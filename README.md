@@ -1,8 +1,8 @@
-# Oak Automation On Ethereum
+# OAK Automation On Ethereum
 
-Oak + EigenLayer
+OAK + EigenLayer
 
-# Oak AVS
+# OAK AVS
 
 Currently one have to compile the code directly. Using go 10.22
 
@@ -25,7 +25,7 @@ oak-avs run-operator
 oak-avs run-aggregrator
 ```
 
-Note: currently aggregrator will be run by Oak team. The IP address for
+Note: currently aggregrator will be run by OAK team. The IP address for
 communication between operator and aggregrator will be hardcode in the operator.
 
 # How it works
@@ -43,7 +43,7 @@ and their actual execution.
 
 ## Aggregator
 
-Aggregator accepts RPC request from client to submit Task Payload. Currently, aggregrator is managed and run by Oak team.
+Aggregator accepts RPC request from client to submit Task Payload. Currently, aggregrator is managed and run by OAK team.
 
 Periodcally, aggregrator combine the task submission, update our internal
 storage and a zkSNARK proof will be write back to our TaskManager contract.
