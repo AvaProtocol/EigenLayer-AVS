@@ -64,12 +64,39 @@ Aggregator also accept task condition check result from operator, perform quorum
 and consensus check, then write the result back and flag that a task is good to
 run.
 
+### Aggregator Address
+
+Aggregator run and managed by Oak team. This address will be hard code in the
+operator.
+
+#### Holesky Testnet
+
+- https://aggregator-holesky.api.oak.tech
+
+#### Mainnet
+
+- https://aggregator.api.oak.tech
+
 ## Operators
 
 Operators communicates with aggregrators through RPC. It requests task data from aggregrator, it performs condition execution to check whether a task can be trigger. The result is then send back to aggregrator.
 
 For task is ok to run, the operator will executed them. The detail of how task
 is triggering throuhg our ERC6900 modular wallet will come soon.
+
+## Oak operator address
+
+Currently, Oak has also deloy our operator on testnet. Community member can run
+their own operator and register to Oak AVS service, or can delegate their token
+to Oak operator.
+
+### Testnet
+
+- [0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d](https://holesky.eigenlayer.xyz/operator/0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d)
+
+### Mainnet
+
+- TBD
 
 # Development guide
 
