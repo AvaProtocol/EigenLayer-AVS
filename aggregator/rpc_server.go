@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"net/rpc"
 
-	cstaskmanager "github.com/OAK-Foundation/oak-avs/contracts/bindings/AutomationTaskManager"
-	"github.com/OAK-Foundation/oak-avs/core"
+	cstaskmanager "github.com/OAK-Foundation/avs-mvp/contracts/bindings/AutomationTaskManager"
+	"github.com/OAK-Foundation/avs-mvp/core"
 
 	"github.com/Layr-Labs/eigensdk-go/crypto/bls"
 	sdktypes "github.com/Layr-Labs/eigensdk-go/types"

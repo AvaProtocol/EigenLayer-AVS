@@ -8,12 +8,12 @@ import (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "oak-avs",
+	Use:   "avs-mvp",
 	Short: "OAK AVS CLI",
 	Long: `OAK CLI to run and interact with EigenLayer service.
 Each sub command can be use for a single service
 
-Such as "oak-avs run-operator" or "oak-avs run-aggregrator" and so on 
+Such as "avs-mvp run-operator" or "avs-mvp run-aggregrator" and so on 
 `,
 	// We may consider a default command to run operator as well
 	// Run: func(cmd *cobra.Command, args []string) { },

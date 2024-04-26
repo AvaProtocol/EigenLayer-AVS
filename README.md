@@ -23,11 +23,11 @@ go build
 To run the AVS operator, follow these steps:
 1. Register your AVS by executing the following command:
 	```
-	oak-avs register 
+	avs-mvp register 
 	```
 1. Start the operator:
 	```
-	oak-avs run-operator
+	avs-mvp run-operator
 	```
 
 ### Run aggregrator
@@ -35,7 +35,7 @@ To run the AVS operator, follow these steps:
 To run the aggregator, use the following command:
 
 ```
-oak-avs run-aggregrator
+avs-mvp run-aggregrator
 ```
 
 Note: The OAK team currently manages the aggregator, and the communication IP address between the operator and the aggregator is hardcoded in the operator.

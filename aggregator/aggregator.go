@@ -14,12 +14,12 @@ import (
 	blsagg "github.com/Layr-Labs/eigensdk-go/services/bls_aggregation"
 	oppubkeysserv "github.com/Layr-Labs/eigensdk-go/services/operatorpubkeys"
 	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
-	"github.com/OAK-Foundation/oak-avs/aggregator/types"
-	"github.com/OAK-Foundation/oak-avs/core"
-	"github.com/OAK-Foundation/oak-avs/core/chainio"
-	"github.com/OAK-Foundation/oak-avs/core/config"
+	"github.com/OAK-Foundation/avs-mvp/aggregator/types"
+	"github.com/OAK-Foundation/avs-mvp/core"
+	"github.com/OAK-Foundation/avs-mvp/core/chainio"
+	"github.com/OAK-Foundation/avs-mvp/core/config"
 
-	cstaskmanager "github.com/OAK-Foundation/oak-avs/contracts/bindings/AutomationTaskManager"
+	cstaskmanager "github.com/OAK-Foundation/avs-mvp/contracts/bindings/AutomationTaskManager"
 )
 
 const (

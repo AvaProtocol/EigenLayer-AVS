@@ -1,4 +1,4 @@
-module github.com/OAK-Foundation/oak-avs
+module github.com/OAK-Foundation/avs-mvp
 
 go 1.22.0
 
