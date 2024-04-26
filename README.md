@@ -66,8 +66,8 @@ run.
 
 ### Aggregator Address
 
-Aggregator run and managed by Oak team. This address will be hard code in the
-operator.
+The aggregator is run and managed by the Oak team. This address will be hard-coded.
+perator.
 
 #### Holesky Testnet
 
@@ -86,9 +86,7 @@ is triggering throuhg our ERC6900 modular wallet will come soon.
 
 ## Oak operator address
 
-Currently, Oak has also deloy our operator on testnet. Community member can run
-their own operator and register to Oak AVS service, or can delegate their token
-to Oak operator.
+Currently, Oak has deployed our operator on the testnet. Community members can run their own operator and register for Oak AVS service, or they can delegate their tokens to the Oak operator.
 
 ### Testnet
 
