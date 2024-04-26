@@ -4,7 +4,7 @@ import (
 	"math/big"
 
 	"github.com/Layr-Labs/eigensdk-go/crypto/bls"
-	cstaskmanager "github.com/OAK-Foundation/oak-avs/contracts/bindings/IncredibleSquaringTaskManager"
+	cstaskmanager "github.com/OAK-Foundation/avs-mvp/contracts/bindings/IncredibleSquaringTaskManager"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"golang.org/x/crypto/sha3"
 )

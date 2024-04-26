@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/OAK-Foundation/oak-avs/aggregator"
+	"github.com/OAK-Foundation/avs-mvp/aggregator"
 )
 
 // runAggregatorCmd represents the runAggregator command
