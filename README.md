@@ -4,7 +4,15 @@ OAK + EigenLayer
 
 # OAK AVS
 
-Currently one have to compile the code directly. Using go 10.22
+The OAK AVS can be compiled directly using Go version 10.22. Ensure you have the appropriate version of Go installed on your development environment.
+
+Check GO version:
+
+```
+go version
+```
+
+Compile OAK AVS:
 
 ```
 go build
@@ -12,21 +20,25 @@ go build
 
 ### Run operator
 
-First register your AVS, and then run the operator
-
-```
-oak-avs register 
-oak-avs run-operator
-```
+To run the AVS operator, follow these steps:
+1. Register your AVS by executing the following command:
+	```
+	oak-avs register 
+	```
+1. Start the operator:
+	```
+	oak-avs run-operator
+	```
 
 ### Run aggregrator
+
+To run the aggregator, use the following command:
 
 ```
 oak-avs run-aggregrator
 ```
 
-Note: currently aggregrator will be run by OAK team. The IP address for
-communication between operator and aggregrator will be hardcode in the operator.
+Note: The OAK team currently manages the aggregator, and the communication IP address between the operator and the aggregator is hardcoded in the operator.
 
 # How it works
 
@@ -63,19 +75,25 @@ is triggering throuhg our ERC6900 modular wallet will come soon.
 
 ## Dependencies
 
-### eigenlayer cli
+### EigenLayer CLI
+
+Install the EigenLayer CLI with the following command:
 
 ```
 curl -sSfL https://raw.githubusercontent.com/layr-labs/eigenlayer-cli/master/scripts/install.sh | sh -s
 ```
 
-### golang
+### Golang
+
+Install Go with the following command:
 
 ```
 brew install go
 ```
 
-### foundry toolchain
+### Foundry Toolchain
+
+Install the Foundry toolchain with the following commands:
 
 ```
 curl -L https://foundry.paradigm.xyz | bash
