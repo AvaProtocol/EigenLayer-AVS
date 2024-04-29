@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.9;
 
-import "@eigenlayer-middleware/src/libraries/BN254.sol";
+import "@eigenlayer-middleware/libraries/BN254.sol";
 
-interface IIncredibleSquaringTaskManager {
+interface IAutomationTaskManager {
     // EVENTS
     event NewTaskCreated(uint32 indexed taskIndex, Task task);
 
