@@ -248,7 +248,11 @@ contract DeployServiceManager is Script {
         vm.createDir("./script/output", true);
 
         string memory output = "avs info deployment output";
-        vm.serializeAddress(output, "avsProxyAddress", address(oakAVSProxyAdmin));
+        vm.serializeAddress(output, "proxyAdmin", address(oakAVSProxyAdmin));
+
+        vm.serializeAddress(output, "avsServiceManagerProxy", address(automationServiceContract.automationServiceManager));
+        vm.serializeAddress(output, "indexRegistryProxy", address(automationServiceContract.indexRegistry));
+        vm.serializeAddress(output, "stakeRegistryProxy", address(automationServiceContract.stakeRegistry));
 
         string memory registryJson = vm.serializeString(output, "object", output);
         vm.writeJson(registryJson, deployedRegistryPath);

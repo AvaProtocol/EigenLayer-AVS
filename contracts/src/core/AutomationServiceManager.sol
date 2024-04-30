@@ -1,20 +1,17 @@
 pragma solidity ^0.8.12;
 
-import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import {Pausable} from "@eigenlayer-core/contracts/permissions/Pausable.sol";
-import {IAVSDirectory} from "@eigenlayer-core/contracts/interfaces/IAVSDirectory.sol";
-import {ISignatureUtils} from "@eigenlayer-core/contracts/interfaces/ISignatureUtils.sol";
-import {IPauserRegistry} from "@eigenlayer-core/contracts/interfaces/IPauserRegistry.sol";
-import {IServiceManager} from "@eigenlayer-middleware/interfaces/IServiceManager.sol";
-import {IStakeRegistry} from "@eigenlayer-middleware/interfaces/IStakeRegistry.sol";
-import {IRegistryCoordinator} from "@eigenlayer-middleware/interfaces/IRegistryCoordinator.sol";
-import {BLSSignatureChecker} from "@eigenlayer-middleware/BLSSignatureChecker.sol";
-import {ServiceManagerBase} from "@eigenlayer-middleware/ServiceManagerBase.sol";
-import {AutomationServiceManagerStorage} from "./AutomationServiceManagerStorage.sol";
-import {IAutomationServiceManager} from "../interfaces/IAutomationServiceManager.sol";
-
-
-
+import { EnumerableSet } from '@openzeppelin/contracts/utils/structs/EnumerableSet.sol';
+import { Pausable } from '@eigenlayer-core/contracts/permissions/Pausable.sol';
+import { IAVSDirectory } from '@eigenlayer-core/contracts/interfaces/IAVSDirectory.sol';
+import { ISignatureUtils } from '@eigenlayer-core/contracts/interfaces/ISignatureUtils.sol';
+import { IPauserRegistry } from '@eigenlayer-core/contracts/interfaces/IPauserRegistry.sol';
+import { IServiceManager } from '@eigenlayer-middleware/interfaces/IServiceManager.sol';
+import { IStakeRegistry } from '@eigenlayer-middleware/interfaces/IStakeRegistry.sol';
+import { IRegistryCoordinator } from '@eigenlayer-middleware/interfaces/IRegistryCoordinator.sol';
+import { BLSSignatureChecker } from '@eigenlayer-middleware/BLSSignatureChecker.sol';
+import { ServiceManagerBase } from '@eigenlayer-middleware/ServiceManagerBase.sol';
+import { AutomationServiceManagerStorage } from './AutomationServiceManagerStorage.sol';
+import { IAutomationServiceManager } from '../interfaces/IAutomationServiceManager.sol';
 
 error ZeroAddress();
 error InvalidStartIndex();
@@ -55,14 +52,10 @@ error InvalidJournal();
 error NoAlert();
 error NotOperator();
 
-
-
-
-
 contract AutomationServiceManager is
     IAutomationServiceManager,
     ServiceManagerBase,
-	AutomationServiceManagerStorage,
+    AutomationServiceManagerStorage,
     BLSSignatureChecker,
     Pausable
 {
@@ -89,10 +82,13 @@ contract AutomationServiceManager is
 
     function initialize(
         IPauserRegistry _pauserRegistry,
-        uint256 _initialPausedStatus,
+        uint _initialPausedStatus,
         address _initialOwner,
         address _whitelister
-    ) public initializer {
+    )
+        public
+        initializer
+    {
         _initializePauser(_pauserRegistry, _initialPausedStatus);
         __ServiceManagerBase_init(_initialOwner);
         _setWhitelister(_whitelister);
@@ -114,7 +110,12 @@ contract AutomationServiceManager is
     function registerOperatorToAVS(
         address operator,
         ISignatureUtils.SignatureWithSaltAndExpiry memory operatorSignature
-    ) public override(ServiceManagerBase, IServiceManager) whenNotPaused onlyRegistryCoordinator {
+    )
+        public
+        override(ServiceManagerBase, IServiceManager)
+        whenNotPaused
+        onlyRegistryCoordinator
+    {
         // we don't check if this operator has registered or not as AVSDirectory has such checking already
         _operators.add(operator);
         // Stake requirement for quorum is checked in StakeRegistry.sol
@@ -139,9 +140,8 @@ contract AutomationServiceManager is
         emit OperatorRemoved(operator);
     }
 
-
-   function _setWhitelister(address _whitelister) internal {
-       address previousWhitelister = whitelister;
-       whitelister = _whitelister;
-   }
+    function _setWhitelister(address _whitelister) internal {
+        address previousWhitelister = whitelister;
+        whitelister = _whitelister;
+    }
 }
