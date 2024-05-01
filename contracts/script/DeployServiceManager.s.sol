@@ -79,17 +79,16 @@ contract DeployServiceManager is Script {
             maxOperatorCount: 50,
             minimumStake: 0,
             numStrategies: 3,
+            pauserRegistry: vm.envAddress("PAUSER_REGISTRY_ADDRESS"),
+            ownerAddress: vm.envAddress("OWNER_ADDRESS"),
+            whitelister: vm.envAddress("OWNER_ADDRESS"),
 
-        pauserRegistry: vm.envAddress("PAUSER_REGISTRY_ADDRESS"),
-        ownerAddress: vm.envAddress("OWNER_ADDRESS"),
-        whitelister: vm.envAddress("OWNER_ADDRESS"),
+            delegationManager: vm.envAddress("DELEGATION_MANAGER"),
+            avsDirectory: vm.envAddress("AVS_DIRECTORY"),
 
-        delegationManager: vm.envAddress("DELEGATION_MANAGER"),
-        avsDirectory: vm.envAddress("AVS_DIRECTORY"),
-
-        beaconETH: vm.envAddress("STRATEGY_B_ETH"),
-        stETH: vm.envAddress("STRATEGY_ST_ETH"),
-        wETH: vm.envAddress("STRATEGY_WETH")
+            beaconETH: vm.envAddress("STRATEGY_B_ETH"),
+            stETH: vm.envAddress("STRATEGY_ST_ETH"),
+            wETH: vm.envAddress("STRATEGY_WETH")
         });
 
         TokenAndWeight[] memory deployedStrategyArray = new TokenAndWeight[](dp.numStrategies);
@@ -253,6 +252,8 @@ contract DeployServiceManager is Script {
         vm.serializeAddress(output, "avsServiceManagerProxy", address(automationServiceContract.automationServiceManager));
         vm.serializeAddress(output, "indexRegistryProxy", address(automationServiceContract.indexRegistry));
         vm.serializeAddress(output, "stakeRegistryProxy", address(automationServiceContract.stakeRegistry));
+        vm.serializeAddress(output, "apkRegistryProxy", address(automationServiceContract.apkRegistry));
+        vm.serializeAddress(output, "registryCoordinator", address(automationServiceContract.registryCoordinator));
 
         string memory registryJson = vm.serializeString(output, "object", output);
         vm.writeJson(registryJson, deployedRegistryPath);
