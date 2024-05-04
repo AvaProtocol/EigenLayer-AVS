@@ -4,30 +4,27 @@ Copyright © 2024 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
 	"github.com/OAK-Foundation/avs-mvp/aggregator"
 )
 
-// runAggregatorCmd represents the runAggregator command
-var runAggregatorCmd = &cobra.Command{
-	Use:   "runAggregator",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
+var (
+	config = "./config/aggregator.yaml"
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("runAggregator called")
+	runAggregatorCmd = &cobra.Command{
+		Use:   "run-aggregator",
+		Short: "Run aggregator",
+		Long: `Initialize and run aggregator.
 
-		aggregator.Run(args)
-	},
-}
+Use --config=path-to-your-config-file. default is=./config/aggregator.yaml `,
+		Run: func(cmd *cobra.Command, args []string) {
+			aggregator.RunWithConfig(config)
+		},
+	}
+)
 
 func init() {
+	registerCmd.Flags().StringVar(&config, "config", "config/aggregator.yaml", "path to aggregrator config file")
 	rootCmd.AddCommand(runAggregatorCmd)
 }
