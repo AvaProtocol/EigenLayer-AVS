@@ -1,9 +1,10 @@
 pragma solidity ^0.8.12;
 
 import { EnumerableSet } from '@openzeppelin/contracts/utils/structs/EnumerableSet.sol';
+import { IAutomationTaskManager } from '../interfaces/IAutomationTaskManager.sol';
 
 abstract contract AutomationServiceManagerStorage {
-    // The number of blocks from the task initialization within which the aggregator has to respond to
+    IAutomationTaskManager public automationTaskManager;
 
     address public whitelister;
 

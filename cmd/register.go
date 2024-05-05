@@ -4,9 +4,9 @@ Copyright © 2024 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
+
+	"github.com/OAK-Foundation/oak-avs/operator"
 )
 
 var (
@@ -21,13 +21,13 @@ var (
 		Long: `The registration requires that an operator already register on Eigenlayer
 	and to have a minimun amount of staked delegated`,
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("Call Register")
+			operator.RegisterToAVS()
 		},
 	}
 )
 
 func init() {
-	rootCmd.AddCommand(registerCmd)
+	runOperatorCmd.AddCommand(registerCmd)
 
 	// Here you will define your flags and configuration settings.
 

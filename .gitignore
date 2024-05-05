@@ -10,3 +10,9 @@ out/
 # Dotenv file
 .env
 *.env
+
+config/*.yaml
+
+# binary
+oak-avs
+avs-mvp

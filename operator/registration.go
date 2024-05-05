@@ -1,0 +1,5 @@
+package operator
+
+func RegisterToAVS() {
+
+}
