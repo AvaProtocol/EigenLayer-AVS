@@ -27,7 +27,7 @@ To run the AVS operator, it is 2 steps
 
 ### Run OAK AVS on Holesky testnet
 
-Download oak-avs from the Github release, for compile for yourself.
+Download the latest release from https://github.com/OAK-Foundation/avs-mvp/releases for your platform. You can compile for yourself by simply running `go build` at the root level.
 
 First, Generate OAK AVS config file. You can put it anywhere. Example `config/operator.yaml` with below content
 
@@ -59,7 +59,7 @@ enable_node_api: true
 Then onboard your operator into our AVS
 
 ```
-oak-avs register --config=./config/operator.yaml
+avs-mvp register --config=./config/operator.yaml
 ```
 
 At the end of process, you should see something like this:
@@ -70,12 +70,12 @@ successfully registered operator with AVS registry coordinator
 Registered operator with avs registry coordinator
 ```
 
-The status can also be checked with `oak-avs status --config=./config/operator.yaml`
+The status can also be checked with `avs-mvp status --config=./config/operator.yaml`
 
 At this point, you're ready to run our operator node by simply do
 
 ```
-oak-avs operator --config=./config/operator.yaml
+avs-mvp operator --config=./config/operator.yaml
 ```
 
 
@@ -84,7 +84,7 @@ oak-avs operator --config=./config/operator.yaml
 To run the aggregator, use the following command:
 
 ```
-avs-mvp run-aggregrator
+avs-mvp aggregrator
 ```
 
 Note: The OAK team currently manages the aggregator, and the communication IP address between the operator and the aggregator is hardcoded in the operator.
@@ -139,7 +139,19 @@ Currently, Oak has deployed our operator on the testnet. Community members can r
 
 ### Testnet
 
-- [0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d](https://holesky.eigenlayer.xyz/operator/0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d)
+- Our own operator: [0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d](https://holesky.eigenlayer.xyz/operator/0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d)
+
+| Name                     | Address                                                                                                                 		|
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------	|
+| ProxyAdmin              | [`0x26CF7A7DF7d1E00D83A5Ca24385f697a3ca4577d`](https://holesky.etherscan.io/address/0x26CF7A7DF7d1E00D83A5Ca24385f697a3ca4577d) 	|
+| ServiceManager          | [`0xEA3E82F9Ae371A6a372A6DCffB1a9bD17e0608eF`](https://holesky.etherscan.io/address/0xEA3E82F9Ae371A6a372A6DCffB1a9bD17e0608eF) 	|
+| RegistryCoordinator     | [`0x90c6d6f2A78d5Ce22AB8631Ddb142C03AC87De7a`](https://holesky.etherscan.io/address/0x90c6d6f2A78d5Ce22AB8631Ddb142C03AC87De7a) 	|
+| BLSApkRegistry          | [`0x6752F8BeeE5BF45c9d11FDBC4F8aFfF879925585`](https://holesky.etherscan.io/address/0x6752F8BeeE5BF45c9d11FDBC4F8aFfF879925585) 	|
+| IndexRegistry           | [`0x298a5d3C8F8Db30E8292C9e2BF92292de469C8FF`](https://holesky.etherscan.io/address/0x298a5d3C8F8Db30E8292C9e2BF92292de469C8FF) 	|
+| OperatorStateRetriever  | [`0xb7bb920538e038DFFEfcB55caBf713652ED2031F`](https://holesky.etherscan.io/address/0xb7bb920538e038DFFEfcB55caBf713652ED2031F) 	|
+| PauserRegistry          | [`0x3A8ea6e4202CdDe4a9e0cCE19c4Dc1739ba2cF0b`](https://holesky.etherscan.io/address/0x3A8ea6e4202CdDe4a9e0cCE19c4Dc1739ba2cF0b) 	|
+| StakeRegistry           | [`0x7BacD5dd5A7C3acf8bf1a3c88fB0D00B68EE626A`](https://holesky.etherscan.io/address/0x7BacD5dd5A7C3acf8bf1a3c88fB0D00B68EE626A) 	|
+
 
 ### Mainnet
 
