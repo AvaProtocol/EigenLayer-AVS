@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"os"
 
@@ -44,13 +45,11 @@ type OperatorConfig struct {
 	OperatorAddress               string `yaml:"operator_address"`
 	OperatorStateRetrieverAddress string `yaml:"operator_state_retriever_address"`
 	AVSRegistryCoordinatorAddress string `yaml:"avs_registry_coordinator_address"`
-	TokenStrategyAddr             string `yaml:"token_strategy_addr"`
 	EthRpcUrl                     string `yaml:"eth_rpc_url"`
 	EthWsUrl                      string `yaml:"eth_ws_url"`
 	BlsPrivateKeyStorePath        string `yaml:"bls_private_key_store_path"`
 	EcdsaPrivateKeyStorePath      string `yaml:"ecdsa_private_key_store_path"`
 	AggregatorServerIpPortAddress string `yaml:"aggregator_server_ip_port_address"`
-	RegisterOperatorOnStartup     bool   `yaml:"register_operator_on_startup"`
 	EigenMetricsIpPortAddress     string `yaml:"eigen_metrics_ip_port_address"`
 	EnableMetrics                 bool   `yaml:"enable_metrics"`
 	NodeApiIpPortAddress          string `yaml:"node_api_ip_port_address"`
@@ -74,8 +73,12 @@ type Operator struct {
 	eigenlayerReader sdkelcontracts.ELReader
 	eigenlayerWriter sdkelcontracts.ELWriter
 	blsKeypair       *bls.KeyPair
-	operatorId       sdktypes.OperatorId
-	operatorAddr     common.Address
+
+	operatorId   sdktypes.OperatorId
+	operatorAddr common.Address
+	// Through the passpharese of operator ecdsa, we can compute the private key
+	operatorEcdsaPrivateKey *ecdsa.PrivateKey
+
 	// receive new tasks in this chan (typically from listening to onchain event)
 	newTaskCreatedChan chan *cstaskmanager.ContractAutomationTaskManagerNewTaskCreated
 	// ip address of aggregator
@@ -91,12 +94,15 @@ func RunWithConfig(configPath string) {
 	if e != nil {
 		panic(fmt.Errorf("cannot create operator. %w", e))
 	}
+
 	operator.Start(context.Background())
 }
 
 func NewOperatorFromConfigFile(configPath string) (*Operator, error) {
 	nodeConfig := OperatorConfig{}
 	err := sdkutils.ReadYamlConfig(configPath, &nodeConfig)
+
+	fmt.Printf("loaded config: %v\n", nodeConfig)
 	if err != nil {
 		panic(fmt.Errorf("failed to parse config file: %w\nMake sure %s is exist and a valid yaml file %w.", configPath, err))
 	}
@@ -191,6 +197,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		c.EcdsaPrivateKeyStorePath,
 		ecdsaKeyPassword,
 	)
+
 	if err != nil {
 		return nil, err
 	}
@@ -265,12 +272,8 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		newTaskCreatedChan:                 make(chan *cstaskmanager.ContractAutomationTaskManagerNewTaskCreated),
 		credibleSquaringServiceManagerAddr: common.HexToAddress(c.AVSRegistryCoordinatorAddress),
 		operatorId:                         [32]byte{0}, // this is set below
-
+		operatorEcdsaPrivateKey:            operatorEcdsaPrivateKey,
 	}
-
-	// if c.RegisterOperatorOnStartup {
-	// 	operator.registerOperatorOnStartup(operatorEcdsaPrivateKey, common.HexToAddress(c.TokenStrategyAddr))
-	// }
 
 	// OperatorId is set in contract during registration so we get it after registering operator.
 	operatorId, err := sdkClients.AvsRegistryChainReader.GetOperatorId(&bind.CallOpts{}, operator.operatorAddr)
