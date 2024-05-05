@@ -3,14 +3,12 @@ package config
 import (
 	"context"
 	"crypto/ecdsa"
-	"errors"
-	"os"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/urfave/cli"
 
 	"github.com/Layr-Labs/eigensdk-go/chainio/clients/eth"
+	"github.com/Layr-Labs/eigensdk-go/chainio/clients/wallet"
 	"github.com/Layr-Labs/eigensdk-go/chainio/txmgr"
 	"github.com/Layr-Labs/eigensdk-go/crypto/bls"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -26,24 +24,26 @@ type Config struct {
 	BlsPrivateKey             *bls.PrivateKey
 	Logger                    sdklogging.Logger
 	EigenMetricsIpPortAddress string
+
 	// we need the url for the eigensdk currently... eventually standardize api so as to
 	// only take an ethclient or an rpcUrl (and build the ethclient at each constructor site)
-	EthHttpRpcUrl                             string
-	EthWsRpcUrl                               string
-	EthHttpClient                             eth.EthClient
-	EthWsClient                               eth.EthClient
-	OperatorStateRetrieverAddr                common.Address
-	IncredibleSquaringRegistryCoordinatorAddr common.Address
-	AggregatorServerIpPortAddr                string
-	RegisterOperatorOnStartup                 bool
+	EthHttpRpcUrl                     string
+	EthWsRpcUrl                       string
+	EthHttpClient                     eth.Client
+	EthWsClient                       eth.Client
+	OperatorStateRetrieverAddr        common.Address
+	AutomationRegistryCoordinatorAddr common.Address
+	AggregatorServerIpPortAddr        string
+	RegisterOperatorOnStartup         bool
 	// json:"-" skips this field when marshaling (only used for logging to stdout), since SignerFn doesnt implement marshalJson
 	SignerFn          signerv2.SignerFn `json:"-"`
 	TxMgr             txmgr.TxManager
 	AggregatorAddress common.Address
 }
 
-// These are read from ConfigFileFlag
+// These are read from configPath
 type ConfigRaw struct {
+	EcdsaPrivateKey            string              `yaml:"ecdsa_private_key"`
 	Environment                sdklogging.LogLevel `yaml:"environment"`
 	EthRpcUrl                  string              `yaml:"eth_rpc_url"`
 	EthWsUrl                   string              `yaml:"eth_ws_url"`
@@ -52,10 +52,10 @@ type ConfigRaw struct {
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
-type IncredibleSquaringDeploymentRaw struct {
-	Addresses IncredibleSquaringContractsRaw `json:"addresses"`
+type AutomationDeploymentRaw struct {
+	Addresses AutomationContractsRaw `json:"addresses"`
 }
-type IncredibleSquaringContractsRaw struct {
+type AutomationContractsRaw struct {
 	RegistryCoordinatorAddr    string `json:"registryCoordinator"`
 	OperatorStateRetrieverAddr string `json:"operatorStateRetriever"`
 }
@@ -63,20 +63,15 @@ type IncredibleSquaringContractsRaw struct {
 // NewConfig parses config file to read from from flags or environment variables
 // Note: This config is shared by challenger and aggregator and so we put in the core.
 // Operator has a different config and is meant to be used by the operator CLI.
-func NewConfig(ctx *cli.Context) (*Config, error) {
-
+func NewConfig(configFilePath string) (*Config, error) {
 	var configRaw ConfigRaw
-	configFilePath := ctx.GlobalString(ConfigFileFlag.Name)
 	if configFilePath != "" {
 		sdkutils.ReadYamlConfig(configFilePath, &configRaw)
 	}
 
-	var credibleSquaringDeploymentRaw IncredibleSquaringDeploymentRaw
-	credibleSquaringDeploymentFilePath := ctx.GlobalString(CredibleSquaringDeploymentFileFlag.Name)
-	if _, err := os.Stat(credibleSquaringDeploymentFilePath); errors.Is(err, os.ErrNotExist) {
-		panic("Path " + credibleSquaringDeploymentFilePath + " does not exist")
-	}
-	sdkutils.ReadJsonConfig(credibleSquaringDeploymentFilePath, &credibleSquaringDeploymentRaw)
+	// TODO: Remove
+	var credibleSquaringDeploymentRaw AutomationDeploymentRaw
+	sdkutils.ReadJsonConfig(configFilePath, &credibleSquaringDeploymentRaw)
 
 	logger, err := sdklogging.NewZapLogger(configRaw.Environment)
 	if err != nil {
@@ -95,10 +90,7 @@ func NewConfig(ctx *cli.Context) (*Config, error) {
 		return nil, err
 	}
 
-	ecdsaPrivateKeyString := ctx.GlobalString(EcdsaPrivateKeyFlag.Name)
-	if ecdsaPrivateKeyString[:2] == "0x" {
-		ecdsaPrivateKeyString = ecdsaPrivateKeyString[2:]
-	}
+	ecdsaPrivateKeyString := configRaw.EcdsaPrivateKey
 	ecdsaPrivateKey, err := crypto.HexToECDSA(ecdsaPrivateKeyString)
 	if err != nil {
 		logger.Errorf("Cannot parse ecdsa private key", "err", err)
@@ -121,22 +113,28 @@ func NewConfig(ctx *cli.Context) (*Config, error) {
 	if err != nil {
 		panic(err)
 	}
-	txMgr := txmgr.NewSimpleTxManager(ethRpcClient, logger, signerV2, aggregatorAddr)
+
+	skWallet, err := wallet.NewPrivateKeyWallet(ethRpcClient, signerV2, aggregatorAddr, logger)
+	if err != nil {
+		panic(err)
+	}
+
+	txMgr := txmgr.NewSimpleTxManager(skWallet, ethRpcClient, logger, aggregatorAddr)
 
 	config := &Config{
-		EcdsaPrivateKey:            ecdsaPrivateKey,
-		Logger:                     logger,
-		EthWsRpcUrl:                configRaw.EthWsUrl,
-		EthHttpRpcUrl:              configRaw.EthRpcUrl,
-		EthHttpClient:              ethRpcClient,
-		EthWsClient:                ethWsClient,
-		OperatorStateRetrieverAddr: common.HexToAddress(credibleSquaringDeploymentRaw.Addresses.OperatorStateRetrieverAddr),
-		IncredibleSquaringRegistryCoordinatorAddr: common.HexToAddress(credibleSquaringDeploymentRaw.Addresses.RegistryCoordinatorAddr),
-		AggregatorServerIpPortAddr:                configRaw.AggregatorServerIpPortAddr,
-		RegisterOperatorOnStartup:                 configRaw.RegisterOperatorOnStartup,
-		SignerFn:                                  signerV2,
-		TxMgr:                                     txMgr,
-		AggregatorAddress:                         aggregatorAddr,
+		EcdsaPrivateKey:                   ecdsaPrivateKey,
+		Logger:                            logger,
+		EthWsRpcUrl:                       configRaw.EthWsUrl,
+		EthHttpRpcUrl:                     configRaw.EthRpcUrl,
+		EthHttpClient:                     ethRpcClient,
+		EthWsClient:                       ethWsClient,
+		OperatorStateRetrieverAddr:        common.HexToAddress(credibleSquaringDeploymentRaw.Addresses.OperatorStateRetrieverAddr),
+		AutomationRegistryCoordinatorAddr: common.HexToAddress(credibleSquaringDeploymentRaw.Addresses.RegistryCoordinatorAddr),
+		AggregatorServerIpPortAddr:        configRaw.AggregatorServerIpPortAddr,
+		RegisterOperatorOnStartup:         configRaw.RegisterOperatorOnStartup,
+		SignerFn:                          signerV2,
+		TxMgr:                             txMgr,
+		AggregatorAddress:                 aggregatorAddr,
 	}
 	config.validate()
 	return config, nil
@@ -147,43 +145,7 @@ func (c *Config) validate() {
 	if c.OperatorStateRetrieverAddr == common.HexToAddress("") {
 		panic("Config: BLSOperatorStateRetrieverAddr is required")
 	}
-	if c.IncredibleSquaringRegistryCoordinatorAddr == common.HexToAddress("") {
-		panic("Config: IncredibleSquaringRegistryCoordinatorAddr is required")
+	if c.AutomationRegistryCoordinatorAddr == common.HexToAddress("") {
+		panic("Config: AutomationRegistryCoordinatorAddr is required")
 	}
 }
-
-var (
-	/* Required Flags */
-	ConfigFileFlag = cli.StringFlag{
-		Name:     "config",
-		Required: true,
-		Usage:    "Load configuration from `FILE`",
-	}
-	CredibleSquaringDeploymentFileFlag = cli.StringFlag{
-		Name:     "credible-squaring-deployment",
-		Required: true,
-		Usage:    "Load credible squaring contract addresses from `FILE`",
-	}
-	EcdsaPrivateKeyFlag = cli.StringFlag{
-		Name:     "ecdsa-private-key",
-		Usage:    "Ethereum private key",
-		Required: true,
-		EnvVar:   "ECDSA_PRIVATE_KEY",
-	}
-	/* Optional Flags */
-)
-
-var requiredFlags = []cli.Flag{
-	ConfigFileFlag,
-	CredibleSquaringDeploymentFileFlag,
-	EcdsaPrivateKeyFlag,
-}
-
-var optionalFlags = []cli.Flag{}
-
-func init() {
-	Flags = append(requiredFlags, optionalFlags...)
-}
-
-// Flags contains the list of configuration options available to the binary.
-var Flags []cli.Flag

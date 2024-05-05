@@ -12,6 +12,8 @@ import { BLSSignatureChecker } from '@eigenlayer-middleware/BLSSignatureChecker.
 import { ServiceManagerBase } from '@eigenlayer-middleware/ServiceManagerBase.sol';
 import { AutomationServiceManagerStorage } from './AutomationServiceManagerStorage.sol';
 import { IAutomationServiceManager } from '../interfaces/IAutomationServiceManager.sol';
+import { AutomationTaskManager } from '../core/AutomationTaskManager.sol';
+import { IAutomationTaskManager } from '../interfaces/IAutomationTaskManager.sol';
 
 error ZeroAddress();
 error InvalidStartIndex();
@@ -98,6 +100,7 @@ contract AutomationServiceManager is
         _setWhitelister(whitelister);
     }
 
+
     //////////////////////////////////////////////////////////////////////////////
     //                          Operator Registration                           //
     //////////////////////////////////////////////////////////////////////////////
@@ -143,5 +146,12 @@ contract AutomationServiceManager is
     function _setWhitelister(address _whitelister) internal {
         address previousWhitelister = whitelister;
         whitelister = _whitelister;
+    }
+
+
+    function setTaskManager(address _newTaskManager) external onlyOwner {
+        address previousTaskManager = address(automationTaskManager);
+        automationTaskManager = IAutomationTaskManager(_newTaskManager);
+        emit TaskManagerUpdate(address(automationTaskManager), previousTaskManager);
     }
 }

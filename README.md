@@ -18,17 +18,66 @@ Compile OAK AVS:
 go build
 ```
 
-### Run operator
+## Run operator
 
-To run the AVS operator, follow these steps:
-1. Register your AVS by executing the following command:
-	```
-	avs-mvp register 
-	```
-1. Start the operator:
-	```
-	avs-mvp run-operator
-	```
+To run the AVS operator, it is 2 steps
+
+1. Register to become an EigenLayer operator by following [EigenLayer Operator Guide](https://docs.eigenlayer.xyz/eigenlayer/operator-guides/operator-introduction)
+2. Once become an operator, you can register for OAK AVS follow below step
+
+### Run OAK AVS on Holesky testnet
+
+Download oak-avs from the Github release, for compile for yourself.
+
+First, Generate OAK AVS config file. You can put it anywhere. Example `config/operator.yaml` with below content
+
+```
+# this sets the logger level (true = info, false = debug)
+production: true
+
+operator_address: your-operator-address
+
+
+avs_registry_coordinator_address: 0x90c6d6f2A78d5Ce22AB8631Ddb142C03AC87De7a
+operator_state_retriever_address: 0xb7bb920538e038DFFEfcB55caBf713652ED2031F
+
+eth_rpc_url: a holesky rpc endpoint for http
+eth_ws_url: a holesky rpc endpoint for wss
+
+ecdsa_private_key_store_path: path-to-your.ecdsa.key.json
+bls_private_key_store_path: path-to-your.bls.key.json
+
+aggregator_server_ip_port_address: https://aggregator-holesky.api.oak.tech
+
+# avs node spec compliance https://eigen.nethermind.io/docs/spec/intro
+eigen_metrics_ip_port_address: your-public-ip:9090
+enable_metrics: true
+node_api_ip_port_address: your-public-ip:9010
+enable_node_api: true
+```
+
+Then onboard your operator into our AVS
+
+```
+oak-avs register --config=./config/operator.yaml
+```
+
+At the end of process, you should see something like this:
+
+```
+successfully registered operator with AVS registry coordinator
+
+Registered operator with avs registry coordinator
+```
+
+The status can also be checked with `oak-avs status --config=./config/operator.yaml`
+
+At this point, you're ready to run our operator node by simply do
+
+```
+oak-avs operator --config=./config/operator.yaml
+```
+
 
 ### Run aggregrator
 

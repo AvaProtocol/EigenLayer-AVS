@@ -20,4 +20,9 @@ interface IAutomationServiceManager is IServiceManager {
      * @param operator The address of the operator
      */
     event OperatorRemoved(address indexed operator);
+
+    event TaskManagerUpdate(
+        address newTaskManager,
+        address previousTaskManager
+    );
 }

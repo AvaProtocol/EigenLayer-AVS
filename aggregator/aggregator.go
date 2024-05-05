@@ -14,12 +14,12 @@ import (
 	blsagg "github.com/Layr-Labs/eigensdk-go/services/bls_aggregation"
 	oppubkeysserv "github.com/Layr-Labs/eigensdk-go/services/operatorpubkeys"
 	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
-	"github.com/OAK-Foundation/avs-mvp/aggregator/types"
-	"github.com/OAK-Foundation/avs-mvp/core"
-	"github.com/OAK-Foundation/avs-mvp/core/chainio"
-	"github.com/OAK-Foundation/avs-mvp/core/config"
+	"github.com/OAK-Foundation/oak-avs/aggregator/types"
+	"github.com/OAK-Foundation/oak-avs/core"
+	"github.com/OAK-Foundation/oak-avs/core/chainio"
+	"github.com/OAK-Foundation/oak-avs/core/config"
 
-	cstaskmanager "github.com/OAK-Foundation/avs-mvp/contracts/bindings/AutomationTaskManager"
+	cstaskmanager "github.com/OAK-Foundation/oak-avs/contracts/bindings/AutomationTaskManager"
 )
 
 const (
@@ -28,11 +28,12 @@ const (
 	// ideally be fetched from the contracts
 	taskChallengeWindowBlock = 100
 	blockTimeSeconds         = 12 * time.Second
-	avsName                  = "oak-automation"
+	avsName                  = "oak-avs"
 )
 
 func RunWithConfig(configPath string) error {
 	//cfgBytes, err := os.ReadFile(configPath)
+	return nil
 }
 
 // block number by calling the getOperatorState() function of the BLSOperatorStateRetriever.sol contract.
@@ -42,9 +43,9 @@ type Aggregator struct {
 	avsWriter        chainio.AvsWriterer
 	// aggregation related fields
 	blsAggregationService blsagg.BlsAggregationService
-	tasks                 map[types.TaskIndex]cstaskmanager.IIncredibleSquaringTaskManagerTask
+	tasks                 map[types.TaskIndex]cstaskmanager.IAutomationTaskManagerTask
 	tasksMu               sync.RWMutex
-	taskResponses         map[types.TaskIndex]map[sdktypes.TaskResponseDigest]cstaskmanager.IIncredibleSquaringTaskManagerTaskResponse
+	taskResponses         map[types.TaskIndex]map[sdktypes.TaskResponseDigest]cstaskmanager.IAutomationTaskManagerTaskResponse
 	taskResponsesMu       sync.RWMutex
 }
 
@@ -66,7 +67,7 @@ func NewAggregator(c *config.Config) (*Aggregator, error) {
 	chainioConfig := sdkclients.BuildAllConfig{
 		EthHttpUrl:                 c.EthHttpRpcUrl,
 		EthWsUrl:                   c.EthWsRpcUrl,
-		RegistryCoordinatorAddr:    c.IncredibleSquaringRegistryCoordinatorAddr.String(),
+		RegistryCoordinatorAddr:    c.AutomationRegistryCoordinatorAddr.String(),
 		OperatorStateRetrieverAddr: c.OperatorStateRetrieverAddr.String(),
 		AvsName:                    avsName,
 		PromMetricsIpPortAddress:   ":9090",
@@ -86,15 +87,15 @@ func NewAggregator(c *config.Config) (*Aggregator, error) {
 		serverIpPortAddr:      c.AggregatorServerIpPortAddr,
 		avsWriter:             avsWriter,
 		blsAggregationService: blsAggregationService,
-		tasks:                 make(map[types.TaskIndex]cstaskmanager.IIncredibleSquaringTaskManagerTask),
-		taskResponses:         make(map[types.TaskIndex]map[sdktypes.TaskResponseDigest]cstaskmanager.IIncredibleSquaringTaskManagerTaskResponse),
+		tasks:                 make(map[types.TaskIndex]cstaskmanager.IAutomationTaskManagerTask),
+		taskResponses:         make(map[types.TaskIndex]map[sdktypes.TaskResponseDigest]cstaskmanager.IAutomationTaskManagerTaskResponse),
 	}, nil
 }
 
 func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.logger.Infof("Starting aggregator.")
 	agg.logger.Infof("Starting aggregator rpc server.")
-	go agg.startServer(ctx)
+	//go agg.startServer(ctx)
 
 	// TODO(soubhik): refactor task generation/sending into a separate function that we can run as goroutine
 	ticker := time.NewTicker(10 * time.Second)
@@ -114,7 +115,7 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 			agg.logger.Info("Received response from blsAggregationService", "blsAggServiceResp", blsAggServiceResp)
 			agg.sendAggregatedResponseToContract(blsAggServiceResp)
 		case <-ticker.C:
-			err := agg.sendNewTask(big.NewInt(taskNum))
+			err := agg.createNewBatch(big.NewInt(taskNum))
 			taskNum++
 			if err != nil {
 				// we log the errors inside sendNewTask() so here we just continue to the next task
