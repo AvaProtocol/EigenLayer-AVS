@@ -20,9 +20,9 @@ import (
 // Config contains all of the configuration information for a credible squaring aggregators and challengers.
 // Operators use a separate config. (see config-files/operator.anvil.yaml)
 type Config struct {
-	EcdsaPrivateKey           *ecdsa.PrivateKey
-	BlsPrivateKey             *bls.PrivateKey
-	Logger                    sdklogging.Logger
+	EcdsaPrivateKey           *ecdsa.PrivateKey `yaml:"ecdsa_private_key"`
+	BlsPrivateKey             *bls.PrivateKey   `yaml:"bls_private_key"`
+	Logger                    sdklogging.Logger `yaml:"-"`
 	EigenMetricsIpPortAddress string
 
 	// we need the url for the eigensdk currently... eventually standardize api so as to
@@ -33,22 +33,29 @@ type Config struct {
 	EthWsClient                       eth.Client
 	OperatorStateRetrieverAddr        common.Address
 	AutomationRegistryCoordinatorAddr common.Address
-	AggregatorServerIpPortAddr        string
+	RpcBindAddress                    string
 	RegisterOperatorOnStartup         bool
 	// json:"-" skips this field when marshaling (only used for logging to stdout), since SignerFn doesnt implement marshalJson
 	SignerFn          signerv2.SignerFn `json:"-"`
 	TxMgr             txmgr.TxManager
 	AggregatorAddress common.Address
+
+	DbPath string
 }
 
 // These are read from configPath
 type ConfigRaw struct {
-	EcdsaPrivateKey            string              `yaml:"ecdsa_private_key"`
-	Environment                sdklogging.LogLevel `yaml:"environment"`
-	EthRpcUrl                  string              `yaml:"eth_rpc_url"`
-	EthWsUrl                   string              `yaml:"eth_ws_url"`
-	AggregatorServerIpPortAddr string              `yaml:"aggregator_server_ip_port_address"`
-	RegisterOperatorOnStartup  bool                `yaml:"register_operator_on_startup"`
+	EcdsaPrivateKey string              `yaml:"ecdsa_private_key"`
+	Environment     sdklogging.LogLevel `yaml:"environment"`
+	EthRpcUrl       string              `yaml:"eth_rpc_url"`
+	EthWsUrl        string              `yaml:"eth_ws_url"`
+
+	RpcBindAddress string `yaml:"rpc_bind_address"`
+
+	OperatorStateRetrieverAddr string `yaml:"operator_state_retriever_address"`
+	AVSRegistryCoordinatorAddr string `yaml:"avs_registry_coordinator_address"`
+
+	DbPath string `yaml:"db_path"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
@@ -68,10 +75,6 @@ func NewConfig(configFilePath string) (*Config, error) {
 	if configFilePath != "" {
 		sdkutils.ReadYamlConfig(configFilePath, &configRaw)
 	}
-
-	// TODO: Remove
-	var credibleSquaringDeploymentRaw AutomationDeploymentRaw
-	sdkutils.ReadJsonConfig(configFilePath, &credibleSquaringDeploymentRaw)
 
 	logger, err := sdklogging.NewZapLogger(configRaw.Environment)
 	if err != nil {
@@ -128,13 +131,14 @@ func NewConfig(configFilePath string) (*Config, error) {
 		EthHttpRpcUrl:                     configRaw.EthRpcUrl,
 		EthHttpClient:                     ethRpcClient,
 		EthWsClient:                       ethWsClient,
-		OperatorStateRetrieverAddr:        common.HexToAddress(credibleSquaringDeploymentRaw.Addresses.OperatorStateRetrieverAddr),
-		AutomationRegistryCoordinatorAddr: common.HexToAddress(credibleSquaringDeploymentRaw.Addresses.RegistryCoordinatorAddr),
-		AggregatorServerIpPortAddr:        configRaw.AggregatorServerIpPortAddr,
-		RegisterOperatorOnStartup:         configRaw.RegisterOperatorOnStartup,
+		OperatorStateRetrieverAddr:        common.HexToAddress(configRaw.OperatorStateRetrieverAddr),
+		AutomationRegistryCoordinatorAddr: common.HexToAddress(configRaw.AVSRegistryCoordinatorAddr),
+		RpcBindAddress:                    configRaw.RpcBindAddress,
 		SignerFn:                          signerV2,
 		TxMgr:                             txMgr,
 		AggregatorAddress:                 aggregatorAddr,
+
+		DbPath: configRaw.DbPath,
 	}
 	config.validate()
 	return config, nil

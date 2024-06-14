@@ -1,0 +1,84 @@
+syntax = "proto3";
+package aggregator;
+
+option go_package = "./avsproto";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+enum TaskType {
+  ETHTransferTask = 0;
+  
+  // Generic contract execution which can be used for:
+  // ERC20 Transfer, NFT Transfer, auto reclaim, auto restaking etc
+  ContractExecutionTask = 1;
+}
+
+enum TriggerType {
+  TimeTrigger = 0;
+  ContractCallTrigger = 1;
+}
+
+
+message UUID {
+  string bytes = 1;
+}
+
+message Checkin {
+  string name = 1;
+  string id = 2;  // Unique ID number for this person.
+
+  message Status {
+    int64 uptime = 1;
+    int64 queueDeptth = 2;
+    google.protobuf.Timestamp last_fetched = 3;
+  }
+
+  google.protobuf.Timestamp last_updated = 3;
+}
+
+service Aggregrator {
+  rpc CreateTask(CreateTaskReq) returns (CreateTaskResp) {};
+  rpc CancelTask(UUID) returns (google.protobuf.BoolValue) {};
+}
+
+message ETHTransfer {
+  string destination = 1;
+  string amount = 2;
+}
+
+message ContractExecution {
+  string contract_address = 1;
+  string method = 2;
+  string encoded_params = 3;
+};
+
+message TaskPayload {
+  ETHTransfer eth_transfer = 1;
+  ContractExecution contract_execution = 2;
+}
+
+message TaskTrigger {
+  message TimeCondition {
+    repeated int64 fixed = 1;
+    string cron = 2;
+  }
+
+  TriggerType type = 1;
+  TimeCondition schedule = 2;
+}
+
+message CreateTaskReq {
+    string    signature = 1;
+    TaskType task_type = 2;
+
+    string owner = 3;
+    string smart_wallet_address = 4;
+
+    TaskTrigger trigger = 5;
+    TaskPayload task_body= 6;
+}
+
+message CreateTaskResp {
+    string id = 1;
+}

@@ -2,22 +2,25 @@ package aggregator
 
 import (
 	"context"
-	"math/big"
+	"fmt"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Layr-Labs/eigensdk-go/logging"
 
 	"github.com/Layr-Labs/eigensdk-go/chainio/clients"
 	sdkclients "github.com/Layr-Labs/eigensdk-go/chainio/clients"
-	"github.com/Layr-Labs/eigensdk-go/services/avsregistry"
 	blsagg "github.com/Layr-Labs/eigensdk-go/services/bls_aggregation"
-	oppubkeysserv "github.com/Layr-Labs/eigensdk-go/services/operatorpubkeys"
 	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
 	"github.com/OAK-Foundation/oak-avs/aggregator/types"
 	"github.com/OAK-Foundation/oak-avs/core"
 	"github.com/OAK-Foundation/oak-avs/core/chainio"
 	"github.com/OAK-Foundation/oak-avs/core/config"
+
+	"github.com/OAK-Foundation/oak-avs/storage"
 
 	cstaskmanager "github.com/OAK-Foundation/oak-avs/contracts/bindings/AutomationTaskManager"
 )
@@ -32,26 +35,37 @@ const (
 )
 
 func RunWithConfig(configPath string) error {
-	//cfgBytes, err := os.ReadFile(configPath)
-	return nil
+	nodeConfig, err := config.NewConfig(configPath)
+	if err != nil {
+		panic(fmt.Errorf("failed to parse config file: %w\nMake sure %s is exist and a valid yaml file %w.", configPath, err))
+	}
+	fmt.Printf("loaded config: %v\n", nodeConfig)
+
+	aggregator, err := NewAggregator(nodeConfig)
+	if err != nil {
+		panic(fmt.Errorf("cannot initialize aggregrator from config: %w", err))
+	}
+
+	return aggregator.Start(context.Background())
 }
 
 // block number by calling the getOperatorState() function of the BLSOperatorStateRetriever.sol contract.
 type Aggregator struct {
-	logger           logging.Logger
-	serverIpPortAddr string
-	avsWriter        chainio.AvsWriterer
+	logger    logging.Logger
+	avsWriter chainio.AvsWriterer
 	// aggregation related fields
 	blsAggregationService blsagg.BlsAggregationService
 	tasks                 map[types.TaskIndex]cstaskmanager.IAutomationTaskManagerTask
 	tasksMu               sync.RWMutex
 	taskResponses         map[types.TaskIndex]map[sdktypes.TaskResponseDigest]cstaskmanager.IAutomationTaskManagerTaskResponse
 	taskResponsesMu       sync.RWMutex
+
+	config *config.Config
+	db     storage.Storage
 }
 
 // NewAggregator creates a new Aggregator with the provided config.
 func NewAggregator(c *config.Config) (*Aggregator, error) {
-
 	avsReader, err := chainio.BuildAvsReaderFromConfig(c)
 	if err != nil {
 		c.Logger.Error("Cannot create avsReader", "err", err)
@@ -64,65 +78,87 @@ func NewAggregator(c *config.Config) (*Aggregator, error) {
 		return nil, err
 	}
 
-	chainioConfig := sdkclients.BuildAllConfig{
-		EthHttpUrl:                 c.EthHttpRpcUrl,
-		EthWsUrl:                   c.EthWsRpcUrl,
-		RegistryCoordinatorAddr:    c.AutomationRegistryCoordinatorAddr.String(),
-		OperatorStateRetrieverAddr: c.OperatorStateRetrieverAddr.String(),
-		AvsName:                    avsName,
-		PromMetricsIpPortAddress:   ":9090",
-	}
-	clients, err := clients.BuildAll(chainioConfig, c.AggregatorAddress, c.SignerFn, c.Logger)
-	if err != nil {
-		c.Logger.Errorf("Cannot create sdk clients", "err", err)
-		return nil, err
-	}
+	go func() {
+		chainioConfig := sdkclients.BuildAllConfig{
+			EthHttpUrl:                 c.EthHttpRpcUrl,
+			EthWsUrl:                   c.EthWsRpcUrl,
+			RegistryCoordinatorAddr:    c.AutomationRegistryCoordinatorAddr.String(),
+			OperatorStateRetrieverAddr: c.OperatorStateRetrieverAddr.String(),
+			AvsName:                    avsName,
+			PromMetricsIpPortAddress:   ":9090",
+		}
+		clients, err := clients.BuildAll(chainioConfig, c.EcdsaPrivateKey, c.Logger)
+		if err != nil {
+			c.Logger.Errorf("Cannot create sdk clients", "err", err)
+			panic(err)
+			//return nil, err
+		}
 
-	operatorPubkeysService := oppubkeysserv.NewOperatorPubkeysServiceInMemory(context.Background(), clients.AvsRegistryChainSubscriber, clients.AvsRegistryChainReader, c.Logger)
-	avsRegistryService := avsregistry.NewAvsRegistryServiceChainCaller(avsReader, operatorPubkeysService, c.Logger)
-	blsAggregationService := blsagg.NewBlsAggregatorService(avsRegistryService, c.Logger)
+		fmt.Println("avsReader", avsReader, "clients", clients)
+
+	}()
+
+	// TODO: These are erroring out and we don't need them now yet
+	// operatorPubkeysService := oppubkeysserv.NewOperatorPubkeysServiceInMemory(context.Background(), clients.AvsRegistryChainSubscriber, clients.AvsRegistryChainReader, c.Logger)
+	//avsRegistryService := avsregistry.NewAvsRegistryServiceChainCaller(avsReader, operatorPubkeysService, c.Logger)
+	// blsAggregationService := blsagg.NewBlsAggregatorService(avsRegistryService, c.Logger)
 
 	return &Aggregator{
-		logger:                c.Logger,
-		serverIpPortAddr:      c.AggregatorServerIpPortAddr,
-		avsWriter:             avsWriter,
-		blsAggregationService: blsAggregationService,
-		tasks:                 make(map[types.TaskIndex]cstaskmanager.IAutomationTaskManagerTask),
-		taskResponses:         make(map[types.TaskIndex]map[sdktypes.TaskResponseDigest]cstaskmanager.IAutomationTaskManagerTaskResponse),
+		logger:    c.Logger,
+		avsWriter: avsWriter,
+
+		//blsAggregationService: blsAggregationService,
+
+		tasks:         make(map[types.TaskIndex]cstaskmanager.IAutomationTaskManagerTask),
+		taskResponses: make(map[types.TaskIndex]map[sdktypes.TaskResponseDigest]cstaskmanager.IAutomationTaskManagerTaskResponse),
+
+		config: c,
 	}, nil
 }
 
-func (agg *Aggregator) Start(ctx context.Context) error {
-	agg.logger.Infof("Starting aggregator.")
-	agg.logger.Infof("Starting aggregator rpc server.")
-	//go agg.startServer(ctx)
+// Open and setup our database
+func (agg *Aggregator) initDB(ctx context.Context) error {
+	var err error
+	agg.db, err = storage.New(&storage.Config{
+		Path: agg.config.DbPath,
+	})
 
-	// TODO(soubhik): refactor task generation/sending into a separate function that we can run as goroutine
-	ticker := time.NewTicker(10 * time.Second)
-	agg.logger.Infof("Aggregator set to send new task every 10 seconds...")
-	defer ticker.Stop()
-	taskNum := int64(0)
-	// ticker doesn't tick immediately, so we send the first task here
-	// see https://github.com/golang/go/issues/17601
-	_ = agg.sendNewTask(big.NewInt(taskNum))
-	taskNum++
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case blsAggServiceResp := <-agg.blsAggregationService.GetResponseChannel():
-			agg.logger.Info("Received response from blsAggregationService", "blsAggServiceResp", blsAggServiceResp)
-			agg.sendAggregatedResponseToContract(blsAggServiceResp)
-		case <-ticker.C:
-			err := agg.createNewBatch(big.NewInt(taskNum))
-			taskNum++
-			if err != nil {
-				// we log the errors inside sendNewTask() so here we just continue to the next task
-				continue
-			}
-		}
+	if err != nil {
+		panic(err)
 	}
+
+	return agg.db.Setup()
+}
+
+func (agg *Aggregator) Start(ctx context.Context) error {
+	agg.logger.Infof("Starting aggregator")
+
+	agg.logger.Infof("Initialize Storagre")
+	agg.initDB(ctx)
+
+	agg.logger.Infof("Starting rpc server.")
+	go agg.startRpcServer(ctx, agg.db)
+
+	agg.logger.Infof("Starting http server.")
+	go agg.startHttpServer(ctx)
+
+	// Setup wait signal
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	done := make(chan bool, 1)
+	go func() {
+		<-sigs
+		done <- true
+	}()
+
+	<-done
+	agg.logger.Infof("Shutting down.")
+
+	// Shutdown the db
+	// TODO: handle ongoing client and fanout closing
+	agg.db.Close()
+
+	return nil
 }
 
 func (agg *Aggregator) sendAggregatedResponseToContract(blsAggServiceResp blsagg.BlsAggregationServiceResponse) {
@@ -164,30 +200,4 @@ func (agg *Aggregator) sendAggregatedResponseToContract(blsAggServiceResp blsagg
 	if err != nil {
 		agg.logger.Error("Aggregator failed to respond to task", "err", err)
 	}
-}
-
-// sendNewTask sends a new task to the task manager contract, and updates the Task dict struct
-// with the information of operators opted into quorum 0 at the block of task creation.
-func (agg *Aggregator) sendNewTask(numToSquare *big.Int) error {
-	agg.logger.Info("Aggregator sending new task", "numberToSquare", numToSquare)
-	// Send number to square to the task manager contract
-	newTask, taskIndex, err := agg.avsWriter.SendNewTaskNumberToSquare(context.Background(), numToSquare, types.QUORUM_THRESHOLD_NUMERATOR, types.QUORUM_NUMBERS)
-	if err != nil {
-		agg.logger.Error("Aggregator failed to send number to square", "err", err)
-		return err
-	}
-
-	agg.tasksMu.Lock()
-	agg.tasks[taskIndex] = newTask
-	agg.tasksMu.Unlock()
-
-	quorumThresholdPercentages := make([]uint32, len(newTask.QuorumNumbers))
-	for i, _ := range newTask.QuorumNumbers {
-		quorumThresholdPercentages[i] = newTask.QuorumThresholdPercentage
-	}
-	// TODO(samlaf): we use seconds for now, but we should ideally pass a blocknumber to the blsAggregationService
-	// and it should monitor the chain and only expire the task aggregation once the chain has reached that block number.
-	taskTimeToExpiry := taskChallengeWindowBlock * blockTimeSeconds
-	agg.blsAggregationService.InitializeNewTask(taskIndex, newTask.TaskCreatedBlock, newTask.QuorumNumbers, quorumThresholdPercentages, taskTimeToExpiry)
-	return nil
 }
