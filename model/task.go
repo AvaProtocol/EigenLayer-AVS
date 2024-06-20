@@ -13,12 +13,16 @@ type TaskType int
 type TriggerType int
 type ScheduleType string
 
+type TaskStatusType string
+
 const (
 	ETHTransferType       TaskType = 1
 	ContractExecutionType          = 2
 )
 
 const (
+	TaskStatusActive TaskStatusType = "active"
+
 	TimeTriggerType         TriggerType = 1
 	ContractCallTriggerType TriggerType = 2
 )

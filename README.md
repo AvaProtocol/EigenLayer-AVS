@@ -167,6 +167,8 @@ Currently, Oak has deployed our operator on the testnet. Community members can r
 
 # Development guide
 
+View docs/development.md
+
 ## Dependencies
 
 ### EigenLayer CLI

@@ -48,9 +48,9 @@ func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.Create
 
 	updates := map[string][]byte{}
 	updates[task.ID], err = task.ToJSON()
+	updates[fmt.Sprintf("%s:%s", user.Address.String(), task.ID)] = []byte(model.TaskStatusActive)
 
 	// TODO: add tak to user account so we can search by account too
-
 	r.db.BatchWrite(updates)
 
 	return &avsproto.CreateTaskResp{

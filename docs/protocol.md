@@ -21,11 +21,13 @@ Before doing anything, send a request to `GetKey` with 3 information:
 - expired_at: when your key will be expired
 - signature: sign a message in form of `RequestKey,owner=${0x123},expired=${epoch}`
 
-The response will have the key
+The response will have the key which can set on the metadata of subsequent
+request.
 
 # Making GRPC request
 
-In subsequent request to the endpoint, set `apikey: ${your-key-from-above}` request.
+In subsequent request to the endpoint, set `authkey: ${your-key-from-above}` request.
 
 # Create a task
 
+# List my task
