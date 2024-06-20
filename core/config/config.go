@@ -40,7 +40,8 @@ type Config struct {
 	TxMgr             txmgr.TxManager
 	AggregatorAddress common.Address
 
-	DbPath string
+	DbPath    string
+	JwtSecret []byte
 }
 
 // These are read from configPath
@@ -55,7 +56,8 @@ type ConfigRaw struct {
 	OperatorStateRetrieverAddr string `yaml:"operator_state_retriever_address"`
 	AVSRegistryCoordinatorAddr string `yaml:"avs_registry_coordinator_address"`
 
-	DbPath string `yaml:"db_path"`
+	DbPath    string `yaml:"db_path"`
+	JwtSecret string `yaml:"jwt_secret"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
@@ -138,7 +140,8 @@ func NewConfig(configFilePath string) (*Config, error) {
 		TxMgr:                             txMgr,
 		AggregatorAddress:                 aggregatorAddr,
 
-		DbPath: configRaw.DbPath,
+		DbPath:    configRaw.DbPath,
+		JwtSecret: []byte(configRaw.JwtSecret),
 	}
 	config.validate()
 	return config, nil

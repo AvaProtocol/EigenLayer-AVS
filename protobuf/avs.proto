@@ -38,7 +38,12 @@ message Checkin {
 }
 
 service Aggregrator {
+  rpc GetKey(GetKeyReq) returns (KeyResp) {};
   rpc CreateTask(CreateTaskReq) returns (CreateTaskResp) {};
+ 
+  rpc Nonce(NonceRequest) returns (NonceResp) {};
+  rpc ListTask(ListTasksReq) returns (ListTasksResp) {};
+
   rpc CancelTask(UUID) returns (google.protobuf.BoolValue) {};
 }
 
@@ -72,13 +77,36 @@ message CreateTaskReq {
     string    signature = 1;
     TaskType task_type = 2;
 
-    string owner = 3;
-    string smart_wallet_address = 4;
-
-    TaskTrigger trigger = 5;
-    TaskPayload task_body= 6;
+    TaskTrigger trigger = 3;
+    TaskPayload task_body= 4;
 }
 
 message CreateTaskResp {
     string id = 1;
+}
+
+message NonceRequest {
+    string owner = 1;
+}
+
+message NonceResp {
+    string nonce = 1;
+}
+
+message ListTasksReq {
+    string owner = 1;
+}
+
+message ListTasksResp {
+    repeated string id = 1;
+}
+
+message GetKeyReq {
+    string owner = 1;
+    int64 expired_at = 2;
+    string signature = 3;
+}
+
+message KeyResp {
+    string key=1;
 }

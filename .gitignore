@@ -16,3 +16,5 @@ config/*.yaml
 # binary
 oak-avs
 avs-mvp
+
+.DS_Store

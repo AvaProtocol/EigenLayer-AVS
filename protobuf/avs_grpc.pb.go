@@ -23,8 +23,11 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AggregratorClient interface {
-	CancelTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
+	GetKey(ctx context.Context, in *GetKeyReq, opts ...grpc.CallOption) (*KeyResp, error)
 	CreateTask(ctx context.Context, in *CreateTaskReq, opts ...grpc.CallOption) (*CreateTaskResp, error)
+	Nonce(ctx context.Context, in *NonceRequest, opts ...grpc.CallOption) (*NonceResp, error)
+	ListTask(ctx context.Context, in *ListTasksReq, opts ...grpc.CallOption) (*ListTasksResp, error)
+	CancelTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
 }
 
 type aggregratorClient struct {
@@ -35,9 +38,9 @@ func NewAggregratorClient(cc grpc.ClientConnInterface) AggregratorClient {
 	return &aggregratorClient{cc}
 }
 
-func (c *aggregratorClient) CancelTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error) {
-	out := new(wrapperspb.BoolValue)
-	err := c.cc.Invoke(ctx, "/aggregator.Aggregrator/CancelTask", in, out, opts...)
+func (c *aggregratorClient) GetKey(ctx context.Context, in *GetKeyReq, opts ...grpc.CallOption) (*KeyResp, error) {
+	out := new(KeyResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregrator/GetKey", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -53,12 +56,42 @@ func (c *aggregratorClient) CreateTask(ctx context.Context, in *CreateTaskReq, o
 	return out, nil
 }
 
+func (c *aggregratorClient) Nonce(ctx context.Context, in *NonceRequest, opts ...grpc.CallOption) (*NonceResp, error) {
+	out := new(NonceResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregrator/Nonce", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aggregratorClient) ListTask(ctx context.Context, in *ListTasksReq, opts ...grpc.CallOption) (*ListTasksResp, error) {
+	out := new(ListTasksResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregrator/ListTask", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aggregratorClient) CancelTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error) {
+	out := new(wrapperspb.BoolValue)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregrator/CancelTask", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AggregratorServer is the server API for Aggregrator service.
 // All implementations must embed UnimplementedAggregratorServer
 // for forward compatibility
 type AggregratorServer interface {
-	CancelTask(context.Context, *UUID) (*wrapperspb.BoolValue, error)
+	GetKey(context.Context, *GetKeyReq) (*KeyResp, error)
 	CreateTask(context.Context, *CreateTaskReq) (*CreateTaskResp, error)
+	Nonce(context.Context, *NonceRequest) (*NonceResp, error)
+	ListTask(context.Context, *ListTasksReq) (*ListTasksResp, error)
+	CancelTask(context.Context, *UUID) (*wrapperspb.BoolValue, error)
 	mustEmbedUnimplementedAggregratorServer()
 }
 
@@ -66,11 +99,20 @@ type AggregratorServer interface {
 type UnimplementedAggregratorServer struct {
 }
 
-func (UnimplementedAggregratorServer) CancelTask(context.Context, *UUID) (*wrapperspb.BoolValue, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CancelTask not implemented")
+func (UnimplementedAggregratorServer) GetKey(context.Context, *GetKeyReq) (*KeyResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetKey not implemented")
 }
 func (UnimplementedAggregratorServer) CreateTask(context.Context, *CreateTaskReq) (*CreateTaskResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTask not implemented")
+}
+func (UnimplementedAggregratorServer) Nonce(context.Context, *NonceRequest) (*NonceResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Nonce not implemented")
+}
+func (UnimplementedAggregratorServer) ListTask(context.Context, *ListTasksReq) (*ListTasksResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTask not implemented")
+}
+func (UnimplementedAggregratorServer) CancelTask(context.Context, *UUID) (*wrapperspb.BoolValue, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelTask not implemented")
 }
 func (UnimplementedAggregratorServer) mustEmbedUnimplementedAggregratorServer() {}
 
@@ -85,20 +127,20 @@ func RegisterAggregratorServer(s grpc.ServiceRegistrar, srv AggregratorServer) {
 	s.RegisterService(&Aggregrator_ServiceDesc, srv)
 }
 
-func _Aggregrator_CancelTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UUID)
+func _Aggregrator_GetKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetKeyReq)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AggregratorServer).CancelTask(ctx, in)
+		return srv.(AggregratorServer).GetKey(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/aggregator.Aggregrator/CancelTask",
+		FullMethod: "/aggregator.Aggregrator/GetKey",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AggregratorServer).CancelTask(ctx, req.(*UUID))
+		return srv.(AggregratorServer).GetKey(ctx, req.(*GetKeyReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -121,6 +163,60 @@ func _Aggregrator_CreateTask_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Aggregrator_Nonce_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NonceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregratorServer).Nonce(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregrator/Nonce",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregratorServer).Nonce(ctx, req.(*NonceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Aggregrator_ListTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTasksReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregratorServer).ListTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregrator/ListTask",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregratorServer).ListTask(ctx, req.(*ListTasksReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Aggregrator_CancelTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UUID)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregratorServer).CancelTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregrator/CancelTask",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregratorServer).CancelTask(ctx, req.(*UUID))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Aggregrator_ServiceDesc is the grpc.ServiceDesc for Aggregrator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -129,12 +225,24 @@ var Aggregrator_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*AggregratorServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "CancelTask",
-			Handler:    _Aggregrator_CancelTask_Handler,
+			MethodName: "GetKey",
+			Handler:    _Aggregrator_GetKey_Handler,
 		},
 		{
 			MethodName: "CreateTask",
 			Handler:    _Aggregrator_CreateTask_Handler,
+		},
+		{
+			MethodName: "Nonce",
+			Handler:    _Aggregrator_Nonce_Handler,
+		},
+		{
+			MethodName: "ListTask",
+			Handler:    _Aggregrator_ListTask_Handler,
+		},
+		{
+			MethodName: "CancelTask",
+			Handler:    _Aggregrator_CancelTask_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

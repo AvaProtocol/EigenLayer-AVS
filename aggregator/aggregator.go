@@ -137,7 +137,7 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.initDB(ctx)
 
 	agg.logger.Infof("Starting rpc server.")
-	go agg.startRpcServer(ctx, agg.db)
+	go agg.startRpcServer(ctx, agg.db, agg.config)
 
 	agg.logger.Infof("Starting http server.")
 	go agg.startHttpServer(ctx)

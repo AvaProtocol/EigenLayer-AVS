@@ -2,8 +2,8 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/oklog/ulid/v2"
 
 	avsproto "github.com/OAK-Foundation/oak-avs/protobuf"
@@ -82,13 +82,17 @@ func GenerateTaskID() string {
 }
 
 // Populate a task structure from proto payload
-func NewTaskFromProtobuf(body *avsproto.CreateTaskReq) (*Task, error) {
+func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error) {
 	if body == nil {
 		return nil, nil
 	}
 
-	owner := common.HexToAddress(body.Owner)
-	aaAddress := common.HexToAddress(body.SmartWalletAddress)
+	owner := user.Address
+	aaAddress := user.SmartAccountAddress
+
+	if aaAddress == nil {
+		return nil, fmt.Errorf("Cannot get acount abstraction wallet")
+	}
 
 	t := &Task{
 		ID: GenerateTaskID(),

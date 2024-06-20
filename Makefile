@@ -85,3 +85,7 @@ protoc-gen:
     	--go-grpc_out=. \
 		--go-grpc_opt=paths=source_relative \
     protobuf/avs.proto
+
+## up: bring up docker compose stack
+up:
+	docker compose up

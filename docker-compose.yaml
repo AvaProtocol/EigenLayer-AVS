@@ -1,0 +1,44 @@
+name: ava
+services:
+  aggregator:
+    image: avaprotocol/avs
+    command: ["aggregator"]
+    build:
+      context: .
+      dockerfile: dockerfiles/aggregator.Dockerfile
+    ports:
+      - "2206:2206"
+    networks:
+      - ava
+        #
+        #  backend:
+        #    image: example/database
+        #    volumes:
+        #      - db-data:/etc/data
+        #    networks:
+        #      - back-tier
+    volumes:
+      - ./config:/app/config
+      - db-data:/tmp/app-avs
+    healthcheck:
+      test: curl --fail http://localhost:1323 || exit 1
+      interval: 3s
+      retries: 15
+      start_period: 3s
+      timeout: 3s
+  grpcui:
+    image: fullstorydev/grpcui
+    command: ["-plaintext", "aggregator:2206"]
+    ports: 
+      - "8080:8080"
+    networks:
+      - ava
+    depends_on:
+      aggregator:
+        condition: service_healthy
+volumes:
+  db-data:
+
+networks:
+  # The presence of these objects is sufficient to define them
+  ava: {}
