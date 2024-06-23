@@ -1,0 +1,17 @@
+{
+  "name": "supports",
+  "version": "1.0.0",
+  "description": "misc support utility",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Ava Protocol",
+  "license": "ISC",
+  "dependencies": {
+    "elliptic": "^6.5.5",
+    "ethers": "^6.13.1",
+    "keccak256": "^1.0.6",
+    "secp256k1": "^5.0.0"
+  }
+}

@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"fmt"
+
 	badger "github.com/dgraph-io/badger/v4"
 )
 
@@ -11,7 +13,15 @@ type Config struct {
 type Storage interface {
 	Setup() error
 	Close() error
+
 	BatchWrite(updates map[string][]byte) error
+	GetByPrefix(prefix []byte) ([]*KeyValueItem, error)
+	GetKeyHasPrefix(prefix []byte) ([][]byte, error)
+}
+
+type KeyValueItem struct {
+	Key   []byte
+	Value []byte
 }
 
 type BadgerStorage struct {
@@ -52,4 +62,79 @@ func (s *BadgerStorage) BatchWrite(updates map[string][]byte) error {
 	_ = txn.Commit()
 
 	return nil
+}
+
+// GetByPrefix return a list of key/value item whoser key prefix matches
+func (s *BadgerStorage) GetByPrefix(prefix []byte) ([]*KeyValueItem, error) {
+	var result []*KeyValueItem
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			k := item.Key()
+			err := item.Value(func(v []byte) error {
+				fmt.Printf("key=%s, value=%s\n", k, v)
+				result = append(result, &KeyValueItem{
+					Key:   k,
+					Value: v,
+				})
+				return nil
+			})
+
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return result, err
+	}
+
+	return result, nil
+}
+
+func (s *BadgerStorage) GetKeyHasPrefix(prefix []byte) ([][]byte, error) {
+	var result [][]byte
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			k := item.Key()
+			result = append(result, k)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return result, err
+	}
+
+	return result, nil
+}
+
+func (s *BadgerStorage) GetByKey(key []byte) ([]byte, error) {
+	var value []byte
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte("answer"))
+		err = item.Value(func(val []byte) error {
+			// copy value to return
+			value = append([]byte{}, val...)
+			return nil
+		})
+
+		return err
+	})
+
+	return value, err
 }

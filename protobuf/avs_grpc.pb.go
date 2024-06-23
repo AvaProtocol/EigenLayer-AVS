@@ -23,10 +23,14 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AggregratorClient interface {
+	// Auth
 	GetKey(ctx context.Context, in *GetKeyReq, opts ...grpc.CallOption) (*KeyResp, error)
+	// Smart Acccount
+	GetNonce(ctx context.Context, in *NonceRequest, opts ...grpc.CallOption) (*NonceResp, error)
+	GetSmartAccountAddress(ctx context.Context, in *AddressRequest, opts ...grpc.CallOption) (*AddressResp, error)
+	// Task Management
 	CreateTask(ctx context.Context, in *CreateTaskReq, opts ...grpc.CallOption) (*CreateTaskResp, error)
-	Nonce(ctx context.Context, in *NonceRequest, opts ...grpc.CallOption) (*NonceResp, error)
-	ListTask(ctx context.Context, in *ListTasksReq, opts ...grpc.CallOption) (*ListTasksResp, error)
+	ListTasks(ctx context.Context, in *ListTasksReq, opts ...grpc.CallOption) (*ListTasksResp, error)
 	CancelTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
 }
 
@@ -47,6 +51,24 @@ func (c *aggregratorClient) GetKey(ctx context.Context, in *GetKeyReq, opts ...g
 	return out, nil
 }
 
+func (c *aggregratorClient) GetNonce(ctx context.Context, in *NonceRequest, opts ...grpc.CallOption) (*NonceResp, error) {
+	out := new(NonceResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregrator/GetNonce", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aggregratorClient) GetSmartAccountAddress(ctx context.Context, in *AddressRequest, opts ...grpc.CallOption) (*AddressResp, error) {
+	out := new(AddressResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregrator/GetSmartAccountAddress", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *aggregratorClient) CreateTask(ctx context.Context, in *CreateTaskReq, opts ...grpc.CallOption) (*CreateTaskResp, error) {
 	out := new(CreateTaskResp)
 	err := c.cc.Invoke(ctx, "/aggregator.Aggregrator/CreateTask", in, out, opts...)
@@ -56,18 +78,9 @@ func (c *aggregratorClient) CreateTask(ctx context.Context, in *CreateTaskReq, o
 	return out, nil
 }
 
-func (c *aggregratorClient) Nonce(ctx context.Context, in *NonceRequest, opts ...grpc.CallOption) (*NonceResp, error) {
-	out := new(NonceResp)
-	err := c.cc.Invoke(ctx, "/aggregator.Aggregrator/Nonce", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *aggregratorClient) ListTask(ctx context.Context, in *ListTasksReq, opts ...grpc.CallOption) (*ListTasksResp, error) {
+func (c *aggregratorClient) ListTasks(ctx context.Context, in *ListTasksReq, opts ...grpc.CallOption) (*ListTasksResp, error) {
 	out := new(ListTasksResp)
-	err := c.cc.Invoke(ctx, "/aggregator.Aggregrator/ListTask", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregrator/ListTasks", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -87,10 +100,14 @@ func (c *aggregratorClient) CancelTask(ctx context.Context, in *UUID, opts ...gr
 // All implementations must embed UnimplementedAggregratorServer
 // for forward compatibility
 type AggregratorServer interface {
+	// Auth
 	GetKey(context.Context, *GetKeyReq) (*KeyResp, error)
+	// Smart Acccount
+	GetNonce(context.Context, *NonceRequest) (*NonceResp, error)
+	GetSmartAccountAddress(context.Context, *AddressRequest) (*AddressResp, error)
+	// Task Management
 	CreateTask(context.Context, *CreateTaskReq) (*CreateTaskResp, error)
-	Nonce(context.Context, *NonceRequest) (*NonceResp, error)
-	ListTask(context.Context, *ListTasksReq) (*ListTasksResp, error)
+	ListTasks(context.Context, *ListTasksReq) (*ListTasksResp, error)
 	CancelTask(context.Context, *UUID) (*wrapperspb.BoolValue, error)
 	mustEmbedUnimplementedAggregratorServer()
 }
@@ -102,14 +119,17 @@ type UnimplementedAggregratorServer struct {
 func (UnimplementedAggregratorServer) GetKey(context.Context, *GetKeyReq) (*KeyResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetKey not implemented")
 }
+func (UnimplementedAggregratorServer) GetNonce(context.Context, *NonceRequest) (*NonceResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetNonce not implemented")
+}
+func (UnimplementedAggregratorServer) GetSmartAccountAddress(context.Context, *AddressRequest) (*AddressResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSmartAccountAddress not implemented")
+}
 func (UnimplementedAggregratorServer) CreateTask(context.Context, *CreateTaskReq) (*CreateTaskResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTask not implemented")
 }
-func (UnimplementedAggregratorServer) Nonce(context.Context, *NonceRequest) (*NonceResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Nonce not implemented")
-}
-func (UnimplementedAggregratorServer) ListTask(context.Context, *ListTasksReq) (*ListTasksResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ListTask not implemented")
+func (UnimplementedAggregratorServer) ListTasks(context.Context, *ListTasksReq) (*ListTasksResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTasks not implemented")
 }
 func (UnimplementedAggregratorServer) CancelTask(context.Context, *UUID) (*wrapperspb.BoolValue, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CancelTask not implemented")
@@ -145,6 +165,42 @@ func _Aggregrator_GetKey_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Aggregrator_GetNonce_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NonceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregratorServer).GetNonce(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregrator/GetNonce",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregratorServer).GetNonce(ctx, req.(*NonceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Aggregrator_GetSmartAccountAddress_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddressRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregratorServer).GetSmartAccountAddress(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregrator/GetSmartAccountAddress",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregratorServer).GetSmartAccountAddress(ctx, req.(*AddressRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Aggregrator_CreateTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateTaskReq)
 	if err := dec(in); err != nil {
@@ -163,38 +219,20 @@ func _Aggregrator_CreateTask_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Aggregrator_Nonce_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(NonceRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AggregratorServer).Nonce(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/aggregator.Aggregrator/Nonce",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AggregratorServer).Nonce(ctx, req.(*NonceRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Aggregrator_ListTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Aggregrator_ListTasks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListTasksReq)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AggregratorServer).ListTask(ctx, in)
+		return srv.(AggregratorServer).ListTasks(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/aggregator.Aggregrator/ListTask",
+		FullMethod: "/aggregator.Aggregrator/ListTasks",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AggregratorServer).ListTask(ctx, req.(*ListTasksReq))
+		return srv.(AggregratorServer).ListTasks(ctx, req.(*ListTasksReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -229,16 +267,20 @@ var Aggregrator_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Aggregrator_GetKey_Handler,
 		},
 		{
+			MethodName: "GetNonce",
+			Handler:    _Aggregrator_GetNonce_Handler,
+		},
+		{
+			MethodName: "GetSmartAccountAddress",
+			Handler:    _Aggregrator_GetSmartAccountAddress_Handler,
+		},
+		{
 			MethodName: "CreateTask",
 			Handler:    _Aggregrator_CreateTask_Handler,
 		},
 		{
-			MethodName: "Nonce",
-			Handler:    _Aggregrator_Nonce_Handler,
-		},
-		{
-			MethodName: "ListTask",
-			Handler:    _Aggregrator_ListTask_Handler,
+			MethodName: "ListTasks",
+			Handler:    _Aggregrator_ListTasks_Handler,
 		},
 		{
 			MethodName: "CancelTask",

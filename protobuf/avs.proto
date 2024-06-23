@@ -7,6 +7,7 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
 
 enum TaskType {
+  // Handle default/missing data
   ETHTransferTask = 0;
   
   // Generic contract execution which can be used for:
@@ -38,12 +39,16 @@ message Checkin {
 }
 
 service Aggregrator {
+  // Auth
   rpc GetKey(GetKeyReq) returns (KeyResp) {};
-  rpc CreateTask(CreateTaskReq) returns (CreateTaskResp) {};
- 
-  rpc Nonce(NonceRequest) returns (NonceResp) {};
-  rpc ListTask(ListTasksReq) returns (ListTasksResp) {};
 
+  // Smart Acccount
+  rpc GetNonce(NonceRequest) returns (NonceResp) {};
+  rpc GetSmartAccountAddress(AddressRequest) returns (AddressResp) {};
+
+  // Task Management
+  rpc CreateTask(CreateTaskReq) returns (CreateTaskResp) {};
+  rpc ListTasks(ListTasksReq) returns (ListTasksResp) {};
   rpc CancelTask(UUID) returns (google.protobuf.BoolValue) {};
 }
 
@@ -93,12 +98,23 @@ message NonceResp {
     string nonce = 1;
 }
 
-message ListTasksReq {
+message AddressRequest {
     string owner = 1;
 }
 
+message AddressResp {
+    string smart_account_address = 1;
+    string nonce = 2;
+}
+
+message ListTasksReq {}
+
 message ListTasksResp {
-    repeated string id = 1;
+    message TaskItemResp {
+        string id = 1;
+    }
+
+    repeated TaskItemResp tasks = 1;
 }
 
 message GetKeyReq {
