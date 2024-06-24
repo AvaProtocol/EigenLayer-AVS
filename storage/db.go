@@ -1,8 +1,6 @@
 package storage
 
 import (
-	"fmt"
-
 	badger "github.com/dgraph-io/badger/v4"
 )
 
@@ -14,6 +12,7 @@ type Storage interface {
 	Setup() error
 	Close() error
 
+	GetKey(prefix []byte) ([]byte, error)
 	BatchWrite(updates map[string][]byte) error
 	GetByPrefix(prefix []byte) ([]*KeyValueItem, error)
 	GetKeyHasPrefix(prefix []byte) ([][]byte, error)
@@ -75,7 +74,6 @@ func (s *BadgerStorage) GetByPrefix(prefix []byte) ([]*KeyValueItem, error) {
 			item := it.Item()
 			k := item.Key()
 			err := item.Value(func(v []byte) error {
-				fmt.Printf("key=%s, value=%s\n", k, v)
 				result = append(result, &KeyValueItem{
 					Key:   k,
 					Value: v,
@@ -122,13 +120,12 @@ func (s *BadgerStorage) GetKeyHasPrefix(prefix []byte) ([][]byte, error) {
 	return result, nil
 }
 
-func (s *BadgerStorage) GetByKey(key []byte) ([]byte, error) {
+func (s *BadgerStorage) GetKey(key []byte) ([]byte, error) {
 	var value []byte
 
 	err := s.db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get([]byte("answer"))
+		item, err := txn.Get(key)
 		err = item.Value(func(val []byte) error {
-			// copy value to return
 			value = append([]byte{}, val...)
 			return nil
 		})

@@ -31,6 +31,7 @@ type AggregratorClient interface {
 	// Task Management
 	CreateTask(ctx context.Context, in *CreateTaskReq, opts ...grpc.CallOption) (*CreateTaskResp, error)
 	ListTasks(ctx context.Context, in *ListTasksReq, opts ...grpc.CallOption) (*ListTasksResp, error)
+	GetTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*Task, error)
 	CancelTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
 }
 
@@ -87,6 +88,15 @@ func (c *aggregratorClient) ListTasks(ctx context.Context, in *ListTasksReq, opt
 	return out, nil
 }
 
+func (c *aggregratorClient) GetTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*Task, error) {
+	out := new(Task)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregrator/GetTask", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *aggregratorClient) CancelTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error) {
 	out := new(wrapperspb.BoolValue)
 	err := c.cc.Invoke(ctx, "/aggregator.Aggregrator/CancelTask", in, out, opts...)
@@ -108,6 +118,7 @@ type AggregratorServer interface {
 	// Task Management
 	CreateTask(context.Context, *CreateTaskReq) (*CreateTaskResp, error)
 	ListTasks(context.Context, *ListTasksReq) (*ListTasksResp, error)
+	GetTask(context.Context, *UUID) (*Task, error)
 	CancelTask(context.Context, *UUID) (*wrapperspb.BoolValue, error)
 	mustEmbedUnimplementedAggregratorServer()
 }
@@ -130,6 +141,9 @@ func (UnimplementedAggregratorServer) CreateTask(context.Context, *CreateTaskReq
 }
 func (UnimplementedAggregratorServer) ListTasks(context.Context, *ListTasksReq) (*ListTasksResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTasks not implemented")
+}
+func (UnimplementedAggregratorServer) GetTask(context.Context, *UUID) (*Task, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTask not implemented")
 }
 func (UnimplementedAggregratorServer) CancelTask(context.Context, *UUID) (*wrapperspb.BoolValue, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CancelTask not implemented")
@@ -237,6 +251,24 @@ func _Aggregrator_ListTasks_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Aggregrator_GetTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UUID)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregratorServer).GetTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregrator/GetTask",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregratorServer).GetTask(ctx, req.(*UUID))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Aggregrator_CancelTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UUID)
 	if err := dec(in); err != nil {
@@ -281,6 +313,10 @@ var Aggregrator_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTasks",
 			Handler:    _Aggregrator_ListTasks_Handler,
+		},
+		{
+			MethodName: "GetTask",
+			Handler:    _Aggregrator_GetTask_Handler,
 		},
 		{
 			MethodName: "CancelTask",

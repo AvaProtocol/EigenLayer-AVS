@@ -49,6 +49,7 @@ service Aggregrator {
   // Task Management
   rpc CreateTask(CreateTaskReq) returns (CreateTaskResp) {};
   rpc ListTasks(ListTasksReq) returns (ListTasksResp) {};
+  rpc GetTask(UUID) returns (Task) {};
   rpc CancelTask(UUID) returns (google.protobuf.BoolValue) {};
 }
 
@@ -63,7 +64,7 @@ message ContractExecution {
   string encoded_params = 3;
 };
 
-message TaskPayload {
+message TaskBody {
   ETHTransfer eth_transfer = 1;
   ContractExecution contract_execution = 2;
 }
@@ -78,17 +79,33 @@ message TaskTrigger {
   TimeCondition schedule = 2;
 }
 
-message CreateTaskReq {
-    string    signature = 1;
-    TaskType task_type = 2;
 
-    TaskTrigger trigger = 3;
-    TaskPayload task_body= 4;
+message Task {
+    string owner = 1;
+    string smart_account_address = 2;
+
+    UUID id = 3;
+    TaskType task_type = 4;
+    TaskTrigger trigger = 5;
+    TaskBody body= 6;
+
+    int64 expired_at = 7;
+    string memo = 8;
+}
+
+message CreateTaskReq {
+    TaskType task_type = 1;
+    TaskTrigger trigger = 2;
+    TaskBody body= 3;
+
+    int64 expired_at = 4;
+    string memo = 5;
 }
 
 message CreateTaskResp {
     string id = 1;
 }
+
 
 message NonceRequest {
     string owner = 1;

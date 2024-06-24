@@ -2,7 +2,6 @@ package aggregator
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"math/big"
 	"net"
@@ -30,6 +29,7 @@ type RpcServer struct {
 	ethrpc *ethclient.Client
 }
 
+// Get nonce of an existing smart wallet of a given owner
 func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest) (*avsproto.NonceResp, error) {
 
 	ownerAddress := common.HexToAddress(payload.Owner)
@@ -44,6 +44,7 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 	}, nil
 }
 
+// GetAddress returns smart account address of the given owner in the auth key
 func (r *RpcServer) GetAddress(ctx context.Context, payload *avsproto.AddressRequest) (*avsproto.AddressResp, error) {
 	ownerAddress := common.HexToAddress(payload.Owner)
 	salt := big.NewInt(0)
@@ -77,10 +78,13 @@ func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.Create
 	}
 
 	updates := map[string][]byte{}
-	updates[task.ID], err = task.ToJSON()
-	updates[fmt.Sprintf("%s:%s", user.Address.String(), task.ID)] = []byte(model.TaskStatusActive)
 
-	// TODO: add tak to user account so we can search by account too
+	// global unique key-value for fast lookup
+	updates[task.ID], err = task.ToJSON()
+
+	// storage to find task belong to a user
+	updates[string(task.Key())] = []byte(model.TaskStatusActive)
+
 	r.db.BatchWrite(updates)
 
 	return &avsproto.CreateTaskResp{
@@ -94,7 +98,6 @@ func (r *RpcServer) ListTasks(ctx context.Context, _ *avsproto.ListTasksReq) (*a
 		return nil, err
 	}
 
-	fmt.Println("List task for", user.Address.String())
 	taskIDs, err := r.db.GetKeyHasPrefix([]byte(user.Address.String()))
 
 	if err != nil {
@@ -102,15 +105,37 @@ func (r *RpcServer) ListTasks(ctx context.Context, _ *avsproto.ListTasksReq) (*a
 	}
 
 	tasks := make([]*avsproto.ListTasksResp_TaskItemResp, len(taskIDs))
-	for i, row := range taskIDs {
+	for i, taskKey := range taskIDs {
 		tasks[i] = &avsproto.ListTasksResp_TaskItemResp{
-			Id: string(row),
+			Id: string(model.TaskKeyToId(taskKey)),
 		}
 	}
 
 	return &avsproto.ListTasksResp{
 		Tasks: tasks,
 	}, nil
+}
+
+func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avsproto.Task, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	task := &model.Task{
+		ID:    taskID.Bytes,
+		Owner: user.Address.Hex(),
+	}
+
+	taskRawByte, err := r.db.GetKey([]byte(task.ID))
+
+	if err != nil {
+		return nil, err
+	}
+
+	task.FromStorageData(taskRawByte)
+
+	return task.ToProtoBuf()
 }
 
 // startRpcServer initializes and establish a tcp socket on given address from
