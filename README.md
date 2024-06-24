@@ -56,7 +56,15 @@ node_api_ip_port_address: your-public-ip:9010
 enable_node_api: true
 ```
 
-Then onboard your operator into our AVS
+Configure 2 env var for your ECDSA and BLS password. Recall that these are
+generated when you onboard your operator to EigenLayer.
+
+```
+export OPERATOR_BLS_KEY_PASSWORD=
+export OPERATOR_ECDSA_KEY_PASSWORD=
+```
+
+Now, we can start the registration process.
 
 ```
 avs-mvp register --config=./config/operator.yaml
@@ -159,6 +167,8 @@ Currently, Oak has deployed our operator on the testnet. Community members can r
 
 # Development guide
 
+View docs/development.md
+
 ## Dependencies
 
 ### EigenLayer CLI
@@ -184,6 +194,11 @@ Install the Foundry toolchain with the following commands:
 ```
 curl -L https://foundry.paradigm.xyz | bash
 foundryup
+```
+### Protobuf Compiler
+
+```
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 ```
 
 ## Getting started

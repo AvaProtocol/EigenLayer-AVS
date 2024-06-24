@@ -29,5 +29,5 @@ func Execute() {
 
 func init() {
 	rootCmd.Flags().BoolP("analytic", "t", false, "send back telemetry to Oak")
-	rootCmd.PersistentFlags().StringVarP(&config, "config", "c", "config/operator.yaml", "Path to config file")
+	rootCmd.PersistentFlags().StringVarP(&config, "config", "c", "./config/operator.yaml", "Path to config file")
 }

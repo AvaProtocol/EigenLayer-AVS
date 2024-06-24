@@ -1,24 +1,27 @@
 package cmd
 
 import (
+	"github.com/OAK-Foundation/oak-avs/aggregator"
+
 	"github.com/spf13/cobra"
-	//"github.com/OAK-Foundation/avs-mvp/aggregator"
 )
 
 var (
+	aggregratorConfig = "./config/aggregator.yaml"
+
 	runAggregatorCmd = &cobra.Command{
-		Use:   "run-aggregator",
+		Use:   "aggregator",
 		Short: "Run aggregator",
 		Long: `Initialize and run aggregator.
 
 Use --config=path-to-your-config-file. default is=./config/aggregator.yaml `,
 		Run: func(cmd *cobra.Command, args []string) {
-			//aggregator.RunWithConfig(config)
+			aggregator.RunWithConfig(aggregratorConfig)
 		},
 	}
 )
 
 func init() {
-	registerCmd.Flags().StringVar(&config, "config", "config/aggregator.yaml", "path to aggregrator config file")
+	registerCmd.Flags().StringVar(&config, "config", "./config/aggregator.yaml", "path to aggregrator config file")
 	rootCmd.AddCommand(runAggregatorCmd)
 }

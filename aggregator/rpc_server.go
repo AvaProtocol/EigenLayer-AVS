@@ -1,159 +1,176 @@
 package aggregator
 
-//
-// import (
-// 	"context"
-// 	"encoding/json"
-// 	"errors"
-// 	"net/http"
-// 	"net/rpc"
-//
-// 	cstaskmanager "github.com/OAK-Foundation/avs-mvp/contracts/bindings/AutomationTaskManager"
-// 	"github.com/OAK-Foundation/avs-mvp/core"
-//
-// 	"github.com/Layr-Labs/eigensdk-go/crypto/bls"
-// 	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
-// )
-//
-// var (
-// 	TaskNotFoundError400                     = errors.New("400. Task not found")
-// 	OperatorNotPartOfTaskQuorum400           = errors.New("400. Operator not part of quorum")
-// 	TaskResponseDigestNotFoundError500       = errors.New("500. Failed to get task response digest")
-// 	UnknownErrorWhileVerifyingSignature400   = errors.New("400. Failed to verify signature")
-// 	SignatureVerificationFailed400           = errors.New("400. Signature verification failed")
-// 	CallToGetCheckSignaturesIndicesFailed500 = errors.New("500. Failed to get check signatures indices")
-// )
-//
-// // Request represents a JSON-RPC request
-// type Request struct {
-// 	Method string      `json:"method"`
-// 	Params interface{} `json:"params"`
-// 	ID     int         `json:"id"`
-// }
-//
-// // Response represents a JSON-RPC response
-// type Response struct {
-// 	ID     int         `json:"id"`
-// 	Result interface{} `json:"result,omitempty"`
-// 	Error  string      `json:"error,omitempty"`
-// }
-//
-// // CommandHandler is a function type for handling commands
-// type CommandHandler func(params interface{}) (interface{}, error)
-//
-// // CommandMap maps command names to their respective handlers
-// var CommandMap = map[string]CommandHandler{
-// 	"TaskSubmission": TaskSubmissionHandler,
-// 	"TaskTriggering": TaskTriggeringHandler,
-// 	"TaskExecuted":   TaskExecutedHandler,
-// }
-//
-// // TaskSubmissionHandler handles TaskSubmission command
-// func TaskSubmissionHandler(params interface{}) (interface{}, error) {
-// 	// Process TaskSubmission command here
-// 	return "TaskSubmission processed", nil
-// }
-//
-// // TaskTriggeringHandler handles TaskTriggering command
-// func TaskTriggeringHandler(params interface{}) (interface{}, error) {
-// 	// Process TaskTriggering command here
-// 	return "TaskTriggering processed", nil
-// }
-//
-// // TaskExecutedHandler handles TaskExecuted command
-// func TaskExecutedHandler(params interface{}) (interface{}, error) {
-// 	// Process TaskExecuted command here
-// 	return "TaskExecuted processed", nil
-// }
-//
-// func jsonError(code int, message string) error {
-// 	return &Response{
-// 		Error:  message,
-// 		ID:     0,
-// 		Result: nil,
-// 	}
-// }
-//
-// // RPCServer handles JSON-RPC requests
-// func RPCServer(w http.ResponseWriter, r *http.Request) {
-// 	if r.Method != "POST" {
-// 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-// 		return
-// 	}
-//
-// 	var req Request
-// 	err := json.NewDecoder(r.Body).Decode(&req)
-// 	if err != nil {
-// 		http.Error(w, "Invalid request", http.StatusBadRequest)
-// 		return
-// 	}
-//
-// 	handler, ok := CommandMap[req.Method]
-// 	if !ok {
-// 		err := jsonError(-32601, "Method not found: "+req.Method)
-// 		json.NewEncoder(w).Encode(err)
-// 		return
-// 	}
-//
-// 	result, err := handler(req.Params)
-// 	if err != nil {
-// 		json.NewEncoder(w).Encode(jsonError(-32603, err.Error()))
-// 		return
-// 	}
-//
-// 	resp := Response{
-// 		ID:     req.ID,
-// 		Result: result,
-// 		Error:  "",
-// 	}
-//
-// 	json.NewEncoder(w).Encode(resp)
-// }
-//
-// func (agg *Aggregator) startServer(ctx context.Context) error {
-//
-// 	err := rpc.Register(agg)
-// 	if err != nil {
-// 		agg.logger.Fatal("Format of service TaskManager isn't correct. ", "err", err)
-// 	}
-// 	rpc.HandleHTTP()
-// 	err = http.ListenAndServe(agg.serverIpPortAddr, nil)
-// 	if err != nil {
-// 		agg.logger.Fatal("ListenAndServe", "err", err)
-// 	}
-//
-// 	return nil
-// }
-//
-// type SignedTaskResponse struct {
-// 	TaskResponse cstaskmanager.IIncredibleSquaringTaskManagerTaskResponse
-// 	BlsSignature bls.Signature
-// 	OperatorId   bls.OperatorId
-// }
-//
-// // rpc endpoint which is called by operator
-// // reply doesn't need to be checked. If there are no errors, the task response is accepted
-// // rpc framework forces a reply type to exist, so we put bool as a placeholder
-// func (agg *Aggregator) ProcessSignedTaskResponse(signedTaskResponse *SignedTaskResponse, reply *bool) error {
-// 	agg.logger.Infof("Received signed task response: %#v", signedTaskResponse)
-// 	taskIndex := signedTaskResponse.TaskResponse.ReferenceTaskIndex
-// 	taskResponseDigest, err := core.GetTaskResponseDigest(&signedTaskResponse.TaskResponse)
-// 	if err != nil {
-// 		agg.logger.Error("Failed to get task response digest", "err", err)
-// 		return TaskResponseDigestNotFoundError500
-// 	}
-// 	agg.taskResponsesMu.Lock()
-// 	if _, ok := agg.taskResponses[taskIndex]; !ok {
-// 		agg.taskResponses[taskIndex] = make(map[sdktypes.TaskResponseDigest]cstaskmanager.IIncredibleSquaringTaskManagerTaskResponse)
-// 	}
-// 	if _, ok := agg.taskResponses[taskIndex][taskResponseDigest]; !ok {
-// 		agg.taskResponses[taskIndex][taskResponseDigest] = signedTaskResponse.TaskResponse
-// 	}
-// 	agg.taskResponsesMu.Unlock()
-//
-// 	err = agg.blsAggregationService.ProcessNewSignature(
-// 		context.Background(), taskIndex, taskResponseDigest,
-// 		&signedTaskResponse.BlsSignature, signedTaskResponse.OperatorId,
-// 	)
-// 	return err
-// }
+import (
+	"context"
+	"log"
+	"math/big"
+	"net"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
+	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
+
+	"github.com/OAK-Foundation/oak-avs/core/chainio/aa"
+	"github.com/OAK-Foundation/oak-avs/core/config"
+	"github.com/OAK-Foundation/oak-avs/model"
+	avsproto "github.com/OAK-Foundation/oak-avs/protobuf"
+	"github.com/OAK-Foundation/oak-avs/storage"
+)
+
+// RpcServer is our grpc sever struct hold the entry point of request handler
+type RpcServer struct {
+	avsproto.UnimplementedAggregratorServer
+	config *config.Config
+	db     storage.Storage
+
+	ethrpc *ethclient.Client
+}
+
+// Get nonce of an existing smart wallet of a given owner
+func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest) (*avsproto.NonceResp, error) {
+
+	ownerAddress := common.HexToAddress(payload.Owner)
+
+	nonce, err := aa.GetNonce(r.ethrpc, ownerAddress, big.NewInt(0))
+	if err != nil {
+		return nil, err
+	}
+
+	return &avsproto.NonceResp{
+		Nonce: nonce.String(),
+	}, nil
+}
+
+// GetAddress returns smart account address of the given owner in the auth key
+func (r *RpcServer) GetAddress(ctx context.Context, payload *avsproto.AddressRequest) (*avsproto.AddressResp, error) {
+	ownerAddress := common.HexToAddress(payload.Owner)
+	salt := big.NewInt(0)
+
+	nonce, err := aa.GetNonce(r.ethrpc, ownerAddress, salt)
+	if err != nil {
+		return nil, err
+	}
+
+	sender, err := aa.GetSenderAddress(r.ethrpc, ownerAddress, salt)
+
+	return &avsproto.AddressResp{
+		Nonce:               nonce.String(),
+		SmartAccountAddress: sender.String(),
+	}, nil
+}
+
+func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.UUID) (*wrapperspb.BoolValue, error) {
+	return nil, nil
+}
+
+func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.CreateTaskReq) (*avsproto.CreateTaskResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	task, err := model.NewTaskFromProtobuf(user, taskPayload)
+	if err != nil {
+		return nil, err
+	}
+
+	updates := map[string][]byte{}
+
+	// global unique key-value for fast lookup
+	updates[task.ID], err = task.ToJSON()
+
+	// storage to find task belong to a user
+	updates[string(task.Key())] = []byte(model.TaskStatusActive)
+
+	r.db.BatchWrite(updates)
+
+	return &avsproto.CreateTaskResp{
+		Id: task.ID,
+	}, nil
+}
+
+func (r *RpcServer) ListTasks(ctx context.Context, _ *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	taskIDs, err := r.db.GetKeyHasPrefix([]byte(user.Address.String()))
+
+	if err != nil {
+		return nil, err
+	}
+
+	tasks := make([]*avsproto.ListTasksResp_TaskItemResp, len(taskIDs))
+	for i, taskKey := range taskIDs {
+		tasks[i] = &avsproto.ListTasksResp_TaskItemResp{
+			Id: string(model.TaskKeyToId(taskKey)),
+		}
+	}
+
+	return &avsproto.ListTasksResp{
+		Tasks: tasks,
+	}, nil
+}
+
+func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avsproto.Task, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	task := &model.Task{
+		ID:    taskID.Bytes,
+		Owner: user.Address.Hex(),
+	}
+
+	taskRawByte, err := r.db.GetKey([]byte(task.ID))
+
+	if err != nil {
+		return nil, err
+	}
+
+	task.FromStorageData(taskRawByte)
+
+	return task.ToProtoBuf()
+}
+
+// startRpcServer initializes and establish a tcp socket on given address from
+// config file
+func (agg *Aggregator) startRpcServer(ctx context.Context, db storage.Storage, config *config.Config) error {
+	// https://github.com/grpc/grpc-go/blob/master/examples/helloworld/greeter_server/main.go#L50
+	lis, err := net.Listen("tcp", agg.config.RpcBindAddress)
+	if err != nil {
+		log.Fatalf("Failed to listen to %v", err)
+		return err
+	}
+
+	s := grpc.NewServer()
+
+	// TODO: Remove hard code
+	ethclient, err := ethclient.Dial("https://eth-sepolia.api.onfinality.io/public")
+
+	if err != nil {
+		panic(err)
+	}
+
+	avsproto.RegisterAggregratorServer(s, &RpcServer{
+		db:     db,
+		ethrpc: ethclient,
+		config: config,
+	})
+
+	// Register reflection service on gRPC server.
+	// This allow clien to discover url endpoint
+	// https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md
+	reflection.Register(s)
+
+	log.Printf("grpc server listening at %v", lis.Addr())
+	if err := s.Serve(lis); err != nil {
+		log.Fatalf("failed to serve: %v", err)
+	}
+	return nil
+}
