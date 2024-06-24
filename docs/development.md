@@ -6,13 +6,15 @@ brew install grpc protobuf
 
 # For generate abibinding
 go install github.com/ethereum/go-ethereum/cmd/abigen@latest
+
+npm install -g grpc-tools
 ```
 
 # Spin up local node
 
 For node that connect to Ava pre-deployed AVS contract on Holesky testnet, we need to create a `config/aggregator.yaml`. Ask a dev on how to construct this file.
 
-After havign the config file, we can run the aggregator:
+After having the config file, we can run the aggregator:
 
 ```
 make build-docker
@@ -43,4 +45,3 @@ For detail of each method and payload, check the protocol.md docs.
 
 We generate the client sdk for JavaScript. The code is generated based on our
 protobuf definition on this file.
-
