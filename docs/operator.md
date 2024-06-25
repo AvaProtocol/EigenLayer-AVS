@@ -27,7 +27,7 @@ eth_ws_url: a holesky rpc endpoint for wss
 ecdsa_private_key_store_path: path-to-your.ecdsa.key.json
 bls_private_key_store_path: path-to-your.bls.key.json
 
-aggregator_server_ip_port_address: https://aggregator-holesky.api.oak.tech
+aggregator_server_ip_port_address: "aggregator-holesky.avaprotocol.org:2206"
 
 # avs node spec compliance https://eigen.nethermind.io/docs/spec/intro
 eigen_metrics_ip_port_address: your-public-ip:9090
