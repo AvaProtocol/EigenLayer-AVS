@@ -8,8 +8,8 @@ import (
 	gethcommon "github.com/ethereum/go-ethereum/common"
 
 	regcoord "github.com/Layr-Labs/eigensdk-go/contracts/bindings/RegistryCoordinator"
-	csservicemanager "github.com/OAK-Foundation/oak-avs/contracts/bindings/AutomationServiceManager"
-	cstaskmanager "github.com/OAK-Foundation/oak-avs/contracts/bindings/AutomationTaskManager"
+	csservicemanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationServiceManager"
+	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
 )
 
 type AvsManagersBindings struct {

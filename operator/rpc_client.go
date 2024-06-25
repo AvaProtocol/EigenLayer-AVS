@@ -3,15 +3,16 @@ package operator
 import (
 	"net/rpc"
 
-	//"github.com/OAK-Foundation/oak-avs/aggregator"
+	//"github.com/AvaProtocol/ap-avs/aggregator"
 
+	"github.com/AvaProtocol/ap-avs/metrics"
 	"github.com/Layr-Labs/eigensdk-go/logging"
-	"github.com/OAK-Foundation/oak-avs/metrics"
 )
 
 type AggregatorRpcClienter interface {
 	//SendSignedTaskResponseToAggregator(signedTaskResponse *aggregator.SignedTaskResponse)
 }
+
 type AggregatorRpcClient struct {
 	rpcClient            *rpc.Client
 	metrics              metrics.Metrics

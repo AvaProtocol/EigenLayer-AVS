@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/OAK-Foundation/oak-avs/aggregator"
+	"github.com/AvaProtocol/ap-avs/aggregator"
 
 	"github.com/spf13/cobra"
 )

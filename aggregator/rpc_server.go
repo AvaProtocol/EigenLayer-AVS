@@ -13,11 +13,11 @@ import (
 	"google.golang.org/grpc/reflection"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 
-	"github.com/OAK-Foundation/oak-avs/core/chainio/aa"
-	"github.com/OAK-Foundation/oak-avs/core/config"
-	"github.com/OAK-Foundation/oak-avs/model"
-	avsproto "github.com/OAK-Foundation/oak-avs/protobuf"
-	"github.com/OAK-Foundation/oak-avs/storage"
+	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
+	"github.com/AvaProtocol/ap-avs/core/config"
+	"github.com/AvaProtocol/ap-avs/model"
+	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/ap-avs/storage"
 )
 
 // RpcServer is our grpc sever struct hold the entry point of request handler

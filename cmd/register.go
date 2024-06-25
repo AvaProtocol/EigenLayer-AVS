@@ -3,7 +3,7 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/OAK-Foundation/oak-avs/operator"
+	"github.com/AvaProtocol/ap-avs/operator"
 )
 
 var (

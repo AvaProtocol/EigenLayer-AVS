@@ -3,8 +3,8 @@ package core
 import (
 	"math/big"
 
+	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
 	"github.com/Layr-Labs/eigensdk-go/crypto/bls"
-	cstaskmanager "github.com/OAK-Foundation/oak-avs/contracts/bindings/AutomationTaskManager"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"golang.org/x/crypto/sha3"
 )

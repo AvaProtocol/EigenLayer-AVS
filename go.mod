@@ -1,4 +1,4 @@
-module github.com/OAK-Foundation/oak-avs
+module github.com/AvaProtocol/ap-avs
 
 go 1.22.0
 

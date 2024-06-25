@@ -6,7 +6,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	avsproto "github.com/OAK-Foundation/oak-avs/protobuf"
+	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
 type TaskType int

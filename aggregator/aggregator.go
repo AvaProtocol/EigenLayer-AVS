@@ -15,14 +15,14 @@ import (
 	sdkclients "github.com/Layr-Labs/eigensdk-go/chainio/clients"
 	blsagg "github.com/Layr-Labs/eigensdk-go/services/bls_aggregation"
 	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
-	"github.com/OAK-Foundation/oak-avs/aggregator/types"
-	"github.com/OAK-Foundation/oak-avs/core"
-	"github.com/OAK-Foundation/oak-avs/core/chainio"
-	"github.com/OAK-Foundation/oak-avs/core/config"
+	"github.com/AvaProtocol/ap-avs/aggregator/types"
+	"github.com/AvaProtocol/ap-avs/core"
+	"github.com/AvaProtocol/ap-avs/core/chainio"
+	"github.com/AvaProtocol/ap-avs/core/config"
 
-	"github.com/OAK-Foundation/oak-avs/storage"
+	"github.com/AvaProtocol/ap-avs/storage"
 
-	cstaskmanager "github.com/OAK-Foundation/oak-avs/contracts/bindings/AutomationTaskManager"
+	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
 )
 
 const (

@@ -13,8 +13,8 @@ import (
 	logging "github.com/Layr-Labs/eigensdk-go/logging"
 	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
 
-	cstaskmanager "github.com/OAK-Foundation/oak-avs/contracts/bindings/AutomationTaskManager"
-	"github.com/OAK-Foundation/oak-avs/core/config"
+	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
+	"github.com/AvaProtocol/ap-avs/core/config"
 )
 
 type AvsWriterer interface {

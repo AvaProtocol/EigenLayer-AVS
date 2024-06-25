@@ -6,9 +6,9 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/OAK-Foundation/oak-avs/core/chainio/aa"
-	"github.com/OAK-Foundation/oak-avs/model"
-	avsproto "github.com/OAK-Foundation/oak-avs/protobuf"
+	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
+	"github.com/AvaProtocol/ap-avs/model"
+	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"

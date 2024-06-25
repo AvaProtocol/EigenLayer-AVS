@@ -6,19 +6,19 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/AvaProtocol/ap-avs/core/chainio"
+	"github.com/AvaProtocol/ap-avs/metrics"
 	"github.com/Layr-Labs/eigensdk-go/metrics/collectors/economic"
 	rpccalls "github.com/Layr-Labs/eigensdk-go/metrics/collectors/rpc_calls"
 	"github.com/Layr-Labs/eigensdk-go/nodeapi"
 	"github.com/Layr-Labs/eigensdk-go/signerv2"
-	"github.com/OAK-Foundation/oak-avs/core/chainio"
-	"github.com/OAK-Foundation/oak-avs/metrics"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	//"github.com/OAK-Foundation/oak-avs/aggregator"
-	cstaskmanager "github.com/OAK-Foundation/oak-avs/contracts/bindings/AutomationTaskManager"
+	//"github.com/AvaProtocol/ap-avs/aggregator"
+	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
 
 	"github.com/Layr-Labs/eigensdk-go/chainio/clients"
 	sdkelcontracts "github.com/Layr-Labs/eigensdk-go/chainio/clients/elcontracts"
