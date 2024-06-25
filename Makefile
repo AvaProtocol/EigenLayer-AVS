@@ -1,5 +1,5 @@
 MAIN_PACKAGE_PATH ?= ./
-BINARY_NAME ?= avs-mvp
+BINARY_NAME ?= ap-avs
 
 # ==================================================================================== #
 # HELPERS
