@@ -68,4 +68,5 @@ ap-avs operator --config=./config/operator.yaml
 
 # Running operator with docker compose
 
-To help simplify the process and auto update we had configure
+To help simplify the process and enable auto update you can use our [official
+operator setup repository](https://github.com/AvaProtocol/ap-operator-setup)
