@@ -1,12 +1,8 @@
-# OAK Automation On Ethereum
+# Ava Protocol Automation On Ethereum
 
-OAK + EigenLayer
+The Ava Protocol AVS can be compiled directly using Go version 1.22+. Ensure you have the appropriate version of Go installed on your development environment.
 
-# OAK AVS
-
-The OAK AVS can be compiled directly using Go version 10.22. Ensure you have the appropriate version of Go installed on your development environment.
-
-Check GO version:
+Check Go version:
 
 ```
 go version
@@ -15,76 +11,14 @@ go version
 Compile OAK AVS:
 
 ```
-go build
+go build -o ap-avs
 ```
+
+Then you can run `ap-avs` binary. We make an effort to use pure Go so you can also cross compile for any supported architecture that the Go compiler support.
 
 ## Run operator
 
-To run the AVS operator, it is 2 steps
-
-1. Register to become an EigenLayer operator by following [EigenLayer Operator Guide](https://docs.eigenlayer.xyz/eigenlayer/operator-guides/operator-introduction)
-2. Once become an operator, you can register for OAK AVS follow below step
-
-### Run OAK AVS on Holesky testnet
-
-Download the latest release from https://github.com/OAK-Foundation/avs-mvp/releases for your platform. You can compile for yourself by simply running `go build` at the root level.
-
-First, Generate OAK AVS config file. You can put it anywhere. Example `config/operator.yaml` with below content
-
-```
-# this sets the logger level (true = info, false = debug)
-production: true
-
-operator_address: your-operator-address
-
-
-avs_registry_coordinator_address: 0x90c6d6f2A78d5Ce22AB8631Ddb142C03AC87De7a
-operator_state_retriever_address: 0xb7bb920538e038DFFEfcB55caBf713652ED2031F
-
-eth_rpc_url: a holesky rpc endpoint for http
-eth_ws_url: a holesky rpc endpoint for wss
-
-ecdsa_private_key_store_path: path-to-your.ecdsa.key.json
-bls_private_key_store_path: path-to-your.bls.key.json
-
-aggregator_server_ip_port_address: https://aggregator-holesky.api.oak.tech
-
-# avs node spec compliance https://eigen.nethermind.io/docs/spec/intro
-eigen_metrics_ip_port_address: your-public-ip:9090
-enable_metrics: true
-node_api_ip_port_address: your-public-ip:9010
-enable_node_api: true
-```
-
-Configure 2 env var for your ECDSA and BLS password. Recall that these are
-generated when you onboard your operator to EigenLayer.
-
-```
-export OPERATOR_BLS_KEY_PASSWORD=
-export OPERATOR_ECDSA_KEY_PASSWORD=
-```
-
-Now, we can start the registration process.
-
-```
-avs-mvp register --config=./config/operator.yaml
-```
-
-At the end of process, you should see something like this:
-
-```
-successfully registered operator with AVS registry coordinator
-
-Registered operator with avs registry coordinator
-```
-
-The status can also be checked with `avs-mvp status --config=./config/operator.yaml`
-
-At this point, you're ready to run our operator node by simply do
-
-```
-avs-mvp operator --config=./config/operator.yaml
-```
+Check how to run an [operator docs](docs/operator.md)
 
 
 ### Run aggregrator

@@ -13,9 +13,11 @@ type Storage interface {
 	Close() error
 
 	GetKey(prefix []byte) ([]byte, error)
-	BatchWrite(updates map[string][]byte) error
 	GetByPrefix(prefix []byte) ([]*KeyValueItem, error)
 	GetKeyHasPrefix(prefix []byte) ([][]byte, error)
+
+	BatchWrite(updates map[string][]byte) error
+	Set(key, value []byte) error
 }
 
 type KeyValueItem struct {
@@ -61,6 +63,13 @@ func (s *BadgerStorage) BatchWrite(updates map[string][]byte) error {
 	_ = txn.Commit()
 
 	return nil
+}
+
+func (s *BadgerStorage) Set(key, value []byte) error {
+	return s.db.Update(func(txn *badger.Txn) error {
+		err := txn.Set(key, value)
+		return err
+	})
 }
 
 // GetByPrefix return a list of key/value item whoser key prefix matches

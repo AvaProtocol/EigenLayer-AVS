@@ -22,7 +22,7 @@ import (
 
 // RpcServer is our grpc sever struct hold the entry point of request handler
 type RpcServer struct {
-	avsproto.UnimplementedAggregratorServer
+	avsproto.UnimplementedAggregatorServer
 	config *config.Config
 	db     storage.Storage
 
@@ -157,7 +157,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context, db storage.Storage, c
 		panic(err)
 	}
 
-	avsproto.RegisterAggregratorServer(s, &RpcServer{
+	avsproto.RegisterAggregatorServer(s, &RpcServer{
 		db:     db,
 		ethrpc: ethclient,
 		config: config,

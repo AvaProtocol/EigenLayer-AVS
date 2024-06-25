@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 
+	"google.golang.org/grpc"
+
 	"github.com/AvaProtocol/ap-avs/core/chainio"
 	"github.com/AvaProtocol/ap-avs/metrics"
 	"github.com/Layr-Labs/eigensdk-go/metrics/collectors/economic"
@@ -16,9 +18,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/prometheus/client_golang/prometheus"
-
-	//"github.com/AvaProtocol/ap-avs/aggregator"
-	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
 
 	"github.com/Layr-Labs/eigensdk-go/chainio/clients"
 	sdkelcontracts "github.com/Layr-Labs/eigensdk-go/chainio/clients/elcontracts"
@@ -33,11 +32,21 @@ import (
 	sdkmetrics "github.com/Layr-Labs/eigensdk-go/metrics"
 	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
 	sdkutils "github.com/Layr-Labs/eigensdk-go/utils"
+
+	//"github.com/AvaProtocol/ap-avs/aggregator"
+	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
+
+	// insecure for local dev
+
+	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
-const AVS_NAME = "oak-avs"
+const AVS_NAME = "ap-avs"
+
+// TODO: inject via builder flag
 const SEM_VER = "0.0.1"
-const AppName = "oak-avs-operator"
+const AppName = "ap-avs-operator"
 
 type OperatorConfig struct {
 	// used to set the logger level (true = info, false = debug)
@@ -57,9 +66,11 @@ type OperatorConfig struct {
 }
 
 type Operator struct {
-	config    OperatorConfig
-	logger    logging.Logger
-	ethClient eth.Client
+	config      OperatorConfig
+	logger      logging.Logger
+	ethClient   eth.Client
+	ethWsClient eth.Client
+
 	// TODO(samlaf): remove both avsWriter and eigenlayerWrite from operator
 	// they are only used for registration, so we should make a special registration package
 	// this way, auditing this operator code makes it obvious that operators don't need to
@@ -81,10 +92,9 @@ type Operator struct {
 
 	// receive new tasks in this chan (typically from listening to onchain event)
 	newTaskCreatedChan chan *cstaskmanager.ContractAutomationTaskManagerNewTaskCreated
-	// ip address of aggregator
-	aggregatorServerIpPortAddr string
 	// rpc client to send signed task responses to aggregator
-	aggregatorRpcClient AggregatorRpcClienter
+	aggregatorRpcClient avsproto.AggregatorClient
+	aggregatorConn      *grpc.ClientConn
 	// needed when opting in to avs (allow this service manager contract to slash operator)
 	credibleSquaringServiceManagerAddr common.Address
 }
@@ -161,7 +171,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	}
 	blsKeyPair, err := bls.ReadPrivateKeyFromFile(c.BlsPrivateKeyStorePath, blsKeyPassword)
 	if err != nil {
-		logger.Errorf("Cannot parse bls private key", "err", err)
+		logger.Errorf("Cannot parse bls private key: %s err: %w", c.BlsPrivateKeyStorePath, err)
 		return nil, err
 	}
 	// TODO(samlaf): should we add the chainId to the config instead?
@@ -235,7 +245,6 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	// 	logger.Error("Cannot create AvsSubscriber", "err", err)
 	// 	return nil, err
 	// }
-	fmt.Println("wsclient", ethWsClient)
 
 	// We must register the economic metrics separately because they are exported metrics (from jsonrpc or subgraph calls)
 	// and not instrumented metrics: see https://prometheus.io/docs/instrumenting/writing_clientlibs/#overall-structure
@@ -247,28 +256,40 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		AVS_NAME, logger, common.HexToAddress(c.OperatorAddress), quorumNames)
 	reg.MustRegister(economicMetricsCollector)
 
-	aggregatorRpcClient, err := NewAggregatorRpcClient(c.AggregatorServerIpPortAddress, logger, avsAndEigenMetrics)
+	// grpc client
+	var opts []grpc.DialOption
+	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	logger.Infof("Connect to aggregator %s", c.AggregatorServerIpPortAddress)
+	aggregatorConn, err := grpc.NewClient(c.AggregatorServerIpPortAddress, opts...)
 	if err != nil {
-		logger.Error("Cannot create AggregatorRpcClient. Is aggregator running?", "err", err)
-		return nil, err
+		panic(err)
 	}
+	aggregatorRpcClient := avsproto.NewAggregatorClient(aggregatorConn)
+	//aggregatorRpcClient, err := NewAggregatorRpcClient(c.AggregatorServerIpPortAddress, logger, avsAndEigenMetrics)
+	//if err != nil {
+	//	logger.Error("Cannot create AggregatorRpcClient. Is aggregator running?", "err", err)
+	//	return nil, err
+	//}
 
 	operator := &Operator{
-		config:     c,
-		logger:     logger,
-		metricsReg: reg,
-		metrics:    avsAndEigenMetrics,
-		nodeApi:    nodeApi,
-		ethClient:  ethRpcClient,
-		avsWriter:  avsWriter,
-		avsReader:  avsReader,
+		config:      c,
+		logger:      logger,
+		metricsReg:  reg,
+		metrics:     avsAndEigenMetrics,
+		nodeApi:     nodeApi,
+		ethClient:   ethRpcClient,
+		ethWsClient: ethWsClient,
+		avsWriter:   avsWriter,
+		avsReader:   avsReader,
 		// avsSubscriber:                      avsSubscriber,
-		eigenlayerReader:                   sdkClients.ElChainReader,
-		eigenlayerWriter:                   sdkClients.ElChainWriter,
-		blsKeypair:                         blsKeyPair,
-		operatorAddr:                       common.HexToAddress(c.OperatorAddress),
-		aggregatorServerIpPortAddr:         c.AggregatorServerIpPortAddress,
-		aggregatorRpcClient:                aggregatorRpcClient,
+		eigenlayerReader: sdkClients.ElChainReader,
+		eigenlayerWriter: sdkClients.ElChainWriter,
+		blsKeypair:       blsKeyPair,
+		operatorAddr:     common.HexToAddress(c.OperatorAddress),
+
+		aggregatorRpcClient: aggregatorRpcClient,
+		aggregatorConn:      aggregatorConn,
+
 		newTaskCreatedChan:                 make(chan *cstaskmanager.ContractAutomationTaskManagerNewTaskCreated),
 		credibleSquaringServiceManagerAddr: common.HexToAddress(c.AVSRegistryCoordinatorAddress),
 		operatorId:                         [32]byte{0}, // this is set below
@@ -310,32 +331,9 @@ func (o *Operator) Start(ctx context.Context) error {
 	if o.config.EnableNodeApi {
 		o.nodeApi.Start()
 	}
-	var metricsErrChan <-chan error
-	if o.config.EnableMetrics {
-		metricsErrChan = o.metrics.Start(ctx, o.metricsReg)
-	} else {
-		metricsErrChan = make(chan error, 1)
-	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case err := <-metricsErrChan:
-			// TODO(samlaf); we should also register the service as unhealthy in the node api
-			// https://eigen.nethermind.io/docs/spec/api/
-			o.logger.Fatal("Error in metrics server", "err", err)
-		case newTaskCreatedLog := <-o.newTaskCreatedChan:
-			o.metrics.IncNumTasksReceived()
-			fmt.Println("Operator receive task", newTaskCreatedLog)
-			// taskResponse := o.ProcessNewTaskCreatedLog(newTaskCreatedLog)
-			// signedTaskResponse, err := o.SignTaskResponse(taskResponse)
-			// if err != nil {
-			// 	continue
-			// }
-			// go o.aggregatorRpcClient.SendSignedTaskResponseToAggregator(signedTaskResponse)
-		}
-	}
+	defer o.aggregatorConn.Close()
+	return o.runWorkLoop(ctx)
 }
 
 // // Takes a NewTaskCreatedLog struct as input and returns a TaskResponseHeader struct.
