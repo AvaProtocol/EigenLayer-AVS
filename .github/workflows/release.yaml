@@ -59,7 +59,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            name/app
+            avaprotocol/ap-avs
           tags: |
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
             type=raw,value={{sha}},enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
