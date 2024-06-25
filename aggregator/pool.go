@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -24,7 +23,6 @@ var (
 func (r *RpcServer) Ping(ctx context.Context, payload *avsproto.Checkin) (*avsproto.CheckinResp, error) {
 	now := time.Now()
 
-	log.Println("Receive operator %s ping", payload.Id)
 	status := &OperatorStatus{
 		Address:       payload.Address,
 		LastPingEpoch: now.Unix(),

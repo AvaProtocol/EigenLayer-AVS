@@ -45,7 +45,7 @@ import (
 const AVS_NAME = "ap-avs"
 
 // TODO: inject via builder flag
-const SEM_VER = "0.0.1"
+const SEM_VER = "0.0.2"
 const AppName = "ap-avs-operator"
 
 type OperatorConfig struct {
