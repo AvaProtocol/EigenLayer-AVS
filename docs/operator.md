@@ -3,36 +3,35 @@
 To run the AVS operator, there are 2 steps
 
 1. Register to become an EigenLayer operator by following [EigenLayer Operator Guide](https://docs.eigenlayer.xyz/eigenlayer/operator-guides/operator-introduction)
-2. Once become an operator, you can register for OAK AVS follow below step
+2. Once become an operator, you can register for Ava Protocol AVS follow below step
 
-### Run OAK AVS on Holesky testnet
+### Run Ava Protocol AVS on Holesky testnet
 
-Download the latest release from https://github.com/OAK-Foundation/ap-avs/releases for your platform. You can compile for yourself by simply running `go build` at the root level.
+Download the latest release from https://github.com/AvaProtocol/ap-avs/releases for your platform. You can compile for yourself by simply running `go build` at the root level.
 
-First, Generate OAK AVS config file. You can put it anywhere. Example `config/operator.yaml` with below content
+First, Generate Ava Protocol AVS config file. You can put it anywhere. Example `config/operator.yaml` with below content
 
 ```
 # this sets the logger level (true = info, false = debug)
 production: true
 
-operator_address: your-operator-address
-
+operator_address: <operator_address>
 
 avs_registry_coordinator_address: 0x90c6d6f2A78d5Ce22AB8631Ddb142C03AC87De7a
 operator_state_retriever_address: 0xb7bb920538e038DFFEfcB55caBf713652ED2031F
 
-eth_rpc_url: a holesky rpc endpoint for http
-eth_ws_url: a holesky rpc endpoint for wss
+eth_rpc_url: https://holesky.drpc.org
+eth_ws_url: wss://holesky.drpc.org/
 
-ecdsa_private_key_store_path: path-to-your.ecdsa.key.json
-bls_private_key_store_path: path-to-your.bls.key.json
+ecdsa_private_key_store_path: <path_to_operator_ecdsa_key_json>
+bls_private_key_store_path: <path_to_operator_bls_key_json>
 
 aggregator_server_ip_port_address: "aggregator-holesky.avaprotocol.org:2206"
 
 # avs node spec compliance https://eigen.nethermind.io/docs/spec/intro
-eigen_metrics_ip_port_address: your-public-ip:9090
+eigen_metrics_ip_port_address: <operator_public_ip>:9090
 enable_metrics: true
-node_api_ip_port_address: your-public-ip:9010
+node_api_ip_port_address: <operator_public_ip>:9010
 enable_node_api: true
 ```
 
@@ -44,7 +43,7 @@ export OPERATOR_BLS_KEY_PASSWORD=
 export OPERATOR_ECDSA_KEY_PASSWORD=
 ```
 
-Now, we can start the registration process.
+Now, we can start the registration process by running our `ap-avs` AVS release binary.
 
 ```
 ap-avs register --config=./config/operator.yaml
