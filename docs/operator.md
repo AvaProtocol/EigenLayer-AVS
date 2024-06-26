@@ -35,12 +35,12 @@ node_api_ip_port_address: <operator_public_ip>:9010
 enable_node_api: true
 ```
 
-Configure 2 env var for your ECDSA and BLS password. Recall that these are
-generated when you onboard your operator to EigenLayer.
-
+Configure 2 env var for your ECDSA and BLS password. Recall that these are generated when you onboard your operator to EigenLayer. In case your password contains special characters to the command-line, here we export both variables by disabling history expansion temporarily.
 ```
-export OPERATOR_BLS_KEY_PASSWORD=
-export OPERATOR_ECDSA_KEY_PASSWORD=
+set +H
+export OPERATOR_BLS_KEY_PASSWORD="<operator_bls_password>"
+export OPERATOR_ECDSA_KEY_PASSWORD="<operator_ecdsa_password>"
+set -H
 ```
 
 Now, we can start the registration process by running our `ap-avs` AVS release binary.

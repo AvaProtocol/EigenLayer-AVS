@@ -11,8 +11,6 @@ out/
 .env
 *.env
 
-config/*.yaml
-
 # binary
 ap-avs
 
@@ -24,5 +22,4 @@ operator.yaml
 metadata.json
 
 # Ignores yaml configuration files in the config directory
-/config/operator.yaml
-/config/aggregator.yaml
+config/*.yaml

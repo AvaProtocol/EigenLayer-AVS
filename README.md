@@ -48,7 +48,7 @@ and their actual execution.
 
 Aggregator accepts RPC request from client to submit Task Payload. Currently, aggregator is managed and run by Ava Protocol team.
 
-Periodcally, aggregator combine the task submission, update our internal
+Periodically, aggregator combine the task submission, update our internal
 storage and a zkSNARK proof will be write back to our TaskManager contract.
 
 Aggregator also accept task condition check result from operator, perform quorum
@@ -72,7 +72,7 @@ The aggregator is run and managed by the Ava Protocol team. This address will be
 Operators communicates with aggregators through RPC. It requests task data from aggregator, it performs condition execution to check whether a task can be trigger. The result is then send back to aggregator.
 
 For task is ok to run, the operator will executed them. The detail of how task
-is triggering throuhg our ERC6900 modular wallet will come soon.
+is triggering through our ERC6900 modular wallet will come soon.
 
 ## Ava Protocol operator address
 
