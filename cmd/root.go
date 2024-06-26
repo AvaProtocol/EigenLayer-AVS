@@ -10,12 +10,12 @@ import (
 var (
 	config  = "./config/operator.yaml"
 	rootCmd = &cobra.Command{
-		Use:   "avs-mvp",
+		Use:   "ap-avs",
 		Short: "OAK AVS CLI",
 		Long: `OAK CLI to run and interact with EigenLayer service.
 Each sub command can be use for a single service
 
-Such as "avs-mvp run-operator" or "avs-mvp run-aggregrator" and so on 
+Such as "ap-avs run-operator" or "ap-avs run-aggregrator" and so on 
 `,
 	}
 )

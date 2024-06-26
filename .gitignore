@@ -11,11 +11,15 @@ out/
 .env
 *.env
 
-config/*.yaml
-
 # binary
-oak-avs
-avs-mvp
+ap-avs
 
 .DS_Store
 node_modules
+
+# Ignores operator configuration files at root
+operator.yaml
+metadata.json
+
+# Ignores yaml configuration files in the config directory
+config/*.yaml

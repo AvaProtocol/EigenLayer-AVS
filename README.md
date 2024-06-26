@@ -8,7 +8,7 @@ Check Go version:
 go version
 ```
 
-Compile OAK AVS:
+Compile Ava Protocol AVS:
 
 ```
 go build -o ap-avs
@@ -21,15 +21,15 @@ Then you can run `ap-avs` binary. We make an effort to use pure Go so you can al
 Check how to run an [operator docs](docs/operator.md)
 
 
-### Run aggregrator
+### Run aggregator
 
 To run the aggregator, use the following command:
 
 ```
-avs-mvp aggregrator
+ap-avs aggregator
 ```
 
-Note: The OAK team currently manages the aggregator, and the communication IP address between the operator and the aggregator is hardcoded in the operator.
+Note: The Ava Protocol team currently manages the aggregator, and the communication IP address between the operator and the aggregator is hardcoded in the operator.
 
 # How it works
 
@@ -46,9 +46,9 @@ and their actual execution.
 
 ## Aggregator
 
-Aggregator accepts RPC request from client to submit Task Payload. Currently, aggregrator is managed and run by OAK team.
+Aggregator accepts RPC request from client to submit Task Payload. Currently, aggregator is managed and run by Ava Protocol team.
 
-Periodcally, aggregrator combine the task submission, update our internal
+Periodically, aggregator combine the task submission, update our internal
 storage and a zkSNARK proof will be write back to our TaskManager contract.
 
 Aggregator also accept task condition check result from operator, perform quorum
@@ -57,27 +57,26 @@ run.
 
 ### Aggregator Address
 
-The aggregator is run and managed by the Oak team. This address will be hard-coded.
-perator.
+The aggregator is run and managed by the Ava Protocol team. This address will be hard-coded.
 
 #### Holesky Testnet
 
-- https://aggregator-holesky.api.oak.tech
+- https://aggregator-holesky.api.avaprotocol.org
 
 #### Mainnet
 
-- https://aggregator.api.oak.tech
+- https://aggregator.api.avaprotocol.org
 
 ## Operators
 
-Operators communicates with aggregrators through RPC. It requests task data from aggregrator, it performs condition execution to check whether a task can be trigger. The result is then send back to aggregrator.
+Operators communicates with aggregators through RPC. It requests task data from aggregator, it performs condition execution to check whether a task can be trigger. The result is then send back to aggregator.
 
 For task is ok to run, the operator will executed them. The detail of how task
-is triggering throuhg our ERC6900 modular wallet will come soon.
+is triggering through our ERC6900 modular wallet will come soon.
 
-## Oak operator address
+## Ava Protocol operator address
 
-Currently, Oak has deployed our operator on the testnet. Community members can run their own operator and register for Oak AVS service, or they can delegate their tokens to the Oak operator.
+Currently, Ava Protocol has deployed our operator on the testnet. Community members can run their own operator and register for Ava Protocol AVS service, or they can delegate their tokens to the Ava Protocol operator.
 
 ### Testnet
 
