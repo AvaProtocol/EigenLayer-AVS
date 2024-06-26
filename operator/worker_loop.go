@@ -9,7 +9,7 @@ import (
 )
 
 func (o *Operator) runWorkLoop(ctx context.Context) error {
-	timer := time.NewTicker(1 * time.Second)
+	timer := time.NewTicker(5 * time.Second)
 
 	var metricsErrChan <-chan error
 	if o.config.EnableMetrics {
@@ -35,6 +35,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 func (o *Operator) PingServer() {
 	id := hex.EncodeToString(o.operatorId[:])
 
+	start := time.Now()
 	// TODO: Implement task and queue depth to detect performance
 	_, err := o.aggregatorRpcClient.Ping(context.Background(), &pb.Checkin{
 		Address: o.config.OperatorAddress,
@@ -42,8 +43,10 @@ func (o *Operator) PingServer() {
 		// TODO: generate signature with bls key
 		Signature: "pending",
 	})
-
-	if err != nil {
-		o.logger.Infof("Error pinging aggregator: %v", err)
+	elapsed := time.Now().Sub(start)
+	if err == nil {
+		o.logger.Infof("operator update status succesfully in %d ms", elapsed.Milliseconds())
+	} else {
+		o.logger.Infof("error update status %v", err)
 	}
 }
