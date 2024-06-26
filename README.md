@@ -57,15 +57,18 @@ run.
 
 ### Aggregator Address
 
-The aggregator is run and managed by the Ava Protocol team. This address will be hard-coded.
+The aggregator is currently run and managed by the Ava Protocol team. Depend on
+testnet or mainnet, you would need to point your operator to the right address
+in the operator config file.
 
 #### Holesky Testnet
 
-- https://aggregator-holesky.api.avaprotocol.org
+- aggregator-holesky.avaprotocol.org:2206
 
 #### Mainnet
 
-- https://aggregator.api.avaprotocol.org
+- aggregator.avaprotocol.org:2206
+
 
 ## Operators
 
