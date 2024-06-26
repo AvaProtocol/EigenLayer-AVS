@@ -7,7 +7,7 @@ To run the AVS operator, there are 2 steps
 
 ### Run Ava Protocol AVS on Holesky testnet
 
-Download the latest release from https://github.com/AvaProtocol/ap-avs/releases for your platform. You can compile for yourself by simply running `go build` at the root level.
+Download the latest release from https://github.com/AvaProtocol/EigenLayer-AVS/releases for your platform. You can compile for yourself by simply running `go build` at the root level.
 
 First, Generate Ava Protocol AVS config file. You can put it anywhere. Example `config/operator.yaml` with below content
 
