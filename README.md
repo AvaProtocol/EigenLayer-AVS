@@ -96,10 +96,22 @@ Currently, Ava Protocol has deployed our operator on the testnet. Community memb
 | PauserRegistry          | [`0x3A8ea6e4202CdDe4a9e0cCE19c4Dc1739ba2cF0b`](https://holesky.etherscan.io/address/0x3A8ea6e4202CdDe4a9e0cCE19c4Dc1739ba2cF0b) 	|
 | StakeRegistry           | [`0x7BacD5dd5A7C3acf8bf1a3c88fB0D00B68EE626A`](https://holesky.etherscan.io/address/0x7BacD5dd5A7C3acf8bf1a3c88fB0D00B68EE626A) 	|
 
-
 ### Mainnet
 
 - TBD
+
+## Telemetry Dashboard
+
+Operator that is connected to Ava Protocol aggregator can also check their
+operator on our telemetry dashboard as below
+
+### Testnet
+
+https://aggregator-holesky.avaprotocol.org/telemetry
+
+### Mainnet
+
+https://aggregator.avaprotocol.org/telemetry
 
 # Development guide
 
