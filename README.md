@@ -83,7 +83,7 @@ Currently, Ava Protocol has deployed our operator on the testnet. Community memb
 
 ### Testnet
 
-- Our own operator: [0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d](https://holesky.eigenlayer.xyz/operator/0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d)
+- Ava Protocol's operator: [0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d](https://holesky.eigenlayer.xyz/operator/0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d). 
 
 | Name                     | Address                                                                                                                 		|
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------	|
