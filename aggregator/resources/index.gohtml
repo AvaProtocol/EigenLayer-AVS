@@ -1,0 +1,41 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Ava Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-black">
+<div class="bg-black">
+  <div class="mx-auto max-w-7xl py-24 sm:px-6 sm:py-32 lg:px-8">
+    <ul role="list" class="divide-y divide-gray-800">
+      {{ range . }}
+      <li class="flex justify-between gap-x-6 py-5">
+        <div class="flex min-w-0 gap-x-4">
+          {{/* TODO: Parse metadata to get image url <img class="h-12 w-12 flex-none rounded-full bg-gray-50"
+    src="https://testnet-usea1-holesky-operator-metadata.s3.amazonaws.com/0x3c7a1a9c769009d21fe2fcfb08c7334919f641fe/logo.png"
+    alt="">*/}}
+          <div class="min-w-0 flex-auto">
+            <p class="text-sm font-semibold leading-6 text-white">
+              <a href="https://holesky.etherscan.io/address/{{ .Address}}">
+                {{ .Address }}
+              </a>
+            </p>
+            <p class="mt-1 truncate text-xs leading-5 text-gray-400">
+              <a href="https://holesky.eigenlayer.xyz/operator/{{ .Address
+}}">View on EigenLayer</a>
+            </p>
+          </div>
+        </div>
+
+        <div class="hidden shrink-0 sm:flex sm:flex-col sm:items-end">
+          <p class="text-sm leading-6 text-white">Active</p>
+          <p class="mt-1 text-xs leading-5 text-gray-400">Last seen <time
+datetime="2023-01-23T13:23Z">{{ .LastSeen }} ago</time></p>
+        </div>
+        {{ end }}
+      </li>
+    </ul>
+  </div>
+</div>
+</body>

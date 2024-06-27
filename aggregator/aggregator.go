@@ -11,14 +11,14 @@ import (
 
 	"github.com/Layr-Labs/eigensdk-go/logging"
 
-	"github.com/Layr-Labs/eigensdk-go/chainio/clients"
-	sdkclients "github.com/Layr-Labs/eigensdk-go/chainio/clients"
-	blsagg "github.com/Layr-Labs/eigensdk-go/services/bls_aggregation"
-	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
 	"github.com/AvaProtocol/ap-avs/aggregator/types"
 	"github.com/AvaProtocol/ap-avs/core"
 	"github.com/AvaProtocol/ap-avs/core/chainio"
 	"github.com/AvaProtocol/ap-avs/core/config"
+	"github.com/Layr-Labs/eigensdk-go/chainio/clients"
+	sdkclients "github.com/Layr-Labs/eigensdk-go/chainio/clients"
+	blsagg "github.com/Layr-Labs/eigensdk-go/services/bls_aggregation"
+	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
 
 	"github.com/AvaProtocol/ap-avs/storage"
 
@@ -62,6 +62,8 @@ type Aggregator struct {
 
 	config *config.Config
 	db     storage.Storage
+
+	operatorPool *OperatorPool
 }
 
 // NewAggregator creates a new Aggregator with the provided config.
@@ -113,6 +115,8 @@ func NewAggregator(c *config.Config) (*Aggregator, error) {
 		taskResponses: make(map[types.TaskIndex]map[sdktypes.TaskResponseDigest]cstaskmanager.IAutomationTaskManagerTaskResponse),
 
 		config: c,
+
+		operatorPool: &OperatorPool{},
 	}, nil
 }
 
@@ -127,6 +131,8 @@ func (agg *Aggregator) initDB(ctx context.Context) error {
 		panic(err)
 	}
 
+	agg.operatorPool.db = agg.db
+
 	return agg.db.Setup()
 }
 
@@ -137,7 +143,7 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.initDB(ctx)
 
 	agg.logger.Infof("Starting rpc server.")
-	go agg.startRpcServer(ctx, agg.db, agg.config)
+	go agg.startRpcServer(ctx)
 
 	agg.logger.Infof("Starting http server.")
 	go agg.startHttpServer(ctx)

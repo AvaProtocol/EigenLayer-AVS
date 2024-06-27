@@ -26,6 +26,8 @@ type RpcServer struct {
 	config *config.Config
 	db     storage.Storage
 
+	operatorPool *OperatorPool
+
 	ethrpc *ethclient.Client
 }
 
@@ -140,7 +142,7 @@ func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avspro
 
 // startRpcServer initializes and establish a tcp socket on given address from
 // config file
-func (agg *Aggregator) startRpcServer(ctx context.Context, db storage.Storage, config *config.Config) error {
+func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 	// https://github.com/grpc/grpc-go/blob/master/examples/helloworld/greeter_server/main.go#L50
 	lis, err := net.Listen("tcp", agg.config.RpcBindAddress)
 	if err != nil {
@@ -158,9 +160,10 @@ func (agg *Aggregator) startRpcServer(ctx context.Context, db storage.Storage, c
 	}
 
 	avsproto.RegisterAggregatorServer(s, &RpcServer{
-		db:     db,
-		ethrpc: ethclient,
-		config: config,
+		db:           agg.db,
+		ethrpc:       ethclient,
+		config:       agg.config,
+		operatorPool: agg.operatorPool,
 	})
 
 	// Register reflection service on gRPC server.

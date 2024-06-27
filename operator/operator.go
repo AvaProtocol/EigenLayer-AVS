@@ -63,6 +63,8 @@ type OperatorConfig struct {
 	EnableMetrics                 bool   `yaml:"enable_metrics"`
 	NodeApiIpPortAddress          string `yaml:"node_api_ip_port_address"`
 	EnableNodeApi                 bool   `yaml:"enable_node_api"`
+
+	DbPath string `yaml:"db_path"`
 }
 
 type Operator struct {
@@ -112,7 +114,6 @@ func NewOperatorFromConfigFile(configPath string) (*Operator, error) {
 	nodeConfig := OperatorConfig{}
 	err := sdkutils.ReadYamlConfig(configPath, &nodeConfig)
 
-	fmt.Printf("loaded config: %v\n", nodeConfig)
 	if err != nil {
 		panic(fmt.Errorf("failed to parse config file: %w\nMake sure %s is exist and a valid yaml file %w.", configPath, err))
 	}
