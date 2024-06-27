@@ -42,12 +42,6 @@ jobs:
   publish-docker:
     name: Publish latest image to docker hub
     runs-on: 'ubuntu-latest'
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
     steps:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -81,7 +75,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64,linux/arm64
           context: .
           file: dockerfiles/operator.Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
