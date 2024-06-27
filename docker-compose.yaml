@@ -22,7 +22,7 @@ services:
       - ./config:/app/config
       - db-data:/tmp/app-avs
     healthcheck:
-      test: curl --fail http://localhost:1323 || exit 1
+      test: curl --fail http://localhost:1323/up || exit 1
       interval: 3s
       retries: 15
       start_period: 3s
