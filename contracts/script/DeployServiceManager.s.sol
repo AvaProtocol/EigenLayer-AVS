@@ -69,8 +69,8 @@ contract DeployServiceManager is Script {
 
 
     function run() external {
-		string memory defaultRegistryPath = "./script/output/deploy_output.json";
-  		string memory deployedRegistryPath = vm.envOr("REGISTRY_PATH", defaultRegistryPath);
+		string memory defaultOutputPath = "./script/output/avs_deploy_output.json";
+  		string memory deployOutputPath = vm.envOr("AVS_DEPLOY_OUTPUT_PATH", defaultOutputPath);
 
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
@@ -250,12 +250,23 @@ contract DeployServiceManager is Script {
         vm.serializeAddress(output, "proxyAdmin", address(oakAVSProxyAdmin));
 
         vm.serializeAddress(output, "avsServiceManagerProxy", address(automationServiceContract.automationServiceManager));
+        vm.serializeAddress(output, "avsServiceManagerImpl", address(automationServiceContract.automationServiceManagerImplementation));
+
+        vm.serializeAddress(output, "registryCoordinatorProxy", address(automationServiceContract.registryCoordinator));
+        vm.serializeAddress(output, "registryCoordinatorImpl", address(automationServiceContract.registryCoordinatorImplementation));
+
+        vm.serializeAddress(output, "BLSApkRegistryProxy", address(automationServiceContract.apkRegistry));
+        vm.serializeAddress(output, "BLSApkRegistryImpl", address(automationServiceContract.apkRegistryImplementation));
+
         vm.serializeAddress(output, "indexRegistryProxy", address(automationServiceContract.indexRegistry));
+        vm.serializeAddress(output, "indexRegistryImpl", address(automationServiceContract.indexRegistryImplementation));
+
+        vm.serializeAddress(output, "operatorStateRetriever", address(automationServiceContract.operatorStateRetriever));
+
         vm.serializeAddress(output, "stakeRegistryProxy", address(automationServiceContract.stakeRegistry));
-        vm.serializeAddress(output, "apkRegistryProxy", address(automationServiceContract.apkRegistry));
-        vm.serializeAddress(output, "registryCoordinator", address(automationServiceContract.registryCoordinator));
+        vm.serializeAddress(output, "stakeRegistryImpl", address(automationServiceContract.stakeRegistryImplementation));
 
         string memory registryJson = vm.serializeString(output, "object", output);
-        vm.writeJson(registryJson, deployedRegistryPath);
+        vm.writeJson(registryJson, deployOutputPath);
     }
 }

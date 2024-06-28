@@ -5,7 +5,7 @@ import "@eigenlayer-core/contracts/permissions/PauserRegistry.sol";
 
 contract DeployPauserRegistry is Script {
     function run() external {
-		string memory defaultRegistryPath = "./script/output/registry_deploy_output.json";
+		string memory defaultRegistryPath = "./script/output/pause_registry_deploy_output.json";
   		string memory deployedRegistryPath = vm.envOr("REGISTRY_PATH", defaultRegistryPath);
 
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -22,7 +22,7 @@ contract DeployPauserRegistry is Script {
 
         vm.createDir("./script/output", true);
 
-        string memory output = "registry info deployment output";
+        string memory output = "pauser registry info deployment output";
         vm.serializeAddress(output, "pauserRegistryAddress", address(r));
 
         string memory registryJson = vm.serializeString(output, "object", output);
