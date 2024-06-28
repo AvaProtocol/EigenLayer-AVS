@@ -98,7 +98,7 @@ Currently, Ava Protocol has deployed our operator on the testnet. Community memb
 
 ### Mainnet
 
-- TBD
+- Ava Protocol's operator: [0xc6B87cc9e85b07365b6aBEfff061F237F7cf7Dc3](https://etherscan.io/address/0xc6B87cc9e85b07365b6aBEfff061F237F7cf7Dc3)
 
 ## Telemetry Dashboard
 
