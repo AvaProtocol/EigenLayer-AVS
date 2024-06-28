@@ -113,7 +113,9 @@ jobs:
           echo "GOARCH=$GOARCH" >> $GITHUB_ENV
       - name: Build
         run: |
-          go build -o "$BINARY_NAME" -v
+          go build \
+            "-X github.com/AvaProtocol/ap-avs/version.semver=${{ inputs.tag || github.ref_name }}" \
+            -o "$BINARY_NAME" -v
       - name: Release Notes
         run:
           git log $(git describe HEAD~ --tags --abbrev=0)..HEAD --pretty='format:* %h %s%n  * %an <%ae>' --no-merges >> ".github/RELEASE-TEMPLATE.md"

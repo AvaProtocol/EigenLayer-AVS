@@ -39,14 +39,11 @@ import (
 	// insecure for local dev
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/ap-avs/version"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
 const AVS_NAME = "ap-avs"
-
-// TODO: inject via builder flag
-const SEM_VER = "0.0.2"
-const AppName = "ap-avs-operator"
 
 type OperatorConfig struct {
 	// used to set the logger level (true = info, false = debug)
@@ -138,8 +135,9 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	avsAndEigenMetrics := metrics.NewAvsAndEigenMetrics(AVS_NAME, eigenMetrics, reg)
 
 	// Setup Node Api
-	nodeApi := nodeapi.NewNodeApi(AVS_NAME, SEM_VER, c.NodeApiIpPortAddress, logger)
+	nodeApi := nodeapi.NewNodeApi(AVS_NAME, version.Get(), c.NodeApiIpPortAddress, logger)
 
+	logger.Infof("%s operator version %s", AVS_NAME, version.Get())
 	var ethRpcClient, ethWsClient eth.Client
 	if c.EnableMetrics {
 		rpcCallsCollector := rpccalls.NewCollector(AVS_NAME, reg)
