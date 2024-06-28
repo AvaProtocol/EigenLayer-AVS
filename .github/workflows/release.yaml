@@ -75,6 +75,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
+          build-args: |
+            RELEASE_TAG=${{ inputs.tag || github.ref_name }}
           platforms: linux/amd64,linux/arm64
           context: .
           file: dockerfiles/operator.Dockerfile
@@ -114,8 +116,9 @@ jobs:
       - name: Build
         run: |
           go build \
-            "-X github.com/AvaProtocol/ap-avs/version.semver=${{ inputs.tag || github.ref_name }}" \
-            -o "$BINARY_NAME" -v
+             -v \
+            -ldflags "-X github.com/AvaProtocol/ap-avs/version.semver=${{ inputs.tag || github.ref_name }}" \
+            -o "$BINARY_NAME"
       - name: Release Notes
         run:
           git log $(git describe HEAD~ --tags --abbrev=0)..HEAD --pretty='format:* %h %s%n  * %an <%ae>' --no-merges >> ".github/RELEASE-TEMPLATE.md"
