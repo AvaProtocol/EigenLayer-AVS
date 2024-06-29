@@ -60,10 +60,6 @@ contract DeployServiceManager is Script {
 
         address delegationManager;
         address avsDirectory;
-
-        address beaconETH;
-        address stETH;
-        address wETH;
     }
 
 
@@ -78,32 +74,42 @@ contract DeployServiceManager is Script {
 		    numQuorum: 1,
             maxOperatorCount: 50,
             minimumStake: 0,
-            numStrategies: 3,
+            numStrategies: 5,
             pauserRegistry: vm.envAddress("PAUSER_REGISTRY_ADDRESS"),
             ownerAddress: vm.envAddress("OWNER_ADDRESS"),
             whitelister: vm.envAddress("OWNER_ADDRESS"),
 
             delegationManager: vm.envAddress("DELEGATION_MANAGER"),
-            avsDirectory: vm.envAddress("AVS_DIRECTORY"),
-
-            beaconETH: vm.envAddress("STRATEGY_B_ETH"),
-            stETH: vm.envAddress("STRATEGY_ST_ETH"),
-            wETH: vm.envAddress("STRATEGY_WETH")
+            avsDirectory: vm.envAddress("AVS_DIRECTORY")
         });
 
         TokenAndWeight[] memory deployedStrategyArray = new TokenAndWeight[](dp.numStrategies);
 
         {
             // need manually step in
-            deployedStrategyArray[0].token = dp.beaconETH;
-            deployedStrategyArray[1].token = dp.stETH;
-            deployedStrategyArray[2].token = dp.wETH;
+            // beaconETH
+            deployedStrategyArray[0].token =
+                address(bytes20(bytes("0xbeaC0eeEeeeeEEeEeEEEEeeEEeEeeeEeeEEBEaC0")));
+            //stETH
+            deployedStrategyArray[1].token =
+                address(bytes20(bytes("0x93c4b944D05dfe6df7645A86cd2206016c51564D")));
+            //cbETH
+            deployedStrategyArray[2].token =
+                address(bytes20(bytes("0x54945180dB7943c0ed0FEE7EdaB2Bd24620256bc")));
+            //swETH
+            deployedStrategyArray[3].token =
+                address(bytes20(bytes("0x0Fe4F44beE93503346A3Ac9EE5A26b130a5796d6")));
+            //osETH
+            deployedStrategyArray[4].token =
+                address(bytes20(bytes("0x57ba429517c3473B6d34CA9aCd56c0e735b94c02")));
         }
 
         {
             deployedStrategyArray[0].weight = 1000000000000000000;
             deployedStrategyArray[1].weight = 997992210000000000;
-            deployedStrategyArray[2].weight = 997992210000000000;
+            deployedStrategyArray[2].weight = 1063068999999999999;
+            deployedStrategyArray[3].weight = 1049743000000000000;
+            deployedStrategyArray[4].weight = 1014248000000000000;
         }
 
 
