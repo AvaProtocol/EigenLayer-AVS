@@ -171,4 +171,4 @@ Coming soon
 | OperatorStateRetriever  | [`0xb3af70D5f72C04D1f490ff49e5aB189fA7122713`](https://etherscan.io/address/0xb3af70D5f72C04D1f490ff49e5aB189fA7122713) 	|
 | PauserRegistry          | [`0xeec585186c37c517030ba371deac5c17e728c135`](https://etherscan.io/address/0xeec585186c37c517030ba371deac5c17e728c135) 	|
 | StakeRegistry           | [`0x363b3604fE8c2323a98c00906115c8b87a512a12`](https://etherscan.io/address/0x363b3604fE8c2323a98c00906115c8b87a512a12) 	|
-
+| TaskManager             | [`0x940f62f75cbbbd723d37c9171dc681dfba653b49`](https://etherscan.io/address/0x940f62f75cbbbd723d37c9171dc681dfba653b49) 	|
