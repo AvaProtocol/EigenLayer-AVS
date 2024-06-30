@@ -8,6 +8,8 @@ forge script \
   --private-key $PRIVATE_KEY \
   --etherscan-api-key $ETHSCAN_API_KEY \
   --broadcast --verify \
+  --resume \
+  --slow \
   -vvvv
   
 
