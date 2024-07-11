@@ -1,2 +1,2 @@
 genabi:
-	abigen --abi=../abis/entrypoint.abi --pkg=apconfig --type=APConfig --out=binding.go
+	abigen --abi=../abis/apconfig.abi --pkg=apconfig --type=APConfig --out=binding.go

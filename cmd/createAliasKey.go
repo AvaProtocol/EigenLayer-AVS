@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	createAliasKeyOption = operator.CreateAliasKeyOption{}
+	aliasKeyOption = operator.CreateAliasKeyOption{}
 )
 
 // createAliasKeyCmd represents the createAliasKey command
@@ -25,17 +25,15 @@ interact with Ava Protocol operator. You will still need the EigenLayer
 Operator ECDSA key to register or deregister from the AVS. But once
 you registered, you don't need that operator key anymore`,
 	Run: func(cmd *cobra.Command, args []string) {
-		operator.CreateOrImportAliasKey(createAliasKeyOption)
+		operator.CreateOrImportAliasKey(aliasKeyOption)
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(createAliasKeyCmd)
 
-	createAliasKeyCmd.Flags().StringVarP(&(createAliasKeyOption.PrivateKey), "ecdsa-private-key", "k", "", "a private key start with 0x to import as alias key")
+	createAliasKeyCmd.Flags().StringVarP(&(aliasKeyOption.PrivateKey), "ecdsa-private-key", "k", "", "a private key start with 0x to import as alias key")
 
-	createAliasKeyCmd.Flags().StringVarP(&(createAliasKeyOption.Passphrase), "passphrase", "p", "", "a passpharase to encrypt your generated or import ECDSA key")
-	createAliasKeyCmd.Flags().StringVarP(&(createAliasKeyOption.Filename), "name", "n", "alias-ecdsa.key.json", "absolute or relative file path to save your ECDSA key to")
-	createAliasKeyCmd.MarkPersistentFlagRequired("passphrase")
+	createAliasKeyCmd.Flags().StringVarP(&(aliasKeyOption.Filename), "name", "n", "alias-ecdsa.key.json", "absolute or relative file path to save your ECDSA key to")
 	createAliasKeyCmd.MarkPersistentFlagRequired("name")
 }

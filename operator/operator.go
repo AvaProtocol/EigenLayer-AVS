@@ -69,6 +69,7 @@ type Operator struct {
 	logger      logging.Logger
 	ethClient   eth.Client
 	ethWsClient eth.Client
+	txManager   *txmgr.SimpleTxManager
 
 	// TODO(samlaf): remove both avsWriter and eigenlayerWrite from operator
 	// they are only used for registration, so we should make a special registration package
@@ -96,6 +97,9 @@ type Operator struct {
 	aggregatorConn      *grpc.ClientConn
 	// needed when opting in to avs (allow this service manager contract to slash operator)
 	credibleSquaringServiceManagerAddr common.Address
+
+	// contract that hold our configuration. Currently only alias key mapping
+	apConfigAddr common.Address
 }
 
 func RunWithConfig(configPath string) {
@@ -180,20 +184,17 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		return nil, err
 	}
 
-	o.PopulateKnownConfigByChainID(chainId)
+	ecdsaKeyPassword := loadECDSAPassword()
 
-	ecdsaKeyPassword, ok := os.LookupEnv("OPERATOR_ECDSA_KEY_PASSWORD")
-	if !ok {
-		logger.Warnf("OPERATOR_ECDSA_KEY_PASSWORD env var not set. using empty string")
-	}
-
-	signerV2, _, err := signerv2.SignerFromConfig(signerv2.Config{
+	signerV2, signerAddress, err := signerv2.SignerFromConfig(signerv2.Config{
 		KeystorePath: c.EcdsaPrivateKeyStorePath,
 		Password:     ecdsaKeyPassword,
 	}, chainId)
+
 	if err != nil {
 		panic(err)
 	}
+
 	chainioConfig := clients.BuildAllConfig{
 		EthHttpUrl:                 c.EthRpcUrl,
 		EthWsUrl:                   c.EthWsUrl,
@@ -214,11 +215,11 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	if err != nil {
 		panic(err)
 	}
-	skWallet, err := wallet.NewPrivateKeyWallet(ethRpcClient, signerV2, common.HexToAddress(c.OperatorAddress), logger)
+	skWallet, err := wallet.NewPrivateKeyWallet(ethRpcClient, signerV2, signerAddress, logger)
 	if err != nil {
 		panic(err)
 	}
-	txMgr := txmgr.NewSimpleTxManager(skWallet, ethRpcClient, logger, common.HexToAddress(c.OperatorAddress))
+	txMgr := txmgr.NewSimpleTxManager(skWallet, ethRpcClient, logger, signerAddress)
 
 	avsWriter, err := chainio.BuildAvsWriter(
 		txMgr, common.HexToAddress(c.AVSRegistryCoordinatorAddress),
@@ -293,6 +294,13 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		credibleSquaringServiceManagerAddr: common.HexToAddress(c.AVSRegistryCoordinatorAddress),
 		operatorId:                         [32]byte{0}, // this is set below
 		operatorEcdsaPrivateKey:            operatorEcdsaPrivateKey,
+
+		txManager: txMgr,
+	}
+
+	operator.PopulateKnownConfigByChainID(chainId)
+	if signerAddress.Cmp(operator.operatorAddr) != 0 {
+		panic(fmt.Errorf("ECDSA private key doesn't match operator address"))
 	}
 
 	// OperatorId is set in contract during registration so we get it after registering operator.

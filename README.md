@@ -156,6 +156,7 @@ Coming soon
 | OperatorStateRetriever  | [`0xb7bb920538e038DFFEfcB55caBf713652ED2031F`](https://holesky.etherscan.io/address/0xb7bb920538e038DFFEfcB55caBf713652ED2031F) 	|
 | PauserRegistry          | [`0x3A8ea6e4202CdDe4a9e0cCE19c4Dc1739ba2cF0b`](https://holesky.etherscan.io/address/0x3A8ea6e4202CdDe4a9e0cCE19c4Dc1739ba2cF0b) 	|
 | StakeRegistry           | [`0x7BacD5dd5A7C3acf8bf1a3c88fB0D00B68EE626A`](https://holesky.etherscan.io/address/0x7BacD5dd5A7C3acf8bf1a3c88fB0D00B68EE626A) 	|
+| ApConfig                | [`0xb8abbb082ecaae8d1cd68378cf3b060f6f0e07eb`](https://holesky.etherscan.io/address/0xb8abbb082ecaae8d1cd68378cf3b060f6f0e07eb) 	|
 
 
 
