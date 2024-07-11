@@ -23,3 +23,5 @@ metadata.json
 
 # Ignores yaml configuration files in the config directory
 config/*.yaml
+
+contracts/script/output/
