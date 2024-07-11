@@ -20,10 +20,10 @@ contract APConfig is IAPConfig	 {
 
     // Function to undeclare an alias for the operator
     function undeclare() external override {
-        require(operatorToAlias[msg.sender] != address(0), "No alias declared for this operator");
+        require(aliasToOperator[msg.sender] != address(0), "No alias declared for this operator");
 
-        delete operatorToAlias[msg.sender];
-        delete aliasToOperator[operatorToAlias[msg.sender]];
+        delete operatorToAlias[aliasToOperator[msg.sender]];
+        delete aliasToOperator[msg.sender];
 
         emit AliasUndeclared(msg.sender);
     }
