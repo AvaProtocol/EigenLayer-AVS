@@ -91,6 +91,9 @@ type Operator struct {
 	// Through the passpharese of operator ecdsa, we can compute the private key
 	operatorEcdsaPrivateKey *ecdsa.PrivateKey
 
+	// signerAddress match operatorAddr unless the operator use alias key
+	signerAddress common.Address
+
 	// receive new tasks in this chan (typically from listening to onchain event)
 	newTaskCreatedChan chan *cstaskmanager.ContractAutomationTaskManagerNewTaskCreated
 	// rpc client to send signed task responses to aggregator
@@ -287,6 +290,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		eigenlayerWriter: sdkClients.ElChainWriter,
 		blsKeypair:       blsKeyPair,
 		operatorAddr:     common.HexToAddress(c.OperatorAddress),
+		signerAddress:    signerAddress,
 
 		aggregatorRpcClient: aggregatorRpcClient,
 		aggregatorConn:      aggregatorConn,
@@ -325,6 +329,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	logger.Info("Operator info",
 		"operatorId", operatorId,
 		"operatorAddr", c.OperatorAddress,
+		"signerAddr", operator.signerAddress,
 		"operatorG1Pubkey", operator.blsKeypair.GetPubKeyG1(),
 		"operatorG2Pubkey", operator.blsKeypair.GetPubKeyG2(),
 	)

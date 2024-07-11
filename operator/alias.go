@@ -110,3 +110,50 @@ func (o *Operator) DeclareAlias(filepath string) error {
 	fmt.Printf("succesfully declared an alias for operator %s alias address %s at tx %s ", o.operatorAddr.String(), crypto.PubkeyToAddress(aliasEcdsaPair.PublicKey), receipt.TxHash.Hex())
 	return nil
 }
+
+// Remove alias key for the operator
+func RemoveAlias(configPath string) {
+	operator, err := NewOperatorFromConfigFile(configPath)
+	fmt.Println(configPath)
+	if err != nil {
+		fmt.Errorf("error creator operator from config: %w", err)
+	}
+
+	if err = operator.RemoveAlias(); err != nil {
+		panic(err)
+	}
+}
+
+func (o *Operator) RemoveAlias() error {
+	apConfigContract, err := apconfig.GetContract(o.config.EthRpcUrl, o.apConfigAddr)
+	if err != nil {
+		panic(fmt.Errorf("cannot create apconfig contract writer: %w", err))
+	}
+
+	if o.signerAddress.Cmp(o.operatorAddr) == 0 {
+		return fmt.Errorf("not using alias key")
+	}
+
+	noSendTxOpts, err := o.txManager.GetNoSendTxOpts()
+	if err != nil {
+		return fmt.Errorf("Error creating transaction object %v", err)
+	}
+
+	tx, err := apConfigContract.Undeclare(noSendTxOpts)
+	if err != nil {
+		return fmt.Errorf("Failed to create APConfig.declareAlias transaction %v", err)
+	}
+
+	ctx := context.Background()
+	receipt, err := o.txManager.Send(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("declareAlias transaction failed %w", err)
+	}
+
+	if receipt.Status != 1 {
+		return fmt.Errorf("declareAlias transaction %w reverted", receipt.TxHash.Hex())
+	}
+
+	fmt.Printf("succesfully remove alias %s for operator %s  at tx %s ", o.signerAddress.String(), o.operatorAddr.String(), receipt.TxHash.Hex())
+	return nil
+}
