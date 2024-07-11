@@ -173,14 +173,14 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		logger.Errorf("Cannot parse bls private key: %s err: %w", c.BlsPrivateKeyStorePath, err)
 		return nil, err
 	}
-	// TODO(samlaf): should we add the chainId to the config instead?
-	// this way we can prevent creating a signer that signs on mainnet by mistake
-	// if the config says chainId=5, then we can only create a goerli signer
+
 	chainId, err := ethRpcClient.ChainID(context.Background())
 	if err != nil {
 		logger.Error("Cannot get chainId", "err", err)
 		return nil, err
 	}
+
+	o.PopulateKnownConfigByChainID(chainId)
 
 	ecdsaKeyPassword, ok := os.LookupEnv("OPERATOR_ECDSA_KEY_PASSWORD")
 	if !ok {
