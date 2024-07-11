@@ -5,6 +5,11 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-func GetContract(conn *ethclient.Client, address common.Address) (*APConfig, error) {
-	return NewAPConfig(address, conn)
+func GetContract(ethRpcURL string, address common.Address) (*APConfig, error) {
+	ethRpcClient, err := ethclient.Dial(ethRpcURL)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewAPConfig(address, ethRpcClient)
 }

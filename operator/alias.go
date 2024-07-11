@@ -7,7 +7,6 @@ import (
 
 	"github.com/AvaProtocol/ap-avs/core/chainio/apconfig"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 
 	eigensdkecdsa "github.com/Layr-Labs/eigensdk-go/crypto/ecdsa"
 )
@@ -73,12 +72,7 @@ func DeclareAlias(configPath, address string) {
 }
 
 func (o *Operator) DeclareAlias(filepath string) error {
-	ethRpcClient, err := ethclient.Dial(o.config.EthRpcUrl)
-	if err != nil {
-		return err
-	}
-
-	apConfigContract, err := apconfig.GetContract(ethRpcClient, o.apConfigAddr)
+	apConfigContract, err := apconfig.GetContract(o.config.EthRpcUrl, o.apConfigAddr)
 	if err != nil {
 		panic(fmt.Errorf("cannot create apconfig contract writer: %w", err))
 	}

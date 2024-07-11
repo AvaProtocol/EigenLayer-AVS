@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/AvaProtocol/ap-avs/core/chainio"
+	"github.com/AvaProtocol/ap-avs/core/chainio/apconfig"
 	"github.com/AvaProtocol/ap-avs/metrics"
 	"github.com/Layr-Labs/eigensdk-go/metrics/collectors/economic"
 	rpccalls "github.com/Layr-Labs/eigensdk-go/metrics/collectors/rpc_calls"
@@ -300,7 +301,18 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 
 	operator.PopulateKnownConfigByChainID(chainId)
 	if signerAddress.Cmp(operator.operatorAddr) != 0 {
-		panic(fmt.Errorf("ECDSA private key doesn't match operator address"))
+		logger.Infof("checking operator alias address. operator: %s alias %s", operator.operatorAddr, signerAddress)
+		apConfigContract, err := apconfig.GetContract(c.EthRpcUrl, operator.apConfigAddr)
+		aliasAddress, err := apConfigContract.GetAlias(nil, operator.operatorAddr)
+		if err != nil {
+			panic(err)
+		}
+
+		if signerAddress.Cmp(aliasAddress) == 0 {
+			logger.Infof("Confirm operator %s matches alias %s", operator.operatorAddr, signerAddress)
+		} else {
+			panic(fmt.Errorf("ECDSA private key doesn't match operator address"))
+		}
 	}
 
 	// OperatorId is set in contract during registration so we get it after registering operator.
