@@ -173,3 +173,4 @@ Coming soon
 | PauserRegistry          | [`0xeec585186c37c517030ba371deac5c17e728c135`](https://etherscan.io/address/0xeec585186c37c517030ba371deac5c17e728c135) 	|
 | StakeRegistry           | [`0x363b3604fE8c2323a98c00906115c8b87a512a12`](https://etherscan.io/address/0x363b3604fE8c2323a98c00906115c8b87a512a12) 	|
 | TaskManager             | [`0x940f62f75cbbbd723d37c9171dc681dfba653b49`](https://etherscan.io/address/0x940f62f75cbbbd723d37c9171dc681dfba653b49) 	|
+| ApConfig                | [`0x9c02dfc92eea988902a98919bf4f035e4aaefced`](https://etherscan.io/address/0x9c02dfc92eea988902a98919bf4f035e4aaefced) 	|
