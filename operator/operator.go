@@ -156,7 +156,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		}
 		ethWsClient, err = eth.NewInstrumentedClient(c.EthWsUrl, rpcCallsCollector)
 		if err != nil {
-			logger.Errorf("Cannot create ws ethclient", "err", err)
+			logger.Errorf("Cannot create ws ethclient %s %w", c.EthWsUrl, err)
 			return nil, err
 		}
 	} else {
@@ -304,20 +304,6 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	}
 
 	operator.PopulateKnownConfigByChainID(chainId)
-	if signerAddress.Cmp(operator.operatorAddr) != 0 {
-		logger.Infof("checking operator alias address. operator: %s alias %s", operator.operatorAddr, signerAddress)
-		apConfigContract, err := apconfig.GetContract(c.EthRpcUrl, operator.apConfigAddr)
-		aliasAddress, err := apConfigContract.GetAlias(nil, operator.operatorAddr)
-		if err != nil {
-			panic(err)
-		}
-
-		if signerAddress.Cmp(aliasAddress) == 0 {
-			logger.Infof("Confirm operator %s matches alias %s", operator.operatorAddr, signerAddress)
-		} else {
-			panic(fmt.Errorf("ECDSA private key doesn't match operator address"))
-		}
-	}
 
 	// OperatorId is set in contract during registration so we get it after registering operator.
 	operatorId, err := sdkClients.AvsRegistryChainReader.GetOperatorId(&bind.CallOpts{}, operator.operatorAddr)
@@ -339,6 +325,22 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 }
 
 func (o *Operator) Start(ctx context.Context) error {
+	if o.signerAddress.Cmp(o.operatorAddr) != 0 {
+		// Ensure alias key is correctly bind to operator address
+		o.logger.Infof("checking operator alias address. operator: %s alias %s", o.operatorAddr, o.signerAddress)
+		apConfigContract, err := apconfig.GetContract(o.config.EthRpcUrl, o.apConfigAddr)
+		aliasAddress, err := apConfigContract.GetAlias(nil, o.operatorAddr)
+		if err != nil {
+			panic(err)
+		}
+
+		if o.signerAddress.Cmp(aliasAddress) == 0 {
+			o.logger.Infof("Confirm operator %s matches alias %s", o.operatorAddr, o.signerAddress)
+		} else {
+			panic(fmt.Errorf("ECDSA private key doesn't match operator address"))
+		}
+	}
+
 	operatorIsRegistered, err := o.avsReader.IsOperatorRegistered(&bind.CallOpts{}, o.operatorAddr)
 	if err != nil {
 		o.logger.Error("Error checking if operator is registered", "err", err)
