@@ -1,3 +1,6 @@
+/*
+Copyright © 2024 Ava Protocol
+*/
 package cmd
 
 import (
