@@ -4,9 +4,13 @@ To interact with Ava Protocol, you start by making request to our grpc endpoint.
 
 # Endpoint
 
-## Prod
+## Prod(Ethereum)
 
-## Staging
+**aggregator-holesky.avaprotocol.org:2206**
+
+## Staging(Holesky)
+
+**aggregator-holesky.avaprotocol.org:2206**
 
 ## Local dev
 
