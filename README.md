@@ -64,10 +64,12 @@ in the operator config file.
 #### Holesky Testnet
 
 - aggregator-holesky.avaprotocol.org:2206
+- [https://api-explorer-holesky.avaprotocol.org/](https://api-explorer-holesky.avaprotocol.org/)
 
 #### Mainnet
 
 - aggregator.avaprotocol.org:2206
+- [https://api-explorer.avaprotocol.org/](https://api-explorer.avaprotocol.org/)
 
 
 ## Operators
