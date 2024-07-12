@@ -30,18 +30,19 @@ contract DeployAPConfig is Script {
         APConfig apConfig = new APConfig();
         vm.serializeAddress(output, "apConfigImpl", address(apConfig));
 
+        // 2. Swap impl or deploy new proxy and bind to
         if (swapImpl) {
             ProxyAdmin oakProxyAdmin =
                 ProxyAdmin(oakAVSProxyAdmin);
 
-            // 3. Here we want 
+            // Load existing proxy and upgrade that to this new impl
             address apProxyAddress =  vm.envAddress("AP_PROXY_ADDRESS");
             oakProxyAdmin.upgrade(
                 TransparentUpgradeableProxy(payable(apProxyAddress)),
                 address(apConfig)
             );
         } else {
-            // 2. Deploy the proxy contract
+            // Deploy the proxy contract, bind it to the impl
             TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(
                 address(apConfig),
                 address(oakAVSProxyAdmin),
