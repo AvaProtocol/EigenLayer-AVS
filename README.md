@@ -41,7 +41,7 @@ Note: The Ava Protocol team currently manages the aggregator, and the communicat
 For each owner we deploy a ERC6900 wallet to schedule task and approve spending
 to user wallet.
 
-Each task type has their equivalent modular code to re-present their condition
+Each task type has its equivalent modular code to re-present its condition
 and their actual execution.
 
 ## Aggregator
@@ -74,7 +74,7 @@ in the operator config file.
 
 ## Operators
 
-Operators communicates with aggregators through RPC. It requests task data from aggregator, it performs condition execution to check whether a task can be trigger. The result is then send back to aggregator.
+Operators communicates with aggregators through RPC. It requests task data from aggregator, it performs condition execution to check whether a task can be trigger. The result is then sent back to aggregator.
 
 For task is ok to run, the operator will executed them. The detail of how task
 is triggering through our ERC6900 modular wallet will come soon.
