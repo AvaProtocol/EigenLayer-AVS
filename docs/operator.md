@@ -3,7 +3,7 @@
 To run the AVS operator, there are 2 steps
 
 1. Register to become an EigenLayer operator by following [EigenLayer Operator Guide](https://docs.eigenlayer.xyz/eigenlayer/operator-guides/operator-introduction)
-2. Once become an operator, you can register for Ava Protocol AVS follow below step
+2. Once become an operator, you can register for Ava Protocol AVS by following the below step
 
 ### Run Ava Protocol AVS on Holesky testnet
 
