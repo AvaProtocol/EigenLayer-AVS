@@ -72,13 +72,8 @@ type Operator struct {
 	ethWsClient eth.Client
 	txManager   *txmgr.SimpleTxManager
 
-	// TODO(samlaf): remove both avsWriter and eigenlayerWrite from operator
-	// they are only used for registration, so we should make a special registration package
-	// this way, auditing this operator code makes it obvious that operators don't need to
-	// write to the chain during the course of their normal operations
-	// writing to the chain should be done via the cli only
 	metricsReg       *prometheus.Registry
-	metrics          metrics.Metrics
+	metrics          metrics.MetricsGenerator
 	nodeApi          *nodeapi.NodeApi
 	avsWriter        *chainio.AvsWriter
 	avsReader        chainio.AvsReaderer
@@ -269,11 +264,6 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		panic(err)
 	}
 	aggregatorRpcClient := avsproto.NewAggregatorClient(aggregatorConn)
-	//aggregatorRpcClient, err := NewAggregatorRpcClient(c.AggregatorServerIpPortAddress, logger, avsAndEigenMetrics)
-	//if err != nil {
-	//	logger.Error("Cannot create AggregatorRpcClient. Is aggregator running?", "err", err)
-	//	return nil, err
-	//}
 
 	operator := &Operator{
 		config:      c,
@@ -285,6 +275,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		ethWsClient: ethWsClient,
 		avsWriter:   avsWriter,
 		avsReader:   avsReader,
+
 		// avsSubscriber:                      avsSubscriber,
 		eigenlayerReader: sdkClients.ElChainReader,
 		eigenlayerWriter: sdkClients.ElChainWriter,
@@ -318,10 +309,10 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		"signerAddr", operator.signerAddress,
 		"operatorG1Pubkey", operator.blsKeypair.GetPubKeyG1(),
 		"operatorG2Pubkey", operator.blsKeypair.GetPubKeyG2(),
+		"prmMetricsEndpoint", fmt.Sprintf("%s/metrics/", operator.PromMetricsIpPortAddress),
 	)
 
 	return operator, nil
-
 }
 
 func (o *Operator) Start(ctx context.Context) error {

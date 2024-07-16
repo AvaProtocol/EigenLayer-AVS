@@ -19,6 +19,8 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	}
 
 	for {
+		o.metrics.IncTick()
+
 		select {
 		case <-ctx.Done():
 			return nil
@@ -26,7 +28,6 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 			// TODO: handle gracefully
 			o.logger.Fatal("Error in metrics server", "err", err)
 		case <-timer.C:
-			// Check in
 			o.PingServer()
 		}
 	}
@@ -45,6 +46,7 @@ func (o *Operator) PingServer() {
 	})
 	elapsed := time.Now().Sub(start)
 	if err == nil {
+		o.metrics.IncPing()
 		o.logger.Infof("operator update status succesfully in %d ms", elapsed.Milliseconds())
 	} else {
 		o.logger.Infof("error update status %v", err)
