@@ -12,22 +12,30 @@ const (
 var (
 	MainnetChainID  = big.NewInt(1)
 	CurrentChainEnv = ChainEnv("ethereum")
+
+	etherscanURLs = map[ChainEnv]string{
+		EthereumEnv: "https://etherscan.io",
+		HoleskyEnv:  "https://holesky.etherscan.io",
+	}
+
+	eigenlayerAppURLs = map[ChainEnv]string{
+		EthereumEnv: "https://app.eigenlayer.xyz",
+		HoleskyEnv:  "https://holesky.eigenlayer.xyz",
+	}
 )
 
-func IsMainnet() bool {
-	return CurrentChainEnv == HoleskyEnv
-}
-
 func EtherscanURL() string {
-	if IsMainnet() {
-		return "https://etherscan.io"
+	if url, ok := etherscanURLs[CurrentChainEnv]; ok {
+		return url
 	}
-	return "https://holesky.etherscan.io"
+
+	return "https://etherscan.io"
 }
 
 func EigenlayerAppURL() string {
-	if IsMainnet() {
-		return "https://app.eigenlayer.xyz"
+	if url, ok := eigenlayerAppURLs[CurrentChainEnv]; ok {
+		return url
 	}
-	return "https://holesky.eigenlayer.xyz"
+
+	return "https://eigenlayer.xyz"
 }
