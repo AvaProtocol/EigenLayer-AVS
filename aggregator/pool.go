@@ -8,6 +8,7 @@ import (
 
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/AvaProtocol/ap-avs/core/config"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/storage"
 )
@@ -35,6 +36,14 @@ func (o *OperatorNode) LastSeen() string {
 	} else {
 		return fmt.Sprintf("%ds ago", seconds)
 	}
+}
+
+func (o *OperatorNode) EtherscanURL() string {
+	return fmt.Sprintf("%s/address/%s", config.EtherscanURL(), o.Address)
+}
+
+func (o *OperatorNode) EigenlayerURL() string {
+	return fmt.Sprintf("%s/operator/%s", config.EigenlayerAppURL(), o.Address)
 }
 
 var (
