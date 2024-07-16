@@ -17,13 +17,12 @@
     alt="">*/}}
           <div class="min-w-0 flex-auto">
             <p class="text-sm font-semibold leading-6 text-white">
-              <a href="https://holesky.etherscan.io/address/{{ .Address}}">
+              <a href="{{ .EtherscanURL }}">
                 {{ .Address }}
               </a>
             </p>
             <p class="mt-1 truncate text-xs leading-5 text-gray-400">
-              <a href="https://holesky.eigenlayer.xyz/operator/{{ .Address
-}}">View on EigenLayer</a>
+              <a href="{{ .EigenlayerURL }}">View on EigenLayer</a>
             </p>
           </div>
         </div>

@@ -3,6 +3,7 @@ package aggregator
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"os"
 	"os/signal"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Layr-Labs/eigensdk-go/logging"
+	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/AvaProtocol/ap-avs/aggregator/types"
 	"github.com/AvaProtocol/ap-avs/core"
@@ -62,6 +64,9 @@ type Aggregator struct {
 
 	config *config.Config
 	db     storage.Storage
+
+	ethRpcClient *ethclient.Client
+	chainID      *big.Int
 
 	operatorPool *OperatorPool
 }
@@ -136,8 +141,31 @@ func (agg *Aggregator) initDB(ctx context.Context) error {
 	return agg.db.Setup()
 }
 
+// initialize agg config and state
+func (agg *Aggregator) init() {
+	var err error
+
+	agg.ethRpcClient, err = ethclient.Dial(agg.config.EthHttpRpcUrl)
+	if err != nil {
+		panic(err)
+	}
+
+	agg.chainID, err = agg.ethRpcClient.ChainID(context.Background())
+	if err != nil {
+		panic(err)
+	}
+
+	if agg.chainID.Cmp(config.MainnetChainID) == 0 {
+		config.CurrentChainEnv = config.EthereumEnv
+	} else {
+		config.CurrentChainEnv = config.HoleskyEnv
+	}
+}
+
 func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.logger.Infof("Starting aggregator")
+
+	agg.init()
 
 	agg.logger.Infof("Initialize Storagre")
 	agg.initDB(ctx)
