@@ -12,6 +12,8 @@ type MetricsGenerator interface {
 	IncTick()
 	IncPing()
 
+	AddUptime(float64)
+
 	IncNumCheckRun()
 
 	IncNumTasksReceived()
@@ -24,6 +26,8 @@ type MetricsGenerator interface {
 // AvsMetrics contains instrumented metrics that should be incremented by the avs node using the methods below
 type AvsAndEigenMetrics struct {
 	metrics.Metrics
+
+	uptime prometheus.Counter
 
 	numTick     prometheus.Counter
 	numPingSent prometheus.Counter
@@ -38,6 +42,13 @@ const apNamespace = "ap"
 func NewAvsAndEigenMetrics(avsName string, eigenMetrics *metrics.EigenMetrics, reg prometheus.Registerer) *AvsAndEigenMetrics {
 	return &AvsAndEigenMetrics{
 		Metrics: eigenMetrics,
+
+		uptime: promauto.With(reg).NewCounter(
+			prometheus.CounterOpts{
+				Namespace: apNamespace,
+				Name:      "uptime",
+				Help:      "The elapse time in milliseconds since the node is booted",
+			}),
 
 		numTick: promauto.With(reg).NewCounter(
 			prometheus.CounterOpts{
@@ -86,4 +97,8 @@ func (m *AvsAndEigenMetrics) IncPing() {
 
 func (m *AvsAndEigenMetrics) IncNumCheckRun() {
 	m.numTick.Inc()
+}
+
+func (m *AvsAndEigenMetrics) AddUptime(total float64) {
+	m.uptime.Add(total)
 }
