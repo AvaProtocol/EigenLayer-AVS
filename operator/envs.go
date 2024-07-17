@@ -10,7 +10,7 @@ import (
 // TODO: We can fetch this dynamically from aggregator so we can upgrade the
 // config without the need to release operator
 var (
-	mainnetChainID = big.NewInt(0)
+	mainnetChainID = big.NewInt(1)
 )
 
 func (o *Operator) PopulateKnownConfigByChainID(chainID *big.Int) error {
