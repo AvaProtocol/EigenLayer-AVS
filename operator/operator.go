@@ -37,10 +37,12 @@ import (
 	//"github.com/AvaProtocol/ap-avs/aggregator"
 	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
 
-	// insecure for local dev
-
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/version"
+
+	"github.com/AvaProtocol/ap-avs/core/timekeeper"
+
+	// insecure for local dev
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -99,6 +101,8 @@ type Operator struct {
 
 	// contract that hold our configuration. Currently only alias key mapping
 	apConfigAddr common.Address
+
+	elapsing *timekeeper.Elapsing
 }
 
 func RunWithConfig(configPath string) {
@@ -123,6 +127,8 @@ func NewOperatorFromConfigFile(configPath string) (*Operator, error) {
 
 // take the config in core (which is shared with aggregator and challenger)
 func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
+	elapsing := timekeeper.NewElapsing()
+
 	var logLevel logging.LogLevel
 	if c.Production {
 		logLevel = sdklogging.Production
@@ -292,6 +298,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		operatorEcdsaPrivateKey:            operatorEcdsaPrivateKey,
 
 		txManager: txMgr,
+		elapsing:  elapsing,
 	}
 
 	operator.PopulateKnownConfigByChainID(chainId)
@@ -309,7 +316,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		"signerAddr", operator.signerAddress,
 		"operatorG1Pubkey", operator.blsKeypair.GetPubKeyG1(),
 		"operatorG2Pubkey", operator.blsKeypair.GetPubKeyG2(),
-		"prmMetricsEndpoint", fmt.Sprintf("%s/metrics/", operator.PromMetricsIpPortAddress),
+		"prmMetricsEndpoint", fmt.Sprintf("%s/metrics/", operator.config.EigenMetricsIpPortAddress),
 	)
 
 	return operator, nil

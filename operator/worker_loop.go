@@ -20,6 +20,8 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 
 	for {
 		o.metrics.IncTick()
+		elapse := o.elapsing.Report()
+		o.metrics.AddUptime(float64(elapse.Milliseconds()))
 
 		select {
 		case <-ctx.Done():
