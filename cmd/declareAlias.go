@@ -15,7 +15,7 @@ var declareAliasCmd = &cobra.Command{
 	Short: "Declare an alias ecdsa key file for the operator address",
 	Long: `Declare an alias ecdsa key file for the operator address
 
-After creating an alias key, they key can be declare as
+After creating an alias key, they key can be declared as
 an alias for the operator address`,
 	Run: func(cmd *cobra.Command, args []string) {
 		operator.DeclareAlias(config, aliasKeyOption.Filename)

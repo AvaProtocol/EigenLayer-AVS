@@ -33,7 +33,7 @@ Call `GetKey` method with below data.
   expired at ${expired_at)}`
 
 The response will have the key which can set on the metadata of subsequent
-request. The token will be expired at the `expired_at` epoch.
+request. The token will expire at the `expired_at` epoch.
 
 Please check `examples/signature.js` for reference code on how to generate this
 signature.

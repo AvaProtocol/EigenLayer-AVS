@@ -8,7 +8,7 @@ import "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
 
 import {APConfig} from "../src/core/APConfig.sol";
 
-// To deployment and swap the implementation set 2 envs:
+// To deploy and swap the implementation set 2 envs:
 // CREATE_PROXY=false
 // AP_PROXY_ADDRESS=0x123 
 // PROXY_ADMIN_ADDRESS=0x456
