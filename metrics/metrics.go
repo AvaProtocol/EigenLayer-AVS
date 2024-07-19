@@ -9,8 +9,8 @@ import (
 type MetricsGenerator interface {
 	metrics.Metrics
 
-	IncTick()
-	IncPing()
+	IncWorkerLoop()
+	IncPing(string)
 
 	AddUptime(float64)
 
@@ -29,8 +29,8 @@ type AvsAndEigenMetrics struct {
 
 	uptime prometheus.Counter
 
-	numTick     prometheus.Counter
-	numPingSent prometheus.Counter
+	numWorkerLoop prometheus.Counter
+	numPingSent   *prometheus.CounterVec
 
 	numTasksReceived prometheus.Counter
 	// if numSignedTaskResponsesAcceptedByAggregator != numTasksReceived, then there is a bug
@@ -46,23 +46,23 @@ func NewAvsAndEigenMetrics(avsName string, eigenMetrics *metrics.EigenMetrics, r
 		uptime: promauto.With(reg).NewCounter(
 			prometheus.CounterOpts{
 				Namespace: apNamespace,
-				Name:      "uptime",
+				Name:      "uptime_milliseconds_total",
 				Help:      "The elapse time in milliseconds since the node is booted",
 			}),
 
-		numTick: promauto.With(reg).NewCounter(
+		numWorkerLoop: promauto.With(reg).NewCounter(
 			prometheus.CounterOpts{
 				Namespace: apNamespace,
-				Name:      "num_tick",
-				Help:      "The number of worker loop tick by the operator. If it isn't increasing, the operator is stuck",
+				Name:      "num_worker_loop_total",
+				Help:      "The number of worker loop by the operator. If it isn't increasing, the operator is stuck",
 			}),
 
-		numPingSent: promauto.With(reg).NewCounter(
+		numPingSent: promauto.With(reg).NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: apNamespace,
-				Name:      "num_ping",
+				Name:      "num_ping_total",
 				Help:      "The number of heartbeat send by operator. If it isn't increasing, the operator failed to communicate with aggregator",
-			}),
+			}, []string{"status"}),
 
 		numTasksReceived: promauto.With(reg).NewCounter(
 			prometheus.CounterOpts{
@@ -87,16 +87,16 @@ func (m *AvsAndEigenMetrics) IncNumTasksAcceptedByAggregator() {
 	m.numSignedTaskResponsesAcceptedByAggregator.Inc()
 }
 
-func (m *AvsAndEigenMetrics) IncTick() {
-	m.numTick.Inc()
+func (m *AvsAndEigenMetrics) IncWorkerLoop() {
+	m.numWorkerLoop.Inc()
 }
 
-func (m *AvsAndEigenMetrics) IncPing() {
-	m.numTick.Inc()
+func (m *AvsAndEigenMetrics) IncPing(status string) {
+	m.numPingSent.WithLabelValues(status).Inc()
 }
 
 func (m *AvsAndEigenMetrics) IncNumCheckRun() {
-	m.numTick.Inc()
+	m.numWorkerLoop.Inc()
 }
 
 func (m *AvsAndEigenMetrics) AddUptime(total float64) {

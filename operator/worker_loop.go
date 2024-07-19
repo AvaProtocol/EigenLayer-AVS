@@ -19,7 +19,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	}
 
 	for {
-		o.metrics.IncTick()
+		o.metrics.IncWorkerLoop()
 		elapse := o.elapsing.Report()
 		o.metrics.AddUptime(float64(elapse.Milliseconds()))
 
@@ -37,7 +37,6 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 
 func (o *Operator) PingServer() {
 	id := hex.EncodeToString(o.operatorId[:])
-
 	start := time.Now()
 	// TODO: Implement task and queue depth to detect performance
 	_, err := o.aggregatorRpcClient.Ping(context.Background(), &pb.Checkin{
@@ -48,9 +47,10 @@ func (o *Operator) PingServer() {
 	})
 	elapsed := time.Now().Sub(start)
 	if err == nil {
-		o.metrics.IncPing()
+		o.metrics.IncPing("success")
 		o.logger.Infof("operator update status succesfully in %d ms", elapsed.Milliseconds())
 	} else {
+		o.metrics.IncPing("error")
 		o.logger.Infof("error update status %v", err)
 	}
 }
