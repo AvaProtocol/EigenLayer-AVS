@@ -14,7 +14,7 @@ type MetricsGenerator interface {
 
 	AddUptime(float64)
 
-	IncNumCheckRun()
+	IncNumCheckRun(string, string)
 
 	IncNumTasksReceived()
 	IncNumTasksAcceptedByAggregator()
@@ -29,10 +29,10 @@ type AvsAndEigenMetrics struct {
 
 	uptime prometheus.Counter
 
-	numWorkerLoop prometheus.Counter
-	numPingSent   *prometheus.CounterVec
-
-	numTasksReceived prometheus.Counter
+	numWorkerLoop     prometheus.Counter
+	numPingSent       *prometheus.CounterVec
+	numCheckProcessed *prometheus.CounterVec
+	numTasksReceived  prometheus.Counter
 	// if numSignedTaskResponsesAcceptedByAggregator != numTasksReceived, then there is a bug
 	numSignedTaskResponsesAcceptedByAggregator prometheus.Counter
 }
@@ -63,6 +63,13 @@ func NewAvsAndEigenMetrics(avsName string, eigenMetrics *metrics.EigenMetrics, r
 				Name:      "num_ping_total",
 				Help:      "The number of heartbeat send by operator. If it isn't increasing, the operator failed to communicate with aggregator",
 			}, []string{"status"}),
+
+		numCheckProcessed: promauto.With(reg).NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: apNamespace,
+				Name:      "num_check_processed_total",
+				Help:      "The number of check has been performed by operator.",
+			}, []string{"type", "status"}),
 
 		numTasksReceived: promauto.With(reg).NewCounter(
 			prometheus.CounterOpts{
@@ -95,8 +102,8 @@ func (m *AvsAndEigenMetrics) IncPing(status string) {
 	m.numPingSent.WithLabelValues(status).Inc()
 }
 
-func (m *AvsAndEigenMetrics) IncNumCheckRun() {
-	m.numWorkerLoop.Inc()
+func (m *AvsAndEigenMetrics) IncNumCheckRun(checkType, status string) {
+	m.numCheckProcessed.WithLabelValues(checkType, status).Inc()
 }
 
 func (m *AvsAndEigenMetrics) AddUptime(total float64) {
