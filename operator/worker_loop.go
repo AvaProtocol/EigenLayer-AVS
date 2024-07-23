@@ -104,4 +104,5 @@ func (o *Operator) PingServer() {
 		o.metrics.IncPing("error")
 		o.logger.Infof("error update status %v", err)
 	}
+	o.metrics.SetPingDuration(elapsed.Seconds())
 }
