@@ -5,6 +5,8 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"os"
+	"strings"
+	"strconv"
 
 	"google.golang.org/grpc"
 
@@ -37,10 +39,12 @@ import (
 	//"github.com/AvaProtocol/ap-avs/aggregator"
 	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
 
-	// insecure for local dev
-
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/version"
+
+	"github.com/AvaProtocol/ap-avs/core/timekeeper"
+
+	// insecure for local dev
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -72,13 +76,8 @@ type Operator struct {
 	ethWsClient eth.Client
 	txManager   *txmgr.SimpleTxManager
 
-	// TODO(samlaf): remove both avsWriter and eigenlayerWrite from operator
-	// they are only used for registration, so we should make a special registration package
-	// this way, auditing this operator code makes it obvious that operators don't need to
-	// write to the chain during the course of their normal operations
-	// writing to the chain should be done via the cli only
 	metricsReg       *prometheus.Registry
-	metrics          metrics.Metrics
+	metrics          metrics.MetricsGenerator
 	nodeApi          *nodeapi.NodeApi
 	avsWriter        *chainio.AvsWriter
 	avsReader        chainio.AvsReaderer
@@ -104,6 +103,10 @@ type Operator struct {
 
 	// contract that hold our configuration. Currently only alias key mapping
 	apConfigAddr common.Address
+
+	elapsing *timekeeper.Elapsing
+
+	metricsPort int32
 }
 
 func RunWithConfig(configPath string) {
@@ -119,6 +122,7 @@ func NewOperatorFromConfigFile(configPath string) (*Operator, error) {
 	nodeConfig := OperatorConfig{}
 	err := sdkutils.ReadYamlConfig(configPath, &nodeConfig)
 
+
 	if err != nil {
 		panic(fmt.Errorf("failed to parse config file: %w\nMake sure %s is exist and a valid yaml file %w.", configPath, err))
 	}
@@ -128,6 +132,8 @@ func NewOperatorFromConfigFile(configPath string) (*Operator, error) {
 
 // take the config in core (which is shared with aggregator and challenger)
 func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
+	elapsing := timekeeper.NewElapsing()
+
 	var logLevel logging.LogLevel
 	if c.Production {
 		logLevel = sdklogging.Production
@@ -140,7 +146,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	}
 	reg := prometheus.NewRegistry()
 	eigenMetrics := sdkmetrics.NewEigenMetrics(AVS_NAME, c.EigenMetricsIpPortAddress, reg, logger)
-	avsAndEigenMetrics := metrics.NewAvsAndEigenMetrics(AVS_NAME, eigenMetrics, reg)
+	avsAndEigenMetrics := metrics.NewAvsAndEigenMetrics(AVS_NAME, strings.ToLower(c.OperatorAddress), version.Get(), eigenMetrics, reg)
 
 	// Setup Node Api
 	nodeApi := nodeapi.NewNodeApi(AVS_NAME, version.Get(), c.NodeApiIpPortAddress, logger)
@@ -269,11 +275,12 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		panic(err)
 	}
 	aggregatorRpcClient := avsproto.NewAggregatorClient(aggregatorConn)
-	//aggregatorRpcClient, err := NewAggregatorRpcClient(c.AggregatorServerIpPortAddress, logger, avsAndEigenMetrics)
-	//if err != nil {
-	//	logger.Error("Cannot create AggregatorRpcClient. Is aggregator running?", "err", err)
-	//	return nil, err
-	//}
+
+	parts := strings.Split(c.EigenMetricsIpPortAddress, ":")
+	if len(parts) !=2 {
+		panic(fmt.Errorf("EigenMetricsIpPortAddress: %s in operator config file is malform", c.EigenMetricsIpPortAddress))
+	}
+	metricsPort,  _ := strconv.Atoi(parts[1])
 
 	operator := &Operator{
 		config:      c,
@@ -285,6 +292,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		ethWsClient: ethWsClient,
 		avsWriter:   avsWriter,
 		avsReader:   avsReader,
+
 		// avsSubscriber:                      avsSubscriber,
 		eigenlayerReader: sdkClients.ElChainReader,
 		eigenlayerWriter: sdkClients.ElChainWriter,
@@ -301,6 +309,9 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		operatorEcdsaPrivateKey:            operatorEcdsaPrivateKey,
 
 		txManager: txMgr,
+		elapsing:  elapsing,
+
+		metricsPort: int32(metricsPort),
 	}
 
 	operator.PopulateKnownConfigByChainID(chainId)
@@ -318,10 +329,10 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		"signerAddr", operator.signerAddress,
 		"operatorG1Pubkey", operator.blsKeypair.GetPubKeyG1(),
 		"operatorG2Pubkey", operator.blsKeypair.GetPubKeyG2(),
+		"prmMetricsEndpoint", fmt.Sprintf("%s/metrics/", operator.config.EigenMetricsIpPortAddress),
 	)
 
 	return operator, nil
-
 }
 
 func (o *Operator) Start(ctx context.Context) error {
@@ -360,6 +371,20 @@ func (o *Operator) Start(ctx context.Context) error {
 
 	defer o.aggregatorConn.Close()
 	return o.runWorkLoop(ctx)
+}
+
+func (o *Operator) retryConnect() error{
+	// grpc client
+	var opts []grpc.DialOption
+	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	o.logger.Info("Retry connect to aggregator", "aggregatorAddress", o.config.AggregatorServerIpPortAddress)
+	var err error
+	o.aggregatorConn, err = grpc.NewClient(o.config.AggregatorServerIpPortAddress, opts...)
+	if err != nil {
+		return err
+	}
+	o.aggregatorRpcClient = avsproto.NewAggregatorClient(o.aggregatorConn)
+	return nil
 }
 
 // // Takes a NewTaskCreatedLog struct as input and returns a TaskResponseHeader struct.

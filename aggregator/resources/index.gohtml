@@ -27,6 +27,19 @@
           </div>
         </div>
 
+        <div class="flex min-w-0 gap-x-4">
+          <div class="min-w-0 flex-auto">
+            <p class="text-sm font-semibold leading-6 text-white">
+              v{{ .Version }}
+            </p>
+            {{/* 
+            <p class="text-sm font-semibold leading-6 text-white">
+              <a href="http://{{ .RemoteIP }}:{{ .MetricsPort }}/metrics">Metric</a>
+            </p>*}}
+          </div>
+        </div>
+
+
         <div class="hidden shrink-0 sm:flex sm:flex-col sm:items-end">
           <p class="text-sm leading-6 text-white">Active</p>
           <p class="mt-1 text-xs leading-5 text-gray-400">Last seen <time

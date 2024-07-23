@@ -33,7 +33,9 @@ type AggregatorClient interface {
 	ListTasks(ctx context.Context, in *ListTasksReq, opts ...grpc.CallOption) (*ListTasksResp, error)
 	GetTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*Task, error)
 	CancelTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
+	// Operator endpoint
 	Ping(ctx context.Context, in *Checkin, opts ...grpc.CallOption) (*CheckinResp, error)
+	SyncTasks(ctx context.Context, in *SyncTasksReq, opts ...grpc.CallOption) (Aggregator_SyncTasksClient, error)
 }
 
 type aggregatorClient struct {
@@ -116,6 +118,38 @@ func (c *aggregatorClient) Ping(ctx context.Context, in *Checkin, opts ...grpc.C
 	return out, nil
 }
 
+func (c *aggregatorClient) SyncTasks(ctx context.Context, in *SyncTasksReq, opts ...grpc.CallOption) (Aggregator_SyncTasksClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Aggregator_ServiceDesc.Streams[0], "/aggregator.Aggregator/SyncTasks", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &aggregatorSyncTasksClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Aggregator_SyncTasksClient interface {
+	Recv() (*SyncTasksResp, error)
+	grpc.ClientStream
+}
+
+type aggregatorSyncTasksClient struct {
+	grpc.ClientStream
+}
+
+func (x *aggregatorSyncTasksClient) Recv() (*SyncTasksResp, error) {
+	m := new(SyncTasksResp)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // AggregatorServer is the server API for Aggregator service.
 // All implementations must embed UnimplementedAggregatorServer
 // for forward compatibility
@@ -130,7 +164,9 @@ type AggregatorServer interface {
 	ListTasks(context.Context, *ListTasksReq) (*ListTasksResp, error)
 	GetTask(context.Context, *UUID) (*Task, error)
 	CancelTask(context.Context, *UUID) (*wrapperspb.BoolValue, error)
+	// Operator endpoint
 	Ping(context.Context, *Checkin) (*CheckinResp, error)
+	SyncTasks(*SyncTasksReq, Aggregator_SyncTasksServer) error
 	mustEmbedUnimplementedAggregatorServer()
 }
 
@@ -161,6 +197,9 @@ func (UnimplementedAggregatorServer) CancelTask(context.Context, *UUID) (*wrappe
 }
 func (UnimplementedAggregatorServer) Ping(context.Context, *Checkin) (*CheckinResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Ping not implemented")
+}
+func (UnimplementedAggregatorServer) SyncTasks(*SyncTasksReq, Aggregator_SyncTasksServer) error {
+	return status.Errorf(codes.Unimplemented, "method SyncTasks not implemented")
 }
 func (UnimplementedAggregatorServer) mustEmbedUnimplementedAggregatorServer() {}
 
@@ -319,6 +358,27 @@ func _Aggregator_Ping_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Aggregator_SyncTasks_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SyncTasksReq)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AggregatorServer).SyncTasks(m, &aggregatorSyncTasksServer{stream})
+}
+
+type Aggregator_SyncTasksServer interface {
+	Send(*SyncTasksResp) error
+	grpc.ServerStream
+}
+
+type aggregatorSyncTasksServer struct {
+	grpc.ServerStream
+}
+
+func (x *aggregatorSyncTasksServer) Send(m *SyncTasksResp) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // Aggregator_ServiceDesc is the grpc.ServiceDesc for Aggregator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -359,6 +419,12 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Aggregator_Ping_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "SyncTasks",
+			Handler:       _Aggregator_SyncTasks_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "protobuf/avs.proto",
 }

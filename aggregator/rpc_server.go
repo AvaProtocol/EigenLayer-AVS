@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/big"
 	"net"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -138,6 +139,29 @@ func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avspro
 	task.FromStorageData(taskRawByte)
 
 	return task.ToProtoBuf()
+}
+
+func (r *RpcServer) SyncTasks(payload *avsproto.SyncTasksReq, srv avsproto.Aggregator_SyncTasksServer) error {
+	log.Printf("sync task for operator : %s", payload.Address)
+
+	for {
+		resp := avsproto.SyncTasksResp{
+			// TODO: Hook up to the new task channel to syncdicate in realtime
+			// Currently this is setup just to generate the metrics so we can
+			// prepare the dashboard
+			// Our actually task will be more completed
+			Id:       "1",
+			TaskType: "CurrentBlockTime",
+		}
+
+		if err := srv.Send(&resp); err != nil {
+			log.Printf("error when sending task to operator %s: %v", payload.Address, err)
+			return err
+		}
+		time.Sleep(time.Duration(5) * time.Second)
+	}
+
+	return nil
 }
 
 // startRpcServer initializes and establish a tcp socket on given address from
