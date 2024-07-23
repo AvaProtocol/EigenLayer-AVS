@@ -373,6 +373,20 @@ func (o *Operator) Start(ctx context.Context) error {
 	return o.runWorkLoop(ctx)
 }
 
+func (o *Operator) retryConnect() error{
+	// grpc client
+	var opts []grpc.DialOption
+	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	o.logger.Info("Retry connect to aggregator", "aggregatorAddress", o.config.AggregatorServerIpPortAddress)
+	var err error
+	o.aggregatorConn, err = grpc.NewClient(o.config.AggregatorServerIpPortAddress, opts...)
+	if err != nil {
+		return err
+	}
+	o.aggregatorRpcClient = avsproto.NewAggregatorClient(o.aggregatorConn)
+	return nil
+}
+
 // // Takes a NewTaskCreatedLog struct as input and returns a TaskResponseHeader struct.
 // // The TaskResponseHeader struct is the struct that is signed and sent to the contract as a task response.
 // func (o *Operator) ProcessNewTaskCreatedLog(newTaskCreatedLog *cstaskmanager.ContractAutomationTaskManagerNewTaskCreated) *cstaskmanager.IAutomationTaskManagerTaskResponse {

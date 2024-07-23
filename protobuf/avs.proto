@@ -20,7 +20,6 @@ enum TriggerType {
   ContractCallTrigger = 1;
 }
 
-
 message UUID {
   string bytes = 1;
 }
@@ -46,6 +45,17 @@ message CheckinResp {
   google.protobuf.Timestamp updated_at = 1;
 }
 
+message SyncTasksReq {
+  string id = 1;
+  string address = 2;
+  string signature = 3;
+}
+
+message SyncTasksResp {
+  string id = 1;
+  string taskType = 2;
+}
+
 service Aggregator {
   // Auth
   rpc GetKey(GetKeyReq) returns (KeyResp) {};
@@ -60,7 +70,9 @@ service Aggregator {
   rpc GetTask(UUID) returns (Task) {};
   rpc CancelTask(UUID) returns (google.protobuf.BoolValue) {};
 
+  // Operator endpoint
   rpc Ping(Checkin) returns (CheckinResp) {};
+  rpc SyncTasks(SyncTasksReq) returns (stream SyncTasksResp) {};
 }
 
 message ETHTransfer {
