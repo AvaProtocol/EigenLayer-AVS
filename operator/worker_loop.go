@@ -10,6 +10,10 @@ import (
 	pb "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
+const (
+	retryIntervalSecond = 15
+)
+
 // runWorkLoop is main entrypoint where we sync data with aggregator
 func (o *Operator) runWorkLoop(ctx context.Context) error {
 	timer := time.NewTicker(5 * time.Second)
@@ -57,7 +61,7 @@ func (o *Operator) FetchTasks() {
 	      stream, err := o.aggregatorRpcClient.SyncTasks(context.Background(), req)
 	      if err != nil {
 			  o.logger.Errorf("error open a stream to aggregator, retry in 15 seconds. error: %v", err)
-		  	time.Sleep(time.Duration(15) * time.Second)
+		  	time.Sleep(time.Duration(retryIntervalSecond) * time.Second)
 			o.retryConnect()
 			continue
 	      }
@@ -69,7 +73,7 @@ func (o *Operator) FetchTasks() {
 		  	}
 		  	if err != nil {
 				o.logger.Errorf("cannot receive task data from server stream, retry in 15 seconds. error: %v", err)
-		  		time.Sleep(time.Duration(15) * time.Second)
+		  		time.Sleep(time.Duration(retryIntervalSecond) * time.Second)
 		  		break
 		  	}
 		  	o.metrics.IncNumTasksReceived(resp.TaskType)
