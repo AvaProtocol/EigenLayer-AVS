@@ -37,12 +37,14 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 		tpl, err := template.ParseFS(res, "resources/*.gohtml")
 
 		if err != nil {
+			agg.logger.Errorf("error rendering telemetry %v", err)
 			return err
 		}
 
 		data := agg.operatorPool.GetAll()
 		var buf bytes.Buffer
 		if err := tpl.Execute(&buf, data); err != nil {
+			agg.logger.Errorf("error rendering telemetry %v", err)
 			return err
 		}
 
