@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"time"
 
+	"github.com/AvaProtocol/ap-avs/version"
 	pb "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -44,7 +45,10 @@ func (o *Operator) PingServer() {
 		Id:      id,
 		// TODO: generate signature with bls key
 		Signature: "pending",
+		Version: version.Get(),
+		MetricsPort: o.metricsPort,
 	})
+
 	elapsed := time.Now().Sub(start)
 	if err == nil {
 		o.metrics.IncPing("success")

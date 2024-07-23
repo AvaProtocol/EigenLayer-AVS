@@ -5,6 +5,8 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"os"
+	"strings"
+	"strconv"
 
 	"google.golang.org/grpc"
 
@@ -103,6 +105,8 @@ type Operator struct {
 	apConfigAddr common.Address
 
 	elapsing *timekeeper.Elapsing
+
+	metricsPort int32
 }
 
 func RunWithConfig(configPath string) {
@@ -117,6 +121,7 @@ func RunWithConfig(configPath string) {
 func NewOperatorFromConfigFile(configPath string) (*Operator, error) {
 	nodeConfig := OperatorConfig{}
 	err := sdkutils.ReadYamlConfig(configPath, &nodeConfig)
+
 
 	if err != nil {
 		panic(fmt.Errorf("failed to parse config file: %w\nMake sure %s is exist and a valid yaml file %w.", configPath, err))
@@ -141,7 +146,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	}
 	reg := prometheus.NewRegistry()
 	eigenMetrics := sdkmetrics.NewEigenMetrics(AVS_NAME, c.EigenMetricsIpPortAddress, reg, logger)
-	avsAndEigenMetrics := metrics.NewAvsAndEigenMetrics(AVS_NAME, eigenMetrics, reg)
+	avsAndEigenMetrics := metrics.NewAvsAndEigenMetrics(AVS_NAME, strings.ToLower(c.OperatorAddress), version.Get(), eigenMetrics, reg)
 
 	// Setup Node Api
 	nodeApi := nodeapi.NewNodeApi(AVS_NAME, version.Get(), c.NodeApiIpPortAddress, logger)
@@ -271,6 +276,12 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	}
 	aggregatorRpcClient := avsproto.NewAggregatorClient(aggregatorConn)
 
+	parts := strings.Split(c.EigenMetricsIpPortAddress, ":")
+	if len(parts) !=2 {
+		panic(fmt.Errorf("EigenMetricsIpPortAddress: %s in operator config file is malform", c.EigenMetricsIpPortAddress))
+	}
+	metricsPort,  _ := strconv.Atoi(parts[1])
+
 	operator := &Operator{
 		config:      c,
 		logger:      logger,
@@ -299,6 +310,8 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 
 		txManager: txMgr,
 		elapsing:  elapsing,
+
+		metricsPort: int32(metricsPort),
 	}
 
 	operator.PopulateKnownConfigByChainID(chainId)

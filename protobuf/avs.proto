@@ -37,6 +37,9 @@ message Checkin {
   }
 
   Status status = 4;
+
+  string version = 5;
+  int32 metricsPort = 6;
 }
 
 message CheckinResp {

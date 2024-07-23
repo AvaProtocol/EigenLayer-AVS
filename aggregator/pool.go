@@ -15,7 +15,10 @@ import (
 
 type OperatorNode struct {
 	Address       string `json:"address"`
+	RemoteIP      string `json:"remote_ip"`
 	LastPingEpoch int64  `json:"last_ping"`
+	Version       string `json:"version"`
+	MetricsPort   int32  `json:"metric_endpoint"`
 }
 
 func (o *OperatorNode) LastSeen() string {
@@ -60,6 +63,8 @@ func (o *OperatorPool) Checkin(payload *avsproto.Checkin) error {
 	status := &OperatorNode{
 		Address:       payload.Address,
 		LastPingEpoch: now.Unix(),
+		Version:       payload.Version,
+		MetricsPort:   payload.MetricsPort,
 	}
 
 	data, err := json.Marshal(status)
