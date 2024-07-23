@@ -18,7 +18,7 @@ type OperatorNode struct {
 	RemoteIP      string `json:"remote_ip"`
 	LastPingEpoch int64  `json:"last_ping"`
 	Version       string `json:"version"`
-	MetricsPort   int32  `json:"metric_endpoint"`
+	MetricsPort   int32  `json:"metrics_port"`
 }
 
 func (o *OperatorNode) LastSeen() string {
