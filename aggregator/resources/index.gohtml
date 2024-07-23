@@ -29,13 +29,16 @@
 
         <div class="flex min-w-0 gap-x-4">
           <div class="min-w-0 flex-auto">
+            {{ if ne .Version "" }}
             <p class="text-sm font-semibold leading-6 text-white">
               v{{ .Version }}
             </p>
-            {{/* 
-            <p class="text-sm font-semibold leading-6 text-white">
+            {{ end }}
+            {{ if gt .MetricsPort 0 }}
+            <p class="text-sm leading-6 text-white">
               <a href="http://{{ .RemoteIP }}:{{ .MetricsPort }}/metrics">Metric</a>
-            </p>*}}
+            </p>
+            {{ end }}
           </div>
         </div>
 
