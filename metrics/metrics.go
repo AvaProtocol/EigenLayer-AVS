@@ -12,6 +12,8 @@ type MetricsGenerator interface {
 	IncWorkerLoop()
 	IncPing(string)
 
+	SetPingDuration(float64)
+
 	AddUptime(float64)
 
 	IncNumCheckRun(string, string)
@@ -30,7 +32,10 @@ type AvsAndEigenMetrics struct {
 	uptime *prometheus.CounterVec
 
 	numWorkerLoop     *prometheus.CounterVec
+
 	numPingSent       *prometheus.CounterVec
+	durationPing *prometheus.GaugeVec
+
 	numCheckProcessed *prometheus.CounterVec
 	numTasksReceived  *prometheus.CounterVec
 	// if numSignedTaskResponsesAcceptedByAggregator != numTasksReceived, then there is a bug
@@ -66,6 +71,14 @@ func NewAvsAndEigenMetrics(avsName, operatorAddress, version string, eigenMetric
 				Name:      "num_ping_total",
 				Help:      "The number of heartbeat send by operator. If it isn't increasing, the operator failed to communicate with aggregator",
 			}, []string{"operator", "version", "status"}),
+
+		durationPing: promauto.With(reg).NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: apNamespace,
+				Name:      "ping_duration_seconds",
+				Help:      "The duration of ping check send to operator. If it spikes, it could indicator aggreator issues or operator network issue",
+			}, []string{"operator", "version",}),
+
 
 		numCheckProcessed: promauto.With(reg).NewCounterVec(
 			prometheus.CounterOpts{
@@ -115,4 +128,8 @@ func (m *AvsAndEigenMetrics) IncNumCheckRun(checkType, status string) {
 
 func (m *AvsAndEigenMetrics) AddUptime(total float64) {
 	m.uptime.WithLabelValues(m.operatorAddress, m.version).Add(total)
+}
+
+func (m *AvsAndEigenMetrics) SetPingDuration(duration float64) {
+	m.durationPing.WithLabelValues(m.operatorAddress, m.version).Set(duration)
 }
