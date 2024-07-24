@@ -93,7 +93,8 @@ func (o *Operator) PingServer() {
 		// TODO: generate signature with bls key
 		Signature: "pending",
 		Version: version.Get(),
-		MetricsPort: o.metricsPort,
+		RemoteIP: o.GetPublicIP(),
+		MetricsPort: o.config.GetPublicMetricPort(),
 	})
 
 	elapsed := time.Now().Sub(start)

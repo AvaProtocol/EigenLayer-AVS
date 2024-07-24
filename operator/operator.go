@@ -43,6 +43,7 @@ import (
 	"github.com/AvaProtocol/ap-avs/version"
 
 	"github.com/AvaProtocol/ap-avs/core/timekeeper"
+	"github.com/AvaProtocol/ap-avs/core/ipfetcher"
 
 	// insecure for local dev
 	"google.golang.org/grpc/credentials/insecure"
@@ -67,6 +68,8 @@ type OperatorConfig struct {
 	EnableNodeApi                 bool   `yaml:"enable_node_api"`
 
 	DbPath string `yaml:"db_path"`
+
+	PublicMetricsPort int32
 }
 
 type Operator struct {
@@ -106,7 +109,7 @@ type Operator struct {
 
 	elapsing *timekeeper.Elapsing
 
-	metricsPort int32
+	publicIP string
 }
 
 func RunWithConfig(configPath string) {
@@ -276,12 +279,6 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	}
 	aggregatorRpcClient := avsproto.NewAggregatorClient(aggregatorConn)
 
-	parts := strings.Split(c.EigenMetricsIpPortAddress, ":")
-	if len(parts) !=2 {
-		panic(fmt.Errorf("EigenMetricsIpPortAddress: %s in operator config file is malform", c.EigenMetricsIpPortAddress))
-	}
-	metricsPort,  _ := strconv.Atoi(parts[1])
-
 	operator := &Operator{
 		config:      c,
 		logger:      logger,
@@ -310,8 +307,6 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 
 		txManager: txMgr,
 		elapsing:  elapsing,
-
-		metricsPort: int32(metricsPort),
 	}
 
 	operator.PopulateKnownConfigByChainID(chainId)
@@ -386,6 +381,45 @@ func (o *Operator) retryConnect() error{
 	o.aggregatorRpcClient = avsproto.NewAggregatorClient(o.aggregatorConn)
 	return nil
 }
+
+// Optimistic get public ip address of the operator
+// the IP address is used in combination with 
+func (o *Operator) GetPublicIP() string {
+	if o.publicIP == "" {
+		var err error
+		o.publicIP, err = ipfetcher.GetIP()
+		if err != nil {
+			// We will retry and eventually successful, the public ip isn't
+			// being used widely in our operation, only for metric scrape
+			o.logger.Errorf("error fetching public ip address %v", err)
+		}
+	}
+
+	return o.publicIP
+}
+
+func (c *OperatorConfig) GetPublicMetricPort() int32 {
+	// If we had port from env, use it, if not, we parse the port from config
+	if c.PublicMetricsPort > 0 {
+		return c.PublicMetricsPort
+	}
+
+	port := os.Getenv("PUBLIC_METRICS_PORT");
+	if port == "" {
+		parts := strings.Split(c.EigenMetricsIpPortAddress, ":")
+		if len(parts) !=2 {
+			panic(fmt.Errorf("EigenMetricsIpPortAddress: %s in operator config file is malform", c.EigenMetricsIpPortAddress))
+		}
+
+		port = parts[1]
+	}
+
+	portNum, _ := strconv.Atoi(port)
+
+	c.PublicMetricsPort = int32(portNum)
+	return c.PublicMetricsPort
+}
+
 
 // // Takes a NewTaskCreatedLog struct as input and returns a TaskResponseHeader struct.
 // // The TaskResponseHeader struct is the struct that is signed and sent to the contract as a task response.
