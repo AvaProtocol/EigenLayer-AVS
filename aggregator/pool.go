@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
-	"google.golang.org/grpc/peer"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/AvaProtocol/ap-avs/core/config"
@@ -59,14 +57,14 @@ type OperatorPool struct {
 	db storage.Storage
 }
 
-func (o *OperatorPool) Checkin(payload *avsproto.Checkin, remoteIp string) error {
+func (o *OperatorPool) Checkin(payload *avsproto.Checkin) error {
 	now := time.Now()
 
 	status := &OperatorNode{
 		Address:       payload.Address,
 		LastPingEpoch: now.Unix(),
 		MetricsPort:   payload.MetricsPort,
-		RemoteIP:      remoteIp,
+		RemoteIP:      payload.RemoteIP,
 		Version:       payload.Version,
 	}
 
@@ -98,10 +96,7 @@ func (o *OperatorPool) GetAll() []*OperatorNode {
 }
 
 func (r *RpcServer) Ping(ctx context.Context, payload *avsproto.Checkin) (*avsproto.CheckinResp, error) {
-	p, _ := peer.FromContext(ctx)
-	remoteIp := strings.Split(p.Addr.String(), ":")[0]
-
-	if err := r.operatorPool.Checkin(payload, remoteIp); err != nil {
+	if err := r.operatorPool.Checkin(payload); err != nil {
 		return nil, fmt.Errorf("cannot update operator status error: %w", err)
 	}
 

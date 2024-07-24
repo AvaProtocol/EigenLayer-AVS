@@ -31,7 +31,7 @@
           <div class="min-w-0 flex-auto">
             {{ if ne .Version "" }}
             <p class="text-sm font-semibold leading-6 text-white">
-              v{{ .Version }}
+              {{ .Version }}
             </p>
             {{ end }}
             {{ if gt .MetricsPort 0 }}
