@@ -13,8 +13,8 @@ import (
 )
 
 var (
-	factoryABI     abi.ABI
-	factoryAddress = common.HexToAddress("0x9406Cc6185a346906296840746125a0E44976454")
+	factoryABI  abi.ABI
+	defaultSalt = big.NewInt(0)
 )
 
 func buildFactoryABI() {
@@ -57,10 +57,23 @@ func GetSenderAddress(conn *ethclient.Client, ownerAddress common.Address, salt 
 }
 
 func GetNonce(conn *ethclient.Client, ownerAddress common.Address, salt *big.Int) (*big.Int, error) {
+	if salt == nil {
+		salt = defaultSalt
+	}
+
 	entrypoint, err := NewEntryPoint(EntrypointAddress, conn)
 	if err != nil {
 		return nil, err
 	}
 
 	return entrypoint.GetNonce(nil, ownerAddress, salt)
+}
+
+func MustNonce(conn *ethclient.Client, ownerAddress common.Address, salt *big.Int) *big.Int {
+	nonce, e := GetNonce(conn, ownerAddress, salt)
+	if e != nil {
+		panic(e)
+	}
+
+	return nonce
 }

@@ -42,6 +42,11 @@ type Config struct {
 
 	DbPath    string
 	JwtSecret []byte
+
+	// Account abstraction
+	BundlerURL        string
+	FactoryAddress    common.Address
+	EntrypointAddress common.Address
 }
 
 // These are read from configPath
@@ -58,6 +63,10 @@ type ConfigRaw struct {
 
 	DbPath    string `yaml:"db_path"`
 	JwtSecret string `yaml:"jwt_secret"`
+
+	BundlerURL        string `yaml:"bundler_url"`
+	FactoryAddress    string `yaml:"factory_address"`
+	EntrypointAddress string `yaml:"entrypoint_address"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
@@ -142,6 +151,10 @@ func NewConfig(configFilePath string) (*Config, error) {
 
 		DbPath:    configRaw.DbPath,
 		JwtSecret: []byte(configRaw.JwtSecret),
+
+		BundlerURL:        configRaw.BundlerURL,
+		FactoryAddress:    common.HexToAddress(configRaw.FactoryAddress),
+		EntrypointAddress: common.HexToAddress(configRaw.EntrypointAddress),
 	}
 	config.validate()
 	return config, nil
