@@ -41,7 +41,6 @@ func RunWithConfig(configPath string) error {
 	if err != nil {
 		panic(fmt.Errorf("failed to parse config file: %w\nMake sure %s is exist and a valid yaml file %w.", configPath, err))
 	}
-	fmt.Printf("loaded config: %v\n", nodeConfig)
 
 	aggregator, err := NewAggregator(nodeConfig)
 	if err != nil {
@@ -170,11 +169,14 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.logger.Infof("Initialize Storagre")
 	agg.initDB(ctx)
 
-	agg.logger.Infof("Starting rpc server.")
+	agg.logger.Infof("Starting rpc server")
 	go agg.startRpcServer(ctx)
 
-	agg.logger.Infof("Starting http server.")
+	agg.logger.Infof("Starting http server")
 	go agg.startHttpServer(ctx)
+
+	agg.logger.Infof("Starting execution engine")
+	go agg.startExecutionEngine(ctx)
 
 	// Setup wait signal
 	sigs := make(chan os.Signal, 1)

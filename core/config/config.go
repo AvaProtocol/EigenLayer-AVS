@@ -44,6 +44,11 @@ type Config struct {
 	JwtSecret []byte
 
 	// Account abstraction
+	SmartWallet SmartWalletConfig
+}
+
+type SmartWalletConfig struct {
+	EthRpcUrl         string
 	BundlerURL        string
 	FactoryAddress    common.Address
 	EntrypointAddress common.Address
@@ -64,15 +69,19 @@ type ConfigRaw struct {
 	DbPath    string `yaml:"db_path"`
 	JwtSecret string `yaml:"jwt_secret"`
 
-	BundlerURL        string `yaml:"bundler_url"`
-	FactoryAddress    string `yaml:"factory_address"`
-	EntrypointAddress string `yaml:"entrypoint_address"`
+	SmartWallet struct {
+		EthRpcUrl         string `yaml:"eth_rpc_url"`
+		BundlerURL        string `yaml:"bundler_url"`
+		FactoryAddress    string `yaml:"factory_address"`
+		EntrypointAddress string `yaml:"entrypoint_address"`
+	} `yaml:"smart_wallet"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
 type AutomationDeploymentRaw struct {
 	Addresses AutomationContractsRaw `json:"addresses"`
 }
+
 type AutomationContractsRaw struct {
 	RegistryCoordinatorAddr    string `json:"registryCoordinator"`
 	OperatorStateRetrieverAddr string `json:"operatorStateRetriever"`
@@ -152,9 +161,12 @@ func NewConfig(configFilePath string) (*Config, error) {
 		DbPath:    configRaw.DbPath,
 		JwtSecret: []byte(configRaw.JwtSecret),
 
-		BundlerURL:        configRaw.BundlerURL,
-		FactoryAddress:    common.HexToAddress(configRaw.FactoryAddress),
-		EntrypointAddress: common.HexToAddress(configRaw.EntrypointAddress),
+		SmartWallet: SmartWalletConfig{
+			EthRpcUrl:         configRaw.SmartWallet.EthRpcUrl,
+			BundlerURL:        configRaw.SmartWallet.EthRpcUrl,
+			FactoryAddress:    common.HexToAddress(configRaw.SmartWallet.FactoryAddress),
+			EntrypointAddress: common.HexToAddress(configRaw.SmartWallet.EntrypointAddress),
+		},
 	}
 	config.validate()
 	return config, nil

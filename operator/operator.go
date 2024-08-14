@@ -5,8 +5,8 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"os"
-	"strings"
 	"strconv"
+	"strings"
 
 	"google.golang.org/grpc"
 
@@ -42,8 +42,8 @@ import (
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/version"
 
-	"github.com/AvaProtocol/ap-avs/core/timekeeper"
-	"github.com/AvaProtocol/ap-avs/core/ipfetcher"
+	"github.com/AvaProtocol/ap-avs/pkg/ipfetcher"
+	"github.com/AvaProtocol/ap-avs/pkg/timekeeper"
 
 	// insecure for local dev
 	"google.golang.org/grpc/credentials/insecure"
@@ -124,7 +124,6 @@ func RunWithConfig(configPath string) {
 func NewOperatorFromConfigFile(configPath string) (*Operator, error) {
 	nodeConfig := OperatorConfig{}
 	err := sdkutils.ReadYamlConfig(configPath, &nodeConfig)
-
 
 	if err != nil {
 		panic(fmt.Errorf("failed to parse config file: %w\nMake sure %s is exist and a valid yaml file %w.", configPath, err))
@@ -368,7 +367,7 @@ func (o *Operator) Start(ctx context.Context) error {
 	return o.runWorkLoop(ctx)
 }
 
-func (o *Operator) retryConnect() error{
+func (o *Operator) retryConnect() error {
 	// grpc client
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -383,7 +382,7 @@ func (o *Operator) retryConnect() error{
 }
 
 // Optimistic get public ip address of the operator
-// the IP address is used in combination with 
+// the IP address is used in combination with
 func (o *Operator) GetPublicIP() string {
 	if o.publicIP == "" {
 		var err error
@@ -404,10 +403,10 @@ func (c *OperatorConfig) GetPublicMetricPort() int32 {
 		return c.PublicMetricsPort
 	}
 
-	port := os.Getenv("PUBLIC_METRICS_PORT");
+	port := os.Getenv("PUBLIC_METRICS_PORT")
 	if port == "" {
 		parts := strings.Split(c.EigenMetricsIpPortAddress, ":")
-		if len(parts) !=2 {
+		if len(parts) != 2 {
 			panic(fmt.Errorf("EigenMetricsIpPortAddress: %s in operator config file is malform", c.EigenMetricsIpPortAddress))
 		}
 
@@ -419,7 +418,6 @@ func (c *OperatorConfig) GetPublicMetricPort() int32 {
 	c.PublicMetricsPort = int32(portNum)
 	return c.PublicMetricsPort
 }
-
 
 // // Takes a NewTaskCreatedLog struct as input and returns a TaskResponseHeader struct.
 // // The TaskResponseHeader struct is the struct that is signed and sent to the contract as a task response.

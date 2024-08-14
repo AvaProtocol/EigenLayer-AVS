@@ -176,8 +176,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 
 	s := grpc.NewServer()
 
-	// TODO: Remove hard code
-	ethclient, err := ethclient.Dial("https://eth-sepolia.api.onfinality.io/public")
+	ethclient, err := ethclient.Dial(agg.config.EthHttpRpcUrl)
 
 	if err != nil {
 		panic(err)
@@ -195,7 +194,9 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 	// https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md
 	reflection.Register(s)
 
-	log.Printf("grpc server listening at %v", lis.Addr())
+	agg.logger.Info("start grpc server",
+		"address", lis.Addr(),
+	)
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}

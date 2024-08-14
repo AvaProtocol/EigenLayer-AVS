@@ -29,7 +29,7 @@ func FromPrivateKeyHex(privateKeyHex string, chainID *big.Int) (*bind.TransactOp
 }
 
 func MustControllerSigner() *ecdsa.PrivateKey {
-	key := os.Getenv("PLAY3_PRIVATE_KEY")
+	key := os.Getenv("CONTROLLER_PRIVATE_KEY")
 
 	if key[0:2] == "0x" {
 		key = key[2:]
