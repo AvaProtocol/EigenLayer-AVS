@@ -2,35 +2,35 @@ package apqueue
 
 import (
 	"encoding/json"
-	"fmt"
 )
 
 // jobStatus Enum Type
-type jobStatus uint8
+type jobStatus string
 
 const (
+	// Use a single char to save space
 	// jobPending : waiting to be processed
-	jobPending jobStatus = iota
+	jobPending jobStatus = "q"
 	// jobInProgress : processing in progress
-	jobInProgress
+	jobInProgress = "p"
 	// jobComplete : processing complete
-	jobComplete
+	jobComplete = "c"
 	// jobFailed : processing errored out
-	jobFailed
+	jobFailed = "f"
 )
 
-type Job [T]struct {
-	// external reference id. example if this is a job to run a task, external id hold the data
-	// This allow us to do fast lookup without decode job data
-	ExternaID string
-	Name      string
-	Data      T
-	Type      string
+type Job struct {
+	Type string `json:"t"`
+	Name string `json:"n"`
+	Data []byte `json:"d"`
+
+	EnqueueAt uint64 `json:"q,omitempty"`
+	Attempt   uint64 `json:"a,omitempty"`
 
 	// id of the job in the queue system
 	// This ID is generate by this package in a sequence. The ID is gurantee to
 	// be unqiue and can be used as part of the signature as nonce
-	ID uint64
+	ID uint64 `json:"id"`
 }
 
 func encodeJob(j *Job) ([]byte, error) {
@@ -38,15 +38,7 @@ func encodeJob(j *Job) ([]byte, error) {
 }
 
 func decodeJob(b []byte) (*Job, error) {
-	var j *Job
-	err := json.Unmarshal(b, j)
-	return j, err
-}
-
-func getQueueKeyPrefix(status jobStatus) string {
-	return fmt.Sprintf("apq:%v:", status)
-}
-
-func getJobKey(status jobStatus, jID uint64) []byte {
-	return []byte(getQueueKeyPrefix(status) + jIDString(jID))
+	j := Job{}
+	err := json.Unmarshal(b, &j)
+	return &j, err
 }

@@ -3,6 +3,7 @@ package apqueue
 import (
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/AvaProtocol/ap-avs/storage"
@@ -14,18 +15,32 @@ type Queue struct {
 	seq    storage.Sequence
 	dbLock sync.Mutex
 
-	eventCh chan int
-	quitCh  chan bool
+	eventCh chan uint64
+	closeCh chan bool
+
+	prefix string
+}
+
+type QueueOption struct {
+	Prefix string
 }
 
 // newQueue creates new ueue
-func New(db storage.Storage) *Queue {
+func New(db storage.Storage, opts *QueueOption) *Queue {
 	q := Queue{
 		db:     db,
 		dbLock: sync.Mutex{},
 
-		eventCh: make(chan int, 1000),
+		eventCh: make(chan uint64, 1000),
 		closeCh: make(chan bool),
+	}
+
+	if opts != nil {
+		if opts.Prefix == "" {
+			q.prefix = "default"
+		} else {
+			q.prefix = opts.Prefix
+		}
 	}
 
 	return &q
@@ -34,24 +49,20 @@ func New(db storage.Storage) *Queue {
 // start Queue, panic if there is any error
 func (q *Queue) MustStart() error {
 	var err error
-	q.seq, err = q.db.GetSequence([]byte("apqueue"), 1000)
+	q.seq, err = q.db.GetSequence([]byte("q:seq:"+q.prefix), 1000)
 
 	if err != nil {
 		panic(err)
 	}
 
-	go func() {
-		for {
-			select {
-			case jid := <-q.eventCh:
-				q.Dequeue()
-			case <-q.closeCh: // loop was stopped
-				return
-			}
-		}
-	}()
-
 	return err
+}
+
+// When a queue being kill abruptedly, there is pending job that isn't being
+// process or stuck.
+// Recover reclaims them and fire them off again
+func (q *Queue) Recover() error {
+	return nil
 }
 
 // stop Queue and Release resources
@@ -79,20 +90,20 @@ func getNextSeq(seq storage.Sequence) (num uint64, err error) {
 }
 
 // enqueueJob enqueues a new Job to the Pending queue
-func (q *Queue) Enqueue(externalID string, name string, data []byte) (uint64, error) {
+func (q *Queue) Enqueue(jobType string, name string, data []byte) (uint64, error) {
 	num, err := getNextSeq(q.seq)
 	if err != nil {
 		return 0, err
 	}
 
 	j := &Job{
-		Name:      name,
-		ExternaID: externalID,
-		Data:      data,
+		Type: jobType,
+		Name: name,
+		Data: data,
 
 		ID: num + 1,
 	}
-	jKey := getJobKey(jobPending, j.ID)
+	jKey := q.getJobKey(jobPending, j.ID)
 
 	b, err := encodeJob(j)
 	if err != nil {
@@ -104,12 +115,9 @@ func (q *Queue) Enqueue(externalID string, name string, data []byte) (uint64, er
 	if err != nil {
 		return 0, err
 	}
+	q.eventCh <- j.ID
 
 	return j.ID, nil
-}
-
-func jIDString(jID uint64) string {
-	return fmt.Sprintf("%020d", jID)
 }
 
 // dequeueJob moves the next pending job from the pending status to inprogress
@@ -119,8 +127,9 @@ func (q *Queue) Dequeue() (*Job, error) {
 	q.dbLock.Lock()
 	defer q.dbLock.Unlock()
 
-	prefix := []byte(getQueueKeyPrefix(jobPending))
+	prefix := []byte(q.getQueueKeyPrefix(jobPending))
 	k, v, err := q.db.FirstKVHasPrefix(prefix)
+	log.Println("found k,v", string(k), string(v))
 	if err != nil {
 		return nil, err
 	}
@@ -136,21 +145,31 @@ func (q *Queue) Dequeue() (*Job, error) {
 	}
 
 	// Move from from Pending queue to InProgress queue
-	err = q.db.Move(k, getJobKey(jobInProgress, j.ID))
+	err = q.db.Move(k, q.getJobKey(jobInProgress, j.ID))
 
 	return j, err
 }
 
 // markJobDone moves a job from the inprogress status to complete/failed
-func (q *Queue) markJobDone(id uint64, status jobStatus) error {
+func (q *Queue) markJobDone(job *Job, status jobStatus) error {
+	id := job.ID
 	if status != jobComplete && status != jobFailed {
 		return errors.New("Can only move to Complete or Failed Status")
 	}
 
-	src := getJobKey(jobInProgress, id)
-	dest := getJobKey(status, id)
+	src := q.getJobKey(jobInProgress, id)
+	dest := q.getJobKey(status, id)
 	q.dbLock.Lock()
 	defer q.dbLock.Unlock()
+
 	err := q.db.Move(src, dest)
 	return err
+}
+
+func (q *Queue) getQueueKeyPrefix(status jobStatus) []byte {
+	return []byte(fmt.Sprintf("q:%s:%v:", q.prefix, status))
+}
+
+func (q *Queue) getJobKey(status jobStatus, jID uint64) []byte {
+	return append(q.getQueueKeyPrefix(status), []byte(fmt.Sprintf("%020d", jID))...)
 }
