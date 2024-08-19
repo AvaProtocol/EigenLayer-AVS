@@ -3,6 +3,7 @@ package preset
 import (
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -73,6 +74,11 @@ func SendUserOp(
 	userOp.Signature, _ = signer.SignMessage(signerKey, dummySigForGasEstimation.Bytes())
 
 	gas, e := bundlerClient.EstimateUserOperationGas(context.Background(), userOp, aa.EntrypointAddress, map[string]any{})
+	if gas == nil {
+		// TODO: handler retry, this could be rate limit from rpc
+		return "", fmt.Errorf("error estimated gas from bundler: %w", e)
+	}
+
 	userOp.PreVerificationGas = gas.PreVerificationGas
 	userOp.VerificationGasLimit = gas.VerificationGasLimit
 	userOp.CallGasLimit = gas.CallGasLimit

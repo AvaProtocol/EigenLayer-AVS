@@ -45,6 +45,8 @@ type Config struct {
 
 	// Account abstraction
 	SmartWallet SmartWalletConfig
+
+	SocketPath string
 }
 
 type SmartWalletConfig struct {
@@ -75,6 +77,8 @@ type ConfigRaw struct {
 		FactoryAddress    string `yaml:"factory_address"`
 		EntrypointAddress string `yaml:"entrypoint_address"`
 	} `yaml:"smart_wallet"`
+
+	SocketPath string `yaml:"socket_path"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
@@ -167,6 +171,12 @@ func NewConfig(configFilePath string) (*Config, error) {
 			FactoryAddress:    common.HexToAddress(configRaw.SmartWallet.FactoryAddress),
 			EntrypointAddress: common.HexToAddress(configRaw.SmartWallet.EntrypointAddress),
 		},
+
+		SocketPath: configRaw.SocketPath,
+	}
+
+	if config.SocketPath == "" {
+		config.SocketPath = "/tmp/ap.sock"
 	}
 	config.validate()
 	return config, nil

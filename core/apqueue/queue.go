@@ -3,7 +3,6 @@ package apqueue
 import (
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/AvaProtocol/ap-avs/storage"
@@ -129,7 +128,7 @@ func (q *Queue) Dequeue() (*Job, error) {
 
 	prefix := []byte(q.getQueueKeyPrefix(jobPending))
 	k, v, err := q.db.FirstKVHasPrefix(prefix)
-	log.Println("found k,v", string(k), string(v))
+
 	if err != nil {
 		return nil, err
 	}

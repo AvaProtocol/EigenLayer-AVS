@@ -1,6 +1,9 @@
 package storage
 
 import (
+	"fmt"
+	"strings"
+
 	badger "github.com/dgraph-io/badger/v4"
 )
 
@@ -19,10 +22,13 @@ type Storage interface {
 
 	GetSequence(prefix []byte, inflightItem uint64) (Sequence, error)
 
-	GetKey(prefix []byte) ([]byte, error)
+	GetKey(key []byte) ([]byte, error)
 	GetByPrefix(prefix []byte) ([]*KeyValueItem, error)
 	GetKeyHasPrefix(prefix []byte) ([][]byte, error)
 	FirstKVHasPrefix(prefix []byte) ([]byte, []byte, error)
+
+	// A key only operation that returns key that has a prefix
+	ListKeys(prefix string) ([]string, error)
 
 	BatchWrite(updates map[string][]byte) error
 	Move(src, dest []byte) error
@@ -37,6 +43,7 @@ type KeyValueItem struct {
 type BadgerStorage struct {
 	config *Config
 	db     *badger.DB
+	seqs   []*badger.Sequence
 }
 
 func New(c *Config) (Storage, error) {
@@ -52,6 +59,8 @@ func New(c *Config) (Storage, error) {
 	return &BadgerStorage{
 		config: c,
 		db:     db,
+
+		seqs: make([]*badger.Sequence, 0),
 	}, nil
 }
 
@@ -60,6 +69,9 @@ func (s *BadgerStorage) Setup() error {
 }
 
 func (s *BadgerStorage) Close() error {
+	for _, seq := range s.seqs {
+		seq.Release()
+	}
 	return s.db.Close()
 }
 
@@ -163,7 +175,13 @@ func (s *BadgerStorage) GetKey(key []byte) ([]byte, error) {
 
 // Wrap badgerdb sequence
 func (s *BadgerStorage) GetSequence(prefix []byte, inflightItem uint64) (Sequence, error) {
-	return s.db.GetSequence(prefix, inflightItem)
+	seq, e := s.db.GetSequence(prefix, inflightItem)
+	if e != nil {
+		return nil, e
+	}
+
+	s.seqs = append(s.seqs, seq)
+	return seq, nil
 }
 
 func (s *BadgerStorage) FirstKVHasPrefix(prefix []byte) ([]byte, []byte, error) {
@@ -222,5 +240,35 @@ func (s *BadgerStorage) Move(src []byte, dest []byte) error {
 		err = txn.Set(dest, b)
 		return err
 	})
+}
 
+func (a *BadgerStorage) ListKeys(prefix string) ([]string, error) {
+	var keys []string
+
+	if prefix == "*" {
+		prefix = ""
+	} else if strings.HasSuffix(prefix, "*") {
+		prefix = prefix[:len(prefix)-1]
+	}
+
+	err := a.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek([]byte(prefix)); it.ValidForPrefix([]byte(prefix)); it.Next() {
+			item := it.Item()
+			key := item.Key()
+
+			keys = append(keys, fmt.Sprintf("%s", key))
+		}
+		return nil
+
+	})
+	if err == nil {
+		return keys, nil
+	}
+
+	return nil, err
 }

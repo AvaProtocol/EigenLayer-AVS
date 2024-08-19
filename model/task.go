@@ -23,8 +23,9 @@ const (
 const (
 	TaskStatusActive TaskStatusType = "active"
 
-	TimeTriggerType         TriggerType = 1
-	ContractCallTriggerType TriggerType = 2
+	TimeTriggerType          TriggerType = 1
+	ContractQueryTriggerType TriggerType = 2
+	ExpressionTriggerType    TriggerType = 3
 )
 
 // Convert protocolbuf task type to our task type
@@ -47,19 +48,38 @@ func (t TaskType) ToProtoBuf() avsproto.TaskType {
 
 }
 
+func (t TriggerType) ToProtoBuf() avsproto.TriggerType {
+	switch t {
+	case TimeTriggerType:
+		return avsproto.TriggerType_TimeTrigger
+	case ContractQueryTriggerType:
+		return avsproto.TriggerType_ContractQueryTrigger
+	case ExpressionTriggerType:
+		return avsproto.TriggerType_ExpressionTrigger
+	}
+	return avsproto.TriggerType_TimeTrigger
+}
+
 type TimeTrigger struct {
 	Fixed []int64 `json:"fixed,omitempty"`
 	Cron  string  `json:"cron,omitempty"`
 }
 
-type ContractSignalTrigger struct {
+type ContractQueryTrigger struct {
+	ContractAddress string `json:"contract_address"`
+	CallData        string `json:"calldata"`
+}
+
+type ExpressionTrigger struct {
+	Expression string `json:"expression,omitempty"`
 }
 
 type Trigger struct {
 	Type TriggerType `json:"type"`
 
-	TimeTrigger           *TimeTrigger           `json:"time_trigger,omitempty"`
-	ContractSignalTrigger *ContractSignalTrigger `json:"contract_call_trigger,omitempty"`
+	TimeTrigger          *TimeTrigger          `json:"time_trigger,omitempty"`
+	ContractQueryTrigger *ContractQueryTrigger `json:"contract_query_trigger,omitempty"`
+	ExpressionTrigger    *ExpressionTrigger    `json:"expression_trigger,omitempty"`
 }
 
 type ETHTransferPayload struct {
@@ -69,8 +89,7 @@ type ETHTransferPayload struct {
 
 type ContractExecutionPayload struct {
 	ContractAddress string `json:"contract_address"`
-	Method          string `json:"method"`
-	EncodedParams   string `json:"encoded_params"`
+	CallData        string `json:"calldata"`
 }
 
 type TaskBody struct {
@@ -100,7 +119,8 @@ type Task struct {
 	Body TaskBody `json:"body"`
 
 	Memo      string `json:"memo"`
-	ExpiredAt int64  `json:"expired_at"`
+	ExpiredAt int64  `json:"expired_at,omitempty"`
+	StartAt   int64  `json:"start_at,omitempty"`
 }
 
 // Generate a sorted uuid
@@ -119,12 +139,7 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 	owner := user.Address
 	aaAddress := user.SmartAccountAddress
 
-	if aaAddress == nil {
-		return nil, fmt.Errorf("Cannot get acount abstraction wallet")
-	}
-
 	//TODO: Validate
-
 	t := &Task{
 		ID: GenerateTaskID(),
 
@@ -137,6 +152,7 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 		Type:      TaskTypeFromProtobuf(body.TaskType),
 		Memo:      body.Memo,
 		ExpiredAt: body.ExpiredAt,
+		StartAt:   body.StartAt,
 	}
 
 	if body.Body.GetEthTransfer() != nil {
@@ -147,12 +163,12 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 	} else if body.Body.GetContractExecution() != nil {
 		t.Body.ContractExecution = &ContractExecutionPayload{
 			ContractAddress: body.Body.ContractExecution.ContractAddress,
-			Method:          body.Body.ContractExecution.Method,
-			EncodedParams:   body.Body.ContractExecution.EncodedParams,
+			CallData:        body.Body.ContractExecution.Calldata,
 		}
 	}
 
-	if body.GetTrigger().GetType() == avsproto.TriggerType_TimeTrigger {
+	switch body.GetTrigger().GetTriggerType() {
+	case avsproto.TriggerType_TimeTrigger:
 		t.Trigger.Type = TimeTriggerType
 		if schedule := body.GetTrigger().GetSchedule(); schedule != nil {
 			t.Trigger.TimeTrigger = &TimeTrigger{
@@ -160,8 +176,17 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 				Cron:  schedule.Cron,
 			}
 		}
-	} else {
-		// TODO: Contract trigger
+
+	case avsproto.TriggerType_ExpressionTrigger:
+		t.Trigger.Type = ExpressionTriggerType
+		if expression := body.GetTrigger().GetExpression(); expression != nil {
+			t.Trigger.ExpressionTrigger = &ExpressionTrigger{
+				Expression: expression.Expression,
+			}
+		}
+
+	case avsproto.TriggerType_ContractQueryTrigger:
+		t.Trigger.Type = ContractQueryTriggerType
 	}
 
 	return t, nil
@@ -196,14 +221,14 @@ func (t *Task) ToProtoBuf() (*avsproto.Task, error) {
 		}
 	}
 
-	if t.Trigger.Type == TimeTriggerType {
-		protoTask.Trigger.Type = avsproto.TriggerType_TimeTrigger
-		protoTask.Trigger.Schedule = &avsproto.TaskTrigger_TimeCondition{
+	switch t.Trigger.Type {
+	case TimeTriggerType:
+		protoTask.Trigger.TriggerType = avsproto.TriggerType_TimeTrigger
+		protoTask.Trigger.Schedule = &avsproto.TimeCondition{
 			Fixed: t.Trigger.TimeTrigger.Fixed,
 			Cron:  t.Trigger.TimeTrigger.Cron,
 		}
-	} else {
-		// TODO: Contract trigger
+	case ExpressionTriggerType:
 	}
 
 	return &protoTask, nil
@@ -224,4 +249,48 @@ func (t *Task) Key() []byte {
 func TaskKeyToId(key []byte) []byte {
 	// the first 43 bytes is owner address
 	return key[43:]
+}
+
+func (t *TimeTrigger) ToProtoBuf() *avsproto.TimeCondition {
+	v := avsproto.TimeCondition{
+		Fixed: t.Fixed,
+		Cron:  t.Cron,
+	}
+
+	return &v
+}
+
+func (t *ContractQueryTrigger) ToProtoBuf() *avsproto.ContractQueryCondition {
+	return &avsproto.ContractQueryCondition{
+		ContractAddress: t.ContractAddress,
+		Callmsg:         t.CallData,
+	}
+}
+
+func (t *ExpressionTrigger) ToProtoBuf() *avsproto.ExpressionCondition {
+	v := avsproto.ExpressionCondition{
+		Expression: t.Expression,
+	}
+
+	return &v
+}
+
+func (t *Trigger) ToProtoBuf() *avsproto.TaskTrigger {
+	v := avsproto.TaskTrigger{
+		TriggerType: t.Type.ToProtoBuf(),
+	}
+
+	if t.TimeTrigger != nil {
+		v.Schedule = t.TimeTrigger.ToProtoBuf()
+	}
+
+	if t.ContractQueryTrigger != nil {
+		v.ContractQuery = t.ContractQueryTrigger.ToProtoBuf()
+	}
+
+	if t.ExpressionTrigger != nil {
+		v.Expression = t.ExpressionTrigger.ToProtoBuf()
+	}
+
+	return &v
 }

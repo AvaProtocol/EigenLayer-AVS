@@ -38,14 +38,13 @@ func (w *Worker) loop() {
 	for {
 		select {
 		case jid := <-w.q.eventCh:
-			log.Println("got jobid", jid, "start dequeue")
 			job, err := w.q.Dequeue()
 			if err != nil {
 				log.Println("dequeue error", err)
 			}
 
 			processor, ok := w.processorRegistry[job.Type]
-			log.Println("Now let process the job with a processor", job)
+			log.Printf("start process job: %d task id: %s", jid, string(job.Data))
 			if ok {
 				err = processor.Perform(job)
 			} else {

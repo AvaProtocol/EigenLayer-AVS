@@ -36,6 +36,7 @@ type AggregatorClient interface {
 	// Operator endpoint
 	Ping(ctx context.Context, in *Checkin, opts ...grpc.CallOption) (*CheckinResp, error)
 	SyncTasks(ctx context.Context, in *SyncTasksReq, opts ...grpc.CallOption) (Aggregator_SyncTasksClient, error)
+	UpdateChecks(ctx context.Context, in *UpdateChecksReq, opts ...grpc.CallOption) (*UpdateChecksResp, error)
 }
 
 type aggregatorClient struct {
@@ -150,6 +151,15 @@ func (x *aggregatorSyncTasksClient) Recv() (*SyncTasksResp, error) {
 	return m, nil
 }
 
+func (c *aggregatorClient) UpdateChecks(ctx context.Context, in *UpdateChecksReq, opts ...grpc.CallOption) (*UpdateChecksResp, error) {
+	out := new(UpdateChecksResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/UpdateChecks", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AggregatorServer is the server API for Aggregator service.
 // All implementations must embed UnimplementedAggregatorServer
 // for forward compatibility
@@ -167,6 +177,7 @@ type AggregatorServer interface {
 	// Operator endpoint
 	Ping(context.Context, *Checkin) (*CheckinResp, error)
 	SyncTasks(*SyncTasksReq, Aggregator_SyncTasksServer) error
+	UpdateChecks(context.Context, *UpdateChecksReq) (*UpdateChecksResp, error)
 	mustEmbedUnimplementedAggregatorServer()
 }
 
@@ -200,6 +211,9 @@ func (UnimplementedAggregatorServer) Ping(context.Context, *Checkin) (*CheckinRe
 }
 func (UnimplementedAggregatorServer) SyncTasks(*SyncTasksReq, Aggregator_SyncTasksServer) error {
 	return status.Errorf(codes.Unimplemented, "method SyncTasks not implemented")
+}
+func (UnimplementedAggregatorServer) UpdateChecks(context.Context, *UpdateChecksReq) (*UpdateChecksResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateChecks not implemented")
 }
 func (UnimplementedAggregatorServer) mustEmbedUnimplementedAggregatorServer() {}
 
@@ -379,6 +393,24 @@ func (x *aggregatorSyncTasksServer) Send(m *SyncTasksResp) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Aggregator_UpdateChecks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateChecksReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).UpdateChecks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregator/UpdateChecks",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).UpdateChecks(ctx, req.(*UpdateChecksReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Aggregator_ServiceDesc is the grpc.ServiceDesc for Aggregator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -417,6 +449,10 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Ping",
 			Handler:    _Aggregator_Ping_Handler,
+		},
+		{
+			MethodName: "UpdateChecks",
+			Handler:    _Aggregator_UpdateChecks_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -3,6 +3,10 @@ const grpc = require('@grpc/grpc-js')
 const protoLoader = require('@grpc/proto-loader')
 const { ethers } = require("ethers")
 
+const {
+  TaskType, TriggerType
+} = require('./static_codegen/avs_pb');
+
 // Load the protobuf definition
 const packageDefinition = protoLoader.loadSync('../protobuf/avs.proto', {
     keepCase: true,
@@ -13,9 +17,8 @@ const packageDefinition = protoLoader.loadSync('../protobuf/avs.proto', {
 })
 
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition)
-const apProto = protoDescriptor.aggregator // Replace with your package name
+const apProto = protoDescriptor.aggregator
 const client = new apProto.Aggregator('localhost:2206', grpc.credentials.createInsecure())
-
 
 async function signMessageWithEthers(wallet, message) {
     const signature = await wallet.signMessage(message)
@@ -72,15 +75,21 @@ async function scheduleExampleJob(owner, token) {
 
   // ETH-USD pair on sepolia
   // https://sepolia.etherscan.io/address/0x694AA1769357215DE4FAC081bf1f309aDC325306#code
-  const taskCondition = `chainlinkPrice("0x694AA1769357215DE4FAC081bf1f309aDC325306") > parseUnit("262199799820", 8)`
-  console.log("\n\nTask condition:", taskBody)
+  // The price return is big.Int so we have to use the cmp function to compare
+  const taskCondition = `bigCmp(
+      priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306"),
+      toBigInt("228171987813")) > 0`
+  console.log("\n\nTask condition:", taskCondition)
 
   const metadata = new grpc.Metadata();
-  console.log("token is", token);
   metadata.add('authkey', token);
 
+  console.log("Trigger type", TriggerType.EXPRESSIONTRIGGER)
+
   const result = await asyncRPC(client, 'CreateTask', {
-    task_type: apProto.TaskType.ContractExecutionTask,
+    // A contract execution will be perform for this taks
+    task_type: TaskType.CONTRACTEXECUTIONTASK,
+
     body: {
       contract_execution: {
         // Our ERC20 test token deploy on sepolia
@@ -91,20 +100,24 @@ async function scheduleExampleJob(owner, token) {
     },
 
     trigger: {
-      trigger_type: apProto.TriggerType.ExpressionTrigger,
+      trigger_type: TriggerType.EXPRESSIONTRIGGER,
       expression: {
         expression: taskCondition,
       },
     },
     
-    expired_at: Math.floor(+new Date() / 3600 * 24 * 30),
+    start_at:  Math.floor(Date.now() / 1000) + 30,
+    expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
     memo: `Demo Example task for ${owner}`
   }, metadata)
 
-  console.log("Task creation resp", result)
+  console.log("Expression Task ID is:", result)
 }
 
 (async() => {
+  // 1. Generate the api token to interact with aggregator
   const { owner, token } = await generateApiToken();
+
+  // 2. Now we can schedule job for this owner
   await scheduleExampleJob(owner, token)
 })()

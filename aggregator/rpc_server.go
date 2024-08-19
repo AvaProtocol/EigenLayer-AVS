@@ -5,17 +5,18 @@ import (
 	"log"
 	"math/big"
 	"net"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
 	"github.com/AvaProtocol/ap-avs/core/config"
+	"github.com/AvaProtocol/ap-avs/core/taskengine"
 	"github.com/AvaProtocol/ap-avs/model"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/storage"
@@ -26,6 +27,7 @@ type RpcServer struct {
 	avsproto.UnimplementedAggregatorServer
 	config *config.Config
 	db     storage.Storage
+	engine *taskengine.Engine
 
 	operatorPool *OperatorPool
 
@@ -75,20 +77,10 @@ func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.Create
 		return nil, err
 	}
 
-	task, err := model.NewTaskFromProtobuf(user, taskPayload)
+	task, err := r.engine.CreateTask(user, taskPayload)
 	if err != nil {
 		return nil, err
 	}
-
-	updates := map[string][]byte{}
-
-	// global unique key-value for fast lookup
-	updates[task.ID], err = task.ToJSON()
-
-	// storage to find task belong to a user
-	updates[string(task.Key())] = []byte(model.TaskStatusActive)
-
-	r.db.BatchWrite(updates)
 
 	return &avsproto.CreateTaskResp{
 		Id: task.ID,
@@ -144,24 +136,20 @@ func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avspro
 func (r *RpcServer) SyncTasks(payload *avsproto.SyncTasksReq, srv avsproto.Aggregator_SyncTasksServer) error {
 	log.Printf("sync task for operator : %s", payload.Address)
 
-	for {
-		resp := avsproto.SyncTasksResp{
-			// TODO: Hook up to the new task channel to syncdicate in realtime
-			// Currently this is setup just to generate the metrics so we can
-			// prepare the dashboard
-			// Our actually task will be more completed
-			Id:       "1",
-			TaskType: "CurrentBlockTime",
-		}
+	err := r.engine.StreamCheckToOperator(payload, srv)
+	log.Printf("close sync stream for: %s %v", payload.Address, err)
 
-		if err := srv.Send(&resp); err != nil {
-			log.Printf("error when sending task to operator %s: %v", payload.Address, err)
-			return err
-		}
-		time.Sleep(time.Duration(5) * time.Second)
+	return err
+}
+
+func (r *RpcServer) UpdateChecks(ctx context.Context, payload *avsproto.UpdateChecksReq) (*avsproto.UpdateChecksResp, error) {
+	if err := r.engine.AggregateChecksResult(payload.Address, payload.Id); err != nil {
+		return nil, err
 	}
 
-	return nil
+	return &avsproto.UpdateChecksResp{
+		UpdatedAt: timestamppb.Now(),
+	}, nil
 }
 
 // startRpcServer initializes and establish a tcp socket on given address from
@@ -183,7 +171,9 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 	}
 
 	avsproto.RegisterAggregatorServer(s, &RpcServer{
-		db:           agg.db,
+		db:     agg.db,
+		engine: agg.engine,
+
 		ethrpc:       ethclient,
 		config:       agg.config,
 		operatorPool: agg.operatorPool,

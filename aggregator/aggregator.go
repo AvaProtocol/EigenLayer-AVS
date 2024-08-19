@@ -15,8 +15,10 @@ import (
 
 	"github.com/AvaProtocol/ap-avs/aggregator/types"
 	"github.com/AvaProtocol/ap-avs/core"
+	"github.com/AvaProtocol/ap-avs/core/apqueue"
 	"github.com/AvaProtocol/ap-avs/core/chainio"
 	"github.com/AvaProtocol/ap-avs/core/config"
+	"github.com/AvaProtocol/ap-avs/core/taskengine"
 	"github.com/Layr-Labs/eigensdk-go/chainio/clients"
 	sdkclients "github.com/Layr-Labs/eigensdk-go/chainio/clients"
 	blsagg "github.com/Layr-Labs/eigensdk-go/services/bls_aggregation"
@@ -34,6 +36,14 @@ const (
 	taskChallengeWindowBlock = 100
 	blockTimeSeconds         = 12 * time.Second
 	avsName                  = "oak-avs"
+)
+
+type AggregatorStatus string
+
+const (
+	initStatus     AggregatorStatus = "init"
+	runningStatus  AggregatorStatus = "running"
+	shutdownStatus AggregatorStatus = "shutdown"
 )
 
 func RunWithConfig(configPath string) error {
@@ -54,6 +64,7 @@ func RunWithConfig(configPath string) error {
 type Aggregator struct {
 	logger    logging.Logger
 	avsWriter chainio.AvsWriterer
+
 	// aggregation related fields
 	blsAggregationService blsagg.BlsAggregationService
 	tasks                 map[types.TaskIndex]cstaskmanager.IAutomationTaskManagerTask
@@ -68,6 +79,14 @@ type Aggregator struct {
 	chainID      *big.Int
 
 	operatorPool *OperatorPool
+
+	// task management
+	engine *taskengine.Engine
+	// execute task that is due to run
+	queue  *apqueue.Queue
+	worker *apqueue.Worker
+
+	status AggregatorStatus
 }
 
 // NewAggregator creates a new Aggregator with the provided config.
@@ -121,6 +140,7 @@ func NewAggregator(c *config.Config) (*Aggregator, error) {
 		config: c,
 
 		operatorPool: &OperatorPool{},
+		status:       initStatus,
 	}, nil
 }
 
@@ -162,6 +182,8 @@ func (agg *Aggregator) init() {
 }
 
 func (agg *Aggregator) Start(ctx context.Context) error {
+	agg.status = runningStatus
+
 	agg.logger.Infof("Starting aggregator")
 
 	agg.init()
@@ -169,14 +191,17 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.logger.Infof("Initialize Storagre")
 	agg.initDB(ctx)
 
-	agg.logger.Infof("Starting rpc server")
-	go agg.startRpcServer(ctx)
+	agg.logger.Infof("Starting Task engine")
+	go agg.startTaskEngine(ctx)
+
+	agg.logger.Info("Starting repl")
+	go agg.startRepl()
 
 	agg.logger.Infof("Starting http server")
 	go agg.startHttpServer(ctx)
 
-	agg.logger.Infof("Starting execution engine")
-	go agg.startExecutionEngine(ctx)
+	agg.logger.Infof("Starting rpc server")
+	go agg.startRpcServer(ctx)
 
 	// Setup wait signal
 	sigs := make(chan os.Signal, 1)
@@ -188,10 +213,12 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	}()
 
 	<-done
-	agg.logger.Infof("Shutting down.")
+	agg.logger.Infof("Shutting down...")
 
-	// Shutdown the db
 	// TODO: handle ongoing client and fanout closing
+	agg.status = shutdownStatus
+	agg.stopRepl()
+	agg.stopTaskEngine()
 	agg.db.Close()
 
 	return nil
@@ -236,4 +263,8 @@ func (agg *Aggregator) sendAggregatedResponseToContract(blsAggServiceResp blsagg
 	if err != nil {
 		agg.logger.Error("Aggregator failed to respond to task", "err", err)
 	}
+}
+
+func (agg *Aggregator) IsShutdown() bool {
+	return agg.status == shutdownStatus
 }
