@@ -9,8 +9,10 @@
   "author": "Ava Protocol",
   "license": "ISC",
   "dependencies": {
+    "@grpc/grpc-js": "^1.11.1",
+    "@grpc/proto-loader": "^0.7.13",
     "elliptic": "^6.5.5",
-    "ethers": "^6.13.1",
+    "ethers": "^6.13.2",
     "grpc-tools": "^1.12.4",
     "keccak256": "^1.0.6",
     "secp256k1": "^5.0.0"
