@@ -88,20 +88,15 @@ contract DeployServiceManager is Script {
         {
             // need manually step in
             // beaconETH
-            deployedStrategyArray[0].token =
-                address(bytes20(bytes("0xbeaC0eeEeeeeEEeEeEEEEeeEEeEeeeEeeEEBEaC0")));
+            deployedStrategyArray[0].token = 0xbeaC0eeEeeeeEEeEeEEEEeeEEeEeeeEeeEEBEaC0;
             //stETH
-            deployedStrategyArray[1].token =
-                address(bytes20(bytes("0x93c4b944D05dfe6df7645A86cd2206016c51564D")));
+            deployedStrategyArray[1].token = 0x93c4b944D05dfe6df7645A86cd2206016c51564D;
             //cbETH
-            deployedStrategyArray[2].token =
-                address(bytes20(bytes("0x54945180dB7943c0ed0FEE7EdaB2Bd24620256bc")));
+            deployedStrategyArray[2].token = 0x54945180dB7943c0ed0FEE7EdaB2Bd24620256bc;
             //swETH
-            deployedStrategyArray[3].token =
-                address(bytes20(bytes("0x0Fe4F44beE93503346A3Ac9EE5A26b130a5796d6")));
+            deployedStrategyArray[3].token = 0x0Fe4F44beE93503346A3Ac9EE5A26b130a5796d6;
             //osETH
-            deployedStrategyArray[4].token =
-                address(bytes20(bytes("0x57ba429517c3473B6d34CA9aCd56c0e735b94c02")));
+            deployedStrategyArray[4].token = 0x57ba429517c3473B6d34CA9aCd56c0e735b94c02 ;
         }
 
         {
