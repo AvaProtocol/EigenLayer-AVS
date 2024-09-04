@@ -83,6 +83,29 @@ func TestExpression(t *testing.T) {
 	}
 }
 
+func TestExpressionDynamic(t *testing.T) {
+	SetRpc(os.Getenv("RPC_URL"))
+
+	// https://sepolia.etherscan.io/address/0x9aCb42Ac07C72cFc29Cd95d9DEaC807E93ada1F6#code
+	match, e := RunExpressionQuery(`
+		bigCmp(
+		  readContractData(
+		    "0x9aCb42Ac07C72cFc29Cd95d9DEaC807E93ada1F6",
+			"0x0a79309b000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a",
+			"retrieve",
+			'[{"inputs":[{"internalType":"address","name":"addr","type":"address"}],"name":"retrieve","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]'
+		  )[0],
+		  toBigInt("2000")
+		) > 0
+	`)
+	if e != nil {
+		t.Errorf("Run expr error: %v %v", e, match)
+	}
+	if !match {
+		t.Error("Evaluate error. Expected: true, received: false")
+	}
+}
+
 func TestExpressionPanicWonCrash(t *testing.T) {
 	rpcConn = nil
 	p, e := CompileExpression(`priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306")`)

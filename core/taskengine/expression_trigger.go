@@ -1,16 +1,49 @@
 package taskengine
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	ethmath "github.com/ethereum/go-ethereum/common/math"
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
 )
+
+// A generic function to query any contract. The method andcontractABI is
+// necessary so we can unpack the result
+func readContractData(contractAddress string, data string, method string, contractABI string) []any {
+	parsedABI, err := abi.JSON(strings.NewReader(contractABI))
+	if err != nil {
+		log.Println("read contract data parse abi error", err)
+		return nil
+	}
+
+	// Perform the call
+	output, err := QueryContractRaw(
+		context.Background(),
+		rpcConn,
+		common.HexToAddress(contractAddress),
+		common.FromHex(data))
+	if err != nil {
+		log.Println("read contract data error", err)
+		return nil
+	}
+
+	// Unpack the output
+	result, err := parsedABI.Unpack(method, output)
+	if err != nil {
+		log.Println("unpack contract result error", err)
+		return nil
+	}
+
+	return result
+}
 
 // QueryContract
 //const taskCondition = `cmp(chainlinkPrice("0x694AA1769357215DE4FAC081bf1f309aDC325306"), parseUnit("262199799820", 8)) > 1`
@@ -60,10 +93,11 @@ func toBigInt(val string) *big.Int {
 
 var (
 	exprEnv = map[string]any{
-		"priceChainlink": chainlinkPrice,
-		"bigCmp":         bigCmp,
-		"parseUnit":      parseUnit,
-		"toBigInt":       toBigInt,
+		"readContractData": readContractData,
+		"priceChainlink":   chainlinkPrice,
+		"bigCmp":           bigCmp,
+		"parseUnit":        parseUnit,
+		"toBigInt":         toBigInt,
 	}
 )
 
