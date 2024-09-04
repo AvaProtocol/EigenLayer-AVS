@@ -10,6 +10,7 @@ out/
 # Dotenv file
 .env
 *.env
+.env*
 
 # binary
 ap-avs
@@ -27,3 +28,4 @@ config/*.yaml
 contracts/script/output*
 
 contracts/broadcast/
+alias-ecdsa.key.json
