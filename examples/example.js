@@ -122,7 +122,7 @@ async function scheduleTimeTransfer(owner, token) {
   // 1. Generate the calldata to check condition
   const taskBody = getTaskData()
   console.log("\n\nTask body:", taskBody)
-  console.log("\n\nTask condition:", taskCondition)
+  console.log("\n\nTask condition: Timeschedule", "*/2")
 
   const metadata = new grpc.Metadata()
   metadata.add('authkey', token)
@@ -275,6 +275,10 @@ async function getWallet(owner, token) {
 
     case "genTaskData":
       console.log("pack contract call", getTaskDataQuery(owner))
+      break
+
+    case "time-schedule":
+      await scheduleTimeTransfer(owner, token)
       break
 
     default:
