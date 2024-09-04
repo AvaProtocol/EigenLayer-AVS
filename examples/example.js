@@ -67,18 +67,12 @@ function getTaskData() {
   return iface.encodeFunctionData("transfer", [ "0xe0f7D11FD714674722d325Cd86062A5F1882E13a", ethers.parseUnits("0.00761", 18) ])
 }
 
-async function scheduleExampleJob(owner, token) {
+async function scheduleExampleJob(owner, token, taskCondition) {
   // Now we can schedule a task
   // 1. Generate the calldata to check condition
   const taskBody = getTaskData()
   console.log("\n\nTask body:", taskBody)
 
-  // ETH-USD pair on sepolia
-  // https://sepolia.etherscan.io/address/0x694AA1769357215DE4FAC081bf1f309aDC325306#code
-  // The price return is big.Int so we have to use the cmp function to compare
-  const taskCondition = `bigCmp(
-      priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306"),
-      toBigInt("228171987813")) > 0`
   console.log("\n\nTask condition:", taskCondition)
 
   const metadata = new grpc.Metadata();
@@ -132,6 +126,15 @@ async function getTask(owner, token, taskId) {
   console.log("Task Data for ", taskId, "\n", result)
 }
 
+async function cancel(owner, token, taskId) {
+  const metadata = new grpc.Metadata();
+  metadata.add('authkey', token);
+
+  const result = await asyncRPC(client, 'CancelTask', { bytes: taskId }, metadata)
+
+  console.log("Canceled Task Data for ", taskId, "\n", result)
+}
+
 async function getWallet(owner, token) {
   const metadata = new grpc.Metadata();
   metadata.add('authkey', token);
@@ -148,8 +151,19 @@ async function getWallet(owner, token) {
 
   switch (process.argv[2]) {
     case "schedule":
-      // 2. Now we can schedule job for this owner
-      await scheduleExampleJob(owner, token)
+      // ETH-USD pair on sepolia
+      // https://sepolia.etherscan.io/address/0x694AA1769357215DE4FAC081bf1f309aDC325306#code
+      // The price return is big.Int so we have to use the cmp function to compare
+      const taskCondition = `bigCmp(
+      priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306"),
+      toBigInt("228171987813")) > 0`
+      await scheduleExampleJob(owner, token, taskCondition)
+      break
+    case "schedule2":
+      const taskCondition2 = `bigCmp(
+      priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306"),
+      toBigInt("99228171987813")) > 0`
+      await scheduleExampleJob(owner, token, taskCondition2)
       break
     case "list":
       await listTask(owner, token)
@@ -157,15 +171,19 @@ async function getWallet(owner, token) {
     case "get":
       await getTask(owner, token, process.argv[3])
       break
+    case "cancel":
+      await cancel(owner, token, process.argv[3])
+      break
     case "wallet":
       await getWallet(owner, token)
       break
     default:
       console.log(`Usage:
 
-      wallet:          to find smart wallet address for this eoa
+      wallet:           to find smart wallet address for this eoa
       list:             to find all task
-      schedule:         to schedule an example task
+      schedule:         to schedule an example task that its condition will be matched quickly
+      schedule2:        to schedule an example task that has a very high price target
       get <task-id>:    to get task detail
       cancel <task-id>: to cancel a task`)
   }
