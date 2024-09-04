@@ -5,7 +5,7 @@ const { ethers } = require("ethers")
 
 const {
   TaskType, TriggerType
-} = require('./static_codegen/avs_pb');
+} = require('./static_codegen/avs_pb')
 
 // Load the protobuf definition
 const packageDefinition = protoLoader.loadSync('../protobuf/avs.proto', {
@@ -29,7 +29,7 @@ const privateKey = process.env.PRIVATE_KEY // Make sure to provide your private 
 
 function asyncRPC(client, method, request, metadata) {
     return new Promise((resolve, reject) => {
-		client[method].bind(client)(request, metadata, (error, response) => {
+        client[method].bind(client)(request, metadata, (error, response) => {
             if (error) {
                 reject(error)
             } else {
@@ -67,7 +67,16 @@ function getTaskData() {
   return iface.encodeFunctionData("transfer", [ "0xe0f7D11FD714674722d325Cd86062A5F1882E13a", ethers.parseUnits("0.00761", 18) ])
 }
 
-async function scheduleExampleJob(owner, token, taskCondition) {
+function getTaskDataQuery(owner) {
+  let ABI = [
+    "function retrieve(address addr) public view returns (uint256)"
+  ]
+  let iface = new ethers.Interface(ABI)
+  return iface.encodeFunctionData("retrieve", [ owner,])
+}
+
+
+async function scheduleERC20TransferJob(owner, token, taskCondition) {
   // Now we can schedule a task
   // 1. Generate the calldata to check condition
   const taskBody = getTaskData()
@@ -75,8 +84,8 @@ async function scheduleExampleJob(owner, token, taskCondition) {
 
   console.log("\n\nTask condition:", taskCondition)
 
-  const metadata = new grpc.Metadata();
-  metadata.add('authkey', token);
+  const metadata = new grpc.Metadata()
+  metadata.add('authkey', token)
 
   console.log("Trigger type", TriggerType.EXPRESSIONTRIGGER)
 
@@ -109,8 +118,8 @@ async function scheduleExampleJob(owner, token, taskCondition) {
 }
 
 async function listTask(owner, token) {
-  const metadata = new grpc.Metadata();
-  metadata.add('authkey', token);
+  const metadata = new grpc.Metadata()
+  metadata.add('authkey', token)
 
   const result = await asyncRPC(client, 'ListTasks', {}, metadata)
 
@@ -118,8 +127,8 @@ async function listTask(owner, token) {
 }
 
 async function getTask(owner, token, taskId) {
-  const metadata = new grpc.Metadata();
-  metadata.add('authkey', token);
+  const metadata = new grpc.Metadata()
+  metadata.add('authkey', token)
 
   const result = await asyncRPC(client, 'GetTask', { bytes: taskId }, metadata)
 
@@ -127,8 +136,8 @@ async function getTask(owner, token, taskId) {
 }
 
 async function cancel(owner, token, taskId) {
-  const metadata = new grpc.Metadata();
-  metadata.add('authkey', token);
+  const metadata = new grpc.Metadata()
+  metadata.add('authkey', token)
 
   const result = await asyncRPC(client, 'CancelTask', { bytes: taskId }, metadata)
 
@@ -136,8 +145,8 @@ async function cancel(owner, token, taskId) {
 }
 
 async function getWallet(owner, token) {
-  const metadata = new grpc.Metadata();
-  metadata.add('authkey', token);
+  const metadata = new grpc.Metadata()
+  metadata.add('authkey', token)
 
   const result = await asyncRPC(client, 'GetSmartAccountAddress', { owner: owner }, metadata)
 
@@ -147,43 +156,80 @@ async function getWallet(owner, token) {
 
 (async() => {
   // 1. Generate the api token to interact with aggregator
-  const { owner, token } = await generateApiToken();
+  const { owner, token } = await generateApiToken()
+
+  let taskCondition = ""
 
   switch (process.argv[2]) {
     case "schedule":
       // ETH-USD pair on sepolia
       // https://sepolia.etherscan.io/address/0x694AA1769357215DE4FAC081bf1f309aDC325306#code
       // The price return is big.Int so we have to use the cmp function to compare
-      const taskCondition = `bigCmp(
+      taskCondition = `bigCmp(
       priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306"),
       toBigInt("228171987813")) > 0`
-      await scheduleExampleJob(owner, token, taskCondition)
+      await scheduleERC20TransferJob(owner, token, taskCondition)
       break
+
     case "schedule2":
-      const taskCondition2 = `bigCmp(
+      taskCondition = `bigCmp(
       priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306"),
       toBigInt("99228171987813")) > 0`
-      await scheduleExampleJob(owner, token, taskCondition2)
+      await scheduleERC20TransferJob(owner, token, taskCondition)
       break
+
+    case "schedule-generic":
+      // https://sepolia.etherscan.io/address/0x9aCb42Ac07C72cFc29Cd95d9DEaC807E93ada1F6#writeContract
+      // This is a demo contract where we have a map of address -> number
+      // we can set the value to demo that the task is trigger when the number
+      // match a condition
+      // When matching an arbitrary contract, the user need to provide the ABI
+      // for the function they call so our task engine can unpack the result
+      taskCondition = `
+        bigCmp(
+          readContractData(
+            // Target contract address
+            "0x9aCb42Ac07C72cFc29Cd95d9DEaC807E93ada1F6",
+            // encoded call data for retrieve method, check getTaskDataQuery to
+            // see how to generate this
+            "0x0a79309b000000000000000000000000e272b72e51a5bf8cb720fc6d6df164a4d5e321c5",
+            // Method call and ABI are needed so the engine can parse the result
+            "retrieve",
+            '[{"inputs":[{"internalType":"address","name":"addr","type":"address"}],"name":"retrieve","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]'
+          )[0],
+          toBigInt("2000")
+        ) > 0`
+      await scheduleERC20TransferJob(owner, token, taskCondition)
+      break
+
     case "list":
       await listTask(owner, token)
       break
+
     case "get":
       await getTask(owner, token, process.argv[3])
       break
+
     case "cancel":
       await cancel(owner, token, process.argv[3])
       break
+
     case "wallet":
       await getWallet(owner, token)
       break
+
+    case "genTaskData":
+      console.log("pack contract call", getTaskDataQuery(owner))
+      break
+
     default:
       console.log(`Usage:
 
       wallet:           to find smart wallet address for this eoa
-      list:             to find all task
-      schedule:         to schedule an example task that its condition will be matched quickly
-      schedule2:        to schedule an example task that has a very high price target
+      list:             to find all tasks
+      schedule:         to schedule a task with chainlink eth-usd its condition will be matched quickly
+      schedule2:        to schedule a task with chainlink that has a very high price target
+      schedule-generic: to schedule a task with an arbitrary contract query
       get <task-id>:    to get task detail
       cancel <task-id>: to cancel a task`)
   }
