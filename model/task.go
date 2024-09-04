@@ -225,7 +225,9 @@ func (t *Task) ToProtoBuf() (*avsproto.Task, error) {
 		ExpiredAt: t.ExpiredAt,
 		Memo:      t.Memo,
 
-		Executions: ExecutionsToProtoBuf(t.Executions),
+		Executions:  ExecutionsToProtoBuf(t.Executions),
+		CompletedAt: t.CompletedAt,
+		Status:      t.Status,
 	}
 
 	if t.Body.ETHTransfer != nil {
@@ -277,6 +279,11 @@ func (t *Task) SetCompleted() {
 
 func (t *Task) SetFailed() {
 	t.Status = avsproto.TaskStatus_Failed
+	t.CompletedAt = time.Now().Unix()
+}
+
+func (t *Task) SetCanceled() {
+	t.Status = avsproto.TaskStatus_Canceled
 	t.CompletedAt = time.Now().Unix()
 }
 

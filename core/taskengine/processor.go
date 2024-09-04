@@ -72,11 +72,11 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 
 	owner := common.HexToAddress(task.Owner)
 	bundlerClient, e := bundler.NewBundlerClient(c.smartWalletConfig.BundlerURL)
-	log.Println("about to send task to bundle", string(job.Data), job.Name, job.Type, task, c.smartWalletConfig.BundlerURL)
 	if e != nil {
 		panic(e)
 	}
 
+	log.Println("push userops to bundle", string(job.Data), job.Name, job.Type, task, c.smartWalletConfig.BundlerURL)
 	txResult, err := preset.SendUserOp(
 		conn,
 		bundlerClient,

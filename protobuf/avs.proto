@@ -193,6 +193,7 @@ message ListTasksReq {}
 message ListTasksResp {
     message TaskItemResp {
         string id = 1;
+        TaskStatus status = 2;
     }
 
     repeated TaskItemResp tasks = 1;

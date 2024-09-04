@@ -39,6 +39,8 @@ type Engine struct {
 func SetRpc(rpcURL string) {
 	if conn, err := ethclient.Dial(rpcURL); err == nil {
 		rpcConn = conn
+	} else {
+		panic(err)
 	}
 }
 
@@ -61,7 +63,8 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue) *Engin
 		sentTasks: make(map[string]bool),
 	}
 
-	SetRpc(config.EthHttpRpcUrl)
+	SetRpc(config.SmartWallet.EthRpcUrl)
+	//SetWsRpc(config.SmartWallet.EthWsUrl)
 
 	return &e
 }
@@ -168,16 +171,19 @@ func (n *Engine) AggregateChecksResult(address string, ids []string) error {
 }
 
 func (n *Engine) ListTasksByUser(user *model.User) ([]*avsproto.ListTasksResp_TaskItemResp, error) {
-	taskIDs, err := n.db.GetKeyHasPrefix([]byte(fmt.Sprintf("u:%s", user.Address.String())))
+	taskIDs, err := n.db.GetByPrefix([]byte(fmt.Sprintf("u:%s", user.Address.String())))
 
 	if err != nil {
 		return nil, err
 	}
 
 	tasks := make([]*avsproto.ListTasksResp_TaskItemResp, len(taskIDs))
-	for i, taskKey := range taskIDs {
+	for i, kv := range taskIDs {
+
+		status, _ := strconv.Atoi(string(kv.Value))
 		tasks[i] = &avsproto.ListTasksResp_TaskItemResp{
-			Id: string(model.TaskKeyToId(taskKey[2:])),
+			Id:     string(model.TaskKeyToId(kv.Key[2:])),
+			Status: avsproto.TaskStatus(status),
 		}
 	}
 
@@ -207,12 +213,31 @@ func (n *Engine) GetTaskByUser(user *model.User, taskID string) (*model.Task, er
 }
 
 func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error) {
-	task := &model.Task{
-		ID:    taskID,
-		Owner: user.Address.Hex(),
+	task, err := n.GetTaskByUser(user, taskID)
+
+	if err != nil {
+		return false, err
 	}
 
-	log.Println("cancel task", task)
+	if task.Status != avsproto.TaskStatus_Active {
+		return false, fmt.Errorf("Only active task can be cancelled")
+	}
+
+	updates := map[string][]byte{}
+	oldStatus := task.Status
+	task.SetCanceled()
+	updates[TaskStorageKey(task.ID, oldStatus)], err = task.ToJSON()
+	updates[TaskUserKey(task)] = []byte(fmt.Sprintf("%d", task.Status))
+
+	if err = n.db.BatchWrite(updates); err == nil {
+		n.db.Move(
+			[]byte(TaskStorageKey(task.ID, oldStatus)),
+			[]byte(TaskStorageKey(task.ID, task.Status)),
+		)
+	} else {
+		// TODO Gracefully handling of storage cleanup
+	}
+
 	return true, nil
 }
 

@@ -51,6 +51,7 @@ type Config struct {
 
 type SmartWalletConfig struct {
 	EthRpcUrl         string
+	EthWsUrl          string
 	BundlerURL        string
 	FactoryAddress    common.Address
 	EntrypointAddress common.Address
@@ -75,6 +76,7 @@ type ConfigRaw struct {
 
 	SmartWallet struct {
 		EthRpcUrl            string `yaml:"eth_rpc_url"`
+		EthWsUrl             string `yaml:"eth_ws_url"`
 		BundlerURL           string `yaml:"bundler_url"`
 		FactoryAddress       string `yaml:"factory_address"`
 		EntrypointAddress    string `yaml:"entrypoint_address"`
@@ -175,6 +177,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 
 		SmartWallet: &SmartWalletConfig{
 			EthRpcUrl:            configRaw.SmartWallet.EthRpcUrl,
+			EthWsUrl:             configRaw.SmartWallet.EthWsUrl,
 			BundlerURL:           configRaw.SmartWallet.BundlerURL,
 			FactoryAddress:       common.HexToAddress(configRaw.SmartWallet.FactoryAddress),
 			EntrypointAddress:    common.HexToAddress(configRaw.SmartWallet.EntrypointAddress),
