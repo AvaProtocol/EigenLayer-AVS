@@ -117,6 +117,47 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
   console.log("Expression Task ID is:", result)
 }
 
+async function scheduleTimeTransfer(owner, token) {
+  // Now we can schedule a task
+  // 1. Generate the calldata to check condition
+  const taskBody = getTaskData()
+  console.log("\n\nTask body:", taskBody)
+  console.log("\n\nTask condition:", taskCondition)
+
+  const metadata = new grpc.Metadata()
+  metadata.add('authkey', token)
+
+  console.log("Trigger type", TriggerType.TIMETRIGGER)
+
+  const result = await asyncRPC(client, 'CreateTask', {
+    // A contract execution will be perform for this taks
+    task_type: TaskType.CONTRACTEXECUTIONTASK,
+
+    body: {
+      contract_execution: {
+        // Our ERC20 test token deploy on sepolia
+        // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
+        contract_address: "0x69256ca54e6296e460dec7b29b7dcd97b81a3d55",
+        calldata: taskBody,
+      }
+    },
+
+    trigger: {
+      trigger_type: TriggerType.TIMETRIGGER,
+      schedule: {
+        cron: "*/2 * * * *",
+      },
+    },
+    
+    start_at:  Math.floor(Date.now() / 1000) + 30,
+    expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
+    memo: `Demo Example task for ${owner}`
+  }, metadata)
+
+  console.log("Expression Task ID is:", result)
+}
+
+
 async function listTask(owner, token) {
   const metadata = new grpc.Metadata()
   metadata.add('authkey', token)
@@ -143,6 +184,16 @@ async function cancel(owner, token, taskId) {
 
   console.log("Canceled Task Data for ", taskId, "\n", result)
 }
+
+async function deleteTask(owner, token, taskId) {
+  const metadata = new grpc.Metadata()
+  metadata.add('authkey', token)
+
+  const result = await asyncRPC(client, 'DeleteTask', { bytes: taskId }, metadata)
+
+  console.log("Delete Task Data for ", taskId, "\n", result)
+}
+
 
 async function getWallet(owner, token) {
   const metadata = new grpc.Metadata()
@@ -213,6 +264,10 @@ async function getWallet(owner, token) {
     case "cancel":
       await cancel(owner, token, process.argv[3])
       break
+    case "delete":
+      await deleteTask(owner, token, process.argv[3])
+      break
+
 
     case "wallet":
       await getWallet(owner, token)
@@ -231,6 +286,7 @@ async function getWallet(owner, token) {
       schedule2:        to schedule a task with chainlink that has a very high price target
       schedule-generic: to schedule a task with an arbitrary contract query
       get <task-id>:    to get task detail
-      cancel <task-id>: to cancel a task`)
+      cancel <task-id>: to cancel a task
+      delete <task-id>: to completely remove a task`)
   }
 })()
