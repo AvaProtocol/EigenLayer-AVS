@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/oklog/ulid/v2"
 
@@ -13,16 +14,12 @@ type TaskType int
 type TriggerType int
 type ScheduleType string
 
-type TaskStatusType string
-
 const (
 	ETHTransferType       TaskType = 0
 	ContractExecutionType TaskType = 1
 )
 
 const (
-	TaskStatusActive TaskStatusType = "active"
-
 	TimeTriggerType          TriggerType = 1
 	ContractQueryTriggerType TriggerType = 2
 	ExpressionTriggerType    TriggerType = 3
@@ -97,6 +94,12 @@ type TaskBody struct {
 	ContractExecution *ContractExecutionPayload `json:"contract_execution,omitempty"`
 }
 
+type Execution struct {
+	Epoch      int64  `json:"epoch"`
+	UserOpHash string `json:"userop_hash,omitempty"`
+	Error      string `json:"failed_reason,omitempty"`
+}
+
 type Task struct {
 	// a unique id identifi this task in entire system
 	ID string `json:"id"`
@@ -118,9 +121,13 @@ type Task struct {
 	// a method call, or a batch call through multicall contract
 	Body TaskBody `json:"body"`
 
-	Memo      string `json:"memo"`
-	ExpiredAt int64  `json:"expired_at,omitempty"`
-	StartAt   int64  `json:"start_at,omitempty"`
+	Memo        string `json:"memo"`
+	ExpiredAt   int64  `json:"expired_at,omitempty"`
+	StartAt     int64  `json:"start_at,omitempty"`
+	CompletedAt int64  `json:"completed_at,omitempty"`
+
+	Status     avsproto.TaskStatus `json:"status"`
+	Executions []*Execution        `json:"executions,omitempty"`
 }
 
 // Generate a sorted uuid
@@ -153,6 +160,10 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 		Memo:      body.Memo,
 		ExpiredAt: body.ExpiredAt,
 		StartAt:   body.StartAt,
+
+		// initial state for task
+		Status:     avsproto.TaskStatus_Active,
+		Executions: []*Execution{},
 	}
 
 	if body.Body.GetEthTransfer() != nil {
@@ -210,14 +221,24 @@ func (t *Task) ToProtoBuf() (*avsproto.Task, error) {
 		Trigger:  &avsproto.TaskTrigger{},
 		Body:     &avsproto.TaskBody{},
 
+		StartAt:   t.StartAt,
 		ExpiredAt: t.ExpiredAt,
 		Memo:      t.Memo,
+
+		Executions: ExecutionsToProtoBuf(t.Executions),
 	}
 
 	if t.Body.ETHTransfer != nil {
 		protoTask.Body.EthTransfer = &avsproto.ETHTransfer{
 			Destination: t.Body.ETHTransfer.Destination,
 			Amount:      t.Body.ETHTransfer.Amount,
+		}
+	}
+
+	if t.Body.ContractExecution != nil {
+		protoTask.Body.ContractExecution = &avsproto.ContractExecution{
+			ContractAddress: t.Body.ContractExecution.ContractAddress,
+			Calldata:        t.Body.ContractExecution.CallData,
 		}
 	}
 
@@ -229,6 +250,10 @@ func (t *Task) ToProtoBuf() (*avsproto.Task, error) {
 			Cron:  t.Trigger.TimeTrigger.Cron,
 		}
 	case ExpressionTriggerType:
+		protoTask.Trigger.TriggerType = avsproto.TriggerType_ExpressionTrigger
+		protoTask.Trigger.Expression = &avsproto.ExpressionCondition{
+			Expression: t.Trigger.ExpressionTrigger.Expression,
+		}
 	}
 
 	return &protoTask, nil
@@ -243,6 +268,29 @@ func (t *Task) FromStorageData(body []byte) error {
 // Generate a global unique key for the task in our system
 func (t *Task) Key() []byte {
 	return []byte(fmt.Sprintf("%s:%s", t.Owner, t.ID))
+}
+
+func (t *Task) SetCompleted() {
+	t.Status = avsproto.TaskStatus_Completed
+	t.CompletedAt = time.Now().Unix()
+}
+
+func (t *Task) SetFailed() {
+	t.Status = avsproto.TaskStatus_Failed
+	t.CompletedAt = time.Now().Unix()
+}
+
+func (t *Task) AppendExecution(epoch int64, userOpHash string, err error) {
+	exc := &Execution{
+		Epoch:      epoch,
+		UserOpHash: userOpHash,
+	}
+
+	if err != nil {
+		exc.Error = err.Error()
+	}
+
+	t.Executions = append(t.Executions, exc)
 }
 
 // Given a task key generated from Key(), extract the ID part
@@ -293,4 +341,18 @@ func (t *Trigger) ToProtoBuf() *avsproto.TaskTrigger {
 	}
 
 	return &v
+}
+
+func ExecutionsToProtoBuf(exc []*Execution) []*avsproto.Execution {
+	data := make([]*avsproto.Execution, len(exc))
+
+	for i, v := range exc {
+		data[i] = &avsproto.Execution{
+			UseropHash: v.UserOpHash,
+			Epoch:      v.Epoch,
+			Error:      v.Error,
+		}
+	}
+
+	return data
 }

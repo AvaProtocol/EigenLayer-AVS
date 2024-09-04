@@ -118,9 +118,7 @@ func NewAggregator(c *config.Config) (*Aggregator, error) {
 			panic(err)
 			//return nil, err
 		}
-
 		fmt.Println("avsReader", avsReader, "clients", clients)
-
 	}()
 
 	// TODO: These are erroring out and we don't need them now yet

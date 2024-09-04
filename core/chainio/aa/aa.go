@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/AvaProtocol/ap-avs/core/chainio/aa/simpleaccount"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -15,6 +16,8 @@ import (
 var (
 	factoryABI  abi.ABI
 	defaultSalt = big.NewInt(0)
+
+	simpleAccountABI *abi.ABI
 )
 
 func buildFactoryABI() {
@@ -76,4 +79,17 @@ func MustNonce(conn *ethclient.Client, ownerAddress common.Address, salt *big.In
 	}
 
 	return nonce
+}
+
+// Generate calldata for UserOps
+func PackExecute(targetAddress common.Address, ethValue *big.Int, calldata []byte) ([]byte, error) {
+	var err error
+	if simpleAccountABI == nil {
+		simpleAccountABI, err = simpleaccount.SimpleAccountMetaData.GetAbi()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return simpleAccountABI.Pack("execute", targetAddress, ethValue, calldata)
 }

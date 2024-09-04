@@ -4,7 +4,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
-	"os"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -26,21 +25,6 @@ func FromPrivateKeyHex(privateKeyHex string, chainID *big.Int) (*bind.TransactOp
 	}
 
 	return bind.NewKeyedTransactorWithChainID(privateKey, chainID)
-}
-
-func MustControllerSigner() *ecdsa.PrivateKey {
-	key := os.Getenv("CONTROLLER_PRIVATE_KEY")
-
-	if key[0:2] == "0x" {
-		key = key[2:]
-	}
-
-	privateKey, err := crypto.HexToECDSA(key)
-	if err != nil {
-		panic(err)
-	}
-
-	return privateKey
 }
 
 // Generate EIP191 signature

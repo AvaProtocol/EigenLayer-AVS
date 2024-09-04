@@ -70,10 +70,22 @@ type OperatorConfig struct {
 	DbPath string `yaml:"db_path"`
 
 	PublicMetricsPort int32
+
+	// Usually we don't need this, but on testnet, our target chain might be
+	// differen from the chain where EigenLayer contract is deployed.
+	// EigenLayer contracts are deployed on Holesky, but on holesky there isn't
+	// much tooling around it: no official rpc bundler or erc4337 explorer, no
+	// uniswap etc
+	//
+	// Therefore on testnet we will need this option when running in Holesky
+	TargetChain struct {
+		EthRpcUrl string `yaml:"eth_rpc_url"`
+		EthWsUrl  string `yaml:"eth_ws_url"`
+	} `yaml:"target_chain"`
 }
 
 type Operator struct {
-	config      OperatorConfig
+	config      *OperatorConfig
 	logger      logging.Logger
 	ethClient   eth.Client
 	ethWsClient eth.Client
@@ -98,6 +110,7 @@ type Operator struct {
 
 	// receive new tasks in this chan (typically from listening to onchain event)
 	newTaskCreatedChan chan *cstaskmanager.ContractAutomationTaskManagerNewTaskCreated
+
 	// rpc client to send signed task responses to aggregator
 	aggregatorRpcClient avsproto.AggregatorClient
 	aggregatorConn      *grpc.ClientConn
@@ -279,7 +292,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	aggregatorRpcClient := avsproto.NewAggregatorClient(aggregatorConn)
 
 	operator := &Operator{
-		config:      c,
+		config:      &c,
 		logger:      logger,
 		metricsReg:  reg,
 		metrics:     avsAndEigenMetrics,

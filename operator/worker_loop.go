@@ -6,13 +6,13 @@ import (
 	"io"
 	"log"
 	"maps"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/AvaProtocol/ap-avs/core/taskengine"
 	pb "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/version"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/expr-lang/expr/vm"
 )
 
@@ -28,16 +28,23 @@ var (
 
 // runWorkLoop is main entrypoint where we sync data with aggregator
 func (o *Operator) runWorkLoop(ctx context.Context) error {
-	// Initialize local storage and cache
-
+	// Setup taskengine, initialize local storage and cache, establish rpc
 	checks = map[string]*pb.SyncTasksResp{}
-
-	// Setup taskengine
-	taskengine.SetRpc(os.Getenv("RPC_URL"))
+	taskengine.SetRpc(o.config.TargetChain.EthRpcUrl)
+	taskengine.SetWsRpc(o.config.TargetChain.EthWsUrl)
+	taskengine.SetLogger(o.logger)
 
 	timer := time.NewTicker(5 * time.Second)
 
+	// Establish a connection with gRPC server where new task will be pushed
+	// automatically
 	go o.FetchTasks()
+
+	// Register a subscriber on new block event and perform our code such as
+	// reporting time and perform check result
+	workerCtx := context.Background()
+	// TODO: Initialize time based task checking
+	taskengine.RegisterBlockListener(workerCtx, o.RunChecks)
 
 	var metricsErrChan <-chan error
 	if o.config.EnableMetrics {
@@ -59,7 +66,6 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 			o.logger.Fatal("Error in metrics server", "err", err)
 		case <-timer.C:
 			o.PingServer()
-			o.RunChecks()
 		}
 	}
 }
@@ -128,7 +134,7 @@ func (o *Operator) PingServer() {
 	o.metrics.SetPingDuration(elapsed.Seconds())
 }
 
-func (o *Operator) RunChecks() {
+func (o *Operator) RunChecks(block *types.Block) error {
 	hits := []string{}
 	hitLookup := map[string]bool{}
 
@@ -160,4 +166,6 @@ func (o *Operator) RunChecks() {
 			return ok
 		})
 	}
+
+	return nil
 }

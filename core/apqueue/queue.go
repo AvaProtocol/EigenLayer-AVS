@@ -36,7 +36,7 @@ func New(db storage.Storage, opts *QueueOption) *Queue {
 
 	if opts != nil {
 		if opts.Prefix == "" {
-			q.prefix = "default"
+			q.prefix = "d"
 		} else {
 			q.prefix = opts.Prefix
 		}

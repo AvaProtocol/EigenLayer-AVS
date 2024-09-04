@@ -1,0 +1,56 @@
+package taskengine
+
+import (
+	"context"
+	"time"
+
+	"github.com/Layr-Labs/eigensdk-go/logging"
+	"github.com/ethereum/go-ethereum/core/types"
+)
+
+type OnblockFunc func(*types.Block) error
+
+var (
+	logger logging.Logger
+)
+
+func SetLogger(mylogger logging.Logger) {
+	logger = mylogger
+}
+
+func RegisterBlockListener(ctx context.Context,
+	fn OnblockFunc,
+) error {
+	headers := make(chan *types.Header)
+	sub, err := wsEthClient.SubscribeNewHead(ctx, headers)
+	if err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case err := <-sub.Err():
+			// TODO: look into error and consider re-connect or wait
+			logger.Errorf("error when fetching new block from websocket", "err", err)
+			time.Sleep(15 * time.Second)
+		case header := <-headers:
+			logger.Infof("[taskengine] receive new block %s", header.Hash().Hex())
+
+			block, err := wsEthClient.BlockByHash(context.Background(), header.Hash())
+			if err != nil {
+				logger.Errorf("error when fetching new block from websocket", "err", err)
+				// TODO: report error in metric
+				// The operator will skip run this time
+				fn(nil)
+			} else {
+				fn(block)
+			}
+
+			//fmt.Println(block.Number().Uint64())
+			//fmt.Println(block.Time().Uint64())
+			//fmt.Println(len(block.Transactions()))
+		}
+	}
+}

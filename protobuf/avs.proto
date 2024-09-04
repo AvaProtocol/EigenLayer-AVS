@@ -18,6 +18,14 @@ enum TaskType {
   ContractExecutionTask = 1;
 }
 
+enum TaskStatus {
+  Active = 0;
+  Completed = 1;
+  Failed = 2;
+  Canceled = 3;
+  Executing = 4;
+}
+
 message UUID {
   string bytes = 1;
 }
@@ -118,6 +126,12 @@ message TaskTrigger {
   ExpressionCondition    expression     = 4;
 }
 
+message Execution {
+  int64 epoch = 1;
+  string userop_hash = 2;
+  string error = 3;
+}
+
 message Task {
     string owner = 1;
     string smart_account_address = 2;
@@ -134,6 +148,11 @@ message Task {
     int64 expired_at = 8;
     // arbitrary data about this task
     string memo = 9;
+
+    int64 completed_at = 10;
+    TaskStatus status = 11;
+
+    repeated Execution executions = 12;
 }
 
 message CreateTaskReq {

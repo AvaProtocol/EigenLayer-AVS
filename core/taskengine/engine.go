@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strconv"
 	"sync"
 	"time"
 
@@ -21,6 +22,8 @@ import (
 
 var (
 	rpcConn *ethclient.Client
+	// websocket client used for subscription
+	wsEthClient *ethclient.Client
 )
 
 type Engine struct {
@@ -36,6 +39,15 @@ type Engine struct {
 func SetRpc(rpcURL string) {
 	if conn, err := ethclient.Dial(rpcURL); err == nil {
 		rpcConn = conn
+	}
+}
+
+func SetWsRpc(rpcURL string) {
+	conn, err := ethclient.Dial(rpcURL)
+	if err == nil {
+		wsEthClient = conn
+	} else {
+		panic(err)
 	}
 }
 
@@ -55,7 +67,7 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue) *Engin
 }
 
 func (n *Engine) Start() {
-	kvs, e := n.db.GetByPrefix([]byte("t:a:"))
+	kvs, e := n.db.GetByPrefix([]byte(fmt.Sprintf("t:%s:", TaskStatusToStorageKey(avsproto.TaskStatus_Active))))
 	if e != nil {
 		panic(e)
 	}
@@ -86,8 +98,8 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	updates := map[string][]byte{}
 
-	updates[fmt.Sprintf("t:a:%s", task.ID)], err = task.ToJSON()
-	updates[fmt.Sprintf("u:%s", string(task.Key()))] = []byte(model.TaskStatusActive)
+	updates[TaskStorageKey(task.ID, task.Status)], err = task.ToJSON()
+	updates[TaskUserKey(task)] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Active))
 
 	if err = n.db.BatchWrite(updates); err != nil {
 		return nil, err
@@ -144,23 +156,92 @@ func (n *Engine) AggregateChecksResult(address string, ids []string) error {
 
 	// Now we will queue the job
 	for _, id := range ids {
-		n.queue.Enqueue("contract_run", id, []byte(id))
+		if err := n.db.Move(
+			[]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Active), id)),
+			[]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Executing), id)),
+		); err == nil {
+			n.queue.Enqueue("contract_run", id, []byte(id))
+		}
 	}
 
 	return nil
 }
 
-func GetTask(db storage.Storage, id string) (*model.Task, error) {
-	var task model.Task
-	item, err := db.GetKey([]byte("t:a:" + id))
+func (n *Engine) ListTasksByUser(user *model.User) ([]*avsproto.ListTasksResp_TaskItemResp, error) {
+	taskIDs, err := n.db.GetKeyHasPrefix([]byte(fmt.Sprintf("u:%s", user.Address.String())))
 
 	if err != nil {
 		return nil, err
 	}
-	err = json.Unmarshal(item, &task)
+
+	tasks := make([]*avsproto.ListTasksResp_TaskItemResp, len(taskIDs))
+	for i, taskKey := range taskIDs {
+		tasks[i] = &avsproto.ListTasksResp_TaskItemResp{
+			Id: string(model.TaskKeyToId(taskKey[2:])),
+		}
+	}
+
+	return tasks, nil
+}
+
+func (n *Engine) GetTaskByUser(user *model.User, taskID string) (*model.Task, error) {
+	task := &model.Task{
+		ID:    taskID,
+		Owner: user.Address.Hex(),
+	}
+
+	// Get Task Status
+	rawStatus, err := n.db.GetKey([]byte(TaskUserKey(task)))
+	status, _ := strconv.Atoi(string(rawStatus))
+
+	taskRawByte, err := n.db.GetKey([]byte(
+		TaskStorageKey(taskID, avsproto.TaskStatus(status)),
+	))
+
 	if err != nil {
 		return nil, err
 	}
 
-	return &task, nil
+	err = task.FromStorageData(taskRawByte)
+	return task, err
+}
+
+func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error) {
+	task := &model.Task{
+		ID:    taskID,
+		Owner: user.Address.Hex(),
+	}
+
+	log.Println("cancel task", task)
+	return true, nil
+}
+
+func TaskStorageKey(id string, status avsproto.TaskStatus) string {
+	return fmt.Sprintf(
+		"t:%s:%s",
+		TaskStatusToStorageKey(status),
+		id,
+	)
+}
+
+func TaskUserKey(t *model.Task) string {
+	return fmt.Sprintf(
+		"u:%s",
+		t.Key(),
+	)
+}
+
+func TaskStatusToStorageKey(v avsproto.TaskStatus) string {
+	switch v {
+	case 1:
+		return "c"
+	case 2:
+		return "f"
+	case 3:
+		return "l"
+	case 4:
+		return "x"
+	}
+
+	return "a"
 }

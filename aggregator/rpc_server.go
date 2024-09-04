@@ -17,7 +17,6 @@ import (
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
 	"github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/core/taskengine"
-	"github.com/AvaProtocol/ap-avs/model"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/storage"
 )
@@ -32,6 +31,8 @@ type RpcServer struct {
 	operatorPool *OperatorPool
 
 	ethrpc *ethclient.Client
+
+	smartWalletRpc *ethclient.Client
 }
 
 // Get nonce of an existing smart wallet of a given owner
@@ -39,7 +40,7 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 
 	ownerAddress := common.HexToAddress(payload.Owner)
 
-	nonce, err := aa.GetNonce(r.ethrpc, ownerAddress, big.NewInt(0))
+	nonce, err := aa.GetNonce(r.smartWalletRpc, ownerAddress, big.NewInt(0))
 	if err != nil {
 		return nil, err
 	}
@@ -50,16 +51,16 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 }
 
 // GetAddress returns smart account address of the given owner in the auth key
-func (r *RpcServer) GetAddress(ctx context.Context, payload *avsproto.AddressRequest) (*avsproto.AddressResp, error) {
+func (r *RpcServer) GetSmartAccountAddress(ctx context.Context, payload *avsproto.AddressRequest) (*avsproto.AddressResp, error) {
 	ownerAddress := common.HexToAddress(payload.Owner)
 	salt := big.NewInt(0)
 
-	nonce, err := aa.GetNonce(r.ethrpc, ownerAddress, salt)
+	nonce, err := aa.GetNonce(r.smartWalletRpc, ownerAddress, salt)
 	if err != nil {
 		return nil, err
 	}
 
-	sender, err := aa.GetSenderAddress(r.ethrpc, ownerAddress, salt)
+	sender, err := aa.GetSenderAddress(r.smartWalletRpc, ownerAddress, salt)
 
 	return &avsproto.AddressResp{
 		Nonce:               nonce.String(),
@@ -68,7 +69,23 @@ func (r *RpcServer) GetAddress(ctx context.Context, payload *avsproto.AddressReq
 }
 
 func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.UUID) (*wrapperspb.BoolValue, error) {
-	return nil, nil
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	r.config.Logger.Info("Process Cancel Task",
+		"user", user.Address.String(),
+		"taskID", string(taskID.Bytes),
+	)
+
+	result, err := r.engine.CancelTaskByUser(user, string(taskID.Bytes))
+
+	if err != nil {
+		return nil, err
+	}
+
+	return wrapperspb.Bool(result), nil
 }
 
 func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.CreateTaskReq) (*avsproto.CreateTaskResp, error) {
@@ -93,18 +110,10 @@ func (r *RpcServer) ListTasks(ctx context.Context, _ *avsproto.ListTasksReq) (*a
 		return nil, err
 	}
 
-	taskIDs, err := r.db.GetKeyHasPrefix([]byte(user.Address.String()))
-
-	if err != nil {
-		return nil, err
-	}
-
-	tasks := make([]*avsproto.ListTasksResp_TaskItemResp, len(taskIDs))
-	for i, taskKey := range taskIDs {
-		tasks[i] = &avsproto.ListTasksResp_TaskItemResp{
-			Id: string(model.TaskKeyToId(taskKey)),
-		}
-	}
+	r.config.Logger.Info("Process List Task",
+		"user", user.Address.String(),
+	)
+	tasks, err := r.engine.ListTasksByUser(user)
 
 	return &avsproto.ListTasksResp{
 		Tasks: tasks,
@@ -117,18 +126,15 @@ func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avspro
 		return nil, err
 	}
 
-	task := &model.Task{
-		ID:    taskID.Bytes,
-		Owner: user.Address.Hex(),
-	}
+	r.config.Logger.Info("Process Get Task",
+		"user", user.Address.String(),
+		"taskID", string(taskID.Bytes),
+	)
 
-	taskRawByte, err := r.db.GetKey([]byte(task.ID))
-
+	task, err := r.engine.GetTaskByUser(user, string(taskID.Bytes))
 	if err != nil {
 		return nil, err
 	}
-
-	task.FromStorageData(taskRawByte)
 
 	return task.ToProtoBuf()
 }
@@ -164,8 +170,13 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 
 	s := grpc.NewServer()
 
-	ethclient, err := ethclient.Dial(agg.config.EthHttpRpcUrl)
+	ethrpc, err := ethclient.Dial(agg.config.EthHttpRpcUrl)
 
+	if err != nil {
+		panic(err)
+	}
+
+	smartwalletClient, err := ethclient.Dial(agg.config.SmartWallet.EthRpcUrl)
 	if err != nil {
 		panic(err)
 	}
@@ -174,7 +185,9 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		db:     agg.db,
 		engine: agg.engine,
 
-		ethrpc:       ethclient,
+		ethrpc:         ethrpc,
+		smartWalletRpc: smartwalletClient,
+
 		config:       agg.config,
 		operatorPool: agg.operatorPool,
 	})

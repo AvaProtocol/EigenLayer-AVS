@@ -21,7 +21,10 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		Prefix: "default",
 	})
 	agg.worker = apqueue.NewWorker(agg.queue, agg.db)
-	agg.worker.RegisterProcessor("contract_run", taskengine.NewProcessor(agg.db))
+	agg.worker.RegisterProcessor(
+		"contract_run",
+		taskengine.NewProcessor(agg.db, agg.config.SmartWallet),
+	)
 
 	agg.engine = taskengine.New(
 		agg.db,
