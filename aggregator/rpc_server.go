@@ -54,14 +54,12 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 func (r *RpcServer) GetSmartAccountAddress(ctx context.Context, payload *avsproto.AddressRequest) (*avsproto.AddressResp, error) {
 	ownerAddress := common.HexToAddress(payload.Owner)
 	salt := big.NewInt(0)
+	sender, err := aa.GetSenderAddress(r.smartWalletRpc, ownerAddress, salt)
+	nonce, err := aa.GetNonce(r.smartWalletRpc, *sender, salt)
 
-	nonce, err := aa.GetNonce(r.smartWalletRpc, ownerAddress, salt)
 	if err != nil {
 		return nil, err
 	}
-
-	sender, err := aa.GetSenderAddress(r.smartWalletRpc, ownerAddress, salt)
-
 	return &avsproto.AddressResp{
 		Nonce:               nonce.String(),
 		SmartAccountAddress: sender.String(),

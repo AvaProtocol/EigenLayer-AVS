@@ -47,7 +47,7 @@ async function generateApiToken() {
   const expired_at = Math.floor(+new Date() / 3600 * 24)
   const message = `key request for ${wallet.address} expired at ${expired_at}`
   const signature = await signMessageWithEthers(wallet, message)
-  console.log(`message: ${message}\nsignature: ${signature}`)
+  //console.log(`message: ${message}\nsignature: ${signature}`)
 
   let result = await asyncRPC(client, 'GetKey', {
       owner,
@@ -114,10 +114,59 @@ async function scheduleExampleJob(owner, token) {
   console.log("Expression Task ID is:", result)
 }
 
+async function listTask(owner, token) {
+  const metadata = new grpc.Metadata();
+  metadata.add('authkey', token);
+
+  const result = await asyncRPC(client, 'ListTasks', {}, metadata)
+
+  console.log("Task ID for ", owner,"\n", result)
+}
+
+async function getTask(owner, token, taskId) {
+  const metadata = new grpc.Metadata();
+  metadata.add('authkey', token);
+
+  const result = await asyncRPC(client, 'GetTask', { bytes: taskId }, metadata)
+
+  console.log("Task Data for ", taskId, "\n", result)
+}
+
+async function getWallet(owner, token) {
+  const metadata = new grpc.Metadata();
+  metadata.add('authkey', token);
+
+  const result = await asyncRPC(client, 'GetSmartAccountAddress', { owner: owner }, metadata)
+
+  console.log("Smart wallet address for ", owner, "\n", result)
+}
+
+
 (async() => {
   // 1. Generate the api token to interact with aggregator
   const { owner, token } = await generateApiToken();
 
-  // 2. Now we can schedule job for this owner
-  await scheduleExampleJob(owner, token)
+  switch (process.argv[2]) {
+    case "schedule":
+      // 2. Now we can schedule job for this owner
+      await scheduleExampleJob(owner, token)
+      break
+    case "list":
+      await listTask(owner, token)
+      break
+    case "get":
+      await getTask(owner, token, process.argv[3])
+      break
+    case "wallet":
+      await getWallet(owner, token)
+      break
+    default:
+      console.log(`Usage:
+
+      wallet:          to find smart wallet address for this eoa
+      list:             to find all task
+      schedule:         to schedule an example task
+      get <task-id>:    to get task detail
+      cancel <task-id>: to cancel a task`)
+  }
 })()
