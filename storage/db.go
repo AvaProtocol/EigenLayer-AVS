@@ -33,6 +33,7 @@ type Storage interface {
 	BatchWrite(updates map[string][]byte) error
 	Move(src, dest []byte) error
 	Set(key, value []byte) error
+	Delete(key []byte) error
 }
 
 type KeyValueItem struct {
@@ -92,6 +93,13 @@ func (s *BadgerStorage) BatchWrite(updates map[string][]byte) error {
 func (s *BadgerStorage) Set(key, value []byte) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		err := txn.Set(key, value)
+		return err
+	})
+}
+
+func (s *BadgerStorage) Delete(key []byte) error {
+	return s.db.Update(func(txn *badger.Txn) error {
+		err := txn.Delete(key)
 		return err
 	})
 }

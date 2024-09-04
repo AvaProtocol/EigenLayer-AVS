@@ -125,10 +125,6 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avspr
 			}
 			log.Printf("sync task %s to operator %s", task.ID, payload.Address)
 			resp := avsproto.SyncTasksResp{
-				// TODO: Hook up to the new task channel to syncdicate in realtime
-				// Currently this is setup just to generate the metrics so we can
-				// prepare the dashboard
-				// Our actually task will be more completed
 				Id:        task.ID,
 				CheckType: "CheckTrigger",
 				Trigger:   task.Trigger.ToProtoBuf(),
@@ -210,6 +206,23 @@ func (n *Engine) GetTaskByUser(user *model.User, taskID string) (*model.Task, er
 
 	err = task.FromStorageData(taskRawByte)
 	return task, err
+}
+
+func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error) {
+	task, err := n.GetTaskByUser(user, taskID)
+
+	if err != nil {
+		return false, err
+	}
+
+	if task.Status == avsproto.TaskStatus_Executing {
+		return false, fmt.Errorf("Only non executing task can be deleted")
+	}
+
+	n.db.Delete([]byte(TaskStorageKey(task.ID, task.Status)))
+	n.db.Delete([]byte(TaskUserKey(task)))
+
+	return true, nil
 }
 
 func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error) {

@@ -232,6 +232,7 @@ service Aggregator {
   rpc ListTasks(ListTasksReq) returns (ListTasksResp) {};
   rpc GetTask(UUID) returns (Task) {};
   rpc CancelTask(UUID) returns (google.protobuf.BoolValue) {};
+  rpc DeleteTask(UUID) returns (google.protobuf.BoolValue) {};
 
   // Operator endpoint
   rpc Ping(Checkin) returns (CheckinResp) {};

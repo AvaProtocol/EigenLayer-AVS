@@ -86,6 +86,26 @@ func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.UUID) (*wra
 	return wrapperspb.Bool(result), nil
 }
 
+func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.UUID) (*wrapperspb.BoolValue, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	r.config.Logger.Info("Process Delete Task",
+		"user", user.Address.String(),
+		"taskID", string(taskID.Bytes),
+	)
+
+	result, err := r.engine.DeleteTaskByUser(user, string(taskID.Bytes))
+
+	if err != nil {
+		return nil, err
+	}
+
+	return wrapperspb.Bool(result), nil
+}
+
 func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.CreateTaskReq) (*avsproto.CreateTaskResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
