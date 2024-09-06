@@ -63,8 +63,7 @@ function getTaskData() {
     "function transfer(address to, uint amount)"
   ]
   let iface = new ethers.Interface(ABI)
-  // 
-  return iface.encodeFunctionData("transfer", [ "0xe0f7D11FD714674722d325Cd86062A5F1882E13a", ethers.parseUnits("0.00761", 18) ])
+  return iface.encodeFunctionData("transfer", [ "0xe0f7D11FD714674722d325Cd86062A5F1882E13a", ethers.parseUnits("0.4337", 18) ])
 }
 
 function getTaskDataQuery(owner) {
@@ -93,11 +92,11 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
     // A contract execution will be perform for this taks
     task_type: TaskType.CONTRACTEXECUTIONTASK,
 
-    body: {
+    action: {
       contract_execution: {
         // Our ERC20 test token deploy on sepolia
         // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
-        contract_address: "0x69256ca54e6296e460dec7b29b7dcd97b81a3d55",
+        contract_address: "0x2e8bdb63d09ef989a0018eeb1c47ef84e3e61f7b",
         calldata: taskBody,
       }
     },
@@ -133,11 +132,11 @@ async function scheduleTimeTransfer(owner, token) {
     // A contract execution will be perform for this taks
     task_type: TaskType.CONTRACTEXECUTIONTASK,
 
-    body: {
+    action: {
       contract_execution: {
         // Our ERC20 test token deploy on sepolia
         // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
-        contract_address: "0x69256ca54e6296e460dec7b29b7dcd97b81a3d55",
+        contract_address: "0x2e8bdb63d09ef989a0018eeb1c47ef84e3e61f7b",
         calldata: taskBody,
       }
     },
@@ -253,7 +252,7 @@ async function getWallet(owner, token) {
       await scheduleERC20TransferJob(owner, token, taskCondition)
       break
 
-    case "list":
+    case "tasks":
       await listTask(owner, token)
       break
 
@@ -285,11 +284,11 @@ async function getWallet(owner, token) {
       console.log(`Usage:
 
       wallet:           to find smart wallet address for this eoa
-      list:             to find all tasks
+      tasks:             to find all tasks
+      get <task-id>:    to get task detail
       schedule:         to schedule a task with chainlink eth-usd its condition will be matched quickly
       schedule2:        to schedule a task with chainlink that has a very high price target
       schedule-generic: to schedule a task with an arbitrary contract query
-      get <task-id>:    to get task detail
       cancel <task-id>: to cancel a task
       delete <task-id>: to completely remove a task`)
   }
