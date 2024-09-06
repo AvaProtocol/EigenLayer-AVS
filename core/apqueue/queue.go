@@ -170,5 +170,5 @@ func (q *Queue) getQueueKeyPrefix(status jobStatus) []byte {
 }
 
 func (q *Queue) getJobKey(status jobStatus, jID uint64) []byte {
-	return append(q.getQueueKeyPrefix(status), []byte(fmt.Sprintf("%020d", jID))...)
+	return append(q.getQueueKeyPrefix(status), []byte(fmt.Sprintf("%d", jID))...)
 }

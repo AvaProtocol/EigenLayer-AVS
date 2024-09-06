@@ -36,7 +36,7 @@ func RegisterBlockListener(ctx context.Context,
 			logger.Errorf("error when fetching new block from websocket", "err", err)
 			time.Sleep(15 * time.Second)
 		case header := <-headers:
-			logger.Infof("[taskengine] receive new block %s", header.Hash().Hex())
+			logger.Info("detect new block, evaluate checks", "component", "taskengine", "block", header.Hash().Hex())
 
 			block, err := wsEthClient.BlockByHash(context.Background(), header.Hash())
 			if err != nil {
@@ -47,10 +47,6 @@ func RegisterBlockListener(ctx context.Context,
 			} else {
 				fn(block)
 			}
-
-			//fmt.Println(block.Number().Uint64())
-			//fmt.Println(block.Time().Uint64())
-			//fmt.Println(len(block.Transactions()))
 		}
 	}
 }

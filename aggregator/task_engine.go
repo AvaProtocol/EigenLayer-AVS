@@ -8,6 +8,8 @@ import (
 )
 
 func (agg *Aggregator) stopTaskEngine() {
+	agg.logger.Infof("Stopping task engine")
+	agg.engine.Stop()
 }
 
 func (agg *Aggregator) startTaskEngine(ctx context.Context) {
@@ -30,6 +32,7 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		agg.db,
 		agg.config,
 		agg.queue,
+		agg.logger,
 	)
 	agg.engine.Start()
 

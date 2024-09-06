@@ -34,7 +34,7 @@ func TestSendUserOp(t *testing.T) {
 	// Because we used the  master key to signed, the address cannot be
 	// calculate from that key
 	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
-	bundlerClient, e := bundler.NewBundlerClient("http://127.0.0.1:4337")
+	bundlerClient, e := bundler.NewBundlerClient(os.Getenv("BUNDLER_RPC"))
 	if e != nil {
 		panic(e)
 	}

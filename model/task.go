@@ -89,7 +89,7 @@ type ContractExecutionPayload struct {
 	CallData        string `json:"calldata"`
 }
 
-type TaskBody struct {
+type TaskAction struct {
 	ETHTransfer       *ETHTransferPayload       `json:"eth_transfer,omitempty"`
 	ContractExecution *ContractExecutionPayload `json:"contract_execution,omitempty"`
 }
@@ -119,7 +119,7 @@ type Task struct {
 
 	// the actual call will be executed in ethereum, it can be a simple transfer
 	// a method call, or a batch call through multicall contract
-	Body TaskBody `json:"body"`
+	Action TaskAction `json:"Action"`
 
 	Memo        string `json:"memo"`
 	ExpiredAt   int64  `json:"expired_at,omitempty"`
@@ -138,7 +138,7 @@ func GenerateTaskID() string {
 }
 
 // Populate a task structure from proto payload
-func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error) {
+func NewTaskFromProtobuf(taskID string, user *User, body *avsproto.CreateTaskReq) (*Task, error) {
 	if body == nil {
 		return nil, nil
 	}
@@ -148,14 +148,14 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 
 	//TODO: Validate
 	t := &Task{
-		ID: GenerateTaskID(),
+		ID: taskID,
 
 		// convert back to string with EIP55-compliant
 		Owner:               owner.Hex(),
 		SmartAccountAddress: aaAddress.Hex(),
 
 		Trigger:   Trigger{},
-		Body:      TaskBody{},
+		Action:    TaskAction{},
 		Type:      TaskTypeFromProtobuf(body.TaskType),
 		Memo:      body.Memo,
 		ExpiredAt: body.ExpiredAt,
@@ -166,15 +166,15 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 		Executions: []*Execution{},
 	}
 
-	if body.Body.GetEthTransfer() != nil {
-		t.Body.ETHTransfer = &ETHTransferPayload{
-			Destination: body.Body.EthTransfer.Destination,
-			Amount:      body.Body.EthTransfer.Amount,
+	if body.Action.GetEthTransfer() != nil {
+		t.Action.ETHTransfer = &ETHTransferPayload{
+			Destination: body.Action.EthTransfer.Destination,
+			Amount:      body.Action.EthTransfer.Amount,
 		}
-	} else if body.Body.GetContractExecution() != nil {
-		t.Body.ContractExecution = &ContractExecutionPayload{
-			ContractAddress: body.Body.ContractExecution.ContractAddress,
-			CallData:        body.Body.ContractExecution.Calldata,
+	} else if body.Action.GetContractExecution() != nil {
+		t.Action.ContractExecution = &ContractExecutionPayload{
+			ContractAddress: body.Action.ContractExecution.ContractAddress,
+			CallData:        body.Action.ContractExecution.Calldata,
 		}
 	}
 
@@ -219,7 +219,7 @@ func (t *Task) ToProtoBuf() (*avsproto.Task, error) {
 		},
 		TaskType: t.Type.ToProtoBuf(),
 		Trigger:  &avsproto.TaskTrigger{},
-		Body:     &avsproto.TaskBody{},
+		Action:   &avsproto.TaskAction{},
 
 		StartAt:   t.StartAt,
 		ExpiredAt: t.ExpiredAt,
@@ -230,17 +230,17 @@ func (t *Task) ToProtoBuf() (*avsproto.Task, error) {
 		Status:      t.Status,
 	}
 
-	if t.Body.ETHTransfer != nil {
-		protoTask.Body.EthTransfer = &avsproto.ETHTransfer{
-			Destination: t.Body.ETHTransfer.Destination,
-			Amount:      t.Body.ETHTransfer.Amount,
+	if t.Action.ETHTransfer != nil {
+		protoTask.Action.EthTransfer = &avsproto.ETHTransfer{
+			Destination: t.Action.ETHTransfer.Destination,
+			Amount:      t.Action.ETHTransfer.Amount,
 		}
 	}
 
-	if t.Body.ContractExecution != nil {
-		protoTask.Body.ContractExecution = &avsproto.ContractExecution{
-			ContractAddress: t.Body.ContractExecution.ContractAddress,
-			Calldata:        t.Body.ContractExecution.CallData,
+	if t.Action.ContractExecution != nil {
+		protoTask.Action.ContractExecution = &avsproto.ContractExecution{
+			ContractAddress: t.Action.ContractExecution.ContractAddress,
+			Calldata:        t.Action.ContractExecution.CallData,
 		}
 	}
 

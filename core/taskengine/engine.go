@@ -4,7 +4,6 @@ package taskengine
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/big"
 	"strconv"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	"github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/model"
 	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
@@ -34,6 +34,10 @@ type Engine struct {
 	tasks     map[string]*model.Task
 	lock      sync.Mutex
 	sentTasks map[string]bool
+
+	seq storage.Sequence
+
+	logger logging.Logger
 }
 
 func SetRpc(rpcURL string) {
@@ -53,7 +57,7 @@ func SetWsRpc(rpcURL string) {
 	}
 }
 
-func New(db storage.Storage, config *config.Config, queue *apqueue.Queue) *Engine {
+func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger logging.Logger) *Engine {
 	e := Engine{
 		db:    db,
 		queue: queue,
@@ -61,6 +65,7 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue) *Engin
 		lock:      sync.Mutex{},
 		tasks:     make(map[string]*model.Task),
 		sentTasks: make(map[string]bool),
+		logger:    logger,
 	}
 
 	SetRpc(config.SmartWallet.EthRpcUrl)
@@ -69,7 +74,17 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue) *Engin
 	return &e
 }
 
+func (n *Engine) Stop() {
+	n.seq.Release()
+}
+
 func (n *Engine) Start() {
+	var err error
+	n.seq, err = n.db.GetSequence([]byte("t:seq"), 1000)
+	if err != nil {
+		panic(err)
+	}
+
 	kvs, e := n.db.GetByPrefix([]byte(fmt.Sprintf("t:%s:", TaskStatusToStorageKey(avsproto.TaskStatus_Active))))
 	if e != nil {
 		panic(e)
@@ -93,7 +108,12 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 		return nil, err
 	}
 
-	task, err := model.NewTaskFromProtobuf(user, taskPayload)
+	taskID, err := n.NewTaskID()
+	if err != nil {
+		return nil, fmt.Errorf("cannot create task right now. storage unavailable")
+	}
+
+	task, err := model.NewTaskFromProtobuf(taskID, user, taskPayload)
 
 	if err != nil {
 		return nil, err
@@ -123,7 +143,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avspr
 			if _, ok := n.sentTasks[key]; ok {
 				continue
 			}
-			log.Printf("sync task %s to operator %s", task.ID, payload.Address)
+			n.logger.Info("stream check to operator", "taskID", task.ID, "operator", payload.Address)
 			resp := avsproto.SyncTasksResp{
 				Id:        task.ID,
 				CheckType: "CheckTrigger",
@@ -131,7 +151,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avspr
 			}
 
 			if err := srv.Send(&resp); err != nil {
-				log.Printf("error when sending task to operator %s: %v", payload.Address, err)
+				n.logger.Error("error stream check", "taskID", task.ID, "operator", payload.Address, "error", err)
 				return err
 			}
 
@@ -201,7 +221,12 @@ func (n *Engine) GetTaskByUser(user *model.User, taskID string) (*model.Task, er
 	))
 
 	if err != nil {
-		return nil, err
+		taskRawByte, err = n.db.GetKey([]byte(
+			TaskStorageKey(taskID, avsproto.TaskStatus_Executing),
+		))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	err = task.FromStorageData(taskRawByte)
@@ -282,4 +307,27 @@ func TaskStatusToStorageKey(v avsproto.TaskStatus) string {
 	}
 
 	return "a"
+}
+
+func (n *Engine) NewTaskID() (string, error) {
+	num := uint64(0)
+	var err error
+
+	defer func() {
+		r := recover()
+		if r != nil {
+			// recover from panic and send err instead
+			err = r.(error)
+		}
+	}()
+
+	num, err = n.seq.Next()
+	if num == 0 {
+		num, err = n.seq.Next()
+	}
+
+	if err != nil {
+		return "", err
+	}
+	return strconv.FormatInt(int64(num), 10), nil
 }

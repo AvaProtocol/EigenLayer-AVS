@@ -187,7 +187,9 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.init()
 
 	agg.logger.Infof("Initialize Storagre")
-	agg.initDB(ctx)
+	if err := agg.initDB(ctx); err != nil {
+		agg.logger.Fatalf("failed to initialize storage", "error", err)
+	}
 
 	agg.logger.Infof("Starting Task engine")
 	go agg.startTaskEngine(ctx)

@@ -34,6 +34,8 @@ type Storage interface {
 	Move(src, dest []byte) error
 	Set(key, value []byte) error
 	Delete(key []byte) error
+
+	Vacuum() error
 }
 
 type KeyValueItem struct {
@@ -279,4 +281,8 @@ func (a *BadgerStorage) ListKeys(prefix string) ([]string, error) {
 	}
 
 	return nil, err
+}
+
+func (a *BadgerStorage) Vacuum() error {
+	return a.db.RunValueLogGC(0.7)
 }

@@ -44,7 +44,7 @@ func (w *Worker) loop() {
 			}
 
 			processor, ok := w.processorRegistry[job.Type]
-			log.Printf("start process job: %d task id: %s", jid, string(job.Data))
+			log.Printf("start process job: %d task id: %s", jid, string(job.Data), processor, ok)
 			if ok {
 				err = processor.Perform(job)
 			} else {

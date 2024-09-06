@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"strings"
 )
 
@@ -41,7 +42,7 @@ func (agg *Aggregator) startRepl() {
 
 func handleConnection(agg *Aggregator, conn net.Conn) {
 	defer func() {
-		log.Println("Close connection from: %s", conn)
+		agg.logger.Info("Close repl connection", "remote", conn.RemoteAddr().String())
 		conn.Close()
 	}()
 
@@ -92,6 +93,35 @@ func handleConnection(agg *Aggregator, conn net.Conn) {
 			} else {
 				fmt.Fprintln(conn, "Usage: get <key>")
 			}
+		case "set":
+			parts = strings.SplitN(input, " ", 3)
+			if len(parts) >= 3 {
+				if parts[2][0] == '@' {
+					if content, err := os.ReadFile(parts[2][1:]); err == nil {
+						if err = agg.db.Set([]byte(parts[1]), content); err == nil {
+							fmt.Fprintln(conn, "written "+string(parts[1]))
+						}
+					} else {
+						fmt.Fprintln(conn, "invalid file "+parts[2][1:])
+					}
+				} else {
+					if err = agg.db.Set([]byte(parts[1]), []byte(parts[2])); err == nil {
+						fmt.Fprintln(conn, "written "+parts[1])
+					}
+
+				}
+			} else {
+				fmt.Fprintln(conn, "Usage: set <key> @/path-to-file")
+			}
+		case "gc":
+			fmt.Fprintln(conn, "start gc with 0.7")
+			err := agg.db.Vacuum()
+			if err == nil {
+				fmt.Fprintln(conn, "gc success. still have more to run")
+			} else {
+				fmt.Fprintln(conn, "gc is done. no more log file to be removed")
+			}
+
 		case "exit":
 			fmt.Fprintln(conn, "Exiting...")
 			return

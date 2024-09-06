@@ -58,25 +58,49 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 	// calculate from that key, but need to be passed in instead
 	task, err := c.GetTask(string(job.Data))
 	if err != nil {
-		log.Println("task not found", task)
 		return err
 	}
 
-	//calldata := common.FromHex(task.Body.ContractExecution.CallData)
+	defer func() {
+		updates := map[string][]byte{}
+		updates[TaskStorageKey(task.ID, avsproto.TaskStatus_Executing)], err = task.ToJSON()
+		updates[TaskUserKey(task)] = []byte(fmt.Sprintf("%d", task.Status))
+
+		if err = c.db.BatchWrite(updates); err == nil {
+			c.db.Move(
+				[]byte(TaskStorageKey(task.ID, avsproto.TaskStatus_Executing)),
+				[]byte(TaskStorageKey(task.ID, task.Status)),
+			)
+		} else {
+			// TODO Gracefully handling of storage cleanup
+		}
+	}()
+
+	if task.Action.ContractExecution == nil {
+		err := fmt.Errorf("invalid task action")
+		task.AppendExecution(currentTime.Unix(), "", err)
+		task.SetFailed()
+		return err
+	}
+
 	userOpCalldata, e := aa.PackExecute(
-		common.HexToAddress(task.Body.ContractExecution.ContractAddress),
+		common.HexToAddress(task.Action.ContractExecution.ContractAddress),
 		big.NewInt(0),
-		common.FromHex(task.Body.ContractExecution.CallData),
+		common.FromHex(task.Action.ContractExecution.CallData),
 	)
 	//calldata := common.FromHex("b61d27f600000000000000000000000069256ca54e6296e460dec7b29b7dcd97b81a3d55000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044a9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a0000000000000000000000000000000000000000000000001bc16d674ec8000000000000000000000000000000000000000000000000000000000000")
 
 	owner := common.HexToAddress(task.Owner)
 	bundlerClient, e := bundler.NewBundlerClient(c.smartWalletConfig.BundlerURL)
 	if e != nil {
-		panic(e)
+		// TODO: maybe set retry?
+		err := fmt.Errorf("internal error, bundler not available")
+		task.AppendExecution(currentTime.Unix(), "", err)
+		task.SetFailed()
+		return err
 	}
 
-	log.Println("push userops to bundle", string(job.Data), job.Name, job.Type, task, c.smartWalletConfig.BundlerURL)
+	log.Println("send task to bundler rpc", task.ID)
 	txResult, err := preset.SendUserOp(
 		conn,
 		bundlerClient,
@@ -93,23 +117,9 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 		task.SetFailed()
 	}
 
-	updates := map[string][]byte{}
-	updates[TaskStorageKey(task.ID, avsproto.TaskStatus_Executing)], err = task.ToJSON()
-	updates[TaskUserKey(task)] = []byte(fmt.Sprintf("%d", task.Status))
-
-	if err = c.db.BatchWrite(updates); err == nil {
-		c.db.Move(
-			[]byte(TaskStorageKey(task.ID, avsproto.TaskStatus_Executing)),
-			[]byte(TaskStorageKey(task.ID, task.Status)),
-		)
-	} else {
-		// TODO Gracefully handling of storage cleanup
-	}
-
 	if err != nil || txResult == "" {
 		return fmt.Errorf("UseOp failed to send; error: %v", err)
 	}
 
-	//t.Logf("UserOp submit succesfully. UserOp hash: %v", txResult)
 	return nil
 }
