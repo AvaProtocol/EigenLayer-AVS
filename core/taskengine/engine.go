@@ -34,6 +34,7 @@ type Engine struct {
 	tasks     map[string]*model.Task
 	lock      sync.Mutex
 	sentTasks map[string]bool
+	shutdown  bool
 
 	seq storage.Sequence
 
@@ -65,7 +66,9 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		lock:      sync.Mutex{},
 		tasks:     make(map[string]*model.Task),
 		sentTasks: make(map[string]bool),
-		logger:    logger,
+		shutdown:  false,
+
+		logger: logger,
 	}
 
 	SetRpc(config.SmartWallet.EthRpcUrl)
@@ -76,6 +79,7 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 
 func (n *Engine) Stop() {
 	n.seq.Release()
+	n.shutdown = true
 }
 
 func (n *Engine) Start() {
@@ -136,31 +140,43 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 }
 
 func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avsproto.Aggregator_SyncTasksServer) error {
-	for {
-		for _, task := range n.tasks {
-			key := fmt.Sprintf("%s:%s", payload.Address, task.ID)
+	ticker := time.NewTicker(5 * time.Second)
 
-			if _, ok := n.sentTasks[key]; ok {
+	for {
+		select {
+		case <-ticker.C:
+			if n.shutdown {
+				return nil
+			}
+
+			if n.tasks == nil {
 				continue
 			}
-			n.logger.Info("stream check to operator", "taskID", task.ID, "operator", payload.Address)
-			resp := avsproto.SyncTasksResp{
-				Id:        task.ID,
-				CheckType: "CheckTrigger",
-				Trigger:   task.Trigger.ToProtoBuf(),
-			}
 
-			if err := srv.Send(&resp); err != nil {
-				n.logger.Error("error stream check", "taskID", task.ID, "operator", payload.Address, "error", err)
-				return err
-			}
+			for _, task := range n.tasks {
+				key := fmt.Sprintf("%s:%s", payload.Address, task.ID)
 
-			n.lock.Lock()
-			n.sentTasks[key] = true
-			n.lock.Unlock()
+				if _, ok := n.sentTasks[key]; ok {
+					continue
+				}
+
+				n.logger.Info("stream check to operator", "taskID", task.ID, "operator", payload.Address)
+				resp := avsproto.SyncTasksResp{
+					Id:        task.ID,
+					CheckType: "CheckTrigger",
+					Trigger:   task.Trigger.ToProtoBuf(),
+				}
+
+				if err := srv.Send(&resp); err != nil {
+					n.logger.Error("error stream check", "taskID", task.ID, "operator", payload.Address, "error", err)
+					return err
+				}
+
+				n.lock.Lock()
+				n.sentTasks[key] = true
+				n.lock.Unlock()
+			}
 		}
-
-		time.Sleep(time.Duration(10) * time.Second)
 	}
 }
 
@@ -272,6 +288,8 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 			[]byte(TaskStorageKey(task.ID, oldStatus)),
 			[]byte(TaskStorageKey(task.ID, task.Status)),
 		)
+
+		delete(n.tasks, task.ID)
 	} else {
 		// TODO Gracefully handling of storage cleanup
 	}
