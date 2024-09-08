@@ -16,9 +16,30 @@ const packageDefinition = protoLoader.loadSync('../protobuf/avs.proto', {
     oneofs: true
 })
 
+const env = process.env.env || "development"
+const config = {
+  development: {
+    AP_AVS_RPC: 'localhost:2206'
+    TEST_TRANSFER_TOKEN: "0x2e8bdb63d09ef989a0018eeb1c47ef84e3e61f7b",
+    TEST_TRANSFER_TO: '0xe0f7D11FD714674722d325Cd86062A5F1882E13a',
+    ORACLE_PRICE_CONTRACT: '0x694AA1769357215DE4FAC081bf1f309aDC325306',
+  }
+
+  staging: {
+    AP_AVS_RPC: 'aggregator-holesky.avaprotocol.org:2206',
+    TEST_TRANSFER_TOKEN: "0x2e8bdb63d09ef989a0018eeb1c47ef84e3e61f7b",
+    TEST_TRANSFER_TO: '0xe0f7D11FD714674722d325Cd86062A5F1882E13a',
+    ORACLE_PRICE_CONTRACT: '0x694AA1769357215DE4FAC081bf1f309aDC325306',
+  },
+
+  producton: {
+    AP_AVS_RPC: 'aggregator.avaprotocol.org:2206'
+  },
+}
+
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition)
 const apProto = protoDescriptor.aggregator
-const client = new apProto.Aggregator('localhost:2206', grpc.credentials.createInsecure())
+const client = new apProto.Aggregator(config[env].AP_AVS_RPC, grpc.credentials.createInsecure())
 
 async function signMessageWithEthers(wallet, message) {
     const signature = await wallet.signMessage(message)
@@ -63,7 +84,7 @@ function getTaskData() {
     "function transfer(address to, uint amount)"
   ]
   let iface = new ethers.Interface(ABI)
-  return iface.encodeFunctionData("transfer", [ "0xe0f7D11FD714674722d325Cd86062A5F1882E13a", ethers.parseUnits("0.4337", 18) ])
+  return iface.encodeFunctionData("transfer", [ config[env].TEST_TRANSFER_TO, ethers.parseUnits("12", 18) ])
 }
 
 function getTaskDataQuery(owner) {
@@ -96,7 +117,7 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
       contract_execution: {
         // Our ERC20 test token deploy on sepolia
         // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
-        contract_address: "0x2e8bdb63d09ef989a0018eeb1c47ef84e3e61f7b",
+        contract_address: config[env].PRICE_CONTRACT,
         calldata: taskBody,
       }
     },
@@ -136,7 +157,7 @@ async function scheduleTimeTransfer(owner, token) {
       contract_execution: {
         // Our ERC20 test token deploy on sepolia
         // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
-        contract_address: "0x2e8bdb63d09ef989a0018eeb1c47ef84e3e61f7b",
+        contract_address: config[env].TEST_TRANSFER_TOKEN,
         calldata: taskBody,
       }
     },
@@ -215,15 +236,17 @@ async function getWallet(owner, token) {
       // ETH-USD pair on sepolia
       // https://sepolia.etherscan.io/address/0x694AA1769357215DE4FAC081bf1f309aDC325306#code
       // The price return is big.Int so we have to use the cmp function to compare
-      taskCondition = `bigCmp(
-      priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306"),
-      toBigInt("228171987813")) > 0`
+      taskCondition = `
+      bigCmp(
+        priceChainlink("${config[env].ORACLE_PRICE_CONTRACT}"),
+        toBigInt("500")
+      ) > 0`
       await scheduleERC20TransferJob(owner, token, taskCondition)
       break
 
     case "schedule2":
       taskCondition = `bigCmp(
-      priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306"),
+      priceChainlink("${config[env].ORACLE_PRICE_CONTRACT}"),
       toBigInt("99228171987813")) > 0`
       await scheduleERC20TransferJob(owner, token, taskCondition)
       break
