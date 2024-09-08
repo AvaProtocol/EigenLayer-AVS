@@ -2,6 +2,7 @@ package aggregator
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math/big"
 	"net"
@@ -158,10 +159,7 @@ func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avspro
 }
 
 func (r *RpcServer) SyncTasks(payload *avsproto.SyncTasksReq, srv avsproto.Aggregator_SyncTasksServer) error {
-	log.Printf("sync task for operator : %s", payload.Address)
-
 	err := r.engine.StreamCheckToOperator(payload, srv)
-	log.Printf("close sync stream for: %s %v", payload.Address, err)
 
 	return err
 }
@@ -182,7 +180,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 	// https://github.com/grpc/grpc-go/blob/master/examples/helloworld/greeter_server/main.go#L50
 	lis, err := net.Listen("tcp", agg.config.RpcBindAddress)
 	if err != nil {
-		log.Fatalf("Failed to listen to %v", err)
+		panic(fmt.Errorf("Failed to listen to %v", err))
 		return err
 	}
 

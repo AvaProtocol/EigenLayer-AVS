@@ -24,18 +24,31 @@ var (
 	rpcConn *ethclient.Client
 	// websocket client used for subscription
 	wsEthClient *ethclient.Client
+	wsRpcURL    string
 )
+
+type operatorState struct {
+	// list of task id that we had synced to this operator
+	TaskID         map[string]bool
+	MonotonicClock int64
+}
 
 type Engine struct {
 	db    storage.Storage
 	queue *apqueue.Queue
 
-	// maintain a list of active job to sync to operator
-	tasks     map[string]*model.Task
-	lock      sync.Mutex
-	sentTasks map[string]bool
-	shutdown  bool
+	// maintain a list of active job that we have to synced to operators
+	// only task triggers are sent to operator
+	tasks            map[string]*model.Task
+	lock             *sync.Mutex
+	trackSyncedTasks map[string]*operatorState
 
+	// when shutdown is true, our engine will perform the shutdown
+	// pending execution will be pushed out before the shutdown completely
+	// to force shutdown, one can type ctrl+c twice
+	shutdown bool
+
+	// seq is a monotonic number to keep track our task id
 	seq storage.Sequence
 
 	logger logging.Logger
@@ -50,12 +63,20 @@ func SetRpc(rpcURL string) {
 }
 
 func SetWsRpc(rpcURL string) {
-	conn, err := ethclient.Dial(rpcURL)
-	if err == nil {
-		wsEthClient = conn
-	} else {
+	wsRpcURL = rpcURL
+	if err := retryWsRpc(); err != nil {
 		panic(err)
 	}
+}
+
+func retryWsRpc() error {
+	conn, err := ethclient.Dial(wsRpcURL)
+	if err == nil {
+		wsEthClient = conn
+		return nil
+	}
+
+	return err
 }
 
 func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger logging.Logger) *Engine {
@@ -63,10 +84,10 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		db:    db,
 		queue: queue,
 
-		lock:      sync.Mutex{},
-		tasks:     make(map[string]*model.Task),
-		sentTasks: make(map[string]bool),
-		shutdown:  false,
+		lock:             &sync.Mutex{},
+		tasks:            make(map[string]*model.Task),
+		trackSyncedTasks: make(map[string]*operatorState),
+		shutdown:         false,
 
 		logger: logger,
 	}
@@ -141,6 +162,29 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avsproto.Aggregator_SyncTasksServer) error {
 	ticker := time.NewTicker(5 * time.Second)
+	address := payload.Address
+
+	if _, ok := n.trackSyncedTasks[address]; !ok {
+		n.lock.Lock()
+		n.trackSyncedTasks[address] = &operatorState{
+			MonotonicClock: payload.MonotonicClock,
+			TaskID:         map[string]bool{},
+		}
+		n.lock.Unlock()
+	} else {
+		// The operator has restated, but we haven't clean it state yet, reset now
+		if payload.MonotonicClock > n.trackSyncedTasks[address].MonotonicClock {
+			n.trackSyncedTasks[address].TaskID = map[string]bool{}
+			n.trackSyncedTasks[address].MonotonicClock = payload.MonotonicClock
+		}
+	}
+
+	// Reset the state if the operator disconnect
+	defer func() {
+		n.logger.Info("operator disconnect, cleanup state", "operator", address)
+		n.trackSyncedTasks[address].TaskID = map[string]bool{}
+		n.trackSyncedTasks[address].MonotonicClock = 0
+	}()
 
 	for {
 		select {
@@ -154,9 +198,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avspr
 			}
 
 			for _, task := range n.tasks {
-				key := fmt.Sprintf("%s:%s", payload.Address, task.ID)
-
-				if _, ok := n.sentTasks[key]; ok {
+				if _, ok := n.trackSyncedTasks[address].TaskID[task.ID]; ok {
 					continue
 				}
 
@@ -168,12 +210,11 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avspr
 				}
 
 				if err := srv.Send(&resp); err != nil {
-					n.logger.Error("error stream check", "taskID", task.ID, "operator", payload.Address, "error", err)
 					return err
 				}
 
 				n.lock.Lock()
-				n.sentTasks[key] = true
+				n.trackSyncedTasks[address].TaskID[task.ID] = true
 				n.lock.Unlock()
 			}
 		}
@@ -182,21 +223,33 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avspr
 
 // TODO: Merge and verify from multiple operators
 func (n *Engine) AggregateChecksResult(address string, ids []string) error {
+	if len(ids) < 1 {
+		return nil
+	}
+
+	n.logger.Debug("process aggregator check hits", "operator", address, "task_ids", ids)
 	for _, id := range ids {
 		n.lock.Lock()
 		delete(n.tasks, id)
-		delete(n.sentTasks, fmt.Sprintf("%s:%s", address, id))
+		delete(n.trackSyncedTasks[address].TaskID, id)
+		n.logger.Info("processed aggregator check hit", "operator", address, "id", id)
 		n.lock.Unlock()
 	}
 
 	// Now we will queue the job
 	for _, id := range ids {
+		n.logger.Debug("mark task in executing status", "task_id", id)
+
 		if err := n.db.Move(
 			[]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Active), id)),
 			[]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Executing), id)),
 		); err == nil {
-			n.queue.Enqueue("contract_run", id, []byte(id))
+			n.logger.Info("en queue contract_run", id)
+		} else {
+			n.logger.Error("error moving the task storage from active to executing", "task", id, "error", err)
 		}
+
+		n.queue.Enqueue("contract_run", id, []byte(id))
 	}
 
 	return nil

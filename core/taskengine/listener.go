@@ -33,8 +33,9 @@ func RegisterBlockListener(ctx context.Context,
 			return nil
 		case err := <-sub.Err():
 			// TODO: look into error and consider re-connect or wait
-			logger.Errorf("error when fetching new block from websocket", "err", err)
+			logger.Errorf("error when fetching new block from websocket, retry in 15 seconds", "err", err)
 			time.Sleep(15 * time.Second)
+			retryWsRpc()
 		case header := <-headers:
 			logger.Info("detect new block, evaluate checks", "component", "taskengine", "block", header.Hash().Hex())
 

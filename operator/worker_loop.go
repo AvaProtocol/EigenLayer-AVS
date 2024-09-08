@@ -36,22 +36,22 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 
 	timer := time.NewTicker(5 * time.Second)
 
-	// Establish a connection with gRPC server where new task will be pushed
-	// automatically
-	go o.FetchTasks()
-
-	// Register a subscriber on new block event and perform our code such as
-	// reporting time and perform check result
-	workerCtx := context.Background()
-	// TODO: Initialize time based task checking
-	taskengine.RegisterBlockListener(workerCtx, o.RunChecks)
-
 	var metricsErrChan <-chan error
 	if o.config.EnableMetrics {
 		metricsErrChan = o.metrics.Start(ctx, o.metricsReg)
 	} else {
 		metricsErrChan = make(chan error, 1)
 	}
+
+	// Establish a connection with gRPC server where new task will be pushed
+	// automatically
+	o.logger.Info("open channel to grpc to receive check")
+	go o.FetchTasks()
+
+	// Register a subscriber on new block event and perform our code such as
+	// reporting time and perform check result
+	// TODO: Initialize time based task checking
+	go taskengine.RegisterBlockListener(ctx, o.RunChecks)
 
 	for {
 		o.metrics.IncWorkerLoop()
@@ -74,45 +74,46 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 // increase metric once we got data
 func (o *Operator) FetchTasks() {
 	id := hex.EncodeToString(o.operatorId[:])
-	go func() {
-		for {
-			req := &pb.SyncTasksReq{
-				Address: o.config.OperatorAddress,
-				Id:      id,
-				// TODO: generate signature with ecda/alias key
-				Signature: "pending",
-			}
+	for {
+		req := &pb.SyncTasksReq{
+			Address: o.config.OperatorAddress,
+			Id:      id,
+			// TODO: generate signature with ecda/alias key
+			Signature: "pending",
 
-			stream, err := o.aggregatorRpcClient.SyncTasks(context.Background(), req)
-			if err != nil {
-				o.logger.Errorf("error open a stream to aggregator, retry in 15 seconds. error: %v", err)
-				time.Sleep(time.Duration(retryIntervalSecond) * time.Second)
-				o.retryConnect()
-				continue
-			}
-
-			for {
-				resp, err := stream.Recv()
-				if err == io.EOF {
-					return
-				}
-				if err != nil {
-					o.logger.Errorf("cannot receive task data from server stream, retry in 15 seconds. error: %v", err)
-					time.Sleep(time.Duration(retryIntervalSecond) * time.Second)
-					break
-				}
-				o.metrics.IncNumTasksReceived(resp.CheckType)
-				o.logger.Info("received new task", "id", resp.Id, "type", resp.CheckType)
-				checks[resp.Id] = resp
-			}
+			// TODO: use lambort clock
+			MonotonicClock: time.Now().Unix(),
 		}
-	}()
+
+		stream, err := o.aggregatorRpcClient.SyncTasks(context.Background(), req)
+		if err != nil {
+			o.logger.Errorf("error open a stream to aggregator, retry in 15 seconds. error: %v", err)
+			time.Sleep(time.Duration(retryIntervalSecond) * time.Second)
+			o.retryConnect()
+			continue
+		}
+
+		for {
+			resp, err := stream.Recv()
+			if err == io.EOF {
+				return
+			}
+			if err != nil {
+				o.logger.Errorf("cannot receive task data from server stream, retry in 15 seconds. error: %v", err)
+				time.Sleep(time.Duration(retryIntervalSecond) * time.Second)
+				break
+			}
+			o.metrics.IncNumTasksReceived(resp.CheckType)
+			o.logger.Info("received new task", "id", resp.Id, "type", resp.CheckType)
+			checks[resp.Id] = resp
+		}
+	}
 }
 
 func (o *Operator) PingServer() {
 	id := hex.EncodeToString(o.operatorId[:])
 	start := time.Now()
-	// TODO: Implement task and queue depth to detect performance
+
 	_, err := o.aggregatorRpcClient.Ping(context.Background(), &pb.Checkin{
 		Address: o.config.OperatorAddress,
 		Id:      id,
@@ -129,7 +130,7 @@ func (o *Operator) PingServer() {
 		o.logger.Infof("operator update status succesfully in %d ms", elapsed.Milliseconds())
 	} else {
 		o.metrics.IncPing("error")
-		o.logger.Infof("error update status %v", err)
+		o.logger.Error("error update status", "operator", o.config.OperatorAddress, "error", err)
 	}
 	o.metrics.SetPingDuration(elapsed.Seconds())
 }
@@ -145,7 +146,7 @@ func (o *Operator) RunChecks(block *types.Block) error {
 			if e == nil && v == true {
 				hits = append(hits, check.Id)
 				hitLookup[check.Id] = true
-				log.Println("Check hit for ", check.Id)
+				o.logger.Debug("Check hit", "taskID", check.Id)
 			} else {
 				log.Println("Check miss for ", check.Id)
 			}
@@ -153,18 +154,22 @@ func (o *Operator) RunChecks(block *types.Block) error {
 		}
 	}
 
-	if _, e := o.aggregatorRpcClient.UpdateChecks(context.Background(), &pb.UpdateChecksReq{
-		Address:   o.config.OperatorAddress,
-		Signature: "pending",
-		Id:        hits,
-	}); e == nil {
-		// Remove the hit from local cache
-		checkLock.Lock()
-		defer checkLock.Unlock()
-		maps.DeleteFunc(checks, func(k string, v *pb.SyncTasksResp) bool {
-			_, ok := hitLookup[k]
-			return ok
-		})
+	if len(hits) >= 0 {
+		if _, err := o.aggregatorRpcClient.UpdateChecks(context.Background(), &pb.UpdateChecksReq{
+			Address:   o.config.OperatorAddress,
+			Signature: "pending",
+			Id:        hits,
+		}); err == nil {
+			// Remove the hit from local cache
+			checkLock.Lock()
+			defer checkLock.Unlock()
+			maps.DeleteFunc(checks, func(k string, v *pb.SyncTasksResp) bool {
+				_, ok := hitLookup[k]
+				return ok
+			})
+		} else {
+			o.logger.Error("error pushing checks result to aggregator", "error", err)
+		}
 	}
 
 	return nil

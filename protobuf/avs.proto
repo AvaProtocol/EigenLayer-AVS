@@ -56,6 +56,7 @@ message SyncTasksReq {
   string id = 1;
   string address = 2;
   string signature = 3;
+  int64  monotonic_clock = 4;
 }
 
 message SyncTasksResp {
