@@ -180,8 +180,8 @@ func (agg *Aggregator) init() {
 	}
 
 	// Setup account abstraction config
-	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
-	aa.SetEntrypointAddress(config.SmartWallet.EntrypointAddress)
+	aa.SetFactoryAddress(agg.config.SmartWallet.FactoryAddress)
+	aa.SetEntrypointAddress(agg.config.SmartWallet.EntrypointAddress)
 }
 
 func (agg *Aggregator) Start(ctx context.Context) error {

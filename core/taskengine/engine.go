@@ -164,6 +164,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avspr
 	ticker := time.NewTicker(5 * time.Second)
 	address := payload.Address
 
+	n.logger.Info("open channel to stream check to operator", "operator", address)
 	if _, ok := n.trackSyncedTasks[address]; !ok {
 		n.lock.Lock()
 		n.trackSyncedTasks[address] = &operatorState{
