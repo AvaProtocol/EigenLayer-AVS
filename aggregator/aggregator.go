@@ -17,6 +17,7 @@ import (
 	"github.com/AvaProtocol/ap-avs/core"
 	"github.com/AvaProtocol/ap-avs/core/apqueue"
 	"github.com/AvaProtocol/ap-avs/core/chainio"
+	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
 	"github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/core/taskengine"
 	"github.com/Layr-Labs/eigensdk-go/chainio/clients"
@@ -177,6 +178,10 @@ func (agg *Aggregator) init() {
 	} else {
 		config.CurrentChainEnv = config.HoleskyEnv
 	}
+
+	// Setup account abstraction config
+	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
+	aa.SetEntrypointAddress(config.SmartWallet.EntrypointAddress)
 }
 
 func (agg *Aggregator) Start(ctx context.Context) error {
