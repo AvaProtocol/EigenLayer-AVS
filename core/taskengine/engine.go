@@ -14,8 +14,9 @@ import (
 	"github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/model"
 	"github.com/AvaProtocol/ap-avs/storage"
-	"github.com/Layr-Labs/eigensdk-go/logging"
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/op/go-logging"
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
@@ -25,7 +26,12 @@ var (
 	// websocket client used for subscription
 	wsEthClient *ethclient.Client
 	wsRpcURL    string
+	logger      sdklogging.Logger
 )
+
+func SetLogger(mylogger logging.Logger) {
+	logger = mylogger
+}
 
 type operatorState struct {
 	// list of task id that we had synced to this operator
@@ -244,13 +250,12 @@ func (n *Engine) AggregateChecksResult(address string, ids []string) error {
 		if err := n.db.Move(
 			[]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Active), id)),
 			[]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Executing), id)),
-		); err == nil {
-			n.logger.Info("en queue contract_run", id)
-		} else {
+		); err != nil {
 			n.logger.Error("error moving the task storage from active to executing", "task", id, "error", err)
 		}
 
 		n.queue.Enqueue("contract_run", id, []byte(id))
+		n.logger.Info("enqueue contract_run job", "taskid", id)
 	}
 
 	return nil

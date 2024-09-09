@@ -46,7 +46,8 @@ type Config struct {
 	// Account abstraction config
 	SmartWallet *SmartWalletConfig
 
-	SocketPath string
+	SocketPath  string
+	Environment sdklogging.LogLevel
 }
 
 type SmartWalletConfig struct {
@@ -159,12 +160,14 @@ func NewConfig(configFilePath string) (*Config, error) {
 	}
 
 	config := &Config{
-		EcdsaPrivateKey:                   ecdsaPrivateKey,
-		Logger:                            logger,
-		EthWsRpcUrl:                       configRaw.EthWsUrl,
-		EthHttpRpcUrl:                     configRaw.EthRpcUrl,
-		EthHttpClient:                     ethRpcClient,
-		EthWsClient:                       ethWsClient,
+		EcdsaPrivateKey: ecdsaPrivateKey,
+		Logger:          logger,
+		EthWsRpcUrl:     configRaw.EthWsUrl,
+		EthHttpRpcUrl:   configRaw.EthRpcUrl,
+		EthHttpClient:   ethRpcClient,
+		EthWsClient:     ethWsClient,
+
+		Environment:                       configRaw.Environment,
 		OperatorStateRetrieverAddr:        common.HexToAddress(configRaw.OperatorStateRetrieverAddr),
 		AutomationRegistryCoordinatorAddr: common.HexToAddress(configRaw.AVSRegistryCoordinatorAddr),
 		RpcBindAddress:                    configRaw.RpcBindAddress,

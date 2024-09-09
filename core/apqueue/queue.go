@@ -6,18 +6,22 @@ import (
 	"sync"
 
 	"github.com/AvaProtocol/ap-avs/storage"
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
 
-type Queue struct {
-	db storage.Storage
+var ()
 
-	seq    storage.Sequence
+type Queue struct {
+	db     storage.Storage
 	dbLock sync.Mutex
 
-	eventCh chan uint64
 	closeCh chan bool
+	eventCh chan uint64
 
 	prefix string
+
+	seq    storage.Sequence
+	logger sdklogging.Logger
 }
 
 type QueueOption struct {
@@ -25,13 +29,15 @@ type QueueOption struct {
 }
 
 // newQueue creates new ueue
-func New(db storage.Storage, opts *QueueOption) *Queue {
+func New(db storage.Storage, logger sdklogging.Logger, opts *QueueOption) *Queue {
 	q := Queue{
 		db:     db,
 		dbLock: sync.Mutex{},
 
 		eventCh: make(chan uint64, 1000),
 		closeCh: make(chan bool),
+
+		logger: logger,
 	}
 
 	if opts != nil {

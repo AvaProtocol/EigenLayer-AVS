@@ -48,7 +48,7 @@ func readContractData(contractAddress string, data string, method string, contra
 // QueryContract
 //const taskCondition = `cmp(chainlinkPrice("0x694AA1769357215DE4FAC081bf1f309aDC325306"), parseUnit("262199799820", 8)) > 1`
 
-func chainlinkPrice(tokenPair string) *big.Int {
+func chainlinkLatestRoundData(tokenPair string) *big.Int {
 	output, err := QueryContract(
 		rpcConn,
 		// https://docs.chain.link/data-feeds/price-feeds/addresses?network=ethereum&page=1&search=et#sepolia-testnet
@@ -65,6 +65,23 @@ func chainlinkPrice(tokenPair string) *big.Int {
 	// TODO: Check round and answer to prevent the case where chainlink down we
 	// may got outdated data
 	return output[1].(*big.Int)
+}
+
+func chainlinkLatestAnswer(tokenPair string) *big.Int {
+	output, err := QueryContract(
+		rpcConn,
+		// https://docs.chain.link/data-feeds/price-feeds/addresses?network=ethereum&page=1&search=et#sepolia-testnet
+		// ETH-USD pair on sepolia
+		common.HexToAddress(tokenPair),
+		chainlinkABI,
+		"latestAnswer",
+	)
+
+	if err != nil {
+		panic(fmt.Errorf("Error when querying contract through rpc. contract: %s. error: %w", tokenPair, err))
+	}
+
+	return output[0].(*big.Int)
 }
 
 func bigCmp(a *big.Int, b *big.Int) (r int) {
@@ -94,10 +111,13 @@ func toBigInt(val string) *big.Int {
 var (
 	exprEnv = map[string]any{
 		"readContractData": readContractData,
-		"priceChainlink":   chainlinkPrice,
-		"bigCmp":           bigCmp,
-		"parseUnit":        parseUnit,
-		"toBigInt":         toBigInt,
+
+		"priceChainlink":           chainlinkLatestAnswer,
+		"latestRoundDataChainlink": chainlinkLatestRoundData,
+
+		"bigCmp":    bigCmp,
+		"parseUnit": parseUnit,
+		"toBigInt":  toBigInt,
 	}
 )
 

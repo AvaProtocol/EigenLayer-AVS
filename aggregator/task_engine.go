@@ -19,13 +19,13 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		"entrypoint", agg.config.SmartWallet.EntrypointAddress,
 	)
 
-	agg.queue = apqueue.New(agg.db, &apqueue.QueueOption{
+	agg.queue = apqueue.New(agg.db, agg.logger, &apqueue.QueueOption{
 		Prefix: "default",
 	})
 	agg.worker = apqueue.NewWorker(agg.queue, agg.db)
 	agg.worker.RegisterProcessor(
 		"contract_run",
-		taskengine.NewProcessor(agg.db, agg.config.SmartWallet),
+		taskengine.NewProcessor(agg.db, agg.config.SmartWallet, agg.logger),
 	)
 
 	agg.engine = taskengine.New(

@@ -4,23 +4,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
 type OnblockFunc func(*types.Block) error
 
-var (
-	logger logging.Logger
-)
-
-func SetLogger(mylogger logging.Logger) {
-	logger = mylogger
-}
-
-func RegisterBlockListener(ctx context.Context,
-	fn OnblockFunc,
-) error {
+func RegisterBlockListener(ctx context.Context, fn OnblockFunc) error {
 	headers := make(chan *types.Header)
 	sub, err := wsEthClient.SubscribeNewHead(ctx, headers)
 	if err != nil {
@@ -36,6 +25,10 @@ func RegisterBlockListener(ctx context.Context,
 			logger.Errorf("error when fetching new block from websocket, retry in 15 seconds", "err", err)
 			time.Sleep(15 * time.Second)
 			retryWsRpc()
+			sub, err = wsEthClient.SubscribeNewHead(ctx, headers)
+			if err != nil {
+				logger.Errorf("fail to subscribe to rpc for new block", "err", err)
+			}
 		case header := <-headers:
 			logger.Info("detect new block, evaluate checks", "component", "taskengine", "block", header.Hash().Hex())
 

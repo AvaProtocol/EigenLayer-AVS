@@ -3,7 +3,6 @@ package taskengine
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/big"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/AvaProtocol/ap-avs/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/ap-avs/pkg/erc4337/preset"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 
 	"github.com/AvaProtocol/ap-avs/core/apqueue"
 	"github.com/AvaProtocol/ap-avs/storage"
@@ -24,12 +24,14 @@ import (
 type ContractProcessor struct {
 	db                storage.Storage
 	smartWalletConfig *config.SmartWalletConfig
+	logger            sdklogging.Logger
 }
 
-func NewProcessor(db storage.Storage, smartWalletConfig *config.SmartWalletConfig) *ContractProcessor {
+func NewProcessor(db storage.Storage, smartWalletConfig *config.SmartWalletConfig, logger sdklogging.Logger) *ContractProcessor {
 	return &ContractProcessor{
 		db:                db,
 		smartWalletConfig: smartWalletConfig,
+		logger:            logger,
 	}
 }
 
@@ -100,7 +102,7 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 		return err
 	}
 
-	log.Println("send task to bundler rpc", task.ID)
+	c.logger.Info("send task to bundler rpc", "taskid", task.ID)
 	txResult, err := preset.SendUserOp(
 		conn,
 		bundlerClient,
@@ -112,9 +114,11 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 	if txResult != "" {
 		task.AppendExecution(currentTime.Unix(), txResult, nil)
 		task.SetCompleted()
+		c.logger.Info("succesfully perform userop", "taskid", task.ID, "userop", txResult)
 	} else {
 		task.AppendExecution(currentTime.Unix(), "", err)
 		task.SetFailed()
+		c.logger.Error("err perform userop", "taskid", task.ID, "error", err)
 	}
 
 	if err != nil || txResult == "" {
