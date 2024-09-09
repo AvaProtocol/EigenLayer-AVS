@@ -17,13 +17,15 @@ const packageDefinition = protoLoader.loadSync('../protobuf/avs.proto', {
 })
 
 const env = process.env.env || "development"
+const privateKey = process.env.PRIVATE_KEY // Make sure to provide your private key with or without the '0x' prefix
+
 const config = {
   development: {
-    AP_AVS_RPC: 'localhost:2206'
+    AP_AVS_RPC: 'localhost:2206',
     TEST_TRANSFER_TOKEN: "0x2e8bdb63d09ef989a0018eeb1c47ef84e3e61f7b",
     TEST_TRANSFER_TO: '0xe0f7D11FD714674722d325Cd86062A5F1882E13a',
     ORACLE_PRICE_CONTRACT: '0x694AA1769357215DE4FAC081bf1f309aDC325306',
-  }
+  },
 
   staging: {
     AP_AVS_RPC: 'aggregator-holesky.avaprotocol.org:2206',
@@ -32,8 +34,11 @@ const config = {
     ORACLE_PRICE_CONTRACT: '0x694AA1769357215DE4FAC081bf1f309aDC325306',
   },
 
-  producton: {
-    AP_AVS_RPC: 'aggregator.avaprotocol.org:2206'
+  production: {
+    AP_AVS_RPC: 'aggregator.avaprotocol.org:2206',
+    TEST_TRANSFER_TOKEN: "0x72d587b34f7d21fbc47d55fa3d2c2609d4f25698",
+    TEST_TRANSFER_TO: '0xe0f7D11FD714674722d325Cd86062A5F1882E13a',
+    ORACLE_PRICE_CONTRACT: '0x360B0a3f9Fc28Eb2426fa2391Fd2eB13912E1e40',
   },
 }
 
@@ -45,8 +50,6 @@ async function signMessageWithEthers(wallet, message) {
     const signature = await wallet.signMessage(message)
     return signature
 }
-
-const privateKey = process.env.PRIVATE_KEY // Make sure to provide your private key with or without the '0x' prefix
 
 function asyncRPC(client, method, request, metadata) {
     return new Promise((resolve, reject) => {
@@ -77,104 +80,6 @@ async function generateApiToken() {
   }, {})
 
   return { owner, token: result.key }
-}
-
-function getTaskData() {
-  let ABI = [
-    "function transfer(address to, uint amount)"
-  ]
-  let iface = new ethers.Interface(ABI)
-  return iface.encodeFunctionData("transfer", [ config[env].TEST_TRANSFER_TO, ethers.parseUnits("12", 18) ])
-}
-
-function getTaskDataQuery(owner) {
-  let ABI = [
-    "function retrieve(address addr) public view returns (uint256)"
-  ]
-  let iface = new ethers.Interface(ABI)
-  return iface.encodeFunctionData("retrieve", [ owner,])
-}
-
-
-async function scheduleERC20TransferJob(owner, token, taskCondition) {
-  // Now we can schedule a task
-  // 1. Generate the calldata to check condition
-  const taskBody = getTaskData()
-  console.log("\n\nTask body:", taskBody)
-
-  console.log("\n\nTask condition:", taskCondition)
-
-  const metadata = new grpc.Metadata()
-  metadata.add('authkey', token)
-
-  console.log("Trigger type", TriggerType.EXPRESSIONTRIGGER)
-
-  const result = await asyncRPC(client, 'CreateTask', {
-    // A contract execution will be perform for this taks
-    task_type: TaskType.CONTRACTEXECUTIONTASK,
-
-    action: {
-      contract_execution: {
-        // Our ERC20 test token deploy on sepolia
-        // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
-        contract_address: config[env].PRICE_CONTRACT,
-        calldata: taskBody,
-      }
-    },
-
-    trigger: {
-      trigger_type: TriggerType.EXPRESSIONTRIGGER,
-      expression: {
-        expression: taskCondition,
-      },
-    },
-    
-    start_at:  Math.floor(Date.now() / 1000) + 30,
-    expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
-    memo: `Demo Example task for ${owner}`
-  }, metadata)
-
-  console.log("Expression Task ID is:", result)
-}
-
-async function scheduleTimeTransfer(owner, token) {
-  // Now we can schedule a task
-  // 1. Generate the calldata to check condition
-  const taskBody = getTaskData()
-  console.log("\n\nTask body:", taskBody)
-  console.log("\n\nTask condition: Timeschedule", "*/2")
-
-  const metadata = new grpc.Metadata()
-  metadata.add('authkey', token)
-
-  console.log("Trigger type", TriggerType.TIMETRIGGER)
-
-  const result = await asyncRPC(client, 'CreateTask', {
-    // A contract execution will be perform for this taks
-    task_type: TaskType.CONTRACTEXECUTIONTASK,
-
-    action: {
-      contract_execution: {
-        // Our ERC20 test token deploy on sepolia
-        // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
-        contract_address: config[env].TEST_TRANSFER_TOKEN,
-        calldata: taskBody,
-      }
-    },
-
-    trigger: {
-      trigger_type: TriggerType.TIMETRIGGER,
-      schedule: {
-        cron: "*/2 * * * *",
-      },
-    },
-    
-    start_at:  Math.floor(Date.now() / 1000) + 30,
-    expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
-    memo: `Demo Example task for ${owner}`
-  }, metadata)
-
-  console.log("Expression Task ID is:", result)
 }
 
 
@@ -239,7 +144,7 @@ async function getWallet(owner, token) {
       taskCondition = `
       bigCmp(
         priceChainlink("${config[env].ORACLE_PRICE_CONTRACT}"),
-        toBigInt("500")
+        toBigInt("10000")
       ) > 0`
       await scheduleERC20TransferJob(owner, token, taskCondition)
       break
@@ -316,3 +221,101 @@ async function getWallet(owner, token) {
       delete <task-id>: to completely remove a task`)
   }
 })()
+
+
+function getTaskData() {
+  let ABI = [
+    "function transfer(address to, uint amount)"
+  ]
+  let iface = new ethers.Interface(ABI)
+  return iface.encodeFunctionData("transfer", [ config[env].TEST_TRANSFER_TO, ethers.parseUnits("12", 18) ])
+}
+
+function getTaskDataQuery(owner) {
+  let ABI = [
+    "function retrieve(address addr) public view returns (uint256)"
+  ]
+  let iface = new ethers.Interface(ABI)
+  return iface.encodeFunctionData("retrieve", [ owner,])
+}
+
+
+async function scheduleERC20TransferJob(owner, token, taskCondition) {
+  // Now we can schedule a task
+  // 1. Generate the calldata to check condition
+  const taskBody = getTaskData()
+  console.log("\n\nTask body:", taskBody)
+
+  console.log("\n\nTask condition:", taskCondition)
+
+  const metadata = new grpc.Metadata()
+  metadata.add('authkey', token)
+
+  console.log("Trigger type", TriggerType.EXPRESSIONTRIGGER)
+
+  const result = await asyncRPC(client, 'CreateTask', {
+    // A contract execution will be perform for this taks
+    task_type: TaskType.CONTRACTEXECUTIONTASK,
+
+    action: {
+      contract_execution: {
+        // Our ERC20 test token
+        contract_address: config[env].TEST_TRANSFER_TOKEN,
+        calldata: taskBody,
+      }
+    },
+
+    trigger: {
+      trigger_type: TriggerType.EXPRESSIONTRIGGER,
+      expression: {
+        expression: taskCondition,
+      },
+    },
+    
+    start_at:  Math.floor(Date.now() / 1000) + 30,
+    expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
+    memo: `Demo Example task for ${owner}`
+  }, metadata)
+
+  console.log("Expression Task ID is:", result)
+}
+
+async function scheduleTimeTransfer(owner, token) {
+  // Now we can schedule a task
+  // 1. Generate the calldata to check condition
+  const taskBody = getTaskData()
+  console.log("\n\nTask body:", taskBody)
+  console.log("\n\nTask condition: Timeschedule", "*/2")
+
+  const metadata = new grpc.Metadata()
+  metadata.add('authkey', token)
+
+  console.log("Trigger type", TriggerType.TIMETRIGGER)
+
+  const result = await asyncRPC(client, 'CreateTask', {
+    // A contract execution will be perform for this taks
+    task_type: TaskType.CONTRACTEXECUTIONTASK,
+
+    action: {
+      contract_execution: {
+        // Our ERC20 test token deploy on sepolia
+        // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
+        contract_address: config[env].TEST_TRANSFER_TOKEN,
+        calldata: taskBody,
+      }
+    },
+
+    trigger: {
+      trigger_type: TriggerType.TIMETRIGGER,
+      schedule: {
+        cron: "*/2 * * * *",
+      },
+    },
+    
+    start_at:  Math.floor(Date.now() / 1000) + 30,
+    expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
+    memo: `Demo Example task for ${owner}`
+  }, metadata)
+
+  console.log("Expression Task ID is:", result)
+}
