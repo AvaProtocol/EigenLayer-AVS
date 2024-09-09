@@ -37,7 +37,7 @@ const config = {
   production: {
     AP_AVS_RPC: 'aggregator.avaprotocol.org:2206',
     TEST_TRANSFER_TOKEN: "0x72d587b34f7d21fbc47d55fa3d2c2609d4f25698",
-    TEST_TRANSFER_TO: '0xe0f7D11FD714674722d325Cd86062A5F1882E13a',
+    TEST_TRANSFER_TO: '0xa5ABB97A2540E4A4756E33f93fB2D7987668396a',
     ORACLE_PRICE_CONTRACT: '0x360B0a3f9Fc28Eb2426fa2391Fd2eB13912E1e40',
   },
 }
@@ -45,11 +45,6 @@ const config = {
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition)
 const apProto = protoDescriptor.aggregator
 const client = new apProto.Aggregator(config[env].AP_AVS_RPC, grpc.credentials.createInsecure())
-
-async function signMessageWithEthers(wallet, message) {
-    const signature = await wallet.signMessage(message)
-    return signature
-}
 
 function asyncRPC(client, method, request, metadata) {
     return new Promise((resolve, reject) => {
@@ -61,6 +56,11 @@ function asyncRPC(client, method, request, metadata) {
             }
         })
     })
+}
+
+async function signMessageWithEthers(wallet, message) {
+    const signature = await wallet.signMessage(message)
+    return signature
 }
 
 async function generateApiToken() {
@@ -116,7 +116,7 @@ async function deleteTask(owner, token, taskId) {
 
   const result = await asyncRPC(client, 'DeleteTask', { bytes: taskId }, metadata)
 
-  console.log("Delete Task Data for ", taskId, "\n", result)
+  console.log("Delete Task ", taskId, "\n", result)
 }
 
 
@@ -212,7 +212,7 @@ async function getWallet(owner, token) {
       console.log(`Usage:
 
       wallet:           to find smart wallet address for this eoa
-      tasks:             to find all tasks
+      tasks:            to find all tasks
       get <task-id>:    to get task detail
       schedule:         to schedule a task with chainlink eth-usd its condition will be matched quickly
       schedule2:        to schedule a task with chainlink that has a very high price target
