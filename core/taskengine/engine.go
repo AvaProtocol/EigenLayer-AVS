@@ -16,7 +16,6 @@ import (
 	"github.com/AvaProtocol/ap-avs/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/op/go-logging"
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
@@ -29,7 +28,7 @@ var (
 	logger      sdklogging.Logger
 )
 
-func SetLogger(mylogger logging.Logger) {
+func SetLogger(mylogger sdklogging.Logger) {
 	logger = mylogger
 }
 
@@ -57,7 +56,7 @@ type Engine struct {
 	// seq is a monotonic number to keep track our task id
 	seq storage.Sequence
 
-	logger logging.Logger
+	logger sdklogging.Logger
 }
 
 func SetRpc(rpcURL string) {
@@ -85,7 +84,7 @@ func retryWsRpc() error {
 	return err
 }
 
-func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger logging.Logger) *Engine {
+func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger sdklogging.Logger) *Engine {
 	e := Engine{
 		db:    db,
 		queue: queue,

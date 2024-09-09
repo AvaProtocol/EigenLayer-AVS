@@ -37,7 +37,6 @@ func RegisterBlockListener(ctx context.Context, fn OnblockFunc) error {
 				logger.Errorf("error when fetching new block from websocket", "err", err)
 				// TODO: report error in metric
 				// The operator will skip run this time
-				fn(nil)
 			} else {
 				fn(block)
 			}
