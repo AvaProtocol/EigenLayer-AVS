@@ -17,8 +17,18 @@ var (
 	factoryABI  abi.ABI
 	defaultSalt = big.NewInt(0)
 
-	simpleAccountABI *abi.ABI
+	simpleAccountABI  *abi.ABI
+	EntrypointAddress = common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789")
+	factoryAddress    common.Address
 )
+
+func SetFactoryAddress(address common.Address) {
+	factoryAddress = address
+}
+
+func SetEntrypointAddress(address common.Address) {
+	EntrypointAddress = address
+}
 
 func buildFactoryABI() {
 	var err error
