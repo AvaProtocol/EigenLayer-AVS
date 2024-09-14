@@ -2,18 +2,22 @@ package operator
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log"
 	"maps"
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/expr-lang/expr/vm"
+
+	"github.com/AvaProtocol/ap-avs/core/chainio/signer"
 	"github.com/AvaProtocol/ap-avs/core/taskengine"
 	pb "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/version"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/expr-lang/expr/vm"
 )
 
 const (
@@ -114,11 +118,17 @@ func (o *Operator) PingServer() {
 	id := hex.EncodeToString(o.operatorId[:])
 	start := time.Now()
 
+	blsSignature := signer.SignBlsMessage(o.blsKeypair, []byte(fmt.Sprintf("ping from %s ip %s", o.config.OperatorAddress, o.GetPublicIP())))
+	if blsSignature == nil {
+		o.logger.Error("error generate bls signature", "operator", o.config.OperatorAddress)
+	}
+
+	str := base64.StdEncoding.EncodeToString(blsSignature.Serialize())
+
 	_, err := o.aggregatorRpcClient.Ping(context.Background(), &pb.Checkin{
-		Address: o.config.OperatorAddress,
-		Id:      id,
-		// TODO: generate signature with bls key
-		Signature:   "pending",
+		Address:     o.config.OperatorAddress,
+		Id:          id,
+		Signature:   str,
 		Version:     version.Get(),
 		RemoteIP:    o.GetPublicIP(),
 		MetricsPort: o.config.GetPublicMetricPort(),

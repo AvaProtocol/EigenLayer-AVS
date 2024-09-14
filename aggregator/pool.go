@@ -68,6 +68,8 @@ func (o *OperatorPool) Checkin(payload *avsproto.Checkin) error {
 		Version:       payload.Version,
 	}
 
+	fmt.Println("signature", payload.Signature)
+
 	data, err := json.Marshal(status)
 
 	if err != nil {

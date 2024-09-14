@@ -81,9 +81,11 @@ type Aggregator struct {
 
 	operatorPool *OperatorPool
 
-	// task management
+	// task engines handles trigger scheduling and send distribute checks to
+	// operator to checks
 	engine *taskengine.Engine
-	// execute task that is due to run
+	// upon a task condition is met, taskengine will schedule it in our queue to
+	// be executed.
 	queue  *apqueue.Queue
 	worker *apqueue.Worker
 
