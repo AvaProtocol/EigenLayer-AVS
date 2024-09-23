@@ -13,6 +13,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/expr-lang/expr/vm"
+	"github.com/go-co-op/gocron/v2"
 
 	"github.com/AvaProtocol/ap-avs/core/chainio/signer"
 	"github.com/AvaProtocol/ap-avs/core/taskengine"
@@ -34,11 +35,16 @@ var (
 func (o *Operator) runWorkLoop(ctx context.Context) error {
 	// Setup taskengine, initialize local storage and cache, establish rpc
 	checks = map[string]*pb.SyncTasksResp{}
+
+	var err error
+	o.scheduler, err = gocron.NewScheduler()
+	if err != nil {
+		panic(err)
+	}
+
 	taskengine.SetRpc(o.config.TargetChain.EthRpcUrl)
 	taskengine.SetWsRpc(o.config.TargetChain.EthWsUrl)
 	taskengine.SetLogger(o.logger)
-
-	timer := time.NewTicker(5 * time.Second)
 
 	var metricsErrChan <-chan error
 	if o.config.EnableMetrics {
@@ -50,33 +56,29 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	// Establish a connection with gRPC server where new task will be pushed
 	// automatically
 	o.logger.Info("open channel to grpc to receive check")
-	go o.FetchTasks()
+	go o.StreamChecks()
 
 	// Register a subscriber on new block event and perform our code such as
 	// reporting time and perform check result
 	// TODO: Initialize time based task checking
 	go taskengine.RegisterBlockListener(ctx, o.RunChecks)
+	o.scheduler.Start()
+	o.scheduler.NewJob(gocron.DurationJob(time.Second*5), gocron.NewTask(o.PingServer))
 
 	for {
-		o.metrics.IncWorkerLoop()
-		elapse := o.elapsing.Report()
-		o.metrics.AddUptime(float64(elapse.Milliseconds()))
-
 		select {
 		case <-ctx.Done():
 			return nil
 		case err := <-metricsErrChan:
 			// TODO: handle gracefully
 			o.logger.Fatal("Error in metrics server", "err", err)
-		case <-timer.C:
-			o.PingServer()
 		}
 	}
 }
 
-// FetchTasks setup a streaming connection to receive task from server, and also
+// StreamChecks setup a streaming connection to receive task from server, and also
 // increase metric once we got data
-func (o *Operator) FetchTasks() {
+func (o *Operator) StreamChecks() {
 	id := hex.EncodeToString(o.operatorId[:])
 	for {
 		req := &pb.SyncTasksReq{
@@ -115,6 +117,10 @@ func (o *Operator) FetchTasks() {
 }
 
 func (o *Operator) PingServer() {
+	o.metrics.IncWorkerLoop()
+	elapse := o.elapsing.Report()
+	o.metrics.AddUptime(float64(elapse.Milliseconds()))
+
 	id := hex.EncodeToString(o.operatorId[:])
 	start := time.Now()
 
@@ -133,6 +139,12 @@ func (o *Operator) PingServer() {
 		RemoteIP:    o.GetPublicIP(),
 		MetricsPort: o.config.GetPublicMetricPort(),
 	})
+
+	if err != nil {
+		o.logger.Error("check in error", "err", err)
+	} else {
+		o.logger.Debug("check in succesfully")
+	}
 
 	elapsed := time.Now().Sub(start)
 	if err == nil {

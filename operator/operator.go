@@ -19,6 +19,7 @@ import (
 	"github.com/Layr-Labs/eigensdk-go/signerv2"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/go-co-op/gocron/v2"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -39,6 +40,7 @@ import (
 	//"github.com/AvaProtocol/ap-avs/aggregator"
 	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
 
+	"github.com/AvaProtocol/ap-avs/core/auth"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/version"
 
@@ -123,6 +125,8 @@ type Operator struct {
 	elapsing *timekeeper.Elapsing
 
 	publicIP string
+
+	scheduler gocron.Scheduler
 }
 
 func RunWithConfig(configPath string) {
@@ -281,16 +285,6 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		AVS_NAME, logger, common.HexToAddress(c.OperatorAddress), quorumNames)
 	reg.MustRegister(economicMetricsCollector)
 
-	// grpc client
-	var opts []grpc.DialOption
-	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	logger.Infof("Connect to aggregator %s", c.AggregatorServerIpPortAddress)
-	aggregatorConn, err := grpc.NewClient(c.AggregatorServerIpPortAddress, opts...)
-	if err != nil {
-		panic(err)
-	}
-	aggregatorRpcClient := avsproto.NewAggregatorClient(aggregatorConn)
-
 	operator := &Operator{
 		config:      &c,
 		logger:      logger,
@@ -309,8 +303,8 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		operatorAddr:     common.HexToAddress(c.OperatorAddress),
 		signerAddress:    signerAddress,
 
-		aggregatorRpcClient: aggregatorRpcClient,
-		aggregatorConn:      aggregatorConn,
+		//aggregatorRpcClient: aggregatorRpcClient,
+		//aggregatorConn:      aggregatorConn,
 
 		newTaskCreatedChan:                 make(chan *cstaskmanager.ContractAutomationTaskManagerNewTaskCreated),
 		credibleSquaringServiceManagerAddr: common.HexToAddress(c.AVSRegistryCoordinatorAddress),
@@ -322,6 +316,9 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	}
 
 	operator.PopulateKnownConfigByChainID(chainId)
+
+	logger.Infof("Connect to aggregator %s", c.AggregatorServerIpPortAddress)
+	operator.retryConnect()
 
 	// OperatorId is set in contract during registration so we get it after registering operator.
 	operatorId, err := sdkClients.AvsRegistryChainReader.GetOperatorId(&bind.CallOpts{}, operator.operatorAddr)
@@ -383,14 +380,21 @@ func (o *Operator) Start(ctx context.Context) error {
 func (o *Operator) retryConnect() error {
 	// grpc client
 	var opts []grpc.DialOption
-	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	o.logger.Info("Retry connect to aggregator", "aggregatorAddress", o.config.AggregatorServerIpPortAddress)
+	opts = append(opts,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithPerRPCCredentials(auth.ClientAuth{
+			EcdsaPrivateKey: o.operatorEcdsaPrivateKey,
+			SignerAddr:      o.operatorAddr,
+		}),
+	)
+	o.logger.Info("attempt connect to aggregator", "aggregatorAddress", o.config.AggregatorServerIpPortAddress)
 	var err error
 	o.aggregatorConn, err = grpc.NewClient(o.config.AggregatorServerIpPortAddress, opts...)
 	if err != nil {
 		return err
 	}
 	o.aggregatorRpcClient = avsproto.NewAggregatorClient(o.aggregatorConn)
+	o.logger.Info("connected to aggregator", "aggregatorAddress", o.config.AggregatorServerIpPortAddress)
 	return nil
 }
 

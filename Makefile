@@ -96,3 +96,15 @@ up:
 unstable-build:
 	docker build --platform=linux/amd64 --build-arg RELEASE_TAG=unstable -t avaprotocol/ap-avs:unstable -f dockerfiles/operator.Dockerfile .
 	docker push avaprotocol/ap-avs:unstable
+
+## dev-build: build a dev version for local development
+dev-build:
+	mkdir out || true
+	go build -o ./out/ap
+
+## dev-agg: run aggregator locally with dev build
+dev-agg:
+	./out/ap aggregator
+## dev-agg: run operator locally with dev build
+dev-op:
+	./out/ap operator --config=config/operator.yaml
