@@ -12,12 +12,18 @@ enum TaskType {
   
   // Generic contract execution which can be used for:
   // ERC20 Transfer, NFT Transfer, auto reclaim, auto restaking etc
+  // When executing a contract we need at least 2 things:
+  // - target contract address
+  // - the message to send to that contract
   ContractExecutionTask = 1;
 }
 
-enum TriggerType {
-  TimeTrigger = 0;
-  ContractCallTrigger = 1;
+enum TaskStatus {
+  Active = 0;
+  Completed = 1;
+  Failed = 2;
+  Canceled = 3;
+  Executing = 4;
 }
 
 message UUID {
@@ -50,30 +56,14 @@ message SyncTasksReq {
   string id = 1;
   string address = 2;
   string signature = 3;
+  int64  monotonic_clock = 4;
 }
 
 message SyncTasksResp {
-  string id = 1;
-  string taskType = 2;
-}
+  string id      = 1;
+  string checkType = 2;
 
-service Aggregator {
-  // Auth
-  rpc GetKey(GetKeyReq) returns (KeyResp) {};
-
-  // Smart Acccount
-  rpc GetNonce(NonceRequest) returns (NonceResp) {};
-  rpc GetSmartAccountAddress(AddressRequest) returns (AddressResp) {};
-
-  // Task Management
-  rpc CreateTask(CreateTaskReq) returns (CreateTaskResp) {};
-  rpc ListTasks(ListTasksReq) returns (ListTasksResp) {};
-  rpc GetTask(UUID) returns (Task) {};
-  rpc CancelTask(UUID) returns (google.protobuf.BoolValue) {};
-
-  // Operator endpoint
-  rpc Ping(Checkin) returns (CheckinResp) {};
-  rpc SyncTasks(SyncTasksReq) returns (stream SyncTasksResp) {};
+  TaskTrigger trigger = 3;
 }
 
 message ETHTransfer {
@@ -83,25 +73,65 @@ message ETHTransfer {
 
 message ContractExecution {
   string contract_address = 1;
-  string method = 2;
-  string encoded_params = 3;
-};
+  string calldata = 2;
 
-message TaskBody {
+  string method = 3;
+  string encoded_params = 4;
+}
+
+message TaskAction {
   ETHTransfer eth_transfer = 1;
   ContractExecution contract_execution = 2;
 }
 
-message TaskTrigger {
-  message TimeCondition {
-    repeated int64 fixed = 1;
-    string cron = 2;
-  }
 
-  TriggerType type = 1;
-  TimeCondition schedule = 2;
+enum TriggerType {
+  TimeTrigger          = 0;
+  ContractQueryTrigger = 1;
+  ExpressionTrigger    = 2;
 }
 
+// Simple timebase or cron syntax.
+message TimeCondition {
+  repeated int64 fixed = 1;
+  string cron = 2;
+}
+// A contract method that return true/false
+// Ideally to use when we already have an existing contract that perform the
+// check.
+// This method will be evaluate every block
+message ContractQueryCondition {
+  string contract_address = 1;
+  string callmsg = 2;
+}
+
+// An arbitrary expression to express the condition.
+// People can define condition example
+//   chainlinkPrice("address-of-eth-usd-pair") > 2644500 && queryContract("contractaddress", "callmsg")[2] < = 5
+// By allow arbitrary expression, people can mix and match to create conplex
+// condition that match their workload
+//
+// The function to be used need to be pre-defined on our task egnine runtime.
+// When a new block is build, our engine will execute these check
+//
+// The expression language is re-present by https://expr-lang.org/
+message ExpressionCondition {
+  string expression = 1;
+}
+
+message TaskTrigger {
+  TriggerType            trigger_type   = 1;
+
+  TimeCondition          schedule       = 2;
+  ContractQueryCondition contract_query = 3;
+  ExpressionCondition    expression     = 4;
+}
+
+message Execution {
+  int64 epoch = 1;
+  string userop_hash = 2;
+  string error = 3;
+}
 
 message Task {
     string owner = 1;
@@ -109,20 +139,32 @@ message Task {
 
     UUID id = 3;
     TaskType task_type = 4;
-    TaskTrigger trigger = 5;
-    TaskBody body= 6;
+    TaskAction action = 5;
 
-    int64 expired_at = 7;
-    string memo = 8;
+    TaskTrigger trigger = 6;
+
+    // task won't be check before this
+    int64 start_at = 7;
+    // task won't be run before this
+    int64 expired_at = 8;
+    // arbitrary data about this task
+    string memo = 9;
+
+    int64 completed_at = 10;
+    TaskStatus status = 11;
+
+    repeated Execution executions = 12;
 }
 
 message CreateTaskReq {
-    TaskType task_type = 1;
-    TaskTrigger trigger = 2;
-    TaskBody body= 3;
+    TaskType task_type  = 1;
+    TaskAction action   = 2;
 
-    int64 expired_at = 4;
-    string memo = 5;
+    TaskTrigger trigger = 3;
+
+    int64 start_at      = 4;
+    int64 expired_at    = 5;
+    string memo         = 6;
 }
 
 message CreateTaskResp {
@@ -152,6 +194,7 @@ message ListTasksReq {}
 message ListTasksResp {
     message TaskItemResp {
         string id = 1;
+        TaskStatus status = 2;
     }
 
     repeated TaskItemResp tasks = 1;
@@ -165,4 +208,35 @@ message GetKeyReq {
 
 message KeyResp {
     string key=1;
+}
+
+message UpdateChecksReq {
+  string address = 1;
+  string signature = 2;
+  repeated string id = 3;
+}
+
+message UpdateChecksResp {
+  google.protobuf.Timestamp updated_at = 1;
+}
+
+service Aggregator {
+  // Auth
+  rpc GetKey(GetKeyReq) returns (KeyResp) {};
+
+  // Smart Acccount
+  rpc GetNonce(NonceRequest) returns (NonceResp) {};
+  rpc GetSmartAccountAddress(AddressRequest) returns (AddressResp) {};
+
+  // Task Management
+  rpc CreateTask(CreateTaskReq) returns (CreateTaskResp) {};
+  rpc ListTasks(ListTasksReq) returns (ListTasksResp) {};
+  rpc GetTask(UUID) returns (Task) {};
+  rpc CancelTask(UUID) returns (google.protobuf.BoolValue) {};
+  rpc DeleteTask(UUID) returns (google.protobuf.BoolValue) {};
+
+  // Operator endpoint
+  rpc Ping(Checkin) returns (CheckinResp) {};
+  rpc SyncTasks(SyncTasksReq) returns (stream SyncTasksResp) {};
+  rpc UpdateChecks(UpdateChecksReq) returns (UpdateChecksResp) {};
 }

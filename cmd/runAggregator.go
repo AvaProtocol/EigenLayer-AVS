@@ -7,8 +7,6 @@ import (
 )
 
 var (
-	aggregratorConfig = "./config/aggregator.yaml"
-
 	runAggregatorCmd = &cobra.Command{
 		Use:   "aggregator",
 		Short: "Run aggregator",
@@ -16,7 +14,7 @@ var (
 
 Use --config=path-to-your-config-file. default is=./config/aggregator.yaml `,
 		Run: func(cmd *cobra.Command, args []string) {
-			aggregator.RunWithConfig(aggregratorConfig)
+			aggregator.RunWithConfig(config)
 		},
 	}
 )

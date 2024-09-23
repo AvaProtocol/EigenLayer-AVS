@@ -33,9 +33,11 @@ type AggregatorClient interface {
 	ListTasks(ctx context.Context, in *ListTasksReq, opts ...grpc.CallOption) (*ListTasksResp, error)
 	GetTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*Task, error)
 	CancelTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
+	DeleteTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
 	// Operator endpoint
 	Ping(ctx context.Context, in *Checkin, opts ...grpc.CallOption) (*CheckinResp, error)
 	SyncTasks(ctx context.Context, in *SyncTasksReq, opts ...grpc.CallOption) (Aggregator_SyncTasksClient, error)
+	UpdateChecks(ctx context.Context, in *UpdateChecksReq, opts ...grpc.CallOption) (*UpdateChecksResp, error)
 }
 
 type aggregatorClient struct {
@@ -109,6 +111,15 @@ func (c *aggregatorClient) CancelTask(ctx context.Context, in *UUID, opts ...grp
 	return out, nil
 }
 
+func (c *aggregatorClient) DeleteTask(ctx context.Context, in *UUID, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error) {
+	out := new(wrapperspb.BoolValue)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/DeleteTask", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *aggregatorClient) Ping(ctx context.Context, in *Checkin, opts ...grpc.CallOption) (*CheckinResp, error) {
 	out := new(CheckinResp)
 	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/Ping", in, out, opts...)
@@ -150,6 +161,15 @@ func (x *aggregatorSyncTasksClient) Recv() (*SyncTasksResp, error) {
 	return m, nil
 }
 
+func (c *aggregatorClient) UpdateChecks(ctx context.Context, in *UpdateChecksReq, opts ...grpc.CallOption) (*UpdateChecksResp, error) {
+	out := new(UpdateChecksResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/UpdateChecks", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AggregatorServer is the server API for Aggregator service.
 // All implementations must embed UnimplementedAggregatorServer
 // for forward compatibility
@@ -164,9 +184,11 @@ type AggregatorServer interface {
 	ListTasks(context.Context, *ListTasksReq) (*ListTasksResp, error)
 	GetTask(context.Context, *UUID) (*Task, error)
 	CancelTask(context.Context, *UUID) (*wrapperspb.BoolValue, error)
+	DeleteTask(context.Context, *UUID) (*wrapperspb.BoolValue, error)
 	// Operator endpoint
 	Ping(context.Context, *Checkin) (*CheckinResp, error)
 	SyncTasks(*SyncTasksReq, Aggregator_SyncTasksServer) error
+	UpdateChecks(context.Context, *UpdateChecksReq) (*UpdateChecksResp, error)
 	mustEmbedUnimplementedAggregatorServer()
 }
 
@@ -195,11 +217,17 @@ func (UnimplementedAggregatorServer) GetTask(context.Context, *UUID) (*Task, err
 func (UnimplementedAggregatorServer) CancelTask(context.Context, *UUID) (*wrapperspb.BoolValue, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CancelTask not implemented")
 }
+func (UnimplementedAggregatorServer) DeleteTask(context.Context, *UUID) (*wrapperspb.BoolValue, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteTask not implemented")
+}
 func (UnimplementedAggregatorServer) Ping(context.Context, *Checkin) (*CheckinResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Ping not implemented")
 }
 func (UnimplementedAggregatorServer) SyncTasks(*SyncTasksReq, Aggregator_SyncTasksServer) error {
 	return status.Errorf(codes.Unimplemented, "method SyncTasks not implemented")
+}
+func (UnimplementedAggregatorServer) UpdateChecks(context.Context, *UpdateChecksReq) (*UpdateChecksResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateChecks not implemented")
 }
 func (UnimplementedAggregatorServer) mustEmbedUnimplementedAggregatorServer() {}
 
@@ -340,6 +368,24 @@ func _Aggregator_CancelTask_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Aggregator_DeleteTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UUID)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).DeleteTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregator/DeleteTask",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).DeleteTask(ctx, req.(*UUID))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Aggregator_Ping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(Checkin)
 	if err := dec(in); err != nil {
@@ -379,6 +425,24 @@ func (x *aggregatorSyncTasksServer) Send(m *SyncTasksResp) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Aggregator_UpdateChecks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateChecksReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).UpdateChecks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregator/UpdateChecks",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).UpdateChecks(ctx, req.(*UpdateChecksReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Aggregator_ServiceDesc is the grpc.ServiceDesc for Aggregator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -415,8 +479,16 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Aggregator_CancelTask_Handler,
 		},
 		{
+			MethodName: "DeleteTask",
+			Handler:    _Aggregator_DeleteTask_Handler,
+		},
+		{
 			MethodName: "Ping",
 			Handler:    _Aggregator_Ping_Handler,
+		},
+		{
+			MethodName: "UpdateChecks",
+			Handler:    _Aggregator_UpdateChecks_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

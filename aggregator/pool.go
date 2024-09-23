@@ -96,6 +96,10 @@ func (o *OperatorPool) GetAll() []*OperatorNode {
 }
 
 func (r *RpcServer) Ping(ctx context.Context, payload *avsproto.Checkin) (*avsproto.CheckinResp, error) {
+	if ok, err := r.verifyOperator(ctx, payload.Address); !ok {
+		return nil, err
+	}
+
 	if err := r.operatorPool.Checkin(payload); err != nil {
 		return nil, fmt.Errorf("cannot update operator status error: %w", err)
 	}

@@ -5,8 +5,8 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"os"
-	"strings"
 	"strconv"
+	"strings"
 
 	"google.golang.org/grpc"
 
@@ -19,6 +19,7 @@ import (
 	"github.com/Layr-Labs/eigensdk-go/signerv2"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/go-co-op/gocron/v2"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -39,11 +40,12 @@ import (
 	//"github.com/AvaProtocol/ap-avs/aggregator"
 	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
 
+	"github.com/AvaProtocol/ap-avs/core/auth"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/version"
 
-	"github.com/AvaProtocol/ap-avs/core/timekeeper"
-	"github.com/AvaProtocol/ap-avs/core/ipfetcher"
+	"github.com/AvaProtocol/ap-avs/pkg/ipfetcher"
+	"github.com/AvaProtocol/ap-avs/pkg/timekeeper"
 
 	// insecure for local dev
 	"google.golang.org/grpc/credentials/insecure"
@@ -70,10 +72,22 @@ type OperatorConfig struct {
 	DbPath string `yaml:"db_path"`
 
 	PublicMetricsPort int32
+
+	// Usually we don't need this, but on testnet, our target chain might be
+	// differen from the chain where EigenLayer contract is deployed.
+	// EigenLayer contracts are deployed on Holesky, but on holesky there isn't
+	// much tooling around it: no official rpc bundler or erc4337 explorer, no
+	// uniswap etc
+	//
+	// Therefore on testnet we will need this option when running in Holesky
+	TargetChain struct {
+		EthRpcUrl string `yaml:"eth_rpc_url"`
+		EthWsUrl  string `yaml:"eth_ws_url"`
+	} `yaml:"target_chain"`
 }
 
 type Operator struct {
-	config      OperatorConfig
+	config      *OperatorConfig
 	logger      logging.Logger
 	ethClient   eth.Client
 	ethWsClient eth.Client
@@ -98,6 +112,7 @@ type Operator struct {
 
 	// receive new tasks in this chan (typically from listening to onchain event)
 	newTaskCreatedChan chan *cstaskmanager.ContractAutomationTaskManagerNewTaskCreated
+
 	// rpc client to send signed task responses to aggregator
 	aggregatorRpcClient avsproto.AggregatorClient
 	aggregatorConn      *grpc.ClientConn
@@ -110,6 +125,8 @@ type Operator struct {
 	elapsing *timekeeper.Elapsing
 
 	publicIP string
+
+	scheduler gocron.Scheduler
 }
 
 func RunWithConfig(configPath string) {
@@ -124,7 +141,6 @@ func RunWithConfig(configPath string) {
 func NewOperatorFromConfigFile(configPath string) (*Operator, error) {
 	nodeConfig := OperatorConfig{}
 	err := sdkutils.ReadYamlConfig(configPath, &nodeConfig)
-
 
 	if err != nil {
 		panic(fmt.Errorf("failed to parse config file: %w\nMake sure %s is exist and a valid yaml file %w.", configPath, err))
@@ -269,18 +285,8 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		AVS_NAME, logger, common.HexToAddress(c.OperatorAddress), quorumNames)
 	reg.MustRegister(economicMetricsCollector)
 
-	// grpc client
-	var opts []grpc.DialOption
-	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	logger.Infof("Connect to aggregator %s", c.AggregatorServerIpPortAddress)
-	aggregatorConn, err := grpc.NewClient(c.AggregatorServerIpPortAddress, opts...)
-	if err != nil {
-		panic(err)
-	}
-	aggregatorRpcClient := avsproto.NewAggregatorClient(aggregatorConn)
-
 	operator := &Operator{
-		config:      c,
+		config:      &c,
 		logger:      logger,
 		metricsReg:  reg,
 		metrics:     avsAndEigenMetrics,
@@ -297,8 +303,8 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		operatorAddr:     common.HexToAddress(c.OperatorAddress),
 		signerAddress:    signerAddress,
 
-		aggregatorRpcClient: aggregatorRpcClient,
-		aggregatorConn:      aggregatorConn,
+		//aggregatorRpcClient: aggregatorRpcClient,
+		//aggregatorConn:      aggregatorConn,
 
 		newTaskCreatedChan:                 make(chan *cstaskmanager.ContractAutomationTaskManagerNewTaskCreated),
 		credibleSquaringServiceManagerAddr: common.HexToAddress(c.AVSRegistryCoordinatorAddress),
@@ -310,6 +316,9 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	}
 
 	operator.PopulateKnownConfigByChainID(chainId)
+
+	logger.Infof("Connect to aggregator %s", c.AggregatorServerIpPortAddress)
+	operator.retryConnect()
 
 	// OperatorId is set in contract during registration so we get it after registering operator.
 	operatorId, err := sdkClients.AvsRegistryChainReader.GetOperatorId(&bind.CallOpts{}, operator.operatorAddr)
@@ -368,22 +377,29 @@ func (o *Operator) Start(ctx context.Context) error {
 	return o.runWorkLoop(ctx)
 }
 
-func (o *Operator) retryConnect() error{
+func (o *Operator) retryConnect() error {
 	// grpc client
 	var opts []grpc.DialOption
-	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	o.logger.Info("Retry connect to aggregator", "aggregatorAddress", o.config.AggregatorServerIpPortAddress)
+	opts = append(opts,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithPerRPCCredentials(auth.ClientAuth{
+			EcdsaPrivateKey: o.operatorEcdsaPrivateKey,
+			SignerAddr:      o.operatorAddr,
+		}),
+	)
+	o.logger.Info("attempt connect to aggregator", "aggregatorAddress", o.config.AggregatorServerIpPortAddress)
 	var err error
 	o.aggregatorConn, err = grpc.NewClient(o.config.AggregatorServerIpPortAddress, opts...)
 	if err != nil {
 		return err
 	}
 	o.aggregatorRpcClient = avsproto.NewAggregatorClient(o.aggregatorConn)
+	o.logger.Info("connected to aggregator", "aggregatorAddress", o.config.AggregatorServerIpPortAddress)
 	return nil
 }
 
 // Optimistic get public ip address of the operator
-// the IP address is used in combination with 
+// the IP address is used in combination with
 func (o *Operator) GetPublicIP() string {
 	if o.publicIP == "" {
 		var err error
@@ -404,10 +420,10 @@ func (c *OperatorConfig) GetPublicMetricPort() int32 {
 		return c.PublicMetricsPort
 	}
 
-	port := os.Getenv("PUBLIC_METRICS_PORT");
+	port := os.Getenv("PUBLIC_METRICS_PORT")
 	if port == "" {
 		parts := strings.Split(c.EigenMetricsIpPortAddress, ":")
-		if len(parts) !=2 {
+		if len(parts) != 2 {
 			panic(fmt.Errorf("EigenMetricsIpPortAddress: %s in operator config file is malform", c.EigenMetricsIpPortAddress))
 		}
 
@@ -419,7 +435,6 @@ func (c *OperatorConfig) GetPublicMetricPort() int32 {
 	c.PublicMetricsPort = int32(portNum)
 	return c.PublicMetricsPort
 }
-
 
 // // Takes a NewTaskCreatedLog struct as input and returns a TaskResponseHeader struct.
 // // The TaskResponseHeader struct is the struct that is signed and sent to the contract as a task response.

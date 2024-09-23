@@ -2,21 +2,22 @@ package aggregator
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math/big"
 	"net"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
 	"github.com/AvaProtocol/ap-avs/core/config"
-	"github.com/AvaProtocol/ap-avs/model"
+	"github.com/AvaProtocol/ap-avs/core/taskengine"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/storage"
 )
@@ -26,10 +27,13 @@ type RpcServer struct {
 	avsproto.UnimplementedAggregatorServer
 	config *config.Config
 	db     storage.Storage
+	engine *taskengine.Engine
 
 	operatorPool *OperatorPool
 
 	ethrpc *ethclient.Client
+
+	smartWalletRpc *ethclient.Client
 }
 
 // Get nonce of an existing smart wallet of a given owner
@@ -37,7 +41,7 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 
 	ownerAddress := common.HexToAddress(payload.Owner)
 
-	nonce, err := aa.GetNonce(r.ethrpc, ownerAddress, big.NewInt(0))
+	nonce, err := aa.GetNonce(r.smartWalletRpc, ownerAddress, big.NewInt(0))
 	if err != nil {
 		return nil, err
 	}
@@ -48,17 +52,15 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 }
 
 // GetAddress returns smart account address of the given owner in the auth key
-func (r *RpcServer) GetAddress(ctx context.Context, payload *avsproto.AddressRequest) (*avsproto.AddressResp, error) {
+func (r *RpcServer) GetSmartAccountAddress(ctx context.Context, payload *avsproto.AddressRequest) (*avsproto.AddressResp, error) {
 	ownerAddress := common.HexToAddress(payload.Owner)
 	salt := big.NewInt(0)
+	sender, err := aa.GetSenderAddress(r.smartWalletRpc, ownerAddress, salt)
+	nonce, err := aa.GetNonce(r.smartWalletRpc, *sender, salt)
 
-	nonce, err := aa.GetNonce(r.ethrpc, ownerAddress, salt)
 	if err != nil {
 		return nil, err
 	}
-
-	sender, err := aa.GetSenderAddress(r.ethrpc, ownerAddress, salt)
-
 	return &avsproto.AddressResp{
 		Nonce:               nonce.String(),
 		SmartAccountAddress: sender.String(),
@@ -66,7 +68,43 @@ func (r *RpcServer) GetAddress(ctx context.Context, payload *avsproto.AddressReq
 }
 
 func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.UUID) (*wrapperspb.BoolValue, error) {
-	return nil, nil
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	r.config.Logger.Info("Process Cancel Task",
+		"user", user.Address.String(),
+		"taskID", string(taskID.Bytes),
+	)
+
+	result, err := r.engine.CancelTaskByUser(user, string(taskID.Bytes))
+
+	if err != nil {
+		return nil, err
+	}
+
+	return wrapperspb.Bool(result), nil
+}
+
+func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.UUID) (*wrapperspb.BoolValue, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	r.config.Logger.Info("Process Delete Task",
+		"user", user.Address.String(),
+		"taskID", string(taskID.Bytes),
+	)
+
+	result, err := r.engine.DeleteTaskByUser(user, string(taskID.Bytes))
+
+	if err != nil {
+		return nil, err
+	}
+
+	return wrapperspb.Bool(result), nil
 }
 
 func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.CreateTaskReq) (*avsproto.CreateTaskResp, error) {
@@ -75,20 +113,10 @@ func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.Create
 		return nil, err
 	}
 
-	task, err := model.NewTaskFromProtobuf(user, taskPayload)
+	task, err := r.engine.CreateTask(user, taskPayload)
 	if err != nil {
 		return nil, err
 	}
-
-	updates := map[string][]byte{}
-
-	// global unique key-value for fast lookup
-	updates[task.ID], err = task.ToJSON()
-
-	// storage to find task belong to a user
-	updates[string(task.Key())] = []byte(model.TaskStatusActive)
-
-	r.db.BatchWrite(updates)
 
 	return &avsproto.CreateTaskResp{
 		Id: task.ID,
@@ -101,18 +129,10 @@ func (r *RpcServer) ListTasks(ctx context.Context, _ *avsproto.ListTasksReq) (*a
 		return nil, err
 	}
 
-	taskIDs, err := r.db.GetKeyHasPrefix([]byte(user.Address.String()))
-
-	if err != nil {
-		return nil, err
-	}
-
-	tasks := make([]*avsproto.ListTasksResp_TaskItemResp, len(taskIDs))
-	for i, taskKey := range taskIDs {
-		tasks[i] = &avsproto.ListTasksResp_TaskItemResp{
-			Id: string(model.TaskKeyToId(taskKey)),
-		}
-	}
+	r.config.Logger.Info("Process List Task",
+		"user", user.Address.String(),
+	)
+	tasks, err := r.engine.ListTasksByUser(user)
 
 	return &avsproto.ListTasksResp{
 		Tasks: tasks,
@@ -125,43 +145,33 @@ func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avspro
 		return nil, err
 	}
 
-	task := &model.Task{
-		ID:    taskID.Bytes,
-		Owner: user.Address.Hex(),
-	}
+	r.config.Logger.Info("Process Get Task",
+		"user", user.Address.String(),
+		"taskID", string(taskID.Bytes),
+	)
 
-	taskRawByte, err := r.db.GetKey([]byte(task.ID))
-
+	task, err := r.engine.GetTaskByUser(user, string(taskID.Bytes))
 	if err != nil {
 		return nil, err
 	}
-
-	task.FromStorageData(taskRawByte)
 
 	return task.ToProtoBuf()
 }
 
 func (r *RpcServer) SyncTasks(payload *avsproto.SyncTasksReq, srv avsproto.Aggregator_SyncTasksServer) error {
-	log.Printf("sync task for operator : %s", payload.Address)
+	err := r.engine.StreamCheckToOperator(payload, srv)
 
-	for {
-		resp := avsproto.SyncTasksResp{
-			// TODO: Hook up to the new task channel to syncdicate in realtime
-			// Currently this is setup just to generate the metrics so we can
-			// prepare the dashboard
-			// Our actually task will be more completed
-			Id:       "1",
-			TaskType: "CurrentBlockTime",
-		}
+	return err
+}
 
-		if err := srv.Send(&resp); err != nil {
-			log.Printf("error when sending task to operator %s: %v", payload.Address, err)
-			return err
-		}
-		time.Sleep(time.Duration(5) * time.Second)
+func (r *RpcServer) UpdateChecks(ctx context.Context, payload *avsproto.UpdateChecksReq) (*avsproto.UpdateChecksResp, error) {
+	if err := r.engine.AggregateChecksResult(payload.Address, payload.Id); err != nil {
+		return nil, err
 	}
 
-	return nil
+	return &avsproto.UpdateChecksResp{
+		UpdatedAt: timestamppb.Now(),
+	}, nil
 }
 
 // startRpcServer initializes and establish a tcp socket on given address from
@@ -170,22 +180,30 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 	// https://github.com/grpc/grpc-go/blob/master/examples/helloworld/greeter_server/main.go#L50
 	lis, err := net.Listen("tcp", agg.config.RpcBindAddress)
 	if err != nil {
-		log.Fatalf("Failed to listen to %v", err)
+		panic(fmt.Errorf("Failed to listen to %v", err))
 		return err
 	}
 
 	s := grpc.NewServer()
 
-	// TODO: Remove hard code
-	ethclient, err := ethclient.Dial("https://eth-sepolia.api.onfinality.io/public")
+	ethrpc, err := ethclient.Dial(agg.config.EthHttpRpcUrl)
 
 	if err != nil {
 		panic(err)
 	}
 
+	smartwalletClient, err := ethclient.Dial(agg.config.SmartWallet.EthRpcUrl)
+	if err != nil {
+		panic(err)
+	}
+
 	avsproto.RegisterAggregatorServer(s, &RpcServer{
-		db:           agg.db,
-		ethrpc:       ethclient,
+		db:     agg.db,
+		engine: agg.engine,
+
+		ethrpc:         ethrpc,
+		smartWalletRpc: smartwalletClient,
+
 		config:       agg.config,
 		operatorPool: agg.operatorPool,
 	})
@@ -195,7 +213,9 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 	// https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md
 	reflection.Register(s)
 
-	log.Printf("grpc server listening at %v", lis.Addr())
+	agg.logger.Info("start grpc server",
+		"address", lis.Addr(),
+	)
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}

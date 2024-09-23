@@ -1,4 +1,4 @@
-FROM golang:1.22 as builder
+FROM golang:1.23 as builder
 ARG RELEASE_TAG
 
 WORKDIR /app
@@ -19,7 +19,7 @@ FROM debian:stable-slim
 WORKDIR /app
 
 RUN useradd -ms /bin/bash ava && \
-    apt update && apt-get install -y ca-certificates
+    apt update && apt-get install -y ca-certificates socat telnet
 
 COPY --from=builder /ava /ava
 

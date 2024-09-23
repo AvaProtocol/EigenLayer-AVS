@@ -20,9 +20,9 @@ import (
 // Config contains all of the configuration information for a credible squaring aggregators and challengers.
 // Operators use a separate config. (see config-files/operator.anvil.yaml)
 type Config struct {
-	EcdsaPrivateKey           *ecdsa.PrivateKey `yaml:"ecdsa_private_key"`
-	BlsPrivateKey             *bls.PrivateKey   `yaml:"bls_private_key"`
-	Logger                    sdklogging.Logger `yaml:"-"`
+	EcdsaPrivateKey           *ecdsa.PrivateKey
+	BlsPrivateKey             *bls.PrivateKey
+	Logger                    sdklogging.Logger
 	EigenMetricsIpPortAddress string
 
 	// we need the url for the eigensdk currently... eventually standardize api so as to
@@ -42,6 +42,22 @@ type Config struct {
 
 	DbPath    string
 	JwtSecret []byte
+
+	// Account abstraction config
+	SmartWallet *SmartWalletConfig
+
+	SocketPath  string
+	Environment sdklogging.LogLevel
+}
+
+type SmartWalletConfig struct {
+	EthRpcUrl         string
+	EthWsUrl          string
+	BundlerURL        string
+	FactoryAddress    common.Address
+	EntrypointAddress common.Address
+
+	ControllerPrivateKey *ecdsa.PrivateKey
 }
 
 // These are read from configPath
@@ -58,12 +74,24 @@ type ConfigRaw struct {
 
 	DbPath    string `yaml:"db_path"`
 	JwtSecret string `yaml:"jwt_secret"`
+
+	SmartWallet struct {
+		EthRpcUrl            string `yaml:"eth_rpc_url"`
+		EthWsUrl             string `yaml:"eth_ws_url"`
+		BundlerURL           string `yaml:"bundler_url"`
+		FactoryAddress       string `yaml:"factory_address"`
+		EntrypointAddress    string `yaml:"entrypoint_address"`
+		ControllerPrivateKey string `yaml:"controller_private_key"`
+	} `yaml:"smart_wallet"`
+
+	SocketPath string `yaml:"socket_path"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
 type AutomationDeploymentRaw struct {
 	Addresses AutomationContractsRaw `json:"addresses"`
 }
+
 type AutomationContractsRaw struct {
 	RegistryCoordinatorAddr    string `json:"registryCoordinator"`
 	OperatorStateRetrieverAddr string `json:"operatorStateRetriever"`
@@ -126,13 +154,20 @@ func NewConfig(configFilePath string) (*Config, error) {
 
 	txMgr := txmgr.NewSimpleTxManager(skWallet, ethRpcClient, logger, aggregatorAddr)
 
+	controllerPrivateKey, err := crypto.HexToECDSA(configRaw.SmartWallet.ControllerPrivateKey)
+	if err != nil {
+		panic(err)
+	}
+
 	config := &Config{
-		EcdsaPrivateKey:                   ecdsaPrivateKey,
-		Logger:                            logger,
-		EthWsRpcUrl:                       configRaw.EthWsUrl,
-		EthHttpRpcUrl:                     configRaw.EthRpcUrl,
-		EthHttpClient:                     ethRpcClient,
-		EthWsClient:                       ethWsClient,
+		EcdsaPrivateKey: ecdsaPrivateKey,
+		Logger:          logger,
+		EthWsRpcUrl:     configRaw.EthWsUrl,
+		EthHttpRpcUrl:   configRaw.EthRpcUrl,
+		EthHttpClient:   ethRpcClient,
+		EthWsClient:     ethWsClient,
+
+		Environment:                       configRaw.Environment,
 		OperatorStateRetrieverAddr:        common.HexToAddress(configRaw.OperatorStateRetrieverAddr),
 		AutomationRegistryCoordinatorAddr: common.HexToAddress(configRaw.AVSRegistryCoordinatorAddr),
 		RpcBindAddress:                    configRaw.RpcBindAddress,
@@ -142,6 +177,21 @@ func NewConfig(configFilePath string) (*Config, error) {
 
 		DbPath:    configRaw.DbPath,
 		JwtSecret: []byte(configRaw.JwtSecret),
+
+		SmartWallet: &SmartWalletConfig{
+			EthRpcUrl:            configRaw.SmartWallet.EthRpcUrl,
+			EthWsUrl:             configRaw.SmartWallet.EthWsUrl,
+			BundlerURL:           configRaw.SmartWallet.BundlerURL,
+			FactoryAddress:       common.HexToAddress(configRaw.SmartWallet.FactoryAddress),
+			EntrypointAddress:    common.HexToAddress(configRaw.SmartWallet.EntrypointAddress),
+			ControllerPrivateKey: controllerPrivateKey,
+		},
+
+		SocketPath: configRaw.SocketPath,
+	}
+
+	if config.SocketPath == "" {
+		config.SocketPath = "/tmp/ap.sock"
 	}
 	config.validate()
 	return config, nil
