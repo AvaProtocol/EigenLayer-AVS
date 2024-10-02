@@ -20,7 +20,7 @@ var (
 	ErrorInvalidToken = fmt.Errorf("Invalid Bearer Token")
 
 	ErrorMalformedAuthHeader = fmt.Errorf("Malform auth header")
-	ErrorExpiredSignature    = fmt.Errorf("signature is expired")
+	ErrorExpiredSignature    = fmt.Errorf("Signature is expired")
 )
 
 type ApiRole string

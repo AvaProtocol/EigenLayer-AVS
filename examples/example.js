@@ -70,9 +70,8 @@ async function generateApiToken() {
   const owner = wallet.address
   const expired_at = Math.floor(+new Date() / 3600 * 24)
   const message = `key request for ${wallet.address} expired at ${expired_at}`
-  const signature = await signMessageWithEthers(wallet, message)
-  //console.log(`message: ${message}\nsignature: ${signature}`)
-
+  let signature = await signMessageWithEthers(wallet, message)
+  console.log(`message: ${message}\nsignature: ${signature}`)
   let result = await asyncRPC(client, 'GetKey', {
       owner,
       expired_at,
@@ -254,16 +253,14 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
   console.log("Trigger type", TriggerType.EXPRESSIONTRIGGER)
 
   const result = await asyncRPC(client, 'CreateTask', {
-    // A contract execution will be perform for this taks
-    task_type: TaskType.CONTRACTEXECUTIONTASK,
-
-    action: {
+    actions: [{
+      task_type: TaskType.CONTRACTEXECUTIONTASK,
       contract_execution: {
         // Our ERC20 test token
         contract_address: config[env].TEST_TRANSFER_TOKEN,
         calldata: taskBody,
       }
-    },
+    }],
 
     trigger: {
       trigger_type: TriggerType.EXPRESSIONTRIGGER,
