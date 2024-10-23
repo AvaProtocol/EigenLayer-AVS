@@ -81,7 +81,7 @@ async function generateApiToken() {
   const expired_at = Math.floor(+new Date() / 3600 * 24)
   const message = `key request for ${wallet.address} expired at ${expired_at}`
   let signature = await signMessageWithEthers(wallet, message)
-  console.log(`message: ${message}\nsignature: ${signature}`)
+  // console.log(`message: ${message}\nsignature: ${signature}`)
   let result = await asyncRPC(client, 'GetKey', {
       owner,
       expired_at,
@@ -107,7 +107,16 @@ async function getTask(owner, token, taskId) {
 
   const result = await asyncRPC(client, 'GetTask', { bytes: taskId }, metadata)
 
-  console.log("Task Data for ", taskId, "\n", result, result.nodes[0].contract_execution)
+  console.log("Inspect TaskID: ".padEnd(30, " "), taskId, "\n")
+  result.nodes.filter(e => e != null).map(node => {
+    for (const [key, value] of Object.entries(node)) {
+      if (!value) {
+        continue
+      }
+
+      console.log(`${key}:`.padEnd(30, " "), JSON.stringify(value, null, 2));
+    }
+  })
 }
 
 async function cancel(owner, token, taskId) {
