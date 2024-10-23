@@ -212,7 +212,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avspr
 				resp := avsproto.SyncTasksResp{
 					Id:        task.ID,
 					CheckType: "CheckTrigger",
-					Trigger:   task.Trigger.ToProtoBuf(),
+					Trigger:   task.Trigger,
 				}
 
 				if err := srv.Send(&resp); err != nil {

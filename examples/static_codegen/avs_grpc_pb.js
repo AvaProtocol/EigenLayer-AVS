@@ -182,6 +182,28 @@ function deserialize_aggregator_UUID(buffer_arg) {
   return avs_pb.UUID.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
+function serialize_aggregator_UpdateChecksReq(arg) {
+  if (!(arg instanceof avs_pb.UpdateChecksReq)) {
+    throw new Error('Expected argument of type aggregator.UpdateChecksReq');
+  }
+  return Buffer.from(arg.serializeBinary());
+}
+
+function deserialize_aggregator_UpdateChecksReq(buffer_arg) {
+  return avs_pb.UpdateChecksReq.deserializeBinary(new Uint8Array(buffer_arg));
+}
+
+function serialize_aggregator_UpdateChecksResp(arg) {
+  if (!(arg instanceof avs_pb.UpdateChecksResp)) {
+    throw new Error('Expected argument of type aggregator.UpdateChecksResp');
+  }
+  return Buffer.from(arg.serializeBinary());
+}
+
+function deserialize_aggregator_UpdateChecksResp(buffer_arg) {
+  return avs_pb.UpdateChecksResp.deserializeBinary(new Uint8Array(buffer_arg));
+}
+
 function serialize_google_protobuf_BoolValue(arg) {
   if (!(arg instanceof google_protobuf_wrappers_pb.BoolValue)) {
     throw new Error('Expected argument of type google.protobuf.BoolValue');
@@ -275,6 +297,17 @@ createTask: {
     responseSerialize: serialize_google_protobuf_BoolValue,
     responseDeserialize: deserialize_google_protobuf_BoolValue,
   },
+  deleteTask: {
+    path: '/aggregator.Aggregator/DeleteTask',
+    requestStream: false,
+    responseStream: false,
+    requestType: avs_pb.UUID,
+    responseType: google_protobuf_wrappers_pb.BoolValue,
+    requestSerialize: serialize_aggregator_UUID,
+    requestDeserialize: deserialize_aggregator_UUID,
+    responseSerialize: serialize_google_protobuf_BoolValue,
+    responseDeserialize: deserialize_google_protobuf_BoolValue,
+  },
   // Operator endpoint
 ping: {
     path: '/aggregator.Aggregator/Ping',
@@ -297,6 +330,17 @@ ping: {
     requestDeserialize: deserialize_aggregator_SyncTasksReq,
     responseSerialize: serialize_aggregator_SyncTasksResp,
     responseDeserialize: deserialize_aggregator_SyncTasksResp,
+  },
+  updateChecks: {
+    path: '/aggregator.Aggregator/UpdateChecks',
+    requestStream: false,
+    responseStream: false,
+    requestType: avs_pb.UpdateChecksReq,
+    responseType: avs_pb.UpdateChecksResp,
+    requestSerialize: serialize_aggregator_UpdateChecksReq,
+    requestDeserialize: deserialize_aggregator_UpdateChecksReq,
+    responseSerialize: serialize_aggregator_UpdateChecksResp,
+    responseDeserialize: deserialize_aggregator_UpdateChecksResp,
   },
 };
 

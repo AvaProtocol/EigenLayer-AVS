@@ -49,6 +49,16 @@ const config = {
     ORACLE_PRICE_CONTRACT: "0x360B0a3f9Fc28Eb2426fa2391Fd2eB13912E1e40",
     RPC_PROVIDER: "https://mainnet.gateway.tenderly.co",
   },
+
+  minato: {
+    AP_AVS_RPC: 'aggregator-minato.avaprotocol.org:2306',
+    // https://explorer-testnet.soneium.org/token/0xBA33747043d09868946978Dd935130490a083458?tab=contract
+    // anyone can mint this token for testing transfer it
+    TEST_TRANSFER_TOKEN: '0xBA33747043d09868946978Dd935130490a083458',
+    // Can be any arbitrary address to demonstrate that this address will receive the token above
+    TEST_TRANSFER_TO: '0xa5ABB97A2540E4A4756E33f93fB2D7987668396a',
+    ORACLE_PRICE_CONTRACT: '0x0ee7f0f7796Bd98c0E68107c42b21F5B7C13bcA9',
+  },
 };
 
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
@@ -114,7 +124,15 @@ async function getTask(owner, token, taskId) {
 
   const result = await asyncRPC(client, "GetTask", { bytes: taskId }, metadata);
 
-  console.log("Task Data for ", taskId, "\n", result);
+  result.nodes.filter(e => e != null).map(node => {
+    for (const [key, value] of Object.entries(node)) {
+      if (!value) {
+        continue;
+      }
+
+      console.log(`${key}:`.padEnd(30, " "), JSON.stringify(value, null, 2));
+    }
+  });
 }
 
 async function cancel(owner, token, taskId) {
@@ -316,26 +334,26 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
 
   const result = await asyncRPC(
     client,
-    "CreateTask",
+    'CreateTask',
     {
-      // A contract execution will be perform for this taks
-      task_type: TaskType.CONTRACTEXECUTIONTASK,
-
-      action: {
+      actions: [{
+        task_type: TaskType.CONTRACTEXECUTIONTASK,
+        // id need to be unique
+        id: 'transfer_erc20_1',
+        // name is for our note only
+        name: 'Transfer Test Token',
         contract_execution: {
           // Our ERC20 test token
           contract_address: config[env].TEST_TRANSFER_TOKEN,
-          calldata: taskBody,
-        },
-      },
-
+          call_data: taskBody,
+        }
+      }],
       trigger: {
         trigger_type: TriggerType.EXPRESSIONTRIGGER,
         expression: {
           expression: taskCondition,
-        },
+        }
       },
-
       start_at: Math.floor(Date.now() / 1000) + 30,
       expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
       memo: `Demo Example task for ${owner}`,
@@ -365,15 +383,14 @@ async function scheduleTimeTransfer(owner, token) {
       // A contract execution will be perform for this taks
       task_type: TaskType.CONTRACTEXECUTIONTASK,
 
-      action: {
+      actions: [{
         contract_execution: {
           // Our ERC20 test token deploy on sepolia
           // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
           contract_address: config[env].TEST_TRANSFER_TOKEN,
-          calldata: taskBody,
+          call_data: taskBody,
         },
-      },
-
+      }],
       trigger: {
         trigger_type: TriggerType.TIMETRIGGER,
         schedule: {

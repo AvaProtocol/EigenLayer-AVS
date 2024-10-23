@@ -19,6 +19,11 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
+const (
+	// We had old operators pre 1.3 where auth isn't enforced. upon all operators updated to 1.3.0 we will toggle this server side
+	enforceAuth = false
+)
+
 // GetKey exchanges an api key or signature submit by an EOA with an API key that can manage
 // the EOA task
 func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*avsproto.KeyResp, error) {
@@ -139,6 +144,11 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 
 // verifyOperator checks validity of the signature submit by operator related request
 func (r *RpcServer) verifyOperator(ctx context.Context, operatorAddr string) (bool, error) {
+	// TODO: Temporary not enforce auth
+	if !enforceAuth {
+		return true, nil
+	}
+
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return false, fmt.Errorf("cannot read metadata from request")
