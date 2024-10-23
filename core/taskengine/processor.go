@@ -78,7 +78,11 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 		}
 	}()
 
-	if task.Action.ContractExecution == nil {
+	// TODO: Implement the actualy nodes exeuction engine
+	// Process entrypoint node, then from the next pointer, and flow of the node, we will follow the chain of execution
+	action := task.Nodes[0]
+
+	if action.ContractExecution == nil {
 		err := fmt.Errorf("invalid task action")
 		task.AppendExecution(currentTime.Unix(), "", err)
 		task.SetFailed()
@@ -86,9 +90,9 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 	}
 
 	userOpCalldata, e := aa.PackExecute(
-		common.HexToAddress(task.Action.ContractExecution.ContractAddress),
+		common.HexToAddress(action.ContractExecution.ContractAddress),
 		big.NewInt(0),
-		common.FromHex(task.Action.ContractExecution.CallData),
+		common.FromHex(action.ContractExecution.CallData),
 	)
 	//calldata := common.FromHex("b61d27f600000000000000000000000069256ca54e6296e460dec7b29b7dcd97b81a3d55000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044a9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a0000000000000000000000000000000000000000000000001bc16d674ec8000000000000000000000000000000000000000000000000000000000000")
 

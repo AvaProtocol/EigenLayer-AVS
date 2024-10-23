@@ -6,26 +6,6 @@ option go_package = "./avsproto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
 
-enum TaskType {
-  // Handle default/missing data
-  ETHTransferTask = 0;
-  
-  // Generic contract execution which can be used for:
-  // ERC20 Transfer, NFT Transfer, auto reclaim, auto restaking etc
-  // When executing a contract we need at least 2 things:
-  // - target contract address
-  // - the message to send to that contract
-  ContractExecutionTask = 1;
-}
-
-enum TaskStatus {
-  Active = 0;
-  Completed = 1;
-  Failed = 2;
-  Canceled = 3;
-  Executing = 4;
-}
-
 message UUID {
   string bytes = 1;
 }
@@ -59,36 +39,18 @@ message SyncTasksReq {
   int64  monotonic_clock = 4;
 }
 
-message SyncTasksResp {
-  string id      = 1;
-  string checkType = 2;
-
-  TaskTrigger trigger = 3;
-}
-
-message ETHTransfer {
-  string destination = 1;
-  string amount = 2;
-}
-
-message ContractExecution {
-  string contract_address = 1;
-  string calldata = 2;
-
-  string method = 3;
-  string encoded_params = 4;
-}
-
-message TaskAction {
-  ETHTransfer eth_transfer = 1;
-  ContractExecution contract_execution = 2;
-}
-
-
 enum TriggerType {
   TimeTrigger          = 0;
   ContractQueryTrigger = 1;
   ExpressionTrigger    = 2;
+}
+
+message TaskTrigger {
+  TriggerType            trigger_type   = 1;
+
+  TimeCondition          schedule       = 2;
+  ContractQueryCondition contract_query = 3;
+  ExpressionCondition    expression     = 4;
 }
 
 // Simple timebase or cron syntax.
@@ -119,58 +81,151 @@ message ExpressionCondition {
   string expression = 1;
 }
 
-message TaskTrigger {
-  TriggerType            trigger_type   = 1;
+message SyncTasksResp {
+  string id        = 1;
+  string checkType = 2;
 
-  TimeCondition          schedule       = 2;
-  ContractQueryCondition contract_query = 3;
-  ExpressionCondition    expression     = 4;
+  TaskTrigger trigger = 3;
+}
+
+// TaskType represents what kind of work the task will perform
+enum TaskType {
+  // Handle default/missing data
+  ETHTransferTask = 0;
+  
+  // Generic contract execution which can be used for:
+  // ERC20 Transfer, NFT Transfer, auto reclaim, auto restaking etc
+  // When executing a contract we need at least 2 things:
+  // - target contract address
+  // - the message to send to that contract
+  ContractExecutionTask = 1;
+
+  GraphQLDataQueryTask = 2;
+  // Make call to a HTTP endpoint
+  HTTPAPICallTask = 3;
+  // CustomCode allow to run arbitraty JavaScript.
+  CustomCodeTask = 4;
+  BranchActionTask = 5;
+}
+
+// TaskStatus represents status of the task. The transition is as follow
+enum TaskStatus {
+  Active = 0;
+  Completed = 1;
+  Failed = 2;
+  Canceled = 3;
+  Executing = 4;
+}
+
+message ETHTransfer {
+  string destination = 1;
+  string amount = 2;
+}
+
+message ContractExecution {
+  string contract_address = 1;
+  string call_data = 2;
+
+  string method = 3;
+  string encoded_params = 4;
+}
+
+message GraphQLDataQuery {
+  // TODO: support graphql variable
+  string url   = 1;
+  string query = 2;
+}
+
+message HTTPAPICall {
+  string              url     = 1;
+  map<string, string> headers = 2;
+  string              body    = 3;
+}
+
+enum CustomCodeType {
+  JavaScript = 0;
+}
+
+message CustomCode {
+  CustomCodeType type     = 1;
+  string          body    = 2;
+}
+
+message ConditionJump {
+  string expression  = 1;
+  string next        = 2;
+}
+
+message BranchAction {
+  ConditionJump If                  = 1;
+  repeated ConditionJump ElseIfs    = 2;
+  ConditionJump Else                = 3;
+}
+
+message TaskAction {
+  TaskType task_type = 1;
+
+  string id = 2;
+  string name = 3;
+
+  // Next can be empty. In some kind of block, such as branching, the next is
+  // based on branching condition
+  repeated string next = 4;
+
+  // Transfer eth
+  ETHTransfer eth_transfer = 10;
+  // Run one ore more contracts. The call call also be batched with tool like
+  // multicall to wrap many calls
+  ContractExecution contract_execution = 11;
+  // Make call to a graphql endpoint
+  GraphQLDataQuery graphql_data_query = 12;
+  // Make call to a HTTP endpoint
+  HTTPAPICall http_data_query = 13;
+  // CustomCode allow to run arbitraty JavaScript.
+  CustomCode custom_code = 14;
+  BranchAction branch = 15;
 }
 
 message Execution {
   int64 epoch = 1;
-  string userop_hash = 2;
+  string user_op_hash = 2;
   string error = 3;
 }
 
 message Task {
-    string owner = 1;
-    string smart_account_address = 2;
-
-    UUID id = 3;
-    TaskType task_type = 4;
-    TaskAction action = 5;
-
-    TaskTrigger trigger = 6;
+    UUID id = 1;
+    string owner = 2;
+    string smart_account_address = 3;
+    TaskTrigger trigger = 4;
+    repeated TaskAction nodes = 5;
 
     // task won't be check before this
-    int64 start_at = 7;
-    // task won't be run before this
-    int64 expired_at = 8;
+    int64 start_at = 6;
+    // task won't be run/check after this
+    int64 expired_at = 7;
     // arbitrary data about this task
-    string memo = 9;
+    string memo = 8;
 
-    int64 completed_at = 10;
-    TaskStatus status = 11;
-
+    int64 completed_at = 9;
+    TaskStatus status  = 10;
+    // repeatable means a task can continue to run even after the first execution
+    bool repeatable  = 11;
     repeated Execution executions = 12;
 }
 
 message CreateTaskReq {
-    TaskType task_type  = 1;
-    TaskAction action   = 2;
-
-    TaskTrigger trigger = 3;
-
-    int64 start_at      = 4;
-    int64 expired_at    = 5;
-    string memo         = 6;
+  TaskTrigger trigger = 1;
+  repeated TaskAction actions  = 2;
+  int64 start_at      = 3;
+  int64 expired_at    = 4;
+  string memo         = 5;
+  // A repeatable task will continue to be run
+  bool repeatable     = 6;
 }
 
 message CreateTaskResp {
     string id = 1;
 }
-
 
 message NonceRequest {
     string owner = 1;
@@ -202,7 +257,7 @@ message ListTasksResp {
 
 message GetKeyReq {
     string owner = 1;
-    int64 expired_at = 2;
+    int64  expired_at = 2;
     string signature = 3;
 }
 

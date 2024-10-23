@@ -10,96 +10,6 @@ import (
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
-type TaskType int
-type TriggerType int
-type ScheduleType string
-
-const (
-	ETHTransferType       TaskType = 0
-	ContractExecutionType TaskType = 1
-)
-
-const (
-	TimeTriggerType          TriggerType = 1
-	ContractQueryTriggerType TriggerType = 2
-	ExpressionTriggerType    TriggerType = 3
-)
-
-// Convert protocolbuf task type to our task type
-func TaskTypeFromProtobuf(t avsproto.TaskType) TaskType {
-	switch t {
-	case avsproto.TaskType_ContractExecutionTask:
-		return ContractExecutionType
-	default:
-		return ETHTransferType
-	}
-}
-
-func (t TaskType) ToProtoBuf() avsproto.TaskType {
-	switch t {
-	case ContractExecutionType:
-		return avsproto.TaskType_ContractExecutionTask
-	default:
-		return avsproto.TaskType_ETHTransferTask
-	}
-
-}
-
-func (t TriggerType) ToProtoBuf() avsproto.TriggerType {
-	switch t {
-	case TimeTriggerType:
-		return avsproto.TriggerType_TimeTrigger
-	case ContractQueryTriggerType:
-		return avsproto.TriggerType_ContractQueryTrigger
-	case ExpressionTriggerType:
-		return avsproto.TriggerType_ExpressionTrigger
-	}
-	return avsproto.TriggerType_TimeTrigger
-}
-
-type TimeTrigger struct {
-	Fixed []int64 `json:"fixed,omitempty"`
-	Cron  string  `json:"cron,omitempty"`
-}
-
-type ContractQueryTrigger struct {
-	ContractAddress string `json:"contract_address"`
-	CallData        string `json:"calldata"`
-}
-
-type ExpressionTrigger struct {
-	Expression string `json:"expression,omitempty"`
-}
-
-type Trigger struct {
-	Type TriggerType `json:"type"`
-
-	TimeTrigger          *TimeTrigger          `json:"time_trigger,omitempty"`
-	ContractQueryTrigger *ContractQueryTrigger `json:"contract_query_trigger,omitempty"`
-	ExpressionTrigger    *ExpressionTrigger    `json:"expression_trigger,omitempty"`
-}
-
-type ETHTransferPayload struct {
-	Destination string `json:"destination"`
-	Amount      string `json:"amount"`
-}
-
-type ContractExecutionPayload struct {
-	ContractAddress string `json:"contract_address"`
-	CallData        string `json:"calldata"`
-}
-
-type TaskAction struct {
-	ETHTransfer       *ETHTransferPayload       `json:"eth_transfer,omitempty"`
-	ContractExecution *ContractExecutionPayload `json:"contract_execution,omitempty"`
-}
-
-type Execution struct {
-	Epoch      int64  `json:"epoch"`
-	UserOpHash string `json:"userop_hash,omitempty"`
-	Error      string `json:"failed_reason,omitempty"`
-}
-
 type Task struct {
 	// a unique id identifi this task in entire system
 	ID string `json:"id"`
@@ -111,23 +21,22 @@ type Task struct {
 	// there are maybe more than one AA per owner
 	SmartAccountAddress string `json:"smart_account_address"`
 
-	Type TaskType `json:"type"`
-
 	// trigger defined whether the task can be executed
 	// trigger can be time based, price based, or contract call based
-	Trigger Trigger `json:"trigger"`
+	Trigger *avsproto.TaskTrigger `json:"trigger"`
 
 	// the actual call will be executed in ethereum, it can be a simple transfer
 	// a method call, or a batch call through multicall contract
-	Action TaskAction `json:"Action"`
+	Nodes []*avsproto.TaskAction `json:"nodes"`
 
 	Memo        string `json:"memo"`
 	ExpiredAt   int64  `json:"expired_at,omitempty"`
 	StartAt     int64  `json:"start_at,omitempty"`
 	CompletedAt int64  `json:"completed_at,omitempty"`
 
-	Status     avsproto.TaskStatus `json:"status"`
-	Executions []*Execution        `json:"executions,omitempty"`
+	Status     avsproto.TaskStatus   `json:"status"`
+	Executions []*avsproto.Execution `json:"executions,omitempty"`
+	Repeatable bool                  `json:"repeatable,omitempty"`
 }
 
 // Generate a sorted uuid
@@ -146,7 +55,6 @@ func NewTaskFromProtobuf(taskID string, user *User, body *avsproto.CreateTaskReq
 	owner := user.Address
 	aaAddress := user.SmartAccountAddress
 
-	//TODO: Validate
 	t := &Task{
 		ID: taskID,
 
@@ -154,50 +62,20 @@ func NewTaskFromProtobuf(taskID string, user *User, body *avsproto.CreateTaskReq
 		Owner:               owner.Hex(),
 		SmartAccountAddress: aaAddress.Hex(),
 
-		Trigger:   Trigger{},
-		Action:    TaskAction{},
-		Type:      TaskTypeFromProtobuf(body.TaskType),
+		Trigger:   body.Trigger,
+		Nodes:     body.Actions,
 		Memo:      body.Memo,
 		ExpiredAt: body.ExpiredAt,
 		StartAt:   body.StartAt,
 
 		// initial state for task
 		Status:     avsproto.TaskStatus_Active,
-		Executions: []*Execution{},
+		Executions: []*avsproto.Execution{},
 	}
 
-	if body.Action.GetEthTransfer() != nil {
-		t.Action.ETHTransfer = &ETHTransferPayload{
-			Destination: body.Action.EthTransfer.Destination,
-			Amount:      body.Action.EthTransfer.Amount,
-		}
-	} else if body.Action.GetContractExecution() != nil {
-		t.Action.ContractExecution = &ContractExecutionPayload{
-			ContractAddress: body.Action.ContractExecution.ContractAddress,
-			CallData:        body.Action.ContractExecution.Calldata,
-		}
-	}
-
-	switch body.GetTrigger().GetTriggerType() {
-	case avsproto.TriggerType_TimeTrigger:
-		t.Trigger.Type = TimeTriggerType
-		if schedule := body.GetTrigger().GetSchedule(); schedule != nil {
-			t.Trigger.TimeTrigger = &TimeTrigger{
-				Fixed: schedule.Fixed,
-				Cron:  schedule.Cron,
-			}
-		}
-
-	case avsproto.TriggerType_ExpressionTrigger:
-		t.Trigger.Type = ExpressionTriggerType
-		if expression := body.GetTrigger().GetExpression(); expression != nil {
-			t.Trigger.ExpressionTrigger = &ExpressionTrigger{
-				Expression: expression.Expression,
-			}
-		}
-
-	case avsproto.TriggerType_ContractQueryTrigger:
-		t.Trigger.Type = ContractQueryTriggerType
+	// Validate
+	if ok := t.Validate(); !ok {
+		return nil, fmt.Errorf("Invalid task argument")
 	}
 
 	return t, nil
@@ -206,6 +84,11 @@ func NewTaskFromProtobuf(taskID string, user *User, body *avsproto.CreateTaskReq
 // Return a compact json ready to persist to storage
 func (t *Task) ToJSON() ([]byte, error) {
 	return json.Marshal(t)
+}
+
+// Return a compact json ready to persist to storage
+func (t *Task) Validate() bool {
+	return true
 }
 
 // Convert to protobuf
@@ -217,45 +100,16 @@ func (t *Task) ToProtoBuf() (*avsproto.Task, error) {
 		Id: &avsproto.UUID{
 			Bytes: t.ID,
 		},
-		TaskType: t.Type.ToProtoBuf(),
-		Trigger:  &avsproto.TaskTrigger{},
-		Action:   &avsproto.TaskAction{},
+		Trigger: t.Trigger,
+		Nodes:   t.Nodes,
 
 		StartAt:   t.StartAt,
 		ExpiredAt: t.ExpiredAt,
 		Memo:      t.Memo,
 
-		Executions:  ExecutionsToProtoBuf(t.Executions),
+		Executions:  t.Executions,
 		CompletedAt: t.CompletedAt,
 		Status:      t.Status,
-	}
-
-	if t.Action.ETHTransfer != nil {
-		protoTask.Action.EthTransfer = &avsproto.ETHTransfer{
-			Destination: t.Action.ETHTransfer.Destination,
-			Amount:      t.Action.ETHTransfer.Amount,
-		}
-	}
-
-	if t.Action.ContractExecution != nil {
-		protoTask.Action.ContractExecution = &avsproto.ContractExecution{
-			ContractAddress: t.Action.ContractExecution.ContractAddress,
-			Calldata:        t.Action.ContractExecution.CallData,
-		}
-	}
-
-	switch t.Trigger.Type {
-	case TimeTriggerType:
-		protoTask.Trigger.TriggerType = avsproto.TriggerType_TimeTrigger
-		protoTask.Trigger.Schedule = &avsproto.TimeCondition{
-			Fixed: t.Trigger.TimeTrigger.Fixed,
-			Cron:  t.Trigger.TimeTrigger.Cron,
-		}
-	case ExpressionTriggerType:
-		protoTask.Trigger.TriggerType = avsproto.TriggerType_ExpressionTrigger
-		protoTask.Trigger.Expression = &avsproto.ExpressionCondition{
-			Expression: t.Trigger.ExpressionTrigger.Expression,
-		}
 	}
 
 	return &protoTask, nil
@@ -288,7 +142,7 @@ func (t *Task) SetCanceled() {
 }
 
 func (t *Task) AppendExecution(epoch int64, userOpHash string, err error) {
-	exc := &Execution{
+	exc := &avsproto.Execution{
 		Epoch:      epoch,
 		UserOpHash: userOpHash,
 	}
@@ -304,62 +158,4 @@ func (t *Task) AppendExecution(epoch int64, userOpHash string, err error) {
 func TaskKeyToId(key []byte) []byte {
 	// the first 43 bytes is owner address
 	return key[43:]
-}
-
-func (t *TimeTrigger) ToProtoBuf() *avsproto.TimeCondition {
-	v := avsproto.TimeCondition{
-		Fixed: t.Fixed,
-		Cron:  t.Cron,
-	}
-
-	return &v
-}
-
-func (t *ContractQueryTrigger) ToProtoBuf() *avsproto.ContractQueryCondition {
-	return &avsproto.ContractQueryCondition{
-		ContractAddress: t.ContractAddress,
-		Callmsg:         t.CallData,
-	}
-}
-
-func (t *ExpressionTrigger) ToProtoBuf() *avsproto.ExpressionCondition {
-	v := avsproto.ExpressionCondition{
-		Expression: t.Expression,
-	}
-
-	return &v
-}
-
-func (t *Trigger) ToProtoBuf() *avsproto.TaskTrigger {
-	v := avsproto.TaskTrigger{
-		TriggerType: t.Type.ToProtoBuf(),
-	}
-
-	if t.TimeTrigger != nil {
-		v.Schedule = t.TimeTrigger.ToProtoBuf()
-	}
-
-	if t.ContractQueryTrigger != nil {
-		v.ContractQuery = t.ContractQueryTrigger.ToProtoBuf()
-	}
-
-	if t.ExpressionTrigger != nil {
-		v.Expression = t.ExpressionTrigger.ToProtoBuf()
-	}
-
-	return &v
-}
-
-func ExecutionsToProtoBuf(exc []*Execution) []*avsproto.Execution {
-	data := make([]*avsproto.Execution, len(exc))
-
-	for i, v := range exc {
-		data[i] = &avsproto.Execution{
-			UseropHash: v.UserOpHash,
-			Epoch:      v.Epoch,
-			Error:      v.Error,
-		}
-	}
-
-	return data
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
 	"github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/core/taskengine"
+	"github.com/AvaProtocol/ap-avs/version"
 	"github.com/Layr-Labs/eigensdk-go/chainio/clients"
 	sdkclients "github.com/Layr-Labs/eigensdk-go/chainio/clients"
 	blsagg "github.com/Layr-Labs/eigensdk-go/services/bls_aggregation"
@@ -189,7 +190,7 @@ func (agg *Aggregator) init() {
 func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.status = runningStatus
 
-	agg.logger.Infof("Starting aggregator")
+	agg.logger.Infof("Starting aggregator %s", version.Get())
 
 	agg.init()
 
