@@ -116,7 +116,7 @@ async function listTask(owner, token) {
 
   const result = await asyncRPC(client, "ListTasks", {}, metadata);
 
-  console.log("Task ID for ", owner, "\n", result);
+  console.log("Tasks that has created by", owner, "\n", result);
 }
 
 async function getTask(owner, token, taskId) {
