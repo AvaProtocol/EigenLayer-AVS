@@ -117,13 +117,22 @@ async function getTask(owner, token, taskId) {
 
   const result = await asyncRPC(client, "GetTask", { bytes: taskId }, metadata);
 
+  console.log("Inspect Task ID: ", taskId, "\n");
+  for (const [key, value] of Object.entries(result)) {
+    if (key == "nodes") {
+      continue;
+    }
+
+    console.log(`${key}:`.padEnd(25, " "), JSON.stringify(value, null, 2));
+  }
+
   result.nodes.filter(e => e != null).map(node => {
     for (const [key, value] of Object.entries(node)) {
       if (!value) {
         continue;
       }
 
-      console.log(`${key}:`.padEnd(30, " "), JSON.stringify(value, null, 2));
+      console.log(`${key}:`.padEnd(25, " "), JSON.stringify(value, null, 2));
     }
   });
 }

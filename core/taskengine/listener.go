@@ -32,7 +32,9 @@ func RegisterBlockListener(ctx context.Context, fn OnblockFunc) error {
 		case header := <-headers:
 			logger.Info("detect new block, evaluate checks", "component", "taskengine", "block", header.Hash().Hex())
 
-			block, err := wsEthClient.BlockByHash(context.Background(), header.Hash())
+			// ideally we can just use wsEthClient but some particular websocket such as minato doesn't support that
+			//block, err := wsEthClient.BlockByHash(context.Background(), header.Hash())
+			block, err := rpcConn.BlockByHash(context.Background(), header.Hash())
 			if err != nil {
 				logger.Errorf("error when fetching new block from websocket", "err", err)
 				// TODO: report error in metric
