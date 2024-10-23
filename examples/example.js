@@ -51,13 +51,14 @@ const config = {
   },
 
   minato: {
-    AP_AVS_RPC: 'aggregator-minato.avaprotocol.org:2306',
+    AP_AVS_RPC: "aggregator-minato.avaprotocol.org:2306",
     // https://explorer-testnet.soneium.org/token/0xBA33747043d09868946978Dd935130490a083458?tab=contract
     // anyone can mint this token for testing transfer it
-    TEST_TRANSFER_TOKEN: '0xBA33747043d09868946978Dd935130490a083458',
+    TEST_TRANSFER_TOKEN: "0xBA33747043d09868946978Dd935130490a083458",
     // Can be any arbitrary address to demonstrate that this address will receive the token above
-    TEST_TRANSFER_TO: '0xa5ABB97A2540E4A4756E33f93fB2D7987668396a',
-    ORACLE_PRICE_CONTRACT: '0x0ee7f0f7796Bd98c0E68107c42b21F5B7C13bcA9',
+    TEST_TRANSFER_TO: "0xa5ABB97A2540E4A4756E33f93fB2D7987668396a",
+    ORACLE_PRICE_CONTRACT: "0x0ee7f0f7796Bd98c0E68107c42b21F5B7C13bcA9",
+    RPC_PROVIDER: "https://rpc.minato.soneium.org",
   },
 };
 
