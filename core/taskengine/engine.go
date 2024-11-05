@@ -115,16 +115,25 @@ func (n *Engine) Start() {
 		panic(err)
 	}
 
-	kvs, e := n.db.GetByPrefix([]byte(fmt.Sprintf("t:%s:", TaskStatusToStorageKey(avsproto.TaskStatus_Active))))
-	if e != nil {
-		panic(e)
-	}
-	for _, item := range kvs {
-		var task model.Task
-		if err := json.Unmarshal(item.Value, &task); err == nil {
-			n.tasks[string(item.Key)] = &task
+	// TODO: FIX
+
+	taskPrefix1 := fmt.Sprintf("t:%s:", TaskStatusToStorageKey(avsproto.TaskStatus_Active))
+	taskPrefix2 := fmt.Sprintf("t:%s:", TaskStatusToStorageKey(avsproto.TaskStatus_Executing))
+
+	for _, taskPrefix := range []string{taskPrefix1, taskPrefix2} {
+		n.logger.Info("engine discovery", "task_prefix", taskPrefix)
+		kvs, e := n.db.GetByPrefix([]byte(taskPrefix))
+		if e != nil {
+			panic(e)
+		}
+		for _, item := range kvs {
+			var task model.Task
+			if err := json.Unmarshal(item.Value, &task); err == nil {
+				n.tasks[string(item.Key)] = &task
+			}
 		}
 	}
+	n.logger.Info("task engine booted with  tasks", "task", n.tasks)
 
 }
 

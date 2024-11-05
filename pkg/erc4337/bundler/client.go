@@ -70,10 +70,15 @@ func (bc *BundlerClient) EstimateUserOperationGas(
 	override map[string]any,
 ) (*GasEstimation, error) {
 	var result struct {
-		PreVerificationGas   int64 `json:"preVerificationGas"`
-		VerificationGasLimit int64 `json:"verificationGasLimit"`
-		CallGasLimit         int64 `json:"callGasLimit"`
-		VerificationGas      int64 `json:"verificationGas"`
+		//		PreVerificationGas   int64 `json:"preVerificationGas"`
+		//		VerificationGasLimit int64 `json:"verificationGasLimit"`
+		//		CallGasLimit         int64 `json:"callGasLimit"`
+
+		//VerificationGas      int64 `json:"verificationGas"`
+
+		PreVerificationGas   string `json:"preVerificationGas"`
+		VerificationGasLimit string `json:"verificationGasLimit"`
+		CallGasLimit         string `json:"callGasLimit"`
 	}
 
 	uo := UserOperation{
@@ -99,12 +104,13 @@ func (bc *BundlerClient) EstimateUserOperationGas(
 		PreVerificationGas:   new(big.Int),
 		VerificationGasLimit: new(big.Int),
 		CallGasLimit:         new(big.Int),
-		VerificationGas:      new(big.Int),
+		//VerificationGas:      new(big.Int),
 	}
-	gasEstimation.PreVerificationGas.SetInt64(result.PreVerificationGas)
-	gasEstimation.VerificationGasLimit.SetInt64(result.VerificationGasLimit)
-	gasEstimation.CallGasLimit.SetInt64(result.CallGasLimit)
-	gasEstimation.VerificationGas.SetInt64(result.VerificationGas)
+	fmt.Println(result)
+	gasEstimation.PreVerificationGas.SetString(result.PreVerificationGas, 16)
+	gasEstimation.VerificationGasLimit.SetString(result.VerificationGasLimit, 16)
+	gasEstimation.CallGasLimit.SetString(result.CallGasLimit, 16)
+	//gasEstimation.VerificationGas.SetInt64(result.VerificationGas)
 
 	return gasEstimation, nil
 }
