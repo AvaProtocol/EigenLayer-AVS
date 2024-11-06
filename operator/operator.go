@@ -12,6 +12,7 @@ import (
 
 	"github.com/AvaProtocol/ap-avs/core/chainio"
 	"github.com/AvaProtocol/ap-avs/core/chainio/apconfig"
+	"github.com/AvaProtocol/ap-avs/core/chainio/signer"
 	"github.com/AvaProtocol/ap-avs/metrics"
 	"github.com/Layr-Labs/eigensdk-go/metrics/collectors/economic"
 	rpccalls "github.com/Layr-Labs/eigensdk-go/metrics/collectors/rpc_calls"
@@ -40,15 +41,18 @@ import (
 	//"github.com/AvaProtocol/ap-avs/aggregator"
 	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
 
+	// insecure for local dev
+	blssignerV1 "github.com/Layr-Labs/cerberus-api/pkg/api/v1"
+	blscrypto "github.com/Layr-Labs/eigensdk-go/crypto/bls"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+
 	"github.com/AvaProtocol/ap-avs/core/auth"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/version"
 
 	"github.com/AvaProtocol/ap-avs/pkg/ipfetcher"
 	"github.com/AvaProtocol/ap-avs/pkg/timekeeper"
-
-	// insecure for local dev
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 const AVS_NAME = "ap-avs"
@@ -61,7 +65,6 @@ type OperatorConfig struct {
 	AVSRegistryCoordinatorAddress string `yaml:"avs_registry_coordinator_address"`
 	EthRpcUrl                     string `yaml:"eth_rpc_url"`
 	EthWsUrl                      string `yaml:"eth_ws_url"`
-	BlsPrivateKeyStorePath        string `yaml:"bls_private_key_store_path"`
 	EcdsaPrivateKeyStorePath      string `yaml:"ecdsa_private_key_store_path"`
 	AggregatorServerIpPortAddress string `yaml:"aggregator_server_ip_port_address"`
 	EigenMetricsIpPortAddress     string `yaml:"eigen_metrics_ip_port_address"`
@@ -84,6 +87,17 @@ type OperatorConfig struct {
 		EthRpcUrl string `yaml:"eth_rpc_url"`
 		EthWsUrl  string `yaml:"eth_ws_url"`
 	} `yaml:"target_chain"`
+
+	// Only one of bls option is needed: key or remote signer. when using remote signer, we also don't need the password in the env
+	// the password of remote signer is the password we set with cerberus api
+	BlsPrivateKeyStorePath string `yaml:"bls_private_key_store_path"`
+	BlsRemoteSigner        struct {
+		GrpcUrl string `yaml:"grpc_url"`
+		// Publickey return from cerberus import/generation key
+		PublicKey       string `yaml:"public_key"`
+		Password        string `yaml:"password"`
+		TLSCertFilePath string `yaml:"tls_cert_file_path"`
+	} `yaml:"bls_remote_signer"`
 }
 
 type Operator struct {
@@ -100,7 +114,10 @@ type Operator struct {
 	avsReader        chainio.AvsReaderer
 	eigenlayerReader sdkelcontracts.ELReader
 	eigenlayerWriter sdkelcontracts.ELWriter
-	blsKeypair       *bls.KeyPair
+
+	// either keypair or RemoteSigner need to be defined
+	blsKeypair      *bls.KeyPair
+	blsRemoteSigner blssignerV1.SignerClient
 
 	operatorId   sdktypes.OperatorId
 	operatorAddr common.Address
@@ -197,14 +214,34 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		}
 	}
 
-	blsKeyPassword, ok := os.LookupEnv("OPERATOR_BLS_KEY_PASSWORD")
-	if !ok {
-		logger.Warnf("OPERATOR_BLS_KEY_PASSWORD env var not set. using empty string")
-	}
-	blsKeyPair, err := bls.ReadPrivateKeyFromFile(c.BlsPrivateKeyStorePath, blsKeyPassword)
-	if err != nil {
-		logger.Errorf("Cannot parse bls private key: %s err: %w", c.BlsPrivateKeyStorePath, err)
-		return nil, err
+	var blsRemoteSigner blssignerV1.SignerClient
+	var blsKeyPair *bls.KeyPair
+	if c.BlsRemoteSigner.GrpcUrl != "" {
+		logger.Info("creating signer client", "url", c.BlsRemoteSigner.GrpcUrl, "publickey", c.BlsRemoteSigner.PublicKey)
+		creds := insecure.NewCredentials()
+		if c.BlsRemoteSigner.TLSCertFilePath != "" {
+			creds, err = credentials.NewClientTLSFromFile(c.BlsRemoteSigner.TLSCertFilePath, "")
+			if err != nil {
+				return nil, err
+			}
+		}
+		cerberusConn, err := grpc.NewClient(
+			c.BlsRemoteSigner.GrpcUrl, grpc.WithTransportCredentials(creds),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create new BLS remote signer client: %w", err)
+		}
+		blsRemoteSigner = blssignerV1.NewSignerClient(cerberusConn)
+	} else {
+		blsKeyPassword, ok := os.LookupEnv("OPERATOR_BLS_KEY_PASSWORD")
+		if !ok {
+			logger.Warnf("OPERATOR_BLS_KEY_PASSWORD env var not set. using empty string")
+		}
+		blsKeyPair, err = bls.ReadPrivateKeyFromFile(c.BlsPrivateKeyStorePath, blsKeyPassword)
+		if err != nil {
+			logger.Errorf("Cannot parse bls private key: %s err: %w", c.BlsPrivateKeyStorePath, err)
+			return nil, err
+		}
 	}
 
 	chainId, err := ethRpcClient.ChainID(context.Background())
@@ -299,9 +336,12 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		// avsSubscriber:                      avsSubscriber,
 		eigenlayerReader: sdkClients.ElChainReader,
 		eigenlayerWriter: sdkClients.ElChainWriter,
-		blsKeypair:       blsKeyPair,
-		operatorAddr:     common.HexToAddress(c.OperatorAddress),
-		signerAddress:    signerAddress,
+
+		blsKeypair:      blsKeyPair,
+		blsRemoteSigner: blsRemoteSigner,
+
+		operatorAddr:  common.HexToAddress(c.OperatorAddress),
+		signerAddress: signerAddress,
 
 		//aggregatorRpcClient: aggregatorRpcClient,
 		//aggregatorConn:      aggregatorConn,
@@ -327,14 +367,26 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		return nil, err
 	}
 	operator.operatorId = operatorId
-	logger.Info("Operator info",
-		"operatorId", operatorId,
-		"operatorAddr", c.OperatorAddress,
-		"signerAddr", operator.signerAddress,
-		"operatorG1Pubkey", operator.blsKeypair.GetPubKeyG1(),
-		"operatorG2Pubkey", operator.blsKeypair.GetPubKeyG2(),
-		"prmMetricsEndpoint", fmt.Sprintf("%s/metrics/", operator.config.EigenMetricsIpPortAddress),
-	)
+	if operator.blsKeypair != nil {
+		logger.Info("Operator info",
+			"operatorId", operatorId,
+			"operatorAddr", c.OperatorAddress,
+			"signerAddr", operator.signerAddress,
+			"operatorG1Pubkey", operator.blsKeypair.GetPubKeyG1(),
+			"operatorG2Pubkey", operator.blsKeypair.GetPubKeyG2(),
+			"prmMetricsEndpoint", fmt.Sprintf("%s/metrics/", operator.config.EigenMetricsIpPortAddress),
+		)
+	} else {
+
+		logger.Info("Operator info",
+			"operatorId", operatorId,
+			"operatorAddr", c.OperatorAddress,
+			"signerAddr", operator.signerAddress,
+			"remoteSignerUrl", operator.config.BlsRemoteSigner.GrpcUrl,
+			"remoteSignerPubKey", operator.config.BlsRemoteSigner.PublicKey,
+			"prmMetricsEndpoint", fmt.Sprintf("%s/metrics/", operator.config.EigenMetricsIpPortAddress),
+		)
+	}
 
 	return operator, nil
 }
@@ -436,37 +488,36 @@ func (c *OperatorConfig) GetPublicMetricPort() int32 {
 	return c.PublicMetricsPort
 }
 
-// // Takes a NewTaskCreatedLog struct as input and returns a TaskResponseHeader struct.
-// // The TaskResponseHeader struct is the struct that is signed and sent to the contract as a task response.
-// func (o *Operator) ProcessNewTaskCreatedLog(newTaskCreatedLog *cstaskmanager.ContractAutomationTaskManagerNewTaskCreated) *cstaskmanager.IAutomationTaskManagerTaskResponse {
-// 	o.logger.Debug("Received new task", "task", newTaskCreatedLog)
-// 	o.logger.Info("Received new task",
-// 		"numberToBeSquared", newTaskCreatedLog.Task.NumberToBeSquared,
-// 		"taskIndex", newTaskCreatedLog.TaskIndex,
-// 		"taskCreatedBlock", newTaskCreatedLog.Task.TaskCreatedBlock,
-// 		"quorumNumbers", newTaskCreatedLog.Task.QuorumNumbers,
-// 		"QuorumThresholdPercentage", newTaskCreatedLog.Task.QuorumThresholdPercentage,
-// 	)
-// 	numberSquared := big.NewInt(0).Exp(newTaskCreatedLog.Task.NumberToBeSquared, big.NewInt(2), nil)
-// 	taskResponse := &cstaskmanager.IAutomationTaskManagerTaskResponse{
-// 		ReferenceTaskIndex: newTaskCreatedLog.TaskIndex,
-// 		NumberSquared:      numberSquared,
-// 	}
-// 	return taskResponse
-// }
-//
-// func (o *Operator) SignTaskResponse(taskResponse *cstaskmanager.IAutomationTaskManagerTaskResponse) (*aggregator.SignedTaskResponse, error) {
-// 	taskResponseHash, err := core.GetTaskResponseDigest(taskResponse)
-// 	if err != nil {
-// 		o.logger.Error("Error getting task response header hash. skipping task (this is not expected and should be investigated)", "err", err)
-// 		return nil, err
-// 	}
-// 	blsSignature := o.blsKeypair.SignMessage(taskResponseHash)
-// 	signedTaskResponse := &aggregator.SignedTaskResponse{
-// 		TaskResponse: *taskResponse,
-// 		BlsSignature: *blsSignature,
-// 		OperatorId:   o.operatorId,
-// 	}
-// 	o.logger.Debug("Signed task response", "signedTaskResponse", signedTaskResponse)
-// 	return signedTaskResponse, nil
-// }
+func (o *Operator) GetSignature(ctx context.Context, message []byte) (*blscrypto.Signature, error) {
+	if o.blsRemoteSigner != nil {
+		data, e := signer.Byte32Digest(message)
+		if e != nil {
+			return nil, fmt.Errorf("error generate 32bytes digest for bls signature: %w", e)
+		}
+
+		sigResp, err := o.blsRemoteSigner.SignGeneric(
+			ctx,
+			&blssignerV1.SignGenericRequest{
+				PublicKey: o.config.BlsRemoteSigner.PublicKey,
+				Password:  o.config.BlsRemoteSigner.Password,
+				Data:      data[:],
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to sign data: %w", err)
+		}
+		sig := new(blscrypto.Signature)
+		g := sig.Deserialize(sigResp.Signature)
+		// we will need G2Point to verify this signature
+		return &blscrypto.Signature{
+			G1Point: g,
+		}, nil
+	}
+
+	sig := signer.SignBlsMessage(o.blsKeypair, message)
+	if sig == nil {
+		return nil, fmt.Errorf("failed to generate digest for bls sign: %v", message)
+	}
+
+	return sig, nil
+}
