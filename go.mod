@@ -3,6 +3,7 @@ module github.com/AvaProtocol/ap-avs
 go 1.23.0
 
 require (
+	github.com/Layr-Labs/cerberus-api v0.0.0-20241016214048-d52f5ddc5559
 	github.com/Layr-Labs/eigensdk-go v0.1.6
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/ethereum/go-ethereum v1.13.14
@@ -20,7 +21,6 @@ require (
 )
 
 require (
-	github.com/Layr-Labs/cerberus-api v0.0.0-20241016214048-d52f5ddc5559 // indirect
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
