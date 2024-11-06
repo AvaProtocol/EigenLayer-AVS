@@ -15,7 +15,6 @@ import (
 	"github.com/expr-lang/expr/vm"
 	"github.com/go-co-op/gocron/v2"
 
-	"github.com/AvaProtocol/ap-avs/core/chainio/signer"
 	"github.com/AvaProtocol/ap-avs/core/taskengine"
 	pb "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/version"
@@ -124,14 +123,15 @@ func (o *Operator) PingServer() {
 	id := hex.EncodeToString(o.operatorId[:])
 	start := time.Now()
 
-	blsSignature := signer.SignBlsMessage(o.blsKeypair, []byte(fmt.Sprintf("ping from %s ip %s", o.config.OperatorAddress, o.GetPublicIP())))
+	blsSignature, err := o.GetSignature(context.Background(), []byte(fmt.Sprintf("ping from %s ip %s", o.config.OperatorAddress, o.GetPublicIP())))
+
 	if blsSignature == nil {
-		o.logger.Error("error generate bls signature", "operator", o.config.OperatorAddress)
+		o.logger.Error("error generate bls signature", "operator", o.config.OperatorAddress, "error", err)
 	}
 
 	str := base64.StdEncoding.EncodeToString(blsSignature.Serialize())
 
-	_, err := o.aggregatorRpcClient.Ping(context.Background(), &pb.Checkin{
+	_, err = o.aggregatorRpcClient.Ping(context.Background(), &pb.Checkin{
 		Address:     o.config.OperatorAddress,
 		Id:          id,
 		Signature:   str,
