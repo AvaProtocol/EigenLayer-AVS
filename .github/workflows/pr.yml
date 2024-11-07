@@ -28,8 +28,8 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
+          # This is a dedicated repository to house the development/preview build
           images: |
-            # This is a dedicated repository to house the development/preview build
             avaprotocol/avs-dev
           tags: |
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
