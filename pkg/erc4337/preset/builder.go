@@ -21,9 +21,9 @@ import (
 var (
 	// Dummy value to fullfil validation.
 	// Gas info is calculated and return by bundler RPC
-	callGasLimit         = big.NewInt(35000)
-	verificationGasLimit = big.NewInt(70000)
-	preVerificationGas   = big.NewInt(21000)
+	callGasLimit         = big.NewInt(10000000)
+	verificationGasLimit = big.NewInt(10000000)
+	preVerificationGas   = big.NewInt(10000000)
 
 	// the signature isnt important, only length check
 	dummySigForGasEstimation = crypto.Keccak256Hash(common.FromHex("0xdead123"))
@@ -74,15 +74,22 @@ func SendUserOp(
 	userOp.Signature, _ = signer.SignMessage(signerKey, dummySigForGasEstimation.Bytes())
 
 	gas, e := bundlerClient.EstimateUserOperationGas(context.Background(), userOp, aa.EntrypointAddress, map[string]any{})
+
+	fmt.Println("gas", gas, e)
+
 	if gas == nil {
 		// TODO: handler retry, this could be rate limit from rpc
 		return "", fmt.Errorf("error estimated gas from bundler: %w", e)
 	}
 
-	userOp.PreVerificationGas = gas.PreVerificationGas
-	userOp.VerificationGasLimit = gas.VerificationGasLimit
-	userOp.CallGasLimit = gas.CallGasLimit
+	userOp.PreVerificationGas = big.NewInt(10000000)   //gas.PreVerificationGas
+	userOp.VerificationGasLimit = big.NewInt(10000000) //gas.VerificationGasLimit
+	userOp.CallGasLimit = big.NewInt(10000000)         //gas.CallGasLimit
 	//userOp.VerificationGas = gas.VerificationGas
+
+	//userOp.PreVerificationGas = gas.PreVerificationGas
+	//userOp.VerificationGasLimit = gas.VerificationGasLimit
+	//userOp.CallGasLimit = gas.CallGasLimit
 
 	userOpHash := userOp.GetUserOpHash(aa.EntrypointAddress, chainID)
 	userOp.Signature, _ = signer.SignMessage(signerKey, userOpHash.Bytes())

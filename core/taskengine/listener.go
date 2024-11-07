@@ -32,9 +32,13 @@ func RegisterBlockListener(ctx context.Context, fn OnblockFunc) error {
 		case header := <-headers:
 			logger.Info("detect new block, evaluate checks", "component", "taskengine", "block", header.Hash().Hex())
 
-			block, err := wsEthClient.BlockByHash(context.Background(), header.Hash())
+			// ideally we can just use wsEthClient but some particular websocket such as minato doesn't support that
+			//block, err := wsEthClient.BlockByHash(context.Background(), header.Hash())
+			block, err := rpcConn.BlockByHash(context.Background(), header.Hash())
 			if err != nil {
-				logger.Errorf("error when fetching new block from websocket", "err", err)
+				// https://github.com/ethereum-optimism/optimism/issues/3850
+				//logger.Errorf("error when fetching new block from websocket", "err", err)
+				fn(nil)
 				// TODO: report error in metric
 				// The operator will skip run this time
 			} else {

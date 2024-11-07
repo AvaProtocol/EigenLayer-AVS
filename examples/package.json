@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "misc support utility",
   "main": "index.js",
+  "type":"module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "gen-ts-type": "proto-loader-gen-types --keepCase --longs=String --enums=String --defaults --oneofs --grpcLib=@grpc/grpc-js --outDir=proto/ ../protobuf/*.proto",
