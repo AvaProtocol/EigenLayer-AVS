@@ -11,7 +11,9 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 
@@ -43,7 +45,7 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 
 	nonce, err := aa.GetNonce(r.smartWalletRpc, ownerAddress, big.NewInt(0))
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletRpcError), "cannot determine nonce for smart wallet")
 	}
 
 	return &avsproto.NonceResp{
@@ -56,21 +58,21 @@ func (r *RpcServer) GetSmartAccountAddress(ctx context.Context, payload *avsprot
 	ownerAddress := common.HexToAddress(payload.Owner)
 	salt := big.NewInt(0)
 	sender, err := aa.GetSenderAddress(r.smartWalletRpc, ownerAddress, salt)
-	nonce, err := aa.GetNonce(r.smartWalletRpc, *sender, salt)
 
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), "cannot determine smart wallet address")
 	}
 	return &avsproto.AddressResp{
-		Nonce:               nonce.String(),
 		SmartAccountAddress: sender.String(),
+		// TODO: return the right salt
+		Salt: big.NewInt(0).String(),
 	}, nil
 }
 
 func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.UUID) (*wrapperspb.BoolValue, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
 	}
 
 	r.config.Logger.Info("Process Cancel Task",
@@ -90,7 +92,7 @@ func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.UUID) (*wra
 func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.UUID) (*wrapperspb.BoolValue, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
 	}
 
 	r.config.Logger.Info("Process Delete Task",
@@ -110,7 +112,7 @@ func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.UUID) (*wra
 func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.CreateTaskReq) (*avsproto.CreateTaskResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
 	}
 
 	task, err := r.engine.CreateTask(user, taskPayload)
@@ -126,7 +128,7 @@ func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.Create
 func (r *RpcServer) ListTasks(ctx context.Context, _ *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
 	}
 
 	r.config.Logger.Info("Process List Task",
@@ -142,7 +144,7 @@ func (r *RpcServer) ListTasks(ctx context.Context, _ *avsproto.ListTasksReq) (*a
 func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avsproto.Task, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
 	}
 
 	r.config.Logger.Info("Process Get Task",

@@ -16,6 +16,8 @@ import (
 	"github.com/AvaProtocol/ap-avs/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
@@ -135,12 +137,12 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	user.SmartAccountAddress, err = aa.GetSenderAddress(rpcConn, user.Address, salt)
 
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletRpcError), "cannot get smart wallet address")
 	}
 
 	taskID, err := n.NewTaskID()
 	if err != nil {
-		return nil, fmt.Errorf("cannot create task right now. storage unavailable")
+		return nil, status.Errorf(codes.Code(avsproto.Error_StorageUnavailable), "cannot create task right now. storage unavailable")
 	}
 
 	task, err := model.NewTaskFromProtobuf(taskID, user, taskPayload)
@@ -264,7 +266,7 @@ func (n *Engine) ListTasksByUser(user *model.User) ([]*avsproto.ListTasksResp_Ta
 	taskIDs, err := n.db.GetByPrefix([]byte(fmt.Sprintf("u:%s", user.Address.String())))
 
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Code(avsproto.Error_StorageUnavailable), "storage is not ready")
 	}
 
 	tasks := make([]*avsproto.ListTasksResp_TaskItemResp, len(taskIDs))
