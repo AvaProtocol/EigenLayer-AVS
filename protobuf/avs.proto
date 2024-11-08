@@ -66,6 +66,9 @@ enum Error {
   // target chain of smart wallet is error and cannot used to determine smartwallet info
   SmartWalletRpcError      = 6000;
   SmartWalletNotFoundError = 6001;
+
+  // Error occurs when we failed to migrat task data and it cannot be decoden
+  TaskDataCorrupted = 7000;
 }
 
 // Simple timebase or cron syntax.
