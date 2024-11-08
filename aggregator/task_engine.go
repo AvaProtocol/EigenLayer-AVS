@@ -34,7 +34,7 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		agg.queue,
 		agg.logger,
 	)
-	agg.engine.Start()
+	agg.engine.MustStart()
 
 	agg.queue.MustStart()
 	agg.worker.MustStart()

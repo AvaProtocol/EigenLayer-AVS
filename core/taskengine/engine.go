@@ -15,8 +15,11 @@ import (
 	"github.com/AvaProtocol/ap-avs/model"
 	"github.com/AvaProtocol/ap-avs/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	grpcstatus "google.golang.org/grpc/status"
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
@@ -50,6 +53,7 @@ type Engine struct {
 	lock             *sync.Mutex
 	trackSyncedTasks map[string]*operatorState
 
+	smartWalletConfig *config.SmartWalletConfig
 	// when shutdown is true, our engine will perform the shutdown
 	// pending execution will be pushed out before the shutdown completely
 	// to force shutdown, one can type ctrl+c twice
@@ -91,10 +95,11 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		db:    db,
 		queue: queue,
 
-		lock:             &sync.Mutex{},
-		tasks:            make(map[string]*model.Task),
-		trackSyncedTasks: make(map[string]*operatorState),
-		shutdown:         false,
+		lock:              &sync.Mutex{},
+		tasks:             make(map[string]*model.Task),
+		trackSyncedTasks:  make(map[string]*operatorState),
+		smartWalletConfig: config.SmartWallet,
+		shutdown:          false,
 
 		logger: logger,
 	}
@@ -110,14 +115,15 @@ func (n *Engine) Stop() {
 	n.shutdown = true
 }
 
-func (n *Engine) Start() {
+func (n *Engine) MustStart() {
 	var err error
 	n.seq, err = n.db.GetSequence([]byte("t:seq"), 1000)
 	if err != nil {
 		panic(err)
 	}
 
-	kvs, e := n.db.GetByPrefix([]byte(fmt.Sprintf("t:%s:", TaskStatusToStorageKey(avsproto.TaskStatus_Active))))
+	// Upon booting we will get all the active tasks to sync to operator
+	kvs, e := n.db.GetByPrefix(TaskByStatusStoragePrefix(avsproto.TaskStatus_Active))
 	if e != nil {
 		panic(e)
 	}
@@ -127,7 +133,87 @@ func (n *Engine) Start() {
 			n.tasks[string(item.Key)] = &task
 		}
 	}
+}
 
+func (n *Engine) GetSmartWallets(owner common.Address) ([]*avsproto.SmartWallet, error) {
+	// This is the default wallet with our own factory
+	salt := big.NewInt(0)
+	sender, err := aa.GetSenderAddress(rpcConn, owner, salt)
+	if err != nil {
+		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), "cannot determine smart wallet address")
+	}
+
+	// now load the customize wallet with different salt or factory that was initialed and store in our db
+	wallets := []*avsproto.SmartWallet{
+		&avsproto.SmartWallet{
+			Address: sender.String(),
+			Factory: n.smartWalletConfig.FactoryAddress.String(),
+			Salt:    salt.String(),
+		},
+	}
+
+	items, err := n.db.GetByPrefix(WalletByOwnerPrefix(owner))
+
+	if err != nil {
+		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), "cannot determine smart wallet address")
+	}
+
+	for _, item := range items {
+		w := &model.SmartWallet{}
+		w.FromStorageData(item.Value)
+
+		wallets = append(wallets, &avsproto.SmartWallet{
+			Address: w.Address.String(),
+			Factory: w.Factory.String(),
+			Salt:    w.Salt.String(),
+		})
+	}
+
+	return wallets, nil
+}
+
+func (n *Engine) CreateSmartWallet(user *model.User, payload *avsproto.CreateWalletReq) (*avsproto.CreateWalletResp, error) {
+	// Verify data
+	// when user passing a custom factory address, we want to validate it
+	if payload.FactoryAddress != "" && !common.IsHexAddress(payload.FactoryAddress) {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid factory address")
+	}
+
+	salt := big.NewInt(0)
+	if payload.Salt != "" {
+		var ok bool
+		salt, ok = math.ParseBig256(payload.Salt)
+		if !ok {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid salt value")
+		}
+	}
+
+	factoryAddress := n.smartWalletConfig.FactoryAddress
+	if payload.FactoryAddress != "" {
+		factoryAddress = common.HexToAddress(payload.FactoryAddress)
+
+	}
+
+	sender, err := aa.GetSenderAddressForFactory(rpcConn, user.Address, factoryAddress, salt)
+
+	wallet := &model.SmartWallet{
+		Owner:   &user.Address,
+		Address: sender,
+		Factory: &factoryAddress,
+		Salt:    salt,
+	}
+
+	updates := map[string][]byte{}
+
+	updates[string(WalletStorageKey(wallet))], err = wallet.ToJSON()
+
+	if err = n.db.BatchWrite(updates); err != nil {
+		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), "cannot update key to storage")
+	}
+
+	return &avsproto.CreateWalletResp{
+		Address: sender.String(),
+	}, nil
 }
 
 func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskReq) (*model.Task, error) {
@@ -140,12 +226,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_SmartWalletRpcError), "cannot get smart wallet address")
 	}
 
-	taskID, err := n.NewTaskID()
-	if err != nil {
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), "cannot create task right now. storage unavailable")
-	}
-
-	task, err := model.NewTaskFromProtobuf(taskID, user, taskPayload)
+	task, err := model.NewTaskFromProtobuf(user, taskPayload)
 
 	if err != nil {
 		return nil, err
@@ -153,8 +234,8 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	updates := map[string][]byte{}
 
-	updates[TaskStorageKey(task.ID, task.Status)], err = task.ToJSON()
-	updates[TaskUserKey(task)] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Active))
+	updates[string(TaskStorageKey(task.ID, task.Status))], err = task.ToJSON()
+	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Active))
 
 	if err = n.db.BatchWrite(updates); err != nil {
 		return nil, err
@@ -249,8 +330,8 @@ func (n *Engine) AggregateChecksResult(address string, ids []string) error {
 		n.logger.Debug("mark task in executing status", "task_id", id)
 
 		if err := n.db.Move(
-			[]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Active), id)),
-			[]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Executing), id)),
+			[]byte(TaskStorageKey(id, avsproto.TaskStatus_Active)),
+			[]byte(TaskStorageKey(id, avsproto.TaskStatus_Executing)),
 		); err != nil {
 			n.logger.Error("error moving the task storage from active to executing", "task", id, "error", err)
 		}
@@ -263,7 +344,7 @@ func (n *Engine) AggregateChecksResult(address string, ids []string) error {
 }
 
 func (n *Engine) ListTasksByUser(user *model.User) ([]*avsproto.ListTasksResp_TaskItemResp, error) {
-	taskIDs, err := n.db.GetByPrefix([]byte(fmt.Sprintf("u:%s", user.Address.String())))
+	taskIDs, err := n.db.GetByPrefix(UserTaskStoragePrefix(user.Address))
 
 	if err != nil {
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), "storage is not ready")
@@ -326,8 +407,8 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error)
 		return false, fmt.Errorf("Only non executing task can be deleted")
 	}
 
-	n.db.Delete([]byte(TaskStorageKey(task.ID, task.Status)))
-	n.db.Delete([]byte(TaskUserKey(task)))
+	n.db.Delete(TaskStorageKey(task.ID, task.Status))
+	n.db.Delete(TaskUserKey(task))
 
 	return true, nil
 }
@@ -346,13 +427,13 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 	updates := map[string][]byte{}
 	oldStatus := task.Status
 	task.SetCanceled()
-	updates[TaskStorageKey(task.ID, oldStatus)], err = task.ToJSON()
-	updates[TaskUserKey(task)] = []byte(fmt.Sprintf("%d", task.Status))
+	updates[string(TaskStorageKey(task.ID, oldStatus))], err = task.ToJSON()
+	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	if err = n.db.BatchWrite(updates); err == nil {
 		n.db.Move(
-			[]byte(TaskStorageKey(task.ID, oldStatus)),
-			[]byte(TaskStorageKey(task.ID, task.Status)),
+			TaskStorageKey(task.ID, oldStatus),
+			TaskStorageKey(task.ID, task.Status),
 		)
 
 		delete(n.tasks, task.ID)
@@ -363,37 +444,8 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 	return true, nil
 }
 
-func TaskStorageKey(id string, status avsproto.TaskStatus) string {
-	return fmt.Sprintf(
-		"t:%s:%s",
-		TaskStatusToStorageKey(status),
-		id,
-	)
-}
-
-func TaskUserKey(t *model.Task) string {
-	return fmt.Sprintf(
-		"u:%s",
-		t.Key(),
-	)
-}
-
-func TaskStatusToStorageKey(v avsproto.TaskStatus) string {
-	switch v {
-	case 1:
-		return "c"
-	case 2:
-		return "f"
-	case 3:
-		return "l"
-	case 4:
-		return "x"
-	}
-
-	return "a"
-}
-
-func (n *Engine) NewTaskID() (string, error) {
+// A global counter for the task engine
+func (n *Engine) NewSeqID() (string, error) {
 	num := uint64(0)
 	var err error
 

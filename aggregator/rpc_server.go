@@ -39,8 +39,16 @@ type RpcServer struct {
 }
 
 // Get nonce of an existing smart wallet of a given owner
-func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest) (*avsproto.NonceResp, error) {
+func (r *RpcServer) CreateWallet(ctx context.Context, payload *avsproto.CreateWalletReq) (*avsproto.CreateWalletResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+	}
+	return r.engine.CreateSmartWallet(user, payload)
+}
 
+// Get nonce of an existing smart wallet of a given owner
+func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest) (*avsproto.NonceResp, error) {
 	ownerAddress := common.HexToAddress(payload.Owner)
 
 	nonce, err := aa.GetNonce(r.smartWalletRpc, ownerAddress, big.NewInt(0))
@@ -55,17 +63,15 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 
 // GetAddress returns smart account address of the given owner in the auth key
 func (r *RpcServer) GetSmartAccountAddress(ctx context.Context, payload *avsproto.AddressRequest) (*avsproto.AddressResp, error) {
-	ownerAddress := common.HexToAddress(payload.Owner)
-	salt := big.NewInt(0)
-	sender, err := aa.GetSenderAddress(r.smartWalletRpc, ownerAddress, salt)
-
+	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), "cannot determine smart wallet address")
+		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
 	}
+
+	wallets, err := r.engine.GetSmartWallets(user.Address)
+
 	return &avsproto.AddressResp{
-		SmartAccountAddress: sender.String(),
-		// TODO: return the right salt
-		Salt: big.NewInt(0).String(),
+		Wallets: wallets,
 	}, nil
 }
 
@@ -160,12 +166,14 @@ func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avspro
 	return task.ToProtoBuf()
 }
 
+// Operator action
 func (r *RpcServer) SyncTasks(payload *avsproto.SyncTasksReq, srv avsproto.Aggregator_SyncTasksServer) error {
 	err := r.engine.StreamCheckToOperator(payload, srv)
 
 	return err
 }
 
+// Operator action
 func (r *RpcServer) UpdateChecks(ctx context.Context, payload *avsproto.UpdateChecksReq) (*avsproto.UpdateChecksResp, error) {
 	if err := r.engine.AggregateChecksResult(payload.Address, payload.Id); err != nil {
 		return nil, err

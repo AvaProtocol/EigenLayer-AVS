@@ -24,6 +24,7 @@ const config = {
     TEST_TRANSFER_TOKEN: "0x2e8bdb63d09ef989a0018eeb1c47ef84e3e61f7b",
     TEST_TRANSFER_TO: "0xe0f7D11FD714674722d325Cd86062A5F1882E13a",
     ORACLE_PRICE_CONTRACT: "0x694AA1769357215DE4FAC081bf1f309aDC325306",
+    // on local development we still target smart wallet on sepolia
     RPC_PROVIDER: "https://sepolia.gateway.tenderly.co",
   },
 
@@ -166,24 +167,19 @@ async function deleteTask(owner, token, taskId) {
   console.log("Delete Task ", taskId, "\n", result);
 }
 
-async function getWallet(owner, token) {
+async function getWallets(owner, token) {
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
 
-  const walletResponse = await asyncRPC(
+  const walletsResp  = await asyncRPC(
     client,
     "GetSmartAccountAddress",
-    { owner: owner },
+    { },
     metadata
   );
 
   // Update the provider creation
   const provider = new ethers.JsonRpcProvider(config[env].RPC_PROVIDER);
-
-  const balance = await provider.getBalance(
-    walletResponse.smart_account_address
-  );
-  const balanceInEth = _.floor(ethers.formatEther(balance), 2);
 
   // Get token balance
   const tokenAddress = config[env].TEST_TRANSFER_TOKEN;
@@ -194,26 +190,38 @@ async function getWallet(owner, token) {
   ];
   const tokenContract = new ethers.Contract(tokenAddress, tokenAbi, provider);
 
-  const tokenBalance = await tokenContract.balanceOf(
-    walletResponse.smart_account_address
-  );
-  const tokenDecimals = await tokenContract.decimals();
-  const tokenSymbol = await tokenContract.symbol();
-  const tokenBalanceFormatted = _.floor(
-    ethers.formatUnits(tokenBalance, tokenDecimals),
-    2
-  );
+  let wallets = [];
+  for (const wallet of walletsResp.wallets) {
+    const balance = await provider.getBalance(
+      wallet.address
+    );
+    const balanceInEth = _.floor(ethers.formatEther(balance), 2);
 
-  const result = _.extend(walletResponse, {
-    balances: [
+    const tokenBalance = await tokenContract.balanceOf(wallet.address);
+
+    const tokenDecimals = await tokenContract.decimals();
+    const tokenSymbol = await tokenContract.symbol();
+    const tokenBalanceFormatted = _.floor(ethers.formatUnits(tokenBalance, tokenDecimals),2);
+    wallets.push({...wallet, balances: [
       `${balanceInEth} ETH`,
       `${tokenBalanceFormatted} ${tokenSymbol}`,
-    ],
-  });
+    ]});
+  }
+  console.log("Smart wallet address for ", owner, "\n", wallets);
 
-  console.log("Smart wallet address for ", owner, "\n", result);
+  return wallets;
+}
 
-  return result;
+const createWallet = async (owner, token, salt, factoryAddress) => {
+  const metadata = new grpc.Metadata();
+  metadata.add("authkey", token);
+
+  return await asyncRPC(
+    client,
+    "CreateWallet",
+    { salt, factoryAddress },
+    metadata
+  );
 }
 
 const main = async (cmd) => {
@@ -223,6 +231,11 @@ const main = async (cmd) => {
   let taskCondition = "";
 
   switch (cmd) {
+    case "create-wallet":
+      salt = process.argv[3] || 0;
+      let smartWalletAddress = await createWallet(owner, token, process.argv[3], process.argv[4]);
+      console.log("inside vm", smartWalletAddress)
+      break;
     case "schedule":
       // ETH-USD pair on sepolia
       // https://sepolia.etherscan.io/address/0x694AA1769357215DE4FAC081bf1f309aDC325306#code
@@ -282,7 +295,7 @@ const main = async (cmd) => {
       break;
 
     case "wallet":
-      await getWallet(owner, token);
+      await getWallets(owner, token);
       break;
 
     case "genTaskData":
@@ -296,14 +309,15 @@ const main = async (cmd) => {
     default:
       console.log(`Usage:
 
-      wallet:           to find smart wallet address for this eoa
-      tasks:            to find all tasks
-      get <task-id>:    to get task detail
-      schedule:         to schedule a task with chainlink eth-usd its condition will be matched quickly
-      schedule2:        to schedule a task with chainlink that has a very high price target
-      schedule-generic: to schedule a task with an arbitrary contract query
-      cancel <task-id>: to cancel a task
-      delete <task-id>: to completely remove a task`);
+      create-wallet <salt> <factory-address>: to create a smart wallet with a salt, and optionally a factory contract
+      wallet:                                 to find smart wallet address for this eoa
+      tasks:                                  to find all tasks
+      get <task-id>:                          to get task detail
+      schedule:                               to schedule a task with chainlink eth-usd its condition will be matched quickly
+      schedule2:                              to schedule a task with chainlink that has a very high price target
+      schedule-generic:                       to schedule a task with an arbitrary contract query
+      cancel <task-id>:                       to cancel a task
+      delete <task-id>:                       to completely remove a task`);
   }
 }
 

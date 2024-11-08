@@ -47,13 +47,15 @@ func GenerateTaskID() string {
 }
 
 // Populate a task structure from proto payload
-func NewTaskFromProtobuf(taskID string, user *User, body *avsproto.CreateTaskReq) (*Task, error) {
+func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error) {
 	if body == nil {
 		return nil, nil
 	}
 
 	owner := user.Address
 	aaAddress := user.SmartAccountAddress
+
+	taskID := GenerateTaskID()
 
 	t := &Task{
 		ID: taskID,
