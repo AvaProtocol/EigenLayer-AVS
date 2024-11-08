@@ -215,13 +215,13 @@ async function getWallet(owner, token) {
   return result;
 }
 
-(async () => {
+const main = async (cmd) => {
   // 1. Generate the api token to interact with aggregator
   const { owner, token } = await generateApiToken();
 
   let taskCondition = "";
 
-  switch (process.argv[2]) {
+  switch (cmd) {
     case "schedule":
       // ETH-USD pair on sepolia
       // https://sepolia.etherscan.io/address/0x694AA1769357215DE4FAC081bf1f309aDC325306#code
@@ -304,7 +304,7 @@ async function getWallet(owner, token) {
       cancel <task-id>: to cancel a task
       delete <task-id>: to completely remove a task`);
   }
-})();
+}
 
 function getTaskData() {
   let ABI = ["function transfer(address to, uint amount)"];
@@ -409,3 +409,12 @@ async function scheduleTimeTransfer(owner, token) {
 
   console.log("Expression Task ID is:", result);
 }
+
+
+(async () => {
+  try {
+    main(process.argv[2]);
+  } catch (e) {
+    console.log("error from grpc", e.code, "detail", e.message);
+  }
+})();
