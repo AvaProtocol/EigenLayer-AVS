@@ -24,6 +24,7 @@ const config = {
     TEST_TRANSFER_TOKEN: "0x2e8bdb63d09ef989a0018eeb1c47ef84e3e61f7b",
     TEST_TRANSFER_TO: "0xe0f7D11FD714674722d325Cd86062A5F1882E13a",
     ORACLE_PRICE_CONTRACT: "0x694AA1769357215DE4FAC081bf1f309aDC325306",
+    RPC_PROVIDER: "https://sepolia.gateway.tenderly.co",
   },
 
   staging: {
