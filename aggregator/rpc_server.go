@@ -131,7 +131,7 @@ func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.Create
 	}, nil
 }
 
-func (r *RpcServer) ListTasks(ctx context.Context, _ *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
+func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
@@ -139,8 +139,13 @@ func (r *RpcServer) ListTasks(ctx context.Context, _ *avsproto.ListTasksReq) (*a
 
 	r.config.Logger.Info("Process List Task",
 		"user", user.Address.String(),
+		"smart_wallet_address", payload.SmartWalletAddress,
 	)
-	tasks, err := r.engine.ListTasksByUser(user)
+	tasks, err := r.engine.ListTasksByUser(user, payload)
+
+	if err != nil {
+		return nil, err
+	}
 
 	return &avsproto.ListTasksResp{
 		Tasks: tasks,
