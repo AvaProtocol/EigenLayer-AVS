@@ -53,6 +53,24 @@ message TaskTrigger {
   ExpressionCondition    expression     = 4;
 }
 
+// gRPC internal error code use up to 17, we extend and start from 1000 to avoid any conflict 
+// Guide: https://grpc.io/docs/guides/error/
+// Go: https://github.com/grpc/grpc-go/blob/master/codes/codes.go#L199
+enum Error {
+  // An error that happen when the app can be recovered but the cause is unknow, rarely use, we try to use specific error as much as we can
+  UnknowError              = 0;
+  // internal rpc node error
+  RpcNodeError             = 1000;
+  // storage system isn't available to respond to query
+  StorageUnavailable       = 2000;
+  // target chain of smart wallet is error and cannot used to determine smartwallet info
+  SmartWalletRpcError      = 6000;
+  SmartWalletNotFoundError = 6001;
+
+  // Error occurs when we failed to migrat task data and it cannot be decoden
+  TaskDataCorrupted = 7000;
+}
+
 // Simple timebase or cron syntax.
 message TimeCondition {
   repeated int64 fixed = 1;
@@ -224,24 +242,25 @@ message CreateTaskReq {
 }
 
 message CreateTaskResp {
-    string id = 1;
+  string id = 1;
 }
 
 message NonceRequest {
-    string owner = 1;
+  string owner = 1;
 }
 
 message NonceResp {
-    string nonce = 1;
+  string nonce = 1;
 }
 
 message AddressRequest {
-    string owner = 1;
+  string owner = 1;
 }
 
 message AddressResp {
-    string smart_account_address = 1;
-    string nonce = 2;
+  string smart_account_address = 1;
+  // we need to use string to re-present the bigint salt, the client can decode it with etherjs for example
+  string salt = 2;
 }
 
 message ListTasksReq {}

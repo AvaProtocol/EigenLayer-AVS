@@ -16,6 +16,8 @@ import (
 	"github.com/AvaProtocol/ap-avs/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
@@ -135,12 +137,12 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	user.SmartAccountAddress, err = aa.GetSenderAddress(rpcConn, user.Address, salt)
 
 	if err != nil {
-		return nil, err
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_SmartWalletRpcError), "cannot get smart wallet address")
 	}
 
 	taskID, err := n.NewTaskID()
 	if err != nil {
-		return nil, fmt.Errorf("cannot create task right now. storage unavailable")
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), "cannot create task right now. storage unavailable")
 	}
 
 	task, err := model.NewTaskFromProtobuf(taskID, user, taskPayload)
@@ -264,7 +266,7 @@ func (n *Engine) ListTasksByUser(user *model.User) ([]*avsproto.ListTasksResp_Ta
 	taskIDs, err := n.db.GetByPrefix([]byte(fmt.Sprintf("u:%s", user.Address.String())))
 
 	if err != nil {
-		return nil, err
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), "storage is not ready")
 	}
 
 	tasks := make([]*avsproto.ListTasksResp_TaskItemResp, len(taskIDs))
@@ -288,6 +290,9 @@ func (n *Engine) GetTaskByUser(user *model.User, taskID string) (*model.Task, er
 
 	// Get Task Status
 	rawStatus, err := n.db.GetKey([]byte(TaskUserKey(task)))
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.NotFound, "task not found")
+	}
 	status, _ := strconv.Atoi(string(rawStatus))
 
 	taskRawByte, err := n.db.GetKey([]byte(
@@ -299,19 +304,22 @@ func (n *Engine) GetTaskByUser(user *model.User, taskID string) (*model.Task, er
 			TaskStorageKey(taskID, avsproto.TaskStatus_Executing),
 		))
 		if err != nil {
-			return nil, err
+			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), "task data storage is corrupted")
 		}
 	}
 
 	err = task.FromStorageData(taskRawByte)
-	return task, err
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), "task data storage is corrupted")
+	}
+	return task, nil
 }
 
 func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error) {
 	task, err := n.GetTaskByUser(user, taskID)
 
 	if err != nil {
-		return false, err
+		return false, grpcstatus.Errorf(codes.NotFound, "task not found")
 	}
 
 	if task.Status == avsproto.TaskStatus_Executing {
@@ -328,7 +336,7 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 	task, err := n.GetTaskByUser(user, taskID)
 
 	if err != nil {
-		return false, err
+		return false, grpcstatus.Errorf(codes.NotFound, "task not found")
 	}
 
 	if task.Status != avsproto.TaskStatus_Active {
