@@ -65,8 +65,8 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 
 	defer func() {
 		updates := map[string][]byte{}
-		updates[TaskStorageKey(task.ID, avsproto.TaskStatus_Executing)], err = task.ToJSON()
-		updates[TaskUserKey(task)] = []byte(fmt.Sprintf("%d", task.Status))
+		updates[string(TaskStorageKey(task.ID, avsproto.TaskStatus_Executing))], err = task.ToJSON()
+		updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 		if err = c.db.BatchWrite(updates); err == nil {
 			c.db.Move(

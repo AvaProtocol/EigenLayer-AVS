@@ -69,6 +69,17 @@ func GetSenderAddress(conn *ethclient.Client, ownerAddress common.Address, salt 
 	return &sender, nil
 }
 
+// Compute smart wallet address for a particular factory
+func GetSenderAddressForFactory(conn *ethclient.Client, ownerAddress common.Address, customFactoryAddress common.Address, salt *big.Int) (*common.Address, error) {
+	simpleFactory, err := NewSimpleFactory(customFactoryAddress, conn)
+	if err != nil {
+		return nil, err
+	}
+
+	sender, err := simpleFactory.GetAddress(nil, ownerAddress, salt)
+	return &sender, nil
+}
+
 func GetNonce(conn *ethclient.Client, ownerAddress common.Address, salt *big.Int) (*big.Int, error) {
 	if salt == nil {
 		salt = defaultSalt

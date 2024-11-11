@@ -63,6 +63,7 @@ enum Error {
   RpcNodeError             = 1000;
   // storage system isn't available to respond to query
   StorageUnavailable       = 2000;
+  StorageWriteError        = 2001;
   // target chain of smart wallet is error and cannot used to determine smartwallet info
   SmartWalletRpcError      = 6000;
   SmartWalletNotFoundError = 6001;
@@ -254,13 +255,20 @@ message NonceResp {
 }
 
 message AddressRequest {
-  string owner = 1;
+  // filter out by factory address or salt
+  // otherwise return all the wallet
+  string factory = 1;
+  string salt = 2;
+}
+
+message SmartWallet {
+  string address = 1;
+  string salt = 2;
+  string factory = 3;
 }
 
 message AddressResp {
-  string smart_account_address = 1;
-  // we need to use string to re-present the bigint salt, the client can decode it with etherjs for example
-  string salt = 2;
+  repeated SmartWallet wallets = 1;
 }
 
 message ListTasksReq {}
@@ -294,20 +302,31 @@ message UpdateChecksResp {
   google.protobuf.Timestamp updated_at = 1;
 }
 
+message CreateWalletReq {
+  string salt = 1;
+  // this is the factory address for the wallet, when leaving its empty, we will use our default factory address
+  string factory_address = 2;
+}
+
+message CreateWalletResp {
+  string address = 1;
+}
+
 service Aggregator {
   // Auth
   rpc GetKey(GetKeyReq) returns (KeyResp) {};
 
   // Smart Acccount
-  rpc GetNonce(NonceRequest) returns (NonceResp) {};
+  rpc GetNonce(NonceRequest)                 returns (NonceResp) {};
   rpc GetSmartAccountAddress(AddressRequest) returns (AddressResp) {};
 
   // Task Management
-  rpc CreateTask(CreateTaskReq) returns (CreateTaskResp) {};
-  rpc ListTasks(ListTasksReq) returns (ListTasksResp) {};
-  rpc GetTask(UUID) returns (Task) {};
-  rpc CancelTask(UUID) returns (google.protobuf.BoolValue) {};
-  rpc DeleteTask(UUID) returns (google.protobuf.BoolValue) {};
+  rpc CreateWallet(CreateWalletReq) returns (CreateWalletResp) {};
+  rpc CreateTask(CreateTaskReq)     returns (CreateTaskResp) {};
+  rpc ListTasks(ListTasksReq)       returns (ListTasksResp) {};
+  rpc GetTask(UUID)                 returns (Task) {};
+  rpc CancelTask(UUID)              returns (google.protobuf.BoolValue) {};
+  rpc DeleteTask(UUID)              returns (google.protobuf.BoolValue) {};
 
   // Operator endpoint
   rpc Ping(Checkin) returns (CheckinResp) {};
