@@ -214,7 +214,7 @@ message Execution {
 message Task {
     UUID id = 1;
     string owner = 2;
-    string smart_account_address = 3;
+    string smart_wallet_address = 3;
     TaskTrigger trigger = 4;
     repeated TaskAction nodes = 5;
 
@@ -232,14 +232,19 @@ message Task {
     repeated Execution executions = 12;
 }
 
+
 message CreateTaskReq {
-  TaskTrigger trigger = 1;
+  TaskTrigger trigger          = 1;
   repeated TaskAction actions  = 2;
-  int64 start_at      = 3;
-  int64 expired_at    = 4;
-  string memo         = 5;
+  int64 start_at               = 3;
+  int64 expired_at             = 4;
+  string memo                  = 5;
   // A repeatable task will continue to be run
-  bool repeatable     = 6;
+  bool repeatable              = 6;
+
+  // the smart wallet address that will be used to run this task
+  // When leaving out, we will use the default(salt=0) wallet
+  string smart_wallet_address  = 7;
 }
 
 message CreateTaskResp {
@@ -271,15 +276,14 @@ message AddressResp {
   repeated SmartWallet wallets = 1;
 }
 
-message ListTasksReq {}
+
+message ListTasksReq {
+  // Filter out by the smart_wallet_address
+  string smart_wallet_address = 1;
+}
 
 message ListTasksResp {
-    message TaskItemResp {
-        string id = 1;
-        TaskStatus status = 2;
-    }
-
-    repeated TaskItemResp tasks = 1;
+    repeated Task tasks = 1;
 }
 
 message GetKeyReq {

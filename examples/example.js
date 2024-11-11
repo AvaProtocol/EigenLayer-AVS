@@ -108,9 +108,11 @@ async function listTask(owner, token) {
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
 
-  const result = await asyncRPC(client, "ListTasks", {}, metadata);
+  const result = await asyncRPC(client, "ListTasks", {
+      smart_wallet_address: process.argv[3]
+  }, metadata);
 
-  console.log("Tasks that has created by", owner, "\n", result);
+  console.log("Tasks that has created by", process.argv[3], "\n", result);
 }
 
 async function getTask(owner, token, taskId) {
@@ -353,6 +355,9 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
     client,
     'CreateTask',
     {
+      // salt = 0
+      //smart_wallet_address: "0x5Df343de7d99fd64b2479189692C1dAb8f46184a",
+      smart_wallet_address: "0xdD85693fd14b522a819CC669D6bA388B4FCd158d",
       actions: [{
         task_type: TaskType.CONTRACTEXECUTIONTASK,
         // id need to be unique

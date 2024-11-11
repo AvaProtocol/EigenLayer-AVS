@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/oklog/ulid/v2"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
@@ -19,7 +22,7 @@ type Task struct {
 
 	// The smartwallet that deploy this, it is important to store this because
 	// there are maybe more than one AA per owner
-	SmartAccountAddress string `json:"smart_account_address"`
+	SmartWalletAddress string `json:"smart_wallet_address"`
 
 	// trigger defined whether the task can be executed
 	// trigger can be time based, price based, or contract call based
@@ -53,7 +56,14 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 	}
 
 	owner := user.Address
-	aaAddress := user.SmartAccountAddress
+	aaAddress := *user.SmartAccountAddress
+
+	if body.SmartWalletAddress != "" {
+		if !common.IsHexAddress(body.SmartWalletAddress) {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid smart account address")
+		}
+		aaAddress = common.HexToAddress(body.SmartWalletAddress)
+	}
 
 	taskID := GenerateTaskID()
 
@@ -61,8 +71,8 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 		ID: taskID,
 
 		// convert back to string with EIP55-compliant
-		Owner:               owner.Hex(),
-		SmartAccountAddress: aaAddress.Hex(),
+		Owner:              owner.Hex(),
+		SmartWalletAddress: aaAddress.Hex(),
 
 		Trigger:   body.Trigger,
 		Nodes:     body.Actions,
@@ -96,8 +106,8 @@ func (t *Task) Validate() bool {
 // Convert to protobuf
 func (t *Task) ToProtoBuf() (*avsproto.Task, error) {
 	protoTask := avsproto.Task{
-		Owner:               t.Owner,
-		SmartAccountAddress: t.SmartAccountAddress,
+		Owner:              t.Owner,
+		SmartWalletAddress: t.SmartWalletAddress,
 
 		Id: &avsproto.UUID{
 			Bytes: t.ID,
@@ -125,7 +135,7 @@ func (t *Task) FromStorageData(body []byte) error {
 
 // Generate a global unique key for the task in our system
 func (t *Task) Key() []byte {
-	return []byte(fmt.Sprintf("%s:%s", t.Owner, t.ID))
+	return []byte(t.ID)
 }
 
 func (t *Task) SetCompleted() {
@@ -158,6 +168,7 @@ func (t *Task) AppendExecution(epoch int64, userOpHash string, err error) {
 
 // Given a task key generated from Key(), extract the ID part
 func TaskKeyToId(key []byte) []byte {
+	// <43-byte>:<43-byte>:
 	// the first 43 bytes is owner address
-	return key[43:]
+	return key[86:]
 }

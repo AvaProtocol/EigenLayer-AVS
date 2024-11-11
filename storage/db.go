@@ -22,6 +22,7 @@ type Storage interface {
 
 	GetSequence(prefix []byte, inflightItem uint64) (Sequence, error)
 
+	Exist(key []byte) (bool, error)
 	GetKey(key []byte) ([]byte, error)
 	GetByPrefix(prefix []byte) ([]*KeyValueItem, error)
 	GetKeyHasPrefix(prefix []byte) ([][]byte, error)
@@ -161,6 +162,21 @@ func (s *BadgerStorage) GetKeyHasPrefix(prefix []byte) ([][]byte, error) {
 	}
 
 	return result, nil
+}
+
+func (s *BadgerStorage) Exist(key []byte) (bool, error) {
+	found := false
+	err := s.db.View(func(txn *badger.Txn) error {
+		_, err := txn.Get(key)
+		if err != nil {
+			return err
+		}
+
+		found = true
+		return nil
+	})
+
+	return found, err
 }
 
 func (s *BadgerStorage) GetKey(key []byte) ([]byte, error) {

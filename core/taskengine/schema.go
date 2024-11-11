@@ -9,9 +9,12 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-// Prefix
 func UserTaskStoragePrefix(address common.Address) []byte {
 	return []byte(fmt.Sprintf("u:%s", strings.ToLower(address.String())))
+}
+
+func SmartWalletTaskStoragePrefix(owner common.Address, smartWalletAddress common.Address) []byte {
+	return []byte(fmt.Sprintf("u:%s:%s", strings.ToLower(owner.Hex()), strings.ToLower(smartWalletAddress.Hex())))
 }
 
 func TaskByStatusStoragePrefix(status avsproto.TaskStatus) []byte {
@@ -25,11 +28,11 @@ func WalletByOwnerPrefix(owner common.Address) []byte {
 	))
 }
 
-func WalletStorageKey(w *model.SmartWallet) string {
+func WalletStorageKey(owner common.Address, smartWalletAddress string) string {
 	return fmt.Sprintf(
 		"w:%s:%s",
-		strings.ToLower(w.Owner.String()),
-		strings.ToLower(w.Address.String()),
+		strings.ToLower(owner.Hex()),
+		strings.ToLower(smartWalletAddress),
 	)
 }
 
@@ -43,7 +46,9 @@ func TaskStorageKey(id string, status avsproto.TaskStatus) []byte {
 
 func TaskUserKey(t *model.Task) []byte {
 	return []byte(fmt.Sprintf(
-		"u:%s",
+		"u:%s:%s:%s",
+		strings.ToLower(t.Owner),
+		strings.ToLower(t.SmartWalletAddress),
 		t.Key(),
 	))
 }
