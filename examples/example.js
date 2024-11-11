@@ -112,7 +112,11 @@ async function listTask(owner, token) {
       smart_wallet_address: process.argv[3]
   }, metadata);
 
-  console.log("Tasks that has created by", process.argv[3], "\n", result);
+  console.log("Tasks that has created by", process.argv[3]);
+  for (const item of result.tasks) {
+    console.log("raw data", item.id, item);
+
+  }
 }
 
 async function getTask(owner, token, taskId) {
@@ -371,10 +375,13 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
         }
       }],
       trigger: {
-        trigger_type: TriggerType.EXPRESSIONTRIGGER,
-        expression: {
-          expression: taskCondition,
-        }
+        trigger_type: TriggerType.EVENTTRIGGER,
+        //event: {
+        //  expression: taskCondition,
+        //}
+        cron: {
+          cron_table: ["0 /2"],
+        },
       },
       start_at: Math.floor(Date.now() / 1000) + 30,
       expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),

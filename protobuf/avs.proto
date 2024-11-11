@@ -40,17 +40,51 @@ message SyncTasksReq {
 }
 
 enum TriggerType {
-  TimeTrigger          = 0;
-  ContractQueryTrigger = 1;
-  ExpressionTrigger    = 2;
+  ManualTrigger        = 0;
+  FixedEpochTrigger  = 1;
+  CronTrigger        = 2;
+  BlockTrigger       = 3;
+  EventTrigger         = 4;
+}
+
+message FixedEpochCondition {
+  repeated int64 at_epoches = 1;
+}
+// Simple timebase or cron syntax.
+message CronCondition {
+  repeated string cron_table = 1;
+}
+
+message BlockCondition {
+  int64 interval = 1;
+}
+
+// An arbitrary expression to express the condition.
+// People can define condition example
+//   chainlinkPrice("address-of-eth-usd-pair") > 2644500 && queryContract("contractaddress", "callmsg")[2] < = 5
+// By allow arbitrary expression, people can mix and match to create conplex
+// condition that match their workload
+//
+// The function to be used need to be pre-defined on our task egnine runtime.
+// When a new block is build, our engine will execute these check
+//
+// The expression language is re-present by https://expr-lang.org/
+message EventCondition {
+  string expression = 1;
 }
 
 message TaskTrigger {
   TriggerType            trigger_type   = 1;
 
-  TimeCondition          schedule       = 2;
-  ContractQueryCondition contract_query = 3;
-  ExpressionCondition    expression     = 4;
+  oneof trigger_condition {
+    bool        manual     = 2;
+    // name inspired by unix `at` utility
+    FixedEpochCondition    at      = 3;
+    // interval such as every hour/day/ etc can be converted to cronsyntax by the sdk/studio
+    CronCondition          cron       = 4;
+    BlockCondition         block      = 5;
+    EventCondition         event      = 6;
+  }
 }
 
 // gRPC internal error code use up to 17, we extend and start from 1000 to avoid any conflict 
@@ -72,33 +106,6 @@ enum Error {
   TaskDataCorrupted = 7000;
 }
 
-// Simple timebase or cron syntax.
-message TimeCondition {
-  repeated int64 fixed = 1;
-  string cron = 2;
-}
-// A contract method that return true/false
-// Ideally to use when we already have an existing contract that perform the
-// check.
-// This method will be evaluate every block
-message ContractQueryCondition {
-  string contract_address = 1;
-  string callmsg = 2;
-}
-
-// An arbitrary expression to express the condition.
-// People can define condition example
-//   chainlinkPrice("address-of-eth-usd-pair") > 2644500 && queryContract("contractaddress", "callmsg")[2] < = 5
-// By allow arbitrary expression, people can mix and match to create conplex
-// condition that match their workload
-//
-// The function to be used need to be pre-defined on our task egnine runtime.
-// When a new block is build, our engine will execute these check
-//
-// The expression language is re-present by https://expr-lang.org/
-message ExpressionCondition {
-  string expression = 1;
-}
 
 message SyncTasksResp {
   string id        = 1;
@@ -191,18 +198,20 @@ message TaskAction {
   // based on branching condition
   repeated string next = 4;
 
-  // Transfer eth
-  ETHTransfer eth_transfer = 10;
-  // Run one ore more contracts. The call call also be batched with tool like
-  // multicall to wrap many calls
-  ContractExecution contract_execution = 11;
-  // Make call to a graphql endpoint
-  GraphQLDataQuery graphql_data_query = 12;
-  // Make call to a HTTP endpoint
-  HTTPAPICall http_data_query = 13;
-  // CustomCode allow to run arbitraty JavaScript.
-  CustomCode custom_code = 14;
-  BranchAction branch = 15;
+  oneof task_body {
+    // Transfer eth
+    ETHTransfer eth_transfer = 10;
+    // Run one ore more contracts. The call call also be batched with tool like
+    // multicall to wrap many calls
+    ContractExecution contract_execution = 11;
+    // Make call to a graphql endpoint
+    GraphQLDataQuery graphql_data_query = 12;
+    // Make call to a HTTP endpoint
+    HTTPAPICall http_data_query = 13;
+    // CustomCode allow to run arbitraty JavaScript.
+    CustomCode custom_code = 14;
+    BranchAction branch = 15;
+  }
 }
 
 message Execution {
@@ -212,24 +221,24 @@ message Execution {
 }
 
 message Task {
-    UUID id = 1;
-    string owner = 2;
-    string smart_wallet_address = 3;
-    TaskTrigger trigger = 4;
-    repeated TaskAction nodes = 5;
+  UUID id = 1;
+  string owner = 2;
+  string smart_wallet_address = 3;
+  TaskTrigger trigger = 4;
+  repeated TaskAction nodes = 5;
 
-    // task won't be check before this
-    int64 start_at = 6;
-    // task won't be run/check after this
-    int64 expired_at = 7;
-    // arbitrary data about this task
-    string memo = 8;
+  // task won't be check before this
+  int64 start_at = 6;
+  // task won't be run/check after this
+  int64 expired_at = 7;
+  // arbitrary data about this task
+  string memo = 8;
 
-    int64 completed_at = 9;
-    TaskStatus status  = 10;
-    // repeatable means a task can continue to run even after the first execution
-    bool repeatable  = 11;
-    repeated Execution executions = 12;
+  int64 completed_at = 9;
+  TaskStatus status  = 10;
+  // repeatable means a task can continue to run even after the first execution
+  bool repeatable  = 11;
+  repeated Execution executions = 12;
 }
 
 
