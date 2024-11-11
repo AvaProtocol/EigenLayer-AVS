@@ -53,6 +53,12 @@ func TaskUserKey(t *model.Task) []byte {
 	))
 }
 
+// Convert task status gRPC enum into the storage prefix
+// c: completed. task is completed and no longer being check for trigger anymore
+// f: failed. task is failed to executed, and no longer being check for trigger anymore
+// x: executing. task is being execured currently.
+// l: cancelled. task is cancelled by user, no longer being check for trigger
+// a: actived. task is actived, and will be checked for triggering. task may had executed zero or more time depend on repeatable or not
 func TaskStatusToStorageKey(v avsproto.TaskStatus) string {
 	switch v {
 	case 1:

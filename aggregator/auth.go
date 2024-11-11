@@ -3,12 +3,10 @@ package aggregator
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"strings"
 	"time"
 
 	"github.com/AvaProtocol/ap-avs/core/auth"
-	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
 	"github.com/AvaProtocol/ap-avs/model"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/ethereum/go-ethereum/accounts"
@@ -131,11 +129,9 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 			Address: common.HexToAddress(claims["sub"].(string)),
 		}
 
-		smartAccountAddress, err := aa.GetSenderAddress(r.ethrpc, user.Address, big.NewInt(0))
-		if err != nil {
+		if err := user.LoadDefaultSmartWallet(r.smartWalletRpc); err != nil {
 			return nil, fmt.Errorf("Rpc error")
 		}
-		user.SmartAccountAddress = smartAccountAddress
 
 		return &user, nil
 	}

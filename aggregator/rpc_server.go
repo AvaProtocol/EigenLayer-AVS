@@ -164,7 +164,7 @@ func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avspro
 		"taskID", string(taskID.Bytes),
 	)
 
-	task, err := r.engine.GetTaskByUser(user, string(taskID.Bytes))
+	task, err := r.engine.GetTask(user, string(taskID.Bytes))
 	if err != nil {
 		return nil, err
 	}

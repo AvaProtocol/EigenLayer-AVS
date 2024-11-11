@@ -149,9 +149,7 @@ func NewAggregator(c *config.Config) (*Aggregator, error) {
 // Open and setup our database
 func (agg *Aggregator) initDB(ctx context.Context) error {
 	var err error
-	agg.db, err = storage.New(&storage.Config{
-		Path: agg.config.DbPath,
-	})
+	agg.db, err = storage.NewWithPath(agg.config.DbPath)
 
 	if err != nil {
 		panic(err)

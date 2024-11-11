@@ -163,7 +163,9 @@ func (o *Operator) RunChecks(block *types.Block) error {
 	for _, check := range checks {
 		switch check.CheckType {
 		case "CheckTrigger":
-			v, e := taskengine.RunExpressionQuery(check.Trigger.Expression.Expression)
+			// TODO: Re-implemenmt in the new execution engine
+			//v, e := taskengine.RunExpressionQuery(check.Trigger.Expression.Expression)
+			v, e := taskengine.RunExpressionQuery("check.Trigger.Expression.Expression")
 			if e == nil && v == true {
 				hits = append(hits, check.Id)
 				hitLookup[check.Id] = true
