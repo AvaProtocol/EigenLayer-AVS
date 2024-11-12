@@ -78,11 +78,17 @@ message TaskTrigger {
 
   oneof trigger_condition {
     bool        manual     = 2;
-    // name inspired by unix `at` utility
+
+    // run at a specific epoch, name inspired by unix `at` utility
     FixedEpochCondition    at      = 3;
+
     // interval such as every hour/day/ etc can be converted to cronsyntax by the sdk/studio
     CronCondition          cron       = 4;
+   
+    // currently the only support syntax is every <x> blocks
     BlockCondition         block      = 5;
+
+    // support filter by event expression such as topic0, topic1, topoc2 and event_data and contract_address
     EventCondition         event      = 6;
   }
 }
@@ -102,7 +108,7 @@ enum Error {
   SmartWalletRpcError      = 6000;
   SmartWalletNotFoundError = 6001;
 
-  // Error occurs when we failed to migrat task data and it cannot be decoden
+  // Error occurs when we failed to migrate task data and it cannot be decode
   TaskDataCorrupted = 7000;
 }
 

@@ -93,7 +93,7 @@ const (
 	// target chain of smart wallet is error and cannot used to determine smartwallet info
 	Error_SmartWalletRpcError      Error = 6000
 	Error_SmartWalletNotFoundError Error = 6001
-	// Error occurs when we failed to migrat task data and it cannot be decoden
+	// Error occurs when we failed to migrate task data and it cannot be decode
 	Error_TaskDataCorrupted Error = 7000
 )
 
@@ -879,7 +879,7 @@ type TaskTrigger_Manual struct {
 }
 
 type TaskTrigger_At struct {
-	// name inspired by unix `at` utility
+	// run at a specific epoch, name inspired by unix `at` utility
 	At *FixedEpochCondition `protobuf:"bytes,3,opt,name=at,proto3,oneof"`
 }
 
@@ -889,10 +889,12 @@ type TaskTrigger_Cron struct {
 }
 
 type TaskTrigger_Block struct {
+	// currently the only support syntax is every <x> blocks
 	Block *BlockCondition `protobuf:"bytes,5,opt,name=block,proto3,oneof"`
 }
 
 type TaskTrigger_Event struct {
+	// support filter by event expression such as topic0, topic1, topoc2 and event_data and contract_address
 	Event *EventCondition `protobuf:"bytes,6,opt,name=event,proto3,oneof"`
 }
 
