@@ -112,10 +112,10 @@ async function listTask(owner, token) {
       smart_wallet_address: process.argv[3]
   }, metadata);
 
-  console.log("Tasks that has created by", process.argv[3]);
-  for (const item of result.tasks) {
-    console.log("raw data", item.id, item);
+  console.log("Tasks that has created by", process.argv[3], result);
 
+  for (const item of result.tasks) {
+    console.log("task", item.id, "data", item,"\n=================================\n");
   }
 }
 
@@ -355,6 +355,29 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
 
   console.log("Trigger type", TriggerType.EXPRESSIONTRIGGER);
 
+  let trigger = {
+        trigger_type: TriggerType.EVENTTRIGGER,
+        event: {
+          expression: taskCondition,
+        }
+  };
+
+  if (process.argv[2] == "time") {
+    trigger = {
+      trigger_type: TriggerType.TIMETRIGGER,
+      cron: {
+        cron_table: ["0 /2"],
+      },
+    }
+  } else if (process.argv[3] == "block") {
+    trigger = {
+      trigger_type: TriggerType.BLOCKTRIGGER,
+      block: {
+        interval: 5, // run every 5 block
+      },
+    }
+  }
+    
   const result = await asyncRPC(
     client,
     'CreateTask',
@@ -374,15 +397,7 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
           call_data: taskBody,
         }
       }],
-      trigger: {
-        trigger_type: TriggerType.EVENTTRIGGER,
-        //event: {
-        //  expression: taskCondition,
-        //}
-        cron: {
-          cron_table: ["0 /2"],
-        },
-      },
+      trigger,
       start_at: Math.floor(Date.now() / 1000) + 30,
       expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
       memo: `Demo Example task for ${owner}`,
@@ -421,10 +436,17 @@ async function scheduleTimeTransfer(owner, token) {
         },
       }],
       trigger: {
-        trigger_type: TriggerType.TIMETRIGGER,
-        schedule: {
-          cron: "*/2 * * * *",
+        //trigger_type: TriggerType.TIMETRIGGER,
+        //schedule: {
+        //  cron: "*/2 * * * *",
+        //},
+
+        trigger_type: TriggerType.EVENTTRIGGER,
+        event: {
+          expression: `topic0 == "123" && topic2 == "334"`,
         },
+
+
       },
 
       start_at: Math.floor(Date.now() / 1000) + 30,
