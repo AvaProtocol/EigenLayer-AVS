@@ -9,6 +9,8 @@ const (
 	SmartAccountCreationError       = "cannot determine smart wallet address"
 	NonceFetchingError              = "cannot determine nonce for smart wallet"
 
+	MissingSmartWalletAddressError = "Missing smart_wallet_address"
+
 	StorageUnavailableError = "storage is not ready"
 	StorageWriteError       = "cannot write to storage"
 
