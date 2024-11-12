@@ -140,7 +140,7 @@ func (n *Engine) GetSmartWallets(owner common.Address) ([]*avsproto.SmartWallet,
 	salt := big.NewInt(0)
 	sender, err := aa.GetSenderAddress(rpcConn, owner, salt)
 	if err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), "cannot determine smart wallet address")
+		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), SmartAccountCreationError)
 	}
 
 	// now load the customize wallet with different salt or factory that was initialed and store in our db
@@ -155,7 +155,7 @@ func (n *Engine) GetSmartWallets(owner common.Address) ([]*avsproto.SmartWallet,
 	items, err := n.db.GetByPrefix(WalletByOwnerPrefix(owner))
 
 	if err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), "cannot determine smart wallet address")
+		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), SmartAccountCreationError)
 	}
 
 	for _, item := range items {
@@ -176,7 +176,7 @@ func (n *Engine) CreateSmartWallet(user *model.User, payload *avsproto.CreateWal
 	// Verify data
 	// when user passing a custom factory address, we want to validate it
 	if payload.FactoryAddress != "" && !common.IsHexAddress(payload.FactoryAddress) {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid factory address")
+		return nil, status.Errorf(codes.InvalidArgument, InvalidFactoryAddressError)
 	}
 
 	salt := big.NewInt(0)
@@ -184,7 +184,7 @@ func (n *Engine) CreateSmartWallet(user *model.User, payload *avsproto.CreateWal
 		var ok bool
 		salt, ok = math.ParseBig256(payload.Salt)
 		if !ok {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid salt value")
+			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountSaltError)
 		}
 	}
 
@@ -208,7 +208,7 @@ func (n *Engine) CreateSmartWallet(user *model.User, payload *avsproto.CreateWal
 	updates[string(WalletStorageKey(user.Address, sender.Hex()))], err = wallet.ToJSON()
 
 	if err = n.db.BatchWrite(updates); err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), "cannot update key to storage")
+		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), StorageWriteError)
 	}
 
 	return &avsproto.CreateWalletResp{
@@ -222,11 +222,11 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	if taskPayload.SmartWalletAddress != "" {
 		if !ValidWalletAddress(taskPayload.SmartWalletAddress) {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid smart account address")
+			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
 		}
 
 		if valid, _ := ValidWalletOwner(n.db, user, common.HexToAddress(taskPayload.SmartWalletAddress)); !valid {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid smart account address")
+			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
 		}
 	}
 	task, err := model.NewTaskFromProtobuf(user, taskPayload)
@@ -351,11 +351,11 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	owner := user.SmartAccountAddress
 	if payload.SmartWalletAddress != "" {
 		if !ValidWalletAddress(payload.SmartWalletAddress) {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid smart account address")
+			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
 		}
 
 		if valid, _ := ValidWalletOwner(n.db, user, common.HexToAddress(payload.SmartWalletAddress)); !valid {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid smart account address")
+			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
 		}
 
 		smartWallet := common.HexToAddress(payload.SmartWalletAddress)
@@ -365,7 +365,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	taskIDs, err := n.db.GetByPrefix(SmartWalletTaskStoragePrefix(user.Address, *owner))
 
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), "storage is not ready")
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
 	}
 
 	tasks := make([]*avsproto.Task, len(taskIDs))
@@ -400,7 +400,7 @@ func (n *Engine) GetTaskByUser(user *model.User, taskID string) (*model.Task, er
 	// Get Task Status
 	rawStatus, err := n.db.GetKey([]byte(TaskUserKey(task)))
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.NotFound, "task not found")
+		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 	status, _ := strconv.Atoi(string(rawStatus))
 
@@ -411,13 +411,13 @@ func (n *Engine) GetTaskByUser(user *model.User, taskID string) (*model.Task, er
 			TaskStorageKey(taskID, avsproto.TaskStatus_Executing),
 		))
 		if err != nil {
-			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), "task data storage is corrupted")
+			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), TaskStorageCorruptedError)
 		}
 	}
 
 	err = task.FromStorageData(taskRawByte)
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), "task data storage is corrupted")
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), TaskStorageCorruptedError)
 	}
 	return task, nil
 }
@@ -426,7 +426,7 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error)
 	task, err := n.GetTaskByUser(user, taskID)
 
 	if err != nil {
-		return false, grpcstatus.Errorf(codes.NotFound, "task not found")
+		return false, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
 	if task.Status == avsproto.TaskStatus_Executing {
@@ -443,7 +443,7 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 	task, err := n.GetTaskByUser(user, taskID)
 
 	if err != nil {
-		return false, grpcstatus.Errorf(codes.NotFound, "task not found")
+		return false, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
 	if task.Status != avsproto.TaskStatus_Active {

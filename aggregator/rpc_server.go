@@ -17,6 +17,7 @@ import (
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 
+	"github.com/AvaProtocol/ap-avs/core/auth"
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
 	"github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/core/taskengine"
@@ -42,7 +43,7 @@ type RpcServer struct {
 func (r *RpcServer) CreateWallet(ctx context.Context, payload *avsproto.CreateWalletReq) (*avsproto.CreateWalletResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 	}
 	return r.engine.CreateSmartWallet(user, payload)
 }
@@ -53,7 +54,7 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 
 	nonce, err := aa.GetNonce(r.smartWalletRpc, ownerAddress, big.NewInt(0))
 	if err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletRpcError), "cannot determine nonce for smart wallet")
+		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletRpcError), taskengine.NonceFetchingError)
 	}
 
 	return &avsproto.NonceResp{
@@ -65,7 +66,7 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 func (r *RpcServer) GetSmartAccountAddress(ctx context.Context, payload *avsproto.AddressRequest) (*avsproto.AddressResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 	}
 
 	wallets, err := r.engine.GetSmartWallets(user.Address)
@@ -78,7 +79,7 @@ func (r *RpcServer) GetSmartAccountAddress(ctx context.Context, payload *avsprot
 func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.UUID) (*wrapperspb.BoolValue, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 	}
 
 	r.config.Logger.Info("Process Cancel Task",
@@ -98,7 +99,7 @@ func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.UUID) (*wra
 func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.UUID) (*wrapperspb.BoolValue, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 	}
 
 	r.config.Logger.Info("Process Delete Task",
@@ -118,7 +119,7 @@ func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.UUID) (*wra
 func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.CreateTaskReq) (*avsproto.CreateTaskResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 	}
 
 	task, err := r.engine.CreateTask(user, taskPayload)
@@ -134,7 +135,7 @@ func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.Create
 func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 	}
 
 	r.config.Logger.Info("Process List Task",
@@ -155,7 +156,7 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avsproto.Task, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 	}
 
 	r.config.Logger.Info("Process Get Task",
