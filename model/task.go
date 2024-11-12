@@ -1,7 +1,8 @@
 package model
 
 import (
-	"encoding/json"
+	"google.golang.org/protobuf/encoding/protojson"
+
 	"fmt"
 	"time"
 
@@ -12,32 +13,9 @@ import (
 )
 
 type Task struct {
-	// a unique id identifi this task in entire system
-	ID string `json:"id"`
+	ID string
 
-	// owner address in hex
-	Owner string `json:"owner"`
-
-	// The smartwallet that deploy this, it is important to store this because
-	// there are maybe more than one AA per owner
-	SmartWalletAddress string `json:"smart_wallet_address"`
-
-	// trigger defined whether the task can be executed
-	// trigger can be time based, price based, or contract call based
-	Trigger *avsproto.TaskTrigger `json:"trigger"`
-
-	// the actual call will be executed in ethereum, it can be a simple transfer
-	// a method call, or a batch call through multicall contract
-	Nodes []*avsproto.TaskAction `json:"nodes"`
-
-	Memo        string `json:"memo"`
-	ExpiredAt   int64  `json:"expired_at,omitempty"`
-	StartAt     int64  `json:"start_at,omitempty"`
-	CompletedAt int64  `json:"completed_at,omitempty"`
-
-	Status     avsproto.TaskStatus   `json:"status"`
-	Executions []*avsproto.Execution `json:"executions,omitempty"`
-	Repeatable bool                  `json:"repeatable,omitempty"`
+	*avsproto.Task
 }
 
 // Generate a sorted uuid
@@ -45,6 +23,12 @@ func GenerateTaskID() string {
 	taskId := ulid.Make()
 
 	return taskId.String()
+}
+
+func NewTask() *Task {
+	return &Task{
+		Task: &avsproto.Task{},
+	}
 }
 
 // Populate a task structure from proto payload
@@ -64,20 +48,25 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 
 	t := &Task{
 		ID: taskID,
+		Task: &avsproto.Task{
+			Id: &avsproto.UUID{
+				Bytes: taskID,
+			},
 
-		// convert back to string with EIP55-compliant
-		Owner:              owner.Hex(),
-		SmartWalletAddress: aaAddress.Hex(),
+			// convert back to string with EIP55-compliant
+			Owner:              owner.Hex(),
+			SmartWalletAddress: aaAddress.Hex(),
 
-		Trigger:   body.Trigger,
-		Nodes:     body.Actions,
-		Memo:      body.Memo,
-		ExpiredAt: body.ExpiredAt,
-		StartAt:   body.StartAt,
+			Trigger:   body.Trigger,
+			Nodes:     body.Actions,
+			Memo:      body.Memo,
+			ExpiredAt: body.ExpiredAt,
+			StartAt:   body.StartAt,
 
-		// initial state for task
-		Status:     avsproto.TaskStatus_Active,
-		Executions: []*avsproto.Execution{},
+			// initial state for task
+			Status:     avsproto.TaskStatus_Active,
+			Executions: []*avsproto.Execution{},
+		},
 	}
 
 	// Validate
@@ -90,7 +79,14 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 
 // Return a compact json ready to persist to storage
 func (t *Task) ToJSON() ([]byte, error) {
-	return json.Marshal(t)
+	// return json.Marshal(t)
+	return protojson.Marshal(t)
+}
+
+func (t *Task) FromStorageData(body []byte) error {
+	// err := json.Unmarshal(body, t)
+	err := protojson.Unmarshal(body, t)
+	return err
 }
 
 // Return a compact json ready to persist to storage
@@ -98,39 +94,13 @@ func (t *Task) Validate() bool {
 	return true
 }
 
-// Convert to protobuf
 func (t *Task) ToProtoBuf() (*avsproto.Task, error) {
-	protoTask := avsproto.Task{
-		Owner:              t.Owner,
-		SmartWalletAddress: t.SmartWalletAddress,
-
-		Id: &avsproto.UUID{
-			Bytes: t.ID,
-		},
-		Trigger: t.Trigger,
-		Nodes:   t.Nodes,
-
-		StartAt:   t.StartAt,
-		ExpiredAt: t.ExpiredAt,
-		Memo:      t.Memo,
-
-		Executions:  t.Executions,
-		CompletedAt: t.CompletedAt,
-		Status:      t.Status,
-	}
-
-	return &protoTask, nil
-}
-
-func (t *Task) FromStorageData(body []byte) error {
-	err := json.Unmarshal(body, t)
-
-	return err
+	return t.Task, nil
 }
 
 // Generate a global unique key for the task in our system
 func (t *Task) Key() []byte {
-	return []byte(t.ID)
+	return []byte(t.Id.Bytes)
 }
 
 func (t *Task) SetCompleted() {

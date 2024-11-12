@@ -380,13 +380,11 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 			continue
 		}
 
-		task := &model.Task{
-			ID:    taskID,
-			Owner: user.Address.Hex(),
-		}
+		task := model.NewTask()
 		if err := task.FromStorageData(taskRawByte); err != nil {
 			continue
 		}
+		task.ID = taskID
 
 		tasks[i], _ = task.ToProtoBuf()
 	}
