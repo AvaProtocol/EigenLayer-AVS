@@ -366,7 +366,10 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
     trigger = {
       trigger_type: TriggerType.TIMETRIGGER,
       cron: {
-        cron_table: ["0 /2"],
+        cron_table: [
+          // every 5 hours
+          "0 */5 * * *",
+        ],
       },
     }
   } else if (process.argv[3] == "block") {
