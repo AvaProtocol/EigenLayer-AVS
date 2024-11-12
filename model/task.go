@@ -7,8 +7,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/oklog/ulid/v2"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
@@ -59,9 +57,6 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 	aaAddress := *user.SmartAccountAddress
 
 	if body.SmartWalletAddress != "" {
-		if !common.IsHexAddress(body.SmartWalletAddress) {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid smart account address")
-		}
 		aaAddress = common.HexToAddress(body.SmartWalletAddress)
 	}
 
