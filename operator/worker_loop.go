@@ -163,6 +163,7 @@ func (o *Operator) RunChecks(block *types.Block) error {
 	for _, check := range checks {
 		switch check.CheckType {
 		case "CheckTrigger":
+			// TODO: Re-implemenmt in the new execution engine
 			//v, e := taskengine.RunExpressionQuery(check.Trigger.Expression.Expression)
 			v, e := taskengine.RunExpressionQuery("check.Trigger.Expression.Expression")
 			if e == nil && v == true {
