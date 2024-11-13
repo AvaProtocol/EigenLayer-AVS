@@ -48,7 +48,7 @@ enum TriggerType {
 }
 
 message FixedEpochCondition {
-  repeated int64 at_epoches = 1;
+  repeated int64 epoches = 1;
 }
 // Simple timebase or cron syntax.
 message CronCondition {
@@ -77,7 +77,7 @@ message TaskTrigger {
   TriggerType            trigger_type   = 1;
 
   oneof trigger_condition {
-    bool        manual     = 2;
+    bool                   manual     = 2;
 
     // run at a specific epoch, name inspired by unix `at` utility
     FixedEpochCondition    at      = 3;
@@ -204,9 +204,9 @@ message ConditionJump {
 }
 
 message BranchNode {
-  ConditionJump If                  = 1;
-  repeated ConditionJump ElseIfs    = 2;
-  ConditionJump Else                = 3;
+  ConditionJump if                  = 1;
+  repeated ConditionJump elseIfs    = 2;
+  ConditionJump else                = 3;
 }
 
 message FilterNode {
@@ -229,21 +229,21 @@ message TaskNode {
   // based on node_type one and only one of these field are set
   oneof task_body {
     // Transfer eth require no calldata etc, just a destination address and an eth amount to be sent
-    ETHTransferNode       eth_transfer = 10;
+    ETHTransferNode   eth_transfer = 10;
 
     // Run one ore more contracts. The call call also be batched with tool like
     // multicall to wrap many calls. in a contract write, we need to generate signature and send as userops.
-    ContractWriteNode     contract_write = 11;
+    ContractWriteNode contract_write = 11;
     // read data fron a target contract
-    ContractQueryNode     contract_read = 12;
+    ContractQueryNode contract_read = 12;
     // Make call to a graphql endpoint
     GraphQLQueryNode  graphql_data_query = 13;
     // Make call to a HTTP endpoint
     HTTPAPINode       http_data_query = 14;
     // CustomCode allow to run arbitraty JavaScript.
-    BranchNode      branch = 15;
+    BranchNode        branch = 15;
     FilterNode        filter = 16;
-    CustomCodeNode        custom_code = 17;
+    CustomCodeNode    custom_code = 17;
   }
 }
 

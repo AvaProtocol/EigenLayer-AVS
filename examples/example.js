@@ -245,6 +245,8 @@ const main = async (cmd) => {
     case "schedule":
     case "schedule-cron":
     case "schedule-event":
+    case "schedule-fixed":
+    case "schedule-manual":
       // ETH-USD pair on sepolia
       // https://sepolia.etherscan.io/address/0x694AA1769357215DE4FAC081bf1f309aDC325306#code
       // The price return is big.Int so we have to use the cmp function to compare
@@ -388,15 +390,27 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
         expression: taskCondition,
       }
     }
+  } else if (process.argv[2] == "schedule-fixed") {
+    trigger = {
+      trigger_type: TriggerType.FIXEDEPOCHTRIGGER,
+      at: {
+        epoches: [Math.floor(new Date().getTime() / 1000 + 3600 ), Math.floor(new Date().getTime() / 1000 + 7200 )]
+      }
+    }
+  } else if (process.argv[2] == "schedule-manual") {
+    trigger = {
+      trigger_type: TriggerType.MANUALTRIGGER,
+      manual: true,
+    }
   }
-    
+
   const result = await asyncRPC(
     client,
     'CreateTask',
     {
       smart_wallet_address: smartWalletAddress,
       nodes: [{
-        task_type: TaskType.FILERTASK,
+        task_type: TaskType.BRANCHTASK,
         id: 'get_oracle_price',
         branch: {
           "if": {
