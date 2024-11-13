@@ -110,6 +110,7 @@ enum Error {
 
   // Error occurs when we failed to migrate task data and it cannot be decode
   TaskDataCorrupted = 7000;
+  TaskDataMissingError = 7001;
 }
 
 
@@ -130,14 +131,19 @@ enum TaskType {
   // When executing a contract we need at least 2 things:
   // - target contract address
   // - the message to send to that contract
-  ContractExecutionTask = 1;
+  ContractWriteTask = 1;
+  ContractReadTask  = 2;
 
-  GraphQLDataQueryTask = 2;
+  // GraphQL query. Note that a graphql can also be query as a HTTP API, but having its own graphql type make writing query easiser without passing all the data in post as parameter.
+  GraphQLDataQueryTask = 3;
+
   // Make call to a HTTP endpoint
-  HTTPAPICallTask = 3;
+  HTTPAPICallTask = 4;
+
   // CustomCode allow to run arbitraty JavaScript.
-  CustomCodeTask = 4;
-  BranchActionTask = 5;
+  BranchTask = 5;
+  FilterTask = 6;
+  CustomCodeTask = 7;
 }
 
 // TaskStatus represents status of the task. The transition is as follow
@@ -149,26 +155,35 @@ enum TaskStatus {
   Executing = 4;
 }
 
-message ETHTransfer {
+message ETHTransferNode {
   string destination = 1;
   string amount = 2;
 }
 
-message ContractExecution {
+message ContractWriteNode {
   string contract_address = 1;
   string call_data = 2;
 
-  string method = 3;
-  string encoded_params = 4;
+  // abi is necessary to decode the return
+  string contract_abi = 3;
 }
 
-message GraphQLDataQuery {
+message ContractQueryNode {
+  string contract_address = 1;
+  string call_data = 2;
+
+  // abi is necessary to decode the return
+  string contract_abi = 3;
+}
+
+
+message GraphQLQueryNode {
   // TODO: support graphql variable
   string url   = 1;
   string query = 2;
 }
 
-message HTTPAPICall {
+message HTTPAPINode {
   string              url     = 1;
   map<string, string> headers = 2;
   string              body    = 3;
@@ -178,9 +193,9 @@ enum CustomCodeType {
   JavaScript = 0;
 }
 
-message CustomCode {
+message CustomCodeNode {
   CustomCodeType type     = 1;
-  string          body    = 2;
+  string         source    = 2;
 }
 
 message ConditionJump {
@@ -188,78 +203,99 @@ message ConditionJump {
   string next        = 2;
 }
 
-message BranchAction {
+message BranchNode {
   ConditionJump If                  = 1;
   repeated ConditionJump ElseIfs    = 2;
   ConditionJump Else                = 3;
 }
 
-message TaskAction {
-  TaskType task_type = 1;
+message FilterNode {
+  // Filter node acts like .select or .filter to pluck out element in an array that evaluate the expression to true
+  string expression = 1;
+}
 
-  string id = 2;
+// The edge is relationship or direct between node
+message TaskEdge {
+  string id    = 1 ;
+  string start = 2 ;
+  string end   = 3 ; 
+}
+
+message TaskNode {
+  TaskType node_type = 1;
+  string id   = 2;
   string name = 3;
 
-  // Next can be empty. In some kind of block, such as branching, the next is
-  // based on branching condition
-  repeated string next = 4;
-
+  // based on node_type one and only one of these field are set
   oneof task_body {
-    // Transfer eth
-    ETHTransfer eth_transfer = 10;
+    // Transfer eth require no calldata etc, just a destination address and an eth amount to be sent
+    ETHTransferNode       eth_transfer = 10;
+
     // Run one ore more contracts. The call call also be batched with tool like
-    // multicall to wrap many calls
-    ContractExecution contract_execution = 11;
+    // multicall to wrap many calls. in a contract write, we need to generate signature and send as userops.
+    ContractWriteNode     contract_write = 11;
+    // read data fron a target contract
+    ContractQueryNode     contract_read = 12;
     // Make call to a graphql endpoint
-    GraphQLDataQuery graphql_data_query = 12;
+    GraphQLQueryNode  graphql_data_query = 13;
     // Make call to a HTTP endpoint
-    HTTPAPICall http_data_query = 13;
+    HTTPAPINode       http_data_query = 14;
     // CustomCode allow to run arbitraty JavaScript.
-    CustomCode custom_code = 14;
-    BranchAction branch = 15;
+    BranchNode      branch = 15;
+    FilterNode        filter = 16;
+    CustomCodeNode        custom_code = 17;
   }
 }
 
 message Execution {
-  int64 epoch = 1;
+  int64  epoch        = 1;
   string user_op_hash = 2;
-  string error = 3;
+  string error        = 3;
 }
 
 message Task {
-  UUID id = 1;
-  string owner = 2;
+  UUID   id                   = 1;
+  string owner                = 2;
   string smart_wallet_address = 3;
-  TaskTrigger trigger = 4;
-  repeated TaskAction nodes = 5;
 
   // task won't be check before this
-  int64 start_at = 6;
+  int64  start_at   = 5;
   // task won't be run/check after this
-  int64 expired_at = 7;
-  // arbitrary data about this task
-  string memo = 8;
+  int64  expired_at = 6;
+  // arbitrary data about this task. has a limit of 255 character
+  string memo = 7;
 
-  int64 completed_at = 9;
-  TaskStatus status  = 10;
-  // repeatable means a task can continue to run even after the first execution
-  bool repeatable  = 11;
-  repeated Execution executions = 12;
+  int64 completed_at = 8;
+
+  // repeatable means a task can continue to run even after the first execution.
+  // By default, recurring is false, task will only executed once.
+  bool recurring  = 10;
+
+  TaskStatus status  = 9;
+  TaskTrigger trigger = 4;
+  repeated TaskNode nodes = 11;
+  repeated TaskEdge edges = 12;
+
+  repeated Execution executions = 13;
 }
 
 
 message CreateTaskReq {
   TaskTrigger trigger          = 1;
-  repeated TaskAction actions  = 2;
-  int64 start_at               = 3;
-  int64 expired_at             = 4;
-  string memo                  = 5;
+
+  int64 start_at               = 2;
+  int64 expired_at             = 3;
+
   // A repeatable task will continue to be run
-  bool repeatable              = 6;
+  bool repeatable              = 4;
 
   // the smart wallet address that will be used to run this task
   // When leaving out, we will use the default(salt=0) wallet
-  string smart_wallet_address  = 7;
+  string smart_wallet_address  = 5;
+
+  string memo                  = 6;
+  repeated TaskNode nodes      = 7;
+  repeated TaskEdge edges      = 8;
 }
 
 message CreateTaskResp {
@@ -298,17 +334,17 @@ message ListTasksReq {
 }
 
 message ListTasksResp {
-    repeated Task tasks = 1;
+  repeated Task tasks = 1;
 }
 
 message GetKeyReq {
-    string owner = 1;
-    int64  expired_at = 2;
-    string signature = 3;
+  string owner = 1;
+  int64  expired_at = 2;
+  string signature = 3;
 }
 
 message KeyResp {
-    string key=1;
+  string key=1;
 }
 
 message UpdateChecksReq {

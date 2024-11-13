@@ -233,7 +233,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	task, err := model.NewTaskFromProtobuf(user, taskPayload)
 
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Code(avsproto.Error_TaskDataMissingError), err.Error())
 	}
 
 	updates := map[string][]byte{}
@@ -395,9 +395,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 func (n *Engine) GetTaskByID(taskID string) (*model.Task, error) {
 	for status, _ := range avsproto.TaskStatus_name {
 		if rawTaskData, err := n.db.GetKey(TaskStorageKey(taskID, avsproto.TaskStatus(status))); err == nil {
-			task := &model.Task{
-				ID: taskID,
-			}
+			task := model.NewTask()
 			err = task.FromStorageData(rawTaskData)
 
 			if err == nil {

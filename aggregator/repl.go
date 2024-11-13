@@ -22,6 +22,7 @@ func (agg *Aggregator) stopRepl() {
 func (agg *Aggregator) startRepl() {
 	var err error
 	repListener, err = net.Listen("unix", agg.config.SocketPath)
+
 	if err != nil {
 		return
 	}

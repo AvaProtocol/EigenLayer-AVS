@@ -46,6 +46,10 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 
 	taskID := GenerateTaskID()
 
+	if len(body.Edges) == 0 || len(body.Nodes) == 0 {
+		return nil, fmt.Errorf("Missing task data")
+	}
+
 	t := &Task{
 		ID: taskID,
 		Task: &avsproto.Task{
@@ -58,7 +62,8 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 			SmartWalletAddress: aaAddress.Hex(),
 
 			Trigger:   body.Trigger,
-			Nodes:     body.Actions,
+			Nodes:     body.Nodes,
+			Edges:     body.Edges,
 			Memo:      body.Memo,
 			ExpiredAt: body.ExpiredAt,
 			StartAt:   body.StartAt,
