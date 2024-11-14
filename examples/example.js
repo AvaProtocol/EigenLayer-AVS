@@ -208,7 +208,10 @@ async function getWallets(owner, token) {
       ],
     });
   }
-  console.log(`Smart wallet addresses for ${owner}:\n`, wallets);
+  console.log(
+    `Listing smart wallet addresses for ${owner} ...\nResponse:\n`,
+    wallets
+  );
 
   return wallets;
 }
@@ -241,7 +244,7 @@ const main = async (cmd) => {
         process.argv[4]
       );
       console.log(
-        `A new smart wallet with salt ${salt} is created for ${owner}:\n`,
+        `A new smart wallet with salt ${salt} is created for ${owner}:\nResponse:\n`,
         smartWalletAddress
       );
       break;
