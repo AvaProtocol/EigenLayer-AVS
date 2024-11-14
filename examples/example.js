@@ -3,6 +3,7 @@ const grpc = require("@grpc/grpc-js");
 const protoLoader = require("@grpc/proto-loader");
 const { ethers } = require("ethers");
 const { Wallet } = ethers;
+const util = require("util");
 
 const { TaskType, TriggerType } = require("./static_codegen/avs_pb");
 
@@ -16,6 +17,8 @@ const packageDefinition = protoLoader.loadSync("../protobuf/avs.proto", {
 });
 
 const env = process.env.ENV || "development";
+
+console.log("Current environment is: ", env);
 const privateKey = process.env.PRIVATE_KEY; // Make sure to provide your private key with or without the '0x' prefix
 
 const config = {
@@ -108,14 +111,19 @@ async function listTask(owner, token) {
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
 
-  const result = await asyncRPC(client, "ListTasks", {
-      smart_wallet_address: process.argv[3]
-  }, metadata);
+  const result = await asyncRPC(
+    client,
+    "ListTasks",
+    {
+      smart_wallet_address: process.argv[3],
+    },
+    metadata
+  );
 
   console.log(`Found ${result.tasks.length} tasks created by`, process.argv[3]);
 
   for (const item of result.tasks) {
-    console.log("\n\ntask id:", item.id, "taskdata", item,"\n=================================\n");
+    console.log(util.inspect(item, { depth: 4, colors: true }));
   }
 }
 
@@ -125,24 +133,7 @@ async function getTask(owner, token, taskId) {
 
   const result = await asyncRPC(client, "GetTask", { bytes: taskId }, metadata);
 
-  console.log("Inspect Task ID: ", taskId, "\n");
-  for (const [key, value] of Object.entries(result)) {
-    if (key == "nodes") {
-      continue;
-    }
-
-    console.log(`${key}:`.padEnd(25, " "), JSON.stringify(value, null, 2));
-  }
-
-  result.nodes.filter(e => e != null).map(node => {
-    for (const [key, value] of Object.entries(node)) {
-      if (!value) {
-        continue;
-      }
-
-      console.log(`${key}:`.padEnd(25, " "), JSON.stringify(value, null, 2));
-    }
-  });
+  console.log(util.inspect(result, { depth: 4, colors: true }));
 }
 
 async function cancel(owner, token, taskId) {
@@ -156,7 +147,7 @@ async function cancel(owner, token, taskId) {
     metadata
   );
 
-  console.log("Canceled Task Data for ", taskId, "\n", result);
+  console.log("Response:\n", result);
 }
 
 async function deleteTask(owner, token, taskId) {
@@ -170,17 +161,17 @@ async function deleteTask(owner, token, taskId) {
     metadata
   );
 
-  console.log("Delete Task ", taskId, "\n", result);
+  console.log("Response:\n", result);
 }
 
 async function getWallets(owner, token) {
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
 
-  const walletsResp  = await asyncRPC(
+  const walletsResp = await asyncRPC(
     client,
     "GetSmartAccountAddress",
-    { },
+    {},
     metadata
   );
 
@@ -198,22 +189,26 @@ async function getWallets(owner, token) {
 
   let wallets = [];
   for (const wallet of walletsResp.wallets) {
-    const balance = await provider.getBalance(
-      wallet.address
-    );
+    const balance = await provider.getBalance(wallet.address);
     const balanceInEth = _.floor(ethers.formatEther(balance), 2);
 
     const tokenBalance = await tokenContract.balanceOf(wallet.address);
 
     const tokenDecimals = await tokenContract.decimals();
     const tokenSymbol = await tokenContract.symbol();
-    const tokenBalanceFormatted = _.floor(ethers.formatUnits(tokenBalance, tokenDecimals),2);
-    wallets.push({...wallet, balances: [
-      `${balanceInEth} ETH`,
-      `${tokenBalanceFormatted} ${tokenSymbol}`,
-    ]});
+    const tokenBalanceFormatted = _.floor(
+      ethers.formatUnits(tokenBalance, tokenDecimals),
+      2
+    );
+    wallets.push({
+      ...wallet,
+      balances: [
+        `${balanceInEth} ETH`,
+        `${tokenBalanceFormatted} ${tokenSymbol}`,
+      ],
+    });
   }
-  console.log("Smart wallet address for ", owner, "\n", wallets);
+  console.log(`Smart wallet addresses for ${owner}:\n`, wallets);
 
   return wallets;
 }
@@ -228,7 +223,7 @@ const createWallet = async (owner, token, salt, factoryAddress) => {
     { salt, factoryAddress },
     metadata
   );
-}
+};
 
 const main = async (cmd) => {
   // 1. Generate the api token to interact with aggregator
@@ -239,8 +234,16 @@ const main = async (cmd) => {
   switch (cmd) {
     case "create-wallet":
       salt = process.argv[3] || 0;
-      let smartWalletAddress = await createWallet(owner, token, process.argv[3], process.argv[4]);
-      console.log("generated smart wallet", smartWalletAddress)
+      let smartWalletAddress = await createWallet(
+        owner,
+        token,
+        process.argv[3],
+        process.argv[4]
+      );
+      console.log(
+        `A new smart wallet with salt ${salt} is created for ${owner}:\n`,
+        smartWalletAddress
+      );
       break;
     case "schedule":
     case "schedule-cron":
@@ -255,14 +258,24 @@ const main = async (cmd) => {
         priceChainlink("${config[env].ORACLE_PRICE_CONTRACT}"),
         toBigInt("10000")
       ) > 0`;
-      await scheduleERC20TransferJob(owner, token, taskCondition);
+      const resultSchedule = await scheduleERC20TransferJob(
+        owner,
+        token,
+        taskCondition
+      );
+      console.log("Response: \n", resultSchedule);
       break;
 
     case "schedule2":
       taskCondition = `bigCmp(
       priceChainlink("${config[env].ORACLE_PRICE_CONTRACT}"),
       toBigInt("99228171987813")) > 0`;
-      await scheduleERC20TransferJob(owner, token, taskCondition);
+      const resultSchedule2 = await scheduleERC20TransferJob(
+        owner,
+        token,
+        taskCondition
+      );
+      console.log("Response: \n", resultSchedule2);
       break;
 
     case "schedule-generic":
@@ -286,7 +299,13 @@ const main = async (cmd) => {
           )[0],
           toBigInt("2000")
         ) > 0`;
-      await scheduleERC20TransferJob(owner, token, taskCondition);
+      const resultScheduleGeneric = await scheduleERC20TransferJob(
+        owner,
+        token,
+        taskCondition
+      );
+
+      console.log("Response: \n", resultScheduleGeneric);
       break;
 
     case "tasks":
@@ -330,7 +349,7 @@ const main = async (cmd) => {
       cancel <task-id>:                       to cancel a task
       delete <task-id>:                       to completely remove a task`);
   }
-}
+};
 
 function getTaskData() {
   let ABI = ["function transfer(address to, uint amount)"];
@@ -354,25 +373,23 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
   const smartWalletAddress = process.argv[3];
   if (!smartWalletAddress) {
     console.log("invalid smart wallet address. check usage");
-    return
+    return;
   }
 
-  console.log("\n\nTask body:", taskBody);
+  console.log("Task body:", taskBody);
 
-  console.log("\n\nTask condition:", taskCondition);
+  console.log("\nTask condition:", taskCondition);
 
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
 
-  console.log("Trigger type", TriggerType.EXPRESSIONTRIGGER);
-
   let trigger = {
-      trigger_type: TriggerType.BLOCKTRIGGER,
-      block: {
-        interval: 5, // run every 5 block
-      },
-    };
- 
+    trigger_type: TriggerType.BLOCKTRIGGER,
+    block: {
+      interval: 5, // run every 5 block
+    },
+  };
+
   if (process.argv[2] == "schedule-cron") {
     trigger = {
       trigger_type: TriggerType.TIMETRIGGER,
@@ -382,62 +399,71 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
           "0 */5 * * *",
         ],
       },
-    }
+    };
   } else if (process.argv[2] == "schedule-event") {
     trigger = {
       trigger_type: TriggerType.EVENTTRIGGER,
       event: {
         expression: taskCondition,
-      }
-    }
+      },
+    };
   } else if (process.argv[2] == "schedule-fixed") {
     trigger = {
       trigger_type: TriggerType.FIXEDEPOCHTRIGGER,
       at: {
-        epoches: [Math.floor(new Date().getTime() / 1000 + 3600 ), Math.floor(new Date().getTime() / 1000 + 7200 )]
-      }
-    }
+        epoches: [
+          Math.floor(new Date().getTime() / 1000 + 3600),
+          Math.floor(new Date().getTime() / 1000 + 7200),
+        ],
+      },
+    };
   } else if (process.argv[2] == "schedule-manual") {
     trigger = {
       trigger_type: TriggerType.MANUALTRIGGER,
       manual: true,
-    }
+    };
   }
+
+  console.log("\nTrigger type", trigger.trigger_type);
 
   const result = await asyncRPC(
     client,
-    'CreateTask',
+    "CreateTask",
     {
       smart_wallet_address: smartWalletAddress,
-      nodes: [{
-        task_type: TaskType.BRANCHTASK,
-        id: 'get_oracle_price',
-        branch: {
-          "if": {
-            expression: `bigCmp(priceChainlink("${config[env].ORACLE_PRICE_CONTRACT}"),toBigInt("10000") > 0`,
-            next: 'transfer_erc20_1'
-          }
-        }
+      nodes: [
+        {
+          task_type: TaskType.BRANCHTASK,
+          id: "get_oracle_price",
+          branch: {
+            if: {
+              expression: `bigCmp(priceChainlink("${config[env].ORACLE_PRICE_CONTRACT}"),toBigInt("10000") > 0`,
+              next: "transfer_erc20_1",
+            },
+          },
+        },
+        {
+          task_type: TaskType.CONTRACTWRITETASK,
+          // id need to be unique. it will be assign to the variable
+          id: "transfer_erc20_1",
+          // name is for our note only. use for display a humand friendly version
+          name: "Transfer Test Token",
+          contract_write: {
+            // Our ERC20 test token
+            contract_address: config[env].TEST_TRANSFER_TOKEN,
+            call_data: taskBody,
+          },
+        },
+      ],
 
-      }, {
-        task_type: TaskType.CONTRACTWRITETASK,
-        // id need to be unique. it will be assign to the variable
-        id: 'transfer_erc20_1',
-        // name is for our note only. use for display a humand friendly version
-        name: 'Transfer Test Token',
-        contract_write: {
-          // Our ERC20 test token
-          contract_address: config[env].TEST_TRANSFER_TOKEN,
-          call_data: taskBody,
-        }
-      }],
-
-      edges: [{
-        id: 'edge-123abcdef',
-        // entrypoint
-        start: 'transfer_erc20_1',
-        // there is no end needed on this task
-      }],
+      edges: [
+        {
+          id: "edge-123abcdef",
+          // entrypoint
+          start: "transfer_erc20_1",
+          // there is no end needed on this task
+        },
+      ],
 
       trigger,
       start_at: Math.floor(Date.now() / 1000) + 30,
@@ -447,15 +473,15 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
     metadata
   );
 
-  console.log("Expression Task ID is:", result);
+  return result;
 }
 
 async function scheduleTimeTransfer(owner, token) {
   // Now we can schedule a task
   // 1. Generate the calldata to check condition
   const taskBody = getTaskData();
-  console.log("\n\nTask body:", taskBody);
-  console.log("\n\nTask condition: Timeschedule", "*/2");
+  console.log("Task body:", taskBody);
+  console.log("\nTask condition: Timeschedule", "*/2");
 
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
@@ -469,14 +495,16 @@ async function scheduleTimeTransfer(owner, token) {
       // A contract execution will be perform for this taks
       task_type: TaskType.CONTRACTEXECUTIONTASK,
 
-      actions: [{
-        contract_execution: {
-          // Our ERC20 test token deploy on sepolia
-          // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
-          contract_address: config[env].TEST_TRANSFER_TOKEN,
-          call_data: taskBody,
+      actions: [
+        {
+          contract_execution: {
+            // Our ERC20 test token deploy on sepolia
+            // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
+            contract_address: config[env].TEST_TRANSFER_TOKEN,
+            call_data: taskBody,
+          },
         },
-      }],
+      ],
       trigger: {
         //trigger_type: TriggerType.TIMETRIGGER,
         //schedule: {
@@ -487,8 +515,6 @@ async function scheduleTimeTransfer(owner, token) {
         event: {
           expression: `topic0 == "123" && topic2 == "334"`,
         },
-
-
       },
 
       start_at: Math.floor(Date.now() / 1000) + 30,
@@ -500,7 +526,6 @@ async function scheduleTimeTransfer(owner, token) {
 
   console.log("Expression Task ID is:", result);
 }
-
 
 (async () => {
   try {
