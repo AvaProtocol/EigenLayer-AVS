@@ -3,6 +3,7 @@ const grpc = require("@grpc/grpc-js");
 const protoLoader = require("@grpc/proto-loader");
 const { ethers } = require("ethers");
 const { Wallet } = ethers;
+const { UlidMonotonic } = require("id128");
 const util = require("util");
 
 const { TaskType, TriggerType } = require("./static_codegen/avs_pb");
@@ -119,7 +120,6 @@ async function listTask(owner, token) {
     },
     metadata
   );
-
   console.log(`Found ${result.tasks.length} tasks created by`, process.argv[3]);
 
   for (const item of result.tasks) {
@@ -427,6 +427,10 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
     };
   }
 
+  const nodeIdOraclePrice = UlidMonotonic.generate().toCanonical();
+  const nodeIdTransfer = UlidMonotonic.generate().toCanonical();
+  const nodeIdNotification = UlidMonotonic.generate().toCanonical();
+
   console.log("\nTrigger type", trigger.trigger_type);
 
   const result = await asyncRPC(
@@ -437,7 +441,8 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
       nodes: [
         {
           task_type: TaskType.BRANCHTASK,
-          id: "get_oracle_price",
+          id: nodeIdOraclePrice,
+          name: "check price",
           branch: {
             if: {
               expression: `bigCmp(priceChainlink("${config[env].ORACLE_PRICE_CONTRACT}"),toBigInt("10000") > 0`,
@@ -448,23 +453,37 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
         {
           task_type: TaskType.CONTRACTWRITETASK,
           // id need to be unique. it will be assign to the variable
-          id: "transfer_erc20_1",
+          id: nodeIdTransfer,
           // name is for our note only. use for display a humand friendly version
-          name: "Transfer Test Token",
+          name: "transfer token",
           contract_write: {
             // Our ERC20 test token
             contract_address: config[env].TEST_TRANSFER_TOKEN,
             call_data: taskBody,
           },
         },
+        {
+          task_type: TaskType.RESTAPITASK,
+          id: nodeIdNotification,
+          name: "notification",
+          rest_api: {
+            url: "https://webhook.site/fd02e579-a58c-4dbd-8a74-0afa399c0912",
+          },
+        },
       ],
 
       edges: [
         {
-          id: "edge-123abcdef",
-          // entrypoint
-          start: "transfer_erc20_1",
-          // there is no end needed on this task
+          id: UlidMonotonic.generate().toCanonical(),
+          // __TRIGGER__ is a special node. It doesn't appear directly in the task data, but it should be draw on the UI to show what is the entrypoint
+          source: "__TRIGGER__",
+          target: nodeIdOraclePrice,
+        },
+        {
+          id: UlidMonotonic.generate().toCanonical(),
+          // __trigger__ is a special node. It doesn't appear directly in the task nodes, but it should be draw on the UI to show what is the entrypoint
+          source: nodeIdOraclePrice,
+          target: nodeIdNotification,
         },
       ],
 
@@ -498,16 +517,14 @@ async function scheduleTimeTransfer(owner, token) {
       // A contract execution will be perform for this taks
       task_type: TaskType.CONTRACTEXECUTIONTASK,
 
-      actions: [
-        {
-          contract_execution: {
-            // Our ERC20 test token deploy on sepolia
-            // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
-            contract_address: config[env].TEST_TRANSFER_TOKEN,
-            call_data: taskBody,
-          },
+      actions: [{
+        contract_execution: {
+          // Our ERC20 test token deploy on sepolia
+          // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
+          contract_address: config[env].TEST_TRANSFER_TOKEN,
+          call_data: taskBody,
         },
-      ],
+      }],
       trigger: {
         //trigger_type: TriggerType.TIMETRIGGER,
         //schedule: {
