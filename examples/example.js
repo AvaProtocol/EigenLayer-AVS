@@ -175,6 +175,13 @@ async function getWallets(owner, token) {
     metadata
   );
 
+  console.log(
+    `Response:\n`,
+    walletsResp
+  );
+
+  console.log("Fetching balances from RPC provider ...");
+
   // Update the provider creation
   const provider = new ethers.JsonRpcProvider(config[env].RPC_PROVIDER);
 
@@ -209,7 +216,7 @@ async function getWallets(owner, token) {
     });
   }
   console.log(
-    `Listing smart wallet addresses for ${owner} ...\nResponse:\n`,
+    `Listing smart wallet addresses for ${owner} ...\n`,
     wallets
   );
 
