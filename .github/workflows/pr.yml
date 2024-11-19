@@ -5,6 +5,20 @@ on:
   workflow_dispatch:
 
 jobs:
+  test:
+    environment: Test
+    name: Unit Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Run Go test
+        run: |
+          cd core/taskengine
+          go test -v .
+
   publish-dev-build:
     name: Publish dev build docker image to dockerhub
     runs-on: 'ubuntu-latest'
