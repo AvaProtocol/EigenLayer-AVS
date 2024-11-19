@@ -63,7 +63,7 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 }
 
 // GetAddress returns smart account address of the given owner in the auth key
-func (r *RpcServer) GetSmartAccountAddress(ctx context.Context, payload *avsproto.AddressRequest) (*avsproto.AddressResp, error) {
+func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalletReq) (*avsproto.ListWalletResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
@@ -71,12 +71,12 @@ func (r *RpcServer) GetSmartAccountAddress(ctx context.Context, payload *avsprot
 
 	wallets, err := r.engine.GetSmartWallets(user.Address)
 
-	return &avsproto.AddressResp{
+	return &avsproto.ListWalletResp{
 		Wallets: wallets,
 	}, nil
 }
 
-func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.UUID) (*wrapperspb.BoolValue, error) {
+func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*wrapperspb.BoolValue, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
@@ -84,10 +84,10 @@ func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.UUID) (*wra
 
 	r.config.Logger.Info("Process Cancel Task",
 		"user", user.Address.String(),
-		"taskID", string(taskID.Bytes),
+		"taskID", taskID.Id,
 	)
 
-	result, err := r.engine.CancelTaskByUser(user, string(taskID.Bytes))
+	result, err := r.engine.CancelTaskByUser(user, string(taskID.Id))
 
 	if err != nil {
 		return nil, err
@@ -96,7 +96,7 @@ func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.UUID) (*wra
 	return wrapperspb.Bool(result), nil
 }
 
-func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.UUID) (*wrapperspb.BoolValue, error) {
+func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.IdReq) (*wrapperspb.BoolValue, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
@@ -104,10 +104,10 @@ func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.UUID) (*wra
 
 	r.config.Logger.Info("Process Delete Task",
 		"user", user.Address.String(),
-		"taskID", string(taskID.Bytes),
+		"taskID", string(taskID.Id),
 	)
 
-	result, err := r.engine.DeleteTaskByUser(user, string(taskID.Bytes))
+	result, err := r.engine.DeleteTaskByUser(user, string(taskID.Id))
 
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.Create
 	}
 
 	return &avsproto.CreateTaskResp{
-		Id: task.ID,
+		Id: task.Id,
 	}, nil
 }
 
@@ -153,7 +153,7 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 	}, nil
 }
 
-func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avsproto.Task, error) {
+func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsproto.Task, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
@@ -161,10 +161,14 @@ func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avspro
 
 	r.config.Logger.Info("Process Get Task",
 		"user", user.Address.String(),
-		"taskID", string(taskID.Bytes),
+		"taskID", payload.Id,
 	)
 
-	task, err := r.engine.GetTask(user, string(taskID.Bytes))
+	if payload.Id == "" {
+		return nil, status.Errorf(codes.InvalidArgument, taskengine.TaskIDMissing)
+	}
+
+	task, err := r.engine.GetTask(user, payload.Id)
 	if err != nil {
 		return nil, err
 	}

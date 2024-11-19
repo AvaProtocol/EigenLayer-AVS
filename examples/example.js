@@ -131,7 +131,7 @@ async function getTask(owner, token, taskId) {
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
 
-  const result = await asyncRPC(client, "GetTask", { bytes: taskId }, metadata);
+  const result = await asyncRPC(client, "GetTask", { id: taskId }, metadata);
 
   console.log(util.inspect(result, { depth: 4, colors: true }));
 }
@@ -143,7 +143,7 @@ async function cancel(owner, token, taskId) {
   const result = await asyncRPC(
     client,
     "CancelTask",
-    { bytes: taskId },
+    { id: taskId },
     metadata
   );
 
@@ -157,7 +157,7 @@ async function deleteTask(owner, token, taskId) {
   const result = await asyncRPC(
     client,
     "DeleteTask",
-    { bytes: taskId },
+    { id: taskId },
     metadata
   );
 
@@ -170,8 +170,8 @@ async function getWallets(owner, token) {
 
   const walletsResp = await asyncRPC(
     client,
-    "GetSmartAccountAddress",
-    {},
+    "ListWallets",
+    { },
     metadata
   );
 
@@ -445,39 +445,32 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
     "CreateTask",
     {
       smart_wallet_address: smartWalletAddress,
-      nodes: [
-        {
-          task_type: TaskType.BRANCHTASK,
-          id: nodeIdOraclePrice,
-          name: "check price",
-          branch: {
-            if: {
-              expression: `bigCmp(priceChainlink("${config[env].ORACLE_PRICE_CONTRACT}"),toBigInt("10000") > 0`,
-              next: "transfer_erc20_1",
-            },
-          },
-        },
-        {
-          task_type: TaskType.CONTRACTWRITETASK,
-          // id need to be unique. it will be assign to the variable
-          id: nodeIdTransfer,
-          // name is for our note only. use for display a humand friendly version
-          name: "transfer token",
-          contract_write: {
-            // Our ERC20 test token
-            contract_address: config[env].TEST_TRANSFER_TOKEN,
-            call_data: taskBody,
-          },
-        },
-        {
-          task_type: TaskType.RESTAPITASK,
-          id: nodeIdNotification,
-          name: "notification",
-          rest_api: {
-            url: "https://webhook.site/fd02e579-a58c-4dbd-8a74-0afa399c0912",
-          },
-        },
-      ],
+      nodes: [{
+        id: nodeIdOraclePrice,
+        name: 'check price',
+        branch: {
+          conditions: [{
+            expression: `bigCmp(priceChainlink("${config[env].ORACLE_PRICE_CONTRACT}"),toBigInt("10000") > 0`,
+            next: 'transfer_erc20_1'
+          }]
+        }
+      }, {
+        // id need to be unique. it will be assign to the variable
+        id: nodeIdTransfer,
+        // name is for our note only. use for display a humand friendly version
+        name: 'transfer token',
+        contract_write: {
+          // Our ERC20 test token
+          contract_address: config[env].TEST_TRANSFER_TOKEN,
+          call_data: taskBody,
+        }
+      }, {
+        id: nodeIdNotification,
+        name: 'notification',
+        rest_api: {
+          url: "https://webhook.site/fd02e579-a58c-4dbd-8a74-0afa399c0912",
+        }
+      }],
 
       edges: [
         {

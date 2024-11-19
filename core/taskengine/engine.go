@@ -213,7 +213,9 @@ func (n *Engine) CreateSmartWallet(user *model.User, payload *avsproto.CreateWal
 	}
 
 	return &avsproto.CreateWalletResp{
-		Address: sender.String(),
+		Address:        sender.Hex(),
+		Salt:           salt.String(),
+		FactoryAddress: factoryAddress.Hex(),
 	}, nil
 }
 
@@ -221,7 +223,6 @@ func (n *Engine) CreateSmartWallet(user *model.User, payload *avsproto.CreateWal
 func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskReq) (*model.Task, error) {
 	var err error
 
-	fmt.Println("user", user)
 	if taskPayload.SmartWalletAddress != "" {
 		if !ValidWalletAddress(taskPayload.SmartWalletAddress) {
 			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
@@ -239,7 +240,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	updates := map[string][]byte{}
 
-	updates[string(TaskStorageKey(task.ID, task.Status))], err = task.ToJSON()
+	updates[string(TaskStorageKey(task.Id, task.Status))], err = task.ToJSON()
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Active))
 
 	if err = n.db.BatchWrite(updates); err != nil {
@@ -248,7 +249,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	n.lock.Lock()
 	defer n.lock.Unlock()
-	n.tasks[task.ID] = task
+	n.tasks[task.Id] = task
 
 	return task, nil
 }
@@ -292,13 +293,13 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avspr
 			}
 
 			for _, task := range n.tasks {
-				if _, ok := n.trackSyncedTasks[address].TaskID[task.ID]; ok {
+				if _, ok := n.trackSyncedTasks[address].TaskID[task.Id]; ok {
 					continue
 				}
 
-				n.logger.Info("stream check to operator", "taskID", task.ID, "operator", payload.Address)
+				n.logger.Info("stream check to operator", "taskID", task.Id, "operator", payload.Address)
 				resp := avsproto.SyncTasksResp{
-					Id:        task.ID,
+					Id:        task.Id,
 					CheckType: "CheckTrigger",
 					Trigger:   task.Trigger,
 				}
@@ -308,7 +309,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avspr
 				}
 
 				n.lock.Lock()
-				n.trackSyncedTasks[address].TaskID[task.ID] = true
+				n.trackSyncedTasks[address].TaskID[task.Id] = true
 				n.lock.Unlock()
 			}
 		}
@@ -385,7 +386,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		if err := task.FromStorageData(taskRawByte); err != nil {
 			continue
 		}
-		task.ID = taskID
+		task.Id = taskID
 
 		tasks[i], _ = task.ToProtoBuf()
 	}
@@ -434,7 +435,7 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error)
 		return false, fmt.Errorf("Only non executing task can be deleted")
 	}
 
-	n.db.Delete(TaskStorageKey(task.ID, task.Status))
+	n.db.Delete(TaskStorageKey(task.Id, task.Status))
 	n.db.Delete(TaskUserKey(task))
 
 	return true, nil
@@ -454,18 +455,19 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 	updates := map[string][]byte{}
 	oldStatus := task.Status
 	task.SetCanceled()
-	updates[string(TaskStorageKey(task.ID, oldStatus))], err = task.ToJSON()
+	fmt.Println("found task", task, string(TaskStorageKey(task.Id, oldStatus)), string(TaskUserKey(task)))
+	updates[string(TaskStorageKey(task.Id, oldStatus))], err = task.ToJSON()
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	if err = n.db.BatchWrite(updates); err == nil {
 		n.db.Move(
-			TaskStorageKey(task.ID, oldStatus),
-			TaskStorageKey(task.ID, task.Status),
+			TaskStorageKey(task.Id, oldStatus),
+			TaskStorageKey(task.Id, task.Status),
 		)
 
-		delete(n.tasks, task.ID)
+		delete(n.tasks, task.Id)
 	} else {
-		// TODO Gracefully handling of storage cleanup
+		return false, err
 	}
 
 	return true, nil

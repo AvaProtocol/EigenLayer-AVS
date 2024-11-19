@@ -108,3 +108,7 @@ dev-agg:
 ## dev-agg: run operator locally with dev build
 dev-op:
 	./out/ap operator --config=config/operator.yaml
+
+## dev-clean: cleanup storage data
+dev-clean:
+	rm -rf /tmp/ap-avs /tmp/ap.sock

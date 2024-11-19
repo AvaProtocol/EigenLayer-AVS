@@ -13,8 +13,6 @@ import (
 )
 
 type Task struct {
-	ID string
-
 	*avsproto.Task
 }
 
@@ -51,11 +49,8 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 	}
 
 	t := &Task{
-		ID: taskID,
 		Task: &avsproto.Task{
-			Id: &avsproto.UUID{
-				Bytes: taskID,
-			},
+			Id: taskID,
 
 			// convert back to string with EIP55-compliant
 			Owner:              owner.Hex(),
@@ -105,7 +100,7 @@ func (t *Task) ToProtoBuf() (*avsproto.Task, error) {
 
 // Generate a global unique key for the task in our system
 func (t *Task) Key() []byte {
-	return []byte(t.Id.Bytes)
+	return []byte(t.Id)
 }
 
 func (t *Task) SetCompleted() {

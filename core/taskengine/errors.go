@@ -15,4 +15,5 @@ const (
 	StorageWriteError       = "cannot write to storage"
 
 	TaskStorageCorruptedError = "task data storage is corrupted"
+	TaskIDMissing             = "Missing task id in request"
 )

@@ -65,13 +65,13 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 
 	defer func() {
 		updates := map[string][]byte{}
-		updates[string(TaskStorageKey(task.ID, avsproto.TaskStatus_Executing))], err = task.ToJSON()
+		updates[string(TaskStorageKey(task.Id, avsproto.TaskStatus_Executing))], err = task.ToJSON()
 		updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 		if err = c.db.BatchWrite(updates); err == nil {
 			c.db.Move(
-				[]byte(TaskStorageKey(task.ID, avsproto.TaskStatus_Executing)),
-				[]byte(TaskStorageKey(task.ID, task.Status)),
+				[]byte(TaskStorageKey(task.Id, avsproto.TaskStatus_Executing)),
+				[]byte(TaskStorageKey(task.Id, task.Status)),
 			)
 		} else {
 			// TODO Gracefully handling of storage cleanup
@@ -107,7 +107,7 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 		return err
 	}
 
-	c.logger.Info("send task to bundler rpc", "taskid", task.ID)
+	c.logger.Info("send task to bundler rpc", "taskid", task.Id)
 	txResult, err := preset.SendUserOp(
 		conn,
 		bundlerClient,
@@ -119,11 +119,11 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 	if txResult != "" {
 		task.AppendExecution(currentTime.Unix(), txResult, nil)
 		task.SetCompleted()
-		c.logger.Info("succesfully perform userop", "taskid", task.ID, "userop", txResult)
+		c.logger.Info("succesfully perform userop", "taskid", task.Id, "userop", txResult)
 	} else {
 		task.AppendExecution(currentTime.Unix(), "", err)
 		task.SetFailed()
-		c.logger.Error("err perform userop", "taskid", task.ID, "error", err)
+		c.logger.Error("err perform userop", "taskid", task.Id, "error", err)
 	}
 
 	if err != nil || txResult == "" {
