@@ -15,9 +15,13 @@ jobs:
           submodules: recursive
 
       - name: Run Go test
+        env: |
+          RPC_URL: ${{ secrets.RPC_URL }}
+          BUNDLER_RPC: ${{ secrets.BUNDLER_RPC }}
         run: |
           cd core/taskengine
-          go test -v .
+          go test -v ./core/taskengine
+          go test -v ./pkg/timekeeper
 
   publish-dev-build:
     name: Publish dev build docker image to dockerhub
