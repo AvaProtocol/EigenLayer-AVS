@@ -15,9 +15,9 @@ jobs:
           submodules: recursive
 
       - name: Run Go test
-        env: |
-          RPC_URL: ${{ secrets.RPC_URL }}
-          BUNDLER_RPC: ${{ secrets.BUNDLER_RPC }}
+        env:
+          RPC_URL: "${{ secrets.RPC_URL }}"
+          BUNDLER_RPC: "${{ secrets.BUNDLER_RPC }}"
         run: |
           # TODO Implement test for all packages
           go test -v ./core/taskengine
