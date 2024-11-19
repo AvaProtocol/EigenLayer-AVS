@@ -19,7 +19,7 @@ jobs:
           RPC_URL: ${{ secrets.RPC_URL }}
           BUNDLER_RPC: ${{ secrets.BUNDLER_RPC }}
         run: |
-          cd core/taskengine
+          # TODO Implement test for all packages
           go test -v ./core/taskengine
           go test -v ./pkg/timekeeper
 
