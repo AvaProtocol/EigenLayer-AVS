@@ -39,20 +39,12 @@ message SyncTasksReq {
   int64  monotonic_clock = 4;
 }
 
-enum TriggerType {
-  ManualTrigger        = 0;
-  FixedEpochTrigger  = 1;
-  CronTrigger        = 2;
-  BlockTrigger       = 3;
-  EventTrigger         = 4;
-}
-
 message FixedEpochCondition {
-  repeated int64 epoches = 1;
+  repeated int64 epochs = 1;
 }
 // Simple timebase or cron syntax.
 message CronCondition {
-  repeated string cron_table = 1;
+  repeated string schedule = 1;
 }
 
 message BlockCondition {
@@ -75,19 +67,19 @@ message EventCondition {
 
 message TaskTrigger {
   oneof trigger_type {
-    bool                   manual     = 2;
+    bool                   manual  = 1;
 
     // run at a specific epoch, name inspired by unix `at` utility
-    FixedEpochCondition    at      = 3;
+    FixedEpochCondition    fixed_time   = 2;
 
     // interval such as every hour/day/ etc can be converted to cronsyntax by the sdk/studio
-    CronCondition          cron       = 4;
+    CronCondition          cron    = 3;
    
     // currently the only support syntax is every <x> blocks
-    BlockCondition         block      = 5;
+    BlockCondition         block   = 4;
 
     // support filter by event expression such as topic0, topic1, topoc2 and event_data and contract_address
-    EventCondition         event      = 6;
+    EventCondition         event   = 5;
   }
 }
 
@@ -189,14 +181,11 @@ message FilterNode {
   string expression = 1;
 }
 
+// LoopNode currently not support, but we pre-defined to reverse the field id
 message LoopNode {
   // name the iteration key and value.
   string iter_var = 1;
   string iter_key = 2;
-  // func can be the built-in function
-  string iter_func = 3;
-  // jj
-  string iter_node = 4;
 }
 
 // The edge is relationship or direct between node
@@ -244,19 +233,19 @@ message Task {
   string smart_wallet_address = 3;
 
   // task won't be check before this
-  int64  start_at   = 5;
+  int64  start_at   = 4;
   // task won't be run/check after this
-  int64  expired_at = 6;
+  int64  expired_at = 5;
   // arbitrary data about this task. has a limit of 255 character
-  string memo = 7;
+  string memo = 6;
 
-  int64 completed_at = 8;
+  int64 completed_at = 7;
 
   // limit on how many time this task can run. Set to 0 will make it run unlimited until cancelling or reaching its expired time
-  int64 max_execution = 10;
+  int64 max_execution = 8;
 
   TaskStatus status  = 9;
-  TaskTrigger trigger = 4;
+  TaskTrigger trigger = 10;
   repeated TaskNode nodes = 11;
   repeated TaskEdge edges = 12;
 
@@ -270,8 +259,7 @@ message CreateTaskReq {
   int64 start_at               = 2;
   int64 expired_at             = 3;
 
-  // A repeatable task will continue to be run
-  bool repeatable              = 4;
+  int64 max_execution          = 4;
 
   // the smart wallet address that will be used to run this task
   // When leaving out, we will use the default(salt=0) wallet

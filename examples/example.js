@@ -6,7 +6,7 @@ const { Wallet } = ethers;
 const { UlidMonotonic } = require("id128");
 const util = require("util");
 
-const { TaskType, TriggerType } = require("./static_codegen/avs_pb");
+const { TaskType, TaskTrigger } = require("./static_codegen/avs_pb");
 
 // Load the protobuf definition
 const packageDefinition = protoLoader.loadSync("../protobuf/avs.proto", {
@@ -394,7 +394,7 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
   metadata.add("authkey", token);
 
   let trigger = {
-    trigger_type: TriggerType.BLOCKTRIGGER,
+    trigger_type: TaskTrigger.TriggerTypeCase.BLOCK,
     block: {
       interval: 5, // run every 5 block
     },
@@ -402,9 +402,9 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
 
   if (process.argv[2] == "schedule-cron") {
     trigger = {
-      trigger_type: TriggerType.TIMETRIGGER,
+      trigger_type: TaskTrigger.TriggerTypeCase.CRON,
       cron: {
-        cron_table: [
+        schedule: [
           // every 5 hours
           "0 */5 * * *",
         ],
@@ -412,16 +412,16 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
     };
   } else if (process.argv[2] == "schedule-event") {
     trigger = {
-      trigger_type: TriggerType.EVENTTRIGGER,
+      trigger_type: TaskTrigger.TriggerTypeCase.EVENT,
       event: {
         expression: taskCondition,
       },
     };
   } else if (process.argv[2] == "schedule-fixed") {
     trigger = {
-      trigger_type: TriggerType.FIXEDEPOCHTRIGGER,
-      at: {
-        epoches: [
+      trigger_type: TaskTrigger.TriggerTypeCase.AT,
+      fixed_time: {
+        epochs: [
           Math.floor(new Date().getTime() / 1000 + 3600),
           Math.floor(new Date().getTime() / 1000 + 7200),
         ],
@@ -429,7 +429,7 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
     };
   } else if (process.argv[2] == "schedule-manual") {
     trigger = {
-      trigger_type: TriggerType.MANUALTRIGGER,
+      trigger_type: TriggerType.MANUAL,
       manual: true,
     };
   }
@@ -496,55 +496,6 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
   );
 
   return result;
-}
-
-async function scheduleTimeTransfer(owner, token) {
-  // Now we can schedule a task
-  // 1. Generate the calldata to check condition
-  const taskBody = getTaskData();
-  console.log("Task body:", taskBody);
-  console.log("\nTask condition: Timeschedule", "*/2");
-
-  const metadata = new grpc.Metadata();
-  metadata.add("authkey", token);
-
-  console.log("Trigger type", TriggerType.TIMETRIGGER);
-
-  const result = await asyncRPC(
-    client,
-    "CreateTask",
-    {
-      // A contract execution will be perform for this taks
-      task_type: TaskType.CONTRACTEXECUTIONTASK,
-
-      actions: [{
-        contract_execution: {
-          // Our ERC20 test token deploy on sepolia
-          // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
-          contract_address: config[env].TEST_TRANSFER_TOKEN,
-          call_data: taskBody,
-        },
-      }],
-      trigger: {
-        //trigger_type: TriggerType.TIMETRIGGER,
-        //schedule: {
-        //  cron: "*/2 * * * *",
-        //},
-
-        trigger_type: TriggerType.EVENTTRIGGER,
-        event: {
-          expression: `topic0 == "123" && topic2 == "334"`,
-        },
-      },
-
-      start_at: Math.floor(Date.now() / 1000) + 30,
-      expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
-      memo: `Demo Example task for ${owner}`,
-    },
-    metadata
-  );
-
-  console.log("Expression Task ID is:", result);
 }
 
 (async () => {
