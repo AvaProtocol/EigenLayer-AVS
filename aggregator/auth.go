@@ -139,8 +139,18 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 			Address: common.HexToAddress(claims["sub"].(string)),
 		}
 
-		if err := user.LoadDefaultSmartWallet(r.smartWalletRpc); err != nil {
-			return nil, fmt.Errorf("Rpc error")
+		// caching to reduce hitting eth rpc node
+		cachekey := "default-wallet" + user.Address.Hex()
+		if value, err := r.cache.Get(cachekey); err == nil {
+			defaultSmartWallet := common.BytesToAddress(value)
+			user.SmartAccountAddress = &defaultSmartWallet
+		} else {
+			if err := user.LoadDefaultSmartWallet(r.smartWalletRpc); err != nil {
+				return nil, fmt.Errorf("Rpc error")
+			}
+
+			// We don't care if its error out in caching
+			r.cache.Set(cachekey, user.SmartAccountAddress.Bytes())
 		}
 
 		return &user, nil

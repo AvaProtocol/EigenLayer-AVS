@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"net"
 
+	"github.com/allegro/bigcache/v3"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -29,6 +30,7 @@ import (
 type RpcServer struct {
 	avsproto.UnimplementedAggregatorServer
 	config *config.Config
+	cache  *bigcache.BigCache
 	db     storage.Storage
 	engine *taskengine.Engine
 
@@ -44,7 +46,7 @@ func (r *RpcServer) CreateWallet(ctx context.Context, payload *avsproto.CreateWa
 	user, err := r.verifyAuth(ctx)
 
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 	r.config.Logger.Info("process create wallet",
 		"user", user.Address.String(),
@@ -72,13 +74,16 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalletReq) (*avsproto.ListWalletResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 
 	r.config.Logger.Info("process list wallet",
 		"address", user.Address.String(),
 	)
 	wallets, err := r.engine.GetSmartWallets(user.Address)
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "rpc server is unavailable, retry later. %s", err.Error())
+	}
 
 	return &avsproto.ListWalletResp{
 		Wallets: wallets,
@@ -88,7 +93,7 @@ func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalle
 func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*wrapperspb.BoolValue, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 
 	r.config.Logger.Info("process cancel task",
@@ -108,7 +113,7 @@ func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*wr
 func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.IdReq) (*wrapperspb.BoolValue, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 
 	r.config.Logger.Info("process delete task",
@@ -128,7 +133,7 @@ func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.IdReq) (*wr
 func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.CreateTaskReq) (*avsproto.CreateTaskResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 
 	task, err := r.engine.CreateTask(user, taskPayload)
@@ -144,7 +149,7 @@ func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.Create
 func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 
 	r.config.Logger.Info("process list task",
@@ -165,7 +170,7 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsproto.Task, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 
 	r.config.Logger.Info("process get task",
@@ -227,6 +232,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 	}
 
 	avsproto.RegisterAggregatorServer(s, &RpcServer{
+		cache:  agg.cache,
 		db:     agg.db,
 		engine: agg.engine,
 
