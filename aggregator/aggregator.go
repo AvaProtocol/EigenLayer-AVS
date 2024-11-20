@@ -232,8 +232,6 @@ func (agg *Aggregator) init() {
 }
 
 func (agg *Aggregator) Start(ctx context.Context) error {
-	agg.status = runningStatus
-
 	agg.logger.Infof("Starting aggregator %s", version.Get())
 
 	agg.init()
@@ -244,16 +242,17 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	}
 
 	agg.logger.Infof("Starting Task engine")
-	go agg.startTaskEngine(ctx)
-
-	agg.logger.Info("Starting repl")
-	go agg.startRepl()
+	agg.startTaskEngine(ctx)
 
 	agg.logger.Infof("Starting rpc server")
-	go agg.startRpcServer(ctx)
+	agg.startRpcServer(ctx)
+
+	agg.logger.Info("Starting repl")
+	agg.startRepl()
 
 	agg.logger.Infof("Starting http server")
-	go agg.startHttpServer(ctx)
+	agg.startHttpServer(ctx)
+	agg.status = runningStatus
 
 	// Setup wait signal
 	sigs := make(chan os.Signal, 1)

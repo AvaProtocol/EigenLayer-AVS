@@ -35,18 +35,20 @@ func (agg *Aggregator) startRepl() {
 		return
 	}
 
-	for {
-		if agg.IsShutdown() {
-			return
-		}
-		conn, err := repListener.Accept()
-		if err != nil {
-			log.Println("Failed to accept connection:", err)
-			continue
-		}
+	go func() {
+		for {
+			if agg.IsShutdown() {
+				return
+			}
+			conn, err := repListener.Accept()
+			if err != nil {
+				log.Println("Failed to accept connection:", err)
+				continue
+			}
 
-		go handleConnection(agg, conn)
-	}
+			go handleConnection(agg, conn)
+		}
+	}()
 }
 
 func handleConnection(agg *Aggregator, conn net.Conn) {

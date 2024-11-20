@@ -9,7 +9,7 @@ on:
         description: tag the release
         required: true
 
-name: Latest Release
+name: Public A Release
 
 defaults:
   run:

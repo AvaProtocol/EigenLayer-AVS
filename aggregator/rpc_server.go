@@ -251,8 +251,11 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 	agg.logger.Info("start grpc server",
 		"address", lis.Addr(),
 	)
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
-	}
+
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			log.Fatalf("failed to serve: %v", err)
+		}
+	}()
 	return nil
 }
