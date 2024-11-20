@@ -92,8 +92,9 @@ up:
 
 ## unstable-build: generate an unstable for internal test
 unstable-build:
-	docker build --platform=linux/amd64 --build-arg RELEASE_TAG=unstable -t avaprotocol/ap-avs:unstable -f dockerfiles/operator.Dockerfile .
-	docker push avaprotocol/ap-avs:unstable
+	docker build --platform=linux/amd64 --build-arg RELEASE_TAG=unstable -t avaprotocol/avs-dev:unstable -f dockerfiles/operator.Dockerfile .
+	docker push avaprotocol/avs-dev:unstable
+
 
 ## dev-build: build a dev version for local development
 dev-build:
