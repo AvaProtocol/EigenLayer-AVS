@@ -24,7 +24,11 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 	e := echo.New()
 
 	e.GET("/up", func(c echo.Context) error {
-		return c.String(http.StatusOK, "AvaProtocol is up")
+		if agg.status == runningStatus {
+			return c.String(http.StatusOK, "up")
+		}
+
+		return c.String(http.StatusServiceUnavailable, "pending...")
 	})
 
 	e.GET("/operator", func(c echo.Context) error {
@@ -51,5 +55,7 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 		return c.HTMLBlob(http.StatusOK, buf.Bytes())
 	})
 
-	e.Logger.Fatal(e.Start(":1323"))
+	go func() {
+		e.Logger.Fatal(e.Start(":1323"))
+	}()
 }
