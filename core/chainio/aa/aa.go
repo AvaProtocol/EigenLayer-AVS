@@ -66,7 +66,7 @@ func GetSenderAddress(conn *ethclient.Client, ownerAddress common.Address, salt 
 	}
 
 	sender, err := simpleFactory.GetAddress(nil, ownerAddress, salt)
-	return &sender, nil
+	return &sender, err
 }
 
 // Compute smart wallet address for a particular factory
