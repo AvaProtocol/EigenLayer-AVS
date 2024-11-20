@@ -49,9 +49,10 @@ jobs:
           # This is a dedicated repository to house the development/preview build
           images: |
             avaprotocol/avs-dev
+          #type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
-            type=raw,value={{sha}},enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value=latest
+            type=raw,value={{sha}}
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
