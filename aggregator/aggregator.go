@@ -203,11 +203,11 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.logger.Info("Starting repl")
 	go agg.startRepl()
 
-	agg.logger.Infof("Starting http server")
-	go agg.startHttpServer(ctx)
-
 	agg.logger.Infof("Starting rpc server")
 	go agg.startRpcServer(ctx)
+
+	agg.logger.Infof("Starting http server")
+	go agg.startHttpServer(ctx)
 
 	// Setup wait signal
 	sigs := make(chan os.Signal, 1)
