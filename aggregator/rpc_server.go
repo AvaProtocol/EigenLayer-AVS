@@ -42,9 +42,15 @@ type RpcServer struct {
 // Get nonce of an existing smart wallet of a given owner
 func (r *RpcServer) CreateWallet(ctx context.Context, payload *avsproto.CreateWalletReq) (*avsproto.CreateWalletResp, error) {
 	user, err := r.verifyAuth(ctx)
+
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 	}
+	r.config.Logger.Info("process create wallet",
+		"user", user.Address.String(),
+		"salt", payload.Salt,
+	)
+
 	return r.engine.CreateSmartWallet(user, payload)
 }
 
@@ -69,6 +75,9 @@ func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalle
 		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 	}
 
+	r.config.Logger.Info("process list wallet",
+		"address", user.Address.String(),
+	)
 	wallets, err := r.engine.GetSmartWallets(user.Address)
 
 	return &avsproto.ListWalletResp{
@@ -82,7 +91,7 @@ func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*wr
 		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 	}
 
-	r.config.Logger.Info("Process Cancel Task",
+	r.config.Logger.Info("process cancel task",
 		"user", user.Address.String(),
 		"taskID", taskID.Id,
 	)
@@ -102,7 +111,7 @@ func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.IdReq) (*wr
 		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 	}
 
-	r.config.Logger.Info("Process Delete Task",
+	r.config.Logger.Info("process delete task",
 		"user", user.Address.String(),
 		"taskID", string(taskID.Id),
 	)
@@ -138,7 +147,7 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 	}
 
-	r.config.Logger.Info("Process List Task",
+	r.config.Logger.Info("process list task",
 		"user", user.Address.String(),
 		"smart_wallet_address", payload.SmartWalletAddress,
 	)
@@ -159,7 +168,7 @@ func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsp
 		return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 	}
 
-	r.config.Logger.Info("Process Get Task",
+	r.config.Logger.Info("process get task",
 		"user", user.Address.String(),
 		"taskID", payload.Id,
 	)

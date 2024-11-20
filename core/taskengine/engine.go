@@ -137,14 +137,13 @@ func (n *Engine) MustStart() {
 }
 
 func (n *Engine) GetSmartWallets(owner common.Address) ([]*avsproto.SmartWallet, error) {
-	// This is the default wallet with our own factory
 	salt := big.NewInt(0)
 	sender, err := aa.GetSenderAddress(rpcConn, owner, salt)
 	if err != nil {
 		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), SmartAccountCreationError)
 	}
 
-	// now load the customize wallet with different salt or factory that was initialed and store in our db
+	// This is the default wallet with our own factory
 	wallets := []*avsproto.SmartWallet{
 		&avsproto.SmartWallet{
 			Address: sender.String(),
@@ -159,6 +158,7 @@ func (n *Engine) GetSmartWallets(owner common.Address) ([]*avsproto.SmartWallet,
 		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), SmartAccountCreationError)
 	}
 
+	// now load the customize wallet with different salt or factory that was initialed and store in our db
 	for _, item := range items {
 		w := &model.SmartWallet{}
 		w.FromStorageData(item.Value)

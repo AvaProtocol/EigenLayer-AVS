@@ -14,7 +14,9 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/golang-jwt/jwt/v5"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -26,6 +28,11 @@ const (
 // the EOA task
 func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*avsproto.KeyResp, error) {
 	submitAddress := common.HexToAddress(payload.Owner)
+
+	r.config.Logger.Info("process getkey",
+		"owner", payload.Owner,
+		"expired", payload.ExpiredAt,
+	)
 
 	if strings.Contains(payload.Signature, ".") {
 		authenticated, err := auth.VerifyJwtKeyForUser(r.config.JwtSecret, payload.Signature, submitAddress)
@@ -46,7 +53,10 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 
 		signature, err := hexutil.Decode(payload.Signature)
 		if err != nil {
-			return nil, err
+			return nil, status.Errorf(codes.InvalidArgument, auth.InvalidSignatureFormat)
+		}
+		if len(signature) < crypto.RecoveryIDOffset || len(signature) < crypto.RecoveryIDOffset {
+			return nil, status.Errorf(codes.InvalidArgument, auth.InvalidSignatureFormat)
 		}
 		// https://stackoverflow.com/questions/49085737/geth-ecrecover-invalid-signature-recovery-id
 		if signature[crypto.RecoveryIDOffset] == 27 || signature[crypto.RecoveryIDOffset] == 28 {
