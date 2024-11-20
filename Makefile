@@ -86,16 +86,15 @@ protoc-gen:
 		--go-grpc_opt=paths=source_relative \
     protobuf/avs.proto
 
-build-docker:
-	docker compose build
 ## up: bring up docker compose stack
 up:
 	docker compose up
 
 ## unstable-build: generate an unstable for internal test
 unstable-build:
-	docker build --platform=linux/amd64 --build-arg RELEASE_TAG=unstable -t avaprotocol/ap-avs:unstable -f dockerfiles/operator.Dockerfile .
-	docker push avaprotocol/ap-avs:unstable
+	docker build --platform=linux/amd64 --build-arg RELEASE_TAG=unstable -t avaprotocol/avs-dev:unstable -f dockerfiles/operator.Dockerfile .
+	docker push avaprotocol/avs-dev:unstable
+
 
 ## dev-build: build a dev version for local development
 dev-build:
@@ -108,3 +107,7 @@ dev-agg:
 ## dev-agg: run operator locally with dev build
 dev-op:
 	./out/ap operator --config=config/operator.yaml
+
+## dev-clean: cleanup storage data
+dev-clean:
+	rm -rf /tmp/ap-avs /tmp/ap.sock

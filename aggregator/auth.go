@@ -3,12 +3,10 @@ package aggregator
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"strings"
 	"time"
 
 	"github.com/AvaProtocol/ap-avs/core/auth"
-	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
 	"github.com/AvaProtocol/ap-avs/model"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/ethereum/go-ethereum/accounts"
@@ -16,7 +14,9 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/golang-jwt/jwt/v5"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -28,6 +28,11 @@ const (
 // the EOA task
 func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*avsproto.KeyResp, error) {
 	submitAddress := common.HexToAddress(payload.Owner)
+
+	r.config.Logger.Info("process getkey",
+		"owner", payload.Owner,
+		"expired", payload.ExpiredAt,
+	)
 
 	if strings.Contains(payload.Signature, ".") {
 		authenticated, err := auth.VerifyJwtKeyForUser(r.config.JwtSecret, payload.Signature, submitAddress)
@@ -48,7 +53,10 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 
 		signature, err := hexutil.Decode(payload.Signature)
 		if err != nil {
-			return nil, err
+			return nil, status.Errorf(codes.InvalidArgument, auth.InvalidSignatureFormat)
+		}
+		if len(signature) < crypto.RecoveryIDOffset || len(signature) < crypto.RecoveryIDOffset {
+			return nil, status.Errorf(codes.InvalidArgument, auth.InvalidSignatureFormat)
 		}
 		// https://stackoverflow.com/questions/49085737/geth-ecrecover-invalid-signature-recovery-id
 		if signature[crypto.RecoveryIDOffset] == 27 || signature[crypto.RecoveryIDOffset] == 28 {
@@ -131,11 +139,19 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 			Address: common.HexToAddress(claims["sub"].(string)),
 		}
 
-		smartAccountAddress, err := aa.GetSenderAddress(r.ethrpc, user.Address, big.NewInt(0))
-		if err != nil {
-			return nil, fmt.Errorf("Rpc error")
+		// caching to reduce hitting eth rpc node
+		cachekey := "default-wallet" + user.Address.Hex()
+		if value, err := r.cache.Get(cachekey); err == nil {
+			defaultSmartWallet := common.BytesToAddress(value)
+			user.SmartAccountAddress = &defaultSmartWallet
+		} else {
+			if err := user.LoadDefaultSmartWallet(r.smartWalletRpc); err != nil {
+				return nil, fmt.Errorf("Rpc error")
+			}
+
+			// We don't care if its error out in caching
+			r.cache.Set(cachekey, user.SmartAccountAddress.Bytes())
 		}
-		user.SmartAccountAddress = smartAccountAddress
 
 		return &user, nil
 	}

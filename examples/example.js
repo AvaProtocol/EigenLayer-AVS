@@ -3,8 +3,10 @@ const grpc = require("@grpc/grpc-js");
 const protoLoader = require("@grpc/proto-loader");
 const { ethers } = require("ethers");
 const { Wallet } = ethers;
+const { UlidMonotonic } = require("id128");
+const util = require("util");
 
-const { TaskType, TriggerType } = require("./static_codegen/avs_pb");
+const { TaskType, TaskTrigger } = require("./static_codegen/avs_pb");
 
 // Load the protobuf definition
 const packageDefinition = protoLoader.loadSync("../protobuf/avs.proto", {
@@ -16,6 +18,8 @@ const packageDefinition = protoLoader.loadSync("../protobuf/avs.proto", {
 });
 
 const env = process.env.ENV || "development";
+
+console.log("Current environment is: ", env);
 const privateKey = process.env.PRIVATE_KEY; // Make sure to provide your private key with or without the '0x' prefix
 
 const config = {
@@ -108,37 +112,28 @@ async function listTask(owner, token) {
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
 
-  const result = await asyncRPC(client, "ListTasks", {
-      smart_wallet_address: process.argv[3]
-  }, metadata);
+  const result = await asyncRPC(
+    client,
+    "ListTasks",
+    {
+      smart_wallet_address: process.argv[3],
+    },
+    metadata
+  );
+  console.log(`Found ${result.tasks.length} tasks created by`, process.argv[3]);
 
-  console.log("Tasks that has created by", process.argv[3], "\n", result);
+  for (const item of result.tasks) {
+    console.log(util.inspect(item, { depth: 4, colors: true }));
+  }
 }
 
 async function getTask(owner, token, taskId) {
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
 
-  const result = await asyncRPC(client, "GetTask", { bytes: taskId }, metadata);
+  const result = await asyncRPC(client, "GetTask", { id: taskId }, metadata);
 
-  console.log("Inspect Task ID: ", taskId, "\n");
-  for (const [key, value] of Object.entries(result)) {
-    if (key == "nodes") {
-      continue;
-    }
-
-    console.log(`${key}:`.padEnd(25, " "), JSON.stringify(value, null, 2));
-  }
-
-  result.nodes.filter(e => e != null).map(node => {
-    for (const [key, value] of Object.entries(node)) {
-      if (!value) {
-        continue;
-      }
-
-      console.log(`${key}:`.padEnd(25, " "), JSON.stringify(value, null, 2));
-    }
-  });
+  console.log(util.inspect(result, { depth: 4, colors: true }));
 }
 
 async function cancel(owner, token, taskId) {
@@ -148,11 +143,11 @@ async function cancel(owner, token, taskId) {
   const result = await asyncRPC(
     client,
     "CancelTask",
-    { bytes: taskId },
+    { id: taskId },
     metadata
   );
 
-  console.log("Canceled Task Data for ", taskId, "\n", result);
+  console.log("Response:\n", result);
 }
 
 async function deleteTask(owner, token, taskId) {
@@ -162,23 +157,30 @@ async function deleteTask(owner, token, taskId) {
   const result = await asyncRPC(
     client,
     "DeleteTask",
-    { bytes: taskId },
+    { id: taskId },
     metadata
   );
 
-  console.log("Delete Task ", taskId, "\n", result);
+  console.log("Response:\n", result);
 }
 
 async function getWallets(owner, token) {
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
 
-  const walletsResp  = await asyncRPC(
+  const walletsResp = await asyncRPC(
     client,
-    "GetSmartAccountAddress",
+    "ListWallets",
     { },
     metadata
   );
+
+  console.log(
+    `Response:\n`,
+    walletsResp
+  );
+
+  console.log("Fetching balances from RPC provider ...");
 
   // Update the provider creation
   const provider = new ethers.JsonRpcProvider(config[env].RPC_PROVIDER);
@@ -194,22 +196,29 @@ async function getWallets(owner, token) {
 
   let wallets = [];
   for (const wallet of walletsResp.wallets) {
-    const balance = await provider.getBalance(
-      wallet.address
-    );
+    const balance = await provider.getBalance(wallet.address);
     const balanceInEth = _.floor(ethers.formatEther(balance), 2);
 
     const tokenBalance = await tokenContract.balanceOf(wallet.address);
 
     const tokenDecimals = await tokenContract.decimals();
     const tokenSymbol = await tokenContract.symbol();
-    const tokenBalanceFormatted = _.floor(ethers.formatUnits(tokenBalance, tokenDecimals),2);
-    wallets.push({...wallet, balances: [
-      `${balanceInEth} ETH`,
-      `${tokenBalanceFormatted} ${tokenSymbol}`,
-    ]});
+    const tokenBalanceFormatted = _.floor(
+      ethers.formatUnits(tokenBalance, tokenDecimals),
+      2
+    );
+    wallets.push({
+      ...wallet,
+      balances: [
+        `${balanceInEth} ETH`,
+        `${tokenBalanceFormatted} ${tokenSymbol}`,
+      ],
+    });
   }
-  console.log("Smart wallet address for ", owner, "\n", wallets);
+  console.log(
+    `Listing smart wallet addresses for ${owner} ...\n`,
+    wallets
+  );
 
   return wallets;
 }
@@ -224,7 +233,7 @@ const createWallet = async (owner, token, salt, factoryAddress) => {
     { salt, factoryAddress },
     metadata
   );
-}
+};
 
 const main = async (cmd) => {
   // 1. Generate the api token to interact with aggregator
@@ -235,10 +244,22 @@ const main = async (cmd) => {
   switch (cmd) {
     case "create-wallet":
       salt = process.argv[3] || 0;
-      let smartWalletAddress = await createWallet(owner, token, process.argv[3], process.argv[4]);
-      console.log("inside vm", smartWalletAddress)
+      let smartWalletAddress = await createWallet(
+        owner,
+        token,
+        process.argv[3],
+        process.argv[4]
+      );
+      console.log(
+        `A new smart wallet with salt ${salt} is created for ${owner}:\nResponse:\n`,
+        smartWalletAddress
+      );
       break;
     case "schedule":
+    case "schedule-cron":
+    case "schedule-event":
+    case "schedule-fixed":
+    case "schedule-manual":
       // ETH-USD pair on sepolia
       // https://sepolia.etherscan.io/address/0x694AA1769357215DE4FAC081bf1f309aDC325306#code
       // The price return is big.Int so we have to use the cmp function to compare
@@ -247,14 +268,24 @@ const main = async (cmd) => {
         priceChainlink("${config[env].ORACLE_PRICE_CONTRACT}"),
         toBigInt("10000")
       ) > 0`;
-      await scheduleERC20TransferJob(owner, token, taskCondition);
+      const resultSchedule = await scheduleERC20TransferJob(
+        owner,
+        token,
+        taskCondition
+      );
+      console.log("Response: \n", resultSchedule);
       break;
 
     case "schedule2":
       taskCondition = `bigCmp(
       priceChainlink("${config[env].ORACLE_PRICE_CONTRACT}"),
       toBigInt("99228171987813")) > 0`;
-      await scheduleERC20TransferJob(owner, token, taskCondition);
+      const resultSchedule2 = await scheduleERC20TransferJob(
+        owner,
+        token,
+        taskCondition
+      );
+      console.log("Response: \n", resultSchedule2);
       break;
 
     case "schedule-generic":
@@ -278,7 +309,13 @@ const main = async (cmd) => {
           )[0],
           toBigInt("2000")
         ) > 0`;
-      await scheduleERC20TransferJob(owner, token, taskCondition);
+      const resultScheduleGeneric = await scheduleERC20TransferJob(
+        owner,
+        token,
+        taskCondition
+      );
+
+      console.log("Response: \n", resultScheduleGeneric);
       break;
 
     case "tasks":
@@ -311,17 +348,18 @@ const main = async (cmd) => {
     default:
       console.log(`Usage:
 
-      create-wallet <salt> <factory-address>: to create a smart wallet with a salt, and optionally a factory contract
-      wallet:                                 to find smart wallet address for this eoa
-      tasks:                                  to find all tasks
-      get <task-id>:                          to get task detail
-      schedule:                               to schedule a task with chainlink eth-usd its condition will be matched quickly
-      schedule2:                              to schedule a task with chainlink that has a very high price target
+      create-wallet <salt> <factory-address(optional)>: to create a smart wallet with a salt, and optionally a factory contract
+      wallet:                                 to list smart wallet address that has been created. note that a default wallet with salt=0 will automatically created
+      tasks <smart-wallet-address>:           to list all tasks of given smart wallet address
+      get <task-id>:                          to get task detail. a permission error is throw if the eoa isn't the smart wallet owner.
+      schedule <smart-wallet-address>:        to schedule a task that run on every block, with chainlink eth-usd its condition will be matched quickly
+      schedule-cron <smart-wallet-address>:   to schedule a task that run on cron
+      schedule-event <smart-wallet-address>:  to schedule a task that run on occurenct of an event
       schedule-generic:                       to schedule a task with an arbitrary contract query
       cancel <task-id>:                       to cancel a task
       delete <task-id>:                       to completely remove a task`);
   }
-}
+};
 
 function getTaskData() {
   let ABI = ["function transfer(address to, uint amount)"];
@@ -342,84 +380,114 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
   // Now we can schedule a task
   // 1. Generate the calldata to check condition
   const taskBody = getTaskData();
-  console.log("\n\nTask body:", taskBody);
+  const smartWalletAddress = process.argv[3];
+  if (!smartWalletAddress) {
+    console.log("invalid smart wallet address. check usage");
+    return;
+  }
 
-  console.log("\n\nTask condition:", taskCondition);
+  console.log("Task body:", taskBody);
+
+  console.log("\nTask condition:", taskCondition);
 
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
 
-  console.log("Trigger type", TriggerType.EXPRESSIONTRIGGER);
-
-  const result = await asyncRPC(
-    client,
-    'CreateTask',
-    {
-      // salt = 0
-      //smart_wallet_address: "0x5Df343de7d99fd64b2479189692C1dAb8f46184a",
-      smart_wallet_address: "0xdD85693fd14b522a819CC669D6bA388B4FCd158d",
-      actions: [{
-        task_type: TaskType.CONTRACTEXECUTIONTASK,
-        // id need to be unique
-        id: 'transfer_erc20_1',
-        // name is for our note only
-        name: 'Transfer Test Token',
-        contract_execution: {
-          // Our ERC20 test token
-          contract_address: config[env].TEST_TRANSFER_TOKEN,
-          call_data: taskBody,
-        }
-      }],
-      trigger: {
-        trigger_type: TriggerType.EXPRESSIONTRIGGER,
-        expression: {
-          expression: taskCondition,
-        }
-      },
-      start_at: Math.floor(Date.now() / 1000) + 30,
-      expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
-      memo: `Demo Example task for ${owner}`,
+  let trigger = {
+    trigger_type: TaskTrigger.TriggerTypeCase.BLOCK,
+    block: {
+      interval: 5, // run every 5 block
     },
-    metadata
-  );
+  };
 
-  console.log("Expression Task ID is:", result);
-}
+  if (process.argv[2] == "schedule-cron") {
+    trigger = {
+      trigger_type: TaskTrigger.TriggerTypeCase.CRON,
+      cron: {
+        schedule: [
+          // every 5 hours
+          "0 */5 * * *",
+        ],
+      },
+    };
+  } else if (process.argv[2] == "schedule-event") {
+    trigger = {
+      trigger_type: TaskTrigger.TriggerTypeCase.EVENT,
+      event: {
+        expression: taskCondition,
+      },
+    };
+  } else if (process.argv[2] == "schedule-fixed") {
+    trigger = {
+      trigger_type: TaskTrigger.TriggerTypeCase.AT,
+      fixed_time: {
+        epochs: [
+          Math.floor(new Date().getTime() / 1000 + 3600),
+          Math.floor(new Date().getTime() / 1000 + 7200),
+        ],
+      },
+    };
+  } else if (process.argv[2] == "schedule-manual") {
+    trigger = {
+      trigger_type: TriggerType.MANUAL,
+      manual: true,
+    };
+  }
 
-async function scheduleTimeTransfer(owner, token) {
-  // Now we can schedule a task
-  // 1. Generate the calldata to check condition
-  const taskBody = getTaskData();
-  console.log("\n\nTask body:", taskBody);
-  console.log("\n\nTask condition: Timeschedule", "*/2");
+  const nodeIdOraclePrice = UlidMonotonic.generate().toCanonical();
+  const nodeIdTransfer = UlidMonotonic.generate().toCanonical();
+  const nodeIdNotification = UlidMonotonic.generate().toCanonical();
 
-  const metadata = new grpc.Metadata();
-  metadata.add("authkey", token);
-
-  console.log("Trigger type", TriggerType.TIMETRIGGER);
+  console.log("\nTrigger type", trigger.trigger_type);
 
   const result = await asyncRPC(
     client,
     "CreateTask",
     {
-      // A contract execution will be perform for this taks
-      task_type: TaskType.CONTRACTEXECUTIONTASK,
-
-      actions: [{
-        contract_execution: {
-          // Our ERC20 test token deploy on sepolia
-          // https://sepolia.etherscan.io/token/0x69256ca54e6296e460dec7b29b7dcd97b81a3d55#code
+      smart_wallet_address: smartWalletAddress,
+      nodes: [{
+        id: nodeIdOraclePrice,
+        name: 'check price',
+        branch: {
+          conditions: [{
+            expression: `bigCmp(priceChainlink("${config[env].ORACLE_PRICE_CONTRACT}"),toBigInt("10000") > 0`,
+            next: 'transfer_erc20_1'
+          }]
+        }
+      }, {
+        // id need to be unique. it will be assign to the variable
+        id: nodeIdTransfer,
+        // name is for our note only. use for display a humand friendly version
+        name: 'transfer token',
+        contract_write: {
+          // Our ERC20 test token
           contract_address: config[env].TEST_TRANSFER_TOKEN,
           call_data: taskBody,
-        },
+        }
+      }, {
+        id: nodeIdNotification,
+        name: 'notification',
+        rest_api: {
+          url: "https://webhook.site/fd02e579-a58c-4dbd-8a74-0afa399c0912",
+        }
       }],
-      trigger: {
-        trigger_type: TriggerType.TIMETRIGGER,
-        schedule: {
-          cron: "*/2 * * * *",
-        },
-      },
 
+      edges: [
+        {
+          id: UlidMonotonic.generate().toCanonical(),
+          // __TRIGGER__ is a special node. It doesn't appear directly in the task data, but it should be draw on the UI to show what is the entrypoint
+          source: "__TRIGGER__",
+          target: nodeIdOraclePrice,
+        },
+        {
+          id: UlidMonotonic.generate().toCanonical(),
+          // __trigger__ is a special node. It doesn't appear directly in the task nodes, but it should be draw on the UI to show what is the entrypoint
+          source: nodeIdOraclePrice,
+          target: nodeIdNotification,
+        },
+      ],
+
+      trigger,
       start_at: Math.floor(Date.now() / 1000) + 30,
       expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
       memo: `Demo Example task for ${owner}`,
@@ -427,9 +495,8 @@ async function scheduleTimeTransfer(owner, token) {
     metadata
   );
 
-  console.log("Expression Task ID is:", result);
+  return result;
 }
-
 
 (async () => {
   try {

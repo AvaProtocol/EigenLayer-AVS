@@ -19,9 +19,18 @@ func (agg *Aggregator) stopRepl() {
 	}
 
 }
+
+// Repl allow an operator to look into node storage directly with a REPL interface.
+// It doesn't listen via TCP socket but directly unix socket on file system.
 func (agg *Aggregator) startRepl() {
 	var err error
+
+	if _, err := os.Stat(agg.config.SocketPath); err == nil {
+		// File exists, most likely result of a previous crash without cleaning, attempt to delete
+		os.Remove(agg.config.SocketPath)
+	}
 	repListener, err = net.Listen("unix", agg.config.SocketPath)
+
 	if err != nil {
 		return
 	}
@@ -48,6 +57,7 @@ func handleConnection(agg *Aggregator, conn net.Conn) {
 
 	reader := bufio.NewReader(conn)
 	fmt.Fprintln(conn, "AP CLI REPL")
+	fmt.Fprintln(conn, "Use `list <prefix>*` to list key, `get <key>` to inspect content ")
 	fmt.Fprintln(conn, "-------------------------")
 
 	for {

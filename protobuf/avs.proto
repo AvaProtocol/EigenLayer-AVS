@@ -6,8 +6,8 @@ option go_package = "./avsproto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
 
-message UUID {
-  string bytes = 1;
+message IdReq {
+  string id = 1;
 }
 
 message Checkin {
@@ -39,18 +39,48 @@ message SyncTasksReq {
   int64  monotonic_clock = 4;
 }
 
-enum TriggerType {
-  TimeTrigger          = 0;
-  ContractQueryTrigger = 1;
-  ExpressionTrigger    = 2;
+message FixedEpochCondition {
+  repeated int64 epochs = 1;
+}
+// Simple timebase or cron syntax.
+message CronCondition {
+  repeated string schedule = 1;
+}
+
+message BlockCondition {
+  int64 interval = 1;
+}
+
+// An arbitrary expression to express the condition.
+// People can define condition example
+//   chainlinkPrice("address-of-eth-usd-pair") > 2644500 && queryContract("contractaddress", "callmsg")[2] < = 5
+// By allow arbitrary expression, people can mix and match to create conplex
+// condition that match their workload
+//
+// The function to be used need to be pre-defined on our task egnine runtime.
+// When a new block is build, our engine will execute these check
+//
+// The expression language is re-present by https://expr-lang.org/
+message EventCondition {
+  string expression = 1;
 }
 
 message TaskTrigger {
-  TriggerType            trigger_type   = 1;
+  oneof trigger_type {
+    bool                   manual  = 1;
 
-  TimeCondition          schedule       = 2;
-  ContractQueryCondition contract_query = 3;
-  ExpressionCondition    expression     = 4;
+    // run at a specific epoch, name inspired by unix `at` utility
+    FixedEpochCondition    fixed_time   = 2;
+
+    // interval such as every hour/day/ etc can be converted to cronsyntax by the sdk/studio
+    CronCondition          cron    = 3;
+   
+    // currently the only support syntax is every <x> blocks
+    BlockCondition         block   = 4;
+
+    // support filter by event expression such as topic0, topic1, topoc2 and event_data and contract_address
+    EventCondition         event   = 5;
+  }
 }
 
 // gRPC internal error code use up to 17, we extend and start from 1000 to avoid any conflict 
@@ -68,37 +98,11 @@ enum Error {
   SmartWalletRpcError      = 6000;
   SmartWalletNotFoundError = 6001;
 
-  // Error occurs when we failed to migrat task data and it cannot be decoden
+  // Error occurs when we failed to migrate task data and it cannot be decode
   TaskDataCorrupted = 7000;
+  TaskDataMissingError = 7001;
 }
 
-// Simple timebase or cron syntax.
-message TimeCondition {
-  repeated int64 fixed = 1;
-  string cron = 2;
-}
-// A contract method that return true/false
-// Ideally to use when we already have an existing contract that perform the
-// check.
-// This method will be evaluate every block
-message ContractQueryCondition {
-  string contract_address = 1;
-  string callmsg = 2;
-}
-
-// An arbitrary expression to express the condition.
-// People can define condition example
-//   chainlinkPrice("address-of-eth-usd-pair") > 2644500 && queryContract("contractaddress", "callmsg")[2] < = 5
-// By allow arbitrary expression, people can mix and match to create conplex
-// condition that match their workload
-//
-// The function to be used need to be pre-defined on our task egnine runtime.
-// When a new block is build, our engine will execute these check
-//
-// The expression language is re-present by https://expr-lang.org/
-message ExpressionCondition {
-  string expression = 1;
-}
 
 message SyncTasksResp {
   string id        = 1;
@@ -107,144 +111,163 @@ message SyncTasksResp {
   TaskTrigger trigger = 3;
 }
 
-// TaskType represents what kind of work the task will perform
-enum TaskType {
-  // Handle default/missing data
-  ETHTransferTask = 0;
-  
-  // Generic contract execution which can be used for:
-  // ERC20 Transfer, NFT Transfer, auto reclaim, auto restaking etc
-  // When executing a contract we need at least 2 things:
-  // - target contract address
-  // - the message to send to that contract
-  ContractExecutionTask = 1;
-
-  GraphQLDataQueryTask = 2;
-  // Make call to a HTTP endpoint
-  HTTPAPICallTask = 3;
-  // CustomCode allow to run arbitraty JavaScript.
-  CustomCodeTask = 4;
-  BranchActionTask = 5;
-}
 
 // TaskStatus represents status of the task. The transition is as follow
 enum TaskStatus {
-  Active = 0;
+  Active    = 0;
   Completed = 1;
-  Failed = 2;
-  Canceled = 3;
+  Failed    = 2;
+  Canceled  = 3;
   Executing = 4;
 }
 
-message ETHTransfer {
+message ETHTransferNode {
   string destination = 1;
   string amount = 2;
 }
 
-message ContractExecution {
+message ContractWriteNode {
   string contract_address = 1;
   string call_data = 2;
 
-  string method = 3;
-  string encoded_params = 4;
+  // abi is necessary to decode the return
+  string contract_abi = 3;
 }
 
-message GraphQLDataQuery {
-  // TODO: support graphql variable
+message ContractReadNode {
+  string contract_address = 1;
+  string call_data = 2;
+
+  // abi is necessary to decode the return
+  string contract_abi = 3;
+}
+
+
+message GraphQLQueryNode {
   string url   = 1;
   string query = 2;
+
+  map<string, string> variables = 3;
 }
 
-message HTTPAPICall {
+message RestAPINode {
   string              url     = 1;
   map<string, string> headers = 2;
   string              body    = 3;
+  string              method  = 4;
 }
 
 enum CustomCodeType {
   JavaScript = 0;
 }
 
-message CustomCode {
+message CustomCodeNode {
   CustomCodeType type     = 1;
-  string          body    = 2;
+  string         source    = 2;
 }
 
-message ConditionJump {
-  string expression  = 1;
-  string next        = 2;
+message Condition {
+  string id = 1;
+  string type = 2;
+  string expression = 3;
 }
 
-message BranchAction {
-  ConditionJump If                  = 1;
-  repeated ConditionJump ElseIfs    = 2;
-  ConditionJump Else                = 3;
+message BranchNode {
+  repeated Condition conditions = 1;
 }
 
-message TaskAction {
-  TaskType task_type = 1;
+message FilterNode {
+  // Filter node acts like .select or .filter to pluck out element in an array that evaluate the expression to true
+  string expression = 1;
+}
 
-  string id = 2;
+// LoopNode currently not support, but we pre-defined to reverse the field id
+message LoopNode {
+  // name the iteration key and value.
+  string iter_var = 1;
+  string iter_key = 2;
+}
+
+// The edge is relationship or direct between node
+message TaskEdge {
+  string id     = 1 ;
+  string source = 2 ;
+  string target = 3 ; 
+}
+
+message TaskNode {
+  string id   = 2;
   string name = 3;
 
-  // Next can be empty. In some kind of block, such as branching, the next is
-  // based on branching condition
-  repeated string next = 4;
+  // based on node_type one and only one of these field are set
+  oneof task_type {
+    // Transfer eth require no calldata etc, just a destination address and an eth amount to be sent
+    ETHTransferNode   eth_transfer = 10;
 
-  // Transfer eth
-  ETHTransfer eth_transfer = 10;
-  // Run one ore more contracts. The call call also be batched with tool like
-  // multicall to wrap many calls
-  ContractExecution contract_execution = 11;
-  // Make call to a graphql endpoint
-  GraphQLDataQuery graphql_data_query = 12;
-  // Make call to a HTTP endpoint
-  HTTPAPICall http_data_query = 13;
-  // CustomCode allow to run arbitraty JavaScript.
-  CustomCode custom_code = 14;
-  BranchAction branch = 15;
+    // Run one ore more contracts. The call call also be batched with tool like
+    // multicall to wrap many calls. in a contract write, we need to generate signature and send as userops.
+    ContractWriteNode contract_write = 11;
+    // read data fron a target contract
+    ContractReadNode contract_read = 12;
+    // Make call to a graphql endpoint
+    GraphQLQueryNode  graphql_data_query = 13;
+    // Make call to a HTTP endpoint
+    RestAPINode       rest_api = 14;
+    // CustomCode allow to run arbitraty JavaScript.
+    BranchNode        branch = 15;
+    FilterNode        filter = 16;
+    LoopNode          loop = 17;
+    CustomCodeNode    custom_code = 18;
+  }
 }
 
 message Execution {
-  int64 epoch = 1;
+  int64  epoch        = 1;
   string user_op_hash = 2;
-  string error = 3;
+  string error        = 3;
 }
 
 message Task {
-    UUID id = 1;
-    string owner = 2;
-    string smart_wallet_address = 3;
-    TaskTrigger trigger = 4;
-    repeated TaskAction nodes = 5;
+  string id                   = 1;
+  string owner                = 2;
+  string smart_wallet_address = 3;
 
-    // task won't be check before this
-    int64 start_at = 6;
-    // task won't be run/check after this
-    int64 expired_at = 7;
-    // arbitrary data about this task
-    string memo = 8;
+  // task won't be check before this
+  int64  start_at   = 4;
+  // task won't be run/check after this
+  int64  expired_at = 5;
+  // arbitrary data about this task. has a limit of 255 character
+  string memo = 6;
 
-    int64 completed_at = 9;
-    TaskStatus status  = 10;
-    // repeatable means a task can continue to run even after the first execution
-    bool repeatable  = 11;
-    repeated Execution executions = 12;
+  int64 completed_at = 7;
+
+  // limit on how many time this task can run. Set to 0 will make it run unlimited until cancelling or reaching its expired time
+  int64 max_execution = 8;
+
+  TaskStatus status  = 9;
+  TaskTrigger trigger = 10;
+  repeated TaskNode nodes = 11;
+  repeated TaskEdge edges = 12;
+
+  repeated Execution executions = 13;
 }
 
 
 message CreateTaskReq {
   TaskTrigger trigger          = 1;
-  repeated TaskAction actions  = 2;
-  int64 start_at               = 3;
-  int64 expired_at             = 4;
-  string memo                  = 5;
-  // A repeatable task will continue to be run
-  bool repeatable              = 6;
+
+  int64 start_at               = 2;
+  int64 expired_at             = 3;
+
+  int64 max_execution          = 4;
 
   // the smart wallet address that will be used to run this task
   // When leaving out, we will use the default(salt=0) wallet
-  string smart_wallet_address  = 7;
+  string smart_wallet_address  = 5;
+
+  string memo                  = 6;
+  repeated TaskNode nodes      = 7;
+  repeated TaskEdge edges      = 8;
 }
 
 message CreateTaskResp {
@@ -259,7 +282,7 @@ message NonceResp {
   string nonce = 1;
 }
 
-message AddressRequest {
+message ListWalletReq {
   // filter out by factory address or salt
   // otherwise return all the wallet
   string factory = 1;
@@ -272,7 +295,7 @@ message SmartWallet {
   string factory = 3;
 }
 
-message AddressResp {
+message ListWalletResp {
   repeated SmartWallet wallets = 1;
 }
 
@@ -283,17 +306,17 @@ message ListTasksReq {
 }
 
 message ListTasksResp {
-    repeated Task tasks = 1;
+  repeated Task tasks = 1;
 }
 
 message GetKeyReq {
-    string owner = 1;
-    int64  expired_at = 2;
-    string signature = 3;
+  string owner = 1;
+  int64  expired_at = 2;
+  string signature = 3;
 }
 
 message KeyResp {
-    string key=1;
+  string key=1;
 }
 
 message UpdateChecksReq {
@@ -314,6 +337,8 @@ message CreateWalletReq {
 
 message CreateWalletResp {
   string address = 1;
+  string salt = 2;
+  string factory_address = 3;
 }
 
 service Aggregator {
@@ -322,15 +347,15 @@ service Aggregator {
 
   // Smart Acccount
   rpc GetNonce(NonceRequest)                 returns (NonceResp) {};
-  rpc GetSmartAccountAddress(AddressRequest) returns (AddressResp) {};
+  rpc CreateWallet(CreateWalletReq) returns (CreateWalletResp) {};
+  rpc ListWallets(ListWalletReq) returns (ListWalletResp) {};
 
   // Task Management
-  rpc CreateWallet(CreateWalletReq) returns (CreateWalletResp) {};
   rpc CreateTask(CreateTaskReq)     returns (CreateTaskResp) {};
   rpc ListTasks(ListTasksReq)       returns (ListTasksResp) {};
-  rpc GetTask(UUID)                 returns (Task) {};
-  rpc CancelTask(UUID)              returns (google.protobuf.BoolValue) {};
-  rpc DeleteTask(UUID)              returns (google.protobuf.BoolValue) {};
+  rpc GetTask(IdReq)                 returns (Task) {};
+  rpc CancelTask(IdReq)              returns (google.protobuf.BoolValue) {};
+  rpc DeleteTask(IdReq)              returns (google.protobuf.BoolValue) {};
 
   // Operator endpoint
   rpc Ping(Checkin) returns (CheckinResp) {};

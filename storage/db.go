@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	badger "github.com/dgraph-io/badger/v4"
@@ -37,6 +38,8 @@ type Storage interface {
 	Delete(key []byte) error
 
 	Vacuum() error
+
+	DbPath() string
 }
 
 type KeyValueItem struct {
@@ -50,6 +53,14 @@ type BadgerStorage struct {
 	seqs   []*badger.Sequence
 }
 
+// Create storage pool at the particular path
+func NewWithPath(path string) (Storage, error) {
+	return New(&Config{
+		Path: path,
+	})
+}
+
+// Create storage pool with the given config
 func New(c *Config) (Storage, error) {
 	opts := badger.DefaultOptions(c.Path)
 	db, err := badger.Open(
@@ -301,4 +312,14 @@ func (a *BadgerStorage) ListKeys(prefix string) ([]string, error) {
 
 func (a *BadgerStorage) Vacuum() error {
 	return a.db.RunValueLogGC(0.7)
+}
+
+func (a *BadgerStorage) DbPath() string {
+	return a.config.Path
+}
+
+// Destroy is destructive action that shutdown a database, and wipe out its entire data directory
+func Destroy(a *BadgerStorage) error {
+	a.Close()
+	return os.RemoveAll(a.config.Path)
 }

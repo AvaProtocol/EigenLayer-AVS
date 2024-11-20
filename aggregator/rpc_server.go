@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"net"
 
+	"github.com/allegro/bigcache/v3"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -17,6 +18,7 @@ import (
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 
+	"github.com/AvaProtocol/ap-avs/core/auth"
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
 	"github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/core/taskengine"
@@ -28,6 +30,7 @@ import (
 type RpcServer struct {
 	avsproto.UnimplementedAggregatorServer
 	config *config.Config
+	cache  *bigcache.BigCache
 	db     storage.Storage
 	engine *taskengine.Engine
 
@@ -41,9 +44,15 @@ type RpcServer struct {
 // Get nonce of an existing smart wallet of a given owner
 func (r *RpcServer) CreateWallet(ctx context.Context, payload *avsproto.CreateWalletReq) (*avsproto.CreateWalletResp, error) {
 	user, err := r.verifyAuth(ctx)
+
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
+	r.config.Logger.Info("process create wallet",
+		"user", user.Address.String(),
+		"salt", payload.Salt,
+	)
+
 	return r.engine.CreateSmartWallet(user, payload)
 }
 
@@ -53,7 +62,7 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 
 	nonce, err := aa.GetNonce(r.smartWalletRpc, ownerAddress, big.NewInt(0))
 	if err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletRpcError), "cannot determine nonce for smart wallet")
+		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletRpcError), taskengine.NonceFetchingError)
 	}
 
 	return &avsproto.NonceResp{
@@ -62,31 +71,37 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 }
 
 // GetAddress returns smart account address of the given owner in the auth key
-func (r *RpcServer) GetSmartAccountAddress(ctx context.Context, payload *avsproto.AddressRequest) (*avsproto.AddressResp, error) {
+func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalletReq) (*avsproto.ListWalletResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 
+	r.config.Logger.Info("process list wallet",
+		"address", user.Address.String(),
+	)
 	wallets, err := r.engine.GetSmartWallets(user.Address)
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "rpc server is unavailable, retry later. %s", err.Error())
+	}
 
-	return &avsproto.AddressResp{
+	return &avsproto.ListWalletResp{
 		Wallets: wallets,
 	}, nil
 }
 
-func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.UUID) (*wrapperspb.BoolValue, error) {
+func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*wrapperspb.BoolValue, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 
-	r.config.Logger.Info("Process Cancel Task",
+	r.config.Logger.Info("process cancel task",
 		"user", user.Address.String(),
-		"taskID", string(taskID.Bytes),
+		"taskID", taskID.Id,
 	)
 
-	result, err := r.engine.CancelTaskByUser(user, string(taskID.Bytes))
+	result, err := r.engine.CancelTaskByUser(user, string(taskID.Id))
 
 	if err != nil {
 		return nil, err
@@ -95,18 +110,18 @@ func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.UUID) (*wra
 	return wrapperspb.Bool(result), nil
 }
 
-func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.UUID) (*wrapperspb.BoolValue, error) {
+func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.IdReq) (*wrapperspb.BoolValue, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 
-	r.config.Logger.Info("Process Delete Task",
+	r.config.Logger.Info("process delete task",
 		"user", user.Address.String(),
-		"taskID", string(taskID.Bytes),
+		"taskID", string(taskID.Id),
 	)
 
-	result, err := r.engine.DeleteTaskByUser(user, string(taskID.Bytes))
+	result, err := r.engine.DeleteTaskByUser(user, string(taskID.Id))
 
 	if err != nil {
 		return nil, err
@@ -118,7 +133,7 @@ func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.UUID) (*wra
 func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.CreateTaskReq) (*avsproto.CreateTaskResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 
 	task, err := r.engine.CreateTask(user, taskPayload)
@@ -127,17 +142,17 @@ func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.Create
 	}
 
 	return &avsproto.CreateTaskResp{
-		Id: task.ID,
+		Id: task.Id,
 	}, nil
 }
 
 func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 
-	r.config.Logger.Info("Process List Task",
+	r.config.Logger.Info("process list task",
 		"user", user.Address.String(),
 		"smart_wallet_address", payload.SmartWalletAddress,
 	)
@@ -152,18 +167,22 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 	}, nil
 }
 
-func (r *RpcServer) GetTask(ctx context.Context, taskID *avsproto.UUID) (*avsproto.Task, error) {
+func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsproto.Task, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "invalid authentication key")
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 
-	r.config.Logger.Info("Process Get Task",
+	r.config.Logger.Info("process get task",
 		"user", user.Address.String(),
-		"taskID", string(taskID.Bytes),
+		"taskID", payload.Id,
 	)
 
-	task, err := r.engine.GetTaskByUser(user, string(taskID.Bytes))
+	if payload.Id == "" {
+		return nil, status.Errorf(codes.InvalidArgument, taskengine.TaskIDMissing)
+	}
+
+	task, err := r.engine.GetTask(user, payload.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -213,6 +232,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 	}
 
 	avsproto.RegisterAggregatorServer(s, &RpcServer{
+		cache:  agg.cache,
 		db:     agg.db,
 		engine: agg.engine,
 

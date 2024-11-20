@@ -17,8 +17,8 @@ For node that connect to Ava pre-deployed AVS contract on Holesky testnet, we ne
 After having the config file, we can run the aggregator:
 
 ```
-make build-docker
-make up
+make dev-build
+make dev-aggregator
 ```
 
 Or use docker compsose directly:
@@ -45,3 +45,57 @@ For detail of each method and payload, check the protocol.md docs.
 
 We generate the client sdk for JavaScript. The code is generated based on our
 protobuf definition on this file.
+
+## Storage REPL
+
+To inspect storage we use a simple repl.
+
+```
+telnet /tmp/ap.sock
+```
+
+The repl support a few commands:
+
+```
+list <prefix>*
+get <key>
+set <key> <value>
+gc
+``
+
+Example:
+
+### List everything
+
+```
+list *
+```
+
+### List active tasks
+
+```
+list t:a:*
+```
+
+### Read a key
+
+```
+get t:a:01JD3252QZKJPK20CPH0S179FH
+```
+
+### Set a key
+
+```
+set t:a:01JD3252QZKJPK20CPH0S179FH 'value here'
+```
+
+Checkout repl.go for more information
+
+
+## Reset storage
+
+During development, we may have to reset storage to erase bad data due to schema change. Once we're mature we will implement migration to migrate storage. For now to wipe out storage run:
+
+```
+make dev-clean
+```

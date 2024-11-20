@@ -65,13 +65,13 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 
 	defer func() {
 		updates := map[string][]byte{}
-		updates[string(TaskStorageKey(task.ID, avsproto.TaskStatus_Executing))], err = task.ToJSON()
+		updates[string(TaskStorageKey(task.Id, avsproto.TaskStatus_Executing))], err = task.ToJSON()
 		updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 		if err = c.db.BatchWrite(updates); err == nil {
 			c.db.Move(
-				[]byte(TaskStorageKey(task.ID, avsproto.TaskStatus_Executing)),
-				[]byte(TaskStorageKey(task.ID, task.Status)),
+				[]byte(TaskStorageKey(task.Id, avsproto.TaskStatus_Executing)),
+				[]byte(TaskStorageKey(task.Id, task.Status)),
 			)
 		} else {
 			// TODO Gracefully handling of storage cleanup
@@ -82,7 +82,8 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 	// Process entrypoint node, then from the next pointer, and flow of the node, we will follow the chain of execution
 	action := task.Nodes[0]
 
-	if action.ContractExecution == nil {
+	// TODO: move to vm.go
+	if action.GetContractWrite() == nil {
 		err := fmt.Errorf("invalid task action")
 		task.AppendExecution(currentTime.Unix(), "", err)
 		task.SetFailed()
@@ -90,9 +91,9 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 	}
 
 	userOpCalldata, e := aa.PackExecute(
-		common.HexToAddress(action.ContractExecution.ContractAddress),
+		common.HexToAddress(action.GetContractWrite().ContractAddress),
 		big.NewInt(0),
-		common.FromHex(action.ContractExecution.CallData),
+		common.FromHex(action.GetContractWrite().CallData),
 	)
 	//calldata := common.FromHex("b61d27f600000000000000000000000069256ca54e6296e460dec7b29b7dcd97b81a3d55000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044a9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a0000000000000000000000000000000000000000000000001bc16d674ec8000000000000000000000000000000000000000000000000000000000000")
 
@@ -106,7 +107,7 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 		return err
 	}
 
-	c.logger.Info("send task to bundler rpc", "taskid", task.ID)
+	c.logger.Info("send task to bundler rpc", "taskid", task.Id)
 	txResult, err := preset.SendUserOp(
 		conn,
 		bundlerClient,
@@ -118,11 +119,11 @@ func (c *ContractProcessor) Perform(job *apqueue.Job) error {
 	if txResult != "" {
 		task.AppendExecution(currentTime.Unix(), txResult, nil)
 		task.SetCompleted()
-		c.logger.Info("succesfully perform userop", "taskid", task.ID, "userop", txResult)
+		c.logger.Info("succesfully perform userop", "taskid", task.Id, "userop", txResult)
 	} else {
 		task.AppendExecution(currentTime.Unix(), "", err)
 		task.SetFailed()
-		c.logger.Error("err perform userop", "taskid", task.ID, "error", err)
+		c.logger.Error("err perform userop", "taskid", task.Id, "error", err)
 	}
 
 	if err != nil || txResult == "" {
