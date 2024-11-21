@@ -123,22 +123,23 @@ func (s *BadgerStorage) GetByPrefix(prefix []byte) ([]*KeyValueItem, error) {
 	var result []*KeyValueItem
 
 	err := s.db.View(func(txn *badger.Txn) error {
-		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchSize = 30
+		it := txn.NewIterator(opts)
 		defer it.Close()
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			item := it.Item()
-			k := item.Key()
-			err := item.Value(func(v []byte) error {
-				result = append(result, &KeyValueItem{
-					Key:   k,
-					Value: v,
-				})
-				return nil
-			})
 
-			if err != nil {
-				return err
+			k := item.KeyCopy(nil)
+			v, e := item.ValueCopy(nil)
+			if e != nil {
+				return e
 			}
+
+			result = append(result, &KeyValueItem{
+				Key:   k,
+				Value: v,
+			})
 		}
 		return nil
 	})
