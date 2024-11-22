@@ -140,6 +140,36 @@ foundryup
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 ```
 
+### Generate API Docs from Proto Files
+1. Install the `protoc-gen-doc` plugin for `protoc`.
+   Install via Go:
+   ```
+   go install github.com/pseudomuto/protoc-gen-doc/cmd/protoc-gen-doc@latest
+   ```  
+   Ensure the plugin is in your PATH:
+   ```
+   export PATH="$PATH:$(go env GOPATH)/bin"
+   ```
+   Verify the plugin is installed:
+   ```
+   which protoc-gen-doc
+   ```
+2. Generate API references in HTML format
+    ```
+    protoc --doc_out=./docs --doc_opt=html,docs.html ./protobuf/avs.proto
+    ```
+
+3. Alternatively, generate API references in Markdown format
+    ```
+    protoc --doc_out=./docs --doc_opt=markdown,docs.md ./protobuf/avs.proto
+    ```
+    This command will generate a markdown version of the gRPC API documentation. To enhance the clarity of the generated documentation, the following improvements should be made to the .proto file:
+    - **Group Definitions by Command**: Organize the API methods and their descriptions by command categories to make it easier for users to find relevant information.
+    - **Elaborate on Input Fields**: Provide detailed descriptions for each input field, including data types, expected values, and any constraints or special considerations.
+    - **Add Examples**: Include usage examples for each API method to demonstrate how to construct requests and interpret responses.
+    - **Link to Related Resources**: Where applicable, link to additional resources or documentation that provide further context or implementation details.
+
+
 ## Getting started
 
 Coming soon
