@@ -255,6 +255,9 @@ const main = async (cmd) => {
         smartWalletAddress
       );
       break;
+    case "schedule-monitor":
+      scheduleMonitor(owner, token, process.argv[3]);
+      break;
     case "schedule":
     case "schedule-cron":
     case "schedule-event":
@@ -356,6 +359,7 @@ const main = async (cmd) => {
       schedule-cron <smart-wallet-address>:   to schedule a task that run on cron
       schedule-event <smart-wallet-address>:  to schedule a task that run on occurenct of an event
       schedule-generic:                       to schedule a task with an arbitrary contract query
+      monitor-address <smart-wallet-address>: monitor erc20 in/out for an address
       cancel <task-id>:                       to cancel a task
       delete <task-id>:                       to completely remove a task`);
   }
@@ -494,6 +498,84 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
     },
     metadata
   );
+
+  return result;
+}
+
+// setup a task to monitor in/out transfer for a wallet and send notification
+async function scheduleMonitor(owner, token, target) {
+  const wallets = await getWallets(owner, token);
+  const smartWalletAddress = wallets[0].address;
+
+  const metadata = new grpc.Metadata();
+  metadata.add("authkey", token);
+
+  let trigger = {
+    trigger_type: TaskTrigger.TriggerTypeCase.EVENT,
+    event: {
+      // native eth transfer emit no event, we use this partciular topic[0] to simulate it
+      // .. (trigger.data.topic[0] == "native_eth_tx" && trigger.data.topic[2] == "${target}" ) ||
+      expression: `
+        (trigger.data.topics[0] == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" && trigger.data.topics[2] == "${target.toLowerCase()}") && 
+          (
+            ( trigger.data.address == lower("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238") &&
+              bigCmp(
+                toBigInt(trigger.data.data),
+                toBigInt("5000000")
+              ) > 0
+            ) ||
+            ( trigger.data.address == lower("0x779877a7b0d9e8603169ddbd7836e478b4624789") &&
+              bigCmp(
+                chainlinkPrice("0xc59E3633BAAC79493d908e63626716e204A45EdF"),
+                toBigInt("5000000")
+              ) > 0
+            )
+          )
+      `,
+    },
+  };
+
+  const nodeIdNotification = UlidMonotonic.generate().toCanonical();
+  console.log("\nTrigger type", trigger.trigger_type);
+
+  const result = await asyncRPC(
+    client,
+    "CreateTask",
+    {
+      smart_wallet_address: smartWalletAddress,
+      nodes: [
+        {
+          id: nodeIdNotification,
+          name: 'notification',
+          rest_api: {
+            url: "https://api.telegram.org/bot/sendMessage?parse_mode=MarkdownV2",
+            method: "POST",
+            body: "chat_id=-4609037622&disable_notification=true&text=%2AWallet ${target.toLowerCase()} receive {{ trigger.data.data }} {{ trigger.data.token_symbol }} at {{ trigger.data.tx_hash }}%2A",
+            header: {
+              "content-type": "application/x-www-form-urlencoded"
+            }
+          }
+        },
+      ],
+
+      edges: [
+        {
+          id: UlidMonotonic.generate().toCanonical(),
+          // __TRIGGER__ is a special node. It doesn't appear directly in the task data, but it should be draw on the UI to show what is the entrypoint
+          source: "__TRIGGER__",
+          target: nodeIdNotification,
+        },
+      ],
+
+      trigger,
+      start_at: Math.floor(Date.now() / 1000) + 30,
+      expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
+      memo: `Demo Example task for ${owner}`,
+    },
+    metadata
+  );
+
+  console.log("create task", result);
 
   return result;
 }

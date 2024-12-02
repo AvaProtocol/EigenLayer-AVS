@@ -23,9 +23,11 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		Prefix: "default",
 	})
 	agg.worker = apqueue.NewWorker(agg.queue, agg.db)
+	x := taskengine.NewExecutor(agg.db, agg.logger)
 	agg.worker.RegisterProcessor(
-		"contract_run",
-		taskengine.NewProcessor(agg.db, agg.config.SmartWallet, agg.logger),
+		taskengine.ExecuteTask,
+		x,
+		//taskengine.NewProcessor(agg.db, agg.config.SmartWallet, agg.logger),
 	)
 
 	agg.engine = taskengine.New(
@@ -38,4 +40,11 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 
 	agg.queue.MustStart()
 	agg.worker.MustStart()
+
+	x.Perform(&apqueue.Job{
+		Type: "x",
+		Name: "01JE3MB0RHQPZHWATSW8SQQJV6",
+		Data: []byte(`{"block_number":7180996,"log_index":82,"tx_hash":"0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d"}`),
+	})
+
 }
