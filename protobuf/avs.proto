@@ -32,12 +32,41 @@ message CheckinResp {
   google.protobuf.Timestamp updated_at = 1;
 }
 
-message SyncTasksReq {
+message SyncMessagesReq {
   string id = 1;
   string address = 2;
-  string signature = 3;
+  bytes  signature = 3;
   int64  monotonic_clock = 4;
 }
+
+enum MessageOp {
+  Unset              = 0;
+  MonitorTaskTrigger = 1;
+  CancelTask         = 2;
+  DeleteTask         = 3;
+  CompletedTask      = 4;
+}
+
+message SyncMessagesResp {
+  // message id is used to support dedup
+  string id = 1;
+  MessageOp op = 2;
+
+  message TaskMetadata {
+    string task_id = 1;
+    // how many time this task can run
+    int64 remain = 2;
+    int64 expired_at = 3;
+    TaskTrigger trigger = 4;
+  };
+
+  TaskMetadata task_metadata = 3;
+}
+
+message AckMessageReq {
+  string id = 1;
+}
+
 
 message FixedEpochCondition {
   repeated int64 epochs = 1;
@@ -99,16 +128,8 @@ enum Error {
   SmartWalletNotFoundError = 6001;
 
   // Error occurs when we failed to migrate task data and it cannot be decode
-  TaskDataCorrupted = 7000;
+  TaskDataCorrupted    = 7000;
   TaskDataMissingError = 7001;
-}
-
-
-message SyncTasksResp {
-  string id        = 1;
-  string checkType = 2;
-
-  TaskTrigger trigger = 3;
 }
 
 
@@ -157,12 +178,12 @@ message RestAPINode {
   string              method  = 4;
 }
 
-enum CustomCodeType {
+enum CustomCodeLang {
   JavaScript = 0;
 }
 
 message CustomCodeNode {
-  CustomCodeType type     = 1;
+  CustomCodeLang lang     = 1;
   string         source    = 2;
 }
 
@@ -183,9 +204,30 @@ message FilterNode {
 
 // LoopNode currently not support, but we pre-defined to reverse the field id
 message LoopNode {
-  // name the iteration key and value.
-  string iter_var = 1;
-  string iter_key = 2;
+  // this is the variable name of any previous step so we can took it
+  string input   = 1;
+
+  // a var that the function can refer to it
+  string iter_val = 2;
+  string iter_key = 3;
+
+
+  // inside the runner, it can access to the current value of the loop iteration through the iter_val/iter_key above
+  oneof runner {
+    // Transfer eth require no calldata etc, just a destination address and an eth amount to be sent
+    ETHTransferNode   eth_transfer = 10;
+
+    // Run one ore more contracts. The call call also be batched with tool like
+    // multicall to wrap many calls. in a contract write, we need to generate signature and send as userops.
+    ContractWriteNode contract_write = 11;
+    // read data fron a target contract
+    ContractReadNode contract_read = 12;
+    // Make call to a graphql endpoint
+    GraphQLQueryNode  graphql_data_query = 13 ;
+    // Make call to a HTTP endpoint
+    RestAPINode       rest_api = 14;
+    CustomCodeNode    custom_code = 15;
+  }
 }
 
 // The edge is relationship or direct between node
@@ -225,6 +267,8 @@ message Execution {
   int64  epoch        = 1;
   string user_op_hash = 2;
   string error        = 3;
+
+  string log = 4;
 }
 
 message Task {
@@ -319,13 +363,22 @@ message KeyResp {
   string key=1;
 }
 
-message UpdateChecksReq {
-  string address = 1;
-  string signature = 2;
-  repeated string id = 3;
+
+message TriggerMark {
+  uint64 block_number = 1;
+  uint64 log_index = 2;
+  string tx_hash = 3;
 }
 
-message UpdateChecksResp {
+message NotifyTriggersReq {
+  string address = 1;
+  string signature = 2;
+
+  string task_id = 3;
+  TriggerMark trigger_marker = 4;
+}
+
+message NotifyTriggersResp {
   google.protobuf.Timestamp updated_at = 1;
 }
 
@@ -356,9 +409,12 @@ service Aggregator {
   rpc GetTask(IdReq)                 returns (Task) {};
   rpc CancelTask(IdReq)              returns (google.protobuf.BoolValue) {};
   rpc DeleteTask(IdReq)              returns (google.protobuf.BoolValue) {};
+}
 
+service Node {
   // Operator endpoint
   rpc Ping(Checkin) returns (CheckinResp) {};
-  rpc SyncTasks(SyncTasksReq) returns (stream SyncTasksResp) {};
-  rpc UpdateChecks(UpdateChecksReq) returns (UpdateChecksResp) {};
+  rpc SyncMessages(SyncMessagesReq) returns (stream SyncMessagesResp) {};
+  rpc Ack(AckMessageReq) returns (google.protobuf.BoolValue) {};
+  rpc NotifyTriggers(NotifyTriggersReq) returns (NotifyTriggersResp) {};
 }

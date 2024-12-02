@@ -1,4 +1,4 @@
-package taskengine
+package macros
 
 import (
 	"context"
@@ -10,10 +10,23 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	ethmath "github.com/ethereum/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
 )
+
+var (
+	rpcConn *ethclient.Client
+)
+
+func SetRpc(rpcURL string) {
+	if conn, err := ethclient.Dial(rpcURL); err == nil {
+		rpcConn = conn
+	} else {
+		panic(err)
+	}
+}
 
 // A generic function to query any contract. The method andcontractABI is
 // necessary so we can unpack the result
@@ -84,11 +97,11 @@ func chainlinkLatestAnswer(tokenPair string) *big.Int {
 	return output[0].(*big.Int)
 }
 
-func bigCmp(a *big.Int, b *big.Int) (r int) {
+func BigCmp(a *big.Int, b *big.Int) (r int) {
 	return a.Cmp(b)
 }
 
-func parseUnit(val string, decimal uint) *big.Int {
+func ParseUnit(val string, decimal uint) *big.Int {
 	b, ok := ethmath.ParseBig256(val)
 	if !ok {
 		panic(fmt.Errorf("Parse error: %s", val))
@@ -98,7 +111,7 @@ func parseUnit(val string, decimal uint) *big.Int {
 	return r.Div(b, big.NewInt(int64(decimal)))
 }
 
-func toBigInt(val string) *big.Int {
+func ToBigInt(val string) *big.Int {
 	// parse either string or hex
 	b, ok := ethmath.ParseBig256(val)
 	if !ok {
@@ -113,13 +126,28 @@ var (
 		"readContractData": readContractData,
 
 		"priceChainlink":           chainlinkLatestAnswer,
+		"chainlinkPrice":           chainlinkLatestAnswer,
 		"latestRoundDataChainlink": chainlinkLatestRoundData,
 
-		"bigCmp":    bigCmp,
-		"parseUnit": parseUnit,
-		"toBigInt":  toBigInt,
+		"bigCmp":    BigCmp,
+		"parseUnit": ParseUnit,
+		"toBigInt":  ToBigInt,
 	}
 )
+
+func GetEnvs(extra map[string]any) map[string]interface{} {
+	envs := map[string]any{}
+
+	for k, v := range exprEnv {
+		envs[k] = v
+	}
+
+	for k, v := range extra {
+		envs[k] = v
+	}
+
+	return envs
+}
 
 func CompileExpression(rawExp string) (*vm.Program, error) {
 	return expr.Compile(rawExp, expr.Env(exprEnv))

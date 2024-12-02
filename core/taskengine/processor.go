@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
 	"github.com/AvaProtocol/ap-avs/core/config"
@@ -18,21 +19,71 @@ import (
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 
 	"github.com/AvaProtocol/ap-avs/core/apqueue"
+	"github.com/AvaProtocol/ap-avs/core/taskengine/types"
 	"github.com/AvaProtocol/ap-avs/storage"
 )
+
+func NewExecutor(db storage.Storage, logger sdklogging.Logger) *TaskExecutor {
+	return &TaskExecutor{
+		db:     db,
+		logger: logger,
+	}
+}
+
+type TaskExecutor struct {
+	db     storage.Storage
+	logger sdklogging.Logger
+}
+
+func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
+	task := &model.Task{
+		Task: &avsproto.Task{},
+	}
+	item, err := x.db.GetKey([]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Executing), id)))
+
+	if err != nil {
+		return nil, err
+	}
+	err = protojson.Unmarshal(item, task)
+	if err != nil {
+		return nil, err
+	}
+
+	return task, nil
+}
+
+func (x *TaskExecutor) Perform(job *apqueue.Job) error {
+	task, err := x.GetTask(job.Name)
+	if err != nil {
+		return fmt.Errorf("fail to load task: %s", job.Name)
+	}
+
+	vm, err := NewVMWithData(types.TaskID(job.Name), task.Nodes, task.Edges)
+	if err != nil {
+		return fmt.Errorf("expect vm initialized")
+	}
+
+	fmt.Println("log", vm)
+	vm.Compile()
+	result, err = vm.Run()
+
+	if err == nil {
+		x.logger.Infof("succesfully executing task", "taskid", job.Name, "triggermark", string(job.Data))
+		task.AppendExecution(currentTime.Unix(), "ok", nil)
+		task.SetCompleted()
+	} else {
+		task.AppendExecution(currentTime.Unix(), "", err)
+		task.SetFailed()
+		return fmt.Errorf("Error executing program", err, "task_id", job.Name)
+	}
+
+	return nil
+}
 
 type ContractProcessor struct {
 	db                storage.Storage
 	smartWalletConfig *config.SmartWalletConfig
 	logger            sdklogging.Logger
-}
-
-func NewProcessor(db storage.Storage, smartWalletConfig *config.SmartWalletConfig, logger sdklogging.Logger) *ContractProcessor {
-	return &ContractProcessor{
-		db:                db,
-		smartWalletConfig: smartWalletConfig,
-		logger:            logger,
-	}
 }
 
 func (c *ContractProcessor) GetTask(id string) (*model.Task, error) {
@@ -50,7 +101,7 @@ func (c *ContractProcessor) GetTask(id string) (*model.Task, error) {
 	return &task, nil
 }
 
-func (c *ContractProcessor) Perform(job *apqueue.Job) error {
+func (c *ContractProcessor) ContractWrite(job *apqueue.Job) error {
 	currentTime := time.Now()
 
 	conn, _ := ethclient.Dial(c.smartWalletConfig.EthRpcUrl)

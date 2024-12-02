@@ -22,8 +22,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+)
+
+const (
+	ExecuteTask = "execute_task"
 )
 
 var (
@@ -34,8 +39,40 @@ var (
 	logger      sdklogging.Logger
 )
 
+// Set a global logger for task engine
 func SetLogger(mylogger sdklogging.Logger) {
 	logger = mylogger
+}
+
+// Initialize a shared rpc client instance
+func SetRpc(rpcURL string) {
+	if conn, err := ethclient.Dial(rpcURL); err == nil {
+		rpcConn = conn
+	} else {
+		panic(err)
+	}
+}
+
+// Initialize a shared websocket rpc client instance
+func SetWsRpc(rpcURL string) {
+	wsRpcURL = rpcURL
+	if err := retryWsRpc(); err != nil {
+		panic(err)
+	}
+}
+
+func retryWsRpc() error {
+	for {
+		conn, err := ethclient.Dial(wsRpcURL)
+		if err == nil {
+			wsEthClient = conn
+			return nil
+		}
+		logger.Errorf("cannot establish websocket client for RPC, retry in 15 seconds", "err", err)
+		time.Sleep(15 * time.Second)
+	}
+
+	return nil
 }
 
 type operatorState struct {
@@ -44,6 +81,7 @@ type operatorState struct {
 	MonotonicClock int64
 }
 
+// The core datastructure of the task engine
 type Engine struct {
 	db    storage.Storage
 	queue *apqueue.Queue
@@ -66,31 +104,7 @@ type Engine struct {
 	logger sdklogging.Logger
 }
 
-func SetRpc(rpcURL string) {
-	if conn, err := ethclient.Dial(rpcURL); err == nil {
-		rpcConn = conn
-	} else {
-		panic(err)
-	}
-}
-
-func SetWsRpc(rpcURL string) {
-	wsRpcURL = rpcURL
-	if err := retryWsRpc(); err != nil {
-		panic(err)
-	}
-}
-
-func retryWsRpc() error {
-	conn, err := ethclient.Dial(wsRpcURL)
-	if err == nil {
-		wsEthClient = conn
-		return nil
-	}
-
-	return err
-}
-
+// create a new task engine using given storage, config and queueu
 func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger sdklogging.Logger) *Engine {
 	e := Engine{
 		db:    db,
@@ -129,9 +143,12 @@ func (n *Engine) MustStart() {
 		panic(e)
 	}
 	for _, item := range kvs {
-		var task model.Task
-		if err := json.Unmarshal(item.Value, &task); err == nil {
-			n.tasks[string(item.Key)] = &task
+		task := &model.Task{
+			Task: &avsproto.Task{},
+		}
+		err := protojson.Unmarshal(item.Value, task)
+		if err == nil {
+			n.tasks[string(item.Key)] = task
 		}
 	}
 }
@@ -254,7 +271,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	return task, nil
 }
 
-func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avsproto.Aggregator_SyncTasksServer) error {
+func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv avsproto.Node_SyncMessagesServer) error {
 	ticker := time.NewTicker(5 * time.Second)
 	address := payload.Address
 
@@ -297,15 +314,23 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avspr
 					continue
 				}
 
-				n.logger.Info("stream check to operator", "taskID", task.Id, "operator", payload.Address)
-				resp := avsproto.SyncTasksResp{
-					Id:        task.Id,
-					CheckType: "CheckTrigger",
-					Trigger:   task.Trigger,
+				resp := avsproto.SyncMessagesResp{
+					Id: task.Id,
+					Op: avsproto.MessageOp_MonitorTaskTrigger,
+
+					TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
+						TaskId:    task.Id,
+						Remain:    task.MaxExecution,
+						ExpiredAt: task.ExpiredAt,
+						Trigger:   task.Trigger,
+					},
 				}
+				n.logger.Info("stream check to operator", "taskID", task.Id, "operator", payload.Address, "resp", resp)
 
 				if err := srv.Send(&resp); err != nil {
-					return err
+					// return error to cause client to establish re-connect the connection
+					n.logger.Info("error sending check to operator", "taskID", task.Id, "operator", payload.Address)
+					return fmt.Errorf("cannot send data back to grpc channel")
 				}
 
 				n.lock.Lock()
@@ -317,35 +342,37 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncTasksReq, srv avspr
 }
 
 // TODO: Merge and verify from multiple operators
-func (n *Engine) AggregateChecksResult(address string, ids []string) error {
-	if len(ids) < 1 {
+func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyTriggersReq) error {
+	if len(payload.TaskId) < 1 {
 		return nil
 	}
 
-	n.logger.Debug("process aggregator check hits", "operator", address, "task_ids", ids)
-	for _, id := range ids {
-		n.lock.Lock()
-		delete(n.tasks, id)
-		delete(n.trackSyncedTasks[address].TaskID, id)
-		n.logger.Info("processed aggregator check hit", "operator", address, "id", id)
-		n.lock.Unlock()
-	}
+	n.lock.Lock()
+	delete(n.tasks, payload.TaskId)
+	delete(n.trackSyncedTasks[address].TaskID, payload.TaskId)
+	n.logger.Info("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
+	n.lock.Unlock()
 
 	// Now we will queue the job
-	for _, id := range ids {
-		n.logger.Debug("mark task in executing status", "task_id", id)
+	n.logger.Debug("mark task in executing status", "task_id", payload.TaskId)
 
-		if err := n.db.Move(
-			[]byte(TaskStorageKey(id, avsproto.TaskStatus_Active)),
-			[]byte(TaskStorageKey(id, avsproto.TaskStatus_Executing)),
-		); err != nil {
-			n.logger.Error("error moving the task storage from active to executing", "task", id, "error", err)
-		}
-
-		n.queue.Enqueue("contract_run", id, []byte(id))
-		n.logger.Info("enqueue contract_run job", "taskid", id)
+	if err := n.db.Move(
+		[]byte(TaskStorageKey(payload.TaskId, avsproto.TaskStatus_Active)),
+		[]byte(TaskStorageKey(payload.TaskId, avsproto.TaskStatus_Executing)),
+	); err != nil {
+		n.logger.Error("error moving the task storage from active to executing", "task_id", payload.TaskId, "error", err)
 	}
 
+	data, err := json.Marshal(payload.TriggerMarker)
+	if err != nil {
+		n.logger.Error("error serialize trigger to json", err)
+		return err
+	}
+
+	n.queue.Enqueue(ExecuteTask, payload.TaskId, data)
+	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId)
+
+	// if the task can still run, add it back
 	return nil
 }
 
@@ -455,7 +482,6 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 	updates := map[string][]byte{}
 	oldStatus := task.Status
 	task.SetCanceled()
-	fmt.Println("found task", task, string(TaskStorageKey(task.Id, oldStatus)), string(TaskUserKey(task)))
 	updates[string(TaskStorageKey(task.Id, oldStatus))], err = task.ToJSON()
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 

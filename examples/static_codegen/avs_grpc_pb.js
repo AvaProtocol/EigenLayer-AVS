@@ -6,6 +6,17 @@ var avs_pb = require('./avs_pb.js');
 var google_protobuf_timestamp_pb = require('google-protobuf/google/protobuf/timestamp_pb.js');
 var google_protobuf_wrappers_pb = require('google-protobuf/google/protobuf/wrappers_pb.js');
 
+function serialize_aggregator_AckMessageReq(arg) {
+  if (!(arg instanceof avs_pb.AckMessageReq)) {
+    throw new Error('Expected argument of type aggregator.AckMessageReq');
+  }
+  return Buffer.from(arg.serializeBinary());
+}
+
+function deserialize_aggregator_AckMessageReq(buffer_arg) {
+  return avs_pb.AckMessageReq.deserializeBinary(new Uint8Array(buffer_arg));
+}
+
 function serialize_aggregator_Checkin(arg) {
   if (!(arg instanceof avs_pb.Checkin)) {
     throw new Error('Expected argument of type aggregator.Checkin');
@@ -171,26 +182,26 @@ function deserialize_aggregator_NonceResp(buffer_arg) {
   return avs_pb.NonceResp.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
-function serialize_aggregator_SyncTasksReq(arg) {
-  if (!(arg instanceof avs_pb.SyncTasksReq)) {
-    throw new Error('Expected argument of type aggregator.SyncTasksReq');
+function serialize_aggregator_SyncMessagesReq(arg) {
+  if (!(arg instanceof avs_pb.SyncMessagesReq)) {
+    throw new Error('Expected argument of type aggregator.SyncMessagesReq');
   }
   return Buffer.from(arg.serializeBinary());
 }
 
-function deserialize_aggregator_SyncTasksReq(buffer_arg) {
-  return avs_pb.SyncTasksReq.deserializeBinary(new Uint8Array(buffer_arg));
+function deserialize_aggregator_SyncMessagesReq(buffer_arg) {
+  return avs_pb.SyncMessagesReq.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
-function serialize_aggregator_SyncTasksResp(arg) {
-  if (!(arg instanceof avs_pb.SyncTasksResp)) {
-    throw new Error('Expected argument of type aggregator.SyncTasksResp');
+function serialize_aggregator_SyncMessagesResp(arg) {
+  if (!(arg instanceof avs_pb.SyncMessagesResp)) {
+    throw new Error('Expected argument of type aggregator.SyncMessagesResp');
   }
   return Buffer.from(arg.serializeBinary());
 }
 
-function deserialize_aggregator_SyncTasksResp(buffer_arg) {
-  return avs_pb.SyncTasksResp.deserializeBinary(new Uint8Array(buffer_arg));
+function deserialize_aggregator_SyncMessagesResp(buffer_arg) {
+  return avs_pb.SyncMessagesResp.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
 function serialize_aggregator_Task(arg) {
@@ -341,9 +352,13 @@ createTask: {
     responseSerialize: serialize_google_protobuf_BoolValue,
     responseDeserialize: deserialize_google_protobuf_BoolValue,
   },
+};
+
+exports.AggregatorClient = grpc.makeGenericClientConstructor(AggregatorService);
+var NodeService = exports.NodeService = {
   // Operator endpoint
 ping: {
-    path: '/aggregator.Aggregator/Ping',
+    path: '/aggregator.Node/Ping',
     requestStream: false,
     responseStream: false,
     requestType: avs_pb.Checkin,
@@ -353,19 +368,30 @@ ping: {
     responseSerialize: serialize_aggregator_CheckinResp,
     responseDeserialize: deserialize_aggregator_CheckinResp,
   },
-  syncTasks: {
-    path: '/aggregator.Aggregator/SyncTasks',
+  syncMessages: {
+    path: '/aggregator.Node/SyncMessages',
     requestStream: false,
     responseStream: true,
-    requestType: avs_pb.SyncTasksReq,
-    responseType: avs_pb.SyncTasksResp,
-    requestSerialize: serialize_aggregator_SyncTasksReq,
-    requestDeserialize: deserialize_aggregator_SyncTasksReq,
-    responseSerialize: serialize_aggregator_SyncTasksResp,
-    responseDeserialize: deserialize_aggregator_SyncTasksResp,
+    requestType: avs_pb.SyncMessagesReq,
+    responseType: avs_pb.SyncMessagesResp,
+    requestSerialize: serialize_aggregator_SyncMessagesReq,
+    requestDeserialize: deserialize_aggregator_SyncMessagesReq,
+    responseSerialize: serialize_aggregator_SyncMessagesResp,
+    responseDeserialize: deserialize_aggregator_SyncMessagesResp,
+  },
+  ack: {
+    path: '/aggregator.Node/Ack',
+    requestStream: false,
+    responseStream: false,
+    requestType: avs_pb.AckMessageReq,
+    responseType: google_protobuf_wrappers_pb.BoolValue,
+    requestSerialize: serialize_aggregator_AckMessageReq,
+    requestDeserialize: deserialize_aggregator_AckMessageReq,
+    responseSerialize: serialize_google_protobuf_BoolValue,
+    responseDeserialize: deserialize_google_protobuf_BoolValue,
   },
   updateChecks: {
-    path: '/aggregator.Aggregator/UpdateChecks',
+    path: '/aggregator.Node/UpdateChecks',
     requestStream: false,
     responseStream: false,
     requestType: avs_pb.UpdateChecksReq,
@@ -377,4 +403,4 @@ ping: {
   },
 };
 
-exports.AggregatorClient = grpc.makeGenericClientConstructor(AggregatorService);
+exports.NodeClient = grpc.makeGenericClientConstructor(NodeService);

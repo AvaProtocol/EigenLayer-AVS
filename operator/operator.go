@@ -51,6 +51,7 @@ import (
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/version"
 
+	triggerengine "github.com/AvaProtocol/ap-avs/core/taskengine/trigger"
 	"github.com/AvaProtocol/ap-avs/pkg/ipfetcher"
 	"github.com/AvaProtocol/ap-avs/pkg/timekeeper"
 )
@@ -131,8 +132,9 @@ type Operator struct {
 	newTaskCreatedChan chan *cstaskmanager.ContractAutomationTaskManagerNewTaskCreated
 
 	// rpc client to send signed task responses to aggregator
-	aggregatorRpcClient avsproto.AggregatorClient
-	aggregatorConn      *grpc.ClientConn
+	nodeRpcClient  avsproto.NodeClient
+	aggregatorConn *grpc.ClientConn
+
 	// needed when opting in to avs (allow this service manager contract to slash operator)
 	credibleSquaringServiceManagerAddr common.Address
 
@@ -143,7 +145,9 @@ type Operator struct {
 
 	publicIP string
 
-	scheduler gocron.Scheduler
+	scheduler    gocron.Scheduler
+	eventTrigger *triggerengine.EventTrigger
+	blockTrigger *triggerengine.BlockTrigger
 }
 
 func RunWithConfig(configPath string) {
@@ -343,7 +347,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		operatorAddr:  common.HexToAddress(c.OperatorAddress),
 		signerAddress: signerAddress,
 
-		//aggregatorRpcClient: aggregatorRpcClient,
+		//nodeRpcClient: nodeRpcClient,
 		//aggregatorConn:      aggregatorConn,
 
 		newTaskCreatedChan:                 make(chan *cstaskmanager.ContractAutomationTaskManagerNewTaskCreated),
@@ -391,6 +395,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	return operator, nil
 }
 
+// main entry function to bootstrap an operator
 func (o *Operator) Start(ctx context.Context) error {
 	if o.signerAddress.Cmp(o.operatorAddr) != 0 {
 		// Ensure alias key is correctly bind to operator address
@@ -445,7 +450,7 @@ func (o *Operator) retryConnect() error {
 	if err != nil {
 		return err
 	}
-	o.aggregatorRpcClient = avsproto.NewAggregatorClient(o.aggregatorConn)
+	o.nodeRpcClient = avsproto.NewNodeClient(o.aggregatorConn)
 	o.logger.Info("connected to aggregator", "aggregatorAddress", o.config.AggregatorServerIpPortAddress)
 	return nil
 }
