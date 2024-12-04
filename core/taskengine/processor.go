@@ -19,7 +19,6 @@ import (
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 
 	"github.com/AvaProtocol/ap-avs/core/apqueue"
-	"github.com/AvaProtocol/ap-avs/core/taskengine/types"
 	"github.com/AvaProtocol/ap-avs/storage"
 )
 
@@ -58,23 +57,39 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 		return fmt.Errorf("fail to load task: %s", job.Name)
 	}
 
-	vm, err := NewVMWithData(types.TaskID(job.Name), task.Nodes, task.Edges)
+	vm, err := NewVMWithData(job.Name, task.Nodes, task.Edges)
 	if err != nil {
 		return fmt.Errorf("expect vm initialized")
 	}
 
-	fmt.Println("log", vm)
 	vm.Compile()
-	result, err = vm.Run()
+	err = vm.Run()
 
+	defer func() {
+		updates := map[string][]byte{}
+		updates[string(TaskStorageKey(task.Id, avsproto.TaskStatus_Executing))], err = task.ToJSON()
+		updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
+
+		if err = x.db.BatchWrite(updates); err == nil {
+			x.db.Move(
+				[]byte(TaskStorageKey(task.Id, avsproto.TaskStatus_Executing)),
+				[]byte(TaskStorageKey(task.Id, task.Status)),
+			)
+		} else {
+			// TODO Gracefully handling of storage cleanup
+		}
+	}()
+
+	currentTime := time.Now()
 	if err == nil {
-		x.logger.Infof("succesfully executing task", "taskid", job.Name, "triggermark", string(job.Data))
-		task.AppendExecution(currentTime.Unix(), "ok", nil)
+		x.logger.Info("succesfully executing task", "taskid", job.Name, "triggermark", string(job.Data))
+		task.AppendExecution(currentTime.Unix(), vm.ExecutionLogs, nil)
 		task.SetCompleted()
 	} else {
-		task.AppendExecution(currentTime.Unix(), "", err)
+		x.logger.Error("error executing task", "taskid", job.Name, "triggermark", string(job.Data), err)
+		task.AppendExecution(currentTime.Unix(), vm.ExecutionLogs, err)
 		task.SetFailed()
-		return fmt.Errorf("Error executing program", err, "task_id", job.Name)
+		return fmt.Errorf("Error executing program: %v", err)
 	}
 
 	return nil
@@ -102,7 +117,7 @@ func (c *ContractProcessor) GetTask(id string) (*model.Task, error) {
 }
 
 func (c *ContractProcessor) ContractWrite(job *apqueue.Job) error {
-	currentTime := time.Now()
+	//currentTime := time.Now()
 
 	conn, _ := ethclient.Dial(c.smartWalletConfig.EthRpcUrl)
 	//defer conn.Close()
@@ -136,7 +151,7 @@ func (c *ContractProcessor) ContractWrite(job *apqueue.Job) error {
 	// TODO: move to vm.go
 	if action.GetContractWrite() == nil {
 		err := fmt.Errorf("invalid task action")
-		task.AppendExecution(currentTime.Unix(), "", err)
+		//task.AppendExecution(currentTime.Unix(), "", err)
 		task.SetFailed()
 		return err
 	}
@@ -153,7 +168,7 @@ func (c *ContractProcessor) ContractWrite(job *apqueue.Job) error {
 	if e != nil {
 		// TODO: maybe set retry?
 		err := fmt.Errorf("internal error, bundler not available")
-		task.AppendExecution(currentTime.Unix(), "", err)
+		//task.AppendExecution(currentTime.Unix(), "", err)
 		task.SetFailed()
 		return err
 	}
@@ -168,11 +183,11 @@ func (c *ContractProcessor) ContractWrite(job *apqueue.Job) error {
 	)
 
 	if txResult != "" {
-		task.AppendExecution(currentTime.Unix(), txResult, nil)
+		//task.AppendExecution(currentTime.Unix(), txResult, nil)
 		task.SetCompleted()
 		c.logger.Info("succesfully perform userop", "taskid", task.Id, "userop", txResult)
 	} else {
-		task.AppendExecution(currentTime.Unix(), "", err)
+		//task.AppendExecution(currentTime.Unix(), "", err)
 		task.SetFailed()
 		c.logger.Error("err perform userop", "taskid", task.Id, "error", err)
 	}

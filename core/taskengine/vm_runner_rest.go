@@ -1,4 +1,4 @@
-package runner
+package taskengine
 
 import (
 	"fmt"
@@ -32,14 +32,23 @@ func NewRestProrcessor() *RestProcessor {
 	return &r
 }
 
-func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*StepExecution, error) {
-	s := &StepExecution{
-		NodeID: stepID,
-		Logs:   []string{},
+func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
+	s := &avsproto.Execution_Step{
+		NodeId:  stepID,
+		Log:     "",
+		Result:  "",
+		Success: true,
+		Error:   "",
 	}
+
+	var log strings.Builder
 
 	request := r.client.R().
 		SetBody([]byte(node.Body))
+
+	for k, v := range node.Headers {
+		request = request.SetHeader(k, v)
+	}
 
 	var resp *resty.Response
 	var err error
@@ -47,11 +56,16 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*Ste
 		resp, err = request.Post(node.Url)
 	} else if strings.EqualFold(node.Method, "get") {
 		resp, err = request.Get(node.Url)
+	} else if strings.EqualFold(node.Method, "delete") {
+		resp, err = request.Delete(node.Url)
 	}
 
-	s.Logs = append(s.Logs, fmt.Sprintf("Request %s at %s", node.Url, time.Now()))
-	s.Result = resp.Body()
+	log.WriteString(fmt.Sprintf("Execute %s %s at %s", node.Method, node.Url, time.Now()))
+	s.Log = log.String()
+	s.Result = string(resp.Body())
 	if err != nil {
+		s.Success = false
+		s.Error = err.Error()
 		return s, err
 	}
 

@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
-	"github.com/AvaProtocol/ap-avs/core/testutil"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
@@ -105,10 +104,8 @@ func (evt *EventTrigger) Run(ctx context.Context) error {
 	}
 
 	// hardcode to test quick
-	event2, err := testutil.GetEventForTx("0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d", 1)
-	if err != nil {
-		panic(err)
-	}
+	// TODO: rever
+	//event2, err := testutil.GetEventForTx("0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d", 1)
 
 	go func() {
 		for {
@@ -126,7 +123,7 @@ func (evt *EventTrigger) Run(ctx context.Context) error {
 				// TODO: implement hint to avoid scan all checks
 				toRemove := []string{}
 
-				event = *event2
+				//event = *event2
 
 				evt.checks.Range(func(key any, value any) bool {
 					evt.logger.Info("evaluate with event", event)
