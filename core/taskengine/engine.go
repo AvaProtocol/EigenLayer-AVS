@@ -37,11 +37,20 @@ var (
 	wsEthClient *ethclient.Client
 	wsRpcURL    string
 	logger      sdklogging.Logger
+
+	// a global variable that we expose to our tasks. User can use `{{name}}` to access them
+	// These macro are define in our aggregator yaml config file under `macros`
+	macroEnvs map[string]string
 )
 
 // Set a global logger for task engine
 func SetLogger(mylogger sdklogging.Logger) {
 	logger = mylogger
+}
+
+// Set the global macro system. macros are static, immutable and available to  all tasks at runtime
+func SetMacro(v map[string]string) {
+	macroEnvs = v
 }
 
 // Initialize a shared rpc client instance

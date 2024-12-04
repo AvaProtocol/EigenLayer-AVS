@@ -442,7 +442,7 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
   const nodeIdTransfer = UlidMonotonic.generate().toCanonical();
   const nodeIdNotification = UlidMonotonic.generate().toCanonical();
 
-  console.log("\nTrigger type", trigger.trigger_type);
+  console.log("\nTrigger type", trigger1.trigger_type);
 
   const result = await asyncRPC(
     client,
@@ -511,32 +511,22 @@ async function scheduleMonitor(owner, token, target) {
   metadata.add("authkey", token);
 
   let trigger = {
+    name: "trigger1",
     trigger_type: TaskTrigger.TriggerTypeCase.EVENT,
     event: {
+      // This is an example to show case the branch
+      //
+      // IN PRACTICE, it strongly recomend to add the filter directly to trigger to make it more efficient and not wasting aggregator resources
       // native eth transfer emit no event, we use this partciular topic[0] to simulate it
-      // .. (trigger.data.topic[0] == "native_eth_tx" && trigger.data.topic[2] == "${target}" ) ||
-      expression: `
-        (trigger.data.topics[0] == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" && trigger.data.topics[2] == "${target.toLowerCase()}") && 
-          (
-            ( trigger.data.address == lower("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238") &&
-              bigCmp(
-                toBigInt(trigger.data.data),
-                toBigInt("5000000")
-              ) > 0
-            ) ||
-            ( trigger.data.address == lower("0x779877a7b0d9e8603169ddbd7836e478b4624789") &&
-              bigCmp(
-                chainlinkPrice("0xc59E3633BAAC79493d908e63626716e204A45EdF"),
-                toBigInt("5000000")
-              ) > 0
-            )
-          )
-      `,
+      // .. (trigger1.data.topic[0] == "native_eth_tx" && trigger1.data.topic[2] == "${target}" ) ||
+      // TODO: eventually we want to allow trigger2 trigger3 but for now has to hardcode trigger1
+      expression: `trigger1.data.topics[0] == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" && trigger1.data.topics[2] == "${target.toLowerCase()}"`,
     },
   };
 
   const nodeIdNotification = UlidMonotonic.generate().toCanonical();
-  console.log("\nTrigger type", trigger.trigger_type);
+  const nodeIdCheckAmount = UlidMonotonic.generate().toCanonical();
+  const branchIdCheckAmount = UlidMonotonic.generate().toCanonical();
 
   const result = await asyncRPC(
     client,
@@ -545,14 +535,51 @@ async function scheduleMonitor(owner, token, target) {
       smart_wallet_address: smartWalletAddress,
       nodes: [
         {
+          id: nodeIdCheckAmount,
+          name: 'checkAmount',
+          branch: {
+            conditions: [
+              {
+                id: branchIdCheckAmount,
+                type: "if",
+                expression: `
+                   // usdc
+                   ( trigger1.data.address == lower("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238") &&
+                     bigCmp(
+                       toBigInt(trigger1.data.data),
+                       toBigInt("2000000")
+                     ) > 0
+                   ) ||
+                   ( trigger1.data.address == lower("0x779877a7b0d9e8603169ddbd7836e478b4624789") &&
+                     bigCmp(
+                       // link token
+                       chainlinkPrice("0xc59E3633BAAC79493d908e63626716e204A45EdF"),
+                       toBigInt("5000000")
+                     ) > 0
+                   )
+                `
+              }
+            ]
+          },
+        },
+        {
           id: nodeIdNotification,
           name: 'notification',
           rest_api: {
-            url: "https://api.telegram.org/bot/sendMessage?parse_mode=MarkdownV2",
+            // As an user, they have 2 option to provide telegram bot token:
+            // 1. Use their own bot by putting the token directly here. That user is the only one see their own tasks/logs
+            // 2. (Prefered way) Use Ava Protocol Bot token. However, now because the user can see their own task config, we cannot use the raw token and has to use a variable here.
+            url: "https://api.telegram.org/bot{{notify_bot_token}}/sendMessage?parse_mode=MarkdownV2",
+            //url: `https://webhook.site/4a2cb0c4-86ea-4189-b1e3-ce168f5d4840`,
             method: "POST",
-            body: "chat_id=-4609037622&disable_notification=true&text=%2AWallet ${target.toLowerCase()} receive {{ trigger.data.data }} {{ trigger.data.token_symbol }} at {{ trigger.data.tx_hash }}%2A",
-            header: {
-              "content-type": "application/x-www-form-urlencoded"
+            //body: "chat_id=-4609037622&disable_notification=true&text=%2AWallet+${target.toLowerCase()}+receive+{{ trigger1.data.data }} {{ trigger1.data.token_symbol }} at {{ trigger1.data.tx_hash }}%2A",
+            // This body is written this way so that it will be evaluate at run time in a JavaScript sandbox
+            body: `JSON.stringify({
+              chat_id:-4609037622,
+              text: \`Congrat, your walllet ${target} received \${trigger1.data.amount} \${trigger1.data.token_symbol} at [\${trigger1.data.tx_hash}](sepolia.etherscan.io/tx/\${trigger1.data.tx_hash})\`
+            })`,
+            headers: {
+              "content-type": "application/json"
             }
           }
         },
@@ -563,6 +590,12 @@ async function scheduleMonitor(owner, token, target) {
           id: UlidMonotonic.generate().toCanonical(),
           // __TRIGGER__ is a special node. It doesn't appear directly in the task data, but it should be draw on the UI to show what is the entrypoint
           source: "__TRIGGER__",
+          target: nodeIdCheckAmount,
+        },
+        {
+          id: UlidMonotonic.generate().toCanonical(),
+          // __TRIGGER__ is a special node. It doesn't appear directly in the task data, but it should be draw on the UI to show what is the entrypoint
+          source: `${nodeIdCheckAmount}.${branchIdCheckAmount}`,
           target: nodeIdNotification,
         },
       ],
@@ -570,7 +603,7 @@ async function scheduleMonitor(owner, token, target) {
       trigger,
       start_at: Math.floor(Date.now() / 1000) + 30,
       expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
-      memo: `Demo Example task for ${owner}`,
+      memo: `Montoring large token transfer for ${target}`,
     },
     metadata
   );

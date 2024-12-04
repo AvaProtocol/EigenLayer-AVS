@@ -40,7 +40,7 @@ func GetRpcClient() *ethclient.Client {
 	return client
 }
 
-func GetEventForTx(txHash string, evtIndex int) (*types.Log, error) {
+func GetEventForTx(txHash string, evtIndex uint64) (*types.Log, error) {
 	client := GetRpcClient()
 
 	receipt, err := client.TransactionReceipt(context.Background(), common.HexToHash(txHash))
@@ -50,7 +50,7 @@ func GetEventForTx(txHash string, evtIndex int) (*types.Log, error) {
 
 	var event *types.Log
 	for _, l := range receipt.Logs {
-		if uint64(l.Index) == triggerMark.LogIndex {
+		if uint64(l.Index) == evtIndex {
 			event = l
 		}
 	}

@@ -28,7 +28,7 @@ func TestRestRequest(t *testing.T) {
 		t.Errorf("expected rest node run succesfully but failed")
 	}
 
-	if !strings.Contains(step.Log, "Execute POST https://webhook.site/4a2cb0c4-86ea-4189-b1e3-ce168f5d4840 at") {
+	if !strings.Contains(step.Log, "Execute POST webhook.site at") {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 

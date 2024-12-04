@@ -110,7 +110,7 @@ func NewVMWithData(taskID string, triggerMark *avsproto.TriggerMark, nodes []*av
 		}
 
 		if event == nil {
-			return nil, fmt.Errorf("tx %s doesn't content event %s", triggerMark.TxHash, triggerMark.LogIndex)
+			return nil, fmt.Errorf("tx %s doesn't content event %d", triggerMark.TxHash, triggerMark.LogIndex)
 		}
 		// TODO: decode with event signature
 		token, err := erc20.NewErc20(event.Address, rpcConn)
@@ -269,12 +269,13 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 	}
 
 	if nodeValue := node.GetRestApi(); nodeValue != nil {
-		// TODO: extract into function
+		// TODO: refactor into function
 		p := NewRestProrcessor()
 
-		if nodeValue.Body != "" {
+		// only evaluate string when there is string interpolation
+		if nodeValue.Body != "" && strings.Contains(nodeValue.Body, "$") {
 			nodeValue2 := &avsproto.RestAPINode{
-				Url:     nodeValue.Url,
+				Url:     macros.RenderString(nodeValue.Url, macroEnvs),
 				Headers: nodeValue.Headers,
 				Method:  nodeValue.Method,
 				Body:    strings.Clone(nodeValue.Body),

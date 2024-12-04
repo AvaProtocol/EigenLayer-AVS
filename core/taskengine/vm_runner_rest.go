@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -60,7 +61,12 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		resp, err = request.Delete(node.Url)
 	}
 
-	log.WriteString(fmt.Sprintf("Execute %s %s at %s", node.Method, node.Url, time.Now()))
+	u, err := url.Parse(node.Url)
+	if err != nil {
+		return nil, err
+	}
+
+	log.WriteString(fmt.Sprintf("Execute %s %s at %s", node.Method, u.Hostname(), time.Now()))
 	s.Log = log.String()
 	s.Result = string(resp.Body())
 	if err != nil {

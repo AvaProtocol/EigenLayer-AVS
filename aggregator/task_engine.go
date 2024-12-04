@@ -24,10 +24,11 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		Prefix: "default",
 	})
 	agg.worker = apqueue.NewWorker(agg.queue, agg.db)
-	x := taskengine.NewExecutor(agg.db, agg.logger)
+	taskExecutor := taskengine.NewExecutor(agg.db, agg.logger)
+	taskengine.SetMacro(agg.config.Macros)
 	agg.worker.RegisterProcessor(
 		taskengine.ExecuteTask,
-		x,
+		taskExecutor,
 	)
 
 	agg.engine = taskengine.New(
@@ -51,9 +52,9 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	//		TxHash:      "0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d",
 	//	},
 	//})
-	err := x.Perform(&apqueue.Job{
+	err := taskExecutor.Perform(&apqueue.Job{
 		Type: taskengine.ExecuteTask,
-		Name: "01JE8SPXSRWFBR6NGHNKNMVV0W",
+		Name: "01JE99NV4K4RNVZSS8C5V3H0KT",
 		Data: []byte(`{"block_number":7180996,"log_index":82,"tx_hash":"0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d"}`),
 	})
 	log.Println("error perform job", err)

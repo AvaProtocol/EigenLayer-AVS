@@ -157,7 +157,7 @@ func TestRunSequentialTasks(t *testing.T) {
 
 	pp.Print(vm.ExecutionLogs)
 
-	if !strings.Contains(vm.ExecutionLogs[0].Log, "Execute POST https://httpbin.org/post at") || !strings.Contains(vm.ExecutionLogs[1].Log, "Execute GET https://httpbin.org/get") {
+	if !strings.Contains(vm.ExecutionLogs[0].Log, "Execute POST httpbin.org at") || !strings.Contains(vm.ExecutionLogs[1].Log, "Execute GET httpbin.org") {
 		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got nothing")
 	}
 
