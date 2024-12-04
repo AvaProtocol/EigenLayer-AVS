@@ -502,6 +502,8 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
   return result;
 }
 
+
+
 // setup a task to monitor in/out transfer for a wallet and send notification
 async function scheduleMonitor(owner, token, target) {
   const wallets = await getWallets(owner, token);
@@ -574,9 +576,10 @@ async function scheduleMonitor(owner, token, target) {
             method: "POST",
             //body: "chat_id=-4609037622&disable_notification=true&text=%2AWallet+${target.toLowerCase()}+receive+{{ trigger1.data.data }} {{ trigger1.data.token_symbol }} at {{ trigger1.data.tx_hash }}%2A",
             // This body is written this way so that it will be evaluate at run time in a JavaScript sandbox
+            // It's important to quote amount with `` because it may contains a `.` and need to be escape with markdownv2
             body: `JSON.stringify({
               chat_id:-4609037622,
-              text: \`Congrat, your walllet ${target} received \${trigger1.data.amount} \${trigger1.data.token_symbol} at [\${trigger1.data.tx_hash}](sepolia.etherscan.io/tx/\${trigger1.data.tx_hash})\`
+              text: \`Congrat, your walllet [\${trigger1.data.to_address}](https://sepolia.etherscan.io/address/\${trigger1.data.to_address}) received \\\`\${trigger1.data.value_formatted}\\\` [\${trigger1.data.token_symbol}](https://sepolia.etherscan.io/token/\${trigger1.data.address}) at [\${trigger1.data.transaction_hash}](sepolia.etherscan.io/tx/\${trigger1.data.transaction_hash})\`
             })`,
             headers: {
               "content-type": "application/json"

@@ -1,7 +1,6 @@
 package trigger
 
 import (
-	"log"
 	"testing"
 
 	"github.com/AvaProtocol/ap-avs/core/testutil"
@@ -9,8 +8,6 @@ import (
 
 func TestChainlinkLatestAnswer(t *testing.T) {
 	event, err := testutil.GetEventForTx("0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d", 82)
-
-	log.Println(event)
 
 	if err != nil {
 		t.Errorf("expect no error but got one: %v", err)

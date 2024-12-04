@@ -137,6 +137,10 @@ func handleConnection(agg *Aggregator, conn net.Conn) {
 		case "exit":
 			fmt.Fprintln(conn, "Exiting...")
 			return
+		case "trigger":
+			fmt.Fprintln(conn, "about to trigger on server")
+			//agg.engine.TriggerWith
+
 		default:
 			fmt.Fprintln(conn, "Unknown command:", command)
 		}

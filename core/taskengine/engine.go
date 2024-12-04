@@ -16,6 +16,7 @@ import (
 	"github.com/AvaProtocol/ap-avs/model"
 	"github.com/AvaProtocol/ap-avs/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
+	"github.com/allegro/bigcache/v3"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -41,6 +42,7 @@ var (
 	// a global variable that we expose to our tasks. User can use `{{name}}` to access them
 	// These macro are define in our aggregator yaml config file under `macros`
 	macroEnvs map[string]string
+	cache     *bigcache.BigCache
 )
 
 // Set a global logger for task engine
@@ -51,6 +53,10 @@ func SetLogger(mylogger sdklogging.Logger) {
 // Set the global macro system. macros are static, immutable and available to  all tasks at runtime
 func SetMacro(v map[string]string) {
 	macroEnvs = v
+}
+
+func SetCache(c *bigcache.BigCache) {
+	cache = c
 }
 
 // Initialize a shared rpc client instance

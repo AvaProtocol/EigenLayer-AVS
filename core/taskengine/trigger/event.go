@@ -67,6 +67,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMark[EventMark]) *Event
 
 // TODO: track remainExecution and expriedAt before merge
 func (t *EventTrigger) AddCheck(check *avspb.SyncMessagesResp_TaskMetadata) error {
+	// Dummy value to get type
 	envs := macros.GetEnvs(map[string]interface{}{
 		"trigger1": map[string]interface{}{
 			"data": map[string]interface{}{

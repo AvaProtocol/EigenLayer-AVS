@@ -3,7 +3,6 @@ package macros
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/big"
 	"strings"
 
@@ -33,7 +32,6 @@ func SetRpc(rpcURL string) {
 func readContractData(contractAddress string, data string, method string, contractABI string) []any {
 	parsedABI, err := abi.JSON(strings.NewReader(contractABI))
 	if err != nil {
-		log.Println("read contract data parse abi error", err)
 		return nil
 	}
 
@@ -44,14 +42,12 @@ func readContractData(contractAddress string, data string, method string, contra
 		common.HexToAddress(contractAddress),
 		common.FromHex(data))
 	if err != nil {
-		log.Println("read contract data error", err)
 		return nil
 	}
 
 	// Unpack the output
 	result, err := parsedABI.Unpack(method, output)
 	if err != nil {
-		log.Println("unpack contract result error", err)
 		return nil
 	}
 
@@ -162,7 +158,6 @@ func RunExpressionQuery(exprCode string) (bool, error) {
 
 	result, err := expr.Run(program, exprEnv)
 	if err != nil {
-		log.Println("error when evaluting", err)
 		return false, nil
 	}
 

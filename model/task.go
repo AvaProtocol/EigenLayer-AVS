@@ -108,6 +108,10 @@ func (t *Task) SetCompleted() {
 	t.CompletedAt = time.Now().Unix()
 }
 
+func (t *Task) SetActive() {
+	t.Status = avsproto.TaskStatus_Active
+}
+
 func (t *Task) SetFailed() {
 	t.Status = avsproto.TaskStatus_Failed
 	t.CompletedAt = time.Now().Unix()

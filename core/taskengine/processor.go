@@ -196,11 +196,10 @@ func (c *ContractProcessor) ContractWrite(job *apqueue.Job) error {
 	)
 
 	if txResult != "" {
-		//task.AppendExecution(currentTime.Unix(), txResult, nil)
-		task.SetCompleted()
+		// only set complete when the task is not reaching max
+		// task.SetCompleted()
 		c.logger.Info("succesfully perform userop", "taskid", task.Id, "userop", txResult)
 	} else {
-		//task.AppendExecution(currentTime.Unix(), "", err)
 		task.SetFailed()
 		c.logger.Error("err perform userop", "taskid", task.Id, "error", err)
 	}

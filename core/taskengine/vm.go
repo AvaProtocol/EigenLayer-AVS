@@ -3,7 +3,6 @@ package taskengine
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 
@@ -11,7 +10,6 @@ import (
 	"github.com/ginkgoch/godash/v2"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/expr-lang/expr"
 
@@ -112,24 +110,37 @@ func NewVMWithData(taskID string, triggerMark *avsproto.TriggerMark, nodes []*av
 		if event == nil {
 			return nil, fmt.Errorf("tx %s doesn't content event %d", triggerMark.TxHash, triggerMark.LogIndex)
 		}
-		// TODO: decode with event signature
-		token, err := erc20.NewErc20(event.Address, rpcConn)
-		symbol, err := token.Symbol(nil)
-		decimal, err := token.Decimals(nil)
 
-		hexAmount := strings.TrimLeft(common.Bytes2Hex(event.Data), "0")
-		bigAmount, err := hexutil.DecodeBig("0x" + hexAmount)
+		tokenMetadata, err := GetMetadataForTransfer(event)
+		ef, err := erc20.NewErc20(event.Address, nil)
+
+		blockHeader, err := GetBlock(event.BlockNumber)
+		if err != nil {
+			return nil, fmt.Errorf("RPC error getting block header. Retry: %w", err)
+		}
+
+		parseTransfer, err := ef.ParseTransfer(*event)
+		formattedValue := ToDecimal(parseTransfer.Value, int(tokenMetadata.Decimals)).String()
 
 		v.vars["trigger1"] = map[string]interface{}{
 			"data": map[string]interface{}{
-				"address": strings.ToLower(event.Address.Hex()),
 				"topics": godash.Map(event.Topics, func(topic common.Hash) string {
 					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
 				}),
-				"data":         "0x" + common.Bytes2Hex(event.Data),
-				"amount":       ToDecimal(bigAmount, int(decimal)).String(),
-				"token_symbol": symbol,
-				"tx_hash":      event.TxHash,
+				"data": "0x" + common.Bytes2Hex(event.Data),
+
+				"token_name":        tokenMetadata.Name,
+				"token_symbol":      tokenMetadata.Symbol,
+				"token_decimals":    tokenMetadata.Decimals,
+				"transaction_hash":  event.TxHash,
+				"address":           strings.ToLower(event.Address.Hex()),
+				"block_number":      event.BlockNumber,
+				"block_timestamp":   blockHeader.Time,
+				"from_address":      parseTransfer.From.String(),
+				"to_address":        parseTransfer.To.String(),
+				"value":             parseTransfer.Value.String(),
+				"value_formatted":   formattedValue,
+				"transaction_index": event.TxIndex,
 			},
 		}
 
@@ -285,10 +296,7 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 			vm.Set("trigger1", v.vars["trigger1"])
 
 			renderBody, err := vm.RunString(nodeValue.Body)
-			if err != nil {
-				log.Println("error render string", err)
-			} else {
-				log.Println("string before", nodeValue.Body, "after", renderBody.Export().(string))
+			if err == nil {
 				nodeValue2.Body = renderBody.Export().(string)
 			}
 			executionLog, err = p.Execute(node.Id, nodeValue2)
