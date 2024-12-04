@@ -2,6 +2,7 @@ package aggregator
 
 import (
 	"context"
+	"log"
 
 	"github.com/AvaProtocol/ap-avs/core/apqueue"
 	"github.com/AvaProtocol/ap-avs/core/taskengine"
@@ -27,7 +28,6 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	agg.worker.RegisterProcessor(
 		taskengine.ExecuteTask,
 		x,
-		//taskengine.NewProcessor(agg.db, agg.config.SmartWallet, agg.logger),
 	)
 
 	agg.engine = taskengine.New(
@@ -41,10 +41,21 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	agg.queue.MustStart()
 	agg.worker.MustStart()
 
-	x.Perform(&apqueue.Job{
-		Type: "x",
-		Name: "01JE3MB0RHQPZHWATSW8SQQJV6",
+	//agg.engine.AggregateChecksResult("0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d", &avsproto.NotifyTriggersReq{
+	//	Address:   "0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d",
+	//	Signature: "123",
+	//	TaskId:    "01JE8FDNGD1HB3G03FC5BKPBMV",
+	//	TriggerMarker: &avsproto.TriggerMark{
+	//		BlockNumber: 7180996,
+	//		LogIndex:    82,
+	//		TxHash:      "0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d",
+	//	},
+	//})
+	err := x.Perform(&apqueue.Job{
+		Type: taskengine.ExecuteTask,
+		Name: "01JE8SPXSRWFBR6NGHNKNMVV0W",
 		Data: []byte(`{"block_number":7180996,"log_index":82,"tx_hash":"0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d"}`),
 	})
+	log.Println("error perform job", err)
 
 }

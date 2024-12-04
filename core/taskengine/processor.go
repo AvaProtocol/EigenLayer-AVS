@@ -41,7 +41,11 @@ func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
 	item, err := x.db.GetKey([]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Executing), id)))
 
 	if err != nil {
-		return nil, err
+		// Fallback, TODO: track this and see how often we fall to this
+		item, err = x.db.GetKey([]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Active), id)))
+		if err != nil {
+			return nil, err
+		}
 	}
 	err = protojson.Unmarshal(item, task)
 	if err != nil {
@@ -57,9 +61,18 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 		return fmt.Errorf("fail to load task: %s", job.Name)
 	}
 
-	vm, err := NewVMWithData(job.Name, task.Nodes, task.Edges)
+	// A task executor data is the trigger mark
+	// ref: AggregateChecksResult
+	triggerMark := &avsproto.TriggerMark{}
+	err = json.Unmarshal(job.Data, triggerMark)
 	if err != nil {
-		return fmt.Errorf("expect vm initialized")
+		return fmt.Errorf("error decode job payload when executing task: %s with job id %d", task.Id, job.ID)
+	}
+
+	vm, err := NewVMWithData(job.Name, triggerMark, task.Nodes, task.Edges)
+
+	if err != nil {
+		return fmt.Errorf("vm failed to initialize: %w", err)
 	}
 
 	vm.Compile()

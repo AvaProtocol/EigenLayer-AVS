@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dop251/goja"
 	"github.com/k0kubun/pp/v3"
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
@@ -33,7 +34,7 @@ func TestVMCompile(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", nodes, edges)
+	vm, err := NewVMWithData("123", nil, nodes, edges)
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -70,7 +71,7 @@ func TestRunSimpleTasks(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", nodes, edges)
+	vm, err := NewVMWithData("123", nil, nodes, edges)
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -131,7 +132,7 @@ func TestRunSequentialTasks(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", nodes, edges)
+	vm, err := NewVMWithData("123", nil, nodes, edges)
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -241,7 +242,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", nodes, edges)
+	vm, err := NewVMWithData("123", nil, nodes, edges)
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -300,4 +301,23 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	if !strings.Contains(vm.ExecutionLogs[1].Result, `notification2`) {
 		t.Errorf("expect executing notification1 step but not it didn't run")
 	}
+}
+
+func TestRenderString(t *testing.T) {
+	vm := goja.New()
+	vm.Set("trigger1", map[string]any{
+		"data": map[string]any{
+			"token_symbol": "0x123",
+			"amount":       123,
+			"tx_hash":      "foo",
+		},
+	})
+	vm.Set("target", "123")
+
+	v, err := vm.RunString(`JSON.stringify({
+      chat_id:-4609037622,
+	  text: ` + "`Congrat, your walllet ${target} received ${trigger1.data.amount} ${trigger1.data.token_symbol} at [${trigger1.data.tx_hash}](sepolia.etherscan.io/tx/${trigger1.data.tx_hash}`" + `
+	  })`)
+
+	fmt.Println("result", v, "error", err)
 }

@@ -348,8 +348,10 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	}
 
 	n.lock.Lock()
-	delete(n.tasks, payload.TaskId)
-	delete(n.trackSyncedTasks[address].TaskID, payload.TaskId)
+	// delete(n.tasks, payload.TaskId)
+	// delete(n.trackSyncedTasks[address].TaskID, payload.TaskId)
+	// uncomment later
+
 	n.logger.Info("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
 	n.lock.Unlock()
 

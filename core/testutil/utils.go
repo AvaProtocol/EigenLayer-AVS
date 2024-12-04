@@ -48,8 +48,15 @@ func GetEventForTx(txHash string, evtIndex int) (*types.Log, error) {
 		return nil, err
 	}
 
-	if evtIndex >= len(receipt.Logs) {
-		return nil, fmt.Errorf("tx %s has only %d events", txHash, len(receipt.Logs))
+	var event *types.Log
+	for _, l := range receipt.Logs {
+		if uint64(l.Index) == triggerMark.LogIndex {
+			event = l
+		}
+	}
+
+	if event == nil {
+		return nil, fmt.Errorf("not found event")
 	}
 	return receipt.Logs[evtIndex], nil
 }

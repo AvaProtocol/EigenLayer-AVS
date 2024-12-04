@@ -68,7 +68,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMark[EventMark]) *Event
 // TODO: track remainExecution and expriedAt before merge
 func (t *EventTrigger) AddCheck(check *avspb.SyncMessagesResp_TaskMetadata) error {
 	envs := macros.GetEnvs(map[string]interface{}{
-		"trigger": map[string]interface{}{
+		"trigger1": map[string]interface{}{
 			"data": map[string]interface{}{
 				"address": "dummy",
 				"topics": godash.Map([]common.Hash{}, func(topic common.Hash) string {
@@ -165,7 +165,7 @@ func (evt *EventTrigger) Run(ctx context.Context) error {
 
 func (evt *EventTrigger) Evaluate(event *types.Log, program *vm.Program) (bool, error) {
 	envs := macros.GetEnvs(map[string]interface{}{
-		"trigger": map[string]interface{}{
+		"trigger1": map[string]interface{}{
 			"data": map[string]interface{}{
 				"address": strings.ToLower(event.Address.Hex()),
 				"topics": godash.Map(event.Topics, func(topic common.Hash) string {

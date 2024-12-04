@@ -1,13 +1,23 @@
 package taskengine
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 
-	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/dop251/goja"
+	"github.com/ginkgoch/godash/v2"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/expr-lang/expr"
+
+	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
+	"github.com/AvaProtocol/ap-avs/pkg/erc20"
+	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
 type VMState string
@@ -66,7 +76,7 @@ func (v *VM) Reset() {
 	v.instructionCount = 0
 }
 
-func NewVMWithData(taskID string, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge) (*VM, error) {
+func NewVMWithData(taskID string, triggerMark *avsproto.TriggerMark, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge) (*VM, error) {
 	v := &VM{
 		Status:           VMStateInitialize,
 		TaskEdges:        edges,
@@ -80,25 +90,60 @@ func NewVMWithData(taskID string, nodes []*avsproto.TaskNode, edges []*avsproto.
 		v.TaskNodes[node.Id] = node
 	}
 
-	// TODO: load initial data based on trigger
-	v.vars = macros.GetEnvs(map[string]interface{}{
-		"trigger": map[string]interface{}{
+	v.vars = macros.GetEnvs(map[string]any{})
+
+	// popular trigger data for trigger variable
+	if triggerMark != nil && triggerMark.LogIndex > 0 && triggerMark.TxHash != "" {
+		// if it contains event, we need to fetch and pop
+		receipt, err := rpcConn.TransactionReceipt(context.Background(), common.HexToHash(triggerMark.TxHash))
+		if err != nil {
+			return nil, err
+		}
+
+		var event *types.Log
+		//event := receipt.Logs[triggerMark.LogIndex]
+
+		for _, l := range receipt.Logs {
+			if uint64(l.Index) == triggerMark.LogIndex {
+				event = l
+			}
+		}
+
+		if event == nil {
+			return nil, fmt.Errorf("tx %s doesn't content event %s", triggerMark.TxHash, triggerMark.LogIndex)
+		}
+		// TODO: decode with event signature
+		token, err := erc20.NewErc20(event.Address, rpcConn)
+		symbol, err := token.Symbol(nil)
+		decimal, err := token.Decimals(nil)
+
+		hexAmount := strings.TrimLeft(common.Bytes2Hex(event.Data), "0")
+		bigAmount, err := hexutil.DecodeBig("0x" + hexAmount)
+
+		v.vars["trigger1"] = map[string]interface{}{
 			"data": map[string]interface{}{
-				// "address": strings.ToLower(event.Address.Hex()),
-				// "topics": godash.Map(event.Topics, func(topic common.Hash) string {
-				// 	return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
-				// }),
-				// "data":    "0x" + common.Bytes2Hex(event.Data),
-				// "tx_hash": event.TxHash
+				"address": strings.ToLower(event.Address.Hex()),
+				"topics": godash.Map(event.Topics, func(topic common.Hash) string {
+					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+				}),
+				"data":         "0x" + common.Bytes2Hex(event.Data),
+				"amount":       ToDecimal(bigAmount, int(decimal)).String(),
+				"token_symbol": symbol,
+				"tx_hash":      event.TxHash,
 			},
-		},
-	})
+		}
+
+	}
 
 	return v, nil
 }
 
 func (v *VM) CreateSandbox() error {
 	return nil
+}
+
+func (v *VM) AddVar(key string, value any) {
+	v.vars[key] = value
 }
 
 // Compile generates an execution plan based on edge
@@ -224,8 +269,32 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 	}
 
 	if nodeValue := node.GetRestApi(); nodeValue != nil {
+		// TODO: extract into function
 		p := NewRestProrcessor()
-		executionLog, err = p.Execute(node.Id, nodeValue)
+
+		if nodeValue.Body != "" {
+			nodeValue2 := &avsproto.RestAPINode{
+				Url:     nodeValue.Url,
+				Headers: nodeValue.Headers,
+				Method:  nodeValue.Method,
+				Body:    strings.Clone(nodeValue.Body),
+			}
+			vm := goja.New()
+			// TODO: dynamically set var
+			vm.Set("trigger1", v.vars["trigger1"])
+
+			renderBody, err := vm.RunString(nodeValue.Body)
+			if err != nil {
+				log.Println("error render string", err)
+			} else {
+				log.Println("string before", nodeValue.Body, "after", renderBody.Export().(string))
+				nodeValue2.Body = renderBody.Export().(string)
+			}
+			executionLog, err = p.Execute(node.Id, nodeValue2)
+		} else {
+			executionLog, err = p.Execute(node.Id, nodeValue)
+		}
+
 		v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 	} else if nodeValue := node.GetBranch(); nodeValue != nil {
 		outcome := ""

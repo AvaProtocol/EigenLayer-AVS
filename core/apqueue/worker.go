@@ -53,7 +53,7 @@ func (w *Worker) loop() {
 			} else {
 				w.logger.Info("unsupported job", "job", string(job.Data))
 			}
-			w.logger.Info("decoded job", "jobid", jid, "jobdata", string(job.Data))
+			w.logger.Info("decoded job", "jobid", jid, "jobName", job.Name, "jobdata", string(job.Data))
 
 			if err == nil {
 				w.q.markJobDone(job, jobComplete)
