@@ -275,8 +275,8 @@ message Execution {
   message Step {
     string node_id = 1;
     bool   success  = 2;
-    // serialize data of the result
-    string result = 3;
+    // serialize data of the result. This is the value that we bind to step variable in subsequent step
+    string output_data = 3;
     string log = 4; 
     string error = 5;
   }
