@@ -182,6 +182,28 @@ function deserialize_aggregator_NonceResp(buffer_arg) {
   return avs_pb.NonceResp.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
+function serialize_aggregator_NotifyTriggersReq(arg) {
+  if (!(arg instanceof avs_pb.NotifyTriggersReq)) {
+    throw new Error('Expected argument of type aggregator.NotifyTriggersReq');
+  }
+  return Buffer.from(arg.serializeBinary());
+}
+
+function deserialize_aggregator_NotifyTriggersReq(buffer_arg) {
+  return avs_pb.NotifyTriggersReq.deserializeBinary(new Uint8Array(buffer_arg));
+}
+
+function serialize_aggregator_NotifyTriggersResp(arg) {
+  if (!(arg instanceof avs_pb.NotifyTriggersResp)) {
+    throw new Error('Expected argument of type aggregator.NotifyTriggersResp');
+  }
+  return Buffer.from(arg.serializeBinary());
+}
+
+function deserialize_aggregator_NotifyTriggersResp(buffer_arg) {
+  return avs_pb.NotifyTriggersResp.deserializeBinary(new Uint8Array(buffer_arg));
+}
+
 function serialize_aggregator_SyncMessagesReq(arg) {
   if (!(arg instanceof avs_pb.SyncMessagesReq)) {
     throw new Error('Expected argument of type aggregator.SyncMessagesReq');
@@ -213,28 +235,6 @@ function serialize_aggregator_Task(arg) {
 
 function deserialize_aggregator_Task(buffer_arg) {
   return avs_pb.Task.deserializeBinary(new Uint8Array(buffer_arg));
-}
-
-function serialize_aggregator_UpdateChecksReq(arg) {
-  if (!(arg instanceof avs_pb.UpdateChecksReq)) {
-    throw new Error('Expected argument of type aggregator.UpdateChecksReq');
-  }
-  return Buffer.from(arg.serializeBinary());
-}
-
-function deserialize_aggregator_UpdateChecksReq(buffer_arg) {
-  return avs_pb.UpdateChecksReq.deserializeBinary(new Uint8Array(buffer_arg));
-}
-
-function serialize_aggregator_UpdateChecksResp(arg) {
-  if (!(arg instanceof avs_pb.UpdateChecksResp)) {
-    throw new Error('Expected argument of type aggregator.UpdateChecksResp');
-  }
-  return Buffer.from(arg.serializeBinary());
-}
-
-function deserialize_aggregator_UpdateChecksResp(buffer_arg) {
-  return avs_pb.UpdateChecksResp.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
 function serialize_google_protobuf_BoolValue(arg) {
@@ -390,16 +390,16 @@ ping: {
     responseSerialize: serialize_google_protobuf_BoolValue,
     responseDeserialize: deserialize_google_protobuf_BoolValue,
   },
-  updateChecks: {
-    path: '/aggregator.Node/UpdateChecks',
+  notifyTriggers: {
+    path: '/aggregator.Node/NotifyTriggers',
     requestStream: false,
     responseStream: false,
-    requestType: avs_pb.UpdateChecksReq,
-    responseType: avs_pb.UpdateChecksResp,
-    requestSerialize: serialize_aggregator_UpdateChecksReq,
-    requestDeserialize: deserialize_aggregator_UpdateChecksReq,
-    responseSerialize: serialize_aggregator_UpdateChecksResp,
-    responseDeserialize: deserialize_aggregator_UpdateChecksResp,
+    requestType: avs_pb.NotifyTriggersReq,
+    responseType: avs_pb.NotifyTriggersResp,
+    requestSerialize: serialize_aggregator_NotifyTriggersReq,
+    requestDeserialize: deserialize_aggregator_NotifyTriggersReq,
+    responseSerialize: serialize_aggregator_NotifyTriggersResp,
+    responseDeserialize: deserialize_aggregator_NotifyTriggersResp,
   },
 };
 
