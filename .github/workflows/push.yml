@@ -22,6 +22,7 @@ jobs:
           # TODO Implement test for all packages
           go test -v ./core/taskengine
           go test -v ./core/taskengine/trigger
+          go test -v ./core/taskengine/macros
           go test -v ./pkg/timekeeper
 
   publish-dev-build:

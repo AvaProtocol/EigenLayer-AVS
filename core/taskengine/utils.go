@@ -62,7 +62,7 @@ func GetMetadataForTransfer(log *types.Log) (*Metadata, error) {
 }
 
 func GetBlock(blockNumber uint64) (*types.Header, error) {
-	cacheKey := fmt.Sprint("blkt:%d", blockNumber)
+	cacheKey := fmt.Sprintf("blkt:%d", blockNumber)
 
 	var blockHeader *types.Header
 	// Check if metadata is cached

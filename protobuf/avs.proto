@@ -268,8 +268,9 @@ message Execution {
   bool   success  = 2;
   string error    = 3;
 
+  TriggerMark trigger_mark = 4;
   // final return data of the whole execution
-  string result = 4;
+  string result = 5;
 
   message Step {
     string node_id = 1;
@@ -280,7 +281,7 @@ message Execution {
     string error = 5;
   }
 
-  repeated Step steps = 5;
+  repeated Step steps = 6;
 }
 
 message Task {

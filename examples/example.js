@@ -548,7 +548,7 @@ async function scheduleMonitor(owner, token, target) {
                    // usdc
                    ( trigger1.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" &&
                      bigGt(
-                       toBigInt(trigger1.data.data),
+                       toBigInt(trigger1.data.value),
                        toBigInt("2000000")
                      )
                    ) ||

@@ -61,7 +61,7 @@ func (w *Worker) loop() {
 			} else {
 				// TODO: move to a retry queue depend on what kind of error
 				w.q.markJobDone(job, jobFailed)
-				w.logger.Info("failed to perform job", "jobid", jid, "task_id", job.Name)
+				w.logger.Errorf("failed to perform job %w", err, "jobid", jid, "task_id", job.Name)
 			}
 		case <-w.q.closeCh: // loop was stopped
 			return

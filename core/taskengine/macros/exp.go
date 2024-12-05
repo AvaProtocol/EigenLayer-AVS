@@ -97,6 +97,14 @@ func BigCmp(a *big.Int, b *big.Int) (r int) {
 	return a.Cmp(b)
 }
 
+func BigGt(a *big.Int, b *big.Int) bool {
+	return a.Cmp(b) > 0
+}
+
+func BigLt(a *big.Int, b *big.Int) bool {
+	return a.Cmp(b) < 0
+}
+
 func ParseUnit(val string, decimal uint) *big.Int {
 	b, ok := ethmath.ParseBig256(val)
 	if !ok {
@@ -126,6 +134,8 @@ var (
 		"latestRoundDataChainlink": chainlinkLatestRoundData,
 
 		"bigCmp":    BigCmp,
+		"bigGt":     BigGt,
+		"bigLt":     BigLt,
 		"parseUnit": ParseUnit,
 		"toBigInt":  ToBigInt,
 	}

@@ -17,13 +17,18 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	avspb "github.com/AvaProtocol/ap-avs/protobuf"
+	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
 type EventMark struct {
 	BlockNumber uint64
 	LogIndex    uint
 	TxHash      string
+}
+
+type Check struct {
+	Program      *vm.Program
+	TaskMetadata *avsproto.SyncMessagesResp_TaskMetadata
 }
 
 type EventTrigger struct {
@@ -66,7 +71,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMark[EventMark]) *Event
 }
 
 // TODO: track remainExecution and expriedAt before merge
-func (t *EventTrigger) AddCheck(check *avspb.SyncMessagesResp_TaskMetadata) error {
+func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) error {
 	// Dummy value to get type
 	envs := macros.GetEnvs(map[string]interface{}{
 		"trigger1": map[string]interface{}{
@@ -85,7 +90,10 @@ func (t *EventTrigger) AddCheck(check *avspb.SyncMessagesResp_TaskMetadata) erro
 		return err
 	}
 
-	t.checks.Store(check.TaskId, program)
+	t.checks.Store(check.TaskId, &Check{
+		Program:      program,
+		TaskMetadata: check,
+	})
 
 	return nil
 }
@@ -104,10 +112,6 @@ func (evt *EventTrigger) Run(ctx context.Context) error {
 		return err
 	}
 
-	// hardcode to test quick
-	// TODO: rever
-	//event2, err := testutil.GetEventForTx("0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d", 1)
-
 	go func() {
 		for {
 			select {
@@ -120,21 +124,18 @@ func (evt *EventTrigger) Run(ctx context.Context) error {
 				evt.retryConnectToRpc()
 				sub, err = evt.wsEthClient.SubscribeFilterLogs(context.Background(), query, logs)
 			case event := <-logs:
-				evt.logger.Info("detect new event, evaluate checks", "component", "eventrigger", "event", event)
+				evt.logger.Debug("detect new event, evaluate checks", "component", "eventrigger", "event", event)
 				// TODO: implement hint to avoid scan all checks
 				toRemove := []string{}
 
-				//event = *event2
-
 				evt.checks.Range(func(key any, value any) bool {
-					evt.logger.Info("evaluate with event", event)
 					if evt.shutdown {
 						return false
 					}
-					evt.logger.Info("call evt.Evaluate", event)
 
-					if hit, err := evt.Evaluate(&event, value.(*vm.Program)); err == nil && hit {
-						evt.logger.Infof("check hit, flush to channel", "taskid", key)
+					check := value.(*Check)
+					if hit, err := evt.Evaluate(&event, check.Program); err == nil && hit {
+						evt.logger.Info("check hit, notify aggregator", "task_id", key)
 						evt.triggerCh <- TriggerMark[EventMark]{
 							TaskID: key.(string),
 							Marker: EventMark{
@@ -144,9 +145,12 @@ func (evt *EventTrigger) Run(ctx context.Context) error {
 							},
 						}
 
-						toRemove = append(toRemove, key.(string))
-					} else {
-						fmt.Println("error evaluate", hit, err)
+						// if check.metadata.Remain >= 0 {
+						// 	if check.metadata.Remain == 1 {
+						// 		toRemove = append(toRemove, key.(string))
+						// 		check.metadata.Remain = -1
+						// 	}
+						// }
 					}
 
 					return true

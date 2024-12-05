@@ -24,7 +24,7 @@ func TestChainlinkLatestAnswer(t *testing.T) {
           (
             ( trigger.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" &&
               bigCmp(
-                trigger.data.data | toBigInt(),
+                trigger.data.value | toBigInt(),
                 "5000000" | toBigInt()
               ) > 0
             ) ||
@@ -46,7 +46,7 @@ func TestChainlinkLatestAnswer(t *testing.T) {
           (
             ( trigger.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" &&
               bigCmp(
-                toBigInt(trigger.data.data),
+                toBigInt(trigger.data.value),
                 toBigInt("95000000")
               ) > 0
             ) ||

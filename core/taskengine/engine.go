@@ -370,16 +370,6 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	n.logger.Info("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
 	n.lock.Unlock()
 
-	// Now we will queue the job
-	n.logger.Debug("mark task in executing status", "task_id", payload.TaskId)
-
-	if err := n.db.Move(
-		[]byte(TaskStorageKey(payload.TaskId, avsproto.TaskStatus_Active)),
-		[]byte(TaskStorageKey(payload.TaskId, avsproto.TaskStatus_Executing)),
-	); err != nil {
-		n.logger.Error("error moving the task storage from active to executing", "task_id", payload.TaskId, "error", err)
-	}
-
 	data, err := json.Marshal(payload.TriggerMarker)
 	if err != nil {
 		n.logger.Error("error serialize trigger to json", err)

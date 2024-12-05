@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dop251/goja"
 	"github.com/ginkgoch/godash/v2"
@@ -343,12 +344,15 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 		if strings.EqualFold(statement.Type, "else") {
 			// Execute this directly
 			outcome = fmt.Sprintf("%s.%s", stepID, statement.Id)
-			sb.WriteString("\nuse else condition, follow path ")
+			sb.WriteString("\n")
+			sb.WriteString(time.Now().String())
+			sb.WriteString("evaluate else, follow else path ")
 			sb.WriteString(outcome)
 			s.Log = sb.String()
+			s.Result = outcome
 			return s, outcome, nil
 		}
-		sb.WriteString(fmt.Sprintf("\nevaluate condition: %s expression: `%s`", statement.Id, statement.Expression))
+		sb.WriteString(fmt.Sprintf("\n%s evaluate condition: %s expression: `%s`", time.Now(), statement.Id, statement.Expression))
 
 		// now we need to valuate condition
 		program, err := expr.Compile(statement.Expression, expr.Env(v.vars), expr.AsBool())
@@ -374,6 +378,7 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 			sb.WriteString(outcome)
 			// run the node
 			s.Log = sb.String()
+			s.Result = outcome
 			return s, outcome, nil
 		}
 	}

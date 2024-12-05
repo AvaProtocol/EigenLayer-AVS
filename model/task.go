@@ -122,12 +122,13 @@ func (t *Task) SetCanceled() {
 	t.CompletedAt = time.Now().Unix()
 }
 
-func (t *Task) AppendExecution(epoch int64, steps []*avsproto.Execution_Step, runError error) {
+func (t *Task) AppendExecution(epoch int64, triggerMark *avsproto.TriggerMark, steps []*avsproto.Execution_Step, runError error) {
 	exc := &avsproto.Execution{
-		Epoch:   epoch,
-		Success: true,
-		Error:   "",
-		Steps:   steps,
+		Epoch:       epoch,
+		Success:     true,
+		Error:       "",
+		Steps:       steps,
+		TriggerMark: triggerMark,
 	}
 
 	if runError != nil {

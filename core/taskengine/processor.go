@@ -38,14 +38,10 @@ func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
 	task := &model.Task{
 		Task: &avsproto.Task{},
 	}
-	item, err := x.db.GetKey([]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Executing), id)))
+	item, err := x.db.GetKey([]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Active), id)))
 
 	if err != nil {
-		// Fallback, TODO: track this and see how often we fall to this
-		item, err = x.db.GetKey([]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Active), id)))
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 	err = protojson.Unmarshal(item, task)
 	if err != nil {
@@ -83,12 +79,7 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 		updates[string(TaskStorageKey(task.Id, avsproto.TaskStatus_Executing))], err = task.ToJSON()
 		updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
-		if err = x.db.BatchWrite(updates); err == nil {
-			x.db.Move(
-				[]byte(TaskStorageKey(task.Id, avsproto.TaskStatus_Executing)),
-				[]byte(TaskStorageKey(task.Id, task.Status)),
-			)
-		} else {
+		if err = x.db.BatchWrite(updates); err != nil {
 			// TODO Gracefully handling of storage cleanup
 		}
 	}()
@@ -96,12 +87,12 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 	currentTime := time.Now()
 	if err == nil {
 		x.logger.Info("succesfully executing task", "taskid", job.Name, "triggermark", string(job.Data))
-		task.AppendExecution(currentTime.Unix(), vm.ExecutionLogs, nil)
-		task.SetCompleted()
+		task.AppendExecution(currentTime.Unix(), triggerMark, vm.ExecutionLogs, nil)
+		//task.SetCompleted()
 	} else {
 		x.logger.Error("error executing task", "taskid", job.Name, "triggermark", string(job.Data), err)
-		task.AppendExecution(currentTime.Unix(), vm.ExecutionLogs, err)
-		task.SetFailed()
+		task.AppendExecution(currentTime.Unix(), triggerMark, vm.ExecutionLogs, err)
+		//task.SetFailed()
 		return fmt.Errorf("Error executing program: %v", err)
 	}
 
