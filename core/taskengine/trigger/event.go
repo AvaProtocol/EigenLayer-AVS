@@ -124,7 +124,7 @@ func (evt *EventTrigger) Run(ctx context.Context) error {
 				evt.retryConnectToRpc()
 				sub, err = evt.wsEthClient.SubscribeFilterLogs(context.Background(), query, logs)
 			case event := <-logs:
-				evt.logger.Debug("detect new event, evaluate checks", "component", "eventrigger", "event", event)
+				evt.logger.Debug("detect new event, evaluate checks", "event", event.Topics[0], "contract", event.Address)
 				// TODO: implement hint to avoid scan all checks
 				toRemove := []string{}
 

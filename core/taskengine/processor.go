@@ -76,14 +76,16 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 
 	defer func() {
 		updates := map[string][]byte{}
-		updates[string(TaskStorageKey(task.Id, avsproto.TaskStatus_Executing))], err = task.ToJSON()
+		updates[string(TaskStorageKey(task.Id, task.Status))], err = task.ToJSON()
 		updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 		if err = x.db.BatchWrite(updates); err != nil {
 			// TODO Gracefully handling of storage cleanup
+			x.logger.Errorf("error updating task status. %w", err, "task_id", task.Id, "job_id", job.ID)
 		}
 	}()
 
+	// TODO: Track max execution reached to set as completed
 	currentTime := time.Now()
 	if err == nil {
 		x.logger.Info("succesfully executing task", "taskid", job.Name, "triggermark", string(job.Data))
