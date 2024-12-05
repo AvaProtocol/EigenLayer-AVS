@@ -546,18 +546,18 @@ async function scheduleMonitor(owner, token, target) {
                 type: "if",
                 expression: `
                    // usdc
-                   ( trigger1.data.address == lower("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238") &&
-                     bigCmp(
+                   ( trigger1.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" &&
+                     bigGt(
                        toBigInt(trigger1.data.data),
                        toBigInt("2000000")
-                     ) > 0
+                     )
                    ) ||
                    ( trigger1.data.address == lower("0x779877a7b0d9e8603169ddbd7836e478b4624789") &&
-                     bigCmp(
+                     bigGt(
                        // link token
                        chainlinkPrice("0xc59E3633BAAC79493d908e63626716e204A45EdF"),
                        toBigInt("5000000")
-                     ) > 0
+                     )
                    )
                 `
               }
