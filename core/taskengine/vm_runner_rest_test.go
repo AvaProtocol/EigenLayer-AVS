@@ -35,7 +35,7 @@ func TestRestRequest(t *testing.T) {
 	if step.Error != "" {
 		t.Errorf("expected log contains request trace data but found no")
 	}
-	if !strings.Contains(step.Result, "This URL has no default content configured") {
+	if !strings.Contains(step.OutputData, "This URL has no default content configured") {
 		t.Errorf("expected step result contains the http endpoint response body")
 	}
 }

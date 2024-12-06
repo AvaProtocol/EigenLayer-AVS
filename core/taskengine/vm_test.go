@@ -170,10 +170,10 @@ func TestRunSequentialTasks(t *testing.T) {
 		t.Errorf("incorrect node id in execution log")
 	}
 
-	if !strings.Contains(vm.ExecutionLogs[0].Result, "post123") {
+	if !strings.Contains(vm.ExecutionLogs[0].OutputData, "post123") {
 		t.Errorf("rest node result is incorrect, should contains the string post123")
 	}
-	if !strings.Contains(vm.ExecutionLogs[1].Result, "query123") {
+	if !strings.Contains(vm.ExecutionLogs[1].OutputData, "query123") {
 		t.Errorf("rest node result is incorrect, should contains the string query123")
 	}
 }
@@ -276,8 +276,8 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	}
 	pp.Print(vm.ExecutionLogs[0])
 	pp.Print(vm.ExecutionLogs[1])
-	fmt.Println(vm.ExecutionLogs[1].Result)
-	if !strings.Contains(vm.ExecutionLogs[1].Result, `notification1`) {
+	fmt.Println(vm.ExecutionLogs[1].OutputData)
+	if !strings.Contains(vm.ExecutionLogs[1].OutputData, `notification1`) {
 		t.Errorf("expect executing notification1 step but not it didn't run")
 	}
 
@@ -298,8 +298,8 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	}
 	pp.Print(vm.ExecutionLogs[0])
 	pp.Print(vm.ExecutionLogs[1])
-	fmt.Println(vm.ExecutionLogs[1].Result)
-	if !strings.Contains(vm.ExecutionLogs[1].Result, `notification2`) {
+	fmt.Println(vm.ExecutionLogs[1].OutputData)
+	if !strings.Contains(vm.ExecutionLogs[1].OutputData, `notification2`) {
 		t.Errorf("expect executing notification1 step but not it didn't run")
 	}
 }
@@ -397,7 +397,7 @@ func TestEvaluateEvent(t *testing.T) {
 	}
 
 	pp.Print(vm.ExecutionLogs)
-	if vm.ExecutionLogs[0].Result != "branch1.a1" {
+	if vm.ExecutionLogs[0].OutputData != "branch1.a1" {
 		t.Errorf("expression evaluate incorrect")
 	}
 }
