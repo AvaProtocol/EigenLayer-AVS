@@ -1934,7 +1934,7 @@ type Execution struct {
 	Success     bool         `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
 	Error       string       `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
 	TriggerMark *TriggerMark `protobuf:"bytes,4,opt,name=trigger_mark,json=triggerMark,proto3" json:"trigger_mark,omitempty"`
-	// final return data of the whole execution
+	// final return data of the whole execution of the task
 	Result string            `protobuf:"bytes,5,opt,name=result,proto3" json:"result,omitempty"`
 	Steps  []*Execution_Step `protobuf:"bytes,6,rep,name=steps,proto3" json:"steps,omitempty"`
 }

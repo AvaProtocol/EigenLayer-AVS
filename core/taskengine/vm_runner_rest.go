@@ -35,11 +35,11 @@ func NewRestProrcessor() *RestProcessor {
 
 func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
 	s := &avsproto.Execution_Step{
-		NodeId:  stepID,
-		Log:     "",
-		Result:  "",
-		Success: true,
-		Error:   "",
+		NodeId:     stepID,
+		Log:        "",
+		OutputData: "",
+		Success:    true,
+		Error:      "",
 	}
 
 	var log strings.Builder
@@ -68,7 +68,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	log.WriteString(fmt.Sprintf("Execute %s %s at %s", node.Method, u.Hostname(), time.Now()))
 	s.Log = log.String()
-	s.Result = string(resp.Body())
+	s.OutputData = string(resp.Body())
 	if err != nil {
 		s.Success = false
 		s.Error = err.Error()

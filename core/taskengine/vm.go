@@ -328,11 +328,11 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 
 func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Execution_Step, string, error) {
 	s := &avsproto.Execution_Step{
-		NodeId:  stepID,
-		Result:  "",
-		Log:     "",
-		Error:   "",
-		Success: true,
+		NodeId:     stepID,
+		OutputData: "",
+		Log:        "",
+		Error:      "",
+		Success:    true,
 	}
 
 	var sb strings.Builder
@@ -349,7 +349,7 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 			sb.WriteString("evaluate else, follow else path ")
 			sb.WriteString(outcome)
 			s.Log = sb.String()
-			s.Result = outcome
+			s.OutputData = outcome
 			return s, outcome, nil
 		}
 		sb.WriteString(fmt.Sprintf("\n%s evaluate condition: %s expression: `%s`", time.Now(), statement.Id, statement.Expression))
@@ -378,7 +378,7 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 			sb.WriteString(outcome)
 			// run the node
 			s.Log = sb.String()
-			s.Result = outcome
+			s.OutputData = outcome
 			return s, outcome, nil
 		}
 	}

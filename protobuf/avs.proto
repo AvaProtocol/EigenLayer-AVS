@@ -269,7 +269,7 @@ message Execution {
   string error    = 3;
 
   TriggerMark trigger_mark = 4;
-  // final return data of the whole execution
+  // final return data of the whole execution of the task
   string result = 5;
 
   message Step {
