@@ -1,4 +1,4 @@
-package taskengine
+package macros
 
 import (
 	"context"
@@ -23,7 +23,6 @@ func QueryContractRaw(
 		Data: data,
 	}
 
-	//log.Println("msg to send to contract", common.Bytes2Hex(data))
 	return client.CallContract(ctx, msg, nil)
 }
 

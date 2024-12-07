@@ -108,6 +108,10 @@ func (t *Task) SetCompleted() {
 	t.CompletedAt = time.Now().Unix()
 }
 
+func (t *Task) SetActive() {
+	t.Status = avsproto.TaskStatus_Active
+}
+
 func (t *Task) SetFailed() {
 	t.Status = avsproto.TaskStatus_Failed
 	t.CompletedAt = time.Now().Unix()
@@ -118,14 +122,18 @@ func (t *Task) SetCanceled() {
 	t.CompletedAt = time.Now().Unix()
 }
 
-func (t *Task) AppendExecution(epoch int64, userOpHash string, err error) {
+func (t *Task) AppendExecution(epoch int64, triggerMark *avsproto.TriggerMark, steps []*avsproto.Execution_Step, runError error) {
 	exc := &avsproto.Execution{
-		Epoch:      epoch,
-		UserOpHash: userOpHash,
+		Epoch:       epoch,
+		Success:     true,
+		Error:       "",
+		Steps:       steps,
+		TriggerMark: triggerMark,
 	}
 
-	if err != nil {
-		exc.Error = err.Error()
+	if runError != nil {
+		exc.Success = false
+		exc.Error = runError.Error()
 	}
 
 	t.Executions = append(t.Executions, exc)

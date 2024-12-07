@@ -3,9 +3,12 @@ package taskengine
 import (
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
+
 	"github.com/AvaProtocol/ap-avs/model"
 	"github.com/AvaProtocol/ap-avs/storage"
-	"github.com/ethereum/go-ethereum/common"
+
+	"github.com/AvaProtocol/ap-avs/core/testutil"
 )
 
 func TestWalletOwnerReturnTrueForDefaultAddress(t *testing.T) {
@@ -22,7 +25,7 @@ func TestWalletOwnerReturnTrueForDefaultAddress(t *testing.T) {
 }
 
 func TestWalletOwnerReturnTrueForNonDefaultAddress(t *testing.T) {
-	db := TestMustDB()
+	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	eoa := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")

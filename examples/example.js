@@ -255,6 +255,9 @@ const main = async (cmd) => {
         smartWalletAddress
       );
       break;
+    case "schedule-monitor":
+      scheduleMonitor(owner, token, process.argv[3]);
+      break;
     case "schedule":
     case "schedule-cron":
     case "schedule-event":
@@ -356,6 +359,7 @@ const main = async (cmd) => {
       schedule-cron <smart-wallet-address>:   to schedule a task that run on cron
       schedule-event <smart-wallet-address>:  to schedule a task that run on occurenct of an event
       schedule-generic:                       to schedule a task with an arbitrary contract query
+      monitor-address <smart-wallet-address>: monitor erc20 in/out for an address
       cancel <task-id>:                       to cancel a task
       delete <task-id>:                       to completely remove a task`);
   }
@@ -438,7 +442,7 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
   const nodeIdTransfer = UlidMonotonic.generate().toCanonical();
   const nodeIdNotification = UlidMonotonic.generate().toCanonical();
 
-  console.log("\nTrigger type", trigger.trigger_type);
+  console.log("\nTrigger type", trigger1.trigger_type);
 
   const result = await asyncRPC(
     client,
@@ -494,6 +498,120 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
     },
     metadata
   );
+
+  return result;
+}
+
+
+
+// setup a task to monitor in/out transfer for a wallet and send notification
+async function scheduleMonitor(owner, token, target) {
+  const wallets = await getWallets(owner, token);
+  const smartWalletAddress = wallets[0].address;
+
+  const metadata = new grpc.Metadata();
+  metadata.add("authkey", token);
+
+  let trigger = {
+    name: "trigger1",
+    trigger_type: TaskTrigger.TriggerTypeCase.EVENT,
+    event: {
+      // This is an example to show case the branch
+      //
+      // IN PRACTICE, it strongly recomend to add the filter directly to trigger to make it more efficient and not wasting aggregator resources
+      // native eth transfer emit no event, we use this partciular topic[0] to simulate it
+      // .. (trigger1.data.topic[0] == "native_eth_tx" && trigger1.data.topic[2] == "${target}" ) ||
+      // TODO: eventually we want to allow trigger2 trigger3 but for now has to hardcode trigger1
+      expression: `trigger1.data.topics[0] == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" && trigger1.data.topics[2] == "${target.toLowerCase()}"`,
+    },
+  };
+
+  const nodeIdNotification = UlidMonotonic.generate().toCanonical();
+  const nodeIdCheckAmount = UlidMonotonic.generate().toCanonical();
+  const branchIdCheckAmount = UlidMonotonic.generate().toCanonical();
+
+  const result = await asyncRPC(
+    client,
+    "CreateTask",
+    {
+      smart_wallet_address: smartWalletAddress,
+      nodes: [
+        {
+          id: nodeIdCheckAmount,
+          name: 'checkAmount',
+          branch: {
+            conditions: [
+              {
+                id: branchIdCheckAmount,
+                type: "if",
+                expression: `
+                   // usdc
+                   ( trigger1.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" &&
+                     bigGt(
+                       toBigInt(trigger1.data.value),
+                       toBigInt("2000000")
+                     )
+                   ) ||
+                   ( trigger1.data.address == lower("0x779877a7b0d9e8603169ddbd7836e478b4624789") &&
+                     bigGt(
+                       // link token
+                       chainlinkPrice("0xc59E3633BAAC79493d908e63626716e204A45EdF"),
+                       toBigInt("5000000")
+                     )
+                   )
+                `
+              }
+            ]
+          },
+        },
+        {
+          id: nodeIdNotification,
+          name: 'notification',
+          rest_api: {
+            // As an user, they have 2 option to provide telegram bot token:
+            // 1. Use their own bot by putting the token directly here. That user is the only one see their own tasks/logs
+            // 2. (Prefered way) Use Ava Protocol Bot token. However, now because the user can see their own task config, we cannot use the raw token and has to use a variable here.
+            url: "https://api.telegram.org/bot{{notify_bot_token}}/sendMessage?parse_mode=MarkdownV2",
+            //url: `https://webhook.site/4a2cb0c4-86ea-4189-b1e3-ce168f5d4840`,
+            method: "POST",
+            //body: "chat_id=-4609037622&disable_notification=true&text=%2AWallet+${target.toLowerCase()}+receive+{{ trigger1.data.data }} {{ trigger1.data.token_symbol }} at {{ trigger1.data.tx_hash }}%2A",
+            // This body is written this way so that it will be evaluate at run time in a JavaScript sandbox
+            // It's important to quote amount with `` because it may contains a `.` and need to be escape with markdownv2
+            body: `JSON.stringify({
+              chat_id:-4609037622,
+              text: \`Congrat, your walllet [\${trigger1.data.to_address}](https://sepolia.etherscan.io/address/\${trigger1.data.to_address}) received \\\`\${trigger1.data.value_formatted}\\\` [\${trigger1.data.token_symbol}](https://sepolia.etherscan.io/token/\${trigger1.data.address}) at [\${trigger1.data.transaction_hash}](sepolia.etherscan.io/tx/\${trigger1.data.transaction_hash})\`
+            })`,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        },
+      ],
+
+      edges: [
+        {
+          id: UlidMonotonic.generate().toCanonical(),
+          // __TRIGGER__ is a special node. It doesn't appear directly in the task data, but it should be draw on the UI to show what is the entrypoint
+          source: "__TRIGGER__",
+          target: nodeIdCheckAmount,
+        },
+        {
+          id: UlidMonotonic.generate().toCanonical(),
+          // __TRIGGER__ is a special node. It doesn't appear directly in the task data, but it should be draw on the UI to show what is the entrypoint
+          source: `${nodeIdCheckAmount}.${branchIdCheckAmount}`,
+          target: nodeIdNotification,
+        },
+      ],
+
+      trigger,
+      start_at: Math.floor(Date.now() / 1000) + 30,
+      expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
+      memo: `Montoring large token transfer for ${target}`,
+    },
+    metadata
+  );
+
+  console.log("create task", result);
 
   return result;
 }

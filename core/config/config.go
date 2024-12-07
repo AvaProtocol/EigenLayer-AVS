@@ -48,6 +48,8 @@ type Config struct {
 
 	SocketPath  string
 	Environment sdklogging.LogLevel
+
+	Macros map[string]string
 }
 
 type SmartWalletConfig struct {
@@ -85,6 +87,8 @@ type ConfigRaw struct {
 	} `yaml:"smart_wallet"`
 
 	SocketPath string `yaml:"socket_path"`
+
+	Macros map[string]string `yaml:"macros"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
@@ -188,6 +192,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 		},
 
 		SocketPath: configRaw.SocketPath,
+		Macros:     configRaw.Macros,
 	}
 
 	if config.SocketPath == "" {

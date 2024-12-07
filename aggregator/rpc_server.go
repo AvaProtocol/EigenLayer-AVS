@@ -29,6 +29,8 @@ import (
 // RpcServer is our grpc sever struct hold the entry point of request handler
 type RpcServer struct {
 	avsproto.UnimplementedAggregatorServer
+	avsproto.UnimplementedNodeServer
+
 	config *config.Config
 	cache  *bigcache.BigCache
 	db     storage.Storage
@@ -191,21 +193,28 @@ func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsp
 }
 
 // Operator action
-func (r *RpcServer) SyncTasks(payload *avsproto.SyncTasksReq, srv avsproto.Aggregator_SyncTasksServer) error {
+func (r *RpcServer) SyncMessages(payload *avsproto.SyncMessagesReq, srv avsproto.Node_SyncMessagesServer) error {
 	err := r.engine.StreamCheckToOperator(payload, srv)
 
 	return err
 }
 
 // Operator action
-func (r *RpcServer) UpdateChecks(ctx context.Context, payload *avsproto.UpdateChecksReq) (*avsproto.UpdateChecksResp, error) {
-	if err := r.engine.AggregateChecksResult(payload.Address, payload.Id); err != nil {
+func (r *RpcServer) NotifyTriggers(ctx context.Context, payload *avsproto.NotifyTriggersReq) (*avsproto.NotifyTriggersResp, error) {
+	if err := r.engine.AggregateChecksResult(payload.Address, payload); err != nil {
 		return nil, err
 	}
 
-	return &avsproto.UpdateChecksResp{
+	return &avsproto.NotifyTriggersResp{
 		UpdatedAt: timestamppb.Now(),
 	}, nil
+}
+
+// Operator action
+func (r *RpcServer) Ack(ctx context.Context, payload *avsproto.AckMessageReq) (*wrapperspb.BoolValue, error) {
+	// TODO: Implement ACK before merge
+
+	return wrapperspb.Bool(true), nil
 }
 
 // startRpcServer initializes and establish a tcp socket on given address from
@@ -231,7 +240,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		panic(err)
 	}
 
-	avsproto.RegisterAggregatorServer(s, &RpcServer{
+	rpcServer := &RpcServer{
 		cache:  agg.cache,
 		db:     agg.db,
 		engine: agg.engine,
@@ -241,7 +250,11 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 
 		config:       agg.config,
 		operatorPool: agg.operatorPool,
-	})
+	}
+
+	// TODO: split node and aggregator
+	avsproto.RegisterAggregatorServer(s, rpcServer)
+	avsproto.RegisterNodeServer(s, rpcServer)
 
 	// Register reflection service on gRPC server.
 	// This allow clien to discover url endpoint

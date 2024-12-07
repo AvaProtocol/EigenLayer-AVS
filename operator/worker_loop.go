@@ -6,17 +6,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"log"
-	"maps"
-	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/expr-lang/expr/vm"
 	"github.com/go-co-op/gocron/v2"
 
 	"github.com/AvaProtocol/ap-avs/core/taskengine"
-	pb "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
+	triggerengine "github.com/AvaProtocol/ap-avs/core/taskengine/trigger"
+	avspb "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/version"
 )
 
@@ -24,23 +21,20 @@ const (
 	retryIntervalSecond = 15
 )
 
-var (
-	checkLock  sync.Mutex
-	checks     map[string]*pb.SyncTasksResp
-	compileExp map[string]*vm.Program
-)
-
-// runWorkLoop is main entrypoint where we sync data with aggregator
+// runWorkLoop is main entrypoint where we sync data with aggregator. It performs these op
+//   - subscribe to server to receive update. act on these update to update local storage
+//   - spawn a loop to check triggering condition
 func (o *Operator) runWorkLoop(ctx context.Context) error {
 	// Setup taskengine, initialize local storage and cache, establish rpc
-	checks = map[string]*pb.SyncTasksResp{}
-
 	var err error
 	o.scheduler, err = gocron.NewScheduler()
 	if err != nil {
 		panic(err)
 	}
+	o.scheduler.Start()
+	o.scheduler.NewJob(gocron.DurationJob(time.Second*5), gocron.NewTask(o.PingServer))
 
+	macros.SetRpc(o.config.TargetChain.EthWsUrl)
 	taskengine.SetRpc(o.config.TargetChain.EthRpcUrl)
 	taskengine.SetWsRpc(o.config.TargetChain.EthWsUrl)
 	taskengine.SetLogger(o.logger)
@@ -51,23 +45,50 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	} else {
 		metricsErrChan = make(chan error, 1)
 	}
+	// Register a subscriber on new block event and perform our code such as
+	// reporting time and perform check result
+	// TODO: Initialize time based task checking
+	rpcConfig := triggerengine.RpcOption{
+		RpcURL:   o.config.TargetChain.EthRpcUrl,
+		WsRpcURL: o.config.TargetChain.EthWsUrl,
+	}
+	blockTriggerCh := make(chan triggerengine.TriggerMark[string], 1000)
+	o.blockTrigger = triggerengine.NewBlockTrigger(&rpcConfig, blockTriggerCh)
+
+	eventTriggerCh := make(chan triggerengine.TriggerMark[triggerengine.EventMark], 1000)
+	o.eventTrigger = triggerengine.NewEventTrigger(&rpcConfig, eventTriggerCh)
+
+	o.blockTrigger.Run(ctx)
+	o.eventTrigger.Run(ctx)
 
 	// Establish a connection with gRPC server where new task will be pushed
 	// automatically
 	o.logger.Info("open channel to grpc to receive check")
-	go o.StreamChecks()
-
-	// Register a subscriber on new block event and perform our code such as
-	// reporting time and perform check result
-	// TODO: Initialize time based task checking
-	go taskengine.RegisterBlockListener(ctx, o.RunChecks)
-	o.scheduler.Start()
-	o.scheduler.NewJob(gocron.DurationJob(time.Second*5), gocron.NewTask(o.PingServer))
+	go o.StreamMessages()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case triggerItem := <-blockTriggerCh:
+			o.logger.Debug("Trigger this task", triggerItem)
+		case triggerItem := <-eventTriggerCh:
+			o.logger.Debug("trigger hit, notifiy aggregator", "task id", triggerItem.TaskID, "marker", triggerItem.Marker)
+
+			if _, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
+				Address:   o.config.OperatorAddress,
+				Signature: "pending",
+				TaskId:    triggerItem.TaskID,
+				TriggerMarker: &avspb.TriggerMark{
+					BlockNumber: uint64(triggerItem.Marker.BlockNumber),
+					LogIndex:    uint64(triggerItem.Marker.LogIndex),
+					TxHash:      triggerItem.Marker.TxHash,
+				},
+			}); err == nil {
+				o.logger.Debug("Succesfully notifiy aggregator for task hit", "taskid", triggerItem.TaskID)
+			} else {
+				o.logger.Errorf("task trigger is in alert condition but failed to sync to aggregator", err, "taskid", triggerItem.TaskID)
+			}
 		case err := <-metricsErrChan:
 			// TODO: handle gracefully
 			o.logger.Fatal("Error in metrics server", "err", err)
@@ -75,22 +96,26 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	}
 }
 
-// StreamChecks setup a streaming connection to receive task from server, and also
-// increase metric once we got data
-func (o *Operator) StreamChecks() {
+// StreamMessages setup a streaming connection to receive task from server
+func (o *Operator) StreamMessages() {
 	id := hex.EncodeToString(o.operatorId[:])
+	ctx := context.Background()
 	for {
-		req := &pb.SyncTasksReq{
-			Address: o.config.OperatorAddress,
-			Id:      id,
-			// TODO: generate signature with ecda/alias key
-			Signature: "pending",
-
-			// TODO: use lambort clock
-			MonotonicClock: time.Now().Unix(),
+		epoch := time.Now().Unix()
+		blsSignature, err := o.GetSignature(ctx, []byte(fmt.Sprintf("operator connection: %s %s %d", o.config.OperatorAddress, id, epoch)))
+		if err != nil {
+			panic("cannot get signature")
 		}
 
-		stream, err := o.aggregatorRpcClient.SyncTasks(context.Background(), req)
+		req := &avspb.SyncMessagesReq{
+			Address: o.config.OperatorAddress,
+			Id:      id,
+
+			MonotonicClock: epoch,
+			Signature:      blsSignature.Serialize(),
+		}
+
+		stream, err := o.nodeRpcClient.SyncMessages(ctx, req)
 		if err != nil {
 			o.logger.Errorf("error open a stream to aggregator, retry in 15 seconds. error: %v", err)
 			time.Sleep(time.Duration(retryIntervalSecond) * time.Second)
@@ -108,9 +133,24 @@ func (o *Operator) StreamChecks() {
 				time.Sleep(time.Duration(retryIntervalSecond) * time.Second)
 				break
 			}
-			o.metrics.IncNumTasksReceived(resp.CheckType)
-			o.logger.Info("received new task", "id", resp.Id, "type", resp.CheckType)
-			checks[resp.Id] = resp
+			o.metrics.IncNumTasksReceived(resp.Id)
+
+			fmt.Println("receive new message", resp, "op", resp.Op)
+			switch resp.Op {
+			case avspb.MessageOp_CancelTask, avspb.MessageOp_DeleteTask:
+				o.eventTrigger.RemoveCheck(resp.TaskMetadata.TaskId)
+				//o.blockTriggerCh.RemoveCheck(resp.ID)
+			case avspb.MessageOp_MonitorTaskTrigger:
+				fmt.Println("get metadata found trigger", resp.TaskMetadata.GetTrigger(), "got event", resp.TaskMetadata.GetTrigger().GetEvent())
+				if trigger := resp.TaskMetadata.GetTrigger().GetEvent(); trigger != nil {
+					o.logger.Info("received new event trigger", "id", resp.Id, "type", resp.TaskMetadata.Trigger)
+					if err := o.eventTrigger.AddCheck(resp.TaskMetadata); err != nil {
+						o.logger.Info("add trigger to monitor error", err)
+					}
+				} else if trigger := resp.TaskMetadata.Trigger.GetBlock(); trigger != nil {
+				}
+			}
+			//checks[resp.Id] = resp
 		}
 	}
 }
@@ -131,7 +171,7 @@ func (o *Operator) PingServer() {
 
 	str := base64.StdEncoding.EncodeToString(blsSignature.Serialize())
 
-	_, err = o.aggregatorRpcClient.Ping(context.Background(), &pb.Checkin{
+	_, err = o.nodeRpcClient.Ping(context.Background(), &avspb.Checkin{
 		Address:     o.config.OperatorAddress,
 		Id:          id,
 		Signature:   str,
@@ -143,7 +183,7 @@ func (o *Operator) PingServer() {
 	if err != nil {
 		o.logger.Error("check in error", "err", err)
 	} else {
-		o.logger.Debug("check in succesfully")
+		o.logger.Debug("check in succesfully", "component", "grpc")
 	}
 
 	elapsed := time.Now().Sub(start)
@@ -154,46 +194,4 @@ func (o *Operator) PingServer() {
 		o.logger.Error("error update status", "operator", o.config.OperatorAddress, "error", err)
 	}
 	o.metrics.SetPingDuration(elapsed.Seconds())
-}
-
-func (o *Operator) RunChecks(block *types.Block) error {
-	hits := []string{}
-	hitLookup := map[string]bool{}
-
-	for _, check := range checks {
-		switch check.CheckType {
-		case "CheckTrigger":
-			// TODO: Re-implemenmt in the new execution engine
-			//v, e := taskengine.RunExpressionQuery(check.Trigger.Expression.Expression)
-			v, e := taskengine.RunExpressionQuery("check.Trigger.Expression.Expression")
-			if e == nil && v == true {
-				hits = append(hits, check.Id)
-				hitLookup[check.Id] = true
-				o.logger.Debug("Check hit", "taskID", check.Id)
-			} else {
-				log.Println("Check miss for ", check.Id)
-			}
-		case "contract_query_check":
-		}
-	}
-
-	if len(hits) >= 0 {
-		if _, err := o.aggregatorRpcClient.UpdateChecks(context.Background(), &pb.UpdateChecksReq{
-			Address:   o.config.OperatorAddress,
-			Signature: "pending",
-			Id:        hits,
-		}); err == nil {
-			// Remove the hit from local cache
-			checkLock.Lock()
-			defer checkLock.Unlock()
-			maps.DeleteFunc(checks, func(k string, v *pb.SyncTasksResp) bool {
-				_, ok := hitLookup[k]
-				return ok
-			})
-		} else {
-			o.logger.Error("error pushing checks result to aggregator", "error", err)
-		}
-	}
-
-	return nil
 }

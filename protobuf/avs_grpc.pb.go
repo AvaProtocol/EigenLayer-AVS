@@ -35,10 +35,6 @@ type AggregatorClient interface {
 	GetTask(ctx context.Context, in *IdReq, opts ...grpc.CallOption) (*Task, error)
 	CancelTask(ctx context.Context, in *IdReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
 	DeleteTask(ctx context.Context, in *IdReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
-	// Operator endpoint
-	Ping(ctx context.Context, in *Checkin, opts ...grpc.CallOption) (*CheckinResp, error)
-	SyncTasks(ctx context.Context, in *SyncTasksReq, opts ...grpc.CallOption) (Aggregator_SyncTasksClient, error)
-	UpdateChecks(ctx context.Context, in *UpdateChecksReq, opts ...grpc.CallOption) (*UpdateChecksResp, error)
 }
 
 type aggregatorClient struct {
@@ -130,56 +126,6 @@ func (c *aggregatorClient) DeleteTask(ctx context.Context, in *IdReq, opts ...gr
 	return out, nil
 }
 
-func (c *aggregatorClient) Ping(ctx context.Context, in *Checkin, opts ...grpc.CallOption) (*CheckinResp, error) {
-	out := new(CheckinResp)
-	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/Ping", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *aggregatorClient) SyncTasks(ctx context.Context, in *SyncTasksReq, opts ...grpc.CallOption) (Aggregator_SyncTasksClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Aggregator_ServiceDesc.Streams[0], "/aggregator.Aggregator/SyncTasks", opts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &aggregatorSyncTasksClient{stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-type Aggregator_SyncTasksClient interface {
-	Recv() (*SyncTasksResp, error)
-	grpc.ClientStream
-}
-
-type aggregatorSyncTasksClient struct {
-	grpc.ClientStream
-}
-
-func (x *aggregatorSyncTasksClient) Recv() (*SyncTasksResp, error) {
-	m := new(SyncTasksResp)
-	if err := x.ClientStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
-func (c *aggregatorClient) UpdateChecks(ctx context.Context, in *UpdateChecksReq, opts ...grpc.CallOption) (*UpdateChecksResp, error) {
-	out := new(UpdateChecksResp)
-	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/UpdateChecks", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // AggregatorServer is the server API for Aggregator service.
 // All implementations must embed UnimplementedAggregatorServer
 // for forward compatibility
@@ -196,10 +142,6 @@ type AggregatorServer interface {
 	GetTask(context.Context, *IdReq) (*Task, error)
 	CancelTask(context.Context, *IdReq) (*wrapperspb.BoolValue, error)
 	DeleteTask(context.Context, *IdReq) (*wrapperspb.BoolValue, error)
-	// Operator endpoint
-	Ping(context.Context, *Checkin) (*CheckinResp, error)
-	SyncTasks(*SyncTasksReq, Aggregator_SyncTasksServer) error
-	UpdateChecks(context.Context, *UpdateChecksReq) (*UpdateChecksResp, error)
 	mustEmbedUnimplementedAggregatorServer()
 }
 
@@ -233,15 +175,6 @@ func (UnimplementedAggregatorServer) CancelTask(context.Context, *IdReq) (*wrapp
 }
 func (UnimplementedAggregatorServer) DeleteTask(context.Context, *IdReq) (*wrapperspb.BoolValue, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteTask not implemented")
-}
-func (UnimplementedAggregatorServer) Ping(context.Context, *Checkin) (*CheckinResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Ping not implemented")
-}
-func (UnimplementedAggregatorServer) SyncTasks(*SyncTasksReq, Aggregator_SyncTasksServer) error {
-	return status.Errorf(codes.Unimplemented, "method SyncTasks not implemented")
-}
-func (UnimplementedAggregatorServer) UpdateChecks(context.Context, *UpdateChecksReq) (*UpdateChecksResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method UpdateChecks not implemented")
 }
 func (UnimplementedAggregatorServer) mustEmbedUnimplementedAggregatorServer() {}
 
@@ -418,63 +351,6 @@ func _Aggregator_DeleteTask_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Aggregator_Ping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Checkin)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AggregatorServer).Ping(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/aggregator.Aggregator/Ping",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AggregatorServer).Ping(ctx, req.(*Checkin))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Aggregator_SyncTasks_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(SyncTasksReq)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(AggregatorServer).SyncTasks(m, &aggregatorSyncTasksServer{stream})
-}
-
-type Aggregator_SyncTasksServer interface {
-	Send(*SyncTasksResp) error
-	grpc.ServerStream
-}
-
-type aggregatorSyncTasksServer struct {
-	grpc.ServerStream
-}
-
-func (x *aggregatorSyncTasksServer) Send(m *SyncTasksResp) error {
-	return x.ServerStream.SendMsg(m)
-}
-
-func _Aggregator_UpdateChecks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UpdateChecksReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AggregatorServer).UpdateChecks(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/aggregator.Aggregator/UpdateChecks",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AggregatorServer).UpdateChecks(ctx, req.(*UpdateChecksReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // Aggregator_ServiceDesc is the grpc.ServiceDesc for Aggregator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -518,19 +394,229 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "DeleteTask",
 			Handler:    _Aggregator_DeleteTask_Handler,
 		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "protobuf/avs.proto",
+}
+
+// NodeClient is the client API for Node service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type NodeClient interface {
+	// Operator endpoint
+	Ping(ctx context.Context, in *Checkin, opts ...grpc.CallOption) (*CheckinResp, error)
+	SyncMessages(ctx context.Context, in *SyncMessagesReq, opts ...grpc.CallOption) (Node_SyncMessagesClient, error)
+	Ack(ctx context.Context, in *AckMessageReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
+	NotifyTriggers(ctx context.Context, in *NotifyTriggersReq, opts ...grpc.CallOption) (*NotifyTriggersResp, error)
+}
+
+type nodeClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewNodeClient(cc grpc.ClientConnInterface) NodeClient {
+	return &nodeClient{cc}
+}
+
+func (c *nodeClient) Ping(ctx context.Context, in *Checkin, opts ...grpc.CallOption) (*CheckinResp, error) {
+	out := new(CheckinResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Node/Ping", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeClient) SyncMessages(ctx context.Context, in *SyncMessagesReq, opts ...grpc.CallOption) (Node_SyncMessagesClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Node_ServiceDesc.Streams[0], "/aggregator.Node/SyncMessages", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &nodeSyncMessagesClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Node_SyncMessagesClient interface {
+	Recv() (*SyncMessagesResp, error)
+	grpc.ClientStream
+}
+
+type nodeSyncMessagesClient struct {
+	grpc.ClientStream
+}
+
+func (x *nodeSyncMessagesClient) Recv() (*SyncMessagesResp, error) {
+	m := new(SyncMessagesResp)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *nodeClient) Ack(ctx context.Context, in *AckMessageReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error) {
+	out := new(wrapperspb.BoolValue)
+	err := c.cc.Invoke(ctx, "/aggregator.Node/Ack", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeClient) NotifyTriggers(ctx context.Context, in *NotifyTriggersReq, opts ...grpc.CallOption) (*NotifyTriggersResp, error) {
+	out := new(NotifyTriggersResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Node/NotifyTriggers", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// NodeServer is the server API for Node service.
+// All implementations must embed UnimplementedNodeServer
+// for forward compatibility
+type NodeServer interface {
+	// Operator endpoint
+	Ping(context.Context, *Checkin) (*CheckinResp, error)
+	SyncMessages(*SyncMessagesReq, Node_SyncMessagesServer) error
+	Ack(context.Context, *AckMessageReq) (*wrapperspb.BoolValue, error)
+	NotifyTriggers(context.Context, *NotifyTriggersReq) (*NotifyTriggersResp, error)
+	mustEmbedUnimplementedNodeServer()
+}
+
+// UnimplementedNodeServer must be embedded to have forward compatible implementations.
+type UnimplementedNodeServer struct {
+}
+
+func (UnimplementedNodeServer) Ping(context.Context, *Checkin) (*CheckinResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Ping not implemented")
+}
+func (UnimplementedNodeServer) SyncMessages(*SyncMessagesReq, Node_SyncMessagesServer) error {
+	return status.Errorf(codes.Unimplemented, "method SyncMessages not implemented")
+}
+func (UnimplementedNodeServer) Ack(context.Context, *AckMessageReq) (*wrapperspb.BoolValue, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Ack not implemented")
+}
+func (UnimplementedNodeServer) NotifyTriggers(context.Context, *NotifyTriggersReq) (*NotifyTriggersResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NotifyTriggers not implemented")
+}
+func (UnimplementedNodeServer) mustEmbedUnimplementedNodeServer() {}
+
+// UnsafeNodeServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to NodeServer will
+// result in compilation errors.
+type UnsafeNodeServer interface {
+	mustEmbedUnimplementedNodeServer()
+}
+
+func RegisterNodeServer(s grpc.ServiceRegistrar, srv NodeServer) {
+	s.RegisterService(&Node_ServiceDesc, srv)
+}
+
+func _Node_Ping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Checkin)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServer).Ping(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Node/Ping",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServer).Ping(ctx, req.(*Checkin))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Node_SyncMessages_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SyncMessagesReq)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(NodeServer).SyncMessages(m, &nodeSyncMessagesServer{stream})
+}
+
+type Node_SyncMessagesServer interface {
+	Send(*SyncMessagesResp) error
+	grpc.ServerStream
+}
+
+type nodeSyncMessagesServer struct {
+	grpc.ServerStream
+}
+
+func (x *nodeSyncMessagesServer) Send(m *SyncMessagesResp) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func _Node_Ack_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AckMessageReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServer).Ack(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Node/Ack",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServer).Ack(ctx, req.(*AckMessageReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Node_NotifyTriggers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NotifyTriggersReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServer).NotifyTriggers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Node/NotifyTriggers",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServer).NotifyTriggers(ctx, req.(*NotifyTriggersReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// Node_ServiceDesc is the grpc.ServiceDesc for Node service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var Node_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "aggregator.Node",
+	HandlerType: (*NodeServer)(nil),
+	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "Ping",
-			Handler:    _Aggregator_Ping_Handler,
+			Handler:    _Node_Ping_Handler,
 		},
 		{
-			MethodName: "UpdateChecks",
-			Handler:    _Aggregator_UpdateChecks_Handler,
+			MethodName: "Ack",
+			Handler:    _Node_Ack_Handler,
+		},
+		{
+			MethodName: "NotifyTriggers",
+			Handler:    _Node_NotifyTriggers_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "SyncTasks",
-			Handler:       _Aggregator_SyncTasks_Handler,
+			StreamName:    "SyncMessages",
+			Handler:       _Node_SyncMessages_Handler,
 			ServerStreams: true,
 		},
 	},
