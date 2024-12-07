@@ -43,6 +43,8 @@ var (
 	// These macro are define in our aggregator yaml config file under `macros`
 	macroEnvs map[string]string
 	cache     *bigcache.BigCache
+
+	defaultSalt = big.NewInt(0)
 )
 
 // Set a global logger for task engine
@@ -169,8 +171,7 @@ func (n *Engine) MustStart() {
 }
 
 func (n *Engine) GetSmartWallets(owner common.Address) ([]*avsproto.SmartWallet, error) {
-	salt := big.NewInt(0)
-	sender, err := aa.GetSenderAddress(rpcConn, owner, salt)
+	sender, err := aa.GetSenderAddress(rpcConn, owner, defaultSalt)
 	if err != nil {
 		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), SmartAccountCreationError)
 	}
@@ -180,7 +181,7 @@ func (n *Engine) GetSmartWallets(owner common.Address) ([]*avsproto.SmartWallet,
 		&avsproto.SmartWallet{
 			Address: sender.String(),
 			Factory: n.smartWalletConfig.FactoryAddress.String(),
-			Salt:    salt.String(),
+			Salt:    defaultSalt.String(),
 		},
 	}
 
@@ -194,6 +195,10 @@ func (n *Engine) GetSmartWallets(owner common.Address) ([]*avsproto.SmartWallet,
 	for _, item := range items {
 		w := &model.SmartWallet{}
 		w.FromStorageData(item.Value)
+
+		if w.Salt.Cmp(defaultSalt) == 0 {
+			continue
+		}
 
 		wallets = append(wallets, &avsproto.SmartWallet{
 			Address: w.Address.String(),
