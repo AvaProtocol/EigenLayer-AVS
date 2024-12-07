@@ -60,7 +60,7 @@ func GetEventForTx(txHash string, evtIndex uint64) (*types.Log, error) {
 	if event == nil {
 		return nil, fmt.Errorf("not found event")
 	}
-	return receipt.Logs[evtIndex], nil
+	return event, nil
 }
 
 // Shortcut to initialize a storage at the given path, panic if we cannot create db
