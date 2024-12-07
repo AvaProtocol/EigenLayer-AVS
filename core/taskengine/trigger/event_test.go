@@ -3,7 +3,9 @@ package trigger
 import (
 	"testing"
 
+	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
 	"github.com/AvaProtocol/ap-avs/core/testutil"
+	"github.com/expr-lang/expr"
 )
 
 func TestChainlinkLatestAnswer(t *testing.T) {
@@ -16,48 +18,38 @@ func TestChainlinkLatestAnswer(t *testing.T) {
 	eventTrigger := NewEventTrigger(&RpcOption{
 		RpcURL:   testutil.GetTestRPCURL(),
 		WsRpcURL: testutil.GetTestRPCURL(),
-	}, make(chan TriggerMark[string], 1000))
+	}, make(chan TriggerMark[EventMark], 1000))
 
-	result, err := eventTrigger.Evaluate(event, `
-		(trigger.data.topics[0] == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" && trigger.data.topics[2] == "0xc114fb059434563dc65ac8d57e7976e3eac534f4")
-		  && 
-          (
-            ( trigger.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" &&
-              bigCmp(
-                trigger.data.value | toBigInt(),
-                "5000000" | toBigInt()
-              ) > 0
-            ) ||
-            ( trigger.data.address == ("0x779877a7b0d9e8603169ddbd7836e478b4624789" | lower()) &&
-              bigCmp(
-                priceChainlink("0xc59E3633BAAC79493d908e63626716e204A45EdF"),
-                toBigInt("5000000")
-              ) > 0
-            )
-          )
-      `)
+	envs := macros.GetEnvs(map[string]interface{}{
+		"trigger1": map[string]interface{}{
+			"data": map[string]interface{}{
+				"topics": []string{
+					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+					"0xabcdef",
+					"0xc114fb059434563dc65ac8d57e7976e3eac534f4",
+				},
+			},
+		},
+	})
+
+	program, err := expr.Compile(`
+		trigger1.data.topics[0] == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" && trigger1.data.topics[2] == "0xc114fb059434563dc65ac8d57e7976e3eac534f4"
+      `, expr.Env(envs), expr.AsBool())
+
+	if err != nil {
+		panic(err)
+	}
+
+	result, err := eventTrigger.Evaluate(event, program)
 	if !result {
 		t.Errorf("expect expression to be match, but got false: error: %v", err)
 	}
 
-	result, err = eventTrigger.Evaluate(event, `
-		(trigger.data.topics[0] == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" && trigger.data.topics[2] == "0xc114fb059434563dc65ac8d57e7976e3eac534f4")
-		  && 
-          (
-            ( trigger.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" &&
-              bigCmp(
-                toBigInt(trigger.data.value),
-                toBigInt("95000000")
-              ) > 0
-            ) ||
-            ( trigger.data.address == "0x779877a7b0d9e8603169ddbd7836e478b4624789" &&
-              bigCmp(
-                priceChainlink("0xc59E3633BAAC79493d908e63626716e204A45EdF"),
-                toBigInt("5000000")
-              ) > 0
-            )
-          )
+	program, err = expr.Compile(`
+		(trigger1.data.topics[0] == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" && trigger1.data.topics[2] == "abc")
       `)
+
+	result, err = eventTrigger.Evaluate(event, program)
 	if result {
 		t.Errorf("expect expression to be not match, but got match: error: %v", err)
 	}

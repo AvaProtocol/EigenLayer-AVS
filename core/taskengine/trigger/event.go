@@ -2,7 +2,6 @@ package trigger
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 
@@ -181,9 +180,6 @@ func (evt *EventTrigger) Evaluate(event *types.Log, program *vm.Program) (bool, 
 			},
 		},
 	})
-
-	fmt.Println("Evaluate", program.Source().String(), "envs", envs, event)
-	//program, err := expr.Compile(expression, expr.Env(envs), expr.AsBool())
 
 	result, err := expr.Run(program, envs)
 
