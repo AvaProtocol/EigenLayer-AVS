@@ -3,7 +3,6 @@ package aggregator;
 
 option go_package = "./avsproto";
 
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
 
 message IdReq {
@@ -308,14 +307,22 @@ message ListWalletResp {
 message ListTasksReq {
   // Filter out by the smart_wallet_address
   string smart_wallet_address = 1;
+  string cursor = 2;
 }
 
 message ListTasksResp {
   repeated Task tasks = 1;
+  string cursor = 2;
+}
+
+message ListExecutionsReq {
+  string id = 1;
+  string cursor = 2;
 }
 
 message ListExecutionsResp {
   repeated Execution executions = 1;
+  string cursor = 2;
 }
 
 message GetKeyReq {
@@ -360,7 +367,7 @@ service Aggregator {
   rpc CreateTask(CreateTaskReq)     returns (CreateTaskResp) {};
   rpc ListTasks(ListTasksReq)       returns (ListTasksResp) {};
   rpc GetTask(IdReq)                returns (Task) {};
-  rpc ListExecutions(IdReq)         returns (ListExecutionsResp) {};
+  rpc ListExecutions(ListExecutionsReq)         returns (ListExecutionsResp) {};
   rpc CancelTask(IdReq)              returns (google.protobuf.BoolValue) {};
   rpc DeleteTask(IdReq)              returns (google.protobuf.BoolValue) {};
 }

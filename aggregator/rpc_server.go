@@ -169,6 +169,19 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 	}, nil
 }
 
+func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
+	}
+
+	r.config.Logger.Info("process list execution",
+		"user", user.Address.String(),
+		"task_id", payload.Id,
+	)
+	return r.engine.ListExecutions(user, payload)
+}
+
 func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsproto.Task, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {

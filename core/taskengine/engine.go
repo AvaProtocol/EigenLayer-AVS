@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +29,8 @@ import (
 
 const (
 	ExecuteTask = "execute_task"
+	// TODO Change this before merge
+	ItemPerPage = 2
 )
 
 var (
@@ -456,11 +457,48 @@ func (n *Engine) GetTask(user *model.User, taskID string) (*model.Task, error) {
 		return nil, err
 	}
 
-	if strings.ToLower(task.Owner) != strings.ToLower(user.Address.Hex()) {
+	if !task.OwnedBy(user.Address) {
 		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
 	return task, nil
+}
+
+// List Execution for a given task id
+func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
+	task, err := n.GetTaskByID(payload.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	if !task.OwnedBy(user.Address) {
+		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+	}
+
+	executionKVs, err := n.db.GetByPrefix([]byte(fmt.Sprintf("history:%s", task.Id)))
+
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
+	}
+
+	executioResp := &avsproto.ListExecutionsResp{
+		Executions: make([]*avsproto.Execution, len(executionKVs)),
+		Cursor:     "",
+	}
+	for i, kv := range executionKVs {
+		exec := avsproto.Execution{}
+		protojson.Unmarshal(kv.Value, &exec)
+		executioResp.Executions[i] = &exec
+		if i >= ItemPerPage+1 {
+			break
+		}
+	}
+
+	if len(executioResp.Executions) >= ItemPerPage {
+		last := len(executioResp.Executions) - 1
+		executioResp.Cursor = NewCursor(CursorDirectionNext, fmt.Sprintf("%d", executioResp.Executions[last].Id)).String()
+	}
+	return executioResp, nil
 }
 
 func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error) {

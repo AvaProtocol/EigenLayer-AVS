@@ -1,6 +1,8 @@
 package model
 
 import (
+	"strings"
+
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"fmt"
@@ -120,6 +122,11 @@ func (t *Task) SetFailed() {
 func (t *Task) SetCanceled() {
 	t.Status = avsproto.TaskStatus_Canceled
 	t.CompletedAt = time.Now().Unix()
+}
+
+// Check whether the task own by the given address
+func (t *Task) OwnedBy(address common.Address) bool {
+	return strings.EqualFold(t.Owner, address.Hex())
 }
 
 // Given a task key generated from Key(), extract the ID part
