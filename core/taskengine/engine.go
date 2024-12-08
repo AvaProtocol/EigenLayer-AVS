@@ -389,7 +389,7 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	return nil
 }
 
-func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksReq) ([]*avsproto.Task, error) {
+func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
 	// by default show the task from the default smart wallet, if proving we look into that wallet specifically
 	owner := user.SmartAccountAddress
 	if payload.SmartWalletAddress == "" {
@@ -413,8 +413,12 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
 	}
 
-	tasks := make([]*avsproto.Task, len(taskIDs))
-	for i, kv := range taskIDs {
+	taskResp := &avsproto.ListTasksResp{
+		Tasks:  []*avsproto.Task{},
+		Cursor: "",
+	}
+	total := 0
+	for _, kv := range taskIDs {
 		status, _ := strconv.Atoi(string(kv.Value))
 		taskID := string(model.TaskKeyToId(kv.Key[2:]))
 		taskRawByte, err := n.db.GetKey(TaskStorageKey(taskID, avsproto.TaskStatus(status)))
@@ -428,10 +432,21 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		}
 		task.Id = taskID
 
-		tasks[i], _ = task.ToProtoBuf()
+		if t, err := task.ToProtoBuf(); err == nil {
+			taskResp.Tasks = append(taskResp.Tasks, t)
+			total += 1
+		}
+
+		if total >= ItemPerPage {
+			break
+		}
 	}
 
-	return tasks, nil
+	if total >= ItemPerPage {
+		taskResp.Cursor = NewCursor(CursorDirectionNext, fmt.Sprintf("%d", taskResp.Tasks[total-1].Id)).String()
+	}
+
+	return taskResp, nil
 }
 
 func (n *Engine) GetTaskByID(taskID string) (*model.Task, error) {
@@ -482,21 +497,23 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	}
 
 	executioResp := &avsproto.ListExecutionsResp{
-		Executions: make([]*avsproto.Execution, len(executionKVs)),
+		Executions: []*avsproto.Execution{},
 		Cursor:     "",
 	}
-	for i, kv := range executionKVs {
+	total := 0
+	for _, kv := range executionKVs {
 		exec := avsproto.Execution{}
-		protojson.Unmarshal(kv.Value, &exec)
-		executioResp.Executions[i] = &exec
-		if i >= ItemPerPage+1 {
+		if err := protojson.Unmarshal(kv.Value, &exec); err == nil {
+			executioResp.Executions = append(executioResp.Executions, &exec)
+			total += 1
+		}
+		if total >= ItemPerPage {
 			break
 		}
 	}
 
-	if len(executioResp.Executions) >= ItemPerPage {
-		last := len(executioResp.Executions) - 1
-		executioResp.Cursor = NewCursor(CursorDirectionNext, fmt.Sprintf("%d", executioResp.Executions[last].Id)).String()
+	if total >= ItemPerPage {
+		executioResp.Cursor = NewCursor(CursorDirectionNext, fmt.Sprintf("%d", executioResp.Executions[total-1].Id)).String()
 	}
 	return executioResp, nil
 }

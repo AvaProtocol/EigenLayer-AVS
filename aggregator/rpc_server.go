@@ -158,15 +158,7 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 		"user", user.Address.String(),
 		"smart_wallet_address", payload.SmartWalletAddress,
 	)
-	tasks, err := r.engine.ListTasksByUser(user, payload)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &avsproto.ListTasksResp{
-		Tasks: tasks,
-	}, nil
+	return r.engine.ListTasksByUser(user, payload)
 }
 
 func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
