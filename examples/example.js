@@ -125,6 +125,7 @@ async function listTask(owner, token) {
   for (const item of result.tasks) {
     console.log(util.inspect(item, { depth: 4, colors: true }));
   }
+  console.log(util.inspect({cursor: result.cursor}, { depth: 4, colors: true }));
 }
 
 async function getTask(owner, token, taskId) {
