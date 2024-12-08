@@ -18,7 +18,7 @@ After having the config file, we can run the aggregator:
 
 ```
 make dev-build
-make dev-aggregator
+make dev-agg
 ```
 
 Or use docker compsose directly:
@@ -30,6 +30,7 @@ docker compose build
 docker compose up
 ```
 
+
 Once the docker compose is up, there are 2 services running:
 
 1. The aggregator on localhost:2206
@@ -38,8 +39,16 @@ Once the docker compose is up, there are 2 services running:
 Visit http://localhost:8080 and you can interactively create and construct
 request to our grpc node.
 
-For detail of each method and payload, check the protocol.md docs.
+For detail of each method and payload, check the protocol.md docs. Look into `examples` to run example workflow against the local node
 
+# Live reload
+
+To auto compile and live reload the node, run:
+
+
+```
+make dev-live
+```
 
 ## Client SDK
 

@@ -34,13 +34,24 @@ func NewRestProrcessor() *RestProcessor {
 }
 
 func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
+	t0 := time.Now().Unix()
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
 		Log:        "",
 		OutputData: "",
 		Success:    true,
 		Error:      "",
+		StartAt:    t0,
 	}
+
+	var err error
+	defer func() {
+		s.EndAt = time.Now().Unix()
+		s.Success = err == nil
+		if err != nil {
+			s.Error = err.Error()
+		}
+	}()
 
 	var log strings.Builder
 
@@ -52,7 +63,6 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 
 	var resp *resty.Response
-	var err error
 	if strings.EqualFold(node.Method, "post") {
 		resp, err = request.Post(node.Url)
 	} else if strings.EqualFold(node.Method, "get") {
@@ -63,6 +73,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	u, err := url.Parse(node.Url)
 	if err != nil {
+		s.Error = fmt.Sprintf("cannot parse url: %s", node.Url)
 		return nil, err
 	}
 

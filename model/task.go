@@ -1,6 +1,8 @@
 package model
 
 import (
+	"strings"
+
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"fmt"
@@ -64,8 +66,8 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 			StartAt:   body.StartAt,
 
 			// initial state for task
-			Status:     avsproto.TaskStatus_Active,
-			Executions: []*avsproto.Execution{},
+			Status: avsproto.TaskStatus_Active,
+			//Executions: []*avsproto.Execution{},
 		},
 	}
 
@@ -122,21 +124,9 @@ func (t *Task) SetCanceled() {
 	t.CompletedAt = time.Now().Unix()
 }
 
-func (t *Task) AppendExecution(epoch int64, triggerMark *avsproto.TriggerMark, steps []*avsproto.Execution_Step, runError error) {
-	exc := &avsproto.Execution{
-		Epoch:       epoch,
-		Success:     true,
-		Error:       "",
-		Steps:       steps,
-		TriggerMark: triggerMark,
-	}
-
-	if runError != nil {
-		exc.Success = false
-		exc.Error = runError.Error()
-	}
-
-	t.Executions = append(t.Executions, exc)
+// Check whether the task own by the given address
+func (t *Task) OwnedBy(address common.Address) bool {
+	return strings.EqualFold(t.Owner, address.Hex())
 }
 
 // Given a task key generated from Key(), extract the ID part
@@ -144,4 +134,8 @@ func TaskKeyToId(key []byte) []byte {
 	// <43-byte>:<43-byte>:
 	// the first 43 bytes is owner address
 	return key[86:]
+}
+
+func UlidFromTaskId(taskID string) ulid.ULID {
+	return ulid.MustParse(taskID)
 }

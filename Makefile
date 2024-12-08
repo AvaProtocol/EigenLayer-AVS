@@ -1,5 +1,7 @@
+ROOT_DIR := $(shell pwd)
+
 MAIN_PACKAGE_PATH ?= ./
-BINARY_NAME ?= ap-avs
+BINARY_NAME ?= ap
 
 # ==================================================================================== #
 # HELPERS
@@ -56,15 +58,6 @@ build:
 run: build
 	/tmp/bin/${BINARY_NAME}
 
-## run/live: run the application with reloading on file changes
-.PHONY: run/live
-run/live:
-	go run github.com/cosmtrek/air@v1.43.0 \
-		--build.cmd "make build" --build.bin "/tmp/bin/${BINARY_NAME}" --build.delay "100" \
-		--build.exclude_dir "" \
-		--build.include_ext "go, tpl, tmpl, html, css, scss, js, ts, sql, jpeg, jpg, gif, png, bmp, svg, webp, ico" \
-		--misc.clean_on_exit "true"
-
 
 ## push: push changes to the remote Git repository
 .PHONY: push
@@ -77,14 +70,22 @@ production/deploy: confirm tidy audit no-dirty
 	GOOS=linux GOARCH=amd64 go build -ldflags='-s' -o=/tmp/bin/linux_amd64/${BINARY_NAME} ${MAIN_PACKAGE_PATH}
 	upx -5 /tmp/bin/linux_amd64/${BINARY_NAME}
 
-## dev: generate protoc
+## protoc-gen: generate protoc buf Go binding
+.PHONY: protoc-gen
 protoc-gen:
 	protoc \
 		--go_out=. \
 		--go_opt=paths=source_relative \
     	--go-grpc_out=. \
 		--go-grpc_opt=paths=source_relative \
-    protobuf/avs.proto
+    	protobuf/avs.proto
+
+	protoc \
+		--go_out=. \
+		--go_opt=paths=source_relative \
+    	--go-grpc_out=. \
+		--go-grpc_opt=paths=source_relative \
+    	protobuf/node.proto
 
 ## up: bring up docker compose stack
 up:
@@ -95,6 +96,15 @@ unstable-build:
 	docker build --platform=linux/amd64 --build-arg RELEASE_TAG=unstable -t avaprotocol/avs-dev:unstable -f dockerfiles/operator.Dockerfile .
 	docker push avaprotocol/avs-dev:unstable
 
+
+## dev/live: run the application with reloading on file changes
+.PHONY: dev-live
+dev-live:
+	go run github.com/air-verse/air@v1.61.1 \
+		--build.cmd "make dev-build" --build.bin "./out/${BINARY_NAME}" --build.args_bin "aggregator" --build.delay "100" \
+		--build.exclude_dir "certs,client-sdk,contracts,examples,out,docs,tmp" \
+		--build.include_ext "go, tpl, tmpl, html, css, scss, js, ts, sql, jpeg, jpg, gif, png, bmp, svg, webp, ico" \
+		--misc.clean_on_exit "true"
 
 ## dev-build: build a dev version for local development
 dev-build:

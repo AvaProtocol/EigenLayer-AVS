@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/oklog/ulid/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	grpcstatus "google.golang.org/grpc/status"
@@ -29,7 +29,8 @@ import (
 )
 
 const (
-	ExecuteTask = "execute_task"
+	ExecuteTask        = "execute_task"
+	DefaultItemPerPage = 50
 )
 
 var (
@@ -388,7 +389,7 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	return nil
 }
 
-func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksReq) ([]*avsproto.Task, error) {
+func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
 	// by default show the task from the default smart wallet, if proving we look into that wallet specifically
 	owner := user.SmartAccountAddress
 	if payload.SmartWalletAddress == "" {
@@ -412,10 +413,26 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
 	}
 
-	tasks := make([]*avsproto.Task, len(taskIDs))
-	for i, kv := range taskIDs {
+	taskResp := &avsproto.ListTasksResp{
+		Tasks:  []*avsproto.ListTasksResp_Item{},
+		Cursor: "",
+	}
+
+	total := 0
+	cursor, err := CursorFromString(payload.Cursor)
+	itemPerPage := int(payload.ItemPerPage)
+	if itemPerPage == 0 {
+		itemPerPage = DefaultItemPerPage
+	}
+	for _, kv := range taskIDs {
 		status, _ := strconv.Atoi(string(kv.Value))
 		taskID := string(model.TaskKeyToId(kv.Key[2:]))
+
+		taskIDUlid := model.UlidFromTaskId(taskID)
+		if !cursor.AfterUlid(taskIDUlid) {
+			continue
+		}
+
 		taskRawByte, err := n.db.GetKey(TaskStorageKey(taskID, avsproto.TaskStatus(status)))
 		if err != nil {
 			continue
@@ -427,10 +444,34 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		}
 		task.Id = taskID
 
-		tasks[i], _ = task.ToProtoBuf()
+		if t, err := task.ToProtoBuf(); err == nil {
+			taskResp.Tasks = append(taskResp.Tasks, &avsproto.ListTasksResp_Item{
+				Id:                 t.Id,
+				Owner:              t.Owner,
+				SmartWalletAddress: t.SmartWalletAddress,
+				StartAt:            t.StartAt,
+				ExpiredAt:          t.ExpiredAt,
+				Memo:               t.Memo,
+				CompletedAt:        t.CompletedAt,
+				MaxExecution:       t.MaxExecution,
+				TotalExecution:     t.TotalExecution,
+				LastRanAt:          t.LastRanAt,
+				Status:             t.Status,
+				Trigger:            t.Trigger,
+			})
+			total += 1
+		}
+
+		if total >= itemPerPage {
+			break
+		}
 	}
 
-	return tasks, nil
+	if total >= itemPerPage {
+		taskResp.Cursor = NewCursor(CursorDirectionNext, taskResp.Tasks[total-1].Id).String()
+	}
+
+	return taskResp, nil
 }
 
 func (n *Engine) GetTaskByID(taskID string) (*model.Task, error) {
@@ -456,11 +497,62 @@ func (n *Engine) GetTask(user *model.User, taskID string) (*model.Task, error) {
 		return nil, err
 	}
 
-	if strings.ToLower(task.Owner) != strings.ToLower(user.Address.Hex()) {
+	if !task.OwnedBy(user.Address) {
 		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
 	return task, nil
+}
+
+// List Execution for a given task id
+func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
+	task, err := n.GetTaskByID(payload.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	if !task.OwnedBy(user.Address) {
+		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+	}
+
+	executionKVs, err := n.db.GetByPrefix(TaskExecutionPrefix(task.Id))
+
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
+	}
+
+	executioResp := &avsproto.ListExecutionsResp{
+		Executions: []*avsproto.Execution{},
+		Cursor:     "",
+	}
+
+	total := 0
+	cursor, err := CursorFromString(payload.Cursor)
+
+	itemPerPage := int(payload.ItemPerPage)
+	if itemPerPage == 0 {
+		itemPerPage = DefaultItemPerPage
+	}
+	for _, kv := range executionKVs {
+		executionUlid := ulid.MustParse(string(ExecutionIdFromStorageKey(kv.Key)))
+		if !cursor.AfterUlid(executionUlid) {
+			continue
+		}
+
+		exec := avsproto.Execution{}
+		if err := protojson.Unmarshal(kv.Value, &exec); err == nil {
+			executioResp.Executions = append(executioResp.Executions, &exec)
+			total += 1
+		}
+		if total >= itemPerPage {
+			break
+		}
+	}
+
+	if total >= itemPerPage {
+		executioResp.Cursor = NewCursor(CursorDirectionNext, executioResp.Executions[total-1].Id).String()
+	}
+	return executioResp, nil
 }
 
 func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error) {
