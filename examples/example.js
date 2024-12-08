@@ -125,6 +125,7 @@ async function listTask(owner, token) {
   for (const item of result.tasks) {
     console.log(util.inspect(item, { depth: 4, colors: true }));
   }
+  console.log(util.inspect({cursor: result.cursor}, { depth: 4, colors: true }));
 }
 
 async function getTask(owner, token, taskId) {
@@ -135,6 +136,16 @@ async function getTask(owner, token, taskId) {
 
   console.log(util.inspect(result, { depth: 4, colors: true }));
 }
+
+async function listExecutions(owner, token, taskId) {
+  const metadata = new grpc.Metadata();
+  metadata.add("authkey", token);
+
+  const result = await asyncRPC(client, "ListExecutions", { id: taskId }, metadata);
+
+  console.log(util.inspect(result, { depth: 4, colors: true }));
+}
+
 
 async function cancel(owner, token, taskId) {
   const metadata = new grpc.Metadata();
@@ -329,6 +340,9 @@ const main = async (cmd) => {
       await getTask(owner, token, process.argv[3]);
       break;
 
+    case "executions":
+      await listExecutions(owner, token, process.argv[3]);
+      break;
     case "cancel":
       await cancel(owner, token, process.argv[3]);
       break;
