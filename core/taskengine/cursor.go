@@ -13,8 +13,8 @@ const (
 )
 
 type Cursor struct {
-	Direction CursorDirection `json:"direction"`
-	Position  string          `json:"mark"`
+	Direction CursorDirection `json:"d"`
+	Position  string          `json:"p"`
 }
 
 func NewCursor(direction CursorDirection, position string) *Cursor {
