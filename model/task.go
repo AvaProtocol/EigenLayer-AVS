@@ -64,8 +64,8 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 			StartAt:   body.StartAt,
 
 			// initial state for task
-			Status:     avsproto.TaskStatus_Active,
-			Executions: []*avsproto.Execution{},
+			Status: avsproto.TaskStatus_Active,
+			//Executions: []*avsproto.Execution{},
 		},
 	}
 
@@ -120,23 +120,6 @@ func (t *Task) SetFailed() {
 func (t *Task) SetCanceled() {
 	t.Status = avsproto.TaskStatus_Canceled
 	t.CompletedAt = time.Now().Unix()
-}
-
-func (t *Task) AppendExecution(epoch int64, triggerMark *avsproto.TriggerMark, steps []*avsproto.Execution_Step, runError error) {
-	exc := &avsproto.Execution{
-		Epoch:       epoch,
-		Success:     true,
-		Error:       "",
-		Steps:       steps,
-		TriggerMark: triggerMark,
-	}
-
-	if runError != nil {
-		exc.Success = false
-		exc.Error = runError.Error()
-	}
-
-	t.Executions = append(t.Executions, exc)
 }
 
 // Given a task key generated from Key(), extract the ID part

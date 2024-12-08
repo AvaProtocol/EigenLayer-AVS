@@ -53,6 +53,14 @@ func TaskUserKey(t *model.Task) []byte {
 	))
 }
 
+func TaskExecutionKey(t *model.Task) []byte {
+	return []byte(fmt.Sprintf(
+		"history:%s:%d",
+		t.Id,
+		t.TotalExecution,
+	))
+}
+
 // Convert task status gRPC enum into the storage prefix
 // c: completed. task is completed and no longer being check for trigger anymore
 // f: failed. task is failed to executed, and no longer being check for trigger anymore

@@ -1,5 +1,7 @@
+ROOT_DIR := $(shell pwd)
+
 MAIN_PACKAGE_PATH ?= ./
-BINARY_NAME ?= ap-avs
+BINARY_NAME ?= ap
 
 # ==================================================================================== #
 # HELPERS
@@ -77,14 +79,22 @@ production/deploy: confirm tidy audit no-dirty
 	GOOS=linux GOARCH=amd64 go build -ldflags='-s' -o=/tmp/bin/linux_amd64/${BINARY_NAME} ${MAIN_PACKAGE_PATH}
 	upx -5 /tmp/bin/linux_amd64/${BINARY_NAME}
 
-## dev: generate protoc
+## protoc-gen: generate protoc buf Go binding
+.PHONY: protoc-gen
 protoc-gen:
 	protoc \
 		--go_out=. \
 		--go_opt=paths=source_relative \
     	--go-grpc_out=. \
 		--go-grpc_opt=paths=source_relative \
-    protobuf/avs.proto
+    	protobuf/avs.proto
+
+	protoc \
+		--go_out=. \
+		--go_opt=paths=source_relative \
+    	--go-grpc_out=. \
+		--go-grpc_opt=paths=source_relative \
+    	protobuf/node.proto
 
 ## up: bring up docker compose stack
 up:
