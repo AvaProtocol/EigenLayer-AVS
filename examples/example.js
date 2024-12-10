@@ -442,7 +442,7 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
   const nodeIdTransfer = UlidMonotonic.generate().toCanonical();
   const nodeIdNotification = UlidMonotonic.generate().toCanonical();
 
-  console.log("\nTrigger type", trigger1.trigger_type);
+  console.log("\nTrigger type", trigger.trigger_type);
 
   const result = await asyncRPC(
     client,
