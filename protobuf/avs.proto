@@ -101,8 +101,9 @@ message ContractReadNode {
   string contract_address = 1;
   string call_data = 2;
 
-  // abi is necessary to decode the return
+  // abi and method name is necessary to decode the return
   string contract_abi = 3;
+  string method = 4;
 }
 
 
