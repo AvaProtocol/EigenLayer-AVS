@@ -9,7 +9,7 @@ message IdReq {
   string id = 1;
 }
 
-message FixedEpochCondition {
+message FixedTimeCondition {
   repeated int64 epochs = 1;
 }
 // Simple timebase or cron syntax.
@@ -38,19 +38,19 @@ message EventCondition {
 message TaskTrigger {
   string name = 1;
   oneof trigger_type {
-    bool                   manual  = 2;
-
+    // manual task will not be auto trigger
+    bool               manual = 2;
     // run at a specific epoch, name inspired by unix `at` utility
-    FixedEpochCondition    fixed_time   = 3;
+    FixedTimeCondition fixed_time   = 3;
 
     // interval such as every hour/day/ etc can be converted to cronsyntax by the sdk/studio
-    CronCondition          cron    = 4;
+    CronCondition      cron    = 4;
    
     // currently the only support syntax is every <x> blocks
-    BlockCondition         block   = 5;
+    BlockCondition     block   = 5;
 
     // support filter by event expression such as topic0, topic1, topoc2 and event_data and contract_address
-    EventCondition         event   = 6;
+    EventCondition     event   = 6;
   }
 }
 
@@ -195,7 +195,7 @@ message TaskNode {
     // read data fron a target contract
     ContractReadNode contract_read = 12;
     // Make call to a graphql endpoint
-    GraphQLQueryNode  graphql_data_query = 13;
+    GraphQLQueryNode  graphql_query = 13;
     // Make call to a HTTP endpoint
     RestAPINode       rest_api = 14;
     // CustomCode allow to run arbitraty JavaScript.
