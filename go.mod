@@ -16,7 +16,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/k0kubun/pp/v3 v3.4.1
 	github.com/labstack/echo/v4 v4.12.0
-	github.com/oklog/ulid/v2 v2.1.0
+	github.com/oklog/ulid/v2 v2.1.1-0.20240413180941-96c4edf226ef
 	github.com/prometheus/client_golang v1.20.5
 	github.com/spf13/cobra v1.8.0
 	github.com/stackup-wallet/stackup-bundler v0.6.47

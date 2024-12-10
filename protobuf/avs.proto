@@ -3,70 +3,11 @@ package aggregator;
 
 option go_package = "./avsproto";
 
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
 
 message IdReq {
   string id = 1;
 }
-
-message Checkin {
-  string id = 1;
-  string address = 2;
-  string signature = 3;
-
-  message Status {
-    int64 uptime = 1;
-    int64 queueDepth = 2;
-    google.protobuf.Timestamp last_heartbeat = 3;
-  }
-
-  Status status = 4;
-
-  string version = 5;
-  int32 metricsPort = 6;
-  string remoteIP = 7;
-}
-
-message CheckinResp {
-  google.protobuf.Timestamp updated_at = 1;
-}
-
-message SyncMessagesReq {
-  string id = 1;
-  string address = 2;
-  bytes  signature = 3;
-  int64  monotonic_clock = 4;
-}
-
-enum MessageOp {
-  Unset              = 0;
-  MonitorTaskTrigger = 1;
-  CancelTask         = 2;
-  DeleteTask         = 3;
-  CompletedTask      = 4;
-}
-
-message SyncMessagesResp {
-  // message id is used to support dedup
-  string id = 1;
-  MessageOp op = 2;
-
-  message TaskMetadata {
-    string task_id = 1;
-    // how many time this task can run
-    int64 remain = 2;
-    int64 expired_at = 3;
-    TaskTrigger trigger = 4;
-  };
-
-  TaskMetadata task_metadata = 3;
-}
-
-message AckMessageReq {
-  string id = 1;
-}
-
 
 message FixedEpochCondition {
   repeated int64 epochs = 1;
@@ -263,14 +204,17 @@ message TaskNode {
     CustomCodeNode    custom_code = 18;
   }
 }
-message Execution {
-  int64  epoch    = 1;
-  bool   success  = 2;
-  string error    = 3;
 
-  TriggerMark trigger_mark = 4;
+message Execution {
+  string id       = 1;
+  int64 start_at = 2;
+  int64 end_at   = 3;
+  bool   success = 4;
+  string error   = 5;
+
+  TriggerMark trigger_mark = 6;
   // final return data of the whole execution of the task
-  string result = 5;
+  string result = 7;
 
   message Step {
     string node_id = 1;
@@ -279,9 +223,11 @@ message Execution {
     string output_data = 3;
     string log = 4; 
     string error = 5;
+    int64 start_at = 6;
+    int64 end_at = 7;
   }
 
-  repeated Step steps = 6;
+  repeated Step steps = 8;
 }
 
 message Task {
@@ -300,13 +246,14 @@ message Task {
 
   // limit on how many time this task can run. Set to 0 will make it run unlimited until cancelling or reaching its expired time
   int64 max_execution = 8;
+  // return how many time this task has run
+  int64 total_execution = 9;
+  int64 last_ran_at = 10;
 
-  TaskStatus status  = 9;
-  TaskTrigger trigger = 10;
-  repeated TaskNode nodes = 11;
-  repeated TaskEdge edges = 12;
-
-  repeated Execution executions = 13;
+  TaskStatus status  = 11;
+  TaskTrigger trigger = 12;
+  repeated TaskNode nodes = 13;
+  repeated TaskEdge edges = 14;
 }
 
 
@@ -360,10 +307,48 @@ message ListWalletResp {
 message ListTasksReq {
   // Filter out by the smart_wallet_address
   string smart_wallet_address = 1;
+  string cursor = 2;
+  int64 item_per_page = 3;
 }
 
 message ListTasksResp {
-  repeated Task tasks = 1;
+  message Item {
+    string id                   = 1;
+    string owner                = 2;
+    string smart_wallet_address = 3;
+
+    // task won't be check before this
+    int64  start_at   = 4;
+    // task won't be run/check after this
+    int64  expired_at = 5;
+    // arbitrary data about this task. has a limit of 255 character
+    string memo = 6;
+
+    int64 completed_at = 7;
+
+    // limit on how many time this task can run. Set to 0 will make it run unlimited until cancelling or reaching its expired time
+    int64 max_execution = 8;
+    // return how many time this task has run
+    int64 total_execution = 9;
+    int64 last_ran_at = 10;
+
+    TaskStatus status  = 11;
+    TaskTrigger trigger = 12;
+  }
+
+  repeated Item tasks = 1;
+  string cursor = 2;
+}
+
+message ListExecutionsReq {
+  string id = 1;
+  string cursor = 2;
+  int64 item_per_page = 3;
+}
+
+message ListExecutionsResp {
+  repeated Execution executions = 1;
+  string cursor = 2;
 }
 
 message GetKeyReq {
@@ -381,18 +366,6 @@ message TriggerMark {
   uint64 block_number = 1;
   uint64 log_index = 2;
   string tx_hash = 3;
-}
-
-message NotifyTriggersReq {
-  string address = 1;
-  string signature = 2;
-
-  string task_id = 3;
-  TriggerMark trigger_marker = 4;
-}
-
-message NotifyTriggersResp {
-  google.protobuf.Timestamp updated_at = 1;
 }
 
 message CreateWalletReq {
@@ -419,15 +392,8 @@ service Aggregator {
   // Task Management
   rpc CreateTask(CreateTaskReq)     returns (CreateTaskResp) {};
   rpc ListTasks(ListTasksReq)       returns (ListTasksResp) {};
-  rpc GetTask(IdReq)                 returns (Task) {};
+  rpc GetTask(IdReq)                returns (Task) {};
+  rpc ListExecutions(ListExecutionsReq)         returns (ListExecutionsResp) {};
   rpc CancelTask(IdReq)              returns (google.protobuf.BoolValue) {};
   rpc DeleteTask(IdReq)              returns (google.protobuf.BoolValue) {};
-}
-
-service Node {
-  // Operator endpoint
-  rpc Ping(Checkin) returns (CheckinResp) {};
-  rpc SyncMessages(SyncMessagesReq) returns (stream SyncMessagesResp) {};
-  rpc Ack(AckMessageReq) returns (google.protobuf.BoolValue) {};
-  rpc NotifyTriggers(NotifyTriggersReq) returns (NotifyTriggersResp) {};
 }

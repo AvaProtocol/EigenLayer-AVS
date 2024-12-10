@@ -117,6 +117,8 @@ async function listTask(owner, token) {
     "ListTasks",
     {
       smart_wallet_address: process.argv[3],
+      cursor: process.argv[4] || "",
+      item_per_page: 2,
     },
     metadata
   );
@@ -125,6 +127,8 @@ async function listTask(owner, token) {
   for (const item of result.tasks) {
     console.log(util.inspect(item, { depth: 4, colors: true }));
   }
+  console.log(util.inspect({cursor: result.cursor}, { depth: 4, colors: true }));
+  console.log("Note: we are returning only 2 items per page to demonstrate pagination")
 }
 
 async function getTask(owner, token, taskId) {
@@ -135,6 +139,16 @@ async function getTask(owner, token, taskId) {
 
   console.log(util.inspect(result, { depth: 4, colors: true }));
 }
+
+async function listExecutions(owner, token, taskId) {
+  const metadata = new grpc.Metadata();
+  metadata.add("authkey", token);
+
+  const result = await asyncRPC(client, "ListExecutions", { id: taskId, cursor: process.argv[4] || "", item_per_page: 2 }, metadata);
+
+  console.log(util.inspect(result, { depth: 4, colors: true }));
+}
+
 
 async function cancel(owner, token, taskId) {
   const metadata = new grpc.Metadata();
@@ -329,6 +343,9 @@ const main = async (cmd) => {
       await getTask(owner, token, process.argv[3]);
       break;
 
+    case "executions":
+      await listExecutions(owner, token, process.argv[3]);
+      break;
     case "cancel":
       await cancel(owner, token, process.argv[3]);
       break;
@@ -579,7 +596,7 @@ async function scheduleMonitor(owner, token, target) {
             // It's important to quote amount with `` because it may contains a `.` and need to be escape with markdownv2
             body: `JSON.stringify({
               chat_id:-4609037622,
-              text: \`Congrat, your walllet [\${trigger1.data.to_address}](https://sepolia.etherscan.io/address/\${trigger1.data.to_address}) received \\\`\${trigger1.data.value_formatted}\\\` [\${trigger1.data.token_symbol}](https://sepolia.etherscan.io/token/\${trigger1.data.address}) at [\${trigger1.data.transaction_hash}](sepolia.etherscan.io/tx/\${trigger1.data.transaction_hash})\`
+              text: \`Congrat, your walllet [\${trigger1.data.to_address}](https://sepolia.etherscan.io/address/\${trigger1.data.to_address}) received \\\`\${trigger1.data.value_formatted}\\\` [\${trigger1.data.token_symbol}](https://sepolia.etherscan.io/token/\${trigger1.data.address}) from \${trigger1.data.from_address} at [\${trigger1.data.transaction_hash}](sepolia.etherscan.io/tx/\${trigger1.data.transaction_hash})\`
             })`,
             headers: {
               "content-type": "application/json"
