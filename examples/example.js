@@ -415,7 +415,6 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
   metadata.add("authkey", token);
 
   let trigger = {
-    trigger_type: TaskTrigger.TriggerTypeCase.BLOCK,
     block: {
       interval: 5, // run every 5 block
     },
@@ -423,7 +422,6 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
 
   if (process.argv[2] == "schedule-cron") {
     trigger = {
-      trigger_type: TaskTrigger.TriggerTypeCase.CRON,
       cron: {
         schedule: [
           // every 5 hours
@@ -433,14 +431,12 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
     };
   } else if (process.argv[2] == "schedule-event") {
     trigger = {
-      trigger_type: TaskTrigger.TriggerTypeCase.EVENT,
       event: {
         expression: taskCondition,
       },
     };
   } else if (process.argv[2] == "schedule-fixed") {
     trigger = {
-      trigger_type: TaskTrigger.TriggerTypeCase.AT,
       fixed_time: {
         epochs: [
           Math.floor(new Date().getTime() / 1000 + 3600),
@@ -450,7 +446,6 @@ async function scheduleERC20TransferJob(owner, token, taskCondition) {
     };
   } else if (process.argv[2] == "schedule-manual") {
     trigger = {
-      trigger_type: TriggerType.MANUAL,
       manual: true,
     };
   }
@@ -531,7 +526,6 @@ async function scheduleMonitor(owner, token, target) {
 
   let trigger = {
     name: "trigger1",
-    trigger_type: TaskTrigger.TriggerTypeCase.EVENT,
     event: {
       // This is an example to show case the branch
       //
