@@ -327,12 +327,14 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 }
 
 func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Execution_Step, string, error) {
+	t0 := time.Now()
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
 		OutputData: "",
 		Log:        "",
 		Error:      "",
 		Success:    true,
+		StartAt:    t0.Unix(),
 	}
 
 	var sb strings.Builder
@@ -361,6 +363,7 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 			s.Error = fmt.Errorf("error compile the statement: %w", err).Error()
 			sb.WriteString("error compile expression")
 			s.Log = sb.String()
+			s.EndAt = time.Now().Unix()
 			return s, outcome, fmt.Errorf("error compile the statement: %w", err)
 		}
 		result, err := expr.Run(program, v.vars)
@@ -369,6 +372,7 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 			s.Error = fmt.Errorf("error run statement: %w", err).Error()
 			sb.WriteString("error run expression")
 			s.Log = sb.String()
+			s.EndAt = time.Now().Unix()
 			return s, outcome, fmt.Errorf("error evaluate the statement: %w", err)
 		}
 
@@ -379,11 +383,13 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 			// run the node
 			s.Log = sb.String()
 			s.OutputData = outcome
+			s.EndAt = time.Now().Unix()
 			return s, outcome, nil
 		}
 	}
 
 	sb.WriteString("\nno condition matched. halt execution")
 	s.Log = sb.String()
+	s.EndAt = time.Now().Unix()
 	return s, "", nil
 }

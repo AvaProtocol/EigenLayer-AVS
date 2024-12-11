@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/oklog/ulid/v2"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
@@ -71,34 +72,59 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 		return fmt.Errorf("vm failed to initialize: %w", err)
 	}
 
+	t0 := time.Now()
 	vm.Compile()
 	err = vm.Run()
+	t1 := time.Now()
 
-	defer func() {
-		updates := map[string][]byte{}
-		updates[string(TaskStorageKey(task.Id, task.Status))], err = task.ToJSON()
-		updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
+	task.TotalExecution += 1
+	task.LastRanAt = t0.Unix()
 
-		if err = x.db.BatchWrite(updates); err != nil {
-			// TODO Gracefully handling of storage cleanup
-			x.logger.Errorf("error updating task status. %w", err, "task_id", task.Id, "job_id", job.ID)
-		}
-	}()
-
-	// TODO: Track max execution reached to set as completed
-	currentTime := time.Now()
-	if err == nil {
-		x.logger.Info("succesfully executing task", "taskid", job.Name, "triggermark", string(job.Data))
-		task.AppendExecution(currentTime.Unix(), triggerMark, vm.ExecutionLogs, nil)
-		//task.SetCompleted()
-	} else {
-		x.logger.Error("error executing task", "taskid", job.Name, "triggermark", string(job.Data), err)
-		task.AppendExecution(currentTime.Unix(), triggerMark, vm.ExecutionLogs, err)
-		//task.SetFailed()
-		return fmt.Errorf("Error executing program: %v", err)
+	if task.MaxExecution > 0 && task.TotalExecution >= task.MaxExecution {
+		task.Status = avsproto.TaskStatus_Completed
+		task.CompletedAt = t1.Unix()
+	}
+	execution := &avsproto.Execution{
+		Id:          ulid.Make().String(),
+		StartAt:     t0.Unix(),
+		EndAt:       t1.Unix(),
+		Success:     err == nil,
+		Error:       "",
+		Steps:       vm.ExecutionLogs,
+		TriggerMark: triggerMark,
 	}
 
-	return nil
+	if err != nil {
+		execution.Error = err.Error()
+	}
+
+	updates := map[string][]byte{}
+	updates[string(TaskStorageKey(task.Id, task.Status))], err = task.ToJSON()
+	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
+
+	executionByte, err := protojson.Marshal(execution)
+	if err == nil {
+		updates[string(TaskExecutionKey(task, execution.Id))] = executionByte
+	}
+
+	//t.Executions = append(t.Executions, exc)
+
+	if err = x.db.BatchWrite(updates); err != nil {
+		// TODO Gracefully handling of storage cleanup
+		x.logger.Errorf("error updating task status. %w", err, "task_id", task.Id, "job_id", job.ID)
+	}
+
+	// TODO: Track max execution reached to set as completed
+	if err == nil {
+		x.logger.Info("succesfully executing task", "taskid", job.Name, "triggermark", string(job.Data))
+		//	task.AppendExecution(currentTime.Unix(), triggerMark, vm.ExecutionLogs, nil)
+
+		return nil
+	}
+
+	x.logger.Error("error executing task", "taskid", job.Name, "triggermark", string(job.Data), err)
+	//	task.AppendExecution(currentTime.Unix(), triggerMark, vm.ExecutionLogs, err)
+	return fmt.Errorf("Error executing task %s %v", job.Name, err)
 }
 
 type ContractProcessor struct {

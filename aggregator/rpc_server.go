@@ -158,15 +158,20 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 		"user", user.Address.String(),
 		"smart_wallet_address", payload.SmartWalletAddress,
 	)
-	tasks, err := r.engine.ListTasksByUser(user, payload)
+	return r.engine.ListTasksByUser(user, payload)
+}
 
+func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
+	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
 	}
 
-	return &avsproto.ListTasksResp{
-		Tasks: tasks,
-	}, nil
+	r.config.Logger.Info("process list execution",
+		"user", user.Address.String(),
+		"task_id", payload.Id,
+	)
+	return r.engine.ListExecutions(user, payload)
 }
 
 func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsproto.Task, error) {

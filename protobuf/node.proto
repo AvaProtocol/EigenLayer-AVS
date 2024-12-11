@@ -1,0 +1,85 @@
+syntax = "proto3";
+package aggregator;
+
+option go_package = "./avsproto";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+import "protobuf/avs.proto";
+
+message Checkin {
+  string id = 1;
+  string address = 2;
+  string signature = 3;
+
+  message Status {
+    int64 uptime = 1;
+    int64 queueDepth = 2;
+    google.protobuf.Timestamp last_heartbeat = 3;
+  }
+
+  Status status = 4;
+
+  string version = 5;
+  int32 metricsPort = 6;
+  string remoteIP = 7;
+}
+
+message CheckinResp {
+  google.protobuf.Timestamp updated_at = 1;
+}
+
+message SyncMessagesReq {
+  string id = 1;
+  string address = 2;
+  bytes  signature = 3;
+  int64  monotonic_clock = 4;
+}
+
+enum MessageOp {
+  Unset              = 0;
+  MonitorTaskTrigger = 1;
+  CancelTask         = 2;
+  DeleteTask         = 3;
+  CompletedTask      = 4;
+}
+
+message SyncMessagesResp {
+  // message id is used to support dedup
+  string id = 1;
+  MessageOp op = 2;
+
+  message TaskMetadata {
+    string task_id = 1;
+    // how many time this task can run
+    int64 remain = 2;
+    int64 expired_at = 3;
+    TaskTrigger trigger = 4;
+  };
+
+  TaskMetadata task_metadata = 3;
+}
+
+message AckMessageReq {
+  string id = 1;
+}
+
+message NotifyTriggersReq {
+  string address = 1;
+  string signature = 2;
+
+  string task_id = 3;
+  TriggerMark trigger_marker = 4;
+}
+
+message NotifyTriggersResp {
+  google.protobuf.Timestamp updated_at = 1;
+}
+
+service Node {
+  // Operator endpoint
+  rpc Ping(Checkin) returns (CheckinResp) {};
+  rpc SyncMessages(SyncMessagesReq) returns (stream SyncMessagesResp) {};
+  rpc Ack(AckMessageReq) returns (google.protobuf.BoolValue) {};
+  rpc NotifyTriggers(NotifyTriggersReq) returns (NotifyTriggersResp) {};
+}
