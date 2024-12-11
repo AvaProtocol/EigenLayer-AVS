@@ -52,7 +52,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		RpcURL:   o.config.TargetChain.EthRpcUrl,
 		WsRpcURL: o.config.TargetChain.EthWsUrl,
 	}
-	blockTriggerCh := make(chan triggerengine.TriggerMark[string], 1000)
+	blockTriggerCh := make(chan triggerengine.TriggerMark[int64], 1000)
 	o.blockTrigger = triggerengine.NewBlockTrigger(&rpcConfig, blockTriggerCh)
 
 	eventTriggerCh := make(chan triggerengine.TriggerMark[triggerengine.EventMark], 1000)
@@ -71,9 +71,23 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case triggerItem := <-blockTriggerCh:
-			o.logger.Debug("Trigger this task", triggerItem)
+			o.logger.Debug("block trigger", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
+
+			if _, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
+				Address:   o.config.OperatorAddress,
+				Signature: "pending",
+				TaskId:    triggerItem.TaskID,
+				TriggerMarker: &avspb.TriggerMark{
+					BlockNumber: uint64(triggerItem.Marker),
+				},
+			}); err == nil {
+				o.logger.Debug("Succesfully notifiy aggregator for task hit", "taskid", triggerItem.TaskID)
+			} else {
+				o.logger.Errorf("task trigger is in alert condition but failed to sync to aggregator", err, "taskid", triggerItem.TaskID)
+			}
+
 		case triggerItem := <-eventTriggerCh:
-			o.logger.Debug("trigger hit, notifiy aggregator", "task id", triggerItem.TaskID, "marker", triggerItem.Marker)
+			o.logger.Debug("event trigger", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
 
 			if _, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
 				Address:   o.config.OperatorAddress,
@@ -135,19 +149,24 @@ func (o *Operator) StreamMessages() {
 			}
 			o.metrics.IncNumTasksReceived(resp.Id)
 
-			fmt.Println("receive new message", resp, "op", resp.Op)
 			switch resp.Op {
 			case avspb.MessageOp_CancelTask, avspb.MessageOp_DeleteTask:
 				o.eventTrigger.RemoveCheck(resp.TaskMetadata.TaskId)
 				//o.blockTriggerCh.RemoveCheck(resp.ID)
 			case avspb.MessageOp_MonitorTaskTrigger:
-				fmt.Println("get metadata found trigger", resp.TaskMetadata.GetTrigger(), "got event", resp.TaskMetadata.GetTrigger().GetEvent())
 				if trigger := resp.TaskMetadata.GetTrigger().GetEvent(); trigger != nil {
 					o.logger.Info("received new event trigger", "id", resp.Id, "type", resp.TaskMetadata.Trigger)
 					if err := o.eventTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Info("add trigger to monitor error", err)
 					}
 				} else if trigger := resp.TaskMetadata.Trigger.GetBlock(); trigger != nil {
+					o.logger.Info("received new block trigger", "id", resp.Id, "interval", resp.TaskMetadata.Trigger)
+					if err := o.blockTrigger.AddCheck(resp.TaskMetadata); err != nil {
+						o.logger.Errorf("add trigger to monitor error", err, "task_id", resp.Id)
+					} else {
+						o.logger.Infof("succesfully monitor %s", resp.Id, "component", "blockTrigger")
+					}
+
 				}
 			}
 			//checks[resp.Id] = resp
