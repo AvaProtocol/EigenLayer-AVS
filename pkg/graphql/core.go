@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 
 	"github.com/go-resty/resty/v2"
 )
@@ -18,25 +19,31 @@ type Client struct {
 
 	useMultipartForm bool
 
-	// Log is called with various debug information.
-	// To log to standard out, use:
-	//  client.Log = func(s string) { log.Println(s) }
-	Log func(s string)
+	// don't pass a logger but pass a function to allow us re-use it as a standalone package in various place
+	Log            func(s string)
+	parsedEndpoint *url.URL
 }
 
 // NewClient creates a new GraphQL client with the specified endpoint and options.
-func NewClient(endpoint string, opts ...ClientOption) *Client {
+func NewClient(endpoint string, log func(s string), opts ...ClientOption) (*Client, error) {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, err
+	}
+
 	client := &Client{
-		endpoint:    endpoint,
-		restyClient: resty.New(),
-		Log:         func(string) {},
+		endpoint:       endpoint,
+		restyClient:    resty.New(),
+		Log:            func(string) {},
+		parsedEndpoint: u,
 	}
 
 	for _, opt := range opts {
+		// allow customization to the client through a clousure
 		opt(client)
 	}
 
-	return client
+	return client, nil
 }
 
 func (c *Client) logf(format string, args ...interface{}) {
@@ -48,6 +55,7 @@ func (c *Client) Run(ctx context.Context, req *Request, resp interface{}) error 
 	if c.useMultipartForm {
 		return c.runWithMultipartForm(ctx, req, resp)
 	}
+	// most graphql, especially ib crypto are JSON
 	return c.runWithJSON(ctx, req, resp)
 }
 
@@ -57,8 +65,8 @@ func (c *Client) runWithJSON(ctx context.Context, req *Request, resp interface{}
 		"variables": req.Vars(),
 	}
 
-	c.logf(">> variables: %v", req.Vars())
-	c.logf(">> query: %s", req.Query())
+	// only log hostname because the domain might contain API key, example subgraph
+	c.logf("request %s variables: %v query: %v", c.parsedEndpoint.Hostname, req.Vars(), req.Query())
 
 	response, err := c.restyClient.R().
 		SetContext(ctx).
@@ -69,9 +77,6 @@ func (c *Client) runWithJSON(ctx context.Context, req *Request, resp interface{}
 	if err != nil {
 		return err
 	}
-
-	c.logf("<< status: %d", response.StatusCode())
-	c.logf("<< body: %s", response.String())
 
 	if response.IsError() {
 		return fmt.Errorf("graphql: server returned a non-200 status code: %d", response.StatusCode())
@@ -105,9 +110,6 @@ func (c *Client) runWithMultipartForm(ctx context.Context, req *Request, resp in
 	if err != nil {
 		return err
 	}
-
-	c.logf("<< status: %d", response.StatusCode())
-	c.logf("<< body: %s", response.String())
 
 	if response.IsError() {
 		return fmt.Errorf("graphql: server returned a non-200 status code: %d", response.StatusCode())

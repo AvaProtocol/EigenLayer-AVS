@@ -100,7 +100,7 @@ func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*wr
 
 	r.config.Logger.Info("process cancel task",
 		"user", user.Address.String(),
-		"taskID", taskID.Id,
+		"task_id", taskID.Id,
 	)
 
 	result, err := r.engine.CancelTaskByUser(user, string(taskID.Id))
@@ -120,7 +120,7 @@ func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.IdReq) (*wr
 
 	r.config.Logger.Info("process delete task",
 		"user", user.Address.String(),
-		"taskID", string(taskID.Id),
+		"task_id", string(taskID.Id),
 	)
 
 	result, err := r.engine.DeleteTaskByUser(user, string(taskID.Id))
@@ -182,7 +182,7 @@ func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsp
 
 	r.config.Logger.Info("process get task",
 		"user", user.Address.String(),
-		"taskID", payload.Id,
+		"task_id", payload.Id,
 	)
 
 	if payload.Id == "" {
@@ -207,7 +207,7 @@ func (r *RpcServer) TriggerTask(ctx context.Context, payload *avsproto.UserTrigg
 
 	r.config.Logger.Info("process trigger task",
 		"user", user.Address.String(),
-		"taskID", payload.TaskId,
+		"task_id", payload.TaskId,
 	)
 
 	if payload.TaskId == "" {

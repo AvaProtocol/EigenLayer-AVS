@@ -71,8 +71,6 @@ func chainlinkLatestRoundData(tokenPair string) *big.Int {
 		panic(fmt.Errorf("Error when querying contract through rpc. contract: %s. error: %w", tokenPair, err))
 	}
 
-	fmt.Println("output", output, "error", err, "pair address", tokenPair)
-
 	// TODO: Check round and answer to prevent the case where chainlink down we
 	// may got outdated data
 	return output[1].(*big.Int)

@@ -5,6 +5,7 @@ import (
 
 	"github.com/AvaProtocol/ap-avs/core/apqueue"
 	"github.com/AvaProtocol/ap-avs/core/taskengine"
+	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
 )
 
 func (agg *Aggregator) stopTaskEngine() {
@@ -26,6 +27,7 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	taskExecutor := taskengine.NewExecutor(agg.db, agg.logger)
 	taskengine.SetMacro(agg.config.Macros)
 	taskengine.SetCache(agg.cache)
+	macros.SetRpc(agg.config.SmartWallet.EthRpcUrl)
 
 	agg.worker.RegisterProcessor(
 		taskengine.ExecuteTask,

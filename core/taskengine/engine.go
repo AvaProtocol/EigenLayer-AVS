@@ -346,11 +346,11 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 						Trigger:   task.Trigger,
 					},
 				}
-				n.logger.Info("stream check to operator", "taskID", task.Id, "operator", payload.Address, "resp", resp)
+				n.logger.Info("stream check to operator", "task_id", task.Id, "operator", payload.Address, "resp", resp)
 
 				if err := srv.Send(&resp); err != nil {
 					// return error to cause client to establish re-connect the connection
-					n.logger.Info("error sending check to operator", "taskID", task.Id, "operator", payload.Address)
+					n.logger.Info("error sending check to operator", "task_id", task.Id, "operator", payload.Address)
 					return fmt.Errorf("cannot send data back to grpc channel")
 				}
 

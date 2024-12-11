@@ -2,7 +2,6 @@ package trigger
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"math/big"
@@ -109,10 +108,8 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 				b.wsEthClient.SubscribeNewHead(ctx, headers)
 			case header := <-headers:
 				b.logger.Debug("detect new block, evaluate checks", "component", "blocktrigger", "block", header.Hash().Hex(), "number", header.Number)
-				fmt.Println("current schedule", b.schedule)
 				toRemove := []int{}
 				for interval, tasks := range b.schedule {
-					fmt.Println("checking block interval", interval)
 					z := new(big.Int)
 					if z.Mod(header.Number, big.NewInt(int64(interval))).Cmp(zero) == 0 {
 						for taskID, _ := range tasks {

@@ -3,7 +3,6 @@ package taskengine
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -91,8 +90,6 @@ func NewVMWithData(taskID string, triggerMark *avsproto.TriggerMark, nodes []*av
 	}
 
 	v.vars = macros.GetEnvs(map[string]any{})
-
-	log.Println("vars", v.vars)
 
 	// popular trigger data for trigger variable
 	if triggerMark != nil && triggerMark.LogIndex > 0 && triggerMark.TxHash != "" {
@@ -194,48 +191,10 @@ func (v *VM) Compile() error {
 		}
 	}
 
-	// TODO Setup a timeout context
-	// currentStep := v.plans[v.entrypoint]
-	// for currentStep != nil {
-	// 	node := v.TaskNodes[currentStep.NodeID]
-
-	// 	v.instructions = append(v.instructions, &Instruction{
-	// 		Op:    "Invoke",
-	// 		Value: node.Id,
-	// 	})
-
-	// 	if len(currentStep.Next) == 0 {
-	// 		break
-	// 	}
-
-	// 	// TODO: Support multiple next
-	// 	for _, next := range currentStep.Next {
-	// 		v.instructions = append(v.instructions, &Instruction{
-	// 			Op:    "Invoke",
-	// 			Value: next,
-	// 		})
-	// 	}
-
-	// 	currentStep = v.plans[currentStep.Next[0]]
-	// }
 	v.Status = VMStateReady
 
 	return nil
 }
-
-//func (v *VM) Plan(node) {
-//	//  if not if or not foo
-//	//  v.instruction = append(v.instruction, {
-//	//      op: "invoke", nodeid
-//	//  }
-//
-//	//  if if block
-//	//  first we put the instruction at the end
-//	//  currentPosition
-//
-//	//  v.instruction = append(v.instruction, the block
-//
-//}
 
 // Run the program. The VM will only run once.
 func (v *VM) Run() error {
@@ -311,15 +270,22 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 
 		v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 	} else if nodeValue := node.GetBranch(); nodeValue != nil {
-		outcome := ""
-		executionLog, outcome, err = v.runBranch(node.Id, nodeValue)
+		outcomeID := ""
+		executionLog, outcomeID, err = v.runBranch(node.Id, nodeValue)
 		v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
-		if err == nil && outcome != "" {
-			if outcomeNodes := v.plans[outcome].Next; len(outcomeNodes) >= 0 {
+		if err == nil && outcomeID != "" {
+			outcome, ok := v.plans[outcomeID]
+			if !ok {
+				return nil, fmt.Errorf("branch resolved to node %s but not found in node list", outcomeID)
+			}
+			outcomeNodes := outcome.Next
+			if len(outcomeNodes) >= 0 {
 				for _, nodeID := range outcomeNodes {
 					// TODO: track stack too deepth and abort
 					node := v.TaskNodes[nodeID]
-					executionLog, err = v.executeNode(node)
+					if executionLog, err = v.executeNode(node); err != nil {
+						return executionLog, err
+					}
 				}
 			}
 		}

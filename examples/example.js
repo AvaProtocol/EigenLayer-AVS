@@ -476,6 +476,7 @@ async function scheduleNotification(owner, token, taskCondition) {
   const nodeIdOraclePrice = UlidMonotonic.generate().toCanonical();
   const nodeIdTransfer = UlidMonotonic.generate().toCanonical();
   const nodeIdNotification = UlidMonotonic.generate().toCanonical();
+  const branchIdLinkPriceHit = UlidMonotonic.generate().toCanonical();
 
   const result = await asyncRPC(
     client,
@@ -487,13 +488,14 @@ async function scheduleNotification(owner, token, taskCondition) {
         name: 'check price',
         branch: {
           conditions: [{
+            id: branchIdLinkPriceHit,
+            type: "if",
             expression: `
               bigGt(
                 // link token
                 chainlinkPrice("${config[env].ORACLE_PRICE_CONTRACT}"),
                 toBigInt("10000")
               )`,
-            next: 'transfer_erc20_1'
           }]
         }
       }, {
@@ -525,7 +527,7 @@ async function scheduleNotification(owner, token, taskCondition) {
         {
           id: UlidMonotonic.generate().toCanonical(),
           // __trigger__ is a special node. It doesn't appear directly in the task nodes, but it should be draw on the UI to show what is the entrypoint
-          source: nodeIdOraclePrice,
+          source: `${nodeIdOraclePrice}.${branchIdLinkPriceHit}`,
           target: nodeIdNotification,
         },
       ],
