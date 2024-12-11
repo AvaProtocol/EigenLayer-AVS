@@ -152,7 +152,7 @@ func (o *Operator) StreamMessages() {
 			switch resp.Op {
 			case avspb.MessageOp_CancelTask, avspb.MessageOp_DeleteTask:
 				o.eventTrigger.RemoveCheck(resp.TaskMetadata.TaskId)
-				//o.blockTriggerCh.RemoveCheck(resp.ID)
+				o.blockTriggerCh.RemoveCheck(resp.TaskMetadata.TaskId)
 			case avspb.MessageOp_MonitorTaskTrigger:
 				if trigger := resp.TaskMetadata.GetTrigger().GetEvent(); trigger != nil {
 					o.logger.Info("received new event trigger", "id", resp.Id, "type", resp.TaskMetadata.Trigger)
@@ -164,12 +164,11 @@ func (o *Operator) StreamMessages() {
 					if err := o.blockTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Errorf("add trigger to monitor error", err, "task_id", resp.Id)
 					} else {
-						o.logger.Infof("succesfully monitor %s", resp.Id, "component", "blockTrigger")
+						o.logger.Info("succesfully monitor", "task_id", resp.Id, "component", "blockTrigger")
 					}
 
 				}
 			}
-			//checks[resp.Id] = resp
 		}
 	}
 }
