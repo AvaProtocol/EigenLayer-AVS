@@ -41,7 +41,7 @@ func (w *Worker) loop() {
 	for {
 		select {
 		case jid := <-w.q.eventCh:
-			w.logger.Info("process job from queue", "jobid", jid)
+			w.logger.Info("process job from queue", "job_id", jid)
 			job, err := w.q.Dequeue()
 			if err != nil {
 				w.logger.Error("failed to dequeue", "error", err)
@@ -53,15 +53,15 @@ func (w *Worker) loop() {
 			} else {
 				w.logger.Info("unsupported job", "job", string(job.Data))
 			}
-			w.logger.Info("decoded job", "jobid", jid, "jobName", job.Name, "jobdata", string(job.Data))
+			w.logger.Info("decoded job", "job_id", jid, "jobName", job.Name, "jobdata", string(job.Data))
 
 			if err == nil {
 				w.q.markJobDone(job, jobComplete)
-				w.logger.Info("succesfully perform job", "jobid", jid, "task_id", job.Name)
+				w.logger.Info("succesfully perform job", "job_id", jid, "task_id", job.Name)
 			} else {
 				// TODO: move to a retry queue depend on what kind of error
 				w.q.markJobDone(job, jobFailed)
-				w.logger.Errorf("failed to perform job %w", err, "jobid", jid, "task_id", job.Name)
+				w.logger.Error("failed to perform job", "error", err, "job_id", jid, "task_id", job.Name)
 			}
 		case <-w.q.closeCh: // loop was stopped
 			return

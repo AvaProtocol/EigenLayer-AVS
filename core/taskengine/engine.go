@@ -504,6 +504,48 @@ func (n *Engine) GetTask(user *model.User, taskID string) (*model.Task, error) {
 	return task, nil
 }
 
+func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTaskReq) (*avsproto.UserTriggerTaskResp, error) {
+	if !ValidateTaskId(payload.TaskId) {
+		return nil, status.Errorf(codes.InvalidArgument, InvalidTaskIdFormat)
+	}
+
+	n.logger.Info("processed manually trigger", "user", user.Address, "task_id", payload.TaskId)
+
+	task, err := n.GetTaskByID(payload.TaskId)
+	if err != nil {
+		return nil, err
+	}
+
+	if !task.OwnedBy(user.Address) {
+		// only the owner of a task can trigger it
+		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+	}
+
+	data, err := json.Marshal(payload.TriggerMark)
+	if err != nil {
+		n.logger.Error("error serialize trigger to json", err)
+		return nil, status.Errorf(codes.InvalidArgument, codes.InvalidArgument.String())
+	}
+
+	if payload.RunInline {
+		// Run the task inline, by pass the queue system
+		executor := NewExecutor(n.db, n.logger)
+		executor.RunTask(task, payload.TriggerMark)
+	} else {
+		jid, err := n.queue.Enqueue(ExecuteTask, payload.TaskId, data)
+		if err != nil {
+			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageQueueUnavailableError)
+		}
+
+		n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId, "jid", jid)
+		return &avsproto.UserTriggerTaskResp{
+			Result: true,
+		}, nil
+	}
+
+	return nil, nil
+}
+
 // List Execution for a given task id
 func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
 	task, err := n.GetTaskByID(payload.Id)

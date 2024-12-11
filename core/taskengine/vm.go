@@ -3,6 +3,7 @@ package taskengine
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -90,6 +91,8 @@ func NewVMWithData(taskID string, triggerMark *avsproto.TriggerMark, nodes []*av
 	}
 
 	v.vars = macros.GetEnvs(map[string]any{})
+
+	log.Println("vars", v.vars)
 
 	// popular trigger data for trigger variable
 	if triggerMark != nil && triggerMark.LogIndex > 0 && triggerMark.TxHash != "" {
@@ -347,7 +350,7 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 			outcome = fmt.Sprintf("%s.%s", stepID, statement.Id)
 			sb.WriteString("\n")
 			sb.WriteString(time.Now().String())
-			sb.WriteString("evaluate else, follow else path ")
+			sb.WriteString("evaluate else, follow else path")
 			sb.WriteString(outcome)
 			s.Log = sb.String()
 			s.OutputData = outcome

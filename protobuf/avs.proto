@@ -38,7 +38,7 @@ message EventCondition {
 message TaskTrigger {
   string name = 1;
   oneof trigger_type {
-    // manual task will not be auto trigger
+    // manual task will not be check to be trigger, instead it can be trigger adhoc
     bool               manual = 2;
     // run at a specific epoch, name inspired by unix `at` utility
     FixedTimeCondition fixed_time   = 3;
@@ -363,10 +363,18 @@ message KeyResp {
 }
 
 
+// TriggerMark represent a lookup that we can use to identify when/where/how it is trigger
+// In a block trigger, we will have block_number
+// In an event trigger, we will have the log_index, tx_hash and the block_number
+// In a time based trigger(cron/fixed time) we will have the epoch.
+//
+// TriggerMark is used to populate the `trigger.data` variable. Example, if this is a transfer
+// event, then you will have access to trigger1.data.from_address trigger1.data.value
 message TriggerMark {
   uint64 block_number = 1;
-  uint64 log_index = 2;
-  string tx_hash = 3;
+  uint64 log_index    = 2;
+  string tx_hash      = 3;
+  uint64 epoch        = 4;
 }
 
 message CreateWalletReq {
@@ -381,20 +389,36 @@ message CreateWalletResp {
   string factory_address = 3;
 }
 
+message UserTriggerTaskReq {
+  string task_id = 1;
+  TriggerMark trigger_mark = 2;
+  // when setting run_inline=true, the execution run in the same request. the request is blocked until the execution is done
+  // setting to false, the task will be execute in our normal queueu system, and the request won't block.
+  // default value is false, for interact testing, set this to true
+  bool run_inline = 3;
+}
+
+message UserTriggerTaskResp {
+  bool result = 1;
+  // if trigger inline, the execution id will be returned
+  string execution_id = 2;
+}
+
 service Aggregator {
-  // Auth
+  // Exchange for an Auth Key to authenticate in subsequent request
   rpc GetKey(GetKeyReq) returns (KeyResp) {};
 
-  // Smart Acccount
-  rpc GetNonce(NonceRequest)                 returns (NonceResp) {};
-  rpc CreateWallet(CreateWalletReq) returns (CreateWalletResp) {};
-  rpc ListWallets(ListWalletReq) returns (ListWalletResp) {};
+  // Smart Acccount Operation
+  rpc GetNonce(NonceRequest)        returns (NonceResp) {};
+  rpc CreateWallet(CreateWalletReq)       returns (CreateWalletResp) {};
+  rpc ListWallets(ListWalletReq)    returns (ListWalletResp) {};
 
-  // Task Management
-  rpc CreateTask(CreateTaskReq)     returns (CreateTaskResp) {};
-  rpc ListTasks(ListTasksReq)       returns (ListTasksResp) {};
-  rpc GetTask(IdReq)                returns (Task) {};
-  rpc ListExecutions(ListExecutionsReq)         returns (ListExecutionsResp) {};
-  rpc CancelTask(IdReq)              returns (google.protobuf.BoolValue) {};
-  rpc DeleteTask(IdReq)              returns (google.protobuf.BoolValue) {};
+  // Task Management Operation
+  rpc CreateTask(CreateTaskReq)         returns (CreateTaskResp) {};
+  rpc ListTasks(ListTasksReq)           returns (ListTasksResp) {};
+  rpc GetTask(IdReq)                    returns (Task) {};
+  rpc ListExecutions(ListExecutionsReq) returns (ListExecutionsResp) {};
+  rpc CancelTask(IdReq)                 returns (google.protobuf.BoolValue) {};
+  rpc DeleteTask(IdReq)                 returns (google.protobuf.BoolValue) {};
+  rpc TriggerTask(UserTriggerTaskReq)   returns (UserTriggerTaskResp) {};
 }
