@@ -293,7 +293,8 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 				Body:    strings.Clone(nodeValue.Body),
 			}
 			vm := goja.New()
-			// TODO: dynamically set var
+			// TODO: dynamically set var instead of hardcode the name
+			// client would need to send this over
 			vm.Set("trigger1", v.vars["trigger1"])
 
 			renderBody, err := vm.RunString(nodeValue.Body)
@@ -316,8 +317,6 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 					// TODO: track stack too deepth and abort
 					node := v.TaskNodes[nodeID]
 					executionLog, err = v.executeNode(node)
-					//v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
-
 				}
 			}
 		}
