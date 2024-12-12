@@ -41,7 +41,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		}
 
 		if !authenticated {
-			return nil, auth.ErrorUnAuthorized
+			return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAPIKey)
 		}
 	} else {
 		// We need to have 3 things to verify the signature: the signature, the hash of the original data, and the public key of the signer. With this information we can determine if the private key holder of the public key pair did indeed sign the message
@@ -66,10 +66,10 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		sigPublicKey, err := crypto.SigToPub(hash, signature)
 		recoveredAddr := crypto.PubkeyToAddress(*sigPublicKey)
 		if err != nil {
-			return nil, err
+			return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 		}
 		if submitAddress.String() != recoveredAddr.String() {
-			return nil, fmt.Errorf("Invalid signature")
+			return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 		}
 	}
 
@@ -83,7 +83,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 	ss, err := token.SignedString(r.config.JwtSecret)
 
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Internal, InternalError)
 	}
 
 	return &avsproto.KeyResp{
@@ -114,7 +114,7 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// Don't forget to validate the alg is what you expect:
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+			return nil, fmt.Errorf("%s", auth.InvalidAuthenticationKey)
 		}
 
 		// hmacSampleSecret is a []byte containing your
@@ -123,16 +123,16 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s", auth.InvalidAuthenticationKey)
 	}
 
 	if token.Header["alg"] != auth.JwtAlg {
-		return nil, fmt.Errorf("invalid signing algorithm")
+		return nil, fmt.Errorf("%s", auth.InvalidAuthenticationKey)
 	}
 
 	if claims, ok := token.Claims.(jwt.MapClaims); ok {
 		if claims["sub"] == "" {
-			return nil, fmt.Errorf("Missing subject")
+			return nil, fmt.Errorf("%s", auth.InvalidAuthenticationKey)
 		}
 
 		user := model.User{
@@ -155,7 +155,7 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 
 		return &user, nil
 	}
-	return nil, fmt.Errorf("Malform claims")
+	return nil, fmt.Errorf("%s", auth.InvalidAuthenticationKey)
 }
 
 // verifyOperator checks validity of the signature submit by operator related request
