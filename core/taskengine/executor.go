@@ -73,7 +73,6 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 
 func (x *TaskExecutor) RunTask(task *model.Task, triggerMetadata *avsproto.TriggerMetadata) (*avsproto.Execution, error) {
 	vm, err := NewVMWithData(task.Id, triggerMetadata, task.Nodes, task.Edges)
-
 	initialTaskStatus := task.Status
 
 	if err != nil {
