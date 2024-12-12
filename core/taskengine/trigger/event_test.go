@@ -18,7 +18,7 @@ func TestChainlinkLatestAnswer(t *testing.T) {
 	eventTrigger := NewEventTrigger(&RpcOption{
 		RpcURL:   testutil.GetTestRPCURL(),
 		WsRpcURL: testutil.GetTestRPCURL(),
-	}, make(chan TriggerMark[EventMark], 1000))
+	}, make(chan TriggerMetadata[EventMark], 1000))
 
 	envs := macros.GetEnvs(map[string]interface{}{
 		"trigger1": map[string]interface{}{

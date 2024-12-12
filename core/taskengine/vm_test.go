@@ -367,7 +367,7 @@ func TestEvaluateEvent(t *testing.T) {
 		},
 	}
 
-	mark := avsproto.TriggerMark{
+	mark := avsproto.TriggerMetadata{
 		BlockNumber: 7212417,
 		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
 		LogIndex:    98,
