@@ -69,6 +69,8 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		resp, err = request.Get(node.Url)
 	} else if strings.EqualFold(node.Method, "delete") {
 		resp, err = request.Delete(node.Url)
+	} else {
+		resp, err = request.Get(node.Url)
 	}
 
 	u, err := url.Parse(node.Url)
@@ -79,6 +81,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	log.WriteString(fmt.Sprintf("Execute %s %s at %s", node.Method, u.Hostname(), time.Now()))
 	s.Log = log.String()
+
 	s.OutputData = string(resp.Body())
 	if err != nil {
 		s.Success = false

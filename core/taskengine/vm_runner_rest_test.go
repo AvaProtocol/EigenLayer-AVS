@@ -11,7 +11,7 @@ func TestRestRequest(t *testing.T) {
 	n := NewRestProrcessor()
 
 	node := &avsproto.RestAPINode{
-		Url: "https://webhook.site/4a2cb0c4-86ea-4189-b1e3-ce168f5d4840",
+		Url: "https://httpbin.org/post",
 		Headers: map[string]string{
 			"Content-type": "application/x-www-form-urlencoded",
 		},
@@ -28,14 +28,14 @@ func TestRestRequest(t *testing.T) {
 		t.Errorf("expected rest node run succesfully but failed")
 	}
 
-	if !strings.Contains(step.Log, "Execute POST webhook.site at") {
+	if !strings.Contains(step.Log, "Execute POST httpbin.org at") {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 
 	if step.Error != "" {
 		t.Errorf("expected log contains request trace data but found no")
 	}
-	if !strings.Contains(step.OutputData, "This URL has no default content configured") {
-		t.Errorf("expected step result contains the http endpoint response body")
+	if !strings.Contains(step.OutputData, "*This is a test format") {
+		t.Errorf("expected step result contains the http endpoint response body: %s", step.OutputData)
 	}
 }

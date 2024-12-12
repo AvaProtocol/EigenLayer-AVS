@@ -9,7 +9,7 @@ message IdReq {
   string id = 1;
 }
 
-message FixedEpochCondition {
+message FixedTimeCondition {
   repeated int64 epochs = 1;
 }
 // Simple timebase or cron syntax.
@@ -38,19 +38,19 @@ message EventCondition {
 message TaskTrigger {
   string name = 1;
   oneof trigger_type {
-    bool                   manual  = 2;
-
+    // manual task will not be check to be trigger, instead it can be trigger adhoc
+    bool               manual = 2;
     // run at a specific epoch, name inspired by unix `at` utility
-    FixedEpochCondition    fixed_time   = 3;
+    FixedTimeCondition fixed_time   = 3;
 
     // interval such as every hour/day/ etc can be converted to cronsyntax by the sdk/studio
-    CronCondition          cron    = 4;
+    CronCondition      cron    = 4;
    
     // currently the only support syntax is every <x> blocks
-    BlockCondition         block   = 5;
+    BlockCondition     block   = 5;
 
     // support filter by event expression such as topic0, topic1, topoc2 and event_data and contract_address
-    EventCondition         event   = 6;
+    EventCondition     event   = 6;
   }
 }
 
@@ -101,8 +101,9 @@ message ContractReadNode {
   string contract_address = 1;
   string call_data = 2;
 
-  // abi is necessary to decode the return
+  // abi and method name is necessary to decode the return
   string contract_abi = 3;
+  string method = 4;
 }
 
 
@@ -194,7 +195,7 @@ message TaskNode {
     // read data fron a target contract
     ContractReadNode contract_read = 12;
     // Make call to a graphql endpoint
-    GraphQLQueryNode  graphql_data_query = 13;
+    GraphQLQueryNode  graphql_query = 13;
     // Make call to a HTTP endpoint
     RestAPINode       rest_api = 14;
     // CustomCode allow to run arbitraty JavaScript.
@@ -300,7 +301,7 @@ message SmartWallet {
 }
 
 message ListWalletResp {
-  repeated SmartWallet wallets = 1;
+  repeated SmartWallet items = 1;
 }
 
 
@@ -336,7 +337,7 @@ message ListTasksResp {
     TaskTrigger trigger = 12;
   }
 
-  repeated Item tasks = 1;
+  repeated Item items = 1;
   string cursor = 2;
 }
 
@@ -347,7 +348,7 @@ message ListExecutionsReq {
 }
 
 message ListExecutionsResp {
-  repeated Execution executions = 1;
+  repeated Execution items = 1;
   string cursor = 2;
 }
 
@@ -362,38 +363,64 @@ message KeyResp {
 }
 
 
+// TriggerMark represent a lookup that we can use to identify when/where/how it is trigger
+// In a block trigger, we will have block_number
+// In an event trigger, we will have the log_index, tx_hash and the block_number
+// In a time based trigger(cron/fixed time) we will have the epoch.
+//
+// TriggerMark is used to populate the `trigger.data` variable. Example, if this is a transfer
+// event, then you will have access to trigger1.data.from_address trigger1.data.value
 message TriggerMark {
   uint64 block_number = 1;
-  uint64 log_index = 2;
-  string tx_hash = 3;
+  uint64 log_index    = 2;
+  string tx_hash      = 3;
+  uint64 epoch        = 4;
 }
 
-message CreateWalletReq {
+message GetWalletReq {
   string salt = 1;
   // this is the factory address for the wallet, when leaving its empty, we will use our default factory address
   string factory_address = 2;
 }
 
-message CreateWalletResp {
+message GetWalletResp {
   string address = 1;
   string salt = 2;
   string factory_address = 3;
 }
 
+message UserTriggerTaskReq {
+  string task_id = 1;
+  TriggerMark trigger_mark = 2;
+  // when setting run_inline=true, the execution run in the same request. the request is blocked until the execution is done
+  // setting to false, the task will be execute in our normal queueu system, and the request won't block.
+  // default value is false, for interact testing, set this to true
+  bool run_inline = 3;
+}
+
+message UserTriggerTaskResp {
+  bool result = 1;
+  // if trigger inline, the execution id will be returned
+  string execution_id = 2;
+  // when running async, we get back a job id
+  string job_id = 3;
+}
+
 service Aggregator {
-  // Auth
+  // Exchange for an Auth Key to authenticate in subsequent request
   rpc GetKey(GetKeyReq) returns (KeyResp) {};
 
-  // Smart Acccount
-  rpc GetNonce(NonceRequest)                 returns (NonceResp) {};
-  rpc CreateWallet(CreateWalletReq) returns (CreateWalletResp) {};
-  rpc ListWallets(ListWalletReq) returns (ListWalletResp) {};
+  // Smart Acccount Operation
+  rpc GetNonce(NonceRequest)        returns (NonceResp) {};
+  rpc GetWallet(GetWalletReq)       returns (GetWalletResp) {};
+  rpc ListWallets(ListWalletReq)    returns (ListWalletResp) {};
 
-  // Task Management
-  rpc CreateTask(CreateTaskReq)     returns (CreateTaskResp) {};
-  rpc ListTasks(ListTasksReq)       returns (ListTasksResp) {};
-  rpc GetTask(IdReq)                returns (Task) {};
-  rpc ListExecutions(ListExecutionsReq)         returns (ListExecutionsResp) {};
-  rpc CancelTask(IdReq)              returns (google.protobuf.BoolValue) {};
-  rpc DeleteTask(IdReq)              returns (google.protobuf.BoolValue) {};
+  // Task Management Operation
+  rpc CreateTask(CreateTaskReq)         returns (CreateTaskResp) {};
+  rpc ListTasks(ListTasksReq)           returns (ListTasksResp) {};
+  rpc GetTask(IdReq)                    returns (Task) {};
+  rpc ListExecutions(ListExecutionsReq) returns (ListExecutionsResp) {};
+  rpc CancelTask(IdReq)                 returns (google.protobuf.BoolValue) {};
+  rpc DeleteTask(IdReq)                 returns (google.protobuf.BoolValue) {};
+  rpc TriggerTask(UserTriggerTaskReq)   returns (UserTriggerTaskResp) {};
 }

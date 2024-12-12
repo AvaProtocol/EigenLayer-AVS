@@ -54,36 +54,49 @@ func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
 
 func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 	task, err := x.GetTask(job.Name)
+
 	if err != nil {
 		return fmt.Errorf("fail to load task: %s", job.Name)
 	}
 
+	triggerMark := &avsproto.TriggerMark{}
 	// A task executor data is the trigger mark
 	// ref: AggregateChecksResult
-	triggerMark := &avsproto.TriggerMark{}
 	err = json.Unmarshal(job.Data, triggerMark)
 	if err != nil {
 		return fmt.Errorf("error decode job payload when executing task: %s with job id %d", task.Id, job.ID)
 	}
 
-	vm, err := NewVMWithData(job.Name, triggerMark, task.Nodes, task.Edges)
+	_, err = x.RunTask(task, triggerMark)
+	return err
+}
+
+func (x *TaskExecutor) RunTask(task *model.Task, triggerMark *avsproto.TriggerMark) (*avsproto.Execution, error) {
+	vm, err := NewVMWithData(task.Id, triggerMark, task.Nodes, task.Edges)
 
 	if err != nil {
-		return fmt.Errorf("vm failed to initialize: %w", err)
+		return nil, fmt.Errorf("vm failed to initialize: %w", err)
 	}
 
 	t0 := time.Now()
-	vm.Compile()
-	err = vm.Run()
-	t1 := time.Now()
-
 	task.TotalExecution += 1
 	task.LastRanAt = t0.Unix()
 
+	vm.Compile()
+	runTaskErr := vm.Run()
+
+	t1 := time.Now()
+
+	// when MaxExecution is 0, it means unlimited run until cancel
 	if task.MaxExecution > 0 && task.TotalExecution >= task.MaxExecution {
-		task.Status = avsproto.TaskStatus_Completed
-		task.CompletedAt = t1.Unix()
+		task.SetCompleted()
 	}
+
+	// If it rached the end, flag the task completed as well
+	if t1.Unix() >= task.ExpiredAt {
+		task.SetCompleted()
+	}
+
 	execution := &avsproto.Execution{
 		Id:          ulid.Make().String(),
 		StartAt:     t0.Unix(),
@@ -94,37 +107,32 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 		TriggerMark: triggerMark,
 	}
 
-	if err != nil {
-		execution.Error = err.Error()
+	if runTaskErr != nil {
+		x.logger.Error("error executing task", "error", err, "task_id", task.Id, "triggermark", triggerMark)
+		execution.Error = runTaskErr.Error()
 	}
 
+	// batch update storage for task + execution log
 	updates := map[string][]byte{}
 	updates[string(TaskStorageKey(task.Id, task.Status))], err = task.ToJSON()
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
+	// update execution log
 	executionByte, err := protojson.Marshal(execution)
 	if err == nil {
 		updates[string(TaskExecutionKey(task, execution.Id))] = executionByte
 	}
 
-	//t.Executions = append(t.Executions, exc)
-
 	if err = x.db.BatchWrite(updates); err != nil {
-		// TODO Gracefully handling of storage cleanup
-		x.logger.Errorf("error updating task status. %w", err, "task_id", task.Id, "job_id", job.ID)
+		// TODO Monitor to see how often this happen
+		x.logger.Errorf("error updating task status. %w", err, "task_id", task.Id)
 	}
 
-	// TODO: Track max execution reached to set as completed
-	if err == nil {
-		x.logger.Info("succesfully executing task", "taskid", job.Name, "triggermark", string(job.Data))
-		//	task.AppendExecution(currentTime.Unix(), triggerMark, vm.ExecutionLogs, nil)
-
-		return nil
+	if runTaskErr == nil {
+		x.logger.Info("succesfully executing task", "task_id", task.Id, "triggermark", triggerMark)
+		return execution, nil
 	}
-
-	x.logger.Error("error executing task", "taskid", job.Name, "triggermark", string(job.Data), err)
-	//	task.AppendExecution(currentTime.Unix(), triggerMark, vm.ExecutionLogs, err)
-	return fmt.Errorf("Error executing task %s %v", job.Name, err)
+	return execution, fmt.Errorf("Error executing task %s %v", task.Id, runTaskErr)
 }
 
 type ContractProcessor struct {
@@ -205,7 +213,7 @@ func (c *ContractProcessor) ContractWrite(job *apqueue.Job) error {
 		return err
 	}
 
-	c.logger.Info("send task to bundler rpc", "taskid", task.Id)
+	c.logger.Info("send task to bundler rpc", "task_id", task.Id)
 	txResult, err := preset.SendUserOp(
 		conn,
 		bundlerClient,
@@ -217,10 +225,10 @@ func (c *ContractProcessor) ContractWrite(job *apqueue.Job) error {
 	if txResult != "" {
 		// only set complete when the task is not reaching max
 		// task.SetCompleted()
-		c.logger.Info("succesfully perform userop", "taskid", task.Id, "userop", txResult)
+		c.logger.Info("succesfully perform userop", "task_id", task.Id, "userop", txResult)
 	} else {
 		task.SetFailed()
-		c.logger.Error("err perform userop", "taskid", task.Id, "error", err)
+		c.logger.Error("err perform userop", "task_id", task.Id, "error", err)
 	}
 
 	if err != nil || txResult == "" {

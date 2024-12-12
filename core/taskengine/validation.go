@@ -24,3 +24,11 @@ func ValidWalletOwner(db storage.Storage, u *model.User, smartWalletAddress comm
 
 	return false, err
 }
+
+func ValidateTaskId(id string) bool {
+	if len(id) != 26 {
+		return false
+	}
+
+	return true
+}

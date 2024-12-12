@@ -3,24 +3,15 @@ package trigger
 import (
 	"context"
 	"sync"
-	"time"
 
 	"math/big"
 
+	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
-
-var (
-	zero = big.NewInt(0)
-)
-
-type RpcOption struct {
-	RpcURL   string
-	WsRpcURL string
-}
 
 type TriggerMark[T any] struct {
 	TaskID string
@@ -28,29 +19,16 @@ type TriggerMark[T any] struct {
 	Marker T
 }
 
-type CommonTrigger struct {
-	wsEthClient *ethclient.Client
-	ethClient   *ethclient.Client
-	rpcOption   *RpcOption
-
-	logger sdklogging.Logger
-
-	// channel to track shutdown
-	done     chan bool
-	shutdown bool
-	mu       *sync.Mutex
-}
-
 type BlockTrigger struct {
 	*CommonTrigger
 
-	schedule map[int][]string
+	schedule map[int64]map[string]bool
 
 	// channel that we will push the trigger information back
-	triggerCh chan TriggerMark[string]
+	triggerCh chan TriggerMark[int64]
 }
 
-func NewBlockTrigger(o *RpcOption, triggerCh chan TriggerMark[string]) *BlockTrigger {
+func NewBlockTrigger(o *RpcOption, triggerCh chan TriggerMark[int64]) *BlockTrigger {
 	var err error
 
 	logger, err := sdklogging.NewZapLogger(sdklogging.Production)
@@ -61,9 +39,9 @@ func NewBlockTrigger(o *RpcOption, triggerCh chan TriggerMark[string]) *BlockTri
 			rpcOption: o,
 
 			logger: logger,
-			mu:     &sync.Mutex{},
+			mu:     sync.Mutex{},
 		},
-		schedule:  make(map[int][]string),
+		schedule:  make(map[int64]map[string]bool),
 		triggerCh: triggerCh,
 	}
 
@@ -81,27 +59,32 @@ func NewBlockTrigger(o *RpcOption, triggerCh chan TriggerMark[string]) *BlockTri
 	return &b
 }
 
-func (b *CommonTrigger) retryConnectToRpc() error {
-	for {
-		if b.shutdown {
-			return nil
-		}
+func (b *BlockTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
-		conn, err := ethclient.Dial(b.rpcOption.WsRpcURL)
-		if err == nil {
-			b.wsEthClient = conn
-			return nil
+	interval := check.GetTrigger().GetBlock().GetInterval()
+	if _, ok := b.schedule[interval]; !ok {
+		b.schedule[interval] = map[string]bool{
+			check.TaskId: true,
 		}
-		b.logger.Errorf("cannot establish websocket client for RPC, retry in 15 seconds", "err", err)
-		time.Sleep(15 * time.Second)
+	} else {
+		b.schedule[interval][check.TaskId] = true
 	}
 
 	return nil
 }
 
-func (b *CommonTrigger) Shutdown() {
-	b.shutdown = true
-	b.done <- true
+func (b *BlockTrigger) Remove(check *avsproto.SyncMessagesResp_TaskMetadata) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	interval := check.GetTrigger().GetBlock().GetInterval()
+	if _, ok := b.schedule[interval]; ok {
+		delete(b.schedule[interval], check.TaskId)
+	}
+
+	return nil
 }
 
 func (b *BlockTrigger) Run(ctx context.Context) error {
@@ -124,26 +107,25 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 				b.retryConnectToRpc()
 				b.wsEthClient.SubscribeNewHead(ctx, headers)
 			case header := <-headers:
-				b.logger.Info("detect new block, evaluate checks", "component", "blocktrigger", "block", header.Hash().Hex(), "number", header.Number)
-
+				b.logger.Debug("detect new block, evaluate checks", "component", "blocktrigger", "block", header.Hash().Hex(), "number", header.Number)
 				toRemove := []int{}
 				for interval, tasks := range b.schedule {
 					z := new(big.Int)
 					if z.Mod(header.Number, big.NewInt(int64(interval))).Cmp(zero) == 0 {
-						for _, taskID := range tasks {
-							b.triggerCh <- TriggerMark[string]{
+						for taskID, _ := range tasks {
+							b.triggerCh <- TriggerMark[int64]{
 								TaskID: taskID,
-								Marker: header.Number.String(),
+								Marker: header.Number.Int64(),
 							}
 
 						}
 						// Remove the task from the queue
-						toRemove = append(toRemove, interval)
+						// toRemove = append(toRemove, interval)
 					}
 				}
 
 				for _, v := range toRemove {
-					delete(b.schedule, v)
+					delete(b.schedule, int64(v))
 				}
 			}
 		}

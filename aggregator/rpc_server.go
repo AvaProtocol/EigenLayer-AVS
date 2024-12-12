@@ -44,11 +44,11 @@ type RpcServer struct {
 }
 
 // Get nonce of an existing smart wallet of a given owner
-func (r *RpcServer) CreateWallet(ctx context.Context, payload *avsproto.CreateWalletReq) (*avsproto.CreateWalletResp, error) {
+func (r *RpcServer) GetWallet(ctx context.Context, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
 	user, err := r.verifyAuth(ctx)
 
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 	r.config.Logger.Info("process create wallet",
 		"user", user.Address.String(),
@@ -76,7 +76,7 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalletReq) (*avsproto.ListWalletResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
 	r.config.Logger.Info("process list wallet",
@@ -88,19 +88,19 @@ func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalle
 	}
 
 	return &avsproto.ListWalletResp{
-		Wallets: wallets,
+		Items: wallets,
 	}, nil
 }
 
 func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*wrapperspb.BoolValue, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
 	r.config.Logger.Info("process cancel task",
 		"user", user.Address.String(),
-		"taskID", taskID.Id,
+		"task_id", taskID.Id,
 	)
 
 	result, err := r.engine.CancelTaskByUser(user, string(taskID.Id))
@@ -115,12 +115,12 @@ func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*wr
 func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.IdReq) (*wrapperspb.BoolValue, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
 	r.config.Logger.Info("process delete task",
 		"user", user.Address.String(),
-		"taskID", string(taskID.Id),
+		"task_id", string(taskID.Id),
 	)
 
 	result, err := r.engine.DeleteTaskByUser(user, string(taskID.Id))
@@ -151,7 +151,7 @@ func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.Create
 func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
 	r.config.Logger.Info("process list task",
@@ -164,7 +164,7 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
 	r.config.Logger.Info("process list execution",
@@ -177,12 +177,12 @@ func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListEx
 func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsproto.Task, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.InvalidAuthenticationKey, err.Error())
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
 	r.config.Logger.Info("process get task",
 		"user", user.Address.String(),
-		"taskID", payload.Id,
+		"task_id", payload.Id,
 	)
 
 	if payload.Id == "" {
@@ -195,6 +195,26 @@ func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsp
 	}
 
 	return task.ToProtoBuf()
+}
+
+// TriggerTask emit a trigger event that cause the task to be queue and execute eventually. It's similar to a trigger
+// sending by operator, but in this case the user manually provide a trigger point to force run it.
+func (r *RpcServer) TriggerTask(ctx context.Context, payload *avsproto.UserTriggerTaskReq) (*avsproto.UserTriggerTaskResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process trigger task",
+		"user", user.Address.String(),
+		"task_id", payload.TaskId,
+	)
+
+	if payload.TaskId == "" {
+		return nil, status.Errorf(codes.InvalidArgument, taskengine.TaskIDMissing)
+	}
+
+	return r.engine.TriggerTask(user, payload)
 }
 
 // Operator action

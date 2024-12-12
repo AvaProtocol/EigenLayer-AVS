@@ -23,19 +23,20 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AggregatorClient interface {
-	// Auth
+	// Exchange for an Auth Key to authenticate in subsequent request
 	GetKey(ctx context.Context, in *GetKeyReq, opts ...grpc.CallOption) (*KeyResp, error)
-	// Smart Acccount
+	// Smart Acccount Operation
 	GetNonce(ctx context.Context, in *NonceRequest, opts ...grpc.CallOption) (*NonceResp, error)
-	CreateWallet(ctx context.Context, in *CreateWalletReq, opts ...grpc.CallOption) (*CreateWalletResp, error)
+	GetWallet(ctx context.Context, in *GetWalletReq, opts ...grpc.CallOption) (*GetWalletResp, error)
 	ListWallets(ctx context.Context, in *ListWalletReq, opts ...grpc.CallOption) (*ListWalletResp, error)
-	// Task Management
+	// Task Management Operation
 	CreateTask(ctx context.Context, in *CreateTaskReq, opts ...grpc.CallOption) (*CreateTaskResp, error)
 	ListTasks(ctx context.Context, in *ListTasksReq, opts ...grpc.CallOption) (*ListTasksResp, error)
 	GetTask(ctx context.Context, in *IdReq, opts ...grpc.CallOption) (*Task, error)
 	ListExecutions(ctx context.Context, in *ListExecutionsReq, opts ...grpc.CallOption) (*ListExecutionsResp, error)
 	CancelTask(ctx context.Context, in *IdReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
 	DeleteTask(ctx context.Context, in *IdReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
+	TriggerTask(ctx context.Context, in *UserTriggerTaskReq, opts ...grpc.CallOption) (*UserTriggerTaskResp, error)
 }
 
 type aggregatorClient struct {
@@ -64,9 +65,9 @@ func (c *aggregatorClient) GetNonce(ctx context.Context, in *NonceRequest, opts 
 	return out, nil
 }
 
-func (c *aggregatorClient) CreateWallet(ctx context.Context, in *CreateWalletReq, opts ...grpc.CallOption) (*CreateWalletResp, error) {
-	out := new(CreateWalletResp)
-	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/CreateWallet", in, out, opts...)
+func (c *aggregatorClient) GetWallet(ctx context.Context, in *GetWalletReq, opts ...grpc.CallOption) (*GetWalletResp, error) {
+	out := new(GetWalletResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/GetWallet", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -136,23 +137,33 @@ func (c *aggregatorClient) DeleteTask(ctx context.Context, in *IdReq, opts ...gr
 	return out, nil
 }
 
+func (c *aggregatorClient) TriggerTask(ctx context.Context, in *UserTriggerTaskReq, opts ...grpc.CallOption) (*UserTriggerTaskResp, error) {
+	out := new(UserTriggerTaskResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/TriggerTask", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AggregatorServer is the server API for Aggregator service.
 // All implementations must embed UnimplementedAggregatorServer
 // for forward compatibility
 type AggregatorServer interface {
-	// Auth
+	// Exchange for an Auth Key to authenticate in subsequent request
 	GetKey(context.Context, *GetKeyReq) (*KeyResp, error)
-	// Smart Acccount
+	// Smart Acccount Operation
 	GetNonce(context.Context, *NonceRequest) (*NonceResp, error)
-	CreateWallet(context.Context, *CreateWalletReq) (*CreateWalletResp, error)
+	GetWallet(context.Context, *GetWalletReq) (*GetWalletResp, error)
 	ListWallets(context.Context, *ListWalletReq) (*ListWalletResp, error)
-	// Task Management
+	// Task Management Operation
 	CreateTask(context.Context, *CreateTaskReq) (*CreateTaskResp, error)
 	ListTasks(context.Context, *ListTasksReq) (*ListTasksResp, error)
 	GetTask(context.Context, *IdReq) (*Task, error)
 	ListExecutions(context.Context, *ListExecutionsReq) (*ListExecutionsResp, error)
 	CancelTask(context.Context, *IdReq) (*wrapperspb.BoolValue, error)
 	DeleteTask(context.Context, *IdReq) (*wrapperspb.BoolValue, error)
+	TriggerTask(context.Context, *UserTriggerTaskReq) (*UserTriggerTaskResp, error)
 	mustEmbedUnimplementedAggregatorServer()
 }
 
@@ -166,8 +177,8 @@ func (UnimplementedAggregatorServer) GetKey(context.Context, *GetKeyReq) (*KeyRe
 func (UnimplementedAggregatorServer) GetNonce(context.Context, *NonceRequest) (*NonceResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetNonce not implemented")
 }
-func (UnimplementedAggregatorServer) CreateWallet(context.Context, *CreateWalletReq) (*CreateWalletResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreateWallet not implemented")
+func (UnimplementedAggregatorServer) GetWallet(context.Context, *GetWalletReq) (*GetWalletResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetWallet not implemented")
 }
 func (UnimplementedAggregatorServer) ListWallets(context.Context, *ListWalletReq) (*ListWalletResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWallets not implemented")
@@ -189,6 +200,9 @@ func (UnimplementedAggregatorServer) CancelTask(context.Context, *IdReq) (*wrapp
 }
 func (UnimplementedAggregatorServer) DeleteTask(context.Context, *IdReq) (*wrapperspb.BoolValue, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteTask not implemented")
+}
+func (UnimplementedAggregatorServer) TriggerTask(context.Context, *UserTriggerTaskReq) (*UserTriggerTaskResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TriggerTask not implemented")
 }
 func (UnimplementedAggregatorServer) mustEmbedUnimplementedAggregatorServer() {}
 
@@ -239,20 +253,20 @@ func _Aggregator_GetNonce_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Aggregator_CreateWallet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateWalletReq)
+func _Aggregator_GetWallet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetWalletReq)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AggregatorServer).CreateWallet(ctx, in)
+		return srv.(AggregatorServer).GetWallet(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/aggregator.Aggregator/CreateWallet",
+		FullMethod: "/aggregator.Aggregator/GetWallet",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AggregatorServer).CreateWallet(ctx, req.(*CreateWalletReq))
+		return srv.(AggregatorServer).GetWallet(ctx, req.(*GetWalletReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -383,6 +397,24 @@ func _Aggregator_DeleteTask_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Aggregator_TriggerTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UserTriggerTaskReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).TriggerTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregator/TriggerTask",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).TriggerTask(ctx, req.(*UserTriggerTaskReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Aggregator_ServiceDesc is the grpc.ServiceDesc for Aggregator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -399,8 +431,8 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Aggregator_GetNonce_Handler,
 		},
 		{
-			MethodName: "CreateWallet",
-			Handler:    _Aggregator_CreateWallet_Handler,
+			MethodName: "GetWallet",
+			Handler:    _Aggregator_GetWallet_Handler,
 		},
 		{
 			MethodName: "ListWallets",
@@ -429,6 +461,10 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteTask",
 			Handler:    _Aggregator_DeleteTask_Handler,
+		},
+		{
+			MethodName: "TriggerTask",
+			Handler:    _Aggregator_TriggerTask_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -211,7 +211,7 @@ func (n *Engine) GetSmartWallets(owner common.Address) ([]*avsproto.SmartWallet,
 	return wallets, nil
 }
 
-func (n *Engine) CreateSmartWallet(user *model.User, payload *avsproto.CreateWalletReq) (*avsproto.CreateWalletResp, error) {
+func (n *Engine) CreateSmartWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
 	// Verify data
 	// when user passing a custom factory address, we want to validate it
 	if payload.FactoryAddress != "" && !common.IsHexAddress(payload.FactoryAddress) {
@@ -250,7 +250,7 @@ func (n *Engine) CreateSmartWallet(user *model.User, payload *avsproto.CreateWal
 		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), StorageWriteError)
 	}
 
-	return &avsproto.CreateWalletResp{
+	return &avsproto.GetWalletResp{
 		Address:        sender.Hex(),
 		Salt:           salt.String(),
 		FactoryAddress: factoryAddress.Hex(),
@@ -346,11 +346,11 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 						Trigger:   task.Trigger,
 					},
 				}
-				n.logger.Info("stream check to operator", "taskID", task.Id, "operator", payload.Address, "resp", resp)
+				n.logger.Info("stream check to operator", "task_id", task.Id, "operator", payload.Address, "resp", resp)
 
 				if err := srv.Send(&resp); err != nil {
 					// return error to cause client to establish re-connect the connection
-					n.logger.Info("error sending check to operator", "taskID", task.Id, "operator", payload.Address)
+					n.logger.Info("error sending check to operator", "task_id", task.Id, "operator", payload.Address)
 					return fmt.Errorf("cannot send data back to grpc channel")
 				}
 
@@ -414,7 +414,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	}
 
 	taskResp := &avsproto.ListTasksResp{
-		Tasks:  []*avsproto.ListTasksResp_Item{},
+		Items:  []*avsproto.ListTasksResp_Item{},
 		Cursor: "",
 	}
 
@@ -445,7 +445,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		task.Id = taskID
 
 		if t, err := task.ToProtoBuf(); err == nil {
-			taskResp.Tasks = append(taskResp.Tasks, &avsproto.ListTasksResp_Item{
+			taskResp.Items = append(taskResp.Items, &avsproto.ListTasksResp_Item{
 				Id:                 t.Id,
 				Owner:              t.Owner,
 				SmartWalletAddress: t.SmartWalletAddress,
@@ -468,7 +468,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	}
 
 	if total >= itemPerPage {
-		taskResp.Cursor = NewCursor(CursorDirectionNext, taskResp.Tasks[total-1].Id).String()
+		taskResp.Cursor = NewCursor(CursorDirectionNext, taskResp.Items[total-1].Id).String()
 	}
 
 	return taskResp, nil
@@ -504,6 +504,57 @@ func (n *Engine) GetTask(user *model.User, taskID string) (*model.Task, error) {
 	return task, nil
 }
 
+func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTaskReq) (*avsproto.UserTriggerTaskResp, error) {
+	if !ValidateTaskId(payload.TaskId) {
+		return nil, status.Errorf(codes.InvalidArgument, InvalidTaskIdFormat)
+	}
+
+	n.logger.Info("processed manually trigger", "user", user.Address, "task_id", payload.TaskId)
+
+	task, err := n.GetTaskByID(payload.TaskId)
+	if err != nil {
+		return nil, err
+	}
+
+	if !task.OwnedBy(user.Address) {
+		// only the owner of a task can trigger it
+		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+	}
+
+	data, err := json.Marshal(payload.TriggerMark)
+	if err != nil {
+		n.logger.Error("error serialize trigger to json", err)
+		return nil, status.Errorf(codes.InvalidArgument, codes.InvalidArgument.String())
+	}
+
+	if payload.RunInline {
+		// Run the task inline, by pass the queue system
+		executor := NewExecutor(n.db, n.logger)
+		execution, err := executor.RunTask(task, payload.TriggerMark)
+		if err == nil {
+			return &avsproto.UserTriggerTaskResp{
+				Result:      true,
+				ExecutionId: execution.Id,
+			}, nil
+		}
+
+		return &avsproto.UserTriggerTaskResp{
+			Result: false,
+		}, err
+	}
+
+	jid, err := n.queue.Enqueue(ExecuteTask, payload.TaskId, data)
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageQueueUnavailableError)
+	}
+
+	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId, "jid", jid)
+	return &avsproto.UserTriggerTaskResp{
+		Result: true,
+		JobId:  fmt.Sprintf("%d", jid),
+	}, nil
+}
+
 // List Execution for a given task id
 func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
 	task, err := n.GetTaskByID(payload.Id)
@@ -522,8 +573,8 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	}
 
 	executioResp := &avsproto.ListExecutionsResp{
-		Executions: []*avsproto.Execution{},
-		Cursor:     "",
+		Items:  []*avsproto.Execution{},
+		Cursor: "",
 	}
 
 	total := 0
@@ -541,7 +592,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 
 		exec := avsproto.Execution{}
 		if err := protojson.Unmarshal(kv.Value, &exec); err == nil {
-			executioResp.Executions = append(executioResp.Executions, &exec)
+			executioResp.Items = append(executioResp.Items, &exec)
 			total += 1
 		}
 		if total >= itemPerPage {
@@ -550,7 +601,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	}
 
 	if total >= itemPerPage {
-		executioResp.Cursor = NewCursor(CursorDirectionNext, executioResp.Executions[total-1].Id).String()
+		executioResp.Cursor = NewCursor(CursorDirectionNext, executioResp.Items[total-1].Id).String()
 	}
 	return executioResp, nil
 }

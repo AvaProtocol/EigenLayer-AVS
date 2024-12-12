@@ -181,6 +181,28 @@ function deserialize_aggregator_Task(buffer_arg) {
   return avs_pb.Task.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
+function serialize_aggregator_UserTriggerTaskReq(arg) {
+  if (!(arg instanceof avs_pb.UserTriggerTaskReq)) {
+    throw new Error('Expected argument of type aggregator.UserTriggerTaskReq');
+  }
+  return Buffer.from(arg.serializeBinary());
+}
+
+function deserialize_aggregator_UserTriggerTaskReq(buffer_arg) {
+  return avs_pb.UserTriggerTaskReq.deserializeBinary(new Uint8Array(buffer_arg));
+}
+
+function serialize_aggregator_UserTriggerTaskResp(arg) {
+  if (!(arg instanceof avs_pb.UserTriggerTaskResp)) {
+    throw new Error('Expected argument of type aggregator.UserTriggerTaskResp');
+  }
+  return Buffer.from(arg.serializeBinary());
+}
+
+function deserialize_aggregator_UserTriggerTaskResp(buffer_arg) {
+  return avs_pb.UserTriggerTaskResp.deserializeBinary(new Uint8Array(buffer_arg));
+}
+
 function serialize_google_protobuf_BoolValue(arg) {
   if (!(arg instanceof google_protobuf_wrappers_pb.BoolValue)) {
     throw new Error('Expected argument of type google.protobuf.BoolValue');
@@ -194,7 +216,7 @@ function deserialize_google_protobuf_BoolValue(buffer_arg) {
 
 
 var AggregatorService = exports.AggregatorService = {
-  // Auth
+  // Exchange for an Auth Key to authenticate in subsequent request
 getKey: {
     path: '/aggregator.Aggregator/GetKey',
     requestStream: false,
@@ -206,7 +228,7 @@ getKey: {
     responseSerialize: serialize_aggregator_KeyResp,
     responseDeserialize: deserialize_aggregator_KeyResp,
   },
-  // Smart Acccount
+  // Smart Acccount Operation
 getNonce: {
     path: '/aggregator.Aggregator/GetNonce',
     requestStream: false,
@@ -240,7 +262,7 @@ getNonce: {
     responseSerialize: serialize_aggregator_ListWalletResp,
     responseDeserialize: deserialize_aggregator_ListWalletResp,
   },
-  // Task Management
+  // Task Management Operation
 createTask: {
     path: '/aggregator.Aggregator/CreateTask',
     requestStream: false,
@@ -306,6 +328,17 @@ createTask: {
     requestDeserialize: deserialize_aggregator_IdReq,
     responseSerialize: serialize_google_protobuf_BoolValue,
     responseDeserialize: deserialize_google_protobuf_BoolValue,
+  },
+  triggerTask: {
+    path: '/aggregator.Aggregator/TriggerTask',
+    requestStream: false,
+    responseStream: false,
+    requestType: avs_pb.UserTriggerTaskReq,
+    responseType: avs_pb.UserTriggerTaskResp,
+    requestSerialize: serialize_aggregator_UserTriggerTaskReq,
+    requestDeserialize: deserialize_aggregator_UserTriggerTaskReq,
+    responseSerialize: serialize_aggregator_UserTriggerTaskResp,
+    responseDeserialize: deserialize_aggregator_UserTriggerTaskResp,
   },
 };
 
