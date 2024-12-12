@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -14,11 +15,13 @@ import (
 type GraphqlQueryProcessor struct {
 	client *graphql.Client
 	sb     *strings.Builder
+	url    *url.URL
 }
 
 func NewGraphqlQueryProcessor(endpoint string) (*GraphqlQueryProcessor, error) {
 	sb := &strings.Builder{}
 	log := func(s string) {
+		fmt.Println("LOGLOG", s)
 		sb.WriteString(s)
 	}
 
@@ -27,9 +30,15 @@ func NewGraphqlQueryProcessor(endpoint string) (*GraphqlQueryProcessor, error) {
 		return nil, err
 	}
 
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, err
+	}
+
 	return &GraphqlQueryProcessor{
 		client: client,
 		sb:     sb,
+		url:    u,
 	}, nil
 }
 
@@ -55,7 +64,7 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	}()
 
 	var resp map[string]any
-	r.sb.WriteString(fmt.Sprintf("Execute GraphQL %s at %s", node.Url, time.Now()))
+	r.sb.WriteString(fmt.Sprintf("Execute GraphQL %s at %s", r.url.Hostname(), time.Now()))
 	query := graphql.NewRequest(node.Query)
 	err = r.client.Run(ctx, query, &resp)
 	if err != nil {

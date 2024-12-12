@@ -1,91 +1,70 @@
 package taskengine
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
-	"time"
-
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
+	"testing"
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
-type ContractReadProcessor struct {
-	client *ethclient.Client
-}
-
-func NewContractReadProcessor(client *ethclient.Client) *ContractReadProcessor {
-	return &ContractReadProcessor{
-		client: client,
-	}
-}
-
-func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractReadNode) (*avsproto.Execution_Step, error) {
-	ctx := context.Background()
-	t0 := time.Now().Unix()
-	s := &avsproto.Execution_Step{
-		NodeId:     stepID,
-		Log:        "",
-		OutputData: "",
-		Success:    true,
-		Error:      "",
-		StartAt:    t0,
+func TestGraphlQlNodeSimpleQuery(t *testing.T) {
+	node := &avsproto.GraphQLQueryNode{
+		Url: "https://gateway.thegraph.com/api/10186dcf11921c7d1bc140721c69da38/subgraphs/id/Sxx812XgeKyzQPaBpR5YZWmGV5fZuBaPdh7DFhzSwiQ",
+		Query: `
+		{
+		  lidoApprovals(where:{id: "0x000016bb61e32d436819632cc192fbc7565ba08a8e9831d67210eab974a5512343010000"}) {
+		    value
+			id
+			owner
+			spender
+		  }
+		}`,
 	}
 
-	var err error
-	defer func() {
-		s.EndAt = time.Now().Unix()
-		s.Success = err == nil
-		if err != nil {
-			s.Error = err.Error()
-		}
-	}()
+	n, _ := NewGraphqlQueryProcessor(node.Url)
 
-	var log strings.Builder
-
-	// TODO: support load pre-define ABI
-	parsedABI, err := abi.JSON(strings.NewReader(node.ContractAbi))
-	if err != nil {
-		return nil, fmt.Errorf("error parse abi: %w", err)
-	}
-
-	contractAddress := common.HexToAddress(node.ContractAddress)
-	calldata := common.FromHex(node.CallData)
-	msg := ethereum.CallMsg{
-		To:   &contractAddress,
-		Data: calldata,
-	}
-
-	output, err := r.client.CallContract(ctx, msg, nil)
+	step, err := n.Execute("lido approval", node)
 
 	if err != nil {
-		s.Success = false
-		s.Error = fmt.Errorf("error invoke contract method: %w", err).Error()
-		return s, err
+		t.Errorf("expected rest node run succesfull but got error: %v", err)
 	}
 
-	// Unpack the output
-	result, err := parsedABI.Unpack(node.Method, output)
+	if !step.Success {
+		t.Errorf("expected rest node run succesfully but failed")
+	}
+
+	if !strings.Contains(step.Log, "Execute GraphQL gateway.thegraph.com") {
+		t.Errorf("expected log contains request trace data but not found. Log data is: %s", step.Log)
+	}
+
+	if step.Error != "" {
+		t.Errorf("expected log contains request trace data but found no")
+	}
+
+	var output struct {
+		LidoApprovals []struct {
+			ID      string `json:"id"`
+			Owner   string `json:"owner"`
+			Spender string `json:"spender"`
+			Value   string `json:"value"`
+		} `json:"lidoApprovals"`
+	}
+	err = json.Unmarshal([]byte(step.OutputData), &output)
 	if err != nil {
-		s.Success = false
-		s.Error = fmt.Errorf("error decode result: %w", err).Error()
-		return s, err
+		t.Errorf("expected the data output in json format, but failed to decode %v", err)
+	}
+	if len(output.LidoApprovals) == 0 {
+		t.Errorf("expected non zero approval but found none. data %s", step.OutputData)
+	}
+	if output.LidoApprovals[0].Owner != "0xd07cb0f431a53601030262a8b8b90f946ad7514a" {
+		t.Errorf("owner doesn't match. expected %s got %s", "0xd07cb0f431a53601030262a8b8b90f946ad7514a", output.LidoApprovals[0].Owner)
 	}
 
-	log.WriteString(fmt.Sprintf("Call %s on %s at %s", node.Method, node.ContractAddress, time.Now()))
-	s.Log = log.String()
-	outputData, err := json.Marshal(result)
-	s.OutputData = string(outputData)
-	if err != nil {
-		s.Success = false
-		s.Error = err.Error()
-		return s, err
+	if output.LidoApprovals[0].Value != "115792089237316195423570985008687907853269984665640564039457584007913129639935" {
+		t.Errorf("value doesn't match. expected %s got %s", "115792089237316195423570985008687907853269984665640564039457584007913129639935", output.LidoApprovals[0].Value)
 	}
-
-	return s, nil
+	if output.LidoApprovals[0].Spender != "0xcb859ea579b28e02b87a1fde08d087ab9dbe5149" {
+		t.Errorf("spender doesn't match. expected %s got %s", "115792089237316195423570985008687907853269984665640564039457584007913129639935", output.LidoApprovals[0].Value)
+	}
 }
