@@ -301,6 +301,9 @@ const main = async (cmd) => {
     case "schedule-monitor":
       scheduleMonitor(owner, token, process.argv[3]);
       break;
+    case "schedule-aave":
+      scheduleAaveMonitor(owner, token);
+      break;
     case "schedule":
     case "schedule-cron":
     case "schedule-event":
@@ -384,7 +387,6 @@ const main = async (cmd) => {
     case "delete":
       await deleteTask(owner, token, process.argv[3]);
       break;
-
     case "wallet":
       await getWallets(owner, token);
       break;
@@ -413,6 +415,7 @@ const main = async (cmd) => {
       schedule-cron <smart-wallet-address>:                    to schedule a task that run on cron
       schedule-event <smart-wallet-address>:                   to schedule a task that run on occurenct of an event
       schedule-generic:                                        to schedule a task with an arbitrary contract query
+      schedule-aave:                                           monitor and report aavee liquidity rate every block
       monitor-address <wallet-address>:                        to monitor erc20 in/out for an address
       trigger <task-id> <trigger-mark>:                        manually trigger a task. Example:
                                                                  trigger abcdef '{"block_number":1234}' for blog trigger
@@ -673,6 +676,116 @@ async function scheduleMonitor(owner, token, target) {
 
   return result;
 }
+
+// setup a task to monitor in/out transfer for a wallet and send notification
+async function scheduleAaveMonitor(owner, token) {
+  const wallets = await getWallets(owner, token);
+  const smartWalletAddress = wallets[0].address;
+
+  const metadata = new grpc.Metadata();
+  metadata.add("authkey", token);
+
+  let trigger = {
+    name: "trigger1",
+    block: {
+      interval: 1,
+    },
+  };
+
+  const getReserveId = UlidMonotonic.generate().toCanonical();
+  const sendSummaryId = UlidMonotonic.generate().toCanonical();
+  const getIpId = UlidMonotonic.generate().toCanonical();
+
+  const result = await asyncRPC(
+    client,
+    "CreateTask",
+    {
+      smart_wallet_address: smartWalletAddress,
+      nodes: [
+        {
+          id: getReserveId,
+          name: 'getReserveUSDC',
+          graphql_query: {
+            url: 'https://gateway.thegraph.com/api/10186dcf11921c7d1bc140721c69da38/subgraphs/id/Cd2gEDVeqnjBn1hSeqFMitw8Q1iiyV9FYUZkLNRcL87g',
+            query: `
+              {
+                reserves(where: {underlyingAsset: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"}) {
+                  id
+                  underlyingAsset
+                  name
+                  decimals
+                  liquidityRate
+                  aToken {
+                    id
+                  }
+                  sToken {
+                    id
+                  }
+                }
+              }
+            `
+          }
+        },
+        {
+          id: getIpId,
+          name: 'getIpAddress',
+          rest_api: {
+            url: 'https://ipinfo.io/json',
+          }
+        },
+
+        {
+          id: sendSummaryId,
+          name: 'notification',
+          rest_api: {
+            url: "https://api.telegram.org/bot{{notify_bot_token}}/sendMessage?",
+            //url: `https://webhook.site/ca416047-5ba0-4485-8f98-76790b63add7`,
+            method: "POST",
+            body: `JSON.stringify({
+              chat_id:-4609037622,
+              text: \`Node IP is: \${getIpAddress.data.ip}.\nCurrent USDC liquidity rate in RAY unit is \${getReserveUSDC.data.reserves[0].liquidityRate} \`
+            })`,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        },
+      ],
+
+      edges: [
+        {
+          id: UlidMonotonic.generate().toCanonical(),
+          // __TRIGGER__ is a special node. It doesn't appear directly in the task data, but it should be draw on the UI to show what is the entrypoint
+          source: "__TRIGGER__",
+          target: getIpId,
+        },
+        {
+          id: UlidMonotonic.generate().toCanonical(),
+          // __TRIGGER__ is a special node. It doesn't appear directly in the task data, but it should be draw on the UI to show what is the entrypoint
+          source: getIpId,
+          target: getReserveId,
+        },
+        {
+          id: UlidMonotonic.generate().toCanonical(),
+          // __TRIGGER__ is a special node. It doesn't appear directly in the task data, but it should be draw on the UI to show what is the entrypoint
+          source: getReserveId,
+          target: sendSummaryId,
+        },
+      ],
+
+      trigger,
+      start_at: Math.floor(Date.now() / 1000) + 30,
+      expired_at: Math.floor(Date.now() / 1000 + 3600 * 24 * 30),
+      memo: `Montoring USDC aavee on ethereum`,
+    },
+    metadata
+  );
+
+  console.log("create task", result);
+
+  return result;
+}
+
 
 (async () => {
   try {
