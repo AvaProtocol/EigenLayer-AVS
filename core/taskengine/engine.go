@@ -530,20 +530,29 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 	if payload.RunInline {
 		// Run the task inline, by pass the queue system
 		executor := NewExecutor(n.db, n.logger)
-		executor.RunTask(task, payload.TriggerMark)
-	} else {
-		jid, err := n.queue.Enqueue(ExecuteTask, payload.TaskId, data)
-		if err != nil {
-			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageQueueUnavailableError)
+		execution, err := executor.RunTask(task, payload.TriggerMark)
+		if err == nil {
+			return &avsproto.UserTriggerTaskResp{
+				Result:      true,
+				ExecutionId: execution.Id,
+			}, nil
 		}
 
-		n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId, "jid", jid)
 		return &avsproto.UserTriggerTaskResp{
-			Result: true,
-		}, nil
+			Result: false,
+		}, err
 	}
 
-	return nil, nil
+	jid, err := n.queue.Enqueue(ExecuteTask, payload.TaskId, data)
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageQueueUnavailableError)
+	}
+
+	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId, "jid", jid)
+	return &avsproto.UserTriggerTaskResp{
+		Result: true,
+		JobId:  fmt.Sprintf("%d", jid),
+	}, nil
 }
 
 // List Execution for a given task id

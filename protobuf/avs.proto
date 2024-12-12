@@ -402,6 +402,8 @@ message UserTriggerTaskResp {
   bool result = 1;
   // if trigger inline, the execution id will be returned
   string execution_id = 2;
+  // when running async, we get back a job id
+  string job_id = 3;
 }
 
 service Aggregator {

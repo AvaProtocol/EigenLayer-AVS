@@ -67,14 +67,15 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 		return fmt.Errorf("error decode job payload when executing task: %s with job id %d", task.Id, job.ID)
 	}
 
-	return x.RunTask(task, triggerMark)
+	_, err = x.RunTask(task, triggerMark)
+	return err
 }
 
-func (x *TaskExecutor) RunTask(task *model.Task, triggerMark *avsproto.TriggerMark) error {
+func (x *TaskExecutor) RunTask(task *model.Task, triggerMark *avsproto.TriggerMark) (*avsproto.Execution, error) {
 	vm, err := NewVMWithData(task.Id, triggerMark, task.Nodes, task.Edges)
 
 	if err != nil {
-		return fmt.Errorf("vm failed to initialize: %w", err)
+		return nil, fmt.Errorf("vm failed to initialize: %w", err)
 	}
 
 	t0 := time.Now()
@@ -129,9 +130,9 @@ func (x *TaskExecutor) RunTask(task *model.Task, triggerMark *avsproto.TriggerMa
 
 	if runTaskErr == nil {
 		x.logger.Info("succesfully executing task", "task_id", task.Id, "triggermark", triggerMark)
-		return nil
+		return execution, nil
 	}
-	return fmt.Errorf("Error executing task %s %v", task.Id, runTaskErr)
+	return execution, fmt.Errorf("Error executing task %s %v", task.Id, runTaskErr)
 }
 
 type ContractProcessor struct {
