@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/url"
 
 	"github.com/go-resty/resty/v2"
 )
@@ -20,22 +19,15 @@ type Client struct {
 	useMultipartForm bool
 
 	// don't pass a logger but pass a function to allow us re-use it as a standalone package in various place
-	Log            func(s string)
-	parsedEndpoint *url.URL
+	Log func(s string)
 }
 
 // NewClient creates a new GraphQL client with the specified endpoint and options.
 func NewClient(endpoint string, log func(s string), opts ...ClientOption) (*Client, error) {
-	u, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, err
-	}
-
 	client := &Client{
-		endpoint:       endpoint,
-		restyClient:    resty.New(),
-		Log:            func(string) {},
-		parsedEndpoint: u,
+		endpoint:    endpoint,
+		restyClient: resty.New(),
+		Log:         func(string) {},
 	}
 
 	for _, opt := range opts {
@@ -65,8 +57,7 @@ func (c *Client) runWithJSON(ctx context.Context, req *Request, resp interface{}
 		"variables": req.Vars(),
 	}
 
-	// only log hostname because the domain might contain API key, example subgraph
-	c.logf("request %s variables: %v query: %v", c.parsedEndpoint.Hostname, req.Vars(), req.Query())
+	c.logf("request variables: %v query: %v", req.Vars(), req.Query())
 
 	response, err := c.restyClient.R().
 		SetContext(ctx).
