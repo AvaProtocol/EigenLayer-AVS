@@ -72,7 +72,7 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 }
 
 func (x *TaskExecutor) RunTask(task *model.Task, triggerMetadata *avsproto.TriggerMetadata) (*avsproto.Execution, error) {
-	vm, err := NewVMWithData(task.Id, triggerMetadata, task.Nodes, task.Edges)
+	vm, err := NewVMWithData(task.Id, triggerMetadata, task.Nodes, task.Edges).WithLogger(x.logger)
 
 	if err != nil {
 		return nil, fmt.Errorf("vm failed to initialize: %w", err)

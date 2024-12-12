@@ -7,8 +7,10 @@ import (
 	"sync"
 	"time"
 
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/dop251/goja"
 	"github.com/ginkgoch/godash/v2"
+	"github.com/pingcap/log"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -55,6 +57,8 @@ type VM struct {
 	plans            map[string]*Step
 	entrypoint       string
 	instructionCount int64
+
+	logger sdklogging.Logger
 }
 
 func NewVM() (*VM, error) {
@@ -73,6 +77,11 @@ func (v *VM) Reset() {
 	v.entrypoint = ""
 	v.Status = VMStateInitialize
 	v.instructionCount = 0
+}
+
+func (v *VM) GetNodeNameAsVar(nodeID string) string {
+	name := v.TaskNodes[nodeID].Name
+	return name
 }
 
 func NewVMWithData(taskID string, triggerMetadata *avsproto.TriggerMetadata, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge) (*VM, error) {
@@ -247,7 +256,7 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 		p := NewRestProrcessor()
 
 		// only evaluate string when there is string interpolation
-		if nodeValue.Body != "" && strings.Contains(nodeValue.Body, "$") {
+		if nodeValue.Body != "" && (strings.Contains(nodeValue.Body, "$") || strings.Contains(nodeValue.Body, "`")) {
 			nodeValue2 := &avsproto.RestAPINode{
 				Url:     macros.RenderString(nodeValue.Url, macroEnvs),
 				Headers: nodeValue.Headers,
@@ -255,15 +264,21 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 				Body:    strings.Clone(nodeValue.Body),
 			}
 			vm := goja.New()
-			// TODO: dynamically set var instead of hardcode the name
-			// client would need to send this over
-			vm.Set("trigger1", v.vars["trigger1"])
+
+			for key, value := range v.vars {
+				vm.Set(key, map[string]any{
+					"data": value,
+				})
+			}
 
 			renderBody, err := vm.RunString(nodeValue.Body)
 			if err == nil {
 				nodeValue2.Body = renderBody.Export().(string)
+			} else {
+				fmt.Println("error render string with goja", err)
 			}
-			executionLog, err = p.Execute(node.Id, nodeValue2)
+			executionLog, result, err = p.Execute(node.Id, nodeValue2)
+			v.vars[v.GetNodeNameAsVar(stepID)] = result
 		} else {
 			executionLog, err = p.Execute(node.Id, nodeValue)
 		}
@@ -289,9 +304,26 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 				}
 			}
 		}
+	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
+		executionLog, err = v.runGraphQL(node.Id, nodeValue)
 	}
 
 	return executionLog, err
+}
+
+func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, error) {
+	g, err := NewGraphqlQueryProcessor(node.Url)
+	if err != nil {
+		return nil, err
+	}
+	executionLog, result, err := g.Execute(stepID, node)
+	v.vars[v.GetNodeNameAsVar(stepID)] = result
+	if err != nil {
+		log.Error("error execute graphql node", "task_id", v.TaskID, "step", node.Id, "url", node.Url, "error", err)
+	}
+	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
+
+	return executionLog, nil
 }
 
 func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Execution_Step, string, error) {
