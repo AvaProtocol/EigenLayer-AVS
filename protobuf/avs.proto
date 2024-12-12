@@ -301,7 +301,7 @@ message SmartWallet {
 }
 
 message ListWalletResp {
-  repeated SmartWallet wallets = 1;
+  repeated SmartWallet items = 1;
 }
 
 
@@ -337,7 +337,7 @@ message ListTasksResp {
     TaskTrigger trigger = 12;
   }
 
-  repeated Item tasks = 1;
+  repeated Item items = 1;
   string cursor = 2;
 }
 
@@ -348,7 +348,7 @@ message ListExecutionsReq {
 }
 
 message ListExecutionsResp {
-  repeated Execution executions = 1;
+  repeated Execution items = 1;
   string cursor = 2;
 }
 

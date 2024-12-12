@@ -414,7 +414,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	}
 
 	taskResp := &avsproto.ListTasksResp{
-		Tasks:  []*avsproto.ListTasksResp_Item{},
+		Items:  []*avsproto.ListTasksResp_Item{},
 		Cursor: "",
 	}
 
@@ -445,7 +445,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		task.Id = taskID
 
 		if t, err := task.ToProtoBuf(); err == nil {
-			taskResp.Tasks = append(taskResp.Tasks, &avsproto.ListTasksResp_Item{
+			taskResp.Items = append(taskResp.Items, &avsproto.ListTasksResp_Item{
 				Id:                 t.Id,
 				Owner:              t.Owner,
 				SmartWalletAddress: t.SmartWalletAddress,
@@ -468,7 +468,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	}
 
 	if total >= itemPerPage {
-		taskResp.Cursor = NewCursor(CursorDirectionNext, taskResp.Tasks[total-1].Id).String()
+		taskResp.Cursor = NewCursor(CursorDirectionNext, taskResp.Items[total-1].Id).String()
 	}
 
 	return taskResp, nil
@@ -573,8 +573,8 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	}
 
 	executioResp := &avsproto.ListExecutionsResp{
-		Executions: []*avsproto.Execution{},
-		Cursor:     "",
+		Items:  []*avsproto.Execution{},
+		Cursor: "",
 	}
 
 	total := 0
@@ -592,7 +592,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 
 		exec := avsproto.Execution{}
 		if err := protojson.Unmarshal(kv.Value, &exec); err == nil {
-			executioResp.Executions = append(executioResp.Executions, &exec)
+			executioResp.Items = append(executioResp.Items, &exec)
 			total += 1
 		}
 		if total >= itemPerPage {
@@ -601,7 +601,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	}
 
 	if total >= itemPerPage {
-		executioResp.Cursor = NewCursor(CursorDirectionNext, executioResp.Executions[total-1].Id).String()
+		executioResp.Cursor = NewCursor(CursorDirectionNext, executioResp.Items[total-1].Id).String()
 	}
 	return executioResp, nil
 }

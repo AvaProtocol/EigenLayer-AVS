@@ -88,7 +88,7 @@ func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalle
 	}
 
 	return &avsproto.ListWalletResp{
-		Wallets: wallets,
+		Items: wallets,
 	}, nil
 }
 
