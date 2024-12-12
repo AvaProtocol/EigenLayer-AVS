@@ -185,7 +185,9 @@ async function triggerTask(owner, token, taskId, triggerMark) {
   const result = await asyncRPC(
     client,
     "TriggerTask",
-    { task_id: taskId, triggerMark,  },
+    // If want to run async, comment this line out
+    //{ task_id: taskId, triggerMark, },
+    { task_id: taskId, triggerMark, run_inline: true },
     metadata
   );
 
