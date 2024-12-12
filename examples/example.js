@@ -122,9 +122,9 @@ async function listTask(owner, token) {
     },
     metadata
   );
-  console.log(`Found ${result.tasks.length} tasks created by`, process.argv[3]);
+  console.log(`Found ${result.items.length} tasks created by`, process.argv[3]);
 
-  for (const item of result.tasks) {
+  for (const item of result.items) {
     console.log(util.inspect(item, { depth: 4, colors: true }));
   }
   console.log(util.inspect({cursor: result.cursor}, { depth: 4, colors: true }));
@@ -225,7 +225,7 @@ async function getWallets(owner, token) {
   const tokenContract = new ethers.Contract(tokenAddress, tokenAbi, provider);
 
   let wallets = [];
-  for (const wallet of walletsResp.wallets) {
+  for (const wallet of walletsResp.items) {
     const balance = await provider.getBalance(wallet.address);
     const balanceInEth = _.floor(ethers.formatEther(balance), 2);
 
