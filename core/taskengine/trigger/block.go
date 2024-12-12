@@ -13,7 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-type TriggerMark[T any] struct {
+type TriggerMetadata[T any] struct {
 	TaskID string
 
 	Marker T
@@ -25,10 +25,10 @@ type BlockTrigger struct {
 	schedule map[int64]map[string]bool
 
 	// channel that we will push the trigger information back
-	triggerCh chan TriggerMark[int64]
+	triggerCh chan TriggerMetadata[int64]
 }
 
-func NewBlockTrigger(o *RpcOption, triggerCh chan TriggerMark[int64]) *BlockTrigger {
+func NewBlockTrigger(o *RpcOption, triggerCh chan TriggerMetadata[int64]) *BlockTrigger {
 	var err error
 
 	logger, err := sdklogging.NewZapLogger(sdklogging.Production)
@@ -113,7 +113,7 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 					z := new(big.Int)
 					if z.Mod(header.Number, big.NewInt(int64(interval))).Cmp(zero) == 0 {
 						for taskID, _ := range tasks {
-							b.triggerCh <- TriggerMark[int64]{
+							b.triggerCh <- TriggerMetadata[int64]{
 								TaskID: taskID,
 								Marker: header.Number.Int64(),
 							}

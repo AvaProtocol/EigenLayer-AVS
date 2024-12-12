@@ -376,7 +376,7 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	n.logger.Info("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
 	n.lock.Unlock()
 
-	data, err := json.Marshal(payload.TriggerMarker)
+	data, err := json.Marshal(payload.TriggerMetadata)
 	if err != nil {
 		n.logger.Error("error serialize trigger to json", err)
 		return err
@@ -521,7 +521,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
-	data, err := json.Marshal(payload.TriggerMark)
+	data, err := json.Marshal(payload.TriggerMetadata)
 	if err != nil {
 		n.logger.Error("error serialize trigger to json", err)
 		return nil, status.Errorf(codes.InvalidArgument, codes.InvalidArgument.String())
@@ -530,7 +530,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 	if payload.RunInline {
 		// Run the task inline, by pass the queue system
 		executor := NewExecutor(n.db, n.logger)
-		execution, err := executor.RunTask(task, payload.TriggerMark)
+		execution, err := executor.RunTask(task, payload.TriggerMetadata)
 		if err == nil {
 			return &avsproto.UserTriggerTaskResp{
 				Result:      true,

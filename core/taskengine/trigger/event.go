@@ -36,10 +36,10 @@ type EventTrigger struct {
 	checks sync.Map
 
 	// channel that we will push the trigger information back
-	triggerCh chan TriggerMark[EventMark]
+	triggerCh chan TriggerMetadata[EventMark]
 }
 
-func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMark[EventMark]) *EventTrigger {
+func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark]) *EventTrigger {
 	var err error
 
 	logger, err := sdklogging.NewZapLogger(sdklogging.Production)
@@ -135,7 +135,7 @@ func (evt *EventTrigger) Run(ctx context.Context) error {
 					check := value.(*Check)
 					if hit, err := evt.Evaluate(&event, check.Program); err == nil && hit {
 						evt.logger.Info("check hit, notify aggregator", "task_id", key)
-						evt.triggerCh <- TriggerMark[EventMark]{
+						evt.triggerCh <- TriggerMetadata[EventMark]{
 							TaskID: key.(string),
 							Marker: EventMark{
 								BlockNumber: event.BlockNumber,

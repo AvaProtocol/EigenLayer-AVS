@@ -69,7 +69,7 @@ message NotifyTriggersReq {
   string signature = 2;
 
   string task_id = 3;
-  TriggerMark trigger_marker = 4;
+  TriggerMetadata trigger_metadata = 4;
 }
 
 message NotifyTriggersResp {
