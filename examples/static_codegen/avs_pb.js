@@ -9792,7 +9792,7 @@ proto.aggregator.UserTriggerTaskReq.toObject = function(includeInstance, msg) {
   var f, obj = {
     taskId: jspb.Message.getFieldWithDefault(msg, 1, ""),
     triggerMetadata: (f = msg.getTriggerMetadata()) && proto.aggregator.TriggerMetadata.toObject(includeInstance, f),
-    runInline: jspb.Message.getBooleanFieldWithDefault(msg, 3, false)
+    isBlocking: jspb.Message.getBooleanFieldWithDefault(msg, 3, false)
   };
 
   if (includeInstance) {
@@ -9840,7 +9840,7 @@ proto.aggregator.UserTriggerTaskReq.deserializeBinaryFromReader = function(msg, 
       break;
     case 3:
       var value = /** @type {boolean} */ (reader.readBool());
-      msg.setRunInline(value);
+      msg.setIsBlocking(value);
       break;
     default:
       reader.skipField();
@@ -9886,7 +9886,7 @@ proto.aggregator.UserTriggerTaskReq.serializeBinaryToWriter = function(message, 
       proto.aggregator.TriggerMetadata.serializeBinaryToWriter
     );
   }
-  f = message.getRunInline();
+  f = message.getIsBlocking();
   if (f) {
     writer.writeBool(
       3,
@@ -9952,10 +9952,10 @@ proto.aggregator.UserTriggerTaskReq.prototype.hasTriggerMetadata = function() {
 
 
 /**
- * optional bool run_inline = 3;
+ * optional bool is_blocking = 3;
  * @return {boolean}
  */
-proto.aggregator.UserTriggerTaskReq.prototype.getRunInline = function() {
+proto.aggregator.UserTriggerTaskReq.prototype.getIsBlocking = function() {
   return /** @type {boolean} */ (jspb.Message.getBooleanFieldWithDefault(this, 3, false));
 };
 
@@ -9964,7 +9964,7 @@ proto.aggregator.UserTriggerTaskReq.prototype.getRunInline = function() {
  * @param {boolean} value
  * @return {!proto.aggregator.UserTriggerTaskReq} returns this
  */
-proto.aggregator.UserTriggerTaskReq.prototype.setRunInline = function(value) {
+proto.aggregator.UserTriggerTaskReq.prototype.setIsBlocking = function(value) {
   return jspb.Message.setProto3BooleanField(this, 3, value);
 };
 

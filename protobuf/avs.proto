@@ -392,10 +392,10 @@ message GetWalletResp {
 message UserTriggerTaskReq {
   string task_id = 1;
   TriggerMetadata trigger_metadata = 2;
-  // when setting run_inline=true, the execution run in the same request. the request is blocked until the execution is done
+  // when setting is_blocking=true, the execution run in the same request. the request is blocked until the execution is done
   // setting to false, the task will be execute in our normal queueu system, and the request won't block.
   // default value is false, for interact testing, set this to true
-  bool run_inline = 3;
+  bool is_blocking = 3;
 }
 
 message UserTriggerTaskResp {
