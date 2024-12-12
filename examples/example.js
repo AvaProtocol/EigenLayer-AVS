@@ -187,7 +187,7 @@ async function triggerTask(owner, token, taskId, triggerMark) {
     "TriggerTask",
     // If want to run async, comment this line out
     //{ task_id: taskId, triggerMark, },
-    { task_id: taskId, triggerMark, run_inline: true },
+    { task_id: taskId, triggerMark, is_blocking: true },
     metadata
   );
 

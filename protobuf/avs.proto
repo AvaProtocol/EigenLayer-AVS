@@ -213,7 +213,7 @@ message Execution {
   bool   success = 4;
   string error   = 5;
 
-  TriggerMark trigger_mark = 6;
+  TriggerMetadata trigger_metadata = 6;
   // final return data of the whole execution of the task
   string result = 7;
 
@@ -363,14 +363,14 @@ message KeyResp {
 }
 
 
-// TriggerMark represent a lookup that we can use to identify when/where/how it is trigger
+// TriggerMetadata represent a lookup that we can use to identify when/where/how it is trigger
 // In a block trigger, we will have block_number
 // In an event trigger, we will have the log_index, tx_hash and the block_number
 // In a time based trigger(cron/fixed time) we will have the epoch.
 //
-// TriggerMark is used to populate the `trigger.data` variable. Example, if this is a transfer
+// TriggerMetadata is used to populate the `trigger.data` variable. Example, if this is a transfer
 // event, then you will have access to trigger1.data.from_address trigger1.data.value
-message TriggerMark {
+message TriggerMetadata {
   uint64 block_number = 1;
   uint64 log_index    = 2;
   string tx_hash      = 3;
@@ -391,11 +391,11 @@ message GetWalletResp {
 
 message UserTriggerTaskReq {
   string task_id = 1;
-  TriggerMark trigger_mark = 2;
-  // when setting run_inline=true, the execution run in the same request. the request is blocked until the execution is done
+  TriggerMetadata trigger_metadata = 2;
+  // when setting is_blocking=true, the execution run in the same request. the request is blocked until the execution is done
   // setting to false, the task will be execute in our normal queueu system, and the request won't block.
   // default value is false, for interact testing, set this to true
-  bool run_inline = 3;
+  bool is_blocking = 3;
 }
 
 message UserTriggerTaskResp {

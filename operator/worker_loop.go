@@ -52,10 +52,10 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		RpcURL:   o.config.TargetChain.EthRpcUrl,
 		WsRpcURL: o.config.TargetChain.EthWsUrl,
 	}
-	blockTriggerCh := make(chan triggerengine.TriggerMark[int64], 1000)
+	blockTriggerCh := make(chan triggerengine.TriggerMetadata[int64], 1000)
 	o.blockTrigger = triggerengine.NewBlockTrigger(&rpcConfig, blockTriggerCh)
 
-	eventTriggerCh := make(chan triggerengine.TriggerMark[triggerengine.EventMark], 1000)
+	eventTriggerCh := make(chan triggerengine.TriggerMetadata[triggerengine.EventMark], 1000)
 	o.eventTrigger = triggerengine.NewEventTrigger(&rpcConfig, eventTriggerCh)
 
 	o.blockTrigger.Run(ctx)
@@ -77,7 +77,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				Address:   o.config.OperatorAddress,
 				Signature: "pending",
 				TaskId:    triggerItem.TaskID,
-				TriggerMarker: &avspb.TriggerMark{
+				TriggerMetadata: &avspb.TriggerMetadata{
 					BlockNumber: uint64(triggerItem.Marker),
 				},
 			}); err == nil {
@@ -93,7 +93,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				Address:   o.config.OperatorAddress,
 				Signature: "pending",
 				TaskId:    triggerItem.TaskID,
-				TriggerMarker: &avspb.TriggerMark{
+				TriggerMetadata: &avspb.TriggerMetadata{
 					BlockNumber: uint64(triggerItem.Marker.BlockNumber),
 					LogIndex:    uint64(triggerItem.Marker.LogIndex),
 					TxHash:      triggerItem.Marker.TxHash,

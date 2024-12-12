@@ -59,20 +59,20 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 		return fmt.Errorf("fail to load task: %s", job.Name)
 	}
 
-	triggerMark := &avsproto.TriggerMark{}
+	triggerMetadata := &avsproto.TriggerMetadata{}
 	// A task executor data is the trigger mark
 	// ref: AggregateChecksResult
-	err = json.Unmarshal(job.Data, triggerMark)
+	err = json.Unmarshal(job.Data, triggerMetadata)
 	if err != nil {
 		return fmt.Errorf("error decode job payload when executing task: %s with job id %d", task.Id, job.ID)
 	}
 
-	_, err = x.RunTask(task, triggerMark)
+	_, err = x.RunTask(task, triggerMetadata)
 	return err
 }
 
-func (x *TaskExecutor) RunTask(task *model.Task, triggerMark *avsproto.TriggerMark) (*avsproto.Execution, error) {
-	vm, err := NewVMWithData(task.Id, triggerMark, task.Nodes, task.Edges)
+func (x *TaskExecutor) RunTask(task *model.Task, triggerMetadata *avsproto.TriggerMetadata) (*avsproto.Execution, error) {
+	vm, err := NewVMWithData(task.Id, triggerMetadata, task.Nodes, task.Edges)
 
 	if err != nil {
 		return nil, fmt.Errorf("vm failed to initialize: %w", err)
@@ -98,17 +98,17 @@ func (x *TaskExecutor) RunTask(task *model.Task, triggerMark *avsproto.TriggerMa
 	}
 
 	execution := &avsproto.Execution{
-		Id:          ulid.Make().String(),
-		StartAt:     t0.Unix(),
-		EndAt:       t1.Unix(),
-		Success:     err == nil,
-		Error:       "",
-		Steps:       vm.ExecutionLogs,
-		TriggerMark: triggerMark,
+		Id:              ulid.Make().String(),
+		StartAt:         t0.Unix(),
+		EndAt:           t1.Unix(),
+		Success:         err == nil,
+		Error:           "",
+		Steps:           vm.ExecutionLogs,
+		TriggerMetadata: triggerMetadata,
 	}
 
 	if runTaskErr != nil {
-		x.logger.Error("error executing task", "error", err, "task_id", task.Id, "triggermark", triggerMark)
+		x.logger.Error("error executing task", "error", err, "task_id", task.Id, "triggermark", triggerMetadata)
 		execution.Error = runTaskErr.Error()
 	}
 
@@ -129,7 +129,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, triggerMark *avsproto.TriggerMa
 	}
 
 	if runTaskErr == nil {
-		x.logger.Info("succesfully executing task", "task_id", task.Id, "triggermark", triggerMark)
+		x.logger.Info("succesfully executing task", "task_id", task.Id, "triggermark", triggerMetadata)
 		return execution, nil
 	}
 	return execution, fmt.Errorf("Error executing task %s %v", task.Id, runTaskErr)

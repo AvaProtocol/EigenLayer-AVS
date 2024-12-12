@@ -27,28 +27,6 @@ function deserialize_aggregator_CreateTaskResp(buffer_arg) {
   return avs_pb.CreateTaskResp.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
-function serialize_aggregator_CreateWalletReq(arg) {
-  if (!(arg instanceof avs_pb.CreateWalletReq)) {
-    throw new Error('Expected argument of type aggregator.CreateWalletReq');
-  }
-  return Buffer.from(arg.serializeBinary());
-}
-
-function deserialize_aggregator_CreateWalletReq(buffer_arg) {
-  return avs_pb.CreateWalletReq.deserializeBinary(new Uint8Array(buffer_arg));
-}
-
-function serialize_aggregator_CreateWalletResp(arg) {
-  if (!(arg instanceof avs_pb.CreateWalletResp)) {
-    throw new Error('Expected argument of type aggregator.CreateWalletResp');
-  }
-  return Buffer.from(arg.serializeBinary());
-}
-
-function deserialize_aggregator_CreateWalletResp(buffer_arg) {
-  return avs_pb.CreateWalletResp.deserializeBinary(new Uint8Array(buffer_arg));
-}
-
 function serialize_aggregator_GetKeyReq(arg) {
   if (!(arg instanceof avs_pb.GetKeyReq)) {
     throw new Error('Expected argument of type aggregator.GetKeyReq');
@@ -58,6 +36,28 @@ function serialize_aggregator_GetKeyReq(arg) {
 
 function deserialize_aggregator_GetKeyReq(buffer_arg) {
   return avs_pb.GetKeyReq.deserializeBinary(new Uint8Array(buffer_arg));
+}
+
+function serialize_aggregator_GetWalletReq(arg) {
+  if (!(arg instanceof avs_pb.GetWalletReq)) {
+    throw new Error('Expected argument of type aggregator.GetWalletReq');
+  }
+  return Buffer.from(arg.serializeBinary());
+}
+
+function deserialize_aggregator_GetWalletReq(buffer_arg) {
+  return avs_pb.GetWalletReq.deserializeBinary(new Uint8Array(buffer_arg));
+}
+
+function serialize_aggregator_GetWalletResp(arg) {
+  if (!(arg instanceof avs_pb.GetWalletResp)) {
+    throw new Error('Expected argument of type aggregator.GetWalletResp');
+  }
+  return Buffer.from(arg.serializeBinary());
+}
+
+function deserialize_aggregator_GetWalletResp(buffer_arg) {
+  return avs_pb.GetWalletResp.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
 function serialize_aggregator_IdReq(arg) {
@@ -240,16 +240,16 @@ getNonce: {
     responseSerialize: serialize_aggregator_NonceResp,
     responseDeserialize: deserialize_aggregator_NonceResp,
   },
-  createWallet: {
-    path: '/aggregator.Aggregator/CreateWallet',
+  getWallet: {
+    path: '/aggregator.Aggregator/GetWallet',
     requestStream: false,
     responseStream: false,
-    requestType: avs_pb.CreateWalletReq,
-    responseType: avs_pb.CreateWalletResp,
-    requestSerialize: serialize_aggregator_CreateWalletReq,
-    requestDeserialize: deserialize_aggregator_CreateWalletReq,
-    responseSerialize: serialize_aggregator_CreateWalletResp,
-    responseDeserialize: deserialize_aggregator_CreateWalletResp,
+    requestType: avs_pb.GetWalletReq,
+    responseType: avs_pb.GetWalletResp,
+    requestSerialize: serialize_aggregator_GetWalletReq,
+    requestDeserialize: deserialize_aggregator_GetWalletReq,
+    responseSerialize: serialize_aggregator_GetWalletResp,
+    responseDeserialize: deserialize_aggregator_GetWalletResp,
   },
   listWallets: {
     path: '/aggregator.Aggregator/ListWallets',

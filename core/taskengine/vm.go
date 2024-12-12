@@ -75,7 +75,7 @@ func (v *VM) Reset() {
 	v.instructionCount = 0
 }
 
-func NewVMWithData(taskID string, triggerMark *avsproto.TriggerMark, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge) (*VM, error) {
+func NewVMWithData(taskID string, triggerMetadata *avsproto.TriggerMetadata, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge) (*VM, error) {
 	v := &VM{
 		Status:           VMStateInitialize,
 		TaskEdges:        edges,
@@ -92,24 +92,24 @@ func NewVMWithData(taskID string, triggerMark *avsproto.TriggerMark, nodes []*av
 	v.vars = macros.GetEnvs(map[string]any{})
 
 	// popular trigger data for trigger variable
-	if triggerMark != nil && triggerMark.LogIndex > 0 && triggerMark.TxHash != "" {
+	if triggerMetadata != nil && triggerMetadata.LogIndex > 0 && triggerMetadata.TxHash != "" {
 		// if it contains event, we need to fetch and pop
-		receipt, err := rpcConn.TransactionReceipt(context.Background(), common.HexToHash(triggerMark.TxHash))
+		receipt, err := rpcConn.TransactionReceipt(context.Background(), common.HexToHash(triggerMetadata.TxHash))
 		if err != nil {
 			return nil, err
 		}
 
 		var event *types.Log
-		//event := receipt.Logs[triggerMark.LogIndex]
+		//event := receipt.Logs[triggerMetadata.LogIndex]
 
 		for _, l := range receipt.Logs {
-			if uint64(l.Index) == triggerMark.LogIndex {
+			if uint64(l.Index) == triggerMetadata.LogIndex {
 				event = l
 			}
 		}
 
 		if event == nil {
-			return nil, fmt.Errorf("tx %s doesn't content event %d", triggerMark.TxHash, triggerMark.LogIndex)
+			return nil, fmt.Errorf("tx %s doesn't content event %d", triggerMetadata.TxHash, triggerMetadata.LogIndex)
 		}
 
 		tokenMetadata, err := GetMetadataForTransfer(event)
