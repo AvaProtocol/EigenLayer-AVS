@@ -27,7 +27,7 @@ type AggregatorClient interface {
 	GetKey(ctx context.Context, in *GetKeyReq, opts ...grpc.CallOption) (*KeyResp, error)
 	// Smart Acccount Operation
 	GetNonce(ctx context.Context, in *NonceRequest, opts ...grpc.CallOption) (*NonceResp, error)
-	CreateWallet(ctx context.Context, in *CreateWalletReq, opts ...grpc.CallOption) (*CreateWalletResp, error)
+	GetWallet(ctx context.Context, in *GetWalletReq, opts ...grpc.CallOption) (*GetWalletResp, error)
 	ListWallets(ctx context.Context, in *ListWalletReq, opts ...grpc.CallOption) (*ListWalletResp, error)
 	// Task Management Operation
 	CreateTask(ctx context.Context, in *CreateTaskReq, opts ...grpc.CallOption) (*CreateTaskResp, error)
@@ -65,9 +65,9 @@ func (c *aggregatorClient) GetNonce(ctx context.Context, in *NonceRequest, opts 
 	return out, nil
 }
 
-func (c *aggregatorClient) CreateWallet(ctx context.Context, in *CreateWalletReq, opts ...grpc.CallOption) (*CreateWalletResp, error) {
-	out := new(CreateWalletResp)
-	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/CreateWallet", in, out, opts...)
+func (c *aggregatorClient) GetWallet(ctx context.Context, in *GetWalletReq, opts ...grpc.CallOption) (*GetWalletResp, error) {
+	out := new(GetWalletResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/GetWallet", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ type AggregatorServer interface {
 	GetKey(context.Context, *GetKeyReq) (*KeyResp, error)
 	// Smart Acccount Operation
 	GetNonce(context.Context, *NonceRequest) (*NonceResp, error)
-	CreateWallet(context.Context, *CreateWalletReq) (*CreateWalletResp, error)
+	GetWallet(context.Context, *GetWalletReq) (*GetWalletResp, error)
 	ListWallets(context.Context, *ListWalletReq) (*ListWalletResp, error)
 	// Task Management Operation
 	CreateTask(context.Context, *CreateTaskReq) (*CreateTaskResp, error)
@@ -177,8 +177,8 @@ func (UnimplementedAggregatorServer) GetKey(context.Context, *GetKeyReq) (*KeyRe
 func (UnimplementedAggregatorServer) GetNonce(context.Context, *NonceRequest) (*NonceResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetNonce not implemented")
 }
-func (UnimplementedAggregatorServer) CreateWallet(context.Context, *CreateWalletReq) (*CreateWalletResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreateWallet not implemented")
+func (UnimplementedAggregatorServer) GetWallet(context.Context, *GetWalletReq) (*GetWalletResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetWallet not implemented")
 }
 func (UnimplementedAggregatorServer) ListWallets(context.Context, *ListWalletReq) (*ListWalletResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWallets not implemented")
@@ -253,20 +253,20 @@ func _Aggregator_GetNonce_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Aggregator_CreateWallet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateWalletReq)
+func _Aggregator_GetWallet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetWalletReq)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AggregatorServer).CreateWallet(ctx, in)
+		return srv.(AggregatorServer).GetWallet(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/aggregator.Aggregator/CreateWallet",
+		FullMethod: "/aggregator.Aggregator/GetWallet",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AggregatorServer).CreateWallet(ctx, req.(*CreateWalletReq))
+		return srv.(AggregatorServer).GetWallet(ctx, req.(*GetWalletReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -431,8 +431,8 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Aggregator_GetNonce_Handler,
 		},
 		{
-			MethodName: "CreateWallet",
-			Handler:    _Aggregator_CreateWallet_Handler,
+			MethodName: "GetWallet",
+			Handler:    _Aggregator_GetWallet_Handler,
 		},
 		{
 			MethodName: "ListWallets",

@@ -44,7 +44,7 @@ type RpcServer struct {
 }
 
 // Get nonce of an existing smart wallet of a given owner
-func (r *RpcServer) CreateWallet(ctx context.Context, payload *avsproto.CreateWalletReq) (*avsproto.CreateWalletResp, error) {
+func (r *RpcServer) GetWallet(ctx context.Context, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
 	user, err := r.verifyAuth(ctx)
 
 	if err != nil {
