@@ -38,6 +38,10 @@ type Step struct {
 	Next   []string
 }
 
+type CommonProcessor struct {
+	vm *VM
+}
+
 // The VM is the core component that load the node information and execute them, yield finaly result
 type VM struct {
 	// Input raw task data
@@ -101,59 +105,65 @@ func NewVMWithData(taskID string, triggerMetadata *avsproto.TriggerMetadata, nod
 	v.vars = macros.GetEnvs(map[string]any{})
 
 	// popular trigger data for trigger variable
-	if triggerMetadata != nil && triggerMetadata.LogIndex > 0 && triggerMetadata.TxHash != "" {
-		// if it contains event, we need to fetch and pop
-		receipt, err := rpcConn.TransactionReceipt(context.Background(), common.HexToHash(triggerMetadata.TxHash))
-		if err != nil {
-			return nil, err
-		}
+	if triggerMetadata != nil {
+		if triggerMetadata.LogIndex > 0 && triggerMetadata.TxHash != "" {
+			// if it contains event, we need to fetch and pop
+			receipt, err := rpcConn.TransactionReceipt(context.Background(), common.HexToHash(triggerMetadata.TxHash))
+			if err != nil {
+				return nil, err
+			}
 
-		var event *types.Log
-		//event := receipt.Logs[triggerMetadata.LogIndex]
+			var event *types.Log
+			//event := receipt.Logs[triggerMetadata.LogIndex]
 
-		for _, l := range receipt.Logs {
-			if uint64(l.Index) == triggerMetadata.LogIndex {
-				event = l
+			for _, l := range receipt.Logs {
+				if uint64(l.Index) == triggerMetadata.LogIndex {
+					event = l
+				}
+			}
+
+			if event == nil {
+				return nil, fmt.Errorf("tx %s doesn't content event %d", triggerMetadata.TxHash, triggerMetadata.LogIndex)
+			}
+
+			tokenMetadata, err := GetMetadataForTransfer(event)
+			ef, err := erc20.NewErc20(event.Address, nil)
+
+			blockHeader, err := GetBlock(event.BlockNumber)
+			if err != nil {
+				return nil, fmt.Errorf("RPC error getting block header. Retry: %w", err)
+			}
+
+			parseTransfer, err := ef.ParseTransfer(*event)
+			formattedValue := ToDecimal(parseTransfer.Value, int(tokenMetadata.Decimals)).String()
+
+			// TODO: Implement a decoder to help standarize common event
+			v.vars["trigger1"] = map[string]interface{}{
+				"data": map[string]interface{}{
+					"topics": godash.Map(event.Topics, func(topic common.Hash) string {
+						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+					}),
+					"data": "0x" + common.Bytes2Hex(event.Data),
+
+					"token_name":        tokenMetadata.Name,
+					"token_symbol":      tokenMetadata.Symbol,
+					"token_decimals":    tokenMetadata.Decimals,
+					"transaction_hash":  event.TxHash,
+					"address":           strings.ToLower(event.Address.Hex()),
+					"block_number":      event.BlockNumber,
+					"block_timestamp":   blockHeader.Time,
+					"from_address":      parseTransfer.From.String(),
+					"to_address":        parseTransfer.To.String(),
+					"value":             parseTransfer.Value.String(),
+					"value_formatted":   formattedValue,
+					"transaction_index": event.TxIndex,
+				},
 			}
 		}
 
-		if event == nil {
-			return nil, fmt.Errorf("tx %s doesn't content event %d", triggerMetadata.TxHash, triggerMetadata.LogIndex)
+		if triggerMetadata.Epoch > 0 {
+			v.vars["trigger1"]["epoch"] = triggerMetadata.Epoch
 		}
-
-		tokenMetadata, err := GetMetadataForTransfer(event)
-		ef, err := erc20.NewErc20(event.Address, nil)
-
-		blockHeader, err := GetBlock(event.BlockNumber)
-		if err != nil {
-			return nil, fmt.Errorf("RPC error getting block header. Retry: %w", err)
-		}
-
-		parseTransfer, err := ef.ParseTransfer(*event)
-		formattedValue := ToDecimal(parseTransfer.Value, int(tokenMetadata.Decimals)).String()
-
-		v.vars["trigger1"] = map[string]interface{}{
-			"data": map[string]interface{}{
-				"topics": godash.Map(event.Topics, func(topic common.Hash) string {
-					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
-				}),
-				"data": "0x" + common.Bytes2Hex(event.Data),
-
-				"token_name":        tokenMetadata.Name,
-				"token_symbol":      tokenMetadata.Symbol,
-				"token_decimals":    tokenMetadata.Decimals,
-				"transaction_hash":  event.TxHash,
-				"address":           strings.ToLower(event.Address.Hex()),
-				"block_number":      event.BlockNumber,
-				"block_timestamp":   blockHeader.Time,
-				"from_address":      parseTransfer.From.String(),
-				"to_address":        parseTransfer.To.String(),
-				"value":             parseTransfer.Value.String(),
-				"value_formatted":   formattedValue,
-				"transaction_index": event.TxIndex,
-			},
-		}
-
 	}
 
 	return v, nil
@@ -312,7 +322,7 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 }
 
 func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, error) {
-	g, err := NewGraphqlQueryProcessor(node.Url)
+	g, err := NewGraphqlQueryProcessor(v, node.Url)
 	if err != nil {
 		return nil, err
 	}

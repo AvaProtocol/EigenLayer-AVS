@@ -16,16 +16,18 @@ import (
 )
 
 type ContractReadProcessor struct {
+	*CommonProcessor
 	client *ethclient.Client
 }
 
-func NewContractReadProcessor(client *ethclient.Client) *ContractReadProcessor {
+func NewContractReadProcessor(vm *VM, client *ethclient.Client) *ContractReadProcessor {
 	return &ContractReadProcessor{
 		client: client,
+		vm:     vm,
 	}
 }
 
-func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractReadNode) (*avsproto.Execution_Step, error) {
+func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractReadNode) (*avsproto.Execution_Step, anyerror) {
 	ctx := context.Background()
 	t0 := time.Now().Unix()
 	s := &avsproto.Execution_Step{

@@ -13,6 +13,8 @@ import (
 )
 
 type GraphqlQueryProcessor struct {
+	*CommonProcessor
+
 	client *graphql.Client
 	sb     *strings.Builder
 	url    *url.URL
