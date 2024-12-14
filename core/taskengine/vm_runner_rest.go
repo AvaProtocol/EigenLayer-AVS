@@ -83,6 +83,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	s.Log = log.String()
 
 	s.OutputData = string(resp.Body())
+
 	if err != nil {
 		s.Success = false
 		s.Error = err.Error()

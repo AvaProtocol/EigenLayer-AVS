@@ -7,8 +7,10 @@ import (
 	"sync"
 	"time"
 
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/dop251/goja"
 	"github.com/ginkgoch/godash/v2"
+	"github.com/pingcap/log"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -36,6 +38,10 @@ type Step struct {
 	Next   []string
 }
 
+type CommonProcessor struct {
+	vm *VM
+}
+
 // The VM is the core component that load the node information and execute them, yield finaly result
 type VM struct {
 	// Input raw task data
@@ -55,6 +61,8 @@ type VM struct {
 	plans            map[string]*Step
 	entrypoint       string
 	instructionCount int64
+
+	logger sdklogging.Logger
 }
 
 func NewVM() (*VM, error) {
@@ -75,6 +83,11 @@ func (v *VM) Reset() {
 	v.instructionCount = 0
 }
 
+func (v *VM) GetNodeNameAsVar(nodeID string) string {
+	name := v.TaskNodes[nodeID].Name
+	return name
+}
+
 func NewVMWithData(taskID string, triggerMetadata *avsproto.TriggerMetadata, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge) (*VM, error) {
 	v := &VM{
 		Status:           VMStateInitialize,
@@ -92,59 +105,65 @@ func NewVMWithData(taskID string, triggerMetadata *avsproto.TriggerMetadata, nod
 	v.vars = macros.GetEnvs(map[string]any{})
 
 	// popular trigger data for trigger variable
-	if triggerMetadata != nil && triggerMetadata.LogIndex > 0 && triggerMetadata.TxHash != "" {
-		// if it contains event, we need to fetch and pop
-		receipt, err := rpcConn.TransactionReceipt(context.Background(), common.HexToHash(triggerMetadata.TxHash))
-		if err != nil {
-			return nil, err
-		}
+	if triggerMetadata != nil {
+		if triggerMetadata.LogIndex > 0 && triggerMetadata.TxHash != "" {
+			// if it contains event, we need to fetch and pop
+			receipt, err := rpcConn.TransactionReceipt(context.Background(), common.HexToHash(triggerMetadata.TxHash))
+			if err != nil {
+				return nil, err
+			}
 
-		var event *types.Log
-		//event := receipt.Logs[triggerMetadata.LogIndex]
+			var event *types.Log
+			//event := receipt.Logs[triggerMetadata.LogIndex]
 
-		for _, l := range receipt.Logs {
-			if uint64(l.Index) == triggerMetadata.LogIndex {
-				event = l
+			for _, l := range receipt.Logs {
+				if uint64(l.Index) == triggerMetadata.LogIndex {
+					event = l
+				}
+			}
+
+			if event == nil {
+				return nil, fmt.Errorf("tx %s doesn't content event %d", triggerMetadata.TxHash, triggerMetadata.LogIndex)
+			}
+
+			tokenMetadata, err := GetMetadataForTransfer(event)
+			ef, err := erc20.NewErc20(event.Address, nil)
+
+			blockHeader, err := GetBlock(event.BlockNumber)
+			if err != nil {
+				return nil, fmt.Errorf("RPC error getting block header. Retry: %w", err)
+			}
+
+			parseTransfer, err := ef.ParseTransfer(*event)
+			formattedValue := ToDecimal(parseTransfer.Value, int(tokenMetadata.Decimals)).String()
+
+			// TODO: Implement a decoder to help standarize common event
+			v.vars["trigger1"] = map[string]interface{}{
+				"data": map[string]interface{}{
+					"topics": godash.Map(event.Topics, func(topic common.Hash) string {
+						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+					}),
+					"data": "0x" + common.Bytes2Hex(event.Data),
+
+					"token_name":        tokenMetadata.Name,
+					"token_symbol":      tokenMetadata.Symbol,
+					"token_decimals":    tokenMetadata.Decimals,
+					"transaction_hash":  event.TxHash,
+					"address":           strings.ToLower(event.Address.Hex()),
+					"block_number":      event.BlockNumber,
+					"block_timestamp":   blockHeader.Time,
+					"from_address":      parseTransfer.From.String(),
+					"to_address":        parseTransfer.To.String(),
+					"value":             parseTransfer.Value.String(),
+					"value_formatted":   formattedValue,
+					"transaction_index": event.TxIndex,
+				},
 			}
 		}
 
-		if event == nil {
-			return nil, fmt.Errorf("tx %s doesn't content event %d", triggerMetadata.TxHash, triggerMetadata.LogIndex)
+		if triggerMetadata.Epoch > 0 {
+			v.vars["trigger1"]["epoch"] = triggerMetadata.Epoch
 		}
-
-		tokenMetadata, err := GetMetadataForTransfer(event)
-		ef, err := erc20.NewErc20(event.Address, nil)
-
-		blockHeader, err := GetBlock(event.BlockNumber)
-		if err != nil {
-			return nil, fmt.Errorf("RPC error getting block header. Retry: %w", err)
-		}
-
-		parseTransfer, err := ef.ParseTransfer(*event)
-		formattedValue := ToDecimal(parseTransfer.Value, int(tokenMetadata.Decimals)).String()
-
-		v.vars["trigger1"] = map[string]interface{}{
-			"data": map[string]interface{}{
-				"topics": godash.Map(event.Topics, func(topic common.Hash) string {
-					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
-				}),
-				"data": "0x" + common.Bytes2Hex(event.Data),
-
-				"token_name":        tokenMetadata.Name,
-				"token_symbol":      tokenMetadata.Symbol,
-				"token_decimals":    tokenMetadata.Decimals,
-				"transaction_hash":  event.TxHash,
-				"address":           strings.ToLower(event.Address.Hex()),
-				"block_number":      event.BlockNumber,
-				"block_timestamp":   blockHeader.Time,
-				"from_address":      parseTransfer.From.String(),
-				"to_address":        parseTransfer.To.String(),
-				"value":             parseTransfer.Value.String(),
-				"value_formatted":   formattedValue,
-				"transaction_index": event.TxIndex,
-			},
-		}
-
 	}
 
 	return v, nil
@@ -247,7 +266,7 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 		p := NewRestProrcessor()
 
 		// only evaluate string when there is string interpolation
-		if nodeValue.Body != "" && strings.Contains(nodeValue.Body, "$") {
+		if nodeValue.Body != "" && (strings.Contains(nodeValue.Body, "$") || strings.Contains(nodeValue.Body, "`")) {
 			nodeValue2 := &avsproto.RestAPINode{
 				Url:     macros.RenderString(nodeValue.Url, macroEnvs),
 				Headers: nodeValue.Headers,
@@ -255,15 +274,21 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 				Body:    strings.Clone(nodeValue.Body),
 			}
 			vm := goja.New()
-			// TODO: dynamically set var instead of hardcode the name
-			// client would need to send this over
-			vm.Set("trigger1", v.vars["trigger1"])
+
+			for key, value := range v.vars {
+				vm.Set(key, map[string]any{
+					"data": value,
+				})
+			}
 
 			renderBody, err := vm.RunString(nodeValue.Body)
 			if err == nil {
 				nodeValue2.Body = renderBody.Export().(string)
+			} else {
+				fmt.Println("error render string with goja", err)
 			}
-			executionLog, err = p.Execute(node.Id, nodeValue2)
+			executionLog, result, err = p.Execute(node.Id, nodeValue2)
+			v.vars[v.GetNodeNameAsVar(stepID)] = result
 		} else {
 			executionLog, err = p.Execute(node.Id, nodeValue)
 		}
@@ -289,9 +314,26 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 				}
 			}
 		}
+	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
+		executionLog, err = v.runGraphQL(node.Id, nodeValue)
 	}
 
 	return executionLog, err
+}
+
+func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, error) {
+	g, err := NewGraphqlQueryProcessor(v, node.Url)
+	if err != nil {
+		return nil, err
+	}
+	executionLog, result, err := g.Execute(stepID, node)
+	v.vars[v.GetNodeNameAsVar(stepID)] = result
+	if err != nil {
+		log.Error("error execute graphql node", "task_id", v.TaskID, "step", node.Id, "url", node.Url, "error", err)
+	}
+	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
+
+	return executionLog, nil
 }
 
 func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Execution_Step, string, error) {

@@ -13,6 +13,8 @@ import (
 )
 
 type GraphqlQueryProcessor struct {
+	*CommonProcessor
+
 	client *graphql.Client
 	sb     *strings.Builder
 	url    *url.URL
@@ -42,7 +44,7 @@ func NewGraphqlQueryProcessor(endpoint string) (*GraphqlQueryProcessor, error) {
 	}, nil
 }
 
-func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, error) {
+func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, any, error) {
 	ctx := context.Background()
 	t0 := time.Now().Unix()
 	step := &avsproto.Execution_Step{
@@ -68,11 +70,11 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	query := graphql.NewRequest(node.Query)
 	err = r.client.Run(ctx, query, &resp)
 	if err != nil {
-		return step, err
+		return step, nil, err
 	}
 
 	step.Log = r.sb.String()
 	data, err := json.Marshal(resp)
 	step.OutputData = string(data)
-	return step, err
+	return step, resp, err
 }
