@@ -74,6 +74,8 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 func (x *TaskExecutor) RunTask(task *model.Task, triggerMetadata *avsproto.TriggerMetadata) (*avsproto.Execution, error) {
 	vm, err := NewVMWithData(task.Id, triggerMetadata, task.Nodes, task.Edges)
 
+	initialTaskStatus := task.Status
+
 	if err != nil {
 		return nil, fmt.Errorf("vm failed to initialize: %w", err)
 	}
@@ -126,6 +128,13 @@ func (x *TaskExecutor) RunTask(task *model.Task, triggerMetadata *avsproto.Trigg
 	if err = x.db.BatchWrite(updates); err != nil {
 		// TODO Monitor to see how often this happen
 		x.logger.Errorf("error updating task status. %w", err, "task_id", task.Id)
+	}
+
+	// whenever a task change its status, we moved it, therefore we will need to clean up the old storage
+	if task.Status != initialTaskStatus {
+		if err = x.db.Delete(TaskStorageKey(task.Id, initialTaskStatus)); err != nil {
+			x.logger.Errorf("error updating task status. %w", err, "task_id", task.Id)
+		}
 	}
 
 	if runTaskErr == nil {
