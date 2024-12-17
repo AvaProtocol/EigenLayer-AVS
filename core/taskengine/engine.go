@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -557,16 +558,28 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 
 // List Execution for a given task id
 func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
-	task, err := n.GetTaskByID(payload.Id)
-	if err != nil {
-		return nil, err
+	// Validate all tasks own by the caller
+	for _, id := range payload.TaskIds {
+		task, err := n.GetTaskByID(id)
+		if err != nil {
+			return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+		}
+
+		if !task.OwnedBy(user.Address) {
+			return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+		}
 	}
 
-	if !task.OwnedBy(user.Address) {
-		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
-	}
+	executionKeys, err := n.db.ListKeysMulti(payload.TaskIds)
 
-	executionKVs, err := n.db.GetByPrefix(TaskExecutionPrefix(task.Id))
+	fmt.Println("keys", executionKeys)
+
+	// second, do the sort, this is key sorted by ordering of ther insertion
+	slices.SortFunc(executionKeys, func(a, b string) int {
+		id1 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(a))))
+		id2 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(b))))
+		return id1.Compare(id2)
+	})
 
 	if err != nil {
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
@@ -584,14 +597,19 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	if itemPerPage == 0 {
 		itemPerPage = DefaultItemPerPage
 	}
-	for _, kv := range executionKVs {
-		executionUlid := ulid.MustParse(string(ExecutionIdFromStorageKey(kv.Key)))
+	for _, key := range executionKeys {
+		executionUlid := ulid.MustParse(ExecutionIdFromStorageKey([]byte(key)))
 		if !cursor.AfterUlid(executionUlid) {
 			continue
 		}
 
+		executionValue, err := n.db.GetKey([]byte(key))
+		if err != nil {
+			continue
+		}
+
 		exec := avsproto.Execution{}
-		if err := protojson.Unmarshal(kv.Value, &exec); err == nil {
+		if err := protojson.Unmarshal(executionValue, &exec); err == nil {
 			executioResp.Items = append(executioResp.Items, &exec)
 			total += 1
 		}

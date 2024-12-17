@@ -339,10 +339,11 @@ message ListTasksResp {
 
   repeated Item items = 1;
   string cursor = 2;
+  bool hasMore = 3;
 }
 
 message ListExecutionsReq {
-  string id = 1;
+  repeated string task_ids = 1;
   string cursor = 2;
   int64 item_per_page = 3;
 }
@@ -350,6 +351,7 @@ message ListExecutionsReq {
 message ListExecutionsResp {
   repeated Execution items = 1;
   string cursor = 2;
+  bool hasMore = 4;
 }
 
 message GetKeyReq {

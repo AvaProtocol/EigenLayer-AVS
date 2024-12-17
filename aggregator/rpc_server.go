@@ -169,7 +169,7 @@ func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListEx
 
 	r.config.Logger.Info("process list execution",
 		"user", user.Address.String(),
-		"task_id", payload.Id,
+		"task_id", payload.TaskIds,
 	)
 	return r.engine.ListExecutions(user, payload)
 }
