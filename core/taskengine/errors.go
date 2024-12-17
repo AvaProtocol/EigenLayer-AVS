@@ -18,4 +18,7 @@ const (
 
 	TaskStorageCorruptedError = "task data storage is corrupted"
 	TaskIDMissing             = "Missing task id in request"
+
+	InvalidCursor          = "cursor is not valid"
+	InvalidPaginationParam = "item per page is not valid"
 )

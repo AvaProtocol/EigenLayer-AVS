@@ -116,7 +116,7 @@ async function listTask(owner, token) {
     client,
     "ListTasks",
     {
-      smart_wallet_address: process.argv[3],
+      smart_wallet_address: process.argv[3].split(","),
       cursor: process.argv[4] || "",
       item_per_page: 2,
     },
@@ -140,11 +140,11 @@ async function getTask(owner, token, taskId) {
   console.log(util.inspect(result, { depth: 4, colors: true }));
 }
 
-async function listExecutions(owner, token, taskId) {
+async function listExecutions(owner, token, ids) {
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
 
-  const result = await asyncRPC(client, "ListExecutions", { id: taskId, cursor: process.argv[4] || "", item_per_page: 200 }, metadata);
+  const result = await asyncRPC(client, "ListExecutions", { task_ids: ids.split(","), cursor: process.argv[4] || "", item_per_page: 200 }, metadata);
 
   console.log(util.inspect(result, { depth: 4, colors: true }));
 }
@@ -261,7 +261,7 @@ const createWallet = async (owner, token, salt, factoryAddress) => {
 
   return await asyncRPC(
     client,
-    "CreateWallet",
+    "GetWallet",
     { salt, factoryAddress },
     metadata
   );
@@ -391,7 +391,7 @@ const main = async (cmd) => {
 
       create-wallet <salt> <factory-address(optional)>: to create a smart wallet with a salt, and optionally a factory contract
       wallet:                                 to list smart wallet address that has been created. note that a default wallet with salt=0 will automatically created
-      tasks <smart-wallet-address>:           to list all tasks of given smart wallet address
+      tasks <smart-wallet-address>,<another-smart-wallet>,...:           to list all tasks of given smart wallet address
       get <task-id>:                          to get task detail. a permission error is throw if the eoa isn't the smart wallet owner.
       executions <task-id>:                   to get task execution history. a permission error is throw if the eoa isn't the smart wallet owner.
       schedule <smart-wallet-address>:        to schedule a task that run on every block, with chainlink eth-usd its condition will be matched quickly

@@ -33,6 +33,10 @@ func CursorFromString(data string) (*Cursor, error) {
 		ulidPos:   ulid.Zero,
 	}
 
+	if data == "" {
+		return c, nil
+	}
+
 	decoded, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
 		return c, err
@@ -54,6 +58,11 @@ func NewCursor(direction CursorDirection, position string) *Cursor {
 		int64Pos: 0,
 	}
 }
+
+func (c *Cursor) IsZero() bool {
+	return c.Position == "0"
+}
+
 func (c *Cursor) String() string {
 	var d []byte
 	d, err := json.Marshal(c)
@@ -68,7 +77,7 @@ func (c *Cursor) String() string {
 }
 
 // Given a value, return true if the value is after the cursor
-func (c *Cursor) AfterInt64(value int64) bool {
+func (c *Cursor) LessThanInt64(value int64) bool {
 	if !c.parsePos {
 		c.int64Pos, _ = strconv.ParseInt(c.Position, 10, 64)
 		c.parsePos = true
@@ -81,7 +90,7 @@ func (c *Cursor) AfterInt64(value int64) bool {
 }
 
 // Given a value, return true if the value is after the cursor
-func (c *Cursor) AfterUlid(value ulid.ULID) bool {
+func (c *Cursor) LessThanUlid(value ulid.ULID) bool {
 	if !c.parsePos {
 		var err error
 		c.ulidPos, err = ulid.Parse(c.Position)
@@ -94,4 +103,33 @@ func (c *Cursor) AfterUlid(value ulid.ULID) bool {
 		return c.ulidPos.Compare(value) < 0
 	}
 	return c.ulidPos.Compare(value) > 0
+}
+
+// Given a value, return true if the value is after the cursor
+func (c *Cursor) LessThanOrEqualInt64(value int64) bool {
+	if !c.parsePos {
+		c.int64Pos, _ = strconv.ParseInt(c.Position, 10, 64)
+		c.parsePos = true
+	}
+	if c.Direction == CursorDirectionNext {
+		return c.int64Pos <= value
+	}
+
+	return c.int64Pos >= value
+}
+
+// Given a value, return true if the value is after the cursor
+func (c *Cursor) LessThanOrEqualUlid(value ulid.ULID) bool {
+	if !c.parsePos {
+		var err error
+		c.ulidPos, err = ulid.Parse(c.Position)
+		if err != nil {
+			c.ulidPos = ulid.Zero
+		}
+		c.parsePos = true
+	}
+	if c.Direction == CursorDirectionNext {
+		return c.ulidPos.Compare(value) <= 0
+	}
+	return c.ulidPos.Compare(value) >= 0
 }

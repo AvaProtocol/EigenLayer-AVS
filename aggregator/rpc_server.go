@@ -157,6 +157,7 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 	r.config.Logger.Info("process list task",
 		"user", user.Address.String(),
 		"smart_wallet_address", payload.SmartWalletAddress,
+		"cursor", payload.Cursor,
 	)
 	return r.engine.ListTasksByUser(user, payload)
 }
@@ -169,7 +170,8 @@ func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListEx
 
 	r.config.Logger.Info("process list execution",
 		"user", user.Address.String(),
-		"task_id", payload.Id,
+		"task_id", payload.TaskIds,
+		"cursor", payload.Cursor,
 	)
 	return r.engine.ListExecutions(user, payload)
 }

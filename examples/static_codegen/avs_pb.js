@@ -668,7 +668,7 @@ if (goog.DEBUG && !COMPILED) {
  * @constructor
  */
 proto.aggregator.ListTasksReq = function(opt_data) {
-  jspb.Message.initialize(this, opt_data, 0, -1, null, null);
+  jspb.Message.initialize(this, opt_data, 0, -1, proto.aggregator.ListTasksReq.repeatedFields_, null);
 };
 goog.inherits(proto.aggregator.ListTasksReq, jspb.Message);
 if (goog.DEBUG && !COMPILED) {
@@ -731,7 +731,7 @@ if (goog.DEBUG && !COMPILED) {
  * @constructor
  */
 proto.aggregator.ListExecutionsReq = function(opt_data) {
-  jspb.Message.initialize(this, opt_data, 0, -1, null, null);
+  jspb.Message.initialize(this, opt_data, 0, -1, proto.aggregator.ListExecutionsReq.repeatedFields_, null);
 };
 goog.inherits(proto.aggregator.ListExecutionsReq, jspb.Message);
 if (goog.DEBUG && !COMPILED) {
@@ -7628,6 +7628,13 @@ proto.aggregator.ListWalletResp.prototype.clearItemsList = function() {
 
 
 
+/**
+ * List of repeated fields within this message type.
+ * @private {!Array<number>}
+ * @const
+ */
+proto.aggregator.ListTasksReq.repeatedFields_ = [1];
+
 
 
 if (jspb.Message.GENERATE_TO_OBJECT) {
@@ -7659,7 +7666,7 @@ proto.aggregator.ListTasksReq.prototype.toObject = function(opt_includeInstance)
  */
 proto.aggregator.ListTasksReq.toObject = function(includeInstance, msg) {
   var f, obj = {
-    smartWalletAddress: jspb.Message.getFieldWithDefault(msg, 1, ""),
+    smartWalletAddressList: (f = jspb.Message.getRepeatedField(msg, 1)) == null ? undefined : f,
     cursor: jspb.Message.getFieldWithDefault(msg, 2, ""),
     itemPerPage: jspb.Message.getFieldWithDefault(msg, 3, 0)
   };
@@ -7700,7 +7707,7 @@ proto.aggregator.ListTasksReq.deserializeBinaryFromReader = function(msg, reader
     switch (field) {
     case 1:
       var value = /** @type {string} */ (reader.readString());
-      msg.setSmartWalletAddress(value);
+      msg.addSmartWalletAddress(value);
       break;
     case 2:
       var value = /** @type {string} */ (reader.readString());
@@ -7739,9 +7746,9 @@ proto.aggregator.ListTasksReq.prototype.serializeBinary = function() {
  */
 proto.aggregator.ListTasksReq.serializeBinaryToWriter = function(message, writer) {
   var f = undefined;
-  f = message.getSmartWalletAddress();
+  f = message.getSmartWalletAddressList();
   if (f.length > 0) {
-    writer.writeString(
+    writer.writeRepeatedString(
       1,
       f
     );
@@ -7764,20 +7771,39 @@ proto.aggregator.ListTasksReq.serializeBinaryToWriter = function(message, writer
 
 
 /**
- * optional string smart_wallet_address = 1;
- * @return {string}
+ * repeated string smart_wallet_address = 1;
+ * @return {!Array<string>}
  */
-proto.aggregator.ListTasksReq.prototype.getSmartWalletAddress = function() {
-  return /** @type {string} */ (jspb.Message.getFieldWithDefault(this, 1, ""));
+proto.aggregator.ListTasksReq.prototype.getSmartWalletAddressList = function() {
+  return /** @type {!Array<string>} */ (jspb.Message.getRepeatedField(this, 1));
+};
+
+
+/**
+ * @param {!Array<string>} value
+ * @return {!proto.aggregator.ListTasksReq} returns this
+ */
+proto.aggregator.ListTasksReq.prototype.setSmartWalletAddressList = function(value) {
+  return jspb.Message.setField(this, 1, value || []);
 };
 
 
 /**
  * @param {string} value
+ * @param {number=} opt_index
  * @return {!proto.aggregator.ListTasksReq} returns this
  */
-proto.aggregator.ListTasksReq.prototype.setSmartWalletAddress = function(value) {
-  return jspb.Message.setProto3StringField(this, 1, value);
+proto.aggregator.ListTasksReq.prototype.addSmartWalletAddress = function(value, opt_index) {
+  return jspb.Message.addToRepeatedField(this, 1, value, opt_index);
+};
+
+
+/**
+ * Clears the list making it empty but non-null.
+ * @return {!proto.aggregator.ListTasksReq} returns this
+ */
+proto.aggregator.ListTasksReq.prototype.clearSmartWalletAddressList = function() {
+  return this.setSmartWalletAddressList([]);
 };
 
 
@@ -7858,7 +7884,8 @@ proto.aggregator.ListTasksResp.toObject = function(includeInstance, msg) {
   var f, obj = {
     itemsList: jspb.Message.toObjectList(msg.getItemsList(),
     proto.aggregator.ListTasksResp.Item.toObject, includeInstance),
-    cursor: jspb.Message.getFieldWithDefault(msg, 2, "")
+    cursor: jspb.Message.getFieldWithDefault(msg, 2, ""),
+    hasMore: jspb.Message.getBooleanFieldWithDefault(msg, 3, false)
   };
 
   if (includeInstance) {
@@ -7904,6 +7931,10 @@ proto.aggregator.ListTasksResp.deserializeBinaryFromReader = function(msg, reade
       var value = /** @type {string} */ (reader.readString());
       msg.setCursor(value);
       break;
+    case 3:
+      var value = /** @type {boolean} */ (reader.readBool());
+      msg.setHasMore(value);
+      break;
     default:
       reader.skipField();
       break;
@@ -7945,6 +7976,13 @@ proto.aggregator.ListTasksResp.serializeBinaryToWriter = function(message, write
   if (f.length > 0) {
     writer.writeString(
       2,
+      f
+    );
+  }
+  f = message.getHasMore();
+  if (f) {
+    writer.writeBool(
+      3,
       f
     );
   }
@@ -8488,6 +8526,31 @@ proto.aggregator.ListTasksResp.prototype.setCursor = function(value) {
 };
 
 
+/**
+ * optional bool has_more = 3;
+ * @return {boolean}
+ */
+proto.aggregator.ListTasksResp.prototype.getHasMore = function() {
+  return /** @type {boolean} */ (jspb.Message.getBooleanFieldWithDefault(this, 3, false));
+};
+
+
+/**
+ * @param {boolean} value
+ * @return {!proto.aggregator.ListTasksResp} returns this
+ */
+proto.aggregator.ListTasksResp.prototype.setHasMore = function(value) {
+  return jspb.Message.setProto3BooleanField(this, 3, value);
+};
+
+
+
+/**
+ * List of repeated fields within this message type.
+ * @private {!Array<number>}
+ * @const
+ */
+proto.aggregator.ListExecutionsReq.repeatedFields_ = [1];
 
 
 
@@ -8520,7 +8583,7 @@ proto.aggregator.ListExecutionsReq.prototype.toObject = function(opt_includeInst
  */
 proto.aggregator.ListExecutionsReq.toObject = function(includeInstance, msg) {
   var f, obj = {
-    id: jspb.Message.getFieldWithDefault(msg, 1, ""),
+    taskIdsList: (f = jspb.Message.getRepeatedField(msg, 1)) == null ? undefined : f,
     cursor: jspb.Message.getFieldWithDefault(msg, 2, ""),
     itemPerPage: jspb.Message.getFieldWithDefault(msg, 3, 0)
   };
@@ -8561,7 +8624,7 @@ proto.aggregator.ListExecutionsReq.deserializeBinaryFromReader = function(msg, r
     switch (field) {
     case 1:
       var value = /** @type {string} */ (reader.readString());
-      msg.setId(value);
+      msg.addTaskIds(value);
       break;
     case 2:
       var value = /** @type {string} */ (reader.readString());
@@ -8600,9 +8663,9 @@ proto.aggregator.ListExecutionsReq.prototype.serializeBinary = function() {
  */
 proto.aggregator.ListExecutionsReq.serializeBinaryToWriter = function(message, writer) {
   var f = undefined;
-  f = message.getId();
+  f = message.getTaskIdsList();
   if (f.length > 0) {
-    writer.writeString(
+    writer.writeRepeatedString(
       1,
       f
     );
@@ -8625,20 +8688,39 @@ proto.aggregator.ListExecutionsReq.serializeBinaryToWriter = function(message, w
 
 
 /**
- * optional string id = 1;
- * @return {string}
+ * repeated string task_ids = 1;
+ * @return {!Array<string>}
  */
-proto.aggregator.ListExecutionsReq.prototype.getId = function() {
-  return /** @type {string} */ (jspb.Message.getFieldWithDefault(this, 1, ""));
+proto.aggregator.ListExecutionsReq.prototype.getTaskIdsList = function() {
+  return /** @type {!Array<string>} */ (jspb.Message.getRepeatedField(this, 1));
+};
+
+
+/**
+ * @param {!Array<string>} value
+ * @return {!proto.aggregator.ListExecutionsReq} returns this
+ */
+proto.aggregator.ListExecutionsReq.prototype.setTaskIdsList = function(value) {
+  return jspb.Message.setField(this, 1, value || []);
 };
 
 
 /**
  * @param {string} value
+ * @param {number=} opt_index
  * @return {!proto.aggregator.ListExecutionsReq} returns this
  */
-proto.aggregator.ListExecutionsReq.prototype.setId = function(value) {
-  return jspb.Message.setProto3StringField(this, 1, value);
+proto.aggregator.ListExecutionsReq.prototype.addTaskIds = function(value, opt_index) {
+  return jspb.Message.addToRepeatedField(this, 1, value, opt_index);
+};
+
+
+/**
+ * Clears the list making it empty but non-null.
+ * @return {!proto.aggregator.ListExecutionsReq} returns this
+ */
+proto.aggregator.ListExecutionsReq.prototype.clearTaskIdsList = function() {
+  return this.setTaskIdsList([]);
 };
 
 
@@ -8719,7 +8801,8 @@ proto.aggregator.ListExecutionsResp.toObject = function(includeInstance, msg) {
   var f, obj = {
     itemsList: jspb.Message.toObjectList(msg.getItemsList(),
     proto.aggregator.Execution.toObject, includeInstance),
-    cursor: jspb.Message.getFieldWithDefault(msg, 2, "")
+    cursor: jspb.Message.getFieldWithDefault(msg, 2, ""),
+    hasMore: jspb.Message.getBooleanFieldWithDefault(msg, 4, false)
   };
 
   if (includeInstance) {
@@ -8765,6 +8848,10 @@ proto.aggregator.ListExecutionsResp.deserializeBinaryFromReader = function(msg, 
       var value = /** @type {string} */ (reader.readString());
       msg.setCursor(value);
       break;
+    case 4:
+      var value = /** @type {boolean} */ (reader.readBool());
+      msg.setHasMore(value);
+      break;
     default:
       reader.skipField();
       break;
@@ -8806,6 +8893,13 @@ proto.aggregator.ListExecutionsResp.serializeBinaryToWriter = function(message, 
   if (f.length > 0) {
     writer.writeString(
       2,
+      f
+    );
+  }
+  f = message.getHasMore();
+  if (f) {
+    writer.writeBool(
+      4,
       f
     );
   }
@@ -8865,6 +8959,24 @@ proto.aggregator.ListExecutionsResp.prototype.getCursor = function() {
  */
 proto.aggregator.ListExecutionsResp.prototype.setCursor = function(value) {
   return jspb.Message.setProto3StringField(this, 2, value);
+};
+
+
+/**
+ * optional bool has_more = 4;
+ * @return {boolean}
+ */
+proto.aggregator.ListExecutionsResp.prototype.getHasMore = function() {
+  return /** @type {boolean} */ (jspb.Message.getBooleanFieldWithDefault(this, 4, false));
+};
+
+
+/**
+ * @param {boolean} value
+ * @return {!proto.aggregator.ListExecutionsResp} returns this
+ */
+proto.aggregator.ListExecutionsResp.prototype.setHasMore = function(value) {
+  return jspb.Message.setProto3BooleanField(this, 4, value);
 };
 
 
