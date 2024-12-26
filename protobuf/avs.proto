@@ -35,6 +35,7 @@ message EventCondition {
   string expression = 1;
 }
 
+
 message TaskTrigger {
   string name = 1;
   oneof trigger_type {
@@ -377,6 +378,21 @@ message TriggerMetadata {
   uint64 log_index    = 2;
   string tx_hash      = 3;
   uint64 epoch        = 4;
+
+  // This value isn't needed because when we query an execution or trigger a task, we know the trigger type 
+  // But, The JS SDK needed this value probabaly to saving the lookup time when it only have execution id somehow
+  // So we added this value to the respose for the client to consume and use however it want
+  // Internaly we don't make use of this field.
+  // The client was map the field based on the one-off field number so we need to match this number with TaskTrigger.trigger_type
+  enum TriggerType {
+    Unset     = 0;
+    Manual    = 2;
+    FixedTime = 3;
+    Cron      = 4;
+    Block     = 5;
+    Event     = 6;
+  }
+  TriggerType type = 5;
 }
 
 message GetWalletReq {
@@ -422,6 +438,8 @@ service Aggregator {
   rpc ListTasks(ListTasksReq)           returns (ListTasksResp) {};
   rpc GetTask(IdReq)                    returns (Task) {};
   rpc ListExecutions(ListExecutionsReq) returns (ListExecutionsResp) {};
+  //rpc GetExecution(GetExecutionReq)     returns (E) {};
+
   rpc CancelTask(IdReq)                 returns (google.protobuf.BoolValue) {};
   rpc DeleteTask(IdReq)                 returns (google.protobuf.BoolValue) {};
   rpc TriggerTask(UserTriggerTaskReq)   returns (UserTriggerTaskResp) {};

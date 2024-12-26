@@ -67,6 +67,7 @@ goog.exportSymbol('proto.aggregator.TaskStatus', null, global);
 goog.exportSymbol('proto.aggregator.TaskTrigger', null, global);
 goog.exportSymbol('proto.aggregator.TaskTrigger.TriggerTypeCase', null, global);
 goog.exportSymbol('proto.aggregator.TriggerMetadata', null, global);
+goog.exportSymbol('proto.aggregator.TriggerMetadata.TriggerType', null, global);
 goog.exportSymbol('proto.aggregator.UserTriggerTaskReq', null, global);
 goog.exportSymbol('proto.aggregator.UserTriggerTaskResp', null, global);
 /**
@@ -9335,7 +9336,8 @@ proto.aggregator.TriggerMetadata.toObject = function(includeInstance, msg) {
     blockNumber: jspb.Message.getFieldWithDefault(msg, 1, 0),
     logIndex: jspb.Message.getFieldWithDefault(msg, 2, 0),
     txHash: jspb.Message.getFieldWithDefault(msg, 3, ""),
-    epoch: jspb.Message.getFieldWithDefault(msg, 4, 0)
+    epoch: jspb.Message.getFieldWithDefault(msg, 4, 0),
+    type: jspb.Message.getFieldWithDefault(msg, 5, 0)
   };
 
   if (includeInstance) {
@@ -9387,6 +9389,10 @@ proto.aggregator.TriggerMetadata.deserializeBinaryFromReader = function(msg, rea
     case 4:
       var value = /** @type {number} */ (reader.readUint64());
       msg.setEpoch(value);
+      break;
+    case 5:
+      var value = /** @type {!proto.aggregator.TriggerMetadata.TriggerType} */ (reader.readEnum());
+      msg.setType(value);
       break;
     default:
       reader.skipField();
@@ -9445,8 +9451,27 @@ proto.aggregator.TriggerMetadata.serializeBinaryToWriter = function(message, wri
       f
     );
   }
+  f = message.getType();
+  if (f !== 0.0) {
+    writer.writeEnum(
+      5,
+      f
+    );
+  }
 };
 
+
+/**
+ * @enum {number}
+ */
+proto.aggregator.TriggerMetadata.TriggerType = {
+  UNSET: 0,
+  MANUAL: 2,
+  FIXEDTIME: 3,
+  CRON: 4,
+  BLOCK: 5,
+  EVENT: 6
+};
 
 /**
  * optional uint64 block_number = 1;
@@ -9517,6 +9542,24 @@ proto.aggregator.TriggerMetadata.prototype.getEpoch = function() {
  */
 proto.aggregator.TriggerMetadata.prototype.setEpoch = function(value) {
   return jspb.Message.setProto3IntField(this, 4, value);
+};
+
+
+/**
+ * optional TriggerType type = 5;
+ * @return {!proto.aggregator.TriggerMetadata.TriggerType}
+ */
+proto.aggregator.TriggerMetadata.prototype.getType = function() {
+  return /** @type {!proto.aggregator.TriggerMetadata.TriggerType} */ (jspb.Message.getFieldWithDefault(this, 5, 0));
+};
+
+
+/**
+ * @param {!proto.aggregator.TriggerMetadata.TriggerType} value
+ * @return {!proto.aggregator.TriggerMetadata} returns this
+ */
+proto.aggregator.TriggerMetadata.prototype.setType = function(value) {
+  return jspb.Message.setProto3EnumField(this, 5, value);
 };
 
 

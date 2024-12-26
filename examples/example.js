@@ -178,20 +178,22 @@ async function deleteTask(owner, token, taskId) {
   console.log("Response:\n", result);
 }
 
-async function triggerTask(owner, token, taskId, triggerMark) {
+async function triggerTask(owner, token, taskId, triggerMetadata) {
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
+
+  console.log("triggermark", triggerMetadata)
 
   const result = await asyncRPC(
     client,
     "TriggerTask",
     // If want to run async, comment this line out
-    //{ task_id: taskId, triggerMark, },
-    { task_id: taskId, triggerMark, is_blocking: true },
+    //{ task_id: taskId, triggerMetadata, },
+    { task_id: taskId, trigger_metadata: JSON.parse(triggerMetadata), is_blocking: true },
     metadata
   );
 
-  console.log("request", { task_id: taskId, triggerMark })
+  console.log("request", { task_id: taskId, triggerMetadata })
 
   console.log("Response:\n", result);
 }

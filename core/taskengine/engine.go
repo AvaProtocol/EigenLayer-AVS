@@ -558,6 +558,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 	if payload.IsBlocking {
 		// Run the task inline, by pass the queue system
 		executor := NewExecutor(n.db, n.logger)
+		fmt.Println("metadata", payload.TriggerMetadata)
 		execution, err := executor.RunTask(task, payload.TriggerMetadata)
 		if err == nil {
 			return &avsproto.UserTriggerTaskResp{
@@ -585,7 +586,9 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 
 // List Execution for a given task id
 func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
-	// Validate all tasks own by the caller
+	// Validate all tasks own by the caller, if there are any tasks won't be owned by caller, we return permission error
+	tasks := make(map[string]*model.Task)
+
 	for _, id := range payload.TaskIds {
 		task, err := n.GetTaskByID(id)
 		if err != nil {
@@ -595,6 +598,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 		if !task.OwnedBy(user.Address) {
 			return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 		}
+		tasks[id] = task
 	}
 
 	prefixes := make([]string, len(payload.TaskIds))
@@ -639,6 +643,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	for i := len(executionKeys) - 1; i >= 0; i-- {
 		key := executionKeys[i]
 		visited = i
+
 		executionUlid := ulid.MustParse(ExecutionIdFromStorageKey([]byte(key)))
 		if !cursor.IsZero() && cursor.LessThanOrEqualUlid(executionUlid) {
 			continue
@@ -651,6 +656,24 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 
 		exec := avsproto.Execution{}
 		if err := protojson.Unmarshal(executionValue, &exec); err == nil {
+			taskId := TaskIdFromExecutionStorageKey([]byte(key))
+			task := tasks[taskId]
+			if task == nil {
+				// This cannot be happen, if it had corrupted storage
+				panic("program corrupted")
+			}
+			switch task.GetTrigger().GetTriggerType().(type) {
+			case *avsproto.TaskTrigger_Manual:
+				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Manual
+			case *avsproto.TaskTrigger_FixedTime:
+				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_FixedTime
+			case *avsproto.TaskTrigger_Cron:
+				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Cron
+			case *avsproto.TaskTrigger_Block:
+				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Block
+			case *avsproto.TaskTrigger_Event:
+				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Event
+			}
 			executioResp.Items = append(executioResp.Items, &exec)
 			total += 1
 		}

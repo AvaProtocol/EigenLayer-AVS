@@ -10,7 +10,7 @@ w:<eoa>:<smart-wallet-address> = {factory_address: address, salt: salt}
 w:<eoa>:<smart-wallet-address> -> {factory, salt}
 t:<task-status>:<task-id>      -> task payload, the source of truth of task information
 u:<eoa>:<smart-wallet-address>:<task-id>    -> task status
-h:<smart-wallet-address>:<task-id>:<execution-id> -> an execution history
+history:<task-id>:<execution-id> -> an execution history
 
 The task storage was designed for fast retrieve time at the cost of extra storage.
 
