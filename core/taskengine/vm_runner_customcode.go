@@ -25,10 +25,11 @@ func NewJSProcessor(vm *VM) *JSProcessor {
 		jsvm: goja.New(),
 	}
 
+	// These are built-in func
 	for key, value := range macros.GetEnvs(nil) {
-		fmt.Println("Set", key)
 		r.jsvm.Set(key, value)
 	}
+	/// Binding the data from previous step into jsvm
 	for key, value := range vm.vars {
 		r.jsvm.Set(key, map[string]any{
 			"data": value,

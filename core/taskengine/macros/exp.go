@@ -158,8 +158,10 @@ func (bi *Builtin) ParseUnit(val string, decimal uint) *big.Int {
 
 var (
 	exprEnv = map[string]any{
-		"fetch":            Fetch,
-		"request":          Fetch,
+		// bind and simular JS fetch api
+		"fetch": Fetch,
+
+		// macro to do IO from JS
 		"readContractData": readContractData,
 
 		"priceChainlink":           chainlinkLatestAnswer,
@@ -193,7 +195,6 @@ type FetchOptions struct {
 func Fetch(url string) *FetchResponse {
 	options := FetchOptions{}
 
-	fmt.Println("FETCH", url)
 	client := resty.New()
 	// Create request
 	request := client.R()
