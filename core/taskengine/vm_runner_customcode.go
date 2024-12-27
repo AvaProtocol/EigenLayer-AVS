@@ -26,6 +26,7 @@ func NewJSProcessor(vm *VM) *JSProcessor {
 	}
 
 	for key, value := range macros.GetEnvs(nil) {
+		fmt.Println("Set", key)
 		r.jsvm.Set(key, value)
 	}
 	for key, value := range vm.vars {
@@ -72,15 +73,16 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	}
 	s.Log = log.String()
 
-	resultValue := result.Export()
-	// TODO: capsize
-	if outputData, serilizeError := json.Marshal(resultValue); serilizeError == nil {
-		s.OutputData = string(outputData)
-	} else {
-		log.WriteString("cannot serilize output data to log")
+	if result != nil {
+		resultValue := result.Export()
+		// TODO: capsize
+		if outputData, serilizeError := json.Marshal(resultValue); serilizeError == nil {
+			s.OutputData = string(outputData)
+		} else {
+			log.WriteString("cannot serilize output data to log")
+		}
+		r.SetOutputVarForStep(stepID, resultValue)
 	}
-
-	r.SetOutputVarForStep(stepID, resultValue)
 
 	return s, err
 }

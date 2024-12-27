@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	ethmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/go-resty/resty/v2"
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
@@ -157,6 +158,8 @@ func (bi *Builtin) ParseUnit(val string, decimal uint) *big.Int {
 
 var (
 	exprEnv = map[string]any{
+		"fetch":            Fetch,
+		"request":          Fetch,
 		"readContractData": readContractData,
 
 		"priceChainlink":           chainlinkLatestAnswer,
@@ -170,6 +173,68 @@ var (
 		"toBigInt":  ToBigInt,
 	}
 )
+
+// FetchResponse mimics the JS fetch Response object
+type FetchResponse struct {
+	Status     int
+	StatusText string
+	Body       string
+	Headers    map[string][]string
+}
+
+// FetchOptions allows specifying method, headers, and body
+type FetchOptions struct {
+	Method  string
+	Headers map[string]string
+	Body    interface{}
+}
+
+// Fetch mimics the JS fetch function using Resty
+func Fetch(url string) *FetchResponse {
+	options := FetchOptions{}
+
+	fmt.Println("FETCH", url)
+	client := resty.New()
+	// Create request
+	request := client.R()
+
+	// Set headers
+	if options.Headers != nil {
+		request.SetHeaders(options.Headers)
+	}
+
+	// Set body
+	if options.Body != nil {
+		request.SetBody(options.Body)
+	}
+
+	// Send request based on method
+	var resp *resty.Response
+	var err error
+	switch options.Method {
+	case "POST":
+		resp, err = request.Post(url)
+	case "PUT":
+		resp, err = request.Put(url)
+	case "DELETE":
+		resp, err = request.Delete(url)
+	default:
+		resp, err = request.Get(url) // Default to GET
+	}
+
+	// Handle errors
+	if err != nil {
+		return nil
+	}
+
+	// Build FetchResponse
+	return &FetchResponse{
+		Status:     resp.StatusCode(),
+		StatusText: resp.Status(),
+		Body:       string(resp.Body()),
+		Headers:    resp.Header(),
+	}
+}
 
 func GetEnvs(extra map[string]any) map[string]interface{} {
 	envs := map[string]any{}
