@@ -12,7 +12,6 @@ import (
 func TestListTasks(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
-	//defer db.Close()
 
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
@@ -75,7 +74,6 @@ func TestListTasks(t *testing.T) {
 func TestListTasksPagination(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
-	//defer db.Close()
 
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
@@ -184,4 +182,50 @@ func TestListTasksPagination(t *testing.T) {
 		t.Errorf("expect hasmore is false, but got true")
 	}
 
+}
+
+func TestGetExecution(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	// Now create a test task
+	tr1 := testutil.RestTask()
+	tr1.Memo = "t1"
+	// salt 0
+	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
+
+	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
+		TaskId: result.Id,
+		TriggerMetadata: &avsproto.TriggerMetadata{
+			BlockNumber: 101,
+		},
+		IsBlocking: true,
+	})
+
+	// Now get back that exectuon id
+	execution, err := n.GetExecution(testutil.TestUser1(), &avsproto.GetExecutionReq{
+		TaskId:      result.Id,
+		ExecutionId: resultTrigger.ExecutionId,
+	})
+
+	if execution.Id != resultTrigger.ExecutionId {
+		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
+	}
+
+	if execution.TriggerMetadata.BlockNumber != 101 {
+		t.Errorf("invalid triggered block. expect 101 got %d", execution.TriggerMetadata.BlockNumber)
+	}
+
+	// Another user cannot get this executin id
+	execution, err = n.GetExecution(testutil.TestUser2(), &avsproto.GetExecutionReq{
+		TaskId:      result.Id,
+		ExecutionId: resultTrigger.ExecutionId,
+	})
+	if err == nil || execution != nil {
+		t.Errorf("expected failure getting other user execution but succesfully read it")
+	}
 }

@@ -27,6 +27,28 @@ function deserialize_aggregator_CreateTaskResp(buffer_arg) {
   return avs_pb.CreateTaskResp.deserializeBinary(new Uint8Array(buffer_arg));
 }
 
+function serialize_aggregator_Execution(arg) {
+  if (!(arg instanceof avs_pb.Execution)) {
+    throw new Error('Expected argument of type aggregator.Execution');
+  }
+  return Buffer.from(arg.serializeBinary());
+}
+
+function deserialize_aggregator_Execution(buffer_arg) {
+  return avs_pb.Execution.deserializeBinary(new Uint8Array(buffer_arg));
+}
+
+function serialize_aggregator_GetExecutionReq(arg) {
+  if (!(arg instanceof avs_pb.GetExecutionReq)) {
+    throw new Error('Expected argument of type aggregator.GetExecutionReq');
+  }
+  return Buffer.from(arg.serializeBinary());
+}
+
+function deserialize_aggregator_GetExecutionReq(buffer_arg) {
+  return avs_pb.GetExecutionReq.deserializeBinary(new Uint8Array(buffer_arg));
+}
+
 function serialize_aggregator_GetKeyReq(arg) {
   if (!(arg instanceof avs_pb.GetKeyReq)) {
     throw new Error('Expected argument of type aggregator.GetKeyReq');
@@ -306,6 +328,17 @@ createTask: {
     requestDeserialize: deserialize_aggregator_ListExecutionsReq,
     responseSerialize: serialize_aggregator_ListExecutionsResp,
     responseDeserialize: deserialize_aggregator_ListExecutionsResp,
+  },
+  getExecution: {
+    path: '/aggregator.Aggregator/GetExecution',
+    requestStream: false,
+    responseStream: false,
+    requestType: avs_pb.GetExecutionReq,
+    responseType: avs_pb.Execution,
+    requestSerialize: serialize_aggregator_GetExecutionReq,
+    requestDeserialize: deserialize_aggregator_GetExecutionReq,
+    responseSerialize: serialize_aggregator_Execution,
+    responseDeserialize: deserialize_aggregator_Execution,
   },
   cancelTask: {
     path: '/aggregator.Aggregator/CancelTask',

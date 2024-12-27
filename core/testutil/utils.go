@@ -100,6 +100,17 @@ func TestUser1() *model.User {
 	}
 }
 
+func TestUser2() *model.User {
+	address := common.HexToAddress("0xd8da6bf26964af9d7eed9e03e53415d37aa96045")
+	smartWalletAddress := common.HexToAddress("0xBdCcA49575918De45bb32f5ba75388e7c3fBB5e4")
+
+	return &model.User{
+		Address: address,
+		// Factory https://sepolia.etherscan.io/address/0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7#readContract salt 0
+		SmartAccountAddress: &smartWalletAddress,
+	}
+}
+
 func GetAggregatorConfig() *config.Config {
 	return &config.Config{
 		SmartWallet: &config.SmartWalletConfig{

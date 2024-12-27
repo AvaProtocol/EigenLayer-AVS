@@ -580,7 +580,6 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId, "jid", jid)
 	return &avsproto.UserTriggerTaskResp{
 		Result: true,
-		JobId:  fmt.Sprintf("%d", jid),
 	}, nil
 }
 
@@ -687,6 +686,40 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	}
 	executioResp.HasMore = visited > 0
 	return executioResp, nil
+}
+
+// Get xecution for a given task id and execution id
+func (n *Engine) GetExecution(user *model.User, payload *avsproto.GetExecutionReq) (*avsproto.Execution, error) {
+	// Validate all tasks own by the caller, if there are any tasks won't be owned by caller, we return permission error
+	task, err := n.GetTaskByID(payload.TaskId)
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+	}
+
+	if !task.OwnedBy(user.Address) {
+		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+	}
+
+	executionValue, err := n.db.GetKey(TaskExecutionKey(task, payload.ExecutionId))
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.NotFound, ExecutionNotFoundError)
+	}
+	exec := avsproto.Execution{}
+	if err := protojson.Unmarshal(executionValue, &exec); err == nil {
+		switch task.GetTrigger().GetTriggerType().(type) {
+		case *avsproto.TaskTrigger_Manual:
+			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Manual
+		case *avsproto.TaskTrigger_FixedTime:
+			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_FixedTime
+		case *avsproto.TaskTrigger_Cron:
+			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Cron
+		case *avsproto.TaskTrigger_Block:
+			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Block
+		case *avsproto.TaskTrigger_Event:
+			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Event
+		}
+	}
+	return &exec, nil
 }
 
 func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error) {

@@ -355,6 +355,11 @@ message ListExecutionsResp {
   bool has_more = 4;
 }
 
+message GetExecutionReq {
+  string task_id = 1;
+  string execution_id = 2;
+}
+
 message GetKeyReq {
   string owner = 1;
   int64  expired_at = 2;
@@ -420,8 +425,6 @@ message UserTriggerTaskResp {
   bool result = 1;
   // if trigger inline, the execution id will be returned
   string execution_id = 2;
-  // when running async, we get back a job id
-  string job_id = 3;
 }
 
 service Aggregator {
@@ -438,7 +441,7 @@ service Aggregator {
   rpc ListTasks(ListTasksReq)           returns (ListTasksResp) {};
   rpc GetTask(IdReq)                    returns (Task) {};
   rpc ListExecutions(ListExecutionsReq) returns (ListExecutionsResp) {};
-  //rpc GetExecution(GetExecutionReq)     returns (E) {};
+  rpc GetExecution(GetExecutionReq)     returns (Execution) {};
 
   rpc CancelTask(IdReq)                 returns (google.protobuf.BoolValue) {};
   rpc DeleteTask(IdReq)                 returns (google.protobuf.BoolValue) {};

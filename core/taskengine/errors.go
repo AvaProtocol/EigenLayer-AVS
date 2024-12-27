@@ -1,8 +1,9 @@
 package taskengine
 
 const (
-	InternalError     = "internal error"
-	TaskNotFoundError = "task not found"
+	InternalError          = "internal error"
+	TaskNotFoundError      = "task not found"
+	ExecutionNotFoundError = "execution not found"
 
 	InvalidSmartAccountAddressError = "invalid smart account address"
 	InvalidFactoryAddressError      = "invalid factory address"
