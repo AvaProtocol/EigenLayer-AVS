@@ -19,6 +19,9 @@ var (
 	rpcConn *ethclient.Client
 )
 
+type Builtin struct {
+}
+
 func SetRpc(rpcURL string) {
 	if conn, err := ethclient.Dial(rpcURL); err == nil {
 		rpcConn = conn
@@ -123,6 +126,33 @@ func ToBigInt(val string) *big.Int {
 	}
 
 	return b
+}
+
+func (bi *Builtin) ToBigInt(val string) *big.Int {
+	return ToBigInt(val)
+}
+
+func (bi *Builtin) ChainlinkLatestRoundData(tokenPair string) *big.Int {
+	return chainlinkLatestRoundData(tokenPair)
+}
+func (bi *Builtin) ChainlinkLatestAnswer(tokenPair string) *big.Int {
+	return chainlinkLatestAnswer(tokenPair)
+}
+
+func (bi *Builtin) BigCmp(a *big.Int, b *big.Int) (r int) {
+	return BigCmp(a, b)
+}
+
+func (bi *Builtin) BigGt(a *big.Int, b *big.Int) bool {
+	return BigGt(a, b)
+}
+
+func (bi *Builtin) BigLt(a *big.Int, b *big.Int) bool {
+	return BigLt(a, b)
+}
+
+func (bi *Builtin) ParseUnit(val string, decimal uint) *big.Int {
+	return ParseUnit(val, decimal)
 }
 
 var (

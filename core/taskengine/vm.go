@@ -278,37 +278,7 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 	}
 
 	if nodeValue := node.GetRestApi(); nodeValue != nil {
-		// TODO: refactor into function
-		p := NewRestProrcessor(v)
-
-		// only evaluate string when there is string interpolation
-		if nodeValue.Body != "" && (strings.Contains(nodeValue.Body, "$") || strings.Contains(nodeValue.Body, "`")) {
-			nodeValue2 := &avsproto.RestAPINode{
-				Url:     macros.RenderString(nodeValue.Url, macroEnvs),
-				Headers: nodeValue.Headers,
-				Method:  nodeValue.Method,
-				Body:    strings.Clone(nodeValue.Body),
-			}
-			jsvm := goja.New()
-
-			for key, value := range v.vars {
-				jsvm.Set(key, map[string]any{
-					"data": value,
-				})
-			}
-
-			renderBody, err := jsvm.RunString(nodeValue.Body)
-			if err == nil {
-				nodeValue2.Body = renderBody.Export().(string)
-			} else {
-				fmt.Println("error render string with goja", err)
-			}
-			executionLog, err = p.Execute(node.Id, nodeValue2)
-		} else {
-			executionLog, err = p.Execute(node.Id, nodeValue)
-		}
-
-		v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
+		executionLog, err = v.runRestApi(node.Id, nodeValue)
 	} else if nodeValue := node.GetBranch(); nodeValue != nil {
 		outcomeID := ""
 		executionLog, outcomeID, err = v.runBranch(node.Id, nodeValue)
@@ -331,8 +301,49 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 		}
 	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
 		executionLog, err = v.runGraphQL(node.Id, nodeValue)
+	} else if nodeValue := node.GetCustomCode(); nodeValue != nil {
+		executionLog, err = v.runCustomCode(node.Id, nodeValue)
 	}
 
+	return executionLog, err
+}
+
+func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
+	p := NewRestProrcessor(v)
+
+	var err error
+	executionLog := &avsproto.Execution_Step{
+		NodeId: stepID,
+	}
+
+	// only evaluate string when there is string interpolation
+	if nodeValue.Body != "" && (strings.Contains(nodeValue.Body, "$") || strings.Contains(nodeValue.Body, "`")) {
+		nodeValue2 := &avsproto.RestAPINode{
+			Url:     macros.RenderString(nodeValue.Url, macroEnvs),
+			Headers: nodeValue.Headers,
+			Method:  nodeValue.Method,
+			Body:    strings.Clone(nodeValue.Body),
+		}
+		jsvm := goja.New()
+
+		for key, value := range v.vars {
+			jsvm.Set(key, map[string]any{
+				"data": value,
+			})
+		}
+
+		renderBody, err := jsvm.RunString(nodeValue.Body)
+		if err == nil {
+			nodeValue2.Body = renderBody.Export().(string)
+		} else {
+			v.logger.Error("error render string with goja", "error", err)
+		}
+		executionLog, err = p.Execute(stepID, nodeValue2)
+	} else {
+		executionLog, err = p.Execute(stepID, nodeValue)
+	}
+
+	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 	return executionLog, err
 }
 
@@ -344,6 +355,17 @@ func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avspro
 	executionLog, _, err := g.Execute(stepID, node)
 	if err != nil {
 		v.logger.Error("error execute graphql node", "task_id", v.TaskID, "step", stepID, "url", node.Url, "error", err)
+	}
+	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
+
+	return executionLog, nil
+}
+
+func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
+	r := NewJSProcessor(v)
+	executionLog, err := r.Execute(stepID, node)
+	if err != nil {
+		v.logger.Error("error execute JavaScript code", "task_id", v.TaskID, "step", stepID, "error", err)
 	}
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 

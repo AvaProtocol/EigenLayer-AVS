@@ -90,6 +90,11 @@ func TestRunSimpleTasks(t *testing.T) {
 	if !strings.Contains(vm.ExecutionLogs[0].Log, "Execute") {
 		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got nothing")
 	}
+
+	data := vm.vars["httpnode"].(map[string]any)
+	if data["data"].(string) != "a=123" {
+		t.Errorf("step result isn't store properly, expect 123 got %s", data["data"])
+	}
 }
 
 func TestRunSequentialTasks(t *testing.T) {

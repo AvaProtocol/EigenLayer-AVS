@@ -340,6 +340,10 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 				continue
 			}
 
+			if !n.CanStreamCheck(address) {
+				continue
+			}
+
 			for _, task := range n.tasks {
 				if _, ok := n.trackSyncedTasks[address].TaskID[task.Id]; ok {
 					continue
@@ -796,4 +800,9 @@ func (n *Engine) NewSeqID() (string, error) {
 		return "", err
 	}
 	return strconv.FormatInt(int64(num), 10), nil
+}
+
+func (n *Engine) CanStreamCheck(address string) bool {
+	// Only enable for our own operator first, once it's stable we will roll out to all
+	return address == "0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d" || address == "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3"
 }

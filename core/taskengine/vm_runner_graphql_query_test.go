@@ -22,9 +22,28 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 		}`,
 	}
 
-	n, _ := NewGraphqlQueryProcessor(node.Url)
+	nodes := []*avsproto.TaskNode{
+		&avsproto.TaskNode{
+			Id:   "123abc",
+			Name: "graphqlQuery",
+			TaskType: &avsproto.TaskNode_GraphqlQuery{
+				GraphqlQuery: node,
+			},
+		},
+	}
 
-	step, err := n.Execute("lido approval", node)
+	edges := []*avsproto.TaskEdge{
+		&avsproto.TaskEdge{
+			Id:     "e1",
+			Source: "__TRIGGER__",
+			Target: "123abc",
+		},
+	}
+
+	vm, err := NewVMWithData("123abc", nil, nodes, edges)
+	n, _ := NewGraphqlQueryProcessor(vm, node.Url)
+
+	step, _, err := n.Execute("123abc", node)
 
 	if err != nil {
 		t.Errorf("expected rest node run succesfull but got error: %v", err)
