@@ -167,7 +167,6 @@ func (evt *EventTrigger) Evaluate(event *types.Log, program string) (bool, error
 		jsvm.Set(k, v)
 	}
 
-	//result, err := expr.Run(program, envs)
 	result, err := jsvm.RunString(program)
 
 	if err != nil {
