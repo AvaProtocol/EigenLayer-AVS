@@ -291,8 +291,8 @@ message NonceResp {
 message ListWalletReq {
   // filter out by factory address or salt
   // otherwise return all the wallet
-  string factory = 1;
-  string salt = 2;
+  string factory_address = 1;
+  string salt            = 2;
 }
 
 message SmartWallet {

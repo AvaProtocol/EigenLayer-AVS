@@ -53,6 +53,7 @@ func (r *RpcServer) GetWallet(ctx context.Context, payload *avsproto.GetWalletRe
 	r.config.Logger.Info("process create wallet",
 		"user", user.Address.String(),
 		"salt", payload.Salt,
+		"factory", payload.FactoryAddress,
 	)
 
 	return r.engine.CreateSmartWallet(user, payload)
@@ -82,7 +83,7 @@ func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalle
 	r.config.Logger.Info("process list wallet",
 		"address", user.Address.String(),
 	)
-	wallets, err := r.engine.GetSmartWallets(user.Address)
+	wallets, err := r.engine.GetSmartWallets(user.Address, payload)
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "rpc server is unavailable, retry later. %s", err.Error())
 	}

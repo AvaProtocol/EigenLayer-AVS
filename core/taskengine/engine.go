@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -139,6 +140,7 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	}
 
 	SetRpc(config.SmartWallet.EthRpcUrl)
+	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
 	//SetWsRpc(config.SmartWallet.EthWsUrl)
 
 	return &e
@@ -172,19 +174,21 @@ func (n *Engine) MustStart() {
 	}
 }
 
-func (n *Engine) GetSmartWallets(owner common.Address) ([]*avsproto.SmartWallet, error) {
+func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWalletReq) ([]*avsproto.SmartWallet, error) {
 	sender, err := aa.GetSenderAddress(rpcConn, owner, defaultSalt)
 	if err != nil {
 		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), SmartAccountCreationError)
 	}
 
-	// This is the default wallet with our own factory
-	wallets := []*avsproto.SmartWallet{
-		&avsproto.SmartWallet{
+	wallets := []*avsproto.SmartWallet{}
+
+	if payload == nil || payload.FactoryAddress == "" || strings.EqualFold(payload.FactoryAddress, n.smartWalletConfig.FactoryAddress.Hex()) {
+		// This is the default wallet with our own factory
+		wallets = append(wallets, &avsproto.SmartWallet{
 			Address: sender.String(),
 			Factory: n.smartWalletConfig.FactoryAddress.String(),
 			Salt:    defaultSalt.String(),
-		},
+		})
 	}
 
 	items, err := n.db.GetByPrefix(WalletByOwnerPrefix(owner))
@@ -199,6 +203,10 @@ func (n *Engine) GetSmartWallets(owner common.Address) ([]*avsproto.SmartWallet,
 		w.FromStorageData(item.Value)
 
 		if w.Salt.Cmp(defaultSalt) == 0 {
+			continue
+		}
+
+		if payload != nil && payload.FactoryAddress != "" && !strings.EqualFold(w.Factory.String(), payload.FactoryAddress) {
 			continue
 		}
 
@@ -233,13 +241,10 @@ func (n *Engine) CreateSmartWallet(user *model.User, payload *avsproto.GetWallet
 		factoryAddress = common.HexToAddress(payload.FactoryAddress)
 
 	}
-
 	sender, err := aa.GetSenderAddressForFactory(rpcConn, user.Address, factoryAddress, salt)
-
 	if err != nil || sender.Hex() == "0x0000000000000000000000000000000000000000" {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidFactoryAddressError)
 	}
-
 	wallet := &model.SmartWallet{
 		Owner:   &user.Address,
 		Address: sender,

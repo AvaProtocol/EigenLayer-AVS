@@ -77,7 +77,7 @@ func GetSenderAddressForFactory(conn *ethclient.Client, ownerAddress common.Addr
 	}
 
 	sender, err := simpleFactory.GetAddress(nil, ownerAddress, salt)
-	return &sender, nil
+	return &sender, err
 }
 
 func GetNonce(conn *ethclient.Client, ownerAddress common.Address, salt *big.Int) (*big.Int, error) {
