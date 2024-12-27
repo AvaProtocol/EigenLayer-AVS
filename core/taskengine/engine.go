@@ -494,10 +494,10 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		}
 	}
 
-	if total >= itemPerPage {
+	taskResp.HasMore = visited > 0
+	if taskResp.HasMore {
 		taskResp.Cursor = NewCursor(CursorDirectionNext, taskResp.Items[total-1].Id).String()
 	}
-	taskResp.HasMore = visited > 0
 
 	return taskResp, nil
 }
@@ -681,10 +681,10 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 		}
 	}
 
-	if total >= itemPerPage {
+	executioResp.HasMore = visited > 0
+	if executioResp.HasMore {
 		executioResp.Cursor = NewCursor(CursorDirectionNext, executioResp.Items[total-1].Id).String()
 	}
-	executioResp.HasMore = visited > 0
 	return executioResp, nil
 }
 

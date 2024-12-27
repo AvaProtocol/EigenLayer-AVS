@@ -127,7 +127,7 @@ async function listTask(owner, token) {
   for (const item of result.items) {
     console.log(util.inspect(item, { depth: 4, colors: true }));
   }
-  console.log(util.inspect({cursor: result.cursor}, { depth: 4, colors: true }));
+  console.log(util.inspect({cursor: result.cursor, hasMore: result.has_more}, { depth: 4, colors: true }));
   console.log("Note: we are returning only 2 items per page to demonstrate pagination")
 }
 
