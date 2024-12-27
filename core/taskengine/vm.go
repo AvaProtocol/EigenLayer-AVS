@@ -3,6 +3,7 @@ package taskengine
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -98,8 +99,20 @@ func (v *VM) WithLogger(logger sdklogging.Logger) *VM {
 }
 
 func (v *VM) GetNodeNameAsVar(nodeID string) string {
+	// Replace invalid characters with _
+	re := regexp.MustCompile(`[^a-zA-Z0-9_$]`)
 	name := v.TaskNodes[nodeID].Name
-	return name
+	if name == "" {
+		name = nodeID
+	}
+	standardized := re.ReplaceAllString(v.TaskNodes[nodeID].Name, "_")
+
+	// Ensure the first character is valid
+	if len(standardized) == 0 || !regexp.MustCompile(`^[a-zA-Z_$]`).MatchString(standardized[:1]) {
+		standardized = "_" + standardized
+	}
+
+	return standardized
 }
 
 func NewVMWithData(taskID string, triggerMetadata *avsproto.TriggerMetadata, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge) (*VM, error) {
