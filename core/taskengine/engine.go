@@ -567,6 +567,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 	if payload.IsBlocking {
 		// Run the task inline, by pass the queue system
 		executor := NewExecutor(n.db, n.logger)
+		fmt.Println("metadata", payload.TriggerMetadata)
 		execution, err := executor.RunTask(task, payload.TriggerMetadata)
 		if err == nil {
 			return &avsproto.UserTriggerTaskResp{
