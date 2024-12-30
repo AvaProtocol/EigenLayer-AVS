@@ -7172,7 +7172,7 @@ proto.aggregator.ListWalletReq.prototype.toObject = function(opt_includeInstance
  */
 proto.aggregator.ListWalletReq.toObject = function(includeInstance, msg) {
   var f, obj = {
-    factory: jspb.Message.getFieldWithDefault(msg, 1, ""),
+    factoryAddress: jspb.Message.getFieldWithDefault(msg, 1, ""),
     salt: jspb.Message.getFieldWithDefault(msg, 2, "")
   };
 
@@ -7212,7 +7212,7 @@ proto.aggregator.ListWalletReq.deserializeBinaryFromReader = function(msg, reade
     switch (field) {
     case 1:
       var value = /** @type {string} */ (reader.readString());
-      msg.setFactory(value);
+      msg.setFactoryAddress(value);
       break;
     case 2:
       var value = /** @type {string} */ (reader.readString());
@@ -7247,7 +7247,7 @@ proto.aggregator.ListWalletReq.prototype.serializeBinary = function() {
  */
 proto.aggregator.ListWalletReq.serializeBinaryToWriter = function(message, writer) {
   var f = undefined;
-  f = message.getFactory();
+  f = message.getFactoryAddress();
   if (f.length > 0) {
     writer.writeString(
       1,
@@ -7265,10 +7265,10 @@ proto.aggregator.ListWalletReq.serializeBinaryToWriter = function(message, write
 
 
 /**
- * optional string factory = 1;
+ * optional string factory_address = 1;
  * @return {string}
  */
-proto.aggregator.ListWalletReq.prototype.getFactory = function() {
+proto.aggregator.ListWalletReq.prototype.getFactoryAddress = function() {
   return /** @type {string} */ (jspb.Message.getFieldWithDefault(this, 1, ""));
 };
 
@@ -7277,7 +7277,7 @@ proto.aggregator.ListWalletReq.prototype.getFactory = function() {
  * @param {string} value
  * @return {!proto.aggregator.ListWalletReq} returns this
  */
-proto.aggregator.ListWalletReq.prototype.setFactory = function(value) {
+proto.aggregator.ListWalletReq.prototype.setFactoryAddress = function(value) {
   return jspb.Message.setProto3StringField(this, 1, value);
 };
 

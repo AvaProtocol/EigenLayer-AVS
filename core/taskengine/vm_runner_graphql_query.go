@@ -13,15 +13,16 @@ import (
 )
 
 type GraphqlQueryProcessor struct {
+	*CommonProcessor
+
 	client *graphql.Client
 	sb     *strings.Builder
 	url    *url.URL
 }
 
-func NewGraphqlQueryProcessor(endpoint string) (*GraphqlQueryProcessor, error) {
+func NewGraphqlQueryProcessor(vm *VM, endpoint string) (*GraphqlQueryProcessor, error) {
 	sb := &strings.Builder{}
 	log := func(s string) {
-		fmt.Println("LOGLOG", s)
 		sb.WriteString(s)
 	}
 
@@ -39,10 +40,12 @@ func NewGraphqlQueryProcessor(endpoint string) (*GraphqlQueryProcessor, error) {
 		client: client,
 		sb:     sb,
 		url:    u,
+
+		CommonProcessor: &CommonProcessor{vm},
 	}, nil
 }
 
-func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, error) {
+func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, any, error) {
 	ctx := context.Background()
 	t0 := time.Now().Unix()
 	step := &avsproto.Execution_Step{
@@ -68,11 +71,12 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	query := graphql.NewRequest(node.Query)
 	err = r.client.Run(ctx, query, &resp)
 	if err != nil {
-		return step, err
+		return step, nil, err
 	}
 
 	step.Log = r.sb.String()
 	data, err := json.Marshal(resp)
 	step.OutputData = string(data)
-	return step, err
+	r.SetOutputVarForStep(stepID, resp)
+	return step, resp, err
 }

@@ -8,8 +8,6 @@ import (
 )
 
 func TestRestRequest(t *testing.T) {
-	n := NewRestProrcessor()
-
 	node := &avsproto.RestAPINode{
 		Url: "https://httpbin.org/post",
 		Headers: map[string]string{
@@ -18,7 +16,28 @@ func TestRestRequest(t *testing.T) {
 		Body:   "chat_id=123&disable_notification=true&text=%2AThis+is+a+test+format%2A",
 		Method: "POST",
 	}
-	step, err := n.Execute("foo123", node)
+
+	nodes := []*avsproto.TaskNode{
+		&avsproto.TaskNode{
+			Id:   "123abc",
+			Name: "restApi",
+			TaskType: &avsproto.TaskNode_RestApi{
+				RestApi: node,
+			},
+		},
+	}
+
+	edges := []*avsproto.TaskEdge{
+		&avsproto.TaskEdge{
+			Id:     "e1",
+			Source: "__TRIGGER__",
+			Target: "123abc",
+		},
+	}
+
+	vm, err := NewVMWithData("123abc", nil, nodes, edges)
+	n := NewRestProrcessor(vm)
+	step, err := n.Execute("123abc", node)
 
 	if err != nil {
 		t.Errorf("expected rest node run succesfull but got error: %v", err)

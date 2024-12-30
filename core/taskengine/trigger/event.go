@@ -7,8 +7,7 @@ import (
 
 	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"github.com/expr-lang/expr"
-	"github.com/expr-lang/expr/vm"
+	"github.com/dop251/goja"
 	"github.com/ginkgoch/godash/v2"
 
 	"github.com/ethereum/go-ethereum"
@@ -26,7 +25,7 @@ type EventMark struct {
 }
 
 type Check struct {
-	Program      *vm.Program
+	Program      string
 	TaskMetadata *avsproto.SyncMessagesResp_TaskMetadata
 }
 
@@ -71,24 +70,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark]) *E
 
 // TODO: track remainExecution and expriedAt before merge
 func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) error {
-	// Dummy value to get type
-	envs := macros.GetEnvs(map[string]interface{}{
-		"trigger1": map[string]interface{}{
-			"data": map[string]interface{}{
-				"address": "dummy",
-				"topics": godash.Map([]common.Hash{}, func(topic common.Hash) string {
-					return "0x"
-				}),
-				"data":    "0x",
-				"tx_hash": "dummy",
-			},
-		},
-	})
-	program, err := expr.Compile(check.GetTrigger().GetEvent().GetExpression(), expr.Env(envs), expr.AsBool())
-	if err != nil {
-		return err
-	}
-
+	program := check.GetTrigger().GetEvent().GetExpression()
 	t.checks.Store(check.TaskId, &Check{
 		Program:      program,
 		TaskMetadata: check,
@@ -167,7 +149,8 @@ func (evt *EventTrigger) Run(ctx context.Context) error {
 	return err
 }
 
-func (evt *EventTrigger) Evaluate(event *types.Log, program *vm.Program) (bool, error) {
+func (evt *EventTrigger) Evaluate(event *types.Log, program string) (bool, error) {
+	jsvm := goja.New()
 	envs := macros.GetEnvs(map[string]interface{}{
 		"trigger1": map[string]interface{}{
 			"data": map[string]interface{}{
@@ -180,12 +163,15 @@ func (evt *EventTrigger) Evaluate(event *types.Log, program *vm.Program) (bool, 
 			},
 		},
 	})
+	for k, v := range envs {
+		jsvm.Set(k, v)
+	}
 
-	result, err := expr.Run(program, envs)
+	result, err := jsvm.RunString(program)
 
 	if err != nil {
 		return false, err
 	}
 
-	return result.(bool), err
+	return result.Export().(bool), err
 }

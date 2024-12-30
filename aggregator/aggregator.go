@@ -107,7 +107,9 @@ func NewAggregator(c *config.Config) (*Aggregator, error) {
 	avsWriter, err := chainio.BuildAvsWriterFromConfig(c)
 	if err != nil {
 		c.Logger.Errorf("Cannot create avsWriter", "err", err)
-		return nil, err
+		// TODO: Upgrade EigenSDK to use the new Slash Manager
+		// EigenLayer has update the contract and we cannot fetch the slasher anymore, we should upgrade the EigenSDK, right now we don't use it so it's ok to ignore this error
+		//return nil, err
 	}
 
 	go func() {
@@ -122,8 +124,9 @@ func NewAggregator(c *config.Config) (*Aggregator, error) {
 		clients, err := clients.BuildAll(chainioConfig, c.EcdsaPrivateKey, c.Logger)
 		if err != nil {
 			c.Logger.Errorf("Cannot create sdk clients", "err", err)
-			panic(err)
-			//return nil, err
+			// TODO: Upgrade EigenSDK to use the new Slash Manager
+			// EigenLayer has update the contract and we cannot fetch the slasher anymore, we should upgrade the EigenSDK, right now we don't use it so it's ok to ignore this error
+			//panic(err)
 		}
 		c.Logger.Info("create avsrrader and client", "avsReader", avsReader, "clients", clients)
 	}()

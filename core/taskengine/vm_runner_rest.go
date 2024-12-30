@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -12,10 +13,11 @@ import (
 )
 
 type RestProcessor struct {
+	*CommonProcessor
 	client *resty.Client
 }
 
-func NewRestProrcessor() *RestProcessor {
+func NewRestProrcessor(vm *VM) *RestProcessor {
 	client := resty.New()
 
 	// Unique settings at Client level
@@ -28,6 +30,9 @@ func NewRestProrcessor() *RestProcessor {
 
 	r := RestProcessor{
 		client: client,
+		CommonProcessor: &CommonProcessor{
+			vm: vm,
+		},
 	}
 
 	return &r
@@ -83,6 +88,18 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	s.Log = log.String()
 
 	s.OutputData = string(resp.Body())
+	// Attempt to detect json
+	if s.OutputData[0] == '{' || s.OutputData[0] == '[' {
+		var parseData map[string]any
+		if err := json.Unmarshal([]byte(s.OutputData), &parseData); err == nil {
+			r.SetOutputVarForStep(stepID, parseData)
+		} else {
+			r.SetOutputVarForStep(stepID, s.OutputData)
+		}
+	} else {
+		r.SetOutputVarForStep(stepID, s.OutputData)
+	}
+
 	if err != nil {
 		s.Success = false
 		s.Error = err.Error()

@@ -283,7 +283,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	}
 	sdkClients, err := clients.BuildAll(chainioConfig, operatorEcdsaPrivateKey, logger)
 	if err != nil {
-		panic(err)
+		//panic(err)
 	}
 	skWallet, err := wallet.NewPrivateKeyWallet(ethRpcClient, signerV2, signerAddress, logger)
 	if err != nil {
@@ -297,7 +297,9 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	)
 	if err != nil {
 		logger.Error("Cannot create AvsWriter", "err", err)
-		return nil, err
+		// TODO: Upgrade EigenSDK to use the new Slash Manager
+		// EigenLayer has update the contract and we cannot fetch the slasher anymore, we should upgrade the EigenSDK, right now we don't use it so it's ok to ignore this error
+		//return nil, err
 	}
 
 	avsReader, err := chainio.BuildAvsReader(
@@ -306,7 +308,9 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		ethRpcClient, logger)
 	if err != nil {
 		logger.Error("Cannot create AvsReader", "err", err)
-		return nil, err
+		// TODO: Upgrade EigenSDK to use the new Slash Manager
+		// EigenLayer has update the contract and we cannot fetch the slasher anymore, we should upgrade the EigenSDK, right now we don't use it so it's ok to ignore this error
+		//return nil, err
 	}
 	// avsSubscriber, err := chainio.BuildAvsSubscriber(common.HexToAddress(c.AVSRegistryCoordinatorAddress),
 	// 	common.HexToAddress(c.OperatorStateRetrieverAddress), ethWsClient, logger,

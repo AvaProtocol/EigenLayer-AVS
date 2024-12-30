@@ -16,12 +16,16 @@ import (
 )
 
 type ContractReadProcessor struct {
+	*CommonProcessor
 	client *ethclient.Client
 }
 
-func NewContractReadProcessor(client *ethclient.Client) *ContractReadProcessor {
+func NewContractReadProcessor(vm *VM, client *ethclient.Client) *ContractReadProcessor {
 	return &ContractReadProcessor{
 		client: client,
+		CommonProcessor: &CommonProcessor{
+			vm: vm,
+		},
 	}
 }
 
@@ -81,6 +85,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	s.Log = log.String()
 	outputData, err := json.Marshal(result)
 	s.OutputData = string(outputData)
+	r.SetOutputVarForStep(stepID, outputData)
 	if err != nil {
 		s.Success = false
 		s.Error = err.Error()
