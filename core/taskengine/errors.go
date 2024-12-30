@@ -1,7 +1,9 @@
 package taskengine
 
 const (
-	TaskNotFoundError = "task not found"
+	InternalError          = "internal error"
+	TaskNotFoundError      = "task not found"
+	ExecutionNotFoundError = "execution not found"
 
 	InvalidSmartAccountAddressError = "invalid smart account address"
 	InvalidFactoryAddressError      = "invalid factory address"
@@ -18,4 +20,7 @@ const (
 
 	TaskStorageCorruptedError = "task data storage is corrupted"
 	TaskIDMissing             = "Missing task id in request"
+
+	InvalidCursor          = "cursor is not valid"
+	InvalidPaginationParam = "item per page is not valid"
 )

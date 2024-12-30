@@ -7,11 +7,15 @@ import (
 	"os"
 	"time"
 
+	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/allegro/bigcache/v3"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/AvaProtocol/ap-avs/core/config"
+	"github.com/AvaProtocol/ap-avs/model"
 	"github.com/AvaProtocol/ap-avs/storage"
 )
 
@@ -69,11 +73,53 @@ func TestMustDB() storage.Storage {
 	if err != nil {
 		panic(err)
 	}
+	//dir = "/tmp/ap-avs"
 	db, err := storage.NewWithPath(dir)
 	if err != nil {
 		panic(err)
 	}
 	return db
+}
+
+func GetLogger() sdklogging.Logger {
+	logger, err := sdklogging.NewZapLogger("development")
+	if err != nil {
+		panic(err)
+	}
+	return logger
+}
+
+func TestUser1() *model.User {
+	address := common.HexToAddress("0xD7050816337a3f8f690F8083B5Ff8019D50c0E50")
+	smartWalletAddress := common.HexToAddress("0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6")
+
+	return &model.User{
+		Address: address,
+		// Factory https://sepolia.etherscan.io/address/0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7#readContract salt 0
+		SmartAccountAddress: &smartWalletAddress,
+	}
+}
+
+func TestUser2() *model.User {
+	address := common.HexToAddress("0xd8da6bf26964af9d7eed9e03e53415d37aa96045")
+	smartWalletAddress := common.HexToAddress("0xBdCcA49575918De45bb32f5ba75388e7c3fBB5e4")
+
+	return &model.User{
+		Address: address,
+		// Factory https://sepolia.etherscan.io/address/0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7#readContract salt 0
+		SmartAccountAddress: &smartWalletAddress,
+	}
+}
+
+func GetAggregatorConfig() *config.Config {
+	return &config.Config{
+		SmartWallet: &config.SmartWalletConfig{
+			EthRpcUrl:         GetTestRPCURL(),
+			EthWsUrl:          GetTestWsRPCURL(),
+			FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
+			EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+		},
+	}
 }
 
 func GetDefaultCache() *bigcache.BigCache {
@@ -121,4 +167,35 @@ func GetDefaultCache() *bigcache.BigCache {
 	}
 	return cache
 
+}
+
+func RestTask() *avsproto.CreateTaskReq {
+	node := &avsproto.TaskNode{
+		Id:   "ping1",
+		Name: "ping",
+		TaskType: &avsproto.TaskNode_RestApi{
+			&avsproto.RestAPINode{
+				Url: "https://httpbin.org",
+			},
+		},
+	}
+	edge := &avsproto.TaskEdge{
+		Id:     "edge1",
+		Source: "__TRIGGER__",
+		Target: "ping1",
+	}
+	tr1 := avsproto.CreateTaskReq{
+		Trigger: &avsproto.TaskTrigger{
+			Name: "block",
+			TriggerType: &avsproto.TaskTrigger_Block{
+				Block: &avsproto.BlockCondition{
+					Interval: 5,
+				},
+			},
+		},
+		MaxExecution: 1000,
+		Nodes:        []*avsproto.TaskNode{node},
+		Edges:        []*avsproto.TaskEdge{edge},
+	}
+	return &tr1
 }

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -138,6 +140,7 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	}
 
 	SetRpc(config.SmartWallet.EthRpcUrl)
+	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
 	//SetWsRpc(config.SmartWallet.EthWsUrl)
 
 	return &e
@@ -171,19 +174,21 @@ func (n *Engine) MustStart() {
 	}
 }
 
-func (n *Engine) GetSmartWallets(owner common.Address) ([]*avsproto.SmartWallet, error) {
+func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWalletReq) ([]*avsproto.SmartWallet, error) {
 	sender, err := aa.GetSenderAddress(rpcConn, owner, defaultSalt)
 	if err != nil {
 		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), SmartAccountCreationError)
 	}
 
-	// This is the default wallet with our own factory
-	wallets := []*avsproto.SmartWallet{
-		&avsproto.SmartWallet{
+	wallets := []*avsproto.SmartWallet{}
+
+	if payload == nil || payload.FactoryAddress == "" || strings.EqualFold(payload.FactoryAddress, n.smartWalletConfig.FactoryAddress.Hex()) {
+		// This is the default wallet with our own factory
+		wallets = append(wallets, &avsproto.SmartWallet{
 			Address: sender.String(),
 			Factory: n.smartWalletConfig.FactoryAddress.String(),
 			Salt:    defaultSalt.String(),
-		},
+		})
 	}
 
 	items, err := n.db.GetByPrefix(WalletByOwnerPrefix(owner))
@@ -198,6 +203,10 @@ func (n *Engine) GetSmartWallets(owner common.Address) ([]*avsproto.SmartWallet,
 		w.FromStorageData(item.Value)
 
 		if w.Salt.Cmp(defaultSalt) == 0 {
+			continue
+		}
+
+		if payload != nil && payload.FactoryAddress != "" && !strings.EqualFold(w.Factory.String(), payload.FactoryAddress) {
 			continue
 		}
 
@@ -232,9 +241,10 @@ func (n *Engine) CreateSmartWallet(user *model.User, payload *avsproto.GetWallet
 		factoryAddress = common.HexToAddress(payload.FactoryAddress)
 
 	}
-
 	sender, err := aa.GetSenderAddressForFactory(rpcConn, user.Address, factoryAddress, salt)
-
+	if err != nil || sender.Hex() == "0x0000000000000000000000000000000000000000" {
+		return nil, status.Errorf(codes.InvalidArgument, InvalidFactoryAddressError)
+	}
 	wallet := &model.SmartWallet{
 		Owner:   &user.Address,
 		Address: sender,
@@ -390,28 +400,40 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 }
 
 func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
-	// by default show the task from the default smart wallet, if proving we look into that wallet specifically
-	owner := user.SmartAccountAddress
-	if payload.SmartWalletAddress == "" {
+	if len(payload.SmartWalletAddress) == 0 {
 		return nil, status.Errorf(codes.InvalidArgument, MissingSmartWalletAddressError)
 	}
 
-	if !ValidWalletAddress(payload.SmartWalletAddress) {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
+	prefixes := make([]string, len(payload.SmartWalletAddress))
+	for i, smartWalletAddress := range payload.SmartWalletAddress {
+		if smartWalletAddress == "" {
+			return nil, status.Errorf(codes.InvalidArgument, MissingSmartWalletAddressError)
+		}
+
+		if !ValidWalletAddress(smartWalletAddress) {
+			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
+		}
+
+		if valid, _ := ValidWalletOwner(n.db, user, common.HexToAddress(smartWalletAddress)); !valid {
+			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
+		}
+
+		smartWallet := common.HexToAddress(smartWalletAddress)
+		prefixes[i] = string(SmartWalletTaskStoragePrefix(user.Address, smartWallet))
 	}
 
-	if valid, _ := ValidWalletOwner(n.db, user, common.HexToAddress(payload.SmartWalletAddress)); !valid {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
-	}
-
-	smartWallet := common.HexToAddress(payload.SmartWalletAddress)
-	owner = &smartWallet
-
-	taskIDs, err := n.db.GetByPrefix(SmartWalletTaskStoragePrefix(user.Address, *owner))
-
+	//taskIDs, err := n.db.GetByPrefix(SmartWalletTaskStoragePrefix(user.Address, *owner))
+	taskKeys, err := n.db.ListKeysMulti(prefixes)
 	if err != nil {
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
 	}
+
+	// second, do the sort, this is key sorted by ordering of ther insertion
+	slices.SortFunc(taskKeys, func(a, b string) int {
+		id1 := ulid.MustParse(string(model.TaskKeyToId([]byte(a[2:]))))
+		id2 := ulid.MustParse(string(model.TaskKeyToId([]byte(b[2:]))))
+		return id1.Compare(id2)
+	})
 
 	taskResp := &avsproto.ListTasksResp{
 		Items:  []*avsproto.ListTasksResp_Item{},
@@ -421,15 +443,25 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	total := 0
 	cursor, err := CursorFromString(payload.Cursor)
 	itemPerPage := int(payload.ItemPerPage)
+	if itemPerPage < 0 {
+	}
 	if itemPerPage == 0 {
 		itemPerPage = DefaultItemPerPage
 	}
-	for _, kv := range taskIDs {
-		status, _ := strconv.Atoi(string(kv.Value))
-		taskID := string(model.TaskKeyToId(kv.Key[2:]))
+
+	visited := 0
+	for i := len(taskKeys) - 1; i >= 0; i-- {
+		key := taskKeys[i]
+		visited = i
+		taskID := string(model.TaskKeyToId(([]byte(key[2:]))))
+		statusValue, err := n.db.GetKey([]byte(key))
+		if err != nil {
+			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
+		}
+		status, _ := strconv.Atoi(string(statusValue))
 
 		taskIDUlid := model.UlidFromTaskId(taskID)
-		if !cursor.AfterUlid(taskIDUlid) {
+		if !cursor.IsZero() && cursor.LessThanOrEqualUlid(taskIDUlid) {
 			continue
 		}
 
@@ -467,7 +499,8 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		}
 	}
 
-	if total >= itemPerPage {
+	taskResp.HasMore = visited > 0
+	if taskResp.HasMore {
 		taskResp.Cursor = NewCursor(CursorDirectionNext, taskResp.Items[total-1].Id).String()
 	}
 
@@ -530,6 +563,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 	if payload.IsBlocking {
 		// Run the task inline, by pass the queue system
 		executor := NewExecutor(n.db, n.logger)
+		fmt.Println("metadata", payload.TriggerMetadata)
 		execution, err := executor.RunTask(task, payload.TriggerMetadata)
 		if err == nil {
 			return &avsproto.UserTriggerTaskResp{
@@ -551,22 +585,39 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId, "jid", jid)
 	return &avsproto.UserTriggerTaskResp{
 		Result: true,
-		JobId:  fmt.Sprintf("%d", jid),
 	}, nil
 }
 
 // List Execution for a given task id
 func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
-	task, err := n.GetTaskByID(payload.Id)
-	if err != nil {
-		return nil, err
+	// Validate all tasks own by the caller, if there are any tasks won't be owned by caller, we return permission error
+	tasks := make(map[string]*model.Task)
+
+	for _, id := range payload.TaskIds {
+		task, err := n.GetTaskByID(id)
+		if err != nil {
+			return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+		}
+
+		if !task.OwnedBy(user.Address) {
+			return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+		}
+		tasks[id] = task
 	}
 
-	if !task.OwnedBy(user.Address) {
-		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+	prefixes := make([]string, len(payload.TaskIds))
+	for _, id := range payload.TaskIds {
+		prefixes = append(prefixes, string(TaskExecutionPrefix(id)))
 	}
 
-	executionKVs, err := n.db.GetByPrefix(TaskExecutionPrefix(task.Id))
+	executionKeys, err := n.db.ListKeysMulti(prefixes)
+
+	// second, do the sort, this is key sorted by ordering of ther insertion
+	slices.SortFunc(executionKeys, func(a, b string) int {
+		id1 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(a))))
+		id2 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(b))))
+		return id1.Compare(id2)
+	})
 
 	if err != nil {
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
@@ -580,18 +631,53 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	total := 0
 	cursor, err := CursorFromString(payload.Cursor)
 
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
+	}
+
 	itemPerPage := int(payload.ItemPerPage)
+	if itemPerPage < 0 {
+		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
+	}
+
 	if itemPerPage == 0 {
 		itemPerPage = DefaultItemPerPage
 	}
-	for _, kv := range executionKVs {
-		executionUlid := ulid.MustParse(string(ExecutionIdFromStorageKey(kv.Key)))
-		if !cursor.AfterUlid(executionUlid) {
+	visited := 0
+	for i := len(executionKeys) - 1; i >= 0; i-- {
+		key := executionKeys[i]
+		visited = i
+
+		executionUlid := ulid.MustParse(ExecutionIdFromStorageKey([]byte(key)))
+		if !cursor.IsZero() && cursor.LessThanOrEqualUlid(executionUlid) {
+			continue
+		}
+
+		executionValue, err := n.db.GetKey([]byte(key))
+		if err != nil {
 			continue
 		}
 
 		exec := avsproto.Execution{}
-		if err := protojson.Unmarshal(kv.Value, &exec); err == nil {
+		if err := protojson.Unmarshal(executionValue, &exec); err == nil {
+			taskId := TaskIdFromExecutionStorageKey([]byte(key))
+			task := tasks[taskId]
+			if task == nil {
+				// This cannot be happen, if it had corrupted storage
+				panic("program corrupted")
+			}
+			switch task.GetTrigger().GetTriggerType().(type) {
+			case *avsproto.TaskTrigger_Manual:
+				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Manual
+			case *avsproto.TaskTrigger_FixedTime:
+				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_FixedTime
+			case *avsproto.TaskTrigger_Cron:
+				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Cron
+			case *avsproto.TaskTrigger_Block:
+				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Block
+			case *avsproto.TaskTrigger_Event:
+				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Event
+			}
 			executioResp.Items = append(executioResp.Items, &exec)
 			total += 1
 		}
@@ -600,10 +686,45 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 		}
 	}
 
-	if total >= itemPerPage {
+	executioResp.HasMore = visited > 0
+	if executioResp.HasMore {
 		executioResp.Cursor = NewCursor(CursorDirectionNext, executioResp.Items[total-1].Id).String()
 	}
 	return executioResp, nil
+}
+
+// Get xecution for a given task id and execution id
+func (n *Engine) GetExecution(user *model.User, payload *avsproto.GetExecutionReq) (*avsproto.Execution, error) {
+	// Validate all tasks own by the caller, if there are any tasks won't be owned by caller, we return permission error
+	task, err := n.GetTaskByID(payload.TaskId)
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+	}
+
+	if !task.OwnedBy(user.Address) {
+		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+	}
+
+	executionValue, err := n.db.GetKey(TaskExecutionKey(task, payload.ExecutionId))
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.NotFound, ExecutionNotFoundError)
+	}
+	exec := avsproto.Execution{}
+	if err := protojson.Unmarshal(executionValue, &exec); err == nil {
+		switch task.GetTrigger().GetTriggerType().(type) {
+		case *avsproto.TaskTrigger_Manual:
+			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Manual
+		case *avsproto.TaskTrigger_FixedTime:
+			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_FixedTime
+		case *avsproto.TaskTrigger_Cron:
+			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Cron
+		case *avsproto.TaskTrigger_Block:
+			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Block
+		case *avsproto.TaskTrigger_Event:
+			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Event
+		}
+	}
+	return &exec, nil
 }
 
 func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error) {

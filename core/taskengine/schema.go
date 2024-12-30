@@ -66,8 +66,13 @@ func TaskExecutionKey(t *model.Task, executionID string) []byte {
 }
 
 func ExecutionIdFromStorageKey(key []byte) string {
-	// key layout: history:01JEJWH9RCPY7S74XBW135S4GA:2
+	// key layout: history:01JG2FE5MDVKBPHEG0PEYSDKAC:01JG2FE5MFKTH0754RGF2DMVY7
 	return string(key[35:])
+}
+
+func TaskIdFromExecutionStorageKey(key []byte) string {
+	// key layout: history:01JG2FE5MDVKBPHEG0PEYSDKAC:01JG2FE5MFKTH0754RGF2DMVY7
+	return string(key[8:34])
 }
 
 // Convert task status gRPC enum into the storage prefix

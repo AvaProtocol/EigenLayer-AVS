@@ -116,7 +116,7 @@ async function listTask(owner, token) {
     client,
     "ListTasks",
     {
-      smart_wallet_address: process.argv[3],
+      smart_wallet_address: process.argv[3].split(","),
       cursor: process.argv[4] || "",
       item_per_page: 2,
     },
@@ -127,7 +127,7 @@ async function listTask(owner, token) {
   for (const item of result.items) {
     console.log(util.inspect(item, { depth: 4, colors: true }));
   }
-  console.log(util.inspect({cursor: result.cursor}, { depth: 4, colors: true }));
+  console.log(util.inspect({cursor: result.cursor, hasMore: result.has_more}, { depth: 4, colors: true }));
   console.log("Note: we are returning only 2 items per page to demonstrate pagination")
 }
 
@@ -140,11 +140,20 @@ async function getTask(owner, token, taskId) {
   console.log(util.inspect(result, { depth: 4, colors: true }));
 }
 
-async function listExecutions(owner, token, taskId) {
+async function listExecutions(owner, token, ids) {
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
 
-  const result = await asyncRPC(client, "ListExecutions", { id: taskId, cursor: process.argv[4] || "", item_per_page: 200 }, metadata);
+  const result = await asyncRPC(client, "ListExecutions", { task_ids: ids.split(","), cursor: process.argv[4] || "", item_per_page: 200 }, metadata);
+
+  console.log(util.inspect(result, { depth: 4, colors: true }));
+}
+
+async function getExecution(owner, token, task, execId) {
+  const metadata = new grpc.Metadata();
+  metadata.add("authkey", token);
+
+  const result = await asyncRPC(client, "GetExecution", { task_id: task, execution_id: execId }, metadata);
 
   console.log(util.inspect(result, { depth: 4, colors: true }));
 }
@@ -178,20 +187,22 @@ async function deleteTask(owner, token, taskId) {
   console.log("Response:\n", result);
 }
 
-async function triggerTask(owner, token, taskId, triggerMark) {
+async function triggerTask(owner, token, taskId, triggerMetadata) {
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
+
+  console.log("triggermark", triggerMetadata)
 
   const result = await asyncRPC(
     client,
     "TriggerTask",
     // If want to run async, comment this line out
-    //{ task_id: taskId, triggerMark, },
-    { task_id: taskId, triggerMark, is_blocking: true },
+    //{ task_id: taskId, triggerMetadata, },
+    { task_id: taskId, trigger_metadata: JSON.parse(triggerMetadata), is_blocking: true },
     metadata
   );
 
-  console.log("request", { task_id: taskId, triggerMark })
+  console.log("request", { task_id: taskId, triggerMetadata })
 
   console.log("Response:\n", result);
 }
@@ -261,7 +272,7 @@ const createWallet = async (owner, token, salt, factoryAddress) => {
 
   return await asyncRPC(
     client,
-    "CreateWallet",
+    "GetWallet",
     { salt, factoryAddress },
     metadata
   );
@@ -364,6 +375,9 @@ const main = async (cmd) => {
     case "executions":
       await listExecutions(owner, token, process.argv[3]);
       break;
+    case "execution":
+      await getExecution(owner, token, process.argv[3], process.argv[4]);
+      break;
     case "cancel":
       await cancel(owner, token, process.argv[3]);
       break;
@@ -389,21 +403,23 @@ const main = async (cmd) => {
     default:
       console.log(`Usage:
 
-      create-wallet <salt> <factory-address(optional)>: to create a smart wallet with a salt, and optionally a factory contract
-      wallet:                                 to list smart wallet address that has been created. note that a default wallet with salt=0 will automatically created
-      tasks <smart-wallet-address>:           to list all tasks of given smart wallet address
-      get <task-id>:                          to get task detail. a permission error is throw if the eoa isn't the smart wallet owner.
-      executions <task-id>:                   to get task execution history. a permission error is throw if the eoa isn't the smart wallet owner.
-      schedule <smart-wallet-address>:        to schedule a task that run on every block, with chainlink eth-usd its condition will be matched quickly
-      schedule-cron <smart-wallet-address>:   to schedule a task that run on cron
-      schedule-event <smart-wallet-address>:  to schedule a task that run on occurenct of an event
-      schedule-generic:                       to schedule a task with an arbitrary contract query
-      monitor-address <wallet-address>:       to monitor erc20 in/out for an address
-      trigger <task-id> <trigger-mark>:       manually trigger a task. Example:
-                                                trigger abcdef '{"block_number":1234}' for blog trigger
-                                                trigger abcdef '{"block_number":1234, "log_index":312,"tx_hash":"0x123"}' for event trigger
-      cancel <task-id>:                       to cancel a task
-      delete <task-id>:                       to completely remove a task`);
+      create-wallet <salt> <factory-address(optional)>:        to create a smart wallet with a salt, and optionally a factory contract
+      wallet:                                                  to list smart wallet address that has been created. note that a default wallet with salt=0 will automatically created
+      tasks <smart-wallet-address>,<another-smart-wallet>,...: to list all tasks of given smart wallet address
+      get <task-id>:                                           to get task detail. a permission error is throw if the eoa isn't the smart wallet owner.
+      executions <task-id>:                                    to get task execution history. a permission error is throw if the eoa isn't the smart wallet owner.
+      execution <task-id> <executio-id>:                       to get a single task execution history. a permission error is throw if the eoa isn't the smart wallet owner.
+      schedule <smart-wallet-address>:                         to schedule a task that run on every block, with chainlink eth-usd its condition will be matched quickly
+      schedule-cron <smart-wallet-address>:                    to schedule a task that run on cron
+      schedule-event <smart-wallet-address>:                   to schedule a task that run on occurenct of an event
+      schedule-generic:                                        to schedule a task with an arbitrary contract query
+      monitor-address <wallet-address>:                        to monitor erc20 in/out for an address
+      trigger <task-id> <trigger-mark>:                        manually trigger a task. Example:
+                                                                 trigger abcdef '{"block_number":1234}' for blog trigger
+                                                                 trigger abcdef '{"block_number":1234, "log_index":312,"tx_hash":"0x123"}' for event trigger
+                                                                 trigger abcdef '{"epoch":1234, "log_index":312,"tx_hash":"0x123"}' for time based trigger (fixed or cron)
+      cancel <task-id>:                                        to cancel a task
+      delete <task-id>:                                        to completely remove a task`);
   }
 };
 

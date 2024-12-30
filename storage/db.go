@@ -31,6 +31,7 @@ type Storage interface {
 
 	// A key only operation that returns key that has a prefix
 	ListKeys(prefix string) ([]string, error)
+	ListKeysMulti(prefixes []string) ([]string, error)
 
 	BatchWrite(updates map[string][]byte) error
 	Move(src, dest []byte) error
@@ -309,6 +310,25 @@ func (a *BadgerStorage) ListKeys(prefix string) ([]string, error) {
 	}
 
 	return nil, err
+}
+
+// ListKeys from multiple suffix. This is similar to a join in RDBMS
+func (a *BadgerStorage) ListKeysMulti(prefixes []string) ([]string, error) {
+	var keys []string
+
+	for _, prefix := range prefixes {
+		if len(prefix) == 0 {
+			continue
+		}
+
+		data, err := a.ListKeys(prefix)
+		if err != nil {
+			continue
+		}
+		keys = append(keys, data...)
+	}
+
+	return keys, nil
 }
 
 func (a *BadgerStorage) Vacuum() error {

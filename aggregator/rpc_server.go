@@ -53,6 +53,7 @@ func (r *RpcServer) GetWallet(ctx context.Context, payload *avsproto.GetWalletRe
 	r.config.Logger.Info("process create wallet",
 		"user", user.Address.String(),
 		"salt", payload.Salt,
+		"factory", payload.FactoryAddress,
 	)
 
 	return r.engine.CreateSmartWallet(user, payload)
@@ -82,7 +83,7 @@ func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalle
 	r.config.Logger.Info("process list wallet",
 		"address", user.Address.String(),
 	)
-	wallets, err := r.engine.GetSmartWallets(user.Address)
+	wallets, err := r.engine.GetSmartWallets(user.Address, payload)
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "rpc server is unavailable, retry later. %s", err.Error())
 	}
@@ -157,6 +158,7 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 	r.config.Logger.Info("process list task",
 		"user", user.Address.String(),
 		"smart_wallet_address", payload.SmartWalletAddress,
+		"cursor", payload.Cursor,
 	)
 	return r.engine.ListTasksByUser(user, payload)
 }
@@ -169,9 +171,24 @@ func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListEx
 
 	r.config.Logger.Info("process list execution",
 		"user", user.Address.String(),
-		"task_id", payload.Id,
+		"task_id", payload.TaskIds,
+		"cursor", payload.Cursor,
 	)
 	return r.engine.ListExecutions(user, payload)
+}
+
+func (r *RpcServer) GetExecution(ctx context.Context, payload *avsproto.GetExecutionReq) (*avsproto.Execution, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process get execution",
+		"user", user.Address.String(),
+		"task_id", payload.TaskId,
+		"execution_id", payload.ExecutionId,
+	)
+	return r.engine.GetExecution(user, payload)
 }
 
 func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsproto.Task, error) {
