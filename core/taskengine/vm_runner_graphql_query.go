@@ -23,7 +23,6 @@ type GraphqlQueryProcessor struct {
 func NewGraphqlQueryProcessor(vm *VM, endpoint string) (*GraphqlQueryProcessor, error) {
 	sb := &strings.Builder{}
 	log := func(s string) {
-		fmt.Println("LOGLOG", s)
 		sb.WriteString(s)
 	}
 
