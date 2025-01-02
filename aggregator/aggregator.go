@@ -21,7 +21,6 @@ import (
 	"github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/core/taskengine"
 	"github.com/AvaProtocol/ap-avs/version"
-	"github.com/Layr-Labs/eigensdk-go/chainio/clients"
 	sdkclients "github.com/Layr-Labs/eigensdk-go/chainio/clients"
 	blsagg "github.com/Layr-Labs/eigensdk-go/services/bls_aggregation"
 	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
@@ -66,7 +65,7 @@ func RunWithConfig(configPath string) error {
 // block number by calling the getOperatorState() function of the BLSOperatorStateRetriever.sol contract.
 type Aggregator struct {
 	logger    logging.Logger
-	avsWriter chainio.AvsWriterer
+	avsWriter *chainio.AvsWriter
 
 	// aggregation related fields
 	blsAggregationService blsagg.BlsAggregationService
@@ -107,9 +106,7 @@ func NewAggregator(c *config.Config) (*Aggregator, error) {
 	avsWriter, err := chainio.BuildAvsWriterFromConfig(c)
 	if err != nil {
 		c.Logger.Errorf("Cannot create avsWriter", "err", err)
-		// TODO: Upgrade EigenSDK to use the new Slash Manager
-		// EigenLayer has update the contract and we cannot fetch the slasher anymore, we should upgrade the EigenSDK, right now we don't use it so it's ok to ignore this error
-		//return nil, err
+		return nil, err
 	}
 
 	go func() {
@@ -121,12 +118,10 @@ func NewAggregator(c *config.Config) (*Aggregator, error) {
 			AvsName:                    avsName,
 			PromMetricsIpPortAddress:   ":9090",
 		}
-		clients, err := clients.BuildAll(chainioConfig, c.EcdsaPrivateKey, c.Logger)
+		clients, err := sdkclients.BuildAll(chainioConfig, c.EcdsaPrivateKey, c.Logger)
 		if err != nil {
-			c.Logger.Errorf("Cannot create sdk clients", "err", err)
-			// TODO: Upgrade EigenSDK to use the new Slash Manager
-			// EigenLayer has update the contract and we cannot fetch the slasher anymore, we should upgrade the EigenSDK, right now we don't use it so it's ok to ignore this error
-			//panic(err)
+			c.Logger.Error("Cannot create sdk clients", "err", err)
+			panic(err)
 		}
 		c.Logger.Info("create avsrrader and client", "avsReader", avsReader, "clients", clients)
 	}()

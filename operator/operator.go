@@ -36,7 +36,6 @@ import (
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	sdkmetrics "github.com/Layr-Labs/eigensdk-go/metrics"
 	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
-	sdkutils "github.com/Layr-Labs/eigensdk-go/utils"
 
 	//"github.com/AvaProtocol/ap-avs/aggregator"
 	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
@@ -52,6 +51,7 @@ import (
 	"github.com/AvaProtocol/ap-avs/version"
 
 	triggerengine "github.com/AvaProtocol/ap-avs/core/taskengine/trigger"
+	 "github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/pkg/ipfetcher"
 	"github.com/AvaProtocol/ap-avs/pkg/timekeeper"
 )
@@ -104,17 +104,17 @@ type OperatorConfig struct {
 type Operator struct {
 	config      *OperatorConfig
 	logger      logging.Logger
-	ethClient   eth.Client
-	ethWsClient eth.Client
+	ethClient   *eth.InstrumentedClient
+	ethWsClient *eth.InstrumentedClient
 	txManager   *txmgr.SimpleTxManager
 
 	metricsReg       *prometheus.Registry
 	metrics          metrics.MetricsGenerator
 	nodeApi          *nodeapi.NodeApi
 	avsWriter        *chainio.AvsWriter
-	avsReader        chainio.AvsReaderer
-	eigenlayerReader sdkelcontracts.ELReader
-	eigenlayerWriter sdkelcontracts.ELWriter
+	avsReader        *chainio.AvsReader
+	eigenlayerReader *sdkelcontracts.ChainReader
+	eigenlayerWriter *sdkelcontracts.ChainWriter
 
 	// either keypair or RemoteSigner need to be defined
 	blsKeypair      *bls.KeyPair
@@ -161,7 +161,7 @@ func RunWithConfig(configPath string) {
 
 func NewOperatorFromConfigFile(configPath string) (*Operator, error) {
 	nodeConfig := OperatorConfig{}
-	err := sdkutils.ReadYamlConfig(configPath, &nodeConfig)
+	err := config.ReadYamlConfig(configPath, &nodeConfig)
 
 	if err != nil {
 		panic(fmt.Errorf("failed to parse config file: %w\nMake sure %s is exist and a valid yaml file %w.", configPath, err))
@@ -192,9 +192,12 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	nodeApi := nodeapi.NewNodeApi(AVS_NAME, version.Get(), c.NodeApiIpPortAddress, logger)
 
 	logger.Infof("%s operator version %s", AVS_NAME, version.Get())
-	var ethRpcClient, ethWsClient eth.Client
-	if c.EnableMetrics {
+
+	var ethRpcClient *eth.InstrumentedClient
+	var ethWsClient *eth.InstrumentedClient
+
 		rpcCallsCollector := rpccalls.NewCollector(AVS_NAME, reg)
+	if c.EnableMetrics {
 		ethRpcClient, err = eth.NewInstrumentedClient(c.EthRpcUrl, rpcCallsCollector)
 		if err != nil {
 			logger.Errorf("Cannot create http ethclient", "err", err)
@@ -206,12 +209,12 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 			return nil, err
 		}
 	} else {
-		ethRpcClient, err = eth.NewClient(c.EthRpcUrl)
+		ethRpcClient, err = eth.NewInstrumentedClient(c.EthRpcUrl, rpcCallsCollector)
 		if err != nil {
 			logger.Errorf("Cannot create http ethclient", "err", err)
 			return nil, err
 		}
-		ethWsClient, err = eth.NewClient(c.EthWsUrl)
+		ethWsClient, err = eth.NewInstrumentedClient(c.EthWsUrl, rpcCallsCollector)
 		if err != nil {
 			logger.Errorf("Cannot create ws ethclient", "err", err)
 			return nil, err
@@ -297,9 +300,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	)
 	if err != nil {
 		logger.Error("Cannot create AvsWriter", "err", err)
-		// TODO: Upgrade EigenSDK to use the new Slash Manager
-		// EigenLayer has update the contract and we cannot fetch the slasher anymore, we should upgrade the EigenSDK, right now we don't use it so it's ok to ignore this error
-		//return nil, err
+		return nil, err
 	}
 
 	avsReader, err := chainio.BuildAvsReader(
@@ -308,9 +309,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		ethRpcClient, logger)
 	if err != nil {
 		logger.Error("Cannot create AvsReader", "err", err)
-		// TODO: Upgrade EigenSDK to use the new Slash Manager
-		// EigenLayer has update the contract and we cannot fetch the slasher anymore, we should upgrade the EigenSDK, right now we don't use it so it's ok to ignore this error
-		//return nil, err
+		return nil, err
 	}
 	// avsSubscriber, err := chainio.BuildAvsSubscriber(common.HexToAddress(c.AVSRegistryCoordinatorAddress),
 	// 	common.HexToAddress(c.OperatorStateRetrieverAddress), ethWsClient, logger,

@@ -3,15 +3,21 @@ package config
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
+	"log"
+	"os"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/prometheus/client_golang/prometheus"
+	"gopkg.in/yaml.v2"
 
 	"github.com/Layr-Labs/eigensdk-go/chainio/clients/eth"
 	"github.com/Layr-Labs/eigensdk-go/chainio/clients/wallet"
 	"github.com/Layr-Labs/eigensdk-go/chainio/txmgr"
 	"github.com/Layr-Labs/eigensdk-go/crypto/bls"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
+	rpccalls "github.com/Layr-Labs/eigensdk-go/metrics/collectors/rpc_calls"
 	"github.com/Layr-Labs/eigensdk-go/signerv2"
 
 	sdkutils "github.com/Layr-Labs/eigensdk-go/utils"
@@ -29,8 +35,8 @@ type Config struct {
 	// only take an ethclient or an rpcUrl (and build the ethclient at each constructor site)
 	EthHttpRpcUrl                     string
 	EthWsRpcUrl                       string
-	EthHttpClient                     eth.Client
-	EthWsClient                       eth.Client
+	EthHttpClient                     *eth.InstrumentedClient
+	EthWsClient                       *eth.InstrumentedClient
 	OperatorStateRetrieverAddr        common.Address
 	AutomationRegistryCoordinatorAddr common.Address
 	RpcBindAddress                    string
@@ -50,6 +56,8 @@ type Config struct {
 	Environment sdklogging.LogLevel
 
 	Macros map[string]string
+
+	MetricsReg       *prometheus.Registry
 }
 
 type SmartWalletConfig struct {
@@ -107,7 +115,7 @@ type AutomationContractsRaw struct {
 func NewConfig(configFilePath string) (*Config, error) {
 	var configRaw ConfigRaw
 	if configFilePath != "" {
-		sdkutils.ReadYamlConfig(configFilePath, &configRaw)
+		ReadYamlConfig(configFilePath, &configRaw)
 	}
 
 	logger, err := sdklogging.NewZapLogger(configRaw.Environment)
@@ -115,13 +123,16 @@ func NewConfig(configFilePath string) (*Config, error) {
 		return nil, err
 	}
 
-	ethRpcClient, err := eth.NewClient(configRaw.EthRpcUrl)
+	reg := prometheus.NewRegistry()
+	rpcCallsCollector := rpccalls.NewCollector("exampleAvs", reg)
+
+	ethRpcClient, err := eth.NewInstrumentedClient(configRaw.EthRpcUrl, rpcCallsCollector)
 	if err != nil {
 		logger.Errorf("Cannot create http ethclient", "err", err)
 		return nil, err
 	}
 
-	ethWsClient, err := eth.NewClient(configRaw.EthWsUrl)
+	ethWsClient, err := eth.NewInstrumentedClient(configRaw.EthWsUrl, rpcCallsCollector)
 	if err != nil {
 		logger.Errorf("Cannot create ws ethclient", "err", err)
 		return nil, err
@@ -193,6 +204,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 
 		SocketPath: configRaw.SocketPath,
 		Macros:     configRaw.Macros,
+		MetricsReg: reg,
 	}
 
 	if config.SocketPath == "" {
@@ -210,4 +222,21 @@ func (c *Config) validate() {
 	if c.AutomationRegistryCoordinatorAddr == common.HexToAddress("") {
 		panic("Config: AutomationRegistryCoordinatorAddr is required")
 	}
+}
+
+func ReadYamlConfig(path string, o interface{}) error {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		log.Fatal("Path ", path, " does not exist")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	err = yaml.Unmarshal(b, o)
+	if err != nil {
+		log.Fatalf("unable to parse file with error %#v", err)
+	}
+
+	return nil
 }
