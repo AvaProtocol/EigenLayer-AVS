@@ -177,7 +177,7 @@ func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListEx
 	return r.engine.ListExecutions(user, payload)
 }
 
-func (r *RpcServer) GetExecution(ctx context.Context, payload *avsproto.GetExecutionReq) (*avsproto.GetExecutionResp, error) {
+func (r *RpcServer) GetExecution(ctx context.Context, payload *avsproto.ExecutionReq) (*avsproto.Execution, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
@@ -189,6 +189,20 @@ func (r *RpcServer) GetExecution(ctx context.Context, payload *avsproto.GetExecu
 		"execution_id", payload.ExecutionId,
 	)
 	return r.engine.GetExecution(user, payload)
+}
+
+func (r *RpcServer) GetExecutionStatus(ctx context.Context, payload *avsproto.ExecutionReq) (*avsproto.ExecutionStatusResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process get execution",
+		"user", user.Address.String(),
+		"task_id", payload.TaskId,
+		"execution_id", payload.ExecutionId,
+	)
+	return r.engine.GetExecutionStatus(user, payload)
 }
 
 func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsproto.Task, error) {

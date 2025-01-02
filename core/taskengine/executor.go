@@ -76,6 +76,11 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 }
 
 func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) (*avsproto.Execution, error) {
+	defer func() {
+		// Delete the task trigger queue when we're done, the execution log is available in main task storage at this point
+		x.db.GetKey(TaskTriggerKey(task, queueData.ExecutionID))
+	}()
+
 	if queueData == nil || queueData.ExecutionID == "" {
 		return nil, fmt.Errorf("internal error: invalid execution id")
 	}

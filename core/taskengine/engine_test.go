@@ -208,22 +208,22 @@ func TestGetExecution(t *testing.T) {
 		IsBlocking: true,
 	})
 
-	// Now get back that exectuon id
-	execution, err := n.GetExecution(testutil.TestUser1(), &avsproto.GetExecutionReq{
+	// Now get back that execution data using the log
+	execution, err := n.GetExecution(testutil.TestUser1(), &avsproto.ExecutionReq{
 		TaskId:      result.Id,
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 
-	if execution.Data.Id != resultTrigger.ExecutionId {
-		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Data.Id)
+	if execution.Id != resultTrigger.ExecutionId {
+		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
 
-	if execution.Data.TriggerMetadata.BlockNumber != 101 {
-		t.Errorf("invalid triggered block. expect 101 got %d", execution.Data.TriggerMetadata.BlockNumber)
+	if execution.TriggerMetadata.BlockNumber != 101 {
+		t.Errorf("invalid triggered block. expect 101 got %d", execution.TriggerMetadata.BlockNumber)
 	}
 
 	// Another user cannot get this executin id
-	execution, err = n.GetExecution(testutil.TestUser2(), &avsproto.GetExecutionReq{
+	execution, err = n.GetExecution(testutil.TestUser2(), &avsproto.ExecutionReq{
 		TaskId:      result.Id,
 		ExecutionId: resultTrigger.ExecutionId,
 	})
@@ -318,21 +318,17 @@ func TestTriggerSync(t *testing.T) {
 	}
 
 	// Now get back that execution id
-	execution, err := n.GetExecution(testutil.TestUser1(), &avsproto.GetExecutionReq{
+	execution, err := n.GetExecution(testutil.TestUser1(), &avsproto.ExecutionReq{
 		TaskId:      result.Id,
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 
-	if execution.Status != avsproto.GetExecutionResp_Completed {
-		t.Errorf("invalid execution status, expected conpleted but got %s", avsproto.GetExecutionResp_ExecutionStatus_name[int32(execution.Status)])
+	if execution.Id != resultTrigger.ExecutionId {
+		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
 
-	if execution.Data.Id != resultTrigger.ExecutionId {
-		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Data.Id)
-	}
-
-	if execution.Data.TriggerMetadata.BlockNumber != 101 {
-		t.Errorf("invalid triggered block. expect 101 got %d", execution.Data.TriggerMetadata.BlockNumber)
+	if execution.TriggerMetadata.BlockNumber != 101 {
+		t.Errorf("invalid triggered block. expect 101 got %d", execution.TriggerMetadata.BlockNumber)
 	}
 }
 
@@ -374,43 +370,46 @@ func TestTriggerAsync(t *testing.T) {
 
 	// Now get back that execution id, because the task is run async we won't have any data yet,
 	// just the status for now
-	execution, err := n.GetExecution(testutil.TestUser1(), &avsproto.GetExecutionReq{
+	executionStatus, err := n.GetExecutionStatus(testutil.TestUser1(), &avsproto.ExecutionReq{
 		TaskId:      result.Id,
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 
-	if execution.Data != nil {
-		t.Errorf("malform execution result. expect no data but got %s", execution.Data)
-	}
-
-	if execution.Status != avsproto.GetExecutionResp_Queue {
-		t.Errorf("invalid execution status, expected queue but got %s", avsproto.GetExecutionResp_ExecutionStatus_name[int32(execution.Status)])
+	if executionStatus.Status != avsproto.ExecutionStatus_Queued {
+		t.Errorf("invalid execution status, expected queue but got %s", avsproto.TaskStatus_name[int32(executionStatus.Status)])
 	}
 
 	// Now let the queue start and process job
 	// In our end to end system the worker will process the job eventually
 	worker.ProcessSignal(1)
 
-	execution, err = n.GetExecution(testutil.TestUser1(), &avsproto.GetExecutionReq{
+	execution, err := n.GetExecution(testutil.TestUser1(), &avsproto.ExecutionReq{
 		TaskId:      result.Id,
 		ExecutionId: resultTrigger.ExecutionId,
 	})
-	if execution.Status != avsproto.GetExecutionResp_Completed {
-		t.Errorf("invalid execution status, expected completed but got %s", avsproto.GetExecutionResp_ExecutionStatus_name[int32(execution.Status)])
+
+	if execution.Id != resultTrigger.ExecutionId {
+		t.Errorf("wring execution id, expected %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
 
-	if execution.Data.Id != resultTrigger.ExecutionId {
-		t.Errorf("wring execution id, expected %s got %s", resultTrigger.ExecutionId, execution.Data.Id)
-	}
-
-	if !execution.Data.Success {
+	if !execution.Success {
 		t.Errorf("wrong success result, expected true got false")
 	}
 
-	if execution.Data.Steps[0].NodeId != "ping1" {
+	if execution.Steps[0].NodeId != "ping1" {
 		t.Errorf("wrong node id in execution log")
 	}
-	if !strings.Contains(execution.Data.Steps[0].OutputData, "httpbin.org") {
+	if !strings.Contains(execution.Steps[0].OutputData, "httpbin.org") {
 		t.Error("Invalid output data")
+	}
+
+	// If we get the status back it also reflected
+	executionStatus, err = n.GetExecutionStatus(testutil.TestUser1(), &avsproto.ExecutionReq{
+		TaskId:      result.Id,
+		ExecutionId: resultTrigger.ExecutionId,
+	})
+
+	if executionStatus.Status != avsproto.ExecutionStatus_Finished {
+		t.Errorf("invalid execution status, expected completed but got %s", avsproto.TaskStatus_name[int32(executionStatus.Status)])
 	}
 }

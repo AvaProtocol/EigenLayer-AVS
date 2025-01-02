@@ -81,10 +81,17 @@ enum Error {
 // TaskStatus represents status of the task. The transition is as follow
 enum TaskStatus {
   Active    = 0;
+  // Task is completd when it's reaching its max_execution or its expiration time
   Completed = 1;
   Failed    = 2;
   Canceled  = 3;
   Executing = 4;
+}
+
+// Execution Status re-present a run of the task
+enum ExecutionStatus {
+  Queued = 0;
+  Finished = 2;
 }
 
 message ETHTransferNode {
@@ -210,7 +217,7 @@ message TaskNode {
 }
 
 message Execution {
-  string id       = 1;
+  string id      = 1;
   int64 start_at = 2;
   int64 end_at   = 3;
   bool   success = 4;
@@ -233,6 +240,7 @@ message Execution {
 
   repeated Step steps = 8;
 }
+
 
 message Task {
   string id                   = 1;
@@ -357,22 +365,13 @@ message ListExecutionsResp {
   bool has_more = 4;
 }
 
-message GetExecutionReq {
+message ExecutionReq {
   string task_id = 1;
   string execution_id = 2;
 }
 
-message GetExecutionResp {
-  enum ExecutionStatus {
-    Queue    = 0; // execution is schedule to run in our system
-    Running  = 1; // execution is actively running right now
-    Completed = 2; // execution is finished. The outcome (whether the execution finished without or with error can be access by looking into the data
-  }
-
+message ExecutionStatusResp {
   ExecutionStatus status = 1;
-  // when the execution is queue or running, we don't have all the data yet, so this field will be null.
-  // when the status changed to "completed", the payload will be returned
-  Execution       data   = 2;
 }
 
 message GetKeyReq {
@@ -440,8 +439,9 @@ message UserTriggerTaskResp {
   // Regardless whether it is a block or async, we always get back the same kind of id for this trigger.
   // The caller then make a second request to GetExecution to check for the execution status and data.
   // In the blocking mode, the execution_id is materialized and has been created, we can then call GetExecution on it immediately to receive result
-  // In async mode, the execution_id is created ahead of time and not materialized, calling GetExecution on it will return Status=Pending for example
+  // In async mode, the execution_id is created ahead of time and not materialized, calling GetExecutionStatus on it will return Status=Pending for example. Once Status=Completed you can call GetExecution to get all log and detail. Call GetExecution before it is completed will result in "Execution Not Found"
   string execution_id = 1;
+  ExecutionStatus status = 2;
 }
 
 service Aggregator {
@@ -458,7 +458,9 @@ service Aggregator {
   rpc ListTasks(ListTasksReq)           returns (ListTasksResp) {};
   rpc GetTask(IdReq)                    returns (Task) {};
   rpc ListExecutions(ListExecutionsReq) returns (ListExecutionsResp) {};
-  rpc GetExecution(GetExecutionReq)     returns (GetExecutionResp) {};
+
+  rpc GetExecution(ExecutionReq)     returns (Execution) {};
+  rpc GetExecutionStatus(ExecutionReq)     returns (ExecutionStatusResp) {};
 
   rpc CancelTask(IdReq)                 returns (google.protobuf.BoolValue) {};
   rpc DeleteTask(IdReq)                 returns (google.protobuf.BoolValue) {};

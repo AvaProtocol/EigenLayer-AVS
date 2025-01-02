@@ -706,11 +706,11 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 }
 
 func (n *Engine) setExecutionStatusQueue(task *model.Task, executionID string) error {
-	status := strconv.Itoa(int(avsproto.GetExecutionResp_Queue))
+	status := strconv.Itoa(int(avsproto.ExecutionStatus_Queued))
 	return n.db.Set(TaskTriggerKey(task, executionID), []byte(status))
 }
 
-func (n *Engine) getExecutonStatusFromQueue(task *model.Task, executionID string) (*avsproto.GetExecutionResp_ExecutionStatus, error) {
+func (n *Engine) getExecutonStatusFromQueue(task *model.Task, executionID string) (*avsproto.ExecutionStatus, error) {
 	status, err := n.db.GetKey(TaskTriggerKey(task, executionID))
 	if err != nil {
 		return nil, err
@@ -720,12 +720,12 @@ func (n *Engine) getExecutonStatusFromQueue(task *model.Task, executionID string
 	if err != nil {
 		return nil, err
 	}
-	statusValue := avsproto.GetExecutionResp_ExecutionStatus(value)
+	statusValue := avsproto.ExecutionStatus(value)
 	return &statusValue, nil
 }
 
 // Get xecution for a given task id and execution id
-func (n *Engine) GetExecution(user *model.User, payload *avsproto.GetExecutionReq) (*avsproto.GetExecutionResp, error) {
+func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) (*avsproto.Execution, error) {
 	// Validate all tasks own by the caller, if there are any tasks won't be owned by caller, we return permission error
 	task, err := n.GetTaskByID(payload.TaskId)
 
@@ -739,12 +739,6 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.GetExecutionRe
 
 	executionValue, err := n.db.GetKey(TaskExecutionKey(task, payload.ExecutionId))
 	if err != nil {
-		// When execution not found, it could be in pending status, we will check that storage
-		if status, err := n.getExecutonStatusFromQueue(task, payload.ExecutionId); err == nil {
-			return &avsproto.GetExecutionResp{
-				Status: *status,
-			}, nil
-		}
 		return nil, grpcstatus.Errorf(codes.NotFound, ExecutionNotFoundError)
 	}
 	exec := avsproto.Execution{}
@@ -763,11 +757,36 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.GetExecutionRe
 		}
 	}
 
-	result := &avsproto.GetExecutionResp{
-		Status: avsproto.GetExecutionResp_Completed,
-		Data:   &exec,
+	return &exec, nil
+}
+
+func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.ExecutionReq) (*avsproto.ExecutionStatusResp, error) {
+	task, err := n.GetTaskByID(payload.TaskId)
+
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
-	return result, nil
+
+	if !task.OwnedBy(user.Address) {
+		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+	}
+
+	// First look into execution first
+	if _, err = n.db.GetKey(TaskExecutionKey(task, payload.ExecutionId)); err != nil {
+		// When execution not found, it could be in pending status, we will check that storage
+		if status, err := n.getExecutonStatusFromQueue(task, payload.ExecutionId); err == nil {
+			return &avsproto.ExecutionStatusResp{
+				Status: *status,
+			}, nil
+		}
+		return nil, fmt.Errorf("invalid ")
+	}
+
+	// if the key existed, the execution has finished, no need to decode the whole storage, we just return the status in this call
+	return &avsproto.ExecutionStatusResp{
+		Status: avsproto.ExecutionStatus_Finished,
+	}, nil
+
 }
 
 func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error) {
