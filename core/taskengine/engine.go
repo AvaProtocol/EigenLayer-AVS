@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	ExecuteTask        = "execute_task"
+	JobTypeExecuteTask = "execute_task"
 	DefaultItemPerPage = 50
 )
 
@@ -390,13 +390,18 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	n.logger.Info("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
 	n.lock.Unlock()
 
-	data, err := json.Marshal(payload.TriggerMetadata)
+	queueTaskData := QueueExecutionData{
+		TriggerMetadata: payload.TriggerMetadata,
+		ExecutionID:     ulid.Make().String(),
+	}
+
+	data, err := json.Marshal(queueTaskData)
 	if err != nil {
 		n.logger.Error("error serialize trigger to json", err)
 		return err
 	}
 
-	n.queue.Enqueue(ExecuteTask, payload.TaskId, data)
+	n.queue.Enqueue(JobTypeExecuteTask, payload.TaskId, data)
 	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId)
 
 	// if the task can still run, add it back
@@ -558,36 +563,40 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
-	data, err := json.Marshal(payload.TriggerMetadata)
-	if err != nil {
-		n.logger.Error("error serialize trigger to json", err)
-		return nil, status.Errorf(codes.InvalidArgument, codes.InvalidArgument.String())
+	queueTaskData := QueueExecutionData{
+		TriggerMetadata: payload.TriggerMetadata,
+		ExecutionID:     ulid.Make().String(),
 	}
 
 	if payload.IsBlocking {
 		// Run the task inline, by pass the queue system
 		executor := NewExecutor(n.db, n.logger)
-		execution, err := executor.RunTask(task, payload.TriggerMetadata)
+		execution, err := executor.RunTask(task, &queueTaskData)
 		if err == nil {
 			return &avsproto.UserTriggerTaskResp{
-				Result:      true,
 				ExecutionId: execution.Id,
 			}, nil
 		}
 
-		return &avsproto.UserTriggerTaskResp{
-			Result: false,
-		}, err
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskTriggerError), fmt.Sprintf("error trigger task: %s", err.Error()))
 	}
 
-	jid, err := n.queue.Enqueue(ExecuteTask, payload.TaskId, data)
+	data, err := json.Marshal(queueTaskData)
 	if err != nil {
+		n.logger.Error("error serialize trigger to json", err)
+		return nil, status.Errorf(codes.InvalidArgument, codes.InvalidArgument.String())
+	}
+
+	jid, err := n.queue.Enqueue(JobTypeExecuteTask, payload.TaskId, data)
+	if err != nil {
+		n.logger.Error("error enqueue job %s %s %w", payload.TaskId, string(data), err)
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageQueueUnavailableError)
 	}
 
-	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId, "jid", jid)
+	n.setExecutionStatusQueue(task, queueTaskData.ExecutionID)
+	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId, "jid", jid, "execution_id", queueTaskData.ExecutionID)
 	return &avsproto.UserTriggerTaskResp{
-		Result: true,
+		ExecutionId: queueTaskData.ExecutionID,
 	}, nil
 }
 
@@ -696,10 +705,30 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	return executioResp, nil
 }
 
+func (n *Engine) setExecutionStatusQueue(task *model.Task, executionID string) error {
+	status := strconv.Itoa(int(avsproto.GetExecutionResp_Queue))
+	return n.db.Set(TaskTriggerKey(task, executionID), []byte(status))
+}
+
+func (n *Engine) getExecutonStatusFromQueue(task *model.Task, executionID string) (*avsproto.GetExecutionResp_ExecutionStatus, error) {
+	status, err := n.db.GetKey(TaskTriggerKey(task, executionID))
+	if err != nil {
+		return nil, err
+	}
+
+	value, err := strconv.Atoi(string(status))
+	if err != nil {
+		return nil, err
+	}
+	statusValue := avsproto.GetExecutionResp_ExecutionStatus(value)
+	return &statusValue, nil
+}
+
 // Get xecution for a given task id and execution id
-func (n *Engine) GetExecution(user *model.User, payload *avsproto.GetExecutionReq) (*avsproto.Execution, error) {
+func (n *Engine) GetExecution(user *model.User, payload *avsproto.GetExecutionReq) (*avsproto.GetExecutionResp, error) {
 	// Validate all tasks own by the caller, if there are any tasks won't be owned by caller, we return permission error
 	task, err := n.GetTaskByID(payload.TaskId)
+
 	if err != nil {
 		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
@@ -710,6 +739,12 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.GetExecutionRe
 
 	executionValue, err := n.db.GetKey(TaskExecutionKey(task, payload.ExecutionId))
 	if err != nil {
+		// When execution not found, it could be in pending status, we will check that storage
+		if status, err := n.getExecutonStatusFromQueue(task, payload.ExecutionId); err == nil {
+			return &avsproto.GetExecutionResp{
+				Status: *status,
+			}, nil
+		}
 		return nil, grpcstatus.Errorf(codes.NotFound, ExecutionNotFoundError)
 	}
 	exec := avsproto.Execution{}
@@ -727,7 +762,12 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.GetExecutionRe
 			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Event
 		}
 	}
-	return &exec, nil
+
+	result := &avsproto.GetExecutionResp{
+		Status: avsproto.GetExecutionResp_Completed,
+		Data:   &exec,
+	}
+	return result, nil
 }
 
 func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error) {

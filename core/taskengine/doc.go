@@ -11,6 +11,7 @@ w:<eoa>:<smart-wallet-address> -> {factory, salt}
 t:<task-status>:<task-id>      -> task payload, the source of truth of task information
 u:<eoa>:<smart-wallet-address>:<task-id>    -> task status
 history:<task-id>:<execution-id> -> an execution history
+trigger:<task-id>:<execution-id> -> execution status
 
 The task storage was designed for fast retrieve time at the cost of extra storage.
 

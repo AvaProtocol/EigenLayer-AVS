@@ -177,7 +177,7 @@ func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListEx
 	return r.engine.ListExecutions(user, payload)
 }
 
-func (r *RpcServer) GetExecution(ctx context.Context, payload *avsproto.GetExecutionReq) (*avsproto.Execution, error) {
+func (r *RpcServer) GetExecution(ctx context.Context, payload *avsproto.GetExecutionReq) (*avsproto.GetExecutionResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())

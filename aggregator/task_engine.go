@@ -30,7 +30,7 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	macros.SetRpc(agg.config.SmartWallet.EthRpcUrl)
 
 	agg.worker.RegisterProcessor(
-		taskengine.ExecuteTask,
+		taskengine.JobTypeExecuteTask,
 		taskExecutor,
 	)
 

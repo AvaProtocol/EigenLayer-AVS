@@ -34,7 +34,7 @@ type AggregatorClient interface {
 	ListTasks(ctx context.Context, in *ListTasksReq, opts ...grpc.CallOption) (*ListTasksResp, error)
 	GetTask(ctx context.Context, in *IdReq, opts ...grpc.CallOption) (*Task, error)
 	ListExecutions(ctx context.Context, in *ListExecutionsReq, opts ...grpc.CallOption) (*ListExecutionsResp, error)
-	GetExecution(ctx context.Context, in *GetExecutionReq, opts ...grpc.CallOption) (*Execution, error)
+	GetExecution(ctx context.Context, in *GetExecutionReq, opts ...grpc.CallOption) (*GetExecutionResp, error)
 	CancelTask(ctx context.Context, in *IdReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
 	DeleteTask(ctx context.Context, in *IdReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
 	TriggerTask(ctx context.Context, in *UserTriggerTaskReq, opts ...grpc.CallOption) (*UserTriggerTaskResp, error)
@@ -120,8 +120,8 @@ func (c *aggregatorClient) ListExecutions(ctx context.Context, in *ListExecution
 	return out, nil
 }
 
-func (c *aggregatorClient) GetExecution(ctx context.Context, in *GetExecutionReq, opts ...grpc.CallOption) (*Execution, error) {
-	out := new(Execution)
+func (c *aggregatorClient) GetExecution(ctx context.Context, in *GetExecutionReq, opts ...grpc.CallOption) (*GetExecutionResp, error) {
+	out := new(GetExecutionResp)
 	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/GetExecution", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -171,7 +171,7 @@ type AggregatorServer interface {
 	ListTasks(context.Context, *ListTasksReq) (*ListTasksResp, error)
 	GetTask(context.Context, *IdReq) (*Task, error)
 	ListExecutions(context.Context, *ListExecutionsReq) (*ListExecutionsResp, error)
-	GetExecution(context.Context, *GetExecutionReq) (*Execution, error)
+	GetExecution(context.Context, *GetExecutionReq) (*GetExecutionResp, error)
 	CancelTask(context.Context, *IdReq) (*wrapperspb.BoolValue, error)
 	DeleteTask(context.Context, *IdReq) (*wrapperspb.BoolValue, error)
 	TriggerTask(context.Context, *UserTriggerTaskReq) (*UserTriggerTaskResp, error)
@@ -206,7 +206,7 @@ func (UnimplementedAggregatorServer) GetTask(context.Context, *IdReq) (*Task, er
 func (UnimplementedAggregatorServer) ListExecutions(context.Context, *ListExecutionsReq) (*ListExecutionsResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListExecutions not implemented")
 }
-func (UnimplementedAggregatorServer) GetExecution(context.Context, *GetExecutionReq) (*Execution, error) {
+func (UnimplementedAggregatorServer) GetExecution(context.Context, *GetExecutionReq) (*GetExecutionResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetExecution not implemented")
 }
 func (UnimplementedAggregatorServer) CancelTask(context.Context, *IdReq) (*wrapperspb.BoolValue, error) {

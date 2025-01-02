@@ -73,6 +73,8 @@ enum Error {
   // Error occurs when we failed to migrate task data and it cannot be decode
   TaskDataCorrupted    = 7000;
   TaskDataMissingError = 7001;
+  // Trigger Task failed
+  TaskTriggerError     = 7003;
 }
 
 
@@ -360,6 +362,19 @@ message GetExecutionReq {
   string execution_id = 2;
 }
 
+message GetExecutionResp {
+  enum ExecutionStatus {
+    Queue    = 0; // execution is schedule to run in our system
+    Running  = 1; // execution is actively running right now
+    Completed = 2; // execution is finished. The outcome (whether the execution finished without or with error can be access by looking into the data
+  }
+
+  ExecutionStatus status = 1;
+  // when the execution is queue or running, we don't have all the data yet, so this field will be null.
+  // when the status changed to "completed", the payload will be returned
+  Execution       data   = 2;
+}
+
 message GetKeyReq {
   string owner = 1;
   int64  expired_at = 2;
@@ -422,9 +437,11 @@ message UserTriggerTaskReq {
 }
 
 message UserTriggerTaskResp {
-  bool result = 1;
-  // if trigger inline, the execution id will be returned
-  string execution_id = 2;
+  // Regardless whether it is a block or async, we always get back the same kind of id for this trigger.
+  // The caller then make a second request to GetExecution to check for the execution status and data.
+  // In the blocking mode, the execution_id is materialized and has been created, we can then call GetExecution on it immediately to receive result
+  // In async mode, the execution_id is created ahead of time and not materialized, calling GetExecution on it will return Status=Pending for example
+  string execution_id = 1;
 }
 
 service Aggregator {
@@ -441,7 +458,7 @@ service Aggregator {
   rpc ListTasks(ListTasksReq)           returns (ListTasksResp) {};
   rpc GetTask(IdReq)                    returns (Task) {};
   rpc ListExecutions(ListExecutionsReq) returns (ListExecutionsResp) {};
-  rpc GetExecution(GetExecutionReq)     returns (Execution) {};
+  rpc GetExecution(GetExecutionReq)     returns (GetExecutionResp) {};
 
   rpc CancelTask(IdReq)                 returns (google.protobuf.BoolValue) {};
   rpc DeleteTask(IdReq)                 returns (google.protobuf.BoolValue) {};

@@ -73,7 +73,7 @@ func TestMustDB() storage.Storage {
 	if err != nil {
 		panic(err)
 	}
-	//dir = "/tmp/ap-avs"
+	dir = "/tmp/ap-avs"
 	db, err := storage.NewWithPath(dir)
 	if err != nil {
 		panic(err)

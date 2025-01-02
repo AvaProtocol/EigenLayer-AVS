@@ -2,8 +2,10 @@ package taskengine
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/AvaProtocol/ap-avs/core/apqueue"
 	"github.com/AvaProtocol/ap-avs/core/testutil"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/storage"
@@ -212,12 +214,12 @@ func TestGetExecution(t *testing.T) {
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 
-	if execution.Id != resultTrigger.ExecutionId {
-		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
+	if execution.Data.Id != resultTrigger.ExecutionId {
+		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Data.Id)
 	}
 
-	if execution.TriggerMetadata.BlockNumber != 101 {
-		t.Errorf("invalid triggered block. expect 101 got %d", execution.TriggerMetadata.BlockNumber)
+	if execution.Data.TriggerMetadata.BlockNumber != 101 {
+		t.Errorf("invalid triggered block. expect 101 got %d", execution.Data.TriggerMetadata.BlockNumber)
 	}
 
 	// Another user cannot get this executin id
@@ -286,5 +288,129 @@ func TestListWallets(t *testing.T) {
 	wallets, _ = n.GetSmartWallets(testutil.TestUser2().Address, nil)
 	if len(wallets) != 1 {
 		t.Errorf("expect only default wallet but got %d", len(wallets))
+	}
+}
+
+func TestTriggerSync(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	// Now create a test task
+	tr1 := testutil.RestTask()
+	tr1.Memo = "t1"
+	// salt 0
+	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
+
+	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
+		TaskId: result.Id,
+		TriggerMetadata: &avsproto.TriggerMetadata{
+			BlockNumber: 101,
+		},
+		IsBlocking: true,
+	})
+
+	if err != nil {
+		t.Errorf("expected trigger succesfully but got error: %s", err)
+	}
+
+	// Now get back that execution id
+	execution, err := n.GetExecution(testutil.TestUser1(), &avsproto.GetExecutionReq{
+		TaskId:      result.Id,
+		ExecutionId: resultTrigger.ExecutionId,
+	})
+
+	if execution.Status != avsproto.GetExecutionResp_Completed {
+		t.Errorf("invalid execution status, expected conpleted but got %s", avsproto.GetExecutionResp_ExecutionStatus_name[int32(execution.Status)])
+	}
+
+	if execution.Data.Id != resultTrigger.ExecutionId {
+		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Data.Id)
+	}
+
+	if execution.Data.TriggerMetadata.BlockNumber != 101 {
+		t.Errorf("invalid triggered block. expect 101 got %d", execution.Data.TriggerMetadata.BlockNumber)
+	}
+}
+
+func TestTriggerAsync(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+	n.queue = apqueue.New(db, testutil.GetLogger(), &apqueue.QueueOption{
+		Prefix: "default",
+	})
+	worker := apqueue.NewWorker(n.queue, n.db)
+	taskExecutor := NewExecutor(n.db, testutil.GetLogger())
+	worker.RegisterProcessor(
+		JobTypeExecuteTask,
+		taskExecutor,
+	)
+	n.queue.MustStart()
+
+	// Now create a test task
+	tr1 := testutil.RestTask()
+	tr1.Memo = "t1"
+	// salt 0 wallet
+	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
+
+	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
+		TaskId: result.Id,
+		TriggerMetadata: &avsproto.TriggerMetadata{
+			BlockNumber: 101,
+		},
+		IsBlocking: false,
+	})
+
+	if err != nil {
+		t.Errorf("expected trigger succesfully but got error: %s", err)
+	}
+
+	// Now get back that execution id, because the task is run async we won't have any data yet,
+	// just the status for now
+	execution, err := n.GetExecution(testutil.TestUser1(), &avsproto.GetExecutionReq{
+		TaskId:      result.Id,
+		ExecutionId: resultTrigger.ExecutionId,
+	})
+
+	if execution.Data != nil {
+		t.Errorf("malform execution result. expect no data but got %s", execution.Data)
+	}
+
+	if execution.Status != avsproto.GetExecutionResp_Queue {
+		t.Errorf("invalid execution status, expected queue but got %s", avsproto.GetExecutionResp_ExecutionStatus_name[int32(execution.Status)])
+	}
+
+	// Now let the queue start and process job
+	// In our end to end system the worker will process the job eventually
+	worker.ProcessSignal(1)
+
+	execution, err = n.GetExecution(testutil.TestUser1(), &avsproto.GetExecutionReq{
+		TaskId:      result.Id,
+		ExecutionId: resultTrigger.ExecutionId,
+	})
+	if execution.Status != avsproto.GetExecutionResp_Completed {
+		t.Errorf("invalid execution status, expected completed but got %s", avsproto.GetExecutionResp_ExecutionStatus_name[int32(execution.Status)])
+	}
+
+	if execution.Data.Id != resultTrigger.ExecutionId {
+		t.Errorf("wring execution id, expected %s got %s", resultTrigger.ExecutionId, execution.Data.Id)
+	}
+
+	if !execution.Data.Success {
+		t.Errorf("wrong success result, expected true got false")
+	}
+
+	if execution.Data.Steps[0].NodeId != "ping1" {
+		t.Errorf("wrong node id in execution log")
+	}
+	if !strings.Contains(execution.Data.Steps[0].OutputData, "httpbin.org") {
+		t.Error("Invalid output data")
 	}
 }
