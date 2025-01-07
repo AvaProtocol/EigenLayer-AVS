@@ -14,21 +14,11 @@ import (
 	"github.com/AvaProtocol/ap-avs/core/config"
 )
 
-//type AvsReaderer interface {
-//	*sdkavsregistry.ChainReader
-//
-//	CheckSignatures(
-//		ctx context.Context, msgHash [32]byte, quorumNumbers []byte, referenceBlockNumber uint32, nonSignerStakesAndSignature cstaskmanager.IBLSSignatureCheckerNonSignerStakesAndSignature,
-//	) (cstaskmanager.IBLSSignatureCheckerQuorumStakeTotals, error)
-//}
-
 type AvsReader struct {
 	*sdkavsregistry.ChainReader
 	AvsServiceBindings *AvsManagersBindings
 	logger             logging.Logger
 }
-
-//var _ AvsReaderer = (*AvsReader)(nil)
 
 func BuildAvsReaderFromConfig(c *config.Config) (*AvsReader, error) {
 	return BuildAvsReader(c.AutomationRegistryCoordinatorAddr, c.OperatorStateRetrieverAddr, c.EthHttpClient, c.Logger)
@@ -46,7 +36,7 @@ func BuildAvsReader(registryCoordinatorAddr, operatorStateRetrieverAddr gethcomm
 }
 func NewAvsReader(avsRegistryReader *sdkavsregistry.ChainReader, avsServiceBindings *AvsManagersBindings, logger logging.Logger) (*AvsReader, error) {
 	return &AvsReader{
-		ChainReader:  avsRegistryReader,
+		ChainReader:        avsRegistryReader,
 		AvsServiceBindings: avsServiceBindings,
 		logger:             logger,
 	}, nil
