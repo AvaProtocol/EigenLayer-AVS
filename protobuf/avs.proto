@@ -73,16 +73,25 @@ enum Error {
   // Error occurs when we failed to migrate task data and it cannot be decode
   TaskDataCorrupted    = 7000;
   TaskDataMissingError = 7001;
+  // Trigger Task failed
+  TaskTriggerError     = 7003;
 }
 
 
 // TaskStatus represents status of the task. The transition is as follow
 enum TaskStatus {
   Active    = 0;
+  // Task is completd when it's reaching its max_execution or its expiration time
   Completed = 1;
   Failed    = 2;
   Canceled  = 3;
   Executing = 4;
+}
+
+// Execution Status re-present a run of the task
+enum ExecutionStatus {
+  Queued = 0;
+  Finished = 2;
 }
 
 message ETHTransferNode {
@@ -208,7 +217,7 @@ message TaskNode {
 }
 
 message Execution {
-  string id       = 1;
+  string id      = 1;
   int64 start_at = 2;
   int64 end_at   = 3;
   bool   success = 4;
@@ -231,6 +240,7 @@ message Execution {
 
   repeated Step steps = 8;
 }
+
 
 message Task {
   string id                   = 1;
@@ -355,9 +365,13 @@ message ListExecutionsResp {
   bool has_more = 4;
 }
 
-message GetExecutionReq {
+message ExecutionReq {
   string task_id = 1;
   string execution_id = 2;
+}
+
+message ExecutionStatusResp {
+  ExecutionStatus status = 1;
 }
 
 message GetKeyReq {
@@ -422,9 +436,12 @@ message UserTriggerTaskReq {
 }
 
 message UserTriggerTaskResp {
-  bool result = 1;
-  // if trigger inline, the execution id will be returned
-  string execution_id = 2;
+  // Regardless whether it is a block or async, we always get back the same kind of id for this trigger.
+  // The caller then make a second request to GetExecution to check for the execution status and data.
+  // In the blocking mode, the execution_id is materialized and has been created, we can then call GetExecution on it immediately to receive result
+  // In async mode, the execution_id is created ahead of time and not materialized, calling GetExecutionStatus on it will return Status=Pending for example. Once Status=Completed you can call GetExecution to get all log and detail. Call GetExecution before it is completed will result in "Execution Not Found"
+  string execution_id = 1;
+  ExecutionStatus status = 2;
 }
 
 service Aggregator {
@@ -441,7 +458,9 @@ service Aggregator {
   rpc ListTasks(ListTasksReq)           returns (ListTasksResp) {};
   rpc GetTask(IdReq)                    returns (Task) {};
   rpc ListExecutions(ListExecutionsReq) returns (ListExecutionsResp) {};
-  rpc GetExecution(GetExecutionReq)     returns (Execution) {};
+
+  rpc GetExecution(ExecutionReq)     returns (Execution) {};
+  rpc GetExecutionStatus(ExecutionReq)     returns (ExecutionStatusResp) {};
 
   rpc CancelTask(IdReq)                 returns (google.protobuf.BoolValue) {};
   rpc DeleteTask(IdReq)                 returns (google.protobuf.BoolValue) {};

@@ -65,6 +65,14 @@ func TaskExecutionKey(t *model.Task, executionID string) []byte {
 	))
 }
 
+func TaskTriggerKey(t *model.Task, executionID string) []byte {
+	return []byte(fmt.Sprintf(
+		"trigger:%s:%s",
+		t.Id,
+		executionID,
+	))
+}
+
 func ExecutionIdFromStorageKey(key []byte) string {
 	// key layout: history:01JG2FE5MDVKBPHEG0PEYSDKAC:01JG2FE5MFKTH0754RGF2DMVY7
 	return string(key[35:])

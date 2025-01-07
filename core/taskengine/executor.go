@@ -8,7 +8,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/oklog/ulid/v2"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
@@ -35,6 +34,11 @@ type TaskExecutor struct {
 	logger sdklogging.Logger
 }
 
+type QueueExecutionData struct {
+	TriggerMetadata *avsproto.TriggerMetadata
+	ExecutionID     string
+}
+
 func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
 	task := &model.Task{
 		Task: &avsproto.Task{},
@@ -59,19 +63,29 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 		return fmt.Errorf("fail to load task: %s", job.Name)
 	}
 
-	triggerMetadata := &avsproto.TriggerMetadata{}
+	queueData := &QueueExecutionData{}
 	// A task executor data is the trigger mark
 	// ref: AggregateChecksResult
-	err = json.Unmarshal(job.Data, triggerMetadata)
+	err = json.Unmarshal(job.Data, queueData)
 	if err != nil {
 		return fmt.Errorf("error decode job payload when executing task: %s with job id %d", task.Id, job.ID)
 	}
 
-	_, err = x.RunTask(task, triggerMetadata)
+	_, err = x.RunTask(task, queueData)
 	return err
 }
 
-func (x *TaskExecutor) RunTask(task *model.Task, triggerMetadata *avsproto.TriggerMetadata) (*avsproto.Execution, error) {
+func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) (*avsproto.Execution, error) {
+	defer func() {
+		// Delete the task trigger queue when we're done, the execution log is available in main task storage at this point
+		x.db.GetKey(TaskTriggerKey(task, queueData.ExecutionID))
+	}()
+
+	if queueData == nil || queueData.ExecutionID == "" {
+		return nil, fmt.Errorf("internal error: invalid execution id")
+	}
+	triggerMetadata := queueData.TriggerMetadata
+
 	vm, err := NewVMWithData(task.Id, triggerMetadata, task.Nodes, task.Edges)
 	if err != nil {
 		return nil, err
@@ -104,7 +118,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, triggerMetadata *avsproto.Trigg
 	}
 
 	execution := &avsproto.Execution{
-		Id:              ulid.Make().String(),
+		Id:              queueData.ExecutionID,
 		StartAt:         t0.Unix(),
 		EndAt:           t1.Unix(),
 		Success:         err == nil,
