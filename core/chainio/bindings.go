@@ -7,19 +7,19 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	gethcommon "github.com/ethereum/go-ethereum/common"
 
-	regcoord "github.com/Layr-Labs/eigensdk-go/contracts/bindings/RegistryCoordinator"
 	csservicemanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationServiceManager"
 	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
+	regcoord "github.com/Layr-Labs/eigensdk-go/contracts/bindings/RegistryCoordinator"
 )
 
 type AvsManagersBindings struct {
 	TaskManager    *cstaskmanager.ContractAutomationTaskManager
 	ServiceManager *csservicemanager.ContractAutomationServiceManager
-	ethClient      eth.Client
+	ethClient      eth.HttpBackend
 	logger         logging.Logger
 }
 
-func NewAvsManagersBindings(registryCoordinatorAddr, operatorStateRetrieverAddr gethcommon.Address, ethclient eth.Client, logger logging.Logger) (*AvsManagersBindings, error) {
+func NewAvsManagersBindings(registryCoordinatorAddr, operatorStateRetrieverAddr gethcommon.Address, ethclient eth.HttpBackend, logger logging.Logger) (*AvsManagersBindings, error) {
 	contractRegistryCoordinator, err := regcoord.NewContractRegistryCoordinator(registryCoordinatorAddr, ethclient)
 	if err != nil {
 		return nil, err

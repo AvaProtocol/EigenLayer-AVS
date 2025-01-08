@@ -68,7 +68,7 @@ func (o *Operator) RegisterOperatorWithAvs() error {
 	_, err = o.avsWriter.RegisterOperatorInQuorumWithAVSRegistryCoordinator(
 		context.Background(),
 		o.operatorEcdsaPrivateKey, operatorToAvsRegistrationSigSalt, operatorToAvsRegistrationSigExpiry,
-		o.blsKeypair, quorumNumbers, socket,
+		o.blsKeypair, quorumNumbers, socket, true,
 	)
 	if err != nil {
 		o.logger.Errorf("Unable to register operator with avs registry coordinator", err)
@@ -105,6 +105,7 @@ func (o *Operator) DeregisterOperatorFromAvs() error {
 		context.Background(),
 		quorumNumber,
 		regcoord.BN254G1Point{},
+		true,
 	)
 	if err != nil {
 		o.logger.Error("Unable to deregister operator with avs registry coordinator", err)

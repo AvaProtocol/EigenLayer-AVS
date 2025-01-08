@@ -98,7 +98,7 @@ func (o *Operator) DeclareAlias(filepath string) error {
 	}
 
 	ctx := context.Background()
-	receipt, err := o.txManager.Send(ctx, tx)
+	receipt, err := o.txManager.Send(ctx, tx, true)
 	if err != nil {
 		return fmt.Errorf("declareAlias transaction failed %w", err)
 	}
@@ -145,7 +145,7 @@ func (o *Operator) RemoveAlias() error {
 	}
 
 	ctx := context.Background()
-	receipt, err := o.txManager.Send(ctx, tx)
+	receipt, err := o.txManager.Send(ctx, tx, true)
 	if err != nil {
 		return fmt.Errorf("declareAlias transaction failed %w", err)
 	}

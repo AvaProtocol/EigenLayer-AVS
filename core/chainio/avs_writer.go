@@ -17,58 +17,40 @@ import (
 	"github.com/AvaProtocol/ap-avs/core/config"
 )
 
-type AvsWriterer interface {
-	avsregistry.AvsRegistryWriter
-
-	SendNewTaskNumberToSquare(
-		ctx context.Context,
-		numToSquare *big.Int,
-		quorumThresholdPercentage sdktypes.QuorumThresholdPercentage,
-		quorumNumbers sdktypes.QuorumNums,
-	) (cstaskmanager.IAutomationTaskManagerTask, uint32, error)
-	RaiseChallenge(
-		ctx context.Context,
-		task cstaskmanager.IAutomationTaskManagerTask,
-		taskResponse cstaskmanager.IAutomationTaskManagerTaskResponse,
-		taskResponseMetadata cstaskmanager.IAutomationTaskManagerTaskResponseMetadata,
-		pubkeysOfNonSigningOperators []cstaskmanager.BN254G1Point,
-	) (*types.Receipt, error)
-	SendAggregatedResponse(ctx context.Context,
-		task cstaskmanager.IAutomationTaskManagerTask,
-		taskResponse cstaskmanager.IAutomationTaskManagerTaskResponse,
-		nonSignerStakesAndSignature cstaskmanager.IBLSSignatureCheckerNonSignerStakesAndSignature,
-	) (*types.Receipt, error)
-}
-
 type AvsWriter struct {
-	avsregistry.AvsRegistryWriter
+	*avsregistry.ChainWriter
 	AvsContractBindings *AvsManagersBindings
 	logger              logging.Logger
 	TxMgr               txmgr.TxManager
-	client              eth.Client
+	client              eth.HttpBackend
 }
-
-var _ AvsWriterer = (*AvsWriter)(nil)
 
 func BuildAvsWriterFromConfig(c *config.Config) (*AvsWriter, error) {
 	return BuildAvsWriter(c.TxMgr, c.AutomationRegistryCoordinatorAddr, c.OperatorStateRetrieverAddr, c.EthHttpClient, c.Logger)
 }
 
-func BuildAvsWriter(txMgr txmgr.TxManager, registryCoordinatorAddr, operatorStateRetrieverAddr gethcommon.Address, ethHttpClient eth.Client, logger logging.Logger) (*AvsWriter, error) {
+func BuildAvsWriter(txMgr txmgr.TxManager, registryCoordinatorAddr, operatorStateRetrieverAddr gethcommon.Address, ethHttpClient eth.HttpBackend, logger logging.Logger) (*AvsWriter, error) {
 	avsServiceBindings, err := NewAvsManagersBindings(registryCoordinatorAddr, operatorStateRetrieverAddr, ethHttpClient, logger)
 	if err != nil {
 		logger.Error("Failed to create contract bindings", "err", err)
 		return nil, err
 	}
-	avsRegistryWriter, err := avsregistry.BuildAvsRegistryChainWriter(registryCoordinatorAddr, operatorStateRetrieverAddr, logger, ethHttpClient, txMgr)
+	//avsRegistryWriter, err := avsregistry.BuildAvsRegistryChainWriter(registryCoordinatorAddr, operatorStateRetrieverAddr, logger, ethHttpClient, txMgr)
+	avsRegistryWriter, err := avsregistry.NewWriterFromConfig(
+		avsregistry.Config{
+			RegistryCoordinatorAddress: registryCoordinatorAddr,
+			OperatorStateRetrieverAddress: operatorStateRetrieverAddr,
+		},
+		ethHttpClient, txMgr,logger,
+	)
 	if err != nil {
 		return nil, err
 	}
 	return NewAvsWriter(avsRegistryWriter, avsServiceBindings, logger, txMgr), nil
 }
-func NewAvsWriter(avsRegistryWriter avsregistry.AvsRegistryWriter, avsServiceBindings *AvsManagersBindings, logger logging.Logger, txMgr txmgr.TxManager) *AvsWriter {
+func NewAvsWriter(avsRegistryWriter *avsregistry.ChainWriter, avsServiceBindings *AvsManagersBindings, logger logging.Logger, txMgr txmgr.TxManager) *AvsWriter {
 	return &AvsWriter{
-		AvsRegistryWriter:   avsRegistryWriter,
+		ChainWriter:   avsRegistryWriter,
 		AvsContractBindings: avsServiceBindings,
 		logger:              logger,
 		TxMgr:               txMgr,
@@ -87,7 +69,7 @@ func (w *AvsWriter) SendNewTaskNumberToSquare(ctx context.Context, numToSquare *
 		w.logger.Errorf("Error assembling CreateNewTask tx")
 		return cstaskmanager.IAutomationTaskManagerTask{}, 0, err
 	}
-	receipt, err := w.TxMgr.Send(ctx, tx)
+	receipt, err := w.TxMgr.Send(ctx, tx, true)
 	if err != nil {
 		w.logger.Errorf("Error submitting CreateNewTask tx")
 		return cstaskmanager.IAutomationTaskManagerTask{}, 0, err
@@ -115,7 +97,7 @@ func (w *AvsWriter) SendAggregatedResponse(
 		w.logger.Error("Error submitting SubmitTaskResponse tx while calling respondToTask", "err", err)
 		return nil, err
 	}
-	receipt, err := w.TxMgr.Send(ctx, tx)
+	receipt, err := w.TxMgr.Send(ctx, tx, true)
 	if err != nil {
 		w.logger.Errorf("Error submitting respondToTask tx")
 		return nil, err
@@ -140,7 +122,7 @@ func (w *AvsWriter) RaiseChallenge(
 		w.logger.Errorf("Error assembling RaiseChallenge tx")
 		return nil, err
 	}
-	receipt, err := w.TxMgr.Send(ctx, tx)
+	receipt, err := w.TxMgr.Send(ctx, tx, true)
 	if err != nil {
 		w.logger.Errorf("Error submitting RaiseChallenge tx")
 		return nil, err
