@@ -492,7 +492,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 				SmartWalletAddress: t.SmartWalletAddress,
 				StartAt:            t.StartAt,
 				ExpiredAt:          t.ExpiredAt,
-				Memo:               t.Memo,
+				Name:               t.Name,
 				CompletedAt:        t.CompletedAt,
 				MaxExecution:       t.MaxExecution,
 				TotalExecution:     t.TotalExecution,

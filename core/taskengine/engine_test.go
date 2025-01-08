@@ -26,20 +26,20 @@ func TestListTasks(t *testing.T) {
 
 	// Now create a test task
 	tr1 := testutil.RestTask()
-	tr1.Memo = "t1"
+	tr1.Name = "t1"
 	// salt 0
 	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
 	n.CreateTask(testutil.TestUser1(), tr1)
 
 	tr2 := testutil.RestTask()
-	tr2.Memo = "t2"
+	tr2.Name = "t2"
 	// salt 12345
 	tr2.SmartWalletAddress = "0x961d2DD008960A9777571D78D21Ec9C3E5c6020c"
 	n.CreateTask(testutil.TestUser1(), tr2)
 
 	tr3 := testutil.RestTask()
 	// salt 6789
-	tr3.Memo = "t3"
+	tr3.Name = "t3"
 	tr3.SmartWalletAddress = "0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4"
 	n.CreateTask(testutil.TestUser1(), tr3)
 
@@ -54,8 +54,8 @@ func TestListTasks(t *testing.T) {
 	if len(result.Items) != 1 {
 		t.Errorf("list task return wrong. expect 1, got %d", len(result.Items))
 	}
-	if result.Items[0].Memo != "t3" {
-		t.Errorf("list task return wrong. expect memo t1, got %s", result.Items[0].Memo)
+	if result.Items[0].Name != "t3" {
+		t.Errorf("list task return wrong. expect memo t1, got %s", result.Items[0].Name)
 	}
 
 	result, err = n.ListTasksByUser(testutil.TestUser1(), &avsproto.ListTasksReq{
@@ -68,8 +68,8 @@ func TestListTasks(t *testing.T) {
 	if len(result.Items) != 2 {
 		t.Errorf("list task returns wrong. expect 2, got %d", len(result.Items))
 	}
-	if result.Items[0].Memo != "t2" && result.Items[1].Memo != "t1" {
-		t.Errorf("list task returns wrong data. expect t2, t1 got %s, %s", result.Items[0].Memo, result.Items[1].Memo)
+	if result.Items[0].Name != "t2" && result.Items[1].Name != "t1" {
+		t.Errorf("list task returns wrong data. expect t2, t1 got %s, %s", result.Items[0].Name, result.Items[1].Name)
 	}
 }
 
@@ -89,13 +89,13 @@ func TestListTasksPagination(t *testing.T) {
 	// Firs we setup test for a 3 smart walets, with overlap ordering
 	// Now create a test task
 	tr1 := testutil.RestTask()
-	tr1.Memo = "t1"
+	tr1.Name = "t1"
 	// salt 0
 	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
 	n.CreateTask(testutil.TestUser1(), tr1)
 
 	tr2 := testutil.RestTask()
-	tr2.Memo = "t2_1"
+	tr2.Name = "t2_1"
 	// salt 12345
 	tr2.SmartWalletAddress = "0x961d2DD008960A9777571D78D21Ec9C3E5c6020c"
 	n.CreateTask(testutil.TestUser1(), tr2)
@@ -103,13 +103,13 @@ func TestListTasksPagination(t *testing.T) {
 	for i := range 20 {
 		tr3 := testutil.RestTask()
 		// salt 6789
-		tr3.Memo = fmt.Sprintf("t3_%d", i)
+		tr3.Name = fmt.Sprintf("t3_%d", i)
 		tr3.SmartWalletAddress = "0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4"
 		n.CreateTask(testutil.TestUser1(), tr3)
 	}
 
 	tr2 = testutil.RestTask()
-	tr2.Memo = "t2_2"
+	tr2.Name = "t2_2"
 	// salt 12345
 	tr2.SmartWalletAddress = "0x961d2DD008960A9777571D78D21Ec9C3E5c6020c"
 	n.CreateTask(testutil.TestUser1(), tr2)
@@ -134,12 +134,12 @@ func TestListTasksPagination(t *testing.T) {
 	if len(result.Items) != 5 {
 		t.Errorf("list task returns wrong. expect 5, got %d", len(result.Items))
 	}
-	if result.Items[0].Memo != "t2_2" {
-		t.Errorf("list task returns first task wrong. expect task t2, got %s", result.Items[0].Memo)
+	if result.Items[0].Name != "t2_2" {
+		t.Errorf("list task returns first task wrong. expect task t2, got %s", result.Items[0].Name)
 	}
 
-	if result.Items[2].Memo != "t3_18" || result.Items[4].Memo != "t3_16" {
-		t.Errorf("list task returns wrong task result, expected t3_19 t3_17 got %s %s", result.Items[2].Memo, result.Items[4].Memo)
+	if result.Items[2].Name != "t3_18" || result.Items[4].Name != "t3_16" {
+		t.Errorf("list task returns wrong task result, expected t3_19 t3_17 got %s %s", result.Items[2].Name, result.Items[4].Name)
 	}
 
 	if result.Cursor == "" {
@@ -157,8 +157,8 @@ func TestListTasksPagination(t *testing.T) {
 	if len(result.Items) != 15 {
 		t.Errorf("list task returns wrong. expect 15, got %d", len(result.Items))
 	}
-	if result.Items[0].Memo != "t3_15" || result.Items[2].Memo != "t3_13" || result.Items[14].Memo != "t3_1" {
-		t.Errorf("list task returns wrong task result, expected t3_15 t3_13 t3_1 got %s %s %s", result.Items[0].Memo, result.Items[2].Memo, result.Items[14].Memo)
+	if result.Items[0].Name != "t3_15" || result.Items[2].Name != "t3_13" || result.Items[14].Name != "t3_1" {
+		t.Errorf("list task returns wrong task result, expected t3_15 t3_13 t3_1 got %s %s %s", result.Items[0].Name, result.Items[2].Name, result.Items[14].Name)
 	}
 
 	if !result.HasMore {
@@ -177,8 +177,8 @@ func TestListTasksPagination(t *testing.T) {
 	if len(result.Items) != 2 {
 		t.Errorf("list task returns wrong. expect 2, got %d", len(result.Items))
 	}
-	if result.Items[0].Memo != "t3_0" || result.Items[1].Memo != "t2_1" {
-		t.Errorf("list task returns wrong task result, expected t3_15 t3_1 got %s %s", result.Items[0].Memo, result.Items[1].Memo)
+	if result.Items[0].Name != "t3_0" || result.Items[1].Name != "t2_1" {
+		t.Errorf("list task returns wrong task result, expected t3_15 t3_1 got %s %s", result.Items[0].Name, result.Items[1].Name)
 	}
 	if result.HasMore {
 		t.Errorf("expect hasmore is false, but got true")
@@ -195,7 +195,7 @@ func TestGetExecution(t *testing.T) {
 
 	// Now create a test task
 	tr1 := testutil.RestTask()
-	tr1.Memo = "t1"
+	tr1.Name = "t1"
 	// salt 0
 	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
 	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
@@ -300,7 +300,7 @@ func TestTriggerSync(t *testing.T) {
 
 	// Now create a test task
 	tr1 := testutil.RestTask()
-	tr1.Memo = "t1"
+	tr1.Name = "t1"
 	// salt 0
 	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
 	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
@@ -351,7 +351,7 @@ func TestTriggerAsync(t *testing.T) {
 
 	// Now create a test task
 	tr1 := testutil.RestTask()
-	tr1.Memo = "t1"
+	tr1.Name = "t1"
 	// salt 0 wallet
 	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
 	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
