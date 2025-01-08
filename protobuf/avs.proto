@@ -252,7 +252,7 @@ message Task {
   // task won't be run/check after this
   int64  expired_at = 5;
   // arbitrary data about this task. has a limit of 255 character
-  string memo = 6;
+  string name = 6;
 
   int64 completed_at = 7;
 
@@ -281,7 +281,7 @@ message CreateTaskReq {
   // When leaving out, we will use the default(salt=0) wallet
   string smart_wallet_address  = 5;
 
-  string memo                  = 6;
+  string name                  = 6;
   repeated TaskNode nodes      = 7;
   repeated TaskEdge edges      = 8;
 }
@@ -334,7 +334,7 @@ message ListTasksResp {
     // task won't be run/check after this
     int64  expired_at = 5;
     // arbitrary data about this task. has a limit of 255 character
-    string memo = 6;
+    string name = 6;
 
     int64 completed_at = 7;
 

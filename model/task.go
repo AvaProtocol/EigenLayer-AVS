@@ -61,7 +61,7 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 			Trigger:      body.Trigger,
 			Nodes:        body.Nodes,
 			Edges:        body.Edges,
-			Memo:         body.Memo,
+			Name:         body.Name,
 			ExpiredAt:    body.ExpiredAt,
 			StartAt:      body.StartAt,
 			MaxExecution: body.MaxExecution,
