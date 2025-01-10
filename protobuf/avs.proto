@@ -21,18 +21,37 @@ message BlockCondition {
   int64 interval = 1;
 }
 
-// An arbitrary expression to express the condition.
-// People can define condition example
-//   chainlinkPrice("address-of-eth-usd-pair") > 2644500 && queryContract("contractaddress", "callmsg")[2] < = 5
-// By allow arbitrary expression, people can mix and match to create conplex
-// condition that match their workload
-//
-// The function to be used need to be pre-defined on our task egnine runtime.
-// When a new block is build, our engine will execute these check
-//
-// The expression language is re-present by https://expr-lang.org/
+// EventCondition is a filter to match on an event. It's adhoc logic expression re-present in an array to match an ethereum event
 message EventCondition {
-  string expression = 1;
+  message Matcher {
+    // the type of Filter we support, right now, we support below value for 
+    //  - topics:
+    //  - address:
+     string type = 1;
+
+    // the payload of the type data to be mached. Each type will have different semantic meaning on how to match
+    // Given type=topics`. This value is the topic array, for every non null element of the array we perform an equal check
+    // If all are equal, the filter resolve to true
+    // 
+    // Example:
+    // To find all ERC20 transfer event into or out to wallet 0x5DD596C901987A2b28C38A9C1DfBf86fFFc15d77 we can do
+    // value = [
+    //   [
+    //     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+    //     "0x5DD596C901987A2b28C38A9C1DfBf86fFFc15d77", // tx out
+    //   ],
+    //   [
+    //     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+    //     null,
+    //     "0x5DD596C901987A2b28C38A9C1DfBf86fFFc15d77" // tx in
+    //   ],
+    // ]
+    repeated string value = 2;
+  }
+
+  // an array of filter to be mach, as soon as any element of the array mach, the trigger is fired.
+  repeated Matcher matcher = 1;
+  string expression = 2;
 }
 
 

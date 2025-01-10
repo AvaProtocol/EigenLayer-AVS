@@ -10,7 +10,7 @@ import (
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/dop251/goja"
-	"github.com/ginkgoch/godash/v2"
+	"github.com/samber/lo"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -167,7 +167,7 @@ func NewVMWithData(taskID string, triggerMetadata *avsproto.TriggerMetadata, nod
 			// TODO: Implement a decoder to help standarize common event
 			v.vars["trigger1"] = map[string]interface{}{
 				"data": map[string]interface{}{
-					"topics": godash.Map(event.Topics, func(topic common.Hash) string {
+					"topics": lo.Map(event.Topics, func(topic common.Hash, _ int) string {
 						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
 					}),
 					"data": "0x" + common.Bytes2Hex(event.Data),

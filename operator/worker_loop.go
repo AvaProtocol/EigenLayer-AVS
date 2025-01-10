@@ -114,6 +114,8 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 func (o *Operator) StreamMessages() {
 	id := hex.EncodeToString(o.operatorId[:])
 	ctx := context.Background()
+	o.logger.Info("Subscribe to aggregator to get check")
+
 	for {
 		epoch := time.Now().Unix()
 		blsSignature, err := o.GetSignature(ctx, []byte(fmt.Sprintf("operator connection: %s %s %d", o.config.OperatorAddress, id, epoch)))
@@ -137,6 +139,7 @@ func (o *Operator) StreamMessages() {
 			continue
 		}
 
+		defer stream.CloseSend()
 		for {
 			resp, err := stream.Recv()
 			if err == io.EOF {
