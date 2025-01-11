@@ -72,6 +72,7 @@ message TaskTrigger {
     // support filter by event expression such as topic0, topic1, topoc2 and event_data and contract_address
     EventCondition     event   = 6;
   }
+  string id = 7;
 }
 
 // gRPC internal error code use up to 17, we extend and start from 1000 to avoid any conflict 

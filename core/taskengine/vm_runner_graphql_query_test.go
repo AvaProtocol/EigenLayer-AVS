@@ -32,15 +32,20 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 		},
 	}
 
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+
 	edges := []*avsproto.TaskEdge{
 		&avsproto.TaskEdge{
 			Id:     "e1",
-			Source: "__TRIGGER__",
+			Source: trigger.Id,
 			Target: "123abc",
 		},
 	}
 
-	vm, err := NewVMWithData("123abc", nil, nodes, edges)
+	vm, err := NewVMWithData("123abc", trigger, nil, nodes, edges)
 	n, _ := NewGraphqlQueryProcessor(vm, node.Url)
 
 	step, _, err := n.Execute("123abc", node)

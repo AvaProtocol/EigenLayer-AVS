@@ -26,15 +26,19 @@ func TestContractReadSimpleReturn(t *testing.T) {
 		},
 	}
 
+	trigger := &avsproto.TaskTrigger{
+		Id: "trigger123",
+	}
+
 	edges := []*avsproto.TaskEdge{
 		&avsproto.TaskEdge{
 			Id:     "e1",
-			Source: "__TRIGGER__",
+			Source: "trigger123",
 			Target: "123",
 		},
 	}
 
-	vm, err := NewVMWithData("123", nil, nodes, edges)
+	vm, err := NewVMWithData("123", trigger, nil, nodes, edges)
 
 	n := NewContractReadProcessor(vm, testutil.GetRpcClient())
 
@@ -78,15 +82,19 @@ func TestContractReadComplexReturn(t *testing.T) {
 		},
 	}
 
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
 	edges := []*avsproto.TaskEdge{
 		&avsproto.TaskEdge{
 			Id:     "e1",
-			Source: "__TRIGGER__",
+			Source: trigger.Id,
 			Target: "123abc",
 		},
 	}
 
-	vm, err := NewVMWithData("123abc", nil, nodes, edges)
+	vm, err := NewVMWithData("123abc", trigger, nil, nodes, edges)
 	n := NewContractReadProcessor(vm, testutil.GetRpcClient())
 	step, err := n.Execute("123abc", node)
 

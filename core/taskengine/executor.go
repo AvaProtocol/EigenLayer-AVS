@@ -79,7 +79,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 	triggerMetadata := queueData.TriggerMetadata
 
-	vm, err := NewVMWithData(task.Id, triggerMetadata, task.Nodes, task.Edges)
+	vm, err := NewVMWithData(task.Id, task.Trigger, triggerMetadata, task.Nodes, task.Edges)
 	if err != nil {
 		return nil, err
 	}
