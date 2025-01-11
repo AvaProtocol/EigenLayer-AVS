@@ -2827,8 +2827,8 @@ func (x *KeyResp) GetKey() string {
 // In an event trigger, we will have the log_index, tx_hash and the block_number
 // In a time based trigger(cron/fixed time) we will have the epoch.
 //
-// TriggerMetadata is used to populate the `trigger.data` variable. Example, if this is a transfer
-// event, then you will have access to trigger1.data.from_address trigger1.data.value
+// TriggerMetadata is used to populate the `<trigger-name>.data` variable. Example, if this is a transfer
+// event, then you will have access to <trigger-name>.data.from_address or <trigger-name>.data.value
 type TriggerMetadata struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache

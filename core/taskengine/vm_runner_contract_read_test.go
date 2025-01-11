@@ -27,13 +27,14 @@ func TestContractReadSimpleReturn(t *testing.T) {
 	}
 
 	trigger := &avsproto.TaskTrigger{
-		Id: "trigger123",
+		Id:   "triggertestid",
+		Name: "triggertest",
 	}
 
 	edges := []*avsproto.TaskEdge{
 		&avsproto.TaskEdge{
 			Id:     "e1",
-			Source: "trigger123",
+			Source: "triggertestid",
 			Target: "123",
 		},
 	}
