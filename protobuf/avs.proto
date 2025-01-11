@@ -72,6 +72,7 @@ message TaskTrigger {
     // support filter by event expression such as topic0, topic1, topoc2 and event_data and contract_address
     EventCondition     event   = 6;
   }
+  string id = 7;
 }
 
 // gRPC internal error code use up to 17, we extend and start from 1000 to avoid any conflict 
@@ -172,6 +173,8 @@ message BranchNode {
 message FilterNode {
   // Filter node acts like .select or .filter to pluck out element in an array that evaluate the expression to true
   string expression = 1;
+  // input is the id of the node that 
+  string input = 2;
 }
 
 // LoopNode currently not support, but we pre-defined to reverse the field id
@@ -183,7 +186,6 @@ message LoopNode {
   string iter_val = 2;
   string iter_key = 3;
 
-
   // inside the runner, it can access to the current value of the loop iteration through the iter_val/iter_key above
   oneof runner {
     // Transfer eth require no calldata etc, just a destination address and an eth amount to be sent
@@ -193,7 +195,7 @@ message LoopNode {
     // multicall to wrap many calls. in a contract write, we need to generate signature and send as userops.
     ContractWriteNode contract_write = 11;
     // read data fron a target contract
-    ContractReadNode contract_read = 12;
+    ContractReadNode  contract_read = 12;
     // Make call to a graphql endpoint
     GraphQLQueryNode  graphql_data_query = 13 ;
     // Make call to a HTTP endpoint

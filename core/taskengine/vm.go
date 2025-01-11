@@ -29,8 +29,6 @@ const (
 	VMStateReady      = "vm_ready"
 	VMStateExecuting  = "vm_executing"
 	VMStateCompleted  = "vm_completed"
-
-	TriggerEdge = "__TRIGGER__"
 )
 
 type Step struct {
@@ -55,9 +53,10 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 type VM struct {
 	// Input raw task data
 	// TaskID can be used to cache compile program
-	TaskID    string
-	TaskNodes map[string]*avsproto.TaskNode
-	TaskEdges []*avsproto.TaskEdge
+	TaskID      string
+	TaskNodes   map[string]*avsproto.TaskNode
+	TaskEdges   []*avsproto.TaskEdge
+	TaskTrigger *avsproto.TaskTrigger
 
 	// executin logs and result per plans
 	ExecutionLogs []*avsproto.Execution_Step
@@ -115,11 +114,12 @@ func (v *VM) GetNodeNameAsVar(nodeID string) string {
 	return standardized
 }
 
-func NewVMWithData(taskID string, triggerMetadata *avsproto.TriggerMetadata, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge) (*VM, error) {
+func NewVMWithData(taskID string, trigger *avsproto.TaskTrigger, triggerMetadata *avsproto.TriggerMetadata, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge) (*VM, error) {
 	v := &VM{
 		Status:           VMStateInitialize,
 		TaskEdges:        edges,
 		TaskNodes:        make(map[string]*avsproto.TaskNode),
+		TaskTrigger:      trigger,
 		plans:            make(map[string]*Step),
 		mu:               &sync.Mutex{},
 		instructionCount: 0,
@@ -208,6 +208,7 @@ func (v *VM) AddVar(key string, value any) {
 
 // Compile generates an execution plan based on edge
 func (v *VM) Compile() error {
+	triggerId := v.TaskTrigger.Id
 	for _, edge := range v.TaskEdges {
 		if strings.Contains(edge.Source, ".") {
 			v.plans[edge.Source] = &Step{
@@ -225,7 +226,7 @@ func (v *VM) Compile() error {
 			}
 		}
 
-		if edge.Source != "__TRIGGER__" {
+		if edge.Source != triggerId {
 			if _, ok := v.plans[edge.Source]; ok {
 				v.plans[edge.Source].Next = append(v.plans[edge.Source].Next, edge.Target)
 			} else {
@@ -237,6 +238,11 @@ func (v *VM) Compile() error {
 		} else {
 			v.entrypoint = edge.Target
 		}
+	}
+
+	// Cannot find entrypoint
+	if v.entrypoint == "" {
+		return fmt.Errorf(InvalidEntrypoint)
 	}
 
 	v.Status = VMStateReady

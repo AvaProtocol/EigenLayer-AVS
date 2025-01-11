@@ -27,15 +27,20 @@ func TestVMCompile(t *testing.T) {
 		},
 	}
 
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+
 	edges := []*avsproto.TaskEdge{
 		&avsproto.TaskEdge{
 			Id:     "e1",
-			Source: "__TRIGGER__",
+			Source: trigger.Id,
 			Target: "123",
 		},
 	}
 
-	vm, err := NewVMWithData("123", nil, nodes, edges)
+	vm, err := NewVMWithData("123", trigger, nil, nodes, edges)
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -64,15 +69,20 @@ func TestRunSimpleTasks(t *testing.T) {
 		},
 	}
 
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+
 	edges := []*avsproto.TaskEdge{
 		&avsproto.TaskEdge{
 			Id:     "e1",
-			Source: "__TRIGGER__",
+			Source: trigger.Id,
 			Target: "123",
 		},
 	}
 
-	vm, err := NewVMWithData("123", nil, nodes, edges)
+	vm, err := NewVMWithData("123", trigger, nil, nodes, edges)
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -125,10 +135,14 @@ func TestRunSequentialTasks(t *testing.T) {
 		},
 	}
 
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
 	edges := []*avsproto.TaskEdge{
 		&avsproto.TaskEdge{
 			Id:     "e1",
-			Source: "__TRIGGER__",
+			Source: trigger.Id,
 			Target: "123",
 		},
 		&avsproto.TaskEdge{
@@ -138,7 +152,7 @@ func TestRunSequentialTasks(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", nil, nodes, edges)
+	vm, err := NewVMWithData("123", trigger, nil, nodes, edges)
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -230,10 +244,14 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		},
 	}
 
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
 	edges := []*avsproto.TaskEdge{
 		&avsproto.TaskEdge{
 			Id:     "e1",
-			Source: "__TRIGGER__",
+			Source: trigger.Id,
 			Target: "branch1",
 		},
 		&avsproto.TaskEdge{
@@ -248,7 +266,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", nil, nodes, edges)
+	vm, err := NewVMWithData("123", trigger, nil, nodes, edges)
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -359,10 +377,14 @@ func TestEvaluateEvent(t *testing.T) {
 		},
 	}
 
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
 	edges := []*avsproto.TaskEdge{
 		&avsproto.TaskEdge{
 			Id:     "e1",
-			Source: "__TRIGGER__",
+			Source: trigger.Id,
 			Target: "branch1",
 		},
 		&avsproto.TaskEdge{
@@ -381,7 +403,7 @@ func TestEvaluateEvent(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 
-	vm, err := NewVMWithData("sampletaskid1", &mark, nodes, edges)
+	vm, err := NewVMWithData("sampletaskid1", trigger, &mark, nodes, edges)
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -404,5 +426,133 @@ func TestEvaluateEvent(t *testing.T) {
 	pp.Print(vm.ExecutionLogs)
 	if vm.ExecutionLogs[0].OutputData != "branch1.a1" {
 		t.Errorf("expression evaluate incorrect")
+	}
+}
+
+func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
+	nodes := []*avsproto.TaskNode{
+		&avsproto.TaskNode{
+			Id:   "branch1",
+			Name: "branch",
+			TaskType: &avsproto.TaskNode_Branch{
+				Branch: &avsproto.BranchNode{
+					Conditions: []*avsproto.Condition{
+						&avsproto.Condition{
+							Id:         "a1",
+							Type:       "if",
+							Expression: `trigger1.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" && bigGt(toBigInt(trigger1.data.data), toBigInt("1200000"))`},
+					},
+				},
+			},
+		},
+		&avsproto.TaskNode{
+			Id:   "notification1",
+			Name: "httpnode",
+			TaskType: &avsproto.TaskNode_RestApi{
+				RestApi: &avsproto.RestAPINode{
+					Url:    "https://httpbin.org/post",
+					Method: "POST",
+					Body:   "hit=notification1",
+				},
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+	edges := []*avsproto.TaskEdge{
+		&avsproto.TaskEdge{
+			Id:     "e1",
+			Source: "foo",
+			Target: "branch1",
+		},
+		&avsproto.TaskEdge{
+			Id:     "e1",
+			Source: "branch1.a1",
+			Target: "notification1",
+		},
+	}
+
+	mark := avsproto.TriggerMetadata{
+		BlockNumber: 7212417,
+		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+		LogIndex:    98,
+	}
+
+	SetRpc(testutil.GetTestRPCURL())
+	SetCache(testutil.GetDefaultCache())
+
+	vm, err := NewVMWithData("sampletaskid1", trigger, &mark, nodes, edges)
+	if err != nil {
+		t.Errorf("expect vm initialized")
+	}
+
+	err = vm.Compile()
+	if err == nil || err.Error() != InvalidEntrypoint {
+		t.Errorf("Expect return error due to invalid data")
+	}
+}
+
+func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
+	nodes := []*avsproto.TaskNode{
+		&avsproto.TaskNode{
+			Id:   "branch1",
+			Name: "branch",
+		},
+		&avsproto.TaskNode{
+			Id:   "notification1",
+			Name: "httpnode",
+		},
+		&avsproto.TaskNode{
+			Id:   "rest1",
+			Name: "httpnode",
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+	edges := []*avsproto.TaskEdge{
+		&avsproto.TaskEdge{
+			Id:     "e1",
+			Source: "rest1",
+			Target: "notification1",
+		},
+		&avsproto.TaskEdge{
+			Id:     "e1",
+			Source: "notification1",
+			Target: "branch1",
+		},
+		&avsproto.TaskEdge{
+			Id:     "e1",
+			Source: trigger.Id,
+			Target: "notification1",
+		},
+	}
+
+	mark := avsproto.TriggerMetadata{
+		BlockNumber: 7212417,
+		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+		LogIndex:    98,
+	}
+
+	SetRpc(testutil.GetTestRPCURL())
+	SetCache(testutil.GetDefaultCache())
+
+	vm, err := NewVMWithData("sampletaskid1", trigger, &mark, nodes, edges)
+	if err != nil {
+		t.Errorf("expect vm initialized")
+	}
+
+	err = vm.Compile()
+	if err != nil {
+		t.Errorf("Expect compile succesfully but got error: %v", err)
+	}
+
+	if vm.entrypoint != "notification1" {
+		t.Errorf("expect entrypoint is notification1 but got %v", vm.entrypoint)
 	}
 }

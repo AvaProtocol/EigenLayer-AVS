@@ -181,11 +181,12 @@ func RestTask() *avsproto.CreateTaskReq {
 	}
 	edge := &avsproto.TaskEdge{
 		Id:     "edge1",
-		Source: "__TRIGGER__",
+		Source: "triggerabcde",
 		Target: "ping1",
 	}
 	tr1 := avsproto.CreateTaskReq{
 		Trigger: &avsproto.TaskTrigger{
+			Id:   "triggerabcde",
 			Name: "block",
 			TriggerType: &avsproto.TaskTrigger_Block{
 				Block: &avsproto.BlockCondition{
