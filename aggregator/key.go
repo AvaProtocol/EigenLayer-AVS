@@ -18,12 +18,12 @@ type CreateApiKeyOption struct {
 func CreateAdminKey(configPath string, opt CreateApiKeyOption) error {
 	nodeConfig, err := config.NewConfig(configPath)
 	if err != nil {
-		panic(fmt.Errorf("failed to parse config file: %w\nMake sure %s is exist and a valid yaml file %w.", configPath, err))
+		return fmt.Errorf("failed to parse config file: %s\nMake sure it is exist and a valid yaml file %w.", configPath, err)
 	}
 
 	aggregator, err := NewAggregator(nodeConfig)
 	if err != nil {
-		panic(fmt.Errorf("cannot initialize aggregrator from config: %w", err))
+		return fmt.Errorf("cannot initialize aggregrator from config: %w", err)
 	}
 
 	if opt.Subject == "" {

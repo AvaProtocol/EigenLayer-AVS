@@ -51,7 +51,7 @@ const (
 func RunWithConfig(configPath string) error {
 	nodeConfig, err := config.NewConfig(configPath)
 	if err != nil {
-		panic(fmt.Errorf("failed to parse config file: %w\nMake sure %s is exist and a valid yaml file %w.", configPath, err))
+		panic(fmt.Errorf("failed to parse config file: %s\nMake sure it is exist and a valid yaml file %w.", configPath, err))
 	}
 
 	aggregator, err := NewAggregator(nodeConfig)

@@ -21,7 +21,15 @@ import (
 
 const (
 	// We had old operators pre 1.3 where auth isn't enforced. upon all operators updated to 1.3.0 we will toggle this server side
-	enforceAuth = false
+	enforceAuth  = false
+	authTemplate = `Please sign the below text for ownership verification.
+
+URI: https://app.avaprotocol.org
+Chain ID: %d
+Version: 1
+Issued At: %s
+Expire At: %s
+Wallet: %s`
 )
 
 // GetKey exchanges an api key or signature submit by an EOA with an API key that can manage
@@ -32,18 +40,19 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 	r.config.Logger.Info("process getkey",
 		"owner", payload.Owner,
 		"expired", payload.ExpiredAt,
+		"issued", payload.IssuedAt,
+		"chainId", payload.ChainId,
 	)
 
 	if strings.Contains(payload.Signature, ".") {
+		// API key directly
 		authenticated, err := auth.VerifyJwtKeyForUser(r.config.JwtSecret, payload.Signature, submitAddress)
 		if err != nil || !authenticated {
 			return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, auth.InvalidAPIKey)
 		}
 	} else {
 		// We need to have 3 things to verify the signature: the signature, the hash of the original data, and the public key of the signer. With this information we can determine if the private key holder of the public key pair did indeed sign the message
-		// The message format we need to sign
-		//
-		text := fmt.Sprintf("key request for %s expired at %d", payload.Owner, payload.ExpiredAt)
+		text := fmt.Sprintf(authTemplate, payload.ChainId, payload.IssuedAt, payload.ExpiredAt, payload.Owner)
 		data := []byte(text)
 		hash := accounts.TextHash(data)
 
@@ -69,8 +78,14 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		}
 	}
 
+	expiredAt, err := time.Parse(time.RFC3339, payload.ExpiredAt)
+
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, auth.MalformedExpirationTime)
+	}
+
 	claims := &jwt.RegisteredClaims{
-		ExpiresAt: jwt.NewNumericDate(time.Unix(payload.ExpiredAt, 0)),
+		ExpiresAt: jwt.NewNumericDate(expiredAt),
 		Issuer:    auth.Issuer,
 		Subject:   payload.Owner,
 	}
