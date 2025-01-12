@@ -25,7 +25,8 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	})
 	agg.worker = apqueue.NewWorker(agg.queue, agg.db)
 	taskExecutor := taskengine.NewExecutor(agg.db, agg.logger)
-	taskengine.SetMacro(agg.config.Macros)
+	taskengine.SetMacroVars(agg.config.MacroVars)
+	taskengine.SetMacroSecrets(agg.config.MacroSecrets)
 	taskengine.SetCache(agg.cache)
 	macros.SetRpc(agg.config.SmartWallet.EthRpcUrl)
 

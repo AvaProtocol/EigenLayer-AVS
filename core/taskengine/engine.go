@@ -44,8 +44,9 @@ var (
 
 	// a global variable that we expose to our tasks. User can use `{{name}}` to access them
 	// These macro are define in our aggregator yaml config file under `macros`
-	macroEnvs map[string]string
-	cache     *bigcache.BigCache
+	macroVars    map[string]string
+	macroSecrets map[string]string
+	cache        *bigcache.BigCache
 
 	defaultSalt = big.NewInt(0)
 )
@@ -56,8 +57,12 @@ func SetLogger(mylogger sdklogging.Logger) {
 }
 
 // Set the global macro system. macros are static, immutable and available to  all tasks at runtime
-func SetMacro(v map[string]string) {
-	macroEnvs = v
+func SetMacroVars(v map[string]string) {
+	macroVars = v
+}
+
+func SetMacroSecrets(v map[string]string) {
+	macroSecrets = v
 }
 
 func SetCache(c *bigcache.BigCache) {
