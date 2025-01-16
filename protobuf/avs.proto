@@ -397,8 +397,10 @@ message ExecutionStatusResp {
 
 message GetKeyReq {
   string owner = 1;
-  int64  expired_at = 2;
-  string signature = 3;
+  int64  chain_id = 2;
+  string issued_at = 3;
+  string expired_at = 4;
+  string signature = 5;
 }
 
 message KeyResp {
