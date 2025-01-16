@@ -351,7 +351,7 @@ func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avspro
 	// only evaluate string when there is string interpolation
 	if nodeValue.Body != "" && (strings.Contains(nodeValue.Body, "$") || strings.Contains(nodeValue.Body, "`")) {
 		nodeValue2 := &avsproto.RestAPINode{
-			Url:     macros.RenderString(nodeValue.Url, macroEnvs),
+			Url:     macros.RenderSecrets(nodeValue.Url, macroSecrets),
 			Headers: nodeValue.Headers,
 			Method:  nodeValue.Method,
 			Body:    strings.Clone(nodeValue.Body),

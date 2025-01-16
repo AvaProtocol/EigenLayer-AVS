@@ -55,9 +55,10 @@ type Config struct {
 	SocketPath  string
 	Environment sdklogging.LogLevel
 
-	Macros map[string]string
+	MacroVars    map[string]string
+	MacroSecrets map[string]string
 
-	MetricsReg       *prometheus.Registry
+	MetricsReg *prometheus.Registry
 }
 
 type SmartWalletConfig struct {
@@ -96,7 +97,7 @@ type ConfigRaw struct {
 
 	SocketPath string `yaml:"socket_path"`
 
-	Macros map[string]string `yaml:"macros"`
+	Macros map[string]map[string]string `yaml:"macros"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
@@ -202,9 +203,10 @@ func NewConfig(configFilePath string) (*Config, error) {
 			ControllerPrivateKey: controllerPrivateKey,
 		},
 
-		SocketPath: configRaw.SocketPath,
-		Macros:     configRaw.Macros,
-		MetricsReg: reg,
+		SocketPath:   configRaw.SocketPath,
+		MacroVars:    configRaw.Macros["vars"],
+		MacroSecrets: configRaw.Macros["secrets"],
+		MetricsReg:   reg,
 	}
 
 	if config.SocketPath == "" {
