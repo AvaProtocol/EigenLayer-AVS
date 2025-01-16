@@ -10,7 +10,6 @@ require (
 	github.com/dop251/goja v0.0.0-20241024094426-79f3a7efcdbd
 	github.com/ethereum/go-ethereum v1.14.0
 	github.com/expr-lang/expr v1.16.9
-	github.com/ginkgoch/godash/v2 v2.0.1
 	github.com/go-co-op/gocron/v2 v2.11.0
 	github.com/go-resty/resty/v2 v2.16.2
 	github.com/golang-jwt/jwt/v5 v5.2.1
@@ -18,6 +17,7 @@ require (
 	github.com/labstack/echo/v4 v4.12.0
 	github.com/oklog/ulid/v2 v2.1.1-0.20240413180941-96c4edf226ef
 	github.com/prometheus/client_golang v1.20.5
+	github.com/samber/lo v1.47.0
 	github.com/shopspring/decimal v1.4.0
 	github.com/spf13/cobra v1.8.0
 	github.com/stackup-wallet/stackup-bundler v0.6.47

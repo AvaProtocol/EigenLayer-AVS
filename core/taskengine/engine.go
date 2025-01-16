@@ -341,6 +341,9 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			}
 
 			if !n.CanStreamCheck(address) {
+				// This isn't a consensus approval. It's a feature flag we control server side whether to stream data to the operator or not.
+				// TODO: Remove this flag when we measure performance impact on all operator
+				n.logger.Info("operator has not been approved to process task", address)
 				continue
 			}
 
@@ -863,5 +866,5 @@ func (n *Engine) NewSeqID() (string, error) {
 
 func (n *Engine) CanStreamCheck(address string) bool {
 	// Only enable for our own operator first, once it's stable we will roll out to all
-	return address == "0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d" || address == "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3"
+	return strings.EqualFold(address, "0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d") || strings.EqualFold(address, "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3")
 }
