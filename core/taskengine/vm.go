@@ -97,6 +97,20 @@ func (v *VM) WithLogger(logger sdklogging.Logger) *VM {
 	return v
 }
 
+func (v *VM) GetTriggerNameAsVar() string {
+	// Replace invalid characters with _
+	re := regexp.MustCompile(`[^a-zA-Z0-9_$]`)
+	name := v.TaskTrigger.Name
+	standardized := re.ReplaceAllString(name, "_")
+
+	// Ensure the first character is valid
+	if len(standardized) == 0 || !regexp.MustCompile(`^[a-zA-Z_$]`).MatchString(standardized[:1]) {
+		standardized = "_" + standardized
+	}
+
+	return standardized
+}
+
 func (v *VM) GetNodeNameAsVar(nodeID string) string {
 	// Replace invalid characters with _
 	re := regexp.MustCompile(`[^a-zA-Z0-9_$]`)
@@ -130,7 +144,7 @@ func NewVMWithData(taskID string, trigger *avsproto.TaskTrigger, triggerMetadata
 	}
 
 	v.vars = macros.GetEnvs(map[string]any{})
-
+	triggerVarName := v.GetTriggerNameAsVar()
 	// popular trigger data for trigger variable
 	if triggerMetadata != nil {
 		if triggerMetadata.LogIndex > 0 && triggerMetadata.TxHash != "" {
@@ -164,8 +178,7 @@ func NewVMWithData(taskID string, trigger *avsproto.TaskTrigger, triggerMetadata
 			parseTransfer, err := ef.ParseTransfer(*event)
 			formattedValue := ToDecimal(parseTransfer.Value, int(tokenMetadata.Decimals)).String()
 
-			// TODO: Implement a decoder to help standarize common event
-			v.vars["trigger1"] = map[string]interface{}{
+			v.vars[triggerVarName] = map[string]interface{}{
 				"data": map[string]interface{}{
 					"topics": lo.Map(event.Topics, func(topic common.Hash, _ int) string {
 						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
@@ -189,7 +202,7 @@ func NewVMWithData(taskID string, trigger *avsproto.TaskTrigger, triggerMetadata
 		}
 
 		if triggerMetadata.Epoch > 0 {
-			v.vars["trigger1"] = map[string]any{
+			v.vars[triggerVarName] = map[string]any{
 				"epoch": triggerMetadata.Epoch,
 			}
 		}

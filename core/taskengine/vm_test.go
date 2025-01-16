@@ -329,7 +329,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 
 func TestRenderString(t *testing.T) {
 	vm := goja.New()
-	vm.Set("trigger1", map[string]any{
+	vm.Set("myTrigger", map[string]any{
 		"data": map[string]any{
 			"token_symbol": "0xtoken",
 			"amount":       123456,
@@ -340,7 +340,7 @@ func TestRenderString(t *testing.T) {
 
 	result, err := vm.RunString(`JSON.stringify({
       chat_id:-4609037622,
-	  text: ` + "`Congrat, your walllet ${target} received ${trigger1.data.amount} ${trigger1.data.token_symbol} at [${trigger1.data.tx_hash}](sepolia.etherscan.io/tx/${trigger1.data.tx_hash}`" + `
+	  text: ` + "`Congrat, your walllet ${target} received ${myTrigger.data.amount} ${myTrigger.data.token_symbol} at [${myTrigger.data.tx_hash}](sepolia.etherscan.io/tx/${myTrigger.data.tx_hash}`" + `
 	  })`)
 	v := result.Export().(string)
 	if err != nil || !strings.Contains(v, "123456") || !strings.Contains(v, "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8") {
@@ -359,7 +359,7 @@ func TestEvaluateEvent(t *testing.T) {
 						&avsproto.Condition{
 							Id:         "a1",
 							Type:       "if",
-							Expression: `trigger1.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" && bigGt(toBigInt(trigger1.data.data), toBigInt("1200000"))`},
+							Expression: `triggertest.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" && bigGt(toBigInt(triggertest.data.data), toBigInt("1200000"))`},
 					},
 				},
 			},
@@ -440,7 +440,7 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 						&avsproto.Condition{
 							Id:         "a1",
 							Type:       "if",
-							Expression: `trigger1.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" && bigGt(toBigInt(trigger1.data.data), toBigInt("1200000"))`},
+							Expression: `triggertest.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" && bigGt(toBigInt(triggertest.data.data), toBigInt("1200000"))`},
 					},
 				},
 			},

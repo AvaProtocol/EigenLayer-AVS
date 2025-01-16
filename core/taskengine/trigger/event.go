@@ -158,22 +158,23 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) {
 	if check.Program != "" {
 		// This is the advance trigger with js evaluation based on trigger data
+		triggerVarName := check.TaskMetadata.GetTrigger().GetName()
+
 		jsvm := goja.New()
-		envs := macros.GetEnvs(map[string]interface{}{
-			"trigger1": map[string]interface{}{
-				"data": map[string]interface{}{
-					"address": strings.ToLower(event.Address.Hex()),
-					"topics": lo.Map[common.Hash, string](event.Topics, func(topic common.Hash, _ int) string {
-						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
-					}),
-					"data":    "0x" + common.Bytes2Hex(event.Data),
-					"tx_hash": event.TxHash,
-				},
-			},
-		})
+		envs := macros.GetEnvs(map[string]interface{}{})
 		for k, v := range envs {
 			jsvm.Set(k, v)
 		}
+		jsvm.Set(triggerVarName, map[string]interface{}{
+			"data": map[string]interface{}{
+				"address": strings.ToLower(event.Address.Hex()),
+				"topics": lo.Map[common.Hash, string](event.Topics, func(topic common.Hash, _ int) string {
+					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+				}),
+				"data":    "0x" + common.Bytes2Hex(event.Data),
+				"tx_hash": event.TxHash,
+			},
+		})
 
 		result, err := jsvm.RunString(check.Program)
 
