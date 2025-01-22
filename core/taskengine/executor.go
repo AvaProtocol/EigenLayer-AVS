@@ -95,7 +95,9 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	task.TotalExecution += 1
 	task.LastRanAt = t0.Unix()
 
-	vm.Compile()
+	if err = vm.Compile(); err != nil {
+		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", triggerMetadata)
+	}
 	runTaskErr := vm.Run()
 
 	t1 := time.Now()
@@ -121,7 +123,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	if runTaskErr != nil {
-		x.logger.Error("error executing task", "error", err, "task_id", task.Id, "triggermark", triggerMetadata)
+		x.logger.Error("error executing task", "error", err, "runError", runTaskErr, "task_id", task.Id, "triggermark", triggerMetadata)
 		execution.Error = runTaskErr.Error()
 	}
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/AvaProtocol/ap-avs/core/auth"
 	"github.com/AvaProtocol/ap-avs/model"
@@ -52,7 +51,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		}
 	} else {
 		// We need to have 3 things to verify the signature: the signature, the hash of the original data, and the public key of the signer. With this information we can determine if the private key holder of the public key pair did indeed sign the message
-		text := fmt.Sprintf(authTemplate, payload.ChainId, payload.IssuedAt, payload.ExpiredAt, payload.Owner)
+		text := fmt.Sprintf(authTemplate, payload.ChainId, payload.IssuedAt.AsTime().UTC().Format("2006-01-02T15:04:05.000Z"), payload.ExpiredAt.AsTime().UTC().Format("2006-01-02T15:04:05.000Z"), payload.Owner)
 		data := []byte(text)
 		hash := accounts.TextHash(data)
 
@@ -78,14 +77,12 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		}
 	}
 
-	expiredAt, err := time.Parse(time.RFC3339, payload.ExpiredAt)
-
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, auth.MalformedExpirationTime)
+	if err := payload.ExpiredAt.CheckValid(); err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, auth.MalformedExpirationTime)
 	}
 
 	claims := &jwt.RegisteredClaims{
-		ExpiresAt: jwt.NewNumericDate(expiredAt),
+		ExpiresAt: jwt.NewNumericDate(payload.ExpiredAt.AsTime()),
 		Issuer:    auth.Issuer,
 		Subject:   payload.Owner,
 	}
