@@ -20,6 +20,7 @@ const (
 
 	TaskStorageCorruptedError = "task data storage is corrupted"
 	TaskIDMissing             = "Missing task id in request"
+	TaskIsNotRunable          = "The workflow is not in a runable status, it has reached the limit execution or the expiration time"
 
 	InvalidCursor          = "cursor is not valid"
 	InvalidPaginationParam = "item per page is not valid"
