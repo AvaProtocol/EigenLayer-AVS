@@ -130,6 +130,18 @@ func (t *Task) OwnedBy(address common.Address) bool {
 	return strings.EqualFold(t.Owner, address.Hex())
 }
 
+// A task is runable when both of these condition are matched
+//  1. Its max execution has not reached
+//  2. Its expiration time has not reached
+func (t *Task) Runable() bool {
+	// When MaxExecution is 0, it is unlimited run
+	reachedMaxRun := t.MaxExecution > 0 && t.TotalExecution >= t.MaxExecution
+
+	reachedExpiredTime := t.ExpiredAt > 0 && time.Unix(t.ExpiredAt, 0).Before(time.Now())
+
+	return !reachedMaxRun && !reachedExpiredTime
+}
+
 // Given a task key generated from Key(), extract the ID part
 func TaskKeyToId(key []byte) []byte {
 	// <43-byte>:<43-byte>:
