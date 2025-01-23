@@ -566,7 +566,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, err
 	}
 
-	if !task.Runable() {
+	if !task.IsRunable() {
 		return nil, grpcstatus.Errorf(codes.FailedPrecondition, TaskIsNotRunable)
 	}
 
