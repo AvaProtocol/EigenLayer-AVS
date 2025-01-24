@@ -331,7 +331,6 @@ func TestTriggerSync(t *testing.T) {
 		t.Errorf("invalid triggered block. expect 101 got %d", execution.TriggerMetadata.BlockNumber)
 	}
 }
-
 func TestTriggerAsync(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
@@ -412,4 +411,47 @@ func TestTriggerAsync(t *testing.T) {
 	if executionStatus.Status != avsproto.ExecutionStatus_Finished {
 		t.Errorf("invalid execution status, expected completed but got %s", avsproto.TaskStatus_name[int32(executionStatus.Status)])
 	}
+}
+
+func TestTriggerCompletedTaskReturnError(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	// Now create a test task
+	tr1 := testutil.RestTask()
+	tr1.Name = "t1"
+	tr1.MaxExecution = 1
+	// salt 0
+	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
+
+	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
+		TaskId: result.Id,
+		TriggerMetadata: &avsproto.TriggerMetadata{
+			BlockNumber: 101,
+		},
+		IsBlocking: true,
+	})
+
+	if err != nil || resultTrigger == nil {
+		t.Errorf("expected trigger succesfully but got error: %s", err)
+	}
+
+	fmt.Println(resultTrigger)
+	// Now the task has reach its max run, and canot run anymore
+	resultTrigger, err = n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
+		TaskId: result.Id,
+		TriggerMetadata: &avsproto.TriggerMetadata{
+			BlockNumber: 101,
+		},
+		IsBlocking: true,
+	})
+
+	if err == nil || resultTrigger != nil {
+		t.Errorf("expect trigger error but succeed")
+	}
+
 }

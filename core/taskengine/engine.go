@@ -566,6 +566,10 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, err
 	}
 
+	if !task.IsRunable() {
+		return nil, grpcstatus.Errorf(codes.FailedPrecondition, TaskIsNotRunable)
+	}
+
 	if !task.OwnedBy(user.Address) {
 		// only the owner of a task can trigger it
 		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
