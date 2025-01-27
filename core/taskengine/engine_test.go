@@ -7,6 +7,7 @@ import (
 
 	"github.com/AvaProtocol/ap-avs/core/apqueue"
 	"github.com/AvaProtocol/ap-avs/core/testutil"
+	"github.com/AvaProtocol/ap-avs/model"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/storage"
 )
@@ -440,7 +441,6 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 		t.Errorf("expected trigger succesfully but got error: %s", err)
 	}
 
-	fmt.Println(resultTrigger)
 	// Now the task has reach its max run, and canot run anymore
 	resultTrigger, err = n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
@@ -452,6 +452,324 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 
 	if err == nil || resultTrigger != nil {
 		t.Errorf("expect trigger error but succeed")
+	}
+}
+
+func TestCreateSecret(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user := testutil.TestUser1()
+	n.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+		Name:   "telebot",
+		Secret: "123",
+	})
+
+	result, _ := n.ListSecrets(user, &avsproto.ListSecretsReq{})
+	if len(result.Items) != 1 {
+		t.Errorf("invalid secret result, expect 1 item got %d", len(result.Items))
+	}
+
+	if result.Items[0].Name != "telebot" {
+		t.Errorf("invalid secret name, expect telebot got %s", result.Items[0].Name)
+	}
+}
+
+func TestCreateSecretAtCorrectLevel(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user1 := testutil.TestUser1()
+	user2 := testutil.TestUser2()
+	n.CreateSecret(user1, &avsproto.CreateOrUpdateSecretReq{
+		Name:   "svckey",
+		Secret: "secret123",
+	})
+
+	n.CreateSecret(user2, &avsproto.CreateOrUpdateSecretReq{
+		Name:       "svckey",
+		Secret:     "secret456",
+		WorkflowId: "workflow123",
+	})
+
+	//"secret:_:%s:_:%s",
+	key1, _ := n.db.GetKey([]byte(fmt.Sprintf("secret:_:%s:_:%s", strings.ToLower(user1.Address.Hex()), "svckey")))
+	if string(key1) != "secret123" {
+		t.Errorf("expect secret to be create at user level with value secret123 but got %s", string(key1))
+	}
+	key2, _ := n.db.GetKey([]byte(fmt.Sprintf("secret:_:%s:%s:%s", strings.ToLower(user2.Address.Hex()), "workflow123", "svckey")))
+	if string(key2) != "secret456" {
+		t.Errorf("expect secret to be create at user level with value secret456 but got %s", string(key1))
+	}
+}
+
+func TestCreateSecretListMulti(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user := testutil.TestUser1()
+	n.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+		Name:   "telebot",
+		Secret: "123",
+	})
+
+	n.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+		Name:   "telebot2",
+		Secret: "456",
+	})
+
+	result, _ := n.ListSecrets(user, &avsproto.ListSecretsReq{})
+	if len(result.Items) != 2 {
+		t.Errorf("invalid secret result, expect 2 items got %d", len(result.Items))
+	}
+
+	if result.Items[0].Name != "telebot" || result.Items[1].Name != "telebot2" {
+		t.Errorf("invalid secret name, expect [telebot, telebot2] got %s", result)
+	}
+}
+
+func TestUpdateSecretSucceed(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user := testutil.TestUser1()
+	n.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+		Name:   "telebot",
+		Secret: "123",
+	})
+
+	key, err := SecretStorageKey(&model.Secret{
+		User: user,
+		Name: "telebot",
+	})
+
+	value, err := db.GetKey([]byte(key))
+
+	if err != nil {
+		t.Errorf("expect secret existed but found error %s", err)
+	}
+
+	n.UpdateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+		Name:   "telebot",
+		Secret: "4567",
+	})
+
+	value, err = db.GetKey([]byte(key))
+
+	if err != nil {
+		t.Errorf("expect secret existed but found error %s", err)
+	}
+	if string(value) != "4567" {
+		t.Errorf("expect secrect value is 4567 but got %s", string(value))
+	}
+}
+
+func TestCannotUpdateSecretOfOther(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user1 := testutil.TestUser1()
+	user2 := testutil.TestUser2()
+	n.CreateSecret(user1, &avsproto.CreateOrUpdateSecretReq{
+		Name:   "telebot",
+		Secret: "123",
+	})
+
+	n.UpdateSecret(user2, &avsproto.CreateOrUpdateSecretReq{
+		Name:   "telebot",
+		Secret: "4567",
+	})
+
+	key, err := SecretStorageKey(&model.Secret{
+		User: user1,
+		Name: "telebot",
+	})
+
+	value, err := db.GetKey([]byte(key))
+
+	if err != nil {
+		t.Errorf("expect secret existed but found error %s", err)
+	}
+	if string(value) != "123" {
+		t.Errorf("expect secrect value is 4567 but got %s", string(value))
+	}
+}
+
+func TestCannotUpdateNotExistSecret(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user1 := testutil.TestUser1()
+	result, err := n.UpdateSecret(user1, &avsproto.CreateOrUpdateSecretReq{
+		Name:   "telebot",
+		Secret: "4567",
+	})
+
+	if result || err == nil || err.Error() != "rpc error: code = NotFound desc = Secret not found" {
+		t.Errorf("expect a failure when updating secret but no error was raise: %s", err)
+	}
+}
+
+func TestDeleteSecretSucceed(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user := testutil.TestUser1()
+	n.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+		Name:   "telebot",
+		Secret: "123",
+	})
+
+	// Ensure the secet is created
+	result, _ := n.ListSecrets(user, &avsproto.ListSecretsReq{})
+	if result.Items[0].Name != "telebot" {
+		t.Errorf("invalid secret name, expect telebot got %s", result)
+	}
+
+	// Now the user can remove it
+	n.DeleteSecret(user, &avsproto.DeleteSecretReq{
+		Name: "telebot",
+	})
+
+	result, _ = n.ListSecrets(user, &avsproto.ListSecretsReq{})
+	if len(result.Items) != 0 {
+		t.Errorf("secret should be delete but still accessible")
+	}
+}
+
+func TestDeleteSecretAtCorrectUserLevel(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user1 := testutil.TestUser1()
+	n.CreateSecret(user1, &avsproto.CreateOrUpdateSecretReq{
+		Name:   "svckey",
+		Secret: "secret123",
+	})
+
+	n.CreateSecret(user1, &avsproto.CreateOrUpdateSecretReq{
+		Name:       "svckey",
+		Secret:     "secret456",
+		WorkflowId: "workflow123",
+	})
+
+	n.DeleteSecret(user1, &avsproto.DeleteSecretReq{
+		Name: "svckey",
+	})
+
+	key1 := fmt.Sprintf("secret:_:%s:_:%s", strings.ToLower(user1.Address.Hex()), "svckey")
+	key2 := fmt.Sprintf("secret:_:%s:%s:%s", strings.ToLower(user1.Address.Hex()), "workflow123", "svckey")
+
+	if ok, _ := n.db.Exist([]byte(key1)); ok {
+		t.Errorf("expect secret to be deleted at user level but it still exists")
+	}
+
+	if ok, _ := n.db.Exist([]byte(key2)); !ok {
+		t.Errorf("expect secret to be deleted at workflow level but it doesn't")
+	}
+}
+
+func TestDeleteSecretAtCorrectWorkflowLevel(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user1 := testutil.TestUser1()
+	n.CreateSecret(user1, &avsproto.CreateOrUpdateSecretReq{
+		Name:   "svckey",
+		Secret: "secret123",
+	})
+
+	n.CreateSecret(user1, &avsproto.CreateOrUpdateSecretReq{
+		Name:       "svckey",
+		Secret:     "secret456",
+		WorkflowId: "workflow123",
+	})
+
+	n.DeleteSecret(user1, &avsproto.DeleteSecretReq{
+		Name:       "svckey",
+		WorkflowId: "workflow123",
+	})
+
+	key1 := fmt.Sprintf("secret:_:%s:_:%s", strings.ToLower(user1.Address.Hex()), "svckey")
+	key2 := fmt.Sprintf("secret:_:%s:%s:%s", strings.ToLower(user1.Address.Hex()), "workflow123", "svckey")
+
+	if ok, _ := n.db.Exist([]byte(key1)); !ok {
+		t.Errorf("expect secret to be deleted at user level but it still exists")
+	}
+
+	if ok, _ := n.db.Exist([]byte(key2)); ok {
+		t.Errorf("expect secret to be deleted at workflow level but it doesn't")
+	}
+}
+
+func TestListSecrets(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user1 := testutil.TestUser1()
+	user2 := testutil.TestUser2()
+	n.CreateSecret(user1, &avsproto.CreateOrUpdateSecretReq{
+		Name:   "telebot",
+		Secret: "secret123",
+	})
+
+	n.CreateSecret(user1, &avsproto.CreateOrUpdateSecretReq{
+		Name:       "telebot2",
+		Secret:     "secretworkflow123",
+		WorkflowId: "workflow123",
+	})
+
+	n.CreateSecret(user2, &avsproto.CreateOrUpdateSecretReq{
+		Name:       "token123",
+		Secret:     "secretworkflow456",
+		WorkflowId: "worflow123",
+	})
+
+	result, _ := n.ListSecrets(user1, &avsproto.ListSecretsReq{})
+	fmt.Println(result)
+	if len(result.Items) != 2 {
+		t.Errorf("invalid secret result, expect 2 items got %d", len(result.Items))
+	}
+	if result.Items[0].Name != "telebot" || result.Items[1].Name != "telebot2" {
+		t.Errorf("invalid secret name, expect [telebot, telebot2] got %s", result)
+	}
+
+	result2, _ := n.ListSecrets(user2, &avsproto.ListSecretsReq{})
+	if len(result2.Items) != 1 {
+		t.Errorf("invalid secret result, expect 2 items got %d", len(result.Items))
+	}
+	if result2.Items[0].Name != "token123" {
+		t.Errorf("invalid secret name, expect [token123] got %s", result)
 	}
 
 }

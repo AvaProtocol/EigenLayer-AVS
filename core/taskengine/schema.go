@@ -103,3 +103,68 @@ func TaskStatusToStorageKey(v avsproto.TaskStatus) string {
 
 	return "a"
 }
+
+func SecretStorageKey(secret *model.Secret) (string, error) {
+	user := secret.User
+	if user == nil {
+		return "", fmt.Errorf("Secret is missing required user field")
+	}
+
+	key := ""
+	if secret.WorkflowID != "" {
+		// Ensure the workflow belongs to this user
+		key = string(SecretStorageKeyForWorkflow(user, secret.Name, secret.WorkflowID))
+	} else if secret.OrgID != "" {
+		key = string(SecretStorageKeyForOrg(user, secret.OrgID, secret.Name))
+	} else {
+		key = string(SecretStorageKeyForUser(user, secret.Name))
+	}
+	return key, nil
+}
+
+func SecretStorageKeyForUser(u *model.User, name string) string {
+	return fmt.Sprintf(
+		"secret:_:%s:_:%s",
+		strings.ToLower(u.Address.Hex()),
+		name,
+	)
+}
+func SecretStorageKeyForOrg(u *model.User, org string, name string) string {
+	return fmt.Sprintf(
+		"secret:%s:%s:_:%s",
+		org,
+		strings.ToLower(u.Address.Hex()),
+		name,
+	)
+}
+func SecretStorageKeyForWorkflow(u *model.User, name string, workflow string) string {
+	return fmt.Sprintf(
+		"secret:_:%s:%s:%s",
+		strings.ToLower(u.Address.Hex()),
+		workflow,
+		name,
+	)
+}
+func SecretStoragePrefix(u *model.User) string {
+	return fmt.Sprintf("secret:_:%s", strings.ToLower(u.Address.Hex()))
+}
+
+// A key had this format secret:<org>:0xd7050816337a3f8f690f8083b5ff8019d50c0e50:<workflow-id>:telebot2
+// example secret:_:0xd7050816337a3f8f690f8083b5ff8019d50c0e50:_:telebot2            secret for all workflow
+// example secret:_:0xd7050816337a3f8f690f8083b5ff8019d50c0e50:workflow1234:telebot2 secret for workflow1234
+func SecretNameFromKey(key string) *model.Secret {
+	parts := strings.Split(key, ":")
+	secretWithNameOnly := &model.Secret{
+		Name: parts[4],
+	}
+
+	if parts[1] != "_" {
+		secretWithNameOnly.OrgID = parts[1]
+	}
+
+	if parts[3] != "_" {
+		secretWithNameOnly.WorkflowID = parts[3]
+	}
+
+	return secretWithNameOnly
+}

@@ -80,6 +80,8 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	triggerMetadata := queueData.TriggerMetadata
 
 	vm, err := NewVMWithData(task.Id, task.Trigger, triggerMetadata, task.Nodes, task.Edges)
+	vm.secrets, _ = LoadSecretForTask(x.db, task)
+
 	if err != nil {
 		return nil, err
 	}

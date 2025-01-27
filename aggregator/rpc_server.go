@@ -248,6 +248,77 @@ func (r *RpcServer) TriggerTask(ctx context.Context, payload *avsproto.UserTrigg
 	return r.engine.TriggerTask(user, payload)
 }
 
+func (r *RpcServer) CreateSecret(ctx context.Context, payload *avsproto.CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process create secret",
+		"user", user.Address.String(),
+		"secret_name", payload.Name,
+	)
+
+	result, err := r.engine.CreateSecret(user, payload)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "")
+	}
+
+	return wrapperspb.Bool(result), nil
+}
+
+func (r *RpcServer) ListSecrets(ctx context.Context, payload *avsproto.ListSecretsReq) (*avsproto.ListSecretsResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process list secret",
+		"user", user.Address.String(),
+	)
+
+	return r.engine.ListSecrets(user, payload)
+}
+
+func (r *RpcServer) UpdateSecret(ctx context.Context, payload *avsproto.CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process update secret",
+		"user", user.Address.String(),
+		"secret_name", payload.Name,
+	)
+
+	result, err := r.engine.UpdateSecret(user, payload)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "")
+	}
+
+	return wrapperspb.Bool(result), nil
+}
+
+func (r *RpcServer) DeleteSecret(ctx context.Context, payload *avsproto.DeleteSecretReq) (*wrapperspb.BoolValue, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process delete secret",
+		"user", user.Address.String(),
+		"secret_name", payload.Name,
+	)
+
+	result, err := r.engine.DeleteSecret(user, payload)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "")
+	}
+
+	return wrapperspb.Bool(result), nil
+
+}
+
 // Operator action
 func (r *RpcServer) SyncMessages(payload *avsproto.SyncMessagesReq, srv avsproto.Node_SyncMessagesServer) error {
 	err := r.engine.StreamCheckToOperator(payload, srv)
