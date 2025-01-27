@@ -263,6 +263,9 @@ func (v *VM) Compile() error {
 		return fmt.Errorf(InvalidEntrypoint)
 	}
 
+	// Load secrets for this task
+	// First we load user secret
+
 	v.Status = VMStateReady
 
 	return nil
