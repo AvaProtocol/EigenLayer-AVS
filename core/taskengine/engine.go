@@ -31,8 +31,9 @@ import (
 )
 
 const (
-	JobTypeExecuteTask = "execute_task"
-	DefaultItemPerPage = 50
+	JobTypeExecuteTask  = "execute_task"
+	DefaultItemPerPage  = 50
+	MaxSecretNameLength = 255
 )
 
 var (
@@ -847,6 +848,100 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 	}
 
 	return true, nil
+}
+
+func (n *Engine) CreateSecret(user *model.User, payload *avsproto.CreateOrUpdateSecretReq) (bool, error) {
+	secret := &model.Secret{
+		User:       user,
+		Name:       payload.Name,
+		Value:      payload.Secret,
+		OrgID:      payload.OrgId,
+		WorkflowID: payload.WorkflowId,
+	}
+
+	updates := map[string][]byte{}
+	if strings.HasPrefix(strings.ToLower(payload.Name), "ap_") {
+		return false, grpcstatus.Errorf(codes.InvalidArgument, "secret name cannot start with ap_")
+	}
+
+	if len(payload.Name) == 0 || len(payload.Name) > MaxSecretNameLength {
+		return false, grpcstatus.Errorf(codes.InvalidArgument, "secret name lengh is invalid: should be 1-255 character")
+	}
+
+	key, _ := SecretStorageKey(secret)
+	updates[key] = []byte(payload.Secret)
+	err := n.db.BatchWrite(updates)
+	if err == nil {
+		return true, nil
+	}
+
+	return false, grpcstatus.Errorf(codes.Internal, "Cannot save data")
+}
+
+func (n *Engine) UpdateSecret(user *model.User, payload *avsproto.CreateOrUpdateSecretReq) (bool, error) {
+	updates := map[string][]byte{}
+	secret := &model.Secret{
+		User:       user,
+		Name:       payload.Name,
+		Value:      payload.Secret,
+		OrgID:      payload.OrgId,
+		WorkflowID: payload.WorkflowId,
+	}
+	key, _ := SecretStorageKey(secret)
+	if ok, err := n.db.Exist([]byte(key)); !ok || err != nil {
+		return false, grpcstatus.Errorf(codes.NotFound, "Secret not found")
+	}
+
+	updates[key] = []byte(payload.Secret)
+
+	err := n.db.BatchWrite(updates)
+	if err == nil {
+		return true, nil
+	}
+
+	return true, nil
+}
+
+// ListSecrets
+func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq) (*avsproto.ListSecretsResp, error) {
+	prefixes := []string{
+		SecretStoragePrefix(user),
+	}
+
+	result := &avsproto.ListSecretsResp{
+		Items: []*avsproto.ListSecretsResp_ResponseSecret{},
+	}
+
+	secretKeys, err := n.db.ListKeysMulti(prefixes)
+	if err != nil {
+		return nil, err
+	}
+	for _, k := range secretKeys {
+		secretWithNameOnly := SecretNameFromKey(k)
+		item := &avsproto.ListSecretsResp_ResponseSecret{
+			Name:       secretWithNameOnly.Name,
+			OrgId:      secretWithNameOnly.OrgID,
+			WorkflowId: secretWithNameOnly.WorkflowID,
+		}
+
+		result.Items = append(result.Items, item)
+	}
+
+	return result, nil
+}
+
+func (n *Engine) DeleteSecret(user *model.User, payload *avsproto.DeleteSecretReq) (bool, error) {
+	// No need to check permission, the key is prefixed by user eoa already
+	secret := &model.Secret{
+		Name:       payload.Name,
+		User:       user,
+		OrgID:      payload.OrgId,
+		WorkflowID: payload.WorkflowId,
+	}
+	key, _ := SecretStorageKey(secret)
+	err := n.db.Delete([]byte(key))
+
+	return err == nil, err
 }
 
 // A global counter for the task engine

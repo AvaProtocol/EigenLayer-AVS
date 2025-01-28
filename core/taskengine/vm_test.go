@@ -556,3 +556,64 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 		t.Errorf("expect entrypoint is notification1 but got %v", vm.entrypoint)
 	}
 }
+
+func TestRunTaskWithCustomUserSecret(t *testing.T) {
+	nodes := []*avsproto.TaskNode{
+		&avsproto.TaskNode{
+			Id:   "123",
+			Name: "httpnode",
+			TaskType: &avsproto.TaskNode_RestApi{
+				RestApi: &avsproto.RestAPINode{
+					Url:    "https://httpbin.org/post?apikey=${{secrets.apikey}}",
+					Method: "POST",
+					Body:   "my key is ${{secrets.apikey}} in body",
+				},
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+
+	edges := []*avsproto.TaskEdge{
+		&avsproto.TaskEdge{
+			Id:     "e1",
+			Source: trigger.Id,
+			Target: "123",
+		},
+	}
+
+	vm, err := NewVMWithData("123", trigger, nil, nodes, edges)
+	vm.secrets = map[string]string{
+		"apikey": "secretapikey",
+	}
+
+	if err != nil {
+		t.Errorf("expect vm initialized")
+	}
+
+	vm.Compile()
+
+	if vm.entrypoint != "123" {
+		t.Errorf("Error compute entrypoint. Expected 123 Got %s", vm.entrypoint)
+	}
+	err = vm.Run()
+	if err != nil {
+		t.Errorf("Error executing program. Expected no error Got error %v", err)
+	}
+
+	if !strings.Contains(vm.ExecutionLogs[0].Log, "Execute") {
+		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got nothing")
+	}
+
+	data := vm.vars["httpnode"].(map[string]any)
+	if data["data"].(string) != "my key is secretapikey in body" {
+		t.Errorf("secret doesn't render correctly in body, expect secretapikey but got %S", data["data"])
+	}
+
+	if data["args"].(map[string]interface{})["apikey"].(string) != "secretapikey" {
+		t.Errorf("secret doesn't render correctly in uri, expect secretapikey but got %S", data["data"])
+	}
+}

@@ -24,5 +24,10 @@ Storage can also be inspect with telnet:
 	telnet /tmp/ap.sock
 
 Then issue `get <ket>` or `list <prefix>` or `list *` to inspect current keys in the storage.
+
+**Secret Storage**
+- currently org_id will always be _ because we haven't implemented it yet
+- workflow_id will also be _ so we can search be prefix
+secret:<org_id>:<eoa>:<workflow_id>:<name> -> value
 */
 package taskengine

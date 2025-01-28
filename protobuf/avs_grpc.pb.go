@@ -39,6 +39,17 @@ type AggregatorClient interface {
 	CancelTask(ctx context.Context, in *IdReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
 	DeleteTask(ctx context.Context, in *IdReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
 	TriggerTask(ctx context.Context, in *UserTriggerTaskReq, opts ...grpc.CallOption) (*UserTriggerTaskResp, error)
+	// CreateSecret allow you to define a secret to be used in your tasks. The secret can be used with a special syntax of ${{secrets.name }}.
+	// You can decide whether to grant secret to a single workflow or many workflow, or all of your workflow
+	// By default, your secret is available across all of your tasks.
+	CreateSecret(ctx context.Context, in *CreateOrUpdateSecretReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
+	Delete(ctx context.Context, in *DeleteSecretReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
+	// Return all secrets belong to this user. Currently we don't support any fine tune or filter yet.
+	// Only secret names and config data are returned. The secret value aren't returned.
+	ListSecrets(ctx context.Context, in *ListSecretsReq, opts ...grpc.CallOption) (*ListSecretsResp, error)
+	// For simplicity, currently only the user who create the secrets can update its value, or update its permission.
+	// The current implementation is also limited, update is an override action, not an appending action. So when updating, you need to pass the whole payload
+	UpdateSecret(ctx context.Context, in *CreateOrUpdateSecretReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
 }
 
 type aggregatorClient struct {
@@ -166,6 +177,42 @@ func (c *aggregatorClient) TriggerTask(ctx context.Context, in *UserTriggerTaskR
 	return out, nil
 }
 
+func (c *aggregatorClient) CreateSecret(ctx context.Context, in *CreateOrUpdateSecretReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error) {
+	out := new(wrapperspb.BoolValue)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/CreateSecret", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aggregatorClient) Delete(ctx context.Context, in *DeleteSecretReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error) {
+	out := new(wrapperspb.BoolValue)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/Delete", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aggregatorClient) ListSecrets(ctx context.Context, in *ListSecretsReq, opts ...grpc.CallOption) (*ListSecretsResp, error) {
+	out := new(ListSecretsResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/ListSecrets", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aggregatorClient) UpdateSecret(ctx context.Context, in *CreateOrUpdateSecretReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error) {
+	out := new(wrapperspb.BoolValue)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/UpdateSecret", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AggregatorServer is the server API for Aggregator service.
 // All implementations must embed UnimplementedAggregatorServer
 // for forward compatibility
@@ -186,6 +233,17 @@ type AggregatorServer interface {
 	CancelTask(context.Context, *IdReq) (*wrapperspb.BoolValue, error)
 	DeleteTask(context.Context, *IdReq) (*wrapperspb.BoolValue, error)
 	TriggerTask(context.Context, *UserTriggerTaskReq) (*UserTriggerTaskResp, error)
+	// CreateSecret allow you to define a secret to be used in your tasks. The secret can be used with a special syntax of ${{secrets.name }}.
+	// You can decide whether to grant secret to a single workflow or many workflow, or all of your workflow
+	// By default, your secret is available across all of your tasks.
+	CreateSecret(context.Context, *CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error)
+	Delete(context.Context, *DeleteSecretReq) (*wrapperspb.BoolValue, error)
+	// Return all secrets belong to this user. Currently we don't support any fine tune or filter yet.
+	// Only secret names and config data are returned. The secret value aren't returned.
+	ListSecrets(context.Context, *ListSecretsReq) (*ListSecretsResp, error)
+	// For simplicity, currently only the user who create the secrets can update its value, or update its permission.
+	// The current implementation is also limited, update is an override action, not an appending action. So when updating, you need to pass the whole payload
+	UpdateSecret(context.Context, *CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error)
 	mustEmbedUnimplementedAggregatorServer()
 }
 
@@ -231,6 +289,18 @@ func (UnimplementedAggregatorServer) DeleteTask(context.Context, *IdReq) (*wrapp
 }
 func (UnimplementedAggregatorServer) TriggerTask(context.Context, *UserTriggerTaskReq) (*UserTriggerTaskResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TriggerTask not implemented")
+}
+func (UnimplementedAggregatorServer) CreateSecret(context.Context, *CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateSecret not implemented")
+}
+func (UnimplementedAggregatorServer) Delete(context.Context, *DeleteSecretReq) (*wrapperspb.BoolValue, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Delete not implemented")
+}
+func (UnimplementedAggregatorServer) ListSecrets(context.Context, *ListSecretsReq) (*ListSecretsResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListSecrets not implemented")
+}
+func (UnimplementedAggregatorServer) UpdateSecret(context.Context, *CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateSecret not implemented")
 }
 func (UnimplementedAggregatorServer) mustEmbedUnimplementedAggregatorServer() {}
 
@@ -479,6 +549,78 @@ func _Aggregator_TriggerTask_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Aggregator_CreateSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateOrUpdateSecretReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).CreateSecret(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregator/CreateSecret",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).CreateSecret(ctx, req.(*CreateOrUpdateSecretReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Aggregator_Delete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteSecretReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).Delete(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregator/Delete",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).Delete(ctx, req.(*DeleteSecretReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Aggregator_ListSecrets_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSecretsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).ListSecrets(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregator/ListSecrets",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).ListSecrets(ctx, req.(*ListSecretsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Aggregator_UpdateSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateOrUpdateSecretReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).UpdateSecret(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregator/UpdateSecret",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).UpdateSecret(ctx, req.(*CreateOrUpdateSecretReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Aggregator_ServiceDesc is the grpc.ServiceDesc for Aggregator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -537,6 +679,22 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TriggerTask",
 			Handler:    _Aggregator_TriggerTask_Handler,
+		},
+		{
+			MethodName: "CreateSecret",
+			Handler:    _Aggregator_CreateSecret_Handler,
+		},
+		{
+			MethodName: "Delete",
+			Handler:    _Aggregator_Delete_Handler,
+		},
+		{
+			MethodName: "ListSecrets",
+			Handler:    _Aggregator_ListSecrets_Handler,
+		},
+		{
+			MethodName: "UpdateSecret",
+			Handler:    _Aggregator_UpdateSecret_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -468,6 +468,49 @@ message UserTriggerTaskResp {
   ExecutionStatus status = 2;
 }
 
+message CreateOrUpdateSecretReq {
+  // name of the secret. it should be [a-zA-Z0-9_]+
+  string name = 1;
+
+  // value can be any valid unicode string
+  // Secret is the only thing we can change in an update. workflow and org id cannot be change
+  string secret = 2;
+
+  // A secret when define can be at these level
+  // - org: available to everything in the org. Currently this isn't supported yet. reserve for future use
+  // - user: available to all workflow of an user. This is the default level
+  // - workflow: available to a single workflow. To make a secret available to multiple workflow, either use org/user level or define them on other workflow.
+  string workflow_id = 3;
+  string org_id = 4;
+}
+
+message ListSecretsReq {
+  string workflow_id = 1;
+}
+
+message ListSecretsResp {
+  message ResponseSecret {
+    // when listing secret, we don't return its value, just secret and last update
+    string name = 1;
+    string scope = 2;
+
+    string workflow_id = 4;
+    string org_id = 5;
+  }
+  repeated ResponseSecret items = 1;
+}
+
+message DeleteSecretReq {
+  string name = 1;
+
+  // Delete the secret belong to the specific workflow. Without its, we delete the one belong to user
+  string workflow_id = 2;
+
+  // Delete the secret belong to the specific prg. Without its, we delete the one belong to user
+  string org_id = 3;
+}
+
+
 service Aggregator {
   // Exchange for an Auth Key to authenticate in subsequent request
   rpc GetKey(GetKeyReq) returns (KeyResp) {};
@@ -489,4 +532,18 @@ service Aggregator {
   rpc CancelTask(IdReq)                 returns (google.protobuf.BoolValue) {};
   rpc DeleteTask(IdReq)                 returns (google.protobuf.BoolValue) {};
   rpc TriggerTask(UserTriggerTaskReq)   returns (UserTriggerTaskResp) {};
+
+  // CreateSecret allow you to define a secret to be used in your tasks. The secret can be used with a special syntax of ${{secrets.name }}.
+  // You can decide whether to grant secret to a single workflow or many workflow, or all of your workflow
+  // By default, your secret is available across all of your tasks.
+  rpc CreateSecret(CreateOrUpdateSecretReq) returns (google.protobuf.BoolValue) {};
+  rpc Delete(DeleteSecretReq) returns (google.protobuf.BoolValue) {};
+
+  // Return all secrets belong to this user. Currently we don't support any fine tune or filter yet.
+  // Only secret names and config data are returned. The secret value aren't returned.
+  rpc ListSecrets(ListSecretsReq) returns (ListSecretsResp) {};
+
+  // For simplicity, currently only the user who create the secrets can update its value, or update its permission.
+  // The current implementation is also limited, update is an override action, not an appending action. So when updating, you need to pass the whole payload
+  rpc UpdateSecret(CreateOrUpdateSecretReq) returns (google.protobuf.BoolValue) {};
 }

@@ -66,6 +66,9 @@ type VM struct {
 	// internal state that is set through out program execution
 	vars map[string]any
 
+	// hold the name->value of loaded secret for this workflow
+	secrets map[string]string
+
 	plans            map[string]*Step
 	entrypoint       string
 	instructionCount int64
@@ -78,6 +81,7 @@ func NewVM() *VM {
 		Status:           VMStateInitialize,
 		mu:               &sync.Mutex{},
 		instructionCount: 0,
+		secrets:          map[string]string{},
 	}
 
 	return v
@@ -137,6 +141,7 @@ func NewVMWithData(taskID string, trigger *avsproto.TaskTrigger, triggerMetadata
 		plans:            make(map[string]*Step),
 		mu:               &sync.Mutex{},
 		instructionCount: 0,
+		secrets:          map[string]string{},
 	}
 
 	for _, node := range nodes {
@@ -348,10 +353,23 @@ func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avspro
 		NodeId: stepID,
 	}
 
+	// TODO: for global secret, we NEED to limit apikey to only send to a certain authorized endpoint for a certain secret to avoid leakage
+	if strings.Contains(nodeValue.Url, "${{") {
+		nodeValue.Url = macros.RenderSecrets(nodeValue.Url, v.secrets)
+	}
+	if strings.Contains(nodeValue.Body, "${{") {
+		nodeValue.Body = macros.RenderSecrets(nodeValue.Body, v.secrets)
+	}
+	for headerName, headerValue := range nodeValue.Headers {
+		if strings.Contains(headerValue, "${{") {
+			nodeValue.Headers[headerName] = macros.RenderSecrets(headerValue, v.secrets)
+		}
+	}
+
 	// only evaluate string when there is string interpolation
 	if nodeValue.Body != "" && (strings.Contains(nodeValue.Body, "$") || strings.Contains(nodeValue.Body, "`")) {
 		nodeValue2 := &avsproto.RestAPINode{
-			Url:     macros.RenderSecrets(nodeValue.Url, macroSecrets),
+			Url:     nodeValue.Url,
 			Headers: nodeValue.Headers,
 			Method:  nodeValue.Method,
 			Body:    strings.Clone(nodeValue.Body),
