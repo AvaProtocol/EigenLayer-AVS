@@ -226,7 +226,7 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 	return wallets, nil
 }
 
-func (n *Engine) CreateSmartWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
+func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
 	// Verify data
 	// when user passing a custom factory address, we want to validate it
 	if payload.FactoryAddress != "" && !common.IsHexAddress(payload.FactoryAddress) {
@@ -266,10 +266,19 @@ func (n *Engine) CreateSmartWallet(user *model.User, payload *avsproto.GetWallet
 		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), StorageWriteError)
 	}
 
+	statSvc := NewStatService(n.db)
+	stat, _ := statSvc.GetTaskCount(wallet)
+
 	return &avsproto.GetWalletResp{
 		Address:        sender.Hex(),
 		Salt:           salt.String(),
 		FactoryAddress: factoryAddress.Hex(),
+
+		TotalTaskCount:     stat.Total,
+		ActiveTaskCount:    stat.Active,
+		CompletedTaskCount: stat.Completed,
+		FailedTaskCount:    stat.Failed,
+		CanceledTaskCount:  stat.Canceled,
 	}, nil
 }
 

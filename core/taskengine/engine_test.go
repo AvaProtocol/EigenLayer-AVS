@@ -18,10 +18,10 @@ func TestListTasks(t *testing.T) {
 
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
-	n.CreateSmartWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
+	n.GetWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
 		Salt: "12345",
 	})
-	n.CreateSmartWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
+	n.GetWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
 		Salt: "6789",
 	})
 
@@ -80,10 +80,10 @@ func TestListTasksPagination(t *testing.T) {
 
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
-	n.CreateSmartWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
+	n.GetWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
 		Salt: "12345",
 	})
-	n.CreateSmartWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
+	n.GetWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
 		Salt: "6789",
 	})
 
@@ -241,10 +241,10 @@ func TestListWallets(t *testing.T) {
 	n := New(db, config, nil, testutil.GetLogger())
 	u := testutil.TestUser1()
 
-	n.CreateSmartWallet(u, &avsproto.GetWalletReq{
+	n.GetWallet(u, &avsproto.GetWalletReq{
 		Salt: "12345",
 	})
-	n.CreateSmartWallet(u, &avsproto.GetWalletReq{
+	n.GetWallet(u, &avsproto.GetWalletReq{
 		Salt: "9876",
 		// https://sepolia.etherscan.io/address/0x9406Cc6185a346906296840746125a0E44976454#readProxyContract
 		FactoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
@@ -772,4 +772,53 @@ func TestListSecrets(t *testing.T) {
 		t.Errorf("invalid secret name, expect [token123] got %s", result)
 	}
 
+}
+
+func TestGetWalletReturnTaskStat(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user1 := testutil.TestUser1()
+	// Now create a test task
+	tr1 := testutil.RestTask()
+	tr1.Name = "t1"
+	// salt 0 wallet
+	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+
+	result, _ := n.GetWallet(user1, &avsproto.GetWalletReq{
+		Salt: "0",
+	})
+
+	if result.TotalTaskCount > 0 {
+		t.Errorf("expect no task count yet but got :%d", result.TotalTaskCount)
+	}
+
+	taskResult, _ := n.CreateTask(testutil.TestUser1(), tr1)
+	result, _ = n.GetWallet(user1, &avsproto.GetWalletReq{
+		Salt: "0",
+	})
+
+	if result.TotalTaskCount != 1 || result.ActiveTaskCount != 1 || result.CompletedTaskCount != 0 {
+		t.Errorf("expect total=1 active=1 completed=0 but got %v", result)
+	}
+
+	// Make the task run to simulate completed count
+	n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
+		TaskId: taskResult.Id,
+		TriggerMetadata: &avsproto.TriggerMetadata{
+			BlockNumber: 101,
+		},
+		IsBlocking: true,
+	})
+
+	result, _ = n.GetWallet(user1, &avsproto.GetWalletReq{
+		Salt: "0",
+	})
+
+	if result.TotalTaskCount != 1 || result.ActiveTaskCount != 0 || result.CompletedTaskCount != 1 {
+		t.Errorf("expect total=1 active=0 completed=1 but got %v", result)
+	}
 }
