@@ -449,6 +449,12 @@ message GetWalletResp {
   string address = 1;
   string salt = 2;
   string factory_address = 3;
+
+  uint64 total_task_count = 4;
+  uint64 active_task_count = 5;
+  uint64 completed_task_count = 6;
+  uint64 failed_task_count = 7;
+  uint64 canceled_task_count = 8;
 }
 
 message UserTriggerTaskReq {

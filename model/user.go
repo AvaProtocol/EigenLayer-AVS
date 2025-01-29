@@ -24,6 +24,14 @@ func (u *User) LoadDefaultSmartWallet(rpcClient *ethclient.Client) error {
 	return nil
 }
 
+// Return the smartwallet struct re-present the default wallet for this user
+func (u *User) ToSmartWallet() *SmartWallet {
+	return &SmartWallet{
+		Owner:   &u.Address,
+		Address: u.SmartAccountAddress,
+	}
+}
+
 type SmartWallet struct {
 	Owner   *common.Address `json:"owner"`
 	Address *common.Address `json:"address"`
@@ -39,4 +47,12 @@ func (w *SmartWallet) FromStorageData(body []byte) error {
 	err := json.Unmarshal(body, w)
 
 	return err
+}
+
+type SmartWalletTaskStat struct {
+	Total     uint64
+	Active    uint64
+	Completed uint64
+	Failed    uint64
+	Canceled  uint64
 }
