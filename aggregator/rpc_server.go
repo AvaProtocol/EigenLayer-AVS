@@ -56,7 +56,7 @@ func (r *RpcServer) GetWallet(ctx context.Context, payload *avsproto.GetWalletRe
 		"factory", payload.FactoryAddress,
 	)
 
-	return r.engine.CreateSmartWallet(user, payload)
+	return r.engine.GetSmartWallet(user, payload)
 }
 
 // Get nonce of an existing smart wallet of a given owner
