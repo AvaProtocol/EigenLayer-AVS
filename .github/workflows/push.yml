@@ -9,6 +9,16 @@ jobs:
     environment: Test
     name: Unit Test
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tests:
+          - ./core/taskengine
+          - ./core/taskengine/trigger
+          - ./core/taskengine/macros
+          - ./pkg/timekeeper
+          - ./pkg/graphql
+          - ./aggregator/
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,11 +29,7 @@ jobs:
           RPC_URL: "${{ secrets.RPC_URL }}"
           BUNDLER_RPC: "${{ secrets.BUNDLER_RPC }}"
         run: |
-          # TODO Implement test for all packages
-          go test -v ./core/taskengine
-          go test -v ./core/taskengine/trigger
-          go test -v ./core/taskengine/macros
-          go test -v ./pkg/timekeeper
+          go test -v ${{ matrix.test }}
 
   publish-dev-build:
     name: Publish dev build docker image to dockerhub

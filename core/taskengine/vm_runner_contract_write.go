@@ -1,37 +1,33 @@
 package taskengine
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"strings"
 	"time"
 
-	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/AvaProtocol/ap-avs/core/apqueue"
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
 	"github.com/AvaProtocol/ap-avs/core/config"
-	"github.com/AvaProtocol/ap-avs/model"
 	"github.com/AvaProtocol/ap-avs/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/ap-avs/pkg/erc4337/preset"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
-	"github.com/AvaProtocol/ap-avs/storage"
 )
 
 type ContractWriteProcessor struct {
 	*CommonProcessor
-	client *ethclient.Client
+	client            *ethclient.Client
+	smartWalletConfig *config.SmartWalletConfig
+	owner             common.Address
 }
 
-func NewContractWriteProcessor(vm *VM, client *ethclient.Client) *ContractWriteProcessor {
+func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConfig *config.SmartWalletConfig, owner common.Address) *ContractWriteProcessor {
 	return &ContractWriteProcessor{
-		client: client,
+		client:            client,
+		smartWalletConfig: smartWalletConfig,
+		owner:             owner,
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
@@ -39,7 +35,6 @@ func NewContractWriteProcessor(vm *VM, client *ethclient.Client) *ContractWriteP
 }
 
 func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
-	ctx := context.Background()
 	t0 := time.Now().Unix()
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
@@ -50,158 +45,49 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		StartAt:    t0,
 	}
 
+	var log strings.Builder
 	var err error
+
 	defer func() {
+		s.Log = log.String()
 		s.EndAt = time.Now().Unix()
 		s.Success = err == nil
-		if err != nil {
-			s.Error = err.Error()
-		}
 	}()
-
-	var log strings.Builder
-
-	// TODO: support load pre-define ABI
-	parsedABI, err := abi.JSON(strings.NewReader(node.ContractAbi))
-	if err != nil {
-		return nil, fmt.Errorf("error parse abi: %w", err)
-	}
 
 	contractAddress := common.HexToAddress(node.ContractAddress)
 	calldata := common.FromHex(node.CallData)
-	msg := ethereum.CallMsg{
-		To:   &contractAddress,
-		Data: calldata,
-	}
-
-	output, err := r.client.CallContract(ctx, msg, nil)
-
-	if err != nil {
-		s.Success = false
-		s.Error = fmt.Errorf("error invoke contract method: %w", err).Error()
-		return s, err
-	}
-
-	// Unpack the output
-	result, err := parsedABI.Unpack(node.Method, output)
-	if err != nil {
-		s.Success = false
-		s.Error = fmt.Errorf("error decode result: %w", err).Error()
-		return s, err
-	}
-
-	log.WriteString(fmt.Sprintf("Call %s on %s at %s", node.Method, node.ContractAddress, time.Now()))
-	s.Log = log.String()
-	outputData, err := json.Marshal(result)
-	s.OutputData = string(outputData)
-	r.SetOutputVarForStep(stepID, outputData)
-	if err != nil {
-		s.Success = false
-		s.Error = err.Error()
-		return s, err
-	}
-
-	return s, nil
-}
-
-type ContractProcessor struct {
-	db                storage.Storage
-	smartWalletConfig *config.SmartWalletConfig
-	logger            sdklogging.Logger
-}
-
-func (c *ContractProcessor) GetTask(id string) (*model.Task, error) {
-	var task model.Task
-	item, err := c.db.GetKey([]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Executing), id)))
-
-	if err != nil {
-		return nil, err
-	}
-	err = json.Unmarshal(item, &task)
-	if err != nil {
-		return nil, err
-	}
-
-	return &task, nil
-}
-func (c *ContractProcessor) ContractWrite(job *apqueue.Job) error {
-	//currentTime := time.Now()
-
-	conn, _ := ethclient.Dial(c.smartWalletConfig.EthRpcUrl)
-	defer conn.Close()
-
-	// Because we used the  master key to signed, the address cannot be
-	// calculate from that key, but need to be passed in instead
-	task, err := c.GetTask(string(job.Data))
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		updates := map[string][]byte{}
-		updates[string(TaskStorageKey(task.Id, avsproto.TaskStatus_Executing))], err = task.ToJSON()
-		updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
-
-		if err = c.db.BatchWrite(updates); err == nil {
-			c.db.Move(
-				[]byte(TaskStorageKey(task.Id, avsproto.TaskStatus_Executing)),
-				[]byte(TaskStorageKey(task.Id, task.Status)),
-			)
-		} else {
-			// TODO Gracefully handling of storage cleanup
-		}
-	}()
-
-	// TODO: Implement the actualy nodes exeuction engine
-	// Process entrypoint node, then from the next pointer, and flow of the node, we will follow the chain of execution
-	action := task.Nodes[0]
-
-	// TODO: move to vm.go
-	if action.GetContractWrite() == nil {
-		err := fmt.Errorf("invalid task action")
-		//task.AppendExecution(currentTime.Unix(), "", err)
-		task.SetFailed()
-		return err
-	}
-
-	userOpCalldata, e := aa.PackExecute(
-		common.HexToAddress(action.GetContractWrite().ContractAddress),
-		big.NewInt(0),
-		common.FromHex(action.GetContractWrite().CallData),
+	userOpCalldata, err := aa.PackExecute(
+		contractAddress,
+		big.NewInt(0), // TODO: load correct salt from the task
+		calldata,
 	)
-	//calldata := common.FromHex("b61d27f600000000000000000000000069256ca54e6296e460dec7b29b7dcd97b81a3d55000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044a9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a0000000000000000000000000000000000000000000000001bc16d674ec8000000000000000000000000000000000000000000000000000000000000")
+	log.WriteString("\ncreate bundle client to send userops to bundler rpc\n")
+	bundlerClient, err := bundler.NewBundlerClient(r.smartWalletConfig.BundlerURL)
 
-	owner := common.HexToAddress(task.Owner)
-	bundlerClient, e := bundler.NewBundlerClient(c.smartWalletConfig.BundlerURL)
-	if e != nil {
-		// TODO: maybe set retry?
-		err := fmt.Errorf("internal error, bundler not available")
-		//task.AppendExecution(currentTime.Unix(), "", err)
-		task.SetFailed()
-		return err
+	if err != nil {
+		log.WriteString(fmt.Sprintf("error creating bundle client: %s", err))
+		s.Error = fmt.Sprintf("error creating bundler client : %s", err)
+		return s, err
 	}
 
-	c.logger.Info("send task to bundler rpc", "task_id", task.Id)
+	log.WriteString("\nsend userops to bundler rpc\n")
+	fmt.Println("send userops to bundler rpc")
+
 	txResult, err := preset.SendUserOp(
-		conn,
+		r.client,
 		bundlerClient,
-		c.smartWalletConfig.ControllerPrivateKey,
-		owner,
+		r.smartWalletConfig.ControllerPrivateKey,
+		r.owner,
 		userOpCalldata,
 	)
 
-	if txResult != "" {
-		// only set complete when the task is not reaching max
-		// task.SetCompleted()
-		c.logger.Info("succesfully perform userop", "task_id", task.Id, "userop", txResult)
-	} else {
-		task.SetFailed()
-		c.logger.Error("err perform userop", "task_id", task.Id, "error", err)
+	if err != nil {
+		s.Error = fmt.Sprintf("error send userops to bundler : %s", err)
+		return s, err
 	}
 
-	if err != nil || txResult == "" {
-		return fmt.Errorf("UseOp failed to send; error: %v", err)
-	}
+	s.OutputData = txResult
+	r.SetOutputVarForStep(stepID, txResult)
 
-	return nil
+	return s, nil
 }
