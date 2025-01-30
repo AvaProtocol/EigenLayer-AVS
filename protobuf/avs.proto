@@ -175,7 +175,8 @@ message BranchNode {
 message FilterNode {
   // Filter node acts like .select or .filter to pluck out element in an array that evaluate the expression to true
   string expression = 1;
-  // input is the id of the node that 
+  // input is the id of the node that we will fetch its value from and feed into the iteration.
+  // this input has to be an array. Currently we only know about the error at runtime
   string input = 2;
 }
 
@@ -544,7 +545,7 @@ service Aggregator {
   // You can decide whether to grant secret to a single workflow or many workflow, or all of your workflow
   // By default, your secret is available across all of your tasks.
   rpc CreateSecret(CreateOrUpdateSecretReq) returns (google.protobuf.BoolValue) {};
-  rpc Delete(DeleteSecretReq) returns (google.protobuf.BoolValue) {};
+  rpc DeleteSecret(DeleteSecretReq) returns (google.protobuf.BoolValue) {};
 
   // Return all secrets belong to this user. Currently we don't support any fine tune or filter yet.
   // Only secret names and config data are returned. The secret value aren't returned.

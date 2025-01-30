@@ -43,7 +43,7 @@ type AggregatorClient interface {
 	// You can decide whether to grant secret to a single workflow or many workflow, or all of your workflow
 	// By default, your secret is available across all of your tasks.
 	CreateSecret(ctx context.Context, in *CreateOrUpdateSecretReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
-	Delete(ctx context.Context, in *DeleteSecretReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
+	DeleteSecret(ctx context.Context, in *DeleteSecretReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
 	// Return all secrets belong to this user. Currently we don't support any fine tune or filter yet.
 	// Only secret names and config data are returned. The secret value aren't returned.
 	ListSecrets(ctx context.Context, in *ListSecretsReq, opts ...grpc.CallOption) (*ListSecretsResp, error)
@@ -186,9 +186,9 @@ func (c *aggregatorClient) CreateSecret(ctx context.Context, in *CreateOrUpdateS
 	return out, nil
 }
 
-func (c *aggregatorClient) Delete(ctx context.Context, in *DeleteSecretReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error) {
+func (c *aggregatorClient) DeleteSecret(ctx context.Context, in *DeleteSecretReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error) {
 	out := new(wrapperspb.BoolValue)
-	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/Delete", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/DeleteSecret", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +237,7 @@ type AggregatorServer interface {
 	// You can decide whether to grant secret to a single workflow or many workflow, or all of your workflow
 	// By default, your secret is available across all of your tasks.
 	CreateSecret(context.Context, *CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error)
-	Delete(context.Context, *DeleteSecretReq) (*wrapperspb.BoolValue, error)
+	DeleteSecret(context.Context, *DeleteSecretReq) (*wrapperspb.BoolValue, error)
 	// Return all secrets belong to this user. Currently we don't support any fine tune or filter yet.
 	// Only secret names and config data are returned. The secret value aren't returned.
 	ListSecrets(context.Context, *ListSecretsReq) (*ListSecretsResp, error)
@@ -293,8 +293,8 @@ func (UnimplementedAggregatorServer) TriggerTask(context.Context, *UserTriggerTa
 func (UnimplementedAggregatorServer) CreateSecret(context.Context, *CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateSecret not implemented")
 }
-func (UnimplementedAggregatorServer) Delete(context.Context, *DeleteSecretReq) (*wrapperspb.BoolValue, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Delete not implemented")
+func (UnimplementedAggregatorServer) DeleteSecret(context.Context, *DeleteSecretReq) (*wrapperspb.BoolValue, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteSecret not implemented")
 }
 func (UnimplementedAggregatorServer) ListSecrets(context.Context, *ListSecretsReq) (*ListSecretsResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSecrets not implemented")
@@ -567,20 +567,20 @@ func _Aggregator_CreateSecret_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Aggregator_Delete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Aggregator_DeleteSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteSecretReq)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AggregatorServer).Delete(ctx, in)
+		return srv.(AggregatorServer).DeleteSecret(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/aggregator.Aggregator/Delete",
+		FullMethod: "/aggregator.Aggregator/DeleteSecret",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AggregatorServer).Delete(ctx, req.(*DeleteSecretReq))
+		return srv.(AggregatorServer).DeleteSecret(ctx, req.(*DeleteSecretReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -685,8 +685,8 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Aggregator_CreateSecret_Handler,
 		},
 		{
-			MethodName: "Delete",
-			Handler:    _Aggregator_Delete_Handler,
+			MethodName: "DeleteSecret",
+			Handler:    _Aggregator_DeleteSecret_Handler,
 		},
 		{
 			MethodName: "ListSecrets",
