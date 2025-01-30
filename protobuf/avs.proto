@@ -126,6 +126,7 @@ message ContractWriteNode {
 
   // abi is necessary to decode the return
   string contract_abi = 3;
+  string method = 4;
 }
 
 message ContractReadNode {

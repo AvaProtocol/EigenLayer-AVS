@@ -2,12 +2,18 @@ package graphql
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
 func TestSimpleQuery(t *testing.T) {
+	sb := &strings.Builder{}
+	log := func(s string) {
+		sb.WriteString(s)
+	}
+
 	endpoint := "https://gateway.thegraph.com/api/10186dcf11921c7d1bc140721c69da38/subgraphs/id/Cd2gEDVeqnjBn1hSeqFMitw8Q1iiyV9FYUZkLNRcL87g"
-	client := NewClient(endpoint)
+	client, _ := NewClient(endpoint, log)
 
 	query := `{
 		protocols(first: 2, block: {number: 21378000}) {

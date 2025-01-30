@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
@@ -12,6 +13,7 @@ import (
 	"github.com/allegro/bigcache/v3"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/AvaProtocol/ap-avs/core/config"
@@ -199,4 +201,20 @@ func RestTask() *avsproto.CreateTaskReq {
 		Edges:        []*avsproto.TaskEdge{edge},
 	}
 	return &tr1
+}
+
+func GetTestSmartWalletConfig() *config.SmartWalletConfig {
+	controllerPrivateKey, err := crypto.HexToECDSA(os.Getenv("CONTROLLER_PRIVATE_KEY"))
+	if err != nil {
+		panic("Invalid controller private key from env. Ensure CONTROLLER_PRIVATE_KEY is ECDSA key of the controller wallet")
+	}
+
+	return &config.SmartWalletConfig{
+		EthRpcUrl:            os.Getenv("BASE_SEPOLIA_RPC_URL"),
+		EthWsUrl:             strings.Replace(os.Getenv("BASE_SEPOLIA_RPC_URL"), "https://", "wss://", 1),
+		BundlerURL:           os.Getenv("BASE_SEPOLIA_BUNDLER_RPC"),
+		FactoryAddress:       common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
+		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+		ControllerPrivateKey: controllerPrivateKey,
+	}
 }
