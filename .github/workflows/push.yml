@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        tests:
+        test:
           - ./core/taskengine
           - ./core/taskengine/trigger
           - ./core/taskengine/macros
