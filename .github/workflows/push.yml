@@ -17,6 +17,7 @@ jobs:
           - ./core/taskengine/macros
           - ./pkg/timekeeper
           - ./pkg/graphql
+          - ./pkg/erc4337/preset
           - ./aggregator/
 
     steps:
