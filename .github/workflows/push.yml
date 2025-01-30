@@ -28,6 +28,11 @@ jobs:
         env:
           RPC_URL: "${{ secrets.RPC_URL }}"
           BUNDLER_RPC: "${{ secrets.BUNDLER_RPC }}"
+          FACTORY_ADDRESS: "${{ vars.FACTORY_ADDRESS }}"
+          BASE_SEPOLIA_RPC_URL: "${{ secrets.BASE_SEPOLIA_RPC_URL }}"
+          BASE_SEPOLIA_BUNDLER_RPC: "${{ secrets.BASE_SEPOLIA_BUNDLER_RPC }}"
+          CONTROLLER_PRIVATE_KEY: "${{ secrets.CONTROLLER_PRIVATE_KEY }}"
+
         run: |
           go test -v ${{ matrix.test }}
 
