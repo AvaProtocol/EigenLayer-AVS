@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
+	"github.com/AvaProtocol/ap-avs/core/testutil"
 	"github.com/AvaProtocol/ap-avs/pkg/erc4337/bundler"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -30,28 +31,40 @@ func getControllerSigner() *ecdsa.PrivateKey {
 }
 
 func TestSendUserOp(t *testing.T) {
-	conn, _ := ethclient.Dial(os.Getenv("RPC_URL"))
-	// Because we used the  master key to signed, the address cannot be
-	// calculate from that key
+	smartWalletConfig := testutil.GetTestSmartWalletConfig()
+
+	//aa.SetFactoryAddress(common.HexToAddress(os.Getenv("FACTORY_ADDRESS")))
+	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+	conn, _ := ethclient.Dial(smartWalletConfig.EthRpcUrl)
+	defer func() {
+		conn.Close()
+	}()
+	// Because we used the  master key to signed, the address cannot be calculate from that key and need to set explicitly
 	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
-	bundlerClient, e := bundler.NewBundlerClient(os.Getenv("BUNDLER_RPC"))
+	bundlerClient, e := bundler.NewBundlerClient(smartWalletConfig.BundlerURL)
 	if e != nil {
 		panic(e)
 	}
 
 	//calldata := common.FromHex("b61d27f600000000000000000000000069256ca54e6296e460dec7b29b7dcd97b81a3d55000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044a9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a0000000000000000000000000000000000000000000000001bc16d674ec8000000000000000000000000000000000000000000000000000000000000")
 	calldata, e := aa.PackExecute(
-		// Test token on sepolia
-		common.HexToAddress("0x69256ca54e6296e460dec7b29b7dcd97b81a3d55"),
+		// For test token on sepolia use this one
+		// common.HexToAddress("0x69256ca54e6296e460dec7b29b7dcd97b81a3d55"),
+		// For test token on base sepolia
+		// these test token can be minted by anyone to help us run these transfer test
+		// This can be any contract/token as long as we have enough token to fund the AA wallet to perform real test
+		common.HexToAddress("0x0a0c037267a690e9792f4660c29989babec9cffb"),
 		big.NewInt(0),
-		// Transfe 0.00761 the test token
-		// https://sepolia.etherscan.io/tx/0xb438f9583a0a505806fa756e1950430e6060c8b4662807c6c40b9f2dec9d726f
-		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000001b094132bda000"),
+		// Transfe 0.000000000000001 the test token
+		// Example result on seplia:       https://sepolia.etherscan.io/tx/0xb438f9583a0a505806fa756e1950430e6060c8b4662807c6c40b9f2dec9d726f
+		// Example result on base sepolia: https://sepolia.basescan.org/tx/0x812290f4a588cb62bd4a46698ece51d576a75729af5dda497badb0ef8f8cddfa
+		//common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000001b094132bda000"),
+		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8"),
 	)
 
 	txResult, err := SendUserOp(conn, bundlerClient, getControllerSigner(), owner, calldata)
 	if err != nil || txResult == "" {
-		t.Errorf("UseOp failed to send; error:%v", err)
+		t.Errorf("UseOp failed to send; error %v", err)
 	}
 
 	t.Logf("UserOp submit succesfully. UserOp hash: %v", txResult)
