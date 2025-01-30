@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/AvaProtocol/ap-avs/core/auth"
 	"github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/golang-jwt/jwt/v5"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/AvaProtocol/ap-avs/core/chainio/signer"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
@@ -28,10 +30,13 @@ func TestGetKeyWithSignature(t *testing.T) {
 
 	owner := "0x578B110b0a7c06e66b7B1a33C39635304aaF733c"
 	chainID := int64(11155111)
-	issuedAt := "2025-01-01T00:00:00Z"
-	expiredAt := "2025-01-02T00:00:00Z"
+	issuedTs, _ := time.Parse(time.RFC3339, "2025-01-01T00:00:00Z")
+	expiredTs, _ := time.Parse(time.RFC3339, "2025-01-02T00:00:00Z")
+	issuedAt := timestamppb.New(issuedTs)
+	expiredAt := timestamppb.New(expiredTs)
 
-	text := fmt.Sprintf(authTemplate, chainID, issuedAt, expiredAt, owner)
+	text := fmt.Sprintf(authTemplate, chainID, issuedTs.UTC().Format("2006-01-02T15:04:05.000Z"), expiredTs.UTC().Format("2006-01-02T15:04:05.000Z"), owner)
+	// dummy key to test auth
 	privateKey, _ := crypto.HexToECDSA("e0502ddd5a0d05ec7b5c22614a01c8ce783810edaa98e44cc82f5fa5a819aaa9")
 
 	signature, _ := signer.SignMessage(privateKey, []byte(text))
