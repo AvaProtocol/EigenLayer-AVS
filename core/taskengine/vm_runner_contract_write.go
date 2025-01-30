@@ -61,7 +61,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		big.NewInt(0), // TODO: load correct salt from the task
 		calldata,
 	)
-	log.WriteString("\ncreate bundle client to send userops to bundler rpc\n")
+	log.WriteString(fmt.Sprintf("\nprepare to send userops target contract %s\ninitialize bundler client\n", node.ContractAddress))
 	bundlerClient, err := bundler.NewBundlerClient(r.smartWalletConfig.BundlerURL)
 
 	if err != nil {
@@ -71,7 +71,6 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	}
 
 	log.WriteString("\nsend userops to bundler rpc\n")
-	fmt.Println("send userops to bundler rpc")
 
 	txResult, err := preset.SendUserOp(
 		r.client,

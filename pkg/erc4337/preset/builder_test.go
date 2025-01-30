@@ -32,8 +32,6 @@ func getControllerSigner() *ecdsa.PrivateKey {
 
 func TestSendUserOp(t *testing.T) {
 	smartWalletConfig := testutil.GetTestSmartWalletConfig()
-
-	//aa.SetFactoryAddress(common.HexToAddress(os.Getenv("FACTORY_ADDRESS")))
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
 	conn, _ := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 	defer func() {
