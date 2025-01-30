@@ -60,7 +60,7 @@ func TestSendUserOp(t *testing.T) {
 		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8"),
 	)
 
-	txResult, err := SendUserOp(conn, bundlerClient, getControllerSigner(), owner, calldata)
+	txResult, err := SendUserOp(conn, bundlerClient, smartWalletConfig.ControllerPrivateKey, owner, calldata)
 	if err != nil || txResult == "" {
 		t.Errorf("UseOp failed to send; error %v", err)
 	}
