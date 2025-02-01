@@ -760,7 +760,9 @@ type ContractWriteNode struct {
 
 	ContractAddress string `protobuf:"bytes,1,opt,name=contract_address,json=contractAddress,proto3" json:"contract_address,omitempty"`
 	CallData        string `protobuf:"bytes,2,opt,name=call_data,json=callData,proto3" json:"call_data,omitempty"`
-	// abi is necessary to decode the return
+	// The ABI is only required to decode the return value of a method call.
+	// If we don’t need the result and only want the transaction hash (which is usually sufficient),
+	// then we don’t need to provide the ABI.
 	ContractAbi string `protobuf:"bytes,3,opt,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
 	Method      string `protobuf:"bytes,4,opt,name=method,proto3" json:"method,omitempty"`
 }
@@ -832,7 +834,9 @@ type ContractReadNode struct {
 
 	ContractAddress string `protobuf:"bytes,1,opt,name=contract_address,json=contractAddress,proto3" json:"contract_address,omitempty"`
 	CallData        string `protobuf:"bytes,2,opt,name=call_data,json=callData,proto3" json:"call_data,omitempty"`
-	// abi and method name is necessary to decode the return
+	// The ABI and method name are required to decode the return value and pass it to the next step.
+	// Currently, we need to provide the contract ABI as a JSON string.
+	// We don’t need to include the full ABI—just enough to decode the method call.
 	ContractAbi string `protobuf:"bytes,3,opt,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
 	Method      string `protobuf:"bytes,4,opt,name=method,proto3" json:"method,omitempty"`
 }

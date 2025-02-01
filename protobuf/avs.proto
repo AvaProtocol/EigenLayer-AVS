@@ -124,7 +124,9 @@ message ContractWriteNode {
   string contract_address = 1;
   string call_data = 2;
 
-  // abi is necessary to decode the return
+  // The ABI is only required to decode the return value of a method call.
+  // If we don’t need the result and only want the transaction hash (which is usually sufficient),
+  // then we don’t need to provide the ABI.
   string contract_abi = 3;
   string method = 4;
 }
@@ -133,7 +135,9 @@ message ContractReadNode {
   string contract_address = 1;
   string call_data = 2;
 
-  // abi and method name is necessary to decode the return
+  // The ABI and method name are required to decode the return value and pass it to the next step.
+  // Currently, we need to provide the contract ABI as a JSON string.
+  // We don’t need to include the full ABI—just enough to decode the method call.
   string contract_abi = 3;
   string method = 4;
 }
