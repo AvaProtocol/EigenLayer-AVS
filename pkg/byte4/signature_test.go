@@ -9,7 +9,7 @@ import (
 )
 
 func TestGetMethodFromSelector(t *testing.T) {
-	// ERC20 ABI with transfer and balanceOf methods
+	// ERC20 ABI with transfer and balanceOf methods. These hash can generate locally or getting from Etherscan/Remix
 	const abiJSON = `[
 		{
 			"constant": false,
@@ -100,7 +100,7 @@ func TestGetMethodFromSelector(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			method, err := GetMethodFromSelector(parsedABI, tt.selector)
+			method, err := GetMethodFromCalldata(parsedABI, tt.selector)
 
 			if tt.wantErr {
 				if err == nil {
