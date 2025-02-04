@@ -12,13 +12,14 @@ jobs:
     strategy:
       matrix:
         test:
-          - ./core/taskengine
-          - ./core/taskengine/trigger
-          - ./core/taskengine/macros
-          - ./pkg/timekeeper
-          - ./pkg/graphql
-          - ./pkg/erc4337/preset
-          - ./aggregator/
+          - aggregator/
+          - core/taskengine
+          - core/taskengine/trigger
+          - core/taskengine/macros
+          - pkg/timekeeper
+          - pkg/graphql
+          - pkg/erc4337/preset
+          - pkg/ethsighash
 
     steps:
       - uses: actions/checkout@v4
@@ -35,7 +36,7 @@ jobs:
           CONTROLLER_PRIVATE_KEY: "${{ secrets.CONTROLLER_PRIVATE_KEY }}"
 
         run: |
-          cd ${{ matrix.test }}
+          cd ./${{ matrix.test }}
           go test . -v
 
   publish-dev-build:

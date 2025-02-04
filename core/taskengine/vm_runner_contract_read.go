@@ -74,7 +74,8 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	}
 
 	// Unpack the output
-	result, err := parsedABI.Unpack(node.Method, output)
+	method := ethsighash.GetMethodFromSelector(parsedABI, common.FromHex(node.CallData)
+	result, err := parsedABI.Unpack(method.Name, output)
 	if err != nil {
 		s.Success = false
 		s.Error = fmt.Errorf("error decode result: %w", err).Error()
