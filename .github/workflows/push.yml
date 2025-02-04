@@ -12,14 +12,14 @@ jobs:
     strategy:
       matrix:
         test:
-          - aggregator/
+          - aggregator
           - core/taskengine
           - core/taskengine/trigger
           - core/taskengine/macros
           - pkg/timekeeper
           - pkg/graphql
+          - pkg/byte4
           - pkg/erc4337/preset
-          - pkg/ethsighash
 
     steps:
       - uses: actions/checkout@v4
