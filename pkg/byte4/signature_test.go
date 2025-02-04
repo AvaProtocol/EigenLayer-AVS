@@ -1,10 +1,11 @@
-package ethsighash
+package byte4
 
 import (
 	"encoding/hex"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"strings"
 	"testing"
+
+	"github.com/ethereum/go-ethereum/accounts/abi"
 )
 
 func TestGetMethodFromSelector(t *testing.T) {
@@ -63,6 +64,7 @@ func TestGetMethodFromSelector(t *testing.T) {
 		return b
 	}
 
+	// our test tables for a list of expected/evaluation
 	tests := []struct {
 		name        string
 		selector    []byte

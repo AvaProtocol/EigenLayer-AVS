@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/AvaProtocol/ap-avs/pkg/byte4"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -73,8 +74,13 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		return s, err
 	}
 
-	// Unpack the output
-	method := ethsighash.GetMethodFromSelector(parsedABI, common.FromHex(node.CallData)
+	// Unpack the output by parsing the 4byte from calldata, compare with the right method in ABI
+	method, err := byte4.GetMethodFromCalldata(parsedABI, common.FromHex(node.CallData))
+	if err != nil {
+		s.Success = false
+		s.Error = fmt.Errorf("error detect method from ABI: %w", err).Error()
+		return s, err
+	}
 	result, err := parsedABI.Unpack(method.Name, output)
 	if err != nil {
 		s.Success = false
@@ -82,7 +88,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		return s, err
 	}
 
-	log.WriteString(fmt.Sprintf("Call %s on %s at %s", node.Method, node.ContractAddress, time.Now()))
+	log.WriteString(fmt.Sprintf("Call %s on %s at %s", method.Name, node.ContractAddress, time.Now()))
 	s.Log = log.String()
 	outputData, err := json.Marshal(result)
 	s.OutputData = string(outputData)
