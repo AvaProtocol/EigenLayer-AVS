@@ -41,6 +41,18 @@ request to our grpc node.
 
 For detail of each method and payload, check the protocol.md docs. Look into `examples` to run example workflow against the local node
 
+# Run operator locally
+
+Run an operator locally allow you to schedule and seeing job execution. First, you need to prepare an `config/operator.yaml` file then run
+
+```
+make dev-op
+```
+
+This local operator will connect to EigenLayer Holesky env, so you will need to make sure you have an existing operator keys onboard with EigenLayer. 
+
+
+
 # Live reload
 
 To auto compile and live reload the node, run:
