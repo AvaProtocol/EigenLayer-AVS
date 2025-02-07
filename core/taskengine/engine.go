@@ -181,21 +181,7 @@ func (n *Engine) MustStart() {
 }
 
 func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWalletReq) ([]*avsproto.SmartWallet, error) {
-	sender, err := aa.GetSenderAddress(rpcConn, owner, defaultSalt)
-	if err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), SmartAccountCreationError)
-	}
-
 	wallets := []*avsproto.SmartWallet{}
-
-	if payload == nil || payload.FactoryAddress == "" || strings.EqualFold(payload.FactoryAddress, n.smartWalletConfig.FactoryAddress.Hex()) {
-		// This is the default wallet with our own factory
-		wallets = append(wallets, &avsproto.SmartWallet{
-			Address: sender.String(),
-			Factory: n.smartWalletConfig.FactoryAddress.String(),
-			Salt:    defaultSalt.String(),
-		})
-	}
 
 	items, err := n.db.GetByPrefix(WalletByOwnerPrefix(owner))
 
@@ -207,10 +193,6 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 	for _, item := range items {
 		w := &model.SmartWallet{}
 		w.FromStorageData(item.Value)
-
-		if w.Salt.Cmp(defaultSalt) == 0 {
-			continue
-		}
 
 		if payload != nil && payload.FactoryAddress != "" && !strings.EqualFold(w.Factory.String(), payload.FactoryAddress) {
 			continue
