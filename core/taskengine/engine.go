@@ -181,11 +181,6 @@ func (n *Engine) MustStart() {
 }
 
 func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWalletReq) ([]*avsproto.SmartWallet, error) {
-	sender, err := aa.GetSenderAddress(rpcConn, owner, defaultSalt)
-	if err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), SmartAccountCreationError)
-	}
-
 	wallets := []*avsproto.SmartWallet{}
 
 	items, err := n.db.GetByPrefix(WalletByOwnerPrefix(owner))
