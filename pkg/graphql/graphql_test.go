@@ -12,67 +12,138 @@ func TestSimpleQuery(t *testing.T) {
 		sb.WriteString(s)
 	}
 
-	endpoint := "https://gateway.thegraph.com/api/10186dcf11921c7d1bc140721c69da38/subgraphs/id/Cd2gEDVeqnjBn1hSeqFMitw8Q1iiyV9FYUZkLNRcL87g"
+	endpoint := "https://spacex-production.up.railway.app/"
 	client, _ := NewClient(endpoint, log)
 
-	query := `{
-		protocols(first: 2, block: {number: 21378000}) {
-			id
-			pools {
-				id
-			}
-		}
-		contractToPoolMappings(first: 2, block: {number: 21378000}) {
-			id
-			pool {
-				id
-			}
-		}
-	}`
+	query := `
+      query Rockets {
+        rockets(limit: 2, ) {
+          id
+          name
+        }
+        ships(limit: 3, sort: "ID") {
+          id
+          name
+        }
+      }
+	`
 
 	type responseStruct struct {
-		Protocols []struct {
-			ID    string `json:"id"`
-			Pools []struct {
-				ID string `json:"id"`
-			} `json:"pools"`
-		} `json:"protocols"`
-		ContractToPoolMappings []struct {
+		Rockets []struct {
 			ID   string `json:"id"`
-			Pool struct {
-				ID string `json:"id"`
-			} `json:"pool"`
-		} `json:"contractToPoolMappings"`
+			Name string `json:"name"`
+		} `json:"rockets"`
+		Ships []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"ships"`
 	}
 
 	var resp responseStruct
-
 	req := NewRequest(query)
 	err := client.Run(context.Background(), req, &resp)
 	if err != nil {
 		t.Fatalf("query failed: %v", err)
 	}
 
-	if len(resp.Protocols) == 0 {
-		t.Fatal("expected at least one protocol, got none")
+	// Check lengths
+	lengthTests := []struct {
+		name     string
+		got      int
+		want     int
+		category string
+	}{
+		{
+			name:     "rockets count",
+			got:      len(resp.Rockets),
+			want:     2,
+			category: "rockets",
+		},
+		{
+			name:     "ships count",
+			got:      len(resp.Ships),
+			want:     3,
+			category: "ships",
+		},
 	}
 
-	if len(resp.ContractToPoolMappings) == 0 {
-		t.Fatal("expected at least one contractToPoolMapping, got none")
+	for _, tt := range lengthTests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Errorf("expected exactly %d %s got %d", tt.want, tt.category, tt.got)
+			}
+		})
 	}
 
-	expectedProtocolID := "1"
-	if resp.Protocols[0].ID != expectedProtocolID {
-		t.Fatalf("expected protocol ID %s, got %s", expectedProtocolID, resp.Protocols[0].ID)
+	// Check rocket details
+	rocketTests := []struct {
+		name     string
+		index    int
+		wantID   string
+		wantName string
+	}{
+		{
+			name:     "first rocket",
+			index:    0,
+			wantID:   "5e9d0d95eda69955f709d1eb",
+			wantName: "Falcon 1",
+		},
+		{
+			name:     "second rocket",
+			index:    1,
+			wantID:   "5e9d0d95eda69973a809d1ec",
+			wantName: "Falcon 9",
+		},
 	}
 
-	expectedProtocolID = "0xcfbf336fe147d643b9cb705648500e101504b16d"
-	if resp.Protocols[0].Pools[1].ID != expectedProtocolID {
-		t.Fatalf("expected protocol ID %s, got %s", expectedProtocolID, resp.Protocols[0].ID)
+	for _, tt := range rocketTests {
+		t.Run(tt.name, func(t *testing.T) {
+			rocket := resp.Rockets[tt.index]
+			if rocket.ID != tt.wantID {
+				t.Errorf("expected rocket ID %s, got %s", tt.wantID, rocket.ID)
+			}
+			if rocket.Name != tt.wantName {
+				t.Errorf("expected rocket name %s, got %s", tt.wantName, rocket.Name)
+			}
+		})
 	}
 
-	expectedContractToPoolID := "0x0002bfcce657a4beb498e23201bd767fc5a0a0d5"
-	if resp.ContractToPoolMappings[0].ID != expectedContractToPoolID {
-		t.Fatalf("expected contract to pool ID %s, got %s", expectedContractToPoolID, resp.ContractToPoolMappings[0].ID)
+	// Check ship details
+	shipTests := []struct {
+		name     string
+		index    int
+		wantID   string
+		wantName string
+	}{
+		{
+			name:     "first ship",
+			index:    0,
+			wantID:   "5ea6ed2d080df4000697c901",
+			wantName: "American Champion",
+		},
+		{
+			name:     "second ship",
+			index:    1,
+			wantID:   "5ea6ed2d080df4000697c902",
+			wantName: "American Islander",
+		},
+		{
+			name:     "third ship",
+			index:    2,
+			wantID:   "5ea6ed2d080df4000697c903",
+			wantName: "American Spirit",
+		},
+	}
+
+	for _, tt := range shipTests {
+		t.Run(tt.name, func(t *testing.T) {
+			ship := resp.Ships[tt.index]
+			if ship.ID != tt.wantID {
+				t.Errorf("expected ship ID %s, got %s", tt.wantID, ship.ID)
+			}
+			if ship.Name != tt.wantName {
+				t.Errorf("expected ship name %s, got %s", tt.wantName, ship.Name)
+			}
+		})
 	}
 }

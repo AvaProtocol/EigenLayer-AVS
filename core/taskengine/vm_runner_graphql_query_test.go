@@ -5,21 +5,26 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AvaProtocol/ap-avs/core/testutil"
+	"github.com/AvaProtocol/ap-avs/model"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
+// Test make a query to a demo graphql server to ensure our node processing work
 func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 	node := &avsproto.GraphQLQueryNode{
-		Url: "https://gateway.thegraph.com/api/10186dcf11921c7d1bc140721c69da38/subgraphs/id/Sxx812XgeKyzQPaBpR5YZWmGV5fZuBaPdh7DFhzSwiQ",
+		Url: "https://spacex-production.up.railway.app/",
 		Query: `
-		{
-		  lidoApprovals(where:{id: "0x000016bb61e32d436819632cc192fbc7565ba08a8e9831d67210eab974a5512343010000"}) {
-		    value
-			id
-			owner
-			spender
-		  }
-		}`,
+          query Launch {
+            company {
+              ceo
+            }
+            launches(limit: 2, sort: "launch_date_unix", order: "ASC") {
+              id
+              mission_name
+            }
+          }
+		`,
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -45,7 +50,15 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123abc", trigger, nil, nodes, edges)
+	vm, err := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "123abc",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
 	n, _ := NewGraphqlQueryProcessor(vm, node.Url)
 
 	step, _, err := n.Execute("123abc", node)
@@ -58,7 +71,7 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 		t.Errorf("expected rest node run succesfully but failed")
 	}
 
-	if !strings.Contains(step.Log, "Execute GraphQL gateway.thegraph.com") {
+	if !strings.Contains(step.Log, "Execute GraphQL spacex-production.up.railway.app") {
 		t.Errorf("expected log contains request trace data but not found. Log data is: %s", step.Log)
 	}
 
@@ -67,28 +80,35 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 	}
 
 	var output struct {
-		LidoApprovals []struct {
-			ID      string `json:"id"`
-			Owner   string `json:"owner"`
-			Spender string `json:"spender"`
-			Value   string `json:"value"`
-		} `json:"lidoApprovals"`
+		Company struct {
+			CEO string `json:"ceo"`
+		} `json:"company"`
+		Launches []struct {
+			ID          string `json:"id"`
+			MissionName string `json:"mission_name"`
+		} `json:"launches"`
 	}
 	err = json.Unmarshal([]byte(step.OutputData), &output)
 	if err != nil {
 		t.Errorf("expected the data output in json format, but failed to decode %v", err)
 	}
-	if len(output.LidoApprovals) == 0 {
-		t.Errorf("expected non zero approval but found none. data %s", step.OutputData)
+
+	if len(output.Launches) != 2 {
+		t.Errorf("expected 2 launches but found %d", len(output.Launches))
 	}
-	if output.LidoApprovals[0].Owner != "0xd07cb0f431a53601030262a8b8b90f946ad7514a" {
-		t.Errorf("owner doesn't match. expected %s got %s", "0xd07cb0f431a53601030262a8b8b90f946ad7514a", output.LidoApprovals[0].Owner)
+	if output.Launches[0].ID != "5eb87cd9ffd86e000604b32a" {
+		t.Errorf("id doesn't match. expected %s got %s", "5eb87cd9ffd86e000604b32a", output.Launches[0].ID)
 	}
 
-	if output.LidoApprovals[0].Value != "115792089237316195423570985008687907853269984665640564039457584007913129639935" {
-		t.Errorf("value doesn't match. expected %s got %s", "115792089237316195423570985008687907853269984665640564039457584007913129639935", output.LidoApprovals[0].Value)
+	if output.Launches[0].MissionName != "FalconSat" {
+		t.Errorf("name doesn't match. expected %s got %s", "FalconSat", output.Launches[0].MissionName)
 	}
-	if output.LidoApprovals[0].Spender != "0xcb859ea579b28e02b87a1fde08d087ab9dbe5149" {
-		t.Errorf("spender doesn't match. expected %s got %s", "115792089237316195423570985008687907853269984665640564039457584007913129639935", output.LidoApprovals[0].Value)
+
+	if output.Launches[1].ID != "5eb87cdaffd86e000604b32b" {
+		t.Errorf("id doesn't match. expected %s got %s", "5eb87cd9ffd86e000604b32b", output.Launches[0].ID)
+	}
+
+	if output.Launches[1].MissionName != "DemoSat" {
+		t.Errorf("name doesn't match. expected %s got %s", "DemoSat", output.Launches[0].MissionName)
 	}
 }

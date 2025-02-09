@@ -14,9 +14,12 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/expr-lang/expr"
 
+	"github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
+	"github.com/AvaProtocol/ap-avs/model"
 	"github.com/AvaProtocol/ap-avs/pkg/erc20"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
@@ -57,6 +60,7 @@ type VM struct {
 	TaskNodes   map[string]*avsproto.TaskNode
 	TaskEdges   []*avsproto.TaskEdge
 	TaskTrigger *avsproto.TaskTrigger
+	TaskOwner   common.Address
 
 	// executin logs and result per plans
 	ExecutionLogs []*avsproto.Execution_Step
@@ -73,7 +77,8 @@ type VM struct {
 	entrypoint       string
 	instructionCount int64
 
-	logger sdklogging.Logger
+	smartWalletConfig *config.SmartWalletConfig
+	logger            sdklogging.Logger
 }
 
 func NewVM() *VM {
@@ -132,19 +137,21 @@ func (v *VM) GetNodeNameAsVar(nodeID string) string {
 	return standardized
 }
 
-func NewVMWithData(taskID string, trigger *avsproto.TaskTrigger, triggerMetadata *avsproto.TriggerMetadata, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge) (*VM, error) {
+func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
 	v := &VM{
-		Status:           VMStateInitialize,
-		TaskEdges:        edges,
-		TaskNodes:        make(map[string]*avsproto.TaskNode),
-		TaskTrigger:      trigger,
-		plans:            make(map[string]*Step),
-		mu:               &sync.Mutex{},
-		instructionCount: 0,
-		secrets:          map[string]string{},
+		Status:            VMStateInitialize,
+		TaskEdges:         task.Edges,
+		TaskNodes:         make(map[string]*avsproto.TaskNode),
+		TaskTrigger:       task.Trigger,
+		TaskOwner:         common.HexToAddress(task.Owner),
+		plans:             make(map[string]*Step),
+		mu:                &sync.Mutex{},
+		instructionCount:  0,
+		secrets:           secrets,
+		smartWalletConfig: smartWalletConfig,
 	}
 
-	for _, node := range nodes {
+	for _, node := range task.Nodes {
 		v.TaskNodes[node.Id] = node
 	}
 
@@ -340,6 +347,10 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 		executionLog, err = v.runGraphQL(node.Id, nodeValue)
 	} else if nodeValue := node.GetCustomCode(); nodeValue != nil {
 		executionLog, err = v.runCustomCode(node.Id, nodeValue)
+	} else if nodeValue := node.GetContractRead(); nodeValue != nil {
+		executionLog, err = v.runContractRead(node.Id, nodeValue)
+	} else if nodeValue := node.GetContractWrite(); nodeValue != nil {
+		executionLog, err = v.runContractWrite(node.Id, nodeValue)
 	}
 
 	return executionLog, err
@@ -405,6 +416,46 @@ func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avspro
 	executionLog, _, err := g.Execute(stepID, node)
 	if err != nil {
 		v.logger.Error("error execute graphql node", "task_id", v.TaskID, "step", stepID, "url", node.Url, "error", err)
+	}
+	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
+
+	return executionLog, nil
+}
+
+func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*avsproto.Execution_Step, error) {
+	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
+	defer func() {
+		rpcClient.Close()
+	}()
+
+	if err != nil {
+		v.logger.Error("error execute contract read node", "task_id", v.TaskID, "step", stepID, "calldata", node.CallData, "error", err)
+		return nil, err
+
+	}
+
+	processor := NewContractReadProcessor(v, rpcClient)
+	executionLog, err := processor.Execute(stepID, node)
+
+	if err != nil {
+		v.logger.Error("error execute contract read node", "task_id", v.TaskID, "step", stepID, "calldata", node.CallData, "error", err)
+		return nil, err
+	}
+	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
+
+	return executionLog, nil
+}
+
+func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
+	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
+	defer func() {
+		rpcClient.Close()
+	}()
+
+	processor := NewContractWriteProcessor(v, rpcClient, v.smartWalletConfig, v.TaskOwner)
+	executionLog, err := processor.Execute(stepID, node)
+	if err != nil {
+		v.logger.Error("error execute contract write node", "task_id", v.TaskID, "step", stepID, "calldata", node.CallData, "error", err)
 	}
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 

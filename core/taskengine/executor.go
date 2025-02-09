@@ -12,19 +12,22 @@ import (
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 
 	"github.com/AvaProtocol/ap-avs/core/apqueue"
+	"github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/storage"
 )
 
-func NewExecutor(db storage.Storage, logger sdklogging.Logger) *TaskExecutor {
+func NewExecutor(config *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger) *TaskExecutor {
 	return &TaskExecutor{
-		db:     db,
-		logger: logger,
+		db:                db,
+		logger:            logger,
+		smartWalletConfig: config,
 	}
 }
 
 type TaskExecutor struct {
-	db     storage.Storage
-	logger sdklogging.Logger
+	db                storage.Storage
+	logger            sdklogging.Logger
+	smartWalletConfig *config.SmartWalletConfig
 }
 
 type QueueExecutionData struct {
@@ -79,8 +82,8 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 	triggerMetadata := queueData.TriggerMetadata
 
-	vm, err := NewVMWithData(task.Id, task.Trigger, triggerMetadata, task.Nodes, task.Edges)
-	vm.secrets, _ = LoadSecretForTask(x.db, task)
+	secrets, _ := LoadSecretForTask(x.db, task)
+	vm, err := NewVMWithData(task, triggerMetadata, x.smartWalletConfig, secrets)
 
 	if err != nil {
 		return nil, err
