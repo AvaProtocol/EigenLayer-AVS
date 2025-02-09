@@ -12,37 +12,31 @@ func TestSimpleQuery(t *testing.T) {
 		sb.WriteString(s)
 	}
 
-	endpoint := "https://gateway.thegraph.com/api/10186dcf11921c7d1bc140721c69da38/subgraphs/id/Cd2gEDVeqnjBn1hSeqFMitw8Q1iiyV9FYUZkLNRcL87g"
+	endpoint := "https://spacex-production.up.railway.app/"
 	client, _ := NewClient(endpoint, log)
 
-	query := `{
-		protocols(first: 2, block: {number: 21378000}) {
-			id
-			pools {
-				id
-			}
-		}
-		contractToPoolMappings(first: 2, block: {number: 21378000}) {
-			id
-			pool {
-				id
-			}
-		}
-	}`
+	query := `
+      query Rockets {
+        rockets(limit: 2, ) {
+          id
+          name
+        }
+        ships(limit: 3, sort: "ID") {
+          id
+          name
+        }
+      }
+	`
 
 	type responseStruct struct {
-		Protocols []struct {
-			ID    string `json:"id"`
-			Pools []struct {
-				ID string `json:"id"`
-			} `json:"pools"`
-		} `json:"protocols"`
-		ContractToPoolMappings []struct {
+		Rockets []struct {
 			ID   string `json:"id"`
-			Pool struct {
-				ID string `json:"id"`
-			} `json:"pool"`
-		} `json:"contractToPoolMappings"`
+			Name string `json:"name"`
+		} `json:"rockets"`
+		Ships []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"ships"`
 	}
 
 	var resp responseStruct
@@ -53,26 +47,30 @@ func TestSimpleQuery(t *testing.T) {
 		t.Fatalf("query failed: %v", err)
 	}
 
-	if len(resp.Protocols) == 0 {
-		t.Fatal("expected at least one protocol, got none")
+	if len(resp.Rockets) != 2 {
+		t.Fatalf("expected exactly 2 rockets got %d", len(resp.Rockets))
+	}
+	if len(resp.Ships) != 3 {
+		t.Fatalf("expected exactly 3 ships got %d", len(resp.Rockets))
 	}
 
-	if len(resp.ContractToPoolMappings) == 0 {
-		t.Fatal("expected at least one contractToPoolMapping, got none")
+	id := "5e9d0d95eda69955f709d1eb"
+	if resp.Rockets[0].ID != id {
+		t.Errorf("expected rocket ID %s, got %s", id, resp.Rockets[0].ID)
 	}
 
-	expectedProtocolID := "1"
-	if resp.Protocols[0].ID != expectedProtocolID {
-		t.Fatalf("expected protocol ID %s, got %s", expectedProtocolID, resp.Protocols[0].ID)
+	id = "5e9d0d95eda69973a809d1ec"
+	if resp.Rockets[1].ID != id {
+		t.Errorf("expected rocket ID %s, got %s", id, resp.Rockets[0].ID)
 	}
 
-	expectedProtocolID = "0xcfbf336fe147d643b9cb705648500e101504b16d"
-	if resp.Protocols[0].Pools[1].ID != expectedProtocolID {
-		t.Fatalf("expected protocol ID %s, got %s", expectedProtocolID, resp.Protocols[0].ID)
+	name := "Falcon 1"
+	if resp.Rockets[0].Name != name {
+		t.Errorf("expected rocket name %s, got %s", name, resp.Rockets[0].Name)
 	}
 
-	expectedContractToPoolID := "0x0002bfcce657a4beb498e23201bd767fc5a0a0d5"
-	if resp.ContractToPoolMappings[0].ID != expectedContractToPoolID {
-		t.Fatalf("expected contract to pool ID %s, got %s", expectedContractToPoolID, resp.ContractToPoolMappings[0].ID)
+	name = "Falcon 9"
+	if resp.Rockets[1].Name != name {
+		t.Errorf("expected rocket name %s, got %s", name, resp.Rockets[1].Name)
 	}
 }
