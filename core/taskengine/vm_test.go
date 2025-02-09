@@ -9,6 +9,7 @@ import (
 	"github.com/k0kubun/pp/v3"
 
 	"github.com/AvaProtocol/ap-avs/core/testutil"
+	"github.com/AvaProtocol/ap-avs/model"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -40,7 +41,15 @@ func TestVMCompile(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
+	vm, err := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "123",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -82,7 +91,14 @@ func TestRunSimpleTasks(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
+	vm, err := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "123",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -152,7 +168,15 @@ func TestRunSequentialTasks(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
+	vm, err := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "123",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -266,7 +290,15 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
+	vm, err := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "123",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -403,7 +435,15 @@ func TestEvaluateEvent(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 
-	vm, err := NewVMWithData("sampletaskid1", trigger, &mark, nodes, edges, testutil.GetTestSmartWalletConfig())
+	vm, err := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "sampletaskid1",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, &mark, testutil.GetTestSmartWalletConfig(), nil)
+
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -484,7 +524,15 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 
-	vm, err := NewVMWithData("sampletaskid1", trigger, &mark, nodes, edges, testutil.GetTestSmartWalletConfig())
+	vm, err := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "sampletaskid1",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, &mark, testutil.GetTestSmartWalletConfig(), nil)
+
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -542,7 +590,15 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 
-	vm, err := NewVMWithData("sampletaskid1", trigger, &mark, nodes, edges, testutil.GetTestSmartWalletConfig())
+	vm, err := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "sampletaskid1",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, &mark, testutil.GetTestSmartWalletConfig(), nil)
+
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -585,10 +641,16 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
-	vm.secrets = map[string]string{
+	vm, err := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "123",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), map[string]string{
 		"apikey": "secretapikey",
-	}
+	})
 
 	if err != nil {
 		t.Errorf("expect vm initialized")

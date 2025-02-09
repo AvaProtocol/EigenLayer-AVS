@@ -7,6 +7,7 @@ import (
 
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
 	"github.com/AvaProtocol/ap-avs/core/testutil"
+	"github.com/AvaProtocol/ap-avs/model"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -43,7 +44,14 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
+	vm, err := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "123",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
 
 	client, _ := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 

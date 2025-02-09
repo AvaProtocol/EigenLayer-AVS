@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/AvaProtocol/ap-avs/core/testutil"
+	"github.com/AvaProtocol/ap-avs/model"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -35,7 +36,15 @@ func TestRunJavaScript(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123abc", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
+	vm, err := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "123abc",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
 	n := NewJSProcessor(vm)
 
 	step, err := n.Execute("123abc", node)
@@ -88,7 +97,15 @@ func TestRunJavaScriptComplex(t *testing.T) {
 		},
 	}
 
-	vm, _ := NewVMWithData("123abc", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
+	vm, _ := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "123abc",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
 	n := NewJSProcessor(vm)
 
 	step, _ := n.Execute("123abc", node)
