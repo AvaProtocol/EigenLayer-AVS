@@ -71,7 +71,7 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 		t.Errorf("expected rest node run succesfully but failed")
 	}
 
-	if !strings.Contains(step.Log, "Execute GraphQL gateway.thegraph.com") {
+	if !strings.Contains(step.Log, "Execute GraphQL spacex-production.up.railway.app") {
 		t.Errorf("expected log contains request trace data but not found. Log data is: %s", step.Log)
 	}
 
@@ -104,11 +104,11 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 		t.Errorf("name doesn't match. expected %s got %s", "FalconSat", output.Launches[0].MissionName)
 	}
 
-	if output.Launches[0].ID != "5eb87cdaffd86e000604b32b" {
-		t.Errorf("id doesn't match. expected %s got %s", "5eb87cd9ffd86e000604b32a", output.Launches[0].ID)
+	if output.Launches[1].ID != "5eb87cdaffd86e000604b32b" {
+		t.Errorf("id doesn't match. expected %s got %s", "5eb87cd9ffd86e000604b32b", output.Launches[0].ID)
 	}
 
-	if output.Launches[0].MissionName != "DemoSat" {
-		t.Errorf("name doesn't match. expected %s got %s", "FalconSat", output.Launches[0].MissionName)
+	if output.Launches[1].MissionName != "DemoSat" {
+		t.Errorf("name doesn't match. expected %s got %s", "DemoSat", output.Launches[0].MissionName)
 	}
 }
