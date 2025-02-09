@@ -43,7 +43,7 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", trigger, nil, nodes, edges)
+	vm, err := NewVMWithData("123", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
 
 	client, _ := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 

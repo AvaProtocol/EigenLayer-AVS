@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AvaProtocol/ap-avs/core/testutil"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -39,7 +40,7 @@ func TestRestRequest(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123abc", trigger, nil, nodes, edges)
+	vm, err := NewVMWithData("123abc", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
 	n := NewRestProrcessor(vm)
 	step, err := n.Execute("123abc", node)
 

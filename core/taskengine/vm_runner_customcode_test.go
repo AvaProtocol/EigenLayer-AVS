@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AvaProtocol/ap-avs/core/testutil"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -34,7 +35,7 @@ func TestRunJavaScript(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123abc", trigger, nil, nodes, edges)
+	vm, err := NewVMWithData("123abc", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
 	n := NewJSProcessor(vm)
 
 	step, err := n.Execute("123abc", node)
@@ -87,7 +88,7 @@ func TestRunJavaScriptComplex(t *testing.T) {
 		},
 	}
 
-	vm, _ := NewVMWithData("123abc", trigger, nil, nodes, edges)
+	vm, _ := NewVMWithData("123abc", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
 	n := NewJSProcessor(vm)
 
 	step, _ := n.Execute("123abc", node)

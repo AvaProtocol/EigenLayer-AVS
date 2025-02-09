@@ -40,7 +40,7 @@ func TestVMCompile(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", trigger, nil, nodes, edges)
+	vm, err := NewVMWithData("123", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -82,7 +82,7 @@ func TestRunSimpleTasks(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", trigger, nil, nodes, edges)
+	vm, err := NewVMWithData("123", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -152,7 +152,7 @@ func TestRunSequentialTasks(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", trigger, nil, nodes, edges)
+	vm, err := NewVMWithData("123", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -266,7 +266,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", trigger, nil, nodes, edges)
+	vm, err := NewVMWithData("123", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -403,7 +403,7 @@ func TestEvaluateEvent(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 
-	vm, err := NewVMWithData("sampletaskid1", trigger, &mark, nodes, edges)
+	vm, err := NewVMWithData("sampletaskid1", trigger, &mark, nodes, edges, testutil.GetTestSmartWalletConfig())
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -484,7 +484,7 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 
-	vm, err := NewVMWithData("sampletaskid1", trigger, &mark, nodes, edges)
+	vm, err := NewVMWithData("sampletaskid1", trigger, &mark, nodes, edges, testutil.GetTestSmartWalletConfig())
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -542,7 +542,7 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 
-	vm, err := NewVMWithData("sampletaskid1", trigger, &mark, nodes, edges)
+	vm, err := NewVMWithData("sampletaskid1", trigger, &mark, nodes, edges, testutil.GetTestSmartWalletConfig())
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
@@ -585,7 +585,7 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123", trigger, nil, nodes, edges)
+	vm, err := NewVMWithData("123", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
 	vm.secrets = map[string]string{
 		"apikey": "secretapikey",
 	}

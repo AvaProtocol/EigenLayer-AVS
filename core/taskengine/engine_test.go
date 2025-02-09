@@ -351,7 +351,7 @@ func TestTriggerAsync(t *testing.T) {
 		Prefix: "default",
 	})
 	worker := apqueue.NewWorker(n.queue, n.db)
-	taskExecutor := NewExecutor(n.db, testutil.GetLogger())
+	taskExecutor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
 	worker.RegisterProcessor(
 		JobTypeExecuteTask,
 		taskExecutor,

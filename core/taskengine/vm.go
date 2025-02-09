@@ -16,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/expr-lang/expr"
 
+	"github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
 	"github.com/AvaProtocol/ap-avs/pkg/erc20"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
@@ -73,7 +74,8 @@ type VM struct {
 	entrypoint       string
 	instructionCount int64
 
-	logger sdklogging.Logger
+	smartWalletConfig *config.SmartWalletConfig
+	logger            sdklogging.Logger
 }
 
 func NewVM() *VM {
@@ -132,16 +134,17 @@ func (v *VM) GetNodeNameAsVar(nodeID string) string {
 	return standardized
 }
 
-func NewVMWithData(taskID string, trigger *avsproto.TaskTrigger, triggerMetadata *avsproto.TriggerMetadata, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge) (*VM, error) {
+func NewVMWithData(taskID string, trigger *avsproto.TaskTrigger, triggerMetadata *avsproto.TriggerMetadata, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, smartWalletConfig *config.SmartWalletConfig) (*VM, error) {
 	v := &VM{
-		Status:           VMStateInitialize,
-		TaskEdges:        edges,
-		TaskNodes:        make(map[string]*avsproto.TaskNode),
-		TaskTrigger:      trigger,
-		plans:            make(map[string]*Step),
-		mu:               &sync.Mutex{},
-		instructionCount: 0,
-		secrets:          map[string]string{},
+		Status:            VMStateInitialize,
+		TaskEdges:         edges,
+		TaskNodes:         make(map[string]*avsproto.TaskNode),
+		TaskTrigger:       trigger,
+		plans:             make(map[string]*Step),
+		mu:                &sync.Mutex{},
+		instructionCount:  0,
+		secrets:           map[string]string{},
+		smartWalletConfig: smartWalletConfig,
 	}
 
 	for _, node := range nodes {

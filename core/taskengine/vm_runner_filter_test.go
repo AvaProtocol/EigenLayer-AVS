@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AvaProtocol/ap-avs/core/testutil"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -40,7 +41,7 @@ func TestFilter(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("abc123", trigger, nil, nodes, edges)
+	vm, err := NewVMWithData("abc123", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
 	if err != nil {
 		t.Errorf("expect vm initialize succesully but failed with error: %v", err)
 	}
@@ -100,7 +101,7 @@ func TestFilterComplexLogic(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("abc123", trigger, nil, nodes, edges)
+	vm, err := NewVMWithData("abc123", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
 	if err != nil {
 		t.Errorf("expect vm initialize succesully but failed with error: %v", err)
 	}

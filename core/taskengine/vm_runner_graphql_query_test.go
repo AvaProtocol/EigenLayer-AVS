@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AvaProtocol/ap-avs/core/testutil"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -45,7 +46,7 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 		},
 	}
 
-	vm, err := NewVMWithData("123abc", trigger, nil, nodes, edges)
+	vm, err := NewVMWithData("123abc", trigger, nil, nodes, edges, testutil.GetTestSmartWalletConfig())
 	n, _ := NewGraphqlQueryProcessor(vm, node.Url)
 
 	step, _, err := n.Execute("123abc", node)
