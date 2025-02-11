@@ -515,7 +515,7 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 		sb.WriteString(fmt.Sprintf("\n%s evaluate condition: %s expression: `%s`", time.Now(), statement.Id, statement.Expression))
 
 		// Evaluate the condition using goja, notice how we wrap into a function to prevent the value is leak across goja run
-		script := fmt.Sprintf(`(() => { return %s; })()`, statement.Expression)
+		script := fmt.Sprintf(`(() => { return %s; })()`, strings.Trim(statement.Expression, "\n \t"))
 
 		result, err := jsvm.RunString(script)
 		if err != nil {
