@@ -1,0 +1,17 @@
+name: Deploy to Sepolia
+
+on:
+  workflow_run:
+    workflows: ["Publish dev build docker image to dockerhub"]
+    types:
+      - completed
+    branches:
+      - main
+
+jobs:
+  deploy-aggregator:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.name == 'Push' }}
+    uses: ./.github/workflows/deploy-aggregator.yml
+    with:
+      environment: Sepolia
+      directory: ${{ vars.DIRECTORY }} 
