@@ -7,7 +7,7 @@ on:
 
 jobs:
   deploy-aggregator:
-    uses: ./.github/workflows/deploy-aggregator.yml
+    uses: ./.github/workflows/deploy-avs.yml
     with:
       environment: Ethereum
       directory: ${{ vars.DIRECTORY }} 
