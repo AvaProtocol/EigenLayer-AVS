@@ -15,7 +15,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/expr-lang/expr"
 
 	"github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
@@ -485,13 +484,24 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 	}
 
 	var sb strings.Builder
-
 	sb.WriteString("Execute Branch: ")
 	sb.WriteString(stepID)
 	outcome := ""
+
+	// Initialize goja runtime
+	jsvm := goja.New()
+
+	// Set variables in the JS environment. The value is wrapped into a data, follow a similar approach by other nocode provider
+	// even though we arent necessarily need to do this
+	for key, value := range v.vars {
+		jsvm.Set(key, map[string]any{
+			"data": value,
+		})
+		jsvm.Set(key, value)
+	}
+
 	for _, statement := range node.Conditions {
 		if strings.EqualFold(statement.Type, "else") {
-			// Execute this directly
 			outcome = fmt.Sprintf("%s.%s", stepID, statement.Id)
 			sb.WriteString("\n")
 			sb.WriteString(time.Now().String())
@@ -501,33 +511,27 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 			s.OutputData = outcome
 			return s, outcome, nil
 		}
+
 		sb.WriteString(fmt.Sprintf("\n%s evaluate condition: %s expression: `%s`", time.Now(), statement.Id, statement.Expression))
 
-		// now we need to valuate condition
-		program, err := expr.Compile(statement.Expression, expr.Env(v.vars), expr.AsBool())
+		// Evaluate the condition using goja, notice how we wrap into a function to prevent the value is leak across goja run
+		script := fmt.Sprintf(`(() => { return %s; })()`, strings.Trim(statement.Expression, "\n \t"))
+
+		result, err := jsvm.RunString(script)
 		if err != nil {
 			s.Success = false
-			s.Error = fmt.Errorf("error compile the statement: %w", err).Error()
-			sb.WriteString("error compile expression")
+			s.Error = fmt.Errorf("error evaluating the statement: %w", err).Error()
+			sb.WriteString("error evaluating expression")
 			s.Log = sb.String()
 			s.EndAt = time.Now().Unix()
-			return s, outcome, fmt.Errorf("error compile the statement: %w", err)
-		}
-		result, err := expr.Run(program, v.vars)
-		if err != nil {
-			s.Success = false
-			s.Error = fmt.Errorf("error run statement: %w", err).Error()
-			sb.WriteString("error run expression")
-			s.Log = sb.String()
-			s.EndAt = time.Now().Unix()
-			return s, outcome, fmt.Errorf("error evaluate the statement: %w", err)
+			return s, outcome, fmt.Errorf("error evaluating the statement: %w", err)
 		}
 
-		if result.(bool) == true {
+		branchResult := result.Export().(bool)
+		if branchResult {
 			outcome = fmt.Sprintf("%s.%s", stepID, statement.Id)
 			sb.WriteString("\nexpression result to true. follow path ")
 			sb.WriteString(outcome)
-			// run the node
 			s.Log = sb.String()
 			s.OutputData = outcome
 			s.EndAt = time.Now().Unix()
