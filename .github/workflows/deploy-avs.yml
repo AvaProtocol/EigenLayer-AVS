@@ -1,0 +1,54 @@
+name: Reusable Aggregator Deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      directory:
+        required: true
+        type: string
+
+jobs:
+  deploy-aggregator:
+    runs-on: ubuntu-latest
+    environment: 
+      name: ${{ inputs.environment }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: SSH and Deploy
+      uses: appleboy/ssh-action@v0.1.5
+      with:
+        host: ${{ secrets.AVS_SERVER_HOST }}
+        username: ava
+        key: ${{ secrets.AVS_SSH_KEY }}
+        script: |
+          echo "Deploying to environment: ${{ inputs.environment }}"
+          cd $HOME/ap-aggregator-setup/${{ inputs.directory }}
+          docker compose pull
+          docker compose up -d --force-recreate 
+
+  deploy-operator:
+    runs-on: ubuntu-latest
+    environment: 
+      name: ${{ inputs.environment }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: SSH and Deploy
+      uses: appleboy/ssh-action@v0.1.5
+      with:
+        host: ${{ secrets.AVS_SERVER_HOST }}
+        username: ava
+        key: ${{ secrets.AVS_SSH_KEY }}
+        script: |
+          echo "Deploying to environment: ${{ inputs.environment }}"
+          cd $HOME/ap-operator-setup/${{ inputs.directory }}
+          docker compose pull
+          docker compose up -d --force-recreate 
