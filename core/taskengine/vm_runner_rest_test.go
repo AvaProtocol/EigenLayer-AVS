@@ -1,6 +1,8 @@
 package taskengine
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -71,5 +73,73 @@ func TestRestRequest(t *testing.T) {
 	}
 	if !strings.Contains(step.OutputData, "*This is a test format") {
 		t.Errorf("expected step result contains the http endpoint response body: %s", step.OutputData)
+	}
+}
+
+func TestRestRequestHandleEmptyResponse(t *testing.T) {
+	// Create test server
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("expected POST request, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(""))
+	}))
+	defer ts.Close()
+
+	node := &avsproto.RestAPINode{
+		Url: ts.URL,
+		Headers: map[string]string{
+			"Content-type": "application/x-www-form-urlencoded",
+		},
+		Body:   "",
+		Method: "POST",
+	}
+
+	nodes := []*avsproto.TaskNode{
+		&avsproto.TaskNode{
+			Id:   "123abc",
+			Name: "restApi",
+			TaskType: &avsproto.TaskNode_RestApi{
+				RestApi: node,
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+	edges := []*avsproto.TaskEdge{
+		&avsproto.TaskEdge{
+			Id:     "e1",
+			Source: trigger.Id,
+			Target: "123abc",
+		},
+	}
+
+	vm, err := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "123abc",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
+	n := NewRestProrcessor(vm)
+
+	step, err := n.Execute("123abc", node)
+
+	if err != nil {
+		t.Errorf("expected rest node run succesfull but got error: %v", err)
+	}
+
+	if !step.Success {
+		t.Errorf("expected rest node run succesfully but failed")
+	}
+
+	if step.OutputData != "" {
+		t.Errorf("expected an empty response, got: %s", step.OutputData)
 	}
 }
