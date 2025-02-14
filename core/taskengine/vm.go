@@ -48,7 +48,9 @@ func (c *CommonProcessor) SetVar(name string, data any) {
 
 // Set the variable for step output so it can be refer and use in subsequent steps
 func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
-	c.vm.AddVar(c.vm.GetNodeNameAsVar(stepID), data)
+	c.vm.AddVar(c.vm.GetNodeNameAsVar(stepID), map[string]any{
+		"data": data,
+	})
 }
 
 // The VM is the core component that load the node information and execute them, yield finaly result
@@ -387,18 +389,12 @@ func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avspro
 		jsvm := goja.New()
 
 		for key, value := range v.vars {
-			jsvm.Set(key, map[string]any{
-				"data": value,
-			})
+			jsvm.Set(key, value)
 		}
 
-		fmt.Println("jsvm", v.vars, nodeValue.Body)
-
 		renderBody, err := jsvm.RunString(nodeValue.Body)
-		//renderBody, err := jsvm.RunString(`"dauhuhu ${demoTriggerName}"`)
 		if err == nil {
 			nodeValue2.Body = renderBody.Export().(string)
-			fmt.Println("got resultr", renderBody.Export().(string))
 		} else {
 			v.logger.Error("error render string with goja", "error", err)
 		}
@@ -498,9 +494,7 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 	// Set variables in the JS environment. The value is wrapped into a data, follow a similar approach by other nocode provider
 	// even though we arent necessarily need to do this
 	for key, value := range v.vars {
-		jsvm.Set(key, map[string]any{
-			"data": value,
-		})
+		jsvm.Set(key, value)
 	}
 
 	for _, statement := range node.Conditions {
@@ -518,7 +512,7 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 		sb.WriteString(fmt.Sprintf("\n%s evaluate condition: %s expression: `%s`", time.Now(), statement.Id, statement.Expression))
 
 		// Evaluate the condition using goja, notice how we wrap into a function to prevent the value is leak across goja run
-		script := fmt.Sprintf(`(() => { return %s; })()`, strings.Trim(statement.Expression, "\n \t"))
+		script := fmt.Sprintf(`(() => %s )()`, strings.Trim(statement.Expression, "\n \t"))
 
 		result, err := jsvm.RunString(script)
 		if err != nil {
