@@ -31,9 +31,7 @@ func NewJSProcessor(vm *VM) *JSProcessor {
 	}
 	/// Binding the data from previous step into jsvm
 	for key, value := range vm.vars {
-		r.jsvm.Set(key, map[string]any{
-			"data": value,
-		})
+		r.jsvm.Set(key, value)
 	}
 
 	return &r

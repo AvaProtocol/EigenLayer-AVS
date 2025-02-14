@@ -67,7 +67,8 @@ func TestFilter(t *testing.T) {
 	n := NewFilterProcessor(vm)
 	step, err := n.Execute("abc123", node)
 	varname := vm.GetNodeNameAsVar("abc123")
-	data := vm.vars[varname].([]interface{})
+	data := vm.vars[varname].(map[string]any)["data"].([]any)
+
 	if len(data) != 1 {
 		t.Errorf("expect return only one element with cost > 5 but got 0")
 	}
@@ -148,7 +149,7 @@ func TestFilterComplexLogic(t *testing.T) {
 	step, err := n.Execute("abc123", node)
 
 	varname := vm.GetNodeNameAsVar("abc123")
-	data := vm.vars[varname].([]interface{})
+	data := vm.vars[varname].(map[string]any)["data"].([]any)
 	if len(data) != 3 {
 		t.Errorf("expect return only 3 element but got %v", len(data))
 	}
