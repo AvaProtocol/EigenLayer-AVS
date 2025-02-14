@@ -88,8 +88,9 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	s.Log = log.String()
 
 	s.OutputData = string(resp.Body())
-	// Attempt to detect json
-	if s.OutputData[0] == '{' || s.OutputData[0] == '[' {
+
+	// Attempt to detect json and auto convert to a map to use in subsequent step
+	if len(s.OutputData) >= 1 && (s.OutputData[0] == '{' || s.OutputData[0] == '[') {
 		var parseData map[string]any
 		if err := json.Unmarshal([]byte(s.OutputData), &parseData); err == nil {
 			r.SetOutputVarForStep(stepID, parseData)
