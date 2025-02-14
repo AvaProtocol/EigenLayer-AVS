@@ -26,11 +26,12 @@ import (
 type VMState string
 
 const (
-	VMStateInitialize = "vm_initialize"
-	VMStateCompiled   = "vm_compiled"
-	VMStateReady      = "vm_ready"
-	VMStateExecuting  = "vm_executing"
-	VMStateCompleted  = "vm_completed"
+	VMStateInitialize         = "vm_initialize"
+	VMStateCompiled           = "vm_compiled"
+	VMStateReady              = "vm_ready"
+	VMStateExecuting          = "vm_executing"
+	VMStateCompleted          = "vm_completed"
+	VMMaxPreprocessIterations = 100
 )
 
 type Step struct {
@@ -221,6 +222,10 @@ func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, 
 		}
 	}
 
+	v.vars["apContext"] = map[string]map[string]string{
+		"configVars": secrets,
+	}
+
 	return v, nil
 }
 
@@ -364,44 +369,7 @@ func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avspro
 	executionLog := &avsproto.Execution_Step{
 		NodeId: stepID,
 	}
-
-	// TODO: for global secret, we NEED to limit apikey to only send to a certain authorized endpoint for a certain secret to avoid leakage
-	if strings.Contains(nodeValue.Url, "${{") {
-		nodeValue.Url = macros.RenderSecrets(nodeValue.Url, v.secrets)
-	}
-	if strings.Contains(nodeValue.Body, "${{") {
-		nodeValue.Body = macros.RenderSecrets(nodeValue.Body, v.secrets)
-	}
-	for headerName, headerValue := range nodeValue.Headers {
-		if strings.Contains(headerValue, "${{") {
-			nodeValue.Headers[headerName] = macros.RenderSecrets(headerValue, v.secrets)
-		}
-	}
-
-	// only evaluate string when there is string interpolation
-	if nodeValue.Body != "" && (strings.Contains(nodeValue.Body, "$") || strings.Contains(nodeValue.Body, "`")) {
-		nodeValue2 := &avsproto.RestAPINode{
-			Url:     nodeValue.Url,
-			Headers: nodeValue.Headers,
-			Method:  nodeValue.Method,
-			Body:    strings.Clone(nodeValue.Body),
-		}
-		jsvm := goja.New()
-
-		for key, value := range v.vars {
-			jsvm.Set(key, value)
-		}
-
-		renderBody, err := jsvm.RunString(nodeValue.Body)
-		if err == nil {
-			nodeValue2.Body = renderBody.Export().(string)
-		} else {
-			v.logger.Error("error render string with goja", "error", err)
-		}
-		executionLog, err = p.Execute(stepID, nodeValue2)
-	} else {
-		executionLog, err = p.Execute(stepID, nodeValue)
-	}
+	executionLog, err = p.Execute(stepID, nodeValue)
 
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 	return executionLog, err
@@ -549,4 +517,73 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 	s.Log = sb.String()
 	s.EndAt = time.Now().Unix()
 	return s, "", nil
+}
+
+// preprocessText processes any text within {{ }} using goja JavaScript engine
+// It returns the processed text with all {{ }} expressions evaluated
+// If there's an invalid syntax, it returns the original text
+func (v *VM) preprocessText(text string) string {
+	// Quick return if no template syntax found
+	if !strings.Contains(text, "{{") || !strings.Contains(text, "}}") {
+		return text
+	}
+
+	// Initialize goja runtime
+	jsvm := goja.New()
+
+	for key, value := range v.vars {
+		jsvm.Set(key, value)
+	}
+
+	// Find all {{ }} expressions
+	result := text
+	currentIteration := 0
+
+	for currentIteration < VMMaxPreprocessIterations {
+		start := strings.Index(result, "{{")
+		if start == -1 {
+			break
+		}
+
+		// Find the next closing brackets after start
+		end := strings.Index(result[start:], "}}")
+		if end == -1 {
+			break
+		}
+		end += start
+
+		// Check for nested opening/closing brackets between start and end
+		if strings.Index(result[start+2:end], "{{") >= 0 || strings.Index(result[start+2:end], "}}") >= 0 {
+			// We don't support nested expressions so we will just set this to blank, similar to how Retool does
+			result = result[:start] + result[end+2:]
+			continue
+		}
+
+		// Extract the expression
+		expr := strings.TrimSpace(result[start+2 : end])
+		if expr == "" {
+			// Skip empty expressions
+			result = result[:start] + result[end+2:]
+			continue
+		}
+
+		// Evaluate the expression using goja, notice that we wrap in an IIFE to prevent variable leakage
+		// We are re-using the same goja instance
+		script := fmt.Sprintf(`(() => { return %s; })()`, expr)
+
+		evaluated, err := jsvm.RunString(script)
+		if err != nil {
+			// If there's an error, move past this opening bracket and continue
+			result = result[:start] + result[end+2:]
+			currentIteration++
+			continue
+		}
+
+		// Replace the expression with its evaluated result
+		replacement := fmt.Sprintf("%v", evaluated.Export())
+		result = result[:start] + replacement + result[end+2:]
+		currentIteration++
+	}
+
+	return result
 }

@@ -218,3 +218,9 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 		ControllerPrivateKey: controllerPrivateKey,
 	}
 }
+
+func GetTestSecrets() map[string]string {
+	return map[string]string{
+		"my_awesome_secret": "my_awesome_secret_value",
+	}
+}

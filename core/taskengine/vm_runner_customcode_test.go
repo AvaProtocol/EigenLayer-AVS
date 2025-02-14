@@ -11,7 +11,7 @@ import (
 
 func TestRunJavaScript(t *testing.T) {
 	node := &avsproto.CustomCodeNode{
-		Source: "3>2",
+		Source: "return 3>2",
 	}
 	nodes := []*avsproto.TaskNode{
 		&avsproto.TaskNode{
@@ -73,7 +73,7 @@ func TestRunJavaScript(t *testing.T) {
 
 func TestRunJavaScriptComplex(t *testing.T) {
 	node := &avsproto.CustomCodeNode{
-		Source: "const a=[1,2,3]; a.filter((i) => i >= 2);",
+		Source: "const a=[1,2,3]; return a.filter((i) => i >= 2);",
 	}
 	nodes := []*avsproto.TaskNode{
 		&avsproto.TaskNode{
@@ -150,3 +150,47 @@ func TestRunJavaScriptComplex(t *testing.T) {
 // 		t.Errorf("wrong JS code evaluation result, expect [2,3] got %s", step.OutputData)
 // 	}
 // }
+
+func TestRunJavaScriptCanAccessSecretsWithapContext(t *testing.T) {
+	node := &avsproto.CustomCodeNode{
+		Source: "return 'my name is ' + apContext.configVars.my_awesome_secret",
+	}
+	nodes := []*avsproto.TaskNode{
+		&avsproto.TaskNode{
+			Id:   "123abc",
+			Name: "customJs",
+			TaskType: &avsproto.TaskNode_CustomCode{
+				CustomCode: node,
+			},
+		},
+	}
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+
+	edges := []*avsproto.TaskEdge{
+		&avsproto.TaskEdge{
+			Id:     "e1",
+			Source: trigger.Id,
+			Target: "123abc",
+		},
+	}
+
+	vm, _ := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "123abc",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), testutil.GetTestSecrets())
+
+	n := NewJSProcessor(vm)
+
+	step, _ := n.Execute("123abc", node)
+
+	if step.OutputData != "\"my name is my_awesome_secret_value\"" {
+		t.Errorf("wrong JS code evaluation result, expect: `\"my name is my_awesome_secret_value\"`,  got `%s`", step.OutputData)
+	}
+}

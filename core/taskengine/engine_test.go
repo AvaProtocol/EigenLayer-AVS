@@ -765,7 +765,6 @@ func TestListSecrets(t *testing.T) {
 	})
 
 	result, _ := n.ListSecrets(user1, &avsproto.ListSecretsReq{})
-	fmt.Println(result)
 	if len(result.Items) != 2 {
 		t.Errorf("invalid secret result, expect 2 items got %d", len(result.Items))
 	}

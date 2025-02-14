@@ -162,7 +162,7 @@ func TestRestRequestRenderVars(t *testing.T) {
 		Headers: map[string]string{
 			"Content-type": "application/x-www-form-urlencoded",
 		},
-		Body:   "my name is ${{myNode.name}}",
+		Body:   "my name is {{myNode.data.name}}",
 		Method: "POST",
 	}
 
