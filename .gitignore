@@ -29,3 +29,5 @@ contracts/script/output*
 
 contracts/broadcast/
 alias-ecdsa.key.json
+
+keys/
