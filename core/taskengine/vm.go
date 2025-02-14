@@ -392,9 +392,13 @@ func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avspro
 			})
 		}
 
+		fmt.Println("jsvm", v.vars, nodeValue.Body)
+
 		renderBody, err := jsvm.RunString(nodeValue.Body)
+		//renderBody, err := jsvm.RunString(`"dauhuhu ${demoTriggerName}"`)
 		if err == nil {
 			nodeValue2.Body = renderBody.Export().(string)
+			fmt.Println("got resultr", renderBody.Export().(string))
 		} else {
 			v.logger.Error("error render string with goja", "error", err)
 		}
@@ -497,7 +501,6 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 		jsvm.Set(key, map[string]any{
 			"data": value,
 		})
-		jsvm.Set(key, value)
 	}
 
 	for _, statement := range node.Conditions {
@@ -527,7 +530,16 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 			return s, outcome, fmt.Errorf("error evaluating the statement: %w", err)
 		}
 
-		branchResult := result.Export().(bool)
+		branchResult, ok := result.Export().(bool)
+		if !ok {
+			s.Success = false
+			s.Error = fmt.Errorf("error evaluating the statement: %w", err).Error()
+			sb.WriteString("error evaluating expression")
+			s.Log = sb.String()
+			s.EndAt = time.Now().Unix()
+			return s, outcome, fmt.Errorf("error evaluating the statement: %w", err)
+		}
+
 		if branchResult {
 			outcome = fmt.Sprintf("%s.%s", stepID, statement.Id)
 			sb.WriteString("\nexpression result to true. follow path ")
