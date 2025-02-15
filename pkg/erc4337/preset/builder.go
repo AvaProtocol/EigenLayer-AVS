@@ -79,9 +79,9 @@ func SendUserOp(
 		return "", fmt.Errorf("error estimated gas from bundler: %w", e)
 	}
 
-	// userOp.PreVerificationGas = gas.PreVerificationGas
-	// userOp.VerificationGasLimit = gas.VerificationGasLimit
-	// userOp.CallGasLimit = gas.CallGasLimit
+	userOp.PreVerificationGas = gas.PreVerificationGas
+	userOp.VerificationGasLimit = gas.VerificationGasLimit
+	userOp.CallGasLimit = gas.CallGasLimit
 	// //userOp.VerificationGas = gas.VerificationGas
 
 	// TODO: Fix this to load properly estimate from voltaire https://github.com/candidelabs/voltaire
