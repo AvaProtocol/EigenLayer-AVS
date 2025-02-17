@@ -1,7 +1,10 @@
 package taskengine
 
 import (
-	"fmt"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -64,15 +67,22 @@ func TestVMCompile(t *testing.T) {
 }
 
 func TestRunSimpleTasks(t *testing.T) {
+	// Setup test server
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.Write(body)
+	}))
+	defer ts.Close()
+
 	nodes := []*avsproto.TaskNode{
 		&avsproto.TaskNode{
 			Id:   "123",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/post",
+					Url:    ts.URL,
 					Method: "POST",
-					Body:   "a=123",
+					Body:   `{"name":"Alice"}`,
 				},
 			},
 		},
@@ -117,9 +127,10 @@ func TestRunSimpleTasks(t *testing.T) {
 		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got nothing")
 	}
 
-	data := vm.vars["httpnode"].(map[string]any)
-	if data["data"].(string) != "a=123" {
-		t.Errorf("step result isn't store properly, expect 123 got %s", data["data"])
+	data := vm.vars["httpnode"].(map[string]any)["data"]
+
+	if data.(map[string]any)["name"].(string) != "Alice" {
+		t.Errorf("step result isn't store properly, expect 123 got %s", data)
 	}
 }
 
@@ -331,7 +342,6 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	}
 	pp.Print(vm.ExecutionLogs[0])
 	pp.Print(vm.ExecutionLogs[1])
-	fmt.Println(vm.ExecutionLogs[1].OutputData)
 	if !strings.Contains(vm.ExecutionLogs[1].OutputData, `notification1`) {
 		t.Errorf("expect executing notification1 step but not it didn't run")
 	}
@@ -353,7 +363,6 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	}
 	pp.Print(vm.ExecutionLogs[0])
 	pp.Print(vm.ExecutionLogs[1])
-	fmt.Println(vm.ExecutionLogs[1].OutputData)
 	if !strings.Contains(vm.ExecutionLogs[1].OutputData, `notification2`) {
 		t.Errorf("expect executing notification1 step but not it didn't run")
 	}
@@ -614,15 +623,28 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 }
 
 func TestRunTaskWithCustomUserSecret(t *testing.T) {
+	// Setup test server
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		response := map[string]interface{}{
+			"data": string(body),
+			"args": map[string]interface{}{
+				"apikey": r.URL.Query().Get("apikey"),
+			},
+		}
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer ts.Close()
+
 	nodes := []*avsproto.TaskNode{
 		&avsproto.TaskNode{
 			Id:   "123",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/post?apikey=${{secrets.apikey}}",
+					Url:    ts.URL + "?apikey={{apContext.configVars.apikey}}",
 					Method: "POST",
-					Body:   "my key is ${{secrets.apikey}} in body",
+					Body:   "my key is {{apContext.configVars.apikey}} in body",
 				},
 			},
 		},
@@ -670,12 +692,181 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got nothing")
 	}
 
-	data := vm.vars["httpnode"].(map[string]any)
+	data := vm.vars["httpnode"].(map[string]any)["data"].(map[string]any)
 	if data["data"].(string) != "my key is secretapikey in body" {
-		t.Errorf("secret doesn't render correctly in body, expect secretapikey but got %S", data["data"])
+		t.Errorf("secret doesn't render correctly in body, expect secretapikey but got %s", data["data"])
 	}
 
 	if data["args"].(map[string]interface{})["apikey"].(string) != "secretapikey" {
-		t.Errorf("secret doesn't render correctly in uri, expect secretapikey but got %S", data["data"])
+		t.Errorf("secret doesn't render correctly in uri, expect secretapikey but got %s", data["data"])
+	}
+}
+
+func TestPreprocessText(t *testing.T) {
+	// Setup a VM with some test variables
+	// in a real task execution, these variables come from 3 places:
+	//	1. previous node outputs
+	//	2. trigger metadata
+	//	3. secrets
+
+	vm := &VM{
+		vars: map[string]any{
+			"user": map[string]any{
+				"data": map[string]any{
+					"name":    "Alice",
+					"balance": 100,
+					"items":   []string{"apple", "banana"},
+					"address": "0x123",
+					"active":  true,
+				},
+			},
+			"token": map[string]any{
+				"data": map[string]any{
+					"symbol":  "ETH",
+					"decimal": 18,
+					"address": "0x123",
+					"pairs": []map[string]any{
+						{"symbol": "ETH/USD", "price": 2000},
+						{"symbol": "ETH/EUR", "price": 1800},
+					},
+				},
+			},
+			"apContext": map[string]map[string]string{
+				"configVars": map[string]string{
+					"my_awesome_secret": "my_awesome_secret_value",
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple variable",
+			input:    "Hello {{ user.data.name }}!",
+			expected: "Hello Alice!",
+		},
+		{
+			name:     "multiple variables",
+			input:    "{{ user.data.name }} has {{ user.data.balance }} {{ token.data.symbol }}",
+			expected: "Alice has 100 ETH",
+		},
+		{
+			name:     "apContext variable",
+			input:    "my secret is {{ apContext.configVars.my_awesome_secret}}",
+			expected: "my secret is my_awesome_secret_value",
+		},
+		{
+			name:     "invalid syntax - unclosed",
+			input:    "Hello {{ user.data.name !",
+			expected: "Hello {{ user.data.name !",
+		},
+		{
+			name:     "invalid syntax - nested braces",
+			input:    "Hello {{ user.data{{ .name }} }}",
+			expected: "Hello  }}",
+		},
+		{
+			name:     "multiple nested braces",
+			input:    "Hello {{ user.data.name }} {{ {{ token.data.symbol }} }}",
+			expected: "Hello Alice  }}",
+		},
+		{
+			name:     "expression with calculation",
+			input:    "Total: {{ user.data.balance * 2 }} {{ token.data.symbol }}",
+			expected: "Total: 200 ETH",
+		},
+		{
+			name:     "text without expressions",
+			input:    "Hello World!",
+			expected: "Hello World!",
+		},
+		{
+			name:     "empty expression",
+			input:    "Hello {{  }} World",
+			expected: "Hello  World",
+		},
+		{
+			name:     "multiple expressions in one line",
+			input:    "{{ user.data.name }} owns {{ token.data.symbol }} at {{ token.data.address }}",
+			expected: "Alice owns ETH at 0x123",
+		},
+		{
+			name:     "javascript expression - array access",
+			input:    "First item: {{ user.data.items[0] }}",
+			expected: "First item: apple",
+		},
+		{
+			name:     "javascript expression - string manipulation",
+			input:    "Address: {{ user.data.address.toLowerCase() }}",
+			expected: "Address: 0x123",
+		},
+		{
+			name:     "javascript expression - conditional",
+			input:    "Status: {{ user.data.active ? 'Online' : 'Offline' }}",
+			expected: "Status: Online",
+		},
+		{
+			name:     "javascript expression - template literal",
+			input:    "{{ `${user.data.name}'s balance is ${user.data.balance}` }}",
+			expected: "Alice's balance is 100",
+		},
+		{
+			name:     "complex object access",
+			input:    "ETH/USD Price: {{ token.data.pairs[0].price }}",
+			expected: "ETH/USD Price: 2000",
+		},
+		{
+			name:     "multiple nested properties",
+			input:    "{{ token.data.pairs[0].symbol }} at {{ token.data.pairs[0].price }}",
+			expected: "ETH/USD at 2000",
+		},
+		{
+			name:     "invalid property access",
+			input:    "{{ user.data.nonexistent.property }}",
+			expected: "",
+		},
+		{
+			name:     "invalid method call",
+			input:    "{{ user.data.name.nonexistentMethod() }}",
+			expected: "",
+		},
+		{
+			name:     "mixed valid and invalid expressions",
+			input:    "{{ user.data.name }} has {{ user.data.nonexistent }} {{ token.data.symbol }}",
+			expected: "Alice has <nil> ETH",
+		},
+		{
+			name:     "javascript expression - arithmetic",
+			input:    "Total in USD: {{ token.data.pairs[0].price * user.data.balance }}",
+			expected: "Total in USD: 200000",
+		},
+		{
+			name:     "expression with spaces and newlines",
+			input:    "{{ \n  user.data.name  \n }}",
+			expected: "Alice",
+		},
+		{
+			name:     "expression with comments",
+			input:    "{{ /* comment */ user.data.name }}",
+			expected: "Alice", // JavaScript comments in expressions are not supported
+		},
+		{
+			name:     "max iterations test",
+			input:    strings.Repeat("{{ user.data.name }}", VMMaxPreprocessIterations+1),
+			expected: strings.Repeat("Alice", VMMaxPreprocessIterations) + "{{ user.data.name }}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := vm.preprocessText(tt.input)
+			if result != tt.expected {
+				t.Errorf("preprocessText(%q) = got %q, want %q", tt.input, result, tt.expected)
+			}
+		})
 	}
 }

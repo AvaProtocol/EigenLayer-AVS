@@ -61,8 +61,8 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	var log strings.Builder
 
 	log.WriteString(fmt.Sprintf("Start execute user-input JS code at %s", time.Now()))
-	//result, err := r.jsvm.RunString("(function() {" + node.Source + "})()")
-	result, err := r.jsvm.RunString(node.Source)
+	result, err := r.jsvm.RunString("(function() {" + node.Source + "})()")
+
 	log.WriteString(fmt.Sprintf("Complete Execute user-input JS code at %s", time.Now()))
 	if err != nil {
 		s.Success = false
@@ -78,7 +78,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 		if outputData, serilizeError := json.Marshal(resultValue); serilizeError == nil {
 			s.OutputData = string(outputData)
 		} else {
-			log.WriteString("cannot serilize output data to log")
+			log.WriteString("cannot serialize output data to log")
 		}
 		r.SetOutputVarForStep(stepID, resultValue)
 	}

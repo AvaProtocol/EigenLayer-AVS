@@ -210,11 +210,17 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 	}
 
 	return &config.SmartWalletConfig{
-		EthRpcUrl:            os.Getenv("BASE_SEPOLIA_RPC_URL"),
-		EthWsUrl:             strings.Replace(os.Getenv("BASE_SEPOLIA_RPC_URL"), "https://", "wss://", 1),
-		BundlerURL:           os.Getenv("BASE_SEPOLIA_BUNDLER_RPC"),
+		EthRpcUrl:            os.Getenv("RPC_URL"),
+		BundlerURL:           os.Getenv("BUNDLER_RPC"),
+		EthWsUrl:             strings.Replace(os.Getenv("RPC_URL"), "https://", "wss://", 1),
 		FactoryAddress:       common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
 		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
 		ControllerPrivateKey: controllerPrivateKey,
+	}
+}
+
+func GetTestSecrets() map[string]string {
+	return map[string]string{
+		"my_awesome_secret": "my_awesome_secret_value",
 	}
 }

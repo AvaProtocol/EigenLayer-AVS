@@ -49,6 +49,19 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		StartAt:    t0,
 	}
 
+	// TODO: for global secret, we NEED to limit apikey to only send to a certain authorized endpoint for a certain secret to avoid leakage
+	if strings.Contains(node.Url, "{{") {
+		node.Url = r.vm.preprocessText(node.Url)
+	}
+	if strings.Contains(node.Body, "{{") {
+		node.Body = r.vm.preprocessText(node.Body)
+	}
+	for headerName, headerValue := range node.Headers {
+		if strings.Contains(headerValue, "{{") {
+			node.Headers[headerName] = r.vm.preprocessText(headerValue)
+		}
+	}
+
 	var err error
 	defer func() {
 		s.EndAt = time.Now().Unix()

@@ -105,13 +105,14 @@ func (bc *BundlerClient) EstimateUserOperationGas(
 		CallGasLimit:         new(big.Int),
 		//VerificationGas:      new(big.Int),
 	}
+
 	// gasEstimation.PreVerificationGas.SetInt64(result.PreVerificationGas)
 	// gasEstimation.VerificationGasLimit.SetInt64(result.VerificationGasLimit)
 	// gasEstimation.CallGasLimit.SetInt64(result.CallGasLimit)
 	// gasEstimation.VerificationGas.SetInt64(result.VerificationGas)
-	gasEstimation.PreVerificationGas.SetString(result.PreVerificationGas, 16)
-	gasEstimation.VerificationGasLimit.SetString(result.VerificationGasLimit, 16)
-	gasEstimation.CallGasLimit.SetString(result.CallGasLimit, 16)
+	gasEstimation.PreVerificationGas.SetString(result.PreVerificationGas[2:], 16)
+	gasEstimation.VerificationGasLimit.SetString(result.VerificationGasLimit[2:], 16)
+	gasEstimation.CallGasLimit.SetString(result.CallGasLimit[2:], 16)
 
 	return gasEstimation, nil
 }
