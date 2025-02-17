@@ -464,6 +464,7 @@ func TestEvaluateEvent(t *testing.T) {
 
 	err = vm.Run()
 	if err != nil {
+		pp.Print(vm.vars)
 		pp.Print(vm.ExecutionLogs)
 		t.Errorf("Error executing program. Expected success, got error %v", err)
 		return
