@@ -322,8 +322,6 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		return
 	}
 
-	pp.Print(vm.plans)
-
 	if len(vm.plans) != 3 {
 		t.Errorf("Invalid plan generation. Expect one step, got %d", len(vm.plans))
 	}
@@ -340,13 +338,13 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	if len(vm.ExecutionLogs) != 2 {
 		t.Errorf("incorrect log, expect 2 got %d", len(vm.ExecutionLogs))
 	}
-	pp.Print(vm.ExecutionLogs[0])
-	pp.Print(vm.ExecutionLogs[1])
 	if !strings.Contains(vm.ExecutionLogs[1].OutputData, `notification1`) {
-		t.Errorf("expect executing notification1 step but not it didn't run")
+		t.Errorf("expect executing notification1 and set output data to notification1")
 	}
 
 	vm.Reset()
+
+	// Now test the else branch
 	vm.vars["a"] = 1
 	vm.Compile()
 	err = vm.Run()
@@ -464,16 +462,15 @@ func TestEvaluateEvent(t *testing.T) {
 		return
 	}
 
-	pp.Print(vm.plans)
-
 	err = vm.Run()
 	if err != nil {
+		pp.Print(vm.ExecutionLogs)
 		t.Errorf("Error executing program. Expected success, got error %v", err)
 		return
 	}
 
-	pp.Print(vm.ExecutionLogs)
 	if vm.ExecutionLogs[0].OutputData != "branch1.a1" {
+		pp.Print(vm.ExecutionLogs)
 		t.Errorf("expression evaluate incorrect")
 	}
 }
