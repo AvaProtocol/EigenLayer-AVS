@@ -215,6 +215,12 @@ func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, 
 			}
 		}
 
+		if triggerMetadata.BlockNumber > 0 {
+			v.vars[triggerVarName] = map[string]any{
+				"block_number": triggerMetadata.BlockNumber,
+			}
+		}
+
 		if triggerMetadata.Epoch > 0 {
 			v.vars[triggerVarName] = map[string]any{
 				"epoch": triggerMetadata.Epoch,
