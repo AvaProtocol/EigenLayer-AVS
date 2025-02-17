@@ -161,6 +161,10 @@ func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, 
 	triggerVarName := v.GetTriggerNameAsVar()
 	// popular trigger data for trigger variable
 	if triggerMetadata != nil {
+		v.vars[triggerVarName] = map[string]any{
+			"data": map[string]any{},
+		}
+
 		if triggerMetadata.LogIndex > 0 && triggerMetadata.TxHash != "" {
 			// if it contains event, we need to fetch and pop
 			receipt, err := rpcConn.TransactionReceipt(context.Background(), common.HexToHash(triggerMetadata.TxHash))
@@ -192,39 +196,33 @@ func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, 
 			parseTransfer, err := ef.ParseTransfer(*event)
 			formattedValue := ToDecimal(parseTransfer.Value, int(tokenMetadata.Decimals)).String()
 
-			v.vars[triggerVarName] = map[string]interface{}{
-				"data": map[string]interface{}{
-					"topics": lo.Map(event.Topics, func(topic common.Hash, _ int) string {
-						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
-					}),
-					"data": "0x" + common.Bytes2Hex(event.Data),
+			v.vars[triggerVarName]["data"] = map[string]interface{}{
+				"topics": lo.Map(event.Topics, func(topic common.Hash, _ int) string {
+					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+				}),
+				"data": "0x" + common.Bytes2Hex(event.Data),
 
-					"token_name":        tokenMetadata.Name,
-					"token_symbol":      tokenMetadata.Symbol,
-					"token_decimals":    tokenMetadata.Decimals,
-					"transaction_hash":  event.TxHash,
-					"address":           strings.ToLower(event.Address.Hex()),
-					"block_number":      event.BlockNumber,
-					"block_timestamp":   blockHeader.Time,
-					"from_address":      parseTransfer.From.String(),
-					"to_address":        parseTransfer.To.String(),
-					"value":             parseTransfer.Value.String(),
-					"value_formatted":   formattedValue,
-					"transaction_index": event.TxIndex,
-				},
+				"token_name":        tokenMetadata.Name,
+				"token_symbol":      tokenMetadata.Symbol,
+				"token_decimals":    tokenMetadata.Decimals,
+				"transaction_hash":  event.TxHash,
+				"address":           strings.ToLower(event.Address.Hex()),
+				"block_number":      event.BlockNumber,
+				"block_timestamp":   blockHeader.Time,
+				"from_address":      parseTransfer.From.String(),
+				"to_address":        parseTransfer.To.String(),
+				"value":             parseTransfer.Value.String(),
+				"value_formatted":   formattedValue,
+				"transaction_index": event.TxIndex,
 			}
 		}
 
 		if triggerMetadata.BlockNumber > 0 {
-			v.vars[triggerVarName] = map[string]any{
-				"block_number": triggerMetadata.BlockNumber,
-			}
+			v.vars[triggerVarName]["data"]["block_number"] = triggerMetadata.BlockNumber
 		}
 
 		if triggerMetadata.Epoch > 0 {
-			v.vars[triggerVarName] = map[string]any{
-				"epoch": triggerMetadata.Epoch,
-			}
+			v.vars[triggerVarName]["data"]["epoch"] = triggerMetadata.Epoch
 		}
 	}
 
