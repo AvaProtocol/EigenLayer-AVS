@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -217,5 +218,113 @@ func TestRestRequestRenderVars(t *testing.T) {
 
 	if step.OutputData != "my name is unitest" {
 		t.Errorf("expected response is `my name is unitest`,  got: %s", step.OutputData)
+	}
+}
+
+func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
+	// Create test server
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("expected POST request, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		body, _ := io.ReadAll(r.Body)
+		w.Write([]byte(body))
+	}))
+	defer ts.Close()
+
+	originalUrl := ts.URL + "?name={{myNode.data.name}}"
+	originalBody := "my name is {{myNode.data.name}}"
+	originalHeaders := map[string]string{
+		"Content-type": "application/x-www-form-urlencoded",
+		"X-Name":      "{{myNode.data.name}}",
+	}
+
+	node := &avsproto.RestAPINode{
+		Url:     originalUrl,
+		Headers: originalHeaders,
+		Body:    originalBody,
+		Method:  "POST",
+	}
+
+	nodes := []*avsproto.TaskNode{
+		&avsproto.TaskNode{
+			Id:   "123abc",
+			Name: "restApi",
+			TaskType: &avsproto.TaskNode_RestApi{
+				RestApi: node,
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+	edges := []*avsproto.TaskEdge{
+		&avsproto.TaskEdge{
+			Id:     "e1",
+			Source: trigger.Id,
+			Target: "123abc",
+		},
+	}
+
+	vm, err := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "123abc",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
+	// First execution with first value
+	vm.AddVar("myNode", map[string]map[string]string{
+		"data": map[string]string{
+			"name": "first",
+		},
+	})
+
+	n := NewRestProrcessor(vm)
+	step, err := n.Execute("123abc", node)
+
+	if err != nil {
+		t.Errorf("expected rest node run successful but got error: %v", err)
+	}
+	if !step.Success {
+		t.Errorf("expected rest node run successfully but failed")
+	}
+	if step.OutputData != "my name is first" {
+		t.Errorf("expected response is `my name is first`, got: %s", step.OutputData)
+	}
+
+	// Second execution with different value
+	vm.AddVar("myNode", map[string]map[string]string{
+		"data": map[string]string{
+			"name": "second",
+		},
+	})
+
+	step, err = n.Execute("123abc", node)
+
+	if err != nil {
+		t.Errorf("expected rest node run successful but got error: %v", err)
+	}
+	if !step.Success {
+		t.Errorf("expected rest node run successfully but failed")
+	}
+	if step.OutputData != "my name is second" {
+		t.Errorf("expected response is `my name is second`, got: %s", step.OutputData)
+	}
+
+	// Verify original node values remain unchanged
+	if node.Url != originalUrl {
+		t.Errorf("URL was modified. Expected %s, got %s", originalUrl, node.Url)
+	}
+	if node.Body != originalBody {
+		t.Errorf("Body was modified. Expected %s, got %s", originalBody, node.Body)
+	}
+	if !reflect.DeepEqual(node.Headers, originalHeaders) {
+		t.Errorf("Headers were modified. Expected %v, got %v", originalHeaders, node.Headers)
 	}
 }

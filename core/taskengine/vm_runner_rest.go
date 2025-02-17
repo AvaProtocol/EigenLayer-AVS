@@ -49,7 +49,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		StartAt:    t0,
 	}
 
-	// Clone the restapi node to 
+	// Clone the restapi node to avoid modifying the pointer memory
 	processedNode := &avsproto.RestAPINode{
 		Url:     node.Url,
 		Method:  node.Method,
