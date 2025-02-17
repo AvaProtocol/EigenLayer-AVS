@@ -18,7 +18,8 @@ jobs:
           - pkg/timekeeper
           - pkg/graphql
           - pkg/byte4
-          - pkg/erc4337/preset
+          # Temp disable until we fix the sepolia bundler
+          # - pkg/erc4337/preset
 
     steps:
       - uses: actions/checkout@v4
