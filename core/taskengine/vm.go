@@ -196,7 +196,7 @@ func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, 
 			parseTransfer, err := ef.ParseTransfer(*event)
 			formattedValue := ToDecimal(parseTransfer.Value, int(tokenMetadata.Decimals)).String()
 
-			v.vars[triggerVarName]["data"] = map[string]interface{}{
+			v.vars[triggerVarName].(map[string]any)["data"] = map[string]any{
 				"topics": lo.Map(event.Topics, func(topic common.Hash, _ int) string {
 					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
 				}),
@@ -218,11 +218,11 @@ func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, 
 		}
 
 		if triggerMetadata.BlockNumber > 0 {
-			v.vars[triggerVarName]["data"]["block_number"] = triggerMetadata.BlockNumber
+			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["block_number"] = triggerMetadata.BlockNumber
 		}
 
 		if triggerMetadata.Epoch > 0 {
-			v.vars[triggerVarName]["data"]["epoch"] = triggerMetadata.Epoch
+			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["epoch"] = triggerMetadata.Epoch
 		}
 	}
 
