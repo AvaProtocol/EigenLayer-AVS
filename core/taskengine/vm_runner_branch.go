@@ -21,6 +21,21 @@ func NewBranchProcessor(vm *VM) *BranchProcessor {
 	}
 }
 
+func (r *BranchProcessor) Validate(node *avsproto.BranchNode) error {
+	if node == nil {
+		return fmt.Errorf("invalid node data")
+	}
+	if len(node.Conditions) == 0 {
+		return fmt.Errorf("there is no condition to evaluate")
+	}
+
+	if node.Conditions[0].Type != "if" {
+		return fmt.Errorf("the first condition need to be an if but got :%s", node.Conditions[0].Type)
+	}
+
+	return nil
+}
+
 func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*avsproto.Execution_Step, error) {
 	t0 := time.Now()
 	s := &avsproto.Execution_Step{
@@ -46,6 +61,10 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		jsvm.Set(key, value)
 	}
 
+	if err := r.Validate(node); err != nil {
+		return nil, err
+	}
+
 	for _, statement := range node.Conditions {
 		if strings.EqualFold(statement.Type, "else") {
 			outcome = fmt.Sprintf("%s.%s", stepID, statement.Id)
@@ -61,31 +80,40 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		sb.WriteString(fmt.Sprintf("\n%s evaluate condition: %s expression: `%s`", time.Now(), statement.Id, statement.Expression))
 
 		// Evaluate the condition using goja, notice how we wrap into a function to prevent the value is leak across goja run
-		script := fmt.Sprintf(`(() => %s )()`, strings.Trim(statement.Expression, "\n \t"))
+		expression := strings.Trim(statement.Expression, "\n \t")
 
-		result, err := jsvm.RunString(script)
-		if err != nil {
-			s.Success = false
-			s.Error = fmt.Errorf("error evaluating the statement: %w", err).Error()
-			sb.WriteString("error evaluating expression")
-			s.Log = sb.String()
-			s.EndAt = time.Now().Unix()
-			return s, fmt.Errorf("error evaluating the statement: %w", err)
-		}
+		var branchResult bool
 
-		branchResult, ok := result.Export().(bool)
-		if !ok {
-			s.Success = false
-			s.Error = fmt.Errorf("error evaluating the statement: %w", err).Error()
-			sb.WriteString("error evaluating expression")
-			s.Log = sb.String()
-			s.EndAt = time.Now().Unix()
-			return s, fmt.Errorf("error evaluating the statement: %w", err)
+		if expression == "" {
+			branchResult = false
+		} else {
+			script := fmt.Sprintf(`(() => %s )()`, expression)
+			result, err := jsvm.RunString(script)
+
+			if err != nil {
+				s.Success = false
+				s.Error = fmt.Errorf("error evaluating the statement: %w", err).Error()
+				sb.WriteString("error evaluating expression")
+				s.Log = sb.String()
+				s.EndAt = time.Now().Unix()
+				return s, fmt.Errorf("error evaluating the statement: %w", err)
+			}
+
+			var ok bool
+			branchResult, ok = result.Export().(bool)
+			if !ok {
+				s.Success = false
+				s.Error = fmt.Errorf("error evaluating the statement: %w", err).Error()
+				sb.WriteString("error evaluating expression")
+				s.Log = sb.String()
+				s.EndAt = time.Now().Unix()
+				return s, fmt.Errorf("error evaluating the statement: %w", err)
+			}
 		}
 
 		if branchResult {
 			outcome = fmt.Sprintf("%s.%s", stepID, statement.Id)
-			sb.WriteString("\nexpression result to true. follow path ")
+			sb.WriteString("\nexpression resolves to true, follow path")
 			sb.WriteString(outcome)
 			s.Log = sb.String()
 			s.OutputData = outcome

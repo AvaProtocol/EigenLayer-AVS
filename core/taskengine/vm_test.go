@@ -359,8 +359,6 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	if len(vm.ExecutionLogs) != 2 {
 		t.Errorf("incorrect log, expect 2 got %d", len(vm.ExecutionLogs))
 	}
-	pp.Print(vm.ExecutionLogs[0])
-	pp.Print(vm.ExecutionLogs[1])
 	if !strings.Contains(vm.ExecutionLogs[1].OutputData, `notification2`) {
 		t.Errorf("expect executing notification1 step but not it didn't run")
 	}

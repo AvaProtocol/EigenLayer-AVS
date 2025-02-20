@@ -88,6 +88,7 @@ func NewVM() *VM {
 		mu:               &sync.Mutex{},
 		instructionCount: 0,
 		secrets:          map[string]string{},
+		vars:             macros.GetEnvs(map[string]any{}),
 	}
 
 	return v
