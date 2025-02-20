@@ -15,6 +15,7 @@ jobs:
           - aggregator
           - core/taskengine
           - core/taskengine/trigger
+          - core/taskengine/macros
           - pkg/timekeeper
           - pkg/graphql
           - pkg/byte4
