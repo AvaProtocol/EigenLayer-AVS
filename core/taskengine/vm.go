@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/dop251/goja"
@@ -334,25 +333,7 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 	if nodeValue := node.GetRestApi(); nodeValue != nil {
 		executionLog, err = v.runRestApi(node.Id, nodeValue)
 	} else if nodeValue := node.GetBranch(); nodeValue != nil {
-		outcomeID := ""
-		executionLog, outcomeID, err = v.runBranch(node.Id, nodeValue)
-		v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
-		if err == nil && outcomeID != "" {
-			outcome, ok := v.plans[outcomeID]
-			if !ok {
-				return nil, fmt.Errorf("branch resolved to node %s but not found in node list", outcomeID)
-			}
-			outcomeNodes := outcome.Next
-			if len(outcomeNodes) >= 0 {
-				for _, nodeID := range outcomeNodes {
-					// TODO: track stack too deepth and abort
-					node := v.TaskNodes[nodeID]
-					if executionLog, err = v.executeNode(node); err != nil {
-						return executionLog, err
-					}
-				}
-			}
-		}
+		executionLog, err = v.runBranch(node.Id, nodeValue)
 	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
 		executionLog, err = v.runGraphQL(node.Id, nodeValue)
 	} else if nodeValue := node.GetCustomCode(); nodeValue != nil {
@@ -444,83 +425,32 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 	return executionLog, nil
 }
 
-func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Execution_Step, string, error) {
-	t0 := time.Now()
-	s := &avsproto.Execution_Step{
-		NodeId:     stepID,
-		OutputData: "",
-		Log:        "",
-		Error:      "",
-		Success:    true,
-		StartAt:    t0.Unix(),
-	}
+func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Execution_Step, error) {
+	processor := NewBranchProcessor(v)
 
-	var sb strings.Builder
-	sb.WriteString("Execute Branch: ")
-	sb.WriteString(stepID)
-	outcome := ""
+	executionLog, err := processor.Execute(stepID, node)
+	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
-	// Initialize goja runtime
-	jsvm := goja.New()
-
-	// Set variables in the JS environment. The value is wrapped into a data, follow a similar approach by other nocode provider
-	// even though we arent necessarily need to do this
-	for key, value := range v.vars {
-		jsvm.Set(key, value)
-	}
-
-	for _, statement := range node.Conditions {
-		if strings.EqualFold(statement.Type, "else") {
-			outcome = fmt.Sprintf("%s.%s", stepID, statement.Id)
-			sb.WriteString("\n")
-			sb.WriteString(time.Now().String())
-			sb.WriteString("evaluate else, follow else path")
-			sb.WriteString(outcome)
-			s.Log = sb.String()
-			s.OutputData = outcome
-			return s, outcome, nil
-		}
-
-		sb.WriteString(fmt.Sprintf("\n%s evaluate condition: %s expression: `%s`", time.Now(), statement.Id, statement.Expression))
-
-		// Evaluate the condition using goja, notice how we wrap into a function to prevent the value is leak across goja run
-		script := fmt.Sprintf(`(() => %s )()`, strings.Trim(statement.Expression, "\n \t"))
-
-		result, err := jsvm.RunString(script)
-		if err != nil {
-			s.Success = false
-			s.Error = fmt.Errorf("error evaluating the statement: %w", err).Error()
-			sb.WriteString("error evaluating expression")
-			s.Log = sb.String()
-			s.EndAt = time.Now().Unix()
-			return s, outcome, fmt.Errorf("error evaluating the statement: %w", err)
-		}
-
-		branchResult, ok := result.Export().(bool)
+	// In branch node we first need to evaluate the condtion to find the outcome, after find the outcome we need to execute that node
+	// the output of a branch node is the node id to jump to
+	if err == nil && executionLog.OutputData != "" {
+		outcome, ok := v.plans[executionLog.OutputData]
 		if !ok {
-			s.Success = false
-			s.Error = fmt.Errorf("error evaluating the statement: %w", err).Error()
-			sb.WriteString("error evaluating expression")
-			s.Log = sb.String()
-			s.EndAt = time.Now().Unix()
-			return s, outcome, fmt.Errorf("error evaluating the statement: %w", err)
+			return nil, fmt.Errorf("branch resolved to node %s but not found in node list", executionLog.OutputData)
 		}
-
-		if branchResult {
-			outcome = fmt.Sprintf("%s.%s", stepID, statement.Id)
-			sb.WriteString("\nexpression result to true. follow path ")
-			sb.WriteString(outcome)
-			s.Log = sb.String()
-			s.OutputData = outcome
-			s.EndAt = time.Now().Unix()
-			return s, outcome, nil
+		outcomeNodes := outcome.Next
+		if len(outcomeNodes) >= 0 {
+			for _, nodeID := range outcomeNodes {
+				// TODO: track stack too deepth and abort
+				node := v.TaskNodes[nodeID]
+				if executionLog, err = v.executeNode(node); err != nil {
+					return executionLog, err
+				}
+			}
 		}
 	}
 
-	sb.WriteString("\nno condition matched. halt execution")
-	s.Log = sb.String()
-	s.EndAt = time.Now().Unix()
-	return s, "", nil
+	return executionLog, err
 }
 
 // preprocessText processes any text within {{ }} using goja JavaScript engine
