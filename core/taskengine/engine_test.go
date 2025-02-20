@@ -241,15 +241,6 @@ func TestListWallets(t *testing.T) {
 	n := New(db, config, nil, testutil.GetLogger())
 	u := testutil.TestUser1()
 
-	wallets, _ := n.GetSmartWallets(u.Address, nil)
-	if len(wallets) > 0 {
-		t.Errorf("expect 0 smartwallets but got %d", len(wallets))
-	}
-
-	n.GetWallet(u, &avsproto.GetWalletReq{
-		Salt: "0",
-	})
-
 	n.GetWallet(u, &avsproto.GetWalletReq{
 		Salt: "12345",
 	})
@@ -259,19 +250,19 @@ func TestListWallets(t *testing.T) {
 		FactoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
 	})
 
-	wallets, _ = n.GetSmartWallets(u.Address, nil)
+	wallets, _ := n.GetSmartWallets(u.Address, nil)
 	if len(wallets) <= 2 {
 		t.Errorf("expect 3 smartwallets but got %d", len(wallets))
 	}
 
-	// This is the wallet from custom factory https://sepolia.etherscan.io/address/0x9406Cc6185a346906296840746125a0E44976454#readProxyContract
-	if wallets[0].Address != "0x29C3139e460d03d951070596eED3218B3cc34FD1" {
-		t.Errorf("invalid smartwallet address, expect 0x923A6A90E422871FC56020d560Bc0D0CF1fbb93e got %s", wallets[1].Address)
+	// The default wallet with salt 0
+	if wallets[0].Address != "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6" {
+		t.Errorf("invalid smartwallet address, expect 0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6 got %s", wallets[0].Address)
 	}
 
-	// The default wallet with salt 0
-	if wallets[1].Address != "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6" {
-		t.Errorf("invalid smartwallet address, expect 0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6 got %s", wallets[0].Address)
+	// This is the wallet from custom factory https://sepolia.etherscan.io/address/0x9406Cc6185a346906296840746125a0E44976454#readProxyContract
+	if wallets[1].Address != "0x29C3139e460d03d951070596eED3218B3cc34FD1" {
+		t.Errorf("invalid smartwallet address, expect 0x923A6A90E422871FC56020d560Bc0D0CF1fbb93e got %s", wallets[1].Address)
 	}
 
 	// the wallet with default factory and salt 12345
@@ -296,8 +287,8 @@ func TestListWallets(t *testing.T) {
 
 	// other user will not be able to list above wallet
 	wallets, _ = n.GetSmartWallets(testutil.TestUser2().Address, nil)
-	if len(wallets) != 0 {
-		t.Errorf("expect no wallet but got %d", len(wallets))
+	if len(wallets) != 1 {
+		t.Errorf("expect only default wallet but got %d", len(wallets))
 	}
 }
 
