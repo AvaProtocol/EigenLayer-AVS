@@ -182,7 +182,12 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 			return false, err
 		}
 
-		return result.Export().(bool), err
+		evalutationResult, ok := result.Export().(bool)
+		if !ok {
+			return false, fmt.Errorf("the expression `%s` didn't return a boolean but %v", check.Program, result.Export())
+		}
+
+		return evalutationResult, err
 
 	}
 
@@ -220,6 +225,6 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 		}), err
 	}
 
-	err = fmt.Errorf("invalid check data: both matcher or trigger is missing")
+	err = fmt.Errorf("invalid event trigger check: both matcher or expression are missing or empty")
 	return false, err
 }
