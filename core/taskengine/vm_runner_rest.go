@@ -104,8 +104,6 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		resp, err = request.Get(processedNode.Url)
 	}
 
-	fmt.Println("post to url", processedNode.Url, "with body", processedNode.Body)
-
 	u, err := url.Parse(processedNode.Url)
 	if err != nil {
 		s.Error = fmt.Sprintf("cannot parse url: %s", processedNode.Url)

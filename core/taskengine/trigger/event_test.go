@@ -305,3 +305,102 @@ func TestTriggerWithContractReadBindingInExpression(t *testing.T) {
 		t.Errorf("expect expression to be false, but got true: error: %v", err)
 	}
 }
+
+// Fix issue: https://github.com/AvaProtocol/EigenLayer-AVS/issues/149
+// operator crash on: received new event trigger	{"id": "01JMBH85WVK1ZNMHBA9JWN45Y4", "type": "name:\"eventTrigger\" event:{expression:\"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef&&0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788\"} id:\"01JMBH7G6BCAKRBKRYN55ETX6M\""
+// The expression in event required a statement that strictly result to true. there were a crash when blindly convert to true. This test ensure our program won't crash and that will
+// Before this test and its implementation the program crash
+// panic: interface conversion: interface {} is float64, not bool [recovered]
+//
+//	panic: interface conversion: interface {} is float64, not bool
+//
+// goroutine 67 [running]:
+// testing.tRunner.func1.2({0x103aa1b20, 0x1400003de30})
+//
+//	/usr/local/go/src/testing/testing.go:1632 +0x1bc
+//
+// testing.tRunner.func1()
+//
+//	/usr/local/go/src/testing/testing.go:1635 +0x334
+//
+// panic({0x103aa1b20?, 0x1400003de30?})
+//
+//	/usr/local/go/src/runtime/panic.go:785 +0x124
+//
+// github.com/AvaProtocol/ap-avs/core/taskengine/trigger.(*EventTrigger).Evaluate(0x140000ba3e0?, 0x140004f1600, 0x140001e9f18)
+//
+//	/Users/vinh/Sites/oak/eigenlayer/EigenLayer-AVS/core/taskengine/trigger/event.go:185 +0x704
+//
+// github.com/AvaProtocol/ap-avs/core/taskengine/trigger.TestTriggerEventExpressionWontCrashOnInvalidInput(0x140004e6b60)
+//
+//	/Users/vinh/Sites/oak/eigenlayer/EigenLayer-AVS/core/taskengine/trigger/event_test.go:330 +0x1b0
+//
+// testing.tRunner(0x140004e6b60, 0x103bd8e70)
+//
+//	/usr/local/go/src/testing/testing.go:1690 +0xe4
+//
+// created by testing.(*T).Run in goroutine 1
+//
+//	/usr/local/go/src/testing/testing.go:1743 +0x314
+//
+// exit status 2
+// FAIL	github.com/AvaProtocol/ap-avs/core/taskengine/trigger	3.929s
+func TestTriggerEventExpressionWontCrashOnInvalidInput(t *testing.T) {
+	tests := []struct {
+		name          string
+		expression    string
+		expectedError string
+	}{
+		{
+			name:          "Invalid Hex String",
+			expression:    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+			expectedError: "the expression `0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef` didn't return a boolean but 1.0038928713678618e+77",
+		},
+		{
+			name:          "Invalid Numeric String",
+			expression:    "123",
+			expectedError: "the expression `123` didn't return a boolean but 123",
+		},
+		{
+			name:          "invalid javascript expression",
+			expression:    "**P{P%^&*()_}{$%}",
+			expectedError: "SyntaxError: SyntaxError: (anonymous): Line 1:1 Unexpected token **",
+		},
+		{
+			name:          "blank expression",
+			expression:    "",
+			expectedError: "invalid event trigger check: both matcher or expression are missing or empty",
+		},
+		{
+			name:          "space only expression",
+			expression:    "    ",
+			expectedError: "the expression `    ` didn't return a boolean but <nil>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event, err := testutil.GetEventForTx("0x4bb728dfbe58d7c641c02a214cac6156a0d6a0fe648cb27a7de229a3160e91b1", 145)
+			if err != nil {
+				t.Fatalf("failed to get event: %v", err)
+			}
+
+			eventTrigger := NewEventTrigger(&RpcOption{
+				RpcURL:   testutil.GetTestRPCURL(),
+				WsRpcURL: testutil.GetTestRPCURL(),
+			}, make(chan TriggerMetadata[EventMark], 1000))
+
+			result, err := eventTrigger.Evaluate(event, &Check{
+				Program: tt.expression,
+			})
+
+			if result {
+				t.Errorf("expected the evaluation to return false but got true")
+			}
+
+			if err == nil || err.Error() != tt.expectedError {
+				t.Errorf("expected error: %s, got: %v", tt.expectedError, err)
+			}
+		})
+	}
+}
