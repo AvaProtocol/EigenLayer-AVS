@@ -250,8 +250,6 @@ message Execution {
   string error   = 5;
 
   TriggerMetadata trigger_metadata = 6;
-  // final return data of the whole execution of the task
-  string result = 7;
 
   message Step {
     string node_id = 1;
