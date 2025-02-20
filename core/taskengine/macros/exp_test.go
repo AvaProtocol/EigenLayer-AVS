@@ -2,12 +2,10 @@ package macros
 
 import (
 	"testing"
-
-	"github.com/AvaProtocol/ap-avs/core/testutil"
 )
 
 func TestChainlinkLatestAnswer(t *testing.T) {
-	SetRpc(testutil.GetTestRPCURL())
+	SetRpc("https://sepolia.drpc.org")
 
 	// https://sepolia.etherscan.io/address/0x9aCb42Ac07C72cFc29Cd95d9DEaC807E93ada1F6#code
 	value := chainlinkLatestAnswer("0x694AA1769357215DE4FAC081bf1f309aDC325306")
