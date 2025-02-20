@@ -38,9 +38,9 @@ The first transaction require siginficant higher gas to pay for contract deploym
 
 This is a few sample tx that also deploy the smart wallet together with the gas cost to get an idea of pre-fund.
 
-| Network      | Transaction Link                                                                 | Gas Cost |
+| Network      | Transaction Link                                                                 | Suggest Prefund(ETH) |
 |--------------|----------------------------------------------------------------------------------|----------|
 | Mainnet      | TBD                                                                              | 0.001    |
+| Sepolia      | [View Transaction](https://sepolia.etherscan.io/tx/0xee325c48e6a6a35b91642b2483acd860255283aded8cb949a9594a8ab19c7f69) | 0.4   |
 | Base         | TBD                                                                              | 0.001    |
-| Sepolia      | [View Transaction](https://sepolia.etherscan.io/tx/0xee325c48e6a6a35b91642b2483acd860255283aded8cb949a9594a8ab19c7f69) | 0.001    |
-| Base Sepolia | [View Transaction](https://sepolia.basescan.org/tx/0x946e7b6e48fd1421d17263e9b89e329e264cb37de511077844e925f414be8851) | 0.001    |
+| Base Sepolia | [View Transaction](https://sepolia.basescan.org/tx/0x946e7b6e48fd1421d17263e9b89e329e264cb37de511077844e925f414be8851) | 0.00005    |
