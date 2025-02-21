@@ -319,6 +319,37 @@ func (r *RpcServer) DeleteSecret(ctx context.Context, payload *avsproto.DeleteSe
 
 }
 
+// GetWorkflowCount handles the RPC request to get the workflow count
+func (r *RpcServer) GetWorkflowCount(ctx context.Context, req *avsproto.GetWorkflowCountReq) (*avsproto.GetWorkflowCountResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process workflow count",
+		"user", user.Address.String(),
+		"smart_wallet_address", req.Addresses,
+	)
+
+	return r.engine.GetWorkflowCount(user, req)
+}
+
+// GetExecutionCount handles the RPC request to get the execution count
+func (r *RpcServer) GetExecutionCount(ctx context.Context, req *avsproto.GetExecutionCountReq) (*avsproto.GetExecutionCountResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process execution count",
+		"user", user.Address.String(),
+		"workflow_ids", req.WorkflowIds,
+	)
+
+	return r.engine.GetExecutionCount(user, req)
+}
+
+
 // Operator action
 func (r *RpcServer) SyncMessages(payload *avsproto.SyncMessagesReq, srv avsproto.Node_SyncMessagesServer) error {
 	err := r.engine.StreamCheckToOperator(payload, srv)

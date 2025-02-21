@@ -75,7 +75,8 @@ func TestMustDB() storage.Storage {
 	if err != nil {
 		panic(err)
 	}
-	//dir = "/tmp/ap-avs"
+
+	//dir = "/tmp/ap-avs/test"
 	db, err := storage.NewWithPath(dir)
 	if err != nil {
 		panic(err)
@@ -186,6 +187,38 @@ func RestTask() *avsproto.CreateTaskReq {
 		Id:     "edge1",
 		Source: "triggerabcde",
 		Target: "ping1",
+	}
+	tr1 := avsproto.CreateTaskReq{
+		Trigger: &avsproto.TaskTrigger{
+			Id:   "triggerabcde",
+			Name: "block",
+			TriggerType: &avsproto.TaskTrigger_Block{
+				Block: &avsproto.BlockCondition{
+					Interval: 5,
+				},
+			},
+		},
+		MaxExecution: 1000,
+		Nodes:        []*avsproto.TaskNode{node},
+		Edges:        []*avsproto.TaskEdge{edge},
+	}
+	return &tr1
+}
+
+func JsFastTask() *avsproto.CreateTaskReq {
+	node := &avsproto.TaskNode{
+		Id:   "jsfast1",
+		Name: "jsfast",
+		TaskType: &avsproto.TaskNode_CustomCode{
+			CustomCode: &avsproto.CustomCodeNode{
+				Source: "return 100",
+			},
+		},
+	}
+	edge := &avsproto.TaskEdge{
+		Id:     "edge1",
+		Source: "triggerabcde",
+		Target: "jsfast1",
 	}
 	tr1 := avsproto.CreateTaskReq{
 		Trigger: &avsproto.TaskTrigger{

@@ -116,7 +116,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	// If it rached the end, flag the task completed as well
-	if t1.Unix() >= task.ExpiredAt {
+	if task.ExpiredAt > 0 && t1.Unix() >= task.ExpiredAt {
 		task.SetCompleted()
 	}
 

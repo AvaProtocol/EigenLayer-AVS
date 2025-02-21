@@ -50,6 +50,18 @@ type AggregatorClient interface {
 	// For simplicity, currently only the user who create the secrets can update its value, or update its permission.
 	// The current implementation is also limited, update is an override action, not an appending action. So when updating, you need to pass the whole payload
 	UpdateSecret(ctx context.Context, in *CreateOrUpdateSecretReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
+	// The spec of these 2 RPCs are based on the following issue:
+	// Reference: https://github.com/AvaProtocol/EigenLayer-AVS/issues/150
+	// GetWorkflowCount returns the total count of workflows for the given eoa addresses or a list of smart wallet addresses belongs to the eoa in the auth key
+	// When passing a list of smart wallet addresses, we will return the total count of workflows belongs to all of them
+	// If the smart wallet address is not found in our system, we will ignore it and not count towards the total
+	// if smart wallet address doesn't belong to the eoa in the auth key, we will also ignore it and not count towards the total
+	GetWorkflowCount(ctx context.Context, in *GetWorkflowCountReq, opts ...grpc.CallOption) (*GetWorkflowCountResp, error)
+	// GetExecutionCount returns the total number of executions for specified workflow IDs or all workflows linked to the EOA in the auth key.
+	// If no workflow IDs are provided, it counts executions for all workflows of the EOA.
+	// Workflow IDs not found in the system are ignored.
+	// Workflow IDs not linked to the EOA in the auth key are also ignored.
+	GetExecutionCount(ctx context.Context, in *GetExecutionCountReq, opts ...grpc.CallOption) (*GetExecutionCountResp, error)
 }
 
 type aggregatorClient struct {
@@ -213,6 +225,24 @@ func (c *aggregatorClient) UpdateSecret(ctx context.Context, in *CreateOrUpdateS
 	return out, nil
 }
 
+func (c *aggregatorClient) GetWorkflowCount(ctx context.Context, in *GetWorkflowCountReq, opts ...grpc.CallOption) (*GetWorkflowCountResp, error) {
+	out := new(GetWorkflowCountResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/GetWorkflowCount", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aggregatorClient) GetExecutionCount(ctx context.Context, in *GetExecutionCountReq, opts ...grpc.CallOption) (*GetExecutionCountResp, error) {
+	out := new(GetExecutionCountResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/GetExecutionCount", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AggregatorServer is the server API for Aggregator service.
 // All implementations must embed UnimplementedAggregatorServer
 // for forward compatibility
@@ -244,6 +274,18 @@ type AggregatorServer interface {
 	// For simplicity, currently only the user who create the secrets can update its value, or update its permission.
 	// The current implementation is also limited, update is an override action, not an appending action. So when updating, you need to pass the whole payload
 	UpdateSecret(context.Context, *CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error)
+	// The spec of these 2 RPCs are based on the following issue:
+	// Reference: https://github.com/AvaProtocol/EigenLayer-AVS/issues/150
+	// GetWorkflowCount returns the total count of workflows for the given eoa addresses or a list of smart wallet addresses belongs to the eoa in the auth key
+	// When passing a list of smart wallet addresses, we will return the total count of workflows belongs to all of them
+	// If the smart wallet address is not found in our system, we will ignore it and not count towards the total
+	// if smart wallet address doesn't belong to the eoa in the auth key, we will also ignore it and not count towards the total
+	GetWorkflowCount(context.Context, *GetWorkflowCountReq) (*GetWorkflowCountResp, error)
+	// GetExecutionCount returns the total number of executions for specified workflow IDs or all workflows linked to the EOA in the auth key.
+	// If no workflow IDs are provided, it counts executions for all workflows of the EOA.
+	// Workflow IDs not found in the system are ignored.
+	// Workflow IDs not linked to the EOA in the auth key are also ignored.
+	GetExecutionCount(context.Context, *GetExecutionCountReq) (*GetExecutionCountResp, error)
 	mustEmbedUnimplementedAggregatorServer()
 }
 
@@ -301,6 +343,12 @@ func (UnimplementedAggregatorServer) ListSecrets(context.Context, *ListSecretsRe
 }
 func (UnimplementedAggregatorServer) UpdateSecret(context.Context, *CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateSecret not implemented")
+}
+func (UnimplementedAggregatorServer) GetWorkflowCount(context.Context, *GetWorkflowCountReq) (*GetWorkflowCountResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetWorkflowCount not implemented")
+}
+func (UnimplementedAggregatorServer) GetExecutionCount(context.Context, *GetExecutionCountReq) (*GetExecutionCountResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetExecutionCount not implemented")
 }
 func (UnimplementedAggregatorServer) mustEmbedUnimplementedAggregatorServer() {}
 
@@ -621,6 +669,42 @@ func _Aggregator_UpdateSecret_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Aggregator_GetWorkflowCount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetWorkflowCountReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).GetWorkflowCount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregator/GetWorkflowCount",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).GetWorkflowCount(ctx, req.(*GetWorkflowCountReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Aggregator_GetExecutionCount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetExecutionCountReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).GetExecutionCount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregator/GetExecutionCount",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).GetExecutionCount(ctx, req.(*GetExecutionCountReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Aggregator_ServiceDesc is the grpc.ServiceDesc for Aggregator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -695,6 +779,14 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateSecret",
 			Handler:    _Aggregator_UpdateSecret_Handler,
+		},
+		{
+			MethodName: "GetWorkflowCount",
+			Handler:    _Aggregator_GetWorkflowCount_Handler,
+		},
+		{
+			MethodName: "GetExecutionCount",
+			Handler:    _Aggregator_GetExecutionCount_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

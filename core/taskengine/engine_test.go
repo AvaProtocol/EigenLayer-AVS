@@ -789,7 +789,7 @@ func TestListSecrets(t *testing.T) {
 
 func TestGetWalletReturnTaskStat(t *testing.T) {
 	db := testutil.TestMustDB()
-	defer storage.Destroy(db.(*storage.BadgerStorage))
+	//defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
@@ -809,7 +809,7 @@ func TestGetWalletReturnTaskStat(t *testing.T) {
 		t.Errorf("expect no task count yet but got :%d", result.TotalTaskCount)
 	}
 
-	taskResult, _ := n.CreateTask(testutil.TestUser1(), tr1)
+	taskResult, _ := n.CreateTask(user1, tr1)
 	result, _ = n.GetWallet(user1, &avsproto.GetWalletReq{
 		Salt: "0",
 	})
@@ -819,7 +819,7 @@ func TestGetWalletReturnTaskStat(t *testing.T) {
 	}
 
 	// Make the task run to simulate completed count
-	n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
+	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 		TaskId: taskResult.Id,
 		Reason: &avsproto.TriggerReason{
 			BlockNumber: 101,
@@ -831,7 +831,287 @@ func TestGetWalletReturnTaskStat(t *testing.T) {
 		Salt: "0",
 	})
 
-	if result.TotalTaskCount != 1 || result.ActiveTaskCount != 0 || result.CompletedTaskCount != 1 {
+	if result.TotalTaskCount != 1 || result.ActiveTaskCount != 1 || result.CompletedTaskCount != 0 {
 		t.Errorf("expect total=1 active=0 completed=1 but got %v", result)
+	}
+
+	tr2 := testutil.JsFastTask()
+	tr2.MaxExecution = 1
+	task2, _ := n.CreateTask(user1, tr2)
+	result, _ = n.GetWallet(user1, &avsproto.GetWalletReq{
+		Salt: "0",
+	})
+
+	if result.TotalTaskCount != 2 || result.ActiveTaskCount != 2 || result.CompletedTaskCount != 0 {
+		t.Errorf("expect total=2 active=0 completed=2 but got %v", result)
+	}
+
+	// Make the task run to simulate completed count
+	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
+		TaskId: task2.Id,
+		Reason: &avsproto.TriggerReason{
+			BlockNumber: 101,
+		},
+		IsBlocking: true,
+	})
+
+	result, _ = n.GetWallet(user1, &avsproto.GetWalletReq{
+		Salt: "0",
+	})
+
+	if result.TotalTaskCount != 2 || result.ActiveTaskCount != 1 || result.CompletedTaskCount != 1 {
+		t.Errorf("expect total=2 active=1 completed=1 but got %v", result)
+	}
+}
+
+func TestGetWorkflowCount(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user1 := testutil.TestUser1()
+	user2 := testutil.TestUser2()
+
+	user1ExtraSmartWallet, _ := n.GetWallet(user1, &avsproto.GetWalletReq{
+		Salt: "123",
+	})
+
+	// Create tasks for user1
+	task1 := testutil.RestTask()
+	task1.Name = "task1"
+	// default wallet
+	task1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	n.CreateTask(user1, task1)
+
+	task2 := testutil.RestTask()
+	task2.Name = "task2"
+	task2.SmartWalletAddress = user1ExtraSmartWallet.Address
+	n.CreateTask(user1, task2)
+
+	// Create a task for user2
+	task3 := testutil.RestTask()
+	task3.Name = "task3"
+	// default wallet for user2
+	task3.SmartWalletAddress = "0xBdCcA49575918De45bb32f5ba75388e7c3fBB5e4"
+	n.CreateTask(user2, task3)
+
+	// Test task count for user1
+	result, err := n.GetWorkflowCount(user1, &avsproto.GetWorkflowCountReq{})
+	if err != nil {
+		t.Errorf("expected to get task count successfully but got error: %s", err)
+	}
+	if result.Total != 2 {
+		t.Errorf("expected task count 2 for user1 but got %d", result.Total)
+	}
+
+	// Test task count for user2
+	result, err = n.GetWorkflowCount(user2, &avsproto.GetWorkflowCountReq{})
+	if err != nil {
+		t.Errorf("expected to get task count successfully but got error: %s", err)
+	}
+	if result.Total != 1 {
+		t.Errorf("expected task count 1 for user2 but got %d", result.Total)
+	}
+
+	// Create extra tasks for a smart wallet
+	task4 := testutil.RestTask()
+	task4.Name = "walletTask1"
+	task4.SmartWalletAddress = user1ExtraSmartWallet.Address
+	n.CreateTask(user1, task4)
+
+	task5 := testutil.RestTask()
+	task5.Name = "walletTask2"
+	task5.SmartWalletAddress = user1ExtraSmartWallet.Address
+	n.CreateTask(user1, task5)
+
+	// Test task count for the smart wallet
+	result, err = n.GetWorkflowCount(user1, &avsproto.GetWorkflowCountReq{
+		Addresses: []string{"0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"},
+	})
+	if result.Total != 1 {
+		t.Errorf("expected task count 2 for smart wallet but got %d", result.Total)
+	}
+
+	// Test task count for the smart wallet
+	result, err = n.GetWorkflowCount(user1, &avsproto.GetWorkflowCountReq{
+		Addresses: []string{user1ExtraSmartWallet.Address},
+	})
+	if result.Total != 3 {
+		t.Errorf("expected task count 3 for smart wallet but got %d", result.Total)
+	}
+
+	// Count other user smart wallet return 0
+	result, err = n.GetWorkflowCount(user1, &avsproto.GetWorkflowCountReq{
+		Addresses: []string{"0xBdCcA49575918De45bb32f5ba75388e7c3fBB5e4"},
+	})
+	if result.Total != 0 {
+		t.Errorf("expected task count 0 for smart wallet but got %d", result.Total)
+	}
+
+	// Count other user smart wallet return 0
+	result, err = n.GetWorkflowCount(user2, &avsproto.GetWorkflowCountReq{
+		Addresses: []string{"0xBdCcA49575918De45bb32f5ba75388e7c3fBB5e4"},
+	})
+	if result.Total != 1 {
+		t.Errorf("expected task count 1 for smart wallet but got %d", result.Total)
+	}
+}
+
+func TestGetExecutionCount(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	// create 2 users to ensure task counting is done per user
+	user1 := testutil.TestUser1()
+	user2 := testutil.TestUser2()
+
+	// create 2 tasks for user1, we will trigger them independently to test execution count per task
+	tr1 := testutil.JsFastTask()
+	tr1.Name = "t1"
+	// salt 0 wallet
+	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	task1, _ := n.CreateTask(user1, tr1)
+
+	tr2 := testutil.JsFastTask()
+	tr2.Name = "t2"
+	// salt 0 wallet
+	tr2.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	task2, _ := n.CreateTask(user1, tr2)
+
+	tr3 := testutil.JsFastTask()
+	tr3.Name = "t1"
+	// salt 0 wallet
+	tr3.SmartWalletAddress = "0xBdCcA49575918De45bb32f5ba75388e7c3fBB5e4"
+	task3, _ := n.CreateTask(user2, tr3)
+
+	// initial state everything is 0
+	stat, _ := n.GetExecutionCount(user1, &avsproto.GetExecutionCountReq{})
+	if stat.Total != 0 {
+		t.Errorf("expected execution count 0 for user1 but got %d", stat.Total)
+	}
+	stat, _ = n.GetExecutionCount(user2, &avsproto.GetExecutionCountReq{
+		WorkflowIds: []string{task1.Id},
+	})
+	if stat.Total != 0 {
+		t.Errorf("expected execution count 0 for user2 but got %d", stat.Total)
+	}
+
+	stat, _ = n.GetExecutionCount(user2, &avsproto.GetExecutionCountReq{})
+	if stat.Total != 0 {
+		t.Errorf("expected execution count 0 for user2 but got %d", stat.Total)
+	}
+
+	stat, _ = n.GetExecutionCount(user2, &avsproto.GetExecutionCountReq{
+		WorkflowIds: []string{task2.Id},
+	})
+	if stat.Total != 0 {
+		t.Errorf("expected execution count 0 for user2 but got %d", stat.Total)
+	}
+
+	// trigger task1 and task2
+	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
+		TaskId: task1.Id,
+		Reason: &avsproto.TriggerReason{
+			BlockNumber: 101,
+		},
+		IsBlocking: true,
+	})
+	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
+		TaskId: task2.Id,
+		Reason: &avsproto.TriggerReason{
+			BlockNumber: 101,
+		},
+		IsBlocking: true,
+	})
+
+	// now user1 has 1 execution for task1, user2 continue to have 0
+	stat, _ = n.GetExecutionCount(user1, &avsproto.GetExecutionCountReq{})
+	if stat.Total != 2 {
+		t.Errorf("expected execution count 2 for user1 but got %d", stat.Total)
+	}
+
+	stat, _ = n.GetExecutionCount(user1, &avsproto.GetExecutionCountReq{
+		WorkflowIds: []string{task1.Id},
+	})
+	if stat.Total != 1 {
+		t.Errorf("expected execution count 1 for user1 but got %d", stat.Total)
+	}
+	stat, _ = n.GetExecutionCount(user1, &avsproto.GetExecutionCountReq{
+		WorkflowIds: []string{task2.Id},
+	})
+	if stat.Total != 1 {
+		t.Errorf("expected execution count 1 for user1 but got %d", stat.Total)
+	}
+
+	stat, _ = n.GetExecutionCount(user2, &avsproto.GetExecutionCountReq{})
+	if stat.Total != 0 {
+		t.Errorf("expected execution count 0 for user2 but got %d", stat.Total)
+	}
+
+	// Trigger task1 N more times, ensure only its count is increased
+	for i := 0; i < 10; i++ {
+		n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
+			TaskId: task1.Id,
+			Reason: &avsproto.TriggerReason{
+				BlockNumber: 101,
+			},
+			IsBlocking: true,
+		})
+	}
+
+	stat, _ = n.GetExecutionCount(user1, &avsproto.GetExecutionCountReq{})
+	if stat.Total != 12 {
+		t.Errorf("expected execution count 12 for user1 but got %d", stat.Total)
+	}
+	stat, _ = n.GetExecutionCount(user1, &avsproto.GetExecutionCountReq{
+		WorkflowIds: []string{task1.Id},
+	})
+	if stat.Total != 11 {
+		t.Errorf("expected execution count 11 for user1 but got %d", stat.Total)
+	}
+
+	// trigger user2 task 10 times, ensure only its count is increased and other user's task count is not affected
+	for i := 0; i < 10; i++ {
+		n.TriggerTask(user2, &avsproto.UserTriggerTaskReq{
+			TaskId: task3.Id,
+			Reason: &avsproto.TriggerReason{
+				BlockNumber: 101,
+			},
+			IsBlocking: true,
+		})
+	}
+
+	stat, _ = n.GetExecutionCount(user2, &avsproto.GetExecutionCountReq{})
+	if stat.Total != 10 {
+		t.Errorf("expected execution count 10 for user2 but got %d", stat.Total)
+	}
+	stat, _ = n.GetExecutionCount(user2, &avsproto.GetExecutionCountReq{
+		WorkflowIds: []string{task3.Id},
+	})
+	if stat.Total != 10 {
+		t.Errorf("expected execution count 10 for user2 but got %d", stat.Total)
+	}
+
+	stat, _ = n.GetExecutionCount(user1, &avsproto.GetExecutionCountReq{})
+	if stat.Total != 12 {
+		t.Errorf("expected execution count 12 for user1 but got %d", stat.Total)
+	}
+	stat, _ = n.GetExecutionCount(user1, &avsproto.GetExecutionCountReq{
+		WorkflowIds: []string{task1.Id},
+	})
+	if stat.Total != 11 {
+		t.Errorf("expected execution count 11 for user1/task1 but got %d", stat.Total)
+	}
+
+	stat, _ = n.GetExecutionCount(user1, &avsproto.GetExecutionCountReq{
+		WorkflowIds: []string{task2.Id},
+	})
+	if stat.Total != 1 {
+		t.Errorf("expected execution count 1 for user1/task2 but got %d", stat.Total)
 	}
 }

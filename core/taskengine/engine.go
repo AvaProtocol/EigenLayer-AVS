@@ -810,7 +810,45 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 	return &avsproto.ExecutionStatusResp{
 		Status: avsproto.ExecutionStatus_Finished,
 	}, nil
+}
 
+func (n *Engine) GetExecutionCount(user *model.User, payload *avsproto.GetExecutionCountReq) (*avsproto.GetExecutionCountResp, error) {
+	workflowIds := payload.WorkflowIds
+
+	total := int64(0)
+	var err error
+
+	if len(workflowIds) == 0 {
+		workflowIds = []string{}
+		// count all executions of the owner by finding all their task idds
+		taskIds, err := n.db.GetKeyHasPrefix(UserTaskStoragePrefix(user.Address))
+
+		if err != nil {
+			return nil, grpcstatus.Errorf(codes.Internal, "Internal error counting execution")
+		}
+		for _, id := range taskIds {
+			taskId := TaskIdFromTaskStatusStorageKey(id)
+			workflowIds = append(workflowIds, string(taskId))
+		}
+	}
+
+	prefixes := [][]byte{}
+	for _, id := range workflowIds {
+		if len(id) != 26 {
+			continue
+		}
+		prefixes = append(prefixes, TaskExecutionPrefix(id))
+	}
+	total, err = n.db.CountKeysByPrefixes(prefixes)
+
+	if err != nil {
+		n.logger.Error("error counting execution for", "user", user.Address, "error", err)
+		return nil, grpcstatus.Errorf(codes.Internal, "Internal error counting execution")
+	}
+
+	return &avsproto.GetExecutionCountResp{
+		Total: total,
+	}, nil
 }
 
 func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error) {
@@ -982,4 +1020,42 @@ func (n *Engine) NewSeqID() (string, error) {
 func (n *Engine) CanStreamCheck(address string) bool {
 	// Only enable for our own operator first, once it's stable we will roll out to all
 	return strings.EqualFold(address, "0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d") || strings.EqualFold(address, "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3")
+}
+
+// GetWorkflowCount returns the number of workflows for the given addresses of smart wallets, or if no addresses are provided, it returns the total number of workflows belongs to the requested user
+func (n *Engine) GetWorkflowCount(user *model.User, payload *avsproto.GetWorkflowCountReq) (*avsproto.GetWorkflowCountResp, error) {
+	smartWalletAddresses := payload.Addresses
+
+	total := int64(0)
+	var err error
+
+	// Example logic to count workflows
+	// This should be replaced with actual logic to count workflows based on addresses
+	if len(smartWalletAddresses) == 0 {
+		// Default logic if no addresses are provided we count all tasks belongs to the user
+		total, err = n.db.CountKeysByPrefix(UserTaskStoragePrefix(user.Address))
+	} else {
+		prefixes := [][]byte{}
+
+		for _, address := range smartWalletAddresses {
+			smartWalletAddress := common.HexToAddress(address)
+			if ok, err := ValidWalletOwner(n.db, user, smartWalletAddress); !ok || err != nil {
+				// skip if the address is not a valid smart wallet address or it isn't belong to this user
+				continue
+			}
+
+			prefixes = append(prefixes, SmartWalletTaskStoragePrefix(user.Address, smartWalletAddress))
+		}
+
+		total, err = n.db.CountKeysByPrefixes(prefixes)
+	}
+
+	if err != nil {
+		n.logger.Error("error counting task for", "user", user.Address, "error", err)
+		return nil, grpcstatus.Errorf(codes.Internal, "Internal error counting workflow")
+	}
+
+	return &avsproto.GetWorkflowCountResp{
+		Total: total,
+	}, nil
 }
