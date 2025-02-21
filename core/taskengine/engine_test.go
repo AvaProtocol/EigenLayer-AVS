@@ -789,7 +789,7 @@ func TestListSecrets(t *testing.T) {
 
 func TestGetWalletReturnTaskStat(t *testing.T) {
 	db := testutil.TestMustDB()
-	defer storage.Destroy(db.(*storage.BadgerStorage))
+	//defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
@@ -809,7 +809,7 @@ func TestGetWalletReturnTaskStat(t *testing.T) {
 		t.Errorf("expect no task count yet but got :%d", result.TotalTaskCount)
 	}
 
-	taskResult, _ := n.CreateTask(testutil.TestUser1(), tr1)
+	taskResult, _ := n.CreateTask(user1, tr1)
 	result, _ = n.GetWallet(user1, &avsproto.GetWalletReq{
 		Salt: "0",
 	})
@@ -819,7 +819,7 @@ func TestGetWalletReturnTaskStat(t *testing.T) {
 	}
 
 	// Make the task run to simulate completed count
-	n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
+	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 		TaskId: taskResult.Id,
 		Reason: &avsproto.TriggerReason{
 			BlockNumber: 101,
@@ -831,8 +831,36 @@ func TestGetWalletReturnTaskStat(t *testing.T) {
 		Salt: "0",
 	})
 
-	if result.TotalTaskCount != 1 || result.ActiveTaskCount != 0 || result.CompletedTaskCount != 1 {
+	if result.TotalTaskCount != 1 || result.ActiveTaskCount != 1 || result.CompletedTaskCount != 0 {
 		t.Errorf("expect total=1 active=0 completed=1 but got %v", result)
+	}
+
+	tr2 := testutil.JsFastTask()
+	tr2.MaxExecution = 1
+	task2, _ := n.CreateTask(user1, tr2)
+	result, _ = n.GetWallet(user1, &avsproto.GetWalletReq{
+		Salt: "0",
+	})
+
+	if result.TotalTaskCount != 2 || result.ActiveTaskCount != 2 || result.CompletedTaskCount != 0 {
+		t.Errorf("expect total=2 active=0 completed=2 but got %v", result)
+	}
+
+	// Make the task run to simulate completed count
+	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
+		TaskId: task2.Id,
+		Reason: &avsproto.TriggerReason{
+			BlockNumber: 101,
+		},
+		IsBlocking: true,
+	})
+
+	result, _ = n.GetWallet(user1, &avsproto.GetWalletReq{
+		Salt: "0",
+	})
+
+	if result.TotalTaskCount != 2 || result.ActiveTaskCount != 1 || result.CompletedTaskCount != 1 {
+		t.Errorf("expect total=2 active=1 completed=1 but got %v", result)
 	}
 }
 
@@ -933,7 +961,7 @@ func TestGetWorkflowCount(t *testing.T) {
 
 func TestGetExecutionCount(t *testing.T) {
 	db := testutil.TestMustDB()
-	//defer storage.Destroy(db.(*storage.BadgerStorage))
+	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
