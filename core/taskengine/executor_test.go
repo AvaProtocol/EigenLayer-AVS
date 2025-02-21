@@ -34,9 +34,10 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 				Branch: &avsproto.BranchNode{
 					Conditions: []*avsproto.Condition{
 						&avsproto.Condition{
-							Id:         "a1",
-							Type:       "if",
-							Expression: "Number(triggertest.data.value_formatted) >= 5",
+							Id:   "a1",
+							Type: "if",
+							// The test data is of this transaction https://sepolia.etherscan.io/tx/0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8 which is 3.45 token
+							Expression: "Number(triggertest.data.value_formatted) >= 3",
 						},
 					},
 				},
@@ -95,16 +96,28 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 		t.Errorf("Expect success status but got failure")
 	}
 
-	if execution.Steps[0].OutputData != "" {
-		t.Errorf("output data isn't empty")
+	if execution.Error != "" {
+		t.Errorf("Expect no error but got: %s", execution.Error)
 	}
 
-	if len(execution.Steps) != 1 {
-		t.Errorf("Expect evaluate one step only but got: %d", len(execution.Steps))
+	if len(execution.Steps) != 2 {
+		t.Errorf("Expect evaluate 2 steps only but got: %d", len(execution.Steps))
 	}
 
 	if execution.Steps[0].NodeId != "branch1" {
-		t.Errorf("step id doesn't match, expect branch1 but got: %s", execution.Steps[0].NodeId)
+		t.Errorf("step id doesn't match, expect branch1.a1 but got: %s", execution.Steps[0].NodeId)
+	}
+
+	if execution.Steps[0].OutputData != "branch1.a1" {
+		t.Errorf("expect branch output data is `branch1.a1` but got %s", execution.Steps[0].OutputData)
+	}
+
+	if execution.Steps[1].NodeId != "notification1" {
+		t.Errorf("step id doesn't match, expect notification1 but got: %s", execution.Steps[1].NodeId)
+	}
+
+	if execution.Steps[1].OutputData != "{\"status\": \"success\"}" {
+		t.Errorf("expect branch output data is {\"status\": \"success\"} but got %s", execution.Steps[1].OutputData)
 	}
 }
 
