@@ -45,11 +45,11 @@ func (svc *StatService) GetTaskCount(smartWalletAddress *model.SmartWallet) (*mo
 	return stat, nil
 }
 
-
+// GetTaskCountByOwner returns the total number of tasks for all smart wallets belongs to the owner
 func (svc *StatService) GetTaskCountByOwner(owner common.Address) (int64, error) {
 	stat := &model.SmartWalletTaskStat{}
 
-	prefix := SmartWalletTaskStoragePrefix(*smartWalletAddress.Owner, *smartWalletAddress.Address)
+	prefix := UserTaskStoragePrefix(*owne)
 	items, err := svc.db.GetByPrefix(prefix)
 	if err != nil {
 		return stat, err
