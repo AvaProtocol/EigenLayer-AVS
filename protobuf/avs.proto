@@ -125,8 +125,8 @@ message ContractWriteNode {
   string call_data = 2;
 
   // The ABI is only required to decode the return value of a method call.
-  // If we don’t need the result and only want the transaction hash (which is usually sufficient),
-  // then we don’t need to provide the ABI.
+  // If we don't need the result and only want the transaction hash (which is usually sufficient),
+  // then we don't need to provide the ABI.
   string contract_abi = 3;
 }
 
@@ -136,7 +136,7 @@ message ContractReadNode {
 
   // The ABI are required to decode the return value and pass it to the next step.
   // Currently, we need to provide the contract ABI as a JSON string.
-  // We don’t need to include the full ABI—just enough to decode the method call.
+  // We don't need to include the full ABI—just enough to decode the method call.
   string contract_abi = 3;
 }
 
@@ -249,7 +249,7 @@ message Execution {
   bool   success = 4;
   string error   = 5;
 
-  TriggerMetadata trigger_metadata = 6;
+  TriggerReason reason = 6;
 
   message Step {
     string node_id = 1;
@@ -260,9 +260,82 @@ message Execution {
     string error = 5;
     int64 start_at = 6;
     int64 end_at = 7;
+
+    // Reference ticket: https://github.com/AvaProtocol/EigenLayer-AVS/issues/151
+    
+    repeated string inputs = 8;
   }
 
   repeated Step steps = 8;
+
+  string trigger_name = 9;
+
+  // Despite the name outputData this is actually the data after we enrich based the metadata at the point where the event is trigger.
+  // Example at the time of triggering a transfer event, the only ifformation we had is ERC20 address, the topics, the from/to and amount, the log id and transaction hash
+  // We then query Etherem RPC to find out more information such as token symbol, token decimal, parse the amount of out event raw data
+  // Reference ticket: https://github.com/AvaProtocol/EigenLayer-AVS/issues/151
+  //  
+  // For transfer event, we had a set of fields
+  // Chris define them here https://avaprotocol.slack.com/archives/D0570FNE0SJ/p1733336982524899
+  // // The selected fields of the response to return to the client
+  //  const FILTERED_FIELDS = [
+  //    "token_name",
+  //    "token_symbol",
+  //    "token_decimals",
+  //    "transaction_hash",
+  //    "address",
+  //    "block_timestamp",
+  //    "block_number",
+  //    "from_address",
+  //    "to_address",
+  //    "value",
+  //    "value_formatted", // Formatted value
+  //    "transaction_index",
+  //    "log_index",
+  //  ];
+  // 
+  // For non transfer event, we just have the raw data
+  // For block event, we had the number at that trigger is meet.
+  // For time trigger, it is the epoch
+  oneof output_data {
+    TransferEventOutput transfer_event = 10;
+    RawEventOutput raw_event = 11;
+    BlockOutput block = 12;
+    TimeOutput time = 13;
+  }
+  message TransferEventOutput {
+    string token_name = 1;
+    string token_symbol = 2;
+    uint32 token_decimals = 3;
+    string transaction_hash = 4;
+    string address = 5;
+    uint64 block_number = 6;
+    uint64 block_timestamp = 7;
+    string from_address = 8;
+    string to_address = 9;
+    string value = 10;
+    string value_formatted = 11;
+    uint32 transaction_index = 12;
+  }
+  
+  // When the trigger is not a transfer event, we will have a raw event output only
+  // These shape of data is https://docs.ethers.org/v6/api/providers/#Log
+  message RawEventOutput {
+    string address = 1;
+    string block_hash = 2;
+    uint64 block_number = 3;
+    string data = 4;
+    uint32 index = 5;
+    repeated string topics = 6;
+    string transaction_hash = 7;
+    uint32 transaction_index = 8;
+  }
+  message BlockOutput {
+    uint64 block_number = 1;
+  }
+  message TimeOutput {
+    uint64 epoch = 1;
+  }
 }
 
 
@@ -411,14 +484,14 @@ message KeyResp {
 }
 
 
-// TriggerMetadata represent a lookup that we can use to identify when/where/how it is trigger
+// TriggerReason represent a lookup that we can use to identify when/where/how it is trigger
 // In a block trigger, we will have block_number
 // In an event trigger, we will have the log_index, tx_hash and the block_number
 // In a time based trigger(cron/fixed time) we will have the epoch.
 //
-// TriggerMetadata is used to populate the `<trigger-name>.data` variable. Example, if this is a transfer
+// TriggerReason is used to populate the `<trigger-name>.data` variable. Example, if this is a transfer
 // event, then you will have access to <trigger-name>.data.from_address or <trigger-name>.data.value
-message TriggerMetadata {
+message TriggerReason {
   uint64 block_number = 1;
   uint64 log_index    = 2;
   string tx_hash      = 3;
@@ -460,7 +533,7 @@ message GetWalletResp {
 
 message UserTriggerTaskReq {
   string task_id = 1;
-  TriggerMetadata trigger_metadata = 2;
+  TriggerReason reason = 2;
   // when setting is_blocking=true, the execution run in the same request. the request is blocked until the execution is done
   // setting to false, the task will be execute in our normal queueu system, and the request won't block.
   // default value is false, for interact testing, set this to true

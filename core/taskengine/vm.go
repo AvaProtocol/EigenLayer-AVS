@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -53,15 +54,52 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 	})
 }
 
+type triggerDataType struct {
+	TransferEvent *avsproto.Execution_TransferEventOutput
+	RawEvent      *avsproto.Execution_RawEventOutput
+	Block         *avsproto.Execution_BlockOutput
+	Time          *avsproto.Execution_TimeOutput
+}
+
+func (t *triggerDataType) GetValue() avsproto.IsExecution_OutputData {
+	if t.TransferEvent != nil {
+		return &avsproto.Execution_TransferEvent{
+			TransferEvent: t.TransferEvent,
+		}
+	}
+	if t.RawEvent != nil {
+		return &avsproto.Execution_RawEvent{
+			RawEvent: t.RawEvent,
+		}
+	}
+	if t.Block != nil {
+		return &avsproto.Execution_Block{
+			Block: t.Block,
+		}
+	}
+	if t.Time != nil {
+		return &avsproto.Execution_Time{
+			Time: t.Time,
+		}
+	}
+
+	return nil
+}
+
 // The VM is the core component that load the node information and execute them, yield finaly result
 type VM struct {
 	// Input raw task data
 	// TaskID can be used to cache compile program
-	TaskID      string
-	TaskNodes   map[string]*avsproto.TaskNode
-	TaskEdges   []*avsproto.TaskEdge
-	TaskTrigger *avsproto.TaskTrigger
-	TaskOwner   common.Address
+	TaskID    string
+	TaskNodes map[string]*avsproto.TaskNode
+
+	//TaskEdges   []*avsproto.TaskEdge
+	//TaskTrigger *avsproto.TaskTrigger
+	TaskOwner common.Address
+
+	task              *model.Task
+	reason            *avsproto.TriggerReason
+	parsedTriggerData *triggerDataType
 
 	// executin logs and result per plans
 	ExecutionLogs []*avsproto.Execution_Step
@@ -111,7 +149,7 @@ func (v *VM) WithLogger(logger sdklogging.Logger) *VM {
 func (v *VM) GetTriggerNameAsVar() string {
 	// Replace invalid characters with _
 	re := regexp.MustCompile(`[^a-zA-Z0-9_$]`)
-	name := v.TaskTrigger.Name
+	name := v.task.Trigger.Name
 	standardized := re.ReplaceAllString(name, "_")
 
 	// Ensure the first character is valid
@@ -139,18 +177,22 @@ func (v *VM) GetNodeNameAsVar(nodeID string) string {
 	return standardized
 }
 
-func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
+func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
 	v := &VM{
-		Status:            VMStateInitialize,
-		TaskEdges:         task.Edges,
-		TaskNodes:         make(map[string]*avsproto.TaskNode),
-		TaskTrigger:       task.Trigger,
-		TaskOwner:         common.HexToAddress(task.Owner),
+		Status: VMStateInitialize,
+		//TaskEdges:         task.Edges,
+		//TaskTrigger:       task.Trigger,
+		TaskNodes: make(map[string]*avsproto.TaskNode),
+		TaskOwner: common.HexToAddress(task.Owner),
+
 		plans:             make(map[string]*Step),
 		mu:                &sync.Mutex{},
 		instructionCount:  0,
 		secrets:           secrets,
 		smartWalletConfig: smartWalletConfig,
+		reason:            reason,
+		task:              task,
+		parsedTriggerData: &triggerDataType{},
 	}
 
 	for _, node := range task.Nodes {
@@ -160,14 +202,14 @@ func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, 
 	v.vars = macros.GetEnvs(map[string]any{})
 	triggerVarName := v.GetTriggerNameAsVar()
 	// popular trigger data for trigger variable
-	if triggerMetadata != nil {
+	if reason != nil {
 		v.vars[triggerVarName] = map[string]any{
 			"data": map[string]any{},
 		}
 
-		if triggerMetadata.LogIndex > 0 && triggerMetadata.TxHash != "" {
-			// if it contains event, we need to fetch and pop
-			receipt, err := rpcConn.TransactionReceipt(context.Background(), common.HexToHash(triggerMetadata.TxHash))
+		if reason.LogIndex > 0 && reason.TxHash != "" {
+			// if it contains event, we need to fetch and populate data
+			receipt, err := rpcConn.TransactionReceipt(context.Background(), common.HexToHash(reason.TxHash))
 			if err != nil {
 				return nil, err
 			}
@@ -175,14 +217,16 @@ func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, 
 			var event *types.Log
 			//event := receipt.Logs[triggerMetadata.LogIndex]
 
+			// TODO Is there a cheaper way to avoid hitting RPC this much?
 			for _, l := range receipt.Logs {
-				if uint64(l.Index) == triggerMetadata.LogIndex {
+				if uint64(l.Index) == reason.LogIndex {
 					event = l
+					break
 				}
 			}
 
 			if event == nil {
-				return nil, fmt.Errorf("tx %s doesn't content event %d", triggerMetadata.TxHash, triggerMetadata.LogIndex)
+				return nil, fmt.Errorf("tx %s doesn't content event %d", reason.TxHash, reason.LogIndex)
 			}
 
 			tokenMetadata, err := GetMetadataForTransfer(event)
@@ -193,36 +237,77 @@ func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, 
 				return nil, fmt.Errorf("RPC error getting block header. Retry: %w", err)
 			}
 
-			parseTransfer, err := ef.ParseTransfer(*event)
-			formattedValue := ToDecimal(parseTransfer.Value, int(tokenMetadata.Decimals)).String()
+			// Only parse data for transfer event
+			if strings.EqualFold(event.Topics[0].Hex(), EvmErc20TransferTopic0) {
+				parseTransfer, err := ef.ParseTransfer(*event)
+				if err != nil {
+					// TODO: This error is retryable
+					return nil, fmt.Errorf("error parsing transfer event: %w", err)
+				}
+				formattedValue := ToDecimal(parseTransfer.Value, int(tokenMetadata.Decimals)).String()
 
-			v.vars[triggerVarName].(map[string]any)["data"] = map[string]any{
-				"topics": lo.Map(event.Topics, func(topic common.Hash, _ int) string {
-					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
-				}),
-				"data": "0x" + common.Bytes2Hex(event.Data),
+				v.vars[triggerVarName].(map[string]any)["data"] = map[string]any{
+					"topics": lo.Map(event.Topics, func(topic common.Hash, _ int) string {
+						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+					}),
+					"data": "0x" + common.Bytes2Hex(event.Data),
 
-				"token_name":        tokenMetadata.Name,
-				"token_symbol":      tokenMetadata.Symbol,
-				"token_decimals":    tokenMetadata.Decimals,
-				"transaction_hash":  event.TxHash,
-				"address":           strings.ToLower(event.Address.Hex()),
-				"block_number":      event.BlockNumber,
-				"block_timestamp":   blockHeader.Time,
-				"from_address":      parseTransfer.From.String(),
-				"to_address":        parseTransfer.To.String(),
-				"value":             parseTransfer.Value.String(),
-				"value_formatted":   formattedValue,
-				"transaction_index": event.TxIndex,
+					"token_name":        tokenMetadata.Name,
+					"token_symbol":      tokenMetadata.Symbol,
+					"token_decimals":    tokenMetadata.Decimals,
+					"transaction_hash":  event.TxHash,
+					"address":           strings.ToLower(event.Address.Hex()),
+					"block_number":      event.BlockNumber,
+					"block_timestamp":   blockHeader.Time,
+					"from_address":      parseTransfer.From.String(),
+					"to_address":        parseTransfer.To.String(),
+					"value":             parseTransfer.Value.String(),
+					"value_formatted":   formattedValue,
+					"transaction_index": event.TxIndex,
+				}
+
+				v.parsedTriggerData.TransferEvent = &avsproto.Execution_TransferEventOutput{
+					TokenName:        tokenMetadata.Name,
+					TokenSymbol:      tokenMetadata.Symbol,
+					TokenDecimals:    uint32(tokenMetadata.Decimals),
+					TransactionHash:  event.TxHash.Hex(),
+					Address:          event.Address.Hex(),
+					BlockNumber:      event.BlockNumber,
+					BlockTimestamp:   blockHeader.Time,
+					FromAddress:      parseTransfer.From.String(),
+					ToAddress:        parseTransfer.To.String(),
+					Value:            parseTransfer.Value.String(),
+					ValueFormatted:   formattedValue,
+					TransactionIndex: uint32(event.TxIndex),
+				}
+			} else {
+				v.parsedTriggerData.RawEvent = &avsproto.Execution_RawEventOutput{
+					Address:          event.Address.Hex(),
+					BlockHash:        event.BlockHash.Hex(),
+					BlockNumber:      event.BlockNumber,
+					Data:             "0x" + common.Bytes2Hex(event.Data),
+					Index:            uint32(event.Index),
+					TransactionHash:  event.TxHash.Hex(),
+					TransactionIndex: uint32(event.TxIndex),
+					Topics: lo.Map(event.Topics, func(topic common.Hash, _ int) string {
+						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+					}),
+				}
 			}
 		}
 
-		if triggerMetadata.BlockNumber > 0 {
-			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["block_number"] = triggerMetadata.BlockNumber
+		if reason.BlockNumber > 0 {
+			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["block_number"] = reason.BlockNumber
+			v.parsedTriggerData.Block = &avsproto.Execution_BlockOutput{
+				BlockNumber: uint64(reason.BlockNumber),
+			}
 		}
 
-		if triggerMetadata.Epoch > 0 {
-			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["epoch"] = triggerMetadata.Epoch
+		if reason.Epoch > 0 {
+			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["epoch"] = reason.Epoch
+			v.parsedTriggerData.Time = &avsproto.Execution_TimeOutput{
+				Epoch: uint64(reason.Epoch),
+			}
 		}
 	}
 
@@ -243,8 +328,8 @@ func (v *VM) AddVar(key string, value any) {
 
 // Compile generates an execution plan based on edge
 func (v *VM) Compile() error {
-	triggerId := v.TaskTrigger.Id
-	for _, edge := range v.TaskEdges {
+	triggerId := v.task.Trigger.Id
+	for _, edge := range v.task.Edges {
 		if strings.Contains(edge.Source, ".") {
 			v.plans[edge.Source] = &Step{
 				NodeID: edge.Source,
@@ -303,79 +388,90 @@ func (v *VM) Run() error {
 
 	// TODO Setup a timeout context
 	currentStep := v.plans[v.entrypoint]
+
 	for currentStep != nil {
 		node := v.TaskNodes[currentStep.NodeID]
 
-		_, err := v.executeNode(node)
+		jump, err := v.executeNode(node)
 		if err != nil {
 			// abort execution as soon as a node raise error
 			return err
 		}
 
-		if len(currentStep.Next) == 0 {
+		if jump == nil {
+			jump = currentStep
+		}
+
+		if len(jump.Next) == 0 {
 			break
 		}
 
 		// TODO: Support multiple next
-		currentStep = v.plans[currentStep.Next[0]]
+		currentStep = v.plans[jump.Next[0]]
 	}
 
 	return nil
 }
 
-func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
+func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 	v.instructionCount += 1
 
+	var step *Step
 	var err error
-	executionLog := &avsproto.Execution_Step{
-		NodeId: node.Id,
-	}
 
 	if nodeValue := node.GetRestApi(); nodeValue != nil {
-		executionLog, err = v.runRestApi(node.Id, nodeValue)
+		step, err = v.runRestApi(node.Id, nodeValue)
 	} else if nodeValue := node.GetBranch(); nodeValue != nil {
-		executionLog, err = v.runBranch(node.Id, nodeValue)
+		step, err = v.runBranch(node.Id, nodeValue)
 	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
-		executionLog, err = v.runGraphQL(node.Id, nodeValue)
+		step, err = v.runGraphQL(node.Id, nodeValue)
 	} else if nodeValue := node.GetCustomCode(); nodeValue != nil {
-		executionLog, err = v.runCustomCode(node.Id, nodeValue)
+		step, err = v.runCustomCode(node.Id, nodeValue)
 	} else if nodeValue := node.GetContractRead(); nodeValue != nil {
-		executionLog, err = v.runContractRead(node.Id, nodeValue)
+		step, err = v.runContractRead(node.Id, nodeValue)
 	} else if nodeValue := node.GetContractWrite(); nodeValue != nil {
-		executionLog, err = v.runContractWrite(node.Id, nodeValue)
+		step, err = v.runContractWrite(node.Id, nodeValue)
 	}
 
-	return executionLog, err
+	if step != nil {
+		return step, err
+	}
+
+	return v.plans[node.Id], err
 }
 
-func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
+func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*Step, error) {
 	p := NewRestProrcessor(v)
 
 	var err error
+	inputs := v.CollectInputs()
 	executionLog := &avsproto.Execution_Step{
 		NodeId: stepID,
 	}
 	executionLog, err = p.Execute(stepID, nodeValue)
 
+	executionLog.Inputs = inputs
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
-	return executionLog, err
+	return nil, err
 }
 
-func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*Step, error) {
 	g, err := NewGraphqlQueryProcessor(v, node.Url)
 	if err != nil {
 		return nil, err
 	}
+	inputs := v.CollectInputs()
 	executionLog, _, err := g.Execute(stepID, node)
 	if err != nil {
 		v.logger.Error("error execute graphql node", "task_id", v.TaskID, "step", stepID, "url", node.Url, "error", err)
 	}
+	executionLog.Inputs = inputs
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
-	return executionLog, nil
+	return nil, nil
 }
 
-func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*Step, error) {
 	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
 	defer func() {
 		rpcClient.Close()
@@ -387,6 +483,7 @@ func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*a
 
 	}
 
+	inputs := v.CollectInputs()
 	processor := NewContractReadProcessor(v, rpcClient)
 	executionLog, err := processor.Execute(stepID, node)
 
@@ -394,42 +491,50 @@ func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*a
 		v.logger.Error("error execute contract read node", "task_id", v.TaskID, "step", stepID, "calldata", node.CallData, "error", err)
 		return nil, err
 	}
+	executionLog.Inputs = inputs
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
-	return executionLog, nil
+	return nil, nil
 }
 
-func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (*Step, error) {
 	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
 	defer func() {
 		rpcClient.Close()
 	}()
 
+	inputs := v.CollectInputs()
 	processor := NewContractWriteProcessor(v, rpcClient, v.smartWalletConfig, v.TaskOwner)
 	executionLog, err := processor.Execute(stepID, node)
 	if err != nil {
 		v.logger.Error("error execute contract write node", "task_id", v.TaskID, "step", stepID, "calldata", node.CallData, "error", err)
 	}
+	executionLog.Inputs = inputs
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
-	return executionLog, nil
+	return nil, nil
 }
 
-func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*Step, error) {
 	r := NewJSProcessor(v)
+
+	inputs := v.CollectInputs()
 	executionLog, err := r.Execute(stepID, node)
 	if err != nil {
 		v.logger.Error("error execute JavaScript code", "task_id", v.TaskID, "step", stepID, "error", err)
 	}
+	executionLog.Inputs = inputs
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
-	return executionLog, nil
+	return nil, nil
 }
 
-func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*Step, error) {
 	processor := NewBranchProcessor(v)
 
+	inputs := v.CollectInputs()
 	executionLog, err := processor.Execute(stepID, node)
+	executionLog.Inputs = inputs
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
 	// In branch node we first need to evaluate the condtion to find the outcome, after find the outcome we need to execute that node
@@ -444,14 +549,17 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 			for _, nodeID := range outcomeNodes {
 				// TODO: track stack too deepth and abort
 				node := v.TaskNodes[nodeID]
-				if executionLog, err = v.executeNode(node); err != nil {
-					return executionLog, err
+				jump, err := v.executeNode(node)
+				if jump != nil {
+					return jump, err
+				} else {
+					return v.plans[nodeID], err
 				}
 			}
 		}
 	}
 
-	return executionLog, err
+	return nil, err
 }
 
 // preprocessText processes any text within {{ }} using goja JavaScript engine
@@ -521,4 +629,23 @@ func (v *VM) preprocessText(text string) string {
 	}
 
 	return result
+}
+
+func (v *VM) CollectInputs() []string {
+	inputs := []string{}
+	for k, _ := range v.vars {
+		if slices.Contains(macros.MacroFuncs, k) {
+			continue
+		}
+
+		varname := k
+		if varname == "apContext" {
+			varname = "apContext.configVars"
+		} else {
+			varname = fmt.Sprintf("%s.data", varname)
+		}
+		inputs = append(inputs, varname)
+	}
+
+	return inputs
 }

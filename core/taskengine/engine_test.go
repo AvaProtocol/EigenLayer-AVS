@@ -52,6 +52,10 @@ func TestListTasks(t *testing.T) {
 		t.Errorf("expect list task succesfully but got error %s", err)
 	}
 
+	if result == nil {
+		t.Errorf("expect result is not nil but got nil")
+	}
+
 	if len(result.Items) != 1 {
 		t.Errorf("list task return wrong. expect 1, got %d", len(result.Items))
 	}
@@ -203,7 +207,7 @@ func TestGetExecution(t *testing.T) {
 
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
-		TriggerMetadata: &avsproto.TriggerMetadata{
+		Reason: &avsproto.TriggerReason{
 			BlockNumber: 101,
 		},
 		IsBlocking: true,
@@ -215,12 +219,16 @@ func TestGetExecution(t *testing.T) {
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 
+	if execution.TriggerName != tr1.Trigger.Name {
+		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
+	}
+
 	if execution.Id != resultTrigger.ExecutionId {
 		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
 
-	if execution.TriggerMetadata.BlockNumber != 101 {
-		t.Errorf("invalid triggered block. expect 101 got %d", execution.TriggerMetadata.BlockNumber)
+	if execution.Reason.BlockNumber != 101 {
+		t.Errorf("invalid triggered block. expect 101 got %d", execution.Reason.BlockNumber)
 	}
 
 	// Another user cannot get this executin id
@@ -308,7 +316,7 @@ func TestTriggerSync(t *testing.T) {
 
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
-		TriggerMetadata: &avsproto.TriggerMetadata{
+		Reason: &avsproto.TriggerReason{
 			BlockNumber: 101,
 		},
 		IsBlocking: true,
@@ -328,8 +336,11 @@ func TestTriggerSync(t *testing.T) {
 		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
 
-	if execution.TriggerMetadata.BlockNumber != 101 {
-		t.Errorf("invalid triggered block. expect 101 got %d", execution.TriggerMetadata.BlockNumber)
+	if execution.TriggerName != tr1.Trigger.Name {
+		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
+	}
+	if execution.Reason.BlockNumber != 101 {
+		t.Errorf("invalid triggered block. expect 101 got %d", execution.Reason.BlockNumber)
 	}
 }
 func TestTriggerAsync(t *testing.T) {
@@ -358,7 +369,7 @@ func TestTriggerAsync(t *testing.T) {
 
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
-		TriggerMetadata: &avsproto.TriggerMetadata{
+		Reason: &avsproto.TriggerReason{
 			BlockNumber: 101,
 		},
 		IsBlocking: false,
@@ -388,6 +399,9 @@ func TestTriggerAsync(t *testing.T) {
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 
+	if execution.TriggerName != tr1.Trigger.Name {
+		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
+	}
 	if execution.Id != resultTrigger.ExecutionId {
 		t.Errorf("wring execution id, expected %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
@@ -431,7 +445,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
-		TriggerMetadata: &avsproto.TriggerMetadata{
+		Reason: &avsproto.TriggerReason{
 			BlockNumber: 101,
 		},
 		IsBlocking: true,
@@ -444,7 +458,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	// Now the task has reach its max run, and canot run anymore
 	resultTrigger, err = n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
-		TriggerMetadata: &avsproto.TriggerMetadata{
+		Reason: &avsproto.TriggerReason{
 			BlockNumber: 101,
 		},
 		IsBlocking: true,
@@ -807,7 +821,7 @@ func TestGetWalletReturnTaskStat(t *testing.T) {
 	// Make the task run to simulate completed count
 	n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: taskResult.Id,
-		TriggerMetadata: &avsproto.TriggerMetadata{
+		Reason: &avsproto.TriggerReason{
 			BlockNumber: 101,
 		},
 		IsBlocking: true,
