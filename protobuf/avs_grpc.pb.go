@@ -50,6 +50,7 @@ type AggregatorClient interface {
 	// For simplicity, currently only the user who create the secrets can update its value, or update its permission.
 	// The current implementation is also limited, update is an override action, not an appending action. So when updating, you need to pass the whole payload
 	UpdateSecret(ctx context.Context, in *CreateOrUpdateSecretReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
+	GetWorkflowCount(ctx context.Context, in *GetWorkflowCountRequest, opts ...grpc.CallOption) (*GetWorkflowCountResponse, error)
 }
 
 type aggregatorClient struct {
@@ -213,6 +214,15 @@ func (c *aggregatorClient) UpdateSecret(ctx context.Context, in *CreateOrUpdateS
 	return out, nil
 }
 
+func (c *aggregatorClient) GetWorkflowCount(ctx context.Context, in *GetWorkflowCountRequest, opts ...grpc.CallOption) (*GetWorkflowCountResponse, error) {
+	out := new(GetWorkflowCountResponse)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/GetWorkflowCount", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AggregatorServer is the server API for Aggregator service.
 // All implementations must embed UnimplementedAggregatorServer
 // for forward compatibility
@@ -244,6 +254,7 @@ type AggregatorServer interface {
 	// For simplicity, currently only the user who create the secrets can update its value, or update its permission.
 	// The current implementation is also limited, update is an override action, not an appending action. So when updating, you need to pass the whole payload
 	UpdateSecret(context.Context, *CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error)
+	GetWorkflowCount(context.Context, *GetWorkflowCountRequest) (*GetWorkflowCountResponse, error)
 	mustEmbedUnimplementedAggregatorServer()
 }
 
@@ -301,6 +312,9 @@ func (UnimplementedAggregatorServer) ListSecrets(context.Context, *ListSecretsRe
 }
 func (UnimplementedAggregatorServer) UpdateSecret(context.Context, *CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateSecret not implemented")
+}
+func (UnimplementedAggregatorServer) GetWorkflowCount(context.Context, *GetWorkflowCountRequest) (*GetWorkflowCountResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetWorkflowCount not implemented")
 }
 func (UnimplementedAggregatorServer) mustEmbedUnimplementedAggregatorServer() {}
 
@@ -621,6 +635,24 @@ func _Aggregator_UpdateSecret_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Aggregator_GetWorkflowCount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetWorkflowCountRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).GetWorkflowCount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregator/GetWorkflowCount",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).GetWorkflowCount(ctx, req.(*GetWorkflowCountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Aggregator_ServiceDesc is the grpc.ServiceDesc for Aggregator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -695,6 +727,10 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateSecret",
 			Handler:    _Aggregator_UpdateSecret_Handler,
+		},
+		{
+			MethodName: "GetWorkflowCount",
+			Handler:    _Aggregator_GetWorkflowCount_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

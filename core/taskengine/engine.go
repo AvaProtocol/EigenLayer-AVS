@@ -983,3 +983,28 @@ func (n *Engine) CanStreamCheck(address string) bool {
 	// Only enable for our own operator first, once it's stable we will roll out to all
 	return strings.EqualFold(address, "0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d") || strings.EqualFold(address, "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3")
 }
+
+// GetWorkflowCount returns the number of workflows for the given addresses of smart wallets, or if no addresses are provided, it returns the total number of workflows belongs to the requested user
+func (n *Engine) GetWorkflowCount(user *model.User, addresses []string) (int32, error) {
+	n.logger.Info("Calculating workflow count")
+
+	// Example logic to count workflows
+	// This should be replaced with actual logic to count workflows based on addresses
+	var count int32
+	if len(addresses) == 0 {
+		// Default logic if no addresses are provided
+		count = int32(len(n.tasks)) // Assuming n.tasks holds all tasks
+	} else {
+		// Logic to count workflows for specific addresses
+		for _, address := range addresses {
+			// Example: count tasks associated with each address
+			for _, task := range n.tasks {
+				if task.SmartWalletAddress == address {
+					count++
+				}
+			}
+		}
+	}
+
+	return count, nil
+}

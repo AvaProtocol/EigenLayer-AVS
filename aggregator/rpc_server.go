@@ -163,6 +163,30 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 	return r.engine.ListTasksByUser(user, payload)
 }
 
+// GetWorkflowCount handles the RPC request to get the workflow count
+func (r *RpcServer) GetWorkflowCount(ctx context.Context, req *avsproto.GetWorkflowCountRequest) (*avsproto.GetWorkflowCountResponse, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process workflow count",
+		"user", user.Address.String(),
+		"smart_wallet_address", req.Addresses,
+	)
+
+	// Call the engine's method to get the workflow count
+	count, err := r.engine.GetWorkflowCount(user,req.Addresses)
+	if err != nil {
+		r.config.Logger.Error("Failed to get workflow count", "error", err)
+		return nil, err
+	}
+
+	return &avsproto.GetWorkflowCountResponse{
+		Count: count,
+	}, nil
+}
+
 func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
@@ -343,6 +367,8 @@ func (r *RpcServer) Ack(ctx context.Context, payload *avsproto.AckMessageReq) (*
 
 	return wrapperspb.Bool(true), nil
 }
+
+
 
 // startRpcServer initializes and establish a tcp socket on given address from
 // config file
