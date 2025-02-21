@@ -132,15 +132,13 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		s.Error = err.Error()
 		return s, err
 	} else {
-		fmt.Println("response", resp.StatusCode())
 		// Check if the response status code is not 2xx or 3xx, we consider it as an error exeuction
-		if (resp.StatusCode() < 200 || resp.StatusCode() >= 400) {
+		if resp.StatusCode() < 200 || resp.StatusCode() >= 400 {
 			s.Success = false
 			s.Error = fmt.Sprintf("unexpected status code: %d", resp.StatusCode())
 			return s, fmt.Errorf("unexpected status code: %d", resp.StatusCode())
 		}
 	}
-	
 
 	return s, nil
 }
