@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -387,89 +388,90 @@ func (v *VM) Run() error {
 
 	// TODO Setup a timeout context
 	currentStep := v.plans[v.entrypoint]
+
 	for currentStep != nil {
 		node := v.TaskNodes[currentStep.NodeID]
 
-		_, err := v.executeNode(node)
+		jump, err := v.executeNode(node)
 		if err != nil {
 			// abort execution as soon as a node raise error
 			return err
 		}
 
-		if len(currentStep.Next) == 0 {
+		if jump == nil {
+			jump = currentStep
+		}
+
+		if len(jump.Next) == 0 {
 			break
 		}
 
 		// TODO: Support multiple next
-		currentStep = v.plans[currentStep.Next[0]]
+		currentStep = v.plans[jump.Next[0]]
 	}
 
 	return nil
 }
 
-func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, error) {
+func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 	v.instructionCount += 1
 
+	var step *Step
 	var err error
-	executionStep := &avsproto.Execution_Step{
-		NodeId: node.Id,
-		Inputs: []string{},
-	}
-	for k, _ := range v.vars {
-		varname := k
-		if varname == "apContext" {
-			varname = "apContext.configVars"
-		} else {
-			varname = fmt.Sprintf("%s.data", varname)
-		}
-		executionStep.Inputs = append(executionStep.Inputs, varname)
-	}
 
 	if nodeValue := node.GetRestApi(); nodeValue != nil {
-		executionStep, err = v.runRestApi(node.Id, nodeValue)
+		step, err = v.runRestApi(node.Id, nodeValue)
 	} else if nodeValue := node.GetBranch(); nodeValue != nil {
-		executionStep, err = v.runBranch(node.Id, nodeValue)
+		step, err = v.runBranch(node.Id, nodeValue)
 	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
-		executionStep, err = v.runGraphQL(node.Id, nodeValue)
+		step, err = v.runGraphQL(node.Id, nodeValue)
 	} else if nodeValue := node.GetCustomCode(); nodeValue != nil {
-		executionStep, err = v.runCustomCode(node.Id, nodeValue)
+		step, err = v.runCustomCode(node.Id, nodeValue)
 	} else if nodeValue := node.GetContractRead(); nodeValue != nil {
-		executionStep, err = v.runContractRead(node.Id, nodeValue)
+		step, err = v.runContractRead(node.Id, nodeValue)
 	} else if nodeValue := node.GetContractWrite(); nodeValue != nil {
-		executionStep, err = v.runContractWrite(node.Id, nodeValue)
+		step, err = v.runContractWrite(node.Id, nodeValue)
 	}
 
-	return executionStep, err
+	if step != nil {
+		return step, err
+	}
+
+	return v.plans[node.Id], err
 }
 
-func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
+func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*Step, error) {
 	p := NewRestProrcessor(v)
 
 	var err error
+	inputs := v.CollectInputs()
 	executionLog := &avsproto.Execution_Step{
 		NodeId: stepID,
 	}
 	executionLog, err = p.Execute(stepID, nodeValue)
 
+	executionLog.Inputs = inputs
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
-	return executionLog, err
+	return nil, err
 }
 
-func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*Step, error) {
 	g, err := NewGraphqlQueryProcessor(v, node.Url)
 	if err != nil {
 		return nil, err
 	}
+	inputs := v.CollectInputs()
 	executionLog, _, err := g.Execute(stepID, node)
 	if err != nil {
 		v.logger.Error("error execute graphql node", "task_id", v.TaskID, "step", stepID, "url", node.Url, "error", err)
 	}
+	executionLog.Inputs = inputs
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
-	return executionLog, nil
+	return nil, nil
 }
 
-func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*Step, error) {
 	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
 	defer func() {
 		rpcClient.Close()
@@ -481,6 +483,7 @@ func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*a
 
 	}
 
+	inputs := v.CollectInputs()
 	processor := NewContractReadProcessor(v, rpcClient)
 	executionLog, err := processor.Execute(stepID, node)
 
@@ -488,42 +491,50 @@ func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*a
 		v.logger.Error("error execute contract read node", "task_id", v.TaskID, "step", stepID, "calldata", node.CallData, "error", err)
 		return nil, err
 	}
+	executionLog.Inputs = inputs
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
-	return executionLog, nil
+	return nil, nil
 }
 
-func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (*Step, error) {
 	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
 	defer func() {
 		rpcClient.Close()
 	}()
 
+	inputs := v.CollectInputs()
 	processor := NewContractWriteProcessor(v, rpcClient, v.smartWalletConfig, v.TaskOwner)
 	executionLog, err := processor.Execute(stepID, node)
 	if err != nil {
 		v.logger.Error("error execute contract write node", "task_id", v.TaskID, "step", stepID, "calldata", node.CallData, "error", err)
 	}
+	executionLog.Inputs = inputs
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
-	return executionLog, nil
+	return nil, nil
 }
 
-func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*Step, error) {
 	r := NewJSProcessor(v)
+
+	inputs := v.CollectInputs()
 	executionLog, err := r.Execute(stepID, node)
 	if err != nil {
 		v.logger.Error("error execute JavaScript code", "task_id", v.TaskID, "step", stepID, "error", err)
 	}
+	executionLog.Inputs = inputs
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
-	return executionLog, nil
+	return nil, nil
 }
 
-func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Execution_Step, error) {
+func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*Step, error) {
 	processor := NewBranchProcessor(v)
 
+	inputs := v.CollectInputs()
 	executionLog, err := processor.Execute(stepID, node)
+	executionLog.Inputs = inputs
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
 	// In branch node we first need to evaluate the condtion to find the outcome, after find the outcome we need to execute that node
@@ -538,14 +549,17 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*avsproto.Exec
 			for _, nodeID := range outcomeNodes {
 				// TODO: track stack too deepth and abort
 				node := v.TaskNodes[nodeID]
-				if executionLog, err = v.executeNode(node); err != nil {
-					return executionLog, err
+				jump, err := v.executeNode(node)
+				if jump != nil {
+					return jump, err
+				} else {
+					return v.plans[nodeID], err
 				}
 			}
 		}
 	}
 
-	return executionLog, err
+	return nil, err
 }
 
 // preprocessText processes any text within {{ }} using goja JavaScript engine
@@ -615,4 +629,23 @@ func (v *VM) preprocessText(text string) string {
 	}
 
 	return result
+}
+
+func (v *VM) CollectInputs() []string {
+	inputs := []string{}
+	for k, _ := range v.vars {
+		if slices.Contains(macros.MacroFuncs, k) {
+			continue
+		}
+
+		varname := k
+		if varname == "apContext" {
+			varname = "apContext.configVars"
+		} else {
+			varname = fmt.Sprintf("%s.data", varname)
+		}
+		inputs = append(inputs, varname)
+	}
+
+	return inputs
 }

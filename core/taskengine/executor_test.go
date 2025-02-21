@@ -1,15 +1,15 @@
 package taskengine
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
+	"reflect"
 	"github.com/AvaProtocol/ap-avs/core/testutil"
 	"github.com/AvaProtocol/ap-avs/model"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/storage"
+	"sort"
 )
 
 func TestExecutorRunTaskSucess(t *testing.T) {
@@ -20,9 +20,9 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 
 	// Set up a test HTTP server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simulate a successful response
+		// Simulate a response with "I'm hit"
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status": "success"}`))
+		w.Write([]byte(`{"message": "I'm hit"}`))
 	}))
 	defer server.Close()
 
@@ -120,8 +120,8 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 		t.Errorf("step id doesn't match, expect notification1 but got: %s", execution.Steps[1].NodeId)
 	}
 
-	if execution.Steps[1].OutputData != "{\"status\": \"success\"}" {
-		t.Errorf("expect branch output data is {\"status\": \"success\"} but got %s", execution.Steps[1].OutputData)
+	if execution.Steps[1].OutputData != "{\"message\": \"I'm hit\"}" {
+		t.Errorf("expect branch output data is {\"message\": \"I'm hit\"} but got %s", execution.Steps[1].OutputData)
 	}
 }
 
@@ -314,7 +314,34 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Simulate a response with "I'm hit"	
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"message": "I'm hit"}`))
+	}))
+	defer server.Close()
+
 	nodes := []*avsproto.TaskNode{
+		&avsproto.TaskNode{
+			Id:   "spacex",
+			Name: "spacex",
+			TaskType: &avsproto.TaskNode_GraphqlQuery{
+				GraphqlQuery: &avsproto.GraphQLQueryNode{
+					Url: "https://spacex-production.up.railway.app/",
+					Query: `
+						query Launch {
+							company {
+							ceo
+							}
+							launches(limit: 2, sort: "launch_date_unix", order: "ASC") {
+							id
+							mission_name
+							}
+						}
+				`,
+				},
+			},
+		},
 		&avsproto.TaskNode{
 			Id:   "branch1",
 			Name: "branch",
@@ -331,8 +358,8 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 			},
 		},
 		&avsproto.TaskNode{
-			Id:   "rest1",
-			Name: "httpnode",
+			Id:   "customcode1",
+			Name: "dummy",
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					// Just logout the data so we can assert from the output
@@ -340,6 +367,17 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 				},
 			},
 		},
+		&avsproto.TaskNode{
+			Id:   "rest1",
+			Name: "http",
+			TaskType: &avsproto.TaskNode_RestApi{
+				RestApi: &avsproto.RestAPINode{
+					Url:    server.URL, // Use the test server URL
+					Method: "POST",
+					Body:   "hit=notification1",
+				},
+			},
+		},		
 	}
 
 	trigger := &avsproto.TaskTrigger{
@@ -348,13 +386,23 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 	}
 	edges := []*avsproto.TaskEdge{
 		&avsproto.TaskEdge{
-			Id:     "e1",
+			Id:     "e0",
 			Source: trigger.Id,
+			Target: "spacex",
+		},
+		&avsproto.TaskEdge{
+			Id:     "e1",
+			Source: "spacex",
 			Target: "branch1",
 		},
 		&avsproto.TaskEdge{
 			Id:     "e1",
 			Source: "branch1.condition1",
+			Target: "customcode1",
+		},
+		&avsproto.TaskEdge{
+			Id:     "e2",
+			Source: "customcode1",
 			Target: "rest1",
 		},
 	}
@@ -413,12 +461,8 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		t.Errorf("expect TxHash is 0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8 but got: %s", reason.TxHash)
 	}
 
-	if len(execution.Steps) != 2 {
-		t.Errorf("expect 2 steps but got: %d", len(execution.Steps))
-	}
-
-	if execution.Steps[0].NodeId != "branch1" {
-		t.Errorf("expect branch node but got: %s", execution.Steps[0].NodeId)
+	if len(execution.Steps) != 4 {
+		t.Errorf("expect 4 steps but got: %d", len(execution.Steps))
 	}
 
 	outputData := execution.OutputData.(*avsproto.Execution_TransferEvent).TransferEvent
@@ -472,5 +516,40 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		t.Errorf("expect TransactionIndex is 73 but got: %d", outputData.TransactionIndex)
 	}
 
-	fmt.Println("execution.OutputData", execution.Steps[0].Inputs, execution.Steps[1].Inputs)
+	if !reflect.DeepEqual([]string{"spacex", "branch1", "customcode1", "rest1"}, []string{execution.Steps[0].NodeId, execution.Steps[1].NodeId, execution.Steps[2].NodeId, execution.Steps[3].NodeId}) {
+		t.Errorf("expect nodeid as spacex, branch1, customcode1, rest1 but got: %s", []string{execution.Steps[0].NodeId, execution.Steps[1].NodeId, execution.Steps[2].NodeId, execution.Steps[3].NodeId})
+	}
+
+
+
+	// Verify the inputs of each step
+	expectedInputsStep0 := []string{"triggertest.data", "apContext.configVars"}
+	expectedInputsStep1 := []string{"triggertest.data", "spacex.data", "apContext.configVars"}
+	expectedInputsStep2 := []string{"triggertest.data", "spacex.data", "apContext.configVars"}
+	expectedInputsStep3 := []string{"apContext.configVars", "spacex.data", "triggertest.data", "dummy.data"}
+
+	// Sort the expected and actual inputs before comparison
+	sort.Strings(expectedInputsStep0)
+	sort.Strings(execution.Steps[0].Inputs)
+	if !reflect.DeepEqual(execution.Steps[0].Inputs, expectedInputsStep0) {
+		t.Errorf("expect inputs for step 0 to be %v but got: %v", expectedInputsStep0, execution.Steps[0].Inputs)
+	}
+
+	sort.Strings(expectedInputsStep1)
+	sort.Strings(execution.Steps[1].Inputs)
+	if !reflect.DeepEqual(execution.Steps[1].Inputs, expectedInputsStep1) {
+		t.Errorf("expect inputs for step 1 to be %v but got: %v", expectedInputsStep1, execution.Steps[1].Inputs)
+	}
+
+	sort.Strings(expectedInputsStep2)
+	sort.Strings(execution.Steps[2].Inputs)
+	if !reflect.DeepEqual(execution.Steps[2].Inputs, expectedInputsStep2) {
+		t.Errorf("expect inputs for step 2 to be %v but got: %v", expectedInputsStep2, execution.Steps[2].Inputs)
+	}	
+
+	sort.Strings(expectedInputsStep3)
+	sort.Strings(execution.Steps[3].Inputs)
+	if !reflect.DeepEqual(execution.Steps[3].Inputs, expectedInputsStep3) {
+		t.Errorf("expect inputs for step 3 to be %v but got: %v", expectedInputsStep3, execution.Steps[3].Inputs)
+	}
 }
