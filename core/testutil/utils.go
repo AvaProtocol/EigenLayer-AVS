@@ -116,8 +116,9 @@ func TestUser2() *model.User {
 func GetAggregatorConfig() *config.Config {
 	return &config.Config{
 		SmartWallet: &config.SmartWalletConfig{
-			EthRpcUrl:         GetTestRPCURL(),
-			EthWsUrl:          GetTestWsRPCURL(),
+			EthRpcUrl: GetTestRPCURL(),
+			EthWsUrl:  GetTestWsRPCURL(),
+			//	FactoryAddress:    common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
 			FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
 			EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
 		},
@@ -210,10 +211,11 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 	}
 
 	return &config.SmartWalletConfig{
-		EthRpcUrl:            os.Getenv("RPC_URL"),
-		BundlerURL:           os.Getenv("BUNDLER_RPC"),
-		EthWsUrl:             strings.Replace(os.Getenv("RPC_URL"), "https://", "wss://", 1),
-		FactoryAddress:       common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
+		EthRpcUrl:  os.Getenv("RPC_URL"),
+		BundlerURL: os.Getenv("BUNDLER_RPC"),
+		EthWsUrl:   strings.Replace(os.Getenv("RPC_URL"), "https://", "wss://", 1),
+		//FactoryAddress:       common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
+		FactoryAddress:       common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
 		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
 		ControllerPrivateKey: controllerPrivateKey,
 	}
@@ -225,8 +227,8 @@ func GetTestSecrets() map[string]string {
 	}
 }
 
-func GetTestEventTriggerMetadata() *avsproto.TriggerMetadata {
-	return &avsproto.TriggerMetadata{
+func GetTestEventTriggerReason() *avsproto.TriggerReason {
+	return &avsproto.TriggerReason{
 		BlockNumber: 7212417,
 		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
 		LogIndex:    98,

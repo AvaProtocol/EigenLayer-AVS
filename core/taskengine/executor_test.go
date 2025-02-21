@@ -1,7 +1,6 @@
 package taskengine
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -84,8 +83,8 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
 	execution, err := executor.RunTask(task, &QueueExecutionData{
-		TriggerMetadata: testutil.GetTestEventTriggerMetadata(),
-		ExecutionID:     "exec123",
+		Reason:      testutil.GetTestEventTriggerReason(),
+		ExecutionID: "exec123",
 	})
 
 	if err != nil {
@@ -184,8 +183,8 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
 	execution, err := executor.RunTask(task, &QueueExecutionData{
-		TriggerMetadata: testutil.GetTestEventTriggerMetadata(),
-		ExecutionID:     "exec123",
+		Reason:      testutil.GetTestEventTriggerReason(),
+		ExecutionID: "exec123",
 	})
 
 	if err == nil {
@@ -196,7 +195,17 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 		t.Errorf("Expect failure status but got success")
 	}
 
-	fmt.Printf("%v", execution.Steps)
+	if len(execution.Steps) != 1 {
+		t.Errorf("expect a single step but got: %d", len(execution.Steps))
+	}
+
+	if execution.Steps[0].NodeId != "branch1" {
+		t.Errorf("expect evaluate branch node but got: %s", execution.Steps[0].NodeId)
+	}
+
+	if execution.Steps[0].OutputData != "" {
+		t.Errorf("expect evaluate branch output data empty but got: %s", execution.Steps[0].OutputData)
+	}
 }
 
 func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
@@ -268,8 +277,8 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
 	execution, err := executor.RunTask(task, &QueueExecutionData{
-		TriggerMetadata: testutil.GetTestEventTriggerMetadata(),
-		ExecutionID:     "exec123",
+		Reason:      testutil.GetTestEventTriggerReason(),
+		ExecutionID: "exec123",
 	})
 
 	if err == nil {
