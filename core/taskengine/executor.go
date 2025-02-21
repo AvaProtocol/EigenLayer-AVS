@@ -100,10 +100,13 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	task.TotalExecution += 1
 	task.LastRanAt = t0.Unix()
 
+	var runTaskErr error = nil
 	if err = vm.Compile(); err != nil {
 		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", triggerMetadata)
+		runTaskErr = err
+	} else {
+		runTaskErr = vm.Run()
 	}
-	runTaskErr := vm.Run()
 
 	t1 := time.Now()
 
@@ -126,6 +129,10 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		Steps:       vm.ExecutionLogs,
 		Reason:      triggerMetadata,
 		TriggerName: task.Trigger.Name,
+
+		// Note: despite the name OutputData, this isn't output data of the task, it's the parsed and enrich data based on the event
+		// it's a synthetic data to help end-user interact with the data come in from event, at run time, it's  accessible through <triggerName>.data
+		OutputData: vm.parsedTriggerData.GetValue(),
 	}
 
 	if runTaskErr != nil {

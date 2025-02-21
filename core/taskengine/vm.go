@@ -53,15 +53,52 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 	})
 }
 
+type triggerDataType struct {
+	TransferEvent *avsproto.Execution_TransferEventOutput
+	RawEvent      *avsproto.Execution_RawEventOutput
+	Block         *avsproto.Execution_BlockOutput
+	Time          *avsproto.Execution_TimeOutput
+}
+
+func (t *triggerDataType) GetValue() avsproto.IsExecution_OutputData {
+	if t.TransferEvent != nil {
+		return &avsproto.Execution_TransferEvent{
+			TransferEvent: t.TransferEvent,
+		}
+	}
+	if t.RawEvent != nil {
+		return &avsproto.Execution_RawEvent{
+			RawEvent: t.RawEvent,
+		}
+	}
+	if t.Block != nil {
+		return &avsproto.Execution_Block{
+			Block: t.Block,
+		}
+	}
+	if t.Time != nil {
+		return &avsproto.Execution_Time{
+			Time: t.Time,
+		}
+	}
+
+	return nil
+}
+
 // The VM is the core component that load the node information and execute them, yield finaly result
 type VM struct {
 	// Input raw task data
 	// TaskID can be used to cache compile program
-	TaskID      string
-	TaskNodes   map[string]*avsproto.TaskNode
-	TaskEdges   []*avsproto.TaskEdge
-	TaskTrigger *avsproto.TaskTrigger
-	TaskOwner   common.Address
+	TaskID    string
+	TaskNodes map[string]*avsproto.TaskNode
+
+	//TaskEdges   []*avsproto.TaskEdge
+	//TaskTrigger *avsproto.TaskTrigger
+	TaskOwner common.Address
+
+	task              *model.Task
+	reason            *avsproto.TriggerReason
+	parsedTriggerData *triggerDataType
 
 	// executin logs and result per plans
 	ExecutionLogs []*avsproto.Execution_Step
@@ -111,7 +148,7 @@ func (v *VM) WithLogger(logger sdklogging.Logger) *VM {
 func (v *VM) GetTriggerNameAsVar() string {
 	// Replace invalid characters with _
 	re := regexp.MustCompile(`[^a-zA-Z0-9_$]`)
-	name := v.TaskTrigger.Name
+	name := v.task.Trigger.Name
 	standardized := re.ReplaceAllString(name, "_")
 
 	// Ensure the first character is valid
@@ -141,16 +178,20 @@ func (v *VM) GetNodeNameAsVar(nodeID string) string {
 
 func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
 	v := &VM{
-		Status:            VMStateInitialize,
-		TaskEdges:         task.Edges,
-		TaskNodes:         make(map[string]*avsproto.TaskNode),
-		TaskTrigger:       task.Trigger,
-		TaskOwner:         common.HexToAddress(task.Owner),
+		Status: VMStateInitialize,
+		//TaskEdges:         task.Edges,
+		//TaskTrigger:       task.Trigger,
+		TaskNodes: make(map[string]*avsproto.TaskNode),
+		TaskOwner: common.HexToAddress(task.Owner),
+
 		plans:             make(map[string]*Step),
 		mu:                &sync.Mutex{},
 		instructionCount:  0,
 		secrets:           secrets,
 		smartWalletConfig: smartWalletConfig,
+		reason:            reason,
+		task:              task,
+		parsedTriggerData: &triggerDataType{},
 	}
 
 	for _, node := range task.Nodes {
@@ -166,7 +207,7 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 		}
 
 		if reason.LogIndex > 0 && reason.TxHash != "" {
-			// if it contains event, we need to fetch and pop
+			// if it contains event, we need to fetch and populate data
 			receipt, err := rpcConn.TransactionReceipt(context.Background(), common.HexToHash(reason.TxHash))
 			if err != nil {
 				return nil, err
@@ -175,9 +216,11 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 			var event *types.Log
 			//event := receipt.Logs[triggerMetadata.LogIndex]
 
+			// TODO Is there a cheaper way to avoid hitting RPC this much?
 			for _, l := range receipt.Logs {
 				if uint64(l.Index) == reason.LogIndex {
 					event = l
+					break
 				}
 			}
 
@@ -193,36 +236,77 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 				return nil, fmt.Errorf("RPC error getting block header. Retry: %w", err)
 			}
 
-			parseTransfer, err := ef.ParseTransfer(*event)
-			formattedValue := ToDecimal(parseTransfer.Value, int(tokenMetadata.Decimals)).String()
+			// Only parse data for transfer event
+			if strings.EqualFold(event.Topics[0].Hex(), EvmErc20TransferTopic0) {
+				parseTransfer, err := ef.ParseTransfer(*event)
+				if err != nil {
+					// TODO: This error is retryable
+					return nil, fmt.Errorf("error parsing transfer event: %w", err)
+				}
+				formattedValue := ToDecimal(parseTransfer.Value, int(tokenMetadata.Decimals)).String()
 
-			v.vars[triggerVarName].(map[string]any)["data"] = map[string]any{
-				"topics": lo.Map(event.Topics, func(topic common.Hash, _ int) string {
-					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
-				}),
-				"data": "0x" + common.Bytes2Hex(event.Data),
+				v.vars[triggerVarName].(map[string]any)["data"] = map[string]any{
+					"topics": lo.Map(event.Topics, func(topic common.Hash, _ int) string {
+						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+					}),
+					"data": "0x" + common.Bytes2Hex(event.Data),
 
-				"token_name":        tokenMetadata.Name,
-				"token_symbol":      tokenMetadata.Symbol,
-				"token_decimals":    tokenMetadata.Decimals,
-				"transaction_hash":  event.TxHash,
-				"address":           strings.ToLower(event.Address.Hex()),
-				"block_number":      event.BlockNumber,
-				"block_timestamp":   blockHeader.Time,
-				"from_address":      parseTransfer.From.String(),
-				"to_address":        parseTransfer.To.String(),
-				"value":             parseTransfer.Value.String(),
-				"value_formatted":   formattedValue,
-				"transaction_index": event.TxIndex,
+					"token_name":        tokenMetadata.Name,
+					"token_symbol":      tokenMetadata.Symbol,
+					"token_decimals":    tokenMetadata.Decimals,
+					"transaction_hash":  event.TxHash,
+					"address":           strings.ToLower(event.Address.Hex()),
+					"block_number":      event.BlockNumber,
+					"block_timestamp":   blockHeader.Time,
+					"from_address":      parseTransfer.From.String(),
+					"to_address":        parseTransfer.To.String(),
+					"value":             parseTransfer.Value.String(),
+					"value_formatted":   formattedValue,
+					"transaction_index": event.TxIndex,
+				}
+
+				v.parsedTriggerData.TransferEvent = &avsproto.Execution_TransferEventOutput{
+					TokenName:        tokenMetadata.Name,
+					TokenSymbol:      tokenMetadata.Symbol,
+					TokenDecimals:    uint32(tokenMetadata.Decimals),
+					TransactionHash:  event.TxHash.Hex(),
+					Address:          event.Address.Hex(),
+					BlockNumber:      event.BlockNumber,
+					BlockTimestamp:   blockHeader.Time,
+					FromAddress:      parseTransfer.From.String(),
+					ToAddress:        parseTransfer.To.String(),
+					Value:            parseTransfer.Value.String(),
+					ValueFormatted:   formattedValue,
+					TransactionIndex: uint32(event.TxIndex),
+				}
+			} else {
+				v.parsedTriggerData.RawEvent = &avsproto.Execution_RawEventOutput{
+					Address:          event.Address.Hex(),
+					BlockHash:        event.BlockHash.Hex(),
+					BlockNumber:      event.BlockNumber,
+					Data:             "0x" + common.Bytes2Hex(event.Data),
+					Index:            uint32(event.Index),
+					TransactionHash:  event.TxHash.Hex(),
+					TransactionIndex: uint32(event.TxIndex),
+					Topics: lo.Map(event.Topics, func(topic common.Hash, _ int) string {
+						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+					}),
+				}
 			}
 		}
 
 		if reason.BlockNumber > 0 {
 			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["block_number"] = reason.BlockNumber
+			v.parsedTriggerData.Block = &avsproto.Execution_BlockOutput{
+				BlockNumber: uint64(reason.BlockNumber),
+			}
 		}
 
 		if reason.Epoch > 0 {
 			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["epoch"] = reason.Epoch
+			v.parsedTriggerData.Time = &avsproto.Execution_TimeOutput{
+				Epoch: uint64(reason.Epoch),
+			}
 		}
 	}
 
@@ -243,8 +327,8 @@ func (v *VM) AddVar(key string, value any) {
 
 // Compile generates an execution plan based on edge
 func (v *VM) Compile() error {
-	triggerId := v.TaskTrigger.Id
-	for _, edge := range v.TaskEdges {
+	triggerId := v.task.Trigger.Id
+	for _, edge := range v.task.Edges {
 		if strings.Contains(edge.Source, ".") {
 			v.plans[edge.Source] = &Step{
 				NodeID: edge.Source,
@@ -327,25 +411,35 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*avsproto.Execution_Step, err
 	v.instructionCount += 1
 
 	var err error
-	executionLog := &avsproto.Execution_Step{
+	executionStep := &avsproto.Execution_Step{
 		NodeId: node.Id,
+		Inputs: []string{},
+	}
+	for k, _ := range v.vars {
+		varname := k
+		if varname == "apContext" {
+			varname = "apContext.configVars"
+		} else {
+			varname = fmt.Sprintf("%s.data", varname)
+		}
+		executionStep.Inputs = append(executionStep.Inputs, varname)
 	}
 
 	if nodeValue := node.GetRestApi(); nodeValue != nil {
-		executionLog, err = v.runRestApi(node.Id, nodeValue)
+		executionStep, err = v.runRestApi(node.Id, nodeValue)
 	} else if nodeValue := node.GetBranch(); nodeValue != nil {
-		executionLog, err = v.runBranch(node.Id, nodeValue)
+		executionStep, err = v.runBranch(node.Id, nodeValue)
 	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
-		executionLog, err = v.runGraphQL(node.Id, nodeValue)
+		executionStep, err = v.runGraphQL(node.Id, nodeValue)
 	} else if nodeValue := node.GetCustomCode(); nodeValue != nil {
-		executionLog, err = v.runCustomCode(node.Id, nodeValue)
+		executionStep, err = v.runCustomCode(node.Id, nodeValue)
 	} else if nodeValue := node.GetContractRead(); nodeValue != nil {
-		executionLog, err = v.runContractRead(node.Id, nodeValue)
+		executionStep, err = v.runContractRead(node.Id, nodeValue)
 	} else if nodeValue := node.GetContractWrite(); nodeValue != nil {
-		executionLog, err = v.runContractWrite(node.Id, nodeValue)
+		executionStep, err = v.runContractWrite(node.Id, nodeValue)
 	}
 
-	return executionLog, err
+	return executionStep, err
 }
 
 func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
