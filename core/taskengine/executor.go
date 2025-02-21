@@ -31,8 +31,8 @@ type TaskExecutor struct {
 }
 
 type QueueExecutionData struct {
-	TriggerMetadata *avsproto.TriggerMetadata
-	ExecutionID     string
+	Reason      *avsproto.TriggerReason
+	ExecutionID string
 }
 
 func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
@@ -80,7 +80,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	if queueData == nil || queueData.ExecutionID == "" {
 		return nil, fmt.Errorf("internal error: invalid execution id")
 	}
-	triggerMetadata := queueData.TriggerMetadata
+	triggerMetadata := queueData.Reason
 
 	secrets, _ := LoadSecretForTask(x.db, task)
 	vm, err := NewVMWithData(task, triggerMetadata, x.smartWalletConfig, secrets)
@@ -118,13 +118,13 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	execution := &avsproto.Execution{
-		Id:              queueData.ExecutionID,
-		StartAt:         t0.Unix(),
-		EndAt:           t1.Unix(),
-		Success:         runTaskErr == nil,
-		Error:           "",
-		Steps:           vm.ExecutionLogs,
-		TriggerMetadata: triggerMetadata,
+		Id:      queueData.ExecutionID,
+		StartAt: t0.Unix(),
+		EndAt:   t1.Unix(),
+		Success: runTaskErr == nil,
+		Error:   "",
+		Steps:   vm.ExecutionLogs,
+		Reason:  triggerMetadata,
 	}
 
 	if runTaskErr != nil {

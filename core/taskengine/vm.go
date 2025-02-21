@@ -139,7 +139,7 @@ func (v *VM) GetNodeNameAsVar(nodeID string) string {
 	return standardized
 }
 
-func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
+func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
 	v := &VM{
 		Status:            VMStateInitialize,
 		TaskEdges:         task.Edges,
@@ -160,14 +160,14 @@ func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, 
 	v.vars = macros.GetEnvs(map[string]any{})
 	triggerVarName := v.GetTriggerNameAsVar()
 	// popular trigger data for trigger variable
-	if triggerMetadata != nil {
+	if reason != nil {
 		v.vars[triggerVarName] = map[string]any{
 			"data": map[string]any{},
 		}
 
-		if triggerMetadata.LogIndex > 0 && triggerMetadata.TxHash != "" {
+		if reason.LogIndex > 0 && reason.TxHash != "" {
 			// if it contains event, we need to fetch and pop
-			receipt, err := rpcConn.TransactionReceipt(context.Background(), common.HexToHash(triggerMetadata.TxHash))
+			receipt, err := rpcConn.TransactionReceipt(context.Background(), common.HexToHash(reason.TxHash))
 			if err != nil {
 				return nil, err
 			}
@@ -176,13 +176,13 @@ func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, 
 			//event := receipt.Logs[triggerMetadata.LogIndex]
 
 			for _, l := range receipt.Logs {
-				if uint64(l.Index) == triggerMetadata.LogIndex {
+				if uint64(l.Index) == reason.LogIndex {
 					event = l
 				}
 			}
 
 			if event == nil {
-				return nil, fmt.Errorf("tx %s doesn't content event %d", triggerMetadata.TxHash, triggerMetadata.LogIndex)
+				return nil, fmt.Errorf("tx %s doesn't content event %d", reason.TxHash, reason.LogIndex)
 			}
 
 			tokenMetadata, err := GetMetadataForTransfer(event)
@@ -217,12 +217,12 @@ func NewVMWithData(task *model.Task, triggerMetadata *avsproto.TriggerMetadata, 
 			}
 		}
 
-		if triggerMetadata.BlockNumber > 0 {
-			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["block_number"] = triggerMetadata.BlockNumber
+		if reason.BlockNumber > 0 {
+			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["block_number"] = reason.BlockNumber
 		}
 
-		if triggerMetadata.Epoch > 0 {
-			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["epoch"] = triggerMetadata.Epoch
+		if reason.Epoch > 0 {
+			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["epoch"] = reason.Epoch
 		}
 	}
 

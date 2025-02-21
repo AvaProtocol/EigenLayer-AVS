@@ -249,7 +249,7 @@ message Execution {
   bool   success = 4;
   string error   = 5;
 
-  TriggerMetadata trigger_metadata = 6;
+  TriggerReason reason = 6;
 
   message Step {
     string node_id = 1;
@@ -263,6 +263,9 @@ message Execution {
   }
 
   repeated Step steps = 8;
+
+  string triggerName = 9;
+  //triggerOutput = 10;
 }
 
 
@@ -411,14 +414,14 @@ message KeyResp {
 }
 
 
-// TriggerMetadata represent a lookup that we can use to identify when/where/how it is trigger
+// TriggerReason represent a lookup that we can use to identify when/where/how it is trigger
 // In a block trigger, we will have block_number
 // In an event trigger, we will have the log_index, tx_hash and the block_number
 // In a time based trigger(cron/fixed time) we will have the epoch.
 //
-// TriggerMetadata is used to populate the `<trigger-name>.data` variable. Example, if this is a transfer
+// TriggerReason is used to populate the `<trigger-name>.data` variable. Example, if this is a transfer
 // event, then you will have access to <trigger-name>.data.from_address or <trigger-name>.data.value
-message TriggerMetadata {
+message TriggerReason {
   uint64 block_number = 1;
   uint64 log_index    = 2;
   string tx_hash      = 3;
@@ -460,7 +463,7 @@ message GetWalletResp {
 
 message UserTriggerTaskReq {
   string task_id = 1;
-  TriggerMetadata trigger_metadata = 2;
+  TriggerReason reason = 2;
   // when setting is_blocking=true, the execution run in the same request. the request is blocked until the execution is done
   // setting to false, the task will be execute in our normal queueu system, and the request won't block.
   // default value is false, for interact testing, set this to true

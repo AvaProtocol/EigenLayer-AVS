@@ -409,8 +409,8 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	n.lock.Unlock()
 
 	queueTaskData := QueueExecutionData{
-		TriggerMetadata: payload.TriggerMetadata,
-		ExecutionID:     ulid.Make().String(),
+		Reason:      payload.Reason,
+		ExecutionID: ulid.Make().String(),
 	}
 
 	data, err := json.Marshal(queueTaskData)
@@ -586,8 +586,8 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 	}
 
 	queueTaskData := QueueExecutionData{
-		TriggerMetadata: payload.TriggerMetadata,
-		ExecutionID:     ulid.Make().String(),
+		Reason:      payload.Reason,
+		ExecutionID: ulid.Make().String(),
 	}
 
 	if payload.IsBlocking {
@@ -702,15 +702,15 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 			}
 			switch task.GetTrigger().GetTriggerType().(type) {
 			case *avsproto.TaskTrigger_Manual:
-				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Manual
+				exec.Reason.Type = avsproto.TriggerReason_Manual
 			case *avsproto.TaskTrigger_FixedTime:
-				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_FixedTime
+				exec.Reason.Type = avsproto.TriggerReason_FixedTime
 			case *avsproto.TaskTrigger_Cron:
-				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Cron
+				exec.Reason.Type = avsproto.TriggerReason_Cron
 			case *avsproto.TaskTrigger_Block:
-				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Block
+				exec.Reason.Type = avsproto.TriggerReason_Block
 			case *avsproto.TaskTrigger_Event:
-				exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Event
+				exec.Reason.Type = avsproto.TriggerReason_Event
 			}
 			executioResp.Items = append(executioResp.Items, &exec)
 			total += 1
@@ -767,15 +767,15 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 	if err := protojson.Unmarshal(executionValue, &exec); err == nil {
 		switch task.GetTrigger().GetTriggerType().(type) {
 		case *avsproto.TaskTrigger_Manual:
-			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Manual
+			exec.Reason.Type = avsproto.TriggerReason_Manual
 		case *avsproto.TaskTrigger_FixedTime:
-			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_FixedTime
+			exec.Reason.Type = avsproto.TriggerReason_FixedTime
 		case *avsproto.TaskTrigger_Cron:
-			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Cron
+			exec.Reason.Type = avsproto.TriggerReason_Cron
 		case *avsproto.TaskTrigger_Block:
-			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Block
+			exec.Reason.Type = avsproto.TriggerReason_Block
 		case *avsproto.TaskTrigger_Event:
-			exec.TriggerMetadata.Type = avsproto.TriggerMetadata_Event
+			exec.Reason.Type = avsproto.TriggerReason_Event
 		}
 	}
 
