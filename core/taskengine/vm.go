@@ -55,21 +55,21 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 }
 
 type triggerDataType struct {
-	TransferEvent *avsproto.Execution_TransferEventOutput
-	RawEvent      *avsproto.Execution_RawEventOutput
-	Block         *avsproto.Execution_BlockOutput
-	Time          *avsproto.Execution_TimeOutput
+	TransferLog *avsproto.Execution_TransferLogOutput
+	EvmLog      *avsproto.Execution_EvmLogOutput
+	Block       *avsproto.Execution_BlockOutput
+	Time        *avsproto.Execution_TimeOutput
 }
 
 func (t *triggerDataType) GetValue() avsproto.IsExecution_OutputData {
-	if t.TransferEvent != nil {
-		return &avsproto.Execution_TransferEvent{
-			TransferEvent: t.TransferEvent,
+	if t.TransferLog != nil {
+		return &avsproto.Execution_TransferLog{
+			TransferLog: t.TransferLog,
 		}
 	}
-	if t.RawEvent != nil {
-		return &avsproto.Execution_RawEvent{
-			RawEvent: t.RawEvent,
+	if t.EvmLog != nil {
+		return &avsproto.Execution_EvmLog{
+			EvmLog: t.EvmLog,
 		}
 	}
 	if t.Block != nil {
@@ -266,7 +266,7 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 					"transaction_index": event.TxIndex,
 				}
 
-				v.parsedTriggerData.TransferEvent = &avsproto.Execution_TransferEventOutput{
+				v.parsedTriggerData.TransferLog = &avsproto.Execution_TransferLogOutput{
 					TokenName:        tokenMetadata.Name,
 					TokenSymbol:      tokenMetadata.Symbol,
 					TokenDecimals:    uint32(tokenMetadata.Decimals),
@@ -281,7 +281,7 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 					TransactionIndex: uint32(event.TxIndex),
 				}
 			} else {
-				v.parsedTriggerData.RawEvent = &avsproto.Execution_RawEventOutput{
+				v.parsedTriggerData.EvmLog = &avsproto.Execution_EvmLogOutput{
 					Address:          event.Address.Hex(),
 					BlockHash:        event.BlockHash.Hex(),
 					BlockNumber:      event.BlockNumber,
