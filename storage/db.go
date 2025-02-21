@@ -177,6 +177,32 @@ func (s *BadgerStorage) GetKeyHasPrefix(prefix []byte) ([][]byte, error) {
 	return result, nil
 }
 
+// // CountByPrefix return total key under a specfic prefix
+// func (s *BadgerStorage) CountByPrefix(prefix []byte) (int64, error) {
+// 	var result [][]byte
+//
+// 	err := s.db.View(func(txn *badger.Txn) error {
+// 		opts := badger.DefaultIteratorOptions
+// 		opts.PrefetchValues = false
+//
+// 		it := txn.NewIterator(opts)
+// 		defer it.Close()
+//
+// 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+// 			item := it.Item()
+// 			k := item.Key()
+// 			result = append(result, k)
+// 		}
+// 		return nil
+// 	})
+//
+// 	if err != nil {
+// 		return result, err
+// 	}
+//
+// 	return result, nil
+// }
+
 func (s *BadgerStorage) Exist(key []byte) (bool, error) {
 	found := false
 	err := s.db.View(func(txn *badger.Txn) error {
