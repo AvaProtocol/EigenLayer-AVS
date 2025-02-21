@@ -83,6 +83,11 @@ func TaskIdFromExecutionStorageKey(key []byte) string {
 	return string(key[8:34])
 }
 
+func TaskIdFromTaskStatusStorageKey(key []byte) []byte {
+	// Exampley key u:0xd7050816337a3f8f690f8083b5ff8019d50c0e50:0x415f09526f25d6520d471890abf0953b0505313d:01JMN2JHAGXTNSY46KH0KYY0MZ
+	return key[88:114]
+}
+
 // Convert task status gRPC enum into the storage prefix
 // c: completed. task is completed and no longer being check for trigger anymore
 // f: failed. task is failed to executed, and no longer being check for trigger anymore

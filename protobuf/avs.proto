@@ -602,7 +602,6 @@ service Aggregator {
   rpc ListWallets(ListWalletReq)    returns (ListWalletResp) {};
 
   
-
   // Task Management Operation
   rpc CreateTask(CreateTaskReq)         returns (CreateTaskResp) {};
   rpc ListTasks(ListTasksReq)           returns (ListTasksResp) {};
@@ -630,15 +629,38 @@ service Aggregator {
   // The current implementation is also limited, update is an override action, not an appending action. So when updating, you need to pass the whole payload
   rpc UpdateSecret(CreateOrUpdateSecretReq) returns (google.protobuf.BoolValue) {};
 
-  rpc GetWorkflowCount(GetWorkflowCountRequest) returns (GetWorkflowCountResponse);
+  // The spec of these 2 RPCs are based on the following issue:
+  // Reference: https://github.com/AvaProtocol/EigenLayer-AVS/issues/150
+  // GetWorkflowCount returns the total count of workflows for the given eoa addresses or a list of smart wallet addresses belongs to the eoa in the auth key
+  // When passing a list of smart wallet addresses, we will return the total count of workflows belongs to all of them
+  // If the smart wallet address is not found in our system, we will ignore it and not count towards the total
+  // if smart wallet address doesn't belong to the eoa in the auth key, we will also ignore it and not count towards the total
+  rpc GetWorkflowCount(GetWorkflowCountReq) returns (GetWorkflowCountResp);
+
+  // GetExecutionCount returns the total number of executions for specified workflow IDs or all workflows linked to the EOA in the auth key.
+  // If no workflow IDs are provided, it counts executions for all workflows of the EOA.
+  // Workflow IDs not found in the system are ignored.
+  // Workflow IDs not linked to the EOA in the auth key are also ignored.
+  rpc GetExecutionCount(GetExecutionCountReq) returns (GetExecutionCountResp);
 }
 
 // Request message for GetWorkflowCount
-message GetWorkflowCountRequest {
+message GetWorkflowCountReq {
   repeated string addresses = 1; // Optional array of smart wallet addresses
 }
 
 // Response message for GetWorkflowCount
-message GetWorkflowCountResponse {
-  int32 count = 1; // The count of workflows
+message GetWorkflowCountResp {
+  // TODO: eventually to support active, cancel and other metrics
+  int64 total = 1; // the total count of workflow
+}
+
+message GetExecutionCountReq {
+  repeated string workflow_ids = 1; // Optional array of workflow IDs, count all executions of the owner if not provided
+}
+
+// Response message for GetExecutionCount
+message GetExecutionCountResp {
+  // TODO: eventually to support success, error count execution
+  int64 total = 1; // The total count of executions
 }

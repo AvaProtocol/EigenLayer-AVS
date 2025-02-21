@@ -112,11 +112,13 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	// when MaxExecution is 0, it means unlimited run until cancel
 	if task.MaxExecution > 0 && task.TotalExecution >= task.MaxExecution {
+		fmt.Println("Set complete", task.Id)
 		task.SetCompleted()
 	}
 
 	// If it rached the end, flag the task completed as well
-	if t1.Unix() >= task.ExpiredAt {
+	if task.ExpiredAt > 0 && t1.Unix() >= task.ExpiredAt {
+		fmt.Println("Set complete", task.Id)
 		task.SetCompleted()
 	}
 

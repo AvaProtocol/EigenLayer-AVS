@@ -416,6 +416,10 @@ func (v *VM) Run() error {
 func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 	v.instructionCount += 1
 
+	if node == nil {
+		return nil, nil
+	}
+
 	var step *Step
 	var err error
 
@@ -436,8 +440,11 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 	if step != nil {
 		return step, err
 	}
-
-	return v.plans[node.Id], err
+	
+	if _, ok := v.plans[node.Id]; ok {
+		return v.plans[node.Id], err
+	}
+	return nil, err
 }
 
 func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*Step, error) {

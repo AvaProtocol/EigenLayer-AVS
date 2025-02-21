@@ -33,6 +33,10 @@ type Storage interface {
 	ListKeys(prefix string) ([]string, error)
 	ListKeysMulti(prefixes []string) ([]string, error)
 
+	// A key only counting keys that has a prefix, very efficient because only operating on lsm tree
+	CountKeysByPrefix(prefix []byte) (int64, error)
+	CountKeysByPrefixes(prefixes [][]byte) (int64, error)
+
 	BatchWrite(updates map[string][]byte) error
 	Move(src, dest []byte) error
 	Set(key, value []byte) error
@@ -164,7 +168,8 @@ func (s *BadgerStorage) GetKeyHasPrefix(prefix []byte) ([][]byte, error) {
 
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			item := it.Item()
-			k := item.Key()
+			k := item.KeyCopy(nil)
+
 			result = append(result, k)
 		}
 		return nil
@@ -177,31 +182,47 @@ func (s *BadgerStorage) GetKeyHasPrefix(prefix []byte) ([][]byte, error) {
 	return result, nil
 }
 
-// // CountByPrefix return total key under a specfic prefix
-// func (s *BadgerStorage) CountByPrefix(prefix []byte) (int64, error) {
-// 	var result [][]byte
-//
-// 	err := s.db.View(func(txn *badger.Txn) error {
-// 		opts := badger.DefaultIteratorOptions
-// 		opts.PrefetchValues = false
-//
-// 		it := txn.NewIterator(opts)
-// 		defer it.Close()
-//
-// 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-// 			item := it.Item()
-// 			k := item.Key()
-// 			result = append(result, k)
-// 		}
-// 		return nil
-// 	})
-//
-// 	if err != nil {
-// 		return result, err
-// 	}
-//
-// 	return result, nil
-// }
+// CountByPrefix return total key under a specfic prefix
+func (s *BadgerStorage) CountKeysByPrefix(prefix []byte) (int64, error) {
+	total := int64(0)
+
+	if len(prefix) == 0 {
+		return 0, fmt.Errorf("cannot count prefix with length 0")
+	}
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			total += 1
+		}
+		return nil
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return total, nil
+}
+
+func (s *BadgerStorage) CountKeysByPrefixes(prefixes [][]byte) (int64, error) {
+	total := int64(0)
+
+	for _, prefix := range prefixes {
+		count, err := s.CountKeysByPrefix(prefix)
+		if err != nil {
+			return 0, err
+		}
+		total += count
+	}
+
+	return total, nil
+}
 
 func (s *BadgerStorage) Exist(key []byte) (bool, error) {
 	found := false
@@ -324,7 +345,7 @@ func (a *BadgerStorage) ListKeys(prefix string) ([]string, error) {
 
 		for it.Seek([]byte(prefix)); it.ValidForPrefix([]byte(prefix)); it.Next() {
 			item := it.Item()
-			key := item.Key()
+			key := item.KeyCopy(nil)
 
 			keys = append(keys, fmt.Sprintf("%s", key))
 		}
