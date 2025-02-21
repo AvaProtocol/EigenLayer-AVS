@@ -77,7 +77,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				Address:   o.config.OperatorAddress,
 				Signature: "pending",
 				TaskId:    triggerItem.TaskID,
-				TriggerMetadata: &avspb.TriggerMetadata{
+				Reason: &avspb.TriggerReason{
 					BlockNumber: uint64(triggerItem.Marker),
 				},
 			}); err == nil {
@@ -93,7 +93,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				Address:   o.config.OperatorAddress,
 				Signature: "pending",
 				TaskId:    triggerItem.TaskID,
-				TriggerMetadata: &avspb.TriggerMetadata{
+				Reason: &avspb.TriggerReason{
 					BlockNumber: uint64(triggerItem.Marker.BlockNumber),
 					LogIndex:    uint64(triggerItem.Marker.LogIndex),
 					TxHash:      triggerItem.Marker.TxHash,
