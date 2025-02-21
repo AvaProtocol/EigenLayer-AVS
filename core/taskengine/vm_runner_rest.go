@@ -93,6 +93,15 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		request = request.SetHeader(k, v)
 	}
 
+	u, err := url.Parse(processedNode.Url)
+	if err != nil {
+		s.Error = fmt.Sprintf("cannot parse url: %s", processedNode.Url)
+		return nil, err
+	}
+
+	log.WriteString(fmt.Sprintf("Execute %s %s at %s", processedNode.Method, u.Hostname(), time.Now()))
+	s.Log = log.String()
+
 	var resp *resty.Response
 	if strings.EqualFold(processedNode.Method, "post") {
 		resp, err = request.Post(processedNode.Url)
@@ -103,15 +112,6 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	} else {
 		resp, err = request.Get(processedNode.Url)
 	}
-
-	u, err := url.Parse(processedNode.Url)
-	if err != nil {
-		s.Error = fmt.Sprintf("cannot parse url: %s", processedNode.Url)
-		return nil, err
-	}
-
-	log.WriteString(fmt.Sprintf("Execute %s %s at %s", processedNode.Method, u.Hostname(), time.Now()))
-	s.Log = log.String()
 
 	s.OutputData = string(resp.Body())
 
@@ -131,6 +131,13 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		s.Success = false
 		s.Error = err.Error()
 		return s, err
+	} else {
+		// Check if the response status code is not 2xx or 3xx, we consider it as an error exeuction
+		if resp.StatusCode() < 200 || resp.StatusCode() >= 400 {
+			s.Success = false
+			s.Error = fmt.Sprintf("unexpected status code: %d", resp.StatusCode())
+			return s, fmt.Errorf("unexpected status code: %d", resp.StatusCode())
+		}
 	}
 
 	return s, nil
