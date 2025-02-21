@@ -3,13 +3,14 @@ package taskengine
 import (
 	"net/http"
 	"net/http/httptest"
-	"testing"
 	"reflect"
+	"sort"
+	"testing"
+
 	"github.com/AvaProtocol/ap-avs/core/testutil"
 	"github.com/AvaProtocol/ap-avs/model"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/storage"
-	"sort"
 )
 
 func TestExecutorRunTaskSucess(t *testing.T) {
@@ -315,7 +316,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simulate a response with "I'm hit"	
+		// Simulate a response with "I'm hit"
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"message": "I'm hit"}`))
 	}))
@@ -377,7 +378,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 					Body:   "hit=notification1",
 				},
 			},
-		},		
+		},
 	}
 
 	trigger := &avsproto.TaskTrigger{
@@ -465,7 +466,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		t.Errorf("expect 4 steps but got: %d", len(execution.Steps))
 	}
 
-	outputData := execution.OutputData.(*avsproto.Execution_TransferEvent).TransferEvent
+	outputData := execution.OutputData.(*avsproto.Execution_TransferLog).TransferLog
 
 	// cannot use deepqual here due to the pointer issue of protobuf
 	if outputData.TokenName != "USDC" {
@@ -520,8 +521,6 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		t.Errorf("expect nodeid as spacex, branch1, customcode1, rest1 but got: %s", []string{execution.Steps[0].NodeId, execution.Steps[1].NodeId, execution.Steps[2].NodeId, execution.Steps[3].NodeId})
 	}
 
-
-
 	// Verify the inputs of each step
 	expectedInputsStep0 := []string{"triggertest.data", "apContext.configVars"}
 	expectedInputsStep1 := []string{"triggertest.data", "spacex.data", "apContext.configVars"}
@@ -545,7 +544,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 	sort.Strings(execution.Steps[2].Inputs)
 	if !reflect.DeepEqual(execution.Steps[2].Inputs, expectedInputsStep2) {
 		t.Errorf("expect inputs for step 2 to be %v but got: %v", expectedInputsStep2, execution.Steps[2].Inputs)
-	}	
+	}
 
 	sort.Strings(expectedInputsStep3)
 	sort.Strings(execution.Steps[3].Inputs)
