@@ -174,6 +174,18 @@ var (
 		"parseUnit": ParseUnit,
 		"toBigInt":  ToBigInt,
 	}
+	MacroFuncs = []string{
+		"fetch",
+		"readContractData",
+		"priceChainlink",
+		"chainlinkPrice",
+		"latestRoundDataChainlink",
+		"bigCmp",
+		"bigGt",
+		"bigLt",
+		"parseUnit",
+		"toBigInt",
+	}
 )
 
 // FetchResponse mimics the JS fetch Response object
