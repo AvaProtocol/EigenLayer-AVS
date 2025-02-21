@@ -224,3 +224,11 @@ func GetTestSecrets() map[string]string {
 		"my_awesome_secret": "my_awesome_secret_value",
 	}
 }
+
+func GetTestEventTriggerMetadata() *avsproto.TriggerMetadata {
+	return &avsproto.TriggerMetadata{
+		BlockNumber: 7212417,
+		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+		LogIndex:    98,
+	}
+}
