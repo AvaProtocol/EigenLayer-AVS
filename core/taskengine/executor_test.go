@@ -91,6 +91,10 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 		t.Errorf("expect no error but got %v", err)
 	}
 
+	if execution.TriggerName != "triggertest" {
+		t.Errorf("expect field triggerName is triggertest but got: %s", execution.TriggerName)
+	}
+
 	if !execution.Success {
 		t.Errorf("Expect success status but got failure")
 	}

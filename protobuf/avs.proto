@@ -264,7 +264,7 @@ message Execution {
 
   repeated Step steps = 8;
 
-  string triggerName = 9;
+  string trigger_name = 9;
   //triggerOutput = 10;
 }
 

@@ -118,13 +118,14 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	execution := &avsproto.Execution{
-		Id:      queueData.ExecutionID,
-		StartAt: t0.Unix(),
-		EndAt:   t1.Unix(),
-		Success: runTaskErr == nil,
-		Error:   "",
-		Steps:   vm.ExecutionLogs,
-		Reason:  triggerMetadata,
+		Id:          queueData.ExecutionID,
+		StartAt:     t0.Unix(),
+		EndAt:       t1.Unix(),
+		Success:     runTaskErr == nil,
+		Error:       "",
+		Steps:       vm.ExecutionLogs,
+		Reason:      triggerMetadata,
+		TriggerName: task.Trigger.Name,
 	}
 
 	if runTaskErr != nil {

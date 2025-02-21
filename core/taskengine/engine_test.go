@@ -56,8 +56,6 @@ func TestListTasks(t *testing.T) {
 		t.Errorf("expect result is not nil but got nil")
 	}
 
-	fmt.Println(result)
-
 	if len(result.Items) != 1 {
 		t.Errorf("list task return wrong. expect 1, got %d", len(result.Items))
 	}
@@ -221,6 +219,10 @@ func TestGetExecution(t *testing.T) {
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 
+	if execution.TriggerName != tr1.Trigger.Name {
+		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
+	}
+
 	if execution.Id != resultTrigger.ExecutionId {
 		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
@@ -334,6 +336,9 @@ func TestTriggerSync(t *testing.T) {
 		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
 
+	if execution.TriggerName != tr1.Trigger.Name {
+		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
+	}
 	if execution.Reason.BlockNumber != 101 {
 		t.Errorf("invalid triggered block. expect 101 got %d", execution.Reason.BlockNumber)
 	}
@@ -394,6 +399,9 @@ func TestTriggerAsync(t *testing.T) {
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 
+	if execution.TriggerName != tr1.Trigger.Name {
+		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
+	}
 	if execution.Id != resultTrigger.ExecutionId {
 		t.Errorf("wring execution id, expected %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
