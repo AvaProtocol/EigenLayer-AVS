@@ -1,11 +1,13 @@
 package taskengine
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/ap-avs/core/testutil"
 	"github.com/AvaProtocol/ap-avs/model"
+	"github.com/AvaProtocol/ap-avs/pkg/gow"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -167,7 +169,24 @@ func TestFilterComplexLogic(t *testing.T) {
 		t.Errorf("expect third elemt is fourth  but got: %s", name3)
 	}
 
-	if !strings.Contains(step.OutputData, "second") {
-		t.Errorf("invalid finaly render output data")
+	data2 := gow.AnyToSlice(step.GetFilter().Data)
+	if !reflect.DeepEqual(
+		[]float64{15, 20, 19},
+		[]float64{
+			data2[0].(map[string]any)["cost"].(float64),
+			data2[1].(map[string]any)["cost"].(float64),
+			data2[2].(map[string]any)["cost"].(float64),
+		}) {
+		t.Errorf("exepect cost array is 15, 20, 19 but got: %v", data2)
+	}
+
+	if !reflect.DeepEqual(
+		[]string{"second", "third", "sixth"},
+		[]string{
+			data2[0].(map[string]any)["name"].(string),
+			data2[1].(map[string]any)["name"].(string),
+			data2[2].(map[string]any)["name"].(string),
+		}) {
+		t.Errorf("exepect name array is second, third, sixth but got: %v", data2)
 	}
 }

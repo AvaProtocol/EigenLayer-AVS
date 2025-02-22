@@ -10,6 +10,7 @@ import (
 
 	"github.com/AvaProtocol/ap-avs/core/testutil"
 	"github.com/AvaProtocol/ap-avs/model"
+	"github.com/AvaProtocol/ap-avs/pkg/gow"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -73,8 +74,20 @@ func TestRestRequest(t *testing.T) {
 	if step.Error != "" {
 		t.Errorf("expected log contains request trace data but found no")
 	}
-	if !strings.Contains(step.OutputData, "*This is a test format") {
-		t.Errorf("expected step result contains the http endpoint response body: %s", step.OutputData)
+
+	outputData := gow.AnyToMap(step.GetRestApi().Data)["form"].(map[string]any)
+	//[chat_id:123 disable_notification:true text:*This is a test format*]
+
+	if outputData["chat_id"].(string) != "123" {
+		t.Errorf("expect chat_id is 123 but got: %s", outputData["chat_id"])
+	}
+
+	if outputData["text"].(string) != "*This is a test format*" {
+		t.Errorf("expect text is *This is a test format* but got: %s", outputData["text"])
+	}
+
+	if outputData["disable_notification"].(string) != "true" {
+		t.Errorf("expect notificaion is disable but got: %s", outputData["disable_notification"])
 	}
 }
 
@@ -141,7 +154,7 @@ func TestRestRequestHandleEmptyResponse(t *testing.T) {
 		t.Errorf("expected rest node run succesfully but failed")
 	}
 
-	if step.OutputData != "" {
+	if gow.AnyToString(step.GetRestApi().Data) != "" {
 		t.Errorf("expected an empty response, got: %s", step.OutputData)
 	}
 }
@@ -216,7 +229,7 @@ func TestRestRequestRenderVars(t *testing.T) {
 		t.Errorf("expected rest node run succesfully but failed")
 	}
 
-	if step.OutputData != "my name is unitest" {
+	if gow.AnyToString(step.GetRestApi().Data) != "my name is unitest" {
 		t.Errorf("expected response is `my name is unitest`,  got: %s", step.OutputData)
 	}
 }
@@ -237,7 +250,7 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 	originalBody := "my name is {{myNode.data.name}}"
 	originalHeaders := map[string]string{
 		"Content-type": "application/x-www-form-urlencoded",
-		"X-Name":      "{{myNode.data.name}}",
+		"X-Name":       "{{myNode.data.name}}",
 	}
 
 	node := &avsproto.RestAPINode{
@@ -294,7 +307,7 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 	if !step.Success {
 		t.Errorf("expected rest node run successfully but failed")
 	}
-	if step.OutputData != "my name is first" {
+	if gow.AnyToString(step.GetRestApi().Data) != "my name is first" {
 		t.Errorf("expected response is `my name is first`, got: %s", step.OutputData)
 	}
 
@@ -313,7 +326,7 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 	if !step.Success {
 		t.Errorf("expected rest node run successfully but failed")
 	}
-	if step.OutputData != "my name is second" {
+	if gow.AnyToString(step.GetRestApi().Data) != "my name is second" {
 		t.Errorf("expected response is `my name is second`, got: %s", step.OutputData)
 	}
 

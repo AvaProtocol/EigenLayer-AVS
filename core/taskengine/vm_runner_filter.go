@@ -1,7 +1,6 @@
 package taskengine
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +8,8 @@ import (
 	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/dop251/goja"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type FilterProcessor struct {
@@ -41,7 +42,7 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
 		Log:        "",
-		OutputData: "",
+		OutputData: nil,
 		Success:    true,
 		Error:      "",
 		StartAt:    t0,
@@ -84,8 +85,17 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		return s, err
 	}
 	r.SetOutputVarForStep(stepID, filteredValues)
-	outputData, err := json.Marshal(filteredValues)
-	s.OutputData = string(outputData)
+
+	value, err := structpb.NewValue(filteredValues)
+	if err == nil {
+		pbResult, _ := anypb.New(value)
+		s.OutputData = &avsproto.Execution_Step_Filter{
+			Filter: &avsproto.FilterNode_Output{
+				Data: pbResult,
+			},
+		}
+	}
+
 	if err != nil {
 		log.WriteString(fmt.Sprintf("succeed perform filter input but cannot serialize data to the log. ignore data serlization: %v", err))
 	}

@@ -2,7 +2,6 @@ package taskengine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/AvaProtocol/ap-avs/pkg/byte4"
+	"github.com/AvaProtocol/ap-avs/pkg/gow"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -36,7 +36,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
 		Log:        "",
-		OutputData: "",
+		OutputData: nil,
 		Success:    true,
 		Error:      "",
 		StartAt:    t0,
@@ -90,9 +90,14 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 
 	log.WriteString(fmt.Sprintf("Call %s on %s at %s", method.Name, node.ContractAddress, time.Now()))
 	s.Log = log.String()
-	outputData, err := json.Marshal(result)
-	s.OutputData = string(outputData)
-	r.SetOutputVarForStep(stepID, outputData)
+
+	s.OutputData = &avsproto.Execution_Step_ContractRead{
+		ContractRead: &avsproto.ContractReadNode_Output{
+			Data: gow.SliceToStructPbSlice(result),
+		},
+	}
+
+	r.SetOutputVarForStep(stepID, result)
 	if err != nil {
 		s.Success = false
 		s.Error = err.Error()

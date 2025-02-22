@@ -76,7 +76,7 @@ func TestMustDB() storage.Storage {
 		panic(err)
 	}
 
-	//dir = "/tmp/ap-avs/test"
+	// dir = "/tmp/ap-avs/test"
 	db, err := storage.NewWithPath(dir)
 	if err != nil {
 		panic(err)
@@ -249,6 +249,24 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 		EthWsUrl:   strings.Replace(os.Getenv("RPC_URL"), "https://", "wss://", 1),
 		//FactoryAddress:       common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
 		FactoryAddress:       common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
+		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+		ControllerPrivateKey: controllerPrivateKey,
+	}
+}
+
+// Get smart wallet config for base
+// Using base sepolia to run test because it's very cheap and fast
+func GetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
+	controllerPrivateKey, err := crypto.HexToECDSA(os.Getenv("CONTROLLER_PRIVATE_KEY"))
+	if err != nil {
+		panic("Invalid controller private key from env. Ensure CONTROLLER_PRIVATE_KEY is ECDSA key of the controller wallet")
+	}
+
+	return &config.SmartWalletConfig{
+		EthRpcUrl:            os.Getenv("BASE_SEPOLIA_RPC_URL"),
+		BundlerURL:           os.Getenv("BASE_SEPOLIA_BUNDLER_RPC"),
+		EthWsUrl:             strings.Replace(os.Getenv("BASE_SEPOLIA_RPC_URL"), "https://", "wss://", 1),
+		FactoryAddress:       common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
 		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
 		ControllerPrivateKey: controllerPrivateKey,
 	}

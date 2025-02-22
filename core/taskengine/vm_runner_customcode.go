@@ -1,12 +1,13 @@
 package taskengine
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/dop251/goja"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
@@ -43,7 +44,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
 		Log:        "",
-		OutputData: "",
+		OutputData: nil,
 		Success:    true,
 		Error:      "",
 		StartAt:    t0,
@@ -74,11 +75,18 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 
 	if result != nil {
 		resultValue := result.Export()
-		// TODO: capsize
-		if outputData, serilizeError := json.Marshal(resultValue); serilizeError == nil {
-			s.OutputData = string(outputData)
-		} else {
-			log.WriteString("cannot serialize output data to log")
+
+		value, err := structpb.NewValue(resultValue)
+		if err != nil {
+			//return nil, fmt.Errorf("failed to convert to structpb.Value: %v", err)
+			return s, err
+		}
+		pbResult, _ := anypb.New(value)
+
+		s.OutputData = &avsproto.Execution_Step_CustomCode{
+			CustomCode: &avsproto.CustomCodeNode_Output{
+				Data: pbResult,
+			},
 		}
 		r.SetOutputVarForStep(stepID, resultValue)
 	}

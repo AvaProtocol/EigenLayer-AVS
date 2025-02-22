@@ -9,10 +9,10 @@ import (
 	"testing"
 
 	"github.com/dop251/goja"
-	"github.com/k0kubun/pp/v3"
 
 	"github.com/AvaProtocol/ap-avs/core/testutil"
 	"github.com/AvaProtocol/ap-avs/model"
+	"github.com/AvaProtocol/ap-avs/pkg/gow"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -152,7 +152,7 @@ func TestRunSequentialTasks(t *testing.T) {
 			Name: "graphql",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/get?query123",
+					Url:    "https://httpbin.org/get?query123=abc",
 					Method: "GET",
 					Headers: map[string]string{
 						"content-type": "application/json",
@@ -210,8 +210,6 @@ func TestRunSequentialTasks(t *testing.T) {
 		t.Errorf("Missing an execution")
 	}
 
-	pp.Print(vm.ExecutionLogs)
-
 	if !strings.Contains(vm.ExecutionLogs[0].Log, "Execute POST httpbin.org at") || !strings.Contains(vm.ExecutionLogs[1].Log, "Execute GET httpbin.org") {
 		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got nothing")
 	}
@@ -224,10 +222,12 @@ func TestRunSequentialTasks(t *testing.T) {
 		t.Errorf("incorrect node id in execution log")
 	}
 
-	if !strings.Contains(vm.ExecutionLogs[0].OutputData, "post123") {
+	outputData := gow.AnyToMap(vm.ExecutionLogs[0].GetRestApi().Data)
+	if outputData["data"].(string) != "post123" {
 		t.Errorf("rest node result is incorrect, should contains the string post123")
 	}
-	if !strings.Contains(vm.ExecutionLogs[1].OutputData, "query123") {
+	outputData = gow.AnyToMap(vm.ExecutionLogs[1].GetRestApi().Data)
+	if outputData["args"].(map[string]any)["query123"].(string) != "abc" {
 		t.Errorf("rest node result is incorrect, should contains the string query123")
 	}
 }
@@ -338,7 +338,9 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	if len(vm.ExecutionLogs) != 2 {
 		t.Errorf("incorrect log, expect 2 got %d", len(vm.ExecutionLogs))
 	}
-	if !strings.Contains(vm.ExecutionLogs[1].OutputData, `notification1`) {
+
+	outputdata := gow.AnyToMap(vm.ExecutionLogs[1].GetRestApi().Data)
+	if outputdata["data"] != `hit=notification1` {
 		t.Errorf("expect executing notification1 and set output data to notification1")
 	}
 
@@ -359,8 +361,9 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	if len(vm.ExecutionLogs) != 2 {
 		t.Errorf("incorrect log, expect 2 got %d", len(vm.ExecutionLogs))
 	}
-	if !strings.Contains(vm.ExecutionLogs[1].OutputData, `notification2`) {
-		t.Errorf("expect executing notification1 step but not it didn't run")
+	outputdata = gow.AnyToMap(vm.ExecutionLogs[1].GetRestApi().Data)
+	if outputdata["args"].(map[string]any)["hit"].(string) != `notification2` {
+		t.Errorf("expect executing notification2 to be run but it didn't run")
 	}
 }
 
@@ -462,14 +465,11 @@ func TestEvaluateEvent(t *testing.T) {
 
 	err = vm.Run()
 	if err != nil {
-		pp.Print(vm.vars)
-		pp.Print(vm.ExecutionLogs)
 		t.Errorf("Error executing program. Expected success, got error %v", err)
 		return
 	}
 
-	if vm.ExecutionLogs[0].OutputData != "branch1.a1" {
-		pp.Print(vm.ExecutionLogs)
+	if vm.ExecutionLogs[0].GetBranch().ConditionId != "branch1.a1" {
 		t.Errorf("expression evaluate incorrect")
 	}
 }

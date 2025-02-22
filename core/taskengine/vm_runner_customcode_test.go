@@ -1,11 +1,13 @@
 package taskengine
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/ap-avs/core/testutil"
 	"github.com/AvaProtocol/ap-avs/model"
+	"github.com/AvaProtocol/ap-avs/pkg/gow"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -65,7 +67,7 @@ func TestRunJavaScript(t *testing.T) {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 
-	if step.OutputData != "true" {
+	if gow.AnyToBool(step.GetCustomCode().Data) != true {
 		t.Errorf("wrong result, expect true got %s", step.OutputData)
 	}
 
@@ -110,8 +112,68 @@ func TestRunJavaScriptComplex(t *testing.T) {
 
 	step, _ := n.Execute("123abc", node)
 
-	if step.OutputData != "[2,3]" {
+	output := gow.AnyToSlice(step.GetCustomCode().Data)
+	got := []float64{output[0].(float64), output[1].(float64)}
+	expect := []float64{2, 3}
+
+	if reflect.DeepEqual(got, expect) != true {
 		t.Errorf("wrong JS code evaluation result, expect [2,3] got %s", step.OutputData)
+	}
+}
+
+func TestRunJavaScriptComplexWithMap(t *testing.T) {
+	node := &avsproto.CustomCodeNode{
+		Source: `
+			const a=[{name: 'alice', age: 10}, {name: 'bob', age: 12}];
+			return a.filter((i) => i.age >= 12).map((i) => { return { name: i.name, age: i.age + 3} });
+			`,
+	}
+	nodes := []*avsproto.TaskNode{
+		&avsproto.TaskNode{
+			Id:   "123abc",
+			Name: "customJs",
+			TaskType: &avsproto.TaskNode_CustomCode{
+				CustomCode: node,
+			},
+		},
+	}
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+
+	edges := []*avsproto.TaskEdge{
+		&avsproto.TaskEdge{
+			Id:     "e1",
+			Source: trigger.Id,
+			Target: "123abc",
+		},
+	}
+
+	vm, _ := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "123abc",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
+	n := NewJSProcessor(vm)
+
+	step, _ := n.Execute("123abc", node)
+
+	output := gow.AnyToSlice(step.GetCustomCode().Data)
+	if len(output) != 1 {
+		t.Errorf("expect a single element return form javascript epression but got: %d", len(output))
+	}
+	got := output[0].(map[string]interface{})
+	if got["name"].(string) != "bob" {
+		t.Errorf("expect return bob but got: %s", got["name"])
+	}
+
+	if got["age"].(float64) != 15 {
+		t.Errorf("expect return age 15 but got: %s", got["age"])
 	}
 }
 
@@ -144,7 +206,6 @@ func TestRunJavaScriptComplex(t *testing.T) {
 // 	n := NewJSProcessor(vm)
 //
 // 	step, err := n.Execute("123abc", node)
-// 	fmt.Println("error", err, step.OutputData)
 //
 // 	if step.OutputData != "[2,3]" {
 // 		t.Errorf("wrong JS code evaluation result, expect [2,3] got %s", step.OutputData)
@@ -190,7 +251,7 @@ func TestRunJavaScriptCanAccessSecretsWithapContext(t *testing.T) {
 
 	step, _ := n.Execute("123abc", node)
 
-	if step.OutputData != "\"my name is my_awesome_secret_value\"" {
+	if gow.AnyToString(step.GetCustomCode().Data) != "my name is my_awesome_secret_value" {
 		t.Errorf("wrong JS code evaluation result, expect: `\"my name is my_awesome_secret_value\"`,  got `%s`", step.OutputData)
 	}
 }

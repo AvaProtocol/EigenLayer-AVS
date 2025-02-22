@@ -1,12 +1,12 @@
 package taskengine
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/ap-avs/core/testutil"
 	"github.com/AvaProtocol/ap-avs/model"
+	"github.com/AvaProtocol/ap-avs/pkg/gow"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -67,8 +67,11 @@ func TestContractReadSimpleReturn(t *testing.T) {
 	if step.Error != "" {
 		t.Errorf("expected log contains request trace data but found no")
 	}
-	if step.OutputData != "[313131]" {
-		t.Errorf("read balanceOf doesn't return right data. expect [313131], got %s", step.OutputData)
+
+	outputData := gow.StructPbSliceToSlice(step.GetContractRead().Data)
+
+	if outputData[0].(string) != "313131" {
+		t.Errorf("read balanceOf doesn't return right data. expect 313131] got %s", step.OutputData)
 	}
 }
 
@@ -129,29 +132,29 @@ func TestContractReadComplexReturn(t *testing.T) {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 
-	var data []any
-	json.Unmarshal([]byte(step.OutputData), &data)
+	data := gow.StructPbSliceToSlice(step.GetContractRead().Data)
 	if len(data) < 5 {
 		t.Errorf("contract read doesn't return right data, wrong length. expect 5, got %d", len(data))
 	}
 
-	roundIdExpected := float64(18446744073709572839)
-	roundId := data[0].(float64)
+	// When reading data out and return over the wire, we have to serialize big int to string.
+	roundIdExpected := "18446744073709572839"
+	roundId := data[0].(string)
 	if roundIdExpected != roundId {
-		t.Errorf("contract read returns incorrect data expect %f got %f", roundIdExpected, roundId)
+		t.Errorf("contract read returns incorrect data expect %s got %s", roundIdExpected, roundId)
 	}
-	if data[1].(float64) != float64(2189300000) {
-		t.Errorf("contract read returns incorrect data expect %d got %f", 2189300000, data[1])
+	if data[1].(string) != "2189300000" {
+		t.Errorf("contract read returns incorrect data expect %d got %s", 2189300000, data[1])
 	}
-	if data[2].(float64) != 1733878404 {
-		t.Errorf("contract read returns incorrect data expect %d got %f", 2189300000, data[1])
+	if data[2].(string) != "1733878404" {
+		t.Errorf("contract read returns incorrect data expect %d got %s", 2189300000, data[1])
 	}
-	if data[3].(float64) != 1733878404 {
-		t.Errorf("contract read returns incorrect data expect %d got %f", 2189300000, data[1])
+	if data[3].(string) != "1733878404" {
+		t.Errorf("contract read returns incorrect data expect %d got %s", 2189300000, data[1])
 	}
 
-	if data[4].(float64) != float64(18446744073709572839) {
-		t.Errorf("contract read returns incorrect data expect %d got %f", 2189300000, data[1])
+	if data[4].(string) != "18446744073709572839" {
+		t.Errorf("contract read returns incorrect data expect %d got %s", 2189300000, data[1])
 	}
 
 }

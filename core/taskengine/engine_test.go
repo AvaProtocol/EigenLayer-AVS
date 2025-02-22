@@ -8,6 +8,7 @@ import (
 	"github.com/AvaProtocol/ap-avs/core/apqueue"
 	"github.com/AvaProtocol/ap-avs/core/testutil"
 	"github.com/AvaProtocol/ap-avs/model"
+	"github.com/AvaProtocol/ap-avs/pkg/gow"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/storage"
 )
@@ -343,6 +344,7 @@ func TestTriggerSync(t *testing.T) {
 		t.Errorf("invalid triggered block. expect 101 got %d", execution.Reason.BlockNumber)
 	}
 }
+
 func TestTriggerAsync(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
@@ -413,7 +415,8 @@ func TestTriggerAsync(t *testing.T) {
 	if execution.Steps[0].NodeId != "ping1" {
 		t.Errorf("wrong node id in execution log")
 	}
-	if !strings.Contains(execution.Steps[0].OutputData, "httpbin.org") {
+
+	if !strings.Contains(gow.AnyToString(execution.Steps[0].GetRestApi().Data), "httpbin.org") {
 		t.Error("Invalid output data")
 	}
 

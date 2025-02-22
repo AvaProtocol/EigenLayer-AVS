@@ -2,6 +2,7 @@ package preset
 
 import (
 	"crypto/ecdsa"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"os"
@@ -9,11 +10,9 @@ import (
 
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
 	"github.com/AvaProtocol/ap-avs/core/testutil"
-	"github.com/AvaProtocol/ap-avs/pkg/erc4337/bundler"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 func getControllerSigner() *ecdsa.PrivateKey {
@@ -32,26 +31,20 @@ func getControllerSigner() *ecdsa.PrivateKey {
 }
 
 func TestSendUserOp(t *testing.T) {
-	smartWalletConfig := testutil.GetTestSmartWalletConfig()
+	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
+	smartWalletConfig.BundlerURL = "http://localhost:3437/rpc"
+
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
 	fmt.Println(smartWalletConfig)
 
-	conn, _ := ethclient.Dial(smartWalletConfig.EthRpcUrl)
-	defer func() {
-		conn.Close()
-	}()
 	// Because we used the  master key to signed, the address cannot be calculate from that key and need to set explicitly
 	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
-	bundlerClient, e := bundler.NewBundlerClient(smartWalletConfig.BundlerURL)
-	if e != nil {
-		panic(e)
-	}
 
 	//calldata := common.FromHex("b61d27f600000000000000000000000069256ca54e6296e460dec7b29b7dcd97b81a3d55000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044a9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a0000000000000000000000000000000000000000000000001bc16d674ec8000000000000000000000000000000000000000000000000000000000000")
 
 	//calldata := common.FromHex("0xb61d27f600000000000000000000000069256ca54e6296e460dec7b29b7dcd97b81a3d55000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044a9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000001b094132bda00000000000000000000000000000000000000000000000000000000000")
 
-	calldata, e := aa.PackExecute(
+	calldata, err := aa.PackExecute(
 		// Sepolia Network example
 		// For test token on base sepolia
 		// these test token can be minted by anyone to help us run these transfer test
@@ -66,16 +59,24 @@ func TestSendUserOp(t *testing.T) {
 		// Example result on base sepolia:
 		// https://sepolia.basescan.org/tx/0x812290f4a588cb62bd4a46698ece51d576a75729af5dda497badb0ef8f8cddfa
 		// https://sepolia.basescan.org/tx/0xef607557e727ae1602c6e74a625cffc57aa7108c4d470d38b96cfd4539ee978f
-		common.HexToAddress("0x0a0c037267a690e9792f4660c29989babec9cffb"),
+		//common.HexToAddress("0x0a0c037267a690e9792f4660c29989babec9cffb"),
+		common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e"), // base sepolia usdc
 		big.NewInt(0),
-		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000001b125981304000"),
+		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000"),
+		// common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000001b125981304000"),
 		//common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000001b134255d55000"),
 	)
 
-	txResult, err := SendUserOp(conn, bundlerClient, smartWalletConfig.ControllerPrivateKey, owner, calldata)
-	if err != nil || txResult == "" {
+	if err != nil {
+		t.Errorf("expect pack userop succesfully but got error: %v", err)
+	}
+
+	userop, txReceipt, err := SendUserOp(smartWalletConfig, owner, calldata)
+	if err != nil || userop == nil {
 		t.Errorf("UserOp failed to send; error %v", err)
 	}
 
-	t.Logf("UserOp submit succesfully. UserOp hash: %v", txResult)
+	a, _ := json.Marshal(txReceipt)
+	b, _ := json.Marshal(userop)
+	t.Logf("UserOp submit succesfully. UserOp hash: %v txreceiet: %v", a, b)
 }

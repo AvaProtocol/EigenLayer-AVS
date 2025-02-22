@@ -9,6 +9,7 @@ import (
 
 	"github.com/AvaProtocol/ap-avs/core/testutil"
 	"github.com/AvaProtocol/ap-avs/model"
+	"github.com/AvaProtocol/ap-avs/pkg/gow"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/storage"
 )
@@ -113,7 +114,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 		t.Errorf("step id doesn't match, expect branch1.a1 but got: %s", execution.Steps[0].NodeId)
 	}
 
-	if execution.Steps[0].OutputData != "branch1.a1" {
+	if execution.Steps[0].GetBranch().ConditionId != "branch1.a1" {
 		t.Errorf("expect branch output data is `branch1.a1` but got %s", execution.Steps[0].OutputData)
 	}
 
@@ -121,8 +122,9 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 		t.Errorf("step id doesn't match, expect notification1 but got: %s", execution.Steps[1].NodeId)
 	}
 
-	if execution.Steps[1].OutputData != "{\"message\": \"I'm hit\"}" {
-		t.Errorf("expect branch output data is {\"message\": \"I'm hit\"} but got %s", execution.Steps[1].OutputData)
+	outputData := gow.AnyToMap(execution.Steps[1].GetRestApi().Data)
+	if outputData["message"].(string) != "I'm hit" {
+		t.Errorf("expect branch output data is {\"message\": \"I'm hit\"} but got %s", outputData)
 	}
 }
 
@@ -209,7 +211,7 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 		t.Errorf("expect evaluate branch node but got: %s", execution.Steps[0].NodeId)
 	}
 
-	if execution.Steps[0].OutputData != "" {
+	if execution.Steps[0].GetBranch() != nil {
 		t.Errorf("expect evaluate branch output data empty but got: %s", execution.Steps[0].OutputData)
 	}
 }
