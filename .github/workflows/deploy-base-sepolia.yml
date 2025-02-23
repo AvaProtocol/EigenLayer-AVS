@@ -15,7 +15,7 @@ jobs:
     uses: ./.github/workflows/deploy-avs.yml
     with:
       environment: "Base Sepolia"
-      directory: ${{ vars.DIRECTORY }}
+      directory: "base-sepolia"
     secrets:
       AVS_SSH_KEY: ${{ secrets.AVS_SSH_KEY }}
       AVS_SERVER_HOST: ${{ secrets.AVS_SERVER_HOST }}
