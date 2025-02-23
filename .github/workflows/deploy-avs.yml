@@ -54,6 +54,6 @@ jobs:
         key: ${{ secrets.AVS_SSH_KEY }}
         script: |
           echo "Deploying to environment: ${{ inputs.environment }}"
-          cd $HOME/ap-operator-setup/${{ inputs.directory }}
+          cd $HOME/ap-operator-setup/${{ inputs.directory }}/${{ vars.DIRECTORY }}
           docker compose pull
           docker compose up -d --force-recreate 
