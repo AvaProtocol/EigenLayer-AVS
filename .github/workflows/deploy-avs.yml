@@ -12,6 +12,8 @@ on:
     secrets:
       AVS_SSH_KEY:
         required: true
+      AVS_SERVER_HOST:
+        required: true
 
 jobs:
   aggregator:
