@@ -27,7 +27,7 @@ func SetRpc(rpcURL string) {
 	if conn, err := ethclient.Dial(rpcURL); err == nil {
 		rpcConn = conn
 	} else {
-		panic(err)
+		panic(fmt.Errorf("panic connect to rpc url %s, error %w", rpcURL, err))
 	}
 }
 
