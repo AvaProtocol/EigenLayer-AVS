@@ -10,9 +10,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy-aggregator:
+  deploy-avs:
     #if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.name == 'Push' }}
     uses: ./.github/workflows/deploy-avs.yml
     with:
       environment: "Base Sepolia"
-      directory: ${{ vars.DIRECTORY }} 
+      directory: ${{ vars.DIRECTORY }}
+    secrets:
+      AVS_SSH_KEY: ${{ secrets.AVS_SSH_KEY }}

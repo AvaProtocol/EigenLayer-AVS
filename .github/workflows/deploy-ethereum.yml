@@ -7,8 +7,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy-aggregator:
+  deploy-avs:
     uses: ./.github/workflows/deploy-avs.yml
     with:
       environment: Ethereum
       directory: ${{ vars.DIRECTORY }} 
+    secrets:
+      AVS_SSH_KEY: ${{ secrets.AVS_SSH_KEY }}
