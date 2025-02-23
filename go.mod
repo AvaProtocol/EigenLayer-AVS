@@ -4,7 +4,7 @@ go 1.23.0
 
 require (
 	github.com/Layr-Labs/cerberus-api v0.0.0-20241016214048-d52f5ddc5559
-	github.com/Layr-Labs/eigensdk-go v0.2.0-beta.1
+	github.com/Layr-Labs/eigensdk-go v0.1.14
 	github.com/allegro/bigcache/v3 v3.1.0
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/dop251/goja v0.0.0-20241024094426-79f3a7efcdbd
@@ -14,7 +14,6 @@ require (
 	github.com/go-playground/validator/v10 v10.22.1
 	github.com/go-resty/resty/v2 v2.16.2
 	github.com/golang-jwt/jwt/v5 v5.2.1
-	github.com/k0kubun/pp/v3 v3.4.1
 	github.com/labstack/echo/v4 v4.12.0
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/oklog/ulid/v2 v2.1.1-0.20240413180941-96c4edf226ef
