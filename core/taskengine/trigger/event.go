@@ -19,6 +19,18 @@ import (
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
+var (
+	// To reduce api call we listen to these topics only
+	// a better idea is to only subscribe to what we need and re-load when new trigger is added
+	whitelistTopics = [][]common.Hash{
+		[]common.Hash{
+			common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"), // UserOp
+			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"), // erc20 transfer
+			common.HexToHash("0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"), // approve
+		},
+	}
+)
+
 type EventMark struct {
 	BlockNumber uint64
 	LogIndex    uint
@@ -41,10 +53,9 @@ type EventTrigger struct {
 	triggerCh chan TriggerMetadata[EventMark]
 }
 
-func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark]) *EventTrigger {
+func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], logger sdklogging.Logger) *EventTrigger {
 	var err error
 
-	logger, err := sdklogging.NewZapLogger(sdklogging.Production)
 	b := EventTrigger{
 		CommonTrigger: &CommonTrigger{
 			done:      make(chan bool),
@@ -92,13 +103,19 @@ func (t *EventTrigger) RemoveCheck(id string) error {
 
 func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 	logs := make(chan types.Log)
-	query := ethereum.FilterQuery{}
-	sub, err := evtTrigger.wsEthClient.SubscribeFilterLogs(context.Background(), ethereum.FilterQuery{}, logs)
+	query := ethereum.FilterQuery{
+		Topics: whitelistTopics,
+	}
+
+	sub, err := evtTrigger.wsEthClient.SubscribeFilterLogs(context.Background(), ethereum.FilterQuery{Topics: whitelistTopics}, logs)
+	evtTrigger.logger.Info("subscribing with filter", "topics", whitelistTopics)
+
 	if err != nil {
 		return err
 	}
 
 	go func() {
+		defer sub.Unsubscribe()
 		for {
 			select {
 			case <-ctx.Done():
@@ -106,7 +123,18 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 			case <-evtTrigger.done:
 				err = nil
 			case err := <-sub.Err():
-				evtTrigger.logger.Errorf("getting error when subscribe to websocket rpc. start reconnecting", "errror", err)
+				if err == nil {
+					continue
+				}
+				evtTrigger.logger.Error("error when subscribing to websocket rpc, retrying", "rpc", evtTrigger.rpcOption.WsRpcURL, "error", err)
+				if sub != nil {
+					sub.Unsubscribe()
+				}
+
+				if evtTrigger.wsEthClient != nil {
+					evtTrigger.wsEthClient.Close()
+				}
+
 				evtTrigger.retryConnectToRpc()
 				sub, err = evtTrigger.wsEthClient.SubscribeFilterLogs(context.Background(), query, logs)
 			case event := <-logs:

@@ -18,7 +18,8 @@ func TestTriggerTopicMatch(t *testing.T) {
 	eventTrigger := NewEventTrigger(&RpcOption{
 		RpcURL:   testutil.GetTestRPCURL(),
 		WsRpcURL: testutil.GetTestRPCURL(),
-	}, make(chan TriggerMetadata[EventMark], 1000))
+	}, make(chan TriggerMetadata[EventMark], 1000),
+		testutil.GetLogger())
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
@@ -48,7 +49,8 @@ func TestTriggerTopicNotMatch(t *testing.T) {
 	eventTrigger := NewEventTrigger(&RpcOption{
 		RpcURL:   testutil.GetTestRPCURL(),
 		WsRpcURL: testutil.GetTestRPCURL(),
-	}, make(chan TriggerMetadata[EventMark], 1000))
+	}, make(chan TriggerMetadata[EventMark], 1000),
+		testutil.GetLogger())
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
@@ -78,7 +80,8 @@ func TestTriggerTopicMulti(t *testing.T) {
 	eventTrigger := NewEventTrigger(&RpcOption{
 		RpcURL:   testutil.GetTestRPCURL(),
 		WsRpcURL: testutil.GetTestRPCURL(),
-	}, make(chan TriggerMetadata[EventMark], 1000))
+	}, make(chan TriggerMetadata[EventMark], 1000),
+		testutil.GetLogger())
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
@@ -131,7 +134,8 @@ func TestTriggerAddress(t *testing.T) {
 	eventTrigger := NewEventTrigger(&RpcOption{
 		RpcURL:   testutil.GetTestRPCURL(),
 		WsRpcURL: testutil.GetTestRPCURL(),
-	}, make(chan TriggerMetadata[EventMark], 1000))
+	}, make(chan TriggerMetadata[EventMark], 1000),
+		testutil.GetLogger())
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
@@ -170,7 +174,8 @@ func TestTriggerAddressNegativeCase(t *testing.T) {
 	eventTrigger := NewEventTrigger(&RpcOption{
 		RpcURL:   testutil.GetTestRPCURL(),
 		WsRpcURL: testutil.GetTestRPCURL(),
-	}, make(chan TriggerMetadata[EventMark], 1000))
+	}, make(chan TriggerMetadata[EventMark], 1000),
+		testutil.GetLogger())
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
@@ -194,7 +199,8 @@ func TestTriggerNonTransferEvent(t *testing.T) {
 	eventTrigger := NewEventTrigger(&RpcOption{
 		RpcURL:   testutil.GetTestRPCURL(),
 		WsRpcURL: testutil.GetTestRPCURL(),
-	}, make(chan TriggerMetadata[EventMark], 1000))
+	}, make(chan TriggerMetadata[EventMark], 1000),
+		testutil.GetLogger())
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
@@ -222,7 +228,8 @@ func TestTriggerExpression(t *testing.T) {
 	eventTrigger := NewEventTrigger(&RpcOption{
 		RpcURL:   testutil.GetTestRPCURL(),
 		WsRpcURL: testutil.GetTestRPCURL(),
-	}, make(chan TriggerMetadata[EventMark], 1000))
+	}, make(chan TriggerMetadata[EventMark], 1000),
+		testutil.GetLogger())
 
 	taskMeta := &avsproto.SyncMessagesResp_TaskMetadata{
 		Trigger: &avsproto.TaskTrigger{
@@ -269,7 +276,8 @@ func TestTriggerWithContractReadBindingInExpression(t *testing.T) {
 	eventTrigger := NewEventTrigger(&RpcOption{
 		RpcURL:   testutil.GetTestRPCURL(),
 		WsRpcURL: testutil.GetTestRPCURL(),
-	}, make(chan TriggerMetadata[EventMark], 1000))
+	}, make(chan TriggerMetadata[EventMark], 1000),
+		testutil.GetLogger())
 
 	taskMeta := &avsproto.SyncMessagesResp_TaskMetadata{
 		Trigger: &avsproto.TaskTrigger{
@@ -388,7 +396,8 @@ func TestTriggerEventExpressionWontCrashOnInvalidInput(t *testing.T) {
 			eventTrigger := NewEventTrigger(&RpcOption{
 				RpcURL:   testutil.GetTestRPCURL(),
 				WsRpcURL: testutil.GetTestRPCURL(),
-			}, make(chan TriggerMetadata[EventMark], 1000))
+			}, make(chan TriggerMetadata[EventMark], 1000),
+				testutil.GetLogger())
 
 			result, err := eventTrigger.Evaluate(event, &Check{
 				Program: tt.expression,
