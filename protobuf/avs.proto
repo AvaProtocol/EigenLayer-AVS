@@ -229,7 +229,7 @@ message FilterNode {
   string input = 2;
 
   message Output {
-    // the output of the filter node is the filtered array
+    // the output of the filter node is the filtered array after apply the filter expression. It works similar to filter of javascript
     google.protobuf.Any data = 1;
   }
 }
@@ -261,8 +261,8 @@ message LoopNode {
   }
 
   message Output {
-    // the output of the loop node is the result of the last node in the loop
-    string result = 1;
+    // TODO: We haven't implement loop node yet
+    string data = 1;
   }
 }
 
