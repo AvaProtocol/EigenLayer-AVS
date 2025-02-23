@@ -9,6 +9,9 @@ on:
       directory:
         required: true
         type: string
+    secrets:
+      AVS_SSH_KEY:
+        required: true
 
 jobs:
   aggregator:
