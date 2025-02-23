@@ -13,8 +13,6 @@ jobs:
   deploy-avs:
     #if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.name == 'Push' }}
     uses: ./.github/workflows/deploy-avs.yml
-    environment:
-      name: "Base Sepolia"
     with:
       environment: "Base Sepolia"
       directory: ${{ vars.DIRECTORY }}
