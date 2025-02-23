@@ -53,10 +53,10 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		WsRpcURL: o.config.TargetChain.EthWsUrl,
 	}
 	blockTriggerCh := make(chan triggerengine.TriggerMetadata[int64], 1000)
-	o.blockTrigger = triggerengine.NewBlockTrigger(&rpcConfig, blockTriggerCh)
+	o.blockTrigger = triggerengine.NewBlockTrigger(&rpcConfig, blockTriggerCh, o.logger)
 
 	eventTriggerCh := make(chan triggerengine.TriggerMetadata[triggerengine.EventMark], 1000)
-	o.eventTrigger = triggerengine.NewEventTrigger(&rpcConfig, eventTriggerCh)
+	o.eventTrigger = triggerengine.NewEventTrigger(&rpcConfig, eventTriggerCh, o.logger)
 
 	o.blockTrigger.Run(ctx)
 	o.eventTrigger.Run(ctx)

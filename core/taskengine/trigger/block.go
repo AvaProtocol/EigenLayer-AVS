@@ -2,6 +2,7 @@ package trigger
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"math/big"
@@ -28,10 +29,10 @@ type BlockTrigger struct {
 	triggerCh chan TriggerMetadata[int64]
 }
 
-func NewBlockTrigger(o *RpcOption, triggerCh chan TriggerMetadata[int64]) *BlockTrigger {
+func NewBlockTrigger(o *RpcOption, triggerCh chan TriggerMetadata[int64], logger sdklogging.Logger) *BlockTrigger {
 	var err error
 
-	logger, err := sdklogging.NewZapLogger(sdklogging.Production)
+	//logger, err := sdklogging.NewZapLogger(sdklogging.Production)
 	b := BlockTrigger{
 		CommonTrigger: &CommonTrigger{
 			done:      make(chan bool),
@@ -88,26 +89,40 @@ func (b *BlockTrigger) Remove(check *avsproto.SyncMessagesResp_TaskMetadata) err
 }
 
 func (b *BlockTrigger) Run(ctx context.Context) error {
-	//func RegisterBlockListener(ctx context.Context, fn OnblockFunc) error {
 	headers := make(chan *types.Header)
 	sub, err := b.wsEthClient.SubscribeNewHead(ctx, headers)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to subscribe to new headers: %w", err)
 	}
+	b.logger.Info("subscribed for new blocks", "rpc", b.rpcOption.WsRpcURL)
 
 	go func() {
+		//defer sub.Unsubscribe()
 		for {
 			select {
 			case <-ctx.Done():
-				err = nil
+				return
 			case <-b.done:
-				err = nil
+				return
 			case err := <-sub.Err():
-				b.logger.Errorf("getting error when subscribe to websocket rpc. start reconnecting", "errror", err)
-				b.retryConnectToRpc()
-				b.wsEthClient.SubscribeNewHead(ctx, headers)
+				if err != nil {
+					b.logger.Error("error when subscribing to websocket RPC, retrying",
+						"rpc", b.rpcOption.WsRpcURL,
+						"error", err,
+						"component", "block")
+					if sub != nil {
+						sub.Unsubscribe()
+					}
+
+					if b.wsEthClient != nil {
+						b.wsEthClient.Close()
+					}
+
+					b.retryConnectToRpc()
+					sub, err = b.wsEthClient.SubscribeNewHead(ctx, headers)
+				}
 			case header := <-headers:
-				b.logger.Debug("detect new block, evaluate checks", "component", "blocktrigger", "block", header.Hash().Hex(), "number", header.Number)
+				b.logger.Debug("detected new block, evaluating checks", "component", "blocktrigger", "block", header.Hash().Hex(), "number", header.Number)
 				toRemove := []int{}
 				for interval, tasks := range b.schedule {
 					z := new(big.Int)
@@ -119,8 +134,6 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 							}
 
 						}
-						// Remove the task from the queue
-						// toRemove = append(toRemove, interval)
 					}
 				}
 
@@ -130,5 +143,6 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 			}
 		}
 	}()
+
 	return err
 }
