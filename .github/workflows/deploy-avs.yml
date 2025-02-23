@@ -9,9 +9,14 @@ on:
       directory:
         required: true
         type: string
+    secrets:
+      AVS_SSH_KEY:
+        required: true
+      AVS_SERVER_HOST:
+        required: true
 
 jobs:
-  deploy-aggregator:
+  aggregator:
     runs-on: ubuntu-latest
     environment: 
       name: ${{ inputs.environment }}
@@ -32,7 +37,7 @@ jobs:
           docker compose pull
           docker compose up -d --force-recreate 
 
-  deploy-operator:
+  operator:
     runs-on: ubuntu-latest
     environment: 
       name: ${{ inputs.environment }}
