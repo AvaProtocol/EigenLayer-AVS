@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"fmt"
 	"log"
 	"strings"
 	"testing"
@@ -15,7 +16,7 @@ import (
 
 // TODO: temporary disable due to rpc issue.
 func xTestContractWriteSimpleReturn(t *testing.T) {
-	smartWalletConfig := testutil.GetTestSmartWalletConfig()
+	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
 
 	node := &avsproto.ContractWriteNode{
@@ -87,7 +88,10 @@ func xTestContractWriteSimpleReturn(t *testing.T) {
 	if step.Error != "" {
 		t.Errorf("expected log contains request trace data but found no")
 	}
-	if len(step.OutputData) != 66 && !strings.HasPrefix(step.OutputData, "0x") {
-		t.Errorf("output data isn't a valid userops hash: %s", step.OutputData)
-	}
+
+	outputData := step.GetContractWrite()
+	fmt.Println("add assertion here", outputData)
+	//if len(outputData.UserOp.Hash)!= 66 && !strings.HasPrefix(step.OutputData, "0x") {
+	//	t.Errorf("output data isn't a valid userops hash: %s", step.OutputData)
+	//}
 }

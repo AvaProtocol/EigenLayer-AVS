@@ -40,7 +40,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	t0 := time.Now()
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
-		OutputData: "",
+		OutputData: nil,
 		Log:        "",
 		Error:      "",
 		Success:    true,
@@ -73,7 +73,11 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 			sb.WriteString("evaluate else, follow else path")
 			sb.WriteString(outcome)
 			s.Log = sb.String()
-			s.OutputData = outcome
+			s.OutputData = &avsproto.Execution_Step_Branch{
+				Branch: &avsproto.BranchNode_Output{
+					ConditionId: outcome,
+				},
+			}
 			return s, nil
 		}
 
@@ -116,7 +120,11 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 			sb.WriteString("\nexpression resolves to true, follow path")
 			sb.WriteString(outcome)
 			s.Log = sb.String()
-			s.OutputData = outcome
+			s.OutputData = &avsproto.Execution_Step_Branch{
+				Branch: &avsproto.BranchNode_Output{
+					ConditionId: outcome,
+				},
+			}
 			s.EndAt = time.Now().Unix()
 			return s, nil
 		}

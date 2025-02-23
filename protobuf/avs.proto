@@ -5,6 +5,8 @@ option go_package = "./avsproto";
 
 import "google/protobuf/wrappers.proto";
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/struct.proto";
 
 message IdReq {
   string id = 1;
@@ -115,9 +117,14 @@ enum ExecutionStatus {
   Finished = 2;
 }
 
+
 message ETHTransferNode {
   string destination = 1;
   string amount = 2;
+
+  message Output {
+    string transaction_hash = 1;
+  }
 }
 
 message ContractWriteNode {
@@ -128,6 +135,16 @@ message ContractWriteNode {
   // If we don't need the result and only want the transaction hash (which is usually sufficient),
   // then we don't need to provide the ABI.
   string contract_abi = 3;
+
+  message Output {
+    // The requiremen for this shape of data is requested in https://github.com/AvaProtocol/EigenLayer-AVS/issues/153
+    // https://docs.ethers.org/v6/api/providers/#TransactionReceipt
+    // Ideally we shouldn't have to transport or store this at all. We should only store/pass the txhash, the consumer can construct
+    // a full message of these through EVM RPC.
+    // But due to requirement for easy to debug on client, we're storing and transport these over the wire
+    Evm.UserOp user_op = 1;
+    Evm.TransactionReceipt tx_receipt = 2;
+  }
 }
 
 message ContractReadNode {
@@ -138,6 +155,14 @@ message ContractReadNode {
   // Currently, we need to provide the contract ABI as a JSON string.
   // We don't need to include the full ABI—just enough to decode the method call.
   string contract_abi = 3;
+
+  message Output {
+    // The data is the result of querying the contract method. Becuase this is fetching data from the outside world,
+    // we don't know the shape of data ahead of time.
+    // At runtime, the data is dynamically parsed into the correct type for the node to consume
+    // In case of smart contract, the return is always an array, then it's up to the client to map to the right field based on method signature
+    repeated google.protobuf.Value data = 1;
+  }
 }
 
 
@@ -146,6 +171,13 @@ message GraphQLQueryNode {
   string query = 2;
 
   map<string, string> variables = 3;
+
+
+  message Output {
+    // The data is the result of the graphql query. Becuase this is GraphQL, the data is a json object
+    // The field of the json object is unknow, its depend on the query
+    google.protobuf.Any data = 1;
+  }
 }
 
 message RestAPINode {
@@ -153,6 +185,10 @@ message RestAPINode {
   map<string, string> headers = 2;
   string              body    = 3;
   string              method  = 4;
+
+  message Output {
+    google.protobuf.Any data = 1;
+  }
 }
 
 enum CustomCodeLang {
@@ -162,6 +198,10 @@ enum CustomCodeLang {
 message CustomCodeNode {
   CustomCodeLang lang     = 1;
   string         source    = 2;
+
+  message Output {
+    google.protobuf.Any data = 1;
+  }
 }
 
 message Condition {
@@ -172,6 +212,13 @@ message Condition {
 
 message BranchNode {
   repeated Condition conditions = 1;
+
+  message Output {
+    // the output of the branch node is the id of the condition that is true
+    // the execution will continue to the next node belong to this condition 
+    // In front-end, when rendering the historical execution, we can draw the relationship coming out of the condition that match this id
+    string condition_id = 1;
+  }
 }
 
 message FilterNode {
@@ -180,6 +227,11 @@ message FilterNode {
   // input is the id of the node that we will fetch its value from and feed into the iteration.
   // this input has to be an array. Currently we only know about the error at runtime
   string input = 2;
+
+  message Output {
+    // the output of the filter node is the filtered array
+    google.protobuf.Any data = 1;
+  }
 }
 
 // LoopNode currently not support, but we pre-defined to reverse the field id
@@ -206,6 +258,11 @@ message LoopNode {
     // Make call to a HTTP endpoint
     RestAPINode       rest_api = 14;
     CustomCodeNode    custom_code = 15;
+  }
+
+  message Output {
+    // the output of the loop node is the result of the last node in the loop
+    string result = 1;
   }
 }
 
@@ -254,16 +311,26 @@ message Execution {
   message Step {
     string node_id = 1;
     bool   success  = 2;
-    // serialize data of the result. This is the value that we bind to step variable in subsequent step
-    string output_data = 3;
-    string log = 4; 
-    string error = 5;
-    int64 start_at = 6;
-    int64 end_at = 7;
+    
+    oneof output_data {
+      ETHTransferNode.Output eth_transfer = 3;
+      GraphQLQueryNode.Output graphql = 4;
+      ContractReadNode.Output contract_read = 5;
+      ContractWriteNode.Output contract_write = 6;
+      CustomCodeNode.Output custom_code = 7;
+      RestAPINode.Output rest_api = 8;
+      BranchNode.Output branch = 9;
+      FilterNode.Output filter = 10;
+      LoopNode.Output loop = 11;
+    }
+
+    string log = 12; 
+    string error = 13;
+    int64 start_at = 14;
+    int64 end_at = 15;
 
     // Reference ticket: https://github.com/AvaProtocol/EigenLayer-AVS/issues/151
-    
-    repeated string inputs = 8;
+    repeated string inputs = 16;
   }
 
   repeated Step steps = 8;
@@ -299,7 +366,10 @@ message Execution {
   // For time trigger, it is the epoch
   oneof output_data {
     TransferLogOutput transfer_log = 10;
-    EvmLogOutput evm_log = 11;
+
+    // When the trigger is not a transfer event, we will have a raw event output only
+    // These shape of data is https://docs.ethers.org/v6/api/providers/#Log
+    Evm.Log evm_log = 11;
     BlockOutput block = 12;
     TimeOutput time = 13;
   }
@@ -318,18 +388,6 @@ message Execution {
     uint32 transaction_index = 12;
   }
   
-  // When the trigger is not a transfer event, we will have a raw event output only
-  // These shape of data is https://docs.ethers.org/v6/api/providers/#Log
-  message EvmLogOutput {
-    string address = 1;
-    string block_hash = 2;
-    uint64 block_number = 3;
-    string data = 4;
-    uint32 index = 5;
-    repeated string topics = 6;
-    string transaction_hash = 7;
-    uint32 transaction_index = 8;
-  }
   message BlockOutput {
     uint64 block_number = 1;
   }
@@ -663,4 +721,57 @@ message GetExecutionCountReq {
 message GetExecutionCountResp {
   // TODO: eventually to support success, error count execution
   int64 total = 1; // The total count of executions
+}
+
+message Evm {
+  message Log {
+    // Consensus fields
+    string address = 1;                // Address of the contract that generated the event
+    repeated string topics = 2;        // List of topics provided by the contract
+    string data = 3;                   // Supplied by the contract, usually ABI-encoded
+
+    // Derived fields (filled in by the node but not secured by consensus)
+    uint64 block_number = 4;          // Block in which the transaction was included
+    string transaction_hash = 5;               // Hash of the transaction
+    uint32 transaction_index = 6;              // Index of the transaction in the block
+    string block_hash = 7;            // Hash of the block in which the transaction was included
+    uint32 index = 8;                 // Index of the log in the receipt
+    bool removed = 9;                 // True if this log was reverted due to chain reorganization
+  }
+
+  // Define to match https://docs.ethers.org/v6/api/providers/#TransactionReceipt as required in this ticket: https://github.com/AvaProtocol/EigenLayer-AVS/issues/153
+  message TransactionReceipt {
+    string hash = 1;
+    string block_hash = 2; 
+    uint64 block_number = 3;
+    string from = 4; 
+    uint64 gas_used = 6;
+    uint64 gas_price = 7;
+    uint64 cumulative_gas_used = 8;
+    uint64 fee = 9;
+    string contract_address = 10; 
+    uint64 index = 11; 
+    repeated string logs = 12; 
+    string logs_bloom = 13; 
+    string root = 14; 
+    uint32 status = 15;
+    uint32 type = 16;
+    uint64 blob_gas_price = 17; 
+    uint64 blob_gas_used = 18;
+    string to = 19;
+  }
+
+  message UserOp {
+    string sender = 1;
+    string nonce = 2;
+    string init_code = 3;
+    string call_data = 4;
+    string call_gas_limit = 5;
+    string verification_gas_limit = 6;
+    string pre_verification_gas = 7;
+    string max_fee_per_gas = 8;
+    string max_priority_fee_per_gas = 9;
+    string paymaster_and_data = 10;
+    string signature = 11;
+  }
 }

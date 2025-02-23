@@ -9,7 +9,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/stackup-wallet/stackup-bundler/pkg/userop"
+
+	"github.com/AvaProtocol/ap-avs/pkg/erc4337/userop"
 )
 
 // BundlerClient defines a client for interacting with an EIP-4337 bundler RPC endpoint.

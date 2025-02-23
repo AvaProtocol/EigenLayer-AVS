@@ -54,9 +54,24 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 	})
 }
 
+// Set the variable for step output so it can be refer and use in subsequent steps
+func (c *CommonProcessor) GetOutputVar(stepID string) any {
+	name := c.vm.GetNodeNameAsVar(stepID)
+	if name == "" {
+		return nil
+	}
+
+	value, ok := c.vm.vars[name].(map[string]any)
+	if ok {
+		return value["data"]
+	}
+
+	return nil
+}
+
 type triggerDataType struct {
 	TransferLog *avsproto.Execution_TransferLogOutput
-	EvmLog      *avsproto.Execution_EvmLogOutput
+	EvmLog      *avsproto.Evm_Log
 	Block       *avsproto.Execution_BlockOutput
 	Time        *avsproto.Execution_TimeOutput
 }
@@ -281,7 +296,7 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 					TransactionIndex: uint32(event.TxIndex),
 				}
 			} else {
-				v.parsedTriggerData.EvmLog = &avsproto.Execution_EvmLogOutput{
+				v.parsedTriggerData.EvmLog = &avsproto.Evm_Log{
 					Address:          event.Address.Hex(),
 					BlockHash:        event.BlockHash.Hex(),
 					BlockNumber:      event.BlockNumber,
@@ -440,7 +455,7 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 	if step != nil {
 		return step, err
 	}
-	
+
 	if _, ok := v.plans[node.Id]; ok {
 		return v.plans[node.Id], err
 	}
@@ -546,21 +561,25 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*Step, error) 
 
 	// In branch node we first need to evaluate the condtion to find the outcome, after find the outcome we need to execute that node
 	// the output of a branch node is the node id to jump to
-	if err == nil && executionLog.OutputData != "" {
-		outcome, ok := v.plans[executionLog.OutputData]
-		if !ok {
-			return nil, fmt.Errorf("branch resolved to node %s but not found in node list", executionLog.OutputData)
-		}
-		outcomeNodes := outcome.Next
-		if len(outcomeNodes) >= 0 {
-			for _, nodeID := range outcomeNodes {
-				// TODO: track stack too deepth and abort
-				node := v.TaskNodes[nodeID]
-				jump, err := v.executeNode(node)
-				if jump != nil {
-					return jump, err
-				} else {
-					return v.plans[nodeID], err
+	if err == nil {
+		if outputData := executionLog.GetBranch(); outputData != nil {
+			branchOutComeID := outputData.GetConditionId()
+
+			outcome, ok := v.plans[branchOutComeID]
+			if !ok {
+				return nil, fmt.Errorf("branch resolved to node %s but not found in node list", executionLog.OutputData)
+			}
+			outcomeNodes := outcome.Next
+			if len(outcomeNodes) >= 0 {
+				for _, nodeID := range outcomeNodes {
+					// TODO: track stack too deepth and abort
+					node := v.TaskNodes[nodeID]
+					jump, err := v.executeNode(node)
+					if jump != nil {
+						return jump, err
+					} else {
+						return v.plans[nodeID], err
+					}
 				}
 			}
 		}

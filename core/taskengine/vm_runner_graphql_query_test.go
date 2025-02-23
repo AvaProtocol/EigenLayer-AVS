@@ -1,12 +1,12 @@
 package taskengine
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/ap-avs/core/testutil"
 	"github.com/AvaProtocol/ap-avs/model"
+	"github.com/AvaProtocol/ap-avs/pkg/gow"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
 
@@ -88,7 +88,8 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 			MissionName string `json:"mission_name"`
 		} `json:"launches"`
 	}
-	err = json.Unmarshal([]byte(step.OutputData), &output)
+
+	err = gow.AnyToStruct(step.GetGraphql().Data, &output)
 	if err != nil {
 		t.Errorf("expected the data output in json format, but failed to decode %v", err)
 	}

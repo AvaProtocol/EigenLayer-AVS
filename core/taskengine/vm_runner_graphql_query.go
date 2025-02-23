@@ -2,7 +2,6 @@ package taskengine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -10,6 +9,8 @@ import (
 
 	"github.com/AvaProtocol/ap-avs/pkg/graphql"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type GraphqlQueryProcessor struct {
@@ -51,7 +52,7 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	step := &avsproto.Execution_Step{
 		NodeId:     stepID,
 		Log:        "",
-		OutputData: "",
+		OutputData: nil,
 		Success:    true,
 		Error:      "",
 		StartAt:    t0,
@@ -75,8 +76,18 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	}
 
 	step.Log = r.sb.String()
-	data, err := json.Marshal(resp)
-	step.OutputData = string(data)
+
+	value, err := structpb.NewValue(resp)
+	if err == nil {
+		pbResult, _ := anypb.New(value)
+		step.OutputData = &avsproto.Execution_Step_Graphql{
+			Graphql: &avsproto.GraphQLQueryNode_Output{
+				Data: pbResult,
+			},
+		}
+
+	}
+
 	r.SetOutputVarForStep(stepID, resp)
 	return step, resp, err
 }

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
@@ -43,7 +45,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
 		Log:        "",
-		OutputData: "",
+		OutputData: nil,
 		Success:    true,
 		Error:      "",
 		StartAt:    t0,
@@ -113,18 +115,30 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		resp, err = request.Get(processedNode.Url)
 	}
 
-	s.OutputData = string(resp.Body())
+	response := string(resp.Body())
+
+	//maybeJSON := false
 
 	// Attempt to detect json and auto convert to a map to use in subsequent step
-	if len(s.OutputData) >= 1 && (s.OutputData[0] == '{' || s.OutputData[0] == '[') {
+	if len(response) >= 1 && (response[0] == '{' || response[0] == '[') {
 		var parseData map[string]any
-		if err := json.Unmarshal([]byte(s.OutputData), &parseData); err == nil {
+		if err := json.Unmarshal([]byte(response), &parseData); err == nil {
 			r.SetOutputVarForStep(stepID, parseData)
 		} else {
-			r.SetOutputVarForStep(stepID, s.OutputData)
+			r.SetOutputVarForStep(stepID, response)
 		}
 	} else {
-		r.SetOutputVarForStep(stepID, s.OutputData)
+		r.SetOutputVarForStep(stepID, response)
+	}
+
+	value, err := structpb.NewValue(r.GetOutputVar(stepID))
+	if err == nil {
+		pbResult, _ := anypb.New(value)
+		s.OutputData = &avsproto.Execution_Step_RestApi{
+			RestApi: &avsproto.RestAPINode_Output{
+				Data: pbResult,
+			},
+		}
 	}
 
 	if err != nil {

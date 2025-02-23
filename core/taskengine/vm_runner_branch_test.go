@@ -10,6 +10,7 @@ import (
 
 	"github.com/AvaProtocol/ap-avs/core/testutil"
 	"github.com/AvaProtocol/ap-avs/model"
+	"github.com/AvaProtocol/ap-avs/pkg/gow"
 
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 )
@@ -19,7 +20,7 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		response := map[string]interface{}{
-			"data": string(body),
+			"name": string(body),
 		}
 		json.NewEncoder(w).Encode(response)
 	}))
@@ -148,10 +149,11 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 	}
 
 	// Verify that the second condition was hit
-	if !strings.Contains(vm.ExecutionLogs[0].OutputData, "branch1.condition2") {
+	if !strings.Contains(vm.ExecutionLogs[0].GetBranch().ConditionId, "branch1.condition2") {
 		t.Errorf("expected second condition to be hit, but got %s", vm.ExecutionLogs[0].OutputData)
 	}
-	if !strings.Contains(vm.ExecutionLogs[1].OutputData, "second_condition") {
+	outputData := gow.AnyToMap(vm.ExecutionLogs[1].GetRestApi().Data)
+	if outputData["name"].(string) != "hit=second_condition" {
 		t.Errorf("expected second notification to be executed, but got %s", vm.ExecutionLogs[1].OutputData)
 	}
 
@@ -163,7 +165,7 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error executing program. Expected success, got error %v", err)
 	}
-	if !strings.Contains(vm.ExecutionLogs[0].OutputData, "branch1.condition1") {
+	if !strings.Contains(vm.ExecutionLogs[0].GetBranch().ConditionId, "branch1.condition1") {
 		t.Errorf("expected first condition to be hit, but got %s", vm.ExecutionLogs[0].OutputData)
 	}
 
@@ -175,7 +177,7 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error executing program. Expected success, got error %v", err)
 	}
-	if !strings.Contains(vm.ExecutionLogs[0].OutputData, "branch1.condition3") {
+	if !strings.Contains(vm.ExecutionLogs[0].GetBranch().ConditionId, "branch1.condition3") {
 		t.Errorf("expected else condition to be hit, but got %s", vm.ExecutionLogs[0].OutputData)
 	}
 }
@@ -236,7 +238,7 @@ func TestBranchConditionSuccesfulCase(t *testing.T) {
 				return
 			}
 
-			if stepResult.OutputData != tc.expectedOutput {
+			if stepResult.GetBranch().ConditionId != tc.expectedOutput {
 				t.Errorf("expected output data %s but got %s", tc.expectedOutput, stepResult.OutputData)
 			}
 		})
@@ -293,7 +295,7 @@ func TestBranchConditionDiscardAnythingAfterElse(t *testing.T) {
 				return
 			}
 
-			if stepResult.OutputData != tc.expectedOutput {
+			if stepResult.GetBranch().ConditionId != tc.expectedOutput {
 				t.Errorf("expected output data %s but got %s", tc.expectedOutput, stepResult.OutputData)
 			}
 		})
@@ -340,19 +342,18 @@ func TestBranchConditionInvalidCase(t *testing.T) {
 				return
 			}
 
-			if stepResult.OutputData != tc.expectedOutput {
+			if stepResult.GetBranch().ConditionId != tc.expectedOutput {
 				t.Errorf("expected output data %s but got %s", tc.expectedOutput, stepResult.OutputData)
 			}
 		})
 	}
 }
 
-
 /*
 Issue: https://github.com/AvaProtocol/EigenLayer-AVS/issues/142
 
 Conditions should accept JavaScript-like expressions for evaluation.
-Currently, expression such as typeof trigger.data === "undefined" is failing 
+Currently, expression such as typeof trigger.data === "undefined" is failing
 */
 func TestBranchNodeEvaluateTypeof(t *testing.T) {
 	testCases := []struct {
@@ -376,7 +377,7 @@ func TestBranchNodeEvaluateTypeof(t *testing.T) {
 			vm := NewVM()
 			processor := NewBranchProcessor(vm)
 			vm.vars["mytrigger"] = tc.dataValue
-			
+
 			stepResult, err := processor.Execute("test1", &avsproto.BranchNode{
 				Conditions: conditions,
 			})
@@ -393,7 +394,7 @@ func TestBranchNodeEvaluateTypeof(t *testing.T) {
 				return
 			}
 
-			if stepResult.OutputData != tc.expectedOutput {
+			if stepResult.GetBranch().ConditionId != tc.expectedOutput {
 				t.Errorf("expected output data %s but got %s", tc.expectedOutput, stepResult.OutputData)
 			}
 		})
@@ -424,7 +425,7 @@ func TestBranchNodeEmptyConditionIsAPass(t *testing.T) {
 			vm := NewVM()
 			processor := NewBranchProcessor(vm)
 			vm.vars["mytrigger"] = tc.dataValue
-			
+
 			stepResult, err := processor.Execute("test1", &avsproto.BranchNode{
 				Conditions: conditions,
 			})
@@ -441,13 +442,12 @@ func TestBranchNodeEmptyConditionIsAPass(t *testing.T) {
 				return
 			}
 
-			if stepResult.OutputData != tc.expectedOutput {
+			if stepResult.GetBranch().ConditionId != tc.expectedOutput {
 				t.Errorf("expected output data %s but got %s", tc.expectedOutput, stepResult.OutputData)
 			}
 		})
 	}
 }
-
 
 func TestBranchNodeExpressionWithJavaScript(t *testing.T) {
 	testCases := []struct {
@@ -478,7 +478,7 @@ func TestBranchNodeExpressionWithJavaScript(t *testing.T) {
 			vm := NewVM()
 			processor := NewBranchProcessor(vm)
 			vm.vars["cod1"] = map[string]interface{}{"data": tc.dataValue}
-			
+
 			conditions[0].Expression = tc.expression
 			stepResult, err := processor.Execute("test1", &avsproto.BranchNode{
 				Conditions: conditions,
@@ -496,22 +496,21 @@ func TestBranchNodeExpressionWithJavaScript(t *testing.T) {
 				return
 			}
 
-			if stepResult.OutputData != tc.expectedOutput {
+			if stepResult.GetBranch().ConditionId != tc.expectedOutput {
 				t.Errorf("expected output data %s but got %s", tc.expectedOutput, stepResult.OutputData)
 			}
 		})
 	}
 }
 
-
 func TestBranchNodeNoElseSkip(t *testing.T) {
 	testCases := []struct {
-		expression     string
-		dataValue      interface{}
-		expectError    bool
+		expression  string
+		dataValue   interface{}
+		expectError bool
 	}{
 		{"Number(cod1.data) > 10", 5, false},
-		{"Number(cod1.data) >= 2 && Number(cod1.data) <=3", 1,  false},
+		{"Number(cod1.data) >= 2 && Number(cod1.data) <=3", 1, false},
 		{"!(Number(cod1.data) >= 2 && Number(cod1.data) <=3)", 3, false},
 		{"cod1.data == 'alice'", "bob", false},
 	}
@@ -526,7 +525,7 @@ func TestBranchNodeNoElseSkip(t *testing.T) {
 			vm := NewVM()
 			processor := NewBranchProcessor(vm)
 			vm.vars["cod1"] = map[string]interface{}{"data": tc.dataValue}
-			
+
 			conditions[0].Expression = tc.expression
 			stepResult, err := processor.Execute("test1", &avsproto.BranchNode{
 				Conditions: conditions,
@@ -544,7 +543,7 @@ func TestBranchNodeNoElseSkip(t *testing.T) {
 				return
 			}
 
-			if stepResult.OutputData != "" {
+			if stepResult.GetBranch() != nil {
 				t.Errorf("expected no action but got %s", stepResult.OutputData)
 			}
 		})
