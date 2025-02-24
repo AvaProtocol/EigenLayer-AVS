@@ -81,7 +81,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				TaskId:    triggerItem.TaskID,
 				Reason: &avspb.TriggerReason{
 					Epoch: uint64(triggerItem.Marker),
-					Type:  avsproto.TriggerReason_Cron,
+					Type:  avspb.TriggerReason_Cron,
 				},
 			}); err == nil {
 				o.logger.Debug("Succesfully notifiy aggregator for task hit", "taskid", triggerItem.TaskID)
@@ -97,7 +97,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				TaskId:    triggerItem.TaskID,
 				Reason: &avspb.TriggerReason{
 					BlockNumber: uint64(triggerItem.Marker),
-					Type:        avsproto.TriggerReason_Block,
+					Type:        avspb.TriggerReason_Block,
 				},
 			}); err == nil {
 				o.logger.Debug("Succesfully notifiy aggregator for task hit", "taskid", triggerItem.TaskID)
@@ -116,7 +116,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 					BlockNumber: uint64(triggerItem.Marker.BlockNumber),
 					LogIndex:    uint64(triggerItem.Marker.LogIndex),
 					TxHash:      triggerItem.Marker.TxHash,
-					Type:        avsproto.TriggerReason_Event,
+					Type:        avspb.TriggerReason_Event,
 				},
 			}); err == nil {
 				o.logger.Debug("Succesfully notifiy aggregator for task hit", "taskid", triggerItem.TaskID)

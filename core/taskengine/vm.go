@@ -601,7 +601,7 @@ func (v *VM) preprocessText(text string) string {
 	jsvm := goja.New()
 
 	for key, value := range v.vars {
-		v.logger.Debug("evaludate pre-processor bind var", "task_id", v.Task.Id, key, value)
+		v.logger.Debug("evaludate pre-processor bind var", "task_id", v.task.Id, key, value)
 		jsvm.Set(key, value)
 	}
 
@@ -642,7 +642,7 @@ func (v *VM) preprocessText(text string) string {
 		script := fmt.Sprintf(`(() => { return %s; })()`, expr)
 
 		evaluated, err := jsvm.RunString(script)
-		v.logger.Debug("evaludate pre-processor script", "task_id", v.Task.Id, "script", script, "result", evaludated)
+		v.logger.Debug("evaludate pre-processor script", "task_id", v.task.Id, "script", script, "result", evaluated)
 		if err != nil {
 			// If there's an error, move past this opening bracket and continue
 			result = result[:start] + result[end+2:]
