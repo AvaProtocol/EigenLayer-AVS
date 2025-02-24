@@ -9,7 +9,7 @@
 <div class="bg-black">
   <div class="mx-auto max-w-7xl py-24 sm:px-6 sm:py-32 lg:px-8">
     <ul role="list" class="divide-y divide-gray-800">
-      {{ range . }}
+      {{ range .Nodes }}
       <li class="flex justify-between gap-x-6 py-5">
         <div class="flex min-w-0 gap-x-4">
           {{/* TODO: Parse metadata to get image url <img class="h-12 w-12 flex-none rounded-full bg-gray-50"
@@ -46,12 +46,20 @@
 
         <div class="hidden shrink-0 sm:flex sm:flex-col sm:items-end">
           <p class="text-sm leading-6 text-white">Active</p>
-          <p class="mt-1 text-xs leading-5 text-gray-400">Last seen <time
-datetime="2023-01-23T13:23Z">{{ .LastSeen }}</time></p>
+          <p class="mt-1 text-xs leading-5 text-gray-400">Last seen <time datetime="2023-01-23T13:23Z">{{ .LastSeen }}</time></p>
+          <p class="mt-1 text-xs leading-5 text-gray-400">Block {{ .BlockNumer }}</p>
+          <p class="mt-1 text-xs leading-5 text-gray-400">Event {{ .EventCount }}</p>
         </div>
         {{ end }}
       </li>
     </ul>
   </div>
+    <!-- Center text for version and revision -->
+    <div class="text-center mb-8">
+      <p class="text-white text-sm">
+        Aggregator v{{.Version}}
+        <a href="https://github.com/AvaProtocol/EigenLayer-AVS/commit/{{.Revision}}" class="underline" target="_blank">+{{.Revision}}</a>
+      </p>
+    </div>
 </div>
 </body>

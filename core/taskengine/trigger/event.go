@@ -141,6 +141,7 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 				evtTrigger.logger.Debug("detect new event, evaluate checks", "event", event.Topics[0], "contract", event.Address)
 				// TODO: implement hint to avoid scan all checks
 				toRemove := []string{}
+				evtTrigger.progress += 1
 
 				evtTrigger.checks.Range(func(key any, value any) bool {
 					if evtTrigger.shutdown {

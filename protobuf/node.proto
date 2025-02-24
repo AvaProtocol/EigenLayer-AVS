@@ -23,6 +23,8 @@ message Checkin {
   string version = 5;
   int32 metricsPort = 6;
   string remoteIP = 7;
+  int64 block_number = 8;
+  int64 event_count = 9;
 }
 
 message CheckinResp {
