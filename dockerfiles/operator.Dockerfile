@@ -1,5 +1,6 @@
 FROM golang:1.23 AS builder
 ARG RELEASE_TAG
+ARG COMMIT_SHA
 
 WORKDIR /app
 
@@ -11,6 +12,7 @@ COPY . ./
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags "-X github.com/AvaProtocol/ap-avs/version.semver=$RELEASE_TAG" \
+    -ldflags "-X github.com/AvaProtocol/ap-avs/version.revision=$COMMIT_SHA" \
     -o /ava
 
 

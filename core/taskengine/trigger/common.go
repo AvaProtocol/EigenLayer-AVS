@@ -29,6 +29,9 @@ type CommonTrigger struct {
 	done     chan bool
 	shutdown bool
 	mu       sync.Mutex
+
+	// a counter to track progress of the trigger. the counter will increase everytime a processing happen
+	progress int64
 }
 
 func (b *CommonTrigger) retryConnectToRpc() error {
@@ -52,4 +55,8 @@ func (b *CommonTrigger) retryConnectToRpc() error {
 func (b *CommonTrigger) Shutdown() {
 	b.shutdown = true
 	b.done <- true
+}
+
+func (b *CommonTrigger) GetProgress() int64 {
+	return b.progress
 }

@@ -79,6 +79,7 @@ jobs:
         with:
           build-args: |
             RELEASE_TAG=${{ inputs.tag || github.sha ||  github.head_ref || github.ref_name }}
+            COMMIT_SHA=${{ github.sha }}
           platforms: linux/amd64,linux/arm64
           context: .
           file: dockerfiles/operator.Dockerfile
