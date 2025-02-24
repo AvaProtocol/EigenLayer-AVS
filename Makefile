@@ -109,7 +109,9 @@ dev-live:
 ## dev-build: build a dev version for local development
 dev-build:
 	mkdir out || true
-	go build -o ./out/ap
+	go build \
+		-o ./out/ap \
+    	-ldflags "-X github.com/AvaProtocol/ap-avs/version.revision=$(shell  git rev-parse HEAD)"
 
 ## dev-agg: run aggregator locally with dev build
 dev-agg:

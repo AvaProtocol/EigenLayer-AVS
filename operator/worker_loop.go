@@ -199,6 +199,8 @@ func (o *Operator) PingServer() {
 		Version:     version.Get(),
 		RemoteIP:    o.GetPublicIP(),
 		MetricsPort: o.config.GetPublicMetricPort(),
+		BlockNumber: o.blockTrigger.GetProgress(),
+		EventCount:  o.eventTrigger.GetProgress(),
 	})
 
 	if err != nil {

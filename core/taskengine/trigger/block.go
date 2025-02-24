@@ -123,6 +123,8 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 				}
 			case header := <-headers:
 				b.logger.Debug("detected new block, evaluating checks", "component", "blocktrigger", "block", header.Hash().Hex(), "number", header.Number)
+				b.progress = header.Number.Int64()
+
 				toRemove := []int{}
 				for interval, tasks := range b.schedule {
 					z := new(big.Int)

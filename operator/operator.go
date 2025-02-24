@@ -50,8 +50,8 @@ import (
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/version"
 
+	"github.com/AvaProtocol/ap-avs/core/config"
 	triggerengine "github.com/AvaProtocol/ap-avs/core/taskengine/trigger"
-	 "github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/pkg/ipfetcher"
 	"github.com/AvaProtocol/ap-avs/pkg/timekeeper"
 )
@@ -196,7 +196,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	var ethRpcClient *eth.InstrumentedClient
 	var ethWsClient *eth.InstrumentedClient
 
-		rpcCallsCollector := rpccalls.NewCollector(AVS_NAME, reg)
+	rpcCallsCollector := rpccalls.NewCollector(AVS_NAME, reg)
 	if c.EnableMetrics {
 		ethRpcClient, err = eth.NewInstrumentedClient(c.EthRpcUrl, rpcCallsCollector)
 		if err != nil {

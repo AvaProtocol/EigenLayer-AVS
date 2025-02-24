@@ -575,15 +575,16 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 
 	task, err := n.GetTaskByID(payload.TaskId)
 	if err != nil {
+		n.logger.Error("task not found", "user", user.Address, "task_id", payload.TaskId)
 		return nil, err
 	}
 
 	if !task.IsRunable() {
 		return nil, grpcstatus.Errorf(codes.FailedPrecondition, TaskIsNotRunable)
 	}
-
 	if !task.OwnedBy(user.Address) {
 		// only the owner of a task can trigger it
+		n.logger.Error("task not own by user", "owner", user.Address, "task_id", payload.TaskId)
 		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
@@ -592,9 +593,11 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		ExecutionID: ulid.Make().String(),
 	}
 
+	fmt.Println("task", task)
 	if payload.IsBlocking {
 		// Run the task inline, by pass the queue system
 		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger)
+		fmt.Println("queue task Data", queueTaskData)
 		execution, err := executor.RunTask(task, &queueTaskData)
 		if err == nil {
 			return &avsproto.UserTriggerTaskResp{

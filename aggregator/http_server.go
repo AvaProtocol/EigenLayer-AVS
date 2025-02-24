@@ -8,6 +8,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/AvaProtocol/ap-avs/version"
 	"github.com/labstack/echo/v4"
 )
 
@@ -45,7 +46,15 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 			return err
 		}
 
-		data := agg.operatorPool.GetAll()
+		data := struct {
+			Version  string
+			Revision string
+			Nodes    []*OperatorNode
+		}{
+			Version:  version.Get(),
+			Revision: version.Commit(),
+			Nodes:    agg.operatorPool.GetAll(),
+		}
 		var buf bytes.Buffer
 		if err := tpl.Execute(&buf, data); err != nil {
 			agg.logger.Errorf("error rendering telemetry %v", err)
