@@ -601,9 +601,6 @@ func (v *VM) preprocessText(text string) string {
 	jsvm := goja.New()
 
 	for key, value := range v.vars {
-		if v.logger != nil {
-			v.logger.Debug("evaludate pre-processor bind var", "task_id", v.GetTaskId(), key, value)
-		}
 		jsvm.Set(key, value)
 	}
 
