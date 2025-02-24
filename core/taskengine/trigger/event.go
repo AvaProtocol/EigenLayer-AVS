@@ -164,6 +164,11 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 							},
 						}
 
+						evtTrigger.logger.Debug("check hit",
+							"check", key,
+							"tx_hash", event.TxHash,
+						)
+
 						// if check.metadata.Remain >= 0 {
 						// 	if check.metadata.Remain == 1 {
 						// 		toRemove = append(toRemove, key.(string))
@@ -220,12 +225,6 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 
 					match = match && strings.EqualFold(topics[i], v)
 				}
-
-				evt.logger.Debug("evaluate check againts event",
-					"check", check.TaskMetadata.TaskId,
-					"tx_hash", event.TxHash,
-					"result", match)
-
 				return match
 			case "address":
 				// Matching base on token contract that emit the event
