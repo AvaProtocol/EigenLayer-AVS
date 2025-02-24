@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -24,9 +25,9 @@ var (
 	// a better idea is to only subscribe to what we need and re-load when new trigger is added
 	whitelistTopics = [][]common.Hash{
 		[]common.Hash{
-			common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"), // UserOp
 			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"), // erc20 transfer
-			common.HexToHash("0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"), // approve
+			//common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"), // UserOp
+			//common.HexToHash("0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"), // approve
 		},
 	}
 )
@@ -107,7 +108,7 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 		Topics: whitelistTopics,
 	}
 
-	sub, err := evtTrigger.wsEthClient.SubscribeFilterLogs(context.Background(), ethereum.FilterQuery{Topics: whitelistTopics}, logs)
+	sub, err := evtTrigger.wsEthClient.SubscribeFilterLogs(context.Background(), query, logs)
 	evtTrigger.logger.Info("subscribing with filter", "topics", whitelistTopics)
 
 	if err != nil {
@@ -138,12 +139,15 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 				evtTrigger.retryConnectToRpc()
 				sub, err = evtTrigger.wsEthClient.SubscribeFilterLogs(context.Background(), query, logs)
 			case event := <-logs:
-				evtTrigger.logger.Debug("detect new event, evaluate checks", "event", event.Topics[0], "contract", event.Address)
+				evtTrigger.logger.Debug("detect new event, evaluate checks", "event", event.Topics, "contract", event.Address, "tx", event.TxHash)
 				// TODO: implement hint to avoid scan all checks
 				toRemove := []string{}
 				evtTrigger.progress += 1
 
+				startTime := time.Now()
+				checksCount := 0
 				evtTrigger.checks.Range(func(key any, value any) bool {
+					checksCount++
 					if evtTrigger.shutdown {
 						return false
 					}
@@ -160,6 +164,11 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 							},
 						}
 
+						evtTrigger.logger.Debug("check hit",
+							"check", key,
+							"tx_hash", event.TxHash,
+						)
+
 						// if check.metadata.Remain >= 0 {
 						// 	if check.metadata.Remain == 1 {
 						// 		toRemove = append(toRemove, key.(string))
@@ -171,6 +180,12 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 					// We do want to continue other check no matter what outcome of previous one
 					return true
 				})
+
+				duration := time.Since(startTime)
+				evtTrigger.logger.Info("completed check evaluations",
+					"checks_count", checksCount,
+					"duration_ms", duration.Milliseconds(),
+					"checks_per_second", float64(checksCount)/(float64(duration.Nanoseconds())/1e9))
 
 				if len(toRemove) > 0 {
 					for _, v := range toRemove {
@@ -185,6 +200,43 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 }
 
 func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) {
+	var err error = nil
+	if len(check.Matcher) > 0 {
+		// This is the simpler trigger. It's essentially an anyof
+		return lo.SomeBy(check.Matcher, func(x *avsproto.EventCondition_Matcher) bool {
+			if len(x.Value) == 0 {
+				err = fmt.Errorf("matcher value is empty")
+				return false
+			}
+
+			switch x.Type {
+			case "topics":
+				// Matching based on topic of transaction
+				topics := lo.Map[common.Hash, string](event.Topics, func(topic common.Hash, _ int) string {
+					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+				})
+
+				match := true
+				// In Topics matching, this will be the array of topics. an element that is empty is skip
+				for i, v := range x.Value {
+					if v == "" || v == "0x" {
+						continue
+					}
+
+					match = match && strings.EqualFold(topics[i], v)
+				}
+				return match
+			case "address":
+				// Matching base on token contract that emit the event
+				return strings.EqualFold(event.Address.String(), x.Value[0])
+			}
+
+			// Unsupport type
+			err = fmt.Errorf("unsupport matcher type: %s", x.Type)
+			return false
+		}), err
+	}
+
 	if check.Program != "" {
 		// This is the advance trigger with js evaluation based on trigger data
 		triggerVarName := check.TaskMetadata.GetTrigger().GetName()
@@ -218,40 +270,6 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 
 		return evalutationResult, err
 
-	}
-
-	var err error = nil
-	if len(check.Matcher) > 0 {
-		// This is the simpler trigger. It's essentially an anyof
-		return lo.SomeBy(check.Matcher, func(x *avsproto.EventCondition_Matcher) bool {
-			if len(x.Value) == 0 {
-				err = fmt.Errorf("matcher value is empty")
-				return false
-			}
-
-			switch x.Type {
-			case "topics":
-				// Matching based on topic of transaction
-				topics := lo.Map[common.Hash, string](event.Topics, func(topic common.Hash, _ int) string {
-					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
-				})
-				match := true
-				for i, v := range x.Value {
-					match = match && (v == "" || strings.EqualFold(topics[i], v))
-					if !match {
-						return false
-					}
-				}
-				return match
-			case "address":
-				// Matching base on token contract that emit the event
-				return strings.EqualFold(event.Address.String(), x.Value[0])
-			}
-
-			// Unsupport type
-			err = fmt.Errorf("unsupport matcher type: %s", x.Type)
-			return false
-		}), err
 	}
 
 	err = fmt.Errorf("invalid event trigger check: both matcher or expression are missing or empty")

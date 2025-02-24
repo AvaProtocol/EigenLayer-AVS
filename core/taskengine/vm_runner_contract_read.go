@@ -82,6 +82,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		return s, err
 	}
 	result, err := parsedABI.Unpack(method.Name, output)
+
 	if err != nil {
 		s.Success = false
 		s.Error = fmt.Errorf("error decode result: %w", err).Error()
