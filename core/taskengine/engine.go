@@ -593,11 +593,9 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		ExecutionID: ulid.Make().String(),
 	}
 
-	fmt.Println("task", task)
 	if payload.IsBlocking {
 		// Run the task inline, by pass the queue system
 		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger)
-		fmt.Println("queue task Data", queueTaskData)
 		execution, err := executor.RunTask(task, &queueTaskData)
 		if err == nil {
 			return &avsproto.UserTriggerTaskResp{

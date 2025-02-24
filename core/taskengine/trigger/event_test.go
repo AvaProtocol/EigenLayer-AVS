@@ -22,6 +22,10 @@ func TestTriggerTopicMatch(t *testing.T) {
 		testutil.GetLogger())
 
 	result, err := eventTrigger.Evaluate(event, &Check{
+		TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
+			TaskId: "123",
+		},
+
 		Matcher: []*avsproto.EventCondition_Matcher{
 			&avsproto.EventCondition_Matcher{
 				Type: "topics",
@@ -84,6 +88,7 @@ func TestTriggerTopicMulti(t *testing.T) {
 		testutil.GetLogger())
 
 	result, err := eventTrigger.Evaluate(event, &Check{
+
 		Matcher: []*avsproto.EventCondition_Matcher{
 			&avsproto.EventCondition_Matcher{
 				Type: "topics",

@@ -148,6 +148,7 @@ type Operator struct {
 	scheduler    gocron.Scheduler
 	eventTrigger *triggerengine.EventTrigger
 	blockTrigger *triggerengine.BlockTrigger
+	timeTrigger  *triggerengine.TimeTrigger
 }
 
 func RunWithConfig(configPath string) {
