@@ -198,7 +198,15 @@ func (o *Operator) StreamMessages() {
 					} else {
 						o.logger.Info("succesfully monitor", "task_id", resp.Id, "component", "timeTrigger")
 					}
+				} else if trigger := resp.TaskMetadata.Trigger.GetFixedTime(); trigger != nil {
+					o.logger.Info("received new fixed time trigger", "id", resp.Id, "fixedtime", resp.TaskMetadata.Trigger)
+					if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
+						o.logger.Errorf("add trigger to monitor error", err, "task_id", resp.Id)
+					} else {
+						o.logger.Info("succesfully monitor", "task_id", resp.Id, "component", "timeTrigger")
+					}
 				}
+
 			}
 		}
 	}
