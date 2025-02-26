@@ -53,21 +53,26 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		s.Success = err == nil
 	}()
 
-	contractAddress := common.HexToAddress(node.ContractAddress)
-	calldata := common.FromHex(node.CallData)
+	contractAddressHex := strings.Clone(node.ContractAddress)
+	callDataHex := strings.Clone(node.CallData)
+
+	if strings.Contains(contractAddressHex, "{{") {
+		contractAddressHex = r.vm.preprocessText(contractAddressHex)
+	}
+	if strings.Contains(callDataHex, "{{") {
+		callDataHex = r.vm.preprocessText(callDataHex)
+	}
+
+	contractAddress := common.HexToAddress(contractAddressHex)
+	calldata := common.FromHex(callDataHex)
+
 	userOpCalldata, err := aa.PackExecute(
 		contractAddress,
 		big.NewInt(0), // TODO: load correct salt from the task
 		calldata,
 	)
-	log.WriteString(fmt.Sprintf("\nprepare to send userops target contract %s\ninitialize bundler client\n", node.ContractAddress))
-	// bundlerClient, err := bundler.NewBundlerClient(r.smartWalletConfig.BundlerURL)
-
-	// if err != nil {
-	// 	log.WriteString(fmt.Sprintf("error creating bundle client: %s", err))
-	// 	s.Error = fmt.Sprintf("error creating bundler client : %s", err)
-	// 	return s, err
-	// }
+	log.WriteString(fmt.Sprintf("\nwill send message %s to contract %s\n", callDataHex, contractAddressHex))
+	log.WriteString(fmt.Sprintf("\nprepare to send userops to target contract %s\ninitialize bundler client\n", contractAddress.Hex()))
 
 	log.WriteString("\nsend userops to bundler rpc\n")
 
@@ -83,6 +88,13 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	}
 
 	bloom, _ := txReceipt.Bloom.MarshalText()
+
+	blobGasPrice := uint64(0)
+
+	if txReceipt.BlobGasPrice != nil {
+		blobGasPrice = uint64(txReceipt.BlobGasPrice.Int64())
+	}
+
 	outputData := &avsproto.Execution_Step_ContractWrite{
 		ContractWrite: &avsproto.ContractWriteNode_Output{
 			UserOp: &avsproto.Evm_UserOp{
@@ -118,7 +130,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				Root:         common.Bytes2Hex(txReceipt.PostState),
 				Status:       uint32(txReceipt.Status),
 				Type:         uint32(txReceipt.Type),
-				BlobGasPrice: uint64(txReceipt.BlobGasPrice.Int64()),
+				BlobGasPrice: blobGasPrice,
 				BlobGasUsed:  uint64(txReceipt.BlobGasUsed),
 			},
 		},
