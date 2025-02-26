@@ -63,8 +63,6 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		callDataHex = r.vm.preprocessText(callDataHex)
 	}
 
-	fmt.Println("EVALUATE TO", contractAddressHex, callDataHex)
-
 	contractAddress := common.HexToAddress(contractAddressHex)
 	calldata := common.FromHex(callDataHex)
 
