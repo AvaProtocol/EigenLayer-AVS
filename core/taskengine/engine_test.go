@@ -13,6 +13,45 @@ import (
 	"github.com/AvaProtocol/ap-avs/storage"
 )
 
+func TestCreateTaskReturnErrorWhenEmptyNodes(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	tr := testutil.RestTask()
+	tr.Name = "t1"
+	tr.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	tr.Nodes = []*avsproto.TaskNode{}
+	//tr.Edges = []*avsproto.Edge{}
+	_, err := n.CreateTask(testutil.TestUser1(), tr)
+	if err == nil {
+		t.Errorf("expect error when create task with empty nodes or edges")
+	}
+
+	if err.Error() != "rpc error: code = InvalidArgument desc = invalid: nodes field cannot be an empty array" {
+		t.Errorf("expect error `code = InvalidArgument desc = invalid: nodes field cannot be an empty array`, got %s", err.Error())
+	}
+}
+
+func TestCreateTaskReturnErrorWhenEmptyEdges(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	tr := testutil.RestTask()
+	tr.Name = "t1"
+	tr.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	tr.Edges = []*avsproto.TaskEdge{}
+	_, err := n.CreateTask(testutil.TestUser1(), tr)
+	if err.Error() != "rpc error: code = InvalidArgument desc = invalid: edges field cannot be an empty array" {
+		t.Errorf("expect error `code = InvalidArgument desc = invalid: edges field cannot be an empty array`, got %s", err.Error())
+	}
+}
+
 func TestListTasks(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
