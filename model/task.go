@@ -18,6 +18,11 @@ type Task struct {
 	*avsproto.Task
 }
 
+const (
+	ErrEmptyNodesField = "invalid: nodes field cannot be an empty array"
+	ErrEmptyEdgesField = "invalid: edges field cannot be an empty array"
+)
+
 // Generate a sorted uuid
 func GenerateTaskID() string {
 	taskId := ulid.Make()
@@ -46,8 +51,12 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 
 	taskID := GenerateTaskID()
 
-	if len(body.Edges) == 0 || len(body.Nodes) == 0 {
-		return nil, fmt.Errorf("Missing task data")
+	if len(body.Edges) == 0 {
+		return nil, fmt.Errorf(ErrEmptyEdgesField)
+	}
+
+	if len(body.Nodes) == 0 {
+		return nil, fmt.Errorf(ErrEmptyNodesField)
 	}
 
 	t := &Task{

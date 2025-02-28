@@ -300,7 +300,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	task, err := model.NewTaskFromProtobuf(user, taskPayload)
 
 	if err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_TaskDataMissingError), err.Error())
+		return nil, status.Errorf(codes.InvalidArgument, err.Error())
 	}
 
 	updates := map[string][]byte{}
