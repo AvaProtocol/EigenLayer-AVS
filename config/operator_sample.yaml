@@ -36,3 +36,7 @@ db_path: /tmp/ap-avs-operator
 target_chain:
   eth_rpc_url: <sepolia-chain-rpc>
   eth_ws_url: <websocket-sepolia-chain-rpc>
+
+enabled_features:
+  # event trigger requires a dedicated rpc node with websocket to listen to all on-chain event. Depend on your RPC provider, this may require significant billing so we disable by default
+  event_trigger: false
