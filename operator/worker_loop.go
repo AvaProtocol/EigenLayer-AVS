@@ -61,8 +61,14 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	o.timeTrigger = triggerengine.NewTimeTrigger(timeTriggerCh, o.logger)
 
 	o.blockTrigger.Run(ctx)
-	o.eventTrigger.Run(ctx)
 	o.timeTrigger.Run(ctx)
+
+	// Event trigger can be costly, so we require an opt-in
+	if o.config.EnabledFeatures.EventTrigger {
+		o.eventTrigger.Run(ctx)
+	} else {
+		o.logger.Info("event trigger not enable, skip initialize event monitoring")
+	}
 
 	// Establish a connection with gRPC server where new task will be pushed automatically
 	o.logger.Info("open channel to grpc to receive check")

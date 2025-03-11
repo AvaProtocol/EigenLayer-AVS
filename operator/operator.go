@@ -99,6 +99,10 @@ type OperatorConfig struct {
 		Password        string `yaml:"password"`
 		TLSCertFilePath string `yaml:"tls_cert_file_path"`
 	} `yaml:"bls_remote_signer"`
+
+	EnabledFeatures struct {
+		EventTrigger bool `yaml:"event_trigger"`
+	} `yaml:"enabled_features"`
 }
 
 type Operator struct {
@@ -192,11 +196,12 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	// Setup Node Api
 	nodeApi := nodeapi.NewNodeApi(AVS_NAME, version.Get(), c.NodeApiIpPortAddress, logger)
 
-	logger.Infof("%s operator version %s", AVS_NAME, version.Get())
+	logger.Info("starting operator", "version", version.Get(), "commit", version.Commit())
 
 	var ethRpcClient *eth.InstrumentedClient
 	var ethWsClient *eth.InstrumentedClient
 
+	logger.Debug("initialize rpc call collector")
 	rpcCallsCollector := rpccalls.NewCollector(AVS_NAME, reg)
 	if c.EnableMetrics {
 		ethRpcClient, err = eth.NewInstrumentedClient(c.EthRpcUrl, rpcCallsCollector)
@@ -225,6 +230,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	var blsRemoteSigner blssignerV1.SignerClient
 	var blsKeyPair *bls.KeyPair
 	if c.BlsRemoteSigner.GrpcUrl != "" {
+		logger.Debug("initialize remote signer", "grpc_url", c.BlsRemoteSigner.GrpcUrl)
 		logger.Info("creating signer client", "url", c.BlsRemoteSigner.GrpcUrl, "publickey", c.BlsRemoteSigner.PublicKey)
 		creds := insecure.NewCredentials()
 		if c.BlsRemoteSigner.TLSCertFilePath != "" {
@@ -253,6 +259,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	}
 
 	chainId, err := ethRpcClient.ChainID(context.Background())
+	logger.Infof("detect EigenLayer on chain id %d", chainId)
 	if err != nil {
 		logger.Error("Cannot get chainId", "err", err)
 		return nil, err
