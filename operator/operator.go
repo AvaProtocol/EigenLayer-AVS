@@ -102,7 +102,7 @@ type OperatorConfig struct {
 
 	EnabledFeatures struct {
 		EventTrigger bool `yaml:"event_trigger"`
-	} `yaml:"enable_features"`
+	} `yaml:"enabled_features"`
 }
 
 type Operator struct {
