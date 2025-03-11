@@ -2,7 +2,7 @@ package version
 
 var (
 	// Version can also be set through tag release at build time
-	semver   = "1.4.0"
+	semver   = "1.5.0"
 	revision = "unknow"
 )
 
