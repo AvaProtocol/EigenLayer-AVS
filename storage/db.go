@@ -182,7 +182,7 @@ func (s *BadgerStorage) GetKeyHasPrefix(prefix []byte) ([][]byte, error) {
 	return result, nil
 }
 
-// CountByPrefix return total key under a specfic prefix
+// CountKeysByPrefix return total key under a specfic prefix
 func (s *BadgerStorage) CountKeysByPrefix(prefix []byte) (int64, error) {
 	total := int64(0)
 
