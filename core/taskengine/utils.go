@@ -20,7 +20,7 @@ type Metadata struct {
 	BlockNumber    uint64
 }
 
-// GetMetadata retrieves and caches token metadata and block data
+// GetMetadataForTransfer retrieves and caches token metadata and block data
 func GetMetadataForTransfer(log *types.Log) (*Metadata, error) {
 	tokenAddress := log.Address.Hex()
 	cacheKey := fmt.Sprintf("erc20:%s", tokenAddress)
