@@ -10,7 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-// QueryContract
+// QueryContractRaw
 func QueryContractRaw(
 	ctx context.Context,
 	client *ethclient.Client,
