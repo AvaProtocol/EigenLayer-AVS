@@ -11,45 +11,12 @@ import (
 	"github.com/AvaProtocol/ap-avs/pkg/erc4337/preset"
 	"github.com/AvaProtocol/ap-avs/pkg/erc4337/userop"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/ap-avs/storage"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
-type MockStorage struct {
-	mock.Mock
-}
 
-func (m *MockStorage) GetCounter(key []byte, defaultValue ...uint64) (uint64, error) {
-	args := m.Called(key, defaultValue)
-	return args.Get(0).(uint64), args.Error(1)
-}
-
-func (m *MockStorage) IncCounter(key []byte, defaultValue ...uint64) (uint64, error) {
-	args := m.Called(key, defaultValue)
-	return args.Get(0).(uint64), args.Error(1)
-}
-
-func (m *MockStorage) Setup() error { return nil }
-func (m *MockStorage) Close() error { return nil }
-func (m *MockStorage) GetSequence(prefix []byte, inflightItem uint64) (interface{}, error) { return nil, nil }
-func (m *MockStorage) Exist(key []byte) (bool, error) { return false, nil }
-func (m *MockStorage) GetKey(key []byte) ([]byte, error) { return nil, nil }
-func (m *MockStorage) GetByPrefix(prefix []byte) (interface{}, error) { return nil, nil }
-func (m *MockStorage) GetKeyHasPrefix(prefix []byte) ([][]byte, error) { return nil, nil }
-func (m *MockStorage) FirstKVHasPrefix(prefix []byte) ([]byte, []byte, error) { return nil, nil, nil }
-func (m *MockStorage) ListKeys(prefix string) ([]string, error) { return nil, nil }
-func (m *MockStorage) ListKeysMulti(prefixes []string) ([]string, error) { return nil, nil }
-func (m *MockStorage) CountKeysByPrefix(prefix []byte) (int64, error) { return 0, nil }
-func (m *MockStorage) CountKeysByPrefixes(prefixes [][]byte) (int64, error) { return 0, nil }
-func (m *MockStorage) BatchWrite(updates map[string][]byte) error { return nil }
-func (m *MockStorage) Move(src, dest []byte) error { return nil }
-func (m *MockStorage) Set(key, value []byte) error { return nil }
-func (m *MockStorage) Delete(key []byte) error { return nil }
-func (m *MockStorage) Vacuum() error { return nil }
-func (m *MockStorage) DbPath() string { return "" }
 
 func TestTransactionSponsorshipLimit(t *testing.T) {
 	origSendUserOp := preset.SendUserOp
@@ -78,13 +45,18 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			mockStorage := new(MockStorage)
+			db := testutil.TestMustDB()
+			defer storage.Destroy(db.(*storage.BadgerStorage))
 			
-			vm := &VM{db: mockStorage}
+			vm := &VM{db: db}
 
 			counterKey := ContractWriteCounterKey(owner)
-			mockStorage.On("GetCounter", counterKey, []uint64{0}).Return(tc.transactionCount, nil)
-			mockStorage.On("IncCounter", counterKey, []uint64{0}).Return(tc.transactionCount + 1, nil)
+			for i := uint64(0); i < tc.transactionCount; i++ {
+				_, err := db.IncCounter(counterKey, 0)
+				if err != nil {
+					t.Fatalf("Failed to increment counter: %v", err)
+				}
+			}
 
 			processor := &ContractWriteProcessor{
 				CommonProcessor: &CommonProcessor{
@@ -107,20 +79,46 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 			}
 
 			processor.Execute("test", node)
-
-			mockStorage.AssertExpectations(t)
 			
 			if tc.expectPaymaster {
-				assert.NotNil(t, capturedPaymaster, "Expected paymaster request for transaction %d", tc.transactionCount)
-				assert.Equal(t, smartWalletConfig.PaymasterAddress, capturedPaymaster.PaymasterAddress)
-				assert.NotNil(t, capturedPaymaster.ValidUntil)
-				assert.NotNil(t, capturedPaymaster.ValidAfter)
+				if capturedPaymaster == nil {
+					t.Errorf("Expected paymaster request for transaction %d, but got nil", tc.transactionCount)
+					return
+				}
+				
+				if capturedPaymaster.PaymasterAddress != smartWalletConfig.PaymasterAddress {
+					t.Errorf("Expected paymaster address %s, got %s", 
+						smartWalletConfig.PaymasterAddress.Hex(), 
+						capturedPaymaster.PaymasterAddress.Hex())
+				}
+				
+				if capturedPaymaster.ValidUntil == nil {
+					t.Errorf("Expected ValidUntil to be set, but it was nil")
+				}
+				
+				if capturedPaymaster.ValidAfter == nil {
+					t.Errorf("Expected ValidAfter to be set, but it was nil")
+				}
+				
 				now := time.Now().Unix()
-				assert.True(t, capturedPaymaster.ValidUntil.Int64() > now)
-				assert.True(t, capturedPaymaster.ValidUntil.Int64() <= now+600+5) // 10 minutes + 5 seconds buffer
-				assert.True(t, capturedPaymaster.ValidAfter.Int64() <= now)
+				if capturedPaymaster.ValidUntil.Int64() <= now {
+					t.Errorf("Expected ValidUntil to be in the future, but it was %d (now: %d)", 
+						capturedPaymaster.ValidUntil.Int64(), now)
+				}
+				
+				if capturedPaymaster.ValidUntil.Int64() > now+600+5 { // 10 minutes + 5 seconds buffer
+					t.Errorf("Expected ValidUntil to be at most 10 minutes in the future, but it was %d (now: %d)", 
+						capturedPaymaster.ValidUntil.Int64(), now)
+				}
+				
+				if capturedPaymaster.ValidAfter.Int64() > now {
+					t.Errorf("Expected ValidAfter to be in the past or present, but it was %d (now: %d)", 
+						capturedPaymaster.ValidAfter.Int64(), now)
+				}
 			} else {
-				assert.Nil(t, capturedPaymaster, "Expected no paymaster request for transaction %d", tc.transactionCount)
+				if capturedPaymaster != nil {
+					t.Errorf("Expected no paymaster request for transaction %d, but got one", tc.transactionCount)
+				}
 			}
 		})
 	}
