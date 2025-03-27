@@ -83,7 +83,6 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	if total < 10 {
 		paymasterRequest = preset.GetVerifyingPaymasterRequestForDuration(r.smartWalletConfig.PaymasterAddress, 15 * time.Minute)
 	}
-
 	userOp, txReceipt, err := preset.SendUserOp(
 		r.smartWalletConfig,
 		r.owner,
