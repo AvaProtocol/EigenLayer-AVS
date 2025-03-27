@@ -79,6 +79,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	total, _ := r.vm.db.GetCounter(ContractWriteCounterKey(r.owner), 0)
 	
 	var paymasterRequest *preset.VerifyingPaymasterRequest
+	// TODO: move to config
 	if total > 10 {
 		paymasterRequest = &preset.VerifyingPaymasterRequest{
 			PaymasterAddress: r.smartWalletConfig.PaymasterAddress,

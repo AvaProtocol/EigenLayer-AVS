@@ -3,6 +3,7 @@ package storage
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	badger "github.com/dgraph-io/badger/v4"
@@ -41,6 +42,9 @@ type Storage interface {
 	Move(src, dest []byte) error
 	Set(key, value []byte) error
 	Delete(key []byte) error
+
+	GetCounter(key []byte, defaultValue ...uint64) (uint64, error)
+	IncCounter(key []byte, defaultValue ...uint64) (uint64, error)
 
 	Vacuum() error
 
@@ -390,4 +394,86 @@ func (a *BadgerStorage) DbPath() string {
 func Destroy(a *BadgerStorage) error {
 	a.Close()
 	return os.RemoveAll(a.config.Path)
+}
+
+// GetCounter retrieves a counter value for a given key.
+// If the key doesn't exist and defaultValue is provided, it returns the defaultValue.
+func (a *BadgerStorage) GetCounter(key []byte, defaultValue ...uint64) (uint64, error) {
+	var counter uint64
+
+	err := a.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(key)
+		if err == badger.ErrKeyNotFound {
+			if len(defaultValue) > 0 {
+				counter = defaultValue[0]
+				return nil
+			}
+			return err
+		}
+		if err != nil {
+			return err
+		}
+
+		return item.Value(func(val []byte) error {
+			counterStr := string(val)
+			parsedCounter, err := strconv.ParseUint(counterStr, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid counter format: %w", err)
+			}
+			counter = parsedCounter
+			return nil
+		})
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return counter, nil
+}
+
+// IncrementCounter increments a counter value for a given key by 1.
+// If the key doesn't exist and defaultValue is provided, it sets the counter to defaultValue + 1.
+// If the key doesn't exist and no defaultValue is provided, it sets the counter to 1.
+func (a *BadgerStorage) IncCounter(key []byte, defaultValue ...uint64) (uint64, error) {
+	var newValue uint64
+
+	err := a.db.Update(func(txn *badger.Txn) error {
+		var startValue uint64 = 0
+		if len(defaultValue) > 0 {
+			startValue = defaultValue[0]
+		}
+
+		item, err := txn.Get(key)
+		if err == badger.ErrKeyNotFound {
+			// Key doesn't exist, set to startValue + 1
+			newValue = startValue + 1
+		} else if err != nil {
+			return err
+		} else {
+			// Key exists, increment its value
+			err = item.Value(func(val []byte) error {
+				counterStr := string(val)
+				currentValue, err := strconv.ParseUint(counterStr, 10, 64)
+				if err != nil {
+					return fmt.Errorf("invalid counter format: %w", err)
+				}
+				newValue = currentValue + 1
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+
+		// Store the new value as a string
+		counterStr := strconv.FormatUint(newValue, 10)
+		return txn.Set(key, []byte(counterStr))
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return newValue, nil
 }
