@@ -2,6 +2,14 @@ name: Run on Push
 
 on:
   push:
+    paths:
+      - '**.go'
+      - '!**/*_test.go'
+      - '!**.yaml'
+      - '!**.yml'
+    branches:
+      - main
+      - support-pay-master
   workflow_dispatch:
 
 jobs:
