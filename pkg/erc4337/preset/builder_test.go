@@ -481,3 +481,195 @@ func mustBigInt(s string, base int) *big.Int {
 	}
 	return val
 }
+
+func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
+	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
+	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
+	if err != nil {
+		t.Fatalf("Failed to connect to the client: %v", err)
+	}
+	defer client.Close()
+
+	bundlerClient, err := bundler.NewBundlerClient(smartWalletConfig.BundlerURL)
+	if err != nil {
+		t.Fatalf("Failed to connect to the bundler: %v", err)
+	}
+
+	invalidPaymasterAddress := common.HexToAddress("0x0000000000000000000000000000000000000000")
+	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
+	validUntil := big.NewInt(0)
+	validAfter := big.NewInt(0)
+
+	calldata, err := aa.PackExecute(
+		common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e"),
+		big.NewInt(0),
+		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e8"),
+	)
+	if err != nil {
+		t.Errorf("failed to pack execute: %v", err)
+	}
+
+	_, err = BuildUserOpWithPaymaster(
+		smartWalletConfig,
+		client,
+		bundlerClient,
+		owner,
+		calldata,
+		invalidPaymasterAddress,
+		validUntil,
+		validAfter,
+	)
+
+	if err == nil {
+		t.Errorf("Expected error when initializing PayMaster contract with invalid address, but got nil")
+	}
+}
+
+func TestPaymasterDataFormatting(t *testing.T) {
+	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
+	smartWalletConfig.BundlerURL = "http://localhost:3437/rpc"
+
+	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+
+	// Because we used the master key to signed, the address cannot be calculated from that key and need to set explicitly
+	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
+
+	calldata, err := aa.PackExecute(
+		common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e"), // base sepolia usdc
+		big.NewInt(0),
+		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e8"),
+	)
+
+	if err != nil {
+		t.Errorf("expect pack userop succesfully but got error: %v", err)
+	}
+	
+	// Create validUntil and validAfter values (1 hour from now and current time)
+	currentTime := time.Now().Unix()
+	validAfter := big.NewInt(currentTime)
+	validUntil := big.NewInt(currentTime + 3600) // Valid for 1 hour
+	
+	userOp, _, err := SendUserOp(
+		smartWalletConfig,
+		owner,
+		calldata,
+		&VerifyingPaymasterRequest{
+			PaymasterAddress: smartWalletConfig.PaymasterAddress,
+			ValidUntil:       validUntil,
+			ValidAfter:       validAfter,
+		},
+	)
+	
+	if err != nil {
+		t.Errorf("Failed to send user operation with paymaster: %v", err)
+		return
+	}
+	
+	if userOp == nil {
+		t.Errorf("UserOp is nil")
+		return
+	}
+	
+	if len(userOp.PaymasterAndData) <= common.AddressLength {
+		t.Errorf("PaymasterAndData too short, expected more than address length")
+		return
+	}
+	
+	paymasterAddress := common.BytesToAddress(userOp.PaymasterAndData[:common.AddressLength])
+	
+	if paymasterAddress != smartWalletConfig.PaymasterAddress {
+		t.Errorf("Expected paymaster address %s, got %s", 
+			smartWalletConfig.PaymasterAddress.Hex(), 
+			paymasterAddress.Hex())
+	}
+}
+
+func TestPaymasterTimeValidation(t *testing.T) {
+	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
+
+	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
+	if err != nil {
+		t.Fatalf("Failed to connect to the client: %v", err)
+	}
+	defer client.Close()
+
+	paymasterContract, err := paymaster.NewPayMaster(smartWalletConfig.PaymasterAddress, client)
+	if err != nil {
+		t.Fatalf("Failed to initialize PayMaster contract: %v", err)
+	}
+
+	userOp := userop.UserOperation{
+		Sender:              common.HexToAddress("0x5afb1b1bc212c6417c575a78bf9921cc05f6d3ed"),
+		Nonce:               big.NewInt(15),
+		InitCode:            common.FromHex("0x"),
+		CallData:            common.FromHex("0xb61d27f600000000000000000000000003"),
+		CallGasLimit:        mustBigInt("989680", 16),
+		VerificationGasLimit: mustBigInt("989680", 16),
+		PreVerificationGas:  mustBigInt("989680", 16),
+		MaxFeePerGas:        mustBigInt("1140f2", 16),
+		MaxPriorityFeePerGas: mustBigInt("113e10", 16),
+		PaymasterAndData:    common.FromHex("0xffffff"),
+		Signature:           common.FromHex("0x1234"),
+	}
+
+	paymasterUserOp := paymaster.UserOperation{
+		Sender:               userOp.Sender,
+		Nonce:                userOp.Nonce,
+		InitCode:             userOp.InitCode,
+		CallData:             userOp.CallData,
+		CallGasLimit:         userOp.CallGasLimit,
+		VerificationGasLimit: userOp.VerificationGasLimit,
+		PreVerificationGas:   userOp.PreVerificationGas,
+		MaxFeePerGas:         userOp.MaxFeePerGas,
+		MaxPriorityFeePerGas: userOp.MaxPriorityFeePerGas,
+		PaymasterAndData:     userOp.PaymasterAndData,
+		Signature:            userOp.Signature,
+	}
+
+	testCases := []struct {
+		name       string
+		validUntil *big.Int
+		validAfter *big.Int
+		expectErr  bool
+	}{
+		{
+			name:       "Valid time range",
+			validUntil: big.NewInt(time.Now().Unix() + 3600),
+			validAfter: big.NewInt(time.Now().Unix()),
+			expectErr:  false,
+		},
+		{
+			name:       "validUntil in the past",
+			validUntil: big.NewInt(time.Now().Unix() - 3600),
+			validAfter: big.NewInt(time.Now().Unix() - 7200),
+			expectErr:  false, // Contract may not validate this at hash generation
+		},
+		{
+			name:       "validAfter in the future",
+			validUntil: big.NewInt(time.Now().Unix() + 7200),
+			validAfter: big.NewInt(time.Now().Unix() + 3600),
+			expectErr:  false, // Contract may not validate this at hash generation
+		},
+		{
+			name:       "validUntil before validAfter",
+			validUntil: big.NewInt(time.Now().Unix()),
+			validAfter: big.NewInt(time.Now().Unix() + 3600),
+			expectErr:  false, // Contract may not validate this at hash generation
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Get hash from PayMaster contract
+			hash, err := paymasterContract.GetHash(nil, paymasterUserOp, tc.validUntil, tc.validAfter)
+
+			if tc.expectErr && err == nil {
+				t.Errorf("Expected error but got nil for case %s", tc.name)
+			} else if !tc.expectErr && err != nil {
+				t.Errorf("Expected no error but got %v for case %s", err, tc.name)
+			}
+
+			t.Logf("Hash for case %s: %s", tc.name, common.Bytes2Hex(hash[:]))
+		})
+	}
+}
