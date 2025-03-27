@@ -48,7 +48,8 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 			db := testutil.TestMustDB()
 			defer storage.Destroy(db.(*storage.BadgerStorage))
 			
-			vm := &VM{db: db}
+			vm := NewVM().WithDb(db)
+			vm.vars = make(map[string]any) // Ensure vars is initialized
 
 			counterKey := ContractWriteCounterKey(owner)
 			for i := uint64(0); i < tc.transactionCount; i++ {
