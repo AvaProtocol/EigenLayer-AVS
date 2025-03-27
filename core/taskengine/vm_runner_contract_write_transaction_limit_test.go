@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"math/big"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,6 +52,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 			vm := NewVM().WithDb(db)
 			vm.vars = make(map[string]any)
 			vm.smartWalletConfig = smartWalletConfig
+			vm.mu = &sync.Mutex{}
 
 			counterKey := ContractWriteCounterKey(owner)
 			for i := uint64(0); i < tc.transactionCount; i++ {
