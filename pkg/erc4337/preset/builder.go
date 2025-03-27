@@ -230,6 +230,9 @@ func BuildUserOp(
 
 // BuildUserOpWithPaymaster creates a UserOperation with paymaster support.
 // It handles the process of building the UserOp, signing it, and setting the appropriate PaymasterAndData field.
+// It works same way as BuildUserOp but with the extra field PaymasterAndData set. The protocol is defined in https://eips.ethereum.org/EIPS/eip-4337#paymasters
+// Currently, we use the VerifyingPaymaster contract as the paymaster. We set a signer when initialize the paymaster contract.
+// The signer is also the controller private key. It's the only way to generate the signature for paymaster.
 func BuildUserOpWithPaymaster(
 	smartWalletConfig *config.SmartWalletConfig,
 	client *ethclient.Client,
@@ -252,7 +255,8 @@ func BuildUserOpWithPaymaster(
 		return nil, fmt.Errorf("failed to initialize PayMaster contract: %w", err)
 	}
 
-	// Get the chain ID
+	// Get the chain ID earlier , it's a part of the userOp hash calculation. If cannot get it, we fail fast
+	// TODO: we may load chain id from config to improve the speed
 	chainID, err := client.ChainID(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get chain ID: %w", err)
