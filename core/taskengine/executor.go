@@ -83,13 +83,18 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	triggerMetadata := queueData.Reason
 
 	secrets, _ := LoadSecretForTask(x.db, task)
-	vm, err := NewVMWithData(task, triggerMetadata, x.smartWalletConfig, secrets)
+	vm, err := NewVMWithData(
+		task,
+		triggerMetadata,
+		x.smartWalletConfig,
+		secrets,
+	)
 
 	if err != nil {
 		return nil, err
 	}
 
-	vm.WithLogger(x.logger)
+	vm.WithLogger(x.logger).WithDb(x.db)
 	initialTaskStatus := task.Status
 
 	if err != nil {

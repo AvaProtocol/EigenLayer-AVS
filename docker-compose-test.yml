@@ -1,0 +1,32 @@
+name: bundler-unitest
+services:
+  bundler:
+    image: ghcr.io/candidelabs/voltaire/voltaire-bundler:latest
+    command:
+      - "--bundler_secret"
+      # For unit test, we use private key of wallet 0xE164dd09e720640F6695cB6cED0308065ceFECd9
+      - "$BUNDLER_PRIVATE_KEY"
+      - "--rpc_url"
+      - "0.0.0.0"
+      - "--rpc_port"
+      - "4437"
+      - "--ethereum_node_url"
+      - "$ETH_RPC_URL"
+      - "--chain_id"
+      - "84532"
+      - "--verbose"
+      - "--unsafe"
+      - "--disable_p2p"
+    environment:
+      - BUNDLER_PRIVATE_KEY
+      # For unit test, we run against base sepolia because it's way more faster and cost less than even sepolia so we don't need to use a lot of test token.
+      - ETH_RPC_URL="${BASE_SEPOLIA_RPC_URL}"
+    ports:
+    - "3437:4437"
+    restart: always
+    networks:
+      - bundler-unitest
+
+networks:
+  # The presence of these objects is sufficient to define them
+  bundler-unitest: {}
