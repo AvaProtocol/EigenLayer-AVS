@@ -7,9 +7,6 @@ on:
       - '!**/*_test.go'
       - '!**.yaml'
       - '!**.yml'
-    branches:
-      - main
-      - support-pay-master
   workflow_dispatch:
 
 jobs:
