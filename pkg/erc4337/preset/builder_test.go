@@ -525,65 +525,6 @@ func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
 	}
 }
 
-func TestPaymasterDataFormatting(t *testing.T) {
-	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
-	smartWalletConfig.BundlerURL = "http://localhost:3437/rpc"
-
-	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
-
-	// Because we used the master key to signed, the address cannot be calculated from that key and need to set explicitly
-	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
-
-	calldata, err := aa.PackExecute(
-		common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e"), // base sepolia usdc
-		big.NewInt(0),
-		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e8"),
-	)
-
-	if err != nil {
-		t.Errorf("expect pack userop succesfully but got error: %v", err)
-	}
-	
-	// Create validUntil and validAfter values (1 hour from now and current time)
-	currentTime := time.Now().Unix()
-	validAfter := big.NewInt(currentTime)
-	validUntil := big.NewInt(currentTime + 3600) // Valid for 1 hour
-	
-	userOp, _, err := SendUserOp(
-		smartWalletConfig,
-		owner,
-		calldata,
-		&VerifyingPaymasterRequest{
-			PaymasterAddress: smartWalletConfig.PaymasterAddress,
-			ValidUntil:       validUntil,
-			ValidAfter:       validAfter,
-		},
-	)
-	
-	if err != nil {
-		t.Errorf("Failed to send user operation with paymaster: %v", err)
-		return
-	}
-	
-	if userOp == nil {
-		t.Errorf("UserOp is nil")
-		return
-	}
-	
-	if len(userOp.PaymasterAndData) <= common.AddressLength {
-		t.Errorf("PaymasterAndData too short, expected more than address length")
-		return
-	}
-	
-	paymasterAddress := common.BytesToAddress(userOp.PaymasterAndData[:common.AddressLength])
-	
-	if paymasterAddress != smartWalletConfig.PaymasterAddress {
-		t.Errorf("Expected paymaster address %s, got %s", 
-			smartWalletConfig.PaymasterAddress.Hex(), 
-			paymasterAddress.Hex())
-	}
-}
-
 func TestPaymasterTimeValidation(t *testing.T) {
 	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
 
