@@ -80,6 +80,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		r.smartWalletConfig,
 		r.owner,
 		userOpCalldata,
+		nil, // No paymaster request for this call
 	)
 
 	if err != nil {
