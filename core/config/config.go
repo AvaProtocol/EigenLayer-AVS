@@ -69,6 +69,7 @@ type SmartWalletConfig struct {
 	EntrypointAddress common.Address
 
 	ControllerPrivateKey *ecdsa.PrivateKey
+	PaymasterAddress     common.Address
 }
 
 // These are read from configPath
@@ -93,6 +94,7 @@ type ConfigRaw struct {
 		FactoryAddress       string `yaml:"factory_address"`
 		EntrypointAddress    string `yaml:"entrypoint_address"`
 		ControllerPrivateKey string `yaml:"controller_private_key"`
+		PaymasterAddress     string `yaml:"paymaster_address"`
 	} `yaml:"smart_wallet"`
 
 	SocketPath string `yaml:"socket_path"`
