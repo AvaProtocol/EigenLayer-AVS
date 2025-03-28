@@ -173,3 +173,8 @@ func SecretNameFromKey(key string) *model.Secret {
 
 	return secretWithNameOnly
 }
+
+// ContractWriteCounterKey returns the key for the contract write counter of a given eoa in our kv store
+func ContractWriteCounterKey(eoa common.Address) []byte {
+	return []byte(fmt.Sprintf("ct:cw:%s", strings.ToLower(eoa.Hex())))
+}

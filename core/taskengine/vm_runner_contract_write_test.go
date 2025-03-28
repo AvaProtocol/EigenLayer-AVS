@@ -1,7 +1,6 @@
 package taskengine
 
 import (
-	"fmt"
 	"log"
 	"strings"
 	"testing"
@@ -10,22 +9,26 @@ import (
 	"github.com/AvaProtocol/ap-avs/core/testutil"
 	"github.com/AvaProtocol/ap-avs/model"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/ap-avs/storage"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-// TODO: temporary disable due to rpc issue.
-func xTestContractWriteSimpleReturn(t *testing.T) {
+func TestContractWriteSimpleReturn(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
 	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
 
+	baseSepoliaUsdcAddress := common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e")
 	node := &avsproto.ContractWriteNode{
-		ContractAddress: "0x0a0c037267a690e9792f4660c29989babec9cffb",
-		CallData:        "0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8",
+		ContractAddress: baseSepoliaUsdcAddress.Hex(),
+		CallData:        "0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000",
 	}
 	nodes := []*avsproto.TaskNode{
 		&avsproto.TaskNode{
-			Id:   "123",
+			Id:   "query1",
 			Name: "contractQuery",
 			TaskType: &avsproto.TaskNode_ContractWrite{
 				ContractWrite: node,
@@ -48,21 +51,21 @@ func xTestContractWriteSimpleReturn(t *testing.T) {
 
 	vm, err := NewVMWithData(&model.Task{
 		&avsproto.Task{
-			Id:      "123",
+			Id:      "query1",
 			Nodes:   nodes,
 			Edges:   edges,
 			Trigger: trigger,
 		},
-	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+	}, nil, smartWalletConfig, nil)
+	vm.WithDb(db)
 
 	client, _ := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 
 	if err != nil {
 		log.Fatalf("error connectiong to websocket: %v", err)
 	}
-	defer func() {
-		client.Close()
-	}()
+	defer client.Close()
+
 	n := NewContractWriteProcessor(
 		vm,
 		client,
@@ -71,7 +74,7 @@ func xTestContractWriteSimpleReturn(t *testing.T) {
 		common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5"),
 	)
 
-	step, err := n.Execute("123", node)
+	step, err := n.Execute("query1", node)
 
 	if err != nil {
 		t.Errorf("expected contract write node run succesfull but got error: %v", err)
@@ -81,7 +84,7 @@ func xTestContractWriteSimpleReturn(t *testing.T) {
 		t.Errorf("expected contract write node run succesfully but failed")
 	}
 
-	if !strings.Contains(step.Log, "prepare to send userops target contract 0x0a0c037267a690e9792f4660c29989babec9cffb") {
+	if !strings.Contains(step.Log, "will send message 0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000 to contract 0x036CbD53842c5426634e7929541eC2318f3dCF7e") {
 		t.Errorf("expected log contains request trace data but found: %s", step.Log)
 	}
 
@@ -90,8 +93,7 @@ func xTestContractWriteSimpleReturn(t *testing.T) {
 	}
 
 	outputData := step.GetContractWrite()
-	fmt.Println("add assertion here", outputData)
-	//if len(outputData.UserOp.Hash)!= 66 && !strings.HasPrefix(step.OutputData, "0x") {
-	//	t.Errorf("output data isn't a valid userops hash: %s", step.OutputData)
-	//}
+	if len(outputData.TxReceipt.Hash) != 66 {
+		t.Errorf("Missing Tx Hash in the output data")
+	}
 }

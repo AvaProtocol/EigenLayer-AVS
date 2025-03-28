@@ -62,6 +62,11 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	}
 
 	if err := r.Validate(node); err != nil {
+		sb.WriteString("\nInvalid branch node: ")
+		sb.WriteString(err.Error())
+		s.Log = sb.String()
+		s.Success = false
+		s.Error = err.Error()
 		return nil, err
 	}
 
@@ -73,6 +78,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 			sb.WriteString("evaluate else, follow else path")
 			sb.WriteString(outcome)
 			s.Log = sb.String()
+			s.Success = true
 			s.OutputData = &avsproto.Execution_Step_Branch{
 				Branch: &avsproto.BranchNode_Output{
 					ConditionId: outcome,
@@ -127,11 +133,16 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 			}
 			s.EndAt = time.Now().Unix()
 			return s, nil
+		} else {
+			sb.WriteString("\nexpression resolves to false, move to next statement\n")
 		}
 	}
 
 	sb.WriteString("\nno condition matched. halt execution")
 	s.Log = sb.String()
 	s.EndAt = time.Now().Unix()
+	if r.vm.logger != nil {
+		r.vm.logger.Debug("No condition matched. halt execution", "execution_log", s.Log)
+	}
 	return s, nil
 }

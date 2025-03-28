@@ -1,6 +1,8 @@
 /*
 Task Engine handles task storage and execution. We use badgerdb for all of our task storage. We like to make sure of Go cross compiling extensively and want to leverage pure-go as much as possible. badgerdb sastify that requirement.
 
+In KV store, we want to use short key to save space. The key is what loaded into RAM, the smaller the better. It's also helpful for key only scan.
+
 **Wallet Info**
 
 w:<eoa>:<smart-wallet-address> = {factory_address: address, salt: salt}
@@ -12,6 +14,7 @@ t:<task-status>:<task-id>      -> task payload, the source of truth of task info
 u:<eoa>:<smart-wallet-address>:<task-id>    -> task status
 history:<task-id>:<execution-id> -> an execution history
 trigger:<task-id>:<execution-id> -> execution status
+ct:cw:<eoa> -> counter value -> track contract write by eoa
 
 The task storage was designed for fast retrieve time at the cost of extra storage.
 
