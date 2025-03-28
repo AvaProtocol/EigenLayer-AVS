@@ -510,6 +510,15 @@ func TestValidatePaymasterUserOpWithInvalidSignature(t *testing.T) {
 
 // callValidatePaymasterUserOp calls the validatePaymasterUserOp method directly and returns the resulting context and validationData
 func callValidatePaymasterUserOp(t *testing.T, paymasterContract *paymaster.PayMaster, userOp *userop.UserOperation, chainID *big.Int) ([]byte, *big.Int, error) {
+	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
+	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to connect to Ethereum client: %w", err)
+	}
+	defer client.Close()
+	
+	paymasterAddress := smartWalletConfig.PaymasterAddress
+	
 	// Convert to paymaster.UserOperation
 	paymasterUserOp := paymaster.UserOperation{
 		Sender:               userOp.Sender,
@@ -541,9 +550,8 @@ func callValidatePaymasterUserOp(t *testing.T, paymasterContract *paymaster.PayM
 		return nil, nil, fmt.Errorf("failed to pack validatePaymasterUserOp call: %w", err)
 	}
 	
-	contractAddr := smartWalletConfig.PaymasterAddress
 	msg := ethereum.CallMsg{
-		To:   &contractAddr,
+		To:   &paymasterAddress,
 		Data: callData,
 	}
 	
