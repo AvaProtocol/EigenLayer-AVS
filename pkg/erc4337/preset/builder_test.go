@@ -366,18 +366,71 @@ func TestValidatePaymasterUserOpSuccess(t *testing.T) {
 	validAfter := big.NewInt(currentTime)
 	validUntil := big.NewInt(currentTime + 3600) // Valid for 1 hour
 	
-	userOp, err := BuildUserOpWithPaymaster(
-		smartWalletConfig,
-		client,
-		nil, // Not using bundler client for validation
-		owner,
-		calldata,
-		smartWalletConfig.PaymasterAddress,
+	initCode := []byte{}
+	nonce := big.NewInt(0)
+	
+	userOp := &userop.UserOperation{
+		Sender:               owner,
+		Nonce:                nonce,
+		InitCode:             initCode,
+		CallData:             calldata,
+		CallGasLimit:         big.NewInt(200000),
+		VerificationGasLimit: big.NewInt(200000),
+		PreVerificationGas:   big.NewInt(200000),
+		MaxFeePerGas:         big.NewInt(1000000000),
+		MaxPriorityFeePerGas: big.NewInt(1000000000),
+		PaymasterAndData:     []byte{},
+		Signature:            []byte{},
+	}
+	
+	paymasterUserOp := paymaster.UserOperation{
+		Sender:               userOp.Sender,
+		Nonce:                userOp.Nonce,
+		InitCode:             userOp.InitCode,
+		CallData:             userOp.CallData,
+		CallGasLimit:         userOp.CallGasLimit,
+		VerificationGasLimit: userOp.VerificationGasLimit,
+		PreVerificationGas:   userOp.PreVerificationGas,
+		MaxFeePerGas:         userOp.MaxFeePerGas,
+		MaxPriorityFeePerGas: userOp.MaxPriorityFeePerGas,
+		PaymasterAndData:     common.FromHex("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+		Signature:            common.FromHex("0x1234567890abcdef"),
+	}
+	
+	paymasterHash, err := paymasterContract.GetHash(nil, paymasterUserOp, validUntil, validAfter)
+	if err != nil {
+		t.Fatalf("Failed to get paymaster hash: %v", err)
+	}
+	
+	paymasterSignature, err := signer.SignMessage(smartWalletConfig.ControllerPrivateKey, paymasterHash[:])
+	if err != nil {
+		t.Fatalf("Failed to sign paymaster hash: %v", err)
+	}
+	
+	uint48Type, _ := abi.NewType("uint48", "", nil)
+	timestampArgs := abi.Arguments{
+		{Type: uint48Type},
+		{Type: uint48Type},
+	}
+	
+	encodedTimestamps, err := timestampArgs.Pack(
 		validUntil,
 		validAfter,
 	)
 	if err != nil {
-		t.Fatalf("Failed to build UserOp with paymaster: %v", err)
+		t.Fatalf("Failed to ABI encode timestamps: %v", err)
+	}
+	
+	paymasterAndData := append(smartWalletConfig.PaymasterAddress.Bytes(), encodedTimestamps...)
+	paymasterAndData = append(paymasterAndData, paymasterSignature...)
+	
+	userOp.PaymasterAndData = paymasterAndData
+	
+	userOpHash := userOp.GetUserOpHash(aa.EntrypointAddress, chainID)
+	
+	userOp.Signature, err = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, userOpHash.Bytes())
+	if err != nil {
+		t.Fatalf("Failed to sign final UserOp: %v", err)
 	}
 	
 	context, validationData, err := callValidatePaymasterUserOp(t, paymasterContract, userOp, chainID)
@@ -426,15 +479,21 @@ func TestValidatePaymasterUserOpWithInvalidSignature(t *testing.T) {
 	validAfter := big.NewInt(currentTime)
 	validUntil := big.NewInt(currentTime + 3600) // Valid for 1 hour
 	
-	userOp, err := BuildUserOp(
-		smartWalletConfig,
-		client,
-		nil, // Not using bundler client for validation
-		owner,
-		calldata,
-	)
-	if err != nil {
-		t.Fatalf("Failed to build UserOp: %v", err)
+	initCode := []byte{}
+	nonce := big.NewInt(0)
+	
+	userOp := &userop.UserOperation{
+		Sender:               owner,
+		Nonce:                nonce,
+		InitCode:             initCode,
+		CallData:             calldata,
+		CallGasLimit:         big.NewInt(200000),
+		VerificationGasLimit: big.NewInt(200000),
+		PreVerificationGas:   big.NewInt(200000),
+		MaxFeePerGas:         big.NewInt(1000000000),
+		MaxPriorityFeePerGas: big.NewInt(1000000000),
+		PaymasterAndData:     []byte{},
+		Signature:            []byte{},
 	}
 	
 	randomKey, err := crypto.GenerateKey()
