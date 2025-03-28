@@ -76,16 +76,26 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 	log.WriteString("\nsend userops to bundler rpc\n")
 
+	total, _ := r.vm.db.GetCounter(ContractWriteCounterKey(r.owner), 0)
+	
+	var paymasterRequest *preset.VerifyingPaymasterRequest
+	// TODO: move to config
+	if total < 10 {
+		paymasterRequest = preset.GetVerifyingPaymasterRequestForDuration(r.smartWalletConfig.PaymasterAddress, 15 * time.Minute)
+	}
+
 	userOp, txReceipt, err := preset.SendUserOp(
 		r.smartWalletConfig,
 		r.owner,
 		userOpCalldata,
+		paymasterRequest,
 	)
 
 	if err != nil {
 		s.Error = fmt.Sprintf("error send userops to bundler : %s", err)
 		return s, err
 	}
+	r.vm.db.IncCounter(ContractWriteCounterKey(r.owner), 0)
 
 	bloom, _ := txReceipt.Bloom.MarshalText()
 

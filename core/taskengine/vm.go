@@ -21,6 +21,7 @@ import (
 	"github.com/AvaProtocol/ap-avs/model"
 	"github.com/AvaProtocol/ap-avs/pkg/erc20"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/ap-avs/storage"
 )
 
 type VMState string
@@ -131,8 +132,13 @@ type VM struct {
 	entrypoint       string
 	instructionCount int64
 
+	// smartWalletConfig contains the smart wallet config for the task. It contains the bundler url, entrypoint address, paymaster address, wallet factory address, etc.
 	smartWalletConfig *config.SmartWalletConfig
+
 	logger            sdklogging.Logger
+
+	// db is used for tracking counter in some nodes, not every node needs it. Example, in contract write we only sponsor first N run so we track this off-chain. Only for tx less than this we will generate PaymasterAndData field	
+	db                storage.Storage
 }
 
 func NewVM() *VM {
@@ -157,6 +163,11 @@ func (v *VM) Reset() {
 
 func (v *VM) WithLogger(logger sdklogging.Logger) *VM {
 	v.logger = logger
+
+	return v
+}
+func (v *VM) WithDb(db storage.Storage) *VM {
+	v.db = db	
 
 	return v
 }
