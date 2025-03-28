@@ -541,15 +541,12 @@ func callValidatePaymasterUserOp(t *testing.T, paymasterContract *paymaster.PayM
 		return nil, nil, fmt.Errorf("failed to pack validatePaymasterUserOp call: %w", err)
 	}
 	
-	// Create a CallMsg to call the contract directly
-	contractAddr := paymasterContract.Address()
+	contractAddr := smartWalletConfig.PaymasterAddress
 	msg := ethereum.CallMsg{
 		To:   &contractAddr,
 		Data: callData,
 	}
 	
-	// Call the contract
-	client := paymasterContract.Client()
 	result, err := client.CallContract(context.Background(), msg, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("contract call failed: %w", err)
