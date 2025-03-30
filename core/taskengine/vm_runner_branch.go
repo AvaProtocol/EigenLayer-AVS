@@ -44,7 +44,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		Log:        "",
 		Error:      "",
 		Success:    true,
-		StartAt:    t0.Unix(),
+		StartAt:    t0.UnixMilli(),
 	}
 
 	var sb strings.Builder
@@ -105,7 +105,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 				s.Error = fmt.Errorf("error evaluating the statement: %w", err).Error()
 				sb.WriteString("error evaluating expression")
 				s.Log = sb.String()
-				s.EndAt = time.Now().Unix()
+				s.EndAt = time.Now().UnixMilli()
 				return s, fmt.Errorf("error evaluating the statement: %w", err)
 			}
 
@@ -116,7 +116,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 				s.Error = fmt.Errorf("error evaluating the statement: %w", err).Error()
 				sb.WriteString("error evaluating expression")
 				s.Log = sb.String()
-				s.EndAt = time.Now().Unix()
+				s.EndAt = time.Now().UnixMilli()
 				return s, fmt.Errorf("error evaluating the statement: %w", err)
 			}
 		}
@@ -131,7 +131,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 					ConditionId: outcome,
 				},
 			}
-			s.EndAt = time.Now().Unix()
+			s.EndAt = time.Now().UnixMilli()
 			return s, nil
 		} else {
 			sb.WriteString("\nexpression resolves to false, move to next statement\n")
@@ -140,7 +140,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 
 	sb.WriteString("\nno condition matched. halt execution")
 	s.Log = sb.String()
-	s.EndAt = time.Now().Unix()
+	s.EndAt = time.Now().UnixMilli()
 	if r.vm.logger != nil {
 		r.vm.logger.Debug("No condition matched. halt execution", "execution_log", s.Log)
 	}

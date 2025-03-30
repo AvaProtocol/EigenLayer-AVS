@@ -58,7 +58,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 
 	// Function to be executed when trigger fires
 	triggerFunc := func() {
-		currentTime := time.Now().Unix()
+		currentTime := time.Now().UnixMilli()
 		t.logger.Info("time trigger fired", "task_id", taskID, "time", currentTime)
 		t.triggerCh <- TriggerMetadata[uint64]{
 			TaskID: taskID,
@@ -79,7 +79,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 		// Schedule a job for each epoch
 		for _, epoch := range epochs {
 			// If epoch is in the past, skip scheduling
-			if epoch < time.Now().Unix() {
+			if epoch < time.Now().UnixMilli()/1000 {
 				t.logger.Info("skipping past epoch", "task_id", taskID, "epoch", epoch)
 				continue
 			}
