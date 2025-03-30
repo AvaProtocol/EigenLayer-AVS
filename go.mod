@@ -1,6 +1,6 @@
 module github.com/AvaProtocol/ap-avs
 
-go 1.23.0
+go 1.22
 
 require (
 	github.com/Layr-Labs/cerberus-api v0.0.0-20241016214048-d52f5ddc5559
