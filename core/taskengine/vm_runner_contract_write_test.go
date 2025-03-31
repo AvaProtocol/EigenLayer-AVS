@@ -93,7 +93,7 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 	}
 
 	outputData := step.GetContractWrite()
-	if len(outputData.TxReceipt.Hash) != 66 {
+	if outputData.TxReceipt == nil || len(outputData.TxReceipt.Hash) != 66 {
 		t.Errorf("Missing Tx Hash in the output data")
 	}
 }
