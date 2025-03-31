@@ -98,7 +98,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	r.vm.db.IncCounter(ContractWriteCounterKey(r.owner), 0)
 
 	var bloom []byte
-	if txReceipt != nil && txReceipt.Bloom != nil {
+	if txReceipt != nil {
 		bloom, _ = txReceipt.Bloom.MarshalText()
 	}
 
