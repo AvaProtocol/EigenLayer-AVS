@@ -45,7 +45,7 @@ func NewTimeTrigger(triggerCh chan TriggerMetadata[uint64], logger sdklogging.Lo
 
 func (t *TimeTrigger) epochToCron(epoch int64) string {
 	// Convert epoch to time
-	tm := time.Unix(epoch, 0)
+	tm := time.Unix(epoch/1000, 0)
 	// Create cron expression for specific time
 	return fmt.Sprintf("%d %d %d %d %d *", tm.Minute(), tm.Hour(), tm.Day(), tm.Month(), tm.Weekday())
 }

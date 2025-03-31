@@ -25,7 +25,7 @@ type OperatorNode struct {
 
 func (o *OperatorNode) LastSeen() string {
 	now := time.Now()
-	last := time.Unix(o.LastPingEpoch, 0)
+	last := time.Unix(o.LastPingEpoch/1000, 0)
 
 	duration := now.Sub(last)
 
