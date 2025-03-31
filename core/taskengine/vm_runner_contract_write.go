@@ -98,14 +98,9 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	r.vm.db.IncCounter(ContractWriteCounterKey(r.owner), 0)
 
 	var bloom []byte
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				bloom = []byte{}
-			}
-		}()
+	if txReceipt != nil && txReceipt.Bloom != nil {
 		bloom, _ = txReceipt.Bloom.MarshalText()
-	}()
+	}
 
 	blobGasPrice := uint64(0)
 
