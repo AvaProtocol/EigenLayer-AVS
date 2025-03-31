@@ -146,7 +146,7 @@ func (t *Task) IsRunable() bool {
 	// When MaxExecution is 0, it is unlimited run
 	reachedMaxRun := t.MaxExecution > 0 && t.TotalExecution >= t.MaxExecution
 
-	reachedExpiredTime := t.ExpiredAt > 0 && time.Unix(t.ExpiredAt, 0).Before(time.Now())
+	reachedExpiredTime := t.ExpiredAt > 0 && time.Unix(t.ExpiredAt/1000, 0).Before(time.Now())
 
 	return !reachedMaxRun && !reachedExpiredTime
 }

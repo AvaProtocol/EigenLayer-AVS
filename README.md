@@ -108,6 +108,12 @@ https://aggregator.avaprotocol.org/telemetry
 
 View docs/development.md
 
+## Testing
+
+The commands to run tests locally are found in the Makefile:
+* `go test -race -buildvcs -vet=off ./...` (default)
+* `go test -v -race -buildvcs ./...` (verbose)
+
 ## Dependencies
 
 ### EigenLayer CLI
