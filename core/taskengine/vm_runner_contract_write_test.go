@@ -19,14 +19,7 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
-	smartWalletConfig := &config.SmartWalletConfig{
-		EthRpcUrl:         "https://sepolia.base.org",
-		BundlerURL:        "https://sepolia.base.org",
-		EthWsUrl:          "wss://sepolia.base.org",
-		FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
-		EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
-		PaymasterAddress:  common.HexToAddress("0xd99a660fc95f786ead76fb73c11354f499f13b30"),
-	}
+	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
 
 	baseSepoliaUsdcAddress := common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e")
