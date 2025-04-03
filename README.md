@@ -108,6 +108,40 @@ https://aggregator.avaprotocol.org/telemetry
 
 View docs/development.md
 
+## Linting and Code Quality
+
+### Running the linter
+
+```bash
+# Install golangci-lint
+curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
+
+# Run the linter
+golangci-lint run ./...
+
+# Or use the Makefile target
+make audit
+```
+
+### Setting up pre-commit hooks
+
+```bash
+# Install the git hooks manually
+mkdir -p ~/.git-hooks
+cp .pre-commit-config.yaml ~/.git-hooks/pre-commit
+chmod +x ~/.git-hooks/pre-commit
+git config --global core.hooksPath ~/.git-hooks
+```
+
+This will run the linters automatically before each commit, ensuring code quality standards are maintained.
+
+### Best practices for running linters
+
+- Run linters before committing code to catch issues early
+- Configure your IDE to run linters on save for immediate feedback
+- Include linting in CI/CD pipelines to enforce code quality standards
+- Fix linting issues as they arise rather than letting them accumulate
+
 ## Dependencies
 
 ### EigenLayer CLI
