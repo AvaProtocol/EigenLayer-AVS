@@ -28,7 +28,7 @@ func AbiEncodeTaskResponse(h *cstaskmanager.IAutomationTaskManagerTaskResponse) 
 		return nil, err
 	}
 	arguments := abi.Arguments{
-		{
+		abi.Argument{
 			Type: taskResponseType,
 		},
 	}
