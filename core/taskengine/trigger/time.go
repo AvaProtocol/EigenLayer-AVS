@@ -79,7 +79,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 		// Schedule a job for each epoch
 		for _, epoch := range epochs {
 			// If epoch is in the past, skip scheduling
-			if epoch < time.Now().UnixMilli()/1000 {
+			if epoch < time.Now().UnixMilli() {
 				t.logger.Info("skipping past epoch", "task_id", taskID, "epoch", epoch)
 				continue
 			}
