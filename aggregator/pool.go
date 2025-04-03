@@ -25,16 +25,24 @@ type OperatorNode struct {
 
 func (o *OperatorNode) LastSeen() string {
 	now := time.Now()
-	last := time.Unix(o.LastPingEpoch/1000, 0)
+	
+	var last time.Time
+	if o.LastPingEpoch > 1e12 { // Threshold for milliseconds (timestamps after 2001)
+		last = time.Unix(o.LastPingEpoch/1000, 0)
+	} else {
+		last = time.Unix(o.LastPingEpoch, 0)
+	}
 
 	duration := now.Sub(last)
 
-	// Extract hours, minutes, and seconds from the duration
-	hours := int(duration.Hours())
+	days := int(duration.Hours()) / 24
+	hours := int(duration.Hours()) % 24
 	minutes := int(duration.Minutes()) % 60
 	seconds := int(duration.Seconds()) % 60
 
-	if hours > 0 {
+	if days > 0 {
+		return fmt.Sprintf("%dd%dh ago", days, hours)
+	} else if hours > 0 {
 		return fmt.Sprintf("%dh%dm ago", hours, minutes)
 	} else if minutes > 0 {
 		return fmt.Sprintf("%dm%ds ago", minutes, seconds)
