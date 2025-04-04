@@ -169,7 +169,7 @@ func NewOperatorFromConfigFile(configPath string) (*Operator, error) {
 	err := config.ReadYamlConfig(configPath, &nodeConfig)
 
 	if err != nil {
-		panic(fmt.Errorf("failed to parse config file: %w\nMake sure %s exists and is a valid yaml file", err, configPath))
+		panic(fmt.Errorf("failed to parse config file: %s\nMake sure it exists and is a valid yaml file %w", configPath, err))
 	}
 
 	return NewOperatorFromConfig(nodeConfig)
