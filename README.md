@@ -110,9 +110,37 @@ View docs/development.md
 
 ## Testing
 
-The commands to run tests locally are found in the Makefile:
-* `go test -race -buildvcs -vet=off ./...` (default)
-* `go test -v -race -buildvcs ./...` (verbose)
+### Standard Tests
+The Makefile includes two primary test configurations:
+```bash
+# Default test suite
+go test -race -buildvcs -vet=off ./...
+
+# Verbose test output
+go test -v -race -buildvcs ./...
+```
+
+### Enhanced Test Output
+For improved test result formatting, use `gotestfmt`:
+
+1. Install the formatter:
+```bash
+go install github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@latest
+```
+
+Run once in the current terminal session to make Bash scripts more robust and error-aware.
+
+```bash
+set -euo pipefail
+```
+
+3. Run tests with formatted output:
+```bash
+go test -json -run ^TestRestRequestErrorHandling$ ./... 2>&1 | gotestfmt --hide=all
+```
+
+The `--hide=all` flag suppresses output for skipped and successful tests, showing only failures. For more output configuration options, see the [gotestfmt documentation](https://github.com/GoTestTools/gotestfmt?tab=readme-ov-file#how-do-i-make-the-output-less-verbose).
+
 =======
 ## Linting and Code Quality
 
