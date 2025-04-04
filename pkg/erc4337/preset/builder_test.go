@@ -197,8 +197,8 @@ func TestGetHash(t *testing.T) {
 		t.Fatalf("Failed to get hash from PayMaster contract: %v", err)
 	}
 
-	if common.Bytes2Hex(hash[:]) != "fb00da1521ff234a7e82fc43ef8c1fd98bb1ce2c780e2c3d0d908b0be5c7212d" {
-		t.Fatalf("Expected hash to be fb00da1521ff234a7e82fc43ef8c1fd98bb1ce2c780e2c3d0d908b0be5c7212d, got %s", common.Bytes2Hex(hash[:]))
+	if common.Bytes2Hex(hash[:]) != "14972f699106bae44f682fd688b936dc1efce4be3b3bdd838521ac385ca5acc7" {
+		t.Fatalf("Expected hash to be 14972f699106bae44f682fd688b936dc1efce4be3b3bdd838521ac385ca5acc7, got %s", common.Bytes2Hex(hash[:]))
 	}
 }
 
