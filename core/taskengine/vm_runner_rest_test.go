@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -339,5 +340,83 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 	}
 	if !reflect.DeepEqual(node.Headers, originalHeaders) {
 		t.Errorf("Headers were modified. Expected %v, got %v", originalHeaders, node.Headers)
+	}
+}
+
+func TestRestRequestErrorHandling(t *testing.T) {
+	node := &avsproto.RestAPINode{
+		Url:    "http://non-existent-domain-that-will-fail.invalid",
+		Method: "GET",
+	}
+
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "error-test",
+			Name: "restApi",
+			TaskType: &avsproto.TaskNode_RestApi{
+				RestApi: node,
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "e1",
+			Source: trigger.Id,
+			Target: "error-test",
+		},
+	}
+
+	vm, err := NewVMWithData(&model.Task{
+		&avsproto.Task{
+			Id:      "error-test",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
+	n := NewRestProrcessor(vm)
+
+	step, err := n.Execute("error-test", node)
+
+	if err == nil {
+		t.Errorf("expected error for non-existent domain, but got nil")
+	}
+
+	if !strings.Contains(err.Error(), "HTTP request failed: connection error, timeout, or DNS resolution failure") {
+		t.Errorf("expected error message to contain connection failure information, got: %v", err)
+	}
+
+	if step.Success {
+		t.Errorf("expected step.Success to be false for failed request")
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound) // 404
+	}))
+	defer ts.Close()
+
+	node404 := &avsproto.RestAPINode{
+		Url:    ts.URL,
+		Method: "GET",
+	}
+
+	step, err = n.Execute("error-test", node404)
+
+	if err == nil {
+		t.Errorf("expected error for 404 status code, but got nil")
+	}
+
+	if !strings.Contains(err.Error(), "unexpected status code: 404") {
+		t.Errorf("expected error message to contain status code 404, got: %v", err)
+	}
+
+	if step.Success {
+		t.Errorf("expected step.Success to be false for 404 response")
 	}
 }
