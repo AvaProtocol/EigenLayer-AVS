@@ -50,7 +50,7 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "query1",
 			Nodes:   nodes,
 			Edges:   edges,

@@ -77,11 +77,11 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	log.WriteString("\nsend userops to bundler rpc\n")
 
 	total, _ := r.vm.db.GetCounter(ContractWriteCounterKey(r.owner), 0)
-	
+
 	var paymasterRequest *preset.VerifyingPaymasterRequest
 	// TODO: move to config
 	if total < 10 {
-		paymasterRequest = preset.GetVerifyingPaymasterRequestForDuration(r.smartWalletConfig.PaymasterAddress, 15 * time.Minute)
+		paymasterRequest = preset.GetVerifyingPaymasterRequestForDuration(r.smartWalletConfig.PaymasterAddress, 15*time.Minute)
 	}
 
 	userOp, txReceipt, err := preset.SendUserOp(
@@ -96,17 +96,6 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		return s, err
 	}
 	r.vm.db.IncCounter(ContractWriteCounterKey(r.owner), 0)
-
-	var bloom []byte
-	if txReceipt != nil {
-		bloom, _ = txReceipt.Bloom.MarshalText()
-	}
-
-	blobGasPrice := uint64(0)
-
-	if txReceipt != nil && txReceipt.BlobGasPrice != nil {
-		blobGasPrice = uint64(txReceipt.BlobGasPrice.Int64())
-	}
 
 	outputData := &avsproto.Execution_Step_ContractWrite{
 		ContractWrite: &avsproto.ContractWriteNode_Output{
@@ -123,31 +112,37 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				PaymasterAndData:     common.Bytes2Hex(userOp.PaymasterAndData),
 				Signature:            common.Bytes2Hex(userOp.Signature),
 			},
-
-			TxReceipt: &avsproto.Evm_TransactionReceipt{
-				Hash:        txReceipt.TxHash.Hex(),
-				BlockHash:   txReceipt.BlockHash.Hex(),
-				BlockNumber: uint64(txReceipt.BlockNumber.Int64()),
-				// TODO: Need to fetch this, it isn't available
-				//From:            txReceipt.From.Hex(),
-				//To:              txReceipt.To.Hex(),
-				GasUsed:           txReceipt.GasUsed,
-				GasPrice:          uint64(txReceipt.EffectiveGasPrice.Int64()),
-				CumulativeGasUsed: txReceipt.CumulativeGasUsed,
-				// Fee:                 txReceipt.Fee,
-				ContractAddress: txReceipt.ContractAddress.Hex(),
-				Index:           uint64(txReceipt.TransactionIndex),
-				// TODO: convert raw log
-				//Logs:                txReceipt.Logs,
-				LogsBloom:    common.Bytes2Hex(bloom),
-				Root:         common.Bytes2Hex(txReceipt.PostState),
-				Status:       uint32(txReceipt.Status),
-				Type:         uint32(txReceipt.Type),
-				BlobGasPrice: blobGasPrice,
-				BlobGasUsed:  uint64(txReceipt.BlobGasUsed),
-			},
 		},
 	}
+
+	// Only add TxReceipt if it exists
+	if txReceipt != nil {
+		var bloom []byte
+		bloom, _ = txReceipt.Bloom.MarshalText()
+
+		blobGasPrice := uint64(0)
+		if txReceipt.BlobGasPrice != nil {
+			blobGasPrice = uint64(txReceipt.BlobGasPrice.Int64())
+		}
+
+		outputData.ContractWrite.TxReceipt = &avsproto.Evm_TransactionReceipt{
+			Hash:              txReceipt.TxHash.Hex(),
+			BlockHash:         txReceipt.BlockHash.Hex(),
+			BlockNumber:       uint64(txReceipt.BlockNumber.Int64()),
+			GasUsed:           txReceipt.GasUsed,
+			GasPrice:          uint64(txReceipt.EffectiveGasPrice.Int64()),
+			CumulativeGasUsed: txReceipt.CumulativeGasUsed,
+			ContractAddress:   txReceipt.ContractAddress.Hex(),
+			Index:             uint64(txReceipt.TransactionIndex),
+			LogsBloom:         common.Bytes2Hex(bloom),
+			Root:              common.Bytes2Hex(txReceipt.PostState),
+			Status:            uint32(txReceipt.Status),
+			Type:              uint32(txReceipt.Type),
+			BlobGasPrice:      blobGasPrice,
+			BlobGasUsed:       uint64(txReceipt.BlobGasUsed),
+		}
+	}
+
 	s.OutputData = outputData
 	r.SetOutputVarForStep(stepID, map[string]any{
 		"userOp":    outputData.ContractWrite.UserOp,
