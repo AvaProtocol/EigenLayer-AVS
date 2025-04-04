@@ -32,7 +32,7 @@ func NewContractReadProcessor(vm *VM, client *ethclient.Client) *ContractReadPro
 
 func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractReadNode) (*avsproto.Execution_Step, error) {
 	ctx := context.Background()
-	t0 := time.Now().Unix()
+	t0 := time.Now().UnixMilli()
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
 		Log:        "",
@@ -44,7 +44,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 
 	var err error
 	defer func() {
-		s.EndAt = time.Now().Unix()
+		s.EndAt = time.Now().UnixMilli()
 		s.Success = err == nil
 		if err != nil {
 			s.Error = err.Error()

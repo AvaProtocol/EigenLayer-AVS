@@ -301,7 +301,9 @@ message TaskNode {
 
 message Execution {
   string id      = 1;
+  // timestamp when execution started (in milliseconds)
   int64 start_at = 2;
+  // timestamp when execution ended (in milliseconds)
   int64 end_at   = 3;
   bool   success = 4;
   string error   = 5;
@@ -326,7 +328,9 @@ message Execution {
 
     string log = 12; 
     string error = 13;
+    // timestamp when step started (in milliseconds)
     int64 start_at = 14;
+    // timestamp when step ended (in milliseconds)
     int64 end_at = 15;
 
     // Reference ticket: https://github.com/AvaProtocol/EigenLayer-AVS/issues/151
@@ -380,6 +384,7 @@ message Execution {
     string transaction_hash = 4;
     string address = 5;
     uint64 block_number = 6;
+    // timestamp of the block (in milliseconds)
     uint64 block_timestamp = 7;
     string from_address = 8;
     string to_address = 9;
@@ -402,19 +407,21 @@ message Task {
   string owner                = 2;
   string smart_wallet_address = 3;
 
-  // task won't be check before this
+  // task won't be check before this (timestamp in milliseconds)
   int64  start_at   = 4;
-  // task won't be run/check after this
+  // task won't be run/check after this (timestamp in milliseconds)
   int64  expired_at = 5;
   // arbitrary data about this task. has a limit of 255 character
   string name = 6;
 
+  // timestamp when task was completed (in milliseconds)
   int64 completed_at = 7;
 
   // limit on how many time this task can run. Set to 0 will make it run unlimited until cancelling or reaching its expired time
   int64 max_execution = 8;
   // return how many time this task has run
   int64 total_execution = 9;
+  // timestamp when task was last executed (in milliseconds)
   int64 last_ran_at = 10;
 
   TaskStatus status  = 11;
@@ -484,19 +491,21 @@ message ListTasksResp {
     string owner                = 2;
     string smart_wallet_address = 3;
 
-    // task won't be check before this
+    // task won't be check before this (timestamp in milliseconds)
     int64  start_at   = 4;
-    // task won't be run/check after this
+    // task won't be run/check after this (timestamp in milliseconds)
     int64  expired_at = 5;
     // arbitrary data about this task. has a limit of 255 character
     string name = 6;
 
+    // timestamp when task was completed (in milliseconds)
     int64 completed_at = 7;
 
     // limit on how many time this task can run. Set to 0 will make it run unlimited until cancelling or reaching its expired time
     int64 max_execution = 8;
     // return how many time this task has run
     int64 total_execution = 9;
+    // timestamp when task was last executed (in milliseconds)
     int64 last_ran_at = 10;
 
     TaskStatus status  = 11;

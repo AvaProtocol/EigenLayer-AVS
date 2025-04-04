@@ -108,6 +108,12 @@ https://aggregator.avaprotocol.org/telemetry
 
 View docs/development.md
 
+## Testing
+
+The commands to run tests locally are found in the Makefile:
+* `go test -race -buildvcs -vet=off ./...` (default)
+* `go test -v -race -buildvcs ./...` (verbose)
+=======
 ## Linting and Code Quality
 
 ### Running the linter
@@ -123,24 +129,13 @@ golangci-lint run ./...
 make audit
 ```
 
-### Setting up pre-commit hooks
-
-```bash
-# Install the git hooks manually
-mkdir -p ~/.git-hooks
-cp .pre-commit-config.yaml ~/.git-hooks/pre-commit
-chmod +x ~/.git-hooks/pre-commit
-git config --global core.hooksPath ~/.git-hooks
-```
-
-This will run the linters automatically before each commit, ensuring code quality standards are maintained.
-
 ### Best practices for running linters
 
 - Run linters before committing code to catch issues early
 - Configure your IDE to run linters on save for immediate feedback
 - Include linting in CI/CD pipelines to enforce code quality standards
 - Fix linting issues as they arise rather than letting them accumulate
+
 
 ## Dependencies
 
