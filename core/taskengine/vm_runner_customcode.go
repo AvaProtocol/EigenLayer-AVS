@@ -39,7 +39,7 @@ func NewJSProcessor(vm *VM) *JSProcessor {
 }
 
 func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
-	t0 := time.Now().Unix()
+	t0 := time.Now().UnixMilli()
 
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
@@ -52,7 +52,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 
 	var err error
 	defer func() {
-		s.EndAt = time.Now().Unix()
+		s.EndAt = time.Now().UnixMilli()
 		s.Success = err == nil
 		if err != nil {
 			s.Error = err.Error()

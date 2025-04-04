@@ -48,7 +48,7 @@ func NewGraphqlQueryProcessor(vm *VM, endpoint string) (*GraphqlQueryProcessor, 
 
 func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, any, error) {
 	ctx := context.Background()
-	t0 := time.Now().Unix()
+	t0 := time.Now().UnixMilli()
 	step := &avsproto.Execution_Step{
 		NodeId:     stepID,
 		Log:        "",
@@ -60,7 +60,7 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 
 	var err error
 	defer func() {
-		step.EndAt = time.Now().Unix()
+		step.EndAt = time.Now().UnixMilli()
 		step.Success = err == nil
 		if err != nil {
 			step.Error = err.Error()
