@@ -602,6 +602,11 @@ func callValidatePaymasterUserOp(t *testing.T, paymasterContract *paymaster.PayM
 		return nil, nil, fmt.Errorf("failed to parse paymaster ABI: %w", err)
 	}
 	
+	entryPointAddress, err := paymasterContract.EntryPoint(nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get EntryPoint address: %w", err)
+	}
+	
 	// Pack the function call data
 	maxCost := big.NewInt(1e18) // 1 ETH max cost - arbitrary for test
 	callData, err := paymasterABI.Pack("validatePaymasterUserOp", paymasterUserOp, userOpHash, maxCost)
@@ -610,6 +615,7 @@ func callValidatePaymasterUserOp(t *testing.T, paymasterContract *paymaster.PayM
 	}
 	
 	msg := ethereum.CallMsg{
+		From: entryPointAddress,
 		To:   &paymasterAddress,
 		Data: callData,
 	}
