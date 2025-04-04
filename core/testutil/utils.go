@@ -285,16 +285,16 @@ func GetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 		FactoryAddress:       common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
 		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
 		ControllerPrivateKey: controllerPrivateKey,
-<<<<<<< HEAD
-		PaymasterAddress:     common.HexToAddress(paymasterAddress),
-||||||| parent of 24a3bca (Fix: Initialize WhitelistAddresses in test configurations)
-		PaymasterAddress:     common.HexToAddress("0xd99a660fc95f786ead76fb73c11354f499f13b30"),
-=======
-		PaymasterAddress:     common.HexToAddress("0xd99a660fc95f786ead76fb73c11354f499f13b30"),
 		PaymasterAddress:     common.HexToAddress(paymasterAddress),
 		WhitelistAddresses:   []common.Address{},
-		WhitelistAddresses:   []common.Address{},
->>>>>>> 24a3bca (Fix: Initialize WhitelistAddresses in test configurations)
+	}
+}
+
+func GetTestSecrets() map[string]string {
+	return map[string]string{
+		"my_awesome_secret": "my_awesome_secret_value",
+	}
+}
 
 func GetTestEventTriggerReason() *avsproto.TriggerReason {
 	return &avsproto.TriggerReason{
