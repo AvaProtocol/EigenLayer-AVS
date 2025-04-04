@@ -99,7 +99,7 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 
 	outputData := step.GetContractWrite()
 	if outputData == nil || outputData.TxReceipt == nil {
-		t.Logf("Test skipped: Contract write operation could not be completed due to connection issues")
+		t.Errorf("Test skipped: Contract write operation could not be completed due to connection issues")
 		return
 	}
 	

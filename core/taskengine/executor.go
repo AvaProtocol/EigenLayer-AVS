@@ -103,7 +103,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	t0 := time.Now()
 	task.TotalExecution += 1
-	task.LastRanAt = t0.Unix()
+	task.LastRanAt = t0.UnixMilli()
 
 	var runTaskErr error = nil
 	if err = vm.Compile(); err != nil {
@@ -120,15 +120,14 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		task.SetCompleted()
 	}
 
-	// If it rached the end, flag the task completed as well
-	if task.ExpiredAt > 0 && t1.Unix() >= task.ExpiredAt {
+	if task.ExpiredAt > 0 && t1.UnixMilli() >= task.ExpiredAt {
 		task.SetCompleted()
 	}
 
 	execution := &avsproto.Execution{
 		Id:          queueData.ExecutionID,
-		StartAt:     t0.Unix(),
-		EndAt:       t1.Unix(),
+		StartAt:     t0.UnixMilli(),
+		EndAt:       t1.UnixMilli(),
 		Success:     runTaskErr == nil,
 		Error:       "",
 		Steps:       vm.ExecutionLogs,

@@ -34,7 +34,7 @@ func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConf
 }
 
 func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
-	t0 := time.Now().Unix()
+	t0 := time.Now().UnixMilli()
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
 		Log:        "",
@@ -49,7 +49,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 	defer func() {
 		s.Log = log.String()
-		s.EndAt = time.Now().Unix()
+		s.EndAt = time.Now().UnixMilli()
 		s.Success = err == nil
 	}()
 
@@ -104,7 +104,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 	blobGasPrice := uint64(0)
 
-	if txReceipt.BlobGasPrice != nil {
+	if txReceipt != nil && txReceipt.BlobGasPrice != nil {
 		blobGasPrice = uint64(txReceipt.BlobGasPrice.Int64())
 	}
 
