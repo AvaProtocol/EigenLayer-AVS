@@ -1,7 +1,6 @@
 package taskengine
 
 import (
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
