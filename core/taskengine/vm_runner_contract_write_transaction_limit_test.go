@@ -20,10 +20,23 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-func TestTransactionSponsorshipLimit(t *testing.T) {
-	origSendUserOp := preset.SendUserOp
-	defer func() { preset.SendUserOp = origSendUserOp }()
+var originalSendUserOp = preset.SendUserOp
 
+type mockSendUserOpFunc func(
+	config *config.SmartWalletConfig,
+	owner common.Address,
+	callData []byte,
+	paymasterReq *preset.VerifyingPaymasterRequest,
+) (*userop.UserOperation, *types.Receipt, error)
+
+func replaceSendUserOp(mock mockSendUserOpFunc) func() {
+	originalSendUserOp = preset.SendUserOp
+	preset.SendUserOp = mock
+	return func() {
+		preset.SendUserOp = originalSendUserOp
+	}
+}
+func TestTransactionSponsorshipLimit(t *testing.T) {
 	testCases := []struct {
 		name            string
 		transactionCount uint64
@@ -107,7 +120,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 
 			var capturedPaymaster *preset.VerifyingPaymasterRequest
 			
-			preset.SendUserOp = func(
+			restore := replaceSendUserOp(func(
 				config *config.SmartWalletConfig,
 				owner common.Address,
 				callData []byte,
@@ -115,7 +128,8 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 			) (*userop.UserOperation, *types.Receipt, error) {
 				capturedPaymaster = paymasterReq
 				return &userop.UserOperation{}, &types.Receipt{}, nil
-			}
+			})
+			defer restore() // Restore the original function after the test
 
 			processor.Execute("test", node)
 			
