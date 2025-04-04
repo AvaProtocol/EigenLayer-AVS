@@ -21,6 +21,10 @@ import (
 	"github.com/AvaProtocol/ap-avs/storage"
 )
 
+const (
+	paymasterAddress = "0xB985af5f96EF2722DC99aEBA573520903B86505e"
+)
+
 func GetTestRPCURL() string {
 	v := os.Getenv("RPC_URL")
 	if v == "" {
@@ -122,7 +126,7 @@ func GetAggregatorConfig() *config.Config {
 			//	FactoryAddress:    common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
 			FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
 			EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
-			PaymasterAddress:  common.HexToAddress("0xd99a660fc95f786ead76fb73c11354f499f13b30"),
+			PaymasterAddress:  common.HexToAddress(paymasterAddress),
 		},
 	}
 }
@@ -252,7 +256,7 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 		FactoryAddress:       common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
 		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
 		ControllerPrivateKey: controllerPrivateKey,
-		PaymasterAddress:     common.HexToAddress("0xd99a660fc95f786ead76fb73c11354f499f13b30"),
+		PaymasterAddress:     common.HexToAddress(paymasterAddress),
 	}
 }
 
@@ -271,7 +275,7 @@ func GetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 		FactoryAddress:       common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
 		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
 		ControllerPrivateKey: controllerPrivateKey,
-		PaymasterAddress:     common.HexToAddress("0xd99a660fc95f786ead76fb73c11354f499f13b30"),
+		PaymasterAddress:     common.HexToAddress(paymasterAddress),
 	}
 }
 
