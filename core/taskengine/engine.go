@@ -603,7 +603,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 			}, nil
 		}
 
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskTriggerError), fmt.Sprintf("error trigger task: %s", err.Error()))
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskTriggerError), "error trigger task: %v", err)
 	}
 
 	data, err := json.Marshal(queueTaskData)
