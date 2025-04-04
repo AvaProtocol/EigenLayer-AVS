@@ -113,6 +113,29 @@ View docs/development.md
 The commands to run tests locally are found in the Makefile:
 * `go test -race -buildvcs -vet=off ./...` (default)
 * `go test -v -race -buildvcs ./...` (verbose)
+=======
+## Linting and Code Quality
+
+### Running the linter
+
+```bash
+# Install golangci-lint
+curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
+
+# Run the linter
+golangci-lint run ./...
+
+# Or use the Makefile target
+make audit
+```
+
+### Best practices for running linters
+
+- Run linters before committing code to catch issues early
+- Configure your IDE to run linters on save for immediate feedback
+- Include linting in CI/CD pipelines to enforce code quality standards
+- Fix linting issues as they arise rather than letting them accumulate
+
 
 ## Dependencies
 
