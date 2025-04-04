@@ -38,10 +38,6 @@ func getControllerSigner() *ecdsa.PrivateKey {
 }
 
 func TestSendUserOp(t *testing.T) {
-	if os.Getenv("CI") == "true" || os.Getenv("CONTROLLER_PRIVATE_KEY") == "" {
-		t.Skip("Skipping TestSendUserOp in CI environment - requires controller private key")
-	}
-
 	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
 
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
@@ -95,10 +91,6 @@ func TestSendUserOp(t *testing.T) {
 }
 
 func TestPaymaster(t *testing.T) {
-	if os.Getenv("CI") == "true" {
-		t.Skip("Skipping TestPaymaster in CI environment - requires funded paymaster")
-	}
-
 	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
 
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
@@ -128,12 +120,12 @@ func TestPaymaster(t *testing.T) {
 	)
 
 	if err != nil {
-		t.Logf("Failed to send user operation with paymaster: %v", err)
+		t.Errorf("Failed to send user operation with paymaster: %v", err)
 		return
 	}
 
 	if userOp == nil {
-		t.Logf("UserOp is nil")
+		t.Errorf("UserOp is nil")
 		return
 	}
 
