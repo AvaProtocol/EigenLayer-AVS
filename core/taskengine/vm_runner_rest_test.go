@@ -47,7 +47,7 @@ func TestRestRequest(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -134,7 +134,7 @@ func TestRestRequestHandleEmptyResponse(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -203,7 +203,7 @@ func TestRestRequestRenderVars(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -283,7 +283,7 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -371,7 +371,7 @@ func TestRestRequestErrorHandling(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "error-test",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -387,7 +387,7 @@ func TestRestRequestErrorHandling(t *testing.T) {
 		t.Errorf("Expected error for non-existent domain, but got nil")
 	}
 
-	if !strings.Contains(err.Error(), "HTTP request failed: connection error, timeout, or DNS resolution failure") {
+	if !strings.Contains(err.Error(), "HTTP request failed: connection error or timeout") {
 		t.Errorf("Expected error message to contain connection failure information, got: %v", err)
 	}
 
@@ -411,11 +411,36 @@ func TestRestRequestErrorHandling(t *testing.T) {
 		t.Errorf("Expected error for 404 status code, but got nil")
 	}
 
-	if !strings.Contains(err.Error(), "Unexpected status code: 404") {
+	if !strings.Contains(err.Error(), "unexpected HTTP status code: 404") {
 		t.Errorf("Expected error message to contain status code 404, got: %v", err)
 	}
 
 	if step.Success {
 		t.Errorf("Expected step.Success to be false for 404 response")
+	}
+
+	// Test 500 Server Error
+	ts500 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError) // 500
+	}))
+	defer ts500.Close()
+
+	node500 := &avsproto.RestAPINode{
+		Url:    ts500.URL,
+		Method: "GET",
+	}
+
+	step, err = n.Execute("error-test", node500)
+
+	if err == nil {
+		t.Errorf("Expected error for 500 status code, but got nil")
+	}
+
+	if !strings.Contains(err.Error(), "unexpected HTTP status code: 500") {
+		t.Errorf("Expected error message to contain status code 500, got: %v", err)
+	}
+
+	if step.Success {
+		t.Errorf("Expected step.Success to be false for 500 response")
 	}
 }

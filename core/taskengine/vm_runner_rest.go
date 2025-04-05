@@ -2,7 +2,6 @@ package taskengine
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -79,8 +78,13 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 
 	var err error
+	// The defer function serves as the single source of truth for setting Success: false
 	defer func() {
 		s.EndAt = time.Now().UnixMilli()
+		s.Success = err == nil
+		if err != nil {
+			s.Error = err.Error()
+		}
 	}()
 
 	var log strings.Builder
@@ -94,9 +98,8 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	u, err := url.Parse(processedNode.Url)
 	if err != nil {
-		s.Success = false
-		s.Error = fmt.Sprintf("Cannot parse URL: %s", processedNode.Url)
-		return s, err
+		s.Error = fmt.Sprintf("cannot parse url: %s", processedNode.Url)
+		return nil, err
 	}
 
 	log.WriteString(fmt.Sprintf("Execute %s %s at %s", processedNode.Method, u.Hostname(), time.Now()))
@@ -113,22 +116,9 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		resp, err = request.Get(processedNode.Url)
 	}
 
-	// Handle connection errors
-	if err != nil {
-		s.Success = false
-		s.Error = "HTTP request failed: connection error, timeout, or DNS resolution failure"
-		return s, fmt.Errorf("%s: %v", s.Error, err)
-	}
-
-	// Check HTTP status code - treat non-2xx/3xx as errors
-	if resp.StatusCode() < 200 || resp.StatusCode() >= 400 {
-		s.Success = false
-		errorMsg := fmt.Sprintf("Unexpected status code: %d", resp.StatusCode())
-		s.Error = errorMsg
-		return s, errors.New(errorMsg)
-	}
-
 	response := string(resp.Body())
+
+	//maybeJSON := false
 
 	// Attempt to detect json and auto convert to a map to use in subsequent step
 	if len(response) >= 1 && (response[0] == '{' || response[0] == '[') {
@@ -143,25 +133,37 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 
 	value, err := structpb.NewValue(r.GetOutputVar(stepID))
+	if err == nil {
+		pbResult, _ := anypb.New(value)
+		s.OutputData = &avsproto.Execution_Step_RestApi{
+			RestApi: &avsproto.RestAPINode_Output{
+				Data: pbResult,
+			},
+		}
+	}
+
 	if err != nil {
-		s.Success = false
 		s.Error = err.Error()
 		return s, err
+	} else {
+		// Check HTTP status codes from the resty response
+		// - 2xx (200-299): Success
+		// - 3xx (300-399): Redirection (also considered successful)
+		// - 4xx (400-499): Client errors
+		// - 5xx (500-599): Server errors
+		// Any status code outside 2xx-3xx range is considered an error
+		// Status code 0 indicates a connection failure
+		if resp.StatusCode() == 0 {
+			err = fmt.Errorf("HTTP request failed: connection error or timeout")
+			s.Error = err.Error()
+			return s, err
+		}
+		if resp.StatusCode() < 200 || resp.StatusCode() >= 400 {
+			err = fmt.Errorf("unexpected HTTP status code: %d", resp.StatusCode())
+			s.Error = err.Error()
+			return s, err
+		}
 	}
 
-	pbResult, err := anypb.New(value)
-	if err != nil {
-		s.Success = false
-		s.Error = err.Error()
-		return s, err
-	}
-
-	s.OutputData = &avsproto.Execution_Step_RestApi{
-		RestApi: &avsproto.RestAPINode_Output{
-			Data: pbResult,
-		},
-	}
-
-	// If we reach here, everything was successful
 	return s, nil
 }
