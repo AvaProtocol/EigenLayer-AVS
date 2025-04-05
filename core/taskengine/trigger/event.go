@@ -24,7 +24,7 @@ var (
 	// To reduce api call we listen to these topics only
 	// a better idea is to only subscribe to what we need and re-load when new trigger is added
 	whitelistTopics = [][]common.Hash{
-		[]common.Hash{
+		{
 			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"), // erc20 transfer
 			//common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"), // UserOp
 			//common.HexToHash("0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"), // approve

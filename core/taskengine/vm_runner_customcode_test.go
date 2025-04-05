@@ -16,7 +16,7 @@ func TestRunJavaScript(t *testing.T) {
 		Source: "return 3>2",
 	}
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123abc",
 			Name: "customJs",
 			TaskType: &avsproto.TaskNode_CustomCode{
@@ -31,7 +31,7 @@ func TestRunJavaScript(t *testing.T) {
 	}
 
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "123abc",
@@ -78,7 +78,7 @@ func TestRunJavaScriptComplex(t *testing.T) {
 		Source: "const a=[1,2,3]; return a.filter((i) => i >= 2);",
 	}
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123abc",
 			Name: "customJs",
 			TaskType: &avsproto.TaskNode_CustomCode{
@@ -92,7 +92,7 @@ func TestRunJavaScriptComplex(t *testing.T) {
 	}
 
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "123abc",
@@ -129,7 +129,7 @@ func TestRunJavaScriptComplexWithMap(t *testing.T) {
 			`,
 	}
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123abc",
 			Name: "customJs",
 			TaskType: &avsproto.TaskNode_CustomCode{
@@ -143,7 +143,7 @@ func TestRunJavaScriptComplexWithMap(t *testing.T) {
 	}
 
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "123abc",
@@ -217,7 +217,7 @@ func TestRunJavaScriptCanAccessSecretsWithapContext(t *testing.T) {
 		Source: "return 'my name is ' + apContext.configVars.my_awesome_secret",
 	}
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123abc",
 			Name: "customJs",
 			TaskType: &avsproto.TaskNode_CustomCode{
@@ -231,7 +231,7 @@ func TestRunJavaScriptCanAccessSecretsWithapContext(t *testing.T) {
 	}
 
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "123abc",

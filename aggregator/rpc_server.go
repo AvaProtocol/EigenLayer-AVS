@@ -349,7 +349,6 @@ func (r *RpcServer) GetExecutionCount(ctx context.Context, req *avsproto.GetExec
 	return r.engine.GetExecutionCount(user, req)
 }
 
-
 // Operator action
 func (r *RpcServer) SyncMessages(payload *avsproto.SyncMessagesReq, srv avsproto.Node_SyncMessagesServer) error {
 	err := r.engine.StreamCheckToOperator(payload, srv)

@@ -57,7 +57,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 						Name: "triggertest",
 					},
 					Nodes: []*avsproto.TaskNode{
-						&avsproto.TaskNode{
+						{
 							Id:   "transfer1",
 							Name: "usdcTransfer",
 							TaskType: &avsproto.TaskNode_ContractWrite{

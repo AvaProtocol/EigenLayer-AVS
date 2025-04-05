@@ -25,7 +25,7 @@ func TestRestRequest(t *testing.T) {
 	}
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123abc",
 			Name: "restApi",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -39,7 +39,7 @@ func TestRestRequest(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "123abc",
@@ -112,7 +112,7 @@ func TestRestRequestHandleEmptyResponse(t *testing.T) {
 	}
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123abc",
 			Name: "restApi",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -126,7 +126,7 @@ func TestRestRequestHandleEmptyResponse(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "123abc",
@@ -181,7 +181,7 @@ func TestRestRequestRenderVars(t *testing.T) {
 	}
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123abc",
 			Name: "restApi",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -195,7 +195,7 @@ func TestRestRequestRenderVars(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "123abc",
@@ -212,7 +212,7 @@ func TestRestRequestRenderVars(t *testing.T) {
 	}, nil, testutil.GetTestSmartWalletConfig(), nil)
 
 	vm.AddVar("myNode", map[string]map[string]string{
-		"data": map[string]string{
+		"data": {
 			"name": "unitest",
 		},
 	})
@@ -261,7 +261,7 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 	}
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123abc",
 			Name: "restApi",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -275,7 +275,7 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "123abc",
@@ -293,7 +293,7 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 
 	// First execution with first value
 	vm.AddVar("myNode", map[string]map[string]string{
-		"data": map[string]string{
+		"data": {
 			"name": "first",
 		},
 	})
@@ -313,7 +313,7 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 
 	// Second execution with different value
 	vm.AddVar("myNode", map[string]map[string]string{
-		"data": map[string]string{
+		"data": {
 			"name": "second",
 		},
 	})
