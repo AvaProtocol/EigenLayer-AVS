@@ -1,0 +1,35 @@
+ecdsa_private_key: f6dc500a34373d7e8af2a4b0b2635253ce1bd92077ed86c24393fb01298abc1d
+
+eth_rpc_url: https://holesky.gateway.tenderly.co/6PJfDJkrMGBl3f4MuyU5M
+eth_ws_url: wss://holesky.gateway.tenderly.co/6PJfDJkrMGBl3f4MuyU5M
+
+rpc_bind_address: "0.0.0.0:2206"
+http_bind_address: "0.0.0.0:8080"
+
+avs_registry_coordinator_address: 0x90c6d6f2A78d5Ce22AB8631Ddb142C03AC87De7a
+operator_state_retriever_address: 0xb7bb920538e038DFFEfcB55caBf713652ED2031F
+
+etherscan_url: https://etherscan.io
+eigenlayer_url: https://app.eigenlayer.xyz
+
+environment: development
+db_path: /tmp/ap-avs/db
+
+jwt_secret: 1b7db1c64236d92de3b3ed32e5d6bf56
+
+# account abstraction config
+# Sepolia
+smart_wallet:
+  eth_rpc_url: https://ethereum-sepolia.core.chainstack.com/2504cb0765f0edf6c33d99095148006f
+  eth_ws_url: wss://ethereum-sepolia.core.chainstack.com/2504cb0765f0edf6c33d99095148006f
+  bundler_url: https://bundler-sepolia.avaprotocol.org/?apikey=kt8qTj8MtmAQGsj17Urz1aMATV1ySn4R
+  factory_address: 0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7
+  entrypoint_address: 0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789
+
+  # master key to generate and sign userops for any wallet
+  # wallet: 0xafDe18682A3ee10E4FA2DDE582CdAd24b939C36F
+  controller_private_key: fa8f65b36c4b312aa4950e475f314c34d273ec3d841a765843926fd00e314563
+
+macros:
+  secrets:
+    ap_notify_bot_token: "7771086042:AAG7UvbAyN8_8OrS-MjRfwz8WpWDKf4Yw8U" # Telegram bot token for notifications

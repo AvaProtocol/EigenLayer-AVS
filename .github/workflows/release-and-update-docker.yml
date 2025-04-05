@@ -1,0 +1,143 @@
+name: Auto Release on Main
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout repository with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required for go-semantic-release
+
+      - name: Setup Go environment
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'
+
+      - name: Run Go linter
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+
+      - name: Run Go tests
+        run: go test -v ./...
+
+      - name: Generate commit summary
+        id: git-summary
+        run: |
+          echo "## Summary" >> commit-summary.md
+          echo "" >> commit-summary.md
+          # Count different types of changes
+          FEATURES=$(git log $(git describe --tags --abbrev=0)..HEAD --pretty=format:"%s" --no-merges | grep -i "^feat" | wc -l)
+          FIXES=$(git log $(git describe --tags --abbrev=0)..HEAD --pretty=format:"%s" --no-merges | grep -i "^fix" | wc -l)
+          DOCS=$(git log $(git describe --tags --abbrev=0)..HEAD --pretty=format:"%s" --no-merges | grep -i "^docs" | wc -l)
+          echo "* $FEATURES new features" >> commit-summary.md
+          echo "* $FIXES bug fixes" >> commit-summary.md
+          echo "* $DOCS documentation updates" >> commit-summary.md
+          echo "" >> commit-summary.md
+          echo "## Changes since last release" >> commit-summary.md
+          echo "" >> commit-summary.md
+          git log $(git describe --tags --abbrev=0)..HEAD --pretty=format:"* %s (%h)" --no-merges >> commit-summary.md
+          echo "COMMIT_SUMMARY<<EOF" >> $GITHUB_ENV
+          cat commit-summary.md >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Run semantic versioning and release
+        id: semantic-release
+        uses: go-semantic-release/action@v1
+        with:
+          hooks: goreleaser
+          changelog: ${{ env.COMMIT_SUMMARY }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            avaprotocol/ap-avs
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value={{sha}},enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push Docker image
+        if: steps.semantic-release.outputs.new_release_published == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          build-args: |
+            RELEASE_TAG=${{ steps.semantic-release.outputs.new_version }}
+          platforms: linux/amd64,linux/arm64
+          context: .
+          file: dockerfiles/operator.Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy:
+    needs: release
+    if: needs.release.outputs.new_release_published == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    strategy:
+      matrix:
+        workflow:
+          - id: 'deploy-sepolia.yml'
+            name: 'Sepolia'
+            environment: 'Sepolia'
+            directory: 'sepolia'
+          - id: 'deploy-base-sepolia.yml'
+            name: 'Base Sepolia'
+            environment: 'Base Sepolia'
+            directory: 'base-sepolia'
+          - id: 'deploy-base.yml'
+            name: 'Base'
+            environment: 'Base'
+            directory: 'base'
+          - id: 'deploy-ethereum.yml'
+            name: 'Ethereum'
+            environment: 'Ethereum'
+            directory: 'ethereum'
+    steps:
+      - name: Trigger ${{ matrix.workflow.name }} deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: '${{ matrix.workflow.id }}',
+              ref: 'main',
+              inputs: {
+                tag: '${{ needs.release.outputs.new_version }}',
+                environment: '${{ matrix.workflow.environment }}',
+                directory: '${{ matrix.workflow.directory }}'
+              }
+            })
