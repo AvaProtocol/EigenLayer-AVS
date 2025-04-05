@@ -28,7 +28,7 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 	}
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123abc",
 			Name: "graphqlQuery",
 			TaskType: &avsproto.TaskNode_GraphqlQuery{
@@ -43,7 +43,7 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 	}
 
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "123abc",

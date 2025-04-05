@@ -484,7 +484,7 @@ func (a *BadgerStorage) SetCounter(key []byte, value uint64) error {
 	return a.db.Update(func(txn *badger.Txn) error {
 		// Convert uint64 to string so we can inspect them easiser in console
 		counterStr := strconv.FormatUint(value, 10)
-		
+
 		return txn.Set(key, []byte(counterStr))
 	})
 }

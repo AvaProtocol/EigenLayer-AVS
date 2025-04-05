@@ -38,10 +38,10 @@ func BuildAvsWriter(txMgr txmgr.TxManager, registryCoordinatorAddr, operatorStat
 	//avsRegistryWriter, err := avsregistry.BuildAvsRegistryChainWriter(registryCoordinatorAddr, operatorStateRetrieverAddr, logger, ethHttpClient, txMgr)
 	avsRegistryWriter, err := avsregistry.NewWriterFromConfig(
 		avsregistry.Config{
-			RegistryCoordinatorAddress: registryCoordinatorAddr,
+			RegistryCoordinatorAddress:    registryCoordinatorAddr,
 			OperatorStateRetrieverAddress: operatorStateRetrieverAddr,
 		},
-		ethHttpClient, txMgr,logger,
+		ethHttpClient, txMgr, logger,
 	)
 	if err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func BuildAvsWriter(txMgr txmgr.TxManager, registryCoordinatorAddr, operatorStat
 }
 func NewAvsWriter(avsRegistryWriter *avsregistry.ChainWriter, avsServiceBindings *AvsManagersBindings, logger logging.Logger, txMgr txmgr.TxManager) *AvsWriter {
 	return &AvsWriter{
-		ChainWriter:   avsRegistryWriter,
+		ChainWriter:         avsRegistryWriter,
 		AvsContractBindings: avsServiceBindings,
 		logger:              logger,
 		TxMgr:               txMgr,
