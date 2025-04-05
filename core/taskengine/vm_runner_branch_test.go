@@ -27,23 +27,23 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 	defer ts.Close()
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "branch1",
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
 					Conditions: []*avsproto.Condition{
-						&avsproto.Condition{
+						{
 							Id:         "condition1",
 							Type:       "if",
 							Expression: "a > 10",
 						},
-						&avsproto.Condition{
+						{
 							Id:         "condition2",
 							Type:       "if",
 							Expression: "a > 5",
 						},
-						&avsproto.Condition{
+						{
 							Id:   "condition3",
 							Type: "else",
 						},
@@ -51,7 +51,7 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 				},
 			},
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "notification1",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -62,7 +62,7 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 				},
 			},
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "notification2",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -73,7 +73,7 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 				},
 			},
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "notification3",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -91,22 +91,22 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "branch1",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e2",
 			Source: "branch1.condition1",
 			Target: "notification1",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e3",
 			Source: "branch1.condition2",
 			Target: "notification2",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e4",
 			Source: "branch1.condition3",
 			Target: "notification3",

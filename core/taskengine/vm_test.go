@@ -18,7 +18,7 @@ import (
 
 func TestVMCompile(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -37,7 +37,7 @@ func TestVMCompile(t *testing.T) {
 	}
 
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "123",
@@ -75,7 +75,7 @@ func TestRunSimpleTasks(t *testing.T) {
 	defer ts.Close()
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -94,7 +94,7 @@ func TestRunSimpleTasks(t *testing.T) {
 	}
 
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "123",
@@ -136,7 +136,7 @@ func TestRunSimpleTasks(t *testing.T) {
 
 func TestRunSequentialTasks(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -147,7 +147,7 @@ func TestRunSequentialTasks(t *testing.T) {
 				},
 			},
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "456",
 			Name: "graphql",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -167,12 +167,12 @@ func TestRunSequentialTasks(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "123",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e2",
 			Source: "123",
 			Target: "456",
@@ -234,18 +234,18 @@ func TestRunSequentialTasks(t *testing.T) {
 
 func TestRunTaskWithBranchNode(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "branch1",
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
 					Conditions: []*avsproto.Condition{
-						&avsproto.Condition{
+						{
 							Id:         "a1",
 							Type:       "if",
 							Expression: "a >= 5",
 						},
-						&avsproto.Condition{
+						{
 							Id:   "a2",
 							Type: "else",
 						},
@@ -253,7 +253,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 				},
 			},
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "notification1",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -264,7 +264,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 				},
 			},
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "notification2",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -284,17 +284,17 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "branch1",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: "branch1.a1",
 			Target: "notification1",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: "branch1.a2",
 			Target: "notification2",
@@ -390,13 +390,13 @@ func TestRenderString(t *testing.T) {
 
 func TestEvaluateEvent(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "branch1",
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
 					Conditions: []*avsproto.Condition{
-						&avsproto.Condition{
+						{
 							Id:         "a1",
 							Type:       "if",
 							Expression: `triggertest.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" && bigGt(toBigInt(triggertest.data.data), toBigInt("1200000"))`},
@@ -404,7 +404,7 @@ func TestEvaluateEvent(t *testing.T) {
 				},
 			},
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "notification1",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -422,12 +422,12 @@ func TestEvaluateEvent(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "branch1",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: "branch1.a1",
 			Target: "notification1",
@@ -476,13 +476,13 @@ func TestEvaluateEvent(t *testing.T) {
 
 func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "branch1",
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
 					Conditions: []*avsproto.Condition{
-						&avsproto.Condition{
+						{
 							Id:         "a1",
 							Type:       "if",
 							Expression: `triggertest.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" && bigGt(toBigInt(triggertest.data.data), toBigInt("1200000"))`},
@@ -490,7 +490,7 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 				},
 			},
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "notification1",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -508,12 +508,12 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: "foo",
 			Target: "branch1",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: "branch1.a1",
 			Target: "notification1",
@@ -550,15 +550,15 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 
 func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "branch1",
 			Name: "branch",
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "notification1",
 			Name: "httpnode",
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "rest1",
 			Name: "httpnode",
 		},
@@ -569,17 +569,17 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: "rest1",
 			Target: "notification1",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: "notification1",
 			Target: "branch1",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "notification1",
@@ -633,7 +633,7 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 	defer ts.Close()
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -652,7 +652,7 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 	}
 
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "123",
@@ -728,7 +728,7 @@ func TestPreprocessText(t *testing.T) {
 				},
 			},
 			"apContext": map[string]map[string]string{
-				"configVars": map[string]string{
+				"configVars": {
 					"my_awesome_secret": "my_awesome_secret_value",
 				},
 			},

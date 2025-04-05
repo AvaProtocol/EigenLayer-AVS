@@ -537,7 +537,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 }
 
 func (n *Engine) GetTaskByID(taskID string) (*model.Task, error) {
-	for status, _ := range avsproto.TaskStatus_name {
+	for status := range avsproto.TaskStatus_name {
 		if rawTaskData, err := n.db.GetKey(TaskStorageKey(taskID, avsproto.TaskStatus(status))); err == nil {
 			task := model.NewTask()
 			err = task.FromStorageData(rawTaskData)

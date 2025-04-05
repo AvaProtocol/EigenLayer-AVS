@@ -9,8 +9,6 @@ import (
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
 
-var ()
-
 type Queue struct {
 	db     storage.Storage
 	dbLock sync.Mutex

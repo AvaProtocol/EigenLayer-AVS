@@ -30,10 +30,10 @@ func NewTimeTrigger(triggerCh chan TriggerMetadata[uint64], logger sdklogging.Lo
 
 	t := TimeTrigger{
 		CommonTrigger: &CommonTrigger{
-			done:      make(chan bool),
-			shutdown:  false,
-			logger:    logger,
-			mu:        sync.Mutex{},
+			done:     make(chan bool),
+			shutdown: false,
+			logger:   logger,
+			mu:       sync.Mutex{},
 		},
 		scheduler: scheduler,
 		jobs:      make(map[string]gocron.Job),
@@ -83,7 +83,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 				t.logger.Info("skipping past epoch", "task_id", taskID, "epoch", epoch)
 				continue
 			}
-			
+
 			cronExpr := t.epochToCron(epoch)
 			job, err = t.scheduler.NewJob(
 				gocron.CronJob(cronExpr, false),
@@ -108,7 +108,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 			if cronExpr == "" {
 				continue
 			}
-			
+
 			job, err = t.scheduler.NewJob(
 				gocron.CronJob(cronExpr, false),
 				gocron.NewTask(triggerFunc),

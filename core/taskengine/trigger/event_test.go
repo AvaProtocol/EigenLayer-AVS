@@ -27,7 +27,7 @@ func TestTriggerTopicMatch(t *testing.T) {
 		},
 
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "topics",
 				Value: []string{
 					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -58,7 +58,7 @@ func TestTriggerTopicNotMatch(t *testing.T) {
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "topics",
 				Value: []string{
 					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -90,7 +90,7 @@ func TestTriggerTopicMulti(t *testing.T) {
 	result, err := eventTrigger.Evaluate(event, &Check{
 
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "topics",
 				Value: []string{
 					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -106,14 +106,14 @@ func TestTriggerTopicMulti(t *testing.T) {
 
 	result, err = eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "topics",
 				Value: []string{
 					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 					"0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
 				},
 			},
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "topics",
 				Value: []string{
 					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -144,7 +144,7 @@ func TestTriggerAddress(t *testing.T) {
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "address",
 				Value: []string{
 					"0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
@@ -159,7 +159,7 @@ func TestTriggerAddress(t *testing.T) {
 
 	result, err = eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "address",
 				Value: []string{
 					"0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7237",
@@ -184,7 +184,7 @@ func TestTriggerAddressNegativeCase(t *testing.T) {
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "address",
 				Value: []string{
 					"0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7237",
@@ -209,7 +209,7 @@ func TestTriggerNonTransferEvent(t *testing.T) {
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "topics",
 				Value: []string{
 					"0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0",

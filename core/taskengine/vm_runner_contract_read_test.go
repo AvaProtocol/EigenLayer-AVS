@@ -17,7 +17,7 @@ func TestContractReadSimpleReturn(t *testing.T) {
 		ContractAbi:     `[{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`,
 	}
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123",
 			Name: "contractQuery",
 			TaskType: &avsproto.TaskNode_ContractRead{
@@ -32,7 +32,7 @@ func TestContractReadSimpleReturn(t *testing.T) {
 	}
 
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: "triggertestid",
 			Target: "123",
@@ -83,7 +83,7 @@ func TestContractReadComplexReturn(t *testing.T) {
 	}
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "123abc",
 			Name: "contractQuery",
 			TaskType: &avsproto.TaskNode_ContractRead{
@@ -97,7 +97,7 @@ func TestContractReadComplexReturn(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "123abc",

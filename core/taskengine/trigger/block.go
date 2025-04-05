@@ -129,7 +129,7 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 				for interval, tasks := range b.schedule {
 					z := new(big.Int)
 					if z.Mod(header.Number, big.NewInt(int64(interval))).Cmp(zero) == 0 {
-						for taskID, _ := range tasks {
+						for taskID := range tasks {
 							b.triggerCh <- TriggerMetadata[int64]{
 								TaskID: taskID,
 								Marker: header.Number.Int64(),

@@ -25,7 +25,7 @@ type OperatorNode struct {
 
 func (o *OperatorNode) LastSeen() string {
 	now := time.Now()
-	
+
 	var last time.Time
 	if o.LastPingEpoch > 1e12 { // Threshold for milliseconds (timestamps after 2001)
 		last = time.Unix(o.LastPingEpoch/1000, 0)
