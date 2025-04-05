@@ -103,7 +103,74 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 		return
 	}
 
+	// Print logs for debugging
+	t.Logf("Logs: %+v", outputData.TxReceipt.Logs)
+
 	if len(outputData.TxReceipt.Hash) != 66 {
 		t.Errorf("Missing Tx Hash in the output data")
 	}
+
+	// Verify all transaction receipt fields
+	if outputData.TxReceipt.BlockHash == "" {
+		t.Errorf("Missing BlockHash in the output data")
+	}
+
+	if outputData.TxReceipt.BlockNumber == 0 {
+		t.Errorf("Missing BlockNumber in the output data")
+	}
+
+	if outputData.TxReceipt.From == "" {
+		t.Errorf("Missing From address in the output data")
+	}
+
+	if outputData.TxReceipt.To == "" {
+		t.Errorf("Missing To address in the output data")
+	}
+
+	if outputData.TxReceipt.GasUsed == 0 {
+		t.Errorf("Missing GasUsed in the output data")
+	}
+
+	if outputData.TxReceipt.GasPrice == 0 {
+		t.Errorf("Missing GasPrice in the output data")
+	}
+
+	if outputData.TxReceipt.CumulativeGasUsed == 0 {
+		t.Errorf("Missing CumulativeGasUsed in the output data")
+	}
+
+	if outputData.TxReceipt.Fee == 0 {
+		t.Errorf("Missing Fee in the output data")
+	}
+
+	if outputData.TxReceipt.ContractAddress == "" {
+		t.Errorf("Missing ContractAddress in the output data")
+	}
+
+	if outputData.TxReceipt.Index == 0 {
+		t.Errorf("Missing Index in the output data")
+	}
+
+	if outputData.TxReceipt.Logs == nil {
+		t.Errorf("Missing Logs in the output data")
+	}
+
+	if outputData.TxReceipt.LogsBloom == "" {
+		t.Errorf("Missing LogsBloom in the output data")
+	}
+
+	// Root is optional in modern Ethereum, only used in pre-Byzantium hard forks
+	// if outputData.TxReceipt.Root == "" {
+	//     t.Errorf("Missing Root in the output data")
+	// }
+
+	if outputData.TxReceipt.Status == 0 {
+		t.Errorf("Missing Status in the output data")
+	}
+
+	if outputData.TxReceipt.Type == 0 {
+		t.Errorf("Missing Type in the output data")
+	}
+
+	// BlobGasPrice and BlobGasUsed are optional fields, so we don't check them
 }
