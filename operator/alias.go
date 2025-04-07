@@ -104,7 +104,7 @@ func (o *Operator) DeclareAlias(filepath string) error {
 	}
 
 	if receipt.Status != 1 {
-		return fmt.Errorf("declareAlias transaction %w reverted", receipt.TxHash.Hex())
+		return fmt.Errorf("declareAlias transaction %s reverted", receipt.TxHash.Hex())
 	}
 
 	fmt.Printf("succesfully declared an alias for operator %s alias address %s at tx %s ", o.operatorAddr.String(), crypto.PubkeyToAddress(aliasEcdsaPair.PublicKey), receipt.TxHash.Hex())
@@ -151,7 +151,7 @@ func (o *Operator) RemoveAlias() error {
 	}
 
 	if receipt.Status != 1 {
-		return fmt.Errorf("declareAlias transaction %w reverted", receipt.TxHash.Hex())
+		return fmt.Errorf("declareAlias transaction %s reverted", receipt.TxHash.Hex())
 	}
 
 	fmt.Printf("succesfully remove alias %s for operator %s  at tx %s ", o.signerAddress.String(), o.operatorAddr.String(), receipt.TxHash.Hex())
