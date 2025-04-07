@@ -20,7 +20,6 @@ Then you can run `ap-avs` binary. We make an effort to use pure Go so you can al
 
 Check how to run an [operator docs](docs/operator.md)
 
-
 ### Run aggregator
 
 To run the aggregator, use the following command:
@@ -34,7 +33,6 @@ Note: The Ava Protocol team currently manages the aggregator, and the communicat
 # How it works
 
 <table><tr><td bgcolor='white'><img src="docs/highlevel-diagram.png"/></td></tr></table>
-
 
 ## User wallet
 
@@ -71,7 +69,6 @@ in the operator config file.
 - aggregator.avaprotocol.org:2206
 - [https://api-explorer.avaprotocol.org/](https://api-explorer.avaprotocol.org/)
 
-
 ## Operators
 
 Operators communicates with aggregators through RPC. It requests task data from aggregator, it performs condition execution to check whether a task can be trigger. The result is then sent back to aggregator.
@@ -85,7 +82,7 @@ Currently, Ava Protocol has deployed our operator on the testnet. Community memb
 
 ### Testnet
 
-- Ava Protocol's operator: [0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d](https://holesky.eigenlayer.xyz/operator/0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d). 
+- Ava Protocol's operator: [0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d](https://holesky.eigenlayer.xyz/operator/0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d).
 
 ### Mainnet
 
@@ -110,10 +107,52 @@ View docs/development.md
 
 ## Testing
 
-The commands to run tests locally are found in the Makefile:
-* `go test -race -buildvcs -vet=off ./...` (default)
-* `go test -v -race -buildvcs ./...` (verbose)
+### Standard Tests
+
+The Makefile includes two primary test configurations:
+
+```bash
+# Default test suite
+go test -race -buildvcs -vet=off ./...
+
+# Verbose test output
+go test -v -race -buildvcs ./...
+```
+
+### Enhanced Test Output
+
+For improved test result formatting, use `gotestfmt`:
+
+1. Install the formatter:
+
+   ```bash
+   go install github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@latest
+   ```
+
+2. Run once in the current terminal session to make Bash scripts more robust and error-aware.
+
+   ```bash
+   set -euo pipefail
+   ```
+
+3. Run tests with formatted output:
+
+   Run all tests with complete output:
+
+   ```base
+   go test -json ./... | gotestfmt
+   ```
+
+   or, run selected test cases:
+
+   ```bash
+   go test -json -run ^TestRestRequestErrorHandling$ ./... 2>&1 | gotestfmt --hide=all
+   ```
+
+   The `--hide=all` flag suppresses output for skipped and successful tests, showing only failures. For more output configuration options, see the [gotestfmt documentation](https://github.com/GoTestTools/gotestfmt?tab=readme-ov-file#how-do-i-make-the-output-less-verbose).
+
 =======
+
 ## Linting and Code Quality
 
 ### Running the linter
@@ -135,7 +174,6 @@ make audit
 - Configure your IDE to run linters on save for immediate feedback
 - Include linting in CI/CD pipelines to enforce code quality standards
 - Fix linting issues as they arise rather than letting them accumulate
-
 
 ## Dependencies
 
@@ -163,6 +201,7 @@ Install the Foundry toolchain with the following commands:
 curl -L https://foundry.paradigm.xyz | bash
 foundryup
 ```
+
 ### Protobuf Compiler
 
 ```
@@ -170,11 +209,12 @@ go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 ```
 
 ### Generate API Docs from Proto Files
+
 1. Install the `protoc-gen-doc` plugin for `protoc`.
    Install via Go:
    ```
    go install github.com/pseudomuto/protoc-gen-doc/cmd/protoc-gen-doc@latest
-   ```  
+   ```
    Ensure the plugin is in your PATH:
    ```
    export PATH="$PATH:$(go env GOPATH)/bin"
@@ -184,20 +224,20 @@ go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
    which protoc-gen-doc
    ```
 2. Generate API references in HTML format
-    ```
-    protoc --doc_out=./docs --doc_opt=html,docs.html ./protobuf/avs.proto
-    ```
+
+   ```
+   protoc --doc_out=./docs --doc_opt=html,docs.html ./protobuf/avs.proto
+   ```
 
 3. Alternatively, generate API references in Markdown format
-    ```
-    protoc --doc_out=./docs --doc_opt=markdown,docs.md ./protobuf/avs.proto
-    ```
-    This command will generate a markdown version of the gRPC API documentation. To enhance the clarity of the generated documentation, the following improvements should be made to the .proto file:
-    - **Group Definitions by Command**: Organize the API methods and their descriptions by command categories to make it easier for users to find relevant information.
-    - **Elaborate on Input Fields**: Provide detailed descriptions for each input field, including data types, expected values, and any constraints or special considerations.
-    - **Add Examples**: Include usage examples for each API method to demonstrate how to construct requests and interpret responses.
-    - **Link to Related Resources**: Where applicable, link to additional resources or documentation that provide further context or implementation details.
-
+   ```
+   protoc --doc_out=./docs --doc_opt=markdown,docs.md ./protobuf/avs.proto
+   ```
+   This command will generate a markdown version of the gRPC API documentation. To enhance the clarity of the generated documentation, the following improvements should be made to the .proto file:
+   - **Group Definitions by Command**: Organize the API methods and their descriptions by command categories to make it easier for users to find relevant information.
+   - **Elaborate on Input Fields**: Provide detailed descriptions for each input field, including data types, expected values, and any constraints or special considerations.
+   - **Add Examples**: Include usage examples for each API method to demonstrate how to construct requests and interpret responses.
+   - **Link to Related Resources**: Where applicable, link to additional resources or documentation that provide further context or implementation details.
 
 ## Getting started
 
@@ -207,31 +247,29 @@ Coming soon
 
 ### Holesky Testnet
 
-| Name                     | Address                                                                                                                 		|
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------	|
-| ProxyAdmin              | [`0x26CF7A7DF7d1E00D83A5Ca24385f697a3ca4577d`](https://holesky.etherscan.io/address/0x26CF7A7DF7d1E00D83A5Ca24385f697a3ca4577d) 	|
-| ServiceManager          | [`0xEA3E82F9Ae371A6a372A6DCffB1a9bD17e0608eF`](https://holesky.etherscan.io/address/0xEA3E82F9Ae371A6a372A6DCffB1a9bD17e0608eF) 	|
-| RegistryCoordinator     | [`0x90c6d6f2A78d5Ce22AB8631Ddb142C03AC87De7a`](https://holesky.etherscan.io/address/0x90c6d6f2A78d5Ce22AB8631Ddb142C03AC87De7a) 	|
-| BLSApkRegistry          | [`0x6752F8BeeE5BF45c9d11FDBC4F8aFfF879925585`](https://holesky.etherscan.io/address/0x6752F8BeeE5BF45c9d11FDBC4F8aFfF879925585) 	|
-| IndexRegistry           | [`0x298a5d3C8F8Db30E8292C9e2BF92292de469C8FF`](https://holesky.etherscan.io/address/0x298a5d3C8F8Db30E8292C9e2BF92292de469C8FF) 	|
-| OperatorStateRetriever  | [`0xb7bb920538e038DFFEfcB55caBf713652ED2031F`](https://holesky.etherscan.io/address/0xb7bb920538e038DFFEfcB55caBf713652ED2031F) 	|
-| PauserRegistry          | [`0x3A8ea6e4202CdDe4a9e0cCE19c4Dc1739ba2cF0b`](https://holesky.etherscan.io/address/0x3A8ea6e4202CdDe4a9e0cCE19c4Dc1739ba2cF0b) 	|
-| StakeRegistry           | [`0x7BacD5dd5A7C3acf8bf1a3c88fB0D00B68EE626A`](https://holesky.etherscan.io/address/0x7BacD5dd5A7C3acf8bf1a3c88fB0D00B68EE626A) 	|
-| ApConfig                | [`0xb8abbb082ecaae8d1cd68378cf3b060f6f0e07eb`](https://holesky.etherscan.io/address/0xb8abbb082ecaae8d1cd68378cf3b060f6f0e07eb) 	|
-
-
+| Name                   | Address                                                                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| ProxyAdmin             | [`0x26CF7A7DF7d1E00D83A5Ca24385f697a3ca4577d`](https://holesky.etherscan.io/address/0x26CF7A7DF7d1E00D83A5Ca24385f697a3ca4577d) |
+| ServiceManager         | [`0xEA3E82F9Ae371A6a372A6DCffB1a9bD17e0608eF`](https://holesky.etherscan.io/address/0xEA3E82F9Ae371A6a372A6DCffB1a9bD17e0608eF) |
+| RegistryCoordinator    | [`0x90c6d6f2A78d5Ce22AB8631Ddb142C03AC87De7a`](https://holesky.etherscan.io/address/0x90c6d6f2A78d5Ce22AB8631Ddb142C03AC87De7a) |
+| BLSApkRegistry         | [`0x6752F8BeeE5BF45c9d11FDBC4F8aFfF879925585`](https://holesky.etherscan.io/address/0x6752F8BeeE5BF45c9d11FDBC4F8aFfF879925585) |
+| IndexRegistry          | [`0x298a5d3C8F8Db30E8292C9e2BF92292de469C8FF`](https://holesky.etherscan.io/address/0x298a5d3C8F8Db30E8292C9e2BF92292de469C8FF) |
+| OperatorStateRetriever | [`0xb7bb920538e038DFFEfcB55caBf713652ED2031F`](https://holesky.etherscan.io/address/0xb7bb920538e038DFFEfcB55caBf713652ED2031F) |
+| PauserRegistry         | [`0x3A8ea6e4202CdDe4a9e0cCE19c4Dc1739ba2cF0b`](https://holesky.etherscan.io/address/0x3A8ea6e4202CdDe4a9e0cCE19c4Dc1739ba2cF0b) |
+| StakeRegistry          | [`0x7BacD5dd5A7C3acf8bf1a3c88fB0D00B68EE626A`](https://holesky.etherscan.io/address/0x7BacD5dd5A7C3acf8bf1a3c88fB0D00B68EE626A) |
+| ApConfig               | [`0xb8abbb082ecaae8d1cd68378cf3b060f6f0e07eb`](https://holesky.etherscan.io/address/0xb8abbb082ecaae8d1cd68378cf3b060f6f0e07eb) |
 
 ### Ethereum Mainnet
 
-| Name                     | Address                                                                                                                 		|
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------	|
-| ProxyAdmin              | [`0x5989934D31f7f397511f105B7E4175a06B7A517F`](https://etherscan.io/address/0x5989934D31f7f397511f105B7E4175a06B7A517F) 	|
-| ServiceManager          | [`0x18343Aa10e3D2F3A861e5649627324aEAD987Adf`](https://etherscan.io/address/0x18343Aa10e3D2F3A861e5649627324aEAD987Adf) 	|
-| RegistryCoordinator     | [`0x8DE3Ee0dE880161Aa0CD8Bf9F8F6a7AfEeB9A44B`](https://etherscan.io/address/0x8DE3Ee0dE880161Aa0CD8Bf9F8F6a7AfEeB9A44B) 	|
-| BLSApkRegistry          | [`0xB58687fF303C8e92C28a484342755d3228081d45`](https://etherscan.io/address/0xB58687fF303C8e92C28a484342755d3228081d45) 	|
-| IndexRegistry           | [`0xc6A464e39d4fA5013D61295501c7cCd050d76612`](https://etherscan.io/address/0xc6A464e39d4fA5013D61295501c7cCd050d76612) 	|
-| OperatorStateRetriever  | [`0xb3af70D5f72C04D1f490ff49e5aB189fA7122713`](https://etherscan.io/address/0xb3af70D5f72C04D1f490ff49e5aB189fA7122713) 	|
-| PauserRegistry          | [`0xeec585186c37c517030ba371deac5c17e728c135`](https://etherscan.io/address/0xeec585186c37c517030ba371deac5c17e728c135) 	|
-| StakeRegistry           | [`0x363b3604fE8c2323a98c00906115c8b87a512a12`](https://etherscan.io/address/0x363b3604fE8c2323a98c00906115c8b87a512a12) 	|
-| TaskManager             | [`0x940f62f75cbbbd723d37c9171dc681dfba653b49`](https://etherscan.io/address/0x940f62f75cbbbd723d37c9171dc681dfba653b49) 	|
-| ApConfig                | [`0x9c02dfc92eea988902a98919bf4f035e4aaefced`](https://etherscan.io/address/0x9c02dfc92eea988902a98919bf4f035e4aaefced) 	|
+| Name                   | Address                                                                                                                 |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| ProxyAdmin             | [`0x5989934D31f7f397511f105B7E4175a06B7A517F`](https://etherscan.io/address/0x5989934D31f7f397511f105B7E4175a06B7A517F) |
+| ServiceManager         | [`0x18343Aa10e3D2F3A861e5649627324aEAD987Adf`](https://etherscan.io/address/0x18343Aa10e3D2F3A861e5649627324aEAD987Adf) |
+| RegistryCoordinator    | [`0x8DE3Ee0dE880161Aa0CD8Bf9F8F6a7AfEeB9A44B`](https://etherscan.io/address/0x8DE3Ee0dE880161Aa0CD8Bf9F8F6a7AfEeB9A44B) |
+| BLSApkRegistry         | [`0xB58687fF303C8e92C28a484342755d3228081d45`](https://etherscan.io/address/0xB58687fF303C8e92C28a484342755d3228081d45) |
+| IndexRegistry          | [`0xc6A464e39d4fA5013D61295501c7cCd050d76612`](https://etherscan.io/address/0xc6A464e39d4fA5013D61295501c7cCd050d76612) |
+| OperatorStateRetriever | [`0xb3af70D5f72C04D1f490ff49e5aB189fA7122713`](https://etherscan.io/address/0xb3af70D5f72C04D1f490ff49e5aB189fA7122713) |
+| PauserRegistry         | [`0xeec585186c37c517030ba371deac5c17e728c135`](https://etherscan.io/address/0xeec585186c37c517030ba371deac5c17e728c135) |
+| StakeRegistry          | [`0x363b3604fE8c2323a98c00906115c8b87a512a12`](https://etherscan.io/address/0x363b3604fE8c2323a98c00906115c8b87a512a12) |
+| TaskManager            | [`0x940f62f75cbbbd723d37c9171dc681dfba653b49`](https://etherscan.io/address/0x940f62f75cbbbd723d37c9171dc681dfba653b49) |
+| ApConfig               | [`0x9c02dfc92eea988902a98919bf4f035e4aaefced`](https://etherscan.io/address/0x9c02dfc92eea988902a98919bf4f035e4aaefced) |

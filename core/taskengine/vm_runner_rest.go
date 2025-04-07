@@ -46,7 +46,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		NodeId:     stepID,
 		Log:        "",
 		OutputData: nil,
-		Success:    true,
+		Success:    true, // Start optimistically
 		Error:      "",
 		StartAt:    t0,
 	}
@@ -78,6 +78,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 
 	var err error
+	// The defer function serves as the single source of truth for setting Success: false
 	defer func() {
 		s.EndAt = time.Now().UnixMilli()
 		s.Success = err == nil
@@ -142,15 +143,25 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 
 	if err != nil {
-		s.Success = false
 		s.Error = err.Error()
 		return s, err
 	} else {
-		// Check if the response status code is not 2xx or 3xx, we consider it as an error exeuction
+		// Check HTTP status codes from the resty response
+		// - 2xx (200-299): Success
+		// - 3xx (300-399): Redirection (also considered successful)
+		// - 4xx (400-499): Client errors
+		// - 5xx (500-599): Server errors
+		// Any status code outside 2xx-3xx range is considered an error
+		// Status code 0 indicates a connection failure
+		if resp.StatusCode() == 0 {
+			err = fmt.Errorf("HTTP request failed: connection error or timeout")
+			s.Error = err.Error()
+			return s, err
+		}
 		if resp.StatusCode() < 200 || resp.StatusCode() >= 400 {
-			s.Success = false
-			s.Error = fmt.Sprintf("unexpected status code: %d", resp.StatusCode())
-			return s, fmt.Errorf("unexpected status code: %d", resp.StatusCode())
+			err = fmt.Errorf("unexpected HTTP status code: %d", resp.StatusCode())
+			s.Error = err.Error()
+			return s, err
 		}
 	}
 
