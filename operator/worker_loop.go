@@ -10,10 +10,12 @@ import (
 
 	"github.com/go-co-op/gocron/v2"
 
+	"github.com/AvaProtocol/ap-avs/core/backup"
 	"github.com/AvaProtocol/ap-avs/core/taskengine"
 	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
 	triggerengine "github.com/AvaProtocol/ap-avs/core/taskengine/trigger"
 	avspb "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/ap-avs/storage"
 	"github.com/AvaProtocol/ap-avs/version"
 )
 
@@ -33,6 +35,23 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	}
 	o.scheduler.Start()
 	o.scheduler.NewJob(gocron.DurationJob(time.Second*5), gocron.NewTask(o.PingServer))
+
+	if o.config.DbPath != "" {
+		db, err := storage.NewWithPath(o.config.DbPath)
+		if err != nil {
+			o.logger.Errorf("Failed to initialize database: %v", err)
+		} else {
+			if o.config.Backup.Enabled {
+				o.logger.Infof("Initializing backup service")
+				o.backupService = backup.NewService(o.logger, db, o.config.Backup.BackupDir)
+				if err := o.backupService.StartPeriodicBackup(time.Duration(o.config.Backup.IntervalMinutes) * time.Minute); err != nil {
+					o.logger.Errorf("Failed to start backup service: %v", err)
+				} else {
+					o.logger.Infof("Backup service started with interval %d minutes", o.config.Backup.IntervalMinutes)
+				}
+			}
+		}
+	}
 
 	macros.SetRpc(o.config.TargetChain.EthWsUrl)
 	taskengine.SetRpc(o.config.TargetChain.EthRpcUrl)

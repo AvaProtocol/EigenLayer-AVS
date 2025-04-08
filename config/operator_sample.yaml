@@ -32,6 +32,11 @@ enable_node_api: true
 
 db_path: /tmp/ap-avs-operator
 
+backup:
+  enabled: false
+  interval_minutes: 60
+  backup_dir: "./backup"
+
 # Destination chain where the task run, relace with your actualy target chain
 target_chain:
   eth_rpc_url: <sepolia-chain-rpc>

@@ -10,10 +10,12 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/AvaProtocol/ap-avs/core/backup"
 	"github.com/AvaProtocol/ap-avs/core/chainio"
 	"github.com/AvaProtocol/ap-avs/core/chainio/apconfig"
 	"github.com/AvaProtocol/ap-avs/core/chainio/signer"
 	"github.com/AvaProtocol/ap-avs/metrics"
+	"github.com/AvaProtocol/ap-avs/storage"
 	"github.com/Layr-Labs/eigensdk-go/metrics/collectors/economic"
 	rpccalls "github.com/Layr-Labs/eigensdk-go/metrics/collectors/rpc_calls"
 	"github.com/Layr-Labs/eigensdk-go/nodeapi"
@@ -74,6 +76,12 @@ type OperatorConfig struct {
 	EnableNodeApi                 bool   `yaml:"enable_node_api"`
 
 	DbPath string `yaml:"db_path"`
+
+	Backup struct {
+		Enabled         bool   `yaml:"enabled"`
+		IntervalMinutes int    `yaml:"interval_minutes"`
+		BackupDir       string `yaml:"backup_dir"`
+	} `yaml:"backup"`
 
 	PublicMetricsPort int32
 
@@ -153,6 +161,8 @@ type Operator struct {
 	eventTrigger *triggerengine.EventTrigger
 	blockTrigger *triggerengine.BlockTrigger
 	timeTrigger  *triggerengine.TimeTrigger
+	
+	backupService *backup.Service
 }
 
 func RunWithConfig(configPath string) {
