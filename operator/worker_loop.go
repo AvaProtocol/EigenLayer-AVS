@@ -14,7 +14,6 @@ import (
 	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
 	triggerengine "github.com/AvaProtocol/ap-avs/core/taskengine/trigger"
 	avspb "github.com/AvaProtocol/ap-avs/protobuf"
-	"github.com/AvaProtocol/ap-avs/storage"
 	"github.com/AvaProtocol/ap-avs/version"
 )
 
@@ -36,10 +35,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	o.scheduler.NewJob(gocron.DurationJob(time.Second*5), gocron.NewTask(o.PingServer))
 
 	if o.config.DbPath != "" {
-		db, err := storage.NewWithPath(o.config.DbPath)
-		if err != nil {
-			o.logger.Errorf("Failed to initialize database: %v", err)
-		}
+		o.logger.Infof("Operator database path: %s", o.config.DbPath)
 	}
 
 	macros.SetRpc(o.config.TargetChain.EthWsUrl)

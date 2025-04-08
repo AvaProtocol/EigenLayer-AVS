@@ -14,7 +14,6 @@ import (
 	"github.com/AvaProtocol/ap-avs/core/chainio/apconfig"
 	"github.com/AvaProtocol/ap-avs/core/chainio/signer"
 	"github.com/AvaProtocol/ap-avs/metrics"
-	"github.com/AvaProtocol/ap-avs/storage"
 	"github.com/Layr-Labs/eigensdk-go/metrics/collectors/economic"
 	rpccalls "github.com/Layr-Labs/eigensdk-go/metrics/collectors/rpc_calls"
 	"github.com/Layr-Labs/eigensdk-go/nodeapi"
