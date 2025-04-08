@@ -20,6 +20,7 @@ jobs:
           - pkg/graphql
           - pkg/byte4
           - pkg/erc4337/preset
+          - core/backup
 
     steps:
       - uses: actions/checkout@v4

@@ -234,10 +234,11 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 
 	agg.init()
 
-	agg.logger.Infof("Initialize Storagre")
+	agg.logger.Infof("Initialize Storage")
 	if err := agg.initDB(ctx); err != nil {
 		agg.logger.Fatalf("failed to initialize storage", "error", err)
 	}
+
 
 	agg.logger.Infof("Starting Task engine")
 	agg.startTaskEngine(ctx)
@@ -268,6 +269,7 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.status = shutdownStatus
 	agg.stopRepl()
 	agg.stopTaskEngine()
+	
 	agg.db.Close()
 
 	return nil

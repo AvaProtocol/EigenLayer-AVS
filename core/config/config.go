@@ -52,6 +52,8 @@ type Config struct {
 	// Account abstraction config
 	SmartWallet *SmartWalletConfig
 
+	BackupConfig BackupConfig
+
 	SocketPath  string
 	Environment sdklogging.LogLevel
 
@@ -70,6 +72,12 @@ type SmartWalletConfig struct {
 
 	ControllerPrivateKey *ecdsa.PrivateKey
 	PaymasterAddress     common.Address
+}
+
+type BackupConfig struct {
+	Enabled         bool   // Whether periodic backups are enabled
+	IntervalMinutes int    // Interval between backups in minutes
+	BackupDir       string // Directory to store backups
 }
 
 // These are read from configPath
@@ -96,6 +104,12 @@ type ConfigRaw struct {
 		ControllerPrivateKey string `yaml:"controller_private_key"`
 		PaymasterAddress     string `yaml:"paymaster_address"`
 	} `yaml:"smart_wallet"`
+
+	Backup struct {
+		Enabled         bool   `yaml:"enabled"`
+		IntervalMinutes int    `yaml:"interval_minutes"`
+		BackupDir       string `yaml:"backup_dir"`
+	} `yaml:"backup"`
 
 	SocketPath string `yaml:"socket_path"`
 
@@ -203,6 +217,12 @@ func NewConfig(configFilePath string) (*Config, error) {
 			FactoryAddress:       common.HexToAddress(configRaw.SmartWallet.FactoryAddress),
 			EntrypointAddress:    common.HexToAddress(configRaw.SmartWallet.EntrypointAddress),
 			ControllerPrivateKey: controllerPrivateKey,
+		},
+
+		BackupConfig: BackupConfig{
+			Enabled:         configRaw.Backup.Enabled,
+			IntervalMinutes: configRaw.Backup.IntervalMinutes,
+			BackupDir:       configRaw.Backup.BackupDir,
 		},
 
 		SocketPath:   configRaw.SocketPath,
