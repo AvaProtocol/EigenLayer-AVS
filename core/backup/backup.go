@@ -3,7 +3,6 @@ package backup
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
