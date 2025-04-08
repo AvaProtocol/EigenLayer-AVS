@@ -16,7 +16,6 @@ import (
 	"github.com/AvaProtocol/ap-avs/aggregator/types"
 	"github.com/AvaProtocol/ap-avs/core"
 	"github.com/AvaProtocol/ap-avs/core/apqueue"
-	"github.com/AvaProtocol/ap-avs/core/backup"
 	"github.com/AvaProtocol/ap-avs/core/chainio"
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
 	"github.com/AvaProtocol/ap-avs/core/config"
@@ -77,8 +76,6 @@ type Aggregator struct {
 
 	config *config.Config
 	db     storage.Storage
-
-	backupService *backup.Service
 
 	ethRpcClient *ethclient.Client
 	chainID      *big.Int
@@ -242,15 +239,6 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 		agg.logger.Fatalf("failed to initialize storage", "error", err)
 	}
 
-	if agg.config.BackupConfig.Enabled {
-		agg.logger.Infof("Initializing backup service")
-		agg.backupService = backup.NewService(agg.logger, agg.db, agg.config.BackupConfig.BackupDir)
-		if err := agg.backupService.StartPeriodicBackup(time.Duration(agg.config.BackupConfig.IntervalMinutes) * time.Minute); err != nil {
-			agg.logger.Errorf("Failed to start backup service: %v", err)
-		} else {
-			agg.logger.Infof("Backup service started with interval %d minutes", agg.config.BackupConfig.IntervalMinutes)
-		}
-	}
 
 	agg.logger.Infof("Starting Task engine")
 	agg.startTaskEngine(ctx)
@@ -281,11 +269,6 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.status = shutdownStatus
 	agg.stopRepl()
 	agg.stopTaskEngine()
-	
-	if agg.backupService != nil {
-		agg.logger.Infof("Stopping backup service")
-		agg.backupService.StopPeriodicBackup()
-	}
 	
 	agg.db.Close()
 

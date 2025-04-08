@@ -10,7 +10,6 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/AvaProtocol/ap-avs/core/backup"
 	"github.com/AvaProtocol/ap-avs/core/chainio"
 	"github.com/AvaProtocol/ap-avs/core/chainio/apconfig"
 	"github.com/AvaProtocol/ap-avs/core/chainio/signer"
@@ -161,8 +160,6 @@ type Operator struct {
 	eventTrigger *triggerengine.EventTrigger
 	blockTrigger *triggerengine.BlockTrigger
 	timeTrigger  *triggerengine.TimeTrigger
-	
-	backupService *backup.Service
 }
 
 func RunWithConfig(configPath string) {
