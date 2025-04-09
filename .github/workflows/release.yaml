@@ -117,7 +117,7 @@ jobs:
         run: |
           go build \
              -v \
-            -ldflags "-X github.com/AvaProtocol/ap-avs/version.semver=${{ inputs.tag || github.ref_name }}" \
+            -ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.semver=${{ inputs.tag || github.ref_name }}" \
             -o "$BINARY_NAME"
       - name: Release Notes
         run:

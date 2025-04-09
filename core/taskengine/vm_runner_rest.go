@@ -11,7 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 type RestProcessor struct {

@@ -5,7 +5,7 @@ import (
 	"slices"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/golang-jwt/jwt/v5"
+	jwt "github.com/golang-jwt/jwt/v5"
 )
 
 // GetUserFromKeyOrSignature attempts to verify that the payload is a valid JWT

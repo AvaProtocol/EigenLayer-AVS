@@ -10,7 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/prometheus/client_golang/prometheus"
-	"gopkg.in/yaml.v2"
+	yaml "gopkg.in/yaml.v2"
 
 	"github.com/Layr-Labs/eigensdk-go/chainio/clients/eth"
 	"github.com/Layr-Labs/eigensdk-go/chainio/clients/wallet"

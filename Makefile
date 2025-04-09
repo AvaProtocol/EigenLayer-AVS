@@ -112,7 +112,7 @@ dev-build:
 	mkdir out || true
 	go build \
 		-o ./out/ap \
-    	-ldflags "-X github.com/AvaProtocol/ap-avs/version.revision=$(shell  git rev-parse HEAD)"
+    	-ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.revision=$(shell git rev-parse HEAD)"
 
 ## dev-agg: run aggregator locally with dev build
 dev-agg:

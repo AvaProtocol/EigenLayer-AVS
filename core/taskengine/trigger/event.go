@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/dop251/goja"
 	"github.com/samber/lo"
@@ -17,7 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 var (

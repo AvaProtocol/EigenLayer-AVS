@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AvaProtocol/ap-avs/core/testutil"
-	"github.com/AvaProtocol/ap-avs/model"
-	"github.com/AvaProtocol/ap-avs/pkg/gow"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 func TestRunTaskWithMultipleConditions(t *testing.T) {

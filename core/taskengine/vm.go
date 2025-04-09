@@ -16,12 +16,12 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/AvaProtocol/ap-avs/core/config"
-	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
-	"github.com/AvaProtocol/ap-avs/model"
-	"github.com/AvaProtocol/ap-avs/pkg/erc20"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 type VMState string

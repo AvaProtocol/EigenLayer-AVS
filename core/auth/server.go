@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AvaProtocol/ap-avs/core/chainio/signer"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/signer"
 )
 
 // VerifyOperator checks and confirm that the auth header is indeed signed by

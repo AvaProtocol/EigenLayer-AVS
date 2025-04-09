@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/AvaProtocol/ap-avs/aggregator"
+	"github.com/AvaProtocol/EigenLayer-AVS/aggregator"
 
 	"github.com/spf13/cobra"
 )

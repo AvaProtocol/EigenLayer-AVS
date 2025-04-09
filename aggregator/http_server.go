@@ -8,7 +8,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/AvaProtocol/ap-avs/version"
+	"github.com/AvaProtocol/EigenLayer-AVS/version"
 	"github.com/labstack/echo/v4"
 )
 

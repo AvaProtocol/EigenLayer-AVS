@@ -13,22 +13,22 @@ import (
 	"github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/AvaProtocol/ap-avs/aggregator/types"
-	"github.com/AvaProtocol/ap-avs/core"
-	"github.com/AvaProtocol/ap-avs/core/apqueue"
-	"github.com/AvaProtocol/ap-avs/core/chainio"
-	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
-	"github.com/AvaProtocol/ap-avs/core/config"
-	"github.com/AvaProtocol/ap-avs/core/taskengine"
-	"github.com/AvaProtocol/ap-avs/version"
+	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/types"
+	"github.com/AvaProtocol/EigenLayer-AVS/core"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/version"
 	sdkclients "github.com/Layr-Labs/eigensdk-go/chainio/clients"
 	blsagg "github.com/Layr-Labs/eigensdk-go/services/bls_aggregation"
 	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
 	"github.com/allegro/bigcache/v3"
 
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 
-	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
+	cstaskmanager "github.com/AvaProtocol/EigenLayer-AVS/contracts/bindings/AutomationTaskManager"
 )
 
 const (
