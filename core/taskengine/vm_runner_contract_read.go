@@ -11,9 +11,9 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/AvaProtocol/ap-avs/pkg/byte4"
-	"github.com/AvaProtocol/ap-avs/pkg/gow"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 type ContractReadProcessor struct {

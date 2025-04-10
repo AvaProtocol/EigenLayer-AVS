@@ -10,10 +10,10 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/AvaProtocol/ap-avs/core/chainio"
-	"github.com/AvaProtocol/ap-avs/core/chainio/apconfig"
-	"github.com/AvaProtocol/ap-avs/core/chainio/signer"
-	"github.com/AvaProtocol/ap-avs/metrics"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/apconfig"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/signer"
+	"github.com/AvaProtocol/EigenLayer-AVS/metrics"
 	"github.com/Layr-Labs/eigensdk-go/metrics/collectors/economic"
 	rpccalls "github.com/Layr-Labs/eigensdk-go/metrics/collectors/rpc_calls"
 	"github.com/Layr-Labs/eigensdk-go/nodeapi"
@@ -37,8 +37,8 @@ import (
 	sdkmetrics "github.com/Layr-Labs/eigensdk-go/metrics"
 	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
 
-	//"github.com/AvaProtocol/ap-avs/aggregator"
-	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
+	//"github.com/AvaProtocol/EigenLayer-AVS/aggregator"
+	cstaskmanager "github.com/AvaProtocol/EigenLayer-AVS/contracts/bindings/AutomationTaskManager"
 
 	// insecure for local dev
 	blssignerV1 "github.com/Layr-Labs/cerberus-api/pkg/api/v1"
@@ -46,14 +46,14 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/AvaProtocol/ap-avs/core/auth"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
-	"github.com/AvaProtocol/ap-avs/version"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/version"
 
-	"github.com/AvaProtocol/ap-avs/core/config"
-	triggerengine "github.com/AvaProtocol/ap-avs/core/taskengine/trigger"
-	"github.com/AvaProtocol/ap-avs/pkg/ipfetcher"
-	"github.com/AvaProtocol/ap-avs/pkg/timekeeper"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	triggerengine "github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/ipfetcher"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/timekeeper"
 )
 
 const AVS_NAME = "ap-avs"

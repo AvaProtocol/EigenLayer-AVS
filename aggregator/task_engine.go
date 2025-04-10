@@ -3,9 +3,9 @@ package aggregator
 import (
 	"context"
 
-	"github.com/AvaProtocol/ap-avs/core/apqueue"
-	"github.com/AvaProtocol/ap-avs/core/taskengine"
-	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 )
 
 func (agg *Aggregator) stopTaskEngine() {

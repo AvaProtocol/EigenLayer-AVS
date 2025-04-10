@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AvaProtocol/ap-avs/pkg/graphql"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/graphql"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
