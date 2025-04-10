@@ -1,46 +1,93 @@
 # Ava Protocol Contracts
 
-There are two kinds of contracts in the Ava Protocol system:
+Ava Protocol implements ERC4337 (Account Abstraction) for smart wallet operations. The system consists of several key contracts:
 
-1. **EigenLayer Contract**  
-2. **Smart Account Contract** (Our account abstraction contract)
+1. **EigenLayer Contract** - For AVS operations
+2. **Smart Account Contract** - Our account abstraction implementation
 
-## Contract List
+## Contract Architecture
 
 We use a consistent contract address across four networks:
 
-- **Base Sepolia**  
-- **Sepolia**  
-- **Base**  
-- **Ethereum**  
+- **Base Sepolia** (Testnet)
+- **Sepolia** (Testnet)
+- **Base** (Mainnet)
+- **Ethereum** (Mainnet)
 
-### Contracts Table
+### Core Contracts
 
-| Contract | Address | Base Sepolia | Base | Sepolia | Ethereum |
-|----------|----------------------------------|------------------------------------------------------------------|-------------------------------------------------------------|-------------------------------------------------------------|------------------------------------------------|
-| **Config (AAConfig)** | `0x5327443cF04e6E8c3B86BDBbfaE16fcB965b7564` | [View](https://sepolia.basescan.org/address/0x5327443cF04e6E8c3B86BDBbfaE16fcB965b7564) | [View](https://basescan.org/address/0x5327443cF04e6E8c3B86BDBbfaE16fcB965b7564) | [View](https://sepolia.etherscan.io/address/0x5327443cF04e6E8c3B86BDBbfaE16fcB965b7564) | [View](https://etherscan.io/address/0x5327443cF04e6E8c3B86BDBbfaE16fcB965b7564) |
-| **Wallet Implementation** | `0x552D410C9c4231841413F6061baaCB5c8fBFB0DE` | [View](https://sepolia.basescan.org/address/0x552D410C9c4231841413F6061baaCB5c8fBFB0DE) | [View](https://basescan.org/address/0x552D410C9c4231841413F6061baaCB5c8fBFB0DE) | [View](https://sepolia.etherscan.io/address/0x552D410C9c4231841413F6061baaCB5c8fBFB0DE) | [View](https://etherscan.io/address/0x552D410C9c4231841413F6061baaCB5c8fBFB0DE) |
-| **Factory Proxy** | `0xB99BC2E399e06CddCF5E725c0ea341E8f0322834` | [View](https://sepolia.basescan.org/address/0xB99BC2E399e06CddCF5E725c0ea341E8f0322834) | [View](https://basescan.org/address/0xB99BC2E399e06CddCF5E725c0ea341E8f0322834) | [View](https://sepolia.etherscan.io/address/0xB99BC2E399e06CddCF5E725c0ea341E8f0322834) | [View](https://etherscan.io/address/0xB99BC2E399e06CddCF5E725c0ea341E8f0322834) |
+| Contract                   | Address                                      | Base Sepolia                                                                            | Base                                                                            | Sepolia                                                                                 | Ethereum                                                                        |
+| -------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| **Config (AAConfig)**      | `0x5327443cF04e6E8c3B86BDBbfaE16fcB965b7564` | [View](https://sepolia.basescan.org/address/0x5327443cF04e6E8c3B86BDBbfaE16fcB965b7564) | [View](https://basescan.org/address/0x5327443cF04e6E8c3B86BDBbfaE16fcB965b7564) | [View](https://sepolia.etherscan.io/address/0x5327443cF04e6E8c3B86BDBbfaE16fcB965b7564) | [View](https://etherscan.io/address/0x5327443cF04e6E8c3B86BDBbfaE16fcB965b7564) |
+| **Wallet Implementation**  | `0x552D410C9c4231841413F6061baaCB5c8fBFB0DE` | [View](https://sepolia.basescan.org/address/0x552D410C9c4231841413F6061baaCB5c8fBFB0DE) | [View](https://basescan.org/address/0x552D410C9c4231841413F6061baaCB5c8fBFB0DE) | [View](https://sepolia.etherscan.io/address/0x552D410C9c4231841413F6061baaCB5c8fBFB0DE) | [View](https://etherscan.io/address/0x552D410C9c4231841413F6061baaCB5c8fBFB0DE) |
+| **Factory Proxy**          | `0xB99BC2E399e06CddCF5E725c0ea341E8f0322834` | [View](https://sepolia.basescan.org/address/0xB99BC2E399e06CddCF5E725c0ea341E8f0322834) | [View](https://basescan.org/address/0xB99BC2E399e06CddCF5E725c0ea341E8f0322834) | [View](https://sepolia.etherscan.io/address/0xB99BC2E399e06CddCF5E725c0ea341E8f0322834) | [View](https://etherscan.io/address/0xB99BC2E399e06CddCF5E725c0ea341E8f0322834) |
 | **Factory Implementation** | `0x5692D03FC5922b806F382E4F1A620479A14c96c2` | [View](https://sepolia.basescan.org/address/0x5692D03FC5922b806F382E4F1A620479A14c96c2) | [View](https://basescan.org/address/0x5692D03FC5922b806F382E4F1A620479A14c96c2) | [View](https://sepolia.etherscan.io/address/0x5692D03FC5922b806F382E4F1A620479A14c96c2) | [View](https://etherscan.io/address/0x5692D03FC5922b806F382E4F1A620479A14c96c2) |
-| **Paymaster Contract** | `0xB985af5f96EF2722DC99aEBA573520903B86505e` | [View](https://sepolia.basescan.org/address/0xB985af5f96EF2722DC99aEBA573520903B86505e) | [View](https://basescan.org/address/0xB985af5f96EF2722DC99aEBA573520903B86505e) | [View](https://sepolia.etherscan.io/address/0xB985af5f96EF2722DC99aEBA573520903B86505e) | [View](https://etherscan.io/address/0xB985af5f96EF2722DC99aEBA573520903B86505e) |
-### Pre-fund
+| **Paymaster Contract**     | `0xB985af5f96EF2722DC99aEBA573520903B86505e` | [View](https://sepolia.basescan.org/address/0xB985af5f96EF2722DC99aEBA573520903B86505e) | [View](https://basescan.org/address/0xB985af5f96EF2722DC99aEBA573520903B86505e) | [View](https://sepolia.etherscan.io/address/0xB985af5f96EF2722DC99aEBA573520903B86505e) | [View](https://etherscan.io/address/0xB985af5f96EF2722DC99aEBA573520903B86505e) |
 
-The first transaction require siginficant higher gas to pay for contract deployment. Below is the sample pre-fund requirement to the smart contract. The smart contract address of wallet can compute ahead of time
+### Bundler Addresses
 
-| Network      | Prefund |
-|--------------|---------|
-| Ethereum     | 0.4     |
-| Sepolia      | 0.4     |
-| Base         | 0.001   |
-| Base Sepolia | 0.001   |
+| Network      | Address                                      | Type | Notes                            |
+| ------------ | -------------------------------------------- | ---- | -------------------------------- |
+| Mainnet      | `0x6A99324303928aF456aA21f3C88dc58E812D9B40` | EOA  | Mainnet bundler                  |
+| Base Sepolia | `0xE164dd09e720640F6695cB6cED0308065ceFECd9` | EOA  | Testnet bundler for Base Sepolia |
 
-### Sample Txs
+## Fee Structure and Pre-funding
 
-This is a few sample tx that also deploy the smart wallet together with the gas cost to get an idea of pre-fund.
+### Understanding Pre-funding
 
-| Network      | Transaction Link                                                                 | Suggest Prefund(ETH) |
-|--------------|----------------------------------------------------------------------------------|----------|
-| Mainnet      | TBD                                                                              | 0.001    |
-| Sepolia      | [View Transaction](https://sepolia.etherscan.io/tx/0xee325c48e6a6a35b91642b2483acd860255283aded8cb949a9594a8ab19c7f69) | 0.4   |
-| Base         | TBD                                                                              | 0.001    |
-| Base Sepolia | [View Transaction](https://sepolia.basescan.org/tx/0x946e7b6e48fd1421d17263e9b89e329e264cb37de511077844e925f414be8851) | 0.00005    |
+Pre-funding refers to depositing ETH to your smart wallet address to cover transaction fees. This is necessary because:
+
+1. Initial contract deployment requires higher gas costs than normal operations
+2. The smart wallet needs ETH to pay for gas when executing tasks
+3. The Factory Proxy contract deploys new smart wallets, which requires gas
+
+### Fee Payment Flow
+
+The fee payment process follows ERC4337 architecture:
+
+1. **Bundler** (EOA addresses listed above):
+
+   - Sends transactions to the chain
+   - Initially spends its own ETH for gas
+   - Gets refunded through the EntryPoint contract
+   - May charge a small fee (configurable)
+
+2. **EntryPoint Contract**:
+
+   - Coordinates the execution flow
+   - Handles fee refunds to the bundler
+   - Gets funds from either:
+     - Smart wallet (user pays)
+     - Paymaster (sponsored transactions)
+
+3. **Paymaster**:
+   - Cannot hold ETH directly
+   - Requires deposits through the deposit function
+   - Immediately transfers funds to EntryPoint
+   - Used for sponsored transactions
+
+### Pre-fund Requirements
+
+| Network      | Pre-fund (ETH) | Sample Transaction                                                                                         |
+| ------------ | -------------- | ---------------------------------------------------------------------------------------------------------- |
+| Ethereum     | 0.4            | TBD                                                                                                        |
+| Sepolia      | 0.4            | [View](https://sepolia.etherscan.io/tx/0xee325c48e6a6a35b91642b2483acd860255283aded8cb949a9594a8ab19c7f69) |
+| Base         | 0.001          | TBD                                                                                                        |
+| Base Sepolia | 0.00005        | [View](https://sepolia.basescan.org/tx/0x946e7b6e48fd1421d17263e9b89e329e264cb37de511077844e925f414be8851) |
+
+### Sponsored Transactions
+
+For tasks where we cover the fee:
+
+1. User's smart wallet doesn't need to hold ETH
+2. Paymaster must have sufficient funds
+3. Funds must be deposited to Paymaster through the deposit function
+4. Paymaster immediately transfers funds to EntryPoint
+
+### Important Notes
+
+- The Factory Proxy is responsible for deploying new smart wallets
+- Smart wallets are dynamically generated with new addresses
+- The bundler is an EOA (Externally Owned Account) that can send transactions. Its address on mainnet is `0x6A99324303928aF456aA21f3C88dc58E812D9B40`
+- We use [Voltaire](https://github.com/candidelabs/voltaire) as our bundler implementation
+- The execution flow follows [ERC4337](https://eips.ethereum.org/EIPS/eip-4337) specification
