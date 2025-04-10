@@ -103,9 +103,6 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 		return
 	}
 
-	// Print logs for debugging
-	t.Logf("Logs: %+v", outputData.TxReceipt.Logs)
-
 	if len(outputData.TxReceipt.Hash) != 66 {
 		t.Errorf("Missing Tx Hash in the output data")
 	}

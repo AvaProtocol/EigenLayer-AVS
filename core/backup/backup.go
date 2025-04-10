@@ -79,7 +79,7 @@ func (s *Service) backupLoop() {
 func (s *Service) PerformBackup() (string, error) {
 	timestamp := time.Now().Format("06-01-02-15-04")
 	backupPath := filepath.Join(s.backupDir, timestamp)
-	
+
 	if err := os.MkdirAll(backupPath, 0755); err != nil {
 		return "", fmt.Errorf("failed to create backup timestamp directory: %v", err)
 	}

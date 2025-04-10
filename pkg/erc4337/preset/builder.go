@@ -14,10 +14,10 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
-	"github.com/AvaProtocol/ap-avs/core/chainio/aa/paymaster"
-	"github.com/AvaProtocol/ap-avs/core/chainio/signer"
-	"github.com/AvaProtocol/ap-avs/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa/paymaster"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/signer"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"

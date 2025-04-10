@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
-	
+
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"google.golang.org/protobuf/encoding/protojson" // Correct import for protojson
 )
@@ -49,11 +49,11 @@ func TestChangeEpochToMs(t *testing.T) {
 
 	// Create Sample Task Data (using avsproto.Task directly as migration handles it)
 	sampleTask := &avsproto.Task{
-		Id:        taskID,
-		StartAt:   startSeconds,   // Seconds
-		ExpiredAt: expiredSeconds, // Seconds
+		Id:          taskID,
+		StartAt:     startSeconds,     // Seconds
+		ExpiredAt:   expiredSeconds,   // Seconds
 		CompletedAt: completedSeconds, // Seconds
-		LastRanAt: lastRanSeconds,   // Seconds
+		LastRanAt:   lastRanSeconds,   // Seconds
 		// Other fields can be default/empty for this test
 	}
 
@@ -79,20 +79,19 @@ func TestChangeEpochToMs(t *testing.T) {
 		},
 		// Other fields can be default/empty
 	}
-    // Add another execution to test TimeOutput
-    execID2 := "exec-def"
-    sampleExec2 := &avsproto.Execution{
-        Id:      execID2,
-        StartAt: execStartSeconds, // Seconds
-        EndAt:   execEndSeconds,   // Seconds
-        OutputData: &avsproto.Execution_Time{
-            Time: &avsproto.Execution_TimeOutput{
-                Epoch: uint64(epochSeconds), // Seconds
-            },
-        },
-        // Other fields can be default/empty
-    }
-
+	// Add another execution to test TimeOutput
+	execID2 := "exec-def"
+	sampleExec2 := &avsproto.Execution{
+		Id:      execID2,
+		StartAt: execStartSeconds, // Seconds
+		EndAt:   execEndSeconds,   // Seconds
+		OutputData: &avsproto.Execution_Time{
+			Time: &avsproto.Execution_TimeOutput{
+				Epoch: uint64(epochSeconds), // Seconds
+			},
+		},
+		// Other fields can be default/empty
+	}
 
 	// Serialize data using protojson (matching migration)
 	taskBytes, err := protojson.Marshal(sampleTask)
@@ -103,21 +102,21 @@ func TestChangeEpochToMs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to marshal sample execution: %v", err)
 	}
-    execBytes2, err := protojson.Marshal(sampleExec2)
-    if err != nil {
-        t.Fatalf("Failed to marshal sample execution 2: %v", err)
-    }
+	execBytes2, err := protojson.Marshal(sampleExec2)
+	if err != nil {
+		t.Fatalf("Failed to marshal sample execution 2: %v", err)
+	}
 
 	// Store data in DB using correct keys
 	taskKey := fmt.Sprintf("t:%s", taskID)
 	execKey := fmt.Sprintf("history:%s:%s", taskID, execID)
-    execKey2 := fmt.Sprintf("history:%s:%s", taskID, execID2)
+	execKey2 := fmt.Sprintf("history:%s:%s", taskID, execID2)
 
 	// Use BatchWrite as seen in the migration code for setting multiple keys
 	updates := map[string][]byte{
 		taskKey:  taskBytes,
 		execKey:  execBytes,
-        execKey2: execBytes2,
+		execKey2: execBytes2,
 	}
 	if err := db.BatchWrite(updates); err != nil {
 		t.Fatalf("Failed to write initial data to db: %v", err)
@@ -197,7 +196,7 @@ func TestChangeEpochToMs(t *testing.T) {
 		t.Errorf("Expected TransferLog output data, but got nil or different type")
 	}
 
-    // Verify Execution Data 2 (TimeOutput) using GetKey
+	// Verify Execution Data 2 (TimeOutput) using GetKey
 	retrievedExecBytes2, err := db.GetKey([]byte(execKey2))
 	if err != nil {
 		t.Fatalf("Failed to retrieve execution data 2 after migration: %v", err)
@@ -207,12 +206,12 @@ func TestChangeEpochToMs(t *testing.T) {
 		t.Fatalf("Failed to unmarshal retrieved execution data 2: %v", err)
 	}
 
-    // Verify Execution Output Data (TimeOutput)
-    if timeOutput := retrievedExec2.GetTime(); timeOutput != nil {
-        if timeOutput.Epoch != uint64(expectedEpochMs) {
+	// Verify Execution Output Data (TimeOutput)
+	if timeOutput := retrievedExec2.GetTime(); timeOutput != nil {
+		if timeOutput.Epoch != uint64(expectedEpochMs) {
 			t.Errorf("TimeOutput Epoch incorrect: got %d, want %d", timeOutput.Epoch, expectedEpochMs)
 		}
-    } else {
-        t.Errorf("Expected Time output data, but got nil or different type")
-    }
+	} else {
+		t.Errorf("Expected Time output data, but got nil or different type")
+	}
 }

@@ -293,12 +293,12 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 				}
 
 				v.parsedTriggerData.TransferLog = &avsproto.Execution_TransferLogOutput{
-					TokenName:        tokenMetadata.Name,
-					TokenSymbol:      tokenMetadata.Symbol,
-					TokenDecimals:    uint32(tokenMetadata.Decimals),
-					TransactionHash:  event.TxHash.Hex(),
-					Address:          event.Address.Hex(),
-					BlockNumber:      event.BlockNumber,
+					TokenName:       tokenMetadata.Name,
+					TokenSymbol:     tokenMetadata.Symbol,
+					TokenDecimals:   uint32(tokenMetadata.Decimals),
+					TransactionHash: event.TxHash.Hex(),
+					Address:         event.Address.Hex(),
+					BlockNumber:     event.BlockNumber,
 					// in Ethereum, timestamp is in seconds, but in our app we use milliseconds, so we need to convert it
 					// https://docs.soliditylang.org/en/latest/units-and-global-variables.html#block-and-transaction-properties
 					// This is requested in ticket https://github.com/AvaProtocol/EigenLayer-AVS/issues/191 and implemented in https://github.com/AvaProtocol/EigenLayer-AVS/pull/192/files

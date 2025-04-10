@@ -10,6 +10,48 @@ on:
   workflow_dispatch:
 
 jobs:
+  format-and-commit:
+    runs-on: ubuntu-latest
+    # Grant permissions for the built-in GITHUB_TOKEN to create a commit and push.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # We need to fetch the history to allow pushing, and potentially check diffs.
+          # Setting persist-credentials to true isn't strictly necessary with actions/checkout@v4+
+          # when using the default GITHUB_TOKEN, but it doesn't hurt.
+          fetch-depth: 0 # Fetch all history for comparison and commit user info
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24' # <--- CHANGE THIS to your project's Go version
+
+      - name: Run gofmt
+        run: gofmt -w .
+
+      - name: Commit changes
+        run: |
+          # Configure Git using the GITHUB_ACTOR pattern or a generic bot name
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+          # Check if there are any changes staged/unstaged
+          # git diff --quiet exits with 1 if there are changes, 0 if not.
+          if ! git diff --quiet; then
+            echo "Detected changes, committing..."
+            git add . # Stage all changes, including new files if any (though gofmt shouldn't create new files)
+            # Alternative: git add -u # Only stage modified/deleted tracked files
+            git commit -m "style: Automated gofmt" -m "Formatted Go code using gofmt."
+            echo "Pushing changes..."
+            git push
+          else
+            echo "No formatting changes detected."
+          fi
+        shell: bash # Explicitly use bash
+
   publish-dev-build:
     name: Publish dev build docker image to dockerhub
     runs-on: 'ubuntu-latest'

@@ -3,8 +3,8 @@ package migrator
 import (
 	"time"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/backup"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 import (
@@ -40,13 +40,11 @@ func NewMigrator(db storage.Storage, backup *backup.Service, migrations []Migrat
 	}
 }
 
-
-
 // Register adds a new migration to the list
 func (m *Migrator) Register(name string, fn MigrationFunc) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.migrations = append(m.migrations, Migration{
 		Name:     name,
 		Function: fn,
@@ -57,7 +55,7 @@ func (m *Migrator) Register(name string, fn MigrationFunc) {
 func (m *Migrator) Run() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Check if we have any migrations to run
 	hasPendingMigrations := false
 	for _, migration := range m.migrations {
@@ -68,7 +66,7 @@ func (m *Migrator) Run() error {
 			break
 		}
 	}
-	
+
 	// If we have migrations to run, take a backup first
 	if hasPendingMigrations {
 		log.Printf("Pending migrations found, creating database backup before proceeding")
@@ -78,7 +76,6 @@ func (m *Migrator) Run() error {
 			log.Printf("Database backup created at %s", backupFile)
 		}
 	}
-	
 
 	for _, migration := range m.migrations {
 		// Check if migration has already been run
@@ -88,7 +85,7 @@ func (m *Migrator) Run() error {
 			log.Printf("Migration %s already applied, skipping", migration.Name)
 			continue
 		}
-		
+
 		// Run the migration
 		log.Printf("Running migration: %s", migration.Name)
 		recordsUpdated, err := migration.Function(m.db)
@@ -97,12 +94,12 @@ func (m *Migrator) Run() error {
 		} else {
 			log.Printf("Migration %s completed successfully. %d records updated.", migration.Name, recordsUpdated)
 		}
-		
+
 		// Mark migration as complete in the database
 		if err := m.db.Set([]byte(key), []byte(fmt.Sprintf("records=%d,ts=%d", recordsUpdated, time.Now().UnixMilli()))); err != nil {
 			return fmt.Errorf("failed to mark migration as complete in database: %w", err)
 		}
 	}
-	
+
 	return nil
 }

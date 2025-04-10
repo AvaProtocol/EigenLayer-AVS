@@ -4,9 +4,9 @@ import (
 	//"strconv"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
-	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"	
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 func ChangeEpochToMs(db storage.Storage) (int, error) {
@@ -43,7 +43,7 @@ func ChangeEpochToMs(db storage.Storage) (int, error) {
 		if err := task.FromStorageData(taskRawByte); err != nil {
 			continue
 		}
-		
+
 		if task.Task.StartAt > 0 && task.Task.StartAt < timestampThreshold {
 			// Convert the timestamp to milliseconds
 			task.Task.StartAt = task.Task.StartAt * 1000
@@ -74,7 +74,7 @@ func ChangeEpochToMs(db storage.Storage) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	for _, key := range historyExecutionKeys {
 		executionRawByte, err := db.GetKey([]byte(key))
 		if err != nil {
@@ -87,17 +87,17 @@ func ChangeEpochToMs(db storage.Storage) (int, error) {
 			return 0, err
 		}
 
-		// Convert the timestamp to milliseconds for the execution 
+		// Convert the timestamp to milliseconds for the execution
 		if exec.StartAt > 0 && exec.StartAt < timestampThreshold {
 			exec.StartAt = exec.StartAt * 1000
 		}
-		if exec.EndAt > 0 && exec.EndAt < timestampThreshold {	
+		if exec.EndAt > 0 && exec.EndAt < timestampThreshold {
 			// Convert the timestamp to milliseconds
 			exec.EndAt = exec.EndAt * 1000
 		}
 
 		// Convert start/end of each step to milliseconds
-		for i, step := range exec.Steps {			
+		for i, step := range exec.Steps {
 			if step.StartAt > 0 && step.StartAt < timestampThreshold {
 				// Convert the timestamp to milliseconds
 				exec.Steps[i].StartAt = step.StartAt * 1000
@@ -129,6 +129,6 @@ func ChangeEpochToMs(db storage.Storage) (int, error) {
 	if err := db.BatchWrite(updates); err != nil {
 		return 0, err
 	}
-	
+
 	return totalUpdated, nil
 }

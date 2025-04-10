@@ -18,7 +18,6 @@ import (
 	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
 	"github.com/allegro/bigcache/v3"
 
-	
 	cstaskmanager "github.com/AvaProtocol/EigenLayer-AVS/contracts/bindings/AutomationTaskManager"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -31,7 +30,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
-	
+
 	"github.com/AvaProtocol/EigenLayer-AVS/core/backup"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/migrator"
 	"github.com/AvaProtocol/EigenLayer-AVS/migrations"
@@ -100,7 +99,7 @@ type Aggregator struct {
 
 	cache *bigcache.BigCache
 
-	backup *backup.Service
+	backup   *backup.Service
 	migrator *migrator.Migrator
 }
 
@@ -256,7 +255,7 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 		agg.logger.Fatalf("failed to initialize storage", "error", err)
 	}
 
-	agg.migrate()	
+	agg.migrate()
 
 	agg.logger.Infof("Starting Task engine")
 	agg.startTaskEngine(ctx)
@@ -287,7 +286,7 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.status = shutdownStatus
 	agg.stopRepl()
 	agg.stopTaskEngine()
-	
+
 	agg.db.Close()
 
 	return nil

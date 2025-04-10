@@ -152,32 +152,32 @@ func handleConnection(agg *Aggregator, conn net.Conn) {
 		case "trigger":
 			fmt.Fprintln(conn, "about to trigger on server")
 			//agg.engine.TriggerWith
-			
+
 		case "backup":
 			if len(parts) == 2 {
 				backupDir := parts[1]
 				fmt.Fprintf(conn, "Starting backup to directory: %s\n", backupDir)
-				
+
 				timestamp := fmt.Sprintf("%s", time.Now().Format("06-01-02-15-04"))
 				backupPath := filepath.Join(backupDir, timestamp)
-				
+
 				if err := os.MkdirAll(backupPath, 0755); err != nil {
 					fmt.Fprintf(conn, "Failed to create backup directory: %v\n", err)
 					break
 				}
-				
+
 				backupFile := filepath.Join(backupPath, "badger.backup")
 				f, err := os.Create(backupFile)
 				if err != nil {
 					fmt.Fprintf(conn, "Failed to create backup file: %v\n", err)
 					break
 				}
-				
+
 				fmt.Fprintf(conn, "Running backup to %s\n", backupFile)
 				since := uint64(0) // Full backup
 				_, err = agg.db.Backup(context.Background(), f, since)
 				f.Close()
-				
+
 				if err != nil {
 					fmt.Fprintf(conn, "Backup failed: %v\n", err)
 				} else {
