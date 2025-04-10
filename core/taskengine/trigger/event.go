@@ -242,6 +242,9 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 		triggerVarName := check.TaskMetadata.GetTrigger().GetName()
 
 		jsvm := goja.New()
+		
+		macros.ConfigureGojaRuntime(jsvm)
+		
 		envs := macros.GetEnvs(map[string]interface{}{})
 		for k, v := range envs {
 			jsvm.Set(k, v)

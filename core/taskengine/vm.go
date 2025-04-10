@@ -615,6 +615,8 @@ func (v *VM) preprocessText(text string) string {
 
 	// Initialize goja runtime
 	jsvm := goja.New()
+	
+	macros.ConfigureGojaRuntime(jsvm)
 
 	for key, value := range v.vars {
 		jsvm.Set(key, value)
