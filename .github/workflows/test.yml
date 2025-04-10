@@ -21,6 +21,8 @@ jobs:
           - pkg/byte4
           - pkg/erc4337/preset
           - core/backup
+          - core/migrations
+          - migrations
 
     steps:
       - uses: actions/checkout@v4
