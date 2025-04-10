@@ -300,7 +300,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	task, err := model.NewTaskFromProtobuf(user, taskPayload)
 
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 
 	updates := map[string][]byte{}
@@ -609,7 +609,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 	data, err := json.Marshal(queueTaskData)
 	if err != nil {
 		n.logger.Error("error serialize trigger to json", err)
-		return nil, status.Errorf(codes.InvalidArgument, codes.InvalidArgument.String())
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 
 	jid, err := n.queue.Enqueue(JobTypeExecuteTask, payload.TaskId, data)
