@@ -13,7 +13,7 @@ import (
 
 	// "github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	// "github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
-
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -42,6 +42,14 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 		ContractAddress: baseSepoliaUsdcAddress.Hex(),
 		CallData:        "0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000",
 	}
+
+	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
+
+	if err != nil {
+		t.Fatalf("error connectiong to websocket: %v", err)
+	}
+	defer client.Close()
+
 
 	for i, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,6 +90,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 				CommonProcessor: &CommonProcessor{
 					vm: vm,
 				},
+				client: client,
 				owner:             owner,
 				smartWalletConfig: smartWalletConfig,
 			}
@@ -90,6 +99,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to execute step: %v", err)
 			}
+			fmt.Println("step", step)
 			capturedPaymaster := step.OutputData.(*avsproto.Execution_Step_ContractWrite).ContractWrite.UserOp.PaymasterAndData
 
 			if tc.expectPaymaster {
