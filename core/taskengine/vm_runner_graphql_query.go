@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/graphql"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"google.golang.org/protobuf/types/known/anypb"
