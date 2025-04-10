@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
-	"github.com/AvaProtocol/ap-avs/core/testutil"
-	"github.com/AvaProtocol/ap-avs/model"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
@@ -102,9 +102,6 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 		t.Errorf("Test skipped: Contract write operation could not be completed due to connection issues")
 		return
 	}
-
-	// Print logs for debugging
-	t.Logf("Logs: %+v", outputData.TxReceipt.Logs)
 
 	if len(outputData.TxReceipt.Hash) != 66 {
 		t.Errorf("Missing Tx Hash in the output data")

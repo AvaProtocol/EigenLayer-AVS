@@ -7,11 +7,11 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/AvaProtocol/ap-avs/core/testutil"
-	"github.com/AvaProtocol/ap-avs/model"
-	"github.com/AvaProtocol/ap-avs/pkg/gow"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 func TestExecutorRunTaskSucess(t *testing.T) {
@@ -495,8 +495,8 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		t.Errorf("expect BlockNumber is 7212417 but got: %d", outputData.BlockNumber)
 	}
 
-	if outputData.BlockTimestamp != 1733351604 {
-		t.Errorf("expect BlockTimestamp is 1733351604 but got: %d", outputData.BlockTimestamp)
+	if outputData.BlockTimestamp != 1733351604000 {
+		t.Errorf("expect BlockTimestamp is 1733351604000 but got: %d", outputData.BlockTimestamp)
 	}
 
 	if outputData.FromAddress != "0x2A6CEbeDF9e737A9C6188c62A68655919c7314DB" {

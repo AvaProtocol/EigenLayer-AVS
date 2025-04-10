@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/AvaProtocol/ap-avs/core/auth"
-	"github.com/AvaProtocol/ap-avs/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/golang-jwt/jwt/v5"
 )
 

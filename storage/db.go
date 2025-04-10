@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -47,6 +49,9 @@ type Storage interface {
 	IncCounter(key []byte, defaultValue ...uint64) (uint64, error)
 	SetCounter(key []byte, value uint64) error
 	Vacuum() error
+
+	Backup(ctx context.Context, w io.Writer, since uint64) (uint64, error)
+	Load(ctx context.Context, r io.Reader) error
 
 	DbPath() string
 }
@@ -487,4 +492,12 @@ func (a *BadgerStorage) SetCounter(key []byte, value uint64) error {
 
 		return txn.Set(key, []byte(counterStr))
 	})
+}
+
+func (bs *BadgerStorage) Backup(ctx context.Context, w io.Writer, since uint64) (uint64, error) {
+	return bs.db.Backup(w, since)
+}
+
+func (bs *BadgerStorage) Load(ctx context.Context, r io.Reader) error {
+	return bs.db.Load(r, 16) // 16 is a good default for the number of concurrent threads
 }

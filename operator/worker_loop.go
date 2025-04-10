@@ -10,11 +10,11 @@ import (
 
 	"github.com/go-co-op/gocron/v2"
 
-	"github.com/AvaProtocol/ap-avs/core/taskengine"
-	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
-	triggerengine "github.com/AvaProtocol/ap-avs/core/taskengine/trigger"
-	avspb "github.com/AvaProtocol/ap-avs/protobuf"
-	"github.com/AvaProtocol/ap-avs/version"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
+	triggerengine "github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger"
+	avspb "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/version"
 )
 
 const (

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/go-co-op/gocron/v2"
 )

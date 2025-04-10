@@ -10,8 +10,8 @@ import (
 	"github.com/Layr-Labs/eigensdk-go/chainio/clients/eth"
 	logging "github.com/Layr-Labs/eigensdk-go/logging"
 
-	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
-	"github.com/AvaProtocol/ap-avs/core/config"
+	cstaskmanager "github.com/AvaProtocol/EigenLayer-AVS/contracts/bindings/AutomationTaskManager"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 )
 
 type AvsReader struct {
