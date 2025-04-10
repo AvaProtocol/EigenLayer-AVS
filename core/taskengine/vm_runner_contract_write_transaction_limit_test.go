@@ -50,7 +50,6 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 	}
 	defer client.Close()
 
-
 	for i, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			db := testutil.TestMustDB()

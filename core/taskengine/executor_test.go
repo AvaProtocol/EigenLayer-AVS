@@ -495,8 +495,8 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		t.Errorf("expect BlockNumber is 7212417 but got: %d", outputData.BlockNumber)
 	}
 
-	if outputData.BlockTimestamp != 1733351604 {
-		t.Errorf("expect BlockTimestamp is 1733351604 but got: %d", outputData.BlockTimestamp)
+	if outputData.BlockTimestamp != 1733351604000 {
+		t.Errorf("expect BlockTimestamp is 1733351604000 but got: %d", outputData.BlockTimestamp)
 	}
 
 	if outputData.FromAddress != "0x2A6CEbeDF9e737A9C6188c62A68655919c7314DB" {
