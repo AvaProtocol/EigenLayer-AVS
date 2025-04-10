@@ -7,11 +7,11 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/AvaProtocol/ap-avs/core/testutil"
-	"github.com/AvaProtocol/ap-avs/model"
-	"github.com/AvaProtocol/ap-avs/pkg/gow"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 func TestExecutorRunTaskSucess(t *testing.T) {

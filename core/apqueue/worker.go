@@ -1,7 +1,7 @@
 package apqueue
 
 import (
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )

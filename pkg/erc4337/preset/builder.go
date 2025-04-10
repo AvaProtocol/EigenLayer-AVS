@@ -19,9 +19,9 @@ import (
 	"github.com/AvaProtocol/ap-avs/core/chainio/signer"
 	"github.com/AvaProtocol/ap-avs/core/config"
 
-	"github.com/AvaProtocol/ap-avs/pkg/eip1559"
-	"github.com/AvaProtocol/ap-avs/pkg/erc4337/bundler"
-	"github.com/AvaProtocol/ap-avs/pkg/erc4337/userop"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 )
 
 var (

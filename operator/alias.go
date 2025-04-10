@@ -5,7 +5,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 
-	"github.com/AvaProtocol/ap-avs/core/chainio/apconfig"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/apconfig"
 	"github.com/ethereum/go-ethereum/crypto"
 
 	eigensdkecdsa "github.com/Layr-Labs/eigensdk-go/crypto/ecdsa"

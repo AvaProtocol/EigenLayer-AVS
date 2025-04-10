@@ -47,6 +47,8 @@ type Config struct {
 	AggregatorAddress common.Address
 
 	DbPath    string
+	BackupDir string
+
 	JwtSecret []byte
 
 	// Account abstraction config
@@ -93,6 +95,7 @@ type ConfigRaw struct {
 	AVSRegistryCoordinatorAddr string `yaml:"avs_registry_coordinator_address"`
 
 	DbPath    string `yaml:"db_path"`
+	BackupDir string `yaml:"backup_dir"`
 	JwtSecret string `yaml:"jwt_secret"`
 
 	SmartWallet struct {
@@ -191,6 +194,11 @@ func NewConfig(configFilePath string) (*Config, error) {
 		panic(err)
 	}
 
+	if configRaw.BackupDir == "" {
+		// If backup dir is not set, use the default path, usually this path will be mount from our docker compose host
+		configRaw.BackupDir = "/tmp/ap-avs-backup"
+	}
+
 	config := &Config{
 		EcdsaPrivateKey: ecdsaPrivateKey,
 		Logger:          logger,
@@ -208,6 +216,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 		AggregatorAddress:                 aggregatorAddr,
 
 		DbPath:    configRaw.DbPath,
+		BackupDir: configRaw.BackupDir,
 		JwtSecret: []byte(configRaw.JwtSecret),
 
 		SmartWallet: &SmartWalletConfig{

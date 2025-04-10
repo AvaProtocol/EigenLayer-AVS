@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 )

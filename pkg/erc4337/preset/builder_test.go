@@ -9,15 +9,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
-	"github.com/AvaProtocol/ap-avs/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 
-	"github.com/AvaProtocol/ap-avs/core/chainio/aa/paymaster"
-	"github.com/AvaProtocol/ap-avs/pkg/erc4337/bundler"
-	"github.com/AvaProtocol/ap-avs/pkg/erc4337/userop"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa/paymaster"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	"github.com/ethereum/go-ethereum/ethclient"
 	//"github.com/ethereum/go-ethereum/common/hexutil"
 )

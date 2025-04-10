@@ -3,9 +3,9 @@ package taskengine
 import (
 	"strconv"
 
-	"github.com/AvaProtocol/ap-avs/model"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 type StatService struct {

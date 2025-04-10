@@ -8,9 +8,9 @@ import (
 
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/AvaProtocol/ap-avs/core/config"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 type OperatorNode struct {

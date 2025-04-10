@@ -16,12 +16,12 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/AvaProtocol/ap-avs/core/config"
-	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
-	"github.com/AvaProtocol/ap-avs/model"
-	"github.com/AvaProtocol/ap-avs/pkg/erc20"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 type VMState string
@@ -299,7 +299,12 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 					TransactionHash:  event.TxHash.Hex(),
 					Address:          event.Address.Hex(),
 					BlockNumber:      event.BlockNumber,
-					BlockTimestamp:   blockHeader.Time,
+					// in Ethereum, timestamp is in seconds, but in our app we use milliseconds, so we need to convert it
+					// https://docs.soliditylang.org/en/latest/units-and-global-variables.html#block-and-transaction-properties
+					// This is requested in ticket https://github.com/AvaProtocol/EigenLayer-AVS/issues/191 and implemented in https://github.com/AvaProtocol/EigenLayer-AVS/pull/192/files
+					// But in that PR, the avs.proto file is updated and documented that this field is in milliseconds but we forgot to update the field in the code.
+					// This update happen at a time later and migration is configured to reflect the change in PR 192.
+					BlockTimestamp:   blockHeader.Time * 1000,
 					FromAddress:      parseTransfer.From.String(),
 					ToAddress:        parseTransfer.To.String(),
 					Value:            parseTransfer.Value.String(),

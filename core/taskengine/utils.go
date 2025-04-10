@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/AvaProtocol/ap-avs/pkg/erc20"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/shopspring/decimal"
 )

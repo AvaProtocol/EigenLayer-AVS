@@ -13,22 +13,28 @@ import (
 	"github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/AvaProtocol/ap-avs/aggregator/types"
-	"github.com/AvaProtocol/ap-avs/core"
-	"github.com/AvaProtocol/ap-avs/core/apqueue"
-	"github.com/AvaProtocol/ap-avs/core/chainio"
-	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
-	"github.com/AvaProtocol/ap-avs/core/config"
-	"github.com/AvaProtocol/ap-avs/core/taskengine"
-	"github.com/AvaProtocol/ap-avs/version"
 	sdkclients "github.com/Layr-Labs/eigensdk-go/chainio/clients"
 	blsagg "github.com/Layr-Labs/eigensdk-go/services/bls_aggregation"
 	sdktypes "github.com/Layr-Labs/eigensdk-go/types"
 	"github.com/allegro/bigcache/v3"
 
-	"github.com/AvaProtocol/ap-avs/storage"
+	
+	cstaskmanager "github.com/AvaProtocol/EigenLayer-AVS/contracts/bindings/AutomationTaskManager"
 
-	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+
+	"github.com/AvaProtocol/EigenLayer-AVS/aggregator/types"
+	"github.com/AvaProtocol/EigenLayer-AVS/core"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/version"
+	
+	"github.com/AvaProtocol/EigenLayer-AVS/core/backup"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/migrator"
+	"github.com/AvaProtocol/EigenLayer-AVS/migrations"
 )
 
 const (
@@ -93,6 +99,9 @@ type Aggregator struct {
 	status AggregatorStatus
 
 	cache *bigcache.BigCache
+
+	backup *backup.Service
+	migrator *migrator.Migrator
 }
 
 // NewAggregator creates a new Aggregator with the provided config.
@@ -229,6 +238,14 @@ func (agg *Aggregator) init() {
 	aa.SetEntrypointAddress(agg.config.SmartWallet.EntrypointAddress)
 }
 
+func (agg *Aggregator) migrate() {
+	agg.backup = backup.NewService(agg.logger, agg.db, agg.config.BackupDir)
+	agg.migrator = migrator.NewMigrator(agg.db, agg.backup, migrations.Migrations)
+	if err := agg.migrator.Run(); err != nil {
+		agg.logger.Fatalf("failed to run migrations", "error", err)
+	}
+}
+
 func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.logger.Infof("Starting aggregator %s", version.Get())
 
@@ -239,6 +256,7 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 		agg.logger.Fatalf("failed to initialize storage", "error", err)
 	}
 
+	agg.migrate()	
 
 	agg.logger.Infof("Starting Task engine")
 	agg.startTaskEngine(ctx)

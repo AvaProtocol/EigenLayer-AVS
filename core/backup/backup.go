@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/Layr-Labs/eigensdk-go/logging"
 )
 
@@ -42,10 +42,6 @@ func (s *Service) StartPeriodicBackup(interval time.Duration) error {
 	s.interval = interval
 	s.backupEnabled = true
 
-	if err := s.PerformBackup(); err != nil {
-		s.logger.Errorf("Initial backup failed: %v", err)
-	}
-
 	go s.backupLoop()
 
 	s.logger.Infof("Started periodic backup every %v to %s", interval, s.backupDir)
@@ -69,8 +65,10 @@ func (s *Service) backupLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			if err := s.PerformBackup(); err != nil {
+			if backupFile, err := s.PerformBackup(); err != nil {
 				s.logger.Errorf("Periodic backup failed: %v", err)
+			} else {
+				s.logger.Infof("Periodic backup completed successfully to %s", backupFile)
 			}
 		case <-s.stop:
 			return
@@ -78,18 +76,18 @@ func (s *Service) backupLoop() {
 	}
 }
 
-func (s *Service) PerformBackup() error {
+func (s *Service) PerformBackup() (string, error) {
 	timestamp := time.Now().Format("06-01-02-15-04")
 	backupPath := filepath.Join(s.backupDir, timestamp)
 	
 	if err := os.MkdirAll(backupPath, 0755); err != nil {
-		return fmt.Errorf("failed to create backup timestamp directory: %v", err)
+		return "", fmt.Errorf("failed to create backup timestamp directory: %v", err)
 	}
 
-	backupFile := filepath.Join(backupPath, "badger.backup")
+	backupFile := filepath.Join(backupPath, "full-backup.db")
 	f, err := os.Create(backupFile)
 	if err != nil {
-		return fmt.Errorf("failed to create backup file: %v", err)
+		return "", fmt.Errorf("failed to create backup file: %v", err)
 	}
 	defer f.Close()
 
@@ -97,9 +95,9 @@ func (s *Service) PerformBackup() error {
 	since := uint64(0) // Full backup
 	_, err = s.db.Backup(context.Background(), f, since)
 	if err != nil {
-		return fmt.Errorf("backup operation failed: %v", err)
+		return "", fmt.Errorf("backup operation failed: %v", err)
 	}
 
 	s.logger.Infof("Backup completed successfully to %s", backupFile)
-	return nil
+	return backupFile, nil
 }

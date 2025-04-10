@@ -100,6 +100,15 @@ func handleConnection(agg *Aggregator, conn net.Conn) {
 			} else {
 				fmt.Fprintln(conn, "Usage: list <prefix>* or list *")
 			}
+		case "rm":
+			if keys, err := agg.db.ListKeys(parts[1]); err == nil {
+				for _, k := range keys {
+					fmt.Fprintln(conn, k)
+					if err := agg.db.Delete([]byte(k)); err == nil {
+						fmt.Fprintln(conn, "deleted "+k)
+					}
+				}
+			}
 		case "get":
 			if len(parts) == 2 {
 				if key, err := agg.db.GetKey([]byte(parts[1])); err == nil {

@@ -3,9 +3,9 @@ package trigger
 import (
 	"testing"
 
-	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
-	"github.com/AvaProtocol/ap-avs/core/testutil"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 func TestTriggerTopicMatch(t *testing.T) {
@@ -340,11 +340,11 @@ func TestTriggerWithContractReadBindingInExpression(t *testing.T) {
 //
 //	/usr/local/go/src/runtime/panic.go:785 +0x124
 //
-// github.com/AvaProtocol/ap-avs/core/taskengine/trigger.(*EventTrigger).Evaluate(0x140000ba3e0?, 0x140004f1600, 0x140001e9f18)
+// github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger.(*EventTrigger).Evaluate(0x140000ba3e0?, 0x140004f1600, 0x140001e9f18)
 //
 //	/Users/vinh/Sites/oak/eigenlayer/EigenLayer-AVS/core/taskengine/trigger/event.go:185 +0x704
 //
-// github.com/AvaProtocol/ap-avs/core/taskengine/trigger.TestTriggerEventExpressionWontCrashOnInvalidInput(0x140004e6b60)
+// github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger.TestTriggerEventExpressionWontCrashOnInvalidInput(0x140004e6b60)
 //
 //	/Users/vinh/Sites/oak/eigenlayer/EigenLayer-AVS/core/taskengine/trigger/event_test.go:330 +0x1b0
 //
@@ -357,7 +357,7 @@ func TestTriggerWithContractReadBindingInExpression(t *testing.T) {
 //	/usr/local/go/src/testing/testing.go:1743 +0x314
 //
 // exit status 2
-// FAIL	github.com/AvaProtocol/ap-avs/core/taskengine/trigger	3.929s
+// FAIL	github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger	3.929s
 func TestTriggerEventExpressionWontCrashOnInvalidInput(t *testing.T) {
 	tests := []struct {
 		name          string
