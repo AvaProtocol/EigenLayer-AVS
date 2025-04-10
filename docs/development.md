@@ -130,8 +130,8 @@ exit
 Deletes all keys that match the given prefix pattern. The command first lists all matching keys and then deletes them.
 
 ```bash
-# Delete all active tasks
-rm t:a:*
+# Delete keys with a specific prefix
+rm prefix:*
 ```
 
 #### `backup <directory>`
