@@ -159,7 +159,7 @@ For improved test result formatting, use `gotestfmt`:
 
 ```bash
 # Install golangci-lint
-curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
+curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.0.2
 
 # Run the linter
 golangci-lint run ./...
