@@ -126,6 +126,22 @@ Closes the REPL connection.
 exit
 ```
 
+#### `rm <prefix>*`
+Deletes all keys that match the given prefix pattern. The command first lists all matching keys and then deletes them.
+
+```bash
+# Delete all active tasks
+rm t:a:*
+```
+
+#### `backup <directory>`
+Creates a backup of the database to the specified directory. The backup is stored in a timestamped subdirectory with a filename of `badger.backup`.
+
+```bash
+# Backup the database to the /tmp/backups directory
+backup /tmp/backups
+```
+
 #### `trigger`
 This command is currently under development and not fully implemented.
 
