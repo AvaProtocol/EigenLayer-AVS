@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/dop251/goja"
 )
