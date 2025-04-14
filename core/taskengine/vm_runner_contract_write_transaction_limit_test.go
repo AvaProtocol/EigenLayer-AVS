@@ -13,10 +13,10 @@ import (
 
 	// "github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	// "github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 func TestTransactionSponsorshipLimit(t *testing.T) {
@@ -89,7 +89,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 				CommonProcessor: &CommonProcessor{
 					vm: vm,
 				},
-				client: client,
+				client:            client,
 				owner:             owner,
 				smartWalletConfig: smartWalletConfig,
 			}

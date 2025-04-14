@@ -34,8 +34,7 @@ func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConf
 			vm: vm,
 		},
 	}
-	
-	
+
 	return r
 }
 

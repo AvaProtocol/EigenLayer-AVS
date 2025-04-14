@@ -55,7 +55,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 
 	// Initialize goja runtime
 	jsvm := goja.New()
-	
+
 	macros.ConfigureGojaRuntime(jsvm)
 
 	// Set variables in the JS environment. The value is wrapped into a data, follow a similar approach by other nocode provider
