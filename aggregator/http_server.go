@@ -10,10 +10,10 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
 	"github.com/labstack/echo/v4"
-)
 	"github.com/getsentry/sentry-go"
 	sentryecho "github.com/getsentry/sentry-go/echo"
 
+)
 
 var (
 	//go:embed resources
