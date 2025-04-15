@@ -228,7 +228,7 @@ func (agg *Aggregator) init() {
 		config.CurrentChainEnv = config.EthereumEnv
 	} else {
 		config.CurrentChainEnv = config.HoleskyEnv
-	agg.initSentry() // Initialize Sentry
+		agg.initSentry() // Initialize Sentry
 
 	}
 
@@ -245,7 +245,6 @@ func (agg *Aggregator) migrate() {
 	}
 }
 
-
 func (agg *Aggregator) initSentry() {
 	sentryDSN := os.Getenv("SENTRY_DSN")
 	if sentryDSN == "" {
@@ -258,7 +257,6 @@ func (agg *Aggregator) initSentry() {
 		sentryEnv = string(agg.config.Environment)
 		agg.logger.Infof("SENTRY_ENVIRONMENT not set, falling back to config environment: %s", sentryEnv)
 	}
-
 
 	err := sentry.Init(sentry.ClientOptions{
 		Dsn:              sentryDSN,
