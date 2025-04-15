@@ -9,6 +9,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"github.com/getsentry/sentry-go"
+	"github.com/AvaProtocol/ap-avs/version" // Ensure version is imported
+
 
 	"github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -230,6 +233,8 @@ func (agg *Aggregator) init() {
 		config.CurrentChainEnv = config.EthereumEnv
 	} else {
 		config.CurrentChainEnv = config.HoleskyEnv
+	agg.initSentry() // Initialize Sentry
+
 	}
 
 	// Setup account abstraction config
@@ -335,4 +340,42 @@ func (agg *Aggregator) sendAggregatedResponseToContract(blsAggServiceResp blsagg
 
 func (agg *Aggregator) IsShutdown() bool {
 	return agg.status == shutdownStatus
+}
+package aggregator
+
+import (
+	"os"
+	"time"
+
+	"github.com/getsentry/sentry-go"
+	"github.com/AvaProtocol/ap-avs/version"
+)
+
+
+func (agg *Aggregator) initSentry() {
+	sentryDSN := os.Getenv("SENTRY_DSN")
+	if sentryDSN == "" {
+		agg.logger.Info("SENTRY_DSN not found, Sentry integration is disabled.")
+		return
+	}
+
+	sentryEnv := os.Getenv("SENTRY_ENVIRONMENT")
+	if sentryEnv == "" {
+		sentryEnv = string(agg.config.Environment)
+		agg.logger.Infof("SENTRY_ENVIRONMENT not set, falling back to config environment: %s", sentryEnv)
+	}
+
+
+	err := sentry.Init(sentry.ClientOptions{
+		Dsn:              sentryDSN,
+		Release:          version.Get() + "@" + version.Commit(),
+		Environment:      sentryEnv,
+		TracesSampleRate: 1.0, // Configure sample rate as needed
+	})
+	if err != nil {
+		agg.logger.Errorf("Sentry initialization failed: %v", err)
+		return
+	}
+	agg.logger.Infof("Sentry initialized successfully for environment: %s", sentryEnv)
+
 }
