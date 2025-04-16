@@ -63,7 +63,7 @@ func CreateOrImportAliasKey(o CreateAliasKeyOption) {
 func DeclareAlias(configPath, address string) {
 	operator, err := NewOperatorFromConfigFile(configPath)
 	if err != nil {
-		fmt.Errorf("error creator operator from config: %w", err)
+		err = fmt.Errorf("error creator operator from config: %w", err)
 	}
 
 	if err = operator.DeclareAlias(address); err != nil {
@@ -116,7 +116,7 @@ func RemoveAlias(configPath string) {
 	operator, err := NewOperatorFromConfigFile(configPath)
 	fmt.Println(configPath)
 	if err != nil {
-		fmt.Errorf("error creator operator from config: %w", err)
+		err = fmt.Errorf("error creator operator from config: %w", err)
 	}
 
 	if err = operator.RemoveAlias(); err != nil {
