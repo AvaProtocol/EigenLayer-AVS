@@ -8,12 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"	
 )
 
 func TestRunJavaScript(t *testing.T) {
@@ -317,21 +316,21 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 				RestApi: &avsproto.RestAPINode{
 					Url:    server.URL, // Point to mock server
 					Method: "POST",
-					Body: `{"output_from_js": "{{ customCodeObjectNode.data }}"`,
+					Body:   `{"output_from_js": "{{ customCodeObjectNode.data }}"`,
 				},
 			},
 		},
 	}
 
 	trigger := &avsproto.TaskTrigger{
-		Id: triggerID,
-		Name: "Template Trigger",
-		TriggerType: &avsproto.TaskTrigger_Manual{ Manual: true },
+		Id:          triggerID,
+		Name:        "Template Trigger",
+		TriggerType: &avsproto.TaskTrigger_Manual{Manual: true},
 	}
 
 	edges := []*avsproto.TaskEdge{
-		{ Id: "e1-template", Source: trigger.Id, Target: customCodeNodeID },
-		{ Id: "e2-template", Source: customCodeNodeID, Target: restNodeID },
+		{Id: "e1-template", Source: trigger.Id, Target: customCodeNodeID},
+		{Id: "e2-template", Source: customCodeNodeID, Target: restNodeID},
 	}
 
 	taskModel := &model.Task{
@@ -350,7 +349,7 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 	vm.WithLogger(logger).WithDb(db)
 
 	//n := NewJSProcessor(vm)
-	
+
 	// --- Compile and Run ---
 	err = vm.Compile()
 	if err != nil {
@@ -376,14 +375,14 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 	// We check for the presence of key-value pairs instead of exact string match.
 	expectedKeyVal1 := "id:123"
 	expectedKeyVal2 := "message:test"
-	if !( (strings.Contains(capturedBody, expectedKeyVal1) && strings.Contains(capturedBody, expectedKeyVal2)) ||
-	      (strings.Contains(capturedBody, expectedKeyVal2) && strings.Contains(capturedBody, expectedKeyVal1)) ) {
+	if !((strings.Contains(capturedBody, expectedKeyVal1) && strings.Contains(capturedBody, expectedKeyVal2)) ||
+		(strings.Contains(capturedBody, expectedKeyVal2) && strings.Contains(capturedBody, expectedKeyVal1))) {
 		// A more robust check might involve parsing the JSON and the inner map string
 		t.Errorf("Request body (%q) does not contain expected Go map key-value pairs like %q and %q", capturedBody, expectedKeyVal1, expectedKeyVal2)
 	}
-	
+
 	if capturedBody != `{"output_from_js": [object Object] }` {
-		 t.Errorf("expected output_from_js to be [object Object] but got %q", capturedBody)
+		t.Errorf("expected output_from_js to be [object Object] but got %q", capturedBody)
 	}
 
 	// Optional: Verify logs for completeness

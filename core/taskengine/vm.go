@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	
+
 	"github.com/samber/lo"
 
 	"github.com/ethereum/go-ethereum/common"
