@@ -293,9 +293,10 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 	triggerID := "triggerTemplate"
 
 	jsObjectSource := `
-		function execute(context) {
+		function execute() {
 			return { message: "test", id: 123 };
-		}
+		};
+		return execute();
 	`
 
 	nodes := []*avsproto.TaskNode{
@@ -369,7 +370,7 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 		t.Fatalf("Expected 2 execution steps, got %d", len(vm.ExecutionLogs))
 	}
 
-	if capturedBody != `{"output_from_js": [object Object] }` {
+	if capturedBody != "{\"output_from_js\": \"[object Object]\"" {
 		t.Errorf("expected output_from_js to be [object Object] but got %q", capturedBody)
 	}
 

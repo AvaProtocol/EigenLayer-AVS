@@ -672,6 +672,10 @@ func (v *VM) preprocessText(text string) string {
 		var replacement string
 
 		if _, ok := exportedValue.(map[string]interface{}); ok {
+			// In Golang, it's better because it can return the actualy object data. But in JavaScript, it will return "[object Object]",
+			// We're mimicking the behavior of Retool here to follow the script gotcha.
+			// In real of userness the golang might be useful for debugging because it's will return the actual object data, eg `map[id:123 message:test]`
+			// but at the same time, map ins't  concept in JavaScript, so end user might get confused
 			replacement = "[object Object]"
 		} else {
 			replacement = fmt.Sprintf("%v", exportedValue)
