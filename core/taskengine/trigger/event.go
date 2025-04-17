@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"github.com/dop251/goja"
 	"github.com/samber/lo"
 
 	"github.com/ethereum/go-ethereum"
@@ -241,9 +241,7 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 		// This is the advance trigger with js evaluation based on trigger data
 		triggerVarName := check.TaskMetadata.GetTrigger().GetName()
 
-		jsvm := goja.New()
-
-		macros.ConfigureGojaRuntime(jsvm)
+		jsvm := taskengine.NewGojaVM()
 
 		envs := macros.GetEnvs(map[string]interface{}{})
 		for k, v := range envs {
@@ -253,10 +251,10 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 			"data": map[string]interface{}{
 				"address": strings.ToLower(event.Address.Hex()),
 				"topics": lo.Map[common.Hash, string](event.Topics, func(topic common.Hash, _ int) string {
-					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+					return "0x" + strings.ToLower(strings.TrimPrefix(topic.Hex(), "0x"))
 				}),
 				"data":    "0x" + common.Bytes2Hex(event.Data),
-				"tx_hash": event.TxHash,
+				"tx_hash": event.TxHash.Hex(),
 			},
 		})
 

@@ -23,10 +23,8 @@ func NewJSProcessor(vm *VM) *JSProcessor {
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
-		jsvm: goja.New(),
+		jsvm: NewGojaVM(),
 	}
-
-	macros.ConfigureGojaRuntime(r.jsvm)
 
 	// These are built-in func
 	for key, value := range macros.GetEnvs(nil) {

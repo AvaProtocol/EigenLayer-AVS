@@ -5,9 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
-	"github.com/dop251/goja"
 )
 
 type BranchProcessor struct {
@@ -53,10 +51,8 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	sb.WriteString(stepID)
 	outcome := ""
 
-	// Initialize goja runtime
-	jsvm := goja.New()
-
-	macros.ConfigureGojaRuntime(jsvm)
+	// Initialize goja runtime using the new constructor
+	jsvm := NewGojaVM()
 
 	// Set variables in the JS environment. The value is wrapped into a data, follow a similar approach by other nocode provider
 	// even though we arent necessarily need to do this
@@ -116,11 +112,13 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 			branchResult, ok = result.Export().(bool)
 			if !ok {
 				s.Success = false
-				s.Error = fmt.Errorf("error evaluating the statement: %w", err).Error()
-				sb.WriteString("error evaluating expression")
+				// The original error might be shadowed here if RunString succeeded but Export failed type assertion.
+				// Consider logging the original err if it exists or improving error message.
+				s.Error = fmt.Sprintf("expression result is not a boolean: %v", result.Export())
+				sb.WriteString("error evaluating expression: result is not a boolean")
 				s.Log = sb.String()
 				s.EndAt = time.Now().UnixMilli()
-				return s, fmt.Errorf("error evaluating the statement: %w", err)
+				return s, fmt.Errorf("expression result is not a boolean")
 			}
 		}
 

@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"github.com/dop251/goja"
+	
 	"github.com/samber/lo"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -613,10 +613,8 @@ func (v *VM) preprocessText(text string) string {
 		return text
 	}
 
-	// Initialize goja runtime
-	jsvm := goja.New()
-
-	macros.ConfigureGojaRuntime(jsvm)
+	// Initialize goja runtime using the new constructor
+	jsvm := NewGojaVM()
 
 	for key, value := range v.vars {
 		jsvm.Set(key, value)
