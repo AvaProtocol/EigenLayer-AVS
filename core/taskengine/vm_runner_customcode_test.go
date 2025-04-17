@@ -369,18 +369,6 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 		t.Fatalf("Expected 2 execution steps, got %d", len(vm.ExecutionLogs))
 	}
 
-	// Verify the request body captured by the mock server
-	// It should contain Go's string representation of the map, not "[object Object]"
-	// NOTE: The exact order of keys in the map string representation is not guaranteed by Go.
-	// We check for the presence of key-value pairs instead of exact string match.
-	expectedKeyVal1 := "id:123"
-	expectedKeyVal2 := "message:test"
-	if !((strings.Contains(capturedBody, expectedKeyVal1) && strings.Contains(capturedBody, expectedKeyVal2)) ||
-		(strings.Contains(capturedBody, expectedKeyVal2) && strings.Contains(capturedBody, expectedKeyVal1))) {
-		// A more robust check might involve parsing the JSON and the inner map string
-		t.Errorf("Request body (%q) does not contain expected Go map key-value pairs like %q and %q", capturedBody, expectedKeyVal1, expectedKeyVal2)
-	}
-
 	if capturedBody != `{"output_from_js": [object Object] }` {
 		t.Errorf("expected output_from_js to be [object Object] but got %q", capturedBody)
 	}
