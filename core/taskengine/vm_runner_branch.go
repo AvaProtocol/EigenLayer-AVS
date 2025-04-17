@@ -112,13 +112,11 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 			branchResult, ok = result.Export().(bool)
 			if !ok {
 				s.Success = false
-				// The original error might be shadowed here if RunString succeeded but Export failed type assertion.
-				// Consider logging the original err if it exists or improving error message.
-				s.Error = fmt.Sprintf("expression result is not a boolean: %v", result.Export())
-				sb.WriteString("error evaluating expression: result is not a boolean")
+				s.Error = fmt.Errorf("error evaluating the statement: %w", err).Error()
+				sb.WriteString("error evaluating expression")
 				s.Log = sb.String()
 				s.EndAt = time.Now().UnixMilli()
-				return s, fmt.Errorf("expression result is not a boolean")
+				return s, fmt.Errorf("error evaluating the statement: %w", err)
 			}
 		}
 
