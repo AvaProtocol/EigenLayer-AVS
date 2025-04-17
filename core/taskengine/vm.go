@@ -668,7 +668,15 @@ func (v *VM) preprocessText(text string) string {
 		}
 
 		// Replace the expression with its evaluated result
-		replacement := fmt.Sprintf("%v", evaluated.Export())
+		exportedValue := evaluated.Export()
+		var replacement string
+		
+		if _, ok := exportedValue.(map[string]interface{}); ok {
+			replacement = "[object Object]"
+		} else {
+			replacement = fmt.Sprintf("%v", exportedValue)
+		}
+		
 		result = result[:start] + replacement + result[end+2:]
 		currentIteration++
 	}
