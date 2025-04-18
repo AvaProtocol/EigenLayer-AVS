@@ -17,7 +17,7 @@ import (
 func RegisterToAVS(configPath string) {
 	operator, err := NewOperatorFromConfigFile(configPath)
 	if err != nil {
-		fmt.Errorf("error creator operator from config: %w", err)
+		err = fmt.Errorf("error creator operator from config: %w", err)
 	}
 
 	err = operator.RegisterOperatorWithAvs()
@@ -26,7 +26,7 @@ func RegisterToAVS(configPath string) {
 func DeregisterFromAVS(configPath string) {
 	operator, err := NewOperatorFromConfigFile(configPath)
 	if err != nil {
-		fmt.Errorf("error creator operator from config: %w", err)
+		err = fmt.Errorf("error creator operator from config: %w", err)
 	}
 
 	err = operator.DeregisterOperatorFromAvs()
@@ -35,7 +35,7 @@ func DeregisterFromAVS(configPath string) {
 func Status(configPath string) {
 	operator, err := NewOperatorFromConfigFile(configPath)
 	if err != nil {
-		fmt.Errorf("error creator operator from config: %w", err)
+		err = fmt.Errorf("error creator operator from config: %w", err)
 	}
 
 	err = operator.ReportOperatorStatus()
