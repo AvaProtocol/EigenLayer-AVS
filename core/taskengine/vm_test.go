@@ -5,9 +5,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
-	"os"
 
 	"github.com/dop251/goja"
 
@@ -870,8 +870,8 @@ func TestPreprocessText(t *testing.T) {
 			name:     "javascript object representation var",
 			input:    `{{ user }}`,
 			expected: "[object Object]",
-		},		
-	}	
+		},
+	}
 
 	os.Setenv("TZ", "UTC")
 	for _, tt := range tests {

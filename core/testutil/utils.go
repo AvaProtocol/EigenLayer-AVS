@@ -52,7 +52,6 @@ func GetRpcClient() *ethclient.Client {
 	return client
 }
 
-
 func MustGetEventForTx(txHash string, evtIndex uint64) *types.Log {
 	event, err := GetEventForTx(txHash, evtIndex)
 	if err != nil {
