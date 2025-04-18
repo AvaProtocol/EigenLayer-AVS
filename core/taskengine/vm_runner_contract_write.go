@@ -26,7 +26,7 @@ type ContractWriteProcessor struct {
 }
 
 func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConfig *config.SmartWalletConfig, owner common.Address) *ContractWriteProcessor {
-	return &ContractWriteProcessor{
+	r := &ContractWriteProcessor{
 		client:            client,
 		smartWalletConfig: smartWalletConfig,
 		owner:             owner,
@@ -34,6 +34,8 @@ func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConf
 			vm: vm,
 		},
 	}
+
+	return r
 }
 
 func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
