@@ -1,10 +1,14 @@
 package taskengine
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
@@ -253,5 +257,140 @@ func TestRunJavaScriptCanAccessSecretsWithapContext(t *testing.T) {
 
 	if gow.AnyToString(step.GetCustomCode().Data) != "my name is my_awesome_secret_value" {
 		t.Errorf("wrong JS code evaluation result, expect: `\"my name is my_awesome_secret_value\"`,  got `%s`", step.OutputData)
+	}
+}
+
+// TestRunJavaScriptObjectInTemplate verifies that using an object result
+// directly in templating results in Go's map string representation.
+func TestRunJavaScriptObjectResultRendering(t *testing.T) {
+	// --- Setup ---
+	logger := testutil.GetLogger()
+	db := testutil.TestMustDB()
+	defer db.Close()
+
+	smartWalletConfig := &config.SmartWalletConfig{
+		// Populate if needed
+	}
+
+	// Mock HTTP Server to capture the request body
+	var capturedBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Logf("Error reading request body in mock server: %v", err)
+			http.Error(w, "Failed to read body", http.StatusInternalServerError)
+			return
+		}
+		capturedBody = string(bodyBytes)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`)) // Simple response
+	}))
+	defer server.Close()
+
+	// --- Define Task Components ---
+	customCodeNodeID := "customCodeObjectNode"
+	restNodeID := "restNodeUsingObject"
+	triggerID := "triggerTemplate"
+
+	jsObjectSource := `
+		function execute() {
+			return { message: "test", id: 123 };
+		};
+		return execute();
+	`
+
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   customCodeNodeID,
+			Name: "customCodeObjectNode",
+			TaskType: &avsproto.TaskNode_CustomCode{
+				CustomCode: &avsproto.CustomCodeNode{
+					Lang:   avsproto.CustomCodeLang_JavaScript,
+					Source: jsObjectSource,
+				},
+			},
+		},
+		{
+			Id:   restNodeID,
+			Name: "restNodeUsingObject",
+			TaskType: &avsproto.TaskNode_RestApi{
+				RestApi: &avsproto.RestAPINode{
+					Url:    server.URL, // Point to mock server
+					Method: "POST",
+					Body:   `{"output_from_js": "{{ customCodeObjectNode.data }}"`,
+				},
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:          triggerID,
+		Name:        "Template Trigger",
+		TriggerType: &avsproto.TaskTrigger_Manual{Manual: true},
+	}
+
+	edges := []*avsproto.TaskEdge{
+		{Id: "e1-template", Source: trigger.Id, Target: customCodeNodeID},
+		{Id: "e2-template", Source: customCodeNodeID, Target: restNodeID},
+	}
+
+	taskModel := &model.Task{
+		&avsproto.Task{
+			Id:      "123abc",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}
+
+	vm, err := NewVMWithData(taskModel, nil, smartWalletConfig, nil)
+	if err != nil {
+		t.Fatalf("NewVMWithData should not error: %v", err)
+	}
+	vm.WithLogger(logger).WithDb(db)
+
+	//n := NewJSProcessor(vm)
+
+	// --- Compile and Run ---
+	err = vm.Compile()
+	if err != nil {
+		t.Fatalf("VM Compile should not error: %v", err)
+	}
+	if vm.entrypoint != customCodeNodeID {
+		t.Errorf("VM entrypoint incorrect: got %q, want %q", vm.entrypoint, customCodeNodeID)
+	}
+
+	err = vm.Run()
+	if err != nil {
+		t.Fatalf("VM Run should not error: %v", err)
+	}
+
+	// --- Verification ---
+	if len(vm.ExecutionLogs) != 2 {
+		t.Fatalf("Expected 2 execution steps, got %d", len(vm.ExecutionLogs))
+	}
+
+	if capturedBody != "{\"output_from_js\": \"[object Object]\"" {
+		t.Errorf("expected output_from_js to be [object Object] but got %q", capturedBody)
+	}
+
+	// Optional: Verify logs for completeness
+	step1Log := vm.ExecutionLogs[0]
+	if step1Log.NodeId != customCodeNodeID {
+		t.Errorf("Step 1 log NodeId mismatch: got %q, want %q", step1Log.NodeId, customCodeNodeID)
+	}
+	if !step1Log.Success {
+		t.Errorf("Step 1 log should be successful")
+	}
+
+	step2Log := vm.ExecutionLogs[1]
+	if step2Log.NodeId != restNodeID {
+		t.Errorf("Step 2 log NodeId mismatch: got %q, want %q", step2Log.NodeId, restNodeID)
+	}
+	if !step2Log.Success {
+		t.Errorf("REST node step log should be successful")
+	}
+	if step2Log.Error != "" {
+		t.Errorf("REST node step log error should be empty, got %q", step2Log.Error)
 	}
 }

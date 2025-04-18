@@ -23,7 +23,7 @@ func NewJSProcessor(vm *VM) *JSProcessor {
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
-		jsvm: goja.New(),
+		jsvm: NewGojaVM(),
 	}
 
 	// These are built-in func

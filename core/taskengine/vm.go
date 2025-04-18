@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"github.com/dop251/goja"
+
 	"github.com/samber/lo"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -613,8 +613,8 @@ func (v *VM) preprocessText(text string) string {
 		return text
 	}
 
-	// Initialize goja runtime
-	jsvm := goja.New()
+	// Initialize goja runtime using the new constructor
+	jsvm := NewGojaVM()
 
 	for key, value := range v.vars {
 		jsvm.Set(key, value)
@@ -668,7 +668,19 @@ func (v *VM) preprocessText(text string) string {
 		}
 
 		// Replace the expression with its evaluated result
-		replacement := fmt.Sprintf("%v", evaluated.Export())
+		exportedValue := evaluated.Export()
+		var replacement string
+
+		if _, ok := exportedValue.(map[string]interface{}); ok {
+			// In Golang, it's better because it can return the actualy object data. But in JavaScript, it will return "[object Object]",
+			// We're mimicking the behavior of Retool here to follow the script gotcha.
+			// In real of userness the golang might be useful for debugging because it's will return the actual object data, eg `map[id:123 message:test]`
+			// but at the same time, map ins't  concept in JavaScript, so end user might get confused
+			replacement = "[object Object]"
+		} else {
+			replacement = fmt.Sprintf("%v", exportedValue)
+		}
+
 		result = result[:start] + replacement + result[end+2:]
 		currentIteration++
 	}

@@ -223,6 +223,112 @@ func TestTriggerNonTransferEvent(t *testing.T) {
 	}
 }
 
+func TestTriggerExpressionHandleNull(t *testing.T) {
+	eventTrigger := NewEventTrigger(&RpcOption{
+		RpcURL:   testutil.GetTestRPCURL(),
+		WsRpcURL: testutil.GetTestRPCURL(),
+	}, make(chan TriggerMetadata[EventMark], 1000),
+		testutil.GetLogger())
+
+	taskMeta := &avsproto.SyncMessagesResp_TaskMetadata{
+		Trigger: &avsproto.TaskTrigger{
+			Name: "myEventTrigger",
+		},
+	}
+
+	result, err := eventTrigger.Evaluate(nil, &Check{
+		Program:      "invalid.data.topics[0] != null && invalid.nonExistentProperty.value == \"something\"",
+		TaskMetadata: taskMeta,
+	})
+
+	if result {
+		t.Errorf("expect null handling to return false, but got true: error: %v", err)
+	}
+
+	event := testutil.MustGetEventForTx("0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d", 82)
+
+	for _, program := range []string{
+		`myEventTrigger.data.nonExistentField.substring(0, 10) == "0xddf252ad"`,
+		`myEventTrigger.data.topics[99] == "0xddf252ad"`,
+		`invalid.data.topics[0] != null && invalid.nonExistentProperty.value == "something"`,
+	} {
+		result, err := eventTrigger.Evaluate(event, &Check{
+			Program:      program,
+			TaskMetadata: taskMeta,
+		})
+
+		if result {
+			t.Errorf("expect null handling to return false, but got true: error: %v", err)
+		}
+	}
+}
+
+func TestTriggerExpressionWithJavaScriptFunctions(t *testing.T) {
+	event, err := testutil.GetEventForTx("0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d", 82)
+
+	if err != nil {
+		t.Errorf("expect no error but got one: %v", err)
+	}
+
+	eventTrigger := NewEventTrigger(&RpcOption{
+		RpcURL:   testutil.GetTestRPCURL(),
+		WsRpcURL: testutil.GetTestRPCURL(),
+	}, make(chan TriggerMetadata[EventMark], 1000),
+		testutil.GetLogger())
+
+	taskMeta := &avsproto.SyncMessagesResp_TaskMetadata{
+		Trigger: &avsproto.TaskTrigger{
+			Name: "myEventTrigger",
+		},
+	}
+
+	// Test substring function
+	program := `myEventTrigger.data.topics[0].substring(0, 10) == "0xddf252ad"`
+
+	result, err := eventTrigger.Evaluate(event, &Check{
+		Program:      program,
+		TaskMetadata: taskMeta,
+	})
+	if !result {
+		t.Errorf("expect substring match to be true, but got false: error: %v", err)
+	}
+
+	// Test with multiple JavaScript functions
+	program = `myEventTrigger.data.topics[0].substring(0, 10) == "0xddf252ad" && 
+               myEventTrigger.data.topics[2].toLowerCase() == "0xc114fb059434563dc65ac8d57e7976e3eac534f4"`
+
+	result, err = eventTrigger.Evaluate(event, &Check{
+		Program:      program,
+		TaskMetadata: taskMeta,
+	})
+	if !result {
+		t.Errorf("expect complex expression to match, but got false: error: %v", err)
+	}
+
+	// Test with negative case
+	program = `myEventTrigger.data.topics[0].substring(2, 6) == "abcd"`
+
+	result, err = eventTrigger.Evaluate(event, &Check{
+		Program:      program,
+		TaskMetadata: taskMeta,
+	})
+	if result {
+		t.Errorf("expect expression to not match, but got true: error: %v", err)
+	}
+
+	// Test with string length and includes
+	program = `myEventTrigger.data.topics[0].length > 10 && 
+               myEventTrigger.data.topics[0].includes("ddf252ad")`
+
+	result, err = eventTrigger.Evaluate(event, &Check{
+		Program:      program,
+		TaskMetadata: taskMeta,
+	})
+	if !result {
+		t.Errorf("expect string functions to match, but got false: error: %v", err)
+	}
+}
+
 func TestTriggerExpression(t *testing.T) {
 	event, err := testutil.GetEventForTx("0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d", 82)
 

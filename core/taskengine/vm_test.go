@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -855,8 +856,24 @@ func TestPreprocessText(t *testing.T) {
 			input:    strings.Repeat("{{ user.data.name }}", VMMaxPreprocessIterations+1),
 			expected: strings.Repeat("Alice", VMMaxPreprocessIterations) + "{{ user.data.name }}",
 		},
+		{
+			name:     "javascript expression - date",
+			input:    `{{ new Date("2014-04-07T13:58:10.104Z")}}`,
+			expected: "2014-04-07 13:58:10.104 +0000 UTC",
+		},
+		{
+			name:     "javascript object representation value",
+			input:    `{{ {a: 1, b: 2} }}`,
+			expected: "[object Object]",
+		},
+		{
+			name:     "javascript object representation var",
+			input:    `{{ user }}`,
+			expected: "[object Object]",
+		},
 	}
 
+	os.Setenv("TZ", "UTC")
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := vm.preprocessText(tt.input)

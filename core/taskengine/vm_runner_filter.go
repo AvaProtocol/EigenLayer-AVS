@@ -22,7 +22,7 @@ func NewFilterProcessor(vm *VM) *FilterProcessor {
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
-		jsvm: goja.New(),
+		jsvm: NewGojaVM(),
 	}
 
 	// These are built-in func
