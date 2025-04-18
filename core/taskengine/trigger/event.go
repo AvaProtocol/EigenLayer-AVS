@@ -247,16 +247,18 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 		for k, v := range envs {
 			jsvm.Set(k, v)
 		}
-		jsvm.Set(triggerVarName, map[string]interface{}{
+
+		triggerData := map[string]interface{}{
 			"data": map[string]interface{}{
 				"address": strings.ToLower(event.Address.Hex()),
 				"topics": lo.Map[common.Hash, string](event.Topics, func(topic common.Hash, _ int) string {
-					return "0x" + strings.ToLower(strings.TrimPrefix(topic.Hex(), "0x"))
+					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x"))
 				}),
 				"data":    "0x" + common.Bytes2Hex(event.Data),
-				"tx_hash": event.TxHash.Hex(),
+				"tx_hash": event.TxHash,
 			},
-		})
+		}
+		jsvm.Set(triggerVarName, triggerData)
 
 		result, err := jsvm.RunString(check.Program)
 

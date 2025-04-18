@@ -1,6 +1,7 @@
 package trigger
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
@@ -241,6 +242,8 @@ func TestTriggerExpression(t *testing.T) {
 			Name: "myEventTrigger",
 		},
 	}
+
+	fmt.Println(event)
 
 	program := `myEventTrigger.data.topics[0] == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" && myEventTrigger.data.topics[2] == "0xc114fb059434563dc65ac8d57e7976e3eac534f4"`
 
