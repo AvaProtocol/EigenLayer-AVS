@@ -75,4 +75,9 @@ func TestGetKeyWithSignature(t *testing.T) {
 	if sub != "0x578B110b0a7c06e66b7B1a33C39635304aaF733c" {
 		t.Errorf("invalid subject. expected 0x578B110b0a7c06e66b7B1a33C39635304aaF733c but got %s", sub)
 	}
+	
+	aud, _ := token.Claims.GetAudience()
+	if len(aud) != 1 || aud[0] != "11155111" {
+		t.Errorf("invalid audience. expected [11155111] but got %v", aud)
+	}
 }

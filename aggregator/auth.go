@@ -85,6 +85,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		ExpiresAt: jwt.NewNumericDate(payload.ExpiredAt.AsTime()),
 		Issuer:    auth.Issuer,
 		Subject:   payload.Owner,
+		Audience:  jwt.ClaimStrings{fmt.Sprintf("%d", payload.ChainId)},
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -141,6 +142,22 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 	if claims, ok := token.Claims.(jwt.MapClaims); ok {
 		if claims["sub"] == "" {
 			return nil, fmt.Errorf("%s", auth.InvalidAuthenticationKey)
+		}
+
+		if aud, ok := claims["aud"].([]interface{}); !ok || len(aud) == 0 {
+			return nil, fmt.Errorf("%s: missing chainId in audience", auth.InvalidAuthenticationKey)
+		} else {
+			chainIdStr := fmt.Sprintf("%d", r.chainID)
+			found := false
+			for _, a := range aud {
+				if a.(string) == chainIdStr {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("%s: invalid chainId in audience", auth.InvalidAuthenticationKey)
+			}
 		}
 
 		user := model.User{
