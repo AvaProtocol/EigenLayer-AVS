@@ -200,7 +200,12 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 }
 
 func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) {
+	if event == nil {
+		return false, fmt.Errorf("event is nil")
+	}
+
 	var err error = nil
+
 	if len(check.Matcher) > 0 {
 		// This is the simpler trigger. It's essentially an anyof
 		return lo.SomeBy(check.Matcher, func(x *avsproto.EventCondition_Matcher) bool {
