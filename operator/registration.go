@@ -38,7 +38,7 @@ func Status(configPath string) {
 		panic(fmt.Errorf("error creator operator from config: %w", err))
 	}
 
-	operator.ReportOperatorStatus()	
+	operator.ReportOperatorStatus()
 }
 
 // Registration specific functions
