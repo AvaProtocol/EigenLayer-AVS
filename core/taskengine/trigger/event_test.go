@@ -240,13 +240,12 @@ func TestTriggerExpressionHandleNull(t *testing.T) {
 		Program:      "invalid.data.topics[0] != null && invalid.nonExistentProperty.value == \"something\"",
 		TaskMetadata: taskMeta,
 	})
-	
+
 	if result {
 		t.Errorf("expect null handling to return false, but got true: error: %v", err)
 	}
 
 	event := testutil.MustGetEventForTx("0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d", 82)
-
 
 	for _, program := range []string{
 		`myEventTrigger.data.nonExistentField.substring(0, 10) == "0xddf252ad"`,
@@ -257,13 +256,12 @@ func TestTriggerExpressionHandleNull(t *testing.T) {
 			Program:      program,
 			TaskMetadata: taskMeta,
 		})
-		
+
 		if result {
 			t.Errorf("expect null handling to return false, but got true: error: %v", err)
 		}
 	}
 }
-
 
 func TestTriggerExpressionWithJavaScriptFunctions(t *testing.T) {
 	event, err := testutil.GetEventForTx("0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d", 82)
