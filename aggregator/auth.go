@@ -144,20 +144,10 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 			return nil, fmt.Errorf("%s", auth.InvalidAuthenticationKey)
 		}
 
-		if aud, ok := claims["aud"].([]interface{}); !ok || len(aud) == 0 {
-			return nil, fmt.Errorf("%s: missing chainId in audience", auth.InvalidAuthenticationKey)
-		} else {
-			chainIdStr := fmt.Sprintf("%d", r.chainID)
-			found := false
-			for _, a := range aud {
-				if a.(string) == chainIdStr {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return nil, fmt.Errorf("%s: invalid chainId in audience", auth.InvalidAuthenticationKey)
-			}
+		chainIdStr := fmt.Sprintf("%d", r.chainID)
+		aud, err := token.Claims.GetAudience()
+		if err != nil || len(aud) == 0 || aud[0] != chainIdStr {
+			return nil, fmt.Errorf("%s: invalid chainId in audience", auth.InvalidAuthenticationKey)
 		}
 
 		user := model.User{
