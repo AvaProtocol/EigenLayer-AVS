@@ -399,6 +399,11 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		panic(err)
 	}
 
+	smartWalletChainID, err := smartwalletClient.ChainID(context.Background())
+	if err != nil {
+		panic(err)
+	}
+
 	rpcServer := &RpcServer{
 		cache:  agg.cache,
 		db:     agg.db,
@@ -409,7 +414,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 
 		config:       agg.config,
 		operatorPool: agg.operatorPool,
-		chainID:      agg.chainID,
+		chainID:      smartWalletChainID,
 	}
 
 	// TODO: split node and aggregator
