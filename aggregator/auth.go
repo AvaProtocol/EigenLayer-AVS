@@ -43,6 +43,10 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		"chainId", payload.ChainId,
 	)
 
+	if r.chainID != nil && payload.ChainId != r.chainID.Int64() {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid chainId: requested chainId %d does not match SmartWallet chainId %d", payload.ChainId, r.chainID.Int64())
+	}
+
 	if strings.Contains(payload.Signature, ".") {
 		// API key directly
 		authenticated, err := auth.VerifyJwtKeyForUser(r.config.JwtSecret, payload.Signature, submitAddress)
