@@ -328,7 +328,13 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 		}
 
 		if reason.BlockNumber > 0 {
-			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["block_number"] = reason.BlockNumber
+			// Add both snake_case and camelCase versions for compatibility
+			dataMap := v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)
+
+			// Add both snake_case and camelCase versions for compatibility
+			dataMap["block_number"] = reason.BlockNumber
+			dataMap["blockNumber"] = reason.BlockNumber
+
 			v.parsedTriggerData.Block = &avsproto.Execution_BlockOutput{
 				BlockNumber: uint64(reason.BlockNumber),
 			}
