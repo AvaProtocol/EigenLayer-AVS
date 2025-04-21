@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/AvaProtocol/ap-avs/core/chainio/signer"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/signer"
 	"github.com/ethereum/go-ethereum/common"
 )
 

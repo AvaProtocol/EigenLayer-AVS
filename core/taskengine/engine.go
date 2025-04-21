@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AvaProtocol/ap-avs/core/apqueue"
-	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
-	"github.com/AvaProtocol/ap-avs/core/config"
-	"github.com/AvaProtocol/ap-avs/model"
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/allegro/bigcache/v3"
 	"github.com/ethereum/go-ethereum/common"
@@ -27,7 +27,7 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 const (
@@ -300,7 +300,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	task, err := model.NewTaskFromProtobuf(user, taskPayload)
 
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 
 	updates := map[string][]byte{}
@@ -537,7 +537,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 }
 
 func (n *Engine) GetTaskByID(taskID string) (*model.Task, error) {
-	for status, _ := range avsproto.TaskStatus_name {
+	for status := range avsproto.TaskStatus_name {
 		if rawTaskData, err := n.db.GetKey(TaskStorageKey(taskID, avsproto.TaskStatus(status))); err == nil {
 			task := model.NewTask()
 			err = task.FromStorageData(rawTaskData)
@@ -603,13 +603,13 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 			}, nil
 		}
 
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskTriggerError), fmt.Sprintf("error trigger task: %s", err.Error()))
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskTriggerError), "Error trigger task: %v", err)
 	}
 
 	data, err := json.Marshal(queueTaskData)
 	if err != nil {
 		n.logger.Error("error serialize trigger to json", err)
-		return nil, status.Errorf(codes.InvalidArgument, codes.InvalidArgument.String())
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 
 	jid, err := n.queue.Enqueue(JobTypeExecuteTask, payload.TaskId, data)

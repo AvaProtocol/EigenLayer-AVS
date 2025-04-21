@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"github.com/dop251/goja"
 	"github.com/samber/lo"
 
 	"github.com/ethereum/go-ethereum"
@@ -17,14 +17,14 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 var (
 	// To reduce api call we listen to these topics only
 	// a better idea is to only subscribe to what we need and re-load when new trigger is added
 	whitelistTopics = [][]common.Hash{
-		[]common.Hash{
+		{
 			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"), // erc20 transfer
 			//common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"), // UserOp
 			//common.HexToHash("0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"), // approve
@@ -200,7 +200,12 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 }
 
 func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) {
+	if event == nil {
+		return false, fmt.Errorf("event is nil")
+	}
+
 	var err error = nil
+
 	if len(check.Matcher) > 0 {
 		// This is the simpler trigger. It's essentially an anyof
 		return lo.SomeBy(check.Matcher, func(x *avsproto.EventCondition_Matcher) bool {
@@ -241,21 +246,24 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 		// This is the advance trigger with js evaluation based on trigger data
 		triggerVarName := check.TaskMetadata.GetTrigger().GetName()
 
-		jsvm := goja.New()
+		jsvm := taskengine.NewGojaVM()
+
 		envs := macros.GetEnvs(map[string]interface{}{})
 		for k, v := range envs {
 			jsvm.Set(k, v)
 		}
-		jsvm.Set(triggerVarName, map[string]interface{}{
+
+		triggerData := map[string]interface{}{
 			"data": map[string]interface{}{
 				"address": strings.ToLower(event.Address.Hex()),
 				"topics": lo.Map[common.Hash, string](event.Topics, func(topic common.Hash, _ int) string {
-					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x"))
 				}),
 				"data":    "0x" + common.Bytes2Hex(event.Data),
 				"tx_hash": event.TxHash,
 			},
-		})
+		}
+		jsvm.Set(triggerVarName, triggerData)
 
 		result, err := jsvm.RunString(check.Program)
 

@@ -8,20 +8,20 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/accounts/abi"
-	
-	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
-	"github.com/AvaProtocol/ap-avs/core/chainio/aa/paymaster"
-	"github.com/AvaProtocol/ap-avs/core/chainio/signer"
-	"github.com/AvaProtocol/ap-avs/core/config"
 
-	"github.com/AvaProtocol/ap-avs/pkg/eip1559"
-	"github.com/AvaProtocol/ap-avs/pkg/erc4337/bundler"
-	"github.com/AvaProtocol/ap-avs/pkg/erc4337/userop"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa/paymaster"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/signer"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 )
 
 var (
@@ -55,8 +55,8 @@ func GetVerifyingPaymasterRequestForDuration(address common.Address, duration ti
 		PaymasterAddress: address,
 		ValidUntil:       big.NewInt(currentTime + int64(duration.Seconds())),
 		// Create validUntil and validAfter values (1 hour from now and current time)
-		// Due to clock drift between server, we subtract 3 seconds to be on the safe side	
-		ValidAfter:       big.NewInt(currentTime - 3),
+		// Due to clock drift between server, we subtract 3 seconds to be on the safe side
+		ValidAfter: big.NewInt(currentTime - 3),
 	}
 }
 
@@ -122,7 +122,7 @@ func SendUserOp(
 	}
 
 	// When the userops get run on-chain, the entrypoint contract emits this event:
-	// UserOperationEvent (index_topic_1 bytes32 userOpHash, index_topic_2 address sender, index_topic_3 address paymaster, 
+	// UserOperationEvent (index_topic_1 bytes32 userOpHash, index_topic_2 address sender, index_topic_3 address paymaster,
 	//                     uint256 nonce, bool success, uint256 actualGasCost, uint256 actualGasUsed)
 	// Topic0 -> 0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f (event signature)
 	// Topic1 -> UserOp Hash
@@ -217,7 +217,7 @@ func BuildUserOp(
 	if err != nil {
 		return nil, fmt.Errorf("failed to get chain ID: %w", err)
 	}
-	
+
 	userOp.Signature, _ = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, dummySigForGasEstimation.Bytes())
 
 	gas, e := bundlerClient.EstimateUserOperationGas(context.Background(), userOp, aa.EntrypointAddress, map[string]any{})
@@ -285,31 +285,30 @@ func BuildUserOpWithPaymaster(
 		MaxFeePerGas:         userOp.MaxFeePerGas,
 		MaxPriorityFeePerGas: userOp.MaxPriorityFeePerGas,
 
-
 		// The value of PaymasterAndData and Signature are not used in the hash calculation but we need to keep them the same length
 		// Given the below assembly code in the contract
 		// assembly {
-        //     let ofs := userOp
-        //     let len := sub(sub(pnd.offset, ofs), 32)
-        //     ret := mload(0x40)
-        //     mstore(0x40, add(ret, add(len, 32)))
-        //     mstore(ret, len)
-        //     calldatacopy(add(ret, 32), ofs, len)
-        // }
-		PaymasterAndData:    common.FromHex("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
-		Signature:           common.FromHex("0x1234567890abcdef"),
+		//     let ofs := userOp
+		//     let len := sub(sub(pnd.offset, ofs), 32)
+		//     ret := mload(0x40)
+		//     mstore(0x40, add(ret, add(len, 32)))
+		//     mstore(ret, len)
+		//     calldatacopy(add(ret, 32), ofs, len)
+		// }
+		PaymasterAndData: common.FromHex("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+		Signature:        common.FromHex("0x1234567890abcdef"),
 	}
 
 	// Get the hash to sign from the PayMaster contract
 	paymasterHash, err := paymasterContract.GetHash(nil, paymasterUserOp, validUntil, validAfter)
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get paymaster hash: %w", err)
 	}
 
 	// Sign the paymaster hash with the controller's private key
 	paymasterSignature, err := signer.SignMessage(smartWalletConfig.ControllerPrivateKey, paymasterHash[:])
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign paymaster hash: %w", err)
 	}
@@ -334,7 +333,6 @@ func BuildUserOpWithPaymaster(
 	paymasterAndData := append(paymasterAddress.Bytes(), encodedTimestamps...)
 	paymasterAndData = append(paymasterAndData, paymasterSignature...)
 
-	
 	// Update the UserOperation with the properly encoded PaymasterAndData
 	userOp.PaymasterAndData = paymasterAndData
 
@@ -349,4 +347,3 @@ func BuildUserOpWithPaymaster(
 
 	return userOp, nil
 }
-

@@ -31,9 +31,9 @@ type AvsAndEigenMetrics struct {
 
 	uptime *prometheus.CounterVec
 
-	numWorkerLoop     *prometheus.CounterVec
+	numWorkerLoop *prometheus.CounterVec
 
-	numPingSent       *prometheus.CounterVec
+	numPingSent  *prometheus.CounterVec
 	durationPing *prometheus.GaugeVec
 
 	numCheckProcessed *prometheus.CounterVec
@@ -42,7 +42,7 @@ type AvsAndEigenMetrics struct {
 	numSignedTaskResponsesAcceptedByAggregator *prometheus.CounterVec
 
 	operatorAddress string
-	version string
+	version         string
 }
 
 const apNamespace = "ap"
@@ -77,8 +77,7 @@ func NewAvsAndEigenMetrics(avsName, operatorAddress, version string, eigenMetric
 				Namespace: apNamespace,
 				Name:      "ping_duration_seconds",
 				Help:      "The duration of ping check send to operator. If it spikes, it could indicator aggreator issues or operator network issue",
-			}, []string{"operator", "version",}),
-
+			}, []string{"operator", "version"}),
 
 		numCheckProcessed: promauto.With(reg).NewCounterVec(
 			prometheus.CounterOpts{
@@ -99,15 +98,15 @@ func NewAvsAndEigenMetrics(avsName, operatorAddress, version string, eigenMetric
 				Namespace: apNamespace,
 				Name:      "num_signed_task_responses_accepted_by_aggregator",
 				Help:      "The number of signed task responses accepted by the aggregator",
-			}, []string{"operator", "version",}),
+			}, []string{"operator", "version"}),
 
 		operatorAddress: operatorAddress,
-		version: version,
+		version:         version,
 	}
 }
 
 func (m *AvsAndEigenMetrics) IncNumTasksReceived(checkType string) {
-	m.numTasksReceived.WithLabelValues(m.operatorAddress, m.version, checkType).  Inc()
+	m.numTasksReceived.WithLabelValues(m.operatorAddress, m.version, checkType).Inc()
 }
 
 func (m *AvsAndEigenMetrics) IncNumTasksAcceptedByAggregator() {

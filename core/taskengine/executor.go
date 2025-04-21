@@ -7,13 +7,13 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/AvaProtocol/ap-avs/model"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 
-	"github.com/AvaProtocol/ap-avs/core/apqueue"
-	"github.com/AvaProtocol/ap-avs/core/config"
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 func NewExecutor(config *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger) *TaskExecutor {
@@ -171,5 +171,5 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		x.logger.Info("succesfully executing task", "task_id", task.Id, "triggermark", triggerMetadata)
 		return execution, nil
 	}
-	return execution, fmt.Errorf("Error executing task %s %v", task.Id, runTaskErr)
+	return execution, fmt.Errorf("Error executing task %s: %v", task.Id, runTaskErr)
 }

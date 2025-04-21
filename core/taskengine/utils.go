@@ -6,10 +6,19 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/AvaProtocol/ap-avs/pkg/erc20"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
+	"github.com/dop251/goja"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/shopspring/decimal"
 )
+
+// NewGojaVM creates a new Goja runtime and applies standard configurations.
+func NewGojaVM() *goja.Runtime {
+	vm := goja.New()
+	macros.ConfigureGojaRuntime(vm)
+	return vm
+}
 
 // Metadata holds token and block metadata
 type Metadata struct {

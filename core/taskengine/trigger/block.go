@@ -7,7 +7,7 @@ import (
 
 	"math/big"
 
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 
 	"github.com/ethereum/go-ethereum/core/types"
@@ -129,7 +129,7 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 				for interval, tasks := range b.schedule {
 					z := new(big.Int)
 					if z.Mod(header.Number, big.NewInt(int64(interval))).Cmp(zero) == 0 {
-						for taskID, _ := range tasks {
+						for taskID := range tasks {
 							b.triggerCh <- TriggerMetadata[int64]{
 								TaskID: taskID,
 								Marker: header.Number.Int64(),

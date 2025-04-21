@@ -3,9 +3,9 @@ package trigger
 import (
 	"testing"
 
-	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
-	"github.com/AvaProtocol/ap-avs/core/testutil"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 func TestTriggerTopicMatch(t *testing.T) {
@@ -27,7 +27,7 @@ func TestTriggerTopicMatch(t *testing.T) {
 		},
 
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "topics",
 				Value: []string{
 					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -58,7 +58,7 @@ func TestTriggerTopicNotMatch(t *testing.T) {
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "topics",
 				Value: []string{
 					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -90,7 +90,7 @@ func TestTriggerTopicMulti(t *testing.T) {
 	result, err := eventTrigger.Evaluate(event, &Check{
 
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "topics",
 				Value: []string{
 					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -106,14 +106,14 @@ func TestTriggerTopicMulti(t *testing.T) {
 
 	result, err = eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "topics",
 				Value: []string{
 					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 					"0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
 				},
 			},
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "topics",
 				Value: []string{
 					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
@@ -144,7 +144,7 @@ func TestTriggerAddress(t *testing.T) {
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "address",
 				Value: []string{
 					"0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
@@ -159,7 +159,7 @@ func TestTriggerAddress(t *testing.T) {
 
 	result, err = eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "address",
 				Value: []string{
 					"0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7237",
@@ -184,7 +184,7 @@ func TestTriggerAddressNegativeCase(t *testing.T) {
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "address",
 				Value: []string{
 					"0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7237",
@@ -209,7 +209,7 @@ func TestTriggerNonTransferEvent(t *testing.T) {
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 		Matcher: []*avsproto.EventCondition_Matcher{
-			&avsproto.EventCondition_Matcher{
+			{
 				Type: "topics",
 				Value: []string{
 					"0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0",
@@ -220,6 +220,112 @@ func TestTriggerNonTransferEvent(t *testing.T) {
 
 	if !result {
 		t.Errorf("expect match, but got false %v", err)
+	}
+}
+
+func TestTriggerExpressionHandleNull(t *testing.T) {
+	eventTrigger := NewEventTrigger(&RpcOption{
+		RpcURL:   testutil.GetTestRPCURL(),
+		WsRpcURL: testutil.GetTestRPCURL(),
+	}, make(chan TriggerMetadata[EventMark], 1000),
+		testutil.GetLogger())
+
+	taskMeta := &avsproto.SyncMessagesResp_TaskMetadata{
+		Trigger: &avsproto.TaskTrigger{
+			Name: "myEventTrigger",
+		},
+	}
+
+	result, err := eventTrigger.Evaluate(nil, &Check{
+		Program:      "invalid.data.topics[0] != null && invalid.nonExistentProperty.value == \"something\"",
+		TaskMetadata: taskMeta,
+	})
+
+	if result {
+		t.Errorf("expect null handling to return false, but got true: error: %v", err)
+	}
+
+	event := testutil.MustGetEventForTx("0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d", 82)
+
+	for _, program := range []string{
+		`myEventTrigger.data.nonExistentField.substring(0, 10) == "0xddf252ad"`,
+		`myEventTrigger.data.topics[99] == "0xddf252ad"`,
+		`invalid.data.topics[0] != null && invalid.nonExistentProperty.value == "something"`,
+	} {
+		result, err := eventTrigger.Evaluate(event, &Check{
+			Program:      program,
+			TaskMetadata: taskMeta,
+		})
+
+		if result {
+			t.Errorf("expect null handling to return false, but got true: error: %v", err)
+		}
+	}
+}
+
+func TestTriggerExpressionWithJavaScriptFunctions(t *testing.T) {
+	event, err := testutil.GetEventForTx("0x8f7c1f698f03d6d32c996b679ea1ebad45bbcdd9aa95d250dda74763cc0f508d", 82)
+
+	if err != nil {
+		t.Errorf("expect no error but got one: %v", err)
+	}
+
+	eventTrigger := NewEventTrigger(&RpcOption{
+		RpcURL:   testutil.GetTestRPCURL(),
+		WsRpcURL: testutil.GetTestRPCURL(),
+	}, make(chan TriggerMetadata[EventMark], 1000),
+		testutil.GetLogger())
+
+	taskMeta := &avsproto.SyncMessagesResp_TaskMetadata{
+		Trigger: &avsproto.TaskTrigger{
+			Name: "myEventTrigger",
+		},
+	}
+
+	// Test substring function
+	program := `myEventTrigger.data.topics[0].substring(0, 10) == "0xddf252ad"`
+
+	result, err := eventTrigger.Evaluate(event, &Check{
+		Program:      program,
+		TaskMetadata: taskMeta,
+	})
+	if !result {
+		t.Errorf("expect substring match to be true, but got false: error: %v", err)
+	}
+
+	// Test with multiple JavaScript functions
+	program = `myEventTrigger.data.topics[0].substring(0, 10) == "0xddf252ad" && 
+               myEventTrigger.data.topics[2].toLowerCase() == "0xc114fb059434563dc65ac8d57e7976e3eac534f4"`
+
+	result, err = eventTrigger.Evaluate(event, &Check{
+		Program:      program,
+		TaskMetadata: taskMeta,
+	})
+	if !result {
+		t.Errorf("expect complex expression to match, but got false: error: %v", err)
+	}
+
+	// Test with negative case
+	program = `myEventTrigger.data.topics[0].substring(2, 6) == "abcd"`
+
+	result, err = eventTrigger.Evaluate(event, &Check{
+		Program:      program,
+		TaskMetadata: taskMeta,
+	})
+	if result {
+		t.Errorf("expect expression to not match, but got true: error: %v", err)
+	}
+
+	// Test with string length and includes
+	program = `myEventTrigger.data.topics[0].length > 10 && 
+               myEventTrigger.data.topics[0].includes("ddf252ad")`
+
+	result, err = eventTrigger.Evaluate(event, &Check{
+		Program:      program,
+		TaskMetadata: taskMeta,
+	})
+	if !result {
+		t.Errorf("expect string functions to match, but got false: error: %v", err)
 	}
 }
 
@@ -340,11 +446,11 @@ func TestTriggerWithContractReadBindingInExpression(t *testing.T) {
 //
 //	/usr/local/go/src/runtime/panic.go:785 +0x124
 //
-// github.com/AvaProtocol/ap-avs/core/taskengine/trigger.(*EventTrigger).Evaluate(0x140000ba3e0?, 0x140004f1600, 0x140001e9f18)
+// github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger.(*EventTrigger).Evaluate(0x140000ba3e0?, 0x140004f1600, 0x140001e9f18)
 //
 //	/Users/vinh/Sites/oak/eigenlayer/EigenLayer-AVS/core/taskengine/trigger/event.go:185 +0x704
 //
-// github.com/AvaProtocol/ap-avs/core/taskengine/trigger.TestTriggerEventExpressionWontCrashOnInvalidInput(0x140004e6b60)
+// github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger.TestTriggerEventExpressionWontCrashOnInvalidInput(0x140004e6b60)
 //
 //	/Users/vinh/Sites/oak/eigenlayer/EigenLayer-AVS/core/taskengine/trigger/event_test.go:330 +0x1b0
 //
@@ -357,7 +463,7 @@ func TestTriggerWithContractReadBindingInExpression(t *testing.T) {
 //	/usr/local/go/src/testing/testing.go:1743 +0x314
 //
 // exit status 2
-// FAIL	github.com/AvaProtocol/ap-avs/core/taskengine/trigger	3.929s
+// FAIL	github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger	3.929s
 func TestTriggerEventExpressionWontCrashOnInvalidInput(t *testing.T) {
 	tests := []struct {
 		name          string
