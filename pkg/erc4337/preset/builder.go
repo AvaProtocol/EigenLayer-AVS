@@ -50,7 +50,7 @@ type VerifyingPaymasterRequest struct {
 }
 
 func GetVerifyingPaymasterRequestForDuration(address common.Address, duration time.Duration) *VerifyingPaymasterRequest {
-	currentTime := time.Now().Unix(	)
+	currentTime := time.Now().Unix()
 	return &VerifyingPaymasterRequest{
 		PaymasterAddress: address,
 		ValidUntil:       big.NewInt(currentTime + int64(duration.Seconds())),

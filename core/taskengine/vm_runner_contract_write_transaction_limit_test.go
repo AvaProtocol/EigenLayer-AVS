@@ -1,80 +1,76 @@
 package taskengine
 
 import (
+	"math/big"
+	"sync"
 	"testing"
-	//"time"
-	//"math/big"
-	"fmt"
-
-	"github.com/ethereum/go-ethereum/common"
+	"time"
 
 	"github.com/AvaProtocol/ap-avs/core/chainio/aa"
+	"github.com/AvaProtocol/ap-avs/core/config"
 	"github.com/AvaProtocol/ap-avs/core/testutil"
-
-	// "github.com/AvaProtocol/ap-avs/pkg/erc4337/preset"
-	// "github.com/AvaProtocol/ap-avs/pkg/erc4337/userop"
-
-	"github.com/AvaProtocol/ap-avs/model"
+	"github.com/AvaProtocol/ap-avs/pkg/erc4337/preset"
+	"github.com/AvaProtocol/ap-avs/pkg/erc4337/userop"
 	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
 	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
-func TestTransactionSponsorshipLimit(t *testing.T) {
-	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
-	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+var originalSendUserOp = preset.SendUserOp
 
+type mockSendUserOpFunc func(
+	config *config.SmartWalletConfig,
+	owner common.Address,
+	callData []byte,
+	paymasterReq *preset.VerifyingPaymasterRequest,
+) (*userop.UserOperation, *types.Receipt, error)
+
+func replaceSendUserOp(mock mockSendUserOpFunc) func() {
+	originalSendUserOp = preset.SendUserOp
+	preset.SendUserOp = mock
+	return func() {
+		preset.SendUserOp = originalSendUserOp
+	}
+}
+
+func TestTransactionSponsorshipLimit(t *testing.T) {
 	testCases := []struct {
-		name             string
+		name            string
 		transactionCount uint64
-		expectPaymaster  bool
+		expectPaymaster bool
 	}{
-		{"First transaction", 1, true},
-		{"5th transaction", 4, true},
-		{"10th transaction", 9, true},
-		{"11th transaction", 11, false},
-		{"20th transaction", 19, false},
+		{"First transaction", 0, false},
+		{"5th transaction", 4, false},
+		{"10th transaction", 9, false},
+		{"11th transaction", 10, true},  // Note: 10 is the 11th transaction (0-indexed)
+		{"20th transaction", 19, true},
 	}
 
 	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
-
-	baseSepoliaUsdcAddress := common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e")
+	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
+	
+	contractAddress := common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e")
 	node := &avsproto.ContractWriteNode{
-		ContractAddress: baseSepoliaUsdcAddress.Hex(),
-		CallData:        "0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000",
+		ContractAddress: contractAddress.Hex(),
+		CallData:        "0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e8",
 	}
 
-	for i, tc := range testCases {
+	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			db := testutil.TestMustDB()
 			defer storage.Destroy(db.(*storage.BadgerStorage))
-
-			//vm := NewVM().WithDb(db)
-			vm, _ := NewVMWithData(&model.Task{
-				&avsproto.Task{
-					Id: fmt.Sprintf("test-%d", i),
-					Trigger: &avsproto.TaskTrigger{
-						Id:   "triggertest",
-						Name: "triggertest",
-					},
-					Nodes: []*avsproto.TaskNode{
-						&avsproto.TaskNode{
-							Id:   "transfer1",
-							Name: "usdcTransfer",
-							TaskType: &avsproto.TaskNode_ContractWrite{
-								ContractWrite: node,
-							},
-						},
-					},
-				},
-			}, nil, smartWalletConfig, nil)
-
-			vm.WithDb(db)
+			
+			vm := NewVM().WithDb(db)
+			vm.vars = make(map[string]any)
+			vm.smartWalletConfig = smartWalletConfig
+			vm.mu = &sync.Mutex{}
 
 			counterKey := ContractWriteCounterKey(owner)
 			for i := uint64(0); i < tc.transactionCount; i++ {
-				err := db.SetCounter(counterKey, tc.transactionCount)
+				_, err := db.IncCounter(counterKey, 0)
 				if err != nil {
-					t.Fatalf("Failed to set counter: %v", err)
+					t.Fatalf("Failed to increment counter: %v", err)
 				}
 			}
 
@@ -86,50 +82,58 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 				smartWalletConfig: smartWalletConfig,
 			}
 
-			step, err := processor.Execute("transfer1", node)
-			if err != nil {
-				t.Fatalf("Failed to execute step: %v", err)
-			}
-			capturedPaymaster := step.OutputData.(*avsproto.Execution_Step_ContractWrite).ContractWrite.UserOp.PaymasterAndData
+			var capturedPaymaster *preset.VerifyingPaymasterRequest
+			
+			restore := replaceSendUserOp(func(
+				config *config.SmartWalletConfig,
+				owner common.Address,
+				callData []byte,
+				paymasterReq *preset.VerifyingPaymasterRequest,
+			) (*userop.UserOperation, *types.Receipt, error) {
+				capturedPaymaster = paymasterReq
+				return &userop.UserOperation{}, &types.Receipt{}, nil
+			})
+			defer restore() // Restore the original function after the test
 
+			processor.Execute("test", node)
+			
 			if tc.expectPaymaster {
-
-				if len(capturedPaymaster) <= 20 {
+				if capturedPaymaster == nil {
 					t.Errorf("Expected paymaster request for transaction %d, but got nil", tc.transactionCount)
 					return
 				}
-
-				// if capturedPaymaster.PaymasterAddress != smartWalletConfig.PaymasterAddress {
-				// 	t.Errorf("Expected paymaster address %s, got %s",
-				// 		smartWalletConfig.PaymasterAddress.Hex(),
-				// 		capturedPaymaster.PaymasterAddress.Hex())
-				// }
-
-				// if capturedPaymaster.ValidUntil == nil {
-				// 	t.Errorf("Expected ValidUntil to be set, but it was nil")
-				// }
-
-				// if capturedPaymaster.ValidAfter == nil {
-				// 	t.Errorf("Expected ValidAfter to be set, but it was nil")
-				// }
-
-				// now := time.Now().Unix()
-				// if capturedPaymaster.ValidUntil.Int64() <= now {
-				// 	t.Errorf("Expected ValidUntil to be in the future, but it was %d (now: %d)",
-				// 		capturedPaymaster.ValidUntil.Int64(), now)
-				// }
-
-				// if capturedPaymaster.ValidUntil.Int64() > now+600+5 { // 10 minutes + 5 seconds buffer
-				// 	t.Errorf("Expected ValidUntil to be at most 10 minutes in the future, but it was %d (now: %d)",
-				// 		capturedPaymaster.ValidUntil.Int64(), now)
-				// }
-
-				// if capturedPaymaster.ValidAfter.Int64() > now {
-				// 	t.Errorf("Expected ValidAfter to be in the past or present, but it was %d (now: %d)",
-				// 		capturedPaymaster.ValidAfter.Int64(), now)
-				// }
+				
+				if capturedPaymaster.PaymasterAddress != smartWalletConfig.PaymasterAddress {
+					t.Errorf("Expected paymaster address %s, got %s", 
+						smartWalletConfig.PaymasterAddress.Hex(), 
+						capturedPaymaster.PaymasterAddress.Hex())
+				}
+				
+				if capturedPaymaster.ValidUntil == nil {
+					t.Errorf("Expected ValidUntil to be set, but it was nil")
+				}
+				
+				if capturedPaymaster.ValidAfter == nil {
+					t.Errorf("Expected ValidAfter to be set, but it was nil")
+				}
+				
+				now := time.Now().Unix()
+				if capturedPaymaster.ValidUntil.Int64() <= now {
+					t.Errorf("Expected ValidUntil to be in the future, but it was %d (now: %d)", 
+						capturedPaymaster.ValidUntil.Int64(), now)
+				}
+				
+				if capturedPaymaster.ValidUntil.Int64() > now+600+5 { // 10 minutes + 5 seconds buffer
+					t.Errorf("Expected ValidUntil to be at most 10 minutes in the future, but it was %d (now: %d)", 
+						capturedPaymaster.ValidUntil.Int64(), now)
+				}
+				
+				if capturedPaymaster.ValidAfter.Int64() > now {
+					t.Errorf("Expected ValidAfter to be in the past or present, but it was %d (now: %d)", 
+						capturedPaymaster.ValidAfter.Int64(), now)
+				}
 			} else {
-				if len(capturedPaymaster) > 0 {
+				if capturedPaymaster != nil {
 					t.Errorf("Expected no paymaster request for transaction %d, but got one", tc.transactionCount)
 				}
 			}

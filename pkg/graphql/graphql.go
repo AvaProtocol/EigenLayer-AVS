@@ -1,4 +1,4 @@
-// Go community is big on static type and codegen. As the result, many sophicated package are based on the idea of static typing the query and code generate the client
+
 
 package graphql
 

@@ -34,7 +34,7 @@ func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConf
 }
 
 func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
-	t0 := time.Now().Unix()
+	t0 := time.Now().UnixMilli()
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
 		Log:        "",
@@ -49,7 +49,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 	defer func() {
 		s.Log = log.String()
-		s.EndAt = time.Now().Unix()
+		s.EndAt = time.Now().UnixMilli()
 		s.Success = err == nil
 	}()
 
@@ -83,7 +83,6 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	if total < 10 {
 		paymasterRequest = preset.GetVerifyingPaymasterRequestForDuration(r.smartWalletConfig.PaymasterAddress, 15 * time.Minute)
 	}
-
 	userOp, txReceipt, err := preset.SendUserOp(
 		r.smartWalletConfig,
 		r.owner,
@@ -97,11 +96,14 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	}
 	r.vm.db.IncCounter(ContractWriteCounterKey(r.owner), 0)
 
-	bloom, _ := txReceipt.Bloom.MarshalText()
+	var bloom []byte
+	if txReceipt != nil {
+		bloom, _ = txReceipt.Bloom.MarshalText()
+	}
 
 	blobGasPrice := uint64(0)
 
-	if txReceipt.BlobGasPrice != nil {
+	if txReceipt != nil && txReceipt.BlobGasPrice != nil {
 		blobGasPrice = uint64(txReceipt.BlobGasPrice.Int64())
 	}
 

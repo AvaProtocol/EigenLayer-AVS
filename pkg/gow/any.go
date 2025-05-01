@@ -25,8 +25,8 @@ func SliceToStructPbSlice(arr []interface{}) []*structpb.Value {
 
 			// Check both pointer and value types
 			if t == reflect.TypeOf(&big.Int{}) || t == reflect.TypeOf(big.Int{}) {
-				value, _ := structpb.NewValue(item.(*big.Int).String())
-				return value
+				bigIntValue, _ := structpb.NewValue(item.(*big.Int).String())
+				return bigIntValue
 			}
 			return nil
 		}

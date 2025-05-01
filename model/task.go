@@ -117,7 +117,7 @@ func (t *Task) Key() []byte {
 
 func (t *Task) SetCompleted() {
 	t.Status = avsproto.TaskStatus_Completed
-	t.CompletedAt = time.Now().Unix()
+	t.CompletedAt = time.Now().UnixMilli()
 }
 
 func (t *Task) SetActive() {
@@ -126,12 +126,12 @@ func (t *Task) SetActive() {
 
 func (t *Task) SetFailed() {
 	t.Status = avsproto.TaskStatus_Failed
-	t.CompletedAt = time.Now().Unix()
+	t.CompletedAt = time.Now().UnixMilli()
 }
 
 func (t *Task) SetCanceled() {
 	t.Status = avsproto.TaskStatus_Canceled
-	t.CompletedAt = time.Now().Unix()
+	t.CompletedAt = time.Now().UnixMilli()
 }
 
 // Check whether the task own by the given address
@@ -146,7 +146,7 @@ func (t *Task) IsRunable() bool {
 	// When MaxExecution is 0, it is unlimited run
 	reachedMaxRun := t.MaxExecution > 0 && t.TotalExecution >= t.MaxExecution
 
-	reachedExpiredTime := t.ExpiredAt > 0 && time.Unix(t.ExpiredAt, 0).Before(time.Now())
+	reachedExpiredTime := t.ExpiredAt > 0 && time.Unix(t.ExpiredAt/1000, 0).Before(time.Now())
 
 	return !reachedMaxRun && !reachedExpiredTime
 }
