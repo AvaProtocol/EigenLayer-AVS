@@ -1,7 +1,8 @@
 name: Publish Dev Docker image upon staging change
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches:
       - staging
     paths:
@@ -13,6 +14,7 @@ on:
 
 jobs:
   publish-staging-build:
+    if: github.event.pull_request.merged == true
     name: Publish staging build docker image to dockerhub
     runs-on: 'ubuntu-latest'
     steps:
@@ -24,6 +26,28 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Ensure fetch-depth is 0 for git log
+
+      - name: Determine Tag Prefix from Source Branch
+        id: vars
+        run: |
+          RAW_BRANCH_NAME="${{ github.event.pull_request.head.ref }}" # Get source branch directly
+          TAG_PREFIX="" 
+
+          if [[ -n "$RAW_BRANCH_NAME" ]]; then
+            # Sanitize the branch name for use in a Docker tag:
+            # 1. Replace '/' with '-'
+            # 2. Keep only alphanumeric characters, '.', and '-'
+            # 3. Replace sequences of invalid characters with a single '-'
+            # 4. Remove leading/trailing '-'
+            SANITIZED_NAME=$(echo "$RAW_BRANCH_NAME" | sed 's|/|-|g' | tr -cs 'a-zA-Z0-9.-' '-' | sed 's/--\\+/-/g' | sed 's/^-*//;s/-*$//')
+            if [[ -n "$SANITIZED_NAME" ]]; then
+              TAG_PREFIX="$SANITIZED_NAME"
+            fi
+          fi
+          echo "TAG_PREFIX=${TAG_PREFIX}" >> $GITHUB_OUTPUT
+        shell: bash
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -47,7 +71,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           build-args: |
-            RELEASE_TAG=staging-${{ github.sha }}
+            RELEASE_TAG=${{ steps.vars.outputs.TAG_PREFIX }}${{ steps.vars.outputs.TAG_PREFIX:+'-' }}${{ github.sha }}
             COMMIT_SHA=${{ github.sha }}
           platforms: linux/amd64,linux/arm64
           context: .
