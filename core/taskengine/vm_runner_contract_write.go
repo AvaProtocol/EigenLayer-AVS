@@ -101,7 +101,8 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		return s, err
 	}
 	
-	if err := r.vm.db.IncCounter(ContractWriteCounterKey(r.owner), 0); err != nil {
+	_, err = r.vm.db.IncCounter(ContractWriteCounterKey(r.owner), 0)
+	if err != nil {
 		if r.vm.logger != nil {
 			r.vm.logger.Error("failed to increment counter", "error", err)
 		}
