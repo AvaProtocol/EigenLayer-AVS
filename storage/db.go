@@ -99,7 +99,9 @@ func (s *BadgerStorage) Setup() error {
 
 func (s *BadgerStorage) Close() error {
 	for _, seq := range s.seqs {
-		seq.Release()
+		if err := seq.Release(); err != nil {
+			return err
+		}
 	}
 	return s.db.Close()
 }
