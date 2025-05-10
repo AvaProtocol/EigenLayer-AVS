@@ -112,7 +112,6 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 			capturedPaymaster := step.OutputData.(*avsproto.Execution_Step_ContractWrite).ContractWrite.UserOp.PaymasterAndData
 
 			if tc.expectPaymaster {
-
 				if len(capturedPaymaster) <= 20 {
 					t.Errorf("Expected paymaster request for transaction %d, but got nil", tc.transactionCount)
 					return
