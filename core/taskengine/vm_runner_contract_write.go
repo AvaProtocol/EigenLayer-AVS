@@ -87,7 +87,6 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// TODO: move to config
 	if total < 10 || isWhitelistedAddress(r.owner, r.smartWalletConfig.WhitelistAddresses) {
 		paymasterRequest = preset.GetVerifyingPaymasterRequestForDuration(r.smartWalletConfig.PaymasterAddress, 15*time.Minute)
-
 	}
 
 	userOp, txReceipt, err := preset.SendUserOp(

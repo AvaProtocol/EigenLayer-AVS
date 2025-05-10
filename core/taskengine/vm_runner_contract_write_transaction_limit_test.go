@@ -62,7 +62,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 			if tc.isWhitelisted {
 				smartWalletConfig.WhitelistAddresses = []common.Address{owner}
 			} else {
-				smartWalletConfig.WhitelistAddresses = nil
+				smartWalletConfig.WhitelistAddresses = []common.Address{}
 			}
 
 			//vm := NewVM().WithDb(db)
