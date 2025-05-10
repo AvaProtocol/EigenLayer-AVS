@@ -74,7 +74,9 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) (*avsproto.Execution, error) {
 	defer func() {
 		// Delete the task trigger queue when we're done, the execution log is available in main task storage at this point
-		x.db.GetKey(TaskTriggerKey(task, queueData.ExecutionID))
+		if _, err := x.db.GetKey(TaskTriggerKey(task, queueData.ExecutionID)); err != nil {
+			x.logger.Debug("Failed to get task trigger key", "error", err, "task_id", task.Id, "execution_id", queueData.ExecutionID)
+		}
 	}()
 
 	if queueData == nil || queueData.ExecutionID == "" {

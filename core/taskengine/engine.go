@@ -909,10 +909,12 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	if err = n.db.BatchWrite(updates); err == nil {
-		n.db.Move(
+		if moveErr := n.db.Move(
 			TaskStorageKey(task.Id, oldStatus),
 			TaskStorageKey(task.Id, task.Status),
-		)
+		); moveErr != nil {
+			n.logger.Error("failed to move task", "error", moveErr, "task_id", task.Id)
+		}
 
 		delete(n.tasks, task.Id)
 	} else {
