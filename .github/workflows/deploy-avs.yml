@@ -1,0 +1,57 @@
+name: Manual AVS Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment for deployment'
+        required: true
+        type: choice
+        options:
+          - ethereum
+          - sepolia
+          - base
+          - base-sepolia
+
+jobs:
+  aggregator:
+    runs-on: ubuntu-latest
+    environment: 
+      name: ${{ inputs.environment }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: SSH and Deploy
+      uses: appleboy/ssh-action@v0.1.5
+      with:
+        host: ${{ secrets.AVS_SERVER_HOST }}
+        username: ava
+        key: ${{ secrets.AVS_SSH_KEY }}
+        script: |
+          echo "Deploying to environment: ${{ inputs.environment }}"
+          cd $HOME/ap-aggregator-setup/${{ inputs.environment }}
+          docker compose pull
+          docker compose up -d --force-recreate 
+
+  operator:
+    runs-on: ubuntu-latest
+    environment: 
+      name: ${{ inputs.environment }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: SSH and Deploy
+      uses: appleboy/ssh-action@v0.1.5
+      with:
+        host: ${{ secrets.AVS_SERVER_HOST }}
+        username: ava
+        key: ${{ secrets.AVS_SSH_KEY }}
+        script: |
+          echo "Deploying to environment: ${{ inputs.environment }}"
+          cd $HOME/ap-operator-setup/${{ inputs.environment == 'sepolia' && 'holesky' || inputs.environment }}
+          docker compose pull
+          docker compose up -d --force-recreate 
