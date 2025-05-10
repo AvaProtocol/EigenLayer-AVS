@@ -41,6 +41,7 @@ type RpcServer struct {
 	ethrpc *ethclient.Client
 
 	smartWalletRpc *ethclient.Client
+	chainID        *big.Int
 }
 
 // Get nonce of an existing smart wallet of a given owner
@@ -397,6 +398,11 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		panic(err)
 	}
 
+	smartWalletChainID, err := smartwalletClient.ChainID(context.Background())
+	if err != nil {
+		panic(err)
+	}
+
 	rpcServer := &RpcServer{
 		cache:  agg.cache,
 		db:     agg.db,
@@ -407,6 +413,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 
 		config:       agg.config,
 		operatorPool: agg.operatorPool,
+		chainID:      smartWalletChainID,
 	}
 
 	// TODO: split node and aggregator
