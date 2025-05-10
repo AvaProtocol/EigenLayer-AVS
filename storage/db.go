@@ -359,7 +359,6 @@ func (a *BadgerStorage) ListKeys(prefix string) ([]string, error) {
 			keys = append(keys, fmt.Sprintf("%s", key))
 		}
 		return nil
-
 	})
 	if err == nil {
 		return keys, nil
