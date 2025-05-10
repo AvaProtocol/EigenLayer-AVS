@@ -12,12 +12,12 @@ import (
 func LoadSecretForTask(db storage.Storage, task *model.Task) (map[string]string, error) {
 	secrets := map[string]string{}
 
-	if task.Owner == "" {
+	if task.Task.Owner == "" {
 		return nil, fmt.Errorf("missing user in task structure")
 	}
 
 	user := &model.User{
-		Address: common.HexToAddress(task.Owner),
+		Address: common.HexToAddress(task.Task.Owner),
 	}
 
 	prefixes := []string{
@@ -51,7 +51,7 @@ func LoadSecretForTask(db storage.Storage, task *model.Task) (map[string]string,
 			continue
 		}
 
-		if secretWithNameOnly.WorkflowID == task.Id {
+		if secretWithNameOnly.WorkflowID == task.Task.Id {
 			if value, err := db.GetKey([]byte(k)); err == nil {
 				secrets[secretWithNameOnly.Name] = string(value)
 			}

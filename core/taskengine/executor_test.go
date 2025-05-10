@@ -3,9 +3,11 @@ package taskengine
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
@@ -129,6 +131,10 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 }
 
 func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
+	if os.Getenv("CONTROLLER_PRIVATE_KEY") == "" {
+		t.Skip("Skipping test because CONTROLLER_PRIVATE_KEY is not set")
+	}
+	
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 	db := testutil.TestMustDB()
@@ -217,6 +223,10 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 }
 
 func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
+	if os.Getenv("CONTROLLER_PRIVATE_KEY") == "" {
+		t.Skip("Skipping test because CONTROLLER_PRIVATE_KEY is not set")
+	}
+	
 	// Set up a test HTTP server that returns a 503 status code
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -312,6 +322,10 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 
 // TestExecutorRunTaskReturnAllExecutionData to test the happy path and return all the relevant data a task needed
 func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
+	if os.Getenv("CONTROLLER_PRIVATE_KEY") == "" {
+		t.Skip("Skipping test because CONTROLLER_PRIVATE_KEY is not set")
+	}
+	
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 	db := testutil.TestMustDB()

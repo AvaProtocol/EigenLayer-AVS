@@ -305,7 +305,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	updates := map[string][]byte{}
 
-	updates[string(TaskStorageKey(task.Id, task.Status))], err = task.ToJSON()
+	updates[string(TaskStorageKey(task.Task.Id, task.Task.Status))], err = task.ToJSON()
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Active))
 
 	if err = n.db.BatchWrite(updates); err != nil {
@@ -314,7 +314,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	n.lock.Lock()
 	defer n.lock.Unlock()
-	n.tasks[task.Id] = task
+	n.tasks[task.Task.Id] = task
 
 	return task, nil
 }
@@ -365,31 +365,31 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			}
 
 			for _, task := range n.tasks {
-				if _, ok := n.trackSyncedTasks[address].TaskID[task.Id]; ok {
+				if _, ok := n.trackSyncedTasks[address].TaskID[task.Task.Id]; ok {
 					continue
 				}
 
 				resp := avsproto.SyncMessagesResp{
-					Id: task.Id,
+					Id: task.Task.Id,
 					Op: avsproto.MessageOp_MonitorTaskTrigger,
 
 					TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
-						TaskId:    task.Id,
-						Remain:    task.MaxExecution,
-						ExpiredAt: task.ExpiredAt,
+						TaskId:    task.Task.Id,
+						Remain:    task.Task.MaxExecution,
+						ExpiredAt: task.Task.ExpiredAt,
 						Trigger:   task.Trigger,
 					},
 				}
-				n.logger.Info("stream check to operator", "task_id", task.Id, "operator", payload.Address, "resp", resp)
+				n.logger.Info("stream check to operator", "task_id", task.Task.Id, "operator", payload.Address, "resp", resp)
 
 				if err := srv.Send(&resp); err != nil {
 					// return error to cause client to establish re-connect the connection
-					n.logger.Info("error sending check to operator", "task_id", task.Id, "operator", payload.Address)
+					n.logger.Info("error sending check to operator", "task_id", task.Task.Id, "operator", payload.Address)
 					return fmt.Errorf("cannot send data back to grpc channel")
 				}
 
 				n.lock.Lock()
-				n.trackSyncedTasks[address].TaskID[task.Id] = true
+				n.trackSyncedTasks[address].TaskID[task.Task.Id] = true
 				n.lock.Unlock()
 			}
 		}
@@ -503,7 +503,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		if err := task.FromStorageData(taskRawByte); err != nil {
 			continue
 		}
-		task.Id = taskID
+		task.Task.Id = taskID
 
 		if t, err := task.ToProtoBuf(); err == nil {
 			taskResp.Items = append(taskResp.Items, &avsproto.ListTasksResp_Item{
@@ -859,11 +859,11 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error)
 		return false, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
-	if task.Status == avsproto.TaskStatus_Executing {
+	if task.Task.Status == avsproto.TaskStatus_Executing {
 		return false, fmt.Errorf("Only non executing task can be deleted")
 	}
 
-	n.db.Delete(TaskStorageKey(task.Id, task.Status))
+	n.db.Delete(TaskStorageKey(task.Task.Id, task.Task.Status))
 	n.db.Delete(TaskUserKey(task))
 
 	return true, nil
@@ -876,23 +876,23 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 		return false, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
-	if task.Status != avsproto.TaskStatus_Active {
+	if task.Task.Status != avsproto.TaskStatus_Active {
 		return false, fmt.Errorf("Only active task can be cancelled")
 	}
 
 	updates := map[string][]byte{}
-	oldStatus := task.Status
+	oldStatus := task.Task.Status
 	task.SetCanceled()
-	updates[string(TaskStorageKey(task.Id, oldStatus))], err = task.ToJSON()
-	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
+	updates[string(TaskStorageKey(task.Task.Id, oldStatus))], err = task.ToJSON()
+	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Task.Status))
 
 	if err = n.db.BatchWrite(updates); err == nil {
 		n.db.Move(
-			TaskStorageKey(task.Id, oldStatus),
-			TaskStorageKey(task.Id, task.Status),
+			TaskStorageKey(task.Task.Id, oldStatus),
+			TaskStorageKey(task.Task.Id, task.Task.Status),
 		)
 
-		delete(n.tasks, task.Id)
+		delete(n.tasks, task.Task.Id)
 	} else {
 		return false, err
 	}
