@@ -309,7 +309,12 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	updates := map[string][]byte{}
 
-	updates[string(TaskStorageKey(task.Id, task.Status))], err = task.ToJSON()
+	taskJSON, err := task.ToJSON()
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.Internal, "Failed to serialize task: %v", err)
+	}
+	
+	updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Active))
 
 	if err = n.db.BatchWrite(updates); err != nil {
