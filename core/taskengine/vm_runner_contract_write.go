@@ -175,10 +175,13 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	}
 
 	s.OutputData = outputData
-	r.SetOutputVarForStep(stepID, map[string]any{
-		"userOp":    outputData.ContractWrite.UserOp,
-		"txReceipt": outputData.ContractWrite.TxReceipt,
-	})
+	outputVars := map[string]any{
+		"userOp": outputData.ContractWrite.UserOp,
+	}
+	if txReceipt != nil {
+		outputVars["txReceipt"] = outputData.ContractWrite.TxReceipt
+	}
+	r.SetOutputVarForStep(stepID, outputVars)
 
 	return s, nil
 }
