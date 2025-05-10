@@ -9,19 +9,19 @@ import (
 	"sync"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"github.com/dop251/goja"
+
 	"github.com/samber/lo"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/AvaProtocol/ap-avs/core/config"
-	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
-	"github.com/AvaProtocol/ap-avs/model"
-	"github.com/AvaProtocol/ap-avs/pkg/erc20"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 type VMState string
@@ -135,10 +135,10 @@ type VM struct {
 	// smartWalletConfig contains the smart wallet config for the task. It contains the bundler url, entrypoint address, paymaster address, wallet factory address, etc.
 	smartWalletConfig *config.SmartWalletConfig
 
-	logger            sdklogging.Logger
+	logger sdklogging.Logger
 
-	// db is used for tracking counter in some nodes, not every node needs it. Example, in contract write we only sponsor first N run so we track this off-chain. Only for tx less than this we will generate PaymasterAndData field	
-	db                storage.Storage
+	// db is used for tracking counter in some nodes, not every node needs it. Example, in contract write we only sponsor first N run so we track this off-chain. Only for tx less than this we will generate PaymasterAndData field
+	db storage.Storage
 }
 
 func NewVM() *VM {
@@ -167,7 +167,7 @@ func (v *VM) WithLogger(logger sdklogging.Logger) *VM {
 	return v
 }
 func (v *VM) WithDb(db storage.Storage) *VM {
-	v.db = db	
+	v.db = db
 
 	return v
 }
@@ -293,13 +293,18 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 				}
 
 				v.parsedTriggerData.TransferLog = &avsproto.Execution_TransferLogOutput{
-					TokenName:        tokenMetadata.Name,
-					TokenSymbol:      tokenMetadata.Symbol,
-					TokenDecimals:    uint32(tokenMetadata.Decimals),
-					TransactionHash:  event.TxHash.Hex(),
-					Address:          event.Address.Hex(),
-					BlockNumber:      event.BlockNumber,
-					BlockTimestamp:   blockHeader.Time,
+					TokenName:       tokenMetadata.Name,
+					TokenSymbol:     tokenMetadata.Symbol,
+					TokenDecimals:   uint32(tokenMetadata.Decimals),
+					TransactionHash: event.TxHash.Hex(),
+					Address:         event.Address.Hex(),
+					BlockNumber:     event.BlockNumber,
+					// in Ethereum, timestamp is in seconds, but in our app we use milliseconds, so we need to convert it
+					// https://docs.soliditylang.org/en/latest/units-and-global-variables.html#block-and-transaction-properties
+					// This is requested in ticket https://github.com/AvaProtocol/EigenLayer-AVS/issues/191 and implemented in https://github.com/AvaProtocol/EigenLayer-AVS/pull/192/files
+					// But in that PR, the avs.proto file is updated and documented that this field is in milliseconds but we forgot to update the field in the code.
+					// This update happen at a time later and migration is configured to reflect the change in PR 192.
+					BlockTimestamp:   blockHeader.Time * 1000,
 					FromAddress:      parseTransfer.From.String(),
 					ToAddress:        parseTransfer.To.String(),
 					Value:            parseTransfer.Value.String(),
@@ -323,7 +328,13 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 		}
 
 		if reason.BlockNumber > 0 {
-			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["block_number"] = reason.BlockNumber
+			// Add both snake_case and camelCase versions for compatibility
+			dataMap := v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)
+
+			// Add both snake_case and camelCase versions for compatibility
+			dataMap["block_number"] = reason.BlockNumber
+			dataMap["blockNumber"] = reason.BlockNumber
+
 			v.parsedTriggerData.Block = &avsproto.Execution_BlockOutput{
 				BlockNumber: uint64(reason.BlockNumber),
 			}
@@ -608,8 +619,8 @@ func (v *VM) preprocessText(text string) string {
 		return text
 	}
 
-	// Initialize goja runtime
-	jsvm := goja.New()
+	// Initialize goja runtime using the new constructor
+	jsvm := NewGojaVM()
 
 	for key, value := range v.vars {
 		jsvm.Set(key, value)
@@ -663,7 +674,19 @@ func (v *VM) preprocessText(text string) string {
 		}
 
 		// Replace the expression with its evaluated result
-		replacement := fmt.Sprintf("%v", evaluated.Export())
+		exportedValue := evaluated.Export()
+		var replacement string
+
+		if _, ok := exportedValue.(map[string]interface{}); ok {
+			// In Golang, it's better because it can return the actualy object data. But in JavaScript, it will return "[object Object]",
+			// We're mimicking the behavior of Retool here to follow the script gotcha.
+			// In real of userness the golang might be useful for debugging because it's will return the actual object data, eg `map[id:123 message:test]`
+			// but at the same time, map ins't  concept in JavaScript, so end user might get confused
+			replacement = "[object Object]"
+		} else {
+			replacement = fmt.Sprintf("%v", exportedValue)
+		}
+
 		result = result[:start] + replacement + result[end+2:]
 		currentIteration++
 	}
@@ -673,7 +696,7 @@ func (v *VM) preprocessText(text string) string {
 
 func (v *VM) CollectInputs() []string {
 	inputs := []string{}
-	for k, _ := range v.vars {
+	for k := range v.vars {
 		if slices.Contains(macros.MacroFuncs, k) {
 			continue
 		}

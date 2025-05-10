@@ -7,7 +7,7 @@ import (
 
 func TestLastSeen(t *testing.T) {
 	now := time.Now()
-	
+
 	testCases := []struct {
 		name           string
 		lastPingEpoch  int64
@@ -53,7 +53,7 @@ func TestLastSeen(t *testing.T) {
 				LastPingEpoch: tc.lastPingEpoch,
 				Version:       "1.0.0",
 			}
-			
+
 			result := node.LastSeen()
 			if result != tc.expectedFormat {
 				t.Errorf("Expected format %s, got %s", tc.expectedFormat, result)

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/AvaProtocol/ap-avs/core/auth"
-	"github.com/AvaProtocol/ap-avs/model"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"

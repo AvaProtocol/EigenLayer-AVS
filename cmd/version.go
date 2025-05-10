@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/AvaProtocol/ap-avs/version"
+	"github.com/AvaProtocol/EigenLayer-AVS/version"
 )
 
 // versionCmd represents the version command

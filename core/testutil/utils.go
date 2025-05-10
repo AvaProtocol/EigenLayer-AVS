@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/allegro/bigcache/v3"
 	"github.com/ethereum/go-ethereum/common"
@@ -16,9 +16,9 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/AvaProtocol/ap-avs/core/config"
-	"github.com/AvaProtocol/ap-avs/model"
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 const (
@@ -50,6 +50,14 @@ func GetRpcClient() *ethclient.Client {
 	}
 
 	return client
+}
+
+func MustGetEventForTx(txHash string, evtIndex uint64) *types.Log {
+	event, err := GetEventForTx(txHash, evtIndex)
+	if err != nil {
+		panic(err)
+	}
+	return event
 }
 
 func GetEventForTx(txHash string, evtIndex uint64) (*types.Log, error) {

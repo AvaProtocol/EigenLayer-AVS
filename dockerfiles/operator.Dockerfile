@@ -1,4 +1,4 @@
-FROM golang:1.23 AS builder
+FROM golang:1.24 AS builder
 ARG RELEASE_TAG
 ARG COMMIT_SHA
 
@@ -11,8 +11,8 @@ RUN go mod download
 COPY . ./
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
-    -ldflags "-X github.com/AvaProtocol/ap-avs/version.semver=$RELEASE_TAG" \
-    -ldflags "-X github.com/AvaProtocol/ap-avs/version.revision=$COMMIT_SHA" \
+    -ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.semver=$RELEASE_TAG" \
+    -ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.revision=$COMMIT_SHA" \
     -o /ava
 
 

@@ -11,7 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/oklog/ulid/v2"
 
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 type Task struct {

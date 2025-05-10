@@ -9,8 +9,8 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/AvaProtocol/ap-avs/core/taskengine/macros"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 type JSProcessor struct {
@@ -23,7 +23,7 @@ func NewJSProcessor(vm *VM) *JSProcessor {
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
-		jsvm: goja.New(),
+		jsvm: NewGojaVM(),
 	}
 
 	// These are built-in func

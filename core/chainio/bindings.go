@@ -7,8 +7,8 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	gethcommon "github.com/ethereum/go-ethereum/common"
 
-	csservicemanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationServiceManager"
-	cstaskmanager "github.com/AvaProtocol/ap-avs/contracts/bindings/AutomationTaskManager"
+	csservicemanager "github.com/AvaProtocol/EigenLayer-AVS/contracts/bindings/AutomationServiceManager"
+	cstaskmanager "github.com/AvaProtocol/EigenLayer-AVS/contracts/bindings/AutomationTaskManager"
 	regcoord "github.com/Layr-Labs/eigensdk-go/contracts/bindings/RegistryCoordinator"
 )
 

@@ -5,7 +5,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 
-	"github.com/AvaProtocol/ap-avs/core/chainio/apconfig"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/apconfig"
 	"github.com/ethereum/go-ethereum/crypto"
 
 	eigensdkecdsa "github.com/Layr-Labs/eigensdk-go/crypto/ecdsa"
@@ -63,7 +63,7 @@ func CreateOrImportAliasKey(o CreateAliasKeyOption) {
 func DeclareAlias(configPath, address string) {
 	operator, err := NewOperatorFromConfigFile(configPath)
 	if err != nil {
-		fmt.Errorf("error creator operator from config: %w", err)
+		panic(fmt.Errorf("error creator operator from config: %w", err))
 	}
 
 	if err = operator.DeclareAlias(address); err != nil {
@@ -104,7 +104,7 @@ func (o *Operator) DeclareAlias(filepath string) error {
 	}
 
 	if receipt.Status != 1 {
-		return fmt.Errorf("declareAlias transaction %w reverted", receipt.TxHash.Hex())
+		return fmt.Errorf("declareAlias transaction %s reverted", receipt.TxHash.Hex())
 	}
 
 	fmt.Printf("succesfully declared an alias for operator %s alias address %s at tx %s ", o.operatorAddr.String(), crypto.PubkeyToAddress(aliasEcdsaPair.PublicKey), receipt.TxHash.Hex())
@@ -116,7 +116,7 @@ func RemoveAlias(configPath string) {
 	operator, err := NewOperatorFromConfigFile(configPath)
 	fmt.Println(configPath)
 	if err != nil {
-		fmt.Errorf("error creator operator from config: %w", err)
+		panic(fmt.Errorf("error creator operator from config: %w", err))
 	}
 
 	if err = operator.RemoveAlias(); err != nil {
@@ -151,7 +151,7 @@ func (o *Operator) RemoveAlias() error {
 	}
 
 	if receipt.Status != 1 {
-		return fmt.Errorf("declareAlias transaction %w reverted", receipt.TxHash.Hex())
+		return fmt.Errorf("declareAlias transaction %s reverted", receipt.TxHash.Hex())
 	}
 
 	fmt.Printf("succesfully remove alias %s for operator %s  at tx %s ", o.signerAddress.String(), o.operatorAddr.String(), receipt.TxHash.Hex())

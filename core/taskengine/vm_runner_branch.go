@@ -5,8 +5,7 @@ import (
 	"strings"
 	"time"
 
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
-	"github.com/dop251/goja"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 type BranchProcessor struct {
@@ -52,8 +51,8 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	sb.WriteString(stepID)
 	outcome := ""
 
-	// Initialize goja runtime
-	jsvm := goja.New()
+	// Initialize goja runtime using the new constructor
+	jsvm := NewGojaVM()
 
 	// Set variables in the JS environment. The value is wrapped into a data, follow a similar approach by other nocode provider
 	// even though we arent necessarily need to do this

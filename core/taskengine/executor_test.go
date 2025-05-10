@@ -7,11 +7,11 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/AvaProtocol/ap-avs/core/testutil"
-	"github.com/AvaProtocol/ap-avs/model"
-	"github.com/AvaProtocol/ap-avs/pkg/gow"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
-	"github.com/AvaProtocol/ap-avs/storage"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
 func TestExecutorRunTaskSucess(t *testing.T) {
@@ -29,13 +29,13 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 	defer server.Close()
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "branch1",
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
 					Conditions: []*avsproto.Condition{
-						&avsproto.Condition{
+						{
 							Id:   "a1",
 							Type: "if",
 							// The test data is of this transaction https://sepolia.etherscan.io/tx/0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8 which is 3.45 token
@@ -45,7 +45,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 				},
 			},
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "notification1",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -63,12 +63,12 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "branch1",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: "branch1.a1",
 			Target: "notification1",
@@ -135,13 +135,13 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "branch1",
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
 					Conditions: []*avsproto.Condition{
-						&avsproto.Condition{
+						{
 							Id:         "a1",
 							Type:       "if",
 							Expression: "a >= 5",
@@ -150,7 +150,7 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 				},
 			},
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "notification1",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -168,12 +168,12 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "branch1",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: "branch1.a1",
 			Target: "notification1",
@@ -229,13 +229,13 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "branch1",
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
 					Conditions: []*avsproto.Condition{
-						&avsproto.Condition{
+						{
 							Id:         "condition1",
 							Type:       "if",
 							Expression: "true",
@@ -244,7 +244,7 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 				},
 			},
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "rest1",
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -262,12 +262,12 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "branch1",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: "branch1.condition1",
 			Target: "rest1",
@@ -325,7 +325,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 	defer server.Close()
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "spacex",
 			Name: "spacex",
 			TaskType: &avsproto.TaskNode_GraphqlQuery{
@@ -345,13 +345,13 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 				},
 			},
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "branch1",
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
 					Conditions: []*avsproto.Condition{
-						&avsproto.Condition{
+						{
 							Id:         "condition1",
 							Type:       "if",
 							Expression: "Number(triggertest.data.value_formatted) >= 3",
@@ -360,7 +360,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 				},
 			},
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "customcode1",
 			Name: "dummy",
 			TaskType: &avsproto.TaskNode_CustomCode{
@@ -370,7 +370,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 				},
 			},
 		},
-		&avsproto.TaskNode{
+		{
 			Id:   "rest1",
 			Name: "http",
 			TaskType: &avsproto.TaskNode_RestApi{
@@ -388,22 +388,22 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e0",
 			Source: trigger.Id,
 			Target: "spacex",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: "spacex",
 			Target: "branch1",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: "branch1.condition1",
 			Target: "customcode1",
 		},
-		&avsproto.TaskEdge{
+		{
 			Id:     "e2",
 			Source: "customcode1",
 			Target: "rest1",
@@ -495,8 +495,8 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		t.Errorf("expect BlockNumber is 7212417 but got: %d", outputData.BlockNumber)
 	}
 
-	if outputData.BlockTimestamp != 1733351604 {
-		t.Errorf("expect BlockTimestamp is 1733351604 but got: %d", outputData.BlockTimestamp)
+	if outputData.BlockTimestamp != 1733351604000 {
+		t.Errorf("expect BlockTimestamp is 1733351604000 but got: %d", outputData.BlockTimestamp)
 	}
 
 	if outputData.FromAddress != "0x2A6CEbeDF9e737A9C6188c62A68655919c7314DB" {

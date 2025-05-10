@@ -11,7 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 type RestProcessor struct {
@@ -46,7 +46,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		NodeId:     stepID,
 		Log:        "",
 		OutputData: nil,
-		Success:    true,
+		Success:    true, // Start optimistically
 		Error:      "",
 		StartAt:    t0,
 	}
@@ -78,6 +78,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 
 	var err error
+	// The defer function serves as the single source of truth for setting Success: false
 	defer func() {
 		s.EndAt = time.Now().UnixMilli()
 		s.Success = err == nil
@@ -104,6 +105,46 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	log.WriteString(fmt.Sprintf("Execute %s %s at %s", processedNode.Method, u.Hostname(), time.Now()))
 	s.Log = log.String()
 
+	// Log the request details before sending
+	headersJson, _ := json.MarshalIndent(processedNode.Headers, "", "  ")
+
+	// Use logger with debug level instead of fmt.Printf for environment awareness
+	if r.vm.logger != nil {
+		r.vm.logger.Debug("HTTP request details",
+			"method", processedNode.Method,
+			"url", processedNode.Url,
+			"headers", string(headersJson),
+			"body", processedNode.Body)
+
+		// Debug available variables
+		varInfo := make(map[string]interface{})
+		for k := range r.vm.vars {
+			if k == "apContext" {
+				varInfo[k] = "configVars"
+			} else if r.vm.task != nil && r.vm.task.Trigger != nil && k == r.vm.GetTriggerNameAsVar() {
+				triggerInfo := map[string]interface{}{
+					"original_name": r.vm.task.Trigger.Name,
+				}
+
+				if dataMap, ok := r.vm.vars[k].(map[string]any); ok {
+					if data, ok := dataMap["data"].(map[string]any); ok {
+						keys := []string{}
+						for key := range data {
+							keys = append(keys, key)
+						}
+						triggerInfo["available_fields"] = keys
+					}
+				}
+
+				varInfo[k] = triggerInfo
+			} else {
+				varInfo[k] = "variable"
+			}
+		}
+
+		r.vm.logger.Debug("Available variables for template rendering", "vars", varInfo)
+	}
+
 	var resp *resty.Response
 	if strings.EqualFold(processedNode.Method, "post") {
 		resp, err = request.Post(processedNode.Url)
@@ -115,7 +156,34 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		resp, err = request.Get(processedNode.Url)
 	}
 
-	response := string(resp.Body())
+	// Log the response details
+	if resp != nil {
+		respHeadersJson, _ := json.MarshalIndent(resp.Header(), "", "  ")
+
+		// Use logger instead of fmt.Printf
+		if r.vm.logger != nil {
+			responseBody := string(resp.Body())
+			if len(responseBody) > 1000 {
+				responseBody = responseBody[:1000] + "... (truncated)"
+			}
+
+			r.vm.logger.Debug("HTTP response details",
+				"status_code", resp.StatusCode(),
+				"status", resp.Status(),
+				"headers", string(respHeadersJson),
+				"response_time_ms", resp.Time().Milliseconds(),
+				"body", responseBody)
+		}
+	} else if err != nil {
+		if r.vm.logger != nil {
+			r.vm.logger.Debug("HTTP request error", "error", err)
+		}
+	}
+
+	response := ""
+	if resp != nil {
+		response = string(resp.Body())
+	}
 
 	//maybeJSON := false
 
@@ -142,15 +210,32 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 
 	if err != nil {
-		s.Success = false
 		s.Error = err.Error()
 		return s, err
 	} else {
-		// Check if the response status code is not 2xx or 3xx, we consider it as an error exeuction
+		// Check HTTP status codes from the resty response
+		// - 2xx (200-299): Success
+		// - 3xx (300-399): Redirection (also considered successful)
+		// - 4xx (400-499): Client errors
+		// - 5xx (500-599): Server errors
+		// Any status code outside 2xx-3xx range is considered an error
+		// Status code 0 indicates a connection failure
+		if resp.StatusCode() == 0 {
+			err = fmt.Errorf("HTTP request failed: connection error or timeout")
+			s.Error = err.Error()
+			return s, err
+		}
 		if resp.StatusCode() < 200 || resp.StatusCode() >= 400 {
-			s.Success = false
-			s.Error = fmt.Sprintf("unexpected status code: %d", resp.StatusCode())
-			return s, fmt.Errorf("unexpected status code: %d", resp.StatusCode())
+			if resp.StatusCode() == 404 {
+				fmt.Printf("\n==== HTTP 404 ERROR DETAILS ====\n")
+				fmt.Printf("Resource not found at URL: %s\n", processedNode.Url)
+				fmt.Printf("This typically indicates the endpoint doesn't exist, or the URL path is incorrect.\n")
+				fmt.Printf("Verify the API endpoint is correct and accessible.\n")
+				fmt.Printf("================================\n")
+			}
+			err = fmt.Errorf("unexpected HTTP status code: %d", resp.StatusCode())
+			s.Error = err.Error()
+			return s, err
 		}
 	}
 

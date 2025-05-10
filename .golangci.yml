@@ -9,7 +9,7 @@ run:
   
   # Go version to use for analysis
   # Default: auto-detected
-  go: "1.24"
+  go: "1.22"
 
   # Exit code when at least one issue was found.
   # Default: 1

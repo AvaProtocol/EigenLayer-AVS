@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AvaProtocol/ap-avs/core/testutil"
-	"github.com/AvaProtocol/ap-avs/model"
-	"github.com/AvaProtocol/ap-avs/pkg/gow"
-	avsproto "github.com/AvaProtocol/ap-avs/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 type MockTokenPrice struct {
@@ -23,7 +23,7 @@ func TestFilter(t *testing.T) {
 	}
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "abc123",
 			Name: "filter",
 			TaskType: &avsproto.TaskNode_Filter{
@@ -37,7 +37,7 @@ func TestFilter(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "abc123",
@@ -57,11 +57,11 @@ func TestFilter(t *testing.T) {
 		t.Errorf("expect vm initialize succesully but failed with error: %v", err)
 	}
 	vm.vars["trades"] = []map[string]interface{}{
-		map[string]interface{}{
+		{
 			"cost": 12,
 			"name": "abc",
 		},
-		map[string]interface{}{
+		{
 			"cost": 2,
 			"name": "def",
 		},
@@ -92,7 +92,7 @@ func TestFilterComplexLogic(t *testing.T) {
 	}
 
 	nodes := []*avsproto.TaskNode{
-		&avsproto.TaskNode{
+		{
 			Id:   "abc123",
 			Name: "filter",
 			TaskType: &avsproto.TaskNode_Filter{
@@ -106,7 +106,7 @@ func TestFilterComplexLogic(t *testing.T) {
 		Name: "triggertest",
 	}
 	edges := []*avsproto.TaskEdge{
-		&avsproto.TaskEdge{
+		{
 			Id:     "e1",
 			Source: trigger.Id,
 			Target: "abc123",
@@ -126,23 +126,23 @@ func TestFilterComplexLogic(t *testing.T) {
 		t.Errorf("expect vm initialize succesully but failed with error: %v", err)
 	}
 	vm.vars["trades"] = []map[string]interface{}{
-		map[string]interface{}{
+		{
 			"cost": 12,
 			"name": "first",
 		},
-		map[string]interface{}{
+		{
 			"cost": 15,
 			"name": "second",
 		},
-		map[string]interface{}{
+		{
 			"cost": 20,
 			"name": "third",
 		},
-		map[string]interface{}{
+		{
 			"cost": 25,
 			"name": "fourth",
 		},
-		map[string]interface{}{
+		{
 			"cost": 19,
 			"name": "sixth",
 		},
