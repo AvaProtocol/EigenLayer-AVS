@@ -210,7 +210,9 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 	// now load the customize wallet with different salt or factory that was initialed and store in our db
 	for _, item := range items {
 		w := &model.SmartWallet{}
-		w.FromStorageData(item.Value)
+		if err := w.FromStorageData(item.Value); err != nil {
+			n.logger.Error("failed to parse wallet data", "error", err)
+		}
 
 		if w.Salt.Cmp(defaultSalt) == 0 {
 			continue
@@ -423,7 +425,10 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 		return err
 	}
 
-	n.queue.Enqueue(JobTypeExecuteTask, payload.TaskId, data)
+	if _, err := n.queue.Enqueue(JobTypeExecuteTask, payload.TaskId, data); err != nil {
+		n.logger.Error("failed to enqueue task", "error", err, "task_id", payload.TaskId)
+		return err
+	}
 	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId)
 
 	// if the task can still run, add it back
@@ -620,7 +625,10 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageQueueUnavailableError)
 	}
 
-	n.setExecutionStatusQueue(task, queueTaskData.ExecutionID)
+	if err := n.setExecutionStatusQueue(task, queueTaskData.ExecutionID); err != nil {
+		n.logger.Error("failed to set execution status", "error", err, "task_id", payload.TaskId, "execution_id", queueTaskData.ExecutionID)
+		return nil, grpcstatus.Errorf(codes.Internal, "Failed to set execution status: %v", err)
+	}
 	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId, "jid", jid, "execution_id", queueTaskData.ExecutionID)
 	return &avsproto.UserTriggerTaskResp{
 		ExecutionId: queueTaskData.ExecutionID,
@@ -865,8 +873,15 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error)
 		return false, fmt.Errorf("Only non executing task can be deleted")
 	}
 
-	n.db.Delete(TaskStorageKey(task.Id, task.Status))
-	n.db.Delete(TaskUserKey(task))
+	if err := n.db.Delete(TaskStorageKey(task.Id, task.Status)); err != nil {
+		n.logger.Error("failed to delete task storage", "error", err, "task_id", task.Id)
+		return false, fmt.Errorf("failed to delete task: %w", err)
+	}
+	
+	if err := n.db.Delete(TaskUserKey(task)); err != nil {
+		n.logger.Error("failed to delete task user key", "error", err, "task_id", task.Id)
+		return false, fmt.Errorf("failed to delete task user key: %w", err)
+	}
 
 	return true, nil
 }

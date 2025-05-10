@@ -37,7 +37,8 @@ func decodeOpTypes(
 	// String to big.Int conversion
 	if f == reflect.String && t == reflect.Struct {
 		n := new(big.Int)
-		n, ok := n.SetString(data.(string), 0)
+		var ok bool
+		n, ok = n.SetString(data.(string), 0)
 		if !ok {
 			return nil, errors.New("bigInt conversion failed")
 		}
@@ -55,7 +56,10 @@ func decodeOpTypes(
 
 	// String to []byte conversion
 	if f == reflect.String && t == reflect.Slice {
-		byteStr := data.(string)
+		byteStr, ok := data.(string)
+		if !ok {
+			return nil, errors.New("expected string for byte conversion")
+		}
 		if len(byteStr) < 2 || byteStr[:2] != "0x" {
 			return nil, errors.New("not byte string")
 		}
