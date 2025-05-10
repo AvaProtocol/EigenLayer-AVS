@@ -218,7 +218,7 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 			case "topics":
 				// Matching based on topic of transaction
 				topics := lo.Map[common.Hash, string](event.Topics, func(topic common.Hash, _ int) string {
-					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x"))
 				})
 
 				match := true

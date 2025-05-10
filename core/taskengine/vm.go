@@ -274,7 +274,7 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 
 				v.vars[triggerVarName].(map[string]any)["data"] = map[string]any{
 					"topics": lo.Map(event.Topics, func(topic common.Hash, _ int) string {
-						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x"))
 					}),
 					"data": "0x" + common.Bytes2Hex(event.Data),
 
@@ -321,7 +321,7 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 					TransactionHash:  event.TxHash.Hex(),
 					TransactionIndex: uint32(event.TxIndex),
 					Topics: lo.Map(event.Topics, func(topic common.Hash, _ int) string {
-						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x"))
 					}),
 				}
 			}
