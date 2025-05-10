@@ -31,7 +31,11 @@ func decodeOpTypes(
 	data interface{}) (interface{}, error) {
 	// String to common.Address conversion
 	if f == reflect.String && t == reflect.Array {
-		return common.HexToAddress(data.(string)), nil
+		addrStr, ok := data.(string)
+		if !ok {
+			return nil, errors.New("expected string for address conversion")
+		}
+		return common.HexToAddress(addrStr), nil
 	}
 
 	// String to big.Int conversion

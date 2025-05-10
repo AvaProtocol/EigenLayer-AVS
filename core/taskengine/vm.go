@@ -623,7 +623,11 @@ func (v *VM) preprocessText(text string) string {
 	jsvm := NewGojaVM()
 
 	for key, value := range v.vars {
-		jsvm.Set(key, value)
+		if err := jsvm.Set(key, value); err != nil {
+			if v.logger != nil {
+				v.logger.Error("failed to set variable in JS VM", "key", key, "error", err)
+			}
+		}
 	}
 
 	// Find all {{ }} expressions
