@@ -155,7 +155,9 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 }
 
 func (n *Engine) Stop() {
-	n.seq.Release()
+	if err := n.seq.Release(); err != nil {
+		n.logger.Error("failed to release sequence", "error", err)
+	}
 	n.shutdown = true
 }
 
