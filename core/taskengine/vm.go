@@ -715,7 +715,7 @@ func (v *VM) CollectInputs() []string {
 
 func (v *VM) GetTaskId() string {
 	if v.task != nil && v.task.Task != nil {
-		return v.task.Id
+		return v.task.Task.Id
 	}
 
 	return ""

@@ -64,7 +64,7 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 	// ref: AggregateChecksResult
 	err = json.Unmarshal(job.Data, queueData)
 	if err != nil {
-		return fmt.Errorf("error decode job payload when executing task: %s with job id %d", task.Id, job.ID)
+		return fmt.Errorf("error decode job payload when executing task: %s with job id %d", task.Task.Id, job.ID)
 	}
 
 	_, err = x.RunTask(task, queueData)
@@ -95,15 +95,15 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	vm.WithLogger(x.logger).WithDb(x.db)
-	initialTaskStatus := task.Status
+	initialTaskStatus := task.Task.Status
 
 	if err != nil {
 		return nil, fmt.Errorf("vm failed to initialize: %w", err)
 	}
 
 	t0 := time.Now()
-	task.TotalExecution += 1
-	task.LastRanAt = t0.UnixMilli()
+	task.Task.TotalExecution += 1
+	task.Task.LastRanAt = t0.UnixMilli()
 
 	var runTaskErr error = nil
 	if err = vm.Compile(); err != nil {
@@ -116,11 +116,11 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	t1 := time.Now()
 
 	// when MaxExecution is 0, it means unlimited run until cancel
-	if task.MaxExecution > 0 && task.TotalExecution >= task.MaxExecution {
+	if task.Task.MaxExecution > 0 && task.Task.TotalExecution >= task.Task.MaxExecution {
 		task.SetCompleted()
 	}
 
-	if task.ExpiredAt > 0 && t1.UnixMilli() >= task.ExpiredAt {
+	if task.Task.ExpiredAt > 0 && t1.UnixMilli() >= task.Task.ExpiredAt {
 		task.SetCompleted()
 	}
 
@@ -140,14 +140,14 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	if runTaskErr != nil {
-		x.logger.Error("error executing task", "error", err, "runError", runTaskErr, "task_id", task.Id, "triggermark", triggerMetadata)
+		x.logger.Error("error executing task", "error", err, "runError", runTaskErr, "task_id", task.Task.Id, "triggermark", triggerMetadata)
 		execution.Error = runTaskErr.Error()
 	}
 
 	// batch update storage for task + execution log
 	updates := map[string][]byte{}
-	updates[string(TaskStorageKey(task.Id, task.Status))], err = task.ToJSON()
-	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
+	updates[string(TaskStorageKey(task.Task.Id, task.Task.Status))], err = task.ToJSON()
+	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Task.Status))
 
 	// update execution log
 	executionByte, err := protojson.Marshal(execution)
@@ -157,19 +157,19 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	if err = x.db.BatchWrite(updates); err != nil {
 		// TODO Monitor to see how often this happen
-		x.logger.Errorf("error updating task status. %w", err, "task_id", task.Id)
+		x.logger.Errorf("error updating task status. %w", err, "task_id", task.Task.Id)
 	}
 
 	// whenever a task change its status, we moved it, therefore we will need to clean up the old storage
-	if task.Status != initialTaskStatus {
-		if err = x.db.Delete(TaskStorageKey(task.Id, initialTaskStatus)); err != nil {
-			x.logger.Errorf("error updating task status. %w", err, "task_id", task.Id)
+	if task.Task.Status != initialTaskStatus {
+		if err = x.db.Delete(TaskStorageKey(task.Task.Id, initialTaskStatus)); err != nil {
+			x.logger.Errorf("error updating task status. %w", err, "task_id", task.Task.Id)
 		}
 	}
 
 	if runTaskErr == nil {
-		x.logger.Info("succesfully executing task", "task_id", task.Id, "triggermark", triggerMetadata)
+		x.logger.Info("succesfully executing task", "task_id", task.Task.Id, "triggermark", triggerMetadata)
 		return execution, nil
 	}
-	return execution, fmt.Errorf("Error executing task %s: %v", task.Id, runTaskErr)
+	return execution, fmt.Errorf("Error executing task %s: %v", task.Task.Id, runTaskErr)
 }

@@ -105,6 +105,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 				sb.WriteString("error evaluating expression")
 				s.Log = sb.String()
 				s.EndAt = time.Now().UnixMilli()
+				s.OutputData = nil
 				return s, fmt.Errorf("error evaluating the statement: %w", err)
 			}
 
@@ -116,6 +117,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 				sb.WriteString("error evaluating expression")
 				s.Log = sb.String()
 				s.EndAt = time.Now().UnixMilli()
+				s.OutputData = nil
 				return s, fmt.Errorf("error evaluating the statement: %w", err)
 			}
 		}
