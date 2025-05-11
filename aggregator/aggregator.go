@@ -7,9 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"time"
+	"syscall"
 
 	"github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/getsentry/sentry-go"
 
 	sdkclients "github.com/Layr-Labs/eigensdk-go/chainio/clients"
 	blsagg "github.com/Layr-Labs/eigensdk-go/services/bls_aggregation"
