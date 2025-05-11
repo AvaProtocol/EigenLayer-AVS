@@ -95,9 +95,6 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 			Status:            1,
 			Type:              2,
 			Logs:              []*types.Log{},
-			LogsBloom:         types.Bloom{},
-			From:              common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5"),
-			To:                common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e"),
 		}
 		return &userop.UserOperation{}, receipt, nil
 	}
