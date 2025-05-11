@@ -1,7 +1,7 @@
 github.com/getsentry/sentry-go v0.27.0 h1:Pv98CIbtB3LkMwmXi4Joa500cwbmnX88sF5qbK3r3Ps=
 github.com/getsentry/sentry-go v0.27.0/go.mod h1:Lc76E2QywIyW8WuBnwl8Lc4bkmQH4+w1gwTf25TrprY=
-github.com/getsentry/sentry-go/echo v0.27.0 h1:Zcl+vq+QQtXjCrLVYh0IbFGkUQR7/5gAkGQrKcUJuRU=
-github.com/getsentry/sentry-go/echo v0.27.0/go.mod h1:XSJsRSrpJCKYVQBvz1YbTUvGNaoXITt2DUJodGcPTdY=
+github.com/getsentry/sentry-go/echo v0.27.0 h1:Pv98CIbtB3LkMwmXi4Joa500cwbmnX88sF5qbK3r3Ps=
+github.com/getsentry/sentry-go/echo v0.27.0/go.mod h1:Lc76E2QywIyW8WuBnwl8Lc4bkmQH4+w1gwTf25TrprY=
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 dario.cat/mergo v1.0.0 h1:AGCNq9Evsj31mOgNPcLyXc+4PNABt905YmuqPYYpBWk=
 dario.cat/mergo v1.0.0/go.mod h1:uNxQE+84aUszobStD9th8a29P2fMDhsBdgRYvZOxGmk=
