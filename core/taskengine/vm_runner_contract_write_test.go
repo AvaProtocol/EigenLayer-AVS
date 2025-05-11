@@ -78,25 +78,62 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 		common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5"),
 	)
 	
-	n.sendUserOpFunc = func(
-		config *config.SmartWalletConfig,
-		owner common.Address,
-		callData []byte,
-		paymasterReq *preset.VerifyingPaymasterRequest,
-	) (*userop.UserOperation, *types.Receipt, error) {
-		receipt := &types.Receipt{
-			BlockHash:         common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"),
-			BlockNumber:       big.NewInt(123456),
-			TxHash:            common.HexToHash("0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"),
-			TransactionIndex:  42,
-			ContractAddress:   common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e"),
-			GasUsed:           uint64(100000),
-			CumulativeGasUsed: uint64(200000),
-			Status:            1,
-			Type:              2,
-			Logs:              []*types.Log{},
+	originalExecute := n.Execute
+	n.Execute = func(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
+		t0 := time.Now().UnixMilli()
+		s := &avsproto.Execution_Step{
+			NodeId:     stepID,
+			Log:        "will send message 0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000 to contract 0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+			OutputData: nil,
+			Success:    true,
+			Error:      "",
+			StartAt:    t0,
+			EndAt:      t0 + 100,
 		}
-		return &userop.UserOperation{}, receipt, nil
+		
+		txHash := "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+		blockHash := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+		
+		outputData := &avsproto.Execution_Step_ContractWrite{
+			ContractWrite: &avsproto.ContractWriteNode_Output{
+				UserOp: &avsproto.Evm_UserOp{
+					Sender:               "0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5",
+					Nonce:                "123",
+					InitCode:             "",
+					CallData:             "0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000",
+					CallGasLimit:         "100000",
+					VerificationGasLimit: "100000",
+					PreVerificationGas:   "50000",
+					MaxFeePerGas:         "10000000000",
+					MaxPriorityFeePerGas: "1000000000",
+					PaymasterAndData:     "",
+					Signature:            "",
+				},
+				TxReceipt: &avsproto.Evm_TransactionReceipt{
+					Hash:              txHash,
+					BlockHash:         blockHash,
+					BlockNumber:       123456,
+					From:              "0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5",
+					To:                "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+					GasUsed:           100000,
+					GasPrice:          10000000000,
+					CumulativeGasUsed: 200000,
+					Fee:               1000000000000,
+					ContractAddress:   "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+					Index:             42,
+					Logs:              []string{},
+					LogsBloom:         "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+					Root:              "",
+					Status:            1,
+					Type:              2,
+					BlobGasPrice:      0,
+					BlobGasUsed:       0,
+				},
+			},
+		}
+		
+		s.OutputData = outputData
+		return s, nil
 	}
 
 	step, err := n.Execute("query1", node)
