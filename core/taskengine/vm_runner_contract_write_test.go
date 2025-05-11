@@ -134,85 +134,80 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 
-	outputData = step.GetContractWrite()
-	if outputData == nil {
+	contractWriteOutput := step.GetContractWrite()
+	if contractWriteOutput == nil {
 		t.Errorf("Expected contract write output data but got nil")
 		return
 	}
 	
-	if outputData.ContractWrite == nil {
-		t.Errorf("Expected contract write output but got nil")
-		return
-	}
-	
-	if outputData.ContractWrite.TxReceipt == nil {
+	if contractWriteOutput.TxReceipt == nil {
 		t.Errorf("Expected transaction receipt but got nil")
 		return
 	}
 
-	if len(outputData.ContractWrite.TxReceipt.Hash) != 66 {
+	if len(contractWriteOutput.TxReceipt.Hash) != 66 {
 		t.Errorf("Missing Tx Hash in the output data")
 	}
 
 	// Verify all transaction receipt fields
-	if outputData.ContractWrite.TxReceipt.BlockHash == "" {
+	if contractWriteOutput.TxReceipt.BlockHash == "" {
 		t.Errorf("Missing BlockHash in the output data")
 	}
 
-	if outputData.ContractWrite.TxReceipt.BlockNumber == 0 {
+	if contractWriteOutput.TxReceipt.BlockNumber == 0 {
 		t.Errorf("Missing BlockNumber in the output data")
 	}
 
-	if outputData.ContractWrite.TxReceipt.From == "" {
+	if contractWriteOutput.TxReceipt.From == "" {
 		t.Errorf("Missing From address in the output data")
 	}
 
-	if outputData.ContractWrite.TxReceipt.To == "" {
+	if contractWriteOutput.TxReceipt.To == "" {
 		t.Errorf("Missing To address in the output data")
 	}
 
-	if outputData.ContractWrite.TxReceipt.GasUsed == 0 {
+	if contractWriteOutput.TxReceipt.GasUsed == 0 {
 		t.Errorf("Missing GasUsed in the output data")
 	}
 
-	if outputData.ContractWrite.TxReceipt.GasPrice == 0 {
+	if contractWriteOutput.TxReceipt.GasPrice == 0 {
 		t.Errorf("Missing GasPrice in the output data")
 	}
 
-	if outputData.ContractWrite.TxReceipt.CumulativeGasUsed == 0 {
+	if contractWriteOutput.TxReceipt.CumulativeGasUsed == 0 {
 		t.Errorf("Missing CumulativeGasUsed in the output data")
 	}
 
-	if outputData.ContractWrite.TxReceipt.Fee == 0 {
+	if contractWriteOutput.TxReceipt.Fee == 0 {
 		t.Errorf("Missing Fee in the output data")
 	}
 
-	if outputData.ContractWrite.TxReceipt.ContractAddress == "" {
+	if contractWriteOutput.TxReceipt.ContractAddress == "" {
 		t.Errorf("Missing ContractAddress in the output data")
 	}
 
-	if outputData.ContractWrite.TxReceipt.Index == 0 {
+	if contractWriteOutput.TxReceipt.Index == 0 {
 		t.Errorf("Missing Index in the output data")
 	}
 
-	if outputData.ContractWrite.TxReceipt.Logs == nil {
+	if contractWriteOutput.TxReceipt.Logs == nil {
 		t.Errorf("Missing Logs in the output data")
 	}
 
-	if outputData.ContractWrite.TxReceipt.LogsBloom == "" {
+	if contractWriteOutput.TxReceipt.LogsBloom == "" {
 		t.Errorf("Missing LogsBloom in the output data")
 	}
 
 	// Root is optional in modern Ethereum, only used in pre-Byzantium hard forks
-	// if outputData.ContractWrite.TxReceipt.Root == "" {
+	// if contractWriteOutput.TxReceipt.Root == "" {
 	//     t.Errorf("Missing Root in the output data")
 	// }
 
-	if outputData.ContractWrite.TxReceipt.Status == 0 {
+	if contractWriteOutput.TxReceipt.Status == 0 {
 		t.Errorf("Missing Status in the output data")
 	}
 
-	if outputData.ContractWrite.TxReceipt.Type == 0 {
+	if contractWriteOutput.TxReceipt.Type == 0 {
 		t.Errorf("Missing Type in the output data")
 	}
 
