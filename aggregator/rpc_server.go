@@ -349,6 +349,21 @@ func (r *RpcServer) GetExecutionCount(ctx context.Context, req *avsproto.GetExec
 	return r.engine.GetExecutionCount(user, req)
 }
 
+func (r *RpcServer) GetExecutionStats(ctx context.Context, req *avsproto.GetExecutionStatsReq) (*avsproto.GetExecutionStatsResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process execution stats",
+		"user", user.Address.String(),
+		"workflow_ids", req.WorkflowIds,
+		"days", req.Days,
+	)
+
+	return r.engine.GetExecutionStats(user, req)
+}
+
 // Operator action
 func (r *RpcServer) SyncMessages(payload *avsproto.SyncMessagesReq, srv avsproto.Node_SyncMessagesServer) error {
 	err := r.engine.StreamCheckToOperator(payload, srv)
