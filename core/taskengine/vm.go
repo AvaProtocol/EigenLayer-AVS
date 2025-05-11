@@ -102,7 +102,7 @@ func (t *triggerDataType) GetValue() avsproto.IsExecution_OutputData {
 	return nil
 }
 
-// The VM is the core component that load the node information and execute them, yield finaly result
+// The VM is the core component that load the node information and execute them, yield finally result
 type VM struct {
 	// Input raw task data
 	// TaskID can be used to cache compile program
@@ -117,7 +117,7 @@ type VM struct {
 	reason            *avsproto.TriggerReason
 	parsedTriggerData *triggerDataType
 
-	// executin logs and result per plans
+	// execution logs and result per plans
 	ExecutionLogs []*avsproto.Execution_Step
 
 	Status VMState
@@ -682,7 +682,7 @@ func (v *VM) preprocessText(text string) string {
 		var replacement string
 
 		if _, ok := exportedValue.(map[string]interface{}); ok {
-			// In Golang, it's better because it can return the actualy object data. But in JavaScript, it will return "[object Object]",
+			// In Golang, it's better because it can return the actually object data. But in JavaScript, it will return "[object Object]",
 			// We're mimicking the behavior of Retool here to follow the script gotcha.
 			// In real of userness the golang might be useful for debugging because it's will return the actual object data, eg `map[id:123 message:test]`
 			// but at the same time, map ins't  concept in JavaScript, so end user might get confused
