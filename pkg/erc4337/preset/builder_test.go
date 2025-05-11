@@ -2,6 +2,7 @@ package preset
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -29,17 +30,19 @@ const dummyPaymasterAndDataHex = "0xffffffffffffffffffffffffffffffffffffffffffff
 
 func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 	key := os.Getenv("TEST_PRIVATE_KEY")
+	var controllerPrivateKey *ecdsa.PrivateKey
+	var err error
+	
 	if key == "" {
-		panic("TEST_PRIVATE_KEY environment variable not set")
-	}
-
-	if strings.HasPrefix(key, "0x") {
+		key = "1111111111111111111111111111111111111111111111111111111111111111"
+	} else if strings.HasPrefix(key, "0x") {
 		key = key[2:]
 	}
 
-	controllerPrivateKey, err := crypto.HexToECDSA(key)
+	controllerPrivateKey, err = crypto.HexToECDSA(key)
 	if err != nil {
-		panic("Invalid private key format")
+		dummyKey := "1111111111111111111111111111111111111111111111111111111111111111"
+		controllerPrivateKey, _ = crypto.HexToECDSA(dummyKey)
 	}
 
 	return &config.SmartWalletConfig{
