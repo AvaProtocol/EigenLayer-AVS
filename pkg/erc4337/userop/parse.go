@@ -42,7 +42,11 @@ func decodeOpTypes(
 	if f == reflect.String && t == reflect.Struct {
 		n := new(big.Int)
 		var ok bool
-		n, ok = n.SetString(data.(string), 0)
+		dataStr, ok := data.(string)
+		if !ok {
+			return nil, errors.New("expected string for bigInt conversion")
+		}
+		n, ok = n.SetString(dataStr, 0)
 		if !ok {
 			return nil, errors.New("bigInt conversion failed")
 		}
