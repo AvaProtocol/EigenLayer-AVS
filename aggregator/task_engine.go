@@ -30,10 +30,12 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	taskengine.SetCache(agg.cache)
 	macros.SetRpc(agg.config.SmartWallet.EthRpcUrl)
 
-	agg.worker.RegisterProcessor(
+	if err := agg.worker.RegisterProcessor(
 		taskengine.JobTypeExecuteTask,
 		taskExecutor,
-	)
+	); err != nil {
+		agg.logger.Error("failed to register task processor", "error", err)
+	}
 
 	agg.engine = taskengine.New(
 		agg.db,
@@ -41,8 +43,14 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		agg.queue,
 		agg.logger,
 	)
-	agg.engine.MustStart()
+	if err := agg.engine.MustStart(); err != nil {
+		agg.logger.Error("failed to start task engine", "error", err)
+	}
 
-	agg.queue.MustStart()
+	queueErr := agg.queue.MustStart()
+	if queueErr != nil {
+		agg.logger.Error("failed to start task queue", "error", queueErr)
+	}
+	
 	agg.worker.MustStart()
 }

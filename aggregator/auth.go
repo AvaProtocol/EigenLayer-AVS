@@ -63,7 +63,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, auth.InvalidSignatureFormat)
 		}
-		if len(signature) < crypto.RecoveryIDOffset || len(signature) < crypto.RecoveryIDOffset {
+		if len(signature) < crypto.RecoveryIDOffset {
 			return nil, status.Errorf(codes.InvalidArgument, auth.InvalidSignatureFormat)
 		}
 		// https://stackoverflow.com/questions/49085737/geth-ecrecover-invalid-signature-recovery-id
@@ -168,8 +168,10 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 				return nil, fmt.Errorf("Rpc error")
 			}
 
-			// We don't care if its error out in caching
-			r.cache.Set(cachekey, user.SmartAccountAddress.Bytes())
+			// We don't care if its error out in caching, but log it for debugging
+			if err := r.cache.Set(cachekey, user.SmartAccountAddress.Bytes()); err != nil {
+				r.config.Logger.Debug("failed to cache smart wallet address", "error", err)
+			}
 		}
 
 		return &user, nil

@@ -62,7 +62,7 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 	client, _ := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 
 	if err != nil {
-		log.Fatalf("error connectiong to websocket: %v", err)
+		log.Fatalf("error connecting to websocket: %v", err)
 	}
 	defer client.Close()
 
@@ -82,11 +82,11 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 	}
 
 	if err != nil {
-		t.Errorf("expected contract write node run succesfull but got error: %v", err)
+		t.Errorf("expected contract write node run successful but got error: %v", err)
 	}
 
 	if !step.Success {
-		t.Errorf("expected contract write node run succesfully but failed")
+		t.Errorf("expected contract write node run successfully but failed")
 	}
 
 	if !strings.Contains(step.Log, "will send message 0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000 to contract 0x036CbD53842c5426634e7929541eC2318f3dCF7e") {
