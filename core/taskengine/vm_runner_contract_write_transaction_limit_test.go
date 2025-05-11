@@ -17,25 +17,32 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-// mockSendUserOpFunc is a function type that matches the signature of SendUserOp
-type mockSendUserOpFunc func(
+// capturedPaymasterRequest stores the paymaster request for verification
+var capturedPaymasterRequest *preset.VerifyingPaymasterRequest
+
+var originalSendUserOp func(
 	config *config.SmartWalletConfig,
 	owner common.Address,
 	callData []byte,
 	paymasterReq *preset.VerifyingPaymasterRequest,
 ) (*userop.UserOperation, *types.Receipt, error)
 
-// capturedPaymasterRequest stores the paymaster request for verification
-var capturedPaymasterRequest *preset.VerifyingPaymasterRequest
+func setupMockSendUserOp() {
+	originalSendUserOp = preset.SendUserOp
+	
+	preset.SendUserOp = func(
+		config *config.SmartWalletConfig,
+		owner common.Address,
+		callData []byte,
+		paymasterReq *preset.VerifyingPaymasterRequest,
+	) (*userop.UserOperation, *types.Receipt, error) {
+		capturedPaymasterRequest = paymasterReq
+		return &userop.UserOperation{}, &types.Receipt{}, nil
+	}
+}
 
-func mockSendUserOp(
-	config *config.SmartWalletConfig,
-	owner common.Address,
-	callData []byte,
-	paymasterReq *preset.VerifyingPaymasterRequest,
-) (*userop.UserOperation, *types.Receipt, error) {
-	capturedPaymasterRequest = paymasterReq
-	return &userop.UserOperation{}, &types.Receipt{}, nil
+func restoreSendUserOp() {
+	preset.SendUserOp = originalSendUserOp
 }
 func TestTransactionSponsorshipLimit(t *testing.T) {
 	testCases := []struct {
@@ -119,14 +126,12 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 				smartWalletConfig: smartWalletConfig,
 			}
 
-			originalFunc := preset.SendUserOp
-			preset.SendUserOp = mockSendUserOp
-			
+			setupMockSendUserOp()
 			capturedPaymasterRequest = nil
 			
 			processor.Execute("test", node)
 			
-			preset.SendUserOp = originalFunc
+			restoreSendUserOp()
 			
 			if tc.expectPaymaster {
 				if capturedPaymasterRequest == nil {
