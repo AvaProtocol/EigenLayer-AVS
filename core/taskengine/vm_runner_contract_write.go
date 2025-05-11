@@ -15,14 +15,23 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
+
+type SendUserOpFunc func(
+	config *config.SmartWalletConfig,
+	owner common.Address,
+	callData []byte,
+	paymasterReq *preset.VerifyingPaymasterRequest,
+) (*userop.UserOperation, *types.Receipt, error)
 
 type ContractWriteProcessor struct {
 	*CommonProcessor
 	client            *ethclient.Client
 	smartWalletConfig *config.SmartWalletConfig
 	owner             common.Address
+	sendUserOpFunc    SendUserOpFunc
 }
 
 func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConfig *config.SmartWalletConfig, owner common.Address) *ContractWriteProcessor {
@@ -30,6 +39,7 @@ func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConf
 		client:            client,
 		smartWalletConfig: smartWalletConfig,
 		owner:             owner,
+		sendUserOpFunc:    preset.SendUserOp, // Default to the real implementation
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
@@ -88,7 +98,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	if total < 10 || isWhitelistedAddress(r.owner, r.smartWalletConfig.WhitelistAddresses) {
 		paymasterRequest = preset.GetVerifyingPaymasterRequestForDuration(r.smartWalletConfig.PaymasterAddress, 15*time.Minute)
 	}
-	userOp, txReceipt, err := preset.SendUserOp(
+	userOp, txReceipt, err := r.sendUserOpFunc(
 		r.smartWalletConfig,
 		r.owner,
 		userOpCalldata,

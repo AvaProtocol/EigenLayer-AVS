@@ -20,29 +20,14 @@ import (
 // capturedPaymasterRequest stores the paymaster request for verification
 var capturedPaymasterRequest *preset.VerifyingPaymasterRequest
 
-var originalSendUserOp func(
+func mockSendUserOp(
 	config *config.SmartWalletConfig,
 	owner common.Address,
 	callData []byte,
 	paymasterReq *preset.VerifyingPaymasterRequest,
-) (*userop.UserOperation, *types.Receipt, error)
-
-func setupMockSendUserOp() {
-	originalSendUserOp = preset.SendUserOp
-	
-	preset.SendUserOp = func(
-		config *config.SmartWalletConfig,
-		owner common.Address,
-		callData []byte,
-		paymasterReq *preset.VerifyingPaymasterRequest,
-	) (*userop.UserOperation, *types.Receipt, error) {
-		capturedPaymasterRequest = paymasterReq
-		return &userop.UserOperation{}, &types.Receipt{}, nil
-	}
-}
-
-func restoreSendUserOp() {
-	preset.SendUserOp = originalSendUserOp
+) (*userop.UserOperation, *types.Receipt, error) {
+	capturedPaymasterRequest = paymasterReq
+	return &userop.UserOperation{}, &types.Receipt{}, nil
 }
 func TestTransactionSponsorshipLimit(t *testing.T) {
 	testCases := []struct {
@@ -126,12 +111,15 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 				smartWalletConfig: smartWalletConfig,
 			}
 
-			setupMockSendUserOp()
 			capturedPaymasterRequest = nil
+			
+			originalSendUserOp := preset.SendUserOp
+			
+			processor.sendUserOpFunc = mockSendUserOp
 			
 			processor.Execute("test", node)
 			
-			restoreSendUserOp()
+			processor.sendUserOpFunc = originalSendUserOp
 			
 			if tc.expectPaymaster {
 				if capturedPaymasterRequest == nil {
