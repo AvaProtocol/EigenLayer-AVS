@@ -145,10 +145,14 @@ func (t *TimeTrigger) Run(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
-				t.scheduler.Shutdown()
+				if err := t.scheduler.Shutdown(); err != nil {
+					t.logger.Error("failed to shutdown scheduler on context done", "error", err)
+				}
 				return
 			case <-t.done:
-				t.scheduler.Shutdown()
+				if err := t.scheduler.Shutdown(); err != nil {
+					t.logger.Error("failed to shutdown scheduler on done signal", "error", err)
+				}
 				return
 			}
 		}

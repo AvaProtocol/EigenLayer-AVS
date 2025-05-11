@@ -46,7 +46,15 @@ func VerifyJwtKeyForUser(secret []byte, key string, userWallet common.Address) (
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if ok {
-		sub := claims["sub"].(string)
+		subVal, ok := claims["sub"]
+		if !ok {
+			return false, fmt.Errorf("Missing subject claim")
+		}
+		
+		sub, ok := subVal.(string)
+		if !ok {
+			return false, fmt.Errorf("Subject is not a string")
+		}
 
 		if sub == "" {
 			return false, fmt.Errorf("Missing subject")
@@ -54,8 +62,22 @@ func VerifyJwtKeyForUser(secret []byte, key string, userWallet common.Address) (
 
 		if sub == "apikey" {
 			roles := []ApiRole{}
-			for _, v := range claims["roles"].([]any) {
-				roles = append(roles, ApiRole(v.(string)))
+			rolesVal, ok := claims["roles"]
+			if !ok {
+				return false, fmt.Errorf("Missing roles claim")
+			}
+			
+			rolesArray, ok := rolesVal.([]any)
+			if !ok {
+				return false, fmt.Errorf("Roles is not an array")
+			}
+			
+			for _, v := range rolesArray {
+				roleStr, ok := v.(string)
+				if !ok {
+					continue // Skip non-string roles
+				}
+				roles = append(roles, ApiRole(roleStr))
 			}
 			if claims["roles"] == nil || !slices.Contains(roles, "admin") {
 				return false, fmt.Errorf("Invalid API Key")
