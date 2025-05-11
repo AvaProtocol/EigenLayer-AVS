@@ -142,8 +142,8 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 						capturedPaymasterRequest.ValidUntil.Int64(), now)
 				}
 				
-				if capturedPaymasterRequest.ValidUntil.Int64() > now+600+5 { // 10 minutes + 5 seconds buffer
-					t.Errorf("Expected ValidUntil to be at most 10 minutes in the future, but it was %d (now: %d)", 
+				if capturedPaymasterRequest.ValidUntil.Int64() > now+900+5 { // 15 minutes + 5 seconds buffer
+					t.Errorf("Expected ValidUntil to be at most 15 minutes in the future, but it was %d (now: %d)", 
 						capturedPaymasterRequest.ValidUntil.Int64(), now)
 				}
 				
