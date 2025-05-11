@@ -412,6 +412,9 @@ func (o *Operator) Start(ctx context.Context) error {
 		// Ensure alias key is correctly bind to operator address
 		o.logger.Infof("checking operator alias address. operator: %s alias %s", o.operatorAddr, o.signerAddress)
 		apConfigContract, err := apconfig.GetContract(o.config.EthRpcUrl, o.apConfigAddr)
+		if err != nil {
+			return fmt.Errorf("failed to get APConfig contract: %w", err)
+		}
 		aliasAddress, err := apConfigContract.GetAlias(nil, o.operatorAddr)
 		if err != nil {
 			panic(err)
@@ -498,7 +501,11 @@ func (c *OperatorConfig) GetPublicMetricPort() int32 {
 		port = parts[1]
 	}
 
-	portNum, _ := strconv.Atoi(port)
+	portNum, err := strconv.Atoi(port)
+	if err != nil {
+		c.logger.Error("failed to parse metrics port", "error", err, "port", port)
+		portNum = 8080 // Default to 8080 if parsing fails
+	}
 
 	c.PublicMetricsPort = int32(portNum)
 	return c.PublicMetricsPort

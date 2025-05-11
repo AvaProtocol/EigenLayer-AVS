@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 
@@ -137,7 +138,9 @@ type AutomationContractsRaw struct {
 func NewConfig(configFilePath string) (*Config, error) {
 	var configRaw ConfigRaw
 	if configFilePath != "" {
-		ReadYamlConfig(configFilePath, &configRaw)
+		if err := ReadYamlConfig(configFilePath, &configRaw); err != nil {
+			return nil, fmt.Errorf("failed to read config file: %w", err)
+		}
 	}
 
 	logger, err := sdklogging.NewZapLogger(configRaw.Environment)
