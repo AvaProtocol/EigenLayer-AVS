@@ -77,6 +77,9 @@ func chainlinkLatestRoundData(tokenPair string) *big.Int {
 
 	// TODO: Check round and answer to prevent the case where chainlink down we
 	// may got outdated data
+	if len(output) < 2 || output[1] == nil {
+		return big.NewInt(0)
+	}
 	return output[1].(*big.Int)
 }
 
@@ -94,6 +97,9 @@ func chainlinkLatestAnswer(tokenPair string) *big.Int {
 		panic(fmt.Errorf("Error when querying contract through rpc. contract: %s. error: %w", tokenPair, err))
 	}
 
+	if len(output) == 0 || output[0] == nil {
+		return big.NewInt(0)
+	}
 	return output[0].(*big.Int)
 }
 
@@ -276,8 +282,13 @@ func RunExpressionQuery(exprCode string) (bool, error) {
 
 	result, err := expr.Run(program, exprEnv)
 	if err != nil {
-		return false, nil
+		return false, err
+	}
+	
+	boolResult, ok := result.(bool)
+	if !ok {
+		return false, fmt.Errorf("expression result is not a boolean")
 	}
 
-	return result.(bool), err
+	return boolResult, nil
 }

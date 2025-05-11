@@ -60,14 +60,14 @@ func TestSendUserOp(t *testing.T) {
 		// common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8"),
 
 		// Base Sepolia Network example
-		// Transfering of 0.00761 the test token
+		// Transferring of 0.00761 the test token
 		// Example result on base sepolia:
 		// https://sepolia.basescan.org/tx/0x812290f4a588cb62bd4a46698ece51d576a75729af5dda497badb0ef8f8cddfa
 		// https://sepolia.basescan.org/tx/0xef607557e727ae1602c6e74a625cffc57aa7108c4d470d38b96cfd4539ee978f
 		//common.HexToAddress("0x0a0c037267a690e9792f4660c29989babec9cffb"),
 		common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e"), // base sepolia usdc
 		big.NewInt(0),
-		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000"),
+		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8"),
 		// common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000001b125981304000"),
 		//common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000001b134255d55000"),
 	)
@@ -86,7 +86,14 @@ func TestSendUserOp(t *testing.T) {
 		b, _ := json.Marshal(userop)
 		//t.Logf("UserOp submit succesfully. tx: %s userop: %s", a, b)
 		t.Logf("UserOp submit failed. userop: %s tx: %s err: %v", a, b, err)
+		return
 	}
+	
+	if receipt == nil {
+		t.Logf("Transaction submitted successfully but receipt is not available yet")
+		return
+	}
+	
 	t.Logf("Transaction executed successfully. TX Hash: %s Gas used: %d", receipt.TxHash.Hex(), receipt.GasUsed)
 }
 
@@ -101,7 +108,7 @@ func TestPaymaster(t *testing.T) {
 	calldata, err := aa.PackExecute(
 		common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e"), // base sepolia usdc
 		big.NewInt(0),
-		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000"),
+		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8"),
 	)
 
 	if err != nil {

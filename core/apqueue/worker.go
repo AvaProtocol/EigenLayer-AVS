@@ -57,7 +57,7 @@ func (w *Worker) ProcessSignal(jid uint64) {
 		if markErr := w.q.markJobDone(job, jobComplete); markErr != nil {
 			w.logger.Error("failed to mark job as complete", "error", markErr, "job_id", jid)
 		} else {
-			w.logger.Info("succesfully perform job", "job_id", jid, "task_id", job.Name)
+			w.logger.Info("successfully perform job", "job_id", jid, "task_id", job.Name)
 		}
 	} else {
 		// TODO: move to a retry queue depend on what kind of error

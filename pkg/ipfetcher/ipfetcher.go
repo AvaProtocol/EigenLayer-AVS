@@ -1,7 +1,7 @@
 package ipfetcher
 
 import (
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -29,7 +29,7 @@ func GetIP() (string, error) {
 	defer resp.Body.Close()
 
 	// Read the response body
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}

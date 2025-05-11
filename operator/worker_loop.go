@@ -90,7 +90,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 					Type:  avspb.TriggerReason_Cron,
 				},
 			}); err == nil {
-				o.logger.Debug("Succesfully notifiy aggregator for task hit", "taskid", triggerItem.TaskID)
+				o.logger.Debug("Successfully notify aggregator for task hit", "taskid", triggerItem.TaskID)
 			} else {
 				o.logger.Errorf("task trigger is in alert condition but failed to sync to aggregator", err, "taskid", triggerItem.TaskID)
 			}
@@ -106,7 +106,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 					Type:        avspb.TriggerReason_Block,
 				},
 			}); err == nil {
-				o.logger.Debug("Succesfully notifiy aggregator for task hit", "taskid", triggerItem.TaskID)
+				o.logger.Debug("Successfully notify aggregator for task hit", "taskid", triggerItem.TaskID)
 			} else {
 				o.logger.Errorf("task trigger is in alert condition but failed to sync to aggregator", err, "taskid", triggerItem.TaskID)
 			}
@@ -125,7 +125,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 					Type:        avspb.TriggerReason_Event,
 				},
 			}); err == nil {
-				o.logger.Debug("Succesfully notifiy aggregator for task hit", "taskid", triggerItem.TaskID)
+				o.logger.Debug("Successfully notify aggregator for task hit", "taskid", triggerItem.TaskID)
 			} else {
 				o.logger.Errorf("task trigger is in alert condition but failed to sync to aggregator", err, "taskid", triggerItem.TaskID)
 			}
@@ -188,28 +188,28 @@ func (o *Operator) StreamMessages() {
 					if err := o.eventTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Info("add trigger to monitor error", err)
 					} else {
-						o.logger.Info("succesfully monitor", "task_id", resp.Id, "component", "eventTrigger")
+						o.logger.Info("successfully monitor", "task_id", resp.Id, "component", "eventTrigger")
 					}
 				} else if trigger := resp.TaskMetadata.Trigger.GetBlock(); trigger != nil {
 					o.logger.Info("received new block trigger", "id", resp.Id, "interval", resp.TaskMetadata.Trigger)
 					if err := o.blockTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Errorf("add trigger to monitor error", err, "task_id", resp.Id)
 					} else {
-						o.logger.Info("succesfully monitor", "task_id", resp.Id, "component", "blockTrigger")
+						o.logger.Info("successfully monitor", "task_id", resp.Id, "component", "blockTrigger")
 					}
 				} else if trigger := resp.TaskMetadata.Trigger.GetCron(); trigger != nil {
 					o.logger.Info("received new cron trigger", "id", resp.Id, "cron", resp.TaskMetadata.Trigger)
 					if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Errorf("add trigger to monitor error", err, "task_id", resp.Id)
 					} else {
-						o.logger.Info("succesfully monitor", "task_id", resp.Id, "component", "timeTrigger")
+						o.logger.Info("successfully monitor", "task_id", resp.Id, "component", "timeTrigger")
 					}
 				} else if trigger := resp.TaskMetadata.Trigger.GetFixedTime(); trigger != nil {
 					o.logger.Info("received new fixed time trigger", "id", resp.Id, "fixedtime", resp.TaskMetadata.Trigger)
 					if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Errorf("add trigger to monitor error", err, "task_id", resp.Id)
 					} else {
-						o.logger.Info("succesfully monitor", "task_id", resp.Id, "component", "timeTrigger")
+						o.logger.Info("successfully monitor", "task_id", resp.Id, "component", "timeTrigger")
 					}
 				}
 
@@ -230,6 +230,7 @@ func (o *Operator) PingServer() {
 
 	if blsSignature == nil {
 		o.logger.Error("error generate bls signature", "operator", o.config.OperatorAddress, "error", err)
+		return
 	}
 
 	str := base64.StdEncoding.EncodeToString(blsSignature.Serialize())
@@ -248,7 +249,7 @@ func (o *Operator) PingServer() {
 	if err != nil {
 		o.logger.Error("check in error", "err", err)
 	} else {
-		o.logger.Debug("check in succesfully", "component", "grpc")
+		o.logger.Debug("check in successfully", "component", "grpc")
 	}
 
 	elapsed := time.Now().Sub(start)

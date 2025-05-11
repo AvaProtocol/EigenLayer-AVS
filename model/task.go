@@ -52,11 +52,11 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 	taskID := GenerateTaskID()
 
 	if len(body.Edges) == 0 {
-		return nil, fmt.Errorf(ErrEmptyEdgesField)
+		return nil, fmt.Errorf("%s", ErrEmptyEdgesField)
 	}
 
 	if len(body.Nodes) == 0 {
-		return nil, fmt.Errorf(ErrEmptyNodesField)
+		return nil, fmt.Errorf("%s", ErrEmptyNodesField)
 	}
 
 	t := &Task{
