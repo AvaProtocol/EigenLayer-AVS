@@ -36,7 +36,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 		expectPaymaster  bool
 		isWhitelisted    bool
 	}{
-		{"First transaction", 0, true, false},
+		{"First transaction", 0, true, false}, // Note: 0 is the first transaction (0-indexed)
 		{"5th transaction", 4, true, false},
 		{"10th transaction", 9, true, false},
 		{"11th transaction", 10, false, false},  // Note: 10 is the 11th transaction (0-indexed)

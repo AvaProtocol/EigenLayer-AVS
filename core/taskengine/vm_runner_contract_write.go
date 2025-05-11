@@ -95,7 +95,11 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 	var paymasterRequest *preset.VerifyingPaymasterRequest
 	// TODO: move to config
+	// Paymaster request logic:
+	// - No paymaster request for transactions >= 10 from non-whitelisted addresses
+	// - Paymaster requests are created for all other cases (transactions < 10 or whitelisted addresses)
 	if total >= 10 && !isWhitelistedAddress(r.owner, r.smartWalletConfig.WhitelistAddresses) {
+		// No paymaster request for non-whitelisted addresses after 10 transactions
 	} else {
 		paymasterRequest = preset.GetVerifyingPaymasterRequestForDuration(r.smartWalletConfig.PaymasterAddress, 15*time.Minute)
 	}
