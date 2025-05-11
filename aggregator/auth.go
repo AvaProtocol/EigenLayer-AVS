@@ -63,7 +63,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, auth.InvalidSignatureFormat)
 		}
-		if len(signature) < crypto.RecoveryIDOffset || len(signature) < crypto.RecoveryIDOffset {
+		if len(signature) < crypto.RecoveryIDOffset {
 			return nil, status.Errorf(codes.InvalidArgument, auth.InvalidSignatureFormat)
 		}
 		// https://stackoverflow.com/questions/49085737/geth-ecrecover-invalid-signature-recovery-id

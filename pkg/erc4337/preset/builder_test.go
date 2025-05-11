@@ -60,7 +60,7 @@ func TestSendUserOp(t *testing.T) {
 		// common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8"),
 
 		// Base Sepolia Network example
-		// Transfering of 0.00761 the test token
+		// Transferring of 0.00761 the test token
 		// Example result on base sepolia:
 		// https://sepolia.basescan.org/tx/0x812290f4a588cb62bd4a46698ece51d576a75729af5dda497badb0ef8f8cddfa
 		// https://sepolia.basescan.org/tx/0xef607557e727ae1602c6e74a625cffc57aa7108c4d470d38b96cfd4539ee978f
