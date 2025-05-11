@@ -16,10 +16,10 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
-	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa/signer"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa/paymaster"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/signer"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/paymaster"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/core/types"
