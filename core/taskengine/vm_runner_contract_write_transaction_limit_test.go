@@ -109,17 +109,12 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 				client:            client,
 				owner:             owner,
 				smartWalletConfig: smartWalletConfig,
+				sendUserOpFunc:    mockSendUserOp,
 			}
 
 			capturedPaymasterRequest = nil
 			
-			originalSendUserOp := preset.SendUserOp
-			
-			processor.sendUserOpFunc = mockSendUserOp
-			
 			processor.Execute("test", node)
-			
-			processor.sendUserOpFunc = originalSendUserOp
 			
 			if tc.expectPaymaster {
 				if capturedPaymasterRequest == nil {
