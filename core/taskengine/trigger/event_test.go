@@ -380,7 +380,7 @@ func TestTriggerExpression(t *testing.T) {
 }
 
 func TestTriggerWithContractReadBindingInExpression(t *testing.T) {
-	// This event is transfering usdc
+	// This event is transferring usdc
 	event, err := testutil.GetEventForTx("0x4bb728dfbe58d7c641c02a214cac6156a0d6a0fe648cb27a7de229a3160e91b1", 145)
 
 	macros.SetRpc(testutil.GetTestRPCURL())

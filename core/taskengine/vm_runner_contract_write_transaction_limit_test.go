@@ -27,12 +27,16 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 		name             string
 		transactionCount uint64
 		expectPaymaster  bool
+		isWhitelisted    bool
 	}{
-		{"First transaction", 1, true},
-		{"5th transaction", 4, true},
-		{"10th transaction", 9, true},
-		{"11th transaction", 11, false},
-		{"20th transaction", 19, false},
+		{"First transaction", 1, true, false},
+		{"5th transaction", 4, true, false},
+		{"10th transaction", 9, true, false},
+		{"11th transaction", 11, false, false},
+		{"20th transaction", 19, false, false},
+		{"Whitelisted address with 1 transaction", 1, true, true},
+		{"Whitelisted address with 11 transactions", 11, true, true},
+		{"Whitelisted address with 20 transactions", 20, true, true},
 	}
 
 	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
@@ -46,7 +50,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 
 	if err != nil {
-		t.Fatalf("error connectiong to websocket: %v", err)
+		t.Fatalf("error connecting to websocket: %v", err)
 	}
 	defer client.Close()
 
@@ -54,6 +58,12 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db := testutil.TestMustDB()
 			defer storage.Destroy(db.(*storage.BadgerStorage))
+			
+			if tc.isWhitelisted {
+				smartWalletConfig.WhitelistAddresses = []common.Address{owner}
+			} else {
+				smartWalletConfig.WhitelistAddresses = []common.Address{}
+			}
 
 			//vm := NewVM().WithDb(db)
 			vm, _ := NewVMWithData(&model.Task{
@@ -102,7 +112,6 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 			capturedPaymaster := step.OutputData.(*avsproto.Execution_Step_ContractWrite).ContractWrite.UserOp.PaymasterAndData
 
 			if tc.expectPaymaster {
-
 				if len(capturedPaymaster) <= 20 {
 					t.Errorf("Expected paymaster request for transaction %d, but got nil", tc.transactionCount)
 					return
