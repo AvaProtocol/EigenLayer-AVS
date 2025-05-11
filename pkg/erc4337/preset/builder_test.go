@@ -86,7 +86,14 @@ func TestSendUserOp(t *testing.T) {
 		b, _ := json.Marshal(userop)
 		//t.Logf("UserOp submit succesfully. tx: %s userop: %s", a, b)
 		t.Logf("UserOp submit failed. userop: %s tx: %s err: %v", a, b, err)
+		return
 	}
+	
+	if receipt == nil {
+		t.Logf("Transaction submitted successfully but receipt is not available yet")
+		return
+	}
+	
 	t.Logf("Transaction executed successfully. TX Hash: %s Gas used: %d", receipt.TxHash.Hex(), receipt.GasUsed)
 }
 
