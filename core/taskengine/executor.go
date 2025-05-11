@@ -172,7 +172,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	if runTaskErr == nil {
-		x.logger.Info("succesfully executing task", "task_id", task.Id, "triggermark", triggerMetadata)
+		x.logger.Info("successfully executing task", "task_id", task.Id, "triggermark", triggerMetadata)
 		return execution, nil
 	}
 	return execution, fmt.Errorf("Error executing task %s: %v", task.Id, runTaskErr)
