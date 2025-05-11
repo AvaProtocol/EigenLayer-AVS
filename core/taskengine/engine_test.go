@@ -90,15 +90,19 @@ func TestListTasks(t *testing.T) {
 
 	if err != nil {
 		t.Errorf("expect list task successfully but got error %s", err)
+		return
 	}
 
 	if result == nil {
 		t.Errorf("expect result is not nil but got nil")
+		return
 	}
 
 	if len(result.Items) != 1 {
 		t.Errorf("list task return wrong. expect 1, got %d", len(result.Items))
+		return
 	}
+	
 	if result.Items[0].Name != "t3" {
 		t.Errorf("list task return wrong. expect memo t1, got %s", result.Items[0].Name)
 	}

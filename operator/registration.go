@@ -72,7 +72,7 @@ func (o *Operator) RegisterOperatorWithAvs() error {
 	sigValidForSeconds := int64(1_000_000)
 	o.logger.Infof("fetch latest block num", "currentBlockNum", curBlockNum)
 	operatorToAvsRegistrationSigExpiry := big.NewInt(int64(curBlock.Time()) + sigValidForSeconds)
-	_, err = o.avsWriter.RegisterOperatorInQuorumWithAVSRegistryCoordinator(
+	_, err = o.avsWriter.RegisterOperator(
 		context.Background(),
 		o.operatorEcdsaPrivateKey, operatorToAvsRegistrationSigSalt, operatorToAvsRegistrationSigExpiry,
 		o.blsKeypair, quorumNumbers, socket, true,
