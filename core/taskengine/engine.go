@@ -1037,6 +1037,7 @@ func (n *Engine) GetExecutionStats(user *model.User, payload *avsproto.GetExecut
 	total := int64(0)
 	succeeded := int64(0)
 	failed := int64(0)
+	var totalExecutionTime int64 = 0
 
 	if len(workflowIds) == 0 {
 		workflowIds = []string{}
@@ -1078,13 +1079,24 @@ func (n *Engine) GetExecutionStats(user *model.User, payload *avsproto.GetExecut
 			} else {
 				failed++
 			}
+			
+			if execution.EndAt > execution.StartAt {
+				executionTime := execution.EndAt - execution.StartAt
+				totalExecutionTime += executionTime
+			}
 		}
 	}
 
+	var avgExecutionTime float64 = 0
+	if total > 0 {
+		avgExecutionTime = float64(totalExecutionTime) / float64(total)
+	}
+
 	return &avsproto.GetExecutionStatsResp{
-		Total:     total,
-		Succeeded: succeeded,
-		Failed:    failed,
+		Total:            total,
+		Succeeded:        succeeded,
+		Failed:           failed,
+		AvgExecutionTime: avgExecutionTime,
 	}, nil
 }
 

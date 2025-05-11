@@ -748,6 +748,7 @@ message GetExecutionStatsResp {
   int64 total = 1; // Total number of executions
   int64 succeeded = 2; // Number of successful executions
   int64 failed = 3; // Number of failed executions
+  double avg_execution_time = 4; // Average execution time in milliseconds
 }
 
 message Evm {
