@@ -2,12 +2,9 @@ package taskengine
 
 import (
 	"fmt"
-	"math/big"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
@@ -20,8 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-var originalSendUserOp = preset.SendUserOp
-
+// mockSendUserOpFunc is a function type that matches the signature of SendUserOp
 type mockSendUserOpFunc func(
 	config *config.SmartWalletConfig,
 	owner common.Address,
@@ -29,12 +25,17 @@ type mockSendUserOpFunc func(
 	paymasterReq *preset.VerifyingPaymasterRequest,
 ) (*userop.UserOperation, *types.Receipt, error)
 
-func replaceSendUserOp(mock mockSendUserOpFunc) func() {
-	originalSendUserOp = preset.SendUserOp
-	preset.SendUserOp = mock
-	return func() {
-		preset.SendUserOp = originalSendUserOp
-	}
+// capturedPaymasterRequest stores the paymaster request for verification
+var capturedPaymasterRequest *preset.VerifyingPaymasterRequest
+
+func mockSendUserOp(
+	config *config.SmartWalletConfig,
+	owner common.Address,
+	callData []byte,
+	paymasterReq *preset.VerifyingPaymasterRequest,
+) (*userop.UserOperation, *types.Receipt, error) {
+	capturedPaymasterRequest = paymasterReq
+	return &userop.UserOperation{}, &types.Receipt{}, nil
 }
 func TestTransactionSponsorshipLimit(t *testing.T) {
 	testCases := []struct {
@@ -118,58 +119,52 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 				smartWalletConfig: smartWalletConfig,
 			}
 
-			var capturedPaymaster *preset.VerifyingPaymasterRequest
+			originalFunc := preset.SendUserOp
+			preset.SendUserOp = mockSendUserOp
 			
-			restore := replaceSendUserOp(func(
-				config *config.SmartWalletConfig,
-				owner common.Address,
-				callData []byte,
-				paymasterReq *preset.VerifyingPaymasterRequest,
-			) (*userop.UserOperation, *types.Receipt, error) {
-				capturedPaymaster = paymasterReq
-				return &userop.UserOperation{}, &types.Receipt{}, nil
-			})
-			defer restore() // Restore the original function after the test
-
+			capturedPaymasterRequest = nil
+			
 			processor.Execute("test", node)
 			
+			preset.SendUserOp = originalFunc
+			
 			if tc.expectPaymaster {
-				if capturedPaymaster == nil {
+				if capturedPaymasterRequest == nil {
 					t.Errorf("Expected paymaster request for transaction %d, but got nil", tc.transactionCount)
 					return
 				}
 				
-				if capturedPaymaster.PaymasterAddress != smartWalletConfig.PaymasterAddress {
+				if capturedPaymasterRequest.PaymasterAddress != smartWalletConfig.PaymasterAddress {
 					t.Errorf("Expected paymaster address %s, got %s", 
 						smartWalletConfig.PaymasterAddress.Hex(), 
-						capturedPaymaster.PaymasterAddress.Hex())
+						capturedPaymasterRequest.PaymasterAddress.Hex())
 				}
 				
-				if capturedPaymaster.ValidUntil == nil {
+				if capturedPaymasterRequest.ValidUntil == nil {
 					t.Errorf("Expected ValidUntil to be set, but it was nil")
 				}
 				
-				if capturedPaymaster.ValidAfter == nil {
+				if capturedPaymasterRequest.ValidAfter == nil {
 					t.Errorf("Expected ValidAfter to be set, but it was nil")
 				}
 				
 				now := time.Now().Unix()
-				if capturedPaymaster.ValidUntil.Int64() <= now {
+				if capturedPaymasterRequest.ValidUntil.Int64() <= now {
 					t.Errorf("Expected ValidUntil to be in the future, but it was %d (now: %d)", 
-						capturedPaymaster.ValidUntil.Int64(), now)
+						capturedPaymasterRequest.ValidUntil.Int64(), now)
 				}
 				
-				if capturedPaymaster.ValidUntil.Int64() > now+600+5 { // 10 minutes + 5 seconds buffer
+				if capturedPaymasterRequest.ValidUntil.Int64() > now+600+5 { // 10 minutes + 5 seconds buffer
 					t.Errorf("Expected ValidUntil to be at most 10 minutes in the future, but it was %d (now: %d)", 
-						capturedPaymaster.ValidUntil.Int64(), now)
+						capturedPaymasterRequest.ValidUntil.Int64(), now)
 				}
 				
-				if capturedPaymaster.ValidAfter.Int64() > now {
+				if capturedPaymasterRequest.ValidAfter.Int64() > now {
 					t.Errorf("Expected ValidAfter to be in the past or present, but it was %d (now: %d)", 
-						capturedPaymaster.ValidAfter.Int64(), now)
+						capturedPaymasterRequest.ValidAfter.Int64(), now)
 				}
 			} else {
-				if capturedPaymaster != nil {
+				if capturedPaymasterRequest != nil {
 					t.Errorf("Expected no paymaster request for transaction %d, but got one", tc.transactionCount)
 				}
 			}
