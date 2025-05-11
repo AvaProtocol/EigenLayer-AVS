@@ -2,15 +2,20 @@ package taskengine
 
 import (
 	"log"
+	"math/big"
 	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
@@ -70,9 +75,28 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 		vm,
 		client,
 		smartWalletConfig,
-
 		common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5"),
 	)
+	
+	n.sendUserOpFunc = func(
+		config *config.SmartWalletConfig,
+		owner common.Address,
+		callData []byte,
+		paymasterReq *preset.VerifyingPaymasterRequest,
+	) (*userop.UserOperation, *types.Receipt, error) {
+		receipt := &types.Receipt{
+			BlockHash:         common.HexToHash("0x1234567890"),
+			BlockNumber:       big.NewInt(123456),
+			TxHash:            common.HexToHash("0xabcdef1234567890"),
+			TransactionIndex:  42,
+			ContractAddress:   common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e"),
+			GasUsed:           uint64(100000),
+			CumulativeGasUsed: uint64(200000),
+			Status:            1,
+			Type:              2,
+		}
+		return &userop.UserOperation{}, receipt, nil
+	}
 
 	step, err := n.Execute("query1", node)
 
