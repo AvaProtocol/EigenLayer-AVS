@@ -56,7 +56,7 @@ func TestGetKeyWithSignature(t *testing.T) {
 	resp, err := r.GetKey(context.Background(), payload)
 
 	if err != nil {
-		t.Errorf("expect GetKey succesfully but got error: %s", err)
+		t.Errorf("expect GetKey successfully but got error: %s", err)
 	}
 	if resp.Key == "" {
 		t.Errorf("expect jwt key but got no")

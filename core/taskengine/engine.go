@@ -471,7 +471,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
 	}
 
-	// second, do the sort, this is key sorted by ordering of ther insertion
+	// second, do the sort, this is key sorted by ordering of their insertion
 	slices.SortFunc(taskKeys, func(a, b string) int {
 		id1 := ulid.MustParse(string(model.TaskKeyToId([]byte(a[2:]))))
 		id2 := ulid.MustParse(string(model.TaskKeyToId([]byte(b[2:]))))
@@ -666,7 +666,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 
 	executionKeys, err := n.db.ListKeysMulti(prefixes)
 
-	// second, do the sort, this is key sorted by ordering of ther insertion
+	// second, do the sort, this is key sorted by ordering of their insertion
 	slices.SortFunc(executionKeys, func(a, b string) int {
 		id1 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(a))))
 		id2 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(b))))
@@ -752,7 +752,7 @@ func (n *Engine) setExecutionStatusQueue(task *model.Task, executionID string) e
 	return n.db.Set(TaskTriggerKey(task, executionID), []byte(status))
 }
 
-func (n *Engine) getExecutonStatusFromQueue(task *model.Task, executionID string) (*avsproto.ExecutionStatus, error) {
+func (n *Engine) getExecutionStatusFromQueue(task *model.Task, executionID string) (*avsproto.ExecutionStatus, error) {
 	status, err := n.db.GetKey(TaskTriggerKey(task, executionID))
 	if err != nil {
 		return nil, err
@@ -816,7 +816,7 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 	// First look into execution first
 	if _, err = n.db.GetKey(TaskExecutionKey(task, payload.ExecutionId)); err != nil {
 		// When execution not found, it could be in pending status, we will check that storage
-		if status, err := n.getExecutonStatusFromQueue(task, payload.ExecutionId); err == nil {
+		if status, err := n.getExecutionStatusFromQueue(task, payload.ExecutionId); err == nil {
 			return &avsproto.ExecutionStatusResp{
 				Status: *status,
 			}, nil
@@ -941,7 +941,7 @@ func (n *Engine) CreateSecret(user *model.User, payload *avsproto.CreateOrUpdate
 	}
 
 	if len(payload.Name) == 0 || len(payload.Name) > MaxSecretNameLength {
-		return false, grpcstatus.Errorf(codes.InvalidArgument, "secret name lengh is invalid: should be 1-255 character")
+		return false, grpcstatus.Errorf(codes.InvalidArgument, "secret name length is invalid: should be 1-255 character")
 	}
 
 	key, _ := SecretStorageKey(secret)

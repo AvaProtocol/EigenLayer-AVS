@@ -13,7 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 )
 
-// Entrypoin funciton for cmd to initialize the  registration process
+// Entrypoint function for cmd to initialize the registration process
 func RegisterToAVS(configPath string) {
 	operator, err := NewOperatorFromConfigFile(configPath)
 	if err != nil {
