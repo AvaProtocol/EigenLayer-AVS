@@ -271,13 +271,13 @@ func TestGetExecution(t *testing.T) {
 		t.Errorf("invalid triggered block. expect 101 got %d", execution.Reason.BlockNumber)
 	}
 
-	// Another user cannot get this executin id
+	// Another user cannot get this execution id
 	execution, err = n.GetExecution(testutil.TestUser2(), &avsproto.ExecutionReq{
 		TaskId:      result.Id,
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 	if err == nil || execution != nil {
-		t.Errorf("expected failure getting other user execution but succesfully read it")
+		t.Errorf("expected failure getting other user execution but successfully read it")
 	}
 }
 

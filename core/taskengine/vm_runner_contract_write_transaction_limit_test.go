@@ -50,7 +50,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
 
 	if err != nil {
-		t.Fatalf("error connectiong to websocket: %v", err)
+		t.Fatalf("error connecting to websocket: %v", err)
 	}
 	defer client.Close()
 
