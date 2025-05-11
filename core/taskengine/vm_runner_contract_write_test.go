@@ -85,15 +85,19 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 		paymasterReq *preset.VerifyingPaymasterRequest,
 	) (*userop.UserOperation, *types.Receipt, error) {
 		receipt := &types.Receipt{
-			BlockHash:         common.HexToHash("0x1234567890"),
+			BlockHash:         common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"),
 			BlockNumber:       big.NewInt(123456),
-			TxHash:            common.HexToHash("0xabcdef1234567890"),
+			TxHash:            common.HexToHash("0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"),
 			TransactionIndex:  42,
 			ContractAddress:   common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e"),
 			GasUsed:           uint64(100000),
 			CumulativeGasUsed: uint64(200000),
 			Status:            1,
 			Type:              2,
+			Logs:              []*types.Log{},
+			LogsBloom:         types.Bloom{},
+			From:              common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5"),
+			To:                common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e"),
 		}
 		return &userop.UserOperation{}, receipt, nil
 	}
@@ -122,8 +126,13 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 	}
 
 	outputData := step.GetContractWrite()
-	if outputData == nil || outputData.TxReceipt == nil {
-		t.Errorf("Test skipped: Contract write operation could not be completed due to connection issues")
+	if outputData == nil {
+		t.Errorf("Expected contract write output data but got nil")
+		return
+	}
+	
+	if outputData.TxReceipt == nil {
+		t.Errorf("Expected transaction receipt but got nil")
 		return
 	}
 
