@@ -129,7 +129,9 @@ func (t *TimeTrigger) Remove(check *avsproto.SyncMessagesResp_TaskMetadata) erro
 
 	taskID := check.TaskId
 	if job, exists := t.jobs[taskID]; exists {
-		t.scheduler.RemoveJob(job.ID())
+		if err := t.scheduler.RemoveJob(job.ID()); err != nil {
+			t.logger.Error("failed to remove job", "task_id", taskID, "error", err)
+		}
 		delete(t.jobs, taskID)
 	}
 
