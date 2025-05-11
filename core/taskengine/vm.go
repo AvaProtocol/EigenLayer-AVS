@@ -399,7 +399,7 @@ func (v *VM) Compile() error {
 
 	// Cannot find entrypoint
 	if v.entrypoint == "" {
-		return fmt.Errorf(InvalidEntrypoint)
+		return fmt.Errorf("%s", InvalidEntrypoint)
 	}
 
 	v.Status = VMStateReady
