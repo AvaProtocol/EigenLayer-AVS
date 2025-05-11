@@ -89,7 +89,7 @@ func TestListTasks(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Errorf("expect list task succesfully but got error %s", err)
+		t.Errorf("expect list task successfully but got error %s", err)
 	}
 
 	if result == nil {
@@ -169,7 +169,7 @@ func TestListTasksPagination(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Errorf("expect list task succesfully but got error %s", err)
+		t.Errorf("expect list task successfully but got error %s", err)
 	}
 
 	if !result.HasMore {
@@ -363,7 +363,7 @@ func TestTriggerSync(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Errorf("expected trigger succesfully but got error: %s", err)
+		t.Errorf("expected trigger successfully but got error: %s", err)
 	}
 
 	// Now get back that execution id
@@ -417,7 +417,7 @@ func TestTriggerAsync(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Errorf("expected trigger succesfully but got error: %s", err)
+		t.Errorf("expected trigger successfully but got error: %s", err)
 	}
 
 	// Now get back that execution id, because the task is run async we won't have any data yet,
@@ -494,7 +494,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	})
 
 	if err != nil || resultTrigger == nil {
-		t.Errorf("expected trigger succesfully but got error: %s", err)
+		t.Errorf("expected trigger successfully but got error: %s", err)
 	}
 
 	// Now the task has reach its max run, and canot run anymore
