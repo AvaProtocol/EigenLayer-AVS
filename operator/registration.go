@@ -74,8 +74,7 @@ func (o *Operator) RegisterOperatorWithAvs() error {
 	operatorToAvsRegistrationSigExpiry := big.NewInt(int64(curBlock.Time()) + sigValidForSeconds)
 	_, err = o.avsWriter.RegisterOperator(
 		context.Background(),
-		o.operatorEcdsaPrivateKey, operatorToAvsRegistrationSigSalt, operatorToAvsRegistrationSigExpiry,
-		o.blsKeypair, quorumNumbers, socket, true,
+		o.operatorEcdsaPrivateKey, o.blsKeypair, quorumNumbers, socket, true,
 	)
 	if err != nil {
 		o.logger.Errorf("Unable to register operator with avs registry coordinator", err)
