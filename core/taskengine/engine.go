@@ -161,7 +161,7 @@ func (n *Engine) Stop() {
 	n.shutdown = true
 }
 
-func (n *Engine) MustStart() {
+func (n *Engine) MustStart() error {
 	var err error
 	n.seq, err = n.db.GetSequence([]byte("t:seq"), 1000)
 	if err != nil {
@@ -182,6 +182,8 @@ func (n *Engine) MustStart() {
 			n.tasks[string(item.Key)] = task
 		}
 	}
+	
+	return nil
 }
 
 func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWalletReq) ([]*avsproto.SmartWallet, error) {
