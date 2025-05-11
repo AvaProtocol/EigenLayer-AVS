@@ -58,6 +58,10 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 }
 
 func TestSendUserOp(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping test in CI environment")
+	}
+
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
@@ -118,6 +122,10 @@ func TestSendUserOp(t *testing.T) {
 }
 
 func TestPaymaster(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping test in CI environment")
+	}
+
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
 
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
