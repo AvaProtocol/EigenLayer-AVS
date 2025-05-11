@@ -503,8 +503,8 @@ func (c *OperatorConfig) GetPublicMetricPort() int32 {
 
 	portNum, err := strconv.Atoi(port)
 	if err != nil {
-		fmt.Printf("failed to parse metrics port: %v (port: %s), defaulting to 8080\n", err, port)
-		portNum = 8080 // Default to 8080 if parsing fails
+		// Just use default port if parsing fails
+		portNum = 8080
 	}
 
 	c.PublicMetricsPort = int32(portNum)
