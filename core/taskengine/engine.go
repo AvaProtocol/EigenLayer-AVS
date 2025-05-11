@@ -1079,7 +1079,7 @@ func (n *Engine) GetExecutionStats(user *model.User, payload *avsproto.GetExecut
 			} else {
 				failed++
 			}
-			
+
 			if execution.EndAt > execution.StartAt {
 				executionTime := execution.EndAt - execution.StartAt
 				totalExecutionTime += executionTime
