@@ -39,8 +39,8 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 		{"First transaction", 0, true, false},
 		{"5th transaction", 4, true, false},
 		{"10th transaction", 9, true, false},
-		{"11th transaction", 10, true, false},  // Note: 10 is the 11th transaction (0-indexed)
-		{"20th transaction", 19, true, false},
+		{"11th transaction", 10, false, false},  // Note: 10 is the 11th transaction (0-indexed)
+		{"20th transaction", 19, false, false},
 		{"Whitelisted address with 1 transaction", 1, true, true},
 		{"Whitelisted address with 11 transactions", 11, true, true},
 		{"Whitelisted address with 20 transactions", 20, true, true},
