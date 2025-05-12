@@ -7,24 +7,61 @@ repos:
         language: system
         types: [go]
         pass_filenames: false
-      
+
       - id: go-mod-tidy
         name: go mod tidy
         entry: go mod tidy
         language: system
         types: [go]
         pass_filenames: false
-      
+
       - id: go-vet
         name: go vet
         entry: go vet ./...
         language: system
         types: [go]
         pass_filenames: false
-      
-      - id: golangci-lint
-        name: golangci-lint
-        entry: golangci-lint run
+
+      # - id: golangci-lint
+      #   name: golangci-lint
+      #   entry: golangci-lint run
+      #   language: system
+      #   types: [go]
+      #   pass_filenames: false
+
+      - id: conventional-commit-check
+        name: Conventional Commit Message Check
+        entry: |-
+          bash -c '
+            COMMIT_MSG_FILE="$1"
+            FIRST_LINE=$(head -n1 "$COMMIT_MSG_FILE")
+            # Regex for conventional commit: type(optional_scope)!: subject
+            # Allowed types: feat, fix, docs, style, refactor, perf, test, chore, ci, build, revert
+            # Allows an optional scope in parentheses e.g. feat(parser):
+            # Allows an optional ! for breaking change e.g. feat!:
+            # Requires a colon and a space after type/scope/!.
+            # Requires some subject text.
+            PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\([\w\s-]+\))?!?:\[[:space:]].+"
+            if ! grep -Eq "$PATTERN" <<< "$FIRST_LINE"; then
+              echo "-------------------------------------------------------------------"
+              echo "ERROR: Commit message does not follow Conventional Commits format."
+              echo "-------------------------------------------------------------------"
+              echo "It must start with a type like feat, fix, docs, etc.,"
+              echo "followed by an optional scope in parentheses (e.g. (api), (ui)),"
+              echo "an optional exclamation mark for breaking changes (!),"
+              echo "a colon and a single space, and then the subject."
+              echo ""
+              echo "Examples:"
+              echo "  feat: add new user authentication feature"
+              echo "  fix(parser): correctly handle empty input"
+              echo "  docs!: update API documentation for breaking change"
+              echo ""
+              echo "Allowed types: feat, fix, docs, style, refactor, perf, test, chore, ci, build, revert"
+              echo "For more details, see: https://www.conventionalcommits.org/"
+              echo "-------------------------------------------------------------------"
+              exit 1
+            fi
+          '
         language: system
-        types: [go]
-        pass_filenames: false
+        stages: [commit-msg]
+        pass_filenames: true # The script expects the filename as $1

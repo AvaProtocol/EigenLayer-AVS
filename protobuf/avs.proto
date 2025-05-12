@@ -737,6 +737,11 @@ service Aggregator {
   // Workflow IDs not found in the system are ignored.
   // Workflow IDs not linked to the EOA in the auth key are also ignored.
   rpc GetExecutionCount(GetExecutionCountReq) returns (GetExecutionCountResp);
+
+  // GetExecutionStats returns execution statistics for a specified time period
+  // It counts total executions, successful executions, and failed executions
+  // If no workflow IDs are provided, it counts for all workflows of the authenticated user
+  rpc GetExecutionStats(GetExecutionStatsReq) returns (GetExecutionStatsResp);
 }
 
 // Request message for GetWorkflowCount
@@ -758,6 +763,20 @@ message GetExecutionCountReq {
 message GetExecutionCountResp {
   // TODO: eventually to support success, error count execution
   int64 total = 1; // The total count of executions
+}
+
+// Request message for GetExecutionStats
+message GetExecutionStatsReq {
+  repeated string workflow_ids = 1; // Optional array of workflow IDs
+  int64 days = 2; // Number of days to look back (default: 7)
+}
+
+// Response message for GetExecutionStats
+message GetExecutionStatsResp {
+  int64 total = 1; // Total number of executions
+  int64 succeeded = 2; // Number of successful executions
+  int64 failed = 3; // Number of failed executions
+  double avg_execution_time = 4; // Average execution time in milliseconds
 }
 
 message Evm {

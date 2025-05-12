@@ -6,14 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math/big"
 
 	regcoord "github.com/Layr-Labs/eigensdk-go/contracts/bindings/RegistryCoordinator"
 	eigenSdkTypes "github.com/Layr-Labs/eigensdk-go/types"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 )
 
-// Entrypoin funciton for cmd to initialize the  registration process
+// Entrypoint function for cmd to initialize the registration process
 func RegisterToAVS(configPath string) {
 	operator, err := NewOperatorFromConfigFile(configPath)
 	if err != nil {
@@ -21,6 +20,9 @@ func RegisterToAVS(configPath string) {
 	}
 
 	err = operator.RegisterOperatorWithAvs()
+	if err != nil {
+		panic(fmt.Errorf("failed to register operator with AVS: %w", err))
+	}
 }
 
 func DeregisterFromAVS(configPath string) {
@@ -29,7 +31,9 @@ func DeregisterFromAVS(configPath string) {
 		panic(fmt.Errorf("error creator operator from config: %w", err))
 	}
 
-	operator.DeregisterOperatorFromAvs()
+	if err := operator.DeregisterOperatorFromAvs(); err != nil {
+		panic(fmt.Errorf("failed to deregister operator from AVS: %w", err))
+	}
 }
 
 func Status(configPath string) {
@@ -38,7 +42,9 @@ func Status(configPath string) {
 		panic(fmt.Errorf("error creator operator from config: %w", err))
 	}
 
-	operator.ReportOperatorStatus()
+	if err := operator.ReportOperatorStatus(); err != nil {
+		panic(fmt.Errorf("failed to report operator status: %w", err))
+	}
 }
 
 // Registration specific functions
@@ -57,18 +63,10 @@ func (o *Operator) RegisterOperatorWithAvs() error {
 		o.logger.Errorf("Unable to get current block number")
 		return err
 	}
-	curBlock, err := o.ethClient.BlockByNumber(context.Background(), big.NewInt(int64(curBlockNum)))
-	if err != nil {
-		o.logger.Errorf("Unable to get current block")
-		return err
-	}
-	sigValidForSeconds := int64(1_000_000)
 	o.logger.Infof("fetch latest block num", "currentBlockNum", curBlockNum)
-	operatorToAvsRegistrationSigExpiry := big.NewInt(int64(curBlock.Time()) + sigValidForSeconds)
-	_, err = o.avsWriter.RegisterOperatorInQuorumWithAVSRegistryCoordinator(
+	_, err = o.avsWriter.RegisterOperator(
 		context.Background(),
-		o.operatorEcdsaPrivateKey, operatorToAvsRegistrationSigSalt, operatorToAvsRegistrationSigExpiry,
-		o.blsKeypair, quorumNumbers, socket, true,
+		o.operatorEcdsaPrivateKey, o.blsKeypair, quorumNumbers, socket, true,
 	)
 	if err != nil {
 		o.logger.Errorf("Unable to register operator with avs registry coordinator", err)

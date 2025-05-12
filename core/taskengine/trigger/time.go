@@ -8,7 +8,7 @@ import (
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"github.com/go-co-op/gocron/v2"
+	gocron "github.com/go-co-op/gocron/v2"
 )
 
 type TimeTrigger struct {
@@ -129,7 +129,9 @@ func (t *TimeTrigger) Remove(check *avsproto.SyncMessagesResp_TaskMetadata) erro
 
 	taskID := check.TaskId
 	if job, exists := t.jobs[taskID]; exists {
-		t.scheduler.RemoveJob(job.ID())
+		if err := t.scheduler.RemoveJob(job.ID()); err != nil {
+			t.logger.Error("failed to remove job", "task_id", taskID, "error", err)
+		}
 		delete(t.jobs, taskID)
 	}
 
@@ -143,10 +145,14 @@ func (t *TimeTrigger) Run(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
-				t.scheduler.Shutdown()
+				if err := t.scheduler.Shutdown(); err != nil {
+					t.logger.Error("failed to shutdown scheduler on context done", "error", err)
+				}
 				return
 			case <-t.done:
-				t.scheduler.Shutdown()
+				if err := t.scheduler.Shutdown(); err != nil {
+					t.logger.Error("failed to shutdown scheduler on done signal", "error", err)
+				}
 				return
 			}
 		}

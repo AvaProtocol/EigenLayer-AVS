@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"sort"
+	"sync"
 	"time"
 
-	"github.com/go-co-op/gocron/v2"
+	gocron "github.com/go-co-op/gocron/v2"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
@@ -25,11 +27,39 @@ const (
 //   - subscribe to server to receive update. act on these update to update local storage
 //   - spawn a loop to check triggering condition
 func (o *Operator) runWorkLoop(ctx context.Context) error {
-	// Setup taskengine, initialize local storage and cache, establish rpc
-	var err error
-	o.scheduler, err = gocron.NewScheduler()
+	blockTasksMap := make(map[int64][]string)
+	blockTasksMutex := &sync.Mutex{}
+
+	_, err := o.scheduler.NewJob(
+		gocron.DurationJob(time.Minute*10),
+		gocron.NewTask(func() {
+			blockTasksMutex.Lock()
+			defer blockTasksMutex.Unlock()
+
+			if len(blockTasksMap) > 10 {
+				var blocks []int64
+				for block := range blockTasksMap {
+					blocks = append(blocks, block)
+				}
+
+				sort.Slice(blocks, func(i, j int) bool {
+					return blocks[i] < blocks[j]
+				})
+
+				for i := 0; i < len(blocks)-10; i++ {
+					delete(blockTasksMap, blocks[i])
+				}
+			}
+		}),
+	)
 	if err != nil {
-		panic(err)
+		o.logger.Error("Failed to create cleanup job for block tasks map", "error", err)
+	}
+	// Setup taskengine, initialize local storage and cache, establish rpc
+	var schedulerErr error
+	o.scheduler, schedulerErr = gocron.NewScheduler()
+	if schedulerErr != nil {
+		panic(schedulerErr)
 	}
 	o.scheduler.Start()
 	o.scheduler.NewJob(gocron.DurationJob(time.Second*5), gocron.NewTask(o.PingServer))
@@ -90,12 +120,22 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 					Type:  avspb.TriggerReason_Cron,
 				},
 			}); err == nil {
-				o.logger.Debug("Succesfully notifiy aggregator for task hit", "taskid", triggerItem.TaskID)
+				o.logger.Debug("Successfully notify aggregator for task hit", "taskid", triggerItem.TaskID)
 			} else {
 				o.logger.Errorf("task trigger is in alert condition but failed to sync to aggregator", err, "taskid", triggerItem.TaskID)
 			}
 		case triggerItem := <-blockTriggerCh:
-			o.logger.Info("block trigger", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
+			o.logger.Debug("block trigger details", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
+
+			blockTasksMutex.Lock()
+			blockNum := triggerItem.Marker
+			blockTasksMap[blockNum] = append(blockTasksMap[blockNum], triggerItem.TaskID)
+
+			taskCount := len(blockTasksMap[blockNum])
+			if taskCount == 1 || taskCount%5 == 0 {
+				o.logger.Info("block trigger summary", "block", blockNum, "task_count", taskCount)
+			}
+			blockTasksMutex.Unlock()
 
 			if _, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
 				Address:   o.config.OperatorAddress,
@@ -106,7 +146,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 					Type:        avspb.TriggerReason_Block,
 				},
 			}); err == nil {
-				o.logger.Debug("Succesfully notifiy aggregator for task hit", "taskid", triggerItem.TaskID)
+				o.logger.Debug("Successfully notify aggregator for task hit", "taskid", triggerItem.TaskID)
 			} else {
 				o.logger.Errorf("task trigger is in alert condition but failed to sync to aggregator", err, "taskid", triggerItem.TaskID)
 			}
@@ -125,7 +165,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 					Type:        avspb.TriggerReason_Event,
 				},
 			}); err == nil {
-				o.logger.Debug("Succesfully notifiy aggregator for task hit", "taskid", triggerItem.TaskID)
+				o.logger.Debug("Successfully notify aggregator for task hit", "taskid", triggerItem.TaskID)
 			} else {
 				o.logger.Errorf("task trigger is in alert condition but failed to sync to aggregator", err, "taskid", triggerItem.TaskID)
 			}
@@ -188,31 +228,30 @@ func (o *Operator) StreamMessages() {
 					if err := o.eventTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Info("add trigger to monitor error", err)
 					} else {
-						o.logger.Info("succesfully monitor", "task_id", resp.Id, "component", "eventTrigger")
+						o.logger.Info("successfully monitor", "task_id", resp.Id, "component", "eventTrigger")
 					}
 				} else if trigger := resp.TaskMetadata.Trigger.GetBlock(); trigger != nil {
 					o.logger.Info("received new block trigger", "id", resp.Id, "interval", resp.TaskMetadata.Trigger)
 					if err := o.blockTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Errorf("add trigger to monitor error", err, "task_id", resp.Id)
 					} else {
-						o.logger.Info("succesfully monitor", "task_id", resp.Id, "component", "blockTrigger")
+						o.logger.Info("successfully monitor", "task_id", resp.Id, "component", "blockTrigger")
 					}
 				} else if trigger := resp.TaskMetadata.Trigger.GetCron(); trigger != nil {
 					o.logger.Info("received new cron trigger", "id", resp.Id, "cron", resp.TaskMetadata.Trigger)
 					if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Errorf("add trigger to monitor error", err, "task_id", resp.Id)
 					} else {
-						o.logger.Info("succesfully monitor", "task_id", resp.Id, "component", "timeTrigger")
+						o.logger.Info("successfully monitor", "task_id", resp.Id, "component", "timeTrigger")
 					}
 				} else if trigger := resp.TaskMetadata.Trigger.GetFixedTime(); trigger != nil {
 					o.logger.Info("received new fixed time trigger", "id", resp.Id, "fixedtime", resp.TaskMetadata.Trigger)
 					if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Errorf("add trigger to monitor error", err, "task_id", resp.Id)
 					} else {
-						o.logger.Info("succesfully monitor", "task_id", resp.Id, "component", "timeTrigger")
+						o.logger.Info("successfully monitor", "task_id", resp.Id, "component", "timeTrigger")
 					}
 				}
-
 			}
 		}
 	}
@@ -230,6 +269,7 @@ func (o *Operator) PingServer() {
 
 	if blsSignature == nil {
 		o.logger.Error("error generate bls signature", "operator", o.config.OperatorAddress, "error", err)
+		return
 	}
 
 	str := base64.StdEncoding.EncodeToString(blsSignature.Serialize())
@@ -248,10 +288,10 @@ func (o *Operator) PingServer() {
 	if err != nil {
 		o.logger.Error("check in error", "err", err)
 	} else {
-		o.logger.Debug("check in succesfully", "component", "grpc")
+		o.logger.Debug("check in successfully", "component", "grpc")
 	}
 
-	elapsed := time.Now().Sub(start)
+	elapsed := time.Since(start)
 	if err == nil {
 		o.metrics.IncPing("success")
 	} else {

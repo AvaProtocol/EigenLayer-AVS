@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/oklog/ulid/v2"
+	ulid "github.com/oklog/ulid/v2"
 )
 
 type CursorDirection string
