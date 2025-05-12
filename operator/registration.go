@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math/big"
 
 	regcoord "github.com/Layr-Labs/eigensdk-go/contracts/bindings/RegistryCoordinator"
 	eigenSdkTypes "github.com/Layr-Labs/eigensdk-go/types"
@@ -64,14 +63,7 @@ func (o *Operator) RegisterOperatorWithAvs() error {
 		o.logger.Errorf("Unable to get current block number")
 		return err
 	}
-	curBlock, err := o.ethClient.BlockByNumber(context.Background(), big.NewInt(int64(curBlockNum)))
-	if err != nil {
-		o.logger.Errorf("Unable to get current block")
-		return err
-	}
-	sigValidForSeconds := int64(1_000_000)
 	o.logger.Infof("fetch latest block num", "currentBlockNum", curBlockNum)
-	operatorToAvsRegistrationSigExpiry := big.NewInt(int64(curBlock.Time()) + sigValidForSeconds)
 	_, err = o.avsWriter.RegisterOperator(
 		context.Background(),
 		o.operatorEcdsaPrivateKey, o.blsKeypair, quorumNumbers, socket, true,
