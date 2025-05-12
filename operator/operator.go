@@ -20,7 +20,7 @@ import (
 	"github.com/Layr-Labs/eigensdk-go/signerv2"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/go-co-op/gocron/v2"
+	gocron "github.com/go-co-op/gocron/v2"
 
 	"github.com/prometheus/client_golang/prometheus"
 
