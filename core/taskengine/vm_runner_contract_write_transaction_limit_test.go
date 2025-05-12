@@ -7,9 +7,9 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
-	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
@@ -31,7 +31,7 @@ func mockSendUserOp(
 }
 func TestTransactionSponsorshipLimit(t *testing.T) {
 	testCases := []struct {
-		name            string
+		name             string
 		transactionCount uint64
 		expectPaymaster  bool
 		isWhitelisted    bool
@@ -39,7 +39,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 		{"First transaction", 0, true, false}, // Note: 0 is the first transaction (0-indexed)
 		{"5th transaction", 4, true, false},
 		{"10th transaction", 9, true, false},
-		{"11th transaction", 10, false, false},  // Note: 10 is the 11th transaction (0-indexed)
+		{"11th transaction", 10, false, false}, // Note: 10 is the 11th transaction (0-indexed)
 		{"20th transaction", 19, false, false},
 		{"Whitelisted address with 1 transaction", 1, true, true},
 		{"Whitelisted address with 11 transactions", 11, true, true},
@@ -48,7 +48,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 
 	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
 	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
-	
+
 	contractAddress := common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e")
 	node := &avsproto.ContractWriteNode{
 		ContractAddress: contractAddress.Hex(),
@@ -66,7 +66,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db := testutil.TestMustDB()
 			defer storage.Destroy(db.(*storage.BadgerStorage))
-			
+
 			if tc.isWhitelisted {
 				smartWalletConfig.WhitelistAddresses = []common.Address{owner}
 			} else {
@@ -74,7 +74,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 			}
 
 			vm, _ := NewVMWithData(&model.Task{
-				&avsproto.Task{
+				Task: &avsproto.Task{
 					Id: fmt.Sprintf("test-%d", i),
 					Trigger: &avsproto.TaskTrigger{
 						Id:   "triggertest",
@@ -113,42 +113,42 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 			}
 
 			capturedPaymasterRequest = nil
-			
+
 			processor.Execute("test", node)
-			
+
 			if tc.expectPaymaster {
 				if capturedPaymasterRequest == nil {
 					t.Errorf("Expected paymaster request for transaction %d, but got nil", tc.transactionCount)
 					return
 				}
-				
+
 				if capturedPaymasterRequest.PaymasterAddress != smartWalletConfig.PaymasterAddress {
-					t.Errorf("Expected paymaster address %s, got %s", 
-						smartWalletConfig.PaymasterAddress.Hex(), 
+					t.Errorf("Expected paymaster address %s, got %s",
+						smartWalletConfig.PaymasterAddress.Hex(),
 						capturedPaymasterRequest.PaymasterAddress.Hex())
 				}
-				
+
 				if capturedPaymasterRequest.ValidUntil == nil {
 					t.Errorf("Expected ValidUntil to be set, but it was nil")
 				}
-				
+
 				if capturedPaymasterRequest.ValidAfter == nil {
 					t.Errorf("Expected ValidAfter to be set, but it was nil")
 				}
-				
+
 				now := time.Now().Unix()
 				if capturedPaymasterRequest.ValidUntil.Int64() <= now {
-					t.Errorf("Expected ValidUntil to be in the future, but it was %d (now: %d)", 
+					t.Errorf("Expected ValidUntil to be in the future, but it was %d (now: %d)",
 						capturedPaymasterRequest.ValidUntil.Int64(), now)
 				}
-				
+
 				if capturedPaymasterRequest.ValidUntil.Int64() > now+900+5 { // 15 minutes + 5 seconds buffer
-					t.Errorf("Expected ValidUntil to be at most 15 minutes in the future, but it was %d (now: %d)", 
+					t.Errorf("Expected ValidUntil to be at most 15 minutes in the future, but it was %d (now: %d)",
 						capturedPaymasterRequest.ValidUntil.Int64(), now)
 				}
-				
+
 				if capturedPaymasterRequest.ValidAfter.Int64() > now {
-					t.Errorf("Expected ValidAfter to be in the past or present, but it was %d (now: %d)", 
+					t.Errorf("Expected ValidAfter to be in the past or present, but it was %d (now: %d)",
 						capturedPaymasterRequest.ValidAfter.Int64(), now)
 				}
 			} else {

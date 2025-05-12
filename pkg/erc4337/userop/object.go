@@ -123,7 +123,7 @@ func (op *UserOperation) GetDynamicGasPrice(basefee *big.Int) *big.Int {
 // Pack returns a standard message of the userOp. This cannot be used to generate a userOpHash.
 func (op *UserOperation) Pack() []byte {
 	args := abi.Arguments{
-		{Name: "UserOp", Type: UserOpType},
+		abi.Argument{Name: "UserOp", Type: UserOpType},
 	}
 	packed, _ := args.Pack(&struct {
 		Sender               common.Address
