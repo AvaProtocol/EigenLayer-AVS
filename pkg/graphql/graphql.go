@@ -25,7 +25,7 @@ func NewClient(endpoint string, log func(s string), opts ...ClientOption) (*Clie
 	client := &Client{
 		endpoint:    endpoint,
 		restyClient: resty.New(),
-		Log:         func(string) {},
+		Log:         log,
 	}
 
 	for _, opt := range opts {

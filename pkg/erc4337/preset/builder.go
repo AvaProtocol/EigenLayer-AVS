@@ -316,8 +316,8 @@ func BuildUserOpWithPaymaster(
 	// Define ABI types for timestamps
 	uint48Type, _ := abi.NewType("uint48", "", nil)
 	timestampArgs := abi.Arguments{
-		{Type: uint48Type},
-		{Type: uint48Type},
+		abi.Argument{Type: uint48Type},
+		abi.Argument{Type: uint48Type},
 	}
 
 	// Pack timestamps according to ABI encoding rules

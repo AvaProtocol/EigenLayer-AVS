@@ -159,16 +159,16 @@ func (op *UserOperation) Pack() []byte {
 // PackForSignature returns a minimal message of the userOp. This can be used to generate a userOpHash.
 func (op *UserOperation) PackForSignature() []byte {
 	args := abi.Arguments{
-		{Name: "sender", Type: address},
-		{Name: "nonce", Type: uint256},
-		{Name: "hashInitCode", Type: bytes32},
-		{Name: "hashCallData", Type: bytes32},
-		{Name: "callGasLimit", Type: uint256},
-		{Name: "verificationGasLimit", Type: uint256},
-		{Name: "preVerificationGas", Type: uint256},
-		{Name: "maxFeePerGas", Type: uint256},
-		{Name: "maxPriorityFeePerGas", Type: uint256},
-		{Name: "hashPaymasterAndData", Type: bytes32},
+		abi.Argument{Name: "sender", Type: address},
+		abi.Argument{Name: "nonce", Type: uint256},
+		abi.Argument{Name: "hashInitCode", Type: bytes32},
+		abi.Argument{Name: "hashCallData", Type: bytes32},
+		abi.Argument{Name: "callGasLimit", Type: uint256},
+		abi.Argument{Name: "verificationGasLimit", Type: uint256},
+		abi.Argument{Name: "preVerificationGas", Type: uint256},
+		abi.Argument{Name: "maxFeePerGas", Type: uint256},
+		abi.Argument{Name: "maxPriorityFeePerGas", Type: uint256},
+		abi.Argument{Name: "hashPaymasterAndData", Type: bytes32},
 	}
 	packed, _ := args.Pack(
 		op.Sender,
