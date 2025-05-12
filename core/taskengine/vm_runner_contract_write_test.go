@@ -69,17 +69,17 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 
 	t0 := time.Now().UnixMilli()
 	mockStep := &avsproto.Execution_Step{
-		NodeId:     "query1",
-		Log:        "will send message 0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000 to contract 0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-		Success:    true,
-		Error:      "",
-		StartAt:    t0,
-		EndAt:      t0 + 100,
+		NodeId:  "query1",
+		Log:     "will send message 0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000 to contract 0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+		Success: true,
+		Error:   "",
+		StartAt: t0,
+		EndAt:   t0 + 100,
 	}
-	
+
 	txHash := "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
 	blockHash := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
-	
+
 	outputData := &avsproto.Execution_Step_ContractWrite{
 		ContractWrite: &avsproto.ContractWriteNode_Output{
 			UserOp: &avsproto.Evm_UserOp{
@@ -117,9 +117,9 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 			},
 		},
 	}
-	
+
 	mockStep.OutputData = outputData
-	
+
 	step := mockStep
 
 	if !step.Success {
@@ -139,7 +139,7 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 		t.Errorf("Expected contract write output data but got nil")
 		return
 	}
-	
+
 	if contractWriteOutput.TxReceipt == nil {
 		t.Errorf("Expected transaction receipt but got nil")
 		return

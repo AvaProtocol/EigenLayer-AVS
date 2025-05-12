@@ -12,7 +12,7 @@ import (
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/samber/lo"
 
-	"github.com/ethereum/go-ethereum"
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -283,7 +283,6 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 		}
 
 		return evalutationResult, err
-
 	}
 
 	err = fmt.Errorf("invalid event trigger check: both matcher or expression are missing or empty")

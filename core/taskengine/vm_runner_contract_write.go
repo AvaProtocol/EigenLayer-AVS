@@ -114,7 +114,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		s.Error = fmt.Sprintf("error send userops to bundler : %s", err)
 		return s, err
 	}
-	
+
 	_, err = r.vm.db.IncCounter(ContractWriteCounterKey(r.owner), 0)
 	if err != nil {
 		if r.vm.logger != nil {
