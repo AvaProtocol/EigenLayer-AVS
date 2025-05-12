@@ -54,9 +54,9 @@ jobs:
           $(go env GOPATH)/bin/golangci-lint --version
 
       - name: Run golangci-lint
-        # Disable typecheck to avoid errors in model/task.go that require deeper structural changes
+        # Use config from .golangci.yml which has typecheck disabled
         run: |
-          $(go env GOPATH)/bin/golangci-lint run ./... --out-format=colored-line-number --config=.golangci.yml --disable=typecheck
+          $(go env GOPATH)/bin/golangci-lint run ./... --out-format=colored-line-number --config=.golangci.yml
 
   test:
     environment: Test
