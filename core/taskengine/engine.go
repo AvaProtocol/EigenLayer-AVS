@@ -605,8 +605,14 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
+	reason := payload.Reason
+	if reason == nil {
+		reason = &avsproto.TriggerReason{}
+	}
+	reason.Type = avsproto.TriggerReason_Manual
+
 	queueTaskData := QueueExecutionData{
-		Reason:      payload.Reason,
+		Reason:      reason,
 		ExecutionID: ulid.Make().String(),
 	}
 
