@@ -54,9 +54,9 @@ jobs:
           $(go env GOPATH)/bin/golangci-lint --version
 
       - name: Run golangci-lint
-        # Explicitly disable typecheck linter to avoid import errors
+        # Use config from .golangci.yml which has typecheck disabled via disable-all
         run: |
-          $(go env GOPATH)/bin/golangci-lint run ./... --out-format=colored-line-number --disable=typecheck
+          $(go env GOPATH)/bin/golangci-lint run ./... --out-format=colored-line-number
 
   test:
     environment: Test
