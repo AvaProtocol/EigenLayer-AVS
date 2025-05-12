@@ -852,7 +852,7 @@ func (n *Engine) GetExecutionCount(user *model.User, payload *avsproto.GetExecut
 
 	prefixes := [][]byte{}
 	for _, id := range workflowIds {
-		if len(id) != 26 {
+		if len(id) != TaskIDLength {
 			continue
 		}
 		prefixes = append(prefixes, TaskExecutionPrefix(id))
@@ -1050,6 +1050,82 @@ func (n *Engine) CanStreamCheck(address string) bool {
 }
 
 // GetWorkflowCount returns the number of workflows for the given addresses of smart wallets, or if no addresses are provided, it returns the total number of workflows belongs to the requested user
+func (n *Engine) GetExecutionStats(user *model.User, payload *avsproto.GetExecutionStatsReq) (*avsproto.GetExecutionStatsResp, error) {
+	workflowIds := payload.WorkflowIds
+	days := payload.Days
+	if days <= 0 {
+		days = 7 // Default to 7 days if not specified
+	}
+
+	cutoffTime := time.Now().AddDate(0, 0, -int(days)).UnixMilli()
+
+	// Initialize counters
+	total := int64(0)
+	succeeded := int64(0)
+	failed := int64(0)
+	var totalExecutionTime int64 = 0
+
+	if len(workflowIds) == 0 {
+		workflowIds = []string{}
+		taskIds, err := n.db.GetKeyHasPrefix(UserTaskStoragePrefix(user.Address))
+		if err != nil {
+			return nil, grpcstatus.Errorf(codes.Internal, "Internal error retrieving tasks")
+		}
+		for _, id := range taskIds {
+			taskId := TaskIdFromTaskStatusStorageKey(id)
+			workflowIds = append(workflowIds, string(taskId))
+		}
+	}
+
+	for _, id := range workflowIds {
+		if len(id) != TaskIDLength {
+			continue
+		}
+
+		items, err := n.db.GetByPrefix(TaskExecutionPrefix(id))
+		if err != nil {
+			n.logger.Error("error getting executions", "workflow", id, "error", err)
+			continue
+		}
+
+		for _, item := range items {
+			execution := &avsproto.Execution{}
+			if err := protojson.Unmarshal(item.Value, execution); err != nil {
+				n.logger.Error("error unmarshalling execution", "error", err)
+				continue
+			}
+
+			if execution.StartAt < cutoffTime {
+				continue
+			}
+
+			total++
+			if execution.Success {
+				succeeded++
+			} else {
+				failed++
+			}
+
+			if execution.EndAt > execution.StartAt {
+				executionTime := execution.EndAt - execution.StartAt
+				totalExecutionTime += executionTime
+			}
+		}
+	}
+
+	var avgExecutionTime float64 = 0
+	if total > 0 {
+		avgExecutionTime = float64(totalExecutionTime) / float64(total)
+	}
+
+	return &avsproto.GetExecutionStatsResp{
+		Total:            total,
+		Succeeded:        succeeded,
+		Failed:           failed,
+		AvgExecutionTime: avgExecutionTime,
+	}, nil
+}
+
 func (n *Engine) GetWorkflowCount(user *model.User, payload *avsproto.GetWorkflowCountReq) (*avsproto.GetWorkflowCountResp, error) {
 	smartWalletAddresses := payload.Addresses
 
