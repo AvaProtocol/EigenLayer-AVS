@@ -96,8 +96,9 @@ func TestChangeEpochToMs(t *testing.T) {
 	// Serialize data using protojson (matching migration)
 	var err error
 	var execData, execData2 []byte
+	var taskBytes []byte
 	
-	taskBytes, err := protojson.Marshal(sampleTask)
+	taskBytes, err = protojson.Marshal(sampleTask)
 	if err != nil {
 		t.Fatalf("Failed to marshal sample task: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestChangeEpochToMs(t *testing.T) {
 
 	// Use BatchWrite as seen in the migration code for setting multiple keys
 	updates := map[string][]byte{
-		taskKey:  taskData,
+		taskKey:  taskBytes,
 		execKey:  execData,
 		execKey2: execData2,
 	}
