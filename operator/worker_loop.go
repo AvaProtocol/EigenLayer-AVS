@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/go-co-op/gocron/v2"
@@ -25,6 +27,34 @@ const (
 //   - subscribe to server to receive update. act on these update to update local storage
 //   - spawn a loop to check triggering condition
 func (o *Operator) runWorkLoop(ctx context.Context) error {
+	blockTasksMap := make(map[int64][]string)
+	blockTasksMutex := &sync.Mutex{}
+	
+	cleanupJob, err := o.scheduler.NewJob(
+		gocron.DurationJob(time.Minute*10),
+		gocron.NewTask(func() {
+			blockTasksMutex.Lock()
+			defer blockTasksMutex.Unlock()
+			
+			if len(blockTasksMap) > 10 {
+				var blocks []int64
+				for block := range blockTasksMap {
+					blocks = append(blocks, block)
+				}
+				
+				sort.Slice(blocks, func(i, j int) bool {
+					return blocks[i] < blocks[j]
+				})
+				
+				for i := 0; i < len(blocks)-10; i++ {
+					delete(blockTasksMap, blocks[i])
+				}
+			}
+		}),
+	)
+	if err != nil {
+		o.logger.Error("Failed to create cleanup job for block tasks map", "error", err)
+	}
 	// Setup taskengine, initialize local storage and cache, establish rpc
 	var err error
 	o.scheduler, err = gocron.NewScheduler()
@@ -95,7 +125,17 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				o.logger.Errorf("task trigger is in alert condition but failed to sync to aggregator", err, "taskid", triggerItem.TaskID)
 			}
 		case triggerItem := <-blockTriggerCh:
-			o.logger.Info("block trigger", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
+			o.logger.Debug("block trigger details", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
+			
+			blockTasksMutex.Lock()
+			blockNum := triggerItem.Marker
+			blockTasksMap[blockNum] = append(blockTasksMap[blockNum], triggerItem.TaskID)
+			
+			taskCount := len(blockTasksMap[blockNum])
+			if taskCount == 1 || taskCount%5 == 0 {
+				o.logger.Info("block trigger summary", "block", blockNum, "task_count", taskCount)
+			}
+			blockTasksMutex.Unlock()
 
 			if _, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
 				Address:   o.config.OperatorAddress,
