@@ -148,11 +148,11 @@ func TestBlockTasksMapConcurrency(t *testing.T) {
 
 func TestLogLevelChanges(t *testing.T) {
 	mockLogger := NewMockLogger()
+	blockTasksMap := make(map[int64][]string)
 	
 	handleBlockTrigger := func(taskID string, blockNum int64) {
 		mockLogger.Debug("block trigger details", "task_id", taskID, "marker", blockNum)
 		
-		blockTasksMap := make(map[int64][]string)
 		blockTasksMap[blockNum] = append(blockTasksMap[blockNum], taskID)
 		
 		taskCount := len(blockTasksMap[blockNum])
