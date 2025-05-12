@@ -30,7 +30,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	blockTasksMap := make(map[int64][]string)
 	blockTasksMutex := &sync.Mutex{}
 	
-	cleanupJob, err := o.scheduler.NewJob(
+	_, err := o.scheduler.NewJob(
 		gocron.DurationJob(time.Minute*10),
 		gocron.NewTask(func() {
 			blockTasksMutex.Lock()
