@@ -29,23 +29,23 @@ const (
 func (o *Operator) runWorkLoop(ctx context.Context) error {
 	blockTasksMap := make(map[int64][]string)
 	blockTasksMutex := &sync.Mutex{}
-	
+
 	_, err := o.scheduler.NewJob(
 		gocron.DurationJob(time.Minute*10),
 		gocron.NewTask(func() {
 			blockTasksMutex.Lock()
 			defer blockTasksMutex.Unlock()
-			
+
 			if len(blockTasksMap) > 10 {
 				var blocks []int64
 				for block := range blockTasksMap {
 					blocks = append(blocks, block)
 				}
-				
+
 				sort.Slice(blocks, func(i, j int) bool {
 					return blocks[i] < blocks[j]
 				})
-				
+
 				for i := 0; i < len(blocks)-10; i++ {
 					delete(blockTasksMap, blocks[i])
 				}
@@ -126,11 +126,11 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 			}
 		case triggerItem := <-blockTriggerCh:
 			o.logger.Debug("block trigger details", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
-			
+
 			blockTasksMutex.Lock()
 			blockNum := triggerItem.Marker
 			blockTasksMap[blockNum] = append(blockTasksMap[blockNum], triggerItem.TaskID)
-			
+
 			taskCount := len(blockTasksMap[blockNum])
 			if taskCount == 1 || taskCount%5 == 0 {
 				o.logger.Info("block trigger summary", "block", blockNum, "task_count", taskCount)
@@ -252,7 +252,6 @@ func (o *Operator) StreamMessages() {
 						o.logger.Info("successfully monitor", "task_id", resp.Id, "component", "timeTrigger")
 					}
 				}
-
 			}
 		}
 	}
@@ -292,7 +291,7 @@ func (o *Operator) PingServer() {
 		o.logger.Debug("check in successfully", "component", "grpc")
 	}
 
-	elapsed := time.Now().Sub(start)
+	elapsed := time.Since(start)
 	if err == nil {
 		o.metrics.IncPing("success")
 	} else {

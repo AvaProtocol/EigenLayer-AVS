@@ -284,7 +284,7 @@ func RunExpressionQuery(exprCode string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	
+
 	boolResult, ok := result.(bool)
 	if !ok {
 		return false, fmt.Errorf("expression result is not a boolean")

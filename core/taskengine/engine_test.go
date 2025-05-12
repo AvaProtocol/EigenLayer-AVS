@@ -102,7 +102,7 @@ func TestListTasks(t *testing.T) {
 		t.Errorf("list task return wrong. expect 1, got %d", len(result.Items))
 		return
 	}
-	
+
 	if result.Items[0].Name != "t3" {
 		t.Errorf("list task return wrong. expect memo t1, got %s", result.Items[0].Name)
 	}

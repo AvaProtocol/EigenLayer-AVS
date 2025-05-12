@@ -51,6 +51,6 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	if queueErr != nil {
 		agg.logger.Error("failed to start task queue", "error", queueErr)
 	}
-	
+
 	agg.worker.MustStart()
 }

@@ -10,7 +10,7 @@ func isWhitelistedAddress(address common.Address, whitelist []common.Address) bo
 	if whitelist == nil {
 		return false
 	}
-	
+
 	addressStr := strings.ToLower(address.Hex())
 	for _, whitelistAddr := range whitelist {
 		if strings.ToLower(whitelistAddr.Hex()) == addressStr {

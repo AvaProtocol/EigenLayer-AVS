@@ -283,7 +283,6 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 		}
 
 		return evalutationResult, err
-
 	}
 
 	err = fmt.Errorf("invalid event trigger check: both matcher or expression are missing or empty")

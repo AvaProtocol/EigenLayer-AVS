@@ -392,7 +392,6 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 			"prmMetricsEndpoint", fmt.Sprintf("%s/metrics/", operator.config.EigenMetricsIpPortAddress),
 		)
 	} else {
-
 		logger.Info("Operator info",
 			"operatorId", operatorId,
 			"operatorAddr", c.OperatorAddress,

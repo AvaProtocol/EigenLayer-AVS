@@ -97,7 +97,7 @@ func TestChangeEpochToMs(t *testing.T) {
 	var err error
 	var execData, execData2 []byte
 	var taskBytes []byte
-	
+
 	taskBytes, err = protojson.Marshal(sampleTask)
 	if err != nil {
 		t.Fatalf("Failed to marshal sample task: %v", err)

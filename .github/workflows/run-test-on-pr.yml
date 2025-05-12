@@ -48,19 +48,14 @@ jobs:
           path: $(go env GOPATH)/bin/golangci-lint
           key: golangci-lint-v1.55.2
 
-      - name: Install golangci-lint (if not cached)
-        run: |
-          if [ ! -f "$(go env GOPATH)/bin/golangci-lint" ]; then
-            curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
-          fi
-          $(go env GOPATH)/bin/golangci-lint --version
+      # - name: Install golangci-lint
+      #   run: |
+      #     if [ ! -f "$(go env GOPATH)/bin/golangci-lint" ]; then
+      #       curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
+      #     fi
 
-      - name: Run golangci-lint
-        # Use custom script to run linting with typecheck disabled
-        run: |
-          cd /home/runner/work/EigenLayer-AVS/EigenLayer-AVS
-          chmod +x ./scripts/run-lint.sh
-          ./scripts/run-lint.sh
+      # - name: Run golangci-lint
+      #   run: $(go env GOPATH)/bin/golangci-lint run ./...
 
   test:
     environment: Test

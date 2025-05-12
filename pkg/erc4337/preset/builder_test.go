@@ -32,7 +32,7 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 	key := os.Getenv("TEST_PRIVATE_KEY")
 	var controllerPrivateKey *ecdsa.PrivateKey
 	var err error
-	
+
 	if key == "" {
 		key = "1111111111111111111111111111111111111111111111111111111111111111"
 	} else if strings.HasPrefix(key, "0x") {
@@ -97,7 +97,7 @@ func TestSendUserOp(t *testing.T) {
 	)
 
 	if err != nil {
-		t.Errorf("expect pack userop succesfully but got error: %v", err)
+		t.Errorf("expect pack userop successfully but got error: %v", err)
 	}
 
 	userop, receipt, err := SendUserOp(smartWalletConfig, owner, calldata, nil)
@@ -108,16 +108,16 @@ func TestSendUserOp(t *testing.T) {
 	if err != nil {
 		a, _ := json.Marshal(receipt)
 		b, _ := json.Marshal(userop)
-		//t.Logf("UserOp submit succesfully. tx: %s userop: %s", a, b)
+		//t.Logf("UserOp submit successfully. tx: %s userop: %s", a, b)
 		t.Logf("UserOp submit failed. userop: %s tx: %s err: %v", a, b, err)
 		return
 	}
-	
+
 	if receipt == nil {
 		t.Logf("Transaction submitted successfully but receipt is not available yet")
 		return
 	}
-	
+
 	t.Logf("Transaction executed successfully. TX Hash: %s Gas used: %d", receipt.TxHash.Hex(), receipt.GasUsed)
 }
 
@@ -140,7 +140,7 @@ func TestPaymaster(t *testing.T) {
 	)
 
 	if err != nil {
-		t.Errorf("expect pack userop succesfully but got error: %v", err)
+		t.Errorf("expect pack userop successfully but got error: %v", err)
 	}
 
 	paymasterRequest := GetVerifyingPaymasterRequestForDuration(smartWalletConfig.PaymasterAddress, 15*time.Minute)
@@ -259,7 +259,7 @@ func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
 		t.Fatalf("Failed to connect to the bundler RPC: %v", err)
 	}
 	defer rpcClient.Close()
-	
+
 	bundlerClient, err := bundler.NewBundlerClient(smartWalletConfig.BundlerURL)
 	if err != nil {
 		t.Fatalf("Failed to connect to the bundler: %v", err)
@@ -401,9 +401,9 @@ func callValidatePaymasterUserOp(t *testing.T, paymasterContract *paymaster.PayM
 		return nil, nil, fmt.Errorf("failed to connect to Ethereum client: %w", err)
 	}
 	defer client.Close()
-	
+
 	paymasterAddress := smartWalletConfig.PaymasterAddress
-	
+
 	// Convert to paymaster.UserOperation
 	paymasterUserOp := paymaster.UserOperation{
 		Sender:               userOp.Sender,
@@ -418,44 +418,44 @@ func callValidatePaymasterUserOp(t *testing.T, paymasterContract *paymaster.PayM
 		PaymasterAndData:     userOp.PaymasterAndData,
 		Signature:            userOp.Signature,
 	}
-	
+
 	userOpHash := userOp.GetUserOpHash(aa.EntrypointAddress, chainID)
-	
+
 	paymasterABI, err := abi.JSON(strings.NewReader(paymaster.PayMasterMetaData.ABI))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse paymaster ABI: %w", err)
 	}
-	
+
 	entryPointAddress, err := paymasterContract.EntryPoint(nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get EntryPoint address: %w", err)
 	}
-	
+
 	maxCost := big.NewInt(1e18) // 1 ETH max cost - arbitrary for test
 	callData, err := paymasterABI.Pack("validatePaymasterUserOp", paymasterUserOp, userOpHash, maxCost)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to pack validatePaymasterUserOp call: %w", err)
 	}
-	
+
 	msg := ethereum.CallMsg{
 		From: entryPointAddress,
 		To:   &paymasterAddress,
 		Data: callData,
 	}
-	
+
 	result, err := client.CallContract(context.Background(), msg, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("contract call failed: %w", err)
 	}
-	
+
 	// Unpack the result
 	outputs, err := paymasterABI.Unpack("validatePaymasterUserOp", result)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to unpack result: %w", err)
 	}
-	
+
 	context := outputs[0].([]byte)
 	validationData := outputs[1].(*big.Int)
-	
+
 	return context, validationData, nil
 }
