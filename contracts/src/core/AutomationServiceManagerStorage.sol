@@ -7,6 +7,7 @@ abstract contract AutomationServiceManagerStorage {
     IAutomationTaskManager public automationTaskManager;
 
     address public whitelister;
+    address public slasher;
 
     EnumerableSet.AddressSet internal _operators;
 }

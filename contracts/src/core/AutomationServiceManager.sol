@@ -77,7 +77,11 @@ contract AutomationServiceManager is
         IStakeRegistry __stakeRegistry
     )
         BLSSignatureChecker(__registryCoordinator)
-        ServiceManagerBase(__avsDirectory, __registryCoordinator, __stakeRegistry)
+        ServiceManagerBase(
+            __avsDirectory,
+            __registryCoordinator,
+            __stakeRegistry
+        )
     {
         _disableInitializers();
     }
@@ -87,10 +91,7 @@ contract AutomationServiceManager is
         uint _initialPausedStatus,
         address _initialOwner,
         address _whitelister
-    )
-        public
-        initializer
-    {
+    ) public initializer {
         _initializePauser(_pauserRegistry, _initialPausedStatus);
         __ServiceManagerBase_init(_initialOwner);
         _setWhitelister(_whitelister);
@@ -99,7 +100,6 @@ contract AutomationServiceManager is
     function setWhitelister(address whitelister) external onlyOwner {
         _setWhitelister(whitelister);
     }
-
 
     //////////////////////////////////////////////////////////////////////////////
     //                          Operator Registration                           //
@@ -132,7 +132,9 @@ contract AutomationServiceManager is
      * @notice Deregister an operator from the AVS. Forwards a call to EigenLayer's AVSDirectory.
      * @param operator The address of the operator to register.
      */
-    function deregisterOperatorFromAVS(address operator)
+    function deregisterOperatorFromAVS(
+        address operator
+    )
         public
         override(ServiceManagerBase, IServiceManager)
         whenNotPaused
@@ -148,10 +150,32 @@ contract AutomationServiceManager is
         whitelister = _whitelister;
     }
 
-
     function setTaskManager(address _newTaskManager) external onlyOwner {
         address previousTaskManager = address(automationTaskManager);
         automationTaskManager = IAutomationTaskManager(_newTaskManager);
-        emit TaskManagerUpdate(address(automationTaskManager), previousTaskManager);
+        emit TaskManagerUpdate(
+            address(automationTaskManager),
+            previousTaskManager
+        );
+    }
+
+    /**
+     * @notice Returns the address of the slasher contract
+     * @return The address of the slasher contract
+     */
+    function slasher() external view returns (address) {
+        return slasher;
+    }
+
+    /**
+     * @notice Sets the slasher address
+     * @param _slasher The address of the slasher contract
+     */
+    function setSlasher(address _slasher) external onlyOwner {
+        address previousSlasher = slasher;
+        slasher = _slasher;
+
+        // Optionally emit an event
+        // emit SlasherUpdated(slasher, previousSlasher);
     }
 }
