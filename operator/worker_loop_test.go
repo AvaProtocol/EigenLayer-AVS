@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -66,7 +67,7 @@ func TestBlockTasksMapCleanup(t *testing.T) {
 	blockTasksMutex := &sync.Mutex{}
 	
 	for i := int64(1); i <= 15; i++ {
-		blockTasksMap[i] = []string{"task" + string(i)}
+		blockTasksMap[i] = []string{"task" + strconv.FormatInt(i, 10)}
 	}
 	
 	cleanupFunc := func() {
@@ -126,7 +127,7 @@ func TestBlockTasksMapConcurrency(t *testing.T) {
 			blockNum := int64(i % 5) // Use 5 different block numbers
 			
 			blockTasksMutex.Lock()
-			blockTasksMap[blockNum] = append(blockTasksMap[blockNum], "task"+string(i))
+			blockTasksMap[blockNum] = append(blockTasksMap[blockNum], "task"+strconv.Itoa(i))
 			blockTasksMutex.Unlock()
 		}(i)
 	}
@@ -171,7 +172,7 @@ func TestLogLevelChanges(t *testing.T) {
 	}
 	
 	for i := 0; i < 4; i++ {
-		handleBlockTrigger("task"+string(i+2), 100)
+		handleBlockTrigger("task"+strconv.Itoa(i+2), 100)
 	}
 	
 	if len(mockLogger.debugMessages) != 5 {
@@ -195,7 +196,7 @@ func TestSchedulerCleanupJob(t *testing.T) {
 	blockTasksMutex := &sync.Mutex{}
 	
 	for i := int64(1); i <= 15; i++ {
-		blockTasksMap[i] = []string{"task" + string(i)}
+		blockTasksMap[i] = []string{"task" + strconv.FormatInt(i, 10)}
 	}
 	
 	cleanupDone := make(chan bool)
