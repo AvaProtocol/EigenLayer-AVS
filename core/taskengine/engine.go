@@ -99,8 +99,6 @@ func retryWsRpc() error {
 		logger.Errorf("cannot establish websocket client for RPC, retry in 15 seconds", "err", err)
 		time.Sleep(15 * time.Second)
 	}
-
-	return nil
 }
 
 type operatorState struct {
@@ -182,7 +180,7 @@ func (n *Engine) MustStart() error {
 			n.tasks[string(item.Key)] = task
 		}
 	}
-	
+
 	return nil
 }
 
@@ -315,7 +313,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	if err != nil {
 		return nil, grpcstatus.Errorf(codes.Internal, "Failed to serialize task: %v", err)
 	}
-	
+
 	updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Active))
 
@@ -357,6 +355,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 		n.trackSyncedTasks[address].MonotonicClock = 0
 	}()
 
+	//nolint:S1000
 	for {
 		select {
 		case <-ticker.C:
@@ -391,7 +390,11 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 						Trigger:   task.Trigger,
 					},
 				}
-				n.logger.Info("stream check to operator", "task_id", task.Id, "operator", payload.Address, "resp", resp)
+				n.logger.Info("stream check to operator",
+					"task_id", task.Id,
+					"operator", payload.Address,
+					"op", resp.Op.String(),
+					"task_id_meta", resp.TaskMetadata.TaskId)
 
 				if err := srv.Send(&resp); err != nil {
 					// return error to cause client to establish re-connect the connection
@@ -884,7 +887,7 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error)
 		n.logger.Error("failed to delete task storage", "error", err, "task_id", task.Id)
 		return false, fmt.Errorf("failed to delete task: %w", err)
 	}
-	
+
 	if err := n.db.Delete(TaskUserKey(task)); err != nil {
 		n.logger.Error("failed to delete task user key", "error", err, "task_id", task.Id)
 		return false, fmt.Errorf("failed to delete task user key: %w", err)

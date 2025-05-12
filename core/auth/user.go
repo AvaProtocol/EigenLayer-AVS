@@ -50,7 +50,7 @@ func VerifyJwtKeyForUser(secret []byte, key string, userWallet common.Address) (
 		if !ok {
 			return false, fmt.Errorf("Missing subject claim")
 		}
-		
+
 		sub, ok := subVal.(string)
 		if !ok {
 			return false, fmt.Errorf("Subject is not a string")
@@ -66,12 +66,12 @@ func VerifyJwtKeyForUser(secret []byte, key string, userWallet common.Address) (
 			if !ok {
 				return false, fmt.Errorf("Missing roles claim")
 			}
-			
+
 			rolesArray, ok := rolesVal.([]any)
 			if !ok {
 				return false, fmt.Errorf("Roles is not an array")
 			}
-			
+
 			for _, v := range rolesArray {
 				roleStr, ok := v.(string)
 				if !ok {

@@ -136,7 +136,6 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 								TaskID: taskID,
 								Marker: header.Number.Int64(),
 							}
-
 						}
 					}
 				}

@@ -102,7 +102,7 @@ func TestListTasks(t *testing.T) {
 		t.Errorf("list task return wrong. expect 1, got %d", len(result.Items))
 		return
 	}
-	
+
 	if result.Items[0].Name != "t3" {
 		t.Errorf("list task return wrong. expect memo t1, got %s", result.Items[0].Name)
 	}
@@ -149,7 +149,7 @@ func TestListTasksPagination(t *testing.T) {
 	tr2.SmartWalletAddress = "0x961d2DD008960A9777571D78D21Ec9C3E5c6020c"
 	n.CreateTask(testutil.TestUser1(), tr2)
 
-	for i := range 20 {
+	for i := 0; i < 20; i++ {
 		tr3 := testutil.RestTask()
 		// salt 6789
 		tr3.Name = fmt.Sprintf("t3_%d", i)

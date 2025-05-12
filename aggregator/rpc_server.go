@@ -396,8 +396,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 	// https://github.com/grpc/grpc-go/blob/master/examples/helloworld/greeter_server/main.go#L50
 	lis, err := net.Listen("tcp", agg.config.RpcBindAddress)
 	if err != nil {
-		panic(fmt.Errorf("Failed to listen to %v", err))
-		return err
+		panic(fmt.Errorf("failed to listen to %v", err))
 	}
 
 	s := grpc.NewServer()

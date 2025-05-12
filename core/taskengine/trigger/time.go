@@ -8,7 +8,7 @@ import (
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"github.com/go-co-op/gocron/v2"
+	gocron "github.com/go-co-op/gocron/v2"
 )
 
 type TimeTrigger struct {
