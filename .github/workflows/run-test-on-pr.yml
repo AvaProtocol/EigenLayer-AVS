@@ -54,10 +54,11 @@ jobs:
           $(go env GOPATH)/bin/golangci-lint --version
 
       - name: Run golangci-lint
-        # Explicitly disable typecheck linter to avoid import errors
+        # Use custom script to run linting with typecheck disabled
         run: |
           cd /home/runner/work/EigenLayer-AVS/EigenLayer-AVS
-          $(go env GOPATH)/bin/golangci-lint run --no-config --disable-all --enable=errcheck,gosimple,govet,ineffassign,staticcheck,unused,gocyclo,gofmt,goimports,misspell,revive,unconvert,unparam,whitespace --out-format=colored-line-number ./...
+          chmod +x ./scripts/run-lint.sh
+          ./scripts/run-lint.sh
 
   test:
     environment: Test
