@@ -835,7 +835,7 @@ func (n *Engine) GetExecutionCount(user *model.User, payload *avsproto.GetExecut
 
 	prefixes := [][]byte{}
 	for _, id := range workflowIds {
-		if len(id) != 26 {
+		if len(id) != TaskIDLength {
 			continue
 		}
 		prefixes = append(prefixes, TaskExecutionPrefix(id))
@@ -1052,7 +1052,7 @@ func (n *Engine) GetExecutionStats(user *model.User, payload *avsproto.GetExecut
 	}
 
 	for _, id := range workflowIds {
-		if len(id) != 26 {
+		if len(id) != TaskIDLength {
 			continue
 		}
 
