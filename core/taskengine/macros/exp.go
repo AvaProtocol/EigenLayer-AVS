@@ -10,7 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	ethmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/go-resty/resty/v2"
+	resty "github.com/go-resty/resty/v2"
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
