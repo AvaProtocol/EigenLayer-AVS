@@ -608,6 +608,13 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 	reason := payload.Reason
 	if reason == nil {
 		reason = &avsproto.TriggerReason{}
+	} else {
+		reason = &avsproto.TriggerReason{
+			BlockNumber: payload.Reason.BlockNumber,
+			TxHash:      payload.Reason.TxHash,
+			LogIndex:    payload.Reason.LogIndex,
+			Epoch:       payload.Reason.Epoch,
+		}
 	}
 	reason.Type = avsproto.TriggerReason_Manual
 
