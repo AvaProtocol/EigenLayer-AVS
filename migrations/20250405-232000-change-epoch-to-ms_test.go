@@ -95,9 +95,9 @@ func TestChangeEpochToMs(t *testing.T) {
 
 	// Serialize data using protojson (matching migration)
 	var err error
-	var taskData, execData, execData2 []byte
+	var execData, execData2 []byte
 	
-	taskData, err = protojson.Marshal(sampleTask)
+	taskBytes, err := protojson.Marshal(sampleTask)
 	if err != nil {
 		t.Fatalf("Failed to marshal sample task: %v", err)
 	}
