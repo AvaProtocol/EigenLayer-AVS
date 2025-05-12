@@ -68,7 +68,7 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 	}
 
 	if !step.Success {
-		t.Errorf("expected rest node run succesfully but failed")
+		t.Errorf("expected rest node run successfully but failed")
 	}
 
 	if !strings.Contains(step.Log, "Execute GraphQL spacex-production.up.railway.app") {
