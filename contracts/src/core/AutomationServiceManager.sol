@@ -160,22 +160,13 @@ contract AutomationServiceManager is
     }
 
     /**
-     * @notice Returns the address of the slasher contract
-     * @return The address of the slasher contract
-     */
-    function slasher() external view returns (address) {
-        return slasher;
-    }
-
-    /**
      * @notice Sets the slasher address
      * @param _slasher The address of the slasher contract
      */
     function setSlasher(address _slasher) external onlyOwner {
         address previousSlasher = slasher;
         slasher = _slasher;
-
-        // Optionally emit an event
-        // emit SlasherUpdated(slasher, previousSlasher);
+        
+        emit SlasherUpdated(slasher, previousSlasher);
     }
 }

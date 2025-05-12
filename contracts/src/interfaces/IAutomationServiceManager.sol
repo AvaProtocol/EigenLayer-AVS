@@ -25,4 +25,14 @@ interface IAutomationServiceManager is IServiceManager {
         address newTaskManager,
         address previousTaskManager
     );
+
+    /**
+     * @notice Emitted when the slasher address is updated
+     * @param newSlasher The new slasher address
+     * @param previousSlasher The previous slasher address
+     */
+    event SlasherUpdated(
+        address newSlasher,
+        address previousSlasher
+    );
 }
