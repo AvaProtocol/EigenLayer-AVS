@@ -81,15 +81,15 @@ linters-settings:
     check-exported: false
 
 linters:
-  disable-all: true
+  # Use allow-list approach instead of disable-all
+  disable-all: false
+  enable-all: false
   enable:
     - errcheck
     - gosimple
     - govet
     - ineffassign
     - staticcheck
-    # Temporarily disabled due to model/task.go issues
-    # - typecheck
     - unused
     - gocyclo
     - gofmt
