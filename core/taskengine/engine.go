@@ -424,8 +424,21 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	n.logger.Info("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
 	n.lock.Unlock()
 
+	var reason *avsproto.TriggerReason
+	if payload.Reason == nil {
+		reason = &avsproto.TriggerReason{}
+	} else {
+		reason = &avsproto.TriggerReason{
+			BlockNumber: payload.Reason.BlockNumber,
+			TxHash:      payload.Reason.TxHash,
+			LogIndex:    payload.Reason.LogIndex,
+			Epoch:       payload.Reason.Epoch,
+			Type:        payload.Reason.Type,
+		}
+	}
+	
 	queueTaskData := QueueExecutionData{
-		Reason:      payload.Reason,
+		Reason:      reason,
 		ExecutionID: ulid.Make().String(),
 	}
 
