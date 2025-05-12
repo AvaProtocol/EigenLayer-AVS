@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 	"time"
 
@@ -41,13 +42,9 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 					blocks = append(blocks, block)
 				}
 				
-				for i := 0; i < len(blocks)-1; i++ {
-					for j := i + 1; j < len(blocks); j++ {
-						if blocks[i] > blocks[j] {
-							blocks[i], blocks[j] = blocks[j], blocks[i]
-						}
-					}
-				}
+				sort.Slice(blocks, func(i, j int) bool {
+					return blocks[i] < blocks[j]
+				})
 				
 				for i := 0; i < len(blocks)-10; i++ {
 					delete(blockTasksMap, blocks[i])
