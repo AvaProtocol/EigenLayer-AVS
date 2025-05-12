@@ -224,19 +224,19 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 			Salt:    w.Salt.String(),
 		})
 	}
-	
+
 	cursor, err := CursorFromBeforeAfter(payload.Before, payload.After)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
 	}
-	
+
 	if cursor.IsZero() && payload.Cursor != "" {
 		cursor, err = CursorFromString(payload.Cursor)
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
 		}
 	}
-	
+
 	itemPerPage := int(payload.ItemPerPage)
 	if itemPerPage < 0 {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
@@ -244,38 +244,38 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 	if itemPerPage == 0 {
 		itemPerPage = DefaultItemPerPage
 	}
-	
+
 	slices.SortFunc(allWallets, func(a, b *avsproto.SmartWallet) int {
 		return strings.Compare(a.Address, b.Address)
 	})
-	
+
 	result := &avsproto.ListWalletResp{
 		Items:   []*avsproto.SmartWallet{},
 		Cursor:  "",
 		HasMore: false,
 	}
-	
+
 	total := 0
 	var lastAddress string
-	
+
 	for _, wallet := range allWallets {
 		if !cursor.IsZero() {
 			if (cursor.Direction == CursorDirectionNext && wallet.Address <= cursor.Position) ||
-			   (cursor.Direction == CursorDirectionPrevious && wallet.Address >= cursor.Position) {
+				(cursor.Direction == CursorDirectionPrevious && wallet.Address >= cursor.Position) {
 				continue
 			}
 		}
-		
+
 		result.Items = append(result.Items, wallet)
 		lastAddress = wallet.Address
 		total++
-		
+
 		if total >= itemPerPage {
 			result.HasMore = true
 			break
 		}
 	}
-	
+
 	if result.HasMore && lastAddress != "" {
 		nextCursor := &Cursor{
 			Direction: CursorDirectionNext,
@@ -533,14 +533,14 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
 	}
-	
+
 	if cursor.IsZero() && payload.Cursor != "" {
 		cursor, err = CursorFromString(payload.Cursor)
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
 		}
 	}
-	
+
 	itemPerPage := int(payload.ItemPerPage)
 	if itemPerPage < 0 {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
@@ -741,7 +741,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
 	}
-	
+
 	if cursor.IsZero() && payload.Cursor != "" {
 		cursor, err = CursorFromString(payload.Cursor)
 		if err != nil {
@@ -1045,21 +1045,21 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	slices.Sort(secretKeys)
-	
+
 	cursor, err := CursorFromBeforeAfter(payload.Before, payload.After)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
 	}
-	
+
 	if cursor.IsZero() && payload.Cursor != "" {
 		cursor, err = CursorFromString(payload.Cursor)
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
 		}
 	}
-	
+
 	itemPerPage := int(payload.ItemPerPage)
 	if itemPerPage < 0 {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
@@ -1067,18 +1067,18 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	if itemPerPage == 0 {
 		itemPerPage = DefaultItemPerPage
 	}
-	
+
 	total := 0
 	var lastKey string
-	
+
 	for _, k := range secretKeys {
 		if !cursor.IsZero() {
 			if (cursor.Direction == CursorDirectionNext && k <= cursor.Position) ||
-			   (cursor.Direction == CursorDirectionPrevious && k >= cursor.Position) {
+				(cursor.Direction == CursorDirectionPrevious && k >= cursor.Position) {
 				continue
 			}
 		}
-		
+
 		secretWithNameOnly := SecretNameFromKey(k)
 		item := &avsproto.ListSecretsResp_ResponseSecret{
 			Name:       secretWithNameOnly.Name,
@@ -1089,13 +1089,13 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 		result.Items = append(result.Items, item)
 		lastKey = k
 		total++
-		
+
 		if total >= itemPerPage {
 			result.HasMore = true
 			break
 		}
 	}
-	
+
 	if result.HasMore && lastKey != "" {
 		nextCursor := &Cursor{
 			Direction: CursorDirectionNext,

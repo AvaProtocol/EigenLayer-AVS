@@ -53,7 +53,7 @@ func CursorFromBeforeAfter(before, after string) (*Cursor, error) {
 	if after != "" {
 		return CursorFromString(after)
 	}
-	
+
 	if before != "" {
 		cursor, err := CursorFromString(before)
 		if err != nil {
@@ -62,7 +62,7 @@ func CursorFromBeforeAfter(before, after string) (*Cursor, error) {
 		cursor.Direction = CursorDirectionPrevious
 		return cursor, nil
 	}
-	
+
 	return &Cursor{
 		Direction: CursorDirectionNext,
 		Position:  "0",
