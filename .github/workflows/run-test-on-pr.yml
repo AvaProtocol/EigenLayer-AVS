@@ -56,7 +56,7 @@ jobs:
       - name: Run golangci-lint
         # Use config from .golangci.yml which has typecheck disabled
         run: |
-          $(go env GOPATH)/bin/golangci-lint run ./... --out-format=colored-line-number --config=.golangci.yml
+          $(go env GOPATH)/bin/golangci-lint run ./... --out-format=colored-line-number
 
   test:
     environment: Test
