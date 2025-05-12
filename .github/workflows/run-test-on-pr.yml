@@ -29,8 +29,6 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    # Skip lint check for PR #237 to avoid persistent typecheck issues
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.number != 237 }}
     steps:
       - uses: actions/checkout@v4
         with:
