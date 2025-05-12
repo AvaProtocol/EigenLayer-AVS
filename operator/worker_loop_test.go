@@ -46,27 +46,27 @@ func TestTaskRemovalFromAllTriggers(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name     string
-		op       avspb.MessageOp
-		taskID   string
+		name          string
+		op            avspb.MessageOp
+		taskID        string
 		expectRemoval bool
 	}{
 		{
-			name:     "Cancel Task",
-			op:       avspb.MessageOp_CancelTask,
-			taskID:   "task-123",
+			name:          "Cancel Task",
+			op:            avspb.MessageOp_CancelTask,
+			taskID:        "task-123",
 			expectRemoval: true,
 		},
 		{
-			name:     "Delete Task",
-			op:       avspb.MessageOp_DeleteTask,
-			taskID:   "task-456",
+			name:          "Delete Task",
+			op:            avspb.MessageOp_DeleteTask,
+			taskID:        "task-456",
 			expectRemoval: true,
 		},
 		{
-			name:     "Monitor Task",
-			op:       avspb.MessageOp_MonitorTaskTrigger,
-			taskID:   "task-789",
+			name:          "Monitor Task",
+			op:            avspb.MessageOp_MonitorTaskTrigger,
+			taskID:        "task-789",
 			expectRemoval: false,
 		},
 	}
