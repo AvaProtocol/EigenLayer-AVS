@@ -56,10 +56,10 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		o.logger.Error("Failed to create cleanup job for block tasks map", "error", err)
 	}
 	// Setup taskengine, initialize local storage and cache, establish rpc
-	var err error
-	o.scheduler, err = gocron.NewScheduler()
-	if err != nil {
-		panic(err)
+	var schedulerErr error
+	o.scheduler, schedulerErr = gocron.NewScheduler()
+	if schedulerErr != nil {
+		panic(schedulerErr)
 	}
 	o.scheduler.Start()
 	o.scheduler.NewJob(gocron.DurationJob(time.Second*5), gocron.NewTask(o.PingServer))
