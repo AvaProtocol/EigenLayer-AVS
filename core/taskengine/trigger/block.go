@@ -118,7 +118,9 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 						b.wsEthClient.Close()
 					}
 
-					b.retryConnectToRpc()
+					if err := b.retryConnectToRpc(); err != nil {
+						b.logger.Error("failed to reconnect to RPC", "error", err)
+					}
 					sub, err = b.wsEthClient.SubscribeNewHead(ctx, headers)
 				}
 			case header := <-headers:
@@ -134,7 +136,6 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 								TaskID: taskID,
 								Marker: header.Number.Int64(),
 							}
-
 						}
 					}
 				}

@@ -40,12 +40,12 @@ func CreateAdminKey(configPath string, opt CreateApiKeyOption) error {
 	}
 
 	claims := &auth.APIClaim{
-		&jwt.RegisteredClaims{
+		RegisteredClaims: &jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24 * 365 * 10)),
 			Issuer:    "AvaProtocol",
 			Subject:   opt.Subject,
 		},
-		roles,
+		Roles: roles,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

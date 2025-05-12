@@ -6,12 +6,14 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+const TaskIDLength = 26
+
 func ValidWalletAddress(address string) bool {
 	return common.IsHexAddress(address)
 }
 
 func ValidWalletOwner(db storage.Storage, u *model.User, smartWalletAddress common.Address) (bool, error) {
-	// the smart wallet adress is the default one
+	// the smart wallet address is the default one
 	if u.SmartAccountAddress.Hex() == smartWalletAddress.Hex() {
 		return true, nil
 	}
@@ -26,7 +28,7 @@ func ValidWalletOwner(db storage.Storage, u *model.User, smartWalletAddress comm
 }
 
 func ValidateTaskId(id string) bool {
-	if len(id) != 26 {
+	if len(id) != TaskIDLength {
 		return false
 	}
 

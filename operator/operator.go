@@ -20,7 +20,7 @@ import (
 	"github.com/Layr-Labs/eigensdk-go/signerv2"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/go-co-op/gocron/v2"
+	gocron "github.com/go-co-op/gocron/v2"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -392,7 +392,6 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 			"prmMetricsEndpoint", fmt.Sprintf("%s/metrics/", operator.config.EigenMetricsIpPortAddress),
 		)
 	} else {
-
 		logger.Info("Operator info",
 			"operatorId", operatorId,
 			"operatorAddr", c.OperatorAddress,
@@ -412,6 +411,9 @@ func (o *Operator) Start(ctx context.Context) error {
 		// Ensure alias key is correctly bind to operator address
 		o.logger.Infof("checking operator alias address. operator: %s alias %s", o.operatorAddr, o.signerAddress)
 		apConfigContract, err := apconfig.GetContract(o.config.EthRpcUrl, o.apConfigAddr)
+		if err != nil {
+			return fmt.Errorf("failed to get APConfig contract: %w", err)
+		}
 		aliasAddress, err := apConfigContract.GetAlias(nil, o.operatorAddr)
 		if err != nil {
 			panic(err)
@@ -498,7 +500,11 @@ func (c *OperatorConfig) GetPublicMetricPort() int32 {
 		port = parts[1]
 	}
 
-	portNum, _ := strconv.Atoi(port)
+	portNum, err := strconv.Atoi(port)
+	if err != nil {
+		// Just use default port if parsing fails
+		portNum = 8080
+	}
 
 	c.PublicMetricsPort = int32(portNum)
 	return c.PublicMetricsPort
