@@ -274,7 +274,7 @@ func TestGetExecution(t *testing.T) {
 	if execution.Reason.BlockNumber != 101 {
 		t.Errorf("invalid triggered block. expect 101 got %d", execution.Reason.BlockNumber)
 	}
-	
+
 	if execution.Reason.Type != avsproto.TriggerReason_Manual {
 		t.Errorf("invalid trigger type. expected Manual (%d) got %d", avsproto.TriggerReason_Manual, execution.Reason.Type)
 	}
@@ -390,7 +390,7 @@ func TestTriggerSync(t *testing.T) {
 	if execution.Reason.BlockNumber != 101 {
 		t.Errorf("invalid triggered block. expect 101 got %d", execution.Reason.BlockNumber)
 	}
-	
+
 	if execution.Reason.Type != avsproto.TriggerReason_Manual {
 		t.Errorf("invalid trigger type. expected Manual (%d) got %d", avsproto.TriggerReason_Manual, execution.Reason.Type)
 	}
