@@ -81,9 +81,7 @@ linters-settings:
     check-exported: false
 
 linters:
-  # Use allow-list approach instead of disable-all
-  disable-all: false
-  enable-all: false
+  disable-all: true
   enable:
     - errcheck
     - gosimple
