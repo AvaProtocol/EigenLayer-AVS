@@ -182,17 +182,17 @@ func (n *Engine) MustStart() {
 	}
 }
 
-func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWalletReq) ([]*avsproto.SmartWallet, error) {
+func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWalletReq) (*avsproto.ListWalletResp, error) {
 	sender, err := aa.GetSenderAddress(rpcConn, owner, defaultSalt)
 	if err != nil {
 		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), SmartAccountCreationError)
 	}
 
-	wallets := []*avsproto.SmartWallet{}
+	allWallets := []*avsproto.SmartWallet{}
 
 	if payload == nil || payload.FactoryAddress == "" || strings.EqualFold(payload.FactoryAddress, n.smartWalletConfig.FactoryAddress.Hex()) {
 		// This is the default wallet with our own factory
-		wallets = append(wallets, &avsproto.SmartWallet{
+		allWallets = append(allWallets, &avsproto.SmartWallet{
 			Address: sender.String(),
 			Factory: n.smartWalletConfig.FactoryAddress.String(),
 			Salt:    defaultSalt.String(),
@@ -218,14 +218,73 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 			continue
 		}
 
-		wallets = append(wallets, &avsproto.SmartWallet{
+		allWallets = append(allWallets, &avsproto.SmartWallet{
 			Address: w.Address.String(),
 			Factory: w.Factory.String(),
 			Salt:    w.Salt.String(),
 		})
 	}
+	
+	cursor, err := CursorFromBeforeAfter(payload.Before, payload.After)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
+	}
+	
+	if cursor.IsZero() && payload.Cursor != "" {
+		cursor, err = CursorFromString(payload.Cursor)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
+		}
+	}
+	
+	itemPerPage := int(payload.ItemPerPage)
+	if itemPerPage < 0 {
+		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
+	}
+	if itemPerPage == 0 {
+		itemPerPage = DefaultItemPerPage
+	}
+	
+	slices.SortFunc(allWallets, func(a, b *avsproto.SmartWallet) int {
+		return strings.Compare(a.Address, b.Address)
+	})
+	
+	result := &avsproto.ListWalletResp{
+		Items:   []*avsproto.SmartWallet{},
+		Cursor:  "",
+		HasMore: false,
+	}
+	
+	total := 0
+	var lastAddress string
+	
+	for _, wallet := range allWallets {
+		if !cursor.IsZero() {
+			if (cursor.Direction == CursorDirectionNext && wallet.Address <= cursor.Position) ||
+			   (cursor.Direction == CursorDirectionPrevious && wallet.Address >= cursor.Position) {
+				continue
+			}
+		}
+		
+		result.Items = append(result.Items, wallet)
+		lastAddress = wallet.Address
+		total++
+		
+		if total >= itemPerPage {
+			result.HasMore = true
+			break
+		}
+	}
+	
+	if result.HasMore && lastAddress != "" {
+		nextCursor := &Cursor{
+			Direction: CursorDirectionNext,
+			Position:  lastAddress,
+		}
+		result.Cursor = nextCursor.String()
+	}
 
-	return wallets, nil
+	return result, nil
 }
 
 func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
@@ -470,9 +529,21 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	}
 
 	total := 0
-	cursor, err := CursorFromString(payload.Cursor)
+	cursor, err := CursorFromBeforeAfter(payload.Before, payload.After)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
+	}
+	
+	if cursor.IsZero() && payload.Cursor != "" {
+		cursor, err = CursorFromString(payload.Cursor)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
+		}
+	}
+	
 	itemPerPage := int(payload.ItemPerPage)
 	if itemPerPage < 0 {
+		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
 	}
 	if itemPerPage == 0 {
 		itemPerPage = DefaultItemPerPage
@@ -666,10 +737,16 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	}
 
 	total := 0
-	cursor, err := CursorFromString(payload.Cursor)
-
+	cursor, err := CursorFromBeforeAfter(payload.Before, payload.After)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
+	}
+	
+	if cursor.IsZero() && payload.Cursor != "" {
+		cursor, err = CursorFromString(payload.Cursor)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
+		}
 	}
 
 	itemPerPage := int(payload.ItemPerPage)
@@ -959,14 +1036,49 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	}
 
 	result := &avsproto.ListSecretsResp{
-		Items: []*avsproto.ListSecretsResp_ResponseSecret{},
+		Items:   []*avsproto.ListSecretsResp_ResponseSecret{},
+		Cursor:  "",
+		HasMore: false,
 	}
 
 	secretKeys, err := n.db.ListKeysMulti(prefixes)
 	if err != nil {
 		return nil, err
 	}
+	
+	slices.Sort(secretKeys)
+	
+	cursor, err := CursorFromBeforeAfter(payload.Before, payload.After)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
+	}
+	
+	if cursor.IsZero() && payload.Cursor != "" {
+		cursor, err = CursorFromString(payload.Cursor)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
+		}
+	}
+	
+	itemPerPage := int(payload.ItemPerPage)
+	if itemPerPage < 0 {
+		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
+	}
+	if itemPerPage == 0 {
+		itemPerPage = DefaultItemPerPage
+	}
+	
+	total := 0
+	var lastKey string
+	
 	for _, k := range secretKeys {
+		if !cursor.IsZero() {
+			if (cursor.Direction == CursorDirectionNext && k <= cursor.Position) ||
+			   (cursor.Direction == CursorDirectionPrevious && k >= cursor.Position) {
+				continue
+			}
+		}
+		
 		secretWithNameOnly := SecretNameFromKey(k)
 		item := &avsproto.ListSecretsResp_ResponseSecret{
 			Name:       secretWithNameOnly.Name,
@@ -975,6 +1087,21 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 		}
 
 		result.Items = append(result.Items, item)
+		lastKey = k
+		total++
+		
+		if total >= itemPerPage {
+			result.HasMore = true
+			break
+		}
+	}
+	
+	if result.HasMore && lastKey != "" {
+		nextCursor := &Cursor{
+			Direction: CursorDirectionNext,
+			Position:  lastKey,
+		}
+		result.Cursor = nextCursor.String()
 	}
 
 	return result, nil

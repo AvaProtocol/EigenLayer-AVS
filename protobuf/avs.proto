@@ -465,6 +465,13 @@ message ListWalletReq {
   // otherwise return all the wallet
   string factory_address = 1;
   string salt            = 2;
+  // Deprecated: Use before or after instead
+  string cursor = 3;
+  // Get items before this cursor value (for backward pagination)
+  string before = 4;
+  // Get items after this cursor value (for forward pagination)
+  string after = 5;
+  int64 item_per_page = 6;
 }
 
 message SmartWallet {
@@ -475,13 +482,20 @@ message SmartWallet {
 
 message ListWalletResp {
   repeated SmartWallet items = 1;
+  string cursor = 2;
+  bool has_more = 3;
 }
 
 
 message ListTasksReq {
   // Filter out by the smart_wallet_address
   repeated string smart_wallet_address = 1;
+  // Deprecated: Use before or after instead
   string cursor = 2;
+  // Get items before this cursor value (for backward pagination)
+  string before = 4;
+  // Get items after this cursor value (for forward pagination)
+  string after = 5;
   int64 item_per_page = 3;
 }
 
@@ -519,7 +533,12 @@ message ListTasksResp {
 
 message ListExecutionsReq {
   repeated string task_ids = 1;
+  // Deprecated: Use before or after instead
   string cursor = 2;
+  // Get items before this cursor value (for backward pagination)
+  string before = 4;
+  // Get items after this cursor value (for forward pagination)
+  string after = 5;
   int64 item_per_page = 3;
 }
 
@@ -634,6 +653,13 @@ message CreateOrUpdateSecretReq {
 
 message ListSecretsReq {
   string workflow_id = 1;
+  // Deprecated: Use before or after instead
+  string cursor = 2;
+  // Get items before this cursor value (for backward pagination)
+  string before = 3;
+  // Get items after this cursor value (for forward pagination)
+  string after = 4;
+  int64 item_per_page = 5;
 }
 
 message ListSecretsResp {
@@ -646,6 +672,8 @@ message ListSecretsResp {
     string org_id = 5;
   }
   repeated ResponseSecret items = 1;
+  string cursor = 2;
+  bool has_more = 3;
 }
 
 message DeleteSecretReq {
