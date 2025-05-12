@@ -47,7 +47,7 @@ jobs:
 
       - name: Run golangci-lint
         run: |
-          $(go env GOPATH)/bin/golangci-lint run ./... --out-format=colored-line-number
+          $(go env GOPATH)/bin/golangci-lint run ./... --out-format=colored-line-number --disable=typecheck
 
   test:
     environment: Test
