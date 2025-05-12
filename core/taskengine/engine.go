@@ -229,24 +229,9 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 		})
 	}
 
-	cursor, err := CursorFromBeforeAfter(payload.Before, payload.After)
+	cursor, itemPerPage, err := SetupPagination(payload.Before, payload.After, payload.Cursor, payload.ItemPerPage)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
-	}
-
-	if cursor.IsZero() && payload.Cursor != "" {
-		cursor, err = CursorFromString(payload.Cursor)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
-		}
-	}
-
-	itemPerPage := int(payload.ItemPerPage)
-	if itemPerPage < 0 {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
-	}
-	if itemPerPage == 0 {
-		itemPerPage = DefaultItemPerPage
+		return nil, err
 	}
 
 	slices.SortFunc(allWallets, func(a, b *avsproto.SmartWallet) int {
@@ -546,24 +531,9 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	}
 
 	total := 0
-	cursor, err := CursorFromBeforeAfter(payload.Before, payload.After)
+	cursor, itemPerPage, err := SetupPagination(payload.Before, payload.After, payload.Cursor, payload.ItemPerPage)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
-	}
-
-	if cursor.IsZero() && payload.Cursor != "" {
-		cursor, err = CursorFromString(payload.Cursor)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
-		}
-	}
-
-	itemPerPage := int(payload.ItemPerPage)
-	if itemPerPage < 0 {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
-	}
-	if itemPerPage == 0 {
-		itemPerPage = DefaultItemPerPage
+		return nil, err
 	}
 
 	visited := 0
@@ -757,25 +727,9 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	}
 
 	total := 0
-	cursor, err := CursorFromBeforeAfter(payload.Before, payload.After)
+	cursor, itemPerPage, err := SetupPagination(payload.Before, payload.After, payload.Cursor, payload.ItemPerPage)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
-	}
-
-	if cursor.IsZero() && payload.Cursor != "" {
-		cursor, err = CursorFromString(payload.Cursor)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
-		}
-	}
-
-	itemPerPage := int(payload.ItemPerPage)
-	if itemPerPage < 0 {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
-	}
-
-	if itemPerPage == 0 {
-		itemPerPage = DefaultItemPerPage
+		return nil, err
 	}
 	visited := 0
 	for i := len(executionKeys) - 1; i >= 0; i-- {
@@ -1076,25 +1030,10 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	}
 
 	slices.Sort(secretKeys)
-
-	cursor, err := CursorFromBeforeAfter(payload.Before, payload.After)
+	
+	cursor, itemPerPage, err := SetupPagination(payload.Before, payload.After, payload.Cursor, payload.ItemPerPage)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
-	}
-
-	if cursor.IsZero() && payload.Cursor != "" {
-		cursor, err = CursorFromString(payload.Cursor)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
-		}
-	}
-
-	itemPerPage := int(payload.ItemPerPage)
-	if itemPerPage < 0 {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
-	}
-	if itemPerPage == 0 {
-		itemPerPage = DefaultItemPerPage
+		return nil, err
 	}
 
 	total := 0
