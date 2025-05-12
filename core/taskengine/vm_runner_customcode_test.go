@@ -43,7 +43,7 @@ func TestRunJavaScript(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -60,7 +60,7 @@ func TestRunJavaScript(t *testing.T) {
 	}
 
 	if !step.Success {
-		t.Errorf("expected JavaScript node run succesfully but failed")
+		t.Errorf("expected JavaScript node run successfully but failed")
 	}
 
 	if !strings.Contains(step.Log, "Start execute user-input JS code at") {
@@ -104,7 +104,7 @@ func TestRunJavaScriptComplex(t *testing.T) {
 	}
 
 	vm, _ := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -155,7 +155,7 @@ func TestRunJavaScriptComplexWithMap(t *testing.T) {
 	}
 
 	vm, _ := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -243,7 +243,7 @@ func TestRunJavaScriptCanAccessSecretsWithapContext(t *testing.T) {
 	}
 
 	vm, _ := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -335,7 +335,7 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 	}
 
 	taskModel := &model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,

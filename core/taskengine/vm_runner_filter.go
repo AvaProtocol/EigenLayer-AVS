@@ -80,7 +80,7 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 
 	result, err := r.jsvm.RunString(script)
 	if err != nil {
-		log.WriteString(fmt.Sprintf("an error has occured when processing your filter expression"))
+		log.WriteString(fmt.Sprintf("an error has occurred when processing your filter expression: %v", err))
 		s.Log = log.String()
 		s.Error = err.Error()
 		return s, err

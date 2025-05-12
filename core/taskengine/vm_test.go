@@ -46,7 +46,7 @@ func TestVMCompile(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -103,7 +103,7 @@ func TestRunSimpleTasks(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -181,7 +181,7 @@ func TestRunSequentialTasks(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -303,7 +303,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -445,7 +445,7 @@ func TestEvaluateEvent(t *testing.T) {
 	SetCache(testutil.GetDefaultCache())
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "sampletaskid1",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -531,7 +531,7 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 	SetCache(testutil.GetDefaultCache())
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "sampletaskid1",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -597,7 +597,7 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 	SetCache(testutil.GetDefaultCache())
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "sampletaskid1",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -661,7 +661,7 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,

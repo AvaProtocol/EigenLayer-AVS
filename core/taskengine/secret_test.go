@@ -42,7 +42,7 @@ func TestLoadSecretForTask(t *testing.T) {
 	})
 
 	secrets, err := LoadSecretForTask(db, &model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Owner: user1.Address.Hex(),
 			Id:    "workflow123",
 		},
