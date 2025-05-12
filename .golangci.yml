@@ -88,6 +88,7 @@ linters:
     - govet
     - ineffassign
     - staticcheck
+    - typecheck
     - unused
     - gocyclo
     - gofmt

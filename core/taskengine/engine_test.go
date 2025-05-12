@@ -1013,6 +1013,43 @@ func TestGetWorkflowCount(t *testing.T) {
 	}
 }
 
+func TestAggregateChecksResult(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, apqueue.NewQueue(), testutil.GetLogger())
+
+	// Create a test task
+	tr1 := testutil.RestTask()
+	tr1.Name = "test_aggregate"
+	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
+
+	payload := &avsproto.NotifyTriggersReq{
+		TaskId: result.Id,
+		Reason: &avsproto.TriggerReason{
+			BlockNumber: 101,
+			Type:        avsproto.TriggerReason_Manual,
+		},
+	}
+
+	err := n.AggregateChecksResult("test_operator", payload)
+	if err != nil {
+		t.Errorf("expected AggregateChecksResult to succeed but got error: %s", err)
+	}
+
+	payload = &avsproto.NotifyTriggersReq{
+		TaskId: result.Id,
+		Reason: nil,
+	}
+
+	err = n.AggregateChecksResult("test_operator", payload)
+	if err != nil {
+		t.Errorf("expected AggregateChecksResult with nil reason to succeed but got error: %s", err)
+	}
+}
+
 func TestGetExecutionCount(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
