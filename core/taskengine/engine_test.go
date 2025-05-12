@@ -1018,7 +1018,11 @@ func TestAggregateChecksResult(t *testing.T) {
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	config := testutil.GetAggregatorConfig()
+	
+	// Create a mock Engine with a custom queue implementation
 	n := New(db, config, nil, testutil.GetLogger())
+	
+	n.queue = &mockQueue{}
 
 	// Create a test task
 	tr1 := testutil.RestTask()
@@ -1048,6 +1052,12 @@ func TestAggregateChecksResult(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected AggregateChecksResult with nil reason to succeed but got error: %s", err)
 	}
+}
+
+type mockQueue struct{}
+
+func (q *mockQueue) Enqueue(jobType string, taskID string, data []byte) (string, error) {
+	return "mock-job-id", nil
 }
 
 func TestGetExecutionCount(t *testing.T) {
