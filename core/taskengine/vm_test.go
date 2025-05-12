@@ -611,7 +611,7 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 
 	err = vm.Compile()
 	if err != nil {
-		t.Errorf("Expect compile succesfully but got error: %v", err)
+		t.Errorf("Expect compile successfully but got error: %v", err)
 	}
 
 	if vm.entrypoint != "notification1" {
