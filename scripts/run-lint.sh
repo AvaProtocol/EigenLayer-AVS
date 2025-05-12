@@ -1,0 +1,3 @@
+set -e
+
+golangci-lint run --no-config --disable-all --enable=errcheck,gosimple,govet,ineffassign,staticcheck,unused,gocyclo,gofmt,goimports,misspell,revive,unconvert,unparam,whitespace --out-format=colored-line-number ./...
