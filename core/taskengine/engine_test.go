@@ -1018,7 +1018,7 @@ func TestAggregateChecksResult(t *testing.T) {
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	config := testutil.GetAggregatorConfig()
-	n := New(db, config, apqueue.NewQueue(), testutil.GetLogger())
+	n := New(db, config, nil, testutil.GetLogger())
 
 	// Create a test task
 	tr1 := testutil.RestTask()
