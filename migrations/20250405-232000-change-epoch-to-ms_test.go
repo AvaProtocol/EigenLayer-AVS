@@ -120,7 +120,6 @@ func TestChangeEpochToMs(t *testing.T) {
 		t.Errorf("Migration reported updating %d records, expected %d", updatedCount, expectedUpdates)
 	}
 
-
 	retrievedTaskBytes, err := db.GetKey([]byte(taskKey))
 	if err != nil {
 		t.Fatalf("Failed to retrieve task data after migration: %v", err)
