@@ -76,6 +76,8 @@ func (q *Queue) Stop() error {
 		return err
 	}
 
+	close(q.closeCh)
+
 	return nil
 }
 
