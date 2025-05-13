@@ -1034,6 +1034,7 @@ func TestAggregateChecksResult(t *testing.T) {
 		JobTypeExecuteTask,
 		taskExecutor,
 	)
+	worker.MustStart()
 	
 	// Create Engine with the real queue
 	n := New(db, config, nil, logger)
