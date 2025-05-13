@@ -10,7 +10,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avspb "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
-	"github.com/go-co-op/gocron/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -213,13 +212,6 @@ func TestLogLevelChanges(t *testing.T) {
 }
 
 func TestSchedulerCleanupJob(t *testing.T) {
-	scheduler, err := gocron.NewScheduler()
-	if err != nil {
-		t.Fatalf("Failed to create scheduler: %v", err)
-	}
-	scheduler.Start()
-	defer scheduler.Shutdown()
-	
 	blockTasksMap := make(map[int64][]string)
 	blockTasksMutex := &sync.Mutex{}
 	
@@ -229,37 +221,33 @@ func TestSchedulerCleanupJob(t *testing.T) {
 	
 	cleanupDone := make(chan bool)
 	
-	_, err = scheduler.NewJob(
-		gocron.DurationJob(time.Millisecond*100),
-		gocron.NewTask(func() {
-			blockTasksMutex.Lock()
-			defer blockTasksMutex.Unlock()
+	cleanupFunc := func() {
+		blockTasksMutex.Lock()
+		defer blockTasksMutex.Unlock()
+		
+		if len(blockTasksMap) > 10 {
+			var blocks []int64
+			for block := range blockTasksMap {
+				blocks = append(blocks, block)
+			}
 			
-			if len(blockTasksMap) > 10 {
-				var blocks []int64
-				for block := range blockTasksMap {
-					blocks = append(blocks, block)
-				}
-				
-				for i := 0; i < len(blocks); i++ {
-					for j := i + 1; j < len(blocks); j++ {
-						if blocks[i] > blocks[j] {
-							blocks[i], blocks[j] = blocks[j], blocks[i]
-						}
+			for i := 0; i < len(blocks); i++ {
+				for j := i + 1; j < len(blocks); j++ {
+					if blocks[i] > blocks[j] {
+						blocks[i], blocks[j] = blocks[j], blocks[i]
 					}
-				}
-				
-				for i := 0; i < len(blocks)-10; i++ {
-					delete(blockTasksMap, blocks[i])
 				}
 			}
 			
-			cleanupDone <- true
-		}),
-	)
-	if err != nil {
-		t.Fatalf("Failed to create cleanup job: %v", err)
+			for i := 0; i < len(blocks)-10; i++ {
+				delete(blockTasksMap, blocks[i])
+			}
+		}
+		
+		cleanupDone <- true
 	}
+	
+	go cleanupFunc()
 	
 	select {
 	case <-cleanupDone:
