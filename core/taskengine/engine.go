@@ -515,7 +515,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 				Name:               t.Name,
 				CompletedAt:        t.CompletedAt,
 				MaxExecution:       t.MaxExecution,
-				TotalExecution:     t.TotalExecution,
+				ExecutionCount:     t.ExecutionCount,
 				LastRanAt:          t.LastRanAt,
 				Status:             t.Status,
 				Trigger:            t.Trigger,
