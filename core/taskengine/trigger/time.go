@@ -123,11 +123,10 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 	return nil
 }
 
-func (t *TimeTrigger) Remove(check *avsproto.SyncMessagesResp_TaskMetadata) error {
+func (t *TimeTrigger) RemoveCheck(taskID string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	taskID := check.TaskId
 	if job, exists := t.jobs[taskID]; exists {
 		if err := t.scheduler.RemoveJob(job.ID()); err != nil {
 			t.logger.Error("failed to remove job", "task_id", taskID, "error", err)

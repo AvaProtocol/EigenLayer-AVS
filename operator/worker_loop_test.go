@@ -21,14 +21,14 @@ type EventTriggerInterface interface {
 }
 
 type BlockTriggerInterface interface {
-	Remove(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error
+	RemoveCheck(taskID string) error
 	AddCheck(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error
 	GetProgress() int64
 	Run(ctx context.Context) error
 }
 
 type TimeTriggerInterface interface {
-	Remove(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error
+	RemoveCheck(taskID string) error
 	AddCheck(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error
 	GetProgress() int64
 	Run(ctx context.Context) error
@@ -115,8 +115,8 @@ type MockBlockTrigger struct {
 	mock.Mock
 }
 
-func (m *MockBlockTrigger) Remove(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error {
-	args := m.Called(taskMetadata)
+func (m *MockBlockTrigger) RemoveCheck(taskID string) error {
+	args := m.Called(taskID)
 	return args.Error(0)
 }
 
@@ -139,8 +139,8 @@ type MockTimeTrigger struct {
 	mock.Mock
 }
 
-func (m *MockTimeTrigger) Remove(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error {
-	args := m.Called(taskMetadata)
+func (m *MockTimeTrigger) RemoveCheck(taskID string) error {
+	args := m.Called(taskID)
 	return args.Error(0)
 }
 
@@ -354,8 +354,8 @@ func (o *TestOperator) processMessage(resp *avspb.SyncMessagesResp) {
 	case avspb.MessageOp_CancelTask, avspb.MessageOp_DeleteTask:
 		o.logger.Info("removing task from all triggers", "task_id", resp.TaskMetadata.TaskId, "operation", resp.Op)
 		o.eventTrigger.RemoveCheck(resp.TaskMetadata.TaskId)
-		o.blockTrigger.Remove(resp.TaskMetadata)
-		o.timeTrigger.Remove(resp.TaskMetadata)
+		o.blockTrigger.RemoveCheck(resp.TaskMetadata.TaskId)
+		o.timeTrigger.RemoveCheck(resp.TaskMetadata.TaskId)
 	}
 }
 
@@ -408,20 +408,20 @@ func TestTaskRemovalFromAllTriggers(t *testing.T) {
 
 			if tc.expectRemoval {
 				mockEventTrigger.On("RemoveCheck", tc.taskID).Return(nil)
-				mockBlockTrigger.On("Remove", message.TaskMetadata).Return(nil)
-				mockTimeTrigger.On("Remove", message.TaskMetadata).Return(nil)
+				mockBlockTrigger.On("RemoveCheck", tc.taskID).Return(nil)
+				mockTimeTrigger.On("RemoveCheck", tc.taskID).Return(nil)
 			}
 
 			operator.processMessage(message)
 
 			if tc.expectRemoval {
 				mockEventTrigger.AssertCalled(t, "RemoveCheck", tc.taskID)
-				mockBlockTrigger.AssertCalled(t, "Remove", message.TaskMetadata)
-				mockTimeTrigger.AssertCalled(t, "Remove", message.TaskMetadata)
+				mockBlockTrigger.AssertCalled(t, "RemoveCheck", tc.taskID)
+				mockTimeTrigger.AssertCalled(t, "RemoveCheck", tc.taskID)
 			} else {
 				mockEventTrigger.AssertNotCalled(t, "RemoveCheck", tc.taskID)
-				mockBlockTrigger.AssertNotCalled(t, "Remove", message.TaskMetadata)
-				mockTimeTrigger.AssertNotCalled(t, "Remove", message.TaskMetadata)
+				mockBlockTrigger.AssertNotCalled(t, "RemoveCheck", tc.taskID)
+				mockTimeTrigger.AssertNotCalled(t, "RemoveCheck", tc.taskID)
 			}
 		})
 	}
