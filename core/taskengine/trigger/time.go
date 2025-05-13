@@ -123,11 +123,22 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 	return nil
 }
 
-func (t *TimeTrigger) Remove(check *avsproto.SyncMessagesResp_TaskMetadata) error {
+// RemoveCheck removes a scheduled job associated with the given taskID.
+// It locks the mutex to ensure thread-safe access to the jobs map, checks if
+// a job exists for the provided taskID, and removes it from the scheduler and
+// the jobs map. If the job does not exist, the method does nothing.
+// 
+// Parameters:
+// - taskID: The unique identifier of the task whose associated job should be removed.
+//
+// Returns:
+// - An error if the job removal from the scheduler fails. The error is logged but not returned.
+// 
+//
+func (t *TimeTrigger) RemoveCheck(taskID string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	taskID := check.TaskId
 	if job, exists := t.jobs[taskID]; exists {
 		if err := t.scheduler.RemoveJob(job.ID()); err != nil {
 			t.logger.Error("failed to remove job", "task_id", taskID, "error", err)
