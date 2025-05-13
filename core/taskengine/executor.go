@@ -106,7 +106,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	t0 := time.Now()
-	task.TotalExecution += 1
+	task.ExecutionCount += 1
 	task.LastRanAt = t0.UnixMilli()
 
 	var runTaskErr error = nil
@@ -120,7 +120,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	t1 := time.Now()
 
 	// when MaxExecution is 0, it means unlimited run until cancel
-	if task.MaxExecution > 0 && task.TotalExecution >= task.MaxExecution {
+	if task.MaxExecution > 0 && task.ExecutionCount >= task.MaxExecution {
 		task.SetCompleted()
 	}
 
