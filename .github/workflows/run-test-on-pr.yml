@@ -73,6 +73,7 @@ jobs:
           - core/backup
           - core/migrator
           - migrations
+          - operator
 
     steps:
       - uses: actions/checkout@v4
