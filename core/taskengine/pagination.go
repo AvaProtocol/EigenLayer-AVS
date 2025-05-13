@@ -3,8 +3,6 @@ package taskengine
 import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 const (
