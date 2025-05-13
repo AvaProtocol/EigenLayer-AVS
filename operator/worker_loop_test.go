@@ -67,26 +67,76 @@ func (m *MockLogger) With(keysAndValues ...interface{}) interface{} {
 	return m
 }
 
-type MockTrigger struct {
+type MockEventTrigger struct {
 	mock.Mock
 }
 
-func (m *MockTrigger) RemoveCheck(taskID string) {
-	m.Called(taskID)
+func (m *MockEventTrigger) RemoveCheck(taskID string) error {
+	args := m.Called(taskID)
+	return args.Error(0)
 }
 
-func (m *MockTrigger) AddCheck(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error {
+func (m *MockEventTrigger) AddCheck(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error {
 	args := m.Called(taskMetadata)
 	return args.Error(0)
 }
 
-func (m *MockTrigger) GetProgress() int64 {
+func (m *MockEventTrigger) GetProgress() int64 {
 	args := m.Called()
 	return args.Get(0).(int64)
 }
 
-func (m *MockTrigger) Run(ctx context.Context) {
-	m.Called(ctx)
+func (m *MockEventTrigger) Run(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
+type MockBlockTrigger struct {
+	mock.Mock
+}
+
+func (m *MockBlockTrigger) Remove(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error {
+	args := m.Called(taskMetadata)
+	return args.Error(0)
+}
+
+func (m *MockBlockTrigger) AddCheck(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error {
+	args := m.Called(taskMetadata)
+	return args.Error(0)
+}
+
+func (m *MockBlockTrigger) GetProgress() int64 {
+	args := m.Called()
+	return args.Get(0).(int64)
+}
+
+func (m *MockBlockTrigger) Run(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
+type MockTimeTrigger struct {
+	mock.Mock
+}
+
+func (m *MockTimeTrigger) Remove(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error {
+	args := m.Called(taskMetadata)
+	return args.Error(0)
+}
+
+func (m *MockTimeTrigger) AddCheck(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error {
+	args := m.Called(taskMetadata)
+	return args.Error(0)
+}
+
+func (m *MockTimeTrigger) GetProgress() int64 {
+	args := m.Called()
+	return args.Get(0).(int64)
+}
+
+func (m *MockTimeTrigger) Run(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
 }
 
 func TestBlockTasksMapCleanup(t *testing.T) {
@@ -273,9 +323,9 @@ func TestSchedulerCleanupJob(t *testing.T) {
 }
 
 func TestTaskRemovalFromAllTriggers(t *testing.T) {
-	mockEventTrigger := new(MockTrigger)
-	mockBlockTrigger := new(MockTrigger)
-	mockTimeTrigger := new(MockTrigger)
+	mockEventTrigger := new(MockEventTrigger)
+	mockBlockTrigger := new(MockBlockTrigger)
+	mockTimeTrigger := new(MockTimeTrigger)
 
 	operator := &Operator{
 		logger:       testutil.GetLogger(),
@@ -320,21 +370,21 @@ func TestTaskRemovalFromAllTriggers(t *testing.T) {
 			}
 
 			if tc.expectRemoval {
-				mockEventTrigger.On("RemoveCheck", tc.taskID).Return()
-				mockBlockTrigger.On("RemoveCheck", tc.taskID).Return()
-				mockTimeTrigger.On("RemoveCheck", tc.taskID).Return()
+				mockEventTrigger.On("RemoveCheck", tc.taskID).Return(nil)
+				mockBlockTrigger.On("Remove", message.TaskMetadata).Return(nil)
+				mockTimeTrigger.On("Remove", message.TaskMetadata).Return(nil)
 			}
 
 			operator.processMessage(message)
 
 			if tc.expectRemoval {
 				mockEventTrigger.AssertCalled(t, "RemoveCheck", tc.taskID)
-				mockBlockTrigger.AssertCalled(t, "RemoveCheck", tc.taskID)
-				mockTimeTrigger.AssertCalled(t, "RemoveCheck", tc.taskID)
+				mockBlockTrigger.AssertCalled(t, "Remove", message.TaskMetadata)
+				mockTimeTrigger.AssertCalled(t, "Remove", message.TaskMetadata)
 			} else {
 				mockEventTrigger.AssertNotCalled(t, "RemoveCheck", tc.taskID)
-				mockBlockTrigger.AssertNotCalled(t, "RemoveCheck", tc.taskID)
-				mockTimeTrigger.AssertNotCalled(t, "RemoveCheck", tc.taskID)
+				mockBlockTrigger.AssertNotCalled(t, "Remove", message.TaskMetadata)
+				mockTimeTrigger.AssertNotCalled(t, "Remove", message.TaskMetadata)
 			}
 		})
 	}
