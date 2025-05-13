@@ -1085,15 +1085,15 @@ func (q *mockQueue) Recover() error {
 	return nil
 }
 
-func (q *mockQueue) getQueueKeyPrefix(status apqueue.JobStatus) []byte {
+func (q *mockQueue) getQueueKeyPrefix(status apqueue.jobStatus) []byte {
 	return []byte(fmt.Sprintf("q:mock:%v:", status))
 }
 
-func (q *mockQueue) getJobKey(status apqueue.JobStatus, jID uint64) []byte {
+func (q *mockQueue) getJobKey(status apqueue.jobStatus, jID uint64) []byte {
 	return append(q.getQueueKeyPrefix(status), []byte(fmt.Sprintf("%d", jID))...)
 }
 
-func (q *mockQueue) markJobDone(job *apqueue.Job, status apqueue.JobStatus) error {
+func (q *mockQueue) markJobDone(job *apqueue.Job, status apqueue.jobStatus) error {
 	return nil
 }
 
@@ -1114,7 +1114,8 @@ func TestAggregateChecksResult(t *testing.T) {
 	
 	// Create Engine with the mock queue
 	n := New(db, config, nil, logger)
-	n.queue = mockQ
+	var queue apqueue.Queue = mockQ
+	n.queue = &queue
 
 	// Create a test task
 	tr1 := testutil.RestTask()
