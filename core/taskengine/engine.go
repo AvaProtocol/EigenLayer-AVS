@@ -440,6 +440,8 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	n.lock.Unlock()
 
 	reason := CopyTriggerReason(payload.Reason)
+	// Set the type to Manual for manual triggers
+	reason.Type = avsproto.TriggerReason_Manual
 	
 	queueTaskData := QueueExecutionData{
 		Reason:      reason,
