@@ -332,7 +332,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	quorumNames := map[sdktypes.QuorumNum]string{
 		0: "quorum0",
 	}
-	economicMetricsCollector := economic.NewCollector(
+	economicMetricsCollector := metrics.NewMetricsOnlyEconomicCollector(
 		sdkClients.ElChainReader, sdkClients.AvsRegistryChainReader,
 		AVS_NAME, logger, common.HexToAddress(c.OperatorAddress), quorumNames)
 	reg.MustRegister(economicMetricsCollector)
