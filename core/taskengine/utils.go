@@ -6,10 +6,19 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
+	"github.com/dop251/goja"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/shopspring/decimal"
 )
+
+// NewGojaVM creates a new Goja runtime and applies standard configurations.
+func NewGojaVM() *goja.Runtime {
+	vm := goja.New()
+	macros.ConfigureGojaRuntime(vm)
+	return vm
+}
 
 // Metadata holds token and block metadata
 type Metadata struct {
@@ -30,7 +39,9 @@ func GetMetadataForTransfer(log *types.Log) (*Metadata, error) {
 	// Check if metadata is cached
 	if data, err := cache.Get(cacheKey); err == nil {
 		var metadata Metadata
-		json.Unmarshal(data, &metadata)
+		if err := json.Unmarshal(data, &metadata); err == nil {
+			m = metadata
+		}
 	}
 
 	if m.Name == "" {
@@ -55,7 +66,11 @@ func GetMetadataForTransfer(log *types.Log) (*Metadata, error) {
 			return nil, fmt.Errorf("error fetching token decimals: %w", err)
 		}
 		data, err := json.Marshal(m)
-		cache.Set(cacheKey, data)
+		if err == nil {
+			if err := cache.Set(cacheKey, data); err != nil {
+				fmt.Printf("Failed to cache token metadata: %v\n", err)
+			}
+		}
 	}
 
 	return &m, nil
@@ -78,7 +93,11 @@ func GetBlock(blockNumber uint64) (*types.Header, error) {
 	}
 
 	data, err := json.Marshal(blockHeader)
-	cache.Set(cacheKey, data)
+	if err == nil {
+		if err := cache.Set(cacheKey, data); err != nil {
+			fmt.Printf("Failed to cache block header: %v\n", err)
+		}
+	}
 
 	return blockHeader, nil
 }

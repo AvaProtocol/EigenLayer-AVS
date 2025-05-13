@@ -7,12 +7,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"github.com/dop251/goja"
 	"github.com/samber/lo"
 
-	"github.com/ethereum/go-ethereum"
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -136,7 +136,9 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 					evtTrigger.wsEthClient.Close()
 				}
 
-				evtTrigger.retryConnectToRpc()
+				if err := evtTrigger.retryConnectToRpc(); err != nil {
+					evtTrigger.logger.Error("failed to reconnect to RPC", "error", err)
+				}
 				sub, err = evtTrigger.wsEthClient.SubscribeFilterLogs(context.Background(), query, logs)
 			case event := <-logs:
 				evtTrigger.logger.Debug("detect new event, evaluate checks", "event", event.Topics, "contract", event.Address, "tx", event.TxHash)
@@ -200,7 +202,12 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 }
 
 func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) {
+	if event == nil {
+		return false, fmt.Errorf("event is nil")
+	}
+
 	var err error = nil
+
 	if len(check.Matcher) > 0 {
 		// This is the simpler trigger. It's essentially an anyof
 		return lo.SomeBy(check.Matcher, func(x *avsproto.EventCondition_Matcher) bool {
@@ -213,7 +220,7 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 			case "topics":
 				// Matching based on topic of transaction
 				topics := lo.Map[common.Hash, string](event.Topics, func(topic common.Hash, _ int) string {
-					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x"))
 				})
 
 				match := true
@@ -241,21 +248,28 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 		// This is the advance trigger with js evaluation based on trigger data
 		triggerVarName := check.TaskMetadata.GetTrigger().GetName()
 
-		jsvm := goja.New()
+		jsvm := taskengine.NewGojaVM()
+
 		envs := macros.GetEnvs(map[string]interface{}{})
 		for k, v := range envs {
-			jsvm.Set(k, v)
+			if err := jsvm.Set(k, v); err != nil {
+				return false, fmt.Errorf("failed to set macro env in JS VM: %w", err)
+			}
 		}
-		jsvm.Set(triggerVarName, map[string]interface{}{
+
+		triggerData := map[string]interface{}{
 			"data": map[string]interface{}{
 				"address": strings.ToLower(event.Address.Hex()),
 				"topics": lo.Map[common.Hash, string](event.Topics, func(topic common.Hash, _ int) string {
-					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x"))
 				}),
 				"data":    "0x" + common.Bytes2Hex(event.Data),
 				"tx_hash": event.TxHash,
 			},
-		})
+		}
+		if err := jsvm.Set(triggerVarName, triggerData); err != nil {
+			return false, fmt.Errorf("failed to set trigger data in JS VM: %w", err)
+		}
 
 		result, err := jsvm.RunString(check.Program)
 
@@ -269,7 +283,6 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 		}
 
 		return evalutationResult, err
-
 	}
 
 	err = fmt.Errorf("invalid event trigger check: both matcher or expression are missing or empty")

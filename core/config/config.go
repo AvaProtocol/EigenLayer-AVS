@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 
@@ -74,6 +75,13 @@ type SmartWalletConfig struct {
 
 	ControllerPrivateKey *ecdsa.PrivateKey
 	PaymasterAddress     common.Address
+	WhitelistAddresses   []common.Address
+}
+
+type BackupConfig struct {
+	Enabled         bool   // Whether periodic backups are enabled
+	IntervalMinutes int    // Interval between backups in minutes
+	BackupDir       string // Directory to store backups
 }
 
 type BackupConfig struct {
@@ -99,13 +107,14 @@ type ConfigRaw struct {
 	JwtSecret string `yaml:"jwt_secret"`
 
 	SmartWallet struct {
-		EthRpcUrl            string `yaml:"eth_rpc_url"`
-		EthWsUrl             string `yaml:"eth_ws_url"`
-		BundlerURL           string `yaml:"bundler_url"`
-		FactoryAddress       string `yaml:"factory_address"`
-		EntrypointAddress    string `yaml:"entrypoint_address"`
-		ControllerPrivateKey string `yaml:"controller_private_key"`
-		PaymasterAddress     string `yaml:"paymaster_address"`
+		EthRpcUrl            string   `yaml:"eth_rpc_url"`
+		EthWsUrl             string   `yaml:"eth_ws_url"`
+		BundlerURL           string   `yaml:"bundler_url"`
+		FactoryAddress       string   `yaml:"factory_address"`
+		EntrypointAddress    string   `yaml:"entrypoint_address"`
+		ControllerPrivateKey string   `yaml:"controller_private_key"`
+		PaymasterAddress     string   `yaml:"paymaster_address"`
+		WhitelistAddresses   []string `yaml:"whitelist_addresses"`
 	} `yaml:"smart_wallet"`
 
 	Backup struct {
@@ -135,7 +144,9 @@ type AutomationContractsRaw struct {
 func NewConfig(configFilePath string) (*Config, error) {
 	var configRaw ConfigRaw
 	if configFilePath != "" {
-		ReadYamlConfig(configFilePath, &configRaw)
+		if err := ReadYamlConfig(configFilePath, &configRaw); err != nil {
+			return nil, fmt.Errorf("failed to read config file: %w", err)
+		}
 	}
 
 	logger, err := sdklogging.NewZapLogger(configRaw.Environment)
@@ -226,6 +237,14 @@ func NewConfig(configFilePath string) (*Config, error) {
 			FactoryAddress:       common.HexToAddress(configRaw.SmartWallet.FactoryAddress),
 			EntrypointAddress:    common.HexToAddress(configRaw.SmartWallet.EntrypointAddress),
 			ControllerPrivateKey: controllerPrivateKey,
+			PaymasterAddress:     common.HexToAddress(configRaw.SmartWallet.PaymasterAddress),
+			WhitelistAddresses:   convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
+		},
+
+		BackupConfig: BackupConfig{
+			Enabled:         configRaw.Backup.Enabled,
+			IntervalMinutes: configRaw.Backup.IntervalMinutes,
+			BackupDir:       configRaw.Backup.BackupDir,
 		},
 
 		BackupConfig: BackupConfig{

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -45,7 +46,7 @@ func TestVMCompile(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -102,7 +103,7 @@ func TestRunSimpleTasks(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -180,7 +181,7 @@ func TestRunSequentialTasks(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -302,7 +303,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -444,7 +445,7 @@ func TestEvaluateEvent(t *testing.T) {
 	SetCache(testutil.GetDefaultCache())
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "sampletaskid1",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -530,7 +531,7 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 	SetCache(testutil.GetDefaultCache())
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "sampletaskid1",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -596,7 +597,7 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 	SetCache(testutil.GetDefaultCache())
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "sampletaskid1",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -610,7 +611,7 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 
 	err = vm.Compile()
 	if err != nil {
-		t.Errorf("Expect compile succesfully but got error: %v", err)
+		t.Errorf("Expect compile successfully but got error: %v", err)
 	}
 
 	if vm.entrypoint != "notification1" {
@@ -660,7 +661,7 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -855,8 +856,24 @@ func TestPreprocessText(t *testing.T) {
 			input:    strings.Repeat("{{ user.data.name }}", VMMaxPreprocessIterations+1),
 			expected: strings.Repeat("Alice", VMMaxPreprocessIterations) + "{{ user.data.name }}",
 		},
+		{
+			name:     "javascript expression - date",
+			input:    `{{ new Date("2014-04-07T13:58:10.104Z")}}`,
+			expected: "2014-04-07 13:58:10.104 +0000 UTC",
+		},
+		{
+			name:     "javascript object representation value",
+			input:    `{{ {a: 1, b: 2} }}`,
+			expected: "[object Object]",
+		},
+		{
+			name:     "javascript object representation var",
+			input:    `{{ user }}`,
+			expected: "[object Object]",
+		},
 	}
 
+	os.Setenv("TZ", "UTC")
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := vm.preprocessText(tt.input)

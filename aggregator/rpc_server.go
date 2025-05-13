@@ -41,6 +41,7 @@ type RpcServer struct {
 	ethrpc *ethclient.Client
 
 	smartWalletRpc *ethclient.Client
+	chainID        *big.Int
 }
 
 // Get nonce of an existing smart wallet of a given owner
@@ -349,6 +350,20 @@ func (r *RpcServer) GetExecutionCount(ctx context.Context, req *avsproto.GetExec
 	return r.engine.GetExecutionCount(user, req)
 }
 
+func (r *RpcServer) GetExecutionStats(ctx context.Context, req *avsproto.GetExecutionStatsReq) (*avsproto.GetExecutionStatsResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process execution stats",
+		"user", user.Address.String(),
+		"workflow_ids", req.WorkflowIds,
+		"days", req.Days,
+	)
+
+	return r.engine.GetExecutionStats(user, req)
+}
 // Operator action
 func (r *RpcServer) SyncMessages(payload *avsproto.SyncMessagesReq, srv avsproto.Node_SyncMessagesServer) error {
 	err := r.engine.StreamCheckToOperator(payload, srv)
@@ -380,8 +395,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 	// https://github.com/grpc/grpc-go/blob/master/examples/helloworld/greeter_server/main.go#L50
 	lis, err := net.Listen("tcp", agg.config.RpcBindAddress)
 	if err != nil {
-		panic(fmt.Errorf("Failed to listen to %v", err))
-		return err
+		panic(fmt.Errorf("failed to listen to %v", err))
 	}
 
 	s := grpc.NewServer()
@@ -397,6 +411,11 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		panic(err)
 	}
 
+	smartWalletChainID, err := smartwalletClient.ChainID(context.Background())
+	if err != nil {
+		panic(err)
+	}
+
 	rpcServer := &RpcServer{
 		cache:  agg.cache,
 		db:     agg.db,
@@ -407,6 +426,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 
 		config:       agg.config,
 		operatorPool: agg.operatorPool,
+		chainID:      smartWalletChainID,
 	}
 
 	// TODO: split node and aggregator

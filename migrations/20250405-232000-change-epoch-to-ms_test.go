@@ -12,17 +12,14 @@ import (
 )
 
 func TestChangeEpochToMs(t *testing.T) {
-	// --- Setup ---
 	logger := testutil.GetLogger() // Use logger from testutil if needed by setup funcs
 	_ = logger                     // Avoid unused variable error if logger isn't directly used
 	db := testutil.TestMustDB()
 	defer db.Close()
 
-	// Sample data IDs
 	taskID := "task-123"
 	execID := "exec-abc"
 
-	// Sample timestamps in seconds (ensure they are below the migration threshold)
 	nowSeconds := time.Now().Unix() // e.g., 1715000000
 	startSeconds := nowSeconds - 3600
 	expiredSeconds := nowSeconds + 86400
@@ -35,7 +32,6 @@ func TestChangeEpochToMs(t *testing.T) {
 	blockTimestampSeconds := nowSeconds - 10
 	epochSeconds := nowSeconds - 15
 
-	// Expected timestamps in milliseconds
 	expectedStartMs := startSeconds * 1000
 	expectedExpiredMs := expiredSeconds * 1000
 	expectedCompletedMs := completedSeconds * 1000
@@ -47,17 +43,14 @@ func TestChangeEpochToMs(t *testing.T) {
 	expectedBlockTimestampMs := blockTimestampSeconds * 1000
 	expectedEpochMs := epochSeconds * 1000
 
-	// Create Sample Task Data (using avsproto.Task directly as migration handles it)
 	sampleTask := &avsproto.Task{
 		Id:          taskID,
 		StartAt:     startSeconds,     // Seconds
 		ExpiredAt:   expiredSeconds,   // Seconds
 		CompletedAt: completedSeconds, // Seconds
 		LastRanAt:   lastRanSeconds,   // Seconds
-		// Other fields can be default/empty for this test
 	}
 
-	// Create Sample Execution Data
 	sampleExec := &avsproto.Execution{
 		Id:      execID,
 		StartAt: execStartSeconds, // Seconds
@@ -70,16 +63,12 @@ func TestChangeEpochToMs(t *testing.T) {
 				EndAt:   stepEndSeconds,   // Seconds
 			},
 		},
-		// Include one type of output data for testing
 		OutputData: &avsproto.Execution_TransferLog{
 			TransferLog: &avsproto.Execution_TransferLogOutput{
 				BlockTimestamp: uint64(blockTimestampSeconds), // Seconds
-				// Other fields irrelevant for this test
 			},
 		},
-		// Other fields can be default/empty
 	}
-	// Add another execution to test TimeOutput
 	execID2 := "exec-def"
 	sampleExec2 := &avsproto.Execution{
 		Id:      execID2,
@@ -90,53 +79,48 @@ func TestChangeEpochToMs(t *testing.T) {
 				Epoch: uint64(epochSeconds), // Seconds
 			},
 		},
-		// Other fields can be default/empty
 	}
 
-	// Serialize data using protojson (matching migration)
-	taskBytes, err := protojson.Marshal(sampleTask)
+	var err error
+	var execData, execData2 []byte
+	var taskBytes []byte
+
+	taskBytes, err = protojson.Marshal(sampleTask)
 	if err != nil {
 		t.Fatalf("Failed to marshal sample task: %v", err)
 	}
-	execBytes, err := protojson.Marshal(sampleExec)
+	execData, err = protojson.Marshal(sampleExec)
 	if err != nil {
 		t.Fatalf("Failed to marshal sample execution: %v", err)
 	}
-	execBytes2, err := protojson.Marshal(sampleExec2)
+	execData2, err = protojson.Marshal(sampleExec2)
 	if err != nil {
 		t.Fatalf("Failed to marshal sample execution 2: %v", err)
 	}
 
-	// Store data in DB using correct keys
 	taskKey := fmt.Sprintf("t:%s", taskID)
 	execKey := fmt.Sprintf("history:%s:%s", taskID, execID)
 	execKey2 := fmt.Sprintf("history:%s:%s", taskID, execID2)
 
-	// Use BatchWrite as seen in the migration code for setting multiple keys
 	updates := map[string][]byte{
 		taskKey:  taskBytes,
-		execKey:  execBytes,
-		execKey2: execBytes2,
+		execKey:  execData,
+		execKey2: execData2,
 	}
 	if err := db.BatchWrite(updates); err != nil {
 		t.Fatalf("Failed to write initial data to db: %v", err)
 	}
 
-	// --- Execute Migration ---
 	updatedCount, err := ChangeEpochToMs(db)
 	if err != nil {
 		t.Fatalf("Migration function failed: %v", err)
 	}
-	// Check if the expected number of records were reported as updated
-	// Modify '3' if you add/remove test records
 	expectedUpdates := 3
 	if updatedCount != expectedUpdates {
 		t.Errorf("Migration reported updating %d records, expected %d", updatedCount, expectedUpdates)
 	}
 
-	// --- Verification ---
 
-	// Verify Task Data using GetKey
 	retrievedTaskBytes, err := db.GetKey([]byte(taskKey))
 	if err != nil {
 		t.Fatalf("Failed to retrieve task data after migration: %v", err)
@@ -159,7 +143,6 @@ func TestChangeEpochToMs(t *testing.T) {
 		t.Errorf("Task LastRanAt incorrect: got %d, want %d", retrievedTask.LastRanAt, expectedLastRanMs)
 	}
 
-	// Verify Execution Data 1 (TransferLog) using GetKey
 	retrievedExecBytes, err := db.GetKey([]byte(execKey))
 	if err != nil {
 		t.Fatalf("Failed to retrieve execution data after migration: %v", err)
@@ -187,7 +170,6 @@ func TestChangeEpochToMs(t *testing.T) {
 		t.Errorf("Step EndAt incorrect: got %d, want %d", retrievedStep.EndAt, expectedStepEndMs)
 	}
 
-	// Verify Execution Output Data (TransferLog)
 	if transferLogOutput := retrievedExec.GetTransferLog(); transferLogOutput != nil {
 		if transferLogOutput.BlockTimestamp != uint64(expectedBlockTimestampMs) {
 			t.Errorf("TransferLog BlockTimestamp incorrect: got %d, want %d", transferLogOutput.BlockTimestamp, expectedBlockTimestampMs)
@@ -196,7 +178,6 @@ func TestChangeEpochToMs(t *testing.T) {
 		t.Errorf("Expected TransferLog output data, but got nil or different type")
 	}
 
-	// Verify Execution Data 2 (TimeOutput) using GetKey
 	retrievedExecBytes2, err := db.GetKey([]byte(execKey2))
 	if err != nil {
 		t.Fatalf("Failed to retrieve execution data 2 after migration: %v", err)
@@ -206,7 +187,6 @@ func TestChangeEpochToMs(t *testing.T) {
 		t.Fatalf("Failed to unmarshal retrieved execution data 2: %v", err)
 	}
 
-	// Verify Execution Output Data (TimeOutput)
 	if timeOutput := retrievedExec2.GetTime(); timeOutput != nil {
 		if timeOutput.Epoch != uint64(expectedEpochMs) {
 			t.Errorf("TimeOutput Epoch incorrect: got %d, want %d", timeOutput.Epoch, expectedEpochMs)

@@ -76,13 +76,16 @@ func (b *BlockTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 	return nil
 }
 
-func (b *BlockTrigger) Remove(check *avsproto.SyncMessagesResp_TaskMetadata) error {
+//
+//
+func (b *BlockTrigger) RemoveCheck(taskID string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	interval := check.GetTrigger().GetBlock().GetInterval()
-	if _, ok := b.schedule[interval]; ok {
-		delete(b.schedule[interval], check.TaskId)
+	for interval, tasks := range b.schedule {
+		if _, exists := tasks[taskID]; exists {
+			delete(b.schedule[interval], taskID)
+		}
 	}
 
 	return nil
@@ -118,7 +121,9 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 						b.wsEthClient.Close()
 					}
 
-					b.retryConnectToRpc()
+					if err := b.retryConnectToRpc(); err != nil {
+						b.logger.Error("failed to reconnect to RPC", "error", err)
+					}
 					sub, err = b.wsEthClient.SubscribeNewHead(ctx, headers)
 				}
 			case header := <-headers:
@@ -134,7 +139,6 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 								TaskID: taskID,
 								Marker: header.Number.Int64(),
 							}
-
 						}
 					}
 				}

@@ -20,7 +20,6 @@ func (agg *Aggregator) stopRepl() {
 	if repListener != nil {
 		repListener.Close()
 	}
-
 }
 
 // Repl allow an operator to look into node storage directly with a REPL interface.
@@ -96,7 +95,6 @@ func handleConnection(agg *Aggregator, conn net.Conn) {
 						fmt.Fprintln(conn, k)
 					}
 				}
-
 			} else {
 				fmt.Fprintln(conn, "Usage: list <prefix>* or list *")
 			}
@@ -132,7 +130,6 @@ func handleConnection(agg *Aggregator, conn net.Conn) {
 					if err = agg.db.Set([]byte(parts[1]), []byte(parts[2])); err == nil {
 						fmt.Fprintln(conn, "written "+parts[1])
 					}
-
 				}
 			} else {
 				fmt.Fprintln(conn, "Usage: set <key> @/path-to-file")
@@ -158,7 +155,7 @@ func handleConnection(agg *Aggregator, conn net.Conn) {
 				backupDir := parts[1]
 				fmt.Fprintf(conn, "Starting backup to directory: %s\n", backupDir)
 
-				timestamp := fmt.Sprintf("%s", time.Now().Format("06-01-02-15-04"))
+				timestamp := time.Now().Format("20060102-150405") // YYYYMMDD-HHMMSS
 				backupPath := filepath.Join(backupDir, timestamp)
 
 				if err := os.MkdirAll(backupPath, 0755); err != nil {
@@ -186,7 +183,6 @@ func handleConnection(agg *Aggregator, conn net.Conn) {
 			} else {
 				fmt.Fprintln(conn, "Usage: backup <directory>")
 			}
-
 		default:
 			fmt.Fprintln(conn, "Unknown command:", command)
 		}

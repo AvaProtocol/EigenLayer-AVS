@@ -7,9 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/getsentry/sentry-go"
 
 	sdkclients "github.com/Layr-Labs/eigensdk-go/chainio/clients"
 	blsagg "github.com/Layr-Labs/eigensdk-go/services/bls_aggregation"
@@ -229,7 +232,6 @@ func (agg *Aggregator) init() {
 	} else {
 		config.CurrentChainEnv = config.HoleskyEnv
 		agg.initSentry() // Initialize Sentry
-
 	}
 
 	// Setup account abstraction config
@@ -269,9 +271,7 @@ func (agg *Aggregator) initSentry() {
 		return
 	}
 	agg.logger.Infof("Sentry initialized successfully for environment: %s", sentryEnv)
-
 }
-
 func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.logger.Infof("Starting aggregator %s", version.Get())
 
@@ -288,7 +288,9 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.startTaskEngine(ctx)
 
 	agg.logger.Infof("Starting rpc server")
-	agg.startRpcServer(ctx)
+	if err := agg.startRpcServer(ctx); err != nil {
+		agg.logger.Error("failed to start RPC server", "error", err)
+	}
 
 	agg.logger.Info("Starting repl")
 	agg.startRepl()

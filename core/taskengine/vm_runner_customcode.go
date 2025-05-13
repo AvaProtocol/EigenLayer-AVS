@@ -23,16 +23,24 @@ func NewJSProcessor(vm *VM) *JSProcessor {
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
-		jsvm: goja.New(),
+		jsvm: NewGojaVM(),
 	}
 
 	// These are built-in func
 	for key, value := range macros.GetEnvs(nil) {
-		r.jsvm.Set(key, value)
+		if err := r.jsvm.Set(key, value); err != nil {
+			if vm.logger != nil {
+				vm.logger.Error("failed to set macro env in JS VM", "key", key, "error", err)
+			}
+		}
 	}
 	/// Binding the data from previous step into jsvm
 	for key, value := range vm.vars {
-		r.jsvm.Set(key, value)
+		if err := r.jsvm.Set(key, value); err != nil {
+			if vm.logger != nil {
+				vm.logger.Error("failed to set variable in JS VM", "key", key, "error", err)
+			}
+		}
 	}
 
 	return &r

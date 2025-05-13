@@ -22,16 +22,24 @@ func NewFilterProcessor(vm *VM) *FilterProcessor {
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
-		jsvm: goja.New(),
+		jsvm: NewGojaVM(),
 	}
 
 	// These are built-in func
 	for key, value := range macros.GetEnvs(nil) {
-		r.jsvm.Set(key, value)
+		if err := r.jsvm.Set(key, value); err != nil {
+			if r.vm.logger != nil {
+				r.vm.logger.Error("failed to set macro env in JS VM", "key", key, "error", err)
+			}
+		}
 	}
 	// Binding the data from previous step into jsvm
 	for key, value := range vm.vars {
-		r.jsvm.Set(key, value)
+		if err := r.jsvm.Set(key, value); err != nil {
+			if vm.logger != nil {
+				vm.logger.Error("failed to set variable in JS VM", "key", key, "error", err)
+			}
+		}
 	}
 
 	return &r
@@ -64,11 +72,15 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		script = fmt.Sprintf(`values.filter((value, index, items) => { return %s})`, node.Expression)
 	}
 
-	r.jsvm.Set("values", r.vm.vars[node.Input])
+	if err := r.jsvm.Set("values", r.vm.vars[node.Input]); err != nil {
+		if r.vm.logger != nil {
+			r.vm.logger.Error("failed to set values in JS VM", "error", err)
+		}
+	}
 
 	result, err := r.jsvm.RunString(script)
 	if err != nil {
-		log.WriteString(fmt.Sprintf("an error has occured when processing your filter expression"))
+		log.WriteString(fmt.Sprintf("an error has occurred when processing your filter expression: %v", err))
 		s.Log = log.String()
 		s.Error = err.Error()
 		return s, err

@@ -15,25 +15,37 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
+
+type SendUserOpFunc func(
+	config *config.SmartWalletConfig,
+	owner common.Address,
+	callData []byte,
+	paymasterReq *preset.VerifyingPaymasterRequest,
+) (*userop.UserOperation, *types.Receipt, error)
 
 type ContractWriteProcessor struct {
 	*CommonProcessor
 	client            *ethclient.Client
 	smartWalletConfig *config.SmartWalletConfig
 	owner             common.Address
+	sendUserOpFunc    SendUserOpFunc
 }
 
 func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConfig *config.SmartWalletConfig, owner common.Address) *ContractWriteProcessor {
-	return &ContractWriteProcessor{
+	r := &ContractWriteProcessor{
 		client:            client,
 		smartWalletConfig: smartWalletConfig,
 		owner:             owner,
+		sendUserOpFunc:    preset.SendUserOp, // Default to the real implementation
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
 	}
+
+	return r
 }
 
 func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
@@ -83,11 +95,15 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 	var paymasterRequest *preset.VerifyingPaymasterRequest
 	// TODO: move to config
-	if total < 10 {
+	// Paymaster request logic:
+	// - No paymaster request for transactions >= 10 from non-whitelisted addresses
+	// - Paymaster requests are created for all other cases (transactions < 10 or whitelisted addresses)
+	if total >= 10 && !isWhitelistedAddress(r.owner, r.smartWalletConfig.WhitelistAddresses) {
+		// No paymaster request for non-whitelisted addresses after 10 transactions
+	} else {
 		paymasterRequest = preset.GetVerifyingPaymasterRequestForDuration(r.smartWalletConfig.PaymasterAddress, 15*time.Minute)
 	}
-
-	userOp, txReceipt, err := preset.SendUserOp(
+	userOp, txReceipt, err := r.sendUserOpFunc(
 		r.smartWalletConfig,
 		r.owner,
 		userOpCalldata,
@@ -98,7 +114,13 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		s.Error = fmt.Sprintf("error send userops to bundler : %s", err)
 		return s, err
 	}
-	r.vm.db.IncCounter(ContractWriteCounterKey(r.owner), 0)
+
+	_, err = r.vm.db.IncCounter(ContractWriteCounterKey(r.owner), 0)
+	if err != nil {
+		if r.vm.logger != nil {
+			r.vm.logger.Error("failed to increment counter", "error", err)
+		}
+	}
 
 	outputData := &avsproto.Execution_Step_ContractWrite{
 		ContractWrite: &avsproto.ContractWriteNode_Output{
@@ -173,10 +195,13 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	}
 
 	s.OutputData = outputData
-	r.SetOutputVarForStep(stepID, map[string]any{
-		"userOp":    outputData.ContractWrite.UserOp,
-		"txReceipt": outputData.ContractWrite.TxReceipt,
-	})
+	outputVars := map[string]any{
+		"userOp": outputData.ContractWrite.UserOp,
+	}
+	if txReceipt != nil {
+		outputVars["txReceipt"] = outputData.ContractWrite.TxReceipt
+	}
+	r.SetOutputVarForStep(stepID, outputVars)
 
 	return s, nil
 }

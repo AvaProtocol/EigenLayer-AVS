@@ -52,6 +52,14 @@ func GetRpcClient() *ethclient.Client {
 	return client
 }
 
+func MustGetEventForTx(txHash string, evtIndex uint64) *types.Log {
+	event, err := GetEventForTx(txHash, evtIndex)
+	if err != nil {
+		panic(err)
+	}
+	return event
+}
+
 func GetEventForTx(txHash string, evtIndex uint64) (*types.Log, error) {
 	client := GetRpcClient()
 
@@ -124,9 +132,10 @@ func GetAggregatorConfig() *config.Config {
 			EthRpcUrl: GetTestRPCURL(),
 			EthWsUrl:  GetTestWsRPCURL(),
 			//	FactoryAddress:    common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
-			FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
-			EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
-			PaymasterAddress:  common.HexToAddress(paymasterAddress),
+			FactoryAddress:     common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
+			EntrypointAddress:  common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+			PaymasterAddress:   common.HexToAddress(paymasterAddress),
+			WhitelistAddresses: []common.Address{},
 		},
 	}
 }
@@ -175,7 +184,6 @@ func GetDefaultCache() *bigcache.BigCache {
 		panic(fmt.Errorf("error get default cache for test"))
 	}
 	return cache
-
 }
 
 func RestTask() *avsproto.CreateTaskReq {
@@ -183,7 +191,7 @@ func RestTask() *avsproto.CreateTaskReq {
 		Id:   "ping1",
 		Name: "ping",
 		TaskType: &avsproto.TaskNode_RestApi{
-			&avsproto.RestAPINode{
+			RestApi: &avsproto.RestAPINode{
 				Url: "https://httpbin.org",
 			},
 		},
@@ -257,6 +265,7 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
 		ControllerPrivateKey: controllerPrivateKey,
 		PaymasterAddress:     common.HexToAddress(paymasterAddress),
+		WhitelistAddresses:   []common.Address{},
 	}
 }
 
@@ -276,6 +285,7 @@ func GetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
 		ControllerPrivateKey: controllerPrivateKey,
 		PaymasterAddress:     common.HexToAddress(paymasterAddress),
+		WhitelistAddresses:   []common.Address{},
 	}
 }
 
