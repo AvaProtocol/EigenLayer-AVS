@@ -10,6 +10,7 @@ import (
 const (
 	InvalidCursor           = "Invalid cursor"
 	InvalidPaginationParam  = "Invalid pagination parameter"
+	DefaultItemPerPage      = 20
 )
 
 func SetupPagination(before, after, legacyCursor string, itemPerPage int64) (*Cursor, int, error) {
