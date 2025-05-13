@@ -89,6 +89,12 @@ func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalle
 		return nil, status.Errorf(codes.Unavailable, "rpc server is unavailable, retry later. %s", err.Error())
 	}
 
+	if wallets == nil {
+		return &avsproto.ListWalletResp{
+			Items: []*avsproto.SmartWallet{},
+		}, nil
+	}
+
 	return wallets, nil
 }
 
