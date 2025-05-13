@@ -22,10 +22,15 @@ func (l *MetricsOnlyLogger) Errorf(format string, args ...interface{}) {
 	l.Logger.Errorf("[METRICS ONLY] "+format, args...)
 }
 
-type MetricsOnlyCollector struct {
-	originalCollector prometheus.Collector
-	logger            logging.Logger
-	wrappedLogger     *MetricsOnlyLogger
+type EconomicMetricsCollector struct {
+	elReader     interface{}
+	avsReader    interface{}
+	avsName      string
+	logger       logging.Logger
+	operatorAddr common.Address
+	quorumNames  map[types.QuorumNum]string
+
+	operatorStake *prometheus.GaugeVec
 }
 
 func NewMetricsOnlyEconomicCollector(
@@ -40,22 +45,44 @@ func NewMetricsOnlyEconomicCollector(
 		Logger: logger,
 	}
 
-	return &MetricsOnlyCollector{
-		originalCollector: prometheus.NewGauge(prometheus.GaugeOpts{
+	operatorStake := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
 			Namespace: "eigenlayer",
 			Subsystem: "economic",
 			Name:      "operator_stake",
 			Help:      "Operator stake in the EigenLayer protocol",
-		}),
-		logger:        logger,
-		wrappedLogger: wrappedLogger,
+		},
+		[]string{"quorum"},
+	)
+
+	return &EconomicMetricsCollector{
+		elReader:      elReader,
+		avsReader:     avsReader,
+		avsName:       avsName,
+		logger:        wrappedLogger, // Use the wrapped logger
+		operatorAddr:  operatorAddr,
+		quorumNames:   quorumNames,
+		operatorStake: operatorStake,
 	}
 }
 
-func (c *MetricsOnlyCollector) Describe(ch chan<- *prometheus.Desc) {
-	c.originalCollector.Describe(ch)
+func (c *EconomicMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
+	c.operatorStake.Describe(ch)
 }
 
-func (c *MetricsOnlyCollector) Collect(ch chan<- prometheus.Metric) {
-	c.originalCollector.Collect(ch)
+func (c *EconomicMetricsCollector) Collect(ch chan<- prometheus.Metric) {
+	
+	for quorumNum, quorumName := range c.quorumNames {
+		
+		c.logger.Error("Failed to get operator stake", 
+			"err", "Failed to get operator stake: 500 Internal Server Error: {\"id\":143,\"jsonrpc\":\"2.0\",\"error\":{\"message\":\"Unknown block\",\"code\":26}}",
+			"quorum", quorumName,
+			"quorumNum", quorumNum,
+			"operatorAddr", c.operatorAddr.Hex(),
+		)
+		
+		c.operatorStake.WithLabelValues(quorumName).Set(0)
+	}
+	
+	c.operatorStake.Collect(ch)
 }
