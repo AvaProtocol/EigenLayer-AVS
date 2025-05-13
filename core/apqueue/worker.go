@@ -84,3 +84,6 @@ func (w *Worker) MustStart() {
 		w.loop()
 	}()
 }
+
+func (w *Worker) Stop() {
+}
