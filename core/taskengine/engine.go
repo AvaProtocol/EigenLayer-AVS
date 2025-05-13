@@ -460,6 +460,17 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	}
 	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId)
 
+	task, err := n.GetTaskByID(payload.TaskId)
+	if err != nil {
+		n.logger.Error("failed to get task", "error", err, "task_id", payload.TaskId)
+		return err
+	}
+
+	if err := n.setExecutionStatusQueue(task, queueTaskData.ExecutionID); err != nil {
+		n.logger.Error("failed to set execution status", "error", err, "task_id", payload.TaskId, "execution_id", queueTaskData.ExecutionID)
+		return err
+	}
+
 	// if the task can still run, add it back
 	return nil
 }
