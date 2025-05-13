@@ -1,8 +1,10 @@
 package taskengine
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
 
 func TestCreateTaskReturnErrorWhenEmptyNodes(t *testing.T) {
@@ -1014,33 +1017,104 @@ func TestGetWorkflowCount(t *testing.T) {
 	}
 }
 
+type mockQueue struct {
+	db     storage.Storage
+	logger sdklogging.Logger
+	jobs   map[uint64]*apqueue.Job
+	nextID uint64
+	mu     sync.Mutex
+}
+
+func newMockQueue(db storage.Storage, logger sdklogging.Logger) *mockQueue {
+	return &mockQueue{
+		db:     db,
+		logger: logger,
+		jobs:   make(map[uint64]*apqueue.Job),
+		nextID: 1,
+	}
+}
+
+func (q *mockQueue) MustStart() error {
+	return nil
+}
+
+func (q *mockQueue) Stop() error {
+	return nil
+}
+
+func (q *mockQueue) Enqueue(jobType string, name string, data []byte) (uint64, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	
+	id := q.nextID
+	q.nextID++
+	
+	job := &apqueue.Job{
+		ID:   id,
+		Type: jobType,
+		Name: name,
+		Data: data,
+	}
+	
+	q.jobs[id] = job
+	return id, nil
+}
+
+func (q *mockQueue) Dequeue() (*apqueue.Job, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	
+	if len(q.jobs) == 0 {
+		return nil, nil
+	}
+	
+	var firstID uint64
+	var firstJob *apqueue.Job
+	for id, job := range q.jobs {
+		firstID = id
+		firstJob = job
+		break
+	}
+	
+	delete(q.jobs, firstID)
+	
+	return firstJob, nil
+}
+
+func (q *mockQueue) Recover() error {
+	return nil
+}
+
+func (q *mockQueue) getQueueKeyPrefix(status apqueue.JobStatus) []byte {
+	return []byte(fmt.Sprintf("q:mock:%v:", status))
+}
+
+func (q *mockQueue) getJobKey(status apqueue.JobStatus, jID uint64) []byte {
+	return append(q.getQueueKeyPrefix(status), []byte(fmt.Sprintf("%d", jID))...)
+}
+
+func (q *mockQueue) markJobDone(job *apqueue.Job, status apqueue.JobStatus) error {
+	return nil
+}
+
 func TestAggregateChecksResult(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	config := testutil.GetAggregatorConfig()
 	
-	// Create a real queue for testing
+	// Create a mock queue for testing
 	logger := testutil.GetLogger()
-	queue := apqueue.New(db, logger, &apqueue.QueueOption{Prefix: "test"})
-	err := queue.MustStart()
+	mockQ := newMockQueue(db, logger)
+	err := mockQ.MustStart()
 	if err != nil {
 		t.Fatalf("Failed to start queue: %v", err)
 	}
-	defer queue.Stop()
+	defer mockQ.Stop()
 	
-	worker := apqueue.NewWorker(queue, db)
-	taskExecutor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, logger)
-	worker.RegisterProcessor(
-		JobTypeExecuteTask,
-		taskExecutor,
-	)
-	worker.MustStart()
-	defer worker.Stop()
-	
-	// Create Engine with the real queue
+	// Create Engine with the mock queue
 	n := New(db, config, nil, logger)
-	n.queue = queue
+	n.queue = mockQ
 
 	// Create a test task
 	tr1 := testutil.RestTask()
