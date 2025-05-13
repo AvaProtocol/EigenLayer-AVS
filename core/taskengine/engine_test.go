@@ -1058,6 +1058,8 @@ func TestAggregateChecksResult(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected AggregateChecksResult to succeed but got error: %s", err)
 	}
+	
+	time.Sleep(100 * time.Millisecond)
 
 	payload = &avsproto.NotifyTriggersReq{
 		TaskId: result.Id,
@@ -1068,6 +1070,8 @@ func TestAggregateChecksResult(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected AggregateChecksResult with nil reason to succeed but got error: %s", err)
 	}
+	
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestGetExecutionCount(t *testing.T) {
