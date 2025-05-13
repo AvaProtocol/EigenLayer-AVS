@@ -1904,7 +1904,7 @@ type Task struct {
 	// limit on how many time this task can run. Set to 0 will make it run unlimited until cancelling or reaching its expired time
 	MaxExecution int64 `protobuf:"varint,8,opt,name=max_execution,json=maxExecution,proto3" json:"max_execution,omitempty"`
 	// return how many time this task has run
-	TotalExecution int64 `protobuf:"varint,9,opt,name=total_execution,json=totalExecution,proto3" json:"total_execution,omitempty"`
+	ExecutionCount int64 `protobuf:"varint,9,opt,name=execution_count,json=executionCount,proto3" json:"execution_count,omitempty"`
 	// timestamp when task was last executed (in milliseconds)
 	LastRanAt int64        `protobuf:"varint,10,opt,name=last_ran_at,json=lastRanAt,proto3" json:"last_ran_at,omitempty"`
 	Status    TaskStatus   `protobuf:"varint,11,opt,name=status,proto3,enum=aggregator.TaskStatus" json:"status,omitempty"`
@@ -2001,9 +2001,9 @@ func (x *Task) GetMaxExecution() int64 {
 	return 0
 }
 
-func (x *Task) GetTotalExecution() int64 {
+func (x *Task) GetExecutionCount() int64 {
 	if x != nil {
-		return x.TotalExecution
+		return x.ExecutionCount
 	}
 	return 0
 }
@@ -4911,7 +4911,7 @@ type ListTasksResp_Item struct {
 	// limit on how many time this task can run. Set to 0 will make it run unlimited until cancelling or reaching its expired time
 	MaxExecution int64 `protobuf:"varint,8,opt,name=max_execution,json=maxExecution,proto3" json:"max_execution,omitempty"`
 	// return how many time this task has run
-	TotalExecution int64 `protobuf:"varint,9,opt,name=total_execution,json=totalExecution,proto3" json:"total_execution,omitempty"`
+	ExecutionCount int64 `protobuf:"varint,9,opt,name=execution_count,json=executionCount,proto3" json:"execution_count,omitempty"`
 	// timestamp when task was last executed (in milliseconds)
 	LastRanAt int64        `protobuf:"varint,10,opt,name=last_ran_at,json=lastRanAt,proto3" json:"last_ran_at,omitempty"`
 	Status    TaskStatus   `protobuf:"varint,11,opt,name=status,proto3,enum=aggregator.TaskStatus" json:"status,omitempty"`
@@ -5006,9 +5006,9 @@ func (x *ListTasksResp_Item) GetMaxExecution() int64 {
 	return 0
 }
 
-func (x *ListTasksResp_Item) GetTotalExecution() int64 {
+func (x *ListTasksResp_Item) GetExecutionCount() int64 {
 	if x != nil {
-		return x.TotalExecution
+		return x.ExecutionCount
 	}
 	return 0
 }
