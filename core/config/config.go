@@ -84,12 +84,6 @@ type BackupConfig struct {
 	BackupDir       string // Directory to store backups
 }
 
-type BackupConfig struct {
-	Enabled         bool   // Whether periodic backups are enabled
-	IntervalMinutes int    // Interval between backups in minutes
-	BackupDir       string // Directory to store backups
-}
-
 // These are read from configPath
 type ConfigRaw struct {
 	EcdsaPrivateKey string              `yaml:"ecdsa_private_key"`
@@ -239,12 +233,6 @@ func NewConfig(configFilePath string) (*Config, error) {
 			ControllerPrivateKey: controllerPrivateKey,
 			PaymasterAddress:     common.HexToAddress(configRaw.SmartWallet.PaymasterAddress),
 			WhitelistAddresses:   convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
-		},
-
-		BackupConfig: BackupConfig{
-			Enabled:         configRaw.Backup.Enabled,
-			IntervalMinutes: configRaw.Backup.IntervalMinutes,
-			BackupDir:       configRaw.Backup.BackupDir,
 		},
 
 		BackupConfig: BackupConfig{
