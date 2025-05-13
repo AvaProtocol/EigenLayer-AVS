@@ -142,6 +142,7 @@ func (t *Task) OwnedBy(address common.Address) bool {
 // A task is runable when all of these conditions are matched
 //  1. Its max execution has not reached
 //  2. Its expiration time has not reached
+//  3. Current time is after or equal to its start time
 func (t *Task) IsRunable() bool {
 	// When MaxExecution is 0, it is unlimited run
 	reachedMaxRun := t.Task.MaxExecution > 0 && t.Task.TotalExecution >= t.Task.MaxExecution
