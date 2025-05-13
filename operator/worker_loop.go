@@ -34,7 +34,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	var schedulerErr error
 	o.scheduler, schedulerErr = gocron.NewScheduler()
 	if schedulerErr != nil {
-		panic(schedulerErr)
+		return fmt.Errorf("failed to initialize scheduler: %w", schedulerErr)
 	}
 	o.scheduler.Start()
 	
