@@ -30,6 +30,14 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	blockTasksMap := make(map[int64][]string)
 	blockTasksMutex := &sync.Mutex{}
 
+	// Setup taskengine, initialize local storage and cache, establish rpc
+	var schedulerErr error
+	o.scheduler, schedulerErr = gocron.NewScheduler()
+	if schedulerErr != nil {
+		panic(schedulerErr)
+	}
+	o.scheduler.Start()
+	
 	_, err := o.scheduler.NewJob(
 		gocron.DurationJob(time.Minute*10),
 		gocron.NewTask(func() {
@@ -55,13 +63,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	if err != nil {
 		o.logger.Error("Failed to create cleanup job for block tasks map", "error", err)
 	}
-	// Setup taskengine, initialize local storage and cache, establish rpc
-	var schedulerErr error
-	o.scheduler, schedulerErr = gocron.NewScheduler()
-	if schedulerErr != nil {
-		panic(schedulerErr)
-	}
-	o.scheduler.Start()
+	
 	o.scheduler.NewJob(gocron.DurationJob(time.Second*5), gocron.NewTask(o.PingServer))
 
 	macros.SetRpc(o.config.TargetChain.EthWsUrl)
