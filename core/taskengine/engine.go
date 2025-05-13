@@ -192,13 +192,23 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 
 	allWallets := []*avsproto.SmartWallet{}
 
-	if payload == nil || payload.FactoryAddress == "" || strings.EqualFold(payload.FactoryAddress, n.smartWalletConfig.FactoryAddress.Hex()) {
+	factoryAddressEmpty := payload == nil || payload.FactoryAddress == ""
+	factoryAddressMatches := n.smartWalletConfig != nil && n.smartWalletConfig.FactoryAddress != nil && payload != nil && strings.EqualFold(payload.FactoryAddress, n.smartWalletConfig.FactoryAddress.Hex())
+	
+	if factoryAddressEmpty || factoryAddressMatches {
 		// This is the default wallet with our own factory
-		allWallets = append(allWallets, &avsproto.SmartWallet{
-			Address: sender.String(),
-			Factory: n.smartWalletConfig.FactoryAddress.String(),
-			Salt:    defaultSalt.String(),
-		})
+		if n.smartWalletConfig != nil && n.smartWalletConfig.FactoryAddress != nil {
+			allWallets = append(allWallets, &avsproto.SmartWallet{
+				Address: sender.String(),
+				Factory: n.smartWalletConfig.FactoryAddress.String(),
+				Salt:    defaultSalt.String(),
+			})
+		} else {
+			allWallets = append(allWallets, &avsproto.SmartWallet{
+				Address: sender.String(),
+				Salt:    defaultSalt.String(),
+			})
+		}
 	}
 
 	items, err := n.db.GetByPrefix(WalletByOwnerPrefix(owner))
@@ -218,7 +228,7 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 			continue
 		}
 
-		if payload != nil && payload.FactoryAddress != "" && !strings.EqualFold(w.Factory.String(), payload.FactoryAddress) {
+		if payload != nil && payload.FactoryAddress != "" && w.Factory != nil && !strings.EqualFold(w.Factory.String(), payload.FactoryAddress) {
 			continue
 		}
 
