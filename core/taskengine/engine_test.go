@@ -1028,6 +1028,15 @@ func TestAggregateChecksResult(t *testing.T) {
 	}
 	defer queue.Stop()
 	
+	worker := apqueue.NewWorker(queue, db)
+	taskExecutor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, logger)
+	worker.RegisterProcessor(
+		JobTypeExecuteTask,
+		func(j *apqueue.Job) error {
+			return taskExecutor.ProcessJob(j)
+		},
+	)
+	
 	// Create Engine with the real queue
 	n := New(db, config, nil, logger)
 	n.queue = queue
