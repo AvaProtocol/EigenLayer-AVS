@@ -15,7 +15,6 @@ require (
 	github.com/go-resty/resty/v2 v2.16.2
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/getsentry/sentry-go v0.27.0
-	github.com/getsentry/sentry-go/echo v0.27.0
 	github.com/golang/protobuf v1.5.4
 	github.com/labstack/echo/v4 v4.12.0
 	github.com/mitchellh/mapstructure v1.5.0
