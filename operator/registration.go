@@ -16,7 +16,7 @@ import (
 func RegisterToAVS(configPath string) {
 	operator, err := NewOperatorFromConfigFile(configPath)
 	if err != nil {
-		panic(fmt.Errorf("error creator operator from config: %w", err))
+		panic(fmt.Errorf("error creating operator from config: %w", err))
 	}
 
 	err = operator.RegisterOperatorWithAvs()
