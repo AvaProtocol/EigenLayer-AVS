@@ -63,7 +63,7 @@ func TestIsRunable(t *testing.T) {
 			Task: &avsproto.Task{
 				StartAt:        time.Now().Add(-time.Hour).UnixMilli(),
 				MaxExecution:   1,
-				TotalExecution: 1,
+				ExecutionCount: 1,
 			},
 		}
 
