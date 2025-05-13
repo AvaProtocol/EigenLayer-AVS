@@ -14,7 +14,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/apconfig"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/signer"
 	"github.com/AvaProtocol/EigenLayer-AVS/metrics"
-	"github.com/Layr-Labs/eigensdk-go/metrics/collectors/economic"
 	rpccalls "github.com/Layr-Labs/eigensdk-go/metrics/collectors/rpc_calls"
 	"github.com/Layr-Labs/eigensdk-go/nodeapi"
 	"github.com/Layr-Labs/eigensdk-go/signerv2"
@@ -332,7 +331,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	quorumNames := map[sdktypes.QuorumNum]string{
 		0: "quorum0",
 	}
-	economicMetricsCollector := economic.NewCollector(
+	economicMetricsCollector := metrics.NewMetricsOnlyEconomicCollector(
 		sdkClients.ElChainReader, sdkClients.AvsRegistryChainReader,
 		AVS_NAME, logger, common.HexToAddress(c.OperatorAddress), quorumNames)
 	reg.MustRegister(economicMetricsCollector)
