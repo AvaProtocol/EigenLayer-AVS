@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -100,6 +101,7 @@ func (o *OperatorPool) GetAll() []*OperatorNode {
 	for _, rawValue := range kvs {
 		node := &OperatorNode{}
 		if err := json.Unmarshal(rawValue.Value, node); err != nil {
+			log.Printf("Failed to unmarshal OperatorNode: %v, raw data: %s", err, string(rawValue.Value))
 			continue
 		}
 

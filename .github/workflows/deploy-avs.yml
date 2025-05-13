@@ -52,6 +52,11 @@ jobs:
         key: ${{ secrets.AVS_SSH_KEY }}
         script: |
           echo "Deploying to environment: ${{ inputs.environment }}"
-          cd $HOME/ap-operator-setup/${{ inputs.environment == 'sepolia' && 'holesky' || inputs.environment }}
+          if [ "${{ inputs.environment }}" = "sepolia" ]; then
+            TARGET_ENV="holesky"
+          else
+            TARGET_ENV="${{ inputs.environment }}"
+          fi
+          cd $HOME/ap-operator-setup/$TARGET_ENV
           docker compose pull
-          docker compose up -d --force-recreate 
+          docker compose up -d --force-recreate  
