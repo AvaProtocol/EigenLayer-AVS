@@ -30,6 +30,21 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
+// CopyTriggerReason creates a deep copy of a TriggerReason
+func CopyTriggerReason(original *avsproto.TriggerReason) *avsproto.TriggerReason {
+	if original == nil {
+		return &avsproto.TriggerReason{}
+	}
+	
+	return &avsproto.TriggerReason{
+		BlockNumber: original.BlockNumber,
+		TxHash:      original.TxHash,
+		LogIndex:    original.LogIndex,
+		Epoch:       original.Epoch,
+		Type:        original.Type,
+	}
+}
+
 const (
 	JobTypeExecuteTask  = "execute_task"
 	DefaultItemPerPage  = 50
@@ -424,18 +439,7 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	n.logger.Info("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
 	n.lock.Unlock()
 
-	var reason *avsproto.TriggerReason
-	if payload.Reason == nil {
-		reason = &avsproto.TriggerReason{}
-	} else {
-		reason = &avsproto.TriggerReason{
-			BlockNumber: payload.Reason.BlockNumber,
-			TxHash:      payload.Reason.TxHash,
-			LogIndex:    payload.Reason.LogIndex,
-			Epoch:       payload.Reason.Epoch,
-			Type:        payload.Reason.Type,
-		}
-	}
+	reason := CopyTriggerReason(payload.Reason)
 	
 	queueTaskData := QueueExecutionData{
 		Reason:      reason,
@@ -618,17 +622,8 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
-	reason := payload.Reason
-	if reason == nil {
-		reason = &avsproto.TriggerReason{}
-	} else {
-		reason = &avsproto.TriggerReason{
-			BlockNumber: payload.Reason.BlockNumber,
-			TxHash:      payload.Reason.TxHash,
-			LogIndex:    payload.Reason.LogIndex,
-			Epoch:       payload.Reason.Epoch,
-		}
-	}
+	reason := CopyTriggerReason(payload.Reason)
+	// Set the type to Manual for manual triggers
 	reason.Type = avsproto.TriggerReason_Manual
 
 	queueTaskData := QueueExecutionData{
