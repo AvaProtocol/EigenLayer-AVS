@@ -1019,10 +1019,18 @@ func TestAggregateChecksResult(t *testing.T) {
 
 	config := testutil.GetAggregatorConfig()
 	
-	// Create a mock Engine with a custom queue implementation
-	n := New(db, config, nil, testutil.GetLogger())
+	// Create a real queue for testing
+	logger := testutil.GetLogger()
+	queue := apqueue.New(db, logger, &apqueue.QueueOption{Prefix: "test"})
+	err := queue.MustStart()
+	if err != nil {
+		t.Fatalf("Failed to start queue: %v", err)
+	}
+	defer queue.Stop()
 	
-	n.queue = &mockQueue{}
+	// Create Engine with the real queue
+	n := New(db, config, nil, logger)
+	n.queue = queue
 
 	// Create a test task
 	tr1 := testutil.RestTask()
@@ -1038,7 +1046,7 @@ func TestAggregateChecksResult(t *testing.T) {
 		},
 	}
 
-	err := n.AggregateChecksResult("test_operator", payload)
+	err = n.AggregateChecksResult("test_operator", payload)
 	if err != nil {
 		t.Errorf("expected AggregateChecksResult to succeed but got error: %s", err)
 	}
@@ -1052,28 +1060,6 @@ func TestAggregateChecksResult(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected AggregateChecksResult with nil reason to succeed but got error: %s", err)
 	}
-}
-
-type mockQueue struct{}
-
-func (q *mockQueue) Enqueue(jobType string, taskID string, data []byte) (uint64, error) {
-	return 1, nil
-}
-
-func (q *mockQueue) MustStart() error {
-	return nil
-}
-
-func (q *mockQueue) Stop() error {
-	return nil
-}
-
-func (q *mockQueue) Recover() error {
-	return nil
-}
-
-func (q *mockQueue) Dequeue() (*apqueue.Job, error) {
-	return nil, nil
 }
 
 func TestGetExecutionCount(t *testing.T) {
