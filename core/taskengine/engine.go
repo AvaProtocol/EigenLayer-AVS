@@ -266,11 +266,7 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 	}
 
 	if result.HasMore && lastAddress != "" {
-		nextCursor := &Cursor{
-			Direction: CursorDirectionNext,
-			Position:  lastAddress,
-		}
-		result.Cursor = nextCursor.String()
+		result.Cursor = CreateNextCursor(lastAddress)
 	}
 
 	return result, nil
@@ -588,7 +584,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 
 	taskResp.HasMore = visited > 0
 	if taskResp.HasMore {
-		taskResp.Cursor = NewCursor(CursorDirectionNext, taskResp.Items[total-1].Id).String()
+		taskResp.Cursor = CreateNextCursor(taskResp.Items[total-1].Id)
 	}
 
 	return taskResp, nil
@@ -776,7 +772,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 
 	executioResp.HasMore = visited > 0
 	if executioResp.HasMore {
-		executioResp.Cursor = NewCursor(CursorDirectionNext, executioResp.Items[total-1].Id).String()
+		executioResp.Cursor = CreateNextCursor(executioResp.Items[total-1].Id)
 	}
 	return executioResp, nil
 }
@@ -1065,11 +1061,7 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	}
 
 	if result.HasMore && lastKey != "" {
-		nextCursor := &Cursor{
-			Direction: CursorDirectionNext,
-			Position:  lastKey,
-		}
-		result.Cursor = nextCursor.String()
+		result.Cursor = CreateNextCursor(lastKey)
 	}
 
 	return result, nil
