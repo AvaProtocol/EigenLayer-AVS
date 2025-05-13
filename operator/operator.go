@@ -206,24 +206,24 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	if c.EnableMetrics {
 		ethRpcClient, err = eth.NewInstrumentedClient(c.EthRpcUrl, rpcCallsCollector)
 		if err != nil {
-			logger.Errorf("Cannot create http ethclient", "err", err)
-			return nil, err
+			logger.Errorf("Cannot connect to RPC endpoint", "url", c.EthRpcUrl, "err", err)
+			return nil, fmt.Errorf("failed to connect to RPC endpoint %s: %w", c.EthRpcUrl, err)
 		}
 		ethWsClient, err = eth.NewInstrumentedClient(c.EthWsUrl, rpcCallsCollector)
 		if err != nil {
-			logger.Errorf("Cannot create ws ethclient %s %w", c.EthWsUrl, err)
-			return nil, err
+			logger.Errorf("Cannot connect to WebSocket RPC endpoint", "url", c.EthWsUrl, "err", err)
+			return nil, fmt.Errorf("failed to connect to WebSocket RPC endpoint %s: %w", c.EthWsUrl, err)
 		}
 	} else {
 		ethRpcClient, err = eth.NewInstrumentedClient(c.EthRpcUrl, rpcCallsCollector)
 		if err != nil {
-			logger.Errorf("Cannot create http ethclient", "err", err)
-			return nil, err
+			logger.Errorf("Cannot connect to RPC endpoint", "url", c.EthRpcUrl, "err", err)
+			return nil, fmt.Errorf("failed to connect to RPC endpoint %s: %w", c.EthRpcUrl, err)
 		}
 		ethWsClient, err = eth.NewInstrumentedClient(c.EthWsUrl, rpcCallsCollector)
 		if err != nil {
-			logger.Errorf("Cannot create ws ethclient", "err", err)
-			return nil, err
+			logger.Errorf("Cannot connect to WebSocket RPC endpoint", "url", c.EthWsUrl, "err", err)
+			return nil, fmt.Errorf("failed to connect to WebSocket RPC endpoint %s: %w", c.EthWsUrl, err)
 		}
 	}
 
