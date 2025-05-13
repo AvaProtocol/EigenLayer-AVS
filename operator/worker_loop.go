@@ -220,8 +220,7 @@ func (o *Operator) StreamMessages() {
 
 			switch resp.Op {
 			case avspb.MessageOp_CancelTask, avspb.MessageOp_DeleteTask:
-				o.eventTrigger.RemoveCheck(resp.TaskMetadata.TaskId)
-				//o.blockTrigger.RemoveCheck(resp.TaskMetadata.TaskId)
+				o.processMessage(resp)
 			case avspb.MessageOp_MonitorTaskTrigger:
 				if trigger := resp.TaskMetadata.GetTrigger().GetEvent(); trigger != nil {
 					o.logger.Info("received new event trigger", "id", resp.Id, "type", resp.TaskMetadata.Trigger)
