@@ -229,7 +229,17 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 		})
 	}
 
-	cursor, itemPerPage, err := SetupPagination(payload.Before, payload.After, payload.Cursor, payload.ItemPerPage)
+	var before, after, legacyCursor string
+	var itemPerPageVal int64
+	
+	if payload != nil {
+		before = payload.Before
+		after = payload.After
+		legacyCursor = payload.Cursor
+		itemPerPageVal = payload.ItemPerPage
+	}
+	
+	cursor, itemPerPage, err := SetupPagination(before, after, legacyCursor, itemPerPageVal)
 	if err != nil {
 		return nil, err
 	}
@@ -527,7 +537,17 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	}
 
 	total := 0
-	cursor, itemPerPage, err := SetupPagination(payload.Before, payload.After, payload.Cursor, payload.ItemPerPage)
+	var before, after, legacyCursor string
+	var itemPerPageVal int64
+	
+	if payload != nil {
+		before = payload.Before
+		after = payload.After
+		legacyCursor = payload.Cursor
+		itemPerPageVal = payload.ItemPerPage
+	}
+	
+	cursor, itemPerPage, err := SetupPagination(before, after, legacyCursor, itemPerPageVal)
 	if err != nil {
 		return nil, err
 	}
@@ -723,7 +743,17 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	}
 
 	total := 0
-	cursor, itemPerPage, err := SetupPagination(payload.Before, payload.After, payload.Cursor, payload.ItemPerPage)
+	var before, after, legacyCursor string
+	var itemPerPageVal int64
+	
+	if payload != nil {
+		before = payload.Before
+		after = payload.After
+		legacyCursor = payload.Cursor
+		itemPerPageVal = payload.ItemPerPage
+	}
+	
+	cursor, itemPerPage, err := SetupPagination(before, after, legacyCursor, itemPerPageVal)
 	if err != nil {
 		return nil, err
 	}
@@ -1027,7 +1057,17 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 
 	slices.Sort(secretKeys)
 	
-	cursor, itemPerPage, err := SetupPagination(payload.Before, payload.After, payload.Cursor, payload.ItemPerPage)
+	var before, after, legacyCursor string
+	var itemPerPageVal int64
+	
+	if payload != nil {
+		before = payload.Before
+		after = payload.After
+		legacyCursor = payload.Cursor
+		itemPerPageVal = payload.ItemPerPage
+	}
+	
+	cursor, itemPerPage, err := SetupPagination(before, after, legacyCursor, itemPerPageVal)
 	if err != nil {
 		return nil, err
 	}
