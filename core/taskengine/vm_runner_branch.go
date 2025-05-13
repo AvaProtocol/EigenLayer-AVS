@@ -6,6 +6,7 @@ import (
 	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/dop251/goja"
 )
 
 type BranchProcessor struct {

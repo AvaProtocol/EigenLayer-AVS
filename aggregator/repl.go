@@ -183,7 +183,6 @@ func handleConnection(agg *Aggregator, conn net.Conn) {
 			} else {
 				fmt.Fprintln(conn, "Usage: backup <directory>")
 			}
-
 		default:
 			fmt.Fprintln(conn, "Unknown command:", command)
 		}

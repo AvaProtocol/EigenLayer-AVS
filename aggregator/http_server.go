@@ -9,6 +9,8 @@ import (
 	"net/http"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
+	"github.com/getsentry/sentry-go"
+	sentryecho "github.com/getsentry/sentry-go/echo"
 	"github.com/labstack/echo/v4"
 )
 
@@ -23,6 +25,16 @@ type HttpJsonResp[T any] struct {
 
 func (agg *Aggregator) startHttpServer(ctx context.Context) {
 	e := echo.New()
+
+	if sentry.CurrentHub().Client() != nil {
+		e.Use(sentryecho.New(sentryecho.Options{
+			Repanic:         true,  // Re-panic after capturing so Echo's default recovery can handle response
+			WaitForDelivery: false, // Set to true if crucial to send event before shutdown
+		}))
+		agg.logger.Info("Sentry Echo middleware enabled.")
+	} else {
+		agg.logger.Info("Sentry Echo middleware disabled (Sentry not initialized).")
+	}
 
 	e.GET("/up", func(c echo.Context) error {
 		if agg.status == runningStatus {

@@ -37,7 +37,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize scheduler: %w", schedulerErr)
 	}
 	o.scheduler.Start()
-	
+
 	_, err := o.scheduler.NewJob(
 		gocron.DurationJob(time.Minute*10),
 		gocron.NewTask(func() {
@@ -63,7 +63,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	if err != nil {
 		o.logger.Error("Failed to create cleanup job for block tasks map", "error", err)
 	}
-	
+
 	o.scheduler.NewJob(gocron.DurationJob(time.Second*5), gocron.NewTask(o.PingServer))
 
 	macros.SetRpc(o.config.TargetChain.EthWsUrl)
