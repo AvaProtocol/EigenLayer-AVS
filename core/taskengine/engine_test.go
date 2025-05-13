@@ -1032,7 +1032,7 @@ func TestAggregateChecksResult(t *testing.T) {
 	taskExecutor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, logger)
 	worker.RegisterProcessor(
 		JobTypeExecuteTask,
-		taskExecutor
+		taskExecutor,
 	)
 	
 	// Create Engine with the real queue
