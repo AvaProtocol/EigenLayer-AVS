@@ -1056,8 +1056,24 @@ func TestAggregateChecksResult(t *testing.T) {
 
 type mockQueue struct{}
 
-func (q *mockQueue) Enqueue(jobType string, taskID string, data []byte) (string, error) {
-	return "mock-job-id", nil
+func (q *mockQueue) Enqueue(jobType string, taskID string, data []byte) (uint64, error) {
+	return 1, nil
+}
+
+func (q *mockQueue) MustStart() error {
+	return nil
+}
+
+func (q *mockQueue) Stop() error {
+	return nil
+}
+
+func (q *mockQueue) Recover() error {
+	return nil
+}
+
+func (q *mockQueue) Dequeue() (*apqueue.Job, error) {
+	return nil, nil
 }
 
 func TestGetExecutionCount(t *testing.T) {
