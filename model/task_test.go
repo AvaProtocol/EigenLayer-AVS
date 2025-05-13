@@ -14,7 +14,7 @@ func TestIsRunable(t *testing.T) {
 			Task: &avsproto.Task{
 				StartAt:        time.Now().Add(time.Hour).UnixMilli(),
 				MaxExecution:   1,
-				TotalExecution: 0,
+				ExecutionCount: 0,
 			},
 		}
 
@@ -26,7 +26,7 @@ func TestIsRunable(t *testing.T) {
 			Task: &avsproto.Task{
 				StartAt:        time.Now().Add(-time.Hour).UnixMilli(),
 				MaxExecution:   1,
-				TotalExecution: 0,
+				ExecutionCount: 0,
 			},
 		}
 
@@ -39,7 +39,7 @@ func TestIsRunable(t *testing.T) {
 			Task: &avsproto.Task{
 				StartAt:        now,
 				MaxExecution:   1,
-				TotalExecution: 0,
+				ExecutionCount: 0,
 			},
 		}
 
@@ -51,7 +51,7 @@ func TestIsRunable(t *testing.T) {
 			Task: &avsproto.Task{
 				StartAt:        0,
 				MaxExecution:   1,
-				TotalExecution: 0,
+				ExecutionCount: 0,
 			},
 		}
 
@@ -63,7 +63,7 @@ func TestIsRunable(t *testing.T) {
 			Task: &avsproto.Task{
 				StartAt:        time.Now().Add(-time.Hour).UnixMilli(),
 				MaxExecution:   1,
-				TotalExecution: 1,
+				ExecutionCount: 1,
 			},
 		}
 
@@ -76,7 +76,7 @@ func TestIsRunable(t *testing.T) {
 				StartAt:        time.Now().Add(-2 * time.Hour).UnixMilli(),
 				ExpiredAt:      time.Now().Add(-time.Hour).UnixMilli(),
 				MaxExecution:   1,
-				TotalExecution: 0,
+				ExecutionCount: 0,
 			},
 		}
 
@@ -89,7 +89,7 @@ func TestIsRunable(t *testing.T) {
 				StartAt:        time.Now().Add(-time.Hour).UnixMilli(),
 				ExpiredAt:      time.Now().Add(time.Hour).UnixMilli(),
 				MaxExecution:   1,
-				TotalExecution: 0,
+				ExecutionCount: 0,
 			},
 		}
 

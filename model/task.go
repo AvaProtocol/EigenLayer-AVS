@@ -144,7 +144,7 @@ func (t *Task) OwnedBy(address common.Address) bool {
 //  2. Its expiration time has not reached
 func (t *Task) IsRunable() bool {
 	// When MaxExecution is 0, it is unlimited run
-	reachedMaxRun := t.Task.MaxExecution > 0 && t.Task.TotalExecution >= t.Task.MaxExecution
+	reachedMaxRun := t.Task.MaxExecution > 0 && t.Task.ExecutionCount >= t.Task.MaxExecution
 
 	reachedExpiredTime := t.Task.ExpiredAt > 0 && time.Unix(t.Task.ExpiredAt/1000, 0).Before(time.Now())
 	
