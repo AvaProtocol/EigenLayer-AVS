@@ -7,12 +7,32 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avspb "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
-	"github.com/stretchr/testify/assert"
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/stretchr/testify/mock"
 )
+
+type EventTriggerInterface interface {
+	RemoveCheck(taskID string) error
+	AddCheck(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error
+	GetProgress() int64
+	Run(ctx context.Context) error
+}
+
+type BlockTriggerInterface interface {
+	Remove(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error
+	AddCheck(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error
+	GetProgress() int64
+	Run(ctx context.Context) error
+}
+
+type TimeTriggerInterface interface {
+	Remove(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error
+	AddCheck(taskMetadata *avspb.SyncMessagesResp_TaskMetadata) error
+	GetProgress() int64
+	Run(ctx context.Context) error
+}
 
 type MockLogger struct {
 	mu            sync.Mutex
@@ -322,12 +342,29 @@ func TestSchedulerCleanupJob(t *testing.T) {
 	}
 }
 
+type TestOperator struct {
+	logger       sdklogging.Logger
+	eventTrigger EventTriggerInterface
+	blockTrigger BlockTriggerInterface
+	timeTrigger  TimeTriggerInterface
+}
+
+func (o *TestOperator) processMessage(resp *avspb.SyncMessagesResp) {
+	switch resp.Op {
+	case avspb.MessageOp_CancelTask, avspb.MessageOp_DeleteTask:
+		o.logger.Info("removing task from all triggers", "task_id", resp.TaskMetadata.TaskId, "operation", resp.Op)
+		o.eventTrigger.RemoveCheck(resp.TaskMetadata.TaskId)
+		o.blockTrigger.Remove(resp.TaskMetadata)
+		o.timeTrigger.Remove(resp.TaskMetadata)
+	}
+}
+
 func TestTaskRemovalFromAllTriggers(t *testing.T) {
 	mockEventTrigger := new(MockEventTrigger)
 	mockBlockTrigger := new(MockBlockTrigger)
 	mockTimeTrigger := new(MockTimeTrigger)
 
-	operator := &Operator{
+	operator := &TestOperator{
 		logger:       testutil.GetLogger(),
 		eventTrigger: mockEventTrigger,
 		blockTrigger: mockBlockTrigger,
