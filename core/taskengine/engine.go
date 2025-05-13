@@ -255,7 +255,7 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 	}
 
 	// slices.SortFunc(allWallets, func(a, b *avsproto.SmartWallet) int {
-	// 	return strings.Compare(a.Address, b.Address)
+	//     return strings.Compare(a.Address, b.Address)
 	// })
 
 	result := &avsproto.ListWalletResp{
