@@ -33,6 +33,19 @@ func TestIsRunable(t *testing.T) {
 		assert.True(t, task.IsRunable(), "Task with past startAt should be runable")
 	})
 
+	t.Run("task with startAt equal to current time should be runable", func(t *testing.T) {
+		now := time.Now().UnixMilli()
+		task := &Task{
+			Task: &avsproto.Task{
+				StartAt:        now,
+				MaxExecution:   1,
+				TotalExecution: 0,
+			},
+		}
+
+		assert.True(t, task.IsRunable(), "Task with startAt equal to current time should be runable")
+	})
+
 	t.Run("task with zero startAt should be runable", func(t *testing.T) {
 		task := &Task{
 			Task: &avsproto.Task{
