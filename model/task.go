@@ -52,11 +52,11 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 	taskID := GenerateTaskID()
 
 	if len(body.Edges) == 0 {
-		return nil, fmt.Errorf(ErrEmptyEdgesField)
+		return nil, fmt.Errorf("%s", ErrEmptyEdgesField)
 	}
 
 	if len(body.Nodes) == 0 {
-		return nil, fmt.Errorf(ErrEmptyNodesField)
+		return nil, fmt.Errorf("%s", ErrEmptyNodesField)
 	}
 
 	t := &Task{
@@ -92,12 +92,12 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 // Return a compact json ready to persist to storage
 func (t *Task) ToJSON() ([]byte, error) {
 	// return json.Marshal(t)
-	return protojson.Marshal(t)
+	return protojson.Marshal(t.Task)
 }
 
 func (t *Task) FromStorageData(body []byte) error {
 	// err := json.Unmarshal(body, t)
-	err := protojson.Unmarshal(body, t)
+	err := protojson.Unmarshal(body, t.Task)
 	return err
 }
 
@@ -112,43 +112,45 @@ func (t *Task) ToProtoBuf() (*avsproto.Task, error) {
 
 // Generate a global unique key for the task in our system
 func (t *Task) Key() []byte {
-	return []byte(t.Id)
+	return []byte(t.Task.Id)
 }
 
 func (t *Task) SetCompleted() {
-	t.Status = avsproto.TaskStatus_Completed
-	t.CompletedAt = time.Now().UnixMilli()
+	t.Task.Status = avsproto.TaskStatus_Completed
+	t.Task.CompletedAt = time.Now().UnixMilli()
 }
 
 func (t *Task) SetActive() {
-	t.Status = avsproto.TaskStatus_Active
+	t.Task.Status = avsproto.TaskStatus_Active
 }
 
 func (t *Task) SetFailed() {
-	t.Status = avsproto.TaskStatus_Failed
-	t.CompletedAt = time.Now().UnixMilli()
+	t.Task.Status = avsproto.TaskStatus_Failed
+	t.Task.CompletedAt = time.Now().UnixMilli()
 }
 
 func (t *Task) SetCanceled() {
-	t.Status = avsproto.TaskStatus_Canceled
-	t.CompletedAt = time.Now().UnixMilli()
+	t.Task.Status = avsproto.TaskStatus_Canceled
+	t.Task.CompletedAt = time.Now().UnixMilli()
 }
 
 // Check whether the task own by the given address
 func (t *Task) OwnedBy(address common.Address) bool {
-	return strings.EqualFold(t.Owner, address.Hex())
+	return strings.EqualFold(t.Task.Owner, address.Hex())
 }
 
-// A task is runable when both of these condition are matched
+// A task is runable when all of these conditions are matched
 //  1. Its max execution has not reached
 //  2. Its expiration time has not reached
 func (t *Task) IsRunable() bool {
 	// When MaxExecution is 0, it is unlimited run
-	reachedMaxRun := t.MaxExecution > 0 && t.ExecutionCount >= t.MaxExecution
+	reachedMaxRun := t.Task.MaxExecution > 0 && t.Task.ExecutionCount >= t.Task.MaxExecution
 
-	reachedExpiredTime := t.ExpiredAt > 0 && time.Unix(t.ExpiredAt/1000, 0).Before(time.Now())
+	reachedExpiredTime := t.Task.ExpiredAt > 0 && time.Unix(t.Task.ExpiredAt/1000, 0).Before(time.Now())
+	
+	beforeStartTime := t.Task.StartAt > 0 && time.Now().UnixMilli() < t.Task.StartAt
 
-	return !reachedMaxRun && !reachedExpiredTime
+	return !reachedMaxRun && !reachedExpiredTime && !beforeStartTime
 }
 
 // Given a task key generated from Key(), extract the ID part

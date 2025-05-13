@@ -51,13 +51,17 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
 			Trigger: trigger,
 		},
 	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+	if err != nil {
+		t.Errorf("failed to create VM: %v", err)
+		return
+	}
 
 	n, _ := NewGraphqlQueryProcessor(vm, node.Url)
 
@@ -68,7 +72,7 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 	}
 
 	if !step.Success {
-		t.Errorf("expected rest node run succesfully but failed")
+		t.Errorf("expected rest node run successfully but failed")
 	}
 
 	if !strings.Contains(step.Log, "Execute GraphQL spacex-production.up.railway.app") {

@@ -114,7 +114,7 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,

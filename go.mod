@@ -14,6 +14,7 @@ require (
 	github.com/go-playground/validator/v10 v10.22.1
 	github.com/go-resty/resty/v2 v2.16.2
 	github.com/golang-jwt/jwt/v5 v5.2.1
+	github.com/golang/protobuf v1.5.4
 	github.com/labstack/echo/v4 v4.12.0
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/oklog/ulid/v2 v2.1.1-0.20240413180941-96c4edf226ef
@@ -21,6 +22,7 @@ require (
 	github.com/samber/lo v1.47.0
 	github.com/shopspring/decimal v1.4.0
 	github.com/spf13/cobra v1.8.0
+	github.com/stretchr/testify v1.9.0
 	golang.org/x/crypto v0.26.0
 	google.golang.org/grpc v1.67.1
 	google.golang.org/protobuf v1.35.1
@@ -51,6 +53,7 @@ require (
 	github.com/consensys/bavard v0.1.13 // indirect
 	github.com/consensys/gnark-crypto v0.12.1 // indirect
 	github.com/crate-crypto/go-kzg-4844 v1.0.0 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/deckarep/golang-set/v2 v2.3.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
 	github.com/dgraph-io/ristretto v0.1.1 // indirect
@@ -67,7 +70,6 @@ require (
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/golang/glog v1.2.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
-	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
 	github.com/google/flatbuffers v1.12.1 // indirect
 	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
@@ -75,7 +77,9 @@ require (
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.22.0 // indirect
 	github.com/holiman/uint256 v1.2.4 // indirect
+	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jonboulle/clockwork v0.4.0 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/labstack/gommon v0.4.2 // indirect
@@ -86,6 +90,7 @@ require (
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
@@ -93,7 +98,9 @@ require (
 	github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible // indirect
 	github.com/shurcooL/graphql v0.0.0-20230722043721-ed46e5a46466 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/supranational/blst v0.3.11 // indirect
+	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
@@ -110,5 +117,6 @@ require (
 	golang.org/x/tools v0.22.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20241104194629-dd2ea8efbc28 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20241021214115-324edc3d5d38 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 )

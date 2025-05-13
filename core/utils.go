@@ -12,7 +12,6 @@ import (
 // this hardcodes abi.encode() for cstaskmanager.IAutomationTaskManagerTaskResponse
 // unclear why abigen doesn't provide this out of the box...
 func AbiEncodeTaskResponse(h *cstaskmanager.IAutomationTaskManagerTaskResponse) ([]byte, error) {
-
 	// The order here has to match the field ordering of cstaskmanager.IAutomationTaskManagerTaskResponse
 	taskResponseType, err := abi.NewType("tuple", "", []abi.ArgumentMarshaling{
 		{
@@ -43,7 +42,6 @@ func AbiEncodeTaskResponse(h *cstaskmanager.IAutomationTaskManagerTaskResponse) 
 
 // GetTaskResponseDigest returns the hash of the TaskResponse, which is what operators sign over
 func GetTaskResponseDigest(h *cstaskmanager.IAutomationTaskManagerTaskResponse) ([32]byte, error) {
-
 	encodeTaskResponseByte, err := AbiEncodeTaskResponse(h)
 	if err != nil {
 		return [32]byte{}, err

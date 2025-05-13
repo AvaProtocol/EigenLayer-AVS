@@ -99,8 +99,6 @@ func retryWsRpc() error {
 		logger.Errorf("cannot establish websocket client for RPC, retry in 15 seconds", "err", err)
 		time.Sleep(15 * time.Second)
 	}
-
-	return nil
 }
 
 type operatorState struct {
@@ -155,11 +153,13 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 }
 
 func (n *Engine) Stop() {
-	n.seq.Release()
+	if err := n.seq.Release(); err != nil {
+		n.logger.Error("failed to release sequence", "error", err)
+	}
 	n.shutdown = true
 }
 
-func (n *Engine) MustStart() {
+func (n *Engine) MustStart() error {
 	var err error
 	n.seq, err = n.db.GetSequence([]byte("t:seq"), 1000)
 	if err != nil {
@@ -180,6 +180,8 @@ func (n *Engine) MustStart() {
 			n.tasks[string(item.Key)] = task
 		}
 	}
+
+	return nil
 }
 
 func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWalletReq) ([]*avsproto.SmartWallet, error) {
@@ -208,7 +210,9 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 	// now load the customize wallet with different salt or factory that was initialed and store in our db
 	for _, item := range items {
 		w := &model.SmartWallet{}
-		w.FromStorageData(item.Value)
+		if err := w.FromStorageData(item.Value); err != nil {
+			n.logger.Error("failed to parse wallet data", "error", err)
+		}
 
 		if w.Salt.Cmp(defaultSalt) == 0 {
 			continue
@@ -305,7 +309,12 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	updates := map[string][]byte{}
 
-	updates[string(TaskStorageKey(task.Id, task.Status))], err = task.ToJSON()
+	taskJSON, err := task.ToJSON()
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.Internal, "Failed to serialize task: %v", err)
+	}
+
+	updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Active))
 
 	if err = n.db.BatchWrite(updates); err != nil {
@@ -346,6 +355,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 		n.trackSyncedTasks[address].MonotonicClock = 0
 	}()
 
+	//nolint:S1000
 	for {
 		select {
 		case <-ticker.C:
@@ -380,7 +390,11 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 						Trigger:   task.Trigger,
 					},
 				}
-				n.logger.Info("stream check to operator", "task_id", task.Id, "operator", payload.Address, "resp", resp)
+				n.logger.Info("stream check to operator",
+					"task_id", task.Id,
+					"operator", payload.Address,
+					"op", resp.Op.String(),
+					"task_id_meta", resp.TaskMetadata.TaskId)
 
 				if err := srv.Send(&resp); err != nil {
 					// return error to cause client to establish re-connect the connection
@@ -421,7 +435,10 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 		return err
 	}
 
-	n.queue.Enqueue(JobTypeExecuteTask, payload.TaskId, data)
+	if _, err := n.queue.Enqueue(JobTypeExecuteTask, payload.TaskId, data); err != nil {
+		n.logger.Error("failed to enqueue task", "error", err, "task_id", payload.TaskId)
+		return err
+	}
 	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId)
 
 	// if the task can still run, add it back
@@ -457,7 +474,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
 	}
 
-	// second, do the sort, this is key sorted by ordering of ther insertion
+	// second, do the sort, this is key sorted by ordering of their insertion
 	slices.SortFunc(taskKeys, func(a, b string) int {
 		id1 := ulid.MustParse(string(model.TaskKeyToId([]byte(a[2:]))))
 		id2 := ulid.MustParse(string(model.TaskKeyToId([]byte(b[2:]))))
@@ -618,7 +635,10 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageQueueUnavailableError)
 	}
 
-	n.setExecutionStatusQueue(task, queueTaskData.ExecutionID)
+	if err := n.setExecutionStatusQueue(task, queueTaskData.ExecutionID); err != nil {
+		n.logger.Error("failed to set execution status", "error", err, "task_id", payload.TaskId, "execution_id", queueTaskData.ExecutionID)
+		return nil, grpcstatus.Errorf(codes.Internal, "Failed to set execution status: %v", err)
+	}
 	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId, "jid", jid, "execution_id", queueTaskData.ExecutionID)
 	return &avsproto.UserTriggerTaskResp{
 		ExecutionId: queueTaskData.ExecutionID,
@@ -649,7 +669,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 
 	executionKeys, err := n.db.ListKeysMulti(prefixes)
 
-	// second, do the sort, this is key sorted by ordering of ther insertion
+	// second, do the sort, this is key sorted by ordering of their insertion
 	slices.SortFunc(executionKeys, func(a, b string) int {
 		id1 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(a))))
 		id2 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(b))))
@@ -735,7 +755,7 @@ func (n *Engine) setExecutionStatusQueue(task *model.Task, executionID string) e
 	return n.db.Set(TaskTriggerKey(task, executionID), []byte(status))
 }
 
-func (n *Engine) getExecutonStatusFromQueue(task *model.Task, executionID string) (*avsproto.ExecutionStatus, error) {
+func (n *Engine) getExecutionStatusFromQueue(task *model.Task, executionID string) (*avsproto.ExecutionStatus, error) {
 	status, err := n.db.GetKey(TaskTriggerKey(task, executionID))
 	if err != nil {
 		return nil, err
@@ -799,7 +819,7 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 	// First look into execution first
 	if _, err = n.db.GetKey(TaskExecutionKey(task, payload.ExecutionId)); err != nil {
 		// When execution not found, it could be in pending status, we will check that storage
-		if status, err := n.getExecutonStatusFromQueue(task, payload.ExecutionId); err == nil {
+		if status, err := n.getExecutionStatusFromQueue(task, payload.ExecutionId); err == nil {
 			return &avsproto.ExecutionStatusResp{
 				Status: *status,
 			}, nil
@@ -835,7 +855,7 @@ func (n *Engine) GetExecutionCount(user *model.User, payload *avsproto.GetExecut
 
 	prefixes := [][]byte{}
 	for _, id := range workflowIds {
-		if len(id) != 26 {
+		if len(id) != TaskIDLength {
 			continue
 		}
 		prefixes = append(prefixes, TaskExecutionPrefix(id))
@@ -863,8 +883,15 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error)
 		return false, fmt.Errorf("Only non executing task can be deleted")
 	}
 
-	n.db.Delete(TaskStorageKey(task.Id, task.Status))
-	n.db.Delete(TaskUserKey(task))
+	if err := n.db.Delete(TaskStorageKey(task.Id, task.Status)); err != nil {
+		n.logger.Error("failed to delete task storage", "error", err, "task_id", task.Id)
+		return false, fmt.Errorf("failed to delete task: %w", err)
+	}
+
+	if err := n.db.Delete(TaskUserKey(task)); err != nil {
+		n.logger.Error("failed to delete task user key", "error", err, "task_id", task.Id)
+		return false, fmt.Errorf("failed to delete task user key: %w", err)
+	}
 
 	return true, nil
 }
@@ -887,10 +914,12 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	if err = n.db.BatchWrite(updates); err == nil {
-		n.db.Move(
+		if moveErr := n.db.Move(
 			TaskStorageKey(task.Id, oldStatus),
 			TaskStorageKey(task.Id, task.Status),
-		)
+		); moveErr != nil {
+			n.logger.Error("failed to move task", "error", moveErr, "task_id", task.Id)
+		}
 
 		delete(n.tasks, task.Id)
 	} else {
@@ -915,7 +944,7 @@ func (n *Engine) CreateSecret(user *model.User, payload *avsproto.CreateOrUpdate
 	}
 
 	if len(payload.Name) == 0 || len(payload.Name) > MaxSecretNameLength {
-		return false, grpcstatus.Errorf(codes.InvalidArgument, "secret name lengh is invalid: should be 1-255 character")
+		return false, grpcstatus.Errorf(codes.InvalidArgument, "secret name length is invalid: should be 1-255 character")
 	}
 
 	key, _ := SecretStorageKey(secret)
@@ -1024,6 +1053,82 @@ func (n *Engine) CanStreamCheck(address string) bool {
 }
 
 // GetWorkflowCount returns the number of workflows for the given addresses of smart wallets, or if no addresses are provided, it returns the total number of workflows belongs to the requested user
+func (n *Engine) GetExecutionStats(user *model.User, payload *avsproto.GetExecutionStatsReq) (*avsproto.GetExecutionStatsResp, error) {
+	workflowIds := payload.WorkflowIds
+	days := payload.Days
+	if days <= 0 {
+		days = 7 // Default to 7 days if not specified
+	}
+
+	cutoffTime := time.Now().AddDate(0, 0, -int(days)).UnixMilli()
+
+	// Initialize counters
+	total := int64(0)
+	succeeded := int64(0)
+	failed := int64(0)
+	var totalExecutionTime int64 = 0
+
+	if len(workflowIds) == 0 {
+		workflowIds = []string{}
+		taskIds, err := n.db.GetKeyHasPrefix(UserTaskStoragePrefix(user.Address))
+		if err != nil {
+			return nil, grpcstatus.Errorf(codes.Internal, "Internal error retrieving tasks")
+		}
+		for _, id := range taskIds {
+			taskId := TaskIdFromTaskStatusStorageKey(id)
+			workflowIds = append(workflowIds, string(taskId))
+		}
+	}
+
+	for _, id := range workflowIds {
+		if len(id) != TaskIDLength {
+			continue
+		}
+
+		items, err := n.db.GetByPrefix(TaskExecutionPrefix(id))
+		if err != nil {
+			n.logger.Error("error getting executions", "workflow", id, "error", err)
+			continue
+		}
+
+		for _, item := range items {
+			execution := &avsproto.Execution{}
+			if err := protojson.Unmarshal(item.Value, execution); err != nil {
+				n.logger.Error("error unmarshalling execution", "error", err)
+				continue
+			}
+
+			if execution.StartAt < cutoffTime {
+				continue
+			}
+
+			total++
+			if execution.Success {
+				succeeded++
+			} else {
+				failed++
+			}
+
+			if execution.EndAt > execution.StartAt {
+				executionTime := execution.EndAt - execution.StartAt
+				totalExecutionTime += executionTime
+			}
+		}
+	}
+
+	var avgExecutionTime float64 = 0
+	if total > 0 {
+		avgExecutionTime = float64(totalExecutionTime) / float64(total)
+	}
+
+	return &avsproto.GetExecutionStatsResp{
+		Total:            total,
+		Succeeded:        succeeded,
+		Failed:           failed,
+		AvgExecutionTime: avgExecutionTime,
+	}, nil
+}
+
 func (n *Engine) GetWorkflowCount(user *model.User, payload *avsproto.GetWorkflowCountReq) (*avsproto.GetWorkflowCountResp, error) {
 	smartWalletAddresses := payload.Addresses
 
