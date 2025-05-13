@@ -30,7 +30,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	blockTasksMap := make(map[int64][]string)
 	blockTasksMutex := &sync.Mutex{}
 
-	// Setup taskengine, initialize local storage and cache, establish rpc
+	// Initialize the scheduler for managing periodic tasks
 	var schedulerErr error
 	o.scheduler, schedulerErr = gocron.NewScheduler()
 	if schedulerErr != nil {
