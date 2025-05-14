@@ -102,7 +102,17 @@ func TestCustomCodeNodeJSONSerialization(t *testing.T) {
 	}
 
 	parsedValue := parsedCustomCode.Data
-	if parsedValue.GetStringValue() != "my secret is dummy_value" {
-		t.Errorf("Expected parsed value to be 'my secret is dummy_value', got %s", parsedValue.GetStringValue())
+	var valueMap map[string]interface{}
+	if err := json.Unmarshal([]byte(parsedValue.GetValue()), &valueMap); err != nil {
+		t.Fatalf("Failed to unmarshal Any value: %v", err)
+	}
+	
+	stringValue, ok := valueMap["stringValue"].(string)
+	if !ok {
+		t.Fatalf("Expected stringValue to be a string, got %T", valueMap["stringValue"])
+	}
+	
+	if stringValue != "my secret is dummy_value" {
+		t.Errorf("Expected parsed value to be 'my secret is dummy_value', got %s", stringValue)
 	}
 }
