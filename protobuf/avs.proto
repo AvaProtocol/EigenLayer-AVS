@@ -200,7 +200,8 @@ message CustomCodeNode {
   string         source    = 2;
 
   message Output {
-    google.protobuf.Any data = 1;
+    // Changed from google.protobuf.Any to google.protobuf.Value for better JavaScript native type support
+    google.protobuf.Value data = 1;
   }
 }
 
