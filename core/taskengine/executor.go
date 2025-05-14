@@ -75,8 +75,8 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	defer func() {
 		// Delete the task trigger queue when we're done, the execution log is available in main task storage at this point
 		if queueData != nil && queueData.ExecutionID != "" {
-			if err := x.db.Delete(TaskTriggerKey(task, queueData.ExecutionID)); err != nil {
-				x.logger.Debug("Failed to delete task trigger key", "error", err, "task_id", task.Id, "execution_id", queueData.ExecutionID)
+			if _, err := x.db.GetKey(TaskTriggerKey(task, queueData.ExecutionID)); err != nil {
+				x.logger.Debug("Failed to get task trigger key", "error", err, "task_id", task.Id, "execution_id", queueData.ExecutionID)
 			}
 		}
 	}()
