@@ -549,3 +549,101 @@ func TestBranchNodeNoElseSkip(t *testing.T) {
 		})
 	}
 }
+
+func TestBranchNodeMalformedData(t *testing.T) {
+	testCases := []struct {
+		name        string
+		conditions  []*avsproto.Condition
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "nil condition",
+			conditions: []*avsproto.Condition{
+				{Id: "condition1", Type: "if", Expression: "a > 10"},
+				nil,
+			},
+			expectError: true,
+			errorMsg:    "condition at index 1 is nil",
+		},
+		{
+			name: "empty condition ID",
+			conditions: []*avsproto.Condition{
+				{Id: "condition1", Type: "if", Expression: "a > 10"},
+				{Id: "", Type: "if", Expression: "a > 5"},
+			},
+			expectError: true,
+			errorMsg:    "condition at index 1 has empty ID",
+		},
+		{
+			name: "empty condition type",
+			conditions: []*avsproto.Condition{
+				{Id: "condition1", Type: "if", Expression: "a > 10"},
+				{Id: "condition2", Type: "", Expression: "a > 5"},
+			},
+			expectError: true,
+			errorMsg:    "condition at index 1 has empty type",
+		},
+		{
+			name: "invalid condition type",
+			conditions: []*avsproto.Condition{
+				{Id: "condition1", Type: "if", Expression: "a > 10"},
+				{Id: "condition2", Type: "invalid", Expression: "a > 5"},
+			},
+			expectError: true,
+			errorMsg:    "condition at index 1 has invalid type",
+		},
+		{
+			name: "empty if expression",
+			conditions: []*avsproto.Condition{
+				{Id: "condition1", Type: "if", Expression: "a > 10"},
+				{Id: "condition2", Type: "if", Expression: ""},
+			},
+			expectError: true,
+			errorMsg:    "condition at index 1 has empty expression",
+		},
+		{
+			name: "whitespace if expression",
+			conditions: []*avsproto.Condition{
+				{Id: "condition1", Type: "if", Expression: "a > 10"},
+				{Id: "condition2", Type: "if", Expression: "   \t\n  "},
+			},
+			expectError: true,
+			errorMsg:    "condition at index 1 has empty expression",
+		},
+		{
+			name: "valid conditions",
+			conditions: []*avsproto.Condition{
+				{Id: "condition1", Type: "if", Expression: "a > 10"},
+				{Id: "condition2", Type: "if", Expression: "a > 5"},
+				{Id: "condition3", Type: "else"},
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			vm := NewVM()
+			processor := NewBranchProcessor(vm)
+
+			err := processor.Validate(&avsproto.BranchNode{
+				Conditions: tc.conditions,
+			})
+
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("expected error but got none")
+					return
+				}
+				if !strings.Contains(err.Error(), tc.errorMsg) {
+					t.Errorf("expected error message to contain '%s', but got: '%s'", tc.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
