@@ -95,6 +95,10 @@ func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalle
 		}, nil
 	}
 
+	if wallets.Items == nil {
+		wallets.Items = []*avsproto.SmartWallet{}
+	}
+
 	return wallets, nil
 }
 
