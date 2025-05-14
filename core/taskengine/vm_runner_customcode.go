@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
@@ -84,17 +83,18 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	if result != nil {
 		resultValue := result.Export()
 
-		value, err := structpb.NewValue(resultValue)
-		if err != nil {
-			//return nil, fmt.Errorf("failed to convert to structpb.Value: %v", err)
-			return s, err
-		}
-		pbResult, _ := anypb.New(value)
-
-		s.OutputData = &avsproto.Execution_Step_CustomCode{
-			CustomCode: &avsproto.CustomCodeNode_Output{
-				Data: pbResult,
-			},
+		protoValue, errConv := structpb.NewValue(resultValue)
+		if errConv != nil {
+			s.Log += fmt.Sprintf("\nfailed to convert JS result to protobuf Value: %v", errConv)
+			// If conversion to structpb.Value fails, OutputData will remain nil or its previous state.
+			// The overall step success might still depend on the 'err' from r.jsvm.RunString()
+		} else {
+			// This assumes CustomCodeNode_Output.Data is defined as google.protobuf.Value in your .proto file
+			s.OutputData = &avsproto.Execution_Step_CustomCode{
+				CustomCode: &avsproto.CustomCodeNode_Output{
+					Data: protoValue,
+				},
+			}
 		}
 		r.SetOutputVarForStep(stepID, resultValue)
 	}
