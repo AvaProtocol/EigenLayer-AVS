@@ -576,7 +576,6 @@ message TriggerReason {
     Cron      = 4;
     Block     = 5;
     Event     = 6;
-    Default   = 7;  // Used as default when no specific trigger type is provided
   }
   TriggerType type = 5;
 }
