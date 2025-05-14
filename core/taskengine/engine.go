@@ -627,6 +627,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskTriggerError), "Error trigger task: %v", err)
 	}
 
+	// Asynchronous execution path
 	data, err := json.Marshal(queueTaskData)
 	if err != nil {
 		n.logger.Error("error serialize trigger to json", err)
@@ -639,10 +640,12 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageQueueUnavailableError)
 	}
 
+	// This is where the TaskTriggerKey is set for asynchronous tasks
 	if err := n.setExecutionStatusQueue(task, queueTaskData.ExecutionID); err != nil {
-		n.logger.Error("failed to set execution status", "error", err, "task_id", payload.TaskId, "execution_id", queueTaskData.ExecutionID)
+		n.logger.Error("failed to set execution status in queue storage", "error", err, "task_id", payload.TaskId, "execution_id", queueTaskData.ExecutionID)
 		return nil, grpcstatus.Errorf(codes.Internal, "Failed to set execution status: %v", err)
 	}
+
 	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId, "jid", jid, "execution_id", queueTaskData.ExecutionID)
 	return &avsproto.UserTriggerTaskResp{
 		ExecutionId: queueTaskData.ExecutionID,
