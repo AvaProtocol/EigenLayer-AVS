@@ -410,8 +410,18 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	n.logger.Info("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
 	n.lock.Unlock()
 
+	var reason *avsproto.TriggerReason
+	if payload.Reason != nil {
+		reason = payload.Reason
+	} else {
+		reason = &avsproto.TriggerReason{
+			Type: avsproto.TriggerReason_Manual,
+		}
+		n.logger.Debug("Creating default manual trigger reason", "task_id", payload.TaskId)
+	}
+
 	queueTaskData := QueueExecutionData{
-		Reason:      payload.Reason,
+		Reason:      reason,
 		ExecutionID: ulid.Make().String(),
 	}
 
@@ -588,8 +598,18 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
+	var reason *avsproto.TriggerReason
+	if payload.Reason != nil {
+		reason = payload.Reason
+	} else {
+		reason = &avsproto.TriggerReason{
+			Type: avsproto.TriggerReason_Manual,
+		}
+		n.logger.Debug("Creating default manual trigger reason", "task_id", payload.TaskId)
+	}
+
 	queueTaskData := QueueExecutionData{
-		Reason:      payload.Reason,
+		Reason:      reason,
 		ExecutionID: ulid.Make().String(),
 	}
 
