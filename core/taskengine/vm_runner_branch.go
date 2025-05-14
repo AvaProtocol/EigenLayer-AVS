@@ -32,6 +32,30 @@ func (r *BranchProcessor) Validate(node *avsproto.BranchNode) error {
 		return fmt.Errorf("the first condition need to be an if but got :%s", node.Conditions[0].Type)
 	}
 
+	for i, condition := range node.Conditions {
+		if condition == nil {
+			return fmt.Errorf("condition at index %d is nil", i)
+		}
+
+		if condition.Id == "" {
+			return fmt.Errorf("condition at index %d has empty ID", i)
+		}
+
+		if condition.Type == "" {
+			return fmt.Errorf("condition at index %d has empty type", i)
+		}
+
+		if condition.Type != "if" && condition.Type != "else" {
+			return fmt.Errorf("condition at index %d has invalid type: %s (must be 'if' or 'else')", i, condition.Type)
+		}
+
+		if condition.Type == "else" && i < len(node.Conditions)-1 {
+			if r.vm.logger != nil {
+				r.vm.logger.Warn("'else' condition is not the last one, subsequent conditions will be ignored")
+			}
+		}
+	}
+
 	return nil
 }
 

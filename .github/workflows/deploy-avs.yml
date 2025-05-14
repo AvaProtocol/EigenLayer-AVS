@@ -59,4 +59,4 @@ jobs:
           fi
           cd $HOME/ap-operator-setup/$TARGET_ENV
           docker compose pull
-          docker compose up -d --force-recreate  
+          docker compose up -d --force-recreate    

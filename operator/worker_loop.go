@@ -30,6 +30,14 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	blockTasksMap := make(map[int64][]string)
 	blockTasksMutex := &sync.Mutex{}
 
+	// Initialize the scheduler for managing periodic tasks
+	var schedulerErr error
+	o.scheduler, schedulerErr = gocron.NewScheduler()
+	if schedulerErr != nil {
+		return fmt.Errorf("failed to initialize scheduler: %w", schedulerErr)
+	}
+	o.scheduler.Start()
+	
 	_, err := o.scheduler.NewJob(
 		gocron.DurationJob(time.Minute*10),
 		gocron.NewTask(func() {
@@ -55,13 +63,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	if err != nil {
 		o.logger.Error("Failed to create cleanup job for block tasks map", "error", err)
 	}
-	// Setup taskengine, initialize local storage and cache, establish rpc
-	var schedulerErr error
-	o.scheduler, schedulerErr = gocron.NewScheduler()
-	if schedulerErr != nil {
-		panic(schedulerErr)
-	}
-	o.scheduler.Start()
+	
 	o.scheduler.NewJob(gocron.DurationJob(time.Second*5), gocron.NewTask(o.PingServer))
 
 	macros.SetRpc(o.config.TargetChain.EthWsUrl)
@@ -220,8 +222,7 @@ func (o *Operator) StreamMessages() {
 
 			switch resp.Op {
 			case avspb.MessageOp_CancelTask, avspb.MessageOp_DeleteTask:
-				o.eventTrigger.RemoveCheck(resp.TaskMetadata.TaskId)
-				//o.blockTrigger.RemoveCheck(resp.TaskMetadata.TaskId)
+				o.processMessage(resp)
 			case avspb.MessageOp_MonitorTaskTrigger:
 				if trigger := resp.TaskMetadata.GetTrigger().GetEvent(); trigger != nil {
 					o.logger.Info("received new event trigger", "id", resp.Id, "type", resp.TaskMetadata.Trigger)

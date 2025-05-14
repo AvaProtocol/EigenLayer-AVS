@@ -14,7 +14,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/apconfig"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/signer"
 	"github.com/AvaProtocol/EigenLayer-AVS/metrics"
-	"github.com/Layr-Labs/eigensdk-go/metrics/collectors/economic"
 	rpccalls "github.com/Layr-Labs/eigensdk-go/metrics/collectors/rpc_calls"
 	"github.com/Layr-Labs/eigensdk-go/nodeapi"
 	"github.com/Layr-Labs/eigensdk-go/signerv2"
@@ -206,24 +205,24 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	if c.EnableMetrics {
 		ethRpcClient, err = eth.NewInstrumentedClient(c.EthRpcUrl, rpcCallsCollector)
 		if err != nil {
-			logger.Errorf("Cannot create http ethclient", "err", err)
-			return nil, err
+			logger.Errorf("Cannot connect to RPC endpoint", "url", c.EthRpcUrl, "err", err)
+			return nil, fmt.Errorf("failed to connect to RPC endpoint %s: %w", c.EthRpcUrl, err)
 		}
 		ethWsClient, err = eth.NewInstrumentedClient(c.EthWsUrl, rpcCallsCollector)
 		if err != nil {
-			logger.Errorf("Cannot create ws ethclient %s %w", c.EthWsUrl, err)
-			return nil, err
+			logger.Errorf("Cannot connect to WebSocket RPC endpoint", "url", c.EthWsUrl, "err", err)
+			return nil, fmt.Errorf("failed to connect to WebSocket RPC endpoint %s: %w", c.EthWsUrl, err)
 		}
 	} else {
 		ethRpcClient, err = eth.NewInstrumentedClient(c.EthRpcUrl, rpcCallsCollector)
 		if err != nil {
-			logger.Errorf("Cannot create http ethclient", "err", err)
-			return nil, err
+			logger.Errorf("Cannot connect to RPC endpoint", "url", c.EthRpcUrl, "err", err)
+			return nil, fmt.Errorf("failed to connect to RPC endpoint %s: %w", c.EthRpcUrl, err)
 		}
 		ethWsClient, err = eth.NewInstrumentedClient(c.EthWsUrl, rpcCallsCollector)
 		if err != nil {
-			logger.Errorf("Cannot create ws ethclient", "err", err)
-			return nil, err
+			logger.Errorf("Cannot connect to WebSocket RPC endpoint", "url", c.EthWsUrl, "err", err)
+			return nil, fmt.Errorf("failed to connect to WebSocket RPC endpoint %s: %w", c.EthWsUrl, err)
 		}
 	}
 
@@ -332,7 +331,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	quorumNames := map[sdktypes.QuorumNum]string{
 		0: "quorum0",
 	}
-	economicMetricsCollector := economic.NewCollector(
+	economicMetricsCollector := metrics.NewMetricsOnlyEconomicCollector(
 		sdkClients.ElChainReader, sdkClients.AvsRegistryChainReader,
 		AVS_NAME, logger, common.HexToAddress(c.OperatorAddress), quorumNames)
 	reg.MustRegister(economicMetricsCollector)
