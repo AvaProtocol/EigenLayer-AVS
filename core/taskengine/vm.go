@@ -241,7 +241,7 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 			}
 
 			var event *types.Log
-			//event := receipt.Logs[triggerMetadata.LogIndex]
+			//event := receipt.Logs[reason.LogIndex]
 
 			// TODO Is there a cheaper way to avoid hitting RPC this much?
 			for _, l := range receipt.Logs {

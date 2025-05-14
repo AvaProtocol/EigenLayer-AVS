@@ -112,7 +112,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	var runTaskErr error = nil
 	if err = vm.Compile(); err != nil {
-		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", triggerReason)
+		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger reason", triggerReason)
 		runTaskErr = err
 	} else {
 		runTaskErr = vm.Run()
@@ -145,7 +145,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	if runTaskErr != nil {
-		x.logger.Error("error executing task", "error", err, "runError", runTaskErr, "task_id", task.Id, "triggermark", triggerReason)
+		x.logger.Error("error executing task", "error", err, "runError", runTaskErr, "task_id", task.Id, "trigger_reason", triggerReason)
 		execution.Error = runTaskErr.Error()
 	}
 
@@ -173,7 +173,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	if runTaskErr == nil {
-		x.logger.Info("successfully executing task", "task_id", task.Id, "triggermark", triggerReason)
+		x.logger.Info("successfully executing task", "task_id", task.Id, "trigger_reason", triggerReason)
 		return execution, nil
 	}
 	return execution, fmt.Errorf("Error executing task %s: %v", task.Id, runTaskErr)

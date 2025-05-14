@@ -23,7 +23,7 @@ func SetupPagination(before, after, legacyCursor string, itemPerPage int64) (*Cu
 		return nil, 0, status.Errorf(codes.InvalidArgument, "item per page is not valid")
 	}
 	if perPage == 0 {
-		perPage = 50
+		perPage = DefaultItemPerPage
 	}
 	
 	return cursor, perPage, nil

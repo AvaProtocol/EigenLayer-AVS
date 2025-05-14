@@ -193,7 +193,7 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 	allWallets := []*avsproto.SmartWallet{}
 
 	factoryAddressEmpty := payload == nil || payload.FactoryAddress == ""
-	factoryAddressMatches := n.smartWalletConfig != nil && payload != nil && strings.EqualFold(payload.FactoryAddress, n.smartWalletConfig.FactoryAddress.Hex())
+	factoryAddressMatches := n.smartWalletConfig != nil && n.smartWalletConfig.FactoryAddress != (common.Address{}) && payload != nil && payload.FactoryAddress != "" && strings.EqualFold(payload.FactoryAddress, n.smartWalletConfig.FactoryAddress.Hex())
 	
 	if factoryAddressEmpty || factoryAddressMatches {
 		// This is the default wallet with our own factory

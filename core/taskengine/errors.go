@@ -24,6 +24,7 @@ const (
 
 	InvalidCursor          = "cursor is not valid"
 	InvalidPaginationParam = "item per page is not valid"
+	DefaultItemPerPage     = 50
 
 	InvalidEntrypoint = "cannot detect task entrypoint from trigger and edge data"
 )
