@@ -75,8 +75,8 @@ func TestExecutorRunTaskWithNilReason(t *testing.T) {
 		t.Errorf("Expected a default reason to be created, but it's still nil")
 	}
 
-	if execution.Reason.Type != avsproto.TriggerReason_Manual {
-		t.Errorf("Expected default reason type to be Manual, but got: %v", execution.Reason.Type)
+	if execution.Reason.Type != avsproto.TriggerReason_Default {
+		t.Errorf("Expected default reason type to be Default, but got: %v", execution.Reason.Type)
 	}
 
 	if len(execution.Steps) != 1 {
