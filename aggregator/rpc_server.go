@@ -177,7 +177,7 @@ func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListEx
 	)
 	listExecResp, err := r.engine.ListExecutions(user, payload)
 	if err != nil {
-		r.config.Logger.Error("error listing executions from engine", "error", err.Error())
+		r.config.Logger.Error("error listing executions from engine", "error", err)
 		return nil, err
 	}
 
