@@ -70,10 +70,24 @@ func (r *RpcServer) HideWallet(ctx context.Context, payload *avsproto.GetWalletR
 		"user", user.Address.String(),
 		"salt", payload.Salt,
 		"factory", payload.FactoryAddress,
-		"hide", payload.Hide,
 	)
 
-	return r.engine.HideWallet(user, payload, payload.Hide)
+	return r.engine.HideWallet(user, payload, true)
+}
+
+func (r *RpcServer) UnhideWallet(ctx context.Context, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
+	user, err := r.verifyAuth(ctx)
+
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+	r.config.Logger.Info("process unhide wallet",
+		"user", user.Address.String(),
+		"salt", payload.Salt,
+		"factory", payload.FactoryAddress,
+	)
+
+	return r.engine.HideWallet(user, payload, false)
 }
 
 // Get nonce of an existing smart wallet of a given owner
