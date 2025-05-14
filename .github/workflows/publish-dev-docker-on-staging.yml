@@ -1,20 +1,32 @@
 name: Publish Dev Docker image upon staging change
 
 on:
-  pull_request:
-    types: [closed]
-    branches:
-      - staging
-    paths:
-      - '**.go'
-      - '!**/*_test.go'
-      - '!**.yaml'
-      - '!**.yml'
+#  pull_request:
+#    types: [closed]
+#    branches:
+#      - staging
+#    paths:
+#      - '**.go'
+#      - '!**/*_test.go'
+#      - '!**.yaml'
+#      - '!**.yml'
   workflow_dispatch:
+    inputs:
+      branch_name:
+        description: 'Branch to build from (default: staging). If commit_hash is provided, this branch context can be used for tagging.'
+        required: false
+        type: string
+        default: 'staging'
+      commit_hash:
+        description: 'Specific commit SHA to build (optional). Overrides branch for checkout if provided.'
+        required: false
+        type: string
 
 jobs:
   publish-staging-build:
-    if: github.event.pull_request.merged == true
+    # If you want to keep the merged check for manual dispatch, you might need to adjust context
+    # For now, assuming manual dispatch doesn't need this specific PR context check.
+    # if: github.event.pull_request.merged == true 
     name: Publish staging build docker image to dockerhub
     runs-on: 'ubuntu-latest'
     steps:
@@ -28,19 +40,20 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0 # Ensure fetch-depth is 0 for git log
+          # For workflow_dispatch, you might need to explicitly checkout the branch from input
+          ref: ${{ github.event.inputs.branch || github.ref }}
 
       - name: Determine Tag Prefix from Source Branch
         id: vars
         run: |
-          RAW_BRANCH_NAME="${{ github.event.pull_request.head.ref }}" # Get source branch directly
+          # For workflow_dispatch, github.event.pull_request.head.ref won't exist.
+          # Need to adapt how RAW_BRANCH_NAME is set or use a default/input for manual runs.
+          # For simplicity, if this script is now mainly for manual dispatch based on an input branch,
+          # we might simplify or use github.ref_name for the branch name when manually dispatched.
+          RAW_BRANCH_NAME="${{ github.event.inputs.branch || github.ref_name }}"
           TAG_PREFIX="" 
 
           if [[ -n "$RAW_BRANCH_NAME" ]]; then
-            # Sanitize the branch name for use in a Docker tag:
-            # 1. Replace '/' with '-'
-            # 2. Keep only alphanumeric characters, '.', and '-'
-            # 3. Replace sequences of invalid characters with a single '-'
-            # 4. Remove leading/trailing '-'
             SANITIZED_NAME=$(echo "$RAW_BRANCH_NAME" | sed 's|/|-|g' | tr -cs 'a-zA-Z0-9.-' '-' | sed 's/--\\+/-/g' | sed 's/^-*//;s/-*$//')
             if [[ -n "$SANITIZED_NAME" ]]; then
               TAG_PREFIX="$SANITIZED_NAME"
@@ -62,18 +75,21 @@ jobs:
           images: |
             avaprotocol/avs-dev
           tags: |
-            type=pr # Generates pr-123 from the PR number
+            # type=pr # This won't work for workflow_dispatch without PR context
             type=raw,value={{sha}} # Full commit SHA
+            # Add a tag based on the branch/prefix if TAG_PREFIX is set
+            type=raw,value=${{ steps.vars.outputs.TAG_PREFIX }}${{ steps.vars.outputs.TAG_PREFIX && '-' || '' }}{{ github.event.inputs.branch && 'manual' || github.sha_short }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/staging' || github.event.inputs.branch == 'staging' }}
 
       - name: Build and push staging docker image
         uses: docker/build-push-action@v6
         with:
           build-args: |
-            RELEASE_TAG=${{ steps.vars.outputs.TAG_PREFIX }}${{ steps.vars.outputs.TAG_PREFIX:+'-' }}${{ github.sha }}
+            RELEASE_TAG=${{ steps.vars.outputs.TAG_PREFIX }}${{ steps.vars.outputs.TAG_PREFIX && '-' || '' }}${{ github.sha }}
             COMMIT_SHA=${{ github.sha }}
           platforms: linux/amd64,linux/arm64
           context: .
           file: dockerfiles/operator.Dockerfile
-          push: true # Always push when this job runs (merged PR to staging)
+          push: true 
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
