@@ -72,7 +72,7 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 
 	if runErr == nil {
 		// Task logic executed successfully. Clean up the TaskTriggerKey for this async execution.
-		if queueData != nil && queueData.ExecutionID != "" { // Should always be true here for a queued job
+		if queueData != nil && queueData.ExecutionID != "" { // Assumes `ExecutionID` is always set for queued jobs. Verify this assumption if the logic changes.
 			triggerKeyToClean := TaskTriggerKey(task, queueData.ExecutionID)
 			if delErr := x.db.Delete(triggerKeyToClean); delErr != nil {
 				x.logger.Error("Perform: Failed to delete TaskTriggerKey after successful async execution",
