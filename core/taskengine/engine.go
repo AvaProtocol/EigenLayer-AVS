@@ -424,8 +424,10 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	n.logger.Info("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
 	n.lock.Unlock()
 
+	reason := GetTriggerReasonOrDefault(payload.Reason, payload.TaskId, n.logger)
+
 	queueTaskData := QueueExecutionData{
-		Reason:      payload.Reason,
+		Reason:      reason,
 		ExecutionID: ulid.Make().String(),
 	}
 
@@ -605,8 +607,10 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
+	reason := GetTriggerReasonOrDefault(payload.Reason, payload.TaskId, n.logger)
+
 	queueTaskData := QueueExecutionData{
-		Reason:      payload.Reason,
+		Reason:      reason,
 		ExecutionID: ulid.Make().String(),
 	}
 
