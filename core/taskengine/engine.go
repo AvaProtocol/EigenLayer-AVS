@@ -326,7 +326,6 @@ func (n *Engine) HideWallet(user *model.User, payload *avsproto.GetWalletReq, hi
 		}
 	}
 
-	walletResp.IsHidden = hide
 	return walletResp, nil
 }
 
