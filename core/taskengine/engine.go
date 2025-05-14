@@ -192,9 +192,12 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 
 	wallets := []*avsproto.SmartWallet{}
 
-	if payload == nil || payload.FactoryAddress == "" || strings.EqualFold(payload.FactoryAddress, n.smartWalletConfig.FactoryAddress.Hex()) {
-		// This is the default wallet with our own factory
-		wallets = append(wallets, &avsproto.SmartWallet{
+	defaultWalletHiddenKey := HiddenWalletStorageKey(owner, sender.String())
+	defaultWalletIsHidden, _ := n.db.Exist([]byte(defaultWalletHiddenKey))
+
+	if (payload == nil || payload.FactoryAddress == "" || strings.EqualFold(payload.FactoryAddress, n.smartWalletConfig.FactoryAddress.Hex())) && !defaultWalletIsHidden {
+		// This is the default wallet with our own factory and it's not hidden
+	wallets = append(wallets, &avsproto.SmartWallet{
 			Address: sender.String(),
 			Factory: n.smartWalletConfig.FactoryAddress.String(),
 			Salt:    defaultSalt.String(),
@@ -212,6 +215,7 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 		w := &model.SmartWallet{}
 		if err := w.FromStorageData(item.Value); err != nil {
 			n.logger.Error("failed to parse wallet data", "error", err)
+			continue
 		}
 
 		if w.Salt.Cmp(defaultSalt) == 0 {
@@ -219,6 +223,13 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 		}
 
 		if payload != nil && payload.FactoryAddress != "" && !strings.EqualFold(w.Factory.String(), payload.FactoryAddress) {
+			continue
+		}
+
+		hiddenKey := HiddenWalletStorageKey(owner, w.Address.String())
+		isHidden, _ := n.db.Exist([]byte(hiddenKey))
+		
+		if isHidden {
 			continue
 		}
 
@@ -272,6 +283,9 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), StorageWriteError)
 	}
 
+	hiddenKey := HiddenWalletStorageKey(user.Address, sender.Hex())
+	_, _ = n.db.Exist([]byte(hiddenKey))
+
 	statSvc := NewStatService(n.db)
 	stat, _ := statSvc.GetTaskCount(wallet)
 
@@ -286,6 +300,34 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		FailedTaskCount:    stat.Failed,
 		CanceledTaskCount:  stat.Canceled,
 	}, nil
+}
+
+func (n *Engine) HideWallet(user *model.User, payload *avsproto.GetWalletReq, hide bool) (*avsproto.GetWalletResp, error) {
+	// Get the wallet first to validate it exists and belongs to the user
+	walletResp, err := n.GetWallet(user, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	walletAddress := common.HexToAddress(walletResp.Address)
+	hiddenKey := HiddenWalletStorageKey(user.Address, walletAddress.Hex())
+
+	updates := map[string][]byte{}
+	if hide {
+		updates[string(hiddenKey)] = []byte("1")
+	} else {
+		if err := n.db.Delete([]byte(hiddenKey)); err != nil {
+			return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), StorageWriteError)
+		}
+	}
+
+	if len(updates) > 0 {
+		if err = n.db.BatchWrite(updates); err != nil {
+			return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), StorageWriteError)
+		}
+	}
+
+	return walletResp, nil
 }
 
 // CreateTask records submission data
