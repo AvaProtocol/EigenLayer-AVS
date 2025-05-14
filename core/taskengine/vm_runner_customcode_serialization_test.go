@@ -7,6 +7,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestCustomCodeNodeJSONSerialization(t *testing.T) {
@@ -37,12 +38,12 @@ func TestCustomCodeNodeJSONSerialization(t *testing.T) {
 		t.Errorf("Expected step to be successful, but it failed with error: %s", step.Error)
 	}
 
-	customCode := step.GetCustomCode()
-	if customCode == nil {
+	customCodeOutputProto := step.GetCustomCode()
+	if customCodeOutputProto == nil {
 		t.Fatalf("Expected custom code output, but got nil")
 	}
 
-	if customCode.Data == nil {
+	if customCodeOutputProto.Data == nil {
 		t.Fatalf("Expected data in custom code output, but got nil")
 	}
 
@@ -56,29 +57,26 @@ func TestCustomCodeNodeJSONSerialization(t *testing.T) {
 
 	var jsonMap map[string]interface{}
 	if err := json.Unmarshal(jsonBytes, &jsonMap); err != nil {
-		t.Fatalf("Failed to unmarshal JSON: %v", err)
+		t.Fatalf("Failed to unmarshal JSON into map: %v", err)
 	}
 
-	customCodeMap, ok := jsonMap["custom_code"].(map[string]interface{})
+	customCodeJsonPart, ok := jsonMap["custom_code"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("Expected custom_code to be a map, got %T", jsonMap["custom_code"])
+		t.Fatalf("Expected 'custom_code' field to be a map, got %T", jsonMap["custom_code"])
 	}
 
-	dataMap, ok := customCodeMap["data"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("Expected data to be a map, got %T", customCodeMap["data"])
+	dataFieldJson, dataExists := customCodeJsonPart["data"]
+	if !dataExists {
+		t.Fatalf("Expected 'data' field within 'custom_code' JSON part")
 	}
 
-	if typeField, exists := dataMap["@type"]; exists {
-		t.Errorf("Expected no @type field, but got %v", typeField)
+	actualStringData, okStr := dataFieldJson.(string)
+	if !okStr {
+		t.Fatalf("Expected 'data' field in JSON to be a string (representing StringValue), got %T (value: %v)", dataFieldJson, dataFieldJson)
 	}
 
-	value, ok := dataMap["string_value"].(string)
-	if !ok {
-		t.Fatalf("Expected string_value to be a string, got %T", dataMap["string_value"])
-	}
-	if value != "my secret is dummy_value" {
-		t.Errorf("Expected value to be 'my secret is dummy_value', got %s", value)
+	if actualStringData != "my secret is dummy_value" {
+		t.Errorf("Expected JSON data string to be 'my secret is dummy_value', got '%s'", actualStringData)
 	}
 
 	execution := &avsproto.Execution{
@@ -89,33 +87,36 @@ func TestCustomCodeNodeJSONSerialization(t *testing.T) {
 		},
 	}
 
-	jsonBytes, err = m.Marshal(execution)
+	jsonBytesExecution, err := m.Marshal(execution)
 	if err != nil {
 		t.Fatalf("Failed to marshal execution to JSON: %v", err)
 	}
 
 	var parsedExecution avsproto.Execution
-	if err := protojson.Unmarshal(jsonBytes, &parsedExecution); err != nil {
+	if err := protojson.Unmarshal(jsonBytesExecution, &parsedExecution); err != nil {
 		t.Fatalf("Failed to unmarshal execution JSON: %v", err)
 	}
 
 	if len(parsedExecution.Steps) != 1 {
-		t.Fatalf("Expected 1 step, got %d", len(parsedExecution.Steps))
+		t.Fatalf("Expected 1 step in parsed execution, got %d", len(parsedExecution.Steps))
 	}
 
-	parsedCustomCode := parsedExecution.Steps[0].GetCustomCode()
-	if parsedCustomCode == nil {
+	parsedCustomCodeOutput := parsedExecution.Steps[0].GetCustomCode()
+	if parsedCustomCodeOutput == nil {
 		t.Fatalf("Expected custom code output in parsed execution, but got nil")
 	}
 
-	parsedValue := parsedCustomCode.Data
-
-	stringValue := parsedValue.GetStringValue()
-	if stringValue == "" {
-		t.Fatalf("Expected a string value, but got empty string or non-string type: %v", parsedValue)
+	parsedProtoValue := parsedCustomCodeOutput.Data
+	if parsedProtoValue == nil {
+		t.Fatalf("Parsed custom code data (*structpb.Value) is nil")
 	}
 
-	if stringValue != "my secret is dummy_value" {
-		t.Errorf("Expected parsed value to be 'my secret is dummy_value', got %s", stringValue)
+	stringValueKind, okStringKind := parsedProtoValue.GetKind().(*structpb.Value_StringValue)
+	if !okStringKind {
+		t.Fatalf("Expected parsed data to be of kind StringValue, got %T for value %v", parsedProtoValue.GetKind(), parsedProtoValue)
+	}
+
+	if stringValueKind.StringValue != "my secret is dummy_value" {
+		t.Errorf("Expected parsed StringValue to be 'my secret is dummy_value', got '%s'", stringValueKind.StringValue)
 	}
 }
