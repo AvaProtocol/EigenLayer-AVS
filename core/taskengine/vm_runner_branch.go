@@ -49,7 +49,6 @@ func (r *BranchProcessor) Validate(node *avsproto.BranchNode) error {
 			return fmt.Errorf("condition at index %d has invalid type: %s (must be 'if' or 'else')", i, condition.Type)
 		}
 
-
 		if condition.Type == "else" && i < len(node.Conditions)-1 {
 			if r.vm.logger != nil {
 				r.vm.logger.Warn("'else' condition is not the last one, subsequent conditions will be ignored")
