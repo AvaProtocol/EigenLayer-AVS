@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -995,14 +995,44 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	}
 
 	result := &avsproto.ListSecretsResp{
-		Items: []*avsproto.ListSecretsResp_ResponseSecret{},
+		Items:   []*avsproto.ListSecretsResp_ResponseSecret{},
+		Cursor:  "",
+		HasMore: false,
 	}
 
 	secretKeys, err := n.db.ListKeysMulti(prefixes)
 	if err != nil {
 		return nil, err
 	}
+
+	sort.Strings(secretKeys)
+	
+	var before, after, legacyCursor string
+	var itemPerPageVal int64
+	
+	if payload != nil {
+		before = payload.Before
+		after = payload.After
+		legacyCursor = payload.Cursor
+		itemPerPageVal = payload.ItemPerPage
+	}
+	
+	cursor, itemPerPage, err := SetupPagination(before, after, legacyCursor, itemPerPageVal)
+	if err != nil {
+		return nil, err
+	}
+
+	total := 0
+	var lastKey string
+
 	for _, k := range secretKeys {
+		if !cursor.IsZero() {
+			if (cursor.Direction == CursorDirectionNext && k <= cursor.Position) ||
+				(cursor.Direction == CursorDirectionPrevious && k >= cursor.Position) {
+				continue
+			}
+		}
+
 		secretWithNameOnly := SecretNameFromKey(k)
 		item := &avsproto.ListSecretsResp_ResponseSecret{
 			Name:       secretWithNameOnly.Name,
@@ -1011,6 +1041,17 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 		}
 
 		result.Items = append(result.Items, item)
+		lastKey = k
+		total++
+
+		if total >= itemPerPage {
+			result.HasMore = true
+			break
+		}
+	}
+
+	if result.HasMore && lastKey != "" {
+		result.Cursor = CreateNextCursor(lastKey)
 	}
 
 	return result, nil
