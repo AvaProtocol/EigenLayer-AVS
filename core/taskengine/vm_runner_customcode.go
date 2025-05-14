@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
