@@ -15,7 +15,7 @@ func TestCustomCodeNodeJSONSerialization(t *testing.T) {
 		vars:      make(map[string]interface{}),
 		TaskNodes: make(map[string]*avsproto.TaskNode),
 	}
-	
+
 	nodeID := "test_node"
 	vm.TaskNodes[nodeID] = &avsproto.TaskNode{
 		Id:   nodeID,
@@ -109,12 +109,12 @@ func TestCustomCodeNodeJSONSerialization(t *testing.T) {
 	}
 
 	parsedValue := parsedCustomCode.Data
-	
+
 	stringValue := parsedValue.GetStringValue()
 	if stringValue == "" {
 		t.Fatalf("Expected a string value, but got empty string or non-string type: %v", parsedValue)
 	}
-	
+
 	if stringValue != "my secret is dummy_value" {
 		t.Errorf("Expected parsed value to be 'my secret is dummy_value', got %s", stringValue)
 	}

@@ -14,7 +14,6 @@ require (
 	github.com/go-playground/validator/v10 v10.22.1
 	github.com/go-resty/resty/v2 v2.16.2
 	github.com/golang-jwt/jwt/v5 v5.2.1
-	github.com/golang/protobuf v1.5.4
 	github.com/labstack/echo/v4 v4.12.0
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/oklog/ulid/v2 v2.1.1-0.20240413180941-96c4edf226ef
@@ -70,6 +69,7 @@ require (
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/golang/glog v1.2.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
 	github.com/google/flatbuffers v1.12.1 // indirect
 	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
