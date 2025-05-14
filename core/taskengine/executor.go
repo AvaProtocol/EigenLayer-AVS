@@ -108,7 +108,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	var runTaskErr error = nil
 	if err = vm.Compile(); err != nil {
-		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", triggerMetadata)
+		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", triggerReason)
 		runTaskErr = err
 	} else {
 		runTaskErr = vm.Run()
