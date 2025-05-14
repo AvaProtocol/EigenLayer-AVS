@@ -1,0 +1,106 @@
+name: Publish Dev Docker image upon staging change
+
+on:
+#  pull_request:
+#    types: [closed]
+#    branches:
+#      - staging
+#    paths:
+#      - '**.go'
+#      - '!**/*_test.go'
+#      - '!**.yaml'
+#      - '!**.yml'
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: 'Branch to build from (default: staging). If commit_hash is provided, this branch context can be used for tagging.'
+        required: false
+        type: string
+        default: 'staging'
+      commit_hash:
+        description: 'Specific commit SHA to build (optional). Overrides branch for checkout if provided.'
+        required: false
+        type: string
+
+jobs:
+  publish-staging-build:
+    # If you want to keep the merged check for manual dispatch, you might need to adjust context
+    # For now, assuming manual dispatch doesn't need this specific PR context check.
+    # if: github.event.pull_request.merged == true 
+    name: Publish staging build docker image to dockerhub
+    runs-on: 'ubuntu-latest'
+    steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Checkout code
+        id: checkout_code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 
+          ref: ${{ github.event.inputs.commit_hash || github.event.inputs.branch_name || 'staging' }}
+
+      - name: Determine Tag Prefix and Build Context
+        id: vars
+        run: |
+          RAW_BRANCH_NAME=""
+          if [[ -n "${{ github.event.inputs.branch_name }}" ]]; then
+            RAW_BRANCH_NAME="${{ github.event.inputs.branch_name }}"
+          elif [[ -z "${{ github.event.inputs.commit_hash }}" ]]; then 
+            RAW_BRANCH_NAME="staging" 
+          else
+            RAW_BRANCH_NAME="staging" 
+          fi
+          
+          TAG_PREFIX=""
+          if [[ -n "$RAW_BRANCH_NAME" ]]; then
+            SANITIZED_NAME=$(echo "$RAW_BRANCH_NAME" | sed 's|/|-|g' | tr -cs 'a-zA-Z0-9.-' '-' | sed 's/--\\+/-/g' | sed 's/^-*//;s/-*$//')
+            if [[ -n "$SANITIZED_NAME" ]]; then
+              TAG_PREFIX="$SANITIZED_NAME"
+            fi
+          fi
+          echo "TAG_PREFIX=${TAG_PREFIX}" >> $GITHUB_OUTPUT
+          echo "Using RAW_BRANCH_NAME for prefix context: $RAW_BRANCH_NAME" 
+          echo "Resulting TAG_PREFIX: $TAG_PREFIX"
+        shell: bash
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: avaprotocol/avs-dev # Vertical bar for multi-line removed as it's a single image
+          tags: |
+            # Tag with the commit SHA (short version) - e.g., 7z1f16a
+            type=sha,format=short
+
+            # Tag with the sanitized branch name (TAG_PREFIX) if TAG_PREFIX is set - e.g., staging, myfeature
+            type=raw,value=${{ steps.vars.outputs.TAG_PREFIX }},enable=${{ steps.vars.outputs.TAG_PREFIX != '' }}
+
+            # Tag for a "manual" build of a specific non-staging branch - e.g., myfeature-manual
+            type=raw,value=${{ steps.vars.outputs.TAG_PREFIX }}-manual,enable=${{ github.event.inputs.branch_name != '' && github.event.inputs.branch_name != 'staging' && steps.vars.outputs.TAG_PREFIX != '' && steps.vars.outputs.TAG_PREFIX != 'staging' }}
+
+            # Tag with full SHA, optionally prefixed (for RELEASE_TAG build-arg consistency)
+            type=raw,value=${{ steps.vars.outputs.TAG_PREFIX }}${{ steps.vars.outputs.TAG_PREFIX && '-' || '' }}${{ github.sha }},enable=${{ steps.vars.outputs.TAG_PREFIX != '' }}
+            type=raw,value=${{ github.sha }},enable=${{ steps.vars.outputs.TAG_PREFIX == '' }} # Just full SHA if no prefix
+            
+      - name: Build and push staging docker image
+        uses: docker/build-push-action@v6
+        with:
+          build-args: |
+            RELEASE_TAG=${{ steps.vars.outputs.TAG_PREFIX }}${{ steps.vars.outputs.TAG_PREFIX && '-' || '' }}${{ github.sha }}
+            COMMIT_SHA=${{ github.sha }}
+          platforms: linux/amd64,linux/arm64
+          context: .
+          file: dockerfiles/operator.Dockerfile
+          push: true 
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

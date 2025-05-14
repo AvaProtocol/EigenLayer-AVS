@@ -40,13 +40,17 @@ func TestContractReadSimpleReturn(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
 			Trigger: trigger,
 		},
 	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+	if err != nil {
+		t.Errorf("failed to create VM: %v", err)
+		return
+	}
 
 	n := NewContractReadProcessor(vm, testutil.GetRpcClient())
 
@@ -57,7 +61,7 @@ func TestContractReadSimpleReturn(t *testing.T) {
 	}
 
 	if !step.Success {
-		t.Errorf("expected contract read node run succesfully but failed")
+		t.Errorf("expected contract read node run successfully but failed")
 	}
 
 	if !strings.Contains(step.Log, "Call balanceOf on 0x1c7d4b196cb0c7b01d743fbc6116a902379c7238 at") {
@@ -105,13 +109,17 @@ func TestContractReadComplexReturn(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
 			Trigger: trigger,
 		},
 	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+	if err != nil {
+		t.Errorf("failed to create VM: %v", err)
+		return
+	}
 
 	n := NewContractReadProcessor(vm, testutil.GetRpcClient())
 	step, err := n.Execute("123abc", node)
@@ -121,7 +129,7 @@ func TestContractReadComplexReturn(t *testing.T) {
 	}
 
 	if !step.Success {
-		t.Errorf("expected contract read node run succesfully but failed")
+		t.Errorf("expected contract read node run successfully but failed")
 	}
 
 	if !strings.Contains(step.Log, "Call getRoundData on 0xc59E3633BAAC79493d908e63626716e204A45EdF at") {

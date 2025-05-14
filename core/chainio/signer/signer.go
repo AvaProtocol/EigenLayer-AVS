@@ -74,7 +74,7 @@ func Verify(text []byte, sig string, submitAddress string) (bool, error) {
 		return false, err
 	}
 
-	if strings.ToLower(submitAddress) != strings.ToLower(recoveredAddr.String()) {
+	if !strings.EqualFold(submitAddress, recoveredAddr.String()) {
 		return false, fmt.Errorf("Invalid signature")
 	}
 

@@ -76,7 +76,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 	}
 
 	task := &model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "TaskID123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -181,7 +181,7 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 	}
 
 	task := &model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "TaskID123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -275,7 +275,7 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 	}
 
 	task := &model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "TaskID123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -411,7 +411,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 	}
 
 	task := &model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "TaskID123",
 			Nodes:   nodes,
 			Edges:   edges,

@@ -1,0 +1,95 @@
+name: Run Tests and Lint on PR or on-demand
+
+on:
+  pull_request:
+    # Only run tests when PR to staging of main and these files are changed
+    branches:
+      - main
+      - staging
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "core/**"
+      - "pkg/**"
+      - "aggregator/**"
+      - "operator/**"
+      - "model/**"
+      - "cmd/**"
+      - "version/**"
+      - "config/**"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to run tests against"
+        required: true
+        type: string
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ github.event.inputs.branch || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24'
+
+      - name: Cache golangci-lint binary
+        uses: actions/cache@v3
+        with:
+          path: $(go env GOPATH)/bin/golangci-lint
+          key: golangci-lint-v1.55.2
+
+      # - name: Install golangci-lint
+      #   run: |
+      #     if [ ! -f "$(go env GOPATH)/bin/golangci-lint" ]; then
+      #       curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
+      #     fi
+
+      # - name: Run golangci-lint
+      #   run: $(go env GOPATH)/bin/golangci-lint run ./...
+
+  test:
+    environment: Test
+    name: Unit Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        test:
+          - aggregator
+          - core/taskengine
+          - core/taskengine/trigger
+          - core/taskengine/macros
+          - pkg/timekeeper
+          - pkg/graphql
+          - pkg/byte4
+          - pkg/erc4337/preset
+          - core/backup
+          - core/migrator
+          - migrations
+          - operator
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ github.event.inputs.branch || github.ref }}
+
+      - name: Run Go test
+        env:
+          RPC_URL: "${{ secrets.RPC_URL }}"
+          BUNDLER_RPC: "${{ secrets.BUNDLER_RPC }}"
+          FACTORY_ADDRESS: "${{ vars.FACTORY_ADDRESS }}"
+          BASE_SEPOLIA_RPC_URL: "${{ secrets.BASE_SEPOLIA_RPC_URL }}"
+          BASE_SEPOLIA_BUNDLER_RPC: "${{ secrets.BASE_SEPOLIA_BUNDLER_RPC }}"
+          CONTROLLER_PRIVATE_KEY: "${{ secrets.CONTROLLER_PRIVATE_KEY }}"
+
+        run: |
+          cd ./${{ matrix.test }}
+          go test . -v

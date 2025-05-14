@@ -43,6 +43,10 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		"chainId", payload.ChainId,
 	)
 
+	if r.chainID != nil && payload.ChainId != r.chainID.Int64() {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid chainId: requested chainId %d does not match SmartWallet chainId %d", payload.ChainId, r.chainID.Int64())
+	}
+
 	if strings.Contains(payload.Signature, ".") {
 		// API key directly
 		authenticated, err := auth.VerifyJwtKeyForUser(r.config.JwtSecret, payload.Signature, submitAddress)
@@ -59,7 +63,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, auth.InvalidSignatureFormat)
 		}
-		if len(signature) < crypto.RecoveryIDOffset || len(signature) < crypto.RecoveryIDOffset {
+		if len(signature) < crypto.RecoveryIDOffset {
 			return nil, status.Errorf(codes.InvalidArgument, auth.InvalidSignatureFormat)
 		}
 		// https://stackoverflow.com/questions/49085737/geth-ecrecover-invalid-signature-recovery-id
@@ -85,6 +89,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		ExpiresAt: jwt.NewNumericDate(payload.ExpiredAt.AsTime()),
 		Issuer:    auth.Issuer,
 		Subject:   payload.Owner,
+		Audience:  jwt.ClaimStrings{fmt.Sprintf("%d", payload.ChainId)},
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -143,6 +148,12 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 			return nil, fmt.Errorf("%s", auth.InvalidAuthenticationKey)
 		}
 
+		chainIdStr := fmt.Sprintf("%d", r.chainID)
+		aud, err := token.Claims.GetAudience()
+		if err != nil || len(aud) == 0 || aud[0] != chainIdStr {
+			return nil, fmt.Errorf("%s: invalid chainId in audience", auth.InvalidAuthenticationKey)
+		}
+
 		user := model.User{
 			Address: common.HexToAddress(claims["sub"].(string)),
 		}
@@ -157,8 +168,10 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 				return nil, fmt.Errorf("Rpc error")
 			}
 
-			// We don't care if its error out in caching
-			r.cache.Set(cachekey, user.SmartAccountAddress.Bytes())
+			// We don't care if its error out in caching, but log it for debugging
+			if err := r.cache.Set(cachekey, user.SmartAccountAddress.Bytes()); err != nil {
+				r.config.Logger.Debug("failed to cache smart wallet address", "error", err)
+			}
 		}
 
 		return &user, nil

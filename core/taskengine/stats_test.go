@@ -47,7 +47,7 @@ func TestTaskStatCountCompleted(t *testing.T) {
 	user1 := testutil.TestUser1()
 
 	task1 := &model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),
 			Id:                 "t1",
@@ -76,7 +76,7 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 	user1 := testutil.TestUser1()
 
 	task1 := &model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),
 			Id:                 "t1",
@@ -84,7 +84,7 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 	}
 
 	task2 := &model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),
 			Id:                 "t2",
@@ -92,7 +92,7 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 	}
 
 	task3 := &model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),
 			Id:                 "t3",
@@ -100,7 +100,7 @@ func TestTaskStatCountAllStatus(t *testing.T) {
 	}
 
 	task4 := &model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Owner:              user1.Address.Hex(),
 			SmartWalletAddress: user1.SmartAccountAddress.Hex(),
 			Id:                 "t4",

@@ -7,7 +7,9 @@ import (
 func ConfigureGojaRuntime(runtime *goja.Runtime) {
 	objectPrototype := runtime.Get("Object").ToObject(runtime).Get("prototype").ToObject(runtime)
 
-	objectPrototype.Set("toString", func() string {
+	if err := objectPrototype.Set("toString", func() string {
 		return "[object Object]"
-	})
+	}); err != nil {
+		return
+	}
 }

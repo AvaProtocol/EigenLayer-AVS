@@ -12,7 +12,7 @@ import (
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/samber/lo"
 
-	"github.com/ethereum/go-ethereum"
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -136,7 +136,9 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 					evtTrigger.wsEthClient.Close()
 				}
 
-				evtTrigger.retryConnectToRpc()
+				if err := evtTrigger.retryConnectToRpc(); err != nil {
+					evtTrigger.logger.Error("failed to reconnect to RPC", "error", err)
+				}
 				sub, err = evtTrigger.wsEthClient.SubscribeFilterLogs(context.Background(), query, logs)
 			case event := <-logs:
 				evtTrigger.logger.Debug("detect new event, evaluate checks", "event", event.Topics, "contract", event.Address, "tx", event.TxHash)
@@ -218,7 +220,7 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 			case "topics":
 				// Matching based on topic of transaction
 				topics := lo.Map[common.Hash, string](event.Topics, func(topic common.Hash, _ int) string {
-					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x"))
 				})
 
 				match := true
@@ -250,7 +252,9 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 
 		envs := macros.GetEnvs(map[string]interface{}{})
 		for k, v := range envs {
-			jsvm.Set(k, v)
+			if err := jsvm.Set(k, v); err != nil {
+				return false, fmt.Errorf("failed to set macro env in JS VM: %w", err)
+			}
 		}
 
 		triggerData := map[string]interface{}{
@@ -263,7 +267,9 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 				"tx_hash": event.TxHash,
 			},
 		}
-		jsvm.Set(triggerVarName, triggerData)
+		if err := jsvm.Set(triggerVarName, triggerData); err != nil {
+			return false, fmt.Errorf("failed to set trigger data in JS VM: %w", err)
+		}
 
 		result, err := jsvm.RunString(check.Program)
 
@@ -277,7 +283,6 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 		}
 
 		return evalutationResult, err
-
 	}
 
 	err = fmt.Errorf("invalid event trigger check: both matcher or expression are missing or empty")

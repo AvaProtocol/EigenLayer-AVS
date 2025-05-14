@@ -261,7 +261,9 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.startTaskEngine(ctx)
 
 	agg.logger.Infof("Starting rpc server")
-	agg.startRpcServer(ctx)
+	if err := agg.startRpcServer(ctx); err != nil {
+		agg.logger.Error("failed to start RPC server", "error", err)
+	}
 
 	agg.logger.Info("Starting repl")
 	agg.startRepl()

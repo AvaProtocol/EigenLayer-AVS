@@ -28,8 +28,8 @@ type Job struct {
 	Attempt   uint64 `json:"a,omitempty"`
 
 	// id of the job in the queue system
-	// This ID is generate by this package in a sequence. The ID is gurantee to
-	// be unqiue and can be used as part of the signature as nonce
+	// This ID is generate by this package in a sequence. The ID is guarantee to
+	// be unique and can be used as part of the signature as nonce
 	ID uint64 `json:"id"`
 }
 

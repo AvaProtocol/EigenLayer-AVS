@@ -74,19 +74,19 @@ production/deploy: confirm tidy audit no-dirty
 ## protoc-gen: generate protoc buf Go binding
 .PHONY: protoc-gen
 protoc-gen:
-	protoc \
-		--go_out=. \
+	@echo "Ensuring output directory ./protobuf exists..."
+	@mkdir -p ./protobuf
+	@echo "Deleting old generated files from ./protobuf/ (if any)..."
+	@rm -f ./protobuf/*.pb.go
+	@echo "Generating Go bindings (expected into ./protobuf/ as package avsproto)..."
+	@protoc \
+		--proto_path=protobuf \
+		--go_out=./protobuf \
 		--go_opt=paths=source_relative \
-    	--go-grpc_out=. \
+    	--go-grpc_out=./protobuf \
 		--go-grpc_opt=paths=source_relative \
-    	protobuf/avs.proto
-
-	protoc \
-		--go_out=. \
-		--go_opt=paths=source_relative \
-    	--go-grpc_out=. \
-		--go-grpc_opt=paths=source_relative \
-    	protobuf/node.proto
+    	protobuf/avs.proto protobuf/node.proto
+	@echo "Protobuf Go generation complete. Files should be in ./protobuf/ and declare package avsproto."
 
 ## up: bring up docker compose stack
 up:

@@ -48,8 +48,6 @@ func (b *CommonTrigger) retryConnectToRpc() error {
 		b.logger.Errorf("cannot establish websocket client for RPC, retry in 15 seconds", "err", err)
 		time.Sleep(15 * time.Second)
 	}
-
-	return nil
 }
 
 func (b *CommonTrigger) Shutdown() {

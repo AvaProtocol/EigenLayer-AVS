@@ -118,5 +118,5 @@ func TestExpressionPanicWonCrash(t *testing.T) {
 		t.Errorf("Evaluate wrong. Expected: nil, got: %v", r)
 	}
 
-	t.Logf("Succesfully recovered from VM crash")
+	t.Logf("Successfully recovered from VM crash")
 }

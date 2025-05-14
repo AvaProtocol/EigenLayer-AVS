@@ -99,7 +99,9 @@ func (o *OperatorPool) GetAll() []*OperatorNode {
 
 	for _, rawValue := range kvs {
 		node := &OperatorNode{}
-		json.Unmarshal(rawValue.Value, node)
+		if err := json.Unmarshal(rawValue.Value, node); err != nil {
+			continue
+		}
 
 		nodes = append(nodes, node)
 	}

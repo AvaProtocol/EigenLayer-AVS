@@ -54,11 +54,16 @@ func (w *Worker) ProcessSignal(jid uint64) {
 	w.logger.Info("decoded job", "job_id", jid, "jobName", job.Name, "jobdata", string(job.Data))
 
 	if err == nil {
-		w.q.markJobDone(job, jobComplete)
-		w.logger.Info("succesfully perform job", "job_id", jid, "task_id", job.Name)
+		if markErr := w.q.markJobDone(job, jobComplete); markErr != nil {
+			w.logger.Error("failed to mark job as complete", "error", markErr, "job_id", jid)
+		} else {
+			w.logger.Info("successfully perform job", "job_id", jid, "task_id", job.Name)
+		}
 	} else {
 		// TODO: move to a retry queue depend on what kind of error
-		w.q.markJobDone(job, jobFailed)
+		if markErr := w.q.markJobDone(job, jobFailed); markErr != nil {
+			w.logger.Error("failed to mark job as failed", "error", markErr, "job_id", jid)
+		}
 		w.logger.Error("failed to perform job", "error", err, "job_id", jid, "task_id", job.Name)
 	}
 }

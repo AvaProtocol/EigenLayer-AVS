@@ -84,7 +84,11 @@ func getNextSeq(seq storage.Sequence) (num uint64, err error) {
 		r := recover()
 		if r != nil {
 			// recover from panic and send err instead
-			err = r.(error)
+			if e, ok := r.(error); ok {
+				err = e
+			} else {
+				err = fmt.Errorf("unknown panic: %v", r)
+			}
 		}
 	}()
 

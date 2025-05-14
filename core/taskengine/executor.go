@@ -67,25 +67,41 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 		return fmt.Errorf("error decode job payload when executing task: %s with job id %d", task.Id, job.ID)
 	}
 
-	_, err = x.RunTask(task, queueData)
-	return err
+	// Execute the task logic
+	_, runErr := x.RunTask(task, queueData)
+
+	if runErr == nil {
+		// Task logic executed successfully. Clean up the TaskTriggerKey for this async execution.
+		if queueData != nil && queueData.ExecutionID != "" { // Assumes `ExecutionID` is always set for queued jobs. Verify this assumption if the logic changes.
+			triggerKeyToClean := TaskTriggerKey(task, queueData.ExecutionID)
+			if delErr := x.db.Delete(triggerKeyToClean); delErr != nil {
+				x.logger.Error("Perform: Failed to delete TaskTriggerKey after successful async execution",
+					"key", string(triggerKeyToClean), "task_id", task.Id, "execution_id", queueData.ExecutionID, "error", delErr)
+			} else {
+				// Successfully deleted, no need for a verbose log here unless for specific debug scenarios
+				// x.logger.Info("Perform: Successfully deleted TaskTriggerKey after async execution",
+				// 	"key", string(triggerKeyToClean), "task_id", task.Id, "execution_id", queueData.ExecutionID)
+			}
+		}
+		return nil // Job processed successfully
+	}
+
+	// If runErr is not nil, the task logic failed.
+	// x.logger.Error("Perform: Task execution failed, not deleting TaskTriggerKey.", "task_id", task.Id, "execution_id", queueData.ExecutionID, "error", runErr)
+	return runErr // Propagate the error from task execution
 }
 
 func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) (*avsproto.Execution, error) {
-	defer func() {
-		// Delete the task trigger queue when we're done, the execution log is available in main task storage at this point
-		x.db.GetKey(TaskTriggerKey(task, queueData.ExecutionID))
-	}()
-
 	if queueData == nil || queueData.ExecutionID == "" {
 		return nil, fmt.Errorf("internal error: invalid execution id")
 	}
-	triggerMetadata := queueData.Reason
+
+	triggerReason := GetTriggerReasonOrDefault(queueData.Reason, task.Id, x.logger)
 
 	secrets, _ := LoadSecretForTask(x.db, task)
 	vm, err := NewVMWithData(
 		task,
-		triggerMetadata,
+		triggerReason,
 		x.smartWalletConfig,
 		secrets,
 	)
@@ -102,12 +118,12 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	t0 := time.Now()
-	task.TotalExecution += 1
+	task.ExecutionCount += 1
 	task.LastRanAt = t0.UnixMilli()
 
 	var runTaskErr error = nil
 	if err = vm.Compile(); err != nil {
-		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", triggerMetadata)
+		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", triggerReason)
 		runTaskErr = err
 	} else {
 		runTaskErr = vm.Run()
@@ -116,7 +132,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	t1 := time.Now()
 
 	// when MaxExecution is 0, it means unlimited run until cancel
-	if task.MaxExecution > 0 && task.TotalExecution >= task.MaxExecution {
+	if task.MaxExecution > 0 && task.ExecutionCount >= task.MaxExecution {
 		task.SetCompleted()
 	}
 
@@ -131,7 +147,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		Success:     runTaskErr == nil,
 		Error:       "",
 		Steps:       vm.ExecutionLogs,
-		Reason:      triggerMetadata,
+		Reason:      triggerReason,
 		TriggerName: task.Trigger.Name,
 
 		// Note: despite the name OutputData, this isn't output data of the task, it's the parsed and enrich data based on the event
@@ -140,7 +156,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	if runTaskErr != nil {
-		x.logger.Error("error executing task", "error", err, "runError", runTaskErr, "task_id", task.Id, "triggermark", triggerMetadata)
+		x.logger.Error("error executing task", "error", err, "runError", runTaskErr, "task_id", task.Id, "triggermark", triggerReason)
 		execution.Error = runTaskErr.Error()
 	}
 
@@ -168,8 +184,9 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	if runTaskErr == nil {
-		x.logger.Info("succesfully executing task", "task_id", task.Id, "triggermark", triggerMetadata)
+		x.logger.Info("successfully executing task", "task_id", task.Id, "triggermark", triggerReason)
 		return execution, nil
 	}
+
 	return execution, fmt.Errorf("Error executing task %s: %v", task.Id, runTaskErr)
 }

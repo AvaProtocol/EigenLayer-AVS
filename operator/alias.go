@@ -56,7 +56,7 @@ func CreateOrImportAliasKey(o CreateAliasKeyOption) {
 		return
 	}
 
-	fmt.Printf("alias key is succesfully written to %s and encrypted with your provider passphrease.\n", o.Filename)
+	fmt.Printf("alias key is successfully written to %s and encrypted with your provider passphrease.\n", o.Filename)
 }
 
 // Declare alias key for the operator
@@ -107,7 +107,7 @@ func (o *Operator) DeclareAlias(filepath string) error {
 		return fmt.Errorf("declareAlias transaction %s reverted", receipt.TxHash.Hex())
 	}
 
-	fmt.Printf("succesfully declared an alias for operator %s alias address %s at tx %s ", o.operatorAddr.String(), crypto.PubkeyToAddress(aliasEcdsaPair.PublicKey), receipt.TxHash.Hex())
+	fmt.Printf("successfully declared an alias for operator %s alias address %s at tx %s ", o.operatorAddr.String(), crypto.PubkeyToAddress(aliasEcdsaPair.PublicKey), receipt.TxHash.Hex())
 	return nil
 }
 
@@ -154,6 +154,6 @@ func (o *Operator) RemoveAlias() error {
 		return fmt.Errorf("declareAlias transaction %s reverted", receipt.TxHash.Hex())
 	}
 
-	fmt.Printf("succesfully remove alias %s for operator %s  at tx %s ", o.signerAddress.String(), o.operatorAddr.String(), receipt.TxHash.Hex())
+	fmt.Printf("successfully remove alias %s for operator %s  at tx %s ", o.signerAddress.String(), o.operatorAddr.String(), receipt.TxHash.Hex())
 	return nil
 }
