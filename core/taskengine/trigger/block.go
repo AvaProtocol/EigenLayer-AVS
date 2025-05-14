@@ -76,8 +76,6 @@ func (b *BlockTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 	return nil
 }
 
-//
-//
 func (b *BlockTrigger) RemoveCheck(taskID string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

@@ -163,43 +163,43 @@ func (m *MockTimeTrigger) Run(ctx context.Context) error {
 func TestBlockTasksMapCleanup(t *testing.T) {
 	blockTasksMap := make(map[int64][]string)
 	blockTasksMutex := &sync.Mutex{}
-	
+
 	for i := int64(1); i <= 15; i++ {
 		blockTasksMap[i] = []string{"task" + strconv.FormatInt(i, 10)}
 	}
-	
+
 	cleanupFunc := func() {
 		blockTasksMutex.Lock()
 		defer blockTasksMutex.Unlock()
-		
+
 		if len(blockTasksMap) > 10 {
 			var blocks []int64
 			for block := range blockTasksMap {
 				blocks = append(blocks, block)
 			}
-			
+
 			sort.Slice(blocks, func(i, j int) bool {
 				return blocks[i] < blocks[j]
 			})
-			
+
 			for i := 0; i < len(blocks)-10; i++ {
 				delete(blockTasksMap, blocks[i])
 			}
 		}
 	}
-	
+
 	cleanupFunc()
-	
+
 	if len(blockTasksMap) != 10 {
 		t.Errorf("Expected 10 entries in blockTasksMap after cleanup, got %d", len(blockTasksMap))
 	}
-	
+
 	for i := int64(1); i <= 5; i++ {
 		if _, exists := blockTasksMap[i]; exists {
 			t.Errorf("Expected block %d to be removed from blockTasksMap", i)
 		}
 	}
-	
+
 	for i := int64(6); i <= 15; i++ {
 		if _, exists := blockTasksMap[i]; !exists {
 			t.Errorf("Expected block %d to remain in blockTasksMap", i)
@@ -210,28 +210,28 @@ func TestBlockTasksMapCleanup(t *testing.T) {
 func TestBlockTasksMapConcurrency(t *testing.T) {
 	blockTasksMap := make(map[int64][]string)
 	blockTasksMutex := &sync.Mutex{}
-	
+
 	var wg sync.WaitGroup
-	
+
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			
+
 			blockNum := int64(i % 5) // Use 5 different block numbers
-			
+
 			blockTasksMutex.Lock()
 			blockTasksMap[blockNum] = append(blockTasksMap[blockNum], "task"+strconv.Itoa(i))
 			blockTasksMutex.Unlock()
 		}(i)
 	}
-	
+
 	wg.Wait()
-	
+
 	if len(blockTasksMap) != 5 {
 		t.Errorf("Expected 5 different block numbers in blockTasksMap, got %d", len(blockTasksMap))
 	}
-	
+
 	for blockNum, tasks := range blockTasksMap {
 		expectedCount := 2 // Each block number should have 2 tasks (10 tasks / 5 block numbers)
 		if len(tasks) != expectedCount {
@@ -243,36 +243,36 @@ func TestBlockTasksMapConcurrency(t *testing.T) {
 func TestLogLevelChanges(t *testing.T) {
 	mockLogger := NewMockLogger()
 	blockTasksMap := make(map[int64][]string)
-	
+
 	handleBlockTrigger := func(taskID string, blockNum int64) {
 		mockLogger.Debug("block trigger details", "task_id", taskID, "marker", blockNum)
-		
+
 		blockTasksMap[blockNum] = append(blockTasksMap[blockNum], taskID)
-		
+
 		taskCount := len(blockTasksMap[blockNum])
 		if taskCount == 1 || taskCount%5 == 0 {
 			mockLogger.Info("block trigger summary", "block", blockNum, "task_count", taskCount)
 		}
 	}
-	
+
 	handleBlockTrigger("task1", 100)
-	
+
 	if len(mockLogger.debugMessages) != 1 {
 		t.Errorf("Expected 1 debug message, got %d", len(mockLogger.debugMessages))
 	}
-	
+
 	if len(mockLogger.infoMessages) != 1 {
 		t.Errorf("Expected 1 info message, got %d", len(mockLogger.infoMessages))
 	}
-	
+
 	for i := 0; i < 4; i++ {
 		handleBlockTrigger("task"+strconv.Itoa(i+2), 100)
 	}
-	
+
 	if len(mockLogger.debugMessages) != 5 {
 		t.Errorf("Expected 5 debug messages, got %d", len(mockLogger.debugMessages))
 	}
-	
+
 	if len(mockLogger.infoMessages) != 2 {
 		t.Errorf("Expected 2 info messages, got %d", len(mockLogger.infoMessages))
 	}
@@ -281,53 +281,53 @@ func TestLogLevelChanges(t *testing.T) {
 func TestSchedulerCleanupJob(t *testing.T) {
 	blockTasksMap := make(map[int64][]string)
 	blockTasksMutex := &sync.Mutex{}
-	
+
 	for i := int64(1); i <= 15; i++ {
 		blockTasksMap[i] = []string{"task" + strconv.FormatInt(i, 10)}
 	}
-	
+
 	cleanupDone := make(chan bool)
-	
+
 	cleanupFunc := func() {
 		blockTasksMutex.Lock()
 		defer blockTasksMutex.Unlock()
-		
+
 		if len(blockTasksMap) > 10 {
 			var blocks []int64
 			for block := range blockTasksMap {
 				blocks = append(blocks, block)
 			}
-			
+
 			sort.Slice(blocks, func(i, j int) bool {
 				return blocks[i] < blocks[j]
 			})
-			
+
 			for i := 0; i < len(blocks)-10; i++ {
 				delete(blockTasksMap, blocks[i])
 			}
 		}
-		
+
 		cleanupDone <- true
 	}
-	
+
 	go cleanupFunc()
-	
+
 	select {
 	case <-cleanupDone:
 	case <-time.After(time.Second):
 		t.Fatal("Cleanup job did not run within the expected time")
 	}
-	
+
 	if len(blockTasksMap) != 10 {
 		t.Errorf("Expected 10 entries in blockTasksMap after cleanup, got %d", len(blockTasksMap))
 	}
-	
+
 	for i := int64(1); i <= 5; i++ {
 		if _, exists := blockTasksMap[i]; exists {
 			t.Errorf("Expected block %d to be removed from blockTasksMap", i)
 		}
 	}
-	
+
 	for i := int64(6); i <= 15; i++ {
 		if _, exists := blockTasksMap[i]; !exists {
 			t.Errorf("Expected block %d to remain in blockTasksMap", i)
