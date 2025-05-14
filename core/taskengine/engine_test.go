@@ -468,9 +468,22 @@ func TestTriggerAsync(t *testing.T) {
 		TaskId:      result.Id,
 		ExecutionId: resultTrigger.ExecutionId,
 	})
+	if err != nil {
+		t.Fatalf("Error getting execution status after processing: %v", err)
+	}
 
 	if executionStatus.Status != avsproto.ExecutionStatus_Finished {
 		t.Errorf("invalid execution status, expected completed but got %s", avsproto.TaskStatus_name[int32(executionStatus.Status)])
+	}
+
+	// Verify TaskTriggerKey is cleaned up after successful async execution
+	triggerKeyBytes := TaskTriggerKey(result, resultTrigger.ExecutionId)
+	val, errDbRead := db.GetKey(triggerKeyBytes)
+	if errDbRead == nil {
+		t.Errorf("Expected TaskTriggerKey '%s' to be deleted after async execution, but it was found with value: %s", string(triggerKeyBytes), string(val))
+	} else if !strings.Contains(errDbRead.Error(), "Key not found") {
+		// Allow "Key not found", but log other errors
+		t.Logf("Got an unexpected error when checking for deleted TaskTriggerKey '%s': %v. This might be okay if it implies not found.", string(triggerKeyBytes), errDbRead)
 	}
 }
 
