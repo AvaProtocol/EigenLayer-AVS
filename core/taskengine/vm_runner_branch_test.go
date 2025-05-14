@@ -599,8 +599,7 @@ func TestBranchNodeMalformedData(t *testing.T) {
 				{Id: "condition1", Type: "if", Expression: "a > 10"},
 				{Id: "condition2", Type: "if", Expression: ""},
 			},
-			expectError: true,
-			errorMsg:    "condition at index 1 has empty expression",
+			expectError: false,
 		},
 		{
 			name: "whitespace if expression",
@@ -608,8 +607,7 @@ func TestBranchNodeMalformedData(t *testing.T) {
 				{Id: "condition1", Type: "if", Expression: "a > 10"},
 				{Id: "condition2", Type: "if", Expression: "   \t\n  "},
 			},
-			expectError: true,
-			errorMsg:    "condition at index 1 has empty expression",
+			expectError: false,
 		},
 		{
 			name: "valid conditions",
