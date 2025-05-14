@@ -109,14 +109,10 @@ func TestCustomCodeNodeJSONSerialization(t *testing.T) {
 	}
 
 	parsedValue := parsedCustomCode.Data
-	var valueMap map[string]interface{}
-	if err := json.Unmarshal([]byte(parsedValue.GetValue()), &valueMap); err != nil {
-		t.Fatalf("Failed to unmarshal Any value: %v", err)
-	}
 	
-	stringValue, ok := valueMap["stringValue"].(string)
-	if !ok {
-		t.Fatalf("Expected stringValue to be a string, got %T", valueMap["stringValue"])
+	stringValue := parsedValue.GetStringValue()
+	if stringValue == "" {
+		t.Fatalf("Expected a string value, but got empty string or non-string type: %v", parsedValue)
 	}
 	
 	if stringValue != "my secret is dummy_value" {
