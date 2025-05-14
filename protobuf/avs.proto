@@ -687,6 +687,8 @@ service Aggregator {
   // Smart Acccount Operation
   rpc GetNonce(NonceRequest)        returns (NonceResp) {};
   rpc GetWallet(GetWalletReq)       returns (GetWalletResp) {};
+  rpc HideWallet(GetWalletReq)      returns (GetWalletResp) {};
+  rpc UnhideWallet(GetWalletReq)    returns (GetWalletResp) {};
   rpc ListWallets(ListWalletReq)    returns (ListWalletResp) {};
 
   
