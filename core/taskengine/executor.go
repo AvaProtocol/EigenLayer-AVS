@@ -80,7 +80,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	if queueData == nil || queueData.ExecutionID == "" {
 		return nil, fmt.Errorf("internal error: invalid execution id")
 	}
-	
+
 	triggerMetadata := queueData.Reason
 	if triggerMetadata == nil {
 		x.logger.Debug("Task trigger reason is nil, creating default reason", "task_id", task.Id, "execution_id", queueData.ExecutionID)
