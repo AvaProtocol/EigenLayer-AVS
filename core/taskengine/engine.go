@@ -303,6 +303,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 }
 
 func (n *Engine) HideWallet(user *model.User, payload *avsproto.GetWalletReq, hide bool) (*avsproto.GetWalletResp, error) {
+	// Get the wallet first to validate it exists and belongs to the user
 	walletResp, err := n.GetWallet(user, payload)
 	if err != nil {
 		return nil, err
