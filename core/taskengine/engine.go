@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -232,11 +232,16 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 			continue
 		}
 
-		allWallets = append(allWallets, &avsproto.SmartWallet{
+		wallet := &avsproto.SmartWallet{
 			Address: w.Address.String(),
-			Factory: w.Factory.String(),
 			Salt:    w.Salt.String(),
-		})
+		}
+		
+		if w.Factory != nil {
+			wallet.Factory = w.Factory.String()
+		}
+		
+		allWallets = append(allWallets, wallet)
 	}
 
 	var before, after, legacyCursor string
@@ -254,9 +259,9 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 		return nil, err
 	}
 
-	// slices.SortFunc(allWallets, func(a, b *avsproto.SmartWallet) int {
-	//     return strings.Compare(a.Address, b.Address)
-	// })
+	sort.Slice(allWallets, func(i, j int) bool {
+		return strings.Compare(allWallets[i].Address, allWallets[j].Address) < 0
+	})
 
 	result := &avsproto.ListWalletResp{
 		Items:   []*avsproto.SmartWallet{},
