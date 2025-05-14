@@ -36,23 +36,26 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Checkout
+      - name: Checkout code
+        id: checkout_code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Ensure fetch-depth is 0 for git log
-          # For workflow_dispatch, you might need to explicitly checkout the branch from input
-          ref: ${{ github.event.inputs.branch || github.ref }}
+          fetch-depth: 0 
+          ref: ${{ github.event.inputs.commit_hash || github.event.inputs.branch_name || 'staging' }}
 
-      - name: Determine Tag Prefix from Source Branch
+      - name: Determine Tag Prefix and Build Context
         id: vars
         run: |
-          # For workflow_dispatch, github.event.pull_request.head.ref won't exist.
-          # Need to adapt how RAW_BRANCH_NAME is set or use a default/input for manual runs.
-          # For simplicity, if this script is now mainly for manual dispatch based on an input branch,
-          # we might simplify or use github.ref_name for the branch name when manually dispatched.
-          RAW_BRANCH_NAME="${{ github.event.inputs.branch || github.ref_name }}"
-          TAG_PREFIX="" 
-
+          RAW_BRANCH_NAME=""
+          if [[ -n "${{ github.event.inputs.branch_name }}" ]]; then
+            RAW_BRANCH_NAME="${{ github.event.inputs.branch_name }}"
+          elif [[ -z "${{ github.event.inputs.commit_hash }}" ]]; then 
+            RAW_BRANCH_NAME="staging" 
+          else
+            RAW_BRANCH_NAME="staging" 
+          fi
+          
+          TAG_PREFIX=""
           if [[ -n "$RAW_BRANCH_NAME" ]]; then
             SANITIZED_NAME=$(echo "$RAW_BRANCH_NAME" | sed 's|/|-|g' | tr -cs 'a-zA-Z0-9.-' '-' | sed 's/--\\+/-/g' | sed 's/^-*//;s/-*$//')
             if [[ -n "$SANITIZED_NAME" ]]; then
@@ -60,6 +63,8 @@ jobs:
             fi
           fi
           echo "TAG_PREFIX=${TAG_PREFIX}" >> $GITHUB_OUTPUT
+          echo "Using RAW_BRANCH_NAME for prefix context: $RAW_BRANCH_NAME" 
+          echo "Resulting TAG_PREFIX: $TAG_PREFIX"
         shell: bash
 
       - name: Set up QEMU
@@ -75,12 +80,10 @@ jobs:
           images: |
             avaprotocol/avs-dev
           tags: |
-            # type=pr # This won't work for workflow_dispatch without PR context
-            type=raw,value={{sha}} # Full commit SHA
-            # Add a tag based on the branch/prefix if TAG_PREFIX is set
-            type=raw,value=${{ steps.vars.outputs.TAG_PREFIX }}${{ steps.vars.outputs.TAG_PREFIX && '-' || '' }}{{ github.event.inputs.branch && 'manual' || github.sha_short }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/staging' || github.event.inputs.branch == 'staging' }}
-
+            type=sha,prefix=${{ steps.vars.outputs.TAG_PREFIX }}${{ steps.vars.outputs.TAG_PREFIX && '-' || '' }},suffix='',format=short # TAG_PREFIX-shortSHA or shortSHA
+            type=raw,value=${{ steps.vars.outputs.TAG_PREFIX }}${{ steps.vars.outputs.TAG_PREFIX && '-' || '' }}${{ github.event.inputs.branch_name && format('{0}-manual', github.sha_short) || github.sha_short }}
+            type=raw,value=latest,enable=${{ (github.event.inputs.branch_name == 'staging' || (github.event_name == 'workflow_dispatch' && !github.event.inputs.branch_name && !github.event.inputs.commit_hash)) && steps.vars.outputs.TAG_PREFIX == 'staging' }} # latest if effectively staging
+            
       - name: Build and push staging docker image
         uses: docker/build-push-action@v6
         with:
