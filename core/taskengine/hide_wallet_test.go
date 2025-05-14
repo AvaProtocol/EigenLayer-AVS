@@ -157,3 +157,4 @@ func TestHideDefaultWallet(t *testing.T) {
 		}
 	}
 }
+// Force CI rebuild
