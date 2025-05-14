@@ -49,7 +49,7 @@ func TestExecutorRunTaskWithNilReason(t *testing.T) {
 	}
 
 	task := &model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "ManualTaskID",
 			Nodes:   nodes,
 			Edges:   edges,

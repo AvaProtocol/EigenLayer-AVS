@@ -175,7 +175,13 @@ func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListEx
 		"task_id", payload.TaskIds,
 		"cursor", payload.Cursor,
 	)
-	return r.engine.ListExecutions(user, payload)
+	listExecResp, err := r.engine.ListExecutions(user, payload)
+	if err != nil {
+		r.config.Logger.Error("error listing executions from engine", "error", err)
+		return nil, err
+	}
+
+	return listExecResp, nil
 }
 
 func (r *RpcServer) GetExecution(ctx context.Context, payload *avsproto.ExecutionReq) (*avsproto.Execution, error) {
