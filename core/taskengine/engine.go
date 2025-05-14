@@ -477,10 +477,10 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	}
 
 	// second, do the sort, this is key sorted by ordering of their insertion
-	slices.SortFunc(taskKeys, func(a, b string) int {
-		id1 := ulid.MustParse(string(model.TaskKeyToId([]byte(a[2:]))))
-		id2 := ulid.MustParse(string(model.TaskKeyToId([]byte(b[2:]))))
-		return id1.Compare(id2)
+	sort.Slice(taskKeys, func(i, j int) bool {
+		id1 := ulid.MustParse(string(model.TaskKeyToId([]byte(taskKeys[i][2:]))))
+		id2 := ulid.MustParse(string(model.TaskKeyToId([]byte(taskKeys[j][2:]))))
+		return id1.Compare(id2) < 0
 	})
 
 	taskResp := &avsproto.ListTasksResp{
@@ -677,10 +677,10 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	executionKeys, err := n.db.ListKeysMulti(prefixes)
 
 	// second, do the sort, this is key sorted by ordering of their insertion
-	slices.SortFunc(executionKeys, func(a, b string) int {
-		id1 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(a))))
-		id2 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(b))))
-		return id1.Compare(id2)
+	sort.Slice(executionKeys, func(i, j int) bool {
+		id1 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(executionKeys[i]))))
+		id2 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(executionKeys[j]))))
+		return id1.Compare(id2) < 0
 	})
 
 	if err != nil {

@@ -5,8 +5,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const DefaultItemPerPage = 50
-
 func SetupPagination(before, after, legacyCursor string, itemPerPage int64) (*Cursor, int, error) {
 	cursor, err := CursorFromBeforeAfter(before, after)
 	if err != nil {
