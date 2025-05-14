@@ -36,6 +36,14 @@ func WalletStorageKey(owner common.Address, smartWalletAddress string) string {
 	)
 }
 
+func HiddenWalletStorageKey(owner common.Address, smartWalletAddress string) string {
+	return fmt.Sprintf(
+		"wh:%s:%s",
+		strings.ToLower(owner.Hex()),
+		strings.ToLower(smartWalletAddress),
+	)
+}
+
 func TaskStorageKey(id string, status avsproto.TaskStatus) []byte {
 	return []byte(fmt.Sprintf(
 		"t:%s:%s",
