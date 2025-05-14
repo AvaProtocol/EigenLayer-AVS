@@ -77,12 +77,20 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            avaprotocol/avs-dev
+          images: avaprotocol/avs-dev # Vertical bar for multi-line removed as it's a single image
           tags: |
-            type=sha,prefix=${{ steps.vars.outputs.TAG_PREFIX }}${{ steps.vars.outputs.TAG_PREFIX && '-' || '' }},suffix='',format=short # TAG_PREFIX-shortSHA or shortSHA
-            type=raw,value=${{ steps.vars.outputs.TAG_PREFIX }}${{ steps.vars.outputs.TAG_PREFIX && '-' || '' }}${{ github.event.inputs.branch_name && format('{0}-manual', github.sha_short) || github.sha_short }}
-            type=raw,value=latest,enable=${{ (github.event.inputs.branch_name == 'staging' || (github.event_name == 'workflow_dispatch' && !github.event.inputs.branch_name && !github.event.inputs.commit_hash)) && steps.vars.outputs.TAG_PREFIX == 'staging' }} # latest if effectively staging
+            # Tag with the commit SHA (short version) - e.g., 7z1f16a
+            type=sha,format=short
+
+            # Tag with the sanitized branch name (TAG_PREFIX) if TAG_PREFIX is set - e.g., staging, myfeature
+            type=raw,value=${{ steps.vars.outputs.TAG_PREFIX }},enable=${{ steps.vars.outputs.TAG_PREFIX != '' }}
+
+            # Tag for a "manual" build of a specific non-staging branch - e.g., myfeature-manual
+            type=raw,value=${{ steps.vars.outputs.TAG_PREFIX }}-manual,enable=${{ github.event.inputs.branch_name != '' && github.event.inputs.branch_name != 'staging' && steps.vars.outputs.TAG_PREFIX != '' && steps.vars.outputs.TAG_PREFIX != 'staging' }}
+
+            # Tag with full SHA, optionally prefixed (for RELEASE_TAG build-arg consistency)
+            type=raw,value=${{ steps.vars.outputs.TAG_PREFIX }}${{ steps.vars.outputs.TAG_PREFIX && '-' || '' }}${{ github.sha }},enable=${{ steps.vars.outputs.TAG_PREFIX != '' }}
+            type=raw,value=${{ github.sha }},enable=${{ steps.vars.outputs.TAG_PREFIX == '' }} # Just full SHA if no prefix
             
       - name: Build and push staging docker image
         uses: docker/build-push-action@v6
