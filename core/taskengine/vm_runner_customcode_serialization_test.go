@@ -11,8 +11,15 @@ import (
 
 func TestCustomCodeNodeJSONSerialization(t *testing.T) {
 	vm := &VM{
-		logger: testutil.GetLogger(),
-		vars:   make(map[string]interface{}),
+		logger:    testutil.GetLogger(),
+		vars:      make(map[string]interface{}),
+		TaskNodes: make(map[string]*avsproto.TaskNode),
+	}
+	
+	nodeID := "test_node"
+	vm.TaskNodes[nodeID] = &avsproto.TaskNode{
+		Id:   nodeID,
+		Name: "test_node",
 	}
 
 	processor := NewJSProcessor(vm)
