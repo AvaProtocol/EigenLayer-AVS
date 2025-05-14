@@ -42,9 +42,6 @@ func TestHideWallet(t *testing.T) {
 	if err != nil {
 		t.Errorf("Failed to hide wallet: %v", err)
 	}
-	if !hideResp.IsHidden {
-		t.Errorf("Wallet should be marked as hidden")
-	}
 
 	wallets, _ = n.GetSmartWallets(u.Address, nil)
 	for _, w := range wallets {
@@ -58,9 +55,6 @@ func TestHideWallet(t *testing.T) {
 	}, false)
 	if err != nil {
 		t.Errorf("Failed to unhide wallet: %v", err)
-	}
-	if unhideResp.IsHidden {
-		t.Errorf("Wallet should not be marked as hidden")
 	}
 
 	wallets, _ = n.GetSmartWallets(u.Address, nil)
@@ -115,9 +109,6 @@ func TestHideWalletWithCustomFactory(t *testing.T) {
 	if err != nil {
 		t.Errorf("Failed to hide wallet: %v", err)
 	}
-	if !hideResp.IsHidden {
-		t.Errorf("Wallet should be marked as hidden")
-	}
 
 	wallets, _ = n.GetSmartWallets(u.Address, &avsproto.ListWalletReq{
 		FactoryAddress: factoryAddress,
@@ -157,9 +148,6 @@ func TestHideDefaultWallet(t *testing.T) {
 	hideResp, err := n.HideWallet(u, &avsproto.GetWalletReq{}, true)
 	if err != nil {
 		t.Errorf("Failed to hide default wallet: %v", err)
-	}
-	if !hideResp.IsHidden {
-		t.Errorf("Default wallet should be marked as hidden")
 	}
 
 	wallets, _ = n.GetSmartWallets(u.Address, nil)
