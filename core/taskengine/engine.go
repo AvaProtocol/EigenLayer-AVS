@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -477,10 +477,10 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	}
 
 	// second, do the sort, this is key sorted by ordering of their insertion
-	slices.SortFunc(taskKeys, func(a, b string) int {
-		id1 := ulid.MustParse(string(model.TaskKeyToId([]byte(a[2:]))))
-		id2 := ulid.MustParse(string(model.TaskKeyToId([]byte(b[2:]))))
-		return id1.Compare(id2)
+	sort.Slice(taskKeys, func(i, j int) bool {
+		id1 := ulid.MustParse(string(model.TaskKeyToId([]byte(taskKeys[i][2:]))))
+		id2 := ulid.MustParse(string(model.TaskKeyToId([]byte(taskKeys[j][2:]))))
+		return id1.Compare(id2) < 0
 	})
 
 	taskResp := &avsproto.ListTasksResp{
@@ -677,10 +677,10 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	executionKeys, err := n.db.ListKeysMulti(prefixes)
 
 	// second, do the sort, this is key sorted by ordering of their insertion
-	slices.SortFunc(executionKeys, func(a, b string) int {
-		id1 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(a))))
-		id2 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(b))))
-		return id1.Compare(id2)
+	sort.Slice(executionKeys, func(i, j int) bool {
+		id1 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(executionKeys[i]))))
+		id2 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(executionKeys[j]))))
+		return id1.Compare(id2) < 0
 	})
 
 	if err != nil {
@@ -995,14 +995,44 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	}
 
 	result := &avsproto.ListSecretsResp{
-		Items: []*avsproto.ListSecretsResp_ResponseSecret{},
+		Items:   []*avsproto.ListSecretsResp_ResponseSecret{},
+		Cursor:  "",
+		HasMore: false,
 	}
 
 	secretKeys, err := n.db.ListKeysMulti(prefixes)
 	if err != nil {
 		return nil, err
 	}
+
+	sort.Strings(secretKeys)
+	
+	var before, after, legacyCursor string
+	var itemPerPageVal int64
+	
+	if payload != nil {
+		before = payload.Before
+		after = payload.After
+		legacyCursor = payload.Cursor
+		itemPerPageVal = payload.ItemPerPage
+	}
+	
+	cursor, itemPerPage, err := SetupPagination(before, after, legacyCursor, itemPerPageVal)
+	if err != nil {
+		return nil, err
+	}
+
+	total := 0
+	var lastKey string
+
 	for _, k := range secretKeys {
+		if !cursor.IsZero() {
+			if (cursor.Direction == CursorDirectionNext && k <= cursor.Position) ||
+				(cursor.Direction == CursorDirectionPrevious && k >= cursor.Position) {
+				continue
+			}
+		}
+
 		secretWithNameOnly := SecretNameFromKey(k)
 		item := &avsproto.ListSecretsResp_ResponseSecret{
 			Name:       secretWithNameOnly.Name,
@@ -1011,6 +1041,17 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 		}
 
 		result.Items = append(result.Items, item)
+		lastKey = k
+		total++
+
+		if total >= itemPerPage {
+			result.HasMore = true
+			break
+		}
+	}
+
+	if result.HasMore && lastKey != "" {
+		result.Cursor = CreateNextCursor(lastKey)
 	}
 
 	return result, nil
