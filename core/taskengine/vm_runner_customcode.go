@@ -89,11 +89,10 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 			//return nil, fmt.Errorf("failed to convert to structpb.Value: %v", err)
 			return s, err
 		}
-		pbResult, _ := anypb.New(value)
 
 		s.OutputData = &avsproto.Execution_Step_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode_Output{
-				Data: pbResult,
+				Data: value,
 			},
 		}
 		r.SetOutputVarForStep(stepID, resultValue)
