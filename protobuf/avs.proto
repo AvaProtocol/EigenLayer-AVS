@@ -599,6 +599,14 @@ message GetWalletResp {
   uint64 canceled_task_count = 8;
 }
 
+message SetWalletReq {
+  string salt = 1;
+  // this is the factory address for the wallet, when leaving its empty, we will use our default factory address
+  string factory_address = 2;
+  // whether the wallet should be hidden in getWallets results
+  bool is_hidden = 3;
+}
+
 message UserTriggerTaskReq {
   string task_id = 1;
   TriggerReason reason = 2;
@@ -678,6 +686,7 @@ service Aggregator {
   rpc GetWallet(GetWalletReq)       returns (GetWalletResp) {};
   rpc HideWallet(GetWalletReq)      returns (GetWalletResp) {};
   rpc UnhideWallet(GetWalletReq)    returns (GetWalletResp) {};
+  rpc SetWallet(SetWalletReq)       returns (GetWalletResp) {};
   rpc ListWallets(ListWalletReq)    returns (ListWalletResp) {};
 
   
