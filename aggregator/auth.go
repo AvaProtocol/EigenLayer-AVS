@@ -191,9 +191,9 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req *avsproto.GetSig
 	issuedAt := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	expiredAt := time.Now().Add(time.Hour * 24).UTC().Format("2006-01-02T15:04:05.000Z")
 	walletAddress := "0x0000000000000000000000000000000000000000" // Example address
-	
+
 	formattedMessage := fmt.Sprintf(authTemplate, chainId, issuedAt, expiredAt, walletAddress)
-	
+
 	return &avsproto.GetSignatureFormatResp{
 		Format: formattedMessage,
 	}, nil
