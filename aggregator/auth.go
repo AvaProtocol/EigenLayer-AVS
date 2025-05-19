@@ -191,15 +191,15 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req *avsproto.GetSig
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to get chainID: %v", err)
 	}
-	
+
 	issuedAt := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-	
+
 	expiredAt := time.Now().Add(time.Hour * 24).UTC().Format("2006-01-02T15:04:05.000Z")
-	
+
 	walletAddress := req.Wallet
-	
+
 	formattedMessage := fmt.Sprintf(authTemplate, chainId.Int64(), issuedAt, expiredAt, walletAddress)
-	
+
 	return &avsproto.GetSignatureFormatResp{
 		Format: formattedMessage,
 	}, nil
