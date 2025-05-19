@@ -60,34 +60,39 @@ func (r *RpcServer) GetWallet(ctx context.Context, payload *avsproto.GetWalletRe
 	return r.engine.GetWallet(user, payload)
 }
 
-func (r *RpcServer) HideWallet(ctx context.Context, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
+type WalletOptions struct {
+	IsHidden bool
+}
+
+func (r *RpcServer) setWallet(ctx context.Context, payload *avsproto.GetWalletReq, options WalletOptions) (*avsproto.GetWalletResp, error) {
 	user, err := r.verifyAuth(ctx)
 
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
-	r.config.Logger.Info("process hide wallet",
+	
+	action := "hide"
+	if !options.IsHidden {
+		action = "unhide"
+	}
+	
+	r.config.Logger.Info("process set wallet",
 		"user", user.Address.String(),
 		"salt", payload.Salt,
 		"factory", payload.FactoryAddress,
+		"action", action,
+		"isHidden", options.IsHidden,
 	)
 
-	return r.engine.HideWallet(user, payload, true)
+	return r.engine.HideWallet(user, payload, options.IsHidden)
+}
+
+func (r *RpcServer) HideWallet(ctx context.Context, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
+	return r.setWallet(ctx, payload, WalletOptions{IsHidden: true})
 }
 
 func (r *RpcServer) UnhideWallet(ctx context.Context, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
-	user, err := r.verifyAuth(ctx)
-
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
-	}
-	r.config.Logger.Info("process unhide wallet",
-		"user", user.Address.String(),
-		"salt", payload.Salt,
-		"factory", payload.FactoryAddress,
-	)
-
-	return r.engine.HideWallet(user, payload, false)
+	return r.setWallet(ctx, payload, WalletOptions{IsHidden: false})
 }
 
 // Get nonce of an existing smart wallet of a given owner

@@ -8,7 +8,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
-func TestHideWallet(t *testing.T) {
+func TestHideUnhideWallet(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
@@ -157,4 +157,3 @@ func TestHideDefaultWallet(t *testing.T) {
 		}
 	}
 }
-// Force CI rebuild
