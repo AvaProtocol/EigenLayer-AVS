@@ -659,11 +659,12 @@ message DeleteSecretReq {
 }
 
 message GetSignatureFormatReq {
-  // Empty request
+  // The wallet address to include in the signature format
+  string wallet = 1;
 }
 
 message GetSignatureFormatResp {
-  // The template format for signature messages
+  // The formatted signature message with server-side values filled in
   string format = 1;
 }
 

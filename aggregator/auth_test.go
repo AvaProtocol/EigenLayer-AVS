@@ -3,6 +3,8 @@ package aggregator
 import (
 	"context"
 	"fmt"
+	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +19,14 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
+
+type MockEthClient struct {
+	chainID *big.Int
+}
+
+func (m *MockEthClient) ChainID(ctx context.Context) (*big.Int, error) {
+	return m.chainID, nil
+}
 
 func TestGetKeyWithSignature(t *testing.T) {
 	logger, _ := sdklogging.NewZapLogger("development")
@@ -80,14 +90,22 @@ func TestGetKeyWithSignature(t *testing.T) {
 func TestGetSignatureFormat(t *testing.T) {
 	logger, _ := sdklogging.NewZapLogger("development")
 
+	mockEthClient := &MockEthClient{
+		chainID: big.NewInt(1), // Ethereum mainnet
+	}
+
 	r := RpcServer{
 		config: &config.Config{
 			JwtSecret: []byte("test123"),
 			Logger:    logger,
 		},
+		ethrpc: mockEthClient,
 	}
 
-	req := &avsproto.GetSignatureFormatReq{}
+	walletAddress := "0x1234567890123456789012345678901234567890"
+	req := &avsproto.GetSignatureFormatReq{
+		Wallet: walletAddress,
+	}
 
 	resp, err := r.GetSignatureFormat(context.Background(), req)
 
@@ -95,7 +113,11 @@ func TestGetSignatureFormat(t *testing.T) {
 		t.Errorf("expected GetSignatureFormat to succeed but got error: %s", err)
 	}
 
-	if resp.Format != authTemplate {
-		t.Errorf("expected format to be %s but got %s", authTemplate, resp.Format)
+	if !strings.Contains(resp.Format, walletAddress) {
+		t.Errorf("expected format to contain wallet address %s but got %s", walletAddress, resp.Format)
+	}
+
+	if !strings.Contains(resp.Format, "Chain ID: 1") {
+		t.Errorf("expected format to contain Chain ID: 1 but got %s", resp.Format)
 	}
 }
