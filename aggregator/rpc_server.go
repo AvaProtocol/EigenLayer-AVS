@@ -87,6 +87,15 @@ func (r *RpcServer) setWallet(ctx context.Context, payload *avsproto.GetWalletRe
 	return r.engine.HideWallet(user, payload, options.IsHidden)
 }
 
+func (r *RpcServer) SetWallet(ctx context.Context, payload *avsproto.SetWalletReq) (*avsproto.GetWalletResp, error) {
+	getWalletReq := &avsproto.GetWalletReq{
+		Salt:           payload.Salt,
+		FactoryAddress: payload.FactoryAddress,
+	}
+	
+	return r.setWallet(ctx, getWalletReq, WalletOptions{IsHidden: payload.IsHidden})
+}
+
 func (r *RpcServer) HideWallet(ctx context.Context, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
 	return r.setWallet(ctx, payload, WalletOptions{IsHidden: true})
 }
