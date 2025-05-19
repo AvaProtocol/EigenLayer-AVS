@@ -23,9 +23,9 @@ import (
 
 const (
 	// We had old operators pre 1.3 where auth isn't enforced. upon all operators updated to 1.3.0 we will toggle this server side
-	enforceAuth  = false
+	enforceAuth             = false
 	TokenExpirationDuration = 48 * time.Hour
-	authTemplate = `Please sign the below text for ownership verification.
+	authTemplate            = `Please sign the below text for ownership verification.
 
 URI: https://app.avaprotocol.org
 Chain ID: %d
@@ -197,15 +197,15 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req *avsproto.GetSig
 	}
 
 	issuedAt := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-	
+
 	expiredAt := time.Now().Add(TokenExpirationDuration).UTC().Format("2006-01-02T15:04:05.000Z")
-	
+
 	walletAddress := req.Wallet
-	
-	formattedMessage := fmt.Sprintf(authTemplate, 
-		chainId.Int64(), 
-		issuedAt, 
-		expiredAt, 
+
+	formattedMessage := fmt.Sprintf(authTemplate,
+		chainId.Int64(),
+		issuedAt,
+		expiredAt,
 		walletAddress)
 
 	return &avsproto.GetSignatureFormatResp{
