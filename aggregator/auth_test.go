@@ -76,3 +76,26 @@ func TestGetKeyWithSignature(t *testing.T) {
 		t.Errorf("invalid subject. expected 0x578B110b0a7c06e66b7B1a33C39635304aaF733c but got %s", sub)
 	}
 }
+
+func TestGetSignatureFormat(t *testing.T) {
+	logger, _ := sdklogging.NewZapLogger("development")
+
+	r := RpcServer{
+		config: &config.Config{
+			JwtSecret: []byte("test123"),
+			Logger:    logger,
+		},
+	}
+
+	req := &avsproto.GetSignatureFormatReq{}
+
+	resp, err := r.GetSignatureFormat(context.Background(), req)
+
+	if err != nil {
+		t.Errorf("expected GetSignatureFormat to succeed but got error: %s", err)
+	}
+
+	if resp.Format != authTemplate {
+		t.Errorf("expected format to be %s but got %s", authTemplate, resp.Format)
+	}
+}
