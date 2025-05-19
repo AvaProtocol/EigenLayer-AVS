@@ -60,11 +60,7 @@ func (r *RpcServer) GetWallet(ctx context.Context, payload *avsproto.GetWalletRe
 	return r.engine.GetWallet(user, payload)
 }
 
-type WalletOptions struct {
-	IsHidden bool
-}
-
-func (r *RpcServer) setWallet(ctx context.Context, payload *avsproto.GetWalletReq, options WalletOptions) (*avsproto.GetWalletResp, error) {
+func (r *RpcServer) SetWallet(ctx context.Context, payload *avsproto.SetWalletReq) (*avsproto.GetWalletResp, error) {
 	user, err := r.verifyAuth(ctx)
 
 	if err != nil {
@@ -72,7 +68,7 @@ func (r *RpcServer) setWallet(ctx context.Context, payload *avsproto.GetWalletRe
 	}
 	
 	action := "hide"
-	if !options.IsHidden {
+	if !payload.IsHidden {
 		action = "unhide"
 	}
 	
@@ -81,27 +77,10 @@ func (r *RpcServer) setWallet(ctx context.Context, payload *avsproto.GetWalletRe
 		"salt", payload.Salt,
 		"factory", payload.FactoryAddress,
 		"action", action,
-		"isHidden", options.IsHidden,
+		"isHidden", payload.IsHidden,
 	)
 
-	return r.engine.HideWallet(user, payload, options.IsHidden)
-}
-
-func (r *RpcServer) SetWallet(ctx context.Context, payload *avsproto.SetWalletReq) (*avsproto.GetWalletResp, error) {
-	getWalletReq := &avsproto.GetWalletReq{
-		Salt:           payload.Salt,
-		FactoryAddress: payload.FactoryAddress,
-	}
-	
-	return r.setWallet(ctx, getWalletReq, WalletOptions{IsHidden: payload.IsHidden})
-}
-
-func (r *RpcServer) HideWallet(ctx context.Context, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
-	return r.setWallet(ctx, payload, WalletOptions{IsHidden: true})
-}
-
-func (r *RpcServer) UnhideWallet(ctx context.Context, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
-	return r.setWallet(ctx, payload, WalletOptions{IsHidden: false})
+	return r.engine.SetWallet(user, payload)
 }
 
 // Get nonce of an existing smart wallet of a given owner

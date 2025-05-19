@@ -302,9 +302,14 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 	}, nil
 }
 
-func (n *Engine) HideWallet(user *model.User, payload *avsproto.GetWalletReq, hide bool) (*avsproto.GetWalletResp, error) {
+func (n *Engine) SetWallet(user *model.User, payload *avsproto.SetWalletReq) (*avsproto.GetWalletResp, error) {
 	// Get the wallet first to validate it exists and belongs to the user
-	walletResp, err := n.GetWallet(user, payload)
+	getWalletReq := &avsproto.GetWalletReq{
+		Salt:           payload.Salt,
+		FactoryAddress: payload.FactoryAddress,
+	}
+	
+	walletResp, err := n.GetWallet(user, getWalletReq)
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +318,7 @@ func (n *Engine) HideWallet(user *model.User, payload *avsproto.GetWalletReq, hi
 	hiddenKey := HiddenWalletStorageKey(user.Address, walletAddress.Hex())
 
 	updates := map[string][]byte{}
-	if hide {
+	if payload.IsHidden {
 		updates[string(hiddenKey)] = []byte("1")
 	} else {
 		if err := n.db.Delete([]byte(hiddenKey)); err != nil {
@@ -329,6 +334,7 @@ func (n *Engine) HideWallet(user *model.User, payload *avsproto.GetWalletReq, hi
 
 	return walletResp, nil
 }
+
 
 // CreateTask records submission data
 func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskReq) (*model.Task, error) {
