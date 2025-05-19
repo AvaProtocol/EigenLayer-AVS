@@ -12,6 +12,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/signer"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -19,7 +20,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/golang-jwt/jwt/v5"
-	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
