@@ -9,15 +9,18 @@ import (
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
-	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/golang-jwt/jwt/v5"
-	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
-
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/signer"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/golang-jwt/jwt/v5"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type MockEthClient struct {
@@ -26,6 +29,92 @@ type MockEthClient struct {
 
 func (m *MockEthClient) ChainID(ctx context.Context) (*big.Int, error) {
 	return m.chainID, nil
+}
+
+func (m *MockEthClient) Close() {}
+func (m *MockEthClient) BlockByHash(ctx context.Context, hash common.Hash) (*types.Block, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) TransactionCount(ctx context.Context, blockHash common.Hash) (uint, error) {
+	return 0, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) TransactionInBlock(ctx context.Context, blockHash common.Hash, index uint) (*types.Transaction, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) TransactionByHash(ctx context.Context, txHash common.Hash) (tx *types.Transaction, isPending bool, err error) {
+	return nil, false, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) SyncProgress(ctx context.Context) (*ethereum.SyncProgress, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) SubscribeNewHead(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) NetworkID(ctx context.Context) (*big.Int, error) {
+	return big.NewInt(1), nil
+}
+func (m *MockEthClient) BalanceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (*big.Int, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) StorageAt(ctx context.Context, account common.Address, key common.Hash, blockNumber *big.Int) ([]byte, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) CodeAt(ctx context.Context, account common.Address, blockNumber *big.Int) ([]byte, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) NonceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (uint64, error) {
+	return 0, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) SubscribeFilterLogs(ctx context.Context, q ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) PendingBalanceAt(ctx context.Context, account common.Address) (*big.Int, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) PendingStorageAt(ctx context.Context, account common.Address, key common.Hash) ([]byte, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) PendingCodeAt(ctx context.Context, account common.Address) ([]byte, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
+	return 0, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) PendingTransactionCount(ctx context.Context) (uint, error) {
+	return 0, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) PendingCallContract(ctx context.Context, msg ethereum.CallMsg) ([]byte, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error) {
+	return 0, fmt.Errorf("not implemented")
+}
+func (m *MockEthClient) SendTransaction(ctx context.Context, tx *types.Transaction) error {
+	return fmt.Errorf("not implemented")
 }
 
 func TestGetKeyWithSignature(t *testing.T) {

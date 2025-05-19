@@ -4,14 +4,17 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/version"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/golang-jwt/jwt/v5"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -21,6 +24,7 @@ import (
 const (
 	// We had old operators pre 1.3 where auth isn't enforced. upon all operators updated to 1.3.0 we will toggle this server side
 	enforceAuth  = false
+	TokenExpirationDuration = 48 * time.Hour
 	authTemplate = `Please sign the below text for ownership verification.
 
 URI: https://app.avaprotocol.org
@@ -193,12 +197,16 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req *avsproto.GetSig
 	}
 
 	issuedAt := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-
-	expiredAt := time.Now().Add(time.Hour * 24).UTC().Format("2006-01-02T15:04:05.000Z")
-
+	
+	expiredAt := time.Now().Add(TokenExpirationDuration).UTC().Format("2006-01-02T15:04:05.000Z")
+	
 	walletAddress := req.Wallet
-
-	formattedMessage := fmt.Sprintf(authTemplate, chainId.Int64(), issuedAt, expiredAt, walletAddress)
+	
+	formattedMessage := fmt.Sprintf(authTemplate, 
+		chainId.Int64(), 
+		issuedAt, 
+		expiredAt, 
+		walletAddress)
 
 	return &avsproto.GetSignatureFormatResp{
 		Format: formattedMessage,
