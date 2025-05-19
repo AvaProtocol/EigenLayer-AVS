@@ -658,10 +658,21 @@ message DeleteSecretReq {
   string org_id = 3;
 }
 
+message GetSignatureFormatReq {
+  // Empty request
+}
+
+message GetSignatureFormatResp {
+  // The template format for signature messages
+  string format = 1;
+}
 
 service Aggregator {
   // Exchange for an Auth Key to authenticate in subsequent request
   rpc GetKey(GetKeyReq) returns (KeyResp) {};
+  
+  // Get the signature format template used for authentication
+  rpc GetSignatureFormat(GetSignatureFormatReq) returns (GetSignatureFormatResp) {};
 
   // Smart Acccount Operation
   rpc GetNonce(NonceRequest)        returns (NonceResp) {};

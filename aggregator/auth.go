@@ -185,3 +185,9 @@ func (r *RpcServer) verifyOperator(ctx context.Context, operatorAddr string) (bo
 
 	return auth.VerifyOperator(authRawHeaders[0], operatorAddr)
 }
+
+func (r *RpcServer) GetSignatureFormat(ctx context.Context, req *avsproto.GetSignatureFormatReq) (*avsproto.GetSignatureFormatResp, error) {
+	return &avsproto.GetSignatureFormatResp{
+		Format: authTemplate,
+	}, nil
+}
