@@ -196,11 +196,11 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req interface{}) (in
 
 	var chainId *big.Int
 	var err error
-	
+
 	type chainIDGetter interface {
 		ChainID(ctx context.Context) (*big.Int, error)
 	}
-	
+
 	if client, ok := r.ethrpc.(chainIDGetter); ok {
 		chainId, err = client.ChainID(ctx)
 		if err != nil {
