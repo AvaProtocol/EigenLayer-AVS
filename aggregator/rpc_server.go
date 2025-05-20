@@ -323,7 +323,6 @@ func (r *RpcServer) DeleteSecret(ctx context.Context, payload *avsproto.DeleteSe
 	}
 
 	return wrapperspb.Bool(result), nil
-
 }
 
 // GetWorkflowCount handles the RPC request to get the workflow count

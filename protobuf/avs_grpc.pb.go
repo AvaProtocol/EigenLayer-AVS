@@ -25,6 +25,8 @@ const _ = grpc.SupportPackageIsVersion7
 type AggregatorClient interface {
 	// Exchange for an Auth Key to authenticate in subsequent request
 	GetKey(ctx context.Context, in *GetKeyReq, opts ...grpc.CallOption) (*KeyResp, error)
+	// Get the signature format template used for authentication
+	GetSignatureFormat(ctx context.Context, in *GetSignatureFormatReq, opts ...grpc.CallOption) (*GetSignatureFormatResp, error)
 	// Smart Acccount Operation
 	GetNonce(ctx context.Context, in *NonceRequest, opts ...grpc.CallOption) (*NonceResp, error)
 	GetWallet(ctx context.Context, in *GetWalletReq, opts ...grpc.CallOption) (*GetWalletResp, error)
@@ -79,6 +81,15 @@ func NewAggregatorClient(cc grpc.ClientConnInterface) AggregatorClient {
 func (c *aggregatorClient) GetKey(ctx context.Context, in *GetKeyReq, opts ...grpc.CallOption) (*KeyResp, error) {
 	out := new(KeyResp)
 	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/GetKey", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aggregatorClient) GetSignatureFormat(ctx context.Context, in *GetSignatureFormatReq, opts ...grpc.CallOption) (*GetSignatureFormatResp, error) {
+	out := new(GetSignatureFormatResp)
+	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/GetSignatureFormat", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -262,6 +273,8 @@ func (c *aggregatorClient) GetExecutionStats(ctx context.Context, in *GetExecuti
 type AggregatorServer interface {
 	// Exchange for an Auth Key to authenticate in subsequent request
 	GetKey(context.Context, *GetKeyReq) (*KeyResp, error)
+	// Get the signature format template used for authentication
+	GetSignatureFormat(context.Context, *GetSignatureFormatReq) (*GetSignatureFormatResp, error)
 	// Smart Acccount Operation
 	GetNonce(context.Context, *NonceRequest) (*NonceResp, error)
 	GetWallet(context.Context, *GetWalletReq) (*GetWalletResp, error)
@@ -312,6 +325,9 @@ type UnimplementedAggregatorServer struct {
 
 func (UnimplementedAggregatorServer) GetKey(context.Context, *GetKeyReq) (*KeyResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetKey not implemented")
+}
+func (UnimplementedAggregatorServer) GetSignatureFormat(context.Context, *GetSignatureFormatReq) (*GetSignatureFormatResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSignatureFormat not implemented")
 }
 func (UnimplementedAggregatorServer) GetNonce(context.Context, *NonceRequest) (*NonceResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetNonce not implemented")
@@ -397,6 +413,24 @@ func _Aggregator_GetKey_Handler(srv interface{}, ctx context.Context, dec func(i
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AggregatorServer).GetKey(ctx, req.(*GetKeyReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Aggregator_GetSignatureFormat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSignatureFormatReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).GetSignatureFormat(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/aggregator.Aggregator/GetSignatureFormat",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).GetSignatureFormat(ctx, req.(*GetSignatureFormatReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -753,6 +787,10 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetKey",
 			Handler:    _Aggregator_GetKey_Handler,
+		},
+		{
+			MethodName: "GetSignatureFormat",
+			Handler:    _Aggregator_GetSignatureFormat_Handler,
 		},
 		{
 			MethodName: "GetNonce",
