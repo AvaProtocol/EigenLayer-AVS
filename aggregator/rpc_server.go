@@ -66,7 +66,7 @@ func (r *RpcServer) SetWallet(ctx context.Context, payload *avsproto.SetWalletRe
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
-	
+
 	r.config.Logger.Info("process set wallet",
 		"user", user.Address.String(),
 		"salt", payload.Salt,
@@ -74,12 +74,7 @@ func (r *RpcServer) SetWallet(ctx context.Context, payload *avsproto.SetWalletRe
 		"isHidden", payload.IsHidden,
 	)
 
-	getWalletReq := &avsproto.GetWalletReq{
-		Salt:           payload.Salt,
-		FactoryAddress: payload.FactoryAddress,
-	}
-
-	return r.engine.SetWalletHiddenStatus(user, getWalletReq, payload.IsHidden)
+	return r.engine.SetWallet(user.Address, payload)
 }
 
 // Get nonce of an existing smart wallet of a given owner
@@ -106,14 +101,7 @@ func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalle
 	r.config.Logger.Info("process list wallet",
 		"address", user.Address.String(),
 	)
-	wallets, err := r.engine.GetSmartWallets(user.Address, payload)
-	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "rpc server is unavailable, retry later. %s", err.Error())
-	}
-
-	return &avsproto.ListWalletResp{
-		Items: wallets,
-	}, nil
+	return r.engine.ListWallets(user.Address, payload)
 }
 
 func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*wrapperspb.BoolValue, error) {

@@ -3,10 +3,10 @@ repos:
     hooks:
       - id: go-fmt
         name: go fmt
-        entry: go fmt
+        entry: go fmt ./...
         language: system
         types: [go]
-        pass_filenames: true
+        pass_filenames: false
 
       - id: go-mod-tidy
         name: go mod tidy
@@ -17,10 +17,10 @@ repos:
 
       - id: go-vet
         name: go vet
-        entry: go vet
+        entry: go vet ./...
         language: system
         types: [go]
-        pass_filenames: true
+        pass_filenames: false
 
       # - id: golangci-lint
       #   name: golangci-lint
