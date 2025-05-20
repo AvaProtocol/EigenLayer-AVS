@@ -140,7 +140,7 @@ For improved test result formatting, use `gotestfmt`:
    Run all tests with complete output:
 
    ```base
-   go test -json ./... | gotestfmt
+   go test -v ./...
    ```
 
    or, run selected test cases:

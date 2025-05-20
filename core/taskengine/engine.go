@@ -291,7 +291,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		var ok bool
 		saltBig, ok = math.ParseBig256(payload.GetSalt())
 		if !ok {
-			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountSaltError+": "+payload.GetSalt())
+			return nil, status.Errorf(codes.InvalidArgument, "%s: %s", InvalidSmartAccountSaltError, payload.GetSalt())
 		}
 	}
 
