@@ -59,8 +59,16 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format")
 	}
 	
-	chainIDLine := strings.TrimSpace(lines[4])
-	if !strings.HasPrefix(chainIDLine, "Chain ID:") {
+	var chainIDLine string
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmedLine, "Chain ID:") {
+			chainIDLine = trimmedLine
+			break
+		}
+	}
+	
+	if chainIDLine == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Chain ID")
 	}
 	chainIDStr := strings.TrimSpace(strings.TrimPrefix(chainIDLine, "Chain ID:"))
