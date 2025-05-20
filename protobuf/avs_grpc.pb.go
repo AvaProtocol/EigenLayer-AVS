@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	Aggregator_GetKey_FullMethodName             = "/aggregator.Aggregator/GetKey"
+	Aggregator_GetSignatureFormat_FullMethodName = "/aggregator.Aggregator/GetSignatureFormat"
 	Aggregator_GetNonce_FullMethodName           = "/aggregator.Aggregator/GetNonce"
 	Aggregator_GetWallet_FullMethodName          = "/aggregator.Aggregator/GetWallet"
 	Aggregator_SetWallet_FullMethodName          = "/aggregator.Aggregator/SetWallet"
@@ -114,8 +115,9 @@ func (c *aggregatorClient) GetKey(ctx context.Context, in *GetKeyReq, opts ...gr
 }
 
 func (c *aggregatorClient) GetSignatureFormat(ctx context.Context, in *GetSignatureFormatReq, opts ...grpc.CallOption) (*GetSignatureFormatResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetSignatureFormatResp)
-	err := c.cc.Invoke(ctx, "/aggregator.Aggregator/GetSignatureFormat", in, out, opts...)
+	err := c.cc.Invoke(ctx, Aggregator_GetSignatureFormat_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -497,7 +499,7 @@ func _Aggregator_GetSignatureFormat_Handler(srv interface{}, ctx context.Context
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/aggregator.Aggregator/GetSignatureFormat",
+		FullMethod: Aggregator_GetSignatureFormat_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AggregatorServer).GetSignatureFormat(ctx, req.(*GetSignatureFormatReq))
