@@ -226,6 +226,8 @@ func (agg *Aggregator) init() {
 		panic(err)
 	}
 
+	SetGlobalChainID(agg.chainID)
+
 	if agg.chainID.Cmp(config.MainnetChainID) == 0 {
 		config.CurrentChainEnv = config.EthereumEnv
 	} else {

@@ -205,10 +205,8 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req interface{}) (in
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Ethereum wallet address format")
 	}
 
-	var chainId *big.Int
-	if r.agg != nil && r.agg.chainID != nil {
-		chainId = r.agg.chainID
-	} else {
+	chainId := GetGlobalChainID()
+	if chainId == nil {
 		return nil, status.Errorf(codes.Internal, "Chain ID not available. Aggregator not fully initialized.")
 	}
 
