@@ -202,16 +202,16 @@ func TestGetSignatureFormat(t *testing.T) {
 		t.Errorf("expected response to be a map but got %T", resp)
 	}
 
-	format, ok := respMap["format"].(string)
+	message, ok := respMap["message"].(string)
 	if !ok {
-		t.Errorf("expected format to be a string but got %T", respMap["format"])
+		t.Errorf("expected message to be a string but got %T", respMap["message"])
 	}
 
-	if !strings.Contains(format, walletAddress) {
-		t.Errorf("expected format to contain wallet address %s but got %s", walletAddress, format)
+	if !strings.Contains(message, walletAddress) {
+		t.Errorf("expected message to contain wallet address %s but got %s", walletAddress, message)
 	}
 
-	if !strings.Contains(format, "Chain ID: 1") {
-		t.Errorf("expected format to contain Chain ID: 1 but got %s", format)
+	if !strings.Contains(message, "Chain ID: 1") {
+		t.Errorf("expected message to contain Chain ID: 1 but got %s", message)
 	}
 }
