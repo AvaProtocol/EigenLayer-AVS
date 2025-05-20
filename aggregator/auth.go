@@ -59,12 +59,20 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format")
 	}
 	
-	var chainIDLine string
+	var chainIDLine, versionLine, issuedAtLine, expireAtLine, walletLine string
+	
 	for _, line := range lines {
 		trimmedLine := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmedLine, "Chain ID:") {
 			chainIDLine = trimmedLine
-			break
+		} else if strings.HasPrefix(trimmedLine, "Version:") {
+			versionLine = trimmedLine
+		} else if strings.HasPrefix(trimmedLine, "Issued At:") {
+			issuedAtLine = trimmedLine
+		} else if strings.HasPrefix(trimmedLine, "Expire At:") {
+			expireAtLine = trimmedLine
+		} else if strings.HasPrefix(trimmedLine, "Wallet:") {
+			walletLine = trimmedLine
 		}
 	}
 	
@@ -81,13 +89,11 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid chainId: requested chainId %s does not match SmartWallet chainId %d", chainIDStr, r.chainID.Int64())
 	}
 	
-	versionLine := strings.TrimSpace(lines[5])
-	if !strings.HasPrefix(versionLine, "Version:") {
+	if versionLine == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Version")
 	}
 	
-	issuedAtLine := strings.TrimSpace(lines[6])
-	if !strings.HasPrefix(issuedAtLine, "Issued At:") {
+	if issuedAtLine == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Issued At")
 	}
 	issuedAtStr := strings.TrimSpace(strings.TrimPrefix(issuedAtLine, "Issued At:"))
@@ -96,8 +102,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Issued At format")
 	}
 	
-	expireAtLine := strings.TrimSpace(lines[7])
-	if !strings.HasPrefix(expireAtLine, "Expire At:") {
+	if expireAtLine == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Expire At")
 	}
 	expireAtStr := strings.TrimSpace(strings.TrimPrefix(expireAtLine, "Expire At:"))
@@ -106,8 +111,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Expire At format")
 	}
 	
-	walletLine := strings.TrimSpace(lines[8])
-	if !strings.HasPrefix(walletLine, "Wallet:") {
+	if walletLine == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Wallet")
 	}
 	walletStr := strings.TrimSpace(strings.TrimPrefix(walletLine, "Wallet:"))
