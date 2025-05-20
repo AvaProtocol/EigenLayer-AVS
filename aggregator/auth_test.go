@@ -178,6 +178,8 @@ func TestGetKeyWithSignature(t *testing.T) {
 func TestGetSignatureFormat(t *testing.T) {
 	logger, _ := sdklogging.NewZapLogger("development")
 
+	SetGlobalChainID(big.NewInt(1))
+
 	r := RpcServer{
 		config: &config.Config{
 			JwtSecret: []byte("test123"),
