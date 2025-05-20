@@ -125,6 +125,7 @@ func TestGetKeyWithSignature(t *testing.T) {
 			JwtSecret: []byte("test123"),
 			Logger:    logger,
 		},
+		chainID: big.NewInt(11155111), // Set chainID to match the test
 	}
 
 	owner := "0x578B110b0a7c06e66b7B1a33C39635304aaF733c"
