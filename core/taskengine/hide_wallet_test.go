@@ -36,10 +36,9 @@ func TestHideUnhideWallet(t *testing.T) {
 		t.Errorf("Wallet with salt %s not found in wallet list", saltValue)
 	}
 
-	_, err = n.SetWallet(u, &avsproto.SetWalletReq{
-		Salt:     saltValue,
-		IsHidden: true,
-	})
+	_, err = n.SetWalletHiddenStatus(u, &avsproto.GetWalletReq{
+		Salt: saltValue,
+	}, true)
 	if err != nil {
 		t.Errorf("Failed to hide wallet: %v", err)
 	}
@@ -51,10 +50,9 @@ func TestHideUnhideWallet(t *testing.T) {
 		}
 	}
 
-	_, err = n.SetWallet(u, &avsproto.SetWalletReq{
-		Salt:     saltValue,
-		IsHidden: false,
-	})
+	_, err = n.SetWalletHiddenStatus(u, &avsproto.GetWalletReq{
+		Salt: saltValue,
+	}, false)
 	if err != nil {
 		t.Errorf("Failed to unhide wallet: %v", err)
 	}
@@ -104,11 +102,10 @@ func TestHideWalletWithCustomFactory(t *testing.T) {
 		t.Errorf("Wallet with salt %s and factory %s not found in wallet list", saltValue, factoryAddress)
 	}
 
-	_, err = n.SetWallet(u, &avsproto.SetWalletReq{
+	_, err = n.SetWalletHiddenStatus(u, &avsproto.GetWalletReq{
 		Salt:           saltValue,
 		FactoryAddress: factoryAddress,
-		IsHidden:       true,
-	})
+	}, true)
 	if err != nil {
 		t.Errorf("Failed to hide wallet: %v", err)
 	}
@@ -148,9 +145,7 @@ func TestHideDefaultWallet(t *testing.T) {
 		t.Errorf("Default wallet not found in wallet list")
 	}
 
-	_, err = n.SetWallet(u, &avsproto.SetWalletReq{
-		IsHidden: true,
-	})
+	_, err = n.SetWalletHiddenStatus(u, &avsproto.GetWalletReq{}, true)
 	if err != nil {
 		t.Errorf("Failed to hide default wallet: %v", err)
 	}

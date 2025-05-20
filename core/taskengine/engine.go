@@ -305,21 +305,16 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 	}, nil
 }
 
-func (n *Engine) SetWallet(user *model.User, payload *avsproto.SetWalletReq) (*avsproto.GetWalletResp, error) {
+func (n *Engine) SetWalletHiddenStatus(user *model.User, payload *avsproto.GetWalletReq, isHidden bool) (*avsproto.GetWalletResp, error) {
 	// Get the wallet first to validate it exists and belongs to the user
-	getWalletReq := &avsproto.GetWalletReq{
-		Salt:           payload.Salt,
-		FactoryAddress: payload.FactoryAddress,
-	}
-	
-	walletResp, err := n.GetWallet(user, getWalletReq)
+	walletResp, err := n.GetWallet(user, payload)
 	if err != nil {
 		return nil, err
 	}
 
 	walletAddress := common.HexToAddress(walletResp.Address)
 	
-	if err := SetWalletHidden(n.db, user.Address, walletAddress.Hex(), payload.IsHidden); err != nil {
+	if err := SetWalletHidden(n.db, user.Address, walletAddress.Hex(), isHidden); err != nil {
 		n.logger.Error("failed to set wallet hidden status", "error", err, "owner", user.Address.Hex(), "wallet", walletAddress.Hex())
 		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), "Failed to update wallet hidden status: %v", err)
 	}
