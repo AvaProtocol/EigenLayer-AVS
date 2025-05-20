@@ -1006,17 +1006,17 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	}
 
 	sort.Strings(secretKeys)
-	
+
 	var before, after, legacyCursor string
 	var itemPerPageVal int64
-	
+
 	if payload != nil {
 		before = payload.Before
 		after = payload.After
 		legacyCursor = payload.Cursor
 		itemPerPageVal = payload.ItemPerPage
 	}
-	
+
 	cursor, itemPerPage, err := SetupPagination(before, after, legacyCursor, itemPerPageVal)
 	if err != nil {
 		return nil, err
