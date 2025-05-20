@@ -1060,3 +1060,76 @@ func (n *Engine) GetWorkflowCount(user *model.User, payload *avsproto.GetWorkflo
 		Total: total,
 	}, nil
 }
+
+func (n *Engine) RunNodeWithInputs(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	vm, err := NewVMWithData(nil, nil, n.smartWalletConfig, nil)
+	if err != nil {
+		return nil, err
+	}
+	
+	vm.WithLogger(n.logger).WithDb(n.db)
+	
+	node, err := CreateNodeFromType(nodeType, nodeConfig, "")
+	if err != nil {
+		return nil, err
+	}
+	
+	// Run the node with input variables
+	executionStep, err := vm.RunNodeWithInputs(node, inputVariables)
+	if err != nil {
+		return nil, err
+	}
+	
+	if !executionStep.Success {
+		return nil, fmt.Errorf("execution failed: %s", executionStep.Error)
+	}
+	
+	result := make(map[string]interface{})
+	
+	switch nodeType {
+	case "blockTrigger":
+		if codeOutput := executionStep.GetCustomCode(); codeOutput != nil && codeOutput.Data != nil {
+			var data map[string]interface{}
+			if err := json.Unmarshal(codeOutput.Data.Value, &data); err == nil {
+				result = data
+			}
+		}
+	case "restApi":
+		if restOutput := executionStep.GetRestApi(); restOutput != nil && restOutput.Data != nil {
+			var data map[string]interface{}
+			if err := json.Unmarshal(restOutput.Data.Value, &data); err == nil {
+				result["data"] = data
+			} else {
+				result["data"] = restOutput.Data
+			}
+		}
+	case "contractRead":
+		if readOutput := executionStep.GetContractRead(); readOutput != nil {
+			result["data"] = readOutput.Data
+		}
+	case "customCode":
+		if codeOutput := executionStep.GetCustomCode(); codeOutput != nil && codeOutput.Data != nil {
+			var data map[string]interface{}
+			if err := json.Unmarshal(codeOutput.Data.Value, &data); err == nil {
+				result = data
+			} else {
+				result["data"] = codeOutput.Data
+			}
+		}
+	case "branch":
+		if branchOutput := executionStep.GetBranch(); branchOutput != nil {
+			result["conditionId"] = branchOutput.ConditionId
+		}
+	case "filter":
+		if filterOutput := executionStep.GetFilter(); filterOutput != nil && filterOutput.Data != nil {
+			var data interface{}
+			if err := json.Unmarshal(filterOutput.Data.Value, &data); err == nil {
+				result["data"] = data
+			} else {
+				result["data"] = filterOutput.Data
+			}
+		}
+	}
+	
+	return result, nil
+}

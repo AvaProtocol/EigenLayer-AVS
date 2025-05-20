@@ -2,19 +2,24 @@ package taskengine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 
+	"github.com/dop251/goja"
+	"github.com/oklog/ulid/v2"
 	"github.com/samber/lo"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
@@ -719,4 +724,169 @@ func (v *VM) GetTaskId() string {
 	}
 
 	return ""
+}
+
+// It returns the execution result as an Execution_Step.
+func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[string]interface{}) (*avsproto.Execution_Step, error) {
+	tempVM := &VM{
+		vars:              make(map[string]interface{}),
+		TaskID:            v.TaskID,
+		TaskNodes:         map[string]*avsproto.TaskNode{node.Id: node},
+		TaskEdges:         map[string]*avsproto.TaskEdge{},
+		plans:             map[string]*Step{},
+		ExecutionLogs:     []*avsproto.Execution_Step{},
+		state:             VMStateReady,
+		logger:            v.logger,
+		smartWalletConfig: v.smartWalletConfig,
+		db:                v.db,
+		secrets:           v.secrets, // Preserve secrets from the original VM
+	}
+
+	if v.vars["apContext"] != nil {
+		tempVM.vars["apContext"] = v.vars["apContext"]
+	}
+
+	for key, value := range inputVariables {
+		tempVM.AddVar(key, value)
+	}
+
+	step, err := tempVM.executeNode(node)
+	if err != nil {
+		return nil, fmt.Errorf("error executing node: %w", err)
+	}
+
+	if len(tempVM.ExecutionLogs) > 0 {
+		return tempVM.ExecutionLogs[0], nil
+	}
+
+	// If no execution logs but we have a step, convert it to an Execution_Step
+	if step != nil {
+		executionStep := &avsproto.Execution_Step{
+			NodeId:   node.Id,
+			Success:  step.Error == "",
+			Error:    step.Error,
+			StartAt:  step.StartTime,
+			EndAt:    step.EndTime,
+			Inputs:   tempVM.CollectInputs(),
+			Log:      step.Log,
+		}
+		return executionStep, nil
+	}
+
+	return nil, fmt.Errorf("node execution produced no results")
+}
+
+// This is a helper function to create nodes for RunNodeWithInputs when working with triggers or simplified inputs.
+func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID string) (*avsproto.TaskNode, error) {
+	if nodeID == "" {
+		nodeID = "node_" + ulid.Make().String()
+	}
+	
+	node := &avsproto.TaskNode{
+		Id:   nodeID,
+		Name: "Single Node Execution",
+	}
+	
+	switch nodeType {
+	case "blockTrigger":
+		blockNumber, ok := config["blockNumber"]
+		if !ok {
+			return nil, fmt.Errorf("blockNumber is required for blockTrigger")
+		}
+		
+		node.TaskType = &avsproto.TaskNode_CustomCode{
+			CustomCode: &avsproto.CustomCodeNode{
+				Lang:   avsproto.CustomCodeLang_JavaScript,
+				Source: fmt.Sprintf(`
+					return { 
+						blockNumber: %v 
+					};
+				`, blockNumber),
+			},
+		}
+		
+	case "restApi":
+		url, _ := config["url"].(string)
+		method, _ := config["method"].(string)
+		body, _ := config["body"].(string)
+		
+		headers := make(map[string]string)
+		if headersMap, ok := config["headers"].(map[string]interface{}); ok {
+			for k, v := range headersMap {
+				headers[k] = fmt.Sprintf("%v", v)
+			}
+		}
+		
+		node.TaskType = &avsproto.TaskNode_RestApi{
+			RestApi: &avsproto.RestAPINode{
+				Url:     url,
+				Method:  method,
+				Body:    body,
+				Headers: headers,
+			},
+		}
+		
+	case "contractRead":
+		contractAddress, _ := config["contractAddress"].(string)
+		callData, _ := config["callData"].(string)
+		contractAbi, _ := config["contractAbi"].(string)
+		
+		node.TaskType = &avsproto.TaskNode_ContractRead{
+			ContractRead: &avsproto.ContractReadNode{
+				ContractAddress: contractAddress,
+				CallData:        callData,
+				ContractAbi:     contractAbi,
+			},
+		}
+		
+	case "customCode":
+		source, _ := config["source"].(string)
+		
+		node.TaskType = &avsproto.TaskNode_CustomCode{
+			CustomCode: &avsproto.CustomCodeNode{
+				Lang:   avsproto.CustomCodeLang_JavaScript,
+				Source: source,
+			},
+		}
+		
+	case "branch":
+		conditions := []*avsproto.Condition{}
+		if conditionsArray, ok := config["conditions"].([]interface{}); ok {
+			for _, c := range conditionsArray {
+				if condMap, ok := c.(map[string]interface{}); ok {
+					id, _ := condMap["id"].(string)
+					condType, _ := condMap["type"].(string)
+					expression, _ := condMap["expression"].(string)
+					
+					conditions = append(conditions, &avsproto.Condition{
+						Id:         id,
+						Type:       condType,
+						Expression: expression,
+					})
+				}
+			}
+		}
+		
+		node.TaskType = &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Conditions: conditions,
+			},
+		}
+		
+	case "filter":
+		expression, _ := config["expression"].(string)
+		input, _ := config["input"].(string)
+		
+		node.TaskType = &avsproto.TaskNode_Filter{
+			Filter: &avsproto.FilterNode{
+				Expression: expression,
+				Input:      input,
+			},
+		}
+		
+	default:
+		return nil, fmt.Errorf("unsupported node type: %s", nodeType)
+	}
+	
+	return node, nil
 }
