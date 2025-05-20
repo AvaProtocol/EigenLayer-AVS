@@ -200,7 +200,8 @@ message CustomCodeNode {
   string         source    = 2;
 
   message Output {
-    google.protobuf.Any data = 1;
+    // Changed from google.protobuf.Any to google.protobuf.Value for better JavaScript native type support
+    google.protobuf.Value data = 1;
   }
 }
 
@@ -420,7 +421,7 @@ message Task {
   // limit on how many time this task can run. Set to 0 will make it run unlimited until cancelling or reaching its expired time
   int64 max_execution = 8;
   // return how many time this task has run
-  int64 total_execution = 9;
+  int64 execution_count = 9;
   // timestamp when task was last executed (in milliseconds)
   int64 last_ran_at = 10;
 
@@ -504,7 +505,7 @@ message ListTasksResp {
     // limit on how many time this task can run. Set to 0 will make it run unlimited until cancelling or reaching its expired time
     int64 max_execution = 8;
     // return how many time this task has run
-    int64 total_execution = 9;
+    int64 execution_count = 9;
     // timestamp when task was last executed (in milliseconds)
     int64 last_ran_at = 10;
 
@@ -634,6 +635,13 @@ message CreateOrUpdateSecretReq {
 
 message ListSecretsReq {
   string workflow_id = 1;
+  // Deprecated: Use before or after instead
+  string cursor = 2;
+  // Get items before this cursor value (for backward pagination)
+  string before = 3;
+  // Get items after this cursor value (for forward pagination)
+  string after = 4;
+  int64 item_per_page = 5;
 }
 
 message ListSecretsResp {
@@ -646,6 +654,8 @@ message ListSecretsResp {
     string org_id = 5;
   }
   repeated ResponseSecret items = 1;
+  string cursor = 2;
+  bool has_more = 3;
 }
 
 message DeleteSecretReq {
@@ -721,6 +731,11 @@ service Aggregator {
   // Workflow IDs not found in the system are ignored.
   // Workflow IDs not linked to the EOA in the auth key are also ignored.
   rpc GetExecutionCount(GetExecutionCountReq) returns (GetExecutionCountResp);
+
+  // GetExecutionStats returns execution statistics for a specified time period
+  // It counts total executions, successful executions, and failed executions
+  // If no workflow IDs are provided, it counts for all workflows of the authenticated user
+  rpc GetExecutionStats(GetExecutionStatsReq) returns (GetExecutionStatsResp);
 }
 
 // Request message for GetWorkflowCount
@@ -742,6 +757,20 @@ message GetExecutionCountReq {
 message GetExecutionCountResp {
   // TODO: eventually to support success, error count execution
   int64 total = 1; // The total count of executions
+}
+
+// Request message for GetExecutionStats
+message GetExecutionStatsReq {
+  repeated string workflow_ids = 1; // Optional array of workflow IDs
+  int64 days = 2; // Number of days to look back (default: 7)
+}
+
+// Response message for GetExecutionStats
+message GetExecutionStatsResp {
+  int64 total = 1; // Total number of executions
+  int64 succeeded = 2; // Number of successful executions
+  int64 failed = 3; // Number of failed executions
+  double avg_execution_time = 4; // Average execution time in milliseconds
 }
 
 message Evm {

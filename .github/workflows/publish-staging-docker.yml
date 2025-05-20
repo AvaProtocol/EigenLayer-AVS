@@ -1,16 +1,16 @@
-name: Run on Push
+name: Publish Staging Docker Image
 
 on:
-  push:
-    paths:
-      - '**.go'
-      - '!**/*_test.go'
-      - '!**.yaml'
-      - '!**.yml'
   workflow_dispatch:
+    inputs:
+      commit_hash:
+        description: 'Commit hash to build and publish'
+        required: true
 
 jobs:
   format-and-commit:
+    # Only run this job when manually triggered
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # Grant permissions for the built-in GITHUB_TOKEN to create a commit and push.
     permissions:
@@ -53,7 +53,9 @@ jobs:
         shell: bash # Explicitly use bash
 
   publish-dev-build:
-    name: Publish dev build docker image to dockerhub
+    # Only run this job when manually triggered
+    if: github.event_name == 'workflow_dispatch'
+    name: Publish staging build docker image to dockerhub
     runs-on: 'ubuntu-latest'
     steps:
       - name: Login to Docker Hub
@@ -79,22 +81,17 @@ jobs:
           images: |
             avaprotocol/avs-dev
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
-            type=raw,value={{sha}}
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ github.event_name == 'workflow_dispatch' && inputs.commit_hash || github.sha }}
 
       - name: Build and push avs-dev docker image
         uses: docker/build-push-action@v6
         with:
           build-args: |
-            RELEASE_TAG=${{ inputs.tag || github.sha ||  github.head_ref || github.ref_name }}
-            COMMIT_SHA=${{ github.sha }}
+            RELEASE_TAG=${{ github.event_name == 'workflow_dispatch' && inputs.commit_hash || github.sha ||  github.head_ref || github.ref_name }}
+            COMMIT_SHA=${{ github.event_name == 'workflow_dispatch' && inputs.commit_hash || github.sha }}
           platforms: linux/amd64,linux/arm64
           context: .
           file: dockerfiles/operator.Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name == 'workflow_dispatch' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
