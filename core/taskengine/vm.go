@@ -762,13 +762,13 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 	// If no execution logs but we have a step, convert it to an Execution_Step
 	if step != nil {
 		executionStep := &avsproto.Execution_Step{
-			NodeId:   node.Id,
-			Success:  step.Error == "",
-			Error:    step.Error,
-			StartAt:  step.StartTime,
-			EndAt:    step.EndTime,
-			Inputs:   tempVM.CollectInputs(),
-			Log:      step.Log,
+			NodeId:  node.Id,
+			Success: step.Error == "",
+			Error:   step.Error,
+			StartAt: step.StartTime,
+			EndAt:   step.EndTime,
+			Inputs:  tempVM.CollectInputs(),
+			Log:     step.Log,
 		}
 		return executionStep, nil
 	}
@@ -781,22 +781,22 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 	if nodeID == "" {
 		nodeID = "node_" + ulid.Make().String()
 	}
-	
+
 	node := &avsproto.TaskNode{
 		Id:   nodeID,
 		Name: "Single Node Execution",
 	}
-	
+
 	switch nodeType {
 	case "blockTrigger":
 		blockNumber, ok := config["blockNumber"]
 		if !ok {
 			return nil, fmt.Errorf("blockNumber is required for blockTrigger")
 		}
-		
+
 		node.TaskType = &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{
-				Lang:   avsproto.CustomCodeLang_JavaScript,
+				Lang: avsproto.CustomCodeLang_JavaScript,
 				Source: fmt.Sprintf(`
 					return { 
 						blockNumber: %v 
@@ -804,19 +804,19 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				`, blockNumber),
 			},
 		}
-		
+
 	case "restApi":
 		url, _ := config["url"].(string)
 		method, _ := config["method"].(string)
 		body, _ := config["body"].(string)
-		
+
 		headers := make(map[string]string)
 		if headersMap, ok := config["headers"].(map[string]interface{}); ok {
 			for k, v := range headersMap {
 				headers[k] = fmt.Sprintf("%v", v)
 			}
 		}
-		
+
 		node.TaskType = &avsproto.TaskNode_RestApi{
 			RestApi: &avsproto.RestAPINode{
 				Url:     url,
@@ -825,12 +825,12 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				Headers: headers,
 			},
 		}
-		
+
 	case "contractRead":
 		contractAddress, _ := config["contractAddress"].(string)
 		callData, _ := config["callData"].(string)
 		contractAbi, _ := config["contractAbi"].(string)
-		
+
 		node.TaskType = &avsproto.TaskNode_ContractRead{
 			ContractRead: &avsproto.ContractReadNode{
 				ContractAddress: contractAddress,
@@ -838,17 +838,17 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				ContractAbi:     contractAbi,
 			},
 		}
-		
+
 	case "customCode":
 		source, _ := config["source"].(string)
-		
+
 		node.TaskType = &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{
 				Lang:   avsproto.CustomCodeLang_JavaScript,
 				Source: source,
 			},
 		}
-		
+
 	case "branch":
 		conditions := []*avsproto.Condition{}
 		if conditionsArray, ok := config["conditions"].([]interface{}); ok {
@@ -857,7 +857,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 					id, _ := condMap["id"].(string)
 					condType, _ := condMap["type"].(string)
 					expression, _ := condMap["expression"].(string)
-					
+
 					conditions = append(conditions, &avsproto.Condition{
 						Id:         id,
 						Type:       condType,
@@ -866,27 +866,27 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				}
 			}
 		}
-		
+
 		node.TaskType = &avsproto.TaskNode_Branch{
 			Branch: &avsproto.BranchNode{
 				Conditions: conditions,
 			},
 		}
-		
+
 	case "filter":
 		expression, _ := config["expression"].(string)
 		input, _ := config["input"].(string)
-		
+
 		node.TaskType = &avsproto.TaskNode_Filter{
 			Filter: &avsproto.FilterNode{
 				Expression: expression,
 				Input:      input,
 			},
 		}
-		
+
 	default:
 		return nil, fmt.Errorf("unsupported node type: %s", nodeType)
 	}
-	
+
 	return node, nil
 }

@@ -1066,26 +1066,26 @@ func (n *Engine) RunNodeWithInputs(nodeType string, nodeConfig map[string]interf
 	if err != nil {
 		return nil, err
 	}
-	
+
 	vm.WithLogger(n.logger).WithDb(n.db)
-	
+
 	node, err := CreateNodeFromType(nodeType, nodeConfig, "")
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Run the node with input variables
 	executionStep, err := vm.RunNodeWithInputs(node, inputVariables)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if !executionStep.Success {
 		return nil, fmt.Errorf("execution failed: %s", executionStep.Error)
 	}
-	
+
 	result := make(map[string]interface{})
-	
+
 	switch nodeType {
 	case "blockTrigger":
 		if codeOutput := executionStep.GetCustomCode(); codeOutput != nil && codeOutput.Data != nil {
@@ -1130,6 +1130,6 @@ func (n *Engine) RunNodeWithInputs(nodeType string, nodeConfig map[string]interf
 			}
 		}
 	}
-	
+
 	return result, nil
 }

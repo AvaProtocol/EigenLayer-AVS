@@ -2,28 +2,28 @@ package taskengine
 
 import (
 	"testing"
-	
-	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
-	"github.com/stretchr/testify/assert"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/oklog/ulid/v2"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRunNodeWithInputs_BlockTrigger(t *testing.T) {
 	vm, err := NewVMWithData(nil, nil, &config.SmartWalletConfig{}, nil)
 	assert.NoError(t, err)
-	
+
 	node, err := CreateNodeFromType("blockTrigger", map[string]interface{}{
 		"blockNumber": float64(12345),
 	}, "")
 	assert.NoError(t, err)
-	
+
 	result, err := vm.RunNodeWithInputs(node, map[string]interface{}{})
-	
+
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.True(t, result.Success)
-	
+
 	codeOutput := result.GetCustomCode()
 	assert.NotNil(t, codeOutput)
 	assert.NotNil(t, codeOutput.Data)
@@ -32,7 +32,7 @@ func TestRunNodeWithInputs_BlockTrigger(t *testing.T) {
 func TestRunNodeWithInputs_CustomCode(t *testing.T) {
 	vm, err := NewVMWithData(nil, nil, &config.SmartWalletConfig{}, nil)
 	assert.NoError(t, err)
-	
+
 	nodeId := "test_" + ulid.Make().String()
 	node := &avsproto.TaskNode{
 		Id:   nodeId,
@@ -49,17 +49,17 @@ func TestRunNodeWithInputs_CustomCode(t *testing.T) {
 			},
 		},
 	}
-	
+
 	_, err = vm.RunNodeWithInputs(node, map[string]interface{}{})
 	assert.Error(t, err)
-	
+
 	result, err := vm.RunNodeWithInputs(node, map[string]interface{}{
 		"myVar": 5,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.True(t, result.Success)
-	
+
 	codeOutput := result.GetCustomCode()
 	assert.NotNil(t, codeOutput)
 	assert.NotNil(t, codeOutput.Data)
@@ -67,10 +67,10 @@ func TestRunNodeWithInputs_CustomCode(t *testing.T) {
 
 func TestCreateNodeFromType(t *testing.T) {
 	nodeTypes := []string{"blockTrigger", "restApi", "contractRead", "customCode", "branch", "filter"}
-	
+
 	for _, nodeType := range nodeTypes {
 		config := map[string]interface{}{}
-		
+
 		switch nodeType {
 		case "blockTrigger":
 			config["blockNumber"] = float64(12345)
@@ -94,13 +94,13 @@ func TestCreateNodeFromType(t *testing.T) {
 			config["expression"] = "item > 5"
 			config["input"] = "inputArray"
 		}
-		
+
 		node, err := CreateNodeFromType(nodeType, config, "")
 		assert.NoError(t, err)
 		assert.NotNil(t, node)
 		assert.NotEmpty(t, node.Id)
 		assert.Equal(t, "Single Node Execution", node.Name)
-		
+
 		switch nodeType {
 		case "blockTrigger":
 			assert.NotNil(t, node.GetCustomCode())
@@ -122,21 +122,21 @@ func TestEngine_RunNodeWithInputs(t *testing.T) {
 	engine := New(nil, &config.Config{
 		SmartWallet: &config.SmartWalletConfig{},
 	}, nil, nil)
-	
+
 	result, err := engine.RunNodeWithInputs("blockTrigger", map[string]interface{}{
 		"blockNumber": float64(12345),
 	}, map[string]interface{}{})
-	
+
 	if err == nil {
 		assert.NotNil(t, result)
 		assert.Contains(t, result, "blockNumber")
 		assert.Equal(t, float64(12345), result["blockNumber"])
 	}
-	
+
 	result, err = engine.RunNodeWithInputs("customCode", map[string]interface{}{
 		"source": "return { message: 'Hello, World!' };",
 	}, map[string]interface{}{})
-	
+
 	if err == nil {
 		assert.NotNil(t, result)
 		assert.Contains(t, result, "message")
