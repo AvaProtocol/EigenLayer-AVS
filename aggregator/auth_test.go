@@ -248,8 +248,8 @@ func TestGetSignatureFormat(t *testing.T) {
 	}
 
 	walletAddress := "0x1234567890123456789012345678901234567890"
-	req := map[string]interface{}{
-		"wallet": walletAddress,
+	req := &avsproto.GetSignatureFormatReq{
+		Wallet: walletAddress,
 	}
 
 	resp, err := r.GetSignatureFormat(context.Background(), req)
@@ -258,14 +258,13 @@ func TestGetSignatureFormat(t *testing.T) {
 		t.Errorf("expected GetSignatureFormat to succeed but got error: %s", err)
 	}
 
-	respMap, ok := resp.(map[string]interface{})
-	if !ok {
-		t.Errorf("expected response to be a map but got %T", resp)
+	if resp == nil {
+		t.Errorf("expected non-nil response but got nil")
 	}
 
-	message, ok := respMap["message"].(string)
-	if !ok {
-		t.Errorf("expected message to be a string but got %T", respMap["message"])
+	message := resp.Message
+	if message == "" {
+		t.Errorf("expected non-empty message but got empty string")
 	}
 
 	if !strings.Contains(message, walletAddress) {
