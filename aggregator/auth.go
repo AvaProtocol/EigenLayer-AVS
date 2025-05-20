@@ -197,12 +197,23 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req interface{}) (in
 		walletAddress = reqMap["wallet"].(string)
 	}
 
-	var chainId *big.Int
+	if walletAddress == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "Wallet address is required")
+	}
 
-	if config.CurrentChainEnv == config.EthereumEnv {
-		chainId = config.MainnetChainID
+	if !common.IsHexAddress(walletAddress) {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid Ethereum wallet address format")
+	}
+
+	var chainId *big.Int
+	if r.agg != nil && r.agg.chainID != nil {
+		chainId = r.agg.chainID
 	} else {
-		chainId = config.HoleskyChainID
+		if config.CurrentChainEnv == config.EthereumEnv {
+			chainId = config.MainnetChainID
+		} else {
+			chainId = config.HoleskyChainID
+		}
 	}
 
 	issuedAt := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
@@ -218,6 +229,6 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req interface{}) (in
 		walletAddress)
 
 	return map[string]interface{}{
-		"format": formattedMessage,
+		"message": formattedMessage,
 	}, nil
 }

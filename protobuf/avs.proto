@@ -665,7 +665,7 @@ message GetSignatureFormatReq {
 
 message GetSignatureFormatResp {
   // The formatted signature message with server-side values filled in
-  string format = 1;
+  string message = 1;
 }
 
 service Aggregator {

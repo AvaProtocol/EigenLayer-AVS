@@ -1,6 +1,6 @@
 module github.com/AvaProtocol/EigenLayer-AVS
 
-go 1.21.13
+go 1.24
 
 require (
 	github.com/Layr-Labs/cerberus-api v0.0.0-20241016214048-d52f5ddc5559
