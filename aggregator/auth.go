@@ -3,12 +3,10 @@ package aggregator
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"strings"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
-	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
