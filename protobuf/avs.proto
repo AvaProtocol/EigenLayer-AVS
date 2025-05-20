@@ -540,11 +540,10 @@ message ExecutionStatusResp {
 }
 
 message GetKeyReq {
-  string owner = 1;
-  int64  chain_id = 2;
-  google.protobuf.Timestamp issued_at = 3;
-  google.protobuf.Timestamp expired_at = 4;
-  string signature = 5;
+  // The message to sign, provided by GetSignatureFormat
+  string message = 1;
+  // The signature of the message
+  string signature = 2;
 }
 
 message KeyResp {
@@ -668,10 +667,22 @@ message DeleteSecretReq {
   string org_id = 3;
 }
 
+message GetSignatureFormatReq {
+  // The wallet address to include in the signature format
+  string wallet = 1;
+}
+
+message GetSignatureFormatResp {
+  // The formatted signature message with server-side values filled in
+  string message = 1;
+}
 
 service Aggregator {
   // Exchange for an Auth Key to authenticate in subsequent request
   rpc GetKey(GetKeyReq) returns (KeyResp) {};
+  
+  // Get the signature format template used for authentication
+  rpc GetSignatureFormat(GetSignatureFormatReq) returns (GetSignatureFormatResp) {};
 
   // Smart Acccount Operation
   rpc GetNonce(NonceRequest)        returns (NonceResp) {};
