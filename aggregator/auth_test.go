@@ -160,7 +160,7 @@ func TestGetKeyWithSignature(t *testing.T) {
 	}
 
 	// Now let verify the key is valid
-	token, err := jwt.Parse(resp.Key, func(token *jwt.Token) (interface{}, error) {
+	token, _ := jwt.Parse(resp.Key, func(token *jwt.Token) (interface{}, error) {
 		// Don't forget to validate the alg is what you expect:
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("%s", auth.InvalidAuthenticationKey)
