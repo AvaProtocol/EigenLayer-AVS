@@ -287,8 +287,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), StorageWriteError)
 	}
 
-	hiddenKey := HiddenWalletStorageKey(user.Address, sender.Hex())
-	_, _ = n.db.Exist([]byte(hiddenKey))
+	_, _ = IsWalletHidden(n.db, user.Address, sender.Hex())
 
 	statSvc := NewStatService(n.db)
 	stat, _ := statSvc.GetTaskCount(wallet)
