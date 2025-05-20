@@ -118,16 +118,16 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 	if !common.IsHexAddress(walletStr) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid wallet address format")
 	}
-	submitAddress := common.HexToAddress(walletStr)
+	ownerAddress := common.HexToAddress(walletStr)
 
 	if strings.Contains(payload.Signature, ".") {
 		// API key directly
-		authenticated, err := auth.VerifyJwtKeyForUser(r.config.JwtSecret, payload.Signature, submitAddress)
+		authenticated, err := auth.VerifyJwtKeyForUser(r.config.JwtSecret, payload.Signature, ownerAddress)
 		if err != nil || !authenticated {
 			return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, auth.InvalidAPIKey)
 		}
 	} else {
-		// We need to have 3 things to verify the signature: the signature, the hash of the original data, and the public key of the signer.
+		// We need to have 3 things to verify the signature: the signature, the hash of the original data, and the public key of the signer (owner address).
 		data := []byte(message)
 		hash := accounts.TextHash(data)
 
@@ -148,7 +148,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 			return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 		}
 		recoveredAddr := crypto.PubkeyToAddress(*sigPublicKey)
-		if submitAddress.String() != recoveredAddr.String() {
+		if ownerAddress.String() != recoveredAddr.String() {
 			return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 		}
 	}
@@ -160,7 +160,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 	claims := &jwt.RegisteredClaims{
 		ExpiresAt: jwt.NewNumericDate(expireAt),
 		Issuer:    auth.Issuer,
-		Subject:   submitAddress.String(),
+		Subject:   ownerAddress.String(),
 		Audience:  jwt.ClaimStrings{chainIDStr},
 	}
 
