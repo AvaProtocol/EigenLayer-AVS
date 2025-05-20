@@ -1,5 +1,6 @@
 package taskengine
 
+/*
 import (
 	"log"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
+*/
 
 /*
 func TestContractWriteSimpleReturn(t *testing.T) {
