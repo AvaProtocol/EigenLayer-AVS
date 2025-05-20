@@ -472,6 +472,7 @@ message SmartWallet {
   string address = 1;
   string salt = 2;
   string factory = 3;
+  bool is_hidden = 4;
 }
 
 message ListWalletResp {

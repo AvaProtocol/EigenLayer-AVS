@@ -18,6 +18,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/allegro/bigcache/v3"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -191,53 +192,67 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 	}
 
 	wallets := []*avsproto.SmartWallet{}
+	processedAddresses := make(map[string]bool) // To avoid duplicate processing if default is also in prefixed list
 
-	defaultWalletHiddenKey := HiddenWalletStorageKey(owner, sender.String())
-	defaultWalletIsHidden, _ := n.db.Exist([]byte(defaultWalletHiddenKey))
-
-	if (payload == nil || payload.FactoryAddress == "" || strings.EqualFold(payload.FactoryAddress, n.smartWalletConfig.FactoryAddress.Hex())) && !defaultWalletIsHidden {
-		// This is the default wallet with our own factory and it's not hidden
-	wallets = append(wallets, &avsproto.SmartWallet{
-			Address: sender.String(),
-			Factory: n.smartWalletConfig.FactoryAddress.String(),
-			Salt:    defaultSalt.String(),
-		})
+	// 1. Handle the default wallet (derived by salt=0)
+	defaultWalletModel, err := GetWalletModel(n.db, owner, sender.String())
+	defaultWalletActualIsHidden := false // Default to false if not found or parse error
+	if err == nil {
+		defaultWalletActualIsHidden = defaultWalletModel.IsHidden
+	} else if err != badger.ErrKeyNotFound {
+		n.logger.Error("failed to get default wallet model", "error", err, "owner", owner.Hex(), "sender", sender.String())
+		// Depending on desired behavior, might return error or proceed with IsHidden=false
 	}
 
-	items, err := n.db.GetByPrefix(WalletByOwnerPrefix(owner))
-
-	if err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), SmartAccountCreationError)
-	}
-
-	// now load the customize wallet with different salt or factory that was initialed and store in our db
-	for _, item := range items {
-		w := &model.SmartWallet{}
-		if err := w.FromStorageData(item.Value); err != nil {
-			n.logger.Error("failed to parse wallet data", "error", err)
-			continue
-		}
-
-		if w.Salt.Cmp(defaultSalt) == 0 {
-			continue
-		}
-
-		if payload != nil && payload.FactoryAddress != "" && !strings.EqualFold(w.Factory.String(), payload.FactoryAddress) {
-			continue
-		}
-
-		hiddenKey := HiddenWalletStorageKey(owner, w.Address.String())
-		isHidden, _ := n.db.Exist([]byte(hiddenKey))
-		
-		if isHidden {
-			continue
-		}
-
+	// Add default wallet if it matches filter (or no filter)
+	if payload == nil || payload.FactoryAddress == "" || strings.EqualFold(payload.FactoryAddress, n.smartWalletConfig.FactoryAddress.Hex()) {
 		wallets = append(wallets, &avsproto.SmartWallet{
-			Address: w.Address.String(),
-			Factory: w.Factory.String(),
-			Salt:    w.Salt.String(),
+			Address:  sender.String(),
+			Factory:  n.smartWalletConfig.FactoryAddress.String(),
+			Salt:     defaultSalt.String(),
+			IsHidden: defaultWalletActualIsHidden, // Pass the IsHidden status
 		})
+		processedAddresses[sender.String()] = true
+	}
+
+	// 2. Handle other wallets stored for the owner
+	items, err := n.db.GetByPrefix(WalletByOwnerPrefix(owner))
+	if err != nil {
+		// If we already have the default wallet, we might return partial results.
+		// Otherwise, if default wasn't added and we can't list others, it's an error.
+		if len(wallets) == 0 {
+			return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), "Error fetching wallets: %v", err)
+		}
+		n.logger.Warn("error fetching additional wallets by prefix, proceeding with default if available", "owner", owner.Hex(), "error", err)
+		return wallets, nil
+	}
+
+	for _, item := range items {
+		wStorage := &model.SmartWallet{}
+		if err := wStorage.FromStorageData(item.Value); err != nil {
+			n.logger.Error("failed to parse wallet data from storage", "error", err, "key", string(item.Key))
+			continue
+		}
+
+		// Skip if this wallet address was already processed (e.g., it was the default wallet)
+		if processedAddresses[wStorage.Address.String()] {
+			continue
+		}
+
+		// Apply factory filter if present in payload
+		if payload != nil && payload.FactoryAddress != "" && !strings.EqualFold(wStorage.Factory.String(), payload.FactoryAddress) {
+			continue
+		}
+
+		// Add the wallet, including its IsHidden status
+		wallets = append(wallets, &avsproto.SmartWallet{
+			Address:  wStorage.Address.String(),
+			Factory:  wStorage.Factory.String(),
+			Salt:     wStorage.Salt.String(),
+			IsHidden: wStorage.IsHidden, // Directly use the IsHidden field from the stored model
+		})
+
+		processedAddresses[wStorage.Address.String()] = true // Mark as processed
 	}
 
 	return wallets, nil
@@ -262,38 +277,44 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 	factoryAddress := n.smartWalletConfig.FactoryAddress
 	if payload.FactoryAddress != "" {
 		factoryAddress = common.HexToAddress(payload.FactoryAddress)
-
 	}
+
 	sender, err := aa.GetSenderAddressForFactory(rpcConn, user.Address, factoryAddress, salt)
 	if err != nil || sender.Hex() == "0x0000000000000000000000000000000000000000" {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidFactoryAddressError)
 	}
-	wallet := &model.SmartWallet{
-		Owner:   &user.Address,
-		Address: sender,
-		Factory: &factoryAddress,
-		Salt:    salt,
+
+	walletModel, err := GetWalletModel(n.db, user.Address, sender.Hex())
+	if err == badger.ErrKeyNotFound { // Wallet doesn't exist, create a new one
+		walletModel = &model.SmartWallet{
+			Owner:    &user.Address,
+			Address:  sender,
+			Factory:  &factoryAddress,
+			Salt:     salt,
+			IsHidden: false, // Default for new wallets
+		}
+	} else if err != nil { // Other DB error
+		n.logger.Error("failed to get wallet model in GetWallet", "error", err, "owner", user.Address.Hex(), "wallet", sender.Hex())
+		return nil, status.Errorf(codes.Code(avsproto.Error_StorageUnavailable), "Failed to access wallet data: %v", err)
+	} else { // Wallet found, ensure derived fields are up-to-date if necessary
+		walletModel.Owner = &user.Address // Ensure owner is correct
+		walletModel.Address = sender      // Ensure address is correct (should match if key was correct)
+		walletModel.Factory = &factoryAddress
+		walletModel.Salt = salt
 	}
 
-	updates := map[string][]byte{}
-
-	updates[string(WalletStorageKey(user.Address, sender.Hex()))], err = wallet.ToJSON()
-
-	if err = n.db.BatchWrite(updates); err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), StorageWriteError)
+	if err := StoreWallet(n.db, user.Address, walletModel); err != nil {
+		n.logger.Error("failed to store wallet model in GetWallet", "error", err, "owner", user.Address.Hex(), "wallet", sender.Hex())
+		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), "Failed to save wallet data: %v", err)
 	}
-
-	hiddenKey := HiddenWalletStorageKey(user.Address, sender.Hex())
-	_, _ = n.db.Exist([]byte(hiddenKey))
 
 	statSvc := NewStatService(n.db)
-	stat, _ := statSvc.GetTaskCount(wallet)
+	stat, _ := statSvc.GetTaskCount(walletModel)
 
 	return &avsproto.GetWalletResp{
-		Address:        sender.Hex(),
-		Salt:           salt.String(),
-		FactoryAddress: factoryAddress.Hex(),
-
+		Address:            sender.Hex(),
+		Salt:               salt.String(),
+		FactoryAddress:     factoryAddress.Hex(),
 		TotalTaskCount:     stat.Total,
 		ActiveTaskCount:    stat.Active,
 		CompletedTaskCount: stat.Completed,
@@ -303,38 +324,41 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 }
 
 func (n *Engine) SetWallet(user *model.User, payload *avsproto.SetWalletReq) (*avsproto.GetWalletResp, error) {
-	// Get the wallet first to validate it exists and belongs to the user
-	getWalletReq := &avsproto.GetWalletReq{
-		Salt:           payload.Salt,
-		FactoryAddress: payload.FactoryAddress,
+	// GetWalletReq is used to derive salt and factory for identifying the wallet address
+	getWalletReqPayload := &avsproto.GetWalletReq{
+		Salt:           payload.GetSalt(),
+		FactoryAddress: payload.GetFactoryAddress(),
 	}
-	
-	walletResp, err := n.GetWallet(user, getWalletReq)
+
+	// Call GetWallet to ensure the wallet exists and to get its canonical details (Address, Salt, Factory)
+	// GetWallet also ensures the wallet is stored with its current (or default false) IsHidden state.
+	walletResp, err := n.GetWallet(user, getWalletReqPayload)
 	if err != nil {
 		return nil, err
 	}
 
+	// Now fetch the model.SmartWallet that GetWallet should have just stored/updated.
 	walletAddress := common.HexToAddress(walletResp.Address)
-	hiddenKey := HiddenWalletStorageKey(user.Address, walletAddress.Hex())
-
-	updates := map[string][]byte{}
-	if payload.IsHidden {
-		updates[string(hiddenKey)] = []byte("1")
-	} else {
-		if err := n.db.Delete([]byte(hiddenKey)); err != nil {
-			return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), StorageWriteError)
-		}
+	walletModel, err := GetWalletModel(n.db, user.Address, walletAddress.Hex())
+	if err != nil {
+		// This would be unexpected if GetWallet succeeded.
+		n.logger.Error("failed to get wallet model in SetWallet after GetWallet succeeded", "error", err, "owner", user.Address.Hex(), "wallet", walletAddress.Hex())
+		return nil, status.Errorf(codes.Internal, "Failed to retrieve wallet for update: %v", err)
 	}
 
-	if len(updates) > 0 {
-		if err = n.db.BatchWrite(updates); err != nil {
-			return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), StorageWriteError)
-		}
+	// Update the IsHidden status based on the payload
+	walletModel.IsHidden = payload.GetIsHidden()
+
+	if err := StoreWallet(n.db, user.Address, walletModel); err != nil {
+		n.logger.Error("failed to store updated wallet model in SetWallet", "error", err, "owner", user.Address.Hex(), "wallet", walletAddress.Hex())
+		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), "Failed to save updated wallet: %v", err)
 	}
 
+	// Return the walletResp obtained from GetWallet.
+	// If GetWalletResp itself needed to reflect the new IsHidden status immediately, GetWalletResp proto and GetWallet logic would need changes.
+	// For now, GetWalletResp primarily confirms the wallet's identity and task stats.
 	return walletResp, nil
 }
-
 
 // CreateTask records submission data
 func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskReq) (*model.Task, error) {
@@ -1054,17 +1078,17 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	}
 
 	sort.Strings(secretKeys)
-	
+
 	var before, after, legacyCursor string
 	var itemPerPageVal int64
-	
+
 	if payload != nil {
 		before = payload.Before
 		after = payload.After
 		legacyCursor = payload.Cursor
 		itemPerPageVal = payload.ItemPerPage
 	}
-	
+
 	cursor, itemPerPage, err := SetupPagination(before, after, legacyCursor, itemPerPageVal)
 	if err != nil {
 		return nil, err

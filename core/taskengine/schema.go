@@ -1,11 +1,13 @@
 package taskengine
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -31,14 +33,6 @@ func WalletByOwnerPrefix(owner common.Address) []byte {
 func WalletStorageKey(owner common.Address, smartWalletAddress string) string {
 	return fmt.Sprintf(
 		"w:%s:%s",
-		strings.ToLower(owner.Hex()),
-		strings.ToLower(smartWalletAddress),
-	)
-}
-
-func HiddenWalletStorageKey(owner common.Address, smartWalletAddress string) string {
-	return fmt.Sprintf(
-		"wh:%s:%s",
 		strings.ToLower(owner.Hex()),
 		strings.ToLower(smartWalletAddress),
 	)
@@ -185,4 +179,33 @@ func SecretNameFromKey(key string) *model.Secret {
 // ContractWriteCounterKey returns the key for the contract write counter of a given eoa in our kv store
 func ContractWriteCounterKey(eoa common.Address) []byte {
 	return []byte(fmt.Sprintf("ct:cw:%s", strings.ToLower(eoa.Hex())))
+}
+
+// GetWalletModel retrieves a wallet model from storage.
+// It returns badger.ErrKeyNotFound if the wallet is not found.
+func GetWalletModel(db storage.Storage, owner common.Address, smartWalletAddress string) (*model.SmartWallet, error) {
+	walletKey := WalletStorageKey(owner, smartWalletAddress)
+	walletData, err := db.GetKey([]byte(walletKey))
+	if err != nil {
+		return nil, err // Includes badger.ErrKeyNotFound
+	}
+
+	var walletModel model.SmartWallet
+	if unmarshalErr := json.Unmarshal(walletData, &walletModel); unmarshalErr != nil {
+		return nil, fmt.Errorf("failed to unmarshal wallet data for key %s: %w", walletKey, unmarshalErr)
+	}
+	return &walletModel, nil
+}
+
+// StoreWallet saves a wallet model to storage.
+func StoreWallet(db storage.Storage, owner common.Address, wallet *model.SmartWallet) error {
+	if wallet.Address == nil {
+		return fmt.Errorf("cannot store wallet with nil address")
+	}
+	walletKey := WalletStorageKey(owner, wallet.Address.String())
+	updatedWalletData, err := json.Marshal(wallet)
+	if err != nil {
+		return fmt.Errorf("failed to marshal wallet for storage (key: %s): %w", walletKey, err)
+	}
+	return db.Set([]byte(walletKey), updatedWalletData)
 }
