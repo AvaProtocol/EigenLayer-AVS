@@ -464,7 +464,7 @@ message NonceResp {
 message ListWalletReq {
   // filter out by factory address or salt
   // otherwise return all the wallet
-  string factory_address = 1;
+  string factory_address = 1; // TODO: Consider renaming to factoryAddress for consistency if this is used as a filter key matching SmartWallet.factoryAddress
   string salt            = 2;
 }
 
@@ -472,6 +472,7 @@ message SmartWallet {
   string address = 1;
   string salt = 2;
   string factory = 3;
+  bool is_hidden = 4;  // Whether the wallet is hidden
 }
 
 message ListWalletResp {
@@ -590,12 +591,20 @@ message GetWalletResp {
   string address = 1;
   string salt = 2;
   string factory_address = 3;
+  bool is_hidden = 4;
+  uint64 total_task_count = 5;
+  uint64 active_task_count = 6;
+  uint64 completed_task_count = 7;
+  uint64 failed_task_count = 8;
+  uint64 canceled_task_count = 9;
+}
 
-  uint64 total_task_count = 4;
-  uint64 active_task_count = 5;
-  uint64 completed_task_count = 6;
-  uint64 failed_task_count = 7;
-  uint64 canceled_task_count = 8;
+message SetWalletReq {
+  string salt = 1;
+  // this is the factory address for the wallet, when leaving its empty, we will use our default factory address
+  string factory_address = 2;
+  // whether the wallet should be hidden in getWallets results
+  bool is_hidden = 3;
 }
 
 message UserTriggerTaskReq {
@@ -687,6 +696,7 @@ service Aggregator {
   // Smart Acccount Operation
   rpc GetNonce(NonceRequest)        returns (NonceResp) {};
   rpc GetWallet(GetWalletReq)       returns (GetWalletResp) {};
+  rpc SetWallet(SetWalletReq)       returns (GetWalletResp) {};
   rpc ListWallets(ListWalletReq)    returns (ListWalletResp) {};
 
   
