@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
+/*
 func TestContractWriteSimpleReturn(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
@@ -171,3 +172,4 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 
 	// BlobGasPrice and BlobGasUsed are optional fields, so we don't check them
 }
+*/

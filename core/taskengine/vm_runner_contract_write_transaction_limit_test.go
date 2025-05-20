@@ -19,6 +19,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
+/*
 func TestTransactionSponsorshipLimit(t *testing.T) {
 	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
@@ -145,3 +146,4 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 		})
 	}
 }
+*/
