@@ -33,10 +33,11 @@ func (u *User) ToSmartWallet() *SmartWallet {
 }
 
 type SmartWallet struct {
-	Owner   *common.Address `json:"owner"`
-	Address *common.Address `json:"address"`
-	Factory *common.Address `json:"factory,omitempty"`
-	Salt    *big.Int        `json:"salt"`
+	Owner    *common.Address `json:"owner"`
+	Address  *common.Address `json:"address"`
+	Factory  *common.Address `json:"factory,omitempty"`
+	Salt     *big.Int        `json:"salt"`
+	IsHidden bool            `json:"is_hidden,omitempty"`
 }
 
 func (w *SmartWallet) ToJSON() ([]byte, error) {

@@ -132,15 +132,15 @@ func TestGetKeyWithSignature(t *testing.T) {
 	chainID := int64(11155111)
 	issuedTs, _ := time.Parse(time.RFC3339, "2025-01-01T00:00:00Z")
 	expiredTs, _ := time.Parse(time.RFC3339, "2030-01-01T00:00:00Z")
-	
+
 	// Create the message using the same format as GetSignatureFormat
-	message := fmt.Sprintf(authTemplate, 
-		chainID, 
-		"1", 
-		issuedTs.UTC().Format("2006-01-02T15:04:05.000Z"), 
-		expiredTs.UTC().Format("2006-01-02T15:04:05.000Z"), 
+	message := fmt.Sprintf(authTemplate,
+		chainID,
+		"1",
+		issuedTs.UTC().Format("2006-01-02T15:04:05.000Z"),
+		expiredTs.UTC().Format("2006-01-02T15:04:05.000Z"),
 		owner)
-	
+
 	// dummy key to test auth
 	privateKey, _ := crypto.HexToECDSA("e0502ddd5a0d05ec7b5c22614a01c8ce783810edaa98e44cc82f5fa5a819aaa9")
 
@@ -203,13 +203,13 @@ func TestCrossChainJWTValidation(t *testing.T) {
 	expiredTs, _ := time.Parse(time.RFC3339, "2030-01-01T00:00:00Z")
 
 	// Create message with different chainID
-	message := fmt.Sprintf(authTemplate, 
-		differentChainID, 
-		"1", 
-		issuedTs.UTC().Format("2006-01-02T15:04:05.000Z"), 
-		expiredTs.UTC().Format("2006-01-02T15:04:05.000Z"), 
+	message := fmt.Sprintf(authTemplate,
+		differentChainID,
+		"1",
+		issuedTs.UTC().Format("2006-01-02T15:04:05.000Z"),
+		expiredTs.UTC().Format("2006-01-02T15:04:05.000Z"),
 		owner)
-	
+
 	privateKey, _ := crypto.HexToECDSA("e0502ddd5a0d05ec7b5c22614a01c8ce783810edaa98e44cc82f5fa5a819aaa9")
 	signature, _ := signer.SignMessage(privateKey, []byte(message))
 

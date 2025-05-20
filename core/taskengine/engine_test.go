@@ -302,45 +302,45 @@ func TestListWallets(t *testing.T) {
 		FactoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
 	})
 
-	wallets, _ := n.GetSmartWallets(u.Address, nil)
-	if len(wallets) <= 2 {
-		t.Errorf("expect 3 smartwallets but got %d", len(wallets))
+	resp, _ := n.ListWallets(u.Address, nil)
+	if len(resp.Items) <= 2 {
+		t.Errorf("expect 3 smartwallets but got %d", len(resp.Items))
 	}
 
 	// The default wallet with salt 0
-	if wallets[0].Address != "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6" {
-		t.Errorf("invalid smartwallet address, expect 0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6 got %s", wallets[0].Address)
+	if resp.Items[0].Address != "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6" {
+		t.Errorf("invalid smartwallet address, expect 0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6 got %s", resp.Items[0].Address)
 	}
 
 	// This is the wallet from custom factory https://sepolia.etherscan.io/address/0x9406Cc6185a346906296840746125a0E44976454#readProxyContract
-	if wallets[1].Address != "0x29C3139e460d03d951070596eED3218B3cc34FD1" {
-		t.Errorf("invalid smartwallet address, expect 0x923A6A90E422871FC56020d560Bc0D0CF1fbb93e got %s", wallets[1].Address)
+	if resp.Items[1].Address != "0x29C3139e460d03d951070596eED3218B3cc34FD1" {
+		t.Errorf("invalid smartwallet address, expect 0x923A6A90E422871FC56020d560Bc0D0CF1fbb93e got %s", resp.Items[1].Address)
 	}
 
 	// the wallet with default factory and salt 12345
-	if wallets[2].Address != "0x961d2DD008960A9777571D78D21Ec9C3E5c6020c" {
-		t.Errorf("invalid smartwallet address, expect 0x961d2DD008960A9777571D78D21Ec9C3E5c6020c got %s", wallets[2].Address)
+	if resp.Items[2].Address != "0x961d2DD008960A9777571D78D21Ec9C3E5c6020c" {
+		t.Errorf("invalid smartwallet address, expect 0x961d2DD008960A9777571D78D21Ec9C3E5c6020c got %s", resp.Items[2].Address)
 	}
 
-	wallets, _ = n.GetSmartWallets(u.Address, &avsproto.ListWalletReq{
+	resp, _ = n.ListWallets(u.Address, &avsproto.ListWalletReq{
 		FactoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
 	})
-	if len(wallets) != 1 {
-		t.Errorf("expect 1 smartwallet but got %d", len(wallets))
+	if len(resp.Items) != 1 {
+		t.Errorf("expect 1 smartwallet but got %d", len(resp.Items))
 	}
 	// owner 0xD7050816337a3f8f690F8083B5Ff8019D50c0E50 salt 0 https://sepolia.etherscan.io/address/0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7#readContract
-	if wallets[0].Address != "0x29C3139e460d03d951070596eED3218B3cc34FD1" {
-		t.Errorf("invalid smartwallet address, expect 0x29C3139e460d03d951070596eED3218B3cc34FD1 got %s", wallets[0].Address)
+	if resp.Items[0].Address != "0x29C3139e460d03d951070596eED3218B3cc34FD1" {
+		t.Errorf("invalid smartwallet address, expect 0x29C3139e460d03d951070596eED3218B3cc34FD1 got %s", resp.Items[0].Address)
 	}
 
-	if wallets[0].Salt != "9876" {
-		t.Errorf("invalid smartwallet address salt, expect 9876 got %s", wallets[0].Salt)
+	if resp.Items[0].Salt != "9876" {
+		t.Errorf("invalid smartwallet address salt, expect 9876 got %s", resp.Items[0].Salt)
 	}
 
 	// other user will not be able to list above wallet
-	wallets, _ = n.GetSmartWallets(testutil.TestUser2().Address, nil)
-	if len(wallets) != 1 {
-		t.Errorf("expect only default wallet but got %d", len(wallets))
+	resp, _ = n.ListWallets(testutil.TestUser2().Address, nil)
+	if len(resp.Items) != 1 {
+		t.Errorf("expect only default wallet but got %d", len(resp.Items))
 	}
 }
 

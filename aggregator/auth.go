@@ -39,7 +39,7 @@ Wallet: %s`
 // the EOA task
 func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*avsproto.KeyResp, error) {
 	message := payload.Message
-	
+
 	r.config.Logger.Info("process getkey with message",
 		"message", message,
 	)
@@ -53,14 +53,14 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 	// Issued At: %s
 	// Expire At: %s
 	// Wallet: %s
-	
+
 	lines := strings.Split(message, "\n")
 	if len(lines) < 8 {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format")
 	}
-	
+
 	var chainIDLine, versionLine, issuedAtLine, expireAtLine, walletLine string
-	
+
 	for _, line := range lines {
 		trimmedLine := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmedLine, "Chain ID:") {
@@ -75,7 +75,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 			walletLine = trimmedLine
 		}
 	}
-	
+
 	if chainIDLine == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Chain ID")
 	}
@@ -84,15 +84,15 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 	if !success || chainID == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Chain ID format")
 	}
-	
+
 	if r.chainID != nil && chainID.Cmp(r.chainID) != 0 {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid chainId: requested chainId %s does not match SmartWallet chainId %d", chainIDStr, r.chainID.Int64())
 	}
-	
+
 	if versionLine == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Version")
 	}
-	
+
 	if issuedAtLine == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Issued At")
 	}
@@ -101,7 +101,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 	if parseErr != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Issued At format")
 	}
-	
+
 	if expireAtLine == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Expire At")
 	}
@@ -110,7 +110,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 	if parseErr != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Expire At format")
 	}
-	
+
 	if walletLine == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Wallet")
 	}
