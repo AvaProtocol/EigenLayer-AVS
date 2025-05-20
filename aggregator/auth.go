@@ -64,8 +64,8 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Chain ID")
 	}
 	chainIDStr := strings.TrimSpace(strings.TrimPrefix(chainIDLine, "Chain ID:"))
-	chainID, err := new(big.Int).SetString(chainIDStr, 10)
-	if err != nil || chainID == nil {
+	chainID, success := new(big.Int).SetString(chainIDStr, 10)
+	if !success || chainID == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Chain ID format")
 	}
 	
@@ -83,8 +83,8 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Issued At")
 	}
 	issuedAtStr := strings.TrimSpace(strings.TrimPrefix(issuedAtLine, "Issued At:"))
-	_, err := time.Parse("2006-01-02T15:04:05.000Z", issuedAtStr)
-	if err != nil {
+	_, parseErr := time.Parse("2006-01-02T15:04:05.000Z", issuedAtStr)
+	if parseErr != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Issued At format")
 	}
 	
@@ -93,8 +93,8 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Expire At")
 	}
 	expireAtStr := strings.TrimSpace(strings.TrimPrefix(expireAtLine, "Expire At:"))
-	expireAt, err := time.Parse("2006-01-02T15:04:05.000Z", expireAtStr)
-	if err != nil {
+	expireAt, parseErr := time.Parse("2006-01-02T15:04:05.000Z", expireAtStr)
+	if parseErr != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Expire At format")
 	}
 	
@@ -153,10 +153,10 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	ss, err := token.SignedString(r.config.JwtSecret)
+	ss, signErr := token.SignedString(r.config.JwtSecret)
 
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, InternalError)
+	if signErr != nil {
+		return nil, status.Errorf(codes.Internal, "Internal server error")
 	}
 
 	return &avsproto.KeyResp{
