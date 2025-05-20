@@ -188,7 +188,12 @@ func (r *RpcServer) verifyOperator(ctx context.Context, operatorAddr string) (bo
 	return auth.VerifyOperator(authRawHeaders[0], operatorAddr)
 }
 
-func (r *RpcServer) GetSignatureFormat(ctx context.Context, req *avsproto.GetSignatureFormatReq) (*avsproto.GetSignatureFormatResp, error) {
+func (r *RpcServer) GetSignatureFormat(ctx context.Context, req interface{}) (interface{}, error) {
+	walletAddress := ""
+	if reqMap, ok := req.(map[string]interface{}); ok && reqMap["wallet"] != nil {
+		walletAddress = reqMap["wallet"].(string)
+	}
+
 	chainId, err := r.ethrpc.ChainID(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to get chainID: %v", err)
@@ -196,7 +201,6 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req *avsproto.GetSig
 
 	issuedAt := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	expiredAt := time.Now().Add(TokenExpirationDuration).UTC().Format("2006-01-02T15:04:05.000Z")
-	walletAddress := req.Wallet
 
 	formattedMessage := fmt.Sprintf(authTemplate,
 		chainId.Int64(),
@@ -204,7 +208,7 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req *avsproto.GetSig
 		expiredAt,
 		walletAddress)
 
-	return &avsproto.GetSignatureFormatResp{
-		Format: formattedMessage,
+	return map[string]interface{}{
+		"format": formattedMessage,
 	}, nil
 }

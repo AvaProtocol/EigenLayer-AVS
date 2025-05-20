@@ -187,13 +187,15 @@ func TestGetSignatureFormat(t *testing.T) {
 			JwtSecret: []byte("test123"),
 			Logger:    logger,
 		},
-		ethrpc: mockEthClient,
+		ethrpc: nil, // We'll use the mock directly in the GetSignatureFormat method
 	}
 
 	walletAddress := "0x1234567890123456789012345678901234567890"
-	req := &avsproto.GetSignatureFormatReq{
-		Wallet: walletAddress,
+	req := map[string]interface{}{
+		"wallet": walletAddress,
 	}
+
+	r.ethrpc = mockEthClient
 
 	resp, err := r.GetSignatureFormat(context.Background(), req)
 
@@ -201,11 +203,21 @@ func TestGetSignatureFormat(t *testing.T) {
 		t.Errorf("expected GetSignatureFormat to succeed but got error: %s", err)
 	}
 
-	if !strings.Contains(resp.Format, walletAddress) {
-		t.Errorf("expected format to contain wallet address %s but got %s", walletAddress, resp.Format)
+	respMap, ok := resp.(map[string]interface{})
+	if !ok {
+		t.Errorf("expected response to be a map but got %T", resp)
 	}
 
-	if !strings.Contains(resp.Format, "Chain ID: 1") {
-		t.Errorf("expected format to contain Chain ID: 1 but got %s", resp.Format)
+	format, ok := respMap["format"].(string)
+	if !ok {
+		t.Errorf("expected format to be a string but got %T", respMap["format"])
+	}
+
+	if !strings.Contains(format, walletAddress) {
+		t.Errorf("expected format to contain wallet address %s but got %s", walletAddress, format)
+	}
+
+	if !strings.Contains(format, "Chain ID: 1") {
+		t.Errorf("expected format to contain Chain ID: 1 but got %s", format)
 	}
 }
