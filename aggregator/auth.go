@@ -198,7 +198,7 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req interface{}) (in
 	}
 
 	var chainId *big.Int
-	
+
 	if config.CurrentChainEnv == config.EthereumEnv {
 		chainId = config.MainnetChainID
 	} else {
