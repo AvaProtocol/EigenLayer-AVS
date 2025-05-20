@@ -131,7 +131,7 @@ func TestGetKeyWithSignature(t *testing.T) {
 	owner := "0x578B110b0a7c06e66b7B1a33C39635304aaF733c"
 	chainID := int64(11155111)
 	issuedTs, _ := time.Parse(time.RFC3339, "2025-01-01T00:00:00Z")
-	expiredTs, _ := time.Parse(time.RFC3339, "2025-01-02T00:00:00Z")
+	expiredTs, _ := time.Parse(time.RFC3339, "2030-01-01T00:00:00Z")
 	
 	// Create the message using the same format as GetSignatureFormat
 	message := fmt.Sprintf(authTemplate, 
@@ -200,7 +200,7 @@ func TestCrossChainJWTValidation(t *testing.T) {
 	owner := "0x578B110b0a7c06e66b7B1a33C39635304aaF733c"
 	differentChainID := int64(5) // Goerli chainID
 	issuedTs, _ := time.Parse(time.RFC3339, "2025-01-01T00:00:00Z")
-	expiredTs, _ := time.Parse(time.RFC3339, "2025-01-02T00:00:00Z")
+	expiredTs, _ := time.Parse(time.RFC3339, "2030-01-01T00:00:00Z")
 
 	// Create message with different chainID
 	message := fmt.Sprintf(authTemplate, 
