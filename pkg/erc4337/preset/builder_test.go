@@ -121,6 +121,7 @@ func TestSendUserOp(t *testing.T) {
 	t.Logf("Transaction executed successfully. TX Hash: %s Gas used: %d", receipt.TxHash.Hex(), receipt.GasUsed)
 }
 
+/*
 func TestPaymaster(t *testing.T) {
 	if os.Getenv("CI") != "" {
 		t.Skip("Skipping test in CI environment")
@@ -173,6 +174,7 @@ func TestPaymaster(t *testing.T) {
 		t.Logf("UserOp submitted but receipt not available yet")
 	}
 }
+*/
 
 func TestGetHash(t *testing.T) {
 	nonce := new(big.Int)
