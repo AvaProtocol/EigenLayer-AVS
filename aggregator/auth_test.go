@@ -18,7 +18,6 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/golang-jwt/jwt/v5"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
