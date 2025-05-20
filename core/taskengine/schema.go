@@ -36,12 +36,54 @@ func WalletStorageKey(owner common.Address, smartWalletAddress string) string {
 	)
 }
 
-func HiddenWalletStorageKey(owner common.Address, smartWalletAddress string) string {
-	return fmt.Sprintf(
+func GetWallet(db storage.Storage, owner common.Address, smartWalletAddress string) (*model.SmartWallet, error) {
+	walletKey := WalletStorageKey(owner, smartWalletAddress)
+	walletData, err := db.GetKey([]byte(walletKey))
+	if err != nil {
+		return nil, err // Includes badger.ErrKeyNotFound
+	}
+
+	var walletModel model.SmartWallet
+	if unmarshalErr := walletModel.FromStorageData(walletData); unmarshalErr != nil {
+		return nil, fmt.Errorf("failed to unmarshal wallet data for key %s: %w", walletKey, unmarshalErr)
+	}
+	return &walletModel, nil
+}
+
+func StoreWallet(db storage.Storage, owner common.Address, wallet *model.SmartWallet) error {
+	if wallet.Address == nil {
+		return fmt.Errorf("cannot store wallet with nil address")
+	}
+	walletKey := WalletStorageKey(owner, wallet.Address.String())
+	updatedWalletData, err := wallet.ToJSON()
+	if err != nil {
+		return fmt.Errorf("failed to marshal wallet for storage (key: %s): %w", walletKey, err)
+	}
+	return db.Set([]byte(walletKey), updatedWalletData)
+}
+
+func IsWalletHidden(db storage.Storage, owner common.Address, smartWalletAddress string) (bool, error) {
+	hiddenKey := fmt.Sprintf(
 		"wh:%s:%s",
 		strings.ToLower(owner.Hex()),
 		strings.ToLower(smartWalletAddress),
 	)
+	exists, err := db.Exist([]byte(hiddenKey))
+	return exists, err
+}
+
+func SetWalletHidden(db storage.Storage, owner common.Address, smartWalletAddress string, hidden bool) error {
+	hiddenKey := fmt.Sprintf(
+		"wh:%s:%s",
+		strings.ToLower(owner.Hex()),
+		strings.ToLower(smartWalletAddress),
+	)
+	
+	if hidden {
+		return db.Set([]byte(hiddenKey), []byte("1"))
+	} else {
+		return db.Delete([]byte(hiddenKey))
+	}
 }
 
 func TaskStorageKey(id string, status avsproto.TaskStatus) []byte {
