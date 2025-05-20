@@ -2330,7 +2330,7 @@ type SmartWallet struct {
 	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	Salt          string                 `protobuf:"bytes,2,opt,name=salt,proto3" json:"salt,omitempty"`
 	Factory       string                 `protobuf:"bytes,3,opt,name=factory,proto3" json:"factory,omitempty"`
-	IsHidden      bool                   `protobuf:"varint,4,opt,name=isHidden,proto3" json:"isHidden,omitempty"` // Whether the wallet is hidden
+	IsHidden      bool                   `protobuf:"varint,4,opt,name=is_hidden,json=isHidden,proto3" json:"is_hidden,omitempty"` // Whether the wallet is hidden
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5815,12 +5815,12 @@ const file_avs_proto_rawDesc = "" +
 	"\x05nonce\x18\x01 \x01(\tR\x05nonce\"L\n" +
 	"\rListWalletReq\x12'\n" +
 	"\x0ffactory_address\x18\x01 \x01(\tR\x0efactoryAddress\x12\x12\n" +
-	"\x04salt\x18\x02 \x01(\tR\x04salt\"q\n" +
+	"\x04salt\x18\x02 \x01(\tR\x04salt\"r\n" +
 	"\vSmartWallet\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04salt\x18\x02 \x01(\tR\x04salt\x12\x18\n" +
-	"\afactory\x18\x03 \x01(\tR\afactory\x12\x1a\n" +
-	"\bisHidden\x18\x04 \x01(\bR\bisHidden\"?\n" +
+	"\afactory\x18\x03 \x01(\tR\afactory\x12\x1b\n" +
+	"\tis_hidden\x18\x04 \x01(\bR\bisHidden\"?\n" +
 	"\x0eListWalletResp\x12-\n" +
 	"\x05items\x18\x01 \x03(\v2\x17.aggregator.SmartWalletR\x05items\"|\n" +
 	"\fListTasksReq\x120\n" +
