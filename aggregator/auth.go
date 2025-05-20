@@ -3,6 +3,7 @@ package aggregator
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -82,7 +83,7 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Issued At")
 	}
 	issuedAtStr := strings.TrimSpace(strings.TrimPrefix(issuedAtLine, "Issued At:"))
-	issuedAt, err := time.Parse("2006-01-02T15:04:05.000Z", issuedAtStr)
+	_, err := time.Parse("2006-01-02T15:04:05.000Z", issuedAtStr)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Issued At format")
 	}
