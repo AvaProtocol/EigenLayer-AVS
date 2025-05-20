@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/version"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -28,7 +30,7 @@ const (
 
 URI: https://app.avaprotocol.org
 Chain ID: %d
-Version: 1
+Version: %s
 Issued At: %s
 Expire At: %s
 Wallet: %s`
@@ -196,22 +198,21 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req interface{}) (in
 	}
 
 	var chainId *big.Int
-	var err error
-
-	if r.ethrpc != nil {
-		chainId, err = r.ethrpc.ChainID(ctx)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "Failed to get chainID: %v", err)
-		}
+	
+	if config.CurrentChainEnv == config.EthereumEnv {
+		chainId = config.MainnetChainID
 	} else {
-		chainId = big.NewInt(1)
+		chainId = config.HoleskyChainID
 	}
 
 	issuedAt := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	expiredAt := time.Now().Add(TokenExpirationDuration).UTC().Format("2006-01-02T15:04:05.000Z")
 
+	currentVersion := version.Get()
+
 	formattedMessage := fmt.Sprintf(authTemplate,
 		chainId.Int64(),
+		currentVersion,
 		issuedAt,
 		expiredAt,
 		walletAddress)
