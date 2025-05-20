@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/go-playground/validator/v10"
+	validator "github.com/go-playground/validator/v10"
 	"github.com/mitchellh/mapstructure"
 )
 
@@ -31,13 +31,22 @@ func decodeOpTypes(
 	data interface{}) (interface{}, error) {
 	// String to common.Address conversion
 	if f == reflect.String && t == reflect.Array {
-		return common.HexToAddress(data.(string)), nil
+		addrStr, ok := data.(string)
+		if !ok {
+			return nil, errors.New("expected string for address conversion")
+		}
+		return common.HexToAddress(addrStr), nil
 	}
 
 	// String to big.Int conversion
 	if f == reflect.String && t == reflect.Struct {
 		n := new(big.Int)
-		n, ok := n.SetString(data.(string), 0)
+		var ok bool
+		dataStr, ok := data.(string)
+		if !ok {
+			return nil, errors.New("expected string for bigInt conversion")
+		}
+		n, ok = n.SetString(dataStr, 0)
 		if !ok {
 			return nil, errors.New("bigInt conversion failed")
 		}
@@ -55,7 +64,10 @@ func decodeOpTypes(
 
 	// String to []byte conversion
 	if f == reflect.String && t == reflect.Slice {
-		byteStr := data.(string)
+		byteStr, ok := data.(string)
+		if !ok {
+			return nil, errors.New("expected string for byte conversion")
+		}
 		if len(byteStr) < 2 || byteStr[:2] != "0x" {
 			return nil, errors.New("not byte string")
 		}

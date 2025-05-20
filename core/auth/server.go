@@ -32,5 +32,4 @@ func VerifyOperator(authHeader string, operatorAddr string) (bool, error) {
 	}
 
 	return result, fmt.Errorf("unauthorized error: %w", err)
-
 }

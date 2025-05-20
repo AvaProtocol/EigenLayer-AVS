@@ -89,16 +89,20 @@ func TestListTasks(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Errorf("expect list task succesfully but got error %s", err)
+		t.Errorf("expect list task successfully but got error %s", err)
+		return
 	}
 
 	if result == nil {
 		t.Errorf("expect result is not nil but got nil")
+		return
 	}
 
 	if len(result.Items) != 1 {
 		t.Errorf("list task return wrong. expect 1, got %d", len(result.Items))
+		return
 	}
+
 	if result.Items[0].Name != "t3" {
 		t.Errorf("list task return wrong. expect memo t1, got %s", result.Items[0].Name)
 	}
@@ -169,7 +173,7 @@ func TestListTasksPagination(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Errorf("expect list task succesfully but got error %s", err)
+		t.Errorf("expect list task successfully but got error %s", err)
 	}
 
 	if !result.HasMore {
@@ -271,13 +275,13 @@ func TestGetExecution(t *testing.T) {
 		t.Errorf("invalid triggered block. expect 101 got %d", execution.Reason.BlockNumber)
 	}
 
-	// Another user cannot get this executin id
+	// Another user cannot get this execution id
 	execution, err = n.GetExecution(testutil.TestUser2(), &avsproto.ExecutionReq{
 		TaskId:      result.Id,
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 	if err == nil || execution != nil {
-		t.Errorf("expected failure getting other user execution but succesfully read it")
+		t.Errorf("expected failure getting other user execution but successfully read it")
 	}
 }
 
@@ -363,7 +367,7 @@ func TestTriggerSync(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Errorf("expected trigger succesfully but got error: %s", err)
+		t.Errorf("expected trigger successfully but got error: %s", err)
 	}
 
 	// Now get back that execution id
@@ -417,7 +421,7 @@ func TestTriggerAsync(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Errorf("expected trigger succesfully but got error: %s", err)
+		t.Errorf("expected trigger successfully but got error: %s", err)
 	}
 
 	// Now get back that execution id, because the task is run async we won't have any data yet,
@@ -464,9 +468,22 @@ func TestTriggerAsync(t *testing.T) {
 		TaskId:      result.Id,
 		ExecutionId: resultTrigger.ExecutionId,
 	})
+	if err != nil {
+		t.Fatalf("Error getting execution status after processing: %v", err)
+	}
 
 	if executionStatus.Status != avsproto.ExecutionStatus_Finished {
 		t.Errorf("invalid execution status, expected completed but got %s", avsproto.TaskStatus_name[int32(executionStatus.Status)])
+	}
+
+	// Verify TaskTriggerKey is cleaned up after successful async execution
+	triggerKeyBytes := TaskTriggerKey(result, resultTrigger.ExecutionId)
+	val, errDbRead := db.GetKey(triggerKeyBytes)
+	if errDbRead == nil {
+		t.Errorf("Expected TaskTriggerKey '%s' to be deleted after async execution, but it was found with value: %s", string(triggerKeyBytes), string(val))
+	} else if !strings.Contains(errDbRead.Error(), "Key not found") {
+		// Allow "Key not found", but log other errors
+		t.Logf("Got an unexpected error when checking for deleted TaskTriggerKey '%s': %v. This might be okay if it implies not found.", string(triggerKeyBytes), errDbRead)
 	}
 }
 
@@ -494,7 +511,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	})
 
 	if err != nil || resultTrigger == nil {
-		t.Errorf("expected trigger succesfully but got error: %s", err)
+		t.Errorf("expected trigger successfully but got error: %s", err)
 	}
 
 	// Now the task has reach its max run, and canot run anymore

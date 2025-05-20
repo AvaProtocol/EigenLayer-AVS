@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,9 +12,83 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// Helper functions for structpb.Value assertions
+
+func assertStructpbValueIsBool(t *testing.T, val *structpb.Value, expectedBool bool, msgAndArgs ...interface{}) {
+	t.Helper()
+	if val == nil {
+		t.Fatalf("assertStructpbValueIsBool: value is nil. Expected bool %v. %s", expectedBool, fmt.Sprint(msgAndArgs...))
+	}
+
+	var actualBool bool
+	validKind := false
+	switch kind := val.GetKind().(type) {
+	case *structpb.Value_BoolValue:
+		actualBool = kind.BoolValue
+		validKind = true
+	case *structpb.Value_NumberValue: // JavaScript `true` might come as number 1
+		actualBool = (kind.NumberValue != 0)
+		validKind = true
+	case *structpb.Value_StringValue: // JavaScript "true" might come as string
+		actualBool = (strings.ToLower(kind.StringValue) == "true")
+		validKind = true
+	}
+
+	if !validKind {
+		t.Fatalf("assertStructpbValueIsBool: Expected bool (or convertible type), got %T: %v. %s", val.GetKind(), val.String(), fmt.Sprint(msgAndArgs...))
+	}
+
+	if actualBool != expectedBool {
+		t.Errorf("assertStructpbValueIsBool: expected %v, got %v. Original value: %s. %s", expectedBool, actualBool, val.String(), fmt.Sprint(msgAndArgs...))
+	}
+}
+
+func assertStructpbValueIsFloat64Slice(t *testing.T, val *structpb.Value, expectedSlice []float64, msgAndArgs ...interface{}) {
+	t.Helper()
+	if val == nil {
+		t.Fatalf("assertStructpbValueIsFloat64Slice: value is nil. Expected slice %v. %s", expectedSlice, fmt.Sprint(msgAndArgs...))
+	}
+	listValue, ok := val.GetKind().(*structpb.Value_ListValue)
+	if !ok {
+		t.Fatalf("assertStructpbValueIsFloat64Slice: expected list, got %T. %s", val.GetKind(), fmt.Sprint(msgAndArgs...))
+	}
+
+	values := listValue.ListValue.GetValues()
+	if len(values) != len(expectedSlice) {
+		t.Fatalf("assertStructpbValueIsFloat64Slice: expected list of %d values, got %d. %s", len(expectedSlice), len(values), fmt.Sprint(msgAndArgs...))
+	}
+
+	var got []float64
+	for i, v := range values {
+		numVal, okNum := v.GetKind().(*structpb.Value_NumberValue)
+		if !okNum {
+			t.Fatalf("assertStructpbValueIsFloat64Slice: expected list item %d to be number, got %T for value %v. %s", i, v.GetKind(), v, fmt.Sprint(msgAndArgs...))
+		}
+		got = append(got, numVal.NumberValue)
+	}
+
+	if !reflect.DeepEqual(got, expectedSlice) {
+		t.Errorf("assertStructpbValueIsFloat64Slice: expected %v, got %v. Original output: %s. %s", expectedSlice, got, val.String(), fmt.Sprint(msgAndArgs...))
+	}
+}
+
+func assertStructpbValueIsString(t *testing.T, val *structpb.Value, expectedString string, msgAndArgs ...interface{}) {
+	t.Helper()
+	if val == nil {
+		t.Fatalf("assertStructpbValueIsString: value is nil. Expected string %q. %s", expectedString, fmt.Sprint(msgAndArgs...))
+	}
+	stringValue, ok := val.GetKind().(*structpb.Value_StringValue)
+	if !ok {
+		t.Fatalf("assertStructpbValueIsString: expected string, got %T. %s", val.GetKind(), fmt.Sprint(msgAndArgs...))
+	}
+	if stringValue.StringValue != expectedString {
+		t.Errorf("assertStructpbValueIsString: expected %q, got %q. Original output: %s. %s", expectedString, stringValue.StringValue, val.String(), fmt.Sprint(msgAndArgs...))
+	}
+}
 
 func TestRunJavaScript(t *testing.T) {
 	node := &avsproto.CustomCodeNode{
@@ -43,7 +118,7 @@ func TestRunJavaScript(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -60,7 +135,7 @@ func TestRunJavaScript(t *testing.T) {
 	}
 
 	if !step.Success {
-		t.Errorf("expected JavaScript node run succesfully but failed")
+		t.Errorf("expected JavaScript node run successfully but failed")
 	}
 
 	if !strings.Contains(step.Log, "Start execute user-input JS code at") {
@@ -71,10 +146,8 @@ func TestRunJavaScript(t *testing.T) {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 
-	if gow.AnyToBool(step.GetCustomCode().Data) != true {
-		t.Errorf("wrong result, expect true got %s", step.OutputData)
-	}
-
+	customCodeOutput := step.GetCustomCode().Data
+	assertStructpbValueIsBool(t, customCodeOutput, true, "TestRunJavaScript: boolean check failed")
 }
 
 func TestRunJavaScriptComplex(t *testing.T) {
@@ -104,7 +177,7 @@ func TestRunJavaScriptComplex(t *testing.T) {
 	}
 
 	vm, _ := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -116,13 +189,8 @@ func TestRunJavaScriptComplex(t *testing.T) {
 
 	step, _ := n.Execute("123abc", node)
 
-	output := gow.AnyToSlice(step.GetCustomCode().Data)
-	got := []float64{output[0].(float64), output[1].(float64)}
-	expect := []float64{2, 3}
-
-	if reflect.DeepEqual(got, expect) != true {
-		t.Errorf("wrong JS code evaluation result, expect [2,3] got %s", step.OutputData)
-	}
+	customCodeOutput := step.GetCustomCode().Data
+	assertStructpbValueIsFloat64Slice(t, customCodeOutput, []float64{2, 3}, "TestRunJavaScriptComplex: slice check failed")
 }
 
 func TestRunJavaScriptComplexWithMap(t *testing.T) {
@@ -155,7 +223,7 @@ func TestRunJavaScriptComplexWithMap(t *testing.T) {
 	}
 
 	vm, _ := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -167,17 +235,43 @@ func TestRunJavaScriptComplexWithMap(t *testing.T) {
 
 	step, _ := n.Execute("123abc", node)
 
-	output := gow.AnyToSlice(step.GetCustomCode().Data)
-	if len(output) != 1 {
-		t.Errorf("expect a single element return form javascript epression but got: %d", len(output))
+	customCodeOutput := step.GetCustomCode().Data
+	if customCodeOutput == nil {
+		t.Fatalf("Custom code output data is nil for TestRunJavaScriptComplexWithMap")
 	}
-	got := output[0].(map[string]interface{})
-	if got["name"].(string) != "bob" {
-		t.Errorf("expect return bob but got: %s", got["name"])
+	listValue, ok := customCodeOutput.GetKind().(*structpb.Value_ListValue)
+	if !ok {
+		t.Fatalf("Expected custom code output to be a list, got %T", customCodeOutput.GetKind())
 	}
 
-	if got["age"].(float64) != 15 {
-		t.Errorf("expect return age 15 but got: %s", got["age"])
+	values := listValue.ListValue.GetValues()
+	if len(values) != 1 {
+		t.Fatalf("expect a single element return from javascript expression but got: %d", len(values))
+	}
+
+	structVal, okStruct := values[0].GetKind().(*structpb.Value_StructValue)
+	if !okStruct {
+		t.Fatalf("Expected list item to be a struct (map), got %T", values[0].GetKind())
+	}
+
+	fields := structVal.StructValue.GetFields()
+
+	nameFieldVal, nameExists := fields["name"]
+	if !nameExists {
+		t.Fatalf("Expected 'name' field in struct")
+	}
+	assertStructpbValueIsString(t, nameFieldVal, "bob", "TestRunJavaScriptComplexWithMap: name check failed")
+
+	ageFieldVal, ageExists := fields["age"]
+	if !ageExists {
+		t.Fatalf("Expected 'age' field in struct")
+	}
+	ageNumVal, okAgeNum := ageFieldVal.GetKind().(*structpb.Value_NumberValue)
+	if !okAgeNum {
+		t.Fatalf("Expected 'age' field to be a number, got %T for value %v", ageFieldVal.GetKind(), ageFieldVal)
+	}
+	if ageNumVal.NumberValue != 15 {
+		t.Errorf("Expected age to be 15, got %f. Original output: %s", ageNumVal.NumberValue, customCodeOutput.String())
 	}
 }
 
@@ -243,7 +337,7 @@ func TestRunJavaScriptCanAccessSecretsWithapContext(t *testing.T) {
 	}
 
 	vm, _ := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -255,9 +349,8 @@ func TestRunJavaScriptCanAccessSecretsWithapContext(t *testing.T) {
 
 	step, _ := n.Execute("123abc", node)
 
-	if gow.AnyToString(step.GetCustomCode().Data) != "my name is my_awesome_secret_value" {
-		t.Errorf("wrong JS code evaluation result, expect: `\"my name is my_awesome_secret_value\"`,  got `%s`", step.OutputData)
-	}
+	customCodeOutput := step.GetCustomCode().Data
+	assertStructpbValueIsString(t, customCodeOutput, "my name is my_awesome_secret_value", "TestRunJavaScriptCanAccessSecretsWithapContext: string check failed")
 }
 
 // TestRunJavaScriptObjectInTemplate verifies that using an object result
@@ -335,7 +428,7 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 	}
 
 	taskModel := &model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
