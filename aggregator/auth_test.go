@@ -178,24 +178,18 @@ func TestGetKeyWithSignature(t *testing.T) {
 func TestGetSignatureFormat(t *testing.T) {
 	logger, _ := sdklogging.NewZapLogger("development")
 
-	mockEthClient := &MockEthClient{
-		chainID: big.NewInt(1), // Ethereum mainnet
-	}
-
 	r := RpcServer{
 		config: &config.Config{
 			JwtSecret: []byte("test123"),
 			Logger:    logger,
 		},
-		ethrpc: nil, // We'll use the mock directly in the GetSignatureFormat method
+		ethrpc: nil, // Using nil ethrpc will default to chainId = 1
 	}
 
 	walletAddress := "0x1234567890123456789012345678901234567890"
 	req := map[string]interface{}{
 		"wallet": walletAddress,
 	}
-
-	r.ethrpc = mockEthClient
 
 	resp, err := r.GetSignatureFormat(context.Background(), req)
 
