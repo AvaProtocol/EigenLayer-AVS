@@ -540,11 +540,10 @@ message ExecutionStatusResp {
 }
 
 message GetKeyReq {
-  string owner = 1;
-  int64  chain_id = 2;
-  google.protobuf.Timestamp issued_at = 3;
-  google.protobuf.Timestamp expired_at = 4;
-  string signature = 5;
+  // The message to sign, provided by GetSignatureFormat
+  string message = 1;
+  // The signature of the message
+  string signature = 2;
 }
 
 message KeyResp {

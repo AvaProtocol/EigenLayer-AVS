@@ -37,18 +37,75 @@ Wallet: %s`
 // GetKey exchanges an api key or signature submit by an EOA with an API key that can manage
 // the EOA task
 func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*avsproto.KeyResp, error) {
-	submitAddress := common.HexToAddress(payload.Owner)
-
-	r.config.Logger.Info("process getkey",
-		"owner", payload.Owner,
-		"expired", payload.ExpiredAt,
-		"issued", payload.IssuedAt,
-		"chainId", payload.ChainId,
+	message := payload.Message
+	
+	r.config.Logger.Info("process getkey with message",
+		"message", message,
 	)
 
-	if r.chainID != nil && payload.ChainId != r.chainID.Int64() {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid chainId: requested chainId %d does not match SmartWallet chainId %d", payload.ChainId, r.chainID.Int64())
+	// Parse the message to extract necessary information
+	// Please sign the below text for ownership verification.
+	//
+	// URI: https://app.avaprotocol.org
+	// Chain ID: %d
+	// Version: %s
+	// Issued At: %s
+	// Expire At: %s
+	// Wallet: %s
+	
+	lines := strings.Split(message, "\n")
+	if len(lines) < 8 {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format")
 	}
+	
+	chainIDLine := strings.TrimSpace(lines[4])
+	if !strings.HasPrefix(chainIDLine, "Chain ID:") {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Chain ID")
+	}
+	chainIDStr := strings.TrimSpace(strings.TrimPrefix(chainIDLine, "Chain ID:"))
+	chainID, err := new(big.Int).SetString(chainIDStr, 10)
+	if err != nil || chainID == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid Chain ID format")
+	}
+	
+	if r.chainID != nil && chainID.Cmp(r.chainID) != 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid chainId: requested chainId %s does not match SmartWallet chainId %d", chainIDStr, r.chainID.Int64())
+	}
+	
+	versionLine := strings.TrimSpace(lines[5])
+	if !strings.HasPrefix(versionLine, "Version:") {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Version")
+	}
+	
+	issuedAtLine := strings.TrimSpace(lines[6])
+	if !strings.HasPrefix(issuedAtLine, "Issued At:") {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Issued At")
+	}
+	issuedAtStr := strings.TrimSpace(strings.TrimPrefix(issuedAtLine, "Issued At:"))
+	issuedAt, err := time.Parse("2006-01-02T15:04:05.000Z", issuedAtStr)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid Issued At format")
+	}
+	
+	expireAtLine := strings.TrimSpace(lines[7])
+	if !strings.HasPrefix(expireAtLine, "Expire At:") {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Expire At")
+	}
+	expireAtStr := strings.TrimSpace(strings.TrimPrefix(expireAtLine, "Expire At:"))
+	expireAt, err := time.Parse("2006-01-02T15:04:05.000Z", expireAtStr)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid Expire At format")
+	}
+	
+	walletLine := strings.TrimSpace(lines[8])
+	if !strings.HasPrefix(walletLine, "Wallet:") {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid message format: missing Wallet")
+	}
+	walletStr := strings.TrimSpace(strings.TrimPrefix(walletLine, "Wallet:"))
+	if !common.IsHexAddress(walletStr) {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid wallet address format")
+	}
+	submitAddress := common.HexToAddress(walletStr)
 
 	if strings.Contains(payload.Signature, ".") {
 		// API key directly
@@ -57,9 +114,8 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 			return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, auth.InvalidAPIKey)
 		}
 	} else {
-		// We need to have 3 things to verify the signature: the signature, the hash of the original data, and the public key of the signer. With this information we can determine if the private key holder of the public key pair did indeed sign the message
-		text := fmt.Sprintf(authTemplate, payload.ChainId, "1", payload.IssuedAt.AsTime().UTC().Format("2006-01-02T15:04:05.000Z"), payload.ExpiredAt.AsTime().UTC().Format("2006-01-02T15:04:05.000Z"), payload.Owner)
-		data := []byte(text)
+		// We need to have 3 things to verify the signature: the signature, the hash of the original data, and the public key of the signer.
+		data := []byte(message)
 		hash := accounts.TextHash(data)
 
 		signature, err := hexutil.Decode(payload.Signature)
@@ -75,24 +131,24 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		}
 
 		sigPublicKey, err := crypto.SigToPub(hash, signature)
-		recoveredAddr := crypto.PubkeyToAddress(*sigPublicKey)
 		if err != nil {
 			return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 		}
+		recoveredAddr := crypto.PubkeyToAddress(*sigPublicKey)
 		if submitAddress.String() != recoveredAddr.String() {
 			return nil, status.Errorf(codes.Unauthenticated, auth.InvalidAuthenticationKey)
 		}
 	}
 
-	if err := payload.ExpiredAt.CheckValid(); err != nil {
+	if expireAt.Before(time.Now()) {
 		return nil, status.Errorf(codes.Unauthenticated, auth.MalformedExpirationTime)
 	}
 
 	claims := &jwt.RegisteredClaims{
-		ExpiresAt: jwt.NewNumericDate(payload.ExpiredAt.AsTime()),
+		ExpiresAt: jwt.NewNumericDate(expireAt),
 		Issuer:    auth.Issuer,
-		Subject:   payload.Owner,
-		Audience:  jwt.ClaimStrings{fmt.Sprintf("%d", payload.ChainId)},
+		Subject:   submitAddress.String(),
+		Audience:  jwt.ClaimStrings{chainIDStr},
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

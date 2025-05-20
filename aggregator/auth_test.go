@@ -132,20 +132,23 @@ func TestGetKeyWithSignature(t *testing.T) {
 	chainID := int64(11155111)
 	issuedTs, _ := time.Parse(time.RFC3339, "2025-01-01T00:00:00Z")
 	expiredTs, _ := time.Parse(time.RFC3339, "2025-01-02T00:00:00Z")
-	issuedAt := timestamppb.New(issuedTs)
-	expiredAt := timestamppb.New(expiredTs)
-
-	text := fmt.Sprintf(authTemplate, chainID, "1", issuedTs.UTC().Format("2006-01-02T15:04:05.000Z"), expiredTs.UTC().Format("2006-01-02T15:04:05.000Z"), owner)
+	
+	// Create the message using the same format as GetSignatureFormat
+	message := fmt.Sprintf(authTemplate, 
+		chainID, 
+		"1", 
+		issuedTs.UTC().Format("2006-01-02T15:04:05.000Z"), 
+		expiredTs.UTC().Format("2006-01-02T15:04:05.000Z"), 
+		owner)
+	
 	// dummy key to test auth
 	privateKey, _ := crypto.HexToECDSA("e0502ddd5a0d05ec7b5c22614a01c8ce783810edaa98e44cc82f5fa5a819aaa9")
 
-	signature, _ := signer.SignMessage(privateKey, []byte(text))
+	signature, _ := signer.SignMessage(privateKey, []byte(message))
 
+	// Create payload with the new structure
 	payload := &avsproto.GetKeyReq{
-		ChainId:   chainID,
-		IssuedAt:  issuedAt,
-		ExpiredAt: expiredAt,
-		Owner:     owner,
+		Message:   message,
 		Signature: hexutil.Encode(signature),
 	}
 
@@ -198,18 +201,21 @@ func TestCrossChainJWTValidation(t *testing.T) {
 	differentChainID := int64(5) // Goerli chainID
 	issuedTs, _ := time.Parse(time.RFC3339, "2025-01-01T00:00:00Z")
 	expiredTs, _ := time.Parse(time.RFC3339, "2025-01-02T00:00:00Z")
-	issuedAt := timestamppb.New(issuedTs)
-	expiredAt := timestamppb.New(expiredTs)
 
-	text := fmt.Sprintf(authTemplate, differentChainID, "1", issuedTs.UTC().Format("2006-01-02T15:04:05.000Z"), expiredTs.UTC().Format("2006-01-02T15:04:05.000Z"), owner)
+	// Create message with different chainID
+	message := fmt.Sprintf(authTemplate, 
+		differentChainID, 
+		"1", 
+		issuedTs.UTC().Format("2006-01-02T15:04:05.000Z"), 
+		expiredTs.UTC().Format("2006-01-02T15:04:05.000Z"), 
+		owner)
+	
 	privateKey, _ := crypto.HexToECDSA("e0502ddd5a0d05ec7b5c22614a01c8ce783810edaa98e44cc82f5fa5a819aaa9")
-	signature, _ := signer.SignMessage(privateKey, []byte(text))
+	signature, _ := signer.SignMessage(privateKey, []byte(message))
 
+	// Create payload with the new structure
 	payload := &avsproto.GetKeyReq{
-		ChainId:   differentChainID,
-		IssuedAt:  issuedAt,
-		ExpiredAt: expiredAt,
-		Owner:     owner,
+		Message:   message,
 		Signature: hexutil.Encode(signature),
 	}
 
@@ -224,7 +230,7 @@ func TestCrossChainJWTValidation(t *testing.T) {
 		t.Errorf("expected a gRPC status error, got: %v", err)
 	} else if statusErr.Code() != codes.InvalidArgument {
 		t.Errorf("expected InvalidArgument error code, got: %v", statusErr.Code())
-	} else if expected := fmt.Sprintf("Invalid chainId: requested chainId %d does not match SmartWallet chainId %d", differentChainID, r.chainID.Int64()); statusErr.Message() != expected {
+	} else if expected := fmt.Sprintf("Invalid chainId: requested chainId %s does not match SmartWallet chainId %d", "5", r.chainID.Int64()); statusErr.Message() != expected {
 		t.Errorf("expected error message '%s', got: '%s'", expected, statusErr.Message())
 	}
 }
