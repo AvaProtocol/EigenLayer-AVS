@@ -5,11 +5,16 @@ on:
     types: [closed]
     branches:
       - staging
+  workflow_dispatch:
+    inputs:
+      commit_hash:
+        description: 'Commit hash to build and publish'
+        required: true
 
 jobs:
   format-and-commit:
-    # Only run this job when the PR is merged to staging (not just closed)
-    if: github.event.pull_request.merged == true
+    # Only run this job when the PR is merged to staging (not just closed) or manually triggered
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # Grant permissions for the built-in GITHUB_TOKEN to create a commit and push.
     permissions:
@@ -52,8 +57,8 @@ jobs:
         shell: bash # Explicitly use bash
 
   publish-dev-build:
-    # Only run this job when the PR is merged to staging (not just closed)
-    if: github.event.pull_request.merged == true
+    # Only run this job when the PR is merged to staging (not just closed) or manually triggered
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     name: Publish staging build docker image to dockerhub
     runs-on: 'ubuntu-latest'
     steps:
@@ -80,17 +85,17 @@ jobs:
           images: |
             avaprotocol/avs-dev
           tags: |
-            type=raw,value={{sha}}
+            type=raw,value=${{ github.event_name == 'workflow_dispatch' && inputs.commit_hash || github.sha }}
 
       - name: Build and push avs-dev docker image
         uses: docker/build-push-action@v6
         with:
           build-args: |
-            RELEASE_TAG=${{ inputs.tag || github.sha ||  github.head_ref || github.ref_name }}
-            COMMIT_SHA=${{ github.sha }}
+            RELEASE_TAG=${{ github.event_name == 'workflow_dispatch' && inputs.commit_hash || github.sha ||  github.head_ref || github.ref_name }}
+            COMMIT_SHA=${{ github.event_name == 'workflow_dispatch' && inputs.commit_hash || github.sha }}
           platforms: linux/amd64,linux/arm64
           context: .
           file: dockerfiles/operator.Dockerfile
-          push: ${{ github.event.pull_request.merged == true }}
+          push: ${{ github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
