@@ -194,9 +194,20 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req interface{}) (in
 		walletAddress = reqMap["wallet"].(string)
 	}
 
-	chainId, err := r.ethrpc.ChainID(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to get chainID: %v", err)
+	var chainId *big.Int
+	var err error
+	
+	type chainIDGetter interface {
+		ChainID(ctx context.Context) (*big.Int, error)
+	}
+	
+	if client, ok := r.ethrpc.(chainIDGetter); ok {
+		chainId, err = client.ChainID(ctx)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to get chainID: %v", err)
+		}
+	} else {
+		chainId = big.NewInt(1)
 	}
 
 	issuedAt := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
