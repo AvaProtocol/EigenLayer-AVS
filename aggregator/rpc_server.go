@@ -41,7 +41,7 @@ type RpcServer struct {
 	ethrpc *ethclient.Client
 
 	smartWalletRpc *ethclient.Client
-	
+
 	agg *Aggregator
 }
 
@@ -409,7 +409,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 
 		config:       agg.config,
 		operatorPool: agg.operatorPool,
-		
+
 		agg: agg,
 	}
 
