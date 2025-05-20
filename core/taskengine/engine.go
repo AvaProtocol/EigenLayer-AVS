@@ -193,7 +193,7 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 	wallets := []*avsproto.SmartWallet{}
 	processedAddresses := make(map[string]bool) // To avoid duplicate processing
 
-	defaultWallet, err := GetExtendedWallet(n.db, owner, sender.String())
+	defaultWallet, err := GetWalletWithHiddenStatus(n.db, owner, sender.String())
 	defaultWalletIsHidden := false
 	if err == nil {
 		defaultWalletIsHidden = defaultWallet.IsHidden
@@ -235,8 +235,8 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 			continue
 		}
 
-		extWallet, err := GetExtendedWallet(n.db, owner, w.Address.String())
-		if err == nil && extWallet.IsHidden {
+		wallet, err := GetWalletWithHiddenStatus(n.db, owner, w.Address.String())
+		if err == nil && wallet.IsHidden {
 			continue
 		}
 
@@ -318,13 +318,13 @@ func (n *Engine) SetWalletHiddenStatus(user *model.User, payload *avsproto.GetWa
 
 	walletAddress := common.HexToAddress(walletResp.Address)
 	
-	// Get the extended wallet
-	extWallet, err := GetExtendedWallet(n.db, user.Address, walletAddress.Hex())
+	// Get the wallet with hidden status
+	wallet, err := GetWalletWithHiddenStatus(n.db, user.Address, walletAddress.Hex())
 	if err != nil {
 		salt, _ := math.ParseBig256(walletResp.Salt)
 		factoryAddress := common.HexToAddress(walletResp.FactoryAddress)
 		
-		extWallet = &ExtendedWallet{
+		wallet = &WalletWithHiddenStatus{
 			SmartWallet: model.SmartWallet{
 				Owner:   &user.Address,
 				Address: &walletAddress,
@@ -335,9 +335,9 @@ func (n *Engine) SetWalletHiddenStatus(user *model.User, payload *avsproto.GetWa
 		}
 	}
 	
-	extWallet.IsHidden = isHidden
+	wallet.IsHidden = isHidden
 	
-	if err := StoreExtendedWallet(n.db, user.Address, extWallet); err != nil {
+	if err := StoreWalletWithHiddenStatus(n.db, user.Address, wallet); err != nil {
 		n.logger.Error("failed to store wallet with hidden status", "error", err, "owner", user.Address.Hex(), "wallet", walletAddress.Hex())
 		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), "Failed to update wallet hidden status: %v", err)
 	}

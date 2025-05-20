@@ -8,7 +8,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
-func TestHideUnhideWallet(t *testing.T) {
+func TestSetWalletHiddenStatus(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
@@ -16,7 +16,7 @@ func TestHideUnhideWallet(t *testing.T) {
 	n := New(db, config, nil, testutil.GetLogger())
 	u := testutil.TestUser1()
 
-	saltValue := "54321"
+	saltValue := "12345"
 	_, err := n.GetWallet(u, &avsproto.GetWalletReq{
 		Salt: saltValue,
 	})
@@ -70,7 +70,7 @@ func TestHideUnhideWallet(t *testing.T) {
 	}
 }
 
-func TestHideWalletWithCustomFactory(t *testing.T) {
+func TestSetWalletHiddenStatusWithCustomFactory(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
@@ -78,7 +78,7 @@ func TestHideWalletWithCustomFactory(t *testing.T) {
 	n := New(db, config, nil, testutil.GetLogger())
 	u := testutil.TestUser1()
 
-	saltValue := "98765"
+	saltValue := "67890"
 	factoryAddress := "0x9406Cc6185a346906296840746125a0E44976454"
 	_, err := n.GetWallet(u, &avsproto.GetWalletReq{
 		Salt:           saltValue,
