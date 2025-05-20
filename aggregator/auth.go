@@ -209,11 +209,7 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req interface{}) (in
 	if r.agg != nil && r.agg.chainID != nil {
 		chainId = r.agg.chainID
 	} else {
-		if config.CurrentChainEnv == config.EthereumEnv {
-			chainId = config.MainnetChainID
-		} else {
-			chainId = config.HoleskyChainID
-		}
+		return nil, status.Errorf(codes.Internal, "Chain ID not available. Aggregator not fully initialized.")
 	}
 
 	issuedAt := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
