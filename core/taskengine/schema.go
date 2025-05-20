@@ -64,27 +64,21 @@ func StoreWallet(db storage.Storage, owner common.Address, wallet *model.SmartWa
 }
 
 func IsWalletHidden(db storage.Storage, owner common.Address, smartWalletAddress string) (bool, error) {
-	hiddenKey := fmt.Sprintf(
-		"wh:%s:%s",
-		strings.ToLower(owner.Hex()),
-		strings.ToLower(smartWalletAddress),
-	)
-	exists, err := db.Exist([]byte(hiddenKey))
-	return exists, err
+	extWallet, err := GetExtendedWallet(db, owner, smartWalletAddress)
+	if err != nil {
+		return false, err
+	}
+	return extWallet.IsHidden, nil
 }
 
 func SetWalletHidden(db storage.Storage, owner common.Address, smartWalletAddress string, hidden bool) error {
-	hiddenKey := fmt.Sprintf(
-		"wh:%s:%s",
-		strings.ToLower(owner.Hex()),
-		strings.ToLower(smartWalletAddress),
-	)
-	
-	if hidden {
-		return db.Set([]byte(hiddenKey), []byte("1"))
-	} else {
-		return db.Delete([]byte(hiddenKey))
+	extWallet, err := GetExtendedWallet(db, owner, smartWalletAddress)
+	if err != nil {
+		return err
 	}
+	
+	extWallet.IsHidden = hidden
+	return StoreExtendedWallet(db, owner, extWallet)
 }
 
 func TaskStorageKey(id string, status avsproto.TaskStatus) []byte {

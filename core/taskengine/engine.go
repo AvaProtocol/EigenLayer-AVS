@@ -193,7 +193,11 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 	wallets := []*avsproto.SmartWallet{}
 	processedAddresses := make(map[string]bool) // To avoid duplicate processing
 
-	defaultWalletIsHidden, _ := IsWalletHidden(n.db, owner, sender.String())
+	defaultWallet, err := GetExtendedWallet(n.db, owner, sender.String())
+	defaultWalletIsHidden := false
+	if err == nil {
+		defaultWalletIsHidden = defaultWallet.IsHidden
+	}
 
 	if (payload == nil || payload.FactoryAddress == "" || strings.EqualFold(payload.FactoryAddress, n.smartWalletConfig.FactoryAddress.Hex())) && !defaultWalletIsHidden {
 		// This is the default wallet with our own factory and it's not hidden
@@ -231,8 +235,8 @@ func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWal
 			continue
 		}
 
-		isHidden, _ := IsWalletHidden(n.db, owner, w.Address.String())
-		if isHidden {
+		extWallet, err := GetExtendedWallet(n.db, owner, w.Address.String())
+		if err == nil && extWallet.IsHidden {
 			continue
 		}
 
@@ -287,7 +291,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), StorageWriteError)
 	}
 
-	_, _ = IsWalletHidden(n.db, user.Address, sender.Hex())
+	_, _ = GetExtendedWallet(n.db, user.Address, sender.Hex())
 
 	statSvc := NewStatService(n.db)
 	stat, _ := statSvc.GetTaskCount(wallet)
@@ -314,8 +318,27 @@ func (n *Engine) SetWalletHiddenStatus(user *model.User, payload *avsproto.GetWa
 
 	walletAddress := common.HexToAddress(walletResp.Address)
 	
-	if err := SetWalletHidden(n.db, user.Address, walletAddress.Hex(), isHidden); err != nil {
-		n.logger.Error("failed to set wallet hidden status", "error", err, "owner", user.Address.Hex(), "wallet", walletAddress.Hex())
+	// Get the extended wallet
+	extWallet, err := GetExtendedWallet(n.db, user.Address, walletAddress.Hex())
+	if err != nil {
+		salt, _ := math.ParseBig256(walletResp.Salt)
+		factoryAddress := common.HexToAddress(walletResp.FactoryAddress)
+		
+		extWallet = &ExtendedWallet{
+			SmartWallet: model.SmartWallet{
+				Owner:   &user.Address,
+				Address: &walletAddress,
+				Factory: &factoryAddress,
+				Salt:    salt,
+			},
+			IsHidden: false,
+		}
+	}
+	
+	extWallet.IsHidden = isHidden
+	
+	if err := StoreExtendedWallet(n.db, user.Address, extWallet); err != nil {
+		n.logger.Error("failed to store wallet with hidden status", "error", err, "owner", user.Address.Hex(), "wallet", walletAddress.Hex())
 		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), "Failed to update wallet hidden status: %v", err)
 	}
 
