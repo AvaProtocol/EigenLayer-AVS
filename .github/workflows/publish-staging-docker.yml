@@ -1,16 +1,15 @@
-name: Run on Push
+name: Publish Staging Docker Image
 
 on:
-  push:
-    paths:
-      - '**.go'
-      - '!**/*_test.go'
-      - '!**.yaml'
-      - '!**.yml'
-  workflow_dispatch:
+  pull_request:
+    types: [closed]
+    branches:
+      - staging
 
 jobs:
   format-and-commit:
+    # Only run this job when the PR is merged to staging (not just closed)
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     # Grant permissions for the built-in GITHUB_TOKEN to create a commit and push.
     permissions:
@@ -53,7 +52,9 @@ jobs:
         shell: bash # Explicitly use bash
 
   publish-dev-build:
-    name: Publish dev build docker image to dockerhub
+    # Only run this job when the PR is merged to staging (not just closed)
+    if: github.event.pull_request.merged == true
+    name: Publish staging build docker image to dockerhub
     runs-on: 'ubuntu-latest'
     steps:
       - name: Login to Docker Hub
@@ -79,12 +80,7 @@ jobs:
           images: |
             avaprotocol/avs-dev
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
             type=raw,value={{sha}}
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push avs-dev docker image
         uses: docker/build-push-action@v6
@@ -95,6 +91,6 @@ jobs:
           platforms: linux/amd64,linux/arm64
           context: .
           file: dockerfiles/operator.Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event.pull_request.merged == true }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
