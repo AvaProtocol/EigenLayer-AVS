@@ -259,11 +259,8 @@ func (r *RpcServer) verifyOperator(ctx context.Context, operatorAddr string) (bo
 	return auth.VerifyOperator(authRawHeaders[0], operatorAddr)
 }
 
-func (r *RpcServer) GetSignatureFormat(ctx context.Context, req interface{}) (interface{}, error) {
-	walletAddress := ""
-	if reqMap, ok := req.(map[string]interface{}); ok && reqMap["wallet"] != nil {
-		walletAddress = reqMap["wallet"].(string)
-	}
+func (r *RpcServer) GetSignatureFormat(ctx context.Context, req *avsproto.GetSignatureFormatReq) (*avsproto.GetSignatureFormatResp, error) {
+	walletAddress := req.Wallet
 
 	if walletAddress == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "Wallet address is required")
@@ -290,7 +287,7 @@ func (r *RpcServer) GetSignatureFormat(ctx context.Context, req interface{}) (in
 		expiredAt,
 		walletAddress)
 
-	return map[string]interface{}{
-		"message": formattedMessage,
+	return &avsproto.GetSignatureFormatResp{
+		Message: formattedMessage,
 	}, nil
 }
