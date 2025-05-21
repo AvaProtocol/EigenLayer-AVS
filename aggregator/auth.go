@@ -85,7 +85,11 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Chain ID format")
 	}
 
-	if r.chainID != nil && chainID.Cmp(r.chainID) != 0 {
+	// TODO: Remove this special handling for Holesky (17000) once client migration is complete.
+	// This allows a requested chainId of 17000 to be valid against a SmartWallet chainId of 11155111.
+	isHoleskyDevnetCase := chainIDStr == "17000" && r.chainID != nil && r.chainID.Int64() == 11155111
+
+	if r.chainID != nil && chainID.Cmp(r.chainID) != 0 && !isHoleskyDevnetCase {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid chainId: requested chainId %s does not match SmartWallet chainId %d", chainIDStr, r.chainID.Int64())
 	}
 
@@ -220,9 +224,32 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 			return nil, fmt.Errorf("%s", auth.InvalidAuthenticationKey)
 		}
 
-		chainIdStr := fmt.Sprintf("%d", r.chainID)
+		expectedChainIdStr := fmt.Sprintf("%d", r.chainID) // e.g., "11155111"
 		aud, err := token.Claims.GetAudience()
-		if err != nil || len(aud) == 0 || aud[0] != chainIdStr {
+
+		// Log the details
+		r.config.Logger.Info("Verifying JWT audience",
+			"expectedServerChainIdStr", expectedChainIdStr,
+			"audienceFromToken", aud,
+			"errorGettingAudience", err,
+		)
+
+		if err != nil || len(aud) == 0 {
+			return nil, fmt.Errorf("%s: error getting audience or audience is empty", auth.InvalidAuthenticationKey)
+		}
+
+		tokenAudienceChainIdStr := aud[0]
+
+		// TODO: Remove this special handling for Holesky (17000) once client migration is complete.
+		// This allows a token with audience "17000" to be valid if server expects "11155111".
+		isHoleskyDevnetAudienceCase := tokenAudienceChainIdStr == "17000" && expectedChainIdStr == "11155111"
+
+		if tokenAudienceChainIdStr != expectedChainIdStr && !isHoleskyDevnetAudienceCase {
+			r.config.Logger.Error("JWT audience mismatch",
+				"expectedAudience", expectedChainIdStr,
+				"tokenAudience", tokenAudienceChainIdStr,
+				"isHoleskySpecialCaseApplied", isHoleskyDevnetAudienceCase,
+			)
 			return nil, fmt.Errorf("%s: invalid chainId in audience", auth.InvalidAuthenticationKey)
 		}
 
