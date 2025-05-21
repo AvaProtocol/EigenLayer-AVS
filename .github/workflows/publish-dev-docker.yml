@@ -125,7 +125,7 @@ jobs:
           build-args: |
             RELEASE_TAG=${{ steps.vars.outputs.RELEASE_TAG_ARG }}
             COMMIT_SHA=${{ steps.vars.outputs.SHORT_SHA }}
-          platforms: linux/amd64  # Temporarily build only for amd64
+          platforms: linux/amd64,linux/arm64  # Build for both architectures
           context: .
           file: dockerfiles/operator.Dockerfile
           push: true 
