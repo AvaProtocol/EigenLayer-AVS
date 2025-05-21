@@ -8,15 +8,17 @@ A Go script that compares storage key structures between branches and analyzes s
 
 Usage:
 ```
-go run compare_storage_structure.go <comparison_branch>
+go run compare_storage_structure.go <old_branch> <new_branch>
 ```
 
-This compares the current branch you're on with the specified comparison_branch.
+This compares storage structures between old_branch and new_branch, where:
+- old_branch: The reference branch (typically main)
+- new_branch: The branch with changes to analyze (typically staging or a feature branch)
 
 Example:
 ```
-# When run from the main branch, this compares main with staging
-go run compare_storage_structure.go staging
+# Compare main (old/reference) with staging (new/changes)
+go run compare_storage_structure.go main staging
 ```
 
 ## compare_storage.sh

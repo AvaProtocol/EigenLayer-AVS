@@ -13,29 +13,35 @@ cleanup() {
 trap cleanup EXIT
 
 if [ "$#" -ne 2 ]; then
-  echo "Usage: $0 <branch1> <branch2>"
+  echo "Usage: $0 <old_branch> <new_branch>"
   echo "Example: $0 main staging"
   exit 1
 fi
 
-BRANCH1="$1"
-BRANCH2="$2"
+OLD_BRANCH="$1"
+NEW_BRANCH="$2"
 
-echo "Comparing storage structures between $BRANCH1 and $BRANCH2..."
+echo "Comparing storage structures between $OLD_BRANCH and $NEW_BRANCH..."
 
-echo "Analyzing $BRANCH1 branch..."
-git checkout "$BRANCH1" > /dev/null 2>&1
+git fetch origin "$OLD_BRANCH" > /dev/null 2>&1
 if [ $? -ne 0 ]; then
-  echo "Error: Failed to checkout $BRANCH1 branch"
+  echo "Error: Failed to fetch $OLD_BRANCH branch"
   exit 1
 fi
 
-echo "Storage key structures in $BRANCH1:"
-go run ./scripts/compare_storage_structure.go "$BRANCH2"
+git fetch origin "$NEW_BRANCH" > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+  echo "Error: Failed to fetch $NEW_BRANCH branch"
+  exit 1
+fi
+
+echo "Running storage structure comparison..."
+go run ./scripts/compare_storage_structure.go "$OLD_BRANCH" "$NEW_BRANCH"
 
 echo "====================================="
 echo "Comparison complete."
-echo "For PR #227, no migration is required because:"
-echo "1. JWT audience field change only affects runtime validation"
-echo "2. StepOutputVar fix only affects runtime handling of nil values"
-echo "3. isHidden attribute is backward compatible due to 'omitempty' JSON tag"
+echo "Review the analysis above to determine if a migration is needed."
+echo "Remember to check for:"
+echo "1. Storage key structure changes"
+echo "2. Non-backward-compatible data structure changes"
+echo "3. Changes that affect how data is serialized/deserialized"

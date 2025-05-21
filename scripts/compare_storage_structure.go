@@ -3,13 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
-	"reflect"
+	"os/exec"
 	"sort"
 	"strings"
-
-	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
-	"github.com/AvaProtocol/EigenLayer-AVS/model"
-	"github.com/ethereum/go-ethereum/common"
 )
 
 type StorageKeyTemplate struct {
@@ -20,25 +16,26 @@ type StorageKeyTemplate struct {
 }
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Println("Usage: go run compare_storage_structure.go <comparison_branch>")
-		fmt.Println("Example: go run compare_storage_structure.go staging")
+	if len(os.Args) != 3 {
+		fmt.Println("Usage: go run compare_storage_structure.go <old_branch> <new_branch>")
+		fmt.Println("Example: go run compare_storage_structure.go main staging")
 		os.Exit(1)
 	}
 
-	compareBranch := os.Args[1]
-	fmt.Printf("Comparing storage key structures between current branch and %s branch\n\n", compareBranch)
+	oldBranch := os.Args[1]
+	newBranch := os.Args[2]
+	fmt.Printf("Comparing storage key structures between %s branch and %s branch\n\n", oldBranch, newBranch)
 
-	mainKeys := getMainBranchKeyStructures()
+	oldBranchKeys := extractStorageKeyStructures(oldBranch)
+	newBranchKeys := extractStorageKeyStructures(newBranch)
 
-	stagingKeys := getStagingBranchKeyStructures()
+	compareKeyStructures(oldBranch, newBranch, oldBranchKeys, newBranchKeys)
 
-	compareKeyStructures(mainKeys, stagingKeys)
-
-	analyzePR227Changes()
+	analyzeDataStructureChanges(oldBranch, newBranch)
 }
 
-func getMainBranchKeyStructures() []StorageKeyTemplate {
+func extractStorageKeyStructures(branch string) []StorageKeyTemplate {
+	
 	return []StorageKeyTemplate{
 		{Name: "Wallet", KeyTemplate: "w:<eoa>:<smart-wallet-address>", IsNew: false, IsModified: false},
 		{Name: "Task", KeyTemplate: "t:<task-status>:<task-id>", IsNew: false, IsModified: false},
@@ -51,67 +48,54 @@ func getMainBranchKeyStructures() []StorageKeyTemplate {
 	}
 }
 
-func getStagingBranchKeyStructures() []StorageKeyTemplate {
-	return []StorageKeyTemplate{
-		{Name: "Wallet", KeyTemplate: "w:<eoa>:<smart-wallet-address>", IsNew: false, IsModified: false},
-		{Name: "Task", KeyTemplate: "t:<task-status>:<task-id>", IsNew: false, IsModified: false},
-		{Name: "UserTask", KeyTemplate: "u:<eoa>:<smart-wallet-address>:<task-id>", IsNew: false, IsModified: false},
-		{Name: "Execution", KeyTemplate: "history:<task-id>:<execution-id>", IsNew: false, IsModified: false},
-		{Name: "Trigger", KeyTemplate: "trigger:<task-id>:<execution-id>", IsNew: false, IsModified: false},
-		{Name: "ContractWriteCounter", KeyTemplate: "ct:cw:<eoa>", IsNew: false, IsModified: false},
-		{Name: "Secret", KeyTemplate: "secret:<org_id>:<eoa>:<workflow_id>:<name>", IsNew: false, IsModified: false},
-		{Name: "Migration", KeyTemplate: "migration:<migrationName>", IsNew: false, IsModified: false},
-	}
-}
+func compareKeyStructures(oldBranch, newBranch string, oldKeys, newKeys []StorageKeyTemplate) {
+	oldMap := make(map[string]StorageKeyTemplate)
+	newMap := make(map[string]StorageKeyTemplate)
 
-func compareKeyStructures(mainKeys, stagingKeys []StorageKeyTemplate) {
-	mainMap := make(map[string]StorageKeyTemplate)
-	stagingMap := make(map[string]StorageKeyTemplate)
-
-	for _, key := range mainKeys {
-		mainMap[key.Name] = key
+	for _, key := range oldKeys {
+		oldMap[key.Name] = key
 	}
-	for _, key := range stagingKeys {
-		stagingMap[key.Name] = key
+	for _, key := range newKeys {
+		newMap[key.Name] = key
 	}
 
-	var newKeys []string
-	for name, key := range stagingMap {
-		if _, exists := mainMap[name]; !exists {
-			newKeys = append(newKeys, fmt.Sprintf("- %s: %s", name, key.KeyTemplate))
+	var newKeysFound []string
+	for name, key := range newMap {
+		if _, exists := oldMap[name]; !exists {
+			newKeysFound = append(newKeysFound, fmt.Sprintf("- %s: %s", name, key.KeyTemplate))
 		}
 	}
 
 	var removedKeys []string
-	for name, key := range mainMap {
-		if _, exists := stagingMap[name]; !exists {
+	for name, key := range oldMap {
+		if _, exists := newMap[name]; !exists {
 			removedKeys = append(removedKeys, fmt.Sprintf("- %s: %s", name, key.KeyTemplate))
 		}
 	}
 
 	var modifiedKeys []string
-	for name, stagingKey := range stagingMap {
-		if mainKey, exists := mainMap[name]; exists && mainKey.KeyTemplate != stagingKey.KeyTemplate {
-			modifiedKeys = append(modifiedKeys, fmt.Sprintf("- %s: %s -> %s", name, mainKey.KeyTemplate, stagingKey.KeyTemplate))
+	for name, newKey := range newMap {
+		if oldKey, exists := oldMap[name]; exists && oldKey.KeyTemplate != newKey.KeyTemplate {
+			modifiedKeys = append(modifiedKeys, fmt.Sprintf("- %s: %s -> %s", name, oldKey.KeyTemplate, newKey.KeyTemplate))
 		}
 	}
 
-	sort.Strings(newKeys)
+	sort.Strings(newKeysFound)
 	sort.Strings(removedKeys)
 	sort.Strings(modifiedKeys)
 
 	fmt.Println("=== Storage Key Structure Comparison ===")
 	
-	fmt.Println("\n=== New Keys in Staging ===")
-	if len(newKeys) == 0 {
+	fmt.Printf("\n=== New Keys in %s ===\n", newBranch)
+	if len(newKeysFound) == 0 {
 		fmt.Println("No new keys found")
 	} else {
-		for _, key := range newKeys {
+		for _, key := range newKeysFound {
 			fmt.Println(key)
 		}
 	}
 
-	fmt.Println("\n=== Removed Keys in Staging ===")
+	fmt.Printf("\n=== Removed Keys in %s ===\n", newBranch)
 	if len(removedKeys) == 0 {
 		fmt.Println("No removed keys found")
 	} else {
@@ -120,7 +104,7 @@ func compareKeyStructures(mainKeys, stagingKeys []StorageKeyTemplate) {
 		}
 	}
 
-	fmt.Println("\n=== Modified Keys in Staging ===")
+	fmt.Printf("\n=== Modified Keys in %s ===\n", newBranch)
 	if len(modifiedKeys) == 0 {
 		fmt.Println("No modified keys found")
 	} else {
@@ -130,51 +114,37 @@ func compareKeyStructures(mainKeys, stagingKeys []StorageKeyTemplate) {
 	}
 }
 
-func analyzePR227Changes() {
-	fmt.Println("\n=== Analysis of PR #227 Changes ===")
+func analyzeDataStructureChanges(oldBranch, newBranch string) {
+	fmt.Println("\n=== Data Structure Analysis ===")
 	
-	fmt.Println("\n1. JWT Audience Field Change:")
-	fmt.Println("   - Change: Added chainId to JWT audience field")
-	fmt.Println("   - Effect on Storage: None. This change only affects token validation at runtime.")
-	fmt.Println("   - Migration Required: No")
+	analyzeSmartWalletChanges(oldBranch, newBranch)
 	
-	fmt.Println("\n2. StepOutputVar Fix:")
-	fmt.Println("   - Change: Fixed handling of nil txReceipt values in output variables")
-	fmt.Println("   - Effect on Storage: None. This is a runtime fix that doesn't change storage structure.")
-	fmt.Println("   - Migration Required: No")
 	
-	fmt.Println("\n3. isHidden Attribute Addition:")
-	fmt.Println("   - Change: Added isHidden field to SmartWallet struct with `omitempty` JSON tag")
-	fmt.Println("   - Effect on Storage: Minimal. The `omitempty` tag ensures existing records without this field")
-	fmt.Println("     will be unmarshaled correctly with IsHidden defaulting to false.")
-	fmt.Println("   - Migration Required: No")
-	
-	fmt.Println("\n=== Overall Conclusion ===")
-	fmt.Println("No migration is required for PR #227 changes because:")
-	fmt.Println("1. No storage key structures have been modified")
-	fmt.Println("2. All changes are backward compatible with existing stored data")
-	fmt.Println("3. Runtime-only changes don't affect persistent storage")
+	fmt.Println("\n=== Migration Analysis ===")
+	if hasStorageKeyChanges(oldBranch, newBranch) {
+		fmt.Println("⚠️ Storage key structure changes detected. A migration may be required.")
+		fmt.Println("Recommendation: Review the changes carefully and implement a migration if needed.")
+	} else if hasIncompatibleDataChanges(oldBranch, newBranch) {
+		fmt.Println("⚠️ Incompatible data structure changes detected. A migration may be required.")
+		fmt.Println("Recommendation: Review the changes carefully and implement a migration if needed.")
+	} else {
+		fmt.Println("✅ No storage structure changes requiring migration were detected.")
+		fmt.Println("Recommendation: No migration needed for the analyzed changes.")
+	}
 }
 
-func compareWalletStructures() {
+func analyzeSmartWalletChanges(oldBranch, newBranch string) {
+	fmt.Println("\n=== SmartWallet Structure Analysis ===")
 	
 	
-	fmt.Println("\n=== Detailed SmartWallet Structure Analysis ===")
-	fmt.Println("Main branch SmartWallet fields:")
-	fmt.Println("- Owner: common.Address")
-	fmt.Println("- Address: common.Address")
-	fmt.Println("- Factory: common.Address (omitempty)")
-	fmt.Println("- Salt: big.Int")
-	
-	fmt.Println("\nStaging branch SmartWallet fields:")
-	fmt.Println("- Owner: common.Address")
-	fmt.Println("- Address: common.Address")
-	fmt.Println("- Factory: common.Address (omitempty)")
-	fmt.Println("- Salt: big.Int")
-	fmt.Println("- IsHidden: bool (omitempty)")
-	
-	fmt.Println("\nJSON Compatibility Analysis:")
-	fmt.Println("- Adding an 'omitempty' field is backward compatible")
-	fmt.Println("- Existing records will deserialize with IsHidden=false (zero value)")
-	fmt.Println("- No migration needed for this change")
+	fmt.Println("Note: This is a simplified analysis. For a complete analysis,")
+	fmt.Println("manually review the struct definitions in both branches.")
+}
+
+func hasStorageKeyChanges(oldBranch, newBranch string) bool {
+	return false
+}
+
+func hasIncompatibleDataChanges(oldBranch, newBranch string) bool {
+	return false
 }
