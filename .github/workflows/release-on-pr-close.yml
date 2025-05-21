@@ -40,77 +40,99 @@ jobs:
       - name: Generate commit summary for changelog
         id: git-summary
         run: |
+          set -x  # Print each command before executing
+          set -e  # Exit on any error
+          
           # Create changelog in semantic-release format
-          echo "# Changelog" > commit-summary.md
+          echo "# Changelog" > commit-summary.md || { echo "Failed to create commit-summary.md"; exit 1; }
           echo "" >> commit-summary.md
           
           # Get the last tag
-          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD) || { echo "Failed to get last tag"; exit 1; }
           echo "Last tag for changelog: $LAST_TAG"
           
           # Count different types of commits
-          FEATURES=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --no-merges | grep -i "^feat" | wc -l || echo "0")
-          FIXES=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --no-merges | grep -i "^fix" | wc -l || echo "0")
-          DOCS=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --no-merges | grep -i "^docs" | wc -l || echo "0")
+          echo "Counting commit types..."
+          FEATURES=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --no-merges | grep -i "^feat" | wc -l || echo "0") || { echo "Failed to count features"; exit 1; }
+          FIXES=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --no-merges | grep -i "^fix" | wc -l || echo "0") || { echo "Failed to count fixes"; exit 1; }
+          DOCS=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --no-merges | grep -i "^docs" | wc -l || echo "0") || { echo "Failed to count docs"; exit 1; }
           
+          echo "Writing summary..."
           # Write summary in semantic-release format
-          echo "## Summary" >> commit-summary.md
-          echo "" >> commit-summary.md
-          echo "- Features: $FEATURES" >> commit-summary.md
-          echo "- Bug Fixes: $FIXES" >> commit-summary.md
-          echo "- Documentation: $DOCS" >> commit-summary.md
-          echo "" >> commit-summary.md
+          {
+            echo "## Summary"
+            echo ""
+            echo "- Features: $FEATURES"
+            echo "- Bug Fixes: $FIXES"
+            echo "- Documentation: $DOCS"
+            echo ""
+          } >> commit-summary.md || { echo "Failed to write summary"; exit 1; }
           
+          echo "Writing changes..."
           # Write detailed changes in semantic-release format
-          echo "## Changes" >> commit-summary.md
-          echo "" >> commit-summary.md
+          {
+            echo "## Changes"
+            echo ""
+          } >> commit-summary.md || { echo "Failed to write changes header"; exit 1; }
           
           # Group commits by type
           if [ "$FEATURES" -gt 0 ]; then
-            echo "### Features" >> commit-summary.md
-            echo "" >> commit-summary.md
-            git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^feat" >> commit-summary.md
-            echo "" >> commit-summary.md
+            echo "Writing features..."
+            {
+              echo "### Features"
+              echo ""
+              git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^feat" || true
+              echo ""
+            } >> commit-summary.md || { echo "Failed to write features"; exit 1; }
           fi
           
           if [ "$FIXES" -gt 0 ]; then
-            echo "### Bug Fixes" >> commit-summary.md
-            echo "" >> commit-summary.md
-            git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^fix" >> commit-summary.md
-            echo "" >> commit-summary.md
+            echo "Writing fixes..."
+            {
+              echo "### Bug Fixes"
+              echo ""
+              git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^fix" || true
+              echo ""
+            } >> commit-summary.md || { echo "Failed to write fixes"; exit 1; }
           fi
           
           if [ "$DOCS" -gt 0 ]; then
-            echo "### Documentation" >> commit-summary.md
-            echo "" >> commit-summary.md
-            git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^docs" >> commit-summary.md
-            echo "" >> commit-summary.md
+            echo "Writing docs..."
+            {
+              echo "### Documentation"
+              echo ""
+              git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^docs" || true
+              echo ""
+            } >> commit-summary.md || { echo "Failed to write docs"; exit 1; }
           fi
           
           # Other changes
-          OTHER_CHANGES=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --no-merges | grep -E -v -i "^(feat|fix|docs)" | wc -l || echo "0")
+          echo "Counting other changes..."
+          OTHER_CHANGES=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --no-merges | grep -E -v -i "^(feat|fix|docs)" | wc -l || echo "0") || { echo "Failed to count other changes"; exit 1; }
+          
           if [ "$OTHER_CHANGES" -gt 0 ]; then
-            echo "### Other Changes" >> commit-summary.md
-            echo "" >> commit-summary.md
-            git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -E -v -i "^(feat|fix|docs)" >> commit-summary.md
-            echo "" >> commit-summary.md
+            echo "Writing other changes..."
+            {
+              echo "### Other Changes"
+              echo ""
+              git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -E -v -i "^(feat|fix|docs)" || true
+              echo ""
+            } >> commit-summary.md || { echo "Failed to write other changes"; exit 1; }
           fi
           
-          # Set the environment variable
-          # First, create a temporary file with the content
-          cat commit-summary.md > /tmp/changelog.txt
-          
-          # Then set the environment variable using GitHub's file command
-          echo "COMMIT_SUMMARY<<EOF" >> $GITHUB_ENV
-          cat /tmp/changelog.txt >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          echo "Setting environment variable..."
+          # Set the environment variable using a simpler approach
+          COMMIT_SUMMARY=$(cat commit-summary.md) || { echo "Failed to read commit-summary.md"; exit 1; }
+          echo "COMMIT_SUMMARY<<EOF" >> $GITHUB_ENV || { echo "Failed to write to GITHUB_ENV"; exit 1; }
+          echo "$COMMIT_SUMMARY" >> $GITHUB_ENV || { echo "Failed to write content to GITHUB_ENV"; exit 1; }
+          echo "EOF" >> $GITHUB_ENV || { echo "Failed to write EOF to GITHUB_ENV"; exit 1; }
           
           # Debug: Print the summary
           echo "Generated commit summary:"
           cat commit-summary.md
           
           # Debug: Print the environment variable setting
-          echo "Setting environment variable with content length: $(wc -l < /tmp/changelog.txt) lines"
+          echo "Environment variable set successfully"
         shell: bash
 
       - name: Run semantic versioning and create full release
