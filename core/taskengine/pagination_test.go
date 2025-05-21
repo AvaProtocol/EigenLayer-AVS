@@ -13,60 +13,60 @@ func TestSetupPagination(t *testing.T) {
 		before         string
 		after          string
 		legacyCursor   string
-		itemPerPage    int64
+		limit          int64
 		expectCursor   *Cursor
-		expectPerPage  int
+		expectLimit    int
 		expectError    bool
 		expectErrorMsg string
 	}{
 		{
-			name:          "Default values",
-			before:        "",
-			after:         "",
-			legacyCursor:  "",
-			itemPerPage:   0,
-			expectCursor:  &Cursor{Direction: CursorDirectionNext, Position: "0"},
-			expectPerPage: DefaultItemPerPage,
-			expectError:   false,
+			name:         "Default values",
+			before:       "",
+			after:        "",
+			legacyCursor: "",
+			limit:        0,
+			expectCursor: &Cursor{Direction: CursorDirectionNext, Position: "0"},
+			expectLimit:  DefaultLimit,
+			expectError:  false,
 		},
 		{
-			name:          "With after parameter",
-			before:        "",
-			after:         "eyJkIjoibmV4dCIsInAiOiIxMjM0NTYifQ==", // {"d":"next","p":"123456"}
-			legacyCursor:  "",
-			itemPerPage:   10,
-			expectCursor:  &Cursor{Direction: CursorDirectionNext, Position: "123456"},
-			expectPerPage: 10,
-			expectError:   false,
+			name:         "With after parameter",
+			before:       "",
+			after:        "eyJkIjoibmV4dCIsInAiOiIxMjM0NTYifQ==", // {"d":"next","p":"123456"}
+			legacyCursor: "",
+			limit:        10,
+			expectCursor: &Cursor{Direction: CursorDirectionNext, Position: "123456"},
+			expectLimit:  10,
+			expectError:  false,
 		},
 		{
-			name:          "With before parameter",
-			before:        "eyJkIjoibmV4dCIsInAiOiIxMjM0NTYifQ==", // {"d":"next","p":"123456"}
-			after:         "",
-			legacyCursor:  "",
-			itemPerPage:   20,
-			expectCursor:  &Cursor{Direction: CursorDirectionPrevious, Position: "123456"},
-			expectPerPage: 20,
-			expectError:   false,
+			name:         "With before parameter",
+			before:       "eyJkIjoibmV4dCIsInAiOiIxMjM0NTYifQ==", // {"d":"next","p":"123456"}
+			after:        "",
+			legacyCursor: "",
+			limit:        20,
+			expectCursor: &Cursor{Direction: CursorDirectionPrevious, Position: "123456"},
+			expectLimit:  20,
+			expectError:  false,
 		},
 		{
-			name:          "With legacy cursor",
-			before:        "",
-			after:         "",
-			legacyCursor:  "eyJkIjoibmV4dCIsInAiOiI5ODc2NTQifQ==", // {"d":"next","p":"987654"}
-			itemPerPage:   30,
-			expectCursor:  &Cursor{Direction: CursorDirectionNext, Position: "987654"},
-			expectPerPage: 30,
-			expectError:   false,
+			name:         "With legacy cursor",
+			before:       "",
+			after:        "",
+			legacyCursor: "eyJkIjoibmV4dCIsInAiOiI5ODc2NTQifQ==", // {"d":"next","p":"987654"}
+			limit:        30,
+			expectCursor: &Cursor{Direction: CursorDirectionNext, Position: "987654"},
+			expectLimit:  30,
+			expectError:  false,
 		},
 		{
 			name:           "Invalid cursor",
 			before:         "invalid-cursor",
 			after:          "",
 			legacyCursor:   "",
-			itemPerPage:    10,
+			limit:          10,
 			expectCursor:   nil,
-			expectPerPage:  0,
+			expectLimit:    0,
 			expectError:    true,
 			expectErrorMsg: InvalidCursor,
 		},
@@ -75,9 +75,9 @@ func TestSetupPagination(t *testing.T) {
 			before:         "",
 			after:          "",
 			legacyCursor:   "",
-			itemPerPage:    -1,
+			limit:          -1,
 			expectCursor:   nil,
-			expectPerPage:  0,
+			expectLimit:    0,
 			expectError:    true,
 			expectErrorMsg: InvalidPaginationParam,
 		},
@@ -85,7 +85,7 @@ func TestSetupPagination(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cursor, perPage, err := SetupPagination(tt.before, tt.after, tt.legacyCursor, tt.itemPerPage)
+			cursor, limit, err := SetupPagination(tt.before, tt.after, tt.legacyCursor, tt.limit)
 
 			if tt.expectError {
 				if err == nil {
@@ -122,8 +122,8 @@ func TestSetupPagination(t *testing.T) {
 				t.Errorf("Expected cursor position %q but got %q", tt.expectCursor.Position, cursor.Position)
 			}
 
-			if perPage != tt.expectPerPage {
-				t.Errorf("Expected per page %d but got %d", tt.expectPerPage, perPage)
+			if limit != tt.expectLimit {
+				t.Errorf("Expected limit %d but got %d", tt.expectLimit, limit)
 			}
 		})
 	}

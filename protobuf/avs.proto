@@ -484,7 +484,7 @@ message ListTasksReq {
   // Filter out by the smart_wallet_address
   repeated string smart_wallet_address = 1;
   string cursor = 2;
-  int64 item_per_page = 3;
+  int64 limit = 3;
 }
 
 message ListTasksResp {
@@ -522,7 +522,7 @@ message ListTasksResp {
 message ListExecutionsReq {
   repeated string task_ids = 1;
   string cursor = 2;
-  int64 item_per_page = 3;
+  int64 limit = 3;
 }
 
 message ListExecutionsResp {
@@ -649,7 +649,7 @@ message ListSecretsReq {
   string before = 3;
   // Get items after this cursor value (for forward pagination)
   string after = 4;
-  int64 item_per_page = 5;
+  int64 limit = 5;
 }
 
 message ListSecretsResp {

@@ -2442,7 +2442,7 @@ type ListTasksReq struct {
 	// Filter out by the smart_wallet_address
 	SmartWalletAddress []string `protobuf:"bytes,1,rep,name=smart_wallet_address,json=smartWalletAddress,proto3" json:"smart_wallet_address,omitempty"`
 	Cursor             string   `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
-	ItemPerPage        int64    `protobuf:"varint,3,opt,name=item_per_page,json=itemPerPage,proto3" json:"item_per_page,omitempty"`
+	Limit              int64    `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -2491,9 +2491,9 @@ func (x *ListTasksReq) GetCursor() string {
 	return ""
 }
 
-func (x *ListTasksReq) GetItemPerPage() int64 {
+func (x *ListTasksReq) GetLimit() int64 {
 	if x != nil {
-		return x.ItemPerPage
+		return x.Limit
 	}
 	return 0
 }
@@ -2562,7 +2562,7 @@ type ListExecutionsReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TaskIds       []string               `protobuf:"bytes,1,rep,name=task_ids,json=taskIds,proto3" json:"task_ids,omitempty"`
 	Cursor        string                 `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
-	ItemPerPage   int64                  `protobuf:"varint,3,opt,name=item_per_page,json=itemPerPage,proto3" json:"item_per_page,omitempty"`
+	Limit         int64                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2611,9 +2611,9 @@ func (x *ListExecutionsReq) GetCursor() string {
 	return ""
 }
 
-func (x *ListExecutionsReq) GetItemPerPage() int64 {
+func (x *ListExecutionsReq) GetLimit() int64 {
 	if x != nil {
-		return x.ItemPerPage
+		return x.Limit
 	}
 	return 0
 }
@@ -3381,7 +3381,7 @@ type ListSecretsReq struct {
 	Before string `protobuf:"bytes,3,opt,name=before,proto3" json:"before,omitempty"`
 	// Get items after this cursor value (for forward pagination)
 	After         string `protobuf:"bytes,4,opt,name=after,proto3" json:"after,omitempty"`
-	ItemPerPage   int64  `protobuf:"varint,5,opt,name=item_per_page,json=itemPerPage,proto3" json:"item_per_page,omitempty"`
+	Limit         int64  `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3444,9 +3444,9 @@ func (x *ListSecretsReq) GetAfter() string {
 	return ""
 }
 
-func (x *ListSecretsReq) GetItemPerPage() int64 {
+func (x *ListSecretsReq) GetLimit() int64 {
 	if x != nil {
-		return x.ItemPerPage
+		return x.Limit
 	}
 	return 0
 }
@@ -5822,11 +5822,11 @@ const file_avs_proto_rawDesc = "" +
 	"\afactory\x18\x03 \x01(\tR\afactory\x12\x1b\n" +
 	"\tis_hidden\x18\x04 \x01(\bR\bisHidden\"?\n" +
 	"\x0eListWalletResp\x12-\n" +
-	"\x05items\x18\x01 \x03(\v2\x17.aggregator.SmartWalletR\x05items\"|\n" +
+	"\x05items\x18\x01 \x03(\v2\x17.aggregator.SmartWalletR\x05items\"n\n" +
 	"\fListTasksReq\x120\n" +
 	"\x14smart_wallet_address\x18\x01 \x03(\tR\x12smartWalletAddress\x12\x16\n" +
-	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\"\n" +
-	"\ritem_per_page\x18\x03 \x01(\x03R\vitemPerPage\"\x9b\x04\n" +
+	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x03R\x05limit\"\x9b\x04\n" +
 	"\rListTasksResp\x124\n" +
 	"\x05items\x18\x01 \x03(\v2\x1e.aggregator.ListTasksResp.ItemR\x05items\x12\x16\n" +
 	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\x19\n" +
@@ -5845,11 +5845,11 @@ const file_avs_proto_rawDesc = "" +
 	"\vlast_ran_at\x18\n" +
 	" \x01(\x03R\tlastRanAt\x12.\n" +
 	"\x06status\x18\v \x01(\x0e2\x16.aggregator.TaskStatusR\x06status\x121\n" +
-	"\atrigger\x18\f \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\"j\n" +
+	"\atrigger\x18\f \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\"\\\n" +
 	"\x11ListExecutionsReq\x12\x19\n" +
 	"\btask_ids\x18\x01 \x03(\tR\ataskIds\x12\x16\n" +
-	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\"\n" +
-	"\ritem_per_page\x18\x03 \x01(\x03R\vitemPerPage\"t\n" +
+	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x03R\x05limit\"t\n" +
 	"\x12ListExecutionsResp\x12+\n" +
 	"\x05items\x18\x01 \x03(\v2\x15.aggregator.ExecutionR\x05items\x12\x16\n" +
 	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\x19\n" +
@@ -5908,14 +5908,14 @@ const file_avs_proto_rawDesc = "" +
 	"\x06secret\x18\x02 \x01(\tR\x06secret\x12\x1f\n" +
 	"\vworkflow_id\x18\x03 \x01(\tR\n" +
 	"workflowId\x12\x15\n" +
-	"\x06org_id\x18\x04 \x01(\tR\x05orgId\"\x9b\x01\n" +
+	"\x06org_id\x18\x04 \x01(\tR\x05orgId\"\x8d\x01\n" +
 	"\x0eListSecretsReq\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\tR\n" +
 	"workflowId\x12\x16\n" +
 	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\x16\n" +
 	"\x06before\x18\x03 \x01(\tR\x06before\x12\x14\n" +
-	"\x05after\x18\x04 \x01(\tR\x05after\x12\"\n" +
-	"\ritem_per_page\x18\x05 \x01(\x03R\vitemPerPage\"\xfa\x01\n" +
+	"\x05after\x18\x04 \x01(\tR\x05after\x12\x14\n" +
+	"\x05limit\x18\x05 \x01(\x03R\x05limit\"\xfa\x01\n" +
 	"\x0fListSecretsResp\x12@\n" +
 	"\x05items\x18\x01 \x03(\v2*.aggregator.ListSecretsResp.ResponseSecretR\x05items\x12\x16\n" +
 	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\x19\n" +

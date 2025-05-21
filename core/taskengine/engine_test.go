@@ -169,7 +169,7 @@ func TestListTasksPagination(t *testing.T) {
 			"0x961d2DD008960A9777571D78D21Ec9C3E5c6020c",
 			"0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4",
 		},
-		ItemPerPage: 5,
+		Limit: 5,
 	})
 
 	if err != nil {
@@ -199,8 +199,8 @@ func TestListTasksPagination(t *testing.T) {
 			"0x961d2DD008960A9777571D78D21Ec9C3E5c6020c",
 			"0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4",
 		},
-		ItemPerPage: 15,
-		Cursor:      result.Cursor,
+		Limit:  15,
+		Cursor: result.Cursor,
 	})
 
 	if len(result.Items) != 15 {
@@ -219,8 +219,8 @@ func TestListTasksPagination(t *testing.T) {
 			"0x961d2DD008960A9777571D78D21Ec9C3E5c6020c",
 			"0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4",
 		},
-		ItemPerPage: 15,
-		Cursor:      result.Cursor,
+		Limit:  15,
+		Cursor: result.Cursor,
 	})
 
 	if len(result.Items) != 2 {
@@ -844,6 +844,114 @@ func TestListSecrets(t *testing.T) {
 		t.Errorf("invalid secret name, expect [token123] got %s", result)
 	}
 
+}
+
+func TestListSecretsPagination(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user := testutil.TestUser1()
+
+	const (
+		totalTestSecrets = 10
+		pageSize         = 3
+	)
+
+	// Create totalTestSecrets secrets
+	for i := 0; i < totalTestSecrets; i++ {
+		n.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+			Name:   fmt.Sprintf("secret%d", i),
+			Secret: fmt.Sprintf("value%d", i),
+		})
+	}
+
+	// Test with pageSize limit
+	result, err := n.ListSecrets(user, &avsproto.ListSecretsReq{
+		Limit: pageSize,
+	})
+	if err != nil {
+		t.Errorf("ListSecrets failed: %v", err)
+		return
+	}
+
+	if len(result.Items) != pageSize {
+		t.Errorf("Expected %d items with limit %d, got %d", pageSize, pageSize, len(result.Items))
+	}
+
+	if !result.HasMore {
+		t.Errorf("Expected HasMore to be true with limit %d and %d total items", pageSize, totalTestSecrets)
+	}
+
+	if result.Cursor == "" {
+		t.Errorf("Expected cursor to be set when HasMore is true")
+	}
+
+	// Test with limit 0 (should use default)
+	result, err = n.ListSecrets(user, &avsproto.ListSecretsReq{
+		Limit: 0,
+	})
+	if err != nil {
+		t.Errorf("ListSecrets failed: %v", err)
+		return
+	}
+
+	if len(result.Items) != totalTestSecrets {
+		t.Errorf("Expected %d items (total number of secrets), got %d", totalTestSecrets, len(result.Items))
+	}
+
+	// Test with limit greater than total items
+	result, err = n.ListSecrets(user, &avsproto.ListSecretsReq{
+		Limit: totalTestSecrets * 2,
+	})
+	if err != nil {
+		t.Errorf("ListSecrets failed: %v", err)
+		return
+	}
+
+	if len(result.Items) != totalTestSecrets {
+		t.Errorf("Expected %d items with limit %d, got %d", totalTestSecrets, totalTestSecrets*2, len(result.Items))
+	}
+
+	if result.HasMore {
+		t.Errorf("Expected HasMore to be false when limit exceeds total items")
+	}
+
+	if result.Cursor != "" {
+		t.Errorf("Expected cursor to be empty when HasMore is false")
+	}
+
+	// Test pagination using cursor
+	firstPage, err := n.ListSecrets(user, &avsproto.ListSecretsReq{
+		Limit: pageSize,
+	})
+	if err != nil {
+		t.Errorf("ListSecrets failed: %v", err)
+		return
+	}
+
+	secondPage, err := n.ListSecrets(user, &avsproto.ListSecretsReq{
+		After: firstPage.Cursor,
+		Limit: pageSize,
+	})
+	if err != nil {
+		t.Errorf("ListSecrets failed: %v", err)
+		return
+	}
+
+	// Verify no overlap between pages
+	firstPageNames := make(map[string]bool)
+	for _, item := range firstPage.Items {
+		firstPageNames[item.Name] = true
+	}
+
+	for _, item := range secondPage.Items {
+		if firstPageNames[item.Name] {
+			t.Errorf("Found duplicate item %s in second page", item.Name)
+		}
+	}
 }
 
 func TestGetWalletReturnTaskStat(t *testing.T) {
