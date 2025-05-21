@@ -1,6 +1,6 @@
-# Storage Structure Comparison Tools
+# Storage Structure Comparison Tool
 
-This directory contains tools for analyzing storage structure differences between branches to determine if data migrations are needed.
+This directory contains a tool for analyzing storage structure differences between branches to determine if data migrations are needed.
 
 ## compare_storage_structure.go
 
@@ -8,37 +8,30 @@ A Go script that compares storage key structures between branches and analyzes s
 
 Usage:
 ```
-go run compare_storage_structure.go <old_branch> <new_branch>
+go run compare_storage_structure.go <old_branch>
 ```
 
-This compares storage structures between old_branch and new_branch, where:
+This compares storage structures between the old_branch and your current branch, where:
 - old_branch: The reference branch (typically main)
-- new_branch: The branch with changes to analyze (typically staging or a feature branch)
+- current branch: The branch with changes you want to analyze (you must check this out first)
 
 Example:
 ```
-# Compare main (old/reference) with staging (new/changes)
-go run compare_storage_structure.go main staging
+# First checkout the branch you want to analyze
+git checkout staging
+
+# Then compare with main (old/reference)
+go run compare_storage_structure.go main
 ```
 
-## compare_storage.sh
+### Branch History Requirements
 
-A shell script wrapper for easier execution of the Go script.
+For accurate comparison, ensure your branches have a linear history:
+- The current branch should be rebased on top of the old_branch
+- This ensures all changes are properly detected and analyzed
+- If branches don't have linear history, the script will warn you
 
-Usage:
-```
-./compare_storage.sh <old_branch> <new_branch>
-```
-
-This compares storage structures between old_branch and new_branch, where:
-- old_branch: The reference branch (typically main)
-- new_branch: The branch with changes to analyze (typically staging or a feature branch)
-
-Example:
-```
-# Compare main (old/reference) with staging (new/changes)
-./compare_storage.sh main staging
-```
+The script uses git diff to analyze changes in storage-related files, which works best with linear history.
 
 ## How to determine if migration is needed
 

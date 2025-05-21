@@ -234,6 +234,32 @@ func TestRunSequentialTasks(t *testing.T) {
 }
 
 func TestRunTaskWithBranchNode(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/post" {
+			body, _ := io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"data": string(body),
+			})
+			return
+		}
+		
+		if r.Method == "GET" && r.URL.Path == "/get" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"args": map[string]interface{}{
+					"hit": r.URL.Query().Get("hit"),
+				},
+			})
+			return
+		}
+		
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockServer.Close()
+	
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "branch1",
@@ -259,7 +285,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/post",
+					Url:    mockServer.URL + "/post",
 					Method: "POST",
 					Body:   "hit=notification1",
 				},
@@ -270,7 +296,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/get?hit=notification2",
+					Url:    mockServer.URL + "/get?hit=notification2",
 					Method: "GET",
 					Headers: map[string]string{
 						"content-type": "application/json",

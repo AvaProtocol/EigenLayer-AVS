@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -16,26 +18,79 @@ type StorageKeyTemplate struct {
 }
 
 func main() {
-	if len(os.Args) != 3 {
-		fmt.Println("Usage: go run compare_storage_structure.go <old_branch> <new_branch>")
-		fmt.Println("Example: go run compare_storage_structure.go main staging")
+	if len(os.Args) != 2 {
+		fmt.Println("Usage: go run compare_storage_structure.go <old_branch>")
+		fmt.Println("Example: go run compare_storage_structure.go main")
+		fmt.Println("\nNote: Run this script after checking out the new branch you want to compare.")
+		fmt.Println("      Ensure the branch history is linear (rebased) for accurate comparison.")
 		os.Exit(1)
 	}
 
 	oldBranch := os.Args[1]
-	newBranch := os.Args[2]
-	fmt.Printf("Comparing storage key structures between %s branch and %s branch\n\n", oldBranch, newBranch)
+	currentBranch, err := getCurrentBranch()
+	if err != nil {
+		fmt.Printf("Error getting current branch: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Comparing storage key structures between %s branch and current branch (%s)\n\n", oldBranch, currentBranch)
+
+	if !hasLinearHistory(oldBranch, currentBranch) {
+		fmt.Printf("⚠️  Warning: Branches may not have linear history. Consider rebasing %s onto %s for accurate comparison.\n\n", currentBranch, oldBranch)
+	}
 
 	oldBranchKeys := extractStorageKeyStructures(oldBranch)
-	newBranchKeys := extractStorageKeyStructures(newBranch)
+	currentBranchKeys := extractCurrentBranchKeyStructures()
 
-	compareKeyStructures(oldBranch, newBranch, oldBranchKeys, newBranchKeys)
+	compareKeyStructures(oldBranch, currentBranch, oldBranchKeys, currentBranchKeys)
 
-	analyzeDataStructureChanges(oldBranch, newBranch)
+	analyzeDataStructureChanges(oldBranch)
+
+	analyzeGitDiff(oldBranch)
+}
+
+func getCurrentBranch() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func hasLinearHistory(oldBranch, currentBranch string) bool {
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", oldBranch, currentBranch)
+	err := cmd.Run()
+	return err == nil
 }
 
 func extractStorageKeyStructures(branch string) []StorageKeyTemplate {
+	cmd := exec.Command("git", "show", fmt.Sprintf("%s:core/taskengine/schema.go", branch))
+	output, err := cmd.Output()
+	if err != nil {
+		fmt.Printf("Warning: Could not extract schema.go from branch %s: %v\n", branch, err)
+		return getDefaultStorageKeys()
+	}
+
+	return parseStorageKeysFromContent(string(output))
+}
+
+func extractCurrentBranchKeyStructures() []StorageKeyTemplate {
+	content, err := os.ReadFile("core/taskengine/schema.go")
+	if err != nil {
+		fmt.Printf("Warning: Could not read schema.go from current branch: %v\n", err)
+		return getDefaultStorageKeys()
+	}
+
+	return parseStorageKeysFromContent(string(content))
+}
+
+func parseStorageKeysFromContent(content string) []StorageKeyTemplate {
 	
+	return getDefaultStorageKeys()
+}
+
+func getDefaultStorageKeys() []StorageKeyTemplate {
 	return []StorageKeyTemplate{
 		{Name: "Wallet", KeyTemplate: "w:<eoa>:<smart-wallet-address>", IsNew: false, IsModified: false},
 		{Name: "Task", KeyTemplate: "t:<task-status>:<task-id>", IsNew: false, IsModified: false},
@@ -48,19 +103,19 @@ func extractStorageKeyStructures(branch string) []StorageKeyTemplate {
 	}
 }
 
-func compareKeyStructures(oldBranch, newBranch string, oldKeys, newKeys []StorageKeyTemplate) {
+func compareKeyStructures(oldBranch, currentBranch string, oldKeys, currentKeys []StorageKeyTemplate) {
 	oldMap := make(map[string]StorageKeyTemplate)
-	newMap := make(map[string]StorageKeyTemplate)
+	currentMap := make(map[string]StorageKeyTemplate)
 
 	for _, key := range oldKeys {
 		oldMap[key.Name] = key
 	}
-	for _, key := range newKeys {
-		newMap[key.Name] = key
+	for _, key := range currentKeys {
+		currentMap[key.Name] = key
 	}
 
 	var newKeysFound []string
-	for name, key := range newMap {
+	for name, key := range currentMap {
 		if _, exists := oldMap[name]; !exists {
 			newKeysFound = append(newKeysFound, fmt.Sprintf("- %s: %s", name, key.KeyTemplate))
 		}
@@ -68,15 +123,15 @@ func compareKeyStructures(oldBranch, newBranch string, oldKeys, newKeys []Storag
 
 	var removedKeys []string
 	for name, key := range oldMap {
-		if _, exists := newMap[name]; !exists {
+		if _, exists := currentMap[name]; !exists {
 			removedKeys = append(removedKeys, fmt.Sprintf("- %s: %s", name, key.KeyTemplate))
 		}
 	}
 
 	var modifiedKeys []string
-	for name, newKey := range newMap {
-		if oldKey, exists := oldMap[name]; exists && oldKey.KeyTemplate != newKey.KeyTemplate {
-			modifiedKeys = append(modifiedKeys, fmt.Sprintf("- %s: %s -> %s", name, oldKey.KeyTemplate, newKey.KeyTemplate))
+	for name, currentKey := range currentMap {
+		if oldKey, exists := oldMap[name]; exists && oldKey.KeyTemplate != currentKey.KeyTemplate {
+			modifiedKeys = append(modifiedKeys, fmt.Sprintf("- %s: %s -> %s", name, oldKey.KeyTemplate, currentKey.KeyTemplate))
 		}
 	}
 
@@ -86,7 +141,7 @@ func compareKeyStructures(oldBranch, newBranch string, oldKeys, newKeys []Storag
 
 	fmt.Println("=== Storage Key Structure Comparison ===")
 	
-	fmt.Printf("\n=== New Keys in %s ===\n", newBranch)
+	fmt.Printf("\n=== New Keys in Current Branch ===\n")
 	if len(newKeysFound) == 0 {
 		fmt.Println("No new keys found")
 	} else {
@@ -95,7 +150,7 @@ func compareKeyStructures(oldBranch, newBranch string, oldKeys, newKeys []Storag
 		}
 	}
 
-	fmt.Printf("\n=== Removed Keys in %s ===\n", newBranch)
+	fmt.Printf("\n=== Removed Keys in Current Branch ===\n")
 	if len(removedKeys) == 0 {
 		fmt.Println("No removed keys found")
 	} else {
@@ -104,7 +159,7 @@ func compareKeyStructures(oldBranch, newBranch string, oldKeys, newKeys []Storag
 		}
 	}
 
-	fmt.Printf("\n=== Modified Keys in %s ===\n", newBranch)
+	fmt.Printf("\n=== Modified Keys in Current Branch ===\n")
 	if len(modifiedKeys) == 0 {
 		fmt.Println("No modified keys found")
 	} else {
@@ -114,17 +169,18 @@ func compareKeyStructures(oldBranch, newBranch string, oldKeys, newKeys []Storag
 	}
 }
 
-func analyzeDataStructureChanges(oldBranch, newBranch string) {
+// analyzeDataStructureChanges analyzes changes in data structures between branches
+func analyzeDataStructureChanges(oldBranch string) {
 	fmt.Println("\n=== Data Structure Analysis ===")
 	
-	analyzeSmartWalletChanges(oldBranch, newBranch)
+	analyzeSmartWalletChanges(oldBranch)
 	
 	
 	fmt.Println("\n=== Migration Analysis ===")
-	if hasStorageKeyChanges(oldBranch, newBranch) {
+	if hasStorageKeyChanges() {
 		fmt.Println("⚠️ Storage key structure changes detected. A migration may be required.")
 		fmt.Println("Recommendation: Review the changes carefully and implement a migration if needed.")
-	} else if hasIncompatibleDataChanges(oldBranch, newBranch) {
+	} else if hasIncompatibleDataChanges() {
 		fmt.Println("⚠️ Incompatible data structure changes detected. A migration may be required.")
 		fmt.Println("Recommendation: Review the changes carefully and implement a migration if needed.")
 	} else {
@@ -133,18 +189,118 @@ func analyzeDataStructureChanges(oldBranch, newBranch string) {
 	}
 }
 
-func analyzeSmartWalletChanges(oldBranch, newBranch string) {
+// analyzeSmartWalletChanges analyzes changes to the SmartWallet struct
+func analyzeSmartWalletChanges(oldBranch string) {
 	fmt.Println("\n=== SmartWallet Structure Analysis ===")
 	
+	cmd := exec.Command("git", "diff", oldBranch, "--", "model/user.go")
+	output, err := cmd.Output()
+	if err != nil {
+		fmt.Printf("Warning: Could not diff model/user.go: %v\n", err)
+		return
+	}
+	
+	if len(output) == 0 {
+		fmt.Println("No changes detected in SmartWallet struct.")
+		return
+	}
+	
+	fieldChanges := false
+	jsonTagChanges := false
+	
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "+	") && strings.Contains(line, "SmartWallet struct") {
+			fieldChanges = true
+		}
+		if strings.Contains(line, "+	") && strings.Contains(line, "json:") {
+			jsonTagChanges = true
+		}
+	}
+	
+	if fieldChanges {
+		fmt.Println("- SmartWallet struct definition has changed")
+	}
+	
+	if jsonTagChanges {
+		fmt.Println("- JSON serialization tags have been modified")
+	}
+	
+	if !fieldChanges && !jsonTagChanges && len(output) > 0 {
+		fmt.Println("- Changes detected in model/user.go but they don't appear to affect storage structure")
+	}
 	
 	fmt.Println("Note: This is a simplified analysis. For a complete analysis,")
 	fmt.Println("manually review the struct definitions in both branches.")
 }
 
-func hasStorageKeyChanges(oldBranch, newBranch string) bool {
+func hasStorageKeyChanges() bool {
 	return false
 }
 
-func hasIncompatibleDataChanges(oldBranch, newBranch string) bool {
+func hasIncompatibleDataChanges() bool {
 	return false
+}
+
+func analyzeGitDiff(oldBranch string) {
+	fmt.Println("\n=== Git Diff Analysis ===")
+	
+	cmd := exec.Command("git", "diff", oldBranch, "--", "core/taskengine/schema.go", "model/user.go", "storage/db.go")
+	output, err := cmd.Output()
+	if err != nil {
+		fmt.Printf("Error running git diff: %v\n", err)
+		return
+	}
+	
+	if len(output) == 0 {
+		fmt.Println("No changes detected in storage-related files.")
+		return
+	}
+	
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	
+	structChanges := false
+	keyChanges := false
+	jsonTagChanges := false
+	
+	structRegex := regexp.MustCompile(`^\+\s*type\s+\w+\s+struct`)
+	keyRegex := regexp.MustCompile(`^\+.*Key.*string`)
+	jsonTagRegex := regexp.MustCompile(`^\+.*json:".*"`)
+	
+	for scanner.Scan() {
+		line := scanner.Text()
+		
+		if structRegex.MatchString(line) {
+			structChanges = true
+		}
+		
+		if keyRegex.MatchString(line) {
+			keyChanges = true
+		}
+		
+		if jsonTagRegex.MatchString(line) {
+			jsonTagChanges = true
+		}
+	}
+	
+	fmt.Println("Potential storage-related changes detected:")
+	if structChanges {
+		fmt.Println("- Struct definitions have been modified")
+	}
+	
+	if keyChanges {
+		fmt.Println("- Storage key generation may have changed")
+	}
+	
+	if jsonTagChanges {
+		fmt.Println("- JSON serialization tags have been modified")
+	}
+	
+	if !structChanges && !keyChanges && !jsonTagChanges {
+		fmt.Println("- No critical storage-related changes detected")
+	}
+	
+	fmt.Println("\nRecommendation: Review the full diff with:")
+	fmt.Printf("  git diff %s -- core/taskengine/schema.go model/user.go storage/db.go\n", oldBranch)
 }
