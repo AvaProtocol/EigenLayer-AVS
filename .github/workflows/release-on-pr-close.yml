@@ -41,7 +41,7 @@ jobs:
         id: git-summary
         run: |
           # Create changelog in semantic-release format
-          echo "## Changelog" > commit-summary.md
+          echo "# Changelog" > commit-summary.md
           echo "" >> commit-summary.md
           
           # Get the last tag
@@ -54,7 +54,7 @@ jobs:
           DOCS=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --no-merges | grep -i "^docs" | wc -l || echo "0")
           
           # Write summary in semantic-release format
-          echo "## Summary of Changes" >> commit-summary.md
+          echo "## Summary" >> commit-summary.md
           echo "" >> commit-summary.md
           echo "- Features: $FEATURES" >> commit-summary.md
           echo "- Bug Fixes: $FIXES" >> commit-summary.md
@@ -62,36 +62,55 @@ jobs:
           echo "" >> commit-summary.md
           
           # Write detailed changes in semantic-release format
-          echo "## Detailed Changes" >> commit-summary.md
+          echo "## Changes" >> commit-summary.md
           echo "" >> commit-summary.md
           
           # Group commits by type
-          echo "### Features" >> commit-summary.md
-          echo "" >> commit-summary.md
-          git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^feat" >> commit-summary.md || echo "- No new features" >> commit-summary.md
-          echo "" >> commit-summary.md
+          if [ "$FEATURES" -gt 0 ]; then
+            echo "### Features" >> commit-summary.md
+            echo "" >> commit-summary.md
+            git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^feat" >> commit-summary.md
+            echo "" >> commit-summary.md
+          fi
           
-          echo "### Bug Fixes" >> commit-summary.md
-          echo "" >> commit-summary.md
-          git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^fix" >> commit-summary.md || echo "- No bug fixes" >> commit-summary.md
-          echo "" >> commit-summary.md
+          if [ "$FIXES" -gt 0 ]; then
+            echo "### Bug Fixes" >> commit-summary.md
+            echo "" >> commit-summary.md
+            git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^fix" >> commit-summary.md
+            echo "" >> commit-summary.md
+          fi
           
-          echo "### Documentation" >> commit-summary.md
-          echo "" >> commit-summary.md
-          git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^docs" >> commit-summary.md || echo "- No documentation updates" >> commit-summary.md
-          echo "" >> commit-summary.md
+          if [ "$DOCS" -gt 0 ]; then
+            echo "### Documentation" >> commit-summary.md
+            echo "" >> commit-summary.md
+            git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^docs" >> commit-summary.md
+            echo "" >> commit-summary.md
+          fi
           
-          echo "### Other Changes" >> commit-summary.md
-          echo "" >> commit-summary.md
-          git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -E -v -i "^(feat|fix|docs)" >> commit-summary.md || echo "- No other changes" >> commit-summary.md
+          # Other changes
+          OTHER_CHANGES=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --no-merges | grep -E -v -i "^(feat|fix|docs)" | wc -l || echo "0")
+          if [ "$OTHER_CHANGES" -gt 0 ]; then
+            echo "### Other Changes" >> commit-summary.md
+            echo "" >> commit-summary.md
+            git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -E -v -i "^(feat|fix|docs)" >> commit-summary.md
+            echo "" >> commit-summary.md
+          fi
           
           # Set the environment variable
-          COMMIT_SUMMARY=$(cat commit-summary.md)
-          echo "COMMIT_SUMMARY=$COMMIT_SUMMARY" >> $GITHUB_ENV
+          # First, create a temporary file with the content
+          cat commit-summary.md > /tmp/changelog.txt
+          
+          # Then set the environment variable using GitHub's file command
+          echo "COMMIT_SUMMARY<<EOF" >> $GITHUB_ENV
+          cat /tmp/changelog.txt >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
           
           # Debug: Print the summary
           echo "Generated commit summary:"
           cat commit-summary.md
+          
+          # Debug: Print the environment variable setting
+          echo "Setting environment variable with content length: $(wc -l < /tmp/changelog.txt) lines"
         shell: bash
 
       - name: Run semantic versioning and create full release
