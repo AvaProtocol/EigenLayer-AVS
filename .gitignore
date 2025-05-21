@@ -31,3 +31,6 @@ contracts/broadcast/
 alias-ecdsa.key.json
 
 keys/
+
+# Plugin files for semantic release
+.semrel/
