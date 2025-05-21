@@ -1,4 +1,4 @@
-name: Publish Dev Docker image
+name: Publish Dev Docker Image
 
 on:
   workflow_dispatch:
@@ -111,6 +111,9 @@ jobs:
 
             # Always include the short SHA tag, if different from the primary tag
             type=raw,value=${{ steps.vars.outputs.SHORT_SHA }},enable=${{ steps.vars.outputs.PRIMARY_DOCKER_TAG != steps.vars.outputs.SHORT_SHA }}
+
+            # Set latest tag when building from staging branch
+            type=raw,value=latest,enable=${{ steps.vars.outputs.BRANCH_FOR_CONTEXT == 'staging' }}
 
             # Specific "manual" tag for non-staging/non-main branch builds (when not building a tag or specific commit)
             # e.g. if branch_name = feature/foo, PRIMARY_DOCKER_TAG = feature-foo, this adds feature-foo-manual
