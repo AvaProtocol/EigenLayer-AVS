@@ -41,7 +41,7 @@ jobs:
         id: git-summary
         run: |
           # Create changelog in semantic-release format
-          echo "# Changelog" > commit-summary.md
+          echo "## Changelog" > commit-summary.md
           echo "" >> commit-summary.md
           
           # Get the last tag
