@@ -86,7 +86,7 @@ func extractCurrentBranchKeyStructures() []StorageKeyTemplate {
 }
 
 func parseStorageKeysFromContent(content string) []StorageKeyTemplate {
-	
+
 	return getDefaultStorageKeys()
 }
 
@@ -140,7 +140,7 @@ func compareKeyStructures(oldBranch, currentBranch string, oldKeys, currentKeys 
 	sort.Strings(modifiedKeys)
 
 	fmt.Println("=== Storage Key Structure Comparison ===")
-	
+
 	fmt.Printf("\n=== New Keys in Current Branch ===\n")
 	if len(newKeysFound) == 0 {
 		fmt.Println("No new keys found")
@@ -172,10 +172,9 @@ func compareKeyStructures(oldBranch, currentBranch string, oldKeys, currentKeys 
 // analyzeDataStructureChanges analyzes changes in data structures between branches
 func analyzeDataStructureChanges(oldBranch string) {
 	fmt.Println("\n=== Data Structure Analysis ===")
-	
+
 	analyzeSmartWalletChanges(oldBranch)
-	
-	
+
 	fmt.Println("\n=== Migration Analysis ===")
 	if hasStorageKeyChanges() {
 		fmt.Println("⚠️ Storage key structure changes detected. A migration may be required.")
@@ -192,22 +191,22 @@ func analyzeDataStructureChanges(oldBranch string) {
 // analyzeSmartWalletChanges analyzes changes to the SmartWallet struct
 func analyzeSmartWalletChanges(oldBranch string) {
 	fmt.Println("\n=== SmartWallet Structure Analysis ===")
-	
+
 	cmd := exec.Command("git", "diff", oldBranch, "--", "model/user.go")
 	output, err := cmd.Output()
 	if err != nil {
 		fmt.Printf("Warning: Could not diff model/user.go: %v\n", err)
 		return
 	}
-	
+
 	if len(output) == 0 {
 		fmt.Println("No changes detected in SmartWallet struct.")
 		return
 	}
-	
+
 	fieldChanges := false
 	jsonTagChanges := false
-	
+
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -218,19 +217,19 @@ func analyzeSmartWalletChanges(oldBranch string) {
 			jsonTagChanges = true
 		}
 	}
-	
+
 	if fieldChanges {
 		fmt.Println("- SmartWallet struct definition has changed")
 	}
-	
+
 	if jsonTagChanges {
 		fmt.Println("- JSON serialization tags have been modified")
 	}
-	
+
 	if !fieldChanges && !jsonTagChanges && len(output) > 0 {
 		fmt.Println("- Changes detected in model/user.go but they don't appear to affect storage structure")
 	}
-	
+
 	fmt.Println("Note: This is a simplified analysis. For a complete analysis,")
 	fmt.Println("manually review the struct definitions in both branches.")
 }
@@ -245,62 +244,62 @@ func hasIncompatibleDataChanges() bool {
 
 func analyzeGitDiff(oldBranch string) {
 	fmt.Println("\n=== Git Diff Analysis ===")
-	
+
 	cmd := exec.Command("git", "diff", oldBranch, "--", "core/taskengine/schema.go", "model/user.go", "storage/db.go")
 	output, err := cmd.Output()
 	if err != nil {
 		fmt.Printf("Error running git diff: %v\n", err)
 		return
 	}
-	
+
 	if len(output) == 0 {
 		fmt.Println("No changes detected in storage-related files.")
 		return
 	}
-	
+
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	
+
 	structChanges := false
 	keyChanges := false
 	jsonTagChanges := false
-	
+
 	structRegex := regexp.MustCompile(`^\+\s*type\s+\w+\s+struct`)
 	keyRegex := regexp.MustCompile(`^\+.*Key.*string`)
 	jsonTagRegex := regexp.MustCompile(`^\+.*json:".*"`)
-	
+
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+
 		if structRegex.MatchString(line) {
 			structChanges = true
 		}
-		
+
 		if keyRegex.MatchString(line) {
 			keyChanges = true
 		}
-		
+
 		if jsonTagRegex.MatchString(line) {
 			jsonTagChanges = true
 		}
 	}
-	
+
 	fmt.Println("Potential storage-related changes detected:")
 	if structChanges {
 		fmt.Println("- Struct definitions have been modified")
 	}
-	
+
 	if keyChanges {
 		fmt.Println("- Storage key generation may have changed")
 	}
-	
+
 	if jsonTagChanges {
 		fmt.Println("- JSON serialization tags have been modified")
 	}
-	
+
 	if !structChanges && !keyChanges && !jsonTagChanges {
 		fmt.Println("- No critical storage-related changes detected")
 	}
-	
+
 	fmt.Println("\nRecommendation: Review the full diff with:")
 	fmt.Printf("  git diff %s -- core/taskengine/schema.go model/user.go storage/db.go\n", oldBranch)
 }
