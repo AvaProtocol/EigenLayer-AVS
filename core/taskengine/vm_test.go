@@ -244,7 +244,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 			})
 			return
 		}
-		
+
 		if r.Method == "GET" && r.URL.Path == "/get" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -255,11 +255,11 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 			})
 			return
 		}
-		
+
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer mockServer.Close()
-	
+
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "branch1",

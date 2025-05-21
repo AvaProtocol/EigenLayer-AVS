@@ -101,6 +101,39 @@ https://aggregator-holesky.avaprotocol.org/telemetry
 
 https://aggregator.avaprotocol.org/telemetry
 
+## Migration Guide
+
+Before merging changes from `staging` to `main`, ensure any storage structure changes are properly migrated:
+
+1. **Check for Storage Changes**
+   ```bash
+   # First checkout staging branch
+   git checkout staging
+   
+   # Compare with main to detect storage changes
+   go run scripts/compare_storage_structure.go main
+   ```
+
+2. **When Migration is Needed**
+   - Storage key format changes
+   - Non-backward-compatible data structure changes
+   - Required field additions (without `omitempty`)
+   - Field type changes
+   - Field removals
+
+3. **Migration Process**
+   - Create migration file in `./migrations` (e.g., `YYYYMMDD-HHMMSS-description.go`)
+   - Implement migration following existing patterns
+   - Add to `Migrations` slice in `./migrations/migrations.go`
+   - Test thoroughly before merging to `main`
+
+4. **No Migration Needed For**
+   - Adding fields with `omitempty` JSON tags
+   - Runtime-only changes
+   - Backward-compatible modifications
+
+> **Important**: Always run migrations before merging to `main`. The script will warn if changes require migration.
+
 # Development guide
 
 View docs/development.md
