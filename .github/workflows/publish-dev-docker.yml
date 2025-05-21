@@ -22,7 +22,7 @@ jobs:
     # If you want to keep the merged check for manual dispatch, you might need to adjust context
     # For now, assuming manual dispatch doesn't need this specific PR context check.
     # if: github.event.pull_request.merged == true 
-    name: Publish staging build docker image to dockerhub
+    name: Build and Publish Dev Docker Image to Dockerhub
     runs-on: 'ubuntu-latest'
     steps:
       - name: Login to Docker Hub
@@ -124,8 +124,8 @@ jobs:
         with:
           build-args: |
             RELEASE_TAG=${{ steps.vars.outputs.RELEASE_TAG_ARG }}
-            COMMIT_SHA=${{ steps.vars.outputs.SHORT_SHA }} # Pass the short SHA
-          platforms: linux/amd64,linux/arm64
+            COMMIT_SHA=${{ steps.vars.outputs.SHORT_SHA }}
+          platforms: linux/amd64  # Temporarily build only for amd64
           context: .
           file: dockerfiles/operator.Dockerfile
           push: true 
