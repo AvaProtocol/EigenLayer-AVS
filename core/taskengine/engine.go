@@ -34,7 +34,7 @@ import (
 
 const (
 	JobTypeExecuteTask  = "execute_task"
-	DefaultItemPerPage  = 50
+	DefaultLimit        = 50
 	MaxSecretNameLength = 255
 
 	EvmErc20TransferTopic0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
@@ -600,7 +600,6 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		prefixes[i] = string(SmartWalletTaskStoragePrefix(user.Address, smartWallet))
 	}
 
-	//taskIDs, err := n.db.GetByPrefix(SmartWalletTaskStoragePrefix(user.Address, *owner))
 	taskKeys, err := n.db.ListKeysMulti(prefixes)
 	if err != nil {
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
@@ -620,11 +619,12 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 
 	total := 0
 	cursor, err := CursorFromString(payload.Cursor)
-	itemPerPage := int(payload.ItemPerPage)
-	if itemPerPage < 0 {
+	limit := int(payload.Limit)
+	if limit < 0 {
+		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
 	}
-	if itemPerPage == 0 {
-		itemPerPage = DefaultItemPerPage
+	if limit == 0 {
+		limit = DefaultLimit
 	}
 
 	visited := 0
@@ -672,7 +672,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 			total += 1
 		}
 
-		if total >= itemPerPage {
+		if total >= limit {
 			break
 		}
 	}
@@ -829,13 +829,13 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
 	}
 
-	itemPerPage := int(payload.ItemPerPage)
-	if itemPerPage < 0 {
+	limit := int(payload.Limit)
+	if limit < 0 {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
 	}
 
-	if itemPerPage == 0 {
-		itemPerPage = DefaultItemPerPage
+	if limit == 0 {
+		limit = DefaultLimit
 	}
 	visited := 0
 	for i := len(executionKeys) - 1; i >= 0; i-- {
@@ -875,7 +875,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 			executioResp.Items = append(executioResp.Items, &exec)
 			total += 1
 		}
-		if total >= itemPerPage {
+		if total >= limit {
 			break
 		}
 	}
@@ -1138,16 +1138,16 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	sort.Strings(secretKeys)
 
 	var before, after, legacyCursor string
-	var itemPerPageVal int64
+	var limitVal int64
 
 	if payload != nil {
 		before = payload.Before
 		after = payload.After
 		legacyCursor = payload.Cursor
-		itemPerPageVal = payload.ItemPerPage
+		limitVal = payload.Limit
 	}
 
-	cursor, itemPerPage, err := SetupPagination(before, after, legacyCursor, itemPerPageVal)
+	cursor, limit, err := SetupPagination(before, after, legacyCursor, limitVal)
 	if err != nil {
 		return nil, err
 	}
@@ -1174,7 +1174,7 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 		lastKey = k
 		total++
 
-		if total >= itemPerPage {
+		if total >= limit {
 			result.HasMore = true
 			break
 		}
