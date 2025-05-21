@@ -62,10 +62,9 @@ jobs:
           echo "" >> commit-summary.md
           git log $LAST_TAG..HEAD --pretty=format:"* %s (%h)" --no-merges >> commit-summary.md || echo "* No changes found" >> commit-summary.md
           
-          # Set the environment variable using proper GitHub Actions syntax
-          echo "COMMIT_SUMMARY<<EOF" >> $GITHUB_ENV
-          cat commit-summary.md >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          # Set the environment variable using a simpler approach
+          COMMIT_SUMMARY=$(cat commit-summary.md)
+          echo "COMMIT_SUMMARY=$COMMIT_SUMMARY" >> $GITHUB_ENV
           
           # Debug: Print the summary to verify it was generated correctly
           echo "Generated commit summary:"
