@@ -122,9 +122,22 @@ Before merging changes from `staging` to `main`, ensure any storage structure ch
    - Field removals
 
 3. **Migration Process**
-   - Create migration file in `./migrations` (e.g., `YYYYMMDD-HHMMSS-description.go`)
-   - Implement migration following existing patterns
-   - Add to `Migrations` slice in `./migrations/migrations.go`
+   ```bash
+   # First checkout staging branch
+   git checkout staging
+   
+   # Compare with main to detect storage changes
+   go run scripts/compare_storage_structure.go main
+   
+   # If changes are detected, generate a migration file
+   go run scripts/migration/create_migration.go main
+   ```
+   
+   The migration script will:
+   - Create a timestamped migration file in `./migrations`
+   - Include detected changes as comments
+   - Provide example migration code
+   - Add the migration to `Migrations` slice in `./migrations/migrations.go`
    - Test thoroughly before merging to `main`
 
 4. **No Migration Needed For**
