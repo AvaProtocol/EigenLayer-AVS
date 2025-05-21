@@ -87,6 +87,27 @@ In order to see what the new version would be, run the below steps on the `stagi
 Once a PR is merged, the `.github/workflows/release-on-pr-close.yml` action will perform the below operations:
 1. `semantic-release` will run on the main branch to determine the new version.
 2. It will use `hooks: goreleaser` to create a Pre-release.
+
+#### Local Testing Before Publishing Docker
+Before running the "Publish Dev Docker image" GitHub Action, you can test the Docker build locally using:
+```bash
+# Get the current commit SHA
+export COMMIT_SHA=$(git rev-parse --short HEAD)
+
+# Build the Docker image locally
+docker build \
+  --build-arg RELEASE_TAG=v1.6.0 \
+  --build-arg COMMIT_SHA=$COMMIT_SHA \
+  --progress=plain \
+  -f dockerfiles/operator.Dockerfile \
+  -t avaprotocol/avs-dev:test \
+  .
+
+# Test the built image
+docker run --rm avaprotocol/avs-dev:test version
+```
+This will help catch any build issues before triggering the GitHub Action. If the local build succeeds, proceed with step 3.
+
 3. Manually run the `Publish Dev Docker image` Github Action, to build and publish docker with **main** branch, and the new version number. For example, if v1.6.0 is selected, a `@avaprotocol/avs-dev@v1.6.0` Docker image will be created.
 4. Update `sepolia`, `base-sepolia`, etc. with the new `avs-dev` docker, and test them end-to-end.
 
