@@ -1,8 +1,6 @@
-FROM --platform=$BUILDPLATFORM golang:1.22.1-alpine AS builder
+FROM golang:1.22.1-alpine AS builder
 ARG RELEASE_TAG
 ARG COMMIT_SHA
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
 
 WORKDIR /app
 
@@ -12,12 +10,12 @@ RUN go mod download
 
 COPY . ./
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=$(echo $TARGETPLATFORM | cut -d/ -f2) go build -v \
+RUN CGO_ENABLED=0 GOOS=linux go build -v \
     -ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.semver=$RELEASE_TAG -X github.com/AvaProtocol/EigenLayer-AVS/version.revision=$COMMIT_SHA" \
     -o /ava
 
 
-FROM --platform=$TARGETPLATFORM debian:stable-slim
+FROM debian:stable-slim
 
 WORKDIR /app
 
