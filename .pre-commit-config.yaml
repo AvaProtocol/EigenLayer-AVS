@@ -41,7 +41,7 @@ repos:
             # Allows an optional ! for breaking change e.g. feat!:
             # Requires a colon and a space after type/scope/!.
             # Requires some subject text.
-            PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\([\w\s-]+\))?!?:\[[:space:]].+"
+            PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\([\w\s-]+\))?!?:\s.+"
             if ! grep -Eq "$PATTERN" <<< "$FIRST_LINE"; then
               echo "-------------------------------------------------------------------"
               echo "ERROR: Commit message does not follow Conventional Commits format."
