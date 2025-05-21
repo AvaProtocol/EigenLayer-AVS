@@ -83,7 +83,7 @@ jobs:
           
           echo "### Other Changes" >> commit-summary.md
           echo "" >> commit-summary.md
-          git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -v -i "^feat\|^fix\|^docs" >> commit-summary.md || echo "- No other changes" >> commit-summary.md
+          git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -E -v -i "^(feat|fix|docs)" >> commit-summary.md || echo "- No other changes" >> commit-summary.md
           
           # Set the environment variable
           COMMIT_SUMMARY=$(cat commit-summary.md)
