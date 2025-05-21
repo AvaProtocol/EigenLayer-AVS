@@ -11,8 +11,7 @@ RUN go mod download
 COPY . ./
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
-    -ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.semver=$RELEASE_TAG" \
-    -ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.revision=$COMMIT_SHA" \
+    -ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.semver=$RELEASE_TAG -X github.com/AvaProtocol/EigenLayer-AVS/version.revision=$COMMIT_SHA" \
     -o /ava
 
 
