@@ -53,50 +53,54 @@ For versioning to work correctly, commit messages **must** follow the Convention
 - `docs:` for documentation changes (typically no version bump by `go-semantic-release` unless configured otherwise).
 - `BREAKING CHANGE:` in the commit body, or `type!:` (e.g., `feat!:`) for breaking changes (results in a major version bump for stable releases).
 
-### Release Process for `main` Branch
+## Release Process
 
-The release process targeting the `main` branch involves two key automated workflows:
+### 1. Dry-run release locally
+In order to see what the new version would be, run the below steps on the `staging` branch locally.
+1. Install `semantic-release`, by running `go install github.com/go-semantic-release/semantic-release@latest`
+2. Configure Github Developer Personal Token in .env file. The .env file will look like,
+  ```
+  GITHUB_TOKEN=
+  ```
+  This is because the `semantic-release` will pull the existing tags.
 
-**A. Pre-release on Pull Request to `main` (via `prerelease-and-update-docker-on-main.yml`)**
+  After editing the .env, run the below commands to make sure the GITHUB_TOKEN value is read in command-line
+  ```
+  source .env
+  echo $GITHUB_TOKEN
+  ```
+3. Run the below command to dry run,
+  ```
+  semantic-release --dry --no-ci --token $GITHUB_TOKEN --provider github --provider-opt slug=AvaProtocol/EigenLayer-AVS --update version/version.go
+  ```
+  You should see new version, e.g. 1.6.0, to be determined in the output.
+  ```
+  [go-semantic-release]: found version: 1.5.1
+  [go-semantic-release]: getting commits...
+  [go-semantic-release]: analyzing commits...
+  [go-semantic-release]: commit-analyzer plugin: default@1.15.0
+  [go-semantic-release]: calculating new version...
+  [go-semantic-release]: new version: 1.6.0
+  ```
 
-This workflow triggers when a Pull Request is opened or synchronized against the `main` branch:
+### 2. Merge PR: staging to main and public Dev Docker
+Once a PR is merged, the `.github/workflows/release-on-pr-close.yml` action will perform the below operations:
+1. `semantic-release` will run on the main branch to determine the new version.
+2. It will use `hooks: goreleaser` to create a Pre-release.
+3. Manually run the `Publish Dev Docker image` Github Action, to build and publish docker with **main** branch, and the new version number. For example, if v1.6.0 is selected, a `@avaprotocol/avs-dev@v1.6.0` Docker image will be created.
+4. Update `sepolia`, `base-sepolia`, etc. with the new `avs-dev` docker, and test them end-to-end.
 
-1.  **Pre-release Version Determination**:
-    - `go-semantic-release` analyzes commit messages in the PR.
-    - Determines the next pre-release version number (e.g., `v0.5.0-rc.1`, where `rc.1` might increment on subsequent pushes to the PR).
-
-2.  **Pre-release Creation**:
-    - Creates a GitHub Pre-Release with the new pre-release version.
-    - Creates a Git tag for the pre-release version (e.g., `v0.5.0-rc.1`).
-
-3.  **Docker Image Build and Push**:
-    - Builds a Docker image from the PR's code.
-    - Publishes the image to `avaprotocol/ap-avs` tagged only with the specific pre-release version (e.g., `avaprotocol/ap-avs:v0.5.0-rc.1`). The `latest` tag is **not** updated at this stage.
-
-**B. Full Release on Pull Request Merge to `main` (via `release-on-pr-close.yml`)**
-
-This workflow triggers when a Pull Request is closed and merged into the `main` branch:
-
-1.  **Stable Version Determination**:
-    - `go-semantic-release` analyzes commit messages on the `main` branch since the last stable release.
-    - Determines the next stable semantic version number (e.g., `v0.5.0`).
-
-2.  **Full Release Creation**:
-    - Creates a GitHub Full Release with the new stable version and a generated changelog.
-    - Creates a Git tag for the stable version (e.g., `v0.5.0`).
-
-3.  **Docker Image Build and Push**:
-    - Builds a Docker image from the merged code on `main`.
-    - Publishes the image to `avaprotocol/ap-avs` with multiple tags:
-        - The stable version (e.g., `avaprotocol/ap-avs:v0.5.0`).
-        - `latest` (i.e., `avaprotocol/ap-avs:latest`).
-        - Other semantic tags like major.minor (e.g., `v0.5`) and major (e.g., `v0`).
+### 3. Publish Release and official Docker
+1. Deploy the official `@avaprotocol/ap-avs` Docker.
+2. Upgrade the aggregators of `ethereum`, `base`, etc.
+3. Mark the Pre-release as an official release.
 
 ### Deployment
 
 - Deployments to various environments (e.g., `Sepolia`, `Base Sepolia`, `Ethereum`, `Base`) are handled by the **manual** GitHub Action workflow: `deploy-avs.yml`.
 - To deploy, a user manually triggers this workflow, selecting the target environment and the version (implicitly by deploying the code from a specific branch, usually `main` for production environments after a release, or `staging` for staging environments).
 - Each environment uses the same Docker image version (for a given release) but varies in runtime configuration.
+
 
 ### Important Notes
 
