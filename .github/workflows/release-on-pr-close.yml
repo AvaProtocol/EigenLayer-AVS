@@ -1,15 +1,18 @@
-name: Create GitHub Pre-Release on Staging Merge to Main
+name: Create GitHub Release on Branch Merge
 
 on:
   pull_request:
     types: [closed]
     branches:
       - main
+      - staging
 
 jobs:
   release-and-publish:
-    # Only run this job if the PR from staging was merged to main
-    if: github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'staging'
+    # Run this job if the PR was merged to either main or staging
+    if: |
+      github.event.pull_request.merged == true && 
+      (github.event.pull_request.base.ref == 'main' || github.event.pull_request.base.ref == 'staging')
     runs-on: ubuntu-latest
     permissions:
       contents: write # Needed for go-semantic-release to create tags and releases
@@ -20,8 +23,8 @@ jobs:
         with:
           # Fetch all history so go-semantic-release can determine the version based on all commits
           fetch-depth: 0
-          # We need to check out the main branch itself after the merge, not the PR ref
-          ref: main
+          # We need to check out the target branch itself after the merge, not the PR ref
+          ref: ${{ github.event.pull_request.base.ref }}
 
       - name: Setup Go environment
         uses: actions/setup-go@v4
@@ -135,13 +138,12 @@ jobs:
           echo "Environment variable set successfully"
         shell: bash
 
-      - name: Run semantic versioning and create full release
+      - name: Run semantic versioning and create release
         id: semantic-release
         uses: go-semantic-release/action@v1
         with:
-          args: --prerelease # Create a pre-release
-          # No pre-release flag needed; it should detect it's on main and do a full release
+          prerelease: true  # Always create a pre-release
           hooks: goreleaser # Or other hooks you use for release asset generation
-          changelog: ${{ env.COMMIT_SUMMARY }}
+          changelog-file: commit-summary.md  # Use the file we created
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
