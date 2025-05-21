@@ -145,5 +145,6 @@ jobs:
           prerelease: true  # Always create a pre-release
           hooks: goreleaser # Or other hooks you use for release asset generation
           changelog-file: commit-summary.md  # Use the file we created
+          custom-arguments: --branches main,staging  # Allow releases from both branches
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
