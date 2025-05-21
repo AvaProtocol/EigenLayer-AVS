@@ -99,7 +99,9 @@ func (s *BadgerStorage) Setup() error {
 
 func (s *BadgerStorage) Close() error {
 	for _, seq := range s.seqs {
-		seq.Release()
+		if err := seq.Release(); err != nil {
+			return err
+		}
 	}
 	return s.db.Close()
 }
@@ -191,7 +193,7 @@ func (s *BadgerStorage) GetKeyHasPrefix(prefix []byte) ([][]byte, error) {
 	return result, nil
 }
 
-// CountKeysByPrefix return total key under a specfic prefix
+// CountKeysByPrefix return total key under a specific prefix
 func (s *BadgerStorage) CountKeysByPrefix(prefix []byte) (int64, error) {
 	total := int64(0)
 
@@ -356,10 +358,9 @@ func (a *BadgerStorage) ListKeys(prefix string) ([]string, error) {
 			item := it.Item()
 			key := item.KeyCopy(nil)
 
-			keys = append(keys, fmt.Sprintf("%s", key))
+			keys = append(keys, string(key))
 		}
 		return nil
-
 	})
 	if err == nil {
 		return keys, nil

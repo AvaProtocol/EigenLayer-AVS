@@ -140,7 +140,7 @@ For improved test result formatting, use `gotestfmt`:
    Run all tests with complete output:
 
    ```base
-   go test -json ./... | gotestfmt
+   go test -v ./...
    ```
 
    or, run selected test cases:
@@ -177,67 +177,57 @@ make audit
 
 ## Dependencies
 
-### EigenLayer CLI
+## Update Protobuf Definitions
 
-Install the EigenLayer CLI with the following command:
+When you modify any `.proto` files (primarily `protobuf/avs.proto` or `protobuf/node.proto`), you need to regenerate the corresponding Go bindings.
 
-```
-curl -sSfL https://raw.githubusercontent.com/layr-labs/eigenlayer-cli/master/scripts/install.sh | sh -s
-```
+### Prerequisites
 
-### Golang
+1.  **Install `protoc` (the protobuf compiler):**
+    If you don't have it, download it from the [protobuf releases page](https://github.com/protocolbuffers/protobuf/releases) and ensure it's in your system's `PATH`.
 
-Install Go with the following command:
+2.  **Install Go plugins for `protoc`:**
+    These commands will install the necessary Go code generators for protobuf messages and gRPC services. Ensure your `$GOPATH/bin` or `$HOME/go/bin` is in your system `PATH`.
+    ```bash
+    go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+    ```
 
-```
-brew install go
-```
+### Generation Command
 
-### Foundry Toolchain
+After installing the prerequisites, run the following Make target from the project root:
 
-Install the Foundry toolchain with the following commands:
-
-```
-curl -L https://foundry.paradigm.xyz | bash
-foundryup
-```
-
-### Protobuf Compiler
-
-```
-go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+```bash
+make protoc-gen
 ```
 
-### Generate API Docs from Proto Files
+### Expected File Structure & Go Package
 
-1. Install the `protoc-gen-doc` plugin for `protoc`.
-   Install via Go:
-   ```
-   go install github.com/pseudomuto/protoc-gen-doc/cmd/protoc-gen-doc@latest
-   ```
-   Ensure the plugin is in your PATH:
-   ```
-   export PATH="$PATH:$(go env GOPATH)/bin"
-   ```
-   Verify the plugin is installed:
-   ```
-   which protoc-gen-doc
-   ```
-2. Generate API references in HTML format
+*   **Proto source files:** Reside in the `protobuf/` directory (e.g., `protobuf/avs.proto`, `protobuf/node.proto`).
+*   **`go_package` option:** Both `avs.proto` and `node.proto` use `option go_package = "github.com/AvaProtocol/EigenLayer-AVS/protobuf;avsproto";`.
+    *   This directs `protoc-gen-go` to generate files that will be part of the Go package aliased as `avsproto`.
+    *   The import path for this package in your Go code will be `github.com/AvaProtocol/EigenLayer-AVS/protobuf` (assuming `github.com/AvaProtocol/EigenLayer-AVS` is your module name from `go.mod`).
+*   **Generated Go files:** The `make protoc-gen` command is configured (via `--go_out=.` and the `go_package` option) to place the generated `*.pb.go` and `*_grpc.pb.go` files directly into the `protobuf/` directory.
+    *   Example: `protobuf/avs.pb.go`, `protobuf/node.pb.go`.
+    *   All these generated files will contain the Go package declaration: `package avsproto`.
 
-   ```
-   protoc --doc_out=./docs --doc_opt=html,docs.html ./protobuf/avs.proto
-   ```
+### Using the Generated Code in Go
 
-3. Alternatively, generate API references in Markdown format
-   ```
-   protoc --doc_out=./docs --doc_opt=markdown,docs.md ./protobuf/avs.proto
-   ```
-   This command will generate a markdown version of the gRPC API documentation. To enhance the clarity of the generated documentation, the following improvements should be made to the .proto file:
-   - **Group Definitions by Command**: Organize the API methods and their descriptions by command categories to make it easier for users to find relevant information.
-   - **Elaborate on Input Fields**: Provide detailed descriptions for each input field, including data types, expected values, and any constraints or special considerations.
-   - **Add Examples**: Include usage examples for each API method to demonstrate how to construct requests and interpret responses.
-   - **Link to Related Resources**: Where applicable, link to additional resources or documentation that provide further context or implementation details.
+To use the generated types and gRPC clients/servers in your Go code, import the package as follows:
+
+```go
+import (
+    // ... other imports
+    avspb "github.com/AvaProtocol/EigenLayer-AVS/protobuf" // Use a suitable alias like avspb
+)
+
+func main() {
+    req := &avspb.IdReq{Id: "test-id"}
+    // ... use other types like avspb.Task, avspb.AggregatorClient, etc.
+}
+```
+
+**Important:** If you change the `go_package` option in the `.proto` files or the output paths in the `Makefile`, you will likely need to update the import paths in your Go codebase accordingly.
 
 ## Getting started
 

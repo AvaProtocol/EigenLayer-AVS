@@ -200,7 +200,8 @@ message CustomCodeNode {
   string         source    = 2;
 
   message Output {
-    google.protobuf.Any data = 1;
+    // Changed from google.protobuf.Any to google.protobuf.Value for better JavaScript native type support
+    google.protobuf.Value data = 1;
   }
 }
 
@@ -420,7 +421,7 @@ message Task {
   // limit on how many time this task can run. Set to 0 will make it run unlimited until cancelling or reaching its expired time
   int64 max_execution = 8;
   // return how many time this task has run
-  int64 total_execution = 9;
+  int64 execution_count = 9;
   // timestamp when task was last executed (in milliseconds)
   int64 last_ran_at = 10;
 
@@ -463,7 +464,7 @@ message NonceResp {
 message ListWalletReq {
   // filter out by factory address or salt
   // otherwise return all the wallet
-  string factory_address = 1;
+  string factory_address = 1; // TODO: Consider renaming to factoryAddress for consistency if this is used as a filter key matching SmartWallet.factoryAddress
   string salt            = 2;
 }
 
@@ -471,6 +472,7 @@ message SmartWallet {
   string address = 1;
   string salt = 2;
   string factory = 3;
+  bool is_hidden = 4;  // Whether the wallet is hidden
 }
 
 message ListWalletResp {
@@ -482,7 +484,7 @@ message ListTasksReq {
   // Filter out by the smart_wallet_address
   repeated string smart_wallet_address = 1;
   string cursor = 2;
-  int64 item_per_page = 3;
+  int64 limit = 3;
 }
 
 message ListTasksResp {
@@ -504,7 +506,7 @@ message ListTasksResp {
     // limit on how many time this task can run. Set to 0 will make it run unlimited until cancelling or reaching its expired time
     int64 max_execution = 8;
     // return how many time this task has run
-    int64 total_execution = 9;
+    int64 execution_count = 9;
     // timestamp when task was last executed (in milliseconds)
     int64 last_ran_at = 10;
 
@@ -520,7 +522,7 @@ message ListTasksResp {
 message ListExecutionsReq {
   repeated string task_ids = 1;
   string cursor = 2;
-  int64 item_per_page = 3;
+  int64 limit = 3;
 }
 
 message ListExecutionsResp {
@@ -539,11 +541,10 @@ message ExecutionStatusResp {
 }
 
 message GetKeyReq {
-  string owner = 1;
-  int64  chain_id = 2;
-  google.protobuf.Timestamp issued_at = 3;
-  google.protobuf.Timestamp expired_at = 4;
-  string signature = 5;
+  // The message to sign, provided by GetSignatureFormat
+  string message = 1;
+  // The signature of the message
+  string signature = 2;
 }
 
 message KeyResp {
@@ -590,12 +591,20 @@ message GetWalletResp {
   string address = 1;
   string salt = 2;
   string factory_address = 3;
+  bool is_hidden = 4;
+  uint64 total_task_count = 5;
+  uint64 active_task_count = 6;
+  uint64 completed_task_count = 7;
+  uint64 failed_task_count = 8;
+  uint64 canceled_task_count = 9;
+}
 
-  uint64 total_task_count = 4;
-  uint64 active_task_count = 5;
-  uint64 completed_task_count = 6;
-  uint64 failed_task_count = 7;
-  uint64 canceled_task_count = 8;
+message SetWalletReq {
+  string salt = 1;
+  // this is the factory address for the wallet, when leaving its empty, we will use our default factory address
+  string factory_address = 2;
+  // whether the wallet should be hidden in getWallets results
+  bool is_hidden = 3;
 }
 
 message UserTriggerTaskReq {
@@ -634,6 +643,13 @@ message CreateOrUpdateSecretReq {
 
 message ListSecretsReq {
   string workflow_id = 1;
+  // Deprecated: Use before or after instead
+  string cursor = 2;
+  // Get items before this cursor value (for backward pagination)
+  string before = 3;
+  // Get items after this cursor value (for forward pagination)
+  string after = 4;
+  int64 limit = 5;
 }
 
 message ListSecretsResp {
@@ -646,6 +662,8 @@ message ListSecretsResp {
     string org_id = 5;
   }
   repeated ResponseSecret items = 1;
+  string cursor = 2;
+  bool has_more = 3;
 }
 
 message DeleteSecretReq {
@@ -658,14 +676,27 @@ message DeleteSecretReq {
   string org_id = 3;
 }
 
+message GetSignatureFormatReq {
+  // The wallet address to include in the signature format
+  string wallet = 1;
+}
+
+message GetSignatureFormatResp {
+  // The formatted signature message with server-side values filled in
+  string message = 1;
+}
 
 service Aggregator {
   // Exchange for an Auth Key to authenticate in subsequent request
   rpc GetKey(GetKeyReq) returns (KeyResp) {};
+  
+  // Get the signature format template used for authentication
+  rpc GetSignatureFormat(GetSignatureFormatReq) returns (GetSignatureFormatResp) {};
 
   // Smart Acccount Operation
   rpc GetNonce(NonceRequest)        returns (NonceResp) {};
   rpc GetWallet(GetWalletReq)       returns (GetWalletResp) {};
+  rpc SetWallet(SetWalletReq)       returns (GetWalletResp) {};
   rpc ListWallets(ListWalletReq)    returns (ListWalletResp) {};
 
   
@@ -709,6 +740,11 @@ service Aggregator {
   // Workflow IDs not found in the system are ignored.
   // Workflow IDs not linked to the EOA in the auth key are also ignored.
   rpc GetExecutionCount(GetExecutionCountReq) returns (GetExecutionCountResp);
+
+  // GetExecutionStats returns execution statistics for a specified time period
+  // It counts total executions, successful executions, and failed executions
+  // If no workflow IDs are provided, it counts for all workflows of the authenticated user
+  rpc GetExecutionStats(GetExecutionStatsReq) returns (GetExecutionStatsResp);
 }
 
 // Request message for GetWorkflowCount
@@ -730,6 +766,20 @@ message GetExecutionCountReq {
 message GetExecutionCountResp {
   // TODO: eventually to support success, error count execution
   int64 total = 1; // The total count of executions
+}
+
+// Request message for GetExecutionStats
+message GetExecutionStatsReq {
+  repeated string workflow_ids = 1; // Optional array of workflow IDs
+  int64 days = 2; // Number of days to look back (default: 7)
+}
+
+// Response message for GetExecutionStats
+message GetExecutionStatsResp {
+  int64 total = 1; // Total number of executions
+  int64 succeeded = 2; // Number of successful executions
+  int64 failed = 3; // Number of failed executions
+  double avg_execution_time = 4; // Average execution time in milliseconds
 }
 
 message Evm {

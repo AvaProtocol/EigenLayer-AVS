@@ -1,0 +1,130 @@
+name: Publish Dev Docker image
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: 'Branch to build from (default: staging). Used if no git_tag or commit_hash is provided, or for tagging context with commit_hash.'
+        required: false
+        type: string
+        default: 'staging'
+      commit_hash:
+        description: 'Specific commit SHA to build (optional). Overrides branch_name for checkout if provided. git_tag takes precedence over this.'
+        required: false
+        type: string
+      git_tag:
+        description: 'Specific Git tag to build (e.g., v1.6.0). Overrides commit_hash and branch_name for checkout.'
+        required: false
+        type: string
+
+jobs:
+  publish-staging-build:
+    # If you want to keep the merged check for manual dispatch, you might need to adjust context
+    # For now, assuming manual dispatch doesn't need this specific PR context check.
+    # if: github.event.pull_request.merged == true 
+    name: Publish staging build docker image to dockerhub
+    runs-on: 'ubuntu-latest'
+    steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Checkout code
+        id: checkout_code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 
+          # Priority: git_tag, then commit_hash, then branch_name
+          ref: ${{ github.event.inputs.git_tag && format('refs/tags/{0}', github.event.inputs.git_tag) || github.event.inputs.commit_hash || github.event.inputs.branch_name }}
+
+      - name: Determine Tags and Build Args
+        id: vars
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          PRIMARY_DOCKER_TAG=""
+          BRANCH_FOR_CONTEXT="" # Sanitized branch name used for context with commits
+          RELEASE_TAG_ARG=""
+
+          if [[ -n "${{ github.event.inputs.git_tag }}" ]]; then
+            echo "Source: Git Tag (${{ github.event.inputs.git_tag }})"
+            PRIMARY_DOCKER_TAG="${{ github.event.inputs.git_tag }}"
+            RELEASE_TAG_ARG="${{ github.event.inputs.git_tag }}"
+          elif [[ -n "${{ github.event.inputs.commit_hash }}" ]]; then
+            echo "Source: Commit SHA (${{ github.event.inputs.commit_hash }})"
+            # Use branch_name for tagging context
+            RAW_BRANCH_CTX="${{ github.event.inputs.branch_name }}"
+            SANITIZED_BRANCH_CTX=$(echo "$RAW_BRANCH_CTX" | sed 's|/|-|g' | tr -cs 'a-zA-Z0-9.-' '-' | sed 's/--\\+/-/g' | sed 's/^-*//;s/-*$//')
+            if [[ -n "$SANITIZED_BRANCH_CTX" ]]; then
+              PRIMARY_DOCKER_TAG="$SANITIZED_BRANCH_CTX-$SHORT_SHA"
+              BRANCH_FOR_CONTEXT="$SANITIZED_BRANCH_CTX"
+              RELEASE_TAG_ARG="$SANITIZED_BRANCH_CTX-$SHORT_SHA"
+            else
+              # Fallback if branch_name was empty (should not happen with default)
+              PRIMARY_DOCKER_TAG="$SHORT_SHA"
+              RELEASE_TAG_ARG="$SHORT_SHA"
+            fi
+          else
+            # Source: Branch Name
+            RAW_BRANCH_NAME="${{ github.event.inputs.branch_name }}" # Default 'staging'
+            echo "Source: Branch ($RAW_BRANCH_NAME)"
+            SANITIZED_BRANCH_NAME=$(echo "$RAW_BRANCH_NAME" | sed 's|/|-|g' | tr -cs 'a-zA-Z0-9.-' '-' | sed 's/--\\+/-/g' | sed 's/^-*//;s/-*$//')
+            if [[ -n "$SANITIZED_BRANCH_NAME" ]]; then
+              PRIMARY_DOCKER_TAG="$SANITIZED_BRANCH_NAME"
+              BRANCH_FOR_CONTEXT="$SANITIZED_BRANCH_NAME"
+              # For branch builds, RELEASE_TAG_ARG is the branch name itself.
+              # The build inside docker might use this to embed a version like <branch>-<sha> or just <branch>
+              RELEASE_TAG_ARG="$SANITIZED_BRANCH_NAME" 
+            else
+              # Should not happen with default for branch_name
+              PRIMARY_DOCKER_TAG="unknown-$SHORT_SHA"
+              RELEASE_TAG_ARG="unknown-$SHORT_SHA"
+            fi
+          fi
+
+          echo "PRIMARY_DOCKER_TAG=${PRIMARY_DOCKER_TAG}" >> $GITHUB_OUTPUT
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "BRANCH_FOR_CONTEXT=${BRANCH_FOR_CONTEXT}" >> $GITHUB_OUTPUT
+          echo "RELEASE_TAG_ARG=${RELEASE_TAG_ARG}" >> $GITHUB_OUTPUT
+
+          echo "Checked out commit short SHA: $SHORT_SHA"
+          echo "Primary Docker tag will be: $PRIMARY_DOCKER_TAG"
+          echo "Branch context for tagging (if any): $BRANCH_FOR_CONTEXT"
+          echo "RELEASE_TAG build argument will be: $RELEASE_TAG_ARG"
+        shell: bash
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: avaprotocol/avs-dev
+          tags: |
+            # Primary tag (e.g., v1.6.0, staging, feature-foo, staging-7z1f16a)
+            type=raw,value=${{ steps.vars.outputs.PRIMARY_DOCKER_TAG }}
+
+            # Always include the short SHA tag, if different from the primary tag
+            type=raw,value=${{ steps.vars.outputs.SHORT_SHA }},enable=${{ steps.vars.outputs.PRIMARY_DOCKER_TAG != steps.vars.outputs.SHORT_SHA }}
+
+            # Specific "manual" tag for non-staging/non-main branch builds (when not building a tag or specific commit)
+            # e.g. if branch_name = feature/foo, PRIMARY_DOCKER_TAG = feature-foo, this adds feature-foo-manual
+            type=raw,value=${{ steps.vars.outputs.PRIMARY_DOCKER_TAG }}-manual,enable=${{ github.event.inputs.git_tag == '' && github.event.inputs.commit_hash == '' && steps.vars.outputs.BRANCH_FOR_CONTEXT != 'staging' && steps.vars.outputs.BRANCH_FOR_CONTEXT != 'main' && steps.vars.outputs.PRIMARY_DOCKER_TAG != '' }}
+            
+      - name: Build and push staging docker image
+        uses: docker/build-push-action@v6
+        with:
+          build-args: |
+            RELEASE_TAG=${{ steps.vars.outputs.RELEASE_TAG_ARG }}
+            COMMIT_SHA=${{ steps.vars.outputs.SHORT_SHA }} # Pass the short SHA
+          platforms: linux/amd64,linux/arm64
+          context: .
+          file: dockerfiles/operator.Dockerfile
+          push: true 
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
