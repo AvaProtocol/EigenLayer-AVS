@@ -11,8 +11,11 @@ Usage:
 go run compare_storage_structure.go <comparison_branch>
 ```
 
+This compares the current branch you're on with the specified comparison_branch.
+
 Example:
 ```
+# When run from the main branch, this compares main with staging
 go run compare_storage_structure.go staging
 ```
 
@@ -22,11 +25,16 @@ A shell script wrapper for easier execution of the Go script.
 
 Usage:
 ```
-./compare_storage.sh <branch1> <branch2>
+./compare_storage.sh <old_branch> <new_branch>
 ```
+
+This compares storage structures between old_branch and new_branch, where:
+- old_branch: The reference branch (typically main)
+- new_branch: The branch with changes to analyze (typically staging or a feature branch)
 
 Example:
 ```
+# Compare main (old/reference) with staging (new/changes)
 ./compare_storage.sh main staging
 ```
 
