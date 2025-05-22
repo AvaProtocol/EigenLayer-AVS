@@ -101,6 +101,8 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64 # Be explicit here too
 
       - name: Docker meta
         id: meta
@@ -111,8 +113,8 @@ jobs:
             # Primary tag (e.g., v1.6.0, staging, feature-foo, staging-7z1f16a)
             type=raw,value=${{ steps.vars.outputs.PRIMARY_DOCKER_TAG }}
 
-            # Always include the short SHA tag, if different from the primary tag
-            type=raw,value=${{ steps.vars.outputs.SHORT_SHA }},enable=${{ steps.vars.outputs.PRIMARY_DOCKER_TAG != steps.vars.outputs.SHORT_SHA }}
+            # Include short SHA tag only when not building from a branch
+            type=raw,value=${{ steps.vars.outputs.SHORT_SHA }},enable=${{ github.event.inputs.git_tag != '' || github.event.inputs.commit_hash != '' }}
 
             # Always set latest tag for any build
             type=raw,value=latest
