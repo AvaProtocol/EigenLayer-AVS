@@ -131,5 +131,6 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 
 func containsModuleSyntax(code string) bool {
 	importRegex := regexp.MustCompile(`(?m)^\s*(import|export)\s+`)
-	return importRegex.MatchString(code)
+	requireRegex := regexp.MustCompile(`\brequire\s*\(\s*['"]`)
+	return importRegex.MatchString(code) || requireRegex.MatchString(code)
 }
