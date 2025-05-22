@@ -2,7 +2,6 @@ package modules
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/dop251/goja"
