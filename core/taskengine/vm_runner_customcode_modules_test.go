@@ -6,7 +6,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestJavaScriptWithLodash(t *testing.T) {
