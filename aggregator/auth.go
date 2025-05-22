@@ -89,7 +89,10 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 	// This allows a requested chainId of 17000 to be valid against a SmartWallet chainId of 11155111.
 	isHoleskyDevnetCase := chainIDStr == "17000"
 
-	if r.chainID != nil && chainID.Cmp(r.chainID) != 0 && !isHoleskyDevnetCase {
+	// Special handling for Ethereum Mainnet (1) to allow requests if server is on a different chain (e.g., Base).
+	isEthereumMainnetCase := chainIDStr == "1"
+
+	if r.chainID != nil && chainID.Cmp(r.chainID) != 0 && !isHoleskyDevnetCase && !isEthereumMainnetCase {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid chainId: requested chainId %s does not match SmartWallet chainId %d", chainIDStr, r.chainID.Int64())
 	}
 
@@ -244,11 +247,15 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 		// This allows a token with audience "17000" to be valid if server expects "11155111".
 		isHoleskyDevnetAudienceCase := tokenAudienceChainIdStr == "17000"
 
-		if tokenAudienceChainIdStr != expectedChainIdStr && !isHoleskyDevnetAudienceCase {
+		// Special handling for Ethereum Mainnet (1) audience if server is on a different chain.
+		isEthereumMainnetAudienceCase := tokenAudienceChainIdStr == "1"
+
+		if tokenAudienceChainIdStr != expectedChainIdStr && !isHoleskyDevnetAudienceCase && !isEthereumMainnetAudienceCase {
 			r.config.Logger.Error("JWT audience mismatch",
 				"expectedAudience", expectedChainIdStr,
 				"tokenAudience", tokenAudienceChainIdStr,
 				"isHoleskySpecialCaseApplied", isHoleskyDevnetAudienceCase,
+				"isEthereumMainnetSpecialCaseApplied", isEthereumMainnetAudienceCase,
 			)
 			return nil, fmt.Errorf("%s: invalid chainId in audience", auth.InvalidAuthenticationKey)
 		}
