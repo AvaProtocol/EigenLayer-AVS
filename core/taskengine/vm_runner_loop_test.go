@@ -36,7 +36,7 @@ func TestLoopProcessor_Execute_Sequential(t *testing.T) {
 	assert.True(t, executionLog.Success)
 	assert.NotNil(t, executionLog.OutputData)
 
-	outputVar := vm.GetOutputVar("test_loop")
+	outputVar := processor.GetOutputVar("test_loop")
 	assert.NotNil(t, outputVar)
 
 	results, ok := outputVar.([]interface{})
@@ -77,7 +77,7 @@ func TestLoopProcessor_Execute_Parallel(t *testing.T) {
 	assert.True(t, executionLog.Success)
 	assert.NotNil(t, executionLog.OutputData)
 
-	outputVar := vm.GetOutputVar("test_loop")
+	outputVar := processor.GetOutputVar("test_loop")
 	assert.NotNil(t, outputVar)
 
 	results, ok := outputVar.([]interface{})
@@ -122,7 +122,7 @@ func TestLoopProcessor_Execute_EmptyArray(t *testing.T) {
 	assert.True(t, executionLog.Success)
 	assert.NotNil(t, executionLog.OutputData)
 
-	outputVar := vm.GetOutputVar("test_loop")
+	outputVar := processor.GetOutputVar("test_loop")
 	assert.NotNil(t, outputVar)
 
 	results, ok := outputVar.([]interface{})
