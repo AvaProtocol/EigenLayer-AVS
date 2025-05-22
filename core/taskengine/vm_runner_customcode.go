@@ -92,9 +92,8 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	log.WriteString(fmt.Sprintf("Start execute user-input JS code at %s", time.Now()))
 	
 	codeToRun := node.Source
-	if !containsModuleSyntax(codeToRun) {
-		codeToRun = "(function() {" + codeToRun + "})()"
-	}
+	
+	codeToRun = "(function() {" + codeToRun + "})()"
 	
 	result, err := r.jsvm.RunString(codeToRun)
 
