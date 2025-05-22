@@ -7,6 +7,7 @@ import (
 	"math/big"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/modules"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
 	"github.com/dop251/goja"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -18,6 +19,25 @@ func NewGojaVM() *goja.Runtime {
 	vm := goja.New()
 	macros.ConfigureGojaRuntime(vm)
 	return vm
+}
+
+// NewGojaVMWithModules creates a new Goja runtime with module support.
+func NewGojaVMWithModules() (*goja.Runtime, *modules.Registry, error) {
+	vm := goja.New()
+	macros.ConfigureGojaRuntime(vm)
+	
+	registry := modules.NewRegistry()
+	
+	builtinLoader := modules.NewBuiltinLoader()
+	if err := builtinLoader.RegisterBuiltinLibraries(); err != nil {
+		return nil, nil, err
+	}
+	
+	registry.RegisterLoader("lodash", builtinLoader)
+	registry.RegisterLoader("moment", builtinLoader)
+	registry.RegisterLoader("uuid", builtinLoader)
+	
+	return vm, registry, nil
 }
 
 // Metadata holds token and block metadata
