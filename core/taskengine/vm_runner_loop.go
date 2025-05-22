@@ -160,45 +160,49 @@ func (r *LoopProcessor) executeNestedNode(node *avsproto.LoopNode, iterationStep
 	var result interface{}
 	var err error
 
+	nodeName := fmt.Sprintf("loop_iteration_%s", iterationStepID)
+
 	if ethTransfer := node.GetEthTransfer(); ethTransfer != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
-			Name:     fmt.Sprintf("loop_iteration_%s", iterationStepID),
+			Name:     nodeName,
 			TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: ethTransfer},
 		}
 	} else if contractWrite := node.GetContractWrite(); contractWrite != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
-			Name:     fmt.Sprintf("loop_iteration_%s", iterationStepID),
+			Name:     nodeName,
 			TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: contractWrite},
 		}
 	} else if contractRead := node.GetContractRead(); contractRead != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
-			Name:     fmt.Sprintf("loop_iteration_%s", iterationStepID),
+			Name:     nodeName,
 			TaskType: &avsproto.TaskNode_ContractRead{ContractRead: contractRead},
 		}
 	} else if graphqlQuery := node.GetGraphqlDataQuery(); graphqlQuery != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
-			Name:     fmt.Sprintf("loop_iteration_%s", iterationStepID),
+			Name:     nodeName,
 			TaskType: &avsproto.TaskNode_GraphqlQuery{GraphqlQuery: graphqlQuery},
 		}
 	} else if restApi := node.GetRestApi(); restApi != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
-			Name:     fmt.Sprintf("loop_iteration_%s", iterationStepID),
+			Name:     nodeName,
 			TaskType: &avsproto.TaskNode_RestApi{RestApi: restApi},
 		}
 	} else if customCode := node.GetCustomCode(); customCode != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
-			Name:     fmt.Sprintf("loop_iteration_%s", iterationStepID),
+			Name:     nodeName,
 			TaskType: &avsproto.TaskNode_CustomCode{CustomCode: customCode},
 		}
 	} else {
 		return nil, fmt.Errorf("no nested node specified in loop")
 	}
+	
+	r.vm.TaskNodes[iterationStepID] = nestedNode
 
 	_, err = r.vm.executeNode(nestedNode)
 	if err != nil {
