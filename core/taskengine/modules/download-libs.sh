@@ -9,7 +9,7 @@ echo "Downloaded lodash.min.js"
 curl -s https://cdn.jsdelivr.net/npm/moment@2.29.4/min/moment.min.js -o $LIBS_DIR/moment.min.js
 echo "Downloaded moment.min.js"
 
-curl -s https://cdn.jsdelivr.net/npm/uuid@9.0.0/dist/umd/uuid.min.js -o $LIBS_DIR/uuid.min.js
+curl -s https://unpkg.com/uuid@9.0.0/dist/index.js -o $LIBS_DIR/uuid.min.js
 echo "Downloaded uuid.min.js"
 
 echo "All libraries downloaded successfully!"
