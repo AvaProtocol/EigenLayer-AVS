@@ -6,6 +6,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestJavaScriptWithLodash(t *testing.T) {
@@ -152,54 +153,5 @@ func TestModuleImportDetection(t *testing.T) {
 				t.Errorf("Expected containsModuleSyntax(%q) to be %v, got %v", tc.code, tc.expected, result)
 			}
 		})
-	}
-}
-
-func assertStructpbValueIsFloat64Slice(t *testing.T, value interface{}, expected []float64, message string) {
-	t.Helper()
-	
-	list, ok := value.(*structpb.Value).GetListValue()
-	if !ok {
-		t.Errorf("%s: expected list value, got %T", message, value)
-		return
-	}
-	
-	if len(list.Values) != len(expected) {
-		t.Errorf("%s: expected list of length %d, got %d", message, len(expected), len(list.Values))
-		return
-	}
-	
-	for i, v := range list.Values {
-		if v.GetNumberValue() != expected[i] {
-			t.Errorf("%s: at index %d, expected %f, got %f", message, i, expected[i], v.GetNumberValue())
-		}
-	}
-}
-
-func assertStructpbValueIsString(t *testing.T, value interface{}, expected string, message string) {
-	t.Helper()
-	
-	str, ok := value.(*structpb.Value).GetStringValue()
-	if !ok {
-		t.Errorf("%s: expected string value, got %T", message, value)
-		return
-	}
-	
-	if str != expected {
-		t.Errorf("%s: expected %q, got %q", message, expected, str)
-	}
-}
-
-func assertStructpbValueIsBool(t *testing.T, value interface{}, expected bool, message string) {
-	t.Helper()
-	
-	b, ok := value.(*structpb.Value).GetBoolValue()
-	if !ok {
-		t.Errorf("%s: expected bool value, got %T", message, value)
-		return
-	}
-	
-	if b != expected {
-		t.Errorf("%s: expected %v, got %v", message, expected, b)
 	}
 }
