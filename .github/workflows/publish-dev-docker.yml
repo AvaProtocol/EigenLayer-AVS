@@ -89,6 +89,16 @@ jobs:
           echo "RELEASE_TAG build argument will be: $RELEASE_TAG_ARG"
         shell: bash
 
+      - name: Print Determined Tags and Args
+        run: |
+          echo "---- Debug: Values from vars step ----"
+          echo "Primary Docker Tag: ${{ steps.vars.outputs.PRIMARY_DOCKER_TAG }}"
+          echo "Short SHA: ${{ steps.vars.outputs.SHORT_SHA }}"
+          echo "Branch for Context: ${{ steps.vars.outputs.BRANCH_FOR_CONTEXT }}"
+          echo "Release Tag Arg for Build: ${{ steps.vars.outputs.RELEASE_TAG_ARG }}"
+          echo "---- End Debug ----"
+        shell: bash
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
