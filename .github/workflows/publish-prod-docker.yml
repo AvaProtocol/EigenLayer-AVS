@@ -33,7 +33,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0 
-          # Priority: git_tag, then commit_hash, then branch_name
           ref: ${{ github.event.inputs.git_tag && format('refs/tags/{0}', github.event.inputs.git_tag) || github.event.inputs.commit_hash || github.event.inputs.branch_name }}
 
       - name: Determine Tags and Build Args
@@ -41,13 +40,12 @@ jobs:
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           PRIMARY_DOCKER_TAG=""
-          BRANCH_FOR_CONTEXT="" # Sanitized branch name used for context with commits
+          BRANCH_FOR_CONTEXT="" 
           RELEASE_TAG_ARG=""
 
-          # Validate branch is main if no git_tag or commit_hash provided
           if [[ -z "${{ github.event.inputs.git_tag }}" && -z "${{ github.event.inputs.commit_hash }}" ]]; then
             if [[ "${{ github.event.inputs.branch_name }}" != "main" ]]; then
-              echo "Error: Production builds must be from main branch unless git_tag or commit_hash is specified"
+              echo "Error: Production builds without a git_tag or commit_hash must be from the main branch."
               exit 1
             fi
           fi
@@ -56,32 +54,28 @@ jobs:
             echo "Source: Git Tag (${{ github.event.inputs.git_tag }})"
             PRIMARY_DOCKER_TAG="${{ github.event.inputs.git_tag }}"
             RELEASE_TAG_ARG="${{ github.event.inputs.git_tag }}"
+            # BRANCH_FOR_CONTEXT remains empty for git_tag builds to ensure no short SHA tag is added by meta
           elif [[ -n "${{ github.event.inputs.commit_hash }}" ]]; then
             echo "Source: Commit SHA (${{ github.event.inputs.commit_hash }})"
-            # Use branch_name for tagging context
-            RAW_BRANCH_CTX="${{ github.event.inputs.branch_name }}"
-            SANITIZED_BRANCH_CTX=$(echo "$RAW_BRANCH_CTX" | sed 's|/|-|g' | tr -cs 'a-zA-Z0-9.-' '-' | sed 's/--\\+/-/g' | sed 's/^-*//;s/-*$//')
+            RAW_BRANCH_CTX="${{ github.event.inputs.branch_name }}" # Should be main for prod if specified with commit
+            SANITIZED_BRANCH_CTX=$(echo "$RAW_BRANCH_CTX" | sed 's|/|-|g' | tr -cs 'a-zA-Z0-9.-_' '-' | sed 's/--\+/-/g' | sed 's/^-*//;s/-*$//')
             if [[ -n "$SANITIZED_BRANCH_CTX" ]]; then
               PRIMARY_DOCKER_TAG="$SANITIZED_BRANCH_CTX-$SHORT_SHA"
               BRANCH_FOR_CONTEXT="$SANITIZED_BRANCH_CTX"
               RELEASE_TAG_ARG="$SANITIZED_BRANCH_CTX-$SHORT_SHA"
             else
-              PRIMARY_DOCKER_TAG="$SHORT_SHA"
+              # This case should ideally not be hit if branch validation is effective
+              PRIMARY_DOCKER_TAG="$SHORT_SHA" 
               RELEASE_TAG_ARG="$SHORT_SHA"
             fi
           else
-            # Source: Branch Name (should be main)
+            # Source: Branch Name (no git_tag, no commit_hash, must be 'main' due to earlier check)
             RAW_BRANCH_NAME="${{ github.event.inputs.branch_name }}"
             echo "Source: Branch ($RAW_BRANCH_NAME)"
-            SANITIZED_BRANCH_NAME=$(echo "$RAW_BRANCH_NAME" | sed 's|/|-|g' | tr -cs 'a-zA-Z0-9.-' '-' | sed 's/--\\+/-/g' | sed 's/^-*//;s/-*$//')
-            if [[ -n "$SANITIZED_BRANCH_NAME" ]]; then
-              PRIMARY_DOCKER_TAG="$SANITIZED_BRANCH_NAME"
-              BRANCH_FOR_CONTEXT="$SANITIZED_BRANCH_NAME"
-              RELEASE_TAG_ARG="$SANITIZED_BRANCH_NAME"
-            else
-              PRIMARY_DOCKER_TAG="unknown-$SHORT_SHA"
-              RELEASE_TAG_ARG="unknown-$SHORT_SHA"
-            fi
+            SANITIZED_BRANCH_NAME=$(echo "$RAW_BRANCH_NAME" | sed 's|/|-|g' | tr -cs 'a-zA-Z0-9.-_' '-' | sed 's/--\+/-/g' | sed 's/^-*//;s/-*$//')
+            PRIMARY_DOCKER_TAG="$SANITIZED_BRANCH_NAME-$SHORT_SHA" 
+            BRANCH_FOR_CONTEXT="$SANITIZED_BRANCH_NAME"
+            RELEASE_TAG_ARG="$SANITIZED_BRANCH_NAME-$SHORT_SHA"
           fi
 
           echo "PRIMARY_DOCKER_TAG=${PRIMARY_DOCKER_TAG}" >> $GITHUB_OUTPUT
@@ -97,22 +91,25 @@ jobs:
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+        with:
+          platforms: 'linux/arm64'
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
 
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: avaprotocol/ap-avs
+          images: avaprotocol/ap-avs # Production image name
           tags: |
-            # Primary tag (e.g., v1.6.0, main, main-7z1f16a)
+            # Primary tag (e.g., v1.6.0 or main-<sha>)
             type=raw,value=${{ steps.vars.outputs.PRIMARY_DOCKER_TAG }}
-
-            # Always include the short SHA tag, if different from the primary tag
-            type=raw,value=${{ steps.vars.outputs.SHORT_SHA }},enable=${{ steps.vars.outputs.PRIMARY_DOCKER_TAG != steps.vars.outputs.SHORT_SHA }}
             
+            # No latest tag automatically for prod, will be managed separately
+
       - name: Build and push production docker image
         uses: docker/build-push-action@v6
         with:
@@ -121,7 +118,7 @@ jobs:
             COMMIT_SHA=${{ steps.vars.outputs.SHORT_SHA }}
           platforms: linux/amd64,linux/arm64
           context: .
-          file: dockerfiles/operator.Dockerfile
+          file: dockerfiles/operator.Dockerfile # Assuming prod also uses operator.Dockerfile
           push: true 
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
