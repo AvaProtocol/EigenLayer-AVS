@@ -16,9 +16,15 @@ func TestJavaScriptWithLodash(t *testing.T) {
 		`,
 	}
 	
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+
 	vm, err := NewVMWithData(&model.Task{
 		Task: &avsproto.Task{
-			Id: "test_lodash",
+			Id:      "test_lodash",
+			Trigger: trigger,
 		},
 	}, nil, testutil.GetTestSmartWalletConfig(), nil)
 	
@@ -51,9 +57,15 @@ func TestJavaScriptWithMoment(t *testing.T) {
 		`,
 	}
 	
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+
 	vm, err := NewVMWithData(&model.Task{
 		Task: &avsproto.Task{
-			Id: "test_moment",
+			Id:      "test_moment",
+			Trigger: trigger,
 		},
 	}, nil, testutil.GetTestSmartWalletConfig(), nil)
 	
@@ -86,9 +98,15 @@ func TestJavaScriptWithUUID(t *testing.T) {
 		`,
 	}
 	
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+
 	vm, err := NewVMWithData(&model.Task{
 		Task: &avsproto.Task{
-			Id: "test_uuid",
+			Id:      "test_uuid",
+			Trigger: trigger,
 		},
 	}, nil, testutil.GetTestSmartWalletConfig(), nil)
 	
