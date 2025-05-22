@@ -146,6 +146,7 @@ type VM struct {
 func NewVM() *VM {
 	v := &VM{
 		Status:           VMStateInitialize,
+		TaskNodes:        make(map[string]*avsproto.TaskNode),
 		mu:               &sync.Mutex{},
 		instructionCount: 0,
 		secrets:          map[string]string{},
