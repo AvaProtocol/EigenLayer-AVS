@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -9,20 +10,31 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/modules"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 type JSProcessor struct {
 	*CommonProcessor
-	jsvm *goja.Runtime
+	jsvm     *goja.Runtime
+	registry *modules.Registry
 }
 
 func NewJSProcessor(vm *VM) *JSProcessor {
+	jsvm, registry, err := NewGojaVMWithModules()
+	if err != nil {
+		if vm.logger != nil {
+			vm.logger.Error("failed to initialize JS VM with modules", "error", err)
+		}
+		jsvm = NewGojaVM()
+	}
+
 	r := JSProcessor{
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
-		jsvm: NewGojaVM(),
+		jsvm:     jsvm,
+		registry: registry,
 	}
 
 	// These are built-in func
@@ -33,11 +45,20 @@ func NewJSProcessor(vm *VM) *JSProcessor {
 			}
 		}
 	}
-	/// Binding the data from previous step into jsvm
+	
+	// Binding the data from previous step into jsvm
 	for key, value := range vm.vars {
 		if err := r.jsvm.Set(key, value); err != nil {
 			if vm.logger != nil {
 				vm.logger.Error("failed to set variable in JS VM", "key", key, "error", err)
+			}
+		}
+	}
+	
+	if registry != nil {
+		if err := r.jsvm.Set("require", registry.RequireFunction(jsvm)); err != nil {
+			if vm.logger != nil {
+				vm.logger.Error("failed to set require function in JS VM", "error", err)
 			}
 		}
 	}
@@ -69,7 +90,13 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	var log strings.Builder
 
 	log.WriteString(fmt.Sprintf("Start execute user-input JS code at %s", time.Now()))
-	result, err := r.jsvm.RunString("(function() {" + node.Source + "})()")
+	
+	codeToRun := node.Source
+	if !containsModuleSyntax(codeToRun) {
+		codeToRun = "(function() {" + codeToRun + "})()"
+	}
+	
+	result, err := r.jsvm.RunString(codeToRun)
 
 	log.WriteString(fmt.Sprintf("Complete Execute user-input JS code at %s", time.Now()))
 	if err != nil {
@@ -100,4 +127,9 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	}
 
 	return s, err
+}
+
+func containsModuleSyntax(code string) bool {
+	importRegex := regexp.MustCompile(`(?m)^\s*(import|export)\s+`)
+	return importRegex.MatchString(code)
 }
