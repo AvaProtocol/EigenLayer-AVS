@@ -96,6 +96,8 @@ jobs:
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+        with:
+          platforms: 'linux/arm64' # Use specific platform and default image
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
