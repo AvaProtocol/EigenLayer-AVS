@@ -9,6 +9,7 @@ import (
 	"github.com/dop251/goja"
 )
 
+//go:embed libs/*
 var builtinLibs embed.FS
 
 type BuiltinLoader struct {
@@ -44,15 +45,13 @@ func (l *BuiltinLoader) Load(runtime *goja.Runtime, name string) (goja.Value, er
 	if !ok {
 		return nil, errors.New("module not found: " + name)
 	}
-
-	exports := runtime.NewObject()
 	
 	moduleScript := `
 	(function(module, exports) {
 		%s
 		
 		return module.exports || exports;
-	})({ exports: exports }, exports);
+	})({ exports: {} }, {});
 	`
 	
 	script := fmt.Sprintf(moduleScript, string(content))
