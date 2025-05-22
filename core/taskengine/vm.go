@@ -496,6 +496,8 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		step, err = v.runContractRead(node.Id, nodeValue)
 	} else if nodeValue := node.GetContractWrite(); nodeValue != nil {
 		step, err = v.runContractWrite(node.Id, nodeValue)
+	} else if nodeValue := node.GetLoop(); nodeValue != nil {
+		step, err = v.runLoop(node.Id, nodeValue)
 	}
 
 	if step != nil {
@@ -630,6 +632,20 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*Step, error) 
 			}
 		}
 	}
+
+	return nil, err
+}
+
+func (v *VM) runLoop(stepID string, node *avsproto.LoopNode) (*Step, error) {
+	processor := NewLoopProcessor(v)
+
+	inputs := v.CollectInputs()
+	executionLog, err := processor.Execute(stepID, node)
+	if err != nil {
+		v.logger.Error("error execute loop node", "task_id", v.TaskID, "step", stepID, "error", err)
+	}
+	executionLog.Inputs = inputs
+	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
 	return nil, err
 }
