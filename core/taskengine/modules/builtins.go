@@ -47,11 +47,13 @@ func (l *BuiltinLoader) Load(runtime *goja.Runtime, name string) (goja.Value, er
 	}
 	
 	moduleScript := `
+	var exports = {};
+	var module = { exports: exports };
 	(function(module, exports) {
 		%s
 		
 		return module.exports || exports;
-	})({ exports: exports }, exports);
+	})(module, exports);
 	`
 	
 	script := fmt.Sprintf(moduleScript, string(content))
