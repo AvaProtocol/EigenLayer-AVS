@@ -85,9 +85,9 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Chain ID format")
 	}
 
-	// TODO: Remove this special handling for Holesky (17000) once client migration is complete.
+	// TODO: Remove this special handling for Holesky (17000) once testnet chain is changed.
 	// This allows a requested chainId of 17000 to be valid against a SmartWallet chainId of 11155111.
-	isHoleskyDevnetCase := chainIDStr == "17000" && r.chainID != nil && r.chainID.Int64() == 11155111
+	isHoleskyDevnetCase := chainIDStr == "17000"
 
 	if r.chainID != nil && chainID.Cmp(r.chainID) != 0 && !isHoleskyDevnetCase {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid chainId: requested chainId %s does not match SmartWallet chainId %d", chainIDStr, r.chainID.Int64())
@@ -240,9 +240,9 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 
 		tokenAudienceChainIdStr := aud[0]
 
-		// TODO: Remove this special handling for Holesky (17000) once client migration is complete.
+		// TODO: Remove this special handling for Holesky (17000) once testnet chain is changed.
 		// This allows a token with audience "17000" to be valid if server expects "11155111".
-		isHoleskyDevnetAudienceCase := tokenAudienceChainIdStr == "17000" && expectedChainIdStr == "11155111"
+		isHoleskyDevnetAudienceCase := tokenAudienceChainIdStr == "17000"
 
 		if tokenAudienceChainIdStr != expectedChainIdStr && !isHoleskyDevnetAudienceCase {
 			r.config.Logger.Error("JWT audience mismatch",
