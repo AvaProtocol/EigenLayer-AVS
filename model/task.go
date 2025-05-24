@@ -106,8 +106,8 @@ func (t *Task) Validate() bool {
 	return true
 }
 
-func (t *Task) ToProtoBuf() (*avsproto.Task, error) {
-	return t.Task, nil
+func (t *Task) ToProtoBuf() *avsproto.Task {
+	return t.Task
 }
 
 // Generate a global unique key for the task in our system
