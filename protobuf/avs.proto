@@ -12,6 +12,14 @@ message IdReq {
   string id = 1;
 }
 
+// Standard pagination info following GraphQL cursor-based pagination conventions
+message PageInfo {
+  string start_cursor = 1;     // Cursor pointing to the first item in the current page
+  string end_cursor = 2;       // Cursor pointing to the last item in the current page
+  bool has_previous_page = 3;  // Whether there are items before the current page
+  bool has_next_page = 4;      // Whether there are items after the current page
+}
+
 message FixedTimeCondition {
   repeated int64 epochs = 1;
 }
@@ -532,8 +540,7 @@ message ListExecutionsReq {
 
 message ListExecutionsResp {
   repeated Execution items = 1;
-  string cursor = 2;
-  bool has_more = 4;
+  PageInfo page_info = 2;
 }
 
 message ExecutionReq {

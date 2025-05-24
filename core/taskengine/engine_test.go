@@ -11,6 +11,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCreateTaskReturnErrorWhenEmptyNodes(t *testing.T) {
@@ -252,7 +253,7 @@ func TestGetExecution(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -361,7 +362,7 @@ func TestTriggerSync(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -415,7 +416,7 @@ func TestTriggerAsync(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: false,
 	})
@@ -505,7 +506,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -518,7 +519,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	resultTrigger, err = n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -989,7 +990,7 @@ func TestGetWalletReturnTaskStat(t *testing.T) {
 	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 		TaskId: taskResult.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -1017,7 +1018,7 @@ func TestGetWalletReturnTaskStat(t *testing.T) {
 	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 		TaskId: task2.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -1184,14 +1185,14 @@ func TestGetExecutionCount(t *testing.T) {
 	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 		TaskId: task1.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
 	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 		TaskId: task2.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -1225,7 +1226,7 @@ func TestGetExecutionCount(t *testing.T) {
 		n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 			TaskId: task1.Id,
 			Reason: &avsproto.TriggerReason{
-				BlockNumber: 101,
+				BlockNumber: uint64(101),
 			},
 			IsBlocking: true,
 		})
@@ -1247,7 +1248,7 @@ func TestGetExecutionCount(t *testing.T) {
 		n.TriggerTask(user2, &avsproto.UserTriggerTaskReq{
 			TaskId: task3.Id,
 			Reason: &avsproto.TriggerReason{
-				BlockNumber: 101,
+				BlockNumber: uint64(101),
 			},
 			IsBlocking: true,
 		})
@@ -1299,7 +1300,7 @@ func TestListExecutionsPagination(t *testing.T) {
 
 	const (
 		totalTestExecutions = 10
-		pageSize           = 3
+		pageSize            = 3
 	)
 
 	// Create totalTestExecutions executions
@@ -1327,18 +1328,18 @@ func TestListExecutionsPagination(t *testing.T) {
 		t.Errorf("Expected %d items with limit %d, got %d", pageSize, pageSize, len(result.Items))
 	}
 
-	if !result.HasMore {
-		t.Errorf("Expected HasMore to be true with limit %d and %d total items", pageSize, totalTestExecutions)
+	if !result.PageInfo.HasNextPage {
+		t.Errorf("Expected HasNextPage to be true with limit %d and %d total items", pageSize, totalTestExecutions)
 	}
 
-	if result.Cursor == "" {
-		t.Errorf("Expected cursor to be set when HasMore is true")
+	if result.PageInfo.EndCursor == "" {
+		t.Errorf("Expected cursor to be set when HasNextPage is true")
 	}
 
 	// Test with limit 0 (should use default)
 	result, err = n.ListExecutions(user, &avsproto.ListExecutionsReq{
 		TaskIds: []string{task.Id},
-		Limit: 0,
+		Limit:   0,
 	})
 	if err != nil {
 		t.Errorf("ListExecutions failed: %v", err)
@@ -1352,7 +1353,7 @@ func TestListExecutionsPagination(t *testing.T) {
 	// Test with limit greater than total items
 	result, err = n.ListExecutions(user, &avsproto.ListExecutionsReq{
 		TaskIds: []string{task.Id},
-		Limit: totalTestExecutions * 2,
+		Limit:   totalTestExecutions * 2,
 	})
 	if err != nil {
 		t.Errorf("ListExecutions failed: %v", err)
@@ -1363,18 +1364,18 @@ func TestListExecutionsPagination(t *testing.T) {
 		t.Errorf("Expected %d items with limit %d, got %d", totalTestExecutions, totalTestExecutions*2, len(result.Items))
 	}
 
-	if result.HasMore {
-		t.Errorf("Expected HasMore to be false when limit exceeds total items")
+	if result.PageInfo.HasNextPage {
+		t.Errorf("Expected HasNextPage to be false when limit exceeds total items")
 	}
 
-	if result.Cursor != "" {
-		t.Errorf("Expected cursor to be empty when HasMore is false")
+	if result.PageInfo.EndCursor == "" {
+		t.Errorf("Expected cursor to always be set for current page (GraphQL PageInfo convention)")
 	}
 
 	// Test pagination using cursor
 	firstPage, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{
 		TaskIds: []string{task.Id},
-		Limit: pageSize,
+		Limit:   pageSize,
 	})
 	if err != nil {
 		t.Errorf("ListExecutions failed: %v", err)
@@ -1383,8 +1384,8 @@ func TestListExecutionsPagination(t *testing.T) {
 
 	secondPage, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{
 		TaskIds: []string{task.Id},
-		After: firstPage.Cursor,
-		Limit: pageSize,
+		After:   firstPage.PageInfo.EndCursor,
+		Limit:   pageSize,
 	})
 	if err != nil {
 		t.Errorf("ListExecutions failed: %v", err)
@@ -1405,8 +1406,8 @@ func TestListExecutionsPagination(t *testing.T) {
 
 	thirdPage, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{
 		TaskIds: []string{task.Id},
-		Before: secondPage.Cursor,
-		Limit: pageSize,
+		Before:  secondPage.PageInfo.EndCursor,
+		Limit:   pageSize,
 	})
 	if err != nil {
 		t.Errorf("ListExecutions failed: %v", err)
@@ -1428,4 +1429,98 @@ func TestListExecutionsPagination(t *testing.T) {
 			t.Errorf("Expected backward pagination to return the same items as forward pagination")
 		}
 	}
+}
+
+func TestTaskExecutionCountIntegration(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user := testutil.TestUser1()
+
+	// Create a task
+	tr := testutil.JsFastTask()
+	tr.Name = "execution-count-test"
+	tr.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	task, err := n.CreateTask(user, tr)
+	assert.NoError(t, err, "CreateTask should not error")
+	assert.Equal(t, int64(0), task.ExecutionCount, "Initial ExecutionCount should be 0")
+
+	// Trigger task execution
+	_, err = n.TriggerTask(user, &avsproto.UserTriggerTaskReq{
+		TaskId: task.Id,
+		Reason: &avsproto.TriggerReason{
+			BlockNumber: uint64(101),
+		},
+		IsBlocking: true,
+	})
+	assert.NoError(t, err, "TriggerTask should not error")
+
+	retrievedTask, err := n.GetTask(user, task.Id)
+	assert.NoError(t, err, "GetTask should not error")
+	assert.Equal(t, int64(1), retrievedTask.ExecutionCount, "ExecutionCount should be 1 after execution")
+
+	protobufTask, err := retrievedTask.ToProtoBuf()
+	assert.NoError(t, err, "ToProtoBuf should not error")
+	assert.Equal(t, int64(1), protobufTask.ExecutionCount, "ExecutionCount should be 1 in protobuf representation")
+
+	// Trigger multiple executions
+	for i := 2; i <= 3; i++ {
+		_, err = n.TriggerTask(user, &avsproto.UserTriggerTaskReq{
+			TaskId: task.Id,
+			Reason: &avsproto.TriggerReason{
+				BlockNumber: uint64(100 + i),
+			},
+			IsBlocking: true,
+		})
+		assert.NoError(t, err, "TriggerTask should not error")
+
+		retrievedTask, err = n.GetTask(user, task.Id)
+		assert.NoError(t, err, "GetTask should not error")
+		assert.Equal(t, int64(i), retrievedTask.ExecutionCount, "ExecutionCount should be %d after %d executions", i, i)
+	}
+}
+
+func TestExecutionCountWithTaskCompletion(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user := testutil.TestUser1()
+
+	// Create a task with max execution of 2
+	tr := testutil.JsFastTask()
+	tr.Name = "max-execution-test"
+	tr.MaxExecution = 2
+	tr.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	task, err := n.CreateTask(user, tr)
+	assert.NoError(t, err, "CreateTask should not error")
+
+	// Execute task twice to reach max execution
+	for i := 1; i <= 2; i++ {
+		_, err = n.TriggerTask(user, &avsproto.UserTriggerTaskReq{
+			TaskId: task.Id,
+			Reason: &avsproto.TriggerReason{
+				BlockNumber: uint64(100 + i),
+			},
+			IsBlocking: true,
+		})
+		assert.NoError(t, err, "TriggerTask should not error")
+	}
+
+	// Verify task is completed and execution count is correct
+	retrievedTask, err := n.GetTask(user, task.Id)
+	assert.NoError(t, err, "GetTask should not error")
+	assert.Equal(t, int64(2), retrievedTask.ExecutionCount, "ExecutionCount should be 2 after reaching max execution")
+	assert.Equal(t, avsproto.TaskStatus_Completed, retrievedTask.Status, "Task should be completed after reaching max execution")
+
+	// Verify protobuf representation
+	protobufTask, err := retrievedTask.ToProtoBuf()
+	assert.NoError(t, err, "ToProtoBuf should not error")
+	assert.Equal(t, int64(2), protobufTask.ExecutionCount, "ExecutionCount should be 2 in protobuf representation")
+	assert.Equal(t, avsproto.TaskStatus_Completed, protobufTask.Status, "Task status should be completed in protobuf representation")
 }
