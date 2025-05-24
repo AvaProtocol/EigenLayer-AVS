@@ -1314,7 +1314,8 @@ func TestTaskExecutionCountIntegration(t *testing.T) {
 	assert.NoError(t, err, "GetTask should not error")
 	assert.Equal(t, int64(1), retrievedTask.ExecutionCount, "ExecutionCount should be 1 after execution")
 
-	protobufTask := retrievedTask.ToProtoBuf()
+	protobufTask, err := retrievedTask.ToProtoBuf()
+	assert.NoError(t, err, "ToProtoBuf should not error")
 	assert.Equal(t, int64(1), protobufTask.ExecutionCount, "ExecutionCount should be 1 in protobuf representation")
 
 	// Trigger multiple executions
@@ -1370,7 +1371,8 @@ func TestExecutionCountWithTaskCompletion(t *testing.T) {
 	assert.Equal(t, avsproto.TaskStatus_Completed, retrievedTask.Status, "Task should be completed after reaching max execution")
 
 	// Verify protobuf representation
-	protobufTask := retrievedTask.ToProtoBuf()
+	protobufTask, err := retrievedTask.ToProtoBuf()
+	assert.NoError(t, err, "ToProtoBuf should not error")
 	assert.Equal(t, int64(2), protobufTask.ExecutionCount, "ExecutionCount should be 2 in protobuf representation")
 	assert.Equal(t, avsproto.TaskStatus_Completed, protobufTask.Status, "Task status should be completed in protobuf representation")
 }

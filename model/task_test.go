@@ -121,7 +121,8 @@ func TestExecutionCountPersistence(t *testing.T) {
 		assert.NoError(t, err, "FromStorageData should not error")
 		assert.Equal(t, int64(1), newTask.ExecutionCount, "ExecutionCount should be preserved after serialization/deserialization")
 
-		protobufTask := newTask.ToProtoBuf()
+		protobufTask, err := newTask.ToProtoBuf()
+		assert.NoError(t, err, "ToProtoBuf should not error")
 		assert.Equal(t, int64(1), protobufTask.ExecutionCount, "ExecutionCount should be preserved in protobuf conversion")
 	})
 
