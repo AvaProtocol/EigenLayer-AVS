@@ -11,6 +11,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCreateTaskReturnErrorWhenEmptyNodes(t *testing.T) {
@@ -252,7 +253,7 @@ func TestGetExecution(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -361,7 +362,7 @@ func TestTriggerSync(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -415,7 +416,7 @@ func TestTriggerAsync(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: false,
 	})
@@ -505,7 +506,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -518,7 +519,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	resultTrigger, err = n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -989,7 +990,7 @@ func TestGetWalletReturnTaskStat(t *testing.T) {
 	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 		TaskId: taskResult.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -1017,7 +1018,7 @@ func TestGetWalletReturnTaskStat(t *testing.T) {
 	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 		TaskId: task2.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -1184,14 +1185,14 @@ func TestGetExecutionCount(t *testing.T) {
 	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 		TaskId: task1.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
 	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 		TaskId: task2.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -1225,7 +1226,7 @@ func TestGetExecutionCount(t *testing.T) {
 		n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 			TaskId: task1.Id,
 			Reason: &avsproto.TriggerReason{
-				BlockNumber: 101,
+				BlockNumber: uint64(101),
 			},
 			IsBlocking: true,
 		})
@@ -1247,7 +1248,7 @@ func TestGetExecutionCount(t *testing.T) {
 		n.TriggerTask(user2, &avsproto.UserTriggerTaskReq{
 			TaskId: task3.Id,
 			Reason: &avsproto.TriggerReason{
-				BlockNumber: 101,
+				BlockNumber: uint64(101),
 			},
 			IsBlocking: true,
 		})
@@ -1304,7 +1305,7 @@ func TestTaskExecutionCountIntegration(t *testing.T) {
 	_, err = n.TriggerTask(user, &avsproto.UserTriggerTaskReq{
 		TaskId: task.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -1323,7 +1324,7 @@ func TestTaskExecutionCountIntegration(t *testing.T) {
 		_, err = n.TriggerTask(user, &avsproto.UserTriggerTaskReq{
 			TaskId: task.Id,
 			Reason: &avsproto.TriggerReason{
-				BlockNumber: 100 + int64(i),
+				BlockNumber: uint64(100 + i),
 			},
 			IsBlocking: true,
 		})
@@ -1357,7 +1358,7 @@ func TestExecutionCountWithTaskCompletion(t *testing.T) {
 		_, err = n.TriggerTask(user, &avsproto.UserTriggerTaskReq{
 			TaskId: task.Id,
 			Reason: &avsproto.TriggerReason{
-				BlockNumber: int64(100 + i),
+				BlockNumber: uint64(100 + i),
 			},
 			IsBlocking: true,
 		})
