@@ -818,8 +818,13 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	}
 
 	executioResp := &avsproto.ListExecutionsResp{
-		Items:  []*avsproto.Execution{},
-		Cursor: "",
+		Items: []*avsproto.Execution{},
+		PageInfo: &avsproto.PageInfo{
+			StartCursor:     "",
+			EndCursor:       "",
+			HasPreviousPage: false,
+			HasNextPage:     false,
+		},
 	}
 
 	var before, after, legacyCursor string
@@ -838,8 +843,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	}
 
 	total := 0
-	var lastExecutionId string
-	
+
 	for i := len(executionKeys) - 1; i >= 0; i-- {
 		key := executionKeys[i]
 
@@ -877,16 +881,34 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 				exec.Reason.Type = avsproto.TriggerReason_Event
 			}
 			executioResp.Items = append(executioResp.Items, &exec)
-			lastExecutionId = exec.Id
 			total += 1
 		}
 		if total >= limit {
-			executioResp.HasMore = true
 			break
 		}
 	}
-	if executioResp.HasMore && lastExecutionId != "" {
-		executioResp.Cursor = CreateNextCursor(lastExecutionId)
+
+	// Set pagination info
+	if len(executioResp.Items) > 0 {
+		firstItem := executioResp.Items[0]
+		lastItem := executioResp.Items[len(executioResp.Items)-1]
+
+		executioResp.PageInfo.StartCursor = CreateNextCursor(firstItem.Id)
+		executioResp.PageInfo.EndCursor = CreateNextCursor(lastItem.Id)
+
+		// Check if there are more items after the current page
+		executioResp.PageInfo.HasNextPage = total >= limit
+
+		// Check if there are items before the current page
+		// This is true if we have a cursor and we're not at the beginning
+		executioResp.PageInfo.HasPreviousPage = !cursor.IsZero() && cursor.Direction == CursorDirectionNext
+
+		// For backward pagination, we need to check if there are items after
+		if cursor.Direction == CursorDirectionPrevious {
+			executioResp.PageInfo.HasNextPage = true // There are items after since we're going backwards
+			// Check if there are more items before
+			executioResp.PageInfo.HasPreviousPage = total >= limit
+		}
 	}
 	return executioResp, nil
 }
