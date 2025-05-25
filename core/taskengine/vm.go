@@ -773,7 +773,7 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 		return executionStep, nil
 	}
 
-	return nil, fmt.Errorf("node execution produced no results")
+	return nil, fmt.Errorf("node execution produced no results for node ID: %s", node.Id)
 }
 
 // This is a helper function to create nodes for RunNodeWithInputs when working with triggers or simplified inputs.
