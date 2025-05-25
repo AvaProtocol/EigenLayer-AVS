@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 
@@ -687,7 +688,10 @@ func (v *VM) preprocessText(text string) string {
 		exportedValue := evaluated.Export()
 		var replacement string
 
-		if _, ok := exportedValue.(map[string]interface{}); ok {
+		if t, ok := exportedValue.(time.Time); ok {
+			// Always format time.Time to a consistent UTC string
+			replacement = t.In(time.UTC).Format("2006-01-02 15:04:05.000 +0000 UTC")
+		} else if _, ok := exportedValue.(map[string]interface{}); ok {
 			// In Golang, it's better because it can return the actually object data. But in JavaScript, it will return "[object Object]",
 			// We're mimicking the behavior of Retool here to follow the script gotcha.
 			// In real of userness the golang might be useful for debugging because it's will return the actual object data, eg `map[id:123 message:test]`
