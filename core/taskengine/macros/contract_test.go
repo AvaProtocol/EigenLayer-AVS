@@ -19,6 +19,10 @@ type answer struct {
 }
 
 func TestQueryContract(t *testing.T) {
+	if os.Getenv("RPC_URL") == "" {
+		t.Skip("Skipping test because RPC_URL environment variable is not set")
+	}
+
 	conn, _ := ethclient.Dial(os.Getenv("RPC_URL"))
 
 	r, err := QueryContract(
@@ -38,6 +42,10 @@ func TestQueryContract(t *testing.T) {
 }
 
 func TestExpression(t *testing.T) {
+	if os.Getenv("RPC_URL") == "" {
+		t.Skip("Skipping test because RPC_URL environment variable is not set")
+	}
+
 	SetRpc(os.Getenv("RPC_URL"))
 
 	p, e := CompileExpression(`priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306")`)
@@ -84,6 +92,10 @@ func TestExpression(t *testing.T) {
 }
 
 func TestExpressionDynamic(t *testing.T) {
+	if os.Getenv("RPC_URL") == "" {
+		t.Skip("Skipping test because RPC_URL environment variable is not set")
+	}
+
 	SetRpc(os.Getenv("RPC_URL"))
 
 	// https://sepolia.etherscan.io/address/0x9aCb42Ac07C72cFc29Cd95d9DEaC807E93ada1F6#code
