@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -26,27 +25,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
-type VMState string
-
-const (
-	VMStateInitialize         = "vm_initialize"
-	VMStateCompiled           = "vm_compiled"
-	VMStateReady              = "vm_ready"
-	VMStateExecuting          = "vm_executing"
-	VMStateCompleted          = "vm_completed"
-	VMMaxPreprocessIterations = 100
-)
-
-type Step struct {
-	NodeID string
-	Next   []string
-}
-
-type CommonProcessor struct {
-	vm *VM
-}
-
-func (c *CommonProcessor) SetVar(name string, data any) {
 	c.vm.AddVar(name, data)
 }
 
@@ -209,6 +187,16 @@ func (v *VM) GetTriggerNameAsVar() (string, error) {
 	}
 
 	return standardized, nil
+}
+
+// contains checks if a slice contains a specific value (replacement for contains)
+func contains(slice []string, str string) bool {
+	for _, v := range slice {
+		if v == str {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *VM) GetNodeNameAsVar(nodeID string) string {
