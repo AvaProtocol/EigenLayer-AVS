@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/status"
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -1090,15 +1091,25 @@ func (n *Engine) RunNodeWithInputs(nodeType string, nodeConfig map[string]interf
 	case "blockTrigger":
 		if codeOutput := executionStep.GetCustomCode(); codeOutput != nil && codeOutput.Data != nil {
 			var data map[string]interface{}
-			if err := json.Unmarshal(codeOutput.Data.Value, &data); err == nil {
-				result = data
+			var value structpb.Value
+			if err := codeOutput.Data.UnmarshalTo(&value); err == nil {
+				if valueBytes, err := value.MarshalJSON(); err == nil {
+					if err := json.Unmarshal(valueBytes, &data); err == nil {
+						result = data
+					}
+				}
 			}
 		}
 	case "restApi":
 		if restOutput := executionStep.GetRestApi(); restOutput != nil && restOutput.Data != nil {
 			var data map[string]interface{}
-			if err := json.Unmarshal(restOutput.Data.Value, &data); err == nil {
-				result["data"] = data
+			var value structpb.Value
+			if err := restOutput.Data.UnmarshalTo(&value); err == nil {
+				if valueBytes, err := value.MarshalJSON(); err == nil {
+					if err := json.Unmarshal(valueBytes, &data); err == nil {
+						result["data"] = data
+					}
+				}
 			} else {
 				result["data"] = restOutput.Data
 			}
@@ -1110,8 +1121,13 @@ func (n *Engine) RunNodeWithInputs(nodeType string, nodeConfig map[string]interf
 	case "customCode":
 		if codeOutput := executionStep.GetCustomCode(); codeOutput != nil && codeOutput.Data != nil {
 			var data map[string]interface{}
-			if err := json.Unmarshal(codeOutput.Data.Value, &data); err == nil {
-				result = data
+			var value structpb.Value
+			if err := codeOutput.Data.UnmarshalTo(&value); err == nil {
+				if valueBytes, err := value.MarshalJSON(); err == nil {
+					if err := json.Unmarshal(valueBytes, &data); err == nil {
+						result = data
+					}
+				}
 			} else {
 				result["data"] = codeOutput.Data
 			}
@@ -1123,8 +1139,13 @@ func (n *Engine) RunNodeWithInputs(nodeType string, nodeConfig map[string]interf
 	case "filter":
 		if filterOutput := executionStep.GetFilter(); filterOutput != nil && filterOutput.Data != nil {
 			var data interface{}
-			if err := json.Unmarshal(filterOutput.Data.Value, &data); err == nil {
-				result["data"] = data
+			var value structpb.Value
+			if err := filterOutput.Data.UnmarshalTo(&value); err == nil {
+				if valueBytes, err := value.MarshalJSON(); err == nil {
+					if err := json.Unmarshal(valueBytes, &data); err == nil {
+						result["data"] = data
+					}
+				}
 			} else {
 				result["data"] = filterOutput.Data
 			}

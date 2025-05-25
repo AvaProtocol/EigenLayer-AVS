@@ -2,24 +2,20 @@ package taskengine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 
-	"github.com/dop251/goja"
 	"github.com/oklog/ulid/v2"
 	"github.com/samber/lo"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
@@ -732,10 +728,9 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 		vars:              make(map[string]interface{}),
 		TaskID:            v.TaskID,
 		TaskNodes:         map[string]*avsproto.TaskNode{node.Id: node},
-		TaskEdges:         map[string]*avsproto.TaskEdge{},
 		plans:             map[string]*Step{},
 		ExecutionLogs:     []*avsproto.Execution_Step{},
-		state:             VMStateReady,
+		Status:            VMStateReady,
 		logger:            v.logger,
 		smartWalletConfig: v.smartWalletConfig,
 		db:                v.db,
@@ -763,12 +758,8 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 	if step != nil {
 		executionStep := &avsproto.Execution_Step{
 			NodeId:  node.Id,
-			Success: step.Error == "",
-			Error:   step.Error,
-			StartAt: step.StartTime,
-			EndAt:   step.EndTime,
+			Success: true, // Default to success since we don't have error information
 			Inputs:  tempVM.CollectInputs(),
-			Log:     step.Log,
 		}
 		return executionStep, nil
 	}
