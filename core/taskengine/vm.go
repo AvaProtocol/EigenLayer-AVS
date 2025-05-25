@@ -726,7 +726,7 @@ func (v *VM) GetTaskId() string {
 	return ""
 }
 
-// It returns the execution result as an Execution_Step.
+// RunNodeWithInputs executes a single node with the provided inputs and returns an Execution_Step.
 func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[string]interface{}) (*avsproto.Execution_Step, error) {
 	tempVM := &VM{
 		vars:              make(map[string]interface{}),
