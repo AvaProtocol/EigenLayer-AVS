@@ -25,6 +25,27 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
+type VMState string
+
+const (
+	VMStateInitialize         = "vm_initialize"
+	VMStateCompiled           = "vm_compiled"
+	VMStateReady              = "vm_ready"
+	VMStateExecuting          = "vm_executing"
+	VMStateCompleted          = "vm_completed"
+	VMMaxPreprocessIterations = 100
+)
+
+type Step struct {
+	NodeID string
+	Next   []string
+}
+
+type CommonProcessor struct {
+	vm *VM
+}
+
+func (c *CommonProcessor) SetVar(name string, data any) {
 	c.vm.AddVar(name, data)
 }
 
@@ -131,6 +152,8 @@ func NewVM() *VM {
 		mu:               &sync.Mutex{},
 		instructionCount: 0,
 		secrets:          map[string]string{},
+		plans:            make(map[string]*Step),
+		TaskNodes:        sync.Map{}, // Initialize TaskNodes as sync.Map
 	}
 	
 	// Initialize vars with environment variables
@@ -202,16 +225,6 @@ func contains(slice []string, str string) bool {
 func (v *VM) GetNodeNameAsVar(nodeID string) string {
 	// Replace invalid characters with _
 	re := regexp.MustCompile(`[^a-zA-Z0-9_$]`)
-<<<<<<< HEAD
-
-	// Get node name if it exists, otherwise use nodeID
-	var name string
-	if node, exists := v.TaskNodes[nodeID]; exists && node != nil {
-		name = node.Name
-	}
-||||||| parent of 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
-	name := v.TaskNodes[nodeID].Name
-=======
 	
 	nodeObj, ok := v.TaskNodes.Load(nodeID)
 	if !ok {
@@ -220,18 +233,10 @@ func (v *VM) GetNodeNameAsVar(nodeID string) string {
 	
 	node := nodeObj.(*avsproto.TaskNode)
 	name := node.Name
->>>>>>> 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
 	if name == "" {
 		name = nodeID
 	}
-<<<<<<< HEAD
-
 	standardized := re.ReplaceAllString(name, "_")
-||||||| parent of 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
-	standardized := re.ReplaceAllString(v.TaskNodes[nodeID].Name, "_")
-=======
-	standardized := re.ReplaceAllString(name, "_")
->>>>>>> 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
 
 	// Ensure the first character is valid
 	if len(standardized) == 0 || !regexp.MustCompile(`^[a-zA-Z_$]`).MatchString(standardized[:1]) {
@@ -243,23 +248,8 @@ func (v *VM) GetNodeNameAsVar(nodeID string) string {
 
 func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
 	v := &VM{
-<<<<<<< HEAD
-		Status:            VMStateInitialize,
-		TaskNodes:         make(map[string]*avsproto.TaskNode),
-||||||| parent of 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
 		Status: VMStateInitialize,
-		//TaskEdges:         task.Edges,
-		//TaskTrigger:       task.Trigger,
-		TaskNodes: make(map[string]*avsproto.TaskNode),
 		TaskOwner: common.HexToAddress(task.Owner),
-
-=======
-		Status: VMStateInitialize,
-		//TaskEdges:         task.Edges,
-		//TaskTrigger:       task.Trigger,
-		TaskOwner: common.HexToAddress(task.Owner),
-
->>>>>>> 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
 		plans:             make(map[string]*Step),
 		mu:                &sync.Mutex{},
 		instructionCount:  0,
@@ -268,41 +258,24 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 		reason:            reason,
 		task:              task,
 		parsedTriggerData: &triggerDataType{},
+		TaskNodes:         sync.Map{}, // Initialize TaskNodes as sync.Map
 	}
 
-<<<<<<< HEAD
-	if task != nil {
-		v.TaskOwner = common.HexToAddress(task.Owner)
-		for _, node := range task.Nodes {
-			v.TaskNodes[node.Id] = node
-		}
-||||||| parent of 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
-	for _, node := range task.Nodes {
-		v.TaskNodes[node.Id] = node
-=======
 	for _, node := range task.Nodes {
 		v.TaskNodes.Store(node.Id, node)
->>>>>>> 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
 	}
 
-<<<<<<< HEAD
-	v.vars = macros.GetEnvs(map[string]any{})
-	triggerVarName, err := v.GetTriggerNameAsVar()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get trigger variable name: %w", err)
-	}
-||||||| parent of 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
-	v.vars = macros.GetEnvs(map[string]any{})
-	triggerVarName := v.GetTriggerNameAsVar()
-=======
 	// Initialize vars with environment variables
 	envVars := macros.GetEnvs(map[string]any{})
 	for key, value := range envVars {
 		v.vars.Store(key, value)
 	}
 	
-	triggerVarName := v.GetTriggerNameAsVar()
->>>>>>> 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
+	triggerVarName, err := v.GetTriggerNameAsVar()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get trigger variable name: %w", err)
+	}
+	
 	// popular trigger data for trigger variable
 	if reason != nil {
 		v.vars.Store(triggerVarName, map[string]any{
@@ -892,16 +865,6 @@ func (v *VM) CollectInputs() map[string]string {
 	return inputs
 }
 
-// Add a custom contains function for Go 1.18.1 compatibility
-func contains(slice []string, str string) bool {
-	for _, v := range slice {
-		if v == str {
-			return true
-		}
-	}
-	return false
-}
-
 func (v *VM) GetTaskId() string {
 	if v.task != nil && v.task.Task != nil {
 		return v.task.Id
@@ -927,22 +890,33 @@ func (v *VM) GetTaskId() string {
 // purposes. It creates a temporary VM instance to execute the node and collects the results.
 func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[string]interface{}) (*avsproto.Execution_Step, error) {
 	tempVM := &VM{
-		vars:              macros.GetEnvs(make(map[string]interface{})),
-		TaskID:            v.TaskID,
-		TaskNodes:         map[string]*avsproto.TaskNode{node.Id: node},
-		plans:             map[string]*Step{},
-		ExecutionLogs:     []*avsproto.Execution_Step{},
 		Status:            VMStateReady,
+		mu:                &sync.Mutex{},
 		logger:            v.logger,
 		smartWalletConfig: v.smartWalletConfig,
 		db:                v.db,
 		secrets:           v.secrets, // Preserve secrets from the original VM
+		TaskID:            v.TaskID,
+		ExecutionLogs:     []*avsproto.Execution_Step{},
+		plans:             map[string]*Step{},
+		TaskNodes:         sync.Map{},
+	}
+	
+	// Initialize vars with environment variables
+	envVars := macros.GetEnvs(make(map[string]interface{}))
+	for key, value := range envVars {
+		tempVM.vars.Store(key, value)
 	}
 
-	if v.vars != nil && v.vars["apContext"] != nil {
-		tempVM.vars["apContext"] = v.vars["apContext"]
+	// Store the node in the TaskNodes map
+	tempVM.TaskNodes.Store(node.Id, node)
+
+	// Copy apContext if it exists
+	if apContextValue, ok := v.vars.Load("apContext"); ok {
+		tempVM.vars.Store("apContext", apContextValue)
 	}
 
+	// Add input variables
 	for key, value := range inputVariables {
 		tempVM.AddVar(key, value)
 	}
@@ -961,8 +935,16 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 		executionStep := &avsproto.Execution_Step{
 			NodeId:  node.Id,
 			Success: true, // Default to success since we don't have error information
-			Inputs:  tempVM.CollectInputs(),
 		}
+		
+		// Collect inputs
+		inputs := tempVM.CollectInputs()
+		inputKeys := make([]string, 0, len(inputs))
+		for k := range inputs {
+			inputKeys = append(inputKeys, k)
+		}
+		executionStep.Inputs = inputKeys
+		
 		return executionStep, nil
 	}
 
