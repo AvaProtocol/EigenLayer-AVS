@@ -28,7 +28,6 @@ import (
 	"google.golang.org/grpc/status"
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -1373,26 +1372,18 @@ func (n *Engine) RunNodeWithInputs(nodeType string, nodeConfig map[string]interf
 	switch nodeType {
 	case "blockTrigger":
 		if codeOutput := executionStep.GetCustomCode(); codeOutput != nil && codeOutput.Data != nil {
-			var data map[string]interface{}
-			var value structpb.Value
-			if err := codeOutput.Data.UnmarshalTo(&value); err == nil {
-				if valueBytes, err := value.MarshalJSON(); err == nil {
-					if err := json.Unmarshal(valueBytes, &data); err == nil {
-						result = data
-					}
+			if valueInterface := codeOutput.Data.AsInterface(); valueInterface != nil {
+				if dataMap, ok := valueInterface.(map[string]interface{}); ok {
+					result = dataMap
 				}
 			}
 		}
 	case "restApi":
 		if restOutput := executionStep.GetRestApi(); restOutput != nil && restOutput.Data != nil {
+			// restOutput.Data is *anypb.Any, so we unmarshal the raw bytes as JSON
 			var data map[string]interface{}
-			var value structpb.Value
-			if err := restOutput.Data.UnmarshalTo(&value); err == nil {
-				if valueBytes, err := value.MarshalJSON(); err == nil {
-					if err := json.Unmarshal(valueBytes, &data); err == nil {
-						result["data"] = data
-					}
-				}
+			if err := json.Unmarshal(restOutput.Data.Value, &data); err == nil {
+				result["data"] = data
 			} else {
 				result["data"] = restOutput.Data
 			}
@@ -1403,13 +1394,9 @@ func (n *Engine) RunNodeWithInputs(nodeType string, nodeConfig map[string]interf
 		}
 	case "customCode":
 		if codeOutput := executionStep.GetCustomCode(); codeOutput != nil && codeOutput.Data != nil {
-			var data map[string]interface{}
-			var value structpb.Value
-			if err := codeOutput.Data.UnmarshalTo(&value); err == nil {
-				if valueBytes, err := value.MarshalJSON(); err == nil {
-					if err := json.Unmarshal(valueBytes, &data); err == nil {
-						result = data
-					}
+			if valueInterface := codeOutput.Data.AsInterface(); valueInterface != nil {
+				if dataMap, ok := valueInterface.(map[string]interface{}); ok {
+					result = dataMap
 				}
 			} else {
 				result["data"] = codeOutput.Data
@@ -1421,14 +1408,10 @@ func (n *Engine) RunNodeWithInputs(nodeType string, nodeConfig map[string]interf
 		}
 	case "filter":
 		if filterOutput := executionStep.GetFilter(); filterOutput != nil && filterOutput.Data != nil {
+			// filterOutput.Data is *anypb.Any, so we unmarshal the raw bytes as JSON
 			var data interface{}
-			var value structpb.Value
-			if err := filterOutput.Data.UnmarshalTo(&value); err == nil {
-				if valueBytes, err := value.MarshalJSON(); err == nil {
-					if err := json.Unmarshal(valueBytes, &data); err == nil {
-						result["data"] = data
-					}
-				}
+			if err := json.Unmarshal(filterOutput.Data.Value, &data); err == nil {
+				result["data"] = data
 			} else {
 				result["data"] = filterOutput.Data
 			}
