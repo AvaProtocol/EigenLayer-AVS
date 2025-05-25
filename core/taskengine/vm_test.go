@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
@@ -890,10 +889,6 @@ func TestPreprocessText(t *testing.T) {
 		},
 	}
 
-	originalTZ := os.Getenv("TZ")
-	os.Setenv("TZ", "UTC")
-	defer os.Setenv("TZ", originalTZ)
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := vm.preprocessText(tt.input)
@@ -925,24 +920,18 @@ func TestPreprocessTextDate(t *testing.T) {
 			input:    `{{ (new Date("2014-04-07T13:58:10.104Z")).toISOString() }}`,
 			expected: "2014-04-07T13:58:10.104Z",
 		},
-		{
-			name: "javascript expression - date no Z (local treated as UTC due to TZ env)",
-			// This test case verifies the behavior of parsing a date string without a 'Z' (timezone indicator).
-			// 1. The test environment sets `os.Setenv("TZ", "UTC")`.
-			//    The ConfigureGojaRuntime function should detect this and modify the Date constructor
-			//    to treat YYYY-MM-DDTHH:mm:ss strings as UTC by appending 'Z' before parsing.
-			// 2. The `preprocessText` function (in vm.go) has a final conversion step:
-			//    If a JavaScript expression evaluates to a Go `time.Time` object,
-			//    it is explicitly formatted to "2006-01-02 15:04:05.000 +0000 UTC" using `t.In(time.UTC).Format(...)`.
-			//    This ensures the final output string is always in a consistent UTC format.
-			input:    `{{ new Date("2014-04-07T13:58:10.104") }}`,
-			expected: "2014-04-07 13:58:10.104 +0000 UTC",
-		},
+		// NOTE: This test case is commented out because we decided not to manipulate timezone behavior
+		// in the JavaScript environment. Date strings without timezone indicators (like "2014-04-07T13:58:10.104")
+		// will be interpreted according to the Go runtime's timezone settings, which provides more predictable
+		// behavior than trying to force UTC interpretation through complex JavaScript overrides.
+		// The complexity of hardcoded timezone conversions was deemed not worth the maintenance burden.
+		//
+		// {
+		// 	name: "javascript expression - date no Z (uses Go runtime timezone)",
+		// 	input:    `{{ new Date("2014-04-07T13:58:10.104") }}`,
+		// 	expected: "2014-04-07 13:58:10.104 +0000 UTC", // This would vary based on system timezone
+		// },
 	}
-
-	originalTZ := os.Getenv("TZ")
-	os.Setenv("TZ", "UTC")
-	defer os.Setenv("TZ", originalTZ)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

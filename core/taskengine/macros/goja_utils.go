@@ -3,7 +3,6 @@ package macros
 import (
 	"crypto/rand"
 	"fmt"
-	"os"
 	"strconv"
 
 	"github.com/dop251/goja"
@@ -13,8 +12,8 @@ import (
 // Its primary goals are:
 //  1. To provide polyfills for common Web APIs (like crypto.getRandomValues) that JavaScript libraries
 //     might expect, but which are not natively part of the Goja engine.
-//  2. To standardize certain JavaScript behaviors (like Date object stringification and parsing of
-//     date strings without explicit timezones when TZ=UTC) for consistency, especially in tests.
+//  2. To standardize certain JavaScript behaviors (like Date object stringification) for consistency
+//     across environments. Date parsing follows Go runtime timezone settings for predictable behavior.
 func ConfigureGojaRuntime(runtime *goja.Runtime) {
 	// Override Object.prototype.toString to always return "[object Object]" for plain objects.
 	// This mimics common browser behavior and can be important for how some JavaScript libraries
@@ -100,72 +99,20 @@ func ConfigureGojaRuntime(runtime *goja.Runtime) {
 	}
 
 	// --- Date Handling Overrides ---
-	// Why: Standardize JavaScript Date behavior for consistency, especially in tests.
+	// Why: Standardize JavaScript Date behavior for consistency across all environments.
 	// JavaScript dates are notoriously tricky due to timezone interpretations.
-	// These overrides aim to:
-	// 1. Make `new Date("YYYY-MM-DDTHH:MM:SS")` (a date string without timezone) be interpreted
-	//    as UTC if the Go environment has TZ=UTC. Goja doesn't do this robustly by default.
-	// 2. Ensure `Date.prototype.toString()` always produces a predictable UTC-based string.
+	// This override ensures `Date.prototype.toString()` always produces a predictable UTC-based string.
 
-	// 1. Determine if Go's TZ is UTC and expose this to the JavaScript environment.
-	//    The `__GO_PROCESS_TZ_IS_UTC__` global variable will be used by the Date constructor override.
-	goTzIsUTC := os.Getenv("TZ") == "UTC"
-	if err := runtime.Set("__GO_PROCESS_TZ_IS_UTC__", goTzIsUTC); err != nil {
-		return // Failed to set helper global
-	}
-
-	// 2. Override Date constructor to interpret YYYY-MM-DDTHH:MM:SS as UTC if TZ=UTC in Go.
-	//    Also, ensure Date.prototype.toString produces a consistent UTC string.
-	//    How: A new JavaScript function `AvaDate` wraps the original `Date` constructor.
-	//    - If `AvaDate` is called with `new` and a single string argument matching `YYYY-MM-DDTHH:MM:SS[.sss]`,
-	//      AND `__GO_PROCESS_TZ_IS_UTC__` is true, it appends 'Z' to the string before passing it to the
-	//      original `Date` constructor. This forces the date to be parsed as UTC.
-	//    - In all other cases, `AvaDate` delegates to the original `Date` behavior.
-	//    - `OriginalDate.prototype.toString` (and by extension `AvaDate.prototype.toString`) is overridden
-	//      to call `this.toUTCString().replace('GMT', 'UTC')`, ensuring a consistent UTC string output
-	//      (e.g., "Tue, 24 Oct 2023 12:34:56 UTC").
+	// Override Date.prototype.toString to always produce a consistent UTC representation
+	// This ensures consistent string formatting for dates across different environments
 	_, err := runtime.RunString(`
 		(function() {
 			const OriginalDate = Date;
-			const isoShortFormatRegex = /^\\\\d{4}-\\\\d{2}-\\\\d{2}T\\\\d{2}:\\\\d{2}:\\\\d{2}(\\\\.\\\\d{1,3})?$/;
-
-			function AvaDate(...args) {
-				if (
-					args.length === 1 &&
-					typeof args[0] === 'string' &&
-					isoShortFormatRegex.test(args[0]) &&
-					__GO_PROCESS_TZ_IS_UTC__
-				) {
-					// If it's a single string argument, in YYYY-MM-DDTHH:MM:SS[.sss] format,  // Corrected escaping for it's
-					// and Go's TZ is UTC, interpret as UTC by appending 'Z'.
-					return new OriginalDate(args[0] + 'Z');
-				}
-				// Otherwise, delegate to the original Date constructor
-				if (new.target) { // Called with new
-					return new OriginalDate(...args);
-				}
-				// Called as a function
-				return OriginalDate(...args);
-			}
-
-			AvaDate.prototype = OriginalDate.prototype;
-			AvaDate.now = OriginalDate.now;
-			AvaDate.parse = OriginalDate.parse;
-			AvaDate.UTC = OriginalDate.UTC;
 
 			// Ensure toString always produces a consistent UTC representation for testing and internal consistency
-			// This was the original override. Keeping it as it's beneficial for string formatting.
 			OriginalDate.prototype.toString = function() {
 				return this.toUTCString().replace('GMT', 'UTC');
 			};
-			
-			// Also apply to our wrapper, though it should inherit via prototype.
-			// However, direct assignment is safer if prototype chain is ever modified unexpectedly.
-			AvaDate.prototype.toString = OriginalDate.prototype.toString;
-
-
-			// Replace the global Date object
-			Date = AvaDate;
 		})();
 	`)
 	if err != nil {
