@@ -80,13 +80,19 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 
 	// Set variables in the JS environment. The value is wrapped into a data, follow a similar approach by other nocode provider
 	// even though we arent necessarily need to do this
-	for key, value := range r.vm.vars {
-		if err := jsvm.Set(key, value); err != nil {
+	r.vm.vars.Range(func(key, value interface{}) bool {
+		keyStr, ok := key.(string)
+		if !ok {
+			return true
+		}
+		
+		if err := jsvm.Set(keyStr, value); err != nil {
 			if r.vm.logger != nil {
-				r.vm.logger.Error("failed to set variable in JS VM", "key", key, "error", err)
+				r.vm.logger.Error("failed to set variable in JS VM", "key", keyStr, "error", err)
 			}
 		}
-	}
+		return true
+	})
 
 	if err := r.Validate(node); err != nil {
 		sb.WriteString("\nInvalid branch node: ")

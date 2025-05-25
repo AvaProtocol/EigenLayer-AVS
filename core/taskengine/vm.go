@@ -600,7 +600,12 @@ func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*Step, 
 	}
 	executionLog, err = p.Execute(stepID, nodeValue)
 
-	executionLog.Inputs = inputs
+	// Convert map keys to string slice for protobuf compatibility
+	inputKeys := make([]string, 0, len(inputs))
+	for k := range inputs {
+		inputKeys = append(inputKeys, k)
+	}
+	executionLog.Inputs = inputKeys
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 	return nil, err
 }
@@ -615,7 +620,13 @@ func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*Step, 
 	if err != nil {
 		v.logger.Error("error execute graphql node", "task_id", v.TaskID, "step", stepID, "url", node.Url, "error", err)
 	}
-	executionLog.Inputs = inputs
+	
+	// Convert map keys to string slice for protobuf compatibility
+	inputKeys := make([]string, 0, len(inputs))
+	for k := range inputs {
+		inputKeys = append(inputKeys, k)
+	}
+	executionLog.Inputs = inputKeys
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
 	return nil, nil
@@ -641,7 +652,13 @@ func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*S
 		v.logger.Error("error execute contract read node", "task_id", v.TaskID, "step", stepID, "calldata", node.CallData, "error", err)
 		return nil, err
 	}
-	executionLog.Inputs = inputs
+	
+	// Convert map keys to string slice for protobuf compatibility
+	inputKeys := make([]string, 0, len(inputs))
+	for k := range inputs {
+		inputKeys = append(inputKeys, k)
+	}
+	executionLog.Inputs = inputKeys
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
 	return nil, nil
@@ -659,7 +676,13 @@ func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (
 	if err != nil {
 		v.logger.Error("error execute contract write node", "task_id", v.TaskID, "step", stepID, "calldata", node.CallData, "error", err)
 	}
-	executionLog.Inputs = inputs
+	
+	// Convert map keys to string slice for protobuf compatibility
+	inputKeys := make([]string, 0, len(inputs))
+	for k := range inputs {
+		inputKeys = append(inputKeys, k)
+	}
+	executionLog.Inputs = inputKeys
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
 	return nil, nil
@@ -673,7 +696,13 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*Step,
 	if err != nil && v.logger != nil {
 		v.logger.Error("error execute JavaScript code", "task_id", v.TaskID, "step", stepID, "error", err)
 	}
-	executionLog.Inputs = inputs
+	
+	// Convert map keys to string slice for protobuf compatibility
+	inputKeys := make([]string, 0, len(inputs))
+	for k := range inputs {
+		inputKeys = append(inputKeys, k)
+	}
+	executionLog.Inputs = inputKeys
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
 	return nil, err
@@ -684,7 +713,13 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*Step, error) 
 
 	inputs := v.CollectInputs()
 	executionLog, err := processor.Execute(stepID, node)
-	executionLog.Inputs = inputs
+	
+	// Convert map keys to string slice for protobuf compatibility
+	inputKeys := make([]string, 0, len(inputs))
+	for k := range inputs {
+		inputKeys = append(inputKeys, k)
+	}
+	executionLog.Inputs = inputKeys
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
 	// In branch node we first need to evaluate the condtion to find the outcome, after find the outcome we need to execute that node
@@ -701,7 +736,11 @@ func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*Step, error) 
 			if len(outcomeNodes) >= 0 {
 				for _, nodeID := range outcomeNodes {
 					// TODO: track stack too deepth and abort
-					node := v.TaskNodes[nodeID]
+					nodeObj, ok := v.TaskNodes.Load(nodeID)
+					if !ok {
+						return nil, fmt.Errorf("node not found: %s", nodeID)
+					}
+					node := nodeObj.(*avsproto.TaskNode)
 					jump, err := v.executeNode(node)
 					if jump != nil {
 						return jump, err
@@ -724,7 +763,13 @@ func (v *VM) runLoop(stepID string, node *avsproto.LoopNode) (*Step, error) {
 	if err != nil {
 		v.logger.Error("error execute loop node", "task_id", v.TaskID, "step", stepID, "error", err)
 	}
-	executionLog.Inputs = inputs
+	
+	// Convert map keys to string slice for protobuf compatibility
+	inputKeys := make([]string, 0, len(inputs))
+	for k := range inputs {
+		inputKeys = append(inputKeys, k)
+	}
+	executionLog.Inputs = inputKeys
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
 	return nil, err
@@ -836,7 +881,7 @@ func (v *VM) CollectInputs() map[string]string {
 			return true
 		}
 		
-		if slices.Contains(macros.MacroFuncs, keyStr) {
+		if contains(macros.MacroFuncs, keyStr) {
 			return true
 		}
 		
@@ -857,6 +902,16 @@ func (v *VM) CollectInputs() map[string]string {
 	})
 	
 	return inputs
+}
+
+// Add a custom contains function for Go 1.18.1 compatibility
+func contains(slice []string, str string) bool {
+	for _, v := range slice {
+		if v == str {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *VM) GetTaskId() string {
