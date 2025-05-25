@@ -59,8 +59,8 @@ func (l *BuiltinLoader) Load(runtime *goja.Runtime, name string) (goja.Value, er
 	if name == "dayjs" || name == "uuid" {
 		// These libraries have better UMD support, so we can run them more simply
 		moduleScript := fmt.Sprintf(`
-			(function(module, exports) {
-				%s
+	(function(module, exports) {
+		%s
 				return module.exports;
 			})(module, exports);
 		`, string(content))
@@ -78,8 +78,8 @@ func (l *BuiltinLoader) Load(runtime *goja.Runtime, name string) (goja.Value, er
 			(function() {
 				%s
 			}).call(this);
-			return module.exports || exports;
-		})(module, exports);
+		return module.exports || exports;
+	})(module, exports);
 	`, string(content))
 
 	result, err := runtime.RunString(moduleScript)
