@@ -25,27 +25,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
-type VMState string
-
-const (
-	VMStateInitialize         = "vm_initialize"
-	VMStateCompiled           = "vm_compiled"
-	VMStateReady              = "vm_ready"
-	VMStateExecuting          = "vm_executing"
-	VMStateCompleted          = "vm_completed"
-	VMMaxPreprocessIterations = 100
-)
-
-type Step struct {
-	NodeID string
-	Next   []string
-}
-
-type CommonProcessor struct {
-	vm *VM
-}
-
-func (c *CommonProcessor) SetVar(name string, data any) {
 	c.vm.AddVar(name, data)
 }
 
