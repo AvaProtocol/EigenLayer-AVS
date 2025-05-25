@@ -120,7 +120,7 @@ jobs:
 
             # Always set latest tag for any build
             type=raw,value=latest
-
+            
       - name: Build and push staging docker image
         uses: docker/build-push-action@v6
         with:

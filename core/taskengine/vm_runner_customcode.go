@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -9,20 +10,36 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/modules"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 type JSProcessor struct {
 	*CommonProcessor
-	jsvm *goja.Runtime
+	jsvm     *goja.Runtime
+	registry *modules.Registry
 }
 
+var (
+	importRegex  = regexp.MustCompile(`(?m)^\s*import\s+(?:(\w+)|(?:\*\s+as\s+(\w+))|(?:{\s*([^}]+)\s*}))\s+from\s+['"]([^'"]+)['"];?\s*$`)
+	requireRegex = regexp.MustCompile(`\brequire\s*\(\s*['"]`)
+)
+
 func NewJSProcessor(vm *VM) *JSProcessor {
+	jsvm, registry, err := NewGojaVMWithModules()
+	if err != nil {
+		if vm.logger != nil {
+			vm.logger.Error("failed to initialize JS VM with modules", "error", err)
+		}
+		jsvm = NewGojaVM()
+	}
+
 	r := JSProcessor{
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
-		jsvm: NewGojaVM(),
+		jsvm:     jsvm,
+		registry: registry,
 	}
 
 	// These are built-in func
@@ -33,7 +50,8 @@ func NewJSProcessor(vm *VM) *JSProcessor {
 			}
 		}
 	}
-	/// Binding the data from previous step into jsvm
+
+	// Binding the data from previous step into jsvm
 	for key, value := range vm.vars {
 		if err := r.jsvm.Set(key, value); err != nil {
 			if vm.logger != nil {
@@ -42,7 +60,97 @@ func NewJSProcessor(vm *VM) *JSProcessor {
 		}
 	}
 
+	if registry != nil {
+		if err := r.jsvm.Set("require", registry.RequireFunction(jsvm)); err != nil {
+			if vm.logger != nil {
+				vm.logger.Error("failed to set require function in JS VM", "error", err)
+			}
+		}
+	}
+
 	return &r
+}
+
+func transformES6Imports(code string) string {
+	// Find all import statements
+	matches := importRegex.FindAllStringSubmatch(code, -1)
+	if len(matches) == 0 {
+		return code
+	}
+
+	// Build the transformed code
+	var transformed strings.Builder
+	transformed.WriteString("(function() {\n")
+
+	// Add require statements for each import
+	for _, match := range matches {
+		defaultImport := match[1] // default import
+		namespace := match[2]     // * as namespace
+		namedImports := match[3]  // { import1, import2 as alias2 }
+		moduleName := match[4]    // module name
+
+		if defaultImport != "" {
+			// Handle default import: import name from 'module'
+			transformed.WriteString(fmt.Sprintf("const %s = require('%s');\n", defaultImport, moduleName))
+		} else if namespace != "" {
+			// Handle namespace import: import * as name from 'module'
+			transformed.WriteString(fmt.Sprintf("const %s = require('%s');\n", namespace, moduleName))
+		} else if namedImports != "" {
+			// Handle named imports: import { name1, name2 as alias2 } from 'module'
+			// Trim whitespace from named imports and convert 'as' syntax to colon syntax for Goja compatibility
+			trimmedImports := strings.TrimSpace(namedImports)
+			// Convert ES6 'as' syntax to JavaScript colon syntax: "v4 as uuidv4" -> "v4: uuidv4"
+			convertedImports := strings.ReplaceAll(trimmedImports, " as ", ": ")
+			transformed.WriteString(fmt.Sprintf("const { %s } = require('%s');\n", convertedImports, moduleName))
+		}
+	}
+
+	// Add the original code with imports removed
+	codeWithoutImports := importRegex.ReplaceAllString(code, "")
+	transformed.WriteString(codeWithoutImports)
+	transformed.WriteString("\n})()")
+
+	return transformed.String()
+}
+
+func wrapCode(code string) string {
+	return "(function() {\n" + code + "\n})()"
+}
+
+func containsES6Imports(code string) bool {
+	importRegex := regexp.MustCompile(`(?m)^\s*(import|export)\s+`)
+	return importRegex.MatchString(code)
+}
+
+func containsModuleSyntax(code string) bool {
+	// Split code into lines and check each line
+	lines := strings.Split(code, "\n")
+
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		// Skip comment lines
+		if strings.HasPrefix(trimmedLine, "//") || strings.HasPrefix(trimmedLine, "/*") {
+			continue
+		}
+
+		// Check for ES6 import/export statements
+		if regexp.MustCompile(`\b(import|export)\s+`).MatchString(line) {
+			return true
+		}
+
+		// Check for dynamic imports
+		if regexp.MustCompile(`\bimport\s*\(`).MatchString(line) {
+			return true
+		}
+
+		// Check for require statements
+		if regexp.MustCompile(`\brequire\s*\(`).MatchString(line) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
@@ -67,9 +175,18 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	}()
 
 	var log strings.Builder
-
 	log.WriteString(fmt.Sprintf("Start execute user-input JS code at %s", time.Now()))
-	result, err := r.jsvm.RunString("(function() {" + node.Source + "})()")
+
+	codeToRun := node.Source
+
+	// Transform ES6 imports to requires if needed, otherwise just wrap the code
+	if containsES6Imports(codeToRun) {
+		codeToRun = transformES6Imports(codeToRun)
+	} else {
+		codeToRun = wrapCode(codeToRun)
+	}
+
+	result, err := r.jsvm.RunString(codeToRun)
 
 	log.WriteString(fmt.Sprintf("Complete Execute user-input JS code at %s", time.Now()))
 	if err != nil {
@@ -86,10 +203,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 		protoValue, errConv := structpb.NewValue(resultValue)
 		if errConv != nil {
 			s.Log += fmt.Sprintf("\nfailed to convert JS result to protobuf Value: %v", errConv)
-			// If conversion to structpb.Value fails, OutputData will remain nil or its previous state.
-			// The overall step success might still depend on the 'err' from r.jsvm.RunString()
 		} else {
-			// This assumes CustomCodeNode_Output.Data is defined as google.protobuf.Value in your .proto file
 			s.OutputData = &avsproto.Execution_Step_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode_Output{
 					Data: protoValue,

@@ -139,10 +139,10 @@ func TestExecutionCountPersistence(t *testing.T) {
 
 		for i := 1; i <= 3; i++ {
 			task.ExecutionCount += 1
-			
+
 			jsonData, err := task.ToJSON()
 			assert.NoError(t, err, "ToJSON should not error")
-			
+
 			newTask := NewTask()
 			err = newTask.FromStorageData(jsonData)
 			assert.NoError(t, err, "FromStorageData should not error")
@@ -170,7 +170,7 @@ func TestExecutionCountPersistence(t *testing.T) {
 
 		jsonData, err := task.ToJSON()
 		assert.NoError(t, err, "ToJSON should not error")
-		
+
 		newTask := NewTask()
 		err = newTask.FromStorageData(jsonData)
 		assert.NoError(t, err, "FromStorageData should not error")
