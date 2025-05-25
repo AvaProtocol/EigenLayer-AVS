@@ -127,7 +127,7 @@ func ConfigureGojaRuntime(runtime *goja.Runtime) {
 	_, err := runtime.RunString(`
 		(function() {
 			const OriginalDate = Date;
-			const isoShortFormatRegex = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?$/; // Corrected regex escaping
+			const isoShortFormatRegex = /^\\\\d{4}-\\\\d{2}-\\\\d{2}T\\\\d{2}:\\\\d{2}:\\\\d{2}(\\\\.\\\\d{1,3})?$/;
 
 			function AvaDate(...args) {
 				if (

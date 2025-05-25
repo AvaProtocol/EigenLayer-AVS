@@ -1357,6 +1357,16 @@ func (n *Engine) RunNodeWithInputs(nodeType string, nodeConfig map[string]interf
 		return nil, err
 	}
 
+	// For blockTrigger, add blockNumber to input variables
+	if nodeType == "blockTrigger" {
+		if blockNumber, ok := nodeConfig["blockNumber"]; ok {
+			if inputVariables == nil {
+				inputVariables = make(map[string]interface{})
+			}
+			inputVariables["blockNumber"] = blockNumber
+		}
+	}
+
 	// Run the node with input variables
 	executionStep, err := vm.RunNodeWithInputs(node, inputVariables)
 	if err != nil {

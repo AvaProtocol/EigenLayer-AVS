@@ -174,10 +174,24 @@ func (v *VM) WithDb(db storage.Storage) *VM {
 	return v
 }
 
-func (v *VM) GetTriggerNameAsVar() string {
+func (v *VM) GetTriggerNameAsVar() (string, error) {
 	// Replace invalid characters with _
 	re := regexp.MustCompile(`[^a-zA-Z0-9_$]`)
-	name := v.task.Trigger.Name
+
+	var name string
+	if v.task != nil && v.task.Trigger != nil {
+		name = v.task.Trigger.Name
+		if name == "" {
+			return "", fmt.Errorf("trigger name is required but not defined in task")
+		}
+	} else if v.task != nil {
+		// Task exists but trigger is nil
+		return "", fmt.Errorf("trigger is required but not defined in task")
+	} else {
+		// Task is nil (e.g., for single node execution), use default
+		name = "trigger"
+	}
+
 	standardized := re.ReplaceAllString(name, "_")
 
 	// Ensure the first character is valid
@@ -185,7 +199,7 @@ func (v *VM) GetTriggerNameAsVar() string {
 		standardized = "_" + standardized
 	}
 
-	return standardized
+	return standardized, nil
 }
 
 func (v *VM) GetNodeNameAsVar(nodeID string) string {
@@ -213,12 +227,8 @@ func (v *VM) GetNodeNameAsVar(nodeID string) string {
 
 func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
 	v := &VM{
-		Status: VMStateInitialize,
-		//TaskEdges:         task.Edges,
-		//TaskTrigger:       task.Trigger,
-		TaskNodes: make(map[string]*avsproto.TaskNode),
-		TaskOwner: common.HexToAddress(task.Owner),
-
+		Status:            VMStateInitialize,
+		TaskNodes:         make(map[string]*avsproto.TaskNode),
 		plans:             make(map[string]*Step),
 		mu:                &sync.Mutex{},
 		instructionCount:  0,
@@ -229,12 +239,18 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 		parsedTriggerData: &triggerDataType{},
 	}
 
-	for _, node := range task.Nodes {
-		v.TaskNodes[node.Id] = node
+	if task != nil {
+		v.TaskOwner = common.HexToAddress(task.Owner)
+		for _, node := range task.Nodes {
+			v.TaskNodes[node.Id] = node
+		}
 	}
 
 	v.vars = macros.GetEnvs(map[string]any{})
-	triggerVarName := v.GetTriggerNameAsVar()
+	triggerVarName, err := v.GetTriggerNameAsVar()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get trigger variable name: %w", err)
+	}
 	// popular trigger data for trigger variable
 	if reason != nil {
 		v.vars[triggerVarName] = map[string]any{
@@ -572,13 +588,13 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*Step,
 
 	inputs := v.CollectInputs()
 	executionLog, err := r.Execute(stepID, node)
-	if err != nil {
+	if err != nil && v.logger != nil {
 		v.logger.Error("error execute JavaScript code", "task_id", v.TaskID, "step", stepID, "error", err)
 	}
 	executionLog.Inputs = inputs
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
-	return nil, nil
+	return nil, err
 }
 
 func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*Step, error) {
@@ -739,7 +755,7 @@ func (v *VM) GetTaskId() string {
 // RunNodeWithInputs executes a single node with the provided inputs and returns an Execution_Step.
 func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[string]interface{}) (*avsproto.Execution_Step, error) {
 	tempVM := &VM{
-		vars:              make(map[string]interface{}),
+		vars:              macros.GetEnvs(make(map[string]interface{})),
 		TaskID:            v.TaskID,
 		TaskNodes:         map[string]*avsproto.TaskNode{node.Id: node},
 		plans:             map[string]*Step{},
@@ -751,7 +767,7 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 		secrets:           v.secrets, // Preserve secrets from the original VM
 	}
 
-	if v.vars["apContext"] != nil {
+	if v.vars != nil && v.vars["apContext"] != nil {
 		tempVM.vars["apContext"] = v.vars["apContext"]
 	}
 
@@ -794,19 +810,14 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 
 	switch nodeType {
 	case "blockTrigger":
-		blockNumber, ok := config["blockNumber"]
-		if !ok {
-			return nil, fmt.Errorf("blockNumber is required for blockTrigger")
-		}
-
 		node.TaskType = &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{
 				Lang: avsproto.CustomCodeLang_JavaScript,
-				Source: fmt.Sprintf(`
+				Source: `
 					return { 
-						blockNumber: %v 
+						blockNumber: blockNumber 
 					};
-				`, blockNumber),
+				`,
 			},
 		}
 

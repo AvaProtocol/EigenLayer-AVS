@@ -13,12 +13,12 @@ func TestRunNodeWithInputs_BlockTrigger(t *testing.T) {
 	vm, err := NewVMWithData(nil, nil, &config.SmartWalletConfig{}, nil)
 	assert.NoError(t, err)
 
-	node, err := CreateNodeFromType("blockTrigger", map[string]interface{}{
-		"blockNumber": float64(12345),
-	}, "")
+	node, err := CreateNodeFromType("blockTrigger", map[string]interface{}{}, "")
 	assert.NoError(t, err)
 
-	result, err := vm.RunNodeWithInputs(node, map[string]interface{}{})
+	result, err := vm.RunNodeWithInputs(node, map[string]interface{}{
+		"blockNumber": float64(12345),
+	})
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -120,7 +120,9 @@ func TestCreateNodeFromType(t *testing.T) {
 
 func TestEngine_RunNodeWithInputs(t *testing.T) {
 	engine := New(nil, &config.Config{
-		SmartWallet: &config.SmartWalletConfig{},
+		SmartWallet: &config.SmartWalletConfig{
+			EthRpcUrl: "http://localhost:8545", // Provide a dummy RPC URL to avoid panic
+		},
 	}, nil, nil)
 
 	result, err := engine.RunNodeWithInputs("blockTrigger", map[string]interface{}{
