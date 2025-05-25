@@ -752,7 +752,21 @@ func (v *VM) GetTaskId() string {
 	return ""
 }
 
-// RunNodeWithInputs executes a single node with the provided inputs and returns an Execution_Step.
+// RunNodeWithInputs executes a single task node within the VM using the provided input variables.
+// 
+// Parameters:
+// - node: The task node to be executed. This should be a valid instance of avsproto.TaskNode.
+// - inputVariables: A map of variable names to their corresponding values, which will be used as inputs
+//   during the execution of the task node.
+//
+// Returns:
+// - *avsproto.Execution_Step: An object representing the result of the node execution, including details
+//   such as the node ID, success status, and inputs used.
+// - error: An error object if the execution fails, or nil if it succeeds.
+//
+// Use case:
+// This method is typically used to execute a single node in isolation, such as for debugging or testing
+// purposes. It creates a temporary VM instance to execute the node and collects the results.
 func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[string]interface{}) (*avsproto.Execution_Step, error) {
 	tempVM := &VM{
 		vars:              macros.GetEnvs(make(map[string]interface{})),
