@@ -11,6 +11,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCreateTaskReturnErrorWhenEmptyNodes(t *testing.T) {
@@ -89,16 +90,20 @@ func TestListTasks(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Errorf("expect list task succesfully but got error %s", err)
+		t.Errorf("expect list task successfully but got error %s", err)
+		return
 	}
 
 	if result == nil {
 		t.Errorf("expect result is not nil but got nil")
+		return
 	}
 
 	if len(result.Items) != 1 {
 		t.Errorf("list task return wrong. expect 1, got %d", len(result.Items))
+		return
 	}
+
 	if result.Items[0].Name != "t3" {
 		t.Errorf("list task return wrong. expect memo t1, got %s", result.Items[0].Name)
 	}
@@ -165,11 +170,11 @@ func TestListTasksPagination(t *testing.T) {
 			"0x961d2DD008960A9777571D78D21Ec9C3E5c6020c",
 			"0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4",
 		},
-		ItemPerPage: 5,
+		Limit: 5,
 	})
 
 	if err != nil {
-		t.Errorf("expect list task succesfully but got error %s", err)
+		t.Errorf("expect list task successfully but got error %s", err)
 	}
 
 	if !result.HasMore {
@@ -195,8 +200,8 @@ func TestListTasksPagination(t *testing.T) {
 			"0x961d2DD008960A9777571D78D21Ec9C3E5c6020c",
 			"0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4",
 		},
-		ItemPerPage: 15,
-		Cursor:      result.Cursor,
+		Limit:  15,
+		Cursor: result.Cursor,
 	})
 
 	if len(result.Items) != 15 {
@@ -215,8 +220,8 @@ func TestListTasksPagination(t *testing.T) {
 			"0x961d2DD008960A9777571D78D21Ec9C3E5c6020c",
 			"0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4",
 		},
-		ItemPerPage: 15,
-		Cursor:      result.Cursor,
+		Limit:  15,
+		Cursor: result.Cursor,
 	})
 
 	if len(result.Items) != 2 {
@@ -248,7 +253,7 @@ func TestGetExecution(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -271,13 +276,13 @@ func TestGetExecution(t *testing.T) {
 		t.Errorf("invalid triggered block. expect 101 got %d", execution.Reason.BlockNumber)
 	}
 
-	// Another user cannot get this executin id
+	// Another user cannot get this execution id
 	execution, err = n.GetExecution(testutil.TestUser2(), &avsproto.ExecutionReq{
 		TaskId:      result.Id,
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 	if err == nil || execution != nil {
-		t.Errorf("expected failure getting other user execution but succesfully read it")
+		t.Errorf("expected failure getting other user execution but successfully read it")
 	}
 }
 
@@ -298,45 +303,45 @@ func TestListWallets(t *testing.T) {
 		FactoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
 	})
 
-	wallets, _ := n.GetSmartWallets(u.Address, nil)
-	if len(wallets) <= 2 {
-		t.Errorf("expect 3 smartwallets but got %d", len(wallets))
+	resp, _ := n.ListWallets(u.Address, nil)
+	if len(resp.Items) <= 2 {
+		t.Errorf("expect 3 smartwallets but got %d", len(resp.Items))
 	}
 
 	// The default wallet with salt 0
-	if wallets[0].Address != "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6" {
-		t.Errorf("invalid smartwallet address, expect 0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6 got %s", wallets[0].Address)
+	if resp.Items[0].Address != "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6" {
+		t.Errorf("invalid smartwallet address, expect 0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6 got %s", resp.Items[0].Address)
 	}
 
 	// This is the wallet from custom factory https://sepolia.etherscan.io/address/0x9406Cc6185a346906296840746125a0E44976454#readProxyContract
-	if wallets[1].Address != "0x29C3139e460d03d951070596eED3218B3cc34FD1" {
-		t.Errorf("invalid smartwallet address, expect 0x923A6A90E422871FC56020d560Bc0D0CF1fbb93e got %s", wallets[1].Address)
+	if resp.Items[1].Address != "0x29C3139e460d03d951070596eED3218B3cc34FD1" {
+		t.Errorf("invalid smartwallet address, expect 0x923A6A90E422871FC56020d560Bc0D0CF1fbb93e got %s", resp.Items[1].Address)
 	}
 
 	// the wallet with default factory and salt 12345
-	if wallets[2].Address != "0x961d2DD008960A9777571D78D21Ec9C3E5c6020c" {
-		t.Errorf("invalid smartwallet address, expect 0x961d2DD008960A9777571D78D21Ec9C3E5c6020c got %s", wallets[2].Address)
+	if resp.Items[2].Address != "0x961d2DD008960A9777571D78D21Ec9C3E5c6020c" {
+		t.Errorf("invalid smartwallet address, expect 0x961d2DD008960A9777571D78D21Ec9C3E5c6020c got %s", resp.Items[2].Address)
 	}
 
-	wallets, _ = n.GetSmartWallets(u.Address, &avsproto.ListWalletReq{
+	resp, _ = n.ListWallets(u.Address, &avsproto.ListWalletReq{
 		FactoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
 	})
-	if len(wallets) != 1 {
-		t.Errorf("expect 1 smartwallet but got %d", len(wallets))
+	if len(resp.Items) != 1 {
+		t.Errorf("expect 1 smartwallet but got %d", len(resp.Items))
 	}
 	// owner 0xD7050816337a3f8f690F8083B5Ff8019D50c0E50 salt 0 https://sepolia.etherscan.io/address/0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7#readContract
-	if wallets[0].Address != "0x29C3139e460d03d951070596eED3218B3cc34FD1" {
-		t.Errorf("invalid smartwallet address, expect 0x29C3139e460d03d951070596eED3218B3cc34FD1 got %s", wallets[0].Address)
+	if resp.Items[0].Address != "0x29C3139e460d03d951070596eED3218B3cc34FD1" {
+		t.Errorf("invalid smartwallet address, expect 0x29C3139e460d03d951070596eED3218B3cc34FD1 got %s", resp.Items[0].Address)
 	}
 
-	if wallets[0].Salt != "9876" {
-		t.Errorf("invalid smartwallet address salt, expect 9876 got %s", wallets[0].Salt)
+	if resp.Items[0].Salt != "9876" {
+		t.Errorf("invalid smartwallet address salt, expect 9876 got %s", resp.Items[0].Salt)
 	}
 
 	// other user will not be able to list above wallet
-	wallets, _ = n.GetSmartWallets(testutil.TestUser2().Address, nil)
-	if len(wallets) != 1 {
-		t.Errorf("expect only default wallet but got %d", len(wallets))
+	resp, _ = n.ListWallets(testutil.TestUser2().Address, nil)
+	if len(resp.Items) != 1 {
+		t.Errorf("expect only default wallet but got %d", len(resp.Items))
 	}
 }
 
@@ -357,13 +362,13 @@ func TestTriggerSync(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
 
 	if err != nil {
-		t.Errorf("expected trigger succesfully but got error: %s", err)
+		t.Errorf("expected trigger successfully but got error: %s", err)
 	}
 
 	// Now get back that execution id
@@ -411,13 +416,13 @@ func TestTriggerAsync(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: false,
 	})
 
 	if err != nil {
-		t.Errorf("expected trigger succesfully but got error: %s", err)
+		t.Errorf("expected trigger successfully but got error: %s", err)
 	}
 
 	// Now get back that execution id, because the task is run async we won't have any data yet,
@@ -464,9 +469,22 @@ func TestTriggerAsync(t *testing.T) {
 		TaskId:      result.Id,
 		ExecutionId: resultTrigger.ExecutionId,
 	})
+	if err != nil {
+		t.Fatalf("Error getting execution status after processing: %v", err)
+	}
 
 	if executionStatus.Status != avsproto.ExecutionStatus_Finished {
 		t.Errorf("invalid execution status, expected completed but got %s", avsproto.TaskStatus_name[int32(executionStatus.Status)])
+	}
+
+	// Verify TaskTriggerKey is cleaned up after successful async execution
+	triggerKeyBytes := TaskTriggerKey(result, resultTrigger.ExecutionId)
+	val, errDbRead := db.GetKey(triggerKeyBytes)
+	if errDbRead == nil {
+		t.Errorf("Expected TaskTriggerKey '%s' to be deleted after async execution, but it was found with value: %s", string(triggerKeyBytes), string(val))
+	} else if !strings.Contains(errDbRead.Error(), "Key not found") {
+		// Allow "Key not found", but log other errors
+		t.Logf("Got an unexpected error when checking for deleted TaskTriggerKey '%s': %v. This might be okay if it implies not found.", string(triggerKeyBytes), errDbRead)
 	}
 }
 
@@ -488,20 +506,20 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
 
 	if err != nil || resultTrigger == nil {
-		t.Errorf("expected trigger succesfully but got error: %s", err)
+		t.Errorf("expected trigger successfully but got error: %s", err)
 	}
 
 	// Now the task has reach its max run, and canot run anymore
 	resultTrigger, err = n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -829,6 +847,114 @@ func TestListSecrets(t *testing.T) {
 
 }
 
+func TestListSecretsPagination(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user := testutil.TestUser1()
+
+	const (
+		totalTestSecrets = 10
+		pageSize         = 3
+	)
+
+	// Create totalTestSecrets secrets
+	for i := 0; i < totalTestSecrets; i++ {
+		n.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+			Name:   fmt.Sprintf("secret%d", i),
+			Secret: fmt.Sprintf("value%d", i),
+		})
+	}
+
+	// Test with pageSize limit
+	result, err := n.ListSecrets(user, &avsproto.ListSecretsReq{
+		Limit: pageSize,
+	})
+	if err != nil {
+		t.Errorf("ListSecrets failed: %v", err)
+		return
+	}
+
+	if len(result.Items) != pageSize {
+		t.Errorf("Expected %d items with limit %d, got %d", pageSize, pageSize, len(result.Items))
+	}
+
+	if !result.HasMore {
+		t.Errorf("Expected HasMore to be true with limit %d and %d total items", pageSize, totalTestSecrets)
+	}
+
+	if result.Cursor == "" {
+		t.Errorf("Expected cursor to be set when HasMore is true")
+	}
+
+	// Test with limit 0 (should use default)
+	result, err = n.ListSecrets(user, &avsproto.ListSecretsReq{
+		Limit: 0,
+	})
+	if err != nil {
+		t.Errorf("ListSecrets failed: %v", err)
+		return
+	}
+
+	if len(result.Items) != totalTestSecrets {
+		t.Errorf("Expected %d items (total number of secrets), got %d", totalTestSecrets, len(result.Items))
+	}
+
+	// Test with limit greater than total items
+	result, err = n.ListSecrets(user, &avsproto.ListSecretsReq{
+		Limit: totalTestSecrets * 2,
+	})
+	if err != nil {
+		t.Errorf("ListSecrets failed: %v", err)
+		return
+	}
+
+	if len(result.Items) != totalTestSecrets {
+		t.Errorf("Expected %d items with limit %d, got %d", totalTestSecrets, totalTestSecrets*2, len(result.Items))
+	}
+
+	if result.HasMore {
+		t.Errorf("Expected HasMore to be false when limit exceeds total items")
+	}
+
+	if result.Cursor != "" {
+		t.Errorf("Expected cursor to be empty when HasMore is false")
+	}
+
+	// Test pagination using cursor
+	firstPage, err := n.ListSecrets(user, &avsproto.ListSecretsReq{
+		Limit: pageSize,
+	})
+	if err != nil {
+		t.Errorf("ListSecrets failed: %v", err)
+		return
+	}
+
+	secondPage, err := n.ListSecrets(user, &avsproto.ListSecretsReq{
+		After: firstPage.Cursor,
+		Limit: pageSize,
+	})
+	if err != nil {
+		t.Errorf("ListSecrets failed: %v", err)
+		return
+	}
+
+	// Verify no overlap between pages
+	firstPageNames := make(map[string]bool)
+	for _, item := range firstPage.Items {
+		firstPageNames[item.Name] = true
+	}
+
+	for _, item := range secondPage.Items {
+		if firstPageNames[item.Name] {
+			t.Errorf("Found duplicate item %s in second page", item.Name)
+		}
+	}
+}
+
 func TestGetWalletReturnTaskStat(t *testing.T) {
 	db := testutil.TestMustDB()
 	//defer storage.Destroy(db.(*storage.BadgerStorage))
@@ -864,7 +990,7 @@ func TestGetWalletReturnTaskStat(t *testing.T) {
 	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 		TaskId: taskResult.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -892,7 +1018,7 @@ func TestGetWalletReturnTaskStat(t *testing.T) {
 	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 		TaskId: task2.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -1059,14 +1185,14 @@ func TestGetExecutionCount(t *testing.T) {
 	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 		TaskId: task1.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
 	n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 		TaskId: task2.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: 101,
+			BlockNumber: uint64(101),
 		},
 		IsBlocking: true,
 	})
@@ -1100,7 +1226,7 @@ func TestGetExecutionCount(t *testing.T) {
 		n.TriggerTask(user1, &avsproto.UserTriggerTaskReq{
 			TaskId: task1.Id,
 			Reason: &avsproto.TriggerReason{
-				BlockNumber: 101,
+				BlockNumber: uint64(101),
 			},
 			IsBlocking: true,
 		})
@@ -1122,7 +1248,7 @@ func TestGetExecutionCount(t *testing.T) {
 		n.TriggerTask(user2, &avsproto.UserTriggerTaskReq{
 			TaskId: task3.Id,
 			Reason: &avsproto.TriggerReason{
-				BlockNumber: 101,
+				BlockNumber: uint64(101),
 			},
 			IsBlocking: true,
 		})
@@ -1156,4 +1282,98 @@ func TestGetExecutionCount(t *testing.T) {
 	if stat.Total != 1 {
 		t.Errorf("expected execution count 1 for user1/task2 but got %d", stat.Total)
 	}
+}
+
+func TestTaskExecutionCountIntegration(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user := testutil.TestUser1()
+
+	// Create a task
+	tr := testutil.JsFastTask()
+	tr.Name = "execution-count-test"
+	tr.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	task, err := n.CreateTask(user, tr)
+	assert.NoError(t, err, "CreateTask should not error")
+	assert.Equal(t, int64(0), task.ExecutionCount, "Initial ExecutionCount should be 0")
+
+	// Trigger task execution
+	_, err = n.TriggerTask(user, &avsproto.UserTriggerTaskReq{
+		TaskId: task.Id,
+		Reason: &avsproto.TriggerReason{
+			BlockNumber: uint64(101),
+		},
+		IsBlocking: true,
+	})
+	assert.NoError(t, err, "TriggerTask should not error")
+
+	retrievedTask, err := n.GetTask(user, task.Id)
+	assert.NoError(t, err, "GetTask should not error")
+	assert.Equal(t, int64(1), retrievedTask.ExecutionCount, "ExecutionCount should be 1 after execution")
+
+	protobufTask, err := retrievedTask.ToProtoBuf()
+	assert.NoError(t, err, "ToProtoBuf should not error")
+	assert.Equal(t, int64(1), protobufTask.ExecutionCount, "ExecutionCount should be 1 in protobuf representation")
+
+	// Trigger multiple executions
+	for i := 2; i <= 3; i++ {
+		_, err = n.TriggerTask(user, &avsproto.UserTriggerTaskReq{
+			TaskId: task.Id,
+			Reason: &avsproto.TriggerReason{
+				BlockNumber: uint64(100 + i),
+			},
+			IsBlocking: true,
+		})
+		assert.NoError(t, err, "TriggerTask should not error")
+
+		retrievedTask, err = n.GetTask(user, task.Id)
+		assert.NoError(t, err, "GetTask should not error")
+		assert.Equal(t, int64(i), retrievedTask.ExecutionCount, "ExecutionCount should be %d after %d executions", i, i)
+	}
+}
+
+func TestExecutionCountWithTaskCompletion(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user := testutil.TestUser1()
+
+	// Create a task with max execution of 2
+	tr := testutil.JsFastTask()
+	tr.Name = "max-execution-test"
+	tr.MaxExecution = 2
+	tr.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	task, err := n.CreateTask(user, tr)
+	assert.NoError(t, err, "CreateTask should not error")
+
+	// Execute task twice to reach max execution
+	for i := 1; i <= 2; i++ {
+		_, err = n.TriggerTask(user, &avsproto.UserTriggerTaskReq{
+			TaskId: task.Id,
+			Reason: &avsproto.TriggerReason{
+				BlockNumber: uint64(100 + i),
+			},
+			IsBlocking: true,
+		})
+		assert.NoError(t, err, "TriggerTask should not error")
+	}
+
+	// Verify task is completed and execution count is correct
+	retrievedTask, err := n.GetTask(user, task.Id)
+	assert.NoError(t, err, "GetTask should not error")
+	assert.Equal(t, int64(2), retrievedTask.ExecutionCount, "ExecutionCount should be 2 after reaching max execution")
+	assert.Equal(t, avsproto.TaskStatus_Completed, retrievedTask.Status, "Task should be completed after reaching max execution")
+
+	// Verify protobuf representation
+	protobufTask, err := retrievedTask.ToProtoBuf()
+	assert.NoError(t, err, "ToProtoBuf should not error")
+	assert.Equal(t, int64(2), protobufTask.ExecutionCount, "ExecutionCount should be 2 in protobuf representation")
+	assert.Equal(t, avsproto.TaskStatus_Completed, protobufTask.Status, "Task status should be completed in protobuf representation")
 }

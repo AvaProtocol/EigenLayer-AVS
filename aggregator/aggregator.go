@@ -226,6 +226,8 @@ func (agg *Aggregator) init() {
 		panic(err)
 	}
 
+	SetGlobalChainID(agg.chainID)
+
 	if agg.chainID.Cmp(config.MainnetChainID) == 0 {
 		config.CurrentChainEnv = config.EthereumEnv
 	} else {
@@ -261,7 +263,10 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 	agg.startTaskEngine(ctx)
 
 	agg.logger.Infof("Starting rpc server")
-	agg.startRpcServer(ctx)
+	if err := agg.startRpcServer(ctx); err != nil {
+		agg.logger.Errorf("failed to start RPC server: %v", err)
+		return fmt.Errorf("failed to start RPC server: %w", err)
+	}
 
 	agg.logger.Info("Starting repl")
 	agg.startRepl()

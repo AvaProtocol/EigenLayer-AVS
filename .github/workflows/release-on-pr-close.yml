@@ -1,0 +1,150 @@
+name: Create GitHub Release on Branch Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+      - staging
+
+jobs:
+  release-and-publish:
+    # Run this job if the PR was merged to either main or staging
+    if: |
+      github.event.pull_request.merged == true && 
+      (github.event.pull_request.base.ref == 'main' || github.event.pull_request.base.ref == 'staging')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed for go-semantic-release to create tags and releases
+      packages: write # If you use GitHub Packages for Docker images (good to have)
+    steps:
+      - name: Checkout repository with full history
+        uses: actions/checkout@v4
+        with:
+          # Fetch all history so go-semantic-release can determine the version based on all commits
+          fetch-depth: 0
+          # We need to check out the target branch itself after the merge, not the PR ref
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Setup Go environment
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24' # Updated to match project's Go version
+
+      # Optional: Add linting and testing steps here if you want to be absolutely sure
+      # before a release, though these should ideally be covered by PR checks.
+      # - name: Run Go linter
+      #   uses: golangci/golangci-lint-action@v3
+      #   with:
+      #     version: latest
+      # - name: Run Go tests
+      #   run: go test -v ./...
+
+      - name: Generate commit summary for changelog
+        id: git-summary
+        run: |
+          set -x  # Print each command before executing
+          set -e  # Exit on any error
+          
+          # Create changelog in semantic-release format
+          echo "# Changelog" > commit-summary.md || { echo "Failed to create commit-summary.md"; exit 1; }
+          echo "" >> commit-summary.md
+          
+          # Get the last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD) || { echo "Failed to get last tag"; exit 1; }
+          echo "Last tag for changelog: $LAST_TAG"
+          
+          # Count different types of commits
+          echo "Counting commit types..."
+          FEATURES=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --no-merges | grep -i "^feat" | wc -l || echo "0") || { echo "Failed to count features"; exit 1; }
+          FIXES=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --no-merges | grep -i "^fix" | wc -l || echo "0") || { echo "Failed to count fixes"; exit 1; }
+          DOCS=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --no-merges | grep -i "^docs" | wc -l || echo "0") || { echo "Failed to count docs"; exit 1; }
+          
+          echo "Writing summary..."
+          # Write summary in semantic-release format
+          {
+            echo "## Summary"
+            echo ""
+            echo "- Features: $FEATURES"
+            echo "- Bug Fixes: $FIXES"
+            echo "- Documentation: $DOCS"
+            echo ""
+          } >> commit-summary.md || { echo "Failed to write summary"; exit 1; }
+          
+          echo "Writing changes..."
+          # Write detailed changes in semantic-release format
+          {
+            echo "## Changes"
+            echo ""
+          } >> commit-summary.md || { echo "Failed to write changes header"; exit 1; }
+          
+          # Group commits by type
+          if [ "$FEATURES" -gt 0 ]; then
+            echo "Writing features..."
+            {
+              echo "### Features"
+              echo ""
+              git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^feat" || true
+              echo ""
+            } >> commit-summary.md || { echo "Failed to write features"; exit 1; }
+          fi
+          
+          if [ "$FIXES" -gt 0 ]; then
+            echo "Writing fixes..."
+            {
+              echo "### Bug Fixes"
+              echo ""
+              git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^fix" || true
+              echo ""
+            } >> commit-summary.md || { echo "Failed to write fixes"; exit 1; }
+          fi
+          
+          if [ "$DOCS" -gt 0 ]; then
+            echo "Writing docs..."
+            {
+              echo "### Documentation"
+              echo ""
+              git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -i "^docs" || true
+              echo ""
+            } >> commit-summary.md || { echo "Failed to write docs"; exit 1; }
+          fi
+          
+          # Other changes
+          echo "Counting other changes..."
+          OTHER_CHANGES=$(git log $LAST_TAG..HEAD --pretty=format:"%s" --no-merges | grep -E -v -i "^(feat|fix|docs)" | wc -l || echo "0") || { echo "Failed to count other changes"; exit 1; }
+          
+          if [ "$OTHER_CHANGES" -gt 0 ]; then
+            echo "Writing other changes..."
+            {
+              echo "### Other Changes"
+              echo ""
+              git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges | grep -E -v -i "^(feat|fix|docs)" || true
+              echo ""
+            } >> commit-summary.md || { echo "Failed to write other changes"; exit 1; }
+          fi
+          
+          echo "Setting environment variable..."
+          # Set the environment variable using a simpler approach
+          COMMIT_SUMMARY=$(cat commit-summary.md) || { echo "Failed to read commit-summary.md"; exit 1; }
+          echo "COMMIT_SUMMARY<<EOF" >> $GITHUB_ENV || { echo "Failed to write to GITHUB_ENV"; exit 1; }
+          echo "$COMMIT_SUMMARY" >> $GITHUB_ENV || { echo "Failed to write content to GITHUB_ENV"; exit 1; }
+          echo "EOF" >> $GITHUB_ENV || { echo "Failed to write EOF to GITHUB_ENV"; exit 1; }
+          
+          # Debug: Print the summary
+          echo "Generated commit summary:"
+          cat commit-summary.md
+          
+          # Debug: Print the environment variable setting
+          echo "Environment variable set successfully"
+        shell: bash
+
+      - name: Run semantic versioning and create release
+        id: semantic-release
+        uses: go-semantic-release/action@v1
+        with:
+          prerelease: true  # Always create a pre-release
+          hooks: goreleaser # Or other hooks you use for release asset generation
+          changelog-file: commit-summary.md  # Use the file we created
+          update-file: version/version.go
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

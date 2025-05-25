@@ -12,8 +12,8 @@ import (
 )
 
 type MockTokenPrice struct {
-	name string  `json:"name"`
-	cost float64 `json:"cost"`
+	Name string  `json:"name"`
+	Cost float64 `json:"cost"`
 }
 
 func TestFilter(t *testing.T) {
@@ -45,7 +45,7 @@ func TestFilter(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -114,7 +114,7 @@ func TestFilterComplexLogic(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123abc",
 			Nodes:   nodes,
 			Edges:   edges,

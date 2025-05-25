@@ -3,9 +3,10 @@ package taskengine
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
-	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/allegro/bigcache/v3"
+	badger "github.com/dgraph-io/badger/v4"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -33,7 +35,7 @@ import (
 
 const (
 	JobTypeExecuteTask  = "execute_task"
-	DefaultItemPerPage  = 50
+	DefaultLimit        = 50
 	MaxSecretNameLength = 255
 
 	EvmErc20TransferTopic0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
@@ -100,8 +102,6 @@ func retryWsRpc() error {
 		logger.Errorf("cannot establish websocket client for RPC, retry in 15 seconds", "err", err)
 		time.Sleep(15 * time.Second)
 	}
-
-	return nil
 }
 
 type operatorState struct {
@@ -156,11 +156,13 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 }
 
 func (n *Engine) Stop() {
-	n.seq.Release()
+	if err := n.seq.Release(); err != nil {
+		n.logger.Error("failed to release sequence", "error", err)
+	}
 	n.shutdown = true
 }
 
-func (n *Engine) MustStart() {
+func (n *Engine) MustStart() error {
 	var err error
 	n.seq, err = n.db.GetSequence([]byte("t:seq"), 1000)
 	if err != nil {
@@ -181,108 +183,240 @@ func (n *Engine) MustStart() {
 			n.tasks[string(item.Key)] = task
 		}
 	}
+
+	return nil
 }
 
-func (n *Engine) GetSmartWallets(owner common.Address, payload *avsproto.ListWalletReq) ([]*avsproto.SmartWallet, error) {
-	sender, err := aa.GetSenderAddress(rpcConn, owner, defaultSalt)
-	if err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), SmartAccountCreationError)
+// ListWallets corresponds to the ListWallets RPC.
+func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletReq) (*avsproto.ListWalletResp, error) {
+	walletsToReturnProto := []*avsproto.SmartWallet{}
+	processedAddresses := make(map[string]bool)
+
+	defaultSystemFactory := n.smartWalletConfig.FactoryAddress
+	defaultDerivedAddress, deriveErr := aa.GetSenderAddressForFactory(rpcConn, owner, defaultSystemFactory, defaultSalt)
+
+	if deriveErr != nil {
+		n.logger.Warn("Failed to derive default system wallet address for ListWallets", "owner", owner.Hex(), "error", deriveErr)
+	} else if defaultDerivedAddress == nil || *defaultDerivedAddress == (common.Address{}) {
+		n.logger.Warn("Derived default system wallet address is nil or zero for ListWallets", "owner", owner.Hex())
+	} else {
+		includeThisDefault := true
+		if payload != nil {
+			if pfa := payload.GetFactoryAddress(); pfa != "" && !strings.EqualFold(defaultSystemFactory.Hex(), pfa) {
+				includeThisDefault = false
+			}
+			if ps := payload.GetSalt(); ps != "" && defaultSalt.String() != ps {
+				includeThisDefault = false
+			}
+		}
+
+		if includeThisDefault {
+			modelWallet, dbGetErr := GetWallet(n.db, owner, defaultDerivedAddress.Hex())
+
+			isHidden := false
+			actualSalt := defaultSalt.String()
+			actualFactory := defaultSystemFactory.Hex()
+
+			if dbGetErr == nil {
+				isHidden = modelWallet.IsHidden
+				actualSalt = modelWallet.Salt.String()
+				if modelWallet.Factory != nil {
+					actualFactory = modelWallet.Factory.Hex()
+				}
+			} else if dbGetErr != badger.ErrKeyNotFound {
+				n.logger.Warn("DB error fetching default derived wallet for ListWallets", "address", defaultDerivedAddress.Hex(), "error", dbGetErr)
+			}
+
+			walletsToReturnProto = append(walletsToReturnProto, &avsproto.SmartWallet{
+				Address:  defaultDerivedAddress.Hex(),
+				Salt:     actualSalt,
+				Factory:  actualFactory,
+				IsHidden: isHidden,
+			})
+			processedAddresses[strings.ToLower(defaultDerivedAddress.Hex())] = true
+		}
 	}
 
-	wallets := []*avsproto.SmartWallet{}
-
-	if payload == nil || payload.FactoryAddress == "" || strings.EqualFold(payload.FactoryAddress, n.smartWalletConfig.FactoryAddress.Hex()) {
-		// This is the default wallet with our own factory
-		wallets = append(wallets, &avsproto.SmartWallet{
-			Address: sender.String(),
-			Factory: n.smartWalletConfig.FactoryAddress.String(),
-			Salt:    defaultSalt.String(),
-		})
+	dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(owner))
+	if listErr != nil && listErr != badger.ErrKeyNotFound {
+		n.logger.Error("Error fetching wallets by owner prefix for ListWallets", "owner", owner.Hex(), "error", listErr)
+		if len(walletsToReturnProto) == 0 {
+			return nil, status.Errorf(codes.Code(avsproto.Error_StorageUnavailable), "Error fetching wallets by owner: %v", listErr)
+		}
 	}
 
-	items, err := n.db.GetByPrefix(WalletByOwnerPrefix(owner))
-
-	if err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletNotFoundError), SmartAccountCreationError)
-	}
-
-	// now load the customize wallet with different salt or factory that was initialed and store in our db
-	for _, item := range items {
-		w := &model.SmartWallet{}
-		w.FromStorageData(item.Value)
-
-		if w.Salt.Cmp(defaultSalt) == 0 {
+	for _, item := range dbItems {
+		storedModelWallet := &model.SmartWallet{}
+		if err := storedModelWallet.FromStorageData(item.Value); err != nil {
+			n.logger.Error("Failed to parse stored wallet data for ListWallets", "key", string(item.Key), "error", err)
 			continue
 		}
 
-		if payload != nil && payload.FactoryAddress != "" && !strings.EqualFold(w.Factory.String(), payload.FactoryAddress) {
+		if processedAddresses[strings.ToLower(storedModelWallet.Address.Hex())] {
 			continue
 		}
 
-		wallets = append(wallets, &avsproto.SmartWallet{
-			Address: w.Address.String(),
-			Factory: w.Factory.String(),
-			Salt:    w.Salt.String(),
+		if pfa := payload.GetFactoryAddress(); pfa != "" {
+			if storedModelWallet.Factory == nil || !strings.EqualFold(storedModelWallet.Factory.Hex(), pfa) {
+				continue
+			}
+		}
+
+		if ps := payload.GetSalt(); ps != "" {
+			if storedModelWallet.Salt == nil || storedModelWallet.Salt.String() != ps {
+				continue
+			}
+		}
+
+		factoryString := ""
+		if storedModelWallet.Factory != nil {
+			factoryString = storedModelWallet.Factory.Hex()
+		}
+		walletsToReturnProto = append(walletsToReturnProto, &avsproto.SmartWallet{
+			Address:  storedModelWallet.Address.Hex(),
+			Salt:     storedModelWallet.Salt.String(),
+			Factory:  factoryString,
+			IsHidden: storedModelWallet.IsHidden,
 		})
 	}
-
-	return wallets, nil
+	return &avsproto.ListWalletResp{Items: walletsToReturnProto}, nil
 }
 
 func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
-	// Verify data
-	// when user passing a custom factory address, we want to validate it
-	if payload.FactoryAddress != "" && !common.IsHexAddress(payload.FactoryAddress) {
+	if payload.GetFactoryAddress() != "" && !common.IsHexAddress(payload.GetFactoryAddress()) {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidFactoryAddressError)
 	}
 
-	salt := big.NewInt(0)
-	if payload.Salt != "" {
+	saltBig := defaultSalt
+	if payload.GetSalt() != "" {
 		var ok bool
-		salt, ok = math.ParseBig256(payload.Salt)
+		saltBig, ok = math.ParseBig256(payload.GetSalt())
 		if !ok {
-			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountSaltError)
+			return nil, status.Errorf(codes.InvalidArgument, "%s: %s", InvalidSmartAccountSaltError, payload.GetSalt())
 		}
 	}
 
-	factoryAddress := n.smartWalletConfig.FactoryAddress
-	if payload.FactoryAddress != "" {
-		factoryAddress = common.HexToAddress(payload.FactoryAddress)
-
-	}
-	sender, err := aa.GetSenderAddressForFactory(rpcConn, user.Address, factoryAddress, salt)
-	if err != nil || sender.Hex() == "0x0000000000000000000000000000000000000000" {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidFactoryAddressError)
-	}
-	wallet := &model.SmartWallet{
-		Owner:   &user.Address,
-		Address: sender,
-		Factory: &factoryAddress,
-		Salt:    salt,
+	factoryAddr := n.smartWalletConfig.FactoryAddress
+	if payload.GetFactoryAddress() != "" {
+		factoryAddr = common.HexToAddress(payload.GetFactoryAddress())
 	}
 
-	updates := map[string][]byte{}
+	derivedSenderAddress, err := aa.GetSenderAddressForFactory(rpcConn, user.Address, factoryAddr, saltBig)
+	if err != nil || derivedSenderAddress == nil || *derivedSenderAddress == (common.Address{}) {
+		n.logger.Warn("Failed to derive sender address or derived address is nil or zero for GetWallet", "owner", user.Address.Hex(), "factory", factoryAddr.Hex(), "salt", saltBig.String(), "derived", derivedSenderAddress, "error", err)
+		return nil, status.Errorf(codes.InvalidArgument, "Failed to derive sender address or derived address is nil or zero. Error: %v", err)
+	}
 
-	updates[string(WalletStorageKey(user.Address, sender.Hex()))], err = wallet.ToJSON()
+	dbModelWallet, err := GetWallet(n.db, user.Address, derivedSenderAddress.Hex())
 
-	if err = n.db.BatchWrite(updates); err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), StorageWriteError)
+	if err != nil && err != badger.ErrKeyNotFound {
+		n.logger.Error("Error fetching wallet from DB for GetWallet", "owner", user.Address.Hex(), "wallet", derivedSenderAddress.Hex(), "error", err)
+		return nil, status.Errorf(codes.Code(avsproto.Error_StorageUnavailable), "Error fetching wallet: %v", err)
+	}
+
+	if err == badger.ErrKeyNotFound {
+		n.logger.Info("Wallet not found in DB for GetWallet, creating new entry", "owner", user.Address.Hex(), "walletAddress", derivedSenderAddress.Hex())
+		newModelWallet := &model.SmartWallet{
+			Owner:    &user.Address,
+			Address:  derivedSenderAddress,
+			Factory:  &factoryAddr,
+			Salt:     saltBig,
+			IsHidden: false,
+		}
+		if storeErr := StoreWallet(n.db, user.Address, newModelWallet); storeErr != nil {
+			n.logger.Error("Error storing new wallet to DB for GetWallet", "owner", user.Address.Hex(), "walletAddress", derivedSenderAddress.Hex(), "error", storeErr)
+			return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), "Error storing new wallet: %v", storeErr)
+		}
+		dbModelWallet = newModelWallet
+	}
+
+	resp := &avsproto.GetWalletResp{
+		Address:        dbModelWallet.Address.Hex(),
+		Salt:           dbModelWallet.Salt.String(),
+		FactoryAddress: dbModelWallet.Factory.Hex(),
+		IsHidden:       dbModelWallet.IsHidden,
 	}
 
 	statSvc := NewStatService(n.db)
-	stat, _ := statSvc.GetTaskCount(wallet)
+	stat, statErr := statSvc.GetTaskCount(dbModelWallet)
+	if statErr != nil {
+		n.logger.Warn("Failed to get task count for GetWallet response", "walletAddress", dbModelWallet.Address.Hex(), "error", statErr)
+	}
+	resp.TotalTaskCount = stat.Total
+	resp.ActiveTaskCount = stat.Active
+	resp.CompletedTaskCount = stat.Completed
+	resp.FailedTaskCount = stat.Failed
+	resp.CanceledTaskCount = stat.Canceled
 
-	return &avsproto.GetWalletResp{
-		Address:        sender.Hex(),
-		Salt:           salt.String(),
-		FactoryAddress: factoryAddress.Hex(),
+	return resp, nil
+}
 
-		TotalTaskCount:     stat.Total,
-		ActiveTaskCount:    stat.Active,
-		CompletedTaskCount: stat.Completed,
-		FailedTaskCount:    stat.Failed,
-		CanceledTaskCount:  stat.Canceled,
-	}, nil
+// SetWallet is the gRPC handler for the SetWallet RPC.
+// It uses the owner (from auth context), salt, and factory_address from payload to identify/derive the wallet.
+// It then sets the IsHidden status for that wallet.
+func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq) (*avsproto.GetWalletResp, error) {
+	if payload.GetFactoryAddress() != "" && !common.IsHexAddress(payload.GetFactoryAddress()) {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid factory address format: %s", payload.GetFactoryAddress())
+	}
+
+	saltBig, ok := math.ParseBig256(payload.GetSalt())
+	if !ok {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid salt format: %s", payload.GetSalt())
+	}
+
+	factoryAddr := n.smartWalletConfig.FactoryAddress // Default factory
+	if payload.GetFactoryAddress() != "" {
+		factoryAddr = common.HexToAddress(payload.GetFactoryAddress())
+	}
+
+	derivedWalletAddress, err := aa.GetSenderAddressForFactory(rpcConn, owner, factoryAddr, saltBig)
+	if err != nil {
+		n.logger.Error("Failed to derive wallet address for SetWallet", "owner", owner.Hex(), "salt", payload.GetSalt(), "factory", payload.GetFactoryAddress(), "error", err)
+		return nil, status.Errorf(codes.Internal, "Failed to derive wallet address: %v", err)
+	}
+	if derivedWalletAddress == nil || *derivedWalletAddress == (common.Address{}) {
+		n.logger.Error("Derived wallet address is nil or zero for SetWallet", "owner", owner.Hex(), "salt", payload.GetSalt(), "factory", payload.GetFactoryAddress())
+		return nil, status.Errorf(codes.Internal, "Derived wallet address is nil or zero")
+	}
+
+	err = SetWalletHiddenStatus(n.db, owner, derivedWalletAddress.Hex(), payload.GetIsHidden())
+	if err != nil {
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			n.logger.Warn("Wallet not found for SetWallet", "owner", owner.Hex(), "derivedAddress", derivedWalletAddress.Hex(), "salt", payload.GetSalt(), "factory", payload.GetFactoryAddress())
+			// If wallet doesn't exist, SetWalletHiddenStatus from schema returns a wrapped ErrKeyNotFound.
+			// The SetWallet RPC is for existing wallets identified by salt/factory.
+			// So, if not found by identifiers, it's a NotFound error.
+			return nil, status.Errorf(codes.NotFound, "Wallet not found for the specified salt and factory.")
+		}
+		n.logger.Error("Failed to set wallet hidden status via schema.SetWalletHiddenStatus", "owner", owner.Hex(), "wallet", derivedWalletAddress.Hex(), "isHidden", payload.GetIsHidden(), "error", err)
+		return nil, status.Errorf(codes.Internal, "Failed to update wallet hidden status: %v", err)
+	}
+
+	updatedModelWallet, getErr := GetWallet(n.db, owner, derivedWalletAddress.Hex())
+	if getErr != nil {
+		n.logger.Error("Failed to fetch wallet after SetWallet operation", "owner", owner.Hex(), "wallet", derivedWalletAddress.Hex(), "error", getErr)
+		return nil, status.Errorf(codes.Internal, "Failed to retrieve wallet details after update: %v", getErr)
+	}
+
+	resp := &avsproto.GetWalletResp{
+		Address:        updatedModelWallet.Address.Hex(),
+		Salt:           updatedModelWallet.Salt.String(),
+		FactoryAddress: updatedModelWallet.Factory.Hex(),
+		IsHidden:       updatedModelWallet.IsHidden,
+	}
+
+	statSvc := NewStatService(n.db)
+	stat, statErr := statSvc.GetTaskCount(updatedModelWallet)
+	if statErr != nil {
+		n.logger.Warn("Failed to get task count for SetWallet response", "walletAddress", updatedModelWallet.Address.Hex(), "error", statErr)
+	}
+	resp.TotalTaskCount = stat.Total
+	resp.ActiveTaskCount = stat.Active
+	resp.CompletedTaskCount = stat.Completed
+	resp.FailedTaskCount = stat.Failed
+	resp.CanceledTaskCount = stat.Canceled
+
+	return resp, nil
 }
 
 // CreateTask records submission data
@@ -306,7 +440,12 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	updates := map[string][]byte{}
 
-	updates[string(TaskStorageKey(task.Id, task.Status))], err = task.ToJSON()
+	taskJSON, err := task.ToJSON()
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.Internal, "Failed to serialize task: %v", err)
+	}
+
+	updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Active))
 
 	if err = n.db.BatchWrite(updates); err != nil {
@@ -347,6 +486,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 		n.trackSyncedTasks[address].MonotonicClock = 0
 	}()
 
+	//nolint:S1000
 	for {
 		select {
 		case <-ticker.C:
@@ -381,7 +521,11 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 						Trigger:   task.Trigger,
 					},
 				}
-				n.logger.Info("stream check to operator", "task_id", task.Id, "operator", payload.Address, "resp", resp)
+				n.logger.Info("stream check to operator",
+					"task_id", task.Id,
+					"operator", payload.Address,
+					"op", resp.Op.String(),
+					"task_id_meta", resp.TaskMetadata.TaskId)
 
 				if err := srv.Send(&resp); err != nil {
 					// return error to cause client to establish re-connect the connection
@@ -411,8 +555,10 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	n.logger.Info("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
 	n.lock.Unlock()
 
+	reason := GetTriggerReasonOrDefault(payload.Reason, payload.TaskId, n.logger)
+
 	queueTaskData := QueueExecutionData{
-		Reason:      payload.Reason,
+		Reason:      reason,
 		ExecutionID: ulid.Make().String(),
 	}
 
@@ -422,7 +568,10 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 		return err
 	}
 
-	n.queue.Enqueue(JobTypeExecuteTask, payload.TaskId, data)
+	if _, err := n.queue.Enqueue(JobTypeExecuteTask, payload.TaskId, data); err != nil {
+		n.logger.Error("failed to enqueue task", "error", err, "task_id", payload.TaskId)
+		return err
+	}
 	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId)
 
 	// if the task can still run, add it back
@@ -452,17 +601,16 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		prefixes[i] = string(SmartWalletTaskStoragePrefix(user.Address, smartWallet))
 	}
 
-	//taskIDs, err := n.db.GetByPrefix(SmartWalletTaskStoragePrefix(user.Address, *owner))
 	taskKeys, err := n.db.ListKeysMulti(prefixes)
 	if err != nil {
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
 	}
 
-	// second, do the sort, this is key sorted by ordering of ther insertion
-	slices.SortFunc(taskKeys, func(a, b string) int {
-		id1 := ulid.MustParse(string(model.TaskKeyToId([]byte(a[2:]))))
-		id2 := ulid.MustParse(string(model.TaskKeyToId([]byte(b[2:]))))
-		return id1.Compare(id2)
+	// second, do the sort, this is key sorted by ordering of their insertion
+	sort.Slice(taskKeys, func(i, j int) bool {
+		id1 := ulid.MustParse(string(model.TaskKeyToId([]byte(taskKeys[i][2:]))))
+		id2 := ulid.MustParse(string(model.TaskKeyToId([]byte(taskKeys[j][2:]))))
+		return id1.Compare(id2) < 0
 	})
 
 	taskResp := &avsproto.ListTasksResp{
@@ -472,11 +620,12 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 
 	total := 0
 	cursor, err := CursorFromString(payload.Cursor)
-	itemPerPage := int(payload.ItemPerPage)
-	if itemPerPage < 0 {
+	limit := int(payload.Limit)
+	if limit < 0 {
+		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
 	}
-	if itemPerPage == 0 {
-		itemPerPage = DefaultItemPerPage
+	if limit == 0 {
+		limit = DefaultLimit
 	}
 
 	visited := 0
@@ -516,7 +665,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 				Name:               t.Name,
 				CompletedAt:        t.CompletedAt,
 				MaxExecution:       t.MaxExecution,
-				TotalExecution:     t.TotalExecution,
+				ExecutionCount:     t.ExecutionCount,
 				LastRanAt:          t.LastRanAt,
 				Status:             t.Status,
 				Trigger:            t.Trigger,
@@ -524,7 +673,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 			total += 1
 		}
 
-		if total >= itemPerPage {
+		if total >= limit {
 			break
 		}
 	}
@@ -589,8 +738,10 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
+	reason := GetTriggerReasonOrDefault(payload.Reason, payload.TaskId, n.logger)
+
 	queueTaskData := QueueExecutionData{
-		Reason:      payload.Reason,
+		Reason:      reason,
 		ExecutionID: ulid.Make().String(),
 	}
 
@@ -607,6 +758,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskTriggerError), "Error trigger task: %v", err)
 	}
 
+	// Asynchronous execution path
 	data, err := json.Marshal(queueTaskData)
 	if err != nil {
 		n.logger.Error("error serialize trigger to json", err)
@@ -619,7 +771,12 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTask
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageQueueUnavailableError)
 	}
 
-	n.setExecutionStatusQueue(task, queueTaskData.ExecutionID)
+	// This is where the TaskTriggerKey is set for asynchronous tasks
+	if err := n.setExecutionStatusQueue(task, queueTaskData.ExecutionID); err != nil {
+		n.logger.Error("failed to set execution status in queue storage", "error", err, "task_id", payload.TaskId, "execution_id", queueTaskData.ExecutionID)
+		return nil, grpcstatus.Errorf(codes.Internal, "Failed to set execution status: %v", err)
+	}
+
 	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId, "jid", jid, "execution_id", queueTaskData.ExecutionID)
 	return &avsproto.UserTriggerTaskResp{
 		ExecutionId: queueTaskData.ExecutionID,
@@ -650,11 +807,11 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 
 	executionKeys, err := n.db.ListKeysMulti(prefixes)
 
-	// second, do the sort, this is key sorted by ordering of ther insertion
-	slices.SortFunc(executionKeys, func(a, b string) int {
-		id1 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(a))))
-		id2 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(b))))
-		return id1.Compare(id2)
+	// second, do the sort, this is key sorted by ordering of their insertion
+	sort.Slice(executionKeys, func(i, j int) bool {
+		id1 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(executionKeys[i]))))
+		id2 := ulid.MustParse(string(ExecutionIdFromStorageKey([]byte(executionKeys[j]))))
+		return id1.Compare(id2) < 0
 	})
 
 	if err != nil {
@@ -673,13 +830,13 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
 	}
 
-	itemPerPage := int(payload.ItemPerPage)
-	if itemPerPage < 0 {
+	limit := int(payload.Limit)
+	if limit < 0 {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
 	}
 
-	if itemPerPage == 0 {
-		itemPerPage = DefaultItemPerPage
+	if limit == 0 {
+		limit = DefaultLimit
 	}
 	visited := 0
 	for i := len(executionKeys) - 1; i >= 0; i-- {
@@ -719,7 +876,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 			executioResp.Items = append(executioResp.Items, &exec)
 			total += 1
 		}
-		if total >= itemPerPage {
+		if total >= limit {
 			break
 		}
 	}
@@ -736,7 +893,7 @@ func (n *Engine) setExecutionStatusQueue(task *model.Task, executionID string) e
 	return n.db.Set(TaskTriggerKey(task, executionID), []byte(status))
 }
 
-func (n *Engine) getExecutonStatusFromQueue(task *model.Task, executionID string) (*avsproto.ExecutionStatus, error) {
+func (n *Engine) getExecutionStatusFromQueue(task *model.Task, executionID string) (*avsproto.ExecutionStatus, error) {
 	status, err := n.db.GetKey(TaskTriggerKey(task, executionID))
 	if err != nil {
 		return nil, err
@@ -800,7 +957,7 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 	// First look into execution first
 	if _, err = n.db.GetKey(TaskExecutionKey(task, payload.ExecutionId)); err != nil {
 		// When execution not found, it could be in pending status, we will check that storage
-		if status, err := n.getExecutonStatusFromQueue(task, payload.ExecutionId); err == nil {
+		if status, err := n.getExecutionStatusFromQueue(task, payload.ExecutionId); err == nil {
 			return &avsproto.ExecutionStatusResp{
 				Status: *status,
 			}, nil
@@ -836,7 +993,7 @@ func (n *Engine) GetExecutionCount(user *model.User, payload *avsproto.GetExecut
 
 	prefixes := [][]byte{}
 	for _, id := range workflowIds {
-		if len(id) != 26 {
+		if len(id) != TaskIDLength {
 			continue
 		}
 		prefixes = append(prefixes, TaskExecutionPrefix(id))
@@ -864,8 +1021,15 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error)
 		return false, fmt.Errorf("Only non executing task can be deleted")
 	}
 
-	n.db.Delete(TaskStorageKey(task.Id, task.Status))
-	n.db.Delete(TaskUserKey(task))
+	if err := n.db.Delete(TaskStorageKey(task.Id, task.Status)); err != nil {
+		n.logger.Error("failed to delete task storage", "error", err, "task_id", task.Id)
+		return false, fmt.Errorf("failed to delete task: %w", err)
+	}
+
+	if err := n.db.Delete(TaskUserKey(task)); err != nil {
+		n.logger.Error("failed to delete task user key", "error", err, "task_id", task.Id)
+		return false, fmt.Errorf("failed to delete task user key: %w", err)
+	}
 
 	return true, nil
 }
@@ -888,10 +1052,12 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	if err = n.db.BatchWrite(updates); err == nil {
-		n.db.Move(
+		if moveErr := n.db.Move(
 			TaskStorageKey(task.Id, oldStatus),
 			TaskStorageKey(task.Id, task.Status),
-		)
+		); moveErr != nil {
+			n.logger.Error("failed to move task", "error", moveErr, "task_id", task.Id)
+		}
 
 		delete(n.tasks, task.Id)
 	} else {
@@ -916,7 +1082,7 @@ func (n *Engine) CreateSecret(user *model.User, payload *avsproto.CreateOrUpdate
 	}
 
 	if len(payload.Name) == 0 || len(payload.Name) > MaxSecretNameLength {
-		return false, grpcstatus.Errorf(codes.InvalidArgument, "secret name lengh is invalid: should be 1-255 character")
+		return false, grpcstatus.Errorf(codes.InvalidArgument, "secret name length is invalid: should be 1-255 character")
 	}
 
 	key, _ := SecretStorageKey(secret)
@@ -960,14 +1126,44 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	}
 
 	result := &avsproto.ListSecretsResp{
-		Items: []*avsproto.ListSecretsResp_ResponseSecret{},
+		Items:   []*avsproto.ListSecretsResp_ResponseSecret{},
+		Cursor:  "",
+		HasMore: false,
 	}
 
 	secretKeys, err := n.db.ListKeysMulti(prefixes)
 	if err != nil {
 		return nil, err
 	}
+
+	sort.Strings(secretKeys)
+
+	var before, after, legacyCursor string
+	var limitVal int64
+
+	if payload != nil {
+		before = payload.Before
+		after = payload.After
+		legacyCursor = payload.Cursor
+		limitVal = payload.Limit
+	}
+
+	cursor, limit, err := SetupPagination(before, after, legacyCursor, limitVal)
+	if err != nil {
+		return nil, err
+	}
+
+	total := 0
+	var lastKey string
+
 	for _, k := range secretKeys {
+		if !cursor.IsZero() {
+			if (cursor.Direction == CursorDirectionNext && k <= cursor.Position) ||
+				(cursor.Direction == CursorDirectionPrevious && k >= cursor.Position) {
+				continue
+			}
+		}
+
 		secretWithNameOnly := SecretNameFromKey(k)
 		item := &avsproto.ListSecretsResp_ResponseSecret{
 			Name:       secretWithNameOnly.Name,
@@ -976,6 +1172,17 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 		}
 
 		result.Items = append(result.Items, item)
+		lastKey = k
+		total++
+
+		if total >= limit {
+			result.HasMore = true
+			break
+		}
+	}
+
+	if result.HasMore && lastKey != "" {
+		result.Cursor = CreateNextCursor(lastKey)
 	}
 
 	return result, nil
@@ -1025,6 +1232,82 @@ func (n *Engine) CanStreamCheck(address string) bool {
 }
 
 // GetWorkflowCount returns the number of workflows for the given addresses of smart wallets, or if no addresses are provided, it returns the total number of workflows belongs to the requested user
+func (n *Engine) GetExecutionStats(user *model.User, payload *avsproto.GetExecutionStatsReq) (*avsproto.GetExecutionStatsResp, error) {
+	workflowIds := payload.WorkflowIds
+	days := payload.Days
+	if days <= 0 {
+		days = 7 // Default to 7 days if not specified
+	}
+
+	cutoffTime := time.Now().AddDate(0, 0, -int(days)).UnixMilli()
+
+	// Initialize counters
+	total := int64(0)
+	succeeded := int64(0)
+	failed := int64(0)
+	var totalExecutionTime int64 = 0
+
+	if len(workflowIds) == 0 {
+		workflowIds = []string{}
+		taskIds, err := n.db.GetKeyHasPrefix(UserTaskStoragePrefix(user.Address))
+		if err != nil {
+			return nil, grpcstatus.Errorf(codes.Internal, "Internal error retrieving tasks")
+		}
+		for _, id := range taskIds {
+			taskId := TaskIdFromTaskStatusStorageKey(id)
+			workflowIds = append(workflowIds, string(taskId))
+		}
+	}
+
+	for _, id := range workflowIds {
+		if len(id) != TaskIDLength {
+			continue
+		}
+
+		items, err := n.db.GetByPrefix(TaskExecutionPrefix(id))
+		if err != nil {
+			n.logger.Error("error getting executions", "workflow", id, "error", err)
+			continue
+		}
+
+		for _, item := range items {
+			execution := &avsproto.Execution{}
+			if err := protojson.Unmarshal(item.Value, execution); err != nil {
+				n.logger.Error("error unmarshalling execution", "error", err)
+				continue
+			}
+
+			if execution.StartAt < cutoffTime {
+				continue
+			}
+
+			total++
+			if execution.Success {
+				succeeded++
+			} else {
+				failed++
+			}
+
+			if execution.EndAt > execution.StartAt {
+				executionTime := execution.EndAt - execution.StartAt
+				totalExecutionTime += executionTime
+			}
+		}
+	}
+
+	var avgExecutionTime float64 = 0
+	if total > 0 {
+		avgExecutionTime = float64(totalExecutionTime) / float64(total)
+	}
+
+	return &avsproto.GetExecutionStatsResp{
+		Total:            total,
+		Succeeded:        succeeded,
+		Failed:           failed,
+		AvgExecutionTime: avgExecutionTime,
+	}, nil
+}
+
 func (n *Engine) GetWorkflowCount(user *model.User, payload *avsproto.GetWorkflowCountReq) (*avsproto.GetWorkflowCountResp, error) {
 	smartWalletAddresses := payload.Addresses
 

@@ -1,0 +1,147 @@
+name: Run Tests and Lint on PR or on-demand
+
+on:
+  pull_request:
+    # Only run tests when PR to staging of main and these files are changed
+    branches:
+      - main
+      - staging
+    paths:
+      - "core/**"
+      - "pkg/**"
+      - "aggregator/**"
+      - "operator/**"
+      - "model/**"
+      - "cmd/**"
+      - "version/**"
+      - "config/**"
+      - "go.mod"
+      - "go.sum"
+      - "!scripts/**"
+      - "!**.md"
+      - "!.github/**"
+      - "!docs/**"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to run tests against"
+        required: true
+        type: string
+      force_run:
+        description: "Force run tests even if only scripts changed"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  check-changes:
+    name: Check Changed Files
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0 # Fetch all history for comparing changes
+          ref: ${{ github.event.inputs.branch || github.ref }}
+
+      - name: Check if relevant files changed
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force_run }}" = "true" ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Get the base branch for comparison
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_BRANCH="${{ github.base_ref }}"
+          else
+            BASE_BRANCH="main"  # Default to main for manual runs
+          fi
+
+          # Get list of changed files
+          CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...HEAD)
+
+          # Check if any changes are in relevant directories
+          RELEVANT_CHANGES=$(echo "$CHANGED_FILES" | grep -E '\.go$|go\.mod|go\.sum|^core/|^pkg/|^aggregator/|^operator/|^model/|^cmd/|^version/|^config/')
+
+          if [ -n "$RELEVANT_CHANGES" ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+            echo "No relevant changes found. Skipping tests."
+          fi
+
+  lint:
+    name: Lint
+    needs: check-changes
+    if: needs.check-changes.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ github.event.inputs.branch || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24"
+
+      - name: Cache golangci-lint binary
+        uses: actions/cache@v3
+        with:
+          path: $(go env GOPATH)/bin/golangci-lint
+          key: golangci-lint-v1.55.2
+
+      # - name: Install golangci-lint
+      #   run: |
+      #     if [ ! -f "$(go env GOPATH)/bin/golangci-lint" ]; then
+      #       curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
+      #     fi
+
+      # - name: Run golangci-lint
+      #   run: $(go env GOPATH)/bin/golangci-lint run ./...
+
+  test:
+    environment: Test
+    name: Unit Test
+    needs: check-changes
+    if: needs.check-changes.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        test:
+          - aggregator
+          - core/taskengine
+          - core/taskengine/trigger
+          - core/taskengine/macros
+          - pkg/timekeeper
+          - pkg/graphql
+          - pkg/byte4
+          - pkg/erc4337/preset
+          - core/backup
+          - core/migrator
+          - migrations
+          - operator
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ github.event.inputs.branch || github.ref }}
+
+      - name: Run Go test
+        env:
+          RPC_URL: "${{ secrets.RPC_URL }}"
+          BUNDLER_RPC: "${{ secrets.BUNDLER_RPC }}"
+          FACTORY_ADDRESS: "${{ vars.FACTORY_ADDRESS }}"
+          BASE_SEPOLIA_RPC_URL: "${{ secrets.BASE_SEPOLIA_RPC_URL }}"
+          BASE_SEPOLIA_BUNDLER_RPC: "${{ secrets.BASE_SEPOLIA_BUNDLER_RPC }}"
+          CONTROLLER_PRIVATE_KEY: "${{ secrets.CONTROLLER_PRIVATE_KEY }}"
+
+        run: |
+          cd ./${{ matrix.test }}
+          go test . -v

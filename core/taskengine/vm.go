@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 
@@ -103,7 +104,7 @@ func (t *triggerDataType) GetValue() avsproto.IsExecution_OutputData {
 	return nil
 }
 
-// The VM is the core component that load the node information and execute them, yield finaly result
+// The VM is the core component that load the node information and execute them, yield finally result
 type VM struct {
 	// Input raw task data
 	// TaskID can be used to cache compile program
@@ -118,7 +119,7 @@ type VM struct {
 	reason            *avsproto.TriggerReason
 	parsedTriggerData *triggerDataType
 
-	// executin logs and result per plans
+	// execution logs and result per plans
 	ExecutionLogs []*avsproto.Execution_Step
 
 	Status VMState
@@ -190,11 +191,17 @@ func (v *VM) GetTriggerNameAsVar() string {
 func (v *VM) GetNodeNameAsVar(nodeID string) string {
 	// Replace invalid characters with _
 	re := regexp.MustCompile(`[^a-zA-Z0-9_$]`)
-	name := v.TaskNodes[nodeID].Name
+
+	// Get node name if it exists, otherwise use nodeID
+	var name string
+	if node, exists := v.TaskNodes[nodeID]; exists && node != nil {
+		name = node.Name
+	}
 	if name == "" {
 		name = nodeID
 	}
-	standardized := re.ReplaceAllString(v.TaskNodes[nodeID].Name, "_")
+
+	standardized := re.ReplaceAllString(name, "_")
 
 	// Ensure the first character is valid
 	if len(standardized) == 0 || !regexp.MustCompile(`^[a-zA-Z_$]`).MatchString(standardized[:1]) {
@@ -275,7 +282,7 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 
 				v.vars[triggerVarName].(map[string]any)["data"] = map[string]any{
 					"topics": lo.Map(event.Topics, func(topic common.Hash, _ int) string {
-						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x"))
 					}),
 					"data": "0x" + common.Bytes2Hex(event.Data),
 
@@ -322,7 +329,7 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 					TransactionHash:  event.TxHash.Hex(),
 					TransactionIndex: uint32(event.TxIndex),
 					Topics: lo.Map(event.Topics, func(topic common.Hash, _ int) string {
-						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x0"))
+						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x"))
 					}),
 				}
 			}
@@ -400,7 +407,7 @@ func (v *VM) Compile() error {
 
 	// Cannot find entrypoint
 	if v.entrypoint == "" {
-		return fmt.Errorf(InvalidEntrypoint)
+		return fmt.Errorf("%s", InvalidEntrypoint)
 	}
 
 	v.Status = VMStateReady
@@ -624,7 +631,11 @@ func (v *VM) preprocessText(text string) string {
 	jsvm := NewGojaVM()
 
 	for key, value := range v.vars {
-		jsvm.Set(key, value)
+		if err := jsvm.Set(key, value); err != nil {
+			if v.logger != nil {
+				v.logger.Error("failed to set variable in JS VM", "key", key, "error", err)
+			}
+		}
 	}
 
 	// Find all {{ }} expressions
@@ -678,8 +689,11 @@ func (v *VM) preprocessText(text string) string {
 		exportedValue := evaluated.Export()
 		var replacement string
 
-		if _, ok := exportedValue.(map[string]interface{}); ok {
-			// In Golang, it's better because it can return the actualy object data. But in JavaScript, it will return "[object Object]",
+		if t, ok := exportedValue.(time.Time); ok {
+			// Always format time.Time to a consistent UTC string
+			replacement = t.In(time.UTC).Format("2006-01-02 15:04:05.000 +0000 UTC")
+		} else if _, ok := exportedValue.(map[string]interface{}); ok {
+			// In Golang, it's better because it can return the actually object data. But in JavaScript, it will return "[object Object]",
 			// We're mimicking the behavior of Retool here to follow the script gotcha.
 			// In real of userness the golang might be useful for debugging because it's will return the actual object data, eg `map[id:123 message:test]`
 			// but at the same time, map ins't  concept in JavaScript, so end user might get confused

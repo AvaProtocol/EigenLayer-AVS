@@ -6,6 +6,8 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	badger "github.com/dgraph-io/badger/v4"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -34,6 +36,32 @@ func WalletStorageKey(owner common.Address, smartWalletAddress string) string {
 		strings.ToLower(owner.Hex()),
 		strings.ToLower(smartWalletAddress),
 	)
+}
+
+func GetWallet(db storage.Storage, owner common.Address, smartWalletAddress string) (*model.SmartWallet, error) {
+	walletKey := WalletStorageKey(owner, smartWalletAddress)
+	walletData, err := db.GetKey([]byte(walletKey))
+	if err != nil {
+		return nil, err // Includes badger.ErrKeyNotFound
+	}
+
+	var walletModel model.SmartWallet
+	if unmarshalErr := walletModel.FromStorageData(walletData); unmarshalErr != nil {
+		return nil, fmt.Errorf("failed to unmarshal wallet data for key %s: %w", walletKey, unmarshalErr)
+	}
+	return &walletModel, nil
+}
+
+func StoreWallet(db storage.Storage, owner common.Address, wallet *model.SmartWallet) error {
+	if wallet.Address == nil {
+		return fmt.Errorf("cannot store wallet with nil address")
+	}
+	walletKey := WalletStorageKey(owner, wallet.Address.String())
+	updatedWalletData, err := wallet.ToJSON()
+	if err != nil {
+		return fmt.Errorf("failed to marshal wallet for storage (key: %s): %w", walletKey, err)
+	}
+	return db.Set([]byte(walletKey), updatedWalletData)
 }
 
 func TaskStorageKey(id string, status avsproto.TaskStatus) []byte {
@@ -177,4 +205,42 @@ func SecretNameFromKey(key string) *model.Secret {
 // ContractWriteCounterKey returns the key for the contract write counter of a given eoa in our kv store
 func ContractWriteCounterKey(eoa common.Address) []byte {
 	return []byte(fmt.Sprintf("ct:cw:%s", strings.ToLower(eoa.Hex())))
+}
+
+// IsWalletHidden checks if a wallet is marked as hidden.
+// It returns true if hidden, false otherwise. If the wallet is not found or an error occurs,
+// it returns false and the error (except for badger.ErrKeyNotFound where it still returns false for IsHidden).
+func IsWalletHidden(db storage.Storage, owner common.Address, smartWalletAddress string) (bool, error) {
+	wallet, err := GetWallet(db, owner, smartWalletAddress)
+	if err != nil {
+		if err == badger.ErrKeyNotFound {
+			return false, nil // Wallet doesn't exist, so not hidden by our definition, no error to bubble up for this specific check.
+		}
+		return false, err // Other error
+	}
+	if wallet == nil { // Should ideally not happen if err is nil, but as a safeguard
+		return false, fmt.Errorf("wallet not found but no error returned for %s", smartWalletAddress)
+	}
+	return wallet.IsHidden, nil
+}
+
+// SetWalletHiddenStatus sets the hidden status of a specified wallet.
+func SetWalletHiddenStatus(db storage.Storage, owner common.Address, smartWalletAddress string, hidden bool) error {
+	wallet, err := GetWallet(db, owner, smartWalletAddress)
+	if err != nil {
+		// If wallet not found, and we intend to "unhide" (which is a no-op) or "hide" (which means creating it as hidden).
+		// For simplicity, let's assume for now that SetWalletHiddenStatus operates on existing wallets.
+		// If the requirement is to create a wallet if it doesn't exist and set its hidden status, this logic needs expansion.
+		return fmt.Errorf("failed to get wallet %s to set hidden status: %w", smartWalletAddress, err)
+	}
+	if wallet == nil {
+		return fmt.Errorf("wallet not found for %s but no error on GetWallet", smartWalletAddress)
+	}
+
+	if wallet.IsHidden == hidden {
+		return nil // No change needed
+	}
+
+	wallet.IsHidden = hidden
+	return StoreWallet(db, owner, wallet)
 }

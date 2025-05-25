@@ -46,7 +46,7 @@ func TestVMCompile(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -103,7 +103,7 @@ func TestRunSimpleTasks(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -181,7 +181,7 @@ func TestRunSequentialTasks(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -234,6 +234,32 @@ func TestRunSequentialTasks(t *testing.T) {
 }
 
 func TestRunTaskWithBranchNode(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/post" {
+			body, _ := io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"data": string(body),
+			})
+			return
+		}
+
+		if r.Method == "GET" && r.URL.Path == "/get" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"args": map[string]interface{}{
+					"hit": r.URL.Query().Get("hit"),
+				},
+			})
+			return
+		}
+
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockServer.Close()
+
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "branch1",
@@ -259,7 +285,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/post",
+					Url:    mockServer.URL + "/post",
 					Method: "POST",
 					Body:   "hit=notification1",
 				},
@@ -270,7 +296,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/get?hit=notification2",
+					Url:    mockServer.URL + "/get?hit=notification2",
 					Method: "GET",
 					Headers: map[string]string{
 						"content-type": "application/json",
@@ -303,7 +329,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -445,7 +471,7 @@ func TestEvaluateEvent(t *testing.T) {
 	SetCache(testutil.GetDefaultCache())
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "sampletaskid1",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -531,7 +557,7 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 	SetCache(testutil.GetDefaultCache())
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "sampletaskid1",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -597,7 +623,7 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 	SetCache(testutil.GetDefaultCache())
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "sampletaskid1",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -611,7 +637,7 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 
 	err = vm.Compile()
 	if err != nil {
-		t.Errorf("Expect compile succesfully but got error: %v", err)
+		t.Errorf("Expect compile successfully but got error: %v", err)
 	}
 
 	if vm.entrypoint != "notification1" {
@@ -661,7 +687,7 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 	}
 
 	vm, err := NewVMWithData(&model.Task{
-		&avsproto.Task{
+		Task: &avsproto.Task{
 			Id:      "123",
 			Nodes:   nodes,
 			Edges:   edges,
@@ -701,11 +727,6 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 
 func TestPreprocessText(t *testing.T) {
 	// Setup a VM with some test variables
-	// in a real task execution, these variables come from 3 places:
-	//	1. previous node outputs
-	//	2. trigger metadata
-	//	3. secrets
-
 	vm := &VM{
 		vars: map[string]any{
 			"user": map[string]any{
@@ -857,11 +878,6 @@ func TestPreprocessText(t *testing.T) {
 			expected: strings.Repeat("Alice", VMMaxPreprocessIterations) + "{{ user.data.name }}",
 		},
 		{
-			name:     "javascript expression - date",
-			input:    `{{ new Date("2014-04-07T13:58:10.104Z")}}`,
-			expected: "2014-04-07 13:58:10.104 +0000 UTC",
-		},
-		{
 			name:     "javascript object representation value",
 			input:    `{{ {a: 1, b: 2} }}`,
 			expected: "[object Object]",
@@ -873,7 +889,60 @@ func TestPreprocessText(t *testing.T) {
 		},
 	}
 
+	originalTZ := os.Getenv("TZ")
 	os.Setenv("TZ", "UTC")
+	defer os.Setenv("TZ", originalTZ)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := vm.preprocessText(tt.input)
+			if result != tt.expected {
+				t.Errorf("preprocessText(%q) = got %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestPreprocessTextDate(t *testing.T) {
+	// Setup a VM
+	vm := &VM{
+		vars: map[string]any{}, // Date tests don't usually need complex global vars
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "javascript expression - date with Z (UTC)",
+			input:    `{{ new Date("2014-04-07T13:58:10.104Z")}}`,
+			expected: "2014-04-07 13:58:10.104 +0000 UTC",
+		},
+		{
+			name:     "javascript expression - date toISOString",
+			input:    `{{ (new Date("2014-04-07T13:58:10.104Z")).toISOString() }}`,
+			expected: "2014-04-07T13:58:10.104Z",
+		},
+		{
+			name: "javascript expression - date no Z (local treated as UTC due to TZ env)",
+			// This test case verifies the behavior of parsing a date string without a 'Z' (timezone indicator).
+			// 1. The test environment sets `os.Setenv("TZ", "UTC")`.
+			//    Ideally, this makes the JavaScript `new Date("YYYY-MM-DDTHH:mm:ss")` (which typically creates a local time Date object)
+			//    interpret the input string as if it were in UTC.
+			// 2. Crucially, the `preprocessText` function (in vm.go) has a final conversion step:
+			//    If a JavaScript expression evaluates to a Go `time.Time` object,
+			//    it is explicitly formatted to "2006-01-02 15:04:05.000 +0000 UTC" using `t.In(time.UTC).Format(...)`.
+			//    This ensures the final output string is always in a consistent UTC format.
+			input:    `{{ new Date("2014-04-07T13:58:10.104") }}`,
+			expected: "2014-04-07 13:58:10.104 +0000 UTC",
+		},
+	}
+
+	originalTZ := os.Getenv("TZ")
+	os.Setenv("TZ", "UTC")
+	defer os.Setenv("TZ", originalTZ)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := vm.preprocessText(tt.input)

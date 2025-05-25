@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/oklog/ulid/v2"
+	ulid "github.com/oklog/ulid/v2"
 )
 
 type CursorDirection string
@@ -47,6 +47,29 @@ func CursorFromString(data string) (*Cursor, error) {
 	} else {
 		return c, err
 	}
+}
+
+func CursorFromBeforeAfter(before, after string) (*Cursor, error) {
+	if after != "" {
+		return CursorFromString(after)
+	}
+
+	if before != "" {
+		cursor, err := CursorFromString(before)
+		if err != nil {
+			return nil, err
+		}
+		cursor.Direction = CursorDirectionPrevious
+		return cursor, nil
+	}
+
+	return &Cursor{
+		Direction: CursorDirectionNext,
+		Position:  "0",
+		parsePos:  false,
+		int64Pos:  0,
+		ulidPos:   ulid.Zero,
+	}, nil
 }
 
 func NewCursor(direction CursorDirection, position string) *Cursor {
