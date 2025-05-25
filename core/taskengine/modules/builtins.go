@@ -55,9 +55,9 @@ func (l *BuiltinLoader) Load(runtime *goja.Runtime, name string) (goja.Value, er
 	runtime.Set("module", module)
 	runtime.Set("exports", exports)
 
-	// Special handling for Day.js - it's designed to work well with module systems
-	if name == "dayjs" {
-		// Day.js has better UMD support, so we can run it more simply
+	// Special handling for Day.js and UUID - they're designed to work well with module systems
+	if name == "dayjs" || name == "uuid" {
+		// These libraries have better UMD support, so we can run them more simply
 		moduleScript := fmt.Sprintf(`
 			(function(module, exports) {
 				%s

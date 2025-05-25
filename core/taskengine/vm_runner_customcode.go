@@ -97,7 +97,11 @@ func transformES6Imports(code string) string {
 			transformed.WriteString(fmt.Sprintf("const %s = require('%s');\n", namespace, moduleName))
 		} else if namedImports != "" {
 			// Handle named imports: import { name1, name2 as alias2 } from 'module'
-			transformed.WriteString(fmt.Sprintf("const { %s } = require('%s');\n", namedImports, moduleName))
+			// Trim whitespace from named imports and convert 'as' syntax to colon syntax for Goja compatibility
+			trimmedImports := strings.TrimSpace(namedImports)
+			// Convert ES6 'as' syntax to JavaScript colon syntax: "v4 as uuidv4" -> "v4: uuidv4"
+			convertedImports := strings.ReplaceAll(trimmedImports, " as ", ": ")
+			transformed.WriteString(fmt.Sprintf("const { %s } = require('%s');\n", convertedImports, moduleName))
 		}
 	}
 
@@ -119,9 +123,34 @@ func containsES6Imports(code string) bool {
 }
 
 func containsModuleSyntax(code string) bool {
-	importRegex := regexp.MustCompile(`(?m)^\s*(import|export)\s+`)
-	requireRegex := regexp.MustCompile(`\brequire\s*\(\s*['"]`)
-	return importRegex.MatchString(code) || requireRegex.MatchString(code)
+	// Split code into lines and check each line
+	lines := strings.Split(code, "\n")
+
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		// Skip comment lines
+		if strings.HasPrefix(trimmedLine, "//") || strings.HasPrefix(trimmedLine, "/*") {
+			continue
+		}
+
+		// Check for ES6 import/export statements
+		if regexp.MustCompile(`\b(import|export)\s+`).MatchString(line) {
+			return true
+		}
+
+		// Check for dynamic imports
+		if regexp.MustCompile(`\bimport\s*\(`).MatchString(line) {
+			return true
+		}
+
+		// Check for require statements
+		if regexp.MustCompile(`\brequire\s*\(`).MatchString(line) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {

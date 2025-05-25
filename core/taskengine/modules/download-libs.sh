@@ -10,7 +10,7 @@ echo "Downloaded lodash.min.js"
 curl -s https://cdnjs.cloudflare.com/ajax/libs/dayjs/1.11.13/dayjs.min.js -o $LIBS_DIR/dayjs.min.js
 echo "Downloaded dayjs.min.js"
 
-curl -s https://cdn.jsdelivr.net/npm/uuid@9.0.0/dist/umd/uuid.min.js -o $LIBS_DIR/uuid.min.js
+curl -s https://unpkg.com/uuid@8.3.2/dist/umd/uuid.min.js -o $LIBS_DIR/uuid.min.js
 echo "Downloaded uuid.min.js"
 
 echo "All libraries downloaded successfully!"

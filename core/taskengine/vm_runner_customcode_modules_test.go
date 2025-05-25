@@ -330,7 +330,7 @@ func TestErrorHandling(t *testing.T) {
 		{
 			name: "Invalid Import Syntax",
 			code: `
-				import * as _ from 'lodash';
+				import { from 'lodash';
 				return _.map([1, 2, 3], n => n * 2);
 			`,
 			expectError: true,
