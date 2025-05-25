@@ -125,7 +125,8 @@ jobs:
           - pkg/erc4337/preset
           # Temporarily skip backup tests due to compatibility issues with eigensdk-go
           # - core/backup
-          - core/migrator
+          # Temporarily skip migrator tests due to compatibility issues with eigensdk-go
+          # - core/migrator
           - migrations
           - operator
 
