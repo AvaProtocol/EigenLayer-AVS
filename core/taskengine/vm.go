@@ -11,6 +11,7 @@ import (
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 
+	"github.com/oklog/ulid/v2"
 	"github.com/samber/lo"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -173,10 +174,24 @@ func (v *VM) WithDb(db storage.Storage) *VM {
 	return v
 }
 
-func (v *VM) GetTriggerNameAsVar() string {
+func (v *VM) GetTriggerNameAsVar() (string, error) {
 	// Replace invalid characters with _
 	re := regexp.MustCompile(`[^a-zA-Z0-9_$]`)
-	name := v.task.Trigger.Name
+
+	var name string
+	if v.task != nil && v.task.Trigger != nil {
+		name = v.task.Trigger.Name
+		if name == "" {
+			return "", fmt.Errorf("trigger name is required but not defined in task")
+		}
+	} else if v.task != nil {
+		// Task exists but trigger is nil
+		return "", fmt.Errorf("trigger is required but not defined in task")
+	} else {
+		// Task is nil (e.g., for single node execution), use default
+		name = "trigger"
+	}
+
 	standardized := re.ReplaceAllString(name, "_")
 
 	// Ensure the first character is valid
@@ -184,7 +199,7 @@ func (v *VM) GetTriggerNameAsVar() string {
 		standardized = "_" + standardized
 	}
 
-	return standardized
+	return standardized, nil
 }
 
 func (v *VM) GetNodeNameAsVar(nodeID string) string {
@@ -212,12 +227,8 @@ func (v *VM) GetNodeNameAsVar(nodeID string) string {
 
 func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
 	v := &VM{
-		Status: VMStateInitialize,
-		//TaskEdges:         task.Edges,
-		//TaskTrigger:       task.Trigger,
-		TaskNodes: make(map[string]*avsproto.TaskNode),
-		TaskOwner: common.HexToAddress(task.Owner),
-
+		Status:            VMStateInitialize,
+		TaskNodes:         make(map[string]*avsproto.TaskNode),
 		plans:             make(map[string]*Step),
 		mu:                &sync.Mutex{},
 		instructionCount:  0,
@@ -228,12 +239,18 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 		parsedTriggerData: &triggerDataType{},
 	}
 
-	for _, node := range task.Nodes {
-		v.TaskNodes[node.Id] = node
+	if task != nil {
+		v.TaskOwner = common.HexToAddress(task.Owner)
+		for _, node := range task.Nodes {
+			v.TaskNodes[node.Id] = node
+		}
 	}
 
 	v.vars = macros.GetEnvs(map[string]any{})
-	triggerVarName := v.GetTriggerNameAsVar()
+	triggerVarName, err := v.GetTriggerNameAsVar()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get trigger variable name: %w", err)
+	}
 	// popular trigger data for trigger variable
 	if reason != nil {
 		v.vars[triggerVarName] = map[string]any{
@@ -571,13 +588,13 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*Step,
 
 	inputs := v.CollectInputs()
 	executionLog, err := r.Execute(stepID, node)
-	if err != nil {
+	if err != nil && v.logger != nil {
 		v.logger.Error("error execute JavaScript code", "task_id", v.TaskID, "step", stepID, "error", err)
 	}
 	executionLog.Inputs = inputs
 	v.ExecutionLogs = append(v.ExecutionLogs, executionLog)
 
-	return nil, nil
+	return nil, err
 }
 
 func (v *VM) runBranch(stepID string, node *avsproto.BranchNode) (*Step, error) {
@@ -733,4 +750,173 @@ func (v *VM) GetTaskId() string {
 	}
 
 	return ""
+}
+
+// RunNodeWithInputs executes a single task node within the VM using the provided input variables.
+// 
+// Parameters:
+// - node: The task node to be executed. This should be a valid instance of avsproto.TaskNode.
+// - inputVariables: A map of variable names to their corresponding values, which will be used as inputs
+//   during the execution of the task node.
+//
+// Returns:
+// - *avsproto.Execution_Step: An object representing the result of the node execution, including details
+//   such as the node ID, success status, and inputs used.
+// - error: An error object if the execution fails, or nil if it succeeds.
+//
+// Use case:
+// This method is typically used to execute a single node in isolation, such as for debugging or testing
+// purposes. It creates a temporary VM instance to execute the node and collects the results.
+func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[string]interface{}) (*avsproto.Execution_Step, error) {
+	tempVM := &VM{
+		vars:              macros.GetEnvs(make(map[string]interface{})),
+		TaskID:            v.TaskID,
+		TaskNodes:         map[string]*avsproto.TaskNode{node.Id: node},
+		plans:             map[string]*Step{},
+		ExecutionLogs:     []*avsproto.Execution_Step{},
+		Status:            VMStateReady,
+		logger:            v.logger,
+		smartWalletConfig: v.smartWalletConfig,
+		db:                v.db,
+		secrets:           v.secrets, // Preserve secrets from the original VM
+	}
+
+	if v.vars != nil && v.vars["apContext"] != nil {
+		tempVM.vars["apContext"] = v.vars["apContext"]
+	}
+
+	for key, value := range inputVariables {
+		tempVM.AddVar(key, value)
+	}
+
+	step, err := tempVM.executeNode(node)
+	if err != nil {
+		return nil, fmt.Errorf("error executing node: %w", err)
+	}
+
+	if len(tempVM.ExecutionLogs) > 0 {
+		return tempVM.ExecutionLogs[0], nil
+	}
+
+	// If no execution logs but we have a step, convert it to an Execution_Step
+	if step != nil {
+		executionStep := &avsproto.Execution_Step{
+			NodeId:  node.Id,
+			Success: true, // Default to success since we don't have error information
+			Inputs:  tempVM.CollectInputs(),
+		}
+		return executionStep, nil
+	}
+
+	return nil, fmt.Errorf("node execution produced no results for node ID: %s", node.Id)
+}
+
+// This is a helper function to create nodes for RunNodeWithInputs when working with triggers or simplified inputs.
+func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID string) (*avsproto.TaskNode, error) {
+	if nodeID == "" {
+		nodeID = "node_" + ulid.Make().String()
+	}
+
+	node := &avsproto.TaskNode{
+		Id:   nodeID,
+		Name: "Single Node Execution",
+	}
+
+	switch nodeType {
+	case "blockTrigger":
+		node.TaskType = &avsproto.TaskNode_CustomCode{
+			CustomCode: &avsproto.CustomCodeNode{
+				Lang: avsproto.CustomCodeLang_JavaScript,
+				Source: `
+					return { 
+						blockNumber: blockNumber 
+					};
+				`,
+			},
+		}
+
+	case "restApi":
+		url, _ := config["url"].(string)
+		method, _ := config["method"].(string)
+		body, _ := config["body"].(string)
+
+		headers := make(map[string]string)
+		if headersMap, ok := config["headers"].(map[string]interface{}); ok {
+			for k, v := range headersMap {
+				headers[k] = fmt.Sprintf("%v", v)
+			}
+		}
+
+		node.TaskType = &avsproto.TaskNode_RestApi{
+			RestApi: &avsproto.RestAPINode{
+				Url:     url,
+				Method:  method,
+				Body:    body,
+				Headers: headers,
+			},
+		}
+
+	case "contractRead":
+		contractAddress, _ := config["contractAddress"].(string)
+		callData, _ := config["callData"].(string)
+		contractAbi, _ := config["contractAbi"].(string)
+
+		node.TaskType = &avsproto.TaskNode_ContractRead{
+			ContractRead: &avsproto.ContractReadNode{
+				ContractAddress: contractAddress,
+				CallData:        callData,
+				ContractAbi:     contractAbi,
+			},
+		}
+
+	case "customCode":
+		source, _ := config["source"].(string)
+
+		node.TaskType = &avsproto.TaskNode_CustomCode{
+			CustomCode: &avsproto.CustomCodeNode{
+				Lang:   avsproto.CustomCodeLang_JavaScript,
+				Source: source,
+			},
+		}
+
+	case "branch":
+		conditions := []*avsproto.Condition{}
+		if conditionsArray, ok := config["conditions"].([]interface{}); ok {
+			for _, c := range conditionsArray {
+				if condMap, ok := c.(map[string]interface{}); ok {
+					id, _ := condMap["id"].(string)
+					condType, _ := condMap["type"].(string)
+					expression, _ := condMap["expression"].(string)
+
+					conditions = append(conditions, &avsproto.Condition{
+						Id:         id,
+						Type:       condType,
+						Expression: expression,
+					})
+				}
+			}
+		}
+
+		node.TaskType = &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Conditions: conditions,
+			},
+		}
+
+	case "filter":
+		expression, _ := config["expression"].(string)
+		input, _ := config["input"].(string)
+
+		node.TaskType = &avsproto.TaskNode_Filter{
+			Filter: &avsproto.FilterNode{
+				Expression: expression,
+				Input:      input,
+			},
+		}
+
+	default:
+		return nil, fmt.Errorf("unsupported node type: %s", nodeType)
+	}
+
+	return node, nil
 }

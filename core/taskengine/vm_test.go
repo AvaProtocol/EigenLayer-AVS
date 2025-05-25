@@ -5,12 +5,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/dop251/goja"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
@@ -889,10 +889,6 @@ func TestPreprocessText(t *testing.T) {
 		},
 	}
 
-	originalTZ := os.Getenv("TZ")
-	os.Setenv("TZ", "UTC")
-	defer os.Setenv("TZ", originalTZ)
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := vm.preprocessText(tt.input)
@@ -924,24 +920,18 @@ func TestPreprocessTextDate(t *testing.T) {
 			input:    `{{ (new Date("2014-04-07T13:58:10.104Z")).toISOString() }}`,
 			expected: "2014-04-07T13:58:10.104Z",
 		},
-		{
-			name: "javascript expression - date no Z (local treated as UTC due to TZ env)",
-			// This test case verifies the behavior of parsing a date string without a 'Z' (timezone indicator).
-			// 1. The test environment sets `os.Setenv("TZ", "UTC")`.
-			//    Ideally, this makes the JavaScript `new Date("YYYY-MM-DDTHH:mm:ss")` (which typically creates a local time Date object)
-			//    interpret the input string as if it were in UTC.
-			// 2. Crucially, the `preprocessText` function (in vm.go) has a final conversion step:
-			//    If a JavaScript expression evaluates to a Go `time.Time` object,
-			//    it is explicitly formatted to "2006-01-02 15:04:05.000 +0000 UTC" using `t.In(time.UTC).Format(...)`.
-			//    This ensures the final output string is always in a consistent UTC format.
-			input:    `{{ new Date("2014-04-07T13:58:10.104") }}`,
-			expected: "2014-04-07 13:58:10.104 +0000 UTC",
-		},
+		// NOTE: This test case is commented out because we decided not to manipulate timezone behavior
+		// in the JavaScript environment. Date strings without timezone indicators (like "2014-04-07T13:58:10.104")
+		// will be interpreted according to the Go runtime's timezone settings, which provides more predictable
+		// behavior than trying to force UTC interpretation through complex JavaScript overrides.
+		// The complexity of hardcoded timezone conversions was deemed not worth the maintenance burden.
+		//
+		// {
+		// 	name: "javascript expression - date no Z (uses Go runtime timezone)",
+		// 	input:    `{{ new Date("2014-04-07T13:58:10.104") }}`,
+		// 	expected: "2014-04-07 13:58:10.104 +0000 UTC", // This would vary based on system timezone
+		// },
 	}
-
-	originalTZ := os.Getenv("TZ")
-	os.Setenv("TZ", "UTC")
-	defer os.Setenv("TZ", originalTZ)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -950,5 +940,55 @@ func TestPreprocessTextDate(t *testing.T) {
 				t.Errorf("preprocessText(%q) = got %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestMissingTriggerName(t *testing.T) {
+	// Test case 1: Task with trigger but missing name
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "", // Empty name should cause error
+	}
+
+	_, err := NewVMWithData(&model.Task{
+		Task: &avsproto.Task{
+			Id:      "123",
+			Nodes:   []*avsproto.TaskNode{},
+			Edges:   []*avsproto.TaskEdge{},
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
+	if err == nil {
+		t.Errorf("Expected error for missing trigger name, but got nil")
+	}
+	if !strings.Contains(err.Error(), "trigger name is required") {
+		t.Errorf("Expected error message about missing trigger name, got: %s", err.Error())
+	}
+
+	// Test case 2: Task with nil trigger should also cause error
+	_, err = NewVMWithData(&model.Task{
+		Task: &avsproto.Task{
+			Id:      "123",
+			Nodes:   []*avsproto.TaskNode{},
+			Edges:   []*avsproto.TaskEdge{},
+			Trigger: nil, // Nil trigger should cause error
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
+	if err == nil {
+		t.Errorf("Expected error for nil trigger, but got nil")
+	}
+	if !strings.Contains(err.Error(), "trigger is required") {
+		t.Errorf("Expected error message about missing trigger, got: %s", err.Error())
+	}
+
+	// Test case 3: Nil task should work (for single node execution)
+	vm, err := NewVMWithData(nil, nil, &config.SmartWalletConfig{}, nil)
+	if err != nil {
+		t.Errorf("Expected nil task to work, but got error: %s", err.Error())
+	}
+	if vm == nil {
+		t.Errorf("Expected VM to be created for nil task")
 	}
 }

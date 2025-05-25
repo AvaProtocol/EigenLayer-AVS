@@ -121,22 +121,27 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		for k := range r.vm.vars {
 			if k == "apContext" {
 				varInfo[k] = "configVars"
-			} else if r.vm.task != nil && r.vm.task.Trigger != nil && k == r.vm.GetTriggerNameAsVar() {
-				triggerInfo := map[string]interface{}{
-					"original_name": r.vm.task.Trigger.Name,
-				}
-
-				if dataMap, ok := r.vm.vars[k].(map[string]any); ok {
-					if data, ok := dataMap["data"].(map[string]any); ok {
-						keys := []string{}
-						for key := range data {
-							keys = append(keys, key)
-						}
-						triggerInfo["available_fields"] = keys
+			} else if r.vm.task != nil && r.vm.task.Trigger != nil {
+				triggerVarName, err := r.vm.GetTriggerNameAsVar()
+				if err == nil && k == triggerVarName {
+					triggerInfo := map[string]interface{}{
+						"original_name": r.vm.task.Trigger.Name,
 					}
-				}
 
-				varInfo[k] = triggerInfo
+					if dataMap, ok := r.vm.vars[k].(map[string]any); ok {
+						if data, ok := dataMap["data"].(map[string]any); ok {
+							keys := []string{}
+							for key := range data {
+								keys = append(keys, key)
+							}
+							triggerInfo["available_fields"] = keys
+						}
+					}
+
+					varInfo[k] = triggerInfo
+				} else {
+					varInfo[k] = "variable"
+				}
 			} else {
 				varInfo[k] = "variable"
 			}

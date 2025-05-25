@@ -25,9 +25,9 @@ func TestCommonJSRequireSyntax(t *testing.T) {
 		{
 			name: "Lodash Array Operations",
 			code: `
-				const _ = require('lodash');
-				return _.map([1, 2, 3], n => n * 2);
-			`,
+			const _ = require('lodash');
+			return _.map([1, 2, 3], n => n * 2);
+		`,
 			expectedResult: []float64{2, 4, 6},
 			checkFunction:  wrapAssertFloat64Slice,
 		},
@@ -181,9 +181,9 @@ func TestES6ImportSyntax(t *testing.T) {
 			name: "UUID Named Import",
 			code: `
 				import { v4 as uuidv4 } from 'uuid';
-				const id = uuidv4();
+			const id = uuidv4();
 				return typeof id === 'string' && id.length === 36;
-			`,
+		`,
 			expectedResult: true,
 			checkFunction:  wrapAssertBool,
 		},
