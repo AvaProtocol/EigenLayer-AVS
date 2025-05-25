@@ -7,9 +7,6 @@ on:
       - main
       - staging
     paths:
-      - "**.go"
-      - "go.mod"
-      - "go.sum"
       - "core/**"
       - "pkg/**"
       - "aggregator/**"
@@ -18,16 +15,69 @@ on:
       - "cmd/**"
       - "version/**"
       - "config/**"
+      - "go.mod"
+      - "go.sum"
+      - "!scripts/**"
+      - "!**.md"
+      - "!.github/**"
+      - "!docs/**"
   workflow_dispatch:
     inputs:
       branch:
         description: "Branch to run tests against"
         required: true
         type: string
+      force_run:
+        description: "Force run tests even if only scripts changed"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
+  check-changes:
+    name: Check Changed Files
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0 # Fetch all history for comparing changes
+          ref: ${{ github.event.inputs.branch || github.ref }}
+
+      - name: Check if relevant files changed
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force_run }}" = "true" ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Get the base branch for comparison
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_BRANCH="${{ github.base_ref }}"
+          else
+            BASE_BRANCH="main"  # Default to main for manual runs
+          fi
+
+          # Get list of changed files
+          CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...HEAD)
+
+          # Check if any changes are in relevant directories
+          RELEVANT_CHANGES=$(echo "$CHANGED_FILES" | grep -E '\.go$|go\.mod|go\.sum|^core/|^pkg/|^aggregator/|^operator/|^model/|^cmd/|^version/|^config/')
+
+          if [ -n "$RELEVANT_CHANGES" ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+            echo "No relevant changes found. Skipping tests."
+          fi
+
   lint:
     name: Lint
+    needs: check-changes
+    if: needs.check-changes.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,7 +88,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.24'
+          go-version: "1.24"
 
       - name: Cache golangci-lint binary
         uses: actions/cache@v3
@@ -58,6 +108,8 @@ jobs:
   test:
     environment: Test
     name: Unit Test
+    needs: check-changes
+    if: needs.check-changes.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
