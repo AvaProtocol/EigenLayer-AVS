@@ -25,7 +25,7 @@ func NewBuiltinLoader() *BuiltinLoader {
 func (l *BuiltinLoader) RegisterBuiltinLibraries() error {
 	libMap := map[string]string{
 		"lodash": "libs/lodash.min.js",
-		"moment": "libs/moment.min.js",
+		"dayjs":  "libs/dayjs.min.js",
 		"uuid":   "libs/uuid.min.js",
 	}
 
@@ -45,23 +45,47 @@ func (l *BuiltinLoader) Load(runtime *goja.Runtime, name string) (goja.Value, er
 	if !ok {
 		return nil, errors.New("module not found: " + name)
 	}
-	
-	moduleScript := `
-	var exports = {};
-	var module = { exports: exports };
-	(function(module, exports) {
-		%s
-		
-		return module.exports || exports;
-	})(module, exports);
-	`
-	
-	script := fmt.Sprintf(moduleScript, string(content))
-	
-	result, err := runtime.RunString(script)
-	if err != nil {
-		return nil, err
+
+	// Create module and exports objects
+	module := runtime.NewObject()
+	exports := runtime.NewObject()
+	module.Set("exports", exports)
+
+	// Set the module and exports objects in the runtime
+	runtime.Set("module", module)
+	runtime.Set("exports", exports)
+
+	// Special handling for Day.js - it's designed to work well with module systems
+	if name == "dayjs" {
+		// Day.js has better UMD support, so we can run it more simply
+		moduleScript := fmt.Sprintf(`
+			(function(module, exports) {
+				%s
+				return module.exports;
+			})(module, exports);
+		`, string(content))
+
+		result, err := runtime.RunString(moduleScript)
+		if err != nil {
+			return nil, fmt.Errorf("error loading module %s: %v", name, err)
+		}
+		return result, nil
 	}
-	
+
+	// Wrap the code so that 'this' is the global object
+	moduleScript := fmt.Sprintf(`
+		(function(module, exports) {
+			(function() {
+				%s
+			}).call(this);
+			return module.exports || exports;
+		})(module, exports);
+	`, string(content))
+
+	result, err := runtime.RunString(moduleScript)
+	if err != nil {
+		return nil, fmt.Errorf("error loading module %s: %v", name, err)
+	}
+
 	return result, nil
 }

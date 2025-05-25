@@ -189,11 +189,17 @@ func (v *VM) GetTriggerNameAsVar() string {
 func (v *VM) GetNodeNameAsVar(nodeID string) string {
 	// Replace invalid characters with _
 	re := regexp.MustCompile(`[^a-zA-Z0-9_$]`)
-	name := v.TaskNodes[nodeID].Name
+
+	// Get node name if it exists, otherwise use nodeID
+	var name string
+	if node, exists := v.TaskNodes[nodeID]; exists && node != nil {
+		name = node.Name
+	}
 	if name == "" {
 		name = nodeID
 	}
-	standardized := re.ReplaceAllString(v.TaskNodes[nodeID].Name, "_")
+
+	standardized := re.ReplaceAllString(name, "_")
 
 	// Ensure the first character is valid
 	if len(standardized) == 0 || !regexp.MustCompile(`^[a-zA-Z_$]`).MatchString(standardized[:1]) {

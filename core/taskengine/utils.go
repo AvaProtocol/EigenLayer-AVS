@@ -25,18 +25,18 @@ func NewGojaVM() *goja.Runtime {
 func NewGojaVMWithModules() (*goja.Runtime, *modules.Registry, error) {
 	vm := goja.New()
 	macros.ConfigureGojaRuntime(vm)
-	
+
 	registry := modules.NewRegistry()
-	
+
 	builtinLoader := modules.NewBuiltinLoader()
 	if err := builtinLoader.RegisterBuiltinLibraries(); err != nil {
 		return nil, nil, err
 	}
-	
+
 	registry.RegisterLoader("lodash", builtinLoader)
-	registry.RegisterLoader("moment", builtinLoader)
+	registry.RegisterLoader("dayjs", builtinLoader)
 	registry.RegisterLoader("uuid", builtinLoader)
-	
+
 	return vm, registry, nil
 }
 
