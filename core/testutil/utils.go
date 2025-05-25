@@ -97,11 +97,42 @@ func TestMustDB() storage.Storage {
 }
 
 func GetLogger() sdklogging.Logger {
-	logger, err := sdklogging.NewZapLogger("development")
-	if err != nil {
-		panic(err)
-	}
-	return logger
+	return &MockLogger{}
+}
+
+// MockLogger implements the sdklogging.Logger interface for testing
+type MockLogger struct{}
+
+func (l *MockLogger) Info(msg string, keysAndValues ...interface{}) {}
+func (l *MockLogger) Debug(msg string, keysAndValues ...interface{}) {}
+func (l *MockLogger) Error(msg string, keysAndValues ...interface{}) {}
+func (l *MockLogger) Warn(msg string, keysAndValues ...interface{}) {}
+func (l *MockLogger) Fatal(msg string, keysAndValues ...interface{}) {
+	panic(msg)
+}
+
+func (l *MockLogger) With(keysAndValues ...interface{}) sdklogging.Logger {
+	return l
+}
+
+func (l *MockLogger) WithComponent(componentName string) sdklogging.Logger {
+	return l
+}
+
+func (l *MockLogger) WithName(name string) sdklogging.Logger {
+	return l
+}
+
+func (l *MockLogger) WithServiceName(serviceName string) sdklogging.Logger {
+	return l
+}
+
+func (l *MockLogger) WithHostName(hostName string) sdklogging.Logger {
+	return l
+}
+
+func (l *MockLogger) Sync() error {
+	return nil
 }
 
 func TestUser1() *model.User {

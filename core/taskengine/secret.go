@@ -2,7 +2,6 @@ package taskengine
 
 import (
 	"fmt"
-	"maps"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -29,7 +28,7 @@ func LoadSecretForTask(db storage.Storage, task *model.Task) (map[string]string,
 		return nil, err
 	}
 	// Copy global static secret we loaded from config file.
-	maps.Copy(secrets, macroSecrets)
+	copyMap(secrets, macroSecrets)
 
 	// Load secret at user level. It has higher priority
 	// TODO: load secret at org level first, when we introduce that
@@ -60,3 +59,11 @@ func LoadSecretForTask(db storage.Storage, task *model.Task) (map[string]string,
 
 	return secrets, nil
 }
+
+// copyMap is a replacement for maps.Copy for Go 1.18.1 compatibility
+func copyMap(dst, src map[string]string) {
+	for k, v := range src {
+		dst[k] = v
+	}
+}
+
