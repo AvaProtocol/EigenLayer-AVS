@@ -3,15 +3,6 @@ module github.com/AvaProtocol/EigenLayer-AVS
 go 1.22.1
 
 require (
-
-go 1.22
-||||||| a354403
-go 1.24
-=======
-go 1.22.1
->>>>>>> staging
-
-require (
 	github.com/Layr-Labs/cerberus-api v0.0.0-20241016214048-d52f5ddc5559
 	github.com/Layr-Labs/eigensdk-go v0.2.0-beta.1
 	github.com/allegro/bigcache/v3 v3.1.0
