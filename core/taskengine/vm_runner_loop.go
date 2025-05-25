@@ -36,7 +36,7 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	var log strings.Builder
 	log.WriteString(fmt.Sprintf("Start loop execution for input %s at %s", node.Input, time.Now()))
 
-	inputVar, exists := r.vm.vars[node.Input]
+	inputVar, exists := r.vm.vars.Load(node.Input)
 	if !exists {
 		err := fmt.Errorf("input variable %s not found", node.Input)
 		s.Success = false
@@ -91,8 +91,8 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 			go func(index int, value interface{}) {
 				defer wg.Done()
 				
-				r.vm.vars[node.IterKey] = index
-				r.vm.vars[node.IterVal] = value
+				r.vm.vars.Store(node.IterKey, index)
+				r.vm.vars.Store(node.IterVal, value)
 				
 				result, err := r.executeNestedNode(node, fmt.Sprintf("%s.%d", stepID, index))
 				
@@ -115,8 +115,8 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 		wg.Wait()
 	} else {
 		for i, item := range inputArray {
-			r.vm.vars[node.IterKey] = i
-			r.vm.vars[node.IterVal] = item
+			r.vm.vars.Store(node.IterKey, i)
+			r.vm.vars.Store(node.IterVal, item)
 			
 			result, err := r.executeNestedNode(node, fmt.Sprintf("%s.%d", stepID, i))
 			results = append(results, result)
@@ -202,7 +202,7 @@ func (r *LoopProcessor) executeNestedNode(node *avsproto.LoopNode, iterationStep
 		return nil, fmt.Errorf("no nested node specified in loop")
 	}
 	
-	r.vm.TaskNodes[iterationStepID] = nestedNode
+	r.vm.TaskNodes.Store(iterationStepID, nestedNode)
 
 	_, err = r.vm.executeNode(nestedNode)
 	if err != nil {
@@ -211,9 +211,11 @@ func (r *LoopProcessor) executeNestedNode(node *avsproto.LoopNode, iterationStep
 
 	varName := r.vm.GetNodeNameAsVar(iterationStepID)
 	if varName != "" {
-		if varMap, ok := r.vm.vars[varName].(map[string]interface{}); ok {
-			if data, hasData := varMap["data"]; hasData {
-				result = data
+		if varValue, ok := r.vm.vars.Load(varName); ok {
+			if varMap, ok := varValue.(map[string]interface{}); ok {
+				if data, hasData := varMap["data"]; hasData {
+					result = data
+				}
 			}
 		}
 	}

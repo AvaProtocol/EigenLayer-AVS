@@ -52,7 +52,7 @@ func (c *CommonProcessor) SetVar(name string, data any) {
 
 // Set the variable for step output so it can be refer and use in subsequent steps
 func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
-	c.vm.AddVar(c.vm.GetNodeNameAsVar(stepID), map[string]any{
+	c.vm.vars.Store(c.vm.GetNodeNameAsVar(stepID), map[string]any{
 		"data": data,
 	})
 }
@@ -64,9 +64,13 @@ func (c *CommonProcessor) GetOutputVar(stepID string) any {
 		return nil
 	}
 
-	value, ok := c.vm.vars[name].(map[string]any)
-	if ok {
-		return value["data"]
+	value, ok := c.vm.vars.Load(name)
+	if !ok {
+		return nil
+	}
+	
+	if valueMap, ok := value.(map[string]any); ok {
+		return valueMap["data"]
 	}
 
 	return nil
@@ -109,7 +113,7 @@ type VM struct {
 	// Input raw task data
 	// TaskID can be used to cache compile program
 	TaskID    string
-	TaskNodes map[string]*avsproto.TaskNode
+	TaskNodes sync.Map // Changed from map[string]*avsproto.TaskNode for thread safety
 
 	//TaskEdges   []*avsproto.TaskEdge
 	//TaskTrigger *avsproto.TaskTrigger
@@ -125,7 +129,7 @@ type VM struct {
 	Status VMState
 	mu     *sync.Mutex
 	// internal state that is set through out program execution
-	vars map[string]any
+	vars sync.Map // Changed from map[string]any for thread safety
 
 	// hold the name->value of loaded secret for this workflow
 	secrets map[string]string
@@ -146,11 +150,15 @@ type VM struct {
 func NewVM() *VM {
 	v := &VM{
 		Status:           VMStateInitialize,
-		TaskNodes:        make(map[string]*avsproto.TaskNode),
 		mu:               &sync.Mutex{},
 		instructionCount: 0,
 		secrets:          map[string]string{},
-		vars:             macros.GetEnvs(map[string]any{}),
+	}
+	
+	// Initialize vars with environment variables
+	envVars := macros.GetEnvs(map[string]any{})
+	for key, value := range envVars {
+		v.vars.Store(key, value)
 	}
 
 	return v
@@ -206,17 +214,36 @@ func (v *VM) GetTriggerNameAsVar() (string, error) {
 func (v *VM) GetNodeNameAsVar(nodeID string) string {
 	// Replace invalid characters with _
 	re := regexp.MustCompile(`[^a-zA-Z0-9_$]`)
+<<<<<<< HEAD
 
 	// Get node name if it exists, otherwise use nodeID
 	var name string
 	if node, exists := v.TaskNodes[nodeID]; exists && node != nil {
 		name = node.Name
 	}
+||||||| parent of 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
+	name := v.TaskNodes[nodeID].Name
+=======
+	
+	nodeObj, ok := v.TaskNodes.Load(nodeID)
+	if !ok {
+		return "_" + nodeID
+	}
+	
+	node := nodeObj.(*avsproto.TaskNode)
+	name := node.Name
+>>>>>>> 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
 	if name == "" {
 		name = nodeID
 	}
+<<<<<<< HEAD
 
 	standardized := re.ReplaceAllString(name, "_")
+||||||| parent of 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
+	standardized := re.ReplaceAllString(v.TaskNodes[nodeID].Name, "_")
+=======
+	standardized := re.ReplaceAllString(name, "_")
+>>>>>>> 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
 
 	// Ensure the first character is valid
 	if len(standardized) == 0 || !regexp.MustCompile(`^[a-zA-Z_$]`).MatchString(standardized[:1]) {
@@ -228,8 +255,23 @@ func (v *VM) GetNodeNameAsVar(nodeID string) string {
 
 func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
 	v := &VM{
+<<<<<<< HEAD
 		Status:            VMStateInitialize,
 		TaskNodes:         make(map[string]*avsproto.TaskNode),
+||||||| parent of 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
+		Status: VMStateInitialize,
+		//TaskEdges:         task.Edges,
+		//TaskTrigger:       task.Trigger,
+		TaskNodes: make(map[string]*avsproto.TaskNode),
+		TaskOwner: common.HexToAddress(task.Owner),
+
+=======
+		Status: VMStateInitialize,
+		//TaskEdges:         task.Edges,
+		//TaskTrigger:       task.Trigger,
+		TaskOwner: common.HexToAddress(task.Owner),
+
+>>>>>>> 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
 		plans:             make(map[string]*Step),
 		mu:                &sync.Mutex{},
 		instructionCount:  0,
@@ -240,23 +282,44 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 		parsedTriggerData: &triggerDataType{},
 	}
 
+<<<<<<< HEAD
 	if task != nil {
 		v.TaskOwner = common.HexToAddress(task.Owner)
 		for _, node := range task.Nodes {
 			v.TaskNodes[node.Id] = node
 		}
+||||||| parent of 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
+	for _, node := range task.Nodes {
+		v.TaskNodes[node.Id] = node
+=======
+	for _, node := range task.Nodes {
+		v.TaskNodes.Store(node.Id, node)
+>>>>>>> 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
 	}
 
+<<<<<<< HEAD
 	v.vars = macros.GetEnvs(map[string]any{})
 	triggerVarName, err := v.GetTriggerNameAsVar()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get trigger variable name: %w", err)
 	}
+||||||| parent of 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
+	v.vars = macros.GetEnvs(map[string]any{})
+	triggerVarName := v.GetTriggerNameAsVar()
+=======
+	// Initialize vars with environment variables
+	envVars := macros.GetEnvs(map[string]any{})
+	for key, value := range envVars {
+		v.vars.Store(key, value)
+	}
+	
+	triggerVarName := v.GetTriggerNameAsVar()
+>>>>>>> 64687b9 (Fix: Replace map with sync.Map for concurrent access in LoopProcessor)
 	// popular trigger data for trigger variable
 	if reason != nil {
-		v.vars[triggerVarName] = map[string]any{
+		v.vars.Store(triggerVarName, map[string]any{
 			"data": map[string]any{},
-		}
+		})
 
 		if reason.LogIndex > 0 && reason.TxHash != "" {
 			// if it contains event, we need to fetch and populate data
@@ -297,7 +360,9 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 				}
 				formattedValue := ToDecimal(parseTransfer.Value, int(tokenMetadata.Decimals)).String()
 
-				v.vars[triggerVarName].(map[string]any)["data"] = map[string]any{
+				triggerData, _ := v.vars.Load(triggerVarName)
+				triggerDataMap := triggerData.(map[string]any)
+				triggerDataMap["data"] = map[string]any{
 					"topics": lo.Map(event.Topics, func(topic common.Hash, _ int) string {
 						return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x"))
 					}),
@@ -316,6 +381,7 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 					"value_formatted":   formattedValue,
 					"transaction_index": event.TxIndex,
 				}
+				v.vars.Store(triggerVarName, triggerDataMap)
 
 				v.parsedTriggerData.TransferLog = &avsproto.Execution_TransferLogOutput{
 					TokenName:       tokenMetadata.Name,
@@ -353,12 +419,15 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 		}
 
 		if reason.BlockNumber > 0 {
-			// Add both snake_case and camelCase versions for compatibility
-			dataMap := v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)
+			triggerData, _ := v.vars.Load(triggerVarName)
+			triggerDataMap := triggerData.(map[string]any)
+			dataMap := triggerDataMap["data"].(map[string]any)
 
 			// Add both snake_case and camelCase versions for compatibility
 			dataMap["block_number"] = reason.BlockNumber
 			dataMap["blockNumber"] = reason.BlockNumber
+			
+			v.vars.Store(triggerVarName, triggerDataMap)
 
 			v.parsedTriggerData.Block = &avsproto.Execution_BlockOutput{
 				BlockNumber: uint64(reason.BlockNumber),
@@ -366,16 +435,22 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 		}
 
 		if reason.Epoch > 0 {
-			v.vars[triggerVarName].(map[string]any)["data"].(map[string]any)["epoch"] = reason.Epoch
+			triggerData, _ := v.vars.Load(triggerVarName)
+			triggerDataMap := triggerData.(map[string]any)
+			dataMap := triggerDataMap["data"].(map[string]any)
+			
+			dataMap["epoch"] = reason.Epoch
+			v.vars.Store(triggerVarName, triggerDataMap)
+			
 			v.parsedTriggerData.Time = &avsproto.Execution_TimeOutput{
 				Epoch: uint64(reason.Epoch),
 			}
 		}
 	}
 
-	v.vars["apContext"] = map[string]map[string]string{
+	v.vars.Store("apContext", map[string]map[string]string{
 		"configVars": secrets,
-	}
+	})
 
 	return v, nil
 }
@@ -385,7 +460,7 @@ func (v *VM) CreateSandbox() error {
 }
 
 func (v *VM) AddVar(key string, value any) {
-	v.vars[key] = value
+	v.vars.Store(key, value)
 }
 
 // Compile generates an execution plan based on edge
@@ -452,7 +527,11 @@ func (v *VM) Run() error {
 	currentStep := v.plans[v.entrypoint]
 
 	for currentStep != nil {
-		node := v.TaskNodes[currentStep.NodeID]
+		nodeObj, ok := v.TaskNodes.Load(currentStep.NodeID)
+		if !ok {
+			return fmt.Errorf("node not found: %s", currentStep.NodeID)
+		}
+		node := nodeObj.(*avsproto.TaskNode)
 
 		jump, err := v.executeNode(node)
 		if err != nil {
@@ -663,13 +742,19 @@ func (v *VM) preprocessText(text string) string {
 	// Initialize goja runtime using the new constructor
 	jsvm := NewGojaVM()
 
-	for key, value := range v.vars {
-		if err := jsvm.Set(key, value); err != nil {
+	v.vars.Range(func(key, value interface{}) bool {
+		keyStr, ok := key.(string)
+		if !ok {
+			return true
+		}
+		
+		if err := jsvm.Set(keyStr, value); err != nil {
 			if v.logger != nil {
-				v.logger.Error("failed to set variable in JS VM", "key", key, "error", err)
+				v.logger.Error("failed to set variable in JS VM", "key", keyStr, "error", err)
 			}
 		}
-	}
+		return true
+	})
 
 	// Find all {{ }} expressions
 	result := text
@@ -742,22 +827,35 @@ func (v *VM) preprocessText(text string) string {
 	return result
 }
 
-func (v *VM) CollectInputs() []string {
-	inputs := []string{}
-	for k := range v.vars {
-		if slices.Contains(macros.MacroFuncs, k) {
-			continue
+func (v *VM) CollectInputs() map[string]string {
+	inputs := make(map[string]string)
+	
+	v.vars.Range(func(key, value interface{}) bool {
+		keyStr, ok := key.(string)
+		if !ok {
+			return true
 		}
-
-		varname := k
+		
+		if slices.Contains(macros.MacroFuncs, keyStr) {
+			return true
+		}
+		
+		valueStr := ""
+		if value != nil {
+			valueStr = fmt.Sprintf("%v", value)
+		}
+		
+		varname := keyStr
 		if varname == "apContext" {
 			varname = "apContext.configVars"
 		} else {
 			varname = fmt.Sprintf("%s.data", varname)
 		}
-		inputs = append(inputs, varname)
-	}
-
+		
+		inputs[varname] = valueStr
+		return true
+	})
+	
 	return inputs
 }
 
