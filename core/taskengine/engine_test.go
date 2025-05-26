@@ -1377,3 +1377,151 @@ func TestExecutionCountWithTaskCompletion(t *testing.T) {
 	assert.Equal(t, int64(2), protobufTask.ExecutionCount, "ExecutionCount should be 2 in protobuf representation")
 	assert.Equal(t, avsproto.TaskStatus_Completed, protobufTask.Status, "Task status should be completed in protobuf representation")
 }
+
+func TestListExecutionsPagination(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	user := testutil.TestUser1()
+
+	// Create a task
+	tr := testutil.JsFastTask()
+	tr.Name = "pagination-test-task"
+	tr.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	task, _ := n.CreateTask(user, tr)
+
+	const (
+		totalTestExecutions = 10
+		pageSize           = 3
+	)
+
+	// Create totalTestExecutions executions
+	for i := 0; i < totalTestExecutions; i++ {
+		n.TriggerTask(user, &avsproto.UserTriggerTaskReq{
+			TaskId: task.Id,
+			Reason: &avsproto.TriggerReason{
+				BlockNumber: uint64(100 + i),
+			},
+			IsBlocking: true,
+		})
+	}
+
+	// Test with pageSize limit
+	result, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{
+		TaskIds: []string{task.Id},
+		Limit:   pageSize,
+	})
+	if err != nil {
+		t.Errorf("ListExecutions failed: %v", err)
+		return
+	}
+
+	if len(result.Items) != pageSize {
+		t.Errorf("Expected %d items with limit %d, got %d", pageSize, pageSize, len(result.Items))
+	}
+
+	if !result.HasMore {
+		t.Errorf("Expected HasMore to be true with limit %d and %d total items", pageSize, totalTestExecutions)
+	}
+
+	if result.Cursor == "" {
+		t.Errorf("Expected cursor to be set when HasMore is true")
+	}
+
+	// Test with limit 0 (should use default)
+	result, err = n.ListExecutions(user, &avsproto.ListExecutionsReq{
+		TaskIds: []string{task.Id},
+		Limit: 0,
+	})
+	if err != nil {
+		t.Errorf("ListExecutions failed: %v", err)
+		return
+	}
+
+	if len(result.Items) != totalTestExecutions {
+		t.Errorf("Expected %d items (total number of executions), got %d", totalTestExecutions, len(result.Items))
+	}
+
+	// Test with limit greater than total items
+	result, err = n.ListExecutions(user, &avsproto.ListExecutionsReq{
+		TaskIds: []string{task.Id},
+		Limit: totalTestExecutions * 2,
+	})
+	if err != nil {
+		t.Errorf("ListExecutions failed: %v", err)
+		return
+	}
+
+	if len(result.Items) != totalTestExecutions {
+		t.Errorf("Expected %d items with limit %d, got %d", totalTestExecutions, totalTestExecutions*2, len(result.Items))
+	}
+
+	if result.HasMore {
+		t.Errorf("Expected HasMore to be false when limit exceeds total items")
+	}
+
+	if result.Cursor != "" {
+		t.Errorf("Expected cursor to be empty when HasMore is false")
+	}
+
+	// Test pagination using cursor
+	firstPage, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{
+		TaskIds: []string{task.Id},
+		Limit: pageSize,
+	})
+	if err != nil {
+		t.Errorf("ListExecutions failed: %v", err)
+		return
+	}
+
+	secondPage, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{
+		TaskIds: []string{task.Id},
+		After: firstPage.Cursor,
+		Limit: pageSize,
+	})
+	if err != nil {
+		t.Errorf("ListExecutions failed: %v", err)
+		return
+	}
+
+	// Verify no overlap between pages
+	firstPageIds := make(map[string]bool)
+	for _, item := range firstPage.Items {
+		firstPageIds[item.Id] = true
+	}
+
+	for _, item := range secondPage.Items {
+		if firstPageIds[item.Id] {
+			t.Errorf("Found duplicate execution %s in second page", item.Id)
+		}
+	}
+
+	thirdPage, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{
+		TaskIds: []string{task.Id},
+		Before: secondPage.Cursor,
+		Limit: pageSize,
+	})
+	if err != nil {
+		t.Errorf("ListExecutions failed: %v", err)
+		return
+	}
+
+	// Verify backward pagination returns the same items as forward pagination
+	if len(thirdPage.Items) != len(firstPage.Items) {
+		t.Errorf("Expected backward pagination to return %d items, got %d", len(firstPage.Items), len(thirdPage.Items))
+	}
+
+	thirdPageIds := make(map[string]bool)
+	for _, item := range thirdPage.Items {
+		thirdPageIds[item.Id] = true
+	}
+
+	for _, item := range firstPage.Items {
+		if !thirdPageIds[item.Id] {
+			t.Errorf("Expected backward pagination to return the same items as forward pagination")
+		}
+	}
+}
