@@ -839,11 +839,9 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 
 	total := 0
 	var lastExecutionId string
-	visited := 0
 	
 	for i := len(executionKeys) - 1; i >= 0; i-- {
 		key := executionKeys[i]
-		visited = i
 
 		executionUlid := ulid.MustParse(ExecutionIdFromStorageKey([]byte(key)))
 		if !cursor.IsZero() {
