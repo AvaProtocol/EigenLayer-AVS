@@ -71,11 +71,21 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	log.WriteString(fmt.Sprintf("Start branch execution for node %s at %s\n", stepID, time.Now()))
 
 	// Evaluate conditions
-	for _, condition := range node.Conditions {
+	for i, condition := range node.Conditions {
 		log.WriteString(fmt.Sprintf("Evaluating condition '%s': %s\n", condition.Id, condition.Expression))
 
 		// Handle 'else' conditions specially - they should always be true if reached
 		if condition.Type == "else" {
+			// Ensure else condition is not the first condition (validation should catch this, but double-check)
+			if i == 0 {
+				err := fmt.Errorf("else condition cannot be the first condition")
+				log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+				executionStep.Error = err.Error()
+				executionStep.Success = false
+				executionStep.Log = log.String()
+				executionStep.EndAt = time.Now().UnixMilli()
+				return executionStep, nil, err
+			}
 			log.WriteString(fmt.Sprintf("Condition '%s' is an 'else' condition, automatically true\n", condition.Id))
 			executionStep.Success = true
 			executionStep.OutputData = &avsproto.Execution_Step_Branch{
@@ -99,6 +109,13 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		}
 
 		// For 'if' conditions, evaluate the expression
+		// Check if expression is empty or only whitespace
+		trimmedExpression := strings.TrimSpace(condition.Expression)
+		if trimmedExpression == "" {
+			log.WriteString(fmt.Sprintf("Condition '%s' has empty expression, treating as false\n", condition.Id))
+			continue // Skip this condition (treat as false)
+		}
+
 		// Preprocess the expression using the VM's current variable context
 		processedExpression := r.vm.preprocessText(condition.Expression)
 		log.WriteString(fmt.Sprintf("Processed expression for '%s': %s\n", condition.Id, processedExpression))
@@ -171,14 +188,43 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 
 	// If no condition evaluated to true
 	log.WriteString("No branch condition evaluated to true.\n")
-	// Removed DefaultBranch handling as it's not in the protobuf definition
 
-	// No condition true, and no default branch
-	noConditionMetError := "no branch condition met"
-	log.WriteString(noConditionMetError + "\n")
-	executionStep.Error = noConditionMetError
-	executionStep.Success = false
-	executionStep.Log = log.String()
-	executionStep.EndAt = time.Now().UnixMilli()
-	return executionStep, nil, fmt.Errorf(noConditionMetError)
+	// Check if there are any 'else' conditions defined
+	hasElseCondition := false
+	for _, condition := range node.Conditions {
+		if condition.Type == "else" {
+			hasElseCondition = true
+			break
+		}
+	}
+
+	// Check if we have any conditions at all
+	if len(node.Conditions) == 0 {
+		// No conditions at all - this is an error
+		noConditionMetError := "no branch condition met"
+		log.WriteString(noConditionMetError + "\n")
+		executionStep.Error = noConditionMetError
+		executionStep.Success = false
+		executionStep.Log = log.String()
+		executionStep.EndAt = time.Now().UnixMilli()
+		return executionStep, nil, fmt.Errorf(noConditionMetError)
+	} else if hasElseCondition {
+		// If there's an else condition but we reached here, it means the else condition failed to execute
+		// This should be an error because else conditions should always execute if reached
+		noConditionMetError := "no branch condition met"
+		log.WriteString(noConditionMetError + "\n")
+		executionStep.Error = noConditionMetError
+		executionStep.Success = false
+		executionStep.Log = log.String()
+		executionStep.EndAt = time.Now().UnixMilli()
+		return executionStep, nil, fmt.Errorf(noConditionMetError)
+	} else {
+		// If there are only 'if' conditions and none matched, this is a valid "no-op" scenario
+		log.WriteString("No conditions matched and no else condition defined - this is a valid no-op.\n")
+		executionStep.Success = true
+		executionStep.OutputData = nil // No branch action taken
+		executionStep.Log = log.String()
+		executionStep.EndAt = time.Now().UnixMilli()
+		return executionStep, nil, nil // Success with no next step
+	}
 }

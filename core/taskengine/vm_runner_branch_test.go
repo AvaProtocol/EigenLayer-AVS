@@ -714,11 +714,12 @@ func TestBranchProcessor_Execute_NoConditionMet(t *testing.T) {
 
 	executionLog, nextStep, err := processor.Execute(stepID, node)
 
-	assert.NotNil(t, err)
-	assert.Contains(t, err.Error(), "no branch condition met")
+	// Updated expectation: when only if conditions exist and none match, it should be a valid no-op
+	assert.Nil(t, err)
 	assert.Nil(t, nextStep)
 	assert.NotNil(t, executionLog)
-	assert.False(t, executionLog.Success)
+	assert.True(t, executionLog.Success)
+	assert.Nil(t, executionLog.GetBranch()) // No branch action taken
 }
 
 func TestBranchProcessor_Execute_ErrorInExpression(t *testing.T) {
@@ -827,16 +828,13 @@ func TestBranchProcessor_Execute_NonExistentVarInExpression(t *testing.T) {
 
 	executionLog, nextStep, err := processor.Execute(stepID, node)
 
-	// Error because nonExistentVar causes expression to fail, then no conditions met.
-	// The exact error might depend on how expr handles undefined variables.
-	// Assuming it evaluates to a falsy value or errors, leading to "no branch condition met".
-	assert.NotNil(t, err)
-	assert.Contains(t, err.Error(), "no branch condition met")
+	// Updated expectation: nonExistentVar causes expression to evaluate to falsy value,
+	// but since there are only if conditions and none match, it should be a valid no-op
+	assert.Nil(t, err)
 	assert.Nil(t, nextStep)
 	assert.NotNil(t, executionLog)
-	assert.False(t, executionLog.Success)
-	// It's also possible the expression itself errors out first.
-	// assert.Contains(t, executionLog.Error, "failed to evaluate expression")
+	assert.True(t, executionLog.Success)
+	assert.Nil(t, executionLog.GetBranch()) // No branch action taken
 }
 
 func TestBranchProcessor_Execute_InvalidScriptSyntax(t *testing.T) {
