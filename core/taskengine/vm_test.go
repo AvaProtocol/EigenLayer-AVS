@@ -128,7 +128,10 @@ func TestRunSimpleTasks(t *testing.T) {
 		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got nothing")
 	}
 
-	data := vm.vars["httpnode"].(map[string]any)["data"]
+	vm.mu.Lock()
+	tempHttpNode, _ := vm.vars["httpnode"]
+	vm.mu.Unlock()
+	data := tempHttpNode.(map[string]any)["data"]
 
 	if data.(map[string]any)["name"].(string) != "Alice" {
 		t.Errorf("step result isn't store properly, expect 123 got %s", data)
@@ -341,7 +344,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		t.Errorf("expect vm initialized")
 	}
 
-	vm.vars["a"] = 10
+	vm.AddVar("a", 10)
 	vm.Compile()
 
 	if vm.entrypoint != "branch1" {
@@ -366,15 +369,19 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		t.Errorf("incorrect log, expect 2 got %d", len(vm.ExecutionLogs))
 	}
 
-	outputdata := gow.AnyToMap(vm.ExecutionLogs[1].GetRestApi().Data)
-	if outputdata["data"] != `hit=notification1` {
-		t.Errorf("expect executing notification1 and set output data to notification1")
+	vm.mu.Lock()
+	outputVar, _ := vm.vars["httpnode"]
+	vm.mu.Unlock()
+	outputMap := outputVar.(map[string]any)
+	actualData := outputMap["data"].(map[string]any)["data"].(string)
+	if actualData != `hit=notification1` {
+		t.Errorf("expect executing notification1 and set output data to notification1, got: %s", actualData)
 	}
 
 	vm.Reset()
 
 	// Now test the else branch
-	vm.vars["a"] = 1
+	vm.AddVar("a", 1)
 	vm.Compile()
 	err = vm.Run()
 	if err != nil {
@@ -388,9 +395,12 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	if len(vm.ExecutionLogs) != 2 {
 		t.Errorf("incorrect log, expect 2 got %d", len(vm.ExecutionLogs))
 	}
-	outputdata = gow.AnyToMap(vm.ExecutionLogs[1].GetRestApi().Data)
-	if outputdata["args"].(map[string]any)["hit"].(string) != `notification2` {
-		t.Errorf("expect executing notification2 to be run but it didn't run")
+	vm.mu.Lock()
+	outputVarElse, _ := vm.vars["httpnode"]
+	vm.mu.Unlock()
+	outputMapElse := outputVarElse.(map[string]any)["data"].(map[string]any)
+	if outputMapElse["args"].(map[string]any)["hit"].(string) != `notification2` {
+		t.Errorf("expect executing notification2 to be run but it didn't run, got %v", outputMapElse)
 	}
 }
 
@@ -715,7 +725,10 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got nothing")
 	}
 
-	data := vm.vars["httpnode"].(map[string]any)["data"].(map[string]any)
+	vm.mu.Lock()
+	tempData, _ := vm.vars["httpnode"]
+	vm.mu.Unlock()
+	data := tempData.(map[string]any)["data"].(map[string]any)
 	if data["data"].(string) != "my key is secretapikey in body" {
 		t.Errorf("secret doesn't render correctly in body, expect secretapikey but got %s", data["data"])
 	}
@@ -727,35 +740,32 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 
 func TestPreprocessText(t *testing.T) {
 	// Setup a VM with some test variables
-	vm := &VM{
-		vars: map[string]any{
-			"user": map[string]any{
-				"data": map[string]any{
-					"name":    "Alice",
-					"balance": 100,
-					"items":   []string{"apple", "banana"},
-					"address": "0x123",
-					"active":  true,
-				},
-			},
-			"token": map[string]any{
-				"data": map[string]any{
-					"symbol":  "ETH",
-					"decimal": 18,
-					"address": "0x123",
-					"pairs": []map[string]any{
-						{"symbol": "ETH/USD", "price": 2000},
-						{"symbol": "ETH/EUR", "price": 1800},
-					},
-				},
-			},
-			"apContext": map[string]map[string]string{
-				"configVars": {
-					"my_awesome_secret": "my_awesome_secret_value",
-				},
+	vm := NewVM()
+	vm.AddVar("user", map[string]any{
+		"data": map[string]any{
+			"name":    "Alice",
+			"balance": 100,
+			"items":   []string{"apple", "banana"},
+			"address": "0x123",
+			"active":  true,
+		},
+	})
+	vm.AddVar("token", map[string]any{
+		"data": map[string]any{
+			"symbol":  "ETH",
+			"decimal": 18,
+			"address": "0x123",
+			"pairs": []map[string]any{
+				{"symbol": "ETH/USD", "price": 2000},
+				{"symbol": "ETH/EUR", "price": 1800},
 			},
 		},
-	}
+	})
+	vm.AddVar("apContext", map[string]map[string]string{
+		"configVars": {
+			"my_awesome_secret": "my_awesome_secret_value",
+		},
+	})
 
 	tests := []struct {
 		name     string
@@ -901,9 +911,9 @@ func TestPreprocessText(t *testing.T) {
 
 func TestPreprocessTextDate(t *testing.T) {
 	// Setup a VM
-	vm := &VM{
-		vars: map[string]any{}, // Date tests don't usually need complex global vars
-	}
+	vm := NewVM()
+	// Date tests don't usually need complex global vars,
+	// NewVM already initializes vm.vars as an empty sync.Map
 
 	tests := []struct {
 		name     string

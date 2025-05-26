@@ -3,246 +3,174 @@ package taskengine
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
+	"net/http"
 	"strings"
 	"time"
 
-	resty "github.com/go-resty/resty/v2"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/go-resty/resty/v2"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
-
-	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 type RestProcessor struct {
 	*CommonProcessor
-	client *resty.Client
+	HttpClient *resty.Client
 }
 
 func NewRestProrcessor(vm *VM) *RestProcessor {
 	client := resty.New()
-
-	// Unique settings at Client level
-	// --------------------------------
-	// Enable debug mode
-	// client.SetDebug(true)
-
-	// Set client timeout as per your need
-	client.SetTimeout(1 * time.Minute)
-
-	r := RestProcessor{
-		client: client,
+	client.SetTimeout(30 * time.Second) // Default timeout
+	// client.SetLogger(vm.logger) // Resty logger might not match sdklogging.Logger interface
+	// TODO: Configure retry, auth, etc. as needed
+	return &RestProcessor{
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
+		HttpClient: client,
 	}
-
-	return &r
 }
 
 func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
-	t0 := time.Now().UnixMilli()
-	s := &avsproto.Execution_Step{
+	t0 := time.Now()
+	executionLogStep := &avsproto.Execution_Step{
 		NodeId:     stepID,
-		Log:        "",
 		OutputData: nil,
-		Success:    true, // Start optimistically
+		Log:        "",
 		Error:      "",
-		StartAt:    t0,
+		Success:    true, // Assume success
+		StartAt:    t0.UnixMilli(),
 	}
 
-	// Clone the restapi node to avoid modifying the pointer memory
-	processedNode := &avsproto.RestAPINode{
-		Url:     node.Url,
-		Method:  node.Method,
-		Body:    node.Body,
-		Headers: make(map[string]string),
+	var logBuilder strings.Builder
+	logBuilder.WriteString(fmt.Sprintf("Executing REST API Node ID: %s at %s\n", stepID, time.Now()))
+	logBuilder.WriteString(fmt.Sprintf("URL: %s, Method: %s\n", node.Url, node.Method))
+
+	// Preprocess URL, Body, and Headers using VM variables
+	processedURL := r.vm.preprocessText(node.Url)
+	processedBodyStr := r.vm.preprocessText(node.Body)
+	processedHeaders := make(map[string]string)
+	for key, valTpl := range node.Headers {
+		processedHeaders[r.vm.preprocessText(key)] = r.vm.preprocessText(valTpl)
 	}
 
-	// Copy headers
-	for k, v := range node.Headers {
-		processedNode.Headers[k] = v
+	logBuilder.WriteString(fmt.Sprintf("Processed URL: %s\n", processedURL))
+	if processedBodyStr != "" {
+		logBuilder.WriteString(fmt.Sprintf("Processed Body: %s\n", processedBodyStr))
+	}
+	if len(processedHeaders) > 0 {
+		logBuilder.WriteString(fmt.Sprintf("Processed Headers: %v\n", processedHeaders))
 	}
 
-	// Preprocess URL, body, and headers without modifying original node
-	if strings.Contains(processedNode.Url, "{{") {
-		processedNode.Url = r.vm.preprocessText(processedNode.Url)
-	}
-	if strings.Contains(processedNode.Body, "{{") {
-		processedNode.Body = r.vm.preprocessText(processedNode.Body)
-	}
-	for headerName, headerValue := range processedNode.Headers {
-		if strings.Contains(headerValue, "{{") {
-			processedNode.Headers[headerName] = r.vm.preprocessText(headerValue)
+	req := r.HttpClient.R()
+	req.SetHeaders(processedHeaders)
+
+	// Attempt to parse body as JSON. If not, send as raw string.
+	var bodyData interface{}
+	if processedBodyStr != "" {
+		if err := json.Unmarshal([]byte(processedBodyStr), &bodyData); err == nil {
+			req.SetBody(bodyData)
+			logBuilder.WriteString("Body sent as parsed JSON.\n")
+		} else {
+			req.SetBody(processedBodyStr) // Send as raw string if not valid JSON
+			logBuilder.WriteString("Body sent as raw string (not valid JSON).\n")
 		}
-	}
-
-	var err error
-	// The defer function serves as the single source of truth for setting Success: false
-	defer func() {
-		s.EndAt = time.Now().UnixMilli()
-		s.Success = err == nil
-		if err != nil {
-			s.Error = err.Error()
-		}
-	}()
-
-	var log strings.Builder
-
-	request := r.client.R().
-		SetBody([]byte(processedNode.Body))
-
-	for k, v := range processedNode.Headers {
-		request = request.SetHeader(k, v)
-	}
-
-	u, err := url.Parse(processedNode.Url)
-	if err != nil {
-		s.Error = fmt.Sprintf("cannot parse url: %s", processedNode.Url)
-		return nil, err
-	}
-
-	log.WriteString(fmt.Sprintf("Execute %s %s at %s", processedNode.Method, u.Hostname(), time.Now()))
-	s.Log = log.String()
-
-	// Log the request details before sending
-	headersJson, _ := json.MarshalIndent(processedNode.Headers, "", "  ")
-
-	// Use logger with debug level instead of fmt.Printf for environment awareness
-	if r.vm.logger != nil {
-		r.vm.logger.Debug("HTTP request details",
-			"method", processedNode.Method,
-			"url", processedNode.Url,
-			"headers", string(headersJson),
-			"body", processedNode.Body)
-
-		// Debug available variables
-		varInfo := make(map[string]interface{})
-		for k := range r.vm.vars {
-			if k == "apContext" {
-				varInfo[k] = "configVars"
-			} else if r.vm.task != nil && r.vm.task.Trigger != nil {
-				triggerVarName, err := r.vm.GetTriggerNameAsVar()
-				if err == nil && k == triggerVarName {
-					triggerInfo := map[string]interface{}{
-						"original_name": r.vm.task.Trigger.Name,
-					}
-
-					if dataMap, ok := r.vm.vars[k].(map[string]any); ok {
-						if data, ok := dataMap["data"].(map[string]any); ok {
-							keys := []string{}
-							for key := range data {
-								keys = append(keys, key)
-							}
-							triggerInfo["available_fields"] = keys
-						}
-					}
-
-					varInfo[k] = triggerInfo
-				} else {
-					varInfo[k] = "variable"
-				}
-			} else {
-				varInfo[k] = "variable"
-			}
-		}
-
-		r.vm.logger.Debug("Available variables for template rendering", "vars", varInfo)
 	}
 
 	var resp *resty.Response
-	if strings.EqualFold(processedNode.Method, "post") {
-		resp, err = request.Post(processedNode.Url)
-	} else if strings.EqualFold(processedNode.Method, "get") {
-		resp, err = request.Get(processedNode.Url)
-	} else if strings.EqualFold(processedNode.Method, "delete") {
-		resp, err = request.Delete(processedNode.Url)
-	} else {
-		resp, err = request.Get(processedNode.Url)
-	}
+	var err error
 
-	// Log the response details
-	if resp != nil {
-		respHeadersJson, _ := json.MarshalIndent(resp.Header(), "", "  ")
-
-		// Use logger instead of fmt.Printf
-		if r.vm.logger != nil {
-			responseBody := string(resp.Body())
-			if len(responseBody) > 1000 {
-				responseBody = responseBody[:1000] + "... (truncated)"
-			}
-
-			r.vm.logger.Debug("HTTP response details",
-				"status_code", resp.StatusCode(),
-				"status", resp.Status(),
-				"headers", string(respHeadersJson),
-				"response_time_ms", resp.Time().Milliseconds(),
-				"body", responseBody)
-		}
-	} else if err != nil {
-		if r.vm.logger != nil {
-			r.vm.logger.Debug("HTTP request error", "error", err)
-		}
-	}
-
-	response := ""
-	if resp != nil {
-		response = string(resp.Body())
-	}
-
-	//maybeJSON := false
-
-	// Attempt to detect json and auto convert to a map to use in subsequent step
-	if len(response) >= 1 && (response[0] == '{' || response[0] == '[') {
-		var parseData map[string]any
-		if err := json.Unmarshal([]byte(response), &parseData); err == nil {
-			r.SetOutputVarForStep(stepID, parseData)
-		} else {
-			r.SetOutputVarForStep(stepID, response)
-		}
-	} else {
-		r.SetOutputVarForStep(stepID, response)
-	}
-
-	value, err := structpb.NewValue(r.GetOutputVar(stepID))
-	if err == nil {
-		pbResult, _ := anypb.New(value)
-		s.OutputData = &avsproto.Execution_Step_RestApi{
-			RestApi: &avsproto.RestAPINode_Output{
-				Data: pbResult,
-			},
-		}
+	switch strings.ToUpper(node.Method) {
+	case http.MethodGet:
+		resp, err = req.Get(processedURL)
+	case http.MethodPost:
+		resp, err = req.Post(processedURL)
+	case http.MethodPut:
+		resp, err = req.Put(processedURL)
+	case http.MethodDelete:
+		resp, err = req.Delete(processedURL)
+	case http.MethodPatch:
+		resp, err = req.Patch(processedURL)
+	case http.MethodHead:
+		resp, err = req.Head(processedURL)
+	case http.MethodOptions:
+		resp, err = req.Options(processedURL)
+	default:
+		err = fmt.Errorf("unsupported HTTP method: %s", node.Method)
 	}
 
 	if err != nil {
-		s.Error = err.Error()
-		return s, err
-	} else {
-		// Check HTTP status codes from the resty response
-		// - 2xx (200-299): Success
-		// - 3xx (300-399): Redirection (also considered successful)
-		// - 4xx (400-499): Client errors
-		// - 5xx (500-599): Server errors
-		// Any status code outside 2xx-3xx range is considered an error
-		// Status code 0 indicates a connection failure
-		if resp.StatusCode() == 0 {
-			err = fmt.Errorf("HTTP request failed: connection error or timeout")
-			s.Error = err.Error()
-			return s, err
-		}
-		if resp.StatusCode() < 200 || resp.StatusCode() >= 400 {
-			if resp.StatusCode() == 404 {
-				fmt.Printf("\n==== HTTP 404 ERROR DETAILS ====\n")
-				fmt.Printf("Resource not found at URL: %s\n", processedNode.Url)
-				fmt.Printf("This typically indicates the endpoint doesn't exist, or the URL path is incorrect.\n")
-				fmt.Printf("Verify the API endpoint is correct and accessible.\n")
-				fmt.Printf("================================\n")
-			}
-			err = fmt.Errorf("unexpected HTTP status code: %d", resp.StatusCode())
-			s.Error = err.Error()
-			return s, err
-		}
+		errMsg := fmt.Sprintf("HTTP request failed: %v", err)
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
+		executionLogStep.Error = errMsg
+		executionLogStep.Success = false
+		executionLogStep.Log = logBuilder.String()
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		return executionLogStep, err
 	}
 
-	return s, nil
+	logBuilder.WriteString(fmt.Sprintf("Response Status: %s, Code: %d\n", resp.Status(), resp.StatusCode()))
+	logBuilder.WriteString(fmt.Sprintf("Response Body: %s\n", string(resp.Body())))
+
+	// Attempt to parse response body as JSON
+	var responseJSON map[string]interface{}
+	jsonParseError := json.Unmarshal(resp.Body(), &responseJSON)
+
+	var resultForOutput interface{}
+	if jsonParseError == nil {
+		resultForOutput = responseJSON
+		logBuilder.WriteString("Response body successfully parsed as JSON.\n")
+	} else {
+		resultForOutput = string(resp.Body()) // Store as string if not JSON
+		logBuilder.WriteString(fmt.Sprintf("Response body is not valid JSON, stored as string. Parse error: %v\n", jsonParseError))
+	}
+
+	// Store the full response details (status, headers, body) in a structured way if needed,
+	// or just the body as is common.
+	fullResponseOutput := map[string]interface{}{
+		"statusCode": resp.StatusCode(),
+		"status":     resp.Status(),
+		"headers":    resp.Header(),   // This is http.Header, map[string][]string
+		"body":       resultForOutput, // Parsed JSON or raw string
+	}
+
+	outputProtoStruct, err := structpb.NewValue(fullResponseOutput)
+	if err != nil {
+		errMsg := fmt.Sprintf("error converting REST API response to protobuf Value: %v", err)
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
+		executionLogStep.Error = errMsg
+		executionLogStep.Success = false // Response obtained, but conversion for logging/output failed
+		executionLogStep.Log = logBuilder.String()
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		return executionLogStep, fmt.Errorf(errMsg)
+	}
+
+	anyOutput, err := anypb.New(outputProtoStruct)
+	if err != nil {
+		executionLogStep.Error = fmt.Sprintf("failed to marshal output to Any: %v", err)
+		executionLogStep.Success = false
+		executionLogStep.Log = logBuilder.String()
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		return executionLogStep, fmt.Errorf("failed to marshal output to Any: %w", err)
+	}
+
+	executionLogStep.OutputData = &avsproto.Execution_Step_RestApi{
+		RestApi: &avsproto.RestAPINode_Output{
+			Data: anyOutput,
+		},
+	}
+
+	r.SetOutputVarForStep(stepID, fullResponseOutput) // Store the map[string]interface{} result in VM vars
+
+	if resp.IsError() { // Consider HTTP status >= 400 an error for Success flag
+		executionLogStep.Success = false
+		executionLogStep.Error = fmt.Sprintf("HTTP Error: %s", resp.Status())
+		// The detailed error (if any from the request execution itself) would have been caught earlier.
+		// This sets error based on HTTP status code.
+	}
+
+	executionLogStep.Log = logBuilder.String()
+	executionLogStep.EndAt = time.Now().UnixMilli()
+	return executionLogStep, nil // Return nil for error if HTTP req succeeded, even if status indicates error (e.g. 404)
+	// The executionLogStep.Success and .Error fields will indicate the outcome.
 }

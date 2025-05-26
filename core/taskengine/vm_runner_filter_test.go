@@ -56,7 +56,7 @@ func TestFilter(t *testing.T) {
 	if err != nil {
 		t.Errorf("expect vm initialize succesully but failed with error: %v", err)
 	}
-	vm.vars["trades"] = []map[string]interface{}{
+	vm.AddVar("trades", []map[string]interface{}{
 		{
 			"cost": 12,
 			"name": "abc",
@@ -65,11 +65,14 @@ func TestFilter(t *testing.T) {
 			"cost": 2,
 			"name": "def",
 		},
-	}
+	})
 	n := NewFilterProcessor(vm)
 	step, err := n.Execute("abc123", node)
 	varname := vm.GetNodeNameAsVar("abc123")
-	data := vm.vars[varname].(map[string]any)["data"].([]any)
+	vm.mu.Lock()
+	tempData, _ := vm.vars[varname]
+	vm.mu.Unlock()
+	data := tempData.(map[string]any)["data"].([]any)
 
 	if len(data) != 1 {
 		t.Errorf("expect return only one element with cost > 5 but got 0")
@@ -125,7 +128,7 @@ func TestFilterComplexLogic(t *testing.T) {
 	if err != nil {
 		t.Errorf("expect vm initialize succesully but failed with error: %v", err)
 	}
-	vm.vars["trades"] = []map[string]interface{}{
+	vm.AddVar("trades", []map[string]interface{}{
 		{
 			"cost": 12,
 			"name": "first",
@@ -146,12 +149,15 @@ func TestFilterComplexLogic(t *testing.T) {
 			"cost": 19,
 			"name": "sixth",
 		},
-	}
+	})
 	n := NewFilterProcessor(vm)
 	step, err := n.Execute("abc123", node)
 
 	varname := vm.GetNodeNameAsVar("abc123")
-	data := vm.vars[varname].(map[string]any)["data"].([]any)
+	vm.mu.Lock()
+	tempData, _ := vm.vars[varname]
+	vm.mu.Unlock()
+	data := tempData.(map[string]any)["data"].([]any)
 	if len(data) != 3 {
 		t.Errorf("expect return only 3 element but got %v", len(data))
 	}

@@ -52,13 +52,17 @@ func NewJSProcessor(vm *VM) *JSProcessor {
 	}
 
 	// Binding the data from previous step into jsvm
+	vm.mu.Lock()
 	for key, value := range vm.vars {
 		if err := r.jsvm.Set(key, value); err != nil {
+			vm.mu.Unlock()
 			if vm.logger != nil {
 				vm.logger.Error("failed to set variable in JS VM", "key", key, "error", err)
 			}
+			return nil
 		}
 	}
+	vm.mu.Unlock()
 
 	if registry != nil {
 		if err := r.jsvm.Set("require", registry.RequireFunction(jsvm)); err != nil {
@@ -118,7 +122,11 @@ func wrapCode(code string) string {
 }
 
 func containsES6Imports(code string) bool {
-	importRegex := regexp.MustCompile(`(?m)^\s*(import|export)\s+`)
+	// A simple regex to detect import statements (can be made more robust).
+	// This regex looks for lines starting with `import` followed by anything, then `from`.
+	// It also handles multiline imports to some extent by looking for `import {`
+	// and `import * as` patterns.
+	importRegex := regexp.MustCompile(`(?m)^\s*import\s+.*\s+from\s+['"].*['"];?|import\s*\{[^}]*\}\s*from\s*['"].*['"];?|import\s*\*\s*as\s+\w+\s+from\s*['"].*['"];?`)
 	return importRegex.MatchString(code)
 }
 
@@ -154,64 +162,74 @@ func containsModuleSyntax(code string) bool {
 }
 
 func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
-	t0 := time.Now().UnixMilli()
-
+	t0 := time.Now()
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
-		Log:        "",
 		OutputData: nil,
-		Success:    true,
+		Log:        "",
 		Error:      "",
-		StartAt:    t0,
+		Success:    true,
+		StartAt:    t0.UnixMilli(),
 	}
 
-	var err error
-	defer func() {
-		s.EndAt = time.Now().UnixMilli()
-		s.Success = err == nil
-		if err != nil {
-			s.Error = err.Error()
+	var sb strings.Builder
+	sb.WriteString("Execute Custom Code: ")
+	sb.WriteString(stepID)
+	sb.WriteString(" Lang: ")
+	sb.WriteString(node.Lang.String())
+
+	// Set variables in the JS environment from vm.vars
+	r.vm.mu.Lock()                      // Lock for reading r.vm.vars
+	for key, value := range r.vm.vars { // Direct map iteration
+		// key is already a string due to map[string]any definition for r.vm.vars
+		if err := r.jsvm.Set(key, value); err != nil {
+			r.vm.mu.Unlock()
+			if r.vm.logger != nil {
+				r.vm.logger.Error("failed to set variable in JS VM", "key", key, "error", err)
+			}
+			s.Success = false
+			s.Error = fmt.Sprintf("Failed to set JS variable '%s': %v", key, err)
+			sb.WriteString(fmt.Sprintf("\nError setting JS variable '%s': %v", key, err))
+			s.Log = sb.String()
+			s.EndAt = time.Now().UnixMilli()
+			return s, fmt.Errorf("failed to set JS variable '%s': %w", key, err)
 		}
-	}()
-
-	var log strings.Builder
-	log.WriteString(fmt.Sprintf("Start execute user-input JS code at %s", time.Now()))
-
-	codeToRun := node.Source
-
-	// Transform ES6 imports to requires if needed, otherwise just wrap the code
-	if containsES6Imports(codeToRun) {
-		codeToRun = transformES6Imports(codeToRun)
-	} else {
-		codeToRun = wrapCode(codeToRun)
 	}
+	r.vm.mu.Unlock()
 
-	result, err := r.jsvm.RunString(codeToRun)
-
-	log.WriteString(fmt.Sprintf("Complete Execute user-input JS code at %s", time.Now()))
+	// Execute the script
+	result, err := r.jsvm.RunString(node.Source)
 	if err != nil {
 		s.Success = false
 		s.Error = err.Error()
-		log.WriteString("\nerror running JavaScript code:")
-		log.WriteString(err.Error())
-	}
-	s.Log = log.String()
-
-	if result != nil {
-		resultValue := result.Export()
-
-		protoValue, errConv := structpb.NewValue(resultValue)
-		if errConv != nil {
-			s.Log += fmt.Sprintf("\nfailed to convert JS result to protobuf Value: %v", errConv)
-		} else {
-			s.OutputData = &avsproto.Execution_Step_CustomCode{
-				CustomCode: &avsproto.CustomCodeNode_Output{
-					Data: protoValue,
-				},
-			}
-		}
-		r.SetOutputVarForStep(stepID, resultValue)
+		sb.WriteString(fmt.Sprintf("\nError executing script: %s", err.Error()))
+		s.Log = sb.String()
+		s.EndAt = time.Now().UnixMilli()
+		return s, err
 	}
 
-	return s, err
+	// Convert the result to a protobuf struct
+	exportedVal := result.Export()
+	outputStruct, err := structpb.NewValue(exportedVal)
+	if err != nil {
+		s.Success = false
+		s.Error = err.Error()
+		sb.WriteString(fmt.Sprintf("\nError converting execution result to Value: %s", err.Error()))
+		s.Log = sb.String()
+		s.EndAt = time.Now().UnixMilli()
+		return s, err
+	}
+	s.OutputData = &avsproto.Execution_Step_CustomCode{
+		CustomCode: &avsproto.CustomCodeNode_Output{
+			Data: outputStruct,
+		},
+	}
+
+	// Set the output variable in the VM
+	r.SetOutputVarForStep(stepID, exportedVal) // This method in CommonProcessor handles its own locking
+
+	sb.WriteString(fmt.Sprintf("\nExecution result: %v", exportedVal))
+	s.Log = sb.String()
+	s.EndAt = time.Now().UnixMilli()
+	return s, nil
 }

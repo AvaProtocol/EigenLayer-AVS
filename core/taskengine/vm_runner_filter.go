@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/dop251/goja"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -18,99 +17,165 @@ type FilterProcessor struct {
 }
 
 func NewFilterProcessor(vm *VM) *FilterProcessor {
-	r := FilterProcessor{
+	return &FilterProcessor{
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
 		jsvm: NewGojaVM(),
 	}
-
-	// These are built-in func
-	for key, value := range macros.GetEnvs(nil) {
-		if err := r.jsvm.Set(key, value); err != nil {
-			if r.vm.logger != nil {
-				r.vm.logger.Error("failed to set macro env in JS VM", "key", key, "error", err)
-			}
-		}
-	}
-	// Binding the data from previous step into jsvm
-	for key, value := range vm.vars {
-		if err := r.jsvm.Set(key, value); err != nil {
-			if vm.logger != nil {
-				vm.logger.Error("failed to set variable in JS VM", "key", key, "error", err)
-			}
-		}
-	}
-
-	return &r
 }
 
 func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*avsproto.Execution_Step, error) {
-	t0 := time.Now().UnixMilli()
-	s := &avsproto.Execution_Step{
+	t0 := time.Now()
+	executionLogStep := &avsproto.Execution_Step{
 		NodeId:     stepID,
-		Log:        "",
 		OutputData: nil,
-		Success:    true,
+		Log:        "",
 		Error:      "",
-		StartAt:    t0,
+		Success:    true,
+		StartAt:    t0.UnixMilli(),
 	}
 
-	var err error
-	defer func() {
-		s.EndAt = time.Now().UnixMilli()
-		s.Success = err == nil
+	var logBuilder strings.Builder
+	logBuilder.WriteString(fmt.Sprintf("Executing Filter Node ID: %s at %s\n", stepID, time.Now()))
+	logBuilder.WriteString(fmt.Sprintf("Input variable: '%s', Expression: '%s'\n", node.Input, node.Expression))
+
+	// Get the input variable from the VM
+	r.vm.mu.Lock()
+	rawInputVal, exists := r.vm.vars[node.Input]
+	r.vm.mu.Unlock()
+
+	if !exists {
+		errMsg := fmt.Sprintf("input variable '%s' not found in VM state for filter node", node.Input)
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
+		executionLogStep.Error = errMsg
+		executionLogStep.Success = false
+		executionLogStep.Log = logBuilder.String()
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		return executionLogStep, fmt.Errorf(errMsg)
+	}
+	logBuilder.WriteString(fmt.Sprintf("Retrieved input data from var '%s': %v\n", node.Input, rawInputVal))
+
+	// Input data might be wrapped, e.g., map[string]interface{}{"data": actual_array_or_object}
+	actualDataToFilter := rawInputVal
+	if mapVal, ok := rawInputVal.(map[string]interface{}); ok {
+		if dataFieldVal, dataOk := mapVal["data"]; dataOk {
+			actualDataToFilter = dataFieldVal
+			logBuilder.WriteString(fmt.Sprintf("Extracted '.data' field for filtering: %v\n", actualDataToFilter))
+		}
+	}
+
+	// Reset and prepare the JSVM for this execution
+	r.jsvm.ClearInterrupt()
+
+	// Set other VM variables in the JS environment for context if the filter expression needs them
+	r.vm.mu.Lock()
+	for key, value := range r.vm.vars {
+		if key == node.Input {
+			continue
+		}
+		if err := r.jsvm.Set(key, value); err != nil {
+			r.vm.mu.Unlock()
+			errMsg := fmt.Sprintf("failed to set context variable '%s' in JS VM for filter: %v", key, err)
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
+			executionLogStep.Error = errMsg
+			executionLogStep.Success = false
+			executionLogStep.Log = logBuilder.String()
+			executionLogStep.EndAt = time.Now().UnixMilli()
+			return executionLogStep, fmt.Errorf(errMsg)
+		}
+	}
+	r.vm.mu.Unlock()
+
+	var filteredResult interface{}
+	var evaluationError error
+
+	switch dataToProcess := actualDataToFilter.(type) {
+	case []interface{}:
+		logBuilder.WriteString(fmt.Sprintf("Input is a slice with %d items. Filtering each item...\n", len(dataToProcess)))
+		resultSlice := make([]interface{}, 0)
+		for i, item := range dataToProcess {
+			loopVarNameForItem := "item"
+			if err := r.jsvm.Set(loopVarNameForItem, item); err != nil {
+				evaluationError = fmt.Errorf("failed to set loop item '%s' (index %d) in JS VM: %w", loopVarNameForItem, i, err)
+				break
+			}
+
+			script := fmt.Sprintf(`(() => { return %s; })()`, node.Expression)
+			val, err := r.jsvm.RunString(script)
+			if err != nil {
+				logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for item %d (%v): %s. Skipping item.\n", i, item, err.Error()))
+				continue
+			}
+			if boolVal, ok := val.Export().(bool); ok && boolVal {
+				resultSlice = append(resultSlice, item)
+			} else if !ok {
+				logBuilder.WriteString(fmt.Sprintf("Filter expression for item %d did not return a boolean. Got: %T. Skipping item.\n", i, val.Export()))
+			}
+		}
+		if evaluationError == nil {
+			filteredResult = resultSlice
+		}
+
+	case map[string]interface{}:
+		logBuilder.WriteString("Input is a map/object. Applying filter expression directly to it...\n")
+		itemVarNameForMap := "item"
+		if err := r.jsvm.Set(itemVarNameForMap, dataToProcess); err != nil {
+			evaluationError = fmt.Errorf("failed to set input map as '%s' in JS VM: %w", itemVarNameForMap, err)
+		} else {
+			script := fmt.Sprintf(`(() => { return %s; })()`, node.Expression)
+			val, err := r.jsvm.RunString(script)
+			if err != nil {
+				logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for map: %s\n", err.Error()))
+				evaluationError = err
+			} else {
+				if boolVal, ok := val.Export().(bool); ok && boolVal {
+					filteredResult = dataToProcess
+					logBuilder.WriteString("Map passed filter.\n")
+				} else {
+					filteredResult = nil
+					logBuilder.WriteString("Map did not pass filter (or expression not boolean).\n")
+				}
+			}
+		}
+
+	default:
+		evaluationError = fmt.Errorf("input variable '%s' (after unwrapping) has an unsupported type for filtering: %T", node.Input, actualDataToFilter)
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", evaluationError.Error()))
+	}
+
+	if evaluationError != nil {
+		executionLogStep.Error = evaluationError.Error()
+		executionLogStep.Success = false
+		executionLogStep.Log = logBuilder.String()
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		return executionLogStep, evaluationError
+	}
+
+	logBuilder.WriteString(fmt.Sprintf("Filtered result: %v\n", filteredResult))
+
+	outputProtoStruct, err := structpb.NewValue(filteredResult)
+	if err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error converting execution result to proto struct: %v\n", err))
+		executionLogStep.Error = err.Error()
+		executionLogStep.Success = false
+	} else {
+		anyOutput, err := anypb.New(outputProtoStruct)
 		if err != nil {
-			s.Error = err.Error()
-		}
-	}()
-
-	var log strings.Builder
-	log.WriteString(fmt.Sprintf("start filter input %s with expression %s at %s", node.Input, node.Expression, time.Now()))
-	script := fmt.Sprintf(`values.filter((value, index, items) => { %s})`, node.Expression)
-	if !strings.Contains(node.Expression, "return") {
-		script = fmt.Sprintf(`values.filter((value, index, items) => { return %s})`, node.Expression)
-	}
-
-	if err := r.jsvm.Set("values", r.vm.vars[node.Input]); err != nil {
-		if r.vm.logger != nil {
-			r.vm.logger.Error("failed to set values in JS VM", "error", err)
+			logBuilder.WriteString(fmt.Sprintf("Error marshalling output to Any: %v\n", err))
+			executionLogStep.Error = err.Error()
+			executionLogStep.Success = false
+		} else {
+			executionLogStep.OutputData = &avsproto.Execution_Step_Filter{
+				Filter: &avsproto.FilterNode_Output{
+					Data: anyOutput,
+				},
+			}
+			r.SetOutputVarForStep(stepID, filteredResult)
 		}
 	}
 
-	result, err := r.jsvm.RunString(script)
-	if err != nil {
-		log.WriteString(fmt.Sprintf("an error has occurred when processing your filter expression: %v", err))
-		s.Log = log.String()
-		s.Error = err.Error()
-		return s, err
-	}
-
-	log.WriteString(fmt.Sprintf("\ncomplete filter input %s", node.Input))
-	// Convert the result back to a Go slice of empty interfaces because we dont know its type, but we do know it's an array
-	filteredValues := result.Export().([]interface{})
-
-	s.Log = log.String()
-	if err != nil {
-		s.Success = false
-		s.Error = err.Error()
-		return s, err
-	}
-	r.SetOutputVarForStep(stepID, filteredValues)
-
-	value, err := structpb.NewValue(filteredValues)
-	if err == nil {
-		pbResult, _ := anypb.New(value)
-		s.OutputData = &avsproto.Execution_Step_Filter{
-			Filter: &avsproto.FilterNode_Output{
-				Data: pbResult,
-			},
-		}
-	}
-
-	if err != nil {
-		log.WriteString(fmt.Sprintf("succeed perform filter input but cannot serialize data to the log. ignore data serlization: %v", err))
-	}
-
-	return s, nil
+	executionLogStep.Log = logBuilder.String()
+	executionLogStep.EndAt = time.Now().UnixMilli()
+	return executionLogStep, nil
 }

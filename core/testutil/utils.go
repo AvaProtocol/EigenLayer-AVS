@@ -104,11 +104,18 @@ func GetLogger() sdklogging.Logger {
 type MockLogger struct{}
 
 func (l *MockLogger) Info(msg string, keysAndValues ...interface{})  {}
+func (l *MockLogger) Infof(format string, args ...interface{})       {}
 func (l *MockLogger) Debug(msg string, keysAndValues ...interface{}) {}
+func (l *MockLogger) Debugf(format string, args ...interface{})      {}
 func (l *MockLogger) Error(msg string, keysAndValues ...interface{}) {}
+func (l *MockLogger) Errorf(format string, args ...interface{})      {}
 func (l *MockLogger) Warn(msg string, keysAndValues ...interface{})  {}
+func (l *MockLogger) Warnf(format string, args ...interface{})       {}
 func (l *MockLogger) Fatal(msg string, keysAndValues ...interface{}) {
-	panic(msg)
+	panic(fmt.Sprintf(msg, keysAndValues...))
+}
+func (l *MockLogger) Fatalf(format string, args ...interface{}) {
+	panic(fmt.Sprintf(format, args...))
 }
 
 func (l *MockLogger) With(keysAndValues ...interface{}) sdklogging.Logger {

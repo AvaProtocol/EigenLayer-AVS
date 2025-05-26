@@ -36,7 +36,10 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	var log strings.Builder
 	log.WriteString(fmt.Sprintf("Start loop execution for input %s at %s", node.Input, time.Now()))
 
-	inputVar, exists := r.vm.vars.Load(node.Input)
+	r.vm.mu.Lock()
+	inputVar, exists := r.vm.vars[node.Input]
+	r.vm.mu.Unlock()
+
 	if !exists {
 		err := fmt.Errorf("input variable %s not found", node.Input)
 		s.Success = false
@@ -88,16 +91,20 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 
 		for i, item := range inputArray {
 			wg.Add(1)
-			go func(index int, value interface{}) {
+			go func(index int, valueParam interface{}) {
 				defer wg.Done()
 
-				r.vm.vars.Store(node.IterKey, index)
-				r.vm.vars.Store(node.IterVal, value)
+				iterInputs := map[string]interface{}{}
+				if node.IterKey != "" {
+					iterInputs[node.IterKey] = index
+				}
+				iterInputs[node.IterVal] = valueParam
 
-				result, err := r.executeNestedNode(node, fmt.Sprintf("%s.%d", stepID, index))
+				iterationStepID := fmt.Sprintf("%s.%d", stepID, index)
+				resultData, err := r.executeNestedNode(node, iterationStepID, iterInputs)
 
 				resultsMutex.Lock()
-				results = append(results, result)
+				results = append(results, resultData)
 				resultsMutex.Unlock()
 
 				if err != nil {
@@ -114,12 +121,17 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 
 		wg.Wait()
 	} else {
+		results = make([]interface{}, len(inputArray))
 		for i, item := range inputArray {
-			r.vm.vars.Store(node.IterKey, i)
-			r.vm.vars.Store(node.IterVal, item)
+			iterInputs := map[string]interface{}{}
+			if node.IterKey != "" {
+				iterInputs[node.IterKey] = i
+			}
+			iterInputs[node.IterVal] = item
 
-			result, err := r.executeNestedNode(node, fmt.Sprintf("%s.%d", stepID, i))
-			results = append(results, result)
+			iterationStepID := fmt.Sprintf("%s.%d", stepID, i)
+			resultData, err := r.executeNestedNode(node, iterationStepID, iterInputs)
+			results[i] = resultData
 
 			if err != nil {
 				success = false
@@ -140,6 +152,8 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 				Data: value.GetStringValue(),
 			},
 		}
+	} else {
+		log.WriteString(fmt.Sprintf("\nError converting results to structpb.Value: %s", err.Error()))
 	}
 
 	log.WriteString(fmt.Sprintf("\nCompleted loop execution at %s", time.Now()))
@@ -155,44 +169,42 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	return s, nil
 }
 
-func (r *LoopProcessor) executeNestedNode(node *avsproto.LoopNode, iterationStepID string) (interface{}, error) {
+func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterationStepID string, iterInputs map[string]interface{}) (interface{}, error) {
 	var nestedNode *avsproto.TaskNode
-	var result interface{}
-	var err error
 
 	nodeName := fmt.Sprintf("loop_iteration_%s", iterationStepID)
 
-	if ethTransfer := node.GetEthTransfer(); ethTransfer != nil {
+	if ethTransfer := loopNodeDef.GetEthTransfer(); ethTransfer != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
 			TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: ethTransfer},
 		}
-	} else if contractWrite := node.GetContractWrite(); contractWrite != nil {
+	} else if contractWrite := loopNodeDef.GetContractWrite(); contractWrite != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
 			TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: contractWrite},
 		}
-	} else if contractRead := node.GetContractRead(); contractRead != nil {
+	} else if contractRead := loopNodeDef.GetContractRead(); contractRead != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
 			TaskType: &avsproto.TaskNode_ContractRead{ContractRead: contractRead},
 		}
-	} else if graphqlQuery := node.GetGraphqlDataQuery(); graphqlQuery != nil {
+	} else if graphqlQuery := loopNodeDef.GetGraphqlDataQuery(); graphqlQuery != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
 			TaskType: &avsproto.TaskNode_GraphqlQuery{GraphqlQuery: graphqlQuery},
 		}
-	} else if restApi := node.GetRestApi(); restApi != nil {
+	} else if restApi := loopNodeDef.GetRestApi(); restApi != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
 			TaskType: &avsproto.TaskNode_RestApi{RestApi: restApi},
 		}
-	} else if customCode := node.GetCustomCode(); customCode != nil {
+	} else if customCode := loopNodeDef.GetCustomCode(); customCode != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
@@ -202,23 +214,24 @@ func (r *LoopProcessor) executeNestedNode(node *avsproto.LoopNode, iterationStep
 		return nil, fmt.Errorf("no nested node specified in loop")
 	}
 
-	r.vm.TaskNodes.Store(iterationStepID, nestedNode)
-
-	_, err = r.vm.executeNode(nestedNode)
+	executionStep, err := r.vm.RunNodeWithInputs(nestedNode, iterInputs)
 	if err != nil {
 		return nil, err
 	}
 
-	varName := r.vm.GetNodeNameAsVar(iterationStepID)
-	if varName != "" {
-		if varValue, ok := r.vm.vars.Load(varName); ok {
-			if varMap, ok := varValue.(map[string]interface{}); ok {
-				if data, hasData := varMap["data"]; hasData {
-					result = data
-				}
-			}
+	if executionStep == nil || !executionStep.Success {
+		if executionStep != nil && executionStep.Error != "" {
+			return nil, fmt.Errorf("nested node execution failed: %s", executionStep.Error)
 		}
+		return nil, fmt.Errorf("nested node execution failed without specific error")
 	}
 
-	return result, nil
+	if customCodeOutput := executionStep.GetCustomCode(); customCodeOutput != nil {
+		if customCodeOutput.Data != nil {
+			return customCodeOutput.Data.AsInterface(), nil
+		}
+		return nil, nil
+	}
+
+	return nil, nil
 }

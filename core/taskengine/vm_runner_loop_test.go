@@ -1,88 +1,94 @@
 package taskengine
 
 import (
+	"fmt"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestLoopProcessor_Execute_Sequential(t *testing.T) {
 	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
 	processor := NewLoopProcessor(vm)
 
-	testArray := []interface{}{1, 2, 3}
-	vm.vars["testArray"] = map[string]interface{}{
+	testArray := []interface{}{1.0, 2.0, 3.0}
+	vm.AddVar("testArray", map[string]interface{}{
 		"data": testArray,
-	}
+	})
 
 	customCode := &avsproto.CustomCodeNode{
 		Lang:   avsproto.CustomCodeLang_JavaScript,
-		Source: "return value",
+		Source: "return loopItemValueForTest;",
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Input:   "testArray",
-		IterVal: "value",
 		IterKey: "index",
+		IterVal: "loopItemValueForTest",
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
 
-	executionLog, err := processor.Execute("test_loop", loopNode)
+	executionLog, err := processor.Execute("test_loop_seq", loopNode)
 
 	assert.NoError(t, err)
-	assert.True(t, executionLog.Success)
-	assert.NotNil(t, executionLog.OutputData)
+	assert.True(t, executionLog.Success, "Execution should be successful")
+	assert.Empty(t, executionLog.Error, "Error message should be empty on success")
+	assert.NotNil(t, executionLog.OutputData, "OutputData should not be nil")
 
-	outputVar := processor.GetOutputVar("test_loop")
-	assert.NotNil(t, outputVar)
+	outputVar := processor.GetOutputVar("test_loop_seq")
+	assert.NotNil(t, outputVar, "Output variable from GetOutputVar should not be nil")
 
 	results, ok := outputVar.([]interface{})
-	assert.True(t, ok)
-	assert.Equal(t, len(testArray), len(results))
+	assert.True(t, ok, "Output variable should be a slice of interfaces")
+	assert.Equal(t, len(testArray), len(results), "Length of results should match testArray")
 
-	for i, result := range results {
-		assert.Equal(t, testArray[i], result)
+	for i, expected := range testArray {
+		assert.Equal(t, expected, results[i], fmt.Sprintf("Sequential test: Expected %v at index %d, got %v", expected, i, results[i]))
 	}
 }
 
 func TestLoopProcessor_Execute_Parallel(t *testing.T) {
 	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
 	processor := NewLoopProcessor(vm)
 
-	testArray := []interface{}{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-	vm.vars["testArray"] = map[string]interface{}{
+	testArray := []interface{}{1.0, 2.0, 3.0}
+	vm.AddVar("testArray", map[string]interface{}{
 		"data": testArray,
-	}
+	})
 
 	customCode := &avsproto.CustomCodeNode{
 		Lang:   avsproto.CustomCodeLang_JavaScript,
-		Source: "return value",
+		Source: "return loopItemValueForTest;",
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Input:   "testArray",
-		IterVal: "value",
 		IterKey: "index",
+		IterVal: "loopItemValueForTest",
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
 
-	executionLog, err := processor.Execute("test_loop", loopNode)
+	executionLog, err := processor.Execute("test_loop_parallel", loopNode)
 
 	assert.NoError(t, err)
-	assert.True(t, executionLog.Success)
-	assert.NotNil(t, executionLog.OutputData)
+	assert.True(t, executionLog.Success, "Execution should be successful")
+	assert.Empty(t, executionLog.Error, "Error message should be empty on success")
+	assert.NotNil(t, executionLog.OutputData, "OutputData should not be nil")
 
-	outputVar := processor.GetOutputVar("test_loop")
-	assert.NotNil(t, outputVar)
+	outputVar := processor.GetOutputVar("test_loop_parallel")
+	assert.NotNil(t, outputVar, "Output variable from GetOutputVar should not be nil")
 
 	results, ok := outputVar.([]interface{})
-	assert.True(t, ok)
-	assert.Equal(t, len(testArray), len(results))
+	assert.True(t, ok, "Output variable should be a slice of interfaces")
+	assert.Equal(t, len(testArray), len(results), "Length of results should match testArray")
 
 	resultSet := make(map[interface{}]bool)
 	for _, result := range results {
@@ -90,39 +96,40 @@ func TestLoopProcessor_Execute_Parallel(t *testing.T) {
 	}
 
 	for _, input := range testArray {
-		assert.True(t, resultSet[input])
+		assert.True(t, resultSet[input], fmt.Sprintf("Parallel test: Expected result %v not found in results %v", input, results))
 	}
 }
 
 func TestLoopProcessor_Execute_EmptyArray(t *testing.T) {
 	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
 	processor := NewLoopProcessor(vm)
 
-	vm.vars["emptyArray"] = map[string]interface{}{
+	vm.AddVar("emptyArray", map[string]interface{}{
 		"data": []interface{}{},
-	}
+	})
 
 	customCode := &avsproto.CustomCodeNode{
 		Lang:   avsproto.CustomCodeLang_JavaScript,
-		Source: "return value",
+		Source: "return loopItemValueForTest;",
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Input:   "emptyArray",
-		IterVal: "value",
 		IterKey: "index",
+		IterVal: "loopItemValueForTest",
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
 
-	executionLog, err := processor.Execute("test_loop", loopNode)
+	executionLog, err := processor.Execute("test_loop_empty", loopNode)
 
 	assert.NoError(t, err)
 	assert.True(t, executionLog.Success)
 	assert.NotNil(t, executionLog.OutputData)
 
-	outputVar := processor.GetOutputVar("test_loop")
+	outputVar := processor.GetOutputVar("test_loop_empty")
 	assert.NotNil(t, outputVar)
 
 	results, ok := outputVar.([]interface{})
@@ -132,54 +139,56 @@ func TestLoopProcessor_Execute_EmptyArray(t *testing.T) {
 
 func TestLoopProcessor_Execute_InvalidInput(t *testing.T) {
 	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
 	processor := NewLoopProcessor(vm)
 
-	vm.vars["notArray"] = map[string]interface{}{
+	vm.AddVar("notArray", map[string]interface{}{
 		"data": "string value",
-	}
+	})
 
 	customCode := &avsproto.CustomCodeNode{
 		Lang:   avsproto.CustomCodeLang_JavaScript,
-		Source: "return value",
+		Source: "return loopItemValueForTest;",
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Input:   "notArray",
-		IterVal: "value",
 		IterKey: "index",
+		IterVal: "loopItemValueForTest",
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
 
-	executionLog, err := processor.Execute("test_loop", loopNode)
+	executionLog, err := processor.Execute("test_loop_invalid_input", loopNode)
 
-	assert.Error(t, err)
-	assert.False(t, executionLog.Success)
-	assert.Contains(t, executionLog.Error, "is not an array")
+	assert.Error(t, err, "Expected an error for invalid input type")
+	assert.False(t, executionLog.Success, "Execution should not be successful")
+	assert.Contains(t, executionLog.Error, "is not an array", "Error message should indicate input is not an array")
 }
 
 func TestLoopProcessor_Execute_MissingInput(t *testing.T) {
 	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
 	processor := NewLoopProcessor(vm)
 
 	customCode := &avsproto.CustomCodeNode{
 		Lang:   avsproto.CustomCodeLang_JavaScript,
-		Source: "return value",
+		Source: "return loopItemValueForTest;",
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Input:   "nonExistentArray",
-		IterVal: "value",
 		IterKey: "index",
+		IterVal: "loopItemValueForTest",
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
 
-	executionLog, err := processor.Execute("test_loop", loopNode)
+	executionLog, err := processor.Execute("test_loop_missing_input", loopNode)
 
-	assert.Error(t, err)
-	assert.False(t, executionLog.Success)
-	assert.Contains(t, executionLog.Error, "not found")
+	assert.Error(t, err, "Expected an error for missing input variable")
+	assert.False(t, executionLog.Success, "Execution should not be successful")
+	assert.Contains(t, executionLog.Error, "not found", "Error message should indicate input variable not found")
 }

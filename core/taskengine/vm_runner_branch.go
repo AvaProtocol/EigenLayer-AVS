@@ -59,123 +59,93 @@ func (r *BranchProcessor) Validate(node *avsproto.BranchNode) error {
 	return nil
 }
 
-func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*avsproto.Execution_Step, error) {
-	t0 := time.Now()
-	s := &avsproto.Execution_Step{
-		NodeId:     stepID,
-		OutputData: nil,
-		Log:        "",
-		Error:      "",
-		Success:    true,
-		StartAt:    t0.UnixMilli(),
+func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*avsproto.Execution_Step, *Step, error) {
+	t0 := time.Now().UnixMilli()
+	executionStep := &avsproto.Execution_Step{
+		NodeId:  stepID,
+		Success: false, // Default to false, set to true if a condition matches
+		StartAt: t0,
 	}
 
-	var sb strings.Builder
-	sb.WriteString("Execute Branch: ")
-	sb.WriteString(stepID)
-	outcome := ""
+	var log strings.Builder
+	log.WriteString(fmt.Sprintf("Start branch execution for node %s at %s\n", stepID, time.Now()))
 
-	// Initialize goja runtime using the new constructor
-	jsvm := NewGojaVM()
+	// Evaluate conditions
+	for _, condition := range node.Conditions {
+		log.WriteString(fmt.Sprintf("Evaluating condition '%s': %s\n", condition.Id, condition.Expression))
 
-	// Set variables in the JS environment. The value is wrapped into a data, follow a similar approach by other nocode provider
-	// even though we arent necessarily need to do this
-	r.vm.vars.Range(func(key, value interface{}) bool {
-		keyStr, ok := key.(string)
+		// Preprocess the expression using the VM's current variable context
+		processedExpression := r.vm.preprocessText(condition.Expression)
+		log.WriteString(fmt.Sprintf("Processed expression for '%s': %s\n", condition.Id, processedExpression))
+
+		// Create a temporary JS VM to evaluate the processed expression
+		jsvm := NewGojaVM()
+
+		// Populate the JS VM with variables from the main VM
+		r.vm.mu.Lock()                      // Lock for reading vm.vars
+		for key, value := range r.vm.vars { // CHANGED from r.vm.vars.Range
+			if err := jsvm.Set(key, value); err != nil {
+				r.vm.mu.Unlock()
+				err := fmt.Errorf("failed to set var '%s' in JS VM for branch condition: %w", key, err)
+				log.WriteString(fmt.Sprintf("Error setting JS var: %s\n", err.Error()))
+				executionStep.Error = err.Error()
+				executionStep.Log = log.String()
+				executionStep.EndAt = time.Now().UnixMilli()
+				return executionStep, nil, err
+			}
+		}
+		r.vm.mu.Unlock()
+
+		// Evaluate the expression
+		value, err := jsvm.RunString(fmt.Sprintf("(%s)", processedExpression)) // Wrap in parens for safety
+		if err != nil {
+			log.WriteString(fmt.Sprintf("Error evaluating expression for '%s': %s\n", condition.Id, err.Error()))
+			// Don't fail the whole branch node for one bad condition expression, just log and continue
+			continue
+		}
+
+		boolValue, ok := value.Export().(bool)
 		if !ok {
-			return true
+			log.WriteString(fmt.Sprintf("Expression for '%s' did not evaluate to a boolean value, got: %T %v\n", condition.Id, value.Export(), value.Export()))
+			continue
 		}
 
-		if err := jsvm.Set(keyStr, value); err != nil {
-			if r.vm.logger != nil {
-				r.vm.logger.Error("failed to set variable in JS VM", "key", keyStr, "error", err)
-			}
-		}
-		return true
-	})
-
-	if err := r.Validate(node); err != nil {
-		sb.WriteString("\nInvalid branch node: ")
-		sb.WriteString(err.Error())
-		s.Log = sb.String()
-		s.Success = false
-		s.Error = err.Error()
-		return nil, err
-	}
-
-	for _, statement := range node.Conditions {
-		if strings.EqualFold(statement.Type, "else") {
-			outcome = fmt.Sprintf("%s.%s", stepID, statement.Id)
-			sb.WriteString("\n")
-			sb.WriteString(time.Now().String())
-			sb.WriteString("evaluate else, follow else path")
-			sb.WriteString(outcome)
-			s.Log = sb.String()
-			s.Success = true
-			s.OutputData = &avsproto.Execution_Step_Branch{
+		log.WriteString(fmt.Sprintf("Condition '%s' evaluated to: %t\n", condition.Id, boolValue))
+		if boolValue {
+			executionStep.Success = true
+			executionStep.OutputData = &avsproto.Execution_Step_Branch{
 				Branch: &avsproto.BranchNode_Output{
-					ConditionId: outcome,
+					ConditionId: fmt.Sprintf("%s.%s", stepID, condition.Id),
 				},
 			}
-			return s, nil
-		}
+			log.WriteString(fmt.Sprintf("Branching to condition '%s'\n", condition.Id))
+			executionStep.Log = log.String()
+			executionStep.EndAt = time.Now().UnixMilli()
 
-		sb.WriteString(fmt.Sprintf("\n%s evaluate condition: %s expression: `%s`", time.Now(), statement.Id, statement.Expression))
-
-		// Evaluate the condition using goja, notice how we wrap into a function to prevent the value is leak across goja run
-		expression := strings.Trim(statement.Expression, "\n \t")
-
-		var branchResult bool
-
-		if expression == "" {
-			branchResult = false
-		} else {
-			script := fmt.Sprintf(`(() => %s )()`, expression)
-			result, err := jsvm.RunString(script)
-
-			if err != nil {
-				s.Success = false
-				s.Error = fmt.Errorf("error evaluating the statement: %w", err).Error()
-				sb.WriteString("error evaluating expression")
-				s.Log = sb.String()
-				s.EndAt = time.Now().UnixMilli()
-				return s, fmt.Errorf("error evaluating the statement: %w", err)
+			// Find the next step in the plan based on this condition ID
+			r.vm.mu.Lock() // Lock for reading vm.plans
+			nextStepInPlan, exists := r.vm.plans[fmt.Sprintf("%s.%s", stepID, condition.Id)]
+			r.vm.mu.Unlock()
+			if !exists {
+				err := fmt.Errorf("branch condition '%s' met, but no corresponding path defined in plans", condition.Id)
+				executionStep.Error = err.Error()
+				executionStep.Success = false
+				return executionStep, nil, err
 			}
-
-			var ok bool
-			branchResult, ok = result.Export().(bool)
-			if !ok {
-				s.Success = false
-				s.Error = fmt.Errorf("error evaluating the statement: %w", err).Error()
-				sb.WriteString("error evaluating expression")
-				s.Log = sb.String()
-				s.EndAt = time.Now().UnixMilli()
-				return s, fmt.Errorf("error evaluating the statement: %w", err)
-			}
-		}
-
-		if branchResult {
-			outcome = fmt.Sprintf("%s.%s", stepID, statement.Id)
-			sb.WriteString("\nexpression resolves to true, follow path")
-			sb.WriteString(outcome)
-			s.Log = sb.String()
-			s.OutputData = &avsproto.Execution_Step_Branch{
-				Branch: &avsproto.BranchNode_Output{
-					ConditionId: outcome,
-				},
-			}
-			s.EndAt = time.Now().UnixMilli()
-			return s, nil
-		} else {
-			sb.WriteString("\nexpression resolves to false, move to next statement\n")
+			return executionStep, nextStepInPlan, nil
 		}
 	}
 
-	sb.WriteString("\nno condition matched. halt execution")
-	s.Log = sb.String()
-	s.EndAt = time.Now().UnixMilli()
-	if r.vm.logger != nil {
-		r.vm.logger.Debug("No condition matched. halt execution", "execution_log", s.Log)
-	}
-	return s, nil
+	// If no condition evaluated to true
+	log.WriteString("No branch condition evaluated to true.\n")
+	// Removed DefaultBranch handling as it's not in the protobuf definition
+
+	// No condition true, and no default branch
+	noConditionMetError := "no branch condition met"
+	log.WriteString(noConditionMetError + "\n")
+	executionStep.Error = noConditionMetError
+	executionStep.Success = false
+	executionStep.Log = log.String()
+	executionStep.EndAt = time.Now().UnixMilli()
+	return executionStep, nil, fmt.Errorf(noConditionMetError)
 }
