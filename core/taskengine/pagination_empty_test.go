@@ -17,24 +17,6 @@ func TestPaginationEmptyParameters(t *testing.T) {
 
 	user := testutil.TestUser1()
 
-	_, err := n.ListSecrets(user, &avsproto.ListSecretsReq{
-		Before: "",
-		After:  "some_cursor",
-		Limit:  5,
-	})
-	if err == nil {
-		t.Errorf("Expected error when before parameter is empty string, got nil")
-	}
-
-	_, err = n.ListSecrets(user, &avsproto.ListSecretsReq{
-		Before: "some_cursor",
-		After:  "",
-		Limit:  5,
-	})
-	if err == nil {
-		t.Errorf("Expected error when after parameter is empty string, got nil")
-	}
-
 	result, err := n.ListSecrets(user, &avsproto.ListSecretsReq{
 		Before: "",
 		After:  "",
@@ -47,27 +29,51 @@ func TestPaginationEmptyParameters(t *testing.T) {
 		t.Errorf("Expected valid result for first page")
 	}
 
-	_, err = n.ListTasksByUser(user, &avsproto.ListTasksReq{
+	result, err = n.ListSecrets(user, &avsproto.ListSecretsReq{
+		Before: "",
+		After:  "eyJkIjoibmV4dCIsInAiOiIwIn0=", // valid cursor
+		Limit:  5,
+	})
+	if err != nil {
+		t.Errorf("Expected no error for normal forward pagination, got %v", err)
+	}
+
+	result, err = n.ListSecrets(user, &avsproto.ListSecretsReq{
+		Before: "eyJkIjoibmV4dCIsInAiOiIwIn0=", // valid cursor
+		After:  "",
+		Limit:  5,
+	})
+	if err != nil {
+		t.Errorf("Expected no error for normal backward pagination, got %v", err)
+	}
+
+	taskResult, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{"0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"},
 		Before:             "",
-		After:              "some_cursor",
+		After:              "",
 		Limit:              5,
 	})
-	if err == nil {
-		t.Errorf("Expected error when before parameter is empty string for ListTasksByUser, got nil")
+	if err != nil {
+		t.Errorf("Expected no error for first page of ListTasksByUser, got %v", err)
+	}
+	if taskResult == nil {
+		t.Errorf("Expected valid result for first page of ListTasksByUser")
 	}
 
 	tr := testutil.JsFastTask()
 	tr.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
 	task, _ := n.CreateTask(user, tr)
 
-	_, err = n.ListExecutions(user, &avsproto.ListExecutionsReq{
+	execResult, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{
 		TaskIds: []string{task.Id},
 		Before:  "",
-		After:   "some_cursor",
+		After:   "",
 		Limit:   5,
 	})
-	if err == nil {
-		t.Errorf("Expected error when before parameter is empty string for ListExecutions, got nil")
+	if err != nil {
+		t.Errorf("Expected no error for first page of ListExecutions, got %v", err)
+	}
+	if execResult == nil {
+		t.Errorf("Expected valid result for first page of ListExecutions")
 	}
 }
