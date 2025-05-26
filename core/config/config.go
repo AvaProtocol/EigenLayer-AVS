@@ -31,6 +31,8 @@ type Config struct {
 	BlsPrivateKey             *bls.PrivateKey
 	Logger                    sdklogging.Logger
 	EigenMetricsIpPortAddress string
+	SentryDsn                 string
+	ServerName                string
 
 	// we need the url for the eigensdk currently... eventually standardize api so as to
 	// only take an ethclient or an rpcUrl (and build the ethclient at each constructor site)
@@ -90,6 +92,8 @@ type ConfigRaw struct {
 	Environment     sdklogging.LogLevel `yaml:"environment"`
 	EthRpcUrl       string              `yaml:"eth_rpc_url"`
 	EthWsUrl        string              `yaml:"eth_ws_url"`
+	SentryDsn       string              `yaml:"sentry_dsn,omitempty"`
+	ServerName      string              `yaml:"server_name,omitempty"`
 
 	RpcBindAddress string `yaml:"rpc_bind_address"`
 
@@ -207,6 +211,8 @@ func NewConfig(configFilePath string) (*Config, error) {
 	config := &Config{
 		EcdsaPrivateKey: ecdsaPrivateKey,
 		Logger:          logger,
+		SentryDsn:       configRaw.SentryDsn,
+		ServerName:      configRaw.ServerName,
 		EthWsRpcUrl:     configRaw.EthWsUrl,
 		EthHttpRpcUrl:   configRaw.EthRpcUrl,
 		EthHttpClient:   ethRpcClient,
