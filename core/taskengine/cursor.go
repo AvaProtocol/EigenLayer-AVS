@@ -51,7 +51,12 @@ func CursorFromString(data string) (*Cursor, error) {
 
 func CursorFromBeforeAfter(before, after string) (*Cursor, error) {
 	if after != "" {
-		return CursorFromString(after)
+		cursor, err := CursorFromString(after)
+		if err != nil {
+			return nil, err
+		}
+		cursor.Direction = CursorDirectionNext
+		return cursor, nil
 	}
 
 	if before != "" {

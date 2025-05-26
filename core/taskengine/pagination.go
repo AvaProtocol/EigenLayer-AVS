@@ -40,3 +40,15 @@ func CreateNextCursor(position string) string {
 	}
 	return nextCursor.String()
 }
+
+func CreatePreviousCursor(position string) string {
+	if position == "" {
+		return ""
+	}
+
+	prevCursor := &Cursor{
+		Direction: CursorDirectionPrevious,
+		Position:  position,
+	}
+	return prevCursor.String()
+}
