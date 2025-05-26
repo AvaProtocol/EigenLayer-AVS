@@ -5,17 +5,10 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func SetupPagination(before, after, legacyCursor string, limit int64) (*Cursor, int, error) {
+func SetupPagination(before, after string, limit int64) (*Cursor, int, error) {
 	cursor, err := CursorFromBeforeAfter(before, after)
 	if err != nil {
 		return nil, 0, status.Errorf(codes.InvalidArgument, InvalidCursor)
-	}
-
-	if cursor.IsZero() && legacyCursor != "" {
-		cursor, err = CursorFromString(legacyCursor)
-		if err != nil {
-			return nil, 0, status.Errorf(codes.InvalidArgument, InvalidCursor)
-		}
 	}
 
 	perPage := int(limit)
