@@ -12,7 +12,6 @@ func TestSetupPagination(t *testing.T) {
 		name           string
 		before         string
 		after          string
-		legacyCursor   string
 		limit          int64
 		expectCursor   *Cursor
 		expectLimit    int
@@ -20,10 +19,9 @@ func TestSetupPagination(t *testing.T) {
 		expectErrorMsg string
 	}{
 		{
-			name:         "Default values",
+			name:         "Default values (first page)",
 			before:       "",
 			after:        "",
-			legacyCursor: "",
 			limit:        0,
 			expectCursor: &Cursor{Direction: CursorDirectionNext, Position: "0"},
 			expectLimit:  DefaultLimit,
@@ -33,7 +31,6 @@ func TestSetupPagination(t *testing.T) {
 			name:         "With after parameter",
 			before:       "",
 			after:        "eyJkIjoibmV4dCIsInAiOiIxMjM0NTYifQ==", // {"d":"next","p":"123456"}
-			legacyCursor: "",
 			limit:        10,
 			expectCursor: &Cursor{Direction: CursorDirectionNext, Position: "123456"},
 			expectLimit:  10,
@@ -43,27 +40,35 @@ func TestSetupPagination(t *testing.T) {
 			name:         "With before parameter",
 			before:       "eyJkIjoibmV4dCIsInAiOiIxMjM0NTYifQ==", // {"d":"next","p":"123456"}
 			after:        "",
-			legacyCursor: "",
 			limit:        20,
 			expectCursor: &Cursor{Direction: CursorDirectionPrevious, Position: "123456"},
 			expectLimit:  20,
 			expectError:  false,
 		},
 		{
-			name:         "With legacy cursor",
-			before:       "",
-			after:        "",
-			legacyCursor: "eyJkIjoibmV4dCIsInAiOiI5ODc2NTQifQ==", // {"d":"next","p":"987654"}
-			limit:        30,
-			expectCursor: &Cursor{Direction: CursorDirectionNext, Position: "987654"},
-			expectLimit:  30,
-			expectError:  false,
+			name:           "Invalid cursor in before",
+			before:         "invalid-cursor",
+			after:          "",
+			limit:          10,
+			expectCursor:   nil,
+			expectLimit:    0,
+			expectError:    true,
+			expectErrorMsg: InvalidCursor,
+		},
+		{
+			name:           "Invalid cursor in after", 
+			before:         "",
+			after:          "invalid-cursor",
+			limit:          10,
+			expectCursor:   nil,
+			expectLimit:    0,
+			expectError:    true,
+			expectErrorMsg: InvalidCursor,
 		},
 		{
 			name:           "Invalid cursor",
 			before:         "invalid-cursor",
 			after:          "",
-			legacyCursor:   "",
 			limit:          10,
 			expectCursor:   nil,
 			expectLimit:    0,
@@ -74,7 +79,6 @@ func TestSetupPagination(t *testing.T) {
 			name:           "Invalid item per page",
 			before:         "",
 			after:          "",
-			legacyCursor:   "",
 			limit:          -1,
 			expectCursor:   nil,
 			expectLimit:    0,
@@ -85,7 +89,7 @@ func TestSetupPagination(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cursor, limit, err := SetupPagination(tt.before, tt.after, tt.legacyCursor, tt.limit)
+			cursor, limit, err := SetupPagination(tt.before, tt.after, tt.limit)
 
 			if tt.expectError {
 				if err == nil {
