@@ -230,7 +230,8 @@ func RestTask() *avsproto.CreateTaskReq {
 		Name: "ping",
 		TaskType: &avsproto.TaskNode_RestApi{
 			RestApi: &avsproto.RestAPINode{
-				Url: "https://httpbin.org",
+				Url:    "https://httpbin.org",
+				Method: "GET",
 			},
 		},
 	}

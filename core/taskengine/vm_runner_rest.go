@@ -125,12 +125,22 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		logBuilder.WriteString(fmt.Sprintf("Response body is not valid JSON, stored as string. Parse error: %v\n", jsonParseError))
 	}
 
+	// Convert http.Header (map[string][]string) to a protobuf-compatible format
+	headers := make(map[string]interface{})
+	for key, values := range resp.Header() {
+		if len(values) == 1 {
+			headers[key] = values[0] // Single value as string
+		} else {
+			headers[key] = values // Multiple values as array
+		}
+	}
+
 	// Store the full response details (status, headers, body) in a structured way if needed,
 	// or just the body as is common.
 	fullResponseOutput := map[string]interface{}{
 		"statusCode": resp.StatusCode(),
 		"status":     resp.Status(),
-		"headers":    resp.Header(),   // This is http.Header, map[string][]string
+		"headers":    headers,         // Converted headers
 		"body":       resultForOutput, // Parsed JSON or raw string
 	}
 

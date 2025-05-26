@@ -254,15 +254,36 @@ func TestGetExecution(t *testing.T) {
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
 			BlockNumber: uint64(101),
+			Type:        avsproto.TriggerReason_Block,
 		},
 		IsBlocking: true,
 	})
+
+	if err != nil {
+		t.Errorf("failed to trigger task: %v", err)
+		return
+	}
+
+	if resultTrigger == nil {
+		t.Errorf("resultTrigger is nil")
+		return
+	}
 
 	// Now get back that execution data using the log
 	execution, err := n.GetExecution(testutil.TestUser1(), &avsproto.ExecutionReq{
 		TaskId:      result.Id,
 		ExecutionId: resultTrigger.ExecutionId,
 	})
+
+	if err != nil {
+		t.Errorf("failed to get execution: %v", err)
+		return
+	}
+
+	if execution == nil {
+		t.Errorf("execution is nil")
+		return
+	}
 
 	if execution.TriggerName != tr1.Trigger.Name {
 		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
@@ -272,8 +293,12 @@ func TestGetExecution(t *testing.T) {
 		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
 
-	if execution.Reason.BlockNumber != 101 {
-		t.Errorf("invalid triggered block. expect 101 got %d", execution.Reason.BlockNumber)
+	if execution.Reason == nil || execution.Reason.BlockNumber != 101 {
+		var actualBlockNumber uint64
+		if execution.Reason != nil {
+			actualBlockNumber = execution.Reason.BlockNumber
+		}
+		t.Errorf("invalid triggered block. expect 101 got %d (Reason: %+v)", actualBlockNumber, execution.Reason)
 	}
 
 	// Another user cannot get this execution id
@@ -384,8 +409,12 @@ func TestTriggerSync(t *testing.T) {
 	if execution.TriggerName != tr1.Trigger.Name {
 		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
 	}
-	if execution.Reason.BlockNumber != 101 {
-		t.Errorf("invalid triggered block. expect 101 got %d", execution.Reason.BlockNumber)
+	if execution.Reason == nil || execution.Reason.BlockNumber != 101 {
+		var actualBlockNumber uint64
+		if execution.Reason != nil {
+			actualBlockNumber = execution.Reason.BlockNumber
+		}
+		t.Errorf("invalid triggered block. expect 101 got %d (Reason: %+v)", actualBlockNumber, execution.Reason)
 	}
 }
 

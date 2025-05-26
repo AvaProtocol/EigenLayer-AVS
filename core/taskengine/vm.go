@@ -48,7 +48,7 @@ func (c *CommonProcessor) SetVar(name string, data any) {
 func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 	c.vm.mu.Lock()
 	defer c.vm.mu.Unlock()
-	nodeNameVar := c.vm.GetNodeNameAsVar(stepID) // Assumes GetNodeNameAsVar handles its own locking if needed for TaskNodes
+	nodeNameVar := c.vm.getNodeNameAsVarLocked(stepID) // Use locked version to avoid deadlock
 	if c.vm.vars == nil {
 		c.vm.vars = make(map[string]any)
 	}
@@ -60,7 +60,7 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 func (c *CommonProcessor) GetOutputVar(stepID string) any {
 	c.vm.mu.Lock()
 	defer c.vm.mu.Unlock()
-	name := c.vm.GetNodeNameAsVar(stepID) // Assumes GetNodeNameAsVar handles its own locking
+	name := c.vm.getNodeNameAsVarLocked(stepID) // Use locked version to avoid deadlock
 	if name == "" || c.vm.vars == nil {
 		return nil
 	}
@@ -182,6 +182,11 @@ func (v *VM) GetTriggerNameAsVar() (string, error) {
 func (v *VM) GetNodeNameAsVar(nodeID string) string {
 	v.mu.Lock() // Lock for reading TaskNodes
 	defer v.mu.Unlock()
+	return v.getNodeNameAsVarLocked(nodeID)
+}
+
+// getNodeNameAsVarLocked is the internal version that assumes the mutex is already held
+func (v *VM) getNodeNameAsVarLocked(nodeID string) string {
 	re := regexp.MustCompile(`[^a-zA-Z0-9_$]`)
 	node, ok := v.TaskNodes[nodeID]
 	if !ok {
@@ -359,7 +364,8 @@ func (v *VM) Compile() error {
 
 	for _, edge := range v.task.Edges {
 		isBranchSource := strings.Contains(edge.Source, ".")
-		if !isBranchSource {
+		isTriggerSource := v.task.Trigger != nil && edge.Source == v.task.Trigger.Id
+		if !isBranchSource && !isTriggerSource {
 			if _, ok := v.TaskNodes[edge.Source]; !ok {
 				return fmt.Errorf("compile error: source node '%s' in edge '%s' not in TaskNodes", edge.Source, edge.Id)
 			}
