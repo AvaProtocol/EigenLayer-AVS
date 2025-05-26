@@ -2510,10 +2510,17 @@ type ListTasksReq struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Filter out by the smart_wallet_address
 	SmartWalletAddress []string `protobuf:"bytes,1,rep,name=smart_wallet_address,json=smartWalletAddress,proto3" json:"smart_wallet_address,omitempty"`
-	Cursor             string   `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
-	Limit              int64    `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Deprecated: Use before or after instead
+	//
+	// Deprecated: Marked as deprecated in avs.proto.
+	Cursor string `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	// Get items before this cursor value (for backward pagination)
+	Before string `protobuf:"bytes,3,opt,name=before,proto3" json:"before,omitempty"`
+	// Get items after this cursor value (for forward pagination)
+	After         string `protobuf:"bytes,4,opt,name=after,proto3" json:"after,omitempty"`
+	Limit         int64  `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListTasksReq) Reset() {
@@ -2553,9 +2560,24 @@ func (x *ListTasksReq) GetSmartWalletAddress() []string {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in avs.proto.
 func (x *ListTasksReq) GetCursor() string {
 	if x != nil {
 		return x.Cursor
+	}
+	return ""
+}
+
+func (x *ListTasksReq) GetBefore() string {
+	if x != nil {
+		return x.Before
+	}
+	return ""
+}
+
+func (x *ListTasksReq) GetAfter() string {
+	if x != nil {
+		return x.After
 	}
 	return ""
 }
@@ -3456,6 +3478,8 @@ type ListSecretsReq struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
 	WorkflowId string                 `protobuf:"bytes,1,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
 	// Deprecated: Use before or after instead
+	//
+	// Deprecated: Marked as deprecated in avs.proto.
 	Cursor string `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	// Get items before this cursor value (for backward pagination)
 	Before string `protobuf:"bytes,3,opt,name=before,proto3" json:"before,omitempty"`
@@ -3503,6 +3527,7 @@ func (x *ListSecretsReq) GetWorkflowId() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in avs.proto.
 func (x *ListSecretsReq) GetCursor() string {
 	if x != nil {
 		return x.Cursor
@@ -5908,11 +5933,13 @@ const file_avs_proto_rawDesc = "" +
 	"\afactory\x18\x03 \x01(\tR\afactory\x12\x1b\n" +
 	"\tis_hidden\x18\x04 \x01(\bR\bisHidden\"?\n" +
 	"\x0eListWalletResp\x12-\n" +
-	"\x05items\x18\x01 \x03(\v2\x17.aggregator.SmartWalletR\x05items\"n\n" +
+	"\x05items\x18\x01 \x03(\v2\x17.aggregator.SmartWalletR\x05items\"\xa0\x01\n" +
 	"\fListTasksReq\x120\n" +
-	"\x14smart_wallet_address\x18\x01 \x03(\tR\x12smartWalletAddress\x12\x16\n" +
-	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\x14\n" +
-	"\x05limit\x18\x03 \x01(\x03R\x05limit\"\x9b\x04\n" +
+	"\x14smart_wallet_address\x18\x01 \x03(\tR\x12smartWalletAddress\x12\x1a\n" +
+	"\x06cursor\x18\x02 \x01(\tB\x02\x18\x01R\x06cursor\x12\x16\n" +
+	"\x06before\x18\x03 \x01(\tR\x06before\x12\x14\n" +
+	"\x05after\x18\x04 \x01(\tR\x05after\x12\x14\n" +
+	"\x05limit\x18\x05 \x01(\x03R\x05limit\"\x9b\x04\n" +
 	"\rListTasksResp\x124\n" +
 	"\x05items\x18\x01 \x03(\v2\x1e.aggregator.ListTasksResp.ItemR\x05items\x12\x16\n" +
 	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\x19\n" +
@@ -5995,11 +6022,11 @@ const file_avs_proto_rawDesc = "" +
 	"\x06secret\x18\x02 \x01(\tR\x06secret\x12\x1f\n" +
 	"\vworkflow_id\x18\x03 \x01(\tR\n" +
 	"workflowId\x12\x15\n" +
-	"\x06org_id\x18\x04 \x01(\tR\x05orgId\"\x8d\x01\n" +
+	"\x06org_id\x18\x04 \x01(\tR\x05orgId\"\x91\x01\n" +
 	"\x0eListSecretsReq\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\tR\n" +
-	"workflowId\x12\x16\n" +
-	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\x16\n" +
+	"workflowId\x12\x1a\n" +
+	"\x06cursor\x18\x02 \x01(\tB\x02\x18\x01R\x06cursor\x12\x16\n" +
 	"\x06before\x18\x03 \x01(\tR\x06before\x12\x14\n" +
 	"\x05after\x18\x04 \x01(\tR\x05after\x12\x14\n" +
 	"\x05limit\x18\x05 \x01(\x03R\x05limit\"\xfa\x01\n" +

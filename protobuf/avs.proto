@@ -491,8 +491,13 @@ message ListWalletResp {
 message ListTasksReq {
   // Filter out by the smart_wallet_address
   repeated string smart_wallet_address = 1;
-  string cursor = 2;
-  int64 limit = 3;
+  // Deprecated: Use before or after instead
+  string cursor = 2 [deprecated=true];
+  // Get items before this cursor value (for backward pagination)
+  string before = 3;
+  // Get items after this cursor value (for forward pagination)
+  string after = 4;
+  int64 limit = 5;
 }
 
 message ListTasksResp {
@@ -656,7 +661,7 @@ message CreateOrUpdateSecretReq {
 message ListSecretsReq {
   string workflow_id = 1;
   // Deprecated: Use before or after instead
-  string cursor = 2;
+  string cursor = 2 [deprecated=true];
   // Get items before this cursor value (for backward pagination)
   string before = 3;
   // Get items after this cursor value (for forward pagination)
