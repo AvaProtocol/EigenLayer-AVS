@@ -686,7 +686,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		}
 	}
 
-	taskResp.HasMore = visited > 0
+	taskResp.HasMore = visited > 0 && total >= limit
 	if taskResp.HasMore && len(taskResp.Items) > 0 {
 		if cursor.Direction == CursorDirectionPrevious {
 			taskResp.Cursor = CreatePreviousCursor(taskResp.Items[0].Id)

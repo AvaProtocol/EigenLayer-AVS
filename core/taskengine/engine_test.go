@@ -200,8 +200,8 @@ func TestListTasksPagination(t *testing.T) {
 			"0x961d2DD008960A9777571D78D21Ec9C3E5c6020c",
 			"0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4",
 		},
-		Limit:  15,
-		Cursor: result.Cursor,
+		Limit: 15,
+		After: result.Cursor,
 	})
 
 	if len(result.Items) != 15 {
@@ -220,8 +220,8 @@ func TestListTasksPagination(t *testing.T) {
 			"0x961d2DD008960A9777571D78D21Ec9C3E5c6020c",
 			"0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4",
 		},
-		Limit:  15,
-		Cursor: result.Cursor,
+		Limit: 15,
+		After: result.Cursor,
 	})
 
 	if len(result.Items) != 2 {
