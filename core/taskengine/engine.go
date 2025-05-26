@@ -846,7 +846,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 		executionUlid := ulid.MustParse(ExecutionIdFromStorageKey([]byte(key)))
 		if !cursor.IsZero() {
 			if (cursor.Direction == CursorDirectionNext && cursor.LessThanOrEqualUlid(executionUlid)) ||
-				(cursor.Direction == CursorDirectionPrevious && !cursor.LessThanUlid(executionUlid)) {
+				(cursor.Direction == CursorDirectionPrevious && cursor.LessThanUlid(executionUlid)) {
 				continue
 			}
 		}
