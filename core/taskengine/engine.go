@@ -822,29 +822,33 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 		Cursor: "",
 	}
 
-	total := 0
-	cursor, err := CursorFromString(payload.Cursor)
+	var before, after, legacyCursor string
+	var limitVal int64
 
+	if payload != nil {
+		before = payload.Before
+		after = payload.After
+		legacyCursor = payload.Cursor
+		limitVal = payload.Limit
+	}
+
+	cursor, limit, err := SetupPagination(before, after, legacyCursor, limitVal)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidCursor)
+		return nil, err
 	}
 
-	limit := int(payload.Limit)
-	if limit < 0 {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
-	}
-
-	if limit == 0 {
-		limit = DefaultLimit
-	}
-	visited := 0
+	total := 0
+	var lastExecutionId string
+	
 	for i := len(executionKeys) - 1; i >= 0; i-- {
 		key := executionKeys[i]
-		visited = i
 
 		executionUlid := ulid.MustParse(ExecutionIdFromStorageKey([]byte(key)))
-		if !cursor.IsZero() && cursor.LessThanOrEqualUlid(executionUlid) {
-			continue
+		if !cursor.IsZero() {
+			if (cursor.Direction == CursorDirectionNext && cursor.LessThanOrEqualUlid(executionUlid)) ||
+				(cursor.Direction == CursorDirectionPrevious && cursor.LessThanUlid(executionUlid)) {
+				continue
+			}
 		}
 
 		executionValue, err := n.db.GetKey([]byte(key))
@@ -873,16 +877,17 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 				exec.Reason.Type = avsproto.TriggerReason_Event
 			}
 			executioResp.Items = append(executioResp.Items, &exec)
+			lastExecutionId = exec.Id
 			total += 1
 		}
 		if total >= limit {
+			executioResp.HasMore = true
 			break
 		}
 	}
-
-	executioResp.HasMore = visited > 0
-	if executioResp.HasMore {
-		executioResp.Cursor = NewCursor(CursorDirectionNext, executioResp.Items[total-1].Id).String()
+	
+	if executioResp.HasMore && lastExecutionId != "" {
+		executioResp.Cursor = CreateNextCursor(lastExecutionId)
 	}
 	return executioResp, nil
 }
