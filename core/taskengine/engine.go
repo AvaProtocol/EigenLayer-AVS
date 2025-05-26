@@ -1595,7 +1595,41 @@ func (n *Engine) runBlockTriggerNode(nodeConfig map[string]interface{}) (map[str
 	}
 }
 
+// validateNodeInputs validates input variables based on node type
+func (n *Engine) validateNodeInputs(nodeType string, inputVariables map[string]*structpb.Value) error {
+	switch nodeType {
+	case "blockTrigger":
+		// blockTrigger nodes should not accept input variables
+		if len(inputVariables) > 0 {
+			var keys []string
+			for k := range inputVariables {
+				keys = append(keys, k)
+			}
+			return fmt.Errorf("blockTrigger nodes do not accept input variables. Received: %s", strings.Join(keys, ", "))
+		}
+	case "restApi", "customCode", "contractRead", "contractWrite", "branch", "filter", "loop", "graphql", "ethTransfer":
+		// These node types can accept input variables
+		break
+	default:
+		// Unknown node types - allow input variables but log a warning
+		if n.logger != nil {
+			n.logger.Warn("Unknown node type, allowing input variables", "nodeType", nodeType)
+		}
+	}
+
+	return nil
+}
+
 func (n *Engine) RunNodeWithInputsRPC(user *model.User, req *avsproto.RunNodeWithInputsReq) (*avsproto.RunNodeWithInputsResp, error) {
+	// Validate input variables based on node type
+	if err := n.validateNodeInputs(req.NodeType, req.InputVariables); err != nil {
+		return &avsproto.RunNodeWithInputsResp{
+			Success: false,
+			Error:   err.Error(),
+			NodeId:  "",
+		}, nil
+	}
+
 	// Convert protobuf request to internal format
 	nodeConfig := make(map[string]interface{})
 	for k, v := range req.NodeConfig {
