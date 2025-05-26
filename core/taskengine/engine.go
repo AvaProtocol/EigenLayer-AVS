@@ -883,11 +883,10 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 			total += 1
 		}
 		if total >= limit {
+			executioResp.HasMore = true
 			break
 		}
 	}
-
-	executioResp.HasMore = visited > 0
 	if executioResp.HasMore && lastExecutionId != "" {
 		executioResp.Cursor = CreateNextCursor(lastExecutionId)
 	}
