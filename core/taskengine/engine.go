@@ -617,17 +617,16 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		Cursor: "",
 	}
 
-	var before, after, legacyCursor string
+	var before, after string
 	var limitVal int64
 
 	if payload != nil {
 		before = payload.Before
 		after = payload.After
-		legacyCursor = payload.Cursor
 		limitVal = payload.Limit
 	}
 
-	cursor, limit, err := SetupPagination(before, after, legacyCursor, limitVal)
+	cursor, limit, err := SetupPagination(before, after, limitVal)
 	if err != nil {
 		return nil, err
 	}
@@ -687,7 +686,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		}
 	}
 
-	taskResp.HasMore = visited > 0
+	taskResp.HasMore = visited > 0 && total >= limit
 	if taskResp.HasMore && len(taskResp.Items) > 0 {
 		if cursor.Direction == CursorDirectionPrevious {
 			taskResp.Cursor = CreatePreviousCursor(taskResp.Items[0].Id)
@@ -841,17 +840,16 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 		},
 	}
 
-	var before, after, legacyCursor string
+	var before, after string
 	var limitVal int64
 
 	if payload != nil {
 		before = payload.Before
 		after = payload.After
-		legacyCursor = payload.Cursor
 		limitVal = payload.Limit
 	}
 
-	cursor, limit, err := SetupPagination(before, after, legacyCursor, limitVal)
+	cursor, limit, err := SetupPagination(before, after, limitVal)
 	if err != nil {
 		return nil, err
 	}
@@ -1179,17 +1177,16 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 
 	sort.Strings(secretKeys)
 
-	var before, after, legacyCursor string
+	var before, after string
 	var limitVal int64
 
 	if payload != nil {
 		before = payload.Before
 		after = payload.After
-		legacyCursor = payload.Cursor
 		limitVal = payload.Limit
 	}
 
-	cursor, limit, err := SetupPagination(before, after, legacyCursor, limitVal)
+	cursor, limit, err := SetupPagination(before, after, limitVal)
 	if err != nil {
 		return nil, err
 	}

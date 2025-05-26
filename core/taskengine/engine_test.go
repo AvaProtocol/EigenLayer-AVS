@@ -200,8 +200,8 @@ func TestListTasksPagination(t *testing.T) {
 			"0x961d2DD008960A9777571D78D21Ec9C3E5c6020c",
 			"0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4",
 		},
-		Limit:  15,
-		Cursor: result.Cursor,
+		Limit: 15,
+		After: result.Cursor,
 	})
 
 	if len(result.Items) != 15 {
@@ -220,8 +220,8 @@ func TestListTasksPagination(t *testing.T) {
 			"0x961d2DD008960A9777571D78D21Ec9C3E5c6020c",
 			"0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4",
 		},
-		Limit:  15,
-		Cursor: result.Cursor,
+		Limit: 15,
+		After: result.Cursor,
 	})
 
 	if len(result.Items) != 2 {
@@ -1542,7 +1542,7 @@ func TestListExecutionsPagination(t *testing.T) {
 
 	const (
 		totalTestExecutions = 10
-		pageSize           = 3
+		pageSize            = 3
 	)
 
 	// Create totalTestExecutions executions
@@ -1581,7 +1581,7 @@ func TestListExecutionsPagination(t *testing.T) {
 	// Test with limit 0 (should use default)
 	result, err = n.ListExecutions(user, &avsproto.ListExecutionsReq{
 		TaskIds: []string{task.Id},
-		Limit: 0,
+		Limit:   0,
 	})
 	if err != nil {
 		t.Errorf("ListExecutions failed: %v", err)
@@ -1595,7 +1595,7 @@ func TestListExecutionsPagination(t *testing.T) {
 	// Test with limit greater than total items
 	result, err = n.ListExecutions(user, &avsproto.ListExecutionsReq{
 		TaskIds: []string{task.Id},
-		Limit: totalTestExecutions * 2,
+		Limit:   totalTestExecutions * 2,
 	})
 	if err != nil {
 		t.Errorf("ListExecutions failed: %v", err)
@@ -1617,7 +1617,7 @@ func TestListExecutionsPagination(t *testing.T) {
 	// Test pagination using cursor
 	firstPage, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{
 		TaskIds: []string{task.Id},
-		Limit: pageSize,
+		Limit:   pageSize,
 	})
 	if err != nil {
 		t.Errorf("ListExecutions failed: %v", err)
@@ -1626,8 +1626,8 @@ func TestListExecutionsPagination(t *testing.T) {
 
 	secondPage, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{
 		TaskIds: []string{task.Id},
-		After: firstPage.Cursor,
-		Limit: pageSize,
+		After:   firstPage.Cursor,
+		Limit:   pageSize,
 	})
 	if err != nil {
 		t.Errorf("ListExecutions failed: %v", err)
@@ -1648,8 +1648,8 @@ func TestListExecutionsPagination(t *testing.T) {
 
 	thirdPage, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{
 		TaskIds: []string{task.Id},
-		Before: secondPage.Cursor,
-		Limit: pageSize,
+		Before:  secondPage.Cursor,
+		Limit:   pageSize,
 	})
 	if err != nil {
 		t.Errorf("ListExecutions failed: %v", err)
