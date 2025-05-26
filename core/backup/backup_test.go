@@ -1,5 +1,3 @@
-
-
 package backup
 
 import (
@@ -11,10 +9,6 @@ import (
 )
 
 func TestBackup(t *testing.T) {
-	if os.Getenv("CI") == "true" {
-		t.Skip("Skipping test in CI environment due to Go version compatibility issues")
-	}
-	
 	// Test cases for backup service
 	t.Run("StartPeriodicBackup", func(t *testing.T) {
 		// Setup

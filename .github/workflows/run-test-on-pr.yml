@@ -114,36 +114,24 @@ jobs:
     strategy:
       matrix:
         test:
-          # Temporarily skip aggregator tests due to compatibility issues with eigensdk-go
-          # - aggregator
-          # Temporarily skip taskengine tests due to compatibility issues with eigensdk-go
-          # - core/taskengine
-          # - core/taskengine/trigger
+          - aggregator
+          - core/taskengine
+          - core/taskengine/trigger
           - core/taskengine/macros
           - pkg/timekeeper
           - pkg/graphql
           - pkg/byte4
-          # Temporarily skip erc4337/preset tests due to compatibility issues with eigensdk-go
-          # - pkg/erc4337/preset
-          # Temporarily skip backup tests due to compatibility issues with eigensdk-go
-          # - core/backup
-          # Temporarily skip migrator tests due to compatibility issues with eigensdk-go
-          # - core/migrator
-          # Temporarily skip migrations tests due to compatibility issues with eigensdk-go
-          # - migrations
-          # Temporarily skip operator tests due to compatibility issues with eigensdk-go
-          # - operator
+          - pkg/erc4337/preset
+          - core/backup
+          - core/migrator
+          - migrations
+          - operator
 
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
           ref: ${{ github.event.inputs.branch || github.ref }}
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: "1.24"
 
       - name: Run Go test
         env:

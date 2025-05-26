@@ -66,4 +66,3 @@ func copyMap(dst, src map[string]string) {
 		dst[k] = v
 	}
 }
-

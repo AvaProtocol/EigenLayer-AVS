@@ -85,7 +85,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		if !ok {
 			return true
 		}
-		
+
 		if err := jsvm.Set(keyStr, value); err != nil {
 			if r.vm.logger != nil {
 				r.vm.logger.Error("failed to set variable in JS VM", "key", keyStr, "error", err)

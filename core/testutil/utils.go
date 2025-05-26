@@ -103,10 +103,10 @@ func GetLogger() sdklogging.Logger {
 // MockLogger implements the sdklogging.Logger interface for testing
 type MockLogger struct{}
 
-func (l *MockLogger) Info(msg string, keysAndValues ...interface{}) {}
+func (l *MockLogger) Info(msg string, keysAndValues ...interface{})  {}
 func (l *MockLogger) Debug(msg string, keysAndValues ...interface{}) {}
 func (l *MockLogger) Error(msg string, keysAndValues ...interface{}) {}
-func (l *MockLogger) Warn(msg string, keysAndValues ...interface{}) {}
+func (l *MockLogger) Warn(msg string, keysAndValues ...interface{})  {}
 func (l *MockLogger) Fatal(msg string, keysAndValues ...interface{}) {
 	panic(msg)
 }

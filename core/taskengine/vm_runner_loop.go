@@ -90,16 +90,16 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 			wg.Add(1)
 			go func(index int, value interface{}) {
 				defer wg.Done()
-				
+
 				r.vm.vars.Store(node.IterKey, index)
 				r.vm.vars.Store(node.IterVal, value)
-				
+
 				result, err := r.executeNestedNode(node, fmt.Sprintf("%s.%d", stepID, index))
-				
+
 				resultsMutex.Lock()
 				results = append(results, result)
 				resultsMutex.Unlock()
-				
+
 				if err != nil {
 					errorsMutex.Lock()
 					if firstError == nil {
@@ -111,16 +111,16 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 				}
 			}(i, item)
 		}
-		
+
 		wg.Wait()
 	} else {
 		for i, item := range inputArray {
 			r.vm.vars.Store(node.IterKey, i)
 			r.vm.vars.Store(node.IterVal, item)
-			
+
 			result, err := r.executeNestedNode(node, fmt.Sprintf("%s.%d", stepID, i))
 			results = append(results, result)
-			
+
 			if err != nil {
 				success = false
 				if firstError == nil {
@@ -132,7 +132,7 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	}
 
 	r.SetOutputVarForStep(stepID, results)
-	
+
 	value, err := structpb.NewValue(results)
 	if err == nil {
 		s.OutputData = &avsproto.Execution_Step_Loop{
@@ -146,12 +146,12 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	s.Log = log.String()
 	s.Success = success
 	s.EndAt = time.Now().UnixMilli()
-	
+
 	if !success && firstError != nil {
 		s.Error = firstError.Error()
 		return s, firstError
 	}
-	
+
 	return s, nil
 }
 
@@ -201,7 +201,7 @@ func (r *LoopProcessor) executeNestedNode(node *avsproto.LoopNode, iterationStep
 	} else {
 		return nil, fmt.Errorf("no nested node specified in loop")
 	}
-	
+
 	r.vm.TaskNodes.Store(iterationStepID, nestedNode)
 
 	_, err = r.vm.executeNode(nestedNode)
