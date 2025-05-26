@@ -617,15 +617,22 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		Cursor: "",
 	}
 
+	var before, after, legacyCursor string
+	var limitVal int64
+
+	if payload != nil {
+		before = payload.Before
+		after = payload.After
+		legacyCursor = payload.Cursor
+		limitVal = payload.Limit
+	}
+
+	cursor, limit, err := SetupPagination(before, after, legacyCursor, limitVal)
+	if err != nil {
+		return nil, err
+	}
+
 	total := 0
-	cursor, err := CursorFromString(payload.Cursor)
-	limit := int(payload.Limit)
-	if limit < 0 {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidPaginationParam)
-	}
-	if limit == 0 {
-		limit = DefaultLimit
-	}
 
 	visited := 0
 	for i := len(taskKeys) - 1; i >= 0; i-- {
@@ -639,8 +646,11 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		status, _ := strconv.Atoi(string(statusValue))
 
 		taskIDUlid := model.UlidFromTaskId(taskID)
-		if !cursor.IsZero() && cursor.LessThanOrEqualUlid(taskIDUlid) {
-			continue
+		if !cursor.IsZero() {
+			if (cursor.Direction == CursorDirectionNext && cursor.LessThanOrEqualUlid(taskIDUlid)) ||
+				(cursor.Direction == CursorDirectionPrevious && !cursor.LessThanUlid(taskIDUlid)) {
+				continue
+			}
 		}
 
 		taskRawByte, err := n.db.GetKey(TaskStorageKey(taskID, avsproto.TaskStatus(status)))
@@ -678,8 +688,8 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	}
 
 	taskResp.HasMore = visited > 0
-	if taskResp.HasMore {
-		taskResp.Cursor = NewCursor(CursorDirectionNext, taskResp.Items[total-1].Id).String()
+	if taskResp.HasMore && len(taskResp.Items) > 0 {
+		taskResp.Cursor = CreateNextCursor(taskResp.Items[len(taskResp.Items)-1].Id)
 	}
 
 	return taskResp, nil
