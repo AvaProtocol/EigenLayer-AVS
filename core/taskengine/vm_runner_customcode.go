@@ -161,6 +161,27 @@ func containsModuleSyntax(code string) bool {
 	return false
 }
 
+func containsReturnStatement(code string) bool {
+	// Check for return statements that are not in comments
+	lines := strings.Split(code, "\n")
+
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+
+		// Skip comment lines
+		if strings.HasPrefix(trimmedLine, "//") || strings.HasPrefix(trimmedLine, "/*") {
+			continue
+		}
+
+		// Check for return statements
+		if regexp.MustCompile(`\breturn\b`).MatchString(line) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
 	t0 := time.Now()
 	s := &avsproto.Execution_Step{
@@ -197,8 +218,21 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	}
 	r.vm.mu.Unlock()
 
+	// Transform the code if it contains module syntax or return statements
+	codeToExecute := node.Source
+
+	// Check if the code contains ES6 imports and transform them
+	if containsES6Imports(codeToExecute) {
+		codeToExecute = transformES6Imports(codeToExecute)
+		sb.WriteString("\nTransformed ES6 imports to CommonJS")
+	} else if containsModuleSyntax(codeToExecute) || containsReturnStatement(codeToExecute) {
+		// If it contains CommonJS require statements or return statements, wrap it in a function
+		codeToExecute = wrapCode(codeToExecute)
+		sb.WriteString("\nWrapped code in function to support return statements")
+	}
+
 	// Execute the script
-	result, err := r.jsvm.RunString(node.Source)
+	result, err := r.jsvm.RunString(codeToExecute)
 	if err != nil {
 		s.Success = false
 		s.Error = err.Error()

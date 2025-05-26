@@ -138,8 +138,8 @@ func TestRunJavaScript(t *testing.T) {
 		t.Errorf("expected JavaScript node run successfully but failed")
 	}
 
-	if !strings.Contains(step.Log, "Start execute user-input JS code at") {
-		t.Errorf("expected log contains trace data but found no")
+	if !strings.Contains(step.Log, "Execute Custom Code:") {
+		t.Errorf("expected log contains trace data but found no. Actual log: %s", step.Log)
 	}
 
 	if step.Error != "" {

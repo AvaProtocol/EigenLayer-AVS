@@ -142,17 +142,18 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		value, err := jsvm.RunString(fmt.Sprintf("(%s)", processedExpression)) // Wrap in parens for safety
 		if err != nil {
 			log.WriteString(fmt.Sprintf("Error evaluating expression for '%s': %s\n", condition.Id, err.Error()))
-			// Check if this is a syntax error (should fail the branch) or a runtime error (should continue)
+			// Check if this is a syntax error or reference error (both should fail the branch)
 			errorStr := err.Error()
-			if strings.Contains(errorStr, "SyntaxError") || strings.Contains(errorStr, "unexpected") || strings.Contains(errorStr, "Unexpected") {
-				// Syntax errors should fail the entire branch
+			if strings.Contains(errorStr, "SyntaxError") || strings.Contains(errorStr, "unexpected") || strings.Contains(errorStr, "Unexpected") ||
+				strings.Contains(errorStr, "ReferenceError") || strings.Contains(errorStr, "is not defined") {
+				// Syntax errors and undefined variable errors should fail the entire branch
 				executionStep.Error = fmt.Sprintf("failed to evaluate expression for condition '%s': %v", condition.Id, err)
 				executionStep.Success = false
 				executionStep.Log = log.String()
 				executionStep.EndAt = time.Now().UnixMilli()
 				return executionStep, nil, fmt.Errorf("failed to evaluate expression for condition '%s': %w", condition.Id, err)
 			}
-			// Runtime errors (like undefined variables) should just skip this condition
+			// Other runtime errors should just skip this condition
 			continue
 		}
 

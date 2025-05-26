@@ -828,13 +828,13 @@ func TestBranchProcessor_Execute_NonExistentVarInExpression(t *testing.T) {
 
 	executionLog, nextStep, err := processor.Execute(stepID, node)
 
-	// Updated expectation: nonExistentVar causes expression to evaluate to falsy value,
-	// but since there are only if conditions and none match, it should be a valid no-op
-	assert.Nil(t, err)
+	// Undefined variables should cause the branch to fail with an error
+	assert.NotNil(t, err)
+	assert.Contains(t, err.Error(), "failed to evaluate expression")
+	assert.Contains(t, err.Error(), "is not defined")
 	assert.Nil(t, nextStep)
 	assert.NotNil(t, executionLog)
-	assert.True(t, executionLog.Success)
-	assert.Nil(t, executionLog.GetBranch()) // No branch action taken
+	assert.False(t, executionLog.Success)
 }
 
 func TestBranchProcessor_Execute_InvalidScriptSyntax(t *testing.T) {
