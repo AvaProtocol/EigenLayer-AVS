@@ -44,7 +44,7 @@ func TestRunNodeWithInputs_CustomCode(t *testing.T) {
 					if (typeof myVar === 'undefined') {
 						throw new Error("myVar is required but not provided");
 					}
-					return { result: myVar * 2 };
+					({ result: myVar * 2 })
 				`,
 			},
 		},
@@ -81,7 +81,7 @@ func TestCreateNodeFromType(t *testing.T) {
 			config["contractAddress"] = "0x1234567890123456789012345678901234567890"
 			config["callData"] = "0x12345678"
 		case "customCode":
-			config["source"] = "return { hello: 'world' };"
+			config["source"] = "({ hello: 'world' })"
 		case "branch":
 			config["conditions"] = []interface{}{
 				map[string]interface{}{
@@ -99,7 +99,7 @@ func TestCreateNodeFromType(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, node)
 		assert.NotEmpty(t, node.Id)
-		assert.Equal(t, "Single Node Execution", node.Name)
+		assert.Equal(t, "Single Node Execution: "+nodeType, node.Name)
 
 		switch nodeType {
 		case "blockTrigger":
@@ -136,7 +136,7 @@ func TestEngine_RunNodeWithInputs(t *testing.T) {
 	}
 
 	result, err = engine.RunNodeWithInputs("customCode", map[string]interface{}{
-		"source": "return { message: 'Hello, World!' };",
+		"source": "({ message: 'Hello, World!' })",
 	}, map[string]interface{}{})
 
 	if err == nil {

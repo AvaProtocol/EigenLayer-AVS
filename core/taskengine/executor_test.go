@@ -69,7 +69,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 			Target: "branch1",
 		},
 		{
-			Id:     "e1",
+			Id:     "e2",
 			Source: "branch1.a1",
 			Target: "notification1",
 		},
@@ -108,6 +108,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 
 	if len(execution.Steps) != 2 {
 		t.Errorf("Expect evaluate 2 steps only but got: %d", len(execution.Steps))
+		return
 	}
 
 	if execution.Steps[0].NodeId != "branch1" {
@@ -123,8 +124,9 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 	}
 
 	outputData := gow.AnyToMap(execution.Steps[1].GetRestApi().Data)
-	if outputData["message"].(string) != "I'm hit" {
-		t.Errorf("expect branch output data is {\"message\": \"I'm hit\"} but got %s", outputData)
+	bodyData := outputData["body"].(map[string]interface{})
+	if bodyData["message"].(string) != "I'm hit" {
+		t.Errorf("expect message to be 'I'm hit' but got %s", bodyData["message"])
 	}
 }
 
@@ -174,7 +176,7 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 			Target: "branch1",
 		},
 		{
-			Id:     "e1",
+			Id:     "e2",
 			Source: "branch1.a1",
 			Target: "notification1",
 		},
@@ -268,7 +270,7 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 			Target: "branch1",
 		},
 		{
-			Id:     "e1",
+			Id:     "e2",
 			Source: "branch1.condition1",
 			Target: "rest1",
 		},
@@ -399,7 +401,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 			Target: "branch1",
 		},
 		{
-			Id:     "e1",
+			Id:     "e3",
 			Source: "branch1.condition1",
 			Target: "customcode1",
 		},
@@ -524,10 +526,10 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 	}
 
 	// Verify the inputs of each step
-	expectedInputsStep0 := []string{"triggertest.data", "apContext.configVars"}
-	expectedInputsStep1 := []string{"triggertest.data", "spacex.data", "apContext.configVars"}
-	expectedInputsStep2 := []string{"triggertest.data", "spacex.data", "apContext.configVars"}
-	expectedInputsStep3 := []string{"apContext.configVars", "spacex.data", "triggertest.data", "dummy.data"}
+	expectedInputsStep0 := []string{"apContext.configVars", "spacex.data", "triggertest.data"}
+	expectedInputsStep1 := []string{"apContext.configVars", "spacex.data", "triggertest.data"}
+	expectedInputsStep2 := []string{"apContext.configVars", "dummy.data", "spacex.data", "triggertest.data"}
+	expectedInputsStep3 := []string{"apContext.configVars", "dummy.data", "http.data", "spacex.data", "triggertest.data"}
 
 	// Sort the expected and actual inputs before comparison
 	sort.Strings(expectedInputsStep0)

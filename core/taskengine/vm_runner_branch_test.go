@@ -122,7 +122,7 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 			Edges:   edges,
 			Trigger: trigger,
 		},
-	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+	}, testutil.GetTestEventTriggerReason(), testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
 		t.Errorf("expect vm initialized")
@@ -155,7 +155,8 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 		t.Errorf("expected second condition to be hit, but got %s", vm.ExecutionLogs[0].OutputData)
 	}
 	outputData := gow.AnyToMap(vm.ExecutionLogs[1].GetRestApi().Data)
-	if outputData["name"].(string) != "hit=second_condition" {
+	bodyData := outputData["body"].(map[string]interface{})
+	if bodyData["name"].(string) != "hit=second_condition" {
 		t.Errorf("expected second notification to be executed, but got %s", vm.ExecutionLogs[1].OutputData)
 	}
 

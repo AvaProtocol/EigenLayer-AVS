@@ -100,13 +100,13 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 
 	if err != nil {
-		errMsg := fmt.Sprintf("HTTP request failed: %v", err)
+		errMsg := fmt.Sprintf("HTTP request failed: connection error or timeout")
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
 		executionLogStep.Error = errMsg
 		executionLogStep.Success = false
 		executionLogStep.Log = logBuilder.String()
 		executionLogStep.EndAt = time.Now().UnixMilli()
-		return executionLogStep, err
+		return executionLogStep, fmt.Errorf(errMsg)
 	}
 
 	logBuilder.WriteString(fmt.Sprintf("Response Status: %s, Code: %d\n", resp.Status(), resp.StatusCode()))
@@ -173,14 +173,15 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	r.SetOutputVarForStep(stepID, fullResponseOutput) // Store the map[string]interface{} result in VM vars
 
 	if resp.IsError() { // Consider HTTP status >= 400 an error for Success flag
+		errMsg := fmt.Sprintf("unexpected HTTP status code: %d", resp.StatusCode())
 		executionLogStep.Success = false
-		executionLogStep.Error = fmt.Sprintf("HTTP Error: %s", resp.Status())
-		// The detailed error (if any from the request execution itself) would have been caught earlier.
-		// This sets error based on HTTP status code.
+		executionLogStep.Error = errMsg
+		executionLogStep.Log = logBuilder.String()
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		return executionLogStep, fmt.Errorf(errMsg)
 	}
 
 	executionLogStep.Log = logBuilder.String()
 	executionLogStep.EndAt = time.Now().UnixMilli()
-	return executionLogStep, nil // Return nil for error if HTTP req succeeded, even if status indicates error (e.g. 404)
-	// The executionLogStep.Success and .Error fields will indicate the outcome.
+	return executionLogStep, nil
 }

@@ -446,6 +446,7 @@ func TestTriggerAsync(t *testing.T) {
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
 			BlockNumber: uint64(101),
+			Type:        avsproto.TriggerReason_Block,
 		},
 		IsBlocking: false,
 	})
@@ -489,8 +490,33 @@ func TestTriggerAsync(t *testing.T) {
 		t.Errorf("wrong node id in execution log")
 	}
 
-	if !strings.Contains(gow.AnyToString(execution.Steps[0].GetRestApi().Data), "httpbin.org") {
-		t.Error("Invalid output data")
+	if len(execution.Steps) == 0 {
+		t.Errorf("No execution steps found")
+		return
+	}
+
+	step := execution.Steps[0]
+	if step.GetRestApi() == nil {
+		t.Errorf("RestApi data is nil")
+		return
+	}
+
+	// Get the response data as a map
+	responseData := gow.AnyToMap(step.GetRestApi().Data)
+	if responseData == nil {
+		t.Errorf("Failed to convert response data to map")
+		return
+	}
+
+	// Check if the response body contains "httpbin.org"
+	body, ok := responseData["body"].(string)
+	if !ok {
+		t.Errorf("Response body is not a string, got type: %T", responseData["body"])
+		return
+	}
+
+	if !strings.Contains(body, "httpbin.org") {
+		t.Errorf("Invalid output data. Expected body to contain 'httpbin.org' but got: %s", body[:100]+"...")
 	}
 
 	// If we get the status back it also reflected
@@ -536,6 +562,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
 			BlockNumber: uint64(101),
+			Type:        avsproto.TriggerReason_Block,
 		},
 		IsBlocking: true,
 	})
@@ -549,6 +576,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
 			BlockNumber: uint64(101),
+			Type:        avsproto.TriggerReason_Block,
 		},
 		IsBlocking: true,
 	})

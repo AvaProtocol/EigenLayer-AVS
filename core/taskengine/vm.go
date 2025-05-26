@@ -204,6 +204,10 @@ func (v *VM) getNodeNameAsVarLocked(nodeID string) string {
 }
 
 func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
+	return NewVMWithDataAndTransferLog(task, reason, smartWalletConfig, secrets, nil)
+}
+
+func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReason, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *avsproto.Execution_TransferLogOutput) (*VM, error) {
 	var taskOwner common.Address
 	if task != nil && task.Owner != "" {
 		taskOwner = common.HexToAddress(task.Owner)
@@ -216,6 +220,24 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 	v.reason = reason
 	v.smartWalletConfig = smartWalletConfig
 	v.parsedTriggerData = &triggerDataType{} // Initialize parsedTriggerData
+
+	// Initialize apContext with configVars containing secrets and macro variables
+	configVars := make(map[string]string)
+	// Add macro variables
+	if macroVars != nil {
+		for k, v := range macroVars {
+			configVars[k] = v
+		}
+	}
+	// Add secrets (they override macro variables if there are conflicts)
+	if secrets != nil {
+		for k, v := range secrets {
+			configVars[k] = v
+		}
+	}
+	v.AddVar("apContext", map[string]map[string]string{
+		"configVars": configVars,
+	})
 
 	if task != nil {
 		if task.Trigger == nil {
@@ -231,66 +253,50 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 		v.mu.Unlock()
 	}
 
-	// The 'reason' object of type *avsproto.TriggerReason (as per local avs.proto)
-	// does not contain EvmLog, TransferLog, Block, or Time directly.
-	// These are part of the Execution.output_data oneof.
-	// Therefore, the following block attempting to populate v.parsedTriggerData
-	// from 'reason' is removed. How v.parsedTriggerData gets populated with these
-	// details needs to be revisited based on where this data actually comes from.
-	/*
-		if reason != nil {
-			triggerNameStd, err := v.GetTriggerNameAsVar()
-			if err != nil {
-				return nil, fmt.Errorf("failed to standardize trigger name: %w", err)
-			}
-			var dataToStore any
-			if reason.EvmLog != nil {
-				v.parsedTriggerData.EvmLog = reason.EvmLog
-				dataToStore = reason.EvmLog
-			} else if reason.TransferLog != nil {
-				v.parsedTriggerData.TransferLog = reason.TransferLog
-				dataToStore = reason.TransferLog
-			} else if reason.Block != nil {
-				v.parsedTriggerData.Block = reason.Block
-				dataToStore = reason.Block
-			} else if reason.Time != nil {
-				v.parsedTriggerData.Time = reason.Time
-				dataToStore = reason.Time
-			}
-			if dataToStore != nil {
-				v.AddVar(triggerNameStd, map[string]any{"data": dataToStore})
-			}
-		} else if task != nil { // Ensure task is not nil before trying to get trigger name
-			triggerNameStd, err := v.GetTriggerNameAsVar()
-			if err == nil {
-				v.AddVar(triggerNameStd, map[string]any{"data": map[string]any{}})
-			}
-		}
-	*/
-
 	// If 'reason' is not nil, we can still try to add its basic fields (block_number, epoch, etc.)
 	// to the vars, if that's intended for the <trigger-name>.data variable.
 	if reason != nil {
 		triggerNameStd, err := v.GetTriggerNameAsVar()
 		if err == nil { // Proceed if trigger name is valid
-			// Create a map to store the basic fields from the reason object
-			reasonDataMap := make(map[string]interface{})
-			if reason.BlockNumber != 0 {
-				reasonDataMap["block_number"] = reason.BlockNumber
+			var triggerData map[string]interface{}
+
+			// If we have transfer log data, use it to populate rich trigger data
+			if transferLog != nil {
+				v.parsedTriggerData.TransferLog = transferLog
+				triggerData = map[string]interface{}{
+					"token_name":        transferLog.TokenName,
+					"token_symbol":      transferLog.TokenSymbol,
+					"token_decimals":    transferLog.TokenDecimals,
+					"transaction_hash":  transferLog.TransactionHash,
+					"address":           transferLog.Address,
+					"block_number":      transferLog.BlockNumber,
+					"block_timestamp":   transferLog.BlockTimestamp,
+					"from_address":      transferLog.FromAddress,
+					"to_address":        transferLog.ToAddress,
+					"value":             transferLog.Value,
+					"value_formatted":   transferLog.ValueFormatted,
+					"transaction_index": transferLog.TransactionIndex,
+				}
+			} else {
+				// Create a map to store the basic fields from the reason object
+				triggerData = make(map[string]interface{})
+				if reason.BlockNumber != 0 {
+					triggerData["block_number"] = reason.BlockNumber
+				}
+				if reason.LogIndex != 0 { // Use a reasonable check, e.g. not zero or if it's optional
+					triggerData["log_index"] = reason.LogIndex
+				}
+				if reason.TxHash != "" {
+					triggerData["tx_hash"] = reason.TxHash
+				}
+				if reason.Epoch != 0 {
+					triggerData["epoch"] = reason.Epoch
+				}
+				if reason.Type != avsproto.TriggerReason_Unset {
+					triggerData["type"] = reason.Type.String() // Store as string
+				}
 			}
-			if reason.LogIndex != 0 { // Use a reasonable check, e.g. not zero or if it's optional
-				reasonDataMap["log_index"] = reason.LogIndex
-			}
-			if reason.TxHash != "" {
-				reasonDataMap["tx_hash"] = reason.TxHash
-			}
-			if reason.Epoch != 0 {
-				reasonDataMap["epoch"] = reason.Epoch
-			}
-			if reason.Type != avsproto.TriggerReason_Unset {
-				reasonDataMap["type"] = reason.Type.String() // Store as string
-			}
-			v.AddVar(triggerNameStd, map[string]any{"data": reasonDataMap})
+			v.AddVar(triggerNameStd, map[string]any{"data": triggerData})
 		}
 	} else if task != nil { // Fallback if reason is nil but task is not
 		triggerNameStd, err := v.GetTriggerNameAsVar()
@@ -476,6 +482,21 @@ func (v *VM) Compile() error {
 				inDegree[neighborNodeID]--
 				if inDegree[neighborNodeID] == 0 {
 					topoQueue = append(topoQueue, neighborNodeID)
+				}
+			}
+		}
+
+		// Also process branch condition edges if this is a branch node
+		if node, isTaskNode := v.TaskNodes[currNodeID]; isTaskNode && node.GetBranch() != nil {
+			for _, cond := range node.GetBranch().Conditions {
+				condSourceID := fmt.Sprintf("%s.%s", currNodeID, cond.Id)
+				for _, neighborNodeID := range adj[condSourceID] {
+					if _, isActualNode := v.TaskNodes[neighborNodeID]; isActualNode {
+						inDegree[neighborNodeID]--
+						if inDegree[neighborNodeID] == 0 {
+							topoQueue = append(topoQueue, neighborNodeID)
+						}
+					}
 				}
 			}
 		}
@@ -673,7 +694,7 @@ func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avspro
 	v.mu.Lock()
 	executionLog.Inputs = v.collectInputKeysForLog() // Uses locked v.vars
 	v.mu.Unlock()
-	v.addExecutionLog(executionLog)
+	// v.addExecutionLog(executionLog) // Caller will add
 	return executionLog, err // RestAPI node doesn't dictate a jump
 }
 
@@ -1022,7 +1043,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 	case "blockTrigger": // This is a conceptual trigger, often represented by custom code
 		node.TaskType = &avsproto.TaskNode_CustomCode{CustomCode: &avsproto.CustomCodeNode{
 			Lang:   avsproto.CustomCodeLang_JavaScript,
-			Source: `return { blockNumber: trigger.data.number, blockHash: trigger.data.hash };`, // Assuming trigger.data has block info
+			Source: `({ blockNumber: blockNumber || 0, blockHash: "0x" })`, // Use object literal instead of return statement
 		}}
 	case "restApi":
 		url, _ := config["url"].(string)

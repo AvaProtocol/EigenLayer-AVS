@@ -263,7 +263,7 @@ func JsFastTask() *avsproto.CreateTaskReq {
 		Name: "jsfast",
 		TaskType: &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{
-				Source: "return 100",
+				Source: "100",
 			},
 		},
 	}
@@ -339,5 +339,33 @@ func GetTestEventTriggerReason() *avsproto.TriggerReason {
 		BlockNumber: 7212417,
 		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
 		LogIndex:    98,
+		Type:        avsproto.TriggerReason_Event,
 	}
+}
+
+// GetTestEventTriggerReasonWithTransferData provides a trigger reason with rich transfer log data for testing
+func GetTestEventTriggerReasonWithTransferData() (*avsproto.TriggerReason, *avsproto.Execution_TransferLogOutput) {
+	reason := &avsproto.TriggerReason{
+		BlockNumber: 7212417,
+		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+		LogIndex:    98,
+		Type:        avsproto.TriggerReason_Event,
+	}
+
+	transferLog := &avsproto.Execution_TransferLogOutput{
+		TokenName:        "USDC",
+		TokenSymbol:      "USDC",
+		TokenDecimals:    6,
+		TransactionHash:  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+		Address:          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+		BlockNumber:      7212417,
+		BlockTimestamp:   1733351604000,
+		FromAddress:      "0x2A6CEbeDF9e737A9C6188c62A68655919c7314DB",
+		ToAddress:        "0xC114FB059434563DC65AC8D57e7976e3eaC534F4",
+		Value:            "3453120",
+		ValueFormatted:   "3.45312",
+		TransactionIndex: 73,
+	}
+
+	return reason, transferLog
 }
