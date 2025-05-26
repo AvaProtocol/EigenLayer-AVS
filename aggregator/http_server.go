@@ -26,18 +26,21 @@ type HttpJsonResp[T any] struct {
 }
 
 func (agg *Aggregator) startHttpServer(ctx context.Context) {
-	// sentryDsn := os.Getenv("SENTRY_DSN") // Old way: from env
 	sentryDsn := ""
+
 	if agg.config != nil {
 		sentryDsn = agg.config.SentryDsn
 	}
-	fmt.Printf("Sentry DSN from config: %s\n", sentryDsn) // Temporary: Print DSN to console
+
+	fmt.Printf("Sentry DSN from config: %s\n", sentryDsn)
+
 	if sentryDsn != "" {
 		serverName := ""
 		if agg.config != nil {
 			serverName = agg.config.ServerName
 		}
-		fmt.Printf("Sentry ServerName from config: %s\n", serverName) // Temporary: Print ServerName
+
+		fmt.Printf("Sentry ServerName from config: %s\n", serverName)
 
 		// To initialize Sentry's handler, you need to initialize Sentry itself beforehand
 		if err := sentry.Init(sentry.ClientOptions{
