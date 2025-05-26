@@ -130,6 +130,7 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 
 	// Set value to hit the second condition (a > 5 but not > 10)
 	vm.AddVar("a", 7)
+
 	vm.Compile()
 
 	if vm.entrypoint != "branch1" {
@@ -691,7 +692,7 @@ func TestBranchProcessor_Execute_ConditionMet(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "cond1"), nextStep.NodeID)
 	branchOutput := executionLog.GetBranch()
 	assert.NotNil(t, branchOutput)
-	assert.Equal(t, "cond1", branchOutput.ConditionId)
+	assert.Equal(t, "testStep.cond1", branchOutput.ConditionId)
 }
 
 func TestBranchProcessor_Execute_NoConditionMet(t *testing.T) {
@@ -766,7 +767,7 @@ func TestBranchProcessor_Execute_MultipleConditions_FirstMatch(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c1"), nextStep.NodeID)
 	branchOutput := executionLog.GetBranch()
 	assert.NotNil(t, branchOutput)
-	assert.Equal(t, "c1", branchOutput.ConditionId)
+	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c1"), branchOutput.ConditionId)
 }
 
 func TestBranchProcessor_Execute_MultipleConditions_SecondMatch(t *testing.T) {
@@ -789,7 +790,7 @@ func TestBranchProcessor_Execute_MultipleConditions_SecondMatch(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c2"), nextStep.NodeID)
 	branchOutput := executionLog.GetBranch()
 	assert.NotNil(t, branchOutput)
-	assert.Equal(t, "c2", branchOutput.ConditionId)
+	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c2"), branchOutput.ConditionId)
 }
 
 func TestBranchProcessor_Execute_ComplexVariableAccess(t *testing.T) {
@@ -813,7 +814,7 @@ func TestBranchProcessor_Execute_ComplexVariableAccess(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c1"), nextStep.NodeID)
 	branchOutput := executionLog.GetBranch()
 	assert.NotNil(t, branchOutput)
-	assert.Equal(t, "c1", branchOutput.ConditionId)
+	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c1"), branchOutput.ConditionId)
 }
 
 func TestBranchProcessor_Execute_NonExistentVarInExpression(t *testing.T) {
