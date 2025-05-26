@@ -8,6 +8,7 @@ import (
 	"time"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/oklog/ulid/v2"
 
@@ -945,6 +946,49 @@ func (v *VM) GetTaskId() string {
 }
 
 func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[string]interface{}) (*avsproto.Execution_Step, error) {
+	// Special handling for blockTrigger - simulate blockchain data locally
+	if node.GetCustomCode() != nil && node.Name == "Single Node Execution: blockTrigger" {
+		// Extract block number from input variables if provided
+		blockNumber := uint64(time.Now().Unix()) // Default to current timestamp as mock block number
+		if blockNum, ok := inputVariables["blockNumber"]; ok {
+			if bn, ok := blockNum.(float64); ok {
+				blockNumber = uint64(bn)
+			}
+		}
+
+		// Create mock block data
+		mockBlockData := map[string]interface{}{
+			"blockNumber": blockNumber,
+			"blockHash":   fmt.Sprintf("0x%x", time.Now().UnixNano()), // Mock hash
+			"timestamp":   time.Now().Unix(),
+			"parentHash":  fmt.Sprintf("0x%x", time.Now().UnixNano()-1),
+			"difficulty":  "1000000000000000",
+			"gasLimit":    uint64(30000000),
+			"gasUsed":     uint64(21000),
+		}
+
+		// Convert to structpb.Value for protobuf
+		structData, err := structpb.NewStruct(mockBlockData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create struct data: %w", err)
+		}
+
+		// Create successful execution step
+		executionStep := &avsproto.Execution_Step{
+			NodeId:  node.Id,
+			Success: true,
+			StartAt: time.Now().UnixMilli(),
+			EndAt:   time.Now().UnixMilli(),
+			OutputData: &avsproto.Execution_Step_CustomCode{
+				CustomCode: &avsproto.CustomCodeNode_Output{
+					Data: structpb.NewStructValue(structData),
+				},
+			},
+		}
+
+		return executionStep, nil
+	}
+
 	// Create a temporary, clean VM for isolated node execution.
 	// It inherits logger, secrets, and global configs but has its own state (vars, plans, etc.)
 	tempVM := NewVM() // NewVM initializes maps and mutex
@@ -1034,11 +1078,6 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 	node := &avsproto.TaskNode{Id: nodeID, Name: "Single Node Execution: " + nodeType}
 
 	switch nodeType {
-	case "blockTrigger": // This is a conceptual trigger, often represented by custom code
-		node.TaskType = &avsproto.TaskNode_CustomCode{CustomCode: &avsproto.CustomCodeNode{
-			Lang:   avsproto.CustomCodeLang_JavaScript,
-			Source: `({ blockNumber: blockNumber || 0, blockHash: "0x" })`, // Use object literal instead of return statement
-		}}
 	case "restApi":
 		url, _ := config["url"].(string)
 		method, _ := config["method"].(string)
@@ -1075,6 +1114,14 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		expression, _ := config["expression"].(string)
 		inputVarName, _ := config["input"].(string)
 		node.TaskType = &avsproto.TaskNode_Filter{Filter: &avsproto.FilterNode{Expression: expression, Input: inputVarName}}
+	case "blockTrigger":
+		// Create a custom code node that will be handled specially by RunNodeWithInputs
+		node.TaskType = &avsproto.TaskNode_CustomCode{
+			CustomCode: &avsproto.CustomCodeNode{
+				Lang:   avsproto.CustomCodeLang_JavaScript,
+				Source: "// BlockTrigger placeholder - handled specially",
+			},
+		}
 	default:
 		return nil, fmt.Errorf("unsupported node type for CreateNodeFromType: %s", nodeType)
 	}

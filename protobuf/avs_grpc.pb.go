@@ -42,6 +42,7 @@ const (
 	Aggregator_GetWorkflowCount_FullMethodName   = "/aggregator.Aggregator/GetWorkflowCount"
 	Aggregator_GetExecutionCount_FullMethodName  = "/aggregator.Aggregator/GetExecutionCount"
 	Aggregator_GetExecutionStats_FullMethodName  = "/aggregator.Aggregator/GetExecutionStats"
+	Aggregator_RunNodeWithInputs_FullMethodName  = "/aggregator.Aggregator/RunNodeWithInputs"
 )
 
 // AggregatorClient is the client API for Aggregator service.
@@ -94,6 +95,8 @@ type AggregatorClient interface {
 	// It counts total executions, successful executions, and failed executions
 	// If no workflow IDs are provided, it counts for all workflows of the authenticated user
 	GetExecutionStats(ctx context.Context, in *GetExecutionStatsReq, opts ...grpc.CallOption) (*GetExecutionStatsResp, error)
+	// RunNodeWithInputs allows executing a single node with provided inputs for testing purposes
+	RunNodeWithInputs(ctx context.Context, in *RunNodeWithInputsReq, opts ...grpc.CallOption) (*RunNodeWithInputsResp, error)
 }
 
 type aggregatorClient struct {
@@ -324,6 +327,16 @@ func (c *aggregatorClient) GetExecutionStats(ctx context.Context, in *GetExecuti
 	return out, nil
 }
 
+func (c *aggregatorClient) RunNodeWithInputs(ctx context.Context, in *RunNodeWithInputsReq, opts ...grpc.CallOption) (*RunNodeWithInputsResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RunNodeWithInputsResp)
+	err := c.cc.Invoke(ctx, Aggregator_RunNodeWithInputs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AggregatorServer is the server API for Aggregator service.
 // All implementations must embed UnimplementedAggregatorServer
 // for forward compatibility.
@@ -374,6 +387,8 @@ type AggregatorServer interface {
 	// It counts total executions, successful executions, and failed executions
 	// If no workflow IDs are provided, it counts for all workflows of the authenticated user
 	GetExecutionStats(context.Context, *GetExecutionStatsReq) (*GetExecutionStatsResp, error)
+	// RunNodeWithInputs allows executing a single node with provided inputs for testing purposes
+	RunNodeWithInputs(context.Context, *RunNodeWithInputsReq) (*RunNodeWithInputsResp, error)
 	mustEmbedUnimplementedAggregatorServer()
 }
 
@@ -449,6 +464,9 @@ func (UnimplementedAggregatorServer) GetExecutionCount(context.Context, *GetExec
 }
 func (UnimplementedAggregatorServer) GetExecutionStats(context.Context, *GetExecutionStatsReq) (*GetExecutionStatsResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetExecutionStats not implemented")
+}
+func (UnimplementedAggregatorServer) RunNodeWithInputs(context.Context, *RunNodeWithInputsReq) (*RunNodeWithInputsResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RunNodeWithInputs not implemented")
 }
 func (UnimplementedAggregatorServer) mustEmbedUnimplementedAggregatorServer() {}
 func (UnimplementedAggregatorServer) testEmbeddedByValue()                    {}
@@ -867,6 +885,24 @@ func _Aggregator_GetExecutionStats_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Aggregator_RunNodeWithInputs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunNodeWithInputsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).RunNodeWithInputs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Aggregator_RunNodeWithInputs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).RunNodeWithInputs(ctx, req.(*RunNodeWithInputsReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Aggregator_ServiceDesc is the grpc.ServiceDesc for Aggregator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -961,6 +997,10 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetExecutionStats",
 			Handler:    _Aggregator_GetExecutionStats_Handler,
+		},
+		{
+			MethodName: "RunNodeWithInputs",
+			Handler:    _Aggregator_RunNodeWithInputs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

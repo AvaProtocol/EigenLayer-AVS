@@ -2,6 +2,7 @@
 package taskengine
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1402,6 +1403,11 @@ func (n *Engine) GetWorkflowCount(user *model.User, payload *avsproto.GetWorkflo
 }
 
 func (n *Engine) RunNodeWithInputs(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	// Handle blockTrigger as a real trigger type, not as a custom code node
+	if nodeType == "blockTrigger" {
+		return n.runBlockTriggerNode(nodeConfig)
+	}
+
 	vm, err := NewVMWithData(nil, nil, n.smartWalletConfig, nil)
 	if err != nil {
 		return nil, err
@@ -1412,16 +1418,6 @@ func (n *Engine) RunNodeWithInputs(nodeType string, nodeConfig map[string]interf
 	node, err := CreateNodeFromType(nodeType, nodeConfig, "")
 	if err != nil {
 		return nil, err
-	}
-
-	// For blockTrigger, add blockNumber to input variables
-	if nodeType == "blockTrigger" { // Assuming "blockTrigger" is a type of customCode
-		if blockNumber, ok := nodeConfig["blockNumber"]; ok {
-			if inputVariables == nil {
-				inputVariables = make(map[string]interface{})
-			}
-			inputVariables["blockNumber"] = blockNumber // Ensure this is passed correctly
-		}
 	}
 
 	// Run the node with input variables
@@ -1525,4 +1521,118 @@ func (n *Engine) RunNodeWithInputs(nodeType string, nodeConfig map[string]interf
 	}
 
 	return result, nil
+}
+
+func (n *Engine) runBlockTriggerNode(nodeConfig map[string]interface{}) (map[string]interface{}, error) {
+	var blockNumber uint64
+
+	// If a specific block number is requested in config, use that
+	if configBlockNumber, ok := nodeConfig["blockNumber"]; ok {
+		if blockNum, ok := configBlockNumber.(float64); ok {
+			blockNumber = uint64(blockNum)
+		} else if blockNum, ok := configBlockNumber.(int64); ok {
+			blockNumber = uint64(blockNum)
+		} else if blockNum, ok := configBlockNumber.(uint64); ok {
+			blockNumber = blockNum
+		}
+	} else if rpcConn != nil {
+		// Get the current block number from the blockchain if no specific block is requested
+		var err error
+		blockNumber, err = rpcConn.BlockNumber(context.Background())
+		if err != nil {
+			if n.logger != nil {
+				n.logger.Error("Failed to get current block number", "error", err)
+			}
+			return nil, fmt.Errorf("failed to get current block number: %w", err)
+		}
+	} else {
+		// For testing purposes when rpcConn is nil, use a default block number
+		blockNumber = uint64(12345)
+	}
+
+	// If rpcConn is available, get real block data
+	if rpcConn != nil {
+		// Get the block header for the specified block number
+		header, err := rpcConn.HeaderByNumber(context.Background(), big.NewInt(int64(blockNumber)))
+		if err != nil {
+			if n.logger != nil {
+				n.logger.Error("Failed to get block header", "blockNumber", blockNumber, "error", err)
+			}
+			return nil, fmt.Errorf("failed to get block header for block %d: %w", blockNumber, err)
+		}
+
+		// Return the actual block data
+		result := map[string]interface{}{
+			"blockNumber": blockNumber,
+			"blockHash":   header.Hash().Hex(),
+			"timestamp":   header.Time,
+			"parentHash":  header.ParentHash.Hex(),
+			"difficulty":  header.Difficulty.String(),
+			"gasLimit":    header.GasLimit,
+			"gasUsed":     header.GasUsed,
+		}
+
+		if n.logger != nil {
+			n.logger.Info("BlockTrigger executed successfully", "blockNumber", blockNumber, "blockHash", header.Hash().Hex())
+		}
+		return result, nil
+	} else {
+		// For testing purposes, return mock block data
+		result := map[string]interface{}{
+			"blockNumber": blockNumber,
+			"blockHash":   "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+			"timestamp":   uint64(1640995200), // Mock timestamp
+			"parentHash":  "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+			"difficulty":  "1000000000000000",
+			"gasLimit":    uint64(30000000),
+			"gasUsed":     uint64(21000),
+		}
+
+		if n.logger != nil {
+			n.logger.Info("BlockTrigger executed successfully (mock data)", "blockNumber", blockNumber)
+		}
+		return result, nil
+	}
+}
+
+func (n *Engine) RunNodeWithInputsRPC(user *model.User, req *avsproto.RunNodeWithInputsReq) (*avsproto.RunNodeWithInputsResp, error) {
+	// Convert protobuf request to internal format
+	nodeConfig := make(map[string]interface{})
+	for k, v := range req.NodeConfig {
+		nodeConfig[k] = v.AsInterface()
+	}
+
+	inputVariables := make(map[string]interface{})
+	for k, v := range req.InputVariables {
+		inputVariables[k] = v.AsInterface()
+	}
+
+	// Use the existing RunNodeWithInputs method
+	result, err := n.RunNodeWithInputs(req.NodeType, nodeConfig, inputVariables)
+	if err != nil {
+		return &avsproto.RunNodeWithInputsResp{
+			Success: false,
+			Error:   err.Error(),
+			NodeId:  "",
+		}, nil
+	}
+
+	// Convert result to protobuf Value
+	var outputData *structpb.Value
+	if result != nil {
+		outputData, err = structpb.NewValue(result)
+		if err != nil {
+			return &avsproto.RunNodeWithInputsResp{
+				Success: false,
+				Error:   fmt.Sprintf("failed to convert output data: %v", err),
+				NodeId:  "",
+			}, nil
+		}
+	}
+
+	return &avsproto.RunNodeWithInputsResp{
+		Success: true,
+		Data:    outputData,
+		NodeId:  fmt.Sprintf("temp_%d", time.Now().UnixNano()),
+	}, nil
 }
