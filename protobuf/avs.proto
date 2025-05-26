@@ -521,8 +521,13 @@ message ListTasksResp {
 
 message ListExecutionsReq {
   repeated string task_ids = 1;
+  // Deprecated: Use before or after instead
   string cursor = 2;
-  int64 limit = 3;
+  // Get items before this cursor value (for backward pagination)
+  string before = 3;
+  // Get items after this cursor value (for forward pagination)
+  string after = 4;
+  int64 limit = 5;
 }
 
 message ListExecutionsResp {
