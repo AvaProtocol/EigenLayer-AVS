@@ -881,9 +881,11 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 				exec.Reason.Type = avsproto.TriggerReason_Event
 			}
 			executioResp.Items = append(executioResp.Items, &exec)
+			lastExecutionId = exec.Id
 			total += 1
 		}
 		if total >= limit {
+			executioResp.HasMore = true
 			break
 		}
 	}
