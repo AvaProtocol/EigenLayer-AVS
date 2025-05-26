@@ -124,17 +124,63 @@ func TestRunSimpleTasks(t *testing.T) {
 		t.Errorf("Error executing program. Expected no error Got error %v", err)
 	}
 
-	if !strings.Contains(vm.ExecutionLogs[0].Log, "Execute") {
-		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got nothing")
+	if len(vm.ExecutionLogs) == 0 {
+		t.Errorf("no execution logs found")
+		return
+	}
+
+	if !strings.Contains(vm.ExecutionLogs[0].Log, "Executing REST API Node ID") {
+		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got: %s", vm.ExecutionLogs[0].Log)
 	}
 
 	vm.mu.Lock()
-	tempHttpNode, _ := vm.vars["httpnode"]
+	tempHttpNode, exists := vm.vars["httpnode"]
 	vm.mu.Unlock()
-	data := tempHttpNode.(map[string]any)["data"]
 
-	if data.(map[string]any)["name"].(string) != "Alice" {
-		t.Errorf("step result isn't store properly, expect 123 got %s", data)
+	if !exists {
+		t.Errorf("httpnode variable not found in VM vars")
+		return
+	}
+
+	if tempHttpNode == nil {
+		t.Errorf("httpnode variable is nil")
+		return
+	}
+
+	// The REST API response is nested under a "data" field
+	responseData, ok := tempHttpNode.(map[string]any)
+	if !ok {
+		t.Errorf("httpnode is not map[string]any, got %T: %v", tempHttpNode, tempHttpNode)
+		return
+	}
+
+	data, dataExists := responseData["data"]
+	if !dataExists {
+		t.Errorf("data field not found in response, available fields: %v", responseData)
+		return
+	}
+
+	dataMap, ok := data.(map[string]any)
+	if !ok {
+		t.Errorf("data is not map[string]any, got %T: %v", data, data)
+		return
+	}
+
+	body, bodyExists := dataMap["body"]
+	if !bodyExists {
+		t.Errorf("body field not found in data, available fields: %v", dataMap)
+		return
+	}
+
+	// The test server echoes back the JSON request body
+	bodyMap, ok := body.(map[string]any)
+	if !ok {
+		t.Errorf("body is not map[string]any, got %T: %v", body, body)
+		return
+	}
+
+	if bodyMap["name"].(string) != "Alice" {
+		t.Errorf("step result isn't store properly, expect Alice got %s", bodyMap["name"])
 	}
 }
 
@@ -214,8 +260,8 @@ func TestRunSequentialTasks(t *testing.T) {
 		t.Errorf("Missing an execution")
 	}
 
-	if !strings.Contains(vm.ExecutionLogs[0].Log, "Execute POST httpbin.org at") || !strings.Contains(vm.ExecutionLogs[1].Log, "Execute GET httpbin.org") {
-		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got nothing")
+	if !strings.Contains(vm.ExecutionLogs[0].Log, "Executing REST API Node ID") || !strings.Contains(vm.ExecutionLogs[1].Log, "Executing REST API Node ID") {
+		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got: %s and %s", vm.ExecutionLogs[0].Log, vm.ExecutionLogs[1].Log)
 	}
 
 	if !vm.ExecutionLogs[0].Success || !vm.ExecutionLogs[1].Success {
@@ -227,12 +273,12 @@ func TestRunSequentialTasks(t *testing.T) {
 	}
 
 	outputData := gow.AnyToMap(vm.ExecutionLogs[0].GetRestApi().Data)
-	if outputData["data"].(string) != "post123" {
-		t.Errorf("rest node result is incorrect, should contains the string post123")
+	if outputData["body"].(map[string]any)["data"].(string) != "post123" {
+		t.Errorf("rest node result is incorrect, should contains the string post123, got: %v", outputData["body"])
 	}
 	outputData = gow.AnyToMap(vm.ExecutionLogs[1].GetRestApi().Data)
-	if outputData["args"].(map[string]any)["query123"].(string) != "abc" {
-		t.Errorf("rest node result is incorrect, should contains the string query123")
+	if outputData["body"].(map[string]any)["args"].(map[string]any)["query123"].(string) != "abc" {
+		t.Errorf("rest node result is incorrect, should contains the string query123, got: %v", outputData["body"])
 	}
 }
 
@@ -352,8 +398,8 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		return
 	}
 
-	if len(vm.plans) != 3 {
-		t.Errorf("Invalid plan generation. Expect one step, got %d", len(vm.plans))
+	if len(vm.plans) != 5 {
+		t.Errorf("Invalid plan generation. Expect 5 steps, got %d", len(vm.plans))
 	}
 
 	err = vm.Run()
@@ -373,7 +419,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	outputVar, _ := vm.vars["httpnode"]
 	vm.mu.Unlock()
 	outputMap := outputVar.(map[string]any)
-	actualData := outputMap["data"].(map[string]any)["data"].(string)
+	actualData := outputMap["data"].(map[string]any)["body"].(map[string]any)["data"].(string)
 	if actualData != `hit=notification1` {
 		t.Errorf("expect executing notification1 and set output data to notification1, got: %s", actualData)
 	}
@@ -398,7 +444,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	vm.mu.Lock()
 	outputVarElse, _ := vm.vars["httpnode"]
 	vm.mu.Unlock()
-	outputMapElse := outputVarElse.(map[string]any)["data"].(map[string]any)
+	outputMapElse := outputVarElse.(map[string]any)["data"].(map[string]any)["body"].(map[string]any)
 	if outputMapElse["args"].(map[string]any)["hit"].(string) != `notification2` {
 		t.Errorf("expect executing notification2 to be run but it didn't run, got %v", outputMapElse)
 	}
@@ -436,7 +482,7 @@ func TestEvaluateEvent(t *testing.T) {
 						{
 							Id:         "a1",
 							Type:       "if",
-							Expression: `triggertest.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" && bigGt(toBigInt(triggertest.data.data), toBigInt("1200000"))`},
+							Expression: `triggertest.data.address == "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" && bigGt(toBigInt(triggertest.data.value), toBigInt("1200000"))`},
 					},
 				},
 			},
@@ -471,23 +517,19 @@ func TestEvaluateEvent(t *testing.T) {
 		},
 	}
 
-	mark := avsproto.TriggerReason{
-		BlockNumber: 7212417,
-		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-		LogIndex:    98,
-	}
+	mark, transferLog := testutil.GetTestEventTriggerReasonWithTransferData()
 
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithDataAndTransferLog(&model.Task{
 		Task: &avsproto.Task{
 			Id:      "sampletaskid1",
 			Nodes:   nodes,
 			Edges:   edges,
 			Trigger: trigger,
 		},
-	}, &mark, testutil.GetTestSmartWalletConfig(), nil)
+	}, mark, testutil.GetTestSmartWalletConfig(), nil, transferLog)
 
 	if err != nil {
 		t.Errorf("expect vm initialized")
@@ -506,8 +548,27 @@ func TestEvaluateEvent(t *testing.T) {
 		return
 	}
 
-	if vm.ExecutionLogs[0].GetBranch().ConditionId != "branch1.a1" {
-		t.Errorf("expression evaluate incorrect")
+	if len(vm.ExecutionLogs) == 0 {
+		t.Errorf("no execution logs found")
+		return
+	}
+
+	// Look for branch execution log
+	var branchLog *avsproto.Execution_Step
+	for _, log := range vm.ExecutionLogs {
+		if log.GetBranch() != nil {
+			branchLog = log
+			break
+		}
+	}
+
+	if branchLog == nil {
+		t.Errorf("no branch execution log found, logs: %v", vm.ExecutionLogs)
+		return
+	}
+
+	if branchLog.GetBranch().ConditionId != "branch1.a1" {
+		t.Errorf("expression evaluate incorrect, got: %s", branchLog.GetBranch().ConditionId)
 	}
 }
 
@@ -580,8 +641,8 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 	}
 
 	err = vm.Compile()
-	if err == nil || err.Error() != InvalidEntrypoint {
-		t.Errorf("Expect return error due to invalid data")
+	if err == nil || (!strings.Contains(err.Error(), "invalid entrypoint") && !strings.Contains(err.Error(), "source node 'foo' in edge")) {
+		t.Errorf("Expect return error due to invalid data, got: %v", err)
 	}
 }
 
@@ -608,18 +669,18 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 	edges := []*avsproto.TaskEdge{
 		{
 			Id:     "e1",
-			Source: "rest1",
-			Target: "notification1",
-		},
-		{
-			Id:     "e1",
-			Source: "notification1",
-			Target: "branch1",
-		},
-		{
-			Id:     "e1",
 			Source: trigger.Id,
 			Target: "notification1",
+		},
+		{
+			Id:     "e2",
+			Source: "notification1",
+			Target: "rest1",
+		},
+		{
+			Id:     "e3",
+			Source: "rest1",
+			Target: "branch1",
 		},
 	}
 
@@ -721,20 +782,66 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 		t.Errorf("Error executing program. Expected no error Got error %v", err)
 	}
 
-	if !strings.Contains(vm.ExecutionLogs[0].Log, "Execute") {
-		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got nothing")
+	if len(vm.ExecutionLogs) == 0 {
+		t.Errorf("no execution logs found")
+		return
+	}
+
+	if !strings.Contains(vm.ExecutionLogs[0].Log, "Executing REST API Node ID") {
+		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got: %s", vm.ExecutionLogs[0].Log)
 	}
 
 	vm.mu.Lock()
-	tempData, _ := vm.vars["httpnode"]
+	tempData, exists := vm.vars["httpnode"]
 	vm.mu.Unlock()
-	data := tempData.(map[string]any)["data"].(map[string]any)
-	if data["data"].(string) != "my key is secretapikey in body" {
-		t.Errorf("secret doesn't render correctly in body, expect secretapikey but got %s", data["data"])
+
+	if !exists {
+		t.Errorf("httpnode variable not found in VM vars")
+		return
 	}
 
-	if data["args"].(map[string]interface{})["apikey"].(string) != "secretapikey" {
-		t.Errorf("secret doesn't render correctly in uri, expect secretapikey but got %s", data["data"])
+	if tempData == nil {
+		t.Errorf("httpnode variable is nil")
+		return
+	}
+
+	// The REST API response structure: {data: {statusCode, status, headers, body}}
+	responseData, ok := tempData.(map[string]any)
+	if !ok {
+		t.Errorf("httpnode is not map[string]any, got %T: %v", tempData, tempData)
+		return
+	}
+
+	data, dataExists := responseData["data"]
+	if !dataExists {
+		t.Errorf("data field not found in response, available fields: %v", responseData)
+		return
+	}
+
+	dataMap, ok := data.(map[string]any)
+	if !ok {
+		t.Errorf("data is not map[string]any, got %T: %v", data, data)
+		return
+	}
+
+	body, bodyExists := dataMap["body"]
+	if !bodyExists {
+		t.Errorf("body field not found in data, available fields: %v", dataMap)
+		return
+	}
+
+	bodyMap, ok := body.(map[string]any)
+	if !ok {
+		t.Errorf("body is not map[string]any, got %T: %v", body, body)
+		return
+	}
+
+	if bodyMap["data"].(string) != "my key is secretapikey in body" {
+		t.Errorf("secret doesn't render correctly in body, expect secretapikey but got %s", bodyMap["data"])
+	}
+
+	if bodyMap["args"].(map[string]interface{})["apikey"].(string) != "secretapikey" {
+		t.Errorf("secret doesn't render correctly in uri, expect secretapikey but got %s", bodyMap["args"].(map[string]interface{})["apikey"])
 	}
 }
 

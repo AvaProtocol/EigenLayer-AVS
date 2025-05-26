@@ -67,15 +67,41 @@ func TestRestRequest(t *testing.T) {
 		t.Errorf("expected rest node run successfully but failed")
 	}
 
-	if !strings.Contains(step.Log, "Execute POST httpbin.org at") {
+	if !strings.Contains(step.Log, "Executing REST API Node ID:") {
 		t.Errorf("expected log to contain request trace data but found no")
 	}
 
 	if step.Error != "" {
-		t.Errorf("expected log to contain request trace data but found no")
+		t.Errorf("expected no error but got: %s", step.Error)
 	}
 
-	outputData := gow.AnyToMap(step.GetRestApi().Data)["form"].(map[string]any)
+	dataMap := gow.AnyToMap(step.GetRestApi().Data)
+
+	// Check if body field exists
+	bodyField, exists := dataMap["body"]
+	if !exists {
+		t.Errorf("response does not contain 'body' field, available fields: %v", dataMap)
+		return
+	}
+
+	bodyMap, ok := bodyField.(map[string]any)
+	if !ok {
+		t.Errorf("body field is not map[string]any, got %T: %v", bodyField, bodyField)
+		return
+	}
+
+	// Check if form field exists in body
+	formField, exists := bodyMap["form"]
+	if !exists {
+		t.Errorf("response body does not contain 'form' field, available fields: %v", bodyMap)
+		return
+	}
+
+	outputData, ok := formField.(map[string]any)
+	if !ok {
+		t.Errorf("form field is not map[string]any, got %T: %v", formField, formField)
+		return
+	}
 	//[chat_id:123 disable_notification:true text:*This is a test format*]
 
 	if outputData["chat_id"].(string) != "123" {
@@ -229,8 +255,9 @@ func TestRestRequestRenderVars(t *testing.T) {
 		t.Errorf("expected rest node run successfully but failed")
 	}
 
-	if gow.AnyToString(step.GetRestApi().Data) != "my name is unit test" {
-		t.Errorf("expected response to be 'my name is unit test', got: %s", step.OutputData)
+	responseData := gow.AnyToMap(step.GetRestApi().Data)
+	if responseData["body"].(string) != "my name is unit test" {
+		t.Errorf("expected response to be 'my name is unit test', got: %s", responseData["body"])
 	}
 }
 
@@ -307,8 +334,9 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 	if !step.Success {
 		t.Errorf("expected rest node run successfully but failed")
 	}
-	if gow.AnyToString(step.GetRestApi().Data) != "my name is first" {
-		t.Errorf("expected response to be 'my name is first', got: %s", step.OutputData)
+	responseData := gow.AnyToMap(step.GetRestApi().Data)
+	if responseData["body"].(string) != "my name is first" {
+		t.Errorf("expected response to be 'my name is first', got: %s", responseData["body"])
 	}
 
 	// Second execution with different value
@@ -326,8 +354,9 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 	if !step.Success {
 		t.Errorf("expected rest node run successfully but failed")
 	}
-	if gow.AnyToString(step.GetRestApi().Data) != "my name is second" {
-		t.Errorf("expected response to be 'my name is second', got: %s", step.OutputData)
+	responseData2 := gow.AnyToMap(step.GetRestApi().Data)
+	if responseData2["body"].(string) != "my name is second" {
+		t.Errorf("expected response to be 'my name is second', got: %s", responseData2["body"])
 	}
 
 	// Verify original node values remain unchanged

@@ -95,13 +95,63 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		logBuilder.WriteString(fmt.Sprintf("Input is a slice with %d items. Filtering each item...\n", len(dataToProcess)))
 		resultSlice := make([]interface{}, 0)
 		for i, item := range dataToProcess {
-			loopVarNameForItem := "item"
+			loopVarNameForItem := "value"
 			if err := r.jsvm.Set(loopVarNameForItem, item); err != nil {
 				evaluationError = fmt.Errorf("failed to set loop item '%s' (index %d) in JS VM: %w", loopVarNameForItem, i, err)
 				break
 			}
+			if err := r.jsvm.Set("index", i); err != nil {
+				evaluationError = fmt.Errorf("failed to set index %d in JS VM: %w", i, err)
+				break
+			}
 
-			script := fmt.Sprintf(`(() => { return %s; })()`, node.Expression)
+			// Check if the expression already contains control flow statements
+			var script string
+			if strings.Contains(node.Expression, "if") || strings.Contains(node.Expression, "return") {
+				// For complex expressions with control flow, wrap in a function without additional return
+				script = fmt.Sprintf(`(() => { %s })()`, node.Expression)
+			} else {
+				// For simple expressions, wrap with return
+				script = fmt.Sprintf(`(() => { return %s; })()`, node.Expression)
+			}
+			val, err := r.jsvm.RunString(script)
+			if err != nil {
+				logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for item %d (%v): %s. Skipping item.\n", i, item, err.Error()))
+				continue
+			}
+			if boolVal, ok := val.Export().(bool); ok && boolVal {
+				resultSlice = append(resultSlice, item)
+			} else if !ok {
+				logBuilder.WriteString(fmt.Sprintf("Filter expression for item %d did not return a boolean. Got: %T. Skipping item.\n", i, val.Export()))
+			}
+		}
+		if evaluationError == nil {
+			filteredResult = resultSlice
+		}
+
+	case []map[string]interface{}:
+		logBuilder.WriteString(fmt.Sprintf("Input is a slice of maps with %d items. Filtering each item...\n", len(dataToProcess)))
+		resultSlice := make([]interface{}, 0)
+		for i, item := range dataToProcess {
+			loopVarNameForItem := "value"
+			if err := r.jsvm.Set(loopVarNameForItem, item); err != nil {
+				evaluationError = fmt.Errorf("failed to set loop item '%s' (index %d) in JS VM: %w", loopVarNameForItem, i, err)
+				break
+			}
+			if err := r.jsvm.Set("index", i); err != nil {
+				evaluationError = fmt.Errorf("failed to set index %d in JS VM: %w", i, err)
+				break
+			}
+
+			// Check if the expression already contains control flow statements
+			var script string
+			if strings.Contains(node.Expression, "if") || strings.Contains(node.Expression, "return") {
+				// For complex expressions with control flow, wrap in a function without additional return
+				script = fmt.Sprintf(`(() => { %s })()`, node.Expression)
+			} else {
+				// For simple expressions, wrap with return
+				script = fmt.Sprintf(`(() => { return %s; })()`, node.Expression)
+			}
 			val, err := r.jsvm.RunString(script)
 			if err != nil {
 				logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for item %d (%v): %s. Skipping item.\n", i, item, err.Error()))
@@ -119,11 +169,19 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 
 	case map[string]interface{}:
 		logBuilder.WriteString("Input is a map/object. Applying filter expression directly to it...\n")
-		itemVarNameForMap := "item"
+		itemVarNameForMap := "value"
 		if err := r.jsvm.Set(itemVarNameForMap, dataToProcess); err != nil {
 			evaluationError = fmt.Errorf("failed to set input map as '%s' in JS VM: %w", itemVarNameForMap, err)
 		} else {
-			script := fmt.Sprintf(`(() => { return %s; })()`, node.Expression)
+			// Check if the expression already contains control flow statements
+			var script string
+			if strings.Contains(node.Expression, "if") || strings.Contains(node.Expression, "return") {
+				// For complex expressions with control flow, wrap in a function without additional return
+				script = fmt.Sprintf(`(() => { %s })()`, node.Expression)
+			} else {
+				// For simple expressions, wrap with return
+				script = fmt.Sprintf(`(() => { return %s; })()`, node.Expression)
+			}
 			val, err := r.jsvm.RunString(script)
 			if err != nil {
 				logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for map: %s\n", err.Error()))

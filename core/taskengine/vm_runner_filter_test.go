@@ -68,6 +68,11 @@ func TestFilter(t *testing.T) {
 	})
 	n := NewFilterProcessor(vm)
 	step, err := n.Execute("abc123", node)
+	if err != nil {
+		t.Errorf("Filter execution failed with error: %v", err)
+		return
+	}
+
 	varname := vm.GetNodeNameAsVar("abc123")
 	vm.mu.Lock()
 	tempData, _ := vm.vars[varname]
@@ -83,7 +88,7 @@ func TestFilter(t *testing.T) {
 		t.Errorf("expect return only one element with cost > 5 but got: %s", data[0])
 	}
 
-	if !strings.Contains(step.Log, "start filter input trades with expression value.cost > 5") {
+	if !strings.Contains(step.Log, "Input variable: 'trades', Expression: 'value.cost > 5'") {
 		t.Errorf("log doesn't contain execution info")
 	}
 }
@@ -152,6 +157,10 @@ func TestFilterComplexLogic(t *testing.T) {
 	})
 	n := NewFilterProcessor(vm)
 	step, err := n.Execute("abc123", node)
+	if err != nil {
+		t.Errorf("Filter execution failed with error: %v", err)
+		return
+	}
 
 	varname := vm.GetNodeNameAsVar("abc123")
 	vm.mu.Lock()

@@ -86,8 +86,10 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 
 	if runInParallel {
 		var wg sync.WaitGroup
-		resultsMutex := &sync.Mutex{}
 		errorsMutex := &sync.Mutex{}
+
+		// Pre-allocate results slice with fixed size to maintain order
+		results = make([]interface{}, len(inputArray))
 
 		for i, item := range inputArray {
 			wg.Add(1)
@@ -103,9 +105,8 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 				iterationStepID := fmt.Sprintf("%s.%d", stepID, index)
 				resultData, err := r.executeNestedNode(node, iterationStepID, iterInputs)
 
-				resultsMutex.Lock()
-				results = append(results, resultData)
-				resultsMutex.Unlock()
+				// Store result at the correct index to maintain order
+				results[index] = resultData
 
 				if err != nil {
 					errorsMutex.Lock()
