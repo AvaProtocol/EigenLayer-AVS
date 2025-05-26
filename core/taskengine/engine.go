@@ -689,7 +689,11 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 
 	taskResp.HasMore = visited > 0
 	if taskResp.HasMore && len(taskResp.Items) > 0 {
-		taskResp.Cursor = CreateNextCursor(taskResp.Items[len(taskResp.Items)-1].Id)
+		if cursor.Direction == CursorDirectionPrevious {
+			taskResp.Cursor = CreatePreviousCursor(taskResp.Items[0].Id)
+		} else {
+			taskResp.Cursor = CreateNextCursor(taskResp.Items[len(taskResp.Items)-1].Id)
+		}
 	}
 
 	return taskResp, nil

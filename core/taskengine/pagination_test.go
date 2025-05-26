@@ -174,3 +174,49 @@ func TestCreateNextCursor(t *testing.T) {
 		})
 	}
 }
+
+func TestCreatePreviousCursor(t *testing.T) {
+	tests := []struct {
+		name     string
+		position string
+		expected string
+	}{
+		{
+			name:     "Empty position",
+			position: "",
+			expected: "",
+		},
+		{
+			name:     "Valid position",
+			position: "123456",
+			expected: "eyJkIjoicHJldiIsInAiOiIxMjM0NTYifQ==", // {"d":"prev","p":"123456"}
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := CreatePreviousCursor(tt.position)
+
+			if tt.position == "" {
+				if result != "" {
+					t.Errorf("Expected empty cursor but got %q", result)
+				}
+				return
+			}
+
+			cursor, err := CursorFromString(result)
+			if err != nil {
+				t.Errorf("Failed to decode cursor: %v", err)
+				return
+			}
+
+			if cursor.Direction != CursorDirectionPrevious {
+				t.Errorf("Expected direction %v but got %v", CursorDirectionPrevious, cursor.Direction)
+			}
+
+			if cursor.Position != tt.position {
+				t.Errorf("Expected position %q but got %q", tt.position, cursor.Position)
+			}
+		})
+	}
+}

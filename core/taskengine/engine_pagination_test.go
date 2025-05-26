@@ -68,6 +68,15 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 	assert.Equal(t, pageSize, len(secondPage.Items), "Expected %d items in second page", pageSize)
 	assert.True(t, secondPage.HasMore, "Expected HasMore to be true for second page")
 	
+	if secondPage.HasMore && secondPage.Cursor != "" {
+		cursor, err := CursorFromString(secondPage.Cursor)
+		if err != nil {
+			t.Errorf("Failed to decode cursor: %v", err)
+		} else {
+			assert.Equal(t, CursorDirectionNext, cursor.Direction, "Expected cursor direction to be 'next' for forward pagination")
+		}
+	}
+	
 	firstPageIds := make(map[string]bool)
 	for _, item := range firstPage.Items {
 		firstPageIds[item.Id] = true
@@ -88,6 +97,15 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 	}
 	
 	assert.Equal(t, pageSize, len(previousPage.Items), "Expected %d items in previous page", pageSize)
+	
+	if previousPage.HasMore && previousPage.Cursor != "" {
+		cursor, err := CursorFromString(previousPage.Cursor)
+		if err != nil {
+			t.Errorf("Failed to decode cursor: %v", err)
+		} else {
+			assert.Equal(t, CursorDirectionPrevious, cursor.Direction, "Expected cursor direction to be 'previous' for backward pagination")
+		}
+	}
 	
 	
 	assert.Equal(t, pageSize, len(previousPage.Items), "Expected %d items in previous page", pageSize)
@@ -125,4 +143,53 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 	assert.Equal(t, totalTestTasks, len(largeLimitResult.Items), "Expected %d items with limit %d", totalTestTasks, largeLimit)
 	assert.False(t, largeLimitResult.HasMore, "Expected HasMore to be false when limit exceeds total items")
 	assert.Empty(t, largeLimitResult.Cursor, "Expected cursor to be empty when HasMore is false")
+	
+	forwardPage, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		SmartWalletAddress: []string{wallet.Address},
+		Limit:              pageSize,
+	})
+	if err != nil {
+		t.Errorf("ListTasksByUser for forward pagination failed: %v", err)
+		return
+	}
+	
+	backwardPage, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		SmartWalletAddress: []string{wallet.Address},
+		Before:             CreateNextCursor(forwardPage.Items[len(forwardPage.Items)-1].Id),
+		Limit:              pageSize,
+	})
+	if err != nil {
+		t.Errorf("ListTasksByUser for backward pagination failed: %v", err)
+		return
+	}
+	
+	assert.NotEmpty(t, backwardPage.Items, "Expected items in backward page")
+	if backwardPage.HasMore && backwardPage.Cursor != "" {
+		cursor, err := CursorFromString(backwardPage.Cursor)
+		if err != nil {
+			t.Errorf("Failed to decode cursor: %v", err)
+		} else {
+			assert.Equal(t, CursorDirectionPrevious, cursor.Direction, "Expected cursor direction to be 'previous' for backward pagination")
+		}
+	}
+	
+	switchedForwardPage, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
+		SmartWalletAddress: []string{wallet.Address},
+		After:              backwardPage.Cursor,
+		Limit:              pageSize,
+	})
+	if err != nil {
+		t.Errorf("ListTasksByUser for switched forward pagination failed: %v", err)
+		return
+	}
+	
+	assert.NotEmpty(t, switchedForwardPage.Items, "Expected items in switched forward page")
+	if switchedForwardPage.HasMore && switchedForwardPage.Cursor != "" {
+		cursor, err := CursorFromString(switchedForwardPage.Cursor)
+		if err != nil {
+			t.Errorf("Failed to decode cursor: %v", err)
+		} else {
+			assert.Equal(t, CursorDirectionNext, cursor.Direction, "Expected cursor direction to be 'next' for forward pagination")
+		}
+	}
 }
