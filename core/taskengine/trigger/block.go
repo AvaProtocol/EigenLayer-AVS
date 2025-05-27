@@ -65,6 +65,12 @@ func (b *BlockTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 	defer b.mu.Unlock()
 
 	interval := check.GetTrigger().GetBlock().GetConfig().GetInterval()
+
+	// Validate interval to prevent division by zero
+	if interval <= 0 {
+		return fmt.Errorf("invalid block trigger interval %d for task %s: interval must be greater than 0", interval, check.TaskId)
+	}
+
 	if _, ok := b.schedule[interval]; !ok {
 		b.schedule[interval] = map[string]bool{
 			check.TaskId: true,
@@ -130,6 +136,13 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 
 				toRemove := []int{}
 				for interval, tasks := range b.schedule {
+					// Safety check to prevent division by zero
+					if interval <= 0 {
+						b.logger.Error("invalid interval found in schedule, removing", "interval", interval, "tasks", len(tasks))
+						toRemove = append(toRemove, int(interval))
+						continue
+					}
+
 					z := new(big.Int)
 					if z.Mod(header.Number, big.NewInt(int64(interval))).Cmp(zero) == 0 {
 						for taskID := range tasks {

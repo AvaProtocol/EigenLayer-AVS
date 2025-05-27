@@ -54,6 +54,65 @@ func TestCreateTaskReturnErrorWhenEmptyEdges(t *testing.T) {
 	}
 }
 
+func TestCreateTaskReturnErrorWhenInvalidBlockTriggerInterval(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	tests := []struct {
+		name     string
+		interval int64
+		wantErr  bool
+	}{
+		{
+			name:     "zero interval should fail",
+			interval: 0,
+			wantErr:  true,
+		},
+		{
+			name:     "negative interval should fail",
+			interval: -1,
+			wantErr:  true,
+		},
+		{
+			name:     "positive interval should succeed",
+			interval: 10,
+			wantErr:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := testutil.RestTask()
+			tr.Name = "test-task-" + tt.name
+			tr.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+
+			// Set the block trigger interval
+			tr.Trigger.GetBlock().GetConfig().Interval = tt.interval
+
+			_, err := n.CreateTask(testutil.TestUser1(), tr)
+
+			if tt.wantErr && err == nil {
+				t.Errorf("CreateTask() expected error for interval %d, but got none", tt.interval)
+			}
+
+			if !tt.wantErr && err != nil {
+				t.Errorf("CreateTask() unexpected error for interval %d: %v", tt.interval, err)
+			}
+
+			if tt.wantErr && err != nil {
+				t.Logf("CreateTask() correctly rejected interval %d with error: %v", tt.interval, err)
+				// Verify the error message indicates invalid task argument
+				if !strings.Contains(err.Error(), "Invalid task argument") {
+					t.Errorf("Expected error to contain 'Invalid task argument', got: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestListTasks(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
