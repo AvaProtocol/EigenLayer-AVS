@@ -578,13 +578,11 @@ message ListWalletResp {
 message ListTasksReq {
   // Filter out by the smart_wallet_address
   repeated string smart_wallet_address = 1;
-  // Deprecated: Use before or after instead
-  string cursor = 2 [deprecated=true];
   // Get items before this cursor value (for backward pagination)
-  string before = 3;
+  string before = 2;
   // Get items after this cursor value (for forward pagination)
-  string after = 4;
-  int64 limit = 5;
+  string after = 3;
+  int64 limit = 4;
 }
 
 message ListTasksResp {
@@ -620,13 +618,11 @@ message ListTasksResp {
 
 message ListExecutionsReq {
   repeated string task_ids = 1;
-  // Deprecated: Use before or after instead
-  string cursor = 2;
   // Get items before this cursor value (for backward pagination)
-  string before = 3;
+  string before = 2;
   // Get items after this cursor value (for forward pagination)
-  string after = 4;
-  int64 limit = 5;
+  string after = 3;
+  int64 limit = 4;
 }
 
 message ListExecutionsResp {
@@ -746,13 +742,11 @@ message CreateOrUpdateSecretReq {
 
 message ListSecretsReq {
   string workflow_id = 1;
-  // Deprecated: Use before or after instead
-  string cursor = 2 [deprecated=true];
   // Get items before this cursor value (for backward pagination)
-  string before = 3;
+  string before = 2;
   // Get items after this cursor value (for forward pagination)
-  string after = 4;
-  int64 limit = 5;
+  string after = 3;
+  int64 limit = 4;
 }
 
 // Standard pagination info following GraphQL cursor-based pagination
