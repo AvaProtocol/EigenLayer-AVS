@@ -616,8 +616,13 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	})
 
 	taskResp := &avsproto.ListTasksResp{
-		Items:  []*avsproto.ListTasksResp_Item{},
-		Cursor: "",
+		Items: []*avsproto.ListTasksResp_Item{},
+		PageInfo: &avsproto.PageInfo{
+			StartCursor:     "",
+			EndCursor:       "",
+			HasPreviousPage: false,
+			HasNextPage:     false,
+		},
 	}
 
 	var before, after string
@@ -688,12 +693,32 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		}
 	}
 
-	taskResp.HasMore = visited > 0 && total >= limit
-	if taskResp.HasMore && len(taskResp.Items) > 0 {
+	// Set pagination info
+	if len(taskResp.Items) > 0 {
+		firstItem := taskResp.Items[0]
+		lastItem := taskResp.Items[len(taskResp.Items)-1]
+
+		taskResp.PageInfo.StartCursor = CreateNextCursor(firstItem.Id)
+		taskResp.PageInfo.EndCursor = CreateNextCursor(lastItem.Id)
+
+		// Check if there are more items after the current page
+		taskResp.PageInfo.HasNextPage = visited > 0 && total >= limit
+
+		// Check if there are items before the current page
+		// This is true if we have a cursor and we're not at the beginning
+		taskResp.PageInfo.HasPreviousPage = !cursor.IsZero() && cursor.Direction == CursorDirectionNext
+
+		// For backward pagination, we need to check if there are items after
 		if cursor.Direction == CursorDirectionPrevious {
-			taskResp.Cursor = CreatePreviousCursor(taskResp.Items[0].Id)
-		} else {
-			taskResp.Cursor = CreateNextCursor(taskResp.Items[len(taskResp.Items)-1].Id)
+			taskResp.PageInfo.HasNextPage = true // There are items after since we're going backwards
+			// Check if there are more items before
+			taskResp.PageInfo.HasPreviousPage = visited > 0 && total >= limit
+		}
+
+		// If there are no more pages, don't set cursors (to match old behavior expectations)
+		if !taskResp.PageInfo.HasNextPage && !taskResp.PageInfo.HasPreviousPage {
+			taskResp.PageInfo.StartCursor = ""
+			taskResp.PageInfo.EndCursor = ""
 		}
 	}
 

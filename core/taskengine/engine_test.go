@@ -178,7 +178,7 @@ func TestListTasksPagination(t *testing.T) {
 		t.Errorf("expect list task successfully but got error %s", err)
 	}
 
-	if !result.HasMore {
+	if !result.PageInfo.HasNextPage {
 		t.Errorf("expect hasmore is true, but got false")
 	}
 
@@ -193,7 +193,7 @@ func TestListTasksPagination(t *testing.T) {
 		t.Errorf("list task returns wrong task result, expected t3_19 t3_17 got %s %s", result.Items[2].Name, result.Items[4].Name)
 	}
 
-	if result.Cursor == "" {
+	if result.PageInfo.EndCursor == "" {
 		t.Errorf("list task returns wrong cursor. expect non empty, got none")
 	}
 	result, err = n.ListTasksByUser(testutil.TestUser1(), &avsproto.ListTasksReq{
@@ -202,7 +202,7 @@ func TestListTasksPagination(t *testing.T) {
 			"0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4",
 		},
 		Limit: 15,
-		After: result.Cursor,
+		After: result.PageInfo.EndCursor,
 	})
 
 	if len(result.Items) != 15 {
@@ -212,7 +212,7 @@ func TestListTasksPagination(t *testing.T) {
 		t.Errorf("list task returns wrong task result, expected t3_15 t3_13 t3_1 got %s %s %s", result.Items[0].Name, result.Items[2].Name, result.Items[14].Name)
 	}
 
-	if !result.HasMore {
+	if !result.PageInfo.HasNextPage {
 		t.Errorf("expect hasmore is true, but got false")
 	}
 
@@ -222,7 +222,7 @@ func TestListTasksPagination(t *testing.T) {
 			"0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4",
 		},
 		Limit: 15,
-		After: result.Cursor,
+		After: result.PageInfo.EndCursor,
 	})
 
 	if len(result.Items) != 2 {
@@ -231,7 +231,7 @@ func TestListTasksPagination(t *testing.T) {
 	if result.Items[0].Name != "t3_0" || result.Items[1].Name != "t2_1" {
 		t.Errorf("list task returns wrong task result, expected t3_15 t3_1 got %s %s", result.Items[0].Name, result.Items[1].Name)
 	}
-	if result.HasMore {
+	if result.PageInfo.HasNextPage {
 		t.Errorf("expect hasmore is false, but got true")
 	}
 
