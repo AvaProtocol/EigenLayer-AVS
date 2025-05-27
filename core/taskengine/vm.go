@@ -851,6 +851,69 @@ func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (
 }
 
 func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
+	// Special handling for blockTrigger nodes that were created via CreateNodeFromType
+	// These nodes have no Config but should be handled specially
+	if node.Config == nil {
+		// Check if this is a blockTrigger node by looking at the node ID in TaskNodes
+		v.mu.Lock()
+		taskNode, exists := v.TaskNodes[stepID]
+		v.mu.Unlock()
+
+		if exists && taskNode.Name == "Single Node Execution: blockTrigger" {
+			// Handle blockTrigger node specially - create mock block data
+			blockNumber := uint64(time.Now().Unix()) // Default to current timestamp as mock block number
+
+			// Try to get block number from trigger data if available
+			if v.reason != nil && v.reason.BlockNumber != 0 {
+				blockNumber = uint64(v.reason.BlockNumber)
+			}
+
+			// Create mock block data
+			mockBlockData := map[string]interface{}{
+				"blockNumber": blockNumber,
+				"blockHash":   fmt.Sprintf("0x%x", time.Now().UnixNano()), // Mock hash
+				"timestamp":   time.Now().Unix(),
+				"parentHash":  fmt.Sprintf("0x%x", time.Now().UnixNano()-1),
+				"difficulty":  "1000000000000000",
+				"gasLimit":    uint64(30000000),
+				"gasUsed":     uint64(21000),
+			}
+
+			// Convert to structpb.Value for protobuf
+			structData, err := structpb.NewStruct(mockBlockData)
+			if err != nil {
+				return &avsproto.Execution_Step{
+					NodeId:  stepID,
+					Success: false,
+					Error:   fmt.Sprintf("failed to create struct data: %v", err),
+					StartAt: time.Now().UnixMilli(),
+					EndAt:   time.Now().UnixMilli(),
+				}, fmt.Errorf("failed to create struct data: %w", err)
+			}
+
+			// Create successful execution step
+			executionStep := &avsproto.Execution_Step{
+				NodeId:  stepID,
+				Success: true,
+				StartAt: time.Now().UnixMilli(),
+				EndAt:   time.Now().UnixMilli(),
+				Log:     fmt.Sprintf("Simulated block trigger with block number %d", blockNumber),
+				OutputData: &avsproto.Execution_Step_CustomCode{
+					CustomCode: &avsproto.CustomCodeNode_Output{
+						Data: structpb.NewStructValue(structData),
+					},
+				},
+			}
+
+			v.mu.Lock()
+			executionStep.Inputs = v.collectInputKeysForLog()
+			v.mu.Unlock()
+
+			return executionStep, nil
+		}
+	}
+
+	// Normal custom code execution
 	r := NewJSProcessor(v)
 	executionLog, err := r.Execute(stepID, node)
 	v.mu.Lock()
