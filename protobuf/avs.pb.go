@@ -2263,15 +2263,11 @@ type ListTasksReq struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Filter out by the smart_wallet_address
 	SmartWalletAddress []string `protobuf:"bytes,1,rep,name=smart_wallet_address,json=smartWalletAddress,proto3" json:"smart_wallet_address,omitempty"`
-	// Deprecated: Use before or after instead
-	//
-	// Deprecated: Marked as deprecated in avs.proto.
-	Cursor string `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	// Get items before this cursor value (for backward pagination)
-	Before string `protobuf:"bytes,3,opt,name=before,proto3" json:"before,omitempty"`
+	Before string `protobuf:"bytes,2,opt,name=before,proto3" json:"before,omitempty"`
 	// Get items after this cursor value (for forward pagination)
-	After         string `protobuf:"bytes,4,opt,name=after,proto3" json:"after,omitempty"`
-	Limit         int64  `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`
+	After         string `protobuf:"bytes,3,opt,name=after,proto3" json:"after,omitempty"`
+	Limit         int64  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2311,14 +2307,6 @@ func (x *ListTasksReq) GetSmartWalletAddress() []string {
 		return x.SmartWalletAddress
 	}
 	return nil
-}
-
-// Deprecated: Marked as deprecated in avs.proto.
-func (x *ListTasksReq) GetCursor() string {
-	if x != nil {
-		return x.Cursor
-	}
-	return ""
 }
 
 func (x *ListTasksReq) GetBefore() string {
@@ -2397,13 +2385,11 @@ func (x *ListTasksResp) GetPageInfo() *PageInfo {
 type ListExecutionsReq struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	TaskIds []string               `protobuf:"bytes,1,rep,name=task_ids,json=taskIds,proto3" json:"task_ids,omitempty"`
-	// Deprecated: Use before or after instead
-	Cursor string `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	// Get items before this cursor value (for backward pagination)
-	Before string `protobuf:"bytes,3,opt,name=before,proto3" json:"before,omitempty"`
+	Before string `protobuf:"bytes,2,opt,name=before,proto3" json:"before,omitempty"`
 	// Get items after this cursor value (for forward pagination)
-	After         string `protobuf:"bytes,4,opt,name=after,proto3" json:"after,omitempty"`
-	Limit         int64  `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`
+	After         string `protobuf:"bytes,3,opt,name=after,proto3" json:"after,omitempty"`
+	Limit         int64  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2443,13 +2429,6 @@ func (x *ListExecutionsReq) GetTaskIds() []string {
 		return x.TaskIds
 	}
 	return nil
-}
-
-func (x *ListExecutionsReq) GetCursor() string {
-	if x != nil {
-		return x.Cursor
-	}
-	return ""
 }
 
 func (x *ListExecutionsReq) GetBefore() string {
@@ -3222,15 +3201,11 @@ func (x *CreateOrUpdateSecretReq) GetOrgId() string {
 type ListSecretsReq struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
 	WorkflowId string                 `protobuf:"bytes,1,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
-	// Deprecated: Use before or after instead
-	//
-	// Deprecated: Marked as deprecated in avs.proto.
-	Cursor string `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
 	// Get items before this cursor value (for backward pagination)
-	Before string `protobuf:"bytes,3,opt,name=before,proto3" json:"before,omitempty"`
+	Before string `protobuf:"bytes,2,opt,name=before,proto3" json:"before,omitempty"`
 	// Get items after this cursor value (for forward pagination)
-	After         string `protobuf:"bytes,4,opt,name=after,proto3" json:"after,omitempty"`
-	Limit         int64  `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`
+	After         string `protobuf:"bytes,3,opt,name=after,proto3" json:"after,omitempty"`
+	Limit         int64  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3268,14 +3243,6 @@ func (*ListSecretsReq) Descriptor() ([]byte, []int) {
 func (x *ListSecretsReq) GetWorkflowId() string {
 	if x != nil {
 		return x.WorkflowId
-	}
-	return ""
-}
-
-// Deprecated: Marked as deprecated in avs.proto.
-func (x *ListSecretsReq) GetCursor() string {
-	if x != nil {
-		return x.Cursor
 	}
 	return ""
 }
@@ -7053,13 +7020,12 @@ const file_avs_proto_rawDesc = "" +
 	"\afactory\x18\x03 \x01(\tR\afactory\x12\x1b\n" +
 	"\tis_hidden\x18\x04 \x01(\bR\bisHidden\"?\n" +
 	"\x0eListWalletResp\x12-\n" +
-	"\x05items\x18\x01 \x03(\v2\x17.aggregator.SmartWalletR\x05items\"\xa0\x01\n" +
+	"\x05items\x18\x01 \x03(\v2\x17.aggregator.SmartWalletR\x05items\"\x84\x01\n" +
 	"\fListTasksReq\x120\n" +
-	"\x14smart_wallet_address\x18\x01 \x03(\tR\x12smartWalletAddress\x12\x1a\n" +
-	"\x06cursor\x18\x02 \x01(\tB\x02\x18\x01R\x06cursor\x12\x16\n" +
-	"\x06before\x18\x03 \x01(\tR\x06before\x12\x14\n" +
-	"\x05after\x18\x04 \x01(\tR\x05after\x12\x14\n" +
-	"\x05limit\x18\x05 \x01(\x03R\x05limit\"\x9b\x04\n" +
+	"\x14smart_wallet_address\x18\x01 \x03(\tR\x12smartWalletAddress\x12\x16\n" +
+	"\x06before\x18\x02 \x01(\tR\x06before\x12\x14\n" +
+	"\x05after\x18\x03 \x01(\tR\x05after\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x03R\x05limit\"\x9b\x04\n" +
 	"\rListTasksResp\x124\n" +
 	"\x05items\x18\x01 \x03(\v2\x1e.aggregator.ListTasksResp.ItemR\x05items\x121\n" +
 	"\tpage_info\x18\x02 \x01(\v2\x14.aggregator.PageInfoR\bpageInfo\x1a\xa0\x03\n" +
@@ -7077,13 +7043,12 @@ const file_avs_proto_rawDesc = "" +
 	"\vlast_ran_at\x18\n" +
 	" \x01(\x03R\tlastRanAt\x12.\n" +
 	"\x06status\x18\v \x01(\x0e2\x16.aggregator.TaskStatusR\x06status\x121\n" +
-	"\atrigger\x18\f \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\"\x8a\x01\n" +
+	"\atrigger\x18\f \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\"r\n" +
 	"\x11ListExecutionsReq\x12\x19\n" +
 	"\btask_ids\x18\x01 \x03(\tR\ataskIds\x12\x16\n" +
-	"\x06cursor\x18\x02 \x01(\tR\x06cursor\x12\x16\n" +
-	"\x06before\x18\x03 \x01(\tR\x06before\x12\x14\n" +
-	"\x05after\x18\x04 \x01(\tR\x05after\x12\x14\n" +
-	"\x05limit\x18\x05 \x01(\x03R\x05limit\"t\n" +
+	"\x06before\x18\x02 \x01(\tR\x06before\x12\x14\n" +
+	"\x05after\x18\x03 \x01(\tR\x05after\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x03R\x05limit\"t\n" +
 	"\x12ListExecutionsResp\x12+\n" +
 	"\x05items\x18\x01 \x03(\v2\x15.aggregator.ExecutionR\x05items\x121\n" +
 	"\tpage_info\x18\x02 \x01(\v2\x14.aggregator.PageInfoR\bpageInfo\"J\n" +
@@ -7141,14 +7106,13 @@ const file_avs_proto_rawDesc = "" +
 	"\x06secret\x18\x02 \x01(\tR\x06secret\x12\x1f\n" +
 	"\vworkflow_id\x18\x03 \x01(\tR\n" +
 	"workflowId\x12\x15\n" +
-	"\x06org_id\x18\x04 \x01(\tR\x05orgId\"\x91\x01\n" +
+	"\x06org_id\x18\x04 \x01(\tR\x05orgId\"u\n" +
 	"\x0eListSecretsReq\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\tR\n" +
-	"workflowId\x12\x1a\n" +
-	"\x06cursor\x18\x02 \x01(\tB\x02\x18\x01R\x06cursor\x12\x16\n" +
-	"\x06before\x18\x03 \x01(\tR\x06before\x12\x14\n" +
-	"\x05after\x18\x04 \x01(\tR\x05after\x12\x14\n" +
-	"\x05limit\x18\x05 \x01(\x03R\x05limit\"\x9c\x01\n" +
+	"workflowId\x12\x16\n" +
+	"\x06before\x18\x02 \x01(\tR\x06before\x12\x14\n" +
+	"\x05after\x18\x03 \x01(\tR\x05after\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x03R\x05limit\"\x9c\x01\n" +
 	"\bPageInfo\x12!\n" +
 	"\fstart_cursor\x18\x01 \x01(\tR\vstartCursor\x12\x1d\n" +
 	"\n" +
