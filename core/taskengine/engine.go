@@ -616,8 +616,13 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	})
 
 	taskResp := &avsproto.ListTasksResp{
-		Items:  []*avsproto.ListTasksResp_Item{},
-		Cursor: "",
+		Items: []*avsproto.ListTasksResp_Item{},
+		PageInfo: &avsproto.PageInfo{
+			StartCursor:     "",
+			EndCursor:       "",
+			HasPreviousPage: false,
+			HasNextPage:     false,
+		},
 	}
 
 	var before, after string
@@ -688,12 +693,27 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		}
 	}
 
-	taskResp.HasMore = visited > 0 && total >= limit
-	if taskResp.HasMore && len(taskResp.Items) > 0 {
+	// Set pagination info
+	if len(taskResp.Items) > 0 {
+		firstItem := taskResp.Items[0]
+		lastItem := taskResp.Items[len(taskResp.Items)-1]
+
+		// Always set cursors for the current page (GraphQL PageInfo convention)
+		taskResp.PageInfo.StartCursor = CreateNextCursor(firstItem.Id)
+		taskResp.PageInfo.EndCursor = CreateNextCursor(lastItem.Id)
+
+		// Check if there are more items after the current page
+		taskResp.PageInfo.HasNextPage = visited > 0 && total >= limit
+
+		// Check if there are items before the current page
+		// This is true if we have a cursor and we're not at the beginning
+		taskResp.PageInfo.HasPreviousPage = !cursor.IsZero() && cursor.Direction == CursorDirectionNext
+
+		// For backward pagination, we need to check if there are items after
 		if cursor.Direction == CursorDirectionPrevious {
-			taskResp.Cursor = CreatePreviousCursor(taskResp.Items[0].Id)
-		} else {
-			taskResp.Cursor = CreateNextCursor(taskResp.Items[len(taskResp.Items)-1].Id)
+			taskResp.PageInfo.HasNextPage = true // There are items after since we're going backwards
+			// Check if there are more items before
+			taskResp.PageInfo.HasPreviousPage = visited > 0 && total >= limit
 		}
 	}
 
@@ -860,6 +880,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 
 	for i := len(executionKeys) - 1; i >= 0; i-- {
 		key := executionKeys[i]
+		visited = i
 
 		executionUlid := ulid.MustParse(ExecutionIdFromStorageKey([]byte(key)))
 		if !cursor.IsZero() {
@@ -902,11 +923,14 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 				exec.Reason.Type = avsproto.TriggerReason_Event
 			}
 			executioResp.Items = append(executioResp.Items, &exec)
+
+			if total == 0 {
+				firstExecutionId = exec.Id
+			}
 			lastExecutionId = exec.Id
 			total += 1
 		}
 		if total >= limit {
-			executioResp.HasMore = true
 			break
 		}
 	}
@@ -1199,9 +1223,13 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	}
 
 	result := &avsproto.ListSecretsResp{
-		Items:   []*avsproto.ListSecretsResp_ResponseSecret{},
-		Cursor:  "",
-		HasMore: false,
+		Items: []*avsproto.ListSecretsResp_ResponseSecret{},
+		PageInfo: &avsproto.PageInfo{
+			StartCursor:     "",
+			EndCursor:       "",
+			HasPreviousPage: false,
+			HasNextPage:     false,
+		},
 	}
 
 	secretKeys, err := n.db.ListKeysMulti(prefixes)
@@ -1226,14 +1254,26 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	}
 
 	total := 0
-	var lastKey string
+	var firstKey, lastKey string
+	var hasMoreItems bool
+	var processedCount int
 
+	// Process keys that match the cursor criteria and stop when limit+1 is reached
+	// We fetch limit+1 to determine if there are more pages without loading everything
 	for _, k := range secretKeys {
 		if !cursor.IsZero() {
 			if (cursor.Direction == CursorDirectionNext && k <= cursor.Position) ||
 				(cursor.Direction == CursorDirectionPrevious && k >= cursor.Position) {
 				continue
 			}
+		}
+
+		processedCount++
+
+		// If we've processed more than the limit, we know there are more items
+		if processedCount > limit {
+			hasMoreItems = true
+			break
 		}
 
 		secretWithNameOnly := SecretNameFromKey(k)
@@ -1244,17 +1284,33 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 		}
 
 		result.Items = append(result.Items, item)
+
+		if total == 0 {
+			firstKey = k
+		}
 		lastKey = k
 		total++
-
-		if total >= limit {
-			result.HasMore = true
-			break
-		}
 	}
 
-	if result.HasMore && lastKey != "" {
-		result.Cursor = CreateNextCursor(lastKey)
+	// Set pagination info
+	if len(result.Items) > 0 {
+		// Always set cursors for the current page (GraphQL PageInfo convention)
+		result.PageInfo.StartCursor = CreateNextCursor(firstKey)
+		result.PageInfo.EndCursor = CreateNextCursor(lastKey)
+
+		// Check if there are more items after the current page
+		result.PageInfo.HasNextPage = hasMoreItems
+
+		// Check if there are items before the current page
+		// This is true if we have a cursor and we're not at the beginning
+		result.PageInfo.HasPreviousPage = !cursor.IsZero() && cursor.Direction == CursorDirectionNext
+
+		// For backward pagination, we need to check if there are items after
+		if cursor.Direction == CursorDirectionPrevious {
+			result.PageInfo.HasNextPage = true // There are items after since we're going backwards
+			// Check if there are more items before
+			result.PageInfo.HasPreviousPage = hasMoreItems
+		}
 	}
 
 	return result, nil
