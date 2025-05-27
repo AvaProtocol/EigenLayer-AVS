@@ -103,6 +103,17 @@ func (t *Task) FromStorageData(body []byte) error {
 
 // Return a compact json ready to persist to storage
 func (t *Task) Validate() bool {
+	// Validate block trigger intervals
+	if t.Task.Trigger != nil {
+		if blockTrigger := t.Task.Trigger.GetBlock(); blockTrigger != nil {
+			if config := blockTrigger.GetConfig(); config != nil {
+				if config.GetInterval() <= 0 {
+					return false
+				}
+			}
+		}
+	}
+
 	return true
 }
 

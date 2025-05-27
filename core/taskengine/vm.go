@@ -688,6 +688,11 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
+	} else if nodeValue := node.GetEthTransfer(); nodeValue != nil {
+		executionLogForNode, err = v.runEthTransfer(node.Id, nodeValue)
+		if executionLogForNode != nil {
+			v.addExecutionLog(executionLogForNode)
+		}
 	} else {
 		err = fmt.Errorf("unknown node type for node ID %s", node.Id)
 	}
@@ -856,6 +861,27 @@ func (v *VM) runLoop(stepID string, nodeValue *avsproto.LoopNode) (*avsproto.Exe
 	v.mu.Unlock()
 	// v.addExecutionLog(executionLog)
 	return executionLog, err // Loop node itself doesn't dictate a jump in the main plan
+}
+
+func (v *VM) runEthTransfer(stepID string, node *avsproto.ETHTransferNode) (*avsproto.Execution_Step, error) {
+	var executionLog *avsproto.Execution_Step
+	if v.smartWalletConfig == nil {
+		err := fmt.Errorf("smart wallet config not set for ETH transfer")
+		executionLog = &avsproto.Execution_Step{NodeId: stepID, Success: false, Error: err.Error(), StartAt: time.Now().UnixMilli()}
+		executionLog.EndAt = time.Now().UnixMilli()
+		return executionLog, err
+	}
+
+	// For now, we don't need an actual ETH client connection for simulation
+	// In the future, this would use the actual ETH RPC client
+	processor := NewETHTransferProcessor(v, nil, v.smartWalletConfig, v.TaskOwner)
+	executionLog, err := processor.Execute(stepID, node)
+	v.mu.Lock()
+	if executionLog != nil {
+		executionLog.Inputs = v.collectInputKeysForLog()
+	}
+	v.mu.Unlock()
+	return executionLog, err
 }
 
 func (v *VM) preprocessText(text string) string {
@@ -1131,6 +1157,9 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		node.TaskType = &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{},
 		}
+	case "ethTransfer":
+		// Configuration is now in Input messages, not in the node structure
+		node.TaskType = &avsproto.TaskNode_EthTransfer{EthTransfer: &avsproto.ETHTransferNode{}}
 	default:
 		return nil, fmt.Errorf("unsupported node type for CreateNodeFromType: %s", nodeType)
 	}
