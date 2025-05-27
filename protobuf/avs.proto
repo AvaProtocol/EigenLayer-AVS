@@ -615,8 +615,7 @@ message ListTasksResp {
   }
 
   repeated Item items = 1;
-  string cursor = 2;
-  bool has_more = 3;
+  PageInfo page_info = 2;
 }
 
 message ListExecutionsReq {
@@ -632,8 +631,7 @@ message ListExecutionsReq {
 
 message ListExecutionsResp {
   repeated Execution items = 1;
-  string cursor = 2;
-  bool has_more = 4;
+  PageInfo page_info = 2;
 }
 
 message ExecutionReq {
@@ -757,6 +755,14 @@ message ListSecretsReq {
   int64 limit = 5;
 }
 
+// Standard pagination info following GraphQL cursor-based pagination
+message PageInfo {
+  string start_cursor = 1;     // Cursor pointing to the first item in the current page
+  string end_cursor = 2;       // Cursor pointing to the last item in the current page
+  bool has_previous_page = 3;  // Whether there are more items before the current page
+  bool has_next_page = 4;      // Whether there are more items after the current page
+}
+
 message ListSecretsResp {
   message ResponseSecret {
     // when listing secret, we don't return its value, just secret and last update
@@ -767,8 +773,7 @@ message ListSecretsResp {
     string org_id = 5;
   }
   repeated ResponseSecret items = 1;
-  string cursor = 2;
-  bool has_more = 3;
+  PageInfo page_info = 2;
 }
 
 message DeleteSecretReq {
