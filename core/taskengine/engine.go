@@ -640,11 +640,10 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	}
 
 	total := 0
+	var hasMoreItems bool
 
-	visited := 0
 	for i := len(taskKeys) - 1; i >= 0; i-- {
 		key := taskKeys[i]
-		visited = i
 		taskID := string(model.TaskKeyToId(([]byte(key[2:]))))
 		statusValue, err := n.db.GetKey([]byte(key))
 		if err != nil {
@@ -688,7 +687,9 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 			total += 1
 		}
 
+		// If we've processed more than the limit, we know there are more items
 		if total >= limit {
+			hasMoreItems = true
 			break
 		}
 	}
@@ -703,7 +704,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		taskResp.PageInfo.EndCursor = CreateNextCursor(lastItem.Id)
 
 		// Check if there are more items after the current page
-		taskResp.PageInfo.HasNextPage = visited > 0 && total >= limit
+		taskResp.PageInfo.HasNextPage = hasMoreItems
 
 		// Check if there are items before the current page
 		// This is true if we have a cursor and we're not at the beginning
@@ -713,7 +714,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		if cursor.Direction == CursorDirectionPrevious {
 			taskResp.PageInfo.HasNextPage = true // There are items after since we're going backwards
 			// Check if there are more items before
-			taskResp.PageInfo.HasPreviousPage = visited > 0 && total >= limit
+			taskResp.PageInfo.HasPreviousPage = hasMoreItems
 		}
 	}
 
@@ -878,11 +879,9 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 
 	total := 0
 	var firstExecutionId, lastExecutionId string
-	visited := 0
-
+	var hasMoreItems bool
 	for i := len(executionKeys) - 1; i >= 0; i-- {
 		key := executionKeys[i]
-		visited = i
 
 		executionUlid := ulid.MustParse(ExecutionIdFromStorageKey([]byte(key)))
 		if !cursor.IsZero() {
@@ -932,7 +931,9 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 			lastExecutionId = exec.Id
 			total += 1
 		}
+		// If we've processed more than the limit, we know there are more items
 		if total >= limit {
+			hasMoreItems = true
 			break
 		}
 	}
@@ -944,7 +945,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 		executioResp.PageInfo.EndCursor = CreateNextCursor(lastExecutionId)
 
 		// Check if there are more items after the current page
-		executioResp.PageInfo.HasNextPage = visited > 0 && total >= limit
+		executioResp.PageInfo.HasNextPage = hasMoreItems
 
 		// Check if there are items before the current page
 		// This is true if we have a cursor and we're not at the beginning
@@ -954,7 +955,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 		if cursor.Direction == CursorDirectionPrevious {
 			executioResp.PageInfo.HasNextPage = true // There are items after since we're going backwards
 			// Check if there are more items before
-			executioResp.PageInfo.HasPreviousPage = visited > 0 && total >= limit
+			executioResp.PageInfo.HasPreviousPage = hasMoreItems
 		}
 	}
 	return executioResp, nil
