@@ -1513,12 +1513,12 @@ func TestListExecutionsPagination(t *testing.T) {
 		t.Errorf("Expected %d items with limit %d, got %d", pageSize, pageSize, len(result.Items))
 	}
 
-	if !result.HasMore {
-		t.Errorf("Expected HasMore to be true with limit %d and %d total items", pageSize, totalTestExecutions)
+	if !result.PageInfo.HasNextPage {
+		t.Errorf("Expected HasNextPage to be true with limit %d and %d total items", pageSize, totalTestExecutions)
 	}
 
-	if result.Cursor == "" {
-		t.Errorf("Expected cursor to be set when HasMore is true")
+	if result.PageInfo.EndCursor == "" {
+		t.Errorf("Expected cursor to be set when HasNextPage is true")
 	}
 
 	// Test with limit 0 (should use default)
@@ -1549,12 +1549,12 @@ func TestListExecutionsPagination(t *testing.T) {
 		t.Errorf("Expected %d items with limit %d, got %d", totalTestExecutions, totalTestExecutions*2, len(result.Items))
 	}
 
-	if result.HasMore {
-		t.Errorf("Expected HasMore to be false when limit exceeds total items")
+	if result.PageInfo.HasNextPage {
+		t.Errorf("Expected HasNextPage to be false when limit exceeds total items")
 	}
 
-	if result.Cursor != "" {
-		t.Errorf("Expected cursor to be empty when HasMore is false")
+	if result.PageInfo.EndCursor == "" {
+		t.Errorf("Expected cursor to always be set for current page (GraphQL PageInfo convention)")
 	}
 
 	// Test pagination using cursor
@@ -1569,7 +1569,7 @@ func TestListExecutionsPagination(t *testing.T) {
 
 	secondPage, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{
 		TaskIds: []string{task.Id},
-		After:   firstPage.Cursor,
+		After:   firstPage.PageInfo.EndCursor,
 		Limit:   pageSize,
 	})
 	if err != nil {
@@ -1591,7 +1591,7 @@ func TestListExecutionsPagination(t *testing.T) {
 
 	thirdPage, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{
 		TaskIds: []string{task.Id},
-		Before:  secondPage.Cursor,
+		Before:  secondPage.PageInfo.EndCursor,
 		Limit:   pageSize,
 	})
 	if err != nil {

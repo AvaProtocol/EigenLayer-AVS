@@ -853,9 +853,13 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	}
 
 	executioResp := &avsproto.ListExecutionsResp{
-		Items:   []*avsproto.Execution{},
-		Cursor:  "",
-		HasMore: false,
+		Items: []*avsproto.Execution{},
+		PageInfo: &avsproto.PageInfo{
+			StartCursor:     "",
+			EndCursor:       "",
+			HasPreviousPage: false,
+			HasNextPage:     false,
+		},
 	}
 
 	var before, after string
@@ -873,10 +877,12 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	}
 
 	total := 0
-	var lastExecutionId string
+	var firstExecutionId, lastExecutionId string
+	visited := 0
 
 	for i := len(executionKeys) - 1; i >= 0; i-- {
 		key := executionKeys[i]
+		visited = i
 
 		executionUlid := ulid.MustParse(ExecutionIdFromStorageKey([]byte(key)))
 		if !cursor.IsZero() {
@@ -919,17 +925,37 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 				exec.Reason.Type = avsproto.TriggerReason_Event
 			}
 			executioResp.Items = append(executioResp.Items, &exec)
+
+			if total == 0 {
+				firstExecutionId = exec.Id
+			}
 			lastExecutionId = exec.Id
 			total += 1
 		}
 		if total >= limit {
-			executioResp.HasMore = true
 			break
 		}
 	}
 
-	if executioResp.HasMore && lastExecutionId != "" {
-		executioResp.Cursor = CreateNextCursor(lastExecutionId)
+	// Set pagination info
+	if len(executioResp.Items) > 0 {
+		// Always set cursors for the current page (GraphQL PageInfo convention)
+		executioResp.PageInfo.StartCursor = CreateNextCursor(firstExecutionId)
+		executioResp.PageInfo.EndCursor = CreateNextCursor(lastExecutionId)
+
+		// Check if there are more items after the current page
+		executioResp.PageInfo.HasNextPage = visited > 0 && total >= limit
+
+		// Check if there are items before the current page
+		// This is true if we have a cursor and we're not at the beginning
+		executioResp.PageInfo.HasPreviousPage = !cursor.IsZero() && cursor.Direction == CursorDirectionNext
+
+		// For backward pagination, we need to check if there are items after
+		if cursor.Direction == CursorDirectionPrevious {
+			executioResp.PageInfo.HasNextPage = true // There are items after since we're going backwards
+			// Check if there are more items before
+			executioResp.PageInfo.HasPreviousPage = visited > 0 && total >= limit
+		}
 	}
 	return executioResp, nil
 }
@@ -1229,9 +1255,11 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 
 	total := 0
 	var firstKey, lastKey string
-	var allKeys []string
+	var hasMoreItems bool
+	var processedCount int
 
-	// Collect all keys that match the cursor criteria
+	// Process keys that match the cursor criteria and stop when limit+1 is reached
+	// We fetch limit+1 to determine if there are more pages without loading everything
 	for _, k := range secretKeys {
 		if !cursor.IsZero() {
 			if (cursor.Direction == CursorDirectionNext && k <= cursor.Position) ||
@@ -1239,12 +1267,12 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 				continue
 			}
 		}
-		allKeys = append(allKeys, k)
-	}
 
-	// Process the keys for the current page
-	for _, k := range allKeys {
-		if total >= limit {
+		processedCount++
+
+		// If we've processed more than the limit, we know there are more items
+		if processedCount > limit {
+			hasMoreItems = true
 			break
 		}
 
@@ -1271,7 +1299,7 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 		result.PageInfo.EndCursor = CreateNextCursor(lastKey)
 
 		// Check if there are more items after the current page
-		result.PageInfo.HasNextPage = len(allKeys) > total
+		result.PageInfo.HasNextPage = hasMoreItems
 
 		// Check if there are items before the current page
 		// This is true if we have a cursor and we're not at the beginning
@@ -1281,7 +1309,7 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 		if cursor.Direction == CursorDirectionPrevious {
 			result.PageInfo.HasNextPage = true // There are items after since we're going backwards
 			// Check if there are more items before
-			result.PageInfo.HasPreviousPage = len(allKeys) > total
+			result.PageInfo.HasPreviousPage = hasMoreItems
 		}
 	}
 

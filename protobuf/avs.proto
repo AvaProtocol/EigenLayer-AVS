@@ -631,8 +631,7 @@ message ListExecutionsReq {
 
 message ListExecutionsResp {
   repeated Execution items = 1;
-  string cursor = 2;
-  bool has_more = 4;
+  PageInfo page_info = 2;
 }
 
 message ExecutionReq {
