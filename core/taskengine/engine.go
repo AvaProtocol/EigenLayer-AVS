@@ -877,6 +877,8 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	}
 
 	total := 0
+	var firstExecutionId, lastExecutionId string
+	visited := 0
 
 	for i := len(executionKeys) - 1; i >= 0; i-- {
 		key := executionKeys[i]
@@ -937,14 +939,12 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 
 	// Set pagination info
 	if len(executioResp.Items) > 0 {
-		firstItem := executioResp.Items[0]
-		lastItem := executioResp.Items[len(executioResp.Items)-1]
-
-		executioResp.PageInfo.StartCursor = CreateNextCursor(firstItem.Id)
-		executioResp.PageInfo.EndCursor = CreateNextCursor(lastItem.Id)
+		// Always set cursors for the current page (GraphQL PageInfo convention)
+		executioResp.PageInfo.StartCursor = CreateNextCursor(firstExecutionId)
+		executioResp.PageInfo.EndCursor = CreateNextCursor(lastExecutionId)
 
 		// Check if there are more items after the current page
-		executioResp.PageInfo.HasNextPage = total >= limit
+		executioResp.PageInfo.HasNextPage = visited > 0 && total >= limit
 
 		// Check if there are items before the current page
 		// This is true if we have a cursor and we're not at the beginning
@@ -954,7 +954,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 		if cursor.Direction == CursorDirectionPrevious {
 			executioResp.PageInfo.HasNextPage = true // There are items after since we're going backwards
 			// Check if there are more items before
-			executioResp.PageInfo.HasPreviousPage = total >= limit
+			executioResp.PageInfo.HasPreviousPage = visited > 0 && total >= limit
 		}
 	}
 	return executioResp, nil
