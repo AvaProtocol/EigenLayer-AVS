@@ -1177,9 +1177,13 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	}
 
 	result := &avsproto.ListSecretsResp{
-		Items:   []*avsproto.ListSecretsResp_ResponseSecret{},
-		Cursor:  "",
-		HasMore: false,
+		Items: []*avsproto.ListSecretsResp_ResponseSecret{},
+		PageInfo: &avsproto.PageInfo{
+			StartCursor:     "",
+			EndCursor:       "",
+			HasPreviousPage: false,
+			HasNextPage:     false,
+		},
 	}
 
 	secretKeys, err := n.db.ListKeysMulti(prefixes)
@@ -1204,14 +1208,24 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	}
 
 	total := 0
-	var lastKey string
+	var firstKey, lastKey string
+	var allKeys []string
 
+	// Collect all keys that match the cursor criteria
 	for _, k := range secretKeys {
 		if !cursor.IsZero() {
 			if (cursor.Direction == CursorDirectionNext && k <= cursor.Position) ||
 				(cursor.Direction == CursorDirectionPrevious && k >= cursor.Position) {
 				continue
 			}
+		}
+		allKeys = append(allKeys, k)
+	}
+
+	// Process the keys for the current page
+	for _, k := range allKeys {
+		if total >= limit {
+			break
 		}
 
 		secretWithNameOnly := SecretNameFromKey(k)
@@ -1222,17 +1236,38 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 		}
 
 		result.Items = append(result.Items, item)
+
+		if total == 0 {
+			firstKey = k
+		}
 		lastKey = k
 		total++
-
-		if total >= limit {
-			result.HasMore = true
-			break
-		}
 	}
 
-	if result.HasMore && lastKey != "" {
-		result.Cursor = CreateNextCursor(lastKey)
+	// Set pagination info
+	if len(result.Items) > 0 {
+		result.PageInfo.StartCursor = CreateNextCursor(firstKey)
+		result.PageInfo.EndCursor = CreateNextCursor(lastKey)
+
+		// Check if there are more items after the current page
+		result.PageInfo.HasNextPage = len(allKeys) > total
+
+		// Check if there are items before the current page
+		// This is true if we have a cursor and we're not at the beginning
+		result.PageInfo.HasPreviousPage = !cursor.IsZero() && cursor.Direction == CursorDirectionNext
+
+		// For backward pagination, we need to check if there are items after
+		if cursor.Direction == CursorDirectionPrevious {
+			result.PageInfo.HasNextPage = true // There are items after since we're going backwards
+			// Check if there are more items before
+			result.PageInfo.HasPreviousPage = len(allKeys) > total
+		}
+
+		// If there are no more pages, don't set cursors (to match old behavior expectations)
+		if !result.PageInfo.HasNextPage && !result.PageInfo.HasPreviousPage {
+			result.PageInfo.StartCursor = ""
+			result.PageInfo.EndCursor = ""
+		}
 	}
 
 	return result, nil

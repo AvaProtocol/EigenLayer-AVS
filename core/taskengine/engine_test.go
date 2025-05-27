@@ -972,12 +972,12 @@ func TestListSecretsPagination(t *testing.T) {
 		t.Errorf("Expected %d items with limit %d, got %d", pageSize, pageSize, len(result.Items))
 	}
 
-	if !result.HasMore {
-		t.Errorf("Expected HasMore to be true with limit %d and %d total items", pageSize, totalTestSecrets)
+	if !result.PageInfo.HasNextPage {
+		t.Errorf("Expected HasNextPage to be true with limit %d and %d total items", pageSize, totalTestSecrets)
 	}
 
-	if result.Cursor == "" {
-		t.Errorf("Expected cursor to be set when HasMore is true")
+	if result.PageInfo.EndCursor == "" {
+		t.Errorf("Expected end cursor to be set when HasNextPage is true")
 	}
 
 	// Test with limit 0 (should use default)
@@ -1006,12 +1006,12 @@ func TestListSecretsPagination(t *testing.T) {
 		t.Errorf("Expected %d items with limit %d, got %d", totalTestSecrets, totalTestSecrets*2, len(result.Items))
 	}
 
-	if result.HasMore {
-		t.Errorf("Expected HasMore to be false when limit exceeds total items")
+	if result.PageInfo.HasNextPage {
+		t.Errorf("Expected HasNextPage to be false when limit exceeds total items")
 	}
 
-	if result.Cursor != "" {
-		t.Errorf("Expected cursor to be empty when HasMore is false")
+	if result.PageInfo.EndCursor != "" {
+		t.Errorf("Expected end cursor to be empty when HasNextPage is false")
 	}
 
 	// Test pagination using cursor
@@ -1024,7 +1024,7 @@ func TestListSecretsPagination(t *testing.T) {
 	}
 
 	secondPage, err := n.ListSecrets(user, &avsproto.ListSecretsReq{
-		After: firstPage.Cursor,
+		After: firstPage.PageInfo.EndCursor,
 		Limit: pageSize,
 	})
 	if err != nil {
