@@ -92,7 +92,10 @@ func assertStructpbValueIsString(t *testing.T, val *structpb.Value, expectedStri
 
 func TestRunJavaScript(t *testing.T) {
 	node := &avsproto.CustomCodeNode{
-		Source: "return 3>2",
+		Config: &avsproto.CustomCodeNode_Config{
+			Lang:   avsproto.Lang_JavaScript,
+			Source: "return 3>2",
+		},
 	}
 	nodes := []*avsproto.TaskNode{
 		{
@@ -138,8 +141,8 @@ func TestRunJavaScript(t *testing.T) {
 		t.Errorf("expected JavaScript node run successfully but failed")
 	}
 
-	if !strings.Contains(step.Log, "Start execute user-input JS code at") {
-		t.Errorf("expected log contains trace data but found no")
+	if !strings.Contains(step.Log, "Execute Custom Code:") {
+		t.Errorf("expected log contains trace data but found no. Actual log: %s", step.Log)
 	}
 
 	if step.Error != "" {
@@ -152,7 +155,10 @@ func TestRunJavaScript(t *testing.T) {
 
 func TestRunJavaScriptComplex(t *testing.T) {
 	node := &avsproto.CustomCodeNode{
-		Source: "const a=[1,2,3]; return a.filter((i) => i >= 2);",
+		Config: &avsproto.CustomCodeNode_Config{
+			Lang:   avsproto.Lang_JavaScript,
+			Source: "const a=[1,2,3]; return a.filter((i) => i >= 2);",
+		},
 	}
 	nodes := []*avsproto.TaskNode{
 		{
@@ -195,10 +201,13 @@ func TestRunJavaScriptComplex(t *testing.T) {
 
 func TestRunJavaScriptComplexWithMap(t *testing.T) {
 	node := &avsproto.CustomCodeNode{
-		Source: `
+		Config: &avsproto.CustomCodeNode_Config{
+			Lang: avsproto.Lang_JavaScript,
+			Source: `
 			const a=[{name: 'alice', age: 10}, {name: 'bob', age: 12}];
 			return a.filter((i) => i.age >= 12).map((i) => { return { name: i.name, age: i.age + 3} });
 			`,
+		},
 	}
 	nodes := []*avsproto.TaskNode{
 		{
@@ -312,7 +321,10 @@ func TestRunJavaScriptComplexWithMap(t *testing.T) {
 
 func TestRunJavaScriptCanAccessSecretsWithapContext(t *testing.T) {
 	node := &avsproto.CustomCodeNode{
-		Source: "return 'my name is ' + apContext.configVars.my_awesome_secret",
+		Config: &avsproto.CustomCodeNode_Config{
+			Lang:   avsproto.Lang_JavaScript,
+			Source: "return 'my name is ' + apContext.configVars.my_awesome_secret",
+		},
 	}
 	nodes := []*avsproto.TaskNode{
 		{
@@ -398,8 +410,10 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 			Name: "customCodeObjectNode",
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
-					Lang:   avsproto.CustomCodeLang_JavaScript,
-					Source: jsObjectSource,
+					Config: &avsproto.CustomCodeNode_Config{
+						Lang:   avsproto.Lang_JavaScript,
+						Source: jsObjectSource,
+					},
 				},
 			},
 		},
@@ -408,9 +422,11 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 			Name: "restNodeUsingObject",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    server.URL, // Point to mock server
-					Method: "POST",
-					Body:   `{"output_from_js": "{{ customCodeObjectNode.data }}"`,
+					Config: &avsproto.RestAPINode_Config{
+						Url:    server.URL, // Point to mock server
+						Method: "POST",
+						Body:   `{"output_from_js": "{{ customCodeObjectNode.data }}"}`,
+					},
 				},
 			},
 		},
@@ -463,7 +479,7 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 		t.Fatalf("Expected 2 execution steps, got %d", len(vm.ExecutionLogs))
 	}
 
-	if capturedBody != "{\"output_from_js\": \"[object Object]\"" {
+	if capturedBody != "{\"output_from_js\": \"[object Object]\"}" {
 		t.Errorf("expected output_from_js to be [object Object] but got %q", capturedBody)
 	}
 

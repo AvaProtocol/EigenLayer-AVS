@@ -64,7 +64,7 @@ func (b *BlockTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	interval := check.GetTrigger().GetBlock().GetInterval()
+	interval := check.GetTrigger().GetBlock().GetConfig().GetInterval()
 	if _, ok := b.schedule[interval]; !ok {
 		b.schedule[interval] = map[string]bool{
 			check.TaskId: true,

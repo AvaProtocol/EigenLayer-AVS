@@ -12,9 +12,7 @@ import (
 
 func TestContractReadSimpleReturn(t *testing.T) {
 	node := &avsproto.ContractReadNode{
-		ContractAddress: "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
-		CallData:        "0x70a08231000000000000000000000000ce289bb9fb0a9591317981223cbe33d5dc42268d",
-		ContractAbi:     `[{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`,
+		Config: &avsproto.ContractReadNode_Config{},
 	}
 	nodes := []*avsproto.TaskNode{
 		{
@@ -52,6 +50,11 @@ func TestContractReadSimpleReturn(t *testing.T) {
 		return
 	}
 
+	// Add input variables that the processor expects
+	vm.AddVar("contractAddress", "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238")
+	vm.AddVar("callData", "0x70a08231000000000000000000000000ce289bb9fb0a9591317981223cbe33d5dc42268d")
+	vm.AddVar("contractAbi", `[{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`)
+
 	n := NewContractReadProcessor(vm, testutil.GetRpcClient())
 
 	step, err := n.Execute("123", node)
@@ -81,9 +84,7 @@ func TestContractReadSimpleReturn(t *testing.T) {
 
 func TestContractReadComplexReturn(t *testing.T) {
 	node := &avsproto.ContractReadNode{
-		ContractAddress: "0xc59E3633BAAC79493d908e63626716e204A45EdF",
-		CallData:        "0x9a6fc8f500000000000000000000000000000000000000000000000100000000000052e7",
-		ContractAbi:     `[{"inputs":[{"internalType":"uint80","name":"_roundId","type":"uint80"}],"name":"getRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`,
+		Config: &avsproto.ContractReadNode_Config{},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -120,6 +121,11 @@ func TestContractReadComplexReturn(t *testing.T) {
 		t.Errorf("failed to create VM: %v", err)
 		return
 	}
+
+	// Add input variables that the processor expects
+	vm.AddVar("contractAddress", "0xc59E3633BAAC79493d908e63626716e204A45EdF")
+	vm.AddVar("callData", "0x9a6fc8f500000000000000000000000000000000000000000000000100000000000052e7")
+	vm.AddVar("contractAbi", `[{"inputs":[{"internalType":"uint80","name":"_roundId","type":"uint80"}],"name":"getRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`)
 
 	n := NewContractReadProcessor(vm, testutil.GetRpcClient())
 	step, err := n.Execute("123abc", node)

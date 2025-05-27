@@ -18,8 +18,7 @@ type MockTokenPrice struct {
 
 func TestFilter(t *testing.T) {
 	node := &avsproto.FilterNode{
-		Expression: "value.cost > 5",
-		Input:      "trades",
+		Config: &avsproto.FilterNode_Config{},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -56,7 +55,7 @@ func TestFilter(t *testing.T) {
 	if err != nil {
 		t.Errorf("expect vm initialize succesully but failed with error: %v", err)
 	}
-	vm.vars["trades"] = []map[string]interface{}{
+	vm.AddVar("trades", []map[string]interface{}{
 		{
 			"cost": 12,
 			"name": "abc",
@@ -65,11 +64,24 @@ func TestFilter(t *testing.T) {
 			"cost": 2,
 			"name": "def",
 		},
-	}
+	})
+
+	// Add input variables that the processor expects
+	vm.AddVar("input", "trades")
+	vm.AddVar("expression", "value.cost > 5")
+
 	n := NewFilterProcessor(vm)
 	step, err := n.Execute("abc123", node)
+	if err != nil {
+		t.Errorf("Filter execution failed with error: %v", err)
+		return
+	}
+
 	varname := vm.GetNodeNameAsVar("abc123")
-	data := vm.vars[varname].(map[string]any)["data"].([]any)
+	vm.mu.Lock()
+	tempData, _ := vm.vars[varname]
+	vm.mu.Unlock()
+	data := tempData.(map[string]any)["data"].([]any)
 
 	if len(data) != 1 {
 		t.Errorf("expect return only one element with cost > 5 but got 0")
@@ -80,15 +92,14 @@ func TestFilter(t *testing.T) {
 		t.Errorf("expect return only one element with cost > 5 but got: %s", data[0])
 	}
 
-	if !strings.Contains(step.Log, "start filter input trades with expression value.cost > 5") {
+	if !strings.Contains(step.Log, "Input variable: 'trades', Expression: 'value.cost > 5'") {
 		t.Errorf("log doesn't contain execution info")
 	}
 }
 
 func TestFilterComplexLogic(t *testing.T) {
 	node := &avsproto.FilterNode{
-		Expression: "if (index<=2) { return value.cost > 13; } else { return value.cost < 21; }",
-		Input:      "trades",
+		Config: &avsproto.FilterNode_Config{},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -125,7 +136,7 @@ func TestFilterComplexLogic(t *testing.T) {
 	if err != nil {
 		t.Errorf("expect vm initialize succesully but failed with error: %v", err)
 	}
-	vm.vars["trades"] = []map[string]interface{}{
+	vm.AddVar("trades", []map[string]interface{}{
 		{
 			"cost": 12,
 			"name": "first",
@@ -146,12 +157,24 @@ func TestFilterComplexLogic(t *testing.T) {
 			"cost": 19,
 			"name": "sixth",
 		},
-	}
+	})
+
+	// Add input variables that the processor expects
+	vm.AddVar("input", "trades")
+	vm.AddVar("expression", "if (index<=2) { return value.cost > 13; } else { return value.cost < 21; }")
+
 	n := NewFilterProcessor(vm)
 	step, err := n.Execute("abc123", node)
+	if err != nil {
+		t.Errorf("Filter execution failed with error: %v", err)
+		return
+	}
 
 	varname := vm.GetNodeNameAsVar("abc123")
-	data := vm.vars[varname].(map[string]any)["data"].([]any)
+	vm.mu.Lock()
+	tempData, _ := vm.vars[varname]
+	vm.mu.Unlock()
+	data := tempData.(map[string]any)["data"].([]any)
 	if len(data) != 3 {
 		t.Errorf("expect return only 3 element but got %v", len(data))
 	}

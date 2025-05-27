@@ -21,26 +21,13 @@ type GraphqlQueryProcessor struct {
 	url    *url.URL
 }
 
-func NewGraphqlQueryProcessor(vm *VM, endpoint string) (*GraphqlQueryProcessor, error) {
+func NewGraphqlQueryProcessor(vm *VM) (*GraphqlQueryProcessor, error) {
 	sb := &strings.Builder{}
-	log := func(s string) {
-		sb.WriteString(s)
-	}
-
-	client, err := graphql.NewClient(endpoint, log)
-	if err != nil {
-		return nil, err
-	}
-
-	u, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, err
-	}
 
 	return &GraphqlQueryProcessor{
-		client: client,
+		client: nil, // Will be initialized when we have the URL from Config
 		sb:     sb,
-		url:    u,
+		url:    nil, // Will be set when we have the URL from Config
 
 		CommonProcessor: &CommonProcessor{vm},
 	}, nil
@@ -67,10 +54,43 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 		}
 	}()
 
+	// Get configuration from Config message (static configuration)
+	if node.Config == nil {
+		err = fmt.Errorf("GraphQLQueryNode Config is nil")
+		return step, nil, err
+	}
+
+	endpoint := node.Config.Url
+	queryStr := node.Config.Query
+
+	if endpoint == "" || queryStr == "" {
+		err = fmt.Errorf("missing required configuration: url and query")
+		return step, nil, err
+	}
+
+	// Preprocess URL and query for template variables
+	endpoint = r.vm.preprocessText(endpoint)
+	queryStr = r.vm.preprocessText(queryStr)
+
+	// Initialize client with the URL from Config
+	log := func(s string) {
+		r.sb.WriteString(s)
+	}
+
+	client, err := graphql.NewClient(endpoint, log)
+	if err != nil {
+		return step, nil, err
+	}
+
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return step, nil, err
+	}
+
 	var resp map[string]any
-	r.sb.WriteString(fmt.Sprintf("Execute GraphQL %s at %s", r.url.Hostname(), time.Now()))
-	query := graphql.NewRequest(node.Query)
-	err = r.client.Run(ctx, query, &resp)
+	r.sb.WriteString(fmt.Sprintf("Execute GraphQL %s at %s", u.Hostname(), time.Now()))
+	query := graphql.NewRequest(queryStr)
+	err = client.Run(ctx, query, &resp)
 	if err != nil {
 		return step, nil, err
 	}

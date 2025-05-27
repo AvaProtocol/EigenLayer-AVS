@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -254,15 +255,36 @@ func TestGetExecution(t *testing.T) {
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
 			BlockNumber: uint64(101),
+			Type:        avsproto.TriggerReason_Block,
 		},
 		IsBlocking: true,
 	})
+
+	if err != nil {
+		t.Errorf("failed to trigger task: %v", err)
+		return
+	}
+
+	if resultTrigger == nil {
+		t.Errorf("resultTrigger is nil")
+		return
+	}
 
 	// Now get back that execution data using the log
 	execution, err := n.GetExecution(testutil.TestUser1(), &avsproto.ExecutionReq{
 		TaskId:      result.Id,
 		ExecutionId: resultTrigger.ExecutionId,
 	})
+
+	if err != nil {
+		t.Errorf("failed to get execution: %v", err)
+		return
+	}
+
+	if execution == nil {
+		t.Errorf("execution is nil")
+		return
+	}
 
 	if execution.TriggerName != tr1.Trigger.Name {
 		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
@@ -272,8 +294,12 @@ func TestGetExecution(t *testing.T) {
 		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
 
-	if execution.Reason.BlockNumber != 101 {
-		t.Errorf("invalid triggered block. expect 101 got %d", execution.Reason.BlockNumber)
+	if execution.Reason == nil || execution.Reason.BlockNumber != 101 {
+		var actualBlockNumber uint64
+		if execution.Reason != nil {
+			actualBlockNumber = execution.Reason.BlockNumber
+		}
+		t.Errorf("invalid triggered block. expect 101 got %d (Reason: %+v)", actualBlockNumber, execution.Reason)
 	}
 
 	// Another user cannot get this execution id
@@ -369,6 +395,12 @@ func TestTriggerSync(t *testing.T) {
 
 	if err != nil {
 		t.Errorf("expected trigger successfully but got error: %s", err)
+		return
+	}
+
+	if resultTrigger == nil {
+		t.Errorf("resultTrigger is nil")
+		return
 	}
 
 	// Now get back that execution id
@@ -377,6 +409,16 @@ func TestTriggerSync(t *testing.T) {
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 
+	if err != nil {
+		t.Errorf("failed to get execution: %v", err)
+		return
+	}
+
+	if execution == nil {
+		t.Errorf("execution is nil")
+		return
+	}
+
 	if execution.Id != resultTrigger.ExecutionId {
 		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
@@ -384,8 +426,13 @@ func TestTriggerSync(t *testing.T) {
 	if execution.TriggerName != tr1.Trigger.Name {
 		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
 	}
-	if execution.Reason.BlockNumber != 101 {
-		t.Errorf("invalid triggered block. expect 101 got %d", execution.Reason.BlockNumber)
+
+	if execution.Reason == nil || execution.Reason.BlockNumber != 101 {
+		var actualBlockNumber uint64
+		if execution.Reason != nil {
+			actualBlockNumber = execution.Reason.BlockNumber
+		}
+		t.Errorf("invalid triggered block. expect 101 got %d (Reason: %+v)", actualBlockNumber, execution.Reason)
 	}
 }
 
@@ -417,6 +464,7 @@ func TestTriggerAsync(t *testing.T) {
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
 			BlockNumber: uint64(101),
+			Type:        avsproto.TriggerReason_Block,
 		},
 		IsBlocking: false,
 	})
@@ -460,8 +508,48 @@ func TestTriggerAsync(t *testing.T) {
 		t.Errorf("wrong node id in execution log")
 	}
 
-	if !strings.Contains(gow.AnyToString(execution.Steps[0].GetRestApi().Data), "httpbin.org") {
-		t.Error("Invalid output data")
+	if len(execution.Steps) == 0 {
+		t.Errorf("No execution steps found")
+		return
+	}
+
+	step := execution.Steps[0]
+	if step.GetRestApi() == nil {
+		t.Errorf("RestApi data is nil")
+		return
+	}
+
+	// Get the response data as a map
+	responseData := gow.AnyToMap(step.GetRestApi().Data)
+	if responseData == nil {
+		t.Errorf("Failed to convert response data to map")
+		return
+	}
+
+	// Check if the response body contains "httpbin.org"
+	// The response structure might have changed, so let's handle both string and map cases
+	var bodyContent string
+	if bodyStr, ok := responseData["body"].(string); ok {
+		bodyContent = bodyStr
+	} else if bodyMap, ok := responseData["body"].(map[string]interface{}); ok {
+		// If body is a map, convert it to string for checking
+		if bodyBytes, err := json.Marshal(bodyMap); err == nil {
+			bodyContent = string(bodyBytes)
+		} else {
+			t.Errorf("Failed to marshal body map to string: %v", err)
+			return
+		}
+	} else {
+		t.Errorf("Response body is neither string nor map, got type: %T", responseData["body"])
+		return
+	}
+
+	if !strings.Contains(bodyContent, "httpbin.org") {
+		maxLen := 100
+		if len(bodyContent) < maxLen {
+			maxLen = len(bodyContent)
+		}
+		t.Errorf("Invalid output data. Expected body to contain 'httpbin.org' but got: %s", bodyContent[:maxLen]+"...")
 	}
 
 	// If we get the status back it also reflected
@@ -507,6 +595,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
 			BlockNumber: uint64(101),
+			Type:        avsproto.TriggerReason_Block,
 		},
 		IsBlocking: true,
 	})
@@ -520,6 +609,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
 			BlockNumber: uint64(101),
+			Type:        avsproto.TriggerReason_Block,
 		},
 		IsBlocking: true,
 	})
