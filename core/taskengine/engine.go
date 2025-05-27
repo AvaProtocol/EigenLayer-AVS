@@ -880,7 +880,6 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	total := 0
 	var firstExecutionId, lastExecutionId string
 	var hasMoreItems bool
-
 	for i := len(executionKeys) - 1; i >= 0; i-- {
 		key := executionKeys[i]
 
