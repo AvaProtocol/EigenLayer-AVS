@@ -42,7 +42,7 @@ type Check struct {
 	TaskMetadata *avsproto.SyncMessagesResp_TaskMetadata
 
 	Program string
-	Matcher []*avsproto.EventCondition_Matcher
+	Matcher []*avsproto.EventTrigger_Matcher
 }
 
 type EventTrigger struct {
@@ -88,8 +88,8 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 	evt := check.GetTrigger().GetEvent()
 
 	t.checks.Store(check.TaskId, &Check{
-		Program:      evt.GetExpression(),
-		Matcher:      evt.GetMatcher(),
+		Program:      evt.GetConfig().GetExpression(),
+		Matcher:      evt.GetConfig().GetMatcher(),
 		TaskMetadata: check,
 	})
 
@@ -210,7 +210,7 @@ func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) 
 
 	if len(check.Matcher) > 0 {
 		// This is the simpler trigger. It's essentially an anyof
-		return lo.SomeBy(check.Matcher, func(x *avsproto.EventCondition_Matcher) bool {
+		return lo.SomeBy(check.Matcher, func(x *avsproto.EventTrigger_Matcher) bool {
 			if len(x.Value) == 0 {
 				err = fmt.Errorf("matcher value is empty")
 				return false

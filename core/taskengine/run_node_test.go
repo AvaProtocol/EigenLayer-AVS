@@ -4,9 +4,12 @@ import (
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestRunNodeWithInputs_BlockTrigger(t *testing.T) {
@@ -39,13 +42,15 @@ func TestRunNodeWithInputs_CustomCode(t *testing.T) {
 		Name: "Test Custom Code",
 		TaskType: &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{
-				Lang: avsproto.CustomCodeLang_JavaScript,
-				Source: `
+				Config: &avsproto.CustomCodeNode_Config{
+					Lang: avsproto.Lang_JavaScript,
+					Source: `
 					if (typeof myVar === 'undefined') {
 						throw new Error("myVar is required but not provided");
 					}
-					return { result: myVar * 2 };
+					({ result: myVar * 2 })
 				`,
+				},
 			},
 		},
 	}
@@ -81,7 +86,7 @@ func TestCreateNodeFromType(t *testing.T) {
 			config["contractAddress"] = "0x1234567890123456789012345678901234567890"
 			config["callData"] = "0x12345678"
 		case "customCode":
-			config["source"] = "return { hello: 'world' };"
+			config["source"] = "({ hello: 'world' })"
 		case "branch":
 			config["conditions"] = []interface{}{
 				map[string]interface{}{
@@ -99,7 +104,7 @@ func TestCreateNodeFromType(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, node)
 		assert.NotEmpty(t, node.Id)
-		assert.Equal(t, "Single Node Execution", node.Name)
+		assert.Equal(t, "Single Node Execution: "+nodeType, node.Name)
 
 		switch nodeType {
 		case "blockTrigger":
@@ -136,12 +141,67 @@ func TestEngine_RunNodeWithInputs(t *testing.T) {
 	}
 
 	result, err = engine.RunNodeWithInputs("customCode", map[string]interface{}{
-		"source": "return { message: 'Hello, World!' };",
+		"source": "({ message: 'Hello, World!' })",
 	}, map[string]interface{}{})
 
 	if err == nil {
 		assert.NotNil(t, result)
 		assert.Contains(t, result, "message")
 		assert.Equal(t, "Hello, World!", result["message"])
+	}
+}
+
+func TestRunNodeWithInputsRPC_BlockTriggerValidation(t *testing.T) {
+	// Create a minimal engine just for testing validation
+	engine := &Engine{
+		logger: nil, // No logger needed for this test
+	}
+
+	user := &model.User{
+		Address: common.HexToAddress("0x1234567890123456789012345678901234567890"),
+	}
+
+	// Test 1: blockTrigger with input variables should fail validation
+	inputVars := map[string]*structpb.Value{
+		"testVar": structpb.NewStringValue("testValue"),
+	}
+
+	req := &avsproto.RunNodeWithInputsReq{
+		NodeType:       "blockTrigger",
+		NodeConfig:     map[string]*structpb.Value{},
+		InputVariables: inputVars,
+	}
+
+	resp, err := engine.RunNodeWithInputsRPC(user, req)
+	assert.NoError(t, err)
+	assert.False(t, resp.Success)
+	assert.Contains(t, resp.Error, "blockTrigger nodes do not accept input variables")
+	assert.Contains(t, resp.Error, "testVar")
+
+	// Test 2: blockTrigger without input variables should pass validation
+	// (but may fail execution due to missing RPC connection - that's OK for this test)
+	req.InputVariables = map[string]*structpb.Value{}
+
+	resp, err = engine.RunNodeWithInputsRPC(user, req)
+	assert.NoError(t, err)
+	// We don't check success here because it may fail due to missing RPC connection
+	// The important thing is that validation passed (no "do not accept input variables" error)
+	if !resp.Success {
+		assert.NotContains(t, resp.Error, "blockTrigger nodes do not accept input variables")
+	}
+
+	// Test 3: Other node types with input variables should pass validation
+	req.NodeType = "customCode"
+	req.NodeConfig = map[string]*structpb.Value{
+		"source": structpb.NewStringValue("({ message: 'Hello' })"),
+	}
+	req.InputVariables = inputVars
+
+	resp, err = engine.RunNodeWithInputsRPC(user, req)
+	assert.NoError(t, err)
+	// Again, we don't check success because execution may fail
+	// The important thing is that validation passed
+	if !resp.Success {
+		assert.NotContains(t, resp.Error, "do not accept input variables")
 	}
 }

@@ -53,16 +53,46 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 
 	var log strings.Builder
 
+	// Get configuration from input variables (new architecture)
+	r.vm.mu.Lock()
+	contractAbiVar, abiExists := r.vm.vars["contractAbi"]
+	contractAddressVar, addrExists := r.vm.vars["contractAddress"]
+	callDataVar, dataExists := r.vm.vars["callData"]
+	r.vm.mu.Unlock()
+
+	if !abiExists || !addrExists || !dataExists {
+		err = fmt.Errorf("missing required input variables: contractAbi, contractAddress, callData")
+		return s, err
+	}
+
+	contractAbi, ok := contractAbiVar.(string)
+	if !ok {
+		err = fmt.Errorf("contractAbi must be a string")
+		return s, err
+	}
+
+	contractAddress, ok := contractAddressVar.(string)
+	if !ok {
+		err = fmt.Errorf("contractAddress must be a string")
+		return s, err
+	}
+
+	callData, ok := callDataVar.(string)
+	if !ok {
+		err = fmt.Errorf("callData must be a string")
+		return s, err
+	}
+
 	// TODO: support load pre-define ABI
-	parsedABI, err := abi.JSON(strings.NewReader(node.ContractAbi))
+	parsedABI, err := abi.JSON(strings.NewReader(contractAbi))
 	if err != nil {
 		return nil, fmt.Errorf("error parse abi: %w", err)
 	}
 
-	contractAddress := common.HexToAddress(node.ContractAddress)
-	calldata := common.FromHex(node.CallData)
+	contractAddr := common.HexToAddress(contractAddress)
+	calldata := common.FromHex(callData)
 	msg := ethereum.CallMsg{
-		To:   &contractAddress,
+		To:   &contractAddr,
 		Data: calldata,
 	}
 
@@ -75,7 +105,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	}
 
 	// Unpack the output by parsing the 4byte from calldata, compare with the right method in ABI
-	method, err := byte4.GetMethodFromCalldata(parsedABI, common.FromHex(node.CallData))
+	method, err := byte4.GetMethodFromCalldata(parsedABI, common.FromHex(callData))
 	if err != nil {
 		s.Success = false
 		s.Error = fmt.Errorf("error detect method from ABI: %w", err).Error()
@@ -89,7 +119,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		return s, err
 	}
 
-	log.WriteString(fmt.Sprintf("Call %s on %s at %s", method.Name, node.ContractAddress, time.Now()))
+	log.WriteString(fmt.Sprintf("Call %s on %s at %s", method.Name, contractAddress, time.Now()))
 	s.Log = log.String()
 
 	s.OutputData = &avsproto.Execution_Step_ContractRead{

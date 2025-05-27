@@ -13,8 +13,9 @@ import (
 // Test make a query to a demo graphql server to ensure our node processing work
 func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 	node := &avsproto.GraphQLQueryNode{
-		Url: "https://spacex-production.up.railway.app/",
-		Query: `
+		Config: &avsproto.GraphQLQueryNode_Config{
+			Url: "https://spacex-production.up.railway.app/",
+			Query: `
           query Launch {
             company {
               ceo
@@ -24,7 +25,8 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
               mission_name
             }
           }
-		`,
+			`,
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -63,7 +65,7 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 		return
 	}
 
-	n, _ := NewGraphqlQueryProcessor(vm, node.Url)
+	n, _ := NewGraphqlQueryProcessor(vm)
 
 	step, _, err := n.Execute("123abc", node)
 

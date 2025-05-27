@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRunTaskWithMultipleConditions(t *testing.T) {
@@ -32,20 +34,22 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
-					Conditions: []*avsproto.Condition{
-						{
-							Id:         "condition1",
-							Type:       "if",
-							Expression: "a > 10",
-						},
-						{
-							Id:         "condition2",
-							Type:       "if",
-							Expression: "a > 5",
-						},
-						{
-							Id:   "condition3",
-							Type: "else",
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:         "condition1",
+								Type:       "if",
+								Expression: "a > 10",
+							},
+							{
+								Id:         "condition2",
+								Type:       "if",
+								Expression: "a > 5",
+							},
+							{
+								Id:   "condition3",
+								Type: "else",
+							},
 						},
 					},
 				},
@@ -56,9 +60,11 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    ts.URL,
-					Method: "POST",
-					Body:   "hit=first_condition",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    ts.URL,
+						Method: "POST",
+						Body:   "hit=first_condition",
+					},
 				},
 			},
 		},
@@ -67,9 +73,11 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    ts.URL,
-					Method: "POST",
-					Body:   "hit=second_condition",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    ts.URL,
+						Method: "POST",
+						Body:   "hit=second_condition",
+					},
 				},
 			},
 		},
@@ -78,9 +86,11 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    ts.URL,
-					Method: "POST",
-					Body:   "hit=else_condition",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    ts.URL,
+						Method: "POST",
+						Body:   "hit=else_condition",
+					},
 				},
 			},
 		},
@@ -120,14 +130,15 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 			Edges:   edges,
 			Trigger: trigger,
 		},
-	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+	}, testutil.GetTestEventTriggerReason(), testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
 		t.Errorf("expect vm initialized")
 	}
 
 	// Set value to hit the second condition (a > 5 but not > 10)
-	vm.vars["a"] = 7
+	vm.AddVar("a", 7)
+
 	vm.Compile()
 
 	if vm.entrypoint != "branch1" {
@@ -153,13 +164,14 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 		t.Errorf("expected second condition to be hit, but got %s", vm.ExecutionLogs[0].OutputData)
 	}
 	outputData := gow.AnyToMap(vm.ExecutionLogs[1].GetRestApi().Data)
-	if outputData["name"].(string) != "hit=second_condition" {
+	bodyData := outputData["body"].(map[string]interface{})
+	if bodyData["name"].(string) != "hit=second_condition" {
 		t.Errorf("expected second notification to be executed, but got %s", vm.ExecutionLogs[1].OutputData)
 	}
 
 	// Test first condition
 	vm.Reset()
-	vm.vars["a"] = 15
+	vm.AddVar("a", 15)
 	vm.Compile()
 	err = vm.Run()
 	if err != nil {
@@ -171,7 +183,7 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 
 	// Test else condition
 	vm.Reset()
-	vm.vars["a"] = 3
+	vm.AddVar("a", 3)
 	vm.Compile()
 	err = vm.Run()
 	if err != nil {
@@ -209,7 +221,7 @@ func TestBranchConditionSuccesfulCase(t *testing.T) {
 	}
 
 	// Define conditions
-	conditions := []*avsproto.Condition{
+	conditions := []*avsproto.BranchNode_Condition{
 		{Id: "condition1", Type: "if", Expression: "a > 10"},
 		{Id: "condition2", Type: "if", Expression: "a > 3"},
 		{Id: "condition3", Type: "else"},
@@ -221,9 +233,11 @@ func TestBranchConditionSuccesfulCase(t *testing.T) {
 			vm := NewVM()
 			processor := NewBranchProcessor(vm)
 
-			vm.vars["a"] = tc.aValue
-			stepResult, err := processor.Execute("test1", &avsproto.BranchNode{
-				Conditions: conditions,
+			vm.AddVar("a", tc.aValue)
+			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: conditions,
+				},
 			})
 
 			if tc.expectError {
@@ -264,7 +278,7 @@ func TestBranchConditionDiscardAnythingAfterElse(t *testing.T) {
 	}
 
 	// Define conditions
-	conditions := []*avsproto.Condition{
+	conditions := []*avsproto.BranchNode_Condition{
 		{Id: "condition1", Type: "if", Expression: "a > 10"},
 		{Id: "condition2", Type: "else"},
 		{Id: "discard1", Type: "if", Expression: "a>3"},
@@ -278,9 +292,11 @@ func TestBranchConditionDiscardAnythingAfterElse(t *testing.T) {
 			vm := NewVM()
 			processor := NewBranchProcessor(vm)
 
-			vm.vars["a"] = tc.aValue
-			stepResult, err := processor.Execute("test1", &avsproto.BranchNode{
-				Conditions: conditions,
+			vm.AddVar("a", tc.aValue)
+			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: conditions,
+				},
 			})
 
 			if tc.expectError {
@@ -314,7 +330,7 @@ func TestBranchConditionInvalidCase(t *testing.T) {
 	}
 
 	// Define conditions
-	conditions := []*avsproto.Condition{
+	conditions := []*avsproto.BranchNode_Condition{
 		{Id: "condition2", Type: "else"},
 		{Id: "condition1", Type: "if", Expression: "a > 10"},
 	}
@@ -325,9 +341,11 @@ func TestBranchConditionInvalidCase(t *testing.T) {
 			vm := NewVM()
 			processor := NewBranchProcessor(vm)
 
-			vm.vars["a"] = tc.aValue
-			stepResult, err := processor.Execute("test1", &avsproto.BranchNode{
-				Conditions: conditions,
+			vm.AddVar("a", tc.aValue)
+			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: conditions,
+				},
 			})
 
 			if tc.expectError {
@@ -342,7 +360,7 @@ func TestBranchConditionInvalidCase(t *testing.T) {
 				return
 			}
 
-			if stepResult.GetBranch().ConditionId != tc.expectedOutput {
+			if stepResult != nil && stepResult.GetBranch() != nil && stepResult.GetBranch().ConditionId != tc.expectedOutput {
 				t.Errorf("expected output data %s but got %s", tc.expectedOutput, stepResult.OutputData)
 			}
 		})
@@ -366,7 +384,7 @@ func TestBranchNodeEvaluateTypeof(t *testing.T) {
 		{"data is defined", map[string]interface{}{"data": "name"}, "test1.condition2", false},
 	}
 
-	conditions := []*avsproto.Condition{
+	conditions := []*avsproto.BranchNode_Condition{
 		{Id: "condition1", Type: "if", Expression: `typeof mytrigger.data == "undefined"`},
 		{Id: "condition2", Type: "else"},
 	}
@@ -376,10 +394,12 @@ func TestBranchNodeEvaluateTypeof(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			vm := NewVM()
 			processor := NewBranchProcessor(vm)
-			vm.vars["mytrigger"] = tc.dataValue
+			vm.AddVar("mytrigger", tc.dataValue)
 
-			stepResult, err := processor.Execute("test1", &avsproto.BranchNode{
-				Conditions: conditions,
+			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: conditions,
+				},
 			})
 
 			if tc.expectError {
@@ -414,7 +434,7 @@ func TestBranchNodeEmptyConditionIsAPass(t *testing.T) {
 		{"expression is many newline", "\t\t\n\n", "test1.condition2", false},
 	}
 
-	conditions := []*avsproto.Condition{
+	conditions := []*avsproto.BranchNode_Condition{
 		{Id: "condition1", Type: "if", Expression: "\t\n"},
 		{Id: "condition2", Type: "else"},
 	}
@@ -424,10 +444,12 @@ func TestBranchNodeEmptyConditionIsAPass(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			vm := NewVM()
 			processor := NewBranchProcessor(vm)
-			vm.vars["mytrigger"] = tc.dataValue
+			vm.AddVar("mytrigger", tc.dataValue)
 
-			stepResult, err := processor.Execute("test1", &avsproto.BranchNode{
-				Conditions: conditions,
+			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: conditions,
+				},
 			})
 
 			if tc.expectError {
@@ -467,7 +489,7 @@ func TestBranchNodeExpressionWithJavaScript(t *testing.T) {
 		{"String comparison not matched", "cod1.data == 'alice'", "bob", "test1.condition2", false},
 	}
 
-	conditions := []*avsproto.Condition{
+	conditions := []*avsproto.BranchNode_Condition{
 		{Id: "condition1", Type: "if", Expression: ""},
 		{Id: "condition2", Type: "else"},
 	}
@@ -477,11 +499,13 @@ func TestBranchNodeExpressionWithJavaScript(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			vm := NewVM()
 			processor := NewBranchProcessor(vm)
-			vm.vars["cod1"] = map[string]interface{}{"data": tc.dataValue}
+			vm.AddVar("cod1", map[string]interface{}{"data": tc.dataValue})
 
 			conditions[0].Expression = tc.expression
-			stepResult, err := processor.Execute("test1", &avsproto.BranchNode{
-				Conditions: conditions,
+			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: conditions,
+				},
 			})
 
 			if tc.expectError {
@@ -515,7 +539,7 @@ func TestBranchNodeNoElseSkip(t *testing.T) {
 		{"cod1.data == 'alice'", "bob", false},
 	}
 
-	conditions := []*avsproto.Condition{
+	conditions := []*avsproto.BranchNode_Condition{
 		{Id: "condition1", Type: "if", Expression: ""},
 	}
 
@@ -524,11 +548,13 @@ func TestBranchNodeNoElseSkip(t *testing.T) {
 		t.Run(tc.expression, func(t *testing.T) {
 			vm := NewVM()
 			processor := NewBranchProcessor(vm)
-			vm.vars["cod1"] = map[string]interface{}{"data": tc.dataValue}
+			vm.AddVar("cod1", map[string]interface{}{"data": tc.dataValue})
 
 			conditions[0].Expression = tc.expression
-			stepResult, err := processor.Execute("test1", &avsproto.BranchNode{
-				Conditions: conditions,
+			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: conditions,
+				},
 			})
 
 			if tc.expectError {
@@ -553,13 +579,13 @@ func TestBranchNodeNoElseSkip(t *testing.T) {
 func TestBranchNodeMalformedData(t *testing.T) {
 	testCases := []struct {
 		name        string
-		conditions  []*avsproto.Condition
+		conditions  []*avsproto.BranchNode_Condition
 		expectError bool
 		errorMsg    string
 	}{
 		{
 			name: "nil condition",
-			conditions: []*avsproto.Condition{
+			conditions: []*avsproto.BranchNode_Condition{
 				{Id: "condition1", Type: "if", Expression: "a > 10"},
 				nil,
 			},
@@ -568,7 +594,7 @@ func TestBranchNodeMalformedData(t *testing.T) {
 		},
 		{
 			name: "empty condition ID",
-			conditions: []*avsproto.Condition{
+			conditions: []*avsproto.BranchNode_Condition{
 				{Id: "condition1", Type: "if", Expression: "a > 10"},
 				{Id: "", Type: "if", Expression: "a > 5"},
 			},
@@ -577,7 +603,7 @@ func TestBranchNodeMalformedData(t *testing.T) {
 		},
 		{
 			name: "empty condition type",
-			conditions: []*avsproto.Condition{
+			conditions: []*avsproto.BranchNode_Condition{
 				{Id: "condition1", Type: "if", Expression: "a > 10"},
 				{Id: "condition2", Type: "", Expression: "a > 5"},
 			},
@@ -586,7 +612,7 @@ func TestBranchNodeMalformedData(t *testing.T) {
 		},
 		{
 			name: "invalid condition type",
-			conditions: []*avsproto.Condition{
+			conditions: []*avsproto.BranchNode_Condition{
 				{Id: "condition1", Type: "if", Expression: "a > 10"},
 				{Id: "condition2", Type: "invalid", Expression: "a > 5"},
 			},
@@ -595,7 +621,7 @@ func TestBranchNodeMalformedData(t *testing.T) {
 		},
 		{
 			name: "empty if expression",
-			conditions: []*avsproto.Condition{
+			conditions: []*avsproto.BranchNode_Condition{
 				{Id: "condition1", Type: "if", Expression: "a > 10"},
 				{Id: "condition2", Type: "if", Expression: ""},
 			},
@@ -603,7 +629,7 @@ func TestBranchNodeMalformedData(t *testing.T) {
 		},
 		{
 			name: "whitespace if expression",
-			conditions: []*avsproto.Condition{
+			conditions: []*avsproto.BranchNode_Condition{
 				{Id: "condition1", Type: "if", Expression: "a > 10"},
 				{Id: "condition2", Type: "if", Expression: "   \t\n  "},
 			},
@@ -611,7 +637,7 @@ func TestBranchNodeMalformedData(t *testing.T) {
 		},
 		{
 			name: "valid conditions",
-			conditions: []*avsproto.Condition{
+			conditions: []*avsproto.BranchNode_Condition{
 				{Id: "condition1", Type: "if", Expression: "a > 10"},
 				{Id: "condition2", Type: "if", Expression: "a > 5"},
 				{Id: "condition3", Type: "else"},
@@ -626,7 +652,9 @@ func TestBranchNodeMalformedData(t *testing.T) {
 			processor := NewBranchProcessor(vm)
 
 			err := processor.Validate(&avsproto.BranchNode{
-				Conditions: tc.conditions,
+				Config: &avsproto.BranchNode_Config{
+					Conditions: tc.conditions,
+				},
 			})
 
 			if tc.expectError {
@@ -644,4 +672,229 @@ func TestBranchNodeMalformedData(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBranchProcessor_Execute_NoConditions(t *testing.T) {
+	vm := NewVM()
+	node := &avsproto.BranchNode{
+		Config: &avsproto.BranchNode_Config{
+			Conditions: []*avsproto.BranchNode_Condition{},
+		},
+	}
+	processor := NewBranchProcessor(vm)
+	stepID := "testStep"
+
+	executionLog, nextStep, err := processor.Execute(stepID, node)
+
+	assert.NotNil(t, err)
+	assert.Contains(t, err.Error(), "there is no condition to evaluate")
+	assert.Nil(t, nextStep)
+	assert.NotNil(t, executionLog)
+	assert.False(t, executionLog.Success)
+}
+
+func TestBranchProcessor_Execute_ConditionMet(t *testing.T) {
+	vm := NewVM()
+	vm.AddVar("myVar", 123)
+
+	node := &avsproto.BranchNode{
+		Config: &avsproto.BranchNode_Config{
+			Conditions: []*avsproto.BranchNode_Condition{
+				{
+					Id:         "cond1",
+					Type:       "if",
+					Expression: "myVar == 123",
+				},
+			},
+		},
+	}
+	processor := NewBranchProcessor(vm)
+	stepID := "testStep"
+
+	executionLog, nextStep, err := processor.Execute(stepID, node)
+
+	assert.Nil(t, err)
+	assert.NotNil(t, executionLog)
+	assert.True(t, executionLog.Success)
+	assert.NotNil(t, nextStep)
+	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "cond1"), nextStep.NodeID)
+	branchOutput := executionLog.GetBranch()
+	assert.NotNil(t, branchOutput)
+	assert.Equal(t, "testStep.cond1", branchOutput.ConditionId)
+}
+
+func TestBranchProcessor_Execute_NoConditionMet(t *testing.T) {
+	vm := NewVM()
+	vm.AddVar("myVar", 456)
+
+	node := &avsproto.BranchNode{
+		Config: &avsproto.BranchNode_Config{
+			Conditions: []*avsproto.BranchNode_Condition{
+				{
+					Id:         "cond1",
+					Type:       "if",
+					Expression: "myVar == 123", // This will be false
+				},
+			},
+		},
+	}
+	processor := NewBranchProcessor(vm)
+	stepID := "testStepNoMatch"
+
+	executionLog, nextStep, err := processor.Execute(stepID, node)
+
+	// Updated expectation: when only if conditions exist and none match, it should be a valid no-op
+	assert.Nil(t, err)
+	assert.Nil(t, nextStep)
+	assert.NotNil(t, executionLog)
+	assert.True(t, executionLog.Success)
+	assert.Nil(t, executionLog.GetBranch()) // No branch action taken
+}
+
+func TestBranchProcessor_Execute_ErrorInExpression(t *testing.T) {
+	vm := NewVM()
+	vm.AddVar("myVar", 123)
+
+	node := &avsproto.BranchNode{
+		Config: &avsproto.BranchNode_Config{
+			Conditions: []*avsproto.BranchNode_Condition{
+				{
+					Id:         "cond1",
+					Type:       "if",
+					Expression: "myVar + ", // Invalid expression
+				},
+			},
+		},
+	}
+	processor := NewBranchProcessor(vm)
+	stepID := "testStepErrorExpr"
+
+	executionLog, nextStep, err := processor.Execute(stepID, node)
+
+	assert.NotNil(t, err)
+	assert.Nil(t, nextStep)
+	assert.NotNil(t, executionLog)
+	assert.False(t, executionLog.Success)
+	assert.Contains(t, executionLog.Error, "failed to evaluate expression")
+}
+
+func TestBranchProcessor_Execute_MultipleConditions_FirstMatch(t *testing.T) {
+	vm := NewVM()
+	vm.AddVar("val", 10)
+
+	node := &avsproto.BranchNode{
+		Config: &avsproto.BranchNode_Config{
+			Conditions: []*avsproto.BranchNode_Condition{
+				{Id: "c1", Type: "if", Expression: "val == 10"}, // Match
+				{Id: "c2", Type: "if", Expression: "val == 20"},
+			},
+		},
+	}
+	processor := NewBranchProcessor(vm)
+	stepID := "multiCondFirst"
+	executionLog, nextStep, err := processor.Execute(stepID, node)
+
+	assert.Nil(t, err)
+	assert.NotNil(t, executionLog)
+	assert.True(t, executionLog.Success)
+	assert.NotNil(t, nextStep)
+	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c1"), nextStep.NodeID)
+	branchOutput := executionLog.GetBranch()
+	assert.NotNil(t, branchOutput)
+	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c1"), branchOutput.ConditionId)
+}
+
+func TestBranchProcessor_Execute_MultipleConditions_SecondMatch(t *testing.T) {
+	vm := NewVM()
+	vm.AddVar("val", 20)
+	node := &avsproto.BranchNode{
+		Config: &avsproto.BranchNode_Config{
+			Conditions: []*avsproto.BranchNode_Condition{
+				{Id: "c1", Type: "if", Expression: "val == 10"},
+				{Id: "c2", Type: "if", Expression: "val == 20"}, // Match
+			},
+		},
+	}
+	processor := NewBranchProcessor(vm)
+	stepID := "multiCondSecond"
+	executionLog, nextStep, err := processor.Execute(stepID, node)
+
+	assert.Nil(t, err)
+	assert.NotNil(t, executionLog)
+	assert.True(t, executionLog.Success)
+	assert.NotNil(t, nextStep)
+	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c2"), nextStep.NodeID)
+	branchOutput := executionLog.GetBranch()
+	assert.NotNil(t, branchOutput)
+	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c2"), branchOutput.ConditionId)
+}
+
+func TestBranchProcessor_Execute_ComplexVariableAccess(t *testing.T) {
+	vm := NewVM()
+	data := map[string]interface{}{"level1": map[string]interface{}{"level2": "found_me"}}
+	vm.AddVar("complexVar", data)
+
+	node := &avsproto.BranchNode{
+		Config: &avsproto.BranchNode_Config{
+			Conditions: []*avsproto.BranchNode_Condition{
+				{Id: "c1", Type: "if", Expression: "complexVar.level1.level2 == 'found_me'"},
+			},
+		},
+	}
+	processor := NewBranchProcessor(vm)
+	stepID := "complexVarAccess"
+	executionLog, nextStep, err := processor.Execute(stepID, node)
+
+	assert.Nil(t, err)
+	assert.NotNil(t, executionLog)
+	assert.True(t, executionLog.Success)
+	assert.NotNil(t, nextStep)
+	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c1"), nextStep.NodeID)
+	branchOutput := executionLog.GetBranch()
+	assert.NotNil(t, branchOutput)
+	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c1"), branchOutput.ConditionId)
+}
+
+func TestBranchProcessor_Execute_NonExistentVarInExpression(t *testing.T) {
+	vm := NewVM()
+	node := &avsproto.BranchNode{
+		Config: &avsproto.BranchNode_Config{
+			Conditions: []*avsproto.BranchNode_Condition{
+				{Id: "condition1", Type: "if", Expression: "nonExistentVar == 123"},
+			},
+		},
+	}
+	processor := NewBranchProcessor(vm)
+	stepID := "testStepNonExistentVar"
+
+	executionLog, nextStep, err := processor.Execute(stepID, node)
+
+	// Undefined variables should cause the branch to fail with an error
+	assert.NotNil(t, err)
+	assert.Contains(t, err.Error(), "failed to evaluate expression")
+	assert.Contains(t, err.Error(), "is not defined")
+	assert.Nil(t, nextStep)
+	assert.NotNil(t, executionLog)
+	assert.False(t, executionLog.Success)
+}
+
+func TestBranchProcessor_Execute_InvalidScriptSyntax(t *testing.T) {
+	vm := NewVM()
+	node := &avsproto.BranchNode{
+		Config: &avsproto.BranchNode_Config{
+			Conditions: []*avsproto.BranchNode_Condition{
+				{Id: "condition1", Type: "if", Expression: "invalid script (((("},
+			},
+		},
+	}
+	processor := NewBranchProcessor(vm)
+	stepID := "testStepInvalidScript"
+
+	executionLog, nextStep, err := processor.Execute(stepID, node)
+
+	assert.NotNil(t, err)
+	assert.Nil(t, nextStep)
+	assert.NotNil(t, executionLog)
+	assert.False(t, executionLog.Success)
+	assert.Contains(t, executionLog.Error, "failed to evaluate expression") // Error from expr parsing
 }

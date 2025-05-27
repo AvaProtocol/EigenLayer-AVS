@@ -380,6 +380,20 @@ func (r *RpcServer) GetExecutionStats(ctx context.Context, req *avsproto.GetExec
 	return r.engine.GetExecutionStats(user, req)
 }
 
+func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNodeWithInputsReq) (*avsproto.RunNodeWithInputsResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process run node with inputs",
+		"user", user.Address.String(),
+		"node_type", req.NodeType,
+	)
+
+	return r.engine.RunNodeWithInputsRPC(user, req)
+}
+
 // Operator action
 func (r *RpcServer) SyncMessages(payload *avsproto.SyncMessagesReq, srv avsproto.Node_SyncMessagesServer) error {
 	err := r.engine.StreamCheckToOperator(payload, srv)

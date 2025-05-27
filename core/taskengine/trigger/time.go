@@ -71,7 +71,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 
 	if fixedTime := check.GetTrigger().GetFixedTime(); fixedTime != nil {
 		// Handle epoch-based scheduling
-		epochs := fixedTime.GetEpochs()
+		epochs := fixedTime.GetConfig().GetEpochs()
 		if len(epochs) == 0 {
 			return fmt.Errorf("no epochs provided")
 		}
@@ -98,7 +98,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 		}
 	} else if cronTrigger := check.GetTrigger().GetCron(); cronTrigger != nil {
 		// Handle cron-based scheduling
-		schedules := cronTrigger.GetSchedule()
+		schedules := cronTrigger.GetConfig().GetSchedule()
 		if len(schedules) == 0 {
 			return fmt.Errorf("no cron expressions provided")
 		}

@@ -278,6 +278,78 @@ const createWallet = async (owner, token, salt, factoryAddress) => {
   );
 };
 
+async function testRunNodeWithInputs(owner, token) {
+  const metadata = new grpc.Metadata();
+  metadata.add("authkey", token);
+
+  console.log("Testing RunNodeWithInputs with blockTrigger...");
+
+  // Test blockTrigger node
+  const blockTriggerRequest = {
+    node_type: "blockTrigger",
+    node_config: {
+      interval: { kind: "numberValue", numberValue: 5 }
+    },
+    input_variables: {
+      currentBlock: { kind: "numberValue", numberValue: 12345 }
+    }
+  };
+
+  try {
+    const result = await asyncRPC(
+      client,
+      "RunNodeWithInputs",
+      blockTriggerRequest,
+      metadata
+    );
+
+    console.log("BlockTrigger test result:");
+    console.log(util.inspect(result, { depth: 4, colors: true }));
+    
+    if (result.success) {
+      console.log("✅ BlockTrigger test passed!");
+    } else {
+      console.log("❌ BlockTrigger test failed:", result.error);
+    }
+  } catch (error) {
+    console.log("❌ BlockTrigger test error:", error.message);
+  }
+
+  // Test customCode node
+  console.log("\nTesting RunNodeWithInputs with customCode...");
+  
+  const customCodeRequest = {
+    node_type: "customCode",
+    node_config: {
+      lang: { kind: "numberValue", numberValue: 0 }, // JavaScript = 0
+      source: { kind: "stringValue", stringValue: "42" }
+    },
+    input_variables: {
+      testVar: { kind: "stringValue", stringValue: "hello world" }
+    }
+  };
+
+  try {
+    const result = await asyncRPC(
+      client,
+      "RunNodeWithInputs",
+      customCodeRequest,
+      metadata
+    );
+
+    console.log("CustomCode test result:");
+    console.log(util.inspect(result, { depth: 4, colors: true }));
+    
+    if (result.success) {
+      console.log("✅ CustomCode test passed!");
+    } else {
+      console.log("❌ CustomCode test failed:", result.error);
+    }
+  } catch (error) {
+    console.log("❌ CustomCode test error:", error.message);
+  }
+}
+
 const main = async (cmd) => {
   // 1. Generate the api token to interact with aggregator
   const { owner, token } = await generateApiToken();
@@ -402,6 +474,9 @@ const main = async (cmd) => {
     case "trigger":
       await triggerTask(owner, token, process.argv[3], process.argv[4]);
       break;
+    case "test-run-node":
+      await testRunNodeWithInputs(owner, token);
+      break;
     default:
       console.log(`Usage:
 
@@ -421,6 +496,7 @@ const main = async (cmd) => {
                                                                  trigger abcdef '{"block_number":1234}' for blog trigger
                                                                  trigger abcdef '{"block_number":1234, "log_index":312,"tx_hash":"0x123"}' for event trigger
                                                                  trigger abcdef '{"epoch":1234, "log_index":312,"tx_hash":"0x123"}' for time based trigger (fixed or cron)
+      test-run-node:                                           test the RunNodeWithInputs gRPC method with blockTrigger and customCode nodes
       cancel <task-id>:                                        to cancel a task
       delete <task-id>:                                        to completely remove a task`);
   }

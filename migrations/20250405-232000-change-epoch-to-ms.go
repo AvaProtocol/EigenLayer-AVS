@@ -108,11 +108,11 @@ func ChangeEpochToMs(db storage.Storage) (int, error) {
 			}
 		}
 
-		if outputData := exec.GetTransferLog(); outputData != nil {
-			if outputData.BlockTimestamp > 0 && outputData.BlockTimestamp < timestampThreshold {
-				outputData.BlockTimestamp = outputData.BlockTimestamp * 1000
+		if outputData := exec.GetEventTrigger(); outputData != nil && outputData.TransferLog != nil {
+			if outputData.TransferLog.BlockTimestamp > 0 && outputData.TransferLog.BlockTimestamp < timestampThreshold {
+				outputData.TransferLog.BlockTimestamp = outputData.TransferLog.BlockTimestamp * 1000
 			}
-		} else if outputData := exec.GetTime(); outputData != nil {
+		} else if outputData := exec.GetFixedTimeTrigger(); outputData != nil {
 			if outputData.Epoch > 0 && outputData.Epoch < timestampThreshold {
 				outputData.Epoch = outputData.Epoch * 1000
 			}

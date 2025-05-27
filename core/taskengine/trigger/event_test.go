@@ -26,7 +26,7 @@ func TestTriggerTopicMatch(t *testing.T) {
 			TaskId: "123",
 		},
 
-		Matcher: []*avsproto.EventCondition_Matcher{
+		Matcher: []*avsproto.EventTrigger_Matcher{
 			{
 				Type: "topics",
 				Value: []string{
@@ -57,7 +57,7 @@ func TestTriggerTopicNotMatch(t *testing.T) {
 		testutil.GetLogger())
 
 	result, err := eventTrigger.Evaluate(event, &Check{
-		Matcher: []*avsproto.EventCondition_Matcher{
+		Matcher: []*avsproto.EventTrigger_Matcher{
 			{
 				Type: "topics",
 				Value: []string{
@@ -89,7 +89,7 @@ func TestTriggerTopicMulti(t *testing.T) {
 
 	result, err := eventTrigger.Evaluate(event, &Check{
 
-		Matcher: []*avsproto.EventCondition_Matcher{
+		Matcher: []*avsproto.EventTrigger_Matcher{
 			{
 				Type: "topics",
 				Value: []string{
@@ -105,7 +105,7 @@ func TestTriggerTopicMulti(t *testing.T) {
 	}
 
 	result, err = eventTrigger.Evaluate(event, &Check{
-		Matcher: []*avsproto.EventCondition_Matcher{
+		Matcher: []*avsproto.EventTrigger_Matcher{
 			{
 				Type: "topics",
 				Value: []string{
@@ -143,7 +143,7 @@ func TestTriggerAddress(t *testing.T) {
 		testutil.GetLogger())
 
 	result, err := eventTrigger.Evaluate(event, &Check{
-		Matcher: []*avsproto.EventCondition_Matcher{
+		Matcher: []*avsproto.EventTrigger_Matcher{
 			{
 				Type: "address",
 				Value: []string{
@@ -158,7 +158,7 @@ func TestTriggerAddress(t *testing.T) {
 	}
 
 	result, err = eventTrigger.Evaluate(event, &Check{
-		Matcher: []*avsproto.EventCondition_Matcher{
+		Matcher: []*avsproto.EventTrigger_Matcher{
 			{
 				Type: "address",
 				Value: []string{
@@ -183,7 +183,7 @@ func TestTriggerAddressNegativeCase(t *testing.T) {
 		testutil.GetLogger())
 
 	result, err := eventTrigger.Evaluate(event, &Check{
-		Matcher: []*avsproto.EventCondition_Matcher{
+		Matcher: []*avsproto.EventTrigger_Matcher{
 			{
 				Type: "address",
 				Value: []string{
@@ -208,7 +208,7 @@ func TestTriggerNonTransferEvent(t *testing.T) {
 		testutil.GetLogger())
 
 	result, err := eventTrigger.Evaluate(event, &Check{
-		Matcher: []*avsproto.EventCondition_Matcher{
+		Matcher: []*avsproto.EventTrigger_Matcher{
 			{
 				Type: "topics",
 				Value: []string{
