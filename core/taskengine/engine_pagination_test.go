@@ -143,7 +143,7 @@ func TestListTasksByUserPaginationWithBeforeAfter(t *testing.T) {
 
 	assert.Equal(t, totalTestTasks, len(largeLimitResult.Items), "Expected %d items with limit %d", totalTestTasks, largeLimit)
 	assert.False(t, largeLimitResult.PageInfo.HasNextPage, "Expected HasNextPage to be false when limit exceeds total items")
-	assert.Empty(t, largeLimitResult.PageInfo.EndCursor, "Expected cursor to be empty when HasNextPage is false")
+	assert.NotEmpty(t, largeLimitResult.PageInfo.EndCursor, "Expected cursor to always be set for current page (GraphQL PageInfo convention)")
 
 	forwardPage, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{wallet.Address},

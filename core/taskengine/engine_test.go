@@ -1010,8 +1010,8 @@ func TestListSecretsPagination(t *testing.T) {
 		t.Errorf("Expected HasNextPage to be false when limit exceeds total items")
 	}
 
-	if result.PageInfo.EndCursor != "" {
-		t.Errorf("Expected end cursor to be empty when HasNextPage is false")
+	if result.PageInfo.EndCursor == "" {
+		t.Errorf("Expected end cursor to always be set for current page (GraphQL PageInfo convention)")
 	}
 
 	// Test pagination using cursor

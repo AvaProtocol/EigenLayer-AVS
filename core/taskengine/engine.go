@@ -698,6 +698,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		firstItem := taskResp.Items[0]
 		lastItem := taskResp.Items[len(taskResp.Items)-1]
 
+		// Always set cursors for the current page (GraphQL PageInfo convention)
 		taskResp.PageInfo.StartCursor = CreateNextCursor(firstItem.Id)
 		taskResp.PageInfo.EndCursor = CreateNextCursor(lastItem.Id)
 
@@ -713,12 +714,6 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 			taskResp.PageInfo.HasNextPage = true // There are items after since we're going backwards
 			// Check if there are more items before
 			taskResp.PageInfo.HasPreviousPage = visited > 0 && total >= limit
-		}
-
-		// If there are no more pages, don't set cursors (to match old behavior expectations)
-		if !taskResp.PageInfo.HasNextPage && !taskResp.PageInfo.HasPreviousPage {
-			taskResp.PageInfo.StartCursor = ""
-			taskResp.PageInfo.EndCursor = ""
 		}
 	}
 
@@ -1271,6 +1266,7 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 
 	// Set pagination info
 	if len(result.Items) > 0 {
+		// Always set cursors for the current page (GraphQL PageInfo convention)
 		result.PageInfo.StartCursor = CreateNextCursor(firstKey)
 		result.PageInfo.EndCursor = CreateNextCursor(lastKey)
 
@@ -1286,12 +1282,6 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 			result.PageInfo.HasNextPage = true // There are items after since we're going backwards
 			// Check if there are more items before
 			result.PageInfo.HasPreviousPage = len(allKeys) > total
-		}
-
-		// If there are no more pages, don't set cursors (to match old behavior expectations)
-		if !result.PageInfo.HasNextPage && !result.PageInfo.HasPreviousPage {
-			result.PageInfo.StartCursor = ""
-			result.PageInfo.EndCursor = ""
 		}
 	}
 
