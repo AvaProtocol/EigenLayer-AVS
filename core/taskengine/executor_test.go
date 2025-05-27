@@ -576,3 +576,342 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		t.Errorf("expect inputs for step 3 to be %v but got: %v", expectedInputsStep3, execution.Steps[3].Inputs)
 	}
 }
+
+func TestExecutorRunTaskWithBlockTriggerOutputData(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	// Create a simple task with block trigger and ETH transfer node
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "eth_transfer_1",
+			Name: "Transfer ETH",
+			TaskType: &avsproto.TaskNode_EthTransfer{
+				EthTransfer: &avsproto.ETHTransferNode{
+					Config: &avsproto.ETHTransferNode_Config{
+						Destination: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
+						Amount:      "1000000000000000000", // 1 ETH in wei
+					},
+				},
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "block_trigger",
+		Name: "blockTrigger",
+		TriggerType: &avsproto.TaskTrigger_Block{
+			Block: &avsproto.BlockTrigger{
+				Config: &avsproto.BlockTrigger_Config{
+					Interval: 5,
+				},
+			},
+		},
+	}
+
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "edge_1",
+			Source: trigger.Id,
+			Target: "eth_transfer_1",
+		},
+	}
+
+	task := &model.Task{
+		Task: &avsproto.Task{
+			Id:      "BlockTriggerTaskID123",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}
+
+	// Create block trigger reason
+	blockTriggerReason := &avsproto.TriggerReason{
+		Type:        avsproto.TriggerReason_Block,
+		BlockNumber: 8416691, // Same block number as in SDK test
+	}
+
+	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	execution, err := executor.RunTask(task, &QueueExecutionData{
+		Reason:      blockTriggerReason,
+		ExecutionID: "block_exec123",
+	})
+
+	// Basic execution checks
+	if execution.Id != "block_exec123" {
+		t.Errorf("expect execution id is block_exec123 but got: %s", execution.Id)
+	}
+
+	if !execution.Success {
+		t.Errorf("expect success status but got failure: %s", execution.Error)
+	}
+
+	if err != nil || execution.Error != "" {
+		t.Errorf("expect no error but got: %s", execution.Error)
+	}
+
+	if execution.TriggerName != "blockTrigger" {
+		t.Errorf("expect trigger name is blockTrigger but got: %s", execution.TriggerName)
+	}
+
+	// Check trigger reason
+	reason := execution.Reason
+	if reason.BlockNumber != 8416691 {
+		t.Errorf("expect BlockNumber is 8416691 but got: %d", reason.BlockNumber)
+	}
+
+	if reason.Type != avsproto.TriggerReason_Block {
+		t.Errorf("expect trigger type is Block but got: %v", reason.Type)
+	}
+
+	// **This is the key test that was missing - check block trigger output data**
+	if execution.OutputData == nil {
+		t.Fatal("expect OutputData to be set but got nil")
+	}
+
+	blockTriggerOutput, ok := execution.OutputData.(*avsproto.Execution_BlockTrigger)
+	if !ok {
+		t.Fatalf("expect OutputData to be BlockTrigger type but got: %T", execution.OutputData)
+	}
+
+	if blockTriggerOutput.BlockTrigger == nil {
+		t.Fatal("expect BlockTrigger output data to be set but got nil")
+	}
+
+	if blockTriggerOutput.BlockTrigger.BlockNumber != 8416691 {
+		t.Errorf("expect BlockTrigger.BlockNumber is 8416691 but got: %d", blockTriggerOutput.BlockTrigger.BlockNumber)
+	}
+
+	// Verify execution steps
+	if len(execution.Steps) != 1 {
+		t.Errorf("expect 1 step but got: %d", len(execution.Steps))
+	}
+
+	if execution.Steps[0].NodeId != "eth_transfer_1" {
+		t.Errorf("expect step NodeId is eth_transfer_1 but got: %s", execution.Steps[0].NodeId)
+	}
+
+	if !execution.Steps[0].Success {
+		t.Errorf("expect step to succeed but got failure: %s", execution.Steps[0].Error)
+	}
+}
+
+func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	// Create a simple task with fixed time trigger and ETH transfer node
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "eth_transfer_1",
+			Name: "Transfer ETH",
+			TaskType: &avsproto.TaskNode_EthTransfer{
+				EthTransfer: &avsproto.ETHTransferNode{
+					Config: &avsproto.ETHTransferNode_Config{
+						Destination: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
+						Amount:      "1000000000000000000", // 1 ETH in wei
+					},
+				},
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "fixed_time_trigger",
+		Name: "fixedTimeTrigger",
+		TriggerType: &avsproto.TaskTrigger_FixedTime{
+			FixedTime: &avsproto.FixedTimeTrigger{
+				Config: &avsproto.FixedTimeTrigger_Config{
+					Epochs: []int64{1640995200}, // Example epoch timestamp
+				},
+			},
+		},
+	}
+
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "edge_1",
+			Source: trigger.Id,
+			Target: "eth_transfer_1",
+		},
+	}
+
+	task := &model.Task{
+		Task: &avsproto.Task{
+			Id:      "FixedTimeTriggerTaskID123",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}
+
+	// Create fixed time trigger reason
+	fixedTimeTriggerReason := &avsproto.TriggerReason{
+		Type:  avsproto.TriggerReason_FixedTime,
+		Epoch: 1640995200, // Same epoch as in trigger config
+	}
+
+	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	execution, err := executor.RunTask(task, &QueueExecutionData{
+		Reason:      fixedTimeTriggerReason,
+		ExecutionID: "fixed_time_exec123",
+	})
+
+	// Basic execution checks
+	if execution.Id != "fixed_time_exec123" {
+		t.Errorf("expect execution id is fixed_time_exec123 but got: %s", execution.Id)
+	}
+
+	if !execution.Success {
+		t.Errorf("expect success status but got failure: %s", execution.Error)
+	}
+
+	if err != nil || execution.Error != "" {
+		t.Errorf("expect no error but got: %s", execution.Error)
+	}
+
+	if execution.TriggerName != "fixedTimeTrigger" {
+		t.Errorf("expect trigger name is fixedTimeTrigger but got: %s", execution.TriggerName)
+	}
+
+	// Check trigger reason
+	reason := execution.Reason
+	if reason.Epoch != 1640995200 {
+		t.Errorf("expect Epoch is 1640995200 but got: %d", reason.Epoch)
+	}
+
+	if reason.Type != avsproto.TriggerReason_FixedTime {
+		t.Errorf("expect trigger type is FixedTime but got: %v", reason.Type)
+	}
+
+	// **Check fixed time trigger output data**
+	if execution.OutputData == nil {
+		t.Fatal("expect OutputData to be set but got nil")
+	}
+
+	fixedTimeTriggerOutput, ok := execution.OutputData.(*avsproto.Execution_FixedTimeTrigger)
+	if !ok {
+		t.Fatalf("expect OutputData to be FixedTimeTrigger type but got: %T", execution.OutputData)
+	}
+
+	if fixedTimeTriggerOutput.FixedTimeTrigger == nil {
+		t.Fatal("expect FixedTimeTrigger output data to be set but got nil")
+	}
+
+	if fixedTimeTriggerOutput.FixedTimeTrigger.Epoch != 1640995200 {
+		t.Errorf("expect FixedTimeTrigger.Epoch is 1640995200 but got: %d", fixedTimeTriggerOutput.FixedTimeTrigger.Epoch)
+	}
+}
+
+func TestExecutorRunTaskWithCronTriggerOutputData(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	// Create a simple task with cron trigger and ETH transfer node
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "eth_transfer_1",
+			Name: "Transfer ETH",
+			TaskType: &avsproto.TaskNode_EthTransfer{
+				EthTransfer: &avsproto.ETHTransferNode{
+					Config: &avsproto.ETHTransferNode_Config{
+						Destination: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
+						Amount:      "1000000000000000000", // 1 ETH in wei
+					},
+				},
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "cron_trigger",
+		Name: "cronTrigger",
+		TriggerType: &avsproto.TaskTrigger_Cron{
+			Cron: &avsproto.CronTrigger{
+				Config: &avsproto.CronTrigger_Config{
+					Schedule: []string{"0 0 * * *"}, // Daily at midnight
+				},
+			},
+		},
+	}
+
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "edge_1",
+			Source: trigger.Id,
+			Target: "eth_transfer_1",
+		},
+	}
+
+	task := &model.Task{
+		Task: &avsproto.Task{
+			Id:      "CronTriggerTaskID123",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}
+
+	// Create cron trigger reason
+	cronTriggerReason := &avsproto.TriggerReason{
+		Type:  avsproto.TriggerReason_Cron,
+		Epoch: 1640995200, // Epoch when cron was triggered
+	}
+
+	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	execution, err := executor.RunTask(task, &QueueExecutionData{
+		Reason:      cronTriggerReason,
+		ExecutionID: "cron_exec123",
+	})
+
+	// Basic execution checks
+	if execution.Id != "cron_exec123" {
+		t.Errorf("expect execution id is cron_exec123 but got: %s", execution.Id)
+	}
+
+	if !execution.Success {
+		t.Errorf("expect success status but got failure: %s", execution.Error)
+	}
+
+	if err != nil || execution.Error != "" {
+		t.Errorf("expect no error but got: %s", execution.Error)
+	}
+
+	if execution.TriggerName != "cronTrigger" {
+		t.Errorf("expect trigger name is cronTrigger but got: %s", execution.TriggerName)
+	}
+
+	// Check trigger reason
+	reason := execution.Reason
+	if reason.Epoch != 1640995200 {
+		t.Errorf("expect Epoch is 1640995200 but got: %d", reason.Epoch)
+	}
+
+	if reason.Type != avsproto.TriggerReason_Cron {
+		t.Errorf("expect trigger type is Cron but got: %v", reason.Type)
+	}
+
+	// **Check cron trigger output data**
+	if execution.OutputData == nil {
+		t.Fatal("expect OutputData to be set but got nil")
+	}
+
+	cronTriggerOutput, ok := execution.OutputData.(*avsproto.Execution_CronTrigger)
+	if !ok {
+		t.Fatalf("expect OutputData to be CronTrigger type but got: %T", execution.OutputData)
+	}
+
+	if cronTriggerOutput.CronTrigger == nil {
+		t.Fatal("expect CronTrigger output data to be set but got nil")
+	}
+
+	if cronTriggerOutput.CronTrigger.Epoch != 1640995200 {
+		t.Errorf("expect CronTrigger.Epoch is 1640995200 but got: %d", cronTriggerOutput.CronTrigger.Epoch)
+	}
+
+	// ScheduleMatched should be empty since it's not available in TriggerReason
+	if cronTriggerOutput.CronTrigger.ScheduleMatched != "" {
+		t.Errorf("expect CronTrigger.ScheduleMatched to be empty but got: %s", cronTriggerOutput.CronTrigger.ScheduleMatched)
+	}
+}
