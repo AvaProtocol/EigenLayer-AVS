@@ -80,6 +80,7 @@ type triggerDataType struct {
 	EvmLog      *avsproto.Evm_Log
 	Block       *avsproto.BlockTrigger_Output
 	Time        *avsproto.FixedTimeTrigger_Output
+	Cron        *avsproto.CronTrigger_Output
 }
 
 func (t *triggerDataType) GetValue() avsproto.IsExecution_OutputData {
@@ -102,6 +103,9 @@ func (t *triggerDataType) GetValue() avsproto.IsExecution_OutputData {
 	}
 	if t.Time != nil {
 		return &avsproto.Execution_FixedTimeTrigger{FixedTimeTrigger: t.Time}
+	}
+	if t.Cron != nil {
+		return &avsproto.Execution_CronTrigger{CronTrigger: t.Cron}
 	}
 	return nil
 }
@@ -283,6 +287,40 @@ func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReaso
 			} else {
 				// Create a map to store the basic fields from the reason object
 				triggerData = make(map[string]interface{})
+
+				// Handle block trigger data
+				if reason.Type == avsproto.TriggerReason_Block && reason.BlockNumber != 0 {
+					// Create BlockTrigger_Output for execution output data
+					v.parsedTriggerData.Block = &avsproto.BlockTrigger_Output{
+						BlockNumber: uint64(reason.BlockNumber),
+						// Add other block fields if available in the future
+						BlockHash:  "", // Not available in TriggerReason
+						Timestamp:  0,  // Not available in TriggerReason
+						ParentHash: "", // Not available in TriggerReason
+						Difficulty: "", // Not available in TriggerReason
+						GasLimit:   0,  // Not available in TriggerReason
+						GasUsed:    0,  // Not available in TriggerReason
+					}
+				}
+
+				// Handle fixed time trigger data
+				if reason.Type == avsproto.TriggerReason_FixedTime && reason.Epoch != 0 {
+					// Create FixedTimeTrigger_Output for execution output data
+					v.parsedTriggerData.Time = &avsproto.FixedTimeTrigger_Output{
+						Epoch: uint64(reason.Epoch),
+					}
+				}
+
+				// Handle cron trigger data
+				if reason.Type == avsproto.TriggerReason_Cron && reason.Epoch != 0 {
+					// Create CronTrigger_Output for execution output data
+					v.parsedTriggerData.Cron = &avsproto.CronTrigger_Output{
+						Epoch: uint64(reason.Epoch),
+						// ScheduleMatched field would need to be added to TriggerReason if needed
+						ScheduleMatched: "", // Not available in TriggerReason
+					}
+				}
+
 				if reason.BlockNumber != 0 {
 					triggerData["block_number"] = reason.BlockNumber
 				}
