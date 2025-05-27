@@ -29,8 +29,10 @@ func TestExecutorRunTaskWithNilReason(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    server.URL,
-					Method: "GET",
+					Config: &avsproto.RestAPINode_Config{
+						// Static configuration set at node creation time
+						// Currently RestAPINode has no static config, all parameters come from input
+					},
 				},
 			},
 		},

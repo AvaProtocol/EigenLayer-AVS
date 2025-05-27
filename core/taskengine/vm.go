@@ -76,24 +76,32 @@ func (c *CommonProcessor) GetOutputVar(stepID string) any {
 }
 
 type triggerDataType struct {
-	TransferLog *avsproto.Execution_TransferLogOutput
+	TransferLog *avsproto.EventTrigger_TransferLogOutput
 	EvmLog      *avsproto.Evm_Log
-	Block       *avsproto.Execution_BlockOutput
-	Time        *avsproto.Execution_TimeOutput
+	Block       *avsproto.BlockTrigger_Output
+	Time        *avsproto.FixedTimeTrigger_Output
 }
 
 func (t *triggerDataType) GetValue() avsproto.IsExecution_OutputData {
 	if t.TransferLog != nil {
-		return &avsproto.Execution_TransferLog{TransferLog: t.TransferLog}
+		// For event triggers with transfer log data, use the event trigger output
+		eventOutput := &avsproto.EventTrigger_Output{
+			TransferLog: t.TransferLog,
+		}
+		return &avsproto.Execution_EventTrigger{EventTrigger: eventOutput}
 	}
 	if t.EvmLog != nil {
-		return &avsproto.Execution_EvmLog{EvmLog: t.EvmLog}
+		// For event triggers with raw EVM log data
+		eventOutput := &avsproto.EventTrigger_Output{
+			EvmLog: t.EvmLog,
+		}
+		return &avsproto.Execution_EventTrigger{EventTrigger: eventOutput}
 	}
 	if t.Block != nil {
-		return &avsproto.Execution_Block{Block: t.Block}
+		return &avsproto.Execution_BlockTrigger{BlockTrigger: t.Block}
 	}
 	if t.Time != nil {
-		return &avsproto.Execution_Time{Time: t.Time}
+		return &avsproto.Execution_FixedTimeTrigger{FixedTimeTrigger: t.Time}
 	}
 	return nil
 }
@@ -208,7 +216,7 @@ func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWallet
 	return NewVMWithDataAndTransferLog(task, reason, smartWalletConfig, secrets, nil)
 }
 
-func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReason, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *avsproto.Execution_TransferLogOutput) (*VM, error) {
+func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReason, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *avsproto.EventTrigger_TransferLogOutput) (*VM, error) {
 	var taskOwner common.Address
 	if task != nil && task.Owner != "" {
 		taskOwner = common.HexToAddress(task.Owner)
@@ -464,12 +472,9 @@ func (v *VM) Compile() error {
 		v.plans[currNodeID] = planStep
 
 		if node, isTaskNode := v.TaskNodes[currNodeID]; isTaskNode && node.GetBranch() != nil {
-			for _, cond := range node.GetBranch().Conditions {
-				condSourceID := fmt.Sprintf("%s.%s", currNodeID, cond.Id)
-				if nextNodesFromCond, ok := adj[condSourceID]; ok {
-					v.plans[condSourceID] = &Step{NodeID: condSourceID, Next: nextNodesFromCond}
-				}
-			}
+			// Branch conditions are now in Input messages, not available at compile time
+			// Skip condition-based plan generation during compilation
+			// Branch execution will handle condition evaluation at runtime
 		}
 
 		for _, neighborNodeID := range adj[currNodeID] {
@@ -481,20 +486,8 @@ func (v *VM) Compile() error {
 			}
 		}
 
-		// Also process branch condition edges if this is a branch node
-		if node, isTaskNode := v.TaskNodes[currNodeID]; isTaskNode && node.GetBranch() != nil {
-			for _, cond := range node.GetBranch().Conditions {
-				condSourceID := fmt.Sprintf("%s.%s", currNodeID, cond.Id)
-				for _, neighborNodeID := range adj[condSourceID] {
-					if _, isActualNode := v.TaskNodes[neighborNodeID]; isActualNode {
-						inDegree[neighborNodeID]--
-						if inDegree[neighborNodeID] == 0 {
-							topoQueue = append(topoQueue, neighborNodeID)
-						}
-					}
-				}
-			}
-		}
+		// Branch condition edges are now handled at execution time, not compile time
+		// since conditions are in Input messages
 	}
 
 	if processedCount != len(v.TaskNodes) {
@@ -694,7 +687,9 @@ func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avspro
 }
 
 func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, error) {
-	g, err := NewGraphqlQueryProcessor(v, node.Url)
+	// GraphQL URL is now in Input message, not available at node creation time
+	// The GraphQL processor will need to get the URL from input variables
+	g, err := NewGraphqlQueryProcessor(v, "") // Pass empty URL, processor will get it from inputs
 	var executionLog *avsproto.Execution_Step // Declare to ensure it's always initialized
 	if err != nil {
 		// Create a failed execution log step
@@ -788,7 +783,7 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 
 func (v *VM) runBranch(stepID string, nodeValue *avsproto.BranchNode) (*avsproto.Execution_Step, *Step, error) {
 	processor := NewBranchProcessor(v)
-	executionLog, nextStepIfBranch, err := processor.Execute(stepID, nodeValue) // This evaluates conditions
+	executionLog, nextStep, err := processor.Execute(stepID, nodeValue) // This evaluates conditions
 	// executionLog is already populated by BranchProcessor.Execute, including Inputs.
 	// v.addExecutionLog(executionLog) // BranchProcessor's Execute already adds its log to its own VM or handles it.
 	// The log returned here is for the *main* VM.
@@ -810,7 +805,7 @@ func (v *VM) runBranch(stepID string, nodeValue *avsproto.BranchNode) (*avsproto
 	// Let's assume processor.Execute returns a log that should be added by the caller.
 	// The `addExecutionLog` for this branch step itself is done by `executeNode` using the returned `branchLog`.
 
-	return executionLog, nextStepIfBranch, err // Return the log, the next step, and any error
+	return executionLog, nextStep, err // Return the log, the next step, and any error
 }
 
 func (v *VM) runLoop(stepID string, nodeValue *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
@@ -1079,48 +1074,24 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 
 	switch nodeType {
 	case "restApi":
-		url, _ := config["url"].(string)
-		method, _ := config["method"].(string)
-		body, _ := config["body"].(string)
-		headers := make(map[string]string)
-		if hm, ok := config["headers"].(map[string]interface{}); ok {
-			for k, v := range hm {
-				headers[k] = fmt.Sprintf("%v", v)
-			}
-		}
-		node.TaskType = &avsproto.TaskNode_RestApi{RestApi: &avsproto.RestAPINode{Url: url, Method: method, Body: body, Headers: headers}}
+		// Configuration is now in Input messages, not in the node structure
+		node.TaskType = &avsproto.TaskNode_RestApi{RestApi: &avsproto.RestAPINode{}}
 	case "contractRead":
-		contractAddress, _ := config["contractAddress"].(string)
-		callData, _ := config["callData"].(string)
-		contractAbi, _ := config["contractAbi"].(string)
-		node.TaskType = &avsproto.TaskNode_ContractRead{ContractRead: &avsproto.ContractReadNode{ContractAddress: contractAddress, CallData: callData, ContractAbi: contractAbi}}
+		// Configuration is now in Input messages, not in the node structure
+		node.TaskType = &avsproto.TaskNode_ContractRead{ContractRead: &avsproto.ContractReadNode{}}
 	case "customCode":
-		source, _ := config["source"].(string)
-		node.TaskType = &avsproto.TaskNode_CustomCode{CustomCode: &avsproto.CustomCodeNode{Lang: avsproto.CustomCodeLang_JavaScript, Source: source}}
+		// Configuration is now in Input messages, not in the node structure
+		node.TaskType = &avsproto.TaskNode_CustomCode{CustomCode: &avsproto.CustomCodeNode{}}
 	case "branch":
-		var conditions []*avsproto.Condition
-		if ca, ok := config["conditions"].([]interface{}); ok {
-			for _, c := range ca {
-				if cm, okc := c.(map[string]interface{}); okc {
-					id, _ := cm["id"].(string)
-					condType, _ := cm["type"].(string)
-					expression, _ := cm["expression"].(string)
-					conditions = append(conditions, &avsproto.Condition{Id: id, Type: condType, Expression: expression})
-				}
-			}
-		}
-		node.TaskType = &avsproto.TaskNode_Branch{Branch: &avsproto.BranchNode{Conditions: conditions}}
-	case "filter": // Assuming FilterNode fields are "expression" and "input" (referring to a var name)
-		expression, _ := config["expression"].(string)
-		inputVarName, _ := config["input"].(string)
-		node.TaskType = &avsproto.TaskNode_Filter{Filter: &avsproto.FilterNode{Expression: expression, Input: inputVarName}}
+		// Configuration is now in Input messages, not in the node structure
+		node.TaskType = &avsproto.TaskNode_Branch{Branch: &avsproto.BranchNode{}}
+	case "filter":
+		// Configuration is now in Input messages, not in the node structure
+		node.TaskType = &avsproto.TaskNode_Filter{Filter: &avsproto.FilterNode{}}
 	case "blockTrigger":
 		// Create a custom code node that will be handled specially by RunNodeWithInputs
 		node.TaskType = &avsproto.TaskNode_CustomCode{
-			CustomCode: &avsproto.CustomCodeNode{
-				Lang:   avsproto.CustomCodeLang_JavaScript,
-				Source: "// BlockTrigger placeholder - handled specially",
-			},
+			CustomCode: &avsproto.CustomCodeNode{},
 		}
 	default:
 		return nil, fmt.Errorf("unsupported node type for CreateNodeFromType: %s", nodeType)

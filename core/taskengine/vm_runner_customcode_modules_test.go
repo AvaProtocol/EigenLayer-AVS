@@ -96,7 +96,9 @@ func TestCommonJSRequireSyntax(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			node := &avsproto.CustomCodeNode{
-				Source: tc.code,
+				Config: &avsproto.CustomCodeNode_Config{
+					Source: tc.code,
+				},
 			}
 
 			trigger := &avsproto.TaskTrigger{
@@ -192,7 +194,9 @@ func TestES6ImportSyntax(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			node := &avsproto.CustomCodeNode{
-				Source: tc.code,
+				Config: &avsproto.CustomCodeNode_Config{
+					Source: tc.code,
+				},
 			}
 
 			trigger := &avsproto.TaskTrigger{
@@ -362,7 +366,9 @@ func TestErrorHandling(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			node := &avsproto.CustomCodeNode{
-				Source: tc.code,
+				Config: &avsproto.CustomCodeNode_Config{
+					Source: tc.code,
+				},
 			}
 
 			trigger := &avsproto.TaskTrigger{

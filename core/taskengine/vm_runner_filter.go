@@ -38,15 +38,15 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 
 	var logBuilder strings.Builder
 	logBuilder.WriteString(fmt.Sprintf("Executing Filter Node ID: %s at %s\n", stepID, time.Now()))
-	logBuilder.WriteString(fmt.Sprintf("Input variable: '%s', Expression: '%s'\n", node.Input, node.Expression))
 
-	// Get the input variable from the VM
+	// Get configuration from input variables (new architecture)
 	r.vm.mu.Lock()
-	rawInputVal, exists := r.vm.vars[node.Input]
+	inputVar, inputExists := r.vm.vars["input"]
+	expressionVar, exprExists := r.vm.vars["expression"]
 	r.vm.mu.Unlock()
 
-	if !exists {
-		errMsg := fmt.Sprintf("input variable '%s' not found in VM state for filter node", node.Input)
+	if !inputExists || !exprExists {
+		errMsg := "missing required input variables: input, expression"
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
 		executionLogStep.Error = errMsg
 		executionLogStep.Success = false
@@ -54,7 +54,46 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		executionLogStep.EndAt = time.Now().UnixMilli()
 		return executionLogStep, fmt.Errorf(errMsg)
 	}
-	logBuilder.WriteString(fmt.Sprintf("Retrieved input data from var '%s': %v\n", node.Input, rawInputVal))
+
+	inputVarName, ok := inputVar.(string)
+	if !ok {
+		errMsg := "input variable name must be a string"
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
+		executionLogStep.Error = errMsg
+		executionLogStep.Success = false
+		executionLogStep.Log = logBuilder.String()
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		return executionLogStep, fmt.Errorf(errMsg)
+	}
+
+	expression, ok := expressionVar.(string)
+	if !ok {
+		errMsg := "expression must be a string"
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
+		executionLogStep.Error = errMsg
+		executionLogStep.Success = false
+		executionLogStep.Log = logBuilder.String()
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		return executionLogStep, fmt.Errorf(errMsg)
+	}
+
+	logBuilder.WriteString(fmt.Sprintf("Input variable: '%s', Expression: '%s'\n", inputVarName, expression))
+
+	// Get the input variable from the VM
+	r.vm.mu.Lock()
+	rawInputVal, exists := r.vm.vars[inputVarName]
+	r.vm.mu.Unlock()
+
+	if !exists {
+		errMsg := fmt.Sprintf("input variable '%s' not found in VM state for filter node", inputVarName)
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
+		executionLogStep.Error = errMsg
+		executionLogStep.Success = false
+		executionLogStep.Log = logBuilder.String()
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		return executionLogStep, fmt.Errorf(errMsg)
+	}
+	logBuilder.WriteString(fmt.Sprintf("Retrieved input data from var '%s': %v\n", inputVarName, rawInputVal))
 
 	// Input data might be wrapped, e.g., map[string]interface{}{"data": actual_array_or_object}
 	actualDataToFilter := rawInputVal
@@ -71,7 +110,7 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	// Set other VM variables in the JS environment for context if the filter expression needs them
 	r.vm.mu.Lock()
 	for key, value := range r.vm.vars {
-		if key == node.Input {
+		if key == inputVarName {
 			continue
 		}
 		if err := r.jsvm.Set(key, value); err != nil {
@@ -107,12 +146,12 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 
 			// Check if the expression already contains control flow statements
 			var script string
-			if strings.Contains(node.Expression, "if") || strings.Contains(node.Expression, "return") {
+			if strings.Contains(expression, "if") || strings.Contains(expression, "return") {
 				// For complex expressions with control flow, wrap in a function without additional return
-				script = fmt.Sprintf(`(() => { %s })()`, node.Expression)
+				script = fmt.Sprintf(`(() => { %s })()`, expression)
 			} else {
 				// For simple expressions, wrap with return
-				script = fmt.Sprintf(`(() => { return %s; })()`, node.Expression)
+				script = fmt.Sprintf(`(() => { return %s; })()`, expression)
 			}
 			val, err := r.jsvm.RunString(script)
 			if err != nil {
@@ -145,12 +184,12 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 
 			// Check if the expression already contains control flow statements
 			var script string
-			if strings.Contains(node.Expression, "if") || strings.Contains(node.Expression, "return") {
+			if strings.Contains(expression, "if") || strings.Contains(expression, "return") {
 				// For complex expressions with control flow, wrap in a function without additional return
-				script = fmt.Sprintf(`(() => { %s })()`, node.Expression)
+				script = fmt.Sprintf(`(() => { %s })()`, expression)
 			} else {
 				// For simple expressions, wrap with return
-				script = fmt.Sprintf(`(() => { return %s; })()`, node.Expression)
+				script = fmt.Sprintf(`(() => { return %s; })()`, expression)
 			}
 			val, err := r.jsvm.RunString(script)
 			if err != nil {
@@ -175,12 +214,12 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		} else {
 			// Check if the expression already contains control flow statements
 			var script string
-			if strings.Contains(node.Expression, "if") || strings.Contains(node.Expression, "return") {
+			if strings.Contains(expression, "if") || strings.Contains(expression, "return") {
 				// For complex expressions with control flow, wrap in a function without additional return
-				script = fmt.Sprintf(`(() => { %s })()`, node.Expression)
+				script = fmt.Sprintf(`(() => { %s })()`, expression)
 			} else {
 				// For simple expressions, wrap with return
-				script = fmt.Sprintf(`(() => { return %s; })()`, node.Expression)
+				script = fmt.Sprintf(`(() => { return %s; })()`, expression)
 			}
 			val, err := r.jsvm.RunString(script)
 			if err != nil {
@@ -198,7 +237,7 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		}
 
 	default:
-		evaluationError = fmt.Errorf("input variable '%s' (after unwrapping) has an unsupported type for filtering: %T", node.Input, actualDataToFilter)
+		evaluationError = fmt.Errorf("input variable '%s' (after unwrapping) has an unsupported type for filtering: %T", inputVarName, actualDataToFilter)
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", evaluationError.Error()))
 	}
 

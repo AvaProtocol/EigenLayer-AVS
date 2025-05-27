@@ -34,14 +34,62 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	}
 
 	var log strings.Builder
-	log.WriteString(fmt.Sprintf("Start loop execution for input %s at %s", node.Input, time.Now()))
+	log.WriteString(fmt.Sprintf("Start loop execution at %s", time.Now()))
+
+	// Get configuration from input variables (new architecture)
+	r.vm.mu.Lock()
+	inputNameVar, inputNameExists := r.vm.vars["input"]
+	iterValVar, iterValExists := r.vm.vars["iter_val"]
+	iterKeyVar, iterKeyExists := r.vm.vars["iter_key"]
+	r.vm.mu.Unlock()
+
+	if !inputNameExists || !iterValExists {
+		err := fmt.Errorf("missing required input variables: input and iter_val")
+		s.Success = false
+		s.Error = err.Error()
+		s.EndAt = time.Now().UnixMilli()
+		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		s.Log = log.String()
+		return s, err
+	}
+
+	inputName, ok := inputNameVar.(string)
+	if !ok {
+		err := fmt.Errorf("input variable must be a string")
+		s.Success = false
+		s.Error = err.Error()
+		s.EndAt = time.Now().UnixMilli()
+		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		s.Log = log.String()
+		return s, err
+	}
+
+	iterVal, ok := iterValVar.(string)
+	if !ok {
+		err := fmt.Errorf("iter_val variable must be a string")
+		s.Success = false
+		s.Error = err.Error()
+		s.EndAt = time.Now().UnixMilli()
+		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		s.Log = log.String()
+		return s, err
+	}
+
+	var iterKey string
+	if iterKeyExists {
+		if iterKeyStr, ok := iterKeyVar.(string); ok {
+			iterKey = iterKeyStr
+		}
+	}
+
+	log.WriteString(fmt.Sprintf("\nLoop configuration - input: %s, iter_val: %s, iter_key: %s", inputName, iterVal, iterKey))
 
 	r.vm.mu.Lock()
-	inputVar, exists := r.vm.vars[node.Input]
+	inputVar, exists := r.vm.vars[inputName]
 	r.vm.mu.Unlock()
 
 	if !exists {
-		err := fmt.Errorf("input variable %s not found", node.Input)
+		err := fmt.Errorf("input variable %s not found", inputName)
 		s.Success = false
 		s.Error = err.Error()
 		s.EndAt = time.Now().UnixMilli()
@@ -63,7 +111,7 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	}
 
 	if !ok {
-		err := fmt.Errorf("input %s is not an array", node.Input)
+		err := fmt.Errorf("input %s is not an array", inputName)
 		s.Success = false
 		s.Error = err.Error()
 		s.EndAt = time.Now().UnixMilli()
@@ -97,10 +145,10 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 				defer wg.Done()
 
 				iterInputs := map[string]interface{}{}
-				if node.IterKey != "" {
-					iterInputs[node.IterKey] = index
+				if iterKey != "" {
+					iterInputs[iterKey] = index
 				}
-				iterInputs[node.IterVal] = valueParam
+				iterInputs[iterVal] = valueParam
 
 				iterationStepID := fmt.Sprintf("%s.%d", stepID, index)
 				resultData, err := r.executeNestedNode(node, iterationStepID, iterInputs)
@@ -125,10 +173,10 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 		results = make([]interface{}, len(inputArray))
 		for i, item := range inputArray {
 			iterInputs := map[string]interface{}{}
-			if node.IterKey != "" {
-				iterInputs[node.IterKey] = i
+			if iterKey != "" {
+				iterInputs[iterKey] = i
 			}
-			iterInputs[node.IterVal] = item
+			iterInputs[iterVal] = item
 
 			iterationStepID := fmt.Sprintf("%s.%d", stepID, i)
 			resultData, err := r.executeNestedNode(node, iterationStepID, iterInputs)

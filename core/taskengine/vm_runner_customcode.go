@@ -196,8 +196,47 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	var sb strings.Builder
 	sb.WriteString("Execute Custom Code: ")
 	sb.WriteString(stepID)
+
+	// Get configuration from input variables (new architecture)
+	r.vm.mu.Lock()
+	langVar, langExists := r.vm.vars["lang"]
+	sourceVar, sourceExists := r.vm.vars["source"]
+	r.vm.mu.Unlock()
+
+	if !langExists || !sourceExists {
+		err := fmt.Errorf("missing required input variables: lang and source")
+		s.Success = false
+		s.Error = err.Error()
+		s.EndAt = time.Now().UnixMilli()
+		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		s.Log = sb.String()
+		return s, err
+	}
+
+	langStr, ok := langVar.(string)
+	if !ok {
+		err := fmt.Errorf("lang variable must be a string")
+		s.Success = false
+		s.Error = err.Error()
+		s.EndAt = time.Now().UnixMilli()
+		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		s.Log = sb.String()
+		return s, err
+	}
+
+	sourceStr, ok := sourceVar.(string)
+	if !ok {
+		err := fmt.Errorf("source variable must be a string")
+		s.Success = false
+		s.Error = err.Error()
+		s.EndAt = time.Now().UnixMilli()
+		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		s.Log = sb.String()
+		return s, err
+	}
+
 	sb.WriteString(" Lang: ")
-	sb.WriteString(node.Lang.String())
+	sb.WriteString(langStr)
 
 	// Set variables in the JS environment from vm.vars
 	r.vm.mu.Lock()                      // Lock for reading r.vm.vars
@@ -219,7 +258,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	r.vm.mu.Unlock()
 
 	// Transform the code if it contains module syntax or return statements
-	codeToExecute := node.Source
+	codeToExecute := sourceStr
 
 	// Check if the code contains ES6 imports and transform them
 	if containsES6Imports(codeToExecute) {

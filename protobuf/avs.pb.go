@@ -25,6 +25,49 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type Lang int32
+
+const (
+	Lang_JavaScript Lang = 0
+)
+
+// Enum value maps for Lang.
+var (
+	Lang_name = map[int32]string{
+		0: "JavaScript",
+	}
+	Lang_value = map[string]int32{
+		"JavaScript": 0,
+	}
+)
+
+func (x Lang) Enum() *Lang {
+	p := new(Lang)
+	*p = x
+	return p
+}
+
+func (x Lang) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Lang) Descriptor() protoreflect.EnumDescriptor {
+	return file_avs_proto_enumTypes[0].Descriptor()
+}
+
+func (Lang) Type() protoreflect.EnumType {
+	return &file_avs_proto_enumTypes[0]
+}
+
+func (x Lang) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Lang.Descriptor instead.
+func (Lang) EnumDescriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{0}
+}
+
 // gRPC internal error code use up to 17, we extend and start from 1000 to avoid any conflict
 // Guide: https://grpc.io/docs/guides/error/
 // Go: https://github.com/grpc/grpc-go/blob/master/codes/codes.go#L199
@@ -85,11 +128,11 @@ func (x Error) String() string {
 }
 
 func (Error) Descriptor() protoreflect.EnumDescriptor {
-	return file_avs_proto_enumTypes[0].Descriptor()
+	return file_avs_proto_enumTypes[1].Descriptor()
 }
 
 func (Error) Type() protoreflect.EnumType {
-	return &file_avs_proto_enumTypes[0]
+	return &file_avs_proto_enumTypes[1]
 }
 
 func (x Error) Number() protoreflect.EnumNumber {
@@ -98,7 +141,7 @@ func (x Error) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Error.Descriptor instead.
 func (Error) EnumDescriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{0}
+	return file_avs_proto_rawDescGZIP(), []int{1}
 }
 
 // TaskStatus represents status of the task. The transition is as follow
@@ -142,11 +185,11 @@ func (x TaskStatus) String() string {
 }
 
 func (TaskStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_avs_proto_enumTypes[1].Descriptor()
+	return file_avs_proto_enumTypes[2].Descriptor()
 }
 
 func (TaskStatus) Type() protoreflect.EnumType {
-	return &file_avs_proto_enumTypes[1]
+	return &file_avs_proto_enumTypes[2]
 }
 
 func (x TaskStatus) Number() protoreflect.EnumNumber {
@@ -155,7 +198,7 @@ func (x TaskStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TaskStatus.Descriptor instead.
 func (TaskStatus) EnumDescriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{1}
+	return file_avs_proto_rawDescGZIP(), []int{2}
 }
 
 // Execution Status re-present a run of the task
@@ -189,11 +232,11 @@ func (x ExecutionStatus) String() string {
 }
 
 func (ExecutionStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_avs_proto_enumTypes[2].Descriptor()
+	return file_avs_proto_enumTypes[3].Descriptor()
 }
 
 func (ExecutionStatus) Type() protoreflect.EnumType {
-	return &file_avs_proto_enumTypes[2]
+	return &file_avs_proto_enumTypes[3]
 }
 
 func (x ExecutionStatus) Number() protoreflect.EnumNumber {
@@ -202,49 +245,6 @@ func (x ExecutionStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ExecutionStatus.Descriptor instead.
 func (ExecutionStatus) EnumDescriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{2}
-}
-
-type CustomCodeLang int32
-
-const (
-	CustomCodeLang_JavaScript CustomCodeLang = 0
-)
-
-// Enum value maps for CustomCodeLang.
-var (
-	CustomCodeLang_name = map[int32]string{
-		0: "JavaScript",
-	}
-	CustomCodeLang_value = map[string]int32{
-		"JavaScript": 0,
-	}
-)
-
-func (x CustomCodeLang) Enum() *CustomCodeLang {
-	p := new(CustomCodeLang)
-	*p = x
-	return p
-}
-
-func (x CustomCodeLang) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (CustomCodeLang) Descriptor() protoreflect.EnumDescriptor {
-	return file_avs_proto_enumTypes[3].Descriptor()
-}
-
-func (CustomCodeLang) Type() protoreflect.EnumType {
-	return &file_avs_proto_enumTypes[3]
-}
-
-func (x CustomCodeLang) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use CustomCodeLang.Descriptor instead.
-func (CustomCodeLang) EnumDescriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{3}
 }
 
@@ -308,7 +308,7 @@ func (x TriggerReason_TriggerType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TriggerReason_TriggerType.Descriptor instead.
 func (TriggerReason_TriggerType) EnumDescriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{35, 0}
+	return file_avs_proto_rawDescGZIP(), []int{34, 0}
 }
 
 type IdReq struct {
@@ -355,27 +355,28 @@ func (x *IdReq) GetId() string {
 	return ""
 }
 
-type FixedTimeCondition struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Epochs        []int64                `protobuf:"varint,1,rep,packed,name=epochs,proto3" json:"epochs,omitempty"`
+type FixedTimeTrigger struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Include Config as field so it is generated in Go
+	Config        *FixedTimeTrigger_Config `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FixedTimeCondition) Reset() {
-	*x = FixedTimeCondition{}
+func (x *FixedTimeTrigger) Reset() {
+	*x = FixedTimeTrigger{}
 	mi := &file_avs_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FixedTimeCondition) String() string {
+func (x *FixedTimeTrigger) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FixedTimeCondition) ProtoMessage() {}
+func (*FixedTimeTrigger) ProtoMessage() {}
 
-func (x *FixedTimeCondition) ProtoReflect() protoreflect.Message {
+func (x *FixedTimeTrigger) ProtoReflect() protoreflect.Message {
 	mi := &file_avs_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -387,40 +388,41 @@ func (x *FixedTimeCondition) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FixedTimeCondition.ProtoReflect.Descriptor instead.
-func (*FixedTimeCondition) Descriptor() ([]byte, []int) {
+// Deprecated: Use FixedTimeTrigger.ProtoReflect.Descriptor instead.
+func (*FixedTimeTrigger) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *FixedTimeCondition) GetEpochs() []int64 {
+func (x *FixedTimeTrigger) GetConfig() *FixedTimeTrigger_Config {
 	if x != nil {
-		return x.Epochs
+		return x.Config
 	}
 	return nil
 }
 
 // Simple timebase or cron syntax.
-type CronCondition struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Schedule      []string               `protobuf:"bytes,1,rep,name=schedule,proto3" json:"schedule,omitempty"`
+type CronTrigger struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Include Config as field so it is generated in Go
+	Config        *CronTrigger_Config `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *CronCondition) Reset() {
-	*x = CronCondition{}
+func (x *CronTrigger) Reset() {
+	*x = CronTrigger{}
 	mi := &file_avs_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CronCondition) String() string {
+func (x *CronTrigger) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CronCondition) ProtoMessage() {}
+func (*CronTrigger) ProtoMessage() {}
 
-func (x *CronCondition) ProtoReflect() protoreflect.Message {
+func (x *CronTrigger) ProtoReflect() protoreflect.Message {
 	mi := &file_avs_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -432,39 +434,40 @@ func (x *CronCondition) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CronCondition.ProtoReflect.Descriptor instead.
-func (*CronCondition) Descriptor() ([]byte, []int) {
+// Deprecated: Use CronTrigger.ProtoReflect.Descriptor instead.
+func (*CronTrigger) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *CronCondition) GetSchedule() []string {
+func (x *CronTrigger) GetConfig() *CronTrigger_Config {
 	if x != nil {
-		return x.Schedule
+		return x.Config
 	}
 	return nil
 }
 
-type BlockCondition struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Interval      int64                  `protobuf:"varint,1,opt,name=interval,proto3" json:"interval,omitempty"`
+type BlockTrigger struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Include Config as field so it is generated in Go
+	Config        *BlockTrigger_Config `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *BlockCondition) Reset() {
-	*x = BlockCondition{}
+func (x *BlockTrigger) Reset() {
+	*x = BlockTrigger{}
 	mi := &file_avs_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *BlockCondition) String() string {
+func (x *BlockTrigger) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*BlockCondition) ProtoMessage() {}
+func (*BlockTrigger) ProtoMessage() {}
 
-func (x *BlockCondition) ProtoReflect() protoreflect.Message {
+func (x *BlockTrigger) ProtoReflect() protoreflect.Message {
 	mi := &file_avs_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -476,42 +479,41 @@ func (x *BlockCondition) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use BlockCondition.ProtoReflect.Descriptor instead.
-func (*BlockCondition) Descriptor() ([]byte, []int) {
+// Deprecated: Use BlockTrigger.ProtoReflect.Descriptor instead.
+func (*BlockTrigger) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *BlockCondition) GetInterval() int64 {
+func (x *BlockTrigger) GetConfig() *BlockTrigger_Config {
 	if x != nil {
-		return x.Interval
+		return x.Config
 	}
-	return 0
+	return nil
 }
 
-// EventCondition is a filter to match on an event. It's adhoc logic expression re-present in an array to match an ethereum event
-type EventCondition struct {
+// EventTrigger is a filter to match on an event. It's adhoc logic expression re-present in an array to match an ethereum event
+type EventTrigger struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// an array of filter to be mach, as soon as any element of the array mach, the trigger is fired.
-	Matcher       []*EventCondition_Matcher `protobuf:"bytes,1,rep,name=matcher,proto3" json:"matcher,omitempty"`
-	Expression    string                    `protobuf:"bytes,2,opt,name=expression,proto3" json:"expression,omitempty"`
+	// Include Config as field so it is generated in Go
+	Config        *EventTrigger_Config `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *EventCondition) Reset() {
-	*x = EventCondition{}
+func (x *EventTrigger) Reset() {
+	*x = EventTrigger{}
 	mi := &file_avs_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *EventCondition) String() string {
+func (x *EventTrigger) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*EventCondition) ProtoMessage() {}
+func (*EventTrigger) ProtoMessage() {}
 
-func (x *EventCondition) ProtoReflect() protoreflect.Message {
+func (x *EventTrigger) ProtoReflect() protoreflect.Message {
 	mi := &file_avs_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -523,23 +525,16 @@ func (x *EventCondition) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use EventCondition.ProtoReflect.Descriptor instead.
-func (*EventCondition) Descriptor() ([]byte, []int) {
+// Deprecated: Use EventTrigger.ProtoReflect.Descriptor instead.
+func (*EventTrigger) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *EventCondition) GetMatcher() []*EventCondition_Matcher {
+func (x *EventTrigger) GetConfig() *EventTrigger_Config {
 	if x != nil {
-		return x.Matcher
+		return x.Config
 	}
 	return nil
-}
-
-func (x *EventCondition) GetExpression() string {
-	if x != nil {
-		return x.Expression
-	}
-	return ""
 }
 
 type TaskTrigger struct {
@@ -611,7 +606,7 @@ func (x *TaskTrigger) GetManual() bool {
 	return false
 }
 
-func (x *TaskTrigger) GetFixedTime() *FixedTimeCondition {
+func (x *TaskTrigger) GetFixedTime() *FixedTimeTrigger {
 	if x != nil {
 		if x, ok := x.TriggerType.(*TaskTrigger_FixedTime); ok {
 			return x.FixedTime
@@ -620,7 +615,7 @@ func (x *TaskTrigger) GetFixedTime() *FixedTimeCondition {
 	return nil
 }
 
-func (x *TaskTrigger) GetCron() *CronCondition {
+func (x *TaskTrigger) GetCron() *CronTrigger {
 	if x != nil {
 		if x, ok := x.TriggerType.(*TaskTrigger_Cron); ok {
 			return x.Cron
@@ -629,7 +624,7 @@ func (x *TaskTrigger) GetCron() *CronCondition {
 	return nil
 }
 
-func (x *TaskTrigger) GetBlock() *BlockCondition {
+func (x *TaskTrigger) GetBlock() *BlockTrigger {
 	if x != nil {
 		if x, ok := x.TriggerType.(*TaskTrigger_Block); ok {
 			return x.Block
@@ -638,7 +633,7 @@ func (x *TaskTrigger) GetBlock() *BlockCondition {
 	return nil
 }
 
-func (x *TaskTrigger) GetEvent() *EventCondition {
+func (x *TaskTrigger) GetEvent() *EventTrigger {
 	if x != nil {
 		if x, ok := x.TriggerType.(*TaskTrigger_Event); ok {
 			return x.Event
@@ -665,22 +660,22 @@ type TaskTrigger_Manual struct {
 
 type TaskTrigger_FixedTime struct {
 	// run at a specific epoch, name inspired by unix `at` utility
-	FixedTime *FixedTimeCondition `protobuf:"bytes,3,opt,name=fixed_time,json=fixedTime,proto3,oneof"`
+	FixedTime *FixedTimeTrigger `protobuf:"bytes,3,opt,name=fixed_time,json=fixedTime,proto3,oneof"`
 }
 
 type TaskTrigger_Cron struct {
 	// interval such as every hour/day/ etc can be converted to cronsyntax by the sdk/studio
-	Cron *CronCondition `protobuf:"bytes,4,opt,name=cron,proto3,oneof"`
+	Cron *CronTrigger `protobuf:"bytes,4,opt,name=cron,proto3,oneof"`
 }
 
 type TaskTrigger_Block struct {
 	// currently the only support syntax is every <x> blocks
-	Block *BlockCondition `protobuf:"bytes,5,opt,name=block,proto3,oneof"`
+	Block *BlockTrigger `protobuf:"bytes,5,opt,name=block,proto3,oneof"`
 }
 
 type TaskTrigger_Event struct {
 	// support filter by event expression such as topic0, topic1, topoc2 and event_data and contract_address
-	Event *EventCondition `protobuf:"bytes,6,opt,name=event,proto3,oneof"`
+	Event *EventTrigger `protobuf:"bytes,6,opt,name=event,proto3,oneof"`
 }
 
 func (*TaskTrigger_Manual) isTaskTrigger_TriggerType() {}
@@ -694,9 +689,9 @@ func (*TaskTrigger_Block) isTaskTrigger_TriggerType() {}
 func (*TaskTrigger_Event) isTaskTrigger_TriggerType() {}
 
 type ETHTransferNode struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Destination   string                 `protobuf:"bytes,1,opt,name=destination,proto3" json:"destination,omitempty"`
-	Amount        string                 `protobuf:"bytes,2,opt,name=amount,proto3" json:"amount,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Include Config and Input as fields so they are generated in Go
+	Config        *ETHTransferNode_Config `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -731,28 +726,17 @@ func (*ETHTransferNode) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *ETHTransferNode) GetDestination() string {
+func (x *ETHTransferNode) GetConfig() *ETHTransferNode_Config {
 	if x != nil {
-		return x.Destination
+		return x.Config
 	}
-	return ""
-}
-
-func (x *ETHTransferNode) GetAmount() string {
-	if x != nil {
-		return x.Amount
-	}
-	return ""
+	return nil
 }
 
 type ContractWriteNode struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	ContractAddress string                 `protobuf:"bytes,1,opt,name=contract_address,json=contractAddress,proto3" json:"contract_address,omitempty"`
-	CallData        string                 `protobuf:"bytes,2,opt,name=call_data,json=callData,proto3" json:"call_data,omitempty"`
-	// The ABI is only required to decode the return value of a method call.
-	// If we don't need the result and only want the transaction hash (which is usually sufficient),
-	// then we don't need to provide the ABI.
-	ContractAbi   string `protobuf:"bytes,3,opt,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Include Config and Input as fields so they are generated in Go
+	Config        *ContractWriteNode_Config `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -787,35 +771,17 @@ func (*ContractWriteNode) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *ContractWriteNode) GetContractAddress() string {
+func (x *ContractWriteNode) GetConfig() *ContractWriteNode_Config {
 	if x != nil {
-		return x.ContractAddress
+		return x.Config
 	}
-	return ""
-}
-
-func (x *ContractWriteNode) GetCallData() string {
-	if x != nil {
-		return x.CallData
-	}
-	return ""
-}
-
-func (x *ContractWriteNode) GetContractAbi() string {
-	if x != nil {
-		return x.ContractAbi
-	}
-	return ""
+	return nil
 }
 
 type ContractReadNode struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	ContractAddress string                 `protobuf:"bytes,1,opt,name=contract_address,json=contractAddress,proto3" json:"contract_address,omitempty"`
-	CallData        string                 `protobuf:"bytes,2,opt,name=call_data,json=callData,proto3" json:"call_data,omitempty"`
-	// The ABI are required to decode the return value and pass it to the next step.
-	// Currently, we need to provide the contract ABI as a JSON string.
-	// We don't need to include the full ABI—just enough to decode the method call.
-	ContractAbi   string `protobuf:"bytes,3,opt,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Include Config and Input as fields so they are generated in Go
+	Config        *ContractReadNode_Config `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -850,32 +816,17 @@ func (*ContractReadNode) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *ContractReadNode) GetContractAddress() string {
+func (x *ContractReadNode) GetConfig() *ContractReadNode_Config {
 	if x != nil {
-		return x.ContractAddress
+		return x.Config
 	}
-	return ""
-}
-
-func (x *ContractReadNode) GetCallData() string {
-	if x != nil {
-		return x.CallData
-	}
-	return ""
-}
-
-func (x *ContractReadNode) GetContractAbi() string {
-	if x != nil {
-		return x.ContractAbi
-	}
-	return ""
+	return nil
 }
 
 type GraphQLQueryNode struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Url           string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
-	Query         string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
-	Variables     map[string]string      `protobuf:"bytes,3,rep,name=variables,proto3" json:"variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Include Config and Input as fields so they are generated in Go
+	Config        *GraphQLQueryNode_Config `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -910,33 +861,17 @@ func (*GraphQLQueryNode) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *GraphQLQueryNode) GetUrl() string {
+func (x *GraphQLQueryNode) GetConfig() *GraphQLQueryNode_Config {
 	if x != nil {
-		return x.Url
-	}
-	return ""
-}
-
-func (x *GraphQLQueryNode) GetQuery() string {
-	if x != nil {
-		return x.Query
-	}
-	return ""
-}
-
-func (x *GraphQLQueryNode) GetVariables() map[string]string {
-	if x != nil {
-		return x.Variables
+		return x.Config
 	}
 	return nil
 }
 
 type RestAPINode struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Url           string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
-	Headers       map[string]string      `protobuf:"bytes,2,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Body          string                 `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
-	Method        string                 `protobuf:"bytes,4,opt,name=method,proto3" json:"method,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Include Config and Input as fields so they are generated in Go
+	Config        *RestAPINode_Config `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -971,38 +906,17 @@ func (*RestAPINode) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *RestAPINode) GetUrl() string {
+func (x *RestAPINode) GetConfig() *RestAPINode_Config {
 	if x != nil {
-		return x.Url
-	}
-	return ""
-}
-
-func (x *RestAPINode) GetHeaders() map[string]string {
-	if x != nil {
-		return x.Headers
+		return x.Config
 	}
 	return nil
 }
 
-func (x *RestAPINode) GetBody() string {
-	if x != nil {
-		return x.Body
-	}
-	return ""
-}
-
-func (x *RestAPINode) GetMethod() string {
-	if x != nil {
-		return x.Method
-	}
-	return ""
-}
-
 type CustomCodeNode struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Lang          CustomCodeLang         `protobuf:"varint,1,opt,name=lang,proto3,enum=aggregator.CustomCodeLang" json:"lang,omitempty"`
-	Source        string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Include Config and Input as fields so they are generated in Go
+	Config        *CustomCodeNode_Config `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1037,90 +951,24 @@ func (*CustomCodeNode) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *CustomCodeNode) GetLang() CustomCodeLang {
+func (x *CustomCodeNode) GetConfig() *CustomCodeNode_Config {
 	if x != nil {
-		return x.Lang
+		return x.Config
 	}
-	return CustomCodeLang_JavaScript
-}
-
-func (x *CustomCodeNode) GetSource() string {
-	if x != nil {
-		return x.Source
-	}
-	return ""
-}
-
-type Condition struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
-	Expression    string                 `protobuf:"bytes,3,opt,name=expression,proto3" json:"expression,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Condition) Reset() {
-	*x = Condition{}
-	mi := &file_avs_proto_msgTypes[12]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Condition) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Condition) ProtoMessage() {}
-
-func (x *Condition) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[12]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Condition.ProtoReflect.Descriptor instead.
-func (*Condition) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *Condition) GetId() string {
-	if x != nil {
-		return x.Id
-	}
-	return ""
-}
-
-func (x *Condition) GetType() string {
-	if x != nil {
-		return x.Type
-	}
-	return ""
-}
-
-func (x *Condition) GetExpression() string {
-	if x != nil {
-		return x.Expression
-	}
-	return ""
+	return nil
 }
 
 type BranchNode struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Conditions    []*Condition           `protobuf:"bytes,1,rep,name=conditions,proto3" json:"conditions,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Include Config and Input as fields so they are generated in Go
+	Config        *BranchNode_Config `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *BranchNode) Reset() {
 	*x = BranchNode{}
-	mi := &file_avs_proto_msgTypes[13]
+	mi := &file_avs_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1132,7 +980,7 @@ func (x *BranchNode) String() string {
 func (*BranchNode) ProtoMessage() {}
 
 func (x *BranchNode) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[13]
+	mi := &file_avs_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1145,30 +993,27 @@ func (x *BranchNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BranchNode.ProtoReflect.Descriptor instead.
 func (*BranchNode) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{13}
+	return file_avs_proto_rawDescGZIP(), []int{12}
 }
 
-func (x *BranchNode) GetConditions() []*Condition {
+func (x *BranchNode) GetConfig() *BranchNode_Config {
 	if x != nil {
-		return x.Conditions
+		return x.Config
 	}
 	return nil
 }
 
 type FilterNode struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Filter node acts like .select or .filter to pluck out element in an array that evaluate the expression to true
-	Expression string `protobuf:"bytes,1,opt,name=expression,proto3" json:"expression,omitempty"`
-	// input is the id of the node that we will fetch its value from and feed into the iteration.
-	// this input has to be an array. Currently we only know about the error at runtime
-	Input         string `protobuf:"bytes,2,opt,name=input,proto3" json:"input,omitempty"`
+	// Include Config and Input as fields so they are generated in Go
+	Config        *FilterNode_Config `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FilterNode) Reset() {
 	*x = FilterNode{}
-	mi := &file_avs_proto_msgTypes[14]
+	mi := &file_avs_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1180,7 +1025,7 @@ func (x *FilterNode) String() string {
 func (*FilterNode) ProtoMessage() {}
 
 func (x *FilterNode) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[14]
+	mi := &file_avs_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1193,31 +1038,19 @@ func (x *FilterNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FilterNode.ProtoReflect.Descriptor instead.
 func (*FilterNode) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{14}
+	return file_avs_proto_rawDescGZIP(), []int{13}
 }
 
-func (x *FilterNode) GetExpression() string {
+func (x *FilterNode) GetConfig() *FilterNode_Config {
 	if x != nil {
-		return x.Expression
+		return x.Config
 	}
-	return ""
-}
-
-func (x *FilterNode) GetInput() string {
-	if x != nil {
-		return x.Input
-	}
-	return ""
+	return nil
 }
 
 // LoopNode currently not support, but we pre-defined to reverse the field id
 type LoopNode struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// this is the variable name of any previous step so we can took it
-	Input string `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"`
-	// a var that the function can refer to it
-	IterVal string `protobuf:"bytes,2,opt,name=iter_val,json=iterVal,proto3" json:"iter_val,omitempty"`
-	IterKey string `protobuf:"bytes,3,opt,name=iter_key,json=iterKey,proto3" json:"iter_key,omitempty"`
 	// inside the runner, it can access to the current value of the loop iteration through the iter_val/iter_key above
 	//
 	// Types that are valid to be assigned to Runner:
@@ -1228,14 +1061,16 @@ type LoopNode struct {
 	//	*LoopNode_GraphqlDataQuery
 	//	*LoopNode_RestApi
 	//	*LoopNode_CustomCode
-	Runner        isLoopNode_Runner `protobuf_oneof:"runner"`
+	Runner isLoopNode_Runner `protobuf_oneof:"runner"`
+	// Include Config and Input as fields so they are generated in Go
+	Config        *LoopNode_Config `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LoopNode) Reset() {
 	*x = LoopNode{}
-	mi := &file_avs_proto_msgTypes[15]
+	mi := &file_avs_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1247,7 +1082,7 @@ func (x *LoopNode) String() string {
 func (*LoopNode) ProtoMessage() {}
 
 func (x *LoopNode) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[15]
+	mi := &file_avs_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1260,28 +1095,7 @@ func (x *LoopNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoopNode.ProtoReflect.Descriptor instead.
 func (*LoopNode) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{15}
-}
-
-func (x *LoopNode) GetInput() string {
-	if x != nil {
-		return x.Input
-	}
-	return ""
-}
-
-func (x *LoopNode) GetIterVal() string {
-	if x != nil {
-		return x.IterVal
-	}
-	return ""
-}
-
-func (x *LoopNode) GetIterKey() string {
-	if x != nil {
-		return x.IterKey
-	}
-	return ""
+	return file_avs_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *LoopNode) GetRunner() isLoopNode_Runner {
@@ -1345,6 +1159,13 @@ func (x *LoopNode) GetCustomCode() *CustomCodeNode {
 	return nil
 }
 
+func (x *LoopNode) GetConfig() *LoopNode_Config {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
 type isLoopNode_Runner interface {
 	isLoopNode_Runner()
 }
@@ -1403,7 +1224,7 @@ type TaskEdge struct {
 
 func (x *TaskEdge) Reset() {
 	*x = TaskEdge{}
-	mi := &file_avs_proto_msgTypes[16]
+	mi := &file_avs_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1415,7 +1236,7 @@ func (x *TaskEdge) String() string {
 func (*TaskEdge) ProtoMessage() {}
 
 func (x *TaskEdge) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[16]
+	mi := &file_avs_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1428,7 +1249,7 @@ func (x *TaskEdge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskEdge.ProtoReflect.Descriptor instead.
 func (*TaskEdge) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{16}
+	return file_avs_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *TaskEdge) GetId() string {
@@ -1476,7 +1297,7 @@ type TaskNode struct {
 
 func (x *TaskNode) Reset() {
 	*x = TaskNode{}
-	mi := &file_avs_proto_msgTypes[17]
+	mi := &file_avs_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1488,7 +1309,7 @@ func (x *TaskNode) String() string {
 func (*TaskNode) ProtoMessage() {}
 
 func (x *TaskNode) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[17]
+	mi := &file_avs_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1501,7 +1322,7 @@ func (x *TaskNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskNode.ProtoReflect.Descriptor instead.
 func (*TaskNode) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{17}
+	return file_avs_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *TaskNode) GetId() string {
@@ -1714,10 +1535,10 @@ type Execution struct {
 	//
 	// Types that are valid to be assigned to OutputData:
 	//
-	//	*Execution_TransferLog
-	//	*Execution_EvmLog
-	//	*Execution_Block
-	//	*Execution_Time
+	//	*Execution_BlockTrigger
+	//	*Execution_FixedTimeTrigger
+	//	*Execution_CronTrigger
+	//	*Execution_EventTrigger
 	OutputData    isExecution_OutputData `protobuf_oneof:"output_data"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1725,7 +1546,7 @@ type Execution struct {
 
 func (x *Execution) Reset() {
 	*x = Execution{}
-	mi := &file_avs_proto_msgTypes[18]
+	mi := &file_avs_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1737,7 +1558,7 @@ func (x *Execution) String() string {
 func (*Execution) ProtoMessage() {}
 
 func (x *Execution) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[18]
+	mi := &file_avs_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1750,7 +1571,7 @@ func (x *Execution) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Execution.ProtoReflect.Descriptor instead.
 func (*Execution) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{18}
+	return file_avs_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *Execution) GetId() string {
@@ -1816,37 +1637,37 @@ func (x *Execution) GetOutputData() isExecution_OutputData {
 	return nil
 }
 
-func (x *Execution) GetTransferLog() *Execution_TransferLogOutput {
+func (x *Execution) GetBlockTrigger() *BlockTrigger_Output {
 	if x != nil {
-		if x, ok := x.OutputData.(*Execution_TransferLog); ok {
-			return x.TransferLog
+		if x, ok := x.OutputData.(*Execution_BlockTrigger); ok {
+			return x.BlockTrigger
 		}
 	}
 	return nil
 }
 
-func (x *Execution) GetEvmLog() *Evm_Log {
+func (x *Execution) GetFixedTimeTrigger() *FixedTimeTrigger_Output {
 	if x != nil {
-		if x, ok := x.OutputData.(*Execution_EvmLog); ok {
-			return x.EvmLog
+		if x, ok := x.OutputData.(*Execution_FixedTimeTrigger); ok {
+			return x.FixedTimeTrigger
 		}
 	}
 	return nil
 }
 
-func (x *Execution) GetBlock() *Execution_BlockOutput {
+func (x *Execution) GetCronTrigger() *CronTrigger_Output {
 	if x != nil {
-		if x, ok := x.OutputData.(*Execution_Block); ok {
-			return x.Block
+		if x, ok := x.OutputData.(*Execution_CronTrigger); ok {
+			return x.CronTrigger
 		}
 	}
 	return nil
 }
 
-func (x *Execution) GetTime() *Execution_TimeOutput {
+func (x *Execution) GetEventTrigger() *EventTrigger_Output {
 	if x != nil {
-		if x, ok := x.OutputData.(*Execution_Time); ok {
-			return x.Time
+		if x, ok := x.OutputData.(*Execution_EventTrigger); ok {
+			return x.EventTrigger
 		}
 	}
 	return nil
@@ -1856,31 +1677,32 @@ type isExecution_OutputData interface {
 	isExecution_OutputData()
 }
 
-type Execution_TransferLog struct {
-	TransferLog *Execution_TransferLogOutput `protobuf:"bytes,10,opt,name=transfer_log,json=transferLog,proto3,oneof"`
+type Execution_BlockTrigger struct {
+	// For block triggers
+	BlockTrigger *BlockTrigger_Output `protobuf:"bytes,10,opt,name=block_trigger,json=blockTrigger,proto3,oneof"`
 }
 
-type Execution_EvmLog struct {
-	// When the trigger is not a transfer event, we will have a raw event output only
-	// These shape of data is https://docs.ethers.org/v6/api/providers/#Log
-	EvmLog *Evm_Log `protobuf:"bytes,11,opt,name=evm_log,json=evmLog,proto3,oneof"`
+type Execution_FixedTimeTrigger struct {
+	// For time triggers
+	FixedTimeTrigger *FixedTimeTrigger_Output `protobuf:"bytes,11,opt,name=fixed_time_trigger,json=fixedTimeTrigger,proto3,oneof"`
 }
 
-type Execution_Block struct {
-	Block *Execution_BlockOutput `protobuf:"bytes,12,opt,name=block,proto3,oneof"`
+type Execution_CronTrigger struct {
+	CronTrigger *CronTrigger_Output `protobuf:"bytes,12,opt,name=cron_trigger,json=cronTrigger,proto3,oneof"`
 }
 
-type Execution_Time struct {
-	Time *Execution_TimeOutput `protobuf:"bytes,13,opt,name=time,proto3,oneof"`
+type Execution_EventTrigger struct {
+	// For event triggers
+	EventTrigger *EventTrigger_Output `protobuf:"bytes,13,opt,name=event_trigger,json=eventTrigger,proto3,oneof"`
 }
 
-func (*Execution_TransferLog) isExecution_OutputData() {}
+func (*Execution_BlockTrigger) isExecution_OutputData() {}
 
-func (*Execution_EvmLog) isExecution_OutputData() {}
+func (*Execution_FixedTimeTrigger) isExecution_OutputData() {}
 
-func (*Execution_Block) isExecution_OutputData() {}
+func (*Execution_CronTrigger) isExecution_OutputData() {}
 
-func (*Execution_Time) isExecution_OutputData() {}
+func (*Execution_EventTrigger) isExecution_OutputData() {}
 
 type Task struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
@@ -1911,7 +1733,7 @@ type Task struct {
 
 func (x *Task) Reset() {
 	*x = Task{}
-	mi := &file_avs_proto_msgTypes[19]
+	mi := &file_avs_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1923,7 +1745,7 @@ func (x *Task) String() string {
 func (*Task) ProtoMessage() {}
 
 func (x *Task) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[19]
+	mi := &file_avs_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1936,7 +1758,7 @@ func (x *Task) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Task.ProtoReflect.Descriptor instead.
 func (*Task) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{19}
+	return file_avs_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *Task) GetId() string {
@@ -2055,7 +1877,7 @@ type CreateTaskReq struct {
 
 func (x *CreateTaskReq) Reset() {
 	*x = CreateTaskReq{}
-	mi := &file_avs_proto_msgTypes[20]
+	mi := &file_avs_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2067,7 +1889,7 @@ func (x *CreateTaskReq) String() string {
 func (*CreateTaskReq) ProtoMessage() {}
 
 func (x *CreateTaskReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[20]
+	mi := &file_avs_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2080,7 +1902,7 @@ func (x *CreateTaskReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTaskReq.ProtoReflect.Descriptor instead.
 func (*CreateTaskReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{20}
+	return file_avs_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *CreateTaskReq) GetTrigger() *TaskTrigger {
@@ -2148,7 +1970,7 @@ type CreateTaskResp struct {
 
 func (x *CreateTaskResp) Reset() {
 	*x = CreateTaskResp{}
-	mi := &file_avs_proto_msgTypes[21]
+	mi := &file_avs_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2160,7 +1982,7 @@ func (x *CreateTaskResp) String() string {
 func (*CreateTaskResp) ProtoMessage() {}
 
 func (x *CreateTaskResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[21]
+	mi := &file_avs_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2173,7 +1995,7 @@ func (x *CreateTaskResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTaskResp.ProtoReflect.Descriptor instead.
 func (*CreateTaskResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{21}
+	return file_avs_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *CreateTaskResp) GetId() string {
@@ -2192,7 +2014,7 @@ type NonceRequest struct {
 
 func (x *NonceRequest) Reset() {
 	*x = NonceRequest{}
-	mi := &file_avs_proto_msgTypes[22]
+	mi := &file_avs_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2204,7 +2026,7 @@ func (x *NonceRequest) String() string {
 func (*NonceRequest) ProtoMessage() {}
 
 func (x *NonceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[22]
+	mi := &file_avs_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2217,7 +2039,7 @@ func (x *NonceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NonceRequest.ProtoReflect.Descriptor instead.
 func (*NonceRequest) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{22}
+	return file_avs_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *NonceRequest) GetOwner() string {
@@ -2236,7 +2058,7 @@ type NonceResp struct {
 
 func (x *NonceResp) Reset() {
 	*x = NonceResp{}
-	mi := &file_avs_proto_msgTypes[23]
+	mi := &file_avs_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2248,7 +2070,7 @@ func (x *NonceResp) String() string {
 func (*NonceResp) ProtoMessage() {}
 
 func (x *NonceResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[23]
+	mi := &file_avs_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2261,7 +2083,7 @@ func (x *NonceResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NonceResp.ProtoReflect.Descriptor instead.
 func (*NonceResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{23}
+	return file_avs_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *NonceResp) GetNonce() string {
@@ -2283,7 +2105,7 @@ type ListWalletReq struct {
 
 func (x *ListWalletReq) Reset() {
 	*x = ListWalletReq{}
-	mi := &file_avs_proto_msgTypes[24]
+	mi := &file_avs_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2295,7 +2117,7 @@ func (x *ListWalletReq) String() string {
 func (*ListWalletReq) ProtoMessage() {}
 
 func (x *ListWalletReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[24]
+	mi := &file_avs_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2308,7 +2130,7 @@ func (x *ListWalletReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWalletReq.ProtoReflect.Descriptor instead.
 func (*ListWalletReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{24}
+	return file_avs_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ListWalletReq) GetFactoryAddress() string {
@@ -2337,7 +2159,7 @@ type SmartWallet struct {
 
 func (x *SmartWallet) Reset() {
 	*x = SmartWallet{}
-	mi := &file_avs_proto_msgTypes[25]
+	mi := &file_avs_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2349,7 +2171,7 @@ func (x *SmartWallet) String() string {
 func (*SmartWallet) ProtoMessage() {}
 
 func (x *SmartWallet) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[25]
+	mi := &file_avs_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2362,7 +2184,7 @@ func (x *SmartWallet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SmartWallet.ProtoReflect.Descriptor instead.
 func (*SmartWallet) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{25}
+	return file_avs_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *SmartWallet) GetAddress() string {
@@ -2402,7 +2224,7 @@ type ListWalletResp struct {
 
 func (x *ListWalletResp) Reset() {
 	*x = ListWalletResp{}
-	mi := &file_avs_proto_msgTypes[26]
+	mi := &file_avs_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2414,7 +2236,7 @@ func (x *ListWalletResp) String() string {
 func (*ListWalletResp) ProtoMessage() {}
 
 func (x *ListWalletResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[26]
+	mi := &file_avs_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2427,7 +2249,7 @@ func (x *ListWalletResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWalletResp.ProtoReflect.Descriptor instead.
 func (*ListWalletResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{26}
+	return file_avs_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ListWalletResp) GetItems() []*SmartWallet {
@@ -2456,7 +2278,7 @@ type ListTasksReq struct {
 
 func (x *ListTasksReq) Reset() {
 	*x = ListTasksReq{}
-	mi := &file_avs_proto_msgTypes[27]
+	mi := &file_avs_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2468,7 +2290,7 @@ func (x *ListTasksReq) String() string {
 func (*ListTasksReq) ProtoMessage() {}
 
 func (x *ListTasksReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[27]
+	mi := &file_avs_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2481,7 +2303,7 @@ func (x *ListTasksReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTasksReq.ProtoReflect.Descriptor instead.
 func (*ListTasksReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{27}
+	return file_avs_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ListTasksReq) GetSmartWalletAddress() []string {
@@ -2531,7 +2353,7 @@ type ListTasksResp struct {
 
 func (x *ListTasksResp) Reset() {
 	*x = ListTasksResp{}
-	mi := &file_avs_proto_msgTypes[28]
+	mi := &file_avs_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2543,7 +2365,7 @@ func (x *ListTasksResp) String() string {
 func (*ListTasksResp) ProtoMessage() {}
 
 func (x *ListTasksResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[28]
+	mi := &file_avs_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2556,7 +2378,7 @@ func (x *ListTasksResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTasksResp.ProtoReflect.Descriptor instead.
 func (*ListTasksResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{28}
+	return file_avs_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ListTasksResp) GetItems() []*ListTasksResp_Item {
@@ -2596,7 +2418,7 @@ type ListExecutionsReq struct {
 
 func (x *ListExecutionsReq) Reset() {
 	*x = ListExecutionsReq{}
-	mi := &file_avs_proto_msgTypes[29]
+	mi := &file_avs_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2608,7 +2430,7 @@ func (x *ListExecutionsReq) String() string {
 func (*ListExecutionsReq) ProtoMessage() {}
 
 func (x *ListExecutionsReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[29]
+	mi := &file_avs_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2621,7 +2443,7 @@ func (x *ListExecutionsReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListExecutionsReq.ProtoReflect.Descriptor instead.
 func (*ListExecutionsReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{29}
+	return file_avs_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ListExecutionsReq) GetTaskIds() []string {
@@ -2670,7 +2492,7 @@ type ListExecutionsResp struct {
 
 func (x *ListExecutionsResp) Reset() {
 	*x = ListExecutionsResp{}
-	mi := &file_avs_proto_msgTypes[30]
+	mi := &file_avs_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2682,7 +2504,7 @@ func (x *ListExecutionsResp) String() string {
 func (*ListExecutionsResp) ProtoMessage() {}
 
 func (x *ListExecutionsResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[30]
+	mi := &file_avs_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2695,7 +2517,7 @@ func (x *ListExecutionsResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListExecutionsResp.ProtoReflect.Descriptor instead.
 func (*ListExecutionsResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{30}
+	return file_avs_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ListExecutionsResp) GetItems() []*Execution {
@@ -2729,7 +2551,7 @@ type ExecutionReq struct {
 
 func (x *ExecutionReq) Reset() {
 	*x = ExecutionReq{}
-	mi := &file_avs_proto_msgTypes[31]
+	mi := &file_avs_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2741,7 +2563,7 @@ func (x *ExecutionReq) String() string {
 func (*ExecutionReq) ProtoMessage() {}
 
 func (x *ExecutionReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[31]
+	mi := &file_avs_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2754,7 +2576,7 @@ func (x *ExecutionReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutionReq.ProtoReflect.Descriptor instead.
 func (*ExecutionReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{31}
+	return file_avs_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ExecutionReq) GetTaskId() string {
@@ -2780,7 +2602,7 @@ type ExecutionStatusResp struct {
 
 func (x *ExecutionStatusResp) Reset() {
 	*x = ExecutionStatusResp{}
-	mi := &file_avs_proto_msgTypes[32]
+	mi := &file_avs_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2792,7 +2614,7 @@ func (x *ExecutionStatusResp) String() string {
 func (*ExecutionStatusResp) ProtoMessage() {}
 
 func (x *ExecutionStatusResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[32]
+	mi := &file_avs_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2805,7 +2627,7 @@ func (x *ExecutionStatusResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecutionStatusResp.ProtoReflect.Descriptor instead.
 func (*ExecutionStatusResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{32}
+	return file_avs_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ExecutionStatusResp) GetStatus() ExecutionStatus {
@@ -2827,7 +2649,7 @@ type GetKeyReq struct {
 
 func (x *GetKeyReq) Reset() {
 	*x = GetKeyReq{}
-	mi := &file_avs_proto_msgTypes[33]
+	mi := &file_avs_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2839,7 +2661,7 @@ func (x *GetKeyReq) String() string {
 func (*GetKeyReq) ProtoMessage() {}
 
 func (x *GetKeyReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[33]
+	mi := &file_avs_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2852,7 +2674,7 @@ func (x *GetKeyReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetKeyReq.ProtoReflect.Descriptor instead.
 func (*GetKeyReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{33}
+	return file_avs_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *GetKeyReq) GetMessage() string {
@@ -2878,7 +2700,7 @@ type KeyResp struct {
 
 func (x *KeyResp) Reset() {
 	*x = KeyResp{}
-	mi := &file_avs_proto_msgTypes[34]
+	mi := &file_avs_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2890,7 +2712,7 @@ func (x *KeyResp) String() string {
 func (*KeyResp) ProtoMessage() {}
 
 func (x *KeyResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[34]
+	mi := &file_avs_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2903,7 +2725,7 @@ func (x *KeyResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeyResp.ProtoReflect.Descriptor instead.
 func (*KeyResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{34}
+	return file_avs_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *KeyResp) GetKey() string {
@@ -2933,7 +2755,7 @@ type TriggerReason struct {
 
 func (x *TriggerReason) Reset() {
 	*x = TriggerReason{}
-	mi := &file_avs_proto_msgTypes[35]
+	mi := &file_avs_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2945,7 +2767,7 @@ func (x *TriggerReason) String() string {
 func (*TriggerReason) ProtoMessage() {}
 
 func (x *TriggerReason) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[35]
+	mi := &file_avs_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2958,7 +2780,7 @@ func (x *TriggerReason) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriggerReason.ProtoReflect.Descriptor instead.
 func (*TriggerReason) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{35}
+	return file_avs_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *TriggerReason) GetBlockNumber() uint64 {
@@ -3007,7 +2829,7 @@ type GetWalletReq struct {
 
 func (x *GetWalletReq) Reset() {
 	*x = GetWalletReq{}
-	mi := &file_avs_proto_msgTypes[36]
+	mi := &file_avs_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3019,7 +2841,7 @@ func (x *GetWalletReq) String() string {
 func (*GetWalletReq) ProtoMessage() {}
 
 func (x *GetWalletReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[36]
+	mi := &file_avs_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3032,7 +2854,7 @@ func (x *GetWalletReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWalletReq.ProtoReflect.Descriptor instead.
 func (*GetWalletReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{36}
+	return file_avs_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *GetWalletReq) GetSalt() string {
@@ -3066,7 +2888,7 @@ type GetWalletResp struct {
 
 func (x *GetWalletResp) Reset() {
 	*x = GetWalletResp{}
-	mi := &file_avs_proto_msgTypes[37]
+	mi := &file_avs_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3078,7 +2900,7 @@ func (x *GetWalletResp) String() string {
 func (*GetWalletResp) ProtoMessage() {}
 
 func (x *GetWalletResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[37]
+	mi := &file_avs_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3091,7 +2913,7 @@ func (x *GetWalletResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWalletResp.ProtoReflect.Descriptor instead.
 func (*GetWalletResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{37}
+	return file_avs_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *GetWalletResp) GetAddress() string {
@@ -3170,7 +2992,7 @@ type SetWalletReq struct {
 
 func (x *SetWalletReq) Reset() {
 	*x = SetWalletReq{}
-	mi := &file_avs_proto_msgTypes[38]
+	mi := &file_avs_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3182,7 +3004,7 @@ func (x *SetWalletReq) String() string {
 func (*SetWalletReq) ProtoMessage() {}
 
 func (x *SetWalletReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[38]
+	mi := &file_avs_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3195,7 +3017,7 @@ func (x *SetWalletReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWalletReq.ProtoReflect.Descriptor instead.
 func (*SetWalletReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{38}
+	return file_avs_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *SetWalletReq) GetSalt() string {
@@ -3233,7 +3055,7 @@ type UserTriggerTaskReq struct {
 
 func (x *UserTriggerTaskReq) Reset() {
 	*x = UserTriggerTaskReq{}
-	mi := &file_avs_proto_msgTypes[39]
+	mi := &file_avs_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3245,7 +3067,7 @@ func (x *UserTriggerTaskReq) String() string {
 func (*UserTriggerTaskReq) ProtoMessage() {}
 
 func (x *UserTriggerTaskReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[39]
+	mi := &file_avs_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3258,7 +3080,7 @@ func (x *UserTriggerTaskReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserTriggerTaskReq.ProtoReflect.Descriptor instead.
 func (*UserTriggerTaskReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{39}
+	return file_avs_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *UserTriggerTaskReq) GetTaskId() string {
@@ -3296,7 +3118,7 @@ type UserTriggerTaskResp struct {
 
 func (x *UserTriggerTaskResp) Reset() {
 	*x = UserTriggerTaskResp{}
-	mi := &file_avs_proto_msgTypes[40]
+	mi := &file_avs_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3308,7 +3130,7 @@ func (x *UserTriggerTaskResp) String() string {
 func (*UserTriggerTaskResp) ProtoMessage() {}
 
 func (x *UserTriggerTaskResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[40]
+	mi := &file_avs_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3321,7 +3143,7 @@ func (x *UserTriggerTaskResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserTriggerTaskResp.ProtoReflect.Descriptor instead.
 func (*UserTriggerTaskResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{40}
+	return file_avs_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *UserTriggerTaskResp) GetExecutionId() string {
@@ -3357,7 +3179,7 @@ type CreateOrUpdateSecretReq struct {
 
 func (x *CreateOrUpdateSecretReq) Reset() {
 	*x = CreateOrUpdateSecretReq{}
-	mi := &file_avs_proto_msgTypes[41]
+	mi := &file_avs_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3369,7 +3191,7 @@ func (x *CreateOrUpdateSecretReq) String() string {
 func (*CreateOrUpdateSecretReq) ProtoMessage() {}
 
 func (x *CreateOrUpdateSecretReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[41]
+	mi := &file_avs_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3382,7 +3204,7 @@ func (x *CreateOrUpdateSecretReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateOrUpdateSecretReq.ProtoReflect.Descriptor instead.
 func (*CreateOrUpdateSecretReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{41}
+	return file_avs_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *CreateOrUpdateSecretReq) GetName() string {
@@ -3431,7 +3253,7 @@ type ListSecretsReq struct {
 
 func (x *ListSecretsReq) Reset() {
 	*x = ListSecretsReq{}
-	mi := &file_avs_proto_msgTypes[42]
+	mi := &file_avs_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3443,7 +3265,7 @@ func (x *ListSecretsReq) String() string {
 func (*ListSecretsReq) ProtoMessage() {}
 
 func (x *ListSecretsReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[42]
+	mi := &file_avs_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3456,7 +3278,7 @@ func (x *ListSecretsReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSecretsReq.ProtoReflect.Descriptor instead.
 func (*ListSecretsReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{42}
+	return file_avs_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ListSecretsReq) GetWorkflowId() string {
@@ -3506,7 +3328,7 @@ type ListSecretsResp struct {
 
 func (x *ListSecretsResp) Reset() {
 	*x = ListSecretsResp{}
-	mi := &file_avs_proto_msgTypes[43]
+	mi := &file_avs_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3518,7 +3340,7 @@ func (x *ListSecretsResp) String() string {
 func (*ListSecretsResp) ProtoMessage() {}
 
 func (x *ListSecretsResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[43]
+	mi := &file_avs_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3531,7 +3353,7 @@ func (x *ListSecretsResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSecretsResp.ProtoReflect.Descriptor instead.
 func (*ListSecretsResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{43}
+	return file_avs_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ListSecretsResp) GetItems() []*ListSecretsResp_ResponseSecret {
@@ -3568,7 +3390,7 @@ type DeleteSecretReq struct {
 
 func (x *DeleteSecretReq) Reset() {
 	*x = DeleteSecretReq{}
-	mi := &file_avs_proto_msgTypes[44]
+	mi := &file_avs_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3580,7 +3402,7 @@ func (x *DeleteSecretReq) String() string {
 func (*DeleteSecretReq) ProtoMessage() {}
 
 func (x *DeleteSecretReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[44]
+	mi := &file_avs_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3593,7 +3415,7 @@ func (x *DeleteSecretReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSecretReq.ProtoReflect.Descriptor instead.
 func (*DeleteSecretReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{44}
+	return file_avs_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *DeleteSecretReq) GetName() string {
@@ -3627,7 +3449,7 @@ type GetSignatureFormatReq struct {
 
 func (x *GetSignatureFormatReq) Reset() {
 	*x = GetSignatureFormatReq{}
-	mi := &file_avs_proto_msgTypes[45]
+	mi := &file_avs_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3639,7 +3461,7 @@ func (x *GetSignatureFormatReq) String() string {
 func (*GetSignatureFormatReq) ProtoMessage() {}
 
 func (x *GetSignatureFormatReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[45]
+	mi := &file_avs_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3652,7 +3474,7 @@ func (x *GetSignatureFormatReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSignatureFormatReq.ProtoReflect.Descriptor instead.
 func (*GetSignatureFormatReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{45}
+	return file_avs_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *GetSignatureFormatReq) GetWallet() string {
@@ -3672,7 +3494,7 @@ type GetSignatureFormatResp struct {
 
 func (x *GetSignatureFormatResp) Reset() {
 	*x = GetSignatureFormatResp{}
-	mi := &file_avs_proto_msgTypes[46]
+	mi := &file_avs_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3684,7 +3506,7 @@ func (x *GetSignatureFormatResp) String() string {
 func (*GetSignatureFormatResp) ProtoMessage() {}
 
 func (x *GetSignatureFormatResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[46]
+	mi := &file_avs_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3697,7 +3519,7 @@ func (x *GetSignatureFormatResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSignatureFormatResp.ProtoReflect.Descriptor instead.
 func (*GetSignatureFormatResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{46}
+	return file_avs_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *GetSignatureFormatResp) GetMessage() string {
@@ -3717,7 +3539,7 @@ type GetWorkflowCountReq struct {
 
 func (x *GetWorkflowCountReq) Reset() {
 	*x = GetWorkflowCountReq{}
-	mi := &file_avs_proto_msgTypes[47]
+	mi := &file_avs_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3729,7 +3551,7 @@ func (x *GetWorkflowCountReq) String() string {
 func (*GetWorkflowCountReq) ProtoMessage() {}
 
 func (x *GetWorkflowCountReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[47]
+	mi := &file_avs_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3742,7 +3564,7 @@ func (x *GetWorkflowCountReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWorkflowCountReq.ProtoReflect.Descriptor instead.
 func (*GetWorkflowCountReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{47}
+	return file_avs_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *GetWorkflowCountReq) GetAddresses() []string {
@@ -3763,7 +3585,7 @@ type GetWorkflowCountResp struct {
 
 func (x *GetWorkflowCountResp) Reset() {
 	*x = GetWorkflowCountResp{}
-	mi := &file_avs_proto_msgTypes[48]
+	mi := &file_avs_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3775,7 +3597,7 @@ func (x *GetWorkflowCountResp) String() string {
 func (*GetWorkflowCountResp) ProtoMessage() {}
 
 func (x *GetWorkflowCountResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[48]
+	mi := &file_avs_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3788,7 +3610,7 @@ func (x *GetWorkflowCountResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWorkflowCountResp.ProtoReflect.Descriptor instead.
 func (*GetWorkflowCountResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{48}
+	return file_avs_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *GetWorkflowCountResp) GetTotal() int64 {
@@ -3807,7 +3629,7 @@ type GetExecutionCountReq struct {
 
 func (x *GetExecutionCountReq) Reset() {
 	*x = GetExecutionCountReq{}
-	mi := &file_avs_proto_msgTypes[49]
+	mi := &file_avs_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3819,7 +3641,7 @@ func (x *GetExecutionCountReq) String() string {
 func (*GetExecutionCountReq) ProtoMessage() {}
 
 func (x *GetExecutionCountReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[49]
+	mi := &file_avs_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3832,7 +3654,7 @@ func (x *GetExecutionCountReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetExecutionCountReq.ProtoReflect.Descriptor instead.
 func (*GetExecutionCountReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{49}
+	return file_avs_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *GetExecutionCountReq) GetWorkflowIds() []string {
@@ -3853,7 +3675,7 @@ type GetExecutionCountResp struct {
 
 func (x *GetExecutionCountResp) Reset() {
 	*x = GetExecutionCountResp{}
-	mi := &file_avs_proto_msgTypes[50]
+	mi := &file_avs_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3865,7 +3687,7 @@ func (x *GetExecutionCountResp) String() string {
 func (*GetExecutionCountResp) ProtoMessage() {}
 
 func (x *GetExecutionCountResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[50]
+	mi := &file_avs_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3878,7 +3700,7 @@ func (x *GetExecutionCountResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetExecutionCountResp.ProtoReflect.Descriptor instead.
 func (*GetExecutionCountResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{50}
+	return file_avs_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *GetExecutionCountResp) GetTotal() int64 {
@@ -3899,7 +3721,7 @@ type GetExecutionStatsReq struct {
 
 func (x *GetExecutionStatsReq) Reset() {
 	*x = GetExecutionStatsReq{}
-	mi := &file_avs_proto_msgTypes[51]
+	mi := &file_avs_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3911,7 +3733,7 @@ func (x *GetExecutionStatsReq) String() string {
 func (*GetExecutionStatsReq) ProtoMessage() {}
 
 func (x *GetExecutionStatsReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[51]
+	mi := &file_avs_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3924,7 +3746,7 @@ func (x *GetExecutionStatsReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetExecutionStatsReq.ProtoReflect.Descriptor instead.
 func (*GetExecutionStatsReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{51}
+	return file_avs_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *GetExecutionStatsReq) GetWorkflowIds() []string {
@@ -3954,7 +3776,7 @@ type GetExecutionStatsResp struct {
 
 func (x *GetExecutionStatsResp) Reset() {
 	*x = GetExecutionStatsResp{}
-	mi := &file_avs_proto_msgTypes[52]
+	mi := &file_avs_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3966,7 +3788,7 @@ func (x *GetExecutionStatsResp) String() string {
 func (*GetExecutionStatsResp) ProtoMessage() {}
 
 func (x *GetExecutionStatsResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[52]
+	mi := &file_avs_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3979,7 +3801,7 @@ func (x *GetExecutionStatsResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetExecutionStatsResp.ProtoReflect.Descriptor instead.
 func (*GetExecutionStatsResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{52}
+	return file_avs_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *GetExecutionStatsResp) GetTotal() int64 {
@@ -4022,7 +3844,7 @@ type RunNodeWithInputsReq struct {
 
 func (x *RunNodeWithInputsReq) Reset() {
 	*x = RunNodeWithInputsReq{}
-	mi := &file_avs_proto_msgTypes[53]
+	mi := &file_avs_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4034,7 +3856,7 @@ func (x *RunNodeWithInputsReq) String() string {
 func (*RunNodeWithInputsReq) ProtoMessage() {}
 
 func (x *RunNodeWithInputsReq) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[53]
+	mi := &file_avs_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4047,7 +3869,7 @@ func (x *RunNodeWithInputsReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunNodeWithInputsReq.ProtoReflect.Descriptor instead.
 func (*RunNodeWithInputsReq) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{53}
+	return file_avs_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *RunNodeWithInputsReq) GetNodeType() string {
@@ -4073,18 +3895,35 @@ func (x *RunNodeWithInputsReq) GetInputVariables() map[string]*structpb.Value {
 
 // Response message for RunNodeWithInputs
 type RunNodeWithInputsResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`            // Whether the execution was successful
-	Data          *structpb.Value        `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`                   // Output data from the node execution
-	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`                 // Error message if execution failed
-	NodeId        string                 `protobuf:"bytes,4,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"` // ID of the executed node
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Success bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`            // Whether the execution was successful
+	Error   string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`                 // Error message if execution failed
+	NodeId  string                 `protobuf:"bytes,4,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"` // ID of the executed node
+	// Use specific output types instead of generic Value
+	//
+	// Types that are valid to be assigned to OutputData:
+	//
+	//	*RunNodeWithInputsResp_EthTransfer
+	//	*RunNodeWithInputsResp_Graphql
+	//	*RunNodeWithInputsResp_ContractRead
+	//	*RunNodeWithInputsResp_ContractWrite
+	//	*RunNodeWithInputsResp_CustomCode
+	//	*RunNodeWithInputsResp_RestApi
+	//	*RunNodeWithInputsResp_Branch
+	//	*RunNodeWithInputsResp_Filter
+	//	*RunNodeWithInputsResp_Loop
+	//	*RunNodeWithInputsResp_BlockTrigger
+	//	*RunNodeWithInputsResp_FixedTimeTrigger
+	//	*RunNodeWithInputsResp_CronTrigger
+	//	*RunNodeWithInputsResp_EventTrigger
+	OutputData    isRunNodeWithInputsResp_OutputData `protobuf_oneof:"output_data"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RunNodeWithInputsResp) Reset() {
 	*x = RunNodeWithInputsResp{}
-	mi := &file_avs_proto_msgTypes[54]
+	mi := &file_avs_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4096,7 +3935,7 @@ func (x *RunNodeWithInputsResp) String() string {
 func (*RunNodeWithInputsResp) ProtoMessage() {}
 
 func (x *RunNodeWithInputsResp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[54]
+	mi := &file_avs_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4109,7 +3948,7 @@ func (x *RunNodeWithInputsResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunNodeWithInputsResp.ProtoReflect.Descriptor instead.
 func (*RunNodeWithInputsResp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{54}
+	return file_avs_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *RunNodeWithInputsResp) GetSuccess() bool {
@@ -4117,13 +3956,6 @@ func (x *RunNodeWithInputsResp) GetSuccess() bool {
 		return x.Success
 	}
 	return false
-}
-
-func (x *RunNodeWithInputsResp) GetData() *structpb.Value {
-	if x != nil {
-		return x.Data
-	}
-	return nil
 }
 
 func (x *RunNodeWithInputsResp) GetError() string {
@@ -4140,6 +3972,214 @@ func (x *RunNodeWithInputsResp) GetNodeId() string {
 	return ""
 }
 
+func (x *RunNodeWithInputsResp) GetOutputData() isRunNodeWithInputsResp_OutputData {
+	if x != nil {
+		return x.OutputData
+	}
+	return nil
+}
+
+func (x *RunNodeWithInputsResp) GetEthTransfer() *ETHTransferNode_Output {
+	if x != nil {
+		if x, ok := x.OutputData.(*RunNodeWithInputsResp_EthTransfer); ok {
+			return x.EthTransfer
+		}
+	}
+	return nil
+}
+
+func (x *RunNodeWithInputsResp) GetGraphql() *GraphQLQueryNode_Output {
+	if x != nil {
+		if x, ok := x.OutputData.(*RunNodeWithInputsResp_Graphql); ok {
+			return x.Graphql
+		}
+	}
+	return nil
+}
+
+func (x *RunNodeWithInputsResp) GetContractRead() *ContractReadNode_Output {
+	if x != nil {
+		if x, ok := x.OutputData.(*RunNodeWithInputsResp_ContractRead); ok {
+			return x.ContractRead
+		}
+	}
+	return nil
+}
+
+func (x *RunNodeWithInputsResp) GetContractWrite() *ContractWriteNode_Output {
+	if x != nil {
+		if x, ok := x.OutputData.(*RunNodeWithInputsResp_ContractWrite); ok {
+			return x.ContractWrite
+		}
+	}
+	return nil
+}
+
+func (x *RunNodeWithInputsResp) GetCustomCode() *CustomCodeNode_Output {
+	if x != nil {
+		if x, ok := x.OutputData.(*RunNodeWithInputsResp_CustomCode); ok {
+			return x.CustomCode
+		}
+	}
+	return nil
+}
+
+func (x *RunNodeWithInputsResp) GetRestApi() *RestAPINode_Output {
+	if x != nil {
+		if x, ok := x.OutputData.(*RunNodeWithInputsResp_RestApi); ok {
+			return x.RestApi
+		}
+	}
+	return nil
+}
+
+func (x *RunNodeWithInputsResp) GetBranch() *BranchNode_Output {
+	if x != nil {
+		if x, ok := x.OutputData.(*RunNodeWithInputsResp_Branch); ok {
+			return x.Branch
+		}
+	}
+	return nil
+}
+
+func (x *RunNodeWithInputsResp) GetFilter() *FilterNode_Output {
+	if x != nil {
+		if x, ok := x.OutputData.(*RunNodeWithInputsResp_Filter); ok {
+			return x.Filter
+		}
+	}
+	return nil
+}
+
+func (x *RunNodeWithInputsResp) GetLoop() *LoopNode_Output {
+	if x != nil {
+		if x, ok := x.OutputData.(*RunNodeWithInputsResp_Loop); ok {
+			return x.Loop
+		}
+	}
+	return nil
+}
+
+func (x *RunNodeWithInputsResp) GetBlockTrigger() *BlockTrigger_Output {
+	if x != nil {
+		if x, ok := x.OutputData.(*RunNodeWithInputsResp_BlockTrigger); ok {
+			return x.BlockTrigger
+		}
+	}
+	return nil
+}
+
+func (x *RunNodeWithInputsResp) GetFixedTimeTrigger() *FixedTimeTrigger_Output {
+	if x != nil {
+		if x, ok := x.OutputData.(*RunNodeWithInputsResp_FixedTimeTrigger); ok {
+			return x.FixedTimeTrigger
+		}
+	}
+	return nil
+}
+
+func (x *RunNodeWithInputsResp) GetCronTrigger() *CronTrigger_Output {
+	if x != nil {
+		if x, ok := x.OutputData.(*RunNodeWithInputsResp_CronTrigger); ok {
+			return x.CronTrigger
+		}
+	}
+	return nil
+}
+
+func (x *RunNodeWithInputsResp) GetEventTrigger() *EventTrigger_Output {
+	if x != nil {
+		if x, ok := x.OutputData.(*RunNodeWithInputsResp_EventTrigger); ok {
+			return x.EventTrigger
+		}
+	}
+	return nil
+}
+
+type isRunNodeWithInputsResp_OutputData interface {
+	isRunNodeWithInputsResp_OutputData()
+}
+
+type RunNodeWithInputsResp_EthTransfer struct {
+	// Node outputs
+	EthTransfer *ETHTransferNode_Output `protobuf:"bytes,10,opt,name=eth_transfer,json=ethTransfer,proto3,oneof"`
+}
+
+type RunNodeWithInputsResp_Graphql struct {
+	Graphql *GraphQLQueryNode_Output `protobuf:"bytes,11,opt,name=graphql,proto3,oneof"`
+}
+
+type RunNodeWithInputsResp_ContractRead struct {
+	ContractRead *ContractReadNode_Output `protobuf:"bytes,12,opt,name=contract_read,json=contractRead,proto3,oneof"`
+}
+
+type RunNodeWithInputsResp_ContractWrite struct {
+	ContractWrite *ContractWriteNode_Output `protobuf:"bytes,13,opt,name=contract_write,json=contractWrite,proto3,oneof"`
+}
+
+type RunNodeWithInputsResp_CustomCode struct {
+	CustomCode *CustomCodeNode_Output `protobuf:"bytes,14,opt,name=custom_code,json=customCode,proto3,oneof"`
+}
+
+type RunNodeWithInputsResp_RestApi struct {
+	RestApi *RestAPINode_Output `protobuf:"bytes,15,opt,name=rest_api,json=restApi,proto3,oneof"`
+}
+
+type RunNodeWithInputsResp_Branch struct {
+	Branch *BranchNode_Output `protobuf:"bytes,16,opt,name=branch,proto3,oneof"`
+}
+
+type RunNodeWithInputsResp_Filter struct {
+	Filter *FilterNode_Output `protobuf:"bytes,17,opt,name=filter,proto3,oneof"`
+}
+
+type RunNodeWithInputsResp_Loop struct {
+	Loop *LoopNode_Output `protobuf:"bytes,18,opt,name=loop,proto3,oneof"`
+}
+
+type RunNodeWithInputsResp_BlockTrigger struct {
+	// Trigger outputs
+	BlockTrigger *BlockTrigger_Output `protobuf:"bytes,20,opt,name=block_trigger,json=blockTrigger,proto3,oneof"`
+}
+
+type RunNodeWithInputsResp_FixedTimeTrigger struct {
+	FixedTimeTrigger *FixedTimeTrigger_Output `protobuf:"bytes,21,opt,name=fixed_time_trigger,json=fixedTimeTrigger,proto3,oneof"`
+}
+
+type RunNodeWithInputsResp_CronTrigger struct {
+	CronTrigger *CronTrigger_Output `protobuf:"bytes,22,opt,name=cron_trigger,json=cronTrigger,proto3,oneof"`
+}
+
+type RunNodeWithInputsResp_EventTrigger struct {
+	EventTrigger *EventTrigger_Output `protobuf:"bytes,23,opt,name=event_trigger,json=eventTrigger,proto3,oneof"`
+}
+
+func (*RunNodeWithInputsResp_EthTransfer) isRunNodeWithInputsResp_OutputData() {}
+
+func (*RunNodeWithInputsResp_Graphql) isRunNodeWithInputsResp_OutputData() {}
+
+func (*RunNodeWithInputsResp_ContractRead) isRunNodeWithInputsResp_OutputData() {}
+
+func (*RunNodeWithInputsResp_ContractWrite) isRunNodeWithInputsResp_OutputData() {}
+
+func (*RunNodeWithInputsResp_CustomCode) isRunNodeWithInputsResp_OutputData() {}
+
+func (*RunNodeWithInputsResp_RestApi) isRunNodeWithInputsResp_OutputData() {}
+
+func (*RunNodeWithInputsResp_Branch) isRunNodeWithInputsResp_OutputData() {}
+
+func (*RunNodeWithInputsResp_Filter) isRunNodeWithInputsResp_OutputData() {}
+
+func (*RunNodeWithInputsResp_Loop) isRunNodeWithInputsResp_OutputData() {}
+
+func (*RunNodeWithInputsResp_BlockTrigger) isRunNodeWithInputsResp_OutputData() {}
+
+func (*RunNodeWithInputsResp_FixedTimeTrigger) isRunNodeWithInputsResp_OutputData() {}
+
+func (*RunNodeWithInputsResp_CronTrigger) isRunNodeWithInputsResp_OutputData() {}
+
+func (*RunNodeWithInputsResp_EventTrigger) isRunNodeWithInputsResp_OutputData() {}
+
 type Evm struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -4148,7 +4188,7 @@ type Evm struct {
 
 func (x *Evm) Reset() {
 	*x = Evm{}
-	mi := &file_avs_proto_msgTypes[55]
+	mi := &file_avs_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4160,7 +4200,7 @@ func (x *Evm) String() string {
 func (*Evm) ProtoMessage() {}
 
 func (x *Evm) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[55]
+	mi := &file_avs_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4173,10 +4213,330 @@ func (x *Evm) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Evm.ProtoReflect.Descriptor instead.
 func (*Evm) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{55}
+	return file_avs_proto_rawDescGZIP(), []int{54}
 }
 
-type EventCondition_Matcher struct {
+type FixedTimeTrigger_Config struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Epochs        []int64                `protobuf:"varint,1,rep,packed,name=epochs,proto3" json:"epochs,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FixedTimeTrigger_Config) Reset() {
+	*x = FixedTimeTrigger_Config{}
+	mi := &file_avs_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FixedTimeTrigger_Config) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FixedTimeTrigger_Config) ProtoMessage() {}
+
+func (x *FixedTimeTrigger_Config) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FixedTimeTrigger_Config.ProtoReflect.Descriptor instead.
+func (*FixedTimeTrigger_Config) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{1, 0}
+}
+
+func (x *FixedTimeTrigger_Config) GetEpochs() []int64 {
+	if x != nil {
+		return x.Epochs
+	}
+	return nil
+}
+
+type FixedTimeTrigger_Output struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Epoch         uint64                 `protobuf:"varint,1,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FixedTimeTrigger_Output) Reset() {
+	*x = FixedTimeTrigger_Output{}
+	mi := &file_avs_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FixedTimeTrigger_Output) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FixedTimeTrigger_Output) ProtoMessage() {}
+
+func (x *FixedTimeTrigger_Output) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FixedTimeTrigger_Output.ProtoReflect.Descriptor instead.
+func (*FixedTimeTrigger_Output) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{1, 1}
+}
+
+func (x *FixedTimeTrigger_Output) GetEpoch() uint64 {
+	if x != nil {
+		return x.Epoch
+	}
+	return 0
+}
+
+type CronTrigger_Config struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Schedule      []string               `protobuf:"bytes,1,rep,name=schedule,proto3" json:"schedule,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CronTrigger_Config) Reset() {
+	*x = CronTrigger_Config{}
+	mi := &file_avs_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CronTrigger_Config) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CronTrigger_Config) ProtoMessage() {}
+
+func (x *CronTrigger_Config) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CronTrigger_Config.ProtoReflect.Descriptor instead.
+func (*CronTrigger_Config) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{2, 0}
+}
+
+func (x *CronTrigger_Config) GetSchedule() []string {
+	if x != nil {
+		return x.Schedule
+	}
+	return nil
+}
+
+type CronTrigger_Output struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Epoch           uint64                 `protobuf:"varint,1,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	ScheduleMatched string                 `protobuf:"bytes,2,opt,name=schedule_matched,json=scheduleMatched,proto3" json:"schedule_matched,omitempty"` // Which schedule pattern was matched
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *CronTrigger_Output) Reset() {
+	*x = CronTrigger_Output{}
+	mi := &file_avs_proto_msgTypes[58]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CronTrigger_Output) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CronTrigger_Output) ProtoMessage() {}
+
+func (x *CronTrigger_Output) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[58]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CronTrigger_Output.ProtoReflect.Descriptor instead.
+func (*CronTrigger_Output) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{2, 1}
+}
+
+func (x *CronTrigger_Output) GetEpoch() uint64 {
+	if x != nil {
+		return x.Epoch
+	}
+	return 0
+}
+
+func (x *CronTrigger_Output) GetScheduleMatched() string {
+	if x != nil {
+		return x.ScheduleMatched
+	}
+	return ""
+}
+
+type BlockTrigger_Config struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Interval      int64                  `protobuf:"varint,1,opt,name=interval,proto3" json:"interval,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BlockTrigger_Config) Reset() {
+	*x = BlockTrigger_Config{}
+	mi := &file_avs_proto_msgTypes[59]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BlockTrigger_Config) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BlockTrigger_Config) ProtoMessage() {}
+
+func (x *BlockTrigger_Config) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[59]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BlockTrigger_Config.ProtoReflect.Descriptor instead.
+func (*BlockTrigger_Config) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{3, 0}
+}
+
+func (x *BlockTrigger_Config) GetInterval() int64 {
+	if x != nil {
+		return x.Interval
+	}
+	return 0
+}
+
+type BlockTrigger_Output struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BlockNumber   uint64                 `protobuf:"varint,1,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
+	BlockHash     string                 `protobuf:"bytes,2,opt,name=block_hash,json=blockHash,proto3" json:"block_hash,omitempty"`
+	Timestamp     uint64                 `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	ParentHash    string                 `protobuf:"bytes,4,opt,name=parent_hash,json=parentHash,proto3" json:"parent_hash,omitempty"`
+	Difficulty    string                 `protobuf:"bytes,5,opt,name=difficulty,proto3" json:"difficulty,omitempty"`
+	GasLimit      uint64                 `protobuf:"varint,6,opt,name=gas_limit,json=gasLimit,proto3" json:"gas_limit,omitempty"`
+	GasUsed       uint64                 `protobuf:"varint,7,opt,name=gas_used,json=gasUsed,proto3" json:"gas_used,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BlockTrigger_Output) Reset() {
+	*x = BlockTrigger_Output{}
+	mi := &file_avs_proto_msgTypes[60]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BlockTrigger_Output) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BlockTrigger_Output) ProtoMessage() {}
+
+func (x *BlockTrigger_Output) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[60]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BlockTrigger_Output.ProtoReflect.Descriptor instead.
+func (*BlockTrigger_Output) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{3, 1}
+}
+
+func (x *BlockTrigger_Output) GetBlockNumber() uint64 {
+	if x != nil {
+		return x.BlockNumber
+	}
+	return 0
+}
+
+func (x *BlockTrigger_Output) GetBlockHash() string {
+	if x != nil {
+		return x.BlockHash
+	}
+	return ""
+}
+
+func (x *BlockTrigger_Output) GetTimestamp() uint64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *BlockTrigger_Output) GetParentHash() string {
+	if x != nil {
+		return x.ParentHash
+	}
+	return ""
+}
+
+func (x *BlockTrigger_Output) GetDifficulty() string {
+	if x != nil {
+		return x.Difficulty
+	}
+	return ""
+}
+
+func (x *BlockTrigger_Output) GetGasLimit() uint64 {
+	if x != nil {
+		return x.GasLimit
+	}
+	return 0
+}
+
+func (x *BlockTrigger_Output) GetGasUsed() uint64 {
+	if x != nil {
+		return x.GasUsed
+	}
+	return 0
+}
+
+type EventTrigger_Matcher struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// the type of Filter we support, right now, we support below value for
 	//   - topics:
@@ -4206,21 +4566,21 @@ type EventCondition_Matcher struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *EventCondition_Matcher) Reset() {
-	*x = EventCondition_Matcher{}
-	mi := &file_avs_proto_msgTypes[56]
+func (x *EventTrigger_Matcher) Reset() {
+	*x = EventTrigger_Matcher{}
+	mi := &file_avs_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *EventCondition_Matcher) String() string {
+func (x *EventTrigger_Matcher) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*EventCondition_Matcher) ProtoMessage() {}
+func (*EventTrigger_Matcher) ProtoMessage() {}
 
-func (x *EventCondition_Matcher) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[56]
+func (x *EventTrigger_Matcher) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4231,23 +4591,324 @@ func (x *EventCondition_Matcher) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use EventCondition_Matcher.ProtoReflect.Descriptor instead.
-func (*EventCondition_Matcher) Descriptor() ([]byte, []int) {
+// Deprecated: Use EventTrigger_Matcher.ProtoReflect.Descriptor instead.
+func (*EventTrigger_Matcher) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{4, 0}
 }
 
-func (x *EventCondition_Matcher) GetType() string {
+func (x *EventTrigger_Matcher) GetType() string {
 	if x != nil {
 		return x.Type
 	}
 	return ""
 }
 
-func (x *EventCondition_Matcher) GetValue() []string {
+func (x *EventTrigger_Matcher) GetValue() []string {
 	if x != nil {
 		return x.Value
 	}
 	return nil
+}
+
+type EventTrigger_Config struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// an array of filter to be mach, as soon as any element of the array mach, the trigger is fired.
+	Matcher       []*EventTrigger_Matcher `protobuf:"bytes,1,rep,name=matcher,proto3" json:"matcher,omitempty"`
+	Expression    string                  `protobuf:"bytes,2,opt,name=expression,proto3" json:"expression,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EventTrigger_Config) Reset() {
+	*x = EventTrigger_Config{}
+	mi := &file_avs_proto_msgTypes[62]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EventTrigger_Config) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EventTrigger_Config) ProtoMessage() {}
+
+func (x *EventTrigger_Config) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[62]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EventTrigger_Config.ProtoReflect.Descriptor instead.
+func (*EventTrigger_Config) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{4, 1}
+}
+
+func (x *EventTrigger_Config) GetMatcher() []*EventTrigger_Matcher {
+	if x != nil {
+		return x.Matcher
+	}
+	return nil
+}
+
+func (x *EventTrigger_Config) GetExpression() string {
+	if x != nil {
+		return x.Expression
+	}
+	return ""
+}
+
+type EventTrigger_Output struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When the trigger is not a transfer event, we will have a raw event output only
+	// These shape of data is https://docs.ethers.org/v6/api/providers/#Log
+	EvmLog *Evm_Log `protobuf:"bytes,1,opt,name=evm_log,json=evmLog,proto3" json:"evm_log,omitempty"`
+	// For transfer events specifically, we have enriched data
+	TransferLog   *EventTrigger_TransferLogOutput `protobuf:"bytes,2,opt,name=transfer_log,json=transferLog,proto3" json:"transfer_log,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EventTrigger_Output) Reset() {
+	*x = EventTrigger_Output{}
+	mi := &file_avs_proto_msgTypes[63]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EventTrigger_Output) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EventTrigger_Output) ProtoMessage() {}
+
+func (x *EventTrigger_Output) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[63]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EventTrigger_Output.ProtoReflect.Descriptor instead.
+func (*EventTrigger_Output) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{4, 2}
+}
+
+func (x *EventTrigger_Output) GetEvmLog() *Evm_Log {
+	if x != nil {
+		return x.EvmLog
+	}
+	return nil
+}
+
+func (x *EventTrigger_Output) GetTransferLog() *EventTrigger_TransferLogOutput {
+	if x != nil {
+		return x.TransferLog
+	}
+	return nil
+}
+
+type EventTrigger_TransferLogOutput struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	TokenName       string                 `protobuf:"bytes,1,opt,name=token_name,json=tokenName,proto3" json:"token_name,omitempty"`
+	TokenSymbol     string                 `protobuf:"bytes,2,opt,name=token_symbol,json=tokenSymbol,proto3" json:"token_symbol,omitempty"`
+	TokenDecimals   uint32                 `protobuf:"varint,3,opt,name=token_decimals,json=tokenDecimals,proto3" json:"token_decimals,omitempty"`
+	TransactionHash string                 `protobuf:"bytes,4,opt,name=transaction_hash,json=transactionHash,proto3" json:"transaction_hash,omitempty"`
+	Address         string                 `protobuf:"bytes,5,opt,name=address,proto3" json:"address,omitempty"`
+	BlockNumber     uint64                 `protobuf:"varint,6,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
+	// timestamp of the block (in milliseconds)
+	BlockTimestamp   uint64 `protobuf:"varint,7,opt,name=block_timestamp,json=blockTimestamp,proto3" json:"block_timestamp,omitempty"`
+	FromAddress      string `protobuf:"bytes,8,opt,name=from_address,json=fromAddress,proto3" json:"from_address,omitempty"`
+	ToAddress        string `protobuf:"bytes,9,opt,name=to_address,json=toAddress,proto3" json:"to_address,omitempty"`
+	Value            string `protobuf:"bytes,10,opt,name=value,proto3" json:"value,omitempty"`
+	ValueFormatted   string `protobuf:"bytes,11,opt,name=value_formatted,json=valueFormatted,proto3" json:"value_formatted,omitempty"`
+	TransactionIndex uint32 `protobuf:"varint,12,opt,name=transaction_index,json=transactionIndex,proto3" json:"transaction_index,omitempty"`
+	LogIndex         uint32 `protobuf:"varint,13,opt,name=log_index,json=logIndex,proto3" json:"log_index,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *EventTrigger_TransferLogOutput) Reset() {
+	*x = EventTrigger_TransferLogOutput{}
+	mi := &file_avs_proto_msgTypes[64]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EventTrigger_TransferLogOutput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EventTrigger_TransferLogOutput) ProtoMessage() {}
+
+func (x *EventTrigger_TransferLogOutput) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[64]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EventTrigger_TransferLogOutput.ProtoReflect.Descriptor instead.
+func (*EventTrigger_TransferLogOutput) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{4, 3}
+}
+
+func (x *EventTrigger_TransferLogOutput) GetTokenName() string {
+	if x != nil {
+		return x.TokenName
+	}
+	return ""
+}
+
+func (x *EventTrigger_TransferLogOutput) GetTokenSymbol() string {
+	if x != nil {
+		return x.TokenSymbol
+	}
+	return ""
+}
+
+func (x *EventTrigger_TransferLogOutput) GetTokenDecimals() uint32 {
+	if x != nil {
+		return x.TokenDecimals
+	}
+	return 0
+}
+
+func (x *EventTrigger_TransferLogOutput) GetTransactionHash() string {
+	if x != nil {
+		return x.TransactionHash
+	}
+	return ""
+}
+
+func (x *EventTrigger_TransferLogOutput) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *EventTrigger_TransferLogOutput) GetBlockNumber() uint64 {
+	if x != nil {
+		return x.BlockNumber
+	}
+	return 0
+}
+
+func (x *EventTrigger_TransferLogOutput) GetBlockTimestamp() uint64 {
+	if x != nil {
+		return x.BlockTimestamp
+	}
+	return 0
+}
+
+func (x *EventTrigger_TransferLogOutput) GetFromAddress() string {
+	if x != nil {
+		return x.FromAddress
+	}
+	return ""
+}
+
+func (x *EventTrigger_TransferLogOutput) GetToAddress() string {
+	if x != nil {
+		return x.ToAddress
+	}
+	return ""
+}
+
+func (x *EventTrigger_TransferLogOutput) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
+func (x *EventTrigger_TransferLogOutput) GetValueFormatted() string {
+	if x != nil {
+		return x.ValueFormatted
+	}
+	return ""
+}
+
+func (x *EventTrigger_TransferLogOutput) GetTransactionIndex() uint32 {
+	if x != nil {
+		return x.TransactionIndex
+	}
+	return 0
+}
+
+func (x *EventTrigger_TransferLogOutput) GetLogIndex() uint32 {
+	if x != nil {
+		return x.LogIndex
+	}
+	return 0
+}
+
+type ETHTransferNode_Config struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Destination   string                 `protobuf:"bytes,1,opt,name=destination,proto3" json:"destination,omitempty"`
+	Amount        string                 `protobuf:"bytes,2,opt,name=amount,proto3" json:"amount,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ETHTransferNode_Config) Reset() {
+	*x = ETHTransferNode_Config{}
+	mi := &file_avs_proto_msgTypes[65]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ETHTransferNode_Config) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ETHTransferNode_Config) ProtoMessage() {}
+
+func (x *ETHTransferNode_Config) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[65]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ETHTransferNode_Config.ProtoReflect.Descriptor instead.
+func (*ETHTransferNode_Config) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{6, 0}
+}
+
+func (x *ETHTransferNode_Config) GetDestination() string {
+	if x != nil {
+		return x.Destination
+	}
+	return ""
+}
+
+func (x *ETHTransferNode_Config) GetAmount() string {
+	if x != nil {
+		return x.Amount
+	}
+	return ""
 }
 
 type ETHTransferNode_Output struct {
@@ -4259,7 +4920,7 @@ type ETHTransferNode_Output struct {
 
 func (x *ETHTransferNode_Output) Reset() {
 	*x = ETHTransferNode_Output{}
-	mi := &file_avs_proto_msgTypes[57]
+	mi := &file_avs_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4271,7 +4932,7 @@ func (x *ETHTransferNode_Output) String() string {
 func (*ETHTransferNode_Output) ProtoMessage() {}
 
 func (x *ETHTransferNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[57]
+	mi := &file_avs_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4284,7 +4945,7 @@ func (x *ETHTransferNode_Output) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ETHTransferNode_Output.ProtoReflect.Descriptor instead.
 func (*ETHTransferNode_Output) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{6, 0}
+	return file_avs_proto_rawDescGZIP(), []int{6, 1}
 }
 
 func (x *ETHTransferNode_Output) GetTransactionHash() string {
@@ -4294,9 +4955,72 @@ func (x *ETHTransferNode_Output) GetTransactionHash() string {
 	return ""
 }
 
+type ContractWriteNode_Config struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ContractAddress string                 `protobuf:"bytes,1,opt,name=contract_address,json=contractAddress,proto3" json:"contract_address,omitempty"`
+	CallData        string                 `protobuf:"bytes,2,opt,name=call_data,json=callData,proto3" json:"call_data,omitempty"`
+	// The ABI is only required to decode the return value of a method call.
+	// If we don't need the result and only want the transaction hash (which is usually sufficient),
+	// then we don't need to provide the ABI.
+	ContractAbi   string `protobuf:"bytes,3,opt,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContractWriteNode_Config) Reset() {
+	*x = ContractWriteNode_Config{}
+	mi := &file_avs_proto_msgTypes[67]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContractWriteNode_Config) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContractWriteNode_Config) ProtoMessage() {}
+
+func (x *ContractWriteNode_Config) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[67]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContractWriteNode_Config.ProtoReflect.Descriptor instead.
+func (*ContractWriteNode_Config) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{7, 0}
+}
+
+func (x *ContractWriteNode_Config) GetContractAddress() string {
+	if x != nil {
+		return x.ContractAddress
+	}
+	return ""
+}
+
+func (x *ContractWriteNode_Config) GetCallData() string {
+	if x != nil {
+		return x.CallData
+	}
+	return ""
+}
+
+func (x *ContractWriteNode_Config) GetContractAbi() string {
+	if x != nil {
+		return x.ContractAbi
+	}
+	return ""
+}
+
 type ContractWriteNode_Output struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The requiremen for this shape of data is requested in https://github.com/AvaProtocol/EigenLayer-AVS/issues/153
+	// The requirement for this shape of data is requested in https://github.com/AvaProtocol/EigenLayer-AVS/issues/153
 	// https://docs.ethers.org/v6/api/providers/#TransactionReceipt
 	// Ideally we shouldn't have to transport or store this at all. We should only store/pass the txhash, the consumer can construct
 	// a full message of these through EVM RPC.
@@ -4309,7 +5033,7 @@ type ContractWriteNode_Output struct {
 
 func (x *ContractWriteNode_Output) Reset() {
 	*x = ContractWriteNode_Output{}
-	mi := &file_avs_proto_msgTypes[58]
+	mi := &file_avs_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4321,7 +5045,7 @@ func (x *ContractWriteNode_Output) String() string {
 func (*ContractWriteNode_Output) ProtoMessage() {}
 
 func (x *ContractWriteNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[58]
+	mi := &file_avs_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4334,7 +5058,7 @@ func (x *ContractWriteNode_Output) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContractWriteNode_Output.ProtoReflect.Descriptor instead.
 func (*ContractWriteNode_Output) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{7, 0}
+	return file_avs_proto_rawDescGZIP(), []int{7, 1}
 }
 
 func (x *ContractWriteNode_Output) GetUserOp() *Evm_UserOp {
@@ -4351,6 +5075,69 @@ func (x *ContractWriteNode_Output) GetTxReceipt() *Evm_TransactionReceipt {
 	return nil
 }
 
+type ContractReadNode_Config struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ContractAddress string                 `protobuf:"bytes,1,opt,name=contract_address,json=contractAddress,proto3" json:"contract_address,omitempty"`
+	CallData        string                 `protobuf:"bytes,2,opt,name=call_data,json=callData,proto3" json:"call_data,omitempty"`
+	// The ABI are required to decode the return value and pass it to the next step.
+	// Currently, we need to provide the contract ABI as a JSON string.
+	// We don't need to include the full ABI—just enough to decode the method call.
+	ContractAbi   string `protobuf:"bytes,3,opt,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContractReadNode_Config) Reset() {
+	*x = ContractReadNode_Config{}
+	mi := &file_avs_proto_msgTypes[69]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContractReadNode_Config) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContractReadNode_Config) ProtoMessage() {}
+
+func (x *ContractReadNode_Config) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[69]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContractReadNode_Config.ProtoReflect.Descriptor instead.
+func (*ContractReadNode_Config) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{8, 0}
+}
+
+func (x *ContractReadNode_Config) GetContractAddress() string {
+	if x != nil {
+		return x.ContractAddress
+	}
+	return ""
+}
+
+func (x *ContractReadNode_Config) GetCallData() string {
+	if x != nil {
+		return x.CallData
+	}
+	return ""
+}
+
+func (x *ContractReadNode_Config) GetContractAbi() string {
+	if x != nil {
+		return x.ContractAbi
+	}
+	return ""
+}
+
 type ContractReadNode_Output struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The data is the result of querying the contract method. Becuase this is fetching data from the outside world,
@@ -4364,7 +5151,7 @@ type ContractReadNode_Output struct {
 
 func (x *ContractReadNode_Output) Reset() {
 	*x = ContractReadNode_Output{}
-	mi := &file_avs_proto_msgTypes[59]
+	mi := &file_avs_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4376,7 +5163,7 @@ func (x *ContractReadNode_Output) String() string {
 func (*ContractReadNode_Output) ProtoMessage() {}
 
 func (x *ContractReadNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[59]
+	mi := &file_avs_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4389,12 +5176,73 @@ func (x *ContractReadNode_Output) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContractReadNode_Output.ProtoReflect.Descriptor instead.
 func (*ContractReadNode_Output) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{8, 0}
+	return file_avs_proto_rawDescGZIP(), []int{8, 1}
 }
 
 func (x *ContractReadNode_Output) GetData() []*structpb.Value {
 	if x != nil {
 		return x.Data
+	}
+	return nil
+}
+
+type GraphQLQueryNode_Config struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Static configuration set at node creation time
+	Url           string            `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	Query         string            `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
+	Variables     map[string]string `protobuf:"bytes,3,rep,name=variables,proto3" json:"variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GraphQLQueryNode_Config) Reset() {
+	*x = GraphQLQueryNode_Config{}
+	mi := &file_avs_proto_msgTypes[71]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GraphQLQueryNode_Config) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GraphQLQueryNode_Config) ProtoMessage() {}
+
+func (x *GraphQLQueryNode_Config) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[71]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GraphQLQueryNode_Config.ProtoReflect.Descriptor instead.
+func (*GraphQLQueryNode_Config) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{9, 0}
+}
+
+func (x *GraphQLQueryNode_Config) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *GraphQLQueryNode_Config) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+func (x *GraphQLQueryNode_Config) GetVariables() map[string]string {
+	if x != nil {
+		return x.Variables
 	}
 	return nil
 }
@@ -4410,7 +5258,7 @@ type GraphQLQueryNode_Output struct {
 
 func (x *GraphQLQueryNode_Output) Reset() {
 	*x = GraphQLQueryNode_Output{}
-	mi := &file_avs_proto_msgTypes[61]
+	mi := &file_avs_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4422,7 +5270,7 @@ func (x *GraphQLQueryNode_Output) String() string {
 func (*GraphQLQueryNode_Output) ProtoMessage() {}
 
 func (x *GraphQLQueryNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[61]
+	mi := &file_avs_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4445,6 +5293,74 @@ func (x *GraphQLQueryNode_Output) GetData() *anypb.Any {
 	return nil
 }
 
+type RestAPINode_Config struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Url           string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	Headers       map[string]string      `protobuf:"bytes,2,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Body          string                 `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
+	Method        string                 `protobuf:"bytes,4,opt,name=method,proto3" json:"method,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestAPINode_Config) Reset() {
+	*x = RestAPINode_Config{}
+	mi := &file_avs_proto_msgTypes[74]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestAPINode_Config) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestAPINode_Config) ProtoMessage() {}
+
+func (x *RestAPINode_Config) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[74]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestAPINode_Config.ProtoReflect.Descriptor instead.
+func (*RestAPINode_Config) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{10, 0}
+}
+
+func (x *RestAPINode_Config) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *RestAPINode_Config) GetHeaders() map[string]string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *RestAPINode_Config) GetBody() string {
+	if x != nil {
+		return x.Body
+	}
+	return ""
+}
+
+func (x *RestAPINode_Config) GetMethod() string {
+	if x != nil {
+		return x.Method
+	}
+	return ""
+}
+
 type RestAPINode_Output struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Data          *anypb.Any             `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
@@ -4454,7 +5370,7 @@ type RestAPINode_Output struct {
 
 func (x *RestAPINode_Output) Reset() {
 	*x = RestAPINode_Output{}
-	mi := &file_avs_proto_msgTypes[63]
+	mi := &file_avs_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4466,7 +5382,7 @@ func (x *RestAPINode_Output) String() string {
 func (*RestAPINode_Output) ProtoMessage() {}
 
 func (x *RestAPINode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[63]
+	mi := &file_avs_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4489,6 +5405,58 @@ func (x *RestAPINode_Output) GetData() *anypb.Any {
 	return nil
 }
 
+type CustomCodeNode_Config struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Lang          Lang                   `protobuf:"varint,1,opt,name=lang,proto3,enum=aggregator.Lang" json:"lang,omitempty"` // Language is static config set at creation time
+	Source        string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`                   // Source code can be provided as input variable
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CustomCodeNode_Config) Reset() {
+	*x = CustomCodeNode_Config{}
+	mi := &file_avs_proto_msgTypes[77]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CustomCodeNode_Config) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CustomCodeNode_Config) ProtoMessage() {}
+
+func (x *CustomCodeNode_Config) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[77]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CustomCodeNode_Config.ProtoReflect.Descriptor instead.
+func (*CustomCodeNode_Config) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{11, 0}
+}
+
+func (x *CustomCodeNode_Config) GetLang() Lang {
+	if x != nil {
+		return x.Lang
+	}
+	return Lang_JavaScript
+}
+
+func (x *CustomCodeNode_Config) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
 type CustomCodeNode_Output struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Changed from google.protobuf.Any to google.protobuf.Value for better JavaScript native type support
@@ -4499,7 +5467,7 @@ type CustomCodeNode_Output struct {
 
 func (x *CustomCodeNode_Output) Reset() {
 	*x = CustomCodeNode_Output{}
-	mi := &file_avs_proto_msgTypes[64]
+	mi := &file_avs_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4511,7 +5479,7 @@ func (x *CustomCodeNode_Output) String() string {
 func (*CustomCodeNode_Output) ProtoMessage() {}
 
 func (x *CustomCodeNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[64]
+	mi := &file_avs_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4524,12 +5492,116 @@ func (x *CustomCodeNode_Output) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CustomCodeNode_Output.ProtoReflect.Descriptor instead.
 func (*CustomCodeNode_Output) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{11, 0}
+	return file_avs_proto_rawDescGZIP(), []int{11, 1}
 }
 
 func (x *CustomCodeNode_Output) GetData() *structpb.Value {
 	if x != nil {
 		return x.Data
+	}
+	return nil
+}
+
+type BranchNode_Condition struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	Expression    string                 `protobuf:"bytes,3,opt,name=expression,proto3" json:"expression,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BranchNode_Condition) Reset() {
+	*x = BranchNode_Condition{}
+	mi := &file_avs_proto_msgTypes[79]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BranchNode_Condition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BranchNode_Condition) ProtoMessage() {}
+
+func (x *BranchNode_Condition) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[79]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BranchNode_Condition.ProtoReflect.Descriptor instead.
+func (*BranchNode_Condition) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{12, 0}
+}
+
+func (x *BranchNode_Condition) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *BranchNode_Condition) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *BranchNode_Condition) GetExpression() string {
+	if x != nil {
+		return x.Expression
+	}
+	return ""
+}
+
+type BranchNode_Config struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Conditions    []*BranchNode_Condition `protobuf:"bytes,1,rep,name=conditions,proto3" json:"conditions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BranchNode_Config) Reset() {
+	*x = BranchNode_Config{}
+	mi := &file_avs_proto_msgTypes[80]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BranchNode_Config) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BranchNode_Config) ProtoMessage() {}
+
+func (x *BranchNode_Config) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[80]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BranchNode_Config.ProtoReflect.Descriptor instead.
+func (*BranchNode_Config) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{12, 1}
+}
+
+func (x *BranchNode_Config) GetConditions() []*BranchNode_Condition {
+	if x != nil {
+		return x.Conditions
 	}
 	return nil
 }
@@ -4546,7 +5618,7 @@ type BranchNode_Output struct {
 
 func (x *BranchNode_Output) Reset() {
 	*x = BranchNode_Output{}
-	mi := &file_avs_proto_msgTypes[65]
+	mi := &file_avs_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4558,7 +5630,7 @@ func (x *BranchNode_Output) String() string {
 func (*BranchNode_Output) ProtoMessage() {}
 
 func (x *BranchNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[65]
+	mi := &file_avs_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4571,12 +5643,67 @@ func (x *BranchNode_Output) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BranchNode_Output.ProtoReflect.Descriptor instead.
 func (*BranchNode_Output) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{13, 0}
+	return file_avs_proto_rawDescGZIP(), []int{12, 2}
 }
 
 func (x *BranchNode_Output) GetConditionId() string {
 	if x != nil {
 		return x.ConditionId
+	}
+	return ""
+}
+
+type FilterNode_Config struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Filter node acts like .select or .filter to pluck out element in an array that evaluate the expression to true
+	Expression string `protobuf:"bytes,1,opt,name=expression,proto3" json:"expression,omitempty"`
+	// The node Id of a source node; we will extract the output of the source node at runtime.
+	// The data should be iterable (array, object, etc.). Runtime validation will check compatibility.
+	SourceId      string `protobuf:"bytes,2,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FilterNode_Config) Reset() {
+	*x = FilterNode_Config{}
+	mi := &file_avs_proto_msgTypes[82]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FilterNode_Config) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FilterNode_Config) ProtoMessage() {}
+
+func (x *FilterNode_Config) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[82]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FilterNode_Config.ProtoReflect.Descriptor instead.
+func (*FilterNode_Config) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{13, 0}
+}
+
+func (x *FilterNode_Config) GetExpression() string {
+	if x != nil {
+		return x.Expression
+	}
+	return ""
+}
+
+func (x *FilterNode_Config) GetSourceId() string {
+	if x != nil {
+		return x.SourceId
 	}
 	return ""
 }
@@ -4591,7 +5718,7 @@ type FilterNode_Output struct {
 
 func (x *FilterNode_Output) Reset() {
 	*x = FilterNode_Output{}
-	mi := &file_avs_proto_msgTypes[66]
+	mi := &file_avs_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4603,7 +5730,7 @@ func (x *FilterNode_Output) String() string {
 func (*FilterNode_Output) ProtoMessage() {}
 
 func (x *FilterNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[66]
+	mi := &file_avs_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4616,7 +5743,7 @@ func (x *FilterNode_Output) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FilterNode_Output.ProtoReflect.Descriptor instead.
 func (*FilterNode_Output) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{14, 0}
+	return file_avs_proto_rawDescGZIP(), []int{13, 1}
 }
 
 func (x *FilterNode_Output) GetData() *anypb.Any {
@@ -4626,17 +5753,80 @@ func (x *FilterNode_Output) GetData() *anypb.Any {
 	return nil
 }
 
-type LoopNode_Output struct {
+type LoopNode_Config struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// TODO: We haven't implement loop node yet
-	Data          string `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
+	// source_variable is the variable name from a previous node whose data will be iterated over.
+	// The node Id of a source node; we will extract the output of the source node at runtime.
+	SourceId string `protobuf:"bytes,1,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	// iter_val is the variable name that will hold the current value during each iteration
+	IterVal string `protobuf:"bytes,2,opt,name=iter_val,json=iterVal,proto3" json:"iter_val,omitempty"`
+	// iter_key is the variable name that will hold the current key/index during each iteration
+	IterKey       string `protobuf:"bytes,3,opt,name=iter_key,json=iterKey,proto3" json:"iter_key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LoopNode_Config) Reset() {
+	*x = LoopNode_Config{}
+	mi := &file_avs_proto_msgTypes[84]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LoopNode_Config) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoopNode_Config) ProtoMessage() {}
+
+func (x *LoopNode_Config) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[84]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoopNode_Config.ProtoReflect.Descriptor instead.
+func (*LoopNode_Config) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{14, 0}
+}
+
+func (x *LoopNode_Config) GetSourceId() string {
+	if x != nil {
+		return x.SourceId
+	}
+	return ""
+}
+
+func (x *LoopNode_Config) GetIterVal() string {
+	if x != nil {
+		return x.IterVal
+	}
+	return ""
+}
+
+func (x *LoopNode_Config) GetIterKey() string {
+	if x != nil {
+		return x.IterKey
+	}
+	return ""
+}
+
+type LoopNode_Output struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Data          string                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LoopNode_Output) Reset() {
 	*x = LoopNode_Output{}
-	mi := &file_avs_proto_msgTypes[67]
+	mi := &file_avs_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4648,7 +5838,7 @@ func (x *LoopNode_Output) String() string {
 func (*LoopNode_Output) ProtoMessage() {}
 
 func (x *LoopNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[67]
+	mi := &file_avs_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4661,7 +5851,7 @@ func (x *LoopNode_Output) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoopNode_Output.ProtoReflect.Descriptor instead.
 func (*LoopNode_Output) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{15, 0}
+	return file_avs_proto_rawDescGZIP(), []int{14, 1}
 }
 
 func (x *LoopNode_Output) GetData() string {
@@ -4701,7 +5891,7 @@ type Execution_Step struct {
 
 func (x *Execution_Step) Reset() {
 	*x = Execution_Step{}
-	mi := &file_avs_proto_msgTypes[68]
+	mi := &file_avs_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4713,7 +5903,7 @@ func (x *Execution_Step) String() string {
 func (*Execution_Step) ProtoMessage() {}
 
 func (x *Execution_Step) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[68]
+	mi := &file_avs_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4726,7 +5916,7 @@ func (x *Execution_Step) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Execution_Step.ProtoReflect.Descriptor instead.
 func (*Execution_Step) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{18, 0}
+	return file_avs_proto_rawDescGZIP(), []int{17, 0}
 }
 
 func (x *Execution_Step) GetNodeId() string {
@@ -4924,227 +6114,6 @@ func (*Execution_Step_Filter) isExecution_Step_OutputData() {}
 
 func (*Execution_Step_Loop) isExecution_Step_OutputData() {}
 
-type Execution_TransferLogOutput struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	TokenName       string                 `protobuf:"bytes,1,opt,name=token_name,json=tokenName,proto3" json:"token_name,omitempty"`
-	TokenSymbol     string                 `protobuf:"bytes,2,opt,name=token_symbol,json=tokenSymbol,proto3" json:"token_symbol,omitempty"`
-	TokenDecimals   uint32                 `protobuf:"varint,3,opt,name=token_decimals,json=tokenDecimals,proto3" json:"token_decimals,omitempty"`
-	TransactionHash string                 `protobuf:"bytes,4,opt,name=transaction_hash,json=transactionHash,proto3" json:"transaction_hash,omitempty"`
-	Address         string                 `protobuf:"bytes,5,opt,name=address,proto3" json:"address,omitempty"`
-	BlockNumber     uint64                 `protobuf:"varint,6,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
-	// timestamp of the block (in milliseconds)
-	BlockTimestamp   uint64 `protobuf:"varint,7,opt,name=block_timestamp,json=blockTimestamp,proto3" json:"block_timestamp,omitempty"`
-	FromAddress      string `protobuf:"bytes,8,opt,name=from_address,json=fromAddress,proto3" json:"from_address,omitempty"`
-	ToAddress        string `protobuf:"bytes,9,opt,name=to_address,json=toAddress,proto3" json:"to_address,omitempty"`
-	Value            string `protobuf:"bytes,10,opt,name=value,proto3" json:"value,omitempty"`
-	ValueFormatted   string `protobuf:"bytes,11,opt,name=value_formatted,json=valueFormatted,proto3" json:"value_formatted,omitempty"`
-	TransactionIndex uint32 `protobuf:"varint,12,opt,name=transaction_index,json=transactionIndex,proto3" json:"transaction_index,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
-}
-
-func (x *Execution_TransferLogOutput) Reset() {
-	*x = Execution_TransferLogOutput{}
-	mi := &file_avs_proto_msgTypes[69]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Execution_TransferLogOutput) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Execution_TransferLogOutput) ProtoMessage() {}
-
-func (x *Execution_TransferLogOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[69]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Execution_TransferLogOutput.ProtoReflect.Descriptor instead.
-func (*Execution_TransferLogOutput) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{18, 1}
-}
-
-func (x *Execution_TransferLogOutput) GetTokenName() string {
-	if x != nil {
-		return x.TokenName
-	}
-	return ""
-}
-
-func (x *Execution_TransferLogOutput) GetTokenSymbol() string {
-	if x != nil {
-		return x.TokenSymbol
-	}
-	return ""
-}
-
-func (x *Execution_TransferLogOutput) GetTokenDecimals() uint32 {
-	if x != nil {
-		return x.TokenDecimals
-	}
-	return 0
-}
-
-func (x *Execution_TransferLogOutput) GetTransactionHash() string {
-	if x != nil {
-		return x.TransactionHash
-	}
-	return ""
-}
-
-func (x *Execution_TransferLogOutput) GetAddress() string {
-	if x != nil {
-		return x.Address
-	}
-	return ""
-}
-
-func (x *Execution_TransferLogOutput) GetBlockNumber() uint64 {
-	if x != nil {
-		return x.BlockNumber
-	}
-	return 0
-}
-
-func (x *Execution_TransferLogOutput) GetBlockTimestamp() uint64 {
-	if x != nil {
-		return x.BlockTimestamp
-	}
-	return 0
-}
-
-func (x *Execution_TransferLogOutput) GetFromAddress() string {
-	if x != nil {
-		return x.FromAddress
-	}
-	return ""
-}
-
-func (x *Execution_TransferLogOutput) GetToAddress() string {
-	if x != nil {
-		return x.ToAddress
-	}
-	return ""
-}
-
-func (x *Execution_TransferLogOutput) GetValue() string {
-	if x != nil {
-		return x.Value
-	}
-	return ""
-}
-
-func (x *Execution_TransferLogOutput) GetValueFormatted() string {
-	if x != nil {
-		return x.ValueFormatted
-	}
-	return ""
-}
-
-func (x *Execution_TransferLogOutput) GetTransactionIndex() uint32 {
-	if x != nil {
-		return x.TransactionIndex
-	}
-	return 0
-}
-
-type Execution_BlockOutput struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	BlockNumber   uint64                 `protobuf:"varint,1,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Execution_BlockOutput) Reset() {
-	*x = Execution_BlockOutput{}
-	mi := &file_avs_proto_msgTypes[70]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Execution_BlockOutput) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Execution_BlockOutput) ProtoMessage() {}
-
-func (x *Execution_BlockOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[70]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Execution_BlockOutput.ProtoReflect.Descriptor instead.
-func (*Execution_BlockOutput) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{18, 2}
-}
-
-func (x *Execution_BlockOutput) GetBlockNumber() uint64 {
-	if x != nil {
-		return x.BlockNumber
-	}
-	return 0
-}
-
-type Execution_TimeOutput struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Epoch         uint64                 `protobuf:"varint,1,opt,name=epoch,proto3" json:"epoch,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Execution_TimeOutput) Reset() {
-	*x = Execution_TimeOutput{}
-	mi := &file_avs_proto_msgTypes[71]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Execution_TimeOutput) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Execution_TimeOutput) ProtoMessage() {}
-
-func (x *Execution_TimeOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[71]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Execution_TimeOutput.ProtoReflect.Descriptor instead.
-func (*Execution_TimeOutput) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{18, 3}
-}
-
-func (x *Execution_TimeOutput) GetEpoch() uint64 {
-	if x != nil {
-		return x.Epoch
-	}
-	return 0
-}
-
 type ListTasksResp_Item struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	Id                 string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -5172,7 +6141,7 @@ type ListTasksResp_Item struct {
 
 func (x *ListTasksResp_Item) Reset() {
 	*x = ListTasksResp_Item{}
-	mi := &file_avs_proto_msgTypes[72]
+	mi := &file_avs_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5184,7 +6153,7 @@ func (x *ListTasksResp_Item) String() string {
 func (*ListTasksResp_Item) ProtoMessage() {}
 
 func (x *ListTasksResp_Item) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[72]
+	mi := &file_avs_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5197,7 +6166,7 @@ func (x *ListTasksResp_Item) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTasksResp_Item.ProtoReflect.Descriptor instead.
 func (*ListTasksResp_Item) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{28, 0}
+	return file_avs_proto_rawDescGZIP(), []int{27, 0}
 }
 
 func (x *ListTasksResp_Item) GetId() string {
@@ -5297,7 +6266,7 @@ type ListSecretsResp_ResponseSecret struct {
 
 func (x *ListSecretsResp_ResponseSecret) Reset() {
 	*x = ListSecretsResp_ResponseSecret{}
-	mi := &file_avs_proto_msgTypes[73]
+	mi := &file_avs_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5309,7 +6278,7 @@ func (x *ListSecretsResp_ResponseSecret) String() string {
 func (*ListSecretsResp_ResponseSecret) ProtoMessage() {}
 
 func (x *ListSecretsResp_ResponseSecret) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[73]
+	mi := &file_avs_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5322,7 +6291,7 @@ func (x *ListSecretsResp_ResponseSecret) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSecretsResp_ResponseSecret.ProtoReflect.Descriptor instead.
 func (*ListSecretsResp_ResponseSecret) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{43, 0}
+	return file_avs_proto_rawDescGZIP(), []int{42, 0}
 }
 
 func (x *ListSecretsResp_ResponseSecret) GetName() string {
@@ -5372,7 +6341,7 @@ type Evm_Log struct {
 
 func (x *Evm_Log) Reset() {
 	*x = Evm_Log{}
-	mi := &file_avs_proto_msgTypes[76]
+	mi := &file_avs_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5384,7 +6353,7 @@ func (x *Evm_Log) String() string {
 func (*Evm_Log) ProtoMessage() {}
 
 func (x *Evm_Log) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[76]
+	mi := &file_avs_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5397,7 +6366,7 @@ func (x *Evm_Log) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Evm_Log.ProtoReflect.Descriptor instead.
 func (*Evm_Log) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{55, 0}
+	return file_avs_proto_rawDescGZIP(), []int{54, 0}
 }
 
 func (x *Evm_Log) GetAddress() string {
@@ -5490,7 +6459,7 @@ type Evm_TransactionReceipt struct {
 
 func (x *Evm_TransactionReceipt) Reset() {
 	*x = Evm_TransactionReceipt{}
-	mi := &file_avs_proto_msgTypes[77]
+	mi := &file_avs_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5502,7 +6471,7 @@ func (x *Evm_TransactionReceipt) String() string {
 func (*Evm_TransactionReceipt) ProtoMessage() {}
 
 func (x *Evm_TransactionReceipt) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[77]
+	mi := &file_avs_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5515,7 +6484,7 @@ func (x *Evm_TransactionReceipt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Evm_TransactionReceipt.ProtoReflect.Descriptor instead.
 func (*Evm_TransactionReceipt) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{55, 1}
+	return file_avs_proto_rawDescGZIP(), []int{54, 1}
 }
 
 func (x *Evm_TransactionReceipt) GetHash() string {
@@ -5663,7 +6632,7 @@ type Evm_UserOp struct {
 
 func (x *Evm_UserOp) Reset() {
 	*x = Evm_UserOp{}
-	mi := &file_avs_proto_msgTypes[78]
+	mi := &file_avs_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5675,7 +6644,7 @@ func (x *Evm_UserOp) String() string {
 func (*Evm_UserOp) ProtoMessage() {}
 
 func (x *Evm_UserOp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[78]
+	mi := &file_avs_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5688,7 +6657,7 @@ func (x *Evm_UserOp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Evm_UserOp.ProtoReflect.Descriptor instead.
 func (*Evm_UserOp) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{55, 2}
+	return file_avs_proto_rawDescGZIP(), []int{54, 2}
 }
 
 func (x *Evm_UserOp) GetSender() string {
@@ -5775,99 +6744,157 @@ const file_avs_proto_rawDesc = "" +
 	"\tavs.proto\x12\n" +
 	"aggregator\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19google/protobuf/any.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x17\n" +
 	"\x05IdReq\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\",\n" +
-	"\x12FixedTimeCondition\x12\x16\n" +
-	"\x06epochs\x18\x01 \x03(\x03R\x06epochs\"+\n" +
-	"\rCronCondition\x12\x1a\n" +
-	"\bschedule\x18\x01 \x03(\tR\bschedule\",\n" +
-	"\x0eBlockCondition\x12\x1a\n" +
-	"\binterval\x18\x01 \x01(\x03R\binterval\"\xa3\x01\n" +
-	"\x0eEventCondition\x12<\n" +
-	"\amatcher\x18\x01 \x03(\v2\".aggregator.EventCondition.MatcherR\amatcher\x12\x1e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x91\x01\n" +
+	"\x10FixedTimeTrigger\x12;\n" +
+	"\x06config\x18\x01 \x01(\v2#.aggregator.FixedTimeTrigger.ConfigR\x06config\x1a \n" +
+	"\x06Config\x12\x16\n" +
+	"\x06epochs\x18\x01 \x03(\x03R\x06epochs\x1a\x1e\n" +
+	"\x06Output\x12\x14\n" +
+	"\x05epoch\x18\x01 \x01(\x04R\x05epoch\"\xb6\x01\n" +
+	"\vCronTrigger\x126\n" +
+	"\x06config\x18\x01 \x01(\v2\x1e.aggregator.CronTrigger.ConfigR\x06config\x1a$\n" +
+	"\x06Config\x12\x1a\n" +
+	"\bschedule\x18\x01 \x03(\tR\bschedule\x1aI\n" +
+	"\x06Output\x12\x14\n" +
+	"\x05epoch\x18\x01 \x01(\x04R\x05epoch\x12)\n" +
+	"\x10schedule_matched\x18\x02 \x01(\tR\x0fscheduleMatched\"\xd1\x02\n" +
+	"\fBlockTrigger\x127\n" +
+	"\x06config\x18\x01 \x01(\v2\x1f.aggregator.BlockTrigger.ConfigR\x06config\x1a$\n" +
+	"\x06Config\x12\x1a\n" +
+	"\binterval\x18\x01 \x01(\x03R\binterval\x1a\xe1\x01\n" +
+	"\x06Output\x12!\n" +
+	"\fblock_number\x18\x01 \x01(\x04R\vblockNumber\x12\x1d\n" +
 	"\n" +
-	"expression\x18\x02 \x01(\tR\n" +
-	"expression\x1a3\n" +
+	"block_hash\x18\x02 \x01(\tR\tblockHash\x12\x1c\n" +
+	"\ttimestamp\x18\x03 \x01(\x04R\ttimestamp\x12\x1f\n" +
+	"\vparent_hash\x18\x04 \x01(\tR\n" +
+	"parentHash\x12\x1e\n" +
+	"\n" +
+	"difficulty\x18\x05 \x01(\tR\n" +
+	"difficulty\x12\x1b\n" +
+	"\tgas_limit\x18\x06 \x01(\x04R\bgasLimit\x12\x19\n" +
+	"\bgas_used\x18\a \x01(\x04R\agasUsed\"\xc5\x06\n" +
+	"\fEventTrigger\x127\n" +
+	"\x06config\x18\x01 \x01(\v2\x1f.aggregator.EventTrigger.ConfigR\x06config\x1a3\n" +
 	"\aMatcher\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x14\n" +
-	"\x05value\x18\x02 \x03(\tR\x05value\"\xb5\x02\n" +
+	"\x05value\x18\x02 \x03(\tR\x05value\x1ad\n" +
+	"\x06Config\x12:\n" +
+	"\amatcher\x18\x01 \x03(\v2 .aggregator.EventTrigger.MatcherR\amatcher\x12\x1e\n" +
+	"\n" +
+	"expression\x18\x02 \x01(\tR\n" +
+	"expression\x1a\x85\x01\n" +
+	"\x06Output\x12,\n" +
+	"\aevm_log\x18\x01 \x01(\v2\x13.aggregator.Evm.LogR\x06evmLog\x12M\n" +
+	"\ftransfer_log\x18\x02 \x01(\v2*.aggregator.EventTrigger.TransferLogOutputR\vtransferLog\x1a\xd8\x03\n" +
+	"\x11TransferLogOutput\x12\x1d\n" +
+	"\n" +
+	"token_name\x18\x01 \x01(\tR\ttokenName\x12!\n" +
+	"\ftoken_symbol\x18\x02 \x01(\tR\vtokenSymbol\x12%\n" +
+	"\x0etoken_decimals\x18\x03 \x01(\rR\rtokenDecimals\x12)\n" +
+	"\x10transaction_hash\x18\x04 \x01(\tR\x0ftransactionHash\x12\x18\n" +
+	"\aaddress\x18\x05 \x01(\tR\aaddress\x12!\n" +
+	"\fblock_number\x18\x06 \x01(\x04R\vblockNumber\x12'\n" +
+	"\x0fblock_timestamp\x18\a \x01(\x04R\x0eblockTimestamp\x12!\n" +
+	"\ffrom_address\x18\b \x01(\tR\vfromAddress\x12\x1d\n" +
+	"\n" +
+	"to_address\x18\t \x01(\tR\ttoAddress\x12\x14\n" +
+	"\x05value\x18\n" +
+	" \x01(\tR\x05value\x12'\n" +
+	"\x0fvalue_formatted\x18\v \x01(\tR\x0evalueFormatted\x12+\n" +
+	"\x11transaction_index\x18\f \x01(\rR\x10transactionIndex\x12\x1b\n" +
+	"\tlog_index\x18\r \x01(\rR\blogIndex\"\xad\x02\n" +
 	"\vTaskTrigger\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
-	"\x06manual\x18\x02 \x01(\bH\x00R\x06manual\x12?\n" +
+	"\x06manual\x18\x02 \x01(\bH\x00R\x06manual\x12=\n" +
 	"\n" +
-	"fixed_time\x18\x03 \x01(\v2\x1e.aggregator.FixedTimeConditionH\x00R\tfixedTime\x12/\n" +
-	"\x04cron\x18\x04 \x01(\v2\x19.aggregator.CronConditionH\x00R\x04cron\x122\n" +
-	"\x05block\x18\x05 \x01(\v2\x1a.aggregator.BlockConditionH\x00R\x05block\x122\n" +
-	"\x05event\x18\x06 \x01(\v2\x1a.aggregator.EventConditionH\x00R\x05event\x12\x0e\n" +
+	"fixed_time\x18\x03 \x01(\v2\x1c.aggregator.FixedTimeTriggerH\x00R\tfixedTime\x12-\n" +
+	"\x04cron\x18\x04 \x01(\v2\x17.aggregator.CronTriggerH\x00R\x04cron\x120\n" +
+	"\x05block\x18\x05 \x01(\v2\x18.aggregator.BlockTriggerH\x00R\x05block\x120\n" +
+	"\x05event\x18\x06 \x01(\v2\x18.aggregator.EventTriggerH\x00R\x05event\x12\x0e\n" +
 	"\x02id\x18\a \x01(\tR\x02idB\x0e\n" +
-	"\ftrigger_type\"\x80\x01\n" +
-	"\x0fETHTransferNode\x12 \n" +
+	"\ftrigger_type\"\xc6\x01\n" +
+	"\x0fETHTransferNode\x12:\n" +
+	"\x06config\x18\x01 \x01(\v2\".aggregator.ETHTransferNode.ConfigR\x06config\x1aB\n" +
+	"\x06Config\x12 \n" +
 	"\vdestination\x18\x01 \x01(\tR\vdestination\x12\x16\n" +
 	"\x06amount\x18\x02 \x01(\tR\x06amount\x1a3\n" +
 	"\x06Output\x12)\n" +
-	"\x10transaction_hash\x18\x01 \x01(\tR\x0ftransactionHash\"\xfc\x01\n" +
-	"\x11ContractWriteNode\x12)\n" +
+	"\x10transaction_hash\x18\x01 \x01(\tR\x0ftransactionHash\"\xc4\x02\n" +
+	"\x11ContractWriteNode\x12<\n" +
+	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x1as\n" +
+	"\x06Config\x12)\n" +
 	"\x10contract_address\x18\x01 \x01(\tR\x0fcontractAddress\x12\x1b\n" +
 	"\tcall_data\x18\x02 \x01(\tR\bcallData\x12!\n" +
 	"\fcontract_abi\x18\x03 \x01(\tR\vcontractAbi\x1a|\n" +
 	"\x06Output\x12/\n" +
 	"\auser_op\x18\x01 \x01(\v2\x16.aggregator.Evm.UserOpR\x06userOp\x12A\n" +
 	"\n" +
-	"tx_receipt\x18\x02 \x01(\v2\".aggregator.Evm.TransactionReceiptR\ttxReceipt\"\xb3\x01\n" +
-	"\x10ContractReadNode\x12)\n" +
+	"tx_receipt\x18\x02 \x01(\v2\".aggregator.Evm.TransactionReceiptR\ttxReceipt\"\xfa\x01\n" +
+	"\x10ContractReadNode\x12;\n" +
+	"\x06config\x18\x01 \x01(\v2#.aggregator.ContractReadNode.ConfigR\x06config\x1as\n" +
+	"\x06Config\x12)\n" +
 	"\x10contract_address\x18\x01 \x01(\tR\x0fcontractAddress\x12\x1b\n" +
 	"\tcall_data\x18\x02 \x01(\tR\bcallData\x12!\n" +
 	"\fcontract_abi\x18\x03 \x01(\tR\vcontractAbi\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x03(\v2\x16.google.protobuf.ValueR\x04data\"\xf7\x01\n" +
-	"\x10GraphQLQueryNode\x12\x10\n" +
+	"\x04data\x18\x01 \x03(\v2\x16.google.protobuf.ValueR\x04data\"\xc6\x02\n" +
+	"\x10GraphQLQueryNode\x12;\n" +
+	"\x06config\x18\x01 \x01(\v2#.aggregator.GraphQLQueryNode.ConfigR\x06config\x1a\xc0\x01\n" +
+	"\x06Config\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x14\n" +
-	"\x05query\x18\x02 \x01(\tR\x05query\x12I\n" +
-	"\tvariables\x18\x03 \x03(\v2+.aggregator.GraphQLQueryNode.VariablesEntryR\tvariables\x1a<\n" +
+	"\x05query\x18\x02 \x01(\tR\x05query\x12P\n" +
+	"\tvariables\x18\x03 \x03(\v22.aggregator.GraphQLQueryNode.Config.VariablesEntryR\tvariables\x1a<\n" +
 	"\x0eVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a2\n" +
 	"\x06Output\x12(\n" +
-	"\x04data\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\x04data\"\xfb\x01\n" +
-	"\vRestAPINode\x12\x10\n" +
-	"\x03url\x18\x01 \x01(\tR\x03url\x12>\n" +
-	"\aheaders\x18\x02 \x03(\v2$.aggregator.RestAPINode.HeadersEntryR\aheaders\x12\x12\n" +
+	"\x04data\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\x04data\"\xc5\x02\n" +
+	"\vRestAPINode\x126\n" +
+	"\x06config\x18\x01 \x01(\v2\x1e.aggregator.RestAPINode.ConfigR\x06config\x1a\xc9\x01\n" +
+	"\x06Config\x12\x10\n" +
+	"\x03url\x18\x01 \x01(\tR\x03url\x12E\n" +
+	"\aheaders\x18\x02 \x03(\v2+.aggregator.RestAPINode.Config.HeadersEntryR\aheaders\x12\x12\n" +
 	"\x04body\x18\x03 \x01(\tR\x04body\x12\x16\n" +
 	"\x06method\x18\x04 \x01(\tR\x06method\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a2\n" +
 	"\x06Output\x12(\n" +
-	"\x04data\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\x04data\"\x8e\x01\n" +
-	"\x0eCustomCodeNode\x12.\n" +
-	"\x04lang\x18\x01 \x01(\x0e2\x1a.aggregator.CustomCodeLangR\x04lang\x12\x16\n" +
+	"\x04data\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\x04data\"\xc9\x01\n" +
+	"\x0eCustomCodeNode\x129\n" +
+	"\x06config\x18\x01 \x01(\v2!.aggregator.CustomCodeNode.ConfigR\x06config\x1aF\n" +
+	"\x06Config\x12$\n" +
+	"\x04lang\x18\x01 \x01(\x0e2\x10.aggregator.LangR\x04lang\x12\x16\n" +
 	"\x06source\x18\x02 \x01(\tR\x06source\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"O\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\x8d\x02\n" +
+	"\n" +
+	"BranchNode\x125\n" +
+	"\x06config\x18\x01 \x01(\v2\x1d.aggregator.BranchNode.ConfigR\x06config\x1aO\n" +
 	"\tCondition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x03 \x01(\tR\n" +
-	"expression\"p\n" +
+	"expression\x1aJ\n" +
+	"\x06Config\x12@\n" +
 	"\n" +
-	"BranchNode\x125\n" +
-	"\n" +
-	"conditions\x18\x01 \x03(\v2\x15.aggregator.ConditionR\n" +
+	"conditions\x18\x01 \x03(\v2 .aggregator.BranchNode.ConditionR\n" +
 	"conditions\x1a+\n" +
 	"\x06Output\x12!\n" +
-	"\fcondition_id\x18\x01 \x01(\tR\vconditionId\"v\n" +
+	"\fcondition_id\x18\x01 \x01(\tR\vconditionId\"\xbe\x01\n" +
 	"\n" +
-	"FilterNode\x12\x1e\n" +
+	"FilterNode\x125\n" +
+	"\x06config\x18\x01 \x01(\v2\x1d.aggregator.FilterNode.ConfigR\x06config\x1aE\n" +
+	"\x06Config\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x01 \x01(\tR\n" +
-	"expression\x12\x14\n" +
-	"\x05input\x18\x02 \x01(\tR\x05input\x1a2\n" +
+	"expression\x12\x1b\n" +
+	"\tsource_id\x18\x02 \x01(\tR\bsourceId\x1a2\n" +
 	"\x06Output\x12(\n" +
-	"\x04data\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\x04data\"\x90\x04\n" +
-	"\bLoopNode\x12\x14\n" +
-	"\x05input\x18\x01 \x01(\tR\x05input\x12\x19\n" +
-	"\biter_val\x18\x02 \x01(\tR\aiterVal\x12\x19\n" +
-	"\biter_key\x18\x03 \x01(\tR\aiterKey\x12@\n" +
+	"\x04data\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\x04data\"\xd6\x04\n" +
+	"\bLoopNode\x12@\n" +
 	"\feth_transfer\x18\n" +
 	" \x01(\v2\x1b.aggregator.ETHTransferNodeH\x00R\vethTransfer\x12F\n" +
 	"\x0econtract_write\x18\v \x01(\v2\x1d.aggregator.ContractWriteNodeH\x00R\rcontractWrite\x12C\n" +
@@ -5875,7 +6902,12 @@ const file_avs_proto_rawDesc = "" +
 	"\x12graphql_data_query\x18\r \x01(\v2\x1c.aggregator.GraphQLQueryNodeH\x00R\x10graphqlDataQuery\x124\n" +
 	"\brest_api\x18\x0e \x01(\v2\x17.aggregator.RestAPINodeH\x00R\arestApi\x12=\n" +
 	"\vcustom_code\x18\x0f \x01(\v2\x1a.aggregator.CustomCodeNodeH\x00R\n" +
-	"customCode\x1a\x1c\n" +
+	"customCode\x123\n" +
+	"\x06config\x18\x01 \x01(\v2\x1b.aggregator.LoopNode.ConfigR\x06config\x1a[\n" +
+	"\x06Config\x12\x1b\n" +
+	"\tsource_id\x18\x01 \x01(\tR\bsourceId\x12\x19\n" +
+	"\biter_val\x18\x02 \x01(\tR\aiterVal\x12\x19\n" +
+	"\biter_key\x18\x03 \x01(\tR\aiterKey\x1a\x1c\n" +
 	"\x06Output\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\tR\x04dataB\b\n" +
 	"\x06runner\"J\n" +
@@ -5897,7 +6929,8 @@ const file_avs_proto_rawDesc = "" +
 	"\x04loop\x18\x11 \x01(\v2\x14.aggregator.LoopNodeH\x00R\x04loop\x12=\n" +
 	"\vcustom_code\x18\x12 \x01(\v2\x1a.aggregator.CustomCodeNodeH\x00R\n" +
 	"customCodeB\v\n" +
-	"\ttask_type\"\xa3\x0e\n" +
+	"\ttask_type\"\xc8\n" +
+	"\n" +
 	"\tExecution\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\bstart_at\x18\x02 \x01(\x03R\astartAt\x12\x15\n" +
@@ -5906,12 +6939,12 @@ const file_avs_proto_rawDesc = "" +
 	"\x05error\x18\x05 \x01(\tR\x05error\x121\n" +
 	"\x06reason\x18\x06 \x01(\v2\x19.aggregator.TriggerReasonR\x06reason\x120\n" +
 	"\x05steps\x18\b \x03(\v2\x1a.aggregator.Execution.StepR\x05steps\x12!\n" +
-	"\ftrigger_name\x18\t \x01(\tR\vtriggerName\x12L\n" +
-	"\ftransfer_log\x18\n" +
-	" \x01(\v2'.aggregator.Execution.TransferLogOutputH\x00R\vtransferLog\x12.\n" +
-	"\aevm_log\x18\v \x01(\v2\x13.aggregator.Evm.LogH\x00R\x06evmLog\x129\n" +
-	"\x05block\x18\f \x01(\v2!.aggregator.Execution.BlockOutputH\x00R\x05block\x126\n" +
-	"\x04time\x18\r \x01(\v2 .aggregator.Execution.TimeOutputH\x00R\x04time\x1a\x87\x06\n" +
+	"\ftrigger_name\x18\t \x01(\tR\vtriggerName\x12F\n" +
+	"\rblock_trigger\x18\n" +
+	" \x01(\v2\x1f.aggregator.BlockTrigger.OutputH\x00R\fblockTrigger\x12S\n" +
+	"\x12fixed_time_trigger\x18\v \x01(\v2#.aggregator.FixedTimeTrigger.OutputH\x00R\x10fixedTimeTrigger\x12C\n" +
+	"\fcron_trigger\x18\f \x01(\v2\x1e.aggregator.CronTrigger.OutputH\x00R\vcronTrigger\x12F\n" +
+	"\revent_trigger\x18\r \x01(\v2\x1f.aggregator.EventTrigger.OutputH\x00R\feventTrigger\x1a\x87\x06\n" +
 	"\x04Step\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12G\n" +
@@ -5931,28 +6964,7 @@ const file_avs_proto_rawDesc = "" +
 	"\bstart_at\x18\x0e \x01(\x03R\astartAt\x12\x15\n" +
 	"\x06end_at\x18\x0f \x01(\x03R\x05endAt\x12\x16\n" +
 	"\x06inputs\x18\x10 \x03(\tR\x06inputsB\r\n" +
-	"\voutput_data\x1a\xbb\x03\n" +
-	"\x11TransferLogOutput\x12\x1d\n" +
-	"\n" +
-	"token_name\x18\x01 \x01(\tR\ttokenName\x12!\n" +
-	"\ftoken_symbol\x18\x02 \x01(\tR\vtokenSymbol\x12%\n" +
-	"\x0etoken_decimals\x18\x03 \x01(\rR\rtokenDecimals\x12)\n" +
-	"\x10transaction_hash\x18\x04 \x01(\tR\x0ftransactionHash\x12\x18\n" +
-	"\aaddress\x18\x05 \x01(\tR\aaddress\x12!\n" +
-	"\fblock_number\x18\x06 \x01(\x04R\vblockNumber\x12'\n" +
-	"\x0fblock_timestamp\x18\a \x01(\x04R\x0eblockTimestamp\x12!\n" +
-	"\ffrom_address\x18\b \x01(\tR\vfromAddress\x12\x1d\n" +
-	"\n" +
-	"to_address\x18\t \x01(\tR\ttoAddress\x12\x14\n" +
-	"\x05value\x18\n" +
-	" \x01(\tR\x05value\x12'\n" +
-	"\x0fvalue_formatted\x18\v \x01(\tR\x0evalueFormatted\x12+\n" +
-	"\x11transaction_index\x18\f \x01(\rR\x10transactionIndex\x1a0\n" +
-	"\vBlockOutput\x12!\n" +
-	"\fblock_number\x18\x01 \x01(\x04R\vblockNumber\x1a\"\n" +
-	"\n" +
-	"TimeOutput\x12\x14\n" +
-	"\x05epoch\x18\x01 \x01(\x04R\x05epochB\r\n" +
+	"\voutput_dataB\r\n" +
 	"\voutput_data\"\xf8\x03\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
@@ -6139,12 +7151,27 @@ const file_avs_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\x1aY\n" +
 	"\x13InputVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
-	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\x8c\x01\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\xe6\a\n" +
 	"\x15RunNodeWithInputsResp\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12*\n" +
-	"\x04data\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x04data\x12\x14\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\x12\x17\n" +
-	"\anode_id\x18\x04 \x01(\tR\x06nodeId\"\xd2\t\n" +
+	"\anode_id\x18\x04 \x01(\tR\x06nodeId\x12G\n" +
+	"\feth_transfer\x18\n" +
+	" \x01(\v2\".aggregator.ETHTransferNode.OutputH\x00R\vethTransfer\x12?\n" +
+	"\agraphql\x18\v \x01(\v2#.aggregator.GraphQLQueryNode.OutputH\x00R\agraphql\x12J\n" +
+	"\rcontract_read\x18\f \x01(\v2#.aggregator.ContractReadNode.OutputH\x00R\fcontractRead\x12M\n" +
+	"\x0econtract_write\x18\r \x01(\v2$.aggregator.ContractWriteNode.OutputH\x00R\rcontractWrite\x12D\n" +
+	"\vcustom_code\x18\x0e \x01(\v2!.aggregator.CustomCodeNode.OutputH\x00R\n" +
+	"customCode\x12;\n" +
+	"\brest_api\x18\x0f \x01(\v2\x1e.aggregator.RestAPINode.OutputH\x00R\arestApi\x127\n" +
+	"\x06branch\x18\x10 \x01(\v2\x1d.aggregator.BranchNode.OutputH\x00R\x06branch\x127\n" +
+	"\x06filter\x18\x11 \x01(\v2\x1d.aggregator.FilterNode.OutputH\x00R\x06filter\x121\n" +
+	"\x04loop\x18\x12 \x01(\v2\x1b.aggregator.LoopNode.OutputH\x00R\x04loop\x12F\n" +
+	"\rblock_trigger\x18\x14 \x01(\v2\x1f.aggregator.BlockTrigger.OutputH\x00R\fblockTrigger\x12S\n" +
+	"\x12fixed_time_trigger\x18\x15 \x01(\v2#.aggregator.FixedTimeTrigger.OutputH\x00R\x10fixedTimeTrigger\x12C\n" +
+	"\fcron_trigger\x18\x16 \x01(\v2\x1e.aggregator.CronTrigger.OutputH\x00R\vcronTrigger\x12F\n" +
+	"\revent_trigger\x18\x17 \x01(\v2\x1f.aggregator.EventTrigger.OutputH\x00R\feventTriggerB\r\n" +
+	"\voutput_data\"\xd2\t\n" +
 	"\x03Evm\x1a\x95\x02\n" +
 	"\x03Log\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x16\n" +
@@ -6191,7 +7218,10 @@ const file_avs_proto_rawDesc = "" +
 	"\x18max_priority_fee_per_gas\x18\t \x01(\tR\x14maxPriorityFeePerGas\x12,\n" +
 	"\x12paymaster_and_data\x18\n" +
 	" \x01(\tR\x10paymasterAndData\x12\x1c\n" +
-	"\tsignature\x18\v \x01(\tR\tsignature*\xdf\x01\n" +
+	"\tsignature\x18\v \x01(\tR\tsignature*\x16\n" +
+	"\x04Lang\x12\x0e\n" +
+	"\n" +
+	"JavaScript\x10\x00*\xdf\x01\n" +
 	"\x05Error\x12\x0f\n" +
 	"\vUnknowError\x10\x00\x12\x11\n" +
 	"\fRpcNodeError\x10\xe8\a\x12\x17\n" +
@@ -6214,10 +7244,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x0fExecutionStatus\x12\n" +
 	"\n" +
 	"\x06Queued\x10\x00\x12\f\n" +
-	"\bFinished\x10\x02* \n" +
-	"\x0eCustomCodeLang\x12\x0e\n" +
-	"\n" +
-	"JavaScript\x10\x002\xc8\r\n" +
+	"\bFinished\x10\x022\xc8\r\n" +
 	"\n" +
 	"Aggregator\x126\n" +
 	"\x06GetKey\x12\x15.aggregator.GetKeyReq\x1a\x13.aggregator.KeyResp\"\x00\x12]\n" +
@@ -6261,18 +7288,18 @@ func file_avs_proto_rawDescGZIP() []byte {
 }
 
 var file_avs_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_avs_proto_msgTypes = make([]protoimpl.MessageInfo, 79)
+var file_avs_proto_msgTypes = make([]protoimpl.MessageInfo, 94)
 var file_avs_proto_goTypes = []any{
-	(Error)(0),                             // 0: aggregator.Error
-	(TaskStatus)(0),                        // 1: aggregator.TaskStatus
-	(ExecutionStatus)(0),                   // 2: aggregator.ExecutionStatus
-	(CustomCodeLang)(0),                    // 3: aggregator.CustomCodeLang
+	(Lang)(0),                              // 0: aggregator.Lang
+	(Error)(0),                             // 1: aggregator.Error
+	(TaskStatus)(0),                        // 2: aggregator.TaskStatus
+	(ExecutionStatus)(0),                   // 3: aggregator.ExecutionStatus
 	(TriggerReason_TriggerType)(0),         // 4: aggregator.TriggerReason.TriggerType
 	(*IdReq)(nil),                          // 5: aggregator.IdReq
-	(*FixedTimeCondition)(nil),             // 6: aggregator.FixedTimeCondition
-	(*CronCondition)(nil),                  // 7: aggregator.CronCondition
-	(*BlockCondition)(nil),                 // 8: aggregator.BlockCondition
-	(*EventCondition)(nil),                 // 9: aggregator.EventCondition
+	(*FixedTimeTrigger)(nil),               // 6: aggregator.FixedTimeTrigger
+	(*CronTrigger)(nil),                    // 7: aggregator.CronTrigger
+	(*BlockTrigger)(nil),                   // 8: aggregator.BlockTrigger
+	(*EventTrigger)(nil),                   // 9: aggregator.EventTrigger
 	(*TaskTrigger)(nil),                    // 10: aggregator.TaskTrigger
 	(*ETHTransferNode)(nil),                // 11: aggregator.ETHTransferNode
 	(*ContractWriteNode)(nil),              // 12: aggregator.ContractWriteNode
@@ -6280,197 +7307,239 @@ var file_avs_proto_goTypes = []any{
 	(*GraphQLQueryNode)(nil),               // 14: aggregator.GraphQLQueryNode
 	(*RestAPINode)(nil),                    // 15: aggregator.RestAPINode
 	(*CustomCodeNode)(nil),                 // 16: aggregator.CustomCodeNode
-	(*Condition)(nil),                      // 17: aggregator.Condition
-	(*BranchNode)(nil),                     // 18: aggregator.BranchNode
-	(*FilterNode)(nil),                     // 19: aggregator.FilterNode
-	(*LoopNode)(nil),                       // 20: aggregator.LoopNode
-	(*TaskEdge)(nil),                       // 21: aggregator.TaskEdge
-	(*TaskNode)(nil),                       // 22: aggregator.TaskNode
-	(*Execution)(nil),                      // 23: aggregator.Execution
-	(*Task)(nil),                           // 24: aggregator.Task
-	(*CreateTaskReq)(nil),                  // 25: aggregator.CreateTaskReq
-	(*CreateTaskResp)(nil),                 // 26: aggregator.CreateTaskResp
-	(*NonceRequest)(nil),                   // 27: aggregator.NonceRequest
-	(*NonceResp)(nil),                      // 28: aggregator.NonceResp
-	(*ListWalletReq)(nil),                  // 29: aggregator.ListWalletReq
-	(*SmartWallet)(nil),                    // 30: aggregator.SmartWallet
-	(*ListWalletResp)(nil),                 // 31: aggregator.ListWalletResp
-	(*ListTasksReq)(nil),                   // 32: aggregator.ListTasksReq
-	(*ListTasksResp)(nil),                  // 33: aggregator.ListTasksResp
-	(*ListExecutionsReq)(nil),              // 34: aggregator.ListExecutionsReq
-	(*ListExecutionsResp)(nil),             // 35: aggregator.ListExecutionsResp
-	(*ExecutionReq)(nil),                   // 36: aggregator.ExecutionReq
-	(*ExecutionStatusResp)(nil),            // 37: aggregator.ExecutionStatusResp
-	(*GetKeyReq)(nil),                      // 38: aggregator.GetKeyReq
-	(*KeyResp)(nil),                        // 39: aggregator.KeyResp
-	(*TriggerReason)(nil),                  // 40: aggregator.TriggerReason
-	(*GetWalletReq)(nil),                   // 41: aggregator.GetWalletReq
-	(*GetWalletResp)(nil),                  // 42: aggregator.GetWalletResp
-	(*SetWalletReq)(nil),                   // 43: aggregator.SetWalletReq
-	(*UserTriggerTaskReq)(nil),             // 44: aggregator.UserTriggerTaskReq
-	(*UserTriggerTaskResp)(nil),            // 45: aggregator.UserTriggerTaskResp
-	(*CreateOrUpdateSecretReq)(nil),        // 46: aggregator.CreateOrUpdateSecretReq
-	(*ListSecretsReq)(nil),                 // 47: aggregator.ListSecretsReq
-	(*ListSecretsResp)(nil),                // 48: aggregator.ListSecretsResp
-	(*DeleteSecretReq)(nil),                // 49: aggregator.DeleteSecretReq
-	(*GetSignatureFormatReq)(nil),          // 50: aggregator.GetSignatureFormatReq
-	(*GetSignatureFormatResp)(nil),         // 51: aggregator.GetSignatureFormatResp
-	(*GetWorkflowCountReq)(nil),            // 52: aggregator.GetWorkflowCountReq
-	(*GetWorkflowCountResp)(nil),           // 53: aggregator.GetWorkflowCountResp
-	(*GetExecutionCountReq)(nil),           // 54: aggregator.GetExecutionCountReq
-	(*GetExecutionCountResp)(nil),          // 55: aggregator.GetExecutionCountResp
-	(*GetExecutionStatsReq)(nil),           // 56: aggregator.GetExecutionStatsReq
-	(*GetExecutionStatsResp)(nil),          // 57: aggregator.GetExecutionStatsResp
-	(*RunNodeWithInputsReq)(nil),           // 58: aggregator.RunNodeWithInputsReq
-	(*RunNodeWithInputsResp)(nil),          // 59: aggregator.RunNodeWithInputsResp
-	(*Evm)(nil),                            // 60: aggregator.Evm
-	(*EventCondition_Matcher)(nil),         // 61: aggregator.EventCondition.Matcher
-	(*ETHTransferNode_Output)(nil),         // 62: aggregator.ETHTransferNode.Output
-	(*ContractWriteNode_Output)(nil),       // 63: aggregator.ContractWriteNode.Output
-	(*ContractReadNode_Output)(nil),        // 64: aggregator.ContractReadNode.Output
-	nil,                                    // 65: aggregator.GraphQLQueryNode.VariablesEntry
-	(*GraphQLQueryNode_Output)(nil),        // 66: aggregator.GraphQLQueryNode.Output
-	nil,                                    // 67: aggregator.RestAPINode.HeadersEntry
-	(*RestAPINode_Output)(nil),             // 68: aggregator.RestAPINode.Output
-	(*CustomCodeNode_Output)(nil),          // 69: aggregator.CustomCodeNode.Output
-	(*BranchNode_Output)(nil),              // 70: aggregator.BranchNode.Output
-	(*FilterNode_Output)(nil),              // 71: aggregator.FilterNode.Output
-	(*LoopNode_Output)(nil),                // 72: aggregator.LoopNode.Output
-	(*Execution_Step)(nil),                 // 73: aggregator.Execution.Step
-	(*Execution_TransferLogOutput)(nil),    // 74: aggregator.Execution.TransferLogOutput
-	(*Execution_BlockOutput)(nil),          // 75: aggregator.Execution.BlockOutput
-	(*Execution_TimeOutput)(nil),           // 76: aggregator.Execution.TimeOutput
-	(*ListTasksResp_Item)(nil),             // 77: aggregator.ListTasksResp.Item
-	(*ListSecretsResp_ResponseSecret)(nil), // 78: aggregator.ListSecretsResp.ResponseSecret
-	nil,                                    // 79: aggregator.RunNodeWithInputsReq.NodeConfigEntry
-	nil,                                    // 80: aggregator.RunNodeWithInputsReq.InputVariablesEntry
-	(*Evm_Log)(nil),                        // 81: aggregator.Evm.Log
-	(*Evm_TransactionReceipt)(nil),         // 82: aggregator.Evm.TransactionReceipt
-	(*Evm_UserOp)(nil),                     // 83: aggregator.Evm.UserOp
-	(*structpb.Value)(nil),                 // 84: google.protobuf.Value
-	(*anypb.Any)(nil),                      // 85: google.protobuf.Any
-	(*wrapperspb.BoolValue)(nil),           // 86: google.protobuf.BoolValue
+	(*BranchNode)(nil),                     // 17: aggregator.BranchNode
+	(*FilterNode)(nil),                     // 18: aggregator.FilterNode
+	(*LoopNode)(nil),                       // 19: aggregator.LoopNode
+	(*TaskEdge)(nil),                       // 20: aggregator.TaskEdge
+	(*TaskNode)(nil),                       // 21: aggregator.TaskNode
+	(*Execution)(nil),                      // 22: aggregator.Execution
+	(*Task)(nil),                           // 23: aggregator.Task
+	(*CreateTaskReq)(nil),                  // 24: aggregator.CreateTaskReq
+	(*CreateTaskResp)(nil),                 // 25: aggregator.CreateTaskResp
+	(*NonceRequest)(nil),                   // 26: aggregator.NonceRequest
+	(*NonceResp)(nil),                      // 27: aggregator.NonceResp
+	(*ListWalletReq)(nil),                  // 28: aggregator.ListWalletReq
+	(*SmartWallet)(nil),                    // 29: aggregator.SmartWallet
+	(*ListWalletResp)(nil),                 // 30: aggregator.ListWalletResp
+	(*ListTasksReq)(nil),                   // 31: aggregator.ListTasksReq
+	(*ListTasksResp)(nil),                  // 32: aggregator.ListTasksResp
+	(*ListExecutionsReq)(nil),              // 33: aggregator.ListExecutionsReq
+	(*ListExecutionsResp)(nil),             // 34: aggregator.ListExecutionsResp
+	(*ExecutionReq)(nil),                   // 35: aggregator.ExecutionReq
+	(*ExecutionStatusResp)(nil),            // 36: aggregator.ExecutionStatusResp
+	(*GetKeyReq)(nil),                      // 37: aggregator.GetKeyReq
+	(*KeyResp)(nil),                        // 38: aggregator.KeyResp
+	(*TriggerReason)(nil),                  // 39: aggregator.TriggerReason
+	(*GetWalletReq)(nil),                   // 40: aggregator.GetWalletReq
+	(*GetWalletResp)(nil),                  // 41: aggregator.GetWalletResp
+	(*SetWalletReq)(nil),                   // 42: aggregator.SetWalletReq
+	(*UserTriggerTaskReq)(nil),             // 43: aggregator.UserTriggerTaskReq
+	(*UserTriggerTaskResp)(nil),            // 44: aggregator.UserTriggerTaskResp
+	(*CreateOrUpdateSecretReq)(nil),        // 45: aggregator.CreateOrUpdateSecretReq
+	(*ListSecretsReq)(nil),                 // 46: aggregator.ListSecretsReq
+	(*ListSecretsResp)(nil),                // 47: aggregator.ListSecretsResp
+	(*DeleteSecretReq)(nil),                // 48: aggregator.DeleteSecretReq
+	(*GetSignatureFormatReq)(nil),          // 49: aggregator.GetSignatureFormatReq
+	(*GetSignatureFormatResp)(nil),         // 50: aggregator.GetSignatureFormatResp
+	(*GetWorkflowCountReq)(nil),            // 51: aggregator.GetWorkflowCountReq
+	(*GetWorkflowCountResp)(nil),           // 52: aggregator.GetWorkflowCountResp
+	(*GetExecutionCountReq)(nil),           // 53: aggregator.GetExecutionCountReq
+	(*GetExecutionCountResp)(nil),          // 54: aggregator.GetExecutionCountResp
+	(*GetExecutionStatsReq)(nil),           // 55: aggregator.GetExecutionStatsReq
+	(*GetExecutionStatsResp)(nil),          // 56: aggregator.GetExecutionStatsResp
+	(*RunNodeWithInputsReq)(nil),           // 57: aggregator.RunNodeWithInputsReq
+	(*RunNodeWithInputsResp)(nil),          // 58: aggregator.RunNodeWithInputsResp
+	(*Evm)(nil),                            // 59: aggregator.Evm
+	(*FixedTimeTrigger_Config)(nil),        // 60: aggregator.FixedTimeTrigger.Config
+	(*FixedTimeTrigger_Output)(nil),        // 61: aggregator.FixedTimeTrigger.Output
+	(*CronTrigger_Config)(nil),             // 62: aggregator.CronTrigger.Config
+	(*CronTrigger_Output)(nil),             // 63: aggregator.CronTrigger.Output
+	(*BlockTrigger_Config)(nil),            // 64: aggregator.BlockTrigger.Config
+	(*BlockTrigger_Output)(nil),            // 65: aggregator.BlockTrigger.Output
+	(*EventTrigger_Matcher)(nil),           // 66: aggregator.EventTrigger.Matcher
+	(*EventTrigger_Config)(nil),            // 67: aggregator.EventTrigger.Config
+	(*EventTrigger_Output)(nil),            // 68: aggregator.EventTrigger.Output
+	(*EventTrigger_TransferLogOutput)(nil), // 69: aggregator.EventTrigger.TransferLogOutput
+	(*ETHTransferNode_Config)(nil),         // 70: aggregator.ETHTransferNode.Config
+	(*ETHTransferNode_Output)(nil),         // 71: aggregator.ETHTransferNode.Output
+	(*ContractWriteNode_Config)(nil),       // 72: aggregator.ContractWriteNode.Config
+	(*ContractWriteNode_Output)(nil),       // 73: aggregator.ContractWriteNode.Output
+	(*ContractReadNode_Config)(nil),        // 74: aggregator.ContractReadNode.Config
+	(*ContractReadNode_Output)(nil),        // 75: aggregator.ContractReadNode.Output
+	(*GraphQLQueryNode_Config)(nil),        // 76: aggregator.GraphQLQueryNode.Config
+	(*GraphQLQueryNode_Output)(nil),        // 77: aggregator.GraphQLQueryNode.Output
+	nil,                                    // 78: aggregator.GraphQLQueryNode.Config.VariablesEntry
+	(*RestAPINode_Config)(nil),             // 79: aggregator.RestAPINode.Config
+	(*RestAPINode_Output)(nil),             // 80: aggregator.RestAPINode.Output
+	nil,                                    // 81: aggregator.RestAPINode.Config.HeadersEntry
+	(*CustomCodeNode_Config)(nil),          // 82: aggregator.CustomCodeNode.Config
+	(*CustomCodeNode_Output)(nil),          // 83: aggregator.CustomCodeNode.Output
+	(*BranchNode_Condition)(nil),           // 84: aggregator.BranchNode.Condition
+	(*BranchNode_Config)(nil),              // 85: aggregator.BranchNode.Config
+	(*BranchNode_Output)(nil),              // 86: aggregator.BranchNode.Output
+	(*FilterNode_Config)(nil),              // 87: aggregator.FilterNode.Config
+	(*FilterNode_Output)(nil),              // 88: aggregator.FilterNode.Output
+	(*LoopNode_Config)(nil),                // 89: aggregator.LoopNode.Config
+	(*LoopNode_Output)(nil),                // 90: aggregator.LoopNode.Output
+	(*Execution_Step)(nil),                 // 91: aggregator.Execution.Step
+	(*ListTasksResp_Item)(nil),             // 92: aggregator.ListTasksResp.Item
+	(*ListSecretsResp_ResponseSecret)(nil), // 93: aggregator.ListSecretsResp.ResponseSecret
+	nil,                                    // 94: aggregator.RunNodeWithInputsReq.NodeConfigEntry
+	nil,                                    // 95: aggregator.RunNodeWithInputsReq.InputVariablesEntry
+	(*Evm_Log)(nil),                        // 96: aggregator.Evm.Log
+	(*Evm_TransactionReceipt)(nil),         // 97: aggregator.Evm.TransactionReceipt
+	(*Evm_UserOp)(nil),                     // 98: aggregator.Evm.UserOp
+	(*structpb.Value)(nil),                 // 99: google.protobuf.Value
+	(*anypb.Any)(nil),                      // 100: google.protobuf.Any
+	(*wrapperspb.BoolValue)(nil),           // 101: google.protobuf.BoolValue
 }
 var file_avs_proto_depIdxs = []int32{
-	61, // 0: aggregator.EventCondition.matcher:type_name -> aggregator.EventCondition.Matcher
-	6,  // 1: aggregator.TaskTrigger.fixed_time:type_name -> aggregator.FixedTimeCondition
-	7,  // 2: aggregator.TaskTrigger.cron:type_name -> aggregator.CronCondition
-	8,  // 3: aggregator.TaskTrigger.block:type_name -> aggregator.BlockCondition
-	9,  // 4: aggregator.TaskTrigger.event:type_name -> aggregator.EventCondition
-	65, // 5: aggregator.GraphQLQueryNode.variables:type_name -> aggregator.GraphQLQueryNode.VariablesEntry
-	67, // 6: aggregator.RestAPINode.headers:type_name -> aggregator.RestAPINode.HeadersEntry
-	3,  // 7: aggregator.CustomCodeNode.lang:type_name -> aggregator.CustomCodeLang
-	17, // 8: aggregator.BranchNode.conditions:type_name -> aggregator.Condition
-	11, // 9: aggregator.LoopNode.eth_transfer:type_name -> aggregator.ETHTransferNode
-	12, // 10: aggregator.LoopNode.contract_write:type_name -> aggregator.ContractWriteNode
-	13, // 11: aggregator.LoopNode.contract_read:type_name -> aggregator.ContractReadNode
-	14, // 12: aggregator.LoopNode.graphql_data_query:type_name -> aggregator.GraphQLQueryNode
-	15, // 13: aggregator.LoopNode.rest_api:type_name -> aggregator.RestAPINode
-	16, // 14: aggregator.LoopNode.custom_code:type_name -> aggregator.CustomCodeNode
-	11, // 15: aggregator.TaskNode.eth_transfer:type_name -> aggregator.ETHTransferNode
-	12, // 16: aggregator.TaskNode.contract_write:type_name -> aggregator.ContractWriteNode
-	13, // 17: aggregator.TaskNode.contract_read:type_name -> aggregator.ContractReadNode
-	14, // 18: aggregator.TaskNode.graphql_query:type_name -> aggregator.GraphQLQueryNode
-	15, // 19: aggregator.TaskNode.rest_api:type_name -> aggregator.RestAPINode
-	18, // 20: aggregator.TaskNode.branch:type_name -> aggregator.BranchNode
-	19, // 21: aggregator.TaskNode.filter:type_name -> aggregator.FilterNode
-	20, // 22: aggregator.TaskNode.loop:type_name -> aggregator.LoopNode
-	16, // 23: aggregator.TaskNode.custom_code:type_name -> aggregator.CustomCodeNode
-	40, // 24: aggregator.Execution.reason:type_name -> aggregator.TriggerReason
-	73, // 25: aggregator.Execution.steps:type_name -> aggregator.Execution.Step
-	74, // 26: aggregator.Execution.transfer_log:type_name -> aggregator.Execution.TransferLogOutput
-	81, // 27: aggregator.Execution.evm_log:type_name -> aggregator.Evm.Log
-	75, // 28: aggregator.Execution.block:type_name -> aggregator.Execution.BlockOutput
-	76, // 29: aggregator.Execution.time:type_name -> aggregator.Execution.TimeOutput
-	1,  // 30: aggregator.Task.status:type_name -> aggregator.TaskStatus
-	10, // 31: aggregator.Task.trigger:type_name -> aggregator.TaskTrigger
-	22, // 32: aggregator.Task.nodes:type_name -> aggregator.TaskNode
-	21, // 33: aggregator.Task.edges:type_name -> aggregator.TaskEdge
-	10, // 34: aggregator.CreateTaskReq.trigger:type_name -> aggregator.TaskTrigger
-	22, // 35: aggregator.CreateTaskReq.nodes:type_name -> aggregator.TaskNode
-	21, // 36: aggregator.CreateTaskReq.edges:type_name -> aggregator.TaskEdge
-	30, // 37: aggregator.ListWalletResp.items:type_name -> aggregator.SmartWallet
-	77, // 38: aggregator.ListTasksResp.items:type_name -> aggregator.ListTasksResp.Item
-	23, // 39: aggregator.ListExecutionsResp.items:type_name -> aggregator.Execution
-	2,  // 40: aggregator.ExecutionStatusResp.status:type_name -> aggregator.ExecutionStatus
-	4,  // 41: aggregator.TriggerReason.type:type_name -> aggregator.TriggerReason.TriggerType
-	40, // 42: aggregator.UserTriggerTaskReq.reason:type_name -> aggregator.TriggerReason
-	2,  // 43: aggregator.UserTriggerTaskResp.status:type_name -> aggregator.ExecutionStatus
-	78, // 44: aggregator.ListSecretsResp.items:type_name -> aggregator.ListSecretsResp.ResponseSecret
-	79, // 45: aggregator.RunNodeWithInputsReq.node_config:type_name -> aggregator.RunNodeWithInputsReq.NodeConfigEntry
-	80, // 46: aggregator.RunNodeWithInputsReq.input_variables:type_name -> aggregator.RunNodeWithInputsReq.InputVariablesEntry
-	84, // 47: aggregator.RunNodeWithInputsResp.data:type_name -> google.protobuf.Value
-	83, // 48: aggregator.ContractWriteNode.Output.user_op:type_name -> aggregator.Evm.UserOp
-	82, // 49: aggregator.ContractWriteNode.Output.tx_receipt:type_name -> aggregator.Evm.TransactionReceipt
-	84, // 50: aggregator.ContractReadNode.Output.data:type_name -> google.protobuf.Value
-	85, // 51: aggregator.GraphQLQueryNode.Output.data:type_name -> google.protobuf.Any
-	85, // 52: aggregator.RestAPINode.Output.data:type_name -> google.protobuf.Any
-	84, // 53: aggregator.CustomCodeNode.Output.data:type_name -> google.protobuf.Value
-	85, // 54: aggregator.FilterNode.Output.data:type_name -> google.protobuf.Any
-	62, // 55: aggregator.Execution.Step.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
-	66, // 56: aggregator.Execution.Step.graphql:type_name -> aggregator.GraphQLQueryNode.Output
-	64, // 57: aggregator.Execution.Step.contract_read:type_name -> aggregator.ContractReadNode.Output
-	63, // 58: aggregator.Execution.Step.contract_write:type_name -> aggregator.ContractWriteNode.Output
-	69, // 59: aggregator.Execution.Step.custom_code:type_name -> aggregator.CustomCodeNode.Output
-	68, // 60: aggregator.Execution.Step.rest_api:type_name -> aggregator.RestAPINode.Output
-	70, // 61: aggregator.Execution.Step.branch:type_name -> aggregator.BranchNode.Output
-	71, // 62: aggregator.Execution.Step.filter:type_name -> aggregator.FilterNode.Output
-	72, // 63: aggregator.Execution.Step.loop:type_name -> aggregator.LoopNode.Output
-	1,  // 64: aggregator.ListTasksResp.Item.status:type_name -> aggregator.TaskStatus
-	10, // 65: aggregator.ListTasksResp.Item.trigger:type_name -> aggregator.TaskTrigger
-	84, // 66: aggregator.RunNodeWithInputsReq.NodeConfigEntry.value:type_name -> google.protobuf.Value
-	84, // 67: aggregator.RunNodeWithInputsReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	38, // 68: aggregator.Aggregator.GetKey:input_type -> aggregator.GetKeyReq
-	50, // 69: aggregator.Aggregator.GetSignatureFormat:input_type -> aggregator.GetSignatureFormatReq
-	27, // 70: aggregator.Aggregator.GetNonce:input_type -> aggregator.NonceRequest
-	41, // 71: aggregator.Aggregator.GetWallet:input_type -> aggregator.GetWalletReq
-	43, // 72: aggregator.Aggregator.SetWallet:input_type -> aggregator.SetWalletReq
-	29, // 73: aggregator.Aggregator.ListWallets:input_type -> aggregator.ListWalletReq
-	25, // 74: aggregator.Aggregator.CreateTask:input_type -> aggregator.CreateTaskReq
-	32, // 75: aggregator.Aggregator.ListTasks:input_type -> aggregator.ListTasksReq
-	5,  // 76: aggregator.Aggregator.GetTask:input_type -> aggregator.IdReq
-	34, // 77: aggregator.Aggregator.ListExecutions:input_type -> aggregator.ListExecutionsReq
-	36, // 78: aggregator.Aggregator.GetExecution:input_type -> aggregator.ExecutionReq
-	36, // 79: aggregator.Aggregator.GetExecutionStatus:input_type -> aggregator.ExecutionReq
-	5,  // 80: aggregator.Aggregator.CancelTask:input_type -> aggregator.IdReq
-	5,  // 81: aggregator.Aggregator.DeleteTask:input_type -> aggregator.IdReq
-	44, // 82: aggregator.Aggregator.TriggerTask:input_type -> aggregator.UserTriggerTaskReq
-	46, // 83: aggregator.Aggregator.CreateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
-	49, // 84: aggregator.Aggregator.DeleteSecret:input_type -> aggregator.DeleteSecretReq
-	47, // 85: aggregator.Aggregator.ListSecrets:input_type -> aggregator.ListSecretsReq
-	46, // 86: aggregator.Aggregator.UpdateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
-	52, // 87: aggregator.Aggregator.GetWorkflowCount:input_type -> aggregator.GetWorkflowCountReq
-	54, // 88: aggregator.Aggregator.GetExecutionCount:input_type -> aggregator.GetExecutionCountReq
-	56, // 89: aggregator.Aggregator.GetExecutionStats:input_type -> aggregator.GetExecutionStatsReq
-	58, // 90: aggregator.Aggregator.RunNodeWithInputs:input_type -> aggregator.RunNodeWithInputsReq
-	39, // 91: aggregator.Aggregator.GetKey:output_type -> aggregator.KeyResp
-	51, // 92: aggregator.Aggregator.GetSignatureFormat:output_type -> aggregator.GetSignatureFormatResp
-	28, // 93: aggregator.Aggregator.GetNonce:output_type -> aggregator.NonceResp
-	42, // 94: aggregator.Aggregator.GetWallet:output_type -> aggregator.GetWalletResp
-	42, // 95: aggregator.Aggregator.SetWallet:output_type -> aggregator.GetWalletResp
-	31, // 96: aggregator.Aggregator.ListWallets:output_type -> aggregator.ListWalletResp
-	26, // 97: aggregator.Aggregator.CreateTask:output_type -> aggregator.CreateTaskResp
-	33, // 98: aggregator.Aggregator.ListTasks:output_type -> aggregator.ListTasksResp
-	24, // 99: aggregator.Aggregator.GetTask:output_type -> aggregator.Task
-	35, // 100: aggregator.Aggregator.ListExecutions:output_type -> aggregator.ListExecutionsResp
-	23, // 101: aggregator.Aggregator.GetExecution:output_type -> aggregator.Execution
-	37, // 102: aggregator.Aggregator.GetExecutionStatus:output_type -> aggregator.ExecutionStatusResp
-	86, // 103: aggregator.Aggregator.CancelTask:output_type -> google.protobuf.BoolValue
-	86, // 104: aggregator.Aggregator.DeleteTask:output_type -> google.protobuf.BoolValue
-	45, // 105: aggregator.Aggregator.TriggerTask:output_type -> aggregator.UserTriggerTaskResp
-	86, // 106: aggregator.Aggregator.CreateSecret:output_type -> google.protobuf.BoolValue
-	86, // 107: aggregator.Aggregator.DeleteSecret:output_type -> google.protobuf.BoolValue
-	48, // 108: aggregator.Aggregator.ListSecrets:output_type -> aggregator.ListSecretsResp
-	86, // 109: aggregator.Aggregator.UpdateSecret:output_type -> google.protobuf.BoolValue
-	53, // 110: aggregator.Aggregator.GetWorkflowCount:output_type -> aggregator.GetWorkflowCountResp
-	55, // 111: aggregator.Aggregator.GetExecutionCount:output_type -> aggregator.GetExecutionCountResp
-	57, // 112: aggregator.Aggregator.GetExecutionStats:output_type -> aggregator.GetExecutionStatsResp
-	59, // 113: aggregator.Aggregator.RunNodeWithInputs:output_type -> aggregator.RunNodeWithInputsResp
-	91, // [91:114] is the sub-list for method output_type
-	68, // [68:91] is the sub-list for method input_type
-	68, // [68:68] is the sub-list for extension type_name
-	68, // [68:68] is the sub-list for extension extendee
-	0,  // [0:68] is the sub-list for field type_name
+	60,  // 0: aggregator.FixedTimeTrigger.config:type_name -> aggregator.FixedTimeTrigger.Config
+	62,  // 1: aggregator.CronTrigger.config:type_name -> aggregator.CronTrigger.Config
+	64,  // 2: aggregator.BlockTrigger.config:type_name -> aggregator.BlockTrigger.Config
+	67,  // 3: aggregator.EventTrigger.config:type_name -> aggregator.EventTrigger.Config
+	6,   // 4: aggregator.TaskTrigger.fixed_time:type_name -> aggregator.FixedTimeTrigger
+	7,   // 5: aggregator.TaskTrigger.cron:type_name -> aggregator.CronTrigger
+	8,   // 6: aggregator.TaskTrigger.block:type_name -> aggregator.BlockTrigger
+	9,   // 7: aggregator.TaskTrigger.event:type_name -> aggregator.EventTrigger
+	70,  // 8: aggregator.ETHTransferNode.config:type_name -> aggregator.ETHTransferNode.Config
+	72,  // 9: aggregator.ContractWriteNode.config:type_name -> aggregator.ContractWriteNode.Config
+	74,  // 10: aggregator.ContractReadNode.config:type_name -> aggregator.ContractReadNode.Config
+	76,  // 11: aggregator.GraphQLQueryNode.config:type_name -> aggregator.GraphQLQueryNode.Config
+	79,  // 12: aggregator.RestAPINode.config:type_name -> aggregator.RestAPINode.Config
+	82,  // 13: aggregator.CustomCodeNode.config:type_name -> aggregator.CustomCodeNode.Config
+	85,  // 14: aggregator.BranchNode.config:type_name -> aggregator.BranchNode.Config
+	87,  // 15: aggregator.FilterNode.config:type_name -> aggregator.FilterNode.Config
+	11,  // 16: aggregator.LoopNode.eth_transfer:type_name -> aggregator.ETHTransferNode
+	12,  // 17: aggregator.LoopNode.contract_write:type_name -> aggregator.ContractWriteNode
+	13,  // 18: aggregator.LoopNode.contract_read:type_name -> aggregator.ContractReadNode
+	14,  // 19: aggregator.LoopNode.graphql_data_query:type_name -> aggregator.GraphQLQueryNode
+	15,  // 20: aggregator.LoopNode.rest_api:type_name -> aggregator.RestAPINode
+	16,  // 21: aggregator.LoopNode.custom_code:type_name -> aggregator.CustomCodeNode
+	89,  // 22: aggregator.LoopNode.config:type_name -> aggregator.LoopNode.Config
+	11,  // 23: aggregator.TaskNode.eth_transfer:type_name -> aggregator.ETHTransferNode
+	12,  // 24: aggregator.TaskNode.contract_write:type_name -> aggregator.ContractWriteNode
+	13,  // 25: aggregator.TaskNode.contract_read:type_name -> aggregator.ContractReadNode
+	14,  // 26: aggregator.TaskNode.graphql_query:type_name -> aggregator.GraphQLQueryNode
+	15,  // 27: aggregator.TaskNode.rest_api:type_name -> aggregator.RestAPINode
+	17,  // 28: aggregator.TaskNode.branch:type_name -> aggregator.BranchNode
+	18,  // 29: aggregator.TaskNode.filter:type_name -> aggregator.FilterNode
+	19,  // 30: aggregator.TaskNode.loop:type_name -> aggregator.LoopNode
+	16,  // 31: aggregator.TaskNode.custom_code:type_name -> aggregator.CustomCodeNode
+	39,  // 32: aggregator.Execution.reason:type_name -> aggregator.TriggerReason
+	91,  // 33: aggregator.Execution.steps:type_name -> aggregator.Execution.Step
+	65,  // 34: aggregator.Execution.block_trigger:type_name -> aggregator.BlockTrigger.Output
+	61,  // 35: aggregator.Execution.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
+	63,  // 36: aggregator.Execution.cron_trigger:type_name -> aggregator.CronTrigger.Output
+	68,  // 37: aggregator.Execution.event_trigger:type_name -> aggregator.EventTrigger.Output
+	2,   // 38: aggregator.Task.status:type_name -> aggregator.TaskStatus
+	10,  // 39: aggregator.Task.trigger:type_name -> aggregator.TaskTrigger
+	21,  // 40: aggregator.Task.nodes:type_name -> aggregator.TaskNode
+	20,  // 41: aggregator.Task.edges:type_name -> aggregator.TaskEdge
+	10,  // 42: aggregator.CreateTaskReq.trigger:type_name -> aggregator.TaskTrigger
+	21,  // 43: aggregator.CreateTaskReq.nodes:type_name -> aggregator.TaskNode
+	20,  // 44: aggregator.CreateTaskReq.edges:type_name -> aggregator.TaskEdge
+	29,  // 45: aggregator.ListWalletResp.items:type_name -> aggregator.SmartWallet
+	92,  // 46: aggregator.ListTasksResp.items:type_name -> aggregator.ListTasksResp.Item
+	22,  // 47: aggregator.ListExecutionsResp.items:type_name -> aggregator.Execution
+	3,   // 48: aggregator.ExecutionStatusResp.status:type_name -> aggregator.ExecutionStatus
+	4,   // 49: aggregator.TriggerReason.type:type_name -> aggregator.TriggerReason.TriggerType
+	39,  // 50: aggregator.UserTriggerTaskReq.reason:type_name -> aggregator.TriggerReason
+	3,   // 51: aggregator.UserTriggerTaskResp.status:type_name -> aggregator.ExecutionStatus
+	93,  // 52: aggregator.ListSecretsResp.items:type_name -> aggregator.ListSecretsResp.ResponseSecret
+	94,  // 53: aggregator.RunNodeWithInputsReq.node_config:type_name -> aggregator.RunNodeWithInputsReq.NodeConfigEntry
+	95,  // 54: aggregator.RunNodeWithInputsReq.input_variables:type_name -> aggregator.RunNodeWithInputsReq.InputVariablesEntry
+	71,  // 55: aggregator.RunNodeWithInputsResp.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
+	77,  // 56: aggregator.RunNodeWithInputsResp.graphql:type_name -> aggregator.GraphQLQueryNode.Output
+	75,  // 57: aggregator.RunNodeWithInputsResp.contract_read:type_name -> aggregator.ContractReadNode.Output
+	73,  // 58: aggregator.RunNodeWithInputsResp.contract_write:type_name -> aggregator.ContractWriteNode.Output
+	83,  // 59: aggregator.RunNodeWithInputsResp.custom_code:type_name -> aggregator.CustomCodeNode.Output
+	80,  // 60: aggregator.RunNodeWithInputsResp.rest_api:type_name -> aggregator.RestAPINode.Output
+	86,  // 61: aggregator.RunNodeWithInputsResp.branch:type_name -> aggregator.BranchNode.Output
+	88,  // 62: aggregator.RunNodeWithInputsResp.filter:type_name -> aggregator.FilterNode.Output
+	90,  // 63: aggregator.RunNodeWithInputsResp.loop:type_name -> aggregator.LoopNode.Output
+	65,  // 64: aggregator.RunNodeWithInputsResp.block_trigger:type_name -> aggregator.BlockTrigger.Output
+	61,  // 65: aggregator.RunNodeWithInputsResp.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
+	63,  // 66: aggregator.RunNodeWithInputsResp.cron_trigger:type_name -> aggregator.CronTrigger.Output
+	68,  // 67: aggregator.RunNodeWithInputsResp.event_trigger:type_name -> aggregator.EventTrigger.Output
+	66,  // 68: aggregator.EventTrigger.Config.matcher:type_name -> aggregator.EventTrigger.Matcher
+	96,  // 69: aggregator.EventTrigger.Output.evm_log:type_name -> aggregator.Evm.Log
+	69,  // 70: aggregator.EventTrigger.Output.transfer_log:type_name -> aggregator.EventTrigger.TransferLogOutput
+	98,  // 71: aggregator.ContractWriteNode.Output.user_op:type_name -> aggregator.Evm.UserOp
+	97,  // 72: aggregator.ContractWriteNode.Output.tx_receipt:type_name -> aggregator.Evm.TransactionReceipt
+	99,  // 73: aggregator.ContractReadNode.Output.data:type_name -> google.protobuf.Value
+	78,  // 74: aggregator.GraphQLQueryNode.Config.variables:type_name -> aggregator.GraphQLQueryNode.Config.VariablesEntry
+	100, // 75: aggregator.GraphQLQueryNode.Output.data:type_name -> google.protobuf.Any
+	81,  // 76: aggregator.RestAPINode.Config.headers:type_name -> aggregator.RestAPINode.Config.HeadersEntry
+	100, // 77: aggregator.RestAPINode.Output.data:type_name -> google.protobuf.Any
+	0,   // 78: aggregator.CustomCodeNode.Config.lang:type_name -> aggregator.Lang
+	99,  // 79: aggregator.CustomCodeNode.Output.data:type_name -> google.protobuf.Value
+	84,  // 80: aggregator.BranchNode.Config.conditions:type_name -> aggregator.BranchNode.Condition
+	100, // 81: aggregator.FilterNode.Output.data:type_name -> google.protobuf.Any
+	71,  // 82: aggregator.Execution.Step.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
+	77,  // 83: aggregator.Execution.Step.graphql:type_name -> aggregator.GraphQLQueryNode.Output
+	75,  // 84: aggregator.Execution.Step.contract_read:type_name -> aggregator.ContractReadNode.Output
+	73,  // 85: aggregator.Execution.Step.contract_write:type_name -> aggregator.ContractWriteNode.Output
+	83,  // 86: aggregator.Execution.Step.custom_code:type_name -> aggregator.CustomCodeNode.Output
+	80,  // 87: aggregator.Execution.Step.rest_api:type_name -> aggregator.RestAPINode.Output
+	86,  // 88: aggregator.Execution.Step.branch:type_name -> aggregator.BranchNode.Output
+	88,  // 89: aggregator.Execution.Step.filter:type_name -> aggregator.FilterNode.Output
+	90,  // 90: aggregator.Execution.Step.loop:type_name -> aggregator.LoopNode.Output
+	2,   // 91: aggregator.ListTasksResp.Item.status:type_name -> aggregator.TaskStatus
+	10,  // 92: aggregator.ListTasksResp.Item.trigger:type_name -> aggregator.TaskTrigger
+	99,  // 93: aggregator.RunNodeWithInputsReq.NodeConfigEntry.value:type_name -> google.protobuf.Value
+	99,  // 94: aggregator.RunNodeWithInputsReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	37,  // 95: aggregator.Aggregator.GetKey:input_type -> aggregator.GetKeyReq
+	49,  // 96: aggregator.Aggregator.GetSignatureFormat:input_type -> aggregator.GetSignatureFormatReq
+	26,  // 97: aggregator.Aggregator.GetNonce:input_type -> aggregator.NonceRequest
+	40,  // 98: aggregator.Aggregator.GetWallet:input_type -> aggregator.GetWalletReq
+	42,  // 99: aggregator.Aggregator.SetWallet:input_type -> aggregator.SetWalletReq
+	28,  // 100: aggregator.Aggregator.ListWallets:input_type -> aggregator.ListWalletReq
+	24,  // 101: aggregator.Aggregator.CreateTask:input_type -> aggregator.CreateTaskReq
+	31,  // 102: aggregator.Aggregator.ListTasks:input_type -> aggregator.ListTasksReq
+	5,   // 103: aggregator.Aggregator.GetTask:input_type -> aggregator.IdReq
+	33,  // 104: aggregator.Aggregator.ListExecutions:input_type -> aggregator.ListExecutionsReq
+	35,  // 105: aggregator.Aggregator.GetExecution:input_type -> aggregator.ExecutionReq
+	35,  // 106: aggregator.Aggregator.GetExecutionStatus:input_type -> aggregator.ExecutionReq
+	5,   // 107: aggregator.Aggregator.CancelTask:input_type -> aggregator.IdReq
+	5,   // 108: aggregator.Aggregator.DeleteTask:input_type -> aggregator.IdReq
+	43,  // 109: aggregator.Aggregator.TriggerTask:input_type -> aggregator.UserTriggerTaskReq
+	45,  // 110: aggregator.Aggregator.CreateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
+	48,  // 111: aggregator.Aggregator.DeleteSecret:input_type -> aggregator.DeleteSecretReq
+	46,  // 112: aggregator.Aggregator.ListSecrets:input_type -> aggregator.ListSecretsReq
+	45,  // 113: aggregator.Aggregator.UpdateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
+	51,  // 114: aggregator.Aggregator.GetWorkflowCount:input_type -> aggregator.GetWorkflowCountReq
+	53,  // 115: aggregator.Aggregator.GetExecutionCount:input_type -> aggregator.GetExecutionCountReq
+	55,  // 116: aggregator.Aggregator.GetExecutionStats:input_type -> aggregator.GetExecutionStatsReq
+	57,  // 117: aggregator.Aggregator.RunNodeWithInputs:input_type -> aggregator.RunNodeWithInputsReq
+	38,  // 118: aggregator.Aggregator.GetKey:output_type -> aggregator.KeyResp
+	50,  // 119: aggregator.Aggregator.GetSignatureFormat:output_type -> aggregator.GetSignatureFormatResp
+	27,  // 120: aggregator.Aggregator.GetNonce:output_type -> aggregator.NonceResp
+	41,  // 121: aggregator.Aggregator.GetWallet:output_type -> aggregator.GetWalletResp
+	41,  // 122: aggregator.Aggregator.SetWallet:output_type -> aggregator.GetWalletResp
+	30,  // 123: aggregator.Aggregator.ListWallets:output_type -> aggregator.ListWalletResp
+	25,  // 124: aggregator.Aggregator.CreateTask:output_type -> aggregator.CreateTaskResp
+	32,  // 125: aggregator.Aggregator.ListTasks:output_type -> aggregator.ListTasksResp
+	23,  // 126: aggregator.Aggregator.GetTask:output_type -> aggregator.Task
+	34,  // 127: aggregator.Aggregator.ListExecutions:output_type -> aggregator.ListExecutionsResp
+	22,  // 128: aggregator.Aggregator.GetExecution:output_type -> aggregator.Execution
+	36,  // 129: aggregator.Aggregator.GetExecutionStatus:output_type -> aggregator.ExecutionStatusResp
+	101, // 130: aggregator.Aggregator.CancelTask:output_type -> google.protobuf.BoolValue
+	101, // 131: aggregator.Aggregator.DeleteTask:output_type -> google.protobuf.BoolValue
+	44,  // 132: aggregator.Aggregator.TriggerTask:output_type -> aggregator.UserTriggerTaskResp
+	101, // 133: aggregator.Aggregator.CreateSecret:output_type -> google.protobuf.BoolValue
+	101, // 134: aggregator.Aggregator.DeleteSecret:output_type -> google.protobuf.BoolValue
+	47,  // 135: aggregator.Aggregator.ListSecrets:output_type -> aggregator.ListSecretsResp
+	101, // 136: aggregator.Aggregator.UpdateSecret:output_type -> google.protobuf.BoolValue
+	52,  // 137: aggregator.Aggregator.GetWorkflowCount:output_type -> aggregator.GetWorkflowCountResp
+	54,  // 138: aggregator.Aggregator.GetExecutionCount:output_type -> aggregator.GetExecutionCountResp
+	56,  // 139: aggregator.Aggregator.GetExecutionStats:output_type -> aggregator.GetExecutionStatsResp
+	58,  // 140: aggregator.Aggregator.RunNodeWithInputs:output_type -> aggregator.RunNodeWithInputsResp
+	118, // [118:141] is the sub-list for method output_type
+	95,  // [95:118] is the sub-list for method input_type
+	95,  // [95:95] is the sub-list for extension type_name
+	95,  // [95:95] is the sub-list for extension extendee
+	0,   // [0:95] is the sub-list for field type_name
 }
 
 func init() { file_avs_proto_init() }
@@ -6485,7 +7554,7 @@ func file_avs_proto_init() {
 		(*TaskTrigger_Block)(nil),
 		(*TaskTrigger_Event)(nil),
 	}
-	file_avs_proto_msgTypes[15].OneofWrappers = []any{
+	file_avs_proto_msgTypes[14].OneofWrappers = []any{
 		(*LoopNode_EthTransfer)(nil),
 		(*LoopNode_ContractWrite)(nil),
 		(*LoopNode_ContractRead)(nil),
@@ -6493,7 +7562,7 @@ func file_avs_proto_init() {
 		(*LoopNode_RestApi)(nil),
 		(*LoopNode_CustomCode)(nil),
 	}
-	file_avs_proto_msgTypes[17].OneofWrappers = []any{
+	file_avs_proto_msgTypes[16].OneofWrappers = []any{
 		(*TaskNode_EthTransfer)(nil),
 		(*TaskNode_ContractWrite)(nil),
 		(*TaskNode_ContractRead)(nil),
@@ -6504,13 +7573,28 @@ func file_avs_proto_init() {
 		(*TaskNode_Loop)(nil),
 		(*TaskNode_CustomCode)(nil),
 	}
-	file_avs_proto_msgTypes[18].OneofWrappers = []any{
-		(*Execution_TransferLog)(nil),
-		(*Execution_EvmLog)(nil),
-		(*Execution_Block)(nil),
-		(*Execution_Time)(nil),
+	file_avs_proto_msgTypes[17].OneofWrappers = []any{
+		(*Execution_BlockTrigger)(nil),
+		(*Execution_FixedTimeTrigger)(nil),
+		(*Execution_CronTrigger)(nil),
+		(*Execution_EventTrigger)(nil),
 	}
-	file_avs_proto_msgTypes[68].OneofWrappers = []any{
+	file_avs_proto_msgTypes[53].OneofWrappers = []any{
+		(*RunNodeWithInputsResp_EthTransfer)(nil),
+		(*RunNodeWithInputsResp_Graphql)(nil),
+		(*RunNodeWithInputsResp_ContractRead)(nil),
+		(*RunNodeWithInputsResp_ContractWrite)(nil),
+		(*RunNodeWithInputsResp_CustomCode)(nil),
+		(*RunNodeWithInputsResp_RestApi)(nil),
+		(*RunNodeWithInputsResp_Branch)(nil),
+		(*RunNodeWithInputsResp_Filter)(nil),
+		(*RunNodeWithInputsResp_Loop)(nil),
+		(*RunNodeWithInputsResp_BlockTrigger)(nil),
+		(*RunNodeWithInputsResp_FixedTimeTrigger)(nil),
+		(*RunNodeWithInputsResp_CronTrigger)(nil),
+		(*RunNodeWithInputsResp_EventTrigger)(nil),
+	}
+	file_avs_proto_msgTypes[86].OneofWrappers = []any{
 		(*Execution_Step_EthTransfer)(nil),
 		(*Execution_Step_Graphql)(nil),
 		(*Execution_Step_ContractRead)(nil),
@@ -6527,7 +7611,7 @@ func file_avs_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_avs_proto_rawDesc), len(file_avs_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   79,
+			NumMessages:   94,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

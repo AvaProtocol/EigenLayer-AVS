@@ -68,8 +68,34 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		s.Success = err == nil
 	}()
 
-	contractAddressHex := strings.Clone(node.ContractAddress)
-	callDataHex := strings.Clone(node.CallData)
+	// Get configuration from input variables (new architecture)
+	r.vm.mu.Lock()
+	contractAddressVar, contractAddressExists := r.vm.vars["contract_address"]
+	callDataVar, callDataExists := r.vm.vars["call_data"]
+	r.vm.mu.Unlock()
+
+	if !contractAddressExists || !callDataExists {
+		err = fmt.Errorf("missing required input variables: contract_address and call_data")
+		s.Error = err.Error()
+		return s, err
+	}
+
+	contractAddressStr, ok := contractAddressVar.(string)
+	if !ok {
+		err = fmt.Errorf("contract_address variable must be a string")
+		s.Error = err.Error()
+		return s, err
+	}
+
+	callDataStr, ok := callDataVar.(string)
+	if !ok {
+		err = fmt.Errorf("call_data variable must be a string")
+		s.Error = err.Error()
+		return s, err
+	}
+
+	contractAddressHex := strings.Clone(contractAddressStr)
+	callDataHex := strings.Clone(callDataStr)
 
 	if strings.Contains(contractAddressHex, "{{") {
 		contractAddressHex = r.vm.preprocessText(contractAddressHex)

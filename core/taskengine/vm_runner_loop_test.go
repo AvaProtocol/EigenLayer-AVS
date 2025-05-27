@@ -20,14 +20,18 @@ func TestLoopProcessor_Execute_Sequential(t *testing.T) {
 	})
 
 	customCode := &avsproto.CustomCodeNode{
-		Lang:   avsproto.CustomCodeLang_JavaScript,
-		Source: "return loopItemValueForTest;",
+		Config: &avsproto.CustomCodeNode_Config{
+			Lang:   avsproto.Lang_JavaScript,
+			Source: "return loopItemValueForTest;",
+		},
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Input:   "testArray",
-		IterKey: "index",
-		IterVal: "loopItemValueForTest",
+		Config: &avsproto.LoopNode_Config{
+			SourceId: "testArray",
+			IterKey:  "index",
+			IterVal:  "loopItemValueForTest",
+		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
@@ -63,14 +67,18 @@ func TestLoopProcessor_Execute_Parallel(t *testing.T) {
 	})
 
 	customCode := &avsproto.CustomCodeNode{
-		Lang:   avsproto.CustomCodeLang_JavaScript,
-		Source: "return loopItemValueForTest;",
+		Config: &avsproto.CustomCodeNode_Config{
+			Lang:   avsproto.Lang_JavaScript,
+			Source: "return loopItemValueForTest;",
+		},
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Input:   "testArray",
-		IterKey: "index",
-		IterVal: "loopItemValueForTest",
+		Config: &avsproto.LoopNode_Config{
+			SourceId: "testArray",
+			IterKey:  "index",
+			IterVal:  "loopItemValueForTest",
+		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
@@ -110,14 +118,18 @@ func TestLoopProcessor_Execute_EmptyArray(t *testing.T) {
 	})
 
 	customCode := &avsproto.CustomCodeNode{
-		Lang:   avsproto.CustomCodeLang_JavaScript,
-		Source: "return loopItemValueForTest;",
+		Config: &avsproto.CustomCodeNode_Config{
+			Lang:   avsproto.Lang_JavaScript,
+			Source: "return loopItemValueForTest;",
+		},
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Input:   "emptyArray",
-		IterKey: "index",
-		IterVal: "loopItemValueForTest",
+		Config: &avsproto.LoopNode_Config{
+			SourceId: "emptyArray",
+			IterKey:  "index",
+			IterVal:  "loopItemValueForTest",
+		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
@@ -147,14 +159,18 @@ func TestLoopProcessor_Execute_InvalidInput(t *testing.T) {
 	})
 
 	customCode := &avsproto.CustomCodeNode{
-		Lang:   avsproto.CustomCodeLang_JavaScript,
-		Source: "return loopItemValueForTest;",
+		Config: &avsproto.CustomCodeNode_Config{
+			Lang:   avsproto.Lang_JavaScript,
+			Source: "return loopItemValueForTest;",
+		},
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Input:   "notArray",
-		IterKey: "index",
-		IterVal: "loopItemValueForTest",
+		Config: &avsproto.LoopNode_Config{
+			SourceId: "notArray",
+			IterKey:  "index",
+			IterVal:  "loopItemValueForTest",
+		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
@@ -173,14 +189,18 @@ func TestLoopProcessor_Execute_MissingInput(t *testing.T) {
 	processor := NewLoopProcessor(vm)
 
 	customCode := &avsproto.CustomCodeNode{
-		Lang:   avsproto.CustomCodeLang_JavaScript,
-		Source: "return loopItemValueForTest;",
+		Config: &avsproto.CustomCodeNode_Config{
+			Lang:   avsproto.Lang_JavaScript,
+			Source: "return loopItemValueForTest;",
+		},
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Input:   "nonExistentArray",
-		IterKey: "index",
-		IterVal: "loopItemValueForTest",
+		Config: &avsproto.LoopNode_Config{
+			SourceId: "nonExistentArray",
+			IterKey:  "index",
+			IterVal:  "loopItemValueForTest",
+		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},

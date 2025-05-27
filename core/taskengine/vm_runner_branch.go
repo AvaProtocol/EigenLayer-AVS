@@ -20,42 +20,22 @@ func NewBranchProcessor(vm *VM) *BranchProcessor {
 	}
 }
 
+// Helper function to safely extract string values from map[string]interface{}
+func getString(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
 func (r *BranchProcessor) Validate(node *avsproto.BranchNode) error {
+	// In the new architecture, conditions are in Input messages, not in the node structure
+	// Validation will be done at execution time when we have access to input variables
 	if node == nil {
 		return fmt.Errorf("invalid node data")
 	}
-	if len(node.Conditions) == 0 {
-		return fmt.Errorf("there is no condition to evaluate")
-	}
-
-	if node.Conditions[0].Type != "if" {
-		return fmt.Errorf("the first condition need to be an if but got :%s", node.Conditions[0].Type)
-	}
-
-	for i, condition := range node.Conditions {
-		if condition == nil {
-			return fmt.Errorf("condition at index %d is nil", i)
-		}
-
-		if condition.Id == "" {
-			return fmt.Errorf("condition at index %d has empty ID", i)
-		}
-
-		if condition.Type == "" {
-			return fmt.Errorf("condition at index %d has empty type", i)
-		}
-
-		if condition.Type != "if" && condition.Type != "else" {
-			return fmt.Errorf("condition at index %d has invalid type: %s (must be 'if' or 'else')", i, condition.Type)
-		}
-
-		if condition.Type == "else" && i < len(node.Conditions)-1 {
-			if r.vm.logger != nil {
-				r.vm.logger.Warn("'else' condition is not the last one, subsequent conditions will be ignored")
-			}
-		}
-	}
-
 	return nil
 }
 
@@ -70,8 +50,67 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	var log strings.Builder
 	log.WriteString(fmt.Sprintf("Start branch execution for node %s at %s\n", stepID, time.Now()))
 
+	// Get conditions from input variables (new architecture)
+	r.vm.mu.Lock()
+	conditionsVar, exists := r.vm.vars["conditions"]
+	r.vm.mu.Unlock()
+
+	if !exists {
+		err := fmt.Errorf("conditions not found in input variables for branch node")
+		log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		executionStep.Error = err.Error()
+		executionStep.Success = false
+		executionStep.Log = log.String()
+		executionStep.EndAt = time.Now().UnixMilli()
+		return executionStep, nil, err
+	}
+
+	// Convert conditions from input variables to Condition structs
+	var conditions []*avsproto.BranchNode_Condition
+	if conditionsArray, ok := conditionsVar.([]interface{}); ok {
+		for _, condItem := range conditionsArray {
+			if condMap, ok := condItem.(map[string]interface{}); ok {
+				condition := &avsproto.BranchNode_Condition{
+					Id:         getString(condMap, "id"),
+					Type:       getString(condMap, "type"),
+					Expression: getString(condMap, "expression"),
+				}
+				conditions = append(conditions, condition)
+			}
+		}
+	} else {
+		err := fmt.Errorf("conditions must be an array of condition objects")
+		log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		executionStep.Error = err.Error()
+		executionStep.Success = false
+		executionStep.Log = log.String()
+		executionStep.EndAt = time.Now().UnixMilli()
+		return executionStep, nil, err
+	}
+
+	// Validate conditions
+	if len(conditions) == 0 {
+		err := fmt.Errorf("there is no condition to evaluate")
+		log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		executionStep.Error = err.Error()
+		executionStep.Success = false
+		executionStep.Log = log.String()
+		executionStep.EndAt = time.Now().UnixMilli()
+		return executionStep, nil, err
+	}
+
+	if conditions[0].Type != "if" {
+		err := fmt.Errorf("the first condition need to be an if but got: %s", conditions[0].Type)
+		log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		executionStep.Error = err.Error()
+		executionStep.Success = false
+		executionStep.Log = log.String()
+		executionStep.EndAt = time.Now().UnixMilli()
+		return executionStep, nil, err
+	}
+
 	// Evaluate conditions
-	for i, condition := range node.Conditions {
+	for i, condition := range conditions {
 		log.WriteString(fmt.Sprintf("Evaluating condition '%s': %s\n", condition.Id, condition.Expression))
 
 		// Handle 'else' conditions specially - they should always be true if reached
@@ -192,7 +231,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 
 	// Check if there are any 'else' conditions defined
 	hasElseCondition := false
-	for _, condition := range node.Conditions {
+	for _, condition := range conditions {
 		if condition.Type == "else" {
 			hasElseCondition = true
 			break
@@ -200,7 +239,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	}
 
 	// Check if we have any conditions at all
-	if len(node.Conditions) == 0 {
+	if len(conditions) == 0 {
 		// No conditions at all - this is an error
 		noConditionMetError := "no branch condition met"
 		log.WriteString(noConditionMetError + "\n")

@@ -44,13 +44,73 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	var logBuilder strings.Builder
 	logBuilder.WriteString(fmt.Sprintf("Executing REST API Node ID: %s at %s\n", stepID, time.Now()))
-	logBuilder.WriteString(fmt.Sprintf("URL: %s, Method: %s\n", node.Url, node.Method))
+
+	// Get configuration from input variables (new architecture)
+	r.vm.mu.Lock()
+	urlVar, urlExists := r.vm.vars["url"]
+	methodVar, methodExists := r.vm.vars["method"]
+	bodyVar, bodyExists := r.vm.vars["body"]
+	headersVar, headersExists := r.vm.vars["headers"]
+	r.vm.mu.Unlock()
+
+	if !urlExists || !methodExists {
+		err := fmt.Errorf("missing required input variables: url and method")
+		executionLogStep.Success = false
+		executionLogStep.Error = err.Error()
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, err
+	}
+
+	url, ok := urlVar.(string)
+	if !ok {
+		err := fmt.Errorf("url variable must be a string")
+		executionLogStep.Success = false
+		executionLogStep.Error = err.Error()
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, err
+	}
+
+	method, ok := methodVar.(string)
+	if !ok {
+		err := fmt.Errorf("method variable must be a string")
+		executionLogStep.Success = false
+		executionLogStep.Error = err.Error()
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, err
+	}
+
+	var body string
+	if bodyExists {
+		if bodyStr, ok := bodyVar.(string); ok {
+			body = bodyStr
+		}
+	}
+
+	var headers map[string]string
+	if headersExists {
+		if headersMap, ok := headersVar.(map[string]interface{}); ok {
+			headers = make(map[string]string)
+			for k, v := range headersMap {
+				if vStr, ok := v.(string); ok {
+					headers[k] = vStr
+				}
+			}
+		}
+	}
+
+	logBuilder.WriteString(fmt.Sprintf("URL: %s, Method: %s\n", url, method))
 
 	// Preprocess URL, Body, and Headers using VM variables
-	processedURL := r.vm.preprocessText(node.Url)
-	processedBodyStr := r.vm.preprocessText(node.Body)
+	processedURL := r.vm.preprocessText(url)
+	processedBodyStr := r.vm.preprocessText(body)
 	processedHeaders := make(map[string]string)
-	for key, valTpl := range node.Headers {
+	for key, valTpl := range headers {
 		processedHeaders[r.vm.preprocessText(key)] = r.vm.preprocessText(valTpl)
 	}
 
@@ -80,7 +140,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	var resp *resty.Response
 	var err error
 
-	switch strings.ToUpper(node.Method) {
+	switch strings.ToUpper(method) {
 	case http.MethodGet:
 		resp, err = req.Get(processedURL)
 	case http.MethodPost:
@@ -96,7 +156,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	case http.MethodOptions:
 		resp, err = req.Options(processedURL)
 	default:
-		err = fmt.Errorf("unsupported HTTP method: %s", node.Method)
+		err = fmt.Errorf("unsupported HTTP method: %s", method)
 	}
 
 	if err != nil {
@@ -126,12 +186,12 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 
 	// Convert http.Header (map[string][]string) to a protobuf-compatible format
-	headers := make(map[string]interface{})
+	responseHeaders := make(map[string]interface{})
 	for key, values := range resp.Header() {
 		if len(values) == 1 {
-			headers[key] = values[0] // Single value as string
+			responseHeaders[key] = values[0] // Single value as string
 		} else {
-			headers[key] = values // Multiple values as array
+			responseHeaders[key] = values // Multiple values as array
 		}
 	}
 
@@ -140,7 +200,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	fullResponseOutput := map[string]interface{}{
 		"statusCode": resp.StatusCode(),
 		"status":     resp.Status(),
-		"headers":    headers,         // Converted headers
+		"headers":    responseHeaders, // Converted headers
 		"body":       resultForOutput, // Parsed JSON or raw string
 	}
 

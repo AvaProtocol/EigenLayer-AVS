@@ -16,12 +16,14 @@ import (
 
 func TestRestRequest(t *testing.T) {
 	node := &avsproto.RestAPINode{
-		Url: "https://httpbin.org/post",
-		Headers: map[string]string{
-			"Content-type": "application/x-www-form-urlencoded",
+		Config: &avsproto.RestAPINode_Config{
+			Url: "https://httpbin.org/post",
+			Headers: map[string]string{
+				"Content-type": "application/x-www-form-urlencoded",
+			},
+			Body:   "chat_id=123&disable_notification=true&text=%2AThis+is+a+test+format%2A",
+			Method: "POST",
 		},
-		Body:   "chat_id=123&disable_notification=true&text=%2AThis+is+a+test+format%2A",
-		Method: "POST",
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -129,12 +131,14 @@ func TestRestRequestHandleEmptyResponse(t *testing.T) {
 	defer ts.Close()
 
 	node := &avsproto.RestAPINode{
-		Url: ts.URL,
-		Headers: map[string]string{
-			"Content-type": "application/x-www-form-urlencoded",
+		Config: &avsproto.RestAPINode_Config{
+			Url: ts.URL,
+			Headers: map[string]string{
+				"Content-type": "application/x-www-form-urlencoded",
+			},
+			Body:   "",
+			Method: "POST",
 		},
-		Body:   "",
-		Method: "POST",
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -198,12 +202,14 @@ func TestRestRequestRenderVars(t *testing.T) {
 	defer ts.Close()
 
 	node := &avsproto.RestAPINode{
-		Url: ts.URL,
-		Headers: map[string]string{
-			"Content-type": "application/x-www-form-urlencoded",
+		Config: &avsproto.RestAPINode_Config{
+			Url: ts.URL,
+			Headers: map[string]string{
+				"Content-type": "application/x-www-form-urlencoded",
+			},
+			Body:   "my name is {{myNode.data.name}}",
+			Method: "POST",
 		},
-		Body:   "my name is {{myNode.data.name}}",
-		Method: "POST",
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -281,10 +287,12 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 	}
 
 	node := &avsproto.RestAPINode{
-		Url:     originalUrl,
-		Headers: originalHeaders,
-		Body:    originalBody,
-		Method:  "POST",
+		Config: &avsproto.RestAPINode_Config{
+			Url:     originalUrl,
+			Headers: originalHeaders,
+			Body:    originalBody,
+			Method:  "POST",
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -360,21 +368,23 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 	}
 
 	// Verify original node values remain unchanged
-	if node.Url != originalUrl {
-		t.Errorf("expected URL to be %s, got %s", originalUrl, node.Url)
+	if node.Config.Url != originalUrl {
+		t.Errorf("expected URL to be %s, got %s", originalUrl, node.Config.Url)
 	}
-	if node.Body != originalBody {
-		t.Errorf("expected Body to be %s, got %s", originalBody, node.Body)
+	if node.Config.Body != originalBody {
+		t.Errorf("expected Body to be %s, got %s", originalBody, node.Config.Body)
 	}
-	if !reflect.DeepEqual(node.Headers, originalHeaders) {
-		t.Errorf("expected Headers to be %v, got %v", originalHeaders, node.Headers)
+	if !reflect.DeepEqual(node.Config.Headers, originalHeaders) {
+		t.Errorf("expected Headers to be %v, got %v", originalHeaders, node.Config.Headers)
 	}
 }
 
 func TestRestRequestErrorHandling(t *testing.T) {
 	node := &avsproto.RestAPINode{
-		Url:    "http://non-existent-domain-that-will-fail.invalid",
-		Method: "GET",
+		Config: &avsproto.RestAPINode_Config{
+			Url:    "http://non-existent-domain-that-will-fail.invalid",
+			Method: "GET",
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -430,8 +440,10 @@ func TestRestRequestErrorHandling(t *testing.T) {
 	defer ts.Close()
 
 	node404 := &avsproto.RestAPINode{
-		Url:    ts.URL,
-		Method: "GET",
+		Config: &avsproto.RestAPINode_Config{
+			Url:    ts.URL,
+			Method: "GET",
+		},
 	}
 
 	step, err = n.Execute("error-test", node404)
@@ -455,8 +467,10 @@ func TestRestRequestErrorHandling(t *testing.T) {
 	defer ts500.Close()
 
 	node500 := &avsproto.RestAPINode{
-		Url:    ts500.URL,
-		Method: "GET",
+		Config: &avsproto.RestAPINode_Config{
+			Url:    ts500.URL,
+			Method: "GET",
+		},
 	}
 
 	step, err = n.Execute("error-test", node500)

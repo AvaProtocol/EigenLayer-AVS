@@ -230,8 +230,11 @@ func RestTask() *avsproto.CreateTaskReq {
 		Name: "ping",
 		TaskType: &avsproto.TaskNode_RestApi{
 			RestApi: &avsproto.RestAPINode{
-				Url:    "https://httpbin.org",
-				Method: "GET",
+				Config: &avsproto.RestAPINode_Config{
+					Url:    "https://httpbin.org/post",
+					Method: "POST",
+					Body:   "test=data",
+				},
 			},
 		},
 	}
@@ -245,8 +248,10 @@ func RestTask() *avsproto.CreateTaskReq {
 			Id:   "triggerabcde",
 			Name: "block",
 			TriggerType: &avsproto.TaskTrigger_Block{
-				Block: &avsproto.BlockCondition{
-					Interval: 5,
+				Block: &avsproto.BlockTrigger{
+					Config: &avsproto.BlockTrigger_Config{
+						Interval: 10,
+					},
 				},
 			},
 		},
@@ -263,7 +268,10 @@ func JsFastTask() *avsproto.CreateTaskReq {
 		Name: "jsfast",
 		TaskType: &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{
-				Source: "100",
+				Config: &avsproto.CustomCodeNode_Config{
+					Lang:   avsproto.Lang_JavaScript,
+					Source: "({ message: 'Hello from test' })",
+				},
 			},
 		},
 	}
@@ -277,8 +285,10 @@ func JsFastTask() *avsproto.CreateTaskReq {
 			Id:   "triggerabcde",
 			Name: "block",
 			TriggerType: &avsproto.TaskTrigger_Block{
-				Block: &avsproto.BlockCondition{
-					Interval: 5,
+				Block: &avsproto.BlockTrigger{
+					Config: &avsproto.BlockTrigger_Config{
+						Interval: 10,
+					},
 				},
 			},
 		},
@@ -344,7 +354,7 @@ func GetTestEventTriggerReason() *avsproto.TriggerReason {
 }
 
 // GetTestEventTriggerReasonWithTransferData provides a trigger reason with rich transfer log data for testing
-func GetTestEventTriggerReasonWithTransferData() (*avsproto.TriggerReason, *avsproto.Execution_TransferLogOutput) {
+func GetTestEventTriggerReasonWithTransferData() (*avsproto.TriggerReason, *avsproto.EventTrigger_TransferLogOutput) {
 	reason := &avsproto.TriggerReason{
 		BlockNumber: 7212417,
 		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
@@ -352,7 +362,7 @@ func GetTestEventTriggerReasonWithTransferData() (*avsproto.TriggerReason, *avsp
 		Type:        avsproto.TriggerReason_Event,
 	}
 
-	transferLog := &avsproto.Execution_TransferLogOutput{
+	transferLog := &avsproto.EventTrigger_TransferLogOutput{
 		TokenName:        "USDC",
 		TokenSymbol:      "USDC",
 		TokenDecimals:    6,

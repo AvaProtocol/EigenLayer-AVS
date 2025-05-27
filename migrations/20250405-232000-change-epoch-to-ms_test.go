@@ -71,10 +71,12 @@ func TestChangeEpochToMs(t *testing.T) {
 			},
 		},
 		// Include one type of output data for testing
-		OutputData: &avsproto.Execution_TransferLog{
-			TransferLog: &avsproto.Execution_TransferLogOutput{
-				BlockTimestamp: uint64(blockTimestampSeconds), // Seconds
-				// Other fields irrelevant for this test
+		OutputData: &avsproto.Execution_EventTrigger{
+			EventTrigger: &avsproto.EventTrigger_Output{
+				TransferLog: &avsproto.EventTrigger_TransferLogOutput{
+					BlockTimestamp: uint64(blockTimestampSeconds), // Seconds
+					// Other fields irrelevant for this test
+				},
 			},
 		},
 		// Other fields can be default/empty
@@ -85,8 +87,8 @@ func TestChangeEpochToMs(t *testing.T) {
 		Id:      execID2,
 		StartAt: execStartSeconds, // Seconds
 		EndAt:   execEndSeconds,   // Seconds
-		OutputData: &avsproto.Execution_Time{
-			Time: &avsproto.Execution_TimeOutput{
+		OutputData: &avsproto.Execution_FixedTimeTrigger{
+			FixedTimeTrigger: &avsproto.FixedTimeTrigger_Output{
 				Epoch: uint64(epochSeconds), // Seconds
 			},
 		},
@@ -191,13 +193,13 @@ func TestChangeEpochToMs(t *testing.T) {
 		t.Errorf("Step EndAt incorrect: got %d, want %d", retrievedStep.EndAt, expectedStepEndMs)
 	}
 
-	// Verify Execution Output Data (TransferLog)
-	if transferLogOutput := retrievedExec.GetTransferLog(); transferLogOutput != nil {
-		if transferLogOutput.BlockTimestamp != uint64(expectedBlockTimestampMs) {
-			t.Errorf("TransferLog BlockTimestamp incorrect: got %d, want %d", transferLogOutput.BlockTimestamp, expectedBlockTimestampMs)
+	// Verify Execution Output Data (EventTrigger with TransferLog)
+	if eventTriggerOutput := retrievedExec.GetEventTrigger(); eventTriggerOutput != nil && eventTriggerOutput.TransferLog != nil {
+		if eventTriggerOutput.TransferLog.BlockTimestamp != uint64(expectedBlockTimestampMs) {
+			t.Errorf("TransferLog BlockTimestamp incorrect: got %d, want %d", eventTriggerOutput.TransferLog.BlockTimestamp, expectedBlockTimestampMs)
 		}
 	} else {
-		t.Errorf("Expected TransferLog output data, but got nil or different type")
+		t.Errorf("Expected EventTrigger with TransferLog output data, but got nil or different type")
 	}
 
 	// Verify Execution Data 2 (TimeOutput) using GetKey
@@ -210,12 +212,12 @@ func TestChangeEpochToMs(t *testing.T) {
 		t.Fatalf("Failed to unmarshal retrieved execution data 2: %v", err)
 	}
 
-	// Verify Execution Output Data (TimeOutput)
-	if timeOutput := retrievedExec2.GetTime(); timeOutput != nil {
-		if timeOutput.Epoch != uint64(expectedEpochMs) {
-			t.Errorf("TimeOutput Epoch incorrect: got %d, want %d", timeOutput.Epoch, expectedEpochMs)
+	// Verify Execution Output Data (FixedTimeTrigger)
+	if fixedTimeTriggerOutput := retrievedExec2.GetFixedTimeTrigger(); fixedTimeTriggerOutput != nil {
+		if fixedTimeTriggerOutput.Epoch != uint64(expectedEpochMs) {
+			t.Errorf("FixedTimeTrigger Epoch incorrect: got %d, want %d", fixedTimeTriggerOutput.Epoch, expectedEpochMs)
 		}
 	} else {
-		t.Errorf("Expected Time output data, but got nil or different type")
+		t.Errorf("Expected FixedTimeTrigger output data, but got nil or different type")
 	}
 }

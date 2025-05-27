@@ -25,7 +25,9 @@ func TestCustomCodeNodeJSONSerialization(t *testing.T) {
 	processor := NewJSProcessor(vm)
 
 	node := &avsproto.CustomCodeNode{
-		Source: "return 'my secret is dummy_value'",
+		Config: &avsproto.CustomCodeNode_Config{
+			Source: "return 'my secret is dummy_value'",
+		},
 	}
 
 	step, err := processor.Execute("test_node", node)

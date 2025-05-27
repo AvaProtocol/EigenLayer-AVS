@@ -29,6 +29,7 @@ import (
 	"google.golang.org/grpc/status"
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -1651,22 +1652,107 @@ func (n *Engine) RunNodeWithInputsRPC(user *model.User, req *avsproto.RunNodeWit
 		}, nil
 	}
 
-	// Convert result to protobuf Value
-	var outputData *structpb.Value
-	if result != nil {
-		outputData, err = structpb.NewValue(result)
-		if err != nil {
-			return &avsproto.RunNodeWithInputsResp{
-				Success: false,
-				Error:   fmt.Sprintf("failed to convert output data: %v", err),
-				NodeId:  "",
-			}, nil
+	// Convert result to the appropriate protobuf output type based on node type
+	resp := &avsproto.RunNodeWithInputsResp{
+		Success: true,
+		NodeId:  fmt.Sprintf("temp_%d", time.Now().UnixNano()),
+	}
+
+	// Set the appropriate output data based on node type
+	switch req.NodeType {
+	case "blockTrigger":
+		if result != nil {
+			blockOutput := &avsproto.BlockTrigger_Output{
+				BlockNumber: getUint64FromResult(result, "blockNumber"),
+				BlockHash:   getStringFromResult(result, "blockHash"),
+				Timestamp:   getUint64FromResult(result, "timestamp"),
+				ParentHash:  getStringFromResult(result, "parentHash"),
+				Difficulty:  getStringFromResult(result, "difficulty"),
+				GasLimit:    getUint64FromResult(result, "gasLimit"),
+				GasUsed:     getUint64FromResult(result, "gasUsed"),
+			}
+			resp.OutputData = &avsproto.RunNodeWithInputsResp_BlockTrigger{
+				BlockTrigger: blockOutput,
+			}
+		}
+	case "restApi":
+		if result != nil {
+			// Convert result to protobuf Any for REST API
+			anyData, err := structpb.NewValue(result)
+			if err != nil {
+				return &avsproto.RunNodeWithInputsResp{
+					Success: false,
+					Error:   fmt.Sprintf("failed to convert REST API output: %v", err),
+					NodeId:  "",
+				}, nil
+			}
+			anyProto, err := anypb.New(anyData)
+			if err != nil {
+				return &avsproto.RunNodeWithInputsResp{
+					Success: false,
+					Error:   fmt.Sprintf("failed to create Any proto: %v", err),
+					NodeId:  "",
+				}, nil
+			}
+			restOutput := &avsproto.RestAPINode_Output{
+				Data: anyProto,
+			}
+			resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{
+				RestApi: restOutput,
+			}
+		}
+	case "customCode":
+		if result != nil {
+			// Convert result to protobuf Value for custom code
+			valueData, err := structpb.NewValue(result)
+			if err != nil {
+				return &avsproto.RunNodeWithInputsResp{
+					Success: false,
+					Error:   fmt.Sprintf("failed to convert custom code output: %v", err),
+					NodeId:  "",
+				}, nil
+			}
+			customOutput := &avsproto.CustomCodeNode_Output{
+				Data: valueData,
+			}
+			resp.OutputData = &avsproto.RunNodeWithInputsResp_CustomCode{
+				CustomCode: customOutput,
+			}
+		}
+	// Add other node types as needed
+	default:
+		// For unknown node types, we can't set specific output data
+		// This will result in no output_data being set, which is valid
+		if n.logger != nil {
+			n.logger.Warn("Unknown node type in RunNodeWithInputsRPC, no specific output type set", "nodeType", req.NodeType)
 		}
 	}
 
-	return &avsproto.RunNodeWithInputsResp{
-		Success: true,
-		Data:    outputData,
-		NodeId:  fmt.Sprintf("temp_%d", time.Now().UnixNano()),
-	}, nil
+	return resp, nil
+}
+
+// Helper functions to extract typed values from result map
+func getStringFromResult(result map[string]interface{}, key string) string {
+	if val, ok := result[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
+func getUint64FromResult(result map[string]interface{}, key string) uint64 {
+	if val, ok := result[key]; ok {
+		switch v := val.(type) {
+		case uint64:
+			return v
+		case int64:
+			return uint64(v)
+		case int:
+			return uint64(v)
+		case float64:
+			return uint64(v)
+		}
+	}
+	return 0
 }

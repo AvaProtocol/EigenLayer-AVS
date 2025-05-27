@@ -67,9 +67,25 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 		}
 	}()
 
+	// Get configuration from input variables (new architecture)
+	r.vm.mu.Lock()
+	queryVar, queryExists := r.vm.vars["query"]
+	r.vm.mu.Unlock()
+
+	if !queryExists {
+		err = fmt.Errorf("missing required input variable: query")
+		return step, nil, err
+	}
+
+	queryStr, ok := queryVar.(string)
+	if !ok {
+		err = fmt.Errorf("query variable must be a string")
+		return step, nil, err
+	}
+
 	var resp map[string]any
 	r.sb.WriteString(fmt.Sprintf("Execute GraphQL %s at %s", r.url.Hostname(), time.Now()))
-	query := graphql.NewRequest(node.Query)
+	query := graphql.NewRequest(queryStr)
 	err = r.client.Run(ctx, query, &resp)
 	if err != nil {
 		return step, nil, err

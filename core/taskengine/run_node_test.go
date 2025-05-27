@@ -42,13 +42,15 @@ func TestRunNodeWithInputs_CustomCode(t *testing.T) {
 		Name: "Test Custom Code",
 		TaskType: &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{
-				Lang: avsproto.CustomCodeLang_JavaScript,
-				Source: `
+				Config: &avsproto.CustomCodeNode_Config{
+					Lang: avsproto.Lang_JavaScript,
+					Source: `
 					if (typeof myVar === 'undefined') {
 						throw new Error("myVar is required but not provided");
 					}
 					({ result: myVar * 2 })
 				`,
+				},
 			},
 		},
 	}

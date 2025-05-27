@@ -24,9 +24,11 @@ func TestVMCompile(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://webhook.site/15431497-2b59-4000-97ee-245fef272967",
-					Method: "POST",
-					Body:   "a=123",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    "https://webhook.site/15431497-2b59-4000-97ee-245fef272967",
+						Method: "POST",
+						Body:   "a=123",
+					},
 				},
 			},
 		},
@@ -81,9 +83,11 @@ func TestRunSimpleTasks(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    ts.URL,
-					Method: "POST",
-					Body:   `{"name":"Alice"}`,
+					Config: &avsproto.RestAPINode_Config{
+						Url:    ts.URL,
+						Method: "POST",
+						Body:   `{"name":"Alice"}`,
+					},
 				},
 			},
 		},
@@ -191,9 +195,11 @@ func TestRunSequentialTasks(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/post",
-					Method: "POST",
-					Body:   "post123",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    "https://httpbin.org/post",
+						Method: "POST",
+						Body:   "post123",
+					},
 				},
 			},
 		},
@@ -202,10 +208,12 @@ func TestRunSequentialTasks(t *testing.T) {
 			Name: "graphql",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/get?query123=abc",
-					Method: "GET",
-					Headers: map[string]string{
-						"content-type": "application/json",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    "https://httpbin.org/get?query123=abc",
+						Method: "GET",
+						Headers: map[string]string{
+							"content-type": "application/json",
+						},
 					},
 				},
 			},
@@ -315,15 +323,17 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
-					Conditions: []*avsproto.Condition{
-						{
-							Id:         "a1",
-							Type:       "if",
-							Expression: "a >= 5",
-						},
-						{
-							Id:   "a2",
-							Type: "else",
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:         "a1",
+								Type:       "if",
+								Expression: "a >= 5",
+							},
+							{
+								Id:   "a2",
+								Type: "else",
+							},
 						},
 					},
 				},
@@ -334,9 +344,11 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    mockServer.URL + "/post",
-					Method: "POST",
-					Body:   "hit=notification1",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    mockServer.URL + "/post",
+						Method: "POST",
+						Body:   "hit=notification1",
+					},
 				},
 			},
 		},
@@ -345,10 +357,12 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    mockServer.URL + "/get?hit=notification2",
-					Method: "GET",
-					Headers: map[string]string{
-						"content-type": "application/json",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    mockServer.URL + "/get?hit=notification2",
+						Method: "GET",
+						Headers: map[string]string{
+							"content-type": "application/json",
+						},
 					},
 				},
 			},
@@ -478,11 +492,13 @@ func TestEvaluateEvent(t *testing.T) {
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
-					Conditions: []*avsproto.Condition{
-						{
-							Id:         "a1",
-							Type:       "if",
-							Expression: `triggertest.data.address == "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" && bigGt(toBigInt(triggertest.data.value), toBigInt("1200000"))`},
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:         "a1",
+								Type:       "if",
+								Expression: `triggertest.data.address == "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" && bigGt(toBigInt(triggertest.data.value), toBigInt("1200000"))`},
+						},
 					},
 				},
 			},
@@ -492,9 +508,11 @@ func TestEvaluateEvent(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/post",
-					Method: "POST",
-					Body:   "hit=notification1",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    "https://httpbin.org/post",
+						Method: "POST",
+						Body:   "hit=notification1",
+					},
 				},
 			},
 		},
@@ -579,11 +597,13 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
-					Conditions: []*avsproto.Condition{
-						{
-							Id:         "a1",
-							Type:       "if",
-							Expression: `triggertest.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" && bigGt(toBigInt(triggertest.data.data), toBigInt("1200000"))`},
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:         "a1",
+								Type:       "if",
+								Expression: `triggertest.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" && bigGt(toBigInt(triggertest.data.data), toBigInt("1200000"))`},
+						},
 					},
 				},
 			},
@@ -593,9 +613,11 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/post",
-					Method: "POST",
-					Body:   "hit=notification1",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    "https://httpbin.org/post",
+						Method: "POST",
+						Body:   "hit=notification1",
+					},
 				},
 			},
 		},
@@ -736,9 +758,11 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    ts.URL + "?apikey={{apContext.configVars.apikey}}",
-					Method: "POST",
-					Body:   "my key is {{apContext.configVars.apikey}} in body",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    ts.URL + "?apikey={{apContext.configVars.apikey}}",
+						Method: "POST",
+						Body:   "my key is {{apContext.configVars.apikey}} in body",
+					},
 				},
 			},
 		},

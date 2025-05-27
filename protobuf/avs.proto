@@ -12,20 +12,62 @@ message IdReq {
   string id = 1;
 }
 
-message FixedTimeCondition {
-  repeated int64 epochs = 1;
+enum Lang {
+  JavaScript = 0;
 }
+
+// Triggers are always the first element in a task execution flow
+// They have Config (static parameters) but no Input (no preceding nodes)
+
+message FixedTimeTrigger {
+  message Config {
+    repeated int64 epochs = 1;
+  }
+  
+  message Output {
+    uint64 epoch = 1;
+  }
+
+  // Include Config as field so it is generated in Go
+  Config config = 1;
+}
+
 // Simple timebase or cron syntax.
-message CronCondition {
-  repeated string schedule = 1;
+message CronTrigger {
+  message Config {
+    repeated string schedule = 1;
+  }
+  
+  message Output {
+    uint64 epoch = 1;
+    string schedule_matched = 2; // Which schedule pattern was matched
+  }
+
+  // Include Config as field so it is generated in Go
+  Config config = 1;
 }
 
-message BlockCondition {
-  int64 interval = 1;
+message BlockTrigger {
+  message Config {
+    int64 interval = 1;
+  }
+  
+  message Output {
+    uint64 block_number = 1;
+    string block_hash = 2;
+    uint64 timestamp = 3;
+    string parent_hash = 4;
+    string difficulty = 5;
+    uint64 gas_limit = 6;
+    uint64 gas_used = 7;
+  }
+
+  // Include Config as field so it is generated in Go
+  Config config = 1;
 }
 
-// EventCondition is a filter to match on an event. It's adhoc logic expression re-present in an array to match an ethereum event
-message EventCondition {
+// EventTrigger is a filter to match on an event. It's adhoc logic expression re-present in an array to match an ethereum event
+message EventTrigger {
   message Matcher {
     // the type of Filter we support, right now, we support below value for 
     //  - topics:
@@ -52,9 +94,40 @@ message EventCondition {
     repeated string value = 2;
   }
 
-  // an array of filter to be mach, as soon as any element of the array mach, the trigger is fired.
-  repeated Matcher matcher = 1;
-  string expression = 2;
+  message Config {
+    // an array of filter to be mach, as soon as any element of the array mach, the trigger is fired.
+    repeated Matcher matcher = 1;
+    string expression = 2;
+  }
+  
+  message Output {
+    // When the trigger is not a transfer event, we will have a raw event output only
+    // These shape of data is https://docs.ethers.org/v6/api/providers/#Log
+    Evm.Log evm_log = 1;
+    
+    // For transfer events specifically, we have enriched data
+    TransferLogOutput transfer_log = 2;
+  }
+  
+  message TransferLogOutput {
+    string token_name = 1;
+    string token_symbol = 2;
+    uint32 token_decimals = 3;
+    string transaction_hash = 4;
+    string address = 5;
+    uint64 block_number = 6;
+    // timestamp of the block (in milliseconds)
+    uint64 block_timestamp = 7;
+    string from_address = 8;
+    string to_address = 9;
+    string value = 10;
+    string value_formatted = 11;
+    uint32 transaction_index = 12;
+    uint32 log_index = 13;
+  }
+
+  // Include Config as field so it is generated in Go
+  Config config = 1;
 }
 
 
@@ -64,16 +137,16 @@ message TaskTrigger {
     // manual task will not be check to be trigger, instead it can be trigger adhoc
     bool               manual = 2;
     // run at a specific epoch, name inspired by unix `at` utility
-    FixedTimeCondition fixed_time   = 3;
+    FixedTimeTrigger fixed_time   = 3;
 
     // interval such as every hour/day/ etc can be converted to cronsyntax by the sdk/studio
-    CronCondition      cron    = 4;
+    CronTrigger      cron    = 4;
    
     // currently the only support syntax is every <x> blocks
-    BlockCondition     block   = 5;
+    BlockTrigger     block   = 5;
 
     // support filter by event expression such as topic0, topic1, topoc2 and event_data and contract_address
-    EventCondition     event   = 6;
+    EventTrigger     event   = 6;
   }
   string id = 7;
 }
@@ -118,26 +191,35 @@ enum ExecutionStatus {
 }
 
 
+// Nodes process data from preceding triggers/nodes
+// They have both Config (static parameters) and Input (runtime variables)
+
 message ETHTransferNode {
-  string destination = 1;
-  string amount = 2;
+  message Config {
+    string destination = 1;
+    string amount = 2;
+  }
 
   message Output {
     string transaction_hash = 1;
   }
+
+  // Include Config and Input as fields so they are generated in Go
+  Config config = 1;
 }
 
 message ContractWriteNode {
-  string contract_address = 1;
-  string call_data = 2;
-
-  // The ABI is only required to decode the return value of a method call.
-  // If we don't need the result and only want the transaction hash (which is usually sufficient),
-  // then we don't need to provide the ABI.
-  string contract_abi = 3;
+  message Config {
+    string contract_address = 1;
+    string call_data = 2;
+    // The ABI is only required to decode the return value of a method call.
+    // If we don't need the result and only want the transaction hash (which is usually sufficient),
+    // then we don't need to provide the ABI.
+    string contract_abi = 3;
+  }
 
   message Output {
-    // The requiremen for this shape of data is requested in https://github.com/AvaProtocol/EigenLayer-AVS/issues/153
+    // The requirement for this shape of data is requested in https://github.com/AvaProtocol/EigenLayer-AVS/issues/153
     // https://docs.ethers.org/v6/api/providers/#TransactionReceipt
     // Ideally we shouldn't have to transport or store this at all. We should only store/pass the txhash, the consumer can construct
     // a full message of these through EVM RPC.
@@ -145,16 +227,20 @@ message ContractWriteNode {
     Evm.UserOp user_op = 1;
     Evm.TransactionReceipt tx_receipt = 2;
   }
+
+  // Include Config and Input as fields so they are generated in Go
+  Config config = 1;
 }
 
 message ContractReadNode {
-  string contract_address = 1;
-  string call_data = 2;
-
-  // The ABI are required to decode the return value and pass it to the next step.
-  // Currently, we need to provide the contract ABI as a JSON string.
-  // We don't need to include the full ABI—just enough to decode the method call.
-  string contract_abi = 3;
+  message Config {
+    string contract_address = 1;
+    string call_data = 2;
+    // The ABI are required to decode the return value and pass it to the next step.
+    // Currently, we need to provide the contract ABI as a JSON string.
+    // We don't need to include the full ABI—just enough to decode the method call.
+    string contract_abi = 3;
+  }
 
   message Output {
     // The data is the result of querying the contract method. Becuase this is fetching data from the outside world,
@@ -163,56 +249,71 @@ message ContractReadNode {
     // In case of smart contract, the return is always an array, then it's up to the client to map to the right field based on method signature
     repeated google.protobuf.Value data = 1;
   }
+
+  // Include Config and Input as fields so they are generated in Go
+  Config config = 1;
 }
 
 
 message GraphQLQueryNode {
-  string url   = 1;
-  string query = 2;
-
-  map<string, string> variables = 3;
-
+  message Config {
+    // Static configuration set at node creation time
+    string url = 1;
+    string query = 2;
+    map<string, string> variables = 3;
+  }
 
   message Output {
     // The data is the result of the graphql query. Becuase this is GraphQL, the data is a json object
     // The field of the json object is unknow, its depend on the query
     google.protobuf.Any data = 1;
   }
+
+  // Include Config and Input as fields so they are generated in Go
+  Config config = 1;
 }
 
 message RestAPINode {
-  string              url     = 1;
-  map<string, string> headers = 2;
-  string              body    = 3;
-  string              method  = 4;
+  message Config {
+    string url = 1;
+    map<string, string> headers = 2;
+    string body = 3;
+    string method = 4;
+  }
 
   message Output {
     google.protobuf.Any data = 1;
   }
-}
 
-enum CustomCodeLang {
-  JavaScript = 0;
+  // Include Config and Input as fields so they are generated in Go
+  Config config = 1;
 }
 
 message CustomCodeNode {
-  CustomCodeLang lang     = 1;
-  string         source    = 2;
+  message Config {
+    Lang lang = 1;  // Language is static config set at creation time
+    string source = 2;  // Source code can be provided as input variable
+  }
 
   message Output {
     // Changed from google.protobuf.Any to google.protobuf.Value for better JavaScript native type support
     google.protobuf.Value data = 1;
   }
-}
 
-message Condition {
-  string id = 1;
-  string type = 2;
-  string expression = 3;
+  // Include Config and Input as fields so they are generated in Go
+  Config config = 1;
 }
 
 message BranchNode {
-  repeated Condition conditions = 1;
+  message Condition {
+    string id = 1;
+    string type = 2;
+    string expression = 3;
+  }
+
+  message Config {
+    repeated Condition conditions = 1;
+  }
 
   message Output {
     // the output of the branch node is the id of the condition that is true
@@ -220,29 +321,41 @@ message BranchNode {
     // In front-end, when rendering the historical execution, we can draw the relationship coming out of the condition that match this id
     string condition_id = 1;
   }
+
+  // Include Config and Input as fields so they are generated in Go
+  Config config = 1;
 }
 
 message FilterNode {
-  // Filter node acts like .select or .filter to pluck out element in an array that evaluate the expression to true
-  string expression = 1;
-  // input is the id of the node that we will fetch its value from and feed into the iteration.
-  // this input has to be an array. Currently we only know about the error at runtime
-  string input = 2;
+  message Config {
+    // Filter node acts like .select or .filter to pluck out element in an array that evaluate the expression to true
+    string expression = 1;
+    
+    // The node Id of a source node; we will extract the output of the source node at runtime.
+    // The data should be iterable (array, object, etc.). Runtime validation will check compatibility.
+    string source_id = 2;
+  }
 
   message Output {
     // the output of the filter node is the filtered array after apply the filter expression. It works similar to filter of javascript
     google.protobuf.Any data = 1;
   }
+
+  // Include Config and Input as fields so they are generated in Go
+  Config config = 1;
 }
 
 // LoopNode currently not support, but we pre-defined to reverse the field id
 message LoopNode {
-  // this is the variable name of any previous step so we can took it
-  string input   = 1;
-
-  // a var that the function can refer to it
-  string iter_val = 2;
-  string iter_key = 3;
+  message Config {
+    // source_variable is the variable name from a previous node whose data will be iterated over.
+    // The node Id of a source node; we will extract the output of the source node at runtime.
+    string source_id = 1;
+    // iter_val is the variable name that will hold the current value during each iteration
+    string iter_val = 2;
+    // iter_key is the variable name that will hold the current key/index during each iteration
+    string iter_key = 3;
+  }
 
   // inside the runner, it can access to the current value of the loop iteration through the iter_val/iter_key above
   oneof runner {
@@ -262,9 +375,11 @@ message LoopNode {
   }
 
   message Output {
-    // TODO: We haven't implement loop node yet
     string data = 1;
   }
+
+  // Include Config and Input as fields so they are generated in Go
+  Config config = 1;
 }
 
 // The edge is relationship or direct between node
@@ -370,35 +485,15 @@ message Execution {
   // For block event, we had the number at that trigger is meet.
   // For time trigger, it is the epoch
   oneof output_data {
-    TransferLogOutput transfer_log = 10;
-
-    // When the trigger is not a transfer event, we will have a raw event output only
-    // These shape of data is https://docs.ethers.org/v6/api/providers/#Log
-    Evm.Log evm_log = 11;
-    BlockOutput block = 12;
-    TimeOutput time = 13;
-  }
-  message TransferLogOutput {
-    string token_name = 1;
-    string token_symbol = 2;
-    uint32 token_decimals = 3;
-    string transaction_hash = 4;
-    string address = 5;
-    uint64 block_number = 6;
-    // timestamp of the block (in milliseconds)
-    uint64 block_timestamp = 7;
-    string from_address = 8;
-    string to_address = 9;
-    string value = 10;
-    string value_formatted = 11;
-    uint32 transaction_index = 12;
-  }
-  
-  message BlockOutput {
-    uint64 block_number = 1;
-  }
-  message TimeOutput {
-    uint64 epoch = 1;
+    // For block triggers
+    BlockTrigger.Output block_trigger = 10;
+    
+    // For time triggers
+    FixedTimeTrigger.Output fixed_time_trigger = 11;
+    CronTrigger.Output cron_trigger = 12;
+    
+    // For event triggers
+    EventTrigger.Output event_trigger = 13;
   }
 }
 
@@ -805,9 +900,28 @@ message RunNodeWithInputsReq {
 // Response message for RunNodeWithInputs
 message RunNodeWithInputsResp {
   bool success = 1; // Whether the execution was successful
-  google.protobuf.Value data = 2; // Output data from the node execution
   string error = 3; // Error message if execution failed
   string node_id = 4; // ID of the executed node
+  
+  // Use specific output types instead of generic Value
+  oneof output_data {
+    // Node outputs
+    ETHTransferNode.Output eth_transfer = 10;
+    GraphQLQueryNode.Output graphql = 11;
+    ContractReadNode.Output contract_read = 12;
+    ContractWriteNode.Output contract_write = 13;
+    CustomCodeNode.Output custom_code = 14;
+    RestAPINode.Output rest_api = 15;
+    BranchNode.Output branch = 16;
+    FilterNode.Output filter = 17;
+    LoopNode.Output loop = 18;
+    
+    // Trigger outputs
+    BlockTrigger.Output block_trigger = 20;
+    FixedTimeTrigger.Output fixed_time_trigger = 21;
+    CronTrigger.Output cron_trigger = 22;
+    EventTrigger.Output event_trigger = 23;
+  }
 }
 
 message Evm {

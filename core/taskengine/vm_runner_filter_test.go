@@ -18,8 +18,10 @@ type MockTokenPrice struct {
 
 func TestFilter(t *testing.T) {
 	node := &avsproto.FilterNode{
-		Expression: "value.cost > 5",
-		Input:      "trades",
+		Config: &avsproto.FilterNode_Config{
+			Expression: "value.cost > 5",
+			SourceId:   "trades",
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -95,8 +97,10 @@ func TestFilter(t *testing.T) {
 
 func TestFilterComplexLogic(t *testing.T) {
 	node := &avsproto.FilterNode{
-		Expression: "if (index<=2) { return value.cost > 13; } else { return value.cost < 21; }",
-		Input:      "trades",
+		Config: &avsproto.FilterNode_Config{
+			Expression: "if (index<=2) { return value.cost > 13; } else { return value.cost < 21; }",
+			SourceId:   "trades",
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
