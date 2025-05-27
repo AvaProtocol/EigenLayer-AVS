@@ -65,7 +65,7 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 		return
 	}
 
-	n, _ := NewGraphqlQueryProcessor(vm, node.Config.Url)
+	n, _ := NewGraphqlQueryProcessor(vm)
 
 	step, _, err := n.Execute("123abc", node)
 

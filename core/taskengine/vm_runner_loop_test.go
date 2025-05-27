@@ -27,15 +27,16 @@ func TestLoopProcessor_Execute_Sequential(t *testing.T) {
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Config: &avsproto.LoopNode_Config{
-			SourceId: "testArray",
-			IterKey:  "index",
-			IterVal:  "loopItemValueForTest",
-		},
+		Config: &avsproto.LoopNode_Config{},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
+
+	// Add input variables that the processor expects
+	vm.AddVar("input", "testArray")
+	vm.AddVar("iter_val", "loopItemValueForTest")
+	vm.AddVar("iter_key", "index")
 
 	executionLog, err := processor.Execute("test_loop_seq", loopNode)
 
@@ -74,15 +75,16 @@ func TestLoopProcessor_Execute_Parallel(t *testing.T) {
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Config: &avsproto.LoopNode_Config{
-			SourceId: "testArray",
-			IterKey:  "index",
-			IterVal:  "loopItemValueForTest",
-		},
+		Config: &avsproto.LoopNode_Config{},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
+
+	// Add input variables that the processor expects
+	vm.AddVar("input", "testArray")
+	vm.AddVar("iter_val", "loopItemValueForTest")
+	vm.AddVar("iter_key", "index")
 
 	executionLog, err := processor.Execute("test_loop_parallel", loopNode)
 
@@ -125,15 +127,16 @@ func TestLoopProcessor_Execute_EmptyArray(t *testing.T) {
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Config: &avsproto.LoopNode_Config{
-			SourceId: "emptyArray",
-			IterKey:  "index",
-			IterVal:  "loopItemValueForTest",
-		},
+		Config: &avsproto.LoopNode_Config{},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
+
+	// Add input variables that the processor expects
+	vm.AddVar("input", "emptyArray")
+	vm.AddVar("iter_val", "loopItemValueForTest")
+	vm.AddVar("iter_key", "index")
 
 	executionLog, err := processor.Execute("test_loop_empty", loopNode)
 
@@ -166,15 +169,16 @@ func TestLoopProcessor_Execute_InvalidInput(t *testing.T) {
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Config: &avsproto.LoopNode_Config{
-			SourceId: "notArray",
-			IterKey:  "index",
-			IterVal:  "loopItemValueForTest",
-		},
+		Config: &avsproto.LoopNode_Config{},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
+
+	// Add input variables that the processor expects
+	vm.AddVar("input", "notArray")
+	vm.AddVar("iter_val", "loopItemValueForTest")
+	vm.AddVar("iter_key", "index")
 
 	executionLog, err := processor.Execute("test_loop_invalid_input", loopNode)
 
@@ -196,15 +200,16 @@ func TestLoopProcessor_Execute_MissingInput(t *testing.T) {
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Config: &avsproto.LoopNode_Config{
-			SourceId: "nonExistentArray",
-			IterKey:  "index",
-			IterVal:  "loopItemValueForTest",
-		},
+		Config: &avsproto.LoopNode_Config{},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
+
+	// Add input variables that the processor expects (but reference non-existent array)
+	vm.AddVar("input", "nonExistentArray")
+	vm.AddVar("iter_val", "loopItemValueForTest")
+	vm.AddVar("iter_key", "index")
 
 	executionLog, err := processor.Execute("test_loop_missing_input", loopNode)
 

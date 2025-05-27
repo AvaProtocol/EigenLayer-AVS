@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -394,6 +395,12 @@ func TestTriggerSync(t *testing.T) {
 
 	if err != nil {
 		t.Errorf("expected trigger successfully but got error: %s", err)
+		return
+	}
+
+	if resultTrigger == nil {
+		t.Errorf("resultTrigger is nil")
+		return
 	}
 
 	// Now get back that execution id
@@ -402,6 +409,16 @@ func TestTriggerSync(t *testing.T) {
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 
+	if err != nil {
+		t.Errorf("failed to get execution: %v", err)
+		return
+	}
+
+	if execution == nil {
+		t.Errorf("execution is nil")
+		return
+	}
+
 	if execution.Id != resultTrigger.ExecutionId {
 		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
@@ -409,6 +426,7 @@ func TestTriggerSync(t *testing.T) {
 	if execution.TriggerName != tr1.Trigger.Name {
 		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
 	}
+
 	if execution.Reason == nil || execution.Reason.BlockNumber != 101 {
 		var actualBlockNumber uint64
 		if execution.Reason != nil {
@@ -509,14 +527,29 @@ func TestTriggerAsync(t *testing.T) {
 	}
 
 	// Check if the response body contains "httpbin.org"
-	body, ok := responseData["body"].(string)
-	if !ok {
-		t.Errorf("Response body is not a string, got type: %T", responseData["body"])
+	// The response structure might have changed, so let's handle both string and map cases
+	var bodyContent string
+	if bodyStr, ok := responseData["body"].(string); ok {
+		bodyContent = bodyStr
+	} else if bodyMap, ok := responseData["body"].(map[string]interface{}); ok {
+		// If body is a map, convert it to string for checking
+		if bodyBytes, err := json.Marshal(bodyMap); err == nil {
+			bodyContent = string(bodyBytes)
+		} else {
+			t.Errorf("Failed to marshal body map to string: %v", err)
+			return
+		}
+	} else {
+		t.Errorf("Response body is neither string nor map, got type: %T", responseData["body"])
 		return
 	}
 
-	if !strings.Contains(body, "httpbin.org") {
-		t.Errorf("Invalid output data. Expected body to contain 'httpbin.org' but got: %s", body[:100]+"...")
+	if !strings.Contains(bodyContent, "httpbin.org") {
+		maxLen := 100
+		if len(bodyContent) < maxLen {
+			maxLen = len(bodyContent)
+		}
+		t.Errorf("Invalid output data. Expected body to contain 'httpbin.org' but got: %s", bodyContent[:maxLen]+"...")
 	}
 
 	// If we get the status back it also reflected

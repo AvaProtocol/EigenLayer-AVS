@@ -30,8 +30,9 @@ func TestExecutorRunTaskWithNilReason(t *testing.T) {
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
 					Config: &avsproto.RestAPINode_Config{
-						// Static configuration set at node creation time
-						// Currently RestAPINode has no static config, all parameters come from input
+						Url:    server.URL,
+						Method: "POST",
+						Body:   `{"test": "data"}`,
 					},
 				},
 			},

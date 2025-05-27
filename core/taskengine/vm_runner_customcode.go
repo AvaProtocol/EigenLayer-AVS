@@ -197,14 +197,9 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	sb.WriteString("Execute Custom Code: ")
 	sb.WriteString(stepID)
 
-	// Get configuration from input variables (new architecture)
-	r.vm.mu.Lock()
-	langVar, langExists := r.vm.vars["lang"]
-	sourceVar, sourceExists := r.vm.vars["source"]
-	r.vm.mu.Unlock()
-
-	if !langExists || !sourceExists {
-		err := fmt.Errorf("missing required input variables: lang and source")
+	// Get configuration from Config message (static configuration)
+	if node.Config == nil {
+		err := fmt.Errorf("CustomCodeNode Config is nil")
 		s.Success = false
 		s.Error = err.Error()
 		s.EndAt = time.Now().UnixMilli()
@@ -213,9 +208,11 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 		return s, err
 	}
 
-	langStr, ok := langVar.(string)
-	if !ok {
-		err := fmt.Errorf("lang variable must be a string")
+	langStr := node.Config.Lang.String()
+	sourceStr := node.Config.Source
+
+	if sourceStr == "" {
+		err := fmt.Errorf("missing required configuration: source")
 		s.Success = false
 		s.Error = err.Error()
 		s.EndAt = time.Now().UnixMilli()
@@ -224,16 +221,8 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 		return s, err
 	}
 
-	sourceStr, ok := sourceVar.(string)
-	if !ok {
-		err := fmt.Errorf("source variable must be a string")
-		s.Success = false
-		s.Error = err.Error()
-		s.EndAt = time.Now().UnixMilli()
-		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		s.Log = sb.String()
-		return s, err
-	}
+	// Preprocess source for template variables
+	sourceStr = r.vm.preprocessText(sourceStr)
 
 	sb.WriteString(" Lang: ")
 	sb.WriteString(langStr)

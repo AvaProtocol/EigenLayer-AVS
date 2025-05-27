@@ -3,7 +3,6 @@ package taskengine
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -45,116 +44,102 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	var logBuilder strings.Builder
 	logBuilder.WriteString(fmt.Sprintf("Executing REST API Node ID: %s at %s\n", stepID, time.Now()))
 
-	// Get configuration from input variables (new architecture)
+	// Get configuration from Config message (static configuration) and input variables (runtime)
+	// Input variables take precedence over Config
+	var url, method, body string
+	var headers map[string]string
+
+	// Start with Config values (if available)
+	if node.Config != nil {
+		url = node.Config.Url
+		method = node.Config.Method
+		body = node.Config.Body
+		headers = node.Config.Headers
+	}
+
+	// Override with input variables if available (for manual execution)
 	r.vm.mu.Lock()
-	urlVar, urlExists := r.vm.vars["url"]
-	methodVar, methodExists := r.vm.vars["method"]
-	bodyVar, bodyExists := r.vm.vars["body"]
-	headersVar, headersExists := r.vm.vars["headers"]
-	r.vm.mu.Unlock()
-
-	if !urlExists || !methodExists {
-		err := fmt.Errorf("missing required input variables: url and method")
-		executionLogStep.Success = false
-		executionLogStep.Error = err.Error()
-		executionLogStep.EndAt = time.Now().UnixMilli()
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-		executionLogStep.Log = logBuilder.String()
-		return executionLogStep, err
+	if urlVar, exists := r.vm.vars["url"]; exists {
+		if urlStr, ok := urlVar.(string); ok {
+			url = urlStr
+		}
 	}
-
-	url, ok := urlVar.(string)
-	if !ok {
-		err := fmt.Errorf("url variable must be a string")
-		executionLogStep.Success = false
-		executionLogStep.Error = err.Error()
-		executionLogStep.EndAt = time.Now().UnixMilli()
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-		executionLogStep.Log = logBuilder.String()
-		return executionLogStep, err
+	if methodVar, exists := r.vm.vars["method"]; exists {
+		if methodStr, ok := methodVar.(string); ok {
+			method = methodStr
+		}
 	}
-
-	method, ok := methodVar.(string)
-	if !ok {
-		err := fmt.Errorf("method variable must be a string")
-		executionLogStep.Success = false
-		executionLogStep.Error = err.Error()
-		executionLogStep.EndAt = time.Now().UnixMilli()
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-		executionLogStep.Log = logBuilder.String()
-		return executionLogStep, err
-	}
-
-	var body string
-	if bodyExists {
+	if bodyVar, exists := r.vm.vars["body"]; exists {
 		if bodyStr, ok := bodyVar.(string); ok {
 			body = bodyStr
 		}
 	}
-
-	var headers map[string]string
-	if headersExists {
-		if headersMap, ok := headersVar.(map[string]interface{}); ok {
-			headers = make(map[string]string)
-			for k, v := range headersMap {
-				if vStr, ok := v.(string); ok {
-					headers[k] = vStr
-				}
-			}
+	if headersVar, exists := r.vm.vars["headers"]; exists {
+		if headersMap, ok := headersVar.(map[string]string); ok {
+			headers = headersMap
 		}
+	}
+	r.vm.mu.Unlock()
+
+	if url == "" || method == "" {
+		err := fmt.Errorf("missing required configuration: url and method (provide via Config or input variables)")
+		executionLogStep.Success = false
+		executionLogStep.Error = err.Error()
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, err
+	}
+
+	// Preprocess URL, body, and headers for template variables
+	url = r.vm.preprocessText(url)
+	body = r.vm.preprocessText(body)
+
+	// Process headers map for template variables
+	processedHeaders := make(map[string]string)
+	for key, value := range headers {
+		processedHeaders[key] = r.vm.preprocessText(value)
 	}
 
 	logBuilder.WriteString(fmt.Sprintf("URL: %s, Method: %s\n", url, method))
+	logBuilder.WriteString(fmt.Sprintf("Body: %s\n", body))
 
-	// Preprocess URL, Body, and Headers using VM variables
-	processedURL := r.vm.preprocessText(url)
-	processedBodyStr := r.vm.preprocessText(body)
-	processedHeaders := make(map[string]string)
-	for key, valTpl := range headers {
-		processedHeaders[r.vm.preprocessText(key)] = r.vm.preprocessText(valTpl)
-	}
-
-	logBuilder.WriteString(fmt.Sprintf("Processed URL: %s\n", processedURL))
-	if processedBodyStr != "" {
-		logBuilder.WriteString(fmt.Sprintf("Processed Body: %s\n", processedBodyStr))
-	}
-	if len(processedHeaders) > 0 {
-		logBuilder.WriteString(fmt.Sprintf("Processed Headers: %v\n", processedHeaders))
-	}
-
+	// Create the HTTP request
 	req := r.HttpClient.R()
-	req.SetHeaders(processedHeaders)
 
-	// Attempt to parse body as JSON. If not, send as raw string.
-	var bodyData interface{}
-	if processedBodyStr != "" {
-		if err := json.Unmarshal([]byte(processedBodyStr), &bodyData); err == nil {
-			req.SetBody(bodyData)
-			logBuilder.WriteString("Body sent as parsed JSON.\n")
-		} else {
-			req.SetBody(processedBodyStr) // Send as raw string if not valid JSON
-			logBuilder.WriteString("Body sent as raw string (not valid JSON).\n")
-		}
+	// Set headers
+	for key, value := range processedHeaders {
+		req.SetHeader(key, value)
+		logBuilder.WriteString(fmt.Sprintf("Header: %s = %s\n", key, value))
 	}
 
+	// Set body if provided
+	if body != "" {
+		req.SetBody(body)
+	}
+
+	logBuilder.WriteString(fmt.Sprintf("Processed URL: %s\n", url))
+	logBuilder.WriteString(fmt.Sprintf("Method: %s\n", method))
+
+	// Execute the request
 	var resp *resty.Response
 	var err error
 
 	switch strings.ToUpper(method) {
-	case http.MethodGet:
-		resp, err = req.Get(processedURL)
-	case http.MethodPost:
-		resp, err = req.Post(processedURL)
-	case http.MethodPut:
-		resp, err = req.Put(processedURL)
-	case http.MethodDelete:
-		resp, err = req.Delete(processedURL)
-	case http.MethodPatch:
-		resp, err = req.Patch(processedURL)
-	case http.MethodHead:
-		resp, err = req.Head(processedURL)
-	case http.MethodOptions:
-		resp, err = req.Options(processedURL)
+	case "GET":
+		resp, err = req.Get(url)
+	case "POST":
+		resp, err = req.Post(url)
+	case "PUT":
+		resp, err = req.Put(url)
+	case "DELETE":
+		resp, err = req.Delete(url)
+	case "PATCH":
+		resp, err = req.Patch(url)
+	case "HEAD":
+		resp, err = req.Head(url)
+	case "OPTIONS":
+		resp, err = req.Options(url)
 	default:
 		err = fmt.Errorf("unsupported HTTP method: %s", method)
 	}

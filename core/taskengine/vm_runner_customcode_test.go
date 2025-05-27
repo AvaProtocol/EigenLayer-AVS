@@ -479,7 +479,7 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 		t.Fatalf("Expected 2 execution steps, got %d", len(vm.ExecutionLogs))
 	}
 
-	if capturedBody != "{\"output_from_js\": \"[object Object]\"" {
+	if capturedBody != "{\"output_from_js\": \"[object Object]\"}" {
 		t.Errorf("expected output_from_js to be [object Object] but got %q", capturedBody)
 	}
 

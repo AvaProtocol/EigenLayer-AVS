@@ -383,7 +383,20 @@ func (v *VM) Compile() error {
 			return fmt.Errorf("compile error: target node '%s' in edge '%s' not in TaskNodes", edge.Target, edge.Id)
 		}
 		adj[edge.Source] = append(adj[edge.Source], edge.Target)
-		inDegree[edge.Target]++ // All valid targets contribute to in-degree. Trigger adjustment comes next.
+		// Only count in-degree for edges from actual TaskNodes or triggers
+		// Branch condition edges don't count toward in-degree since they're not real nodes
+		if !isBranchSource {
+			inDegree[edge.Target]++ // All valid targets contribute to in-degree. Trigger adjustment comes next.
+		}
+	}
+
+	// Track nodes that are targets of branch condition edges
+	// These should not be in the initial queue even if they have in-degree 0
+	branchTargets := make(map[string]bool)
+	for _, edge := range v.task.Edges {
+		if strings.Contains(edge.Source, ".") { // Branch condition edge
+			branchTargets[edge.Target] = true
+		}
 	}
 
 	q := make([]string, 0, len(v.TaskNodes))
@@ -392,7 +405,7 @@ func (v *VM) Compile() error {
 	if v.task.Trigger == nil || v.task.Trigger.Id == "" {
 		if v.entrypoint == "" { // Only if not set by RunNodeWithInputs
 			for nodeID, deg := range inDegree {
-				if deg == 0 {
+				if deg == 0 && !branchTargets[nodeID] {
 					q = append(q, nodeID)
 					initialEntryCandidates[nodeID] = true
 				}
@@ -423,24 +436,11 @@ func (v *VM) Compile() error {
 		}
 		// After adjustments, collect all nodes with in-degree 0.
 		for nodeID, deg := range inDegree {
-			if deg == 0 && initialEntryCandidates[nodeID] { // Must be a trigger target (or graph start if no trigger)
-				q = append(q, nodeID)
-			} else if deg == 0 && (v.task.Trigger == nil || v.task.Trigger.Id == "") { // No trigger, any 0-in-degree node
+			if deg == 0 && !branchTargets[nodeID] {
+				// Add nodes with in-degree 0 that are not targets of branch condition edges
+				// Branch targets should only be executed when their branch condition is met
 				q = append(q, nodeID)
 			}
-		}
-		// Remove duplicates from q if any node was added twice through different logic paths
-		// (though current logic should prevent this for trigger-based starts)
-		if len(q) > 0 {
-			uniqueQ := make([]string, 0, len(q))
-			seenInQ := make(map[string]bool)
-			for _, item := range q {
-				if !seenInQ[item] {
-					uniqueQ = append(uniqueQ, item)
-					seenInQ[item] = true
-				}
-			}
-			q = uniqueQ
 		}
 
 		if len(q) == 0 && len(v.TaskNodes) > 0 {
@@ -472,9 +472,21 @@ func (v *VM) Compile() error {
 		v.plans[currNodeID] = planStep
 
 		if node, isTaskNode := v.TaskNodes[currNodeID]; isTaskNode && node.GetBranch() != nil {
-			// Branch conditions are now in Input messages, not available at compile time
-			// Skip condition-based plan generation during compilation
-			// Branch execution will handle condition evaluation at runtime
+			// For branch nodes, we need to create plans for each condition ID
+			// so that edges like "branch1.a1" can be resolved
+			branchNode := node.GetBranch()
+			if branchNode.Config != nil && len(branchNode.Config.Conditions) > 0 {
+				for _, condition := range branchNode.Config.Conditions {
+					conditionID := fmt.Sprintf("%s.%s", currNodeID, condition.Id)
+					// Create a plan for this condition ID
+					conditionPlan := &Step{NodeID: conditionID}
+					// Find edges that have this condition as source
+					if nextNodeIDs, ok := adj[conditionID]; ok {
+						conditionPlan.Next = nextNodeIDs
+					}
+					v.plans[conditionID] = conditionPlan
+				}
+			}
 		}
 
 		for _, neighborNodeID := range adj[currNodeID] {
@@ -491,6 +503,33 @@ func (v *VM) Compile() error {
 	}
 
 	if processedCount != len(v.TaskNodes) {
+		// Check if the unprocessed nodes are all branch targets or nodes reachable only through branch targets
+		// Branch targets are not processed in the initial topological sort
+		unprocessedNodes := len(v.TaskNodes) - processedCount
+
+		// Find all nodes that are reachable only through branch targets
+		allUnreachableNodes := make(map[string]bool)
+		for nodeID := range v.TaskNodes {
+			if _, exists := v.plans[nodeID]; !exists {
+				allUnreachableNodes[nodeID] = true
+			}
+		}
+
+		// Check if all unprocessed nodes are either branch targets or reachable only through branch targets
+		if unprocessedNodes == len(allUnreachableNodes) {
+			// All unprocessed nodes are unreachable through normal topological sort
+			// But we still need to add them to the plans so they can be executed when branch conditions are met
+			for nodeID := range allUnreachableNodes {
+				// This node wasn't processed in the topological sort, add it to plans
+				planStep := &Step{NodeID: nodeID}
+				if nextNodeIDs, ok := adj[nodeID]; ok {
+					planStep.Next = nextNodeIDs
+				}
+				v.plans[nodeID] = planStep
+			}
+			v.Status = VMStateCompiled
+			return nil
+		}
 		return fmt.Errorf("cycle detected: processed %d nodes, but %d TaskNodes exist", processedCount, len(v.TaskNodes))
 	}
 
@@ -558,19 +597,19 @@ func (v *VM) Run() error {
 			// This can happen if a branch condition ID is in currentStep.NodeID
 			// but it doesn't map directly to a TaskNode (it's a conceptual step).
 			// The actual jump should have been resolved by executeNode (branch).
-			// If we reach here with a non-TaskNode ID, it's likely a logic error in plan navigation.
-			if v.logger != nil {
-				v.logger.Error("Node ID in current step not found in TaskNodes, might be a plan navigation issue.", "nodeID", stepToExecute.NodeID)
-			}
-			// If it's a conceptual step (like branch output), its 'Next' should point to a real node.
+			// If we reach here with a non-TaskNode ID, it's likely a conceptual step like "branch1.a1"
+			// that should immediately proceed to its Next nodes.
 			v.mu.Lock()
 			if len(stepToExecute.Next) > 0 {
-				currentStep = v.plans[stepToExecute.Next[0]]
+				nextStepID := stepToExecute.Next[0]
+				currentStep = v.plans[nextStepID]
 				v.mu.Unlock()
 				continue
 			}
 			v.mu.Unlock()
-			return fmt.Errorf("plan error: node ID '%s' not found in TaskNodes and no next step defined", stepToExecute.NodeID)
+			// If no next step, end execution
+			currentStep = nil
+			continue
 		}
 
 		jump, err := v.executeNode(node) // executeNode calls sub-processors which should use AddVar for VM state changes
@@ -687,9 +726,8 @@ func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avspro
 }
 
 func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, error) {
-	// GraphQL URL is now in Input message, not available at node creation time
-	// The GraphQL processor will need to get the URL from input variables
-	g, err := NewGraphqlQueryProcessor(v, "") // Pass empty URL, processor will get it from inputs
+	// GraphQL URL and query are now in Config message, not input variables
+	g, err := NewGraphqlQueryProcessor(v)     // No URL parameter needed, processor gets it from Config
 	var executionLog *avsproto.Execution_Step // Declare to ensure it's always initialized
 	if err != nil {
 		// Create a failed execution log step
@@ -800,7 +838,7 @@ func (v *VM) runBranch(stepID string, nodeValue *avsproto.BranchNode) (*avsproto
 		v.mu.Unlock()
 	}
 	// The returned executionLog from processor.Execute should be the one for the main VM.
-	// No need to call v.addExecutionLog here if processor.Execute is designed to return the log for the *caller* VM.
+	// No need to call v.addExecutionLog here if processor.Execute returns a log that should be added by the caller.
 	// However, the original structure had v.addExecutionLog(executionLog) *after* the call to processor.Execute.
 	// Let's assume processor.Execute returns a log that should be added by the caller.
 	// The `addExecutionLog` for this branch step itself is done by `executeNode` using the returned `branchLog`.

@@ -234,18 +234,11 @@ func TestBranchConditionSuccesfulCase(t *testing.T) {
 			processor := NewBranchProcessor(vm)
 
 			vm.AddVar("a", tc.aValue)
-			// Add conditions as input variables (new architecture)
-			conditionsInterface := make([]interface{}, len(conditions))
-			for i, cond := range conditions {
-				conditionsInterface[i] = map[string]interface{}{
-					"id":         cond.Id,
-					"type":       cond.Type,
-					"expression": cond.Expression,
-				}
-			}
-			vm.AddVar("conditions", conditionsInterface)
-
-			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{})
+			stepResult, _, err := processor.Execute("test1", &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: conditions,
+				},
+			})
 
 			if tc.expectError {
 				if err == nil {
@@ -694,7 +687,7 @@ func TestBranchProcessor_Execute_NoConditions(t *testing.T) {
 	executionLog, nextStep, err := processor.Execute(stepID, node)
 
 	assert.NotNil(t, err)
-	assert.Contains(t, err.Error(), "no branch condition met")
+	assert.Contains(t, err.Error(), "there is no condition to evaluate")
 	assert.Nil(t, nextStep)
 	assert.NotNil(t, executionLog)
 	assert.False(t, executionLog.Success)
