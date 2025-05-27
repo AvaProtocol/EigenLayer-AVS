@@ -34,12 +34,14 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
-					Conditions: []*avsproto.Condition{
-						{
-							Id:   "a1",
-							Type: "if",
-							// The test data is of this transaction https://sepolia.etherscan.io/tx/0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8 which is 3.45 token
-							Expression: "Number(triggertest.data.value_formatted) >= 3",
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:   "a1",
+								Type: "if",
+								// The test data is of this transaction https://sepolia.etherscan.io/tx/0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8 which is 3.45 token
+								Expression: "Number(triggertest.data.value_formatted) >= 3",
+							},
 						},
 					},
 				},
@@ -50,9 +52,11 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    server.URL, // Use the test server URL
-					Method: "POST",
-					Body:   "hit=notification1",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    server.URL, // Use the test server URL
+						Method: "POST",
+						Body:   "hit=notification1",
+					},
 				},
 			},
 		},
@@ -69,7 +73,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 			Target: "branch1",
 		},
 		{
-			Id:     "e1",
+			Id:     "e2",
 			Source: "branch1.a1",
 			Target: "notification1",
 		},
@@ -108,6 +112,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 
 	if len(execution.Steps) != 2 {
 		t.Errorf("Expect evaluate 2 steps only but got: %d", len(execution.Steps))
+		return
 	}
 
 	if execution.Steps[0].NodeId != "branch1" {
@@ -123,8 +128,9 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 	}
 
 	outputData := gow.AnyToMap(execution.Steps[1].GetRestApi().Data)
-	if outputData["message"].(string) != "I'm hit" {
-		t.Errorf("expect branch output data is {\"message\": \"I'm hit\"} but got %s", outputData)
+	bodyData := outputData["body"].(map[string]interface{})
+	if bodyData["message"].(string) != "I'm hit" {
+		t.Errorf("expect message to be 'I'm hit' but got %s", bodyData["message"])
 	}
 }
 
@@ -140,11 +146,13 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
-					Conditions: []*avsproto.Condition{
-						{
-							Id:         "a1",
-							Type:       "if",
-							Expression: "a >= 5",
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:         "a1",
+								Type:       "if",
+								Expression: "a >= 5",
+							},
 						},
 					},
 				},
@@ -155,9 +163,11 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/post",
-					Method: "POST",
-					Body:   "hit=notification1",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    "https://httpbin.org/post",
+						Method: "POST",
+						Body:   "hit=notification1",
+					},
 				},
 			},
 		},
@@ -174,7 +184,7 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 			Target: "branch1",
 		},
 		{
-			Id:     "e1",
+			Id:     "e2",
 			Source: "branch1.a1",
 			Target: "notification1",
 		},
@@ -234,11 +244,13 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
-					Conditions: []*avsproto.Condition{
-						{
-							Id:         "condition1",
-							Type:       "if",
-							Expression: "true",
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:         "condition1",
+								Type:       "if",
+								Expression: "true",
+							},
 						},
 					},
 				},
@@ -249,9 +261,11 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    server.URL, // Use the test server URL
-					Method: "POST",
-					Body:   "hit=notification1",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    server.URL, // Use the test server URL
+						Method: "POST",
+						Body:   "hit=notification1",
+					},
 				},
 			},
 		},
@@ -268,7 +282,7 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 			Target: "branch1",
 		},
 		{
-			Id:     "e1",
+			Id:     "e2",
 			Source: "branch1.condition1",
 			Target: "rest1",
 		},
@@ -330,8 +344,9 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 			Name: "spacex",
 			TaskType: &avsproto.TaskNode_GraphqlQuery{
 				GraphqlQuery: &avsproto.GraphQLQueryNode{
-					Url: "https://spacex-production.up.railway.app/",
-					Query: `
+					Config: &avsproto.GraphQLQueryNode_Config{
+						Url: "https://spacex-production.up.railway.app/",
+						Query: `
 						query Launch {
 							company {
 							ceo
@@ -342,6 +357,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 							}
 						}
 				`,
+					},
 				},
 			},
 		},
@@ -350,11 +366,13 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
-					Conditions: []*avsproto.Condition{
-						{
-							Id:         "condition1",
-							Type:       "if",
-							Expression: "Number(triggertest.data.value_formatted) >= 3",
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:         "condition1",
+								Type:       "if",
+								Expression: "Number(triggertest.data.value_formatted) >= 3",
+							},
 						},
 					},
 				},
@@ -365,8 +383,10 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 			Name: "dummy",
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
-					// Just logout the data so we can assert from the output
-					Source: "JSON.stringify(triggertest.data)",
+					Config: &avsproto.CustomCodeNode_Config{
+						// Just logout the data so we can assert from the output
+						Source: "JSON.stringify(triggertest.data)",
+					},
 				},
 			},
 		},
@@ -375,9 +395,11 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 			Name: "http",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    server.URL, // Use the test server URL
-					Method: "POST",
-					Body:   "hit=notification1",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    server.URL, // Use the test server URL
+						Method: "POST",
+						Body:   "hit=notification1",
+					},
 				},
 			},
 		},
@@ -399,7 +421,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 			Target: "branch1",
 		},
 		{
-			Id:     "e1",
+			Id:     "e3",
 			Source: "branch1.condition1",
 			Target: "customcode1",
 		},
@@ -468,7 +490,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		t.Errorf("expect 4 steps but got: %d", len(execution.Steps))
 	}
 
-	outputData := execution.OutputData.(*avsproto.Execution_TransferLog).TransferLog
+	outputData := execution.OutputData.(*avsproto.Execution_EventTrigger).EventTrigger.TransferLog
 
 	// cannot use deepqual here due to the pointer issue of protobuf
 	if outputData.TokenName != "USDC" {
@@ -524,10 +546,10 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 	}
 
 	// Verify the inputs of each step
-	expectedInputsStep0 := []string{"triggertest.data", "apContext.configVars"}
-	expectedInputsStep1 := []string{"triggertest.data", "spacex.data", "apContext.configVars"}
-	expectedInputsStep2 := []string{"triggertest.data", "spacex.data", "apContext.configVars"}
-	expectedInputsStep3 := []string{"apContext.configVars", "spacex.data", "triggertest.data", "dummy.data"}
+	expectedInputsStep0 := []string{"apContext.configVars", "spacex.data", "triggertest.data"}
+	expectedInputsStep1 := []string{"apContext.configVars", "spacex.data", "triggertest.data"}
+	expectedInputsStep2 := []string{"apContext.configVars", "dummy.data", "spacex.data", "triggertest.data"}
+	expectedInputsStep3 := []string{"apContext.configVars", "dummy.data", "http.data", "spacex.data", "triggertest.data"}
 
 	// Sort the expected and actual inputs before comparison
 	sort.Strings(expectedInputsStep0)

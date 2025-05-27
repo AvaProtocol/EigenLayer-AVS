@@ -56,7 +56,7 @@ func TestSetupPagination(t *testing.T) {
 			expectErrorMsg: InvalidCursor,
 		},
 		{
-			name:           "Invalid cursor in after", 
+			name:           "Invalid cursor in after",
 			before:         "",
 			after:          "invalid-cursor",
 			limit:          10,

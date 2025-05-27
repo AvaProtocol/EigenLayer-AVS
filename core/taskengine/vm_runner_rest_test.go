@@ -16,12 +16,14 @@ import (
 
 func TestRestRequest(t *testing.T) {
 	node := &avsproto.RestAPINode{
-		Url: "https://httpbin.org/post",
-		Headers: map[string]string{
-			"Content-type": "application/x-www-form-urlencoded",
+		Config: &avsproto.RestAPINode_Config{
+			Url: "https://httpbin.org/post",
+			Headers: map[string]string{
+				"Content-type": "application/x-www-form-urlencoded",
+			},
+			Body:   "chat_id=123&disable_notification=true&text=%2AThis+is+a+test+format%2A",
+			Method: "POST",
 		},
-		Body:   "chat_id=123&disable_notification=true&text=%2AThis+is+a+test+format%2A",
-		Method: "POST",
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -67,15 +69,41 @@ func TestRestRequest(t *testing.T) {
 		t.Errorf("expected rest node run successfully but failed")
 	}
 
-	if !strings.Contains(step.Log, "Execute POST httpbin.org at") {
+	if !strings.Contains(step.Log, "Executing REST API Node ID:") {
 		t.Errorf("expected log to contain request trace data but found no")
 	}
 
 	if step.Error != "" {
-		t.Errorf("expected log to contain request trace data but found no")
+		t.Errorf("expected no error but got: %s", step.Error)
 	}
 
-	outputData := gow.AnyToMap(step.GetRestApi().Data)["form"].(map[string]any)
+	dataMap := gow.AnyToMap(step.GetRestApi().Data)
+
+	// Check if body field exists
+	bodyField, exists := dataMap["body"]
+	if !exists {
+		t.Errorf("response does not contain 'body' field, available fields: %v", dataMap)
+		return
+	}
+
+	bodyMap, ok := bodyField.(map[string]any)
+	if !ok {
+		t.Errorf("body field is not map[string]any, got %T: %v", bodyField, bodyField)
+		return
+	}
+
+	// Check if form field exists in body
+	formField, exists := bodyMap["form"]
+	if !exists {
+		t.Errorf("response body does not contain 'form' field, available fields: %v", bodyMap)
+		return
+	}
+
+	outputData, ok := formField.(map[string]any)
+	if !ok {
+		t.Errorf("form field is not map[string]any, got %T: %v", formField, formField)
+		return
+	}
 	//[chat_id:123 disable_notification:true text:*This is a test format*]
 
 	if outputData["chat_id"].(string) != "123" {
@@ -103,12 +131,14 @@ func TestRestRequestHandleEmptyResponse(t *testing.T) {
 	defer ts.Close()
 
 	node := &avsproto.RestAPINode{
-		Url: ts.URL,
-		Headers: map[string]string{
-			"Content-type": "application/x-www-form-urlencoded",
+		Config: &avsproto.RestAPINode_Config{
+			Url: ts.URL,
+			Headers: map[string]string{
+				"Content-type": "application/x-www-form-urlencoded",
+			},
+			Body:   "",
+			Method: "POST",
 		},
-		Body:   "",
-		Method: "POST",
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -172,12 +202,14 @@ func TestRestRequestRenderVars(t *testing.T) {
 	defer ts.Close()
 
 	node := &avsproto.RestAPINode{
-		Url: ts.URL,
-		Headers: map[string]string{
-			"Content-type": "application/x-www-form-urlencoded",
+		Config: &avsproto.RestAPINode_Config{
+			Url: ts.URL,
+			Headers: map[string]string{
+				"Content-type": "application/x-www-form-urlencoded",
+			},
+			Body:   "my name is {{myNode.data.name}}",
+			Method: "POST",
 		},
-		Body:   "my name is {{myNode.data.name}}",
-		Method: "POST",
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -229,8 +261,9 @@ func TestRestRequestRenderVars(t *testing.T) {
 		t.Errorf("expected rest node run successfully but failed")
 	}
 
-	if gow.AnyToString(step.GetRestApi().Data) != "my name is unit test" {
-		t.Errorf("expected response to be 'my name is unit test', got: %s", step.OutputData)
+	responseData := gow.AnyToMap(step.GetRestApi().Data)
+	if responseData["body"].(string) != "my name is unit test" {
+		t.Errorf("expected response to be 'my name is unit test', got: %s", responseData["body"])
 	}
 }
 
@@ -254,10 +287,12 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 	}
 
 	node := &avsproto.RestAPINode{
-		Url:     originalUrl,
-		Headers: originalHeaders,
-		Body:    originalBody,
-		Method:  "POST",
+		Config: &avsproto.RestAPINode_Config{
+			Url:     originalUrl,
+			Headers: originalHeaders,
+			Body:    originalBody,
+			Method:  "POST",
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -307,8 +342,9 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 	if !step.Success {
 		t.Errorf("expected rest node run successfully but failed")
 	}
-	if gow.AnyToString(step.GetRestApi().Data) != "my name is first" {
-		t.Errorf("expected response to be 'my name is first', got: %s", step.OutputData)
+	responseData := gow.AnyToMap(step.GetRestApi().Data)
+	if responseData["body"].(string) != "my name is first" {
+		t.Errorf("expected response to be 'my name is first', got: %s", responseData["body"])
 	}
 
 	// Second execution with different value
@@ -326,26 +362,29 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 	if !step.Success {
 		t.Errorf("expected rest node run successfully but failed")
 	}
-	if gow.AnyToString(step.GetRestApi().Data) != "my name is second" {
-		t.Errorf("expected response to be 'my name is second', got: %s", step.OutputData)
+	responseData2 := gow.AnyToMap(step.GetRestApi().Data)
+	if responseData2["body"].(string) != "my name is second" {
+		t.Errorf("expected response to be 'my name is second', got: %s", responseData2["body"])
 	}
 
 	// Verify original node values remain unchanged
-	if node.Url != originalUrl {
-		t.Errorf("expected URL to be %s, got %s", originalUrl, node.Url)
+	if node.Config.Url != originalUrl {
+		t.Errorf("expected URL to be %s, got %s", originalUrl, node.Config.Url)
 	}
-	if node.Body != originalBody {
-		t.Errorf("expected Body to be %s, got %s", originalBody, node.Body)
+	if node.Config.Body != originalBody {
+		t.Errorf("expected Body to be %s, got %s", originalBody, node.Config.Body)
 	}
-	if !reflect.DeepEqual(node.Headers, originalHeaders) {
-		t.Errorf("expected Headers to be %v, got %v", originalHeaders, node.Headers)
+	if !reflect.DeepEqual(node.Config.Headers, originalHeaders) {
+		t.Errorf("expected Headers to be %v, got %v", originalHeaders, node.Config.Headers)
 	}
 }
 
 func TestRestRequestErrorHandling(t *testing.T) {
 	node := &avsproto.RestAPINode{
-		Url:    "http://non-existent-domain-that-will-fail.invalid",
-		Method: "GET",
+		Config: &avsproto.RestAPINode_Config{
+			Url:    "http://non-existent-domain-that-will-fail.invalid",
+			Method: "GET",
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -401,8 +440,10 @@ func TestRestRequestErrorHandling(t *testing.T) {
 	defer ts.Close()
 
 	node404 := &avsproto.RestAPINode{
-		Url:    ts.URL,
-		Method: "GET",
+		Config: &avsproto.RestAPINode_Config{
+			Url:    ts.URL,
+			Method: "GET",
+		},
 	}
 
 	step, err = n.Execute("error-test", node404)
@@ -426,8 +467,10 @@ func TestRestRequestErrorHandling(t *testing.T) {
 	defer ts500.Close()
 
 	node500 := &avsproto.RestAPINode{
-		Url:    ts500.URL,
-		Method: "GET",
+		Config: &avsproto.RestAPINode_Config{
+			Url:    ts500.URL,
+			Method: "GET",
+		},
 	}
 
 	step, err = n.Execute("error-test", node500)

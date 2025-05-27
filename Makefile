@@ -103,7 +103,7 @@ unstable-build:
 dev-live:
 	go run github.com/air-verse/air@v1.61.1 \
 		--build.cmd "make dev-build" --build.bin "./out/${BINARY_NAME}" --build.args_bin "aggregator" --build.delay "100" \
-		--build.exclude_dir "certs,client-sdk,contracts,examples,out,docs,tmp" \
+		--build.exclude_dir "certs,client-sdk,contracts,examples,out,docs,tmp, migrations" \
 		--build.include_ext "go, tpl, tmpl, html, css, scss, js, ts, sql, jpeg, jpg, gif, png, bmp, svg, webp, ico" \
 		--misc.clean_on_exit "true"
 

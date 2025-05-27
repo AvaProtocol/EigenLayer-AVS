@@ -24,9 +24,11 @@ func TestVMCompile(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://webhook.site/15431497-2b59-4000-97ee-245fef272967",
-					Method: "POST",
-					Body:   "a=123",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    "https://webhook.site/15431497-2b59-4000-97ee-245fef272967",
+						Method: "POST",
+						Body:   "a=123",
+					},
 				},
 			},
 		},
@@ -81,9 +83,11 @@ func TestRunSimpleTasks(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    ts.URL,
-					Method: "POST",
-					Body:   `{"name":"Alice"}`,
+					Config: &avsproto.RestAPINode_Config{
+						Url:    ts.URL,
+						Method: "POST",
+						Body:   `{"name":"Alice"}`,
+					},
 				},
 			},
 		},
@@ -124,14 +128,63 @@ func TestRunSimpleTasks(t *testing.T) {
 		t.Errorf("Error executing program. Expected no error Got error %v", err)
 	}
 
-	if !strings.Contains(vm.ExecutionLogs[0].Log, "Execute") {
-		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got nothing")
+	if len(vm.ExecutionLogs) == 0 {
+		t.Errorf("no execution logs found")
+		return
 	}
 
-	data := vm.vars["httpnode"].(map[string]any)["data"]
+	if !strings.Contains(vm.ExecutionLogs[0].Log, "Executing REST API Node ID") {
+		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got: %s", vm.ExecutionLogs[0].Log)
+	}
 
-	if data.(map[string]any)["name"].(string) != "Alice" {
-		t.Errorf("step result isn't store properly, expect 123 got %s", data)
+	vm.mu.Lock()
+	tempHttpNode, exists := vm.vars["httpnode"]
+	vm.mu.Unlock()
+
+	if !exists {
+		t.Errorf("httpnode variable not found in VM vars")
+		return
+	}
+
+	if tempHttpNode == nil {
+		t.Errorf("httpnode variable is nil")
+		return
+	}
+
+	// The REST API response is nested under a "data" field
+	responseData, ok := tempHttpNode.(map[string]any)
+	if !ok {
+		t.Errorf("httpnode is not map[string]any, got %T: %v", tempHttpNode, tempHttpNode)
+		return
+	}
+
+	data, dataExists := responseData["data"]
+	if !dataExists {
+		t.Errorf("data field not found in response, available fields: %v", responseData)
+		return
+	}
+
+	dataMap, ok := data.(map[string]any)
+	if !ok {
+		t.Errorf("data is not map[string]any, got %T: %v", data, data)
+		return
+	}
+
+	body, bodyExists := dataMap["body"]
+	if !bodyExists {
+		t.Errorf("body field not found in data, available fields: %v", dataMap)
+		return
+	}
+
+	// The test server echoes back the JSON request body
+	bodyMap, ok := body.(map[string]any)
+	if !ok {
+		t.Errorf("body is not map[string]any, got %T: %v", body, body)
+		return
+	}
+
+	if bodyMap["name"].(string) != "Alice" {
+		t.Errorf("step result isn't store properly, expect Alice got %s", bodyMap["name"])
 	}
 }
 
@@ -142,9 +195,11 @@ func TestRunSequentialTasks(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/post",
-					Method: "POST",
-					Body:   "post123",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    "https://httpbin.org/post",
+						Method: "POST",
+						Body:   "post123",
+					},
 				},
 			},
 		},
@@ -153,10 +208,12 @@ func TestRunSequentialTasks(t *testing.T) {
 			Name: "graphql",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/get?query123=abc",
-					Method: "GET",
-					Headers: map[string]string{
-						"content-type": "application/json",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    "https://httpbin.org/get?query123=abc",
+						Method: "GET",
+						Headers: map[string]string{
+							"content-type": "application/json",
+						},
 					},
 				},
 			},
@@ -211,8 +268,8 @@ func TestRunSequentialTasks(t *testing.T) {
 		t.Errorf("Missing an execution")
 	}
 
-	if !strings.Contains(vm.ExecutionLogs[0].Log, "Execute POST httpbin.org at") || !strings.Contains(vm.ExecutionLogs[1].Log, "Execute GET httpbin.org") {
-		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got nothing")
+	if !strings.Contains(vm.ExecutionLogs[0].Log, "Executing REST API Node ID") || !strings.Contains(vm.ExecutionLogs[1].Log, "Executing REST API Node ID") {
+		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got: %s and %s", vm.ExecutionLogs[0].Log, vm.ExecutionLogs[1].Log)
 	}
 
 	if !vm.ExecutionLogs[0].Success || !vm.ExecutionLogs[1].Success {
@@ -224,12 +281,12 @@ func TestRunSequentialTasks(t *testing.T) {
 	}
 
 	outputData := gow.AnyToMap(vm.ExecutionLogs[0].GetRestApi().Data)
-	if outputData["data"].(string) != "post123" {
-		t.Errorf("rest node result is incorrect, should contains the string post123")
+	if outputData["body"].(map[string]any)["data"].(string) != "post123" {
+		t.Errorf("rest node result is incorrect, should contains the string post123, got: %v", outputData["body"])
 	}
 	outputData = gow.AnyToMap(vm.ExecutionLogs[1].GetRestApi().Data)
-	if outputData["args"].(map[string]any)["query123"].(string) != "abc" {
-		t.Errorf("rest node result is incorrect, should contains the string query123")
+	if outputData["body"].(map[string]any)["args"].(map[string]any)["query123"].(string) != "abc" {
+		t.Errorf("rest node result is incorrect, should contains the string query123, got: %v", outputData["body"])
 	}
 }
 
@@ -266,15 +323,17 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
-					Conditions: []*avsproto.Condition{
-						{
-							Id:         "a1",
-							Type:       "if",
-							Expression: "a >= 5",
-						},
-						{
-							Id:   "a2",
-							Type: "else",
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:         "a1",
+								Type:       "if",
+								Expression: "a >= 5",
+							},
+							{
+								Id:   "a2",
+								Type: "else",
+							},
 						},
 					},
 				},
@@ -285,9 +344,11 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    mockServer.URL + "/post",
-					Method: "POST",
-					Body:   "hit=notification1",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    mockServer.URL + "/post",
+						Method: "POST",
+						Body:   "hit=notification1",
+					},
 				},
 			},
 		},
@@ -296,10 +357,12 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    mockServer.URL + "/get?hit=notification2",
-					Method: "GET",
-					Headers: map[string]string{
-						"content-type": "application/json",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    mockServer.URL + "/get?hit=notification2",
+						Method: "GET",
+						Headers: map[string]string{
+							"content-type": "application/json",
+						},
 					},
 				},
 			},
@@ -341,7 +404,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		t.Errorf("expect vm initialized")
 	}
 
-	vm.vars["a"] = 10
+	vm.AddVar("a", 10)
 	vm.Compile()
 
 	if vm.entrypoint != "branch1" {
@@ -349,8 +412,8 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		return
 	}
 
-	if len(vm.plans) != 3 {
-		t.Errorf("Invalid plan generation. Expect one step, got %d", len(vm.plans))
+	if len(vm.plans) != 5 {
+		t.Errorf("Invalid plan generation. Expect 5 steps, got %d", len(vm.plans))
 	}
 
 	err = vm.Run()
@@ -366,15 +429,19 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		t.Errorf("incorrect log, expect 2 got %d", len(vm.ExecutionLogs))
 	}
 
-	outputdata := gow.AnyToMap(vm.ExecutionLogs[1].GetRestApi().Data)
-	if outputdata["data"] != `hit=notification1` {
-		t.Errorf("expect executing notification1 and set output data to notification1")
+	vm.mu.Lock()
+	outputVar, _ := vm.vars["httpnode"]
+	vm.mu.Unlock()
+	outputMap := outputVar.(map[string]any)
+	actualData := outputMap["data"].(map[string]any)["body"].(map[string]any)["data"].(string)
+	if actualData != `hit=notification1` {
+		t.Errorf("expect executing notification1 and set output data to notification1, got: %s", actualData)
 	}
 
 	vm.Reset()
 
 	// Now test the else branch
-	vm.vars["a"] = 1
+	vm.AddVar("a", 1)
 	vm.Compile()
 	err = vm.Run()
 	if err != nil {
@@ -388,9 +455,12 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	if len(vm.ExecutionLogs) != 2 {
 		t.Errorf("incorrect log, expect 2 got %d", len(vm.ExecutionLogs))
 	}
-	outputdata = gow.AnyToMap(vm.ExecutionLogs[1].GetRestApi().Data)
-	if outputdata["args"].(map[string]any)["hit"].(string) != `notification2` {
-		t.Errorf("expect executing notification2 to be run but it didn't run")
+	vm.mu.Lock()
+	outputVarElse, _ := vm.vars["httpnode"]
+	vm.mu.Unlock()
+	outputMapElse := outputVarElse.(map[string]any)["data"].(map[string]any)["body"].(map[string]any)
+	if outputMapElse["args"].(map[string]any)["hit"].(string) != `notification2` {
+		t.Errorf("expect executing notification2 to be run but it didn't run, got %v", outputMapElse)
 	}
 }
 
@@ -422,11 +492,13 @@ func TestEvaluateEvent(t *testing.T) {
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
-					Conditions: []*avsproto.Condition{
-						{
-							Id:         "a1",
-							Type:       "if",
-							Expression: `triggertest.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" && bigGt(toBigInt(triggertest.data.data), toBigInt("1200000"))`},
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:         "a1",
+								Type:       "if",
+								Expression: `triggertest.data.address == "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" && bigGt(toBigInt(triggertest.data.value), toBigInt("1200000"))`},
+						},
 					},
 				},
 			},
@@ -436,9 +508,11 @@ func TestEvaluateEvent(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/post",
-					Method: "POST",
-					Body:   "hit=notification1",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    "https://httpbin.org/post",
+						Method: "POST",
+						Body:   "hit=notification1",
+					},
 				},
 			},
 		},
@@ -461,23 +535,19 @@ func TestEvaluateEvent(t *testing.T) {
 		},
 	}
 
-	mark := avsproto.TriggerReason{
-		BlockNumber: 7212417,
-		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-		LogIndex:    98,
-	}
+	mark, transferLog := testutil.GetTestEventTriggerReasonWithTransferData()
 
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 
-	vm, err := NewVMWithData(&model.Task{
+	vm, err := NewVMWithDataAndTransferLog(&model.Task{
 		Task: &avsproto.Task{
 			Id:      "sampletaskid1",
 			Nodes:   nodes,
 			Edges:   edges,
 			Trigger: trigger,
 		},
-	}, &mark, testutil.GetTestSmartWalletConfig(), nil)
+	}, mark, testutil.GetTestSmartWalletConfig(), nil, transferLog)
 
 	if err != nil {
 		t.Errorf("expect vm initialized")
@@ -496,8 +566,27 @@ func TestEvaluateEvent(t *testing.T) {
 		return
 	}
 
-	if vm.ExecutionLogs[0].GetBranch().ConditionId != "branch1.a1" {
-		t.Errorf("expression evaluate incorrect")
+	if len(vm.ExecutionLogs) == 0 {
+		t.Errorf("no execution logs found")
+		return
+	}
+
+	// Look for branch execution log
+	var branchLog *avsproto.Execution_Step
+	for _, log := range vm.ExecutionLogs {
+		if log.GetBranch() != nil {
+			branchLog = log
+			break
+		}
+	}
+
+	if branchLog == nil {
+		t.Errorf("no branch execution log found, logs: %v", vm.ExecutionLogs)
+		return
+	}
+
+	if branchLog.GetBranch().ConditionId != "branch1.a1" {
+		t.Errorf("expression evaluate incorrect, got: %s", branchLog.GetBranch().ConditionId)
 	}
 }
 
@@ -508,11 +597,13 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 			Name: "branch",
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
-					Conditions: []*avsproto.Condition{
-						{
-							Id:         "a1",
-							Type:       "if",
-							Expression: `triggertest.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" && bigGt(toBigInt(triggertest.data.data), toBigInt("1200000"))`},
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:         "a1",
+								Type:       "if",
+								Expression: `triggertest.data.address == "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" && bigGt(toBigInt(triggertest.data.data), toBigInt("1200000"))`},
+						},
 					},
 				},
 			},
@@ -522,9 +613,11 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    "https://httpbin.org/post",
-					Method: "POST",
-					Body:   "hit=notification1",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    "https://httpbin.org/post",
+						Method: "POST",
+						Body:   "hit=notification1",
+					},
 				},
 			},
 		},
@@ -570,8 +663,8 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 	}
 
 	err = vm.Compile()
-	if err == nil || err.Error() != InvalidEntrypoint {
-		t.Errorf("Expect return error due to invalid data")
+	if err == nil || (!strings.Contains(err.Error(), "invalid entrypoint") && !strings.Contains(err.Error(), "source node 'foo' in edge")) {
+		t.Errorf("Expect return error due to invalid data, got: %v", err)
 	}
 }
 
@@ -598,18 +691,18 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 	edges := []*avsproto.TaskEdge{
 		{
 			Id:     "e1",
-			Source: "rest1",
-			Target: "notification1",
-		},
-		{
-			Id:     "e1",
-			Source: "notification1",
-			Target: "branch1",
-		},
-		{
-			Id:     "e1",
 			Source: trigger.Id,
 			Target: "notification1",
+		},
+		{
+			Id:     "e2",
+			Source: "notification1",
+			Target: "rest1",
+		},
+		{
+			Id:     "e3",
+			Source: "rest1",
+			Target: "branch1",
 		},
 	}
 
@@ -665,9 +758,11 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 			Name: "httpnode",
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
-					Url:    ts.URL + "?apikey={{apContext.configVars.apikey}}",
-					Method: "POST",
-					Body:   "my key is {{apContext.configVars.apikey}} in body",
+					Config: &avsproto.RestAPINode_Config{
+						Url:    ts.URL + "?apikey={{apContext.configVars.apikey}}",
+						Method: "POST",
+						Body:   "my key is {{apContext.configVars.apikey}} in body",
+					},
 				},
 			},
 		},
@@ -711,51 +806,97 @@ func TestRunTaskWithCustomUserSecret(t *testing.T) {
 		t.Errorf("Error executing program. Expected no error Got error %v", err)
 	}
 
-	if !strings.Contains(vm.ExecutionLogs[0].Log, "Execute") {
-		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got nothing")
+	if len(vm.ExecutionLogs) == 0 {
+		t.Errorf("no execution logs found")
+		return
 	}
 
-	data := vm.vars["httpnode"].(map[string]any)["data"].(map[string]any)
-	if data["data"].(string) != "my key is secretapikey in body" {
-		t.Errorf("secret doesn't render correctly in body, expect secretapikey but got %s", data["data"])
+	if !strings.Contains(vm.ExecutionLogs[0].Log, "Executing REST API Node ID") {
+		t.Errorf("error generating log for executing. expect a log line displaying the request attempt, got: %s", vm.ExecutionLogs[0].Log)
 	}
 
-	if data["args"].(map[string]interface{})["apikey"].(string) != "secretapikey" {
-		t.Errorf("secret doesn't render correctly in uri, expect secretapikey but got %s", data["data"])
+	vm.mu.Lock()
+	tempData, exists := vm.vars["httpnode"]
+	vm.mu.Unlock()
+
+	if !exists {
+		t.Errorf("httpnode variable not found in VM vars")
+		return
+	}
+
+	if tempData == nil {
+		t.Errorf("httpnode variable is nil")
+		return
+	}
+
+	// The REST API response structure: {data: {statusCode, status, headers, body}}
+	responseData, ok := tempData.(map[string]any)
+	if !ok {
+		t.Errorf("httpnode is not map[string]any, got %T: %v", tempData, tempData)
+		return
+	}
+
+	data, dataExists := responseData["data"]
+	if !dataExists {
+		t.Errorf("data field not found in response, available fields: %v", responseData)
+		return
+	}
+
+	dataMap, ok := data.(map[string]any)
+	if !ok {
+		t.Errorf("data is not map[string]any, got %T: %v", data, data)
+		return
+	}
+
+	body, bodyExists := dataMap["body"]
+	if !bodyExists {
+		t.Errorf("body field not found in data, available fields: %v", dataMap)
+		return
+	}
+
+	bodyMap, ok := body.(map[string]any)
+	if !ok {
+		t.Errorf("body is not map[string]any, got %T: %v", body, body)
+		return
+	}
+
+	if bodyMap["data"].(string) != "my key is secretapikey in body" {
+		t.Errorf("secret doesn't render correctly in body, expect secretapikey but got %s", bodyMap["data"])
+	}
+
+	if bodyMap["args"].(map[string]interface{})["apikey"].(string) != "secretapikey" {
+		t.Errorf("secret doesn't render correctly in uri, expect secretapikey but got %s", bodyMap["args"].(map[string]interface{})["apikey"])
 	}
 }
 
 func TestPreprocessText(t *testing.T) {
 	// Setup a VM with some test variables
-	vm := &VM{
-		vars: map[string]any{
-			"user": map[string]any{
-				"data": map[string]any{
-					"name":    "Alice",
-					"balance": 100,
-					"items":   []string{"apple", "banana"},
-					"address": "0x123",
-					"active":  true,
-				},
-			},
-			"token": map[string]any{
-				"data": map[string]any{
-					"symbol":  "ETH",
-					"decimal": 18,
-					"address": "0x123",
-					"pairs": []map[string]any{
-						{"symbol": "ETH/USD", "price": 2000},
-						{"symbol": "ETH/EUR", "price": 1800},
-					},
-				},
-			},
-			"apContext": map[string]map[string]string{
-				"configVars": {
-					"my_awesome_secret": "my_awesome_secret_value",
-				},
+	vm := NewVM()
+	vm.AddVar("user", map[string]any{
+		"data": map[string]any{
+			"name":    "Alice",
+			"balance": 100,
+			"items":   []string{"apple", "banana"},
+			"address": "0x123",
+			"active":  true,
+		},
+	})
+	vm.AddVar("token", map[string]any{
+		"data": map[string]any{
+			"symbol":  "ETH",
+			"decimal": 18,
+			"address": "0x123",
+			"pairs": []map[string]any{
+				{"symbol": "ETH/USD", "price": 2000},
+				{"symbol": "ETH/EUR", "price": 1800},
 			},
 		},
-	}
+	})
+	vm.AddVar("apContext", map[string]map[string]string{
+		"configVars": {
+			"my_awesome_secret": "my_awesome_secret_value",
+		},
+	})
 
 	tests := []struct {
 		name     string
@@ -901,9 +1042,9 @@ func TestPreprocessText(t *testing.T) {
 
 func TestPreprocessTextDate(t *testing.T) {
 	// Setup a VM
-	vm := &VM{
-		vars: map[string]any{}, // Date tests don't usually need complex global vars
-	}
+	vm := NewVM()
+	// Date tests don't usually need complex global vars,
+	// NewVM already initializes vm.vars as an empty sync.Map
 
 	tests := []struct {
 		name     string

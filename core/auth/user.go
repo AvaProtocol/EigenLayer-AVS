@@ -2,7 +2,6 @@ package auth
 
 import (
 	"fmt"
-	"slices"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/golang-jwt/jwt/v5"
@@ -79,7 +78,7 @@ func VerifyJwtKeyForUser(secret []byte, key string, userWallet common.Address) (
 				}
 				roles = append(roles, ApiRole(roleStr))
 			}
-			if claims["roles"] == nil || !slices.Contains(roles, "admin") {
+			if claims["roles"] == nil || !contains(roles, "admin") {
 				return false, fmt.Errorf("Invalid API Key")
 			}
 
@@ -87,10 +86,22 @@ func VerifyJwtKeyForUser(secret []byte, key string, userWallet common.Address) (
 		}
 
 		claimAddress := common.HexToAddress(sub)
-		if claimAddress.Cmp(userWallet) != 0 {
+		if claimAddress != userWallet {
 			return false, fmt.Errorf("Invalid Subject")
 		}
 	}
 
 	return false, fmt.Errorf("Malform JWT Key Claim")
 }
+
+// contains checks if a slice contains a specific value (replacement for slices.Contains)
+func contains(slice []ApiRole, val ApiRole) bool {
+	for _, item := range slice {
+		if item == val {
+			return true
+		}
+	}
+	return false
+}
+
+// contains is already defined in protocol.go

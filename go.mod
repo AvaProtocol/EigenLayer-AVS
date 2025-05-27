@@ -14,16 +14,16 @@ require (
 	github.com/getsentry/sentry-go/echo v0.33.0
 	github.com/go-co-op/gocron/v2 v2.11.0
 	github.com/go-playground/validator/v10 v10.22.1
-	github.com/go-resty/resty/v2 v2.16.2
+	github.com/go-resty/resty/v2 v2.16.5
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/labstack/echo/v4 v4.12.0
 	github.com/mitchellh/mapstructure v1.5.0
-	github.com/oklog/ulid/v2 v2.1.1-0.20240413180941-96c4edf226ef
+	github.com/oklog/ulid/v2 v2.1.1
 	github.com/prometheus/client_golang v1.20.5
-	github.com/samber/lo v1.47.0
+	github.com/samber/lo v1.50.0
 	github.com/shopspring/decimal v1.4.0
 	github.com/spf13/cobra v1.8.0
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	golang.org/x/crypto v0.31.0
 	google.golang.org/grpc v1.67.1
 	google.golang.org/protobuf v1.35.1
@@ -113,9 +113,9 @@ require (
 	golang.org/x/exp v0.0.0-20240613232115-7f521ea00fb8 // indirect
 	golang.org/x/mod v0.18.0 // indirect
 	golang.org/x/net v0.33.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
+	golang.org/x/sync v0.11.0 // indirect
 	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/time v0.6.0 // indirect
 	golang.org/x/tools v0.22.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20241104194629-dd2ea8efbc28 // indirect

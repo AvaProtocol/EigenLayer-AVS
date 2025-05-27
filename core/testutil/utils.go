@@ -97,11 +97,49 @@ func TestMustDB() storage.Storage {
 }
 
 func GetLogger() sdklogging.Logger {
-	logger, err := sdklogging.NewZapLogger("development")
-	if err != nil {
-		panic(err)
-	}
-	return logger
+	return &MockLogger{}
+}
+
+// MockLogger implements the sdklogging.Logger interface for testing
+type MockLogger struct{}
+
+func (l *MockLogger) Info(msg string, keysAndValues ...interface{})  {}
+func (l *MockLogger) Infof(format string, args ...interface{})       {}
+func (l *MockLogger) Debug(msg string, keysAndValues ...interface{}) {}
+func (l *MockLogger) Debugf(format string, args ...interface{})      {}
+func (l *MockLogger) Error(msg string, keysAndValues ...interface{}) {}
+func (l *MockLogger) Errorf(format string, args ...interface{})      {}
+func (l *MockLogger) Warn(msg string, keysAndValues ...interface{})  {}
+func (l *MockLogger) Warnf(format string, args ...interface{})       {}
+func (l *MockLogger) Fatal(msg string, keysAndValues ...interface{}) {
+	panic(fmt.Sprintf(msg, keysAndValues...))
+}
+func (l *MockLogger) Fatalf(format string, args ...interface{}) {
+	panic(fmt.Sprintf(format, args...))
+}
+
+func (l *MockLogger) With(keysAndValues ...interface{}) sdklogging.Logger {
+	return l
+}
+
+func (l *MockLogger) WithComponent(componentName string) sdklogging.Logger {
+	return l
+}
+
+func (l *MockLogger) WithName(name string) sdklogging.Logger {
+	return l
+}
+
+func (l *MockLogger) WithServiceName(serviceName string) sdklogging.Logger {
+	return l
+}
+
+func (l *MockLogger) WithHostName(hostName string) sdklogging.Logger {
+	return l
+}
+
+func (l *MockLogger) Sync() error {
+	return nil
 }
 
 func TestUser1() *model.User {
@@ -192,7 +230,11 @@ func RestTask() *avsproto.CreateTaskReq {
 		Name: "ping",
 		TaskType: &avsproto.TaskNode_RestApi{
 			RestApi: &avsproto.RestAPINode{
-				Url: "https://httpbin.org",
+				Config: &avsproto.RestAPINode_Config{
+					Url:    "https://httpbin.org/post",
+					Method: "POST",
+					Body:   "test=data",
+				},
 			},
 		},
 	}
@@ -206,8 +248,10 @@ func RestTask() *avsproto.CreateTaskReq {
 			Id:   "triggerabcde",
 			Name: "block",
 			TriggerType: &avsproto.TaskTrigger_Block{
-				Block: &avsproto.BlockCondition{
-					Interval: 5,
+				Block: &avsproto.BlockTrigger{
+					Config: &avsproto.BlockTrigger_Config{
+						Interval: 10,
+					},
 				},
 			},
 		},
@@ -224,7 +268,10 @@ func JsFastTask() *avsproto.CreateTaskReq {
 		Name: "jsfast",
 		TaskType: &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{
-				Source: "return 100",
+				Config: &avsproto.CustomCodeNode_Config{
+					Lang:   avsproto.Lang_JavaScript,
+					Source: "({ message: 'Hello from test' })",
+				},
 			},
 		},
 	}
@@ -238,8 +285,10 @@ func JsFastTask() *avsproto.CreateTaskReq {
 			Id:   "triggerabcde",
 			Name: "block",
 			TriggerType: &avsproto.TaskTrigger_Block{
-				Block: &avsproto.BlockCondition{
-					Interval: 5,
+				Block: &avsproto.BlockTrigger{
+					Config: &avsproto.BlockTrigger_Config{
+						Interval: 10,
+					},
 				},
 			},
 		},
@@ -300,5 +349,33 @@ func GetTestEventTriggerReason() *avsproto.TriggerReason {
 		BlockNumber: 7212417,
 		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
 		LogIndex:    98,
+		Type:        avsproto.TriggerReason_Event,
 	}
+}
+
+// GetTestEventTriggerReasonWithTransferData provides a trigger reason with rich transfer log data for testing
+func GetTestEventTriggerReasonWithTransferData() (*avsproto.TriggerReason, *avsproto.EventTrigger_TransferLogOutput) {
+	reason := &avsproto.TriggerReason{
+		BlockNumber: 7212417,
+		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+		LogIndex:    98,
+		Type:        avsproto.TriggerReason_Event,
+	}
+
+	transferLog := &avsproto.EventTrigger_TransferLogOutput{
+		TokenName:        "USDC",
+		TokenSymbol:      "USDC",
+		TokenDecimals:    6,
+		TransactionHash:  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+		Address:          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+		BlockNumber:      7212417,
+		BlockTimestamp:   1733351604000,
+		FromAddress:      "0x2A6CEbeDF9e737A9C6188c62A68655919c7314DB",
+		ToAddress:        "0xC114FB059434563DC65AC8D57e7976e3eaC534F4",
+		Value:            "3453120",
+		ValueFormatted:   "3.45312",
+		TransactionIndex: 73,
+	}
+
+	return reason, transferLog
 }
