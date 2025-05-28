@@ -172,6 +172,12 @@ func validateRPCEndpoint(rpcURL string, logger logging.Logger) error {
 	}
 	defer resp.Body.Close()
 
+	// Check if the HTTP status code indicates success (2xx range)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logger.Errorf("RPC endpoint validation failed - HTTP error: %s (status: %d)", rpcURL, resp.StatusCode)
+		return fmt.Errorf("RPC endpoint %s returned HTTP error status: %d", rpcURL, resp.StatusCode)
+	}
+
 	logger.Infof("RPC endpoint validation successful: %s (status: %d)", rpcURL, resp.StatusCode)
 	return nil
 }
