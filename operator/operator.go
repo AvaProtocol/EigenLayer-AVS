@@ -164,8 +164,11 @@ func validateRPCEndpoint(rpcURL string, logger logging.Logger) error {
 		Timeout: 10 * time.Second,
 	}
 
-	// Test basic connectivity
-	resp, err := client.Get(rpcURL)
+	// Create a simple JSON-RPC request to test the endpoint
+	jsonRPCPayload := `{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}`
+
+	// Test JSON-RPC connectivity with POST request
+	resp, err := client.Post(rpcURL, "application/json", strings.NewReader(jsonRPCPayload))
 	if err != nil {
 		logger.Errorf("RPC endpoint validation failed - connection error: %v", err)
 		return fmt.Errorf("RPC endpoint %s is not accessible: %w", rpcURL, err)
