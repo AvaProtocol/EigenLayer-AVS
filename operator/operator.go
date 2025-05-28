@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -154,6 +156,26 @@ type Operator struct {
 	timeTrigger  *triggerengine.TimeTrigger
 }
 
+// validateRPCEndpoint checks if the RPC endpoint is accessible
+func validateRPCEndpoint(url string, logger logging.Logger) error {
+	logger.Infof("Validating RPC endpoint: %s", url)
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	// Test basic connectivity
+	resp, err := client.Get(url)
+	if err != nil {
+		logger.Errorf("RPC endpoint validation failed - connection error: %v", err)
+		return fmt.Errorf("RPC endpoint %s is not accessible: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	logger.Infof("RPC endpoint validation successful: %s (status: %d)", url, resp.StatusCode)
+	return nil
+}
+
 func RunWithConfig(configPath string) {
 	operator, e := NewOperatorFromConfigFile(configPath)
 	if e != nil {
@@ -187,6 +209,20 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	logger, err := sdklogging.NewZapLogger(logLevel)
 	if err != nil {
 		return nil, err
+	}
+
+	// Log initial configuration details for debugging
+	logger.Infof("=== Initial Operator Configuration ===")
+	logger.Infof("ETH RPC URL: %s", c.EthRpcUrl)
+	logger.Infof("ETH WS URL: %s", c.EthWsUrl)
+	logger.Infof("Operator Address: %s", c.OperatorAddress)
+	logger.Infof("AVS Registry Coordinator Address: %s", c.AVSRegistryCoordinatorAddress)
+	logger.Infof("Operator State Retriever Address: %s", c.OperatorStateRetrieverAddress)
+
+	// Validate RPC endpoints before proceeding
+	if err := validateRPCEndpoint(c.EthRpcUrl, logger); err != nil {
+		logger.Errorf("RPC endpoint validation failed: %v", err)
+		return nil, fmt.Errorf("RPC endpoint validation failed: %w", err)
 	}
 	reg := prometheus.NewRegistry()
 	eigenMetrics := sdkmetrics.NewEigenMetrics(AVS_NAME, c.EigenMetricsIpPortAddress, reg, logger)
@@ -258,11 +294,29 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	}
 
 	chainId, err := ethRpcClient.ChainID(context.Background())
-	logger.Infof("detect EigenLayer on chain id %d", chainId)
+	logger.Infof("Detected EigenLayer on chain id %d", chainId)
 	if err != nil {
 		logger.Error("Cannot get chainId", "err", err)
 		return nil, err
 	}
+
+	// Create a temporary operator instance to call PopulateKnownConfigByChainID
+	tempOperator := &Operator{
+		config: &c,
+		logger: logger,
+	}
+
+	// Apply chain-specific configuration and default addresses
+	if err := tempOperator.PopulateKnownConfigByChainID(chainId); err != nil {
+		logger.Errorf("Failed to populate chain-specific configuration: %v", err)
+		return nil, fmt.Errorf("failed to populate chain-specific configuration: %w", err)
+	}
+
+	// Log final configuration after chain-specific defaults are applied
+	logger.Infof("=== Final Configuration After Chain-Specific Defaults ===")
+	logger.Infof("Chain ID: %s", chainId.String())
+	logger.Infof("AVS Registry Coordinator Address: %s", c.AVSRegistryCoordinatorAddress)
+	logger.Infof("Operator State Retriever Address: %s", c.OperatorStateRetrieverAddress)
 
 	ecdsaKeyPassword := loadECDSAPassword()
 
@@ -283,6 +337,14 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		AvsName:                    AVS_NAME,
 		PromMetricsIpPortAddress:   c.EigenMetricsIpPortAddress,
 	}
+
+	logger.Infof("=== EigenLayer SDK Configuration ===")
+	logger.Infof("Chain ID: %s", chainId.String())
+	logger.Infof("Registry Coordinator Address: %s", chainioConfig.RegistryCoordinatorAddr)
+	logger.Infof("Operator State Retriever Address: %s", chainioConfig.OperatorStateRetrieverAddr)
+	logger.Infof("ETH HTTP URL: %s", chainioConfig.EthHttpUrl)
+	logger.Infof("ETH WS URL: %s", chainioConfig.EthWsUrl)
+
 	operatorEcdsaPrivateKey, err := sdkecdsa.ReadKey(
 		c.EcdsaPrivateKeyStorePath,
 		ecdsaKeyPassword,
@@ -291,33 +353,53 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	logger.Infof("Building EigenLayer SDK clients...")
 	sdkClients, err := clients.BuildAll(chainioConfig, operatorEcdsaPrivateKey, logger)
 	if err != nil {
-		//panic(err)
+		logger.Errorf("Failed to build EigenLayer SDK clients: %v", err)
+		logger.Errorf("This error often indicates:")
+		logger.Errorf("1. RPC endpoint connectivity issues")
+		logger.Errorf("2. Incorrect contract addresses")
+		logger.Errorf("3. Network/chain ID mismatch")
+		logger.Errorf("4. Contract deployment issues on the target network")
+		return nil, fmt.Errorf("failed to build EigenLayer SDK clients: %w", err)
 	}
+	logger.Infof("EigenLayer SDK clients built successfully")
 	skWallet, err := wallet.NewPrivateKeyWallet(ethRpcClient, signerV2, signerAddress, logger)
 	if err != nil {
 		panic(err)
 	}
 	txMgr := txmgr.NewSimpleTxManager(skWallet, ethRpcClient, logger, signerAddress)
 
+	logger.Infof("=== Building AVS Components ===")
+	logger.Infof("Creating AvsWriter with Registry Coordinator: %s", c.AVSRegistryCoordinatorAddress)
+	logger.Infof("Creating AvsWriter with State Retriever: %s", c.OperatorStateRetrieverAddress)
+
 	avsWriter, err := chainio.BuildAvsWriter(
 		txMgr, common.HexToAddress(c.AVSRegistryCoordinatorAddress),
 		common.HexToAddress(c.OperatorStateRetrieverAddress), ethRpcClient, logger,
 	)
 	if err != nil {
-		logger.Error("Cannot create AvsWriter", "err", err)
-		return nil, err
+		logger.Errorf("Cannot create AvsWriter: %v", err)
+		logger.Errorf("This may indicate contract address issues or network connectivity problems")
+		return nil, fmt.Errorf("failed to create AvsWriter: %w", err)
 	}
+	logger.Infof("AvsWriter created successfully")
+
+	logger.Infof("Creating AvsReader with Registry Coordinator: %s", c.AVSRegistryCoordinatorAddress)
+	logger.Infof("Creating AvsReader with State Retriever: %s", c.OperatorStateRetrieverAddress)
 
 	avsReader, err := chainio.BuildAvsReader(
 		common.HexToAddress(c.AVSRegistryCoordinatorAddress),
 		common.HexToAddress(c.OperatorStateRetrieverAddress),
 		ethRpcClient, logger)
 	if err != nil {
-		logger.Error("Cannot create AvsReader", "err", err)
-		return nil, err
+		logger.Errorf("Cannot create AvsReader: %v", err)
+		logger.Errorf("This may indicate contract address issues or network connectivity problems")
+		return nil, fmt.Errorf("failed to create AvsReader: %w", err)
 	}
+	logger.Infof("AvsReader created successfully")
 	// avsSubscriber, err := chainio.BuildAvsSubscriber(common.HexToAddress(c.AVSRegistryCoordinatorAddress),
 	// 	common.HexToAddress(c.OperatorStateRetrieverAddress), ethWsClient, logger,
 	// )
@@ -368,8 +450,6 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		txManager: txMgr,
 		elapsing:  elapsing,
 	}
-
-	operator.PopulateKnownConfigByChainID(chainId)
 
 	logger.Infof("Connect to aggregator %s", c.AggregatorServerIpPortAddress)
 	operator.retryConnect()
