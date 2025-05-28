@@ -583,36 +583,14 @@ message ListTasksReq {
   // Get items after this cursor value (for forward pagination)
   string after = 3;
   int64 limit = 4;
+  
+  // Field control options for flexible response content
+  bool include_nodes = 5;  // Include task nodes (expensive field)
+  bool include_edges = 6;  // Include task edges (expensive field)
 }
 
 message ListTasksResp {
-  message Item {
-    string id                   = 1;
-    string owner                = 2;
-    string smart_wallet_address = 3;
-
-    // task won't be check before this (timestamp in milliseconds)
-    int64  start_at   = 4;
-    // task won't be run/check after this (timestamp in milliseconds)
-    int64  expired_at = 5;
-    // arbitrary data about this task. has a limit of 255 character
-    string name = 6;
-
-    // timestamp when task was completed (in milliseconds)
-    int64 completed_at = 7;
-
-    // limit on how many time this task can run. Set to 0 will make it run unlimited until cancelling or reaching its expired time
-    int64 max_execution = 8;
-    // return how many time this task has run
-    int64 execution_count = 9;
-    // timestamp when task was last executed (in milliseconds)
-    int64 last_ran_at = 10;
-
-    TaskStatus status  = 11;
-    TaskTrigger trigger = 12;
-  }
-
-  repeated Item items = 1;
+  repeated Task items = 1;
   PageInfo page_info = 2;
 }
 
@@ -747,6 +725,11 @@ message ListSecretsReq {
   // Get items after this cursor value (for forward pagination)
   string after = 3;
   int64 limit = 4;
+  
+  // Field control options for flexible response content
+  bool include_timestamps = 5;   // Include created_at and updated_at fields
+  bool include_created_by = 6;   // Include created_by field
+  bool include_description = 7;  // Include description field
 }
 
 // Standard pagination info following GraphQL cursor-based pagination
@@ -757,16 +740,22 @@ message PageInfo {
   bool has_next_page = 4;      // Whether there are more items after the current page
 }
 
-message ListSecretsResp {
-  message ResponseSecret {
-    // when listing secret, we don't return its value, just secret and last update
-    string name = 1;
-    string scope = 2;
+// Secret represents a secret configuration without the actual secret value
+message Secret {
+  // when listing secret, we don't return its value, just secret and last update
+  string name = 1;
+  string scope = 2;
+  string workflow_id = 3;
+  string org_id = 4;
+  // Additional fields that can be controlled via field masks
+  int64 created_at = 5;      // Unix timestamp when secret was created
+  int64 updated_at = 6;      // Unix timestamp when secret was last updated
+  string created_by = 7;     // User ID who created the secret
+  string description = 8;    // Optional description of the secret
+}
 
-    string workflow_id = 4;
-    string org_id = 5;
-  }
-  repeated ResponseSecret items = 1;
+message ListSecretsResp {
+  repeated Secret items = 1;
   PageInfo page_info = 2;
 }
 
