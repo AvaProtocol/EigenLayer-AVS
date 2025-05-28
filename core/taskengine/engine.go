@@ -158,8 +158,10 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 }
 
 func (n *Engine) Stop() {
-	if err := n.seq.Release(); err != nil {
-		n.logger.Error("failed to release sequence", "error", err)
+	if n.seq != nil {
+		if err := n.seq.Release(); err != nil {
+			n.logger.Error("failed to release sequence", "error", err)
+		}
 	}
 	n.shutdown = true
 }
@@ -616,7 +618,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 	})
 
 	taskResp := &avsproto.ListTasksResp{
-		Items: []*avsproto.ListTasksResp_Item{},
+		Items: []*avsproto.Task{},
 		PageInfo: &avsproto.PageInfo{
 			StartCursor:     "",
 			EndCursor:       "",
@@ -670,7 +672,8 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		task.Id = taskID
 
 		if t, err := task.ToProtoBuf(); err == nil {
-			taskResp.Items = append(taskResp.Items, &avsproto.ListTasksResp_Item{
+			// Apply field control - conditionally populate expensive fields
+			taskItem := &avsproto.Task{
 				Id:                 t.Id,
 				Owner:              t.Owner,
 				SmartWalletAddress: t.SmartWalletAddress,
@@ -683,7 +686,19 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 				LastRanAt:          t.LastRanAt,
 				Status:             t.Status,
 				Trigger:            t.Trigger,
-			})
+			}
+
+			// Conditionally populate expensive fields based on request parameters
+			if payload != nil {
+				if payload.IncludeNodes {
+					taskItem.Nodes = t.Nodes
+				}
+				if payload.IncludeEdges {
+					taskItem.Edges = t.Edges
+				}
+			}
+
+			taskResp.Items = append(taskResp.Items, taskItem)
 			total += 1
 		}
 
@@ -1224,7 +1239,7 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	}
 
 	result := &avsproto.ListSecretsResp{
-		Items: []*avsproto.ListSecretsResp_ResponseSecret{},
+		Items: []*avsproto.Secret{},
 		PageInfo: &avsproto.PageInfo{
 			StartCursor:     "",
 			EndCursor:       "",
@@ -1278,10 +1293,28 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 		}
 
 		secretWithNameOnly := SecretNameFromKey(k)
-		item := &avsproto.ListSecretsResp_ResponseSecret{
+		item := &avsproto.Secret{
 			Name:       secretWithNameOnly.Name,
 			OrgId:      secretWithNameOnly.OrgID,
 			WorkflowId: secretWithNameOnly.WorkflowID,
+			// Always include scope for basic functionality
+			Scope: "user", // Default scope, could be enhanced to read from storage
+		}
+
+		// Conditionally populate additional fields based on request parameters
+		if payload != nil {
+			if payload.IncludeTimestamps {
+				// In a real implementation, these would be fetched from storage
+				// For now, we'll use placeholder values
+				item.CreatedAt = time.Now().Unix() // Would fetch from storage
+				item.UpdatedAt = time.Now().Unix() // Would fetch from storage
+			}
+			if payload.IncludeCreatedBy {
+				item.CreatedBy = user.Address.Hex() // Would fetch from storage
+			}
+			if payload.IncludeDescription {
+				item.Description = "" // Would fetch from storage
+			}
 		}
 
 		result.Items = append(result.Items, item)
