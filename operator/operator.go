@@ -157,22 +157,22 @@ type Operator struct {
 }
 
 // validateRPCEndpoint checks if the RPC endpoint is accessible
-func validateRPCEndpoint(url string, logger logging.Logger) error {
-	logger.Infof("Validating RPC endpoint: %s", url)
+func validateRPCEndpoint(rpcURL string, logger logging.Logger) error {
+	logger.Infof("Validating RPC endpoint: %s", rpcURL)
 
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}
 
 	// Test basic connectivity
-	resp, err := client.Get(url)
+	resp, err := client.Get(rpcURL)
 	if err != nil {
 		logger.Errorf("RPC endpoint validation failed - connection error: %v", err)
-		return fmt.Errorf("RPC endpoint %s is not accessible: %w", url, err)
+		return fmt.Errorf("RPC endpoint %s is not accessible: %w", rpcURL, err)
 	}
 	defer resp.Body.Close()
 
-	logger.Infof("RPC endpoint validation successful: %s (status: %d)", url, resp.StatusCode)
+	logger.Infof("RPC endpoint validation successful: %s (status: %d)", rpcURL, resp.StatusCode)
 	return nil
 }
 
