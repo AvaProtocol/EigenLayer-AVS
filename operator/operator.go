@@ -294,11 +294,11 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	}
 
 	chainId, err := ethRpcClient.ChainID(context.Background())
-	logger.Infof("Detected EigenLayer on chain id %d", chainId)
 	if err != nil {
 		logger.Error("Cannot get chainId", "err", err)
 		return nil, err
 	}
+	logger.Infof("Detected EigenLayer on chain id %d", chainId)
 
 	// Create a temporary operator instance to call PopulateKnownConfigByChainID
 	tempOperator := &Operator{
