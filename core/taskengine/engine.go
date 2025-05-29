@@ -928,15 +928,15 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 
 			switch task.GetTrigger().GetTriggerType().(type) {
 			case *avsproto.TaskTrigger_Manual:
-				exec.Reason.Type = avsproto.TriggerReason_Manual
+				exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_MANUAL
 			case *avsproto.TaskTrigger_FixedTime:
-				exec.Reason.Type = avsproto.TriggerReason_FixedTime
+				exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME
 			case *avsproto.TaskTrigger_Cron:
-				exec.Reason.Type = avsproto.TriggerReason_Cron
+				exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_CRON
 			case *avsproto.TaskTrigger_Block:
-				exec.Reason.Type = avsproto.TriggerReason_Block
+				exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_BLOCK
 			case *avsproto.TaskTrigger_Event:
-				exec.Reason.Type = avsproto.TriggerReason_Event
+				exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_EVENT
 			}
 			executioResp.Items = append(executioResp.Items, &exec)
 
@@ -1033,15 +1033,15 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 		}
 		switch task.GetTrigger().GetTriggerType().(type) {
 		case *avsproto.TaskTrigger_Manual:
-			exec.Reason.Type = avsproto.TriggerReason_Manual
+			exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_MANUAL
 		case *avsproto.TaskTrigger_FixedTime:
-			exec.Reason.Type = avsproto.TriggerReason_FixedTime
+			exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME
 		case *avsproto.TaskTrigger_Cron:
-			exec.Reason.Type = avsproto.TriggerReason_Cron
+			exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_CRON
 		case *avsproto.TaskTrigger_Block:
-			exec.Reason.Type = avsproto.TriggerReason_Block
+			exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_BLOCK
 		case *avsproto.TaskTrigger_Event:
-			exec.Reason.Type = avsproto.TriggerReason_Event
+			exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_EVENT
 		}
 	}
 
@@ -1515,163 +1515,162 @@ func (n *Engine) GetWorkflowCount(user *model.User, payload *avsproto.GetWorkflo
 	}, nil
 }
 
+// RunNodeWithInputs executes a single node or trigger immediately with provided input variables.
+//
+// This function provides a unified interface for running any supported node type or trigger type
+// in isolation, without requiring a full workflow. It's designed for testing, debugging, and
+// direct node/trigger execution scenarios.
+//
+// Key Features:
+// - Supports all trigger types (blockTrigger, fixedTimeTrigger, cronTrigger, eventTrigger, manualTrigger)
+// - Supports all processing node types (restApi, customCode, contractRead, contractWrite, etc.)
+// - Input variable replacement: Variables in inputVariables can replace placeholders in node configurations
+// - Template processing: String fields in node configs support {{variable}} syntax for dynamic values
+// - Isolated execution: Each call creates a clean VM environment with only the provided variables
+//
+// Parameters:
+// - nodeType: String identifier for the node/trigger type (e.g., "blockTrigger", "restApi", "customCode")
+// - nodeConfig: Configuration map specific to the node/trigger type (e.g., URL for restApi, source for customCode)
+// - inputVariables: Runtime variables that can be referenced in node configs and used for placeholder replacement
+//
+// Returns:
+// - map[string]interface{}: Execution result data specific to the node/trigger type
+// - error: Any execution error that occurred
+//
+// Example Usage:
+//
+//	// Execute a REST API call with dynamic URL
+//	result, err := engine.RunNodeWithInputs("restApi",
+//	  map[string]interface{}{
+//	    "url": "https://api.example.com/users/{{userId}}",
+//	    "method": "GET",
+//	  },
+//	  map[string]interface{}{
+//	    "userId": "12345",
+//	  })
+//
+//	// Execute a block trigger
+//	result, err := engine.RunNodeWithInputs("blockTrigger",
+//	  map[string]interface{}{
+//	    "blockNumber": 18500000,
+//	  },
+//	  map[string]interface{}{})
 func (n *Engine) RunNodeWithInputs(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
-	// Handle blockTrigger as a real trigger type, not as a custom code node
-	if nodeType == NodeTypeBlockTrigger {
-		return n.runBlockTriggerNode(nodeConfig)
+	// Validate node type
+	if !IsValidNodeType(nodeType) {
+		return nil, fmt.Errorf("unsupported node type: %s", nodeType)
 	}
 
+	// Add debug logging
+	if n.logger != nil {
+		n.logger.Info("RunNodeWithInputs called", "nodeType", nodeType, "isTrigger", IsTriggerNodeType(nodeType), "configKeys", getStringMapKeys(nodeConfig), "inputKeys", getStringMapKeys(inputVariables))
+	}
+
+	// Handle trigger types specially
+	if IsTriggerNodeType(nodeType) {
+		if n.logger != nil {
+			n.logger.Info("Routing to runTriggerWithInputs", "nodeType", nodeType)
+		}
+		return n.runTriggerWithInputs(nodeType, nodeConfig, inputVariables)
+	}
+
+	// Handle processing node types
+	if n.logger != nil {
+		n.logger.Info("Routing to runProcessingNodeWithInputs", "nodeType", nodeType)
+	}
+	return n.runProcessingNodeWithInputs(nodeType, nodeConfig, inputVariables)
+}
+
+// runTriggerWithInputs handles execution of trigger types
+func (n *Engine) runTriggerWithInputs(triggerType string, triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	switch triggerType {
+	case NodeTypeBlockTrigger:
+		return n.runBlockTriggerWithInputs(triggerConfig, inputVariables)
+	case NodeTypeFixedTimeTrigger:
+		return n.runFixedTimeTriggerWithInputs(triggerConfig, inputVariables)
+	case NodeTypeCronTrigger:
+		return n.runCronTriggerWithInputs(triggerConfig, inputVariables)
+	case NodeTypeEventTrigger:
+		return n.runEventTriggerWithInputs(triggerConfig, inputVariables)
+	case NodeTypeManualTrigger:
+		return n.runManualTriggerWithInputs(triggerConfig, inputVariables)
+	default:
+		return nil, fmt.Errorf("unsupported trigger type: %s", triggerType)
+	}
+}
+
+// runProcessingNodeWithInputs handles execution of processing node types
+func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	// Check if this is actually a trigger type that was misrouted
+	if IsTriggerNodeType(nodeType) {
+		return n.runTriggerWithInputs(nodeType, nodeConfig, inputVariables)
+	}
+
+	// Create a clean VM for isolated execution
 	vm, err := NewVMWithData(nil, nil, n.smartWalletConfig, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create VM: %w", err)
 	}
 
 	vm.WithLogger(n.logger).WithDb(n.db)
 
-	node, err := CreateNodeFromType(nodeType, nodeConfig, "")
-	if err != nil {
-		return nil, err
+	// Add input variables to VM for template processing and node access
+	for key, value := range inputVariables {
+		vm.AddVar(key, value)
 	}
 
-	// Run the node with input variables
+	// Create node from type and config
+	node, err := CreateNodeFromType(nodeType, nodeConfig, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create node: %w", err)
+	}
+
+	// Execute the node
 	executionStep, err := vm.RunNodeWithInputs(node, inputVariables)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("node execution failed: %w", err)
 	}
 
 	if !executionStep.Success {
 		return nil, fmt.Errorf("execution failed: %s", executionStep.Error)
 	}
 
-	result := make(map[string]interface{})
-
-	// Consolidate output handling based on how RunNodeWithInputs populates Execution_Step.OutputData
-	// and what each node type's output structure actually is.
-	// The original switch had specific handling for each type.
-	// We need to ensure the outputData field of executionStep is correctly interpreted.
-
-	outputData := executionStep.GetOutputData() // This is oneof
-
-	if ccode := executionStep.GetCustomCode(); ccode != nil && ccode.GetData() != nil {
-		iface := ccode.GetData().AsInterface()
-		if m, ok := iface.(map[string]interface{}); ok {
-			result = m
-		} else {
-			result["data"] = iface // Store as "data" field if not a map
-		}
-	} else if restAPI := executionStep.GetRestApi(); restAPI != nil && restAPI.GetData() != nil {
-		var data map[string]interface{}
-		// restAPI.GetData() is *anypb.Any, which should wrap a structpb.Value (like structpb.Struct for JSON objects)
-		// We need to unmarshal the Any to a structpb.Value first, then convert that to a map.
-		structVal := &structpb.Struct{}
-		if err_any := restAPI.GetData().UnmarshalTo(structVal); err_any == nil {
-			data = structVal.AsMap()
-		} else {
-			// Fallback if UnmarshalTo fails, perhaps it's not a struct? Or try raw bytes if desperate.
-			n.logger.Warn("Failed to unmarshal RestAPI output from Any to Struct", "error", err_any)
-			// Try unmarshalling the raw value of Any as JSON directly if it holds raw JSON bytes
-			if err_json := json.Unmarshal(restAPI.GetData().GetValue(), &data); err_json != nil {
-				n.logger.Warn("Failed to unmarshal RestAPI output value as JSON", "error", err_json)
-				data = map[string]interface{}{"raw_output": string(restAPI.GetData().GetValue())} // Raw bytes as string in a map
-			}
-		}
-		result = data // The body itself is often the main result.
-	} else if cqRead := executionStep.GetContractRead(); cqRead != nil && len(cqRead.GetData()) > 0 {
-		// Assuming for RunNodeWithInputs, we might expect a single primary result if used this way
-		result["data"] = cqRead.GetData()[0].AsInterface()
-		if len(cqRead.GetData()) > 1 {
-			n.logger.Warn("ContractRead in RunNodeWithInputs returned multiple values, only using the first.", "count", len(cqRead.GetData()))
-		}
-	} else if branch := executionStep.GetBranch(); branch != nil {
-		result["conditionId"] = branch.GetConditionId()
-		// Potentially add branch.GetNextStepId() if relevant
-	} else if filterOut := executionStep.GetFilter(); filterOut != nil && filterOut.GetData() != nil {
-		var data interface{}
-		// filterOut.Data is *anypb.Any, which wraps a structpb.Value for structured data
-		// We need to unmarshal the underlying structpb.Value
-		structVal := &structpb.Value{}
-		if err_any := filterOut.GetData().UnmarshalTo(structVal); err_any == nil {
-			data = structVal.AsInterface()
-		} else {
-			n.logger.Warn("Failed to unmarshal Filter output from Any to Value", "error", err_any)
-			// Fallback: try to unmarshal raw bytes if that's what it contains
-			if err_json := json.Unmarshal(filterOut.GetData().GetValue(), &data); err_json != nil {
-				n.logger.Warn("Failed to unmarshal Filter output value as JSON", "error", err_json)
-				data = string(filterOut.GetData().GetValue()) // Raw bytes as string
-			}
-		}
-		result["data"] = data
-	} else if loopOut := executionStep.GetLoop(); loopOut != nil {
-		// Loop node output might be a collection or a status.
-		// Current proto definition for LoopNode_Output has `Data string`.
-		// If it's intended to be JSON string, parse it.
-		var loopResultData interface{}
-		if err_json := json.Unmarshal([]byte(loopOut.GetData()), &loopResultData); err_json == nil {
-			result["data"] = loopResultData
-		} else {
-			result["data"] = loopOut.GetData() // As raw string
-		}
-	} else if graphQL := executionStep.GetGraphql(); graphQL != nil && graphQL.GetData() != nil {
-		var data map[string]interface{}
-		structVal := &structpb.Struct{}
-		if err_any := graphQL.GetData().UnmarshalTo(structVal); err_any == nil {
-			data = structVal.AsMap()
-		} else {
-			n.logger.Warn("Failed to unmarshal GraphQL output from Any to Struct", "error", err_any)
-			if err_json := json.Unmarshal(graphQL.GetData().GetValue(), &data); err_json != nil {
-				n.logger.Warn("Failed to unmarshal GraphQL output value as JSON", "error", err_json)
-				data = map[string]interface{}{"raw_output": string(graphQL.GetData().GetValue())}
-			}
-		}
-		result = data
-	}
-	// Add other cases as needed: EthTransfer, ContractWrite
-
-	if len(result) == 0 && outputData != nil {
-		// This part is tricky as outputData is oneof.
-		// This might indicate a need to refine the switch or how data is packaged.
-		n.logger.Info("Node execution resulted in unhandled outputData type for RunNodeWithInputs", "nodeType", nodeType)
-	}
-
-	return result, nil
+	// Extract and return the result data
+	return n.extractExecutionResult(executionStep)
 }
 
-func (n *Engine) runBlockTriggerNode(nodeConfig map[string]interface{}) (map[string]interface{}, error) {
+// runBlockTriggerWithInputs executes a block trigger with input variables
+func (n *Engine) runBlockTriggerWithInputs(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	var blockNumber uint64
 
-	// If a specific block number is requested in config, use that
-	if configBlockNumber, ok := nodeConfig["blockNumber"]; ok {
-		if blockNum, ok := configBlockNumber.(float64); ok {
-			blockNumber = uint64(blockNum)
-		} else if blockNum, ok := configBlockNumber.(int64); ok {
-			blockNumber = uint64(blockNum)
-		} else if blockNum, ok := configBlockNumber.(uint64); ok {
+	// Check for block number in triggerConfig first, then inputVariables
+	if configBlockNumber, ok := triggerConfig["blockNumber"]; ok {
+		if blockNum, err := n.parseUint64(configBlockNumber); err == nil {
 			blockNumber = blockNum
-		} else if blockNum, ok := configBlockNumber.(int); ok {
-			blockNumber = uint64(blockNum)
+		}
+	} else if inputBlockNumber, ok := inputVariables["blockNumber"]; ok {
+		if blockNum, err := n.parseUint64(inputBlockNumber); err == nil {
+			blockNumber = blockNum
 		}
 	}
 
-	// If no block number was specified or parsed, use default
+	// If no block number specified, use current block or default
 	if blockNumber == 0 {
-		blockNumber = uint64(12345)
+		if rpcConn != nil {
+			if currentBlock, err := rpcConn.BlockNumber(context.Background()); err == nil {
+				blockNumber = currentBlock
+			} else {
+				blockNumber = uint64(time.Now().Unix()) // Fallback to timestamp
+			}
+		} else {
+			blockNumber = uint64(time.Now().Unix()) // Mock block number
+		}
 	}
 
-	// If rpcConn is available and no specific block number was requested, try to get real block data
+	// Try to get real block data if RPC is available
 	if rpcConn != nil {
-		// Only try to get current block if no specific block was requested
-		if _, hasBlockNumber := nodeConfig["blockNumber"]; !hasBlockNumber {
-			currentBlock, err := rpcConn.BlockNumber(context.Background())
-			if err == nil {
-				blockNumber = currentBlock
-			}
-			// If error, continue with default/mock block number
-		}
-
-		// Try to get the block header for the specified block number
 		header, err := rpcConn.HeaderByNumber(context.Background(), big.NewInt(int64(blockNumber)))
 		if err == nil {
-			// Return the actual block data
 			result := map[string]interface{}{
 				"blockNumber": blockNumber,
 				"blockHash":   header.Hash().Hex(),
@@ -1687,15 +1686,14 @@ func (n *Engine) runBlockTriggerNode(nodeConfig map[string]interface{}) (map[str
 			}
 			return result, nil
 		}
-		// If error getting block data, fall through to mock data
 	}
 
-	// For testing purposes or when RPC is unavailable, return mock block data
+	// Return mock data if RPC unavailable or error
 	result := map[string]interface{}{
 		"blockNumber": blockNumber,
-		"blockHash":   fmt.Sprintf("0x%x", time.Now().UnixNano()), // Mock hash based on timestamp
+		"blockHash":   fmt.Sprintf("0x%x", time.Now().UnixNano()),
 		"timestamp":   uint64(time.Now().Unix()),
-		"parentHash":  fmt.Sprintf("0x%x", time.Now().UnixNano()-1000), // Mock parent hash
+		"parentHash":  fmt.Sprintf("0x%x", time.Now().UnixNano()-1000),
 		"difficulty":  "1000000000000000",
 		"gasLimit":    uint64(30000000),
 		"gasUsed":     uint64(21000),
@@ -1707,41 +1705,293 @@ func (n *Engine) runBlockTriggerNode(nodeConfig map[string]interface{}) (map[str
 	return result, nil
 }
 
-// validateNodeInputs validates input variables based on node type
-func (n *Engine) validateNodeInputs(nodeType string, inputVariables map[string]*structpb.Value) error {
-	switch nodeType {
-	case NodeTypeBlockTrigger:
-		// blockTrigger nodes should not accept input variables
-		if len(inputVariables) > 0 {
-			var keys []string
-			for k := range inputVariables {
-				keys = append(keys, k)
-			}
-			return fmt.Errorf("blockTrigger nodes do not accept input variables. Received: %s", strings.Join(keys, ", "))
+// runFixedTimeTriggerWithInputs executes a fixed time trigger
+func (n *Engine) runFixedTimeTriggerWithInputs(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	var epoch uint64
+
+	// Check for epoch in triggerConfig first, then inputVariables
+	if configEpoch, ok := triggerConfig["epoch"]; ok {
+		if epochNum, err := n.parseUint64(configEpoch); err == nil {
+			epoch = epochNum
 		}
-	case NodeTypeRestAPI, NodeTypeCustomCode, NodeTypeContractRead, NodeTypeContractWrite, NodeTypeBranch, NodeTypeFilter, NodeTypeLoop, NodeTypeGraphQLQuery, NodeTypeETHTransfer:
-		// These node types can accept input variables
-		break
-	default:
-		// Unknown node types - allow input variables but log a warning
-		if n.logger != nil {
-			n.logger.Warn("Unknown node type, allowing input variables", "nodeType", nodeType)
+	} else if inputEpoch, ok := inputVariables["epoch"]; ok {
+		if epochNum, err := n.parseUint64(inputEpoch); err == nil {
+			epoch = epochNum
 		}
 	}
 
-	return nil
+	// Default to current time if no epoch specified
+	if epoch == 0 {
+		epoch = uint64(time.Now().Unix())
+	}
+
+	result := map[string]interface{}{
+		"epoch":     epoch,
+		"timestamp": time.Unix(int64(epoch), 0).UTC().Format(time.RFC3339),
+		"triggered": true,
+	}
+
+	if n.logger != nil {
+		n.logger.Info("FixedTimeTrigger executed successfully", "epoch", epoch)
+	}
+	return result, nil
 }
 
-func (n *Engine) RunNodeWithInputsRPC(user *model.User, req *avsproto.RunNodeWithInputsReq) (*avsproto.RunNodeWithInputsResp, error) {
-	// Validate input variables based on node type
-	if err := n.validateNodeInputs(req.NodeType, req.InputVariables); err != nil {
-		return &avsproto.RunNodeWithInputsResp{
-			Success: false,
-			Error:   err.Error(),
-			NodeId:  "",
-		}, nil
+// runCronTriggerWithInputs executes a cron trigger
+func (n *Engine) runCronTriggerWithInputs(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	var epoch uint64
+	var expression string
+
+	// Get cron expression from config or input variables
+	if configExpr, ok := triggerConfig["expression"]; ok {
+		if exprStr, ok := configExpr.(string); ok {
+			expression = exprStr
+		}
+	} else if inputExpr, ok := inputVariables["expression"]; ok {
+		if exprStr, ok := inputExpr.(string); ok {
+			expression = exprStr
+		}
 	}
 
+	// Get epoch from config or input variables
+	if configEpoch, ok := triggerConfig["epoch"]; ok {
+		if epochNum, err := n.parseUint64(configEpoch); err == nil {
+			epoch = epochNum
+		}
+	} else if inputEpoch, ok := inputVariables["epoch"]; ok {
+		if epochNum, err := n.parseUint64(inputEpoch); err == nil {
+			epoch = epochNum
+		}
+	}
+
+	// Default to current time if no epoch specified
+	if epoch == 0 {
+		epoch = uint64(time.Now().Unix())
+	}
+
+	result := map[string]interface{}{
+		"epoch":           epoch,
+		"timestamp":       time.Unix(int64(epoch), 0).UTC().Format(time.RFC3339),
+		"expression":      expression,
+		"scheduleMatched": true,
+		"triggered":       true,
+	}
+
+	if n.logger != nil {
+		n.logger.Info("CronTrigger executed successfully", "epoch", epoch, "expression", expression)
+	}
+	return result, nil
+}
+
+// runEventTriggerWithInputs executes an event trigger
+func (n *Engine) runEventTriggerWithInputs(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	var blockNumber uint64
+	var logIndex uint64
+	var txHash string
+
+	// Get values from config or input variables
+	if configBlockNumber, ok := triggerConfig["blockNumber"]; ok {
+		if blockNum, err := n.parseUint64(configBlockNumber); err == nil {
+			blockNumber = blockNum
+		}
+	} else if inputBlockNumber, ok := inputVariables["blockNumber"]; ok {
+		if blockNum, err := n.parseUint64(inputBlockNumber); err == nil {
+			blockNumber = blockNum
+		}
+	}
+
+	if configLogIndex, ok := triggerConfig["logIndex"]; ok {
+		if logIdx, err := n.parseUint64(configLogIndex); err == nil {
+			logIndex = logIdx
+		}
+	} else if inputLogIndex, ok := inputVariables["logIndex"]; ok {
+		if logIdx, err := n.parseUint64(inputLogIndex); err == nil {
+			logIndex = logIdx
+		}
+	}
+
+	if configTxHash, ok := triggerConfig["txHash"]; ok {
+		if txHashStr, ok := configTxHash.(string); ok {
+			txHash = txHashStr
+		}
+	} else if inputTxHash, ok := inputVariables["txHash"]; ok {
+		if txHashStr, ok := inputTxHash.(string); ok {
+			txHash = txHashStr
+		}
+	}
+
+	// Use defaults if not specified
+	if blockNumber == 0 {
+		blockNumber = uint64(time.Now().Unix())
+	}
+	if txHash == "" {
+		txHash = fmt.Sprintf("0x%x", time.Now().UnixNano())
+	}
+
+	result := map[string]interface{}{
+		"blockNumber": blockNumber,
+		"logIndex":    logIndex,
+		"txHash":      txHash,
+		"triggered":   true,
+	}
+
+	if n.logger != nil {
+		n.logger.Info("EventTrigger executed successfully", "blockNumber", blockNumber, "logIndex", logIndex, "txHash", txHash)
+	}
+	return result, nil
+}
+
+// runManualTriggerWithInputs executes a manual trigger
+func (n *Engine) runManualTriggerWithInputs(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	// Manual triggers simply return the input variables as the result
+	result := map[string]interface{}{
+		"triggered": true,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// Include any provided input variables in the result
+	for key, value := range inputVariables {
+		result[key] = value
+	}
+
+	// Include any config values
+	for key, value := range triggerConfig {
+		if _, exists := result[key]; !exists { // Don't override input variables
+			result[key] = value
+		}
+	}
+
+	if n.logger != nil {
+		n.logger.Info("ManualTrigger executed successfully", "inputVariables", len(inputVariables))
+	}
+	return result, nil
+}
+
+// parseUint64 safely converts various numeric types to uint64
+func (n *Engine) parseUint64(value interface{}) (uint64, error) {
+	switch v := value.(type) {
+	case uint64:
+		return v, nil
+	case int64:
+		if v < 0 {
+			return 0, fmt.Errorf("negative value not allowed: %d", v)
+		}
+		return uint64(v), nil
+	case int:
+		if v < 0 {
+			return 0, fmt.Errorf("negative value not allowed: %d", v)
+		}
+		return uint64(v), nil
+	case float64:
+		if v < 0 {
+			return 0, fmt.Errorf("negative value not allowed: %f", v)
+		}
+		return uint64(v), nil
+	case string:
+		return strconv.ParseUint(v, 10, 64)
+	default:
+		return 0, fmt.Errorf("cannot convert %T to uint64", value)
+	}
+}
+
+// extractExecutionResult extracts the result data from an execution step
+func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) (map[string]interface{}, error) {
+	result := make(map[string]interface{})
+
+	// Handle different output data types
+	if ccode := executionStep.GetCustomCode(); ccode != nil && ccode.GetData() != nil {
+		iface := ccode.GetData().AsInterface()
+		if m, ok := iface.(map[string]interface{}); ok {
+			result = m
+		} else {
+			result["data"] = iface
+		}
+	} else if restAPI := executionStep.GetRestApi(); restAPI != nil && restAPI.GetData() != nil {
+		var data map[string]interface{}
+		structVal := &structpb.Struct{}
+		if err := restAPI.GetData().UnmarshalTo(structVal); err == nil {
+			data = structVal.AsMap()
+		} else {
+			if n.logger != nil {
+				n.logger.Warn("Failed to unmarshal RestAPI output", "error", err)
+			}
+			if err := json.Unmarshal(restAPI.GetData().GetValue(), &data); err != nil {
+				data = map[string]interface{}{"raw_output": string(restAPI.GetData().GetValue())}
+			}
+		}
+		result = data
+	} else if contractRead := executionStep.GetContractRead(); contractRead != nil && len(contractRead.GetData()) > 0 {
+		result["data"] = contractRead.GetData()[0].AsInterface()
+		if len(contractRead.GetData()) > 1 {
+			result["allData"] = make([]interface{}, len(contractRead.GetData()))
+			for i, data := range contractRead.GetData() {
+				result["allData"].([]interface{})[i] = data.AsInterface()
+			}
+		}
+	} else if branch := executionStep.GetBranch(); branch != nil {
+		result["conditionId"] = branch.GetConditionId()
+	} else if filter := executionStep.GetFilter(); filter != nil && filter.GetData() != nil {
+		var data interface{}
+		structVal := &structpb.Value{}
+		if err := filter.GetData().UnmarshalTo(structVal); err == nil {
+			data = structVal.AsInterface()
+		} else {
+			if n.logger != nil {
+				n.logger.Warn("Failed to unmarshal Filter output", "error", err)
+			}
+			if err := json.Unmarshal(filter.GetData().GetValue(), &data); err != nil {
+				data = string(filter.GetData().GetValue())
+			}
+		}
+		result["data"] = data
+	} else if loop := executionStep.GetLoop(); loop != nil {
+		var loopResultData interface{}
+		if err := json.Unmarshal([]byte(loop.GetData()), &loopResultData); err == nil {
+			result["data"] = loopResultData
+		} else {
+			result["data"] = loop.GetData()
+		}
+	} else if graphQL := executionStep.GetGraphql(); graphQL != nil && graphQL.GetData() != nil {
+		var data map[string]interface{}
+		structVal := &structpb.Struct{}
+		if err := graphQL.GetData().UnmarshalTo(structVal); err == nil {
+			data = structVal.AsMap()
+		} else {
+			if n.logger != nil {
+				n.logger.Warn("Failed to unmarshal GraphQL output", "error", err)
+			}
+			if err := json.Unmarshal(graphQL.GetData().GetValue(), &data); err != nil {
+				data = map[string]interface{}{"raw_output": string(graphQL.GetData().GetValue())}
+			}
+		}
+		result = data
+	} else if ethTransfer := executionStep.GetEthTransfer(); ethTransfer != nil {
+		result["txHash"] = ethTransfer.GetTransactionHash()
+		result["success"] = true
+	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
+		// ContractWrite output contains UserOp and TxReceipt
+		if txReceipt := contractWrite.GetTxReceipt(); txReceipt != nil {
+			result["txHash"] = txReceipt.GetHash()
+			result["success"] = true
+		} else {
+			result["success"] = true
+		}
+	}
+
+	// If no specific data was extracted, include basic execution info
+	if len(result) == 0 {
+		result["success"] = executionStep.Success
+		result["nodeId"] = executionStep.NodeId
+		if executionStep.Error != "" {
+			result["error"] = executionStep.Error
+		}
+	}
+
+	return result, nil
+}
+
+// RunNodeWithInputsRPC handles the gRPC interface for running nodes with inputs
+func (n *Engine) RunNodeWithInputsRPC(user *model.User, req *avsproto.RunNodeWithInputsReq) (*avsproto.RunNodeWithInputsResp, error) {
 	// Convert protobuf request to internal format
 	nodeConfig := make(map[string]interface{})
 	for k, v := range req.NodeConfig {
@@ -1753,9 +2003,62 @@ func (n *Engine) RunNodeWithInputsRPC(user *model.User, req *avsproto.RunNodeWit
 		inputVariables[k] = v.AsInterface()
 	}
 
-	// Use the existing RunNodeWithInputs method
-	result, err := n.RunNodeWithInputs(req.NodeType, nodeConfig, inputVariables)
+	var nodeTypeStr string
+	var result map[string]interface{}
+	var err error
+
+	// Handle the special case where trigger types are sent as CUSTOM_CODE
+	if req.NodeType == avsproto.NodeType_NODE_TYPE_CUSTOM_CODE {
+		// Check if this might be a trigger type based on config or input variables
+		if _, hasBlockNumber := nodeConfig["blockNumber"]; hasBlockNumber {
+			nodeTypeStr = NodeTypeBlockTrigger
+		} else if _, hasBlockNumber := inputVariables["blockNumber"]; hasBlockNumber {
+			nodeTypeStr = NodeTypeBlockTrigger
+		} else if _, hasEpoch := nodeConfig["epoch"]; hasEpoch {
+			nodeTypeStr = NodeTypeFixedTimeTrigger
+		} else if _, hasEpoch := inputVariables["epoch"]; hasEpoch {
+			nodeTypeStr = NodeTypeFixedTimeTrigger
+		} else if _, hasExpression := nodeConfig["expression"]; hasExpression {
+			nodeTypeStr = NodeTypeCronTrigger
+		} else if _, hasExpression := inputVariables["expression"]; hasExpression {
+			nodeTypeStr = NodeTypeCronTrigger
+		} else if _, hasTxHash := nodeConfig["txHash"]; hasTxHash {
+			nodeTypeStr = NodeTypeEventTrigger
+		} else if _, hasTxHash := inputVariables["txHash"]; hasTxHash {
+			nodeTypeStr = NodeTypeEventTrigger
+		} else {
+			// If no specific trigger indicators found, check if nodeConfig is empty
+			// This is likely a blockTrigger sent from the SDK
+			if len(nodeConfig) == 0 {
+				nodeTypeStr = NodeTypeBlockTrigger
+			} else {
+				// This is a real customCode node
+				nodeTypeStr = NodeTypeCustomCode
+			}
+		}
+	} else {
+		// Convert NodeType enum to string for regular processing nodes
+		nodeTypeStr = NodeTypeToString(req.NodeType)
+		if nodeTypeStr == "" {
+			return &avsproto.RunNodeWithInputsResp{
+				Success: false,
+				Error:   fmt.Sprintf("unsupported node type: %v", req.NodeType),
+				NodeId:  "",
+			}, nil
+		}
+	}
+
+	// Log what we detected for debugging
+	if n.logger != nil {
+		n.logger.Info("RunNodeWithInputsRPC: Detected node type", "nodeTypeStr", nodeTypeStr, "originalNodeType", req.NodeType, "configKeys", getStringMapKeys(nodeConfig), "inputKeys", getStringMapKeys(inputVariables))
+	}
+
+	// Use the existing RunNodeWithInputs method which will route correctly
+	result, err = n.RunNodeWithInputs(nodeTypeStr, nodeConfig, inputVariables)
 	if err != nil {
+		if n.logger != nil {
+			n.logger.Error("RunNodeWithInputsRPC: Execution failed", "nodeType", nodeTypeStr, "error", err)
+		}
 		return &avsproto.RunNodeWithInputsResp{
 			Success: false,
 			Error:   err.Error(),
@@ -1763,27 +2066,74 @@ func (n *Engine) RunNodeWithInputsRPC(user *model.User, req *avsproto.RunNodeWit
 		}, nil
 	}
 
-	// Convert result to the appropriate protobuf output type based on node type
+	// Convert result to the appropriate protobuf output type based on the detected node type
 	resp := &avsproto.RunNodeWithInputsResp{
 		Success: true,
 		NodeId:  fmt.Sprintf("temp_%d", time.Now().UnixNano()),
 	}
 
-	// Set the appropriate output data based on node type
-	switch req.NodeType {
+	// Set the appropriate output data based on the detected node type (not the original request type)
+	switch nodeTypeStr {
 	case NodeTypeBlockTrigger:
 		if result != nil {
-			blockOutput := &avsproto.BlockTrigger_Output{
-				BlockNumber: getUint64FromResult(result, "blockNumber"),
-				BlockHash:   getStringFromResult(result, "blockHash"),
-				Timestamp:   getUint64FromResult(result, "timestamp"),
-				ParentHash:  getStringFromResult(result, "parentHash"),
-				Difficulty:  getStringFromResult(result, "difficulty"),
-				GasLimit:    getUint64FromResult(result, "gasLimit"),
-				GasUsed:     getUint64FromResult(result, "gasUsed"),
+			// Convert result to BlockTrigger output
+			blockOutput := &avsproto.BlockTrigger_Output{}
+			if blockNumber, ok := result["blockNumber"].(uint64); ok {
+				blockOutput.BlockNumber = blockNumber
+			}
+			if blockHash, ok := result["blockHash"].(string); ok {
+				blockOutput.BlockHash = blockHash
+			}
+			if timestamp, ok := result["timestamp"].(uint64); ok {
+				blockOutput.Timestamp = timestamp
 			}
 			resp.OutputData = &avsproto.RunNodeWithInputsResp_BlockTrigger{
 				BlockTrigger: blockOutput,
+			}
+		}
+	case NodeTypeFixedTimeTrigger:
+		if result != nil {
+			// Convert result to FixedTimeTrigger output
+			fixedTimeOutput := &avsproto.FixedTimeTrigger_Output{}
+			if epoch, ok := result["epoch"].(uint64); ok {
+				fixedTimeOutput.Epoch = epoch
+			}
+			resp.OutputData = &avsproto.RunNodeWithInputsResp_FixedTimeTrigger{
+				FixedTimeTrigger: fixedTimeOutput,
+			}
+		}
+	case NodeTypeCronTrigger:
+		if result != nil {
+			// Convert result to CronTrigger output
+			cronOutput := &avsproto.CronTrigger_Output{}
+			if epoch, ok := result["epoch"].(uint64); ok {
+				cronOutput.Epoch = epoch
+			}
+			if scheduleMatched, ok := result["scheduleMatched"].(string); ok {
+				cronOutput.ScheduleMatched = scheduleMatched
+			}
+			resp.OutputData = &avsproto.RunNodeWithInputsResp_CronTrigger{
+				CronTrigger: cronOutput,
+			}
+		}
+	case NodeTypeEventTrigger:
+		if result != nil {
+			// Convert result to EventTrigger output - need to check the actual EventTrigger_Output fields
+			// For now, we'll use a generic approach since EventTrigger_Output structure is complex
+			valueData, err := structpb.NewValue(result)
+			if err != nil {
+				return &avsproto.RunNodeWithInputsResp{
+					Success: false,
+					Error:   fmt.Sprintf("failed to convert EventTrigger output: %v", err),
+					NodeId:  "",
+				}, nil
+			}
+			// Since EventTrigger.Output is complex, we'll use CustomCode output for now
+			customOutput := &avsproto.CustomCodeNode_Output{
+				Data: valueData,
+			}
+			resp.OutputData = &avsproto.RunNodeWithInputsResp_CustomCode{
+				CustomCode: customOutput,
 			}
 		}
 	case NodeTypeRestAPI:
@@ -1814,12 +2164,12 @@ func (n *Engine) RunNodeWithInputsRPC(user *model.User, req *avsproto.RunNodeWit
 		}
 	case NodeTypeCustomCode:
 		if result != nil {
-			// Convert result to protobuf Value for custom code
+			// For custom code nodes
 			valueData, err := structpb.NewValue(result)
 			if err != nil {
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,
-					Error:   fmt.Sprintf("failed to convert custom code output: %v", err),
+					Error:   fmt.Sprintf("failed to convert output: %v", err),
 					NodeId:  "",
 				}, nil
 			}
@@ -1830,40 +2180,49 @@ func (n *Engine) RunNodeWithInputsRPC(user *model.User, req *avsproto.RunNodeWit
 				CustomCode: customOutput,
 			}
 		}
-	// Add other node types as needed
+	case NodeTypeETHTransfer:
+		if result != nil {
+			if txHash, ok := result["txHash"].(string); ok {
+				ethOutput := &avsproto.ETHTransferNode_Output{
+					TransactionHash: txHash,
+				}
+				resp.OutputData = &avsproto.RunNodeWithInputsResp_EthTransfer{
+					EthTransfer: ethOutput,
+				}
+			}
+		}
+	case NodeTypeContractWrite:
+		if result != nil {
+			if txHash, ok := result["txHash"].(string); ok {
+				// Create a minimal transaction receipt for the output
+				txReceipt := &avsproto.Evm_TransactionReceipt{
+					Hash: txHash,
+				}
+				contractOutput := &avsproto.ContractWriteNode_Output{
+					TxReceipt: txReceipt,
+				}
+				resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractWrite{
+					ContractWrite: contractOutput,
+				}
+			}
+		}
+	// Handle other node types
 	default:
-		// For unknown node types, we can't set specific output data
+		// For other node types, we can't set specific output data
 		// This will result in no output_data being set, which is valid
 		if n.logger != nil {
-			n.logger.Warn("Unknown node type in RunNodeWithInputsRPC, no specific output type set", "nodeType", req.NodeType)
+			n.logger.Info("Node type has no specific protobuf output mapping", "nodeType", nodeTypeStr)
 		}
 	}
 
 	return resp, nil
 }
 
-// Helper functions to extract typed values from result map
-func getStringFromResult(result map[string]interface{}, key string) string {
-	if val, ok := result[key]; ok {
-		if str, ok := val.(string); ok {
-			return str
-		}
+// Helper function to get map keys for logging
+func getStringMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
 	}
-	return ""
-}
-
-func getUint64FromResult(result map[string]interface{}, key string) uint64 {
-	if val, ok := result[key]; ok {
-		switch v := val.(type) {
-		case uint64:
-			return v
-		case int64:
-			return uint64(v)
-		case int:
-			return uint64(v)
-		case float64:
-			return uint64(v)
-		}
-	}
-	return 0
+	return keys
 }
