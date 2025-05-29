@@ -874,6 +874,9 @@ service Aggregator {
 
   // RunNodeWithInputs allows executing a single node with provided inputs for testing purposes
   rpc RunNodeWithInputs(RunNodeWithInputsReq) returns (RunNodeWithInputsResp);
+  
+  // RunTrigger allows executing a single trigger for testing purposes (triggers don't accept inputs)
+  rpc RunTrigger(RunTriggerReq) returns (RunTriggerResp);
 }
 
 // Request message for GetWorkflowCount
@@ -924,7 +927,7 @@ message RunNodeWithInputsResp {
   string error = 3; // Error message if execution failed
   string node_id = 4; // ID of the executed node
   
-  // Use specific output types instead of generic Value
+  // Use specific output types for nodes only
   oneof output_data {
     // Node outputs
     ETHTransferNode.Output eth_transfer = 10;
@@ -936,12 +939,27 @@ message RunNodeWithInputsResp {
     BranchNode.Output branch = 16;
     FilterNode.Output filter = 17;
     LoopNode.Output loop = 18;
-    
-    // Trigger outputs
-    BlockTrigger.Output block_trigger = 20;
-    FixedTimeTrigger.Output fixed_time_trigger = 21;
-    CronTrigger.Output cron_trigger = 22;
-    EventTrigger.Output event_trigger = 23;
+  }
+}
+
+// Request message for RunTrigger
+message RunTriggerReq {
+  TriggerType trigger_type = 1; // Type of trigger to execute using the TriggerType enum
+  map<string, google.protobuf.Value> trigger_config = 2; // Configuration for the trigger
+}
+
+// Response message for RunTrigger
+message RunTriggerResp {
+  bool success = 1; // Whether the execution was successful
+  string error = 2; // Error message if execution failed
+  string trigger_id = 3; // ID of the executed trigger
+  
+  // Use specific output types for triggers
+  oneof output_data {
+    BlockTrigger.Output block_trigger = 10;
+    FixedTimeTrigger.Output fixed_time_trigger = 11;
+    CronTrigger.Output cron_trigger = 12;
+    EventTrigger.Output event_trigger = 13;
   }
 }
 
