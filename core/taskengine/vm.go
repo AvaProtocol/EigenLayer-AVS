@@ -32,7 +32,7 @@ const (
 	VMMaxPreprocessIterations         = 100
 	APContextVarName                  = "apContext"
 	ConfigVarsPath                    = "configVars"
-	APContextConfigVarsPath           = "apContext.configVars"
+	APContextConfigVarsPath           = APContextVarName + "." + ConfigVarsPath
 	DataSuffix                        = "data"
 )
 
