@@ -78,7 +78,7 @@ func TestExecutorRunTaskWithNilReason(t *testing.T) {
 		t.Errorf("Expected a default reason to be created, but it's still nil")
 	}
 
-	if execution.Reason.Type != avsproto.TriggerReason_Unset {
+	if execution.Reason.Type != avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
 		t.Errorf("Expected default reason type to be Unset, but got: %v", execution.Reason.Type)
 	}
 

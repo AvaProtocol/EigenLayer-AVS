@@ -892,8 +892,8 @@ func TestPreprocessText(t *testing.T) {
 			},
 		},
 	})
-	vm.AddVar("apContext", map[string]map[string]string{
-		"configVars": {
+	vm.AddVar(APContextVarName, map[string]map[string]string{
+		ConfigVarsPath: {
 			"my_awesome_secret": "my_awesome_secret_value",
 		},
 	})

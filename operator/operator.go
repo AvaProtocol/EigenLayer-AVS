@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -164,17 +165,32 @@ func validateRPCEndpoint(rpcURL string, logger logging.Logger) error {
 		Timeout: 10 * time.Second,
 	}
 
-	// Test basic connectivity
-	resp, err := client.Get(rpcURL)
+	// Create a simple JSON-RPC request to test the endpoint
+	jsonRPCPayload := `{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}`
+	logger.Infof("Sending JSON-RPC request: %s", jsonRPCPayload)
+
+	// Test JSON-RPC connectivity with POST request
+	resp, err := client.Post(rpcURL, "application/json", strings.NewReader(jsonRPCPayload))
 	if err != nil {
 		logger.Errorf("RPC endpoint validation failed - connection error: %v", err)
 		return fmt.Errorf("RPC endpoint %s is not accessible: %w", rpcURL, err)
 	}
 	defer resp.Body.Close()
 
+	// Read response body for debugging
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		logger.Warnf("Could not read response body: %v", readErr)
+	} else {
+		logger.Infof("RPC response body: %s", string(body))
+	}
+
 	// Check if the HTTP status code indicates success (2xx range)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		logger.Errorf("RPC endpoint validation failed - HTTP error: %s (status: %d)", rpcURL, resp.StatusCode)
+		if len(body) > 0 {
+			logger.Errorf("Response body: %s", string(body))
+		}
 		return fmt.Errorf("RPC endpoint %s returned HTTP error status: %d", rpcURL, resp.StatusCode)
 	}
 

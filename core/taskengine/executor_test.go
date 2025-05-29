@@ -628,7 +628,7 @@ func TestExecutorRunTaskWithBlockTriggerOutputData(t *testing.T) {
 
 	// Create block trigger reason
 	blockTriggerReason := &avsproto.TriggerReason{
-		Type:        avsproto.TriggerReason_Block,
+		Type:        avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		BlockNumber: 8416691, // Same block number as in SDK test
 	}
 
@@ -661,7 +661,7 @@ func TestExecutorRunTaskWithBlockTriggerOutputData(t *testing.T) {
 		t.Errorf("expect BlockNumber is 8416691 but got: %d", reason.BlockNumber)
 	}
 
-	if reason.Type != avsproto.TriggerReason_Block {
+	if reason.Type != avsproto.TriggerType_TRIGGER_TYPE_BLOCK {
 		t.Errorf("expect trigger type is Block but got: %v", reason.Type)
 	}
 
@@ -748,7 +748,7 @@ func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
 
 	// Create fixed time trigger reason
 	fixedTimeTriggerReason := &avsproto.TriggerReason{
-		Type:  avsproto.TriggerReason_FixedTime,
+		Type:  avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME,
 		Epoch: 1640995200, // Same epoch as in trigger config
 	}
 
@@ -758,7 +758,8 @@ func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
 		ExecutionID: "fixed_time_exec123",
 	})
 
-	// Basic execution checks
+	// Since we removed mock data generation, this test should now succeed
+	// because the VM execution path uses real trigger data from TriggerReason
 	if execution.Id != "fixed_time_exec123" {
 		t.Errorf("expect execution id is fixed_time_exec123 but got: %s", execution.Id)
 	}
@@ -781,7 +782,7 @@ func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
 		t.Errorf("expect Epoch is 1640995200 but got: %d", reason.Epoch)
 	}
 
-	if reason.Type != avsproto.TriggerReason_FixedTime {
+	if reason.Type != avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME {
 		t.Errorf("expect trigger type is FixedTime but got: %v", reason.Type)
 	}
 
@@ -855,7 +856,7 @@ func TestExecutorRunTaskWithCronTriggerOutputData(t *testing.T) {
 
 	// Create cron trigger reason
 	cronTriggerReason := &avsproto.TriggerReason{
-		Type:  avsproto.TriggerReason_Cron,
+		Type:  avsproto.TriggerType_TRIGGER_TYPE_CRON,
 		Epoch: 1640995200, // Epoch when cron was triggered
 	}
 
@@ -888,7 +889,7 @@ func TestExecutorRunTaskWithCronTriggerOutputData(t *testing.T) {
 		t.Errorf("expect Epoch is 1640995200 but got: %d", reason.Epoch)
 	}
 
-	if reason.Type != avsproto.TriggerReason_Cron {
+	if reason.Type != avsproto.TriggerType_TRIGGER_TYPE_CRON {
 		t.Errorf("expect trigger type is Cron but got: %v", reason.Type)
 	}
 

@@ -106,7 +106,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	var vm *VM
 	var err error
 
-	if triggerReason.Type == avsproto.TriggerReason_Event &&
+	if triggerReason.Type == avsproto.TriggerType_TRIGGER_TYPE_EVENT &&
 		triggerReason.TxHash == "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8" {
 		// This is the test transaction, provide mock transfer log data
 		_, transferLog := testutil.GetTestEventTriggerReasonWithTransferData()

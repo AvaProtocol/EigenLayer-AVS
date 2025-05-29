@@ -8,7 +8,6 @@ import (
 	"time"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/oklog/ulid/v2"
 
@@ -28,9 +27,13 @@ const (
 	VMStateInitialize         VMState = "vm_initialize"
 	VMStateCompiled           VMState = "vm_compiled"
 	VMStateReady              VMState = "vm_ready"
-	VMStateExecuting          VMState = "vm_executing"
+	VMStateRunning            VMState = "vm_running"
 	VMStateCompleted          VMState = "vm_completed"
 	VMMaxPreprocessIterations         = 100
+	APContextVarName                  = "apContext"
+	ConfigVarsPath                    = "configVars"
+	APContextConfigVarsPath           = APContextVarName + "." + ConfigVarsPath
+	DataSuffix                        = "data"
 )
 
 type Step struct {
@@ -242,8 +245,9 @@ func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReaso
 			configVars[k] = v
 		}
 	}
-	v.AddVar("apContext", map[string]map[string]string{
-		"configVars": configVars,
+
+	v.AddVar(APContextVarName, map[string]map[string]string{
+		ConfigVarsPath: configVars,
 	})
 
 	if task != nil {
@@ -289,7 +293,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReaso
 				triggerData = make(map[string]interface{})
 
 				// Handle block trigger data
-				if reason.Type == avsproto.TriggerReason_Block && reason.BlockNumber != 0 {
+				if reason.Type == avsproto.TriggerType_TRIGGER_TYPE_BLOCK && reason.BlockNumber != 0 {
 					// Create BlockTrigger_Output for execution output data
 					v.parsedTriggerData.Block = &avsproto.BlockTrigger_Output{
 						BlockNumber: uint64(reason.BlockNumber),
@@ -304,7 +308,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReaso
 				}
 
 				// Handle fixed time trigger data
-				if reason.Type == avsproto.TriggerReason_FixedTime && reason.Epoch != 0 {
+				if reason.Type == avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME && reason.Epoch != 0 {
 					// Create FixedTimeTrigger_Output for execution output data
 					v.parsedTriggerData.Time = &avsproto.FixedTimeTrigger_Output{
 						Epoch: uint64(reason.Epoch),
@@ -312,7 +316,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReaso
 				}
 
 				// Handle cron trigger data
-				if reason.Type == avsproto.TriggerReason_Cron && reason.Epoch != 0 {
+				if reason.Type == avsproto.TriggerType_TRIGGER_TYPE_CRON && reason.Epoch != 0 {
 					// Create CronTrigger_Output for execution output data
 					v.parsedTriggerData.Cron = &avsproto.CronTrigger_Output{
 						Epoch: uint64(reason.Epoch),
@@ -333,7 +337,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReaso
 				if reason.Epoch != 0 {
 					triggerData["epoch"] = reason.Epoch
 				}
-				if reason.Type != avsproto.TriggerReason_Unset {
+				if reason.Type != avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
 					triggerData["type"] = reason.Type.String() // Store as string
 				}
 			}
@@ -594,7 +598,7 @@ func (v *VM) Run() error {
 	if v.Status == VMStateCompiled { // If compiled, transition to ready
 		v.Status = VMStateReady
 	}
-	v.Status = VMStateExecuting
+	v.Status = VMStateRunning
 	v.mu.Unlock() // Unlock after status updates, before long running execution
 
 	// Defer status update requires its own lock if Run can error out early
@@ -854,63 +858,42 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 	// Special handling for blockTrigger nodes that were created via CreateNodeFromType
 	// These nodes have no Config but should be handled specially
 	if node.Config == nil {
-		// Check if this is a blockTrigger node by looking at the node ID in TaskNodes
+		// Check if this is a blockTrigger node by looking at the node name in TaskNodes
 		v.mu.Lock()
 		taskNode, exists := v.TaskNodes[stepID]
 		v.mu.Unlock()
 
-		if exists && taskNode.Name == "Single Node Execution: blockTrigger" {
-			// Handle blockTrigger node specially - create mock block data
-			blockNumber := uint64(time.Now().Unix()) // Default to current timestamp as mock block number
-
-			// Try to get block number from trigger data if available
-			if v.reason != nil && v.reason.BlockNumber != 0 {
-				blockNumber = uint64(v.reason.BlockNumber)
+		if v.logger != nil {
+			v.logger.Info("runCustomCode: Config is nil", "stepID", stepID, "exists", exists)
+			if exists {
+				v.logger.Info("runCustomCode: TaskNode details", "name", taskNode.Name, "id", taskNode.Id)
 			}
+		}
 
-			// Create mock block data
-			mockBlockData := map[string]interface{}{
-				"blockNumber": blockNumber,
-				"blockHash":   fmt.Sprintf("0x%x", time.Now().UnixNano()), // Mock hash
-				"timestamp":   time.Now().Unix(),
-				"parentHash":  fmt.Sprintf("0x%x", time.Now().UnixNano()-1),
-				"difficulty":  "1000000000000000",
-				"gasLimit":    uint64(30000000),
-				"gasUsed":     uint64(21000),
+		if exists && strings.Contains(taskNode.Name, NodeTypeBlockTrigger) {
+			if v.logger != nil {
+				v.logger.Error("runCustomCode: BlockTrigger nodes require real blockchain data - mock data not supported", "stepID", stepID, "name", taskNode.Name)
 			}
-
-			// Convert to structpb.Value for protobuf
-			structData, err := structpb.NewStruct(mockBlockData)
-			if err != nil {
-				return &avsproto.Execution_Step{
-					NodeId:  stepID,
-					Success: false,
-					Error:   fmt.Sprintf("failed to create struct data: %v", err),
-					StartAt: time.Now().UnixMilli(),
-					EndAt:   time.Now().UnixMilli(),
-				}, fmt.Errorf("failed to create struct data: %w", err)
-			}
-
-			// Create successful execution step
-			executionStep := &avsproto.Execution_Step{
+			return &avsproto.Execution_Step{
 				NodeId:  stepID,
-				Success: true,
+				Success: false,
+				Error:   "BlockTrigger nodes require real blockchain data - mock data not supported",
 				StartAt: time.Now().UnixMilli(),
 				EndAt:   time.Now().UnixMilli(),
-				Log:     fmt.Sprintf("Simulated block trigger with block number %d", blockNumber),
-				OutputData: &avsproto.Execution_Step_CustomCode{
-					CustomCode: &avsproto.CustomCodeNode_Output{
-						Data: structpb.NewStructValue(structData),
-					},
-				},
-			}
-
-			v.mu.Lock()
-			executionStep.Inputs = v.collectInputKeysForLog()
-			v.mu.Unlock()
-
-			return executionStep, nil
+			}, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
 		}
+
+		// If Config is nil and it's not a blockTrigger, return an error
+		if v.logger != nil {
+			v.logger.Error("runCustomCode: CustomCodeNode Config is nil", "stepID", stepID)
+		}
+		return &avsproto.Execution_Step{
+			NodeId:  stepID,
+			Success: false,
+			Error:   "CustomCodeNode Config is nil",
+			StartAt: time.Now().UnixMilli(),
+			EndAt:   time.Now().UnixMilli(),
+		}, fmt.Errorf("CustomCodeNode Config is nil")
 	}
 
 	// Normal custom code execution
@@ -1063,10 +1046,10 @@ func (v *VM) collectInputKeysForLog() []string {
 	for k := range v.vars {
 		if !contains(macros.MacroFuncs, k) { // `contains` is a global helper
 			varname := k
-			if varname == "apContext" { // Specific handling for apContext
-				varname = "apContext.configVars"
+			if varname == APContextVarName { // Specific handling for apContext
+				varname = APContextConfigVarsPath
 			} else {
-				varname = fmt.Sprintf("%s.data", varname)
+				varname = fmt.Sprintf("%s.%s", varname, DataSuffix)
 			}
 			inputKeys = append(inputKeys, varname)
 		}
@@ -1087,8 +1070,8 @@ func (v *VM) CollectInputs() map[string]string {
 			valueStr = fmt.Sprintf("%v", value)
 		}
 		varname := key
-		if varname == "apContext" {
-			varname = "apContext.configVars"
+		if varname == APContextVarName {
+			varname = APContextConfigVarsPath
 		} else {
 			varname = fmt.Sprintf("%s.data", varname)
 		}
@@ -1106,47 +1089,15 @@ func (v *VM) GetTaskId() string {
 }
 
 func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[string]interface{}) (*avsproto.Execution_Step, error) {
-	// Special handling for blockTrigger - simulate blockchain data locally
-	if node.GetCustomCode() != nil && node.Name == "Single Node Execution: blockTrigger" {
-		// Extract block number from input variables if provided
-		blockNumber := uint64(time.Now().Unix()) // Default to current timestamp as mock block number
-		if blockNum, ok := inputVariables["blockNumber"]; ok {
-			if bn, ok := blockNum.(float64); ok {
-				blockNumber = uint64(bn)
-			}
-		}
-
-		// Create mock block data
-		mockBlockData := map[string]interface{}{
-			"blockNumber": blockNumber,
-			"blockHash":   fmt.Sprintf("0x%x", time.Now().UnixNano()), // Mock hash
-			"timestamp":   time.Now().Unix(),
-			"parentHash":  fmt.Sprintf("0x%x", time.Now().UnixNano()-1),
-			"difficulty":  "1000000000000000",
-			"gasLimit":    uint64(30000000),
-			"gasUsed":     uint64(21000),
-		}
-
-		// Convert to structpb.Value for protobuf
-		structData, err := structpb.NewStruct(mockBlockData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create struct data: %w", err)
-		}
-
-		// Create successful execution step
-		executionStep := &avsproto.Execution_Step{
+	// Special handling for blockTrigger - require real blockchain data
+	if node.GetCustomCode() != nil && node.Name == "Single Node Execution: "+NodeTypeBlockTrigger {
+		return &avsproto.Execution_Step{
 			NodeId:  node.Id,
-			Success: true,
+			Success: false,
+			Error:   "BlockTrigger nodes require real blockchain data - mock data not supported",
 			StartAt: time.Now().UnixMilli(),
 			EndAt:   time.Now().UnixMilli(),
-			OutputData: &avsproto.Execution_Step_CustomCode{
-				CustomCode: &avsproto.CustomCodeNode_Output{
-					Data: structpb.NewStructValue(structData),
-				},
-			},
-		}
-
-		return executionStep, nil
+		}, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
 	}
 
 	// Create a temporary, clean VM for isolated node execution.
@@ -1163,11 +1114,11 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 
 	// Copy apContext if it exists in the original VM's vars (might contain global config)
 	v.mu.Lock() // Lock original VM to read its vars
-	if apContextValue, ok := v.vars["apContext"]; ok {
+	if apContextValue, ok := v.vars[APContextVarName]; ok {
 		if tempVM.vars == nil { // Ensure tempVM.vars is initialized
 			tempVM.vars = make(map[string]any)
 		}
-		tempVM.vars["apContext"] = apContextValue
+		tempVM.vars[APContextVarName] = apContextValue
 	}
 	v.mu.Unlock()
 
@@ -1238,27 +1189,27 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 	node := &avsproto.TaskNode{Id: nodeID, Name: "Single Node Execution: " + nodeType}
 
 	switch nodeType {
-	case "restApi":
+	case NodeTypeRestAPI:
 		// Configuration is now in Input messages, not in the node structure
 		node.TaskType = &avsproto.TaskNode_RestApi{RestApi: &avsproto.RestAPINode{}}
-	case "contractRead":
+	case NodeTypeContractRead:
 		// Configuration is now in Input messages, not in the node structure
 		node.TaskType = &avsproto.TaskNode_ContractRead{ContractRead: &avsproto.ContractReadNode{}}
-	case "customCode":
+	case NodeTypeCustomCode:
 		// Configuration is now in Input messages, not in the node structure
 		node.TaskType = &avsproto.TaskNode_CustomCode{CustomCode: &avsproto.CustomCodeNode{}}
-	case "branch":
+	case NodeTypeBranch:
 		// Configuration is now in Input messages, not in the node structure
 		node.TaskType = &avsproto.TaskNode_Branch{Branch: &avsproto.BranchNode{}}
-	case "filter":
+	case NodeTypeFilter:
 		// Configuration is now in Input messages, not in the node structure
 		node.TaskType = &avsproto.TaskNode_Filter{Filter: &avsproto.FilterNode{}}
-	case "blockTrigger":
+	case NodeTypeBlockTrigger:
 		// Create a custom code node that will be handled specially by RunNodeWithInputs
 		node.TaskType = &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{},
 		}
-	case "ethTransfer":
+	case NodeTypeETHTransfer:
 		// Configuration is now in Input messages, not in the node structure
 		node.TaskType = &avsproto.TaskNode_EthTransfer{EthTransfer: &avsproto.ETHTransferNode{}}
 	default:
