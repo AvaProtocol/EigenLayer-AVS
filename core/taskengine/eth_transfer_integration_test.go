@@ -72,7 +72,7 @@ func TestETHTransferTaskIntegration(t *testing.T) {
 	triggerResult, err := n.TriggerTask(user, &avsproto.UserTriggerTaskReq{
 		TaskId: task.Id,
 		Reason: &avsproto.TriggerReason{
-			Type: avsproto.TriggerReason_Manual,
+			Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		},
 		IsBlocking: true, // Execute synchronously for testing
 	})
@@ -185,7 +185,7 @@ func TestETHTransferTaskWithInvalidConfig(t *testing.T) {
 	_, err = n.TriggerTask(user, &avsproto.UserTriggerTaskReq{
 		TaskId: task.Id,
 		Reason: &avsproto.TriggerReason{
-			Type: avsproto.TriggerReason_Manual,
+			Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		},
 		IsBlocking: true,
 	})

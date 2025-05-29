@@ -294,7 +294,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReaso
 				triggerData = make(map[string]interface{})
 
 				// Handle block trigger data
-				if reason.Type == avsproto.TriggerReason_Block && reason.BlockNumber != 0 {
+				if reason.Type == avsproto.TriggerType_TRIGGER_TYPE_BLOCK && reason.BlockNumber != 0 {
 					// Create BlockTrigger_Output for execution output data
 					v.parsedTriggerData.Block = &avsproto.BlockTrigger_Output{
 						BlockNumber: uint64(reason.BlockNumber),
@@ -309,7 +309,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReaso
 				}
 
 				// Handle fixed time trigger data
-				if reason.Type == avsproto.TriggerReason_FixedTime && reason.Epoch != 0 {
+				if reason.Type == avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME && reason.Epoch != 0 {
 					// Create FixedTimeTrigger_Output for execution output data
 					v.parsedTriggerData.Time = &avsproto.FixedTimeTrigger_Output{
 						Epoch: uint64(reason.Epoch),
@@ -317,7 +317,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReaso
 				}
 
 				// Handle cron trigger data
-				if reason.Type == avsproto.TriggerReason_Cron && reason.Epoch != 0 {
+				if reason.Type == avsproto.TriggerType_TRIGGER_TYPE_CRON && reason.Epoch != 0 {
 					// Create CronTrigger_Output for execution output data
 					v.parsedTriggerData.Cron = &avsproto.CronTrigger_Output{
 						Epoch: uint64(reason.Epoch),
@@ -338,7 +338,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReaso
 				if reason.Epoch != 0 {
 					triggerData["epoch"] = reason.Epoch
 				}
-				if reason.Type != avsproto.TriggerReason_Unset {
+				if reason.Type != avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
 					triggerData["type"] = reason.Type.String() // Store as string
 				}
 			}
@@ -859,14 +859,37 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 	// Special handling for blockTrigger nodes that were created via CreateNodeFromType
 	// These nodes have no Config but should be handled specially
 	if node.Config == nil {
-		// Check if this is a blockTrigger node by looking at the node ID in TaskNodes
+		// Check if this is a blockTrigger node by looking at the node name in TaskNodes
 		v.mu.Lock()
 		taskNode, exists := v.TaskNodes[stepID]
 		v.mu.Unlock()
 
-		if exists && taskNode.Name == "Single Node Execution: "+NodeTypeBlockTrigger {
+		if v.logger != nil {
+			v.logger.Info("runCustomCode: Config is nil", "stepID", stepID, "exists", exists)
+			if exists {
+				v.logger.Info("runCustomCode: TaskNode details", "name", taskNode.Name, "id", taskNode.Id)
+			}
+		}
+
+		if exists && strings.Contains(taskNode.Name, NodeTypeBlockTrigger) {
+			if v.logger != nil {
+				v.logger.Info("runCustomCode: Detected blockTrigger node", "stepID", stepID, "name", taskNode.Name)
+			}
 			// Handle blockTrigger node specially - create mock block data
 			blockNumber := uint64(time.Now().Unix()) // Default to current timestamp as mock block number
+
+			// Try to get block number from input variables if available
+			v.mu.Lock()
+			if blockNumVar, ok := v.vars["blockNumber"]; ok {
+				if bn, ok := blockNumVar.(float64); ok {
+					blockNumber = uint64(bn)
+				} else if bn, ok := blockNumVar.(uint64); ok {
+					blockNumber = bn
+				} else if bn, ok := blockNumVar.(int64); ok {
+					blockNumber = uint64(bn)
+				}
+			}
+			v.mu.Unlock()
 
 			// Try to get block number from trigger data if available
 			if v.reason != nil && v.reason.BlockNumber != 0 {
@@ -916,6 +939,18 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 
 			return executionStep, nil
 		}
+
+		// If Config is nil and it's not a blockTrigger, return an error
+		if v.logger != nil {
+			v.logger.Error("runCustomCode: CustomCodeNode Config is nil and not a blockTrigger", "stepID", stepID)
+		}
+		return &avsproto.Execution_Step{
+			NodeId:  stepID,
+			Success: false,
+			Error:   "CustomCodeNode Config is nil",
+			StartAt: time.Now().UnixMilli(),
+			EndAt:   time.Now().UnixMilli(),
+		}, fmt.Errorf("CustomCodeNode Config is nil")
 	}
 
 	// Normal custom code execution

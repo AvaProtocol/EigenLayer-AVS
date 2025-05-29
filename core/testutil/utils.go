@@ -349,7 +349,7 @@ func GetTestEventTriggerReason() *avsproto.TriggerReason {
 		BlockNumber: 7212417,
 		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
 		LogIndex:    98,
-		Type:        avsproto.TriggerReason_Event,
+		Type:        avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 	}
 }
 
@@ -359,7 +359,7 @@ func GetTestEventTriggerReasonWithTransferData() (*avsproto.TriggerReason, *avsp
 		BlockNumber: 7212417,
 		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
 		LogIndex:    98,
-		Type:        avsproto.TriggerReason_Event,
+		Type:        avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 	}
 
 	transferLog := &avsproto.EventTrigger_TransferLogOutput{

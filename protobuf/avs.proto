@@ -8,6 +8,40 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/struct.proto";
 
+// ============================================================================
+// ENUMS - Single source of truth for types
+// ============================================================================
+
+// TriggerType defines all supported trigger types
+// This enum provides a single source of truth for trigger types used across the system
+enum TriggerType {
+  TRIGGER_TYPE_UNSPECIFIED = 0;  // Default unspecified value
+  TRIGGER_TYPE_MANUAL = 1;       // Manual trigger
+  TRIGGER_TYPE_FIXED_TIME = 2;   // Fixed time trigger
+  TRIGGER_TYPE_CRON = 3;         // Cron-based trigger
+  TRIGGER_TYPE_BLOCK = 4;        // Block-based trigger
+  TRIGGER_TYPE_EVENT = 5;        // Event-based trigger
+}
+
+// NodeType defines all supported node types
+// This enum provides a single source of truth for node types used across the system
+enum NodeType {
+  NODE_TYPE_UNSPECIFIED = 0;     // Default unspecified value
+  NODE_TYPE_ETH_TRANSFER = 1;    // Ethereum transfer node
+  NODE_TYPE_CONTRACT_WRITE = 2;  // Contract write node
+  NODE_TYPE_CONTRACT_READ = 3;   // Contract read node
+  NODE_TYPE_GRAPHQL_QUERY = 4;   // GraphQL query node
+  NODE_TYPE_REST_API = 5;        // REST API node
+  NODE_TYPE_CUSTOM_CODE = 6;     // Custom code node
+  NODE_TYPE_BRANCH = 7;          // Branch node
+  NODE_TYPE_FILTER = 8;          // Filter node
+  NODE_TYPE_LOOP = 9;            // Loop node
+}
+
+// ============================================================================
+// EXISTING MESSAGES
+// ============================================================================
+
 message IdReq {
   string id = 1;
 }
@@ -133,6 +167,10 @@ message EventTrigger {
 
 message TaskTrigger {
   string name = 1;
+  
+  // NEW: Use the enum for type identification (Phase 1: add alongside existing)
+  TriggerType type = 8;
+  
   oneof trigger_type {
     // manual task will not be check to be trigger, instead it can be trigger adhoc
     bool               manual = 2;
@@ -392,6 +430,9 @@ message TaskEdge {
 message TaskNode {
   string id   = 2;
   string name = 3;
+  
+  // NEW: Use the enum for type identification (Phase 1: add alongside existing)
+  NodeType type = 1;
 
   // based on node_type one and only one of these field are set
   oneof task_type {
@@ -642,19 +683,11 @@ message TriggerReason {
   string tx_hash      = 3;
   uint64 epoch        = 4;
 
+  // Use the top-level TriggerType enum for consistency
   // This value isn't needed because when we query an execution or trigger a task, we know the trigger type 
-  // But, The JS SDK needed this value probabaly to saving the lookup time when it only have execution id somehow
-  // So we added this value to the respose for the client to consume and use however it want
-  // Internaly we don't make use of this field.
-  // The client was map the field based on the one-off field number so we need to match this number with TaskTrigger.trigger_type
-  enum TriggerType {
-    Unset     = 0;
-    Manual    = 2;
-    FixedTime = 3;
-    Cron      = 4;
-    Block     = 5;
-    Event     = 6;
-  }
+  // But, The JS SDK needed this value probably to save the lookup time when it only has execution id somehow
+  // So we added this value to the response for the client to consume and use however it wants
+  // Internally we don't make use of this field.
   TriggerType type = 5;
 }
 
@@ -880,7 +913,7 @@ message GetExecutionStatsResp {
 
 // Request message for RunNodeWithInputs
 message RunNodeWithInputsReq {
-  string node_type = 1; // Type of node to execute (e.g., "blockTrigger", "customCode")
+  NodeType node_type = 1; // Type of node to execute using the NodeType enum
   map<string, google.protobuf.Value> node_config = 2; // Configuration for the node
   map<string, google.protobuf.Value> input_variables = 3; // Input variables for the node
 }

@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 
@@ -389,7 +390,56 @@ func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNode
 		"node_type", req.NodeType,
 	)
 
-	return r.engine.RunNodeWithInputsRPC(user, req)
+	// Add debug logging for the request details
+	configKeys := make([]string, 0, len(req.NodeConfig))
+	for k := range req.NodeConfig {
+		configKeys = append(configKeys, k)
+	}
+	inputKeys := make([]string, 0, len(req.InputVariables))
+	for k := range req.InputVariables {
+		inputKeys = append(inputKeys, k)
+	}
+
+	r.config.Logger.Info("run node with inputs details",
+		"user", user.Address.String(),
+		"node_type", req.NodeType,
+		"config_keys", configKeys,
+		"input_keys", inputKeys,
+	)
+
+	result, err := r.engine.RunNodeWithInputsRPC(user, req)
+	if err != nil {
+		r.config.Logger.Error("run node with inputs failed",
+			"user", user.Address.String(),
+			"error", err,
+		)
+		return nil, status.Errorf(codes.Internal, "execution failed: %v", err)
+	}
+
+	r.config.Logger.Info("run node with inputs completed",
+		"user", user.Address.String(),
+		"success", result.Success,
+		"error", result.Error,
+	)
+
+	return result, nil
+}
+
+// Helper functions for logging
+func getConfigKeys(config map[string]*structpb.Value) []string {
+	keys := make([]string, 0, len(config))
+	for k := range config {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func getInputKeys(inputs map[string]*structpb.Value) []string {
+	keys := make([]string, 0, len(inputs))
+	for k := range inputs {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // Operator action

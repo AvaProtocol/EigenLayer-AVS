@@ -12,6 +12,6 @@ func GetTriggerReasonOrDefault(reason *avsproto.TriggerReason, taskID string, lo
 
 	logger.Debug("Creating default trigger reason", "task_id", taskID)
 	return &avsproto.TriggerReason{
-		Type: avsproto.TriggerReason_Unset,
+		Type: avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED,
 	}
 }
