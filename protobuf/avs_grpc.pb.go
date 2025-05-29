@@ -43,6 +43,7 @@ const (
 	Aggregator_GetExecutionCount_FullMethodName  = "/aggregator.Aggregator/GetExecutionCount"
 	Aggregator_GetExecutionStats_FullMethodName  = "/aggregator.Aggregator/GetExecutionStats"
 	Aggregator_RunNodeWithInputs_FullMethodName  = "/aggregator.Aggregator/RunNodeWithInputs"
+	Aggregator_RunTrigger_FullMethodName         = "/aggregator.Aggregator/RunTrigger"
 )
 
 // AggregatorClient is the client API for Aggregator service.
@@ -97,6 +98,8 @@ type AggregatorClient interface {
 	GetExecutionStats(ctx context.Context, in *GetExecutionStatsReq, opts ...grpc.CallOption) (*GetExecutionStatsResp, error)
 	// RunNodeWithInputs allows executing a single node with provided inputs for testing purposes
 	RunNodeWithInputs(ctx context.Context, in *RunNodeWithInputsReq, opts ...grpc.CallOption) (*RunNodeWithInputsResp, error)
+	// RunTrigger allows executing a single trigger for testing purposes (triggers don't accept inputs)
+	RunTrigger(ctx context.Context, in *RunTriggerReq, opts ...grpc.CallOption) (*RunTriggerResp, error)
 }
 
 type aggregatorClient struct {
@@ -337,6 +340,16 @@ func (c *aggregatorClient) RunNodeWithInputs(ctx context.Context, in *RunNodeWit
 	return out, nil
 }
 
+func (c *aggregatorClient) RunTrigger(ctx context.Context, in *RunTriggerReq, opts ...grpc.CallOption) (*RunTriggerResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RunTriggerResp)
+	err := c.cc.Invoke(ctx, Aggregator_RunTrigger_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AggregatorServer is the server API for Aggregator service.
 // All implementations must embed UnimplementedAggregatorServer
 // for forward compatibility.
@@ -389,6 +402,8 @@ type AggregatorServer interface {
 	GetExecutionStats(context.Context, *GetExecutionStatsReq) (*GetExecutionStatsResp, error)
 	// RunNodeWithInputs allows executing a single node with provided inputs for testing purposes
 	RunNodeWithInputs(context.Context, *RunNodeWithInputsReq) (*RunNodeWithInputsResp, error)
+	// RunTrigger allows executing a single trigger for testing purposes (triggers don't accept inputs)
+	RunTrigger(context.Context, *RunTriggerReq) (*RunTriggerResp, error)
 	mustEmbedUnimplementedAggregatorServer()
 }
 
@@ -467,6 +482,9 @@ func (UnimplementedAggregatorServer) GetExecutionStats(context.Context, *GetExec
 }
 func (UnimplementedAggregatorServer) RunNodeWithInputs(context.Context, *RunNodeWithInputsReq) (*RunNodeWithInputsResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RunNodeWithInputs not implemented")
+}
+func (UnimplementedAggregatorServer) RunTrigger(context.Context, *RunTriggerReq) (*RunTriggerResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RunTrigger not implemented")
 }
 func (UnimplementedAggregatorServer) mustEmbedUnimplementedAggregatorServer() {}
 func (UnimplementedAggregatorServer) testEmbeddedByValue()                    {}
@@ -903,6 +921,24 @@ func _Aggregator_RunNodeWithInputs_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Aggregator_RunTrigger_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunTriggerReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).RunTrigger(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Aggregator_RunTrigger_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).RunTrigger(ctx, req.(*RunTriggerReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Aggregator_ServiceDesc is the grpc.ServiceDesc for Aggregator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1001,6 +1037,10 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RunNodeWithInputs",
 			Handler:    _Aggregator_RunNodeWithInputs_Handler,
+		},
+		{
+			MethodName: "RunTrigger",
+			Handler:    _Aggregator_RunTrigger_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

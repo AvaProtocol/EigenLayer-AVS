@@ -407,7 +407,8 @@ func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNode
 		"input_keys", inputKeys,
 	)
 
-	result, err := r.engine.RunNodeWithInputsRPC(user, req)
+	// Call the immediate execution function directly
+	result, err := r.engine.RunNodeImmediatelyRPC(user, req)
 	if err != nil {
 		r.config.Logger.Error("run node with inputs failed",
 			"user", user.Address.String(),
@@ -417,6 +418,48 @@ func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNode
 	}
 
 	r.config.Logger.Info("run node with inputs completed",
+		"user", user.Address.String(),
+		"success", result.Success,
+		"error", result.Error,
+	)
+
+	return result, nil
+}
+
+func (r *RpcServer) RunTrigger(ctx context.Context, req *avsproto.RunTriggerReq) (*avsproto.RunTriggerResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process run trigger",
+		"user", user.Address.String(),
+		"trigger_type", req.TriggerType,
+	)
+
+	// Add debug logging for the request details
+	configKeys := make([]string, 0, len(req.TriggerConfig))
+	for k := range req.TriggerConfig {
+		configKeys = append(configKeys, k)
+	}
+
+	r.config.Logger.Info("run trigger details",
+		"user", user.Address.String(),
+		"trigger_type", req.TriggerType,
+		"config_keys", configKeys,
+	)
+
+	// Call the trigger execution function directly
+	result, err := r.engine.RunTriggerRPC(user, req)
+	if err != nil {
+		r.config.Logger.Error("run trigger failed",
+			"user", user.Address.String(),
+			"error", err,
+		)
+		return nil, status.Errorf(codes.Internal, "execution failed: %v", err)
+	}
+
+	r.config.Logger.Info("run trigger completed",
 		"user", user.Address.String(),
 		"success", result.Success,
 		"error", result.Error,

@@ -6,13 +6,10 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
-	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func createTestEngine(t *testing.T) *Engine {
@@ -24,10 +21,11 @@ func createTestEngine(t *testing.T) *Engine {
 	return New(db, config, nil, testutil.GetLogger())
 }
 
-func TestRunNodeWithInputs_BlockTrigger(t *testing.T) {
+// Test immediate execution of blockTrigger with specific block number
+func TestRunNodeImmediately_BlockTrigger(t *testing.T) {
 	engine := createTestEngine(t)
 
-	result, err := engine.RunNodeWithInputs(NodeTypeBlockTrigger, map[string]interface{}{
+	result, err := engine.RunNodeImmediately(NodeTypeBlockTrigger, map[string]interface{}{
 		"blockNumber": 12345,
 	}, map[string]interface{}{})
 
@@ -37,7 +35,8 @@ func TestRunNodeWithInputs_BlockTrigger(t *testing.T) {
 	assert.Equal(t, uint64(12345), result["blockNumber"])
 }
 
-func TestRunNodeWithInputs_CustomCode(t *testing.T) {
+// Test immediate execution of custom code node
+func TestRunNodeImmediately_CustomCode(t *testing.T) {
 	vm, err := NewVMWithData(nil, nil, &config.SmartWalletConfig{}, nil)
 	assert.NoError(t, err)
 
@@ -75,6 +74,7 @@ func TestRunNodeWithInputs_CustomCode(t *testing.T) {
 	assert.NotNil(t, codeOutput.Data)
 }
 
+// Test CreateNodeFromType utility function
 func TestCreateNodeFromType(t *testing.T) {
 	node, err := CreateNodeFromType(NodeTypeBlockTrigger, map[string]interface{}{}, "")
 	assert.NoError(t, err)
@@ -82,7 +82,8 @@ func TestCreateNodeFromType(t *testing.T) {
 	assert.Equal(t, "Single Node Execution: "+NodeTypeBlockTrigger, node.Name)
 }
 
-func TestEngine_RunNodeWithInputs(t *testing.T) {
+// Test immediate execution of various node types
+func TestRunNodeImmediately_AllNodeTypes(t *testing.T) {
 	engine := createTestEngine(t)
 
 	// Test different node types
@@ -122,7 +123,7 @@ func TestEngine_RunNodeWithInputs(t *testing.T) {
 				}
 			}
 
-			result, err := engine.RunNodeWithInputs(nodeType, config, map[string]interface{}{})
+			result, err := engine.RunNodeImmediately(nodeType, config, map[string]interface{}{})
 
 			switch nodeType {
 			case NodeTypeBlockTrigger:
@@ -153,7 +154,7 @@ func TestEngine_RunNodeWithInputs(t *testing.T) {
 	}
 
 	// Test specific functionality for blockTrigger
-	result, err := engine.RunNodeWithInputs(NodeTypeBlockTrigger, map[string]interface{}{
+	result, err := engine.RunNodeImmediately(NodeTypeBlockTrigger, map[string]interface{}{
 		"blockNumber": 12345,
 	}, map[string]interface{}{})
 
@@ -163,7 +164,7 @@ func TestEngine_RunNodeWithInputs(t *testing.T) {
 	assert.Equal(t, uint64(12345), result["blockNumber"])
 
 	// Test custom code with proper configuration (this will still fail due to CreateNodeFromType limitations)
-	result, err = engine.RunNodeWithInputs(NodeTypeCustomCode, map[string]interface{}{
+	result, err = engine.RunNodeImmediately(NodeTypeCustomCode, map[string]interface{}{
 		"code": `
 			return {
 				message: "Hello World",
@@ -191,53 +192,46 @@ func TestEngine_RunNodeWithInputs(t *testing.T) {
 	}
 }
 
-func TestRunNodeWithInputsRPC_NodeTypeValidation(t *testing.T) {
+// Test immediate execution of different trigger types
+func TestRunNodeImmediately_TriggerTypes(t *testing.T) {
 	engine := createTestEngine(t)
-	user := &model.User{Address: common.HexToAddress("0x1234567890123456789012345678901234567890")}
 
-	// Test that custom code nodes accept input variables properly
-	req := &avsproto.RunNodeWithInputsReq{
-		NodeType: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
-		NodeConfig: map[string]*structpb.Value{
-			"lang":   structpb.NewNumberValue(float64(avsproto.Lang_JavaScript)),
-			"source": structpb.NewStringValue("return {result: 'success'};"),
-		},
-		InputVariables: map[string]*structpb.Value{
-			"testInput": structpb.NewStringValue("test value"),
-		},
-	}
+	// Test FixedTimeTrigger immediate execution
+	t.Run("FixedTimeTrigger", func(t *testing.T) {
+		result, err := engine.RunNodeImmediately(NodeTypeFixedTimeTrigger, map[string]interface{}{}, map[string]interface{}{})
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Contains(t, result, "epoch")
+		assert.IsType(t, uint64(0), result["epoch"])
+	})
 
-	resp, err := engine.RunNodeWithInputsRPC(user, req)
-	assert.NoError(t, err)
-	// Custom code should accept input variables, so no validation error
-	if !resp.Success {
-		assert.NotContains(t, resp.Error, "do not accept input variables")
-	}
+	// Test CronTrigger immediate execution
+	t.Run("CronTrigger", func(t *testing.T) {
+		result, err := engine.RunNodeImmediately(NodeTypeCronTrigger, map[string]interface{}{}, map[string]interface{}{})
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Contains(t, result, "epoch")
+		assert.Contains(t, result, "scheduleMatched")
+		assert.Equal(t, "immediate_execution", result["scheduleMatched"])
+	})
 
-	// Test REST API node with input variables
-	req.NodeType = avsproto.NodeType_NODE_TYPE_REST_API
-	req.NodeConfig = map[string]*structpb.Value{
-		"url":    structpb.NewStringValue("https://httpbin.org/get"),
-		"method": structpb.NewStringValue("GET"),
-	}
-	req.InputVariables = map[string]*structpb.Value{
-		"testParam": structpb.NewStringValue("test value"),
-	}
+	// Test EventTrigger immediate execution (simulation)
+	t.Run("EventTrigger", func(t *testing.T) {
+		result, err := engine.RunNodeImmediately(NodeTypeEventTrigger, map[string]interface{}{}, map[string]interface{}{})
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Contains(t, result, "simulated")
+		assert.Equal(t, true, result["simulated"])
+		assert.Contains(t, result, "message")
+	})
 
-	resp, err = engine.RunNodeWithInputsRPC(user, req)
-	assert.NoError(t, err)
-	// REST API should accept input variables, so no validation error
-	if !resp.Success {
-		assert.NotContains(t, resp.Error, "do not accept input variables")
-	}
-
-	// Test unsupported node type
-	req.NodeType = avsproto.NodeType_NODE_TYPE_UNSPECIFIED
-	req.NodeConfig = map[string]*structpb.Value{}
-	req.InputVariables = map[string]*structpb.Value{}
-
-	resp, err = engine.RunNodeWithInputsRPC(user, req)
-	assert.NoError(t, err)
-	assert.False(t, resp.Success)
-	assert.Contains(t, resp.Error, "unsupported node type")
+	// Test ManualTrigger immediate execution
+	t.Run("ManualTrigger", func(t *testing.T) {
+		result, err := engine.RunNodeImmediately(NodeTypeManualTrigger, map[string]interface{}{}, map[string]interface{}{})
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Contains(t, result, "triggered")
+		assert.Equal(t, true, result["triggered"])
+		assert.Contains(t, result, "timestamp")
+	})
 }
