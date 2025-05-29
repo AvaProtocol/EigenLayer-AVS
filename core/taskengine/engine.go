@@ -1305,9 +1305,9 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 		if payload != nil {
 			if payload.IncludeTimestamps {
 				// In a real implementation, these would be fetched from storage
-				// For now, we'll use placeholder values
-				item.CreatedAt = time.Now().Unix() // Would fetch from storage
-				item.UpdatedAt = time.Now().Unix() // Would fetch from storage
+				// For now, we'll skip timestamps since we don't have real data
+				// item.CreatedAt = time.Now().Unix() // Would fetch from storage
+				// item.UpdatedAt = time.Now().Unix() // Would fetch from storage
 			}
 			if payload.IncludeCreatedBy {
 				item.CreatedBy = user.Address.Hex() // Would fetch from storage
@@ -1654,53 +1654,38 @@ func (n *Engine) runBlockTriggerWithInputs(triggerConfig map[string]interface{},
 		}
 	}
 
-	// If no block number specified, use current block or default
+	// Ensure RPC connection is available
+	if rpcConn == nil {
+		return nil, fmt.Errorf("RPC connection not available for BlockTrigger execution")
+	}
+
+	// If no block number specified, get current block from RPC
 	if blockNumber == 0 {
-		if rpcConn != nil {
-			if currentBlock, err := rpcConn.BlockNumber(context.Background()); err == nil {
-				blockNumber = currentBlock
-			} else {
-				blockNumber = uint64(time.Now().Unix()) // Fallback to timestamp
-			}
-		} else {
-			blockNumber = uint64(time.Now().Unix()) // Mock block number
+		currentBlock, err := rpcConn.BlockNumber(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("failed to get current block number from RPC: %w", err)
 		}
+		blockNumber = currentBlock
 	}
 
-	// Try to get real block data if RPC is available
-	if rpcConn != nil {
-		header, err := rpcConn.HeaderByNumber(context.Background(), big.NewInt(int64(blockNumber)))
-		if err == nil {
-			result := map[string]interface{}{
-				"blockNumber": blockNumber,
-				"blockHash":   header.Hash().Hex(),
-				"timestamp":   header.Time,
-				"parentHash":  header.ParentHash.Hex(),
-				"difficulty":  header.Difficulty.String(),
-				"gasLimit":    header.GasLimit,
-				"gasUsed":     header.GasUsed,
-			}
-
-			if n.logger != nil {
-				n.logger.Info("BlockTrigger executed successfully", "blockNumber", blockNumber, "blockHash", header.Hash().Hex())
-			}
-			return result, nil
-		}
+	// Get real block data from RPC
+	header, err := rpcConn.HeaderByNumber(context.Background(), big.NewInt(int64(blockNumber)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block header for block %d from RPC: %w", blockNumber, err)
 	}
 
-	// Return mock data if RPC unavailable or error
 	result := map[string]interface{}{
 		"blockNumber": blockNumber,
-		"blockHash":   fmt.Sprintf("0x%x", time.Now().UnixNano()),
-		"timestamp":   uint64(time.Now().Unix()),
-		"parentHash":  fmt.Sprintf("0x%x", time.Now().UnixNano()-1000),
-		"difficulty":  "1000000000000000",
-		"gasLimit":    uint64(30000000),
-		"gasUsed":     uint64(21000),
+		"blockHash":   header.Hash().Hex(),
+		"timestamp":   header.Time,
+		"parentHash":  header.ParentHash.Hex(),
+		"difficulty":  header.Difficulty.String(),
+		"gasLimit":    header.GasLimit,
+		"gasUsed":     header.GasUsed,
 	}
 
 	if n.logger != nil {
-		n.logger.Info("BlockTrigger executed successfully (mock data)", "blockNumber", blockNumber)
+		n.logger.Info("BlockTrigger executed successfully", "blockNumber", blockNumber, "blockHash", header.Hash().Hex())
 	}
 	return result, nil
 }
@@ -1720,9 +1705,9 @@ func (n *Engine) runFixedTimeTriggerWithInputs(triggerConfig map[string]interfac
 		}
 	}
 
-	// Default to current time if no epoch specified
+	// Require explicit epoch value - no mock data
 	if epoch == 0 {
-		epoch = uint64(time.Now().Unix())
+		return nil, fmt.Errorf("epoch value is required for FixedTimeTrigger execution")
 	}
 
 	result := map[string]interface{}{
@@ -1764,9 +1749,14 @@ func (n *Engine) runCronTriggerWithInputs(triggerConfig map[string]interface{}, 
 		}
 	}
 
-	// Default to current time if no epoch specified
+	// Require explicit epoch value - no mock data
 	if epoch == 0 {
-		epoch = uint64(time.Now().Unix())
+		return nil, fmt.Errorf("epoch value is required for CronTrigger execution")
+	}
+
+	// Require cron expression
+	if expression == "" {
+		return nil, fmt.Errorf("cron expression is required for CronTrigger execution")
 	}
 
 	result := map[string]interface{}{
@@ -1820,12 +1810,12 @@ func (n *Engine) runEventTriggerWithInputs(triggerConfig map[string]interface{},
 		}
 	}
 
-	// Use defaults if not specified
+	// Require explicit values - no mock data
 	if blockNumber == 0 {
-		blockNumber = uint64(time.Now().Unix())
+		return nil, fmt.Errorf("blockNumber is required for EventTrigger execution")
 	}
 	if txHash == "" {
-		txHash = fmt.Sprintf("0x%x", time.Now().UnixNano())
+		return nil, fmt.Errorf("txHash is required for EventTrigger execution")
 	}
 
 	result := map[string]interface{}{
@@ -1846,7 +1836,6 @@ func (n *Engine) runManualTriggerWithInputs(triggerConfig map[string]interface{}
 	// Manual triggers simply return the input variables as the result
 	result := map[string]interface{}{
 		"triggered": true,
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
 
 	// Include any provided input variables in the result
