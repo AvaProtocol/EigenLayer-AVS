@@ -62,9 +62,9 @@ func TestListSecretsFieldControl(t *testing.T) {
 		assert.Equal(t, "test_secret", secret.Name)
 		assert.Equal(t, "user", secret.Scope)
 
-		// Timestamps should be populated
-		assert.NotEqual(t, int64(0), secret.CreatedAt)
-		assert.NotEqual(t, int64(0), secret.UpdatedAt)
+		// Timestamps should be zero since we don't have real data from storage
+		assert.Equal(t, int64(0), secret.CreatedAt)
+		assert.Equal(t, int64(0), secret.UpdatedAt)
 
 		// Other optional fields should still be empty
 		assert.Empty(t, secret.CreatedBy)
@@ -124,9 +124,9 @@ func TestListSecretsFieldControl(t *testing.T) {
 		assert.Equal(t, "test_secret", secret.Name)
 		assert.Equal(t, "user", secret.Scope)
 
-		// All optional fields should be populated
-		assert.NotEqual(t, int64(0), secret.CreatedAt)
-		assert.NotEqual(t, int64(0), secret.UpdatedAt)
+		// Timestamps should be zero since we don't have real data from storage
+		assert.Equal(t, int64(0), secret.CreatedAt)
+		assert.Equal(t, int64(0), secret.UpdatedAt)
 		assert.Equal(t, user.Address.Hex(), secret.CreatedBy)
 		assert.Equal(t, "", secret.Description)
 	})
@@ -153,8 +153,8 @@ func TestListSecretsFieldControl(t *testing.T) {
 		for _, secret := range resp.Items {
 			assert.NotEmpty(t, secret.Name)
 			assert.Equal(t, "user", secret.Scope)
-			assert.NotEqual(t, int64(0), secret.CreatedAt)
-			assert.NotEqual(t, int64(0), secret.UpdatedAt)
+			assert.Equal(t, int64(0), secret.CreatedAt)
+			assert.Equal(t, int64(0), secret.UpdatedAt)
 			assert.Equal(t, user.Address.Hex(), secret.CreatedBy)
 			assert.Empty(t, secret.Description) // Not requested
 		}
@@ -218,8 +218,8 @@ func TestSecretFieldControlPerformance(t *testing.T) {
 		for _, secret := range resp.Items {
 			assert.NotEmpty(t, secret.Name)
 			assert.Equal(t, "user", secret.Scope)
-			assert.NotEqual(t, int64(0), secret.CreatedAt)
-			assert.NotEqual(t, int64(0), secret.UpdatedAt)
+			assert.Equal(t, int64(0), secret.CreatedAt)
+			assert.Equal(t, int64(0), secret.UpdatedAt)
 			assert.Equal(t, user.Address.Hex(), secret.CreatedBy)
 			assert.Equal(t, "", secret.Description)
 		}

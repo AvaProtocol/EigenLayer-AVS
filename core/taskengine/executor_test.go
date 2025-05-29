@@ -758,7 +758,8 @@ func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
 		ExecutionID: "fixed_time_exec123",
 	})
 
-	// Basic execution checks
+	// Since we removed mock data generation, this test should now succeed
+	// because the VM execution path uses real trigger data from TriggerReason
 	if execution.Id != "fixed_time_exec123" {
 		t.Errorf("expect execution id is fixed_time_exec123 but got: %s", execution.Id)
 	}

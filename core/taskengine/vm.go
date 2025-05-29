@@ -8,7 +8,6 @@ import (
 	"time"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/oklog/ulid/v2"
 
@@ -873,76 +872,20 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 
 		if exists && strings.Contains(taskNode.Name, NodeTypeBlockTrigger) {
 			if v.logger != nil {
-				v.logger.Info("runCustomCode: Detected blockTrigger node", "stepID", stepID, "name", taskNode.Name)
+				v.logger.Error("runCustomCode: BlockTrigger nodes require real blockchain data - mock data not supported", "stepID", stepID, "name", taskNode.Name)
 			}
-			// Handle blockTrigger node specially - create mock block data
-			blockNumber := uint64(time.Now().Unix()) // Default to current timestamp as mock block number
-
-			// Try to get block number from input variables if available
-			v.mu.Lock()
-			if blockNumVar, ok := v.vars["blockNumber"]; ok {
-				if bn, ok := blockNumVar.(float64); ok {
-					blockNumber = uint64(bn)
-				} else if bn, ok := blockNumVar.(uint64); ok {
-					blockNumber = bn
-				} else if bn, ok := blockNumVar.(int64); ok {
-					blockNumber = uint64(bn)
-				}
-			}
-			v.mu.Unlock()
-
-			// Try to get block number from trigger data if available
-			if v.reason != nil && v.reason.BlockNumber != 0 {
-				blockNumber = uint64(v.reason.BlockNumber)
-			}
-
-			// Create mock block data
-			mockBlockData := map[string]interface{}{
-				"blockNumber": blockNumber,
-				"blockHash":   fmt.Sprintf("0x%x", time.Now().UnixNano()), // Mock hash
-				"timestamp":   time.Now().Unix(),
-				"parentHash":  fmt.Sprintf("0x%x", time.Now().UnixNano()-1),
-				"difficulty":  "1000000000000000",
-				"gasLimit":    uint64(30000000),
-				"gasUsed":     uint64(21000),
-			}
-
-			// Convert to structpb.Value for protobuf
-			structData, err := structpb.NewStruct(mockBlockData)
-			if err != nil {
-				return &avsproto.Execution_Step{
-					NodeId:  stepID,
-					Success: false,
-					Error:   fmt.Sprintf("failed to create struct data: %v", err),
-					StartAt: time.Now().UnixMilli(),
-					EndAt:   time.Now().UnixMilli(),
-				}, fmt.Errorf("failed to create struct data: %w", err)
-			}
-
-			// Create successful execution step
-			executionStep := &avsproto.Execution_Step{
+			return &avsproto.Execution_Step{
 				NodeId:  stepID,
-				Success: true,
+				Success: false,
+				Error:   "BlockTrigger nodes require real blockchain data - mock data not supported",
 				StartAt: time.Now().UnixMilli(),
 				EndAt:   time.Now().UnixMilli(),
-				Log:     fmt.Sprintf("Simulated block trigger with block number %d", blockNumber),
-				OutputData: &avsproto.Execution_Step_CustomCode{
-					CustomCode: &avsproto.CustomCodeNode_Output{
-						Data: structpb.NewStructValue(structData),
-					},
-				},
-			}
-
-			v.mu.Lock()
-			executionStep.Inputs = v.collectInputKeysForLog()
-			v.mu.Unlock()
-
-			return executionStep, nil
+			}, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
 		}
 
 		// If Config is nil and it's not a blockTrigger, return an error
 		if v.logger != nil {
-			v.logger.Error("runCustomCode: CustomCodeNode Config is nil and not a blockTrigger", "stepID", stepID)
+			v.logger.Error("runCustomCode: CustomCodeNode Config is nil", "stepID", stepID)
 		}
 		return &avsproto.Execution_Step{
 			NodeId:  stepID,
@@ -1146,47 +1089,15 @@ func (v *VM) GetTaskId() string {
 }
 
 func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[string]interface{}) (*avsproto.Execution_Step, error) {
-	// Special handling for blockTrigger - simulate blockchain data locally
+	// Special handling for blockTrigger - require real blockchain data
 	if node.GetCustomCode() != nil && node.Name == "Single Node Execution: "+NodeTypeBlockTrigger {
-		// Extract block number from input variables if provided
-		blockNumber := uint64(time.Now().Unix()) // Default to current timestamp as mock block number
-		if blockNum, ok := inputVariables["blockNumber"]; ok {
-			if bn, ok := blockNum.(float64); ok {
-				blockNumber = uint64(bn)
-			}
-		}
-
-		// Create mock block data
-		mockBlockData := map[string]interface{}{
-			"blockNumber": blockNumber,
-			"blockHash":   fmt.Sprintf("0x%x", time.Now().UnixNano()), // Mock hash
-			"timestamp":   time.Now().Unix(),
-			"parentHash":  fmt.Sprintf("0x%x", time.Now().UnixNano()-1),
-			"difficulty":  "1000000000000000",
-			"gasLimit":    uint64(30000000),
-			"gasUsed":     uint64(21000),
-		}
-
-		// Convert to structpb.Value for protobuf
-		structData, err := structpb.NewStruct(mockBlockData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create struct data: %w", err)
-		}
-
-		// Create successful execution step
-		executionStep := &avsproto.Execution_Step{
+		return &avsproto.Execution_Step{
 			NodeId:  node.Id,
-			Success: true,
+			Success: false,
+			Error:   "BlockTrigger nodes require real blockchain data - mock data not supported",
 			StartAt: time.Now().UnixMilli(),
 			EndAt:   time.Now().UnixMilli(),
-			OutputData: &avsproto.Execution_Step_CustomCode{
-				CustomCode: &avsproto.CustomCodeNode_Output{
-					Data: structpb.NewStructValue(structData),
-				},
-			},
-		}
-
-		return executionStep, nil
+		}, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
 	}
 
 	// Create a temporary, clean VM for isolated node execution.
