@@ -44,8 +44,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	var logBuilder strings.Builder
 	logBuilder.WriteString(fmt.Sprintf("Executing REST API Node ID: %s at %s\n", stepID, time.Now()))
 
-	// Get configuration from Config message (static configuration) and input variables (runtime)
-	// Input variables take precedence over Config
+	// Extract configuration from the node's Config message
 	var url, method, body string
 	var headers map[string]string
 
@@ -56,8 +55,11 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		body = node.Config.Body
 		headers = node.Config.Headers
 	}
+	if headers == nil {
+		headers = make(map[string]string)
+	}
 
-	// Override with input variables if available (for manual execution)
+	// Extract and merge input variables from VM vars (runtime variables override config)
 	r.vm.mu.Lock()
 	if urlVar, exists := r.vm.vars["url"]; exists {
 		if urlStr, ok := urlVar.(string); ok {
@@ -79,8 +81,12 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 			headers = headersMap
 		}
 	}
+	if headersMapVar, exists := r.vm.vars["headersMap"]; exists {
+		r.parseHeadersMap(headersMapVar, headers)
+	}
 	r.vm.mu.Unlock()
 
+	// Validate required fields
 	if url == "" || method == "" {
 		err := fmt.Errorf("missing required configuration: url and method (provide via Config or input variables)")
 		executionLogStep.Success = false
@@ -98,135 +104,178 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	// Process headers map for template variables
 	processedHeaders := make(map[string]string)
 	for key, value := range headers {
-		processedHeaders[key] = r.vm.preprocessText(value)
+		processedKey := r.vm.preprocessText(key)
+		processedValue := r.vm.preprocessText(value)
+		processedHeaders[processedKey] = processedValue
 	}
 
-	logBuilder.WriteString(fmt.Sprintf("URL: %s, Method: %s\n", url, method))
-	logBuilder.WriteString(fmt.Sprintf("Body: %s\n", body))
+	logBuilder.WriteString(fmt.Sprintf("Making %s request to: %s\n", method, url))
+	if body != "" {
+		logBuilder.WriteString(fmt.Sprintf("Request body: %s\n", body))
+	}
+	if len(processedHeaders) > 0 {
+		logBuilder.WriteString(fmt.Sprintf("Request headers: %v\n", processedHeaders))
+	}
 
-	// Create the HTTP request
-	req := r.HttpClient.R()
+	// Create and execute HTTP request
+	request := r.HttpClient.R()
 
 	// Set headers
 	for key, value := range processedHeaders {
-		req.SetHeader(key, value)
-		logBuilder.WriteString(fmt.Sprintf("Header: %s = %s\n", key, value))
+		request.SetHeader(key, value)
 	}
 
 	// Set body if provided
 	if body != "" {
-		req.SetBody(body)
+		request.SetBody(body)
 	}
 
-	logBuilder.WriteString(fmt.Sprintf("Processed URL: %s\n", url))
-	logBuilder.WriteString(fmt.Sprintf("Method: %s\n", method))
-
-	// Execute the request
-	var resp *resty.Response
+	// Execute request
+	var response *resty.Response
 	var err error
-
 	switch strings.ToUpper(method) {
 	case "GET":
-		resp, err = req.Get(url)
+		response, err = request.Get(url)
 	case "POST":
-		resp, err = req.Post(url)
+		response, err = request.Post(url)
 	case "PUT":
-		resp, err = req.Put(url)
+		response, err = request.Put(url)
 	case "DELETE":
-		resp, err = req.Delete(url)
+		response, err = request.Delete(url)
 	case "PATCH":
-		resp, err = req.Patch(url)
+		response, err = request.Patch(url)
 	case "HEAD":
-		resp, err = req.Head(url)
+		response, err = request.Head(url)
 	case "OPTIONS":
-		resp, err = req.Options(url)
+		response, err = request.Options(url)
 	default:
 		err = fmt.Errorf("unsupported HTTP method: %s", method)
 	}
 
 	if err != nil {
-		errMsg := fmt.Sprintf("HTTP request failed: connection error or timeout")
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
-		executionLogStep.Error = errMsg
+		errorMsg := fmt.Sprintf("HTTP request failed: connection error or timeout: %v", err)
 		executionLogStep.Success = false
-		executionLogStep.Log = logBuilder.String()
+		executionLogStep.Error = errorMsg
 		executionLogStep.EndAt = time.Now().UnixMilli()
-		return executionLogStep, fmt.Errorf(errMsg)
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, fmt.Errorf(errorMsg)
 	}
 
-	logBuilder.WriteString(fmt.Sprintf("Response Status: %s, Code: %d\n", resp.Status(), resp.StatusCode()))
-	logBuilder.WriteString(fmt.Sprintf("Response Body: %s\n", string(resp.Body())))
-
-	// Attempt to parse response body as JSON
-	var responseJSON map[string]interface{}
-	jsonParseError := json.Unmarshal(resp.Body(), &responseJSON)
-
-	var resultForOutput interface{}
-	if jsonParseError == nil {
-		resultForOutput = responseJSON
-		logBuilder.WriteString("Response body successfully parsed as JSON.\n")
-	} else {
-		resultForOutput = string(resp.Body()) // Store as string if not JSON
-		logBuilder.WriteString(fmt.Sprintf("Response body is not valid JSON, stored as string. Parse error: %v\n", jsonParseError))
+	// Check for HTTP error status codes
+	if response.StatusCode() >= 400 {
+		errorMsg := fmt.Sprintf("unexpected HTTP status code: %d", response.StatusCode())
+		executionLogStep.Success = false
+		executionLogStep.Error = errorMsg
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
+		logBuilder.WriteString(fmt.Sprintf("Response body: %s\n", string(response.Body())))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, fmt.Errorf(errorMsg)
 	}
 
-	// Convert http.Header (map[string][]string) to a protobuf-compatible format
-	responseHeaders := make(map[string]interface{})
-	for key, values := range resp.Header() {
-		if len(values) == 1 {
-			responseHeaders[key] = values[0] // Single value as string
-		} else {
-			responseHeaders[key] = values // Multiple values as array
+	logBuilder.WriteString(fmt.Sprintf("Request completed successfully with status: %d\n", response.StatusCode()))
+	logBuilder.WriteString(fmt.Sprintf("Response headers: %v\n", response.Header()))
+
+	// Process response
+	responseData := r.processResponse(response)
+
+	// Create protobuf output
+	anyData, err := structpb.NewValue(responseData)
+	if err != nil {
+		errorMsg := fmt.Sprintf("failed to convert response to protobuf: %v", err)
+		executionLogStep.Success = false
+		executionLogStep.Error = errorMsg
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, fmt.Errorf(errorMsg)
+	}
+
+	anyProto, err := anypb.New(anyData)
+	if err != nil {
+		errorMsg := fmt.Sprintf("failed to create Any proto: %v", err)
+		executionLogStep.Success = false
+		executionLogStep.Error = errorMsg
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, fmt.Errorf(errorMsg)
+	}
+
+	// Set output data
+	restOutput := &avsproto.RestAPINode_Output{
+		Data: anyProto,
+	}
+	executionLogStep.OutputData = &avsproto.Execution_Step_RestApi{
+		RestApi: restOutput,
+	}
+
+	// Set output variable for following nodes (workflow behavior)
+	r.SetOutputVarForStep(stepID, responseData)
+
+	executionLogStep.EndAt = time.Now().UnixMilli()
+	executionLogStep.Log = logBuilder.String()
+
+	if r.vm.logger != nil {
+		r.vm.logger.Info("REST API request executed successfully", "stepID", stepID, "method", method, "url", url, "statusCode", response.StatusCode())
+	}
+
+	return executionLogStep, nil
+}
+
+// parseHeadersMap handles different headersMap formats
+func (r *RestProcessor) parseHeadersMap(headersMapVal interface{}, headers map[string]string) {
+	if headersMap, ok := headersMapVal.([][]string); ok {
+		for _, header := range headersMap {
+			if len(header) == 2 {
+				headers[header[0]] = header[1]
+			}
+		}
+	} else if headersAny, ok := headersMapVal.([]interface{}); ok {
+		for _, headerAny := range headersAny {
+			if headerSlice, ok := headerAny.([]interface{}); ok && len(headerSlice) == 2 {
+				if key, ok := headerSlice[0].(string); ok {
+					if value, ok := headerSlice[1].(string); ok {
+						headers[key] = value
+					}
+				}
+			}
 		}
 	}
+}
 
-	// Store the full response details (status, headers, body) in a structured way if needed,
-	// or just the body as is common.
-	fullResponseOutput := map[string]interface{}{
-		"statusCode": resp.StatusCode(),
-		"status":     resp.Status(),
-		"headers":    responseHeaders, // Converted headers
-		"body":       resultForOutput, // Parsed JSON or raw string
+// processResponse converts HTTP response to structured data
+func (r *RestProcessor) processResponse(response *resty.Response) map[string]interface{} {
+	responseData := make(map[string]interface{})
+
+	// Always include basic response info
+	responseData["statusCode"] = response.StatusCode()
+
+	// Convert http.Header (map[string][]string) to protobuf-compatible format
+	headers := make(map[string]interface{})
+	for key, values := range response.Header() {
+		if len(values) == 1 {
+			headers[key] = values[0] // Single value as string
+		} else {
+			headers[key] = values // Multiple values as array
+		}
+	}
+	responseData["headers"] = headers
+
+	responseBody := response.Body()
+	if len(responseBody) > 0 {
+		// Try to parse as JSON first
+		var jsonData interface{}
+		if err := json.Unmarshal(responseBody, &jsonData); err == nil {
+			responseData["body"] = jsonData
+		} else {
+			// Fallback to string if not valid JSON
+			responseData["body"] = string(responseBody)
+		}
+	} else {
+		responseData["body"] = ""
 	}
 
-	outputProtoStruct, err := structpb.NewValue(fullResponseOutput)
-	if err != nil {
-		errMsg := fmt.Sprintf("error converting REST API response to protobuf Value: %v", err)
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
-		executionLogStep.Error = errMsg
-		executionLogStep.Success = false // Response obtained, but conversion for logging/output failed
-		executionLogStep.Log = logBuilder.String()
-		executionLogStep.EndAt = time.Now().UnixMilli()
-		return executionLogStep, fmt.Errorf(errMsg)
-	}
-
-	anyOutput, err := anypb.New(outputProtoStruct)
-	if err != nil {
-		executionLogStep.Error = fmt.Sprintf("failed to marshal output to Any: %v", err)
-		executionLogStep.Success = false
-		executionLogStep.Log = logBuilder.String()
-		executionLogStep.EndAt = time.Now().UnixMilli()
-		return executionLogStep, fmt.Errorf("failed to marshal output to Any: %w", err)
-	}
-
-	executionLogStep.OutputData = &avsproto.Execution_Step_RestApi{
-		RestApi: &avsproto.RestAPINode_Output{
-			Data: anyOutput,
-		},
-	}
-
-	r.SetOutputVarForStep(stepID, fullResponseOutput) // Store the map[string]interface{} result in VM vars
-
-	if resp.IsError() { // Consider HTTP status >= 400 an error for Success flag
-		errMsg := fmt.Sprintf("unexpected HTTP status code: %d", resp.StatusCode())
-		executionLogStep.Success = false
-		executionLogStep.Error = errMsg
-		executionLogStep.Log = logBuilder.String()
-		executionLogStep.EndAt = time.Now().UnixMilli()
-		return executionLogStep, fmt.Errorf(errMsg)
-	}
-
-	executionLogStep.Log = logBuilder.String()
-	executionLogStep.EndAt = time.Now().UnixMilli()
-	return executionLogStep, nil
+	return responseData
 }
