@@ -1190,8 +1190,48 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 
 	switch nodeType {
 	case NodeTypeRestAPI:
-		// Configuration is now in Input messages, not in the node structure
-		node.TaskType = &avsproto.TaskNode_RestApi{RestApi: &avsproto.RestAPINode{}}
+		// Create REST API node with proper configuration
+		restConfig := &avsproto.RestAPINode_Config{}
+		if url, ok := config["url"].(string); ok {
+			restConfig.Url = url
+		}
+		if method, ok := config["method"].(string); ok {
+			restConfig.Method = method
+		}
+		if body, ok := config["body"].(string); ok {
+			restConfig.Body = body
+		}
+
+		// Handle headers - can be map[string]string or [][]string (headersMap format)
+		if headers, ok := config["headers"].(map[string]string); ok {
+			restConfig.Headers = headers
+		} else if headersMap, ok := config["headersMap"].([][]string); ok {
+			headers := make(map[string]string)
+			for _, header := range headersMap {
+				if len(header) == 2 {
+					headers[header[0]] = header[1]
+				}
+			}
+			restConfig.Headers = headers
+		} else if headersAny, ok := config["headersMap"].([]interface{}); ok {
+			headers := make(map[string]string)
+			for _, headerAny := range headersAny {
+				if headerSlice, ok := headerAny.([]interface{}); ok && len(headerSlice) == 2 {
+					if key, ok := headerSlice[0].(string); ok {
+						if value, ok := headerSlice[1].(string); ok {
+							headers[key] = value
+						}
+					}
+				}
+			}
+			restConfig.Headers = headers
+		}
+
+		node.TaskType = &avsproto.TaskNode_RestApi{
+			RestApi: &avsproto.RestAPINode{
+				Config: restConfig,
+			},
+		}
 	case NodeTypeContractRead:
 		// Configuration is now in Input messages, not in the node structure
 		node.TaskType = &avsproto.TaskNode_ContractRead{ContractRead: &avsproto.ContractReadNode{}}
