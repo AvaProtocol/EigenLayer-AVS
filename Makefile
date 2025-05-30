@@ -115,7 +115,7 @@ dev-build:
     	-ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.revision=$(shell  git rev-parse HEAD)"
 
 ## dev-agg: run aggregator locally with dev build
-dev-agg:
+dev-agg:dev-build
 	./out/ap aggregator
 ## dev-agg: run operator locally with dev build
 dev-op:
