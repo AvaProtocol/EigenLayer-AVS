@@ -1,7 +1,13 @@
 package taskengine
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -10,6 +16,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func createTestEngine(t *testing.T) *Engine {
@@ -97,29 +104,28 @@ func TestRunNodeImmediately_AllNodeTypes(t *testing.T) {
 				config = map[string]interface{}{"blockNumber": 12345}
 			case NodeTypeRestAPI:
 				config = map[string]interface{}{
-					"url": "https://httpbin.org/get",
+					"url":    "https://httpbin.org/get",
+					"method": "GET",
 				}
 			case NodeTypeContractRead:
 				config = map[string]interface{}{
-					"contractAddress": "0x1234567890123456789012345678901234567890",
+					"contract_address": "0x1234567890123456789012345678901234567890",
+					"call_data":        "0x123456",
+					"contract_abi":     "[]",
 				}
 			case NodeTypeCustomCode:
 				config = map[string]interface{}{
-					"code": "return {result: 'test'};",
+					"source": "return {result: 'test'};",
+					"lang":   "javascript",
 				}
 			case NodeTypeBranch:
 				config = map[string]interface{}{
-					"conditions": []map[string]interface{}{
-						{
-							"id":         "condition1",
-							"type":       "if",
-							"expression": "true",
-						},
-					},
+					"expression": "true",
 				}
 			case NodeTypeFilter:
 				config = map[string]interface{}{
 					"expression": "true",
+					"source_id":  "test_source",
 				}
 			}
 
@@ -131,24 +137,43 @@ func TestRunNodeImmediately_AllNodeTypes(t *testing.T) {
 				assert.NoError(t, err)
 				assert.NotNil(t, result)
 			case NodeTypeRestAPI:
-				// REST API might fail due to network, but should not panic
-				// We don't assert success/failure here as it depends on network
-			case NodeTypeContractRead:
-				// Contract read might fail due to network, but should not panic
-				// We don't assert success/failure here as it depends on network
-			case NodeTypeCustomCode, NodeTypeBranch, NodeTypeFilter:
-				// These will fail because CreateNodeFromType doesn't create proper Config
-				// This is expected behavior - the test verifies the method doesn't panic
-				// In real usage, these nodes would have proper Config from the protobuf
+				// REST API should work with proper config
+				// Note: might fail due to network, but should not be a config error
 				if err != nil {
-					// Expected errors for nodes without proper Config
-					t.Logf("Expected error for %s: %v", nodeType, err)
+					t.Logf("REST API error (expected due to network): %v", err)
+					// Should not be a config-related error
+					assert.NotContains(t, err.Error(), "Config is nil")
 				}
-			}
-
-			// Basic validation that we get some result when successful
-			if err == nil {
-				assert.NotNil(t, result)
+			case NodeTypeContractRead:
+				// Contract read might fail due to network/RPC, but should not be a config error
+				if err != nil {
+					t.Logf("Contract read error (expected due to network): %v", err)
+					// Should not be a config-related error
+					assert.NotContains(t, err.Error(), "Config is nil")
+				}
+			case NodeTypeCustomCode:
+				// Should work with proper config
+				if err != nil {
+					t.Logf("Custom code error: %v", err)
+					// Should not be a config-related error
+					assert.NotContains(t, err.Error(), "Config is nil")
+				} else {
+					assert.NotNil(t, result)
+				}
+			case NodeTypeBranch:
+				// Should work with proper config
+				if err != nil {
+					t.Logf("Branch error: %v", err)
+					// Should not be a config-related error
+					assert.NotContains(t, err.Error(), "Config is nil")
+				}
+			case NodeTypeFilter:
+				// Should work with proper config
+				if err != nil {
+					t.Logf("Filter error: %v", err)
+					// Should not be a config-related error
+					assert.NotContains(t, err.Error(), "Config is nil")
+				}
 			}
 		})
 	}
@@ -163,26 +188,27 @@ func TestRunNodeImmediately_AllNodeTypes(t *testing.T) {
 	assert.Contains(t, result, "blockNumber")
 	assert.Equal(t, uint64(12345), result["blockNumber"])
 
-	// Test custom code with proper configuration (this will still fail due to CreateNodeFromType limitations)
+	// Test custom code with proper configuration
 	result, err = engine.RunNodeImmediately(NodeTypeCustomCode, map[string]interface{}{
-		"code": `
+		"source": `
 			return {
 				message: "Hello World",
 				timestamp: Date.now(),
 				input: inputVariables
 			};
 		`,
+		"lang": "javascript",
 	}, map[string]interface{}{
 		"testInput": "test value",
 	})
 
-	// This is expected to fail because CreateNodeFromType doesn't create proper Config
-	// In real usage, the node would have proper Config from protobuf
+	// Should now succeed since CreateNodeFromType creates proper Config
 	if err != nil {
-		t.Logf("Expected error for custom code: %v", err)
-		assert.Contains(t, err.Error(), "Config is nil")
+		t.Logf("Custom code error: %v", err)
+		// Should not be a config-related error anymore
+		assert.NotContains(t, err.Error(), "Config is nil")
 	} else {
-		// If it somehow succeeds, validate the result
+		// Should succeed with proper result
 		assert.NotNil(t, result)
 		if result != nil {
 			if message, ok := result["message"]; ok {
@@ -234,4 +260,844 @@ func TestRunNodeImmediately_TriggerTypes(t *testing.T) {
 		assert.Equal(t, true, result["triggered"])
 		assert.Contains(t, result, "timestamp")
 	})
+}
+
+// Test immediate execution with real-world template processing (Telegram bot example)
+func TestRunNodeImmediately_RestAPIWithTemplates(t *testing.T) {
+	engine := createTestEngine(t)
+
+	// Test REST API with template variables (Telegram bot notification)
+	t.Run("TelegramBotWithTemplates", func(t *testing.T) {
+		// Test variables
+		testChatID := "452247333"
+		testBlockNumber := 18500000
+
+		// Setup global secrets that should be available via apContext.configVars
+		SetMacroSecrets(map[string]string{
+			"ap_notify_bot_token": "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789",
+		})
+
+		// Configuration with template variables
+		config := map[string]interface{}{
+			"url":    "https://api.telegram.org/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown",
+			"method": "POST",
+			"headersMap": [][]string{
+				{"Content-Type", "application/json"},
+			},
+			"body": fmt.Sprintf(`{"chat_id":"%s","text":"test: Workflow is triggered by block: {{trigger.data.block_number}}"}`, testChatID),
+		}
+
+		// Input variables for template processing
+		inputVariables := map[string]interface{}{
+			"workflowContext": map[string]interface{}{
+				"id":     "test-workflow-123",
+				"userId": "test-user-456",
+			},
+			"trigger": map[string]interface{}{
+				"data": map[string]interface{}{
+					"block_number": testBlockNumber,
+				},
+			},
+		}
+
+		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
+
+		if err != nil {
+			t.Logf("REST API error: %v", err)
+			// Should not be a config-related error
+			assert.NotContains(t, err.Error(), "Config is nil")
+			assert.NotContains(t, err.Error(), "missing required configuration")
+
+			// Common errors for invalid bot tokens
+			if assert.Contains(t, err.Error(), "401") ||
+				assert.Contains(t, err.Error(), "unauthorized") ||
+				assert.Contains(t, err.Error(), "Unauthorized") {
+				t.Log("Expected 401 Unauthorized for test bot token")
+			}
+		} else {
+			// If successful (with real bot token), validate Telegram API response structure
+			assert.NotNil(t, result)
+			t.Logf("Telegram API success: %+v", result)
+
+			// result is already a map[string]interface{} from RunNodeImmediately signature
+			// Check for Telegram API response structure
+			// Should have statusCode
+			if statusCode, exists := result["statusCode"]; exists {
+				assert.Equal(t, float64(200), statusCode, "Should be HTTP 200 for successful Telegram API call")
+			}
+
+			// Should have body with Telegram API response
+			if body, exists := result["body"]; exists {
+				bodyMap, ok := body.(map[string]interface{})
+				assert.True(t, ok, "Response body should be parsed as JSON object")
+
+				if bodyMap != nil {
+					// Validate Telegram API response structure
+					// Expected format: {"ok":true,"result":{"message_id":479,"from":{...},"chat":{...},"date":1748635350,"text":"test: Workflow is triggered by block: <block_number>"}}
+
+					// Check "ok" field
+					if okField, exists := bodyMap["ok"]; exists {
+						assert.Equal(t, true, okField, "Telegram API 'ok' field should be true")
+					}
+
+					// Check "result" field
+					if resultField, exists := bodyMap["result"]; exists {
+						resultObj, ok := resultField.(map[string]interface{})
+						assert.True(t, ok, "Telegram API 'result' field should be an object")
+
+						if resultObj != nil {
+							// Validate message_id exists
+							assert.Contains(t, resultObj, "message_id", "Should contain message_id")
+
+							// Validate from field (bot info)
+							if from, exists := resultObj["from"]; exists {
+								fromObj, ok := from.(map[string]interface{})
+								assert.True(t, ok, "from field should be an object")
+								if fromObj != nil {
+									assert.Contains(t, fromObj, "is_bot", "Should contain is_bot field")
+									assert.Equal(t, true, fromObj["is_bot"], "Should be a bot")
+								}
+							}
+
+							// Validate chat field
+							if chat, exists := resultObj["chat"]; exists {
+								chatObj, ok := chat.(map[string]interface{})
+								assert.True(t, ok, "chat field should be an object")
+								if chatObj != nil {
+									assert.Contains(t, chatObj, "id", "Should contain chat id")
+									// The chat_id we sent should match
+									if chatId, exists := chatObj["id"]; exists {
+										// Convert to string for comparison since JSON might parse as float64
+										chatIDFloat, _ := strconv.ParseFloat(testChatID, 64)
+										assert.Equal(t, chatIDFloat, chatId, "Chat ID should match what we sent")
+									}
+								}
+							}
+
+							// Validate the text was processed with template variables
+							if text, exists := resultObj["text"]; exists {
+								textStr, ok := text.(string)
+								assert.True(t, ok, "text field should be a string")
+								if textStr != "" {
+									assert.Contains(t, textStr, "test: Workflow is triggered by block:", "Should contain the message prefix")
+									assert.Contains(t, textStr, strconv.Itoa(testBlockNumber), "Should contain the processed block number from template")
+								}
+							}
+
+							// Validate date field exists
+							assert.Contains(t, resultObj, "date", "Should contain date field")
+						}
+					}
+				}
+			}
+		}
+	})
+
+	// Test validation logic with simulated successful Telegram response
+	t.Run("TelegramResponseValidation", func(t *testing.T) {
+		// Test variables - same as used in TelegramBotWithTemplates
+		testChatID := "452247333"
+		testBlockNumber := 18500000
+		expectedMessage := fmt.Sprintf("test: Workflow is triggered by block: %d", testBlockNumber)
+
+		// Setup global secrets that should be available via apContext.configVars
+		SetMacroSecrets(map[string]string{
+			"ap_notify_bot_token": "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789",
+		})
+
+		// Create a mock HTTP server that returns the Telegram API response
+		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Verify the request is what we expect
+			assert.Equal(t, "POST", r.Method)
+			assert.Contains(t, r.URL.Path, "/sendMessage")
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+			// Read and verify the request body
+			body, err := io.ReadAll(r.Body)
+			assert.NoError(t, err)
+
+			var requestBody map[string]interface{}
+			err = json.Unmarshal(body, &requestBody)
+			assert.NoError(t, err)
+
+			// Verify the chat_id and text with template processing
+			assert.Equal(t, testChatID, requestBody["chat_id"])
+			assert.Equal(t, expectedMessage, requestBody["text"])
+
+			// Return the mock Telegram API response
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(200)
+			response := fmt.Sprintf(`{
+				"ok": true,
+				"result": {
+					"message_id": 479,
+					"from": {
+						"id": 7771086042,
+						"is_bot": true,
+						"first_name": "AvaProtocolBotDev",
+						"username": "AvaProtocolDevBot"
+					},
+					"chat": {
+						"id": %s,
+						"first_name": "Chris | Ava Protocol",
+						"username": "kezjo",
+						"type": "private"
+					},
+					"date": 1748635350,
+					"text": "%s"
+				}
+			}`, testChatID, expectedMessage)
+			w.Write([]byte(response))
+		}))
+
+		defer mockServer.Close()
+
+		// Configuration pointing to our mock server with template variables
+		config := map[string]interface{}{
+			"url":    mockServer.URL + "/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown",
+			"method": "POST",
+			"headersMap": [][]string{
+				{"Content-Type", "application/json"},
+			},
+			"body": fmt.Sprintf(`{"chat_id":"%s","text":"test: Workflow is triggered by block: {{trigger.data.block_number}}"}`, testChatID),
+		}
+
+		// Input variables for template processing
+		inputVariables := map[string]interface{}{
+			"workflowContext": map[string]interface{}{
+				"id":     "test-workflow-123",
+				"userId": "test-user-456",
+			},
+			"trigger": map[string]interface{}{
+				"data": map[string]interface{}{
+					"block_number": testBlockNumber,
+				},
+			},
+		}
+
+		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
+
+		// Should succeed with mock server
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+
+		// Verify the response structure
+		assert.Equal(t, float64(200), result["statusCode"])
+
+		// Check the response body
+		body, exists := result["body"]
+		assert.True(t, exists)
+
+		bodyMap, ok := body.(map[string]interface{})
+		assert.True(t, ok)
+
+		// Verify Telegram API response structure
+		assert.Equal(t, true, bodyMap["ok"])
+
+		resultField, exists := bodyMap["result"]
+		assert.True(t, exists)
+
+		resultObj, ok := resultField.(map[string]interface{})
+		assert.True(t, ok)
+
+		// Check chat ID matches what we sent and what Telegram returned
+		chatField, exists := resultObj["chat"]
+		assert.True(t, exists)
+
+		chatObj, ok := chatField.(map[string]interface{})
+		assert.True(t, ok)
+
+		// Verify chat ID matches (JSON numbers become float64)
+		chatIDFloat, _ := strconv.ParseFloat(testChatID, 64)
+		assert.Equal(t, chatIDFloat, chatObj["id"])
+
+		// Verify the message text has the template variable properly replaced
+		textField, exists := resultObj["text"]
+		assert.True(t, exists)
+
+		textStr, ok := textField.(string)
+		assert.True(t, ok)
+		assert.Equal(t, expectedMessage, textStr)
+	})
+
+	// Test template processing with missing variables
+	t.Run("TemplateWithMissingVariables", func(t *testing.T) {
+		config := map[string]interface{}{
+			"url":    "https://api.example.com/{{missing.variable}}/endpoint",
+			"method": "GET",
+		}
+
+		inputVariables := map[string]interface{}{
+			"present": "value",
+		}
+
+		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
+
+		// Should handle missing template variables gracefully
+		if err != nil {
+			t.Logf("Template processing error: %v", err)
+		} else {
+			assert.NotNil(t, result)
+		}
+	})
+
+	// Test headersMap format processing
+	t.Run("HeadersMapFormat", func(t *testing.T) {
+		config := map[string]interface{}{
+			"url":    "https://httpbin.org/headers",
+			"method": "GET",
+			"headersMap": [][]string{
+				{"X-Custom-Header", "custom-value"},
+				{"Authorization", "Bearer {{token}}"},
+			},
+		}
+
+		inputVariables := map[string]interface{}{
+			"token": "abc123def456",
+		}
+
+		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
+
+		// Network call might fail, but config should be processed correctly
+		if err != nil {
+			t.Logf("REST API error (expected due to network): %v", err)
+			// Should not be config-related errors
+			assert.NotContains(t, err.Error(), "Config is nil")
+			assert.NotContains(t, err.Error(), "missing required configuration")
+		} else {
+			assert.NotNil(t, result)
+			t.Logf("Headers test result: %+v", result)
+		}
+	})
+
+	// Test input variables overriding config
+	t.Run("InputVariablesOverrideConfig", func(t *testing.T) {
+		// Config provides base values
+		config := map[string]interface{}{
+			"url":    "https://httpbin.org/get",
+			"method": "GET",
+			"body":   "original body",
+		}
+
+		// Input variables override config
+		inputVariables := map[string]interface{}{
+			"url":       "https://httpbin.org/post",
+			"method":    "POST",
+			"body":      `{"message": "overridden body", "timestamp": "{{timestamp}}"}`,
+			"timestamp": "2025-05-30T12:00:00Z",
+		}
+
+		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
+
+		// Should use input variables instead of config
+		if err != nil {
+			t.Logf("REST API error (expected due to network): %v", err)
+			assert.NotContains(t, err.Error(), "Config is nil")
+		} else {
+			assert.NotNil(t, result)
+			t.Logf("Override test result: %+v", result)
+		}
+	})
+}
+
+// TestRunNodeImmediately_SecretsAccess verifies that apContext.configVars is properly populated
+func TestRunNodeImmediately_SecretsAccess(t *testing.T) {
+	engine := createTestEngine(t)
+
+	// Setup global secrets
+	SetMacroSecrets(map[string]string{
+		"test_secret_key": "test_secret_value",
+		"api_token":       "abc123def456",
+	})
+
+	// Test custom code that accesses apContext.configVars
+	config := map[string]interface{}{
+		"source": "return { secret: apContext.configVars.test_secret_key, token: apContext.configVars.api_token }",
+		"lang":   "javascript",
+	}
+
+	inputVariables := map[string]interface{}{
+		"workflowContext": map[string]interface{}{
+			"id":     "test-workflow-123",
+			"userId": "test-user-456",
+		},
+	}
+
+	result, err := engine.RunNodeImmediately(NodeTypeCustomCode, config, inputVariables)
+
+	// Should succeed
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	// Verify that secrets are accessible
+	assert.Equal(t, "test_secret_value", result["secret"])
+	assert.Equal(t, "abc123def456", result["token"])
+
+	t.Logf("Secrets access test result: %+v", result)
+}
+
+// TestRunNodeImmediately_SimpleUndefinedVariable tests basic undefined variable replacement
+func TestRunNodeImmediately_SimpleUndefinedVariable(t *testing.T) {
+	engine := createTestEngine(t)
+
+	// Simple test for undefined variable replacement
+	config := map[string]interface{}{
+		"source": `
+		var message = "Hello {{missing.variable}} World";
+		return { message: message };
+		`,
+		"lang": "javascript",
+	}
+
+	inputVariables := map[string]interface{}{
+		// No variables provided, so missing.variable should become "undefined"
+	}
+
+	result, err := engine.RunNodeImmediately(NodeTypeCustomCode, config, inputVariables)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	message, exists := result["message"]
+	assert.True(t, exists)
+	messageStr, ok := message.(string)
+	assert.True(t, ok)
+
+	// Should be "Hello undefined World"
+	assert.Equal(t, "Hello undefined World", messageStr)
+
+	t.Logf("Simple undefined test result: %s", messageStr)
+}
+
+// TestRunNodeImmediately_ClientInputDebug reproduces the exact client input scenario
+func TestRunNodeImmediately_ClientInputDebug(t *testing.T) {
+	engine := createTestEngine(t)
+
+	// Setup global secrets
+	SetMacroSecrets(map[string]string{
+		"ap_notify_bot_token": "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789",
+	})
+
+	// Exact client config
+	config := map[string]interface{}{
+		"url":    "https://api.telegram.org/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown",
+		"method": "POST",
+		"headersMap": [][]string{
+			{"Content-Type", "application/json"},
+		},
+		"body": `{"chat_id":"452247333","text":"Workflow: {{ workflowContext.name }}\\nEOA Address: {{ workflowContext.eoaAddress }}\\nRunner Address: {{ workflowContext.runner }}\\nWorkflow is triggered by block: { { trigger.data.block_number } }"}`,
+	}
+
+	// Exact client input variables
+	inputVariables := map[string]interface{}{
+		"workflowContext": map[string]interface{}{
+			"id":             "74958435-2480-46ed-8113-00001f6736f7",
+			"chainId":        nil,
+			"name":           "May 29, 2025 12:49 PM",
+			"userId":         "01d05279-14d6-4f87-b192-63428692f8ce",
+			"eoaAddress":     "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
+			"runner":         "0xB861aEe06De8694E129b50adA89437a1BF688F69",
+			"status":         "draft",
+			"executionCount": nil,
+		},
+		"trigger": map[string]interface{}{
+			"data": map[string]interface{}{
+				"interval": 7200, // Note: NO block_number - this is the issue!
+			},
+		},
+	}
+
+	result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
+
+	// This should fail because trigger.data.block_number is missing
+	if err != nil {
+		t.Logf("Expected error due to missing block_number: %v", err)
+	} else {
+		t.Logf("Unexpected success result: %+v", result)
+	}
+}
+
+// TestRunNodeImmediately_TemplateProcessingDebug examines template processing in detail
+func TestRunNodeImmediately_TemplateProcessingDebug(t *testing.T) {
+	engine := createTestEngine(t)
+
+	// Setup global secrets
+	SetMacroSecrets(map[string]string{
+		"ap_notify_bot_token": "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789",
+	})
+
+	// Use custom code to debug template processing
+	config := map[string]interface{}{
+		"source": `
+		// Debug template processing
+		var url = "https://api.telegram.org/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown";
+		var body = '{"chat_id":"452247333","text":"Workflow: {{ workflowContext.name }}\\nEOA Address: {{ workflowContext.eoaAddress }}\\nRunner Address: {{ workflowContext.runner }}\\nWorkflow is triggered by block: { { trigger.data.block_number } }"}';
+		
+		return {
+			url_template: url,
+			body_template: body,
+			trigger_data: trigger ? trigger.data : "trigger is undefined",
+			block_number: trigger && trigger.data ? trigger.data.block_number : "block_number is undefined",
+			workflowContext_name: workflowContext ? workflowContext.name : "workflowContext is undefined",
+			available_vars: Object.keys(this).filter(key => !key.startsWith('__'))
+		};
+		`,
+		"lang": "javascript",
+	}
+
+	// Same input variables as client
+	inputVariables := map[string]interface{}{
+		"workflowContext": map[string]interface{}{
+			"id":         "74958435-2480-46ed-8113-00001f6736f7",
+			"name":       "May 29, 2025 12:49 PM",
+			"userId":     "01d05279-14d6-4f87-b192-63428692f8ce",
+			"eoaAddress": "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
+			"runner":     "0xB861aEe06De8694E129b50adA89437a1BF688F69",
+		},
+		"trigger": map[string]interface{}{
+			"data": map[string]interface{}{
+				"interval": 7200, // Missing block_number
+			},
+		},
+	}
+
+	result, err := engine.RunNodeImmediately(NodeTypeCustomCode, config, inputVariables)
+
+	if err != nil {
+		t.Logf("Template processing debug error: %v", err)
+	} else {
+		t.Logf("Template processing debug result: %+v", result)
+	}
+}
+
+// TestRunNodeImmediately_MissingTemplateVariable demonstrates the template variable issue
+func TestRunNodeImmediately_MissingTemplateVariable(t *testing.T) {
+	engine := createTestEngine(t)
+
+	// Setup global secrets
+	SetMacroSecrets(map[string]string{
+		"ap_notify_bot_token": "test_token",
+	})
+
+	t.Run("BrokenTemplate", func(t *testing.T) {
+		// This mimics the client's broken template with missing variable
+		config := map[string]interface{}{
+			"source": `
+			// Simulate template processing
+			var body = '{"chat_id":"452247333","text":"Workflow is triggered by block: {{trigger.data.block_number}}"}';
+			return {
+				body_before: body,
+				body_after: body, // This will process templates
+				trigger_data: trigger ? trigger.data : null,
+				block_number_exists: trigger && trigger.data && trigger.data.block_number !== undefined
+			};
+			`,
+			"lang": "javascript",
+		}
+
+		inputVariables := map[string]interface{}{
+			"trigger": map[string]interface{}{
+				"data": map[string]interface{}{
+					"interval": 7200, // Missing block_number!
+				},
+			},
+		}
+
+		result, err := engine.RunNodeImmediately(NodeTypeCustomCode, config, inputVariables)
+		assert.NoError(t, err)
+		t.Logf("Broken template result: %+v", result)
+	})
+
+	t.Run("FixedTemplate", func(t *testing.T) {
+		// This shows the proper way to handle missing variables
+		config := map[string]interface{}{
+			"source": `
+			// Use conditional logic to handle missing variables
+			var blockNumber = (trigger && trigger.data && trigger.data.block_number) ? trigger.data.block_number : "N/A";
+			var body = JSON.stringify({
+				chat_id: "452247333", 
+				text: "Workflow is triggered by block: " + blockNumber
+			});
+			return {
+				body: body,
+				block_number: blockNumber,
+				is_valid_json: true
+			};
+			`,
+			"lang": "javascript",
+		}
+
+		inputVariables := map[string]interface{}{
+			"trigger": map[string]interface{}{
+				"data": map[string]interface{}{
+					"interval": 7200, // Still missing block_number, but handled gracefully
+				},
+			},
+		}
+
+		result, err := engine.RunNodeImmediately(NodeTypeCustomCode, config, inputVariables)
+		assert.NoError(t, err)
+		t.Logf("Fixed template result: %+v", result)
+
+		// Verify the JSON is valid
+		bodyStr, ok := result["body"].(string)
+		assert.True(t, ok)
+		var jsonTest interface{}
+		err = json.Unmarshal([]byte(bodyStr), &jsonTest)
+		assert.NoError(t, err, "Generated JSON should be valid")
+	})
+}
+
+// TestRunNodeImmediately_UndefinedVariableReplacement tests that missing template variables are replaced with "undefined"
+func TestRunNodeImmediately_UndefinedVariableReplacement(t *testing.T) {
+	engine := createTestEngine(t)
+
+	// Setup global secrets
+	SetMacroSecrets(map[string]string{
+		"ap_notify_bot_token": "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789",
+	})
+
+	t.Run("TelegramWithMissingBlockNumber", func(t *testing.T) {
+		// Create a mock server to capture what gets sent to Telegram
+		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Read the request body to verify the template processing
+			body, err := io.ReadAll(r.Body)
+			assert.NoError(t, err)
+
+			// Log the received body for debugging
+			t.Logf("Received request body: %s", string(body))
+
+			// Parse the JSON to verify it's valid
+			var requestData map[string]interface{}
+			err = json.Unmarshal(body, &requestData)
+			assert.NoError(t, err, "Request body should be valid JSON")
+
+			// Verify the message contains "undefined" where block_number was missing
+			text, exists := requestData["text"]
+			assert.True(t, exists)
+			textStr, ok := text.(string)
+			assert.True(t, ok)
+			assert.Contains(t, textStr, "undefined", "Missing block_number should be replaced with 'undefined'")
+
+			// Verify other template variables were processed correctly
+			assert.Contains(t, textStr, "May 29, 2025 12:49 PM")                      // workflowContext.name
+			assert.Contains(t, textStr, "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9") // workflowContext.eoaAddress
+			assert.Contains(t, textStr, "0xB861aEe06De8694E129b50adA89437a1BF688F69") // workflowContext.runner
+
+			// Return a successful response
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(200)
+			fmt.Fprint(w, `{
+				"ok": true,
+				"result": {
+					"message_id": 123,
+					"chat": {"id": 452247333, "type": "private"},
+					"date": 1640995200,
+					"text": "`+textStr+`"
+				}
+			}`)
+		}))
+		defer mockServer.Close()
+
+		// Exact configuration from client input (with the missing block_number issue)
+		config := map[string]interface{}{
+			"url":    mockServer.URL + "/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown",
+			"method": "POST",
+			"headersMap": [][]string{
+				{"Content-Type", "application/json"},
+			},
+			"body": `{"chat_id":"452247333","text":"Workflow: {{workflowContext.name}}\nEOA Address: {{workflowContext.eoaAddress}}\nRunner Address: {{workflowContext.runner}}\nWorkflow is triggered by block: {{trigger.data.block_number}}"}`,
+		}
+
+		// Client input variables (missing block_number in trigger.data)
+		inputVariables := map[string]interface{}{
+			"workflowContext": map[string]interface{}{
+				"id":         "74958435-2480-46ed-8113-00001f6736f7",
+				"name":       "May 29, 2025 12:49 PM",
+				"userId":     "01d05279-14d6-4f87-b192-63428692f8ce",
+				"eoaAddress": "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
+				"runner":     "0xB861aEe06De8694E129b50adA89437a1BF688F69",
+			},
+			"trigger": map[string]interface{}{
+				"data": map[string]interface{}{
+					"interval": 7200, // Note: block_number is missing!
+				},
+			},
+		}
+
+		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
+
+		// Should succeed now that JSON is valid
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+
+		// Verify the response structure
+		assert.Equal(t, float64(200), result["statusCode"])
+
+		// Check the response body contains our message with "undefined"
+		body, exists := result["body"]
+		assert.True(t, exists)
+		bodyMap, ok := body.(map[string]interface{})
+		assert.True(t, ok)
+
+		resultField, exists := bodyMap["result"]
+		assert.True(t, exists)
+		resultObj, ok := resultField.(map[string]interface{})
+		assert.True(t, ok)
+
+		text, exists := resultObj["text"]
+		assert.True(t, exists)
+		textStr, ok := text.(string)
+		assert.True(t, ok)
+
+		// Verify the final message contains "undefined" for the missing block_number
+		assert.Contains(t, textStr, "triggered by block: undefined")
+
+		t.Logf("Final message text: %s", textStr)
+	})
+
+	t.Run("MultipleUndefinedVariables", func(t *testing.T) {
+		// Test multiple missing variables in different parts of the template
+		config := map[string]interface{}{
+			"source": `
+			var template = "User: {{user.name}}, Block: {{block.number}}, Status: {{status.active}}";
+			return { 
+				processed_template: template,
+				user_defined: typeof user !== 'undefined',
+				block_defined: typeof block !== 'undefined',
+				status_defined: typeof status !== 'undefined'
+			};
+			`,
+			"lang": "javascript",
+		}
+
+		// Provide no variables, so all should become "undefined"
+		inputVariables := map[string]interface{}{}
+
+		result, err := engine.RunNodeImmediately(NodeTypeCustomCode, config, inputVariables)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+
+		// Check that all missing variables were replaced with "undefined"
+		processedTemplate, exists := result["processed_template"]
+		assert.True(t, exists)
+		templateStr, ok := processedTemplate.(string)
+		assert.True(t, ok)
+
+		// Should contain "undefined" for each missing variable
+		expectedTemplate := "User: undefined, Block: undefined, Status: undefined"
+		assert.Equal(t, expectedTemplate, templateStr)
+
+		t.Logf("Processed template with undefined variables: %s", templateStr)
+	})
+}
+
+func TestRunNodeImmediately_MalformedTemplateDetection(t *testing.T) {
+	engine := createTestEngine(t)
+
+	// Set up macro secrets for apContext
+	SetMacroSecrets(map[string]string{
+		"ap_notify_bot_token": "7771086042:AAG7UvbAyN8_8OrS-MjRfwz8WpWDKf4Yw8U",
+	})
+
+	// Create REST API node config with malformed template syntax (spaces in curly braces)
+	config := map[string]interface{}{
+		"url":    "https://api.telegram.org/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown",
+		"method": "POST",
+		"headers": map[string]string{
+			"Content-Type": "application/json",
+		},
+		"body": `{
+			"chat_id": "452247333",
+			"text": "Workflow: {{workflowContext.name}}\nEOA Address: {{workflowContext.eoaAddress}}\nRunner Address: {{workflowContext.runner}}\nWorkflow is triggered by block: { { trigger.data.block_number } }"
+		}`,
+	}
+
+	inputVariables := map[string]interface{}{
+		"workflowContext": map[string]interface{}{
+			"name":       "May 29, 2025 12:49 PM",
+			"eoaAddress": "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
+			"runner":     "0xB861aEe06De8694E129b50adA89437a1BF688F69",
+		},
+		"trigger": map[string]interface{}{
+			"data": map[string]interface{}{
+				"interval": 7200,
+				// Note: block_number is intentionally missing to test the malformed template detection
+			},
+		},
+	}
+
+	// Execute the node - this should fail due to malformed template syntax
+	result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
+
+	// Verify that it failed due to malformed template syntax, not due to HTTP request
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "malformed template in request body")
+	require.Contains(t, err.Error(), "{ { trigger.data.block_number } }")
+	require.Contains(t, err.Error(), "Use '{{trigger.data.block_number}}' instead")
+
+	// Result should be nil or empty on template validation error
+	if result != nil {
+		t.Logf("Result on malformed template error: %+v", result)
+	}
+
+	t.Logf("Success: Malformed template syntax was correctly detected and prevented REST API execution")
+	t.Logf("Error message: %s", err.Error())
+}
+
+func TestRunNodeImmediately_ValidTemplateAfterFix(t *testing.T) {
+	engine := createTestEngine(t)
+
+	// Set up macro secrets for apContext
+	SetMacroSecrets(map[string]string{
+		"ap_notify_bot_token": "7771086042:AAG7UvbAyN8_8OrS-MjRfwz8WpWDKf4Yw8U",
+	})
+
+	// Create REST API node config with correct template syntax
+	config := map[string]interface{}{
+		"url":    "https://api.telegram.org/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown",
+		"method": "POST",
+		"headers": map[string]string{
+			"Content-Type": "application/json",
+		},
+		"body": `{
+			"chat_id": "452247333",
+			"text": "Workflow: {{workflowContext.name}}\nEOA Address: {{workflowContext.eoaAddress}}\nRunner Address: {{workflowContext.runner}}\nWorkflow is triggered by block: {{trigger.data.block_number}}"
+		}`,
+	}
+
+	inputVariables := map[string]interface{}{
+		"workflowContext": map[string]interface{}{
+			"name":       "May 29, 2025 12:49 PM",
+			"eoaAddress": "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
+			"runner":     "0xB861aEe06De8694E129b50adA89437a1BF688F69",
+		},
+		"trigger": map[string]interface{}{
+			"data": map[string]interface{}{
+				"interval": 7200,
+				// Note: block_number is still missing, but template syntax is correct
+			},
+		},
+	}
+
+	// Execute the node - this should now get past template validation
+	result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
+
+	// Log what actually happened
+	if err != nil {
+		t.Logf("Request failed with error: %v", err)
+		// Verify it's NOT a malformed template error
+		require.NotContains(t, err.Error(), "malformed template")
+
+		// Check if it's the expected 400 error
+		if strings.Contains(err.Error(), "unexpected HTTP status code: 400") {
+			t.Logf("Success: Valid template syntax passed validation but failed due to Telegram API response")
+		} else {
+			t.Logf("Unexpected error type: %s", err.Error())
+		}
+	} else {
+		t.Logf("Request succeeded unexpectedly: %+v", result)
+		t.Logf("This means Telegram accepted the message with 'undefined' in it")
+	}
 }

@@ -98,7 +98,14 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 
 	// Preprocess URL, body, and headers for template variables
+	if r.vm.logger != nil {
+		r.vm.logger.Debug("REST API URL before template processing", "url", url)
+	}
 	url = r.vm.preprocessText(url)
+	if r.vm.logger != nil {
+		r.vm.logger.Debug("REST API URL after template processing", "url", url)
+	}
+
 	body = r.vm.preprocessText(body)
 
 	// Process headers map for template variables
@@ -109,12 +116,101 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		processedHeaders[processedKey] = processedValue
 	}
 
+	// Validate template format in URL, body, and headers for malformed syntax
+	if err := r.vm.validateTemplateFormat(url); err != nil {
+		errorMsg := fmt.Sprintf("malformed template in URL: %v", err)
+		if r.vm.logger != nil {
+			r.vm.logger.Error("REST API URL contains malformed template syntax", "url", url, "error", err)
+		}
+		executionLogStep.Success = false
+		executionLogStep.Error = errorMsg
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, fmt.Errorf(errorMsg)
+	}
+
+	if err := r.vm.validateTemplateFormat(body); err != nil {
+		errorMsg := fmt.Sprintf("malformed template in request body: %v", err)
+		if r.vm.logger != nil {
+			r.vm.logger.Error("REST API request body contains malformed template syntax", "body", body, "error", err)
+		}
+		executionLogStep.Success = false
+		executionLogStep.Error = errorMsg
+		executionLogStep.EndAt = time.Now().UnixMilli()
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, fmt.Errorf(errorMsg)
+	}
+
+	for key, value := range processedHeaders {
+		if err := r.vm.validateTemplateFormat(key); err != nil {
+			errorMsg := fmt.Sprintf("malformed template in header key '%s': %v", key, err)
+			if r.vm.logger != nil {
+				r.vm.logger.Error("REST API header key contains malformed template syntax", "key", key, "error", err)
+			}
+			executionLogStep.Success = false
+			executionLogStep.Error = errorMsg
+			executionLogStep.EndAt = time.Now().UnixMilli()
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
+			executionLogStep.Log = logBuilder.String()
+			return executionLogStep, fmt.Errorf(errorMsg)
+		}
+		if err := r.vm.validateTemplateFormat(value); err != nil {
+			errorMsg := fmt.Sprintf("malformed template in header value for '%s': %v", key, err)
+			if r.vm.logger != nil {
+				r.vm.logger.Error("REST API header value contains malformed template syntax", "key", key, "value", value, "error", err)
+			}
+			executionLogStep.Success = false
+			executionLogStep.Error = errorMsg
+			executionLogStep.EndAt = time.Now().UnixMilli()
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
+			executionLogStep.Log = logBuilder.String()
+			return executionLogStep, fmt.Errorf(errorMsg)
+		}
+	}
+
 	logBuilder.WriteString(fmt.Sprintf("Making %s request to: %s\n", method, url))
 	if body != "" {
 		logBuilder.WriteString(fmt.Sprintf("Request body: %s\n", body))
 	}
 	if len(processedHeaders) > 0 {
 		logBuilder.WriteString(fmt.Sprintf("Request headers: %v\n", processedHeaders))
+	}
+
+	// Add debug logging for processed request details
+	if r.vm.logger != nil {
+		r.vm.logger.Debug("REST API request details",
+			"method", method,
+			"url", url,
+			"body", body,
+			"headers", processedHeaders)
+	}
+
+	// Validate JSON body if content-type is application/json
+	if body != "" {
+		for key, value := range processedHeaders {
+			if strings.ToLower(key) == "content-type" && strings.Contains(strings.ToLower(value), "application/json") {
+				var jsonTest interface{}
+				if err := json.Unmarshal([]byte(body), &jsonTest); err != nil {
+					errorMsg := fmt.Sprintf("invalid JSON in request body: %v", err)
+					if r.vm.logger != nil {
+						r.vm.logger.Error("REST API request body is not valid JSON",
+							"body", body,
+							"jsonError", err,
+							"url", url)
+					}
+					executionLogStep.Success = false
+					executionLogStep.Error = errorMsg
+					executionLogStep.EndAt = time.Now().UnixMilli()
+					logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
+					logBuilder.WriteString(fmt.Sprintf("Request body: %s\n", body))
+					executionLogStep.Log = logBuilder.String()
+					return executionLogStep, fmt.Errorf(errorMsg)
+				}
+				break
+			}
+		}
 	}
 
 	// Create and execute HTTP request
@@ -164,12 +260,26 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	// Check for HTTP error status codes
 	if response.StatusCode() >= 400 {
+		responseBody := string(response.Body())
 		errorMsg := fmt.Sprintf("unexpected HTTP status code: %d", response.StatusCode())
+
+		// Add detailed error logging
+		if r.vm.logger != nil {
+			r.vm.logger.Error("REST API request failed with error status code",
+				"statusCode", response.StatusCode(),
+				"method", method,
+				"url", url,
+				"requestBody", body,
+				"responseBody", responseBody,
+				"responseHeaders", response.Header())
+		}
+
 		executionLogStep.Success = false
 		executionLogStep.Error = errorMsg
 		executionLogStep.EndAt = time.Now().UnixMilli()
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
-		logBuilder.WriteString(fmt.Sprintf("Response body: %s\n", string(response.Body())))
+		logBuilder.WriteString(fmt.Sprintf("Response body: %s\n", responseBody))
+		logBuilder.WriteString(fmt.Sprintf("Response headers: %v\n", response.Header()))
 		executionLogStep.Log = logBuilder.String()
 		return executionLogStep, fmt.Errorf(errorMsg)
 	}

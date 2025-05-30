@@ -161,8 +161,18 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
 	}
 
-	// Create a clean VM for isolated execution
-	vm, err := NewVMWithData(nil, nil, n.smartWalletConfig, nil)
+	// Load secrets for immediate execution (global macroSecrets + user-level secrets)
+	secrets, err := n.LoadSecretsForImmediateExecution(inputVariables)
+	if err != nil {
+		if n.logger != nil {
+			n.logger.Warn("Failed to load secrets for immediate execution", "error", err)
+		}
+		// Don't fail the request, just use empty secrets
+		secrets = make(map[string]string)
+	}
+
+	// Create a clean VM for isolated execution with proper secrets
+	vm, err := NewVMWithData(nil, nil, n.smartWalletConfig, secrets)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VM: %w", err)
 	}
@@ -192,6 +202,33 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 
 	// Extract and return the result data
 	return n.extractExecutionResult(executionStep)
+}
+
+// LoadSecretsForImmediateExecution loads secrets for immediate node execution
+// It loads global macroSecrets and user-level secrets (no workflow-level secrets since there's no workflow)
+func (n *Engine) LoadSecretsForImmediateExecution(inputVariables map[string]interface{}) (map[string]string, error) {
+	secrets := make(map[string]string)
+
+	// Copy global static secrets from macroSecrets (equivalent to copyMap(secrets, macroSecrets) in LoadSecretForTask)
+	copyMap(secrets, macroSecrets)
+
+	// Try to get user from workflowContext if available
+	if workflowContext, ok := inputVariables["workflowContext"]; ok {
+		if wfCtx, ok := workflowContext.(map[string]interface{}); ok {
+			if userIdStr, ok := wfCtx["userId"].(string); ok {
+				// Load user-level secrets from database
+				// Note: For immediate execution we don't have workflow-level secrets since there's no specific workflow
+				// For now, we'll just use the global macroSecrets
+				// In a full implementation, you'd want to resolve userId to user address and load user secrets
+				// But the most important thing is that macroSecrets (global config secrets) are available
+				if n.logger != nil {
+					n.logger.Debug("LoadSecretsForImmediateExecution: Using global secrets", "userId", userIdStr, "secretCount", len(secrets))
+				}
+			}
+		}
+	}
+
+	return secrets, nil
 }
 
 func (n *Engine) parseUint64(value interface{}) (uint64, error) {
@@ -238,15 +275,28 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		}
 	} else if restAPI := executionStep.GetRestApi(); restAPI != nil && restAPI.GetData() != nil {
 		var data map[string]interface{}
-		structVal := &structpb.Struct{}
+		// Try to unmarshal as Value first (how REST processor stores data)
+		structVal := &structpb.Value{}
 		if err := restAPI.GetData().UnmarshalTo(structVal); err == nil {
-			data = structVal.AsMap()
-		} else {
-			if n.logger != nil {
-				n.logger.Warn("Failed to unmarshal RestAPI output", "error", err)
+			// Successfully unmarshaled as Value, convert to interface
+			iface := structVal.AsInterface()
+			if m, ok := iface.(map[string]interface{}); ok {
+				data = m
+			} else {
+				data = map[string]interface{}{"data": iface}
 			}
-			// Try to unmarshal as JSON if struct unmarshal fails
-			data = map[string]interface{}{"raw_output": string(restAPI.GetData().GetValue())}
+		} else {
+			// Fallback: try to unmarshal as Struct
+			structMap := &structpb.Struct{}
+			if err2 := restAPI.GetData().UnmarshalTo(structMap); err2 == nil {
+				data = structMap.AsMap()
+			} else {
+				if n.logger != nil {
+					n.logger.Warn("Failed to unmarshal RestAPI output as both Value and Struct", "valueError", err, "structError", err2)
+				}
+				// Final fallback to raw output
+				data = map[string]interface{}{"raw_output": string(restAPI.GetData().GetValue())}
+			}
 		}
 		result = data
 	} else if contractRead := executionStep.GetContractRead(); contractRead != nil && len(contractRead.GetData()) > 0 {

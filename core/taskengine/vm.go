@@ -1020,7 +1020,12 @@ func (v *VM) preprocessText(text string) string {
 			v.logger.Debug("evaluating pre-processor script", "task_id", v.GetTaskId(), "script", script, "result", evaluated, "error", err)
 		}
 		if err != nil {
-			result = result[:start] + result[end+2:] // Remove invalid expression
+			// Replace with "undefined" instead of removing the expression
+			// This helps maintain valid JSON structure and makes debugging easier
+			if v.logger != nil {
+				v.logger.Debug("template variable evaluation failed, replacing with 'undefined'", "expression", expr, "error", err)
+			}
+			result = result[:start] + "undefined" + result[end+2:]
 			continue
 		}
 
@@ -1038,6 +1043,65 @@ func (v *VM) preprocessText(text string) string {
 		result = result[:start] + replacement + result[end+2:]
 	}
 	return result
+}
+
+// validateTemplateFormat checks for malformed template syntax and returns an error if found
+func (v *VM) validateTemplateFormat(text string) error {
+	// Check for malformed template syntax like { { variable } }
+	// Use a more specific regex that looks for template-like patterns, not JSON
+	// Match: { + whitespace + variable-like-content + whitespace + }
+	// But exclude JSON patterns by ensuring the content looks like a variable reference
+	malformedTemplateRegex := regexp.MustCompile(`\{\s+([a-zA-Z_$][a-zA-Z0-9_$]*(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*)*)\s+\}`)
+	matches := malformedTemplateRegex.FindAllStringSubmatch(text, -1)
+
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		content := strings.TrimSpace(match[1])
+
+		// Double-check if the content looks like a variable reference
+		if v.looksLikeVariableReference(content) {
+			return fmt.Errorf("malformed template syntax detected: '{ { %s } }'. Use '{{%s}}' instead", content, content)
+		}
+	}
+
+	return nil
+}
+
+// looksLikeVariableReference determines if a string looks like it's trying to reference a variable
+func (v *VM) looksLikeVariableReference(content string) bool {
+	// Common patterns that indicate variable references:
+
+	// 1. Contains dots (property access like trigger.data.block_number)
+	if strings.Contains(content, ".") {
+		return true
+	}
+
+	// 2. Starts with common variable names
+	commonVarPrefixes := []string{
+		"trigger",
+		"workflowContext",
+		"apContext",
+		"taskContext",
+		"env",
+		"secrets",
+	}
+
+	for _, prefix := range commonVarPrefixes {
+		if strings.HasPrefix(content, prefix) {
+			return true
+		}
+	}
+
+	// 3. Follows JavaScript variable naming pattern (letters, numbers, underscore, $)
+	// and doesn't look like regular text (no spaces, not just a single word)
+	jsVarPattern := regexp.MustCompile(`^[a-zA-Z_$][a-zA-Z0-9_$]*(\.[a-zA-Z_$][a-zA-Z0-9_$]*)*$`)
+	if jsVarPattern.MatchString(content) && len(content) > 3 {
+		return true
+	}
+
+	return false
 }
 
 func (v *VM) collectInputKeysForLog() []string {
@@ -1233,25 +1297,99 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			},
 		}
 	case NodeTypeContractRead:
-		// Configuration is now in Input messages, not in the node structure
-		node.TaskType = &avsproto.TaskNode_ContractRead{ContractRead: &avsproto.ContractReadNode{}}
+		// Create contract read node with proper configuration
+		contractConfig := &avsproto.ContractReadNode_Config{}
+		if address, ok := config["contract_address"].(string); ok {
+			contractConfig.ContractAddress = address
+		}
+		if abi, ok := config["contract_abi"].(string); ok {
+			contractConfig.ContractAbi = abi
+		}
+		if callData, ok := config["call_data"].(string); ok {
+			contractConfig.CallData = callData
+		}
+
+		node.TaskType = &avsproto.TaskNode_ContractRead{
+			ContractRead: &avsproto.ContractReadNode{
+				Config: contractConfig,
+			},
+		}
 	case NodeTypeCustomCode:
-		// Configuration is now in Input messages, not in the node structure
-		node.TaskType = &avsproto.TaskNode_CustomCode{CustomCode: &avsproto.CustomCodeNode{}}
+		// Create custom code node with proper configuration
+		customConfig := &avsproto.CustomCodeNode_Config{}
+		if source, ok := config["source"].(string); ok {
+			customConfig.Source = source
+		}
+		if lang, ok := config["lang"].(string); ok {
+			switch strings.ToLower(lang) {
+			case "javascript", "js":
+				customConfig.Lang = avsproto.Lang_JavaScript
+			default:
+				customConfig.Lang = avsproto.Lang_JavaScript // Default to JavaScript
+			}
+		} else {
+			customConfig.Lang = avsproto.Lang_JavaScript // Default to JavaScript
+		}
+
+		node.TaskType = &avsproto.TaskNode_CustomCode{
+			CustomCode: &avsproto.CustomCodeNode{
+				Config: customConfig,
+			},
+		}
 	case NodeTypeBranch:
-		// Configuration is now in Input messages, not in the node structure
-		node.TaskType = &avsproto.TaskNode_Branch{Branch: &avsproto.BranchNode{}}
+		// Create branch node with proper configuration
+		branchConfig := &avsproto.BranchNode_Config{}
+		// BranchNode uses repeated Condition, which is more complex
+		// For immediate execution, we'll support a simple expression field
+		if expression, ok := config["expression"].(string); ok {
+			condition := &avsproto.BranchNode_Condition{
+				Id:         "condition_1",
+				Type:       "expression",
+				Expression: expression,
+			}
+			branchConfig.Conditions = []*avsproto.BranchNode_Condition{condition}
+		}
+
+		node.TaskType = &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Config: branchConfig,
+			},
+		}
 	case NodeTypeFilter:
-		// Configuration is now in Input messages, not in the node structure
-		node.TaskType = &avsproto.TaskNode_Filter{Filter: &avsproto.FilterNode{}}
+		// Create filter node with proper configuration
+		filterConfig := &avsproto.FilterNode_Config{}
+		if expression, ok := config["expression"].(string); ok {
+			filterConfig.Expression = expression
+		}
+		if sourceId, ok := config["source_id"].(string); ok {
+			filterConfig.SourceId = sourceId
+		}
+
+		node.TaskType = &avsproto.TaskNode_Filter{
+			Filter: &avsproto.FilterNode{
+				Config: filterConfig,
+			},
+		}
 	case NodeTypeBlockTrigger:
 		// Create a custom code node that will be handled specially by RunNodeWithInputs
 		node.TaskType = &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{},
 		}
 	case NodeTypeETHTransfer:
-		// Configuration is now in Input messages, not in the node structure
-		node.TaskType = &avsproto.TaskNode_EthTransfer{EthTransfer: &avsproto.ETHTransferNode{}}
+		// Create ETH transfer node with proper configuration
+		ethConfig := &avsproto.ETHTransferNode_Config{}
+		if destination, ok := config["destination"].(string); ok {
+			ethConfig.Destination = destination
+		}
+		if amount, ok := config["amount"].(string); ok {
+			ethConfig.Amount = amount
+		}
+
+		node.TaskType = &avsproto.TaskNode_EthTransfer{
+			EthTransfer: &avsproto.ETHTransferNode{
+				Config: ethConfig,
+			},
+		}
 	default:
 		return nil, fmt.Errorf("unsupported node type for CreateNodeFromType: %s", nodeType)
 	}
