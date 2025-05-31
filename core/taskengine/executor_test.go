@@ -127,7 +127,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 		t.Errorf("step id doesn't match, expect notification1 but got: %s", execution.Steps[1].NodeId)
 	}
 
-	outputData := gow.AnyToMap(execution.Steps[1].GetRestApi().Data)
+	outputData := gow.ValueToMap(execution.Steps[1].GetRestApi().Data)
 	bodyData := outputData["body"].(map[string]interface{})
 	if bodyData["message"].(string) != "I'm hit" {
 		t.Errorf("expect message to be 'I'm hit' but got %s", bodyData["message"])

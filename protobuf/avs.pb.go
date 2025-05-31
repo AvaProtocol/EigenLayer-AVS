@@ -5740,8 +5740,9 @@ func (x *RestAPINode_Config) GetMethod() string {
 }
 
 type RestAPINode_Output struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Data          *anypb.Any             `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Changed from google.protobuf.Any to google.protobuf.Value for better JavaScript native type support
+	Data          *structpb.Value `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5776,7 +5777,7 @@ func (*RestAPINode_Output) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{10, 1}
 }
 
-func (x *RestAPINode_Output) GetData() *anypb.Any {
+func (x *RestAPINode_Output) GetData() *structpb.Value {
 	if x != nil {
 		return x.Data
 	}
@@ -7020,7 +7021,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a2\n" +
 	"\x06Output\x12(\n" +
-	"\x04data\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\x04data\"\xc5\x02\n" +
+	"\x04data\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\x04data\"\xc7\x02\n" +
 	"\vRestAPINode\x126\n" +
 	"\x06config\x18\x01 \x01(\v2\x1e.aggregator.RestAPINode.ConfigR\x06config\x1a\xc9\x01\n" +
 	"\x06Config\x12\x10\n" +
@@ -7030,9 +7031,9 @@ const file_avs_proto_rawDesc = "" +
 	"\x06method\x18\x04 \x01(\tR\x06method\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a2\n" +
-	"\x06Output\x12(\n" +
-	"\x04data\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\x04data\"\xc9\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a4\n" +
+	"\x06Output\x12*\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xc9\x01\n" +
 	"\x0eCustomCodeNode\x129\n" +
 	"\x06config\x18\x01 \x01(\v2!.aggregator.CustomCodeNode.ConfigR\x06config\x1aF\n" +
 	"\x06Config\x12$\n" +
@@ -7677,7 +7678,7 @@ var file_avs_proto_depIdxs = []int32{
 	83,  // 82: aggregator.GraphQLQueryNode.Config.variables:type_name -> aggregator.GraphQLQueryNode.Config.VariablesEntry
 	104, // 83: aggregator.GraphQLQueryNode.Output.data:type_name -> google.protobuf.Any
 	86,  // 84: aggregator.RestAPINode.Config.headers:type_name -> aggregator.RestAPINode.Config.HeadersEntry
-	104, // 85: aggregator.RestAPINode.Output.data:type_name -> google.protobuf.Any
+	103, // 85: aggregator.RestAPINode.Output.data:type_name -> google.protobuf.Value
 	2,   // 86: aggregator.CustomCodeNode.Config.lang:type_name -> aggregator.Lang
 	103, // 87: aggregator.CustomCodeNode.Output.data:type_name -> google.protobuf.Value
 	89,  // 88: aggregator.BranchNode.Config.conditions:type_name -> aggregator.BranchNode.Condition
