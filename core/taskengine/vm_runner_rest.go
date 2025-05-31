@@ -8,7 +8,6 @@ import (
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/go-resty/resty/v2"
-	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -286,35 +285,22 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	// Process response
 	responseData := r.processResponse(response)
 
-	// Create protobuf output
-	anyData, err := structpb.NewValue(responseData)
+	// Convert the response to protobuf Value for storage
+	valueData, err := structpb.NewValue(responseData)
 	if err != nil {
-		errorMsg := fmt.Sprintf("failed to convert response to protobuf: %v", err)
-		executionLogStep.Success = false
-		executionLogStep.Error = errorMsg
-		executionLogStep.EndAt = time.Now().UnixMilli()
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
-		executionLogStep.Log = logBuilder.String()
-		return executionLogStep, fmt.Errorf(errorMsg)
+		if r.vm.logger != nil {
+			r.vm.logger.Error("Failed to convert response to protobuf Value", "error", err)
+		}
+		// Create a simple string representation as fallback
+		valueData = structpb.NewStringValue(fmt.Sprintf("Error converting response: %v", err))
 	}
 
-	anyProto, err := anypb.New(anyData)
-	if err != nil {
-		errorMsg := fmt.Sprintf("failed to create Any proto: %v", err)
-		executionLogStep.Success = false
-		executionLogStep.Error = errorMsg
-		executionLogStep.EndAt = time.Now().UnixMilli()
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
-		executionLogStep.Log = logBuilder.String()
-		return executionLogStep, fmt.Errorf(errorMsg)
-	}
-
-	// Set output data
-	restOutput := &avsproto.RestAPINode_Output{
-		Data: anyProto,
+	// Store the Value directly in the output
+	outputData := &avsproto.RestAPINode_Output{
+		Data: valueData,
 	}
 	executionLogStep.OutputData = &avsproto.Execution_Step_RestApi{
-		RestApi: restOutput,
+		RestApi: outputData,
 	}
 
 	// Set output variable for following nodes (workflow behavior)

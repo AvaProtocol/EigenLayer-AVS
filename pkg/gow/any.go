@@ -157,3 +157,27 @@ func AnyToStruct(anyVal *anypb.Any, target interface{}) error {
 	// Then unmarshal JSON to your Go struct
 	return json.Unmarshal(jsonBytes, target)
 }
+
+func ValueToString(value *structpb.Value) string {
+	return value.GetStringValue()
+}
+
+func ValueToMap(value *structpb.Value) map[string]any {
+	if structValue := value.GetStructValue(); structValue != nil {
+		return structValue.AsMap()
+	}
+	// If it's not a struct, try to convert the whole value as interface
+	if iface := value.AsInterface(); iface != nil {
+		if m, ok := iface.(map[string]interface{}); ok {
+			return m
+		}
+	}
+	return nil
+}
+
+func ValueToSlice(value *structpb.Value) []any {
+	if listValue := value.GetListValue(); listValue != nil {
+		return listValue.AsSlice()
+	}
+	return nil
+}
