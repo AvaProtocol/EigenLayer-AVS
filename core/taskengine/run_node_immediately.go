@@ -631,11 +631,17 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 	// Convert TriggerType enum to string
 	triggerTypeStr := TriggerTypeToString(req.TriggerType)
 	if triggerTypeStr == "" {
-		return &avsproto.RunTriggerResp{
+		// For unsupported trigger types, return error but still set output data to avoid OUTPUT_DATA_NOT_SET
+		resp := &avsproto.RunTriggerResp{
 			Success:   false,
 			Error:     fmt.Sprintf("unsupported trigger type: %v", req.TriggerType),
-			TriggerId: "",
-		}, nil
+			TriggerId: fmt.Sprintf("trigger_immediate_%d", time.Now().UnixNano()),
+		}
+		// Set default ManualTrigger output structure to avoid OUTPUT_DATA_NOT_SET
+		resp.OutputData = &avsproto.RunTriggerResp_ManualTrigger{
+			ManualTrigger: &avsproto.ManualTrigger_Output{},
+		}
+		return resp, nil
 	}
 
 	// Execute the trigger immediately (triggers don't accept input variables)
@@ -644,11 +650,45 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		if n.logger != nil {
 			n.logger.Error("RunTriggerRPC: Execution failed", "triggerType", triggerTypeStr, "error", err)
 		}
-		return &avsproto.RunTriggerResp{
+
+		// Create response with failure status but still set appropriate output data structure
+		// to avoid OUTPUT_DATA_NOT_SET errors on client side
+		resp := &avsproto.RunTriggerResp{
 			Success:   false,
 			Error:     err.Error(),
-			TriggerId: "",
-		}, nil
+			TriggerId: fmt.Sprintf("trigger_immediate_%d", time.Now().UnixNano()),
+		}
+
+		// Set empty output data structure based on trigger type to avoid OUTPUT_DATA_NOT_SET
+		switch triggerTypeStr {
+		case NodeTypeBlockTrigger:
+			resp.OutputData = &avsproto.RunTriggerResp_BlockTrigger{
+				BlockTrigger: &avsproto.BlockTrigger_Output{},
+			}
+		case NodeTypeFixedTimeTrigger:
+			resp.OutputData = &avsproto.RunTriggerResp_FixedTimeTrigger{
+				FixedTimeTrigger: &avsproto.FixedTimeTrigger_Output{},
+			}
+		case NodeTypeCronTrigger:
+			resp.OutputData = &avsproto.RunTriggerResp_CronTrigger{
+				CronTrigger: &avsproto.CronTrigger_Output{},
+			}
+		case NodeTypeEventTrigger:
+			resp.OutputData = &avsproto.RunTriggerResp_EventTrigger{
+				EventTrigger: &avsproto.EventTrigger_Output{},
+			}
+		case NodeTypeManualTrigger:
+			resp.OutputData = &avsproto.RunTriggerResp_ManualTrigger{
+				ManualTrigger: &avsproto.ManualTrigger_Output{},
+			}
+		default:
+			// For unknown trigger types, set ManualTrigger as default to avoid OUTPUT_DATA_NOT_SET
+			resp.OutputData = &avsproto.RunTriggerResp_ManualTrigger{
+				ManualTrigger: &avsproto.ManualTrigger_Output{},
+			}
+		}
+
+		return resp, nil
 	}
 
 	// Log successful execution
