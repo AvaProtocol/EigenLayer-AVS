@@ -10,11 +10,14 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func createTestEngine(t *testing.T) *Engine {
@@ -256,7 +259,8 @@ func TestRunNodeImmediately_TriggerTypes(t *testing.T) {
 		assert.NotNil(t, result)
 		assert.Contains(t, result, "triggered")
 		assert.Equal(t, true, result["triggered"])
-		assert.Contains(t, result, "timestamp")
+		assert.Contains(t, result, "runAt")
+		assert.IsType(t, uint64(0), result["runAt"])
 	})
 }
 
@@ -1078,4 +1082,40 @@ func TestRunNodeImmediately_ValidTemplateAfterFix(t *testing.T) {
 	}
 
 	t.Logf("Success: Valid template syntax passed validation and mock server responded correctly")
+}
+
+// Test RunTriggerRPC with ManualTrigger to verify protobuf output data
+func TestRunTriggerRPC_ManualTrigger(t *testing.T) {
+	engine := createTestEngine(t)
+
+	// Create a test user (minimal user needed for RPC)
+	user := &model.User{
+		Address: common.HexToAddress("0x1234567890123456789012345678901234567890"),
+	}
+
+	// Create RPC request for manual trigger
+	req := &avsproto.RunTriggerReq{
+		TriggerType:   avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
+		TriggerConfig: map[string]*structpb.Value{},
+	}
+
+	// Execute the RPC call
+	resp, err := engine.RunTriggerRPC(user, req)
+
+	// Verify the response
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+
+	// Check that the output data is set correctly for manual trigger
+	manualTrigger := resp.GetManualTrigger()
+	assert.NotNil(t, manualTrigger, "ManualTrigger output should be set")
+	assert.Greater(t, manualTrigger.GetRunAt(), uint64(0), "RunAt should be set to a valid timestamp")
+
+	// Verify that the output data case is correct (not OUTPUT_DATA_NOT_SET)
+	switch resp.OutputData.(type) {
+	case *avsproto.RunTriggerResp_ManualTrigger:
+		t.Logf("✓ Manual trigger output data correctly set with RunAt: %d", manualTrigger.GetRunAt())
+	default:
+		t.Errorf("Expected ManualTrigger output data, got: %T", resp.OutputData)
+	}
 }
