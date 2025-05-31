@@ -274,31 +274,13 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 			result["data"] = iface
 		}
 	} else if restAPI := executionStep.GetRestApi(); restAPI != nil && restAPI.GetData() != nil {
-		var data map[string]interface{}
-		// Try to unmarshal as Value first (how REST processor stores data)
-		structVal := &structpb.Value{}
-		if err := restAPI.GetData().UnmarshalTo(structVal); err == nil {
-			// Successfully unmarshaled as Value, convert to interface
-			iface := structVal.AsInterface()
-			if m, ok := iface.(map[string]interface{}); ok {
-				data = m
-			} else {
-				data = map[string]interface{}{"data": iface}
-			}
+		// REST API data is now stored as structpb.Value directly (no Any wrapper)
+		iface := restAPI.GetData().AsInterface()
+		if m, ok := iface.(map[string]interface{}); ok {
+			result = m
 		} else {
-			// Fallback: try to unmarshal as Struct
-			structMap := &structpb.Struct{}
-			if err2 := restAPI.GetData().UnmarshalTo(structMap); err2 == nil {
-				data = structMap.AsMap()
-			} else {
-				if n.logger != nil {
-					n.logger.Warn("Failed to unmarshal RestAPI output as both Value and Struct", "valueError", err, "structError", err2)
-				}
-				// Final fallback to raw output
-				data = map[string]interface{}{"raw_output": string(restAPI.GetData().GetValue())}
-			}
+			result = map[string]interface{}{"data": iface}
 		}
-		result = data
 	} else if contractRead := executionStep.GetContractRead(); contractRead != nil && len(contractRead.GetData()) > 0 {
 		result["data"] = contractRead.GetData()[0].AsInterface()
 		if len(contractRead.GetData()) > 1 {
@@ -411,8 +393,8 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	switch nodeTypeStr {
 	case NodeTypeRestAPI:
 		if result != nil {
-			// Convert result to protobuf Any for REST API
-			anyData, err := structpb.NewValue(result)
+			// Convert result directly to protobuf Value for REST API (no Any wrapping needed)
+			valueData, err := structpb.NewValue(result)
 			if err != nil {
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,
@@ -420,16 +402,8 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 					NodeId:  "",
 				}, nil
 			}
-			anyProto, err := anypb.New(anyData)
-			if err != nil {
-				return &avsproto.RunNodeWithInputsResp{
-					Success: false,
-					Error:   fmt.Sprintf("failed to create Any proto: %v", err),
-					NodeId:  "",
-				}, nil
-			}
 			restOutput := &avsproto.RestAPINode_Output{
-				Data: anyProto,
+				Data: valueData,
 			}
 			resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{
 				RestApi: restOutput,

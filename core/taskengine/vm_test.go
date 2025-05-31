@@ -280,11 +280,11 @@ func TestRunSequentialTasks(t *testing.T) {
 		t.Errorf("incorrect node id in execution log")
 	}
 
-	outputData := gow.AnyToMap(vm.ExecutionLogs[0].GetRestApi().Data)
+	outputData := gow.ValueToMap(vm.ExecutionLogs[0].GetRestApi().Data)
 	if outputData["body"].(map[string]any)["data"].(string) != "post123" {
 		t.Errorf("rest node result is incorrect, should contains the string post123, got: %v", outputData["body"])
 	}
-	outputData = gow.AnyToMap(vm.ExecutionLogs[1].GetRestApi().Data)
+	outputData = gow.ValueToMap(vm.ExecutionLogs[1].GetRestApi().Data)
 	if outputData["body"].(map[string]any)["args"].(map[string]any)["query123"].(string) != "abc" {
 		t.Errorf("rest node result is incorrect, should contains the string query123, got: %v", outputData["body"])
 	}

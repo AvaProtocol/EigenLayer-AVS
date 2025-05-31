@@ -578,7 +578,7 @@ func TestTriggerAsync(t *testing.T) {
 	}
 
 	// Get the response data as a map
-	responseData := gow.AnyToMap(step.GetRestApi().Data)
+	responseData := gow.ValueToMap(step.GetRestApi().Data)
 	if responseData == nil {
 		t.Errorf("Failed to convert response data to map")
 		return
