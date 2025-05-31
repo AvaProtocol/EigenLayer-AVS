@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 
@@ -32,6 +33,7 @@ const (
 	VMStateCompleted          VMState = "vm_completed"
 	VMMaxPreprocessIterations         = 100
 	APContextVarName                  = "apContext"
+	WorkflowContextVarName            = "workflowContext"
 	ConfigVarsPath                    = "configVars"
 	APContextConfigVarsPath           = APContextVarName + "." + ConfigVarsPath
 	DataSuffix                        = "data"
@@ -263,6 +265,24 @@ func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReaso
 			v.TaskNodes[node.Id] = node
 		}
 		v.mu.Unlock()
+
+		// Add workflowContext variable with task metadata
+		workflowContext := map[string]interface{}{
+			"id":                 task.Id,
+			"name":               task.Name,
+			"owner":              task.Owner,
+			"smartWalletAddress": task.SmartWalletAddress,
+			"runner":             task.SmartWalletAddress, // Alias for smartWalletAddress
+			"eoaAddress":         task.Owner,              // Alias for owner
+			"startAt":            task.StartAt,
+			"expiredAt":          task.ExpiredAt,
+			"completedAt":        task.CompletedAt,
+			"maxExecution":       task.MaxExecution,
+			"executionCount":     task.ExecutionCount,
+			"lastRanAt":          task.LastRanAt,
+			"status":             task.Status.String(),
+		}
+		v.AddVar(WorkflowContextVarName, workflowContext)
 	}
 
 	// If 'reason' is not nil, we can still try to add its basic fields (block_number, epoch, etc.)
@@ -986,21 +1006,42 @@ func convertToCamelCase(s string) string {
 	return result
 }
 
-// resolveVariableWithFallback tries to resolve a variable path, with fallback to camelCase for node_name.data paths
+// convertToSnakeCase converts camelCase to snake_case
+// Example: "blockNumber" -> "block_number"
+func convertToSnakeCase(s string) string {
+	// Handle empty strings
+	if s == "" {
+		return s
+	}
+
+	var result strings.Builder
+	for i, r := range s {
+		if i > 0 && unicode.IsUpper(r) {
+			result.WriteRune('_')
+		}
+		result.WriteRune(unicode.ToLower(r))
+	}
+	return result.String()
+}
+
+// resolveVariableWithFallback tries to resolve a variable path, with smart fallback for node_name.data paths
 //
 // PROBLEM: gRPC automatically converts Go snake_case field names to JavaScript camelCase during protobuf conversion.
-// Templates use snake_case like {{trigger.data.block_number}} but the actual data has camelCase like blockNumber.
+// Templates using camelCase (like {{trigger.data.blockNumber}}) expect protobuf-converted field names,
+// but the actual data may still be in snake_case format (like block_number).
 //
-// SOLUTION: For node_name.data.field_name patterns:
-// 1. First try original path: trigger.data.block_number
-// 2. If not found, try camelCase: trigger.data.blockNumber
-// 3. Return resolved value or undefined
+// SOLUTION: For any node_name.data.field_name patterns using camelCase, provide snake_case fallback:
+// 1. First try original path as-is
+// 2. If original uses camelCase and fails, try snake_case conversion as fallback
+// 3. If original uses snake_case, no fallback needed (already native format)
 //
 // Examples:
 //
-//	{{trigger.data.block_number}} -> tries block_number, then blockNumber
-//	{{apiNode.data.response.api_key}} -> tries response.api_key, then response.apiKey
-//	{{workflowContext.user_id}} -> only tries user_id (not a node.data pattern)
+//	{{trigger.data.blockNumber}} -> tries blockNumber, then block_number (camelCase with fallback)
+//	{{trigger.data.block_number}} -> tries block_number only (snake_case, no fallback needed)
+//	{{apiNode.data.responseData}} -> tries responseData, then response_data (camelCase with fallback)
+//	{{apiNode.data.response_data}} -> tries response_data only (snake_case, no fallback needed)
+//	{{workflowContext.user_id}} -> tries user_id only (not a node.data pattern)
 func (v *VM) resolveVariableWithFallback(jsvm *goja.Runtime, varPath string, currentVars map[string]any) (interface{}, bool) {
 	// First try the original path
 	script := fmt.Sprintf(`(() => { try { return %s; } catch(e) { return undefined; } })()`, varPath)
@@ -1012,33 +1053,51 @@ func (v *VM) resolveVariableWithFallback(jsvm *goja.Runtime, varPath string, cur
 		}
 	}
 
-	// Check if this is a node_name.data.field_name pattern
+	// Check if this is a node_name.data.field_name pattern for smart camelCase→snake_case fallback
 	if strings.Contains(varPath, ".data.") {
 		parts := strings.Split(varPath, ".data.")
 		if len(parts) == 2 {
 			nodeName := parts[0]
 			fieldPath := parts[1]
 
-			// Convert field path to camelCase - handle nested paths like "field.subfield"
+			// Only try snake_case fallback if the original field path contains camelCase
+			// Check if any part of the field path looks like camelCase (contains uppercase letters)
 			fieldParts := strings.Split(fieldPath, ".")
-			camelFieldParts := make([]string, len(fieldParts))
-			for i, part := range fieldParts {
-				camelFieldParts[i] = convertToCamelCase(part)
-			}
-			camelFieldPath := strings.Join(camelFieldParts, ".")
-
-			// Try with camelCase field names
-			camelScript := fmt.Sprintf(`(() => { try { return %s.data.%s; } catch(e) { return undefined; } })()`, nodeName, camelFieldPath)
-			if evaluated, err := jsvm.RunString(camelScript); err == nil {
-				exportedValue := evaluated.Export()
-				if exportedValue != nil && fmt.Sprintf("%v", exportedValue) != "undefined" {
-					if v.logger != nil {
-						v.logger.Debug("variable resolved using camelCase conversion",
-							"originalPath", varPath,
-							"resolvedPath", fmt.Sprintf("%s.data.%s", nodeName, camelFieldPath),
-							"value", exportedValue)
+			hasCamelCase := false
+			for _, part := range fieldParts {
+				for _, r := range part {
+					if unicode.IsUpper(r) {
+						hasCamelCase = true
+						break
 					}
-					return exportedValue, true
+				}
+				if hasCamelCase {
+					break
+				}
+			}
+
+			// Only attempt snake_case conversion if we detected camelCase
+			if hasCamelCase {
+				// Convert camelCase field path to snake_case - handle nested paths like "field.subfield"
+				snakeFieldParts := make([]string, len(fieldParts))
+				for i, part := range fieldParts {
+					snakeFieldParts[i] = convertToSnakeCase(part)
+				}
+				snakeFieldPath := strings.Join(snakeFieldParts, ".")
+
+				// Try with snake_case field names
+				snakeScript := fmt.Sprintf(`(() => { try { return %s.data.%s; } catch(e) { return undefined; } })()`, nodeName, snakeFieldPath)
+				if evaluated, err := jsvm.RunString(snakeScript); err == nil {
+					exportedValue := evaluated.Export()
+					if exportedValue != nil && fmt.Sprintf("%v", exportedValue) != "undefined" {
+						if v.logger != nil {
+							v.logger.Debug("variable resolved using snake_case fallback",
+								"originalPath", varPath,
+								"resolvedPath", fmt.Sprintf("%s.data.%s", nodeName, snakeFieldPath),
+								"value", exportedValue)
+						}
+						return exportedValue, true
+					}
 				}
 			}
 		}
@@ -1279,6 +1338,8 @@ func (v *VM) collectInputKeysForLog() []string {
 			varname := k
 			if varname == APContextVarName { // Specific handling for apContext
 				varname = APContextConfigVarsPath
+			} else if varname == WorkflowContextVarName { // Specific handling for workflowContext
+				varname = WorkflowContextVarName // Use as-is, no .data suffix
 			} else {
 				varname = fmt.Sprintf("%s.%s", varname, DataSuffix)
 			}
@@ -1303,6 +1364,8 @@ func (v *VM) CollectInputs() map[string]string {
 		varname := key
 		if varname == APContextVarName {
 			varname = APContextConfigVarsPath
+		} else if varname == WorkflowContextVarName {
+			varname = WorkflowContextVarName // Use as-is, no .data suffix
 		} else {
 			varname = fmt.Sprintf("%s.data", varname)
 		}
@@ -1369,10 +1432,6 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 
 	// Execute the single node. VM.Run handles status changes.
 	// We are calling tempVM.executeNode directly for more control and to get the step log.
-
-	// _, err := tempVM.Run() // Run() would execute and store logs in tempVM.ExecutionLogs
-	// For RunNodeWithInputs, we are more interested in the direct log of *this* node's execution.
-	// So, call executeNode directly.
 
 	_, err := tempVM.executeNode(node) // This will append to tempVM.ExecutionLogs
 
