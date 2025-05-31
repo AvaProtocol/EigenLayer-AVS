@@ -3,6 +3,7 @@ package taskengine
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -40,14 +41,15 @@ func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
 	task := &model.Task{
 		Task: &avsproto.Task{},
 	}
-	item, err := x.db.GetKey([]byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Active), id)))
+	storageKey := []byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Active), id))
+	item, err := x.db.GetKey(storageKey)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("storage access failed for key 't:%s:%s': %w", TaskStatusToStorageKey(avsproto.TaskStatus_Active), id, err)
 	}
 	err = protojson.Unmarshal(item, task)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse task data from storage (data may be corrupted): %w", err)
 	}
 
 	return task, nil
@@ -57,7 +59,14 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 	task, err := x.GetTask(job.Name)
 
 	if err != nil {
-		return fmt.Errorf("fail to load task: %s", job.Name)
+		// Provide more specific error information
+		if strings.Contains(err.Error(), "key not found") || strings.Contains(err.Error(), "not found") {
+			return fmt.Errorf("task not found in storage: %s (task may have been deleted or storage key is incorrect)", job.Name)
+		} else if strings.Contains(err.Error(), "unmarshal") || strings.Contains(err.Error(), "json") {
+			return fmt.Errorf("task data corruption in storage: %s (stored data is invalid JSON)", job.Name)
+		} else {
+			return fmt.Errorf("storage error loading task %s: %v", job.Name, err)
+		}
 	}
 
 	queueData := &QueueExecutionData{}
