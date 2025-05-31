@@ -164,6 +164,21 @@ message EventTrigger {
   Config config = 1;
 }
 
+message ManualTrigger {
+  message Config {
+    // Manual triggers typically don't have configuration parameters
+    // but we keep this for consistency
+  }
+  
+  message Output {
+    // Manual triggers typically don't return data
+    // but we keep this for consistency and future extensibility
+    uint64 run_at = 1; // Timestamp when manually run
+  }
+
+  // Include Config as field so it is generated in Go
+  Config config = 1;
+}
 
 message TaskTrigger {
   string name = 1;
@@ -961,6 +976,7 @@ message RunTriggerResp {
     FixedTimeTrigger.Output fixed_time_trigger = 11;
     CronTrigger.Output cron_trigger = 12;
     EventTrigger.Output event_trigger = 13;
+    ManualTrigger.Output manual_trigger = 14;
   }
 }
 
