@@ -145,7 +145,7 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 	// Manual triggers are perfect for immediate execution
 	result := map[string]interface{}{
 		"triggered": true,
-		"timestamp": uint64(time.Now().Unix()),
+		"runAt":     uint64(time.Now().Unix()),
 	}
 
 	if n.logger != nil {
@@ -644,6 +644,17 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 			resp.OutputData = &avsproto.RunTriggerResp_EventTrigger{
 				EventTrigger: eventOutput,
 			}
+		}
+	case NodeTypeManualTrigger:
+		// Always set manual trigger output, even if result is nil
+		manualOutput := &avsproto.ManualTrigger_Output{}
+		if result != nil {
+			if runAt, ok := result["runAt"].(uint64); ok {
+				manualOutput.RunAt = runAt
+			}
+		}
+		resp.OutputData = &avsproto.RunTriggerResp_ManualTrigger{
+			ManualTrigger: manualOutput,
 		}
 	}
 
