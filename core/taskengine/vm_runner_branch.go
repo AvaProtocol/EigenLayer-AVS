@@ -168,7 +168,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		}
 
 		// Preprocess the expression using the VM's current variable context
-		processedExpression := r.vm.preprocessText(condition.Expression)
+		processedExpression := r.vm.preprocessTextWithVariableMapping(condition.Expression)
 		log.WriteString(fmt.Sprintf("Processed expression for '%s': %s\n", condition.Id, processedExpression))
 
 		// Create a temporary JS VM to evaluate the processed expression
