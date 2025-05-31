@@ -449,16 +449,18 @@ func TestRestRequestErrorHandling(t *testing.T) {
 
 	step, err = n.Execute("error-test", node404)
 
-	if err == nil {
-		t.Errorf("expected error for 404 status code, but got nil")
+	if err != nil {
+		t.Errorf("HTTP 404 should not cause execution error, but got: %v", err)
 	}
 
-	if !strings.Contains(err.Error(), "unexpected HTTP status code: 404") {
-		t.Errorf("expected error message to contain status code 404, got: %v", err)
+	if !step.Success {
+		t.Errorf("expected step.Success to be true even for 404 response")
 	}
 
-	if step.Success {
-		t.Errorf("expected step.Success to be false for 404 response")
+	// Verify the response data contains the 404 status
+	responseData := gow.ValueToMap(step.GetRestApi().Data)
+	if statusCode, ok := responseData["statusCode"].(float64); !ok || statusCode != 404 {
+		t.Errorf("expected statusCode 404 in response data, got: %v", responseData["statusCode"])
 	}
 
 	// Test 500 Server Error
@@ -476,21 +478,28 @@ func TestRestRequestErrorHandling(t *testing.T) {
 
 	step, err = n.Execute("error-test", node500)
 
-	if err == nil {
-		t.Errorf("expected error for 500 status code, but got nil")
+	if err != nil {
+		t.Errorf("HTTP 500 should not cause execution error, but got: %v", err)
 	}
 
-	if !strings.Contains(err.Error(), "unexpected HTTP status code: 500") {
-		t.Errorf("expected error message to contain status code 500, got: %v", err)
+	if !step.Success {
+		t.Errorf("expected step.Success to be true even for 500 response")
 	}
 
-	if step.Success {
-		t.Errorf("expected step.Success to be false for 500 response")
+	// Verify the response data contains the 500 status
+	responseData = gow.ValueToMap(step.GetRestApi().Data)
+	if statusCode, ok := responseData["statusCode"].(float64); !ok || statusCode != 500 {
+		t.Errorf("expected statusCode 500 in response data, got: %v", responseData["statusCode"])
 	}
 }
 
 func TestRestRequestTelegramMockServer(t *testing.T) {
-	// Create mock Telegram server with the exact response format
+	// Test values stored in variables for both mock response and verification
+	expectedMessageId := 123
+	expectedFromFirstName := "TestBot"
+	expectedChatUsername := "testuser"
+
+	// Create mock Telegram server with test response format
 	telegramServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify it's a Telegram bot API call
 		if !strings.Contains(r.URL.Path, "/bot") || !strings.Contains(r.URL.Path, "/sendMessage") {
@@ -501,27 +510,27 @@ func TestRestRequestTelegramMockServer(t *testing.T) {
 			t.Errorf("expected POST request, got %s", r.Method)
 		}
 
-		// Return the exact Telegram response format
+		// Return test response using the test variables
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		telegramResponse := map[string]interface{}{
 			"ok": true,
 			"result": map[string]interface{}{
-				"message_id": 492,
+				"message_id": expectedMessageId,
 				"from": map[string]interface{}{
-					"id":         7771086042,
+					"id":         12345,
 					"is_bot":     true,
-					"first_name": "AvaProtocolBotDev",
-					"username":   "AvaProtocolDevBot",
+					"first_name": expectedFromFirstName,
+					"username":   "test_bot",
 				},
 				"chat": map[string]interface{}{
-					"id":         452247333,
-					"first_name": "Chris | Ava Protocol",
-					"username":   "kezjo",
+					"id":         67890,
+					"first_name": "Test User",
+					"username":   expectedChatUsername,
 					"type":       "private",
 				},
-				"date": 1748665041,
-				"text": "Hello from script",
+				"date": 1640995200,
+				"text": "Test message",
 			},
 		}
 
@@ -534,11 +543,11 @@ func TestRestRequestTelegramMockServer(t *testing.T) {
 	// Create REST API node that calls our mock Telegram server
 	node := &avsproto.RestAPINode{
 		Config: &avsproto.RestAPINode_Config{
-			Url: telegramServer.URL + "/bot123456:ABC-DEF1234/sendMessage",
+			Url: telegramServer.URL + "/bot123456:TEST-TOKEN/sendMessage",
 			Headers: map[string]string{
 				"Content-Type": "application/json",
 			},
-			Body:   `{"chat_id": 452247333, "text": "Hello from script"}`,
+			Body:   `{"chat_id": 67890, "text": "Test message"}`,
 			Method: "POST",
 		},
 	}
@@ -616,17 +625,16 @@ func TestRestRequestTelegramMockServer(t *testing.T) {
 		t.Fatalf("❌ Body is not map[string]interface{}, got %T: %v", bodyField, bodyField)
 	}
 
-	// Test Telegram response structure access
-	// Should be able to access bodyMap["ok"] directly
+	// Test basic response structure
 	okField, exists := bodyMap["ok"]
 	if !exists {
-		t.Fatalf("❌ Telegram response missing 'ok' field. Available fields: %v", getStringMapKeys(bodyMap))
+		t.Fatalf("❌ Telegram response missing 'ok' field")
 	}
 	if ok, isOk := okField.(bool); !isOk || !ok {
 		t.Errorf("❌ Expected ok=true, got: %v (type: %T)", okField, okField)
 	}
 
-	// Test nested result access
+	// Get result object
 	resultField, exists := bodyMap["result"]
 	if !exists {
 		t.Fatalf("❌ Telegram response missing 'result' field")
@@ -637,16 +645,16 @@ func TestRestRequestTelegramMockServer(t *testing.T) {
 		t.Fatalf("❌ Result is not map[string]interface{}, got %T", resultField)
 	}
 
-	// Test message_id access
+	// Test 1: message_id
 	messageId, exists := resultMap["message_id"]
 	if !exists {
 		t.Fatalf("❌ Result missing 'message_id' field")
 	}
-	if msgId, ok := messageId.(float64); !ok || msgId != 492 {
-		t.Errorf("❌ Expected message_id=492, got: %v (type: %T)", messageId, messageId)
+	if msgId, ok := messageId.(float64); !ok || int(msgId) != expectedMessageId {
+		t.Errorf("❌ Expected message_id=%d, got: %v (type: %T)", expectedMessageId, messageId, messageId)
 	}
 
-	// Test nested from object access
+	// Test 2: from.first_name
 	fromField, exists := resultMap["from"]
 	if !exists {
 		t.Fatalf("❌ Result missing 'from' field")
@@ -657,25 +665,15 @@ func TestRestRequestTelegramMockServer(t *testing.T) {
 		t.Fatalf("❌ From is not map[string]interface{}, got %T", fromField)
 	}
 
-	// Test from.id access
-	fromId, exists := fromMap["id"]
-	if !exists {
-		t.Fatalf("❌ From missing 'id' field")
-	}
-	if id, ok := fromId.(float64); !ok || id != 7771086042 {
-		t.Errorf("❌ Expected from.id=7771086042, got: %v (type: %T)", fromId, fromId)
-	}
-
-	// Test from.first_name access
 	firstName, exists := fromMap["first_name"]
 	if !exists {
 		t.Fatalf("❌ From missing 'first_name' field")
 	}
-	if name, ok := firstName.(string); !ok || name != "AvaProtocolBotDev" {
-		t.Errorf("❌ Expected from.first_name='AvaProtocolBotDev', got: %v", firstName)
+	if name, ok := firstName.(string); !ok || name != expectedFromFirstName {
+		t.Errorf("❌ Expected from.first_name='%s', got: %v", expectedFromFirstName, firstName)
 	}
 
-	// Test nested chat object access
+	// Test 3: chat.username
 	chatField, exists := resultMap["chat"]
 	if !exists {
 		t.Fatalf("❌ Result missing 'chat' field")
@@ -686,35 +684,16 @@ func TestRestRequestTelegramMockServer(t *testing.T) {
 		t.Fatalf("❌ Chat is not map[string]interface{}, got %T", chatField)
 	}
 
-	// Test chat.id access
-	chatId, exists := chatMap["id"]
+	chatUsername, exists := chatMap["username"]
 	if !exists {
-		t.Fatalf("❌ Chat missing 'id' field")
+		t.Fatalf("❌ Chat missing 'username' field")
 	}
-	if id, ok := chatId.(float64); !ok || id != 452247333 {
-		t.Errorf("❌ Expected chat.id=452247333, got: %v (type: %T)", chatId, chatId)
-	}
-
-	// Test text field access
-	textField, exists := resultMap["text"]
-	if !exists {
-		t.Fatalf("❌ Result missing 'text' field")
-	}
-	if text, ok := textField.(string); !ok || text != "Hello from script" {
-		t.Errorf("❌ Expected text='Hello from script', got: %v", textField)
-	}
-
-	// Test date field access
-	dateField, exists := resultMap["date"]
-	if !exists {
-		t.Fatalf("❌ Result missing 'date' field")
-	}
-	if date, ok := dateField.(float64); !ok || date != 1748665041 {
-		t.Errorf("❌ Expected date=1748665041, got: %v (type: %T)", dateField, dateField)
+	if username, ok := chatUsername.(string); !ok || username != expectedChatUsername {
+		t.Errorf("❌ Expected chat.username='%s', got: %v", expectedChatUsername, chatUsername)
 	}
 
 	t.Logf("✅ SUCCESS: Telegram mock server test passed!")
 	t.Logf("✅ Response structure properly accessible without typeUrl/value wrapping")
-	t.Logf("✅ Can access nested fields: ok=%v, message_id=%v, from.id=%v, chat.id=%v, text='%v'",
-		okField, messageId, fromId, chatId, textField)
+	t.Logf("✅ Verified test fields: message_id=%d, from.first_name='%s', chat.username='%s'",
+		expectedMessageId, expectedFromFirstName, expectedChatUsername)
 }

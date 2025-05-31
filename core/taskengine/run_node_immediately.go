@@ -277,7 +277,8 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		// REST API data is now stored as structpb.Value directly (no Any wrapper)
 		iface := restAPI.GetData().AsInterface()
 		if m, ok := iface.(map[string]interface{}); ok {
-			result = m
+			// Use the common response processing function
+			result = ProcessRestAPIResponseRaw(m)
 		} else {
 			result = map[string]interface{}{"data": iface}
 		}
