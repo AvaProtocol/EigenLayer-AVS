@@ -69,8 +69,8 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	}
 
 	// Preprocess URL and query for template variables
-	endpoint = r.vm.preprocessText(endpoint)
-	queryStr = r.vm.preprocessText(queryStr)
+	endpoint = r.vm.preprocessTextWithVariableMapping(endpoint)
+	queryStr = r.vm.preprocessTextWithVariableMapping(queryStr)
 
 	// Initialize client with the URL from Config
 	log := func(s string) {

@@ -222,7 +222,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	}
 
 	// Preprocess source for template variables
-	sourceStr = r.vm.preprocessText(sourceStr)
+	sourceStr = r.vm.preprocessTextWithVariableMapping(sourceStr)
 
 	sb.WriteString(" Lang: ")
 	sb.WriteString(langStr)

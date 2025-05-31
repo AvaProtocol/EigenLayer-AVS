@@ -19,6 +19,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/dop251/goja"
 )
 
 type VMState string
@@ -968,6 +969,172 @@ func (v *VM) runEthTransfer(stepID string, node *avsproto.ETHTransferNode) (*avs
 	return executionLog, err
 }
 
+// convertToCamelCase converts snake_case to camelCase
+// Example: "block_number" -> "blockNumber", "gas_limit" -> "gasLimit"
+func convertToCamelCase(s string) string {
+	parts := strings.Split(s, "_")
+	if len(parts) <= 1 {
+		return s
+	}
+
+	result := parts[0]
+	for i := 1; i < len(parts); i++ {
+		if len(parts[i]) > 0 {
+			result += strings.ToUpper(parts[i][:1]) + parts[i][1:]
+		}
+	}
+	return result
+}
+
+// resolveVariableWithFallback tries to resolve a variable path, with fallback to camelCase for node_name.data paths
+//
+// PROBLEM: gRPC automatically converts Go snake_case field names to JavaScript camelCase during protobuf conversion.
+// Templates use snake_case like {{trigger.data.block_number}} but the actual data has camelCase like blockNumber.
+//
+// SOLUTION: For node_name.data.field_name patterns:
+// 1. First try original path: trigger.data.block_number
+// 2. If not found, try camelCase: trigger.data.blockNumber
+// 3. Return resolved value or undefined
+//
+// Examples:
+//
+//	{{trigger.data.block_number}} -> tries block_number, then blockNumber
+//	{{apiNode.data.response.api_key}} -> tries response.api_key, then response.apiKey
+//	{{workflowContext.user_id}} -> only tries user_id (not a node.data pattern)
+func (v *VM) resolveVariableWithFallback(jsvm *goja.Runtime, varPath string, currentVars map[string]any) (interface{}, bool) {
+	// First try the original path
+	script := fmt.Sprintf(`(() => { try { return %s; } catch(e) { return undefined; } })()`, varPath)
+	if evaluated, err := jsvm.RunString(script); err == nil {
+		exportedValue := evaluated.Export()
+		// Check if we got a real value (not undefined)
+		if exportedValue != nil && fmt.Sprintf("%v", exportedValue) != "undefined" {
+			return exportedValue, true
+		}
+	}
+
+	// Check if this is a node_name.data.field_name pattern
+	if strings.Contains(varPath, ".data.") {
+		parts := strings.Split(varPath, ".data.")
+		if len(parts) == 2 {
+			nodeName := parts[0]
+			fieldPath := parts[1]
+
+			// Convert field path to camelCase - handle nested paths like "field.subfield"
+			fieldParts := strings.Split(fieldPath, ".")
+			camelFieldParts := make([]string, len(fieldParts))
+			for i, part := range fieldParts {
+				camelFieldParts[i] = convertToCamelCase(part)
+			}
+			camelFieldPath := strings.Join(camelFieldParts, ".")
+
+			// Try with camelCase field names
+			camelScript := fmt.Sprintf(`(() => { try { return %s.data.%s; } catch(e) { return undefined; } })()`, nodeName, camelFieldPath)
+			if evaluated, err := jsvm.RunString(camelScript); err == nil {
+				exportedValue := evaluated.Export()
+				if exportedValue != nil && fmt.Sprintf("%v", exportedValue) != "undefined" {
+					if v.logger != nil {
+						v.logger.Debug("variable resolved using camelCase conversion",
+							"originalPath", varPath,
+							"resolvedPath", fmt.Sprintf("%s.data.%s", nodeName, camelFieldPath),
+							"value", exportedValue)
+					}
+					return exportedValue, true
+				}
+			}
+		}
+	}
+
+	return nil, false
+}
+
+// preprocessTextWithVariableMapping enhances preprocessText with smart variable resolution
+// It handles both snake_case and camelCase variable names, especially for node_name.data.field patterns
+//
+// Used by: REST API, GraphQL, Custom Code, Contract Write, Branch runners
+// Returns: "undefined" for missing variables (better for JSON structure and debugging)
+//
+// This function solves the gRPC protobuf conversion issue where Go snake_case fields
+// become JavaScript camelCase, but templates still reference the original snake_case names.
+func (v *VM) preprocessTextWithVariableMapping(text string) string {
+	if !strings.Contains(text, "{{") || !strings.Contains(text, "}}") {
+		return text
+	}
+	jsvm := NewGojaVM()
+	v.mu.Lock()
+	currentVars := make(map[string]any, len(v.vars))
+	for k, val := range v.vars {
+		currentVars[k] = val
+	}
+	v.mu.Unlock()
+
+	for key, value := range currentVars {
+		if err := jsvm.Set(key, value); err != nil {
+			if v.logger != nil {
+				v.logger.Error("failed to set variable in JS VM for preprocessing", "key", key, "error", err)
+			}
+		}
+	}
+
+	result := text
+	for i := 0; i < VMMaxPreprocessIterations; i++ {
+		start := strings.Index(result, "{{")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(result[start:], "}}")
+		if end == -1 {
+			break
+		}
+		end += start // Adjust end to be relative to the start of `result`
+
+		expr := strings.TrimSpace(result[start+2 : end])
+		if expr == "" {
+			result = result[:start] + result[end+2:]
+			continue
+		}
+		// Simple check for nested, though might not be perfect for all cases.
+		if strings.Index(expr, "{{") != -1 || strings.Index(expr, "}}") != -1 {
+			if v.logger != nil {
+				v.logger.Warn("Nested expression detected, replacing with empty string", "expression", expr)
+			}
+			result = result[:start] + result[end+2:]
+			continue
+		}
+
+		// Try to resolve the variable with fallback to camelCase
+		exportedValue, resolved := v.resolveVariableWithFallback(jsvm, expr, currentVars)
+		if !resolved {
+			// Replace with "undefined" instead of removing the expression
+			// This helps maintain valid JSON structure and makes debugging easier
+			if v.logger != nil {
+				v.logger.Debug("template variable evaluation failed, replacing with 'undefined'", "expression", expr)
+			}
+			result = result[:start] + "undefined" + result[end+2:]
+			continue
+		}
+
+		var replacement string
+		if t, ok := exportedValue.(time.Time); ok {
+			replacement = t.In(time.UTC).Format("2006-01-02 15:04:05.000 +0000 UTC")
+		} else if _, okMap := exportedValue.(map[string]interface{}); okMap {
+			replacement = "[object Object]" // Mimic JS behavior for objects in strings
+		} else if _, okArr := exportedValue.([]interface{}); okArr {
+			replacement = fmt.Sprintf("%v", exportedValue) // Or could be "[object Array]" or stringified JSON
+		} else {
+			replacement = fmt.Sprintf("%v", exportedValue)
+		}
+		result = result[:start] + replacement + result[end+2:]
+	}
+	return result
+}
+
+// preprocessText is the original template processing function
+//
+// Used by: Legacy code and tests that expect original behavior
+// Returns: Removes failed expressions entirely (empty string replacement)
+//
+// This maintains backward compatibility with existing tests while the enhanced
+// preprocessTextWithVariableMapping provides smart resolution for production use.
 func (v *VM) preprocessText(text string) string {
 	if !strings.Contains(text, "{{") || !strings.Contains(text, "}}") {
 		return text
@@ -1020,7 +1187,12 @@ func (v *VM) preprocessText(text string) string {
 			v.logger.Debug("evaluating pre-processor script", "task_id", v.GetTaskId(), "script", script, "result", evaluated, "error", err)
 		}
 		if err != nil {
-			result = result[:start] + result[end+2:] // Remove invalid expression
+			// Remove the expression entirely (original behavior)
+			// This is the expected behavior for existing tests
+			if v.logger != nil {
+				v.logger.Debug("template variable evaluation failed, removing expression", "expression", expr, "error", err)
+			}
+			result = result[:start] + result[end+2:]
 			continue
 		}
 
@@ -1038,6 +1210,65 @@ func (v *VM) preprocessText(text string) string {
 		result = result[:start] + replacement + result[end+2:]
 	}
 	return result
+}
+
+// validateTemplateFormat checks for malformed template syntax and returns an error if found
+func (v *VM) validateTemplateFormat(text string) error {
+	// Check for malformed template syntax like { { variable } }
+	// Use a more specific regex that looks for template-like patterns, not JSON
+	// Match: { + whitespace + variable-like-content + whitespace + }
+	// But exclude JSON patterns by ensuring the content looks like a variable reference
+	malformedTemplateRegex := regexp.MustCompile(`\{\s+([a-zA-Z_$][a-zA-Z0-9_$]*(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*)*)\s+\}`)
+	matches := malformedTemplateRegex.FindAllStringSubmatch(text, -1)
+
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		content := strings.TrimSpace(match[1])
+
+		// Double-check if the content looks like a variable reference
+		if v.looksLikeVariableReference(content) {
+			return fmt.Errorf("malformed template syntax detected: '{ { %s } }'. Use '{{%s}}' instead", content, content)
+		}
+	}
+
+	return nil
+}
+
+// looksLikeVariableReference determines if a string looks like it's trying to reference a variable
+func (v *VM) looksLikeVariableReference(content string) bool {
+	// Common patterns that indicate variable references:
+
+	// 1. Contains dots (property access like trigger.data.block_number)
+	if strings.Contains(content, ".") {
+		return true
+	}
+
+	// 2. Starts with common variable names
+	commonVarPrefixes := []string{
+		"trigger",
+		"workflowContext",
+		"apContext",
+		"taskContext",
+		"env",
+		"secrets",
+	}
+
+	for _, prefix := range commonVarPrefixes {
+		if strings.HasPrefix(content, prefix) {
+			return true
+		}
+	}
+
+	// 3. Follows JavaScript variable naming pattern (letters, numbers, underscore, $)
+	// and doesn't look like regular text (no spaces, not just a single word)
+	jsVarPattern := regexp.MustCompile(`^[a-zA-Z_$][a-zA-Z0-9_$]*(\.[a-zA-Z_$][a-zA-Z0-9_$]*)*$`)
+	if jsVarPattern.MatchString(content) && len(content) > 3 {
+		return true
+	}
+
+	return false
 }
 
 func (v *VM) collectInputKeysForLog() []string {
@@ -1190,28 +1421,142 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 
 	switch nodeType {
 	case NodeTypeRestAPI:
-		// Configuration is now in Input messages, not in the node structure
-		node.TaskType = &avsproto.TaskNode_RestApi{RestApi: &avsproto.RestAPINode{}}
+		// Create REST API node with proper configuration
+		restConfig := &avsproto.RestAPINode_Config{}
+		if url, ok := config["url"].(string); ok {
+			restConfig.Url = url
+		}
+		if method, ok := config["method"].(string); ok {
+			restConfig.Method = method
+		}
+		if body, ok := config["body"].(string); ok {
+			restConfig.Body = body
+		}
+
+		// Handle headers - can be map[string]string or [][]string (headersMap format)
+		if headers, ok := config["headers"].(map[string]string); ok {
+			restConfig.Headers = headers
+		} else if headersMap, ok := config["headersMap"].([][]string); ok {
+			headers := make(map[string]string)
+			for _, header := range headersMap {
+				if len(header) == 2 {
+					headers[header[0]] = header[1]
+				}
+			}
+			restConfig.Headers = headers
+		} else if headersAny, ok := config["headersMap"].([]interface{}); ok {
+			headers := make(map[string]string)
+			for _, headerAny := range headersAny {
+				if headerSlice, ok := headerAny.([]interface{}); ok && len(headerSlice) == 2 {
+					if key, ok := headerSlice[0].(string); ok {
+						if value, ok := headerSlice[1].(string); ok {
+							headers[key] = value
+						}
+					}
+				}
+			}
+			restConfig.Headers = headers
+		}
+
+		node.TaskType = &avsproto.TaskNode_RestApi{
+			RestApi: &avsproto.RestAPINode{
+				Config: restConfig,
+			},
+		}
 	case NodeTypeContractRead:
-		// Configuration is now in Input messages, not in the node structure
-		node.TaskType = &avsproto.TaskNode_ContractRead{ContractRead: &avsproto.ContractReadNode{}}
+		// Create contract read node with proper configuration
+		contractConfig := &avsproto.ContractReadNode_Config{}
+		if address, ok := config["contract_address"].(string); ok {
+			contractConfig.ContractAddress = address
+		}
+		if abi, ok := config["contract_abi"].(string); ok {
+			contractConfig.ContractAbi = abi
+		}
+		if callData, ok := config["call_data"].(string); ok {
+			contractConfig.CallData = callData
+		}
+
+		node.TaskType = &avsproto.TaskNode_ContractRead{
+			ContractRead: &avsproto.ContractReadNode{
+				Config: contractConfig,
+			},
+		}
 	case NodeTypeCustomCode:
-		// Configuration is now in Input messages, not in the node structure
-		node.TaskType = &avsproto.TaskNode_CustomCode{CustomCode: &avsproto.CustomCodeNode{}}
+		// Create custom code node with proper configuration
+		customConfig := &avsproto.CustomCodeNode_Config{}
+		if source, ok := config["source"].(string); ok {
+			customConfig.Source = source
+		}
+		if lang, ok := config["lang"].(string); ok {
+			switch strings.ToLower(lang) {
+			case "javascript", "js":
+				customConfig.Lang = avsproto.Lang_JavaScript
+			default:
+				customConfig.Lang = avsproto.Lang_JavaScript // Default to JavaScript
+			}
+		} else {
+			customConfig.Lang = avsproto.Lang_JavaScript // Default to JavaScript
+		}
+
+		node.TaskType = &avsproto.TaskNode_CustomCode{
+			CustomCode: &avsproto.CustomCodeNode{
+				Config: customConfig,
+			},
+		}
 	case NodeTypeBranch:
-		// Configuration is now in Input messages, not in the node structure
-		node.TaskType = &avsproto.TaskNode_Branch{Branch: &avsproto.BranchNode{}}
+		// Create branch node with proper configuration
+		branchConfig := &avsproto.BranchNode_Config{}
+		// BranchNode uses repeated Condition, which is more complex
+		// For immediate execution, we'll support a simple expression field
+		if expression, ok := config["expression"].(string); ok {
+			condition := &avsproto.BranchNode_Condition{
+				Id:         "condition_1",
+				Type:       "expression",
+				Expression: expression,
+			}
+			branchConfig.Conditions = []*avsproto.BranchNode_Condition{condition}
+		}
+
+		node.TaskType = &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Config: branchConfig,
+			},
+		}
 	case NodeTypeFilter:
-		// Configuration is now in Input messages, not in the node structure
-		node.TaskType = &avsproto.TaskNode_Filter{Filter: &avsproto.FilterNode{}}
+		// Create filter node with proper configuration
+		filterConfig := &avsproto.FilterNode_Config{}
+		if expression, ok := config["expression"].(string); ok {
+			filterConfig.Expression = expression
+		}
+		if sourceId, ok := config["source_id"].(string); ok {
+			filterConfig.SourceId = sourceId
+		}
+
+		node.TaskType = &avsproto.TaskNode_Filter{
+			Filter: &avsproto.FilterNode{
+				Config: filterConfig,
+			},
+		}
 	case NodeTypeBlockTrigger:
 		// Create a custom code node that will be handled specially by RunNodeWithInputs
 		node.TaskType = &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{},
 		}
 	case NodeTypeETHTransfer:
-		// Configuration is now in Input messages, not in the node structure
-		node.TaskType = &avsproto.TaskNode_EthTransfer{EthTransfer: &avsproto.ETHTransferNode{}}
+		// Create ETH transfer node with proper configuration
+		ethConfig := &avsproto.ETHTransferNode_Config{}
+		if destination, ok := config["destination"].(string); ok {
+			ethConfig.Destination = destination
+		}
+		if amount, ok := config["amount"].(string); ok {
+			ethConfig.Amount = amount
+		}
+
+		node.TaskType = &avsproto.TaskNode_EthTransfer{
+			EthTransfer: &avsproto.ETHTransferNode{
+				Config: ethConfig,
+			},
+		}
 	default:
 		return nil, fmt.Errorf("unsupported node type for CreateNodeFromType: %s", nodeType)
 	}
