@@ -97,12 +97,10 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	contractAddressHex := strings.Clone(contractAddressStr)
 	callDataHex := strings.Clone(callDataStr)
 
-	if strings.Contains(contractAddressHex, "{{") {
-		contractAddressHex = r.vm.preprocessText(contractAddressHex)
-	}
-	if strings.Contains(callDataHex, "{{") {
-		callDataHex = r.vm.preprocessText(callDataHex)
-	}
+	contractAddressHex = r.vm.preprocessTextWithVariableMapping(contractAddressHex)
+
+	// Preprocess calldata for template variables
+	callDataHex = r.vm.preprocessTextWithVariableMapping(callDataHex)
 
 	contractAddress := common.HexToAddress(contractAddressHex)
 	calldata := common.FromHex(callDataHex)
