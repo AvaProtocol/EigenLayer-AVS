@@ -64,7 +64,12 @@ func (w *Worker) ProcessSignal(jid uint64) {
 		if markErr := w.q.markJobDone(job, jobFailed); markErr != nil {
 			w.logger.Error("failed to mark job as failed", "error", markErr, "job_id", jid)
 		}
-		w.logger.Error("failed to perform job", "error", err, "job_id", jid, "task_id", job.Name)
+		w.logger.Info("Job processing failed",
+			"job_id", jid,
+			"task_id", job.Name,
+			"job_type", job.Type,
+			"failure_reason", err.Error(),
+			"job_data", string(job.Data))
 	}
 }
 
