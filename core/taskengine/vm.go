@@ -1053,16 +1053,50 @@ func (v *VM) resolveVariableWithFallback(jsvm *goja.Runtime, varPath string, cur
 		}
 	}
 
-	// Check if this is a node_name.data.field_name pattern for smart camelCase→snake_case fallback
+	// Check if this is a node_name.data.field_name pattern for smart variable resolution fallback
 	if strings.Contains(varPath, ".data.") {
 		parts := strings.Split(varPath, ".data.")
 		if len(parts) == 2 {
 			nodeName := parts[0]
 			fieldPath := parts[1]
 
-			// Only try snake_case fallback if the original field path contains camelCase
-			// Check if any part of the field path looks like camelCase (contains uppercase letters)
 			fieldParts := strings.Split(fieldPath, ".")
+
+			// Check if the original field path contains snake_case (underscores)
+			hasSnakeCase := false
+			for _, part := range fieldParts {
+				if strings.Contains(part, "_") {
+					hasSnakeCase = true
+					break
+				}
+			}
+
+			// If we have snake_case, try converting to camelCase as fallback
+			if hasSnakeCase {
+				// Convert snake_case field path to camelCase - handle nested paths like "field.subfield"
+				camelFieldParts := make([]string, len(fieldParts))
+				for i, part := range fieldParts {
+					camelFieldParts[i] = convertToCamelCase(part)
+				}
+				camelFieldPath := strings.Join(camelFieldParts, ".")
+
+				// Try with camelCase field names
+				camelScript := fmt.Sprintf(`(() => { try { return %s.data.%s; } catch(e) { return undefined; } })()`, nodeName, camelFieldPath)
+				if evaluated, err := jsvm.RunString(camelScript); err == nil {
+					exportedValue := evaluated.Export()
+					if exportedValue != nil && fmt.Sprintf("%v", exportedValue) != "undefined" {
+						if v.logger != nil {
+							v.logger.Debug("variable resolved using camelCase fallback",
+								"originalPath", varPath,
+								"resolvedPath", fmt.Sprintf("%s.data.%s", nodeName, camelFieldPath),
+								"value", exportedValue)
+						}
+						return exportedValue, true
+					}
+				}
+			}
+
+			// Check if the original field path contains camelCase (uppercase letters)
 			hasCamelCase := false
 			for _, part := range fieldParts {
 				for _, r := range part {
@@ -1076,7 +1110,7 @@ func (v *VM) resolveVariableWithFallback(jsvm *goja.Runtime, varPath string, cur
 				}
 			}
 
-			// Only attempt snake_case conversion if we detected camelCase
+			// If we have camelCase, try converting to snake_case as fallback
 			if hasCamelCase {
 				// Convert camelCase field path to snake_case - handle nested paths like "field.subfield"
 				snakeFieldParts := make([]string, len(fieldParts))
