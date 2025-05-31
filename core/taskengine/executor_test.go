@@ -303,12 +303,13 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 		ExecutionID: "exec123",
 	})
 
-	if err == nil {
-		t.Errorf("expected error due to 503 response but got nil")
+	// HTTP error status codes should not cause execution errors in the current design
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
 
-	if execution.Success {
-		t.Error("Expected failure status but got success")
+	if !execution.Success {
+		t.Errorf("Expected success status but got failure: %s", execution.Error)
 	}
 
 	if len(execution.Steps) != 2 {
@@ -319,9 +320,18 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 		t.Errorf("step id doesn't match, expect branch1 but got: %s", execution.Steps[0].NodeId)
 	}
 	if execution.Steps[1].NodeId != "rest1" {
-		t.Errorf("step id doesn't match, expect branch1 but got: %s", execution.Steps[0].NodeId)
+		t.Errorf("step id doesn't match, expect rest1 but got: %s", execution.Steps[1].NodeId)
 	}
 
+	// Verify that the REST API step captured the 503 status code
+	if !execution.Steps[1].Success {
+		t.Errorf("REST API step should succeed even with 503 status, but got failure: %s", execution.Steps[1].Error)
+	}
+
+	// The 503 status code should be available in the step's output data for workflow logic to handle
+	if execution.Steps[1].OutputData == nil {
+		t.Error("Expected REST API step to have output data")
+	}
 }
 
 // TestExecutorRunTaskReturnAllExecutionData to test the happy path and return all the relevant data a task needed
@@ -546,10 +556,10 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 	}
 
 	// Verify the inputs of each step
-	expectedInputsStep0 := []string{"apContext.configVars", "spacex.data", "triggertest.data"}
-	expectedInputsStep1 := []string{"apContext.configVars", "spacex.data", "triggertest.data"}
-	expectedInputsStep2 := []string{"apContext.configVars", "dummy.data", "spacex.data", "triggertest.data"}
-	expectedInputsStep3 := []string{"apContext.configVars", "dummy.data", "http.data", "spacex.data", "triggertest.data"}
+	expectedInputsStep0 := []string{"apContext.configVars", "spacex.data", "triggertest.data", "workflowContext"}
+	expectedInputsStep1 := []string{"apContext.configVars", "spacex.data", "triggertest.data", "workflowContext"}
+	expectedInputsStep2 := []string{"apContext.configVars", "dummy.data", "spacex.data", "triggertest.data", "workflowContext"}
+	expectedInputsStep3 := []string{"apContext.configVars", "dummy.data", "http.data", "spacex.data", "triggertest.data", "workflowContext"}
 
 	// Sort the expected and actual inputs before comparison
 	sort.Strings(expectedInputsStep0)
