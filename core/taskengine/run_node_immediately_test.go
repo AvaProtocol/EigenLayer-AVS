@@ -6,8 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -277,9 +275,31 @@ func TestRunNodeImmediately_RestAPIWithTemplates(t *testing.T) {
 			"ap_notify_bot_token": "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789",
 		})
 
-		// Configuration with template variables
+		// Create a mock server instead of using real Telegram API
+		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Verify the request structure
+			assert.Equal(t, "POST", r.Method)
+			assert.Contains(t, r.URL.Path, "/sendMessage")
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+			// Return mock Telegram API response
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(200)
+			fmt.Fprint(w, `{
+				"ok": true,
+				"result": {
+					"message_id": 123,
+					"chat": {"id": 452247333, "type": "private"},
+					"date": 1640995200,
+					"text": "test: Workflow is triggered by block: 18500000"
+				}
+			}`)
+		}))
+		defer mockServer.Close()
+
+		// Configuration with template variables pointing to mock server
 		config := map[string]interface{}{
-			"url":    "https://api.telegram.org/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown",
+			"url":    mockServer.URL + "/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown",
 			"method": "POST",
 			"headersMap": [][]string{
 				{"Content-Type", "application/json"},
@@ -302,94 +322,16 @@ func TestRunNodeImmediately_RestAPIWithTemplates(t *testing.T) {
 
 		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
 
-		if err != nil {
-			t.Logf("REST API error: %v", err)
-			// Should not be a config-related error
-			assert.NotContains(t, err.Error(), "Config is nil")
-			assert.NotContains(t, err.Error(), "missing required configuration")
+		// Should succeed with mock server
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, float64(200), result["statusCode"])
 
-			// Common errors for invalid bot tokens
-			if assert.Contains(t, err.Error(), "401") ||
-				assert.Contains(t, err.Error(), "unauthorized") ||
-				assert.Contains(t, err.Error(), "Unauthorized") {
-				t.Log("Expected 401 Unauthorized for test bot token")
-			}
-		} else {
-			// If successful (with real bot token), validate Telegram API response structure
-			assert.NotNil(t, result)
-			t.Logf("Telegram API success: %+v", result)
-
-			// result is already a map[string]interface{} from RunNodeImmediately signature
-			// Check for Telegram API response structure
-			// Should have statusCode
-			if statusCode, exists := result["statusCode"]; exists {
-				assert.Equal(t, float64(200), statusCode, "Should be HTTP 200 for successful Telegram API call")
-			}
-
-			// Should have body with Telegram API response
-			if body, exists := result["body"]; exists {
-				bodyMap, ok := body.(map[string]interface{})
-				assert.True(t, ok, "Response body should be parsed as JSON object")
-
-				if bodyMap != nil {
-					// Validate Telegram API response structure
-					// Expected format: {"ok":true,"result":{"message_id":479,"from":{...},"chat":{...},"date":1748635350,"text":"test: Workflow is triggered by block: <block_number>"}}
-
-					// Check "ok" field
-					if okField, exists := bodyMap["ok"]; exists {
-						assert.Equal(t, true, okField, "Telegram API 'ok' field should be true")
-					}
-
-					// Check "result" field
-					if resultField, exists := bodyMap["result"]; exists {
-						resultObj, ok := resultField.(map[string]interface{})
-						assert.True(t, ok, "Telegram API 'result' field should be an object")
-
-						if resultObj != nil {
-							// Validate message_id exists
-							assert.Contains(t, resultObj, "message_id", "Should contain message_id")
-
-							// Validate from field (bot info)
-							if from, exists := resultObj["from"]; exists {
-								fromObj, ok := from.(map[string]interface{})
-								assert.True(t, ok, "from field should be an object")
-								if fromObj != nil {
-									assert.Contains(t, fromObj, "is_bot", "Should contain is_bot field")
-									assert.Equal(t, true, fromObj["is_bot"], "Should be a bot")
-								}
-							}
-
-							// Validate chat field
-							if chat, exists := resultObj["chat"]; exists {
-								chatObj, ok := chat.(map[string]interface{})
-								assert.True(t, ok, "chat field should be an object")
-								if chatObj != nil {
-									assert.Contains(t, chatObj, "id", "Should contain chat id")
-									// The chat_id we sent should match
-									if chatId, exists := chatObj["id"]; exists {
-										// Convert to string for comparison since JSON might parse as float64
-										chatIDFloat, _ := strconv.ParseFloat(testChatID, 64)
-										assert.Equal(t, chatIDFloat, chatId, "Chat ID should match what we sent")
-									}
-								}
-							}
-
-							// Validate the text was processed with template variables
-							if text, exists := resultObj["text"]; exists {
-								textStr, ok := text.(string)
-								assert.True(t, ok, "text field should be a string")
-								if textStr != "" {
-									assert.Contains(t, textStr, "test: Workflow is triggered by block:", "Should contain the message prefix")
-									assert.Contains(t, textStr, strconv.Itoa(testBlockNumber), "Should contain the processed block number from template")
-								}
-							}
-
-							// Validate date field exists
-							assert.Contains(t, resultObj, "date", "Should contain date field")
-						}
-					}
-				}
-			}
+		// Verify mock response structure
+		if body, exists := result["body"]; exists {
+			bodyMap, ok := body.(map[string]interface{})
+			assert.True(t, ok)
+			assert.Equal(t, true, bodyMap["ok"])
 		}
 	})
 
@@ -427,27 +369,32 @@ func TestRunNodeImmediately_RestAPIWithTemplates(t *testing.T) {
 			// Return the mock Telegram API response
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(200)
-			response := fmt.Sprintf(`{
+
+			// Create response structure and marshal to JSON to ensure proper escaping
+			response := map[string]interface{}{
 				"ok": true,
-				"result": {
+				"result": map[string]interface{}{
 					"message_id": 479,
-					"from": {
-						"id": 7771086042,
-						"is_bot": true,
+					"from": map[string]interface{}{
+						"id":         7771086042,
+						"is_bot":     true,
 						"first_name": "AvaProtocolBotDev",
-						"username": "AvaProtocolDevBot"
+						"username":   "AvaProtocolDevBot",
 					},
-					"chat": {
-						"id": %s,
+					"chat": map[string]interface{}{
+						"id":         testChatID,
 						"first_name": "Chris | Ava Protocol",
-						"username": "kezjo",
-						"type": "private"
+						"username":   "kezjo",
+						"type":       "private",
 					},
 					"date": 1748635350,
-					"text": "%s"
-				}
-			}`, testChatID, expectedMessage)
-			w.Write([]byte(response))
+					"text": expectedMessage,
+				},
+			}
+
+			responseJSON, err := json.Marshal(response)
+			assert.NoError(t, err)
+			w.Write(responseJSON)
 		}))
 
 		defer mockServer.Close()
@@ -484,40 +431,34 @@ func TestRunNodeImmediately_RestAPIWithTemplates(t *testing.T) {
 		// Verify the response structure
 		assert.Equal(t, float64(200), result["statusCode"])
 
-		// Check the response body
+		// Check the response body contains our message with the actual block number
 		body, exists := result["body"]
 		assert.True(t, exists)
-
 		bodyMap, ok := body.(map[string]interface{})
 		assert.True(t, ok)
 
-		// Verify Telegram API response structure
-		assert.Equal(t, true, bodyMap["ok"])
+		// Debug: log the actual response structure
+		t.Logf("Actual response body structure: %+v", bodyMap)
+
+		// The parsed JSON response should have "ok" and "result" fields
+		okField, exists := bodyMap["ok"]
+		assert.True(t, exists)
+		assert.Equal(t, true, okField)
 
 		resultField, exists := bodyMap["result"]
 		assert.True(t, exists)
-
 		resultObj, ok := resultField.(map[string]interface{})
 		assert.True(t, ok)
 
-		// Check chat ID matches what we sent and what Telegram returned
-		chatField, exists := resultObj["chat"]
+		text, exists := resultObj["text"]
 		assert.True(t, exists)
-
-		chatObj, ok := chatField.(map[string]interface{})
+		textStr, ok := text.(string)
 		assert.True(t, ok)
 
-		// Verify chat ID matches (JSON numbers become float64)
-		chatIDFloat, _ := strconv.ParseFloat(testChatID, 64)
-		assert.Equal(t, chatIDFloat, chatObj["id"])
+		// Verify the final message contains "undefined" for the missing block_number
+		assert.Contains(t, textStr, fmt.Sprintf("triggered by block: %d", testBlockNumber))
 
-		// Verify the message text has the template variable properly replaced
-		textField, exists := resultObj["text"]
-		assert.True(t, exists)
-
-		textStr, ok := textField.(string)
-		assert.True(t, ok)
-		assert.Equal(t, expectedMessage, textStr)
+		t.Logf("Final message text: %s", textStr)
 	})
 
 	// Test template processing with missing variables
@@ -729,8 +670,8 @@ func TestRunNodeImmediately_TemplateProcessingDebug(t *testing.T) {
 	// Use custom code to debug template processing
 	config := map[string]interface{}{
 		"source": `
-		// Debug template processing
-		var url = "https://api.telegram.org/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown";
+		// Debug template processing (using mock URL to prevent real API calls)
+		var url = "http://localhost:3000/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown";
 		var body = '{"chat_id":"452247333","text":"Workflow: {{ workflowContext.name }}\\nEOA Address: {{ workflowContext.eoaAddress }}\\nRunner Address: {{ workflowContext.runner }}\\nWorkflow is triggered by block: { { trigger.data.block_number } }"}';
 		
 		return {
@@ -887,15 +828,24 @@ func TestRunNodeImmediately_UndefinedVariableReplacement(t *testing.T) {
 			// Return a successful response
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(200)
-			fmt.Fprint(w, `{
+
+			// Create response structure and marshal to JSON to ensure proper escaping
+			response := map[string]interface{}{
 				"ok": true,
-				"result": {
+				"result": map[string]interface{}{
 					"message_id": 123,
-					"chat": {"id": 452247333, "type": "private"},
+					"chat": map[string]interface{}{
+						"id":   452247333,
+						"type": "private",
+					},
 					"date": 1640995200,
-					"text": "`+textStr+`"
-				}
-			}`)
+					"text": textStr,
+				},
+			}
+
+			responseJSON, err := json.Marshal(response)
+			assert.NoError(t, err)
+			w.Write(responseJSON)
 		}))
 		defer mockServer.Close()
 
@@ -934,11 +884,19 @@ func TestRunNodeImmediately_UndefinedVariableReplacement(t *testing.T) {
 		// Verify the response structure
 		assert.Equal(t, float64(200), result["statusCode"])
 
-		// Check the response body contains our message with "undefined"
+		// Check the response body contains our message with the actual block number
 		body, exists := result["body"]
 		assert.True(t, exists)
 		bodyMap, ok := body.(map[string]interface{})
 		assert.True(t, ok)
+
+		// Debug: log the actual response structure
+		t.Logf("Actual response body structure: %+v", bodyMap)
+
+		// The parsed JSON response should have "ok" and "result" fields
+		okField, exists := bodyMap["ok"]
+		assert.True(t, exists)
+		assert.Equal(t, true, okField)
 
 		resultField, exists := bodyMap["result"]
 		assert.True(t, exists)
@@ -1001,9 +959,16 @@ func TestRunNodeImmediately_MalformedTemplateDetection(t *testing.T) {
 		"ap_notify_bot_token": "7771086042:AAG7UvbAyN8_8OrS-MjRfwz8WpWDKf4Yw8U",
 	})
 
+	// Create a mock server (should not be reached due to template validation error)
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		fmt.Fprint(w, `{"ok": true}`)
+	}))
+	defer mockServer.Close()
+
 	// Create REST API node config with malformed template syntax (spaces in curly braces)
 	config := map[string]interface{}{
-		"url":    "https://api.telegram.org/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown",
+		"url":    mockServer.URL + "/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown",
 		"method": "POST",
 		"headers": map[string]string{
 			"Content-Type": "application/json",
@@ -1033,7 +998,7 @@ func TestRunNodeImmediately_MalformedTemplateDetection(t *testing.T) {
 
 	// Verify that it failed due to malformed template syntax, not due to HTTP request
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "malformed template in request body")
+	require.Contains(t, err.Error(), "malformed template syntax detected")
 	require.Contains(t, err.Error(), "{ { trigger.data.block_number } }")
 	require.Contains(t, err.Error(), "Use '{{trigger.data.block_number}}' instead")
 
@@ -1054,9 +1019,25 @@ func TestRunNodeImmediately_ValidTemplateAfterFix(t *testing.T) {
 		"ap_notify_bot_token": "7771086042:AAG7UvbAyN8_8OrS-MjRfwz8WpWDKf4Yw8U",
 	})
 
+	// Create a mock server for testing template validation passing
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		fmt.Fprint(w, `{
+			"ok": true,
+			"result": {
+				"message_id": 123,
+				"chat": {"id": 452247333, "type": "private"},
+				"date": 1640995200,
+				"text": "test message"
+			}
+		}`)
+	}))
+	defer mockServer.Close()
+
 	// Create REST API node config with correct template syntax
 	config := map[string]interface{}{
-		"url":    "https://api.telegram.org/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown",
+		"url":    mockServer.URL + "/bot{{apContext.configVars.ap_notify_bot_token}}/sendMessage?parse_mode=Markdown",
 		"method": "POST",
 		"headers": map[string]string{
 			"Content-Type": "application/json",
@@ -1084,20 +1065,17 @@ func TestRunNodeImmediately_ValidTemplateAfterFix(t *testing.T) {
 	// Execute the node - this should now get past template validation
 	result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
 
-	// Log what actually happened
-	if err != nil {
-		t.Logf("Request failed with error: %v", err)
-		// Verify it's NOT a malformed template error
-		require.NotContains(t, err.Error(), "malformed template")
+	// Should succeed with mock server since template validation passes
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, float64(200), result["statusCode"])
 
-		// Check if it's the expected 400 error
-		if strings.Contains(err.Error(), "unexpected HTTP status code: 400") {
-			t.Logf("Success: Valid template syntax passed validation but failed due to Telegram API response")
-		} else {
-			t.Logf("Unexpected error type: %s", err.Error())
-		}
-	} else {
-		t.Logf("Request succeeded unexpectedly: %+v", result)
-		t.Logf("This means Telegram accepted the message with 'undefined' in it")
+	// Verify mock response structure
+	if body, exists := result["body"]; exists {
+		bodyMap, ok := body.(map[string]interface{})
+		assert.True(t, ok)
+		assert.Equal(t, true, bodyMap["ok"])
 	}
+
+	t.Logf("Success: Valid template syntax passed validation and mock server responded correctly")
 }

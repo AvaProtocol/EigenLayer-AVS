@@ -101,72 +101,68 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	if r.vm.logger != nil {
 		r.vm.logger.Debug("REST API URL before template processing", "url", url)
 	}
-	url = r.vm.preprocessText(url)
+	url = r.vm.preprocessTextWithVariableMapping(url)
 	if r.vm.logger != nil {
 		r.vm.logger.Debug("REST API URL after template processing", "url", url)
 	}
 
-	body = r.vm.preprocessText(body)
+	body = r.vm.preprocessTextWithVariableMapping(body)
 
 	// Process headers map for template variables
 	processedHeaders := make(map[string]string)
 	for key, value := range headers {
-		processedKey := r.vm.preprocessText(key)
-		processedValue := r.vm.preprocessText(value)
+		processedKey := r.vm.preprocessTextWithVariableMapping(key)
+		processedValue := r.vm.preprocessTextWithVariableMapping(value)
 		processedHeaders[processedKey] = processedValue
 	}
 
 	// Validate template format in URL, body, and headers for malformed syntax
 	if err := r.vm.validateTemplateFormat(url); err != nil {
-		errorMsg := fmt.Sprintf("malformed template in URL: %v", err)
 		if r.vm.logger != nil {
 			r.vm.logger.Error("REST API URL contains malformed template syntax", "url", url, "error", err)
 		}
 		executionLogStep.Success = false
-		executionLogStep.Error = errorMsg
+		executionLogStep.Error = err.Error()
 		executionLogStep.EndAt = time.Now().UnixMilli()
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
 		executionLogStep.Log = logBuilder.String()
-		return executionLogStep, fmt.Errorf(errorMsg)
+		return executionLogStep, err
 	}
 
 	if err := r.vm.validateTemplateFormat(body); err != nil {
-		errorMsg := fmt.Sprintf("malformed template in request body: %v", err)
 		if r.vm.logger != nil {
 			r.vm.logger.Error("REST API request body contains malformed template syntax", "body", body, "error", err)
 		}
 		executionLogStep.Success = false
-		executionLogStep.Error = errorMsg
+		executionLogStep.Error = err.Error()
 		executionLogStep.EndAt = time.Now().UnixMilli()
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
 		executionLogStep.Log = logBuilder.String()
-		return executionLogStep, fmt.Errorf(errorMsg)
+		return executionLogStep, err
 	}
 
 	for key, value := range processedHeaders {
 		if err := r.vm.validateTemplateFormat(key); err != nil {
-			errorMsg := fmt.Sprintf("malformed template in header key '%s': %v", key, err)
 			if r.vm.logger != nil {
 				r.vm.logger.Error("REST API header key contains malformed template syntax", "key", key, "error", err)
 			}
 			executionLogStep.Success = false
-			executionLogStep.Error = errorMsg
+			executionLogStep.Error = err.Error()
 			executionLogStep.EndAt = time.Now().UnixMilli()
-			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
 			executionLogStep.Log = logBuilder.String()
-			return executionLogStep, fmt.Errorf(errorMsg)
+			return executionLogStep, err
 		}
 		if err := r.vm.validateTemplateFormat(value); err != nil {
-			errorMsg := fmt.Sprintf("malformed template in header value for '%s': %v", key, err)
 			if r.vm.logger != nil {
 				r.vm.logger.Error("REST API header value contains malformed template syntax", "key", key, "value", value, "error", err)
 			}
 			executionLogStep.Success = false
-			executionLogStep.Error = errorMsg
+			executionLogStep.Error = err.Error()
 			executionLogStep.EndAt = time.Now().UnixMilli()
-			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
 			executionLogStep.Log = logBuilder.String()
-			return executionLogStep, fmt.Errorf(errorMsg)
+			return executionLogStep, err
 		}
 	}
 
