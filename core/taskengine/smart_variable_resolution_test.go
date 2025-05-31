@@ -92,20 +92,16 @@ func TestSmartVariableResolution(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		// Verify the variables were resolved correctly
-		assert.Equal(t, float64(200), result["statusCode"])
+		// With new behavior, successful (2xx) responses return the body directly
+		// The mock server returns JSON like: {"method": "POST", "url": "...", "data": "{...}", "headers": {...}}
+		assert.Equal(t, "POST", result["method"])
 
-		if body, ok := result["body"]; ok {
-			bodyMap, ok := body.(map[string]interface{})
-			assert.True(t, ok)
-
-			// Check the data field which contains the JSON body that was sent
-			if data, ok := bodyMap["data"]; ok {
-				dataStr := fmt.Sprintf("%v", data)
-				assert.Contains(t, dataStr, "18500000", "block_number should be resolved to blockNumber")
-				assert.Contains(t, dataStr, "0xabc123def456", "block_hash should be resolved to blockHash")
-				assert.Contains(t, dataStr, "15000000", "gas_limit should be resolved to gasLimit")
-			}
+		// Check the data field which contains the JSON body that was sent
+		if data, ok := result["data"]; ok {
+			dataStr := fmt.Sprintf("%v", data)
+			assert.Contains(t, dataStr, "18500000", "block_number should be resolved to blockNumber")
+			assert.Contains(t, dataStr, "0xabc123def456", "block_hash should be resolved to blockHash")
+			assert.Contains(t, dataStr, "15000000", "gas_limit should be resolved to gasLimit")
 		}
 	})
 
@@ -137,17 +133,14 @@ func TestSmartVariableResolution(t *testing.T) {
 		// Should succeed
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Equal(t, float64(200), result["statusCode"])
 
-		if body, ok := result["body"]; ok {
-			bodyMap, ok := body.(map[string]interface{})
-			assert.True(t, ok)
+		// With new behavior, successful (2xx) responses return the body directly
+		assert.Equal(t, "POST", result["method"])
 
-			if data, ok := bodyMap["data"]; ok {
-				dataStr := fmt.Sprintf("%v", data)
-				assert.Contains(t, dataStr, "18500000")
-				assert.Contains(t, dataStr, "0xabc123def456")
-			}
+		if data, ok := result["data"]; ok {
+			dataStr := fmt.Sprintf("%v", data)
+			assert.Contains(t, dataStr, "18500000")
+			assert.Contains(t, dataStr, "0xabc123def456")
 		}
 	})
 
@@ -180,18 +173,15 @@ func TestSmartVariableResolution(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Equal(t, float64(200), result["statusCode"])
 
-		if body, ok := result["body"]; ok {
-			bodyMap, ok := body.(map[string]interface{})
-			assert.True(t, ok)
+		// With new behavior, successful (2xx) responses return the body directly
+		assert.Equal(t, "POST", result["method"])
 
-			if data, ok := bodyMap["data"]; ok {
-				dataStr := fmt.Sprintf("%v", data)
-				assert.Contains(t, dataStr, "18500000") // block_number resolved from blockNumber
-				assert.Contains(t, dataStr, "5000000")  // gasUsed direct access
-				assert.Contains(t, dataStr, "15000000") // total_gas resolved from totalGas
-			}
+		if data, ok := result["data"]; ok {
+			dataStr := fmt.Sprintf("%v", data)
+			assert.Contains(t, dataStr, "18500000") // block_number resolved from blockNumber
+			assert.Contains(t, dataStr, "5000000")  // gasUsed direct access
+			assert.Contains(t, dataStr, "15000000") // total_gas resolved from totalGas
 		}
 	})
 
@@ -220,17 +210,14 @@ func TestSmartVariableResolution(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Equal(t, float64(200), result["statusCode"])
 
-		if body, ok := result["body"]; ok {
-			bodyMap, ok := body.(map[string]interface{})
-			assert.True(t, ok)
+		// With new behavior, successful (2xx) responses return the body directly
+		assert.Equal(t, "POST", result["method"])
 
-			if data, ok := bodyMap["data"]; ok {
-				dataStr := fmt.Sprintf("%v", data)
-				assert.Contains(t, dataStr, "test_token_123") // from macro secrets
-				assert.Contains(t, dataStr, "test_user_123")  // direct access to snake_case
-			}
+		if data, ok := result["data"]; ok {
+			dataStr := fmt.Sprintf("%v", data)
+			assert.Contains(t, dataStr, "test_token_123") // from macro secrets
+			assert.Contains(t, dataStr, "test_user_123")  // direct access to snake_case
 		}
 	})
 
@@ -264,17 +251,14 @@ func TestSmartVariableResolution(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Equal(t, float64(200), result["statusCode"])
 
-		if body, ok := result["body"]; ok {
-			bodyMap, ok := body.(map[string]interface{})
-			assert.True(t, ok)
+		// With new behavior, successful (2xx) responses return the body directly
+		assert.Equal(t, "POST", result["method"])
 
-			if data, ok := bodyMap["data"]; ok {
-				dataStr := fmt.Sprintf("%v", data)
-				assert.Contains(t, dataStr, "secret_key_123") // api_key resolved from apiKey
-				assert.Contains(t, dataStr, "200")            // status_code resolved from statusCode
-			}
+		if data, ok := result["data"]; ok {
+			dataStr := fmt.Sprintf("%v", data)
+			assert.Contains(t, dataStr, "secret_key_123") // api_key resolved from apiKey
+			assert.Contains(t, dataStr, "200")            // status_code resolved from statusCode
 		}
 	})
 }

@@ -329,14 +329,9 @@ func TestRunNodeImmediately_RestAPIWithTemplates(t *testing.T) {
 		// Should succeed with mock server
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Equal(t, float64(200), result["statusCode"])
 
-		// Verify mock response structure
-		if body, exists := result["body"]; exists {
-			bodyMap, ok := body.(map[string]interface{})
-			assert.True(t, ok)
-			assert.Equal(t, true, bodyMap["ok"])
-		}
+		// With new behavior, successful (2xx) responses return the body directly
+		assert.Equal(t, true, result["ok"])
 	})
 
 	// Test validation logic with simulated successful Telegram response
@@ -432,24 +427,18 @@ func TestRunNodeImmediately_RestAPIWithTemplates(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		// Verify the response structure
-		assert.Equal(t, float64(200), result["statusCode"])
-
-		// Check the response body contains our message with the actual block number
-		body, exists := result["body"]
-		assert.True(t, exists)
-		bodyMap, ok := body.(map[string]interface{})
-		assert.True(t, ok)
+		// With new behavior, successful (2xx) responses return the body directly
+		// The mock server returns the Telegram response JSON directly
 
 		// Debug: log the actual response structure
-		t.Logf("Actual response body structure: %+v", bodyMap)
+		t.Logf("Actual response body structure: %+v", result)
 
 		// The parsed JSON response should have "ok" and "result" fields
-		okField, exists := bodyMap["ok"]
+		okField, exists := result["ok"]
 		assert.True(t, exists)
 		assert.Equal(t, true, okField)
 
-		resultField, exists := bodyMap["result"]
+		resultField, exists := result["result"]
 		assert.True(t, exists)
 		resultObj, ok := resultField.(map[string]interface{})
 		assert.True(t, ok)
@@ -459,7 +448,7 @@ func TestRunNodeImmediately_RestAPIWithTemplates(t *testing.T) {
 		textStr, ok := text.(string)
 		assert.True(t, ok)
 
-		// Verify the final message contains "undefined" for the missing block_number
+		// Verify the final message contains the processed template with the actual block number
 		assert.Contains(t, textStr, fmt.Sprintf("triggered by block: %d", testBlockNumber))
 
 		t.Logf("Final message text: %s", textStr)
@@ -881,28 +870,22 @@ func TestRunNodeImmediately_UndefinedVariableReplacement(t *testing.T) {
 
 		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
 
-		// Should succeed now that JSON is valid
+		// Should succeed with mock server
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		// Verify the response structure
-		assert.Equal(t, float64(200), result["statusCode"])
-
-		// Check the response body contains our message with the actual block number
-		body, exists := result["body"]
-		assert.True(t, exists)
-		bodyMap, ok := body.(map[string]interface{})
-		assert.True(t, ok)
+		// With new behavior, successful (2xx) responses return the body directly
+		// The mock server returns the Telegram response JSON directly
 
 		// Debug: log the actual response structure
-		t.Logf("Actual response body structure: %+v", bodyMap)
+		t.Logf("Actual response body structure: %+v", result)
 
 		// The parsed JSON response should have "ok" and "result" fields
-		okField, exists := bodyMap["ok"]
+		okField, exists := result["ok"]
 		assert.True(t, exists)
 		assert.Equal(t, true, okField)
 
-		resultField, exists := bodyMap["result"]
+		resultField, exists := result["result"]
 		assert.True(t, exists)
 		resultObj, ok := resultField.(map[string]interface{})
 		assert.True(t, ok)
@@ -1072,16 +1055,20 @@ func TestRunNodeImmediately_ValidTemplateAfterFix(t *testing.T) {
 	// Should succeed with mock server since template validation passes
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.Equal(t, float64(200), result["statusCode"])
 
-	// Verify mock response structure
-	if body, exists := result["body"]; exists {
-		bodyMap, ok := body.(map[string]interface{})
+	// With new behavior, successful (2xx) responses return the body directly
+	// The mock server returns: {"ok": true, "result": {"message_id": 123, ...}}
+	assert.Equal(t, true, result["ok"])
+
+	// Verify the result structure from the mock response
+	if resultField, exists := result["result"]; exists {
+		resultMap, ok := resultField.(map[string]interface{})
 		assert.True(t, ok)
-		assert.Equal(t, true, bodyMap["ok"])
+		assert.Equal(t, float64(123), resultMap["message_id"])
 	}
 
 	t.Logf("Success: Valid template syntax passed validation and mock server responded correctly")
+	t.Logf("Response body returned directly (new behavior): %+v", result)
 }
 
 // Test RunTriggerRPC with ManualTrigger to verify protobuf output data
