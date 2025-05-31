@@ -253,36 +253,10 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		return executionLogStep, fmt.Errorf(errorMsg)
 	}
 
-	// Check for HTTP error status codes
-	if response.StatusCode() >= 400 {
-		responseBody := string(response.Body())
-		errorMsg := fmt.Sprintf("unexpected HTTP status code: %d", response.StatusCode())
-
-		// Add detailed error logging
-		if r.vm.logger != nil {
-			r.vm.logger.Error("REST API request failed with error status code",
-				"statusCode", response.StatusCode(),
-				"method", method,
-				"url", url,
-				"requestBody", body,
-				"responseBody", responseBody,
-				"responseHeaders", response.Header())
-		}
-
-		executionLogStep.Success = false
-		executionLogStep.Error = errorMsg
-		executionLogStep.EndAt = time.Now().UnixMilli()
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
-		logBuilder.WriteString(fmt.Sprintf("Response body: %s\n", responseBody))
-		logBuilder.WriteString(fmt.Sprintf("Response headers: %v\n", response.Header()))
-		executionLogStep.Log = logBuilder.String()
-		return executionLogStep, fmt.Errorf(errorMsg)
-	}
-
-	logBuilder.WriteString(fmt.Sprintf("Request completed successfully with status: %d\n", response.StatusCode()))
+	logBuilder.WriteString(fmt.Sprintf("Request completed with status: %d\n", response.StatusCode()))
 	logBuilder.WriteString(fmt.Sprintf("Response headers: %v\n", response.Header()))
 
-	// Process response
+	// Process response - store full response structure for workflow compatibility
 	responseData := r.processResponse(response)
 
 	// Convert the response to protobuf Value for storage
@@ -337,7 +311,7 @@ func (r *RestProcessor) parseHeadersMap(headersMapVal interface{}, headers map[s
 	}
 }
 
-// processResponse converts HTTP response to structured data
+// processResponse converts HTTP response to structured data for workflow compatibility
 func (r *RestProcessor) processResponse(response *resty.Response) map[string]interface{} {
 	responseData := make(map[string]interface{})
 
