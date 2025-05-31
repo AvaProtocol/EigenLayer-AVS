@@ -17,6 +17,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/apconfig"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/signer"
 	"github.com/AvaProtocol/EigenLayer-AVS/metrics"
+	avspb "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	rpccalls "github.com/Layr-Labs/eigensdk-go/metrics/collectors/rpc_calls"
 	"github.com/Layr-Labs/eigensdk-go/nodeapi"
 	"github.com/Layr-Labs/eigensdk-go/signerv2"
@@ -155,6 +156,15 @@ type Operator struct {
 	eventTrigger *triggerengine.EventTrigger
 	blockTrigger *triggerengine.BlockTrigger
 	timeTrigger  *triggerengine.TimeTrigger
+
+	// Error debouncing to prevent log spam - track last time we logged specific error types
+	lastPingErrorTime   time.Time
+	lastStreamErrorTime time.Time
+	lastPingErrorType   string
+	lastStreamErrorType string
+
+	// Success message debouncing to prevent log spam
+	lastPingSuccessTime time.Time
 }
 
 // validateRPCEndpoint checks if the RPC endpoint is accessible
@@ -484,7 +494,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	}
 	operator.operatorId = operatorId
 	if operator.blsKeypair != nil {
-		logger.Info("Operator info",
+		logger.Debug("Operator info",
 			"operatorId", operatorId,
 			"operatorAddr", c.OperatorAddress,
 			"signerAddr", operator.signerAddress,
@@ -493,7 +503,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 			"prmMetricsEndpoint", fmt.Sprintf("%s/metrics/", operator.config.EigenMetricsIpPortAddress),
 		)
 	} else {
-		logger.Info("Operator info",
+		logger.Debug("Operator info",
 			"operatorId", operatorId,
 			"operatorAddr", c.OperatorAddress,
 			"signerAddr", operator.signerAddress,
@@ -558,14 +568,65 @@ func (o *Operator) retryConnect() error {
 			SignerAddr:      o.operatorAddr,
 		}),
 	)
-	o.logger.Info("attempt connect to aggregator", "aggregatorAddress", o.config.AggregatorServerIpPortAddress)
+	o.logger.Info("🔗 Attempting to connect to aggregator service",
+		"aggregator_address", o.config.AggregatorServerIpPortAddress,
+		"operator", o.config.OperatorAddress)
+
 	var err error
 	o.aggregatorConn, err = grpc.NewClient(o.config.AggregatorServerIpPortAddress, opts...)
 	if err != nil {
+		if strings.Contains(err.Error(), "connection refused") {
+			o.logger.Info("❌ Cannot create gRPC client for aggregator",
+				"aggregator_address", o.config.AggregatorServerIpPortAddress,
+				"operator", o.config.OperatorAddress,
+				"raw_error", err)
+		} else {
+			o.logger.Info("❌ Failed to create gRPC client for aggregator",
+				"aggregator_address", o.config.AggregatorServerIpPortAddress,
+				"operator", o.config.OperatorAddress,
+				"raw_error", err)
+		}
 		return err
 	}
+
 	o.nodeRpcClient = avsproto.NewNodeClient(o.aggregatorConn)
-	o.logger.Info("connected to aggregator", "aggregatorAddress", o.config.AggregatorServerIpPortAddress)
+
+	// Actually test the connection by making a ping call
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, pingErr := o.nodeRpcClient.Ping(ctx, &avspb.Checkin{
+		Address:   o.config.OperatorAddress,
+		Id:        "connection-test",
+		Signature: "test",
+		Version:   "connection-test",
+	})
+
+	if pingErr != nil {
+		if strings.Contains(pingErr.Error(), "connection refused") {
+			o.logger.Info("❌ Cannot connect to aggregator - service appears to be down",
+				"aggregator_address", o.config.AggregatorServerIpPortAddress,
+				"operator", o.config.OperatorAddress,
+				"raw_error", pingErr)
+		} else if strings.Contains(pingErr.Error(), "no such host") || strings.Contains(pingErr.Error(), "name resolution") {
+			o.logger.Info("❌ Cannot resolve aggregator hostname",
+				"aggregator_address", o.config.AggregatorServerIpPortAddress,
+				"operator", o.config.OperatorAddress,
+				"raw_error", pingErr)
+		} else {
+			o.logger.Info("❌ Failed to establish connection to aggregator",
+				"aggregator_address", o.config.AggregatorServerIpPortAddress,
+				"operator", o.config.OperatorAddress,
+				"raw_error", pingErr)
+		}
+		// Close the connection since we couldn't actually connect
+		o.aggregatorConn.Close()
+		return pingErr
+	}
+
+	o.logger.Info("✅ Successfully connected to aggregator service",
+		"aggregator_address", o.config.AggregatorServerIpPortAddress,
+		"operator", o.config.OperatorAddress)
 	return nil
 }
 
