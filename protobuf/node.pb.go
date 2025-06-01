@@ -404,11 +404,22 @@ func (x *AckMessageReq) GetId() string {
 }
 
 type NotifyTriggersReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
-	Signature     string                 `protobuf:"bytes,2,opt,name=signature,proto3" json:"signature,omitempty"`
-	TaskId        string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	Reason        *TriggerReason         `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Address   string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Signature string                 `protobuf:"bytes,2,opt,name=signature,proto3" json:"signature,omitempty"`
+	TaskId    string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	// Flattened from TriggerReason: Use the top-level TriggerType enum for consistency
+	TriggerType TriggerType `protobuf:"varint,4,opt,name=trigger_type,json=triggerType,proto3,enum=aggregator.TriggerType" json:"trigger_type,omitempty"`
+	// Flattened from TriggerReason: trigger output data based on type
+	//
+	// Types that are valid to be assigned to TriggerOutput:
+	//
+	//	*NotifyTriggersReq_BlockTrigger
+	//	*NotifyTriggersReq_FixedTimeTrigger
+	//	*NotifyTriggersReq_CronTrigger
+	//	*NotifyTriggersReq_EventTrigger
+	//	*NotifyTriggersReq_ManualTrigger
+	TriggerOutput isNotifyTriggersReq_TriggerOutput `protobuf_oneof:"trigger_output"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -464,12 +475,98 @@ func (x *NotifyTriggersReq) GetTaskId() string {
 	return ""
 }
 
-func (x *NotifyTriggersReq) GetReason() *TriggerReason {
+func (x *NotifyTriggersReq) GetTriggerType() TriggerType {
 	if x != nil {
-		return x.Reason
+		return x.TriggerType
+	}
+	return TriggerType_TRIGGER_TYPE_UNSPECIFIED
+}
+
+func (x *NotifyTriggersReq) GetTriggerOutput() isNotifyTriggersReq_TriggerOutput {
+	if x != nil {
+		return x.TriggerOutput
 	}
 	return nil
 }
+
+func (x *NotifyTriggersReq) GetBlockTrigger() *BlockTrigger_Output {
+	if x != nil {
+		if x, ok := x.TriggerOutput.(*NotifyTriggersReq_BlockTrigger); ok {
+			return x.BlockTrigger
+		}
+	}
+	return nil
+}
+
+func (x *NotifyTriggersReq) GetFixedTimeTrigger() *FixedTimeTrigger_Output {
+	if x != nil {
+		if x, ok := x.TriggerOutput.(*NotifyTriggersReq_FixedTimeTrigger); ok {
+			return x.FixedTimeTrigger
+		}
+	}
+	return nil
+}
+
+func (x *NotifyTriggersReq) GetCronTrigger() *CronTrigger_Output {
+	if x != nil {
+		if x, ok := x.TriggerOutput.(*NotifyTriggersReq_CronTrigger); ok {
+			return x.CronTrigger
+		}
+	}
+	return nil
+}
+
+func (x *NotifyTriggersReq) GetEventTrigger() *EventTrigger_Output {
+	if x != nil {
+		if x, ok := x.TriggerOutput.(*NotifyTriggersReq_EventTrigger); ok {
+			return x.EventTrigger
+		}
+	}
+	return nil
+}
+
+func (x *NotifyTriggersReq) GetManualTrigger() *ManualTrigger_Output {
+	if x != nil {
+		if x, ok := x.TriggerOutput.(*NotifyTriggersReq_ManualTrigger); ok {
+			return x.ManualTrigger
+		}
+	}
+	return nil
+}
+
+type isNotifyTriggersReq_TriggerOutput interface {
+	isNotifyTriggersReq_TriggerOutput()
+}
+
+type NotifyTriggersReq_BlockTrigger struct {
+	BlockTrigger *BlockTrigger_Output `protobuf:"bytes,5,opt,name=block_trigger,json=blockTrigger,proto3,oneof"`
+}
+
+type NotifyTriggersReq_FixedTimeTrigger struct {
+	FixedTimeTrigger *FixedTimeTrigger_Output `protobuf:"bytes,6,opt,name=fixed_time_trigger,json=fixedTimeTrigger,proto3,oneof"`
+}
+
+type NotifyTriggersReq_CronTrigger struct {
+	CronTrigger *CronTrigger_Output `protobuf:"bytes,7,opt,name=cron_trigger,json=cronTrigger,proto3,oneof"`
+}
+
+type NotifyTriggersReq_EventTrigger struct {
+	EventTrigger *EventTrigger_Output `protobuf:"bytes,8,opt,name=event_trigger,json=eventTrigger,proto3,oneof"`
+}
+
+type NotifyTriggersReq_ManualTrigger struct {
+	ManualTrigger *ManualTrigger_Output `protobuf:"bytes,9,opt,name=manual_trigger,json=manualTrigger,proto3,oneof"`
+}
+
+func (*NotifyTriggersReq_BlockTrigger) isNotifyTriggersReq_TriggerOutput() {}
+
+func (*NotifyTriggersReq_FixedTimeTrigger) isNotifyTriggersReq_TriggerOutput() {}
+
+func (*NotifyTriggersReq_CronTrigger) isNotifyTriggersReq_TriggerOutput() {}
+
+func (*NotifyTriggersReq_EventTrigger) isNotifyTriggersReq_TriggerOutput() {}
+
+func (*NotifyTriggersReq_ManualTrigger) isNotifyTriggersReq_TriggerOutput() {}
 
 type NotifyTriggersResp struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -687,12 +784,18 @@ const file_node_proto_rawDesc = "" +
 	"expired_at\x18\x03 \x01(\x03R\texpiredAt\x121\n" +
 	"\atrigger\x18\x04 \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\"\x1f\n" +
 	"\rAckMessageReq\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x97\x01\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\xa7\x04\n" +
 	"\x11NotifyTriggersReq\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x1c\n" +
 	"\tsignature\x18\x02 \x01(\tR\tsignature\x12\x17\n" +
-	"\atask_id\x18\x03 \x01(\tR\x06taskId\x121\n" +
-	"\x06reason\x18\x04 \x01(\v2\x19.aggregator.TriggerReasonR\x06reason\"O\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12:\n" +
+	"\ftrigger_type\x18\x04 \x01(\x0e2\x17.aggregator.TriggerTypeR\vtriggerType\x12F\n" +
+	"\rblock_trigger\x18\x05 \x01(\v2\x1f.aggregator.BlockTrigger.OutputH\x00R\fblockTrigger\x12S\n" +
+	"\x12fixed_time_trigger\x18\x06 \x01(\v2#.aggregator.FixedTimeTrigger.OutputH\x00R\x10fixedTimeTrigger\x12C\n" +
+	"\fcron_trigger\x18\a \x01(\v2\x1e.aggregator.CronTrigger.OutputH\x00R\vcronTrigger\x12F\n" +
+	"\revent_trigger\x18\b \x01(\v2\x1f.aggregator.EventTrigger.OutputH\x00R\feventTrigger\x12I\n" +
+	"\x0emanual_trigger\x18\t \x01(\v2 .aggregator.ManualTrigger.OutputH\x00R\rmanualTriggerB\x10\n" +
+	"\x0etrigger_output\"O\n" +
 	"\x12NotifyTriggersResp\x129\n" +
 	"\n" +
 	"updated_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt*a\n" +
@@ -737,32 +840,42 @@ var file_node_proto_goTypes = []any{
 	(*Checkin_Status)(nil),                // 8: aggregator.Checkin.Status
 	(*SyncMessagesResp_TaskMetadata)(nil), // 9: aggregator.SyncMessagesResp.TaskMetadata
 	(*timestamppb.Timestamp)(nil),         // 10: google.protobuf.Timestamp
-	(*TriggerReason)(nil),                 // 11: aggregator.TriggerReason
-	(*TaskTrigger)(nil),                   // 12: aggregator.TaskTrigger
-	(*wrapperspb.BoolValue)(nil),          // 13: google.protobuf.BoolValue
+	(TriggerType)(0),                      // 11: aggregator.TriggerType
+	(*BlockTrigger_Output)(nil),           // 12: aggregator.BlockTrigger.Output
+	(*FixedTimeTrigger_Output)(nil),       // 13: aggregator.FixedTimeTrigger.Output
+	(*CronTrigger_Output)(nil),            // 14: aggregator.CronTrigger.Output
+	(*EventTrigger_Output)(nil),           // 15: aggregator.EventTrigger.Output
+	(*ManualTrigger_Output)(nil),          // 16: aggregator.ManualTrigger.Output
+	(*TaskTrigger)(nil),                   // 17: aggregator.TaskTrigger
+	(*wrapperspb.BoolValue)(nil),          // 18: google.protobuf.BoolValue
 }
 var file_node_proto_depIdxs = []int32{
 	8,  // 0: aggregator.Checkin.status:type_name -> aggregator.Checkin.Status
 	10, // 1: aggregator.CheckinResp.updated_at:type_name -> google.protobuf.Timestamp
 	0,  // 2: aggregator.SyncMessagesResp.op:type_name -> aggregator.MessageOp
 	9,  // 3: aggregator.SyncMessagesResp.task_metadata:type_name -> aggregator.SyncMessagesResp.TaskMetadata
-	11, // 4: aggregator.NotifyTriggersReq.reason:type_name -> aggregator.TriggerReason
-	10, // 5: aggregator.NotifyTriggersResp.updated_at:type_name -> google.protobuf.Timestamp
-	10, // 6: aggregator.Checkin.Status.last_heartbeat:type_name -> google.protobuf.Timestamp
-	12, // 7: aggregator.SyncMessagesResp.TaskMetadata.trigger:type_name -> aggregator.TaskTrigger
-	1,  // 8: aggregator.Node.Ping:input_type -> aggregator.Checkin
-	3,  // 9: aggregator.Node.SyncMessages:input_type -> aggregator.SyncMessagesReq
-	5,  // 10: aggregator.Node.Ack:input_type -> aggregator.AckMessageReq
-	6,  // 11: aggregator.Node.NotifyTriggers:input_type -> aggregator.NotifyTriggersReq
-	2,  // 12: aggregator.Node.Ping:output_type -> aggregator.CheckinResp
-	4,  // 13: aggregator.Node.SyncMessages:output_type -> aggregator.SyncMessagesResp
-	13, // 14: aggregator.Node.Ack:output_type -> google.protobuf.BoolValue
-	7,  // 15: aggregator.Node.NotifyTriggers:output_type -> aggregator.NotifyTriggersResp
-	12, // [12:16] is the sub-list for method output_type
-	8,  // [8:12] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	11, // 4: aggregator.NotifyTriggersReq.trigger_type:type_name -> aggregator.TriggerType
+	12, // 5: aggregator.NotifyTriggersReq.block_trigger:type_name -> aggregator.BlockTrigger.Output
+	13, // 6: aggregator.NotifyTriggersReq.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
+	14, // 7: aggregator.NotifyTriggersReq.cron_trigger:type_name -> aggregator.CronTrigger.Output
+	15, // 8: aggregator.NotifyTriggersReq.event_trigger:type_name -> aggregator.EventTrigger.Output
+	16, // 9: aggregator.NotifyTriggersReq.manual_trigger:type_name -> aggregator.ManualTrigger.Output
+	10, // 10: aggregator.NotifyTriggersResp.updated_at:type_name -> google.protobuf.Timestamp
+	10, // 11: aggregator.Checkin.Status.last_heartbeat:type_name -> google.protobuf.Timestamp
+	17, // 12: aggregator.SyncMessagesResp.TaskMetadata.trigger:type_name -> aggregator.TaskTrigger
+	1,  // 13: aggregator.Node.Ping:input_type -> aggregator.Checkin
+	3,  // 14: aggregator.Node.SyncMessages:input_type -> aggregator.SyncMessagesReq
+	5,  // 15: aggregator.Node.Ack:input_type -> aggregator.AckMessageReq
+	6,  // 16: aggregator.Node.NotifyTriggers:input_type -> aggregator.NotifyTriggersReq
+	2,  // 17: aggregator.Node.Ping:output_type -> aggregator.CheckinResp
+	4,  // 18: aggregator.Node.SyncMessages:output_type -> aggregator.SyncMessagesResp
+	18, // 19: aggregator.Node.Ack:output_type -> google.protobuf.BoolValue
+	7,  // 20: aggregator.Node.NotifyTriggers:output_type -> aggregator.NotifyTriggersResp
+	17, // [17:21] is the sub-list for method output_type
+	13, // [13:17] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_node_proto_init() }
@@ -771,6 +884,13 @@ func file_node_proto_init() {
 		return
 	}
 	file_avs_proto_init()
+	file_node_proto_msgTypes[5].OneofWrappers = []any{
+		(*NotifyTriggersReq_BlockTrigger)(nil),
+		(*NotifyTriggersReq_FixedTimeTrigger)(nil),
+		(*NotifyTriggersReq_CronTrigger)(nil),
+		(*NotifyTriggersReq_EventTrigger)(nil),
+		(*NotifyTriggersReq_ManualTrigger)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

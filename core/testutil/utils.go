@@ -25,6 +25,12 @@ const (
 	paymasterAddress = "0xB985af5f96EF2722DC99aEBA573520903B86505e"
 )
 
+// TriggerData represents the flattened trigger information for testing
+type TriggerData struct {
+	Type   avsproto.TriggerType
+	Output interface{} // Will hold the specific trigger output (BlockTrigger.Output, etc.)
+}
+
 func GetTestRPCURL() string {
 	v := os.Getenv("RPC_URL")
 	if v == "" {
@@ -344,24 +350,25 @@ func GetTestSecrets() map[string]string {
 	}
 }
 
-func GetTestEventTriggerReason() *avsproto.TriggerReason {
-	return &avsproto.TriggerReason{
-		BlockNumber: 7212417,
-		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-		LogIndex:    98,
-		Type:        avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+func GetTestEventTriggerData() *TriggerData {
+	return &TriggerData{
+		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+		Output: &avsproto.EventTrigger_Output{
+			EvmLog: &avsproto.Evm_Log{
+				BlockNumber:     7212417,
+				TransactionHash: "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+				Index:           98,
+				// Other fields would be populated if available
+				Address: "",
+				Topics:  []string{},
+				Data:    "",
+			},
+		},
 	}
 }
 
-// GetTestEventTriggerReasonWithTransferData provides a trigger reason with rich transfer log data for testing
-func GetTestEventTriggerReasonWithTransferData() (*avsproto.TriggerReason, *avsproto.EventTrigger_TransferLogOutput) {
-	reason := &avsproto.TriggerReason{
-		BlockNumber: 7212417,
-		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-		LogIndex:    98,
-		Type:        avsproto.TriggerType_TRIGGER_TYPE_EVENT,
-	}
-
+// GetTestEventTriggerDataWithTransferData provides trigger data with rich transfer log data for testing
+func GetTestEventTriggerDataWithTransferData() (*TriggerData, *avsproto.EventTrigger_TransferLogOutput) {
 	transferLog := &avsproto.EventTrigger_TransferLogOutput{
 		TokenName:        "USDC",
 		TokenSymbol:      "USDC",
@@ -377,5 +384,12 @@ func GetTestEventTriggerReasonWithTransferData() (*avsproto.TriggerReason, *avsp
 		TransactionIndex: 73,
 	}
 
-	return reason, transferLog
+	triggerData := &TriggerData{
+		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+		Output: &avsproto.EventTrigger_Output{
+			TransferLog: transferLog,
+		},
+	}
+
+	return triggerData, transferLog
 }

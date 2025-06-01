@@ -87,6 +87,8 @@ type triggerDataType struct {
 	Block       *avsproto.BlockTrigger_Output
 	Time        *avsproto.FixedTimeTrigger_Output
 	Cron        *avsproto.CronTrigger_Output
+	Event       *avsproto.EventTrigger_Output
+	Manual      *avsproto.ManualTrigger_Output
 }
 
 func (t *triggerDataType) GetValue() avsproto.IsExecution_OutputData {
@@ -104,6 +106,9 @@ func (t *triggerDataType) GetValue() avsproto.IsExecution_OutputData {
 		}
 		return &avsproto.Execution_EventTrigger{EventTrigger: eventOutput}
 	}
+	if t.Event != nil {
+		return &avsproto.Execution_EventTrigger{EventTrigger: t.Event}
+	}
 	if t.Block != nil {
 		return &avsproto.Execution_BlockTrigger{BlockTrigger: t.Block}
 	}
@@ -113,6 +118,7 @@ func (t *triggerDataType) GetValue() avsproto.IsExecution_OutputData {
 	if t.Cron != nil {
 		return &avsproto.Execution_CronTrigger{CronTrigger: t.Cron}
 	}
+	// Note: Manual triggers don't have an Execution output type in the protobuf
 	return nil
 }
 
@@ -121,7 +127,7 @@ type VM struct {
 	TaskNodes         map[string]*avsproto.TaskNode
 	TaskOwner         common.Address
 	task              *model.Task
-	reason            *avsproto.TriggerReason
+	triggerData       *TriggerData
 	parsedTriggerData *triggerDataType
 	ExecutionLogs     []*avsproto.Execution_Step
 	Status            VMState
@@ -222,11 +228,11 @@ func (v *VM) getNodeNameAsVarLocked(nodeID string) string {
 	return standardized
 }
 
-func NewVMWithData(task *model.Task, reason *avsproto.TriggerReason, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
-	return NewVMWithDataAndTransferLog(task, reason, smartWalletConfig, secrets, nil)
+func NewVMWithData(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
+	return NewVMWithDataAndTransferLog(task, triggerData, smartWalletConfig, secrets, nil)
 }
 
-func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReason, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *avsproto.EventTrigger_TransferLogOutput) (*VM, error) {
+func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *avsproto.EventTrigger_TransferLogOutput) (*VM, error) {
 	var taskOwner common.Address
 	if task != nil && task.Owner != "" {
 		taskOwner = common.HexToAddress(task.Owner)
@@ -236,7 +242,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReaso
 	v.TaskOwner = taskOwner
 	v.secrets = secrets
 	v.task = task
-	v.reason = reason
+	v.triggerData = triggerData
 	v.smartWalletConfig = smartWalletConfig
 	v.parsedTriggerData = &triggerDataType{} // Initialize parsedTriggerData
 
@@ -285,17 +291,42 @@ func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReaso
 		v.AddVar(WorkflowContextVarName, workflowContext)
 	}
 
-	// If 'reason' is not nil, we can still try to add its basic fields (block_number, epoch, etc.)
-	// to the vars, if that's intended for the <trigger-name>.data variable.
-	if reason != nil {
+	// Parse trigger-specific data based on the flattened structure
+	if triggerData != nil {
+		switch triggerData.Type {
+		case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
+			if blockOutput, ok := triggerData.Output.(*avsproto.BlockTrigger_Output); ok {
+				v.parsedTriggerData.Block = blockOutput
+			}
+		case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
+			if timeOutput, ok := triggerData.Output.(*avsproto.FixedTimeTrigger_Output); ok {
+				v.parsedTriggerData.Time = timeOutput
+			}
+		case avsproto.TriggerType_TRIGGER_TYPE_CRON:
+			if cronOutput, ok := triggerData.Output.(*avsproto.CronTrigger_Output); ok {
+				v.parsedTriggerData.Cron = cronOutput
+			}
+		case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+			if eventOutput, ok := triggerData.Output.(*avsproto.EventTrigger_Output); ok {
+				v.parsedTriggerData.Event = eventOutput
+			}
+		case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
+			if manualOutput, ok := triggerData.Output.(*avsproto.ManualTrigger_Output); ok {
+				v.parsedTriggerData.Manual = manualOutput
+			}
+		}
+	}
+
+	// Create trigger data variable if we have a valid trigger name and trigger data
+	if triggerData != nil {
 		triggerNameStd, err := v.GetTriggerNameAsVar()
 		if err == nil { // Proceed if trigger name is valid
-			var triggerData map[string]interface{}
+			var triggerDataMap map[string]interface{}
 
 			// If we have transfer log data, use it to populate rich trigger data
 			if transferLog != nil {
 				v.parsedTriggerData.TransferLog = transferLog
-				triggerData = map[string]interface{}{
+				triggerDataMap = map[string]interface{}{
 					"token_name":        transferLog.TokenName,
 					"token_symbol":      transferLog.TokenSymbol,
 					"token_decimals":    transferLog.TokenDecimals,
@@ -310,61 +341,75 @@ func NewVMWithDataAndTransferLog(task *model.Task, reason *avsproto.TriggerReaso
 					"transaction_index": transferLog.TransactionIndex,
 				}
 			} else {
-				// Create a map to store the basic fields from the reason object
-				triggerData = make(map[string]interface{})
+				// Create a map to store the trigger data based on the new oneof structure
+				triggerDataMap = make(map[string]interface{})
 
-				// Handle block trigger data
-				if reason.Type == avsproto.TriggerType_TRIGGER_TYPE_BLOCK && reason.BlockNumber != 0 {
-					// Create BlockTrigger_Output for execution output data
-					v.parsedTriggerData.Block = &avsproto.BlockTrigger_Output{
-						BlockNumber: uint64(reason.BlockNumber),
-						// Add other block fields if available in the future
-						BlockHash:  "", // Not available in TriggerReason
-						Timestamp:  0,  // Not available in TriggerReason
-						ParentHash: "", // Not available in TriggerReason
-						Difficulty: "", // Not available in TriggerReason
-						GasLimit:   0,  // Not available in TriggerReason
-						GasUsed:    0,  // Not available in TriggerReason
+				// Extract data from the oneof trigger outputs
+				switch triggerData.Type {
+				case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
+					if blockOutput := v.parsedTriggerData.Block; blockOutput != nil {
+						triggerDataMap["block_number"] = blockOutput.BlockNumber
+						triggerDataMap["block_hash"] = blockOutput.BlockHash
+						triggerDataMap["timestamp"] = blockOutput.Timestamp
+						triggerDataMap["parent_hash"] = blockOutput.ParentHash
+						triggerDataMap["difficulty"] = blockOutput.Difficulty
+						triggerDataMap["gas_limit"] = blockOutput.GasLimit
+						triggerDataMap["gas_used"] = blockOutput.GasUsed
+					}
+				case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
+					if timeOutput := v.parsedTriggerData.Time; timeOutput != nil {
+						triggerDataMap["timestamp"] = timeOutput.Timestamp
+						triggerDataMap["timestamp_iso"] = timeOutput.TimestampIso
+					}
+				case avsproto.TriggerType_TRIGGER_TYPE_CRON:
+					if cronOutput := v.parsedTriggerData.Cron; cronOutput != nil {
+						triggerDataMap["timestamp"] = cronOutput.Timestamp
+						triggerDataMap["timestamp_iso"] = cronOutput.TimestampIso
+					}
+				case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+					if eventOutput := v.parsedTriggerData.Event; eventOutput != nil {
+						// Check if we have transfer log data in the event output
+						if transferLogData := eventOutput.GetTransferLog(); transferLogData != nil {
+							// Use transfer log data to populate rich trigger data
+							triggerDataMap["token_name"] = transferLogData.TokenName
+							triggerDataMap["token_symbol"] = transferLogData.TokenSymbol
+							triggerDataMap["token_decimals"] = transferLogData.TokenDecimals
+							triggerDataMap["transaction_hash"] = transferLogData.TransactionHash
+							triggerDataMap["address"] = transferLogData.Address
+							triggerDataMap["block_number"] = transferLogData.BlockNumber
+							triggerDataMap["block_timestamp"] = transferLogData.BlockTimestamp
+							triggerDataMap["from_address"] = transferLogData.FromAddress
+							triggerDataMap["to_address"] = transferLogData.ToAddress
+							triggerDataMap["value"] = transferLogData.Value
+							triggerDataMap["value_formatted"] = transferLogData.ValueFormatted
+							triggerDataMap["transaction_index"] = transferLogData.TransactionIndex
+						} else if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
+							// Fall back to basic EVM log data
+							triggerDataMap["block_number"] = evmLog.BlockNumber
+							triggerDataMap["log_index"] = evmLog.Index
+							triggerDataMap["tx_hash"] = evmLog.TransactionHash
+							triggerDataMap["address"] = evmLog.Address
+							triggerDataMap["topics"] = evmLog.Topics
+							triggerDataMap["data"] = evmLog.Data
+							triggerDataMap["block_hash"] = evmLog.BlockHash
+							triggerDataMap["transaction_index"] = evmLog.TransactionIndex
+							triggerDataMap["removed"] = evmLog.Removed
+						}
+					}
+				case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
+					if manualOutput := v.parsedTriggerData.Manual; manualOutput != nil {
+						triggerDataMap["run_at"] = manualOutput.RunAt
 					}
 				}
 
-				// Handle fixed time trigger data
-				if reason.Type == avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME && reason.Epoch != 0 {
-					// Create FixedTimeTrigger_Output for execution output data
-					v.parsedTriggerData.Time = &avsproto.FixedTimeTrigger_Output{
-						Epoch: uint64(reason.Epoch),
-					}
-				}
-
-				// Handle cron trigger data
-				if reason.Type == avsproto.TriggerType_TRIGGER_TYPE_CRON && reason.Epoch != 0 {
-					// Create CronTrigger_Output for execution output data
-					v.parsedTriggerData.Cron = &avsproto.CronTrigger_Output{
-						Epoch: uint64(reason.Epoch),
-						// ScheduleMatched field would need to be added to TriggerReason if needed
-						ScheduleMatched: "", // Not available in TriggerReason
-					}
-				}
-
-				if reason.BlockNumber != 0 {
-					triggerData["block_number"] = reason.BlockNumber
-				}
-				if reason.LogIndex != 0 { // Use a reasonable check, e.g. not zero or if it's optional
-					triggerData["log_index"] = reason.LogIndex
-				}
-				if reason.TxHash != "" {
-					triggerData["tx_hash"] = reason.TxHash
-				}
-				if reason.Epoch != 0 {
-					triggerData["epoch"] = reason.Epoch
-				}
-				if reason.Type != avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
-					triggerData["type"] = reason.Type.String() // Store as string
+				// Always add trigger type for reference
+				if triggerData.Type != avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
+					triggerDataMap["type"] = triggerData.Type.String()
 				}
 			}
-			v.AddVar(triggerNameStd, map[string]any{"data": triggerData})
+			v.AddVar(triggerNameStd, map[string]any{"data": triggerDataMap})
 		}
-	} else if task != nil { // Fallback if reason is nil but task is not
+	} else if task != nil { // Fallback if triggerData is nil but task is not
 		triggerNameStd, err := v.GetTriggerNameAsVar()
 		if err == nil {
 			v.AddVar(triggerNameStd, map[string]any{"data": map[string]any{}}) // Empty data map

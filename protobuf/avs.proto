@@ -59,7 +59,8 @@ message FixedTimeTrigger {
   }
   
   message Output {
-    uint64 epoch = 1;
+    uint64 timestamp = 1; // Timestamp in milliseconds
+    string timestamp_iso = 2; // ISO representation of timestamp in UTC (e.g., "2025-05-31T10:30:00.000Z")
   }
 
   // Include Config as field so it is generated in Go
@@ -73,8 +74,8 @@ message CronTrigger {
   }
   
   message Output {
-    uint64 epoch = 1;
-    string schedule_matched = 2; // Which schedule pattern was matched
+    uint64 timestamp = 1; // Timestamp in milliseconds
+    string timestamp_iso = 2; // ISO representation of timestamp in UTC (e.g., "2025-05-31T10:30:00.000Z")
   }
 
   // Include Config as field so it is generated in Go
@@ -239,8 +240,10 @@ enum TaskStatus {
 
 // Execution Status re-present a run of the task
 enum ExecutionStatus {
-  Queued = 0;
-  Finished = 2;
+  EXECUTION_STATUS_UNSPECIFIED = 0;
+  EXECUTION_STATUS_PENDING = 1;
+  EXECUTION_STATUS_COMPLETED = 2;
+  EXECUTION_STATUS_FAILED = 3;
 }
 
 
@@ -481,7 +484,8 @@ message Execution {
   bool   success = 4;
   string error   = 5;
 
-  TriggerReason reason = 6;
+  // Flattened from TriggerReason: Use the top-level TriggerType enum for consistency
+  TriggerType trigger_type = 6;
 
   message Step {
     string node_id = 1;
@@ -551,6 +555,9 @@ message Execution {
     
     // For event triggers
     EventTrigger.Output event_trigger = 13;
+    
+    // For manual triggers
+    ManualTrigger.Output manual_trigger = 14;
   }
 }
 
@@ -682,29 +689,17 @@ message GetKeyReq {
 }
 
 message KeyResp {
-  string key=1;
-}
-
-
-// TriggerReason represent a lookup that we can use to identify when/where/how it is trigger
-// In a block trigger, we will have block_number
-// In an event trigger, we will have the log_index, tx_hash and the block_number
-// In a time based trigger(cron/fixed time) we will have the epoch.
-//
-// TriggerReason is used to populate the `<trigger-name>.data` variable. Example, if this is a transfer
-// event, then you will have access to <trigger-name>.data.from_address or <trigger-name>.data.value
-message TriggerReason {
-  uint64 block_number = 1;
-  uint64 log_index    = 2;
-  string tx_hash      = 3;
-  uint64 epoch        = 4;
-
-  // Use the top-level TriggerType enum for consistency
-  // This value isn't needed because when we query an execution or trigger a task, we know the trigger type 
-  // But, The JS SDK needed this value probably to save the lookup time when it only has execution id somehow
-  // So we added this value to the response for the client to consume and use however it wants
-  // Internally we don't make use of this field.
-  TriggerType type = 5;
+  // The user's address derived from the signature
+  string address = 1;
+  
+  // The auth key to include in all future requests
+  string key = 2;
+  
+  // The message that was signed to produce the signature
+  string message = 3;
+  
+  // Expiry of the auth key in seconds since epoch
+  uint64 expiry = 4;
 }
 
 message GetWalletReq {
@@ -733,16 +728,28 @@ message SetWalletReq {
   bool is_hidden = 3;
 }
 
-message UserTriggerTaskReq {
+message TriggerTaskReq {
   string task_id = 1;
-  TriggerReason reason = 2;
+  
+  // Flattened from TriggerReason: Use the top-level TriggerType enum for consistency
+  TriggerType trigger_type = 2;
+
+  // Flattened from TriggerReason: trigger output data based on type
+  oneof trigger_output {
+    BlockTrigger.Output block_trigger = 3;
+    FixedTimeTrigger.Output fixed_time_trigger = 4;
+    CronTrigger.Output cron_trigger = 5;
+    EventTrigger.Output event_trigger = 6;
+    ManualTrigger.Output manual_trigger = 7;
+  }
+  
   // when setting is_blocking=true, the execution run in the same request. the request is blocked until the execution is done
   // setting to false, the task will be execute in our normal queueu system, and the request won't block.
   // default value is false, for interact testing, set this to true
-  bool is_blocking = 3;
+  bool is_blocking = 8;
 }
 
-message UserTriggerTaskResp {
+message TriggerTaskResp {
   // Regardless whether it is a block or async, we always get back the same kind of id for this trigger.
   // The caller then make a second request to GetExecution to check for the execution status and data.
   // In the blocking mode, the execution_id is materialized and has been created, we can then call GetExecution on it immediately to receive result
@@ -853,7 +860,7 @@ service Aggregator {
 
   rpc CancelTask(IdReq)                 returns (google.protobuf.BoolValue) {};
   rpc DeleteTask(IdReq)                 returns (google.protobuf.BoolValue) {};
-  rpc TriggerTask(UserTriggerTaskReq)   returns (UserTriggerTaskResp) {};
+  rpc TriggerTask(TriggerTaskReq)   returns (TriggerTaskResp) {};
 
   // CreateSecret allow you to define a secret to be used in your tasks. The secret can be used with a special syntax of ${{secrets.name }}.
   // You can decide whether to grant secret to a single workflow or many workflow, or all of your workflow

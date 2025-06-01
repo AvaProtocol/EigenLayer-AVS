@@ -308,11 +308,13 @@ func TestGetExecution(t *testing.T) {
 	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
 	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
 
-	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
-		TaskId: result.Id,
-		Reason: &avsproto.TriggerReason{
-			BlockNumber: uint64(101),
-			Type:        avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{
+		TaskId:      result.Id,
+		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
+			BlockTrigger: &avsproto.BlockTrigger_Output{
+				BlockNumber: uint64(101),
+			},
 		},
 		IsBlocking: true,
 	})
@@ -351,12 +353,8 @@ func TestGetExecution(t *testing.T) {
 		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
 
-	if execution.Reason == nil || execution.Reason.BlockNumber != 101 {
-		var actualBlockNumber uint64
-		if execution.Reason != nil {
-			actualBlockNumber = execution.Reason.BlockNumber
-		}
-		t.Errorf("invalid triggered block. expect 101 got %d (Reason: %+v)", actualBlockNumber, execution.Reason)
+	if execution.TriggerType != avsproto.TriggerType_TRIGGER_TYPE_BLOCK {
+		t.Errorf("invalid trigger type. expect TRIGGER_TYPE_BLOCK got %v", execution.TriggerType)
 	}
 
 	// Another user cannot get this execution id
@@ -442,11 +440,13 @@ func TestTriggerSync(t *testing.T) {
 	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
 	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
 
-	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
-		TaskId: result.Id,
-		Reason: &avsproto.TriggerReason{
-			BlockNumber: uint64(101),
-			Type:        avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{
+		TaskId:      result.Id,
+		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
+			BlockTrigger: &avsproto.BlockTrigger_Output{
+				BlockNumber: uint64(101),
+			},
 		},
 		IsBlocking: true,
 	})
@@ -485,12 +485,8 @@ func TestTriggerSync(t *testing.T) {
 		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
 	}
 
-	if execution.Reason == nil || execution.Reason.BlockNumber != 101 {
-		var actualBlockNumber uint64
-		if execution.Reason != nil {
-			actualBlockNumber = execution.Reason.BlockNumber
-		}
-		t.Errorf("invalid triggered block. expect 101 got %d (Reason: %+v)", actualBlockNumber, execution.Reason)
+	if execution.TriggerType != avsproto.TriggerType_TRIGGER_TYPE_BLOCK {
+		t.Errorf("invalid trigger type. expect TRIGGER_TYPE_BLOCK got %v", execution.TriggerType)
 	}
 }
 
@@ -518,11 +514,13 @@ func TestTriggerAsync(t *testing.T) {
 	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
 	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
 
-	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
-		TaskId: result.Id,
-		Reason: &avsproto.TriggerReason{
-			BlockNumber: uint64(101),
-			Type:        avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{
+		TaskId:      result.Id,
+		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
+			BlockTrigger: &avsproto.BlockTrigger_Output{
+				BlockNumber: uint64(101),
+			},
 		},
 		IsBlocking: false,
 	})
@@ -538,8 +536,8 @@ func TestTriggerAsync(t *testing.T) {
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 
-	if executionStatus.Status != avsproto.ExecutionStatus_Queued {
-		t.Errorf("invalid execution status, expected queue but got %s", avsproto.TaskStatus_name[int32(executionStatus.Status)])
+	if executionStatus.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING {
+		t.Errorf("expected status to be pending but got %v", executionStatus.Status)
 	}
 
 	// Now let the queue start and process job
@@ -559,16 +557,16 @@ func TestTriggerAsync(t *testing.T) {
 	}
 
 	if !execution.Success {
-		t.Errorf("wrong success result, expected true got false")
-	}
-
-	if execution.Steps[0].NodeId != "ping1" {
-		t.Errorf("wrong node id in execution log")
+		t.Errorf("wrong success result, expected true got false. Error: %s", execution.Error)
 	}
 
 	if len(execution.Steps) == 0 {
 		t.Errorf("No execution steps found")
 		return
+	}
+
+	if execution.Steps[0].NodeId != "ping1" {
+		t.Errorf("wrong node id in execution log")
 	}
 
 	step := execution.Steps[0]
@@ -619,8 +617,8 @@ func TestTriggerAsync(t *testing.T) {
 		t.Fatalf("Error getting execution status after processing: %v", err)
 	}
 
-	if executionStatus.Status != avsproto.ExecutionStatus_Finished {
-		t.Errorf("invalid execution status, expected completed but got %s", avsproto.TaskStatus_name[int32(executionStatus.Status)])
+	if executionStatus.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_COMPLETED {
+		t.Errorf("expected status to be completed but got %v", executionStatus.Status)
 	}
 
 	// Verify TaskTriggerKey is cleaned up after successful async execution
@@ -649,11 +647,13 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
 	result, _ := n.CreateTask(testutil.TestUser1(), tr1)
 
-	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
-		TaskId: result.Id,
-		Reason: &avsproto.TriggerReason{
-			BlockNumber: uint64(101),
-			Type:        avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{
+		TaskId:      result.Id,
+		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
+			BlockTrigger: &avsproto.BlockTrigger_Output{
+				BlockNumber: uint64(101),
+			},
 		},
 		IsBlocking: true,
 	})
@@ -663,11 +663,13 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	}
 
 	// Now the task has reach its max run, and canot run anymore
-	resultTrigger, err = n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
-		TaskId: result.Id,
-		Reason: &avsproto.TriggerReason{
-			BlockNumber: uint64(101),
-			Type:        avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+	resultTrigger, err = n.TriggerTask(testutil.TestUser1(), &avsproto.TriggerTaskReq{
+		TaskId:      result.Id,
+		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
+			BlockTrigger: &avsproto.BlockTrigger_Output{
+				BlockNumber: uint64(101),
+			},
 		},
 		IsBlocking: true,
 	})

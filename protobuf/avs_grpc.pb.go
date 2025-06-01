@@ -68,7 +68,7 @@ type AggregatorClient interface {
 	GetExecutionStatus(ctx context.Context, in *ExecutionReq, opts ...grpc.CallOption) (*ExecutionStatusResp, error)
 	CancelTask(ctx context.Context, in *IdReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
 	DeleteTask(ctx context.Context, in *IdReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
-	TriggerTask(ctx context.Context, in *UserTriggerTaskReq, opts ...grpc.CallOption) (*UserTriggerTaskResp, error)
+	TriggerTask(ctx context.Context, in *TriggerTaskReq, opts ...grpc.CallOption) (*TriggerTaskResp, error)
 	// CreateSecret allow you to define a secret to be used in your tasks. The secret can be used with a special syntax of ${{secrets.name }}.
 	// You can decide whether to grant secret to a single workflow or many workflow, or all of your workflow
 	// By default, your secret is available across all of your tasks.
@@ -250,9 +250,9 @@ func (c *aggregatorClient) DeleteTask(ctx context.Context, in *IdReq, opts ...gr
 	return out, nil
 }
 
-func (c *aggregatorClient) TriggerTask(ctx context.Context, in *UserTriggerTaskReq, opts ...grpc.CallOption) (*UserTriggerTaskResp, error) {
+func (c *aggregatorClient) TriggerTask(ctx context.Context, in *TriggerTaskReq, opts ...grpc.CallOption) (*TriggerTaskResp, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UserTriggerTaskResp)
+	out := new(TriggerTaskResp)
 	err := c.cc.Invoke(ctx, Aggregator_TriggerTask_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -372,7 +372,7 @@ type AggregatorServer interface {
 	GetExecutionStatus(context.Context, *ExecutionReq) (*ExecutionStatusResp, error)
 	CancelTask(context.Context, *IdReq) (*wrapperspb.BoolValue, error)
 	DeleteTask(context.Context, *IdReq) (*wrapperspb.BoolValue, error)
-	TriggerTask(context.Context, *UserTriggerTaskReq) (*UserTriggerTaskResp, error)
+	TriggerTask(context.Context, *TriggerTaskReq) (*TriggerTaskResp, error)
 	// CreateSecret allow you to define a secret to be used in your tasks. The secret can be used with a special syntax of ${{secrets.name }}.
 	// You can decide whether to grant secret to a single workflow or many workflow, or all of your workflow
 	// By default, your secret is available across all of your tasks.
@@ -456,7 +456,7 @@ func (UnimplementedAggregatorServer) CancelTask(context.Context, *IdReq) (*wrapp
 func (UnimplementedAggregatorServer) DeleteTask(context.Context, *IdReq) (*wrapperspb.BoolValue, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteTask not implemented")
 }
-func (UnimplementedAggregatorServer) TriggerTask(context.Context, *UserTriggerTaskReq) (*UserTriggerTaskResp, error) {
+func (UnimplementedAggregatorServer) TriggerTask(context.Context, *TriggerTaskReq) (*TriggerTaskResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TriggerTask not implemented")
 }
 func (UnimplementedAggregatorServer) CreateSecret(context.Context, *CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error) {
@@ -760,7 +760,7 @@ func _Aggregator_DeleteTask_Handler(srv interface{}, ctx context.Context, dec fu
 }
 
 func _Aggregator_TriggerTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UserTriggerTaskReq)
+	in := new(TriggerTaskReq)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -772,7 +772,7 @@ func _Aggregator_TriggerTask_Handler(srv interface{}, ctx context.Context, dec f
 		FullMethod: Aggregator_TriggerTask_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AggregatorServer).TriggerTask(ctx, req.(*UserTriggerTaskReq))
+		return srv.(AggregatorServer).TriggerTask(ctx, req.(*TriggerTaskReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }

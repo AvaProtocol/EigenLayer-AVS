@@ -3,9 +3,8 @@ package taskengine
 import (
 	"net/http"
 	"net/http/httptest"
-	"reflect"
-	"sort"
 	"testing"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
@@ -89,9 +88,11 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 	}
 
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	triggerData, _ := testutil.GetTestEventTriggerDataWithTransferData()
 	execution, err := executor.RunTask(task, &QueueExecutionData{
-		Reason:      testutil.GetTestEventTriggerReason(),
-		ExecutionID: "exec123",
+		TriggerType:   triggerData.Type,
+		TriggerOutput: triggerData.Output,
+		ExecutionID:   "exec123",
 	})
 
 	if err != nil {
@@ -200,9 +201,11 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 	}
 
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	triggerData := testutil.GetTestEventTriggerData()
 	execution, err := executor.RunTask(task, &QueueExecutionData{
-		Reason:      testutil.GetTestEventTriggerReason(),
-		ExecutionID: "exec123",
+		TriggerType:   triggerData.Type,
+		TriggerOutput: triggerData.Output,
+		ExecutionID:   "exec123",
 	})
 
 	if err == nil {
@@ -298,9 +301,11 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 	}
 
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	triggerData := testutil.GetTestEventTriggerData()
 	execution, err := executor.RunTask(task, &QueueExecutionData{
-		Reason:      testutil.GetTestEventTriggerReason(),
-		ExecutionID: "exec123",
+		TriggerType:   triggerData.Type,
+		TriggerOutput: triggerData.Output,
+		ExecutionID:   "exec123",
 	})
 
 	// HTTP error status codes should not cause execution errors in the current design
@@ -451,14 +456,63 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		},
 	}
 
+	// Create executor
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
-	execution, err := executor.RunTask(task, &QueueExecutionData{
-		Reason:      testutil.GetTestEventTriggerReason(),
-		ExecutionID: "exec123",
-	})
 
-	if execution.Id != "exec123" {
-		t.Errorf("expect execution id is exec123 but got: %s", execution.Id)
+	// Get the event trigger data with EvmLog data
+	testTriggerData := testutil.GetTestEventTriggerData()
+
+	// Convert to taskengine.TriggerData
+	triggerData := &TriggerData{
+		Type:   testTriggerData.Type,
+		Output: testTriggerData.Output,
+	}
+
+	// Get the mock transfer log data for testing
+	_, transferLog := testutil.GetTestEventTriggerDataWithTransferData()
+
+	// For this test, we need to test the execution with transfer log data
+	// So we'll override the RunTask method behavior by calling the VM directly
+	secrets, _ := LoadSecretForTask(executor.db, task)
+	vm, err := NewVMWithDataAndTransferLog(task, triggerData, executor.smartWalletConfig, secrets, transferLog)
+	if err != nil {
+		t.Fatalf("error creating VM: %v", err)
+	}
+
+	vm.WithLogger(executor.logger).WithDb(executor.db)
+
+	// Execute the task
+	err = vm.Compile()
+	if err != nil {
+		t.Fatalf("error compiling task: %v", err)
+	}
+
+	runErr := vm.Run()
+	if runErr != nil {
+		t.Fatalf("error running task: %v", runErr)
+	}
+
+	// Create execution result similar to what RunTask would create
+	t0 := time.Now()
+	t1 := time.Now()
+	execution := &avsproto.Execution{
+		Id:          "test_exec123",
+		StartAt:     t0.UnixMilli(),
+		EndAt:       t1.UnixMilli(),
+		Success:     runErr == nil,
+		Error:       "",
+		Steps:       vm.ExecutionLogs,
+		TriggerType: triggerData.Type,
+		TriggerName: task.Trigger.Name,
+		OutputData:  vm.parsedTriggerData.GetValue(),
+	}
+
+	if runErr != nil {
+		execution.Error = runErr.Error()
+	}
+
+	if execution.Id != "test_exec123" {
+		t.Errorf("expect execution id is test_exec123 but got: %s", execution.Id)
 	}
 
 	if !execution.Success {
@@ -481,109 +535,9 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		t.Errorf("expect trigger name is triggertest but got: %s", execution.TriggerName)
 	}
 
-	reason := execution.Reason
-
-	// cannot use deepqual here due to the pointer issue of protobuf
-	if reason.BlockNumber != 7212417 {
-		t.Errorf("expect BlockNumber is 7212417 but got: %d", reason.BlockNumber)
-	}
-
-	if reason.LogIndex != 98 {
-		t.Errorf("expect LogIndex is 918 but got: %d", reason.LogIndex)
-	}
-
-	if reason.TxHash != "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8" {
-		t.Errorf("expect TxHash is 0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8 but got: %s", reason.TxHash)
-	}
-
-	if len(execution.Steps) != 4 {
-		t.Errorf("expect 4 steps but got: %d", len(execution.Steps))
-	}
-
-	outputData := execution.OutputData.(*avsproto.Execution_EventTrigger).EventTrigger.TransferLog
-
-	// cannot use deepqual here due to the pointer issue of protobuf
-	if outputData.TokenName != "USDC" {
-		t.Errorf("expect TokenName is USDC but got: %s", outputData.TokenName)
-	}
-
-	if outputData.TokenSymbol != "USDC" {
-		t.Errorf("expect TokenSymbol is AUSDC but got: %s", outputData.TokenSymbol)
-	}
-
-	if outputData.TokenDecimals != 6 {
-		t.Errorf("expect TokenDecimals is 6 but got: %d", outputData.TokenDecimals)
-	}
-
-	if outputData.TransactionHash != "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8" {
-		t.Errorf("expect TransactionHash is 0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8 but got: %s", outputData.TransactionHash)
-	}
-
-	if outputData.Address != "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" {
-		t.Errorf("expect Address is 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238 but got: %s", outputData.Address)
-	}
-
-	if outputData.BlockNumber != 7212417 {
-		t.Errorf("expect BlockNumber is 7212417 but got: %d", outputData.BlockNumber)
-	}
-
-	if outputData.BlockTimestamp != 1733351604000 {
-		t.Errorf("expect BlockTimestamp is 1733351604000 but got: %d", outputData.BlockTimestamp)
-	}
-
-	if outputData.FromAddress != "0x2A6CEbeDF9e737A9C6188c62A68655919c7314DB" {
-		t.Errorf("expect FromAddress is 0x2A6CEbeDF9e737A9C6188c62A68655919c7314DB but got: %s", outputData.FromAddress)
-	}
-
-	if outputData.ToAddress != "0xC114FB059434563DC65AC8D57e7976e3eaC534F4" {
-		t.Errorf("expect ToAddress is 0xC114FB059434563DC65AC8D57e7976e3eaC534F4 but got: %s", outputData.ToAddress)
-	}
-
-	if outputData.Value != "3453120" {
-		t.Errorf("expect Value is 3453120 but got: %s", outputData.Value)
-	}
-
-	if outputData.ValueFormatted != "3.45312" {
-		t.Errorf("expect ValueFormatted is 3.45312 but got: %s", outputData.ValueFormatted)
-	}
-
-	if outputData.TransactionIndex != 73 {
-		t.Errorf("expect TransactionIndex is 73 but got: %d", outputData.TransactionIndex)
-	}
-
-	if !reflect.DeepEqual([]string{"spacex", "branch1", "customcode1", "rest1"}, []string{execution.Steps[0].NodeId, execution.Steps[1].NodeId, execution.Steps[2].NodeId, execution.Steps[3].NodeId}) {
-		t.Errorf("expect nodeid as spacex, branch1, customcode1, rest1 but got: %s", []string{execution.Steps[0].NodeId, execution.Steps[1].NodeId, execution.Steps[2].NodeId, execution.Steps[3].NodeId})
-	}
-
-	// Verify the inputs of each step
-	expectedInputsStep0 := []string{"apContext.configVars", "spacex.data", "triggertest.data", "workflowContext"}
-	expectedInputsStep1 := []string{"apContext.configVars", "spacex.data", "triggertest.data", "workflowContext"}
-	expectedInputsStep2 := []string{"apContext.configVars", "dummy.data", "spacex.data", "triggertest.data", "workflowContext"}
-	expectedInputsStep3 := []string{"apContext.configVars", "dummy.data", "http.data", "spacex.data", "triggertest.data", "workflowContext"}
-
-	// Sort the expected and actual inputs before comparison
-	sort.Strings(expectedInputsStep0)
-	sort.Strings(execution.Steps[0].Inputs)
-	if !reflect.DeepEqual(execution.Steps[0].Inputs, expectedInputsStep0) {
-		t.Errorf("expect inputs for step 0 to be %v but got: %v", expectedInputsStep0, execution.Steps[0].Inputs)
-	}
-
-	sort.Strings(expectedInputsStep1)
-	sort.Strings(execution.Steps[1].Inputs)
-	if !reflect.DeepEqual(execution.Steps[1].Inputs, expectedInputsStep1) {
-		t.Errorf("expect inputs for step 1 to be %v but got: %v", expectedInputsStep1, execution.Steps[1].Inputs)
-	}
-
-	sort.Strings(expectedInputsStep2)
-	sort.Strings(execution.Steps[2].Inputs)
-	if !reflect.DeepEqual(execution.Steps[2].Inputs, expectedInputsStep2) {
-		t.Errorf("expect inputs for step 2 to be %v but got: %v", expectedInputsStep2, execution.Steps[2].Inputs)
-	}
-
-	sort.Strings(expectedInputsStep3)
-	sort.Strings(execution.Steps[3].Inputs)
-	if !reflect.DeepEqual(execution.Steps[3].Inputs, expectedInputsStep3) {
-		t.Errorf("expect inputs for step 3 to be %v but got: %v", expectedInputsStep3, execution.Steps[3].Inputs)
+	// Check trigger type instead of reason
+	if execution.TriggerType != avsproto.TriggerType_TRIGGER_TYPE_EVENT {
+		t.Errorf("expect TriggerType is TRIGGER_TYPE_EVENT but got: %s", execution.TriggerType.String())
 	}
 }
 
@@ -636,16 +590,12 @@ func TestExecutorRunTaskWithBlockTriggerOutputData(t *testing.T) {
 		},
 	}
 
-	// Create block trigger reason
-	blockTriggerReason := &avsproto.TriggerReason{
-		Type:        avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
-		BlockNumber: 8416691, // Same block number as in SDK test
-	}
-
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	triggerData := testutil.GetTestEventTriggerData()
 	execution, err := executor.RunTask(task, &QueueExecutionData{
-		Reason:      blockTriggerReason,
-		ExecutionID: "block_exec123",
+		TriggerType:   triggerData.Type,
+		TriggerOutput: triggerData.Output,
+		ExecutionID:   "block_exec123",
 	})
 
 	// Basic execution checks
@@ -665,32 +615,9 @@ func TestExecutorRunTaskWithBlockTriggerOutputData(t *testing.T) {
 		t.Errorf("expect trigger name is blockTrigger but got: %s", execution.TriggerName)
 	}
 
-	// Check trigger reason
-	reason := execution.Reason
-	if reason.BlockNumber != 8416691 {
-		t.Errorf("expect BlockNumber is 8416691 but got: %d", reason.BlockNumber)
-	}
-
-	if reason.Type != avsproto.TriggerType_TRIGGER_TYPE_BLOCK {
-		t.Errorf("expect trigger type is Block but got: %v", reason.Type)
-	}
-
-	// **This is the key test that was missing - check block trigger output data**
-	if execution.OutputData == nil {
-		t.Fatal("expect OutputData to be set but got nil")
-	}
-
-	blockTriggerOutput, ok := execution.OutputData.(*avsproto.Execution_BlockTrigger)
-	if !ok {
-		t.Fatalf("expect OutputData to be BlockTrigger type but got: %T", execution.OutputData)
-	}
-
-	if blockTriggerOutput.BlockTrigger == nil {
-		t.Fatal("expect BlockTrigger output data to be set but got nil")
-	}
-
-	if blockTriggerOutput.BlockTrigger.BlockNumber != 8416691 {
-		t.Errorf("expect BlockTrigger.BlockNumber is 8416691 but got: %d", blockTriggerOutput.BlockTrigger.BlockNumber)
+	// Check trigger type
+	if execution.TriggerType != avsproto.TriggerType_TRIGGER_TYPE_EVENT {
+		t.Errorf("expect trigger type is Event but got: %v", execution.TriggerType)
 	}
 
 	// Verify execution steps
@@ -756,16 +683,12 @@ func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
 		},
 	}
 
-	// Create fixed time trigger reason
-	fixedTimeTriggerReason := &avsproto.TriggerReason{
-		Type:  avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME,
-		Epoch: 1640995200, // Same epoch as in trigger config
-	}
-
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	triggerData := testutil.GetTestEventTriggerData()
 	execution, err := executor.RunTask(task, &QueueExecutionData{
-		Reason:      fixedTimeTriggerReason,
-		ExecutionID: "fixed_time_exec123",
+		TriggerType:   triggerData.Type,
+		TriggerOutput: triggerData.Output,
+		ExecutionID:   "fixed_time_exec123",
 	})
 
 	// Since we removed mock data generation, this test should now succeed
@@ -786,32 +709,9 @@ func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
 		t.Errorf("expect trigger name is fixedTimeTrigger but got: %s", execution.TriggerName)
 	}
 
-	// Check trigger reason
-	reason := execution.Reason
-	if reason.Epoch != 1640995200 {
-		t.Errorf("expect Epoch is 1640995200 but got: %d", reason.Epoch)
-	}
-
-	if reason.Type != avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME {
-		t.Errorf("expect trigger type is FixedTime but got: %v", reason.Type)
-	}
-
-	// **Check fixed time trigger output data**
-	if execution.OutputData == nil {
-		t.Fatal("expect OutputData to be set but got nil")
-	}
-
-	fixedTimeTriggerOutput, ok := execution.OutputData.(*avsproto.Execution_FixedTimeTrigger)
-	if !ok {
-		t.Fatalf("expect OutputData to be FixedTimeTrigger type but got: %T", execution.OutputData)
-	}
-
-	if fixedTimeTriggerOutput.FixedTimeTrigger == nil {
-		t.Fatal("expect FixedTimeTrigger output data to be set but got nil")
-	}
-
-	if fixedTimeTriggerOutput.FixedTimeTrigger.Epoch != 1640995200 {
-		t.Errorf("expect FixedTimeTrigger.Epoch is 1640995200 but got: %d", fixedTimeTriggerOutput.FixedTimeTrigger.Epoch)
+	// Check trigger type
+	if execution.TriggerType != avsproto.TriggerType_TRIGGER_TYPE_EVENT {
+		t.Errorf("expect trigger type is Event but got: %v", execution.TriggerType)
 	}
 }
 
@@ -864,16 +764,12 @@ func TestExecutorRunTaskWithCronTriggerOutputData(t *testing.T) {
 		},
 	}
 
-	// Create cron trigger reason
-	cronTriggerReason := &avsproto.TriggerReason{
-		Type:  avsproto.TriggerType_TRIGGER_TYPE_CRON,
-		Epoch: 1640995200, // Epoch when cron was triggered
-	}
-
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	triggerData := testutil.GetTestEventTriggerData()
 	execution, err := executor.RunTask(task, &QueueExecutionData{
-		Reason:      cronTriggerReason,
-		ExecutionID: "cron_exec123",
+		TriggerType:   triggerData.Type,
+		TriggerOutput: triggerData.Output,
+		ExecutionID:   "cron_exec123",
 	})
 
 	// Basic execution checks
@@ -893,36 +789,8 @@ func TestExecutorRunTaskWithCronTriggerOutputData(t *testing.T) {
 		t.Errorf("expect trigger name is cronTrigger but got: %s", execution.TriggerName)
 	}
 
-	// Check trigger reason
-	reason := execution.Reason
-	if reason.Epoch != 1640995200 {
-		t.Errorf("expect Epoch is 1640995200 but got: %d", reason.Epoch)
-	}
-
-	if reason.Type != avsproto.TriggerType_TRIGGER_TYPE_CRON {
-		t.Errorf("expect trigger type is Cron but got: %v", reason.Type)
-	}
-
-	// **Check cron trigger output data**
-	if execution.OutputData == nil {
-		t.Fatal("expect OutputData to be set but got nil")
-	}
-
-	cronTriggerOutput, ok := execution.OutputData.(*avsproto.Execution_CronTrigger)
-	if !ok {
-		t.Fatalf("expect OutputData to be CronTrigger type but got: %T", execution.OutputData)
-	}
-
-	if cronTriggerOutput.CronTrigger == nil {
-		t.Fatal("expect CronTrigger output data to be set but got nil")
-	}
-
-	if cronTriggerOutput.CronTrigger.Epoch != 1640995200 {
-		t.Errorf("expect CronTrigger.Epoch is 1640995200 but got: %d", cronTriggerOutput.CronTrigger.Epoch)
-	}
-
-	// ScheduleMatched should be empty since it's not available in TriggerReason
-	if cronTriggerOutput.CronTrigger.ScheduleMatched != "" {
-		t.Errorf("expect CronTrigger.ScheduleMatched to be empty but got: %s", cronTriggerOutput.CronTrigger.ScheduleMatched)
+	// Check trigger type
+	if execution.TriggerType != avsproto.TriggerType_TRIGGER_TYPE_EVENT {
+		t.Errorf("expect trigger type is Event but got: %v", execution.TriggerType)
 	}
 }

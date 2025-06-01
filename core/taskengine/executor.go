@@ -14,7 +14,6 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
-	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
@@ -33,8 +32,9 @@ type TaskExecutor struct {
 }
 
 type QueueExecutionData struct {
-	Reason      *avsproto.TriggerReason
-	ExecutionID string
+	TriggerType   avsproto.TriggerType
+	TriggerOutput interface{} // Will hold the specific trigger output (BlockTrigger.Output, etc.)
+	ExecutionID   string
 }
 
 func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
@@ -106,34 +106,13 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		return nil, fmt.Errorf("internal error: invalid execution id")
 	}
 
-	triggerReason := GetTriggerReasonOrDefault(queueData.Reason, task.Id, x.logger)
+	// Convert queue data back to the format expected by the VM
+	triggerReason := GetTriggerReasonOrDefault(queueData, task.Id, x.logger)
 
 	secrets, _ := LoadSecretForTask(x.db, task)
 
-	// Check if this is an event trigger that might need transfer log data
-	// For testing purposes, we'll provide mock transfer log data for event triggers
-	var vm *VM
-	var err error
-
-	if triggerReason.Type == avsproto.TriggerType_TRIGGER_TYPE_EVENT &&
-		triggerReason.TxHash == "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8" {
-		// This is the test transaction, provide mock transfer log data
-		_, transferLog := testutil.GetTestEventTriggerReasonWithTransferData()
-		vm, err = NewVMWithDataAndTransferLog(
-			task,
-			triggerReason,
-			x.smartWalletConfig,
-			secrets,
-			transferLog,
-		)
-	} else {
-		vm, err = NewVMWithData(
-			task,
-			triggerReason,
-			x.smartWalletConfig,
-			secrets,
-		)
-	}
+	// Create VM with trigger reason data
+	vm, err := NewVMWithData(task, triggerReason, x.smartWalletConfig, secrets)
 
 	if err != nil {
 		return nil, err
@@ -152,7 +131,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	var runTaskErr error = nil
 	if err = vm.Compile(); err != nil {
-		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", triggerReason)
+		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", queueData)
 		runTaskErr = err
 	} else {
 		runTaskErr = vm.Run()
@@ -176,16 +155,13 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		Success:     runTaskErr == nil,
 		Error:       "",
 		Steps:       vm.ExecutionLogs,
-		Reason:      triggerReason,
+		TriggerType: queueData.TriggerType,
 		TriggerName: task.Trigger.Name,
-
-		// Note: despite the name OutputData, this isn't output data of the task, it's the parsed and enrich data based on the event
-		// it's a synthetic data to help end-user interact with the data come in from event, at run time, it's  accessible through <triggerName>.data
-		OutputData: vm.parsedTriggerData.GetValue(),
+		OutputData:  vm.parsedTriggerData.GetValue(),
 	}
 
 	if runTaskErr != nil {
-		x.logger.Error("error executing task", "error", err, "runError", runTaskErr, "task_id", task.Id, "triggermark", triggerReason)
+		x.logger.Error("error executing task", "error", err, "runError", runTaskErr, "task_id", task.Id, "triggermark", queueData)
 		execution.Error = runTaskErr.Error()
 	}
 
@@ -213,7 +189,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	if runTaskErr == nil {
-		x.logger.Info("successfully executing task", "task_id", task.Id, "triggermark", triggerReason)
+		x.logger.Info("successfully executing task", "task_id", task.Id, "triggermark", queueData)
 		return execution, nil
 	}
 

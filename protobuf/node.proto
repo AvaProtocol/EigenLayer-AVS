@@ -71,7 +71,18 @@ message NotifyTriggersReq {
   string signature = 2;
 
   string task_id = 3;
-  TriggerReason reason = 4;
+  
+  // Flattened from TriggerReason: Use the top-level TriggerType enum for consistency
+  TriggerType trigger_type = 4;
+
+  // Flattened from TriggerReason: trigger output data based on type
+  oneof trigger_output {
+    BlockTrigger.Output block_trigger = 5;
+    FixedTimeTrigger.Output fixed_time_trigger = 6;
+    CronTrigger.Output cron_trigger = 7;
+    EventTrigger.Output event_trigger = 8;
+    ManualTrigger.Output manual_trigger = 9;
+  }
 }
 
 message NotifyTriggersResp {
