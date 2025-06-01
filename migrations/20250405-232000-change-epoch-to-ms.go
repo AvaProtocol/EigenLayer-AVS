@@ -118,8 +118,8 @@ func ChangeEpochToMs(db storage.Storage) (int, error) {
 				outputData.TransferLog.BlockTimestamp = outputData.TransferLog.BlockTimestamp * 1000
 			}
 		} else if outputData := exec.GetFixedTimeTrigger(); outputData != nil {
-			if outputData.Epoch > 0 && outputData.Epoch < timestampThreshold {
-				outputData.Epoch = outputData.Epoch * 1000
+			if outputData.Timestamp > 0 && outputData.Timestamp < timestampThreshold {
+				outputData.Timestamp = outputData.Timestamp * 1000
 			}
 		}
 
