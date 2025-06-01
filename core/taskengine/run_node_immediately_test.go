@@ -1323,6 +1323,7 @@ func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
 			Type: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 			Output: &avsproto.BlockTrigger_Output{
 				BlockNumber: 12345678,
+				GasLimit:    42000000, // Add gas_limit to test camelCase fallback
 			},
 		}
 
@@ -1454,6 +1455,7 @@ func TestSmartTriggerDataFallback(t *testing.T) {
 		Type: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		Output: &avsproto.BlockTrigger_Output{
 			BlockNumber: 12345678,
+			GasLimit:    42000000, // Add gas_limit to test camelCase fallback
 		},
 	}
 
@@ -1490,17 +1492,17 @@ func TestSmartTriggerDataFallback(t *testing.T) {
 	nonExistentResult := vm.preprocessTextWithVariableMapping(nonExistentTemplate)
 	t.Logf("🔍 Non-existent template: %s -> %s", nonExistentTemplate, nonExistentResult)
 
-	// Test 4: Another camelCase field (logIndex -> log_index)
-	logIndexTemplate := "{{ block_trigger.data.logIndex }}"
-	logIndexResult := vm.preprocessTextWithVariableMapping(logIndexTemplate)
-	t.Logf("🔍 LogIndex template: %s -> %s", logIndexTemplate, logIndexResult)
+	// Test 4: Another camelCase field (gasLimit -> gas_limit)
+	gasLimitTemplate := "{{ block_trigger.data.gasLimit }}"
+	gasLimitResult := vm.preprocessTextWithVariableMapping(gasLimitTemplate)
+	t.Logf("🔍 GasLimit template: %s -> %s", gasLimitTemplate, gasLimitResult)
 
 	// Verify that our fallback logic is working correctly
 	// Both camelCase and snake_case should resolve to the same value
 	require.Equal(t, "12345678", camelCaseResult, "camelCase blockNumber should resolve via snake_case fallback")
 	require.Equal(t, "12345678", snakeCaseResult, "snake_case block_number should resolve directly")
 	require.Equal(t, "undefined", nonExistentResult, "non-existent field should resolve to 'undefined'")
-	require.Equal(t, "42", logIndexResult, "camelCase logIndex should resolve via snake_case fallback")
+	require.Equal(t, "42000000", gasLimitResult, "camelCase gasLimit should resolve via snake_case fallback")
 
 	t.Logf("✅ Smart fallback test completed successfully")
 	t.Logf("Confirmed: camelCase variables fallback to snake_case, but snake_case variables work directly without fallback")
