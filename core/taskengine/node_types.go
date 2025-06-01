@@ -167,3 +167,25 @@ func TriggerTypeToString(triggerType avsproto.TriggerType) string {
 		return ""
 	}
 }
+
+// TaskTriggerToTriggerType converts from TaskTrigger oneof types to TriggerType enum
+func TaskTriggerToTriggerType(taskTrigger *avsproto.TaskTrigger) avsproto.TriggerType {
+	if taskTrigger == nil {
+		return avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED
+	}
+
+	switch taskTrigger.GetTriggerType().(type) {
+	case *avsproto.TaskTrigger_Manual:
+		return avsproto.TriggerType_TRIGGER_TYPE_MANUAL
+	case *avsproto.TaskTrigger_FixedTime:
+		return avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME
+	case *avsproto.TaskTrigger_Cron:
+		return avsproto.TriggerType_TRIGGER_TYPE_CRON
+	case *avsproto.TaskTrigger_Block:
+		return avsproto.TriggerType_TRIGGER_TYPE_BLOCK
+	case *avsproto.TaskTrigger_Event:
+		return avsproto.TriggerType_TRIGGER_TYPE_EVENT
+	default:
+		return avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED
+	}
+}

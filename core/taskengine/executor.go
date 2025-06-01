@@ -32,8 +32,9 @@ type TaskExecutor struct {
 }
 
 type QueueExecutionData struct {
-	Reason      *avsproto.TriggerReason
-	ExecutionID string
+	TriggerType   avsproto.TriggerType
+	TriggerOutput interface{} // Will hold the specific trigger output (BlockTrigger.Output, etc.)
+	ExecutionID   string
 }
 
 func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
@@ -105,7 +106,8 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		return nil, fmt.Errorf("internal error: invalid execution id")
 	}
 
-	triggerReason := GetTriggerReasonOrDefault(queueData.Reason, task.Id, x.logger)
+	// Convert queue data back to the format expected by the VM
+	triggerReason := GetTriggerReasonOrDefault(queueData, task.Id, x.logger)
 
 	secrets, _ := LoadSecretForTask(x.db, task)
 
@@ -129,7 +131,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	var runTaskErr error = nil
 	if err = vm.Compile(); err != nil {
-		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", triggerReason)
+		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", queueData)
 		runTaskErr = err
 	} else {
 		runTaskErr = vm.Run()
@@ -153,16 +155,13 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		Success:     runTaskErr == nil,
 		Error:       "",
 		Steps:       vm.ExecutionLogs,
-		Reason:      triggerReason,
+		TriggerType: queueData.TriggerType,
 		TriggerName: task.Trigger.Name,
-
-		// Note: despite the name OutputData, this isn't output data of the task, it's the parsed and enrich data based on the event
-		// it's a synthetic data to help end-user interact with the data come in from event, at run time, it's  accessible through <triggerName>.data
-		OutputData: vm.parsedTriggerData.GetValue(),
+		OutputData:  vm.parsedTriggerData.GetValue(),
 	}
 
 	if runTaskErr != nil {
-		x.logger.Error("error executing task", "error", err, "runError", runTaskErr, "task_id", task.Id, "triggermark", triggerReason)
+		x.logger.Error("error executing task", "error", err, "runError", runTaskErr, "task_id", task.Id, "triggermark", queueData)
 		execution.Error = runTaskErr.Error()
 	}
 
@@ -190,7 +189,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	if runTaskErr == nil {
-		x.logger.Info("successfully executing task", "task_id", task.Id, "triggermark", triggerReason)
+		x.logger.Info("successfully executing task", "task_id", task.Id, "triggermark", queueData)
 		return execution, nil
 	}
 

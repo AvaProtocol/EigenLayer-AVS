@@ -89,7 +89,7 @@ func TestChangeEpochToMs(t *testing.T) {
 		EndAt:   execEndSeconds,   // Seconds
 		OutputData: &avsproto.Execution_FixedTimeTrigger{
 			FixedTimeTrigger: &avsproto.FixedTimeTrigger_Output{
-				Epoch: uint64(epochSeconds), // Seconds
+				Timestamp: uint64(epochSeconds), // Seconds
 			},
 		},
 		// Other fields can be default/empty
@@ -214,8 +214,8 @@ func TestChangeEpochToMs(t *testing.T) {
 
 	// Verify Execution Output Data (FixedTimeTrigger)
 	if fixedTimeTriggerOutput := retrievedExec2.GetFixedTimeTrigger(); fixedTimeTriggerOutput != nil {
-		if fixedTimeTriggerOutput.Epoch != uint64(expectedEpochMs) {
-			t.Errorf("FixedTimeTrigger Epoch incorrect: got %d, want %d", fixedTimeTriggerOutput.Epoch, expectedEpochMs)
+		if fixedTimeTriggerOutput.Timestamp != uint64(expectedEpochMs) {
+			t.Errorf("FixedTimeTrigger Timestamp incorrect: got %d, want %d", fixedTimeTriggerOutput.Timestamp, expectedEpochMs)
 		}
 	} else {
 		t.Errorf("Expected FixedTimeTrigger output data, but got nil or different type")

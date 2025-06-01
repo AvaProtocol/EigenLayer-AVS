@@ -123,14 +123,20 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 		},
 	}
 
+	testTriggerData := testutil.GetTestEventTriggerData()
+	triggerData := &TriggerData{
+		Type:   testTriggerData.Type,
+		Output: testTriggerData.Output,
+	}
+
 	vm, err := NewVMWithData(&model.Task{
 		Task: &avsproto.Task{
-			Id:      "123",
+			Id:      "sampletaskid1",
 			Nodes:   nodes,
 			Edges:   edges,
 			Trigger: trigger,
 		},
-	}, testutil.GetTestEventTriggerReason(), testutil.GetTestSmartWalletConfig(), nil)
+	}, triggerData, testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
 		t.Errorf("expect vm initialized")

@@ -544,23 +544,26 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 
 // TODO: Merge and verify from multiple operators
 func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyTriggersReq) error {
-	if len(payload.TaskId) < 1 {
-		return nil
-	}
-
 	n.lock.Lock()
-	// delete(n.tasks, payload.TaskId)
-	// delete(n.trackSyncedTasks[address].TaskID, payload.TaskId)
-	// uncomment later
+	n.logger.Info("processing aggregator check hit", "operator", address, "task_id", payload.TaskId)
+
+	if state, exists := n.trackSyncedTasks[address]; exists {
+		state.TaskID[payload.TaskId] = true
+	}
 
 	n.logger.Info("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
 	n.lock.Unlock()
 
-	reason := GetTriggerReasonOrDefault(payload.Reason, payload.TaskId, n.logger)
+	// Create trigger data
+	triggerData := &TriggerData{
+		Type:   payload.TriggerType,
+		Output: ExtractTriggerOutput(payload.TriggerOutput),
+	}
 
 	queueTaskData := QueueExecutionData{
-		Reason:      reason,
-		ExecutionID: ulid.Make().String(),
+		TriggerType:   triggerData.Type,
+		TriggerOutput: triggerData.Output,
+		ExecutionID:   ulid.Make().String(),
 	}
 
 	data, err := json.Marshal(queueTaskData)
@@ -763,70 +766,80 @@ func (n *Engine) GetTask(user *model.User, taskID string) (*model.Task, error) {
 	return task, nil
 }
 
-func (n *Engine) TriggerTask(user *model.User, payload *avsproto.UserTriggerTaskReq) (*avsproto.UserTriggerTaskResp, error) {
+func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq) (*avsproto.TriggerTaskResp, error) {
+	// Validate task ID format first
 	if !ValidateTaskId(payload.TaskId) {
-		return nil, status.Errorf(codes.InvalidArgument, InvalidTaskIdFormat)
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, InvalidTaskIdFormat)
 	}
 
-	n.logger.Info("processed manually trigger", "user", user.Address, "task_id", payload.TaskId)
-
-	task, err := n.GetTaskByID(payload.TaskId)
+	task, err := n.GetTask(user, payload.TaskId)
 	if err != nil {
-		n.logger.Error("task not found", "user", user.Address, "task_id", payload.TaskId)
 		return nil, err
 	}
 
-	if !task.IsRunable() {
-		return nil, grpcstatus.Errorf(codes.FailedPrecondition, TaskIsNotRunable)
-	}
+	// Explicit ownership validation for security (even though GetTask already checks this)
 	if !task.OwnedBy(user.Address) {
-		// only the owner of a task can trigger it
-		n.logger.Error("task not own by user", "owner", user.Address, "task_id", payload.TaskId)
 		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
-	reason := GetTriggerReasonOrDefault(payload.Reason, payload.TaskId, n.logger)
+	// Important business logic validation: Check if task is runnable
+	if !task.IsRunable() {
+		return nil, grpcstatus.Errorf(codes.FailedPrecondition, TaskIsNotRunnable)
+	}
+
+	// Create trigger data
+	triggerData := &TriggerData{
+		Type:   payload.TriggerType,
+		Output: ExtractTriggerOutput(payload.TriggerOutput),
+	}
 
 	queueTaskData := QueueExecutionData{
-		Reason:      reason,
-		ExecutionID: ulid.Make().String(),
+		TriggerType:   triggerData.Type,
+		TriggerOutput: triggerData.Output,
+		ExecutionID:   ulid.Make().String(),
+	}
+
+	// Store execution status as pending first
+	err = n.setExecutionStatusQueue(task, queueTaskData.ExecutionID)
+	if err != nil {
+		return nil, err
 	}
 
 	if payload.IsBlocking {
-		// Run the task inline, by pass the queue system
 		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger)
-		execution, err := executor.RunTask(task, &queueTaskData)
-		if err == nil {
-			return &avsproto.UserTriggerTaskResp{
-				ExecutionId: execution.Id,
+		execution, runErr := executor.RunTask(task, &queueTaskData)
+		if runErr != nil {
+			n.logger.Error("failed to run blocking task", runErr)
+			return &avsproto.TriggerTaskResp{
+				ExecutionId: queueTaskData.ExecutionID,
+				Status:      avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED,
 			}, nil
 		}
 
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskTriggerError), "Error trigger task: %v", err)
+		if execution != nil {
+			return &avsproto.TriggerTaskResp{
+				ExecutionId: queueTaskData.ExecutionID,
+				Status:      avsproto.ExecutionStatus_EXECUTION_STATUS_COMPLETED,
+			}, nil
+		}
 	}
 
-	// Asynchronous execution path
+	// Add async execution
 	data, err := json.Marshal(queueTaskData)
 	if err != nil {
-		n.logger.Error("error serialize trigger to json", err)
-		return nil, grpcstatus.Errorf(codes.InvalidArgument, "%s", err.Error())
+		n.logger.Error("error serialize trigger to json", "error", err)
+		return nil, err
 	}
 
-	jid, err := n.queue.Enqueue(JobTypeExecuteTask, payload.TaskId, data)
-	if err != nil {
-		n.logger.Error("error enqueue job %s %s %w", payload.TaskId, string(data), err)
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageQueueUnavailableError)
+	if _, err := n.queue.Enqueue(JobTypeExecuteTask, payload.TaskId, data); err != nil {
+		n.logger.Error("failed to enqueue task", "error", err, "task_id", payload.TaskId)
+		return nil, err
 	}
+	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId)
 
-	// This is where the TaskTriggerKey is set for asynchronous tasks
-	if err := n.setExecutionStatusQueue(task, queueTaskData.ExecutionID); err != nil {
-		n.logger.Error("failed to set execution status in queue storage", "error", err, "task_id", payload.TaskId, "execution_id", queueTaskData.ExecutionID)
-		return nil, grpcstatus.Errorf(codes.Internal, "Failed to set execution status: %v", err)
-	}
-
-	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId, "jid", jid, "execution_id", queueTaskData.ExecutionID)
-	return &avsproto.UserTriggerTaskResp{
+	return &avsproto.TriggerTaskResp{
 		ExecutionId: queueTaskData.ExecutionID,
+		Status:      avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING,
 	}, nil
 }
 
@@ -910,30 +923,14 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 
 		exec := avsproto.Execution{}
 		if err := protojson.Unmarshal(executionValue, &exec); err == nil {
-			// Ensure Reason is not nil before attempting to set its Type field.
-			if exec.Reason == nil {
-				exec.Reason = &avsproto.TriggerReason{}
-			}
-			// task is needed for the switch, get it from the map populated earlier
-			taskId := TaskIdFromExecutionStorageKey([]byte(key))
-			task := tasks[string(taskId)] // Get the task from the map
-			if task == nil {
-				// This should ideally not happen if tasks map is populated correctly
-				n.logger.Error("Task not found in map for execution", "task_id_from_key", string(taskId))
-				continue
-			}
-
-			switch task.GetTrigger().GetTriggerType().(type) {
-			case *avsproto.TaskTrigger_Manual:
-				exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_MANUAL
-			case *avsproto.TaskTrigger_FixedTime:
-				exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME
-			case *avsproto.TaskTrigger_Cron:
-				exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_CRON
-			case *avsproto.TaskTrigger_Block:
-				exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_BLOCK
-			case *avsproto.TaskTrigger_Event:
-				exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_EVENT
+			// Set default trigger type if not set for backward compatibility
+			if exec.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
+				// task is needed for the conversion, get it from the map populated earlier
+				taskId := TaskIdFromExecutionStorageKey([]byte(key))
+				task := tasks[string(taskId)] // Get the task from the map
+				if task != nil {
+					exec.TriggerType = TaskTriggerToTriggerType(task.GetTrigger())
+				}
 			}
 			executioResp.Items = append(executioResp.Items, &exec)
 
@@ -974,7 +971,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 }
 
 func (n *Engine) setExecutionStatusQueue(task *model.Task, executionID string) error {
-	status := strconv.Itoa(int(avsproto.ExecutionStatus_Queued))
+	status := strconv.Itoa(int(avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING))
 	return n.db.Set(TaskTriggerKey(task, executionID), []byte(status))
 }
 
@@ -994,83 +991,64 @@ func (n *Engine) getExecutionStatusFromQueue(task *model.Task, executionID strin
 
 // GetExecution for a given task id and execution id
 func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) (*avsproto.Execution, error) {
-	// Validate all tasks own by the caller, if there are any tasks won't be owned by caller, we return permission error
-	task, err := n.GetTaskByID(payload.TaskId)
-
+	task, err := n.GetTask(user, payload.TaskId)
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+		return nil, err
 	}
 
-	if !task.OwnedBy(user.Address) {
-		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
-	}
-
-	executionValue, err := n.db.GetKey(TaskExecutionKey(task, payload.ExecutionId))
+	rawExecution, err := n.db.GetKey(TaskExecutionKey(task, payload.ExecutionId))
 	if err != nil {
-		// If not found in main execution storage, check if it's in the queue
-		status, statusErr := n.getExecutionStatusFromQueue(task, payload.ExecutionId)
-		if statusErr == nil && status != nil {
-			// Return a synthetic execution object indicating its queued status
-			// Note: avsproto.Execution does not have Status or AcknowledgeAt fields by default.
-			// If these are needed, the protobuf definition must be updated.
-			// For now, returning a basic Execution object.
-			return &avsproto.Execution{
-				Id: payload.ExecutionId,
-				// Status:        *status, // Field does not exist on avsproto.Execution
-				// AcknowledgeAt: time.Now().UnixMilli(), // Field does not exist on avsproto.Execution
-			}, nil
-		}
 		return nil, grpcstatus.Errorf(codes.NotFound, ExecutionNotFoundError)
 	}
-	exec := avsproto.Execution{}
-	if err := protojson.Unmarshal(executionValue, &exec); err == nil {
-		// Ensure Reason is not nil before attempting to set its Type field.
-		if exec.Reason == nil {
-			exec.Reason = &avsproto.TriggerReason{}
-		}
-		switch task.GetTrigger().GetTriggerType().(type) {
-		case *avsproto.TaskTrigger_Manual:
-			exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_MANUAL
-		case *avsproto.TaskTrigger_FixedTime:
-			exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME
-		case *avsproto.TaskTrigger_Cron:
-			exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_CRON
-		case *avsproto.TaskTrigger_Block:
-			exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_BLOCK
-		case *avsproto.TaskTrigger_Event:
-			exec.Reason.Type = avsproto.TriggerType_TRIGGER_TYPE_EVENT
-		}
+
+	exec := &avsproto.Execution{}
+	err = protojson.Unmarshal(rawExecution, exec)
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), TaskStorageCorruptedError)
 	}
 
-	return &exec, nil
+	// Set default trigger type if not set for backward compatibility
+	if exec.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
+		exec.TriggerType = TaskTriggerToTriggerType(task.Trigger)
+	}
+
+	return exec, nil
 }
 
 func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.ExecutionReq) (*avsproto.ExecutionStatusResp, error) {
-	task, err := n.GetTaskByID(payload.TaskId)
-
+	task, err := n.GetTask(user, payload.TaskId)
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+		return nil, err
 	}
 
-	if !task.OwnedBy(user.Address) {
-		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
-	}
-
-	// First look into execution first
-	if _, err = n.db.GetKey(TaskExecutionKey(task, payload.ExecutionId)); err != nil {
-		// When execution not found, it could be in pending status, we will check that storage
-		if status, err := n.getExecutionStatusFromQueue(task, payload.ExecutionId); err == nil {
-			return &avsproto.ExecutionStatusResp{
-				Status: *status,
-			}, nil
+	// First check if execution is completed and stored
+	rawExecution, err := n.db.GetKey(TaskExecutionKey(task, payload.ExecutionId))
+	if err == nil {
+		exec := &avsproto.Execution{}
+		err = protojson.Unmarshal(rawExecution, exec)
+		if err != nil {
+			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), TaskStorageCorruptedError)
 		}
-		return nil, fmt.Errorf("invalid execution or task id") // Corrected error message
+
+		// Set default trigger type if not set for backward compatibility
+		if exec.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
+			exec.TriggerType = TaskTriggerToTriggerType(task.Trigger)
+		}
+
+		if exec.Success {
+			return &avsproto.ExecutionStatusResp{Status: avsproto.ExecutionStatus_EXECUTION_STATUS_COMPLETED}, nil
+		} else {
+			return &avsproto.ExecutionStatusResp{Status: avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED}, nil
+		}
 	}
 
-	// if the key existed, the execution has finished, no need to decode the whole storage, we just return the status in this call
-	return &avsproto.ExecutionStatusResp{
-		Status: avsproto.ExecutionStatus_Finished,
-	}, nil
+	// Check if it's pending in queue
+	status, err := n.getExecutionStatusFromQueue(task, payload.ExecutionId)
+	if err != nil {
+		return nil, grpcstatus.Errorf(codes.NotFound, ExecutionNotFoundError)
+	}
+
+	return &avsproto.ExecutionStatusResp{Status: *status}, nil
 }
 
 func (n *Engine) GetExecutionCount(user *model.User, payload *avsproto.GetExecutionCountReq) (*avsproto.GetExecutionCountResp, error) {

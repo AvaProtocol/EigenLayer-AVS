@@ -230,8 +230,10 @@ func TestRunNodeImmediately_TriggerTypes(t *testing.T) {
 		result, err := engine.RunNodeImmediately(NodeTypeFixedTimeTrigger, map[string]interface{}{}, map[string]interface{}{})
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Contains(t, result, "epoch")
-		assert.IsType(t, uint64(0), result["epoch"])
+		assert.Contains(t, result, "timestamp")
+		assert.Contains(t, result, "timestamp_iso")
+		assert.IsType(t, uint64(0), result["timestamp"])
+		assert.IsType(t, "", result["timestamp_iso"])
 	})
 
 	// Test CronTrigger immediate execution
@@ -239,9 +241,10 @@ func TestRunNodeImmediately_TriggerTypes(t *testing.T) {
 		result, err := engine.RunNodeImmediately(NodeTypeCronTrigger, map[string]interface{}{}, map[string]interface{}{})
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Contains(t, result, "epoch")
-		assert.Contains(t, result, "scheduleMatched")
-		assert.Equal(t, "immediate_execution", result["scheduleMatched"])
+		assert.Contains(t, result, "timestamp")
+		assert.Contains(t, result, "timestamp_iso")
+		assert.IsType(t, uint64(0), result["timestamp"])
+		assert.IsType(t, "", result["timestamp_iso"])
 	})
 
 	// Test EventTrigger immediate execution (simulation)
@@ -1315,18 +1318,16 @@ func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
 			},
 		}
 
-		// Create trigger reason
-		triggerReason := &avsproto.TriggerReason{
+		// Create trigger data
+		triggerData := &TriggerData{
 			Type: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
-			TriggerOutput: &avsproto.TriggerReason_BlockTrigger{
-				BlockTrigger: &avsproto.BlockTrigger_Output{
-					BlockNumber: testBlockNumber,
-				},
+			Output: &avsproto.BlockTrigger_Output{
+				BlockNumber: 12345678,
 			},
 		}
 
 		// Create VM and simulate normal execution
-		vm, err := NewVMWithData(task, triggerReason, nil, map[string]string{})
+		vm, err := NewVMWithData(task, triggerData, testutil.GetTestSmartWalletConfig(), nil)
 		assert.NoError(t, err, "Should create VM without error")
 
 		// Verify VM state
@@ -1449,15 +1450,14 @@ func TestSmartTriggerDataFallback(t *testing.T) {
 		},
 	}
 
-	reason := &avsproto.TriggerReason{
-		TriggerOutput: &avsproto.TriggerReason_BlockTrigger{
-			BlockTrigger: &avsproto.BlockTrigger_Output{
-				BlockNumber: 12345678,
-			},
+	triggerData := &TriggerData{
+		Type: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+		Output: &avsproto.BlockTrigger_Output{
+			BlockNumber: 12345678,
 		},
 	}
 
-	vm, err := NewVMWithData(task, reason, testutil.GetTestSmartWalletConfig(), nil)
+	vm, err := NewVMWithData(task, triggerData, testutil.GetTestSmartWalletConfig(), nil)
 	require.NoError(t, err)
 	require.NotNil(t, vm)
 

@@ -96,15 +96,18 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 
 // runFixedTimeTriggerImmediately returns the current timestamp immediately
 func (n *Engine) runFixedTimeTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
-	// For immediate execution, return current epoch time
-	currentEpoch := uint64(time.Now().Unix())
+	// For immediate execution, return current timestamp in milliseconds and ISO format
+	currentTime := time.Now()
+	currentTimestamp := uint64(currentTime.UnixMilli())
+	currentTimestampISO := currentTime.UTC().Format("2006-01-02T15:04:05.000Z")
 
 	result := map[string]interface{}{
-		"epoch": currentEpoch,
+		"timestamp":     currentTimestamp,
+		"timestamp_iso": currentTimestampISO,
 	}
 
 	if n.logger != nil {
-		n.logger.Info("FixedTimeTrigger executed immediately", "epoch", currentEpoch)
+		n.logger.Info("FixedTimeTrigger executed immediately", "timestamp", currentTimestamp, "timestamp_iso", currentTimestampISO)
 	}
 	return result, nil
 }
@@ -739,8 +742,11 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		if result != nil {
 			// Convert result to FixedTimeTrigger output
 			fixedTimeOutput := &avsproto.FixedTimeTrigger_Output{}
-			if epoch, ok := result["epoch"].(uint64); ok {
-				fixedTimeOutput.Epoch = epoch
+			if timestamp, ok := result["timestamp"].(uint64); ok {
+				fixedTimeOutput.Timestamp = timestamp
+			}
+			if timestampISO, ok := result["timestamp_iso"].(string); ok {
+				fixedTimeOutput.TimestampIso = timestampISO
 			}
 			resp.OutputData = &avsproto.RunTriggerResp_FixedTimeTrigger{
 				FixedTimeTrigger: fixedTimeOutput,
