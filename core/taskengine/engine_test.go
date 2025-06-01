@@ -311,8 +311,12 @@ func TestGetExecution(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: uint64(101),
-			Type:        avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+			Type: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+			TriggerOutput: &avsproto.TriggerReason_BlockTrigger{
+				BlockTrigger: &avsproto.BlockTrigger_Output{
+					BlockNumber: uint64(101),
+				},
+			},
 		},
 		IsBlocking: true,
 	})
@@ -351,10 +355,10 @@ func TestGetExecution(t *testing.T) {
 		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
 
-	if execution.Reason == nil || execution.Reason.BlockNumber != 101 {
+	if execution.Reason == nil || execution.Reason.GetBlockTrigger().BlockNumber != 101 {
 		var actualBlockNumber uint64
-		if execution.Reason != nil {
-			actualBlockNumber = execution.Reason.BlockNumber
+		if execution.Reason != nil && execution.Reason.GetBlockTrigger() != nil {
+			actualBlockNumber = execution.Reason.GetBlockTrigger().BlockNumber
 		}
 		t.Errorf("invalid triggered block. expect 101 got %d (Reason: %+v)", actualBlockNumber, execution.Reason)
 	}
@@ -445,8 +449,12 @@ func TestTriggerSync(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: uint64(101),
-			Type:        avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+			Type: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+			TriggerOutput: &avsproto.TriggerReason_BlockTrigger{
+				BlockTrigger: &avsproto.BlockTrigger_Output{
+					BlockNumber: uint64(101),
+				},
+			},
 		},
 		IsBlocking: true,
 	})
@@ -485,10 +493,10 @@ func TestTriggerSync(t *testing.T) {
 		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
 	}
 
-	if execution.Reason == nil || execution.Reason.BlockNumber != 101 {
+	if execution.Reason == nil || execution.Reason.GetBlockTrigger().BlockNumber != 101 {
 		var actualBlockNumber uint64
-		if execution.Reason != nil {
-			actualBlockNumber = execution.Reason.BlockNumber
+		if execution.Reason != nil && execution.Reason.GetBlockTrigger() != nil {
+			actualBlockNumber = execution.Reason.GetBlockTrigger().BlockNumber
 		}
 		t.Errorf("invalid triggered block. expect 101 got %d (Reason: %+v)", actualBlockNumber, execution.Reason)
 	}
@@ -521,8 +529,12 @@ func TestTriggerAsync(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: uint64(101),
-			Type:        avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+			Type: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+			TriggerOutput: &avsproto.TriggerReason_BlockTrigger{
+				BlockTrigger: &avsproto.BlockTrigger_Output{
+					BlockNumber: uint64(101),
+				},
+			},
 		},
 		IsBlocking: false,
 	})
@@ -559,16 +571,16 @@ func TestTriggerAsync(t *testing.T) {
 	}
 
 	if !execution.Success {
-		t.Errorf("wrong success result, expected true got false")
-	}
-
-	if execution.Steps[0].NodeId != "ping1" {
-		t.Errorf("wrong node id in execution log")
+		t.Errorf("wrong success result, expected true got false. Error: %s", execution.Error)
 	}
 
 	if len(execution.Steps) == 0 {
 		t.Errorf("No execution steps found")
 		return
+	}
+
+	if execution.Steps[0].NodeId != "ping1" {
+		t.Errorf("wrong node id in execution log")
 	}
 
 	step := execution.Steps[0]
@@ -652,8 +664,12 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	resultTrigger, err := n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: uint64(101),
-			Type:        avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+			Type: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+			TriggerOutput: &avsproto.TriggerReason_BlockTrigger{
+				BlockTrigger: &avsproto.BlockTrigger_Output{
+					BlockNumber: uint64(101),
+				},
+			},
 		},
 		IsBlocking: true,
 	})
@@ -666,8 +682,12 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	resultTrigger, err = n.TriggerTask(testutil.TestUser1(), &avsproto.UserTriggerTaskReq{
 		TaskId: result.Id,
 		Reason: &avsproto.TriggerReason{
-			BlockNumber: uint64(101),
-			Type:        avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+			Type: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+			TriggerOutput: &avsproto.TriggerReason_BlockTrigger{
+				BlockTrigger: &avsproto.BlockTrigger_Output{
+					BlockNumber: uint64(101),
+				},
+			},
 		},
 		IsBlocking: true,
 	})

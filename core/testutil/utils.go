@@ -346,22 +346,25 @@ func GetTestSecrets() map[string]string {
 
 func GetTestEventTriggerReason() *avsproto.TriggerReason {
 	return &avsproto.TriggerReason{
-		BlockNumber: 7212417,
-		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-		LogIndex:    98,
-		Type:        avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+		TriggerOutput: &avsproto.TriggerReason_EventTrigger{
+			EventTrigger: &avsproto.EventTrigger_Output{
+				EvmLog: &avsproto.Evm_Log{
+					BlockNumber:     7212417,
+					TransactionHash: "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+					Index:           98,
+					// Other fields would be populated if available
+					Address: "",
+					Topics:  []string{},
+					Data:    "",
+				},
+			},
+		},
 	}
 }
 
 // GetTestEventTriggerReasonWithTransferData provides a trigger reason with rich transfer log data for testing
 func GetTestEventTriggerReasonWithTransferData() (*avsproto.TriggerReason, *avsproto.EventTrigger_TransferLogOutput) {
-	reason := &avsproto.TriggerReason{
-		BlockNumber: 7212417,
-		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-		LogIndex:    98,
-		Type:        avsproto.TriggerType_TRIGGER_TYPE_EVENT,
-	}
-
 	transferLog := &avsproto.EventTrigger_TransferLogOutput{
 		TokenName:        "USDC",
 		TokenSymbol:      "USDC",
@@ -375,6 +378,15 @@ func GetTestEventTriggerReasonWithTransferData() (*avsproto.TriggerReason, *avsp
 		Value:            "3453120",
 		ValueFormatted:   "3.45312",
 		TransactionIndex: 73,
+	}
+
+	reason := &avsproto.TriggerReason{
+		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+		TriggerOutput: &avsproto.TriggerReason_EventTrigger{
+			EventTrigger: &avsproto.EventTrigger_Output{
+				TransferLog: transferLog,
+			},
+		},
 	}
 
 	return reason, transferLog

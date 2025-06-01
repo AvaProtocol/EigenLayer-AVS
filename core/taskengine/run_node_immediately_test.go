@@ -1317,9 +1317,12 @@ func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
 
 		// Create trigger reason
 		triggerReason := &avsproto.TriggerReason{
-			Type:        avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
-			BlockNumber: testBlockNumber,
-			Epoch:       uint64(time.Now().Unix()),
+			Type: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+			TriggerOutput: &avsproto.TriggerReason_BlockTrigger{
+				BlockTrigger: &avsproto.BlockTrigger_Output{
+					BlockNumber: testBlockNumber,
+				},
+			},
 		}
 
 		// Create VM and simulate normal execution
@@ -1447,10 +1450,11 @@ func TestSmartTriggerDataFallback(t *testing.T) {
 	}
 
 	reason := &avsproto.TriggerReason{
-		BlockNumber: 12345678,
-		Epoch:       1748680000,
-		LogIndex:    42,
-		TxHash:      "0xabcdef",
+		TriggerOutput: &avsproto.TriggerReason_BlockTrigger{
+			BlockTrigger: &avsproto.BlockTrigger_Output{
+				BlockNumber: 12345678,
+			},
+		},
 	}
 
 	vm, err := NewVMWithData(task, reason, testutil.GetTestSmartWalletConfig(), nil)

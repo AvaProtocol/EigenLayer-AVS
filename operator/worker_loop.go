@@ -170,8 +170,13 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				Signature: "pending",
 				TaskId:    triggerItem.TaskID,
 				Reason: &avspb.TriggerReason{
-					Epoch: uint64(triggerItem.Marker),
-					Type:  avspb.TriggerType_TRIGGER_TYPE_CRON,
+					Type: avspb.TriggerType_TRIGGER_TYPE_CRON,
+					TriggerOutput: &avspb.TriggerReason_CronTrigger{
+						CronTrigger: &avspb.CronTrigger_Output{
+							Timestamp:    uint64(triggerItem.Marker),
+							TimestampIso: time.Unix(0, int64(triggerItem.Marker)*1000000).UTC().Format("2006-01-02T15:04:05.000Z"),
+						},
+					},
 				},
 			}); err == nil {
 				o.logger.Debug("Successfully notify aggregator for task hit", "taskid", triggerItem.TaskID)
@@ -214,8 +219,19 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				Signature: "pending",
 				TaskId:    triggerItem.TaskID,
 				Reason: &avspb.TriggerReason{
-					BlockNumber: uint64(triggerItem.Marker),
-					Type:        avspb.TriggerType_TRIGGER_TYPE_BLOCK,
+					Type: avspb.TriggerType_TRIGGER_TYPE_BLOCK,
+					TriggerOutput: &avspb.TriggerReason_BlockTrigger{
+						BlockTrigger: &avspb.BlockTrigger_Output{
+							BlockNumber: uint64(triggerItem.Marker),
+							// Other block fields would be populated here if available
+							BlockHash:  "",
+							Timestamp:  0,
+							ParentHash: "",
+							Difficulty: "",
+							GasLimit:   0,
+							GasUsed:    0,
+						},
+					},
 				},
 			}); err == nil {
 				o.logger.Debug("Successfully notify aggregator for task hit", "taskid", triggerItem.TaskID)
@@ -250,10 +266,21 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				Signature: "pending",
 				TaskId:    triggerItem.TaskID,
 				Reason: &avspb.TriggerReason{
-					BlockNumber: uint64(triggerItem.Marker.BlockNumber),
-					LogIndex:    uint64(triggerItem.Marker.LogIndex),
-					TxHash:      triggerItem.Marker.TxHash,
-					Type:        avspb.TriggerType_TRIGGER_TYPE_EVENT,
+					Type: avspb.TriggerType_TRIGGER_TYPE_EVENT,
+					TriggerOutput: &avspb.TriggerReason_EventTrigger{
+						EventTrigger: &avspb.EventTrigger_Output{
+							// Create an EVM log output with the event data
+							EvmLog: &avspb.Evm_Log{
+								BlockNumber:     uint64(triggerItem.Marker.BlockNumber),
+								Index:           uint32(triggerItem.Marker.LogIndex),
+								TransactionHash: triggerItem.Marker.TxHash,
+								// Other fields would be populated if available
+								Address: "",
+								Topics:  []string{},
+								Data:    "",
+							},
+						},
+					},
 				},
 			}); err == nil {
 				o.logger.Debug("Successfully notify aggregator for task hit", "taskid", triggerItem.TaskID)

@@ -111,16 +111,18 @@ func (n *Engine) runFixedTimeTriggerImmediately(triggerConfig map[string]interfa
 
 // runCronTriggerImmediately returns the current timestamp immediately
 func (n *Engine) runCronTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
-	// For immediate execution, return current epoch time and indicate manual execution
-	currentEpoch := uint64(time.Now().Unix())
+	// For immediate execution, return current timestamp in milliseconds and ISO format
+	currentTime := time.Now()
+	currentTimestamp := uint64(currentTime.UnixMilli())
+	currentTimestampISO := currentTime.UTC().Format("2006-01-02T15:04:05.000Z")
 
 	result := map[string]interface{}{
-		"epoch":           currentEpoch,
-		"scheduleMatched": "immediate_execution", // Indicate this was immediate, not scheduled
+		"timestamp":     currentTimestamp,
+		"timestamp_iso": currentTimestampISO,
 	}
 
 	if n.logger != nil {
-		n.logger.Info("CronTrigger executed immediately", "epoch", currentEpoch)
+		n.logger.Info("CronTrigger executed immediately", "timestamp", currentTimestamp, "timestamp_iso", currentTimestampISO)
 	}
 	return result, nil
 }
@@ -748,11 +750,11 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		if result != nil {
 			// Convert result to CronTrigger output
 			cronOutput := &avsproto.CronTrigger_Output{}
-			if epoch, ok := result["epoch"].(uint64); ok {
-				cronOutput.Epoch = epoch
+			if timestamp, ok := result["timestamp"].(uint64); ok {
+				cronOutput.Timestamp = timestamp
 			}
-			if scheduleMatched, ok := result["scheduleMatched"].(string); ok {
-				cronOutput.ScheduleMatched = scheduleMatched
+			if timestampISO, ok := result["timestamp_iso"].(string); ok {
+				cronOutput.TimestampIso = timestampISO
 			}
 			resp.OutputData = &avsproto.RunTriggerResp_CronTrigger{
 				CronTrigger: cronOutput,

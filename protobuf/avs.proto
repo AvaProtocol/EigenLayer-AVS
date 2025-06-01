@@ -73,8 +73,8 @@ message CronTrigger {
   }
   
   message Output {
-    uint64 epoch = 1;
-    string schedule_matched = 2; // Which schedule pattern was matched
+    uint64 timestamp = 1; // Timestamp in milliseconds
+    string timestamp_iso = 2; // ISO representation of timestamp in UTC (e.g., "2025-05-31T10:30:00.000Z")
   }
 
   // Include Config as field so it is generated in Go
@@ -694,17 +694,21 @@ message KeyResp {
 // TriggerReason is used to populate the `<trigger-name>.data` variable. Example, if this is a transfer
 // event, then you will have access to <trigger-name>.data.from_address or <trigger-name>.data.value
 message TriggerReason {
-  uint64 block_number = 1;
-  uint64 log_index    = 2;
-  string tx_hash      = 3;
-  uint64 epoch        = 4;
-
   // Use the top-level TriggerType enum for consistency
   // This value isn't needed because when we query an execution or trigger a task, we know the trigger type 
   // But, The JS SDK needed this value probably to save the lookup time when it only has execution id somehow
   // So we added this value to the response for the client to consume and use however it wants
   // Internally we don't make use of this field.
-  TriggerType type = 5;
+  TriggerType type = 1;
+
+  // Use oneof to contain the actual trigger output data based on type
+  oneof trigger_output {
+    BlockTrigger.Output block_trigger = 2;
+    FixedTimeTrigger.Output fixed_time_trigger = 3;
+    CronTrigger.Output cron_trigger = 4;
+    EventTrigger.Output event_trigger = 5;
+    ManualTrigger.Output manual_trigger = 6;
+  }
 }
 
 message GetWalletReq {

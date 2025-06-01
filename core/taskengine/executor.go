@@ -14,7 +14,6 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
-	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
@@ -110,30 +109,8 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	secrets, _ := LoadSecretForTask(x.db, task)
 
-	// Check if this is an event trigger that might need transfer log data
-	// For testing purposes, we'll provide mock transfer log data for event triggers
-	var vm *VM
-	var err error
-
-	if triggerReason.Type == avsproto.TriggerType_TRIGGER_TYPE_EVENT &&
-		triggerReason.TxHash == "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8" {
-		// This is the test transaction, provide mock transfer log data
-		_, transferLog := testutil.GetTestEventTriggerReasonWithTransferData()
-		vm, err = NewVMWithDataAndTransferLog(
-			task,
-			triggerReason,
-			x.smartWalletConfig,
-			secrets,
-			transferLog,
-		)
-	} else {
-		vm, err = NewVMWithData(
-			task,
-			triggerReason,
-			x.smartWalletConfig,
-			secrets,
-		)
-	}
+	// Create VM with trigger reason data
+	vm, err := NewVMWithData(task, triggerReason, x.smartWalletConfig, secrets)
 
 	if err != nil {
 		return nil, err

@@ -535,7 +535,18 @@ func TestEvaluateEvent(t *testing.T) {
 		},
 	}
 
-	mark, transferLog := testutil.GetTestEventTriggerReasonWithTransferData()
+	mark := &avsproto.TriggerReason{
+		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+		TriggerOutput: &avsproto.TriggerReason_EventTrigger{
+			EventTrigger: &avsproto.EventTrigger_Output{
+				EvmLog: &avsproto.Evm_Log{
+					BlockNumber:     7212417,
+					TransactionHash: "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+					Index:           98,
+				},
+			},
+		},
+	}
 
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
@@ -547,7 +558,7 @@ func TestEvaluateEvent(t *testing.T) {
 			Edges:   edges,
 			Trigger: trigger,
 		},
-	}, mark, testutil.GetTestSmartWalletConfig(), nil, transferLog)
+	}, mark, testutil.GetTestSmartWalletConfig(), nil, nil)
 
 	if err != nil {
 		t.Errorf("expect vm initialized")
@@ -640,10 +651,17 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 		},
 	}
 
-	mark := avsproto.TriggerReason{
-		BlockNumber: 7212417,
-		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-		LogIndex:    98,
+	mark := &avsproto.TriggerReason{
+		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+		TriggerOutput: &avsproto.TriggerReason_EventTrigger{
+			EventTrigger: &avsproto.EventTrigger_Output{
+				EvmLog: &avsproto.Evm_Log{
+					BlockNumber:     7212417,
+					TransactionHash: "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+					Index:           98,
+				},
+			},
+		},
 	}
 
 	SetRpc(testutil.GetTestRPCURL())
@@ -656,7 +674,7 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 			Edges:   edges,
 			Trigger: trigger,
 		},
-	}, &mark, testutil.GetTestSmartWalletConfig(), nil)
+	}, mark, testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
 		t.Errorf("expect vm initialized")
@@ -706,10 +724,17 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 		},
 	}
 
-	mark := avsproto.TriggerReason{
-		BlockNumber: 7212417,
-		TxHash:      "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-		LogIndex:    98,
+	mark := &avsproto.TriggerReason{
+		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+		TriggerOutput: &avsproto.TriggerReason_EventTrigger{
+			EventTrigger: &avsproto.EventTrigger_Output{
+				EvmLog: &avsproto.Evm_Log{
+					BlockNumber:     7212417,
+					TransactionHash: "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+					Index:           98,
+				},
+			},
+		},
 	}
 
 	SetRpc(testutil.GetTestRPCURL())
@@ -722,7 +747,7 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 			Edges:   edges,
 			Trigger: trigger,
 		},
-	}, &mark, testutil.GetTestSmartWalletConfig(), nil)
+	}, mark, testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
 		t.Errorf("expect vm initialized")
