@@ -468,6 +468,97 @@ func (r *RpcServer) RunTrigger(ctx context.Context, req *avsproto.RunTriggerReq)
 	return result, nil
 }
 
+func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTaskReq) (*avsproto.SimulateTaskResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process simulate task",
+		"user", user.Address.String(),
+		"trigger_type", req.TriggerType,
+		"nodes_count", len(req.Nodes),
+		"edges_count", len(req.Edges),
+	)
+
+	// Basic validation
+	if req.Trigger == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "trigger is required for task simulation")
+	}
+	if len(req.Nodes) == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "at least one node is required for task simulation")
+	}
+
+	// Add debug logging for the request details
+	configKeys := make([]string, 0, len(req.TriggerConfig))
+	for k := range req.TriggerConfig {
+		configKeys = append(configKeys, k)
+	}
+	inputKeys := make([]string, 0, len(req.InputVariables))
+	for k := range req.InputVariables {
+		inputKeys = append(inputKeys, k)
+	}
+
+	r.config.Logger.Info("simulate task details",
+		"user", user.Address.String(),
+		"trigger_type", req.TriggerType,
+		"trigger_name", req.Trigger.Name,
+		"config_keys", configKeys,
+		"input_keys", inputKeys,
+	)
+
+	// Convert protobuf values to Go native types
+	triggerConfig := make(map[string]interface{})
+	for k, v := range req.TriggerConfig {
+		triggerConfig[k] = v.AsInterface()
+	}
+
+	inputVariables := make(map[string]interface{})
+	for k, v := range req.InputVariables {
+		inputVariables[k] = v.AsInterface()
+	}
+
+	// Convert TriggerType enum to string for the engine function
+	triggerTypeStr := ""
+	switch req.TriggerType {
+	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
+		triggerTypeStr = taskengine.NodeTypeManualTrigger
+	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
+		triggerTypeStr = taskengine.NodeTypeFixedTimeTrigger
+	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
+		triggerTypeStr = taskengine.NodeTypeCronTrigger
+	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
+		triggerTypeStr = taskengine.NodeTypeBlockTrigger
+	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+		triggerTypeStr = taskengine.NodeTypeEventTrigger
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "unsupported trigger type: %v", req.TriggerType)
+	}
+
+	// Call the simulation function with the provided task definition
+	execution, err := r.engine.SimulateTask(user, req.Trigger, req.Nodes, req.Edges, triggerTypeStr, triggerConfig, inputVariables)
+	if err != nil {
+		r.config.Logger.Error("simulate task failed",
+			"user", user.Address.String(),
+			"trigger_name", req.Trigger.Name,
+			"error", err,
+		)
+		return nil, status.Errorf(codes.Internal, "simulation failed: %v", err)
+	}
+
+	r.config.Logger.Info("simulate task completed",
+		"user", user.Address.String(),
+		"trigger_name", req.Trigger.Name,
+		"success", execution.Success,
+		"execution_id", execution.Id,
+		"steps_count", len(execution.Steps),
+	)
+
+	return &avsproto.SimulateTaskResp{
+		Execution: execution,
+	}, nil
+}
+
 // Helper functions for logging
 func getConfigKeys(config map[string]*structpb.Value) []string {
 	keys := make([]string, 0, len(config))

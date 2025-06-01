@@ -44,6 +44,7 @@ const (
 	Aggregator_GetExecutionStats_FullMethodName  = "/aggregator.Aggregator/GetExecutionStats"
 	Aggregator_RunNodeWithInputs_FullMethodName  = "/aggregator.Aggregator/RunNodeWithInputs"
 	Aggregator_RunTrigger_FullMethodName         = "/aggregator.Aggregator/RunTrigger"
+	Aggregator_SimulateTask_FullMethodName       = "/aggregator.Aggregator/SimulateTask"
 )
 
 // AggregatorClient is the client API for Aggregator service.
@@ -100,6 +101,8 @@ type AggregatorClient interface {
 	RunNodeWithInputs(ctx context.Context, in *RunNodeWithInputsReq, opts ...grpc.CallOption) (*RunNodeWithInputsResp, error)
 	// RunTrigger allows executing a single trigger for testing purposes (triggers don't accept inputs)
 	RunTrigger(ctx context.Context, in *RunTriggerReq, opts ...grpc.CallOption) (*RunTriggerResp, error)
+	// SimulateTask allows executing a complete task simulation including trigger and all workflow nodes
+	SimulateTask(ctx context.Context, in *SimulateTaskReq, opts ...grpc.CallOption) (*SimulateTaskResp, error)
 }
 
 type aggregatorClient struct {
@@ -350,6 +353,16 @@ func (c *aggregatorClient) RunTrigger(ctx context.Context, in *RunTriggerReq, op
 	return out, nil
 }
 
+func (c *aggregatorClient) SimulateTask(ctx context.Context, in *SimulateTaskReq, opts ...grpc.CallOption) (*SimulateTaskResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SimulateTaskResp)
+	err := c.cc.Invoke(ctx, Aggregator_SimulateTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AggregatorServer is the server API for Aggregator service.
 // All implementations must embed UnimplementedAggregatorServer
 // for forward compatibility.
@@ -404,6 +417,8 @@ type AggregatorServer interface {
 	RunNodeWithInputs(context.Context, *RunNodeWithInputsReq) (*RunNodeWithInputsResp, error)
 	// RunTrigger allows executing a single trigger for testing purposes (triggers don't accept inputs)
 	RunTrigger(context.Context, *RunTriggerReq) (*RunTriggerResp, error)
+	// SimulateTask allows executing a complete task simulation including trigger and all workflow nodes
+	SimulateTask(context.Context, *SimulateTaskReq) (*SimulateTaskResp, error)
 	mustEmbedUnimplementedAggregatorServer()
 }
 
@@ -485,6 +500,9 @@ func (UnimplementedAggregatorServer) RunNodeWithInputs(context.Context, *RunNode
 }
 func (UnimplementedAggregatorServer) RunTrigger(context.Context, *RunTriggerReq) (*RunTriggerResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RunTrigger not implemented")
+}
+func (UnimplementedAggregatorServer) SimulateTask(context.Context, *SimulateTaskReq) (*SimulateTaskResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SimulateTask not implemented")
 }
 func (UnimplementedAggregatorServer) mustEmbedUnimplementedAggregatorServer() {}
 func (UnimplementedAggregatorServer) testEmbeddedByValue()                    {}
@@ -939,6 +957,24 @@ func _Aggregator_RunTrigger_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Aggregator_SimulateTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SimulateTaskReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).SimulateTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Aggregator_SimulateTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).SimulateTask(ctx, req.(*SimulateTaskReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Aggregator_ServiceDesc is the grpc.ServiceDesc for Aggregator service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1041,6 +1077,10 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RunTrigger",
 			Handler:    _Aggregator_RunTrigger_Handler,
+		},
+		{
+			MethodName: "SimulateTask",
+			Handler:    _Aggregator_SimulateTask_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

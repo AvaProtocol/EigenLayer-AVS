@@ -118,7 +118,9 @@ func (t *triggerDataType) GetValue() avsproto.IsExecution_OutputData {
 	if t.Cron != nil {
 		return &avsproto.Execution_CronTrigger{CronTrigger: t.Cron}
 	}
-	// Note: Manual triggers don't have an Execution output type in the protobuf
+	if t.Manual != nil {
+		return &avsproto.Execution_ManualTrigger{ManualTrigger: t.Manual}
+	}
 	return nil
 }
 
