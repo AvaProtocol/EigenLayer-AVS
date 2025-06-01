@@ -246,7 +246,7 @@ func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsp
 
 // TriggerTask emit a trigger event that cause the task to be queue and execute eventually. It's similar to a trigger
 // sending by operator, but in this case the user manually provide a trigger point to force run it.
-func (r *RpcServer) TriggerTask(ctx context.Context, payload *avsproto.UserTriggerTaskReq) (*avsproto.UserTriggerTaskResp, error) {
+func (r *RpcServer) TriggerTask(ctx context.Context, payload *avsproto.TriggerTaskReq) (*avsproto.TriggerTaskResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())

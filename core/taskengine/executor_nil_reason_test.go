@@ -62,24 +62,21 @@ func TestExecutorRunTaskWithNilReason(t *testing.T) {
 
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
 	execution, err := executor.RunTask(task, &QueueExecutionData{
-		Reason:      nil, // Explicitly set to nil to test our fix
-		ExecutionID: "exec_nil_reason",
+		TriggerType:   avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED,
+		TriggerOutput: nil,
+		ExecutionID:   "exec_nil_reason",
 	})
 
 	if err != nil {
-		t.Errorf("Expected no error with nil reason, but got: %v", err)
+		t.Errorf("Expected no error with unspecified trigger type, but got: %v", err)
 	}
 
 	if !execution.Success {
 		t.Errorf("Expected success status but got failure")
 	}
 
-	if execution.Reason == nil {
-		t.Errorf("Expected a default reason to be created, but it's still nil")
-	}
-
-	if execution.Reason.Type != avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
-		t.Errorf("Expected default reason type to be Unset, but got: %v", execution.Reason.Type)
+	if execution.TriggerType != avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
+		t.Errorf("Expected trigger type to be TRIGGER_TYPE_UNSPECIFIED, but got: %v", execution.TriggerType)
 	}
 
 	if len(execution.Steps) != 1 {

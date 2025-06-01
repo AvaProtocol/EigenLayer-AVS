@@ -230,8 +230,10 @@ func TestRunNodeImmediately_TriggerTypes(t *testing.T) {
 		result, err := engine.RunNodeImmediately(NodeTypeFixedTimeTrigger, map[string]interface{}{}, map[string]interface{}{})
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Contains(t, result, "epoch")
-		assert.IsType(t, uint64(0), result["epoch"])
+		assert.Contains(t, result, "timestamp")
+		assert.Contains(t, result, "timestamp_iso")
+		assert.IsType(t, uint64(0), result["timestamp"])
+		assert.IsType(t, "", result["timestamp_iso"])
 	})
 
 	// Test CronTrigger immediate execution
@@ -239,9 +241,10 @@ func TestRunNodeImmediately_TriggerTypes(t *testing.T) {
 		result, err := engine.RunNodeImmediately(NodeTypeCronTrigger, map[string]interface{}{}, map[string]interface{}{})
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Contains(t, result, "epoch")
-		assert.Contains(t, result, "scheduleMatched")
-		assert.Equal(t, "immediate_execution", result["scheduleMatched"])
+		assert.Contains(t, result, "timestamp")
+		assert.Contains(t, result, "timestamp_iso")
+		assert.IsType(t, uint64(0), result["timestamp"])
+		assert.IsType(t, "", result["timestamp_iso"])
 	})
 
 	// Test EventTrigger immediate execution (simulation)
@@ -1315,15 +1318,17 @@ func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
 			},
 		}
 
-		// Create trigger reason
-		triggerReason := &avsproto.TriggerReason{
-			Type:        avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
-			BlockNumber: testBlockNumber,
-			Epoch:       uint64(time.Now().Unix()),
+		// Create trigger data
+		triggerData := &TriggerData{
+			Type: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+			Output: &avsproto.BlockTrigger_Output{
+				BlockNumber: 12345678,
+				GasLimit:    42000000, // Add gas_limit to test camelCase fallback
+			},
 		}
 
 		// Create VM and simulate normal execution
-		vm, err := NewVMWithData(task, triggerReason, nil, map[string]string{})
+		vm, err := NewVMWithData(task, triggerData, testutil.GetTestSmartWalletConfig(), nil)
 		assert.NoError(t, err, "Should create VM without error")
 
 		// Verify VM state
@@ -1446,14 +1451,15 @@ func TestSmartTriggerDataFallback(t *testing.T) {
 		},
 	}
 
-	reason := &avsproto.TriggerReason{
-		BlockNumber: 12345678,
-		Epoch:       1748680000,
-		LogIndex:    42,
-		TxHash:      "0xabcdef",
+	triggerData := &TriggerData{
+		Type: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
+		Output: &avsproto.BlockTrigger_Output{
+			BlockNumber: 12345678,
+			GasLimit:    42000000, // Add gas_limit to test camelCase fallback
+		},
 	}
 
-	vm, err := NewVMWithData(task, reason, testutil.GetTestSmartWalletConfig(), nil)
+	vm, err := NewVMWithData(task, triggerData, testutil.GetTestSmartWalletConfig(), nil)
 	require.NoError(t, err)
 	require.NotNil(t, vm)
 
@@ -1486,17 +1492,17 @@ func TestSmartTriggerDataFallback(t *testing.T) {
 	nonExistentResult := vm.preprocessTextWithVariableMapping(nonExistentTemplate)
 	t.Logf("🔍 Non-existent template: %s -> %s", nonExistentTemplate, nonExistentResult)
 
-	// Test 4: Another camelCase field (logIndex -> log_index)
-	logIndexTemplate := "{{ block_trigger.data.logIndex }}"
-	logIndexResult := vm.preprocessTextWithVariableMapping(logIndexTemplate)
-	t.Logf("🔍 LogIndex template: %s -> %s", logIndexTemplate, logIndexResult)
+	// Test 4: Another camelCase field (gasLimit -> gas_limit)
+	gasLimitTemplate := "{{ block_trigger.data.gasLimit }}"
+	gasLimitResult := vm.preprocessTextWithVariableMapping(gasLimitTemplate)
+	t.Logf("🔍 GasLimit template: %s -> %s", gasLimitTemplate, gasLimitResult)
 
 	// Verify that our fallback logic is working correctly
 	// Both camelCase and snake_case should resolve to the same value
 	require.Equal(t, "12345678", camelCaseResult, "camelCase blockNumber should resolve via snake_case fallback")
 	require.Equal(t, "12345678", snakeCaseResult, "snake_case block_number should resolve directly")
 	require.Equal(t, "undefined", nonExistentResult, "non-existent field should resolve to 'undefined'")
-	require.Equal(t, "42", logIndexResult, "camelCase logIndex should resolve via snake_case fallback")
+	require.Equal(t, "42000000", gasLimitResult, "camelCase gasLimit should resolve via snake_case fallback")
 
 	t.Logf("✅ Smart fallback test completed successfully")
 	t.Logf("Confirmed: camelCase variables fallback to snake_case, but snake_case variables work directly without fallback")

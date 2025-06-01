@@ -1,3 +1,8 @@
+//go:build migrations
+
+// The build tags require `go build -tags="migrations"` specifically to include this file in the build
+// Since this migration has run we do not want to include this file in a normal build
+
 package migrations
 
 import (
