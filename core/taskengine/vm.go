@@ -368,7 +368,23 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 					}
 				case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
 					if eventOutput := v.parsedTriggerData.Event; eventOutput != nil {
-						if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
+						// Check if we have transfer log data in the event output
+						if transferLogData := eventOutput.GetTransferLog(); transferLogData != nil {
+							// Use transfer log data to populate rich trigger data
+							triggerDataMap["token_name"] = transferLogData.TokenName
+							triggerDataMap["token_symbol"] = transferLogData.TokenSymbol
+							triggerDataMap["token_decimals"] = transferLogData.TokenDecimals
+							triggerDataMap["transaction_hash"] = transferLogData.TransactionHash
+							triggerDataMap["address"] = transferLogData.Address
+							triggerDataMap["block_number"] = transferLogData.BlockNumber
+							triggerDataMap["block_timestamp"] = transferLogData.BlockTimestamp
+							triggerDataMap["from_address"] = transferLogData.FromAddress
+							triggerDataMap["to_address"] = transferLogData.ToAddress
+							triggerDataMap["value"] = transferLogData.Value
+							triggerDataMap["value_formatted"] = transferLogData.ValueFormatted
+							triggerDataMap["transaction_index"] = transferLogData.TransactionIndex
+						} else if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
+							// Fall back to basic EVM log data
 							triggerDataMap["block_number"] = evmLog.BlockNumber
 							triggerDataMap["log_index"] = evmLog.Index
 							triggerDataMap["tx_hash"] = evmLog.TransactionHash
@@ -379,7 +395,6 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 							triggerDataMap["transaction_index"] = evmLog.TransactionIndex
 							triggerDataMap["removed"] = evmLog.Removed
 						}
-						// Transfer log data would be handled above in the transferLog != nil case
 					}
 				case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
 					if manualOutput := v.parsedTriggerData.Manual; manualOutput != nil {

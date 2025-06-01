@@ -1,3 +1,8 @@
+//go:build migrations
+
+// The build tags require `go build -tags="migrations"` specifically to include this file in the build
+// Since this migration has run we do not want to include this file in a normal build
+
 package migrations
 
 import (
@@ -89,7 +94,7 @@ func TestChangeEpochToMs(t *testing.T) {
 		EndAt:   execEndSeconds,   // Seconds
 		OutputData: &avsproto.Execution_FixedTimeTrigger{
 			FixedTimeTrigger: &avsproto.FixedTimeTrigger_Output{
-				Timestamp: uint64(epochSeconds), // Seconds
+				Epoch: uint64(epochSeconds), // Seconds
 			},
 		},
 		// Other fields can be default/empty
@@ -214,8 +219,8 @@ func TestChangeEpochToMs(t *testing.T) {
 
 	// Verify Execution Output Data (FixedTimeTrigger)
 	if fixedTimeTriggerOutput := retrievedExec2.GetFixedTimeTrigger(); fixedTimeTriggerOutput != nil {
-		if fixedTimeTriggerOutput.Timestamp != uint64(expectedEpochMs) {
-			t.Errorf("FixedTimeTrigger Timestamp incorrect: got %d, want %d", fixedTimeTriggerOutput.Timestamp, expectedEpochMs)
+		if fixedTimeTriggerOutput.Epoch != uint64(expectedEpochMs) {
+			t.Errorf("FixedTimeTrigger Epoch incorrect: got %d, want %d", fixedTimeTriggerOutput.Epoch, expectedEpochMs)
 		}
 	} else {
 		t.Errorf("Expected FixedTimeTrigger output data, but got nil or different type")

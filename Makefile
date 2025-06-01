@@ -39,16 +39,44 @@ audit:
 	go test -race -buildvcs -vet=off ./...
 
 
-## test: run all tests
+## test: run all tests with proper environment
 .PHONY: test
 test:
+	go clean -cache
+	go mod tidy
+	go build ./...
 	go test -v -race -buildvcs ./...
 
-## test/cover: run all tests and display coverage
+## test/cover: run all tests and display coverage with proper environment
 .PHONY: test/cover
 test/cover:
+	go clean -cache
+	go mod tidy
+	go build ./...
 	go test -v -race -buildvcs -coverprofile=/tmp/coverage.out ./...
 	go tool cover -html=/tmp/coverage.out
+
+## test/quick: run tests without race detection for faster feedback during development
+.PHONY: test/quick
+test/quick:
+	go test -v ./...
+
+## test/package: run tests for a specific package (usage: make test/package PKG=./core/taskengine)
+.PHONY: test/package
+test/package:
+	go clean -cache
+	go mod tidy
+	go build ./...
+	go test -v -race -buildvcs $(PKG)
+
+## test/clean: run tests with clean cache to ensure consistency
+.PHONY: test/clean
+test/clean:
+	go clean -testcache
+	go clean -cache
+	go mod tidy
+	go build ./...
+	go test -v -race -buildvcs ./...
 
 ## build: build the application
 .PHONY: build

@@ -88,7 +88,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 	}
 
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
-	triggerData := testutil.GetTestEventTriggerData()
+	triggerData, _ := testutil.GetTestEventTriggerDataWithTransferData()
 	execution, err := executor.RunTask(task, &QueueExecutionData{
 		TriggerType:   triggerData.Type,
 		TriggerOutput: triggerData.Output,

@@ -810,10 +810,8 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 		execution, runErr := executor.RunTask(task, &queueTaskData)
 		if runErr != nil {
 			n.logger.Error("failed to run blocking task", runErr)
-			return &avsproto.TriggerTaskResp{
-				ExecutionId: queueTaskData.ExecutionID,
-				Status:      avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED,
-			}, nil
+			// For blocking execution, return the error to the caller
+			return nil, runErr
 		}
 
 		if execution != nil {
