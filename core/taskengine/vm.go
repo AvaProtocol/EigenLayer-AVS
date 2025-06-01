@@ -1644,15 +1644,28 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 	case NodeTypeBranch:
 		// Create branch node with proper configuration
 		branchConfig := &avsproto.BranchNode_Config{}
-		// BranchNode uses repeated Condition, which is more complex
-		// For immediate execution, we'll support a simple expression field
-		if expression, ok := config["expression"].(string); ok {
-			condition := &avsproto.BranchNode_Condition{
-				Id:         "condition_1",
-				Type:       "expression",
-				Expression: expression,
+
+		// Handle conditionsList from client
+		if conditionsList, ok := config["conditionsList"].([]interface{}); ok && len(conditionsList) > 0 {
+			conditions := make([]*avsproto.BranchNode_Condition, len(conditionsList))
+			for i, conditionInterface := range conditionsList {
+				if conditionMap, ok := conditionInterface.(map[string]interface{}); ok {
+					condition := &avsproto.BranchNode_Condition{}
+					if id, ok := conditionMap["id"].(string); ok {
+						condition.Id = id
+					}
+					if condType, ok := conditionMap["type"].(string); ok {
+						condition.Type = condType
+					}
+					if expression, ok := conditionMap["expression"].(string); ok {
+						condition.Expression = expression
+					}
+					conditions[i] = condition
+				}
 			}
-			branchConfig.Conditions = []*avsproto.BranchNode_Condition{condition}
+			branchConfig.Conditions = conditions
+		} else {
+			return nil, fmt.Errorf("branch node requires conditionsList configuration")
 		}
 
 		node.TaskType = &avsproto.TaskNode_Branch{
