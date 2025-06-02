@@ -102,7 +102,7 @@ type AggregatorClient interface {
 	// RunTrigger allows executing a single trigger for testing purposes (triggers don't accept inputs)
 	RunTrigger(ctx context.Context, in *RunTriggerReq, opts ...grpc.CallOption) (*RunTriggerResp, error)
 	// SimulateTask allows executing a complete task simulation including trigger and all workflow nodes
-	SimulateTask(ctx context.Context, in *SimulateTaskReq, opts ...grpc.CallOption) (*SimulateTaskResp, error)
+	SimulateTask(ctx context.Context, in *SimulateTaskReq, opts ...grpc.CallOption) (*Execution, error)
 }
 
 type aggregatorClient struct {
@@ -353,9 +353,9 @@ func (c *aggregatorClient) RunTrigger(ctx context.Context, in *RunTriggerReq, op
 	return out, nil
 }
 
-func (c *aggregatorClient) SimulateTask(ctx context.Context, in *SimulateTaskReq, opts ...grpc.CallOption) (*SimulateTaskResp, error) {
+func (c *aggregatorClient) SimulateTask(ctx context.Context, in *SimulateTaskReq, opts ...grpc.CallOption) (*Execution, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SimulateTaskResp)
+	out := new(Execution)
 	err := c.cc.Invoke(ctx, Aggregator_SimulateTask_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -418,7 +418,7 @@ type AggregatorServer interface {
 	// RunTrigger allows executing a single trigger for testing purposes (triggers don't accept inputs)
 	RunTrigger(context.Context, *RunTriggerReq) (*RunTriggerResp, error)
 	// SimulateTask allows executing a complete task simulation including trigger and all workflow nodes
-	SimulateTask(context.Context, *SimulateTaskReq) (*SimulateTaskResp, error)
+	SimulateTask(context.Context, *SimulateTaskReq) (*Execution, error)
 	mustEmbedUnimplementedAggregatorServer()
 }
 
@@ -501,7 +501,7 @@ func (UnimplementedAggregatorServer) RunNodeWithInputs(context.Context, *RunNode
 func (UnimplementedAggregatorServer) RunTrigger(context.Context, *RunTriggerReq) (*RunTriggerResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RunTrigger not implemented")
 }
-func (UnimplementedAggregatorServer) SimulateTask(context.Context, *SimulateTaskReq) (*SimulateTaskResp, error) {
+func (UnimplementedAggregatorServer) SimulateTask(context.Context, *SimulateTaskReq) (*Execution, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SimulateTask not implemented")
 }
 func (UnimplementedAggregatorServer) mustEmbedUnimplementedAggregatorServer() {}

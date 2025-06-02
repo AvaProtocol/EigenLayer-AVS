@@ -468,7 +468,7 @@ func (r *RpcServer) RunTrigger(ctx context.Context, req *avsproto.RunTriggerReq)
 	return result, nil
 }
 
-func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTaskReq) (*avsproto.SimulateTaskResp, error) {
+func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTaskReq) (*avsproto.Execution, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
@@ -554,9 +554,7 @@ func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTask
 		"steps_count", len(execution.Steps),
 	)
 
-	return &avsproto.SimulateTaskResp{
-		Execution: execution,
-	}, nil
+	return execution, nil
 }
 
 // Helper functions for logging

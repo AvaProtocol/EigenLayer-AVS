@@ -906,7 +906,7 @@ service Aggregator {
   rpc RunTrigger(RunTriggerReq) returns (RunTriggerResp);
   
   // SimulateTask allows executing a complete task simulation including trigger and all workflow nodes
-  rpc SimulateTask(SimulateTaskReq) returns (SimulateTaskResp);
+  rpc SimulateTask(SimulateTaskReq) returns (Execution);
 }
 
 // Request message for GetWorkflowCount
@@ -1056,9 +1056,4 @@ message SimulateTaskReq {
   TriggerType trigger_type = 4; // Type of trigger to simulate using the TriggerType enum
   map<string, google.protobuf.Value> trigger_config = 5; // Configuration for the trigger simulation
   map<string, google.protobuf.Value> input_variables = 6; // Input variables for the simulation
-}
-
-// Response message for SimulateTask
-message SimulateTaskResp {
-  Execution execution = 1; // The complete execution result including all steps
 }
