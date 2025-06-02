@@ -80,10 +80,21 @@ func (r *BranchProcessor) Validate(node *avsproto.BranchNode) error {
 
 func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*avsproto.Execution_Step, *Step, error) {
 	t0 := time.Now().UnixMilli()
+
+	// Look up the task node to get the name
+	var nodeName string = "unknown"
+	r.vm.mu.Lock()
+	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
+		nodeName = taskNode.Name
+	}
+	r.vm.mu.Unlock()
+
 	executionStep := &avsproto.Execution_Step{
-		NodeId:  stepID,
-		Success: false, // Default to false, set to true if a condition matches
-		StartAt: t0,
+		NodeId:   stepID,
+		Success:  false, // Default to false, set to true if a condition matches
+		StartAt:  t0,
+		NodeType: avsproto.NodeType_NODE_TYPE_BRANCH,
+		NodeName: nodeName,
 	}
 
 	var log strings.Builder

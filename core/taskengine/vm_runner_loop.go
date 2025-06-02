@@ -24,6 +24,15 @@ func NewLoopProcessor(vm *VM) *LoopProcessor {
 
 func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
 	t0 := time.Now().UnixMilli()
+
+	// Look up the task node to get the name
+	var nodeName string = "unknown"
+	r.vm.mu.Lock()
+	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
+		nodeName = taskNode.Name
+	}
+	r.vm.mu.Unlock()
+
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
 		OutputData: nil,
@@ -31,6 +40,8 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 		Error:      "",
 		Success:    true,
 		StartAt:    t0,
+		NodeType:   avsproto.NodeType_NODE_TYPE_LOOP,
+		NodeName:   nodeName,
 	}
 
 	var log strings.Builder

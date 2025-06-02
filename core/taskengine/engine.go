@@ -1085,13 +1085,15 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Step 7: Create and add a trigger execution step manually before running nodes
 	triggerStep := &avsproto.Execution_Step{
-		NodeId:  task.Trigger.Id,
-		Success: true,
-		Error:   "",
-		StartAt: t0.UnixMilli(),
-		EndAt:   t0.UnixMilli(),
-		Log:     fmt.Sprintf("Simulated trigger: %s executed successfully", task.Trigger.Name),
-		Inputs:  []string{"trigger.data"},
+		NodeId:   task.Trigger.Id,
+		Success:  true,
+		Error:    "",
+		StartAt:  t0.UnixMilli(),
+		EndAt:    t0.UnixMilli(),
+		Log:      fmt.Sprintf("Simulated trigger: %s executed successfully", task.Trigger.Name),
+		Inputs:   []string{"trigger.data"},
+		NodeType: avsproto.NodeType_NODE_TYPE_UNSPECIFIED, // Triggers are not workflow nodes
+		NodeName: task.Trigger.Name,
 	}
 
 	// Note: Execution steps don't have trigger output data - that's stored at the Execution level

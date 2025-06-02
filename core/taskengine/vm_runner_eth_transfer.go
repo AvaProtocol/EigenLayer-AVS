@@ -30,11 +30,21 @@ func NewETHTransferProcessor(vm *VM, ethClient *ethclient.Client, smartWalletCon
 func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransferNode) (*avsproto.Execution_Step, error) {
 	startTime := time.Now()
 
+	// Look up the task node to get the name
+	var nodeName string = "unknown"
+	p.vm.mu.Lock()
+	if taskNode, exists := p.vm.TaskNodes[stepID]; exists {
+		nodeName = taskNode.Name
+	}
+	p.vm.mu.Unlock()
+
 	// Create execution log
 	executionLog := &avsproto.Execution_Step{
-		NodeId:  stepID,
-		StartAt: startTime.UnixMilli(),
-		Success: false,
+		NodeId:   stepID,
+		StartAt:  startTime.UnixMilli(),
+		Success:  false,
+		NodeType: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
+		NodeName: nodeName,
 	}
 
 	// Get configuration

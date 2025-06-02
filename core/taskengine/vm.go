@@ -846,7 +846,7 @@ func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avspro
 	var executionLog *avsproto.Execution_Step // Declare to ensure it's always initialized
 	if err != nil {
 		// Create a failed execution log step
-		executionLog = &avsproto.Execution_Step{NodeId: stepID, Success: false, Error: err.Error(), StartAt: time.Now().UnixMilli()}
+		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
 		// v.addExecutionLog(logEntry) // Caller will add
 		return executionLog, err
@@ -868,14 +868,14 @@ func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*a
 	var executionLog *avsproto.Execution_Step
 	if v.smartWalletConfig == nil || v.smartWalletConfig.EthRpcUrl == "" {
 		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract read")
-		executionLog = &avsproto.Execution_Step{NodeId: stepID, Success: false, Error: err.Error(), StartAt: time.Now().UnixMilli()}
+		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
 		// v.addExecutionLog(logEntry)
 		return executionLog, err
 	}
 	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
 	if err != nil {
-		executionLog = &avsproto.Execution_Step{NodeId: stepID, Success: false, Error: fmt.Sprintf("failed to dial ETH RPC: %v", err), StartAt: time.Now().UnixMilli()}
+		executionLog = v.createExecutionStep(stepID, false, fmt.Sprintf("failed to dial ETH RPC: %v", err), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
 		// v.addExecutionLog(logEntry)
 		return executionLog, err
@@ -897,14 +897,14 @@ func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (
 	var executionLog *avsproto.Execution_Step
 	if v.smartWalletConfig == nil || v.smartWalletConfig.EthRpcUrl == "" {
 		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract write")
-		executionLog = &avsproto.Execution_Step{NodeId: stepID, Success: false, Error: err.Error(), StartAt: time.Now().UnixMilli()}
+		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
 		// v.addExecutionLog(logEntry)
 		return executionLog, err
 	}
 	rpcClient, err := ethclient.Dial(v.smartWalletConfig.EthRpcUrl)
 	if err != nil {
-		executionLog = &avsproto.Execution_Step{NodeId: stepID, Success: false, Error: fmt.Sprintf("failed to dial ETH RPC: %v", err), StartAt: time.Now().UnixMilli()}
+		executionLog = v.createExecutionStep(stepID, false, fmt.Sprintf("failed to dial ETH RPC: %v", err), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
 		// v.addExecutionLog(logEntry)
 		return executionLog, err
@@ -942,13 +942,9 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 			if v.logger != nil {
 				v.logger.Error("runCustomCode: BlockTrigger nodes require real blockchain data - mock data not supported", "stepID", stepID, "name", taskNode.Name)
 			}
-			return &avsproto.Execution_Step{
-				NodeId:  stepID,
-				Success: false,
-				Error:   "BlockTrigger nodes require real blockchain data - mock data not supported",
-				StartAt: time.Now().UnixMilli(),
-				EndAt:   time.Now().UnixMilli(),
-			}, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
+			executionLog := v.createExecutionStep(stepID, false, "BlockTrigger nodes require real blockchain data - mock data not supported", "", time.Now().UnixMilli())
+			executionLog.EndAt = time.Now().UnixMilli()
+			return executionLog, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
 		}
 
 		// If Config is nil and it's not a blockTrigger, return an error
@@ -1019,7 +1015,7 @@ func (v *VM) runEthTransfer(stepID string, node *avsproto.ETHTransferNode) (*avs
 	var executionLog *avsproto.Execution_Step
 	if v.smartWalletConfig == nil {
 		err := fmt.Errorf("smart wallet config not set for ETH transfer")
-		executionLog = &avsproto.Execution_Step{NodeId: stepID, Success: false, Error: err.Error(), StartAt: time.Now().UnixMilli()}
+		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
 		executionLog.EndAt = time.Now().UnixMilli()
 		return executionLog, err
 	}
@@ -1520,12 +1516,8 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 		// If executeNode itself errored, the log might already be there with failure.
 		// If not, ensure a failed log entry.
 		if len(tempVM.ExecutionLogs) == 0 {
-			failedStep := &avsproto.Execution_Step{
-				NodeId:  node.Id,
-				Success: false,
-				Error:   err.Error(),
-				StartAt: time.Now().UnixMilli(),
-			}
+			// No log was created, create a failed step
+			failedStep := tempVM.createExecutionStep(node.Id, false, err.Error(), "", time.Now().UnixMilli())
 			failedStep.EndAt = time.Now().UnixMilli()
 			tempVM.addExecutionLog(failedStep) // addExecutionLog handles locking
 		} else {
@@ -1561,6 +1553,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 
 	switch nodeType {
 	case NodeTypeRestAPI:
+		node.Type = avsproto.NodeType_NODE_TYPE_REST_API
 		// Create REST API node with proper configuration
 		restConfig := &avsproto.RestAPINode_Config{}
 		if url, ok := config["url"].(string); ok {
@@ -1604,6 +1597,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			},
 		}
 	case NodeTypeContractRead:
+		node.Type = avsproto.NodeType_NODE_TYPE_CONTRACT_READ
 		// Create contract read node with proper configuration
 		contractConfig := &avsproto.ContractReadNode_Config{}
 		if address, ok := config["contract_address"].(string); ok {
@@ -1622,6 +1616,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			},
 		}
 	case NodeTypeCustomCode:
+		node.Type = avsproto.NodeType_NODE_TYPE_CUSTOM_CODE
 		// Create custom code node with proper configuration
 		customConfig := &avsproto.CustomCodeNode_Config{}
 		if source, ok := config["source"].(string); ok {
@@ -1644,6 +1639,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			},
 		}
 	case NodeTypeBranch:
+		node.Type = avsproto.NodeType_NODE_TYPE_BRANCH
 		// Create branch node with proper configuration
 		branchConfig := &avsproto.BranchNode_Config{}
 
@@ -1676,6 +1672,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			},
 		}
 	case NodeTypeFilter:
+		node.Type = avsproto.NodeType_NODE_TYPE_FILTER
 		// Create filter node with proper configuration
 		filterConfig := &avsproto.FilterNode_Config{}
 		if expression, ok := config["expression"].(string); ok {
@@ -1691,11 +1688,13 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			},
 		}
 	case NodeTypeBlockTrigger:
+		node.Type = avsproto.NodeType_NODE_TYPE_CUSTOM_CODE // BlockTrigger is handled as custom code
 		// Create a custom code node that will be handled specially by RunNodeWithInputs
 		node.TaskType = &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{},
 		}
 	case NodeTypeETHTransfer:
+		node.Type = avsproto.NodeType_NODE_TYPE_ETH_TRANSFER
 		// Create ETH transfer node with proper configuration
 		ethConfig := &avsproto.ETHTransferNode_Config{}
 		if destination, ok := config["destination"].(string); ok {
@@ -1724,4 +1723,32 @@ func contains(slice []string, str string) bool {
 		}
 	}
 	return false
+}
+
+// Helper function to create execution step with node information
+func (v *VM) createExecutionStep(nodeId string, success bool, errorMsg string, logMsg string, startTime int64) *avsproto.Execution_Step {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	// Look up the node to get its type and name
+	var nodeType avsproto.NodeType = avsproto.NodeType_NODE_TYPE_UNSPECIFIED
+	var nodeName string = "unknown"
+
+	if node, exists := v.TaskNodes[nodeId]; exists {
+		nodeType = node.Type
+		nodeName = node.Name
+	}
+
+	step := &avsproto.Execution_Step{
+		NodeId:   nodeId,
+		Success:  success,
+		Error:    errorMsg,
+		Log:      logMsg,
+		StartAt:  startTime,
+		EndAt:    startTime, // Will be updated by caller if needed
+		NodeType: nodeType,
+		NodeName: nodeName,
+	}
+
+	return step
 }

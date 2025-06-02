@@ -512,6 +512,10 @@ message Execution {
 
     // Reference ticket: https://github.com/AvaProtocol/EigenLayer-AVS/issues/151
     repeated string inputs = 16;
+    
+    // Node type and name for better client understanding
+    NodeType node_type = 17;
+    string node_name = 18;
   }
 
   repeated Step steps = 8;

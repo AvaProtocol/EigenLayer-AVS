@@ -50,6 +50,15 @@ func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConf
 
 func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
 	t0 := time.Now().UnixMilli()
+
+	// Look up the task node to get the name
+	var nodeName string = "unknown"
+	r.vm.mu.Lock()
+	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
+		nodeName = taskNode.Name
+	}
+	r.vm.mu.Unlock()
+
 	s := &avsproto.Execution_Step{
 		NodeId:     stepID,
 		Log:        "",
@@ -57,6 +66,8 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		Success:    true,
 		Error:      "",
 		StartAt:    t0,
+		NodeType:   avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
+		NodeName:   nodeName,
 	}
 
 	var log strings.Builder
