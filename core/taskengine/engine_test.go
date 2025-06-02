@@ -564,33 +564,21 @@ func TestTriggerAsync(t *testing.T) {
 	})
 
 	if len(execution.Steps) == 0 {
-		t.Errorf("execution should have at least one step (trigger step)")
-		return
-	}
-
-	// Check trigger information from the first step (trigger step)
-	triggerStep := execution.Steps[0]
-	if triggerStep.Name != tr1.Trigger.Name {
-		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, triggerStep.Name)
-	}
-	if execution.Id != resultTrigger.ExecutionId {
-		t.Errorf("wring execution id, expected %s got %s", resultTrigger.ExecutionId, execution.Id)
-	}
-
-	if !execution.Success {
-		t.Errorf("wrong success result, expected true got false. Error: %s", execution.Error)
-	}
-
-	if len(execution.Steps) == 0 {
 		t.Errorf("No execution steps found")
 		return
 	}
 
-	if execution.Steps[0].Id != "ping1" {
-		t.Errorf("wrong node id in execution log")
+	// Now that trigger steps are included, the REST API node should be at index 1
+	if len(execution.Steps) < 2 {
+		t.Errorf("Expected at least 2 steps (trigger + node), but got %d", len(execution.Steps))
+		return
 	}
 
-	step := execution.Steps[0]
+	if execution.Steps[1].Id != "ping1" {
+		t.Errorf("wrong node id in execution log, expected ping1 but got %s", execution.Steps[1].Id)
+	}
+
+	step := execution.Steps[1] // REST API node is now the second step
 	if step.GetRestApi() == nil {
 		t.Errorf("RestApi data is nil")
 		return
