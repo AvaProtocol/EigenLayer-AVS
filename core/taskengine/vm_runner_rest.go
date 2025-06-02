@@ -31,13 +31,24 @@ func NewRestProrcessor(vm *VM) *RestProcessor {
 
 func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
 	t0 := time.Now()
+
+	// Look up the task node to get the name
+	var nodeName string = "unknown"
+	r.vm.mu.Lock()
+	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
+		nodeName = taskNode.Name
+	}
+	r.vm.mu.Unlock()
+
 	executionLogStep := &avsproto.Execution_Step{
-		NodeId:     stepID,
+		Id:         stepID,
 		OutputData: nil,
 		Log:        "",
 		Error:      "",
 		Success:    true, // Assume success
 		StartAt:    t0.UnixMilli(),
+		Type:       avsproto.NodeType_NODE_TYPE_REST_API.String(),
+		Name:       nodeName,
 	}
 
 	var logBuilder strings.Builder

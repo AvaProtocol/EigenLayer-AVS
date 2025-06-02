@@ -134,6 +134,46 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", queueData)
 		runTaskErr = err
 	} else {
+		// Create and add a trigger execution step before running nodes (matching SimulateTask behavior)
+		triggerStep := &avsproto.Execution_Step{
+			Id:      task.Trigger.Id,
+			Success: true,
+			Error:   "",
+			StartAt: t0.UnixMilli(),
+			EndAt:   t0.UnixMilli(),
+			Log:     fmt.Sprintf("Executed trigger: %s", task.Trigger.Name),
+			Inputs:  []string{}, // No inputs for trigger steps
+			Type:    queueData.TriggerType.String(),
+			Name:    task.Trigger.Name,
+		}
+
+		// Set trigger output data in the step based on trigger type
+		switch queueData.TriggerType {
+		case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
+			if output, ok := queueData.TriggerOutput.(*avsproto.ManualTrigger_Output); ok {
+				triggerStep.OutputData = &avsproto.Execution_Step_ManualTrigger{ManualTrigger: output}
+			}
+		case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
+			if output, ok := queueData.TriggerOutput.(*avsproto.FixedTimeTrigger_Output); ok {
+				triggerStep.OutputData = &avsproto.Execution_Step_FixedTimeTrigger{FixedTimeTrigger: output}
+			}
+		case avsproto.TriggerType_TRIGGER_TYPE_CRON:
+			if output, ok := queueData.TriggerOutput.(*avsproto.CronTrigger_Output); ok {
+				triggerStep.OutputData = &avsproto.Execution_Step_CronTrigger{CronTrigger: output}
+			}
+		case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
+			if output, ok := queueData.TriggerOutput.(*avsproto.BlockTrigger_Output); ok {
+				triggerStep.OutputData = &avsproto.Execution_Step_BlockTrigger{BlockTrigger: output}
+			}
+		case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+			if output, ok := queueData.TriggerOutput.(*avsproto.EventTrigger_Output); ok {
+				triggerStep.OutputData = &avsproto.Execution_Step_EventTrigger{EventTrigger: output}
+			}
+		}
+
+		// Add trigger step to execution logs before running nodes
+		vm.ExecutionLogs = append(vm.ExecutionLogs, triggerStep)
+
 		runTaskErr = vm.Run()
 	}
 
@@ -149,15 +189,12 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	execution := &avsproto.Execution{
-		Id:          queueData.ExecutionID,
-		StartAt:     t0.UnixMilli(),
-		EndAt:       t1.UnixMilli(),
-		Success:     runTaskErr == nil,
-		Error:       "",
-		Steps:       vm.ExecutionLogs,
-		TriggerType: queueData.TriggerType,
-		TriggerName: task.Trigger.Name,
-		OutputData:  vm.parsedTriggerData.GetValue(),
+		Id:      queueData.ExecutionID,
+		StartAt: t0.UnixMilli(),
+		EndAt:   t1.UnixMilli(),
+		Success: runTaskErr == nil,
+		Error:   "",
+		Steps:   vm.ExecutionLogs,
 	}
 
 	if runTaskErr != nil {
