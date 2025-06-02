@@ -1444,7 +1444,7 @@ func (v *VM) CollectInputs() map[string]string {
 		} else if varname == WorkflowContextVarName {
 			varname = WorkflowContextVarName // Use as-is, no .data suffix
 		} else {
-			varname = fmt.Sprintf("%s.data", varname)
+			varname = fmt.Sprintf("%s.%s", varname, DataSuffix)
 		}
 		inputs[varname] = valueStr
 	}

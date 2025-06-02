@@ -1084,6 +1084,12 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	// Step 7: Create and add a trigger execution step manually before running nodes
+	// Convert inputVariables keys to trigger inputs
+	triggerInputs := make([]string, 0, len(inputVariables))
+	for key := range inputVariables {
+		triggerInputs = append(triggerInputs, key)
+	}
+
 	triggerStep := &avsproto.Execution_Step{
 		NodeId:   task.Trigger.Id,
 		Success:  true,
@@ -1091,8 +1097,8 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		StartAt:  t0.UnixMilli(),
 		EndAt:    t0.UnixMilli(),
 		Log:      fmt.Sprintf("Simulated trigger: %s executed successfully", task.Trigger.Name),
-		Inputs:   []string{"trigger.data"},
-		NodeType: avsproto.NodeType_NODE_TYPE_UNSPECIFIED, // Triggers are not workflow nodes
+		Inputs:   triggerInputs, // Use inputVariables keys as trigger inputs
+		NodeType: avsproto.NodeType_NODE_TYPE_UNSPECIFIED,
 		NodeName: task.Trigger.Name,
 	}
 
