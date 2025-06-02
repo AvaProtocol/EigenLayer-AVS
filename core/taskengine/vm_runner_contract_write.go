@@ -60,14 +60,14 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	r.vm.mu.Unlock()
 
 	s := &avsproto.Execution_Step{
-		NodeId:     stepID,
+		Id:         stepID,
 		Log:        "",
 		OutputData: nil,
 		Success:    true,
 		Error:      "",
 		StartAt:    t0,
-		NodeType:   avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
-		NodeName:   nodeName,
+		Type:       avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
+		Name:       nodeName,
 	}
 
 	var log strings.Builder

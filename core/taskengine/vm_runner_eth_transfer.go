@@ -40,11 +40,11 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 
 	// Create execution log
 	executionLog := &avsproto.Execution_Step{
-		NodeId:   stepID,
-		StartAt:  startTime.UnixMilli(),
-		Success:  false,
-		NodeType: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
-		NodeName: nodeName,
+		Id:      stepID,
+		StartAt: startTime.UnixMilli(),
+		Success: false,
+		Type:    avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String(),
+		Name:    nodeName,
 	}
 
 	// Get configuration

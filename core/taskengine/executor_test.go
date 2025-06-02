@@ -99,10 +99,6 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 		t.Errorf("expect no error but got %v", err)
 	}
 
-	if execution.TriggerName != "triggertest" {
-		t.Errorf("expect field triggerName is triggertest but got: %s", execution.TriggerName)
-	}
-
 	if !execution.Success {
 		t.Errorf("Expect success status but got failure")
 	}
@@ -116,16 +112,16 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 		return
 	}
 
-	if execution.Steps[0].NodeId != "branch1" {
-		t.Errorf("step id doesn't match, expect branch1.a1 but got: %s", execution.Steps[0].NodeId)
+	if execution.Steps[0].Id != "branch1" {
+		t.Errorf("step id doesn't match, expect branch1.a1 but got: %s", execution.Steps[0].Id)
 	}
 
 	if execution.Steps[0].GetBranch().ConditionId != "branch1.a1" {
 		t.Errorf("expect branch output data is `branch1.a1` but got %s", execution.Steps[0].OutputData)
 	}
 
-	if execution.Steps[1].NodeId != "notification1" {
-		t.Errorf("step id doesn't match, expect notification1 but got: %s", execution.Steps[1].NodeId)
+	if execution.Steps[1].Id != "notification1" {
+		t.Errorf("step id doesn't match, expect notification1 but got: %s", execution.Steps[1].Id)
 	}
 
 	outputData := gow.ValueToMap(execution.Steps[1].GetRestApi().Data)
@@ -220,8 +216,8 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 		t.Errorf("expect a single step but got: %d", len(execution.Steps))
 	}
 
-	if execution.Steps[0].NodeId != "branch1" {
-		t.Errorf("expect evaluate branch node but got: %s", execution.Steps[0].NodeId)
+	if execution.Steps[0].Id != "branch1" {
+		t.Errorf("expect evaluate branch node but got: %s", execution.Steps[0].Id)
 	}
 
 	if execution.Steps[0].GetBranch() != nil {
@@ -321,11 +317,11 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 		t.Errorf("Expect evaluate 2 steps but got: %d", len(execution.Steps))
 	}
 
-	if execution.Steps[0].NodeId != "branch1" {
-		t.Errorf("step id doesn't match, expect branch1 but got: %s", execution.Steps[0].NodeId)
+	if execution.Steps[0].Id != "branch1" {
+		t.Errorf("step id doesn't match, expect branch1 but got: %s", execution.Steps[0].Id)
 	}
-	if execution.Steps[1].NodeId != "rest1" {
-		t.Errorf("step id doesn't match, expect rest1 but got: %s", execution.Steps[1].NodeId)
+	if execution.Steps[1].Id != "rest1" {
+		t.Errorf("step id doesn't match, expect rest1 but got: %s", execution.Steps[1].Id)
 	}
 
 	// Verify that the REST API step captured the 503 status code
@@ -496,15 +492,12 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 	t0 := time.Now()
 	t1 := time.Now()
 	execution := &avsproto.Execution{
-		Id:          "test_exec123",
-		StartAt:     t0.UnixMilli(),
-		EndAt:       t1.UnixMilli(),
-		Success:     runErr == nil,
-		Error:       "",
-		Steps:       vm.ExecutionLogs,
-		TriggerType: triggerData.Type,
-		TriggerName: task.Trigger.Name,
-		OutputData:  vm.parsedTriggerData.GetValue(),
+		Id:      "test_exec123",
+		StartAt: t0.UnixMilli(),
+		EndAt:   t1.UnixMilli(),
+		Success: runErr == nil,
+		Error:   "",
+		Steps:   vm.ExecutionLogs,
 	}
 
 	if runErr != nil {
@@ -529,15 +522,6 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 
 	if execution.EndAt <= 0 {
 		t.Errorf("expect end at is set but got: %d", execution.EndAt)
-	}
-
-	if execution.TriggerName != "triggertest" {
-		t.Errorf("expect trigger name is triggertest but got: %s", execution.TriggerName)
-	}
-
-	// Check trigger type instead of reason
-	if execution.TriggerType != avsproto.TriggerType_TRIGGER_TYPE_EVENT {
-		t.Errorf("expect TriggerType is TRIGGER_TYPE_EVENT but got: %s", execution.TriggerType.String())
 	}
 }
 
@@ -611,22 +595,13 @@ func TestExecutorRunTaskWithBlockTriggerOutputData(t *testing.T) {
 		t.Errorf("expect no error but got: %s", execution.Error)
 	}
 
-	if execution.TriggerName != "blockTrigger" {
-		t.Errorf("expect trigger name is blockTrigger but got: %s", execution.TriggerName)
-	}
-
-	// Check trigger type
-	if execution.TriggerType != avsproto.TriggerType_TRIGGER_TYPE_EVENT {
-		t.Errorf("expect trigger type is Event but got: %v", execution.TriggerType)
-	}
-
 	// Verify execution steps
 	if len(execution.Steps) != 1 {
 		t.Errorf("expect 1 step but got: %d", len(execution.Steps))
 	}
 
-	if execution.Steps[0].NodeId != "eth_transfer_1" {
-		t.Errorf("expect step NodeId is eth_transfer_1 but got: %s", execution.Steps[0].NodeId)
+	if execution.Steps[0].Id != "eth_transfer_1" {
+		t.Errorf("expect step NodeId is eth_transfer_1 but got: %s", execution.Steps[0].Id)
 	}
 
 	if !execution.Steps[0].Success {
@@ -704,15 +679,6 @@ func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
 	if err != nil || execution.Error != "" {
 		t.Errorf("expect no error but got: %s", execution.Error)
 	}
-
-	if execution.TriggerName != "fixedTimeTrigger" {
-		t.Errorf("expect trigger name is fixedTimeTrigger but got: %s", execution.TriggerName)
-	}
-
-	// Check trigger type
-	if execution.TriggerType != avsproto.TriggerType_TRIGGER_TYPE_EVENT {
-		t.Errorf("expect trigger type is Event but got: %v", execution.TriggerType)
-	}
 }
 
 func TestExecutorRunTaskWithCronTriggerOutputData(t *testing.T) {
@@ -783,14 +749,5 @@ func TestExecutorRunTaskWithCronTriggerOutputData(t *testing.T) {
 
 	if err != nil || execution.Error != "" {
 		t.Errorf("expect no error but got: %s", execution.Error)
-	}
-
-	if execution.TriggerName != "cronTrigger" {
-		t.Errorf("expect trigger name is cronTrigger but got: %s", execution.TriggerName)
-	}
-
-	// Check trigger type
-	if execution.TriggerType != avsproto.TriggerType_TRIGGER_TYPE_EVENT {
-		t.Errorf("expect trigger type is Event but got: %v", execution.TriggerType)
 	}
 }

@@ -34,14 +34,14 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	r.vm.mu.Unlock()
 
 	s := &avsproto.Execution_Step{
-		NodeId:     stepID,
+		Id:         stepID,
 		OutputData: nil,
 		Log:        "",
 		Error:      "",
 		Success:    true,
 		StartAt:    t0,
-		NodeType:   avsproto.NodeType_NODE_TYPE_LOOP,
-		NodeName:   nodeName,
+		Type:       avsproto.NodeType_NODE_TYPE_LOOP.String(),
+		Name:       nodeName,
 	}
 
 	var log strings.Builder

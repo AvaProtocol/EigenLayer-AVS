@@ -339,7 +339,7 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 	// If no specific data was extracted, include basic execution info
 	if len(result) == 0 {
 		result["success"] = executionStep.Success
-		result["nodeId"] = executionStep.NodeId
+		result["nodeId"] = executionStep.Id
 		if executionStep.Error != "" {
 			result["error"] = executionStep.Error
 		}

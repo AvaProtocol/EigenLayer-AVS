@@ -90,11 +90,11 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	r.vm.mu.Unlock()
 
 	executionStep := &avsproto.Execution_Step{
-		NodeId:   stepID,
-		Success:  false, // Default to false, set to true if a condition matches
-		StartAt:  t0,
-		NodeType: avsproto.NodeType_NODE_TYPE_BRANCH,
-		NodeName: nodeName,
+		Id:      stepID,
+		Success: false, // Default to false, set to true if a condition matches
+		StartAt: t0,
+		Type:    avsproto.NodeType_NODE_TYPE_BRANCH.String(),
+		Name:    nodeName,
 	}
 
 	var log strings.Builder

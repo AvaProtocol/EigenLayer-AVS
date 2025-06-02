@@ -41,14 +41,14 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	r.vm.mu.Unlock()
 
 	executionLogStep := &avsproto.Execution_Step{
-		NodeId:     stepID,
+		Id:         stepID,
 		OutputData: nil,
 		Log:        "",
 		Error:      "",
 		Success:    true, // Assume success
 		StartAt:    t0.UnixMilli(),
-		NodeType:   avsproto.NodeType_NODE_TYPE_REST_API,
-		NodeName:   nodeName,
+		Type:       avsproto.NodeType_NODE_TYPE_REST_API.String(),
+		Name:       nodeName,
 	}
 
 	var logBuilder strings.Builder

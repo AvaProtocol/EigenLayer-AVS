@@ -37,14 +37,14 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	r.vm.mu.Unlock()
 
 	executionLogStep := &avsproto.Execution_Step{
-		NodeId:     stepID,
+		Id:         stepID,
 		OutputData: nil,
 		Log:        "",
 		Error:      "",
 		Success:    true,
 		StartAt:    t0.UnixMilli(),
-		NodeType:   avsproto.NodeType_NODE_TYPE_FILTER,
-		NodeName:   nodeName,
+		Type:       avsproto.NodeType_NODE_TYPE_FILTER.String(),
+		Name:       nodeName,
 	}
 
 	var logBuilder strings.Builder

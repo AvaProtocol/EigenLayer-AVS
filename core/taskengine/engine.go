@@ -1091,19 +1091,40 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	triggerStep := &avsproto.Execution_Step{
-		NodeId:   task.Trigger.Id,
-		Success:  true,
-		Error:    "",
-		StartAt:  t0.UnixMilli(),
-		EndAt:    t0.UnixMilli(),
-		Log:      fmt.Sprintf("Simulated trigger: %s executed successfully", task.Trigger.Name),
-		Inputs:   triggerInputs, // Use inputVariables keys as trigger inputs
-		NodeType: avsproto.NodeType_NODE_TYPE_UNSPECIFIED,
-		NodeName: task.Trigger.Name,
+		Id:      task.Trigger.Id, // Use new 'id' field
+		Success: true,
+		Error:   "",
+		StartAt: t0.UnixMilli(),
+		EndAt:   t0.UnixMilli(),
+		Log:     fmt.Sprintf("Simulated trigger: %s executed successfully", task.Trigger.Name),
+		Inputs:  triggerInputs,                  // Use inputVariables keys as trigger inputs
+		Type:    queueData.TriggerType.String(), // Use trigger type as string
+		Name:    task.Trigger.Name,              // Use new 'name' field
 	}
 
-	// Note: Execution steps don't have trigger output data - that's stored at the Execution level
-	// Trigger steps represent the trigger execution itself, not node execution
+	// Set trigger output data in the step based on trigger type
+	switch queueData.TriggerType {
+	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
+		if output, ok := triggerOutputProto.(*avsproto.ManualTrigger_Output); ok {
+			triggerStep.OutputData = &avsproto.Execution_Step_ManualTrigger{ManualTrigger: output}
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
+		if output, ok := triggerOutputProto.(*avsproto.FixedTimeTrigger_Output); ok {
+			triggerStep.OutputData = &avsproto.Execution_Step_FixedTimeTrigger{FixedTimeTrigger: output}
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
+		if output, ok := triggerOutputProto.(*avsproto.CronTrigger_Output); ok {
+			triggerStep.OutputData = &avsproto.Execution_Step_CronTrigger{CronTrigger: output}
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
+		if output, ok := triggerOutputProto.(*avsproto.BlockTrigger_Output); ok {
+			triggerStep.OutputData = &avsproto.Execution_Step_BlockTrigger{BlockTrigger: output}
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+		if output, ok := triggerOutputProto.(*avsproto.EventTrigger_Output); ok {
+			triggerStep.OutputData = &avsproto.Execution_Step_EventTrigger{EventTrigger: output}
+		}
+	}
 
 	// Add trigger step to execution logs
 	vm.ExecutionLogs = append(vm.ExecutionLogs, triggerStep)
@@ -1112,17 +1133,14 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	runErr := vm.Run()
 	t1 := time.Now()
 
-	// Step 9: Create execution result (similar to RunTask but without persisting)
+	// Step 9: Create execution result with unified structure
 	execution := &avsproto.Execution{
-		Id:          simulationID,
-		StartAt:     t0.UnixMilli(),
-		EndAt:       t1.UnixMilli(),
-		Success:     runErr == nil,
-		Error:       "",
-		Steps:       vm.ExecutionLogs,
-		TriggerType: queueData.TriggerType,
-		TriggerName: task.Trigger.Name,
-		OutputData:  vm.parsedTriggerData.GetValue(),
+		Id:      simulationID,
+		StartAt: t0.UnixMilli(),
+		EndAt:   t1.UnixMilli(),
+		Success: runErr == nil,
+		Error:   "",
+		Steps:   vm.ExecutionLogs, // Now contains both trigger and node steps
 	}
 
 	if runErr != nil {
@@ -1231,18 +1249,10 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 			continue
 		}
 
-		exec := avsproto.Execution{}
-		if err := protojson.Unmarshal(executionValue, &exec); err == nil {
-			// Set default trigger type if not set for backward compatibility
-			if exec.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
-				// task is needed for the conversion, get it from the map populated earlier
-				taskId := TaskIdFromExecutionStorageKey([]byte(key))
-				task := tasks[string(taskId)] // Get the task from the map
-				if task != nil {
-					exec.TriggerType = TaskTriggerToTriggerType(task.GetTrigger())
-				}
-			}
-			executioResp.Items = append(executioResp.Items, &exec)
+		exec := &avsproto.Execution{}
+		if err := protojson.Unmarshal(executionValue, exec); err == nil {
+			// No longer need trigger type at execution level - it's in the first step
+			executioResp.Items = append(executioResp.Items, exec)
 
 			if total == 0 {
 				firstExecutionId = exec.Id
@@ -1317,11 +1327,7 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), TaskStorageCorruptedError)
 	}
 
-	// Set default trigger type if not set for backward compatibility
-	if exec.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
-		exec.TriggerType = TaskTriggerToTriggerType(task.Trigger)
-	}
-
+	// No longer need trigger type at execution level - it's in the first step
 	return exec, nil
 }
 
@@ -1338,11 +1344,6 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 		err = protojson.Unmarshal(rawExecution, exec)
 		if err != nil {
 			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), TaskStorageCorruptedError)
-		}
-
-		// Set default trigger type if not set for backward compatibility
-		if exec.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
-			exec.TriggerType = TaskTriggerToTriggerType(task.Trigger)
 		}
 
 		if exec.Success {

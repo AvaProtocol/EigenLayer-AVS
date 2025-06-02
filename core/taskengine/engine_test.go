@@ -345,16 +345,23 @@ func TestGetExecution(t *testing.T) {
 		return
 	}
 
-	if execution.TriggerName != tr1.Trigger.Name {
-		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
+	if len(execution.Steps) == 0 {
+		t.Errorf("execution should have at least one step (trigger step)")
+		return
+	}
+
+	// Check trigger information from the first step (trigger step)
+	triggerStep := execution.Steps[0]
+	if triggerStep.Name != tr1.Trigger.Name {
+		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, triggerStep.Name)
 	}
 
 	if execution.Id != resultTrigger.ExecutionId {
 		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
 
-	if execution.TriggerType != avsproto.TriggerType_TRIGGER_TYPE_BLOCK {
-		t.Errorf("invalid trigger type. expect TRIGGER_TYPE_BLOCK got %v", execution.TriggerType)
+	if triggerStep.Type != avsproto.TriggerType_TRIGGER_TYPE_BLOCK.String() {
+		t.Errorf("invalid trigger type. expect TRIGGER_TYPE_BLOCK got %v", triggerStep.Type)
 	}
 
 	// Another user cannot get this execution id
@@ -477,16 +484,23 @@ func TestTriggerSync(t *testing.T) {
 		return
 	}
 
+	if len(execution.Steps) == 0 {
+		t.Errorf("execution should have at least one step (trigger step)")
+		return
+	}
+
+	// Check trigger information from the first step (trigger step)
+	triggerStep := execution.Steps[0]
+	if triggerStep.Name != tr1.Trigger.Name {
+		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, triggerStep.Name)
+	}
+
 	if execution.Id != resultTrigger.ExecutionId {
 		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
 
-	if execution.TriggerName != tr1.Trigger.Name {
-		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
-	}
-
-	if execution.TriggerType != avsproto.TriggerType_TRIGGER_TYPE_BLOCK {
-		t.Errorf("invalid trigger type. expect TRIGGER_TYPE_BLOCK got %v", execution.TriggerType)
+	if triggerStep.Type != avsproto.TriggerType_TRIGGER_TYPE_BLOCK.String() {
+		t.Errorf("invalid trigger type. expect TRIGGER_TYPE_BLOCK got %v", triggerStep.Type)
 	}
 }
 
@@ -549,8 +563,15 @@ func TestTriggerAsync(t *testing.T) {
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 
-	if execution.TriggerName != tr1.Trigger.Name {
-		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, execution.TriggerName)
+	if len(execution.Steps) == 0 {
+		t.Errorf("execution should have at least one step (trigger step)")
+		return
+	}
+
+	// Check trigger information from the first step (trigger step)
+	triggerStep := execution.Steps[0]
+	if triggerStep.Name != tr1.Trigger.Name {
+		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, triggerStep.Name)
 	}
 	if execution.Id != resultTrigger.ExecutionId {
 		t.Errorf("wring execution id, expected %s got %s", resultTrigger.ExecutionId, execution.Id)
@@ -565,7 +586,7 @@ func TestTriggerAsync(t *testing.T) {
 		return
 	}
 
-	if execution.Steps[0].NodeId != "ping1" {
+	if execution.Steps[0].Id != "ping1" {
 		t.Errorf("wrong node id in execution log")
 	}
 

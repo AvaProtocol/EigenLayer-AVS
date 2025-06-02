@@ -43,14 +43,14 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	r.vm.mu.Unlock()
 
 	s := &avsproto.Execution_Step{
-		NodeId:     stepID,
+		Id:         stepID,
 		Log:        "",
 		OutputData: nil,
 		Success:    true,
 		Error:      "",
 		StartAt:    t0,
-		NodeType:   avsproto.NodeType_NODE_TYPE_CONTRACT_READ,
-		NodeName:   nodeName,
+		Type:       avsproto.NodeType_NODE_TYPE_CONTRACT_READ.String(),
+		Name:       nodeName,
 	}
 
 	var err error

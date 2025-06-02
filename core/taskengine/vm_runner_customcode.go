@@ -194,14 +194,14 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	r.vm.mu.Unlock()
 
 	s := &avsproto.Execution_Step{
-		NodeId:     stepID,
+		Id:         stepID,
 		OutputData: nil,
 		Log:        "",
 		Error:      "",
 		Success:    true,
 		StartAt:    t0.UnixMilli(),
-		NodeType:   avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
-		NodeName:   nodeName,
+		Type:       avsproto.NodeType_NODE_TYPE_CUSTOM_CODE.String(),
+		Name:       nodeName,
 	}
 
 	var sb strings.Builder

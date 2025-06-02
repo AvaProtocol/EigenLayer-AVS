@@ -276,7 +276,7 @@ func TestRunSequentialTasks(t *testing.T) {
 		t.Errorf("incorrect success status, expect all success but got failure")
 	}
 
-	if vm.ExecutionLogs[0].NodeId != "123" || vm.ExecutionLogs[1].NodeId != "456" {
+	if vm.ExecutionLogs[0].Id != "123" || vm.ExecutionLogs[1].Id != "456" {
 		t.Errorf("incorrect node id in execution log")
 	}
 

@@ -70,27 +70,26 @@ func TestSimulateTask_ManualTriggerWithCustomCode(t *testing.T) {
 	assert.NotNil(t, execution)
 	assert.True(t, execution.Success)
 	assert.Empty(t, execution.Error)
-	assert.Equal(t, avsproto.TriggerType_TRIGGER_TYPE_MANUAL, execution.TriggerType)
-	assert.Equal(t, "manual", execution.TriggerName)
 
 	// Verify execution steps
 	assert.Len(t, execution.Steps, 2) // Trigger + Custom Code node
 
 	// Verify trigger step
 	triggerStep := execution.Steps[0]
-	assert.Equal(t, "trigger_1", triggerStep.NodeId)
+	assert.Equal(t, "trigger_1", triggerStep.Id)
 	assert.True(t, triggerStep.Success)
 	assert.Empty(t, triggerStep.Error)
 	assert.Contains(t, triggerStep.Log, "Simulated trigger")
 
 	// Verify custom code step
 	codeStep := execution.Steps[1]
-	assert.Equal(t, "step_1", codeStep.NodeId)
+	assert.Equal(t, "step_1", codeStep.Id)
 	assert.True(t, codeStep.Success)
 	assert.Empty(t, codeStep.Error)
 
-	// Verify trigger data was available at the execution level
-	assert.NotNil(t, execution.OutputData)
+	// Verify the execution completed successfully with unified step structure
+	assert.NotEmpty(t, execution.Steps)
+	assert.Len(t, execution.Steps, 2) // Trigger + custom code step
 }
 
 func TestSimulateTask_FixedTimeTriggerWithRestAPI(t *testing.T) {
@@ -150,22 +149,24 @@ func TestSimulateTask_FixedTimeTriggerWithRestAPI(t *testing.T) {
 	assert.NotNil(t, execution)
 	assert.True(t, execution.Success)
 	assert.Empty(t, execution.Error)
-	assert.Equal(t, avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME, execution.TriggerType)
-	assert.Equal(t, "time_trigger", execution.TriggerName)
 
 	// Verify execution steps
 	assert.Len(t, execution.Steps, 2) // Trigger + REST API node
 
 	// Verify trigger step provided timestamp data
 	triggerStep := execution.Steps[0]
-	assert.Equal(t, "trigger_1", triggerStep.NodeId)
+	assert.Equal(t, "trigger_1", triggerStep.Id)
+	assert.Equal(t, "TRIGGER_TYPE_FIXED_TIME", triggerStep.Type)
+	assert.Equal(t, "time_trigger", triggerStep.Name)
 	assert.True(t, triggerStep.Success)
 	assert.Empty(t, triggerStep.Error)
 	assert.Contains(t, triggerStep.Log, "Simulated trigger")
 
 	// Verify REST API step
 	apiStep := execution.Steps[1]
-	assert.Equal(t, "step_1", apiStep.NodeId)
+	assert.Equal(t, "step_1", apiStep.Id)
+	assert.Equal(t, "NODE_TYPE_REST_API", apiStep.Type)
+	assert.Equal(t, "call_api", apiStep.Name)
 	assert.True(t, apiStep.Success)
 }
 
@@ -267,25 +268,29 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 	assert.NotNil(t, execution)
 	assert.True(t, execution.Success)
 	assert.Empty(t, execution.Error)
-	assert.Equal(t, avsproto.TriggerType_TRIGGER_TYPE_MANUAL, execution.TriggerType)
-	assert.Equal(t, "manual", execution.TriggerName)
 
 	// Verify execution steps (trigger + branch + success action)
 	assert.Len(t, execution.Steps, 3)
 
 	// Verify trigger step
 	triggerStep := execution.Steps[0]
-	assert.Equal(t, "trigger_1", triggerStep.NodeId)
+	assert.Equal(t, "trigger_1", triggerStep.Id)
+	assert.Equal(t, "TRIGGER_TYPE_MANUAL", triggerStep.Type)
+	assert.Equal(t, "manual", triggerStep.Name)
 	assert.True(t, triggerStep.Success)
 
 	// Verify branch step
 	branchStep := execution.Steps[1]
-	assert.Equal(t, "branch_1", branchStep.NodeId)
+	assert.Equal(t, "branch_1", branchStep.Id)
+	assert.Equal(t, "NODE_TYPE_BRANCH", branchStep.Type)
+	assert.Equal(t, "condition_check", branchStep.Name)
 	assert.True(t, branchStep.Success)
 
 	// Verify action step (should be step_1 since condition met)
 	actionStep := execution.Steps[2]
-	assert.Equal(t, "step_1", actionStep.NodeId)
+	assert.Equal(t, "step_1", actionStep.Id)
+	assert.Equal(t, "NODE_TYPE_CUSTOM_CODE", actionStep.Type)
+	assert.Equal(t, "success_action", actionStep.Name)
 	assert.True(t, actionStep.Success)
 }
 
@@ -428,16 +433,15 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 	assert.NotNil(t, execution)
 	assert.True(t, execution.Success)
 	assert.Empty(t, execution.Error)
-	assert.Equal(t, avsproto.TriggerType_TRIGGER_TYPE_MANUAL, execution.TriggerType)
-	assert.Equal(t, "manual trigger", execution.TriggerName)
 
 	// Verify we have 2 steps (trigger + custom code)
 	assert.Len(t, execution.Steps, 2)
 
 	// ===== BUG TEST 1: Trigger Step InputsList =====
 	triggerStep := execution.Steps[0]
-	assert.Equal(t, "trigger1", triggerStep.NodeId)
-	assert.Equal(t, "manual trigger", triggerStep.NodeName)
+	assert.Equal(t, "trigger1", triggerStep.Id)
+	assert.Equal(t, "manual trigger", triggerStep.Name)
+	assert.Equal(t, "TRIGGER_TYPE_MANUAL", triggerStep.Type)
 	assert.True(t, triggerStep.Success)
 
 	// Trigger step should have inputs from inputVariables
@@ -466,8 +470,9 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 
 	// ===== BUG TEST 2: Custom Code Step InputsList =====
 	codeStep := execution.Steps[1]
-	assert.Equal(t, "node1", codeStep.NodeId)
-	assert.Equal(t, "custom code", codeStep.NodeName)
+	assert.Equal(t, "node1", codeStep.Id)
+	assert.Equal(t, "custom code", codeStep.Name)
+	assert.Equal(t, "NODE_TYPE_CUSTOM_CODE", codeStep.Type)
 	assert.True(t, codeStep.Success)
 
 	// Check for 'trigger.data' (convenience variable) and 'manual_trigger.data' (normalized trigger name)
@@ -501,7 +506,7 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 
 	// Print detailed analysis
 	t.Logf("\n=== INPUTSLIST BUG ANALYSIS ===")
-	t.Logf("Step 1 (Trigger '%s'):", triggerStep.NodeName)
+	t.Logf("Step 1 (Trigger '%s'):", triggerStep.Name)
 	t.Logf("  Expected inputs: %v", expectedTriggerInputs)
 	t.Logf("  Actual inputs: %v", triggerStep.Inputs)
 	t.Logf("  Status: %s", func() string {
@@ -511,7 +516,7 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 		return "❌ BUG - should be correct"
 	}())
 
-	t.Logf("Step 2 (Node '%s'):", codeStep.NodeName)
+	t.Logf("Step 2 (Node '%s'):", codeStep.Name)
 	t.Logf("  Inputs: %v", codeStep.Inputs)
 	t.Logf("  Contains 'trigger.data': %v (should be true)", hasTriggerData)
 	t.Logf("  Contains 'manual_trigger.data': %v (should be true)", hasManualTriggerData)
@@ -594,6 +599,9 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, execution)
 	assert.True(t, execution.Success)
+	assert.Empty(t, execution.Error)
+
+	// Verify we have 2 steps (trigger + custom code)
 	assert.Len(t, execution.Steps, 2)
 
 	// Verify trigger step has inputs from inputVariables

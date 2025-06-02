@@ -114,8 +114,8 @@ func TestETHTransferTaskIntegration(t *testing.T) {
 
 	// Check the ETH transfer step
 	step := execution.Steps[0]
-	if step.NodeId != "eth_transfer_1" {
-		t.Errorf("Expected step NodeId 'eth_transfer_1', got '%s'", step.NodeId)
+	if step.Id != "eth_transfer_1" {
+		t.Errorf("Expected step NodeId 'eth_transfer_1', got '%s'", step.Id)
 	}
 
 	if !step.Success {

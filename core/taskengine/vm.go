@@ -91,35 +91,35 @@ type triggerDataType struct {
 	Manual      *avsproto.ManualTrigger_Output
 }
 
-func (t *triggerDataType) GetValue() avsproto.IsExecution_OutputData {
+func (t *triggerDataType) GetValue() avsproto.IsExecution_Step_OutputData {
 	if t.TransferLog != nil {
 		// For event triggers with transfer log data, use the event trigger output
 		eventOutput := &avsproto.EventTrigger_Output{
 			TransferLog: t.TransferLog,
 		}
-		return &avsproto.Execution_EventTrigger{EventTrigger: eventOutput}
+		return &avsproto.Execution_Step_EventTrigger{EventTrigger: eventOutput}
 	}
 	if t.EvmLog != nil {
 		// For event triggers with raw EVM log data
 		eventOutput := &avsproto.EventTrigger_Output{
 			EvmLog: t.EvmLog,
 		}
-		return &avsproto.Execution_EventTrigger{EventTrigger: eventOutput}
+		return &avsproto.Execution_Step_EventTrigger{EventTrigger: eventOutput}
 	}
 	if t.Event != nil {
-		return &avsproto.Execution_EventTrigger{EventTrigger: t.Event}
+		return &avsproto.Execution_Step_EventTrigger{EventTrigger: t.Event}
 	}
 	if t.Block != nil {
-		return &avsproto.Execution_BlockTrigger{BlockTrigger: t.Block}
+		return &avsproto.Execution_Step_BlockTrigger{BlockTrigger: t.Block}
 	}
 	if t.Time != nil {
-		return &avsproto.Execution_FixedTimeTrigger{FixedTimeTrigger: t.Time}
+		return &avsproto.Execution_Step_FixedTimeTrigger{FixedTimeTrigger: t.Time}
 	}
 	if t.Cron != nil {
-		return &avsproto.Execution_CronTrigger{CronTrigger: t.Cron}
+		return &avsproto.Execution_Step_CronTrigger{CronTrigger: t.Cron}
 	}
 	if t.Manual != nil {
-		return &avsproto.Execution_ManualTrigger{ManualTrigger: t.Manual}
+		return &avsproto.Execution_Step_ManualTrigger{ManualTrigger: t.Manual}
 	}
 	return nil
 }
@@ -952,7 +952,7 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 			v.logger.Error("runCustomCode: CustomCodeNode Config is nil", "stepID", stepID)
 		}
 		return &avsproto.Execution_Step{
-			NodeId:  stepID,
+			Id:      stepID, // Use new 'id' field
 			Success: false,
 			Error:   "CustomCodeNode Config is nil",
 			StartAt: time.Now().UnixMilli(),
@@ -1463,7 +1463,7 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 	// Special handling for blockTrigger - require real blockchain data
 	if node.GetCustomCode() != nil && node.Name == "Single Node Execution: "+NodeTypeBlockTrigger {
 		return &avsproto.Execution_Step{
-			NodeId:  node.Id,
+			Id:      node.Id, // Use new 'id' field
 			Success: false,
 			Error:   "BlockTrigger nodes require real blockchain data - mock data not supported",
 			StartAt: time.Now().UnixMilli(),
@@ -1524,7 +1524,7 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 			// If a log exists, update it with error if not already set (though executeNode's sub-calls should do this)
 			tempVM.mu.Lock()
 			lastLog := tempVM.ExecutionLogs[len(tempVM.ExecutionLogs)-1]
-			if lastLog.NodeId == node.Id && lastLog.Success { // If marked success but error occurred here
+			if lastLog.Id == node.Id && lastLog.Success { // If marked success but error occurred here
 				lastLog.Success = false
 				lastLog.Error = err.Error()
 			}
@@ -1731,23 +1731,23 @@ func (v *VM) createExecutionStep(nodeId string, success bool, errorMsg string, l
 	defer v.mu.Unlock()
 
 	// Look up the node to get its type and name
-	var nodeType avsproto.NodeType = avsproto.NodeType_NODE_TYPE_UNSPECIFIED
+	var nodeType string = "UNSPECIFIED"
 	var nodeName string = "unknown"
 
 	if node, exists := v.TaskNodes[nodeId]; exists {
-		nodeType = node.Type
+		nodeType = node.Type.String()
 		nodeName = node.Name
 	}
 
 	step := &avsproto.Execution_Step{
-		NodeId:   nodeId,
-		Success:  success,
-		Error:    errorMsg,
-		Log:      logMsg,
-		StartAt:  startTime,
-		EndAt:    startTime, // Will be updated by caller if needed
-		NodeType: nodeType,
-		NodeName: nodeName,
+		Id:      nodeId, // Use new 'id' field
+		Success: success,
+		Error:   errorMsg,
+		Log:     logMsg,
+		StartAt: startTime,
+		EndAt:   startTime, // Will be updated by caller if needed
+		Type:    nodeType,  // Use new 'type' field as string
+		Name:    nodeName,  // Use new 'name' field
 	}
 
 	return step

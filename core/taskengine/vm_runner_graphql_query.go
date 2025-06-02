@@ -46,14 +46,14 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	r.vm.mu.Unlock()
 
 	step := &avsproto.Execution_Step{
-		NodeId:     stepID,
+		Id:         stepID,
 		Log:        "",
 		OutputData: nil,
 		Success:    true,
 		Error:      "",
 		StartAt:    t0,
-		NodeType:   avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY,
-		NodeName:   nodeName,
+		Type:       avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY.String(),
+		Name:       nodeName,
 	}
 
 	var err error

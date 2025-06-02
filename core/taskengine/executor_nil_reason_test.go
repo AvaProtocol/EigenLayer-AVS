@@ -75,15 +75,11 @@ func TestExecutorRunTaskWithNilReason(t *testing.T) {
 		t.Errorf("Expected success status but got failure")
 	}
 
-	if execution.TriggerType != avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
-		t.Errorf("Expected trigger type to be TRIGGER_TYPE_UNSPECIFIED, but got: %v", execution.TriggerType)
-	}
-
 	if len(execution.Steps) != 1 {
 		t.Errorf("Expected 1 step but got: %d", len(execution.Steps))
 	}
 
-	if execution.Steps[0].NodeId != "rest1" {
-		t.Errorf("Expected step ID to be rest1 but got: %s", execution.Steps[0].NodeId)
+	if execution.Steps[0].Id != "rest1" {
+		t.Errorf("Expected step ID to be rest1 but got: %s", execution.Steps[0].Id)
 	}
 }
