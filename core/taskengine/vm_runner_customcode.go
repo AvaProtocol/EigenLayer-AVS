@@ -184,13 +184,24 @@ func containsReturnStatement(code string) bool {
 
 func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
 	t0 := time.Now()
+
+	// Look up the task node to get the name
+	var nodeName string = "unknown"
+	r.vm.mu.Lock()
+	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
+		nodeName = taskNode.Name
+	}
+	r.vm.mu.Unlock()
+
 	s := &avsproto.Execution_Step{
-		NodeId:     stepID,
+		Id:         stepID,
 		OutputData: nil,
 		Log:        "",
 		Error:      "",
 		Success:    true,
 		StartAt:    t0.UnixMilli(),
+		Type:       avsproto.NodeType_NODE_TYPE_CUSTOM_CODE.String(),
+		Name:       nodeName,
 	}
 
 	var sb strings.Builder

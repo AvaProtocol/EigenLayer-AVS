@@ -485,16 +485,16 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 
 	// Optional: Verify logs for completeness
 	step1Log := vm.ExecutionLogs[0]
-	if step1Log.NodeId != customCodeNodeID {
-		t.Errorf("Step 1 log NodeId mismatch: got %q, want %q", step1Log.NodeId, customCodeNodeID)
+	if step1Log.Id != customCodeNodeID {
+		t.Errorf("Step 1 log Id mismatch: got %q, want %q", step1Log.Id, customCodeNodeID)
 	}
 	if !step1Log.Success {
 		t.Errorf("Step 1 log should be successful")
 	}
 
 	step2Log := vm.ExecutionLogs[1]
-	if step2Log.NodeId != restNodeID {
-		t.Errorf("Step 2 log NodeId mismatch: got %q, want %q", step2Log.NodeId, restNodeID)
+	if step2Log.Id != restNodeID {
+		t.Errorf("Step 2 log Id mismatch: got %q, want %q", step2Log.Id, restNodeID)
 	}
 	if !step2Log.Success {
 		t.Errorf("REST node step log should be successful")

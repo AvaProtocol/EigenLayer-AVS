@@ -34,8 +34,8 @@ func TestETHTransferProcessor_Execute_Success(t *testing.T) {
 		t.Errorf("Expected success=true, got success=%v, error=%s", executionLog.Success, executionLog.Error)
 	}
 
-	if executionLog.NodeId != "test-step" {
-		t.Errorf("Expected NodeId='test-step', got '%s'", executionLog.NodeId)
+	if executionLog.Id != "test-step" {
+		t.Errorf("Expected Id='test-step', got '%s'", executionLog.Id)
 	}
 
 	// Check output data

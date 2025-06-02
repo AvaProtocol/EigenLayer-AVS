@@ -16,9 +16,52 @@ import (
 )
 
 func TestRestRequest(t *testing.T) {
+	// Create mock httpbin server that mimics httpbin.org/post response format
+	httpbinServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("expected POST request, got %s", r.Method)
+		}
+
+		// Read the form data from the request body
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("failed to parse form data: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		// Create response structure that matches httpbin.org/post
+		httpbinResponse := map[string]interface{}{
+			"args":  map[string]interface{}{},
+			"data":  "",
+			"files": map[string]interface{}{},
+			"form": map[string]interface{}{
+				"chat_id":              r.Form.Get("chat_id"),
+				"disable_notification": r.Form.Get("disable_notification"),
+				"text":                 r.Form.Get("text"),
+			},
+			"headers": map[string]interface{}{
+				"Accept":         "*/*",
+				"Content-Length": r.Header.Get("Content-Length"),
+				"Content-Type":   r.Header.Get("Content-Type"),
+				"Host":           r.Host,
+				"User-Agent":     r.Header.Get("User-Agent"),
+			},
+			"json":   nil,
+			"origin": r.RemoteAddr,
+			"url":    r.URL.String(),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(httpbinResponse); err != nil {
+			t.Errorf("failed to encode response: %v", err)
+		}
+	}))
+	defer httpbinServer.Close()
+
 	node := &avsproto.RestAPINode{
 		Config: &avsproto.RestAPINode_Config{
-			Url: "https://httpbin.org/post",
+			Url: httpbinServer.URL, // Use mock server instead of https://httpbin.org/post
 			Headers: map[string]string{
 				"Content-type": "application/x-www-form-urlencoded",
 			},

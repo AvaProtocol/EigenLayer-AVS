@@ -27,13 +27,24 @@ func NewFilterProcessor(vm *VM) *FilterProcessor {
 
 func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*avsproto.Execution_Step, error) {
 	t0 := time.Now()
+
+	// Look up the task node to get the name
+	var nodeName string = "unknown"
+	r.vm.mu.Lock()
+	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
+		nodeName = taskNode.Name
+	}
+	r.vm.mu.Unlock()
+
 	executionLogStep := &avsproto.Execution_Step{
-		NodeId:     stepID,
+		Id:         stepID,
 		OutputData: nil,
 		Log:        "",
 		Error:      "",
 		Success:    true,
 		StartAt:    t0.UnixMilli(),
+		Type:       avsproto.NodeType_NODE_TYPE_FILTER.String(),
+		Name:       nodeName,
 	}
 
 	var logBuilder strings.Builder

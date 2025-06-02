@@ -33,13 +33,24 @@ func NewContractReadProcessor(vm *VM, client *ethclient.Client) *ContractReadPro
 func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractReadNode) (*avsproto.Execution_Step, error) {
 	ctx := context.Background()
 	t0 := time.Now().UnixMilli()
+
+	// Look up the task node to get the name
+	var nodeName string = "unknown"
+	r.vm.mu.Lock()
+	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
+		nodeName = taskNode.Name
+	}
+	r.vm.mu.Unlock()
+
 	s := &avsproto.Execution_Step{
-		NodeId:     stepID,
+		Id:         stepID,
 		Log:        "",
 		OutputData: nil,
 		Success:    true,
 		Error:      "",
 		StartAt:    t0,
+		Type:       avsproto.NodeType_NODE_TYPE_CONTRACT_READ.String(),
+		Name:       nodeName,
 	}
 
 	var err error

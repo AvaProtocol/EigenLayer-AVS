@@ -841,6 +841,336 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 	}, nil
 }
 
+// SimulateTask executes a complete task simulation by first running the trigger immediately,
+// then executing the task nodes in sequence just like regular task execution.
+// This is useful for testing tasks without waiting for actual trigger conditions.
+// The task definition is provided in the request, so no storage persistence is required.
+func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, triggerType string, triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (*avsproto.Execution, error) {
+	// Create a temporary task structure for simulation (not saved to storage)
+	simulationTaskID := ulid.Make().String()
+	task := &model.Task{
+		Task: &avsproto.Task{
+			Id:      simulationTaskID,
+			Owner:   user.Address.Hex(),
+			Trigger: trigger,
+			Nodes:   nodes,
+			Edges:   edges,
+			Status:  avsproto.TaskStatus_Active, // Set as active for simulation
+		},
+	}
+
+	// Basic validation: Check if task structure is valid for execution
+	if task.Trigger == nil {
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, "task trigger is required for simulation")
+	}
+	if len(task.Nodes) == 0 {
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, "task must have at least one node for simulation")
+	}
+
+	// Step 1: Simulate the trigger to get trigger output data
+	triggerOutput, err := n.runTriggerImmediately(triggerType, triggerConfig, inputVariables)
+	if err != nil {
+		return nil, fmt.Errorf("failed to simulate trigger: %w", err)
+	}
+
+	// Step 2: Create QueueExecutionData similar to regular task execution
+	simulationID := ulid.Make().String()
+
+	// Convert trigger output to proper protobuf structure
+	var triggerOutputProto interface{}
+	switch triggerTypeStringToEnum(triggerType) {
+	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
+		runAt := uint64(0)
+		if runAtVal, ok := triggerOutput["runAt"]; ok {
+			if runAtUint, ok := runAtVal.(uint64); ok {
+				runAt = runAtUint
+			}
+		}
+		triggerOutputProto = &avsproto.ManualTrigger_Output{
+			RunAt: runAt,
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
+		timestamp := uint64(0)
+		timestampISO := ""
+		if ts, ok := triggerOutput["timestamp"]; ok {
+			if tsUint, ok := ts.(uint64); ok {
+				timestamp = tsUint
+			}
+		}
+		if tsISO, ok := triggerOutput["timestamp_iso"]; ok {
+			if tsISOStr, ok := tsISO.(string); ok {
+				timestampISO = tsISOStr
+			}
+		}
+		triggerOutputProto = &avsproto.FixedTimeTrigger_Output{
+			Timestamp:    timestamp,
+			TimestampIso: timestampISO,
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
+		timestamp := uint64(0)
+		timestampISO := ""
+		if ts, ok := triggerOutput["timestamp"]; ok {
+			if tsUint, ok := ts.(uint64); ok {
+				timestamp = tsUint
+			}
+		}
+		if tsISO, ok := triggerOutput["timestamp_iso"]; ok {
+			if tsISOStr, ok := tsISO.(string); ok {
+				timestampISO = tsISOStr
+			}
+		}
+		triggerOutputProto = &avsproto.CronTrigger_Output{
+			Timestamp:    timestamp,
+			TimestampIso: timestampISO,
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
+		blockNumber := uint64(0)
+		blockHash := ""
+		timestamp := uint64(0)
+		parentHash := ""
+		difficulty := ""
+		gasLimit := uint64(0)
+		gasUsed := uint64(0)
+
+		if bn, ok := triggerOutput["blockNumber"]; ok {
+			if bnUint, ok := bn.(uint64); ok {
+				blockNumber = bnUint
+			}
+		}
+		if bh, ok := triggerOutput["blockHash"]; ok {
+			if bhStr, ok := bh.(string); ok {
+				blockHash = bhStr
+			}
+		}
+		if ts, ok := triggerOutput["timestamp"]; ok {
+			if tsUint, ok := ts.(uint64); ok {
+				timestamp = tsUint
+			}
+		}
+		if ph, ok := triggerOutput["parentHash"]; ok {
+			if phStr, ok := ph.(string); ok {
+				parentHash = phStr
+			}
+		}
+		if diff, ok := triggerOutput["difficulty"]; ok {
+			if diffStr, ok := diff.(string); ok {
+				difficulty = diffStr
+			}
+		}
+		if gl, ok := triggerOutput["gasLimit"]; ok {
+			if glUint, ok := gl.(uint64); ok {
+				gasLimit = glUint
+			}
+		}
+		if gu, ok := triggerOutput["gasUsed"]; ok {
+			if guUint, ok := gu.(uint64); ok {
+				gasUsed = guUint
+			}
+		}
+
+		triggerOutputProto = &avsproto.BlockTrigger_Output{
+			BlockNumber: blockNumber,
+			BlockHash:   blockHash,
+			Timestamp:   timestamp,
+			ParentHash:  parentHash,
+			Difficulty:  difficulty,
+			GasLimit:    gasLimit,
+			GasUsed:     gasUsed,
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+		// For event triggers, create a basic event output
+		// In a real scenario, this would be populated with actual event data
+		triggerOutputProto = &avsproto.EventTrigger_Output{}
+	default:
+		// For unknown trigger types, create a manual trigger as fallback
+		triggerOutputProto = &avsproto.ManualTrigger_Output{
+			RunAt: uint64(time.Now().Unix()),
+		}
+	}
+
+	queueData := &QueueExecutionData{
+		TriggerType:   triggerTypeStringToEnum(triggerType),
+		TriggerOutput: triggerOutputProto,
+		ExecutionID:   simulationID,
+	}
+
+	// Step 3: Load secrets for the task
+	secrets, err := LoadSecretForTask(n.db, task)
+	if err != nil {
+		n.logger.Warn("Failed to load secrets for workflow simulation", "error", err, "task_id", task.Id)
+		// Don't fail the simulation, just use empty secrets
+		secrets = make(map[string]string)
+	}
+
+	// Step 4: Create VM with simulated trigger data (similar to RunTask)
+	triggerReason := GetTriggerReasonOrDefault(queueData, task.Id, n.logger)
+	vm, err := NewVMWithData(task, triggerReason, n.smartWalletConfig, secrets)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create VM for simulation: %w", err)
+	}
+
+	vm.WithLogger(n.logger).WithDb(n.db)
+
+	// Add input variables to VM for template processing
+	for key, value := range inputVariables {
+		vm.AddVar(key, value)
+	}
+
+	// Step 5: Add trigger data as "trigger" variable for convenient access in JavaScript
+	// This ensures scripts can access trigger.data regardless of the trigger's name
+	triggerDataMap := make(map[string]interface{})
+	switch triggerReason.Type {
+	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
+		triggerDataMap["triggered"] = true
+		if runAt, ok := triggerOutput["runAt"]; ok {
+			triggerDataMap["runAt"] = runAt
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
+		if timestamp, ok := triggerOutput["timestamp"]; ok {
+			triggerDataMap["timestamp"] = timestamp
+		}
+		if timestampISO, ok := triggerOutput["timestamp_iso"]; ok {
+			triggerDataMap["timestamp_iso"] = timestampISO
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
+		if timestamp, ok := triggerOutput["timestamp"]; ok {
+			triggerDataMap["timestamp"] = timestamp
+		}
+		if timestampISO, ok := triggerOutput["timestamp_iso"]; ok {
+			triggerDataMap["timestamp_iso"] = timestampISO
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
+		if blockNumber, ok := triggerOutput["blockNumber"]; ok {
+			triggerDataMap["blockNumber"] = blockNumber
+		}
+		if blockHash, ok := triggerOutput["blockHash"]; ok {
+			triggerDataMap["blockHash"] = blockHash
+		}
+		if timestamp, ok := triggerOutput["timestamp"]; ok {
+			triggerDataMap["timestamp"] = timestamp
+		}
+		if parentHash, ok := triggerOutput["parentHash"]; ok {
+			triggerDataMap["parentHash"] = parentHash
+		}
+		if difficulty, ok := triggerOutput["difficulty"]; ok {
+			triggerDataMap["difficulty"] = difficulty
+		}
+		if gasLimit, ok := triggerOutput["gasLimit"]; ok {
+			triggerDataMap["gasLimit"] = gasLimit
+		}
+		if gasUsed, ok := triggerOutput["gasUsed"]; ok {
+			triggerDataMap["gasUsed"] = gasUsed
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+		// Copy all event trigger data
+		for k, v := range triggerOutput {
+			triggerDataMap[k] = v
+		}
+	default:
+		// For unknown trigger types, copy all output data
+		for k, v := range triggerOutput {
+			triggerDataMap[k] = v
+		}
+	}
+
+	// Add the universal "trigger" variable for JavaScript access
+	vm.AddVar("trigger", map[string]any{"data": triggerDataMap})
+
+	// Step 6: Compile the workflow
+	t0 := time.Now()
+
+	if err = vm.Compile(); err != nil {
+		return nil, fmt.Errorf("failed to compile workflow for simulation: %w", err)
+	}
+
+	// Step 7: Create and add a trigger execution step manually before running nodes
+	// Convert inputVariables keys to trigger inputs
+	triggerInputs := make([]string, 0, len(inputVariables))
+	for key := range inputVariables {
+		triggerInputs = append(triggerInputs, key)
+	}
+
+	triggerStep := &avsproto.Execution_Step{
+		Id:      task.Trigger.Id, // Use new 'id' field
+		Success: true,
+		Error:   "",
+		StartAt: t0.UnixMilli(),
+		EndAt:   t0.UnixMilli(),
+		Log:     fmt.Sprintf("Simulated trigger: %s executed successfully", task.Trigger.Name),
+		Inputs:  triggerInputs,                  // Use inputVariables keys as trigger inputs
+		Type:    queueData.TriggerType.String(), // Use trigger type as string
+		Name:    task.Trigger.Name,              // Use new 'name' field
+	}
+
+	// Set trigger output data in the step based on trigger type
+	switch queueData.TriggerType {
+	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
+		if output, ok := triggerOutputProto.(*avsproto.ManualTrigger_Output); ok {
+			triggerStep.OutputData = &avsproto.Execution_Step_ManualTrigger{ManualTrigger: output}
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
+		if output, ok := triggerOutputProto.(*avsproto.FixedTimeTrigger_Output); ok {
+			triggerStep.OutputData = &avsproto.Execution_Step_FixedTimeTrigger{FixedTimeTrigger: output}
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
+		if output, ok := triggerOutputProto.(*avsproto.CronTrigger_Output); ok {
+			triggerStep.OutputData = &avsproto.Execution_Step_CronTrigger{CronTrigger: output}
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
+		if output, ok := triggerOutputProto.(*avsproto.BlockTrigger_Output); ok {
+			triggerStep.OutputData = &avsproto.Execution_Step_BlockTrigger{BlockTrigger: output}
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+		if output, ok := triggerOutputProto.(*avsproto.EventTrigger_Output); ok {
+			triggerStep.OutputData = &avsproto.Execution_Step_EventTrigger{EventTrigger: output}
+		}
+	}
+
+	// Add trigger step to execution logs
+	vm.ExecutionLogs = append(vm.ExecutionLogs, triggerStep)
+
+	// Step 8: Run the workflow nodes
+	runErr := vm.Run()
+	t1 := time.Now()
+
+	// Step 9: Create execution result with unified structure
+	execution := &avsproto.Execution{
+		Id:      simulationID,
+		StartAt: t0.UnixMilli(),
+		EndAt:   t1.UnixMilli(),
+		Success: runErr == nil,
+		Error:   "",
+		Steps:   vm.ExecutionLogs, // Now contains both trigger and node steps
+	}
+
+	if runErr != nil {
+		n.logger.Error("workflow simulation failed", "error", runErr, "task_id", task.Id, "simulation_id", simulationID)
+		execution.Error = runErr.Error()
+		return execution, fmt.Errorf("workflow simulation failed: %w", runErr)
+	}
+
+	n.logger.Info("workflow simulation completed successfully", "task_id", task.Id, "simulation_id", simulationID, "steps", len(execution.Steps))
+	return execution, nil
+}
+
+// triggerTypeStringToEnum converts trigger type string to enum
+func triggerTypeStringToEnum(triggerType string) avsproto.TriggerType {
+	switch triggerType {
+	case NodeTypeBlockTrigger:
+		return avsproto.TriggerType_TRIGGER_TYPE_BLOCK
+	case NodeTypeFixedTimeTrigger:
+		return avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME
+	case NodeTypeCronTrigger:
+		return avsproto.TriggerType_TRIGGER_TYPE_CRON
+	case NodeTypeEventTrigger:
+		return avsproto.TriggerType_TRIGGER_TYPE_EVENT
+	case NodeTypeManualTrigger:
+		return avsproto.TriggerType_TRIGGER_TYPE_MANUAL
+	default:
+		return avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED
+	}
+}
+
 // List Execution for a given task id
 func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
 	// Validate all tasks own by the caller, if there are any tasks won't be owned by caller, we return permission error
@@ -919,18 +1249,10 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 			continue
 		}
 
-		exec := avsproto.Execution{}
-		if err := protojson.Unmarshal(executionValue, &exec); err == nil {
-			// Set default trigger type if not set for backward compatibility
-			if exec.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
-				// task is needed for the conversion, get it from the map populated earlier
-				taskId := TaskIdFromExecutionStorageKey([]byte(key))
-				task := tasks[string(taskId)] // Get the task from the map
-				if task != nil {
-					exec.TriggerType = TaskTriggerToTriggerType(task.GetTrigger())
-				}
-			}
-			executioResp.Items = append(executioResp.Items, &exec)
+		exec := &avsproto.Execution{}
+		if err := protojson.Unmarshal(executionValue, exec); err == nil {
+			// No longer need trigger type at execution level - it's in the first step
+			executioResp.Items = append(executioResp.Items, exec)
 
 			if total == 0 {
 				firstExecutionId = exec.Id
@@ -1005,11 +1327,7 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), TaskStorageCorruptedError)
 	}
 
-	// Set default trigger type if not set for backward compatibility
-	if exec.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
-		exec.TriggerType = TaskTriggerToTriggerType(task.Trigger)
-	}
-
+	// No longer need trigger type at execution level - it's in the first step
 	return exec, nil
 }
 
@@ -1026,11 +1344,6 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 		err = protojson.Unmarshal(rawExecution, exec)
 		if err != nil {
 			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), TaskStorageCorruptedError)
-		}
-
-		// Set default trigger type if not set for backward compatibility
-		if exec.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
-			exec.TriggerType = TaskTriggerToTriggerType(task.Trigger)
 		}
 
 		if exec.Success {

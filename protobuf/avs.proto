@@ -4,7 +4,6 @@ package aggregator;
 option go_package = "./avsproto";
 
 import "google/protobuf/wrappers.proto";
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/struct.proto";
 
@@ -477,21 +476,31 @@ message TaskNode {
 
 message Execution {
   string id      = 1;
-  // timestamp when execution started (in milliseconds)
-  int64 start_at = 2;
-  // timestamp when execution ended (in milliseconds)
-  int64 end_at   = 3;
+  
+  int64 start_at = 2; // timestamp when execution started (in milliseconds)
+  int64 end_at   = 3; // timestamp when execution ended (in milliseconds)
   bool   success = 4;
   string error   = 5;
 
-  // Flattened from TriggerReason: Use the top-level TriggerType enum for consistency
-  TriggerType trigger_type = 6;
-
   message Step {
-    string node_id = 1;
-    bool   success  = 2;
+    string id = 1;
     
+    // Unified type field - can be trigger type (MANUAL, BLOCK, etc) or node type (CUSTOM_CODE, REST_API, etc)
+    string type = 17;
+    string name = 18;
+    bool success = 2;
+    string error = 13;
+    string log = 12;
+    repeated string inputs = 16;
     oneof output_data {
+      // Trigger outputs
+      BlockTrigger.Output block_trigger = 20;
+      FixedTimeTrigger.Output fixed_time_trigger = 21;
+      CronTrigger.Output cron_trigger = 22;
+      EventTrigger.Output event_trigger = 23;
+      ManualTrigger.Output manual_trigger = 24;
+      
+      // Node outputs  
       ETHTransferNode.Output eth_transfer = 3;
       GraphQLQueryNode.Output graphql = 4;
       ContractReadNode.Output contract_read = 5;
@@ -502,63 +511,14 @@ message Execution {
       FilterNode.Output filter = 10;
       LoopNode.Output loop = 11;
     }
-
-    string log = 12; 
-    string error = 13;
+    
     // timestamp when step started (in milliseconds)
     int64 start_at = 14;
     // timestamp when step ended (in milliseconds)
     int64 end_at = 15;
-
-    // Reference ticket: https://github.com/AvaProtocol/EigenLayer-AVS/issues/151
-    repeated string inputs = 16;
   }
 
   repeated Step steps = 8;
-
-  string trigger_name = 9;
-
-  // Despite the name outputData this is actually the data after we enrich based the metadata at the point where the event is trigger.
-  // Example at the time of triggering a transfer event, the only ifformation we had is ERC20 address, the topics, the from/to and amount, the log id and transaction hash
-  // We then query Etherem RPC to find out more information such as token symbol, token decimal, parse the amount of out event raw data
-  // Reference ticket: https://github.com/AvaProtocol/EigenLayer-AVS/issues/151
-  //  
-  // For transfer event, we had a set of fields
-  // Chris define them here https://avaprotocol.slack.com/archives/D0570FNE0SJ/p1733336982524899
-  // // The selected fields of the response to return to the client
-  //  const FILTERED_FIELDS = [
-  //    "token_name",
-  //    "token_symbol",
-  //    "token_decimals",
-  //    "transaction_hash",
-  //    "address",
-  //    "block_timestamp",
-  //    "block_number",
-  //    "from_address",
-  //    "to_address",
-  //    "value",
-  //    "value_formatted", // Formatted value
-  //    "transaction_index",
-  //    "log_index",
-  //  ];
-  // 
-  // For non transfer event, we just have the raw data
-  // For block event, we had the number at that trigger is meet.
-  // For time trigger, it is the epoch
-  oneof output_data {
-    // For block triggers
-    BlockTrigger.Output block_trigger = 10;
-    
-    // For time triggers
-    FixedTimeTrigger.Output fixed_time_trigger = 11;
-    CronTrigger.Output cron_trigger = 12;
-    
-    // For event triggers
-    EventTrigger.Output event_trigger = 13;
-    
-    // For manual triggers
-    ManualTrigger.Output manual_trigger = 14;
-  }
 }
 
 
@@ -900,6 +860,9 @@ service Aggregator {
   
   // RunTrigger allows executing a single trigger for testing purposes (triggers don't accept inputs)
   rpc RunTrigger(RunTriggerReq) returns (RunTriggerResp);
+  
+  // SimulateTask allows executing a complete task simulation including trigger and all workflow nodes
+  rpc SimulateTask(SimulateTaskReq) returns (Execution);
 }
 
 // Request message for GetWorkflowCount
@@ -1038,4 +1001,15 @@ message Evm {
     string paymaster_and_data = 10;
     string signature = 11;
   }
+}
+
+// Request message for SimulateTask
+message SimulateTaskReq {
+  // Complete task definition for simulation (no need to save to storage first)
+  TaskTrigger trigger = 1; // The trigger configuration
+  repeated TaskNode nodes = 2; // All workflow nodes
+  repeated TaskEdge edges = 3; // All edges connecting the nodes
+  TriggerType trigger_type = 4; // Type of trigger to simulate using the TriggerType enum
+  map<string, google.protobuf.Value> trigger_config = 5; // Configuration for the trigger simulation
+  map<string, google.protobuf.Value> input_variables = 6; // Input variables for the simulation
 }
