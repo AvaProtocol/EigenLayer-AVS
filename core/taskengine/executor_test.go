@@ -107,24 +107,31 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 		t.Errorf("Expect no error but got: %s", execution.Error)
 	}
 
-	if len(execution.Steps) != 2 {
-		t.Errorf("Expect evaluate 2 steps only but got: %d", len(execution.Steps))
+	if len(execution.Steps) != 3 {
+		t.Errorf("Expect evaluate 3 steps (trigger + 2 nodes) but got: %d", len(execution.Steps))
 		return
 	}
 
-	if execution.Steps[0].Id != "branch1" {
-		t.Errorf("step id doesn't match, expect branch1.a1 but got: %s", execution.Steps[0].Id)
+	// Check trigger step at index 0
+	if execution.Steps[0].Id != "triggertest" {
+		t.Errorf("step id doesn't match, expect triggertest but got: %s", execution.Steps[0].Id)
 	}
 
-	if execution.Steps[0].GetBranch().ConditionId != "branch1.a1" {
-		t.Errorf("expect branch output data is `branch1.a1` but got %s", execution.Steps[0].OutputData)
+	// Check branch1 step at index 1
+	if execution.Steps[1].Id != "branch1" {
+		t.Errorf("step id doesn't match, expect branch1 but got: %s", execution.Steps[1].Id)
 	}
 
-	if execution.Steps[1].Id != "notification1" {
-		t.Errorf("step id doesn't match, expect notification1 but got: %s", execution.Steps[1].Id)
+	if execution.Steps[1].GetBranch().ConditionId != "branch1.a1" {
+		t.Errorf("expect branch output data is `branch1.a1` but got %s", execution.Steps[1].OutputData)
 	}
 
-	outputData := gow.ValueToMap(execution.Steps[1].GetRestApi().Data)
+	// Check notification1 step at index 2
+	if execution.Steps[2].Id != "notification1" {
+		t.Errorf("step id doesn't match, expect notification1 but got: %s", execution.Steps[2].Id)
+	}
+
+	outputData := gow.ValueToMap(execution.Steps[2].GetRestApi().Data)
 	bodyData := outputData["body"].(map[string]interface{})
 	if bodyData["message"].(string) != "I'm hit" {
 		t.Errorf("expect message to be 'I'm hit' but got %s", bodyData["message"])
@@ -212,16 +219,18 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 		t.Errorf("Expect failure status but got success")
 	}
 
-	if len(execution.Steps) != 1 {
-		t.Errorf("expect a single step but got: %d", len(execution.Steps))
+	if len(execution.Steps) != 2 {
+		t.Errorf("expect 2 steps (trigger + node) but got: %d", len(execution.Steps))
 	}
 
-	if execution.Steps[0].Id != "branch1" {
-		t.Errorf("expect evaluate branch node but got: %s", execution.Steps[0].Id)
+	// Check trigger step at index 0
+	if execution.Steps[0].Id != "triggertest" {
+		t.Errorf("expect trigger step but got: %s", execution.Steps[0].Id)
 	}
 
-	if execution.Steps[0].GetBranch() != nil {
-		t.Errorf("expect evaluate branch output data empty but got: %s", execution.Steps[0].OutputData)
+	// Check branch1 step at index 1
+	if execution.Steps[1].Id != "branch1" {
+		t.Errorf("expect evaluate branch node but got: %s", execution.Steps[1].Id)
 	}
 }
 
@@ -304,7 +313,6 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 		ExecutionID:   "exec123",
 	})
 
-	// HTTP error status codes should not cause execution errors in the current design
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -313,24 +321,32 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 		t.Errorf("Expected success status but got failure: %s", execution.Error)
 	}
 
-	if len(execution.Steps) != 2 {
-		t.Errorf("Expect evaluate 2 steps but got: %d", len(execution.Steps))
+	if len(execution.Steps) != 3 {
+		t.Errorf("Expect evaluate 3 steps (trigger + 2 nodes) but got: %d", len(execution.Steps))
 	}
 
-	if execution.Steps[0].Id != "branch1" {
-		t.Errorf("step id doesn't match, expect branch1 but got: %s", execution.Steps[0].Id)
+	// Check trigger step at index 0
+	if execution.Steps[0].Id != "triggertest" {
+		t.Errorf("step id doesn't match, expect triggertest but got: %s", execution.Steps[0].Id)
 	}
-	if execution.Steps[1].Id != "rest1" {
-		t.Errorf("step id doesn't match, expect rest1 but got: %s", execution.Steps[1].Id)
+
+	// Check branch1 step at index 1
+	if execution.Steps[1].Id != "branch1" {
+		t.Errorf("step id doesn't match, expect branch1 but got: %s", execution.Steps[1].Id)
+	}
+
+	// Check rest1 step at index 2
+	if execution.Steps[2].Id != "rest1" {
+		t.Errorf("step id doesn't match, expect rest1 but got: %s", execution.Steps[2].Id)
 	}
 
 	// Verify that the REST API step captured the 503 status code
-	if !execution.Steps[1].Success {
-		t.Errorf("REST API step should succeed even with 503 status, but got failure: %s", execution.Steps[1].Error)
+	if !execution.Steps[2].Success {
+		t.Errorf("REST API step should succeed even with 503 status, but got failure: %s", execution.Steps[2].Error)
 	}
 
 	// The 503 status code should be available in the step's output data for workflow logic to handle
-	if execution.Steps[1].OutputData == nil {
+	if execution.Steps[2].OutputData == nil {
 		t.Error("Expected REST API step to have output data")
 	}
 }
@@ -596,16 +612,22 @@ func TestExecutorRunTaskWithBlockTriggerOutputData(t *testing.T) {
 	}
 
 	// Verify execution steps
-	if len(execution.Steps) != 1 {
-		t.Errorf("expect 1 step but got: %d", len(execution.Steps))
+	if len(execution.Steps) != 2 {
+		t.Errorf("expect 2 steps (trigger + node) but got: %d", len(execution.Steps))
 	}
 
-	if execution.Steps[0].Id != "eth_transfer_1" {
-		t.Errorf("expect step NodeId is eth_transfer_1 but got: %s", execution.Steps[0].Id)
+	// Check trigger step at index 0
+	if execution.Steps[0].Id != "block_trigger" {
+		t.Errorf("expect trigger step ID is block_trigger but got: %s", execution.Steps[0].Id)
 	}
 
-	if !execution.Steps[0].Success {
-		t.Errorf("expect step to succeed but got failure: %s", execution.Steps[0].Error)
+	// Check eth_transfer_1 step at index 1
+	if execution.Steps[1].Id != "eth_transfer_1" {
+		t.Errorf("expect step NodeId is eth_transfer_1 but got: %s", execution.Steps[1].Id)
+	}
+
+	if !execution.Steps[1].Success {
+		t.Errorf("expect step to succeed but got failure: %s", execution.Steps[1].Error)
 	}
 }
 

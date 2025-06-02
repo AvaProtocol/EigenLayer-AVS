@@ -112,8 +112,23 @@ func TestETHTransferTaskIntegration(t *testing.T) {
 		t.Fatal("Expected at least one execution step")
 	}
 
-	// Check the ETH transfer step
-	step := execution.Steps[0]
+	// With unified API, we expect 2 steps: trigger step + node step
+	if len(execution.Steps) != 2 {
+		t.Fatalf("Expected 2 execution steps (trigger + node), got %d", len(execution.Steps))
+	}
+
+	// Check the trigger step (index 0)
+	triggerStep := execution.Steps[0]
+	if triggerStep.Id != "manual_trigger" {
+		t.Errorf("Expected trigger step ID 'manual_trigger', got '%s'", triggerStep.Id)
+	}
+
+	if !triggerStep.Success {
+		t.Errorf("Expected trigger step to succeed, got success=%v, error=%s", triggerStep.Success, triggerStep.Error)
+	}
+
+	// Check the ETH transfer step (index 1)
+	step := execution.Steps[1]
 	if step.Id != "eth_transfer_1" {
 		t.Errorf("Expected step NodeId 'eth_transfer_1', got '%s'", step.Id)
 	}
