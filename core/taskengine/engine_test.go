@@ -350,17 +350,17 @@ func TestGetExecution(t *testing.T) {
 		return
 	}
 
-	// Regular workflow executions contain only node steps, not trigger steps
-	if len(execution.Steps) != 1 {
-		t.Errorf("Expected 1 step (node only), but got %d", len(execution.Steps))
+	// Regular workflow executions now contain both trigger and node steps
+	if len(execution.Steps) != 2 {
+		t.Errorf("Expected 2 steps (trigger + node), but got %d", len(execution.Steps))
 		return
 	}
 
-	if execution.Steps[0].Id != "ping1" {
-		t.Errorf("wrong node id in execution log, expected ping1 but got %s", execution.Steps[0].Id)
+	if execution.Steps[1].Id != "ping1" {
+		t.Errorf("wrong node id in execution log, expected ping1 but got %s", execution.Steps[1].Id)
 	}
 
-	step := execution.Steps[0]
+	step := execution.Steps[1]
 	if step.GetRestApi() == nil {
 		t.Errorf("RestApi data is nil")
 		return
@@ -538,9 +538,9 @@ func TestTriggerSync(t *testing.T) {
 		return
 	}
 
-	// Regular workflow executions contain only node steps, not trigger steps
+	// Regular workflow executions now contain both trigger and node steps
 	// The first step should be the actual workflow node (e.g., REST API call)
-	firstStep := execution.Steps[0]
+	firstStep := execution.Steps[1]
 
 	if execution.Id != resultTrigger.ExecutionId {
 		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
@@ -621,11 +621,11 @@ func TestTriggerAsync(t *testing.T) {
 		return
 	}
 
-	if execution.Steps[0].Id != "ping1" {
-		t.Errorf("wrong node id in execution log, expected ping1 but got %s", execution.Steps[0].Id)
+	if execution.Steps[1].Id != "ping1" {
+		t.Errorf("wrong node id in execution log, expected ping1 but got %s", execution.Steps[1].Id)
 	}
 
-	step := execution.Steps[0]
+	step := execution.Steps[1]
 	if step.GetRestApi() == nil {
 		t.Errorf("RestApi data is nil")
 		return

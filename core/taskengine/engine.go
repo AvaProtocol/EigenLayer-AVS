@@ -869,9 +869,24 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Step 1: Simulate the trigger to get trigger output data
 	// Extract trigger type and config from the TaskTrigger
-	triggerTypeStr := TriggerTypeToString(trigger.GetType())
+	n.logger.Info("SimulateTask received trigger", "trigger_type_raw", trigger.GetType(), "trigger_type_int", int(trigger.GetType()), "trigger_id", trigger.GetId(), "trigger_name", trigger.GetName())
+
+	// Debug: Check what oneof field is set
+	n.logger.Info("SimulateTask trigger oneof debug",
+		"manual", trigger.GetManual(),
+		"fixed_time", trigger.GetFixedTime() != nil,
+		"cron", trigger.GetCron() != nil,
+		"block", trigger.GetBlock() != nil,
+		"event", trigger.GetEvent() != nil,
+		"oneof_type", fmt.Sprintf("%T", trigger.GetTriggerType()))
+
+	// Use TaskTriggerToTriggerType to determine type from oneof field instead of just GetType()
+	triggerType := TaskTriggerToTriggerType(trigger)
+	n.logger.Info("SimulateTask trigger type conversion", "from_oneof", triggerType, "from_explicit", trigger.GetType())
+
+	triggerTypeStr := TriggerTypeToString(triggerType)
 	if triggerTypeStr == "" {
-		return nil, grpcstatus.Errorf(codes.InvalidArgument, "unsupported trigger type: %v", trigger.GetType())
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, "unsupported trigger type: %v (oneof type: %T)", trigger.GetType(), trigger.GetTriggerType())
 	}
 
 	// Extract trigger config using the shared utility function

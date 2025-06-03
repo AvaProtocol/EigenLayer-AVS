@@ -75,12 +75,12 @@ func TestExecutorRunTaskWithNilReason(t *testing.T) {
 		t.Errorf("Expected success status but got failure")
 	}
 
-	if len(execution.Steps) != 1 {
-		t.Errorf("Expected 1 step (node only) but got: %d", len(execution.Steps))
+	if len(execution.Steps) != 2 {
+		t.Errorf("Expected 2 steps (trigger + node) but got: %d", len(execution.Steps))
 	}
 
 	// Check node step at index 0 (no trigger step in regular executions)
-	if execution.Steps[0].Id != "rest1" {
-		t.Errorf("Expected step ID to be rest1 but got: %s", execution.Steps[0].Id)
+	if execution.Steps[1].Id != "rest1" {
+		t.Errorf("Expected step ID to be rest1 but got: %s", execution.Steps[1].Id)
 	}
 }
