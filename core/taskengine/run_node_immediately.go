@@ -413,6 +413,54 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 			"logIndex":         uint32(mostRecentEvent.Index),
 		}
 
+		// Enrich the transfer log with token metadata if TokenEnrichmentService is available
+		if n.tokenEnrichmentService != nil {
+			// Create protobuf structures for enrichment
+			evmLogProto := &avsproto.Evm_Log{
+				Address: mostRecentEvent.Address.Hex(),
+			}
+
+			transferLogProto := &avsproto.EventTrigger_TransferLogOutput{
+				TransactionHash:  mostRecentEvent.TxHash.Hex(),
+				Address:          mostRecentEvent.Address.Hex(),
+				BlockNumber:      mostRecentEvent.BlockNumber,
+				BlockTimestamp:   blockTimestamp,
+				FromAddress:      fromAddr,
+				ToAddress:        toAddr,
+				Value:            value,
+				TransactionIndex: uint32(mostRecentEvent.TxIndex),
+				LogIndex:         uint32(mostRecentEvent.Index),
+			}
+
+			// Enrich with token metadata
+			if enrichErr := n.tokenEnrichmentService.EnrichTransferLog(evmLogProto, transferLogProto); enrichErr == nil {
+				// Update the map with enriched data
+				transferLog["tokenName"] = transferLogProto.TokenName
+				transferLog["tokenSymbol"] = transferLogProto.TokenSymbol
+				transferLog["tokenDecimals"] = transferLogProto.TokenDecimals
+				transferLog["valueFormatted"] = transferLogProto.ValueFormatted
+
+				if n.logger != nil {
+					n.logger.Info("EventTrigger: Successfully enriched transfer log",
+						"contract", mostRecentEvent.Address.Hex(),
+						"tokenName", transferLogProto.TokenName,
+						"tokenSymbol", transferLogProto.TokenSymbol,
+						"tokenDecimals", transferLogProto.TokenDecimals,
+						"valueFormatted", transferLogProto.ValueFormatted)
+				}
+			} else {
+				if n.logger != nil {
+					n.logger.Warn("EventTrigger: Failed to enrich transfer log",
+						"contract", mostRecentEvent.Address.Hex(),
+						"error", enrichErr)
+				}
+			}
+		} else {
+			if n.logger != nil {
+				n.logger.Debug("EventTrigger: TokenEnrichmentService not available, transfer log not enriched")
+			}
+		}
+
 		result["transfer_log"] = transferLog
 
 		if n.logger != nil {
