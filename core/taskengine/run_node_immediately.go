@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -130,19 +134,343 @@ func (n *Engine) runCronTriggerImmediately(triggerConfig map[string]interface{},
 	return result, nil
 }
 
-// runEventTriggerImmediately simulates an event trigger execution
+// runEventTriggerImmediately makes an actual call to Ethereum RPC to fetch event data
+// Unlike regular workflow event triggers that listen to real-time events, this searches
+// for the most recent historical event matching the criteria without block limitations
+//
+// Enhanced syntax support:
+// - Basic: "0xddf252...signature"
+// - Single contract: "0xddf252...signature&&0xcontractAddress"
+// - Multiple contracts: "0xddf252...signature&&contracts=[0xaddr1,0xaddr2]"
+// - From address filter: "0xddf252...signature&&from=0xaddress"
+// - To address filter: "0xddf252...signature&&to=0xaddress"
+// - Combined: "0xddf252...signature&&contracts=[0xaddr1,0xaddr2]&&from=0xaddress"
 func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
-	// For immediate execution, we can't actually wait for an event, so return a simulation
-	result := map[string]interface{}{
-		"simulated": true,
-		"message":   "EventTrigger cannot be executed immediately - this is a simulation",
-		"timestamp": uint64(time.Now().Unix()),
+	// Ensure RPC connection is available
+	if rpcConn == nil {
+		return nil, fmt.Errorf("RPC connection not available for EventTrigger execution")
+	}
+
+	// Parse the enhanced expression format
+	var expression string
+	var topicHash string
+	var contractAddresses []string
+	var fromAddress, toAddress string
+
+	if expr, ok := triggerConfig["expression"].(string); ok {
+		expression = expr
+		topicHash, contractAddresses, fromAddress, toAddress = parseEnhancedExpression(expression)
+	}
+
+	// If no expression provided, use default Transfer event signature
+	if topicHash == "" {
+		topicHash = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" // Transfer event
 	}
 
 	if n.logger != nil {
-		n.logger.Info("EventTrigger simulated for immediate execution")
+		n.logger.Info("EventTrigger: Making enhanced RPC call to fetch event data",
+			"expression", expression,
+			"topicHash", topicHash,
+			"contractAddresses", contractAddresses,
+			"fromAddress", fromAddress,
+			"toAddress", toAddress)
 	}
+
+	// Get the latest block number
+	currentBlock, err := rpcConn.BlockNumber(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current block number: %w", err)
+	}
+
+	// If we need to search for both FROM and TO, we'll need separate queries
+	var allEvents []types.Log
+	var totalSearched uint64
+
+	// Search strategy: Start with recent blocks, then expand backwards
+	searchRanges := []uint64{1000, 5000, 20000, 50000, 100000}
+
+	// Function to search with specific topic configuration
+	searchWithTopics := func(topics [][]common.Hash) ([]types.Log, uint64, error) {
+		var events []types.Log
+		var searched uint64
+
+		for _, searchRange := range searchRanges {
+			var fromBlock uint64
+			if currentBlock < searchRange {
+				fromBlock = 0
+			} else {
+				fromBlock = currentBlock - searchRange
+			}
+
+			// Prepare filter query
+			query := ethereum.FilterQuery{
+				FromBlock: big.NewInt(int64(fromBlock)),
+				ToBlock:   big.NewInt(int64(currentBlock)),
+				Topics:    topics,
+			}
+
+			// Add contract address filters if specified
+			if len(contractAddresses) > 0 {
+				addresses := make([]common.Address, len(contractAddresses))
+				for i, addr := range contractAddresses {
+					addresses[i] = common.HexToAddress(addr)
+				}
+				query.Addresses = addresses
+			}
+
+			if n.logger != nil {
+				n.logger.Info("EventTrigger: Enhanced search",
+					"fromBlock", fromBlock,
+					"toBlock", currentBlock,
+					"contractCount", len(contractAddresses),
+					"topicsCount", len(topics))
+			}
+
+			// Fetch logs from Ethereum
+			logs, err := rpcConn.FilterLogs(context.Background(), query)
+			if err != nil {
+				if n.logger != nil {
+					n.logger.Warn("EventTrigger: Failed to fetch logs, continuing search",
+						"fromBlock", fromBlock,
+						"toBlock", currentBlock,
+						"error", err)
+				}
+				continue
+			}
+
+			searched += (currentBlock - fromBlock)
+			events = append(events, logs...)
+
+			// If events found, we can stop searching this range
+			if len(logs) > 0 {
+				break
+			}
+
+			// If we've searched back to genesis, stop
+			if fromBlock == 0 {
+				break
+			}
+		}
+
+		return events, searched, nil
+	}
+
+	// Build topics for searching
+	baseTopics := [][]common.Hash{{common.HexToHash(topicHash)}}
+
+	if fromAddress != "" && toAddress != "" {
+		// Search for transfers both FROM and TO the address (two separate queries)
+
+		// Query 1: FROM the address
+		fromTopics := append(baseTopics, []common.Hash{common.HexToHash(fromAddress)}, []common.Hash{})
+		fromEvents, fromSearched, err := searchWithTopics(fromTopics)
+		if err != nil {
+			return nil, fmt.Errorf("failed to search FROM events: %w", err)
+		}
+
+		// Query 2: TO the address
+		toTopics := append(baseTopics, []common.Hash{}, []common.Hash{common.HexToHash(toAddress)})
+		toEvents, toSearched, err := searchWithTopics(toTopics)
+		if err != nil {
+			return nil, fmt.Errorf("failed to search TO events: %w", err)
+		}
+
+		allEvents = append(fromEvents, toEvents...)
+		totalSearched = fromSearched + toSearched
+
+	} else if fromAddress != "" {
+		// Search only FROM the address
+		fromTopics := append(baseTopics, []common.Hash{common.HexToHash(fromAddress)}, []common.Hash{})
+		allEvents, totalSearched, err = searchWithTopics(fromTopics)
+		if err != nil {
+			return nil, fmt.Errorf("failed to search FROM events: %w", err)
+		}
+
+	} else if toAddress != "" {
+		// Search only TO the address
+		toTopics := append(baseTopics, []common.Hash{}, []common.Hash{common.HexToHash(toAddress)})
+		allEvents, totalSearched, err = searchWithTopics(toTopics)
+		if err != nil {
+			return nil, fmt.Errorf("failed to search TO events: %w", err)
+		}
+
+	} else {
+		// Search without address filtering (any from/to)
+		allEvents, totalSearched, err = searchWithTopics(baseTopics)
+		if err != nil {
+			return nil, fmt.Errorf("failed to search events: %w", err)
+		}
+	}
+
+	if n.logger != nil {
+		n.logger.Info("EventTrigger: Enhanced search complete",
+			"totalEvents", len(allEvents),
+			"totalSearched", totalSearched)
+	}
+
+	// If no events found after comprehensive search
+	if len(allEvents) == 0 {
+		if n.logger != nil {
+			n.logger.Info("EventTrigger: No events found after enhanced search",
+				"totalBlocksSearched", totalSearched,
+				"topicHash", topicHash,
+				"contractAddresses", contractAddresses,
+				"fromAddress", fromAddress,
+				"toAddress", toAddress)
+		}
+
+		return map[string]interface{}{
+			"found":             false,
+			"message":           fmt.Sprintf("No events found matching criteria after searching %d blocks", totalSearched),
+			"topicHash":         topicHash,
+			"contractAddresses": contractAddresses,
+			"fromAddress":       fromAddress,
+			"toAddress":         toAddress,
+			"totalSearched":     totalSearched,
+			"expression":        expression,
+		}, nil
+	}
+
+	// Find the most recent event (highest block number + log index)
+	mostRecentEvent := &allEvents[0]
+	for i := 1; i < len(allEvents); i++ {
+		current := &allEvents[i]
+		if current.BlockNumber > mostRecentEvent.BlockNumber ||
+			(current.BlockNumber == mostRecentEvent.BlockNumber && current.Index > mostRecentEvent.Index) {
+			mostRecentEvent = current
+		}
+	}
+
+	// Build the result with proper EventTrigger.Output structure
+	topics := make([]string, len(mostRecentEvent.Topics))
+	for i, topic := range mostRecentEvent.Topics {
+		topics[i] = topic.Hex()
+	}
+
+	// Create the basic evm_log structure (always present)
+	evmLog := map[string]interface{}{
+		"address":          mostRecentEvent.Address.Hex(),
+		"topics":           topics,
+		"data":             "0x" + common.Bytes2Hex(mostRecentEvent.Data),
+		"blockNumber":      mostRecentEvent.BlockNumber,
+		"transactionHash":  mostRecentEvent.TxHash.Hex(),
+		"transactionIndex": uint32(mostRecentEvent.TxIndex),
+		"blockHash":        mostRecentEvent.BlockHash.Hex(),
+		"index":            uint32(mostRecentEvent.Index),
+		"removed":          mostRecentEvent.Removed,
+	}
+
+	result := map[string]interface{}{
+		"found":             true,
+		"evm_log":           evmLog,
+		"topicHash":         topicHash,
+		"contractAddresses": contractAddresses,
+		"fromAddress":       fromAddress,
+		"toAddress":         toAddress,
+		"totalSearched":     totalSearched,
+		"expression":        expression,
+		"totalEvents":       len(allEvents),
+	}
+
+	// If this is a Transfer event, add enriched transfer_log data
+	isTransferEvent := topicHash == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+	if isTransferEvent && len(topics) >= 3 {
+		// Get block timestamp for transfer_log
+		header, err := rpcConn.HeaderByNumber(context.Background(), big.NewInt(int64(mostRecentEvent.BlockNumber)))
+		var blockTimestamp uint64
+		if err == nil {
+			blockTimestamp = header.Time * 1000 // Convert to milliseconds
+		}
+
+		// Extract from and to addresses from topics
+		fromAddr := common.HexToAddress(topics[1]).Hex()
+		toAddr := common.HexToAddress(topics[2]).Hex()
+		value := "0x" + common.Bytes2Hex(mostRecentEvent.Data)
+
+		transferLog := map[string]interface{}{
+			"tokenName":        "",
+			"tokenSymbol":      "",
+			"tokenDecimals":    uint32(0),
+			"transactionHash":  mostRecentEvent.TxHash.Hex(),
+			"address":          mostRecentEvent.Address.Hex(),
+			"blockNumber":      mostRecentEvent.BlockNumber,
+			"blockTimestamp":   blockTimestamp,
+			"fromAddress":      fromAddr,
+			"toAddress":        toAddr,
+			"value":            value,
+			"valueFormatted":   "",
+			"transactionIndex": uint32(mostRecentEvent.TxIndex),
+			"logIndex":         uint32(mostRecentEvent.Index),
+		}
+
+		result["transfer_log"] = transferLog
+
+		if n.logger != nil {
+			n.logger.Info("EventTrigger: Enhanced Transfer event found",
+				"blockNumber", mostRecentEvent.BlockNumber,
+				"txHash", mostRecentEvent.TxHash.Hex(),
+				"from", fromAddr,
+				"to", toAddr,
+				"value", value,
+				"contract", mostRecentEvent.Address.Hex())
+		}
+	}
+
+	if n.logger != nil {
+		n.logger.Info("EventTrigger: Successfully found most recent event with enhanced search",
+			"blockNumber", mostRecentEvent.BlockNumber,
+			"txHash", mostRecentEvent.TxHash.Hex(),
+			"address", mostRecentEvent.Address.Hex(),
+			"totalEvents", len(allEvents),
+			"totalSearched", totalSearched)
+	}
+
 	return result, nil
+}
+
+// parseEnhancedExpression parses the enhanced expression format
+// Examples:
+// - "0xddf252...signature" -> (signature, [], "", "")
+// - "0xddf252...signature&&0xaddr" -> (signature, [addr], "", "")
+// - "0xddf252...signature&&contracts=[0xaddr1,0xaddr2]" -> (signature, [addr1,addr2], "", "")
+// - "0xddf252...signature&&from=0xaddr" -> (signature, [], addr, "")
+// - "0xddf252...signature&&to=0xaddr" -> (signature, [], "", addr)
+// - "0xddf252...signature&&contracts=[0xaddr1,0xaddr2]&&from=0xaddr" -> (signature, [addr1,addr2], addr, "")
+func parseEnhancedExpression(expression string) (topicHash string, contractAddresses []string, fromAddress, toAddress string) {
+	parts := strings.Split(expression, "&&")
+
+	// First part is always the topic hash
+	if len(parts) > 0 {
+		topicHash = strings.TrimSpace(parts[0])
+	}
+
+	// Parse additional parameters
+	for i := 1; i < len(parts); i++ {
+		part := strings.TrimSpace(parts[i])
+
+		if strings.HasPrefix(part, "contracts=") {
+			// Parse contracts array: contracts=[0xaddr1,0xaddr2]
+			contractsStr := strings.TrimPrefix(part, "contracts=")
+			if strings.HasPrefix(contractsStr, "[") && strings.HasSuffix(contractsStr, "]") {
+				contractsStr = strings.Trim(contractsStr, "[]")
+				if contractsStr != "" {
+					contractAddresses = strings.Split(contractsStr, ",")
+					for j := range contractAddresses {
+						contractAddresses[j] = strings.TrimSpace(contractAddresses[j])
+					}
+				}
+			}
+		} else if strings.HasPrefix(part, "from=") {
+			fromAddress = strings.TrimSpace(strings.TrimPrefix(part, "from="))
+		} else if strings.HasPrefix(part, "to=") {
+			toAddress = strings.TrimSpace(strings.TrimPrefix(part, "to="))
+		} else {
+			// Legacy format: simple contract address
+			contractAddresses = []string{part}
+		}
+	}
+
+	return topicHash, contractAddresses, fromAddress, toAddress
 }
 
 // runManualTriggerImmediately executes a manual trigger immediately
@@ -768,11 +1096,102 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		}
 	case NodeTypeEventTrigger:
 		if result != nil {
-			// Convert result to EventTrigger output
+			// Convert result to EventTrigger output with proper evm_log and transfer_log structures
 			eventOutput := &avsproto.EventTrigger_Output{}
-			// EventTrigger simulation doesn't have specific fields, but we can set basic info
+
+			// Check if we found an event
+			if found, ok := result["found"].(bool); ok && found {
+				// Extract evm_log data
+				if evmLogData, ok := result["evm_log"].(map[string]interface{}); ok {
+					evmLog := &avsproto.Evm_Log{}
+
+					if address, ok := evmLogData["address"].(string); ok {
+						evmLog.Address = address
+					}
+					if topics, ok := evmLogData["topics"].([]string); ok {
+						evmLog.Topics = topics
+					}
+					if data, ok := evmLogData["data"].(string); ok {
+						evmLog.Data = data
+					}
+					if blockNumber, ok := evmLogData["blockNumber"].(uint64); ok {
+						evmLog.BlockNumber = blockNumber
+					}
+					if transactionHash, ok := evmLogData["transactionHash"].(string); ok {
+						evmLog.TransactionHash = transactionHash
+					}
+					if transactionIndex, ok := evmLogData["transactionIndex"].(uint32); ok {
+						evmLog.TransactionIndex = transactionIndex
+					}
+					if blockHash, ok := evmLogData["blockHash"].(string); ok {
+						evmLog.BlockHash = blockHash
+					}
+					if index, ok := evmLogData["index"].(uint32); ok {
+						evmLog.Index = index
+					}
+					if removed, ok := evmLogData["removed"].(bool); ok {
+						evmLog.Removed = removed
+					}
+
+					eventOutput.EvmLog = evmLog
+				}
+
+				// Extract transfer_log data if present (for Transfer events)
+				if transferLogData, ok := result["transfer_log"].(map[string]interface{}); ok {
+					transferLog := &avsproto.EventTrigger_TransferLogOutput{}
+
+					if tokenName, ok := transferLogData["tokenName"].(string); ok {
+						transferLog.TokenName = tokenName
+					}
+					if tokenSymbol, ok := transferLogData["tokenSymbol"].(string); ok {
+						transferLog.TokenSymbol = tokenSymbol
+					}
+					if tokenDecimals, ok := transferLogData["tokenDecimals"].(uint32); ok {
+						transferLog.TokenDecimals = tokenDecimals
+					}
+					if transactionHash, ok := transferLogData["transactionHash"].(string); ok {
+						transferLog.TransactionHash = transactionHash
+					}
+					if address, ok := transferLogData["address"].(string); ok {
+						transferLog.Address = address
+					}
+					if blockNumber, ok := transferLogData["blockNumber"].(uint64); ok {
+						transferLog.BlockNumber = blockNumber
+					}
+					if blockTimestamp, ok := transferLogData["blockTimestamp"].(uint64); ok {
+						transferLog.BlockTimestamp = blockTimestamp
+					}
+					if fromAddress, ok := transferLogData["fromAddress"].(string); ok {
+						transferLog.FromAddress = fromAddress
+					}
+					if toAddress, ok := transferLogData["toAddress"].(string); ok {
+						transferLog.ToAddress = toAddress
+					}
+					if value, ok := transferLogData["value"].(string); ok {
+						transferLog.Value = value
+					}
+					if valueFormatted, ok := transferLogData["valueFormatted"].(string); ok {
+						transferLog.ValueFormatted = valueFormatted
+					}
+					if transactionIndex, ok := transferLogData["transactionIndex"].(uint32); ok {
+						transferLog.TransactionIndex = transactionIndex
+					}
+					if logIndex, ok := transferLogData["logIndex"].(uint32); ok {
+						transferLog.LogIndex = logIndex
+					}
+
+					eventOutput.TransferLog = transferLog
+				}
+			}
+			// If no event found, eventOutput will have nil evm_log and transfer_log which is correct
+
 			resp.OutputData = &avsproto.RunTriggerResp_EventTrigger{
 				EventTrigger: eventOutput,
+			}
+		} else {
+			// If result is nil, create empty EventTrigger output
+			resp.OutputData = &avsproto.RunTriggerResp_EventTrigger{
+				EventTrigger: &avsproto.EventTrigger_Output{},
 			}
 		}
 	case NodeTypeManualTrigger:
