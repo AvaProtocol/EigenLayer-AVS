@@ -26,6 +26,7 @@ type TokenMetadata struct {
 	Name     string `json:"name"`
 	Symbol   string `json:"symbol"`
 	Decimals uint32 `json:"decimals"`
+	Source   string `json:"source"` // "whitelist" or "rpc"
 }
 
 // TokenEnrichmentService handles token metadata lookup and enrichment
@@ -168,6 +169,7 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 			Name:     token.Name,
 			Symbol:   token.Symbol,
 			Decimals: token.Decimals,
+			Source:   "whitelist",
 		}
 	}
 	t.cacheMux.Unlock()
@@ -186,7 +188,7 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 func (t *TokenEnrichmentService) GetTokenMetadata(contractAddress string) (*TokenMetadata, error) {
 	normalizedAddr := strings.ToLower(contractAddress)
 
-	// Check cache first
+	// Check cache first (this includes whitelist data)
 	t.cacheMux.RLock()
 	if cached, exists := t.cache[normalizedAddr]; exists {
 		t.cacheMux.RUnlock()
@@ -194,9 +196,11 @@ func (t *TokenEnrichmentService) GetTokenMetadata(contractAddress string) (*Toke
 	}
 	t.cacheMux.RUnlock()
 
-	// Not in cache, try RPC calls
+	// Not in cache/whitelist, try RPC calls if available
 	if t.rpcClient == nil {
-		return nil, fmt.Errorf("no RPC client available and token not in whitelist: %s", contractAddress)
+		// No RPC client available and token not in whitelist
+		// Return nil to indicate not found rather than an error
+		return nil, nil
 	}
 
 	metadata, err := t.fetchTokenMetadataFromRPC(contractAddress)
@@ -229,6 +233,7 @@ func (t *TokenEnrichmentService) fetchTokenMetadataFromRPC(contractAddress strin
 
 	metadata := &TokenMetadata{
 		Address: strings.ToLower(contractAddress),
+		Source:  "rpc",
 	}
 
 	// Call name() method
