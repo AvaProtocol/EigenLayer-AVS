@@ -14,32 +14,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// NewGojaVM creates a new Goja runtime and applies standard configurations.
-func NewGojaVM() *goja.Runtime {
-	vm := goja.New()
-	macros.ConfigureGojaRuntime(vm)
-	return vm
-}
-
-// NewGojaVMWithModules creates a new Goja runtime with module support.
-func NewGojaVMWithModules() (*goja.Runtime, *modules.Registry, error) {
-	vm := goja.New()
-	macros.ConfigureGojaRuntime(vm)
-
-	registry := modules.NewRegistry()
-
-	builtinLoader := modules.NewBuiltinLoader()
-	if err := builtinLoader.RegisterBuiltinLibraries(); err != nil {
-		return nil, nil, err
-	}
-
-	registry.RegisterLoader("lodash", builtinLoader)
-	registry.RegisterLoader("dayjs", builtinLoader)
-	registry.RegisterLoader("uuid", builtinLoader)
-
-	return vm, registry, nil
-}
-
 // Metadata holds token and block metadata
 type Metadata struct {
 	Name           string
@@ -147,4 +121,30 @@ func ToDecimal(ivalue interface{}, decimals int) decimal.Decimal {
 	result := num.Div(mul)
 
 	return result
+}
+
+// NewGojaVM creates a new Goja runtime and applies standard configurations.
+func NewGojaVM() *goja.Runtime {
+	vm := goja.New()
+	macros.ConfigureGojaRuntime(vm)
+	return vm
+}
+
+// NewGojaVMWithModules creates a new Goja runtime with module support.
+func NewGojaVMWithModules() (*goja.Runtime, *modules.Registry, error) {
+	vm := goja.New()
+	macros.ConfigureGojaRuntime(vm)
+
+	registry := modules.NewRegistry()
+
+	builtinLoader := modules.NewBuiltinLoader()
+	if err := builtinLoader.RegisterBuiltinLibraries(); err != nil {
+		return nil, nil, err
+	}
+
+	registry.RegisterLoader("lodash", builtinLoader)
+	registry.RegisterLoader("dayjs", builtinLoader)
+	registry.RegisterLoader("uuid", builtinLoader)
+
+	return vm, registry, nil
 }
