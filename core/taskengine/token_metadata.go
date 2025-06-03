@@ -69,8 +69,8 @@ const (
 
 // Chain ID constants
 const (
-	ChainIDEthereum = 1
-	ChainIDSepolia  = 11155111
+	ChainIDEthereum uint64 = 1
+	ChainIDSepolia  uint64 = 11155111
 )
 
 // NewTokenEnrichmentService creates a new token enrichment service
