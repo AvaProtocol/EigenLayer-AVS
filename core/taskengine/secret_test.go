@@ -439,7 +439,7 @@ func TestSecretFieldControlPerformance(t *testing.T) {
 	})
 }
 
-// Legacy Test (preserved from original secret_test.go)
+// TestLoadSecretForTask tests the LoadSecretForTask function
 func TestLoadSecretForTask(t *testing.T) {
 	// Clear any global secrets from other tests
 	SetMacroSecrets(map[string]string{})

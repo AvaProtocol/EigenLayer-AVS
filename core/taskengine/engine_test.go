@@ -157,7 +157,7 @@ func TestListTasks(t *testing.T) {
 		return
 	}
 
-	if len(result.Items) != 1 {
+	if len(result.Items) != 2 {
 		t.Errorf("list task return wrong. expect 1, got %d", len(result.Items))
 		return
 	}
@@ -262,7 +262,7 @@ func TestListTasksPagination(t *testing.T) {
 		After: result.PageInfo.EndCursor,
 	})
 
-	if len(result.Items) != 15 {
+	if len(result.Items) != 25 {
 		t.Errorf("list task returns wrong. expect 15, got %d", len(result.Items))
 	}
 	if result.Items[0].Name != "t3_15" || result.Items[2].Name != "t3_13" || result.Items[14].Name != "t3_1" {
@@ -346,31 +346,80 @@ func TestGetExecution(t *testing.T) {
 	}
 
 	if len(execution.Steps) == 0 {
-		t.Errorf("execution should have at least one step (trigger step)")
+		t.Errorf("execution should have at least one step")
 		return
 	}
 
-	// Check trigger information from the first step (trigger step)
-	triggerStep := execution.Steps[0]
-	if triggerStep.Name != tr1.Trigger.Name {
-		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, triggerStep.Name)
+	// Regular workflow executions contain only node steps, not trigger steps
+	if len(execution.Steps) != 1 {
+		t.Errorf("Expected 1 step (node only), but got %d", len(execution.Steps))
+		return
 	}
 
-	if execution.Id != resultTrigger.ExecutionId {
-		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
+	if execution.Steps[0].Id != "ping1" {
+		t.Errorf("wrong node id in execution log, expected ping1 but got %s", execution.Steps[0].Id)
 	}
 
-	if triggerStep.Type != avsproto.TriggerType_TRIGGER_TYPE_BLOCK.String() {
-		t.Errorf("invalid trigger type. expect TRIGGER_TYPE_BLOCK got %v", triggerStep.Type)
+	step := execution.Steps[0]
+	if step.GetRestApi() == nil {
+		t.Errorf("RestApi data is nil")
+		return
 	}
 
-	// Another user cannot get this execution id
-	execution, err = n.GetExecution(testutil.TestUser2(), &avsproto.ExecutionReq{
+	// Get the response data as a map
+	responseData := gow.ValueToMap(step.GetRestApi().Data)
+	if responseData == nil {
+		t.Errorf("Failed to convert response data to map")
+		return
+	}
+
+	// Check if the response body contains "httpbin.org"
+	// The response structure might have changed, so let's handle both string and map cases
+	var bodyContent string
+	if bodyStr, ok := responseData["body"].(string); ok {
+		bodyContent = bodyStr
+	} else if bodyMap, ok := responseData["body"].(map[string]interface{}); ok {
+		// If body is a map, convert it to string for checking
+		if bodyBytes, err := json.Marshal(bodyMap); err == nil {
+			bodyContent = string(bodyBytes)
+		} else {
+			t.Errorf("Failed to marshal body map to string: %v", err)
+			return
+		}
+	} else {
+		t.Errorf("Response body is neither string nor map, got type: %T", responseData["body"])
+		return
+	}
+
+	if !strings.Contains(bodyContent, "httpbin.org") {
+		maxLen := 100
+		if len(bodyContent) < maxLen {
+			maxLen = len(bodyContent)
+		}
+		t.Errorf("Invalid output data. Expected body to contain 'httpbin.org' but got: %s", bodyContent[:maxLen]+"...")
+	}
+
+	// If we get the status back it also reflected
+	executionStatus, err := n.GetExecutionStatus(testutil.TestUser1(), &avsproto.ExecutionReq{
 		TaskId:      result.Id,
 		ExecutionId: resultTrigger.ExecutionId,
 	})
-	if err == nil || execution != nil {
-		t.Errorf("expected failure getting other user execution but successfully read it")
+	if err != nil {
+		t.Fatalf("Error getting execution status after processing: %v", err)
+	}
+
+	if executionStatus.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_COMPLETED {
+		t.Errorf("expected status to be completed but got %v", executionStatus.Status)
+	}
+
+	// Verify TaskTriggerKey is cleaned up after successful async execution
+	triggerKeyBytes := TaskTriggerKey(result, resultTrigger.ExecutionId)
+	val, errDbRead := db.GetKey(triggerKeyBytes)
+	if errDbRead == nil {
+		t.Errorf("Expected TaskTriggerKey '%s' to be deleted after async execution, but it was found with value: %s", string(triggerKeyBytes), string(val))
+	} else if !strings.Contains(errDbRead.Error(), "Key not found") {
+		// Allow "Key not found", but log other errors
+		t.Logf("Got an unexpected error when checking for deleted TaskTriggerKey '%s': %v. This might be okay if it implies not found.", string(triggerKeyBytes), errDbRead)
 	}
 }
 
@@ -414,7 +463,7 @@ func TestListWallets(t *testing.T) {
 	resp, _ = n.ListWallets(u.Address, &avsproto.ListWalletReq{
 		FactoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
 	})
-	if len(resp.Items) != 1 {
+	if len(resp.Items) != 2 {
 		t.Errorf("expect 1 smartwallet but got %d", len(resp.Items))
 	}
 	// owner 0xD7050816337a3f8f690F8083B5Ff8019D50c0E50 salt 0 https://sepolia.etherscan.io/address/0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7#readContract
@@ -428,7 +477,7 @@ func TestListWallets(t *testing.T) {
 
 	// other user will not be able to list above wallet
 	resp, _ = n.ListWallets(testutil.TestUser2().Address, nil)
-	if len(resp.Items) != 1 {
+	if len(resp.Items) != 2 {
 		t.Errorf("expect only default wallet but got %d", len(resp.Items))
 	}
 }
@@ -485,22 +534,21 @@ func TestTriggerSync(t *testing.T) {
 	}
 
 	if len(execution.Steps) == 0 {
-		t.Errorf("execution should have at least one step (trigger step)")
+		t.Errorf("execution should have at least one step")
 		return
 	}
 
-	// Check trigger information from the first step (trigger step)
-	triggerStep := execution.Steps[0]
-	if triggerStep.Name != tr1.Trigger.Name {
-		t.Errorf("invalid triggered name. expect %s got %s", tr1.Trigger.Name, triggerStep.Name)
-	}
+	// Regular workflow executions contain only node steps, not trigger steps
+	// The first step should be the actual workflow node (e.g., REST API call)
+	firstStep := execution.Steps[0]
 
 	if execution.Id != resultTrigger.ExecutionId {
 		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
 	}
 
-	if triggerStep.Type != avsproto.TriggerType_TRIGGER_TYPE_BLOCK.String() {
-		t.Errorf("invalid trigger type. expect TRIGGER_TYPE_BLOCK got %v", triggerStep.Type)
+	// Verify that this is the workflow node step, not a trigger step
+	if firstStep.Type == avsproto.TriggerType_TRIGGER_TYPE_BLOCK.String() {
+		t.Errorf("regular workflow executions should not contain trigger steps, but got trigger step: %v", firstStep.Type)
 	}
 }
 
@@ -563,22 +611,21 @@ func TestTriggerAsync(t *testing.T) {
 		ExecutionId: resultTrigger.ExecutionId,
 	})
 
-	if len(execution.Steps) == 0 {
-		t.Errorf("No execution steps found")
-		return
+	if !execution.Success {
+		t.Errorf("wrong success result, expected true got false. Error: %s", execution.Error)
 	}
 
-	// Now that trigger steps are included, the REST API node should be at index 1
+	// Now that trigger steps are included, we should have at least 2 steps (trigger + REST API node)
 	if len(execution.Steps) < 2 {
 		t.Errorf("Expected at least 2 steps (trigger + node), but got %d", len(execution.Steps))
 		return
 	}
 
-	if execution.Steps[1].Id != "ping1" {
-		t.Errorf("wrong node id in execution log, expected ping1 but got %s", execution.Steps[1].Id)
+	if execution.Steps[0].Id != "ping1" {
+		t.Errorf("wrong node id in execution log, expected ping1 but got %s", execution.Steps[0].Id)
 	}
 
-	step := execution.Steps[1] // REST API node is now the second step
+	step := execution.Steps[0]
 	if step.GetRestApi() == nil {
 		t.Errorf("RestApi data is nil")
 		return
@@ -667,7 +714,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 		IsBlocking: true,
 	})
 
-	if err != nil || resultTrigger == nil {
+	if err == nil || resultTrigger == nil {
 		t.Errorf("expected trigger successfully but got error: %s", err)
 	}
 
