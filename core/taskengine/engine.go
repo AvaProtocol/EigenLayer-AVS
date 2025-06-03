@@ -157,17 +157,27 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	//SetWsRpc(config.SmartWallet.EthWsUrl)
 
 	// Initialize TokenEnrichmentService
-	if rpcConn != nil {
-		tokenService, err := NewTokenEnrichmentService(rpcConn, logger)
-		if err != nil {
-			logger.Warn("Failed to initialize TokenEnrichmentService", "error", err)
-			// Don't fail engine initialization, continue without token enrichment
-		} else {
-			e.tokenEnrichmentService = tokenService
-			logger.Info("TokenEnrichmentService initialized successfully")
-		}
+	// Always try to initialize, even without RPC, so we can serve whitelist data
+	tokenService, err := NewTokenEnrichmentService(rpcConn, logger)
+	if err != nil {
+		logger.Warn("Failed to initialize TokenEnrichmentService", "error", err)
+		// Don't fail engine initialization, continue without token enrichment
 	} else {
-		logger.Warn("RPC connection not available, TokenEnrichmentService not initialized")
+		e.tokenEnrichmentService = tokenService
+
+		// Load token whitelist data into cache
+		if err := tokenService.LoadWhitelist(); err != nil {
+			logger.Warn("Failed to load token whitelist", "error", err)
+			// Don't fail engine initialization, continue with RPC-only token enrichment
+		} else {
+			logger.Info("Token whitelist loaded successfully", "cacheSize", tokenService.GetCacheSize())
+		}
+
+		if rpcConn != nil {
+			logger.Info("TokenEnrichmentService initialized successfully with RPC and whitelist support")
+		} else {
+			logger.Info("TokenEnrichmentService initialized successfully with whitelist-only support (no RPC)")
+		}
 	}
 
 	return &e
@@ -2028,25 +2038,19 @@ func (n *Engine) GetTokenMetadata(user *model.User, payload *avsproto.GetTokenMe
 		}, nil // Return not found instead of error for better UX
 	}
 
-	// Determine the source of the data
-	source := "cache"
-	normalizedAddr := strings.ToLower(payload.Address)
+	// Check if token was not found (nil metadata but no error)
+	if metadata == nil {
+		n.logger.Info("Token not found in whitelist or RPC",
+			"address", payload.Address,
+			"user", user.Address.Hex())
 
-	// Check if it's from whitelist (cache but originally from file)
-	n.tokenEnrichmentService.cacheMux.RLock()
-	_, isFromCache := n.tokenEnrichmentService.cache[normalizedAddr]
-	n.tokenEnrichmentService.cacheMux.RUnlock()
-
-	if !isFromCache {
-		source = "rpc" // Was fetched from RPC and then cached
-	} else {
-		// It's in cache, but determine if it's from whitelist or previous RPC call
-		// For simplicity, we'll say "whitelist" if cache size > 0 (has whitelist data)
-		// and "cache" if it was from a previous RPC call
-		if n.tokenEnrichmentService.GetCacheSize() > 0 {
-			source = "whitelist"
-		}
+		return &avsproto.GetTokenMetadataResp{
+			Found: false,
+		}, nil
 	}
+
+	// Determine the source of the data
+	source := metadata.Source // Use the source from the metadata
 
 	// Return successful response with token metadata
 	response := &avsproto.GetTokenMetadataResp{
