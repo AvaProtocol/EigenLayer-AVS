@@ -845,7 +845,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 // then executing the task nodes in sequence just like regular task execution.
 // This is useful for testing tasks without waiting for actual trigger conditions.
 // The task definition is provided in the request, so no storage persistence is required.
-func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, triggerType string, triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (*avsproto.Execution, error) {
+func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, inputVariables map[string]interface{}) (*avsproto.Execution, error) {
 	// Create a temporary task structure for simulation (not saved to storage)
 	simulationTaskID := ulid.Make().String()
 	task := &model.Task{
@@ -868,7 +868,16 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	// Step 1: Simulate the trigger to get trigger output data
-	triggerOutput, err := n.runTriggerImmediately(triggerType, triggerConfig, inputVariables)
+	// Extract trigger type and config from the TaskTrigger
+	triggerTypeStr := TriggerTypeToString(trigger.GetType())
+	if triggerTypeStr == "" {
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, "unsupported trigger type: %v", trigger.GetType())
+	}
+
+	// Extract trigger config using the shared utility function
+	triggerConfig := TaskTriggerToConfig(trigger)
+
+	triggerOutput, err := n.runTriggerImmediately(triggerTypeStr, triggerConfig, inputVariables)
 	if err != nil {
 		return nil, fmt.Errorf("failed to simulate trigger: %w", err)
 	}
@@ -878,7 +887,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Convert trigger output to proper protobuf structure
 	var triggerOutputProto interface{}
-	switch triggerTypeStringToEnum(triggerType) {
+	switch trigger.Type {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
 		runAt := uint64(0)
 		if runAtVal, ok := triggerOutput["runAt"]; ok {
@@ -989,7 +998,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	queueData := &QueueExecutionData{
-		TriggerType:   triggerTypeStringToEnum(triggerType),
+		TriggerType:   trigger.Type,
 		TriggerOutput: triggerOutputProto,
 		ExecutionID:   simulationID,
 	}

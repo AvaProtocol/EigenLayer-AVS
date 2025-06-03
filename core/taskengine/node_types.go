@@ -189,3 +189,53 @@ func TaskTriggerToTriggerType(taskTrigger *avsproto.TaskTrigger) avsproto.Trigge
 		return avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED
 	}
 }
+
+// TaskTriggerToConfig extracts configuration from TaskTrigger objects into a map[string]interface{}
+// This provides a centralized way to extract trigger configurations and eliminates code duplication
+func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
+	triggerConfig := make(map[string]interface{})
+
+	if trigger == nil {
+		return triggerConfig
+	}
+
+	switch trigger.GetTriggerType().(type) {
+	case *avsproto.TaskTrigger_Event:
+		eventTrigger := trigger.GetEvent()
+		if eventTrigger != nil && eventTrigger.Config != nil {
+			// Extract config fields from EventTrigger.Config
+			if eventTrigger.Config.Expression != "" {
+				triggerConfig["expression"] = eventTrigger.Config.Expression
+			}
+			if len(eventTrigger.Config.Matcher) > 0 {
+				triggerConfig["matcherList"] = eventTrigger.Config.Matcher
+			}
+		}
+	case *avsproto.TaskTrigger_Block:
+		blockTrigger := trigger.GetBlock()
+		if blockTrigger != nil && blockTrigger.Config != nil {
+			if blockTrigger.Config.Interval > 0 {
+				triggerConfig["interval"] = blockTrigger.Config.Interval
+			}
+		}
+	case *avsproto.TaskTrigger_Cron:
+		cronTrigger := trigger.GetCron()
+		if cronTrigger != nil && cronTrigger.Config != nil {
+			if len(cronTrigger.Config.Schedule) > 0 {
+				triggerConfig["schedule"] = cronTrigger.Config.Schedule
+			}
+		}
+	case *avsproto.TaskTrigger_FixedTime:
+		fixedTimeTrigger := trigger.GetFixedTime()
+		if fixedTimeTrigger != nil && fixedTimeTrigger.Config != nil {
+			if len(fixedTimeTrigger.Config.Epochs) > 0 {
+				triggerConfig["epochs"] = fixedTimeTrigger.Config.Epochs
+			}
+		}
+	case *avsproto.TaskTrigger_Manual:
+		// Manual triggers typically don't have configuration
+		triggerConfig["manual"] = trigger.GetManual()
+	}
+
+	return triggerConfig
+}

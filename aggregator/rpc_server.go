@@ -476,7 +476,7 @@ func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTask
 
 	r.config.Logger.Info("process simulate task",
 		"user", user.Address.String(),
-		"trigger_type", req.TriggerType,
+		"trigger_type", req.Trigger.Type,
 		"nodes_count", len(req.Nodes),
 		"edges_count", len(req.Edges),
 	)
@@ -489,54 +489,21 @@ func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTask
 		return nil, status.Errorf(codes.InvalidArgument, "at least one node is required for task simulation")
 	}
 
-	// Add debug logging for the request details
-	configKeys := make([]string, 0, len(req.TriggerConfig))
-	for k := range req.TriggerConfig {
-		configKeys = append(configKeys, k)
-	}
-	inputKeys := make([]string, 0, len(req.InputVariables))
-	for k := range req.InputVariables {
-		inputKeys = append(inputKeys, k)
-	}
-
-	r.config.Logger.Info("simulate task details",
-		"user", user.Address.String(),
-		"trigger_type", req.TriggerType,
-		"trigger_name", req.Trigger.Name,
-		"config_keys", configKeys,
-		"input_keys", inputKeys,
-	)
-
-	// Convert protobuf values to Go native types
-	triggerConfig := make(map[string]interface{})
-	for k, v := range req.TriggerConfig {
-		triggerConfig[k] = v.AsInterface()
-	}
-
+	// Convert protobuf input variables to Go native types
 	inputVariables := make(map[string]interface{})
 	for k, v := range req.InputVariables {
 		inputVariables[k] = v.AsInterface()
 	}
 
-	// Convert TriggerType enum to string for the engine function
-	triggerTypeStr := ""
-	switch req.TriggerType {
-	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-		triggerTypeStr = taskengine.NodeTypeManualTrigger
-	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
-		triggerTypeStr = taskengine.NodeTypeFixedTimeTrigger
-	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
-		triggerTypeStr = taskengine.NodeTypeCronTrigger
-	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
-		triggerTypeStr = taskengine.NodeTypeBlockTrigger
-	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
-		triggerTypeStr = taskengine.NodeTypeEventTrigger
-	default:
-		return nil, status.Errorf(codes.InvalidArgument, "unsupported trigger type: %v", req.TriggerType)
-	}
+	r.config.Logger.Info("simulate task details",
+		"user", user.Address.String(),
+		"trigger_type", req.Trigger.Type,
+		"trigger_name", req.Trigger.Name,
+		"input_keys", getInputKeys(req.InputVariables),
+	)
 
-	// Call the simulation function with the provided task definition
-	execution, err := r.engine.SimulateTask(user, req.Trigger, req.Nodes, req.Edges, triggerTypeStr, triggerConfig, inputVariables)
+	// Call the simulation function with the provided task definition (no need to extract triggerType and triggerConfig)
+	execution, err := r.engine.SimulateTask(user, req.Trigger, req.Nodes, req.Edges, inputVariables)
 	if err != nil {
 		r.config.Logger.Error("simulate task failed",
 			"user", user.Address.String(),
