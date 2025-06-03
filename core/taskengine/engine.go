@@ -884,6 +884,12 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	triggerType := TaskTriggerToTriggerType(trigger)
 	n.logger.Info("SimulateTask trigger type conversion", "from_oneof", triggerType, "from_explicit", trigger.GetType())
 
+	// Validate that the derived trigger type matches the expected type
+	if triggerType != trigger.GetType() {
+		n.logger.Error("Trigger type mismatch", "derived_type", triggerType, "expected_type", trigger.GetType(), "trigger_id", trigger.GetId(), "trigger_name", trigger.GetName())
+		return nil, grpcstatus.Errorf(codes.InvalidArgument, "trigger type mismatch: derived=%v, expected=%v", triggerType, trigger.GetType())
+	}
+
 	triggerTypeStr := TriggerTypeToString(triggerType)
 	if triggerTypeStr == "" {
 		return nil, grpcstatus.Errorf(codes.InvalidArgument, "unsupported trigger type: %v (oneof type: %T)", trigger.GetType(), trigger.GetTriggerType())
