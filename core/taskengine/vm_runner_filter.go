@@ -155,14 +155,19 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 				break
 			}
 
+			processedExpression := expression
+			if strings.Contains(expression, "{{") {
+				processedExpression = r.vm.preprocessText(expression)
+			}
+			
 			// Check if the expression already contains control flow statements
 			var script string
-			if strings.Contains(expression, "if") || strings.Contains(expression, "return") {
+			if strings.Contains(processedExpression, "if") || strings.Contains(processedExpression, "return") {
 				// For complex expressions with control flow, wrap in a function without additional return
-				script = fmt.Sprintf(`(() => { %s })()`, expression)
+				script = fmt.Sprintf(`(() => { %s })()`, processedExpression)
 			} else {
 				// For simple expressions, wrap with return
-				script = fmt.Sprintf(`(() => { return %s; })()`, expression)
+				script = fmt.Sprintf(`(() => { return %s; })()`, processedExpression)
 			}
 			val, err := r.jsvm.RunString(script)
 			if err != nil {
@@ -193,14 +198,19 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 				break
 			}
 
+			processedExpression := expression
+			if strings.Contains(expression, "{{") {
+				processedExpression = r.vm.preprocessText(expression)
+			}
+			
 			// Check if the expression already contains control flow statements
 			var script string
-			if strings.Contains(expression, "if") || strings.Contains(expression, "return") {
+			if strings.Contains(processedExpression, "if") || strings.Contains(processedExpression, "return") {
 				// For complex expressions with control flow, wrap in a function without additional return
-				script = fmt.Sprintf(`(() => { %s })()`, expression)
+				script = fmt.Sprintf(`(() => { %s })()`, processedExpression)
 			} else {
 				// For simple expressions, wrap with return
-				script = fmt.Sprintf(`(() => { return %s; })()`, expression)
+				script = fmt.Sprintf(`(() => { return %s; })()`, processedExpression)
 			}
 			val, err := r.jsvm.RunString(script)
 			if err != nil {
@@ -223,14 +233,19 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		if err := r.jsvm.Set(itemVarNameForMap, dataToProcess); err != nil {
 			evaluationError = fmt.Errorf("failed to set input map as '%s' in JS VM: %w", itemVarNameForMap, err)
 		} else {
+			processedExpression := expression
+			if strings.Contains(expression, "{{") {
+				processedExpression = r.vm.preprocessText(expression)
+			}
+			
 			// Check if the expression already contains control flow statements
 			var script string
-			if strings.Contains(expression, "if") || strings.Contains(expression, "return") {
+			if strings.Contains(processedExpression, "if") || strings.Contains(processedExpression, "return") {
 				// For complex expressions with control flow, wrap in a function without additional return
-				script = fmt.Sprintf(`(() => { %s })()`, expression)
+				script = fmt.Sprintf(`(() => { %s })()`, processedExpression)
 			} else {
 				// For simple expressions, wrap with return
-				script = fmt.Sprintf(`(() => { return %s; })()`, expression)
+				script = fmt.Sprintf(`(() => { return %s; })()`, processedExpression)
 			}
 			val, err := r.jsvm.RunString(script)
 			if err != nil {
