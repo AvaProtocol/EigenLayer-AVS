@@ -8,11 +8,11 @@ import (
 
 func TestFilterNodePreprocessing(t *testing.T) {
 	testCases := []struct {
-		name           string
-		expression     string
-		inputData      []interface{}
-		expectedCount  int
-		expectError    bool
+		name          string
+		expression    string
+		inputData     []interface{}
+		expectedCount int
+		expectError   bool
 	}{
 		{
 			name:       "age filter with preprocessing using trigger data",
@@ -25,7 +25,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 			expectedCount: 2, // Alice and Charlie (assuming minAge = 18)
 		},
 		{
-			name:       "age filter under 18 with preprocessing", 
+			name:       "age filter under 18 with preprocessing",
 			expression: "value.age < 18",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "age": 25},
@@ -91,22 +91,22 @@ func TestFilterNodePreprocessing(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			vm := NewVM()
 			processor := NewFilterProcessor(vm)
-			
-		vm.AddVar("testInput", tc.inputData)
-		vm.AddVar("trigger", map[string]interface{}{
-			"data": map[string]interface{}{
-				"minAge": 18,
-			},
-		})
 
-		vm.AddVar("input", "testInput")
-		vm.AddVar("expression", tc.expression)
+			vm.AddVar("testInput", tc.inputData)
+			vm.AddVar("trigger", map[string]interface{}{
+				"data": map[string]interface{}{
+					"minAge": 18,
+				},
+			})
 
-		node := &avsproto.FilterNode{
-			Config: &avsproto.FilterNode_Config{},
-		}
+			vm.AddVar("input", "testInput")
+			vm.AddVar("expression", tc.expression)
 
-		stepResult, err := processor.Execute("filter1", node)
+			node := &avsproto.FilterNode{
+				Config: &avsproto.FilterNode_Config{},
+			}
+
+			stepResult, err := processor.Execute("filter1", node)
 
 			if tc.expectError {
 				if err == nil {
@@ -188,17 +188,17 @@ func TestFilterNodePreprocessingEdgeCases(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			vm := NewVM()
 			processor := NewFilterProcessor(vm)
-			
-		vm.AddVar("testInput", tc.inputData)
 
-		vm.AddVar("input", "testInput")
-		vm.AddVar("expression", tc.expression)
+			vm.AddVar("testInput", tc.inputData)
 
-		node := &avsproto.FilterNode{
-			Config: &avsproto.FilterNode_Config{},
-		}
+			vm.AddVar("input", "testInput")
+			vm.AddVar("expression", tc.expression)
 
-		stepResult, err := processor.Execute("filter1", node)
+			node := &avsproto.FilterNode{
+				Config: &avsproto.FilterNode_Config{},
+			}
+
+			stepResult, err := processor.Execute("filter1", node)
 
 			if tc.expectError {
 				if err == nil {

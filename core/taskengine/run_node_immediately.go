@@ -719,7 +719,14 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	result, err := n.RunNodeImmediately(nodeTypeStr, nodeConfig, inputVariables)
 	if err != nil {
 		if n.logger != nil {
-			n.logger.Error("RunNodeImmediatelyRPC: Execution failed", "nodeType", nodeTypeStr, "error", err)
+			// Categorize errors to avoid unnecessary stack traces for expected validation errors
+			if isExpectedValidationError(err) {
+				// Expected validation errors - log at WARN level without stack traces
+				n.logger.Warn("RunNodeImmediatelyRPC: Validation failed", "nodeType", nodeTypeStr, "error", err.Error())
+			} else {
+				// Unexpected system errors - log at ERROR level (with stack traces)
+				n.logger.Error("RunNodeImmediatelyRPC: System error during execution", "nodeType", nodeTypeStr, "error", err)
+			}
 		}
 
 		// Create response with failure status but still set appropriate output data structure
@@ -991,7 +998,14 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 	result, err := n.runTriggerImmediately(triggerTypeStr, triggerConfig, nil)
 	if err != nil {
 		if n.logger != nil {
-			n.logger.Error("RunTriggerRPC: Execution failed", "triggerType", triggerTypeStr, "error", err)
+			// Categorize errors to avoid unnecessary stack traces for expected validation errors
+			if isExpectedValidationError(err) {
+				// Expected validation errors - log at WARN level without stack traces
+				n.logger.Warn("RunTriggerRPC: Validation failed", "triggerType", triggerTypeStr, "error", err.Error())
+			} else {
+				// Unexpected system errors - log at ERROR level (with stack traces)
+				n.logger.Error("RunTriggerRPC: System error during execution", "triggerType", triggerTypeStr, "error", err)
+			}
 		}
 
 		// Create response with failure status but still set appropriate output data structure
@@ -1218,4 +1232,40 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 	}
 
 	return resp, nil
+}
+
+// isExpectedValidationError determines if an error is an expected validation error
+// that should be logged at WARN level without stack traces, vs an unexpected system error
+// that should be logged at ERROR level with stack traces
+func isExpectedValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errorMsg := err.Error()
+
+	// Common validation error patterns that should be logged as WARN (no stack traces)
+	validationErrorPatterns := []string{
+		"missing required input variables:",
+		"destination address is required",
+		"unsupported node type for CreateNodeFromType:",
+		"invalid node type:",
+		"missing required configuration:",
+		"invalid configuration:",
+		"missing required field:",
+		"validation failed:",
+		"invalid input:",
+		"parameter validation failed:",
+		"node configuration error:",
+		"template processing failed:",
+	}
+
+	for _, pattern := range validationErrorPatterns {
+		if strings.Contains(errorMsg, pattern) {
+			return true
+		}
+	}
+
+	// If it doesn't match validation patterns, treat as system error
+	return false
 }

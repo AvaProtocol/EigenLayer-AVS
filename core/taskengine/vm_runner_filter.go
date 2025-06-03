@@ -159,7 +159,7 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 			if strings.Contains(expression, "{{") {
 				processedExpression = r.vm.preprocessText(expression)
 			}
-			
+
 			// Check if the expression already contains control flow statements
 			var script string
 			if strings.Contains(processedExpression, "if") || strings.Contains(processedExpression, "return") {
@@ -202,7 +202,7 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 			if strings.Contains(expression, "{{") {
 				processedExpression = r.vm.preprocessText(expression)
 			}
-			
+
 			// Check if the expression already contains control flow statements
 			var script string
 			if strings.Contains(processedExpression, "if") || strings.Contains(processedExpression, "return") {
@@ -237,7 +237,7 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 			if strings.Contains(expression, "{{") {
 				processedExpression = r.vm.preprocessText(expression)
 			}
-			
+
 			// Check if the expression already contains control flow statements
 			var script string
 			if strings.Contains(processedExpression, "if") || strings.Contains(processedExpression, "return") {
