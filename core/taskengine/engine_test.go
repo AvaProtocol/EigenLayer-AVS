@@ -158,7 +158,7 @@ func TestListTasks(t *testing.T) {
 	}
 
 	if len(result.Items) != 2 {
-		t.Errorf("list task return wrong. expect 1, got %d", len(result.Items))
+		t.Errorf("list task return wrong. expect 2, got %d", len(result.Items))
 		return
 	}
 
@@ -263,7 +263,7 @@ func TestListTasksPagination(t *testing.T) {
 	})
 
 	if len(result.Items) != 25 {
-		t.Errorf("list task returns wrong. expect 15, got %d", len(result.Items))
+		t.Errorf("list task returns wrong. expect 25, got %d", len(result.Items))
 	}
 	if result.Items[0].Name != "t3_15" || result.Items[2].Name != "t3_13" || result.Items[14].Name != "t3_1" {
 		t.Errorf("list task returns wrong task result, expected t3_15 t3_13 t3_1 got %s %s %s", result.Items[0].Name, result.Items[2].Name, result.Items[14].Name)

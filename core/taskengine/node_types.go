@@ -235,6 +235,10 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 	case *avsproto.TaskTrigger_Manual:
 		// Manual triggers typically don't have configuration
 		triggerConfig["manual"] = trigger.GetManual()
+	default:
+		// Handle unforeseen trigger types by returning empty configuration
+		// This ensures consistent behavior for unknown or future trigger types
+		return triggerConfig
 	}
 
 	return triggerConfig
