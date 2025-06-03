@@ -2,6 +2,7 @@
 package taskengine
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +31,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 const (
@@ -130,6 +132,9 @@ type Engine struct {
 	seq storage.Sequence
 
 	logger sdklogging.Logger
+
+	// Token enrichment service for ERC20 transfers
+	tokenEnrichmentService *TokenEnrichmentService
 }
 
 // create a new task engine using given storage, config and queueu
@@ -150,6 +155,20 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	SetRpc(config.SmartWallet.EthRpcUrl)
 	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
 	//SetWsRpc(config.SmartWallet.EthWsUrl)
+
+	// Initialize TokenEnrichmentService
+	if rpcConn != nil {
+		tokenService, err := NewTokenEnrichmentService(rpcConn, logger)
+		if err != nil {
+			logger.Warn("Failed to initialize TokenEnrichmentService", "error", err)
+			// Don't fail engine initialization, continue without token enrichment
+		} else {
+			e.tokenEnrichmentService = tokenService
+			logger.Info("TokenEnrichmentService initialized successfully")
+		}
+	} else {
+		logger.Warn("RPC connection not available, TokenEnrichmentService not initialized")
+	}
 
 	return &e
 }
@@ -558,6 +577,31 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	triggerData := &TriggerData{
 		Type:   payload.TriggerType,
 		Output: ExtractTriggerOutput(payload.TriggerOutput),
+	}
+
+	// Enrich EventTrigger output if TokenEnrichmentService is available and it's a Transfer event
+	if payload.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_EVENT && n.tokenEnrichmentService != nil {
+		if eventOutput := triggerData.Output.(*avsproto.EventTrigger_Output); eventOutput != nil {
+			if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
+				n.logger.Debug("enriching EventTrigger output from operator",
+					"task_id", payload.TaskId,
+					"tx_hash", evmLog.TransactionHash,
+					"block_number", evmLog.BlockNumber)
+
+				// Fetch full event data from the blockchain using the minimal data from operator
+				if enrichedEventOutput, err := n.enrichEventTriggerFromOperatorData(evmLog); err == nil {
+					// Replace the minimal event output with the enriched one
+					triggerData.Output = enrichedEventOutput
+					n.logger.Debug("successfully enriched EventTrigger output",
+						"task_id", payload.TaskId,
+						"has_transfer_log", enrichedEventOutput.TransferLog != nil)
+				} else {
+					n.logger.Warn("failed to enrich EventTrigger output, using minimal data",
+						"task_id", payload.TaskId,
+						"error", err)
+				}
+			}
+		}
 	}
 
 	queueTaskData := QueueExecutionData{
@@ -1847,4 +1891,181 @@ func getStringMapKeys(m map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// enrichEventTriggerFromOperatorData fetches full event data from blockchain and enriches it with token metadata
+func (n *Engine) enrichEventTriggerFromOperatorData(minimalEvmLog *avsproto.Evm_Log) (*avsproto.EventTrigger_Output, error) {
+	if minimalEvmLog.TransactionHash == "" {
+		return nil, fmt.Errorf("transaction hash is required for enrichment")
+	}
+
+	// Get RPC client (using the global rpcConn variable)
+	if rpcConn == nil {
+		return nil, fmt.Errorf("RPC client not available")
+	}
+
+	// Fetch transaction receipt to get the full event logs
+	ctx := context.Background()
+	receipt, err := rpcConn.TransactionReceipt(ctx, common.HexToHash(minimalEvmLog.TransactionHash))
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch transaction receipt: %w", err)
+	}
+
+	// Find the specific log that matches the operator's data
+	var targetLog *types.Log
+	for _, log := range receipt.Logs {
+		if uint32(log.Index) == minimalEvmLog.Index {
+			targetLog = log
+			break
+		}
+	}
+
+	if targetLog == nil {
+		return nil, fmt.Errorf("log with index %d not found in transaction %s",
+			minimalEvmLog.Index, minimalEvmLog.TransactionHash)
+	}
+
+	// Create enriched EVM log with full data
+	enrichedEvmLog := &avsproto.Evm_Log{
+		Address:          targetLog.Address.Hex(),
+		Topics:           make([]string, len(targetLog.Topics)),
+		Data:             "0x" + common.Bytes2Hex(targetLog.Data),
+		BlockNumber:      targetLog.BlockNumber,
+		TransactionHash:  targetLog.TxHash.Hex(),
+		TransactionIndex: uint32(targetLog.TxIndex),
+		BlockHash:        targetLog.BlockHash.Hex(),
+		Index:            uint32(targetLog.Index),
+		Removed:          targetLog.Removed,
+	}
+
+	// Convert topics to string array
+	for i, topic := range targetLog.Topics {
+		enrichedEvmLog.Topics[i] = topic.Hex()
+	}
+
+	enrichedOutput := &avsproto.EventTrigger_Output{
+		EvmLog: enrichedEvmLog,
+	}
+
+	// Check if this is a Transfer event and enrich with token metadata
+	isTransferEvent := len(targetLog.Topics) > 0 &&
+		targetLog.Topics[0].Hex() == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+	if isTransferEvent && len(targetLog.Topics) >= 3 {
+		// Get block timestamp for transfer_log
+		header, err := rpcConn.HeaderByNumber(ctx, big.NewInt(int64(targetLog.BlockNumber)))
+		var blockTimestamp uint64
+		if err == nil {
+			blockTimestamp = header.Time * 1000 // Convert to milliseconds
+		}
+
+		// Extract from and to addresses from topics
+		fromAddr := common.HexToAddress(targetLog.Topics[1].Hex()).Hex()
+		toAddr := common.HexToAddress(targetLog.Topics[2].Hex()).Hex()
+		value := "0x" + common.Bytes2Hex(targetLog.Data)
+
+		transferLog := &avsproto.EventTrigger_TransferLogOutput{
+			TokenName:        "",
+			TokenSymbol:      "",
+			TokenDecimals:    0,
+			TransactionHash:  targetLog.TxHash.Hex(),
+			Address:          targetLog.Address.Hex(),
+			BlockNumber:      targetLog.BlockNumber,
+			BlockTimestamp:   blockTimestamp,
+			FromAddress:      fromAddr,
+			ToAddress:        toAddr,
+			Value:            value,
+			ValueFormatted:   "",
+			TransactionIndex: uint32(targetLog.TxIndex),
+			LogIndex:         uint32(targetLog.Index),
+		}
+
+		// Enrich with token metadata
+		if err := n.tokenEnrichmentService.EnrichTransferLog(enrichedEvmLog, transferLog); err != nil {
+			n.logger.Warn("failed to enrich transfer log with token metadata", "error", err)
+			// Continue without enrichment - partial data is better than no data
+		}
+
+		enrichedOutput.TransferLog = transferLog
+	}
+
+	return enrichedOutput, nil
+}
+
+// GetTokenMetadata handles the RPC for token metadata lookup
+func (n *Engine) GetTokenMetadata(user *model.User, payload *avsproto.GetTokenMetadataReq) (*avsproto.GetTokenMetadataResp, error) {
+	// Validate the address parameter
+	if payload.Address == "" {
+		return &avsproto.GetTokenMetadataResp{
+			Found: false,
+		}, grpcstatus.Errorf(codes.InvalidArgument, "token address is required")
+	}
+
+	// Check if address is a valid hex address
+	if !common.IsHexAddress(payload.Address) {
+		return &avsproto.GetTokenMetadataResp{
+			Found: false,
+		}, grpcstatus.Errorf(codes.InvalidArgument, "invalid token address format")
+	}
+
+	// Check if TokenEnrichmentService is available
+	if n.tokenEnrichmentService == nil {
+		return &avsproto.GetTokenMetadataResp{
+			Found: false,
+		}, grpcstatus.Errorf(codes.Unavailable, "token enrichment service not available")
+	}
+
+	// Try to get token metadata using the enrichment service
+	metadata, err := n.tokenEnrichmentService.GetTokenMetadata(payload.Address)
+	if err != nil {
+		n.logger.Warn("Failed to get token metadata",
+			"address", payload.Address,
+			"user", user.Address.Hex(),
+			"error", err)
+
+		return &avsproto.GetTokenMetadataResp{
+			Found: false,
+		}, nil // Return not found instead of error for better UX
+	}
+
+	// Determine the source of the data
+	source := "cache"
+	normalizedAddr := strings.ToLower(payload.Address)
+
+	// Check if it's from whitelist (cache but originally from file)
+	n.tokenEnrichmentService.cacheMux.RLock()
+	_, isFromCache := n.tokenEnrichmentService.cache[normalizedAddr]
+	n.tokenEnrichmentService.cacheMux.RUnlock()
+
+	if !isFromCache {
+		source = "rpc" // Was fetched from RPC and then cached
+	} else {
+		// It's in cache, but determine if it's from whitelist or previous RPC call
+		// For simplicity, we'll say "whitelist" if cache size > 0 (has whitelist data)
+		// and "cache" if it was from a previous RPC call
+		if n.tokenEnrichmentService.GetCacheSize() > 0 {
+			source = "whitelist"
+		}
+	}
+
+	// Return successful response with token metadata
+	response := &avsproto.GetTokenMetadataResp{
+		Found:  true,
+		Source: source,
+		Token: &avsproto.TokenMetadata{
+			Address:  metadata.Address,
+			Name:     metadata.Name,
+			Symbol:   metadata.Symbol,
+			Decimals: metadata.Decimals,
+		},
+	}
+
+	n.logger.Info("Token metadata lookup successful",
+		"address", payload.Address,
+		"user", user.Address.Hex(),
+		"tokenName", metadata.Name,
+		"tokenSymbol", metadata.Symbol,
+		"source", source)
+
+	return response, nil
 }

@@ -38,6 +38,30 @@ enum NodeType {
 }
 
 // ============================================================================
+// TOKEN METADATA MESSAGES
+// ============================================================================
+
+// TokenMetadata represents ERC20 token information
+message TokenMetadata {
+  string address = 1;    // Contract address (lowercase, normalized)
+  string name = 2;       // Token name (e.g., "USD Coin")
+  string symbol = 3;     // Token symbol (e.g., "USDC")
+  uint32 decimals = 4;   // Number of decimal places
+}
+
+// GetTokenMetadataReq is the request for token metadata lookup
+message GetTokenMetadataReq {
+  string address = 1;    // Contract address to look up
+}
+
+// GetTokenMetadataResp is the response containing token metadata
+message GetTokenMetadataResp {
+  TokenMetadata token = 1;  // Token metadata information
+  bool found = 2;           // Whether the token was found
+  string source = 3;        // Source of data: "whitelist", "rpc", or "cache"
+}
+
+// ============================================================================
 // EXISTING MESSAGES
 // ============================================================================
 
@@ -863,6 +887,9 @@ service Aggregator {
   
   // SimulateTask allows executing a complete task simulation including trigger and all workflow nodes
   rpc SimulateTask(SimulateTaskReq) returns (Execution);
+  
+  // GetTokenMetadata allows looking up ERC20 token metadata by contract address
+  rpc GetTokenMetadata(GetTokenMetadataReq) returns (GetTokenMetadataResp);
 }
 
 // Request message for GetWorkflowCount
