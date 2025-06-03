@@ -92,19 +92,21 @@ func TestFilterNodePreprocessing(t *testing.T) {
 			vm := NewVM()
 			processor := NewFilterProcessor(vm)
 			
-			vm.vars["testInput"] = tc.inputData
-			vm.vars["trigger"] = map[string]interface{}{
-				"data": map[string]interface{}{
-					"minAge": 18,
-				},
-			}
+		vm.AddVar("testInput", tc.inputData)
+		vm.AddVar("trigger", map[string]interface{}{
+			"data": map[string]interface{}{
+				"minAge": 18,
+			},
+		})
 
-			node := &avsproto.FilterNode{
-				Expression: tc.expression,
-				Input:      "testInput",
-			}
+		vm.AddVar("input", "testInput")
+		vm.AddVar("expression", tc.expression)
 
-			stepResult, err := processor.Execute("filter1", node)
+		node := &avsproto.FilterNode{
+			Config: &avsproto.FilterNode_Config{},
+		}
+
+		stepResult, err := processor.Execute("filter1", node)
 
 			if tc.expectError {
 				if err == nil {
@@ -187,14 +189,16 @@ func TestFilterNodePreprocessingEdgeCases(t *testing.T) {
 			vm := NewVM()
 			processor := NewFilterProcessor(vm)
 			
-			vm.vars["testInput"] = tc.inputData
+		vm.AddVar("testInput", tc.inputData)
 
-			node := &avsproto.FilterNode{
-				Expression: tc.expression,
-				Input:      "testInput",
-			}
+		vm.AddVar("input", "testInput")
+		vm.AddVar("expression", tc.expression)
 
-			stepResult, err := processor.Execute("filter1", node)
+		node := &avsproto.FilterNode{
+			Config: &avsproto.FilterNode_Config{},
+		}
+
+		stepResult, err := processor.Execute("filter1", node)
 
 			if tc.expectError {
 				if err == nil {
