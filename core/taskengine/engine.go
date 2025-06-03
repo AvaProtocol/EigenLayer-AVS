@@ -1991,3 +1991,81 @@ func (n *Engine) enrichEventTriggerFromOperatorData(minimalEvmLog *avsproto.Evm_
 
 	return enrichedOutput, nil
 }
+
+// GetTokenMetadata handles the RPC for token metadata lookup
+func (n *Engine) GetTokenMetadata(user *model.User, payload *avsproto.GetTokenMetadataReq) (*avsproto.GetTokenMetadataResp, error) {
+	// Validate the address parameter
+	if payload.Address == "" {
+		return &avsproto.GetTokenMetadataResp{
+			Found: false,
+		}, grpcstatus.Errorf(codes.InvalidArgument, "token address is required")
+	}
+
+	// Check if address is a valid hex address
+	if !common.IsHexAddress(payload.Address) {
+		return &avsproto.GetTokenMetadataResp{
+			Found: false,
+		}, grpcstatus.Errorf(codes.InvalidArgument, "invalid token address format")
+	}
+
+	// Check if TokenEnrichmentService is available
+	if n.tokenEnrichmentService == nil {
+		return &avsproto.GetTokenMetadataResp{
+			Found: false,
+		}, grpcstatus.Errorf(codes.Unavailable, "token enrichment service not available")
+	}
+
+	// Try to get token metadata using the enrichment service
+	metadata, err := n.tokenEnrichmentService.GetTokenMetadata(payload.Address)
+	if err != nil {
+		n.logger.Warn("Failed to get token metadata",
+			"address", payload.Address,
+			"user", user.Address.Hex(),
+			"error", err)
+
+		return &avsproto.GetTokenMetadataResp{
+			Found: false,
+		}, nil // Return not found instead of error for better UX
+	}
+
+	// Determine the source of the data
+	source := "cache"
+	normalizedAddr := strings.ToLower(payload.Address)
+
+	// Check if it's from whitelist (cache but originally from file)
+	n.tokenEnrichmentService.cacheMux.RLock()
+	_, isFromCache := n.tokenEnrichmentService.cache[normalizedAddr]
+	n.tokenEnrichmentService.cacheMux.RUnlock()
+
+	if !isFromCache {
+		source = "rpc" // Was fetched from RPC and then cached
+	} else {
+		// It's in cache, but determine if it's from whitelist or previous RPC call
+		// For simplicity, we'll say "whitelist" if cache size > 0 (has whitelist data)
+		// and "cache" if it was from a previous RPC call
+		if n.tokenEnrichmentService.GetCacheSize() > 0 {
+			source = "whitelist"
+		}
+	}
+
+	// Return successful response with token metadata
+	response := &avsproto.GetTokenMetadataResp{
+		Found:  true,
+		Source: source,
+		Token: &avsproto.TokenMetadata{
+			Address:  metadata.Address,
+			Name:     metadata.Name,
+			Symbol:   metadata.Symbol,
+			Decimals: metadata.Decimals,
+		},
+	}
+
+	n.logger.Info("Token metadata lookup successful",
+		"address", payload.Address,
+		"user", user.Address.Hex(),
+		"tokenName", metadata.Name,
+		"tokenSymbol", metadata.Symbol,
+		"source", source)
+
+	return response, nil
+}

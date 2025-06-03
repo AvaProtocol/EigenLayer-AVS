@@ -524,6 +524,21 @@ func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTask
 	return execution, nil
 }
 
+// GetTokenMetadata handles token metadata lookup requests
+func (r *RpcServer) GetTokenMetadata(ctx context.Context, payload *avsproto.GetTokenMetadataReq) (*avsproto.GetTokenMetadataResp, error) {
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process get token metadata",
+		"user", user.Address.String(),
+		"address", payload.Address,
+	)
+
+	return r.engine.GetTokenMetadata(user, payload)
+}
+
 // Helper functions for logging
 func getConfigKeys(config map[string]*structpb.Value) []string {
 	keys := make([]string, 0, len(config))

@@ -139,12 +139,24 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 		filename = "ethereum.json"
 	}
 
-	// Look for whitelist file in token_whitelist directory
+	// First try the current directory (for tests)
 	whitelistPath := filepath.Join("token_whitelist", filename)
 
-	// Check if file exists
+	// Check if file exists in current directory
 	if _, err := os.Stat(whitelistPath); os.IsNotExist(err) {
-		return fmt.Errorf("whitelist file not found: %s", whitelistPath)
+		// File doesn't exist in current directory, try project root
+		projectRoot, rootErr := FindProjectRoot()
+		if rootErr != nil {
+			return fmt.Errorf("whitelist file not found in current directory and failed to find project root: %w", rootErr)
+		}
+
+		// Look for whitelist file in token_whitelist directory relative to project root
+		whitelistPath = filepath.Join(projectRoot, "token_whitelist", filename)
+
+		// Check if file exists in project root
+		if _, err := os.Stat(whitelistPath); os.IsNotExist(err) {
+			return fmt.Errorf("whitelist file not found: %s", whitelistPath)
+		}
 	}
 
 	// Read and parse the file
