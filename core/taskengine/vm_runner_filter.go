@@ -67,9 +67,15 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 
 	var log strings.Builder
 	log.WriteString(fmt.Sprintf("start filter input %s with expression %s at %s", node.Input, node.Expression, time.Now()))
-	script := fmt.Sprintf(`values.filter((value, index, items) => { %s})`, node.Expression)
-	if !strings.Contains(node.Expression, "return") {
-		script = fmt.Sprintf(`values.filter((value, index, items) => { return %s})`, node.Expression)
+	
+	processedExpression := node.Expression
+	if strings.Contains(processedExpression, "{{") {
+		processedExpression = r.vm.preprocessText(processedExpression)
+	}
+	
+	script := fmt.Sprintf(`values.filter((value, index, items) => { %s})`, processedExpression)
+	if !strings.Contains(processedExpression, "return") {
+		script = fmt.Sprintf(`values.filter((value, index, items) => { return %s})`, processedExpression)
 	}
 
 	if err := r.jsvm.Set("values", r.vm.vars[node.Input]); err != nil {

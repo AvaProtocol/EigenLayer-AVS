@@ -116,8 +116,10 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 
 		sb.WriteString(fmt.Sprintf("\n%s evaluate condition: %s expression: `%s`", time.Now(), statement.Id, statement.Expression))
 
-		// Evaluate the condition using goja, notice how we wrap into a function to prevent the value is leak across goja run
 		expression := strings.Trim(statement.Expression, "\n \t")
+		if strings.Contains(expression, "{{") {
+			expression = r.vm.preprocessText(expression)
+		}
 
 		var branchResult bool
 
