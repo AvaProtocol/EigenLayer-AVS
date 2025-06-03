@@ -814,6 +814,15 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 			return nil, runErr
 		}
 
+		// Clean up TaskTriggerKey after successful blocking execution
+		if queueTaskData.ExecutionID != "" {
+			triggerKeyToClean := TaskTriggerKey(task, queueTaskData.ExecutionID)
+			if delErr := n.db.Delete(triggerKeyToClean); delErr != nil {
+				n.logger.Error("TriggerTask: Failed to delete TaskTriggerKey after successful blocking execution",
+					"key", string(triggerKeyToClean), "task_id", task.Id, "execution_id", queueTaskData.ExecutionID, "error", delErr)
+			}
+		}
+
 		if execution != nil {
 			return &avsproto.TriggerTaskResp{
 				ExecutionId: queueTaskData.ExecutionID,
