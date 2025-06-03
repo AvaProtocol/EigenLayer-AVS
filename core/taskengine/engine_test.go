@@ -345,15 +345,14 @@ func TestGetExecution(t *testing.T) {
 		return
 	}
 
-	if len(execution.Steps) == 0 {
-		t.Errorf("execution should have at least one step")
-		return
-	}
-
-	// Regular workflow executions now contain both trigger and node steps
 	if len(execution.Steps) != 2 {
 		t.Errorf("Expected 2 steps (trigger + node), but got %d", len(execution.Steps))
 		return
+	}
+
+	// Verify the first step is the trigger step
+	if execution.Steps[0].Type != avsproto.TriggerType_TRIGGER_TYPE_BLOCK.String() {
+		t.Errorf("First step should be trigger step, but got: %s", execution.Steps[0].Type)
 	}
 
 	if execution.Steps[1].Id != "ping1" {
@@ -463,7 +462,7 @@ func TestListWallets(t *testing.T) {
 	resp, _ = n.ListWallets(u.Address, &avsproto.ListWalletReq{
 		FactoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
 	})
-	if len(resp.Items) != 2 {
+	if len(resp.Items) != 1 {
 		t.Errorf("expect 1 smartwallet but got %d", len(resp.Items))
 	}
 	// owner 0xD7050816337a3f8f690F8083B5Ff8019D50c0E50 salt 0 https://sepolia.etherscan.io/address/0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7#readContract
@@ -477,8 +476,8 @@ func TestListWallets(t *testing.T) {
 
 	// other user will not be able to list above wallet
 	resp, _ = n.ListWallets(testutil.TestUser2().Address, nil)
-	if len(resp.Items) != 2 {
-		t.Errorf("expect only default wallet but got %d", len(resp.Items))
+	if len(resp.Items) != 1 {
+		t.Errorf("expect 1 wallet but got %d", len(resp.Items))
 	}
 }
 
@@ -533,22 +532,80 @@ func TestTriggerSync(t *testing.T) {
 		return
 	}
 
-	if len(execution.Steps) == 0 {
-		t.Errorf("execution should have at least one step")
+	if len(execution.Steps) != 2 {
+		t.Errorf("Expected 2 steps (trigger + node), but got %d", len(execution.Steps))
 		return
 	}
 
-	// Regular workflow executions now contain both trigger and node steps
-	// The first step should be the actual workflow node (e.g., REST API call)
-	firstStep := execution.Steps[1]
-
-	if execution.Id != resultTrigger.ExecutionId {
-		t.Errorf("invalid execution id. expect %s got %s", resultTrigger.ExecutionId, execution.Id)
+	// Verify the first step is the trigger step
+	if execution.Steps[0].Type != avsproto.TriggerType_TRIGGER_TYPE_BLOCK.String() {
+		t.Errorf("First step should be trigger step, but got: %s", execution.Steps[0].Type)
 	}
 
-	// Verify that this is the workflow node step, not a trigger step
-	if firstStep.Type == avsproto.TriggerType_TRIGGER_TYPE_BLOCK.String() {
-		t.Errorf("regular workflow executions should not contain trigger steps, but got trigger step: %v", firstStep.Type)
+	if execution.Steps[1].Id != "ping1" {
+		t.Errorf("wrong node id in execution log, expected ping1 but got %s", execution.Steps[1].Id)
+	}
+
+	step := execution.Steps[1]
+	if step.GetRestApi() == nil {
+		t.Errorf("RestApi data is nil")
+		return
+	}
+
+	// Get the response data as a map
+	responseData := gow.ValueToMap(step.GetRestApi().Data)
+	if responseData == nil {
+		t.Errorf("Failed to convert response data to map")
+		return
+	}
+
+	// Check if the response body contains "httpbin.org"
+	// The response structure might have changed, so let's handle both string and map cases
+	var bodyContent string
+	if bodyStr, ok := responseData["body"].(string); ok {
+		bodyContent = bodyStr
+	} else if bodyMap, ok := responseData["body"].(map[string]interface{}); ok {
+		// If body is a map, convert it to string for checking
+		if bodyBytes, err := json.Marshal(bodyMap); err == nil {
+			bodyContent = string(bodyBytes)
+		} else {
+			t.Errorf("Failed to marshal body map to string: %v", err)
+			return
+		}
+	} else {
+		t.Errorf("Response body is neither string nor map, got type: %T", responseData["body"])
+		return
+	}
+
+	if !strings.Contains(bodyContent, "httpbin.org") {
+		maxLen := 100
+		if len(bodyContent) < maxLen {
+			maxLen = len(bodyContent)
+		}
+		t.Errorf("Invalid output data. Expected body to contain 'httpbin.org' but got: %s", bodyContent[:maxLen]+"...")
+	}
+
+	// If we get the status back it also reflected
+	executionStatus, err := n.GetExecutionStatus(testutil.TestUser1(), &avsproto.ExecutionReq{
+		TaskId:      result.Id,
+		ExecutionId: resultTrigger.ExecutionId,
+	})
+	if err != nil {
+		t.Fatalf("Error getting execution status after processing: %v", err)
+	}
+
+	if executionStatus.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_COMPLETED {
+		t.Errorf("expected status to be completed but got %v", executionStatus.Status)
+	}
+
+	// Verify TaskTriggerKey is cleaned up after successful async execution
+	triggerKeyBytes := TaskTriggerKey(result, resultTrigger.ExecutionId)
+	val, errDbRead := db.GetKey(triggerKeyBytes)
+	if errDbRead == nil {
+		t.Errorf("Expected TaskTriggerKey '%s' to be deleted after async execution, but it was found with value: %s", string(triggerKeyBytes), string(val))
+	} else if !strings.Contains(errDbRead.Error(), "Key not found") {
+		// Allow "Key not found", but log other errors
+		t.Logf("Got an unexpected error when checking for deleted TaskTriggerKey '%s': %v. This might be okay if it implies not found.", string(triggerKeyBytes), errDbRead)
 	}
 }
 
@@ -615,10 +672,15 @@ func TestTriggerAsync(t *testing.T) {
 		t.Errorf("wrong success result, expected true got false. Error: %s", execution.Error)
 	}
 
-	// Now that trigger steps are included, we should have at least 2 steps (trigger + REST API node)
-	if len(execution.Steps) < 2 {
-		t.Errorf("Expected at least 2 steps (trigger + node), but got %d", len(execution.Steps))
+	// Now that trigger steps are included, we should have at least 2 steps (trigger + node)
+	if len(execution.Steps) != 2 {
+		t.Errorf("Expected 2 steps (trigger + node), but got %d", len(execution.Steps))
 		return
+	}
+
+	// Verify the first step is the trigger step
+	if execution.Steps[0].Type != avsproto.TriggerType_TRIGGER_TYPE_BLOCK.String() {
+		t.Errorf("First step should be trigger step, but got: %s", execution.Steps[0].Type)
 	}
 
 	if execution.Steps[1].Id != "ping1" {
