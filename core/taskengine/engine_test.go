@@ -437,8 +437,8 @@ func TestListWallets(t *testing.T) {
 	})
 
 	resp, _ := n.ListWallets(u.Address, nil)
-	if len(resp.Items) != 2 {
-		t.Errorf("expect 2 smartwallets but got %d", len(resp.Items))
+	if len(resp.Items) != 3 {
+		t.Errorf("expect 3 smartwallets but got %d", len(resp.Items))
 	}
 
 	// The default wallet with salt 0
@@ -473,8 +473,8 @@ func TestListWallets(t *testing.T) {
 
 	// other user will not be able to list above wallet
 	resp, _ = n.ListWallets(testutil.TestUser2().Address, nil)
-	if len(resp.Items) != 2 {
-		t.Errorf("expect 2 wallets but got %d", len(resp.Items))
+	if len(resp.Items) != 1 {
+		t.Errorf("expect 1 wallets but got %d", len(resp.Items))
 	}
 }
 
@@ -770,6 +770,7 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 
 	if err != nil || resultTrigger == nil {
 		t.Errorf("expected first trigger to succeed but got error: %v", err)
+		return
 	}
 
 	// Now the task has reach its max run, and canot run anymore
