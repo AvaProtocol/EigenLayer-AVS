@@ -134,15 +134,18 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", queueData)
 		runTaskErr = err
 	} else {
-		// Create and add a trigger execution step before running nodes (matching SimulateTask behavior)
+		// Create and add a trigger execution step before running nodes
+		// This ensures regular workflows have complete execution history (trigger + nodes)
+
+		// Create trigger step similar to SimulateTask
 		triggerStep := &avsproto.Execution_Step{
 			Id:      task.Trigger.Id,
 			Success: true,
 			Error:   "",
 			StartAt: t0.UnixMilli(),
 			EndAt:   t0.UnixMilli(),
-			Log:     fmt.Sprintf("Executed trigger: %s", task.Trigger.Name),
-			Inputs:  []string{}, // No inputs for trigger steps
+			Log:     fmt.Sprintf("Trigger: %s executed successfully", task.Trigger.Name),
+			Inputs:  []string{}, // Empty inputs for trigger steps
 			Type:    queueData.TriggerType.String(),
 			Name:    task.Trigger.Name,
 		}

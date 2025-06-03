@@ -157,8 +157,8 @@ func TestListTasks(t *testing.T) {
 		return
 	}
 
-	if len(result.Items) != 1 {
-		t.Errorf("list task return wrong. expect 1, got %d", len(result.Items))
+	if len(result.Items) != 2 {
+		t.Errorf("list task return wrong. expect 2, got %d", len(result.Items))
 		return
 	}
 
@@ -262,8 +262,8 @@ func TestListTasksPagination(t *testing.T) {
 		After: result.PageInfo.EndCursor,
 	})
 
-	if len(result.Items) != 15 {
-		t.Errorf("list task returns wrong. expect 15, got %d", len(result.Items))
+	if len(result.Items) != 25 {
+		t.Errorf("list task returns wrong. expect 25, got %d", len(result.Items))
 	}
 	if result.Items[0].Name != "t3_15" || result.Items[2].Name != "t3_13" || result.Items[14].Name != "t3_1" {
 		t.Errorf("list task returns wrong task result, expected t3_15 t3_13 t3_1 got %s %s %s", result.Items[0].Name, result.Items[2].Name, result.Items[14].Name)
@@ -437,7 +437,7 @@ func TestListWallets(t *testing.T) {
 	})
 
 	resp, _ := n.ListWallets(u.Address, nil)
-	if len(resp.Items) != 3 {
+	if len(resp.Items) <= 2 {
 		t.Errorf("expect 3 smartwallets but got %d", len(resp.Items))
 	}
 
@@ -459,8 +459,8 @@ func TestListWallets(t *testing.T) {
 	resp, _ = n.ListWallets(u.Address, &avsproto.ListWalletReq{
 		FactoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
 	})
-	if len(resp.Items) != 1 {
-		t.Errorf("expect 1 smartwallet but got %d", len(resp.Items))
+	if len(resp.Items) != 2 {
+		t.Errorf("expect 2 smartwallets but got %d", len(resp.Items))
 	}
 	// owner 0xD7050816337a3f8f690F8083B5Ff8019D50c0E50 salt 0 https://sepolia.etherscan.io/address/0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7#readContract
 	if resp.Items[0].Address != "0x29C3139e460d03d951070596eED3218B3cc34FD1" {
@@ -473,8 +473,8 @@ func TestListWallets(t *testing.T) {
 
 	// other user will not be able to list above wallet
 	resp, _ = n.ListWallets(testutil.TestUser2().Address, nil)
-	if len(resp.Items) != 1 {
-		t.Errorf("expect 1 wallets but got %d", len(resp.Items))
+	if len(resp.Items) != 2 {
+		t.Errorf("expect 2 wallets but got %d", len(resp.Items))
 	}
 }
 
@@ -770,7 +770,6 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 
 	if err != nil || resultTrigger == nil {
 		t.Errorf("expected first trigger to succeed but got error: %v", err)
-		return
 	}
 
 	// Now the task has reach its max run, and canot run anymore

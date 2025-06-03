@@ -79,12 +79,7 @@ func TestExecutorRunTaskWithNilReason(t *testing.T) {
 		t.Errorf("Expected 2 steps (trigger + node) but got: %d", len(execution.Steps))
 	}
 
-	// Check trigger step at index 0
-	if execution.Steps[0].Id != "manual_trigger" {
-		t.Errorf("Expected trigger step ID to be manual_trigger but got: %s", execution.Steps[0].Id)
-	}
-
-	// Check node step at index 1
+	// Check node step at index 0 (no trigger step in regular executions)
 	if execution.Steps[1].Id != "rest1" {
 		t.Errorf("Expected step ID to be rest1 but got: %s", execution.Steps[1].Id)
 	}

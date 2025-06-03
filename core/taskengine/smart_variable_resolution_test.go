@@ -106,7 +106,7 @@ func TestSmartVariableResolution(t *testing.T) {
 	})
 
 	t.Run("DirectCamelCaseAccess", func(t *testing.T) {
-		// DEMONSTRATES: Direct camelCase access still works (backward compatibility)
+		// DEMONSTRATES: Direct camelCase access still works
 		// Template: {{triggerNode.data.blockNumber}} -> Data: triggerNode.data.blockNumber
 		// Expected: Direct path resolution succeeds without fallback needed
 

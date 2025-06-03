@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,6 +30,10 @@ func TestSimulateTask_ManualTriggerWithCustomCode(t *testing.T) {
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger_1",
 		Name: "manual",
+		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
+		TriggerType: &avsproto.TaskTrigger_Manual{
+			Manual: true,
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -54,16 +59,13 @@ func TestSimulateTask_ManualTriggerWithCustomCode(t *testing.T) {
 	}
 
 	// Simulate the task with provided definition
-	triggerConfig := map[string]interface{}{
-		"manual": true,
-	}
 	inputVariables := map[string]interface{}{
 		"testInput": map[string]interface{}{
 			"data": "test value",
 		},
 	}
 
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, NodeTypeManualTrigger, triggerConfig, inputVariables)
+	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
 
 	// Verify the simulation was successful
 	assert.NoError(t, err)
@@ -110,6 +112,14 @@ func TestSimulateTask_FixedTimeTriggerWithRestAPI(t *testing.T) {
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger_1",
 		Name: "time_trigger",
+		Type: avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME,
+		TriggerType: &avsproto.TaskTrigger_FixedTime{
+			FixedTime: &avsproto.FixedTimeTrigger{
+				Config: &avsproto.FixedTimeTrigger_Config{
+					Epochs: []int64{time.Now().Unix() + 60}, // 1 minute from now
+				},
+			},
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -139,10 +149,9 @@ func TestSimulateTask_FixedTimeTriggerWithRestAPI(t *testing.T) {
 	}
 
 	// Simulate the task with provided definition
-	triggerConfig := map[string]interface{}{} // Fixed time trigger doesn't need config
 	inputVariables := map[string]interface{}{}
 
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, NodeTypeFixedTimeTrigger, triggerConfig, inputVariables)
+	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
 
 	// Verify the simulation was successful
 	assert.NoError(t, err)
@@ -188,6 +197,10 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger_1",
 		Name: "manual",
+		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
+		TriggerType: &avsproto.TaskTrigger_Manual{
+			Manual: true,
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -256,12 +269,9 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 	}
 
 	// Simulate the task with provided definition
-	triggerConfig := map[string]interface{}{
-		"manual": true,
-	}
 	inputVariables := map[string]interface{}{}
 
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, NodeTypeManualTrigger, triggerConfig, inputVariables)
+	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
 
 	// Verify the simulation was successful
 	assert.NoError(t, err)
@@ -309,10 +319,9 @@ func TestSimulateTask_TaskNotFound(t *testing.T) {
 	user := testutil.TestUser1()
 
 	// Test with invalid trigger (nil trigger should cause validation error)
-	triggerConfig := map[string]interface{}{}
 	inputVariables := map[string]interface{}{}
 
-	execution, err := engine.SimulateTask(user, nil, nil, nil, NodeTypeManualTrigger, triggerConfig, inputVariables)
+	execution, err := engine.SimulateTask(user, nil, nil, nil, inputVariables)
 
 	// Verify the simulation failed with appropriate error
 	assert.Error(t, err)
@@ -334,10 +343,11 @@ func TestSimulateTask_InvalidTriggerType(t *testing.T) {
 
 	user := testutil.TestUser1()
 
-	// Define valid task components
+	// Define valid task components but with invalid trigger type
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger_1",
 		Name: "manual",
+		Type: avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED, // Invalid trigger type
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -363,15 +373,14 @@ func TestSimulateTask_InvalidTriggerType(t *testing.T) {
 	}
 
 	// Try to simulate with invalid trigger type
-	triggerConfig := map[string]interface{}{}
 	inputVariables := map[string]interface{}{}
 
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, "invalid_trigger_type", triggerConfig, inputVariables)
+	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
 
 	// Verify the simulation failed with appropriate error
 	assert.Error(t, err)
 	assert.Nil(t, execution)
-	assert.Contains(t, err.Error(), "failed to simulate trigger")
+	assert.Contains(t, err.Error(), "unsupported trigger type")
 }
 
 func TestSimulateTask_InputsListBugs(t *testing.T) {
@@ -392,6 +401,10 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger1",
 		Name: "manual trigger", // Exact name from JS test
+		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
+		TriggerType: &avsproto.TaskTrigger_Manual{
+			Manual: true,
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -417,7 +430,6 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 	}
 
 	// Simulate the task with exact parameters from JavaScript test
-	triggerConfig := map[string]interface{}{} // Empty like JS test
 	inputVariables := map[string]interface{}{
 		"testInput": "test value",
 		"userConfig": map[string]interface{}{
@@ -426,7 +438,7 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 		},
 	} // Add some input variables to test trigger inputs
 
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, NodeTypeManualTrigger, triggerConfig, inputVariables)
+	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
 
 	// Verify the simulation was successful
 	assert.NoError(t, err)
@@ -557,6 +569,10 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger1",
 		Name: "manual trigger",
+		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
+		TriggerType: &avsproto.TaskTrigger_Manual{
+			Manual: true,
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -585,7 +601,6 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 	}
 
 	// Test case: Include 'trigger' as an actual input variable
-	triggerConfig := map[string]interface{}{}
 	inputVariables := map[string]interface{}{
 		"trigger": map[string]interface{}{
 			"userValue": "user provided trigger data",
@@ -593,7 +608,7 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 		"otherInput": "some other value",
 	}
 
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, NodeTypeManualTrigger, triggerConfig, inputVariables)
+	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
 
 	// Verify the simulation was successful
 	assert.NoError(t, err)

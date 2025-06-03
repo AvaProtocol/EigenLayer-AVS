@@ -1266,11 +1266,7 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 
 // preprocessText is the original template processing function
 //
-// Used by: Legacy code and tests that expect original behavior
 // Returns: Removes failed expressions entirely (empty string replacement)
-//
-// This maintains backward compatibility with existing tests while the enhanced
-// preprocessTextWithVariableMapping provides smart resolution for production use.
 func (v *VM) preprocessText(text string) string {
 	if !strings.Contains(text, "{{") || !strings.Contains(text, "}}") {
 		return text
