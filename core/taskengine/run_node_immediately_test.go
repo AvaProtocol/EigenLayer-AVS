@@ -247,14 +247,37 @@ func TestRunNodeImmediately_TriggerTypes(t *testing.T) {
 		assert.IsType(t, "", result["timestamp_iso"])
 	})
 
-	// Test EventTrigger immediate execution (simulation)
+	// Test EventTrigger immediate execution (real RPC call)
 	t.Run("EventTrigger", func(t *testing.T) {
 		result, err := engine.RunNodeImmediately(NodeTypeEventTrigger, map[string]interface{}{}, map[string]interface{}{})
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Contains(t, result, "simulated")
-		assert.Equal(t, true, result["simulated"])
-		assert.Contains(t, result, "message")
+
+		// The new implementation makes real RPC calls and returns event search results
+		assert.Contains(t, result, "found")
+		assert.Contains(t, result, "topicHash")
+		assert.Contains(t, result, "totalSearched")
+
+		// Check if we found events or not
+		if found, ok := result["found"].(bool); ok {
+			if found {
+				// If events found, should have evm_log data
+				assert.Contains(t, result, "evm_log")
+				assert.Contains(t, result, "totalEvents")
+			} else {
+				// If no events found, should have appropriate message
+				assert.Contains(t, result, "message")
+				// Should have searched at least 0 blocks
+				if totalSearched, ok := result["totalSearched"].(uint64); ok {
+					assert.GreaterOrEqual(t, totalSearched, uint64(0))
+				}
+			}
+		}
+
+		// Should always have the default Transfer event topic hash when no expression provided
+		if topicHash, ok := result["topicHash"].(string); ok {
+			assert.Equal(t, "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", topicHash)
+		}
 	})
 
 	// Test ManualTrigger immediate execution

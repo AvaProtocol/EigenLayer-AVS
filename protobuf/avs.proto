@@ -1009,7 +1009,5 @@ message SimulateTaskReq {
   TaskTrigger trigger = 1; // The trigger configuration
   repeated TaskNode nodes = 2; // All workflow nodes
   repeated TaskEdge edges = 3; // All edges connecting the nodes
-  TriggerType trigger_type = 4; // Type of trigger to simulate using the TriggerType enum
-  map<string, google.protobuf.Value> trigger_config = 5; // Configuration for the trigger simulation
   map<string, google.protobuf.Value> input_variables = 6; // Input variables for the simulation
 }

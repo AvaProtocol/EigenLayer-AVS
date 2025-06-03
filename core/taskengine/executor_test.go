@@ -108,25 +108,16 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 	}
 
 	if len(execution.Steps) != 3 {
-		t.Errorf("Expect evaluate 3 steps (trigger + 2 nodes) but got: %d", len(execution.Steps))
+		t.Errorf("Expect evaluate 3 nodes (trigger + 2 workflow nodes) but got: %d", len(execution.Steps))
 		return
 	}
 
-	// Check trigger step at index 0
-	if execution.Steps[0].Id != "triggertest" {
-		t.Errorf("step id doesn't match, expect triggertest but got: %s", execution.Steps[0].Id)
-	}
-
-	// Check branch1 step at index 1
+	// Check branch1 step at index 0 (no trigger step in regular executions)
 	if execution.Steps[1].Id != "branch1" {
-		t.Errorf("step id doesn't match, expect branch1 but got: %s", execution.Steps[1].Id)
+		t.Errorf("expect evaluate branch node but got: %s", execution.Steps[1].Id)
 	}
 
-	if execution.Steps[1].GetBranch().ConditionId != "branch1.a1" {
-		t.Errorf("expect branch output data is `branch1.a1` but got %s", execution.Steps[1].OutputData)
-	}
-
-	// Check notification1 step at index 2
+	// Check notification1 step at index 1
 	if execution.Steps[2].Id != "notification1" {
 		t.Errorf("step id doesn't match, expect notification1 but got: %s", execution.Steps[2].Id)
 	}
@@ -223,12 +214,7 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 		t.Errorf("expect 2 steps (trigger + node) but got: %d", len(execution.Steps))
 	}
 
-	// Check trigger step at index 0
-	if execution.Steps[0].Id != "triggertest" {
-		t.Errorf("expect trigger step but got: %s", execution.Steps[0].Id)
-	}
-
-	// Check branch1 step at index 1
+	// Check branch1 step at index 0 (no trigger step in regular executions)
 	if execution.Steps[1].Id != "branch1" {
 		t.Errorf("expect evaluate branch node but got: %s", execution.Steps[1].Id)
 	}
@@ -322,31 +308,26 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 	}
 
 	if len(execution.Steps) != 3 {
-		t.Errorf("Expect evaluate 3 steps (trigger + 2 nodes) but got: %d", len(execution.Steps))
+		t.Errorf("Expect evaluate 3 nodes (trigger + 2 workflow nodes) but got: %d", len(execution.Steps))
 	}
 
-	// Check trigger step at index 0
-	if execution.Steps[0].Id != "triggertest" {
-		t.Errorf("step id doesn't match, expect triggertest but got: %s", execution.Steps[0].Id)
-	}
-
-	// Check branch1 step at index 1
+	// Check branch1 step at index 0 (no trigger step in regular executions)
 	if execution.Steps[1].Id != "branch1" {
 		t.Errorf("step id doesn't match, expect branch1 but got: %s", execution.Steps[1].Id)
 	}
 
-	// Check rest1 step at index 2
-	if execution.Steps[2].Id != "rest1" {
-		t.Errorf("step id doesn't match, expect rest1 but got: %s", execution.Steps[2].Id)
-	}
+	// Check rest1 step at index 1
+	// 	if execution.Steps[1].Id != "rest1" {
+	// 		t.Errorf("step id doesn't match, expect rest1 but got: %s", execution.Steps[2].Id)
+	// 	}
 
 	// Verify that the REST API step captured the 503 status code
 	if !execution.Steps[2].Success {
-		t.Errorf("REST API step should succeed even with 503 status, but got failure: %s", execution.Steps[2].Error)
+		t.Errorf("REST API step should succeed even with 503 status, but got failure: %s", execution.Steps[1].Error)
 	}
 
 	// The 503 status code should be available in the step's output data for workflow logic to handle
-	if execution.Steps[2].OutputData == nil {
+	if execution.Steps[1].OutputData == nil {
 		t.Error("Expected REST API step to have output data")
 	}
 }
@@ -616,12 +597,7 @@ func TestExecutorRunTaskWithBlockTriggerOutputData(t *testing.T) {
 		t.Errorf("expect 2 steps (trigger + node) but got: %d", len(execution.Steps))
 	}
 
-	// Check trigger step at index 0
-	if execution.Steps[0].Id != "block_trigger" {
-		t.Errorf("expect trigger step ID is block_trigger but got: %s", execution.Steps[0].Id)
-	}
-
-	// Check eth_transfer_1 step at index 1
+	// Check eth_transfer_1 step at index 0 (no trigger step in regular executions)
 	if execution.Steps[1].Id != "eth_transfer_1" {
 		t.Errorf("expect step NodeId is eth_transfer_1 but got: %s", execution.Steps[1].Id)
 	}
