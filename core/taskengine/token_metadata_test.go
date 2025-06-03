@@ -45,10 +45,16 @@ func TestLoadWhitelist(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	// Create token_whitelist directory inside tempDir
-	whitelistDir := filepath.Join(tempDir, "token_whitelist")
-	err = os.Mkdir(whitelistDir, 0755)
+	// Change to temp directory
+	originalWd, _ := os.Getwd()
+	err = os.Chdir(tempDir)
 	require.NoError(t, err)
+	defer os.Chdir(originalWd)
+
+	// Create token_whitelist directory
+	err = os.Mkdir("token_whitelist", 0755)
+	require.NoError(t, err)
+
 	// Create test ethereum.json
 	testTokens := `[
 		{

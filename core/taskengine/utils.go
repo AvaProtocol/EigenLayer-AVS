@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"os"
-	"path/filepath"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/modules"
@@ -15,57 +13,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/shopspring/decimal"
 )
-
-// FindProjectRoot walks up the directory tree to find the project root (where go.mod is located)
-func FindProjectRoot() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-
-	for {
-		// Check if go.mod exists in current directory
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, nil
-		}
-
-		// Move up one directory
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			// Reached the root of the filesystem
-			break
-		}
-		dir = parent
-	}
-
-	return "", fmt.Errorf("go.mod not found in any parent directory")
-}
-
-// NewGojaVM creates a new Goja runtime and applies standard configurations.
-func NewGojaVM() *goja.Runtime {
-	vm := goja.New()
-	macros.ConfigureGojaRuntime(vm)
-	return vm
-}
-
-// NewGojaVMWithModules creates a new Goja runtime with module support.
-func NewGojaVMWithModules() (*goja.Runtime, *modules.Registry, error) {
-	vm := goja.New()
-	macros.ConfigureGojaRuntime(vm)
-
-	registry := modules.NewRegistry()
-
-	builtinLoader := modules.NewBuiltinLoader()
-	if err := builtinLoader.RegisterBuiltinLibraries(); err != nil {
-		return nil, nil, err
-	}
-
-	registry.RegisterLoader("lodash", builtinLoader)
-	registry.RegisterLoader("dayjs", builtinLoader)
-	registry.RegisterLoader("uuid", builtinLoader)
-
-	return vm, registry, nil
-}
 
 // Metadata holds token and block metadata
 type Metadata struct {
@@ -174,4 +121,30 @@ func ToDecimal(ivalue interface{}, decimals int) decimal.Decimal {
 	result := num.Div(mul)
 
 	return result
+}
+
+// NewGojaVM creates a new Goja runtime and applies standard configurations.
+func NewGojaVM() *goja.Runtime {
+	vm := goja.New()
+	macros.ConfigureGojaRuntime(vm)
+	return vm
+}
+
+// NewGojaVMWithModules creates a new Goja runtime with module support.
+func NewGojaVMWithModules() (*goja.Runtime, *modules.Registry, error) {
+	vm := goja.New()
+	macros.ConfigureGojaRuntime(vm)
+
+	registry := modules.NewRegistry()
+
+	builtinLoader := modules.NewBuiltinLoader()
+	if err := builtinLoader.RegisterBuiltinLibraries(); err != nil {
+		return nil, nil, err
+	}
+
+	registry.RegisterLoader("lodash", builtinLoader)
+	registry.RegisterLoader("dayjs", builtinLoader)
+	registry.RegisterLoader("uuid", builtinLoader)
+
+	return vm, registry, nil
 }
