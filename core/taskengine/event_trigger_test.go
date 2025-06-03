@@ -275,8 +275,8 @@ func TestEventTriggerDifferentExpressions(t *testing.T) {
 			if _, ok := result["found"]; !ok {
 				t.Error("Result should have 'found' field")
 			}
-			if _, ok := result["searchExpression"]; !ok {
-				t.Error("Result should have 'searchExpression' field")
+			if _, ok := result["expression"]; !ok {
+				t.Error("Result should have 'expression' field")
 			}
 			if _, ok := result["topicHash"]; !ok {
 				t.Error("Result should have 'topicHash' field")
