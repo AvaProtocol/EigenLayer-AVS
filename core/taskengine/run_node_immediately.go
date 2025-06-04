@@ -1411,6 +1411,9 @@ func isExpectedValidationError(err error) bool {
 		"parameter validation failed:",
 		"node configuration error:",
 		"template processing failed:",
+		"unknown node type for node ID",                     // Filter node execution errors
+		"branch node requires conditionsList configuration", // Branch node configuration errors
+		"failed to create node:",                            // Node creation errors
 	}
 
 	for _, pattern := range validationErrorPatterns {
