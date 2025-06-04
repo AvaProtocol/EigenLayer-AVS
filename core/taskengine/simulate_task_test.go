@@ -43,7 +43,7 @@ func TestSimulateTask_ManualTriggerWithCustomCode(t *testing.T) {
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
-						Source: `({ message: "Hello from trigger: " + trigger.data.triggered })`,
+						Source: `({ message: "Hello from trigger: " + manual.data.triggered })`,
 					},
 				},
 			},
@@ -214,7 +214,7 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 							{
 								Id:         "condition_1",
 								Type:       "if",
-								Expression: "trigger.data.triggered === true",
+								Expression: "manual.data.triggered === true",
 							},
 							{
 								Id:         "else",
@@ -501,19 +501,19 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 		}
 	}
 
-	// 'trigger.data' should exist as a convenience variable for JavaScript access
-	if hasTriggerData {
-		t.Logf("✅ Custom code step correctly contains 'trigger.data' (convenience variable for JS access)")
+	// Per user requirements: NO hardcoded 'trigger.data' convenience variable
+	if !hasTriggerData {
+		t.Logf("✅ No hardcoded 'trigger.data' convenience variable (as requested - only dynamic trigger names)")
 	} else {
-		t.Errorf("❌ Missing 'trigger.data' convenience variable in: %v", codeStep.Inputs)
-		t.Logf("The 'trigger' convenience variable should always be available for JavaScript access")
+		t.Errorf("❌ Found unexpected 'trigger.data' convenience variable in: %v", codeStep.Inputs)
+		t.Logf("User requested NO backward compatibility - only dynamic trigger names should work")
 	}
 
 	// Verify 'manual_trigger.data' exists (normalized name from trigger name "manual trigger")
 	if hasManualTriggerData {
 		t.Logf("✅ Custom code step correctly contains 'manual_trigger.data'")
 	} else {
-		t.Logf("❓ Expected 'manual_trigger.data' not found in: %v", codeStep.Inputs)
+		t.Errorf("❌ Expected 'manual_trigger.data' not found in: %v", codeStep.Inputs)
 	}
 
 	// Print detailed analysis
@@ -530,12 +530,12 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 
 	t.Logf("Step 2 (Node '%s'):", codeStep.Name)
 	t.Logf("  Inputs: %v", codeStep.Inputs)
-	t.Logf("  Contains 'trigger.data': %v (should be true)", hasTriggerData)
+	t.Logf("  Contains 'trigger.data': %v (should be false)", hasTriggerData)
 	t.Logf("  Contains 'manual_trigger.data': %v (should be true)", hasManualTriggerData)
 
 	t.Logf("\n=== EXPECTED FIXES ===")
 	t.Logf("1. Trigger step inputs should be: %v", expectedTriggerInputs)
-	t.Logf("2. Keep 'trigger.data' (convenience variable for JavaScript access)")
+	t.Logf("2. Remove 'trigger.data' (convenience variable for JavaScript access)")
 	t.Logf("3. Keep 'manual_trigger.data' (normalized from trigger name 'manual trigger')")
 
 	t.Logf("\n=== TROUBLESHOOTING SUMMARY ===")
@@ -544,11 +544,11 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 	t.Logf("  Solution: Extract keys from inputVariables and use as trigger inputs")
 	t.Logf("  Result: Trigger step correctly receives input variables")
 
-	t.Logf("✅ BEHAVIOR 2: 'trigger.data' is a convenience variable")
-	t.Logf("  File: core/taskengine/engine.go:1077")
-	t.Logf("  Purpose: vm.AddVar(\"trigger\", map[string]any{\"data\": triggerDataMap})")
-	t.Logf("  Result: JavaScript can access trigger.data regardless of trigger name")
-	t.Logf("  This is intended behavior, not a bug")
+	t.Logf("✅ FIX 2: No hardcoded 'trigger.data' convenience variable")
+	t.Logf("  File: core/taskengine/engine.go:1169-1170")
+	t.Logf("  Change: Removed vm.AddVar(\"trigger\", map[string]any{\"data\": triggerDataMap})")
+	t.Logf("  Result: Only dynamic trigger names work (e.g., manual_trigger.data)")
+	t.Logf("  Rationale: User requested no backward compatibility, no hardcoded trigger references")
 }
 
 func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
@@ -583,8 +583,8 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
 						Source: `return { 
-							convenientTrigger: trigger.data.triggered,
-							userTrigger: trigger.data.userValue  
+							convenientTrigger: manual_trigger.data.triggered,
+							userTrigger: manual_trigger.data.userValue  
 						};`,
 					},
 				},
@@ -627,20 +627,20 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 	// Verify custom code step
 	codeStep := execution.Steps[1]
 
-	// Should have both convenience trigger.data AND user-provided trigger.data
-	hasTriggerData := false
+	// Check if manual_trigger.data exists (the dynamic trigger name)
+	hasManualTriggerData := false
 	for _, input := range codeStep.Inputs {
-		if input == "trigger.data" {
-			hasTriggerData = true
+		if input == "manual_trigger.data" {
+			hasManualTriggerData = true
 			break
 		}
 	}
 
-	assert.True(t, hasTriggerData, "Should have trigger.data from both convenience variable and user input")
+	assert.True(t, hasManualTriggerData, "Should have manual_trigger.data (dynamic trigger name)")
 
 	t.Logf("\n=== TRIGGER VARIABLE TEST ===")
 	t.Logf("Input variables provided: %v", []string{"trigger", "otherInput"})
 	t.Logf("Trigger step inputs: %v", triggerStep.Inputs)
 	t.Logf("Custom code step inputs: %v", codeStep.Inputs)
-	t.Logf("Result: When 'trigger' is provided as input variable, it merges with convenience trigger")
+	t.Logf("Result: Only dynamic trigger names work (no hardcoded 'trigger' convenience variable)")
 }

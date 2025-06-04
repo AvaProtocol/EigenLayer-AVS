@@ -1166,8 +1166,8 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		}
 	}
 
-	// Add the universal "trigger" variable for JavaScript access
-	vm.AddVar("trigger", map[string]any{"data": triggerDataMap})
+	// Add the trigger variable with the actual trigger name for JavaScript access
+	vm.AddVar(trigger.GetName(), map[string]any{"data": triggerDataMap})
 
 	// Step 6: Compile the workflow
 	t0 := time.Now()
@@ -1244,24 +1244,6 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	n.logger.Info("workflow simulation completed successfully", "task_id", task.Id, "simulation_id", simulationID, "steps", len(execution.Steps))
 	return execution, nil
-}
-
-// triggerTypeStringToEnum converts trigger type string to enum
-func triggerTypeStringToEnum(triggerType string) avsproto.TriggerType {
-	switch triggerType {
-	case NodeTypeBlockTrigger:
-		return avsproto.TriggerType_TRIGGER_TYPE_BLOCK
-	case NodeTypeFixedTimeTrigger:
-		return avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME
-	case NodeTypeCronTrigger:
-		return avsproto.TriggerType_TRIGGER_TYPE_CRON
-	case NodeTypeEventTrigger:
-		return avsproto.TriggerType_TRIGGER_TYPE_EVENT
-	case NodeTypeManualTrigger:
-		return avsproto.TriggerType_TRIGGER_TYPE_MANUAL
-	default:
-		return avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED
-	}
 }
 
 // List Execution for a given task id

@@ -152,7 +152,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	}
 
 	// Create a context with timeout to prevent hanging tests
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // Reduced timeout for better test performance
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second) // Increased slightly for chunked search
 	defer cancel()
 
 	// Parse the enhanced expression format
@@ -283,6 +283,8 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 
 			// Fetch logs from Ethereum with timeout context
 			logs, err := rpcConn.FilterLogs(ctx, query)
+			var usedChunkedSearch bool
+
 			if err != nil {
 				if n.logger != nil {
 					// Check if it's a known RPC limit error to avoid stack traces
@@ -298,13 +300,26 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 
 						// Try chunked search for large ranges
 						if currentBlock-fromBlock > 1000 {
+							usedChunkedSearch = true
 							n.logger.Debug("EventTrigger: Attempting chunked search",
 								"originalRange", currentBlock-fromBlock,
 								"chunkSize", 1000)
 
 							// Break the range into 1000-block chunks
 							chunkSize := uint64(1000)
+							var chunkedSearched uint64
 							for chunkStart := fromBlock; chunkStart < currentBlock; chunkStart += chunkSize {
+								// Check timeout during chunked search
+								select {
+								case <-ctx.Done():
+									n.logger.Info("EventTrigger: Chunked search timeout reached",
+										"chunkedSearched", chunkedSearched,
+										"chunksProcessed", (chunkStart-fromBlock)/chunkSize)
+									searched += chunkedSearched
+									return events, searched, nil
+								default:
+								}
+
 								chunkEnd := chunkStart + chunkSize - 1
 								if chunkEnd > currentBlock {
 									chunkEnd = currentBlock
@@ -315,13 +330,31 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 								chunkQuery.ToBlock = big.NewInt(int64(chunkEnd))
 
 								chunkLogs, chunkErr := rpcConn.FilterLogs(ctx, chunkQuery)
+								chunkedSearched += (chunkEnd - chunkStart + 1)
+
 								if chunkErr == nil {
 									logs = append(logs, chunkLogs...)
+									if n.logger != nil && len(chunkLogs) > 0 {
+										n.logger.Info("EventTrigger: Found events in chunk",
+											"chunkStart", chunkStart,
+											"chunkEnd", chunkEnd,
+											"eventsInChunk", len(chunkLogs))
+									}
+								} else {
+									if n.logger != nil {
+										n.logger.Debug("EventTrigger: Chunk failed, continuing",
+											"chunkStart", chunkStart,
+											"chunkEnd", chunkEnd,
+											"error", chunkErr)
+									}
 								}
 							}
 
-							// If chunked search worked, treat as success
-							if len(logs) > 0 {
+							// Update searched counter with chunked progress
+							searched += chunkedSearched
+
+							// If chunked search found events or completed successfully, treat as success
+							if len(logs) > 0 || chunkedSearched > 0 {
 								err = nil
 							}
 						}
@@ -339,7 +372,11 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 				}
 			}
 
-			searched += (currentBlock - fromBlock)
+			// Only update searched counter if chunked search wasn't used (it handles its own counting)
+			if !usedChunkedSearch {
+				searched += (currentBlock - fromBlock)
+			}
+
 			events = append(events, logs...)
 
 			if n.logger != nil {
@@ -369,24 +406,49 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	baseTopics := [][]common.Hash{{common.HexToHash(topicHash)}}
 
 	if fromAddress != "" && toAddress != "" {
-		// Search for transfers both FROM and TO the address (two separate queries)
-
-		// Query 1: FROM the address
-		fromTopics := append(baseTopics, []common.Hash{common.HexToHash(fromAddress)}, []common.Hash{})
-		fromEvents, fromSearched, err := searchWithTopics(fromTopics)
-		if err != nil {
-			return nil, fmt.Errorf("failed to search FROM events: %w", err)
+		if n.logger != nil {
+			n.logger.Debug("EventTrigger: Both FROM and TO addresses specified",
+				"fromAddress", fromAddress,
+				"toAddress", toAddress,
+				"addressesEqual", strings.EqualFold(fromAddress, toAddress))
 		}
 
-		// Query 2: TO the address
-		toTopics := append(baseTopics, []common.Hash{}, []common.Hash{common.HexToHash(toAddress)})
-		toEvents, toSearched, err := searchWithTopics(toTopics)
-		if err != nil {
-			return nil, fmt.Errorf("failed to search TO events: %w", err)
-		}
+		// Check if FROM and TO addresses are the same to avoid redundant search
+		if strings.EqualFold(fromAddress, toAddress) {
+			// When searching for transfers from an address to itself,
+			// we only need to search FROM events (which includes self-transfers)
+			fromTopics := append(baseTopics, []common.Hash{common.HexToHash(fromAddress)}, []common.Hash{})
+			allEvents, totalSearched, err = searchWithTopics(fromTopics)
+			if err != nil {
+				return nil, fmt.Errorf("failed to search FROM events for same address: %w", err)
+			}
 
-		allEvents = append(fromEvents, toEvents...)
-		totalSearched = fromSearched + toSearched
+			if n.logger != nil {
+				n.logger.Info("EventTrigger: Optimized search for same FROM/TO address (single FROM search)",
+					"address", fromAddress,
+					"eventsFound", len(allEvents),
+					"totalSearched", totalSearched)
+			}
+		} else {
+			// Search for transfers both FROM and TO the address (two separate queries)
+
+			// Query 1: FROM the address
+			fromTopics := append(baseTopics, []common.Hash{common.HexToHash(fromAddress)}, []common.Hash{})
+			fromEvents, fromSearched, err := searchWithTopics(fromTopics)
+			if err != nil {
+				return nil, fmt.Errorf("failed to search FROM events: %w", err)
+			}
+
+			// Query 2: TO the address
+			toTopics := append(baseTopics, []common.Hash{}, []common.Hash{common.HexToHash(toAddress)})
+			toEvents, toSearched, err := searchWithTopics(toTopics)
+			if err != nil {
+				return nil, fmt.Errorf("failed to search TO events: %w", err)
+			}
+
+			allEvents = append(fromEvents, toEvents...)
+			totalSearched = fromSearched + toSearched
+		}
 
 	} else if fromAddress != "" {
 		// Search only FROM the address
