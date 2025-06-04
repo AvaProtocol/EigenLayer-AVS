@@ -604,7 +604,7 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 					triggerData.Output = enrichedEventOutput
 					n.logger.Debug("successfully enriched EventTrigger output",
 						"task_id", payload.TaskId,
-						"has_transfer_log", enrichedEventOutput.TransferLog != nil)
+						"has_transfer_log", enrichedEventOutput.GetTransferLog() != nil)
 				} else {
 					n.logger.Warn("failed to enrich EventTrigger output, using minimal data",
 						"task_id", payload.TaskId,
@@ -1953,9 +1953,7 @@ func (n *Engine) enrichEventTriggerFromOperatorData(minimalEvmLog *avsproto.Evm_
 		enrichedEvmLog.Topics[i] = topic.Hex()
 	}
 
-	enrichedOutput := &avsproto.EventTrigger_Output{
-		EvmLog: enrichedEvmLog,
-	}
+	enrichedOutput := &avsproto.EventTrigger_Output{}
 
 	// Check if this is a Transfer event and enrich with token metadata
 	isTransferEvent := len(targetLog.Topics) > 0 &&
@@ -1996,7 +1994,15 @@ func (n *Engine) enrichEventTriggerFromOperatorData(minimalEvmLog *avsproto.Evm_
 			// Continue without enrichment - partial data is better than no data
 		}
 
-		enrichedOutput.TransferLog = transferLog
+		// Use the oneof TransferLog field
+		enrichedOutput.OutputType = &avsproto.EventTrigger_Output_TransferLog{
+			TransferLog: transferLog,
+		}
+	} else {
+		// Regular event (not a transfer) - use the oneof EvmLog field
+		enrichedOutput.OutputType = &avsproto.EventTrigger_Output_EvmLog{
+			EvmLog: enrichedEvmLog,
+		}
 	}
 
 	return enrichedOutput, nil

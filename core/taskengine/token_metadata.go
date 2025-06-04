@@ -199,7 +199,7 @@ func (t *TokenEnrichmentService) GetTokenMetadata(contractAddress string) (*Toke
 	// Not in cache/whitelist, try RPC calls if available
 	if t.rpcClient == nil {
 		// No RPC client available and token not in whitelist
-		// Return nil to indicate not found rather than an error
+		// Return nil to indicate not found in whitelist-only mode
 		return nil, nil
 	}
 

@@ -82,30 +82,14 @@ func (c *CommonProcessor) GetOutputVar(stepID string) any {
 }
 
 type triggerDataType struct {
-	TransferLog *avsproto.EventTrigger_TransferLogOutput
-	EvmLog      *avsproto.Evm_Log
-	Block       *avsproto.BlockTrigger_Output
-	Time        *avsproto.FixedTimeTrigger_Output
-	Cron        *avsproto.CronTrigger_Output
-	Event       *avsproto.EventTrigger_Output
-	Manual      *avsproto.ManualTrigger_Output
+	Block  *avsproto.BlockTrigger_Output
+	Time   *avsproto.FixedTimeTrigger_Output
+	Cron   *avsproto.CronTrigger_Output
+	Event  *avsproto.EventTrigger_Output
+	Manual *avsproto.ManualTrigger_Output
 }
 
 func (t *triggerDataType) GetValue() avsproto.IsExecution_Step_OutputData {
-	if t.TransferLog != nil {
-		// For event triggers with transfer log data, use the event trigger output
-		eventOutput := &avsproto.EventTrigger_Output{
-			TransferLog: t.TransferLog,
-		}
-		return &avsproto.Execution_Step_EventTrigger{EventTrigger: eventOutput}
-	}
-	if t.EvmLog != nil {
-		// For event triggers with raw EVM log data
-		eventOutput := &avsproto.EventTrigger_Output{
-			EvmLog: t.EvmLog,
-		}
-		return &avsproto.Execution_Step_EventTrigger{EventTrigger: eventOutput}
-	}
 	if t.Event != nil {
 		return &avsproto.Execution_Step_EventTrigger{EventTrigger: t.Event}
 	}
@@ -325,9 +309,15 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 		if err == nil { // Proceed if trigger name is valid
 			var triggerDataMap map[string]interface{}
 
-			// If we have transfer log data, use it to populate rich trigger data
+			// If we have transfer log data, use it to populate rich trigger data and create proper Event structure
 			if transferLog != nil {
-				v.parsedTriggerData.TransferLog = transferLog
+				// Create EventTrigger_Output with oneof TransferLog
+				v.parsedTriggerData.Event = &avsproto.EventTrigger_Output{
+					OutputType: &avsproto.EventTrigger_Output_TransferLog{
+						TransferLog: transferLog,
+					},
+				}
+
 				triggerDataMap = map[string]interface{}{
 					"token_name":        transferLog.TokenName,
 					"token_symbol":      transferLog.TokenSymbol,

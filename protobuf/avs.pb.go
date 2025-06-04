@@ -5271,11 +5271,13 @@ func (x *EventTrigger_Config) GetExpression() string {
 
 type EventTrigger_Output struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// When the trigger is not a transfer event, we will have a raw event output only
-	// These shape of data is https://docs.ethers.org/v6/api/providers/#Log
-	EvmLog *Evm_Log `protobuf:"bytes,1,opt,name=evm_log,json=evmLog,proto3" json:"evm_log,omitempty"`
-	// For transfer events specifically, we have enriched data
-	TransferLog   *EventTrigger_TransferLogOutput `protobuf:"bytes,2,opt,name=transfer_log,json=transferLog,proto3" json:"transfer_log,omitempty"`
+	// Use oneof to ensure exactly one field is set
+	//
+	// Types that are valid to be assigned to OutputType:
+	//
+	//	*EventTrigger_Output_EvmLog
+	//	*EventTrigger_Output_TransferLog
+	OutputType    isEventTrigger_Output_OutputType `protobuf_oneof:"output_type"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5310,19 +5312,49 @@ func (*EventTrigger_Output) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{7, 2}
 }
 
+func (x *EventTrigger_Output) GetOutputType() isEventTrigger_Output_OutputType {
+	if x != nil {
+		return x.OutputType
+	}
+	return nil
+}
+
 func (x *EventTrigger_Output) GetEvmLog() *Evm_Log {
 	if x != nil {
-		return x.EvmLog
+		if x, ok := x.OutputType.(*EventTrigger_Output_EvmLog); ok {
+			return x.EvmLog
+		}
 	}
 	return nil
 }
 
 func (x *EventTrigger_Output) GetTransferLog() *EventTrigger_TransferLogOutput {
 	if x != nil {
-		return x.TransferLog
+		if x, ok := x.OutputType.(*EventTrigger_Output_TransferLog); ok {
+			return x.TransferLog
+		}
 	}
 	return nil
 }
+
+type isEventTrigger_Output_OutputType interface {
+	isEventTrigger_Output_OutputType()
+}
+
+type EventTrigger_Output_EvmLog struct {
+	// When the trigger is not a transfer event, we will have a raw event output only
+	// These shape of data is https://docs.ethers.org/v6/api/providers/#Log
+	EvmLog *Evm_Log `protobuf:"bytes,1,opt,name=evm_log,json=evmLog,proto3,oneof"`
+}
+
+type EventTrigger_Output_TransferLog struct {
+	// For transfer events specifically, we have enriched data
+	TransferLog *EventTrigger_TransferLogOutput `protobuf:"bytes,2,opt,name=transfer_log,json=transferLog,proto3,oneof"`
+}
+
+func (*EventTrigger_Output_EvmLog) isEventTrigger_Output_OutputType() {}
+
+func (*EventTrigger_Output_TransferLog) isEventTrigger_Output_OutputType() {}
 
 type EventTrigger_TransferLogOutput struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
@@ -7364,7 +7396,7 @@ const file_avs_proto_rawDesc = "" +
 	"difficulty\x18\x05 \x01(\tR\n" +
 	"difficulty\x12\x1b\n" +
 	"\tgas_limit\x18\x06 \x01(\x04R\bgasLimit\x12\x19\n" +
-	"\bgas_used\x18\a \x01(\x04R\agasUsed\"\xc5\x06\n" +
+	"\bgas_used\x18\a \x01(\x04R\agasUsed\"\xd8\x06\n" +
 	"\fEventTrigger\x127\n" +
 	"\x06config\x18\x01 \x01(\v2\x1f.aggregator.EventTrigger.ConfigR\x06config\x1a3\n" +
 	"\aMatcher\x12\x12\n" +
@@ -7374,10 +7406,11 @@ const file_avs_proto_rawDesc = "" +
 	"\amatcher\x18\x01 \x03(\v2 .aggregator.EventTrigger.MatcherR\amatcher\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x02 \x01(\tR\n" +
-	"expression\x1a\x85\x01\n" +
-	"\x06Output\x12,\n" +
-	"\aevm_log\x18\x01 \x01(\v2\x13.aggregator.Evm.LogR\x06evmLog\x12M\n" +
-	"\ftransfer_log\x18\x02 \x01(\v2*.aggregator.EventTrigger.TransferLogOutputR\vtransferLog\x1a\xd8\x03\n" +
+	"expression\x1a\x98\x01\n" +
+	"\x06Output\x12.\n" +
+	"\aevm_log\x18\x01 \x01(\v2\x13.aggregator.Evm.LogH\x00R\x06evmLog\x12O\n" +
+	"\ftransfer_log\x18\x02 \x01(\v2*.aggregator.EventTrigger.TransferLogOutputH\x00R\vtransferLogB\r\n" +
+	"\voutput_type\x1a\xd8\x03\n" +
 	"\x11TransferLogOutput\x12\x1d\n" +
 	"\n" +
 	"token_name\x18\x01 \x01(\tR\ttokenName\x12!\n" +
@@ -8267,6 +8300,10 @@ func file_avs_proto_init() {
 		(*RunTriggerResp_CronTrigger)(nil),
 		(*RunTriggerResp_EventTrigger)(nil),
 		(*RunTriggerResp_ManualTrigger)(nil),
+	}
+	file_avs_proto_msgTypes[71].OneofWrappers = []any{
+		(*EventTrigger_Output_EvmLog)(nil),
+		(*EventTrigger_Output_TransferLog)(nil),
 	}
 	file_avs_proto_msgTypes[96].OneofWrappers = []any{
 		(*Execution_Step_BlockTrigger)(nil),
