@@ -205,8 +205,9 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 			ranges := GetBlockSearchRanges(chainID)
 			n.logger.Info("EventTrigger: Using chain-specific search ranges",
 				"chainID", chainID,
-				"threeMonths", ranges.ThreeMonths,
-				"sixMonths", ranges.SixMonths)
+				"oneMonth", ranges.OneMonth,
+				"twoMonths", ranges.TwoMonths,
+				"fourMonths", ranges.FourMonths)
 		}
 	} else {
 		// Fallback to default Ethereum-like ranges if no token service available

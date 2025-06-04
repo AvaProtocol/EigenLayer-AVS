@@ -6,58 +6,67 @@ import (
 
 func TestBlockSearchRanges(t *testing.T) {
 	testCases := []struct {
-		name                string
-		chainID             uint64
-		expectedThreeMonths uint64
-		expectedSixMonths   uint64
+		name               string
+		chainID            uint64
+		expectedOneMonth   uint64
+		expectedTwoMonths  uint64
+		expectedFourMonths uint64
 	}{
 		{
-			name:                "Ethereum Mainnet",
-			chainID:             1,
-			expectedThreeMonths: 648000,  // 90 days at 12s blocks
-			expectedSixMonths:   1296000, // 180 days at 12s blocks
+			name:               "Ethereum Mainnet",
+			chainID:            1,
+			expectedOneMonth:   216000, // 30 days at 12s blocks
+			expectedTwoMonths:  432000, // 60 days at 12s blocks
+			expectedFourMonths: 864000, // 120 days at 12s blocks
 		},
 		{
-			name:                "Ethereum Sepolia",
-			chainID:             11155111,
-			expectedThreeMonths: 648000,  // 90 days at 12s blocks
-			expectedSixMonths:   1296000, // 180 days at 12s blocks
+			name:               "Ethereum Sepolia",
+			chainID:            11155111,
+			expectedOneMonth:   216000, // 30 days at 12s blocks
+			expectedTwoMonths:  432000, // 60 days at 12s blocks
+			expectedFourMonths: 864000, // 120 days at 12s blocks
 		},
 		{
-			name:                "Base Mainnet",
-			chainID:             8453,
-			expectedThreeMonths: 3888000, // 90 days at 2s blocks
-			expectedSixMonths:   7776000, // 180 days at 2s blocks
+			name:               "Base Mainnet",
+			chainID:            8453,
+			expectedOneMonth:   1296000, // 30 days at 2s blocks
+			expectedTwoMonths:  2592000, // 60 days at 2s blocks
+			expectedFourMonths: 5184000, // 120 days at 2s blocks
 		},
 		{
-			name:                "Base Sepolia",
-			chainID:             84532,
-			expectedThreeMonths: 3888000, // 90 days at 2s blocks
-			expectedSixMonths:   7776000, // 180 days at 2s blocks
+			name:               "Base Sepolia",
+			chainID:            84532,
+			expectedOneMonth:   1296000, // 30 days at 2s blocks
+			expectedTwoMonths:  2592000, // 60 days at 2s blocks
+			expectedFourMonths: 5184000, // 120 days at 2s blocks
 		},
 		{
-			name:                "BNB Smart Chain Mainnet",
-			chainID:             56,
-			expectedThreeMonths: 10368000, // 90 days at 0.75s blocks
-			expectedSixMonths:   20736000, // 180 days at 0.75s blocks
+			name:               "BNB Smart Chain Mainnet",
+			chainID:            56,
+			expectedOneMonth:   3456000,  // 30 days at 0.75s blocks
+			expectedTwoMonths:  6912000,  // 60 days at 0.75s blocks
+			expectedFourMonths: 13824000, // 120 days at 0.75s blocks
 		},
 		{
-			name:                "BNB Smart Chain Testnet",
-			chainID:             97,
-			expectedThreeMonths: 10368000, // 90 days at 0.75s blocks
-			expectedSixMonths:   20736000, // 180 days at 0.75s blocks
+			name:               "BNB Smart Chain Testnet",
+			chainID:            97,
+			expectedOneMonth:   3456000,  // 30 days at 0.75s blocks
+			expectedTwoMonths:  6912000,  // 60 days at 0.75s blocks
+			expectedFourMonths: 13824000, // 120 days at 0.75s blocks
 		},
 		{
-			name:                "Polygon Mainnet",
-			chainID:             137,
-			expectedThreeMonths: 3888000, // 90 days at 2s blocks
-			expectedSixMonths:   7776000, // 180 days at 2s blocks
+			name:               "Polygon Mainnet",
+			chainID:            137,
+			expectedOneMonth:   1296000, // 30 days at 2s blocks
+			expectedTwoMonths:  2592000, // 60 days at 2s blocks
+			expectedFourMonths: 5184000, // 120 days at 2s blocks
 		},
 		{
-			name:                "Unknown Chain (defaults to Ethereum)",
-			chainID:             999999,
-			expectedThreeMonths: 648000,  // Default to Ethereum timing
-			expectedSixMonths:   1296000, // Default to Ethereum timing
+			name:               "Unknown Chain (defaults to Ethereum)",
+			chainID:            999999,
+			expectedOneMonth:   216000, // Default to Ethereum timing
+			expectedTwoMonths:  432000, // Default to Ethereum timing
+			expectedFourMonths: 864000, // Default to Ethereum timing
 		},
 	}
 
@@ -65,22 +74,27 @@ func TestBlockSearchRanges(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ranges := GetBlockSearchRanges(tc.chainID)
 
-			if ranges.ThreeMonths != tc.expectedThreeMonths {
-				t.Errorf("Chain %d (%s): Expected ThreeMonths=%d, got %d",
-					tc.chainID, tc.name, tc.expectedThreeMonths, ranges.ThreeMonths)
+			if ranges.OneMonth != tc.expectedOneMonth {
+				t.Errorf("Chain %d (%s): Expected OneMonth=%d, got %d",
+					tc.chainID, tc.name, tc.expectedOneMonth, ranges.OneMonth)
 			}
 
-			if ranges.SixMonths != tc.expectedSixMonths {
-				t.Errorf("Chain %d (%s): Expected SixMonths=%d, got %d",
-					tc.chainID, tc.name, tc.expectedSixMonths, ranges.SixMonths)
+			if ranges.TwoMonths != tc.expectedTwoMonths {
+				t.Errorf("Chain %d (%s): Expected TwoMonths=%d, got %d",
+					tc.chainID, tc.name, tc.expectedTwoMonths, ranges.TwoMonths)
+			}
+
+			if ranges.FourMonths != tc.expectedFourMonths {
+				t.Errorf("Chain %d (%s): Expected FourMonths=%d, got %d",
+					tc.chainID, tc.name, tc.expectedFourMonths, ranges.FourMonths)
 			}
 
 			// Test the slice version
 			searchRanges := GetChainSearchRanges(tc.chainID)
-			expectedSlice := []uint64{tc.expectedThreeMonths, tc.expectedSixMonths}
+			expectedSlice := []uint64{tc.expectedOneMonth, tc.expectedTwoMonths, tc.expectedFourMonths}
 
-			if len(searchRanges) != 2 {
-				t.Errorf("Chain %d (%s): Expected 2 search ranges, got %d",
+			if len(searchRanges) != 3 {
+				t.Errorf("Chain %d (%s): Expected 3 search ranges, got %d",
 					tc.chainID, tc.name, len(searchRanges))
 			}
 
@@ -136,15 +150,20 @@ func TestBlockCalculations(t *testing.T) {
 					tc.chain, tc.expectedDaily, actualDaily)
 			}
 
-			// Test 90-day calculation
-			expectedThreeMonths := tc.expectedDaily * 90
-			t.Logf("%s: %d blocks/day × 90 days = %d blocks (3 months)",
-				tc.chain, tc.expectedDaily, expectedThreeMonths)
+			// Test 30-day calculation
+			expectedOneMonth := tc.expectedDaily * 30
+			t.Logf("%s: %d blocks/day × 30 days = %d blocks (1 month)",
+				tc.chain, tc.expectedDaily, expectedOneMonth)
 
-			// Test 180-day calculation
-			expectedSixMonths := tc.expectedDaily * 180
-			t.Logf("%s: %d blocks/day × 180 days = %d blocks (6 months)",
-				tc.chain, tc.expectedDaily, expectedSixMonths)
+			// Test 60-day calculation
+			expectedTwoMonths := tc.expectedDaily * 60
+			t.Logf("%s: %d blocks/day × 60 days = %d blocks (2 months)",
+				tc.chain, tc.expectedDaily, expectedTwoMonths)
+
+			// Test 120-day calculation
+			expectedFourMonths := tc.expectedDaily * 120
+			t.Logf("%s: %d blocks/day × 120 days = %d blocks (4 months)",
+				tc.chain, tc.expectedDaily, expectedFourMonths)
 		})
 	}
 }

@@ -250,32 +250,20 @@ func TestIsERC20Contract(t *testing.T) {
 	assert.True(t, isERC20)
 }
 
-func TestGetTokenMetadataNotFound(t *testing.T) {
+func TestGetTokenMetadataWhitelistOnlyReturnsNil(t *testing.T) {
 	logger := &MockLogger{}
 
-	// Create a temporary directory for test whitelist files
-	tempDir, err := os.MkdirTemp("", "token_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	// Change to temp directory
-	originalWd, _ := os.Getwd()
-	err = os.Chdir(tempDir)
-	require.NoError(t, err)
-	defer os.Chdir(originalWd)
-
-	// Create token_whitelist directory
-	err = os.Mkdir("token_whitelist", 0755)
-	require.NoError(t, err)
-
-	// Create empty ethereum.json
-	err = os.WriteFile(filepath.Join("token_whitelist", "ethereum.json"), []byte("[]"), 0644)
-	require.NoError(t, err)
-
+	// Create service without RPC client (whitelist-only mode)
 	service, err := NewTokenEnrichmentService(nil, logger)
 	require.NoError(t, err)
 
-	// Test with token not in whitelist and no RPC client
+	// Clear any cache that might have been loaded from actual whitelist files
+	// This simulates having an empty whitelist without requiring file operations
+	service.cacheMux.Lock()
+	service.cache = make(map[string]*TokenMetadata)
+	service.cacheMux.Unlock()
+
+	// Test with token not in empty cache and no RPC client
 	metadata, err := service.GetTokenMetadata("0x1234567890123456789012345678901234567890")
 	assert.NoError(t, err)
 	assert.Nil(t, metadata, "Token not in whitelist should return nil metadata when no RPC client")

@@ -612,6 +612,231 @@ func TestEvaluateEvent(t *testing.T) {
 	}
 }
 
+func TestEvaluateEventEvmLog(t *testing.T) {
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "branch1",
+			Name: "branch",
+			TaskType: &avsproto.TaskNode_Branch{
+				Branch: &avsproto.BranchNode{
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:         "a1",
+								Type:       "if",
+								Expression: `triggertest.data.address == "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" && triggertest.data.block_number > 7000000`},
+						},
+					},
+				},
+			},
+		},
+		{
+			Id:   "notification1",
+			Name: "httpnode",
+			TaskType: &avsproto.TaskNode_RestApi{
+				RestApi: &avsproto.RestAPINode{
+					Config: &avsproto.RestAPINode_Config{
+						Url:    "https://httpbin.org/post",
+						Method: "POST",
+						Body:   "hit=notification1",
+					},
+				},
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "e1",
+			Source: trigger.Id,
+			Target: "branch1",
+		},
+		{
+			Id:     "e1",
+			Source: "branch1.a1",
+			Target: "notification1",
+		},
+	}
+
+	triggerData := &TriggerData{
+		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+		Output: &avsproto.EventTrigger_Output{
+			// Use oneof structure with EvmLog for raw event data
+			OutputType: &avsproto.EventTrigger_Output_EvmLog{
+				EvmLog: &avsproto.Evm_Log{
+					BlockNumber:      7212417, // Greater than 7000000 to make condition true
+					TransactionHash:  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+					Index:            98,
+					Address:          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+					Topics:           []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", "0x000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045", "0x0000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c7238"},
+					Data:             "0x0000000000000000000000000000000000000000000000000000000000200000",
+					TransactionIndex: 42,
+					BlockHash:        "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+					Removed:          false,
+				},
+			},
+		},
+	}
+
+	SetRpc(testutil.GetTestRPCURL())
+	SetCache(testutil.GetDefaultCache())
+
+	vm, err := NewVMWithData(&model.Task{
+		Task: &avsproto.Task{
+			Id:      "sampletaskid2",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, triggerData, testutil.GetTestSmartWalletConfig(), nil)
+
+	if err != nil {
+		t.Errorf("expect vm initialized")
+	}
+
+	vm.Compile()
+
+	if vm.entrypoint != "branch1" {
+		t.Errorf("Error compute entrypoint. Expected branch1, got %s", vm.entrypoint)
+		return
+	}
+
+	// Verify the oneof structure is correctly set up
+	eventOutput := triggerData.Output.(*avsproto.EventTrigger_Output)
+	evmLog := eventOutput.GetEvmLog()
+	if evmLog == nil {
+		t.Errorf("Expected EvmLog to be populated in oneof structure")
+		return
+	}
+
+	transferLog := eventOutput.GetTransferLog()
+	if transferLog != nil {
+		t.Errorf("Expected TransferLog to be nil when EvmLog is used in oneof structure")
+		return
+	}
+
+	// Verify EvmLog fields are accessible
+	if evmLog.Address != "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" {
+		t.Errorf("Expected EvmLog address to be accessible, got: %s", evmLog.Address)
+		return
+	}
+
+	if evmLog.BlockNumber != 7212417 {
+		t.Errorf("Expected EvmLog block number to be accessible, got: %d", evmLog.BlockNumber)
+		return
+	}
+
+	err = vm.Run()
+	if err != nil {
+		t.Errorf("Error executing program. Expected success, got error %v", err)
+		return
+	}
+
+	if len(vm.ExecutionLogs) == 0 {
+		t.Errorf("no execution logs found")
+		return
+	}
+
+	// Look for branch execution log
+	var branchLog *avsproto.Execution_Step
+	for _, log := range vm.ExecutionLogs {
+		if log.GetBranch() != nil {
+			branchLog = log
+			break
+		}
+	}
+
+	if branchLog == nil {
+		t.Errorf("no branch execution log found, logs: %v", vm.ExecutionLogs)
+		return
+	}
+
+	if branchLog.GetBranch().ConditionId != "branch1.a1" {
+		t.Errorf("expression evaluate incorrect for EvmLog branch, got: %s", branchLog.GetBranch().ConditionId)
+	}
+}
+
+func TestEventTriggerOneofExclusivity(t *testing.T) {
+	t.Run("EvmLog branch populated, TransferLog nil", func(t *testing.T) {
+		eventOutput := &avsproto.EventTrigger_Output{
+			OutputType: &avsproto.EventTrigger_Output_EvmLog{
+				EvmLog: &avsproto.Evm_Log{
+					BlockNumber: 7212417,
+					Address:     "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+					Topics:      []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"},
+					Data:        "0x0000000000000000000000000000000000000000000000000000000000200000",
+				},
+			},
+		}
+
+		// Verify EvmLog is populated
+		evmLog := eventOutput.GetEvmLog()
+		if evmLog == nil {
+			t.Errorf("Expected EvmLog to be populated")
+		}
+		if evmLog.Address != "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" {
+			t.Errorf("Expected EvmLog address to match, got: %s", evmLog.Address)
+		}
+
+		// Verify TransferLog is nil (oneof exclusivity)
+		transferLog := eventOutput.GetTransferLog()
+		if transferLog != nil {
+			t.Errorf("Expected TransferLog to be nil when EvmLog is set")
+		}
+	})
+
+	t.Run("TransferLog branch populated, EvmLog nil", func(t *testing.T) {
+		eventOutput := &avsproto.EventTrigger_Output{
+			OutputType: &avsproto.EventTrigger_Output_TransferLog{
+				TransferLog: &avsproto.EventTrigger_TransferLogOutput{
+					Address:       "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+					Value:         "1500000",
+					TokenName:     "TestToken",
+					TokenSymbol:   "TEST",
+					TokenDecimals: 18,
+				},
+			},
+		}
+
+		// Verify TransferLog is populated
+		transferLog := eventOutput.GetTransferLog()
+		if transferLog == nil {
+			t.Errorf("Expected TransferLog to be populated")
+		}
+		if transferLog.Address != "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" {
+			t.Errorf("Expected TransferLog address to match, got: %s", transferLog.Address)
+		}
+		if transferLog.TokenName != "TestToken" {
+			t.Errorf("Expected TransferLog token name to match, got: %s", transferLog.TokenName)
+		}
+
+		// Verify EvmLog is nil (oneof exclusivity)
+		evmLog := eventOutput.GetEvmLog()
+		if evmLog != nil {
+			t.Errorf("Expected EvmLog to be nil when TransferLog is set")
+		}
+	})
+
+	t.Run("Empty output returns nil for both", func(t *testing.T) {
+		eventOutput := &avsproto.EventTrigger_Output{}
+
+		// Both should return nil when no oneof branch is set
+		evmLog := eventOutput.GetEvmLog()
+		if evmLog != nil {
+			t.Errorf("Expected EvmLog to be nil when no oneof branch is set")
+		}
+
+		transferLog := eventOutput.GetTransferLog()
+		if transferLog != nil {
+			t.Errorf("Expected TransferLog to be nil when no oneof branch is set")
+		}
+	})
+}
+
 func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
