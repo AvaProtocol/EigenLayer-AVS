@@ -230,10 +230,8 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 	// Initialize apContext with configVars containing secrets and macro variables
 	configVars := make(map[string]string)
 	// Add secrets (they override macro variables if there are conflicts)
-	if secrets != nil {
-		for k, v := range secrets {
-			configVars[k] = v
-		}
+	for k, v := range secrets {
+		configVars[k] = v
 	}
 
 	v.AddVar(APContextVarName, map[string]map[string]string{

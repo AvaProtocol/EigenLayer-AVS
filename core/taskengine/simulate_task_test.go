@@ -12,6 +12,22 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
+// Test constants for consistent naming
+const (
+	// Trigger names
+	ManualTriggerName       = "manual"         // Sanitizes to: manual
+	ManualTriggerNameSpaced = "manual trigger" // Sanitizes to: manual_trigger
+	TimeTriggerName         = "time_trigger"   // Sanitizes to: time_trigger
+
+	// Node names
+	CustomCodeNodeName       = "custom_code"     // Sanitizes to: custom_code
+	CustomCodeNodeNameSpaced = "custom code"     // Sanitizes to: custom_code
+	RestAPINodeName          = "call_api"        // Sanitizes to: call_api
+	BranchNodeName           = "condition_check" // Sanitizes to: condition_check
+	SuccessActionNodeName    = "success_action"  // Sanitizes to: success_action
+	ElseActionNodeName       = "else_action"     // Sanitizes to: else_action
+)
+
 func TestSimulateTask_ManualTriggerWithCustomCode(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
@@ -29,7 +45,7 @@ func TestSimulateTask_ManualTriggerWithCustomCode(t *testing.T) {
 	// Define task components for simulation (no need to save to storage)
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger_1",
-		Name: "manual",
+		Name: ManualTriggerName,
 		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerType: &avsproto.TaskTrigger_Manual{
 			Manual: true,
@@ -39,11 +55,11 @@ func TestSimulateTask_ManualTriggerWithCustomCode(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "step_1",
-			Name: "custom_code",
+			Name: CustomCodeNodeName,
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
-						Source: `({ message: "Hello from trigger: " + manual.data.triggered })`,
+						Source: `({ message: "Hello from trigger: " + ` + ManualTriggerName + `.data.triggered })`,
 					},
 				},
 			},
@@ -111,7 +127,7 @@ func TestSimulateTask_FixedTimeTriggerWithRestAPI(t *testing.T) {
 	// Define task components for simulation (no need to save to storage)
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger_1",
-		Name: "time_trigger",
+		Name: TimeTriggerName,
 		Type: avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME,
 		TriggerType: &avsproto.TaskTrigger_FixedTime{
 			FixedTime: &avsproto.FixedTimeTrigger{
@@ -125,7 +141,7 @@ func TestSimulateTask_FixedTimeTriggerWithRestAPI(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "step_1",
-			Name: "call_api",
+			Name: RestAPINodeName,
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
 					Config: &avsproto.RestAPINode_Config{
@@ -166,7 +182,7 @@ func TestSimulateTask_FixedTimeTriggerWithRestAPI(t *testing.T) {
 	triggerStep := execution.Steps[0]
 	assert.Equal(t, "trigger_1", triggerStep.Id)
 	assert.Equal(t, "TRIGGER_TYPE_FIXED_TIME", triggerStep.Type)
-	assert.Equal(t, "time_trigger", triggerStep.Name)
+	assert.Equal(t, TimeTriggerName, triggerStep.Name)
 	assert.True(t, triggerStep.Success)
 	assert.Empty(t, triggerStep.Error)
 	assert.Contains(t, triggerStep.Log, "Simulated trigger")
@@ -175,7 +191,7 @@ func TestSimulateTask_FixedTimeTriggerWithRestAPI(t *testing.T) {
 	apiStep := execution.Steps[1]
 	assert.Equal(t, "step_1", apiStep.Id)
 	assert.Equal(t, "NODE_TYPE_REST_API", apiStep.Type)
-	assert.Equal(t, "call_api", apiStep.Name)
+	assert.Equal(t, RestAPINodeName, apiStep.Name)
 	assert.True(t, apiStep.Success)
 }
 
@@ -196,7 +212,7 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 	// Define task components for simulation (no need to save to storage)
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger_1",
-		Name: "manual",
+		Name: ManualTriggerName,
 		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerType: &avsproto.TaskTrigger_Manual{
 			Manual: true,
@@ -206,7 +222,7 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "branch_1",
-			Name: "condition_check",
+			Name: BranchNodeName,
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
 					Config: &avsproto.BranchNode_Config{
@@ -214,7 +230,7 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 							{
 								Id:         "condition_1",
 								Type:       "if",
-								Expression: "manual.data.triggered === true",
+								Expression: ManualTriggerName + ".data.triggered === true",
 							},
 							{
 								Id:         "else",
@@ -228,7 +244,7 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 		},
 		{
 			Id:   "step_1",
-			Name: "success_action",
+			Name: SuccessActionNodeName,
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
@@ -239,7 +255,7 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 		},
 		{
 			Id:   "step_2",
-			Name: "else_action",
+			Name: ElseActionNodeName,
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
@@ -286,21 +302,21 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 	triggerStep := execution.Steps[0]
 	assert.Equal(t, "trigger_1", triggerStep.Id)
 	assert.Equal(t, "TRIGGER_TYPE_MANUAL", triggerStep.Type)
-	assert.Equal(t, "manual", triggerStep.Name)
+	assert.Equal(t, ManualTriggerName, triggerStep.Name)
 	assert.True(t, triggerStep.Success)
 
 	// Verify branch step
 	branchStep := execution.Steps[1]
 	assert.Equal(t, "branch_1", branchStep.Id)
 	assert.Equal(t, "NODE_TYPE_BRANCH", branchStep.Type)
-	assert.Equal(t, "condition_check", branchStep.Name)
+	assert.Equal(t, BranchNodeName, branchStep.Name)
 	assert.True(t, branchStep.Success)
 
 	// Verify action step (should be step_1 since condition met)
 	actionStep := execution.Steps[2]
 	assert.Equal(t, "step_1", actionStep.Id)
 	assert.Equal(t, "NODE_TYPE_CUSTOM_CODE", actionStep.Type)
-	assert.Equal(t, "success_action", actionStep.Name)
+	assert.Equal(t, SuccessActionNodeName, actionStep.Name)
 	assert.True(t, actionStep.Success)
 }
 
@@ -346,14 +362,14 @@ func TestSimulateTask_InvalidTriggerType(t *testing.T) {
 	// Define valid task components but with invalid trigger type
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger_1",
-		Name: "manual",
+		Name: ManualTriggerName,
 		Type: avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED, // Invalid trigger type
 	}
 
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "step_1",
-			Name: "custom_code",
+			Name: CustomCodeNodeName,
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
@@ -400,7 +416,7 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 	// Define task components matching JavaScript test parameters exactly
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger1",
-		Name: "manual trigger", // Exact name from JS test
+		Name: ManualTriggerNameSpaced, // Exact name from JS test
 		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerType: &avsproto.TaskTrigger_Manual{
 			Manual: true,
@@ -410,7 +426,7 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "node1",
-			Name: "custom code", // Exact name from JS test
+			Name: CustomCodeNodeNameSpaced, // Exact name from JS test
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
@@ -452,7 +468,7 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 	// ===== BUG TEST 1: Trigger Step InputsList =====
 	triggerStep := execution.Steps[0]
 	assert.Equal(t, "trigger1", triggerStep.Id)
-	assert.Equal(t, "manual trigger", triggerStep.Name)
+	assert.Equal(t, ManualTriggerNameSpaced, triggerStep.Name)
 	assert.Equal(t, "TRIGGER_TYPE_MANUAL", triggerStep.Type)
 	assert.True(t, triggerStep.Success)
 
@@ -568,7 +584,7 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 	// Define task components
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger1",
-		Name: "manual trigger",
+		Name: ManualTriggerNameSpaced,
 		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerType: &avsproto.TaskTrigger_Manual{
 			Manual: true,
@@ -578,13 +594,13 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "node1",
-			Name: "custom code",
+			Name: CustomCodeNodeNameSpaced,
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
 						Source: `return { 
-							convenientTrigger: manual_trigger.data.triggered,
-							userTrigger: manual_trigger.data.userValue  
+							convenientTrigger: ` + "manual_trigger" + `.data.triggered,
+							userTrigger: ` + "manual_trigger" + `.data.userValue  
 						};`,
 					},
 				},
