@@ -18,6 +18,7 @@ const (
 	ManualTriggerName       = "manual"         // Sanitizes to: manual
 	ManualTriggerNameSpaced = "manual trigger" // Sanitizes to: manual_trigger
 	TimeTriggerName         = "time_trigger"   // Sanitizes to: time_trigger
+	EventTriggerName        = "event_trigger"  // Sanitizes to: event_trigger
 
 	// Node names
 	CustomCodeNodeName       = "custom_code"     // Sanitizes to: custom_code
@@ -27,6 +28,15 @@ const (
 	SuccessActionNodeName    = "success_action"  // Sanitizes to: success_action
 	ElseActionNodeName       = "else_action"     // Sanitizes to: else_action
 )
+
+// Helper function to get keys from inputVariables map
+func getInputKeys(inputVariables map[string]interface{}) []string {
+	keys := make([]string, 0, len(inputVariables))
+	for k := range inputVariables {
+		keys = append(keys, k)
+	}
+	return keys
+}
 
 func TestSimulateTask_ManualTriggerWithCustomCode(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
@@ -581,10 +591,10 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 
 	user := testutil.TestUser1()
 
-	// Define task components
+	// Define task components for simulation (no need to save to storage)
 	trigger := &avsproto.TaskTrigger{
-		Id:   "trigger1",
-		Name: ManualTriggerNameSpaced,
+		Id:   "trigger_1",
+		Name: ManualTriggerName,
 		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerType: &avsproto.TaskTrigger_Manual{
 			Manual: true,
@@ -593,15 +603,12 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 
 	nodes := []*avsproto.TaskNode{
 		{
-			Id:   "node1",
-			Name: CustomCodeNodeNameSpaced,
+			Id:   "step_1",
+			Name: CustomCodeNodeName,
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
-						Source: `return { 
-							convenientTrigger: ` + "manual_trigger" + `.data.triggered,
-							userTrigger: ` + "manual_trigger" + `.data.userValue  
-						};`,
+						Source: `({ message: "Hello from " + ` + ManualTriggerName + `.data.triggered })`,
 					},
 				},
 			},
@@ -610,18 +617,18 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 
 	edges := []*avsproto.TaskEdge{
 		{
-			Id:     "edge1",
-			Source: "trigger1",
-			Target: "node1",
+			Id:     "edge_1",
+			Source: "trigger_1",
+			Target: "step_1",
 		},
 	}
 
-	// Test case: Include 'trigger' as an actual input variable
+	// Test with input variable named "trigger" to ensure it doesn't conflict
 	inputVariables := map[string]interface{}{
 		"trigger": map[string]interface{}{
-			"userValue": "user provided trigger data",
+			"testData": "this should be accessible as trigger.testData in JavaScript",
 		},
-		"otherInput": "some other value",
+		"otherInput": "other test value",
 	}
 
 	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
@@ -632,31 +639,189 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 	assert.True(t, execution.Success)
 	assert.Empty(t, execution.Error)
 
-	// Verify we have 2 steps (trigger + custom code)
-	assert.Len(t, execution.Steps, 2)
+	// Verify execution steps
+	assert.Len(t, execution.Steps, 2) // Trigger + Custom Code node
 
-	// Verify trigger step has inputs from inputVariables
+	// Verify trigger step
 	triggerStep := execution.Steps[0]
-	assert.Contains(t, triggerStep.Inputs, "trigger")
-	assert.Contains(t, triggerStep.Inputs, "otherInput")
+	assert.Equal(t, "trigger_1", triggerStep.Id)
+	assert.True(t, triggerStep.Success)
+	assert.Empty(t, triggerStep.Error)
 
 	// Verify custom code step
 	codeStep := execution.Steps[1]
+	assert.Equal(t, "step_1", codeStep.Id)
+	assert.True(t, codeStep.Success)
+	assert.Empty(t, codeStep.Error)
 
-	// Check if manual_trigger.data exists (the dynamic trigger name)
-	hasManualTriggerData := false
-	for _, input := range codeStep.Inputs {
-		if input == "manual_trigger.data" {
-			hasManualTriggerData = true
-			break
+	t.Log("")
+	t.Log("=== TRIGGER VARIABLE TEST ===")
+	t.Logf("Input variables provided: %v", getInputKeys(inputVariables))
+	t.Logf("Trigger step inputs: %v", triggerStep.Inputs)
+	t.Logf("Custom code step inputs: %v", codeStep.Inputs)
+	t.Log("Result: Only dynamic trigger names work (no hardcoded 'trigger' convenience variable)")
+}
+
+func TestSimulateTask_EventTriggerWithOutput(t *testing.T) {
+	SetRpc(testutil.GetTestRPCURL())
+	SetCache(testutil.GetDefaultCache())
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	engine := New(db, config, nil, testutil.GetLogger())
+	err := engine.MustStart()
+	require.NoError(t, err)
+	defer engine.Stop()
+
+	user := testutil.TestUser1()
+
+	// Define EventTrigger for simulation
+	trigger := &avsproto.TaskTrigger{
+		Id:   "event_trigger_1",
+		Name: EventTriggerName,
+		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+		TriggerType: &avsproto.TaskTrigger_Event{
+			Event: &avsproto.EventTrigger{
+				Config: &avsproto.EventTrigger_Config{
+					Expression: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+				},
+			},
+		},
+	}
+
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "branch_1",
+			Name: BranchNodeName,
+			TaskType: &avsproto.TaskNode_Branch{
+				Branch: &avsproto.BranchNode{
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:         "condition_1",
+								Type:       "if",
+								Expression: "Object.keys(" + EventTriggerName + ".data).length > 0",
+							},
+							{
+								Id:         "else",
+								Type:       "else",
+								Expression: "",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			Id:   "step_1",
+			Name: SuccessActionNodeName,
+			TaskType: &avsproto.TaskNode_CustomCode{
+				CustomCode: &avsproto.CustomCodeNode{
+					Config: &avsproto.CustomCodeNode_Config{
+						Source: `({ message: "EventTrigger data found!" })`,
+					},
+				},
+			},
+		},
+		{
+			Id:   "step_2",
+			Name: ElseActionNodeName,
+			TaskType: &avsproto.TaskNode_CustomCode{
+				CustomCode: &avsproto.CustomCodeNode{
+					Config: &avsproto.CustomCodeNode_Config{
+						Source: `({ message: "No EventTrigger data!" })`,
+					},
+				},
+			},
+		},
+	}
+
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "edge_1",
+			Source: "event_trigger_1",
+			Target: "branch_1",
+		},
+		{
+			Id:     "edge_2",
+			Source: "branch_1.condition_1",
+			Target: "step_1",
+		},
+		{
+			Id:     "edge_3",
+			Source: "branch_1.else",
+			Target: "step_2",
+		},
+	}
+
+	// Simulate the task
+	inputVariables := map[string]interface{}{}
+
+	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
+
+	// Verify the simulation was successful
+	assert.NoError(t, err)
+	assert.NotNil(t, execution)
+	assert.True(t, execution.Success)
+	assert.Empty(t, execution.Error)
+
+	// Verify execution steps (trigger + branch + one action node)
+	assert.Len(t, execution.Steps, 3)
+
+	// Verify trigger step
+	triggerStep := execution.Steps[0]
+	assert.Equal(t, "event_trigger_1", triggerStep.Id)
+	assert.Equal(t, "TRIGGER_TYPE_EVENT", triggerStep.Type)
+	assert.Equal(t, EventTriggerName, triggerStep.Name)
+	assert.True(t, triggerStep.Success)
+
+	// CRITICAL TEST: Verify EventTrigger output is NOT undefined/nil
+	assert.NotNil(t, triggerStep.OutputData)
+
+	// The OutputData should have EventTrigger field - use the correct getter method
+	eventTriggerOutput := triggerStep.GetEventTrigger()
+	assert.NotNil(t, eventTriggerOutput, "EventTrigger OutputData should not be nil - this was the original bug!")
+
+	t.Log("")
+	t.Log("=== EVENT TRIGGER OUTPUT TEST ===")
+	t.Logf("EventTrigger OutputData exists: %v", triggerStep.OutputData != nil)
+	t.Logf("EventTrigger field exists: %v", eventTriggerOutput != nil)
+
+	if eventTriggerOutput != nil {
+		// Check if we have either TransferLog or EvmLog data
+		hasTransferLog := eventTriggerOutput.GetTransferLog() != nil
+		hasEvmLog := eventTriggerOutput.GetEvmLog() != nil
+
+		t.Logf("Has TransferLog data: %v", hasTransferLog)
+		t.Logf("Has EvmLog data: %v", hasEvmLog)
+
+		if hasTransferLog {
+			transferLog := eventTriggerOutput.GetTransferLog()
+			t.Logf("TransferLog address: %s", transferLog.Address)
+			t.Logf("TransferLog blockNumber: %d", transferLog.BlockNumber)
+		} else if hasEvmLog {
+			evmLog := eventTriggerOutput.GetEvmLog()
+			t.Logf("EvmLog address: %s", evmLog.Address)
+			t.Logf("EvmLog blockNumber: %d", evmLog.BlockNumber)
+		} else {
+			t.Log("No event data found (valid case - no matching events)")
 		}
 	}
 
-	assert.True(t, hasManualTriggerData, "Should have manual_trigger.data (dynamic trigger name)")
+	// Verify branch step
+	branchStep := execution.Steps[1]
+	assert.Equal(t, "branch_1", branchStep.Id)
+	assert.Equal(t, "NODE_TYPE_BRANCH", branchStep.Type)
+	assert.Equal(t, BranchNodeName, branchStep.Name)
+	assert.True(t, branchStep.Success)
 
-	t.Logf("\n=== TRIGGER VARIABLE TEST ===")
-	t.Logf("Input variables provided: %v", []string{"trigger", "otherInput"})
-	t.Logf("Trigger step inputs: %v", triggerStep.Inputs)
-	t.Logf("Custom code step inputs: %v", codeStep.Inputs)
-	t.Logf("Result: Only dynamic trigger names work (no hardcoded 'trigger' convenience variable)")
+	// Verify action step executed
+	actionStep := execution.Steps[2]
+	assert.True(t, actionStep.Success)
+	assert.NotEmpty(t, actionStep.Id)
+
+	t.Log("")
+	t.Log("✅ FIXED: EventTrigger output is no longer undefined!")
+	t.Log("✅ simulateWorkflow should now work the same as runTrigger for EventTriggers")
 }

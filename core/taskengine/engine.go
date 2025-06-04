@@ -1072,9 +1072,105 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 			GasUsed:     gasUsed,
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
-		// For event triggers, create a basic event output
-		// In a real scenario, this would be populated with actual event data
-		triggerOutputProto = &avsproto.EventTrigger_Output{}
+		// For event triggers, populate with actual event data from runEventTriggerImmediately
+		eventOutput := &avsproto.EventTrigger_Output{}
+
+		// Check if we have event data and populate appropriately
+		if triggerOutput != nil {
+			// Check if we found events
+			if found, ok := triggerOutput["found"].(bool); ok && found {
+				// We found events - check if we have transfer_log data (for Transfer events)
+				if transferLogData, hasTransferLog := triggerOutput["transfer_log"].(map[string]interface{}); hasTransferLog {
+					// Create TransferLog structure
+					transferLog := &avsproto.EventTrigger_TransferLogOutput{}
+
+					if tokenName, ok := transferLogData["tokenName"].(string); ok {
+						transferLog.TokenName = tokenName
+					}
+					if tokenSymbol, ok := transferLogData["tokenSymbol"].(string); ok {
+						transferLog.TokenSymbol = tokenSymbol
+					}
+					if tokenDecimals, ok := transferLogData["tokenDecimals"].(uint32); ok {
+						transferLog.TokenDecimals = tokenDecimals
+					}
+					if txHash, ok := transferLogData["transactionHash"].(string); ok {
+						transferLog.TransactionHash = txHash
+					}
+					if address, ok := transferLogData["address"].(string); ok {
+						transferLog.Address = address
+					}
+					if blockNumber, ok := transferLogData["blockNumber"].(uint64); ok {
+						transferLog.BlockNumber = blockNumber
+					}
+					if blockTimestamp, ok := transferLogData["blockTimestamp"].(uint64); ok {
+						transferLog.BlockTimestamp = blockTimestamp
+					}
+					if fromAddress, ok := transferLogData["fromAddress"].(string); ok {
+						transferLog.FromAddress = fromAddress
+					}
+					if toAddress, ok := transferLogData["toAddress"].(string); ok {
+						transferLog.ToAddress = toAddress
+					}
+					if value, ok := transferLogData["value"].(string); ok {
+						transferLog.Value = value
+					}
+					if valueFormatted, ok := transferLogData["valueFormatted"].(string); ok {
+						transferLog.ValueFormatted = valueFormatted
+					}
+					if txIndex, ok := transferLogData["transactionIndex"].(uint32); ok {
+						transferLog.TransactionIndex = txIndex
+					}
+					if logIndex, ok := transferLogData["logIndex"].(uint32); ok {
+						transferLog.LogIndex = logIndex
+					}
+
+					// Set the oneof field to TransferLog
+					eventOutput.OutputType = &avsproto.EventTrigger_Output_TransferLog{
+						TransferLog: transferLog,
+					}
+				} else if evmLogData, hasEvmLog := triggerOutput["evm_log"].(map[string]interface{}); hasEvmLog {
+					// We have basic EVM log data but no transfer_log - create EvmLog structure
+					evmLog := &avsproto.Evm_Log{}
+
+					if address, ok := evmLogData["address"].(string); ok {
+						evmLog.Address = address
+					}
+					if topics, ok := evmLogData["topics"].([]string); ok {
+						evmLog.Topics = topics
+					}
+					if data, ok := evmLogData["data"].(string); ok {
+						evmLog.Data = data
+					}
+					if blockNumber, ok := evmLogData["blockNumber"].(uint64); ok {
+						evmLog.BlockNumber = blockNumber
+					}
+					if txHash, ok := evmLogData["transactionHash"].(string); ok {
+						evmLog.TransactionHash = txHash
+					}
+					if txIndex, ok := evmLogData["transactionIndex"].(uint32); ok {
+						evmLog.TransactionIndex = txIndex
+					}
+					if blockHash, ok := evmLogData["blockHash"].(string); ok {
+						evmLog.BlockHash = blockHash
+					}
+					if index, ok := evmLogData["index"].(uint32); ok {
+						evmLog.Index = index
+					}
+					if removed, ok := evmLogData["removed"].(bool); ok {
+						evmLog.Removed = removed
+					}
+
+					// Set the oneof field to EvmLog
+					eventOutput.OutputType = &avsproto.EventTrigger_Output_EvmLog{
+						EvmLog: evmLog,
+					}
+				}
+			}
+			// If no events found (found=false or no data), eventOutput remains empty with no oneof field set
+			// This is valid - it represents "no events found" state
+		}
+
+		triggerOutputProto = eventOutput
 	default:
 		// For unknown trigger types, create a manual trigger as fallback
 		triggerOutputProto = &avsproto.ManualTrigger_Output{
