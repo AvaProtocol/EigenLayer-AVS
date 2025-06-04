@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1166,8 +1167,8 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		}
 	}
 
-	// Add the universal "trigger" variable for JavaScript access
-	vm.AddVar("trigger", map[string]any{"data": triggerDataMap})
+	// Add the trigger variable with the actual trigger name for JavaScript access
+	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), map[string]any{"data": triggerDataMap})
 
 	// Step 6: Compile the workflow
 	t0 := time.Now()
@@ -1244,24 +1245,6 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	n.logger.Info("workflow simulation completed successfully", "task_id", task.Id, "simulation_id", simulationID, "steps", len(execution.Steps))
 	return execution, nil
-}
-
-// triggerTypeStringToEnum converts trigger type string to enum
-func triggerTypeStringToEnum(triggerType string) avsproto.TriggerType {
-	switch triggerType {
-	case NodeTypeBlockTrigger:
-		return avsproto.TriggerType_TRIGGER_TYPE_BLOCK
-	case NodeTypeFixedTimeTrigger:
-		return avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME
-	case NodeTypeCronTrigger:
-		return avsproto.TriggerType_TRIGGER_TYPE_CRON
-	case NodeTypeEventTrigger:
-		return avsproto.TriggerType_TRIGGER_TYPE_EVENT
-	case NodeTypeManualTrigger:
-		return avsproto.TriggerType_TRIGGER_TYPE_MANUAL
-	default:
-		return avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED
-	}
 }
 
 // List Execution for a given task id
@@ -2078,4 +2061,33 @@ func (n *Engine) GetTokenMetadata(user *model.User, payload *avsproto.GetTokenMe
 		"source", source)
 
 	return response, nil
+}
+
+// sanitizeTriggerNameForJS converts trigger names to valid JavaScript variable identifiers
+// by replacing spaces and special characters with underscores.
+// This ensures trigger names like "my event trigger" or "trigger-1" become valid JS variables
+// like "my_event_trigger" and "trigger_1" respectively.
+func sanitizeTriggerNameForJS(triggerName string) string {
+	if triggerName == "" {
+		return "unnamed_trigger"
+	}
+
+	// Replace any sequence of non-alphanumeric characters (except underscore) with a single underscore
+	reg := regexp.MustCompile(`[^a-zA-Z0-9_]+`)
+	sanitized := reg.ReplaceAllString(triggerName, "_")
+
+	// Remove leading/trailing underscores
+	sanitized = strings.Trim(sanitized, "_")
+
+	// Ensure it doesn't start with a number (JS variable naming rule)
+	if len(sanitized) > 0 && sanitized[0] >= '0' && sanitized[0] <= '9' {
+		sanitized = "trigger_" + sanitized
+	}
+
+	// Fallback if somehow we end up with empty string
+	if sanitized == "" {
+		sanitized = "unnamed_trigger"
+	}
+
+	return sanitized
 }

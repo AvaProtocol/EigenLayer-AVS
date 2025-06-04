@@ -13,107 +13,97 @@ type ChainBlockRanges struct {
 var BlockSearchRanges = map[uint64]ChainBlockRanges{
 	// Ethereum Mainnet (Chain ID: 1)
 	// Block time: ~12 seconds
-	// 30 days: 7,200 blocks/day × 30 = 216,000 blocks
-	// 60 days: 7,200 blocks/day × 60 = 432,000 blocks
-	// 120 days: 7,200 blocks/day × 120 = 864,000 blocks
+	// 1/10 of original ranges to balance search coverage with RPC limits
 	1: {
-		OneMonth:   216000,
-		TwoMonths:  432000,
-		FourMonths: 864000,
+		OneMonth:   21600, // ~3 days of recent history (1/10 of 216000)
+		TwoMonths:  43200, // ~6 days of recent history (1/10 of 432000)
+		FourMonths: 86400, // ~12 days of recent history (1/10 of 864000)
 	},
 
 	// Ethereum Sepolia Testnet (Chain ID: 11155111)
 	// Block time: ~12 seconds (same as mainnet)
-	// Optimized for faster responses while maintaining good coverage
+	// 1/10 of original ranges to balance search coverage with RPC limits
 	11155111: {
-		OneMonth:   216000, // ~30 days of history
-		TwoMonths:  432000, // ~60 days of history
-		FourMonths: 864000, // ~120 days of history
+		OneMonth:   21600, // ~3 days of recent history (1/10 of 216000)
+		TwoMonths:  43200, // ~6 days of recent history (1/10 of 432000)
+		FourMonths: 86400, // ~12 days of recent history (1/10 of 864000)
 	},
 
 	// Base Mainnet (Chain ID: 8453)
 	// Block time: ~2 seconds
-	// 30 days: 43,200 blocks/day × 30 = 1,296,000 blocks
-	// 60 days: 43,200 blocks/day × 60 = 2,592,000 blocks
-	// 120 days: 43,200 blocks/day × 120 = 5,184,000 blocks
+	// 1/10 of original ranges to balance search coverage with RPC limits
 	8453: {
-		OneMonth:   1296000,
-		TwoMonths:  2592000,
-		FourMonths: 5184000,
+		OneMonth:   129600, // ~3 days of recent history (1/10 of 1296000)
+		TwoMonths:  259200, // ~6 days of recent history (1/10 of 2592000)
+		FourMonths: 518400, // ~12 days of recent history (1/10 of 5184000)
 	},
 
 	// Base Sepolia Testnet (Chain ID: 84532)
 	// Block time: ~2 seconds (same as mainnet)
 	84532: {
-		OneMonth:   1296000,
-		TwoMonths:  2592000,
-		FourMonths: 5184000,
+		OneMonth:   129600, // ~3 days of recent history (1/10 of 1296000)
+		TwoMonths:  259200, // ~6 days of recent history (1/10 of 2592000)
+		FourMonths: 518400, // ~12 days of recent history (1/10 of 5184000)
 	},
 
 	// BNB Smart Chain Mainnet (Chain ID: 56)
 	// Block time: ~0.75 seconds (after Maxwell hardfork)
-	// 30 days: 115,200 blocks/day × 30 = 3,456,000 blocks
-	// 60 days: 115,200 blocks/day × 60 = 6,912,000 blocks
-	// 120 days: 115,200 blocks/day × 120 = 13,824,000 blocks
+	// 1/10 of original ranges to balance search coverage with RPC limits
 	56: {
-		OneMonth:   3456000,
-		TwoMonths:  6912000,
-		FourMonths: 13824000,
+		OneMonth:   345600,  // ~3 days of recent history (1/10 of 3456000)
+		TwoMonths:  691200,  // ~6 days of recent history (1/10 of 6912000)
+		FourMonths: 1382400, // ~12 days of recent history (1/10 of 13824000)
 	},
 
 	// BNB Smart Chain Testnet (Chain ID: 97)
 	// Block time: ~0.75 seconds (same as mainnet)
 	97: {
-		OneMonth:   3456000,
-		TwoMonths:  6912000,
-		FourMonths: 13824000,
+		OneMonth:   345600,  // ~3 days of recent history (1/10 of 3456000)
+		TwoMonths:  691200,  // ~6 days of recent history (1/10 of 6912000)
+		FourMonths: 1382400, // ~12 days of recent history (1/10 of 13824000)
 	},
 
 	// Polygon Mainnet (Chain ID: 137)
 	// Block time: ~2 seconds
-	// 30 days: 43,200 blocks/day × 30 = 1,296,000 blocks
-	// 60 days: 43,200 blocks/day × 60 = 2,592,000 blocks
-	// 120 days: 43,200 blocks/day × 120 = 5,184,000 blocks
+	// 1/10 of original ranges to balance search coverage with RPC limits
 	137: {
-		OneMonth:   1296000,
-		TwoMonths:  2592000,
-		FourMonths: 5184000,
+		OneMonth:   129600, // ~3 days of recent history (1/10 of 1296000)
+		TwoMonths:  259200, // ~6 days of recent history (1/10 of 2592000)
+		FourMonths: 518400, // ~12 days of recent history (1/10 of 5184000)
 	},
 
 	// Polygon Mumbai Testnet (Chain ID: 80001)
 	// Block time: ~2 seconds (same as mainnet)
 	80001: {
-		OneMonth:   1296000,
-		TwoMonths:  2592000,
-		FourMonths: 5184000,
+		OneMonth:   129600, // ~3 days of recent history (1/10 of 1296000)
+		TwoMonths:  259200, // ~6 days of recent history (1/10 of 2592000)
+		FourMonths: 518400, // ~12 days of recent history (1/10 of 5184000)
 	},
 
 	// Avalanche C-Chain (Chain ID: 43114)
 	// Block time: ~2 seconds
-	// 30 days: 43,200 blocks/day × 30 = 1,296,000 blocks
-	// 60 days: 43,200 blocks/day × 60 = 2,592,000 blocks
-	// 120 days: 43,200 blocks/day × 120 = 5,184,000 blocks
+	// 1/10 of original ranges to balance search coverage with RPC limits
 	43114: {
-		OneMonth:   1296000,
-		TwoMonths:  2592000,
-		FourMonths: 5184000,
+		OneMonth:   129600, // ~3 days of recent history (1/10 of 1296000)
+		TwoMonths:  259200, // ~6 days of recent history (1/10 of 2592000)
+		FourMonths: 518400, // ~12 days of recent history (1/10 of 5184000)
 	},
 
 	// Avalanche Fuji Testnet (Chain ID: 43113)
 	// Block time: ~2 seconds (same as mainnet)
 	43113: {
-		OneMonth:   1296000,
-		TwoMonths:  2592000,
-		FourMonths: 5184000,
+		OneMonth:   129600, // ~3 days of recent history (1/10 of 1296000)
+		TwoMonths:  259200, // ~6 days of recent history (1/10 of 2592000)
+		FourMonths: 518400, // ~12 days of recent history (1/10 of 5184000)
 	},
 }
 
 // DefaultBlockSearchRanges provides fallback values for unknown chains
-// Based on a conservative 12-second block time (Ethereum-like)
+// 1/10 of original conservative ranges to balance search coverage with RPC limits
 var DefaultBlockSearchRanges = ChainBlockRanges{
-	OneMonth:   216000, // 30 days at 12s blocks
-	TwoMonths:  432000, // 60 days at 12s blocks
-	FourMonths: 864000, // 120 days at 12s blocks
+	OneMonth:   21600, // ~3 days at 12s blocks (1/10 of 216000)
+	TwoMonths:  43200, // ~6 days at 12s blocks (1/10 of 432000)
+	FourMonths: 86400, // ~12 days at 12s blocks (1/10 of 864000)
 }
 
 // GetBlockSearchRanges returns the appropriate search ranges for a given chain ID

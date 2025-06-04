@@ -12,6 +12,22 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
+// Test constants for consistent naming
+const (
+	// Trigger names
+	ManualTriggerName       = "manual"         // Sanitizes to: manual
+	ManualTriggerNameSpaced = "manual trigger" // Sanitizes to: manual_trigger
+	TimeTriggerName         = "time_trigger"   // Sanitizes to: time_trigger
+
+	// Node names
+	CustomCodeNodeName       = "custom_code"     // Sanitizes to: custom_code
+	CustomCodeNodeNameSpaced = "custom code"     // Sanitizes to: custom_code
+	RestAPINodeName          = "call_api"        // Sanitizes to: call_api
+	BranchNodeName           = "condition_check" // Sanitizes to: condition_check
+	SuccessActionNodeName    = "success_action"  // Sanitizes to: success_action
+	ElseActionNodeName       = "else_action"     // Sanitizes to: else_action
+)
+
 func TestSimulateTask_ManualTriggerWithCustomCode(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
@@ -29,7 +45,7 @@ func TestSimulateTask_ManualTriggerWithCustomCode(t *testing.T) {
 	// Define task components for simulation (no need to save to storage)
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger_1",
-		Name: "manual",
+		Name: ManualTriggerName,
 		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerType: &avsproto.TaskTrigger_Manual{
 			Manual: true,
@@ -39,11 +55,11 @@ func TestSimulateTask_ManualTriggerWithCustomCode(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "step_1",
-			Name: "custom_code",
+			Name: CustomCodeNodeName,
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
-						Source: `({ message: "Hello from trigger: " + trigger.data.triggered })`,
+						Source: `({ message: "Hello from trigger: " + ` + ManualTriggerName + `.data.triggered })`,
 					},
 				},
 			},
@@ -111,7 +127,7 @@ func TestSimulateTask_FixedTimeTriggerWithRestAPI(t *testing.T) {
 	// Define task components for simulation (no need to save to storage)
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger_1",
-		Name: "time_trigger",
+		Name: TimeTriggerName,
 		Type: avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME,
 		TriggerType: &avsproto.TaskTrigger_FixedTime{
 			FixedTime: &avsproto.FixedTimeTrigger{
@@ -125,7 +141,7 @@ func TestSimulateTask_FixedTimeTriggerWithRestAPI(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "step_1",
-			Name: "call_api",
+			Name: RestAPINodeName,
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
 					Config: &avsproto.RestAPINode_Config{
@@ -166,7 +182,7 @@ func TestSimulateTask_FixedTimeTriggerWithRestAPI(t *testing.T) {
 	triggerStep := execution.Steps[0]
 	assert.Equal(t, "trigger_1", triggerStep.Id)
 	assert.Equal(t, "TRIGGER_TYPE_FIXED_TIME", triggerStep.Type)
-	assert.Equal(t, "time_trigger", triggerStep.Name)
+	assert.Equal(t, TimeTriggerName, triggerStep.Name)
 	assert.True(t, triggerStep.Success)
 	assert.Empty(t, triggerStep.Error)
 	assert.Contains(t, triggerStep.Log, "Simulated trigger")
@@ -175,7 +191,7 @@ func TestSimulateTask_FixedTimeTriggerWithRestAPI(t *testing.T) {
 	apiStep := execution.Steps[1]
 	assert.Equal(t, "step_1", apiStep.Id)
 	assert.Equal(t, "NODE_TYPE_REST_API", apiStep.Type)
-	assert.Equal(t, "call_api", apiStep.Name)
+	assert.Equal(t, RestAPINodeName, apiStep.Name)
 	assert.True(t, apiStep.Success)
 }
 
@@ -196,7 +212,7 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 	// Define task components for simulation (no need to save to storage)
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger_1",
-		Name: "manual",
+		Name: ManualTriggerName,
 		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerType: &avsproto.TaskTrigger_Manual{
 			Manual: true,
@@ -206,7 +222,7 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "branch_1",
-			Name: "condition_check",
+			Name: BranchNodeName,
 			TaskType: &avsproto.TaskNode_Branch{
 				Branch: &avsproto.BranchNode{
 					Config: &avsproto.BranchNode_Config{
@@ -214,7 +230,7 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 							{
 								Id:         "condition_1",
 								Type:       "if",
-								Expression: "trigger.data.triggered === true",
+								Expression: ManualTriggerName + ".data.triggered === true",
 							},
 							{
 								Id:         "else",
@@ -228,7 +244,7 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 		},
 		{
 			Id:   "step_1",
-			Name: "success_action",
+			Name: SuccessActionNodeName,
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
@@ -239,7 +255,7 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 		},
 		{
 			Id:   "step_2",
-			Name: "else_action",
+			Name: ElseActionNodeName,
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
@@ -286,21 +302,21 @@ func TestSimulateTask_WithBranchNode(t *testing.T) {
 	triggerStep := execution.Steps[0]
 	assert.Equal(t, "trigger_1", triggerStep.Id)
 	assert.Equal(t, "TRIGGER_TYPE_MANUAL", triggerStep.Type)
-	assert.Equal(t, "manual", triggerStep.Name)
+	assert.Equal(t, ManualTriggerName, triggerStep.Name)
 	assert.True(t, triggerStep.Success)
 
 	// Verify branch step
 	branchStep := execution.Steps[1]
 	assert.Equal(t, "branch_1", branchStep.Id)
 	assert.Equal(t, "NODE_TYPE_BRANCH", branchStep.Type)
-	assert.Equal(t, "condition_check", branchStep.Name)
+	assert.Equal(t, BranchNodeName, branchStep.Name)
 	assert.True(t, branchStep.Success)
 
 	// Verify action step (should be step_1 since condition met)
 	actionStep := execution.Steps[2]
 	assert.Equal(t, "step_1", actionStep.Id)
 	assert.Equal(t, "NODE_TYPE_CUSTOM_CODE", actionStep.Type)
-	assert.Equal(t, "success_action", actionStep.Name)
+	assert.Equal(t, SuccessActionNodeName, actionStep.Name)
 	assert.True(t, actionStep.Success)
 }
 
@@ -346,14 +362,14 @@ func TestSimulateTask_InvalidTriggerType(t *testing.T) {
 	// Define valid task components but with invalid trigger type
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger_1",
-		Name: "manual",
+		Name: ManualTriggerName,
 		Type: avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED, // Invalid trigger type
 	}
 
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "step_1",
-			Name: "custom_code",
+			Name: CustomCodeNodeName,
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
@@ -400,7 +416,7 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 	// Define task components matching JavaScript test parameters exactly
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger1",
-		Name: "manual trigger", // Exact name from JS test
+		Name: ManualTriggerNameSpaced, // Exact name from JS test
 		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerType: &avsproto.TaskTrigger_Manual{
 			Manual: true,
@@ -410,7 +426,7 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "node1",
-			Name: "custom code", // Exact name from JS test
+			Name: CustomCodeNodeNameSpaced, // Exact name from JS test
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
@@ -452,7 +468,7 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 	// ===== BUG TEST 1: Trigger Step InputsList =====
 	triggerStep := execution.Steps[0]
 	assert.Equal(t, "trigger1", triggerStep.Id)
-	assert.Equal(t, "manual trigger", triggerStep.Name)
+	assert.Equal(t, ManualTriggerNameSpaced, triggerStep.Name)
 	assert.Equal(t, "TRIGGER_TYPE_MANUAL", triggerStep.Type)
 	assert.True(t, triggerStep.Success)
 
@@ -501,19 +517,19 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 		}
 	}
 
-	// 'trigger.data' should exist as a convenience variable for JavaScript access
-	if hasTriggerData {
-		t.Logf("✅ Custom code step correctly contains 'trigger.data' (convenience variable for JS access)")
+	// Per user requirements: NO hardcoded 'trigger.data' convenience variable
+	if !hasTriggerData {
+		t.Logf("✅ No hardcoded 'trigger.data' convenience variable (as requested - only dynamic trigger names)")
 	} else {
-		t.Errorf("❌ Missing 'trigger.data' convenience variable in: %v", codeStep.Inputs)
-		t.Logf("The 'trigger' convenience variable should always be available for JavaScript access")
+		t.Errorf("❌ Found unexpected 'trigger.data' convenience variable in: %v", codeStep.Inputs)
+		t.Logf("User requested NO backward compatibility - only dynamic trigger names should work")
 	}
 
 	// Verify 'manual_trigger.data' exists (normalized name from trigger name "manual trigger")
 	if hasManualTriggerData {
 		t.Logf("✅ Custom code step correctly contains 'manual_trigger.data'")
 	} else {
-		t.Logf("❓ Expected 'manual_trigger.data' not found in: %v", codeStep.Inputs)
+		t.Errorf("❌ Expected 'manual_trigger.data' not found in: %v", codeStep.Inputs)
 	}
 
 	// Print detailed analysis
@@ -530,12 +546,12 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 
 	t.Logf("Step 2 (Node '%s'):", codeStep.Name)
 	t.Logf("  Inputs: %v", codeStep.Inputs)
-	t.Logf("  Contains 'trigger.data': %v (should be true)", hasTriggerData)
+	t.Logf("  Contains 'trigger.data': %v (should be false)", hasTriggerData)
 	t.Logf("  Contains 'manual_trigger.data': %v (should be true)", hasManualTriggerData)
 
 	t.Logf("\n=== EXPECTED FIXES ===")
 	t.Logf("1. Trigger step inputs should be: %v", expectedTriggerInputs)
-	t.Logf("2. Keep 'trigger.data' (convenience variable for JavaScript access)")
+	t.Logf("2. Remove 'trigger.data' (convenience variable for JavaScript access)")
 	t.Logf("3. Keep 'manual_trigger.data' (normalized from trigger name 'manual trigger')")
 
 	t.Logf("\n=== TROUBLESHOOTING SUMMARY ===")
@@ -544,11 +560,11 @@ func TestSimulateTask_InputsListBugs(t *testing.T) {
 	t.Logf("  Solution: Extract keys from inputVariables and use as trigger inputs")
 	t.Logf("  Result: Trigger step correctly receives input variables")
 
-	t.Logf("✅ BEHAVIOR 2: 'trigger.data' is a convenience variable")
-	t.Logf("  File: core/taskengine/engine.go:1077")
-	t.Logf("  Purpose: vm.AddVar(\"trigger\", map[string]any{\"data\": triggerDataMap})")
-	t.Logf("  Result: JavaScript can access trigger.data regardless of trigger name")
-	t.Logf("  This is intended behavior, not a bug")
+	t.Logf("✅ FIX 2: No hardcoded 'trigger.data' convenience variable")
+	t.Logf("  File: core/taskengine/engine.go:1169-1170")
+	t.Logf("  Change: Removed vm.AddVar(\"trigger\", map[string]any{\"data\": triggerDataMap})")
+	t.Logf("  Result: Only dynamic trigger names work (e.g., manual_trigger.data)")
+	t.Logf("  Rationale: User requested no backward compatibility, no hardcoded trigger references")
 }
 
 func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
@@ -568,7 +584,7 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 	// Define task components
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger1",
-		Name: "manual trigger",
+		Name: ManualTriggerNameSpaced,
 		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerType: &avsproto.TaskTrigger_Manual{
 			Manual: true,
@@ -578,13 +594,13 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "node1",
-			Name: "custom code",
+			Name: CustomCodeNodeNameSpaced,
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
 						Source: `return { 
-							convenientTrigger: trigger.data.triggered,
-							userTrigger: trigger.data.userValue  
+							convenientTrigger: ` + "manual_trigger" + `.data.triggered,
+							userTrigger: ` + "manual_trigger" + `.data.userValue  
 						};`,
 					},
 				},
@@ -627,20 +643,20 @@ func TestSimulateTask_WithTriggerInputVariable(t *testing.T) {
 	// Verify custom code step
 	codeStep := execution.Steps[1]
 
-	// Should have both convenience trigger.data AND user-provided trigger.data
-	hasTriggerData := false
+	// Check if manual_trigger.data exists (the dynamic trigger name)
+	hasManualTriggerData := false
 	for _, input := range codeStep.Inputs {
-		if input == "trigger.data" {
-			hasTriggerData = true
+		if input == "manual_trigger.data" {
+			hasManualTriggerData = true
 			break
 		}
 	}
 
-	assert.True(t, hasTriggerData, "Should have trigger.data from both convenience variable and user input")
+	assert.True(t, hasManualTriggerData, "Should have manual_trigger.data (dynamic trigger name)")
 
 	t.Logf("\n=== TRIGGER VARIABLE TEST ===")
 	t.Logf("Input variables provided: %v", []string{"trigger", "otherInput"})
 	t.Logf("Trigger step inputs: %v", triggerStep.Inputs)
 	t.Logf("Custom code step inputs: %v", codeStep.Inputs)
-	t.Logf("Result: When 'trigger' is provided as input variable, it merges with convenience trigger")
+	t.Logf("Result: Only dynamic trigger names work (no hardcoded 'trigger' convenience variable)")
 }

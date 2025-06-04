@@ -98,12 +98,12 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	}
 
 	var log strings.Builder
-	log.WriteString(fmt.Sprintf("Start branch execution for node %s at %s\n", stepID, time.Now()))
+	log.WriteString("Start branch execution for node " + stepID + " at " + time.Now().Format(time.RFC3339) + "\n")
 
 	// Get conditions from Config message (static configuration)
 	if node.Config == nil {
 		err := fmt.Errorf("BranchNode Config is nil")
-		log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		log.WriteString("Error: " + err.Error() + "\n")
 		executionStep.Error = err.Error()
 		executionStep.Success = false
 		executionStep.Log = log.String()
@@ -114,7 +114,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	conditions := node.Config.Conditions
 	if len(conditions) == 0 {
 		err := fmt.Errorf("there is no condition to evaluate")
-		log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		log.WriteString("Error: " + err.Error() + "\n")
 		executionStep.Error = err.Error()
 		executionStep.Success = false
 		executionStep.Log = log.String()
@@ -123,8 +123,8 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	}
 
 	if conditions[0].Type != "if" {
-		err := fmt.Errorf("the first condition need to be an if but got: %s", conditions[0].Type)
-		log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		err := fmt.Errorf("the first condition need to be an if but got: " + conditions[0].Type)
+		log.WriteString("Error: " + err.Error() + "\n")
 		executionStep.Error = err.Error()
 		executionStep.Success = false
 		executionStep.Log = log.String()
@@ -134,28 +134,28 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 
 	// Evaluate conditions
 	for i, condition := range conditions {
-		log.WriteString(fmt.Sprintf("Evaluating condition '%s': %s\n", condition.Id, condition.Expression))
+		log.WriteString("Evaluating condition '" + condition.Id + "': " + condition.Expression + "\n")
 
 		// Handle 'else' conditions specially - they should always be true if reached
 		if condition.Type == "else" {
 			// Ensure else condition is not the first condition (validation should catch this, but double-check)
 			if i == 0 {
 				err := fmt.Errorf("else condition cannot be the first condition")
-				log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+				log.WriteString("Error: " + err.Error() + "\n")
 				executionStep.Error = err.Error()
 				executionStep.Success = false
 				executionStep.Log = log.String()
 				executionStep.EndAt = time.Now().UnixMilli()
 				return executionStep, nil, err
 			}
-			log.WriteString(fmt.Sprintf("Condition '%s' is an 'else' condition, automatically true\n", condition.Id))
+			log.WriteString("Condition '" + condition.Id + "' is an 'else' condition, automatically true\n")
 			executionStep.Success = true
 			executionStep.OutputData = &avsproto.Execution_Step_Branch{
 				Branch: &avsproto.BranchNode_Output{
 					ConditionId: fmt.Sprintf("%s.%s", stepID, condition.Id),
 				},
 			}
-			log.WriteString(fmt.Sprintf("Branching to else condition '%s'\n", condition.Id))
+			log.WriteString("Branching to else condition '" + condition.Id + "'\n")
 			executionStep.Log = log.String()
 			executionStep.EndAt = time.Now().UnixMilli()
 
@@ -174,7 +174,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		// Check if expression is empty or only whitespace
 		trimmedExpression := strings.TrimSpace(condition.Expression)
 		if trimmedExpression == "" {
-			log.WriteString(fmt.Sprintf("Condition '%s' has empty expression, treating as false\n", condition.Id))
+			log.WriteString("Condition '" + condition.Id + "' has empty expression, treating as false\n")
 			continue // Skip this condition (treat as false)
 		}
 
@@ -185,7 +185,16 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		} else {
 			processedExpression = r.vm.preprocessTextWithVariableMapping(condition.Expression)
 		}
-		log.WriteString(fmt.Sprintf("Processed expression for '%s': %s\n", condition.Id, processedExpression))
+		log.WriteString("Processed expression for '" + condition.Id + "': " + processedExpression + "\n")
+
+		// Check if expression became empty after preprocessing (indicates variable resolution failure)
+		trimmedProcessed := strings.TrimSpace(processedExpression)
+		if trimmedProcessed == "" {
+			log.WriteString("Condition '" + condition.Id + "' expression became empty after preprocessing, treating as false\n")
+			log.WriteString("Original expression: " + condition.Expression + "\n")
+			log.WriteString("Hint: If using trigger variables, use dynamic trigger names instead of 'trigger.data'\n")
+			continue // Skip this condition (treat as false)
+		}
 
 		// Create a temporary JS VM to evaluate the processed expression
 		jsvm := NewGojaVM()
@@ -195,8 +204,8 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		for key, value := range r.vm.vars { // CHANGED from r.vm.vars.Range
 			if err := jsvm.Set(key, value); err != nil {
 				r.vm.mu.Unlock()
-				err := fmt.Errorf("failed to set var '%s' in JS VM for branch condition: %w", key, err)
-				log.WriteString(fmt.Sprintf("Error setting JS var: %s\n", err.Error()))
+				err := fmt.Errorf("failed to set var '" + key + "' in JS VM for branch condition: " + err.Error())
+				log.WriteString("Error setting JS var: " + err.Error() + "\n")
 				executionStep.Error = err.Error()
 				executionStep.Log = log.String()
 				executionStep.EndAt = time.Now().UnixMilli()
@@ -206,31 +215,26 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		r.vm.mu.Unlock()
 
 		// Evaluate the expression
-		value, err := jsvm.RunString(fmt.Sprintf("(%s)", processedExpression)) // Wrap in parens for safety
+		wrappedExpression := fmt.Sprintf("(%s)", trimmedProcessed)
+		log.WriteString("Final wrapped expression for '" + condition.Id + "': " + wrappedExpression + "\n")
+		value, err := jsvm.RunString(wrappedExpression)
 		if err != nil {
-			log.WriteString(fmt.Sprintf("Error evaluating expression for '%s': %s\n", condition.Id, err.Error()))
-			// Check if this is a syntax error or reference error (both should fail the branch)
-			errorStr := err.Error()
-			if strings.Contains(errorStr, "SyntaxError") || strings.Contains(errorStr, "unexpected") || strings.Contains(errorStr, "Unexpected") ||
-				strings.Contains(errorStr, "ReferenceError") || strings.Contains(errorStr, "is not defined") {
-				// Syntax errors and undefined variable errors should fail the entire branch
-				executionStep.Error = fmt.Sprintf("failed to evaluate expression for condition '%s': %v", condition.Id, err)
-				executionStep.Success = false
-				executionStep.Log = log.String()
-				executionStep.EndAt = time.Now().UnixMilli()
-				return executionStep, nil, fmt.Errorf("failed to evaluate expression for condition '%s': %w", condition.Id, err)
-			}
-			// Other runtime errors should just skip this condition
-			continue
+			log.WriteString("Error evaluating expression for '" + condition.Id + "': " + err.Error() + "\n")
+			log.WriteString("Original expression: " + condition.Expression + "\n")
+			log.WriteString("Processed expression: " + processedExpression + "\n")
+			log.WriteString("Wrapped expression: " + wrappedExpression + "\n")
+			// Log the error but silently skip this condition instead of failing the entire branch
+			log.WriteString("Condition '" + condition.Id + "' failed to evaluate, treating as false and continuing\n")
+			continue // Skip this condition (treat as false)
 		}
 
 		boolValue, ok := value.Export().(bool)
 		if !ok {
-			log.WriteString(fmt.Sprintf("Expression for '%s' did not evaluate to a boolean value, got: %T %v\n", condition.Id, value.Export(), value.Export()))
+			log.WriteString("Expression for '" + condition.Id + "' did not evaluate to a boolean value, got: " + fmt.Sprintf("%T %v\n", value.Export(), value.Export()))
 			continue
 		}
 
-		log.WriteString(fmt.Sprintf("Condition '%s' evaluated to: %t\n", condition.Id, boolValue))
+		log.WriteString("Condition '" + condition.Id + "' evaluated to: " + fmt.Sprintf("%t\n", boolValue))
 		if boolValue {
 			executionStep.Success = true
 			executionStep.OutputData = &avsproto.Execution_Step_Branch{
@@ -238,7 +242,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 					ConditionId: fmt.Sprintf("%s.%s", stepID, condition.Id),
 				},
 			}
-			log.WriteString(fmt.Sprintf("Branching to condition '%s'\n", condition.Id))
+			log.WriteString("Branching to condition '" + condition.Id + "'\n")
 			executionStep.Log = log.String()
 			executionStep.EndAt = time.Now().UnixMilli()
 

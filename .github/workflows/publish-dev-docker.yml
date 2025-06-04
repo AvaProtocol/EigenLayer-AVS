@@ -16,6 +16,11 @@ on:
         description: 'Specific Git tag to build (e.g., v1.6.0). Overrides commit_hash and branch_name for checkout.'
         required: false
         type: string
+      fast_build:
+        description: 'Enable fast build (linux/amd64 only) for development testing. Reduces build time by ~50%.'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   publish-staging-build:
@@ -99,15 +104,31 @@ jobs:
           echo "---- End Debug ----"
         shell: bash
 
+      - name: Show Build Configuration
+        run: |
+          echo "---- Build Configuration ----"
+          if [[ "${{ inputs.fast_build }}" == "true" ]]; then
+            echo "🚀 Fast Build Mode: Building for linux/amd64 only (~50% faster)"
+            echo "Platforms: linux/amd64"
+            echo "QEMU Setup: Skipped"
+          else
+            echo "🏗️  Full Build Mode: Building for linux/amd64,linux/arm64"
+            echo "Platforms: linux/amd64,linux/arm64"
+            echo "QEMU Setup: Enabled for ARM64"
+          fi
+          echo "---- End Configuration ----"
+        shell: bash
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
           platforms: 'linux/arm64' # Use specific platform and default image
+        if: ${{ !inputs.fast_build }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
-          platforms: linux/amd64,linux/arm64 # Be explicit here too
+          platforms: ${{ inputs.fast_build && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
 
       - name: Docker meta
         id: meta
@@ -121,13 +142,13 @@ jobs:
             # Always set latest tag for any build
             type=raw,value=latest
             
-      - name: Build and push staging docker image
+      - name: Build and push avs-dev Docker image
         uses: docker/build-push-action@v6
         with:
           build-args: |
             RELEASE_TAG=${{ steps.vars.outputs.RELEASE_TAG_ARG }}
             COMMIT_SHA=${{ steps.vars.outputs.SHORT_SHA }}
-          platforms: linux/amd64,linux/arm64  # Build for both architectures
+          platforms: ${{ inputs.fast_build && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           context: .
           file: dockerfiles/operator.Dockerfile
           push: true 
