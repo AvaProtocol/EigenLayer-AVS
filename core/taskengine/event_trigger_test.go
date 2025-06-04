@@ -9,6 +9,7 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -689,9 +690,36 @@ func TestEventTriggerEnhancedMultipleContracts(t *testing.T) {
 
 			// Verify RPC response has proper EventTrigger.Output structure
 			if rpcResult.GetEventTrigger() != nil {
-				hasEvmLog := rpcResult.GetEventTrigger().EvmLog != nil
-				hasTransferLog := rpcResult.GetEventTrigger().TransferLog != nil
+				// Check response structure
+				hasEvmLog := rpcResult.GetEventTrigger().GetEvmLog() != nil
+				hasTransferLog := rpcResult.GetEventTrigger().GetTransferLog() != nil
 				t.Logf("🔌 RPC Response: evm_log=%v, transfer_log=%v", hasEvmLog, hasTransferLog)
+
+				// Validate oneof pattern based on whether events were found
+				if found, exists := result["found"].(bool); exists && found {
+					// When events are found, exactly one of evm_log or transfer_log should be populated
+					if hasEvmLog && hasTransferLog {
+						t.Errorf("ONEOF violation: both evm_log and transfer_log are populated")
+					} else if !hasEvmLog && !hasTransferLog {
+						t.Errorf("ONEOF violation: neither evm_log nor transfer_log is populated when events found")
+					} else {
+						t.Logf("✅ ONEOF validation passed: exactly one field populated")
+					}
+
+					// For Transfer events, transfer_log should be populated
+					if _, hasTransferLogInResult := result["transfer_log"].(map[string]interface{}); hasTransferLogInResult {
+						assert.NotNil(t, rpcResult.GetEventTrigger().GetTransferLog(), "transfer_log should be populated for Transfer events")
+						assert.Nil(t, rpcResult.GetEventTrigger().GetEvmLog(), "evm_log should be nil when transfer_log is populated")
+					} else {
+						// For non-Transfer events, evm_log should be populated
+						assert.NotNil(t, rpcResult.GetEventTrigger().GetEvmLog(), "evm_log should be populated for non-Transfer events")
+						assert.Nil(t, rpcResult.GetEventTrigger().GetTransferLog(), "transfer_log should be nil when evm_log is populated")
+					}
+				} else {
+					// When no events are found, both should be nil (oneof field undefined)
+					assert.Nil(t, rpcResult.GetEventTrigger().GetEvmLog(), "evm_log should be nil when no events found")
+					assert.Nil(t, rpcResult.GetEventTrigger().GetTransferLog(), "transfer_log should be nil when no events found")
+				}
 			}
 
 			t.Logf("✅ Test completed for: %s\n", tc.name)
@@ -941,8 +969,8 @@ func TestEventTriggerUserSpecificRequest(t *testing.T) {
 
 	// Verify protobuf response
 	if rpcResult.GetEventTrigger() != nil {
-		hasEvmLog := rpcResult.GetEventTrigger().EvmLog != nil
-		hasTransferLog := rpcResult.GetEventTrigger().TransferLog != nil
+		hasEvmLog := rpcResult.GetEventTrigger().GetEvmLog() != nil
+		hasTransferLog := rpcResult.GetEventTrigger().GetTransferLog() != nil
 		t.Logf("🔌 RPC Response verification: evm_log=%v, transfer_log=%v", hasEvmLog, hasTransferLog)
 
 		if hasEvmLog || hasTransferLog {

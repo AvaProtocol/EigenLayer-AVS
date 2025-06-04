@@ -159,12 +159,15 @@ message EventTrigger {
   }
   
   message Output {
-    // When the trigger is not a transfer event, we will have a raw event output only
-    // These shape of data is https://docs.ethers.org/v6/api/providers/#Log
-    Evm.Log evm_log = 1;
-    
-    // For transfer events specifically, we have enriched data
-    TransferLogOutput transfer_log = 2;
+    // Use oneof to ensure exactly one field is set
+    oneof output_type {
+      // When the trigger is not a transfer event, we will have a raw event output only
+      // These shape of data is https://docs.ethers.org/v6/api/providers/#Log
+      Evm.Log evm_log = 1;
+      
+      // For transfer events specifically, we have enriched data
+      TransferLogOutput transfer_log = 2;
+    }
   }
   
   message TransferLogOutput {

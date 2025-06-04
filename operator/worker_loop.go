@@ -264,15 +264,17 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				TriggerType: avspb.TriggerType_TRIGGER_TYPE_EVENT,
 				TriggerOutput: &avspb.NotifyTriggersReq_EventTrigger{
 					EventTrigger: &avspb.EventTrigger_Output{
-						// Create an EVM log output with the event data
-						EvmLog: &avspb.Evm_Log{
-							BlockNumber:     uint64(triggerItem.Marker.BlockNumber),
-							Index:           uint32(triggerItem.Marker.LogIndex),
-							TransactionHash: triggerItem.Marker.TxHash,
-							// Other fields would be populated if available
-							Address: "",
-							Topics:  []string{},
-							Data:    "",
+						// Create an EVM log output with the event data using oneof
+						OutputType: &avspb.EventTrigger_Output_EvmLog{
+							EvmLog: &avspb.Evm_Log{
+								BlockNumber:     uint64(triggerItem.Marker.BlockNumber),
+								Index:           uint32(triggerItem.Marker.LogIndex),
+								TransactionHash: triggerItem.Marker.TxHash,
+								// Other fields would be populated if available
+								Address: "",
+								Topics:  []string{},
+								Data:    "",
+							},
 						},
 					},
 				},
