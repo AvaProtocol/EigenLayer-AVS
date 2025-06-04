@@ -354,14 +354,16 @@ func GetTestEventTriggerData() *TriggerData {
 	return &TriggerData{
 		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 		Output: &avsproto.EventTrigger_Output{
-			EvmLog: &avsproto.Evm_Log{
-				BlockNumber:     7212417,
-				TransactionHash: "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-				Index:           98,
-				// Other fields would be populated if available
-				Address: "",
-				Topics:  []string{},
-				Data:    "",
+			OutputType: &avsproto.EventTrigger_Output_EvmLog{
+				EvmLog: &avsproto.Evm_Log{
+					BlockNumber:     7212417,
+					TransactionHash: "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+					Index:           98,
+					// Other fields would be populated if available
+					Address: "",
+					Topics:  []string{},
+					Data:    "",
+				},
 			},
 		},
 	}
@@ -387,7 +389,9 @@ func GetTestEventTriggerDataWithTransferData() (*TriggerData, *avsproto.EventTri
 	triggerData := &TriggerData{
 		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 		Output: &avsproto.EventTrigger_Output{
-			TransferLog: transferLog,
+			OutputType: &avsproto.EventTrigger_Output_TransferLog{
+				TransferLog: transferLog,
+			},
 		},
 	}
 

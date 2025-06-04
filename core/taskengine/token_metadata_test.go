@@ -276,9 +276,9 @@ func TestGetTokenMetadataNotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test with token not in whitelist and no RPC client
-	_, err = service.GetTokenMetadata("0x1234567890123456789012345678901234567890")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no RPC client available")
+	metadata, err := service.GetTokenMetadata("0x1234567890123456789012345678901234567890")
+	assert.NoError(t, err)
+	assert.Nil(t, metadata, "Token not in whitelist should return nil metadata when no RPC client")
 }
 
 func TestChainIDDetection(t *testing.T) {

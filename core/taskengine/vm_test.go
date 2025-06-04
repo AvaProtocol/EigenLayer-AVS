@@ -538,42 +538,38 @@ func TestEvaluateEvent(t *testing.T) {
 	triggerData := &TriggerData{
 		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 		Output: &avsproto.EventTrigger_Output{
-			EvmLog: &avsproto.Evm_Log{
-				BlockNumber:     7212417,
-				TransactionHash: "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-				Index:           98,
+			// Use oneof structure with TransferLog for enriched transfer data
+			OutputType: &avsproto.EventTrigger_Output_TransferLog{
+				TransferLog: &avsproto.EventTrigger_TransferLogOutput{
+					Address:          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+					Value:            "1500000", // Greater than 1200000 to make condition true
+					TokenName:        "TestToken",
+					TokenSymbol:      "TEST",
+					TokenDecimals:    18,
+					TransactionHash:  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+					BlockNumber:      7212417,
+					BlockTimestamp:   1625097600000,
+					FromAddress:      "0x0000000000000000000000000000000000000000",
+					ToAddress:        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+					ValueFormatted:   "1.5",
+					TransactionIndex: 0,
+					LogIndex:         98,
+				},
 			},
 		},
-	}
-
-	// Create the transfer log data separately
-	transferLog := &avsproto.EventTrigger_TransferLogOutput{
-		Address:          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-		Value:            "1500000", // Greater than 1200000 to make condition true
-		TokenName:        "TestToken",
-		TokenSymbol:      "TEST",
-		TokenDecimals:    18,
-		TransactionHash:  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-		BlockNumber:      7212417,
-		BlockTimestamp:   1625097600000,
-		FromAddress:      "0x0000000000000000000000000000000000000000",
-		ToAddress:        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-		ValueFormatted:   "1.5",
-		TransactionIndex: 0,
-		LogIndex:         98,
 	}
 
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 
-	vm, err := NewVMWithDataAndTransferLog(&model.Task{
+	vm, err := NewVMWithData(&model.Task{
 		Task: &avsproto.Task{
 			Id:      "sampletaskid1",
 			Nodes:   nodes,
 			Edges:   edges,
 			Trigger: trigger,
 		},
-	}, triggerData, testutil.GetTestSmartWalletConfig(), nil, transferLog)
+	}, triggerData, testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
 		t.Errorf("expect vm initialized")
@@ -669,10 +665,23 @@ func TestReturnErrorWhenMissingEntrypoint(t *testing.T) {
 	triggerData := &TriggerData{
 		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 		Output: &avsproto.EventTrigger_Output{
-			EvmLog: &avsproto.Evm_Log{
-				BlockNumber:     7212417,
-				TransactionHash: "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-				Index:           98,
+			// Use oneof structure with TransferLog for enriched transfer data
+			OutputType: &avsproto.EventTrigger_Output_TransferLog{
+				TransferLog: &avsproto.EventTrigger_TransferLogOutput{
+					Address:          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+					Value:            "1500000", // Greater than 1200000 to make condition true
+					TokenName:        "TestToken",
+					TokenSymbol:      "TEST",
+					TokenDecimals:    18,
+					TransactionHash:  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+					BlockNumber:      7212417,
+					BlockTimestamp:   1625097600000,
+					FromAddress:      "0x0000000000000000000000000000000000000000",
+					ToAddress:        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+					ValueFormatted:   "1.5",
+					TransactionIndex: 0,
+					LogIndex:         98,
+				},
 			},
 		},
 	}
@@ -740,10 +749,23 @@ func TestParseEntrypointRegardlessOfOrdering(t *testing.T) {
 	triggerData := &TriggerData{
 		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 		Output: &avsproto.EventTrigger_Output{
-			EvmLog: &avsproto.Evm_Log{
-				BlockNumber:     7212417,
-				TransactionHash: "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-				Index:           98,
+			// Use oneof structure with TransferLog for enriched transfer data
+			OutputType: &avsproto.EventTrigger_Output_TransferLog{
+				TransferLog: &avsproto.EventTrigger_TransferLogOutput{
+					Address:          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+					Value:            "1500000", // Greater than 1200000 to make condition true
+					TokenName:        "TestToken",
+					TokenSymbol:      "TEST",
+					TokenDecimals:    18,
+					TransactionHash:  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+					BlockNumber:      7212417,
+					BlockTimestamp:   1625097600000,
+					FromAddress:      "0x0000000000000000000000000000000000000000",
+					ToAddress:        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+					ValueFormatted:   "1.5",
+					TransactionIndex: 0,
+					LogIndex:         98,
+				},
 			},
 		},
 	}

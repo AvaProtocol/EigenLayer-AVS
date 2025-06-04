@@ -152,7 +152,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	}
 
 	// Create a context with timeout to prevent hanging tests
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) // Increased timeout for comprehensive search
 	defer cancel()
 
 	// Parse the enhanced expression format
@@ -172,10 +172,15 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	}
 
 	if n.logger != nil {
+		contractsInfo := "ALL contracts"
+		if len(contractAddresses) > 0 {
+			contractsInfo = fmt.Sprintf("contracts: %v", contractAddresses)
+		}
+
 		n.logger.Info("EventTrigger: Making enhanced RPC call to fetch event data",
 			"expression", expression,
 			"topicHash", topicHash,
-			"contractAddresses", contractAddresses,
+			"contractsInfo", contractsInfo,
 			"fromAddress", fromAddress,
 			"toAddress", toAddress)
 	}
@@ -190,8 +195,27 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	var allEvents []types.Log
 	var totalSearched uint64
 
-	// Reduced search strategy for testing: Use smaller ranges to prevent timeouts
-	searchRanges := []uint64{100, 500, 1000, 5000} // Reduced from [1000, 5000, 20000, 50000, 100000]
+	// Chain-specific search strategy: Use 3-month and 6-month ranges based on chain block times
+	var searchRanges []uint64
+	if n.tokenEnrichmentService != nil {
+		chainID := n.tokenEnrichmentService.GetChainID()
+		searchRanges = GetChainSearchRanges(chainID)
+
+		if n.logger != nil {
+			ranges := GetBlockSearchRanges(chainID)
+			n.logger.Info("EventTrigger: Using chain-specific search ranges",
+				"chainID", chainID,
+				"threeMonths", ranges.ThreeMonths,
+				"sixMonths", ranges.SixMonths)
+		}
+	} else {
+		// Fallback to default Ethereum-like ranges if no token service available
+		searchRanges = GetChainSearchRanges(1) // Default to Ethereum mainnet
+
+		if n.logger != nil {
+			n.logger.Warn("EventTrigger: Using default Ethereum search ranges (no token service available)")
+		}
+	}
 
 	// Function to search with specific topic configuration
 	searchWithTopics := func(topics [][]common.Hash) ([]types.Log, uint64, error) {
@@ -229,27 +253,96 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 			}
 
 			if n.logger != nil {
-				n.logger.Info("EventTrigger: Enhanced search",
+				addressStrs := make([]string, len(query.Addresses))
+				for i, addr := range query.Addresses {
+					addressStrs[i] = addr.Hex()
+				}
+
+				topicStrs := make([][]string, len(topics))
+				for i, topicGroup := range topics {
+					topicStrs[i] = make([]string, len(topicGroup))
+					for j, topic := range topicGroup {
+						topicStrs[i][j] = topic.Hex()
+					}
+				}
+
+				n.logger.Info("EventTrigger: Enhanced search with detailed params",
 					"fromBlock", fromBlock,
 					"toBlock", currentBlock,
-					"contractCount", len(contractAddresses),
-					"topicsCount", len(topics))
+					"contractAddresses", addressStrs,
+					"topics", topicStrs,
+					"blockRange", currentBlock-fromBlock)
 			}
 
 			// Fetch logs from Ethereum with timeout context
 			logs, err := rpcConn.FilterLogs(ctx, query)
 			if err != nil {
 				if n.logger != nil {
-					n.logger.Warn("EventTrigger: Failed to fetch logs, continuing search",
-						"fromBlock", fromBlock,
-						"toBlock", currentBlock,
-						"error", err)
+					// Check if it's a known RPC limit error to avoid stack traces
+					errorMsg := err.Error()
+					if strings.Contains(errorMsg, "Block range limit exceeded") ||
+						strings.Contains(errorMsg, "range limit") ||
+						strings.Contains(errorMsg, "too many blocks") {
+						n.logger.Debug("EventTrigger: RPC provider block range limit hit, trying smaller range",
+							"fromBlock", fromBlock,
+							"toBlock", currentBlock,
+							"blockRange", currentBlock-fromBlock,
+							"error", errorMsg)
+
+						// Try chunked search for large ranges
+						if currentBlock-fromBlock > 1000 {
+							n.logger.Debug("EventTrigger: Attempting chunked search",
+								"originalRange", currentBlock-fromBlock,
+								"chunkSize", 1000)
+
+							// Break the range into 1000-block chunks
+							chunkSize := uint64(1000)
+							for chunkStart := fromBlock; chunkStart < currentBlock; chunkStart += chunkSize {
+								chunkEnd := chunkStart + chunkSize - 1
+								if chunkEnd > currentBlock {
+									chunkEnd = currentBlock
+								}
+
+								chunkQuery := query
+								chunkQuery.FromBlock = big.NewInt(int64(chunkStart))
+								chunkQuery.ToBlock = big.NewInt(int64(chunkEnd))
+
+								chunkLogs, chunkErr := rpcConn.FilterLogs(ctx, chunkQuery)
+								if chunkErr == nil {
+									logs = append(logs, chunkLogs...)
+								}
+							}
+
+							// If chunked search worked, treat as success
+							if len(logs) > 0 {
+								err = nil
+							}
+						}
+					} else {
+						n.logger.Warn("EventTrigger: Failed to fetch logs, continuing search",
+							"fromBlock", fromBlock,
+							"toBlock", currentBlock,
+							"error", err)
+					}
 				}
-				continue
+
+				// If still error after chunked retry, continue to next range
+				if err != nil {
+					continue
+				}
 			}
 
 			searched += (currentBlock - fromBlock)
 			events = append(events, logs...)
+
+			if n.logger != nil {
+				n.logger.Info("EventTrigger: Search completed for range",
+					"fromBlock", fromBlock,
+					"toBlock", currentBlock,
+					"logsFound", len(logs),
+					"totalEventsSoFar", len(events),
+					"blockRange", currentBlock-fromBlock)
+			}
 
 			// If events found, we can stop searching this range
 			if len(logs) > 0 {
@@ -338,6 +431,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 			"toAddress":         toAddress,
 			"totalSearched":     totalSearched,
 			"expression":        expression,
+			"message":           "No events found matching the criteria",
 		}, nil
 	}
 
@@ -1168,7 +1262,7 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		}
 	case NodeTypeEventTrigger:
 		if result != nil {
-			// Convert result to EventTrigger output with proper evm_log and transfer_log structures
+			// Convert result to EventTrigger output with proper oneof structure
 			eventOutput := &avsproto.EventTrigger_Output{}
 
 			// Check if we found an event
@@ -1205,65 +1299,75 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 						evmLog.Removed = removed
 					}
 
-					eventOutput.EvmLog = evmLog
-				}
+					// Check if we also have enriched transfer data
+					if transferLogData, ok := result["transfer_log"].(map[string]interface{}); ok {
+						// This is a transfer event - use the enriched transfer_log structure
+						transferLog := &avsproto.EventTrigger_TransferLogOutput{}
 
-				// Extract transfer_log data if present (for Transfer events)
-				if transferLogData, ok := result["transfer_log"].(map[string]interface{}); ok {
-					transferLog := &avsproto.EventTrigger_TransferLogOutput{}
+						if tokenName, ok := transferLogData["tokenName"].(string); ok {
+							transferLog.TokenName = tokenName
+						}
+						if tokenSymbol, ok := transferLogData["tokenSymbol"].(string); ok {
+							transferLog.TokenSymbol = tokenSymbol
+						}
+						if tokenDecimals, ok := transferLogData["tokenDecimals"].(uint32); ok {
+							transferLog.TokenDecimals = tokenDecimals
+						}
+						if transactionHash, ok := transferLogData["transactionHash"].(string); ok {
+							transferLog.TransactionHash = transactionHash
+						}
+						if address, ok := transferLogData["address"].(string); ok {
+							transferLog.Address = address
+						}
+						if blockNumber, ok := transferLogData["blockNumber"].(uint64); ok {
+							transferLog.BlockNumber = blockNumber
+						}
+						if blockTimestamp, ok := transferLogData["blockTimestamp"].(uint64); ok {
+							transferLog.BlockTimestamp = blockTimestamp
+						}
+						if fromAddress, ok := transferLogData["fromAddress"].(string); ok {
+							transferLog.FromAddress = fromAddress
+						}
+						if toAddress, ok := transferLogData["toAddress"].(string); ok {
+							transferLog.ToAddress = toAddress
+						}
+						if value, ok := transferLogData["value"].(string); ok {
+							transferLog.Value = value
+						}
+						if valueFormatted, ok := transferLogData["valueFormatted"].(string); ok {
+							transferLog.ValueFormatted = valueFormatted
+						}
+						if transactionIndex, ok := transferLogData["transactionIndex"].(uint32); ok {
+							transferLog.TransactionIndex = transactionIndex
+						}
+						if logIndex, ok := transferLogData["logIndex"].(uint32); ok {
+							transferLog.LogIndex = logIndex
+						}
 
-					if tokenName, ok := transferLogData["tokenName"].(string); ok {
-						transferLog.TokenName = tokenName
+						// Use the oneof TransferLog field
+						eventOutput.OutputType = &avsproto.EventTrigger_Output_TransferLog{
+							TransferLog: transferLog,
+						}
+					} else {
+						// Regular event (not a transfer) - use the oneof EvmLog field
+						eventOutput.OutputType = &avsproto.EventTrigger_Output_EvmLog{
+							EvmLog: evmLog,
+						}
 					}
-					if tokenSymbol, ok := transferLogData["tokenSymbol"].(string); ok {
-						transferLog.TokenSymbol = tokenSymbol
-					}
-					if tokenDecimals, ok := transferLogData["tokenDecimals"].(uint32); ok {
-						transferLog.TokenDecimals = tokenDecimals
-					}
-					if transactionHash, ok := transferLogData["transactionHash"].(string); ok {
-						transferLog.TransactionHash = transactionHash
-					}
-					if address, ok := transferLogData["address"].(string); ok {
-						transferLog.Address = address
-					}
-					if blockNumber, ok := transferLogData["blockNumber"].(uint64); ok {
-						transferLog.BlockNumber = blockNumber
-					}
-					if blockTimestamp, ok := transferLogData["blockTimestamp"].(uint64); ok {
-						transferLog.BlockTimestamp = blockTimestamp
-					}
-					if fromAddress, ok := transferLogData["fromAddress"].(string); ok {
-						transferLog.FromAddress = fromAddress
-					}
-					if toAddress, ok := transferLogData["toAddress"].(string); ok {
-						transferLog.ToAddress = toAddress
-					}
-					if value, ok := transferLogData["value"].(string); ok {
-						transferLog.Value = value
-					}
-					if valueFormatted, ok := transferLogData["valueFormatted"].(string); ok {
-						transferLog.ValueFormatted = valueFormatted
-					}
-					if transactionIndex, ok := transferLogData["transactionIndex"].(uint32); ok {
-						transferLog.TransactionIndex = transactionIndex
-					}
-					if logIndex, ok := transferLogData["logIndex"].(uint32); ok {
-						transferLog.LogIndex = logIndex
-					}
-
-					eventOutput.TransferLog = transferLog
 				}
 			}
-			// If no event found, eventOutput will have nil evm_log and transfer_log which is correct
+			// When no event found, leave OutputType as nil (undefined on client)
 
 			resp.OutputData = &avsproto.RunTriggerResp_EventTrigger{
 				EventTrigger: eventOutput,
 			}
 		} else {
-			// If result is nil, create empty EventTrigger output
+			// If result is nil, create empty EventTrigger output with nil OutputType
+			eventOutput := &avsproto.EventTrigger_Output{
+				// Leave OutputType as nil (undefined on client)
+			}
 			resp.OutputData = &avsproto.RunTriggerResp_EventTrigger{
-				EventTrigger: &avsproto.EventTrigger_Output{},
+				EventTrigger: eventOutput,
 			}
 		}
 	case NodeTypeManualTrigger:

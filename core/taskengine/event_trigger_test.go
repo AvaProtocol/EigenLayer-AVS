@@ -9,6 +9,7 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -689,9 +690,14 @@ func TestEventTriggerEnhancedMultipleContracts(t *testing.T) {
 
 			// Verify RPC response has proper EventTrigger.Output structure
 			if rpcResult.GetEventTrigger() != nil {
-				hasEvmLog := rpcResult.GetEventTrigger().EvmLog != nil
-				hasTransferLog := rpcResult.GetEventTrigger().TransferLog != nil
+				// Check response structure - should be undefined when no events found
+				hasEvmLog := rpcResult.GetEventTrigger().GetEvmLog() != nil
+				hasTransferLog := rpcResult.GetEventTrigger().GetTransferLog() != nil
 				t.Logf("🔌 RPC Response: evm_log=%v, transfer_log=%v", hasEvmLog, hasTransferLog)
+
+				// Check that we get undefined when no events are found
+				assert.Nil(t, rpcResult.GetEventTrigger().GetEvmLog(), "evm_log should be nil when no events found")
+				assert.Nil(t, rpcResult.GetEventTrigger().GetTransferLog(), "transfer_log should be nil when no events found")
 			}
 
 			t.Logf("✅ Test completed for: %s\n", tc.name)
@@ -941,8 +947,8 @@ func TestEventTriggerUserSpecificRequest(t *testing.T) {
 
 	// Verify protobuf response
 	if rpcResult.GetEventTrigger() != nil {
-		hasEvmLog := rpcResult.GetEventTrigger().EvmLog != nil
-		hasTransferLog := rpcResult.GetEventTrigger().TransferLog != nil
+		hasEvmLog := rpcResult.GetEventTrigger().GetEvmLog() != nil
+		hasTransferLog := rpcResult.GetEventTrigger().GetTransferLog() != nil
 		t.Logf("🔌 RPC Response verification: evm_log=%v, transfer_log=%v", hasEvmLog, hasTransferLog)
 
 		if hasEvmLog || hasTransferLog {
