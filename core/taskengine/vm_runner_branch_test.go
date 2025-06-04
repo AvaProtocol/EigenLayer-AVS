@@ -777,11 +777,12 @@ func TestBranchProcessor_Execute_ErrorInExpression(t *testing.T) {
 
 	executionLog, nextStep, err := processor.Execute(stepID, node)
 
-	assert.NotNil(t, err)
-	assert.Nil(t, nextStep)
+	// Now expects silent failure - no error returned, condition treated as false
+	assert.Nil(t, err)
+	assert.Nil(t, nextStep) // No condition matched, no else condition, so no next step
 	assert.NotNil(t, executionLog)
-	assert.False(t, executionLog.Success)
-	assert.Contains(t, executionLog.Error, "failed to evaluate expression")
+	assert.True(t, executionLog.Success) // Success with no branch action taken
+	assert.Empty(t, executionLog.Error)  // No error in execution log
 }
 
 func TestBranchProcessor_Execute_MultipleConditions_FirstMatch(t *testing.T) {
@@ -875,13 +876,11 @@ func TestBranchProcessor_Execute_NonExistentVarInExpression(t *testing.T) {
 
 	executionLog, nextStep, err := processor.Execute(stepID, node)
 
-	// Undefined variables should cause the branch to fail with an error
-	assert.NotNil(t, err)
-	assert.Contains(t, err.Error(), "failed to evaluate expression")
-	assert.Contains(t, err.Error(), "is not defined")
-	assert.Nil(t, nextStep)
+	// Now expects silent failure - undefined variables are treated as false
+	assert.Nil(t, err)
+	assert.Nil(t, nextStep) // No condition matched, no else condition, so no next step
 	assert.NotNil(t, executionLog)
-	assert.False(t, executionLog.Success)
+	assert.True(t, executionLog.Success) // Success with no branch action taken
 }
 
 func TestBranchProcessor_Execute_InvalidScriptSyntax(t *testing.T) {
@@ -898,9 +897,10 @@ func TestBranchProcessor_Execute_InvalidScriptSyntax(t *testing.T) {
 
 	executionLog, nextStep, err := processor.Execute(stepID, node)
 
-	assert.NotNil(t, err)
-	assert.Nil(t, nextStep)
+	// Now expects silent failure - invalid syntax is treated as false
+	assert.Nil(t, err)
+	assert.Nil(t, nextStep) // No condition matched, no else condition, so no next step
 	assert.NotNil(t, executionLog)
-	assert.False(t, executionLog.Success)
-	assert.Contains(t, executionLog.Error, "failed to evaluate expression") // Error from expr parsing
+	assert.True(t, executionLog.Success) // Success with no branch action taken
+	assert.Empty(t, executionLog.Error)  // No error in execution log
 }

@@ -15,58 +15,58 @@ func TestBlockSearchRanges(t *testing.T) {
 		{
 			name:               "Ethereum Mainnet",
 			chainID:            1,
-			expectedOneMonth:   216000, // 30 days at 12s blocks
-			expectedTwoMonths:  432000, // 60 days at 12s blocks
-			expectedFourMonths: 864000, // 120 days at 12s blocks
+			expectedOneMonth:   21600, // ~3 days at 12s blocks (1/10 of original 216000)
+			expectedTwoMonths:  43200, // ~6 days at 12s blocks (1/10 of original 432000)
+			expectedFourMonths: 86400, // ~12 days at 12s blocks (1/10 of original 864000)
 		},
 		{
 			name:               "Ethereum Sepolia",
 			chainID:            11155111,
-			expectedOneMonth:   216000, // 30 days at 12s blocks
-			expectedTwoMonths:  432000, // 60 days at 12s blocks
-			expectedFourMonths: 864000, // 120 days at 12s blocks
+			expectedOneMonth:   21600, // ~3 days at 12s blocks (1/10 of original 216000)
+			expectedTwoMonths:  43200, // ~6 days at 12s blocks (1/10 of original 432000)
+			expectedFourMonths: 86400, // ~12 days at 12s blocks (1/10 of original 864000)
 		},
 		{
 			name:               "Base Mainnet",
 			chainID:            8453,
-			expectedOneMonth:   1296000, // 30 days at 2s blocks
-			expectedTwoMonths:  2592000, // 60 days at 2s blocks
-			expectedFourMonths: 5184000, // 120 days at 2s blocks
+			expectedOneMonth:   129600, // ~3 days at 2s blocks (1/10 of original 1296000)
+			expectedTwoMonths:  259200, // ~6 days at 2s blocks (1/10 of original 2592000)
+			expectedFourMonths: 518400, // ~12 days at 2s blocks (1/10 of original 5184000)
 		},
 		{
 			name:               "Base Sepolia",
 			chainID:            84532,
-			expectedOneMonth:   1296000, // 30 days at 2s blocks
-			expectedTwoMonths:  2592000, // 60 days at 2s blocks
-			expectedFourMonths: 5184000, // 120 days at 2s blocks
+			expectedOneMonth:   129600, // ~3 days at 2s blocks (1/10 of original 1296000)
+			expectedTwoMonths:  259200, // ~6 days at 2s blocks (1/10 of original 2592000)
+			expectedFourMonths: 518400, // ~12 days at 2s blocks (1/10 of original 5184000)
 		},
 		{
 			name:               "BNB Smart Chain Mainnet",
 			chainID:            56,
-			expectedOneMonth:   3456000,  // 30 days at 0.75s blocks
-			expectedTwoMonths:  6912000,  // 60 days at 0.75s blocks
-			expectedFourMonths: 13824000, // 120 days at 0.75s blocks
+			expectedOneMonth:   345600,  // ~3 days at 0.75s blocks (1/10 of original 3456000)
+			expectedTwoMonths:  691200,  // ~6 days at 0.75s blocks (1/10 of original 6912000)
+			expectedFourMonths: 1382400, // ~12 days at 0.75s blocks (1/10 of original 13824000)
 		},
 		{
 			name:               "BNB Smart Chain Testnet",
 			chainID:            97,
-			expectedOneMonth:   3456000,  // 30 days at 0.75s blocks
-			expectedTwoMonths:  6912000,  // 60 days at 0.75s blocks
-			expectedFourMonths: 13824000, // 120 days at 0.75s blocks
+			expectedOneMonth:   345600,  // ~3 days at 0.75s blocks (1/10 of original 3456000)
+			expectedTwoMonths:  691200,  // ~6 days at 0.75s blocks (1/10 of original 6912000)
+			expectedFourMonths: 1382400, // ~12 days at 0.75s blocks (1/10 of original 13824000)
 		},
 		{
 			name:               "Polygon Mainnet",
 			chainID:            137,
-			expectedOneMonth:   1296000, // 30 days at 2s blocks
-			expectedTwoMonths:  2592000, // 60 days at 2s blocks
-			expectedFourMonths: 5184000, // 120 days at 2s blocks
+			expectedOneMonth:   129600, // ~3 days at 2s blocks (1/10 of original 1296000)
+			expectedTwoMonths:  259200, // ~6 days at 2s blocks (1/10 of original 2592000)
+			expectedFourMonths: 518400, // ~12 days at 2s blocks (1/10 of original 5184000)
 		},
 		{
 			name:               "Unknown Chain (defaults to Ethereum)",
 			chainID:            999999,
-			expectedOneMonth:   216000, // Default to Ethereum timing
-			expectedTwoMonths:  432000, // Default to Ethereum timing
-			expectedFourMonths: 864000, // Default to Ethereum timing
+			expectedOneMonth:   21600, // Default to reduced Ethereum timing (1/10 of original 216000)
+			expectedTwoMonths:  43200, // Default to reduced Ethereum timing (1/10 of original 432000)
+			expectedFourMonths: 86400, // Default to reduced Ethereum timing (1/10 of original 864000)
 		},
 	}
 

@@ -171,7 +171,6 @@ func (v *VM) WithDb(db storage.Storage) *VM {
 func (v *VM) GetTriggerNameAsVar() (string, error) {
 	// This method doesn't modify VM state directly, so mutex is not strictly needed
 	// unless task can be modified concurrently, which is unlikely during this call.
-	re := regexp.MustCompile(`[^a-zA-Z0-9_$]`)
 	var name string
 	if v.task != nil && v.task.Trigger != nil {
 		name = v.task.Trigger.Name
@@ -183,11 +182,9 @@ func (v *VM) GetTriggerNameAsVar() (string, error) {
 	} else {
 		name = "trigger" // Default for nil task (e.g. single node execution)
 	}
-	standardized := re.ReplaceAllString(name, "_")
-	if len(standardized) == 0 || !regexp.MustCompile(`^[a-zA-Z_$]`).MatchString(standardized[:1]) {
-		standardized = "_" + standardized
-	}
-	return standardized, nil
+
+	// Use the unified sanitization function
+	return sanitizeTriggerNameForJS(name), nil
 }
 
 func (v *VM) GetNodeNameAsVar(nodeID string) string {
@@ -198,20 +195,18 @@ func (v *VM) GetNodeNameAsVar(nodeID string) string {
 
 // getNodeNameAsVarLocked is the internal version that assumes the mutex is already held
 func (v *VM) getNodeNameAsVarLocked(nodeID string) string {
-	re := regexp.MustCompile(`[^a-zA-Z0-9_$]`)
 	node, ok := v.TaskNodes[nodeID]
 	if !ok {
-		return "_" + re.ReplaceAllString(nodeID, "_") // Sanitize nodeID itself if not found
+		// Use the unified sanitization function for nodeID itself if not found
+		return sanitizeTriggerNameForJS(nodeID)
 	}
 	name := node.Name
 	if name == "" {
 		name = nodeID
 	}
-	standardized := re.ReplaceAllString(name, "_")
-	if len(standardized) == 0 || !regexp.MustCompile(`^[a-zA-Z_$]`).MatchString(standardized[:1]) {
-		standardized = "_" + standardized
-	}
-	return standardized
+
+	// Use the unified sanitization function for node names
+	return sanitizeTriggerNameForJS(name)
 }
 
 func NewVMWithData(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string) (*VM, error) {
@@ -235,10 +230,8 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 	// Initialize apContext with configVars containing secrets and macro variables
 	configVars := make(map[string]string)
 	// Add secrets (they override macro variables if there are conflicts)
-	if secrets != nil {
-		for k, v := range secrets {
-			configVars[k] = v
-		}
+	for k, v := range secrets {
+		configVars[k] = v
 	}
 
 	v.AddVar(APContextVarName, map[string]map[string]string{

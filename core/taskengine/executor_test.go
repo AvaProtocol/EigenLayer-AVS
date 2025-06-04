@@ -129,7 +129,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 	}
 }
 
-func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
+func TestExecutorRunTaskWithBranchSilentFailureBehavior(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
 	db := testutil.TestMustDB()
@@ -146,7 +146,7 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 							{
 								Id:         "a1",
 								Type:       "if",
-								Expression: "a >= 5",
+								Expression: "a >= 5", // Variable 'a' doesn't exist - should be treated as false
 							},
 						},
 					},
@@ -202,21 +202,32 @@ func TestExecutorRunTaskStopAndReturnErrorWhenANodeFailed(t *testing.T) {
 		ExecutionID:   "exec123",
 	})
 
-	if err == nil {
-		t.Errorf("expect an error but the execution return no error")
+	// With silent failure behavior, branch nodes no longer hard fail - they succeed but no condition matches
+	if err != nil {
+		t.Errorf("Expected no error with silent failure behavior, but got: %v", err)
 	}
 
-	if execution.Success {
-		t.Errorf("Expect failure status but got success")
+	if !execution.Success {
+		t.Errorf("Expected success status with silent failure behavior, but got failure: %s", execution.Error)
 	}
 
 	if len(execution.Steps) != 2 {
-		t.Errorf("expect 2 steps (trigger + node) but got: %d", len(execution.Steps))
+		t.Errorf("expect 2 steps (trigger + branch) but got: %d", len(execution.Steps))
 	}
 
-	// Check branch1 step at index 0 (no trigger step in regular executions)
+	// Check branch1 step (should succeed but not match any condition)
 	if execution.Steps[1].Id != "branch1" {
 		t.Errorf("expect evaluate branch node but got: %s", execution.Steps[1].Id)
+	}
+
+	// Branch should succeed but no condition should be matched
+	if !execution.Steps[1].Success {
+		t.Errorf("Expected branch to succeed with silent failure behavior, but got failure: %s", execution.Steps[1].Error)
+	}
+
+	// The output should be nil since no condition was matched
+	if execution.Steps[1].OutputData != nil {
+		t.Errorf("Expected no branch output since no condition matched, but got output")
 	}
 }
 
