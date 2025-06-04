@@ -16,5 +16,10 @@ var Migrations = []migrator.Migration{
 	// 	Name:     "20250405-232000-change-epoch-to-ms",
 	// 	Function: ChangeEpochToMs,
 	// },
+	// Token metadata fields migration - adding required fields to new TokenMetadata struct
+	{
+		Name:     "20250603-183034-token-metadata-fields",
+		Function: TokenMetadataFieldsMigration,
+	},
 	// Each migration should be added to this list
 }
