@@ -719,7 +719,7 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 	secrets, err := n.LoadSecretsForImmediateExecution(inputVariables)
 	if err != nil {
 		if n.logger != nil {
-			n.logger.Warn("Failed to load secrets for immediate execution", "error", err)
+			n.logger.Warn("Failed to load secrets for immediate execution", "error", err.Error())
 		}
 		// Don't fail the request, just use empty secrets
 		secrets = make(map[string]string)
@@ -853,7 +853,7 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 			data = structVal.AsInterface()
 		} else {
 			if n.logger != nil {
-				n.logger.Warn("Failed to unmarshal Filter output", "error", err)
+				n.logger.Warn("Failed to unmarshal Filter output", "error", err.Error())
 			}
 			data = string(filter.GetData().GetValue())
 		}
@@ -867,7 +867,7 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 			data = structVal.AsMap()
 		} else {
 			if n.logger != nil {
-				n.logger.Warn("Failed to unmarshal GraphQL output", "error", err)
+				n.logger.Warn("Failed to unmarshal GraphQL output", "error", err.Error())
 			}
 			data = map[string]interface{}{"raw_output": string(graphQL.GetData().GetValue())}
 		}
@@ -935,8 +935,8 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				// Expected validation errors - log at WARN level without stack traces
 				n.logger.Warn("RunNodeImmediatelyRPC: Validation failed", "nodeType", nodeTypeStr, "error", err.Error())
 			} else {
-				// Unexpected system errors - log at ERROR level (with stack traces)
-				n.logger.Error("RunNodeImmediatelyRPC: System error during execution", "nodeType", nodeTypeStr, "error", err)
+				// Unexpected system errors - log at ERROR level without stack traces for cleaner output
+				n.logger.Error("RunNodeImmediatelyRPC: System error during execution", "nodeType", nodeTypeStr, "error", err.Error())
 			}
 		}
 
@@ -1214,8 +1214,8 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 				// Expected validation errors - log at WARN level without stack traces
 				n.logger.Warn("RunTriggerRPC: Validation failed", "triggerType", triggerTypeStr, "error", err.Error())
 			} else {
-				// Unexpected system errors - log at ERROR level (with stack traces)
-				n.logger.Error("RunTriggerRPC: System error during execution", "triggerType", triggerTypeStr, "error", err)
+				// Unexpected system errors - log at ERROR level without stack traces for cleaner output
+				n.logger.Error("RunTriggerRPC: System error during execution", "triggerType", triggerTypeStr, "error", err.Error())
 			}
 		}
 
