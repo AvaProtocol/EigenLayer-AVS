@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1167,7 +1168,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	// Add the trigger variable with the actual trigger name for JavaScript access
-	vm.AddVar(trigger.GetName(), map[string]any{"data": triggerDataMap})
+	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), map[string]any{"data": triggerDataMap})
 
 	// Step 6: Compile the workflow
 	t0 := time.Now()
@@ -2060,4 +2061,33 @@ func (n *Engine) GetTokenMetadata(user *model.User, payload *avsproto.GetTokenMe
 		"source", source)
 
 	return response, nil
+}
+
+// sanitizeTriggerNameForJS converts trigger names to valid JavaScript variable identifiers
+// by replacing spaces and special characters with underscores.
+// This ensures trigger names like "my event trigger" or "trigger-1" become valid JS variables
+// like "my_event_trigger" and "trigger_1" respectively.
+func sanitizeTriggerNameForJS(triggerName string) string {
+	if triggerName == "" {
+		return "unnamed_trigger"
+	}
+
+	// Replace any sequence of non-alphanumeric characters (except underscore) with a single underscore
+	reg := regexp.MustCompile(`[^a-zA-Z0-9_]+`)
+	sanitized := reg.ReplaceAllString(triggerName, "_")
+
+	// Remove leading/trailing underscores
+	sanitized = strings.Trim(sanitized, "_")
+
+	// Ensure it doesn't start with a number (JS variable naming rule)
+	if len(sanitized) > 0 && sanitized[0] >= '0' && sanitized[0] <= '9' {
+		sanitized = "trigger_" + sanitized
+	}
+
+	// Fallback if somehow we end up with empty string
+	if sanitized == "" {
+		sanitized = "unnamed_trigger"
+	}
+
+	return sanitized
 }
