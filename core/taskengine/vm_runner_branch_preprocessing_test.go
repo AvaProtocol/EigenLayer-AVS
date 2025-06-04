@@ -169,7 +169,7 @@ func TestBranchNodePreprocessingEdgeCases(t *testing.T) {
 			triggerData: map[string]interface{}{
 				"status": "ready",
 			},
-			expectError: true, // Empty expressions cause syntax errors
+			expectError: false, // Now fails silently - goes to else condition
 		},
 		{
 			name:       "string with braces in content",
@@ -185,7 +185,7 @@ func TestBranchNodePreprocessingEdgeCases(t *testing.T) {
 			triggerData: map[string]interface{}{
 				"status": "ready",
 			},
-			expectError: true, // Invalid property access causes errors
+			expectError: false, // Now fails silently - goes to else condition
 		},
 	}
 
