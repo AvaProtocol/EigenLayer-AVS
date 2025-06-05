@@ -281,12 +281,25 @@ func TestRunSequentialTasks(t *testing.T) {
 	}
 
 	outputData := gow.ValueToMap(vm.ExecutionLogs[0].GetRestApi().Data)
-	if outputData["body"].(map[string]any)["data"].(string) != "post123" {
-		t.Errorf("rest node result is incorrect, should contains the string post123, got: %v", outputData["body"])
+	if body, ok := outputData["body"].(map[string]any); ok {
+		if data, ok := body["data"].(string); ok && data != "post123" {
+			t.Errorf("rest node result is incorrect, should contains the string post123, got: %v", data)
+		}
+	} else {
+		t.Errorf("rest node result is incorrect, body should be a map, got: %T %v", outputData["body"], outputData["body"])
 	}
+
 	outputData = gow.ValueToMap(vm.ExecutionLogs[1].GetRestApi().Data)
-	if outputData["body"].(map[string]any)["args"].(map[string]any)["query123"].(string) != "abc" {
-		t.Errorf("rest node result is incorrect, should contains the string query123, got: %v", outputData["body"])
+	if body, ok := outputData["body"].(map[string]any); ok {
+		if args, ok := body["args"].(map[string]any); ok {
+			if query123, ok := args["query123"].(string); ok && query123 != "abc" {
+				t.Errorf("rest node result is incorrect, should contains the string query123=abc, got: %v", query123)
+			}
+		} else {
+			t.Errorf("rest node result is incorrect, args should be a map, got: %T %v", body["args"], body["args"])
+		}
+	} else {
+		t.Errorf("rest node result is incorrect, body should be a map, got: %T %v", outputData["body"], outputData["body"])
 	}
 }
 
