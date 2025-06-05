@@ -970,116 +970,22 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Step 2: Create QueueExecutionData similar to regular task execution
 	simulationID := ulid.Make().String()
 
-	// Convert trigger output to proper protobuf structure
+	// Convert trigger output to proper protobuf structure using shared functions
 	var triggerOutputProto interface{}
 	switch trigger.Type {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-		runAt := uint64(0)
-		if runAtVal, ok := triggerOutput["runAt"]; ok {
-			if runAtUint, ok := runAtVal.(uint64); ok {
-				runAt = runAtUint
-			}
-		}
-		triggerOutputProto = &avsproto.ManualTrigger_Output{
-			RunAt: runAt,
-		}
+		triggerOutputProto = buildManualTriggerOutput(triggerOutput)
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
-		timestamp := uint64(0)
-		timestampISO := ""
-		if ts, ok := triggerOutput["timestamp"]; ok {
-			if tsUint, ok := ts.(uint64); ok {
-				timestamp = tsUint
-			}
-		}
-		if tsISO, ok := triggerOutput["timestamp_iso"]; ok {
-			if tsISOStr, ok := tsISO.(string); ok {
-				timestampISO = tsISOStr
-			}
-		}
-		triggerOutputProto = &avsproto.FixedTimeTrigger_Output{
-			Timestamp:    timestamp,
-			TimestampIso: timestampISO,
-		}
+		triggerOutputProto = buildFixedTimeTriggerOutput(triggerOutput)
 	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
-		timestamp := uint64(0)
-		timestampISO := ""
-		if ts, ok := triggerOutput["timestamp"]; ok {
-			if tsUint, ok := ts.(uint64); ok {
-				timestamp = tsUint
-			}
-		}
-		if tsISO, ok := triggerOutput["timestamp_iso"]; ok {
-			if tsISOStr, ok := tsISO.(string); ok {
-				timestampISO = tsISOStr
-			}
-		}
-		triggerOutputProto = &avsproto.CronTrigger_Output{
-			Timestamp:    timestamp,
-			TimestampIso: timestampISO,
-		}
+		triggerOutputProto = buildCronTriggerOutput(triggerOutput)
 	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
-		blockNumber := uint64(0)
-		blockHash := ""
-		timestamp := uint64(0)
-		parentHash := ""
-		difficulty := ""
-		gasLimit := uint64(0)
-		gasUsed := uint64(0)
-
-		if bn, ok := triggerOutput["blockNumber"]; ok {
-			if bnUint, ok := bn.(uint64); ok {
-				blockNumber = bnUint
-			}
-		}
-		if bh, ok := triggerOutput["blockHash"]; ok {
-			if bhStr, ok := bh.(string); ok {
-				blockHash = bhStr
-			}
-		}
-		if ts, ok := triggerOutput["timestamp"]; ok {
-			if tsUint, ok := ts.(uint64); ok {
-				timestamp = tsUint
-			}
-		}
-		if ph, ok := triggerOutput["parentHash"]; ok {
-			if phStr, ok := ph.(string); ok {
-				parentHash = phStr
-			}
-		}
-		if diff, ok := triggerOutput["difficulty"]; ok {
-			if diffStr, ok := diff.(string); ok {
-				difficulty = diffStr
-			}
-		}
-		if gl, ok := triggerOutput["gasLimit"]; ok {
-			if glUint, ok := gl.(uint64); ok {
-				gasLimit = glUint
-			}
-		}
-		if gu, ok := triggerOutput["gasUsed"]; ok {
-			if guUint, ok := gu.(uint64); ok {
-				gasUsed = guUint
-			}
-		}
-
-		triggerOutputProto = &avsproto.BlockTrigger_Output{
-			BlockNumber: blockNumber,
-			BlockHash:   blockHash,
-			Timestamp:   timestamp,
-			ParentHash:  parentHash,
-			Difficulty:  difficulty,
-			GasLimit:    gasLimit,
-			GasUsed:     gasUsed,
-		}
+		triggerOutputProto = buildBlockTriggerOutput(triggerOutput)
 	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
-		// For event triggers, create a basic event output
-		// In a real scenario, this would be populated with actual event data
-		triggerOutputProto = &avsproto.EventTrigger_Output{}
+		triggerOutputProto = buildEventTriggerOutput(triggerOutput)
 	default:
 		// For unknown trigger types, create a manual trigger as fallback
-		triggerOutputProto = &avsproto.ManualTrigger_Output{
-			RunAt: uint64(time.Now().Unix()),
-		}
+		triggerOutputProto = buildManualTriggerOutput(triggerOutput)
 	}
 
 	queueData := &QueueExecutionData{
@@ -1111,61 +1017,8 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	// Step 5: Add trigger data as "trigger" variable for convenient access in JavaScript
-	// This ensures scripts can access trigger.data regardless of the trigger's name
-	triggerDataMap := make(map[string]interface{})
-	switch triggerReason.Type {
-	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-		triggerDataMap["triggered"] = true
-		if runAt, ok := triggerOutput["runAt"]; ok {
-			triggerDataMap["runAt"] = runAt
-		}
-	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
-		if timestamp, ok := triggerOutput["timestamp"]; ok {
-			triggerDataMap["timestamp"] = timestamp
-		}
-		if timestampISO, ok := triggerOutput["timestamp_iso"]; ok {
-			triggerDataMap["timestamp_iso"] = timestampISO
-		}
-	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
-		if timestamp, ok := triggerOutput["timestamp"]; ok {
-			triggerDataMap["timestamp"] = timestamp
-		}
-		if timestampISO, ok := triggerOutput["timestamp_iso"]; ok {
-			triggerDataMap["timestamp_iso"] = timestampISO
-		}
-	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
-		if blockNumber, ok := triggerOutput["blockNumber"]; ok {
-			triggerDataMap["blockNumber"] = blockNumber
-		}
-		if blockHash, ok := triggerOutput["blockHash"]; ok {
-			triggerDataMap["blockHash"] = blockHash
-		}
-		if timestamp, ok := triggerOutput["timestamp"]; ok {
-			triggerDataMap["timestamp"] = timestamp
-		}
-		if parentHash, ok := triggerOutput["parentHash"]; ok {
-			triggerDataMap["parentHash"] = parentHash
-		}
-		if difficulty, ok := triggerOutput["difficulty"]; ok {
-			triggerDataMap["difficulty"] = difficulty
-		}
-		if gasLimit, ok := triggerOutput["gasLimit"]; ok {
-			triggerDataMap["gasLimit"] = gasLimit
-		}
-		if gasUsed, ok := triggerOutput["gasUsed"]; ok {
-			triggerDataMap["gasUsed"] = gasUsed
-		}
-	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
-		// Copy all event trigger data
-		for k, v := range triggerOutput {
-			triggerDataMap[k] = v
-		}
-	default:
-		// For unknown trigger types, copy all output data
-		for k, v := range triggerOutput {
-			triggerDataMap[k] = v
-		}
-	}
+	// This ensures scripts can access trigger.data regardless of the trigger's name using shared function
+	triggerDataMap := buildTriggerDataMap(triggerReason.Type, triggerOutput)
 
 	// Add the trigger variable with the actual trigger name for JavaScript access
 	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), map[string]any{"data": triggerDataMap})
@@ -1196,29 +1049,8 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Name:    task.Trigger.Name,              // Use new 'name' field
 	}
 
-	// Set trigger output data in the step based on trigger type
-	switch queueData.TriggerType {
-	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-		if output, ok := triggerOutputProto.(*avsproto.ManualTrigger_Output); ok {
-			triggerStep.OutputData = &avsproto.Execution_Step_ManualTrigger{ManualTrigger: output}
-		}
-	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
-		if output, ok := triggerOutputProto.(*avsproto.FixedTimeTrigger_Output); ok {
-			triggerStep.OutputData = &avsproto.Execution_Step_FixedTimeTrigger{FixedTimeTrigger: output}
-		}
-	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
-		if output, ok := triggerOutputProto.(*avsproto.CronTrigger_Output); ok {
-			triggerStep.OutputData = &avsproto.Execution_Step_CronTrigger{CronTrigger: output}
-		}
-	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
-		if output, ok := triggerOutputProto.(*avsproto.BlockTrigger_Output); ok {
-			triggerStep.OutputData = &avsproto.Execution_Step_BlockTrigger{BlockTrigger: output}
-		}
-	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
-		if output, ok := triggerOutputProto.(*avsproto.EventTrigger_Output); ok {
-			triggerStep.OutputData = &avsproto.Execution_Step_EventTrigger{EventTrigger: output}
-		}
-	}
+	// Set trigger output data in the step using shared function
+	triggerStep.OutputData = buildExecutionStepOutputData(queueData.TriggerType, triggerOutputProto)
 
 	// Add trigger step to execution logs
 	vm.ExecutionLogs = append(vm.ExecutionLogs, triggerStep)
@@ -2090,4 +1922,472 @@ func sanitizeTriggerNameForJS(triggerName string) string {
 	}
 
 	return sanitized
+}
+
+// buildEventTriggerOutput creates an EventTrigger_Output from raw trigger output data.
+// This shared function eliminates code duplication between SimulateTask, RunTriggerRPC,
+// and regular task execution flows.
+//
+// Parameters:
+//   - triggerOutput: map containing raw trigger output data from runEventTriggerImmediately
+//
+// Returns:
+//   - *avsproto.EventTrigger_Output: properly structured protobuf output with oneof fields
+//
+// The function handles both TransferLog (for Transfer events with enriched token metadata)
+// and EvmLog (for general Ethereum events with raw log data).
+func buildEventTriggerOutput(triggerOutput map[string]interface{}) *avsproto.EventTrigger_Output {
+	eventOutput := &avsproto.EventTrigger_Output{}
+
+	// Check if we have event data and populate appropriately
+	if triggerOutput != nil {
+		// Check if we found events
+		if found, ok := triggerOutput["found"].(bool); ok && found {
+			// We found events - check if we have transfer_log data (for Transfer events)
+			if transferLogData, hasTransferLog := triggerOutput["transfer_log"].(map[string]interface{}); hasTransferLog {
+				// Create TransferLog structure
+				transferLog := &avsproto.EventTrigger_TransferLogOutput{}
+
+				if tokenName, ok := transferLogData["tokenName"].(string); ok {
+					transferLog.TokenName = tokenName
+				}
+				if tokenSymbol, ok := transferLogData["tokenSymbol"].(string); ok {
+					transferLog.TokenSymbol = tokenSymbol
+				}
+				if tokenDecimals, ok := transferLogData["tokenDecimals"].(uint32); ok {
+					transferLog.TokenDecimals = tokenDecimals
+				}
+				if txHash, ok := transferLogData["transactionHash"].(string); ok {
+					transferLog.TransactionHash = txHash
+				}
+				if address, ok := transferLogData["address"].(string); ok {
+					transferLog.Address = address
+				}
+				if blockNumber, ok := transferLogData["blockNumber"].(uint64); ok {
+					transferLog.BlockNumber = blockNumber
+				}
+				if blockTimestamp, ok := transferLogData["blockTimestamp"].(uint64); ok {
+					transferLog.BlockTimestamp = blockTimestamp
+				}
+				if fromAddress, ok := transferLogData["fromAddress"].(string); ok {
+					transferLog.FromAddress = fromAddress
+				}
+				if toAddress, ok := transferLogData["toAddress"].(string); ok {
+					transferLog.ToAddress = toAddress
+				}
+				if value, ok := transferLogData["value"].(string); ok {
+					transferLog.Value = value
+				}
+				if valueFormatted, ok := transferLogData["valueFormatted"].(string); ok {
+					transferLog.ValueFormatted = valueFormatted
+				}
+				if txIndex, ok := transferLogData["transactionIndex"].(uint32); ok {
+					transferLog.TransactionIndex = txIndex
+				}
+				if logIndex, ok := transferLogData["logIndex"].(uint32); ok {
+					transferLog.LogIndex = logIndex
+				}
+
+				// Set the TransferLog in the oneof field
+				eventOutput.OutputType = &avsproto.EventTrigger_Output_TransferLog{
+					TransferLog: transferLog,
+				}
+			} else if evmLogData, hasEvmLog := triggerOutput["evm_log"].(map[string]interface{}); hasEvmLog {
+				// Create EvmLog structure for general Ethereum events
+				evmLog := &avsproto.Evm_Log{}
+
+				if address, ok := evmLogData["address"].(string); ok {
+					evmLog.Address = address
+				}
+				if topics, ok := evmLogData["topics"].([]string); ok {
+					evmLog.Topics = topics
+				}
+				if data, ok := evmLogData["data"].(string); ok {
+					evmLog.Data = data
+				}
+				if blockNumber, ok := evmLogData["blockNumber"].(uint64); ok {
+					evmLog.BlockNumber = blockNumber
+				}
+				if txHash, ok := evmLogData["transactionHash"].(string); ok {
+					evmLog.TransactionHash = txHash
+				}
+				if txIndex, ok := evmLogData["transactionIndex"].(uint32); ok {
+					evmLog.TransactionIndex = txIndex
+				}
+				if blockHash, ok := evmLogData["blockHash"].(string); ok {
+					evmLog.BlockHash = blockHash
+				}
+				if index, ok := evmLogData["index"].(uint32); ok {
+					evmLog.Index = index
+				}
+				if removed, ok := evmLogData["removed"].(bool); ok {
+					evmLog.Removed = removed
+				}
+
+				// Set the EvmLog in the oneof field
+				eventOutput.OutputType = &avsproto.EventTrigger_Output_EvmLog{
+					EvmLog: evmLog,
+				}
+			}
+		}
+		// If no events found or no event data, eventOutput remains with default empty oneof
+	}
+
+	return eventOutput
+}
+
+// buildBlockTriggerOutput creates a BlockTrigger_Output from raw trigger output data.
+// This shared function eliminates code duplication between SimulateTask, RunTriggerRPC,
+// and regular task execution flows.
+//
+// Parameters:
+//   - triggerOutput: map containing raw trigger output data from runBlockTriggerImmediately
+//
+// Returns:
+//   - *avsproto.BlockTrigger_Output: properly structured protobuf output with block data
+func buildBlockTriggerOutput(triggerOutput map[string]interface{}) *avsproto.BlockTrigger_Output {
+	blockNumber := uint64(0)
+	blockHash := ""
+	timestamp := uint64(0)
+	parentHash := ""
+	difficulty := ""
+	gasLimit := uint64(0)
+	gasUsed := uint64(0)
+
+	if triggerOutput != nil {
+		if bn, ok := triggerOutput["blockNumber"]; ok {
+			if bnUint, ok := bn.(uint64); ok {
+				blockNumber = bnUint
+			}
+		}
+		if bh, ok := triggerOutput["blockHash"]; ok {
+			if bhStr, ok := bh.(string); ok {
+				blockHash = bhStr
+			}
+		}
+		if ts, ok := triggerOutput["timestamp"]; ok {
+			if tsUint, ok := ts.(uint64); ok {
+				timestamp = tsUint
+			}
+		}
+		if ph, ok := triggerOutput["parentHash"]; ok {
+			if phStr, ok := ph.(string); ok {
+				parentHash = phStr
+			}
+		}
+		if diff, ok := triggerOutput["difficulty"]; ok {
+			if diffStr, ok := diff.(string); ok {
+				difficulty = diffStr
+			}
+		}
+		if gl, ok := triggerOutput["gasLimit"]; ok {
+			if glUint, ok := gl.(uint64); ok {
+				gasLimit = glUint
+			}
+		}
+		if gu, ok := triggerOutput["gasUsed"]; ok {
+			if guUint, ok := gu.(uint64); ok {
+				gasUsed = guUint
+			}
+		}
+	}
+
+	return &avsproto.BlockTrigger_Output{
+		BlockNumber: blockNumber,
+		BlockHash:   blockHash,
+		Timestamp:   timestamp,
+		ParentHash:  parentHash,
+		Difficulty:  difficulty,
+		GasLimit:    gasLimit,
+		GasUsed:     gasUsed,
+	}
+}
+
+// buildFixedTimeTriggerOutput creates a FixedTimeTrigger_Output from raw trigger output data.
+// This shared function eliminates code duplication between SimulateTask, RunTriggerRPC,
+// and regular task execution flows.
+//
+// Parameters:
+//   - triggerOutput: map containing raw trigger output data from runFixedTimeTriggerImmediately
+//
+// Returns:
+//   - *avsproto.FixedTimeTrigger_Output: properly structured protobuf output with timestamp data
+func buildFixedTimeTriggerOutput(triggerOutput map[string]interface{}) *avsproto.FixedTimeTrigger_Output {
+	timestamp := uint64(0)
+	timestampISO := ""
+
+	if triggerOutput != nil {
+		if ts, ok := triggerOutput["timestamp"]; ok {
+			if tsUint, ok := ts.(uint64); ok {
+				timestamp = tsUint
+			}
+		}
+		if tsISO, ok := triggerOutput["timestamp_iso"]; ok {
+			if tsISOStr, ok := tsISO.(string); ok {
+				timestampISO = tsISOStr
+			}
+		}
+	}
+
+	return &avsproto.FixedTimeTrigger_Output{
+		Timestamp:    timestamp,
+		TimestampIso: timestampISO,
+	}
+}
+
+// buildCronTriggerOutput creates a CronTrigger_Output from raw trigger output data.
+// This shared function eliminates code duplication between SimulateTask, RunTriggerRPC,
+// and regular task execution flows.
+//
+// Parameters:
+//   - triggerOutput: map containing raw trigger output data from runCronTriggerImmediately
+//
+// Returns:
+//   - *avsproto.CronTrigger_Output: properly structured protobuf output with timestamp data
+func buildCronTriggerOutput(triggerOutput map[string]interface{}) *avsproto.CronTrigger_Output {
+	timestamp := uint64(0)
+	timestampISO := ""
+
+	if triggerOutput != nil {
+		if ts, ok := triggerOutput["timestamp"]; ok {
+			if tsUint, ok := ts.(uint64); ok {
+				timestamp = tsUint
+			}
+		}
+		if tsISO, ok := triggerOutput["timestamp_iso"]; ok {
+			if tsISOStr, ok := tsISO.(string); ok {
+				timestampISO = tsISOStr
+			}
+		}
+	}
+
+	return &avsproto.CronTrigger_Output{
+		Timestamp:    timestamp,
+		TimestampIso: timestampISO,
+	}
+}
+
+// buildManualTriggerOutput creates a ManualTrigger_Output from raw trigger output data.
+// This shared function eliminates code duplication between SimulateTask, RunTriggerRPC,
+// and regular task execution flows.
+//
+// Parameters:
+//   - triggerOutput: map containing raw trigger output data from runManualTriggerImmediately
+//
+// Returns:
+//   - *avsproto.ManualTrigger_Output: properly structured protobuf output with run timestamp
+func buildManualTriggerOutput(triggerOutput map[string]interface{}) *avsproto.ManualTrigger_Output {
+	runAt := uint64(time.Now().Unix()) // Default to current time
+
+	if triggerOutput != nil {
+		if ra, ok := triggerOutput["runAt"]; ok {
+			if raUint, ok := ra.(uint64); ok {
+				runAt = raUint
+			}
+		}
+	}
+
+	return &avsproto.ManualTrigger_Output{
+		RunAt: runAt,
+	}
+}
+
+// buildTriggerDataMap creates a map for JavaScript trigger variable access.
+// This shared function eliminates code duplication between SimulateTask and VM initialization.
+//
+// Parameters:
+//   - triggerType: the type of trigger being processed
+//   - triggerOutput: map containing raw trigger output data
+//
+// Returns:
+//   - map[string]interface{}: JavaScript-accessible trigger data map
+func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[string]interface{}) map[string]interface{} {
+	triggerDataMap := make(map[string]interface{})
+
+	if triggerOutput == nil {
+		return triggerDataMap
+	}
+
+	switch triggerType {
+	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
+		triggerDataMap["triggered"] = true
+		if runAt, ok := triggerOutput["runAt"]; ok {
+			triggerDataMap["runAt"] = runAt
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
+		if timestamp, ok := triggerOutput["timestamp"]; ok {
+			triggerDataMap["timestamp"] = timestamp
+		}
+		if timestampISO, ok := triggerOutput["timestamp_iso"]; ok {
+			triggerDataMap["timestamp_iso"] = timestampISO
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
+		if timestamp, ok := triggerOutput["timestamp"]; ok {
+			triggerDataMap["timestamp"] = timestamp
+		}
+		if timestampISO, ok := triggerOutput["timestamp_iso"]; ok {
+			triggerDataMap["timestamp_iso"] = timestampISO
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
+		if blockNumber, ok := triggerOutput["blockNumber"]; ok {
+			triggerDataMap["blockNumber"] = blockNumber
+		}
+		if blockHash, ok := triggerOutput["blockHash"]; ok {
+			triggerDataMap["blockHash"] = blockHash
+		}
+		if timestamp, ok := triggerOutput["timestamp"]; ok {
+			triggerDataMap["timestamp"] = timestamp
+		}
+		if parentHash, ok := triggerOutput["parentHash"]; ok {
+			triggerDataMap["parentHash"] = parentHash
+		}
+		if difficulty, ok := triggerOutput["difficulty"]; ok {
+			triggerDataMap["difficulty"] = difficulty
+		}
+		if gasLimit, ok := triggerOutput["gasLimit"]; ok {
+			triggerDataMap["gasLimit"] = gasLimit
+		}
+		if gasUsed, ok := triggerOutput["gasUsed"]; ok {
+			triggerDataMap["gasUsed"] = gasUsed
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+		// Copy all event trigger data
+		for k, v := range triggerOutput {
+			triggerDataMap[k] = v
+		}
+	default:
+		// For unknown trigger types, copy all output data
+		for k, v := range triggerOutput {
+			triggerDataMap[k] = v
+		}
+	}
+
+	return triggerDataMap
+}
+
+// buildExecutionStepOutputData creates the appropriate OutputData oneof field for execution steps.
+// This shared function eliminates code duplication in execution step creation.
+//
+// Parameters:
+//   - triggerType: the type of trigger being processed
+//   - triggerOutputProto: the protobuf trigger output structure
+//
+// Returns:
+//   - avsproto.IsExecution_Step_OutputData: the appropriate oneof field for the execution step
+func buildExecutionStepOutputData(triggerType avsproto.TriggerType, triggerOutputProto interface{}) avsproto.IsExecution_Step_OutputData {
+	switch triggerType {
+	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
+		if output, ok := triggerOutputProto.(*avsproto.ManualTrigger_Output); ok {
+			return &avsproto.Execution_Step_ManualTrigger{ManualTrigger: output}
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
+		if output, ok := triggerOutputProto.(*avsproto.FixedTimeTrigger_Output); ok {
+			return &avsproto.Execution_Step_FixedTimeTrigger{FixedTimeTrigger: output}
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
+		if output, ok := triggerOutputProto.(*avsproto.CronTrigger_Output); ok {
+			return &avsproto.Execution_Step_CronTrigger{CronTrigger: output}
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
+		if output, ok := triggerOutputProto.(*avsproto.BlockTrigger_Output); ok {
+			return &avsproto.Execution_Step_BlockTrigger{BlockTrigger: output}
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+		if output, ok := triggerOutputProto.(*avsproto.EventTrigger_Output); ok {
+			return &avsproto.Execution_Step_EventTrigger{EventTrigger: output}
+		}
+	}
+	return nil
+}
+
+// buildTriggerDataMapFromProtobuf creates a map for JavaScript trigger variable access from protobuf structures.
+// This shared function eliminates code duplication in VM initialization where protobuf trigger outputs
+// need to be converted to JavaScript-accessible data maps.
+//
+// Parameters:
+//   - triggerType: the type of trigger being processed
+//   - triggerOutputProto: the protobuf trigger output structure (e.g., *avsproto.BlockTrigger_Output)
+//
+// Returns:
+//   - map[string]interface{}: JavaScript-accessible trigger data map
+//
+// This function differs from buildTriggerDataMap in that it works with structured protobuf data
+// rather than raw trigger output maps, making it suitable for VM initialization.
+func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOutputProto interface{}) map[string]interface{} {
+	triggerDataMap := make(map[string]interface{})
+
+	if triggerOutputProto == nil {
+		// Always add trigger type for reference if available
+		if triggerType != avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
+			triggerDataMap["type"] = triggerType.String()
+		}
+		return triggerDataMap
+	}
+
+	switch triggerType {
+	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
+		if manualOutput, ok := triggerOutputProto.(*avsproto.ManualTrigger_Output); ok {
+			triggerDataMap["run_at"] = manualOutput.RunAt
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
+		if timeOutput, ok := triggerOutputProto.(*avsproto.FixedTimeTrigger_Output); ok {
+			triggerDataMap["timestamp"] = timeOutput.Timestamp
+			triggerDataMap["timestamp_iso"] = timeOutput.TimestampIso
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
+		if cronOutput, ok := triggerOutputProto.(*avsproto.CronTrigger_Output); ok {
+			triggerDataMap["timestamp"] = cronOutput.Timestamp
+			triggerDataMap["timestamp_iso"] = cronOutput.TimestampIso
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
+		if blockOutput, ok := triggerOutputProto.(*avsproto.BlockTrigger_Output); ok {
+			triggerDataMap["block_number"] = blockOutput.BlockNumber
+			triggerDataMap["block_hash"] = blockOutput.BlockHash
+			triggerDataMap["timestamp"] = blockOutput.Timestamp
+			triggerDataMap["parent_hash"] = blockOutput.ParentHash
+			triggerDataMap["difficulty"] = blockOutput.Difficulty
+			triggerDataMap["gas_limit"] = blockOutput.GasLimit
+			triggerDataMap["gas_used"] = blockOutput.GasUsed
+		}
+	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+		if eventOutput, ok := triggerOutputProto.(*avsproto.EventTrigger_Output); ok {
+			// Check if we have transfer log data in the event output
+			if transferLogData := eventOutput.GetTransferLog(); transferLogData != nil {
+				// Use transfer log data to populate rich trigger data
+				triggerDataMap["token_name"] = transferLogData.TokenName
+				triggerDataMap["token_symbol"] = transferLogData.TokenSymbol
+				triggerDataMap["token_decimals"] = transferLogData.TokenDecimals
+				triggerDataMap["transaction_hash"] = transferLogData.TransactionHash
+				triggerDataMap["address"] = transferLogData.Address
+				triggerDataMap["block_number"] = transferLogData.BlockNumber
+				triggerDataMap["block_timestamp"] = transferLogData.BlockTimestamp
+				triggerDataMap["from_address"] = transferLogData.FromAddress
+				triggerDataMap["to_address"] = transferLogData.ToAddress
+				triggerDataMap["value"] = transferLogData.Value
+				triggerDataMap["value_formatted"] = transferLogData.ValueFormatted
+				triggerDataMap["transaction_index"] = transferLogData.TransactionIndex
+				triggerDataMap["log_index"] = transferLogData.LogIndex
+			} else if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
+				// Fall back to basic EVM log data
+				triggerDataMap["block_number"] = evmLog.BlockNumber
+				triggerDataMap["log_index"] = evmLog.Index
+				triggerDataMap["tx_hash"] = evmLog.TransactionHash
+				triggerDataMap["address"] = evmLog.Address
+				triggerDataMap["topics"] = evmLog.Topics
+				triggerDataMap["data"] = evmLog.Data
+				triggerDataMap["block_hash"] = evmLog.BlockHash
+				triggerDataMap["transaction_index"] = evmLog.TransactionIndex
+				triggerDataMap["removed"] = evmLog.Removed
+			}
+		}
+	default:
+		// For unknown trigger types, return empty map
+	}
+
+	// Always add trigger type for reference
+	if triggerType != avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
+		triggerDataMap["type"] = triggerType.String()
+	}
+
+	return triggerDataMap
 }

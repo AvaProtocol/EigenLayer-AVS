@@ -311,86 +311,11 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 					},
 				}
 
-				triggerDataMap = map[string]interface{}{
-					"token_name":        transferLog.TokenName,
-					"token_symbol":      transferLog.TokenSymbol,
-					"token_decimals":    transferLog.TokenDecimals,
-					"transaction_hash":  transferLog.TransactionHash,
-					"address":           transferLog.Address,
-					"block_number":      transferLog.BlockNumber,
-					"block_timestamp":   transferLog.BlockTimestamp,
-					"from_address":      transferLog.FromAddress,
-					"to_address":        transferLog.ToAddress,
-					"value":             transferLog.Value,
-					"value_formatted":   transferLog.ValueFormatted,
-					"transaction_index": transferLog.TransactionIndex,
-				}
+				// Use shared function to build trigger data map from the TransferLog protobuf
+				triggerDataMap = buildTriggerDataMapFromProtobuf(avsproto.TriggerType_TRIGGER_TYPE_EVENT, v.parsedTriggerData.Event)
 			} else {
-				// Create a map to store the trigger data based on the new oneof structure
-				triggerDataMap = make(map[string]interface{})
-
-				// Extract data from the oneof trigger outputs
-				switch triggerData.Type {
-				case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
-					if blockOutput := v.parsedTriggerData.Block; blockOutput != nil {
-						triggerDataMap["block_number"] = blockOutput.BlockNumber
-						triggerDataMap["block_hash"] = blockOutput.BlockHash
-						triggerDataMap["timestamp"] = blockOutput.Timestamp
-						triggerDataMap["parent_hash"] = blockOutput.ParentHash
-						triggerDataMap["difficulty"] = blockOutput.Difficulty
-						triggerDataMap["gas_limit"] = blockOutput.GasLimit
-						triggerDataMap["gas_used"] = blockOutput.GasUsed
-					}
-				case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
-					if timeOutput := v.parsedTriggerData.Time; timeOutput != nil {
-						triggerDataMap["timestamp"] = timeOutput.Timestamp
-						triggerDataMap["timestamp_iso"] = timeOutput.TimestampIso
-					}
-				case avsproto.TriggerType_TRIGGER_TYPE_CRON:
-					if cronOutput := v.parsedTriggerData.Cron; cronOutput != nil {
-						triggerDataMap["timestamp"] = cronOutput.Timestamp
-						triggerDataMap["timestamp_iso"] = cronOutput.TimestampIso
-					}
-				case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
-					if eventOutput := v.parsedTriggerData.Event; eventOutput != nil {
-						// Check if we have transfer log data in the event output
-						if transferLogData := eventOutput.GetTransferLog(); transferLogData != nil {
-							// Use transfer log data to populate rich trigger data
-							triggerDataMap["token_name"] = transferLogData.TokenName
-							triggerDataMap["token_symbol"] = transferLogData.TokenSymbol
-							triggerDataMap["token_decimals"] = transferLogData.TokenDecimals
-							triggerDataMap["transaction_hash"] = transferLogData.TransactionHash
-							triggerDataMap["address"] = transferLogData.Address
-							triggerDataMap["block_number"] = transferLogData.BlockNumber
-							triggerDataMap["block_timestamp"] = transferLogData.BlockTimestamp
-							triggerDataMap["from_address"] = transferLogData.FromAddress
-							triggerDataMap["to_address"] = transferLogData.ToAddress
-							triggerDataMap["value"] = transferLogData.Value
-							triggerDataMap["value_formatted"] = transferLogData.ValueFormatted
-							triggerDataMap["transaction_index"] = transferLogData.TransactionIndex
-						} else if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
-							// Fall back to basic EVM log data
-							triggerDataMap["block_number"] = evmLog.BlockNumber
-							triggerDataMap["log_index"] = evmLog.Index
-							triggerDataMap["tx_hash"] = evmLog.TransactionHash
-							triggerDataMap["address"] = evmLog.Address
-							triggerDataMap["topics"] = evmLog.Topics
-							triggerDataMap["data"] = evmLog.Data
-							triggerDataMap["block_hash"] = evmLog.BlockHash
-							triggerDataMap["transaction_index"] = evmLog.TransactionIndex
-							triggerDataMap["removed"] = evmLog.Removed
-						}
-					}
-				case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-					if manualOutput := v.parsedTriggerData.Manual; manualOutput != nil {
-						triggerDataMap["run_at"] = manualOutput.RunAt
-					}
-				}
-
-				// Always add trigger type for reference
-				if triggerData.Type != avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED {
-					triggerDataMap["type"] = triggerData.Type.String()
-				}
+				// Use shared function to build trigger data map from protobuf trigger outputs
+				triggerDataMap = buildTriggerDataMapFromProtobuf(triggerData.Type, triggerData.Output)
 			}
 			v.AddVar(triggerNameStd, map[string]any{"data": triggerDataMap})
 		}
