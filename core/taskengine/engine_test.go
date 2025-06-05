@@ -11,6 +11,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreateTaskReturnErrorWhenEmptyNodes(t *testing.T) {
@@ -788,4 +789,494 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 	if err == nil || resultTrigger != nil {
 		t.Errorf("expect trigger error but succeed")
 	}
+}
+
+// TestBuildEventTriggerOutputDefensiveProgramming tests that buildEventTriggerOutput
+// gracefully handles nil and unexpected inputs without causing runtime errors.
+func TestBuildEventTriggerOutputDefensiveProgramming(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          map[string]interface{}
+		expectedResult bool // true if we expect a valid output
+		description    string
+	}{
+		{
+			name:           "Nil input",
+			input:          nil,
+			expectedResult: true,
+			description:    "Should return empty EventTrigger_Output for nil input",
+		},
+		{
+			name:           "Empty map",
+			input:          map[string]interface{}{},
+			expectedResult: true,
+			description:    "Should return empty EventTrigger_Output for empty map",
+		},
+		{
+			name: "Invalid types for all fields",
+			input: map[string]interface{}{
+				"found":        "not_a_bool",
+				"transfer_log": "not_a_map",
+				"evm_log":      12345,
+			},
+			expectedResult: true,
+			description:    "Should handle invalid types gracefully",
+		},
+		{
+			name: "Found=false",
+			input: map[string]interface{}{
+				"found": false,
+			},
+			expectedResult: true,
+			description:    "Should return empty output when found=false",
+		},
+		{
+			name: "Found=true but no event data",
+			input: map[string]interface{}{
+				"found": true,
+			},
+			expectedResult: true,
+			description:    "Should return empty output when found=true but no event data",
+		},
+		{
+			name: "Found=true with invalid transfer_log",
+			input: map[string]interface{}{
+				"found":        true,
+				"transfer_log": "invalid_type",
+			},
+			expectedResult: true,
+			description:    "Should handle invalid transfer_log type gracefully",
+		},
+		{
+			name: "Found=true with valid transfer_log structure",
+			input: map[string]interface{}{
+				"found": true,
+				"transfer_log": map[string]interface{}{
+					"tokenName":        "TestToken",
+					"tokenSymbol":      "TEST",
+					"tokenDecimals":    uint32(18),
+					"transactionHash":  "0x123",
+					"address":          "0x456",
+					"blockNumber":      uint64(12345),
+					"blockTimestamp":   uint64(1234567890),
+					"fromAddress":      "0x789",
+					"toAddress":        "0xabc",
+					"value":            "1000000000000000000",
+					"valueFormatted":   "1.0",
+					"transactionIndex": uint32(5),
+					"logIndex":         uint32(2),
+				},
+			},
+			expectedResult: true,
+			description:    "Should properly parse valid transfer_log data",
+		},
+		{
+			name: "Found=true with valid evm_log structure",
+			input: map[string]interface{}{
+				"found": true,
+				"evm_log": map[string]interface{}{
+					"address":          "0x123",
+					"topics":           []string{"0xtopic1", "0xtopic2"},
+					"data":             "0xdata",
+					"blockNumber":      uint64(12345),
+					"transactionHash":  "0x456",
+					"transactionIndex": uint32(3),
+					"blockHash":        "0x789",
+					"index":            uint32(1),
+					"removed":          false,
+				},
+			},
+			expectedResult: true,
+			description:    "Should properly parse valid evm_log data",
+		},
+		{
+			name: "Found=true with transfer_log containing wrong types",
+			input: map[string]interface{}{
+				"found": true,
+				"transfer_log": map[string]interface{}{
+					"tokenName":       12345,          // wrong type
+					"tokenSymbol":     true,           // wrong type
+					"tokenDecimals":   "18",           // wrong type
+					"transactionHash": nil,            // nil value
+					"blockNumber":     "not_a_number", // wrong type
+				},
+			},
+			expectedResult: true,
+			description:    "Should handle wrong types in transfer_log gracefully",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// This should not panic regardless of input
+			result := buildEventTriggerOutput(test.input)
+
+			// Verify we always get a non-nil result
+			require.NotNil(t, result, "buildEventTriggerOutput should never return nil")
+
+			// Verify the result is a valid EventTrigger_Output structure
+			require.IsType(t, &avsproto.EventTrigger_Output{}, result, "Should return correct type")
+
+			t.Logf("✅ %s: %s", test.name, test.description)
+
+			// For valid data cases, verify the structure is populated correctly
+			if test.name == "Found=true with valid transfer_log structure" {
+				require.NotNil(t, result.GetTransferLog(), "TransferLog should be populated")
+				transferLog := result.GetTransferLog()
+				require.Equal(t, "TestToken", transferLog.TokenName)
+				require.Equal(t, "TEST", transferLog.TokenSymbol)
+				require.Equal(t, uint32(18), transferLog.TokenDecimals)
+				require.Equal(t, "0x123", transferLog.TransactionHash)
+			} else if test.name == "Found=true with valid evm_log structure" {
+				require.NotNil(t, result.GetEvmLog(), "EvmLog should be populated")
+				evmLog := result.GetEvmLog()
+				require.Equal(t, "0x123", evmLog.Address)
+				require.Equal(t, []string{"0xtopic1", "0xtopic2"}, evmLog.Topics)
+				require.Equal(t, "0xdata", evmLog.Data)
+				require.Equal(t, uint64(12345), evmLog.BlockNumber)
+			} else if test.name == "Found=true with transfer_log containing wrong types" {
+				// When found=true with transfer_log key present (even with wrong types),
+				// an empty TransferLog structure should be created
+				require.NotNil(t, result.GetTransferLog(), "TransferLog should be created for malformed transfer_log data")
+				transferLog := result.GetTransferLog()
+				// All fields should be empty/default since type assertions failed
+				require.Equal(t, "", transferLog.TokenName, "TokenName should be empty for wrong type")
+				require.Equal(t, "", transferLog.TokenSymbol, "TokenSymbol should be empty for wrong type")
+				require.Equal(t, uint32(0), transferLog.TokenDecimals, "TokenDecimals should be 0 for wrong type")
+			} else {
+				// For all other cases (nil, empty, invalid, etc.), should have empty oneof
+				require.Nil(t, result.GetTransferLog(), "TransferLog should be nil for invalid/empty input")
+				require.Nil(t, result.GetEvmLog(), "EvmLog should be nil for invalid/empty input")
+			}
+		})
+	}
+}
+
+// TestBuildEventTriggerOutputConsistencyWithOtherTriggerFunctions tests that
+// buildEventTriggerOutput follows the same defensive patterns as other trigger build functions.
+func TestBuildEventTriggerOutputConsistencyWithOtherTriggerFunctions(t *testing.T) {
+	t.Run("Nil handling consistency", func(t *testing.T) {
+		// All trigger build functions should handle nil gracefully
+		eventResult := buildEventTriggerOutput(nil)
+		blockResult := buildBlockTriggerOutput(nil)
+		fixedTimeResult := buildFixedTimeTriggerOutput(nil)
+		cronResult := buildCronTriggerOutput(nil)
+		manualResult := buildManualTriggerOutput(nil)
+
+		// All should return non-nil results
+		require.NotNil(t, eventResult, "buildEventTriggerOutput should handle nil gracefully")
+		require.NotNil(t, blockResult, "buildBlockTriggerOutput should handle nil gracefully")
+		require.NotNil(t, fixedTimeResult, "buildFixedTimeTriggerOutput should handle nil gracefully")
+		require.NotNil(t, cronResult, "buildCronTriggerOutput should handle nil gracefully")
+		require.NotNil(t, manualResult, "buildManualTriggerOutput should handle nil gracefully")
+
+		t.Log("✅ All trigger build functions consistently handle nil inputs")
+	})
+
+	t.Run("Empty map handling consistency", func(t *testing.T) {
+		emptyMap := map[string]interface{}{}
+
+		// All trigger build functions should handle empty maps gracefully
+		eventResult := buildEventTriggerOutput(emptyMap)
+		blockResult := buildBlockTriggerOutput(emptyMap)
+		fixedTimeResult := buildFixedTimeTriggerOutput(emptyMap)
+		cronResult := buildCronTriggerOutput(emptyMap)
+		manualResult := buildManualTriggerOutput(emptyMap)
+
+		// All should return non-nil results with default values
+		require.NotNil(t, eventResult, "buildEventTriggerOutput should handle empty map gracefully")
+		require.NotNil(t, blockResult, "buildBlockTriggerOutput should handle empty map gracefully")
+		require.NotNil(t, fixedTimeResult, "buildFixedTimeTriggerOutput should handle empty map gracefully")
+		require.NotNil(t, cronResult, "buildCronTriggerOutput should handle empty map gracefully")
+		require.NotNil(t, manualResult, "buildManualTriggerOutput should handle empty map gracefully")
+
+		// Verify default values are set appropriately
+		require.Equal(t, uint64(0), blockResult.BlockNumber, "BlockTrigger should have default block number")
+		require.Equal(t, uint64(0), fixedTimeResult.Timestamp, "FixedTimeTrigger should have default timestamp")
+		require.Equal(t, uint64(0), cronResult.Timestamp, "CronTrigger should have default timestamp")
+		require.Greater(t, manualResult.RunAt, uint64(0), "ManualTrigger should have current timestamp as default")
+
+		t.Log("✅ All trigger build functions consistently handle empty maps with appropriate defaults")
+	})
+}
+
+// TestBuildTriggerDataMapFromProtobufEventTriggerComprehensive tests that
+// buildTriggerDataMapFromProtobuf for EVENT trigger types consolidates all required fields
+// compared to any previous explicit mapping and handles all edge cases properly.
+func TestBuildTriggerDataMapFromProtobufEventTriggerComprehensive(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       interface{}
+		description string
+		verifyFunc  func(t *testing.T, result map[string]interface{})
+	}{
+		{
+			name:        "Nil EventTrigger_Output",
+			input:       nil,
+			description: "Should handle nil input gracefully and add trigger type",
+			verifyFunc: func(t *testing.T, result map[string]interface{}) {
+				require.Equal(t, "TRIGGER_TYPE_EVENT", result["type"], "Should add trigger type for nil input")
+				require.Len(t, result, 1, "Should only contain type field for nil input")
+			},
+		},
+		{
+			name: "EventTrigger_Output with complete TransferLog",
+			input: &avsproto.EventTrigger_Output{
+				OutputType: &avsproto.EventTrigger_Output_TransferLog{
+					TransferLog: &avsproto.EventTrigger_TransferLogOutput{
+						TokenName:        "Test Token",
+						TokenSymbol:      "TEST",
+						TokenDecimals:    18,
+						TransactionHash:  "0x1234567890abcdef",
+						Address:          "0xabcdef1234567890",
+						BlockNumber:      12345678,
+						BlockTimestamp:   1672531200,
+						FromAddress:      "0x1111111111111111",
+						ToAddress:        "0x2222222222222222",
+						Value:            "1000000000000000000",
+						ValueFormatted:   "1.0",
+						TransactionIndex: 5,
+						LogIndex:         3,
+					},
+				},
+			},
+			description: "Should map all TransferLog fields including the critical log_index field",
+			verifyFunc: func(t *testing.T, result map[string]interface{}) {
+				expected := map[string]interface{}{
+					"token_name":        "Test Token",
+					"token_symbol":      "TEST",
+					"token_decimals":    uint32(18),
+					"transaction_hash":  "0x1234567890abcdef",
+					"address":           "0xabcdef1234567890",
+					"block_number":      uint64(12345678),
+					"block_timestamp":   uint64(1672531200),
+					"from_address":      "0x1111111111111111",
+					"to_address":        "0x2222222222222222",
+					"value":             "1000000000000000000",
+					"value_formatted":   "1.0",
+					"transaction_index": uint32(5),
+					"log_index":         uint32(3), // CRITICAL: This was missing before the fix
+					"type":              "TRIGGER_TYPE_EVENT",
+				}
+
+				require.Equal(t, expected, result, "All TransferLog fields should be properly mapped")
+
+				// Verify critical fields specifically
+				require.Contains(t, result, "log_index", "log_index field should be present")
+				require.Equal(t, uint32(3), result["log_index"], "log_index should have correct value")
+			},
+		},
+		{
+			name: "EventTrigger_Output with complete EvmLog",
+			input: &avsproto.EventTrigger_Output{
+				OutputType: &avsproto.EventTrigger_Output_EvmLog{
+					EvmLog: &avsproto.Evm_Log{
+						Address:          "0xabcdef1234567890",
+						Topics:           []string{"0xtopic1", "0xtopic2", "0xtopic3"},
+						Data:             "0xdeadbeef",
+						BlockNumber:      12345678,
+						TransactionHash:  "0x1234567890abcdef",
+						TransactionIndex: 5,
+						BlockHash:        "0xblockhash123456",
+						Index:            3,
+						Removed:          false,
+					},
+				},
+			},
+			description: "Should map all EvmLog fields including log_index",
+			verifyFunc: func(t *testing.T, result map[string]interface{}) {
+				expected := map[string]interface{}{
+					"block_number":      uint64(12345678),
+					"log_index":         uint32(3),
+					"tx_hash":           "0x1234567890abcdef",
+					"address":           "0xabcdef1234567890",
+					"topics":            []string{"0xtopic1", "0xtopic2", "0xtopic3"},
+					"data":              "0xdeadbeef",
+					"block_hash":        "0xblockhash123456",
+					"transaction_index": uint32(5),
+					"removed":           false,
+					"type":              "TRIGGER_TYPE_EVENT",
+				}
+
+				require.Equal(t, expected, result, "All EvmLog fields should be properly mapped")
+			},
+		},
+		{
+			name: "EventTrigger_Output with empty TransferLog",
+			input: &avsproto.EventTrigger_Output{
+				OutputType: &avsproto.EventTrigger_Output_TransferLog{
+					TransferLog: &avsproto.EventTrigger_TransferLogOutput{},
+				},
+			},
+			description: "Should handle empty TransferLog with default values",
+			verifyFunc: func(t *testing.T, result map[string]interface{}) {
+				expected := map[string]interface{}{
+					"token_name":        "",
+					"token_symbol":      "",
+					"token_decimals":    uint32(0),
+					"transaction_hash":  "",
+					"address":           "",
+					"block_number":      uint64(0),
+					"block_timestamp":   uint64(0),
+					"from_address":      "",
+					"to_address":        "",
+					"value":             "",
+					"value_formatted":   "",
+					"transaction_index": uint32(0),
+					"log_index":         uint32(0),
+					"type":              "TRIGGER_TYPE_EVENT",
+				}
+
+				require.Equal(t, expected, result, "Empty TransferLog should have default values")
+			},
+		},
+		{
+			name: "EventTrigger_Output with empty EvmLog",
+			input: &avsproto.EventTrigger_Output{
+				OutputType: &avsproto.EventTrigger_Output_EvmLog{
+					EvmLog: &avsproto.Evm_Log{},
+				},
+			},
+			description: "Should handle empty EvmLog with default values",
+			verifyFunc: func(t *testing.T, result map[string]interface{}) {
+				expected := map[string]interface{}{
+					"block_number":      uint64(0),
+					"log_index":         uint32(0),
+					"tx_hash":           "",
+					"address":           "",
+					"topics":            ([]string)(nil),
+					"data":              "",
+					"block_hash":        "",
+					"transaction_index": uint32(0),
+					"removed":           false,
+					"type":              "TRIGGER_TYPE_EVENT",
+				}
+
+				require.Equal(t, expected, result, "Empty EvmLog should have default values")
+			},
+		},
+		{
+			name:  "EventTrigger_Output with no output type set",
+			input: &avsproto.EventTrigger_Output{
+				// OutputType is nil (neither TransferLog nor EvmLog)
+			},
+			description: "Should handle EventTrigger_Output with no output type gracefully",
+			verifyFunc: func(t *testing.T, result map[string]interface{}) {
+				expected := map[string]interface{}{
+					"type": "TRIGGER_TYPE_EVENT",
+				}
+
+				require.Equal(t, expected, result, "Should only contain type field when no output type is set")
+			},
+		},
+		{
+			name:        "Wrong type passed (not EventTrigger_Output)",
+			input:       &avsproto.BlockTrigger_Output{},
+			description: "Should handle wrong type gracefully and only add type field",
+			verifyFunc: func(t *testing.T, result map[string]interface{}) {
+				expected := map[string]interface{}{
+					"type": "TRIGGER_TYPE_EVENT",
+				}
+
+				require.Equal(t, expected, result, "Should only contain type field for wrong input type")
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Execute the function under test
+			result := buildTriggerDataMapFromProtobuf(avsproto.TriggerType_TRIGGER_TYPE_EVENT, test.input)
+
+			// Verify results using the test-specific verification function
+			test.verifyFunc(t, result)
+
+			t.Logf("✅ %s: %s", test.name, test.description)
+		})
+	}
+}
+
+// TestBuildTriggerDataMapFromProtobufFieldCompleteness verifies that all fields
+// from the protobuf structures are properly mapped to JavaScript-accessible names.
+func TestBuildTriggerDataMapFromProtobufFieldCompleteness(t *testing.T) {
+	t.Run("TransferLog field completeness", func(t *testing.T) {
+		// Create a TransferLog with all possible fields set
+		transferLog := &avsproto.EventTrigger_TransferLogOutput{
+			TokenName:        "Complete Token",
+			TokenSymbol:      "COMP",
+			TokenDecimals:    18,
+			TransactionHash:  "0xhash",
+			Address:          "0xaddr",
+			BlockNumber:      123,
+			BlockTimestamp:   456,
+			FromAddress:      "0xfrom",
+			ToAddress:        "0xto",
+			Value:            "789",
+			ValueFormatted:   "0.789",
+			TransactionIndex: 1,
+			LogIndex:         2,
+		}
+
+		eventOutput := &avsproto.EventTrigger_Output{
+			OutputType: &avsproto.EventTrigger_Output_TransferLog{
+				TransferLog: transferLog,
+			},
+		}
+
+		result := buildTriggerDataMapFromProtobuf(avsproto.TriggerType_TRIGGER_TYPE_EVENT, eventOutput)
+
+		// Verify all TransferLog fields are mapped
+		expectedFields := []string{
+			"token_name", "token_symbol", "token_decimals",
+			"transaction_hash", "address", "block_number", "block_timestamp",
+			"from_address", "to_address", "value", "value_formatted",
+			"transaction_index", "log_index", "type",
+		}
+
+		for _, field := range expectedFields {
+			require.Contains(t, result, field, "Field %s should be present in result", field)
+		}
+
+		require.Len(t, result, len(expectedFields), "Result should contain exactly %d fields", len(expectedFields))
+
+		t.Log("✅ All TransferLog protobuf fields are properly mapped to JavaScript names")
+	})
+
+	t.Run("EvmLog field completeness", func(t *testing.T) {
+		// Create an EvmLog with all possible fields set
+		evmLog := &avsproto.Evm_Log{
+			Address:          "0xaddr",
+			Topics:           []string{"0xtopic1", "0xtopic2"},
+			Data:             "0xdata",
+			BlockNumber:      123,
+			TransactionHash:  "0xhash",
+			TransactionIndex: 1,
+			BlockHash:        "0xblockhash",
+			Index:            2,
+			Removed:          true,
+		}
+
+		eventOutput := &avsproto.EventTrigger_Output{
+			OutputType: &avsproto.EventTrigger_Output_EvmLog{
+				EvmLog: evmLog,
+			},
+		}
+
+		result := buildTriggerDataMapFromProtobuf(avsproto.TriggerType_TRIGGER_TYPE_EVENT, eventOutput)
+
+		// Verify all EvmLog fields are mapped
+		expectedFields := []string{
+			"block_number", "log_index", "tx_hash", "address",
+			"topics", "data", "block_hash", "transaction_index",
+			"removed", "type",
+		}
+
+		for _, field := range expectedFields {
+			require.Contains(t, result, field, "Field %s should be present in result", field)
+		}
+
+		require.Len(t, result, len(expectedFields), "Result should contain exactly %d fields", len(expectedFields))
+
+		t.Log("✅ All EvmLog protobuf fields are properly mapped to JavaScript names")
+	})
 }

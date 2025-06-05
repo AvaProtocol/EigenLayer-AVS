@@ -2366,6 +2366,7 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 				triggerDataMap["value"] = transferLogData.Value
 				triggerDataMap["value_formatted"] = transferLogData.ValueFormatted
 				triggerDataMap["transaction_index"] = transferLogData.TransactionIndex
+				triggerDataMap["log_index"] = transferLogData.LogIndex
 			} else if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
 				// Fall back to basic EVM log data
 				triggerDataMap["block_number"] = evmLog.BlockNumber

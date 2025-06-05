@@ -1301,7 +1301,7 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 			}
 		}
 	case NodeTypeEventTrigger:
-		// Use shared function to build EventTrigger output
+		// Use shared function to build EventTrigger output (handles nil result gracefully)
 		eventOutput := buildEventTriggerOutput(result)
 		resp.OutputData = &avsproto.RunTriggerResp_EventTrigger{
 			EventTrigger: eventOutput,
