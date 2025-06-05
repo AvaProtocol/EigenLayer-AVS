@@ -1270,47 +1270,18 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		TriggerId: fmt.Sprintf("trigger_immediate_%d", time.Now().UnixNano()),
 	}
 
-	// Set the appropriate output data based on the trigger type
+	// Set the appropriate output data based on the trigger type using shared functions
 	switch triggerTypeStr {
 	case NodeTypeBlockTrigger:
 		if result != nil {
-			// Convert result to BlockTrigger output
-			blockOutput := &avsproto.BlockTrigger_Output{}
-			if blockNumber, ok := result["blockNumber"].(uint64); ok {
-				blockOutput.BlockNumber = blockNumber
-			}
-			if blockHash, ok := result["blockHash"].(string); ok {
-				blockOutput.BlockHash = blockHash
-			}
-			if timestamp, ok := result["timestamp"].(uint64); ok {
-				blockOutput.Timestamp = timestamp
-			}
-			if parentHash, ok := result["parentHash"].(string); ok {
-				blockOutput.ParentHash = parentHash
-			}
-			if difficulty, ok := result["difficulty"].(string); ok {
-				blockOutput.Difficulty = difficulty
-			}
-			if gasLimit, ok := result["gasLimit"].(uint64); ok {
-				blockOutput.GasLimit = gasLimit
-			}
-			if gasUsed, ok := result["gasUsed"].(uint64); ok {
-				blockOutput.GasUsed = gasUsed
-			}
+			blockOutput := buildBlockTriggerOutput(result)
 			resp.OutputData = &avsproto.RunTriggerResp_BlockTrigger{
 				BlockTrigger: blockOutput,
 			}
 		}
 	case NodeTypeFixedTimeTrigger:
 		if result != nil {
-			// Convert result to FixedTimeTrigger output
-			fixedTimeOutput := &avsproto.FixedTimeTrigger_Output{}
-			if timestamp, ok := result["timestamp"].(uint64); ok {
-				fixedTimeOutput.Timestamp = timestamp
-			}
-			if timestampISO, ok := result["timestamp_iso"].(string); ok {
-				fixedTimeOutput.TimestampIso = timestampISO
-			}
+			fixedTimeOutput := buildFixedTimeTriggerOutput(result)
 			resp.OutputData = &avsproto.RunTriggerResp_FixedTimeTrigger{
 				FixedTimeTrigger: fixedTimeOutput,
 			}
@@ -1330,114 +1301,10 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 			}
 		}
 	case NodeTypeEventTrigger:
-		if result != nil {
-			// Convert result to EventTrigger output with proper oneof structure
-			eventOutput := &avsproto.EventTrigger_Output{}
-
-			// Check if we found an event
-			if found, ok := result["found"].(bool); ok && found {
-				// Extract evm_log data
-				if evmLogData, ok := result["evm_log"].(map[string]interface{}); ok {
-					evmLog := &avsproto.Evm_Log{}
-
-					if address, ok := evmLogData["address"].(string); ok {
-						evmLog.Address = address
-					}
-					if topics, ok := evmLogData["topics"].([]string); ok {
-						evmLog.Topics = topics
-					}
-					if data, ok := evmLogData["data"].(string); ok {
-						evmLog.Data = data
-					}
-					if blockNumber, ok := evmLogData["blockNumber"].(uint64); ok {
-						evmLog.BlockNumber = blockNumber
-					}
-					if transactionHash, ok := evmLogData["transactionHash"].(string); ok {
-						evmLog.TransactionHash = transactionHash
-					}
-					if transactionIndex, ok := evmLogData["transactionIndex"].(uint32); ok {
-						evmLog.TransactionIndex = transactionIndex
-					}
-					if blockHash, ok := evmLogData["blockHash"].(string); ok {
-						evmLog.BlockHash = blockHash
-					}
-					if index, ok := evmLogData["index"].(uint32); ok {
-						evmLog.Index = index
-					}
-					if removed, ok := evmLogData["removed"].(bool); ok {
-						evmLog.Removed = removed
-					}
-
-					// Check if we also have enriched transfer data
-					if transferLogData, ok := result["transfer_log"].(map[string]interface{}); ok {
-						// This is a transfer event - use the enriched transfer_log structure
-						transferLog := &avsproto.EventTrigger_TransferLogOutput{}
-
-						if tokenName, ok := transferLogData["tokenName"].(string); ok {
-							transferLog.TokenName = tokenName
-						}
-						if tokenSymbol, ok := transferLogData["tokenSymbol"].(string); ok {
-							transferLog.TokenSymbol = tokenSymbol
-						}
-						if tokenDecimals, ok := transferLogData["tokenDecimals"].(uint32); ok {
-							transferLog.TokenDecimals = tokenDecimals
-						}
-						if transactionHash, ok := transferLogData["transactionHash"].(string); ok {
-							transferLog.TransactionHash = transactionHash
-						}
-						if address, ok := transferLogData["address"].(string); ok {
-							transferLog.Address = address
-						}
-						if blockNumber, ok := transferLogData["blockNumber"].(uint64); ok {
-							transferLog.BlockNumber = blockNumber
-						}
-						if blockTimestamp, ok := transferLogData["blockTimestamp"].(uint64); ok {
-							transferLog.BlockTimestamp = blockTimestamp
-						}
-						if fromAddress, ok := transferLogData["fromAddress"].(string); ok {
-							transferLog.FromAddress = fromAddress
-						}
-						if toAddress, ok := transferLogData["toAddress"].(string); ok {
-							transferLog.ToAddress = toAddress
-						}
-						if value, ok := transferLogData["value"].(string); ok {
-							transferLog.Value = value
-						}
-						if valueFormatted, ok := transferLogData["valueFormatted"].(string); ok {
-							transferLog.ValueFormatted = valueFormatted
-						}
-						if transactionIndex, ok := transferLogData["transactionIndex"].(uint32); ok {
-							transferLog.TransactionIndex = transactionIndex
-						}
-						if logIndex, ok := transferLogData["logIndex"].(uint32); ok {
-							transferLog.LogIndex = logIndex
-						}
-
-						// Use the oneof TransferLog field
-						eventOutput.OutputType = &avsproto.EventTrigger_Output_TransferLog{
-							TransferLog: transferLog,
-						}
-					} else {
-						// Regular event (not a transfer) - use the oneof EvmLog field
-						eventOutput.OutputType = &avsproto.EventTrigger_Output_EvmLog{
-							EvmLog: evmLog,
-						}
-					}
-				}
-			}
-			// When no event found, leave OutputType as nil (undefined on client)
-
-			resp.OutputData = &avsproto.RunTriggerResp_EventTrigger{
-				EventTrigger: eventOutput,
-			}
-		} else {
-			// If result is nil, create empty EventTrigger output with nil OutputType
-			eventOutput := &avsproto.EventTrigger_Output{
-				// Leave OutputType as nil (undefined on client)
-			}
-			resp.OutputData = &avsproto.RunTriggerResp_EventTrigger{
-				EventTrigger: eventOutput,
-			}
+		// Use shared function to build EventTrigger output (handles nil result gracefully)
+		eventOutput := buildEventTriggerOutput(result)
+		resp.OutputData = &avsproto.RunTriggerResp_EventTrigger{
+			EventTrigger: eventOutput,
 		}
 	case NodeTypeManualTrigger:
 		// Always set manual trigger output, even if result is nil
