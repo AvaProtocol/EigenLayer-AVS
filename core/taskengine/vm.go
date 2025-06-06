@@ -1245,7 +1245,13 @@ func (v *VM) preprocessText(text string) string {
 
 	result := text
 	searchPos := 0
+	previousResult := ""
 	for i := 0; i < VMMaxPreprocessIterations; i++ {
+		// Break if result hasn't changed (prevents unnecessary iterations)
+		if result == previousResult && i > 0 {
+			break
+		}
+		previousResult = result
 		start := strings.Index(result[searchPos:], "{{")
 		if start == -1 {
 			break
