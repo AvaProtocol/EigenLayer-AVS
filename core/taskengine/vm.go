@@ -636,7 +636,7 @@ func (v *VM) Run() error {
 			// The failed step should already be logged by executeNode/runXXX methods
 			// Log the error but continue to next step
 			if v.logger != nil {
-				v.logger.Error("node execution failed, continuing execution", "nodeID", node.Id, "error", err)
+				v.logger.Error("node execution failed, continuing execution", "nodeID", node.Id, "error", err.Error())
 			}
 
 			// Continue to next step in sequence (don't follow jump since this node failed)
@@ -1779,12 +1779,14 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
 		return true, "", 0
 	}
 
-	// Build simple error message with failed step count
+	// Build error message with failed step count and failed node names
 	var errorMessage string
+	failedNodesList := strings.Join(failedStepNames, ", ")
+
 	if failedCount == 1 {
-		errorMessage = fmt.Sprintf("This %d step encountered error", failedCount)
+		errorMessage = fmt.Sprintf("This %d step encountered error: %s", failedCount, failedNodesList)
 	} else {
-		errorMessage = fmt.Sprintf("These %d steps encountered error", failedCount)
+		errorMessage = fmt.Sprintf("These %d steps encountered error: %s", failedCount, failedNodesList)
 	}
 
 	return false, errorMessage, failedCount

@@ -939,8 +939,9 @@ func TestSimulateTask_ContractReadNodeFailure(t *testing.T) {
 	assert.NotEmpty(t, contractReadStep.Error, "ContractRead step should have error message")
 	assert.Contains(t, contractReadStep.Error, "missing required input variables", "Error should mention missing input variables")
 
-	// Verify the overall execution error mentions ContractRead failure count
-	assert.Contains(t, execution.Error, "This 1 step encountered error", "Overall error should mention failed step count")
+	// Verify the overall execution error mentions ContractRead failure count with new format
+	assert.Contains(t, execution.Error, "This 1 step encountered error:", "Overall error should mention failed step count")
+	assert.Contains(t, execution.Error, "oracle0", "Overall error should contain the failed node name")
 
 	t.Logf("✅ SUCCESS: Failed ContractRead node properly captured in simulation")
 	t.Logf("  - Overall execution.Success: %v", execution.Success)
