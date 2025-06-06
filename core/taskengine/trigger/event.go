@@ -3,6 +3,7 @@ package trigger
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +53,16 @@ type EventTrigger struct {
 
 	// channel that we will push the trigger information back
 	triggerCh chan TriggerMetadata[EventMark]
+
+	// Track multiple subscriptions for complex filtering
+	subscriptions []SubscriptionInfo
+	subsMutex     sync.RWMutex
+}
+
+type SubscriptionInfo struct {
+	subscription ethereum.Subscription
+	query        ethereum.FilterQuery
+	description  string
 }
 
 func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], logger sdklogging.Logger) *EventTrigger {
@@ -65,8 +76,9 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 			logger:    logger,
 		},
 
-		triggerCh: triggerCh,
-		checks:    sync.Map{},
+		triggerCh:     triggerCh,
+		checks:        sync.Map{},
+		subscriptions: make([]SubscriptionInfo, 0),
 	}
 
 	b.ethClient, err = ethclient.Dial(o.RpcURL)
@@ -103,43 +115,125 @@ func (t *EventTrigger) RemoveCheck(id string) error {
 }
 
 func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
-	logs := make(chan types.Log)
-	query := ethereum.FilterQuery{
-		Topics: whitelistTopics,
+	// Build filter queries based on registered checks
+	queries := evtTrigger.buildFilterQueries()
+
+	if len(queries) == 0 {
+		evtTrigger.logger.Info("no filter queries to subscribe to")
+		return nil
 	}
 
-	sub, err := evtTrigger.wsEthClient.SubscribeFilterLogs(context.Background(), query, logs)
-	evtTrigger.logger.Info("subscribing with filter", "topics", whitelistTopics)
+	// Create logs channel that all subscriptions will send to
+	logs := make(chan types.Log, 1000) // Buffered to handle multiple subscriptions
 
-	if err != nil {
-		return err
+	// Create subscriptions for each query
+	evtTrigger.subsMutex.Lock()
+	evtTrigger.subscriptions = make([]SubscriptionInfo, 0, len(queries))
+
+	for i, queryInfo := range queries {
+		sub, err := evtTrigger.wsEthClient.SubscribeFilterLogs(context.Background(), queryInfo.Query, logs)
+		if err != nil {
+			evtTrigger.logger.Error("failed to create subscription", "query_index", i, "description", queryInfo.Description, "error", err)
+			// Clean up any successful subscriptions
+			for _, subInfo := range evtTrigger.subscriptions {
+				subInfo.subscription.Unsubscribe()
+			}
+			evtTrigger.subsMutex.Unlock()
+			return err
+		}
+
+		evtTrigger.subscriptions = append(evtTrigger.subscriptions, SubscriptionInfo{
+			subscription: sub,
+			query:        queryInfo.Query,
+			description:  queryInfo.Description,
+		})
+
+		evtTrigger.logger.Info("created subscription",
+			"index", i,
+			"description", queryInfo.Description,
+			"addresses", queryInfo.Query.Addresses,
+			"topics", queryInfo.Query.Topics)
+	}
+	evtTrigger.subsMutex.Unlock()
+
+	// Create error channel that collects errors from all subscriptions
+	errorCh := make(chan error, len(evtTrigger.subscriptions))
+
+	// Start goroutines to monitor each subscription's error channel
+	for i, subInfo := range evtTrigger.subscriptions {
+		go func(index int, sub ethereum.Subscription, desc string) {
+			err := <-sub.Err()
+			if err != nil {
+				evtTrigger.logger.Error("subscription error", "index", index, "description", desc, "error", err)
+				errorCh <- err
+			}
+		}(i, subInfo.subscription, subInfo.description)
 	}
 
 	go func() {
-		defer sub.Unsubscribe()
+		defer func() {
+			// Clean up all subscriptions
+			evtTrigger.subsMutex.RLock()
+			for _, subInfo := range evtTrigger.subscriptions {
+				subInfo.subscription.Unsubscribe()
+			}
+			evtTrigger.subsMutex.RUnlock()
+		}()
+
 		for {
 			select {
 			case <-ctx.Done():
-				err = nil
+				evtTrigger.logger.Info("context cancelled, stopping event trigger")
+				return
 			case <-evtTrigger.done:
-				err = nil
-			case err := <-sub.Err():
+				evtTrigger.logger.Info("event trigger shutdown signal received")
+				return
+			case err := <-errorCh:
 				if err == nil {
 					continue
 				}
-				evtTrigger.logger.Error("error when subscribing to websocket rpc, retrying", "rpc", evtTrigger.rpcOption.WsRpcURL, "error", err)
-				if sub != nil {
-					sub.Unsubscribe()
-				}
+				evtTrigger.logger.Error("subscription error, attempting reconnection", "error", err)
 
-				if evtTrigger.wsEthClient != nil {
-					evtTrigger.wsEthClient.Close()
-				}
-
+				// Attempt to reconnect
 				if err := evtTrigger.retryConnectToRpc(); err != nil {
 					evtTrigger.logger.Error("failed to reconnect to RPC", "error", err)
+					continue
 				}
-				sub, err = evtTrigger.wsEthClient.SubscribeFilterLogs(context.Background(), query, logs)
+
+				// Rebuild and resubscribe
+				evtTrigger.logger.Info("reconnected, rebuilding subscriptions")
+				newQueries := evtTrigger.buildFilterQueries()
+
+				evtTrigger.subsMutex.Lock()
+				// Clean up old subscriptions
+				for _, subInfo := range evtTrigger.subscriptions {
+					subInfo.subscription.Unsubscribe()
+				}
+				evtTrigger.subscriptions = make([]SubscriptionInfo, 0, len(newQueries))
+
+				// Create new subscriptions
+				for i, queryInfo := range newQueries {
+					sub, subErr := evtTrigger.wsEthClient.SubscribeFilterLogs(context.Background(), queryInfo.Query, logs)
+					if subErr != nil {
+						evtTrigger.logger.Error("failed to recreate subscription", "index", i, "error", subErr)
+						continue
+					}
+
+					evtTrigger.subscriptions = append(evtTrigger.subscriptions, SubscriptionInfo{
+						subscription: sub,
+						query:        queryInfo.Query,
+						description:  queryInfo.Description,
+					})
+
+					// Restart error monitoring for this subscription
+					go func(idx int, s ethereum.Subscription, d string) {
+						errSub := <-s.Err()
+						if errSub != nil {
+							errorCh <- errSub
+						}
+					}(i, sub, queryInfo.Description)
+				}
+				evtTrigger.subsMutex.Unlock()
 			case event := <-logs:
 				evtTrigger.logger.Debug("detect new event, evaluate checks", "event", event.Topics, "contract", event.Address, "tx", event.TxHash)
 				// TODO: implement hint to avoid scan all checks
@@ -198,7 +292,613 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 		}
 	}()
 
-	return err
+	return nil
+}
+
+type QueryInfo struct {
+	Query       ethereum.FilterQuery
+	Description string
+}
+
+// buildFilterQueries creates multiple filter queries for efficient FROM-OR-TO filtering
+func (evtTrigger *EventTrigger) buildFilterQueries() []QueryInfo {
+	addressesMap := make(map[common.Address]bool)
+	topicsMap := make(map[common.Hash]bool)
+	fromAddressesMap := make(map[common.Address]bool)
+	toAddressesMap := make(map[common.Address]bool)
+
+	// Analyze all registered checks to collect filter requirements
+	evtTrigger.checks.Range(func(key any, value any) bool {
+		check := value.(*Check)
+
+		// Parse different trigger types
+		if len(check.Matcher) > 0 {
+			// Handle simple matcher-based triggers
+			for _, matcher := range check.Matcher {
+				switch matcher.Type {
+				case "address":
+					if len(matcher.Value) > 0 && matcher.Value[0] != "" {
+						if addr := common.HexToAddress(matcher.Value[0]); addr != (common.Address{}) {
+							addressesMap[addr] = true
+						}
+					}
+				case "topics":
+					if len(matcher.Value) > 0 && matcher.Value[0] != "" {
+						if topic := common.HexToHash(matcher.Value[0]); topic != (common.Hash{}) {
+							topicsMap[topic] = true
+						}
+					}
+				}
+			}
+		} else if check.Program != "" {
+			// Parse advanced expression-based triggers
+			triggerName := check.TaskMetadata.GetTrigger().GetName()
+
+			// Try to extract information from the JavaScript expression
+			contracts, topics, fromAddrs, toAddrs := evtTrigger.parseExpressionForFilters(check.Program, triggerName)
+
+			for _, addr := range contracts {
+				if addr != (common.Address{}) {
+					addressesMap[addr] = true
+				}
+			}
+
+			for _, topic := range topics {
+				if topic != (common.Hash{}) {
+					topicsMap[topic] = true
+				}
+			}
+
+			for _, addr := range fromAddrs {
+				if addr != (common.Address{}) {
+					fromAddressesMap[addr] = true
+				}
+			}
+
+			for _, addr := range toAddrs {
+				if addr != (common.Address{}) {
+					toAddressesMap[addr] = true
+				}
+			}
+		}
+
+		return true
+	})
+
+	// Convert maps to slices
+	var addresses []common.Address
+	for addr := range addressesMap {
+		addresses = append(addresses, addr)
+	}
+
+	var queries []QueryInfo
+
+	// Check if we have Transfer events and from/to filtering
+	transferTopic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	hasTransferEvent := false
+	for topic := range topicsMap {
+		if topic == transferTopic {
+			hasTransferEvent = true
+			break
+		}
+	}
+
+	hasFromFilter := len(fromAddressesMap) > 0
+	hasToFilter := len(toAddressesMap) > 0
+
+	// VALIDATION: Disallow overly broad Transfer event filters (similar to buildFilterQuery validation)
+	if hasTransferEvent {
+		// Case 1: Transfer events from any contract without proper filtering
+		if len(addresses) == 0 && !hasFromFilter && !hasToFilter {
+			evtTrigger.logger.Error("DISALLOWED in buildFilterQueries: Transfer events from any contract without from/to filtering")
+			return []QueryInfo{} // Return empty to prevent any subscriptions
+		}
+
+		// Case 2: Transfer events from specific contracts but no from/to filtering
+		if len(addresses) > 0 && !hasFromFilter && !hasToFilter {
+			evtTrigger.logger.Error("DISALLOWED in buildFilterQueries: Transfer events from specific contracts without from/to filtering")
+			evtTrigger.logger.Error("Contracts that would be affected:", "addresses", addresses)
+			return []QueryInfo{} // Return empty to prevent any subscriptions
+		}
+	}
+
+	if hasTransferEvent && hasFromFilter && hasToFilter {
+		// Check if it's FROM-OR-TO for the same address
+		sameAddressInBoth := false
+		for fromAddr := range fromAddressesMap {
+			if _, exists := toAddressesMap[fromAddr]; exists {
+				sameAddressInBoth = true
+				break
+			}
+		}
+
+		if sameAddressInBoth {
+			// Create two separate subscriptions: one for FROM, one for TO
+			evtTrigger.logger.Info("Creating dual subscriptions for FROM-OR-TO filtering")
+
+			// FROM subscription
+			fromTopics := [][]common.Hash{
+				{transferTopic}, // Transfer signature
+				{},              // from addresses
+			}
+			for addr := range fromAddressesMap {
+				fromTopics[1] = append(fromTopics[1], common.BytesToHash(addr.Bytes()))
+			}
+
+			queries = append(queries, QueryInfo{
+				Query: ethereum.FilterQuery{
+					Addresses: addresses,
+					Topics:    fromTopics,
+				},
+				Description: fmt.Sprintf("Transfer FROM addresses (count: %d)", len(fromAddressesMap)),
+			})
+
+			// TO subscription
+			toTopics := [][]common.Hash{
+				{transferTopic}, // Transfer signature
+				nil,             // any from address
+				{},              // to addresses
+			}
+			for addr := range toAddressesMap {
+				toTopics[2] = append(toTopics[2], common.BytesToHash(addr.Bytes()))
+			}
+
+			queries = append(queries, QueryInfo{
+				Query: ethereum.FilterQuery{
+					Addresses: addresses,
+					Topics:    toTopics,
+				},
+				Description: fmt.Sprintf("Transfer TO addresses (count: %d)", len(toAddressesMap)),
+			})
+
+			evtTrigger.logger.Info("=== DUAL SUBSCRIPTION STRATEGY ===")
+			evtTrigger.logger.Info("Subscription 1: Transfer FROM specific addresses")
+			evtTrigger.logger.Info("Subscription 2: Transfer TO specific addresses")
+			evtTrigger.logger.Info("Both will trigger the same task - much more efficient!")
+			evtTrigger.logger.Info("=== END DUAL SUBSCRIPTION ===")
+
+			return queries
+		}
+	}
+
+	// Fallback to single subscription
+	evtTrigger.logger.Info("Using single subscription strategy")
+	return []QueryInfo{evtTrigger.convertToQueryInfo(evtTrigger.buildFilterQuery())}
+}
+
+// Helper function to convert FilterQuery to QueryInfo
+func (evtTrigger *EventTrigger) convertToQueryInfo(query ethereum.FilterQuery) QueryInfo {
+	description := "Single subscription"
+	if len(query.Addresses) > 0 {
+		description += fmt.Sprintf(" - contracts: %v", query.Addresses)
+	}
+	if len(query.Topics) > 0 {
+		description += fmt.Sprintf(" - %d topic levels", len(query.Topics))
+	}
+
+	return QueryInfo{
+		Query:       query,
+		Description: description,
+	}
+}
+
+// buildFilterQuery creates a dynamic filter query based on registered checks
+//
+// EXAMPLE FILTER QUERY STRUCTURES:
+//
+//  1. Basic Transfer event from any contract: ** DISALLOWED **
+//     FilterQuery{
+//     Addresses: nil,  // any contract
+//     Topics: [
+//     [0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef], // Transfer signature
+//     ]
+//     }
+//     NOTE: This would capture ALL Transfer events from ALL contracts - too broad and inefficient.
+//
+//  2. Transfer from specific contract (no from/to filtering): ** DISALLOWED **
+//     FilterQuery{
+//     Addresses: [0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4],
+//     Topics: [
+//     [0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef], // Transfer signature
+//     ]
+//     }
+//     NOTE: This would capture ALL Transfer events from specific contracts - still too broad.
+//
+//  3. Transfer FROM specific address (from any contract):
+//     FilterQuery{
+//     Addresses: nil,
+//     Topics: [
+//     [0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef], // Transfer signature
+//     [0x000000000000000000000000fE66125343Aabda4A330DA667431eC1Acb7BbDA9], // from address (padded)
+//     ]
+//     }
+//
+//  4. Transfer TO specific address (from any contract):
+//     FilterQuery{
+//     Addresses: nil,
+//     Topics: [
+//     [0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef], // Transfer signature
+//     nil, // any from address
+//     [0x000000000000000000000000fE66125343Aabda4A330DA667431eC1Acb7BbDA9], // to address
+//     ]
+//     }
+//
+// NOTE: For "FROM or TO" scenarios, RPC filtering cannot do OR across topic positions!
+// We need to use a more permissive filter and do the OR logic locally, or use multiple subscriptions.
+// Current strategy: Use permissive filter (just event signature + contract) and filter locally.
+//
+// This dramatically reduces network traffic compared to subscribing to ALL events!
+func (evtTrigger *EventTrigger) buildFilterQuery() ethereum.FilterQuery {
+	addressesMap := make(map[common.Address]bool)
+	topicsMap := make(map[common.Hash]bool)
+	fromAddressesMap := make(map[common.Address]bool)
+	toAddressesMap := make(map[common.Address]bool)
+
+	// Analyze all registered checks to build comprehensive filter
+	evtTrigger.checks.Range(func(key any, value any) bool {
+		check := value.(*Check)
+
+		// Parse different trigger types
+		if len(check.Matcher) > 0 {
+			// Handle simple matcher-based triggers
+			for _, matcher := range check.Matcher {
+				switch matcher.Type {
+				case "address":
+					if len(matcher.Value) > 0 && matcher.Value[0] != "" {
+						if addr := common.HexToAddress(matcher.Value[0]); addr != (common.Address{}) {
+							addressesMap[addr] = true
+						}
+					}
+				case "topics":
+					if len(matcher.Value) > 0 && matcher.Value[0] != "" {
+						if topic := common.HexToHash(matcher.Value[0]); topic != (common.Hash{}) {
+							topicsMap[topic] = true
+						}
+					}
+				}
+			}
+		} else if check.Program != "" {
+			// Parse advanced expression-based triggers
+			triggerName := check.TaskMetadata.GetTrigger().GetName()
+
+			// Try to extract information from the JavaScript expression
+			contracts, topics, fromAddrs, toAddrs := evtTrigger.parseExpressionForFilters(check.Program, triggerName)
+
+			for _, addr := range contracts {
+				if addr != (common.Address{}) {
+					addressesMap[addr] = true
+				}
+			}
+
+			for _, topic := range topics {
+				if topic != (common.Hash{}) {
+					topicsMap[topic] = true
+				}
+			}
+
+			for _, addr := range fromAddrs {
+				if addr != (common.Address{}) {
+					fromAddressesMap[addr] = true
+				}
+			}
+
+			for _, addr := range toAddrs {
+				if addr != (common.Address{}) {
+					toAddressesMap[addr] = true
+				}
+			}
+		}
+
+		return true
+	})
+
+	// Convert maps to slices
+	var addresses []common.Address
+	for addr := range addressesMap {
+		addresses = append(addresses, addr)
+	}
+
+	var topics [][]common.Hash
+	if len(topicsMap) > 0 {
+		var topicList []common.Hash
+		for topic := range topicsMap {
+			topicList = append(topicList, topic)
+		}
+		// First position is event signature/topic0
+		topics = append(topics, topicList)
+
+		// Handle from/to filtering for Transfer events
+		if evtTrigger.hasTransferEvent(topicList) {
+			hasFromFilter := len(fromAddressesMap) > 0
+			hasToFilter := len(toAddressesMap) > 0
+
+			if hasFromFilter && hasToFilter {
+				// Check if it's the same address in both from and to
+				sameAddressInBoth := false
+				for fromAddr := range fromAddressesMap {
+					if _, exists := toAddressesMap[fromAddr]; exists {
+						sameAddressInBoth = true
+						break
+					}
+				}
+
+				if sameAddressInBoth {
+					// For "from=X||to=X" (same address), use permissive filter and do OR logic locally
+					evtTrigger.logger.Info("FROM-OR-TO filtering detected: using permissive filter + local evaluation")
+					// Don't add topic filters - let all Transfer events through and filter locally
+				} else {
+					// Different addresses in from and to - this is likely an error in configuration
+					evtTrigger.logger.Warn("FROM and TO filters have different addresses - using permissive filter")
+				}
+			} else if hasFromFilter {
+				// Only FROM filter
+				var fromTopics []common.Hash
+				for addr := range fromAddressesMap {
+					fromTopics = append(fromTopics, common.BytesToHash(addr.Bytes()))
+				}
+				topics = append(topics, fromTopics)
+				evtTrigger.logger.Info("FROM-only filter applied", "from_addresses", fromTopics)
+			} else if hasToFilter {
+				// Only TO filter
+				topics = append(topics, nil) // any from address
+				var toTopics []common.Hash
+				for addr := range toAddressesMap {
+					toTopics = append(toTopics, common.BytesToHash(addr.Bytes()))
+				}
+				topics = append(topics, toTopics)
+				evtTrigger.logger.Info("TO-only filter applied", "to_addresses", toTopics)
+			}
+		}
+	}
+
+	// Fallback: if no specific filters detected, use whitelist topics
+	if len(addresses) == 0 && len(topics) == 0 {
+		topics = whitelistTopics
+		evtTrigger.logger.Info("using fallback whitelist topics filter")
+	}
+
+	evtTrigger.logger.Info("built dynamic filter",
+		"addresses_count", len(addresses),
+		"topic_levels", len(topics),
+		"from_addresses_count", len(fromAddressesMap),
+		"to_addresses_count", len(toAddressesMap))
+
+	// Log detailed filter structure for debugging
+	if len(addresses) > 0 || len(topics) > 0 {
+		evtTrigger.logger.Info("=== FILTER QUERY STRUCTURE ===")
+
+		if len(addresses) > 0 {
+			evtTrigger.logger.Info("Contract addresses filter:", "addresses", addresses)
+			evtTrigger.logger.Info("  Example: Only events from these specific contracts will be received")
+		}
+
+		if len(topics) > 0 {
+			for i, topicLevel := range topics {
+				switch i {
+				case 0:
+					evtTrigger.logger.Info("Topic[0] - Event signatures:", "topics", topicLevel)
+					evtTrigger.logger.Info("  Example: 0xddf252ad... = Transfer event signature")
+				case 1:
+					if len(topicLevel) > 0 {
+						evtTrigger.logger.Info("Topic[1] - FROM addresses:", "topics", topicLevel)
+						evtTrigger.logger.Info("  Example: Only Transfer events FROM these addresses")
+					} else {
+						evtTrigger.logger.Info("Topic[1] - FROM addresses: ANY (no filter)")
+					}
+				case 2:
+					if len(topicLevel) > 0 {
+						evtTrigger.logger.Info("Topic[2] - TO addresses:", "topics", topicLevel)
+						evtTrigger.logger.Info("  Example: Only Transfer events TO these addresses")
+					} else {
+						evtTrigger.logger.Info("Topic[2] - TO addresses: ANY (no filter)")
+					}
+				default:
+					evtTrigger.logger.Info("Topic[%d]:", i, "topics", topicLevel)
+				}
+			}
+		}
+
+		// Show complete example
+		evtTrigger.logger.Info("=== COMPLETE FILTER EXAMPLE ===")
+		if len(addresses) > 0 && len(topics) > 0 {
+			if len(fromAddressesMap) > 0 && len(toAddressesMap) > 0 {
+				evtTrigger.logger.Info("FROM-OR-TO scenario: Permissive RPC filter + local evaluation")
+				evtTrigger.logger.Info("  - RPC receives: Transfer events from contracts %v", addresses)
+				fromAddrs := make([]common.Address, 0, len(fromAddressesMap))
+				for addr := range fromAddressesMap {
+					fromAddrs = append(fromAddrs, addr)
+				}
+				toAddrs := make([]common.Address, 0, len(toAddressesMap))
+				for addr := range toAddressesMap {
+					toAddrs = append(toAddrs, addr)
+				}
+				evtTrigger.logger.Info("  - Local filter: from=%v OR to=%v", fromAddrs, toAddrs)
+			} else {
+				evtTrigger.logger.Info("FilterQuery will receive:")
+				evtTrigger.logger.Info("  - Events from contracts: %v", addresses)
+				evtTrigger.logger.Info("  - With event signatures: %v", topics[0])
+				if len(topics) > 1 && len(topics[1]) > 0 {
+					evtTrigger.logger.Info("  - FROM addresses: %v", topics[1])
+				}
+				if len(topics) > 2 && len(topics[2]) > 0 {
+					evtTrigger.logger.Info("  - TO addresses: %v", topics[2])
+				}
+			}
+		} else if len(addresses) > 0 {
+			evtTrigger.logger.Info("FilterQuery: Events from contracts %v (any event type)", addresses)
+		} else if len(topics) > 0 {
+			evtTrigger.logger.Info("FilterQuery: Events with signatures %v (any contract)", topics[0])
+		}
+		evtTrigger.logger.Info("=== END FILTER STRUCTURE ===")
+	}
+
+	// VALIDATION: Disallow overly broad Transfer event filters to prevent network overload
+	transferTopic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	hasTransferInTopics := false
+	if len(topics) > 0 {
+		for _, topic := range topics[0] {
+			if topic == transferTopic {
+				hasTransferInTopics = true
+				break
+			}
+		}
+	}
+
+	if hasTransferInTopics {
+		// Case 1: Transfer events from any contract (no address filter AND no from/to filters)
+		if len(addresses) == 0 && (len(topics) == 1 || (len(topics) > 1 && len(topics[1]) == 0 && (len(topics) <= 2 || len(topics[2]) == 0))) {
+			evtTrigger.logger.Error("DISALLOWED: Transfer events from any contract without from/to filtering")
+			evtTrigger.logger.Error("This would capture ALL Transfer events from ALL contracts - too broad and inefficient")
+			return ethereum.FilterQuery{} // Return empty filter to prevent subscription
+		}
+
+		// Case 2: Transfer events from specific contracts but no from/to filtering
+		if len(addresses) > 0 && (len(topics) == 1 || (len(topics) > 1 && len(topics[1]) == 0 && (len(topics) <= 2 || len(topics[2]) == 0))) {
+			evtTrigger.logger.Error("DISALLOWED: Transfer events from specific contracts without from/to filtering")
+			evtTrigger.logger.Error("This would capture ALL Transfer events from specified contracts - still too broad")
+			evtTrigger.logger.Error("Contracts that would be affected:", "addresses", addresses)
+			return ethereum.FilterQuery{} // Return empty filter to prevent subscription
+		}
+
+		evtTrigger.logger.Info("Transfer filter validation passed - has proper from/to filtering")
+	}
+
+	return ethereum.FilterQuery{
+		Addresses: addresses,
+		Topics:    topics,
+	}
+}
+
+// hasTransferEvent checks if the topic list contains Transfer event signature
+func (evtTrigger *EventTrigger) hasTransferEvent(topics []common.Hash) bool {
+	transferTopic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	for _, topic := range topics {
+		if topic == transferTopic {
+			return true
+		}
+	}
+	return false
+}
+
+// parseExpressionForFilters extracts contract addresses and topics from JavaScript expressions
+func (evtTrigger *EventTrigger) parseExpressionForFilters(program, triggerName string) ([]common.Address, []common.Hash, []common.Address, []common.Address) {
+	var contracts []common.Address
+	var topics []common.Hash
+	var fromAddresses []common.Address
+	var toAddresses []common.Address
+
+	// First check for enhanced expression format (used in immediate execution)
+	// Format: "0xddf252...&&contracts=[0xaddr1,0xaddr2]&&from=0xaddr&&to=0xaddr"
+	if strings.Contains(program, "&&") {
+		topicHash, contractAddresses, fromAddress, toAddress := evtTrigger.parseEnhancedExpression(program)
+
+		// Add topic hash if found
+		if topicHash != "" {
+			if topic := common.HexToHash(topicHash); topic != (common.Hash{}) {
+				topics = append(topics, topic)
+			}
+		}
+
+		// Add contract addresses if found
+		for _, addrStr := range contractAddresses {
+			if addr := common.HexToAddress(addrStr); addr != (common.Address{}) {
+				contracts = append(contracts, addr)
+			}
+		}
+
+		if fromAddress != "" {
+			if addr := common.HexToAddress(fromAddress); addr != (common.Address{}) {
+				fromAddresses = append(fromAddresses, addr)
+			}
+		}
+
+		if toAddress != "" {
+			if addr := common.HexToAddress(toAddress); addr != (common.Address{}) {
+				toAddresses = append(toAddresses, addr)
+			}
+		}
+
+		return contracts, topics, fromAddresses, toAddresses
+	}
+
+	// Look for common patterns in JavaScript expressions:
+	// - triggerName.data.address == "0x..."
+	// - triggerName.data.topics[0] == "0x..."
+
+	// Extract contract addresses from JS expressions
+	addressPattern := regexp.MustCompile(triggerName + `\.data\.address\s*==\s*"(0x[a-fA-F0-9]{40})"`)
+	addressMatches := addressPattern.FindAllStringSubmatch(program, -1)
+	for _, match := range addressMatches {
+		if len(match) > 1 {
+			if addr := common.HexToAddress(match[1]); addr != (common.Address{}) {
+				contracts = append(contracts, addr)
+			}
+		}
+	}
+
+	// Extract topic hashes (usually topic[0] for event signatures)
+	topicPattern := regexp.MustCompile(triggerName + `\.data\.topics\[0\]\s*==\s*"(0x[a-fA-F0-9]{64})"`)
+	topicMatches := topicPattern.FindAllStringSubmatch(program, -1)
+	for _, match := range topicMatches {
+		if len(match) > 1 {
+			if topic := common.HexToHash(match[1]); topic != (common.Hash{}) {
+				topics = append(topics, topic)
+			}
+		}
+	}
+
+	// Extract Transfer event signature (common case)
+	transferPattern := regexp.MustCompile(`0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef`)
+	if transferPattern.MatchString(program) {
+		transferTopic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+		topics = append(topics, transferTopic)
+	}
+
+	return contracts, topics, fromAddresses, toAddresses
+}
+
+// parseEnhancedExpression parses the enhanced expression format used in immediate execution
+// Examples:
+// - "0xddf252...signature" -> (signature, [], "", "")
+// - "0xddf252...signature&&0xaddr" -> (signature, [addr], "", "")
+// - "0xddf252...signature&&contracts=[0xaddr1,0xaddr2]" -> (signature, [addr1,addr2], "", "")
+// - "0xddf252...signature&&from=0xaddr" -> (signature, [], addr, "")
+// - "0xddf252...signature&&to=0xaddr" -> (signature, [], "", addr)
+func (evtTrigger *EventTrigger) parseEnhancedExpression(expression string) (topicHash string, contractAddresses []string, fromAddress, toAddress string) {
+	parts := strings.Split(expression, "&&")
+
+	// First part is always the topic hash
+	if len(parts) > 0 {
+		topicHash = strings.TrimSpace(parts[0])
+	}
+
+	// Parse additional parameters
+	for i := 1; i < len(parts); i++ {
+		part := strings.TrimSpace(parts[i])
+
+		if strings.HasPrefix(part, "contracts=") {
+			// Parse contracts array: contracts=[0xaddr1,0xaddr2]
+			contractsStr := strings.TrimPrefix(part, "contracts=")
+			if strings.HasPrefix(contractsStr, "[") && strings.HasSuffix(contractsStr, "]") {
+				contractsStr = strings.Trim(contractsStr, "[]")
+				if contractsStr != "" {
+					contractAddresses = strings.Split(contractsStr, ",")
+					for j := range contractAddresses {
+						contractAddresses[j] = strings.TrimSpace(contractAddresses[j])
+					}
+				}
+			}
+		} else if strings.HasPrefix(part, "from=") {
+			fromAddress = strings.TrimSpace(strings.TrimPrefix(part, "from="))
+		} else if strings.HasPrefix(part, "to=") {
+			toAddress = strings.TrimSpace(strings.TrimPrefix(part, "to="))
+		} else {
+			// Simple contract address format
+			contractAddresses = []string{part}
+		}
+	}
+
+	return topicHash, contractAddresses, fromAddress, toAddress
 }
 
 func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) {
