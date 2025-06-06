@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
@@ -824,4 +825,263 @@ func TestSimulateTask_EventTriggerWithOutput(t *testing.T) {
 	t.Log("")
 	t.Log("✅ FIXED: EventTrigger output is no longer undefined!")
 	t.Log("✅ simulateWorkflow should now work the same as runTrigger for EventTriggers")
+}
+
+func TestSimulateTask_ContractReadNodeFailure(t *testing.T) {
+	SetRpc(testutil.GetTestRPCURL())
+	SetCache(testutil.GetDefaultCache())
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	engine := New(db, config, nil, testutil.GetLogger())
+	err := engine.MustStart()
+	require.NoError(t, err)
+	defer engine.Stop()
+
+	user := testutil.TestUser1()
+
+	// Define EventTrigger for simulation
+	trigger := &avsproto.TaskTrigger{
+		Id:   "event_trigger_1",
+		Name: EventTriggerName,
+		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+		TriggerType: &avsproto.TaskTrigger_Event{
+			Event: &avsproto.EventTrigger{
+				Config: &avsproto.EventTrigger_Config{
+					Expression: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+				},
+			},
+		},
+	}
+
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "branch_1",
+			Name: BranchNodeName,
+			TaskType: &avsproto.TaskNode_Branch{
+				Branch: &avsproto.BranchNode{
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:         "condition_1",
+								Type:       "if",
+								Expression: "Object.keys(" + EventTriggerName + ".data).length > 0",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			Id:   "contract_read_1",
+			Name: "oracle0",
+			TaskType: &avsproto.TaskNode_ContractRead{
+				ContractRead: &avsproto.ContractReadNode{
+					Config: &avsproto.ContractReadNode_Config{
+						ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
+						CallData:        "0xfeaf968c",
+						ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"latestRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+					},
+				},
+			},
+		},
+	}
+
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "edge_1",
+			Source: "event_trigger_1",
+			Target: "branch_1",
+		},
+		{
+			Id:     "edge_2",
+			Source: "branch_1.condition_1",
+			Target: "contract_read_1",
+		},
+	}
+
+	// Simulate the task with provided definition
+	inputVariables := map[string]interface{}{}
+
+	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
+
+	// Verify the simulation was "successful" in the sense that it ran to completion
+	// but should report failure due to ContractRead node failing
+	assert.NoError(t, err, "SimulateTask should not return an error even with failed nodes")
+	assert.NotNil(t, execution)
+
+	// CRITICAL TEST: The execution should report failure due to ContractRead node failing
+	assert.False(t, execution.Success, "Execution should report failure when ContractRead node fails")
+	assert.NotEmpty(t, execution.Error, "Execution should have error message explaining the failure")
+
+	// Verify we have all 3 steps including the failed ContractRead step
+	assert.Len(t, execution.Steps, 3, "Should have 3 steps: trigger + branch + failed contract read")
+
+	// Verify trigger step
+	triggerStep := execution.Steps[0]
+	assert.Equal(t, "event_trigger_1", triggerStep.Id)
+	assert.Equal(t, "TRIGGER_TYPE_EVENT", triggerStep.Type)
+	assert.Equal(t, EventTriggerName, triggerStep.Name)
+	assert.True(t, triggerStep.Success)
+
+	// Verify branch step
+	branchStep := execution.Steps[1]
+	assert.Equal(t, "branch_1", branchStep.Id)
+	assert.Equal(t, "NODE_TYPE_BRANCH", branchStep.Type)
+	assert.Equal(t, BranchNodeName, branchStep.Name)
+	assert.True(t, branchStep.Success)
+
+	// CRITICAL TEST: Verify the failed ContractRead step is included
+	contractReadStep := execution.Steps[2]
+	assert.Equal(t, "contract_read_1", contractReadStep.Id)
+	assert.Equal(t, "NODE_TYPE_CONTRACT_READ", contractReadStep.Type)
+	assert.Equal(t, "oracle0", contractReadStep.Name)
+	assert.False(t, contractReadStep.Success, "ContractRead step should report failure")
+	assert.NotEmpty(t, contractReadStep.Error, "ContractRead step should have error message")
+	assert.Contains(t, contractReadStep.Error, "missing required input variables", "Error should mention missing input variables")
+
+	// Verify the overall execution error mentions ContractRead failure
+	assert.Contains(t, execution.Error, "1 step failed", "Overall error should mention failed step count")
+
+	t.Logf("✅ SUCCESS: Failed ContractRead node properly captured in simulation")
+	t.Logf("  - Overall execution.Success: %v", execution.Success)
+	t.Logf("  - Overall execution.Error: %s", execution.Error)
+	t.Logf("  - ContractRead step.Success: %v", contractReadStep.Success)
+	t.Logf("  - ContractRead step.Error: %s", contractReadStep.Error)
+}
+
+func TestSimulateTask_BranchConditionDebug(t *testing.T) {
+	SetRpc(testutil.GetTestRPCURL())
+	SetCache(testutil.GetDefaultCache())
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	engine := New(db, config, nil, testutil.GetLogger())
+	err := engine.MustStart()
+	require.NoError(t, err)
+	defer engine.Stop()
+
+	user := testutil.TestUser1()
+
+	// Recreate the exact scenario from user's logs
+	trigger := &avsproto.TaskTrigger{
+		Id:   "01JWT8GR0AV0DP12644JCTEBNF",
+		Name: "eventTrigger",
+		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+		TriggerType: &avsproto.TaskTrigger_Event{
+			Event: &avsproto.EventTrigger{
+				Config: &avsproto.EventTrigger_Config{
+					Expression: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+				},
+			},
+		},
+	}
+
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "01JWSFA99PZ6ZCGARYD5AH0F6R",
+			Name: "branch0",
+			TaskType: &avsproto.TaskNode_Branch{
+				Branch: &avsproto.BranchNode{
+					Config: &avsproto.BranchNode_Config{
+						Conditions: []*avsproto.BranchNode_Condition{
+							{
+								Id:         "0", // This should create "01JWSFA99PZ6ZCGARYD5AH0F6R.0"
+								Type:       "if",
+								Expression: "Object.keys(eventTrigger.data).length > 0",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			Id:   "01JWYECNS5C1P3R4PDNJY6JHEY",
+			Name: "oracle0",
+			TaskType: &avsproto.TaskNode_ContractRead{
+				ContractRead: &avsproto.ContractReadNode{
+					// Remove Config to simulate the input variable approach
+					// This will cause it to look for contractAbi, contractAddress, callData in input variables
+					// But let's provide them via VM variables to get past that validation
+					Config: &avsproto.ContractReadNode_Config{
+						ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
+						CallData:        "0xfeaf968c",
+						ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+					},
+				},
+			},
+		},
+	}
+
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "edge1",
+			Source: "01JWT8GR0AV0DP12644JCTEBNF", // trigger -> branch
+			Target: "01JWSFA99PZ6ZCGARYD5AH0F6R",
+		},
+		{
+			Id:     "edge2",
+			Source: "01JWSFA99PZ6ZCGARYD5AH0F6R.0", // branch condition -> contract read
+			Target: "01JWYECNS5C1P3R4PDNJY6JHEY",
+		},
+	}
+
+	t.Logf("DEBUG: Setting up workflow with edges:")
+	for _, edge := range edges {
+		t.Logf("  %s: %s -> %s", edge.Id, edge.Source, edge.Target)
+	}
+
+	// Create VM directly to inspect plans
+	task := &model.Task{
+		Task: &avsproto.Task{
+			Id:      "debug_task",
+			Owner:   user.Address.Hex(),
+			Trigger: trigger,
+			Nodes:   nodes,
+			Edges:   edges,
+		},
+	}
+
+	secrets := make(map[string]string)
+	vm, err := NewVMWithData(task, nil, nil, secrets) // Set smartWalletConfig to nil to trigger the error
+	require.NoError(t, err)
+
+	// Compile and inspect plans
+	err = vm.Compile()
+	require.NoError(t, err)
+
+	// Debug: Print all plans
+	t.Logf("DEBUG: VM Plans after compilation:")
+	vm.mu.Lock()
+	for planID, plan := range vm.plans {
+		t.Logf("  Plan[%s]: NodeID=%s, Next=%v", planID, plan.NodeID, plan.Next)
+	}
+	vm.mu.Unlock()
+
+	// Now test with the real engine (which should have proper smart wallet config)
+	inputVariables := map[string]interface{}{}
+	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, execution)
+
+	t.Logf("DEBUG: Execution results:")
+	t.Logf("  Success: %v", execution.Success)
+	t.Logf("  Error: %s", execution.Error)
+	t.Logf("  Steps count: %d", len(execution.Steps))
+
+	for i, step := range execution.Steps {
+		t.Logf("  Step %d: ID=%s, Type=%s, Name=%s, Success=%v, Error=%s",
+			i+1, step.Id, step.Type, step.Name, step.Success, step.Error)
+	}
+
+	// The key test: verify we have 3 steps (trigger + branch + contract read)
+	if len(execution.Steps) != 3 {
+		t.Errorf("Expected 3 steps but got %d. This indicates the branch condition is not finding its next step!", len(execution.Steps))
+	} else {
+		t.Logf("✅ SUCCESS: All 3 steps are present, our fix is working!")
+		t.Logf("✅ The user should restart their aggregator to get the latest code.")
+	}
 }

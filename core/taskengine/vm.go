@@ -632,7 +632,22 @@ func (v *VM) Run() error {
 
 		jump, err := v.executeNode(node) // executeNode calls sub-processors which should use AddVar for VM state changes
 		if err != nil {
-			return err // Abort on first error
+			// Instead of aborting on first error, we now continue execution
+			// The failed step should already be logged by executeNode/runXXX methods
+			// Log the error but continue to next step
+			if v.logger != nil {
+				v.logger.Error("node execution failed, continuing execution", "nodeID", node.Id, "error", err)
+			}
+
+			// Continue to next step in sequence (don't follow jump since this node failed)
+			v.mu.Lock()
+			if len(stepToExecute.Next) == 0 {
+				currentStep = nil // End of this path
+			} else {
+				currentStep = v.plans[stepToExecute.Next[0]]
+			}
+			v.mu.Unlock()
+			continue
 		}
 
 		v.mu.Lock()      // Lock for plan navigation
@@ -1655,4 +1670,42 @@ func (v *VM) createExecutionStep(nodeId string, success bool, errorMsg string, l
 	}
 
 	return step
+}
+
+// AnalyzeExecutionResult examines all execution steps and determines overall success/failure
+// Returns (success, errorMessage, failedStepCount)
+func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if len(v.ExecutionLogs) == 0 {
+		return false, "no execution steps found", 0
+	}
+
+	var failedSteps []string
+	var firstErrorMessage string
+
+	for _, step := range v.ExecutionLogs {
+		if !step.Success && step.Error != "" {
+			if firstErrorMessage == "" {
+				firstErrorMessage = step.Error
+			}
+			failedSteps = append(failedSteps, fmt.Sprintf("Step '%s' (%s): %s", step.Name, step.Id, step.Error))
+		}
+	}
+
+	failedCount := len(failedSteps)
+	if failedCount == 0 {
+		return true, "", 0
+	}
+
+	// Build comprehensive error message
+	var errorMessage string
+	if failedCount == 1 {
+		errorMessage = fmt.Sprintf("1 step failed: %s", firstErrorMessage)
+	} else {
+		errorMessage = fmt.Sprintf("%d steps failed, first error: %s", failedCount, firstErrorMessage)
+	}
+
+	return false, errorMessage, failedCount
 }

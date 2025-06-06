@@ -1133,21 +1133,39 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	runErr := vm.Run()
 	nodeEndTime := time.Now()
 
-	// Step 10: Create execution result with unified structure
-	// Overall execution timing starts with trigger and ends with nodes
+	// Step 10: Analyze execution results from all steps
+	executionSuccess, executionError, failedStepCount := vm.AnalyzeExecutionResult()
+
+	// Create execution result with proper success/error analysis
 	execution := &avsproto.Execution{
 		Id:      simulationID,
 		StartAt: triggerStartTime.UnixMilli(), // Start with trigger start time
 		EndAt:   nodeEndTime.UnixMilli(),      // End with node completion time
-		Success: runErr == nil,
-		Error:   "",
-		Steps:   vm.ExecutionLogs, // Now contains both trigger and node steps
+		Success: executionSuccess,             // Based on analysis of all steps
+		Error:   executionError,               // Comprehensive error message from failed steps
+		Steps:   vm.ExecutionLogs,             // Now contains both trigger and node steps (including failed ones)
+	}
+
+	if !executionSuccess {
+		n.logger.Error("workflow simulation completed with failures",
+			"error", executionError,
+			"task_id", task.Id,
+			"simulation_id", simulationID,
+			"failed_steps", failedStepCount,
+			"total_steps", len(vm.ExecutionLogs))
+		// Don't return error here - we want to return the execution result with failed steps
+		return execution, nil
 	}
 
 	if runErr != nil {
-		n.logger.Error("workflow simulation failed", "error", runErr, "task_id", task.Id, "simulation_id", simulationID)
-		execution.Error = runErr.Error()
-		return execution, fmt.Errorf("workflow simulation failed: %w", runErr)
+		// This should not happen if AnalyzeExecutionResult is working correctly,
+		// but handle it as a fallback for VM-level errors
+		n.logger.Error("workflow simulation had VM-level error", "vm_error", runErr, "task_id", task.Id, "simulation_id", simulationID)
+		if execution.Error == "" {
+			execution.Error = fmt.Sprintf("VM execution error: %s", runErr.Error())
+			execution.Success = false
+		}
+		return execution, nil
 	}
 
 	n.logger.Info("workflow simulation completed successfully", "task_id", task.Id, "simulation_id", simulationID, "steps", len(execution.Steps))
