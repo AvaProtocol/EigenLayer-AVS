@@ -1747,14 +1747,12 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
 		return true, "", 0
 	}
 
-	// Build comprehensive error message with failed step names
+	// Build simple error message with failed step count
 	var errorMessage string
 	if failedCount == 1 {
-		errorMessage = fmt.Sprintf("%d step failed: these steps have failed: %s. Error: %s",
-			failedCount, strings.Join(failedStepNames, ", "), firstErrorMessage)
+		errorMessage = fmt.Sprintf("This %d step encountered error", failedCount)
 	} else {
-		errorMessage = fmt.Sprintf("%d steps failed: these steps have failed: %s. First error: %s",
-			failedCount, strings.Join(failedStepNames, ", "), firstErrorMessage)
+		errorMessage = fmt.Sprintf("These %d steps encountered error", failedCount)
 	}
 
 	return false, errorMessage, failedCount

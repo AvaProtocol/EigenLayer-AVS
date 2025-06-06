@@ -939,8 +939,8 @@ func TestSimulateTask_ContractReadNodeFailure(t *testing.T) {
 	assert.NotEmpty(t, contractReadStep.Error, "ContractRead step should have error message")
 	assert.Contains(t, contractReadStep.Error, "missing required input variables", "Error should mention missing input variables")
 
-	// Verify the overall execution error mentions ContractRead failure
-	assert.Contains(t, execution.Error, "1 step failed", "Overall error should mention failed step count")
+	// Verify the overall execution error mentions ContractRead failure count
+	assert.Contains(t, execution.Error, "This 1 step encountered error", "Overall error should mention failed step count")
 
 	t.Logf("✅ SUCCESS: Failed ContractRead node properly captured in simulation")
 	t.Logf("  - Overall execution.Success: %v", execution.Success)
@@ -1082,4 +1082,120 @@ func TestSimulateTask_BranchConditionDebug(t *testing.T) {
 		t.Logf("✅ SUCCESS: All 3 steps are present, our fix is working!")
 		t.Logf("✅ The user should restart their aggregator to get the latest code.")
 	}
+}
+
+func TestSimulateTask_MultipleNodeFailures(t *testing.T) {
+	SetRpc(testutil.GetTestRPCURL())
+	SetCache(testutil.GetDefaultCache())
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	engine := New(db, config, nil, testutil.GetLogger())
+	err := engine.MustStart()
+	require.NoError(t, err)
+	defer engine.Stop()
+
+	user := testutil.TestUser1()
+
+	// Define EventTrigger for simulation
+	trigger := &avsproto.TaskTrigger{
+		Id:   "event_trigger_1",
+		Name: EventTriggerName,
+		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+		TriggerType: &avsproto.TaskTrigger_Event{
+			Event: &avsproto.EventTrigger{
+				Config: &avsproto.EventTrigger_Config{
+					Expression: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+				},
+			},
+		},
+	}
+
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "contract_read_1",
+			Name: "oracle1",
+			TaskType: &avsproto.TaskNode_ContractRead{
+				ContractRead: &avsproto.ContractReadNode{
+					Config: &avsproto.ContractReadNode_Config{
+						// Empty config to trigger "missing required input variables" error
+					},
+				},
+			},
+		},
+		{
+			Id:   "contract_read_2",
+			Name: "oracle2",
+			TaskType: &avsproto.TaskNode_ContractRead{
+				ContractRead: &avsproto.ContractReadNode{
+					Config: &avsproto.ContractReadNode_Config{
+						// Empty config to trigger "missing required input variables" error
+					},
+				},
+			},
+		},
+	}
+
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "edge_1",
+			Source: "event_trigger_1",
+			Target: "contract_read_1",
+		},
+		{
+			Id:     "edge_2",
+			Source: "contract_read_1",
+			Target: "contract_read_2",
+		},
+	}
+
+	// Simulate the task with provided definition
+	inputVariables := map[string]interface{}{}
+
+	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
+
+	// Verify the simulation was "successful" in the sense that it ran to completion
+	// but should report failure due to multiple ContractRead nodes failing
+	assert.NoError(t, err, "SimulateTask should not return an error even with failed nodes")
+	assert.NotNil(t, execution)
+
+	// CRITICAL TEST: The execution should report failure due to multiple nodes failing
+	assert.False(t, execution.Success, "Execution should report failure when multiple nodes fail")
+	assert.NotEmpty(t, execution.Error, "Execution should have error message explaining the failure")
+
+	// Log actual execution details for debugging
+	t.Logf("DEBUG: Actual steps count: %d", len(execution.Steps))
+	for i, step := range execution.Steps {
+		t.Logf("  Step %d: ID=%s, Type=%s, Name=%s, Success=%v, Error=%s",
+			i+1, step.Id, step.Type, step.Name, step.Success, step.Error)
+	}
+
+	// Since execution stops at first failure, adjust expectation
+	// We expect at least 2 steps: trigger + the first failed contract read
+	assert.GreaterOrEqual(t, len(execution.Steps), 2, "Should have at least 2 steps: trigger + 1 failed contract read")
+
+	// Verify trigger step
+	triggerStep := execution.Steps[0]
+	assert.Equal(t, "event_trigger_1", triggerStep.Id)
+	assert.Equal(t, "TRIGGER_TYPE_EVENT", triggerStep.Type)
+	assert.Equal(t, EventTriggerName, triggerStep.Name)
+	assert.True(t, triggerStep.Success)
+
+	// Verify first ContractRead step
+	contractReadStep1 := execution.Steps[1]
+	assert.Equal(t, "contract_read_1", contractReadStep1.Id)
+	assert.Equal(t, "NODE_TYPE_CONTRACT_READ", contractReadStep1.Type)
+	assert.Equal(t, "oracle1", contractReadStep1.Name)
+	assert.False(t, contractReadStep1.Success, "First ContractRead step should report failure")
+	assert.NotEmpty(t, contractReadStep1.Error, "First ContractRead step should have error message")
+
+	// Verify the overall execution error mentions all failed steps count
+	assert.Contains(t, execution.Error, "These 2 steps encountered error", "Overall error should mention failed step count")
+
+	t.Logf("✅ SUCCESS: Enhanced error message format properly demonstrated")
+	t.Logf("  - Overall execution.Success: %v", execution.Success)
+	t.Logf("  - Overall execution.Error: %s", execution.Error)
+	t.Logf("  - First ContractRead step.Success: %v", contractReadStep1.Success)
+	t.Logf("  - First ContractRead step.Error: %s", contractReadStep1.Error)
 }
