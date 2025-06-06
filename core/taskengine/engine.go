@@ -1515,12 +1515,12 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error)
 	n.logger.Info("🔄 Starting delete task operation", "task_id", taskID, "user", user.Address.String())
 
 	task, err := n.GetTask(user, taskID)
-	n.logger.Info("✅ Retrieved task for deletion", "task_id", taskID, "status", task.Status)
-
 	if err != nil {
 		n.logger.Info("❌ Task not found for deletion", "task_id", taskID, "error", err)
 		return false, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
+
+	n.logger.Info("✅ Retrieved task for deletion", "task_id", taskID, "status", task.Status)
 
 	if task.Status == avsproto.TaskStatus_Executing {
 		n.logger.Info("❌ Cannot delete executing task", "task_id", taskID, "status", task.Status)
