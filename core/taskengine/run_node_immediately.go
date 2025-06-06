@@ -145,6 +145,7 @@ func (n *Engine) runCronTriggerImmediately(triggerConfig map[string]interface{},
 // - From address filter: "0xddf252...signature&&from=0xaddress"
 // - To address filter: "0xddf252...signature&&to=0xaddress"
 // - Combined: "0xddf252...signature&&contracts=[0xaddr1,0xaddr2]&&from=0xaddress"
+// - "0xddf252...signature&&from=0xaddr||to=0xaddr" -> (signature, [], addr, addr) - OR syntax support
 func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	// Ensure RPC connection is available
 	if rpcConn == nil {
@@ -652,6 +653,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 // - "0xddf252...signature&&from=0xaddr" -> (signature, [], addr, "")
 // - "0xddf252...signature&&to=0xaddr" -> (signature, [], "", addr)
 // - "0xddf252...signature&&contracts=[0xaddr1,0xaddr2]&&from=0xaddr" -> (signature, [addr1,addr2], addr, "")
+// - "0xddf252...signature&&from=0xaddr||to=0xaddr" -> (signature, [], addr, addr) - OR syntax support
 func parseEnhancedExpression(expression string) (topicHash string, contractAddresses []string, fromAddress, toAddress string) {
 	parts := strings.Split(expression, "&&")
 
@@ -677,7 +679,19 @@ func parseEnhancedExpression(expression string) (topicHash string, contractAddre
 				}
 			}
 		} else if strings.HasPrefix(part, "from=") {
-			fromAddress = strings.TrimSpace(strings.TrimPrefix(part, "from="))
+			fromPart := strings.TrimSpace(strings.TrimPrefix(part, "from="))
+			// Check if this contains OR logic: from=X||to=Y
+			if strings.Contains(fromPart, "||to=") {
+				orParts := strings.Split(fromPart, "||to=")
+				if len(orParts) == 2 {
+					fromAddress = strings.TrimSpace(orParts[0])
+					toAddress = strings.TrimSpace(orParts[1])
+				} else {
+					fromAddress = fromPart
+				}
+			} else {
+				fromAddress = fromPart
+			}
 		} else if strings.HasPrefix(part, "to=") {
 			toAddress = strings.TrimSpace(strings.TrimPrefix(part, "to="))
 		} else {

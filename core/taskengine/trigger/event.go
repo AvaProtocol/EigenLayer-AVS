@@ -88,21 +88,35 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 	return &b
 }
 
-// TODO: track remainExecution and expriedAt before merge
 func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) error {
-	evt := check.GetTrigger().GetEvent()
+	sTrigger := check.GetTrigger()
+	if sTrigger == nil {
+		return fmt.Errorf("trigger not found from sync message")
+	}
 
-	t.checks.Store(check.TaskId, &Check{
+	evt := sTrigger.GetEvent()
+	if evt == nil {
+		return fmt.Errorf("event trigger not found from sync message")
+	}
+
+	taskID := check.TaskId
+	c := &Check{
+		TaskMetadata: check,
 		Program:      evt.GetConfig().GetExpression(),
 		Matcher:      evt.GetConfig().GetMatcher(),
-		TaskMetadata: check,
-	})
+	}
+
+	t.checks.Store(taskID, c)
+
+	t.logger.Info("Task added - subscriptions will be evaluated on next restart", "task_id", taskID)
 
 	return nil
 }
 
 func (t *EventTrigger) RemoveCheck(id string) error {
 	t.checks.Delete(id)
+
+	t.logger.Info("Task removed - subscriptions will be evaluated on next restart", "task_id", id)
 
 	return nil
 }
@@ -237,11 +251,20 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 				checksCount := 0
 				evtTrigger.checks.Range(func(key any, value any) bool {
 					checksCount++
+					check := value.(*Check)
+
+					// DEBUG: Log what task is being evaluated (only for first check to avoid spam)
+					if checksCount == 1 {
+						evtTrigger.logger.Debug("evaluating registered task",
+							"task_id", key,
+							"program", check.Program,
+							"matchers_count", len(check.Matcher),
+							"trigger_name", check.TaskMetadata.GetTrigger().GetName(),
+							"trigger_type", check.TaskMetadata.GetTrigger().GetType())
+					}
 					if evtTrigger.shutdown {
 						return false
 					}
-
-					check := value.(*Check)
 					if hit, err := evtTrigger.Evaluate(&event, check); err == nil && hit {
 						evtTrigger.logger.Info("check hit, notify aggregator", "task_id", key)
 						evtTrigger.triggerCh <- TriggerMetadata[EventMark]{
@@ -295,6 +318,18 @@ type QueryInfo struct {
 
 // buildFilterQueries creates multiple filter queries for efficient FROM-OR-TO filtering
 func (evtTrigger *EventTrigger) buildFilterQueries() []QueryInfo {
+	// First check if there are any registered tasks at all
+	totalTasks := 0
+	evtTrigger.checks.Range(func(key any, value any) bool {
+		totalTasks++
+		return false // Just count, no need to continue
+	})
+
+	if totalTasks == 0 {
+		evtTrigger.logger.Info("No registered tasks found in buildFilterQueries - no subscriptions needed")
+		return []QueryInfo{} // Return empty slice to prevent any subscriptions
+	}
+
 	addressesMap := make(map[common.Address]bool)
 	topicsMap := make(map[common.Hash]bool)
 	fromAddressesMap := make(map[common.Address]bool)
@@ -303,6 +338,32 @@ func (evtTrigger *EventTrigger) buildFilterQueries() []QueryInfo {
 	// Analyze all registered checks to collect filter requirements
 	evtTrigger.checks.Range(func(key any, value any) bool {
 		check := value.(*Check)
+
+		// DEBUG: Log detailed task registration info
+		// Note: Owner/smart wallet info requires database lookup which EventTrigger doesn't have access to
+		taskID := key.(string)
+
+		evtTrigger.logger.Info("=== ANALYZING REGISTERED TASK ===",
+			"task_id", taskID,
+			"task_id_length", len(taskID),
+			"program", check.Program,
+			"matchers_count", len(check.Matcher),
+			"trigger_name", check.TaskMetadata.GetTrigger().GetName(),
+			"trigger_type", check.TaskMetadata.GetTrigger().GetType(),
+			"remain", check.TaskMetadata.GetRemain(),
+			"expired_at", check.TaskMetadata.GetExpiredAt())
+
+		evtTrigger.logger.Info("=== TASK ANALYSIS NOTE ===",
+			"message", "To find task owner/smart wallet, need database lookup using TaskStorageKey",
+			"task_storage_pattern", "u:<owner>:<smart_wallet>:<task_id>",
+			"current_task_id", taskID)
+
+		// DEBUG: Log what task is being analyzed for filtering
+		evtTrigger.logger.Info("analyzing registered task for filtering",
+			"task_id", key,
+			"program", check.Program,
+			"matchers_count", len(check.Matcher),
+			"trigger_name", check.TaskMetadata.GetTrigger().GetName())
 
 		// Parse different trigger types
 		if len(check.Matcher) > 0 {
@@ -454,8 +515,9 @@ func (evtTrigger *EventTrigger) buildFilterQueries() []QueryInfo {
 		}
 	}
 
-	// Fallback to single subscription
-	evtTrigger.logger.Info("Using single subscription strategy")
+	// If we reach here, we have tasks but they don't fit the dual subscription pattern
+	// Create targeted single subscription based on the registered tasks
+	evtTrigger.logger.Info("Creating targeted single subscription for registered tasks")
 	return []QueryInfo{evtTrigger.convertToQueryInfo(evtTrigger.buildFilterQuery())}
 }
 
@@ -894,7 +956,19 @@ func (evtTrigger *EventTrigger) parseEnhancedExpression(expression string) (topi
 				}
 			}
 		} else if strings.HasPrefix(part, "from=") {
-			fromAddress = strings.TrimSpace(strings.TrimPrefix(part, "from="))
+			fromPart := strings.TrimSpace(strings.TrimPrefix(part, "from="))
+			// Check if this contains OR logic: from=X||to=Y
+			if strings.Contains(fromPart, "||to=") {
+				orParts := strings.Split(fromPart, "||to=")
+				if len(orParts) == 2 {
+					fromAddress = strings.TrimSpace(orParts[0])
+					toAddress = strings.TrimSpace(orParts[1])
+				} else {
+					fromAddress = fromPart
+				}
+			} else {
+				fromAddress = fromPart
+			}
 		} else if strings.HasPrefix(part, "to=") {
 			toAddress = strings.TrimSpace(strings.TrimPrefix(part, "to="))
 		} else {
