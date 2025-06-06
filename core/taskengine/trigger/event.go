@@ -22,15 +22,8 @@ import (
 )
 
 var (
-	// To reduce api call we listen to these topics only
-	// a better idea is to only subscribe to what we need and re-load when new trigger is added
-	whitelistTopics = [][]common.Hash{
-		{
-			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"), // erc20 transfer
-			//common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"), // UserOp
-			//common.HexToHash("0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"), // approve
-		},
-	}
+// Legacy whitelist removed - no longer needed since we use dynamic filtering
+// The system now only subscribes to events that registered tasks actually need
 )
 
 type EventMark struct {
@@ -651,10 +644,11 @@ func (evtTrigger *EventTrigger) buildFilterQuery() ethereum.FilterQuery {
 		}
 	}
 
-	// Fallback: if no specific filters detected, use whitelist topics
+	// If no specific filters detected, don't create any subscriptions
+	// This means no tasks are registered, so no events need to be monitored
 	if len(addresses) == 0 && len(topics) == 0 {
-		topics = whitelistTopics
-		evtTrigger.logger.Info("using fallback whitelist topics filter")
+		evtTrigger.logger.Info("no registered tasks require event monitoring - no subscriptions needed")
+		return ethereum.FilterQuery{} // Return empty filter - no subscriptions will be created
 	}
 
 	evtTrigger.logger.Info("built dynamic filter",
@@ -703,7 +697,7 @@ func (evtTrigger *EventTrigger) buildFilterQuery() ethereum.FilterQuery {
 		if len(addresses) > 0 && len(topics) > 0 {
 			if len(fromAddressesMap) > 0 && len(toAddressesMap) > 0 {
 				evtTrigger.logger.Info("FROM-OR-TO scenario: Permissive RPC filter + local evaluation")
-				evtTrigger.logger.Info("  - RPC receives: Transfer events from contracts %v", addresses)
+				evtTrigger.logger.Info("  - RPC receives: Transfer events from contracts", "contracts", addresses)
 				fromAddrs := make([]common.Address, 0, len(fromAddressesMap))
 				for addr := range fromAddressesMap {
 					fromAddrs = append(fromAddrs, addr)
@@ -712,22 +706,22 @@ func (evtTrigger *EventTrigger) buildFilterQuery() ethereum.FilterQuery {
 				for addr := range toAddressesMap {
 					toAddrs = append(toAddrs, addr)
 				}
-				evtTrigger.logger.Info("  - Local filter: from=%v OR to=%v", fromAddrs, toAddrs)
+				evtTrigger.logger.Info("  - Local filter: from OR to", "from_addresses", fromAddrs, "to_addresses", toAddrs)
 			} else {
 				evtTrigger.logger.Info("FilterQuery will receive:")
-				evtTrigger.logger.Info("  - Events from contracts: %v", addresses)
-				evtTrigger.logger.Info("  - With event signatures: %v", topics[0])
+				evtTrigger.logger.Info("  - Events from contracts", "contracts", addresses)
+				evtTrigger.logger.Info("  - With event signatures", "signatures", topics[0])
 				if len(topics) > 1 && len(topics[1]) > 0 {
-					evtTrigger.logger.Info("  - FROM addresses: %v", topics[1])
+					evtTrigger.logger.Info("  - FROM addresses", "from_addresses", topics[1])
 				}
 				if len(topics) > 2 && len(topics[2]) > 0 {
-					evtTrigger.logger.Info("  - TO addresses: %v", topics[2])
+					evtTrigger.logger.Info("  - TO addresses", "to_addresses", topics[2])
 				}
 			}
 		} else if len(addresses) > 0 {
-			evtTrigger.logger.Info("FilterQuery: Events from contracts %v (any event type)", addresses)
+			evtTrigger.logger.Info("FilterQuery: Events from contracts (any event type)", "addresses", addresses)
 		} else if len(topics) > 0 {
-			evtTrigger.logger.Info("FilterQuery: Events with signatures %v (any contract)", topics[0])
+			evtTrigger.logger.Info("FilterQuery: Events with signatures (any contract)", "topics", topics[0])
 		}
 		evtTrigger.logger.Info("=== END FILTER STRUCTURE ===")
 	}
@@ -749,6 +743,17 @@ func (evtTrigger *EventTrigger) buildFilterQuery() ethereum.FilterQuery {
 		if len(addresses) == 0 && (len(topics) == 1 || (len(topics) > 1 && len(topics[1]) == 0 && (len(topics) <= 2 || len(topics[2]) == 0))) {
 			evtTrigger.logger.Error("DISALLOWED: Transfer events from any contract without from/to filtering")
 			evtTrigger.logger.Error("This would capture ALL Transfer events from ALL contracts - too broad and inefficient")
+
+			// Debug: Log which checks are causing this
+			evtTrigger.checks.Range(func(key any, value any) bool {
+				check := value.(*Check)
+				evtTrigger.logger.Error("Problematic check causing broad filter",
+					"task_id", key,
+					"program", check.Program,
+					"matchers_count", len(check.Matcher))
+				return true
+			})
+
 			return ethereum.FilterQuery{} // Return empty filter to prevent subscription
 		}
 
