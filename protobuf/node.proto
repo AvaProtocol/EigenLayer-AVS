@@ -36,6 +36,15 @@ message SyncMessagesReq {
   string address = 2;
   bytes  signature = 3;
   int64  monotonic_clock = 4;
+  
+  // Operator capabilities - what trigger types this operator supports
+  message Capabilities {
+    bool event_monitoring = 1;    // Supports event trigger monitoring
+    bool block_monitoring = 2;    // Supports block trigger monitoring  
+    bool time_monitoring = 3;     // Supports time/cron trigger monitoring
+  }
+  
+  Capabilities capabilities = 5;
 }
 
 enum MessageOp {

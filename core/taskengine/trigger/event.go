@@ -50,6 +50,9 @@ type EventTrigger struct {
 	// Track multiple subscriptions for complex filtering
 	subscriptions []SubscriptionInfo
 	subsMutex     sync.RWMutex
+
+	// Channel to signal subscription updates
+	updateSubsCh chan struct{}
 }
 
 type SubscriptionInfo struct {
@@ -72,6 +75,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 		triggerCh:     triggerCh,
 		checks:        sync.Map{},
 		subscriptions: make([]SubscriptionInfo, 0),
+		updateSubsCh:  make(chan struct{}, 1),
 	}
 
 	b.ethClient, err = ethclient.Dial(o.RpcURL)
@@ -108,7 +112,14 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 
 	t.checks.Store(taskID, c)
 
-	t.logger.Info("Task added - subscriptions will be evaluated on next restart", "task_id", taskID)
+	t.logger.Info("Task added - updating subscriptions dynamically", "task_id", taskID)
+
+	// Trigger subscription update (non-blocking)
+	select {
+	case t.updateSubsCh <- struct{}{}:
+	default:
+		// Channel already has a pending update, no need to queue another
+	}
 
 	return nil
 }
@@ -116,7 +127,14 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 func (t *EventTrigger) RemoveCheck(id string) error {
 	t.checks.Delete(id)
 
-	t.logger.Info("Task removed - subscriptions will be evaluated on next restart", "task_id", id)
+	t.logger.Info("Task removed - updating subscriptions dynamically", "task_id", id)
+
+	// Trigger subscription update (non-blocking)
+	select {
+	case t.updateSubsCh <- struct{}{}:
+	default:
+		// Channel already has a pending update, no need to queue another
+	}
 
 	return nil
 }
@@ -138,7 +156,10 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 	evtTrigger.subscriptions = make([]SubscriptionInfo, 0, len(queries))
 
 	for i, queryInfo := range queries {
-		sub, err := evtTrigger.wsEthClient.SubscribeFilterLogs(context.Background(), queryInfo.Query, logs)
+		// Use timeout context to prevent indefinite blocking
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		sub, err := evtTrigger.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
+		cancel() // Clean up timeout context
 		if err != nil {
 			evtTrigger.logger.Error("failed to create subscription", "query_index", i, "description", queryInfo.Description, "error", err)
 			// Clean up any successful subscriptions
@@ -195,6 +216,89 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 			case <-evtTrigger.done:
 				evtTrigger.logger.Info("event trigger shutdown signal received")
 				return
+			case <-evtTrigger.updateSubsCh:
+				evtTrigger.logger.Info("received subscription update signal - starting debounced rebuild")
+
+				// Debounce mechanism: wait for additional updates for 500ms
+				debounceTimer := time.NewTimer(500 * time.Millisecond)
+				updateCount := 1
+
+				// Collect any additional updates during debounce period
+			debounceLoop:
+				for {
+					select {
+					case <-evtTrigger.updateSubsCh:
+						updateCount++
+						// Reset timer for additional 500ms when new updates arrive
+						if !debounceTimer.Stop() {
+							<-debounceTimer.C
+						}
+						debounceTimer.Reset(500 * time.Millisecond)
+					case <-debounceTimer.C:
+						// Debounce period completed, proceed with update
+						break debounceLoop
+					case <-ctx.Done():
+						debounceTimer.Stop()
+						evtTrigger.logger.Info("context cancelled during debounce, stopping event trigger")
+						return
+					case <-evtTrigger.done:
+						debounceTimer.Stop()
+						evtTrigger.logger.Info("event trigger shutdown signal received during debounce")
+						return
+					}
+				}
+
+				evtTrigger.logger.Info("debounce completed - rebuilding subscriptions",
+					"batched_updates", updateCount)
+
+				// Build new filter queries based on current tasks
+				newQueries := evtTrigger.buildFilterQueries()
+
+				evtTrigger.subsMutex.Lock()
+				// Clean up old subscriptions
+				for _, subInfo := range evtTrigger.subscriptions {
+					subInfo.subscription.Unsubscribe()
+				}
+				evtTrigger.subscriptions = make([]SubscriptionInfo, 0, len(newQueries))
+
+				if len(newQueries) == 0 {
+					evtTrigger.logger.Info("no tasks require monitoring - all subscriptions stopped")
+				} else {
+					// Create new subscriptions
+					for i, queryInfo := range newQueries {
+						// Use timeout context to prevent indefinite blocking during updates
+						timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+						sub, subErr := evtTrigger.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
+						cancel() // Clean up timeout context
+						if subErr != nil {
+							evtTrigger.logger.Error("failed to create new subscription during update", "index", i, "error", subErr)
+							continue
+						}
+
+						evtTrigger.subscriptions = append(evtTrigger.subscriptions, SubscriptionInfo{
+							subscription: sub,
+							query:        queryInfo.Query,
+							description:  queryInfo.Description,
+						})
+
+						evtTrigger.logger.Info("created new subscription during update",
+							"index", i,
+							"description", queryInfo.Description,
+							"addresses", queryInfo.Query.Addresses,
+							"topics", queryInfo.Query.Topics)
+
+						// Start error monitoring for new subscription
+						go func(idx int, s ethereum.Subscription, d string) {
+							errSub := <-s.Err()
+							if errSub != nil {
+								errorCh <- errSub
+							}
+						}(i, sub, queryInfo.Description)
+					}
+				}
+				evtTrigger.subsMutex.Unlock()
+
+				evtTrigger.logger.Info("subscription update completed", "active_subscriptions", len(newQueries))
 			case err := <-errorCh:
 				if err == nil {
 					continue
@@ -220,7 +324,10 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 
 				// Create new subscriptions
 				for i, queryInfo := range newQueries {
-					sub, subErr := evtTrigger.wsEthClient.SubscribeFilterLogs(context.Background(), queryInfo.Query, logs)
+					// Use timeout context to prevent indefinite blocking during reconnection
+					timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					sub, subErr := evtTrigger.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
+					cancel() // Clean up timeout context
 					if subErr != nil {
 						evtTrigger.logger.Error("failed to recreate subscription", "index", i, "error", subErr)
 						continue

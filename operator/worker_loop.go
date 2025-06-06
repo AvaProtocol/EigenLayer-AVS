@@ -103,7 +103,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		}),
 	)
 	if err != nil {
-		o.logger.Error("Failed to create cleanup job for block tasks map", "error", err)
+		o.logger.Error("Failed to create cleanup job for block tasks map", "error", err.Error())
 	}
 
 	// Wrap PingServer to handle errors gracefully without stack traces
@@ -348,6 +348,11 @@ func (o *Operator) StreamMessages() {
 
 			MonotonicClock: epoch,
 			Signature:      blsSignature.Serialize(),
+			Capabilities: &avspb.SyncMessagesReq_Capabilities{
+				EventMonitoring: true, // This operator supports event monitoring
+				BlockMonitoring: true, // This operator supports block monitoring
+				TimeMonitoring:  true, // This operator supports time/cron monitoring
+			},
 		}
 
 		stream, err := o.nodeRpcClient.SyncMessages(ctx, req)

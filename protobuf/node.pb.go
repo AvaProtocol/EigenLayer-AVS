@@ -231,11 +231,12 @@ func (x *CheckinResp) GetUpdatedAt() *timestamppb.Timestamp {
 }
 
 type SyncMessagesReq struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Address        string                 `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
-	Signature      []byte                 `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
-	MonotonicClock int64                  `protobuf:"varint,4,opt,name=monotonic_clock,json=monotonicClock,proto3" json:"monotonic_clock,omitempty"`
+	state          protoimpl.MessageState        `protogen:"open.v1"`
+	Id             string                        `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Address        string                        `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
+	Signature      []byte                        `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
+	MonotonicClock int64                         `protobuf:"varint,4,opt,name=monotonic_clock,json=monotonicClock,proto3" json:"monotonic_clock,omitempty"`
+	Capabilities   *SyncMessagesReq_Capabilities `protobuf:"bytes,5,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -296,6 +297,13 @@ func (x *SyncMessagesReq) GetMonotonicClock() int64 {
 		return x.MonotonicClock
 	}
 	return 0
+}
+
+func (x *SyncMessagesReq) GetCapabilities() *SyncMessagesReq_Capabilities {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
 }
 
 type SyncMessagesResp struct {
@@ -672,6 +680,67 @@ func (x *Checkin_Status) GetLastHeartbeat() *timestamppb.Timestamp {
 	return nil
 }
 
+// Operator capabilities - what trigger types this operator supports
+type SyncMessagesReq_Capabilities struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	EventMonitoring bool                   `protobuf:"varint,1,opt,name=event_monitoring,json=eventMonitoring,proto3" json:"event_monitoring,omitempty"` // Supports event trigger monitoring
+	BlockMonitoring bool                   `protobuf:"varint,2,opt,name=block_monitoring,json=blockMonitoring,proto3" json:"block_monitoring,omitempty"` // Supports block trigger monitoring
+	TimeMonitoring  bool                   `protobuf:"varint,3,opt,name=time_monitoring,json=timeMonitoring,proto3" json:"time_monitoring,omitempty"`    // Supports time/cron trigger monitoring
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *SyncMessagesReq_Capabilities) Reset() {
+	*x = SyncMessagesReq_Capabilities{}
+	mi := &file_node_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SyncMessagesReq_Capabilities) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncMessagesReq_Capabilities) ProtoMessage() {}
+
+func (x *SyncMessagesReq_Capabilities) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncMessagesReq_Capabilities.ProtoReflect.Descriptor instead.
+func (*SyncMessagesReq_Capabilities) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{2, 0}
+}
+
+func (x *SyncMessagesReq_Capabilities) GetEventMonitoring() bool {
+	if x != nil {
+		return x.EventMonitoring
+	}
+	return false
+}
+
+func (x *SyncMessagesReq_Capabilities) GetBlockMonitoring() bool {
+	if x != nil {
+		return x.BlockMonitoring
+	}
+	return false
+}
+
+func (x *SyncMessagesReq_Capabilities) GetTimeMonitoring() bool {
+	if x != nil {
+		return x.TimeMonitoring
+	}
+	return false
+}
+
 type SyncMessagesResp_TaskMetadata struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	TaskId string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -685,7 +754,7 @@ type SyncMessagesResp_TaskMetadata struct {
 
 func (x *SyncMessagesResp_TaskMetadata) Reset() {
 	*x = SyncMessagesResp_TaskMetadata{}
-	mi := &file_node_proto_msgTypes[8]
+	mi := &file_node_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -697,7 +766,7 @@ func (x *SyncMessagesResp_TaskMetadata) String() string {
 func (*SyncMessagesResp_TaskMetadata) ProtoMessage() {}
 
 func (x *SyncMessagesResp_TaskMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[8]
+	mi := &file_node_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -767,12 +836,17 @@ const file_node_proto_rawDesc = "" +
 	"\x0elast_heartbeat\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\rlastHeartbeat\"H\n" +
 	"\vCheckinResp\x129\n" +
 	"\n" +
-	"updated_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\x82\x01\n" +
+	"updated_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\xe0\x02\n" +
 	"\x0fSyncMessagesReq\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x1c\n" +
 	"\tsignature\x18\x03 \x01(\fR\tsignature\x12'\n" +
-	"\x0fmonotonic_clock\x18\x04 \x01(\x03R\x0emonotonicClock\"\xad\x02\n" +
+	"\x0fmonotonic_clock\x18\x04 \x01(\x03R\x0emonotonicClock\x12L\n" +
+	"\fcapabilities\x18\x05 \x01(\v2(.aggregator.SyncMessagesReq.CapabilitiesR\fcapabilities\x1a\x8d\x01\n" +
+	"\fCapabilities\x12)\n" +
+	"\x10event_monitoring\x18\x01 \x01(\bR\x0feventMonitoring\x12)\n" +
+	"\x10block_monitoring\x18\x02 \x01(\bR\x0fblockMonitoring\x12'\n" +
+	"\x0ftime_monitoring\x18\x03 \x01(\bR\x0etimeMonitoring\"\xad\x02\n" +
 	"\x10SyncMessagesResp\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12%\n" +
 	"\x02op\x18\x02 \x01(\x0e2\x15.aggregator.MessageOpR\x02op\x12N\n" +
@@ -827,7 +901,7 @@ func file_node_proto_rawDescGZIP() []byte {
 }
 
 var file_node_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_node_proto_goTypes = []any{
 	(MessageOp)(0),                        // 0: aggregator.MessageOp
 	(*Checkin)(nil),                       // 1: aggregator.Checkin
@@ -838,44 +912,46 @@ var file_node_proto_goTypes = []any{
 	(*NotifyTriggersReq)(nil),             // 6: aggregator.NotifyTriggersReq
 	(*NotifyTriggersResp)(nil),            // 7: aggregator.NotifyTriggersResp
 	(*Checkin_Status)(nil),                // 8: aggregator.Checkin.Status
-	(*SyncMessagesResp_TaskMetadata)(nil), // 9: aggregator.SyncMessagesResp.TaskMetadata
-	(*timestamppb.Timestamp)(nil),         // 10: google.protobuf.Timestamp
-	(TriggerType)(0),                      // 11: aggregator.TriggerType
-	(*BlockTrigger_Output)(nil),           // 12: aggregator.BlockTrigger.Output
-	(*FixedTimeTrigger_Output)(nil),       // 13: aggregator.FixedTimeTrigger.Output
-	(*CronTrigger_Output)(nil),            // 14: aggregator.CronTrigger.Output
-	(*EventTrigger_Output)(nil),           // 15: aggregator.EventTrigger.Output
-	(*ManualTrigger_Output)(nil),          // 16: aggregator.ManualTrigger.Output
-	(*TaskTrigger)(nil),                   // 17: aggregator.TaskTrigger
-	(*wrapperspb.BoolValue)(nil),          // 18: google.protobuf.BoolValue
+	(*SyncMessagesReq_Capabilities)(nil),  // 9: aggregator.SyncMessagesReq.Capabilities
+	(*SyncMessagesResp_TaskMetadata)(nil), // 10: aggregator.SyncMessagesResp.TaskMetadata
+	(*timestamppb.Timestamp)(nil),         // 11: google.protobuf.Timestamp
+	(TriggerType)(0),                      // 12: aggregator.TriggerType
+	(*BlockTrigger_Output)(nil),           // 13: aggregator.BlockTrigger.Output
+	(*FixedTimeTrigger_Output)(nil),       // 14: aggregator.FixedTimeTrigger.Output
+	(*CronTrigger_Output)(nil),            // 15: aggregator.CronTrigger.Output
+	(*EventTrigger_Output)(nil),           // 16: aggregator.EventTrigger.Output
+	(*ManualTrigger_Output)(nil),          // 17: aggregator.ManualTrigger.Output
+	(*TaskTrigger)(nil),                   // 18: aggregator.TaskTrigger
+	(*wrapperspb.BoolValue)(nil),          // 19: google.protobuf.BoolValue
 }
 var file_node_proto_depIdxs = []int32{
 	8,  // 0: aggregator.Checkin.status:type_name -> aggregator.Checkin.Status
-	10, // 1: aggregator.CheckinResp.updated_at:type_name -> google.protobuf.Timestamp
-	0,  // 2: aggregator.SyncMessagesResp.op:type_name -> aggregator.MessageOp
-	9,  // 3: aggregator.SyncMessagesResp.task_metadata:type_name -> aggregator.SyncMessagesResp.TaskMetadata
-	11, // 4: aggregator.NotifyTriggersReq.trigger_type:type_name -> aggregator.TriggerType
-	12, // 5: aggregator.NotifyTriggersReq.block_trigger:type_name -> aggregator.BlockTrigger.Output
-	13, // 6: aggregator.NotifyTriggersReq.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
-	14, // 7: aggregator.NotifyTriggersReq.cron_trigger:type_name -> aggregator.CronTrigger.Output
-	15, // 8: aggregator.NotifyTriggersReq.event_trigger:type_name -> aggregator.EventTrigger.Output
-	16, // 9: aggregator.NotifyTriggersReq.manual_trigger:type_name -> aggregator.ManualTrigger.Output
-	10, // 10: aggregator.NotifyTriggersResp.updated_at:type_name -> google.protobuf.Timestamp
-	10, // 11: aggregator.Checkin.Status.last_heartbeat:type_name -> google.protobuf.Timestamp
-	17, // 12: aggregator.SyncMessagesResp.TaskMetadata.trigger:type_name -> aggregator.TaskTrigger
-	1,  // 13: aggregator.Node.Ping:input_type -> aggregator.Checkin
-	3,  // 14: aggregator.Node.SyncMessages:input_type -> aggregator.SyncMessagesReq
-	5,  // 15: aggregator.Node.Ack:input_type -> aggregator.AckMessageReq
-	6,  // 16: aggregator.Node.NotifyTriggers:input_type -> aggregator.NotifyTriggersReq
-	2,  // 17: aggregator.Node.Ping:output_type -> aggregator.CheckinResp
-	4,  // 18: aggregator.Node.SyncMessages:output_type -> aggregator.SyncMessagesResp
-	18, // 19: aggregator.Node.Ack:output_type -> google.protobuf.BoolValue
-	7,  // 20: aggregator.Node.NotifyTriggers:output_type -> aggregator.NotifyTriggersResp
-	17, // [17:21] is the sub-list for method output_type
-	13, // [13:17] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	11, // 1: aggregator.CheckinResp.updated_at:type_name -> google.protobuf.Timestamp
+	9,  // 2: aggregator.SyncMessagesReq.capabilities:type_name -> aggregator.SyncMessagesReq.Capabilities
+	0,  // 3: aggregator.SyncMessagesResp.op:type_name -> aggregator.MessageOp
+	10, // 4: aggregator.SyncMessagesResp.task_metadata:type_name -> aggregator.SyncMessagesResp.TaskMetadata
+	12, // 5: aggregator.NotifyTriggersReq.trigger_type:type_name -> aggregator.TriggerType
+	13, // 6: aggregator.NotifyTriggersReq.block_trigger:type_name -> aggregator.BlockTrigger.Output
+	14, // 7: aggregator.NotifyTriggersReq.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
+	15, // 8: aggregator.NotifyTriggersReq.cron_trigger:type_name -> aggregator.CronTrigger.Output
+	16, // 9: aggregator.NotifyTriggersReq.event_trigger:type_name -> aggregator.EventTrigger.Output
+	17, // 10: aggregator.NotifyTriggersReq.manual_trigger:type_name -> aggregator.ManualTrigger.Output
+	11, // 11: aggregator.NotifyTriggersResp.updated_at:type_name -> google.protobuf.Timestamp
+	11, // 12: aggregator.Checkin.Status.last_heartbeat:type_name -> google.protobuf.Timestamp
+	18, // 13: aggregator.SyncMessagesResp.TaskMetadata.trigger:type_name -> aggregator.TaskTrigger
+	1,  // 14: aggregator.Node.Ping:input_type -> aggregator.Checkin
+	3,  // 15: aggregator.Node.SyncMessages:input_type -> aggregator.SyncMessagesReq
+	5,  // 16: aggregator.Node.Ack:input_type -> aggregator.AckMessageReq
+	6,  // 17: aggregator.Node.NotifyTriggers:input_type -> aggregator.NotifyTriggersReq
+	2,  // 18: aggregator.Node.Ping:output_type -> aggregator.CheckinResp
+	4,  // 19: aggregator.Node.SyncMessages:output_type -> aggregator.SyncMessagesResp
+	19, // 20: aggregator.Node.Ack:output_type -> google.protobuf.BoolValue
+	7,  // 21: aggregator.Node.NotifyTriggers:output_type -> aggregator.NotifyTriggersResp
+	18, // [18:22] is the sub-list for method output_type
+	14, // [14:18] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_node_proto_init() }
@@ -897,7 +973,7 @@ func file_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
