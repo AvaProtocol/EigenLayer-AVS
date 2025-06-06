@@ -131,7 +131,7 @@ func NewAggregator(c *config.Config) (*Aggregator, error) {
 			c.Logger.Error("Cannot create sdk clients", "err", err)
 			panic(err)
 		}
-		c.Logger.Info("create avsrrader and client", "avsReader", avsReader, "clients", clients)
+		c.Logger.Info("create avs reader and client", "avsReader", avsReader, "clients", clients)
 	}()
 
 	// TODO: These are erroring out and we don't need them now yet
@@ -243,7 +243,8 @@ func (agg *Aggregator) migrate() {
 	agg.backup = backup.NewService(agg.logger, agg.db, agg.config.BackupDir)
 	agg.migrator = migrator.NewMigrator(agg.db, agg.backup, migrations.Migrations)
 	if err := agg.migrator.Run(); err != nil {
-		agg.logger.Fatalf("failed to run migrations", "error", err)
+		agg.logger.Error("Failed to run database migrations", "error", err.Error())
+		panic("database migration failed - cannot continue")
 	}
 }
 
@@ -254,7 +255,8 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 
 	agg.logger.Infof("Initialize Storage")
 	if err := agg.initDB(ctx); err != nil {
-		agg.logger.Fatalf("failed to initialize storage", "error", err)
+		agg.logger.Error("Failed to initialize database storage", "error", err.Error())
+		panic("database initialization failed - cannot continue")
 	}
 
 	agg.migrate()

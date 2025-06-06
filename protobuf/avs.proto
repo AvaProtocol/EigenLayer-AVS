@@ -62,7 +62,7 @@ message GetTokenMetadataResp {
 }
 
 // ============================================================================
-// EXISTING MESSAGES
+// CLIENT-FACING MESSAGES
 // ============================================================================
 
 message IdReq {
@@ -124,38 +124,42 @@ message BlockTrigger {
   Config config = 1;
 }
 
-// EventTrigger is a filter to match on an event. It's adhoc logic expression re-present in an array to match an ethereum event
+// EventTrigger monitors blockchain events using direct RPC filter queries.
+// Clients provide an array of ethereum.FilterQuery structures that map directly to RPC calls.
+// This approach eliminates parsing overhead and provides maximum flexibility and performance.
 message EventTrigger {
-  message Matcher {
-    // the type of Filter we support, right now, we support below value for 
-    //  - topics:
-    //  - address:
-     string type = 1;
-
-    // the payload of the type data to be mached. Each type will have different semantic meaning on how to match
-    // Given type=topics`. This value is the topic array, for every non null element of the array we perform an equal check
-    // If all are equal, the filter resolve to true
+  // Query represents a single ethereum.FilterQuery for RPC filtering
+  message Query {
+    // Contract addresses to filter events from. Empty means any contract.
+    repeated string addresses = 1;
+    
+    // Topic filters structured as a 2D array matching ethereum.FilterQuery.Topics
+    // Each inner array represents a topic position (topic[0], topic[1], topic[2], etc.)
+    // Each string in the inner array represents a valid value for that topic position
+    // Empty inner array means "any value" for that topic position
     // 
-    // Example:
-    // To find all ERC20 transfer event into or out to wallet 0x5DD596C901987A2b28C38A9C1DfBf86fFFc15d77 we can do
-    // value = [
-    //   [
-    //     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-    //     "0x5DD596C901987A2b28C38A9C1DfBf86fFFc15d77", // tx out
-    //   ],
-    //   [
-    //     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-    //     null,
-    //     "0x5DD596C901987A2b28C38A9C1DfBf86fFFc15d77" // tx in
-    //   ],
+    // Example for Transfer events FROM or TO a specific address:
+    // [
+    //   ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"], // Transfer signature
+    //   ["0x000000000000000000000000fE66125343Aabda4A330DA667431eC1Acb7BbDA9"], // FROM address
+    //   []  // Any TO address
     // ]
-    repeated string value = 2;
+    repeated Topics topics = 2;
+    
+    // Maximum number of events this query should process per block/time window
+    // Used for safety - if exceeded, operator notifies aggregator to cancel task
+    optional uint32 max_events_per_block = 3;
+  }
+  
+  // Topics represents a single topic position filter (e.g., topic[0], topic[1], etc.)
+  message Topics {
+    repeated string values = 1;  // Valid values for this topic position
   }
 
   message Config {
-    // an array of filter to be mach, as soon as any element of the array mach, the trigger is fired.
-    repeated Matcher matcher = 1;
-    string expression = 2;
+    // Array of RPC filter queries. Each query creates a separate subscription.
+    // For FROM-OR-TO scenarios, provide two queries: one for FROM, one for TO.
+    repeated Query queries = 1;
   }
   
   message Output {
@@ -893,6 +897,8 @@ service Aggregator {
   
   // GetTokenMetadata allows looking up ERC20 token metadata by contract address
   rpc GetTokenMetadata(GetTokenMetadataReq) returns (GetTokenMetadataResp);
+  
+
 }
 
 // Request message for GetWorkflowCount

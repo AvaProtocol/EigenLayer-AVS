@@ -204,11 +204,8 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 		eventTrigger := trigger.GetEvent()
 		if eventTrigger != nil && eventTrigger.Config != nil {
 			// Extract config fields from EventTrigger.Config
-			if eventTrigger.Config.Expression != "" {
-				triggerConfig["expression"] = eventTrigger.Config.Expression
-			}
-			if len(eventTrigger.Config.Matcher) > 0 {
-				triggerConfig["matcherList"] = eventTrigger.Config.Matcher
+			if len(eventTrigger.Config.Queries) > 0 {
+				triggerConfig["queries"] = eventTrigger.Config.Queries
 			}
 		}
 	case *avsproto.TaskTrigger_Block:

@@ -106,6 +106,12 @@ type OperatorConfig struct {
 	EnabledFeatures struct {
 		EventTrigger bool `yaml:"event_trigger"`
 	} `yaml:"enabled_features"`
+
+	// Event processing safety limits - protect operator from overload
+	EventSafety struct {
+		MaxTotalEventsPerBlock    uint32 `yaml:"max_total_events_per_block"`     // Across all queries (default: 1000)
+		MaxEventsPerQueryPerBlock uint32 `yaml:"max_events_per_query_per_block"` // Per individual query (default: 500)
+	} `yaml:"event_safety"`
 }
 
 type Operator struct {
@@ -670,6 +676,22 @@ func (c *OperatorConfig) GetPublicMetricPort() int32 {
 
 	c.PublicMetricsPort = int32(portNum)
 	return c.PublicMetricsPort
+}
+
+// GetMaxTotalEventsPerBlock returns the configured limit with default fallback
+func (c *OperatorConfig) GetMaxTotalEventsPerBlock() uint32 {
+	if c.EventSafety.MaxTotalEventsPerBlock > 0 {
+		return c.EventSafety.MaxTotalEventsPerBlock
+	}
+	return 1000 // Default: 1000 events per block across all queries
+}
+
+// GetMaxEventsPerQueryPerBlock returns the configured limit with default fallback
+func (c *OperatorConfig) GetMaxEventsPerQueryPerBlock() uint32 {
+	if c.EventSafety.MaxEventsPerQueryPerBlock > 0 {
+		return c.EventSafety.MaxEventsPerQueryPerBlock
+	}
+	return 500 // Default: 500 events per query per block
 }
 
 func (o *Operator) GetSignature(ctx context.Context, message []byte) (*blscrypto.Signature, error) {

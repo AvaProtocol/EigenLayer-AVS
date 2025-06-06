@@ -231,11 +231,12 @@ func (x *CheckinResp) GetUpdatedAt() *timestamppb.Timestamp {
 }
 
 type SyncMessagesReq struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Address        string                 `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
-	Signature      []byte                 `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
-	MonotonicClock int64                  `protobuf:"varint,4,opt,name=monotonic_clock,json=monotonicClock,proto3" json:"monotonic_clock,omitempty"`
+	state          protoimpl.MessageState        `protogen:"open.v1"`
+	Id             string                        `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Address        string                        `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
+	Signature      []byte                        `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
+	MonotonicClock int64                         `protobuf:"varint,4,opt,name=monotonic_clock,json=monotonicClock,proto3" json:"monotonic_clock,omitempty"`
+	Capabilities   *SyncMessagesReq_Capabilities `protobuf:"bytes,5,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -296,6 +297,13 @@ func (x *SyncMessagesReq) GetMonotonicClock() int64 {
 		return x.MonotonicClock
 	}
 	return 0
+}
+
+func (x *SyncMessagesReq) GetCapabilities() *SyncMessagesReq_Capabilities {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
 }
 
 type SyncMessagesResp struct {
@@ -612,6 +620,169 @@ func (x *NotifyTriggersResp) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+// EventOverloadAlert is sent by operators to aggregator when event query processing
+// exceeds safety limits, triggering task cancellation and Sentry alerts
+type EventOverloadAlert struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	TaskId          string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`                            // Task ID that triggered the overload
+	OperatorAddress string                 `protobuf:"bytes,2,opt,name=operator_address,json=operatorAddress,proto3" json:"operator_address,omitempty"` // Address of the operator reporting the overload
+	BlockNumber     uint64                 `protobuf:"varint,3,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`            // Block number where overload was detected
+	EventsDetected  uint32                 `protobuf:"varint,4,opt,name=events_detected,json=eventsDetected,proto3" json:"events_detected,omitempty"`   // Number of events that triggered the alert
+	SafetyLimit     uint32                 `protobuf:"varint,5,opt,name=safety_limit,json=safetyLimit,proto3" json:"safety_limit,omitempty"`            // The safety limit that was exceeded
+	QueryIndex      string                 `protobuf:"bytes,6,opt,name=query_index,json=queryIndex,proto3" json:"query_index,omitempty"`                // Index/identifier of the specific query that overloaded
+	Timestamp       uint64                 `protobuf:"varint,7,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                   // Timestamp when overload was detected (milliseconds)
+	Details         string                 `protobuf:"bytes,8,opt,name=details,proto3" json:"details,omitempty"`                                        // Additional context about the overload
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *EventOverloadAlert) Reset() {
+	*x = EventOverloadAlert{}
+	mi := &file_node_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EventOverloadAlert) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EventOverloadAlert) ProtoMessage() {}
+
+func (x *EventOverloadAlert) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EventOverloadAlert.ProtoReflect.Descriptor instead.
+func (*EventOverloadAlert) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *EventOverloadAlert) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *EventOverloadAlert) GetOperatorAddress() string {
+	if x != nil {
+		return x.OperatorAddress
+	}
+	return ""
+}
+
+func (x *EventOverloadAlert) GetBlockNumber() uint64 {
+	if x != nil {
+		return x.BlockNumber
+	}
+	return 0
+}
+
+func (x *EventOverloadAlert) GetEventsDetected() uint32 {
+	if x != nil {
+		return x.EventsDetected
+	}
+	return 0
+}
+
+func (x *EventOverloadAlert) GetSafetyLimit() uint32 {
+	if x != nil {
+		return x.SafetyLimit
+	}
+	return 0
+}
+
+func (x *EventOverloadAlert) GetQueryIndex() string {
+	if x != nil {
+		return x.QueryIndex
+	}
+	return ""
+}
+
+func (x *EventOverloadAlert) GetTimestamp() uint64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *EventOverloadAlert) GetDetails() string {
+	if x != nil {
+		return x.Details
+	}
+	return ""
+}
+
+// EventOverloadResponse is the aggregator's response to an overload alert
+type EventOverloadResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskCancelled bool                   `protobuf:"varint,1,opt,name=task_cancelled,json=taskCancelled,proto3" json:"task_cancelled,omitempty"` // Whether the task was cancelled due to overload
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`                                   // Response message/reason
+	Timestamp     uint64                 `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                              // Response timestamp (milliseconds)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EventOverloadResponse) Reset() {
+	*x = EventOverloadResponse{}
+	mi := &file_node_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EventOverloadResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EventOverloadResponse) ProtoMessage() {}
+
+func (x *EventOverloadResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EventOverloadResponse.ProtoReflect.Descriptor instead.
+func (*EventOverloadResponse) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *EventOverloadResponse) GetTaskCancelled() bool {
+	if x != nil {
+		return x.TaskCancelled
+	}
+	return false
+}
+
+func (x *EventOverloadResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *EventOverloadResponse) GetTimestamp() uint64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
 type Checkin_Status struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Uptime        int64                  `protobuf:"varint,1,opt,name=uptime,proto3" json:"uptime,omitempty"`
@@ -623,7 +794,7 @@ type Checkin_Status struct {
 
 func (x *Checkin_Status) Reset() {
 	*x = Checkin_Status{}
-	mi := &file_node_proto_msgTypes[7]
+	mi := &file_node_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -635,7 +806,7 @@ func (x *Checkin_Status) String() string {
 func (*Checkin_Status) ProtoMessage() {}
 
 func (x *Checkin_Status) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[7]
+	mi := &file_node_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -672,6 +843,67 @@ func (x *Checkin_Status) GetLastHeartbeat() *timestamppb.Timestamp {
 	return nil
 }
 
+// Operator capabilities - what trigger types this operator supports
+type SyncMessagesReq_Capabilities struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	EventMonitoring bool                   `protobuf:"varint,1,opt,name=event_monitoring,json=eventMonitoring,proto3" json:"event_monitoring,omitempty"` // Supports event trigger monitoring
+	BlockMonitoring bool                   `protobuf:"varint,2,opt,name=block_monitoring,json=blockMonitoring,proto3" json:"block_monitoring,omitempty"` // Supports block trigger monitoring
+	TimeMonitoring  bool                   `protobuf:"varint,3,opt,name=time_monitoring,json=timeMonitoring,proto3" json:"time_monitoring,omitempty"`    // Supports time/cron trigger monitoring
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *SyncMessagesReq_Capabilities) Reset() {
+	*x = SyncMessagesReq_Capabilities{}
+	mi := &file_node_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SyncMessagesReq_Capabilities) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncMessagesReq_Capabilities) ProtoMessage() {}
+
+func (x *SyncMessagesReq_Capabilities) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncMessagesReq_Capabilities.ProtoReflect.Descriptor instead.
+func (*SyncMessagesReq_Capabilities) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{2, 0}
+}
+
+func (x *SyncMessagesReq_Capabilities) GetEventMonitoring() bool {
+	if x != nil {
+		return x.EventMonitoring
+	}
+	return false
+}
+
+func (x *SyncMessagesReq_Capabilities) GetBlockMonitoring() bool {
+	if x != nil {
+		return x.BlockMonitoring
+	}
+	return false
+}
+
+func (x *SyncMessagesReq_Capabilities) GetTimeMonitoring() bool {
+	if x != nil {
+		return x.TimeMonitoring
+	}
+	return false
+}
+
 type SyncMessagesResp_TaskMetadata struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	TaskId string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
@@ -685,7 +917,7 @@ type SyncMessagesResp_TaskMetadata struct {
 
 func (x *SyncMessagesResp_TaskMetadata) Reset() {
 	*x = SyncMessagesResp_TaskMetadata{}
-	mi := &file_node_proto_msgTypes[8]
+	mi := &file_node_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -697,7 +929,7 @@ func (x *SyncMessagesResp_TaskMetadata) String() string {
 func (*SyncMessagesResp_TaskMetadata) ProtoMessage() {}
 
 func (x *SyncMessagesResp_TaskMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[8]
+	mi := &file_node_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -767,12 +999,17 @@ const file_node_proto_rawDesc = "" +
 	"\x0elast_heartbeat\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\rlastHeartbeat\"H\n" +
 	"\vCheckinResp\x129\n" +
 	"\n" +
-	"updated_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\x82\x01\n" +
+	"updated_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\xe0\x02\n" +
 	"\x0fSyncMessagesReq\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x1c\n" +
 	"\tsignature\x18\x03 \x01(\fR\tsignature\x12'\n" +
-	"\x0fmonotonic_clock\x18\x04 \x01(\x03R\x0emonotonicClock\"\xad\x02\n" +
+	"\x0fmonotonic_clock\x18\x04 \x01(\x03R\x0emonotonicClock\x12L\n" +
+	"\fcapabilities\x18\x05 \x01(\v2(.aggregator.SyncMessagesReq.CapabilitiesR\fcapabilities\x1a\x8d\x01\n" +
+	"\fCapabilities\x12)\n" +
+	"\x10event_monitoring\x18\x01 \x01(\bR\x0feventMonitoring\x12)\n" +
+	"\x10block_monitoring\x18\x02 \x01(\bR\x0fblockMonitoring\x12'\n" +
+	"\x0ftime_monitoring\x18\x03 \x01(\bR\x0etimeMonitoring\"\xad\x02\n" +
 	"\x10SyncMessagesResp\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12%\n" +
 	"\x02op\x18\x02 \x01(\x0e2\x15.aggregator.MessageOpR\x02op\x12N\n" +
@@ -798,7 +1035,21 @@ const file_node_proto_rawDesc = "" +
 	"\x0etrigger_output\"O\n" +
 	"\x12NotifyTriggersResp\x129\n" +
 	"\n" +
-	"updated_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt*a\n" +
+	"updated_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\xa0\x02\n" +
+	"\x12EventOverloadAlert\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12)\n" +
+	"\x10operator_address\x18\x02 \x01(\tR\x0foperatorAddress\x12!\n" +
+	"\fblock_number\x18\x03 \x01(\x04R\vblockNumber\x12'\n" +
+	"\x0fevents_detected\x18\x04 \x01(\rR\x0eeventsDetected\x12!\n" +
+	"\fsafety_limit\x18\x05 \x01(\rR\vsafetyLimit\x12\x1f\n" +
+	"\vquery_index\x18\x06 \x01(\tR\n" +
+	"queryIndex\x12\x1c\n" +
+	"\ttimestamp\x18\a \x01(\x04R\ttimestamp\x12\x18\n" +
+	"\adetails\x18\b \x01(\tR\adetails\"v\n" +
+	"\x15EventOverloadResponse\x12%\n" +
+	"\x0etask_cancelled\x18\x01 \x01(\bR\rtaskCancelled\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1c\n" +
+	"\ttimestamp\x18\x03 \x01(\x04R\ttimestamp*a\n" +
 	"\tMessageOp\x12\t\n" +
 	"\x05Unset\x10\x00\x12\x16\n" +
 	"\x12MonitorTaskTrigger\x10\x01\x12\x0e\n" +
@@ -806,12 +1057,13 @@ const file_node_proto_rawDesc = "" +
 	"CancelTask\x10\x02\x12\x0e\n" +
 	"\n" +
 	"DeleteTask\x10\x03\x12\x11\n" +
-	"\rCompletedTask\x10\x042\xa0\x02\n" +
+	"\rCompletedTask\x10\x042\xfa\x02\n" +
 	"\x04Node\x126\n" +
 	"\x04Ping\x12\x13.aggregator.Checkin\x1a\x17.aggregator.CheckinResp\"\x00\x12M\n" +
 	"\fSyncMessages\x12\x1b.aggregator.SyncMessagesReq\x1a\x1c.aggregator.SyncMessagesResp\"\x000\x01\x12>\n" +
 	"\x03Ack\x12\x19.aggregator.AckMessageReq\x1a\x1a.google.protobuf.BoolValue\"\x00\x12Q\n" +
-	"\x0eNotifyTriggers\x12\x1d.aggregator.NotifyTriggersReq\x1a\x1e.aggregator.NotifyTriggersResp\"\x00B\fZ\n" +
+	"\x0eNotifyTriggers\x12\x1d.aggregator.NotifyTriggersReq\x1a\x1e.aggregator.NotifyTriggersResp\"\x00\x12X\n" +
+	"\x13ReportEventOverload\x12\x1e.aggregator.EventOverloadAlert\x1a!.aggregator.EventOverloadResponseB\fZ\n" +
 	"./avsprotob\x06proto3"
 
 var (
@@ -827,7 +1079,7 @@ func file_node_proto_rawDescGZIP() []byte {
 }
 
 var file_node_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_node_proto_goTypes = []any{
 	(MessageOp)(0),                        // 0: aggregator.MessageOp
 	(*Checkin)(nil),                       // 1: aggregator.Checkin
@@ -837,45 +1089,51 @@ var file_node_proto_goTypes = []any{
 	(*AckMessageReq)(nil),                 // 5: aggregator.AckMessageReq
 	(*NotifyTriggersReq)(nil),             // 6: aggregator.NotifyTriggersReq
 	(*NotifyTriggersResp)(nil),            // 7: aggregator.NotifyTriggersResp
-	(*Checkin_Status)(nil),                // 8: aggregator.Checkin.Status
-	(*SyncMessagesResp_TaskMetadata)(nil), // 9: aggregator.SyncMessagesResp.TaskMetadata
-	(*timestamppb.Timestamp)(nil),         // 10: google.protobuf.Timestamp
-	(TriggerType)(0),                      // 11: aggregator.TriggerType
-	(*BlockTrigger_Output)(nil),           // 12: aggregator.BlockTrigger.Output
-	(*FixedTimeTrigger_Output)(nil),       // 13: aggregator.FixedTimeTrigger.Output
-	(*CronTrigger_Output)(nil),            // 14: aggregator.CronTrigger.Output
-	(*EventTrigger_Output)(nil),           // 15: aggregator.EventTrigger.Output
-	(*ManualTrigger_Output)(nil),          // 16: aggregator.ManualTrigger.Output
-	(*TaskTrigger)(nil),                   // 17: aggregator.TaskTrigger
-	(*wrapperspb.BoolValue)(nil),          // 18: google.protobuf.BoolValue
+	(*EventOverloadAlert)(nil),            // 8: aggregator.EventOverloadAlert
+	(*EventOverloadResponse)(nil),         // 9: aggregator.EventOverloadResponse
+	(*Checkin_Status)(nil),                // 10: aggregator.Checkin.Status
+	(*SyncMessagesReq_Capabilities)(nil),  // 11: aggregator.SyncMessagesReq.Capabilities
+	(*SyncMessagesResp_TaskMetadata)(nil), // 12: aggregator.SyncMessagesResp.TaskMetadata
+	(*timestamppb.Timestamp)(nil),         // 13: google.protobuf.Timestamp
+	(TriggerType)(0),                      // 14: aggregator.TriggerType
+	(*BlockTrigger_Output)(nil),           // 15: aggregator.BlockTrigger.Output
+	(*FixedTimeTrigger_Output)(nil),       // 16: aggregator.FixedTimeTrigger.Output
+	(*CronTrigger_Output)(nil),            // 17: aggregator.CronTrigger.Output
+	(*EventTrigger_Output)(nil),           // 18: aggregator.EventTrigger.Output
+	(*ManualTrigger_Output)(nil),          // 19: aggregator.ManualTrigger.Output
+	(*TaskTrigger)(nil),                   // 20: aggregator.TaskTrigger
+	(*wrapperspb.BoolValue)(nil),          // 21: google.protobuf.BoolValue
 }
 var file_node_proto_depIdxs = []int32{
-	8,  // 0: aggregator.Checkin.status:type_name -> aggregator.Checkin.Status
-	10, // 1: aggregator.CheckinResp.updated_at:type_name -> google.protobuf.Timestamp
-	0,  // 2: aggregator.SyncMessagesResp.op:type_name -> aggregator.MessageOp
-	9,  // 3: aggregator.SyncMessagesResp.task_metadata:type_name -> aggregator.SyncMessagesResp.TaskMetadata
-	11, // 4: aggregator.NotifyTriggersReq.trigger_type:type_name -> aggregator.TriggerType
-	12, // 5: aggregator.NotifyTriggersReq.block_trigger:type_name -> aggregator.BlockTrigger.Output
-	13, // 6: aggregator.NotifyTriggersReq.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
-	14, // 7: aggregator.NotifyTriggersReq.cron_trigger:type_name -> aggregator.CronTrigger.Output
-	15, // 8: aggregator.NotifyTriggersReq.event_trigger:type_name -> aggregator.EventTrigger.Output
-	16, // 9: aggregator.NotifyTriggersReq.manual_trigger:type_name -> aggregator.ManualTrigger.Output
-	10, // 10: aggregator.NotifyTriggersResp.updated_at:type_name -> google.protobuf.Timestamp
-	10, // 11: aggregator.Checkin.Status.last_heartbeat:type_name -> google.protobuf.Timestamp
-	17, // 12: aggregator.SyncMessagesResp.TaskMetadata.trigger:type_name -> aggregator.TaskTrigger
-	1,  // 13: aggregator.Node.Ping:input_type -> aggregator.Checkin
-	3,  // 14: aggregator.Node.SyncMessages:input_type -> aggregator.SyncMessagesReq
-	5,  // 15: aggregator.Node.Ack:input_type -> aggregator.AckMessageReq
-	6,  // 16: aggregator.Node.NotifyTriggers:input_type -> aggregator.NotifyTriggersReq
-	2,  // 17: aggregator.Node.Ping:output_type -> aggregator.CheckinResp
-	4,  // 18: aggregator.Node.SyncMessages:output_type -> aggregator.SyncMessagesResp
-	18, // 19: aggregator.Node.Ack:output_type -> google.protobuf.BoolValue
-	7,  // 20: aggregator.Node.NotifyTriggers:output_type -> aggregator.NotifyTriggersResp
-	17, // [17:21] is the sub-list for method output_type
-	13, // [13:17] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	10, // 0: aggregator.Checkin.status:type_name -> aggregator.Checkin.Status
+	13, // 1: aggregator.CheckinResp.updated_at:type_name -> google.protobuf.Timestamp
+	11, // 2: aggregator.SyncMessagesReq.capabilities:type_name -> aggregator.SyncMessagesReq.Capabilities
+	0,  // 3: aggregator.SyncMessagesResp.op:type_name -> aggregator.MessageOp
+	12, // 4: aggregator.SyncMessagesResp.task_metadata:type_name -> aggregator.SyncMessagesResp.TaskMetadata
+	14, // 5: aggregator.NotifyTriggersReq.trigger_type:type_name -> aggregator.TriggerType
+	15, // 6: aggregator.NotifyTriggersReq.block_trigger:type_name -> aggregator.BlockTrigger.Output
+	16, // 7: aggregator.NotifyTriggersReq.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
+	17, // 8: aggregator.NotifyTriggersReq.cron_trigger:type_name -> aggregator.CronTrigger.Output
+	18, // 9: aggregator.NotifyTriggersReq.event_trigger:type_name -> aggregator.EventTrigger.Output
+	19, // 10: aggregator.NotifyTriggersReq.manual_trigger:type_name -> aggregator.ManualTrigger.Output
+	13, // 11: aggregator.NotifyTriggersResp.updated_at:type_name -> google.protobuf.Timestamp
+	13, // 12: aggregator.Checkin.Status.last_heartbeat:type_name -> google.protobuf.Timestamp
+	20, // 13: aggregator.SyncMessagesResp.TaskMetadata.trigger:type_name -> aggregator.TaskTrigger
+	1,  // 14: aggregator.Node.Ping:input_type -> aggregator.Checkin
+	3,  // 15: aggregator.Node.SyncMessages:input_type -> aggregator.SyncMessagesReq
+	5,  // 16: aggregator.Node.Ack:input_type -> aggregator.AckMessageReq
+	6,  // 17: aggregator.Node.NotifyTriggers:input_type -> aggregator.NotifyTriggersReq
+	8,  // 18: aggregator.Node.ReportEventOverload:input_type -> aggregator.EventOverloadAlert
+	2,  // 19: aggregator.Node.Ping:output_type -> aggregator.CheckinResp
+	4,  // 20: aggregator.Node.SyncMessages:output_type -> aggregator.SyncMessagesResp
+	21, // 21: aggregator.Node.Ack:output_type -> google.protobuf.BoolValue
+	7,  // 22: aggregator.Node.NotifyTriggers:output_type -> aggregator.NotifyTriggersResp
+	9,  // 23: aggregator.Node.ReportEventOverload:output_type -> aggregator.EventOverloadResponse
+	19, // [19:24] is the sub-list for method output_type
+	14, // [14:19] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_node_proto_init() }
@@ -897,7 +1155,7 @@ func file_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   9,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

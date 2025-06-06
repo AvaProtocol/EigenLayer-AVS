@@ -3,9 +3,9 @@ package aggregator
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/big"
 	"net"
+	"time"
 
 	"github.com/allegro/bigcache/v3"
 	"github.com/ethereum/go-ethereum/common"
@@ -186,7 +186,7 @@ func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListEx
 	)
 	listExecResp, err := r.engine.ListExecutions(user, payload)
 	if err != nil {
-		r.config.Logger.Error("error listing executions from engine", "error", err)
+		r.config.Logger.Error("error listing executions from engine", "error", err.Error())
 		return nil, err
 	}
 
@@ -412,7 +412,7 @@ func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNode
 	if err != nil {
 		r.config.Logger.Error("run node with inputs failed",
 			"user", user.Address.String(),
-			"error", err,
+			"error", err.Error(),
 		)
 		return nil, status.Errorf(codes.Internal, "execution failed: %v", err)
 	}
@@ -454,7 +454,7 @@ func (r *RpcServer) RunTrigger(ctx context.Context, req *avsproto.RunTriggerReq)
 	if err != nil {
 		r.config.Logger.Error("run trigger failed",
 			"user", user.Address.String(),
-			"error", err,
+			"error", err.Error(),
 		)
 		return nil, status.Errorf(codes.Internal, "execution failed: %v", err)
 	}
@@ -508,7 +508,7 @@ func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTask
 		r.config.Logger.Error("simulate task failed",
 			"user", user.Address.String(),
 			"trigger_name", req.Trigger.Name,
-			"error", err,
+			"error", err.Error(),
 		)
 		return nil, status.Errorf(codes.Internal, "simulation failed: %v", err)
 	}
@@ -537,6 +537,49 @@ func (r *RpcServer) GetTokenMetadata(ctx context.Context, payload *avsproto.GetT
 	)
 
 	return r.engine.GetTokenMetadata(user, payload)
+}
+
+// ReportEventOverload handles event overload alerts from operators
+func (r *RpcServer) ReportEventOverload(ctx context.Context, alert *avsproto.EventOverloadAlert) (*avsproto.EventOverloadResponse, error) {
+	r.config.Logger.Warn("🚨 EVENT OVERLOAD ALERT RECEIVED",
+		"task_id", alert.TaskId,
+		"operator_address", alert.OperatorAddress,
+		"block_number", alert.BlockNumber,
+		"events_detected", alert.EventsDetected,
+		"safety_limit", alert.SafetyLimit,
+		"query_index", alert.QueryIndex,
+		"details", alert.Details)
+
+	// Cancel the overloaded task immediately
+	cancelled, err := r.engine.CancelTask(alert.TaskId)
+	if err != nil {
+		r.config.Logger.Error("❌ Failed to cancel overloaded task",
+			"task_id", alert.TaskId,
+			"error", err)
+		return &avsproto.EventOverloadResponse{
+			TaskCancelled: false,
+			Message:       fmt.Sprintf("Failed to cancel task: %v", err),
+			Timestamp:     uint64(time.Now().UnixMilli()),
+		}, nil
+	}
+
+	responseMessage := "Task cancelled due to event overload"
+	if !cancelled {
+		responseMessage = "Task was already cancelled or not found"
+	}
+
+	// TODO: Integrate with Sentry for alerting
+	// sentry.CaptureMessage(fmt.Sprintf("Event overload detected for task %s: %s", alert.TaskId, alert.Details))
+
+	r.config.Logger.Info("🛑 Task cancelled due to event overload",
+		"task_id", alert.TaskId,
+		"cancelled", cancelled)
+
+	return &avsproto.EventOverloadResponse{
+		TaskCancelled: cancelled,
+		Message:       responseMessage,
+		Timestamp:     uint64(time.Now().UnixMilli()),
+	}, nil
 }
 
 // Helper functions for logging
@@ -636,7 +679,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 
 	go func() {
 		if err := s.Serve(lis); err != nil {
-			log.Fatalf("failed to serve: %v", err)
+			agg.logger.Error("gRPC server failed to serve", "error", err.Error())
 		}
 	}()
 	return nil
