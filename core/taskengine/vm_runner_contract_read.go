@@ -64,34 +64,44 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 
 	var log strings.Builder
 
-	// Get configuration from input variables (new architecture)
-	r.vm.mu.Lock()
-	contractAbiVar, abiExists := r.vm.vars["contractAbi"]
-	contractAddressVar, addrExists := r.vm.vars["contractAddress"]
-	callDataVar, dataExists := r.vm.vars["callData"]
-	r.vm.mu.Unlock()
+	var contractAbi, contractAddress, callData string
 
-	if !abiExists || !addrExists || !dataExists {
-		err = fmt.Errorf("missing required input variables: contractAbi, contractAddress, callData")
-		return s, err
-	}
+	// First try to get configuration from node config
+	if node.Config != nil && node.Config.ContractAddress != "" && node.Config.CallData != "" && node.Config.ContractAbi != "" {
+		contractAbi = node.Config.ContractAbi
+		contractAddress = node.Config.ContractAddress
+		callData = node.Config.CallData
+	} else {
+		// Fall back to input variables (legacy architecture)
+		r.vm.mu.Lock()
+		contractAbiVar, abiExists := r.vm.vars["contractAbi"]
+		contractAddressVar, addrExists := r.vm.vars["contractAddress"]
+		callDataVar, dataExists := r.vm.vars["callData"]
+		r.vm.mu.Unlock()
 
-	contractAbi, ok := contractAbiVar.(string)
-	if !ok {
-		err = fmt.Errorf("contractAbi must be a string")
-		return s, err
-	}
+		if !abiExists || !addrExists || !dataExists {
+			err = fmt.Errorf("missing required input variables: contractAbi, contractAddress, callData")
+			return s, err
+		}
 
-	contractAddress, ok := contractAddressVar.(string)
-	if !ok {
-		err = fmt.Errorf("contractAddress must be a string")
-		return s, err
-	}
+		var ok bool
+		contractAbi, ok = contractAbiVar.(string)
+		if !ok {
+			err = fmt.Errorf("contractAbi must be a string")
+			return s, err
+		}
 
-	callData, ok := callDataVar.(string)
-	if !ok {
-		err = fmt.Errorf("callData must be a string")
-		return s, err
+		contractAddress, ok = contractAddressVar.(string)
+		if !ok {
+			err = fmt.Errorf("contractAddress must be a string")
+			return s, err
+		}
+
+		callData, ok = callDataVar.(string)
+		if !ok {
+			err = fmt.Errorf("callData must be a string")
+			return s, err
+		}
 	}
 
 	// TODO: support load pre-define ABI
