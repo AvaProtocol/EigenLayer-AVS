@@ -12,11 +12,19 @@ func TestRenderString(t *testing.T) {
 	vm, err := NewVMWithData(&model.Task{
 		Task: &avsproto.Task{
 			Id: "sampletaskid1",
+			Trigger: &avsproto.TaskTrigger{
+				Id:   "trigger1",
+				Name: "test_trigger",
+			},
 		},
 	}, nil, testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
-		t.Errorf("expect vm initialized")
+		t.Fatalf("expect vm initialized, got error: %v", err)
+	}
+
+	if vm == nil {
+		t.Fatal("vm is nil")
 	}
 
 	vm.vars["test"] = "world"
@@ -33,11 +41,19 @@ func TestPreprocessText(t *testing.T) {
 	vm, err := NewVMWithData(&model.Task{
 		Task: &avsproto.Task{
 			Id: "sampletaskid1",
+			Trigger: &avsproto.TaskTrigger{
+				Id:   "trigger1",
+				Name: "test_trigger",
+			},
 		},
 	}, nil, testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
-		t.Errorf("expect vm initialized")
+		t.Fatalf("expect vm initialized, got error: %v", err)
+	}
+
+	if vm == nil {
+		t.Fatal("vm is nil")
 	}
 
 	vm.vars["test"] = map[string]interface{}{
@@ -78,11 +94,11 @@ func TestPreprocessText(t *testing.T) {
 		"data": map[string]interface{}{
 			"items": []interface{}{
 				map[string]interface{}{
-					"name": "item1",
+					"name":  "item1",
 					"value": 100,
 				},
 				map[string]interface{}{
-					"name": "item2",
+					"name":  "item2",
 					"value": 200,
 				},
 			},
@@ -144,11 +160,19 @@ func TestPreprocessTextDate(t *testing.T) {
 	vm, err := NewVMWithData(&model.Task{
 		Task: &avsproto.Task{
 			Id: "sampletaskid1",
+			Trigger: &avsproto.TaskTrigger{
+				Id:   "trigger1",
+				Name: "test_trigger",
+			},
 		},
 	}, nil, testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
-		t.Errorf("expect vm initialized")
+		t.Fatalf("expect vm initialized, got error: %v", err)
+	}
+
+	if vm == nil {
+		t.Fatal("vm is nil")
 	}
 
 	result := vm.preprocessText("{{date.now}}")

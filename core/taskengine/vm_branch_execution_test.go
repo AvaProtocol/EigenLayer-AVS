@@ -31,6 +31,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 						Conditions: []*avsproto.BranchNode_Condition{
 							{
 								Id:         "condition1",
+								Type:       "if",
 								Expression: "httpnode.data.body.url == 'https://httpbin.org/get'",
 							},
 						},
@@ -70,7 +71,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		},
 		{
 			Id:     "e3",
-			Source: "456",
+			Source: "456.condition1",
 			Target: "789",
 		},
 	}
@@ -85,7 +86,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 	}, nil, testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
-		t.Errorf("expect vm initialized")
+		t.Fatalf("expect vm initialized, got error: %v", err)
 	}
 
 	vm.Compile()
@@ -164,9 +165,9 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		return
 	}
 
-	conditionResultsSlice, ok := conditionResults.([]interface{})
+	conditionResultsSlice, ok := conditionResults.([]map[string]interface{})
 	if !ok {
-		t.Errorf("condition_results is not []interface{}, got %T: %v", conditionResults, conditionResults)
+		t.Errorf("condition_results is not []map[string]interface{}, got %T: %v", conditionResults, conditionResults)
 		return
 	}
 
@@ -175,11 +176,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 		return
 	}
 
-	firstCondition, ok := conditionResultsSlice[0].(map[string]interface{})
-	if !ok {
-		t.Errorf("First condition result is not map[string]interface{}, got %T: %v", conditionResultsSlice[0], conditionResultsSlice[0])
-		return
-	}
+	firstCondition := conditionResultsSlice[0]
 
 	if firstCondition["id"] != "condition1" {
 		t.Errorf("Expected condition id 'condition1', got %v", firstCondition["id"])

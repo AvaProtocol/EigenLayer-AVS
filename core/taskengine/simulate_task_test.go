@@ -879,9 +879,7 @@ func TestSimulateTask_ContractReadNodeFailure(t *testing.T) {
 			TaskType: &avsproto.TaskNode_ContractRead{
 				ContractRead: &avsproto.ContractReadNode{
 					Config: &avsproto.ContractReadNode_Config{
-						ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
-						CallData:        "0xfeaf968c",
-						ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"latestRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+						// Empty config to trigger "missing required input variables" error
 					},
 				},
 			},

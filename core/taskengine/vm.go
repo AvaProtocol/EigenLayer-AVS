@@ -789,6 +789,20 @@ func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avspro
 
 func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*avsproto.Execution_Step, error) {
 	var executionLog *avsproto.Execution_Step
+
+	// Check if node has empty config first - let processor handle this case
+	if node.Config != nil && (node.Config.ContractAddress == "" || node.Config.CallData == "" || node.Config.ContractAbi == "") {
+		// Empty config case - create a mock processor to handle the error
+		processor := NewContractReadProcessor(v, nil)
+		executionLog, err := processor.Execute(stepID, node)
+		v.mu.Lock()
+		if executionLog != nil {
+			executionLog.Inputs = v.collectInputKeysForLog()
+		}
+		v.mu.Unlock()
+		return executionLog, err
+	}
+
 	if v.smartWalletConfig == nil || v.smartWalletConfig.EthRpcUrl == "" {
 		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract read")
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
@@ -1211,11 +1225,14 @@ func (v *VM) preprocessText(text string) string {
 	}
 
 	result := text
+	searchPos := 0
 	for i := 0; i < VMMaxPreprocessIterations; i++ {
-		start := strings.Index(result, "{{")
+		start := strings.Index(result[searchPos:], "{{")
 		if start == -1 {
 			break
 		}
+		start += searchPos // Adjust to absolute position
+
 		end := strings.Index(result[start:], "}}")
 		if end == -1 {
 			break
@@ -1225,6 +1242,7 @@ func (v *VM) preprocessText(text string) string {
 		expr := strings.TrimSpace(result[start+2 : end])
 		if expr == "" {
 			result = result[:start] + result[end+2:]
+			searchPos = start
 			continue
 		}
 		// Simple check for nested, though might not be perfect for all cases.
@@ -1233,21 +1251,45 @@ func (v *VM) preprocessText(text string) string {
 				v.logger.Warn("Nested expression detected, replacing with empty string", "expression", expr)
 			}
 			result = result[:start] + result[end+2:]
+			searchPos = start
 			continue
 		}
 
-		script := fmt.Sprintf(`(() => { return %s; })()`, expr)
+		// Handle special date macros
+		if strings.HasPrefix(expr, "date.") {
+			switch expr {
+			case "date.now":
+				replacement := fmt.Sprintf("%d", time.Now().UnixMilli())
+				result = result[:start] + replacement + result[end+2:]
+				searchPos = start + len(replacement)
+				continue
+			case "date.now_iso":
+				replacement := time.Now().UTC().Format(time.RFC3339)
+				result = result[:start] + replacement + result[end+2:]
+				searchPos = start + len(replacement)
+				continue
+			}
+		}
+
+		// Handle array access with dot notation (e.g., array.0 -> array[0])
+		jsExpr := expr
+		// Convert dot notation array access to bracket notation
+		re := regexp.MustCompile(`\.(\d+)`)
+		jsExpr = re.ReplaceAllString(jsExpr, "[$1]")
+
+		script := fmt.Sprintf(`(() => { return %s; })()`, jsExpr)
 		evaluated, err := jsvm.RunString(script)
 		if v.logger != nil {
 			v.logger.Debug("evaluating pre-processor script", "task_id", v.GetTaskId(), "script", script, "result", evaluated, "error", err)
 		}
 		if err != nil {
-			// Remove the expression entirely (original behavior)
+			// Keep the expression unchanged (original behavior)
 			// This is the expected behavior for existing tests
 			if v.logger != nil {
-				v.logger.Debug("template variable evaluation failed, removing expression", "expression", expr, "error", err)
+				v.logger.Debug("template variable evaluation failed, keeping expression unchanged", "expression", expr, "error", err)
 			}
-			result = result[:start] + result[end+2:]
+			// Skip this expression and continue looking for the next one
+			searchPos = end + 2
 			continue
 		}
 
@@ -1263,6 +1305,7 @@ func (v *VM) preprocessText(text string) string {
 			replacement = fmt.Sprintf("%v", exportedValue)
 		}
 		result = result[:start] + replacement + result[end+2:]
+		searchPos = start + len(replacement)
 	}
 	return result
 }
@@ -1682,7 +1725,7 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
 		return false, "no execution steps found", 0
 	}
 
-	var failedSteps []string
+	var failedStepNames []string
 	var firstErrorMessage string
 
 	for _, step := range v.ExecutionLogs {
@@ -1690,21 +1733,28 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
 			if firstErrorMessage == "" {
 				firstErrorMessage = step.Error
 			}
-			failedSteps = append(failedSteps, fmt.Sprintf("Step '%s' (%s): %s", step.Name, step.Id, step.Error))
+			// Collect the step name (prefer name over ID)
+			stepName := step.Name
+			if stepName == "" || stepName == "unknown" {
+				stepName = step.Id
+			}
+			failedStepNames = append(failedStepNames, stepName)
 		}
 	}
 
-	failedCount := len(failedSteps)
+	failedCount := len(failedStepNames)
 	if failedCount == 0 {
 		return true, "", 0
 	}
 
-	// Build comprehensive error message
+	// Build comprehensive error message with failed step names
 	var errorMessage string
 	if failedCount == 1 {
-		errorMessage = fmt.Sprintf("1 step failed: %s", firstErrorMessage)
+		errorMessage = fmt.Sprintf("%d step failed: these steps have failed: %s. Error: %s",
+			failedCount, strings.Join(failedStepNames, ", "), firstErrorMessage)
 	} else {
-		errorMessage = fmt.Sprintf("%d steps failed, first error: %s", failedCount, firstErrorMessage)
+		errorMessage = fmt.Sprintf("%d steps failed: these steps have failed: %s. First error: %s",
+			failedCount, strings.Join(failedStepNames, ", "), firstErrorMessage)
 	}
 
 	return false, errorMessage, failedCount

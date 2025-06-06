@@ -38,15 +38,28 @@ func TestEvaluateEvent(t *testing.T) {
 	vm, err := NewVMWithData(&model.Task{
 		Task: &avsproto.Task{
 			Id: "sampletaskid1",
+			Trigger: &avsproto.TaskTrigger{
+				Id:   "trigger1",
+				Name: "test_trigger",
+			},
 		},
 	}, triggerData, testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
-		t.Errorf("expect vm initialized")
+		t.Fatalf("expect vm initialized, got error: %v", err)
 	}
 
-	if vm.vars["trigger"] == nil {
-		t.Errorf("expected trigger data to be available")
+	if vm == nil {
+		t.Fatal("vm is nil")
+	}
+
+	triggerName, err := vm.GetTriggerNameAsVar()
+	if err != nil {
+		t.Fatalf("failed to get trigger name: %v", err)
+	}
+
+	if vm.vars[triggerName] == nil {
+		t.Errorf("expected trigger data to be available at key '%s'", triggerName)
 	}
 }
 
@@ -76,15 +89,28 @@ func TestEvaluateEventEvmLog(t *testing.T) {
 	vm, err := NewVMWithData(&model.Task{
 		Task: &avsproto.Task{
 			Id: "sampletaskid1",
+			Trigger: &avsproto.TaskTrigger{
+				Id:   "trigger1",
+				Name: "test_trigger",
+			},
 		},
 	}, triggerData, testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
-		t.Errorf("expect vm initialized")
+		t.Fatalf("expect vm initialized, got error: %v", err)
 	}
 
-	if vm.vars["trigger"] == nil {
-		t.Errorf("expected trigger data to be available")
+	if vm == nil {
+		t.Fatal("vm is nil")
+	}
+
+	triggerName, err := vm.GetTriggerNameAsVar()
+	if err != nil {
+		t.Fatalf("failed to get trigger name: %v", err)
+	}
+
+	if vm.vars[triggerName] == nil {
+		t.Errorf("expected trigger data to be available at key '%s'", triggerName)
 	}
 }
 
@@ -118,15 +144,28 @@ func TestEventTriggerOneofExclusivity(t *testing.T) {
 	vm, err := NewVMWithData(&model.Task{
 		Task: &avsproto.Task{
 			Id: "sampletaskid1",
+			Trigger: &avsproto.TaskTrigger{
+				Id:   "trigger1",
+				Name: "test_trigger",
+			},
 		},
 	}, transferLogTriggerData, testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
-		t.Errorf("expect vm initialized")
+		t.Fatalf("expect vm initialized, got error: %v", err)
 	}
 
-	if vm.vars["trigger"] == nil {
-		t.Errorf("expected trigger data to be available")
+	if vm == nil {
+		t.Fatal("vm is nil")
+	}
+
+	triggerName, err := vm.GetTriggerNameAsVar()
+	if err != nil {
+		t.Fatalf("failed to get trigger name: %v", err)
+	}
+
+	if vm.vars[triggerName] == nil {
+		t.Errorf("expected trigger data to be available at key '%s'", triggerName)
 	}
 
 	evmLogTriggerData := &TriggerData{
@@ -151,14 +190,27 @@ func TestEventTriggerOneofExclusivity(t *testing.T) {
 	vm2, err := NewVMWithData(&model.Task{
 		Task: &avsproto.Task{
 			Id: "sampletaskid2",
+			Trigger: &avsproto.TaskTrigger{
+				Id:   "trigger2",
+				Name: "test_trigger2",
+			},
 		},
 	}, evmLogTriggerData, testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
-		t.Errorf("expect vm initialized")
+		t.Fatalf("expect vm initialized, got error: %v", err)
 	}
 
-	if vm2.vars["trigger"] == nil {
-		t.Errorf("expected trigger data to be available")
+	if vm2 == nil {
+		t.Fatal("vm2 is nil")
+	}
+
+	triggerName2, err := vm2.GetTriggerNameAsVar()
+	if err != nil {
+		t.Fatalf("failed to get trigger name: %v", err)
+	}
+
+	if vm2.vars[triggerName2] == nil {
+		t.Errorf("expected trigger data to be available at key '%s'", triggerName2)
 	}
 }

@@ -76,7 +76,7 @@ func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			nodeType := ""
 			nodeConfig := make(map[string]interface{})
-			
+
 			switch tc.nodeType {
 			case avsproto.NodeType_NODE_TYPE_REST_API:
 				nodeType = "restAPI"
@@ -110,7 +110,7 @@ func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
 					`,
 				}
 			}
-			
+
 			result, err := engine.RunNodeImmediately(nodeType, nodeConfig, tc.templateData)
 
 			if tc.expectError && err == nil {
@@ -178,13 +178,13 @@ func TestSmartTriggerDataFallback(t *testing.T) {
 			{"Content-Type", "application/json"},
 		},
 	}
-	
+
 	triggerData := map[string]interface{}{
 		"camelCaseValue":     "camel_value",
 		"snake_case_value":   "snake_value",
 		"fallbackCamelValue": "fallback_camel_value",
 	}
-	
+
 	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
 
 	if err != nil {

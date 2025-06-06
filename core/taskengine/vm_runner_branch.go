@@ -246,6 +246,32 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 			executionStep.Log = log.String()
 			executionStep.EndAt = time.Now().UnixMilli()
 
+			// Find the actual target node from the edges
+			conditionId := fmt.Sprintf("%s.%s", stepID, condition.Id)
+			var targetNodeId string
+			r.vm.mu.Lock()
+			if r.vm.task != nil && r.vm.task.Edges != nil {
+				for _, edge := range r.vm.task.Edges {
+					if edge.Source == conditionId {
+						targetNodeId = edge.Target
+						break
+					}
+				}
+			}
+			r.vm.mu.Unlock()
+
+			// Set the output variable for the branch node
+			branchOutput := map[string]interface{}{
+				"condition_results": []map[string]interface{}{
+					{
+						"id":           condition.Id,
+						"result":       true,
+						"next_node_id": targetNodeId,
+					},
+				},
+			}
+			r.SetOutputVarForStep(stepID, branchOutput)
+
 			// Find the next step in the plan based on this condition ID
 			r.vm.mu.Lock() // Lock for reading vm.plans
 			nextStepInPlan, exists := r.vm.plans[fmt.Sprintf("%s.%s", stepID, condition.Id)]
@@ -297,6 +323,13 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		executionStep.OutputData = nil // No branch action taken
 		executionStep.Log = log.String()
 		executionStep.EndAt = time.Now().UnixMilli()
+
+		// Set the output variable for the branch node with empty results
+		branchOutput := map[string]interface{}{
+			"condition_results": []map[string]interface{}{},
+		}
+		r.SetOutputVarForStep(stepID, branchOutput)
+
 		return executionStep, nil, nil // Success with no next step
 	}
 }

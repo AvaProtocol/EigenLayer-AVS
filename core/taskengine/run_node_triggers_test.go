@@ -6,8 +6,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
-
-
 func TestRunNodeImmediately_TriggerTypes(t *testing.T) {
 	engine := createTestEngine()
 	defer storage.Destroy(engine.db.(*storage.BadgerStorage))
@@ -46,9 +44,9 @@ func TestRunNodeImmediately_TriggerTypes(t *testing.T) {
 		{
 			name: "Event Trigger",
 			nodeConfig: map[string]interface{}{
-				"triggerType":       "event",
-				"contractAddress":   "0x1234567890123456789012345678901234567890",
-				"eventSignature":    "Transfer(address,address,uint256)",
+				"triggerType":     "event",
+				"contractAddress": "0x1234567890123456789012345678901234567890",
+				"eventSignature":  "Transfer(address,address,uint256)",
 			},
 		},
 	}
@@ -76,7 +74,7 @@ func TestRunTriggerRPC_ManualTrigger(t *testing.T) {
 		"triggerType": "manual",
 		"runAt":       1672531200,
 	}
-	
+
 	result, err := engine.RunNodeImmediately("manualTrigger", nodeConfig, map[string]interface{}{})
 
 	if err != nil {

@@ -6,8 +6,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
-
-
 func TestRunNodeImmediately_RestAPIWithTemplates(t *testing.T) {
 	engine := createTestEngine()
 	defer storage.Destroy(engine.db.(*storage.BadgerStorage))
@@ -20,11 +18,11 @@ func TestRunNodeImmediately_RestAPIWithTemplates(t *testing.T) {
 			{"Content-Type", "application/json"},
 		},
 	}
-	
+
 	triggerData := map[string]interface{}{
 		"test_value": "Hello World",
 	}
-	
+
 	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
 
 	if err != nil {
@@ -48,11 +46,11 @@ func TestRunNodeImmediately_SecretsAccess(t *testing.T) {
 			{"Authorization", "Bearer {{secrets.api_key}}"},
 		},
 	}
-	
+
 	secrets := map[string]interface{}{
 		"api_key": "test_secret_123",
 	}
-	
+
 	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, secrets)
 
 	if err != nil {
@@ -77,7 +75,7 @@ func TestRunNodeImmediately_SimpleUndefinedVariable(t *testing.T) {
 			{"Content-Type", "application/json"},
 		},
 	}
-	
+
 	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, map[string]interface{}{})
 
 	if err != nil {
@@ -102,14 +100,14 @@ func TestRunNodeImmediately_ClientInputDebug(t *testing.T) {
 			{"Content-Type", "application/json"},
 		},
 	}
-	
+
 	triggerData := map[string]interface{}{
 		"client_data": map[string]interface{}{
 			"user_id": 12345,
 			"action":  "test_action",
 		},
 	}
-	
+
 	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
 
 	if err != nil {
@@ -134,14 +132,14 @@ func TestRunNodeImmediately_TemplateProcessingDebug(t *testing.T) {
 			{"Content-Type", "application/json"},
 		},
 	}
-	
+
 	triggerData := map[string]interface{}{
 		"nested": map[string]interface{}{
 			"value": "nested_test_value",
 		},
 		"array": []interface{}{"first_item", "second_item"},
 	}
-	
+
 	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
 
 	if err != nil {
@@ -166,11 +164,11 @@ func TestRunNodeImmediately_MissingTemplateVariable(t *testing.T) {
 			{"Content-Type", "application/json"},
 		},
 	}
-	
+
 	triggerData := map[string]interface{}{
 		"existing_field": "some_value",
 	}
-	
+
 	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
 
 	if err != nil {
@@ -195,11 +193,11 @@ func TestRunNodeImmediately_UndefinedVariableReplacement(t *testing.T) {
 			{"Content-Type", "application/json"},
 		},
 	}
-	
+
 	triggerData := map[string]interface{}{
 		"defined_value": "this_is_defined",
 	}
-	
+
 	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
 
 	if err != nil {
@@ -224,11 +222,11 @@ func TestRunNodeImmediately_MalformedTemplateDetection(t *testing.T) {
 			{"Content-Type", "application/json"},
 		},
 	}
-	
+
 	triggerData := map[string]interface{}{
 		"value": "test_value",
 	}
-	
+
 	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
 
 	if err != nil {
@@ -253,11 +251,11 @@ func TestRunNodeImmediately_ValidTemplateAfterFix(t *testing.T) {
 			{"Content-Type", "application/json"},
 		},
 	}
-	
+
 	triggerData := map[string]interface{}{
 		"message": "Template processing works correctly",
 	}
-	
+
 	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
 
 	if err != nil {
