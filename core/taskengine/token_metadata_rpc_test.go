@@ -33,7 +33,7 @@ func TestGetTokenMetadataRPC(t *testing.T) {
 	// Test 1: Valid USDC address (should be in Sepolia whitelist)
 	t.Run("ValidUSDCToken", func(t *testing.T) {
 		req := &avsproto.GetTokenMetadataReq{
-			Address: "0x94a9d9ac8a22534e3faca9f4e7f2e2cf85d5e4c8", // USDC from sepolia.json
+			Address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", // USDC from sepolia.json
 		}
 
 		resp, err := engine.GetTokenMetadata(user, req)
@@ -54,7 +54,7 @@ func TestGetTokenMetadataRPC(t *testing.T) {
 		assert.True(t, resp.Found, "Token should be found")
 		assert.NotNil(t, resp.Token, "Token data should not be nil")
 		if resp.Token != nil {
-			assert.Equal(t, "0x94a9d9ac8a22534e3faca9f4e7f2e2cf85d5e4c8", resp.Token.Address)
+			assert.Equal(t, "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", resp.Token.Address)
 			assert.Equal(t, "USDC", resp.Token.Symbol) // Should be either "USDC" or "USD Coin"
 			assert.Equal(t, uint32(6), resp.Token.Decimals)
 			assert.Contains(t, []string{"whitelist", "rpc", "cache"}, resp.Source)
@@ -109,7 +109,7 @@ func TestGetTokenMetadataRPC(t *testing.T) {
 		}
 
 		req := &avsproto.GetTokenMetadataReq{
-			Address: "0x94a9d9ac8a22534e3faca9f4e7f2e2cf85d5e4c8",
+			Address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
 		}
 
 		resp, err := engineNoService.GetTokenMetadata(user, req)
@@ -145,7 +145,7 @@ func TestGetTokenMetadataIntegration(t *testing.T) {
 		address string
 		symbol  string
 	}{
-		{"USDC", "0x94a9d9ac8a22534e3faca9f4e7f2e2cf85d5e4c8", "USDC"},
+		{"USDC", "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", "USDC"},
 		{"WETH", "0x7b79995e5f793a07bc00c21412e50ecae098e7f9", "WETH"},
 		{"DAI", "0x3e622317f8c93f7328350cf0b56d9ed4c620c5d6", "DAI"},
 	}
