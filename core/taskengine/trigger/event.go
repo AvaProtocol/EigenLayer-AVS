@@ -3,15 +3,10 @@ package trigger
 import (
 	"context"
 	"fmt"
-	"regexp"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
-	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-	"github.com/samber/lo"
 
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -34,9 +29,16 @@ type EventMark struct {
 
 type Check struct {
 	TaskMetadata *avsproto.SyncMessagesResp_TaskMetadata
+	Queries      []*avsproto.EventTrigger_Query
+}
 
-	Program string
-	Matcher []*avsproto.EventTrigger_Matcher
+// QueryInfo contains a filter query with safety and debugging information
+type QueryInfo struct {
+	Query             ethereum.FilterQuery
+	Description       string
+	TaskID            string
+	QueryIndex        int
+	MaxEventsPerBlock uint32
 }
 
 type EventTrigger struct {
@@ -47,21 +49,34 @@ type EventTrigger struct {
 	// channel that we will push the trigger information back
 	triggerCh chan TriggerMetadata[EventMark]
 
-	// Track multiple subscriptions for complex filtering
+	// Track multiple subscriptions for query-based filtering
 	subscriptions []SubscriptionInfo
 	subsMutex     sync.RWMutex
 
 	// Channel to signal subscription updates
 	updateSubsCh chan struct{}
+
+	// Event counting for safety monitoring
+	eventCountsMutex sync.RWMutex
+	eventCounts      map[string]map[uint64]uint32 // taskID -> blockNumber -> eventCount
+
+	// Safety limits
+	defaultMaxEventsPerQuery uint32
+	defaultMaxTotalEvents    uint32
+
+	// Overload alert callback (for operator to notify aggregator)
+	onOverloadAlert func(alert *avsproto.EventOverloadAlert)
 }
 
 type SubscriptionInfo struct {
 	subscription ethereum.Subscription
 	query        ethereum.FilterQuery
 	description  string
+	taskID       string
+	queryIndex   int
 }
 
-func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], logger sdklogging.Logger) *EventTrigger {
+func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], logger sdklogging.Logger, maxEventsPerQuery uint32, maxTotalEvents uint32) *EventTrigger {
 	var err error
 
 	b := EventTrigger{
@@ -72,10 +87,13 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 			logger:    logger,
 		},
 
-		triggerCh:     triggerCh,
-		checks:        sync.Map{},
-		subscriptions: make([]SubscriptionInfo, 0),
-		updateSubsCh:  make(chan struct{}, 1),
+		triggerCh:                triggerCh,
+		checks:                   sync.Map{},
+		subscriptions:            make([]SubscriptionInfo, 0),
+		updateSubsCh:             make(chan struct{}, 1),
+		eventCounts:              make(map[string]map[uint64]uint32),
+		defaultMaxEventsPerQuery: maxEventsPerQuery,
+		defaultMaxTotalEvents:    maxTotalEvents,
 	}
 
 	b.ethClient, err = ethclient.Dial(o.RpcURL)
@@ -84,12 +102,16 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 	}
 
 	b.wsEthClient, err = ethclient.Dial(o.WsRpcURL)
-
 	if err != nil {
 		panic(err)
 	}
 
 	return &b
+}
+
+// SetOverloadAlertCallback sets the callback function for when event overload is detected
+func (t *EventTrigger) SetOverloadAlertCallback(callback func(alert *avsproto.EventOverloadAlert)) {
+	t.onOverloadAlert = callback
 }
 
 func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) error {
@@ -104,15 +126,37 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 	}
 
 	taskID := check.TaskId
+	queries := evt.GetConfig().GetQueries()
+
+	if len(queries) == 0 {
+		return fmt.Errorf("no queries found in event trigger config for task %s", taskID)
+	}
+
 	c := &Check{
 		TaskMetadata: check,
-		Program:      evt.GetConfig().GetExpression(),
-		Matcher:      evt.GetConfig().GetMatcher(),
+		Queries:      queries,
 	}
 
 	t.checks.Store(taskID, c)
 
-	t.logger.Info("Task added - updating subscriptions dynamically", "task_id", taskID)
+	// Initialize event counts for this task
+	t.eventCountsMutex.Lock()
+	t.eventCounts[taskID] = make(map[uint64]uint32)
+	t.eventCountsMutex.Unlock()
+
+	t.logger.Info("🔍 Task added with queries-based EventTrigger",
+		"task_id", taskID,
+		"queries_count", len(queries))
+
+	// Log query details
+	for i, query := range queries {
+		t.logger.Info("📋 Query details",
+			"task_id", taskID,
+			"query_index", i,
+			"addresses_count", len(query.GetAddresses()),
+			"topics_count", len(query.GetTopics()),
+			"max_events_per_block", query.GetMaxEventsPerBlock())
+	}
 
 	// Trigger subscription update (non-blocking)
 	select {
@@ -127,7 +171,12 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 func (t *EventTrigger) RemoveCheck(id string) error {
 	t.checks.Delete(id)
 
-	t.logger.Info("Task removed - updating subscriptions dynamically", "task_id", id)
+	// Clean up event counts for this task
+	t.eventCountsMutex.Lock()
+	delete(t.eventCounts, id)
+	t.eventCountsMutex.Unlock()
+
+	t.logger.Info("🗑️ Task removed - updating subscriptions dynamically", "task_id", id)
 
 	// Trigger subscription update (non-blocking)
 	select {
@@ -139,12 +188,12 @@ func (t *EventTrigger) RemoveCheck(id string) error {
 	return nil
 }
 
-func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
+func (t *EventTrigger) Run(ctx context.Context) error {
 	// Build filter queries based on registered checks
-	queries := evtTrigger.buildFilterQueries()
+	queries := t.buildFilterQueries()
 
 	if len(queries) == 0 {
-		evtTrigger.logger.Info("no filter queries to subscribe to")
+		t.logger.Info("🚫 No filter queries to subscribe to")
 		return nil
 	}
 
@@ -152,47 +201,53 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 	logs := make(chan types.Log, 1000) // Buffered to handle multiple subscriptions
 
 	// Create subscriptions for each query
-	evtTrigger.subsMutex.Lock()
-	evtTrigger.subscriptions = make([]SubscriptionInfo, 0, len(queries))
+	t.subsMutex.Lock()
+	t.subscriptions = make([]SubscriptionInfo, 0, len(queries))
 
 	for i, queryInfo := range queries {
 		// Use timeout context to prevent indefinite blocking
 		timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		sub, err := evtTrigger.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
+		sub, err := t.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
 		cancel() // Clean up timeout context
 		if err != nil {
-			evtTrigger.logger.Error("failed to create subscription", "query_index", i, "description", queryInfo.Description, "error", err)
+			t.logger.Error("❌ Failed to create subscription",
+				"query_index", i,
+				"description", queryInfo.Description,
+				"error", err)
 			// Clean up any successful subscriptions
-			for _, subInfo := range evtTrigger.subscriptions {
+			for _, subInfo := range t.subscriptions {
 				subInfo.subscription.Unsubscribe()
 			}
-			evtTrigger.subsMutex.Unlock()
+			t.subsMutex.Unlock()
 			return err
 		}
 
-		evtTrigger.subscriptions = append(evtTrigger.subscriptions, SubscriptionInfo{
+		t.subscriptions = append(t.subscriptions, SubscriptionInfo{
 			subscription: sub,
 			query:        queryInfo.Query,
 			description:  queryInfo.Description,
+			taskID:       queryInfo.TaskID,
+			queryIndex:   queryInfo.QueryIndex,
 		})
 
-		evtTrigger.logger.Info("created subscription",
+		t.logger.Info("✅ Created subscription",
 			"index", i,
+			"task_id", queryInfo.TaskID,
 			"description", queryInfo.Description,
 			"addresses", queryInfo.Query.Addresses,
 			"topics", queryInfo.Query.Topics)
 	}
-	evtTrigger.subsMutex.Unlock()
+	t.subsMutex.Unlock()
 
 	// Create error channel that collects errors from all subscriptions
-	errorCh := make(chan error, len(evtTrigger.subscriptions))
+	errorCh := make(chan error, len(t.subscriptions))
 
 	// Start goroutines to monitor each subscription's error channel
-	for i, subInfo := range evtTrigger.subscriptions {
+	for i, subInfo := range t.subscriptions {
 		go func(index int, sub ethereum.Subscription, desc string) {
 			err := <-sub.Err()
 			if err != nil {
-				evtTrigger.logger.Error("subscription error", "index", index, "description", desc, "error", err)
+				t.logger.Error("🔥 Subscription error", "index", index, "description", desc, "error", err)
 				errorCh <- err
 			}
 		}(i, subInfo.subscription, subInfo.description)
@@ -201,88 +256,75 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 	go func() {
 		defer func() {
 			// Clean up all subscriptions
-			evtTrigger.subsMutex.RLock()
-			for _, subInfo := range evtTrigger.subscriptions {
+			t.subsMutex.RLock()
+			for _, subInfo := range t.subscriptions {
 				subInfo.subscription.Unsubscribe()
 			}
-			evtTrigger.subsMutex.RUnlock()
+			t.subsMutex.RUnlock()
 		}()
 
 		for {
 			select {
 			case <-ctx.Done():
-				evtTrigger.logger.Info("context cancelled, stopping event trigger")
+				t.logger.Info("⏹️ Context cancelled, stopping event trigger")
 				return
-			case <-evtTrigger.done:
-				evtTrigger.logger.Info("event trigger shutdown signal received")
+			case <-t.done:
+				t.logger.Info("🛑 Event trigger shutdown signal received")
 				return
-			case <-evtTrigger.updateSubsCh:
-				evtTrigger.logger.Info("received subscription update signal - starting debounced rebuild")
+			case log := <-logs:
+				t.logger.Debug("📨 Received log",
+					"block", log.BlockNumber,
+					"tx", log.TxHash.Hex(),
+					"log_index", log.Index)
 
-				// Debounce mechanism: wait for additional updates for 500ms
-				debounceTimer := time.NewTimer(500 * time.Millisecond)
-				updateCount := 1
-
-				// Collect any additional updates during debounce period
-			debounceLoop:
-				for {
-					select {
-					case <-evtTrigger.updateSubsCh:
-						updateCount++
-						// Reset timer for additional 500ms when new updates arrive
-						if !debounceTimer.Stop() {
-							<-debounceTimer.C
-						}
-						debounceTimer.Reset(500 * time.Millisecond)
-					case <-debounceTimer.C:
-						// Debounce period completed, proceed with update
-						break debounceLoop
-					case <-ctx.Done():
-						debounceTimer.Stop()
-						evtTrigger.logger.Info("context cancelled during debounce, stopping event trigger")
-						return
-					case <-evtTrigger.done:
-						debounceTimer.Stop()
-						evtTrigger.logger.Info("event trigger shutdown signal received during debounce")
-						return
-					}
+				// Safety check: count events per block per task
+				if !t.checkEventSafety(log) {
+					continue // Skip processing this event due to safety limits
 				}
 
-				evtTrigger.logger.Info("debounce completed - rebuilding subscriptions",
-					"batched_updates", updateCount)
+				// Process the log and match it to tasks
+				if err := t.processLog(log); err != nil {
+					t.logger.Error("❌ Error processing log", "error", err)
+				}
 
-				// Build new filter queries based on current tasks
-				newQueries := evtTrigger.buildFilterQueries()
+			case <-t.updateSubsCh:
+				t.logger.Info("🔄 Subscription update requested")
 
-				evtTrigger.subsMutex.Lock()
-				// Clean up old subscriptions
-				for _, subInfo := range evtTrigger.subscriptions {
+				// Rebuild queries
+				newQueries := t.buildFilterQueries()
+
+				// Stop all existing subscriptions
+				t.subsMutex.Lock()
+				for _, subInfo := range t.subscriptions {
 					subInfo.subscription.Unsubscribe()
 				}
-				evtTrigger.subscriptions = make([]SubscriptionInfo, 0, len(newQueries))
+				t.subscriptions = make([]SubscriptionInfo, 0, len(newQueries))
 
 				if len(newQueries) == 0 {
-					evtTrigger.logger.Info("no tasks require monitoring - all subscriptions stopped")
+					t.logger.Info("🚫 No tasks require monitoring - all subscriptions stopped")
 				} else {
 					// Create new subscriptions
 					for i, queryInfo := range newQueries {
 						// Use timeout context to prevent indefinite blocking during updates
 						timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-						sub, subErr := evtTrigger.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
+						sub, subErr := t.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
 						cancel() // Clean up timeout context
 						if subErr != nil {
-							evtTrigger.logger.Error("failed to create new subscription during update", "index", i, "error", subErr)
+							t.logger.Error("❌ Failed to create new subscription during update", "index", i, "error", subErr)
 							continue
 						}
 
-						evtTrigger.subscriptions = append(evtTrigger.subscriptions, SubscriptionInfo{
+						t.subscriptions = append(t.subscriptions, SubscriptionInfo{
 							subscription: sub,
 							query:        queryInfo.Query,
 							description:  queryInfo.Description,
+							taskID:       queryInfo.TaskID,
+							queryIndex:   queryInfo.QueryIndex,
 						})
 
-						evtTrigger.logger.Info("created new subscription during update",
+						t.logger.Info("✅ Created new subscription during update",
 							"index", i,
+							"task_id", queryInfo.TaskID,
 							"description", queryInfo.Description,
 							"addresses", queryInfo.Query.Addresses,
 							"topics", queryInfo.Query.Topics)
@@ -296,47 +338,50 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 						}(i, sub, queryInfo.Description)
 					}
 				}
-				evtTrigger.subsMutex.Unlock()
+				t.subsMutex.Unlock()
 
-				evtTrigger.logger.Info("subscription update completed", "active_subscriptions", len(newQueries))
+				t.logger.Info("🔄 Subscription update completed", "active_subscriptions", len(newQueries))
+
 			case err := <-errorCh:
 				if err == nil {
 					continue
 				}
-				evtTrigger.logger.Error("subscription error, attempting reconnection", "error", err)
+				t.logger.Error("🔥 Subscription error, attempting reconnection", "error", err)
 
 				// Attempt to reconnect
-				if err := evtTrigger.retryConnectToRpc(); err != nil {
-					evtTrigger.logger.Error("failed to reconnect to RPC", "error", err)
+				if err := t.retryConnectToRpc(); err != nil {
+					t.logger.Error("❌ Failed to reconnect to RPC", "error", err)
 					continue
 				}
 
 				// Rebuild and resubscribe
-				evtTrigger.logger.Info("reconnected, rebuilding subscriptions")
-				newQueries := evtTrigger.buildFilterQueries()
+				t.logger.Info("🔌 Reconnected, rebuilding subscriptions")
+				newQueries := t.buildFilterQueries()
 
-				evtTrigger.subsMutex.Lock()
+				t.subsMutex.Lock()
 				// Clean up old subscriptions
-				for _, subInfo := range evtTrigger.subscriptions {
+				for _, subInfo := range t.subscriptions {
 					subInfo.subscription.Unsubscribe()
 				}
-				evtTrigger.subscriptions = make([]SubscriptionInfo, 0, len(newQueries))
+				t.subscriptions = make([]SubscriptionInfo, 0, len(newQueries))
 
 				// Create new subscriptions
 				for i, queryInfo := range newQueries {
 					// Use timeout context to prevent indefinite blocking during reconnection
 					timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-					sub, subErr := evtTrigger.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
+					sub, subErr := t.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
 					cancel() // Clean up timeout context
 					if subErr != nil {
-						evtTrigger.logger.Error("failed to recreate subscription", "index", i, "error", subErr)
+						t.logger.Error("❌ Failed to recreate subscription", "index", i, "error", subErr)
 						continue
 					}
 
-					evtTrigger.subscriptions = append(evtTrigger.subscriptions, SubscriptionInfo{
+					t.subscriptions = append(t.subscriptions, SubscriptionInfo{
 						subscription: sub,
 						query:        queryInfo.Query,
 						description:  queryInfo.Description,
+						taskID:       queryInfo.TaskID,
+						queryIndex:   queryInfo.QueryIndex,
 					})
 
 					// Restart error monitoring for this subscription
@@ -347,70 +392,9 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 						}
 					}(i, sub, queryInfo.Description)
 				}
-				evtTrigger.subsMutex.Unlock()
-			case event := <-logs:
-				evtTrigger.logger.Debug("detect new event, evaluate checks", "event", event.Topics, "contract", event.Address, "tx", event.TxHash)
-				// TODO: implement hint to avoid scan all checks
-				toRemove := []string{}
-				evtTrigger.progress += 1
+				t.subsMutex.Unlock()
 
-				startTime := time.Now()
-				checksCount := 0
-				evtTrigger.checks.Range(func(key any, value any) bool {
-					checksCount++
-					check := value.(*Check)
-
-					// DEBUG: Log what task is being evaluated (only for first check to avoid spam)
-					if checksCount == 1 {
-						evtTrigger.logger.Debug("evaluating registered task",
-							"task_id", key,
-							"program", check.Program,
-							"matchers_count", len(check.Matcher),
-							"trigger_name", check.TaskMetadata.GetTrigger().GetName(),
-							"trigger_type", check.TaskMetadata.GetTrigger().GetType())
-					}
-					if evtTrigger.shutdown {
-						return false
-					}
-					if hit, err := evtTrigger.Evaluate(&event, check); err == nil && hit {
-						evtTrigger.logger.Info("check hit, notify aggregator", "task_id", key)
-						evtTrigger.triggerCh <- TriggerMetadata[EventMark]{
-							TaskID: key.(string),
-							Marker: EventMark{
-								BlockNumber: event.BlockNumber,
-								LogIndex:    event.Index,
-								TxHash:      event.TxHash.String(),
-							},
-						}
-
-						evtTrigger.logger.Debug("check hit",
-							"check", key,
-							"tx_hash", event.TxHash,
-						)
-
-						// if check.metadata.Remain >= 0 {
-						// 	if check.metadata.Remain == 1 {
-						// 		toRemove = append(toRemove, key.(string))
-						// 		check.metadata.Remain = -1
-						// 	}
-						// }
-					}
-
-					// We do want to continue other check no matter what outcome of previous one
-					return true
-				})
-
-				duration := time.Since(startTime)
-				evtTrigger.logger.Info("completed check evaluations",
-					"checks_count", checksCount,
-					"duration_ms", duration.Milliseconds(),
-					"checks_per_second", float64(checksCount)/(float64(duration.Nanoseconds())/1e9))
-
-				if len(toRemove) > 0 {
-					for _, v := range toRemove {
-						evtTrigger.checks.Delete(v)
-					}
-				}
+				t.logger.Info("🔌 Reconnection completed", "active_subscriptions", len(newQueries))
 			}
 		}
 	}()
@@ -418,523 +402,292 @@ func (evtTrigger *EventTrigger) Run(ctx context.Context) error {
 	return nil
 }
 
-type QueryInfo struct {
-	Query       ethereum.FilterQuery
-	Description string
-}
+// checkEventSafety monitors event counts per block and triggers alerts if limits are exceeded
+func (t *EventTrigger) checkEventSafety(log types.Log) bool {
+	blockNumber := log.BlockNumber
 
-// buildFilterQueries creates multiple filter queries for efficient FROM-OR-TO filtering
-func (evtTrigger *EventTrigger) buildFilterQueries() []QueryInfo {
-	// First check if there are any registered tasks at all
-	totalTasks := 0
-	evtTrigger.checks.Range(func(key any, value any) bool {
-		totalTasks++
-		return false // Just count, no need to continue
-	})
+	// Find which task this log belongs to by checking all subscriptions
+	t.subsMutex.RLock()
+	var matchingTaskID string
+	var queryIndex int
+	var maxEventsPerBlock uint32
 
-	if totalTasks == 0 {
-		evtTrigger.logger.Info("No registered tasks found in buildFilterQueries - no subscriptions needed")
-		return []QueryInfo{} // Return empty slice to prevent any subscriptions
-	}
+	for _, subInfo := range t.subscriptions {
+		if t.logMatchesQuery(log, subInfo.query) {
+			matchingTaskID = subInfo.taskID
+			queryIndex = subInfo.queryIndex
 
-	addressesMap := make(map[common.Address]bool)
-	topicsMap := make(map[common.Hash]bool)
-	fromAddressesMap := make(map[common.Address]bool)
-	toAddressesMap := make(map[common.Address]bool)
-
-	// Analyze all registered checks to collect filter requirements
-	evtTrigger.checks.Range(func(key any, value any) bool {
-		check := value.(*Check)
-
-		// DEBUG: Log detailed task registration info
-		// Note: Owner/smart wallet info requires database lookup which EventTrigger doesn't have access to
-		taskID := key.(string)
-
-		evtTrigger.logger.Info("=== ANALYZING REGISTERED TASK ===",
-			"task_id", taskID,
-			"task_id_length", len(taskID),
-			"program", check.Program,
-			"matchers_count", len(check.Matcher),
-			"trigger_name", check.TaskMetadata.GetTrigger().GetName(),
-			"trigger_type", check.TaskMetadata.GetTrigger().GetType(),
-			"remain", check.TaskMetadata.GetRemain(),
-			"expired_at", check.TaskMetadata.GetExpiredAt())
-
-		evtTrigger.logger.Info("=== TASK ANALYSIS NOTE ===",
-			"message", "To find task owner/smart wallet, need database lookup using TaskStorageKey",
-			"task_storage_pattern", "u:<owner>:<smart_wallet>:<task_id>",
-			"current_task_id", taskID)
-
-		// DEBUG: Log what task is being analyzed for filtering
-		evtTrigger.logger.Info("analyzing registered task for filtering",
-			"task_id", key,
-			"program", check.Program,
-			"matchers_count", len(check.Matcher),
-			"trigger_name", check.TaskMetadata.GetTrigger().GetName())
-
-		// Parse different trigger types
-		if len(check.Matcher) > 0 {
-			// Handle simple matcher-based triggers
-			for _, matcher := range check.Matcher {
-				switch matcher.Type {
-				case "address":
-					if len(matcher.Value) > 0 && matcher.Value[0] != "" {
-						if addr := common.HexToAddress(matcher.Value[0]); addr != (common.Address{}) {
-							addressesMap[addr] = true
-						}
-					}
-				case "topics":
-					if len(matcher.Value) > 0 && matcher.Value[0] != "" {
-						if topic := common.HexToHash(matcher.Value[0]); topic != (common.Hash{}) {
-							topicsMap[topic] = true
-						}
-					}
+			// Get safety limits for this task
+			if check, exists := t.checks.Load(matchingTaskID); exists {
+				checkObj := check.(*Check)
+				if queryIndex < len(checkObj.Queries) {
+					maxEventsPerBlock = checkObj.Queries[queryIndex].GetMaxEventsPerBlock()
 				}
 			}
-		} else if check.Program != "" {
-			// Parse advanced expression-based triggers
-			triggerName := check.TaskMetadata.GetTrigger().GetName()
-
-			// Try to extract information from the JavaScript expression
-			contracts, topics, fromAddrs, toAddrs := evtTrigger.parseExpressionForFilters(check.Program, triggerName)
-
-			for _, addr := range contracts {
-				if addr != (common.Address{}) {
-					addressesMap[addr] = true
-				}
-			}
-
-			for _, topic := range topics {
-				if topic != (common.Hash{}) {
-					topicsMap[topic] = true
-				}
-			}
-
-			for _, addr := range fromAddrs {
-				if addr != (common.Address{}) {
-					fromAddressesMap[addr] = true
-				}
-			}
-
-			for _, addr := range toAddrs {
-				if addr != (common.Address{}) {
-					toAddressesMap[addr] = true
-				}
-			}
-		}
-
-		return true
-	})
-
-	// Convert maps to slices
-	var addresses []common.Address
-	for addr := range addressesMap {
-		addresses = append(addresses, addr)
-	}
-
-	var queries []QueryInfo
-
-	// Check if we have Transfer events and from/to filtering
-	transferTopic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
-	hasTransferEvent := false
-	for topic := range topicsMap {
-		if topic == transferTopic {
-			hasTransferEvent = true
 			break
 		}
 	}
+	t.subsMutex.RUnlock()
 
-	hasFromFilter := len(fromAddressesMap) > 0
-	hasToFilter := len(toAddressesMap) > 0
-
-	// VALIDATION: Disallow overly broad Transfer event filters (similar to buildFilterQuery validation)
-	if hasTransferEvent {
-		// Case 1: Transfer events from any contract without proper filtering
-		if len(addresses) == 0 && !hasFromFilter && !hasToFilter {
-			evtTrigger.logger.Error("DISALLOWED in buildFilterQueries: Transfer events from any contract without from/to filtering")
-			return []QueryInfo{} // Return empty to prevent any subscriptions
-		}
-
-		// Case 2: Transfer events from specific contracts but no from/to filtering
-		if len(addresses) > 0 && !hasFromFilter && !hasToFilter {
-			evtTrigger.logger.Error("DISALLOWED in buildFilterQueries: Transfer events from specific contracts without from/to filtering")
-			evtTrigger.logger.Error("Contracts that would be affected:", "addresses", addresses)
-			return []QueryInfo{} // Return empty to prevent any subscriptions
-		}
+	if matchingTaskID == "" {
+		return true // No matching task found, allow processing
 	}
 
-	if hasTransferEvent && hasFromFilter && hasToFilter {
-		// Check if it's FROM-OR-TO for the same address
-		sameAddressInBoth := false
-		for fromAddr := range fromAddressesMap {
-			if _, exists := toAddressesMap[fromAddr]; exists {
-				sameAddressInBoth = true
+	// Apply default if not specified
+	if maxEventsPerBlock == 0 {
+		maxEventsPerBlock = t.defaultMaxEventsPerQuery
+	}
+
+	// Update event count for this task and block
+	t.eventCountsMutex.Lock()
+	if t.eventCounts[matchingTaskID] == nil {
+		t.eventCounts[matchingTaskID] = make(map[uint64]uint32)
+	}
+	t.eventCounts[matchingTaskID][blockNumber]++
+	currentCount := t.eventCounts[matchingTaskID][blockNumber]
+	t.eventCountsMutex.Unlock()
+
+	// Check if limit is exceeded
+	if currentCount > maxEventsPerBlock {
+		t.logger.Warn("🚨 Event safety limit exceeded",
+			"task_id", matchingTaskID,
+			"block_number", blockNumber,
+			"events_detected", currentCount,
+			"safety_limit", maxEventsPerBlock,
+			"query_index", queryIndex)
+
+		// Trigger overload alert if callback is set
+		if t.onOverloadAlert != nil {
+			alert := &avsproto.EventOverloadAlert{
+				TaskId:          matchingTaskID,
+				OperatorAddress: "operator", // TODO: Get from config
+				BlockNumber:     blockNumber,
+				EventsDetected:  currentCount,
+				SafetyLimit:     maxEventsPerBlock,
+				QueryIndex:      fmt.Sprintf("%d", queryIndex),
+				Timestamp:       uint64(time.Now().UnixMilli()),
+				Details:         fmt.Sprintf("Query %d exceeded %d events per block limit with %d events at block %d", queryIndex, maxEventsPerBlock, currentCount, blockNumber),
+			}
+
+			go t.onOverloadAlert(alert) // Non-blocking call
+		}
+
+		return false // Reject this event
+	}
+
+	return true // Allow processing
+}
+
+// logMatchesQuery checks if a log matches the given ethereum.FilterQuery
+func (t *EventTrigger) logMatchesQuery(log types.Log, query ethereum.FilterQuery) bool {
+	// Check addresses
+	if len(query.Addresses) > 0 {
+		found := false
+		for _, addr := range query.Addresses {
+			if log.Address == addr {
+				found = true
 				break
 			}
 		}
-
-		if sameAddressInBoth {
-			// Create two separate subscriptions: one for FROM, one for TO
-			evtTrigger.logger.Info("Creating dual subscriptions for FROM-OR-TO filtering")
-
-			// FROM subscription
-			fromTopics := [][]common.Hash{
-				{transferTopic}, // Transfer signature
-				{},              // from addresses
-			}
-			for addr := range fromAddressesMap {
-				fromTopics[1] = append(fromTopics[1], common.BytesToHash(addr.Bytes()))
-			}
-
-			queries = append(queries, QueryInfo{
-				Query: ethereum.FilterQuery{
-					Addresses: addresses,
-					Topics:    fromTopics,
-				},
-				Description: fmt.Sprintf("Transfer FROM addresses (count: %d)", len(fromAddressesMap)),
-			})
-
-			// TO subscription
-			toTopics := [][]common.Hash{
-				{transferTopic}, // Transfer signature
-				nil,             // any from address
-				{},              // to addresses
-			}
-			for addr := range toAddressesMap {
-				toTopics[2] = append(toTopics[2], common.BytesToHash(addr.Bytes()))
-			}
-
-			queries = append(queries, QueryInfo{
-				Query: ethereum.FilterQuery{
-					Addresses: addresses,
-					Topics:    toTopics,
-				},
-				Description: fmt.Sprintf("Transfer TO addresses (count: %d)", len(toAddressesMap)),
-			})
-
-			evtTrigger.logger.Info("=== DUAL SUBSCRIPTION STRATEGY ===")
-			evtTrigger.logger.Info("Subscription 1: Transfer FROM specific addresses")
-			evtTrigger.logger.Info("Subscription 2: Transfer TO specific addresses")
-			evtTrigger.logger.Info("Both will trigger the same task - much more efficient!")
-			evtTrigger.logger.Info("=== END DUAL SUBSCRIPTION ===")
-
-			return queries
+		if !found {
+			return false
 		}
 	}
 
-	// If we reach here, we have tasks but they don't fit the dual subscription pattern
-	// Create targeted single subscription based on the registered tasks
-	evtTrigger.logger.Info("Creating targeted single subscription for registered tasks")
-	return []QueryInfo{evtTrigger.convertToQueryInfo(evtTrigger.buildFilterQuery())}
+	// Check topics
+	if len(query.Topics) > 0 && len(log.Topics) > 0 {
+		for i, topicOptions := range query.Topics {
+			if i >= len(log.Topics) {
+				break
+			}
+			if len(topicOptions) > 0 {
+				found := false
+				for _, expectedTopic := range topicOptions {
+					if log.Topics[i] == expectedTopic {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return false
+				}
+			}
+		}
+	}
+
+	return true
 }
 
-// Helper function to convert FilterQuery to QueryInfo
-func (evtTrigger *EventTrigger) convertToQueryInfo(query ethereum.FilterQuery) QueryInfo {
-	description := "Single subscription"
-	if len(query.Addresses) > 0 {
-		description += fmt.Sprintf(" - contracts: %v", query.Addresses)
-	}
-	if len(query.Topics) > 0 {
-		description += fmt.Sprintf(" - %d topic levels", len(query.Topics))
-	}
+// processLog processes an individual log and triggers matching tasks
+func (t *EventTrigger) processLog(log types.Log) error {
+	var triggeredTasks []string
 
-	return QueryInfo{
-		Query:       query,
-		Description: description,
-	}
-}
-
-// buildFilterQuery creates a dynamic filter query based on registered checks
-//
-// EXAMPLE FILTER QUERY STRUCTURES:
-//
-//  1. Basic Transfer event from any contract: ** DISALLOWED **
-//     FilterQuery{
-//     Addresses: nil,  // any contract
-//     Topics: [
-//     [0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef], // Transfer signature
-//     ]
-//     }
-//     NOTE: This would capture ALL Transfer events from ALL contracts - too broad and inefficient.
-//
-//  2. Transfer from specific contract (no from/to filtering): ** DISALLOWED **
-//     FilterQuery{
-//     Addresses: [0x08210F9170F89Ab7658F0B5E3fF39b0E03C594D4],
-//     Topics: [
-//     [0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef], // Transfer signature
-//     ]
-//     }
-//     NOTE: This would capture ALL Transfer events from specific contracts - still too broad.
-//
-//  3. Transfer FROM specific address (from any contract):
-//     FilterQuery{
-//     Addresses: nil,
-//     Topics: [
-//     [0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef], // Transfer signature
-//     [0x000000000000000000000000fE66125343Aabda4A330DA667431eC1Acb7BbDA9], // from address (padded)
-//     ]
-//     }
-//
-//  4. Transfer TO specific address (from any contract):
-//     FilterQuery{
-//     Addresses: nil,
-//     Topics: [
-//     [0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef], // Transfer signature
-//     nil, // any from address
-//     [0x000000000000000000000000fE66125343Aabda4A330DA667431eC1Acb7BbDA9], // to address
-//     ]
-//     }
-//
-// NOTE: For "FROM or TO" scenarios, RPC filtering cannot do OR across topic positions!
-// We need to use a more permissive filter and do the OR logic locally, or use multiple subscriptions.
-// Current strategy: Use permissive filter (just event signature + contract) and filter locally.
-//
-// This dramatically reduces network traffic compared to subscribing to ALL events!
-func (evtTrigger *EventTrigger) buildFilterQuery() ethereum.FilterQuery {
-	addressesMap := make(map[common.Address]bool)
-	topicsMap := make(map[common.Hash]bool)
-	fromAddressesMap := make(map[common.Address]bool)
-	toAddressesMap := make(map[common.Address]bool)
-
-	// Analyze all registered checks to build comprehensive filter
-	evtTrigger.checks.Range(func(key any, value any) bool {
+	// Check all registered tasks to see which ones match this log
+	t.checks.Range(func(key any, value any) bool {
+		taskID := key.(string)
 		check := value.(*Check)
 
-		// Parse different trigger types
-		if len(check.Matcher) > 0 {
-			// Handle simple matcher-based triggers
-			for _, matcher := range check.Matcher {
-				switch matcher.Type {
-				case "address":
-					if len(matcher.Value) > 0 && matcher.Value[0] != "" {
-						if addr := common.HexToAddress(matcher.Value[0]); addr != (common.Address{}) {
-							addressesMap[addr] = true
-						}
+		if t.logMatchesTask(log, check) {
+			triggeredTasks = append(triggeredTasks, taskID)
+
+			// Send trigger notification
+			marker := EventMark{
+				BlockNumber: log.BlockNumber,
+				LogIndex:    uint(log.Index),
+				TxHash:      log.TxHash.Hex(),
+			}
+
+			triggerMeta := TriggerMetadata[EventMark]{
+				TaskID: taskID,
+				Marker: marker,
+			}
+
+			select {
+			case t.triggerCh <- triggerMeta:
+				t.logger.Info("🎯 Task triggered",
+					"task_id", taskID,
+					"block", log.BlockNumber,
+					"tx", log.TxHash.Hex(),
+					"log_index", log.Index)
+			default:
+				t.logger.Warn("⚠️ Trigger channel full, dropping trigger", "task_id", taskID)
+			}
+		}
+		return true
+	})
+
+	if len(triggeredTasks) > 0 {
+		t.logger.Debug("📤 Log processed successfully",
+			"triggered_tasks", len(triggeredTasks),
+			"task_ids", triggeredTasks)
+	}
+
+	return nil
+}
+
+// logMatchesTask checks if a log matches any of the queries for a specific task
+func (t *EventTrigger) logMatchesTask(log types.Log, check *Check) bool {
+	for _, query := range check.Queries {
+		if t.logMatchesEventQuery(log, query) {
+			return true
+		}
+	}
+	return false
+}
+
+// logMatchesEventQuery checks if a log matches a specific EventTrigger_Query
+func (t *EventTrigger) logMatchesEventQuery(log types.Log, query *avsproto.EventTrigger_Query) bool {
+	// Check addresses
+	addresses := query.GetAddresses()
+	if len(addresses) > 0 {
+		found := false
+		for _, addrStr := range addresses {
+			if addr := common.HexToAddress(addrStr); addr == log.Address {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+
+	// Check topics
+	topics := query.GetTopics()
+	if len(topics) > 0 && len(log.Topics) > 0 {
+		for i, topicFilter := range topics {
+			if i >= len(log.Topics) {
+				break
+			}
+
+			topicValues := topicFilter.GetValues()
+			if len(topicValues) > 0 {
+				found := false
+				for _, expectedTopicStr := range topicValues {
+					if expectedTopic := common.HexToHash(expectedTopicStr); log.Topics[i] == expectedTopic {
+						found = true
+						break
 					}
-				case "topics":
-					if len(matcher.Value) > 0 && matcher.Value[0] != "" {
-						if topic := common.HexToHash(matcher.Value[0]); topic != (common.Hash{}) {
-							topicsMap[topic] = true
-						}
-					}
+				}
+				if !found {
+					return false
 				}
 			}
-		} else if check.Program != "" {
-			// Parse advanced expression-based triggers
-			triggerName := check.TaskMetadata.GetTrigger().GetName()
+		}
+	}
 
-			// Try to extract information from the JavaScript expression
-			contracts, topics, fromAddrs, toAddrs := evtTrigger.parseExpressionForFilters(check.Program, triggerName)
+	return true
+}
 
-			for _, addr := range contracts {
-				if addr != (common.Address{}) {
-					addressesMap[addr] = true
-				}
+// buildFilterQueries converts all registered tasks into ethereum.FilterQuery objects
+func (t *EventTrigger) buildFilterQueries() []QueryInfo {
+	var allQueries []QueryInfo
+
+	t.checks.Range(func(key any, value any) bool {
+		taskID := key.(string)
+		check := value.(*Check)
+
+		// Convert each EventTrigger_Query to ethereum.FilterQuery
+		for i, query := range check.Queries {
+			ethQuery := t.convertToFilterQuery(query)
+
+			description := fmt.Sprintf("Task[%s] Query[%d]", taskID, i)
+			if len(ethQuery.Addresses) > 0 {
+				description += fmt.Sprintf(" - contracts:%v", ethQuery.Addresses)
+			}
+			if len(ethQuery.Topics) > 0 {
+				description += fmt.Sprintf(" - %d topic levels", len(ethQuery.Topics))
 			}
 
-			for _, topic := range topics {
-				if topic != (common.Hash{}) {
-					topicsMap[topic] = true
-				}
+			queryInfo := QueryInfo{
+				Query:             ethQuery,
+				Description:       description,
+				TaskID:            taskID,
+				QueryIndex:        i,
+				MaxEventsPerBlock: query.GetMaxEventsPerBlock(),
 			}
 
-			for _, addr := range fromAddrs {
-				if addr != (common.Address{}) {
-					fromAddressesMap[addr] = true
-				}
-			}
-
-			for _, addr := range toAddrs {
-				if addr != (common.Address{}) {
-					toAddressesMap[addr] = true
-				}
-			}
+			allQueries = append(allQueries, queryInfo)
 		}
 
 		return true
 	})
 
-	// Convert maps to slices
+	if len(allQueries) > 0 {
+		t.logger.Info("🔧 Built filter queries",
+			"total_queries", len(allQueries))
+
+		for i, q := range allQueries {
+			t.logger.Info("📋 Query details",
+				"index", i,
+				"task_id", q.TaskID,
+				"description", q.Description,
+				"addresses", len(q.Query.Addresses),
+				"topic_levels", len(q.Query.Topics))
+		}
+	}
+
+	return allQueries
+}
+
+// convertToFilterQuery converts a protobuf EventTrigger_Query to ethereum.FilterQuery
+func (t *EventTrigger) convertToFilterQuery(query *avsproto.EventTrigger_Query) ethereum.FilterQuery {
 	var addresses []common.Address
-	for addr := range addressesMap {
-		addresses = append(addresses, addr)
+	for _, addrStr := range query.GetAddresses() {
+		if addr := common.HexToAddress(addrStr); addr != (common.Address{}) {
+			addresses = append(addresses, addr)
+		}
 	}
 
 	var topics [][]common.Hash
-	if len(topicsMap) > 0 {
-		var topicList []common.Hash
-		for topic := range topicsMap {
-			topicList = append(topicList, topic)
-		}
-		// First position is event signature/topic0
-		topics = append(topics, topicList)
-
-		// Handle from/to filtering for Transfer events
-		if evtTrigger.hasTransferEvent(topicList) {
-			hasFromFilter := len(fromAddressesMap) > 0
-			hasToFilter := len(toAddressesMap) > 0
-
-			if hasFromFilter && hasToFilter {
-				// Check if it's the same address in both from and to
-				sameAddressInBoth := false
-				for fromAddr := range fromAddressesMap {
-					if _, exists := toAddressesMap[fromAddr]; exists {
-						sameAddressInBoth = true
-						break
-					}
-				}
-
-				if sameAddressInBoth {
-					// For "from=X||to=X" (same address), use permissive filter and do OR logic locally
-					evtTrigger.logger.Info("FROM-OR-TO filtering detected: using permissive filter + local evaluation")
-					// Don't add topic filters - let all Transfer events through and filter locally
-				} else {
-					// Different addresses in from and to - this is likely an error in configuration
-					evtTrigger.logger.Warn("FROM and TO filters have different addresses - using permissive filter")
-				}
-			} else if hasFromFilter {
-				// Only FROM filter
-				var fromTopics []common.Hash
-				for addr := range fromAddressesMap {
-					fromTopics = append(fromTopics, common.BytesToHash(addr.Bytes()))
-				}
-				topics = append(topics, fromTopics)
-				evtTrigger.logger.Info("FROM-only filter applied", "from_addresses", fromTopics)
-			} else if hasToFilter {
-				// Only TO filter
-				topics = append(topics, nil) // any from address
-				var toTopics []common.Hash
-				for addr := range toAddressesMap {
-					toTopics = append(toTopics, common.BytesToHash(addr.Bytes()))
-				}
-				topics = append(topics, toTopics)
-				evtTrigger.logger.Info("TO-only filter applied", "to_addresses", toTopics)
+	for _, topicFilter := range query.GetTopics() {
+		var topicHashes []common.Hash
+		for _, topicStr := range topicFilter.GetValues() {
+			if hash := common.HexToHash(topicStr); hash != (common.Hash{}) {
+				topicHashes = append(topicHashes, hash)
 			}
 		}
-	}
-
-	// If no specific filters detected, don't create any subscriptions
-	// This means no tasks are registered, so no events need to be monitored
-	if len(addresses) == 0 && len(topics) == 0 {
-		evtTrigger.logger.Info("no registered tasks require event monitoring - no subscriptions needed")
-		return ethereum.FilterQuery{} // Return empty filter - no subscriptions will be created
-	}
-
-	evtTrigger.logger.Info("built dynamic filter",
-		"addresses_count", len(addresses),
-		"topic_levels", len(topics),
-		"from_addresses_count", len(fromAddressesMap),
-		"to_addresses_count", len(toAddressesMap))
-
-	// Log detailed filter structure for debugging
-	if len(addresses) > 0 || len(topics) > 0 {
-		evtTrigger.logger.Info("=== FILTER QUERY STRUCTURE ===")
-
-		if len(addresses) > 0 {
-			evtTrigger.logger.Info("Contract addresses filter:", "addresses", addresses)
-			evtTrigger.logger.Info("  Example: Only events from these specific contracts will be received")
-		}
-
-		if len(topics) > 0 {
-			for i, topicLevel := range topics {
-				switch i {
-				case 0:
-					evtTrigger.logger.Info("Topic[0] - Event signatures:", "topics", topicLevel)
-					evtTrigger.logger.Info("  Example: 0xddf252ad... = Transfer event signature")
-				case 1:
-					if len(topicLevel) > 0 {
-						evtTrigger.logger.Info("Topic[1] - FROM addresses:", "topics", topicLevel)
-						evtTrigger.logger.Info("  Example: Only Transfer events FROM these addresses")
-					} else {
-						evtTrigger.logger.Info("Topic[1] - FROM addresses: ANY (no filter)")
-					}
-				case 2:
-					if len(topicLevel) > 0 {
-						evtTrigger.logger.Info("Topic[2] - TO addresses:", "topics", topicLevel)
-						evtTrigger.logger.Info("  Example: Only Transfer events TO these addresses")
-					} else {
-						evtTrigger.logger.Info("Topic[2] - TO addresses: ANY (no filter)")
-					}
-				default:
-					evtTrigger.logger.Info("Topic[%d]:", i, "topics", topicLevel)
-				}
-			}
-		}
-
-		// Show complete example
-		evtTrigger.logger.Info("=== COMPLETE FILTER EXAMPLE ===")
-		if len(addresses) > 0 && len(topics) > 0 {
-			if len(fromAddressesMap) > 0 && len(toAddressesMap) > 0 {
-				evtTrigger.logger.Info("FROM-OR-TO scenario: Permissive RPC filter + local evaluation")
-				evtTrigger.logger.Info("  - RPC receives: Transfer events from contracts", "contracts", addresses)
-				fromAddrs := make([]common.Address, 0, len(fromAddressesMap))
-				for addr := range fromAddressesMap {
-					fromAddrs = append(fromAddrs, addr)
-				}
-				toAddrs := make([]common.Address, 0, len(toAddressesMap))
-				for addr := range toAddressesMap {
-					toAddrs = append(toAddrs, addr)
-				}
-				evtTrigger.logger.Info("  - Local filter: from OR to", "from_addresses", fromAddrs, "to_addresses", toAddrs)
-			} else {
-				evtTrigger.logger.Info("FilterQuery will receive:")
-				evtTrigger.logger.Info("  - Events from contracts", "contracts", addresses)
-				evtTrigger.logger.Info("  - With event signatures", "signatures", topics[0])
-				if len(topics) > 1 && len(topics[1]) > 0 {
-					evtTrigger.logger.Info("  - FROM addresses", "from_addresses", topics[1])
-				}
-				if len(topics) > 2 && len(topics[2]) > 0 {
-					evtTrigger.logger.Info("  - TO addresses", "to_addresses", topics[2])
-				}
-			}
-		} else if len(addresses) > 0 {
-			evtTrigger.logger.Info("FilterQuery: Events from contracts (any event type)", "addresses", addresses)
-		} else if len(topics) > 0 {
-			evtTrigger.logger.Info("FilterQuery: Events with signatures (any contract)", "topics", topics[0])
-		}
-		evtTrigger.logger.Info("=== END FILTER STRUCTURE ===")
-	}
-
-	// VALIDATION: Disallow overly broad Transfer event filters to prevent network overload
-	transferTopic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
-	hasTransferInTopics := false
-	if len(topics) > 0 {
-		for _, topic := range topics[0] {
-			if topic == transferTopic {
-				hasTransferInTopics = true
-				break
-			}
-		}
-	}
-
-	if hasTransferInTopics {
-		// Case 1: Transfer events from any contract (no address filter AND no from/to filters)
-		if len(addresses) == 0 && (len(topics) == 1 || (len(topics) > 1 && len(topics[1]) == 0 && (len(topics) <= 2 || len(topics[2]) == 0))) {
-			evtTrigger.logger.Error("DISALLOWED: Transfer events from any contract without from/to filtering")
-			evtTrigger.logger.Error("This would capture ALL Transfer events from ALL contracts - too broad and inefficient")
-
-			// Debug: Log which checks are causing this
-			evtTrigger.checks.Range(func(key any, value any) bool {
-				check := value.(*Check)
-				evtTrigger.logger.Error("Problematic check causing broad filter",
-					"task_id", key,
-					"program", check.Program,
-					"matchers_count", len(check.Matcher))
-				return true
-			})
-
-			return ethereum.FilterQuery{} // Return empty filter to prevent subscription
-		}
-
-		// Case 2: Transfer events from specific contracts but no from/to filtering
-		if len(addresses) > 0 && (len(topics) == 1 || (len(topics) > 1 && len(topics[1]) == 0 && (len(topics) <= 2 || len(topics[2]) == 0))) {
-			evtTrigger.logger.Error("DISALLOWED: Transfer events from specific contracts without from/to filtering")
-			evtTrigger.logger.Error("This would capture ALL Transfer events from specified contracts - still too broad")
-			evtTrigger.logger.Error("Contracts that would be affected:", "addresses", addresses)
-			return ethereum.FilterQuery{} // Return empty filter to prevent subscription
-		}
-
-		evtTrigger.logger.Info("Transfer filter validation passed - has proper from/to filtering")
+		topics = append(topics, topicHashes)
 	}
 
 	return ethereum.FilterQuery{
@@ -943,234 +696,34 @@ func (evtTrigger *EventTrigger) buildFilterQuery() ethereum.FilterQuery {
 	}
 }
 
-// hasTransferEvent checks if the topic list contains Transfer event signature
-func (evtTrigger *EventTrigger) hasTransferEvent(topics []common.Hash) bool {
-	transferTopic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
-	for _, topic := range topics {
-		if topic == transferTopic {
-			return true
-		}
-	}
-	return false
+// Stop stops the event trigger
+func (t *EventTrigger) Stop() {
+	t.logger.Info("🛑 Stopping EventTrigger")
+	t.shutdown = true
+	close(t.done)
 }
 
-// parseExpressionForFilters extracts contract addresses and topics from JavaScript expressions
-func (evtTrigger *EventTrigger) parseExpressionForFilters(program, triggerName string) ([]common.Address, []common.Hash, []common.Address, []common.Address) {
-	var contracts []common.Address
-	var topics []common.Hash
-	var fromAddresses []common.Address
-	var toAddresses []common.Address
+// Cleanup for old event counts (call periodically to prevent memory leaks)
+func (t *EventTrigger) cleanupOldEventCounts(blocksToKeep uint64) {
+	t.eventCountsMutex.Lock()
+	defer t.eventCountsMutex.Unlock()
 
-	// First check for enhanced expression format (used in immediate execution)
-	// Format: "0xddf252...&&contracts=[0xaddr1,0xaddr2]&&from=0xaddr&&to=0xaddr"
-	if strings.Contains(program, "&&") {
-		topicHash, contractAddresses, fromAddress, toAddress := evtTrigger.parseEnhancedExpression(program)
+	// Get current block number (you might want to track this)
+	// For now, just keep recent blocks based on the parameter
 
-		// Add topic hash if found
-		if topicHash != "" {
-			if topic := common.HexToHash(topicHash); topic != (common.Hash{}) {
-				topics = append(topics, topic)
-			}
-		}
-
-		// Add contract addresses if found
-		for _, addrStr := range contractAddresses {
-			if addr := common.HexToAddress(addrStr); addr != (common.Address{}) {
-				contracts = append(contracts, addr)
-			}
-		}
-
-		if fromAddress != "" {
-			if addr := common.HexToAddress(fromAddress); addr != (common.Address{}) {
-				fromAddresses = append(fromAddresses, addr)
-			}
-		}
-
-		if toAddress != "" {
-			if addr := common.HexToAddress(toAddress); addr != (common.Address{}) {
-				toAddresses = append(toAddresses, addr)
-			}
-		}
-
-		return contracts, topics, fromAddresses, toAddresses
-	}
-
-	// Look for common patterns in JavaScript expressions:
-	// - triggerName.data.address == "0x..."
-	// - triggerName.data.topics[0] == "0x..."
-
-	// Extract contract addresses from JS expressions
-	addressPattern := regexp.MustCompile(triggerName + `\.data\.address\s*==\s*"(0x[a-fA-F0-9]{40})"`)
-	addressMatches := addressPattern.FindAllStringSubmatch(program, -1)
-	for _, match := range addressMatches {
-		if len(match) > 1 {
-			if addr := common.HexToAddress(match[1]); addr != (common.Address{}) {
-				contracts = append(contracts, addr)
-			}
-		}
-	}
-
-	// Extract topic hashes (usually topic[0] for event signatures)
-	topicPattern := regexp.MustCompile(triggerName + `\.data\.topics\[0\]\s*==\s*"(0x[a-fA-F0-9]{64})"`)
-	topicMatches := topicPattern.FindAllStringSubmatch(program, -1)
-	for _, match := range topicMatches {
-		if len(match) > 1 {
-			if topic := common.HexToHash(match[1]); topic != (common.Hash{}) {
-				topics = append(topics, topic)
-			}
-		}
-	}
-
-	// Extract Transfer event signature (common case)
-	transferPattern := regexp.MustCompile(`0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef`)
-	if transferPattern.MatchString(program) {
-		transferTopic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
-		topics = append(topics, transferTopic)
-	}
-
-	return contracts, topics, fromAddresses, toAddresses
-}
-
-// parseEnhancedExpression parses the enhanced expression format used in immediate execution
-// Examples:
-// - "0xddf252...signature" -> (signature, [], "", "")
-// - "0xddf252...signature&&0xaddr" -> (signature, [addr], "", "")
-// - "0xddf252...signature&&contracts=[0xaddr1,0xaddr2]" -> (signature, [addr1,addr2], "", "")
-// - "0xddf252...signature&&from=0xaddr" -> (signature, [], addr, "")
-// - "0xddf252...signature&&to=0xaddr" -> (signature, [], "", addr)
-func (evtTrigger *EventTrigger) parseEnhancedExpression(expression string) (topicHash string, contractAddresses []string, fromAddress, toAddress string) {
-	parts := strings.Split(expression, "&&")
-
-	// First part is always the topic hash
-	if len(parts) > 0 {
-		topicHash = strings.TrimSpace(parts[0])
-	}
-
-	// Parse additional parameters
-	for i := 1; i < len(parts); i++ {
-		part := strings.TrimSpace(parts[i])
-
-		if strings.HasPrefix(part, "contracts=") {
-			// Parse contracts array: contracts=[0xaddr1,0xaddr2]
-			contractsStr := strings.TrimPrefix(part, "contracts=")
-			if strings.HasPrefix(contractsStr, "[") && strings.HasSuffix(contractsStr, "]") {
-				contractsStr = strings.Trim(contractsStr, "[]")
-				if contractsStr != "" {
-					contractAddresses = strings.Split(contractsStr, ",")
-					for j := range contractAddresses {
-						contractAddresses[j] = strings.TrimSpace(contractAddresses[j])
-					}
+	for taskID, blockCounts := range t.eventCounts {
+		// This is a simplified cleanup - in practice you'd want to know the current block
+		// For now, just limit the number of blocks we keep in memory
+		if len(blockCounts) > int(blocksToKeep) {
+			// Find and remove oldest blocks
+			var oldestBlock uint64 = ^uint64(0)
+			for blockNumber := range blockCounts {
+				if blockNumber < oldestBlock {
+					oldestBlock = blockNumber
 				}
 			}
-		} else if strings.HasPrefix(part, "from=") {
-			fromPart := strings.TrimSpace(strings.TrimPrefix(part, "from="))
-			// Check if this contains OR logic: from=X||to=Y
-			if strings.Contains(fromPart, "||to=") {
-				orParts := strings.Split(fromPart, "||to=")
-				if len(orParts) == 2 {
-					fromAddress = strings.TrimSpace(orParts[0])
-					toAddress = strings.TrimSpace(orParts[1])
-				} else {
-					fromAddress = fromPart
-				}
-			} else {
-				fromAddress = fromPart
-			}
-		} else if strings.HasPrefix(part, "to=") {
-			toAddress = strings.TrimSpace(strings.TrimPrefix(part, "to="))
-		} else {
-			// Simple contract address format
-			contractAddresses = []string{part}
+			delete(blockCounts, oldestBlock)
+			t.logger.Debug("🧹 Cleaned up old event counts", "task_id", taskID, "removed_block", oldestBlock)
 		}
 	}
-
-	return topicHash, contractAddresses, fromAddress, toAddress
-}
-
-func (evt *EventTrigger) Evaluate(event *types.Log, check *Check) (bool, error) {
-	if event == nil {
-		return false, fmt.Errorf("event is nil")
-	}
-
-	var err error = nil
-
-	if len(check.Matcher) > 0 {
-		// This is the simpler trigger. It's essentially an anyof
-		return lo.SomeBy(check.Matcher, func(x *avsproto.EventTrigger_Matcher) bool {
-			if len(x.Value) == 0 {
-				err = fmt.Errorf("matcher value is empty")
-				return false
-			}
-
-			switch x.Type {
-			case "topics":
-				// Matching based on topic of transaction
-				topics := lo.Map[common.Hash, string](event.Topics, func(topic common.Hash, _ int) string {
-					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x"))
-				})
-
-				match := true
-				// In Topics matching, this will be the array of topics. an element that is empty is skip
-				for i, v := range x.Value {
-					if v == "" || v == "0x" {
-						continue
-					}
-
-					match = match && strings.EqualFold(topics[i], v)
-				}
-				return match
-			case "address":
-				// Matching base on token contract that emit the event
-				return strings.EqualFold(event.Address.String(), x.Value[0])
-			}
-
-			// Unsupport type
-			err = fmt.Errorf("unsupport matcher type: %s", x.Type)
-			return false
-		}), err
-	}
-
-	if check.Program != "" {
-		// This is the advance trigger with js evaluation based on trigger data
-		triggerVarName := check.TaskMetadata.GetTrigger().GetName()
-
-		jsvm := taskengine.NewGojaVM()
-
-		envs := macros.GetEnvs(map[string]interface{}{})
-		for k, v := range envs {
-			if err := jsvm.Set(k, v); err != nil {
-				return false, fmt.Errorf("failed to set macro env in JS VM: %w", err)
-			}
-		}
-
-		triggerData := map[string]interface{}{
-			"data": map[string]interface{}{
-				"address": strings.ToLower(event.Address.Hex()),
-				"topics": lo.Map[common.Hash, string](event.Topics, func(topic common.Hash, _ int) string {
-					return "0x" + strings.ToLower(strings.TrimLeft(topic.String(), "0x"))
-				}),
-				"data":    "0x" + common.Bytes2Hex(event.Data),
-				"tx_hash": event.TxHash,
-			},
-		}
-		if err := jsvm.Set(triggerVarName, triggerData); err != nil {
-			return false, fmt.Errorf("failed to set trigger data in JS VM: %w", err)
-		}
-
-		result, err := jsvm.RunString(check.Program)
-
-		if err != nil {
-			return false, err
-		}
-
-		evalutationResult, ok := result.Export().(bool)
-		if !ok {
-			return false, fmt.Errorf("the expression `%s` didn't return a boolean but %v", check.Program, result.Export())
-		}
-
-		return evalutationResult, err
-	}
-
-	err = fmt.Errorf("invalid event trigger check: both matcher or expression are missing or empty")
-	return false, err
 }

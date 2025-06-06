@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"time"
 
 	"github.com/allegro/bigcache/v3"
 	"github.com/ethereum/go-ethereum/common"
@@ -536,6 +537,49 @@ func (r *RpcServer) GetTokenMetadata(ctx context.Context, payload *avsproto.GetT
 	)
 
 	return r.engine.GetTokenMetadata(user, payload)
+}
+
+// ReportEventOverload handles event overload alerts from operators
+func (r *RpcServer) ReportEventOverload(ctx context.Context, alert *avsproto.EventOverloadAlert) (*avsproto.EventOverloadResponse, error) {
+	r.config.Logger.Warn("🚨 EVENT OVERLOAD ALERT RECEIVED",
+		"task_id", alert.TaskId,
+		"operator_address", alert.OperatorAddress,
+		"block_number", alert.BlockNumber,
+		"events_detected", alert.EventsDetected,
+		"safety_limit", alert.SafetyLimit,
+		"query_index", alert.QueryIndex,
+		"details", alert.Details)
+
+	// Cancel the overloaded task immediately
+	cancelled, err := r.engine.CancelTask(alert.TaskId)
+	if err != nil {
+		r.config.Logger.Error("❌ Failed to cancel overloaded task",
+			"task_id", alert.TaskId,
+			"error", err)
+		return &avsproto.EventOverloadResponse{
+			TaskCancelled: false,
+			Message:       fmt.Sprintf("Failed to cancel task: %v", err),
+			Timestamp:     uint64(time.Now().UnixMilli()),
+		}, nil
+	}
+
+	responseMessage := "Task cancelled due to event overload"
+	if !cancelled {
+		responseMessage = "Task was already cancelled or not found"
+	}
+
+	// TODO: Integrate with Sentry for alerting
+	// sentry.CaptureMessage(fmt.Sprintf("Event overload detected for task %s: %s", alert.TaskId, alert.Details))
+
+	r.config.Logger.Info("🛑 Task cancelled due to event overload",
+		"task_id", alert.TaskId,
+		"cancelled", cancelled)
+
+	return &avsproto.EventOverloadResponse{
+		TaskCancelled: cancelled,
+		Message:       responseMessage,
+		Timestamp:     uint64(time.Now().UnixMilli()),
+	}, nil
 }
 
 // Helper functions for logging

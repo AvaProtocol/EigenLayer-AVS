@@ -139,7 +139,26 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	o.blockTrigger = triggerengine.NewBlockTrigger(&rpcConfig, blockTriggerCh, o.logger)
 
 	eventTriggerCh := make(chan triggerengine.TriggerMetadata[triggerengine.EventMark], 1000)
-	o.eventTrigger = triggerengine.NewEventTrigger(&rpcConfig, eventTriggerCh, o.logger)
+	o.eventTrigger = triggerengine.NewEventTrigger(&rpcConfig, eventTriggerCh, o.logger,
+		o.config.GetMaxEventsPerQueryPerBlock(), o.config.GetMaxTotalEventsPerBlock())
+
+	// Set up overload alert callback to notify aggregator
+	o.eventTrigger.SetOverloadAlertCallback(func(alert *avspb.EventOverloadAlert) {
+		o.logger.Warn("🚨 Sending event overload alert to aggregator",
+			"task_id", alert.TaskId,
+			"events_detected", alert.EventsDetected,
+			"safety_limit", alert.SafetyLimit)
+
+		// Use existing node client for internal overload alerts
+		if _, err := o.nodeRpcClient.ReportEventOverload(context.Background(), alert); err != nil {
+			o.logger.Error("❌ Failed to send overload alert to aggregator",
+				"task_id", alert.TaskId,
+				"error", err)
+		} else {
+			o.logger.Info("✅ Successfully sent overload alert to aggregator",
+				"task_id", alert.TaskId)
+		}
+	})
 
 	timeTriggerCh := make(chan triggerengine.TriggerMetadata[uint64], 1000)
 	o.timeTrigger = triggerengine.NewTimeTrigger(timeTriggerCh, o.logger)

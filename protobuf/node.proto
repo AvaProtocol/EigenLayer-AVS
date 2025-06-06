@@ -98,10 +98,37 @@ message NotifyTriggersResp {
   google.protobuf.Timestamp updated_at = 1;
 }
 
+// ============================================================================
+// INTERNAL OPERATOR SAFETY MESSAGES
+// ============================================================================
+
+// EventOverloadAlert is sent by operators to aggregator when event query processing 
+// exceeds safety limits, triggering task cancellation and Sentry alerts
+message EventOverloadAlert {
+  string task_id = 1;           // Task ID that triggered the overload
+  string operator_address = 2;  // Address of the operator reporting the overload
+  uint64 block_number = 3;      // Block number where overload was detected
+  uint32 events_detected = 4;   // Number of events that triggered the alert
+  uint32 safety_limit = 5;      // The safety limit that was exceeded
+  string query_index = 6;       // Index/identifier of the specific query that overloaded
+  uint64 timestamp = 7;         // Timestamp when overload was detected (milliseconds)
+  string details = 8;           // Additional context about the overload
+}
+
+// EventOverloadResponse is the aggregator's response to an overload alert
+message EventOverloadResponse {
+  bool task_cancelled = 1;      // Whether the task was cancelled due to overload
+  string message = 2;           // Response message/reason
+  uint64 timestamp = 3;         // Response timestamp (milliseconds)
+}
+
 service Node {
   // Operator endpoint
   rpc Ping(Checkin) returns (CheckinResp) {};
   rpc SyncMessages(SyncMessagesReq) returns (stream SyncMessagesResp) {};
   rpc Ack(AckMessageReq) returns (google.protobuf.BoolValue) {};
   rpc NotifyTriggers(NotifyTriggersReq) returns (NotifyTriggersResp) {};
+  
+  // Internal operator safety reporting  
+  rpc ReportEventOverload(EventOverloadAlert) returns (EventOverloadResponse);
 }

@@ -1579,6 +1579,55 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 	return true, nil
 }
 
+// CancelTask cancels a task by ID without user authentication (for internal use like overload alerts)
+func (n *Engine) CancelTask(taskID string) (bool, error) {
+	n.lock.Lock()
+	task, exists := n.tasks[taskID]
+	n.lock.Unlock()
+
+	if !exists {
+		n.logger.Warn("Task not found for cancellation", "task_id", taskID)
+		return false, nil
+	}
+
+	if task.Status != avsproto.TaskStatus_Active {
+		n.logger.Info("Task is not active, cannot cancel", "task_id", taskID, "status", task.Status)
+		return false, nil
+	}
+
+	updates := map[string][]byte{}
+	oldStatus := task.Status
+	task.SetCanceled()
+
+	taskJSON, err := task.ToJSON()
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize canceled task: %w", err)
+	}
+
+	updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON
+	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
+
+	if err = n.db.BatchWrite(updates); err == nil {
+		// Delete the old record
+		if oldStatus != task.Status {
+			if delErr := n.db.Delete(TaskStorageKey(task.Id, oldStatus)); delErr != nil {
+				n.logger.Error("failed to delete old task status entry", "error", delErr, "task_id", task.Id, "old_status", oldStatus)
+			}
+		}
+
+		n.lock.Lock()
+		delete(n.tasks, task.Id) // Remove from active tasks map
+		n.lock.Unlock()
+	} else {
+		return false, err
+	}
+
+	n.notifyOperatorsTaskOperation(taskID, avsproto.MessageOp_CancelTask)
+	n.logger.Info("Task cancelled due to system alert", "task_id", taskID)
+
+	return true, nil
+}
+
 func (n *Engine) CreateSecret(user *model.User, payload *avsproto.CreateOrUpdateSecretReq) (bool, error) {
 	secret := &model.Secret{
 		User:       user,
