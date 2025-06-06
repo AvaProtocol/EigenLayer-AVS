@@ -590,6 +590,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 }
 
 // notifyOperatorsTaskOperation sends real-time notifications to operators about task operations (cancel/delete)
+// This method is non-blocking to prevent hanging of cancel/delete operations
 func (n *Engine) notifyOperatorsTaskOperation(taskID string, operation avsproto.MessageOp) {
 	// Copy operator streams under read lock to minimize lock duration
 	n.streamsMutex.RLock()
@@ -599,47 +600,71 @@ func (n *Engine) notifyOperatorsTaskOperation(taskID string, operation avsproto.
 	}
 	n.streamsMutex.RUnlock()
 
-	operatorsNotified := 0
+	// Run notifications asynchronously to prevent blocking the caller
+	go func() {
+		operatorsNotified := 0
 
-	for operatorAddr, stream := range operatorStreamsCopy {
-		// Check if this operator was tracking this task
-		if operatorState, exists := n.trackSyncedTasks[operatorAddr]; exists {
-			if _, wasTracked := operatorState.TaskID[taskID]; wasTracked {
-				// Send notification
-				resp := avsproto.SyncMessagesResp{
-					Id: taskID,
-					Op: operation,
-					TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
-						TaskId: taskID,
-					},
-				}
+		for operatorAddr, stream := range operatorStreamsCopy {
+			// Check if this operator was tracking this task
+			if operatorState, exists := n.trackSyncedTasks[operatorAddr]; exists {
+				if _, wasTracked := operatorState.TaskID[taskID]; wasTracked {
+					// Send notification with timeout to prevent hanging
+					go func(addr string, s avsproto.Node_SyncMessagesServer) {
+						resp := avsproto.SyncMessagesResp{
+							Id: taskID,
+							Op: operation,
+							TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
+								TaskId: taskID,
+							},
+						}
 
-				if err := stream.Send(&resp); err != nil {
-					n.logger.Warn("Failed to notify operator of task operation",
-						"operator", operatorAddr,
-						"task_id", taskID,
-						"operation", operation.String(),
-						"error", err)
-				} else {
-					n.logger.Info("Successfully notified operator of task operation",
-						"operator", operatorAddr,
-						"task_id", taskID,
-						"operation", operation.String())
-					operatorsNotified++
+						// Use a channel to handle timeout
+						done := make(chan error, 1)
+						go func() {
+							done <- s.Send(&resp)
+						}()
 
-					// Remove the task from the operator's tracking state since it's no longer active
-					delete(operatorState.TaskID, taskID)
+						select {
+						case err := <-done:
+							if err != nil {
+								n.logger.Warn("Failed to notify operator of task operation",
+									"operator", addr,
+									"task_id", taskID,
+									"operation", operation.String(),
+									"error", err)
+							} else {
+								n.logger.Info("Successfully notified operator of task operation",
+									"operator", addr,
+									"task_id", taskID,
+									"operation", operation.String())
+								operatorsNotified++
+
+								// Remove the task from the operator's tracking state since it's no longer active
+								if state, exists := n.trackSyncedTasks[addr]; exists {
+									delete(state.TaskID, taskID)
+								}
+							}
+						case <-time.After(5 * time.Second):
+							n.logger.Warn("Timeout notifying operator of task operation",
+								"operator", addr,
+								"task_id", taskID,
+								"operation", operation.String())
+						}
+					}(operatorAddr, stream)
 				}
 			}
 		}
-	}
 
-	if operatorsNotified > 0 {
-		n.logger.Info("Task operation notification completed",
-			"task_id", taskID,
-			"operation", operation.String(),
-			"operators_notified", operatorsNotified)
-	}
+		// Small delay to allow goroutines to complete and update counters
+		time.Sleep(100 * time.Millisecond)
+
+		if operatorsNotified > 0 {
+			n.logger.Info("Task operation notification completed",
+				"task_id", taskID,
+				"operation", operation.String(),
+				"operators_notified", operatorsNotified)
+		}
+	}()
 }
 
 // TODO: Merge and verify from multiple operators
