@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
@@ -54,7 +55,9 @@ func TestGetTokenMetadataRPC(t *testing.T) {
 		assert.True(t, resp.Found, "Token should be found")
 		assert.NotNil(t, resp.Token, "Token data should not be nil")
 		if resp.Token != nil {
-			assert.Equal(t, "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", resp.Token.Address)
+			// Use case-insensitive comparison for Ethereum addresses
+			assert.Equal(t, strings.ToLower("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"),
+				strings.ToLower(resp.Token.Address), "Address should match (case-insensitive)")
 			assert.Equal(t, "USDC", resp.Token.Symbol) // Should be either "USDC" or "USD Coin"
 			assert.Equal(t, uint32(6), resp.Token.Decimals)
 			assert.Contains(t, []string{"whitelist", "rpc", "cache"}, resp.Source)

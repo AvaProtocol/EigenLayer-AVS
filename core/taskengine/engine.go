@@ -1229,6 +1229,11 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Add trigger step to execution logs
 	vm.ExecutionLogs = append(vm.ExecutionLogs, triggerStep)
 
+	// Step 8.5: Update VM trigger variable with actual execution results
+	// This ensures subsequent nodes can access the trigger's actual output via eventTrigger.data
+	actualTriggerDataMap := buildTriggerDataMapFromProtobuf(queueData.TriggerType, triggerOutputProto)
+	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), map[string]any{"data": actualTriggerDataMap})
+
 	// Step 9: Run the workflow nodes
 	runErr := vm.Run()
 	nodeEndTime := time.Now()
