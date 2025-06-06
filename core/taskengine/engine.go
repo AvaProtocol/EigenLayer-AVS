@@ -1027,12 +1027,18 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Extract trigger config using the shared utility function
 	triggerConfig := TaskTriggerToConfig(trigger)
 
+	// Step 1: Start timing BEFORE trigger execution (consistent with node timing)
+	triggerStartTime := time.Now()
+
 	triggerOutput, err := n.runTriggerImmediately(triggerTypeStr, triggerConfig, inputVariables)
 	if err != nil {
 		return nil, fmt.Errorf("failed to simulate trigger: %w", err)
 	}
 
-	// Step 2: Create QueueExecutionData similar to regular task execution
+	// Step 2: Capture trigger end time AFTER trigger execution completes
+	triggerEndTime := time.Now()
+
+	// Step 3: Create QueueExecutionData similar to regular task execution
 	simulationID := ulid.Make().String()
 
 	// Convert trigger output to proper protobuf structure using shared functions
@@ -1059,7 +1065,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		ExecutionID:   simulationID,
 	}
 
-	// Step 3: Load secrets for the task
+	// Step 4: Load secrets for the task
 	secrets, err := LoadSecretForTask(n.db, task)
 	if err != nil {
 		n.logger.Warn("Failed to load secrets for workflow simulation", "error", err, "task_id", task.Id)
@@ -1067,7 +1073,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		secrets = make(map[string]string)
 	}
 
-	// Step 4: Create VM with simulated trigger data (similar to RunTask)
+	// Step 5: Create VM with simulated trigger data (similar to RunTask)
 	triggerReason := GetTriggerReasonOrDefault(queueData, task.Id, n.logger)
 	vm, err := NewVMWithData(task, triggerReason, n.smartWalletConfig, secrets)
 	if err != nil {
@@ -1081,21 +1087,19 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		vm.AddVar(key, value)
 	}
 
-	// Step 5: Add trigger data as "trigger" variable for convenient access in JavaScript
+	// Step 6: Add trigger data as "trigger" variable for convenient access in JavaScript
 	// This ensures scripts can access trigger.data regardless of the trigger's name using shared function
 	triggerDataMap := buildTriggerDataMap(triggerReason.Type, triggerOutput)
 
 	// Add the trigger variable with the actual trigger name for JavaScript access
 	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), map[string]any{"data": triggerDataMap})
 
-	// Step 6: Compile the workflow
-	t0 := time.Now()
-
+	// Step 7: Compile the workflow
 	if err = vm.Compile(); err != nil {
 		return nil, fmt.Errorf("failed to compile workflow for simulation: %w", err)
 	}
 
-	// Step 7: Create and add a trigger execution step manually before running nodes
+	// Step 8: Create and add a trigger execution step with ACTUAL timing
 	// Convert inputVariables keys to trigger inputs
 	triggerInputs := make([]string, 0, len(inputVariables))
 	for key := range inputVariables {
@@ -1106,8 +1110,8 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Id:      task.Trigger.Id, // Use new 'id' field
 		Success: true,
 		Error:   "",
-		StartAt: t0.UnixMilli(),
-		EndAt:   t0.UnixMilli(),
+		StartAt: triggerStartTime.UnixMilli(), // Use actual trigger start time
+		EndAt:   triggerEndTime.UnixMilli(),   // Use actual trigger end time
 		Log:     fmt.Sprintf("Simulated trigger: %s executed successfully", task.Trigger.Name),
 		Inputs:  triggerInputs,                  // Use inputVariables keys as trigger inputs
 		Type:    queueData.TriggerType.String(), // Use trigger type as string
@@ -1120,15 +1124,16 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Add trigger step to execution logs
 	vm.ExecutionLogs = append(vm.ExecutionLogs, triggerStep)
 
-	// Step 8: Run the workflow nodes
+	// Step 9: Run the workflow nodes
 	runErr := vm.Run()
-	t1 := time.Now()
+	nodeEndTime := time.Now()
 
-	// Step 9: Create execution result with unified structure
+	// Step 10: Create execution result with unified structure
+	// Overall execution timing starts with trigger and ends with nodes
 	execution := &avsproto.Execution{
 		Id:      simulationID,
-		StartAt: t0.UnixMilli(),
-		EndAt:   t1.UnixMilli(),
+		StartAt: triggerStartTime.UnixMilli(), // Start with trigger start time
+		EndAt:   nodeEndTime.UnixMilli(),      // End with node completion time
 		Success: runErr == nil,
 		Error:   "",
 		Steps:   vm.ExecutionLogs, // Now contains both trigger and node steps
