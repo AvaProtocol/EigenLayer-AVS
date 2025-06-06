@@ -632,7 +632,22 @@ func (v *VM) Run() error {
 
 		jump, err := v.executeNode(node) // executeNode calls sub-processors which should use AddVar for VM state changes
 		if err != nil {
-			return err // Abort on first error
+			// Instead of aborting on first error, we now continue execution
+			// The failed step should already be logged by executeNode/runXXX methods
+			// Log the error but continue to next step
+			if v.logger != nil {
+				v.logger.Error("node execution failed, continuing execution", "nodeID", node.Id, "error", err.Error())
+			}
+
+			// Continue to next step in sequence (don't follow jump since this node failed)
+			v.mu.Lock()
+			if len(stepToExecute.Next) == 0 {
+				currentStep = nil // End of this path
+			} else {
+				currentStep = v.plans[stepToExecute.Next[0]]
+			}
+			v.mu.Unlock()
+			continue
 		}
 
 		v.mu.Lock()      // Lock for plan navigation
@@ -774,6 +789,20 @@ func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avspro
 
 func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*avsproto.Execution_Step, error) {
 	var executionLog *avsproto.Execution_Step
+
+	// Check if node has empty config first - let processor handle this case
+	if node.Config != nil && (node.Config.ContractAddress == "" || node.Config.CallData == "" || node.Config.ContractAbi == "") {
+		// Empty config case - create a mock processor to handle the error
+		processor := NewContractReadProcessor(v, nil)
+		executionLog, err := processor.Execute(stepID, node)
+		v.mu.Lock()
+		if executionLog != nil {
+			executionLog.Inputs = v.collectInputKeysForLog()
+		}
+		v.mu.Unlock()
+		return executionLog, err
+	}
+
 	if v.smartWalletConfig == nil || v.smartWalletConfig.EthRpcUrl == "" {
 		err := fmt.Errorf("smart wallet config or ETH RPC URL not set for contract read")
 		executionLog = v.createExecutionStep(stepID, false, err.Error(), "", time.Now().UnixMilli())
@@ -966,12 +995,31 @@ func convertToSnakeCase(s string) string {
 	}
 
 	var result strings.Builder
-	for i, r := range s {
+	runes := []rune(s)
+
+	for i, r := range runes {
+		// Convert to lowercase
+		lower := unicode.ToLower(r)
+
+		// Add underscore before uppercase letter if:
+		// 1. Not the first character AND
+		// 2. Current character is uppercase AND
+		// 3. Previous character is not uppercase OR next character is lowercase
 		if i > 0 && unicode.IsUpper(r) {
-			result.WriteRune('_')
+			prevIsUpper := i > 0 && unicode.IsUpper(runes[i-1])
+			nextIsLower := i < len(runes)-1 && unicode.IsLower(runes[i+1])
+
+			// Add underscore if:
+			// - Previous char is not uppercase (camelCase boundary like "testHTTP" -> "test_HTTP")
+			// - OR this is part of acronym but next char is lowercase (like "HTTP" in "HTTPSConnection" -> "HTTPS_Connection")
+			if !prevIsUpper || nextIsLower {
+				result.WriteRune('_')
+			}
 		}
-		result.WriteRune(unicode.ToLower(r))
+
+		result.WriteRune(lower)
 	}
+
 	return result.String()
 }
 
@@ -1196,11 +1244,14 @@ func (v *VM) preprocessText(text string) string {
 	}
 
 	result := text
+	searchPos := 0
 	for i := 0; i < VMMaxPreprocessIterations; i++ {
-		start := strings.Index(result, "{{")
+		start := strings.Index(result[searchPos:], "{{")
 		if start == -1 {
 			break
 		}
+		start += searchPos // Adjust to absolute position
+
 		end := strings.Index(result[start:], "}}")
 		if end == -1 {
 			break
@@ -1210,6 +1261,7 @@ func (v *VM) preprocessText(text string) string {
 		expr := strings.TrimSpace(result[start+2 : end])
 		if expr == "" {
 			result = result[:start] + result[end+2:]
+			searchPos = start
 			continue
 		}
 		// Simple check for nested, though might not be perfect for all cases.
@@ -1218,21 +1270,45 @@ func (v *VM) preprocessText(text string) string {
 				v.logger.Warn("Nested expression detected, replacing with empty string", "expression", expr)
 			}
 			result = result[:start] + result[end+2:]
+			searchPos = start
 			continue
 		}
 
-		script := fmt.Sprintf(`(() => { return %s; })()`, expr)
+		// Handle special date macros
+		if strings.HasPrefix(expr, "date.") {
+			switch expr {
+			case "date.now":
+				replacement := fmt.Sprintf("%d", time.Now().UnixMilli())
+				result = result[:start] + replacement + result[end+2:]
+				searchPos = start + len(replacement)
+				continue
+			case "date.now_iso":
+				replacement := time.Now().UTC().Format(time.RFC3339)
+				result = result[:start] + replacement + result[end+2:]
+				searchPos = start + len(replacement)
+				continue
+			}
+		}
+
+		// Handle array access with dot notation (e.g., array.0 -> array[0])
+		jsExpr := expr
+		// Convert dot notation array access to bracket notation
+		re := regexp.MustCompile(`\.(\d+)`)
+		jsExpr = re.ReplaceAllString(jsExpr, "[$1]")
+
+		script := fmt.Sprintf(`(() => { return %s; })()`, jsExpr)
 		evaluated, err := jsvm.RunString(script)
 		if v.logger != nil {
 			v.logger.Debug("evaluating pre-processor script", "task_id", v.GetTaskId(), "script", script, "result", evaluated, "error", err)
 		}
 		if err != nil {
-			// Remove the expression entirely (original behavior)
+			// Keep the expression unchanged (original behavior)
 			// This is the expected behavior for existing tests
 			if v.logger != nil {
-				v.logger.Debug("template variable evaluation failed, removing expression", "expression", expr, "error", err)
+				v.logger.Debug("template variable evaluation failed, keeping expression unchanged", "expression", expr, "error", err)
 			}
-			result = result[:start] + result[end+2:]
+			// Skip this expression and continue looking for the next one
+			searchPos = end + 2
 			continue
 		}
 
@@ -1248,6 +1324,7 @@ func (v *VM) preprocessText(text string) string {
 			replacement = fmt.Sprintf("%v", exportedValue)
 		}
 		result = result[:start] + replacement + result[end+2:]
+		searchPos = start + len(replacement)
 	}
 	return result
 }
@@ -1456,7 +1533,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 	node := &avsproto.TaskNode{Id: nodeID, Name: "Single Node Execution: " + nodeType}
 
 	switch nodeType {
-	case NodeTypeRestAPI:
+	case NodeTypeRestAPI, "restAPI": // Support both "restApi" and "restAPI" for backward compatibility
 		node.Type = avsproto.NodeType_NODE_TYPE_REST_API
 		// Create REST API node with proper configuration
 		restConfig := &avsproto.RestAPINode_Config{}
@@ -1613,6 +1690,19 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				Config: ethConfig,
 			},
 		}
+	case "trigger": // Support trigger as a generic node type for testing purposes
+		// Support trigger as a generic node type - all trigger types use custom code for testing
+		node.Type = avsproto.NodeType_NODE_TYPE_CUSTOM_CODE
+		// Create a minimal config for trigger simulation
+		customConfig := &avsproto.CustomCodeNode_Config{
+			Source: "// Trigger simulation node",
+			Lang:   avsproto.Lang_JavaScript,
+		}
+		node.TaskType = &avsproto.TaskNode_CustomCode{
+			CustomCode: &avsproto.CustomCodeNode{
+				Config: customConfig,
+			},
+		}
 	default:
 		return nil, fmt.Errorf("unsupported node type for CreateNodeFromType: %s", nodeType)
 	}
@@ -1655,4 +1745,49 @@ func (v *VM) createExecutionStep(nodeId string, success bool, errorMsg string, l
 	}
 
 	return step
+}
+
+// AnalyzeExecutionResult examines all execution steps and determines overall success/failure
+// Returns (success, errorMessage, failedStepCount)
+func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if len(v.ExecutionLogs) == 0 {
+		return false, "no execution steps found", 0
+	}
+
+	var failedStepNames []string
+	var firstErrorMessage string
+
+	for _, step := range v.ExecutionLogs {
+		if !step.Success && step.Error != "" {
+			if firstErrorMessage == "" {
+				firstErrorMessage = step.Error
+			}
+			// Collect the step name (prefer name over ID)
+			stepName := step.Name
+			if stepName == "" || stepName == "unknown" {
+				stepName = step.Id
+			}
+			failedStepNames = append(failedStepNames, stepName)
+		}
+	}
+
+	failedCount := len(failedStepNames)
+	if failedCount == 0 {
+		return true, "", 0
+	}
+
+	// Build error message with failed step count and failed node names
+	var errorMessage string
+	failedNodesList := strings.Join(failedStepNames, ", ")
+
+	if failedCount == 1 {
+		errorMessage = fmt.Sprintf("This %d step encountered error: %s", failedCount, failedNodesList)
+	} else {
+		errorMessage = fmt.Sprintf("These %d steps encountered error: %s", failedCount, failedNodesList)
+	}
+
+	return false, errorMessage, failedCount
 }

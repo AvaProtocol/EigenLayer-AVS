@@ -191,18 +191,35 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		task.SetCompleted()
 	}
 
+	// Analyze execution results from all steps (including failed ones)
+	executionSuccess, executionError, failedStepCount := vm.AnalyzeExecutionResult()
+
 	execution := &avsproto.Execution{
 		Id:      queueData.ExecutionID,
 		StartAt: t0.UnixMilli(),
 		EndAt:   t1.UnixMilli(),
-		Success: runTaskErr == nil,
-		Error:   "",
-		Steps:   vm.ExecutionLogs,
+		Success: executionSuccess, // Based on analysis of all steps
+		Error:   executionError,   // Comprehensive error message from failed steps
+		Steps:   vm.ExecutionLogs, // Contains all steps including failed ones
+	}
+
+	if !executionSuccess {
+		x.logger.Error("task execution completed with failures",
+			"error", executionError,
+			"task_id", task.Id,
+			"execution_id", queueData.ExecutionID,
+			"failed_steps", failedStepCount,
+			"total_steps", len(vm.ExecutionLogs))
 	}
 
 	if runTaskErr != nil {
-		x.logger.Error("error executing task", "error", err, "runError", runTaskErr, "task_id", task.Id, "triggermark", queueData)
-		execution.Error = runTaskErr.Error()
+		// This should not happen if AnalyzeExecutionResult is working correctly,
+		// but handle it as a fallback for VM-level errors
+		x.logger.Error("task execution had VM-level error", "vm_error", runTaskErr, "task_id", task.Id, "execution_id", queueData.ExecutionID)
+		if execution.Error == "" {
+			execution.Error = fmt.Sprintf("VM execution error: %s", runTaskErr.Error())
+			execution.Success = false
+		}
 	}
 
 	// batch update storage for task + execution log
@@ -228,10 +245,19 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		}
 	}
 
-	if runTaskErr == nil {
-		x.logger.Info("successfully executing task", "task_id", task.Id, "triggermark", queueData)
-		return execution, nil
+	// Always return the execution result (whether successful or failed)
+	// Only return an error for true system-level failures, not node execution failures
+	if runTaskErr != nil && execution.Error == "" {
+		// This is a true system-level error (compilation, etc.) not handled by AnalyzeExecutionResult
+		x.logger.Error("critical system error during task execution", "error", runTaskErr, "task_id", task.Id)
+		return execution, fmt.Errorf("System error executing task %s: %v", task.Id, runTaskErr)
 	}
 
-	return execution, fmt.Errorf("Error executing task %s: %v", task.Id, runTaskErr)
+	if executionSuccess {
+		x.logger.Info("successfully executing task", "task_id", task.Id, "triggermark", queueData)
+	} else {
+		x.logger.Info("task execution completed with step failures", "task_id", task.Id, "failed_steps", failedStepCount)
+	}
+
+	return execution, nil
 }

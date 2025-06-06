@@ -273,7 +273,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 					}
 				}
 
-				n.logger.Info("EventTrigger: Enhanced search with detailed params",
+				n.logger.Debug("EventTrigger: Enhanced search with detailed params",
 					"fromBlock", fromBlock,
 					"toBlock", currentBlock,
 					"contractAddresses", addressStrs,
@@ -292,18 +292,13 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 					if strings.Contains(errorMsg, "Block range limit exceeded") ||
 						strings.Contains(errorMsg, "range limit") ||
 						strings.Contains(errorMsg, "too many blocks") {
-						n.logger.Debug("EventTrigger: RPC provider block range limit hit, trying smaller range",
-							"fromBlock", fromBlock,
-							"toBlock", currentBlock,
-							"blockRange", currentBlock-fromBlock,
-							"error", errorMsg)
+						n.logger.Debug("EventTrigger: Block range limit hit, using chunked search",
+							"blockRange", currentBlock-fromBlock)
 
 						// Try chunked search for large ranges
 						if currentBlock-fromBlock > 1000 {
 							usedChunkedSearch = true
-							n.logger.Debug("EventTrigger: Attempting chunked search",
-								"originalRange", currentBlock-fromBlock,
-								"chunkSize", 1000)
+							// Chunked search in progress - reduced logging for cleaner output
 
 							// Break the range into 1000-block chunks
 							chunkSize := uint64(1000)
