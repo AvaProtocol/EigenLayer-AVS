@@ -197,8 +197,8 @@ func TestETHTransferTaskWithInvalidConfig(t *testing.T) {
 		t.Fatalf("Failed to create ETH transfer task: %v", err)
 	}
 
-	// Trigger the task (should fail during execution)
-	_, err = n.TriggerTask(user, &avsproto.TriggerTaskReq{
+	// Trigger the task (should succeed as a call, but execution should fail)
+	triggerResult, err := n.TriggerTask(user, &avsproto.TriggerTaskReq{
 		TaskId:      task.Id,
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerOutput: &avsproto.TriggerTaskReq_ManualTrigger{
@@ -207,17 +207,64 @@ func TestETHTransferTaskWithInvalidConfig(t *testing.T) {
 		IsBlocking: true,
 	})
 
-	// The trigger should fail due to invalid destination address
-	if err == nil {
-		t.Error("Expected trigger to fail due to invalid destination address")
+	// TriggerTask should succeed but the execution should fail
+	if err != nil {
+		t.Fatalf("TriggerTask should not fail at the API level, but execution should fail: %v", err)
+	}
+
+	if triggerResult == nil {
+		t.Fatal("Trigger result should not be nil")
+	}
+
+	if triggerResult.ExecutionId == "" {
+		t.Error("Execution ID should not be empty")
+	}
+
+	// Get the execution details to check that it failed with the expected error
+	execution, err := n.GetExecution(user, &avsproto.ExecutionReq{
+		TaskId:      task.Id,
+		ExecutionId: triggerResult.ExecutionId,
+	})
+
+	if err != nil {
+		t.Fatalf("Failed to get execution: %v", err)
+	}
+
+	if execution == nil {
+		t.Fatal("Execution is nil")
+	}
+
+	// The execution should have failed
+	if execution.Success {
+		t.Error("Expected execution to fail due to invalid destination address")
 		return
 	}
 
-	// Check that the error message contains the expected validation error
-	expectedError := "invalid destination address"
-	if !strings.Contains(err.Error(), expectedError) {
-		t.Errorf("Expected error to contain '%s', got: %s", expectedError, err.Error())
+	// Check that the overall execution indicates failure
+	if execution.Error == "" {
+		t.Error("Expected execution to have an error message")
 	}
 
-	t.Logf("ETH transfer task correctly failed with error: %s", err.Error())
+	// Verify that we have the expected steps
+	if len(execution.Steps) < 2 {
+		t.Fatalf("Expected at least 2 steps (trigger + node), got %d", len(execution.Steps))
+	}
+
+	// Check that the ETH transfer step failed
+	ethTransferStep := execution.Steps[1] // Second step should be the ETH transfer
+	if ethTransferStep.Id != "eth_transfer_1" {
+		t.Errorf("Expected second step to be 'eth_transfer_1', got '%s'", ethTransferStep.Id)
+	}
+
+	if ethTransferStep.Success {
+		t.Error("Expected ETH transfer step to fail")
+	}
+
+	// Check that the step error message contains the expected validation error
+	expectedError := "invalid destination address"
+	if !strings.Contains(ethTransferStep.Error, expectedError) {
+		t.Errorf("Expected step error to contain '%s', got: %s", expectedError, ethTransferStep.Error)
+	}
+
+	t.Logf("ETH transfer task correctly failed with error: %s", execution.Error)
 }

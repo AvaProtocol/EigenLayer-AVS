@@ -995,12 +995,31 @@ func convertToSnakeCase(s string) string {
 	}
 
 	var result strings.Builder
-	for i, r := range s {
+	runes := []rune(s)
+
+	for i, r := range runes {
+		// Convert to lowercase
+		lower := unicode.ToLower(r)
+
+		// Add underscore before uppercase letter if:
+		// 1. Not the first character AND
+		// 2. Current character is uppercase AND
+		// 3. Previous character is not uppercase OR next character is lowercase
 		if i > 0 && unicode.IsUpper(r) {
-			result.WriteRune('_')
+			prevIsUpper := i > 0 && unicode.IsUpper(runes[i-1])
+			nextIsLower := i < len(runes)-1 && unicode.IsLower(runes[i+1])
+
+			// Add underscore if:
+			// - Previous char is not uppercase (camelCase boundary like "testHTTP" -> "test_HTTP")
+			// - OR this is part of acronym but next char is lowercase (like "HTTP" in "HTTPSConnection" -> "HTTPS_Connection")
+			if !prevIsUpper || nextIsLower {
+				result.WriteRune('_')
+			}
 		}
-		result.WriteRune(unicode.ToLower(r))
+
+		result.WriteRune(lower)
 	}
+
 	return result.String()
 }
 
@@ -1514,7 +1533,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 	node := &avsproto.TaskNode{Id: nodeID, Name: "Single Node Execution: " + nodeType}
 
 	switch nodeType {
-	case NodeTypeRestAPI:
+	case NodeTypeRestAPI, "restAPI": // Support both "restApi" and "restAPI" for backward compatibility
 		node.Type = avsproto.NodeType_NODE_TYPE_REST_API
 		// Create REST API node with proper configuration
 		restConfig := &avsproto.RestAPINode_Config{}
@@ -1669,6 +1688,19 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		node.TaskType = &avsproto.TaskNode_EthTransfer{
 			EthTransfer: &avsproto.ETHTransferNode{
 				Config: ethConfig,
+			},
+		}
+	case "trigger": // Support trigger as a generic node type for testing purposes
+		// Support trigger as a generic node type - all trigger types use custom code for testing
+		node.Type = avsproto.NodeType_NODE_TYPE_CUSTOM_CODE
+		// Create a minimal config for trigger simulation
+		customConfig := &avsproto.CustomCodeNode_Config{
+			Source: "// Trigger simulation node",
+			Lang:   avsproto.Lang_JavaScript,
+		}
+		node.TaskType = &avsproto.TaskNode_CustomCode{
+			CustomCode: &avsproto.CustomCodeNode{
+				Config: customConfig,
 			},
 		}
 	default:
