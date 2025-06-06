@@ -504,8 +504,8 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 
 	// Register this operator's stream for real-time notifications
 	n.streamsMutex.Lock()
+	defer n.streamsMutex.Unlock()
 	n.operatorStreams[address] = srv
-	n.streamsMutex.Unlock()
 
 	if _, ok := n.trackSyncedTasks[address]; !ok {
 		n.lock.Lock()
@@ -591,12 +591,17 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 
 // notifyOperatorsTaskOperation sends real-time notifications to operators about task operations (cancel/delete)
 func (n *Engine) notifyOperatorsTaskOperation(taskID string, operation avsproto.MessageOp) {
+	// Copy operator streams under read lock to minimize lock duration
 	n.streamsMutex.RLock()
-	defer n.streamsMutex.RUnlock()
+	operatorStreamsCopy := make(map[string]avsproto.Node_SyncMessagesServer, len(n.operatorStreams))
+	for operatorAddr, stream := range n.operatorStreams {
+		operatorStreamsCopy[operatorAddr] = stream
+	}
+	n.streamsMutex.RUnlock()
 
 	operatorsNotified := 0
 
-	for operatorAddr, stream := range n.operatorStreams {
+	for operatorAddr, stream := range operatorStreamsCopy {
 		// Check if this operator was tracking this task
 		if operatorState, exists := n.trackSyncedTasks[operatorAddr]; exists {
 			if _, wasTracked := operatorState.TaskID[taskID]; wasTracked {
