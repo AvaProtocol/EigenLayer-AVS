@@ -123,6 +123,10 @@ type Engine struct {
 	lock             *sync.Mutex
 	trackSyncedTasks map[string]*operatorState
 
+	// operator stream management for real-time notifications
+	operatorStreams map[string]avsproto.Node_SyncMessagesServer
+	streamsMutex    *sync.RWMutex
+
 	smartWalletConfig *config.SmartWalletConfig
 	// when shutdown is true, our engine will perform the shutdown
 	// pending execution will be pushed out before the shutdown completely
@@ -147,6 +151,8 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		lock:              &sync.Mutex{},
 		tasks:             make(map[string]*model.Task),
 		trackSyncedTasks:  make(map[string]*operatorState),
+		operatorStreams:   make(map[string]avsproto.Node_SyncMessagesServer),
+		streamsMutex:      &sync.RWMutex{},
 		smartWalletConfig: config.SmartWallet,
 		shutdown:          false,
 
@@ -495,6 +501,12 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 	address := payload.Address
 
 	n.logger.Info("open channel to stream check to operator", "operator", address)
+
+	// Register this operator's stream for real-time notifications
+	n.streamsMutex.Lock()
+	n.operatorStreams[address] = srv
+	n.streamsMutex.Unlock()
+
 	if _, ok := n.trackSyncedTasks[address]; !ok {
 		n.lock.Lock()
 		n.trackSyncedTasks[address] = &operatorState{
@@ -515,6 +527,11 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 		n.logger.Info("operator disconnect, cleanup state", "operator", address)
 		n.trackSyncedTasks[address].TaskID = map[string]bool{}
 		n.trackSyncedTasks[address].MonotonicClock = 0
+
+		// Unregister the operator's stream
+		n.streamsMutex.Lock()
+		delete(n.operatorStreams, address)
+		n.streamsMutex.Unlock()
 	}()
 
 	//nolint:S1000
@@ -569,6 +586,54 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 				n.lock.Unlock()
 			}
 		}
+	}
+}
+
+// notifyOperatorsTaskOperation sends real-time notifications to operators about task operations (cancel/delete)
+func (n *Engine) notifyOperatorsTaskOperation(taskID string, operation avsproto.MessageOp) {
+	n.streamsMutex.RLock()
+	defer n.streamsMutex.RUnlock()
+
+	operatorsNotified := 0
+
+	for operatorAddr, stream := range n.operatorStreams {
+		// Check if this operator was tracking this task
+		if operatorState, exists := n.trackSyncedTasks[operatorAddr]; exists {
+			if _, wasTracked := operatorState.TaskID[taskID]; wasTracked {
+				// Send notification
+				resp := avsproto.SyncMessagesResp{
+					Id: taskID,
+					Op: operation,
+					TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
+						TaskId: taskID,
+					},
+				}
+
+				if err := stream.Send(&resp); err != nil {
+					n.logger.Warn("Failed to notify operator of task operation",
+						"operator", operatorAddr,
+						"task_id", taskID,
+						"operation", operation.String(),
+						"error", err)
+				} else {
+					n.logger.Info("Successfully notified operator of task operation",
+						"operator", operatorAddr,
+						"task_id", taskID,
+						"operation", operation.String())
+					operatorsNotified++
+
+					// Remove the task from the operator's tracking state since it's no longer active
+					delete(operatorState.TaskID, taskID)
+				}
+			}
+		}
+	}
+
+	if operatorsNotified > 0 {
+		n.logger.Info("Task operation notification completed",
+			"task_id", taskID,
+			"operation", operation.String(),
+			"operators_notified", operatorsNotified)
 	}
 }
 
@@ -1330,6 +1395,8 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error)
 		return false, fmt.Errorf("failed to delete task user key: %w", err)
 	}
 
+	n.notifyOperatorsTaskOperation(taskID, avsproto.MessageOp_DeleteTask)
+
 	return true, nil
 }
 
@@ -1369,6 +1436,8 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 	} else {
 		return false, err
 	}
+
+	n.notifyOperatorsTaskOperation(taskID, avsproto.MessageOp_CancelTask)
 
 	return true, nil
 }
