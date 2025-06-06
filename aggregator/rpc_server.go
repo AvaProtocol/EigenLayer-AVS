@@ -3,7 +3,6 @@ package aggregator
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/big"
 	"net"
 
@@ -186,7 +185,7 @@ func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListEx
 	)
 	listExecResp, err := r.engine.ListExecutions(user, payload)
 	if err != nil {
-		r.config.Logger.Error("error listing executions from engine", "error", err)
+		r.config.Logger.Error("error listing executions from engine", "error", err.Error())
 		return nil, err
 	}
 
@@ -412,7 +411,7 @@ func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNode
 	if err != nil {
 		r.config.Logger.Error("run node with inputs failed",
 			"user", user.Address.String(),
-			"error", err,
+			"error", err.Error(),
 		)
 		return nil, status.Errorf(codes.Internal, "execution failed: %v", err)
 	}
@@ -454,7 +453,7 @@ func (r *RpcServer) RunTrigger(ctx context.Context, req *avsproto.RunTriggerReq)
 	if err != nil {
 		r.config.Logger.Error("run trigger failed",
 			"user", user.Address.String(),
-			"error", err,
+			"error", err.Error(),
 		)
 		return nil, status.Errorf(codes.Internal, "execution failed: %v", err)
 	}
@@ -508,7 +507,7 @@ func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTask
 		r.config.Logger.Error("simulate task failed",
 			"user", user.Address.String(),
 			"trigger_name", req.Trigger.Name,
-			"error", err,
+			"error", err.Error(),
 		)
 		return nil, status.Errorf(codes.Internal, "simulation failed: %v", err)
 	}
@@ -636,7 +635,7 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 
 	go func() {
 		if err := s.Serve(lis); err != nil {
-			log.Fatalf("failed to serve: %v", err)
+			agg.logger.Error("gRPC server failed to serve", "error", err.Error())
 		}
 	}()
 	return nil

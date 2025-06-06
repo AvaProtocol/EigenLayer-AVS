@@ -468,32 +468,32 @@ func (o *Operator) StreamMessages() {
 				o.processMessage(resp)
 			case avspb.MessageOp_MonitorTaskTrigger:
 				if trigger := resp.TaskMetadata.GetTrigger().GetEvent(); trigger != nil {
-					o.logger.Info("received new event trigger", "id", resp.Id, "type", resp.TaskMetadata.Trigger)
+					o.logger.Info("📥 Monitoring event trigger", "task_id", resp.Id)
 					if err := o.eventTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Info("❌ Failed to add event trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for events")
-					} else {
-						o.logger.Info("successfully monitor", "task_id", resp.Id, "component", "eventTrigger")
 					}
 				} else if trigger := resp.TaskMetadata.Trigger.GetBlock(); trigger != nil {
-					o.logger.Info("received new block trigger", "id", resp.Id, "interval", resp.TaskMetadata.Trigger)
+					o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id, "interval", trigger.Config.Interval)
 					if err := o.blockTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Info("❌ Failed to add block trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for blocks")
-					} else {
-						o.logger.Info("successfully monitor", "task_id", resp.Id, "component", "blockTrigger")
 					}
 				} else if trigger := resp.TaskMetadata.Trigger.GetCron(); trigger != nil {
-					o.logger.Info("received new cron trigger", "id", resp.Id, "cron", resp.TaskMetadata.Trigger)
+					scheduleStr := strings.Join(trigger.Config.Schedule, ", ")
+					o.logger.Info("⏰ Monitoring cron trigger", "task_id", resp.Id, "schedule", scheduleStr)
 					if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Info("❌ Failed to add cron trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for scheduled execution")
-					} else {
-						o.logger.Info("successfully monitor", "task_id", resp.Id, "component", "timeTrigger")
 					}
 				} else if trigger := resp.TaskMetadata.Trigger.GetFixedTime(); trigger != nil {
-					o.logger.Info("received new fixed time trigger", "id", resp.Id, "fixedtime", resp.TaskMetadata.Trigger)
+					epochCount := len(trigger.Config.Epochs)
+					var epochInfo string
+					if epochCount == 1 {
+						epochInfo = fmt.Sprintf("epoch %d", trigger.Config.Epochs[0])
+					} else {
+						epochInfo = fmt.Sprintf("%d epochs", epochCount)
+					}
+					o.logger.Info("📅 Monitoring fixed time trigger", "task_id", resp.Id, "epochs", epochInfo)
 					if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Info("❌ Failed to add fixed time trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for scheduled execution")
-					} else {
-						o.logger.Info("successfully monitor", "task_id", resp.Id, "component", "timeTrigger")
 					}
 				}
 			}
