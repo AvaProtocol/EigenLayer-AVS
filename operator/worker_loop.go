@@ -103,7 +103,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		}),
 	)
 	if err != nil {
-		o.logger.Error("Failed to create cleanup job for block tasks map", "error", err.Error())
+		o.logger.Error("Failed to create cleanup job for block tasks map", "error", err)
 	}
 
 	// Wrap PingServer to handle errors gracefully without stack traces
@@ -150,7 +150,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 			"safety_limit", alert.SafetyLimit)
 
 		// Use existing node client for internal overload alerts
-		if _, err := o.nodeRpcClient.ReportEventOverload(context.Background(), alert); err != nil {
+		if _, err := o.nodeRpcClient.ReportEventOverload(ctx, alert); err != nil {
 			o.logger.Error("❌ Failed to send overload alert to aggregator",
 				"task_id", alert.TaskId,
 				"error", err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"math/big"
 
@@ -272,7 +273,8 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 						}
 
 					default:
-						// Non-blocking check - continue the loop
+						// Non-blocking check - add small sleep to prevent busy-waiting
+						time.Sleep(10 * time.Millisecond)
 					}
 				}
 			}
@@ -313,6 +315,10 @@ func (b *BlockTrigger) processBlock(header *types.Header) {
 
 	triggeredTasks := 0
 
+	// Pre-allocate reusable big.Int instances to avoid allocations in the loop
+	intervalBig := new(big.Int)
+	remainder := new(big.Int)
+
 	// Check all intervals to see which ones should trigger at this block
 	for interval, tasks := range scheduleSnapshot {
 		if len(tasks) == 0 {
@@ -321,8 +327,8 @@ func (b *BlockTrigger) processBlock(header *types.Header) {
 
 		// Check if this interval should trigger at this block number
 		// Using checkpoint system: interval should trigger when blockNumber % interval == 0
-		z := new(big.Int)
-		if z.Mod(header.Number, big.NewInt(interval)).Cmp(zero) == 0 {
+		intervalBig.SetInt64(interval)
+		if remainder.Mod(header.Number, intervalBig).Cmp(zero) == 0 {
 			for taskID := range tasks {
 				b.triggerCh <- TriggerMetadata[int64]{
 					TaskID: taskID,

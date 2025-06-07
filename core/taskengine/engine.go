@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
@@ -679,15 +680,18 @@ func (n *Engine) notifyOperatorsTaskOperation(taskID string, operation avsproto.
 
 	// Run notifications asynchronously to prevent blocking the caller
 	go func() {
-		operatorsNotified := 0
+		var operatorsNotified int64 // Use int64 for atomic operations
 		n.logger.Info("🚀 Starting async notification goroutine", "task_id", taskID)
 
+		var wg sync.WaitGroup
 		for operatorAddr, stream := range operatorStreamsCopy {
 			// Check if this operator was tracking this task
 			if operatorState, exists := n.trackSyncedTasks[operatorAddr]; exists {
 				if _, wasTracked := operatorState.TaskID[taskID]; wasTracked {
+					wg.Add(1)
 					// Send notification with timeout to prevent hanging
 					go func(addr string, s avsproto.Node_SyncMessagesServer) {
+						defer wg.Done()
 						resp := avsproto.SyncMessagesResp{
 							Id: taskID,
 							Op: operation,
@@ -715,7 +719,7 @@ func (n *Engine) notifyOperatorsTaskOperation(taskID string, operation avsproto.
 									"operator", addr,
 									"task_id", taskID,
 									"operation", operation.String())
-								operatorsNotified++
+								atomic.AddInt64(&operatorsNotified, 1)
 
 								// Remove the task from the operator's tracking state since it's no longer active
 								if state, exists := n.trackSyncedTasks[addr]; exists {
@@ -734,14 +738,14 @@ func (n *Engine) notifyOperatorsTaskOperation(taskID string, operation avsproto.
 			}
 		}
 
-		// Small delay to allow goroutines to complete and update counters
-		time.Sleep(100 * time.Millisecond)
+		// Wait for all goroutines to complete
+		wg.Wait()
 
-		if operatorsNotified > 0 {
+		if notifiedCount := atomic.LoadInt64(&operatorsNotified); notifiedCount > 0 {
 			n.logger.Info("Task operation notification completed",
 				"task_id", taskID,
 				"operation", operation.String(),
-				"operators_notified", operatorsNotified)
+				"operators_notified", notifiedCount)
 		}
 	}()
 }
