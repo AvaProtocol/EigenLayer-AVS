@@ -791,7 +791,7 @@ func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*a
 	var executionLog *avsproto.Execution_Step
 
 	// Check if node has empty config first - let processor handle this case
-	if node.Config != nil && (node.Config.ContractAddress == "" || node.Config.CallData == "" || node.Config.ContractAbi == "") {
+	if node.Config != nil && (node.Config.ContractAddress == "" || len(node.Config.MethodCalls) == 0 || node.Config.ContractAbi == "") {
 		// Empty config case - create a mock processor to handle the error
 		processor := NewContractReadProcessor(v, nil)
 		executionLog, err := processor.Execute(stepID, node)
@@ -1593,8 +1593,28 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		if abi, ok := config["contract_abi"].(string); ok {
 			contractConfig.ContractAbi = abi
 		}
+		// Handle method calls - for backward compatibility, support single call_data
 		if callData, ok := config["call_data"].(string); ok {
-			contractConfig.CallData = callData
+			// Single method call for backward compatibility
+			methodCall := &avsproto.ContractReadNode_MethodCall{
+				CallData:   callData,
+				MethodName: "", // Will be determined from ABI
+			}
+			contractConfig.MethodCalls = []*avsproto.ContractReadNode_MethodCall{methodCall}
+		} else if methodCalls, ok := config["method_calls"].([]interface{}); ok {
+			// Multiple method calls
+			for _, methodCallInterface := range methodCalls {
+				if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
+					methodCall := &avsproto.ContractReadNode_MethodCall{}
+					if callData, ok := methodCallMap["call_data"].(string); ok {
+						methodCall.CallData = callData
+					}
+					if methodName, ok := methodCallMap["method_name"].(string); ok {
+						methodCall.MethodName = methodName
+					}
+					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
+				}
+			}
 		}
 
 		node.TaskType = &avsproto.TaskNode_ContractRead{

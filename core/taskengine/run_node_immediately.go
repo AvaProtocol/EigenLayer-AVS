@@ -331,10 +331,16 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 								if chunkErr == nil {
 									logs = append(logs, chunkLogs...)
 									if n.logger != nil && len(chunkLogs) > 0 {
-										n.logger.Info("EventTrigger: Found events in chunk",
+										n.logger.Info("EventTrigger: Found events in chunk - stopping early for most recent",
 											"chunkStart", chunkStart,
 											"chunkEnd", chunkEnd,
 											"eventsInChunk", len(chunkLogs))
+									}
+									// OPTIMIZATION: For runTrigger, we only need the most recent event
+									// Stop immediately after finding any events to avoid unnecessary work
+									if len(chunkLogs) > 0 {
+										searched += chunkedSearched
+										return logs, searched, nil
 									}
 								} else {
 									if n.logger != nil {
@@ -384,9 +390,14 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 					"blockRange", currentBlock-fromBlock)
 			}
 
-			// If events found, we can stop searching this range
+			// OPTIMIZATION: For runTrigger, return immediately after finding any events
+			// Since we search from most recent blocks first, the first events found are the most recent
 			if len(logs) > 0 {
-				break
+				// Update searched counter and return immediately
+				if !usedChunkedSearch {
+					searched += (currentBlock - fromBlock)
+				}
+				return append(events, logs...), searched, nil
 			}
 
 			// If we've searched back to genesis, stop
@@ -497,6 +508,11 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 			"totalSearched":     totalSearched,
 			"expression":        expression,
 			"message":           "No events found matching the criteria",
+			"searchMetadata": map[string]interface{}{
+				"blocksSearchedBackwards": totalSearched,
+				"searchComplete":          true,
+				"timeoutOccurred":         false,
+			},
 		}, nil
 	}
 
@@ -539,6 +555,12 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		"totalSearched":     totalSearched,
 		"expression":        expression,
 		"totalEvents":       len(allEvents),
+		"searchMetadata": map[string]interface{}{
+			"blocksSearchedBackwards": totalSearched,
+			"searchComplete":          true,
+			"timeoutOccurred":         false,
+			"stoppedEarly":            true, // Since we stop after finding first event
+		},
 	}
 
 	// If this is a Transfer event, add enriched transfer_log data
@@ -824,7 +846,7 @@ func (n *Engine) parseUint64(value interface{}) (uint64, error) {
 	}
 }
 
-// extractExecutionResult extracts the result data from an execution step
+// extractExecutionResult extracts the result data from an execution step (legacy version with success/error fields)
 func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
 
@@ -845,13 +867,53 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		} else {
 			result = map[string]interface{}{"data": iface}
 		}
-	} else if contractRead := executionStep.GetContractRead(); contractRead != nil && len(contractRead.GetData()) > 0 {
-		result["data"] = contractRead.GetData()[0].AsInterface()
-		if len(contractRead.GetData()) > 1 {
-			result["allData"] = make([]interface{}, len(contractRead.GetData()))
-			for i, data := range contractRead.GetData() {
-				result["allData"].([]interface{})[i] = data.AsInterface()
+	} else if contractRead := executionStep.GetContractRead(); contractRead != nil && len(contractRead.GetResults()) > 0 {
+		// ContractRead now returns multiple method results
+		results := contractRead.GetResults()
+
+		// For backward compatibility, if there's only one result, expose its fields directly
+		if len(results) == 1 {
+			methodResult := results[0]
+			if methodResult.Success {
+				result["method_name"] = methodResult.GetMethodName()
+
+				// Add structured data with field names
+				if len(methodResult.GetData()) > 0 {
+					structuredData := make(map[string]interface{})
+					for _, field := range methodResult.GetData() {
+						structuredData[field.GetName()] = field.GetValue()
+					}
+					result["data"] = structuredData
+				}
+			} else {
+				result["error"] = methodResult.GetError()
+				result["method_name"] = methodResult.GetMethodName()
 			}
+		} else {
+			// Multiple method results - return as array
+			var allResults []map[string]interface{}
+			for _, methodResult := range results {
+				methodMap := map[string]interface{}{
+					"method_name": methodResult.GetMethodName(),
+					"success":     methodResult.GetSuccess(),
+				}
+
+				if methodResult.Success {
+					// Add structured data
+					if len(methodResult.GetData()) > 0 {
+						structuredData := make(map[string]interface{})
+						for _, field := range methodResult.GetData() {
+							structuredData[field.GetName()] = field.GetValue()
+						}
+						methodMap["data"] = structuredData
+					}
+				} else {
+					methodMap["error"] = methodResult.GetError()
+				}
+
+				allResults = append(allResults, methodMap)
+			}
+			result["results"] = allResults
 		}
 	} else if branch := executionStep.GetBranch(); branch != nil {
 		result["conditionId"] = branch.GetConditionId()
@@ -904,6 +966,121 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 	}
 
 	return result, nil
+}
+
+// extractExecutionResultDirect extracts only the data from execution step, throwing errors instead of including them
+func (n *Engine) extractExecutionResultDirect(executionStep *avsproto.Execution_Step) (map[string]interface{}, error) {
+	// Handle different output data types and return data directly
+	if ccode := executionStep.GetCustomCode(); ccode != nil && ccode.GetData() != nil {
+		iface := ccode.GetData().AsInterface()
+		if m, ok := iface.(map[string]interface{}); ok {
+			return m, nil
+		} else {
+			return map[string]interface{}{"data": iface}, nil
+		}
+	} else if restAPI := executionStep.GetRestApi(); restAPI != nil && restAPI.GetData() != nil {
+		// REST API data is now stored as structpb.Value directly (no Any wrapper)
+		iface := restAPI.GetData().AsInterface()
+		if m, ok := iface.(map[string]interface{}); ok {
+			// Use the common response processing function
+			return ProcessRestAPIResponseRaw(m), nil
+		} else {
+			return map[string]interface{}{"data": iface}, nil
+		}
+	} else if contractRead := executionStep.GetContractRead(); contractRead != nil && len(contractRead.GetResults()) > 0 {
+		// For ContractRead, return the method results
+		results := contractRead.GetResults()
+
+		// If single result, return directly for backward compatibility
+		if len(results) == 1 {
+			methodResult := results[0]
+			if methodResult.Success {
+				response := map[string]interface{}{
+					"method_name": methodResult.GetMethodName(),
+				}
+
+				// Add structured data
+				if len(methodResult.GetData()) > 0 {
+					structuredData := make(map[string]interface{})
+					for _, field := range methodResult.GetData() {
+						structuredData[field.GetName()] = field.GetValue()
+					}
+					response["data"] = structuredData
+				}
+
+				return response, nil
+			} else {
+				return map[string]interface{}{
+					"method_name": methodResult.GetMethodName(),
+					"error":       methodResult.GetError(),
+				}, nil
+			}
+		} else {
+			// Multiple results
+			var allResults []map[string]interface{}
+			for _, methodResult := range results {
+				methodMap := map[string]interface{}{
+					"method_name": methodResult.GetMethodName(),
+					"success":     methodResult.GetSuccess(),
+				}
+
+				if methodResult.Success {
+					if len(methodResult.GetData()) > 0 {
+						structuredData := make(map[string]interface{})
+						for _, field := range methodResult.GetData() {
+							structuredData[field.GetName()] = field.GetValue()
+						}
+						methodMap["data"] = structuredData
+					}
+				} else {
+					methodMap["error"] = methodResult.GetError()
+				}
+
+				allResults = append(allResults, methodMap)
+			}
+			return map[string]interface{}{"results": allResults}, nil
+		}
+	} else if branch := executionStep.GetBranch(); branch != nil {
+		return map[string]interface{}{"conditionId": branch.GetConditionId()}, nil
+	} else if filter := executionStep.GetFilter(); filter != nil && filter.GetData() != nil {
+		var data interface{}
+		structVal := &structpb.Value{}
+		if err := filter.GetData().UnmarshalTo(structVal); err == nil {
+			data = structVal.AsInterface()
+		} else {
+			if n.logger != nil {
+				n.logger.Warn("Failed to unmarshal Filter output", "error", err.Error())
+			}
+			data = string(filter.GetData().GetValue())
+		}
+		return map[string]interface{}{"data": data}, nil
+	} else if loop := executionStep.GetLoop(); loop != nil {
+		return map[string]interface{}{"data": loop.GetData()}, nil
+	} else if graphQL := executionStep.GetGraphql(); graphQL != nil && graphQL.GetData() != nil {
+		var data map[string]interface{}
+		structVal := &structpb.Struct{}
+		if err := graphQL.GetData().UnmarshalTo(structVal); err == nil {
+			data = structVal.AsMap()
+		} else {
+			if n.logger != nil {
+				n.logger.Warn("Failed to unmarshal GraphQL output", "error", err.Error())
+			}
+			data = map[string]interface{}{"raw_output": string(graphQL.GetData().GetValue())}
+		}
+		return data, nil
+	} else if ethTransfer := executionStep.GetEthTransfer(); ethTransfer != nil {
+		return map[string]interface{}{"txHash": ethTransfer.GetTransactionHash()}, nil
+	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
+		// ContractWrite output contains UserOp and TxReceipt
+		if txReceipt := contractWrite.GetTxReceipt(); txReceipt != nil {
+			return map[string]interface{}{"txHash": txReceipt.GetHash()}, nil
+		} else {
+			return map[string]interface{}{"status": "success"}, nil
+		}
+	}
+
+	// If no specific data was extracted, return empty result
+	return map[string]interface{}{}, nil
 }
 
 // RunNodeImmediatelyRPC handles the RPC interface for immediate node execution
@@ -1066,19 +1243,62 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		// For contract read nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
 		contractReadOutput := &avsproto.ContractReadNode_Output{}
 		if result != nil && len(result) > 0 {
-			// Contract read returns array data - convert to []*structpb.Value
-			if resultArray, ok := result["data"].([]interface{}); ok {
-				// Convert array elements to protobuf Values
-				for _, item := range resultArray {
-					if pbValue, err := structpb.NewValue(item); err == nil {
-						contractReadOutput.Data = append(contractReadOutput.Data, pbValue)
+			// Handle the new multiple method result structure
+			if results, ok := result["results"].([]map[string]interface{}); ok {
+				// Multiple method results
+				for _, methodResult := range results {
+					methodResultProto := &avsproto.ContractReadNode_MethodResult{}
+					if methodName, ok := methodResult["method_name"].(string); ok {
+						methodResultProto.MethodName = methodName
 					}
+					if success, ok := methodResult["success"].(bool); ok {
+						methodResultProto.Success = success
+					}
+					if errorMsg, ok := methodResult["error"].(string); ok {
+						methodResultProto.Error = errorMsg
+					}
+
+					// Handle structured data (now the only data field)
+					if data, ok := methodResult["data"].(map[string]interface{}); ok {
+						for fieldName, fieldValue := range data {
+							field := &avsproto.ContractReadNode_MethodResult_StructuredField{
+								Name:  fieldName,
+								Type:  "string", // Default type, could be enhanced to detect actual type
+								Value: fmt.Sprintf("%v", fieldValue),
+							}
+							methodResultProto.Data = append(methodResultProto.Data, field)
+						}
+					}
+
+					contractReadOutput.Results = append(contractReadOutput.Results, methodResultProto)
 				}
 			} else {
-				// If not an array, wrap single result as single element array
-				if pbValue, err := structpb.NewValue(result); err == nil {
-					contractReadOutput.Data = append(contractReadOutput.Data, pbValue)
+				// Single method result (backward compatibility)
+				methodResult := &avsproto.ContractReadNode_MethodResult{}
+
+				if methodName, ok := result["method_name"].(string); ok {
+					methodResult.MethodName = methodName
 				}
+				if errorMsg, ok := result["error"].(string); ok {
+					methodResult.Error = errorMsg
+					methodResult.Success = false
+				} else {
+					methodResult.Success = true
+				}
+
+				// Handle structured data (now the only data field)
+				if data, ok := result["data"].(map[string]interface{}); ok {
+					for fieldName, fieldValue := range data {
+						field := &avsproto.ContractReadNode_MethodResult_StructuredField{
+							Name:  fieldName,
+							Type:  "string", // Default type, could be enhanced to detect actual type
+							Value: fmt.Sprintf("%v", fieldValue),
+						}
+						methodResult.Data = append(methodResult.Data, field)
+					}
+				}
+
+				contractReadOutput.Results = []*avsproto.ContractReadNode_MethodResult{methodResult}
 			}
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractRead{

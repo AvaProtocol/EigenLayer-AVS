@@ -6,13 +6,21 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 func TestContractReadSimpleReturn(t *testing.T) {
 	node := &avsproto.ContractReadNode{
-		Config: &avsproto.ContractReadNode_Config{},
+		Config: &avsproto.ContractReadNode_Config{
+			ContractAddress: "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+			ContractAbi:     `[{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`,
+			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+				{
+					CallData:   "0x70a08231000000000000000000000000ce289bb9fb0a9591317981223cbe33d5dc42268d",
+					MethodName: "balanceOf",
+				},
+			},
+		},
 	}
 	nodes := []*avsproto.TaskNode{
 		{
@@ -50,11 +58,6 @@ func TestContractReadSimpleReturn(t *testing.T) {
 		return
 	}
 
-	// Add input variables that the processor expects
-	vm.AddVar("contractAddress", "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238")
-	vm.AddVar("callData", "0x70a08231000000000000000000000000ce289bb9fb0a9591317981223cbe33d5dc42268d")
-	vm.AddVar("contractAbi", `[{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`)
-
 	n := NewContractReadProcessor(vm, testutil.GetRpcClient())
 
 	step, err := n.Execute("123", node)
@@ -67,7 +70,7 @@ func TestContractReadSimpleReturn(t *testing.T) {
 		t.Errorf("expected contract read node run successfully but failed")
 	}
 
-	if !strings.Contains(step.Log, "Call balanceOf on 0x1c7d4b196cb0c7b01d743fbc6116a902379c7238 at") {
+	if !strings.Contains(step.Log, "Call 1: balanceOf on 0x1c7d4b196cb0c7b01d743fbc6116a902379c7238") {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 
@@ -75,16 +78,31 @@ func TestContractReadSimpleReturn(t *testing.T) {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 
-	outputData := gow.StructPbSliceToSlice(step.GetContractRead().Data)
+	results := step.GetContractRead().Results
+	if len(results) == 0 || len(results[0].Data) == 0 {
+		t.Errorf("expected contract read to return data but got empty results")
+		return
+	}
 
-	if outputData[0].(string) != "313131" {
-		t.Errorf("read balanceOf doesn't return right data. expect 313131] got %s", step.OutputData)
+	// Get the first field value from the first result
+	firstValue := results[0].Data[0].Value
+	if firstValue != "313131" {
+		t.Errorf("read balanceOf doesn't return right data. expect 313131 got %s", firstValue)
 	}
 }
 
 func TestContractReadComplexReturn(t *testing.T) {
 	node := &avsproto.ContractReadNode{
-		Config: &avsproto.ContractReadNode_Config{},
+		Config: &avsproto.ContractReadNode_Config{
+			ContractAddress: "0xc59E3633BAAC79493d908e63626716e204A45EdF",
+			ContractAbi:     `[{"inputs":[{"internalType":"uint80","name":"_roundId","type":"uint80"}],"name":"getRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`,
+			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+				{
+					CallData:   "0x9a6fc8f500000000000000000000000000000000000000000000000100000000000052e7",
+					MethodName: "getRoundData",
+				},
+			},
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -122,11 +140,6 @@ func TestContractReadComplexReturn(t *testing.T) {
 		return
 	}
 
-	// Add input variables that the processor expects
-	vm.AddVar("contractAddress", "0xc59E3633BAAC79493d908e63626716e204A45EdF")
-	vm.AddVar("callData", "0x9a6fc8f500000000000000000000000000000000000000000000000100000000000052e7")
-	vm.AddVar("contractAbi", `[{"inputs":[{"internalType":"uint80","name":"_roundId","type":"uint80"}],"name":"getRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`)
-
 	n := NewContractReadProcessor(vm, testutil.GetRpcClient())
 	step, err := n.Execute("123abc", node)
 
@@ -138,7 +151,7 @@ func TestContractReadComplexReturn(t *testing.T) {
 		t.Errorf("expected contract read node run successfully but failed")
 	}
 
-	if !strings.Contains(step.Log, "Call getRoundData on 0xc59E3633BAAC79493d908e63626716e204A45EdF at") {
+	if !strings.Contains(step.Log, "Call 1: getRoundData on 0xc59E3633BAAC79493d908e63626716e204A45EdF") {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 
@@ -146,29 +159,30 @@ func TestContractReadComplexReturn(t *testing.T) {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 
-	data := gow.StructPbSliceToSlice(step.GetContractRead().Data)
-	if len(data) < 5 {
-		t.Errorf("contract read doesn't return right data, wrong length. expect 5, got %d", len(data))
+	results := step.GetContractRead().Results
+	if len(results) == 0 || len(results[0].Data) < 5 {
+		t.Errorf("contract read doesn't return right data, wrong length. expect 5 fields, got %d results with %d fields", len(results), len(results[0].Data))
+		return
 	}
 
 	// When reading data out and return over the wire, we have to serialize big int to string.
 	roundIdExpected := "18446744073709572839"
-	roundId := data[0].(string)
+	roundId := results[0].Data[0].Value
 	if roundIdExpected != roundId {
 		t.Errorf("contract read returns incorrect data expect %s got %s", roundIdExpected, roundId)
 	}
-	if data[1].(string) != "2189300000" {
-		t.Errorf("contract read returns incorrect data expect %d got %s", 2189300000, data[1])
+	if results[0].Data[1].Value != "2189300000" {
+		t.Errorf("contract read returns incorrect data expect %s got %s", "2189300000", results[0].Data[1].Value)
 	}
-	if data[2].(string) != "1733878404" {
-		t.Errorf("contract read returns incorrect data expect %d got %s", 2189300000, data[1])
+	if results[0].Data[2].Value != "1733878404" {
+		t.Errorf("contract read returns incorrect data expect %s got %s", "1733878404", results[0].Data[2].Value)
 	}
-	if data[3].(string) != "1733878404" {
-		t.Errorf("contract read returns incorrect data expect %d got %s", 2189300000, data[1])
+	if results[0].Data[3].Value != "1733878404" {
+		t.Errorf("contract read returns incorrect data expect %s got %s", "1733878404", results[0].Data[3].Value)
 	}
 
-	if data[4].(string) != "18446744073709572839" {
-		t.Errorf("contract read returns incorrect data expect %d got %s", 2189300000, data[1])
+	if results[0].Data[4].Value != "18446744073709572839" {
+		t.Errorf("contract read returns incorrect data expect %s got %s", "18446744073709572839", results[0].Data[4].Value)
 	}
 
 }

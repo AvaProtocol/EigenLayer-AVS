@@ -10,7 +10,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
-// TestVM_ContractRead_BasicExecution tests basic contract read functionality
+// TestVM_ContractRead_BasicExecution tests basic contract reading functionality
 func TestVM_ContractRead_BasicExecution(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
@@ -26,8 +26,13 @@ func TestVM_ContractRead_BasicExecution(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", // Chainlink ETH/USD
-			CallData:        "0xfeaf968c",                                 // decimals()
 			ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+				{
+					CallData:   "0xfeaf968c", // decimals()
+					MethodName: "decimals",
+				},
+			},
 		},
 	}
 
@@ -56,8 +61,13 @@ func TestVM_ContractRead_LatestRoundData(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
-			CallData:        "0xfeaf968c", // This is decimals, but for demo purposes
 			ContractAbi:     "[{\"inputs\":[],\"name\":\"latestRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+				{
+					CallData:   "0xfeaf968c", // This is decimals, but for demo purposes
+					MethodName: "decimals",
+				},
+			},
 		},
 	}
 
@@ -87,8 +97,13 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
 					ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
-					CallData:        "0xfeaf968c",
 					ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+						{
+							CallData:   "0xfeaf968c",
+							MethodName: "decimals",
+						},
+					},
 				},
 			},
 			expectError: true,
@@ -100,8 +115,13 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
 					ContractAddress: "invalid-address",
-					CallData:        "0xfeaf968c",
 					ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+						{
+							CallData:   "0xfeaf968c",
+							MethodName: "decimals",
+						},
+					},
 				},
 			},
 			expectError: true,
@@ -117,7 +137,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 				Config: &avsproto.ContractReadNode_Config{},
 			},
 			expectError: true,
-			errorText:   "missing required input variables",
+			errorText:   "missing required configuration: contract_address and contract_abi are required",
 		},
 	}
 

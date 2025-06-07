@@ -319,21 +319,37 @@ message ContractWriteNode {
 }
 
 message ContractReadNode {
+  message MethodCall {
+    string call_data = 1;     // Hex-encoded calldata for the method
+    string method_name = 2;   // Optional: method name for clarity (e.g. "latestRoundData")
+  }
+
   message Config {
     string contract_address = 1;
-    string call_data = 2;
-    // The ABI are required to decode the return value and pass it to the next step.
-    // Currently, we need to provide the contract ABI as a JSON string.
-    // We don't need to include the full ABI—just enough to decode the method call.
-    string contract_abi = 3;
+    // The ABI is required to decode the return values
+    string contract_abi = 2;
+    // Array of method calls to execute serially
+    repeated MethodCall method_calls = 3;
+  }
+
+  message MethodResult {
+    // Structured data with named fields based on method signature
+    message StructuredField {
+      string name = 1;      // Field name from ABI (e.g. "roundId", "answer", "startedAt")
+      string type = 2;      // Solidity type (e.g. "uint80", "int256", "uint256")
+      string value = 3;     // The actual value as string, client parses based on type
+    }
+    repeated StructuredField data = 1;
+    
+    // Method metadata
+    string method_name = 2;   // The name of the method called
+    bool success = 3;         // Whether this specific method call succeeded
+    string error = 4;         // Error message if the method call failed
   }
 
   message Output {
-    // The data is the result of querying the contract method. Becuase this is fetching data from the outside world,
-    // we don't know the shape of data ahead of time.
-    // At runtime, the data is dynamically parsed into the correct type for the node to consume
-    // In case of smart contract, the return is always an array, then it's up to the client to map to the right field based on method signature
-    repeated google.protobuf.Value data = 1;
+    // Results for each method call, in the same order as the input method_calls
+    repeated MethodResult results = 1;
   }
 
   // Include Config and Input as fields so they are generated in Go
