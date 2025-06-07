@@ -277,6 +277,9 @@ func (b *BlockTrigger) Run(ctx context.Context) error {
 						time.Sleep(10 * time.Millisecond)
 					}
 				}
+
+				// Add a small delay to prevent busy-waiting when no action is needed
+				time.Sleep(10 * time.Millisecond)
 			}
 		}
 	}()
