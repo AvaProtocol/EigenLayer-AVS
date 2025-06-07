@@ -116,6 +116,12 @@ type operatorState struct {
 	Capabilities *avsproto.SyncMessagesReq_Capabilities
 }
 
+type PendingNotification struct {
+	TaskID    string
+	Operation avsproto.MessageOp
+	Timestamp time.Time
+}
+
 // The core datastructure of the task engine
 type Engine struct {
 	db    storage.Storage
@@ -153,6 +159,11 @@ type Engine struct {
 	// Debouncing for operator approval logging
 	lastApprovalLogTime map[string]time.Time
 	approvalLogMutex    *sync.RWMutex
+
+	// Batched operator notifications
+	pendingNotifications map[string][]PendingNotification // operatorAddr -> list of notifications
+	notificationMutex    *sync.RWMutex
+	notificationTicker   *time.Ticker
 }
 
 // create a new task engine using given storage, config and queueu
@@ -172,6 +183,11 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		approvalLogMutex:    &sync.RWMutex{},
 		smartWalletConfig:   config.SmartWallet,
 		shutdown:            false,
+
+		// Initialize batched notifications
+		pendingNotifications: make(map[string][]PendingNotification),
+		notificationMutex:    &sync.RWMutex{},
+		notificationTicker:   time.NewTicker(3 * time.Second), // Send batched notifications every 3 seconds
 
 		logger: logger,
 	}
@@ -214,6 +230,12 @@ func (n *Engine) Stop() {
 		}
 	}
 	n.shutdown = true
+
+	// Send any remaining notifications before shutting down
+	if n.notificationTicker != nil {
+		n.sendBatchedNotifications()
+		n.notificationTicker.Stop()
+	}
 }
 
 func (n *Engine) MustStart() error {
@@ -237,6 +259,9 @@ func (n *Engine) MustStart() error {
 			n.tasks[string(item.Key)] = task
 		}
 	}
+
+	// Start the batch notification processor
+	go n.processBatchedNotifications()
 
 	return nil
 }
@@ -511,8 +536,11 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	}
 
 	n.lock.Lock()
-	defer n.lock.Unlock()
 	n.tasks[task.Id] = task
+	n.lock.Unlock()
+
+	// Notify operators about the new task
+	n.notifyOperatorsTaskOperation(task.Id, avsproto.MessageOp_MonitorTaskTrigger)
 
 	return task, nil
 }
@@ -525,8 +553,8 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 
 	// Register this operator's stream for real-time notifications
 	n.streamsMutex.Lock()
-	defer n.streamsMutex.Unlock()
 	n.operatorStreams[address] = srv
+	n.streamsMutex.Unlock()
 
 	if _, ok := n.trackSyncedTasks[address]; !ok {
 		n.lock.Lock()
@@ -606,6 +634,11 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			// Reassign orphaned tasks when operators connect/disconnect
 			n.reassignOrphanedTasks()
 
+			// Aggregate tasks for this operator to reduce logging and improve efficiency
+			var tasksToStream []*model.Task
+			var tasksByTriggerType = make(map[string]int) // Count tasks by trigger type
+			var newAssignments []string                   // Track new task assignments for this operator
+
 			for _, task := range n.tasks {
 				if _, ok := n.trackSyncedTasks[address].TaskID[task.Id]; ok {
 					continue
@@ -618,6 +651,9 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 					continue
 				}
 
+				// Track this as a new assignment
+				newAssignments = append(newAssignments, task.Id)
+
 				// Check if operator supports this trigger type
 				if !n.supportsTaskTrigger(address, task) {
 					n.logger.Info("⚠️ Skipping task - operator doesn't support trigger type",
@@ -627,141 +663,239 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 					continue
 				}
 
-				resp := avsproto.SyncMessagesResp{
-					Id: task.Id,
-					Op: avsproto.MessageOp_MonitorTaskTrigger,
+				tasksToStream = append(tasksToStream, task)
+				triggerTypeName := task.Trigger.String()
+				tasksByTriggerType[triggerTypeName]++
+			}
 
-					TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
-						TaskId:    task.Id,
-						Remain:    task.MaxExecution,
-						ExpiredAt: task.ExpiredAt,
-						Trigger:   task.Trigger,
-					},
+			// Log aggregated task assignments per operator
+			if len(newAssignments) > 0 {
+				n.logger.Info("🔄 Task assignments for operator",
+					"operator", address,
+					"operation", "MonitorTaskTrigger",
+					"assigned_task_ids", newAssignments,
+					"total_assignments", len(newAssignments))
+			}
+
+			// Stream all tasks and log aggregated results
+			if len(tasksToStream) > 0 {
+				successCount := 0
+				for _, task := range tasksToStream {
+					resp := avsproto.SyncMessagesResp{
+						Id: task.Id,
+						Op: avsproto.MessageOp_MonitorTaskTrigger,
+
+						TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
+							TaskId:    task.Id,
+							Remain:    task.MaxExecution,
+							ExpiredAt: task.ExpiredAt,
+							Trigger:   task.Trigger,
+						},
+					}
+
+					if err := srv.Send(&resp); err != nil {
+						// return error to cause client to establish re-connect the connection
+						n.logger.Error("error sending check to operator",
+							"task_id", task.Id,
+							"operator", payload.Address,
+							"error", err,
+							"error_type", fmt.Sprintf("%T", err),
+							"grpc_status", grpcstatus.Code(err).String())
+						return fmt.Errorf("cannot send data back to grpc channel: %w", err)
+					}
+
+					n.lock.Lock()
+					n.trackSyncedTasks[address].TaskID[task.Id] = true
+					n.lock.Unlock()
+					successCount++
 				}
-				n.logger.Info("📤 Streaming task to assigned operator",
-					"task_id", task.Id,
+
+				// Log aggregated results instead of individual tasks
+				n.logger.Info("📤 Streamed tasks to operator",
 					"operator", payload.Address,
-					"op", resp.Op.String(),
-					"trigger_type", task.Trigger.String())
-
-				if err := srv.Send(&resp); err != nil {
-					// return error to cause client to establish re-connect the connection
-					n.logger.Error("error sending check to operator",
-						"task_id", task.Id,
-						"operator", payload.Address,
-						"error", err,
-						"error_type", fmt.Sprintf("%T", err),
-						"grpc_status", grpcstatus.Code(err).String())
-					return fmt.Errorf("cannot send data back to grpc channel: %w", err)
-				}
-
-				n.lock.Lock()
-				n.trackSyncedTasks[address].TaskID[task.Id] = true
-				n.lock.Unlock()
+					"total_tasks", len(tasksToStream),
+					"successful", successCount,
+					"task_breakdown", tasksByTriggerType)
 			}
 		}
 	}
 }
 
-// notifyOperatorsTaskOperation sends real-time notifications to operators about task operations (cancel/delete)
-// This method is non-blocking to prevent hanging of cancel/delete operations
+// notifyOperatorsTaskOperation queues notifications for batched sending to operators
+// This method is non-blocking and batches notifications for efficiency
 func (n *Engine) notifyOperatorsTaskOperation(taskID string, operation avsproto.MessageOp) {
-	n.logger.Info("📢 Starting operator notification process", "task_id", taskID, "operation", operation.String())
+	n.notificationMutex.Lock()
+	defer n.notificationMutex.Unlock()
 
-	// Copy operator streams under read lock to minimize lock duration
+	// Find operators that were tracking this task
+	for operatorAddr, operatorState := range n.trackSyncedTasks {
+		if operatorState != nil {
+			if _, wasTracked := operatorState.TaskID[taskID]; wasTracked {
+				// Add to pending notifications for this operator
+				notification := PendingNotification{
+					TaskID:    taskID,
+					Operation: operation,
+					Timestamp: time.Now(),
+				}
+				n.pendingNotifications[operatorAddr] = append(n.pendingNotifications[operatorAddr], notification)
+			}
+		}
+	}
+
+	n.logger.Debug("📢 Queued notification for batching", "task_id", taskID, "operation", operation.String())
+}
+
+// processBatchedNotifications sends batched notifications to operators periodically
+func (n *Engine) processBatchedNotifications() {
+	defer n.notificationTicker.Stop()
+
+	for {
+		select {
+		case <-n.notificationTicker.C:
+			n.sendBatchedNotifications()
+		case <-time.After(1 * time.Minute): // Safety check for shutdown
+			if n.shutdown {
+				n.logger.Info("🔄 Batch notification processor shutting down")
+				return
+			}
+		}
+	}
+}
+
+// sendBatchedNotifications sends accumulated notifications to operators in batches
+func (n *Engine) sendBatchedNotifications() {
+	n.notificationMutex.Lock()
+
+	// Take a snapshot of pending notifications and clear the pending map
+	currentBatch := make(map[string][]PendingNotification)
+	for operatorAddr, notifications := range n.pendingNotifications {
+		if len(notifications) > 0 {
+			currentBatch[operatorAddr] = append([]PendingNotification{}, notifications...)
+		}
+	}
+	// Clear pending notifications
+	n.pendingNotifications = make(map[string][]PendingNotification)
+	n.notificationMutex.Unlock()
+
+	if len(currentBatch) == 0 {
+		return // Nothing to send
+	}
+
+	// Get current operator streams
 	n.streamsMutex.RLock()
-	operatorStreamsCopy := make(map[string]avsproto.Node_SyncMessagesServer, len(n.operatorStreams))
+	operatorStreams := make(map[string]avsproto.Node_SyncMessagesServer)
 	for operatorAddr, stream := range n.operatorStreams {
-		operatorStreamsCopy[operatorAddr] = stream
+		operatorStreams[operatorAddr] = stream
 	}
 	n.streamsMutex.RUnlock()
 
-	n.logger.Info("📋 Copied operator streams", "task_id", taskID, "operators_count", len(operatorStreamsCopy))
+	// Send notifications in parallel to each operator
+	var totalNotifications int
+	var operatorsNotified int64
+	operationCounts := make(map[string]int) // Track counts by operation type
 
-	// Run notifications asynchronously to prevent blocking the caller
-	go func() {
-		var operatorsNotified int64 // Use int64 for atomic operations
-		n.logger.Info("🚀 Starting async notification goroutine", "task_id", taskID)
+	for operatorAddr, notifications := range currentBatch {
+		totalNotifications += len(notifications)
 
-		var wg sync.WaitGroup
-		for operatorAddr, stream := range operatorStreamsCopy {
-			// Check if this operator was tracking this task
-			if operatorState, exists := n.trackSyncedTasks[operatorAddr]; exists {
-				if _, wasTracked := operatorState.TaskID[taskID]; wasTracked {
-					wg.Add(1)
-					// Send notification with timeout to prevent hanging
-					go func(addr string, s avsproto.Node_SyncMessagesServer) {
-						defer wg.Done()
-						resp := avsproto.SyncMessagesResp{
-							Id: taskID,
-							Op: operation,
-							TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
-								TaskId: taskID,
-							},
-						}
-
-						// Use a channel to handle timeout
-						done := make(chan error, 1)
-						go func() {
-							done <- s.Send(&resp)
-						}()
-
-						select {
-						case err := <-done:
-							if err != nil {
-								n.logger.Warn("Failed to notify operator of task operation",
-									"operator", addr,
-									"task_id", taskID,
-									"operation", operation.String(),
-									"error", err)
-							} else {
-								n.logger.Info("Successfully notified operator of task operation",
-									"operator", addr,
-									"task_id", taskID,
-									"operation", operation.String())
-								atomic.AddInt64(&operatorsNotified, 1)
-
-								// Remove the task from the operator's tracking state since it's no longer active
-								if state, exists := n.trackSyncedTasks[addr]; exists {
-									delete(state.TaskID, taskID)
-								}
-							}
-						case <-time.After(500 * time.Millisecond):
-							n.logger.Warn("Timeout notifying operator of task operation",
-								"operator", addr,
-								"task_id", taskID,
-								"operation", operation.String(),
-								"timeout_ms", 500)
-						}
-					}(operatorAddr, stream)
-				}
-			}
+		// Count operations by type
+		for _, notification := range notifications {
+			operationCounts[notification.Operation.String()]++
 		}
 
-		// Don't wait for all goroutines to complete - make it truly non-blocking
-		// The notifications will complete asynchronously in the background
+		if stream, exists := operatorStreams[operatorAddr]; exists {
+			go func(addr string, s avsproto.Node_SyncMessagesServer, notifs []PendingNotification) {
+				successCount := 0
+				operatorOperations := make(map[string][]string) // operation -> task_ids
+
+				for _, notification := range notifs {
+					resp := avsproto.SyncMessagesResp{
+						Id: notification.TaskID,
+						Op: notification.Operation,
+						TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
+							TaskId: notification.TaskID,
+						},
+					}
+
+					// Use timeout for each individual notification
+					done := make(chan error, 1)
+					go func() {
+						done <- s.Send(&resp)
+					}()
+
+					select {
+					case err := <-done:
+						if err != nil {
+							n.logger.Debug("Failed to send batched notification",
+								"operator", addr,
+								"task_id", notification.TaskID,
+								"operation", notification.Operation.String(),
+								"error", err)
+						} else {
+							successCount++
+							// Track successful operations by type
+							operatorOperations[notification.Operation.String()] = append(
+								operatorOperations[notification.Operation.String()],
+								notification.TaskID)
+
+							// Remove the task from the operator's tracking state for delete/cancel operations
+							if notification.Operation == avsproto.MessageOp_CancelTask ||
+								notification.Operation == avsproto.MessageOp_DeleteTask {
+								if state, exists := n.trackSyncedTasks[addr]; exists {
+									delete(state.TaskID, notification.TaskID)
+								}
+							}
+						}
+					case <-time.After(500 * time.Millisecond):
+						n.logger.Debug("Timeout sending batched notification",
+							"operator", addr,
+							"task_id", notification.TaskID,
+							"operation", notification.Operation.String())
+					}
+				}
+
+				if successCount > 0 {
+					atomic.AddInt64(&operatorsNotified, 1)
+					// Log operator-centric notifications with operation breakdown
+					for operation, taskIDs := range operatorOperations {
+						n.logger.Info("📤 Batched notifications sent to operator",
+							"operator", addr,
+							"operation", operation,
+							"task_ids", taskIDs,
+							"total_notifications", len(taskIDs))
+					}
+				}
+			}(operatorAddr, stream, notifications)
+		} else {
+			n.logger.Debug("Operator stream not available for batched notifications", "operator", operatorAddr)
+		}
+	}
+
+	// Log aggregated results with operation breakdown
+	if totalNotifications > 0 {
+		// Give goroutines time to complete, then log summary
 		go func() {
-			wg.Wait()
-			if notifiedCount := atomic.LoadInt64(&operatorsNotified); notifiedCount > 0 {
-				n.logger.Info("Task operation notification completed",
-					"task_id", taskID,
-					"operation", operation.String(),
-					"operators_notified", notifiedCount)
+			time.Sleep(1 * time.Second)
+			notifiedCount := atomic.LoadInt64(&operatorsNotified)
+			if notifiedCount > 0 {
+				n.logger.Info("📤 Batch notification summary",
+					"total_notifications", totalNotifications,
+					"operators_notified", notifiedCount,
+					"operation_breakdown", operationCounts)
 			}
 		}()
-	}()
+	}
 }
 
 // TODO: Merge and verify from multiple operators
 func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyTriggersReq) error {
 	n.lock.Lock()
-	n.logger.Info("processing aggregator check hit", "operator", address, "task_id", payload.TaskId)
+	n.logger.Debug("processing aggregator check hit", "operator", address, "task_id", payload.TaskId)
 
 	if state, exists := n.trackSyncedTasks[address]; exists {
 		state.TaskID[payload.TaskId] = true
 	}
 
-	n.logger.Info("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
+	n.logger.Debug("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
 	n.lock.Unlock()
 
 	// Create trigger data
@@ -811,7 +945,7 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 		n.logger.Error("failed to enqueue task", "error", err, "task_id", payload.TaskId)
 		return err
 	}
-	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId)
+	n.logger.Debug("enqueue task into the queue system", "task_id", payload.TaskId)
 
 	// if the task can still run, add it back
 	return nil
@@ -1077,7 +1211,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 		n.logger.Error("failed to enqueue task", "error", err, "task_id", payload.TaskId)
 		return nil, err
 	}
-	n.logger.Info("enqueue task into the queue system", "task_id", payload.TaskId)
+	n.logger.Debug("enqueue task into the queue system", "task_id", payload.TaskId)
 
 	return &avsproto.TriggerTaskResp{
 		ExecutionId: queueTaskData.ExecutionID,
@@ -1957,7 +2091,7 @@ func (n *Engine) assignTaskToOperator(task *model.Task) string {
 	// Store assignment
 	n.taskAssignments[task.Id] = selectedOperator
 
-	n.logger.Info("🔄 Round-robin task assignment",
+	n.logger.Debug("🔄 Round-robin task assignment",
 		"task_id", task.Id,
 		"assigned_operator", selectedOperator,
 		"eligible_operators", len(eligible),
@@ -1991,11 +2125,24 @@ func (n *Engine) reassignOrphanedTasks() {
 			"orphaned_count", len(orphanedTasks),
 			"active_operators", len(activeOperators))
 
+		// Track reassignments by operator
+		reassignmentsByOperator := make(map[string][]string)
+
 		// Reassign orphaned tasks
 		for _, taskID := range orphanedTasks {
 			if task, exists := n.tasks[taskID]; exists {
-				n.assignTaskToOperator(task)
+				assignedOperator := n.assignTaskToOperator(task)
+				reassignmentsByOperator[assignedOperator] = append(reassignmentsByOperator[assignedOperator], taskID)
 			}
+		}
+
+		// Log aggregated reassignments per operator
+		for operatorAddr, taskIDs := range reassignmentsByOperator {
+			n.logger.Info("🔄 Reassigned tasks to operator",
+				"operator", operatorAddr,
+				"operation", "MonitorTaskTrigger",
+				"reassigned_task_ids", taskIDs,
+				"total_reassignments", len(taskIDs))
 		}
 	}
 }
