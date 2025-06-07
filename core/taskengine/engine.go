@@ -738,15 +738,17 @@ func (n *Engine) notifyOperatorsTaskOperation(taskID string, operation avsproto.
 			}
 		}
 
-		// Wait for all goroutines to complete
-		wg.Wait()
-
-		if notifiedCount := atomic.LoadInt64(&operatorsNotified); notifiedCount > 0 {
-			n.logger.Info("Task operation notification completed",
-				"task_id", taskID,
-				"operation", operation.String(),
-				"operators_notified", notifiedCount)
-		}
+		// Don't wait for all goroutines to complete - make it truly non-blocking
+		// The notifications will complete asynchronously in the background
+		go func() {
+			wg.Wait()
+			if notifiedCount := atomic.LoadInt64(&operatorsNotified); notifiedCount > 0 {
+				n.logger.Info("Task operation notification completed",
+					"task_id", taskID,
+					"operation", operation.String(),
+					"operators_notified", notifiedCount)
+			}
+		}()
 	}()
 }
 
