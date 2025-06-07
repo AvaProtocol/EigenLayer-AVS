@@ -1587,12 +1587,20 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		node.Type = avsproto.NodeType_NODE_TYPE_CONTRACT_READ
 		// Create contract read node with proper configuration
 		contractConfig := &avsproto.ContractReadNode_Config{}
+
+		// Support both snake_case and camelCase for backward compatibility
 		if address, ok := config["contract_address"].(string); ok {
 			contractConfig.ContractAddress = address
+		} else if address, ok := config["contractAddress"].(string); ok {
+			contractConfig.ContractAddress = address
 		}
+
 		if abi, ok := config["contract_abi"].(string); ok {
 			contractConfig.ContractAbi = abi
+		} else if abi, ok := config["contractAbi"].(string); ok {
+			contractConfig.ContractAbi = abi
 		}
+
 		// Handle method calls - for backward compatibility, support single call_data
 		if callData, ok := config["call_data"].(string); ok {
 			// Single method call for backward compatibility
@@ -1601,8 +1609,15 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				MethodName: "", // Will be determined from ABI
 			}
 			contractConfig.MethodCalls = []*avsproto.ContractReadNode_MethodCall{methodCall}
+		} else if callData, ok := config["callData"].(string); ok {
+			// Single method call for backward compatibility (camelCase)
+			methodCall := &avsproto.ContractReadNode_MethodCall{
+				CallData:   callData,
+				MethodName: "", // Will be determined from ABI
+			}
+			contractConfig.MethodCalls = []*avsproto.ContractReadNode_MethodCall{methodCall}
 		} else if methodCalls, ok := config["method_calls"].([]interface{}); ok {
-			// Multiple method calls
+			// Multiple method calls (snake_case)
 			for _, methodCallInterface := range methodCalls {
 				if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
 					methodCall := &avsproto.ContractReadNode_MethodCall{}
@@ -1610,6 +1625,24 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 						methodCall.CallData = callData
 					}
 					if methodName, ok := methodCallMap["method_name"].(string); ok {
+						methodCall.MethodName = methodName
+					}
+					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
+				}
+			}
+		} else if methodCalls, ok := config["methodCallsList"].([]interface{}); ok {
+			// Multiple method calls (camelCase from SDK)
+			for _, methodCallInterface := range methodCalls {
+				if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
+					methodCall := &avsproto.ContractReadNode_MethodCall{}
+					if callData, ok := methodCallMap["callData"].(string); ok {
+						methodCall.CallData = callData
+					} else if callData, ok := methodCallMap["call_data"].(string); ok {
+						methodCall.CallData = callData
+					}
+					if methodName, ok := methodCallMap["methodName"].(string); ok {
+						methodCall.MethodName = methodName
+					} else if methodName, ok := methodCallMap["method_name"].(string); ok {
 						methodCall.MethodName = methodName
 					}
 					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
