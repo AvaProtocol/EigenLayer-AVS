@@ -1,0 +1,169 @@
+# Timeout Functionality Implementation
+
+This document describes the comprehensive timeout functionality added to the Ava Protocol SDK.
+
+## 🚀 Features Added
+
+### 1. Timeout Configuration
+- **Default timeout**: 30 seconds with 3 retries and 1-second delays
+- **Configurable per client**: Set timeout options during client creation
+- **Configurable per request**: Override timeout settings for individual requests
+- **Dynamic updates**: Change timeout configuration after client creation
+
+### 2. Timeout Presets
+Four predefined configurations for common use cases:
+
+- **FAST**: 5s timeout, 2 retries, 500ms delay - for quick operations
+- **NORMAL**: 30s timeout, 3 retries, 1s delay - for standard operations  
+- **SLOW**: 2min timeout, 2 retries, 2s delay - for heavy operations
+- **NO_RETRY**: 30s timeout, no retries - for latency-sensitive operations
+
+### 3. Intelligent Retry Logic
+- **Retryable errors**: UNAVAILABLE, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED, timeout errors
+- **Non-retryable errors**: UNAUTHENTICATED, PERMISSION_DENIED, INVALID_ARGUMENT
+- **Request cancellation**: Properly cancels gRPC calls on timeout
+- **Exponential backoff**: Configurable retry delays
+
+### 4. Enhanced Error Context
+- `isTimeout`: Boolean indicating if error was due to timeout
+- `attemptsMade`: Number of attempts made before failure
+- `methodName`: gRPC method that timed out
+
+## 📁 Files Modified
+
+### Core Implementation
+- `packages/types/src/api.ts`: Added timeout types and presets
+- `packages/sdk-js/src/index.ts`: Updated Client class with timeout functionality
+
+### Documentation & Examples
+- `examples/timeout-demo.js`: Interactive demonstration
+- `tests/timeout-config-only.test.ts`: Comprehensive test suite
+- `TIMEOUT_IMPLEMENTATION.md`: This documentation
+
+## 🛠️ Usage Examples
+
+### Basic Client Creation
+```javascript
+// Default timeout (30s, 3 retries)
+const client = new Client({ endpoint: 'localhost:2206' });
+
+// Custom timeout
+const fastClient = new Client({
+  endpoint: 'localhost:2206',
+  timeout: {
+    timeout: 5000,
+    retries: 2,
+    retryDelay: 500
+  }
+});
+
+// Using presets
+const slowClient = new Client({
+  endpoint: 'localhost:2206',
+  timeout: TimeoutPresets.SLOW
+});
+```
+
+### Dynamic Configuration
+```javascript
+// Update timeout after creation
+client.setTimeoutConfig({ timeout: 15000, retries: 1 });
+
+// Get current configuration
+const config = client.getTimeoutConfig();
+```
+
+### Per-Request Timeouts
+```javascript
+// Using presets
+await client.getWorkflows(['0x123'], {
+  timeout: TimeoutPresets.FAST
+});
+
+// Custom timeout for specific request
+await client.runNodeWithInputs(nodeParams, {
+  timeout: { timeout: 60000, retries: 0 }
+});
+```
+
+### Error Handling
+```javascript
+try {
+  const result = await client.getWorkflows(['0x123'], {
+    timeout: TimeoutPresets.FAST
+  });
+} catch (error) {
+  if (error.isTimeout) {
+    console.log(`Timeout after ${error.attemptsMade} attempts for ${error.methodName}`);
+  } else {
+    console.log('Other error:', error.message);
+  }
+}
+```
+
+## 🧪 Testing
+
+The implementation includes comprehensive tests covering:
+
+- ✅ Default timeout configuration
+- ✅ Custom timeout configuration  
+- ✅ Timeout presets functionality
+- ✅ Configuration updates and merging
+- ✅ Client lifecycle management
+- ✅ Edge cases (zero values, large values)
+- ✅ Independent client configurations
+
+Run tests with:
+```bash
+npx jest tests/timeout-config-only.test.ts --verbose
+```
+
+## 🎯 Key Benefits
+
+1. **Improved Reliability**: Automatic retry logic for transient failures
+2. **Better UX**: Configurable timeouts prevent indefinite hangs
+3. **Flexibility**: Multiple configuration options for different use cases
+4. **Observability**: Rich error context for debugging
+5. **Industry Standards**: Follows gRPC and web service timeout best practices
+
+## 🔧 Technical Implementation
+
+### Timeout Logic Flow
+1. Request initiated with timeout configuration
+2. Race condition between gRPC call and timeout promise
+3. On timeout: cancel gRPC call and create timeout error
+4. On retryable error: wait retry delay and attempt again
+5. On non-retryable error: fail immediately
+6. Return result or enriched error with context
+
+### Configuration Hierarchy
+1. **Request-level timeout** (highest priority)
+2. **Client-level timeout** (medium priority)  
+3. **Default timeout** (fallback)
+
+### Error Classification
+- **Timeout errors**: Always retryable
+- **Network errors**: Retryable (UNAVAILABLE, DEADLINE_EXCEEDED, RESOURCE_EXHAUSTED)
+- **Auth errors**: Non-retryable (UNAUTHENTICATED, PERMISSION_DENIED)
+- **Input errors**: Non-retryable (INVALID_ARGUMENT)
+
+## 🚀 Demo
+
+Run the interactive demo:
+```bash
+node examples/timeout-demo.js
+```
+
+This demonstrates all timeout features with examples and usage patterns.
+
+## 🎉 Summary
+
+This implementation provides a robust, flexible, and user-friendly timeout system that:
+- Follows industry best practices
+- Provides multiple configuration options
+- Includes intelligent retry logic
+- Offers comprehensive error handling
+- Maintains backward compatibility
+- Includes thorough testing
+
+The timeout functionality is now production-ready and integrated into the Ava Protocol SDK!

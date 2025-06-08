@@ -1,0 +1,125 @@
+// Timeout Functionality Demo
+// This example demonstrates the new timeout features in ava-sdk-js
+
+const { Client, TimeoutPresets } = require('@avaprotocol/sdk-js');
+
+async function timeoutDemo() {
+  console.log('🚀 Ava Protocol SDK - Timeout Functionality Demo\n');
+
+  // 1. Basic client with default timeout (30s, 3 retries, 1s delay)
+  const client = new Client({
+    endpoint: 'localhost:2206',
+  });
+
+  console.log('📋 Default timeout configuration:', client.getTimeoutConfig());
+
+  // 2. Client with custom timeout configuration
+  const fastClient = new Client({
+    endpoint: 'localhost:2206',
+    timeout: {
+      timeout: 5000,      // 5 second timeout
+      retries: 2,         // 2 retry attempts
+      retryDelay: 500     // 500ms between retries
+    }
+  });
+
+  console.log('⚡ Fast client timeout configuration:', fastClient.getTimeoutConfig());
+
+  // 3. Using timeout presets
+  console.log('\n🎛️  Available timeout presets:');
+  console.log('FAST:', TimeoutPresets.FAST);
+  console.log('NORMAL:', TimeoutPresets.NORMAL);
+  console.log('SLOW:', TimeoutPresets.SLOW);
+  console.log('NO_RETRY:', TimeoutPresets.NO_RETRY);
+
+  // 4. Updating timeout configuration after client creation
+  client.setTimeoutConfig({
+    timeout: 15000,
+    retries: 1
+  });
+
+  console.log('\n🔧 Updated client timeout configuration:', client.getTimeoutConfig());
+
+  // 5. Using timeout options in requests
+  try {
+    console.log('\n🔍 Example: Making a request with FAST preset...');
+    
+    // This would make a request with 5s timeout, 2 retries, 500ms delay
+    // const result = await client.getWorkflows(['0x123'], {
+    //   timeout: TimeoutPresets.FAST
+    // });
+
+    console.log('✅ Request would use FAST preset settings');
+  } catch (error) {
+    if (error.isTimeout) {
+      console.log(`❌ Timeout error occurred after ${error.attemptsMade} attempts for method ${error.methodName}`);
+    } else {
+      console.log('❌ Other error:', error.message);
+    }
+  }
+
+  // 6. Custom timeout for specific request
+  try {
+    console.log('\n🔍 Example: Making a request with custom timeout...');
+    
+    // This would make a request with custom timeout settings
+    // const result = await client.runNodeWithInputs(
+    //   {
+    //     nodeType: 'customCode',
+    //     nodeConfig: { lang: 0, source: '42' }
+    //   },
+    //   {
+    //     timeout: {
+    //       timeout: 60000,  // 1 minute timeout
+    //       retries: 0,      // No retries
+    //       retryDelay: 0
+    //     }
+    //   }
+    // );
+
+    console.log('✅ Request would use custom timeout settings');
+  } catch (error) {
+    console.log('❌ Error:', error.message);
+  }
+
+  console.log('\n📚 Usage Examples:');
+  console.log(`
+// 1. Default timeout (30s, 3 retries)
+const client = new Client({ endpoint: 'localhost:2206' });
+
+// 2. Custom timeout on client creation
+const fastClient = new Client({
+  endpoint: 'localhost:2206',
+  timeout: TimeoutPresets.FAST  // 5s, 2 retries
+});
+
+// 3. Update timeout after creation
+client.setTimeoutConfig({ timeout: 10000, retries: 1 });
+
+// 4. Per-request timeout
+await client.getWorkflows(['0x123'], {
+  timeout: TimeoutPresets.SLOW  // 2min, 2 retries
+});
+
+// 5. Custom timeout per request
+await client.runNodeWithInputs(nodeParams, {
+  timeout: { timeout: 60000, retries: 0 }
+});
+  `);
+
+  console.log('\n🎯 Key Features:');
+  console.log('• ⏱️  Configurable timeouts per client and per request');
+  console.log('• 🔄 Intelligent retry logic for network errors');
+  console.log('• 🚫 No retries for authentication/permission errors');
+  console.log('• 📋 Predefined presets for common use cases');
+  console.log('• 🔍 Rich error context with timeout information');
+  console.log('• ⚡ Request cancellation on timeout');
+}
+
+// Export for use in tests or other modules
+module.exports = { timeoutDemo };
+
+// Run demo if called directly
+if (require.main === module) {
+  timeoutDemo().catch(console.error);
+}

@@ -1,0 +1,247 @@
+import { describe, test, expect } from "@jest/globals";
+import { Client, TimeoutPresets } from "@avaprotocol/sdk-js";
+
+describe("SDK Timeout Configuration Only", () => {
+  describe("Timeout Configuration", () => {
+    test("should use default timeout configuration when not specified", () => {
+      const client = new Client({ endpoint: "localhost:2206" });
+      const config = client.getTimeoutConfig();
+
+      expect(config.timeout).toBe(30000); // 30 seconds
+      expect(config.retries).toBe(3);
+      expect(config.retryDelay).toBe(1000); // 1 second
+    });
+
+    test("should use custom timeout configuration when specified", () => {
+      const client = new Client({
+        endpoint: "localhost:2206",
+        timeout: {
+          timeout: 5000,
+          retries: 2,
+          retryDelay: 500,
+        },
+      });
+
+      const config = client.getTimeoutConfig();
+      expect(config.timeout).toBe(5000);
+      expect(config.retries).toBe(2);
+      expect(config.retryDelay).toBe(500);
+    });
+
+    test("should allow updating timeout configuration after creation", () => {
+      const client = new Client({ endpoint: "localhost:2206" });
+      
+      const newConfig = {
+        timeout: 15000,
+        retries: 1,
+        retryDelay: 750,
+      };
+
+      client.setTimeoutConfig(newConfig);
+      const config = client.getTimeoutConfig();
+
+      expect(config.timeout).toBe(15000);
+      expect(config.retries).toBe(1);
+      expect(config.retryDelay).toBe(750);
+    });
+
+    test("should merge partial timeout configurations", () => {
+      const client = new Client({ endpoint: "localhost:2206" });
+
+      // Set initial config
+      client.setTimeoutConfig({ timeout: 10000, retries: 2, retryDelay: 500 });
+
+      // Update only timeout
+      client.setTimeoutConfig({ timeout: 20000 });
+
+      const config = client.getTimeoutConfig();
+      expect(config.timeout).toBe(20000); // Updated
+      expect(config.retries).toBe(2); // Preserved
+      expect(config.retryDelay).toBe(500); // Preserved
+    });
+  });
+
+  describe("Timeout Presets", () => {
+    test("should have correct timeout preset values", () => {
+      expect(TimeoutPresets.FAST).toEqual({
+        timeout: 5000,
+        retries: 2,
+        retryDelay: 500,
+      });
+
+      expect(TimeoutPresets.NORMAL).toEqual({
+        timeout: 30000,
+        retries: 3,
+        retryDelay: 1000,
+      });
+
+      expect(TimeoutPresets.SLOW).toEqual({
+        timeout: 120000,
+        retries: 2,
+        retryDelay: 2000,
+      });
+
+      expect(TimeoutPresets.NO_RETRY).toEqual({
+        timeout: 30000,
+        retries: 0,
+        retryDelay: 0,
+      });
+    });
+
+    test("should work with preset timeout configurations", () => {
+      const fastClient = new Client({
+        endpoint: "localhost:2206",
+        timeout: TimeoutPresets.FAST,
+      });
+
+      const config = fastClient.getTimeoutConfig();
+      expect(config).toEqual(TimeoutPresets.FAST);
+    });
+
+    test("should allow using different presets for different clients", () => {
+      const slowClient = new Client({
+        endpoint: "localhost:2206",
+        timeout: TimeoutPresets.SLOW,
+      });
+
+      const noRetryClient = new Client({
+        endpoint: "localhost:2206",
+        timeout: TimeoutPresets.NO_RETRY,
+      });
+
+      expect(slowClient.getTimeoutConfig()).toEqual(TimeoutPresets.SLOW);
+      expect(noRetryClient.getTimeoutConfig()).toEqual(TimeoutPresets.NO_RETRY);
+    });
+  });
+
+  describe("Timeout Configuration Client Lifecycle", () => {
+    test("should allow chaining timeout configurations", () => {
+      const client = new Client({
+        endpoint: "localhost:2206",
+        timeout: { timeout: 5000 },
+      });
+
+      client.setTimeoutConfig({ retries: 5 });
+      client.setTimeoutConfig({ retryDelay: 200 });
+
+      const config = client.getTimeoutConfig();
+      expect(config.timeout).toBe(5000);
+      expect(config.retries).toBe(5);
+      expect(config.retryDelay).toBe(200);
+    });
+
+    test("should create independent client configurations", () => {
+      const client1 = new Client({
+        endpoint: "localhost:2206",
+        timeout: TimeoutPresets.FAST,
+      });
+
+      const client2 = new Client({
+        endpoint: "localhost:2206",
+        timeout: TimeoutPresets.SLOW,
+      });
+
+      expect(client1.getTimeoutConfig()).toEqual(TimeoutPresets.FAST);
+      expect(client2.getTimeoutConfig()).toEqual(TimeoutPresets.SLOW);
+
+      // Modifying one shouldn't affect the other
+      client1.setTimeoutConfig({ timeout: 1000 });
+      expect(client1.getTimeoutConfig().timeout).toBe(1000);
+      expect(client2.getTimeoutConfig()).toEqual(TimeoutPresets.SLOW);
+    });
+
+    test("should handle undefined timeout config gracefully", () => {
+      const client = new Client({ endpoint: "localhost:2206" });
+
+      // Should not throw when setting partial configs
+      client.setTimeoutConfig({ timeout: 8000 });
+      client.setTimeoutConfig({ retries: 1 });
+      client.setTimeoutConfig({ retryDelay: 100 });
+
+      const config = client.getTimeoutConfig();
+      expect(config.timeout).toBe(8000);
+      expect(config.retries).toBe(1);
+      expect(config.retryDelay).toBe(100);
+    });
+
+    test("should preserve configuration when creating multiple clients", () => {
+      // Create multiple clients with different configurations
+      const clients = [
+        new Client({ endpoint: "localhost:2206", timeout: TimeoutPresets.FAST }),
+        new Client({ endpoint: "localhost:2206", timeout: TimeoutPresets.NORMAL }),
+        new Client({ endpoint: "localhost:2206", timeout: TimeoutPresets.SLOW }),
+        new Client({ endpoint: "localhost:2206", timeout: TimeoutPresets.NO_RETRY }),
+      ];
+
+      // Verify each client has the correct configuration
+      expect(clients[0].getTimeoutConfig()).toEqual(TimeoutPresets.FAST);
+      expect(clients[1].getTimeoutConfig()).toEqual(TimeoutPresets.NORMAL);
+      expect(clients[2].getTimeoutConfig()).toEqual(TimeoutPresets.SLOW);
+      expect(clients[3].getTimeoutConfig()).toEqual(TimeoutPresets.NO_RETRY);
+    });
+
+    test("should allow custom configurations beyond presets", () => {
+      const customConfig = {
+        timeout: 45000, // 45 seconds
+        retries: 7,
+        retryDelay: 1500, // 1.5 seconds
+      };
+
+      const client = new Client({
+        endpoint: "localhost:2206",
+        timeout: customConfig,
+      });
+
+      expect(client.getTimeoutConfig()).toEqual(customConfig);
+    });
+  });
+
+  describe("Timeout Configuration Edge Cases", () => {
+    test("should handle zero values in timeout configuration", () => {
+      const client = new Client({
+        endpoint: "localhost:2206",
+        timeout: {
+          timeout: 0,
+          retries: 0,
+          retryDelay: 0,
+        },
+      });
+
+      const config = client.getTimeoutConfig();
+      expect(config.timeout).toBe(0);
+      expect(config.retries).toBe(0);
+      expect(config.retryDelay).toBe(0);
+    });
+
+    test("should handle large timeout values", () => {
+      const client = new Client({
+        endpoint: "localhost:2206",
+        timeout: {
+          timeout: 300000, // 5 minutes
+          retries: 10,
+          retryDelay: 5000, // 5 seconds
+        },
+      });
+
+      const config = client.getTimeoutConfig();
+      expect(config.timeout).toBe(300000);
+      expect(config.retries).toBe(10);
+      expect(config.retryDelay).toBe(5000);
+    });
+
+    test("should allow overriding individual timeout properties", () => {
+      const client = new Client({
+        endpoint: "localhost:2206",
+        timeout: TimeoutPresets.NORMAL,
+      });
+
+      // Override just the timeout
+      client.setTimeoutConfig({ timeout: 60000 });
+      
+      const config = client.getTimeoutConfig();
+      expect(config.timeout).toBe(60000); // Updated
+      expect(config.retries).toBe(3); // From NORMAL preset
+      expect(config.retryDelay).toBe(1000); // From NORMAL preset
+    });
+  });
+});
