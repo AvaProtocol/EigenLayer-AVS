@@ -130,3 +130,75 @@ func TestGetMethodFromSelector(t *testing.T) {
 		})
 	}
 }
+
+func TestChainlinkABISelectors(t *testing.T) {
+	// Chainlink AggregatorV3Interface ABI
+	const chainlinkABI = `[
+		{
+			"inputs": [],
+			"name": "decimals",
+			"outputs": [{"internalType": "uint8", "name": "", "type": "uint8"}],
+			"stateMutability": "view",
+			"type": "function"
+		},
+		{
+			"inputs": [],
+			"name": "latestRoundData",
+			"outputs": [
+				{"internalType": "uint80", "name": "roundId", "type": "uint80"},
+				{"internalType": "int256", "name": "answer", "type": "int256"},
+				{"internalType": "uint256", "name": "startedAt", "type": "uint256"},
+				{"internalType": "uint256", "name": "updatedAt", "type": "uint256"},
+				{"internalType": "uint80", "name": "answeredInRound", "type": "uint80"}
+			],
+			"stateMutability": "view",
+			"type": "function"
+		}
+	]`
+
+	parsedABI, err := abi.JSON(strings.NewReader(chainlinkABI))
+	if err != nil {
+		t.Fatalf("failed to parse Chainlink ABI: %v", err)
+	}
+
+	// Helper function to decode hex string to bytes
+	decodeHex := func(s string) []byte {
+		b, err := hex.DecodeString(s)
+		if err != nil {
+			t.Fatalf("failed to decode hex: %v", err)
+		}
+		return b
+	}
+
+	tests := []struct {
+		name       string
+		selector   string
+		wantMethod string
+	}{
+		{
+			name:       "decimals selector",
+			selector:   "313ce567", // What client claims is decimals()
+			wantMethod: "decimals",
+		},
+		{
+			name:       "latestRoundData selector",
+			selector:   "feaf968c", // What client claims is latestRoundData()
+			wantMethod: "latestRoundData",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			method, err := GetMethodFromCalldata(parsedABI, decodeHex(tt.selector))
+			if err != nil {
+				t.Errorf("GetMethodFromCalldata failed: %v", err)
+				return
+			}
+			if method.Name != tt.wantMethod {
+				t.Errorf("Expected method %s but got %s for selector 0x%s", tt.wantMethod, method.Name, tt.selector)
+			} else {
+				t.Logf("✅ Selector 0x%s correctly maps to %s", tt.selector, method.Name)
+			}
+		})
+	}
+}

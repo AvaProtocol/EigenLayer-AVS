@@ -1,6 +1,9 @@
 package apqueue
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -37,39 +40,63 @@ func NewWorker(q *Queue, db storage.Storage) *Worker {
 	return w
 }
 
+// isOrphanedJob checks if the error indicates a deleted/missing task
+func (w *Worker) isOrphanedJob(err error) bool {
+	errorMsg := err.Error()
+	return strings.Contains(errorMsg, "task not found in storage") ||
+		strings.Contains(errorMsg, "task may have been deleted") ||
+		strings.Contains(errorMsg, "storage key is incorrect")
+}
+
 // wake up and pop first item in the queue to process
 func (w *Worker) ProcessSignal(jid uint64) {
-	w.logger.Info("process job from queue", "signal", jid)
 	job, err := w.q.Dequeue()
 	if err != nil {
 		w.logger.Error("failed to dequeue", "error", err)
+		return
 	}
+
+	// Single consolidated log for job processing start
+	w.logger.Info("processing job", "job_id", jid, "task_id", job.Name, "job_type", job.Type)
 
 	processor, ok := w.processorRegistry[job.Type]
 	if ok {
 		err = processor.Perform(job)
 	} else {
-		w.logger.Info("unsupported job", "job", string(job.Data))
+		w.logger.Warn("unsupported job type", "job_id", jid, "task_id", job.Name, "job_type", job.Type)
+		err = fmt.Errorf("unsupported job type: %s", job.Type)
 	}
-	w.logger.Info("decoded job", "job_id", jid, "jobName", job.Name, "jobdata", string(job.Data))
 
 	if err == nil {
 		if markErr := w.q.markJobDone(job, jobComplete); markErr != nil {
 			w.logger.Error("failed to mark job as complete", "error", markErr, "job_id", jid)
 		} else {
-			w.logger.Info("successfully perform job", "job_id", jid, "task_id", job.Name)
+			w.logger.Info("job completed successfully", "job_id", jid, "task_id", job.Name)
 		}
 	} else {
-		// TODO: move to a retry queue depend on what kind of error
-		if markErr := w.q.markJobDone(job, jobFailed); markErr != nil {
-			w.logger.Error("failed to mark job as failed", "error", markErr, "job_id", jid)
+		// Check if this is an orphaned job (task deleted)
+		isOrphanedJob := w.isOrphanedJob(err)
+		if isOrphanedJob {
+			// Mark as permanently failed - don't retry orphaned jobs
+			if markErr := w.q.markJobDone(job, jobFailed); markErr != nil {
+				w.logger.Error("failed to mark orphaned job as failed", "error", markErr, "job_id", jid)
+			}
+			// Use Info level instead of Warn to avoid stack traces
+			w.logger.Info("orphaned job removed (task deleted)",
+				"job_id", jid,
+				"task_id", job.Name,
+				"reason", "task_not_found")
+		} else {
+			// Regular failure - could be retried
+			if markErr := w.q.markJobDone(job, jobFailed); markErr != nil {
+				w.logger.Error("failed to mark job as failed", "error", markErr, "job_id", jid)
+			}
+			w.logger.Error("job processing failed",
+				"job_id", jid,
+				"task_id", job.Name,
+				"job_type", job.Type,
+				"error", err.Error())
 		}
-		w.logger.Info("Job processing failed",
-			"job_id", jid,
-			"task_id", job.Name,
-			"job_type", job.Type,
-			"failure_reason", err.Error(),
-			"job_data", string(job.Data))
 	}
 }
 
