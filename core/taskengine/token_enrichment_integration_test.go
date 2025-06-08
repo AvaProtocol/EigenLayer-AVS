@@ -36,11 +36,11 @@ func TestTokenEnrichmentIntegration(t *testing.T) {
 	t.Run("MockTokenEnrichment", func(t *testing.T) {
 		// Create a mock EventTrigger output with known token (USDC from whitelist)
 		evmLog := &avsproto.Evm_Log{
-			Address: "0x94a9d9ac8a22534e3faca9f4e7f2e2cf85d5e4c8", // USDC from sepolia.json
+			Address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", // USDC from sepolia.json
 		}
 
 		transferLog := &avsproto.EventTrigger_TransferLogOutput{
-			Address:     "0x94a9d9ac8a22534e3faca9f4e7f2e2cf85d5e4c8",
+			Address:     "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
 			Value:       "0xf4240", // 1 USDC (1,000,000 micro USDC)
 			FromAddress: "0x1234567890123456789012345678901234567890",
 			ToAddress:   "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",

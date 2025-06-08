@@ -20,10 +20,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Node_Ping_FullMethodName           = "/aggregator.Node/Ping"
-	Node_SyncMessages_FullMethodName   = "/aggregator.Node/SyncMessages"
-	Node_Ack_FullMethodName            = "/aggregator.Node/Ack"
-	Node_NotifyTriggers_FullMethodName = "/aggregator.Node/NotifyTriggers"
+	Node_Ping_FullMethodName                = "/aggregator.Node/Ping"
+	Node_SyncMessages_FullMethodName        = "/aggregator.Node/SyncMessages"
+	Node_Ack_FullMethodName                 = "/aggregator.Node/Ack"
+	Node_NotifyTriggers_FullMethodName      = "/aggregator.Node/NotifyTriggers"
+	Node_ReportEventOverload_FullMethodName = "/aggregator.Node/ReportEventOverload"
 )
 
 // NodeClient is the client API for Node service.
@@ -35,6 +36,8 @@ type NodeClient interface {
 	SyncMessages(ctx context.Context, in *SyncMessagesReq, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SyncMessagesResp], error)
 	Ack(ctx context.Context, in *AckMessageReq, opts ...grpc.CallOption) (*wrapperspb.BoolValue, error)
 	NotifyTriggers(ctx context.Context, in *NotifyTriggersReq, opts ...grpc.CallOption) (*NotifyTriggersResp, error)
+	// Internal operator safety reporting
+	ReportEventOverload(ctx context.Context, in *EventOverloadAlert, opts ...grpc.CallOption) (*EventOverloadResponse, error)
 }
 
 type nodeClient struct {
@@ -94,6 +97,16 @@ func (c *nodeClient) NotifyTriggers(ctx context.Context, in *NotifyTriggersReq, 
 	return out, nil
 }
 
+func (c *nodeClient) ReportEventOverload(ctx context.Context, in *EventOverloadAlert, opts ...grpc.CallOption) (*EventOverloadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EventOverloadResponse)
+	err := c.cc.Invoke(ctx, Node_ReportEventOverload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NodeServer is the server API for Node service.
 // All implementations must embed UnimplementedNodeServer
 // for forward compatibility.
@@ -103,6 +116,8 @@ type NodeServer interface {
 	SyncMessages(*SyncMessagesReq, grpc.ServerStreamingServer[SyncMessagesResp]) error
 	Ack(context.Context, *AckMessageReq) (*wrapperspb.BoolValue, error)
 	NotifyTriggers(context.Context, *NotifyTriggersReq) (*NotifyTriggersResp, error)
+	// Internal operator safety reporting
+	ReportEventOverload(context.Context, *EventOverloadAlert) (*EventOverloadResponse, error)
 	mustEmbedUnimplementedNodeServer()
 }
 
@@ -124,6 +139,9 @@ func (UnimplementedNodeServer) Ack(context.Context, *AckMessageReq) (*wrapperspb
 }
 func (UnimplementedNodeServer) NotifyTriggers(context.Context, *NotifyTriggersReq) (*NotifyTriggersResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NotifyTriggers not implemented")
+}
+func (UnimplementedNodeServer) ReportEventOverload(context.Context, *EventOverloadAlert) (*EventOverloadResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReportEventOverload not implemented")
 }
 func (UnimplementedNodeServer) mustEmbedUnimplementedNodeServer() {}
 func (UnimplementedNodeServer) testEmbeddedByValue()              {}
@@ -211,6 +229,24 @@ func _Node_NotifyTriggers_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Node_ReportEventOverload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EventOverloadAlert)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServer).ReportEventOverload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Node_ReportEventOverload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServer).ReportEventOverload(ctx, req.(*EventOverloadAlert))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Node_ServiceDesc is the grpc.ServiceDesc for Node service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -229,6 +265,10 @@ var Node_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "NotifyTriggers",
 			Handler:    _Node_NotifyTriggers_Handler,
+		},
+		{
+			MethodName: "ReportEventOverload",
+			Handler:    _Node_ReportEventOverload_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

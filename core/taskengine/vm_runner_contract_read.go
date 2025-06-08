@@ -6,14 +6,12 @@ import (
 	"strings"
 	"time"
 
-	ethereum "github.com/ethereum/go-ethereum"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
-	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
 type ContractReadProcessor struct {
@@ -23,10 +21,119 @@ type ContractReadProcessor struct {
 
 func NewContractReadProcessor(vm *VM, client *ethclient.Client) *ContractReadProcessor {
 	return &ContractReadProcessor{
-		client: client,
 		CommonProcessor: &CommonProcessor{
 			vm: vm,
 		},
+		client: client,
+	}
+}
+
+// buildStructuredData converts result interface{} array to StructuredField array with named fields
+func (r *ContractReadProcessor) buildStructuredData(method *abi.Method, result []interface{}) ([]*avsproto.ContractReadNode_MethodResult_StructuredField, error) {
+	var structuredFields []*avsproto.ContractReadNode_MethodResult_StructuredField
+
+	// Handle the case where method has outputs but result is empty
+	if len(result) == 0 && len(method.Outputs) > 0 {
+		return structuredFields, nil
+	}
+
+	// If method has no defined outputs, create a generic field
+	if len(method.Outputs) == 0 && len(result) > 0 {
+		for i, item := range result {
+			fieldName := fmt.Sprintf("output_%d", i)
+			fieldType := "unknown"
+			value := fmt.Sprintf("%v", item)
+
+			structuredFields = append(structuredFields, &avsproto.ContractReadNode_MethodResult_StructuredField{
+				Name:  fieldName,
+				Type:  fieldType,
+				Value: value,
+			})
+		}
+		return structuredFields, nil
+	}
+
+	// Map results to named fields based on ABI
+	for i, item := range result {
+		var fieldName, fieldType string
+		if i < len(method.Outputs) {
+			fieldName = method.Outputs[i].Name
+			fieldType = method.Outputs[i].Type.String()
+		} else {
+			fieldName = fmt.Sprintf("output_%d", i)
+			fieldType = "unknown"
+		}
+
+		// Convert value to string representation
+		value := fmt.Sprintf("%v", item)
+
+		structuredFields = append(structuredFields, &avsproto.ContractReadNode_MethodResult_StructuredField{
+			Name:  fieldName,
+			Type:  fieldType,
+			Value: value,
+		})
+	}
+
+	return structuredFields, nil
+}
+
+// executeMethodCall executes a single method call and returns the result
+func (r *ContractReadProcessor) executeMethodCall(ctx context.Context, contractAbi *abi.ABI, contractAddress common.Address, methodCall *avsproto.ContractReadNode_MethodCall) *avsproto.ContractReadNode_MethodResult {
+	calldata := common.FromHex(methodCall.CallData)
+	msg := ethereum.CallMsg{
+		To:   &contractAddress,
+		Data: calldata,
+	}
+
+	// Execute the contract call
+	output, err := r.client.CallContract(ctx, msg, nil)
+	if err != nil {
+		return &avsproto.ContractReadNode_MethodResult{
+			Success:    false,
+			Error:      fmt.Sprintf("contract call failed: %v", err),
+			MethodName: methodCall.MethodName,
+			Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+		}
+	}
+
+	// Get the method from calldata to decode the response
+	method, err := byte4.GetMethodFromCalldata(*contractAbi, calldata)
+	if err != nil {
+		return &avsproto.ContractReadNode_MethodResult{
+			Success:    false,
+			Error:      fmt.Sprintf("failed to detect method from ABI: %v", err),
+			MethodName: methodCall.MethodName,
+			Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+		}
+	}
+
+	// Decode the result using the ABI
+	result, err := contractAbi.Unpack(method.Name, output)
+	if err != nil {
+		return &avsproto.ContractReadNode_MethodResult{
+			Success:    false,
+			Error:      fmt.Sprintf("failed to decode result: %v", err),
+			MethodName: method.Name,
+			Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+		}
+	}
+
+	// Build structured data with named fields
+	structuredData, err := r.buildStructuredData(method, result)
+	if err != nil {
+		return &avsproto.ContractReadNode_MethodResult{
+			Success:    false,
+			Error:      fmt.Sprintf("failed to build structured data: %v", err),
+			MethodName: method.Name,
+			Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+		}
+	}
+
+	return &avsproto.ContractReadNode_MethodResult{
+		Success:    true,
+		Error:      "",
+		MethodName: method.Name,
+		Data:       structuredData,
 	}
 }
 
@@ -64,96 +171,70 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 
 	var log strings.Builder
 
-	var contractAbi, contractAddress, callData string
-
-	// First try to get configuration from node config
-	if node.Config != nil && node.Config.ContractAddress != "" && node.Config.CallData != "" && node.Config.ContractAbi != "" {
-		contractAbi = node.Config.ContractAbi
-		contractAddress = node.Config.ContractAddress
-		callData = node.Config.CallData
-	} else {
-		// Fall back to input variables (legacy architecture)
-		r.vm.mu.Lock()
-		contractAbiVar, abiExists := r.vm.vars["contractAbi"]
-		contractAddressVar, addrExists := r.vm.vars["contractAddress"]
-		callDataVar, dataExists := r.vm.vars["callData"]
-		r.vm.mu.Unlock()
-
-		if !abiExists || !addrExists || !dataExists {
-			err = fmt.Errorf("missing required input variables: contractAbi, contractAddress, callData")
-			return s, err
-		}
-
-		var ok bool
-		contractAbi, ok = contractAbiVar.(string)
-		if !ok {
-			err = fmt.Errorf("contractAbi must be a string")
-			return s, err
-		}
-
-		contractAddress, ok = contractAddressVar.(string)
-		if !ok {
-			err = fmt.Errorf("contractAddress must be a string")
-			return s, err
-		}
-
-		callData, ok = callDataVar.(string)
-		if !ok {
-			err = fmt.Errorf("callData must be a string")
-			return s, err
-		}
-	}
-
-	// TODO: support load pre-define ABI
-	parsedABI, err := abi.JSON(strings.NewReader(contractAbi))
-	if err != nil {
-		return nil, fmt.Errorf("error parse abi: %w", err)
-	}
-
-	contractAddr := common.HexToAddress(contractAddress)
-	calldata := common.FromHex(callData)
-	msg := ethereum.CallMsg{
-		To:   &contractAddr,
-		Data: calldata,
-	}
-
-	output, err := r.client.CallContract(ctx, msg, nil)
-
-	if err != nil {
-		s.Success = false
-		s.Error = fmt.Errorf("error invoke contract method: %w", err).Error()
+	// Get configuration from node config
+	if node.Config == nil {
+		err = fmt.Errorf("missing contract read configuration")
 		return s, err
 	}
 
-	// Unpack the output by parsing the 4byte from calldata, compare with the right method in ABI
-	method, err := byte4.GetMethodFromCalldata(parsedABI, common.FromHex(callData))
-	if err != nil {
-		s.Success = false
-		s.Error = fmt.Errorf("error detect method from ABI: %w", err).Error()
-		return s, err
-	}
-	result, err := parsedABI.Unpack(method.Name, output)
-
-	if err != nil {
-		s.Success = false
-		s.Error = fmt.Errorf("error decode result: %w", err).Error()
+	config := node.Config
+	if config.ContractAddress == "" || config.ContractAbi == "" {
+		err = fmt.Errorf("missing required configuration: contract_address and contract_abi are required")
 		return s, err
 	}
 
-	log.WriteString(fmt.Sprintf("Call %s on %s at %s", method.Name, contractAddress, time.Now()))
+	if len(config.MethodCalls) == 0 {
+		err = fmt.Errorf("no method calls specified")
+		return s, err
+	}
+
+	// Parse the ABI
+	parsedABI, err := abi.JSON(strings.NewReader(config.ContractAbi))
+	if err != nil {
+		err = fmt.Errorf("failed to parse ABI: %w", err)
+		return s, err
+	}
+
+	contractAddr := common.HexToAddress(config.ContractAddress)
+	var results []*avsproto.ContractReadNode_MethodResult
+
+	// Execute each method call serially
+	for i, methodCall := range config.MethodCalls {
+		log.WriteString(fmt.Sprintf("Call %d: %s on %s\n", i+1, methodCall.MethodName, config.ContractAddress))
+
+		result := r.executeMethodCall(ctx, &parsedABI, contractAddr, methodCall)
+		results = append(results, result)
+
+		// Log the result
+		if result.Success {
+			log.WriteString(fmt.Sprintf("  ✅ Success: %s\n", result.MethodName))
+		} else {
+			log.WriteString(fmt.Sprintf("  ❌ Failed: %s - %s\n", result.MethodName, result.Error))
+			// If any method call fails, mark the overall execution as failed
+			if err == nil {
+				err = fmt.Errorf("method call failed: %s", result.Error)
+			}
+		}
+	}
+
 	s.Log = log.String()
 
+	// Create output with all results
 	s.OutputData = &avsproto.Execution_Step_ContractRead{
 		ContractRead: &avsproto.ContractReadNode_Output{
-			Data: gow.SliceToStructPbSlice(result),
+			Results: results,
 		},
 	}
 
-	r.SetOutputVarForStep(stepID, result)
-	if err != nil {
-		s.Success = false
-		s.Error = err.Error()
-		return s, err
+	// Set output variables for backward compatibility
+	// For single method calls, set the first result as the main output
+	if len(results) > 0 && results[0].Success {
+		// Convert structured fields to interface{} for VM variable setting
+		var resultInterfaces []interface{}
+		for _, field := range results[0].Data {
+			resultInterfaces = append(resultInterfaces, field.Value)
+		}
+		r.SetOutputVarForStep(stepID, resultInterfaces)
 	}
 
 	return s, nil

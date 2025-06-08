@@ -74,7 +74,7 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		taskengine.JobTypeExecuteTask,
 		taskExecutor,
 	); err != nil {
-		agg.logger.Error("failed to register task processor", "error", err)
+		agg.logger.Error("failed to register task processor", "error", err.Error())
 	}
 
 	agg.engine = taskengine.New(
@@ -84,12 +84,12 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		agg.logger,
 	)
 	if err := agg.engine.MustStart(); err != nil {
-		agg.logger.Error("failed to start task engine", "error", err)
+		agg.logger.Error("failed to start task engine", "error", err.Error())
 	}
 
 	queueErr := agg.queue.MustStart()
 	if queueErr != nil {
-		agg.logger.Error("failed to start task queue", "error", queueErr)
+		agg.logger.Error("failed to start task queue", "error", queueErr.Error())
 	}
 
 	agg.worker.MustStart()

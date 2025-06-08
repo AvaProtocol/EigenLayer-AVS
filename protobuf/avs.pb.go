@@ -740,7 +740,9 @@ func (x *BlockTrigger) GetConfig() *BlockTrigger_Config {
 	return nil
 }
 
-// EventTrigger is a filter to match on an event. It's adhoc logic expression re-present in an array to match an ethereum event
+// EventTrigger monitors blockchain events using direct RPC filter queries.
+// Clients provide an array of ethereum.FilterQuery structures that map directly to RPC calls.
+// This approach eliminates parsing overhead and provides maximum flexibility and performance.
 type EventTrigger struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Include Config as field so it is generated in Go
@@ -5142,50 +5144,46 @@ func (x *BlockTrigger_Output) GetGasUsed() uint64 {
 	return 0
 }
 
-type EventTrigger_Matcher struct {
+// Query represents a single ethereum.FilterQuery for RPC filtering
+type EventTrigger_Query struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// the type of Filter we support, right now, we support below value for
-	//   - topics:
-	//   - address:
-	Type string `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
-	// the payload of the type data to be mached. Each type will have different semantic meaning on how to match
-	// Given type=topics`. This value is the topic array, for every non null element of the array we perform an equal check
-	// If all are equal, the filter resolve to true
+	// Contract addresses to filter events from. Empty means any contract.
+	Addresses []string `protobuf:"bytes,1,rep,name=addresses,proto3" json:"addresses,omitempty"`
+	// Topic filters structured as a 2D array matching ethereum.FilterQuery.Topics
+	// Each inner array represents a topic position (topic[0], topic[1], topic[2], etc.)
+	// Each string in the inner array represents a valid value for that topic position
+	// Empty inner array means "any value" for that topic position
 	//
-	// Example:
-	// To find all ERC20 transfer event into or out to wallet 0x5DD596C901987A2b28C38A9C1DfBf86fFFc15d77 we can do
-	// value = [
+	// Example for Transfer events FROM or TO a specific address:
+	// [
 	//
-	//	[
-	//	  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-	//	  "0x5DD596C901987A2b28C38A9C1DfBf86fFFc15d77", // tx out
-	//	],
-	//	[
-	//	  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-	//	  null,
-	//	  "0x5DD596C901987A2b28C38A9C1DfBf86fFFc15d77" // tx in
-	//	],
+	//	["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"], // Transfer signature
+	//	["0x000000000000000000000000fE66125343Aabda4A330DA667431eC1Acb7BbDA9"], // FROM address
+	//	[]  // Any TO address
 	//
 	// ]
-	Value         []string `protobuf:"bytes,2,rep,name=value,proto3" json:"value,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Topics []*EventTrigger_Topics `protobuf:"bytes,2,rep,name=topics,proto3" json:"topics,omitempty"`
+	// Maximum number of events this query should process per block/time window
+	// Used for safety - if exceeded, operator notifies aggregator to cancel task
+	MaxEventsPerBlock *uint32 `protobuf:"varint,3,opt,name=max_events_per_block,json=maxEventsPerBlock,proto3,oneof" json:"max_events_per_block,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
-func (x *EventTrigger_Matcher) Reset() {
-	*x = EventTrigger_Matcher{}
+func (x *EventTrigger_Query) Reset() {
+	*x = EventTrigger_Query{}
 	mi := &file_avs_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *EventTrigger_Matcher) String() string {
+func (x *EventTrigger_Query) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*EventTrigger_Matcher) ProtoMessage() {}
+func (*EventTrigger_Query) ProtoMessage() {}
 
-func (x *EventTrigger_Matcher) ProtoReflect() protoreflect.Message {
+func (x *EventTrigger_Query) ProtoReflect() protoreflect.Message {
 	mi := &file_avs_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5197,37 +5195,89 @@ func (x *EventTrigger_Matcher) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use EventTrigger_Matcher.ProtoReflect.Descriptor instead.
-func (*EventTrigger_Matcher) Descriptor() ([]byte, []int) {
+// Deprecated: Use EventTrigger_Query.ProtoReflect.Descriptor instead.
+func (*EventTrigger_Query) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{7, 0}
 }
 
-func (x *EventTrigger_Matcher) GetType() string {
+func (x *EventTrigger_Query) GetAddresses() []string {
 	if x != nil {
-		return x.Type
+		return x.Addresses
 	}
-	return ""
+	return nil
 }
 
-func (x *EventTrigger_Matcher) GetValue() []string {
+func (x *EventTrigger_Query) GetTopics() []*EventTrigger_Topics {
 	if x != nil {
-		return x.Value
+		return x.Topics
+	}
+	return nil
+}
+
+func (x *EventTrigger_Query) GetMaxEventsPerBlock() uint32 {
+	if x != nil && x.MaxEventsPerBlock != nil {
+		return *x.MaxEventsPerBlock
+	}
+	return 0
+}
+
+// Topics represents a single topic position filter (e.g., topic[0], topic[1], etc.)
+type EventTrigger_Topics struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Values        []string               `protobuf:"bytes,1,rep,name=values,proto3" json:"values,omitempty"` // Valid values for this topic position
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EventTrigger_Topics) Reset() {
+	*x = EventTrigger_Topics{}
+	mi := &file_avs_proto_msgTypes[70]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EventTrigger_Topics) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EventTrigger_Topics) ProtoMessage() {}
+
+func (x *EventTrigger_Topics) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[70]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EventTrigger_Topics.ProtoReflect.Descriptor instead.
+func (*EventTrigger_Topics) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{7, 1}
+}
+
+func (x *EventTrigger_Topics) GetValues() []string {
+	if x != nil {
+		return x.Values
 	}
 	return nil
 }
 
 type EventTrigger_Config struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// an array of filter to be mach, as soon as any element of the array mach, the trigger is fired.
-	Matcher       []*EventTrigger_Matcher `protobuf:"bytes,1,rep,name=matcher,proto3" json:"matcher,omitempty"`
-	Expression    string                  `protobuf:"bytes,2,opt,name=expression,proto3" json:"expression,omitempty"`
+	// Array of RPC filter queries. Each query creates a separate subscription.
+	// For FROM-OR-TO scenarios, provide two queries: one for FROM, one for TO.
+	Queries       []*EventTrigger_Query `protobuf:"bytes,1,rep,name=queries,proto3" json:"queries,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EventTrigger_Config) Reset() {
 	*x = EventTrigger_Config{}
-	mi := &file_avs_proto_msgTypes[70]
+	mi := &file_avs_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5239,7 +5289,7 @@ func (x *EventTrigger_Config) String() string {
 func (*EventTrigger_Config) ProtoMessage() {}
 
 func (x *EventTrigger_Config) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[70]
+	mi := &file_avs_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5252,21 +5302,14 @@ func (x *EventTrigger_Config) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventTrigger_Config.ProtoReflect.Descriptor instead.
 func (*EventTrigger_Config) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{7, 1}
+	return file_avs_proto_rawDescGZIP(), []int{7, 2}
 }
 
-func (x *EventTrigger_Config) GetMatcher() []*EventTrigger_Matcher {
+func (x *EventTrigger_Config) GetQueries() []*EventTrigger_Query {
 	if x != nil {
-		return x.Matcher
+		return x.Queries
 	}
 	return nil
-}
-
-func (x *EventTrigger_Config) GetExpression() string {
-	if x != nil {
-		return x.Expression
-	}
-	return ""
 }
 
 type EventTrigger_Output struct {
@@ -5284,7 +5327,7 @@ type EventTrigger_Output struct {
 
 func (x *EventTrigger_Output) Reset() {
 	*x = EventTrigger_Output{}
-	mi := &file_avs_proto_msgTypes[71]
+	mi := &file_avs_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5296,7 +5339,7 @@ func (x *EventTrigger_Output) String() string {
 func (*EventTrigger_Output) ProtoMessage() {}
 
 func (x *EventTrigger_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[71]
+	mi := &file_avs_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5309,7 +5352,7 @@ func (x *EventTrigger_Output) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventTrigger_Output.ProtoReflect.Descriptor instead.
 func (*EventTrigger_Output) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{7, 2}
+	return file_avs_proto_rawDescGZIP(), []int{7, 3}
 }
 
 func (x *EventTrigger_Output) GetOutputType() isEventTrigger_Output_OutputType {
@@ -5378,7 +5421,7 @@ type EventTrigger_TransferLogOutput struct {
 
 func (x *EventTrigger_TransferLogOutput) Reset() {
 	*x = EventTrigger_TransferLogOutput{}
-	mi := &file_avs_proto_msgTypes[72]
+	mi := &file_avs_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5390,7 +5433,7 @@ func (x *EventTrigger_TransferLogOutput) String() string {
 func (*EventTrigger_TransferLogOutput) ProtoMessage() {}
 
 func (x *EventTrigger_TransferLogOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[72]
+	mi := &file_avs_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5403,7 +5446,7 @@ func (x *EventTrigger_TransferLogOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventTrigger_TransferLogOutput.ProtoReflect.Descriptor instead.
 func (*EventTrigger_TransferLogOutput) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{7, 3}
+	return file_avs_proto_rawDescGZIP(), []int{7, 4}
 }
 
 func (x *EventTrigger_TransferLogOutput) GetTokenName() string {
@@ -5505,7 +5548,7 @@ type ManualTrigger_Config struct {
 
 func (x *ManualTrigger_Config) Reset() {
 	*x = ManualTrigger_Config{}
-	mi := &file_avs_proto_msgTypes[73]
+	mi := &file_avs_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5517,7 +5560,7 @@ func (x *ManualTrigger_Config) String() string {
 func (*ManualTrigger_Config) ProtoMessage() {}
 
 func (x *ManualTrigger_Config) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[73]
+	mi := &file_avs_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5544,7 +5587,7 @@ type ManualTrigger_Output struct {
 
 func (x *ManualTrigger_Output) Reset() {
 	*x = ManualTrigger_Output{}
-	mi := &file_avs_proto_msgTypes[74]
+	mi := &file_avs_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5556,7 +5599,7 @@ func (x *ManualTrigger_Output) String() string {
 func (*ManualTrigger_Output) ProtoMessage() {}
 
 func (x *ManualTrigger_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[74]
+	mi := &file_avs_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5589,7 +5632,7 @@ type ETHTransferNode_Config struct {
 
 func (x *ETHTransferNode_Config) Reset() {
 	*x = ETHTransferNode_Config{}
-	mi := &file_avs_proto_msgTypes[75]
+	mi := &file_avs_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5601,7 +5644,7 @@ func (x *ETHTransferNode_Config) String() string {
 func (*ETHTransferNode_Config) ProtoMessage() {}
 
 func (x *ETHTransferNode_Config) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[75]
+	mi := &file_avs_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5640,7 +5683,7 @@ type ETHTransferNode_Output struct {
 
 func (x *ETHTransferNode_Output) Reset() {
 	*x = ETHTransferNode_Output{}
-	mi := &file_avs_proto_msgTypes[76]
+	mi := &file_avs_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5652,7 +5695,7 @@ func (x *ETHTransferNode_Output) String() string {
 func (*ETHTransferNode_Output) ProtoMessage() {}
 
 func (x *ETHTransferNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[76]
+	mi := &file_avs_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5689,7 +5732,7 @@ type ContractWriteNode_Config struct {
 
 func (x *ContractWriteNode_Config) Reset() {
 	*x = ContractWriteNode_Config{}
-	mi := &file_avs_proto_msgTypes[77]
+	mi := &file_avs_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5701,7 +5744,7 @@ func (x *ContractWriteNode_Config) String() string {
 func (*ContractWriteNode_Config) ProtoMessage() {}
 
 func (x *ContractWriteNode_Config) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[77]
+	mi := &file_avs_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5753,7 +5796,7 @@ type ContractWriteNode_Output struct {
 
 func (x *ContractWriteNode_Output) Reset() {
 	*x = ContractWriteNode_Output{}
-	mi := &file_avs_proto_msgTypes[78]
+	mi := &file_avs_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5765,7 +5808,7 @@ func (x *ContractWriteNode_Output) String() string {
 func (*ContractWriteNode_Output) ProtoMessage() {}
 
 func (x *ContractWriteNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[78]
+	mi := &file_avs_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5795,21 +5838,72 @@ func (x *ContractWriteNode_Output) GetTxReceipt() *Evm_TransactionReceipt {
 	return nil
 }
 
+type ContractReadNode_MethodCall struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CallData      string                 `protobuf:"bytes,1,opt,name=call_data,json=callData,proto3" json:"call_data,omitempty"`       // Hex-encoded calldata for the method
+	MethodName    string                 `protobuf:"bytes,2,opt,name=method_name,json=methodName,proto3" json:"method_name,omitempty"` // Optional: method name for clarity (e.g. "latestRoundData")
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContractReadNode_MethodCall) Reset() {
+	*x = ContractReadNode_MethodCall{}
+	mi := &file_avs_proto_msgTypes[80]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContractReadNode_MethodCall) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContractReadNode_MethodCall) ProtoMessage() {}
+
+func (x *ContractReadNode_MethodCall) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[80]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContractReadNode_MethodCall.ProtoReflect.Descriptor instead.
+func (*ContractReadNode_MethodCall) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{12, 0}
+}
+
+func (x *ContractReadNode_MethodCall) GetCallData() string {
+	if x != nil {
+		return x.CallData
+	}
+	return ""
+}
+
+func (x *ContractReadNode_MethodCall) GetMethodName() string {
+	if x != nil {
+		return x.MethodName
+	}
+	return ""
+}
+
 type ContractReadNode_Config struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	ContractAddress string                 `protobuf:"bytes,1,opt,name=contract_address,json=contractAddress,proto3" json:"contract_address,omitempty"`
-	CallData        string                 `protobuf:"bytes,2,opt,name=call_data,json=callData,proto3" json:"call_data,omitempty"`
-	// The ABI are required to decode the return value and pass it to the next step.
-	// Currently, we need to provide the contract ABI as a JSON string.
-	// We don't need to include the full ABI—just enough to decode the method call.
-	ContractAbi   string `protobuf:"bytes,3,opt,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
+	// The ABI is required to decode the return values
+	ContractAbi string `protobuf:"bytes,2,opt,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
+	// Array of method calls to execute serially
+	MethodCalls   []*ContractReadNode_MethodCall `protobuf:"bytes,3,rep,name=method_calls,json=methodCalls,proto3" json:"method_calls,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ContractReadNode_Config) Reset() {
 	*x = ContractReadNode_Config{}
-	mi := &file_avs_proto_msgTypes[79]
+	mi := &file_avs_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5821,7 +5915,7 @@ func (x *ContractReadNode_Config) String() string {
 func (*ContractReadNode_Config) ProtoMessage() {}
 
 func (x *ContractReadNode_Config) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[79]
+	mi := &file_avs_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5834,19 +5928,12 @@ func (x *ContractReadNode_Config) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContractReadNode_Config.ProtoReflect.Descriptor instead.
 func (*ContractReadNode_Config) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{12, 0}
+	return file_avs_proto_rawDescGZIP(), []int{12, 1}
 }
 
 func (x *ContractReadNode_Config) GetContractAddress() string {
 	if x != nil {
 		return x.ContractAddress
-	}
-	return ""
-}
-
-func (x *ContractReadNode_Config) GetCallData() string {
-	if x != nil {
-		return x.CallData
 	}
 	return ""
 }
@@ -5858,20 +5945,93 @@ func (x *ContractReadNode_Config) GetContractAbi() string {
 	return ""
 }
 
+func (x *ContractReadNode_Config) GetMethodCalls() []*ContractReadNode_MethodCall {
+	if x != nil {
+		return x.MethodCalls
+	}
+	return nil
+}
+
+type ContractReadNode_MethodResult struct {
+	state protoimpl.MessageState                           `protogen:"open.v1"`
+	Data  []*ContractReadNode_MethodResult_StructuredField `protobuf:"bytes,1,rep,name=data,proto3" json:"data,omitempty"`
+	// Method metadata
+	MethodName    string `protobuf:"bytes,2,opt,name=method_name,json=methodName,proto3" json:"method_name,omitempty"` // The name of the method called
+	Success       bool   `protobuf:"varint,3,opt,name=success,proto3" json:"success,omitempty"`                        // Whether this specific method call succeeded
+	Error         string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`                             // Error message if the method call failed
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContractReadNode_MethodResult) Reset() {
+	*x = ContractReadNode_MethodResult{}
+	mi := &file_avs_proto_msgTypes[82]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContractReadNode_MethodResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContractReadNode_MethodResult) ProtoMessage() {}
+
+func (x *ContractReadNode_MethodResult) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[82]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContractReadNode_MethodResult.ProtoReflect.Descriptor instead.
+func (*ContractReadNode_MethodResult) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{12, 2}
+}
+
+func (x *ContractReadNode_MethodResult) GetData() []*ContractReadNode_MethodResult_StructuredField {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *ContractReadNode_MethodResult) GetMethodName() string {
+	if x != nil {
+		return x.MethodName
+	}
+	return ""
+}
+
+func (x *ContractReadNode_MethodResult) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ContractReadNode_MethodResult) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 type ContractReadNode_Output struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The data is the result of querying the contract method. Becuase this is fetching data from the outside world,
-	// we don't know the shape of data ahead of time.
-	// At runtime, the data is dynamically parsed into the correct type for the node to consume
-	// In case of smart contract, the return is always an array, then it's up to the client to map to the right field based on method signature
-	Data          []*structpb.Value `protobuf:"bytes,1,rep,name=data,proto3" json:"data,omitempty"`
+	// Results for each method call, in the same order as the input method_calls
+	Results       []*ContractReadNode_MethodResult `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ContractReadNode_Output) Reset() {
 	*x = ContractReadNode_Output{}
-	mi := &file_avs_proto_msgTypes[80]
+	mi := &file_avs_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5883,7 +6043,7 @@ func (x *ContractReadNode_Output) String() string {
 func (*ContractReadNode_Output) ProtoMessage() {}
 
 func (x *ContractReadNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[80]
+	mi := &file_avs_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5896,14 +6056,75 @@ func (x *ContractReadNode_Output) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContractReadNode_Output.ProtoReflect.Descriptor instead.
 func (*ContractReadNode_Output) Descriptor() ([]byte, []int) {
-	return file_avs_proto_rawDescGZIP(), []int{12, 1}
+	return file_avs_proto_rawDescGZIP(), []int{12, 3}
 }
 
-func (x *ContractReadNode_Output) GetData() []*structpb.Value {
+func (x *ContractReadNode_Output) GetResults() []*ContractReadNode_MethodResult {
 	if x != nil {
-		return x.Data
+		return x.Results
 	}
 	return nil
+}
+
+// Structured data with named fields based on method signature
+type ContractReadNode_MethodResult_StructuredField struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`   // Field name from ABI (e.g. "roundId", "answer", "startedAt")
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`   // Solidity type (e.g. "uint80", "int256", "uint256")
+	Value         string                 `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"` // The actual value as string, client parses based on type
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContractReadNode_MethodResult_StructuredField) Reset() {
+	*x = ContractReadNode_MethodResult_StructuredField{}
+	mi := &file_avs_proto_msgTypes[84]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContractReadNode_MethodResult_StructuredField) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContractReadNode_MethodResult_StructuredField) ProtoMessage() {}
+
+func (x *ContractReadNode_MethodResult_StructuredField) ProtoReflect() protoreflect.Message {
+	mi := &file_avs_proto_msgTypes[84]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContractReadNode_MethodResult_StructuredField.ProtoReflect.Descriptor instead.
+func (*ContractReadNode_MethodResult_StructuredField) Descriptor() ([]byte, []int) {
+	return file_avs_proto_rawDescGZIP(), []int{12, 2, 0}
+}
+
+func (x *ContractReadNode_MethodResult_StructuredField) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ContractReadNode_MethodResult_StructuredField) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *ContractReadNode_MethodResult_StructuredField) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
 }
 
 type GraphQLQueryNode_Config struct {
@@ -5918,7 +6139,7 @@ type GraphQLQueryNode_Config struct {
 
 func (x *GraphQLQueryNode_Config) Reset() {
 	*x = GraphQLQueryNode_Config{}
-	mi := &file_avs_proto_msgTypes[81]
+	mi := &file_avs_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5930,7 +6151,7 @@ func (x *GraphQLQueryNode_Config) String() string {
 func (*GraphQLQueryNode_Config) ProtoMessage() {}
 
 func (x *GraphQLQueryNode_Config) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[81]
+	mi := &file_avs_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5978,7 +6199,7 @@ type GraphQLQueryNode_Output struct {
 
 func (x *GraphQLQueryNode_Output) Reset() {
 	*x = GraphQLQueryNode_Output{}
-	mi := &file_avs_proto_msgTypes[82]
+	mi := &file_avs_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5990,7 +6211,7 @@ func (x *GraphQLQueryNode_Output) String() string {
 func (*GraphQLQueryNode_Output) ProtoMessage() {}
 
 func (x *GraphQLQueryNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[82]
+	mi := &file_avs_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6025,7 +6246,7 @@ type RestAPINode_Config struct {
 
 func (x *RestAPINode_Config) Reset() {
 	*x = RestAPINode_Config{}
-	mi := &file_avs_proto_msgTypes[84]
+	mi := &file_avs_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6037,7 +6258,7 @@ func (x *RestAPINode_Config) String() string {
 func (*RestAPINode_Config) ProtoMessage() {}
 
 func (x *RestAPINode_Config) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[84]
+	mi := &file_avs_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6091,7 +6312,7 @@ type RestAPINode_Output struct {
 
 func (x *RestAPINode_Output) Reset() {
 	*x = RestAPINode_Output{}
-	mi := &file_avs_proto_msgTypes[85]
+	mi := &file_avs_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6103,7 +6324,7 @@ func (x *RestAPINode_Output) String() string {
 func (*RestAPINode_Output) ProtoMessage() {}
 
 func (x *RestAPINode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[85]
+	mi := &file_avs_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6136,7 +6357,7 @@ type CustomCodeNode_Config struct {
 
 func (x *CustomCodeNode_Config) Reset() {
 	*x = CustomCodeNode_Config{}
-	mi := &file_avs_proto_msgTypes[87]
+	mi := &file_avs_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6148,7 +6369,7 @@ func (x *CustomCodeNode_Config) String() string {
 func (*CustomCodeNode_Config) ProtoMessage() {}
 
 func (x *CustomCodeNode_Config) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[87]
+	mi := &file_avs_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6188,7 +6409,7 @@ type CustomCodeNode_Output struct {
 
 func (x *CustomCodeNode_Output) Reset() {
 	*x = CustomCodeNode_Output{}
-	mi := &file_avs_proto_msgTypes[88]
+	mi := &file_avs_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6200,7 +6421,7 @@ func (x *CustomCodeNode_Output) String() string {
 func (*CustomCodeNode_Output) ProtoMessage() {}
 
 func (x *CustomCodeNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[88]
+	mi := &file_avs_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6234,7 +6455,7 @@ type BranchNode_Condition struct {
 
 func (x *BranchNode_Condition) Reset() {
 	*x = BranchNode_Condition{}
-	mi := &file_avs_proto_msgTypes[89]
+	mi := &file_avs_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6246,7 +6467,7 @@ func (x *BranchNode_Condition) String() string {
 func (*BranchNode_Condition) ProtoMessage() {}
 
 func (x *BranchNode_Condition) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[89]
+	mi := &file_avs_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6292,7 +6513,7 @@ type BranchNode_Config struct {
 
 func (x *BranchNode_Config) Reset() {
 	*x = BranchNode_Config{}
-	mi := &file_avs_proto_msgTypes[90]
+	mi := &file_avs_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6304,7 +6525,7 @@ func (x *BranchNode_Config) String() string {
 func (*BranchNode_Config) ProtoMessage() {}
 
 func (x *BranchNode_Config) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[90]
+	mi := &file_avs_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6339,7 +6560,7 @@ type BranchNode_Output struct {
 
 func (x *BranchNode_Output) Reset() {
 	*x = BranchNode_Output{}
-	mi := &file_avs_proto_msgTypes[91]
+	mi := &file_avs_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6351,7 +6572,7 @@ func (x *BranchNode_Output) String() string {
 func (*BranchNode_Output) ProtoMessage() {}
 
 func (x *BranchNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[91]
+	mi := &file_avs_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6387,7 +6608,7 @@ type FilterNode_Config struct {
 
 func (x *FilterNode_Config) Reset() {
 	*x = FilterNode_Config{}
-	mi := &file_avs_proto_msgTypes[92]
+	mi := &file_avs_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6399,7 +6620,7 @@ func (x *FilterNode_Config) String() string {
 func (*FilterNode_Config) ProtoMessage() {}
 
 func (x *FilterNode_Config) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[92]
+	mi := &file_avs_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6439,7 +6660,7 @@ type FilterNode_Output struct {
 
 func (x *FilterNode_Output) Reset() {
 	*x = FilterNode_Output{}
-	mi := &file_avs_proto_msgTypes[93]
+	mi := &file_avs_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6451,7 +6672,7 @@ func (x *FilterNode_Output) String() string {
 func (*FilterNode_Output) ProtoMessage() {}
 
 func (x *FilterNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[93]
+	mi := &file_avs_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6489,7 +6710,7 @@ type LoopNode_Config struct {
 
 func (x *LoopNode_Config) Reset() {
 	*x = LoopNode_Config{}
-	mi := &file_avs_proto_msgTypes[94]
+	mi := &file_avs_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6501,7 +6722,7 @@ func (x *LoopNode_Config) String() string {
 func (*LoopNode_Config) ProtoMessage() {}
 
 func (x *LoopNode_Config) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[94]
+	mi := &file_avs_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6547,7 +6768,7 @@ type LoopNode_Output struct {
 
 func (x *LoopNode_Output) Reset() {
 	*x = LoopNode_Output{}
-	mi := &file_avs_proto_msgTypes[95]
+	mi := &file_avs_proto_msgTypes[99]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6559,7 +6780,7 @@ func (x *LoopNode_Output) String() string {
 func (*LoopNode_Output) ProtoMessage() {}
 
 func (x *LoopNode_Output) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[95]
+	mi := &file_avs_proto_msgTypes[99]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6619,7 +6840,7 @@ type Execution_Step struct {
 
 func (x *Execution_Step) Reset() {
 	*x = Execution_Step{}
-	mi := &file_avs_proto_msgTypes[96]
+	mi := &file_avs_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6631,7 +6852,7 @@ func (x *Execution_Step) String() string {
 func (*Execution_Step) ProtoMessage() {}
 
 func (x *Execution_Step) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[96]
+	mi := &file_avs_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6952,7 +7173,7 @@ type Evm_Log struct {
 
 func (x *Evm_Log) Reset() {
 	*x = Evm_Log{}
-	mi := &file_avs_proto_msgTypes[100]
+	mi := &file_avs_proto_msgTypes[104]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6964,7 +7185,7 @@ func (x *Evm_Log) String() string {
 func (*Evm_Log) ProtoMessage() {}
 
 func (x *Evm_Log) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[100]
+	mi := &file_avs_proto_msgTypes[104]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7070,7 +7291,7 @@ type Evm_TransactionReceipt struct {
 
 func (x *Evm_TransactionReceipt) Reset() {
 	*x = Evm_TransactionReceipt{}
-	mi := &file_avs_proto_msgTypes[101]
+	mi := &file_avs_proto_msgTypes[105]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7082,7 +7303,7 @@ func (x *Evm_TransactionReceipt) String() string {
 func (*Evm_TransactionReceipt) ProtoMessage() {}
 
 func (x *Evm_TransactionReceipt) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[101]
+	mi := &file_avs_proto_msgTypes[105]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7243,7 +7464,7 @@ type Evm_UserOp struct {
 
 func (x *Evm_UserOp) Reset() {
 	*x = Evm_UserOp{}
-	mi := &file_avs_proto_msgTypes[102]
+	mi := &file_avs_proto_msgTypes[106]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7255,7 +7476,7 @@ func (x *Evm_UserOp) String() string {
 func (*Evm_UserOp) ProtoMessage() {}
 
 func (x *Evm_UserOp) ProtoReflect() protoreflect.Message {
-	mi := &file_avs_proto_msgTypes[102]
+	mi := &file_avs_proto_msgTypes[106]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7396,17 +7617,18 @@ const file_avs_proto_rawDesc = "" +
 	"difficulty\x18\x05 \x01(\tR\n" +
 	"difficulty\x12\x1b\n" +
 	"\tgas_limit\x18\x06 \x01(\x04R\bgasLimit\x12\x19\n" +
-	"\bgas_used\x18\a \x01(\x04R\agasUsed\"\xd8\x06\n" +
+	"\bgas_used\x18\a \x01(\x04R\agasUsed\"\xd3\a\n" +
 	"\fEventTrigger\x127\n" +
-	"\x06config\x18\x01 \x01(\v2\x1f.aggregator.EventTrigger.ConfigR\x06config\x1a3\n" +
-	"\aMatcher\x12\x12\n" +
-	"\x04type\x18\x01 \x01(\tR\x04type\x12\x14\n" +
-	"\x05value\x18\x02 \x03(\tR\x05value\x1ad\n" +
-	"\x06Config\x12:\n" +
-	"\amatcher\x18\x01 \x03(\v2 .aggregator.EventTrigger.MatcherR\amatcher\x12\x1e\n" +
-	"\n" +
-	"expression\x18\x02 \x01(\tR\n" +
-	"expression\x1a\x98\x01\n" +
+	"\x06config\x18\x01 \x01(\v2\x1f.aggregator.EventTrigger.ConfigR\x06config\x1a\xad\x01\n" +
+	"\x05Query\x12\x1c\n" +
+	"\taddresses\x18\x01 \x03(\tR\taddresses\x127\n" +
+	"\x06topics\x18\x02 \x03(\v2\x1f.aggregator.EventTrigger.TopicsR\x06topics\x124\n" +
+	"\x14max_events_per_block\x18\x03 \x01(\rH\x00R\x11maxEventsPerBlock\x88\x01\x01B\x17\n" +
+	"\x15_max_events_per_block\x1a \n" +
+	"\x06Topics\x12\x16\n" +
+	"\x06values\x18\x01 \x03(\tR\x06values\x1aB\n" +
+	"\x06Config\x128\n" +
+	"\aqueries\x18\x01 \x03(\v2\x1e.aggregator.EventTrigger.QueryR\aqueries\x1a\x98\x01\n" +
 	"\x06Output\x12.\n" +
 	"\aevm_log\x18\x01 \x01(\v2\x13.aggregator.Evm.LogH\x00R\x06evmLog\x12O\n" +
 	"\ftransfer_log\x18\x02 \x01(\v2*.aggregator.EventTrigger.TransferLogOutputH\x00R\vtransferLogB\r\n" +
@@ -7460,15 +7682,30 @@ const file_avs_proto_rawDesc = "" +
 	"\x06Output\x12/\n" +
 	"\auser_op\x18\x01 \x01(\v2\x16.aggregator.Evm.UserOpR\x06userOp\x12A\n" +
 	"\n" +
-	"tx_receipt\x18\x02 \x01(\v2\".aggregator.Evm.TransactionReceiptR\ttxReceipt\"\xfa\x01\n" +
+	"tx_receipt\x18\x02 \x01(\v2\".aggregator.Evm.TransactionReceiptR\ttxReceipt\"\x91\x05\n" +
 	"\x10ContractReadNode\x12;\n" +
-	"\x06config\x18\x01 \x01(\v2#.aggregator.ContractReadNode.ConfigR\x06config\x1as\n" +
+	"\x06config\x18\x01 \x01(\v2#.aggregator.ContractReadNode.ConfigR\x06config\x1aJ\n" +
+	"\n" +
+	"MethodCall\x12\x1b\n" +
+	"\tcall_data\x18\x01 \x01(\tR\bcallData\x12\x1f\n" +
+	"\vmethod_name\x18\x02 \x01(\tR\n" +
+	"methodName\x1a\xa2\x01\n" +
 	"\x06Config\x12)\n" +
-	"\x10contract_address\x18\x01 \x01(\tR\x0fcontractAddress\x12\x1b\n" +
-	"\tcall_data\x18\x02 \x01(\tR\bcallData\x12!\n" +
-	"\fcontract_abi\x18\x03 \x01(\tR\vcontractAbi\x1a4\n" +
-	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x03(\v2\x16.google.protobuf.ValueR\x04data\"\xc6\x02\n" +
+	"\x10contract_address\x18\x01 \x01(\tR\x0fcontractAddress\x12!\n" +
+	"\fcontract_abi\x18\x02 \x01(\tR\vcontractAbi\x12J\n" +
+	"\fmethod_calls\x18\x03 \x03(\v2'.aggregator.ContractReadNode.MethodCallR\vmethodCalls\x1a\xff\x01\n" +
+	"\fMethodResult\x12M\n" +
+	"\x04data\x18\x01 \x03(\v29.aggregator.ContractReadNode.MethodResult.StructuredFieldR\x04data\x12\x1f\n" +
+	"\vmethod_name\x18\x02 \x01(\tR\n" +
+	"methodName\x12\x18\n" +
+	"\asuccess\x18\x03 \x01(\bR\asuccess\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x1aO\n" +
+	"\x0fStructuredField\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12\x14\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\x1aM\n" +
+	"\x06Output\x12C\n" +
+	"\aresults\x18\x01 \x03(\v2).aggregator.ContractReadNode.MethodResultR\aresults\"\xc6\x02\n" +
 	"\x10GraphQLQueryNode\x12;\n" +
 	"\x06config\x18\x01 \x01(\v2#.aggregator.GraphQLQueryNode.ConfigR\x06config\x1a\xc0\x01\n" +
 	"\x06Config\x12\x10\n" +
@@ -7955,149 +8192,153 @@ func file_avs_proto_rawDescGZIP() []byte {
 }
 
 var file_avs_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_avs_proto_msgTypes = make([]protoimpl.MessageInfo, 104)
+var file_avs_proto_msgTypes = make([]protoimpl.MessageInfo, 108)
 var file_avs_proto_goTypes = []any{
-	(TriggerType)(0),                       // 0: aggregator.TriggerType
-	(NodeType)(0),                          // 1: aggregator.NodeType
-	(Lang)(0),                              // 2: aggregator.Lang
-	(Error)(0),                             // 3: aggregator.Error
-	(TaskStatus)(0),                        // 4: aggregator.TaskStatus
-	(ExecutionStatus)(0),                   // 5: aggregator.ExecutionStatus
-	(*TokenMetadata)(nil),                  // 6: aggregator.TokenMetadata
-	(*GetTokenMetadataReq)(nil),            // 7: aggregator.GetTokenMetadataReq
-	(*GetTokenMetadataResp)(nil),           // 8: aggregator.GetTokenMetadataResp
-	(*IdReq)(nil),                          // 9: aggregator.IdReq
-	(*FixedTimeTrigger)(nil),               // 10: aggregator.FixedTimeTrigger
-	(*CronTrigger)(nil),                    // 11: aggregator.CronTrigger
-	(*BlockTrigger)(nil),                   // 12: aggregator.BlockTrigger
-	(*EventTrigger)(nil),                   // 13: aggregator.EventTrigger
-	(*ManualTrigger)(nil),                  // 14: aggregator.ManualTrigger
-	(*TaskTrigger)(nil),                    // 15: aggregator.TaskTrigger
-	(*ETHTransferNode)(nil),                // 16: aggregator.ETHTransferNode
-	(*ContractWriteNode)(nil),              // 17: aggregator.ContractWriteNode
-	(*ContractReadNode)(nil),               // 18: aggregator.ContractReadNode
-	(*GraphQLQueryNode)(nil),               // 19: aggregator.GraphQLQueryNode
-	(*RestAPINode)(nil),                    // 20: aggregator.RestAPINode
-	(*CustomCodeNode)(nil),                 // 21: aggregator.CustomCodeNode
-	(*BranchNode)(nil),                     // 22: aggregator.BranchNode
-	(*FilterNode)(nil),                     // 23: aggregator.FilterNode
-	(*LoopNode)(nil),                       // 24: aggregator.LoopNode
-	(*TaskEdge)(nil),                       // 25: aggregator.TaskEdge
-	(*TaskNode)(nil),                       // 26: aggregator.TaskNode
-	(*Execution)(nil),                      // 27: aggregator.Execution
-	(*Task)(nil),                           // 28: aggregator.Task
-	(*CreateTaskReq)(nil),                  // 29: aggregator.CreateTaskReq
-	(*CreateTaskResp)(nil),                 // 30: aggregator.CreateTaskResp
-	(*NonceRequest)(nil),                   // 31: aggregator.NonceRequest
-	(*NonceResp)(nil),                      // 32: aggregator.NonceResp
-	(*ListWalletReq)(nil),                  // 33: aggregator.ListWalletReq
-	(*SmartWallet)(nil),                    // 34: aggregator.SmartWallet
-	(*ListWalletResp)(nil),                 // 35: aggregator.ListWalletResp
-	(*ListTasksReq)(nil),                   // 36: aggregator.ListTasksReq
-	(*ListTasksResp)(nil),                  // 37: aggregator.ListTasksResp
-	(*ListExecutionsReq)(nil),              // 38: aggregator.ListExecutionsReq
-	(*ListExecutionsResp)(nil),             // 39: aggregator.ListExecutionsResp
-	(*ExecutionReq)(nil),                   // 40: aggregator.ExecutionReq
-	(*ExecutionStatusResp)(nil),            // 41: aggregator.ExecutionStatusResp
-	(*GetKeyReq)(nil),                      // 42: aggregator.GetKeyReq
-	(*KeyResp)(nil),                        // 43: aggregator.KeyResp
-	(*GetWalletReq)(nil),                   // 44: aggregator.GetWalletReq
-	(*GetWalletResp)(nil),                  // 45: aggregator.GetWalletResp
-	(*SetWalletReq)(nil),                   // 46: aggregator.SetWalletReq
-	(*TriggerTaskReq)(nil),                 // 47: aggregator.TriggerTaskReq
-	(*TriggerTaskResp)(nil),                // 48: aggregator.TriggerTaskResp
-	(*CreateOrUpdateSecretReq)(nil),        // 49: aggregator.CreateOrUpdateSecretReq
-	(*ListSecretsReq)(nil),                 // 50: aggregator.ListSecretsReq
-	(*PageInfo)(nil),                       // 51: aggregator.PageInfo
-	(*Secret)(nil),                         // 52: aggregator.Secret
-	(*ListSecretsResp)(nil),                // 53: aggregator.ListSecretsResp
-	(*DeleteSecretReq)(nil),                // 54: aggregator.DeleteSecretReq
-	(*GetSignatureFormatReq)(nil),          // 55: aggregator.GetSignatureFormatReq
-	(*GetSignatureFormatResp)(nil),         // 56: aggregator.GetSignatureFormatResp
-	(*GetWorkflowCountReq)(nil),            // 57: aggregator.GetWorkflowCountReq
-	(*GetWorkflowCountResp)(nil),           // 58: aggregator.GetWorkflowCountResp
-	(*GetExecutionCountReq)(nil),           // 59: aggregator.GetExecutionCountReq
-	(*GetExecutionCountResp)(nil),          // 60: aggregator.GetExecutionCountResp
-	(*GetExecutionStatsReq)(nil),           // 61: aggregator.GetExecutionStatsReq
-	(*GetExecutionStatsResp)(nil),          // 62: aggregator.GetExecutionStatsResp
-	(*RunNodeWithInputsReq)(nil),           // 63: aggregator.RunNodeWithInputsReq
-	(*RunNodeWithInputsResp)(nil),          // 64: aggregator.RunNodeWithInputsResp
-	(*RunTriggerReq)(nil),                  // 65: aggregator.RunTriggerReq
-	(*RunTriggerResp)(nil),                 // 66: aggregator.RunTriggerResp
-	(*Evm)(nil),                            // 67: aggregator.Evm
-	(*SimulateTaskReq)(nil),                // 68: aggregator.SimulateTaskReq
-	(*FixedTimeTrigger_Config)(nil),        // 69: aggregator.FixedTimeTrigger.Config
-	(*FixedTimeTrigger_Output)(nil),        // 70: aggregator.FixedTimeTrigger.Output
-	(*CronTrigger_Config)(nil),             // 71: aggregator.CronTrigger.Config
-	(*CronTrigger_Output)(nil),             // 72: aggregator.CronTrigger.Output
-	(*BlockTrigger_Config)(nil),            // 73: aggregator.BlockTrigger.Config
-	(*BlockTrigger_Output)(nil),            // 74: aggregator.BlockTrigger.Output
-	(*EventTrigger_Matcher)(nil),           // 75: aggregator.EventTrigger.Matcher
-	(*EventTrigger_Config)(nil),            // 76: aggregator.EventTrigger.Config
-	(*EventTrigger_Output)(nil),            // 77: aggregator.EventTrigger.Output
-	(*EventTrigger_TransferLogOutput)(nil), // 78: aggregator.EventTrigger.TransferLogOutput
-	(*ManualTrigger_Config)(nil),           // 79: aggregator.ManualTrigger.Config
-	(*ManualTrigger_Output)(nil),           // 80: aggregator.ManualTrigger.Output
-	(*ETHTransferNode_Config)(nil),         // 81: aggregator.ETHTransferNode.Config
-	(*ETHTransferNode_Output)(nil),         // 82: aggregator.ETHTransferNode.Output
-	(*ContractWriteNode_Config)(nil),       // 83: aggregator.ContractWriteNode.Config
-	(*ContractWriteNode_Output)(nil),       // 84: aggregator.ContractWriteNode.Output
-	(*ContractReadNode_Config)(nil),        // 85: aggregator.ContractReadNode.Config
-	(*ContractReadNode_Output)(nil),        // 86: aggregator.ContractReadNode.Output
-	(*GraphQLQueryNode_Config)(nil),        // 87: aggregator.GraphQLQueryNode.Config
-	(*GraphQLQueryNode_Output)(nil),        // 88: aggregator.GraphQLQueryNode.Output
-	nil,                                    // 89: aggregator.GraphQLQueryNode.Config.VariablesEntry
-	(*RestAPINode_Config)(nil),             // 90: aggregator.RestAPINode.Config
-	(*RestAPINode_Output)(nil),             // 91: aggregator.RestAPINode.Output
-	nil,                                    // 92: aggregator.RestAPINode.Config.HeadersEntry
-	(*CustomCodeNode_Config)(nil),          // 93: aggregator.CustomCodeNode.Config
-	(*CustomCodeNode_Output)(nil),          // 94: aggregator.CustomCodeNode.Output
-	(*BranchNode_Condition)(nil),           // 95: aggregator.BranchNode.Condition
-	(*BranchNode_Config)(nil),              // 96: aggregator.BranchNode.Config
-	(*BranchNode_Output)(nil),              // 97: aggregator.BranchNode.Output
-	(*FilterNode_Config)(nil),              // 98: aggregator.FilterNode.Config
-	(*FilterNode_Output)(nil),              // 99: aggregator.FilterNode.Output
-	(*LoopNode_Config)(nil),                // 100: aggregator.LoopNode.Config
-	(*LoopNode_Output)(nil),                // 101: aggregator.LoopNode.Output
-	(*Execution_Step)(nil),                 // 102: aggregator.Execution.Step
-	nil,                                    // 103: aggregator.RunNodeWithInputsReq.NodeConfigEntry
-	nil,                                    // 104: aggregator.RunNodeWithInputsReq.InputVariablesEntry
-	nil,                                    // 105: aggregator.RunTriggerReq.TriggerConfigEntry
-	(*Evm_Log)(nil),                        // 106: aggregator.Evm.Log
-	(*Evm_TransactionReceipt)(nil),         // 107: aggregator.Evm.TransactionReceipt
-	(*Evm_UserOp)(nil),                     // 108: aggregator.Evm.UserOp
-	nil,                                    // 109: aggregator.SimulateTaskReq.InputVariablesEntry
-	(*structpb.Value)(nil),                 // 110: google.protobuf.Value
-	(*anypb.Any)(nil),                      // 111: google.protobuf.Any
-	(*wrapperspb.BoolValue)(nil),           // 112: google.protobuf.BoolValue
+	(TriggerType)(0),                                      // 0: aggregator.TriggerType
+	(NodeType)(0),                                         // 1: aggregator.NodeType
+	(Lang)(0),                                             // 2: aggregator.Lang
+	(Error)(0),                                            // 3: aggregator.Error
+	(TaskStatus)(0),                                       // 4: aggregator.TaskStatus
+	(ExecutionStatus)(0),                                  // 5: aggregator.ExecutionStatus
+	(*TokenMetadata)(nil),                                 // 6: aggregator.TokenMetadata
+	(*GetTokenMetadataReq)(nil),                           // 7: aggregator.GetTokenMetadataReq
+	(*GetTokenMetadataResp)(nil),                          // 8: aggregator.GetTokenMetadataResp
+	(*IdReq)(nil),                                         // 9: aggregator.IdReq
+	(*FixedTimeTrigger)(nil),                              // 10: aggregator.FixedTimeTrigger
+	(*CronTrigger)(nil),                                   // 11: aggregator.CronTrigger
+	(*BlockTrigger)(nil),                                  // 12: aggregator.BlockTrigger
+	(*EventTrigger)(nil),                                  // 13: aggregator.EventTrigger
+	(*ManualTrigger)(nil),                                 // 14: aggregator.ManualTrigger
+	(*TaskTrigger)(nil),                                   // 15: aggregator.TaskTrigger
+	(*ETHTransferNode)(nil),                               // 16: aggregator.ETHTransferNode
+	(*ContractWriteNode)(nil),                             // 17: aggregator.ContractWriteNode
+	(*ContractReadNode)(nil),                              // 18: aggregator.ContractReadNode
+	(*GraphQLQueryNode)(nil),                              // 19: aggregator.GraphQLQueryNode
+	(*RestAPINode)(nil),                                   // 20: aggregator.RestAPINode
+	(*CustomCodeNode)(nil),                                // 21: aggregator.CustomCodeNode
+	(*BranchNode)(nil),                                    // 22: aggregator.BranchNode
+	(*FilterNode)(nil),                                    // 23: aggregator.FilterNode
+	(*LoopNode)(nil),                                      // 24: aggregator.LoopNode
+	(*TaskEdge)(nil),                                      // 25: aggregator.TaskEdge
+	(*TaskNode)(nil),                                      // 26: aggregator.TaskNode
+	(*Execution)(nil),                                     // 27: aggregator.Execution
+	(*Task)(nil),                                          // 28: aggregator.Task
+	(*CreateTaskReq)(nil),                                 // 29: aggregator.CreateTaskReq
+	(*CreateTaskResp)(nil),                                // 30: aggregator.CreateTaskResp
+	(*NonceRequest)(nil),                                  // 31: aggregator.NonceRequest
+	(*NonceResp)(nil),                                     // 32: aggregator.NonceResp
+	(*ListWalletReq)(nil),                                 // 33: aggregator.ListWalletReq
+	(*SmartWallet)(nil),                                   // 34: aggregator.SmartWallet
+	(*ListWalletResp)(nil),                                // 35: aggregator.ListWalletResp
+	(*ListTasksReq)(nil),                                  // 36: aggregator.ListTasksReq
+	(*ListTasksResp)(nil),                                 // 37: aggregator.ListTasksResp
+	(*ListExecutionsReq)(nil),                             // 38: aggregator.ListExecutionsReq
+	(*ListExecutionsResp)(nil),                            // 39: aggregator.ListExecutionsResp
+	(*ExecutionReq)(nil),                                  // 40: aggregator.ExecutionReq
+	(*ExecutionStatusResp)(nil),                           // 41: aggregator.ExecutionStatusResp
+	(*GetKeyReq)(nil),                                     // 42: aggregator.GetKeyReq
+	(*KeyResp)(nil),                                       // 43: aggregator.KeyResp
+	(*GetWalletReq)(nil),                                  // 44: aggregator.GetWalletReq
+	(*GetWalletResp)(nil),                                 // 45: aggregator.GetWalletResp
+	(*SetWalletReq)(nil),                                  // 46: aggregator.SetWalletReq
+	(*TriggerTaskReq)(nil),                                // 47: aggregator.TriggerTaskReq
+	(*TriggerTaskResp)(nil),                               // 48: aggregator.TriggerTaskResp
+	(*CreateOrUpdateSecretReq)(nil),                       // 49: aggregator.CreateOrUpdateSecretReq
+	(*ListSecretsReq)(nil),                                // 50: aggregator.ListSecretsReq
+	(*PageInfo)(nil),                                      // 51: aggregator.PageInfo
+	(*Secret)(nil),                                        // 52: aggregator.Secret
+	(*ListSecretsResp)(nil),                               // 53: aggregator.ListSecretsResp
+	(*DeleteSecretReq)(nil),                               // 54: aggregator.DeleteSecretReq
+	(*GetSignatureFormatReq)(nil),                         // 55: aggregator.GetSignatureFormatReq
+	(*GetSignatureFormatResp)(nil),                        // 56: aggregator.GetSignatureFormatResp
+	(*GetWorkflowCountReq)(nil),                           // 57: aggregator.GetWorkflowCountReq
+	(*GetWorkflowCountResp)(nil),                          // 58: aggregator.GetWorkflowCountResp
+	(*GetExecutionCountReq)(nil),                          // 59: aggregator.GetExecutionCountReq
+	(*GetExecutionCountResp)(nil),                         // 60: aggregator.GetExecutionCountResp
+	(*GetExecutionStatsReq)(nil),                          // 61: aggregator.GetExecutionStatsReq
+	(*GetExecutionStatsResp)(nil),                         // 62: aggregator.GetExecutionStatsResp
+	(*RunNodeWithInputsReq)(nil),                          // 63: aggregator.RunNodeWithInputsReq
+	(*RunNodeWithInputsResp)(nil),                         // 64: aggregator.RunNodeWithInputsResp
+	(*RunTriggerReq)(nil),                                 // 65: aggregator.RunTriggerReq
+	(*RunTriggerResp)(nil),                                // 66: aggregator.RunTriggerResp
+	(*Evm)(nil),                                           // 67: aggregator.Evm
+	(*SimulateTaskReq)(nil),                               // 68: aggregator.SimulateTaskReq
+	(*FixedTimeTrigger_Config)(nil),                       // 69: aggregator.FixedTimeTrigger.Config
+	(*FixedTimeTrigger_Output)(nil),                       // 70: aggregator.FixedTimeTrigger.Output
+	(*CronTrigger_Config)(nil),                            // 71: aggregator.CronTrigger.Config
+	(*CronTrigger_Output)(nil),                            // 72: aggregator.CronTrigger.Output
+	(*BlockTrigger_Config)(nil),                           // 73: aggregator.BlockTrigger.Config
+	(*BlockTrigger_Output)(nil),                           // 74: aggregator.BlockTrigger.Output
+	(*EventTrigger_Query)(nil),                            // 75: aggregator.EventTrigger.Query
+	(*EventTrigger_Topics)(nil),                           // 76: aggregator.EventTrigger.Topics
+	(*EventTrigger_Config)(nil),                           // 77: aggregator.EventTrigger.Config
+	(*EventTrigger_Output)(nil),                           // 78: aggregator.EventTrigger.Output
+	(*EventTrigger_TransferLogOutput)(nil),                // 79: aggregator.EventTrigger.TransferLogOutput
+	(*ManualTrigger_Config)(nil),                          // 80: aggregator.ManualTrigger.Config
+	(*ManualTrigger_Output)(nil),                          // 81: aggregator.ManualTrigger.Output
+	(*ETHTransferNode_Config)(nil),                        // 82: aggregator.ETHTransferNode.Config
+	(*ETHTransferNode_Output)(nil),                        // 83: aggregator.ETHTransferNode.Output
+	(*ContractWriteNode_Config)(nil),                      // 84: aggregator.ContractWriteNode.Config
+	(*ContractWriteNode_Output)(nil),                      // 85: aggregator.ContractWriteNode.Output
+	(*ContractReadNode_MethodCall)(nil),                   // 86: aggregator.ContractReadNode.MethodCall
+	(*ContractReadNode_Config)(nil),                       // 87: aggregator.ContractReadNode.Config
+	(*ContractReadNode_MethodResult)(nil),                 // 88: aggregator.ContractReadNode.MethodResult
+	(*ContractReadNode_Output)(nil),                       // 89: aggregator.ContractReadNode.Output
+	(*ContractReadNode_MethodResult_StructuredField)(nil), // 90: aggregator.ContractReadNode.MethodResult.StructuredField
+	(*GraphQLQueryNode_Config)(nil),                       // 91: aggregator.GraphQLQueryNode.Config
+	(*GraphQLQueryNode_Output)(nil),                       // 92: aggregator.GraphQLQueryNode.Output
+	nil,                                                   // 93: aggregator.GraphQLQueryNode.Config.VariablesEntry
+	(*RestAPINode_Config)(nil),                            // 94: aggregator.RestAPINode.Config
+	(*RestAPINode_Output)(nil),                            // 95: aggregator.RestAPINode.Output
+	nil,                                                   // 96: aggregator.RestAPINode.Config.HeadersEntry
+	(*CustomCodeNode_Config)(nil),                         // 97: aggregator.CustomCodeNode.Config
+	(*CustomCodeNode_Output)(nil),                         // 98: aggregator.CustomCodeNode.Output
+	(*BranchNode_Condition)(nil),                          // 99: aggregator.BranchNode.Condition
+	(*BranchNode_Config)(nil),                             // 100: aggregator.BranchNode.Config
+	(*BranchNode_Output)(nil),                             // 101: aggregator.BranchNode.Output
+	(*FilterNode_Config)(nil),                             // 102: aggregator.FilterNode.Config
+	(*FilterNode_Output)(nil),                             // 103: aggregator.FilterNode.Output
+	(*LoopNode_Config)(nil),                               // 104: aggregator.LoopNode.Config
+	(*LoopNode_Output)(nil),                               // 105: aggregator.LoopNode.Output
+	(*Execution_Step)(nil),                                // 106: aggregator.Execution.Step
+	nil,                                                   // 107: aggregator.RunNodeWithInputsReq.NodeConfigEntry
+	nil,                                                   // 108: aggregator.RunNodeWithInputsReq.InputVariablesEntry
+	nil,                                                   // 109: aggregator.RunTriggerReq.TriggerConfigEntry
+	(*Evm_Log)(nil),                                       // 110: aggregator.Evm.Log
+	(*Evm_TransactionReceipt)(nil),                        // 111: aggregator.Evm.TransactionReceipt
+	(*Evm_UserOp)(nil),                                    // 112: aggregator.Evm.UserOp
+	nil,                                                   // 113: aggregator.SimulateTaskReq.InputVariablesEntry
+	(*anypb.Any)(nil),                                     // 114: google.protobuf.Any
+	(*structpb.Value)(nil),                                // 115: google.protobuf.Value
+	(*wrapperspb.BoolValue)(nil),                          // 116: google.protobuf.BoolValue
 }
 var file_avs_proto_depIdxs = []int32{
 	6,   // 0: aggregator.GetTokenMetadataResp.token:type_name -> aggregator.TokenMetadata
 	69,  // 1: aggregator.FixedTimeTrigger.config:type_name -> aggregator.FixedTimeTrigger.Config
 	71,  // 2: aggregator.CronTrigger.config:type_name -> aggregator.CronTrigger.Config
 	73,  // 3: aggregator.BlockTrigger.config:type_name -> aggregator.BlockTrigger.Config
-	76,  // 4: aggregator.EventTrigger.config:type_name -> aggregator.EventTrigger.Config
-	79,  // 5: aggregator.ManualTrigger.config:type_name -> aggregator.ManualTrigger.Config
+	77,  // 4: aggregator.EventTrigger.config:type_name -> aggregator.EventTrigger.Config
+	80,  // 5: aggregator.ManualTrigger.config:type_name -> aggregator.ManualTrigger.Config
 	0,   // 6: aggregator.TaskTrigger.type:type_name -> aggregator.TriggerType
 	10,  // 7: aggregator.TaskTrigger.fixed_time:type_name -> aggregator.FixedTimeTrigger
 	11,  // 8: aggregator.TaskTrigger.cron:type_name -> aggregator.CronTrigger
 	12,  // 9: aggregator.TaskTrigger.block:type_name -> aggregator.BlockTrigger
 	13,  // 10: aggregator.TaskTrigger.event:type_name -> aggregator.EventTrigger
-	81,  // 11: aggregator.ETHTransferNode.config:type_name -> aggregator.ETHTransferNode.Config
-	83,  // 12: aggregator.ContractWriteNode.config:type_name -> aggregator.ContractWriteNode.Config
-	85,  // 13: aggregator.ContractReadNode.config:type_name -> aggregator.ContractReadNode.Config
-	87,  // 14: aggregator.GraphQLQueryNode.config:type_name -> aggregator.GraphQLQueryNode.Config
-	90,  // 15: aggregator.RestAPINode.config:type_name -> aggregator.RestAPINode.Config
-	93,  // 16: aggregator.CustomCodeNode.config:type_name -> aggregator.CustomCodeNode.Config
-	96,  // 17: aggregator.BranchNode.config:type_name -> aggregator.BranchNode.Config
-	98,  // 18: aggregator.FilterNode.config:type_name -> aggregator.FilterNode.Config
+	82,  // 11: aggregator.ETHTransferNode.config:type_name -> aggregator.ETHTransferNode.Config
+	84,  // 12: aggregator.ContractWriteNode.config:type_name -> aggregator.ContractWriteNode.Config
+	87,  // 13: aggregator.ContractReadNode.config:type_name -> aggregator.ContractReadNode.Config
+	91,  // 14: aggregator.GraphQLQueryNode.config:type_name -> aggregator.GraphQLQueryNode.Config
+	94,  // 15: aggregator.RestAPINode.config:type_name -> aggregator.RestAPINode.Config
+	97,  // 16: aggregator.CustomCodeNode.config:type_name -> aggregator.CustomCodeNode.Config
+	100, // 17: aggregator.BranchNode.config:type_name -> aggregator.BranchNode.Config
+	102, // 18: aggregator.FilterNode.config:type_name -> aggregator.FilterNode.Config
 	16,  // 19: aggregator.LoopNode.eth_transfer:type_name -> aggregator.ETHTransferNode
 	17,  // 20: aggregator.LoopNode.contract_write:type_name -> aggregator.ContractWriteNode
 	18,  // 21: aggregator.LoopNode.contract_read:type_name -> aggregator.ContractReadNode
 	19,  // 22: aggregator.LoopNode.graphql_data_query:type_name -> aggregator.GraphQLQueryNode
 	20,  // 23: aggregator.LoopNode.rest_api:type_name -> aggregator.RestAPINode
 	21,  // 24: aggregator.LoopNode.custom_code:type_name -> aggregator.CustomCodeNode
-	100, // 25: aggregator.LoopNode.config:type_name -> aggregator.LoopNode.Config
+	104, // 25: aggregator.LoopNode.config:type_name -> aggregator.LoopNode.Config
 	1,   // 26: aggregator.TaskNode.type:type_name -> aggregator.NodeType
 	16,  // 27: aggregator.TaskNode.eth_transfer:type_name -> aggregator.ETHTransferNode
 	17,  // 28: aggregator.TaskNode.contract_write:type_name -> aggregator.ContractWriteNode
@@ -8108,7 +8349,7 @@ var file_avs_proto_depIdxs = []int32{
 	23,  // 33: aggregator.TaskNode.filter:type_name -> aggregator.FilterNode
 	24,  // 34: aggregator.TaskNode.loop:type_name -> aggregator.LoopNode
 	21,  // 35: aggregator.TaskNode.custom_code:type_name -> aggregator.CustomCodeNode
-	102, // 36: aggregator.Execution.steps:type_name -> aggregator.Execution.Step
+	106, // 36: aggregator.Execution.steps:type_name -> aggregator.Execution.Step
 	4,   // 37: aggregator.Task.status:type_name -> aggregator.TaskStatus
 	15,  // 38: aggregator.Task.trigger:type_name -> aggregator.TaskTrigger
 	26,  // 39: aggregator.Task.nodes:type_name -> aggregator.TaskNode
@@ -8126,123 +8367,126 @@ var file_avs_proto_depIdxs = []int32{
 	74,  // 51: aggregator.TriggerTaskReq.block_trigger:type_name -> aggregator.BlockTrigger.Output
 	70,  // 52: aggregator.TriggerTaskReq.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
 	72,  // 53: aggregator.TriggerTaskReq.cron_trigger:type_name -> aggregator.CronTrigger.Output
-	77,  // 54: aggregator.TriggerTaskReq.event_trigger:type_name -> aggregator.EventTrigger.Output
-	80,  // 55: aggregator.TriggerTaskReq.manual_trigger:type_name -> aggregator.ManualTrigger.Output
+	78,  // 54: aggregator.TriggerTaskReq.event_trigger:type_name -> aggregator.EventTrigger.Output
+	81,  // 55: aggregator.TriggerTaskReq.manual_trigger:type_name -> aggregator.ManualTrigger.Output
 	5,   // 56: aggregator.TriggerTaskResp.status:type_name -> aggregator.ExecutionStatus
 	52,  // 57: aggregator.ListSecretsResp.items:type_name -> aggregator.Secret
 	51,  // 58: aggregator.ListSecretsResp.page_info:type_name -> aggregator.PageInfo
 	1,   // 59: aggregator.RunNodeWithInputsReq.node_type:type_name -> aggregator.NodeType
-	103, // 60: aggregator.RunNodeWithInputsReq.node_config:type_name -> aggregator.RunNodeWithInputsReq.NodeConfigEntry
-	104, // 61: aggregator.RunNodeWithInputsReq.input_variables:type_name -> aggregator.RunNodeWithInputsReq.InputVariablesEntry
-	82,  // 62: aggregator.RunNodeWithInputsResp.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
-	88,  // 63: aggregator.RunNodeWithInputsResp.graphql:type_name -> aggregator.GraphQLQueryNode.Output
-	86,  // 64: aggregator.RunNodeWithInputsResp.contract_read:type_name -> aggregator.ContractReadNode.Output
-	84,  // 65: aggregator.RunNodeWithInputsResp.contract_write:type_name -> aggregator.ContractWriteNode.Output
-	94,  // 66: aggregator.RunNodeWithInputsResp.custom_code:type_name -> aggregator.CustomCodeNode.Output
-	91,  // 67: aggregator.RunNodeWithInputsResp.rest_api:type_name -> aggregator.RestAPINode.Output
-	97,  // 68: aggregator.RunNodeWithInputsResp.branch:type_name -> aggregator.BranchNode.Output
-	99,  // 69: aggregator.RunNodeWithInputsResp.filter:type_name -> aggregator.FilterNode.Output
-	101, // 70: aggregator.RunNodeWithInputsResp.loop:type_name -> aggregator.LoopNode.Output
+	107, // 60: aggregator.RunNodeWithInputsReq.node_config:type_name -> aggregator.RunNodeWithInputsReq.NodeConfigEntry
+	108, // 61: aggregator.RunNodeWithInputsReq.input_variables:type_name -> aggregator.RunNodeWithInputsReq.InputVariablesEntry
+	83,  // 62: aggregator.RunNodeWithInputsResp.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
+	92,  // 63: aggregator.RunNodeWithInputsResp.graphql:type_name -> aggregator.GraphQLQueryNode.Output
+	89,  // 64: aggregator.RunNodeWithInputsResp.contract_read:type_name -> aggregator.ContractReadNode.Output
+	85,  // 65: aggregator.RunNodeWithInputsResp.contract_write:type_name -> aggregator.ContractWriteNode.Output
+	98,  // 66: aggregator.RunNodeWithInputsResp.custom_code:type_name -> aggregator.CustomCodeNode.Output
+	95,  // 67: aggregator.RunNodeWithInputsResp.rest_api:type_name -> aggregator.RestAPINode.Output
+	101, // 68: aggregator.RunNodeWithInputsResp.branch:type_name -> aggregator.BranchNode.Output
+	103, // 69: aggregator.RunNodeWithInputsResp.filter:type_name -> aggregator.FilterNode.Output
+	105, // 70: aggregator.RunNodeWithInputsResp.loop:type_name -> aggregator.LoopNode.Output
 	0,   // 71: aggregator.RunTriggerReq.trigger_type:type_name -> aggregator.TriggerType
-	105, // 72: aggregator.RunTriggerReq.trigger_config:type_name -> aggregator.RunTriggerReq.TriggerConfigEntry
+	109, // 72: aggregator.RunTriggerReq.trigger_config:type_name -> aggregator.RunTriggerReq.TriggerConfigEntry
 	74,  // 73: aggregator.RunTriggerResp.block_trigger:type_name -> aggregator.BlockTrigger.Output
 	70,  // 74: aggregator.RunTriggerResp.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
 	72,  // 75: aggregator.RunTriggerResp.cron_trigger:type_name -> aggregator.CronTrigger.Output
-	77,  // 76: aggregator.RunTriggerResp.event_trigger:type_name -> aggregator.EventTrigger.Output
-	80,  // 77: aggregator.RunTriggerResp.manual_trigger:type_name -> aggregator.ManualTrigger.Output
+	78,  // 76: aggregator.RunTriggerResp.event_trigger:type_name -> aggregator.EventTrigger.Output
+	81,  // 77: aggregator.RunTriggerResp.manual_trigger:type_name -> aggregator.ManualTrigger.Output
 	15,  // 78: aggregator.SimulateTaskReq.trigger:type_name -> aggregator.TaskTrigger
 	26,  // 79: aggregator.SimulateTaskReq.nodes:type_name -> aggregator.TaskNode
 	25,  // 80: aggregator.SimulateTaskReq.edges:type_name -> aggregator.TaskEdge
-	109, // 81: aggregator.SimulateTaskReq.input_variables:type_name -> aggregator.SimulateTaskReq.InputVariablesEntry
-	75,  // 82: aggregator.EventTrigger.Config.matcher:type_name -> aggregator.EventTrigger.Matcher
-	106, // 83: aggregator.EventTrigger.Output.evm_log:type_name -> aggregator.Evm.Log
-	78,  // 84: aggregator.EventTrigger.Output.transfer_log:type_name -> aggregator.EventTrigger.TransferLogOutput
-	108, // 85: aggregator.ContractWriteNode.Output.user_op:type_name -> aggregator.Evm.UserOp
-	107, // 86: aggregator.ContractWriteNode.Output.tx_receipt:type_name -> aggregator.Evm.TransactionReceipt
-	110, // 87: aggregator.ContractReadNode.Output.data:type_name -> google.protobuf.Value
-	89,  // 88: aggregator.GraphQLQueryNode.Config.variables:type_name -> aggregator.GraphQLQueryNode.Config.VariablesEntry
-	111, // 89: aggregator.GraphQLQueryNode.Output.data:type_name -> google.protobuf.Any
-	92,  // 90: aggregator.RestAPINode.Config.headers:type_name -> aggregator.RestAPINode.Config.HeadersEntry
-	110, // 91: aggregator.RestAPINode.Output.data:type_name -> google.protobuf.Value
-	2,   // 92: aggregator.CustomCodeNode.Config.lang:type_name -> aggregator.Lang
-	110, // 93: aggregator.CustomCodeNode.Output.data:type_name -> google.protobuf.Value
-	95,  // 94: aggregator.BranchNode.Config.conditions:type_name -> aggregator.BranchNode.Condition
-	111, // 95: aggregator.FilterNode.Output.data:type_name -> google.protobuf.Any
-	74,  // 96: aggregator.Execution.Step.block_trigger:type_name -> aggregator.BlockTrigger.Output
-	70,  // 97: aggregator.Execution.Step.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
-	72,  // 98: aggregator.Execution.Step.cron_trigger:type_name -> aggregator.CronTrigger.Output
-	77,  // 99: aggregator.Execution.Step.event_trigger:type_name -> aggregator.EventTrigger.Output
-	80,  // 100: aggregator.Execution.Step.manual_trigger:type_name -> aggregator.ManualTrigger.Output
-	82,  // 101: aggregator.Execution.Step.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
-	88,  // 102: aggregator.Execution.Step.graphql:type_name -> aggregator.GraphQLQueryNode.Output
-	86,  // 103: aggregator.Execution.Step.contract_read:type_name -> aggregator.ContractReadNode.Output
-	84,  // 104: aggregator.Execution.Step.contract_write:type_name -> aggregator.ContractWriteNode.Output
-	94,  // 105: aggregator.Execution.Step.custom_code:type_name -> aggregator.CustomCodeNode.Output
-	91,  // 106: aggregator.Execution.Step.rest_api:type_name -> aggregator.RestAPINode.Output
-	97,  // 107: aggregator.Execution.Step.branch:type_name -> aggregator.BranchNode.Output
-	99,  // 108: aggregator.Execution.Step.filter:type_name -> aggregator.FilterNode.Output
-	101, // 109: aggregator.Execution.Step.loop:type_name -> aggregator.LoopNode.Output
-	110, // 110: aggregator.RunNodeWithInputsReq.NodeConfigEntry.value:type_name -> google.protobuf.Value
-	110, // 111: aggregator.RunNodeWithInputsReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	110, // 112: aggregator.RunTriggerReq.TriggerConfigEntry.value:type_name -> google.protobuf.Value
-	110, // 113: aggregator.SimulateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	42,  // 114: aggregator.Aggregator.GetKey:input_type -> aggregator.GetKeyReq
-	55,  // 115: aggregator.Aggregator.GetSignatureFormat:input_type -> aggregator.GetSignatureFormatReq
-	31,  // 116: aggregator.Aggregator.GetNonce:input_type -> aggregator.NonceRequest
-	44,  // 117: aggregator.Aggregator.GetWallet:input_type -> aggregator.GetWalletReq
-	46,  // 118: aggregator.Aggregator.SetWallet:input_type -> aggregator.SetWalletReq
-	33,  // 119: aggregator.Aggregator.ListWallets:input_type -> aggregator.ListWalletReq
-	29,  // 120: aggregator.Aggregator.CreateTask:input_type -> aggregator.CreateTaskReq
-	36,  // 121: aggregator.Aggregator.ListTasks:input_type -> aggregator.ListTasksReq
-	9,   // 122: aggregator.Aggregator.GetTask:input_type -> aggregator.IdReq
-	38,  // 123: aggregator.Aggregator.ListExecutions:input_type -> aggregator.ListExecutionsReq
-	40,  // 124: aggregator.Aggregator.GetExecution:input_type -> aggregator.ExecutionReq
-	40,  // 125: aggregator.Aggregator.GetExecutionStatus:input_type -> aggregator.ExecutionReq
-	9,   // 126: aggregator.Aggregator.CancelTask:input_type -> aggregator.IdReq
-	9,   // 127: aggregator.Aggregator.DeleteTask:input_type -> aggregator.IdReq
-	47,  // 128: aggregator.Aggregator.TriggerTask:input_type -> aggregator.TriggerTaskReq
-	49,  // 129: aggregator.Aggregator.CreateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
-	54,  // 130: aggregator.Aggregator.DeleteSecret:input_type -> aggregator.DeleteSecretReq
-	50,  // 131: aggregator.Aggregator.ListSecrets:input_type -> aggregator.ListSecretsReq
-	49,  // 132: aggregator.Aggregator.UpdateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
-	57,  // 133: aggregator.Aggregator.GetWorkflowCount:input_type -> aggregator.GetWorkflowCountReq
-	59,  // 134: aggregator.Aggregator.GetExecutionCount:input_type -> aggregator.GetExecutionCountReq
-	61,  // 135: aggregator.Aggregator.GetExecutionStats:input_type -> aggregator.GetExecutionStatsReq
-	63,  // 136: aggregator.Aggregator.RunNodeWithInputs:input_type -> aggregator.RunNodeWithInputsReq
-	65,  // 137: aggregator.Aggregator.RunTrigger:input_type -> aggregator.RunTriggerReq
-	68,  // 138: aggregator.Aggregator.SimulateTask:input_type -> aggregator.SimulateTaskReq
-	7,   // 139: aggregator.Aggregator.GetTokenMetadata:input_type -> aggregator.GetTokenMetadataReq
-	43,  // 140: aggregator.Aggregator.GetKey:output_type -> aggregator.KeyResp
-	56,  // 141: aggregator.Aggregator.GetSignatureFormat:output_type -> aggregator.GetSignatureFormatResp
-	32,  // 142: aggregator.Aggregator.GetNonce:output_type -> aggregator.NonceResp
-	45,  // 143: aggregator.Aggregator.GetWallet:output_type -> aggregator.GetWalletResp
-	45,  // 144: aggregator.Aggregator.SetWallet:output_type -> aggregator.GetWalletResp
-	35,  // 145: aggregator.Aggregator.ListWallets:output_type -> aggregator.ListWalletResp
-	30,  // 146: aggregator.Aggregator.CreateTask:output_type -> aggregator.CreateTaskResp
-	37,  // 147: aggregator.Aggregator.ListTasks:output_type -> aggregator.ListTasksResp
-	28,  // 148: aggregator.Aggregator.GetTask:output_type -> aggregator.Task
-	39,  // 149: aggregator.Aggregator.ListExecutions:output_type -> aggregator.ListExecutionsResp
-	27,  // 150: aggregator.Aggregator.GetExecution:output_type -> aggregator.Execution
-	41,  // 151: aggregator.Aggregator.GetExecutionStatus:output_type -> aggregator.ExecutionStatusResp
-	112, // 152: aggregator.Aggregator.CancelTask:output_type -> google.protobuf.BoolValue
-	112, // 153: aggregator.Aggregator.DeleteTask:output_type -> google.protobuf.BoolValue
-	48,  // 154: aggregator.Aggregator.TriggerTask:output_type -> aggregator.TriggerTaskResp
-	112, // 155: aggregator.Aggregator.CreateSecret:output_type -> google.protobuf.BoolValue
-	112, // 156: aggregator.Aggregator.DeleteSecret:output_type -> google.protobuf.BoolValue
-	53,  // 157: aggregator.Aggregator.ListSecrets:output_type -> aggregator.ListSecretsResp
-	112, // 158: aggregator.Aggregator.UpdateSecret:output_type -> google.protobuf.BoolValue
-	58,  // 159: aggregator.Aggregator.GetWorkflowCount:output_type -> aggregator.GetWorkflowCountResp
-	60,  // 160: aggregator.Aggregator.GetExecutionCount:output_type -> aggregator.GetExecutionCountResp
-	62,  // 161: aggregator.Aggregator.GetExecutionStats:output_type -> aggregator.GetExecutionStatsResp
-	64,  // 162: aggregator.Aggregator.RunNodeWithInputs:output_type -> aggregator.RunNodeWithInputsResp
-	66,  // 163: aggregator.Aggregator.RunTrigger:output_type -> aggregator.RunTriggerResp
-	27,  // 164: aggregator.Aggregator.SimulateTask:output_type -> aggregator.Execution
-	8,   // 165: aggregator.Aggregator.GetTokenMetadata:output_type -> aggregator.GetTokenMetadataResp
-	140, // [140:166] is the sub-list for method output_type
-	114, // [114:140] is the sub-list for method input_type
-	114, // [114:114] is the sub-list for extension type_name
-	114, // [114:114] is the sub-list for extension extendee
-	0,   // [0:114] is the sub-list for field type_name
+	113, // 81: aggregator.SimulateTaskReq.input_variables:type_name -> aggregator.SimulateTaskReq.InputVariablesEntry
+	76,  // 82: aggregator.EventTrigger.Query.topics:type_name -> aggregator.EventTrigger.Topics
+	75,  // 83: aggregator.EventTrigger.Config.queries:type_name -> aggregator.EventTrigger.Query
+	110, // 84: aggregator.EventTrigger.Output.evm_log:type_name -> aggregator.Evm.Log
+	79,  // 85: aggregator.EventTrigger.Output.transfer_log:type_name -> aggregator.EventTrigger.TransferLogOutput
+	112, // 86: aggregator.ContractWriteNode.Output.user_op:type_name -> aggregator.Evm.UserOp
+	111, // 87: aggregator.ContractWriteNode.Output.tx_receipt:type_name -> aggregator.Evm.TransactionReceipt
+	86,  // 88: aggregator.ContractReadNode.Config.method_calls:type_name -> aggregator.ContractReadNode.MethodCall
+	90,  // 89: aggregator.ContractReadNode.MethodResult.data:type_name -> aggregator.ContractReadNode.MethodResult.StructuredField
+	88,  // 90: aggregator.ContractReadNode.Output.results:type_name -> aggregator.ContractReadNode.MethodResult
+	93,  // 91: aggregator.GraphQLQueryNode.Config.variables:type_name -> aggregator.GraphQLQueryNode.Config.VariablesEntry
+	114, // 92: aggregator.GraphQLQueryNode.Output.data:type_name -> google.protobuf.Any
+	96,  // 93: aggregator.RestAPINode.Config.headers:type_name -> aggregator.RestAPINode.Config.HeadersEntry
+	115, // 94: aggregator.RestAPINode.Output.data:type_name -> google.protobuf.Value
+	2,   // 95: aggregator.CustomCodeNode.Config.lang:type_name -> aggregator.Lang
+	115, // 96: aggregator.CustomCodeNode.Output.data:type_name -> google.protobuf.Value
+	99,  // 97: aggregator.BranchNode.Config.conditions:type_name -> aggregator.BranchNode.Condition
+	114, // 98: aggregator.FilterNode.Output.data:type_name -> google.protobuf.Any
+	74,  // 99: aggregator.Execution.Step.block_trigger:type_name -> aggregator.BlockTrigger.Output
+	70,  // 100: aggregator.Execution.Step.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
+	72,  // 101: aggregator.Execution.Step.cron_trigger:type_name -> aggregator.CronTrigger.Output
+	78,  // 102: aggregator.Execution.Step.event_trigger:type_name -> aggregator.EventTrigger.Output
+	81,  // 103: aggregator.Execution.Step.manual_trigger:type_name -> aggregator.ManualTrigger.Output
+	83,  // 104: aggregator.Execution.Step.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
+	92,  // 105: aggregator.Execution.Step.graphql:type_name -> aggregator.GraphQLQueryNode.Output
+	89,  // 106: aggregator.Execution.Step.contract_read:type_name -> aggregator.ContractReadNode.Output
+	85,  // 107: aggregator.Execution.Step.contract_write:type_name -> aggregator.ContractWriteNode.Output
+	98,  // 108: aggregator.Execution.Step.custom_code:type_name -> aggregator.CustomCodeNode.Output
+	95,  // 109: aggregator.Execution.Step.rest_api:type_name -> aggregator.RestAPINode.Output
+	101, // 110: aggregator.Execution.Step.branch:type_name -> aggregator.BranchNode.Output
+	103, // 111: aggregator.Execution.Step.filter:type_name -> aggregator.FilterNode.Output
+	105, // 112: aggregator.Execution.Step.loop:type_name -> aggregator.LoopNode.Output
+	115, // 113: aggregator.RunNodeWithInputsReq.NodeConfigEntry.value:type_name -> google.protobuf.Value
+	115, // 114: aggregator.RunNodeWithInputsReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	115, // 115: aggregator.RunTriggerReq.TriggerConfigEntry.value:type_name -> google.protobuf.Value
+	115, // 116: aggregator.SimulateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	42,  // 117: aggregator.Aggregator.GetKey:input_type -> aggregator.GetKeyReq
+	55,  // 118: aggregator.Aggregator.GetSignatureFormat:input_type -> aggregator.GetSignatureFormatReq
+	31,  // 119: aggregator.Aggregator.GetNonce:input_type -> aggregator.NonceRequest
+	44,  // 120: aggregator.Aggregator.GetWallet:input_type -> aggregator.GetWalletReq
+	46,  // 121: aggregator.Aggregator.SetWallet:input_type -> aggregator.SetWalletReq
+	33,  // 122: aggregator.Aggregator.ListWallets:input_type -> aggregator.ListWalletReq
+	29,  // 123: aggregator.Aggregator.CreateTask:input_type -> aggregator.CreateTaskReq
+	36,  // 124: aggregator.Aggregator.ListTasks:input_type -> aggregator.ListTasksReq
+	9,   // 125: aggregator.Aggregator.GetTask:input_type -> aggregator.IdReq
+	38,  // 126: aggregator.Aggregator.ListExecutions:input_type -> aggregator.ListExecutionsReq
+	40,  // 127: aggregator.Aggregator.GetExecution:input_type -> aggregator.ExecutionReq
+	40,  // 128: aggregator.Aggregator.GetExecutionStatus:input_type -> aggregator.ExecutionReq
+	9,   // 129: aggregator.Aggregator.CancelTask:input_type -> aggregator.IdReq
+	9,   // 130: aggregator.Aggregator.DeleteTask:input_type -> aggregator.IdReq
+	47,  // 131: aggregator.Aggregator.TriggerTask:input_type -> aggregator.TriggerTaskReq
+	49,  // 132: aggregator.Aggregator.CreateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
+	54,  // 133: aggregator.Aggregator.DeleteSecret:input_type -> aggregator.DeleteSecretReq
+	50,  // 134: aggregator.Aggregator.ListSecrets:input_type -> aggregator.ListSecretsReq
+	49,  // 135: aggregator.Aggregator.UpdateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
+	57,  // 136: aggregator.Aggregator.GetWorkflowCount:input_type -> aggregator.GetWorkflowCountReq
+	59,  // 137: aggregator.Aggregator.GetExecutionCount:input_type -> aggregator.GetExecutionCountReq
+	61,  // 138: aggregator.Aggregator.GetExecutionStats:input_type -> aggregator.GetExecutionStatsReq
+	63,  // 139: aggregator.Aggregator.RunNodeWithInputs:input_type -> aggregator.RunNodeWithInputsReq
+	65,  // 140: aggregator.Aggregator.RunTrigger:input_type -> aggregator.RunTriggerReq
+	68,  // 141: aggregator.Aggregator.SimulateTask:input_type -> aggregator.SimulateTaskReq
+	7,   // 142: aggregator.Aggregator.GetTokenMetadata:input_type -> aggregator.GetTokenMetadataReq
+	43,  // 143: aggregator.Aggregator.GetKey:output_type -> aggregator.KeyResp
+	56,  // 144: aggregator.Aggregator.GetSignatureFormat:output_type -> aggregator.GetSignatureFormatResp
+	32,  // 145: aggregator.Aggregator.GetNonce:output_type -> aggregator.NonceResp
+	45,  // 146: aggregator.Aggregator.GetWallet:output_type -> aggregator.GetWalletResp
+	45,  // 147: aggregator.Aggregator.SetWallet:output_type -> aggregator.GetWalletResp
+	35,  // 148: aggregator.Aggregator.ListWallets:output_type -> aggregator.ListWalletResp
+	30,  // 149: aggregator.Aggregator.CreateTask:output_type -> aggregator.CreateTaskResp
+	37,  // 150: aggregator.Aggregator.ListTasks:output_type -> aggregator.ListTasksResp
+	28,  // 151: aggregator.Aggregator.GetTask:output_type -> aggregator.Task
+	39,  // 152: aggregator.Aggregator.ListExecutions:output_type -> aggregator.ListExecutionsResp
+	27,  // 153: aggregator.Aggregator.GetExecution:output_type -> aggregator.Execution
+	41,  // 154: aggregator.Aggregator.GetExecutionStatus:output_type -> aggregator.ExecutionStatusResp
+	116, // 155: aggregator.Aggregator.CancelTask:output_type -> google.protobuf.BoolValue
+	116, // 156: aggregator.Aggregator.DeleteTask:output_type -> google.protobuf.BoolValue
+	48,  // 157: aggregator.Aggregator.TriggerTask:output_type -> aggregator.TriggerTaskResp
+	116, // 158: aggregator.Aggregator.CreateSecret:output_type -> google.protobuf.BoolValue
+	116, // 159: aggregator.Aggregator.DeleteSecret:output_type -> google.protobuf.BoolValue
+	53,  // 160: aggregator.Aggregator.ListSecrets:output_type -> aggregator.ListSecretsResp
+	116, // 161: aggregator.Aggregator.UpdateSecret:output_type -> google.protobuf.BoolValue
+	58,  // 162: aggregator.Aggregator.GetWorkflowCount:output_type -> aggregator.GetWorkflowCountResp
+	60,  // 163: aggregator.Aggregator.GetExecutionCount:output_type -> aggregator.GetExecutionCountResp
+	62,  // 164: aggregator.Aggregator.GetExecutionStats:output_type -> aggregator.GetExecutionStatsResp
+	64,  // 165: aggregator.Aggregator.RunNodeWithInputs:output_type -> aggregator.RunNodeWithInputsResp
+	66,  // 166: aggregator.Aggregator.RunTrigger:output_type -> aggregator.RunTriggerResp
+	27,  // 167: aggregator.Aggregator.SimulateTask:output_type -> aggregator.Execution
+	8,   // 168: aggregator.Aggregator.GetTokenMetadata:output_type -> aggregator.GetTokenMetadataResp
+	143, // [143:169] is the sub-list for method output_type
+	117, // [117:143] is the sub-list for method input_type
+	117, // [117:117] is the sub-list for extension type_name
+	117, // [117:117] is the sub-list for extension extendee
+	0,   // [0:117] is the sub-list for field type_name
 }
 
 func init() { file_avs_proto_init() }
@@ -8301,11 +8545,12 @@ func file_avs_proto_init() {
 		(*RunTriggerResp_EventTrigger)(nil),
 		(*RunTriggerResp_ManualTrigger)(nil),
 	}
-	file_avs_proto_msgTypes[71].OneofWrappers = []any{
+	file_avs_proto_msgTypes[69].OneofWrappers = []any{}
+	file_avs_proto_msgTypes[72].OneofWrappers = []any{
 		(*EventTrigger_Output_EvmLog)(nil),
 		(*EventTrigger_Output_TransferLog)(nil),
 	}
-	file_avs_proto_msgTypes[96].OneofWrappers = []any{
+	file_avs_proto_msgTypes[100].OneofWrappers = []any{
 		(*Execution_Step_BlockTrigger)(nil),
 		(*Execution_Step_FixedTimeTrigger)(nil),
 		(*Execution_Step_CronTrigger)(nil),
@@ -8327,7 +8572,7 @@ func file_avs_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_avs_proto_rawDesc), len(file_avs_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   104,
+			NumMessages:   108,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
