@@ -636,7 +636,13 @@ func (v *VM) Run() error {
 			// The failed step should already be logged by executeNode/runXXX methods
 			// Log the error but continue to next step
 			if v.logger != nil {
-				v.logger.Error("node execution failed, continuing execution", "nodeID", node.Id, "error", err.Error())
+				// Extract just the error message without stack trace
+				errorMsg := err.Error()
+				if idx := strings.Index(errorMsg, " at "); idx != -1 {
+					// Trim stack trace for cleaner logging (common in JS errors)
+					errorMsg = errorMsg[:idx]
+				}
+				v.logger.Error("node execution failed, continuing execution", "nodeID", node.Id, "error", errorMsg)
 			}
 
 			// Continue to next step in sequence (don't follow jump since this node failed)

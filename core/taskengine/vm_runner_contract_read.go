@@ -59,6 +59,17 @@ func (r *ContractReadProcessor) buildStructuredData(method *abi.Method, result [
 		if i < len(method.Outputs) {
 			fieldName = method.Outputs[i].Name
 			fieldType = method.Outputs[i].Type.String()
+
+			// Handle empty field names (common in Chainlink contracts)
+			if fieldName == "" {
+				if len(method.Outputs) == 1 {
+					// Single unnamed output - use the method name as field name
+					fieldName = method.Name
+				} else {
+					// Multiple outputs - use positional naming
+					fieldName = fmt.Sprintf("output_%d", i)
+				}
+			}
 		} else {
 			fieldName = fmt.Sprintf("output_%d", i)
 			fieldType = "unknown"

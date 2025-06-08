@@ -1396,8 +1396,14 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	if !executionSuccess {
+		// Clean up error message to avoid stack traces in logs
+		cleanErrorMsg := executionError
+		if idx := strings.Index(cleanErrorMsg, " at "); idx != -1 {
+			cleanErrorMsg = cleanErrorMsg[:idx]
+		}
+
 		n.logger.Error("workflow simulation completed with failures",
-			"error", executionError,
+			"error", cleanErrorMsg,
 			"task_id", task.Id,
 			"simulation_id", simulationID,
 			"failed_steps", failedStepCount,
