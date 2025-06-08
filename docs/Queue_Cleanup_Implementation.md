@@ -17,12 +17,20 @@ Previously, the system suffered from massive log spam due to orphaned jobs - job
 
 **Location**: `aggregator/task_engine.go`
 ```go
-// Start periodic cleanup every hour for orphaned jobs
-agg.queue.SchedulePeriodicCleanup(time.Hour)
-agg.logger.Info("scheduled periodic queue cleanup every hour")
+// Start periodic cleanup with environment-specific intervals
+cleanupInterval := time.Hour // Default: 1 hour for production
+if agg.config.Environment == sdklogging.Development {
+    cleanupInterval = 5 * time.Minute // 5 minutes for development
+    agg.logger.Info("scheduled periodic queue cleanup every 5 minutes (development mode)")
+} else {
+    agg.logger.Info("scheduled periodic queue cleanup every hour (production mode)")
+}
+agg.queue.SchedulePeriodicCleanup(cleanupInterval)
 ```
 
-- Cleanup runs automatically every hour
+- **Development Mode**: Cleanup runs every 5 minutes for rapid testing and validation
+- **Production Mode**: Cleanup runs every hour for optimal performance
+- Automatically detects environment from config (`Environment: development` vs `Environment: production`)
 - Integrated into the aggregator startup process
 - No manual intervention required
 
@@ -122,9 +130,16 @@ func (q *Queue) SchedulePeriodicCleanup(interval time.Duration) {
 
 ## Monitoring and Logs
 
-### Startup Log
+### Startup Logs
+
+**Development Mode:**
 ```
-INFO scheduled periodic queue cleanup every hour
+INFO scheduled periodic queue cleanup every 5 minutes (development mode)
+```
+
+**Production Mode:**
+```
+INFO scheduled periodic queue cleanup every hour (production mode)
 ```
 
 ### Cleanup Summary Logs

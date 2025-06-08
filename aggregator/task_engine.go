@@ -47,6 +47,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
 
 func (agg *Aggregator) stopTaskEngine() {
@@ -93,9 +94,15 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		agg.logger.Error("failed to start task queue", "error", queueErr.Error())
 	}
 
-	// Start periodic cleanup every hour for orphaned jobs
-	agg.queue.SchedulePeriodicCleanup(time.Hour)
-	agg.logger.Info("scheduled periodic queue cleanup every hour")
+	// Start periodic cleanup with environment-specific intervals
+	cleanupInterval := time.Hour // Default: 1 hour for production
+	if agg.config.Environment == sdklogging.Development {
+		cleanupInterval = 5 * time.Minute // 5 minutes for development
+		agg.logger.Info("scheduled periodic queue cleanup every 5 minutes (development mode)")
+	} else {
+		agg.logger.Info("scheduled periodic queue cleanup every hour (production mode)")
+	}
+	agg.queue.SchedulePeriodicCleanup(cleanupInterval)
 
 	agg.worker.MustStart()
 }
