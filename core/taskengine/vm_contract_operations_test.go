@@ -290,6 +290,20 @@ func TestVM_ContractWrite_BasicExecution(t *testing.T) {
 	assert.NotNil(t, executionStep)
 	assert.Equal(t, "test_write", executionStep.Id)
 
+	// Check the new enhanced output structure
+	if executionStep.Success {
+		contractWriteOutput := executionStep.GetContractWrite()
+		if contractWriteOutput != nil && len(contractWriteOutput.Results) > 0 {
+			result := contractWriteOutput.Results[0]
+			hash := ""
+			if result.Transaction != nil {
+				hash = result.Transaction.Hash
+			}
+			t.Logf("Contract write result - Method: %s, Success: %v, Hash: %s",
+				result.MethodName, result.Success, hash)
+		}
+	}
+
 	t.Logf("Contract write - Success: %v, Error: %s", executionStep.Success, executionStep.Error)
 	if err != nil {
 		t.Logf("Contract write system error (expected): %v", err)

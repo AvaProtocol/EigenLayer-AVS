@@ -103,34 +103,43 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 		return
 	}
 
-	if contractWriteOutput.UserOp == nil {
-		t.Errorf("Expected UserOp data but got nil")
+	if len(contractWriteOutput.Results) == 0 {
+		t.Errorf("Expected at least one result but got none")
 		return
 	}
 
-	if contractWriteOutput.UserOp.Sender == "" {
-		t.Errorf("Missing Sender in UserOp data")
+	result := contractWriteOutput.Results[0]
+
+	if result.MethodName == "" {
+		t.Errorf("Expected method name but got empty string")
 	}
 
-	if contractWriteOutput.UserOp.CallData == "" {
-		t.Errorf("Missing CallData in UserOp data")
+	if !result.Success {
+		t.Errorf("Expected successful result but got failure: %v", result.Error)
 	}
 
-	if contractWriteOutput.TxReceipt != nil {
-		if len(contractWriteOutput.TxReceipt.Hash) > 0 && len(contractWriteOutput.TxReceipt.Hash) != 66 {
-			t.Errorf("Invalid Tx Hash length in the output data, expected 66 chars but got %d", len(contractWriteOutput.TxReceipt.Hash))
-		}
-
-		if contractWriteOutput.TxReceipt.From == "" {
-			t.Errorf("Missing From address in the transaction receipt")
-		}
-
-		if contractWriteOutput.TxReceipt.To == "" {
-			t.Errorf("Missing To address in the transaction receipt")
-		}
+	if result.Transaction == nil {
+		t.Errorf("Expected transaction data but got nil")
+		return
 	}
 
-	expectedLogSubstring := "contract " + strings.ToLower(baseSepoliaUsdcAddress.Hex())
+	if result.Transaction.From == "" {
+		t.Errorf("Missing From address in the transaction data")
+	}
+
+	if result.Transaction.To == "" {
+		t.Errorf("Missing To address in the transaction data")
+	}
+
+	if result.Transaction.Hash != "" && len(result.Transaction.Hash) != 66 {
+		t.Errorf("Invalid Tx Hash length in the output data, expected 66 chars but got %d", len(result.Transaction.Hash))
+	}
+
+	if result.InputData == "" {
+		t.Errorf("Missing input data in the result")
+	}
+
+	expectedLogSubstring := strings.ToLower(baseSepoliaUsdcAddress.Hex())
 	if !strings.Contains(strings.ToLower(step.Log), expectedLogSubstring) {
 		t.Errorf("expected log to contain contract address '%s' but found: %s", expectedLogSubstring, step.Log)
 	}

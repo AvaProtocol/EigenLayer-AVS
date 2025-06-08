@@ -863,13 +863,14 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		result["txHash"] = ethTransfer.GetTransactionHash()
 		result["success"] = true
 	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
-		// ContractWrite output contains UserOp and TxReceipt
-		if txReceipt := contractWrite.GetTxReceipt(); txReceipt != nil {
-			result["txHash"] = txReceipt.GetHash()
-			result["success"] = true
-		} else {
-			result["success"] = true
+		// ContractWrite output now contains enhanced results structure
+		if len(contractWrite.GetResults()) > 0 {
+			firstResult := contractWrite.GetResults()[0]
+			if firstResult.Transaction != nil {
+				return map[string]interface{}{"txHash": firstResult.Transaction.Hash}, nil
+			}
 		}
+		return map[string]interface{}{"status": "success"}, nil
 	}
 
 	// If no specific data was extracted, include basic execution info
@@ -987,12 +988,14 @@ func (n *Engine) extractExecutionResultDirect(executionStep *avsproto.Execution_
 	} else if ethTransfer := executionStep.GetEthTransfer(); ethTransfer != nil {
 		return map[string]interface{}{"txHash": ethTransfer.GetTransactionHash()}, nil
 	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
-		// ContractWrite output contains UserOp and TxReceipt
-		if txReceipt := contractWrite.GetTxReceipt(); txReceipt != nil {
-			return map[string]interface{}{"txHash": txReceipt.GetHash()}, nil
-		} else {
-			return map[string]interface{}{"status": "success"}, nil
+		// ContractWrite output now contains enhanced results structure
+		if len(contractWrite.GetResults()) > 0 {
+			firstResult := contractWrite.GetResults()[0]
+			if firstResult.Transaction != nil {
+				return map[string]interface{}{"txHash": firstResult.Transaction.Hash}, nil
+			}
 		}
+		return map[string]interface{}{"status": "success"}, nil
 	}
 
 	// If no specific data was extracted, return empty result
@@ -1260,17 +1263,29 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		// For contract write nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
 		contractWriteOutput := &avsproto.ContractWriteNode_Output{}
 		if result != nil && len(result) > 0 {
-			// ContractWrite should have UserOp and TxReceipt, but for testing we just create empty structures
-			// In a real implementation, these would be populated from the actual transaction results
-			contractWriteOutput.UserOp = &avsproto.Evm_UserOp{}
-			contractWriteOutput.TxReceipt = &avsproto.Evm_TransactionReceipt{}
+			// ContractWrite now uses results array structure
+			var results []*avsproto.ContractWriteNode_MethodResult
 
 			// Try to extract transaction hash from result if available
 			if txHash, ok := result["txHash"].(string); ok {
-				contractWriteOutput.TxReceipt.Hash = txHash
+				results = append(results, &avsproto.ContractWriteNode_MethodResult{
+					MethodName: "unknown",
+					Success:    true,
+					Transaction: &avsproto.ContractWriteNode_TransactionData{
+						Hash: txHash,
+					},
+				})
 			} else if transactionHash, ok := result["transactionHash"].(string); ok {
-				contractWriteOutput.TxReceipt.Hash = transactionHash
+				results = append(results, &avsproto.ContractWriteNode_MethodResult{
+					MethodName: "unknown",
+					Success:    true,
+					Transaction: &avsproto.ContractWriteNode_TransactionData{
+						Hash: transactionHash,
+					},
+				})
 			}
+
+			contractWriteOutput.Results = results
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractWrite{
 			ContractWrite: contractWriteOutput,
