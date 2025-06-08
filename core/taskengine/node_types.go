@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
@@ -203,30 +204,46 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 	case *avsproto.TaskTrigger_Event:
 		eventTrigger := trigger.GetEvent()
 		if eventTrigger != nil && eventTrigger.Config != nil {
-			// Extract config fields from EventTrigger.Config
-			if len(eventTrigger.Config.Queries) > 0 {
-				triggerConfig["queries"] = eventTrigger.Config.Queries
+			// Use the generic protobuf to map converter
+			configMap, err := gow.ProtoToMap(eventTrigger.Config)
+			if err == nil {
+				// Merge the config fields into triggerConfig
+				for key, value := range configMap {
+					triggerConfig[key] = value
+				}
 			}
 		}
 	case *avsproto.TaskTrigger_Block:
 		blockTrigger := trigger.GetBlock()
 		if blockTrigger != nil && blockTrigger.Config != nil {
-			if blockTrigger.Config.Interval > 0 {
-				triggerConfig["interval"] = blockTrigger.Config.Interval
+			// Use the generic protobuf to map converter for consistency
+			configMap, err := gow.ProtoToMap(blockTrigger.Config)
+			if err == nil {
+				for key, value := range configMap {
+					triggerConfig[key] = value
+				}
 			}
 		}
 	case *avsproto.TaskTrigger_Cron:
 		cronTrigger := trigger.GetCron()
 		if cronTrigger != nil && cronTrigger.Config != nil {
-			if len(cronTrigger.Config.Schedule) > 0 {
-				triggerConfig["schedule"] = cronTrigger.Config.Schedule
+			// Use the generic protobuf to map converter for consistency
+			configMap, err := gow.ProtoToMap(cronTrigger.Config)
+			if err == nil {
+				for key, value := range configMap {
+					triggerConfig[key] = value
+				}
 			}
 		}
 	case *avsproto.TaskTrigger_FixedTime:
 		fixedTimeTrigger := trigger.GetFixedTime()
 		if fixedTimeTrigger != nil && fixedTimeTrigger.Config != nil {
-			if len(fixedTimeTrigger.Config.Epochs) > 0 {
-				triggerConfig["epochs"] = fixedTimeTrigger.Config.Epochs
+			// Use the generic protobuf to map converter for consistency
+			configMap, err := gow.ProtoToMap(fixedTimeTrigger.Config)
+			if err == nil {
+				for key, value := range configMap {
+					triggerConfig[key] = value
+				}
 			}
 		}
 	case *avsproto.TaskTrigger_Manual:

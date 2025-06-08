@@ -255,18 +255,18 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 	sepoliaUSDT := "0x7169D38820dfd117C3FA1f22a697dBA58d90BA06" // Example Sepolia USDT
 
 	testCases := []struct {
-		name        string
-		queriesList []interface{}
-		desc        string
+		name    string
+		queries []interface{}
+		desc    string
 	}{
 		{
 			name: "Transfer FROM target address (any token)",
-			queriesList: []interface{}{
+			queries: []interface{}{
 				map[string]interface{}{
-					"addressesList": []interface{}{},
-					"topicsList": []interface{}{
+					"addresses": []interface{}{},
+					"topics": []interface{}{
 						map[string]interface{}{
-							"valuesList": []interface{}{
+							"values": []interface{}{
 								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 								targetAddress,
 								nil,
@@ -280,12 +280,12 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 		},
 		{
 			name: "Transfer TO target address (any token)",
-			queriesList: []interface{}{
+			queries: []interface{}{
 				map[string]interface{}{
-					"addressesList": []interface{}{},
-					"topicsList": []interface{}{
+					"addresses": []interface{}{},
+					"topics": []interface{}{
 						map[string]interface{}{
-							"valuesList": []interface{}{
+							"values": []interface{}{
 								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 								nil,
 								targetAddress,
@@ -299,12 +299,12 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 		},
 		{
 			name: "USDC transfers FROM target address",
-			queriesList: []interface{}{
+			queries: []interface{}{
 				map[string]interface{}{
-					"addressesList": []interface{}{sepoliaUSDC},
-					"topicsList": []interface{}{
+					"addresses": []interface{}{sepoliaUSDC},
+					"topics": []interface{}{
 						map[string]interface{}{
-							"valuesList": []interface{}{
+							"values": []interface{}{
 								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 								targetAddress,
 								nil,
@@ -318,12 +318,12 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 		},
 		{
 			name: "USDT transfers TO target address",
-			queriesList: []interface{}{
+			queries: []interface{}{
 				map[string]interface{}{
-					"addressesList": []interface{}{sepoliaUSDT},
-					"topicsList": []interface{}{
+					"addresses": []interface{}{sepoliaUSDT},
+					"topics": []interface{}{
 						map[string]interface{}{
-							"valuesList": []interface{}{
+							"values": []interface{}{
 								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 								nil,
 								targetAddress,
@@ -337,12 +337,12 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 		},
 		{
 			name: "Multiple contracts transfers FROM target address",
-			queriesList: []interface{}{
+			queries: []interface{}{
 				map[string]interface{}{
-					"addressesList": []interface{}{sepoliaUSDC, sepoliaUSDT},
-					"topicsList": []interface{}{
+					"addresses": []interface{}{sepoliaUSDC, sepoliaUSDT},
+					"topics": []interface{}{
 						map[string]interface{}{
-							"valuesList": []interface{}{
+							"values": []interface{}{
 								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 								targetAddress,
 								nil,
@@ -356,12 +356,12 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 		},
 		{
 			name: "Multiple contracts transfers TO target address",
-			queriesList: []interface{}{
+			queries: []interface{}{
 				map[string]interface{}{
-					"addressesList": []interface{}{sepoliaUSDC, sepoliaUSDT},
-					"topicsList": []interface{}{
+					"addresses": []interface{}{sepoliaUSDC, sepoliaUSDT},
+					"topics": []interface{}{
 						map[string]interface{}{
-							"valuesList": []interface{}{
+							"values": []interface{}{
 								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 								nil,
 								targetAddress,
@@ -375,12 +375,12 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 		},
 		{
 			name: "Any transfers FROM OR TO target address (two queries)",
-			queriesList: []interface{}{
+			queries: []interface{}{
 				map[string]interface{}{
-					"addressesList": []interface{}{},
-					"topicsList": []interface{}{
+					"addresses": []interface{}{},
+					"topics": []interface{}{
 						map[string]interface{}{
-							"valuesList": []interface{}{
+							"values": []interface{}{
 								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 								targetAddress,
 								nil,
@@ -390,10 +390,10 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 					"maxEventsPerBlock": float64(100),
 				},
 				map[string]interface{}{
-					"addressesList": []interface{}{},
-					"topicsList": []interface{}{
+					"addresses": []interface{}{},
+					"topics": []interface{}{
 						map[string]interface{}{
-							"valuesList": []interface{}{
+							"values": []interface{}{
 								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 								nil,
 								targetAddress,
@@ -410,11 +410,11 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Logf("Testing: %s", tc.desc)
-			t.Logf("Queries: %d", len(tc.queriesList))
+			t.Logf("Queries: %d", len(tc.queries))
 
 			// Test with runTriggerImmediately
 			triggerConfig := map[string]interface{}{
-				"queriesList": tc.queriesList,
+				"queries": tc.queries,
 			}
 			inputVariables := map[string]interface{}{}
 
@@ -537,24 +537,24 @@ func TestEventTriggerQueriesBasedConfiguration(t *testing.T) {
 
 	testCases := []struct {
 		name        string
-		queriesList []interface{}
+		queries     []interface{}
 		expectError bool
 		errorMsg    string
 	}{
 		{
-			name:        "Empty queriesList should fail",
-			queriesList: []interface{}{},
+			name:        "Empty queries should fail",
+			queries:     []interface{}{},
 			expectError: true,
-			errorMsg:    "queriesList must be a non-empty array",
+			errorMsg:    "queries must be a non-empty array",
 		},
 		{
 			name: "Valid query with addresses and topics",
-			queriesList: []interface{}{
+			queries: []interface{}{
 				map[string]interface{}{
-					"addressesList": []interface{}{"0xA0b86a33E6441E654cF7A6E88ac73EB3a7fA88d8"},
-					"topicsList": []interface{}{
+					"addresses": []interface{}{"0xA0b86a33E6441E654cF7A6E88ac73EB3a7fA88d8"},
+					"topics": []interface{}{
 						map[string]interface{}{
-							"valuesList": []interface{}{
+							"values": []interface{}{
 								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 							},
 						},
@@ -566,12 +566,12 @@ func TestEventTriggerQueriesBasedConfiguration(t *testing.T) {
 		},
 		{
 			name: "Multiple queries for FROM-OR-TO scenario",
-			queriesList: []interface{}{
+			queries: []interface{}{
 				map[string]interface{}{
-					"addressesList": []interface{}{"0xA0b86a33E6441E654cF7A6E88ac73EB3a7fA88d8"},
-					"topicsList": []interface{}{
+					"addresses": []interface{}{"0xA0b86a33E6441E654cF7A6E88ac73EB3a7fA88d8"},
+					"topics": []interface{}{
 						map[string]interface{}{
-							"valuesList": []interface{}{
+							"values": []interface{}{
 								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 								"0x06DBb141d8275d9eDb8a7446F037D20E215188ff", // FROM
 								nil, // Any TO
@@ -581,10 +581,10 @@ func TestEventTriggerQueriesBasedConfiguration(t *testing.T) {
 					"maxEventsPerBlock": float64(50),
 				},
 				map[string]interface{}{
-					"addressesList": []interface{}{"0xA0b86a33E6441E654cF7A6E88ac73EB3a7fA88d8"},
-					"topicsList": []interface{}{
+					"addresses": []interface{}{"0xA0b86a33E6441E654cF7A6E88ac73EB3a7fA88d8"},
+					"topics": []interface{}{
 						map[string]interface{}{
-							"valuesList": []interface{}{
+							"values": []interface{}{
 								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 								nil, // Any FROM
 								"0x06DBb141d8275d9eDb8a7446F037D20E215188ff", // TO
@@ -597,13 +597,13 @@ func TestEventTriggerQueriesBasedConfiguration(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "Query with empty addressesList",
-			queriesList: []interface{}{
+			name: "Query with empty addresses",
+			queries: []interface{}{
 				map[string]interface{}{
-					"addressesList": []interface{}{},
-					"topicsList": []interface{}{
+					"addresses": []interface{}{},
+					"topics": []interface{}{
 						map[string]interface{}{
-							"valuesList": []interface{}{
+							"values": []interface{}{
 								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 							},
 						},
@@ -613,11 +613,11 @@ func TestEventTriggerQueriesBasedConfiguration(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "Query with empty topicsList",
-			queriesList: []interface{}{
+			name: "Query with empty topics",
+			queries: []interface{}{
 				map[string]interface{}{
-					"addressesList": []interface{}{"0xA0b86a33E6441E654cF7A6E88ac73EB3a7fA88d8"},
-					"topicsList":    []interface{}{},
+					"addresses": []interface{}{"0xA0b86a33E6441E654cF7A6E88ac73EB3a7fA88d8"},
+					"topics":    []interface{}{},
 				},
 			},
 			expectError: false,
@@ -629,7 +629,7 @@ func TestEventTriggerQueriesBasedConfiguration(t *testing.T) {
 			t.Logf("Testing: %s", tc.name)
 
 			triggerConfig := map[string]interface{}{
-				"queriesList": tc.queriesList,
+				"queries": tc.queries,
 			}
 			inputVariables := map[string]interface{}{}
 
@@ -690,13 +690,13 @@ func TestEventTriggerQueriesBasedUserScenario(t *testing.T) {
 
 	// Build queries-based configuration for USDC and USDT transfers FROM or TO the user's address
 	// This requires two separate queries to handle OR logic properly
-	queriesList := []interface{}{
+	queries := []interface{}{
 		map[string]interface{}{
 			// Query 1: USDC/USDT transfers FROM user address
-			"addressesList": []interface{}{mainnetUSDC, mainnetUSDT},
-			"topicsList": []interface{}{
+			"addresses": []interface{}{mainnetUSDC, mainnetUSDT},
+			"topics": []interface{}{
 				map[string]interface{}{
-					"valuesList": []interface{}{
+					"values": []interface{}{
 						"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 						userAddress, // FROM user
 						nil,         // Any TO
@@ -707,10 +707,10 @@ func TestEventTriggerQueriesBasedUserScenario(t *testing.T) {
 		},
 		map[string]interface{}{
 			// Query 2: USDC/USDT transfers TO user address
-			"addressesList": []interface{}{mainnetUSDC, mainnetUSDT},
-			"topicsList": []interface{}{
+			"addresses": []interface{}{mainnetUSDC, mainnetUSDT},
+			"topics": []interface{}{
 				map[string]interface{}{
-					"valuesList": []interface{}{
+					"values": []interface{}{
 						"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 						nil,         // Any FROM
 						userAddress, // TO user
@@ -721,11 +721,11 @@ func TestEventTriggerQueriesBasedUserScenario(t *testing.T) {
 		},
 	}
 
-	t.Logf("🚀 Queries-based Configuration: %d queries", len(queriesList))
+	t.Logf("🚀 Queries-based Configuration: %d queries", len(queries))
 	t.Log("This should find USDC or USDT transfers where your address is either FROM or TO")
 
 	triggerConfig := map[string]interface{}{
-		"queriesList": queriesList,
+		"queries": queries,
 	}
 	inputVariables := map[string]interface{}{}
 

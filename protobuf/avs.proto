@@ -298,20 +298,68 @@ message ContractWriteNode {
   message Config {
     string contract_address = 1;
     string call_data = 2;
-    // The ABI is only required to decode the return value of a method call.
-    // If we don't need the result and only want the transaction hash (which is usually sufficient),
-    // then we don't need to provide the ABI.
+    // The ABI is required to decode events and return values for enhanced response structure
     string contract_abi = 3;
+    // Support for multiple method calls in sequence (similar to ContractRead)
+    repeated MethodCall method_calls = 4;
+  }
+
+  message MethodCall {
+    string call_data = 1;     // Hex-encoded calldata for the method
+    string method_name = 2;   // Method name for clarity and response mapping
   }
 
   message Output {
-    // The requirement for this shape of data is requested in https://github.com/AvaProtocol/EigenLayer-AVS/issues/153
-    // https://docs.ethers.org/v6/api/providers/#TransactionReceipt
-    // Ideally we shouldn't have to transport or store this at all. We should only store/pass the txhash, the consumer can construct
-    // a full message of these through EVM RPC.
-    // But due to requirement for easy to debug on client, we're storing and transport these over the wire
-    Evm.UserOp user_op = 1;
-    Evm.TransactionReceipt tx_receipt = 2;
+    // Enhanced response structure matching Write_Contract_Spec.md
+    repeated MethodResult results = 1;
+  }
+
+  message MethodResult {
+    string method_name = 1;           // The name of the method called
+    bool success = 2;                 // Whether this specific method call succeeded
+    TransactionData transaction = 3;   // Transaction details
+    repeated EventData events = 4;     // Decoded events emitted
+    ErrorData error = 5;              // Error details if failed
+    ReturnData return_data = 6;       // Decoded return value
+    string input_data = 7;            // Raw input calldata for debugging
+  }
+
+  message TransactionData {
+    string hash = 1;                  // Transaction hash
+    string status = 2;                // "pending", "confirmed", "failed"
+    string block_number = 3;          // Block number when mined (null for pending)
+    string block_hash = 4;            // Block hash when mined
+    string gas_used = 5;              // Actual gas consumed (null for pending)
+    string gas_limit = 6;             // Gas limit set
+    string gas_price = 7;             // Gas price paid
+    string effective_gas_price = 8;   // Effective gas price (EIP-1559)
+    string from = 9;                  // Sender address (smart wallet)
+    string to = 10;                   // Target contract address
+    string value = 11;                // ETH value sent (usually "0" for contract calls)
+    string nonce = 12;                // Transaction nonce
+    string transaction_index = 13;    // Index in block (null for pending)
+    string confirmations = 14;        // Number of confirmations
+    int64 timestamp = 15;             // Transaction timestamp
+  }
+
+  message EventData {
+    string event_name = 1;            // Decoded event name (e.g. "Transfer")
+    string address = 2;               // Contract address that emitted the event
+    repeated string topics = 3;       // Raw topics array
+    string data = 4;                  // Raw data field
+    map<string, string> decoded = 5;  // Decoded event parameters with names
+  }
+
+  message ErrorData {
+    string code = 1;                  // Error classification: "EXECUTION_REVERTED", "OUT_OF_GAS", etc.
+    string message = 2;               // Human-readable error message
+    string revert_reason = 3;         // Encoded revert message from contract
+  }
+
+  message ReturnData {
+    string name = 1;                  // Return value name from ABI (may be empty)
+    string type = 2;                  // Solidity type (e.g. "bool", "uint256")
+    string value = 3;                 // The actual return value as string
   }
 
   // Include Config and Input as fields so they are generated in Go

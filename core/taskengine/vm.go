@@ -1636,8 +1636,8 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
 				}
 			}
-		} else if methodCalls, ok := config["methodCallsList"].([]interface{}); ok {
-			// Multiple method calls (camelCase from SDK)
+		} else if methodCalls, ok := config["methodCalls"].([]interface{}); ok {
+			// Multiple method calls (new clean naming from SDK)
 			for _, methodCallInterface := range methodCalls {
 				if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
 					methodCall := &avsproto.ContractReadNode_MethodCall{}
@@ -1689,28 +1689,29 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		// Create branch node with proper configuration
 		branchConfig := &avsproto.BranchNode_Config{}
 
-		// Handle conditionsList from client
-		if conditionsList, ok := config["conditionsList"].([]interface{}); ok && len(conditionsList) > 0 {
-			conditions := make([]*avsproto.BranchNode_Condition, len(conditionsList))
-			for i, conditionInterface := range conditionsList {
-				if conditionMap, ok := conditionInterface.(map[string]interface{}); ok {
-					condition := &avsproto.BranchNode_Condition{}
-					if id, ok := conditionMap["id"].(string); ok {
-						condition.Id = id
-					}
-					if condType, ok := conditionMap["type"].(string); ok {
-						condition.Type = condType
-					}
-					if expression, ok := conditionMap["expression"].(string); ok {
-						condition.Expression = expression
-					}
-					conditions[i] = condition
-				}
-			}
-			branchConfig.Conditions = conditions
-		} else {
-			return nil, fmt.Errorf("branch node requires conditionsList configuration")
+		// Handle conditions from client
+		conditionsData, ok := config["conditions"].([]interface{})
+		if !ok || len(conditionsData) == 0 {
+			return nil, fmt.Errorf("branch node requires conditions configuration")
 		}
+
+		conditions := make([]*avsproto.BranchNode_Condition, len(conditionsData))
+		for i, conditionInterface := range conditionsData {
+			if conditionMap, ok := conditionInterface.(map[string]interface{}); ok {
+				condition := &avsproto.BranchNode_Condition{}
+				if id, ok := conditionMap["id"].(string); ok {
+					condition.Id = id
+				}
+				if condType, ok := conditionMap["type"].(string); ok {
+					condition.Type = condType
+				}
+				if expression, ok := conditionMap["expression"].(string); ok {
+					condition.Expression = expression
+				}
+				conditions[i] = condition
+			}
+		}
+		branchConfig.Conditions = conditions
 
 		node.TaskType = &avsproto.TaskNode_Branch{
 			Branch: &avsproto.BranchNode{

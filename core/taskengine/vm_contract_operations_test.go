@@ -271,7 +271,13 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 
 // TestVM_ContractWrite_BasicExecution tests basic contract write functionality
 func TestVM_ContractWrite_BasicExecution(t *testing.T) {
+	SetRpc(testutil.GetTestRPCURL())
+	SetCache(testutil.GetDefaultCache())
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
 	vm := NewVM()
+	vm.WithDb(db)
 	vm.WithLogger(testutil.GetLogger())
 	vm.smartWalletConfig = testutil.GetTestSmartWalletConfig()
 
@@ -279,8 +285,13 @@ func TestVM_ContractWrite_BasicExecution(t *testing.T) {
 	node := &avsproto.ContractWriteNode{
 		Config: &avsproto.ContractWriteNode_Config{
 			ContractAddress: "0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E", // Test address
-			CallData:        "0xa9059cbb",                                 // transfer function selector
 			ContractAbi:     "[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"to\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"transfer\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+			MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
+				{
+					CallData:   "0xa9059cbb", // transfer function selector
+					MethodName: "transfer",
+				},
+			},
 		},
 	}
 
@@ -290,6 +301,20 @@ func TestVM_ContractWrite_BasicExecution(t *testing.T) {
 	assert.NotNil(t, executionStep)
 	assert.Equal(t, "test_write", executionStep.Id)
 
+	// Check the new enhanced output structure
+	if executionStep.Success {
+		contractWriteOutput := executionStep.GetContractWrite()
+		if contractWriteOutput != nil && len(contractWriteOutput.Results) > 0 {
+			result := contractWriteOutput.Results[0]
+			hash := ""
+			if result.Transaction != nil {
+				hash = result.Transaction.Hash
+			}
+			t.Logf("Contract write result - Method: %s, Success: %v, Hash: %s",
+				result.MethodName, result.Success, hash)
+		}
+	}
+
 	t.Logf("Contract write - Success: %v, Error: %s", executionStep.Success, executionStep.Error)
 	if err != nil {
 		t.Logf("Contract write system error (expected): %v", err)
@@ -298,6 +323,10 @@ func TestVM_ContractWrite_BasicExecution(t *testing.T) {
 
 // TestVM_ContractWrite_ErrorHandling tests contract write error conditions
 func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
+	// Setup test database for ContractWrite operations
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
 	tests := []struct {
 		name        string
 		setupVM     func(*VM)
@@ -311,21 +340,42 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
 					ContractAddress: "0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E",
-					CallData:        "0xa9059cbb",
 					ContractAbi:     "[{\"inputs\":[],\"name\":\"test\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
+						{
+							CallData:   "0xa9059cbb",
+							MethodName: "test",
+						},
+					},
 				},
 			},
 			expectError: true,
 			errorText:   "smart wallet config",
 		},
 		{
-			name:    "Invalid Contract Address",
-			setupVM: func(v *VM) { v.smartWalletConfig = testutil.GetTestSmartWalletConfig() },
+			name: "Invalid Contract Address",
+			setupVM: func(v *VM) {
+				// Use a properly configured smart wallet config to ensure we test address validation
+				config := &config.SmartWalletConfig{
+					EthRpcUrl:         "https://sepolia.drpc.org", // Valid RPC URL
+					BundlerURL:        "https://bundler.test",
+					EthWsUrl:          "wss://sepolia.drpc.org",
+					FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
+					EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
+				}
+				v.smartWalletConfig = config
+			},
 			node: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
 					ContractAddress: "invalid-address",
-					CallData:        "0xa9059cbb",
 					ContractAbi:     "[{\"inputs\":[],\"name\":\"test\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
+						{
+							CallData:   "0xa9059cbb",
+							MethodName: "test",
+						},
+					},
 				},
 			},
 			expectError: true,
@@ -336,6 +386,7 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			vm := NewVM()
+			vm.WithDb(db)
 			vm.WithLogger(testutil.GetLogger())
 			tt.setupVM(vm)
 

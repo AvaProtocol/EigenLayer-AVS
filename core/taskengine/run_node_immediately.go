@@ -146,14 +146,14 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	defer cancel()
 
 	// Parse the new queries-based configuration
-	queriesInterface, ok := triggerConfig["queriesList"]
+	queriesInterface, ok := triggerConfig["queries"]
 	if !ok {
-		return nil, fmt.Errorf("queriesList is required for EventTrigger")
+		return nil, fmt.Errorf("queries is required for EventTrigger")
 	}
 
 	queriesArray, ok := queriesInterface.([]interface{})
 	if !ok || len(queriesArray) == 0 {
-		return nil, fmt.Errorf("queriesList must be a non-empty array")
+		return nil, fmt.Errorf("queries must be a non-empty array")
 	}
 
 	if n.logger != nil {
@@ -193,7 +193,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	var allEvents []types.Log
 	var totalSearched uint64
 
-	// Process each query in the queriesList
+	// Process each query in the queries
 	for queryIndex, queryInterface := range queriesArray {
 		queryMap, ok := queryInterface.(map[string]interface{})
 		if !ok {
@@ -206,7 +206,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		var maxEventsPerBlock uint32
 
 		// Extract addresses list
-		if addressesInterface, exists := queryMap["addressesList"]; exists {
+		if addressesInterface, exists := queryMap["addresses"]; exists {
 			if addressesArray, ok := addressesInterface.([]interface{}); ok {
 				for _, addrInterface := range addressesArray {
 					if addrStr, ok := addrInterface.(string); ok && addrStr != "" {
@@ -216,24 +216,31 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 			}
 		}
 
-		// Extract topics list
-		if topicsInterface, exists := queryMap["topicsList"]; exists {
+		// Extract topics list and build proper Ethereum log filter structure
+		if topicsInterface, exists := queryMap["topics"]; exists {
 			if topicsArray, ok := topicsInterface.([]interface{}); ok {
-				for _, topicGroupInterface := range topicsArray {
-					if topicGroupMap, ok := topicGroupInterface.(map[string]interface{}); ok {
-						if valuesInterface, exists := topicGroupMap["valuesList"]; exists {
+				// For each query, we expect one topic group that defines the topic filter structure
+				// Multiple topic groups within one query is not supported in Ethereum filtering
+				if len(topicsArray) > 0 {
+					if topicGroupMap, ok := topicsArray[0].(map[string]interface{}); ok {
+						if valuesInterface, exists := topicGroupMap["values"]; exists {
 							if valuesArray, ok := valuesInterface.([]interface{}); ok {
-								var topicGroup []common.Hash
-								for _, valueInterface := range valuesArray {
+								// Build topics array where each position corresponds to topic[0], topic[1], topic[2], etc.
+								// For Ethereum log filtering: topics[i] = []common.Hash{possible values for topic position i}
+								// If a position should be wildcard (any value), use nil for that position
+
+								// Initialize topics array with the correct size
+								topics = make([][]common.Hash, len(valuesArray))
+
+								// Process each value and assign to the corresponding topic position
+								for i, valueInterface := range valuesArray {
 									if valueStr, ok := valueInterface.(string); ok && valueStr != "" {
-										topicGroup = append(topicGroup, common.HexToHash(valueStr))
+										// Non-null value: create a topic filter for this position
+										topics[i] = []common.Hash{common.HexToHash(valueStr)}
 									} else {
-										// null values are supported for wildcard matching
-										topicGroup = append(topicGroup, common.Hash{})
+										// null value: this topic position should be wildcard (nil)
+										topics[i] = nil
 									}
-								}
-								if len(topicGroup) > 0 {
-									topics = append(topics, topicGroup)
 								}
 							}
 						}
@@ -460,21 +467,78 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	return result, nil
 }
 
-// searchEventsForQuery executes a single query search
+// searchEventsForQuery executes a single query search with recent-first strategy
 func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Address, topics [][]common.Hash, currentBlock uint64, searchRanges []uint64) ([]types.Log, uint64, error) {
-	var events []types.Log
+	var allEvents []types.Log
 	var totalSearched uint64
 
+	// PRIORITY SEARCH: First, search very recent blocks for the most recent events
+	// This ensures we find the latest events even if RPC has sync issues
+	recentRanges := []uint64{100, 500, 2000} // Last 100, 500, 2000 blocks
+
+	for _, recentRange := range recentRanges {
+		select {
+		case <-ctx.Done():
+			return allEvents, totalSearched, nil
+		default:
+		}
+
+		var fromBlock uint64
+		if currentBlock < recentRange {
+			fromBlock = 0
+		} else {
+			fromBlock = currentBlock - recentRange
+		}
+
+		// Prepare filter query for recent search
+		query := ethereum.FilterQuery{
+			FromBlock: big.NewInt(int64(fromBlock)),
+			ToBlock:   big.NewInt(int64(currentBlock)),
+			Addresses: addresses,
+			Topics:    topics,
+		}
+
+		if n.logger != nil {
+			n.logger.Debug("EventTrigger: Priority search for recent events",
+				"fromBlock", fromBlock,
+				"toBlock", currentBlock,
+				"blockRange", currentBlock-fromBlock)
+		}
+
+		// Search recent blocks
+		logs, err := rpcConn.FilterLogs(ctx, query)
+		if err == nil {
+			totalSearched += (currentBlock - fromBlock)
+			allEvents = append(allEvents, logs...)
+
+			if len(logs) > 0 {
+				if n.logger != nil {
+					n.logger.Info("EventTrigger: Found recent events - returning immediately",
+						"fromBlock", fromBlock,
+						"toBlock", currentBlock,
+						"eventsFound", len(logs),
+						"blockRange", currentBlock-fromBlock)
+				}
+				return allEvents, totalSearched, nil
+			}
+		} else if n.logger != nil {
+			n.logger.Debug("EventTrigger: Recent search failed, continuing",
+				"fromBlock", fromBlock,
+				"toBlock", currentBlock,
+				"error", err)
+		}
+	}
+
+	// FALLBACK SEARCH: If no recent events found, search larger ranges
 	for _, searchRange := range searchRanges {
 		select {
 		case <-ctx.Done():
-			// Timeout occurred - return partial results gracefully
 			if n.logger != nil {
 				n.logger.Warn("EventTrigger: Search timeout reached, returning partial results",
 					"blocksSearched", totalSearched,
-					"eventsFound", len(events))
+					"eventsFound", len(allEvents))
 			}
-			return events, totalSearched, nil // Return what we have so far instead of error
+			return allEvents, totalSearched, nil
 		default:
 		}
 
@@ -501,13 +565,17 @@ func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Ad
 
 			topicStrs := make([][]string, len(topics))
 			for i, topicGroup := range topics {
-				topicStrs[i] = make([]string, len(topicGroup))
-				for j, topic := range topicGroup {
-					topicStrs[i][j] = topic.Hex()
+				if topicGroup == nil {
+					topicStrs[i] = []string{"<wildcard>"}
+				} else {
+					topicStrs[i] = make([]string, len(topicGroup))
+					for j, topic := range topicGroup {
+						topicStrs[i][j] = topic.Hex()
+					}
 				}
 			}
 
-			n.logger.Debug("EventTrigger: Searching with query",
+			n.logger.Debug("EventTrigger: Fallback search with larger range",
 				"fromBlock", fromBlock,
 				"toBlock", currentBlock,
 				"addresses", addressStrs,
@@ -533,24 +601,27 @@ func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Ad
 					if currentBlock-fromBlock > 1000 {
 						usedChunkedSearch = true
 
-						// Break the range into 1000-block chunks
+						// Break the range into 1000-block chunks, searching from MOST RECENT first
 						chunkSize := uint64(1000)
 						var chunkedSearched uint64
-						for chunkStart := fromBlock; chunkStart < currentBlock; chunkStart += chunkSize {
+
+						// Search chunks in reverse order (most recent first)
+						for chunkStart := currentBlock; chunkStart > fromBlock; {
 							// Check timeout during chunked search
 							select {
 							case <-ctx.Done():
 								n.logger.Info("EventTrigger: Chunked search timeout reached",
-									"chunkedSearched", chunkedSearched,
-									"chunksProcessed", (chunkStart-fromBlock)/chunkSize)
+									"chunkedSearched", chunkedSearched)
 								totalSearched += chunkedSearched
-								return events, totalSearched, nil
+								return allEvents, totalSearched, nil
 							default:
 							}
 
-							chunkEnd := chunkStart + chunkSize - 1
-							if chunkEnd > currentBlock {
-								chunkEnd = currentBlock
+							chunkEnd := chunkStart
+							if chunkStart < fromBlock+chunkSize {
+								chunkStart = fromBlock
+							} else {
+								chunkStart = chunkStart - chunkSize
 							}
 
 							chunkQuery := query
@@ -558,21 +629,20 @@ func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Ad
 							chunkQuery.ToBlock = big.NewInt(int64(chunkEnd))
 
 							chunkLogs, chunkErr := rpcConn.FilterLogs(ctx, chunkQuery)
-							chunkedSearched += (chunkEnd - chunkStart + 1)
+							chunkedSearched += (chunkEnd - chunkStart)
 
 							if chunkErr == nil {
-								logs = append(logs, chunkLogs...)
+								allEvents = append(allEvents, chunkLogs...)
 								if n.logger != nil && len(chunkLogs) > 0 {
-									n.logger.Info("EventTrigger: Found events in chunk - stopping early for most recent",
+									n.logger.Info("EventTrigger: Found events in chunk - returning most recent",
 										"chunkStart", chunkStart,
 										"chunkEnd", chunkEnd,
 										"eventsInChunk", len(chunkLogs))
 								}
-								// OPTIMIZATION: For runTrigger, we only need the most recent event
-								// Stop immediately after finding any events to avoid unnecessary work
+								// Return immediately when we find events (these are most recent due to reverse search)
 								if len(chunkLogs) > 0 {
 									totalSearched += chunkedSearched
-									return logs, totalSearched, nil
+									return allEvents, totalSearched, nil
 								}
 							} else {
 								if n.logger != nil {
@@ -587,9 +657,9 @@ func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Ad
 						// Update searched counter with chunked progress
 						totalSearched += chunkedSearched
 
-						// If chunked search found events or completed successfully, treat as success
-						if len(logs) > 0 || chunkedSearched > 0 {
-							err = nil
+						// If chunked search found events, return them
+						if len(allEvents) > 0 {
+							return allEvents, totalSearched, nil
 						}
 					}
 				} else {
@@ -611,25 +681,20 @@ func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Ad
 			totalSearched += (currentBlock - fromBlock)
 		}
 
-		events = append(events, logs...)
+		allEvents = append(allEvents, logs...)
 
 		if n.logger != nil {
-			n.logger.Info("EventTrigger: Search completed for range",
+			n.logger.Info("EventTrigger: Fallback search completed for range",
 				"fromBlock", fromBlock,
 				"toBlock", currentBlock,
 				"logsFound", len(logs),
-				"totalEventsSoFar", len(events),
+				"totalEventsSoFar", len(allEvents),
 				"blockRange", currentBlock-fromBlock)
 		}
 
-		// OPTIMIZATION: For runTrigger, return immediately after finding any events
-		// Since we search from most recent blocks first, the first events found are the most recent
+		// If we found events in this range, return them (they should be the most recent available)
 		if len(logs) > 0 {
-			// Update searched counter and return immediately
-			if !usedChunkedSearch {
-				totalSearched += (currentBlock - fromBlock)
-			}
-			return append(events, logs...), totalSearched, nil
+			return allEvents, totalSearched, nil
 		}
 
 		// If we've searched back to genesis, stop
@@ -638,7 +703,7 @@ func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Ad
 		}
 	}
 
-	return events, totalSearched, nil
+	return allEvents, totalSearched, nil
 }
 
 // runManualTriggerImmediately executes a manual trigger immediately
@@ -863,13 +928,14 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		result["txHash"] = ethTransfer.GetTransactionHash()
 		result["success"] = true
 	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
-		// ContractWrite output contains UserOp and TxReceipt
-		if txReceipt := contractWrite.GetTxReceipt(); txReceipt != nil {
-			result["txHash"] = txReceipt.GetHash()
-			result["success"] = true
-		} else {
-			result["success"] = true
+		// ContractWrite output now contains enhanced results structure
+		if len(contractWrite.GetResults()) > 0 {
+			firstResult := contractWrite.GetResults()[0]
+			if firstResult.Transaction != nil {
+				return map[string]interface{}{"txHash": firstResult.Transaction.Hash}, nil
+			}
 		}
+		return map[string]interface{}{"status": "success"}, nil
 	}
 
 	// If no specific data was extracted, include basic execution info
@@ -987,12 +1053,14 @@ func (n *Engine) extractExecutionResultDirect(executionStep *avsproto.Execution_
 	} else if ethTransfer := executionStep.GetEthTransfer(); ethTransfer != nil {
 		return map[string]interface{}{"txHash": ethTransfer.GetTransactionHash()}, nil
 	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
-		// ContractWrite output contains UserOp and TxReceipt
-		if txReceipt := contractWrite.GetTxReceipt(); txReceipt != nil {
-			return map[string]interface{}{"txHash": txReceipt.GetHash()}, nil
-		} else {
-			return map[string]interface{}{"status": "success"}, nil
+		// ContractWrite output now contains enhanced results structure
+		if len(contractWrite.GetResults()) > 0 {
+			firstResult := contractWrite.GetResults()[0]
+			if firstResult.Transaction != nil {
+				return map[string]interface{}{"txHash": firstResult.Transaction.Hash}, nil
+			}
 		}
+		return map[string]interface{}{"status": "success"}, nil
 	}
 
 	// If no specific data was extracted, return empty result
@@ -1260,17 +1328,29 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		// For contract write nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
 		contractWriteOutput := &avsproto.ContractWriteNode_Output{}
 		if result != nil && len(result) > 0 {
-			// ContractWrite should have UserOp and TxReceipt, but for testing we just create empty structures
-			// In a real implementation, these would be populated from the actual transaction results
-			contractWriteOutput.UserOp = &avsproto.Evm_UserOp{}
-			contractWriteOutput.TxReceipt = &avsproto.Evm_TransactionReceipt{}
+			// ContractWrite now uses results array structure
+			var results []*avsproto.ContractWriteNode_MethodResult
 
 			// Try to extract transaction hash from result if available
 			if txHash, ok := result["txHash"].(string); ok {
-				contractWriteOutput.TxReceipt.Hash = txHash
+				results = append(results, &avsproto.ContractWriteNode_MethodResult{
+					MethodName: "unknown",
+					Success:    true,
+					Transaction: &avsproto.ContractWriteNode_TransactionData{
+						Hash: txHash,
+					},
+				})
 			} else if transactionHash, ok := result["transactionHash"].(string); ok {
-				contractWriteOutput.TxReceipt.Hash = transactionHash
+				results = append(results, &avsproto.ContractWriteNode_MethodResult{
+					MethodName: "unknown",
+					Success:    true,
+					Transaction: &avsproto.ContractWriteNode_TransactionData{
+						Hash: transactionHash,
+					},
+				})
 			}
+
+			contractWriteOutput.Results = results
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractWrite{
 			ContractWrite: contractWriteOutput,
