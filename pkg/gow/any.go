@@ -9,6 +9,7 @@ import (
 
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -180,4 +181,25 @@ func ValueToSlice(value *structpb.Value) []any {
 		return listValue.AsSlice()
 	}
 	return nil
+}
+
+// ProtoToMap converts any protobuf message to map[string]interface{}
+// This is useful for converting protobuf objects to the interface{} format expected by validation logic
+func ProtoToMap(message proto.Message) (map[string]interface{}, error) {
+	marshaler := protojson.MarshalOptions{
+		UseProtoNames:   false, // Use camelCase field names (matches existing patterns)
+		EmitUnpopulated: false, // Don't include zero values unless explicitly set
+	}
+
+	jsonBytes, err := marshaler.Marshal(message)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
