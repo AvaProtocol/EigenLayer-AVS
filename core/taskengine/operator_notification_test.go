@@ -102,7 +102,10 @@ func TestNotifyOperatorsTaskOperation_DeleteTask(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, deleted)
 
-	// Give some time for async notification
+	// Manually trigger batch processing for immediate testing
+	engine.sendBatchedNotifications()
+
+	// Give some time for async notification processing
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify the notification was sent
@@ -156,7 +159,10 @@ func TestNotifyOperatorsTaskOperation_CancelTask(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, cancelled)
 
-	// Give some time for async notification
+	// Manually trigger batch processing for immediate testing
+	engine.sendBatchedNotifications()
+
+	// Give some time for async notification processing
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify the notification was sent
@@ -215,7 +221,10 @@ func TestNotifyOperatorsTaskOperation_OnlyNotifiesTrackingOperators(t *testing.T
 	assert.NoError(t, err)
 	assert.True(t, deleted)
 
-	// Give some time for async notification
+	// Manually trigger batch processing for immediate testing
+	engine.sendBatchedNotifications()
+
+	// Give some time for async notification processing
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify only the tracking operator received notification
@@ -288,6 +297,12 @@ func TestNotifyOperatorsTaskOperation_LockDuration(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("❌ Operations blocked - potential lock contention issue")
 	}
+
+	// Manually trigger batch processing for immediate testing
+	engine.sendBatchedNotifications()
+
+	// Give some time for async notification processing
+	time.Sleep(100 * time.Millisecond)
 
 	// Verify all operators received notifications
 	for i, stream := range streams {

@@ -3,14 +3,15 @@ package taskengine
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/stretchr/testify/assert"
 )
 
-// TestVM_ContractRead_BasicExecution tests basic contract read functionality
+// TestVM_ContractRead_BasicExecution tests basic contract reading functionality
 func TestVM_ContractRead_BasicExecution(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
 	SetCache(testutil.GetDefaultCache())
@@ -26,8 +27,13 @@ func TestVM_ContractRead_BasicExecution(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", // Chainlink ETH/USD
-			CallData:        "0xfeaf968c",                                 // decimals()
 			ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+				{
+					CallData:   "0xfeaf968c", // decimals()
+					MethodName: "decimals",
+				},
+			},
 		},
 	}
 
@@ -56,8 +62,13 @@ func TestVM_ContractRead_LatestRoundData(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
-			CallData:        "0xfeaf968c", // This is decimals, but for demo purposes
 			ContractAbi:     "[{\"inputs\":[],\"name\":\"latestRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+				{
+					CallData:   "0xfeaf968c", // This is decimals, but for demo purposes
+					MethodName: "decimals",
+				},
+			},
 		},
 	}
 
@@ -87,21 +98,43 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
 					ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
-					CallData:        "0xfeaf968c",
 					ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+						{
+							CallData:   "0xfeaf968c",
+							MethodName: "decimals",
+						},
+					},
 				},
 			},
 			expectError: true,
 			errorText:   "smart wallet config",
 		},
 		{
-			name:    "Invalid Contract Address",
-			setupVM: func(v *VM) { v.smartWalletConfig = testutil.GetTestSmartWalletConfig() },
+			name: "Invalid Contract Address",
+			setupVM: func(v *VM) {
+				// Create a mock smart wallet config with a test RPC URL
+				// to ensure we test the contract address validation, not RPC URL validation
+				config := &config.SmartWalletConfig{
+					EthRpcUrl:         "http://localhost:99999/definitely-not-a-real-endpoint", // Guaranteed to fail
+					BundlerURL:        "https://bundler.test",
+					EthWsUrl:          "wss://localhost:99999/ws",
+					FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
+					EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
+				}
+				v.smartWalletConfig = config
+			},
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
 					ContractAddress: "invalid-address",
-					CallData:        "0xfeaf968c",
 					ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+						{
+							CallData:   "0xfeaf968c",
+							MethodName: "decimals",
+						},
+					},
 				},
 			},
 			expectError: true,
@@ -117,7 +150,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 				Config: &avsproto.ContractReadNode_Config{},
 			},
 			expectError: true,
-			errorText:   "missing required input variables",
+			errorText:   "missing required configuration: contract_address and contract_abi are required",
 		},
 	}
 
