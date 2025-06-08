@@ -210,6 +210,10 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 			log.WriteString(fmt.Sprintf("  ✅ Success: %s\n", result.MethodName))
 		} else {
 			log.WriteString(fmt.Sprintf("  ❌ Failed: %s - %s\n", result.MethodName, result.Error))
+			// If any method call fails, mark the overall execution as failed
+			if err == nil {
+				err = fmt.Errorf("method call failed: %s", result.Error)
+			}
 		}
 	}
 
