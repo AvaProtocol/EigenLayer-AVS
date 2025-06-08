@@ -42,6 +42,7 @@ This architecture ensures clear separation between static configuration and dyna
 
 import (
 	"context"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
@@ -91,6 +92,10 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	if queueErr != nil {
 		agg.logger.Error("failed to start task queue", "error", queueErr.Error())
 	}
+
+	// Start periodic cleanup every hour for orphaned jobs
+	agg.queue.SchedulePeriodicCleanup(time.Hour)
+	agg.logger.Info("scheduled periodic queue cleanup every hour")
 
 	agg.worker.MustStart()
 }
