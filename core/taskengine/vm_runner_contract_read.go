@@ -107,6 +107,16 @@ func (r *ContractReadProcessor) executeMethodCall(ctx context.Context, contractA
 		}
 	}
 
+	// Validate that the provided methodName matches the actual method detected from callData
+	if method.Name != methodCall.MethodName {
+		return &avsproto.ContractReadNode_MethodResult{
+			Success:    false,
+			Error:      fmt.Sprintf("method name mismatch: callData corresponds to '%s' but methodName is '%s'. Please verify the function selector matches the intended method", method.Name, methodCall.MethodName),
+			MethodName: methodCall.MethodName,
+			Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+		}
+	}
+
 	// Decode the result using the ABI
 	result, err := contractAbi.Unpack(method.Name, output)
 	if err != nil {
