@@ -146,14 +146,14 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	defer cancel()
 
 	// Parse the new queries-based configuration
-	queriesInterface, ok := triggerConfig["queriesList"]
+	queriesInterface, ok := triggerConfig["queries"]
 	if !ok {
-		return nil, fmt.Errorf("queriesList is required for EventTrigger")
+		return nil, fmt.Errorf("queries is required for EventTrigger")
 	}
 
 	queriesArray, ok := queriesInterface.([]interface{})
 	if !ok || len(queriesArray) == 0 {
-		return nil, fmt.Errorf("queriesList must be a non-empty array")
+		return nil, fmt.Errorf("queries must be a non-empty array")
 	}
 
 	if n.logger != nil {
@@ -193,7 +193,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	var allEvents []types.Log
 	var totalSearched uint64
 
-	// Process each query in the queriesList
+	// Process each query in the queries
 	for queryIndex, queryInterface := range queriesArray {
 		queryMap, ok := queryInterface.(map[string]interface{})
 		if !ok {
@@ -206,7 +206,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		var maxEventsPerBlock uint32
 
 		// Extract addresses list
-		if addressesInterface, exists := queryMap["addressesList"]; exists {
+		if addressesInterface, exists := queryMap["addresses"]; exists {
 			if addressesArray, ok := addressesInterface.([]interface{}); ok {
 				for _, addrInterface := range addressesArray {
 					if addrStr, ok := addrInterface.(string); ok && addrStr != "" {
@@ -217,11 +217,11 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		}
 
 		// Extract topics list
-		if topicsInterface, exists := queryMap["topicsList"]; exists {
+		if topicsInterface, exists := queryMap["topics"]; exists {
 			if topicsArray, ok := topicsInterface.([]interface{}); ok {
 				for _, topicGroupInterface := range topicsArray {
 					if topicGroupMap, ok := topicGroupInterface.(map[string]interface{}); ok {
-						if valuesInterface, exists := topicGroupMap["valuesList"]; exists {
+						if valuesInterface, exists := topicGroupMap["values"]; exists {
 							if valuesArray, ok := valuesInterface.([]interface{}); ok {
 								var topicGroup []common.Hash
 								for _, valueInterface := range valuesArray {
