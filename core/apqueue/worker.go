@@ -56,6 +56,12 @@ func (w *Worker) ProcessSignal(jid uint64) {
 		return
 	}
 
+	// Check if job is nil (queue is empty)
+	if job == nil {
+		w.logger.Debug("no jobs available in queue", "job_id", jid)
+		return
+	}
+
 	// Single consolidated log for job processing start
 	w.logger.Info("processing job", "job_id", jid, "task_id", job.Name, "job_type", job.Type)
 

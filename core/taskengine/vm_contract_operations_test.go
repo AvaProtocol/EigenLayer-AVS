@@ -271,7 +271,13 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 
 // TestVM_ContractWrite_BasicExecution tests basic contract write functionality
 func TestVM_ContractWrite_BasicExecution(t *testing.T) {
+	SetRpc(testutil.GetTestRPCURL())
+	SetCache(testutil.GetDefaultCache())
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
 	vm := NewVM()
+	vm.WithDb(db)
 	vm.WithLogger(testutil.GetLogger())
 	vm.smartWalletConfig = testutil.GetTestSmartWalletConfig()
 
@@ -317,6 +323,10 @@ func TestVM_ContractWrite_BasicExecution(t *testing.T) {
 
 // TestVM_ContractWrite_ErrorHandling tests contract write error conditions
 func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
+	// Setup test database for ContractWrite operations
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
 	tests := []struct {
 		name        string
 		setupVM     func(*VM)
@@ -365,6 +375,7 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			vm := NewVM()
+			vm.WithDb(db)
 			vm.WithLogger(testutil.GetLogger())
 			tt.setupVM(vm)
 
