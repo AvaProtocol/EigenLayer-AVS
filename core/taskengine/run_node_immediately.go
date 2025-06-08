@@ -1101,12 +1101,16 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	// Log successful execution
 	if n.logger != nil {
 		n.logger.Info("RunNodeImmediatelyRPC: Executed successfully", "nodeTypeStr", nodeTypeStr, "originalNodeType", req.NodeType, "configKeys", getStringMapKeys(nodeConfig), "inputKeys", getStringMapKeys(inputVariables))
+
 	}
 
 	// Convert result to the appropriate protobuf output type
+	nodeId := fmt.Sprintf("node_immediate_%d", time.Now().UnixNano())
+
 	resp := &avsproto.RunNodeWithInputsResp{
 		Success: true,
-		NodeId:  fmt.Sprintf("node_immediate_%d", time.Now().UnixNano()),
+		NodeId:  nodeId,
+		Error:   "", // Ensure error field is never nil for successful responses
 	}
 
 	// Set the appropriate output data based on the node type
@@ -1164,23 +1168,40 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				// Multiple method results
 				for _, methodResult := range results {
 					methodResultProto := &avsproto.ContractReadNode_MethodResult{}
-					if methodName, ok := methodResult["method_name"].(string); ok {
+					if methodName, ok := methodResult["method_name"].(string); ok && methodName != "" {
 						methodResultProto.MethodName = methodName
+					} else {
+						methodResultProto.MethodName = "unknown" // Ensure non-empty method name
 					}
 					if success, ok := methodResult["success"].(bool); ok {
 						methodResultProto.Success = success
+					} else {
+						methodResultProto.Success = false // Default to false if not set
 					}
-					if errorMsg, ok := methodResult["error"].(string); ok {
+					if errorMsg, ok := methodResult["error"].(string); ok && errorMsg != "" {
 						methodResultProto.Error = errorMsg
+					} else {
+						methodResultProto.Error = "" // Ensure error field is never nil
 					}
 
 					// Handle structured data (now the only data field)
 					if data, ok := methodResult["data"].(map[string]interface{}); ok {
 						for fieldName, fieldValue := range data {
+							// Ensure field name and value are never empty
+							name := fieldName
+							if name == "" {
+								name = "unknown_field"
+							}
+
+							value := fmt.Sprintf("%v", fieldValue)
+							if value == "" || value == "<nil>" {
+								value = ""
+							}
+
 							field := &avsproto.ContractReadNode_MethodResult_StructuredField{
-								Name:  fieldName,
+								Name:  name,
 								Type:  "string", // Default type, could be enhanced to detect actual type
-								Value: fmt.Sprintf("%v", fieldValue),
+								Value: value,
 							}
 							methodResultProto.Data = append(methodResultProto.Data, field)
 						}
@@ -1192,23 +1213,37 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				// Single method result (backward compatibility)
 				methodResult := &avsproto.ContractReadNode_MethodResult{}
 
-				if methodName, ok := result["method_name"].(string); ok {
+				if methodName, ok := result["method_name"].(string); ok && methodName != "" {
 					methodResult.MethodName = methodName
+				} else {
+					methodResult.MethodName = "unknown" // Ensure non-empty method name
 				}
-				if errorMsg, ok := result["error"].(string); ok {
+				if errorMsg, ok := result["error"].(string); ok && errorMsg != "" {
 					methodResult.Error = errorMsg
 					methodResult.Success = false
 				} else {
+					methodResult.Error = "" // Ensure error field is never nil
 					methodResult.Success = true
 				}
 
 				// Handle structured data (now the only data field)
 				if data, ok := result["data"].(map[string]interface{}); ok {
 					for fieldName, fieldValue := range data {
+						// Ensure field name and value are never empty
+						name := fieldName
+						if name == "" {
+							name = "unknown_field"
+						}
+
+						value := fmt.Sprintf("%v", fieldValue)
+						if value == "" || value == "<nil>" {
+							value = ""
+						}
+
 						field := &avsproto.ContractReadNode_MethodResult_StructuredField{
-							Name:  fieldName,
+							Name:  name,
 							Type:  "string", // Default type, could be enhanced to detect actual type
-							Value: fmt.Sprintf("%v", fieldValue),
+							Value: value,
 						}
 						methodResult.Data = append(methodResult.Data, field)
 					}
@@ -1220,6 +1255,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractRead{
 			ContractRead: contractReadOutput,
 		}
+
 	case NodeTypeContractWrite:
 		// For contract write nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
 		contractWriteOutput := &avsproto.ContractWriteNode_Output{}

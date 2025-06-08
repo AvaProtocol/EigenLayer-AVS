@@ -152,6 +152,97 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			expectError: true,
 			errorText:   "missing required configuration: contract_address and contract_abi are required",
 		},
+		{
+			name: "Method Name Mismatch",
+			setupVM: func(v *VM) {
+				// Use a valid RPC URL to test the validation logic
+				config := &config.SmartWalletConfig{
+					EthRpcUrl:         "https://sepolia.drpc.org", // Real endpoint for testing
+					BundlerURL:        "https://bundler.test",
+					EthWsUrl:          "wss://sepolia.drpc.org",
+					FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
+					EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
+				}
+				v.smartWalletConfig = config
+			},
+			node: &avsproto.ContractReadNode{
+				Config: &avsproto.ContractReadNode_Config{
+					ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", // Valid Chainlink contract
+					ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"latestRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+						{
+							CallData:   "0x313ce567",      // decimals() function selector
+							MethodName: "latestRoundData", // Wrong method name - should be "decimals"
+						},
+					},
+				},
+			},
+			expectError: true,
+			errorText:   "method name mismatch", // Should contain the validation error
+		},
+		{
+			name: "Client Error Scenario",
+			setupVM: func(v *VM) {
+				// Use a valid RPC URL to test the validation logic
+				config := &config.SmartWalletConfig{
+					EthRpcUrl:         "https://sepolia.drpc.org", // Real endpoint for testing
+					BundlerURL:        "https://bundler.test",
+					EthWsUrl:          "wss://sepolia.drpc.org",
+					FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
+					EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
+				}
+				v.smartWalletConfig = config
+			},
+			node: &avsproto.ContractReadNode{
+				Config: &avsproto.ContractReadNode_Config{
+					ContractAddress: "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c", // Client's contract address
+					ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"description\",\"outputs\":[{\"internalType\":\"string\",\"name\":\"\",\"type\":\"string\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"version\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint80\",\"name\":\"_roundId\",\"type\":\"uint80\"}],\"name\":\"getRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"latestRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+						{
+							CallData:   "0x313ce567",      // decimals() function selector - this is correct for decimals
+							MethodName: "latestRoundData", // Wrong! This should be "decimals"
+						},
+					},
+				},
+			},
+			expectError: true,
+			errorText:   "method name mismatch", // Should catch the exact client error
+		},
+		{
+			name: "Empty Contract Response",
+			setupVM: func(v *VM) {
+				// Use a valid RPC URL but point to a non-existent contract or one that returns empty data
+				config := &config.SmartWalletConfig{
+					EthRpcUrl:         "https://sepolia.drpc.org", // Real endpoint
+					BundlerURL:        "https://bundler.test",
+					EthWsUrl:          "wss://sepolia.drpc.org",
+					FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
+					EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
+				}
+				v.smartWalletConfig = config
+			},
+			node: &avsproto.ContractReadNode{
+				Config: &avsproto.ContractReadNode_Config{
+					ContractAddress: "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c", // Address that returns empty data
+					ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"latestRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+						{
+							CallData:   "0xfeaf968c",      // latestRoundData() function selector - correct
+							MethodName: "latestRoundData", // Correct method name
+						},
+						{
+							CallData:   "0x313ce567", // decimals() function selector - correct
+							MethodName: "decimals",   // Correct method name
+						},
+					},
+				},
+			},
+			expectError: true,
+			errorText:   "contract does not exist", // Should catch contract not found
+		},
 	}
 
 	for _, tt := range tests {
