@@ -81,7 +81,8 @@ func (w *Worker) ProcessSignal(jid uint64) {
 			if markErr := w.q.markJobDone(job, jobFailed); markErr != nil {
 				w.logger.Error("failed to mark orphaned job as failed", "error", markErr, "job_id", jid)
 			}
-			w.logger.Warn("orphaned job removed (task deleted)",
+			// Use Info level instead of Warn to avoid stack traces
+			w.logger.Info("orphaned job removed (task deleted)",
 				"job_id", jid,
 				"task_id", job.Name,
 				"reason", "task_not_found")

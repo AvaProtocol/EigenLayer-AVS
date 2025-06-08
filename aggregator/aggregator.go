@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -249,6 +250,10 @@ func (agg *Aggregator) migrate() {
 }
 
 func (agg *Aggregator) Start(ctx context.Context) error {
+	// Disable stack traces globally to reduce log noise
+	debug.SetTraceback("none")
+	os.Setenv("GOTRACEBACK", "none")
+
 	agg.logger.Infof("Starting aggregator %s", version.Get())
 
 	agg.init()
