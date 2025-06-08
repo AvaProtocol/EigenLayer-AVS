@@ -279,8 +279,13 @@ func TestVM_ContractWrite_BasicExecution(t *testing.T) {
 	node := &avsproto.ContractWriteNode{
 		Config: &avsproto.ContractWriteNode_Config{
 			ContractAddress: "0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E", // Test address
-			CallData:        "0xa9059cbb",                                 // transfer function selector
 			ContractAbi:     "[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"to\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"transfer\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+			MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
+				{
+					CallData:   "0xa9059cbb", // transfer function selector
+					MethodName: "transfer",
+				},
+			},
 		},
 	}
 
@@ -325,8 +330,13 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
 					ContractAddress: "0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E",
-					CallData:        "0xa9059cbb",
 					ContractAbi:     "[{\"inputs\":[],\"name\":\"test\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
+						{
+							CallData:   "0xa9059cbb",
+							MethodName: "test",
+						},
+					},
 				},
 			},
 			expectError: true,
@@ -338,8 +348,13 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
 					ContractAddress: "invalid-address",
-					CallData:        "0xa9059cbb",
 					ContractAbi:     "[{\"inputs\":[],\"name\":\"test\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
+						{
+							CallData:   "0xa9059cbb",
+							MethodName: "test",
+						},
+					},
 				},
 			},
 			expectError: true,
