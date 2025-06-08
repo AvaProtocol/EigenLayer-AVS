@@ -407,6 +407,15 @@ func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNode
 		"input_keys", inputKeys,
 	)
 
+	// For contract read debugging, log the full request details
+	if req.NodeType == avsproto.NodeType_NODE_TYPE_CONTRACT_READ {
+		r.config.Logger.Debug("ContractRead full request",
+			"user", user.Address.String(),
+			"node_config", req.NodeConfig,
+			"input_variables", req.InputVariables,
+		)
+	}
+
 	// Call the immediate execution function directly
 	result, err := r.engine.RunNodeImmediatelyRPC(user, req)
 	if err != nil {

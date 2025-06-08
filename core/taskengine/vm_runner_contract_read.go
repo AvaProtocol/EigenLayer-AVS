@@ -96,6 +96,26 @@ func (r *ContractReadProcessor) executeMethodCall(ctx context.Context, contractA
 		}
 	}
 
+	// Debug: Log the contract call details and response
+	if r.vm != nil && r.vm.logger != nil {
+		// Get chain ID for debugging
+		chainID, _ := r.client.ChainID(ctx)
+
+		// Check if contract has code (exists)
+		code, _ := r.client.CodeAt(ctx, contractAddress, nil)
+
+		r.vm.logger.Debug("Contract call executed",
+			"contract_address", contractAddress.Hex(),
+			"chain_id", chainID,
+			"contract_exists", len(code) > 0,
+			"contract_code_length", len(code),
+			"calldata", fmt.Sprintf("0x%x", calldata),
+			"output_length", len(output),
+			"output_hex", fmt.Sprintf("0x%x", output),
+			"method_name", methodCall.MethodName,
+		)
+	}
+
 	// Get the method from calldata to decode the response
 	method, err := byte4.GetMethodFromCalldata(*contractAbi, calldata)
 	if err != nil {
@@ -113,6 +133,27 @@ func (r *ContractReadProcessor) executeMethodCall(ctx context.Context, contractA
 			Success:    false,
 			Error:      fmt.Sprintf("method name mismatch: callData corresponds to '%s' but methodName is '%s'. Please verify the function selector matches the intended method", method.Name, methodCall.MethodName),
 			MethodName: methodCall.MethodName,
+			Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+		}
+	}
+
+	// Handle empty contract response
+	if len(output) == 0 {
+		// Check if contract exists to provide better error message
+		code, _ := r.client.CodeAt(ctx, contractAddress, nil)
+		chainID, _ := r.client.ChainID(ctx)
+
+		var errorMsg string
+		if len(code) == 0 {
+			errorMsg = fmt.Sprintf("contract does not exist at address %s on chain ID %v - verify the contract address and network", contractAddress.Hex(), chainID)
+		} else {
+			errorMsg = fmt.Sprintf("contract call returned empty data - function may not be implemented or is reverting silently at address %s on chain ID %v", contractAddress.Hex(), chainID)
+		}
+
+		return &avsproto.ContractReadNode_MethodResult{
+			Success:    false,
+			Error:      errorMsg,
+			MethodName: method.Name,
 			Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
 		}
 	}
