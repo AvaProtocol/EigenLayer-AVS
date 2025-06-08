@@ -409,10 +409,14 @@ func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNode
 
 	// For contract read debugging, log the full request details
 	if req.NodeType == avsproto.NodeType_NODE_TYPE_CONTRACT_READ {
+		// Extract keys only to avoid logging sensitive data
+		configKeys := getConfigKeys(req.NodeConfig)
+		inputKeys := getInputKeys(req.InputVariables)
+
 		r.config.Logger.Debug("ContractRead full request",
 			"user", user.Address.String(),
-			"node_config", req.NodeConfig,
-			"input_variables", req.InputVariables,
+			"config_keys", configKeys,
+			"input_keys", inputKeys,
 		)
 	}
 

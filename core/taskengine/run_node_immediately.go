@@ -1106,9 +1106,6 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 	// Convert result to the appropriate protobuf output type
 	nodeId := fmt.Sprintf("node_immediate_%d", time.Now().UnixNano())
-	if nodeId == "" {
-		nodeId = "unknown_node" // Fallback to ensure never empty
-	}
 
 	resp := &avsproto.RunNodeWithInputsResp{
 		Success: true,
