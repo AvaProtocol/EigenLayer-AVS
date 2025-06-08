@@ -134,18 +134,7 @@ func (n *Engine) runCronTriggerImmediately(triggerConfig map[string]interface{},
 	return result, nil
 }
 
-// runEventTriggerImmediately makes an actual call to Ethereum RPC to fetch event data
-// Unlike regular workflow event triggers that listen to real-time events, this searches
-// for the most recent historical event matching the criteria without block limitations
-//
-// Enhanced syntax support:
-// - Basic: "0xddf252...signature"
-// - Single contract: "0xddf252...signature&&0xcontractAddress"
-// - Multiple contracts: "0xddf252...signature&&contracts=[0xaddr1,0xaddr2]"
-// - From address filter: "0xddf252...signature&&from=0xaddress"
-// - To address filter: "0xddf252...signature&&to=0xaddress"
-// - Combined: "0xddf252...signature&&contracts=[0xaddr1,0xaddr2]&&from=0xaddress"
-// - "0xddf252...signature&&from=0xaddr||to=0xaddr" -> (signature, [], addr, addr) - OR syntax support
+// runEventTriggerImmediately executes an event trigger immediately using the new queries-based system
 func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	// Ensure RPC connection is available
 	if rpcConn == nil {
@@ -153,37 +142,23 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	}
 
 	// Create a context with timeout to prevent hanging tests
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second) // Increased slightly for chunked search
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// Parse the enhanced expression format
-	var expression string
-	var topicHash string
-	var contractAddresses []string
-	var fromAddress, toAddress string
-
-	if expr, ok := triggerConfig["expression"].(string); ok {
-		expression = expr
-		topicHash, contractAddresses, fromAddress, toAddress = parseEnhancedExpression(expression)
+	// Parse the new queries-based configuration
+	queriesInterface, ok := triggerConfig["queriesList"]
+	if !ok {
+		return nil, fmt.Errorf("queriesList is required for EventTrigger")
 	}
 
-	// If no expression provided, use default Transfer event signature
-	if topicHash == "" {
-		topicHash = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" // Transfer event
+	queriesArray, ok := queriesInterface.([]interface{})
+	if !ok || len(queriesArray) == 0 {
+		return nil, fmt.Errorf("queriesList must be a non-empty array")
 	}
 
 	if n.logger != nil {
-		contractsInfo := "ALL contracts"
-		if len(contractAddresses) > 0 {
-			contractsInfo = fmt.Sprintf("contracts: %v", contractAddresses)
-		}
-
-		n.logger.Info("EventTrigger: Making enhanced RPC call to fetch event data",
-			"expression", expression,
-			"topicHash", topicHash,
-			"contractsInfo", contractsInfo,
-			"fromAddress", fromAddress,
-			"toAddress", toAddress)
+		n.logger.Info("EventTrigger: Processing queries-based EventTrigger",
+			"queriesCount", len(queriesArray))
 	}
 
 	// Get the latest block number
@@ -191,10 +166,6 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current block number: %w", err)
 	}
-
-	// If we need to search for both FROM and TO, we'll need separate queries
-	var allEvents []types.Log
-	var totalSearched uint64
 
 	// Chain-specific search strategy: Use 3-month and 6-month ranges based on chain block times
 	var searchRanges []uint64
@@ -219,295 +190,121 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		}
 	}
 
-	// Function to search with specific topic configuration
-	searchWithTopics := func(topics [][]common.Hash) ([]types.Log, uint64, error) {
-		var events []types.Log
-		var searched uint64
+	var allEvents []types.Log
+	var totalSearched uint64
 
-		for _, searchRange := range searchRanges {
-			select {
-			case <-ctx.Done():
-				// Timeout occurred - return partial results gracefully
-				if n.logger != nil {
-					n.logger.Warn("EventTrigger: Search timeout reached, returning partial results",
-						"blocksSearched", searched,
-						"eventsFound", len(events))
-				}
-				return events, searched, nil // Return what we have so far instead of error
-			default:
-			}
+	// Process each query in the queriesList
+	for queryIndex, queryInterface := range queriesArray {
+		queryMap, ok := queryInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
 
-			var fromBlock uint64
-			if currentBlock < searchRange {
-				fromBlock = 0
-			} else {
-				fromBlock = currentBlock - searchRange
-			}
+		// Parse query configuration
+		var addresses []common.Address
+		var topics [][]common.Hash
+		var maxEventsPerBlock uint32
 
-			// Prepare filter query
-			query := ethereum.FilterQuery{
-				FromBlock: big.NewInt(int64(fromBlock)),
-				ToBlock:   big.NewInt(int64(currentBlock)),
-				Topics:    topics,
-			}
-
-			// Add contract address filters if specified
-			if len(contractAddresses) > 0 {
-				addresses := make([]common.Address, len(contractAddresses))
-				for i, addr := range contractAddresses {
-					addresses[i] = common.HexToAddress(addr)
-				}
-				query.Addresses = addresses
-			}
-
-			if n.logger != nil {
-				addressStrs := make([]string, len(query.Addresses))
-				for i, addr := range query.Addresses {
-					addressStrs[i] = addr.Hex()
-				}
-
-				topicStrs := make([][]string, len(topics))
-				for i, topicGroup := range topics {
-					topicStrs[i] = make([]string, len(topicGroup))
-					for j, topic := range topicGroup {
-						topicStrs[i][j] = topic.Hex()
+		// Extract addresses list
+		if addressesInterface, exists := queryMap["addressesList"]; exists {
+			if addressesArray, ok := addressesInterface.([]interface{}); ok {
+				for _, addrInterface := range addressesArray {
+					if addrStr, ok := addrInterface.(string); ok && addrStr != "" {
+						addresses = append(addresses, common.HexToAddress(addrStr))
 					}
 				}
-
-				n.logger.Debug("EventTrigger: Enhanced search with detailed params",
-					"fromBlock", fromBlock,
-					"toBlock", currentBlock,
-					"contractAddresses", addressStrs,
-					"topics", topicStrs,
-					"blockRange", currentBlock-fromBlock)
 			}
+		}
 
-			// Fetch logs from Ethereum with timeout context
-			logs, err := rpcConn.FilterLogs(ctx, query)
-			var usedChunkedSearch bool
-
-			if err != nil {
-				if n.logger != nil {
-					// Check if it's a known RPC limit error to avoid stack traces
-					errorMsg := err.Error()
-					if strings.Contains(errorMsg, "Block range limit exceeded") ||
-						strings.Contains(errorMsg, "range limit") ||
-						strings.Contains(errorMsg, "too many blocks") {
-						n.logger.Debug("EventTrigger: Block range limit hit, using chunked search",
-							"blockRange", currentBlock-fromBlock)
-
-						// Try chunked search for large ranges
-						if currentBlock-fromBlock > 1000 {
-							usedChunkedSearch = true
-							// Chunked search in progress - reduced logging for cleaner output
-
-							// Break the range into 1000-block chunks
-							chunkSize := uint64(1000)
-							var chunkedSearched uint64
-							for chunkStart := fromBlock; chunkStart < currentBlock; chunkStart += chunkSize {
-								// Check timeout during chunked search
-								select {
-								case <-ctx.Done():
-									n.logger.Info("EventTrigger: Chunked search timeout reached",
-										"chunkedSearched", chunkedSearched,
-										"chunksProcessed", (chunkStart-fromBlock)/chunkSize)
-									searched += chunkedSearched
-									return events, searched, nil
-								default:
-								}
-
-								chunkEnd := chunkStart + chunkSize - 1
-								if chunkEnd > currentBlock {
-									chunkEnd = currentBlock
-								}
-
-								chunkQuery := query
-								chunkQuery.FromBlock = big.NewInt(int64(chunkStart))
-								chunkQuery.ToBlock = big.NewInt(int64(chunkEnd))
-
-								chunkLogs, chunkErr := rpcConn.FilterLogs(ctx, chunkQuery)
-								chunkedSearched += (chunkEnd - chunkStart + 1)
-
-								if chunkErr == nil {
-									logs = append(logs, chunkLogs...)
-									if n.logger != nil && len(chunkLogs) > 0 {
-										n.logger.Info("EventTrigger: Found events in chunk - stopping early for most recent",
-											"chunkStart", chunkStart,
-											"chunkEnd", chunkEnd,
-											"eventsInChunk", len(chunkLogs))
-									}
-									// OPTIMIZATION: For runTrigger, we only need the most recent event
-									// Stop immediately after finding any events to avoid unnecessary work
-									if len(chunkLogs) > 0 {
-										searched += chunkedSearched
-										return logs, searched, nil
-									}
-								} else {
-									if n.logger != nil {
-										n.logger.Debug("EventTrigger: Chunk failed, continuing",
-											"chunkStart", chunkStart,
-											"chunkEnd", chunkEnd,
-											"error", chunkErr)
+		// Extract topics list
+		if topicsInterface, exists := queryMap["topicsList"]; exists {
+			if topicsArray, ok := topicsInterface.([]interface{}); ok {
+				for _, topicGroupInterface := range topicsArray {
+					if topicGroupMap, ok := topicGroupInterface.(map[string]interface{}); ok {
+						if valuesInterface, exists := topicGroupMap["valuesList"]; exists {
+							if valuesArray, ok := valuesInterface.([]interface{}); ok {
+								var topicGroup []common.Hash
+								for _, valueInterface := range valuesArray {
+									if valueStr, ok := valueInterface.(string); ok && valueStr != "" {
+										topicGroup = append(topicGroup, common.HexToHash(valueStr))
+									} else {
+										// null values are supported for wildcard matching
+										topicGroup = append(topicGroup, common.Hash{})
 									}
 								}
-							}
-
-							// Update searched counter with chunked progress
-							searched += chunkedSearched
-
-							// If chunked search found events or completed successfully, treat as success
-							if len(logs) > 0 || chunkedSearched > 0 {
-								err = nil
+								if len(topicGroup) > 0 {
+									topics = append(topics, topicGroup)
+								}
 							}
 						}
-					} else {
-						n.logger.Warn("EventTrigger: Failed to fetch logs, continuing search",
-							"fromBlock", fromBlock,
-							"toBlock", currentBlock,
-							"error", err)
 					}
 				}
-
-				// If still error after chunked retry, continue to next range
-				if err != nil {
-					continue
-				}
-			}
-
-			// Only update searched counter if chunked search wasn't used (it handles its own counting)
-			if !usedChunkedSearch {
-				searched += (currentBlock - fromBlock)
-			}
-
-			events = append(events, logs...)
-
-			if n.logger != nil {
-				n.logger.Info("EventTrigger: Search completed for range",
-					"fromBlock", fromBlock,
-					"toBlock", currentBlock,
-					"logsFound", len(logs),
-					"totalEventsSoFar", len(events),
-					"blockRange", currentBlock-fromBlock)
-			}
-
-			// OPTIMIZATION: For runTrigger, return immediately after finding any events
-			// Since we search from most recent blocks first, the first events found are the most recent
-			if len(logs) > 0 {
-				// Update searched counter and return immediately
-				if !usedChunkedSearch {
-					searched += (currentBlock - fromBlock)
-				}
-				return append(events, logs...), searched, nil
-			}
-
-			// If we've searched back to genesis, stop
-			if fromBlock == 0 {
-				break
 			}
 		}
 
-		return events, searched, nil
-	}
+		// Extract maxEventsPerBlock
+		if maxEventsInterface, exists := queryMap["maxEventsPerBlock"]; exists {
+			if maxEventsFloat, ok := maxEventsInterface.(float64); ok {
+				maxEventsPerBlock = uint32(maxEventsFloat)
+			}
+		}
 
-	// Build topics for searching
-	baseTopics := [][]common.Hash{{common.HexToHash(topicHash)}}
-
-	if fromAddress != "" && toAddress != "" {
 		if n.logger != nil {
-			n.logger.Debug("EventTrigger: Both FROM and TO addresses specified",
-				"fromAddress", fromAddress,
-				"toAddress", toAddress,
-				"addressesEqual", strings.EqualFold(fromAddress, toAddress))
+			n.logger.Info("EventTrigger: Processing query",
+				"queryIndex", queryIndex,
+				"addressesCount", len(addresses),
+				"topicGroupsCount", len(topics),
+				"maxEventsPerBlock", maxEventsPerBlock)
 		}
 
-		// Check if FROM and TO addresses are the same to avoid redundant search
-		if strings.EqualFold(fromAddress, toAddress) {
-			// When searching for transfers from an address to itself,
-			// we only need to search FROM events (which includes self-transfers)
-			fromTopics := append(baseTopics, []common.Hash{common.HexToHash(fromAddress)}, []common.Hash{})
-			allEvents, totalSearched, err = searchWithTopics(fromTopics)
-			if err != nil {
-				return nil, fmt.Errorf("failed to search FROM events for same address: %w", err)
-			}
-
+		// Execute search for this query
+		queryEvents, querySearched, err := n.searchEventsForQuery(ctx, addresses, topics, currentBlock, searchRanges)
+		if err != nil {
 			if n.logger != nil {
-				n.logger.Info("EventTrigger: Optimized search for same FROM/TO address (single FROM search)",
-					"address", fromAddress,
-					"eventsFound", len(allEvents),
-					"totalSearched", totalSearched)
+				n.logger.Warn("EventTrigger: Query failed, continuing with other queries",
+					"queryIndex", queryIndex,
+					"error", err)
 			}
-		} else {
-			// Search for transfers both FROM and TO the address (two separate queries)
-
-			// Query 1: FROM the address
-			fromTopics := append(baseTopics, []common.Hash{common.HexToHash(fromAddress)}, []common.Hash{})
-			fromEvents, fromSearched, err := searchWithTopics(fromTopics)
-			if err != nil {
-				return nil, fmt.Errorf("failed to search FROM events: %w", err)
-			}
-
-			// Query 2: TO the address
-			toTopics := append(baseTopics, []common.Hash{}, []common.Hash{common.HexToHash(toAddress)})
-			toEvents, toSearched, err := searchWithTopics(toTopics)
-			if err != nil {
-				return nil, fmt.Errorf("failed to search TO events: %w", err)
-			}
-
-			allEvents = append(fromEvents, toEvents...)
-			totalSearched = fromSearched + toSearched
+			continue
 		}
 
-	} else if fromAddress != "" {
-		// Search only FROM the address
-		fromTopics := append(baseTopics, []common.Hash{common.HexToHash(fromAddress)}, []common.Hash{})
-		allEvents, totalSearched, err = searchWithTopics(fromTopics)
-		if err != nil {
-			return nil, fmt.Errorf("failed to search FROM events: %w", err)
+		allEvents = append(allEvents, queryEvents...)
+		totalSearched += querySearched
+
+		if n.logger != nil {
+			n.logger.Info("EventTrigger: Query completed",
+				"queryIndex", queryIndex,
+				"eventsFound", len(queryEvents),
+				"blocksSearched", querySearched)
 		}
 
-	} else if toAddress != "" {
-		// Search only TO the address
-		toTopics := append(baseTopics, []common.Hash{}, []common.Hash{common.HexToHash(toAddress)})
-		allEvents, totalSearched, err = searchWithTopics(toTopics)
-		if err != nil {
-			return nil, fmt.Errorf("failed to search TO events: %w", err)
-		}
-
-	} else {
-		// Search without address filtering (any from/to)
-		allEvents, totalSearched, err = searchWithTopics(baseTopics)
-		if err != nil {
-			return nil, fmt.Errorf("failed to search events: %w", err)
+		// OPTIMIZATION: For immediate execution, stop after finding events from any query
+		if len(queryEvents) > 0 {
+			break
 		}
 	}
 
 	if n.logger != nil {
-		n.logger.Info("EventTrigger: Enhanced search complete",
+		n.logger.Info("EventTrigger: All queries processed",
+			"queriesProcessed", len(queriesArray),
 			"totalEvents", len(allEvents),
 			"totalSearched", totalSearched)
 	}
 
-	// If no events found after comprehensive search
+	// If no events found after processing all queries
 	if len(allEvents) == 0 {
 		if n.logger != nil {
-			n.logger.Info("EventTrigger: No events found after enhanced search",
+			n.logger.Info("EventTrigger: No events found after processing all queries",
 				"totalBlocksSearched", totalSearched,
-				"topicHash", topicHash,
-				"contractAddresses", contractAddresses,
-				"fromAddress", fromAddress,
-				"toAddress", toAddress)
+				"queriesCount", len(queriesArray))
 		}
 
 		return map[string]interface{}{
-			"found":             false,
-			"evm_log":           nil,
-			"topicHash":         topicHash,
-			"contractAddresses": contractAddresses,
-			"fromAddress":       fromAddress,
-			"toAddress":         toAddress,
-			"totalSearched":     totalSearched,
-			"expression":        expression,
-			"message":           "No events found matching the criteria",
+			"found":         false,
+			"evm_log":       nil,
+			"queriesCount":  len(queriesArray),
+			"totalSearched": totalSearched,
+			"message":       "No events found matching any query criteria",
 			"searchMetadata": map[string]interface{}{
 				"blocksSearchedBackwards": totalSearched,
 				"searchComplete":          true,
@@ -546,15 +343,11 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	}
 
 	result := map[string]interface{}{
-		"found":             true,
-		"evm_log":           evmLog,
-		"topicHash":         topicHash,
-		"contractAddresses": contractAddresses,
-		"fromAddress":       fromAddress,
-		"toAddress":         toAddress,
-		"totalSearched":     totalSearched,
-		"expression":        expression,
-		"totalEvents":       len(allEvents),
+		"found":         true,
+		"evm_log":       evmLog,
+		"queriesCount":  len(queriesArray),
+		"totalSearched": totalSearched,
+		"totalEvents":   len(allEvents),
 		"searchMetadata": map[string]interface{}{
 			"blocksSearchedBackwards": totalSearched,
 			"searchComplete":          true,
@@ -563,8 +356,8 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		},
 	}
 
-	// If this is a Transfer event, add enriched transfer_log data
-	isTransferEvent := topicHash == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+	// Check if this is a Transfer event and add enriched transfer_log data
+	isTransferEvent := len(topics) >= 1 && topics[0] == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 	if isTransferEvent && len(topics) >= 3 {
 		// Get block timestamp for transfer_log
 		header, err := rpcConn.HeaderByNumber(ctx, big.NewInt(int64(mostRecentEvent.BlockNumber)))
@@ -645,7 +438,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		result["transfer_log"] = transferLog
 
 		if n.logger != nil {
-			n.logger.Info("EventTrigger: Enhanced Transfer event found",
+			n.logger.Info("EventTrigger: Transfer event found with queries-based search",
 				"blockNumber", mostRecentEvent.BlockNumber,
 				"txHash", mostRecentEvent.TxHash.Hex(),
 				"from", fromAddr,
@@ -656,7 +449,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	}
 
 	if n.logger != nil {
-		n.logger.Info("EventTrigger: Successfully found most recent event with enhanced search",
+		n.logger.Info("EventTrigger: Successfully found most recent event with queries-based search",
 			"blockNumber", mostRecentEvent.BlockNumber,
 			"txHash", mostRecentEvent.TxHash.Hex(),
 			"address", mostRecentEvent.Address.Hex(),
@@ -667,62 +460,185 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	return result, nil
 }
 
-// parseEnhancedExpression parses the enhanced expression format
-// Examples:
-// - "0xddf252...signature" -> (signature, [], "", "")
-// - "0xddf252...signature&&0xaddr" -> (signature, [addr], "", "")
-// - "0xddf252...signature&&contracts=[0xaddr1,0xaddr2]" -> (signature, [addr1,addr2], "", "")
-// - "0xddf252...signature&&from=0xaddr" -> (signature, [], addr, "")
-// - "0xddf252...signature&&to=0xaddr" -> (signature, [], "", addr)
-// - "0xddf252...signature&&contracts=[0xaddr1,0xaddr2]&&from=0xaddr" -> (signature, [addr1,addr2], addr, "")
-// - "0xddf252...signature&&from=0xaddr||to=0xaddr" -> (signature, [], addr, addr) - OR syntax support
-func parseEnhancedExpression(expression string) (topicHash string, contractAddresses []string, fromAddress, toAddress string) {
-	parts := strings.Split(expression, "&&")
+// searchEventsForQuery executes a single query search
+func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Address, topics [][]common.Hash, currentBlock uint64, searchRanges []uint64) ([]types.Log, uint64, error) {
+	var events []types.Log
+	var totalSearched uint64
 
-	// First part is always the topic hash
-	if len(parts) > 0 {
-		topicHash = strings.TrimSpace(parts[0])
-	}
-
-	// Parse additional parameters
-	for i := 1; i < len(parts); i++ {
-		part := strings.TrimSpace(parts[i])
-
-		if strings.HasPrefix(part, "contracts=") {
-			// Parse contracts array: contracts=[0xaddr1,0xaddr2]
-			contractsStr := strings.TrimPrefix(part, "contracts=")
-			if strings.HasPrefix(contractsStr, "[") && strings.HasSuffix(contractsStr, "]") {
-				contractsStr = strings.Trim(contractsStr, "[]")
-				if contractsStr != "" {
-					contractAddresses = strings.Split(contractsStr, ",")
-					for j := range contractAddresses {
-						contractAddresses[j] = strings.TrimSpace(contractAddresses[j])
-					}
-				}
+	for _, searchRange := range searchRanges {
+		select {
+		case <-ctx.Done():
+			// Timeout occurred - return partial results gracefully
+			if n.logger != nil {
+				n.logger.Warn("EventTrigger: Search timeout reached, returning partial results",
+					"blocksSearched", totalSearched,
+					"eventsFound", len(events))
 			}
-		} else if strings.HasPrefix(part, "from=") {
-			fromPart := strings.TrimSpace(strings.TrimPrefix(part, "from="))
-			// Check if this contains OR logic: from=X||to=Y
-			if strings.Contains(fromPart, "||to=") {
-				orParts := strings.Split(fromPart, "||to=")
-				if len(orParts) == 2 {
-					fromAddress = strings.TrimSpace(orParts[0])
-					toAddress = strings.TrimSpace(orParts[1])
-				} else {
-					fromAddress = fromPart
-				}
-			} else {
-				fromAddress = fromPart
-			}
-		} else if strings.HasPrefix(part, "to=") {
-			toAddress = strings.TrimSpace(strings.TrimPrefix(part, "to="))
+			return events, totalSearched, nil // Return what we have so far instead of error
+		default:
+		}
+
+		var fromBlock uint64
+		if currentBlock < searchRange {
+			fromBlock = 0
 		} else {
-			// Simple contract address format
-			contractAddresses = []string{part}
+			fromBlock = currentBlock - searchRange
+		}
+
+		// Prepare filter query
+		query := ethereum.FilterQuery{
+			FromBlock: big.NewInt(int64(fromBlock)),
+			ToBlock:   big.NewInt(int64(currentBlock)),
+			Addresses: addresses,
+			Topics:    topics,
+		}
+
+		if n.logger != nil {
+			addressStrs := make([]string, len(addresses))
+			for i, addr := range addresses {
+				addressStrs[i] = addr.Hex()
+			}
+
+			topicStrs := make([][]string, len(topics))
+			for i, topicGroup := range topics {
+				topicStrs[i] = make([]string, len(topicGroup))
+				for j, topic := range topicGroup {
+					topicStrs[i][j] = topic.Hex()
+				}
+			}
+
+			n.logger.Debug("EventTrigger: Searching with query",
+				"fromBlock", fromBlock,
+				"toBlock", currentBlock,
+				"addresses", addressStrs,
+				"topics", topicStrs,
+				"blockRange", currentBlock-fromBlock)
+		}
+
+		// Fetch logs from Ethereum with timeout context
+		logs, err := rpcConn.FilterLogs(ctx, query)
+		var usedChunkedSearch bool
+
+		if err != nil {
+			if n.logger != nil {
+				// Check if it's a known RPC limit error to avoid stack traces
+				errorMsg := err.Error()
+				if strings.Contains(errorMsg, "Block range limit exceeded") ||
+					strings.Contains(errorMsg, "range limit") ||
+					strings.Contains(errorMsg, "too many blocks") {
+					n.logger.Debug("EventTrigger: Block range limit hit, using chunked search",
+						"blockRange", currentBlock-fromBlock)
+
+					// Try chunked search for large ranges
+					if currentBlock-fromBlock > 1000 {
+						usedChunkedSearch = true
+
+						// Break the range into 1000-block chunks
+						chunkSize := uint64(1000)
+						var chunkedSearched uint64
+						for chunkStart := fromBlock; chunkStart < currentBlock; chunkStart += chunkSize {
+							// Check timeout during chunked search
+							select {
+							case <-ctx.Done():
+								n.logger.Info("EventTrigger: Chunked search timeout reached",
+									"chunkedSearched", chunkedSearched,
+									"chunksProcessed", (chunkStart-fromBlock)/chunkSize)
+								totalSearched += chunkedSearched
+								return events, totalSearched, nil
+							default:
+							}
+
+							chunkEnd := chunkStart + chunkSize - 1
+							if chunkEnd > currentBlock {
+								chunkEnd = currentBlock
+							}
+
+							chunkQuery := query
+							chunkQuery.FromBlock = big.NewInt(int64(chunkStart))
+							chunkQuery.ToBlock = big.NewInt(int64(chunkEnd))
+
+							chunkLogs, chunkErr := rpcConn.FilterLogs(ctx, chunkQuery)
+							chunkedSearched += (chunkEnd - chunkStart + 1)
+
+							if chunkErr == nil {
+								logs = append(logs, chunkLogs...)
+								if n.logger != nil && len(chunkLogs) > 0 {
+									n.logger.Info("EventTrigger: Found events in chunk - stopping early for most recent",
+										"chunkStart", chunkStart,
+										"chunkEnd", chunkEnd,
+										"eventsInChunk", len(chunkLogs))
+								}
+								// OPTIMIZATION: For runTrigger, we only need the most recent event
+								// Stop immediately after finding any events to avoid unnecessary work
+								if len(chunkLogs) > 0 {
+									totalSearched += chunkedSearched
+									return logs, totalSearched, nil
+								}
+							} else {
+								if n.logger != nil {
+									n.logger.Debug("EventTrigger: Chunk failed, continuing",
+										"chunkStart", chunkStart,
+										"chunkEnd", chunkEnd,
+										"error", chunkErr)
+								}
+							}
+						}
+
+						// Update searched counter with chunked progress
+						totalSearched += chunkedSearched
+
+						// If chunked search found events or completed successfully, treat as success
+						if len(logs) > 0 || chunkedSearched > 0 {
+							err = nil
+						}
+					}
+				} else {
+					n.logger.Warn("EventTrigger: Failed to fetch logs, continuing search",
+						"fromBlock", fromBlock,
+						"toBlock", currentBlock,
+						"error", err)
+				}
+			}
+
+			// If still error after chunked retry, continue to next range
+			if err != nil {
+				continue
+			}
+		}
+
+		// Only update searched counter if chunked search wasn't used (it handles its own counting)
+		if !usedChunkedSearch {
+			totalSearched += (currentBlock - fromBlock)
+		}
+
+		events = append(events, logs...)
+
+		if n.logger != nil {
+			n.logger.Info("EventTrigger: Search completed for range",
+				"fromBlock", fromBlock,
+				"toBlock", currentBlock,
+				"logsFound", len(logs),
+				"totalEventsSoFar", len(events),
+				"blockRange", currentBlock-fromBlock)
+		}
+
+		// OPTIMIZATION: For runTrigger, return immediately after finding any events
+		// Since we search from most recent blocks first, the first events found are the most recent
+		if len(logs) > 0 {
+			// Update searched counter and return immediately
+			if !usedChunkedSearch {
+				totalSearched += (currentBlock - fromBlock)
+			}
+			return append(events, logs...), totalSearched, nil
+		}
+
+		// If we've searched back to genesis, stop
+		if fromBlock == 0 {
+			break
 		}
 	}
 
-	return topicHash, contractAddresses, fromAddress, toAddress
+	return events, totalSearched, nil
 }
 
 // runManualTriggerImmediately executes a manual trigger immediately
