@@ -62,20 +62,101 @@ const config = {
 
 const protoDescriptor = grpc.loadPackageDefinition(packageDefinition);
 const apProto = protoDescriptor.aggregator;
-const client = new apProto.Aggregator(
+
+// Enhanced client creation with timeout options
+function createClient(serverAddress, credentials, options = {}) {
+  const {
+    timeout = 30000, // Default 30 seconds
+    maxRetries = 3,
+    retryDelay = 1000
+  } = options;
+
+  const client = new apProto.Aggregator(serverAddress, credentials);
+  
+  // Store timeout configuration on client for later use
+  client._timeoutConfig = {
+    timeout,
+    maxRetries,
+    retryDelay
+  };
+  
+  return client;
+}
+
+const client = createClient(
   config[env].AP_AVS_RPC,
-  grpc.credentials.createInsecure()
+  grpc.credentials.createInsecure(),
+  {
+    timeout: 30000, // 30 seconds default
+    maxRetries: 3,
+    retryDelay: 1000
+  }
 );
 
-function asyncRPC(client, method, request, metadata) {
+// Enhanced asyncRPC function with timeout support
+function asyncRPC(client, method, request, metadata, options = {}) {
   return new Promise((resolve, reject) => {
-    client[method].bind(client)(request, metadata, (error, response) => {
-      if (error) {
-        reject(error);
-      } else {
-        resolve(response);
-      }
-    });
+    const {
+      timeout = client._timeoutConfig?.timeout || 30000,
+      retries = client._timeoutConfig?.maxRetries || 3,
+      retryDelay = client._timeoutConfig?.retryDelay || 1000
+    } = options;
+
+    let attempt = 0;
+    
+    function executeRequest() {
+      attempt++;
+      
+      // Create a timeout promise
+      const timeoutPromise = new Promise((_, timeoutReject) => {
+        setTimeout(() => {
+          timeoutReject(new Error(`gRPC request timeout after ${timeout}ms for method ${method}`));
+        }, timeout);
+      });
+
+      // Create the actual gRPC call promise
+      const grpcPromise = new Promise((grpcResolve, grpcReject) => {
+        const call = client[method].bind(client)(request, metadata, (error, response) => {
+          if (error) {
+            grpcReject(error);
+          } else {
+            grpcResolve(response);
+          }
+        });
+
+        // Handle call cancellation on timeout
+        timeoutPromise.catch(() => {
+          if (call && call.cancel) {
+            call.cancel();
+          }
+        });
+      });
+
+      // Race between timeout and actual call
+      Promise.race([grpcPromise, timeoutPromise])
+        .then(resolve)
+        .catch((error) => {
+          const isTimeoutError = error.message.includes('timeout');
+          const isRetryableError = isTimeoutError || 
+            error.code === grpc.status.UNAVAILABLE || 
+            error.code === grpc.status.DEADLINE_EXCEEDED ||
+            error.code === grpc.status.RESOURCE_EXHAUSTED;
+
+          if (isRetryableError && attempt < retries) {
+            console.warn(`gRPC ${method} attempt ${attempt} failed, retrying in ${retryDelay}ms:`, error.message);
+            setTimeout(executeRequest, retryDelay);
+          } else {
+            // Add timeout context to error
+            if (isTimeoutError) {
+              error.isTimeout = true;
+              error.attemptsMade = attempt;
+            }
+            reject(error);
+          }
+        });
+    }
+
+    executeRequest();
   });
 }
 
@@ -282,9 +363,9 @@ async function testRunNodeWithInputs(owner, token) {
   const metadata = new grpc.Metadata();
   metadata.add("authkey", token);
 
-  console.log("Testing RunNodeWithInputs with blockTrigger...");
+  console.log("Testing RunNodeWithInputs with blockTrigger (using fast timeout)...");
 
-  // Test blockTrigger node
+  // Test blockTrigger node with fast timeout
   const blockTriggerRequest = {
     node_type: "blockTrigger",
     node_config: {
@@ -296,7 +377,8 @@ async function testRunNodeWithInputs(owner, token) {
   };
 
   try {
-    const result = await asyncRPC(
+    // Use fast timeout for quick operations
+    const result = await fastRPC(
       client,
       "RunNodeWithInputs",
       blockTriggerRequest,
@@ -312,11 +394,15 @@ async function testRunNodeWithInputs(owner, token) {
       console.log("❌ BlockTrigger test failed:", result.error);
     }
   } catch (error) {
-    console.log("❌ BlockTrigger test error:", error.message);
+    if (error.isTimeout) {
+      console.log(`❌ BlockTrigger test timed out after ${error.attemptsMade} attempts:`, error.message);
+    } else {
+      console.log("❌ BlockTrigger test error:", error.message);
+    }
   }
 
-  // Test customCode node
-  console.log("\nTesting RunNodeWithInputs with customCode...");
+  // Test customCode node with custom timeout
+  console.log("\nTesting RunNodeWithInputs with customCode (using custom timeout)...");
   
   const customCodeRequest = {
     node_type: "customCode",
@@ -330,11 +416,13 @@ async function testRunNodeWithInputs(owner, token) {
   };
 
   try {
+    // Use custom timeout for this specific operation
     const result = await asyncRPC(
       client,
       "RunNodeWithInputs",
       customCodeRequest,
-      metadata
+      metadata,
+      { timeout: 15000, retries: 1, retryDelay: 500 } // 15s timeout, 1 retry
     );
 
     console.log("CustomCode test result:");
@@ -346,7 +434,11 @@ async function testRunNodeWithInputs(owner, token) {
       console.log("❌ CustomCode test failed:", result.error);
     }
   } catch (error) {
-    console.log("❌ CustomCode test error:", error.message);
+    if (error.isTimeout) {
+      console.log(`❌ CustomCode test timed out after ${error.attemptsMade} attempts:`, error.message);
+    } else {
+      console.log("❌ CustomCode test error:", error.message);
+    }
   }
 }
 
@@ -640,7 +732,26 @@ async function scheduleNotification(owner, token, taskCondition) {
   return result;
 }
 
+// Utility functions for common timeout scenarios
+const TimeoutPresets = {
+  FAST: { timeout: 5000, retries: 2, retryDelay: 500 },     // 5s for quick operations
+  NORMAL: { timeout: 30000, retries: 3, retryDelay: 1000 }, // 30s for normal operations  
+  SLOW: { timeout: 120000, retries: 2, retryDelay: 2000 },  // 2min for heavy operations
+  NO_RETRY: { timeout: 30000, retries: 0, retryDelay: 0 }   // No retries
+};
 
+// Convenience wrapper functions
+function fastRPC(client, method, request, metadata) {
+  return asyncRPC(client, method, request, metadata, TimeoutPresets.FAST);
+}
+
+function slowRPC(client, method, request, metadata) {
+  return asyncRPC(client, method, request, metadata, TimeoutPresets.SLOW);
+}
+
+function noRetryRPC(client, method, request, metadata) {
+  return asyncRPC(client, method, request, metadata, TimeoutPresets.NO_RETRY);
+}
 
 // setup a task to monitor in/out transfer for a wallet and send notification
 async function scheduleMonitor(owner, token, target) {
