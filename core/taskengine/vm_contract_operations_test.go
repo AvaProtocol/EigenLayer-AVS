@@ -353,8 +353,19 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 			errorText:   "smart wallet config",
 		},
 		{
-			name:    "Invalid Contract Address",
-			setupVM: func(v *VM) { v.smartWalletConfig = testutil.GetTestSmartWalletConfig() },
+			name: "Invalid Contract Address",
+			setupVM: func(v *VM) {
+				// Use a properly configured smart wallet config to ensure we test address validation
+				config := &config.SmartWalletConfig{
+					EthRpcUrl:         "https://sepolia.drpc.org", // Valid RPC URL
+					BundlerURL:        "https://bundler.test",
+					EthWsUrl:          "wss://sepolia.drpc.org",
+					FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
+					EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
+				}
+				v.smartWalletConfig = config
+			},
 			node: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
 					ContractAddress: "invalid-address",
