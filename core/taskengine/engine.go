@@ -361,7 +361,6 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 	return &avsproto.ListWalletResp{Items: walletsToReturnProto}, nil
 }
 
-<<<<<<< HEAD
 // validateNonZeroAddress validates that the factory address is not the zero address
 // Returns an error if validation fails, nil if validation passes
 func (n *Engine) validateNonZeroAddress(factoryAddr common.Address, methodName, ownerHex, salt string) error {
@@ -372,8 +371,6 @@ func (n *Engine) validateNonZeroAddress(factoryAddr common.Address, methodName, 
 	return nil
 }
 
-=======
->>>>>>> 503de8f (Updated cron trigger to use schedules; erorr handling of test triggered stack trace)
 // GetWallet is the gRPC handler for the GetWallet RPC.
 // It uses the owner (from auth context), salt, and factory_address from payload to derive the wallet address.
 func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
