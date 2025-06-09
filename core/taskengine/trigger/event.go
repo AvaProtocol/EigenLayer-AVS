@@ -193,7 +193,7 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 	queries := t.buildFilterQueries()
 
 	if len(queries) == 0 {
-		t.logger.Info("🚫 No filter queries to subscribe to")
+		t.logger.Debug("🚫 No filter queries to subscribe to")
 		return nil
 	}
 

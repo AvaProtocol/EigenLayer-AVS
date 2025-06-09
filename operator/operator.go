@@ -249,13 +249,8 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		return nil, err
 	}
 
-	// Log initial configuration details for debugging
-	logger.Infof("=== Initial Operator Configuration ===")
-	logger.Infof("ETH RPC URL: %s", c.EthRpcUrl)
-	logger.Infof("ETH WS URL: %s", c.EthWsUrl)
-	logger.Infof("Operator Address: %s", c.OperatorAddress)
-	logger.Infof("AVS Registry Coordinator Address: %s", c.AVSRegistryCoordinatorAddress)
-	logger.Infof("Operator State Retriever Address: %s", c.OperatorStateRetrieverAddress)
+	// Log concise configuration for startup
+	logger.Infof("🚀 Starting Operator %s (v%s) on chain %s", c.OperatorAddress, version.Get(), "auto-detect")
 
 	// Validate RPC endpoints before proceeding
 	if err := validateRPCEndpoint(c.EthRpcUrl, logger); err != nil {
@@ -269,7 +264,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	// Setup Node Api
 	nodeApi := nodeapi.NewNodeApi(AVS_NAME, version.Get(), c.NodeApiIpPortAddress, logger)
 
-	logger.Info("starting operator", "version", version.Get(), "commit", version.Commit())
+	// Starting operator message removed - already logged above
 
 	var ethRpcClient *eth.InstrumentedClient
 	var ethWsClient *eth.InstrumentedClient
@@ -336,7 +331,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		logger.Error("Cannot get chainId", "err", err)
 		return nil, err
 	}
-	logger.Infof("Detected EigenLayer on chain id %d", chainId)
+	logger.Infof("🔗 Connected to EigenLayer on chain %d", chainId)
 
 	// Create a temporary operator instance to call PopulateKnownConfigByChainID
 	tempOperator := &Operator{
@@ -349,12 +344,6 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		logger.Errorf("Failed to populate chain-specific configuration: %v", err)
 		return nil, fmt.Errorf("failed to populate chain-specific configuration: %w", err)
 	}
-
-	// Log final configuration after chain-specific defaults are applied
-	logger.Infof("=== Final Configuration After Chain-Specific Defaults ===")
-	logger.Infof("Chain ID: %s", chainId.String())
-	logger.Infof("AVS Registry Coordinator Address: %s", c.AVSRegistryCoordinatorAddress)
-	logger.Infof("Operator State Retriever Address: %s", c.OperatorStateRetrieverAddress)
 
 	ecdsaKeyPassword := loadECDSAPassword()
 
@@ -376,12 +365,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		PromMetricsIpPortAddress:   c.EigenMetricsIpPortAddress,
 	}
 
-	logger.Infof("=== EigenLayer SDK Configuration ===")
-	logger.Infof("Chain ID: %s", chainId.String())
-	logger.Infof("Registry Coordinator Address: %s", chainioConfig.RegistryCoordinatorAddr)
-	logger.Infof("Operator State Retriever Address: %s", chainioConfig.OperatorStateRetrieverAddr)
-	logger.Infof("ETH HTTP URL: %s", chainioConfig.EthHttpUrl)
-	logger.Infof("ETH WS URL: %s", chainioConfig.EthWsUrl)
+	// EigenLayer SDK configuration logging removed - details available in debug mode
 
 	operatorEcdsaPrivateKey, err := sdkecdsa.ReadKey(
 		c.EcdsaPrivateKeyStorePath,
@@ -392,52 +376,34 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		return nil, err
 	}
 
-	logger.Infof("Building EigenLayer SDK clients...")
 	sdkClients, err := clients.BuildAll(chainioConfig, operatorEcdsaPrivateKey, logger)
 	if err != nil {
-		logger.Errorf("Failed to build EigenLayer SDK clients: %v", err)
-		logger.Errorf("This error often indicates:")
-		logger.Errorf("1. RPC endpoint connectivity issues")
-		logger.Errorf("2. Incorrect contract addresses")
-		logger.Errorf("3. Network/chain ID mismatch")
-		logger.Errorf("4. Contract deployment issues on the target network")
+		logger.Errorf("❌ Failed to build EigenLayer SDK clients: %v", err)
 		return nil, fmt.Errorf("failed to build EigenLayer SDK clients: %w", err)
 	}
-	logger.Infof("EigenLayer SDK clients built successfully")
 	skWallet, err := wallet.NewPrivateKeyWallet(ethRpcClient, signerV2, signerAddress, logger)
 	if err != nil {
 		panic(err)
 	}
 	txMgr := txmgr.NewSimpleTxManager(skWallet, ethRpcClient, logger, signerAddress)
 
-	logger.Infof("=== Building AVS Components ===")
-	logger.Infof("Creating AvsWriter with Registry Coordinator: %s", c.AVSRegistryCoordinatorAddress)
-	logger.Infof("Creating AvsWriter with State Retriever: %s", c.OperatorStateRetrieverAddress)
-
 	avsWriter, err := chainio.BuildAvsWriter(
 		txMgr, common.HexToAddress(c.AVSRegistryCoordinatorAddress),
 		common.HexToAddress(c.OperatorStateRetrieverAddress), ethRpcClient, logger,
 	)
 	if err != nil {
-		logger.Errorf("Cannot create AvsWriter: %v", err)
-		logger.Errorf("This may indicate contract address issues or network connectivity problems")
+		logger.Errorf("❌ Cannot create AvsWriter: %v", err)
 		return nil, fmt.Errorf("failed to create AvsWriter: %w", err)
 	}
-	logger.Infof("AvsWriter created successfully")
-
-	logger.Infof("Creating AvsReader with Registry Coordinator: %s", c.AVSRegistryCoordinatorAddress)
-	logger.Infof("Creating AvsReader with State Retriever: %s", c.OperatorStateRetrieverAddress)
 
 	avsReader, err := chainio.BuildAvsReader(
 		common.HexToAddress(c.AVSRegistryCoordinatorAddress),
 		common.HexToAddress(c.OperatorStateRetrieverAddress),
 		ethRpcClient, logger)
 	if err != nil {
-		logger.Errorf("Cannot create AvsReader: %v", err)
-		logger.Errorf("This may indicate contract address issues or network connectivity problems")
+		logger.Errorf("❌ Cannot create AvsReader: %v", err)
 		return nil, fmt.Errorf("failed to create AvsReader: %w", err)
 	}
-	logger.Infof("AvsReader created successfully")
 	// avsSubscriber, err := chainio.BuildAvsSubscriber(common.HexToAddress(c.AVSRegistryCoordinatorAddress),
 	// 	common.HexToAddress(c.OperatorStateRetrieverAddress), ethWsClient, logger,
 	// )
@@ -489,7 +455,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		elapsing:  elapsing,
 	}
 
-	logger.Infof("Connect to aggregator %s", c.AggregatorServerIpPortAddress)
+	logger.Infof("🔌 Connecting to aggregator %s", c.AggregatorServerIpPortAddress)
 	operator.retryConnect()
 
 	// OperatorId is set in contract during registration so we get it after registering operator.
@@ -554,7 +520,7 @@ func (o *Operator) Start(ctx context.Context) error {
 		return fmt.Errorf("operator is not registered. Registering operator using the operator-cli before starting operator")
 	}
 
-	o.logger.Infof("Starting operator.")
+	o.logger.Infof("✅ Operator ready - starting service")
 
 	if o.config.EnableNodeApi {
 		o.nodeApi.Start()
