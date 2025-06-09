@@ -98,7 +98,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 		}
 	} else if cronTrigger := check.GetTrigger().GetCron(); cronTrigger != nil {
 		// Handle cron-based scheduling
-		schedules := cronTrigger.GetConfig().GetSchedule()
+		schedules := cronTrigger.GetConfig().GetSchedules()
 		if len(schedules) == 0 {
 			return fmt.Errorf("no cron expressions provided")
 		}

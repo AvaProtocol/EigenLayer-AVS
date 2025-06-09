@@ -93,7 +93,7 @@ message FixedTimeTrigger {
 // Simple timebase or cron syntax.
 message CronTrigger {
   message Config {
-    repeated string schedule = 1;
+    repeated string schedules = 1;
   }
   
   message Output {

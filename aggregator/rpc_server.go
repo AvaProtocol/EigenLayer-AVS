@@ -171,7 +171,19 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 		"user", user.Address.String(),
 		"smart_wallet_address", payload.SmartWalletAddress,
 	)
-	return r.engine.ListTasksByUser(user, payload)
+
+	listTaskResp, err := r.engine.ListTasksByUser(user, payload)
+	if err != nil {
+		contextFields := map[string]interface{}{
+			"smart_wallet_address": payload.SmartWalletAddress,
+			"before_cursor":        payload.Before,
+			"after_cursor":         payload.After,
+			"limit":                payload.Limit,
+		}
+		return nil, r.handlePaginationError(err, "ListTasks", user.Address.String(), contextFields)
+	}
+
+	return listTaskResp, nil
 }
 
 func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
@@ -184,10 +196,16 @@ func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListEx
 		"user", user.Address.String(),
 		"task_id", payload.TaskIds,
 	)
+
 	listExecResp, err := r.engine.ListExecutions(user, payload)
 	if err != nil {
-		r.config.Logger.Error("error listing executions from engine", "error", err.Error())
-		return nil, err
+		contextFields := map[string]interface{}{
+			"task_ids":      payload.TaskIds,
+			"before_cursor": payload.Before,
+			"after_cursor":  payload.After,
+			"limit":         payload.Limit,
+		}
+		return nil, r.handlePaginationError(err, "ListExecutions", user.Address.String(), contextFields)
 	}
 
 	return listExecResp, nil
@@ -293,7 +311,18 @@ func (r *RpcServer) ListSecrets(ctx context.Context, payload *avsproto.ListSecre
 		"user", user.Address.String(),
 	)
 
-	return r.engine.ListSecrets(user, payload)
+	listSecretResp, err := r.engine.ListSecrets(user, payload)
+	if err != nil {
+		contextFields := map[string]interface{}{
+			"workflow_id":   payload.WorkflowId,
+			"before_cursor": payload.Before,
+			"after_cursor":  payload.After,
+			"limit":         payload.Limit,
+		}
+		return nil, r.handlePaginationError(err, "ListSecrets", user.Address.String(), contextFields)
+	}
+
+	return listSecretResp, nil
 }
 
 func (r *RpcServer) UpdateSecret(ctx context.Context, payload *avsproto.CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error) {
@@ -610,6 +639,54 @@ func getInputKeys(inputs map[string]*structpb.Value) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// handlePaginationError processes pagination-related errors and returns user-friendly messages
+func (r *RpcServer) handlePaginationError(err error, methodName string, userAddr string, contextFields map[string]interface{}) error {
+	if err == nil {
+		return nil
+	}
+
+	// Enhanced error handling for cursor validation failures
+	if st, ok := status.FromError(err); ok && st.Code() == codes.InvalidArgument {
+		// Prepare logging fields
+		logFields := []interface{}{
+			"user", userAddr,
+			"error", st.Message(),
+		}
+
+		// Add context-specific fields
+		for key, value := range contextFields {
+			logFields = append(logFields, key, value)
+		}
+
+		// Log detailed information about the invalid request
+		r.config.Logger.Warn("invalid pagination parameters in "+methodName, logFields...)
+
+		// Return a more user-friendly error message for cursor validation
+		if st.Message() == "cursor is not valid" {
+			return status.Errorf(codes.InvalidArgument,
+				"Invalid pagination cursor. Please retry without pagination parameters or use a fresh cursor from a recent response.")
+		}
+
+		// Return original error for other InvalidArgument cases
+		return err
+	}
+
+	// Prepare logging fields for non-pagination errors
+	logFields := []interface{}{
+		"user", userAddr,
+		"error", err.Error(),
+	}
+
+	// Add context-specific fields
+	for key, value := range contextFields {
+		logFields = append(logFields, key, value)
+	}
+
+	// Log other types of errors
+	r.config.Logger.Error("error in "+methodName, logFields...)
+	return err
 }
 
 // Operator action

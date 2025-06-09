@@ -543,7 +543,7 @@ async function scheduleNotification(owner, token, taskCondition) {
   if (process.argv[2] == "schedule-cron") {
     trigger = {
       cron: {
-        schedule: [
+        schedules: [
           // every 5 hours
           "0 */5 * * *",
         ],
