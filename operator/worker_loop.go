@@ -163,14 +163,19 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	timeTriggerCh := make(chan triggerengine.TriggerMetadata[uint64], 1000)
 	o.timeTrigger = triggerengine.NewTimeTrigger(timeTriggerCh, o.logger)
 
+	// Log consolidated monitoring status
+	eventStatus := "disabled"
+	if o.config.EnabledFeatures.EventTrigger {
+		eventStatus = "enabled"
+	}
+	o.logger.Infof("📊 Monitoring Status: Block ✅ | Time ✅ | Event %s", eventStatus)
+
 	o.blockTrigger.Run(ctx)
 	o.timeTrigger.Run(ctx)
 
 	// Event trigger can be costly, so we require an opt-in
 	if o.config.EnabledFeatures.EventTrigger {
 		o.eventTrigger.Run(ctx)
-	} else {
-		o.logger.Info("event trigger not enable, skip initialize event monitoring")
 	}
 
 	// Establish a connection with gRPC server where new task will be pushed automatically
