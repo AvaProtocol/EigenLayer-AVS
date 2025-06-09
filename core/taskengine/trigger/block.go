@@ -187,7 +187,7 @@ func (b *BlockTrigger) RemoveCheck(taskID string) error {
 }
 
 func (b *BlockTrigger) Run(ctx context.Context) error {
-	b.logger.Info("🚀 Starting smart block trigger monitor")
+	b.logger.Debug("🚀 Starting smart block trigger monitor")
 
 	go func() {
 		var headers chan *types.Header
