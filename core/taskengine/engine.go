@@ -361,6 +361,8 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 	return &avsproto.ListWalletResp{Items: walletsToReturnProto}, nil
 }
 
+// GetWallet is the gRPC handler for the GetWallet RPC.
+// It uses the owner (from auth context), salt, and factory_address from payload to derive the wallet address.
 func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
 	if payload.GetFactoryAddress() != "" && !common.IsHexAddress(payload.GetFactoryAddress()) {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidFactoryAddressError)
@@ -378,6 +380,12 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 	factoryAddr := n.smartWalletConfig.FactoryAddress
 	if payload.GetFactoryAddress() != "" {
 		factoryAddr = common.HexToAddress(payload.GetFactoryAddress())
+	}
+
+	// Validate that factory address is not the zero address
+	if factoryAddr == (common.Address{}) {
+		n.logger.Warn("Attempted to use zero address as factory for GetWallet", "owner", user.Address.Hex(), "salt", saltBig.String())
+		return nil, status.Errorf(codes.InvalidArgument, "Factory address cannot be the zero address")
 	}
 
 	derivedSenderAddress, err := aa.GetSenderAddressForFactory(rpcConn, user.Address, factoryAddr, saltBig)
@@ -450,6 +458,12 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 	factoryAddr := n.smartWalletConfig.FactoryAddress // Default factory
 	if payload.GetFactoryAddress() != "" {
 		factoryAddr = common.HexToAddress(payload.GetFactoryAddress())
+	}
+
+	// Validate that factory address is not the zero address
+	if factoryAddr == (common.Address{}) {
+		n.logger.Warn("Attempted to use zero address as factory for SetWallet", "owner", owner.Hex(), "salt", payload.GetSalt())
+		return nil, status.Errorf(codes.InvalidArgument, "Factory address cannot be the zero address")
 	}
 
 	derivedWalletAddress, err := aa.GetSenderAddressForFactory(rpcConn, owner, factoryAddr, saltBig)

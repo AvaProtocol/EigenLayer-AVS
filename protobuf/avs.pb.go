@@ -4914,7 +4914,7 @@ func (x *FixedTimeTrigger_Output) GetTimestampIso() string {
 
 type CronTrigger_Config struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Schedule      []string               `protobuf:"bytes,1,rep,name=schedule,proto3" json:"schedule,omitempty"`
+	Schedules     []string               `protobuf:"bytes,1,rep,name=schedules,proto3" json:"schedules,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4949,9 +4949,9 @@ func (*CronTrigger_Config) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{5, 0}
 }
 
-func (x *CronTrigger_Config) GetSchedule() []string {
+func (x *CronTrigger_Config) GetSchedules() []string {
 	if x != nil {
-		return x.Schedule
+		return x.Schedules
 	}
 	return nil
 }
@@ -8085,11 +8085,11 @@ const file_avs_proto_rawDesc = "" +
 	"\x06epochs\x18\x01 \x03(\x03R\x06epochs\x1aK\n" +
 	"\x06Output\x12\x1c\n" +
 	"\ttimestamp\x18\x01 \x01(\x04R\ttimestamp\x12#\n" +
-	"\rtimestamp_iso\x18\x02 \x01(\tR\ftimestampIso\"\xb8\x01\n" +
+	"\rtimestamp_iso\x18\x02 \x01(\tR\ftimestampIso\"\xba\x01\n" +
 	"\vCronTrigger\x126\n" +
-	"\x06config\x18\x01 \x01(\v2\x1e.aggregator.CronTrigger.ConfigR\x06config\x1a$\n" +
-	"\x06Config\x12\x1a\n" +
-	"\bschedule\x18\x01 \x03(\tR\bschedule\x1aK\n" +
+	"\x06config\x18\x01 \x01(\v2\x1e.aggregator.CronTrigger.ConfigR\x06config\x1a&\n" +
+	"\x06Config\x12\x1c\n" +
+	"\tschedules\x18\x01 \x03(\tR\tschedules\x1aK\n" +
 	"\x06Output\x12\x1c\n" +
 	"\ttimestamp\x18\x01 \x01(\x04R\ttimestamp\x12#\n" +
 	"\rtimestamp_iso\x18\x02 \x01(\tR\ftimestampIso\"\xd1\x02\n" +
