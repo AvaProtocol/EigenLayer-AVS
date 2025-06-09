@@ -502,7 +502,7 @@ func (o *Operator) StreamMessages() {
 						o.logger.Info("❌ Failed to add block trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for blocks")
 					}
 				} else if trigger := resp.TaskMetadata.Trigger.GetCron(); trigger != nil {
-					scheduleStr := strings.Join(trigger.Config.Schedule, ", ")
+					scheduleStr := strings.Join(trigger.Config.Schedules, ", ")
 					o.logger.Info("⏰ Monitoring cron trigger", "task_id", resp.Id, "schedule", scheduleStr)
 					if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Info("❌ Failed to add cron trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for scheduled execution")

@@ -716,7 +716,7 @@ func TestExecutorRunTaskWithCronTriggerOutputData(t *testing.T) {
 		TriggerType: &avsproto.TaskTrigger_Cron{
 			Cron: &avsproto.CronTrigger{
 				Config: &avsproto.CronTrigger_Config{
-					Schedule: []string{"0 0 * * *"}, // Daily at midnight
+					Schedules: []string{"0 0 * * *"}, // Daily at midnight
 				},
 			},
 		},

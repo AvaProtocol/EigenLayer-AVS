@@ -361,6 +361,18 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 	return &avsproto.ListWalletResp{Items: walletsToReturnProto}, nil
 }
 
+// validateNonZeroAddress validates that the factory address is not the zero address
+// Returns an error if validation fails, nil if validation passes
+func (n *Engine) validateNonZeroAddress(factoryAddr common.Address, methodName, ownerHex, salt string) error {
+	if factoryAddr == (common.Address{}) {
+		n.logger.Warn("Attempted to use zero address as factory for "+methodName, "owner", ownerHex, "salt", salt)
+		return status.Errorf(codes.InvalidArgument, "Factory address cannot be the zero address")
+	}
+	return nil
+}
+
+// GetWallet is the gRPC handler for the GetWallet RPC.
+// It uses the owner (from auth context), salt, and factory_address from payload to derive the wallet address.
 func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
 	if payload.GetFactoryAddress() != "" && !common.IsHexAddress(payload.GetFactoryAddress()) {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidFactoryAddressError)
@@ -378,6 +390,10 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 	factoryAddr := n.smartWalletConfig.FactoryAddress
 	if payload.GetFactoryAddress() != "" {
 		factoryAddr = common.HexToAddress(payload.GetFactoryAddress())
+	}
+
+	if err := n.validateNonZeroAddress(factoryAddr, "GetWallet", user.Address.Hex(), saltBig.String()); err != nil {
+		return nil, err
 	}
 
 	derivedSenderAddress, err := aa.GetSenderAddressForFactory(rpcConn, user.Address, factoryAddr, saltBig)
@@ -450,6 +466,10 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 	factoryAddr := n.smartWalletConfig.FactoryAddress // Default factory
 	if payload.GetFactoryAddress() != "" {
 		factoryAddr = common.HexToAddress(payload.GetFactoryAddress())
+	}
+
+	if err := n.validateNonZeroAddress(factoryAddr, "SetWallet", owner.Hex(), payload.GetSalt()); err != nil {
+		return nil, err
 	}
 
 	derivedWalletAddress, err := aa.GetSenderAddressForFactory(rpcConn, owner, factoryAddr, saltBig)
