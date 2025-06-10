@@ -16,6 +16,11 @@ on:
         description: "Specific Git tag to build (e.g., v1.6.0). Overrides commit_hash and branch_name for checkout."
         required: false
         type: string
+      tag_latest:
+        description: "Automatically tag the image with 'latest' tag in addition to the primary tag."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   publish-prod-build:
@@ -96,6 +101,12 @@ jobs:
           echo "Short SHA: ${{ steps.vars.outputs.SHORT_SHA }}"
           echo "Branch for Context: ${{ steps.vars.outputs.BRANCH_FOR_CONTEXT }}"
           echo "Release Tag Arg for Build: ${{ steps.vars.outputs.RELEASE_TAG_ARG }}"
+          echo "Tag Latest: ${{ inputs.tag_latest }}"
+          if [[ "${{ inputs.tag_latest }}" == "true" ]]; then
+            echo "✅ Latest tag will be applied: avaprotocol/ap-avs:latest"
+          else
+            echo "❌ Latest tag will NOT be applied (default production behavior)"
+          fi
           echo "---- End Debug ----"
         shell: bash
 
@@ -118,7 +129,8 @@ jobs:
             # Primary tag (e.g., v1.6.0 or main-<sha>)
             type=raw,value=${{ steps.vars.outputs.PRIMARY_DOCKER_TAG }}
 
-            # No latest tag automatically for prod, will be managed separately
+            # Conditionally add latest tag based on input
+            ${{ inputs.tag_latest && 'type=raw,value=latest' || '# Latest tag disabled' }}
 
       - name: Build and push production docker image
         uses: docker/build-push-action@v6
