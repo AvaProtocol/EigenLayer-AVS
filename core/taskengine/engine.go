@@ -124,8 +124,9 @@ type PendingNotification struct {
 
 // The core datastructure of the task engine
 type Engine struct {
-	db    storage.Storage
-	queue *apqueue.Queue
+	db     storage.Storage
+	config *config.Config
+	queue  *apqueue.Queue
 
 	// maintain a list of active job that we have to synced to operators
 	// only task triggers are sent to operator
@@ -169,8 +170,9 @@ type Engine struct {
 // create a new task engine using given storage, config and queueu
 func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger sdklogging.Logger) *Engine {
 	e := Engine{
-		db:    db,
-		queue: queue,
+		db:     db,
+		config: config,
+		queue:  queue,
 
 		lock:                &sync.Mutex{},
 		tasks:               make(map[string]*model.Task),
@@ -640,9 +642,21 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 
 				// Use debounced logging to prevent spam (only log every 3 minutes per operator)
 				if n.shouldLogApprovalMessage(address) {
+					// Build dynamic approved operators list for logging
+					var approvedList []string
+					if len(n.config.ApprovedOperators) == 0 {
+						// Use hardcoded list if no configuration
+						approvedList = []string{"0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d", "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3", "0xa026265a0f01a6e1a19b04655519429df0a57c4e"}
+					} else {
+						// Use configured list
+						for _, addr := range n.config.ApprovedOperators {
+							approvedList = append(approvedList, addr.Hex())
+						}
+					}
+
 					n.logger.Info("operator has not been approved to process task",
 						"operator", address,
-						"approved_operators", []string{"0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d", "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3"},
+						"approved_operators", approvedList,
 						"next_log_in", "3 minutes if still not approved")
 				}
 				continue
@@ -2023,10 +2037,24 @@ func (n *Engine) NewSeqID() (string, error) {
 }
 
 func (n *Engine) CanStreamCheck(address string) bool {
-	// TODO: Remove this flag when we measure performance impact on all operator
-	// Use case-insensitive comparison for Ethereum addresses
-	return strings.EqualFold(address, "0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d") ||
-		strings.EqualFold(address, "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3")
+	// If no approved operators configured, use default hardcoded list for backward compatibility
+	if len(n.config.ApprovedOperators) == 0 {
+		n.logger.Debug("Using hardcoded operator approval list", "operator", address)
+		return strings.EqualFold(address, "0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d") ||
+			strings.EqualFold(address, "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3") ||
+			strings.EqualFold(address, "0xa026265a0f01a6e1a19b04655519429df0a57c4e")
+	}
+
+	// Check against configured approved operators (case-insensitive)
+	for _, approvedAddr := range n.config.ApprovedOperators {
+		if strings.EqualFold(address, approvedAddr.Hex()) {
+			n.logger.Debug("Operator approved via configuration", "operator", address)
+			return true
+		}
+	}
+
+	n.logger.Debug("Operator not found in approved list", "operator", address, "approved_count", len(n.config.ApprovedOperators))
+	return false
 }
 
 // shouldLogApprovalMessage checks if we should log the approval message for this operator

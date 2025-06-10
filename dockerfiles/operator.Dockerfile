@@ -1,6 +1,7 @@
 FROM golang:1.22.1-alpine AS builder
 ARG RELEASE_TAG
 ARG COMMIT_SHA
+ARG TARGETARCH
 
 WORKDIR /app
 
@@ -10,7 +11,7 @@ RUN go mod download
 
 COPY . ./
 
-RUN CGO_ENABLED=0 GOOS=linux go build -v \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -v \
     -ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.semver=$RELEASE_TAG -X github.com/AvaProtocol/EigenLayer-AVS/version.revision=$COMMIT_SHA" \
     -o /ava
 
