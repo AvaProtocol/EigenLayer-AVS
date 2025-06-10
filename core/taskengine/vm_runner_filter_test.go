@@ -91,7 +91,7 @@ func TestFilter(t *testing.T) {
 		t.Errorf("expect return only one element with cost > 5 but got: %s", data[0])
 	}
 
-	if !strings.Contains(step.Log, "Source node ID: 'trades', Variable name: 'trades', Expression: 'current.cost > 5'") {
+	if !strings.Contains(step.Log, "Source node ID: 'trades', Variable name: 'trades', Original Expression: 'current.cost > 5', Clean Expression: 'current.cost > 5'") {
 		t.Errorf("log doesn't contain execution info")
 	}
 }
