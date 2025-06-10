@@ -92,12 +92,17 @@ func TestSmartVariableResolution(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		// With new behavior, successful (2xx) responses return the body directly
-		// The mock server returns JSON like: {"method": "POST", "url": "...", "data": "{...}", "headers": {...}}
-		assert.Equal(t, "POST", result["method"])
+		// With new behavior, full response structure is returned
+		// Check that we have the raw response structure
+		assert.Equal(t, float64(200), result["statusCode"])
+
+		// The mock server returns JSON in the body field
+		bodyData, ok := result["body"].(map[string]interface{})
+		assert.True(t, ok, "body should be a map")
+		assert.Equal(t, "POST", bodyData["method"])
 
 		// Check the data field which contains the JSON body that was sent
-		if data, ok := result["data"]; ok {
+		if data, ok := bodyData["data"]; ok {
 			dataStr := fmt.Sprintf("%v", data)
 			assert.Contains(t, dataStr, "18500000", "block_number should be resolved to blockNumber")
 			assert.Contains(t, dataStr, "0xabc123def456", "block_hash should be resolved to blockHash")
@@ -134,10 +139,15 @@ func TestSmartVariableResolution(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		// With new behavior, successful (2xx) responses return the body directly
-		assert.Equal(t, "POST", result["method"])
+		// With new behavior, full response structure is returned
+		assert.Equal(t, float64(200), result["statusCode"])
 
-		if data, ok := result["data"]; ok {
+		// The mock server returns JSON in the body field
+		bodyData, ok := result["body"].(map[string]interface{})
+		assert.True(t, ok, "body should be a map")
+		assert.Equal(t, "POST", bodyData["method"])
+
+		if data, ok := bodyData["data"]; ok {
 			dataStr := fmt.Sprintf("%v", data)
 			assert.Contains(t, dataStr, "18500000")
 			assert.Contains(t, dataStr, "0xabc123def456")
@@ -174,10 +184,15 @@ func TestSmartVariableResolution(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		// With new behavior, successful (2xx) responses return the body directly
-		assert.Equal(t, "POST", result["method"])
+		// With new behavior, full response structure is returned
+		assert.Equal(t, float64(200), result["statusCode"])
 
-		if data, ok := result["data"]; ok {
+		// The mock server returns JSON in the body field
+		bodyData, ok := result["body"].(map[string]interface{})
+		assert.True(t, ok, "body should be a map")
+		assert.Equal(t, "POST", bodyData["method"])
+
+		if data, ok := bodyData["data"]; ok {
 			dataStr := fmt.Sprintf("%v", data)
 			assert.Contains(t, dataStr, "18500000") // block_number resolved from blockNumber
 			assert.Contains(t, dataStr, "5000000")  // gasUsed direct access
@@ -211,10 +226,15 @@ func TestSmartVariableResolution(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		// With new behavior, successful (2xx) responses return the body directly
-		assert.Equal(t, "POST", result["method"])
+		// With new behavior, full response structure is returned
+		assert.Equal(t, float64(200), result["statusCode"])
 
-		if data, ok := result["data"]; ok {
+		// The mock server returns JSON in the body field
+		bodyData, ok := result["body"].(map[string]interface{})
+		assert.True(t, ok, "body should be a map")
+		assert.Equal(t, "POST", bodyData["method"])
+
+		if data, ok := bodyData["data"]; ok {
 			dataStr := fmt.Sprintf("%v", data)
 			assert.Contains(t, dataStr, "test_token_123") // from macro secrets
 			assert.Contains(t, dataStr, "test_user_123")  // direct access to snake_case
@@ -252,10 +272,15 @@ func TestSmartVariableResolution(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		// With new behavior, successful (2xx) responses return the body directly
-		assert.Equal(t, "POST", result["method"])
+		// With new behavior, full response structure is returned
+		assert.Equal(t, float64(200), result["statusCode"])
 
-		if data, ok := result["data"]; ok {
+		// The mock server returns JSON in the body field
+		bodyData, ok := result["body"].(map[string]interface{})
+		assert.True(t, ok, "body should be a map")
+		assert.Equal(t, "POST", bodyData["method"])
+
+		if data, ok := bodyData["data"]; ok {
 			dataStr := fmt.Sprintf("%v", data)
 			assert.Contains(t, dataStr, "secret_key_123") // api_key resolved from apiKey
 			assert.Contains(t, dataStr, "200")            // status_code resolved from statusCode
