@@ -1,4 +1,5 @@
 FROM golang:1.22.1-alpine AS builder
+ARG TARGETARCH
 
 WORKDIR /app
 
@@ -8,7 +9,7 @@ RUN go mod download
 
 COPY . ./
 
-RUN CGO_ENABLED=0 GOOS=linux go build -v -o /ava
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -v -o /ava
 
 
 FROM debian:stable-slim

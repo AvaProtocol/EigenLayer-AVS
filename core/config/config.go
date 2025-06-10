@@ -65,6 +65,9 @@ type Config struct {
 	MacroVars    map[string]string
 	MacroSecrets map[string]string
 
+	// List of approved operator addresses that can process tasks
+	ApprovedOperators []common.Address
+
 	MetricsReg *prometheus.Registry
 }
 
@@ -122,6 +125,9 @@ type ConfigRaw struct {
 	} `yaml:"backup"`
 
 	SocketPath string `yaml:"socket_path"`
+
+	// List of approved operator addresses that can process tasks
+	ApprovedOperators []string `yaml:"approved_operators"`
 
 	Macros map[string]map[string]string `yaml:"macros"`
 }
@@ -247,10 +253,11 @@ func NewConfig(configFilePath string) (*Config, error) {
 			BackupDir:       configRaw.Backup.BackupDir,
 		},
 
-		SocketPath:   configRaw.SocketPath,
-		MacroVars:    configRaw.Macros["vars"],
-		MacroSecrets: configRaw.Macros["secrets"],
-		MetricsReg:   reg,
+		SocketPath:        configRaw.SocketPath,
+		MacroVars:         configRaw.Macros["vars"],
+		MacroSecrets:      configRaw.Macros["secrets"],
+		ApprovedOperators: convertToAddressSlice(configRaw.ApprovedOperators),
+		MetricsReg:        reg,
 	}
 
 	if config.SocketPath == "" {

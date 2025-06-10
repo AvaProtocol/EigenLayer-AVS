@@ -27,7 +27,7 @@ func (q *Queue) CleanupOrphanedJobs() (*CleanupStats, error) {
 		// Get all jobs with this status
 		kvs, err := q.db.GetByPrefix(prefix)
 		if err != nil {
-			q.logger.Error("failed to get jobs for cleanup", "status", status, "error", err)
+			q.logger.Error("failed to get jobs for cleanup", "status", status.HumanReadable(), "error", err)
 			stats.FailedCleanup++
 			continue
 		}
@@ -56,7 +56,7 @@ func (q *Queue) CleanupOrphanedJobs() (*CleanupStats, error) {
 					stats.FailedCleanup++
 				} else {
 					stats.RemovedJobs++
-					q.logger.Debug("removed orphaned job", "job_id", job.ID, "task_id", job.Name, "status", status)
+					q.logger.Debug("removed orphaned job", "job_id", job.ID, "task_id", job.Name, "status", status.HumanReadable())
 				}
 				q.dbLock.Unlock()
 			}

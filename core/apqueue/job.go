@@ -19,6 +19,38 @@ const (
 	jobFailed = "f"
 )
 
+// String returns a human-readable status name for logging
+func (s jobStatus) String() string {
+	switch s {
+	case jobPending:
+		return "pending"
+	case jobInProgress:
+		return "in_progress"
+	case jobComplete:
+		return "complete"
+	case jobFailed:
+		return "failed"
+	default:
+		return string(s) // fallback to raw value
+	}
+}
+
+// HumanReadable returns a descriptive status name for logging
+func (s jobStatus) HumanReadable() string {
+	switch s {
+	case jobPending:
+		return "⏳ pending"
+	case jobInProgress:
+		return "🔄 in_progress"
+	case jobComplete:
+		return "✅ complete"
+	case jobFailed:
+		return "❌ failed"
+	default:
+		return string(s) // fallback to raw value
+	}
+}
+
 type Job struct {
 	Type string `json:"t"`
 	Name string `json:"n"`
