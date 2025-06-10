@@ -843,8 +843,8 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		// REST API data is now stored as structpb.Value directly (no Any wrapper)
 		iface := restAPI.GetData().AsInterface()
 		if m, ok := iface.(map[string]interface{}); ok {
-			// Use the common response processing function
-			result = ProcessRestAPIResponseRaw(m)
+			// Use raw response format (same as simulateWorkflow) instead of ProcessRestAPIResponseRaw
+			result = m
 		} else {
 			result = map[string]interface{}{"data": iface}
 		}
@@ -948,123 +948,6 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 	}
 
 	return result, nil
-}
-
-// extractExecutionResultDirect extracts only the data from execution step, throwing errors instead of including them
-func (n *Engine) extractExecutionResultDirect(executionStep *avsproto.Execution_Step) (map[string]interface{}, error) {
-	// Handle different output data types and return data directly
-	if ccode := executionStep.GetCustomCode(); ccode != nil && ccode.GetData() != nil {
-		iface := ccode.GetData().AsInterface()
-		if m, ok := iface.(map[string]interface{}); ok {
-			return m, nil
-		} else {
-			return map[string]interface{}{"data": iface}, nil
-		}
-	} else if restAPI := executionStep.GetRestApi(); restAPI != nil && restAPI.GetData() != nil {
-		// REST API data is now stored as structpb.Value directly (no Any wrapper)
-		iface := restAPI.GetData().AsInterface()
-		if m, ok := iface.(map[string]interface{}); ok {
-			// Use the common response processing function
-			return ProcessRestAPIResponseRaw(m), nil
-		} else {
-			return map[string]interface{}{"data": iface}, nil
-		}
-	} else if contractRead := executionStep.GetContractRead(); contractRead != nil && len(contractRead.GetResults()) > 0 {
-		// For ContractRead, return the method results
-		results := contractRead.GetResults()
-
-		// If single result, return directly for backward compatibility
-		if len(results) == 1 {
-			methodResult := results[0]
-			if methodResult.Success {
-				response := map[string]interface{}{
-					"method_name": methodResult.GetMethodName(),
-				}
-
-				// Add structured data
-				if len(methodResult.GetData()) > 0 {
-					structuredData := make(map[string]interface{})
-					for _, field := range methodResult.GetData() {
-						structuredData[field.GetName()] = field.GetValue()
-					}
-					response["data"] = structuredData
-				}
-
-				return response, nil
-			} else {
-				return map[string]interface{}{
-					"method_name": methodResult.GetMethodName(),
-					"error":       methodResult.GetError(),
-				}, nil
-			}
-		} else {
-			// Multiple results
-			var allResults []map[string]interface{}
-			for _, methodResult := range results {
-				methodMap := map[string]interface{}{
-					"method_name": methodResult.GetMethodName(),
-					"success":     methodResult.GetSuccess(),
-				}
-
-				if methodResult.Success {
-					if len(methodResult.GetData()) > 0 {
-						structuredData := make(map[string]interface{})
-						for _, field := range methodResult.GetData() {
-							structuredData[field.GetName()] = field.GetValue()
-						}
-						methodMap["data"] = structuredData
-					}
-				} else {
-					methodMap["error"] = methodResult.GetError()
-				}
-
-				allResults = append(allResults, methodMap)
-			}
-			return map[string]interface{}{"results": allResults}, nil
-		}
-	} else if branch := executionStep.GetBranch(); branch != nil {
-		return map[string]interface{}{"conditionId": branch.GetConditionId()}, nil
-	} else if filter := executionStep.GetFilter(); filter != nil && filter.GetData() != nil {
-		var data interface{}
-		structVal := &structpb.Value{}
-		if err := filter.GetData().UnmarshalTo(structVal); err == nil {
-			data = structVal.AsInterface()
-		} else {
-			if n.logger != nil {
-				n.logger.Warn("Failed to unmarshal Filter output", "error", err.Error())
-			}
-			data = string(filter.GetData().GetValue())
-		}
-		return map[string]interface{}{"data": data}, nil
-	} else if loop := executionStep.GetLoop(); loop != nil {
-		return map[string]interface{}{"data": loop.GetData()}, nil
-	} else if graphQL := executionStep.GetGraphql(); graphQL != nil && graphQL.GetData() != nil {
-		var data map[string]interface{}
-		structVal := &structpb.Struct{}
-		if err := graphQL.GetData().UnmarshalTo(structVal); err == nil {
-			data = structVal.AsMap()
-		} else {
-			if n.logger != nil {
-				n.logger.Warn("Failed to unmarshal GraphQL output", "error", err.Error())
-			}
-			data = map[string]interface{}{"raw_output": string(graphQL.GetData().GetValue())}
-		}
-		return data, nil
-	} else if ethTransfer := executionStep.GetEthTransfer(); ethTransfer != nil {
-		return map[string]interface{}{"txHash": ethTransfer.GetTransactionHash()}, nil
-	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
-		// ContractWrite output now contains enhanced results structure
-		if len(contractWrite.GetResults()) > 0 {
-			firstResult := contractWrite.GetResults()[0]
-			if firstResult.Transaction != nil {
-				return map[string]interface{}{"txHash": firstResult.Transaction.Hash}, nil
-			}
-		}
-		return map[string]interface{}{"status": "success"}, nil
-	}
-
-	// If no specific data was extracted, return empty result
-	return map[string]interface{}{}, nil
 }
 
 // RunNodeImmediatelyRPC handles the RPC interface for immediate node execution
