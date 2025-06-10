@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -911,7 +912,19 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		}
 		result["data"] = data
 	} else if loop := executionStep.GetLoop(); loop != nil {
-		result["data"] = loop.GetData()
+		// Parse JSON string back to array/object for SDK response
+		jsonData := loop.GetData()
+		if jsonData != "" {
+			var parsedData interface{}
+			if err := json.Unmarshal([]byte(jsonData), &parsedData); err == nil {
+				result["data"] = parsedData
+			} else {
+				// Fallback to raw string if JSON parsing fails
+				result["data"] = jsonData
+			}
+		} else {
+			result["data"] = []interface{}{} // Empty array for empty results
+		}
 	} else if graphQL := executionStep.GetGraphql(); graphQL != nil && graphQL.GetData() != nil {
 		var data map[string]interface{}
 		structVal := &structpb.Struct{}
@@ -1377,16 +1390,33 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		}
 	case NodeTypeLoop:
 		if result != nil && len(result) > 0 {
-			// For loop nodes, convert result to appropriate format
-			loopOutput := &avsproto.LoopNode_Output{}
-			if data, ok := result["data"].(string); ok {
-				loopOutput.Data = data
-			} else if data, ok := result["data"]; ok {
-				// Convert any other data type to string representation
-				loopOutput.Data = fmt.Sprintf("%v", data)
+			// For loop nodes, return structured data like other node types
+			valueData, err := structpb.NewValue(result)
+			if err != nil {
+				return &avsproto.RunNodeWithInputsResp{
+					Success: false,
+					Error:   fmt.Sprintf("failed to convert loop output: %v", err),
+					NodeId:  "",
+				}, nil
 			}
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_Loop{
-				Loop: loopOutput,
+			// Return structured data for consistency with other node types
+			resp.OutputData = &avsproto.RunNodeWithInputsResp_CustomCode{
+				CustomCode: &avsproto.CustomCodeNode_Output{
+					Data: valueData,
+				},
+			}
+		} else {
+			// Empty loop result
+			resp.OutputData = &avsproto.RunNodeWithInputsResp_CustomCode{
+				CustomCode: &avsproto.CustomCodeNode_Output{
+					Data: &structpb.Value{
+						Kind: &structpb.Value_ListValue{
+							ListValue: &structpb.ListValue{
+								Values: []*structpb.Value{},
+							},
+						},
+					},
+				},
 			}
 		}
 	default:

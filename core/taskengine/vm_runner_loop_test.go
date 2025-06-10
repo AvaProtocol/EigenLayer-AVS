@@ -19,6 +19,14 @@ func TestLoopProcessor_Execute_Sequential(t *testing.T) {
 		"data": testArray,
 	})
 
+	// Create a mock data generation node for testing
+	dataGenNode := &avsproto.TaskNode{
+		Id:   "test_data_gen",
+		Name: "testArray",
+		Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
+	}
+	vm.TaskNodes["test_data_gen"] = dataGenNode
+
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
@@ -27,16 +35,15 @@ func TestLoopProcessor_Execute_Sequential(t *testing.T) {
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Config: &avsproto.LoopNode_Config{},
+		Config: &avsproto.LoopNode_Config{
+			SourceId: "test_data_gen",
+			IterVal:  "loopItemValueForTest",
+			IterKey:  "index",
+		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
-
-	// Add input variables that the processor expects
-	vm.AddVar("input", "testArray")
-	vm.AddVar("iter_val", "loopItemValueForTest")
-	vm.AddVar("iter_key", "index")
 
 	executionLog, err := processor.Execute("test_loop_seq", loopNode)
 
@@ -67,6 +74,14 @@ func TestLoopProcessor_Execute_Parallel(t *testing.T) {
 		"data": testArray,
 	})
 
+	// Create a mock data generation node for testing
+	dataGenNode := &avsproto.TaskNode{
+		Id:   "test_data_gen",
+		Name: "testArray",
+		Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
+	}
+	vm.TaskNodes["test_data_gen"] = dataGenNode
+
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
@@ -75,16 +90,15 @@ func TestLoopProcessor_Execute_Parallel(t *testing.T) {
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Config: &avsproto.LoopNode_Config{},
+		Config: &avsproto.LoopNode_Config{
+			SourceId: "test_data_gen",
+			IterVal:  "loopItemValueForTest",
+			IterKey:  "index",
+		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
-
-	// Add input variables that the processor expects
-	vm.AddVar("input", "testArray")
-	vm.AddVar("iter_val", "loopItemValueForTest")
-	vm.AddVar("iter_key", "index")
 
 	executionLog, err := processor.Execute("test_loop_parallel", loopNode)
 
@@ -119,6 +133,14 @@ func TestLoopProcessor_Execute_EmptyArray(t *testing.T) {
 		"data": []interface{}{},
 	})
 
+	// Create a mock data generation node for testing
+	dataGenNode := &avsproto.TaskNode{
+		Id:   "test_data_gen_empty",
+		Name: "emptyArray",
+		Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
+	}
+	vm.TaskNodes["test_data_gen_empty"] = dataGenNode
+
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
@@ -127,16 +149,15 @@ func TestLoopProcessor_Execute_EmptyArray(t *testing.T) {
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Config: &avsproto.LoopNode_Config{},
+		Config: &avsproto.LoopNode_Config{
+			SourceId: "test_data_gen_empty",
+			IterVal:  "loopItemValueForTest",
+			IterKey:  "index",
+		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
-
-	// Add input variables that the processor expects
-	vm.AddVar("input", "emptyArray")
-	vm.AddVar("iter_val", "loopItemValueForTest")
-	vm.AddVar("iter_key", "index")
 
 	executionLog, err := processor.Execute("test_loop_empty", loopNode)
 
@@ -161,6 +182,14 @@ func TestLoopProcessor_Execute_InvalidInput(t *testing.T) {
 		"data": "string value",
 	})
 
+	// Create a mock data generation node for testing
+	dataGenNode := &avsproto.TaskNode{
+		Id:   "test_data_gen_invalid",
+		Name: "notArray",
+		Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
+	}
+	vm.TaskNodes["test_data_gen_invalid"] = dataGenNode
+
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
@@ -169,16 +198,15 @@ func TestLoopProcessor_Execute_InvalidInput(t *testing.T) {
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Config: &avsproto.LoopNode_Config{},
+		Config: &avsproto.LoopNode_Config{
+			SourceId: "test_data_gen_invalid",
+			IterVal:  "loopItemValueForTest",
+			IterKey:  "index",
+		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
-
-	// Add input variables that the processor expects
-	vm.AddVar("input", "notArray")
-	vm.AddVar("iter_val", "loopItemValueForTest")
-	vm.AddVar("iter_key", "index")
 
 	executionLog, err := processor.Execute("test_loop_invalid_input", loopNode)
 
@@ -192,6 +220,14 @@ func TestLoopProcessor_Execute_MissingInput(t *testing.T) {
 	vm.WithLogger(testutil.GetLogger())
 	processor := NewLoopProcessor(vm)
 
+	// Create a mock data generation node for testing (but don't add corresponding VM variable)
+	dataGenNode := &avsproto.TaskNode{
+		Id:   "test_data_gen_missing",
+		Name: "nonExistentArray",
+		Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
+	}
+	vm.TaskNodes["test_data_gen_missing"] = dataGenNode
+
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
@@ -200,16 +236,15 @@ func TestLoopProcessor_Execute_MissingInput(t *testing.T) {
 	}
 
 	loopNode := &avsproto.LoopNode{
-		Config: &avsproto.LoopNode_Config{},
+		Config: &avsproto.LoopNode_Config{
+			SourceId: "test_data_gen_missing",
+			IterVal:  "loopItemValueForTest",
+			IterKey:  "index",
+		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
 		},
 	}
-
-	// Add input variables that the processor expects (but reference non-existent array)
-	vm.AddVar("input", "nonExistentArray")
-	vm.AddVar("iter_val", "loopItemValueForTest")
-	vm.AddVar("iter_key", "index")
 
 	executionLog, err := processor.Execute("test_loop_missing_input", loopNode)
 

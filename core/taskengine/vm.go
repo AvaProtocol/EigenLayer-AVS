@@ -1849,6 +1849,101 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				Config: ethConfig,
 			},
 		}
+	case NodeTypeLoop:
+		node.Type = avsproto.NodeType_NODE_TYPE_LOOP
+		// Create loop node with proper configuration
+		loopConfig := &avsproto.LoopNode_Config{}
+
+		// Support both snake_case and camelCase for backward compatibility
+		if sourceId, ok := config["source_id"].(string); ok {
+			loopConfig.SourceId = sourceId
+		} else if sourceId, ok := config["sourceId"].(string); ok {
+			loopConfig.SourceId = sourceId
+		}
+
+		if iterVal, ok := config["iter_val"].(string); ok {
+			loopConfig.IterVal = iterVal
+		} else if iterVal, ok := config["iterVal"].(string); ok {
+			loopConfig.IterVal = iterVal
+		}
+
+		if iterKey, ok := config["iter_key"].(string); ok {
+			loopConfig.IterKey = iterKey
+		} else if iterKey, ok := config["iterKey"].(string); ok {
+			loopConfig.IterKey = iterKey
+		}
+
+		// Handle the nested runner configuration (CustomCode, RestAPI, etc.)
+		loopNode := &avsproto.LoopNode{
+			Config: loopConfig,
+		}
+
+		// Check for different runner types
+		if customCode, ok := config["customCode"].(map[string]interface{}); ok {
+			if customConfig, ok := customCode["config"].(map[string]interface{}); ok {
+				ccConfig := &avsproto.CustomCodeNode_Config{}
+				if source, ok := customConfig["source"].(string); ok {
+					ccConfig.Source = source
+				}
+				if lang, ok := customConfig["lang"].(string); ok {
+					switch strings.ToLower(lang) {
+					case "javascript", "js":
+						ccConfig.Lang = avsproto.Lang_JavaScript
+					default:
+						ccConfig.Lang = avsproto.Lang_JavaScript
+					}
+				} else {
+					ccConfig.Lang = avsproto.Lang_JavaScript
+				}
+				loopNode.Runner = &avsproto.LoopNode_CustomCode{
+					CustomCode: &avsproto.CustomCodeNode{Config: ccConfig},
+				}
+			}
+		} else if restApi, ok := config["restApi"].(map[string]interface{}); ok {
+			if restConfig, ok := restApi["config"].(map[string]interface{}); ok {
+				rConfig := &avsproto.RestAPINode_Config{}
+				if url, ok := restConfig["url"].(string); ok {
+					rConfig.Url = url
+				}
+				if method, ok := restConfig["method"].(string); ok {
+					rConfig.Method = method
+				}
+				if body, ok := restConfig["body"].(string); ok {
+					rConfig.Body = body
+				}
+
+				// Handle headers
+				if headersMap, ok := restConfig["headersMap"].([][]string); ok {
+					headers := make(map[string]string)
+					for _, header := range headersMap {
+						if len(header) == 2 {
+							headers[header[0]] = header[1]
+						}
+					}
+					rConfig.Headers = headers
+				} else if headersAny, ok := restConfig["headersMap"].([]interface{}); ok {
+					headers := make(map[string]string)
+					for _, headerAny := range headersAny {
+						if headerSlice, ok := headerAny.([]interface{}); ok && len(headerSlice) == 2 {
+							if key, ok := headerSlice[0].(string); ok {
+								if value, ok := headerSlice[1].(string); ok {
+									headers[key] = value
+								}
+							}
+						}
+					}
+					rConfig.Headers = headers
+				}
+
+				loopNode.Runner = &avsproto.LoopNode_RestApi{
+					RestApi: &avsproto.RestAPINode{Config: rConfig},
+				}
+			}
+		}
+
+		node.TaskType = &avsproto.TaskNode_Loop{
+			Loop: loopNode,
+		}
 	case "trigger": // Support trigger as a generic node type for testing purposes
 		// Support trigger as a generic node type - all trigger types use custom code for testing
 		node.Type = avsproto.NodeType_NODE_TYPE_CUSTOM_CODE
