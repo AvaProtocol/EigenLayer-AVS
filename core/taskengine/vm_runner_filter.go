@@ -25,6 +25,36 @@ func NewFilterProcessor(vm *VM) *FilterProcessor {
 	}
 }
 
+// processExpression handles different expression patterns and returns a clean JavaScript expression
+func (r *FilterProcessor) processExpression(expression string) string {
+	// Handle different expression patterns:
+	// 1. Full template: "{{ current.age >= 18 }}" -> strip braces, use as JavaScript
+	// 2. Mixed template: "{{ trigger.data.minAge }} <= current.age" -> process variables
+	// 3. Pure JavaScript: "current.age < 18" -> use as-is
+	cleanExpression := expression
+	if strings.HasPrefix(expression, "{{") && strings.HasSuffix(expression, "}}") && strings.Count(expression, "{{") == 1 {
+		// Full template expression - strip braces and use as JavaScript
+		cleanExpression = strings.TrimSpace(expression[2 : len(expression)-2])
+	} else if strings.Contains(expression, "{{") {
+		// Mixed expression - process template variables
+		cleanExpression = r.vm.preprocessTextWithVariableMapping(expression)
+	}
+	// else: Pure JavaScript expression - use as-is
+	return cleanExpression
+}
+
+// wrapExpressionForExecution wraps the expression appropriately based on its content
+func (r *FilterProcessor) wrapExpressionForExecution(cleanExpression string) string {
+	// Check if the expression already contains control flow statements
+	if strings.Contains(cleanExpression, "if") || strings.Contains(cleanExpression, "return") {
+		// For complex expressions with control flow, wrap in a function without additional return
+		return fmt.Sprintf(`(() => { %s })()`, cleanExpression)
+	} else {
+		// For simple expressions, wrap with return
+		return fmt.Sprintf(`(() => { return %s; })()`, cleanExpression)
+	}
+}
+
 func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*avsproto.Execution_Step, error) {
 	t0 := time.Now()
 
@@ -89,19 +119,8 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	// Convert source node ID to actual variable name (node name)
 	inputVarName := r.vm.GetNodeNameAsVar(sourceNodeID)
 
-	// Handle different expression patterns:
-	// 1. Full template: "{{ current.age >= 18 }}" -> strip braces, use as JavaScript
-	// 2. Mixed template: "{{ trigger.data.minAge }} <= current.age" -> process variables
-	// 3. Pure JavaScript: "current.age < 18" -> use as-is
-	cleanExpression := expression
-	if strings.HasPrefix(expression, "{{") && strings.HasSuffix(expression, "}}") && strings.Count(expression, "{{") == 1 {
-		// Full template expression - strip braces and use as JavaScript
-		cleanExpression = strings.TrimSpace(expression[2 : len(expression)-2])
-	} else if strings.Contains(expression, "{{") {
-		// Mixed expression - process template variables
-		cleanExpression = r.vm.preprocessTextWithVariableMapping(expression)
-	}
-	// else: Pure JavaScript expression - use as-is
+	// Process the expression using the extracted helper function
+	cleanExpression := r.processExpression(expression)
 
 	logBuilder.WriteString(fmt.Sprintf("Source node ID: '%s', Variable name: '%s', Original Expression: '%s', Clean Expression: '%s'\n", sourceNodeID, inputVarName, expression, cleanExpression))
 
@@ -170,15 +189,8 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 				break
 			}
 
-			// Check if the expression already contains control flow statements
-			var script string
-			if strings.Contains(cleanExpression, "if") || strings.Contains(cleanExpression, "return") {
-				// For complex expressions with control flow, wrap in a function without additional return
-				script = fmt.Sprintf(`(() => { %s })()`, cleanExpression)
-			} else {
-				// For simple expressions, wrap with return
-				script = fmt.Sprintf(`(() => { return %s; })()`, cleanExpression)
-			}
+			// Use the extracted helper function for script wrapping
+			script := r.wrapExpressionForExecution(cleanExpression)
 			val, err := r.jsvm.RunString(script)
 			if err != nil {
 				logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for item %d (%v): %s. Skipping item.\n", i, item, err.Error()))
@@ -208,15 +220,8 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 				break
 			}
 
-			// Check if the expression already contains control flow statements
-			var script string
-			if strings.Contains(cleanExpression, "if") || strings.Contains(cleanExpression, "return") {
-				// For complex expressions with control flow, wrap in a function without additional return
-				script = fmt.Sprintf(`(() => { %s })()`, cleanExpression)
-			} else {
-				// For simple expressions, wrap with return
-				script = fmt.Sprintf(`(() => { return %s; })()`, cleanExpression)
-			}
+			// Use the extracted helper function for script wrapping
+			script := r.wrapExpressionForExecution(cleanExpression)
 			val, err := r.jsvm.RunString(script)
 			if err != nil {
 				logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for item %d (%v): %s. Skipping item.\n", i, item, err.Error()))
@@ -238,15 +243,8 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		if err := r.jsvm.Set(itemVarNameForMap, dataToProcess); err != nil {
 			evaluationError = fmt.Errorf("failed to set input map as '%s' in JS VM: %w", itemVarNameForMap, err)
 		} else {
-			// Check if the expression already contains control flow statements
-			var script string
-			if strings.Contains(cleanExpression, "if") || strings.Contains(cleanExpression, "return") {
-				// For complex expressions with control flow, wrap in a function without additional return
-				script = fmt.Sprintf(`(() => { %s })()`, cleanExpression)
-			} else {
-				// For simple expressions, wrap with return
-				script = fmt.Sprintf(`(() => { return %s; })()`, cleanExpression)
-			}
+			// Use the extracted helper function for script wrapping
+			script := r.wrapExpressionForExecution(cleanExpression)
 			val, err := r.jsvm.RunString(script)
 			if err != nil {
 				logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for map: %s\n", err.Error()))
