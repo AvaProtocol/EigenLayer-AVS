@@ -1,0 +1,102 @@
+[
+  {
+    "name": "Tea Token",
+    "symbol": "TEA",
+    "address": "0x87C51CD469A0E1E2aF0e0e597fD88D9Ae4BaA967"
+  },
+  {
+    "name": "Wrapped fake liquid staked Ether 2.0",
+    "symbol": "wstETH",
+    "address": "0x13e5FB0B6534BB22cBC59Fae339dbBE0Dc906871"
+  },
+  {
+    "name": "Circle Fake USD",
+    "symbol": "USDC",
+    "address": "0xf7464321dE37BdE4C03AAeeF6b1e7b71379A9a64"
+  },
+  {
+    "name": "Staked TEA",
+    "symbol": "stTEA",
+    "address": "0xa8cB1964ea7f9674Ac6EC2Bc87D386380bE264F8"
+  },
+  {
+    "name": "Bond ETH",
+    "symbol": "bondETH",
+    "address": "0x5Bd36745f6199CF32d2465Ef1F8D6c51dCA9BdEE"
+  },
+  {
+    "name": "Levered ETH",
+    "symbol": "levETH",
+    "address": "0x98f665D98a046fB81147879eCBE9A6fF68BC276C"
+  },
+  {
+    "name": "SOGNI testnet token V1.0.2",
+    "symbol": "tSOGNI",
+    "address": "0xF0593d8dBb5D443156F782d89C6978CB4D8205D6"
+  },
+  {
+    "name": "Bond ETH",
+    "symbol": "BondETH",
+    "address": "0x3EB4b2c7D235fE915E3A0eF6BE73FD458Bb891F4"
+  },
+  {
+    "name": "USDG",
+    "symbol": "USDG",
+    "address": "0xD4fA4dE9D8F8DB39EAf4de9A19bF6910F6B5bD60"
+  },
+  {
+    "name": "Leverage ETH",
+    "symbol": "LevETH",
+    "address": "0x8EE92Ce1caF5848d7a54672fC4320E4f92748643"
+  },
+  {
+    "name": "Angry Dynomites Lab - Badges",
+    "symbol": "BADGES",
+    "address": "0x187F4cF75d86810fC9c9dDa1bc4B6Fd86c98158B"
+  },
+  {
+    "name": "Black Pass",
+    "symbol": "BP",
+    "address": "0x5878e492fba20F47884841d093b79d259B5B799B"
+  },
+  {
+    "name": "Coinbase Wrapped Fake Staked ETH",
+    "symbol": "cbETH",
+    "address": "0x1197766B82Eee9c2e57674E53F0D961590e43769"
+  },
+  {
+    "name": "USDC",
+    "symbol": "USDC",
+    "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+  },
+  {
+    "name": "Bond ETH",
+    "symbol": "bondETH",
+    "address": "0x1aC493C87a483518642f320Ba5b342c7b78154ED"
+  },
+  {
+    "name": "Ethereum",
+    "symbol": "ETH",
+    "address": "0x464C8ec100F2F42fB4e42E07E203DA2324f9FC67"
+  },
+  {
+    "name": "Ethena USD",
+    "symbol": "USDe",
+    "address": "0x28356C7B6087EebaFd1023D292eA9F5327e8F215"
+  },
+  {
+    "name": "Tether USD",
+    "symbol": "USDT",
+    "address": "0xd7e9C75C6C05FdE929cAc19bb887892de78819B7"
+  },
+  {
+    "name": "Levered ETH",
+    "symbol": "levETH",
+    "address": "0x975f67319f9DA83B403309108d4a8f84031538A6"
+  },
+  {
+    "name": "TAO Token",
+    "symbol": "TAO",
+    "address": "0x67025805e2431921C8359A0E1C0c514cFF5fcFDB"
+  }
+]

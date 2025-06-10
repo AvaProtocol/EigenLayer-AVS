@@ -930,6 +930,18 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
 		// ContractWrite output now contains enhanced results structure
 		if len(contractWrite.GetResults()) > 0 {
+			// Convert all results to the expected format
+			var allResults []interface{}
+			for _, methodResult := range contractWrite.GetResults() {
+				allResults = append(allResults, methodResult)
+			}
+
+			// Return results array for multiple method calls
+			if len(allResults) > 1 {
+				return map[string]interface{}{"results": allResults}, nil
+			}
+
+			// For single method call, maintain backward compatibility
 			firstResult := contractWrite.GetResults()[0]
 			if firstResult.Transaction != nil {
 				return map[string]interface{}{"txHash": firstResult.Transaction.Hash}, nil
@@ -1214,23 +1226,85 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			// ContractWrite now uses results array structure
 			var results []*avsproto.ContractWriteNode_MethodResult
 
-			// Try to extract transaction hash from result if available
-			if txHash, ok := result["txHash"].(string); ok {
-				results = append(results, &avsproto.ContractWriteNode_MethodResult{
-					MethodName: "unknown",
-					Success:    true,
-					Transaction: &avsproto.ContractWriteNode_TransactionData{
-						Hash: txHash,
-					},
-				})
-			} else if transactionHash, ok := result["transactionHash"].(string); ok {
-				results = append(results, &avsproto.ContractWriteNode_MethodResult{
-					MethodName: "unknown",
-					Success:    true,
-					Transaction: &avsproto.ContractWriteNode_TransactionData{
-						Hash: transactionHash,
-					},
-				})
+			// Check if we have the new results array format (from VM execution)
+			if resultsArray, ok := result["results"].([]interface{}); ok {
+				// Process each result in the array
+				for _, resultInterface := range resultsArray {
+					if methodResult, ok := resultInterface.(*avsproto.ContractWriteNode_MethodResult); ok {
+						// Direct protobuf result from VM execution
+						results = append(results, methodResult)
+					} else if methodResultMap, ok := resultInterface.(map[string]interface{}); ok {
+						// Map format - convert to protobuf
+						methodResult := &avsproto.ContractWriteNode_MethodResult{}
+
+						if methodName, ok := methodResultMap["method_name"].(string); ok {
+							methodResult.MethodName = methodName
+						} else if methodName, ok := methodResultMap["methodName"].(string); ok {
+							methodResult.MethodName = methodName
+						}
+
+						if success, ok := methodResultMap["success"].(bool); ok {
+							methodResult.Success = success
+						}
+
+						// Handle transaction data
+						if txData, ok := methodResultMap["transaction"].(map[string]interface{}); ok {
+							transaction := &avsproto.ContractWriteNode_TransactionData{}
+							if hash, ok := txData["hash"].(string); ok {
+								transaction.Hash = hash
+							}
+							if status, ok := txData["status"].(string); ok {
+								transaction.Status = status
+							}
+							if from, ok := txData["from"].(string); ok {
+								transaction.From = from
+							}
+							if to, ok := txData["to"].(string); ok {
+								transaction.To = to
+							}
+							methodResult.Transaction = transaction
+						}
+
+						// Handle error data
+						if errorData, ok := methodResultMap["error"].(map[string]interface{}); ok {
+							errorResult := &avsproto.ContractWriteNode_ErrorData{}
+							if code, ok := errorData["code"].(string); ok {
+								errorResult.Code = code
+							}
+							if message, ok := errorData["message"].(string); ok {
+								errorResult.Message = message
+							}
+							methodResult.Error = errorResult
+						}
+
+						if inputData, ok := methodResultMap["input_data"].(string); ok {
+							methodResult.InputData = inputData
+						} else if inputData, ok := methodResultMap["inputData"].(string); ok {
+							methodResult.InputData = inputData
+						}
+
+						results = append(results, methodResult)
+					}
+				}
+			} else {
+				// Fallback: Try to extract transaction hash from result (backward compatibility)
+				if txHash, ok := result["txHash"].(string); ok {
+					results = append(results, &avsproto.ContractWriteNode_MethodResult{
+						MethodName: "unknown",
+						Success:    true,
+						Transaction: &avsproto.ContractWriteNode_TransactionData{
+							Hash: txHash,
+						},
+					})
+				} else if transactionHash, ok := result["transactionHash"].(string); ok {
+					results = append(results, &avsproto.ContractWriteNode_MethodResult{
+						MethodName: "unknown",
+						Success:    true,
+						Transaction: &avsproto.ContractWriteNode_TransactionData{
+							Hash: transactionHash,
+						},
+					})
+				}
 			}
 
 			contractWriteOutput.Results = results
