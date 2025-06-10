@@ -642,7 +642,15 @@ func (v *VM) Run() error {
 				errorMsg = stackTraceRegex.ReplaceAllString(errorMsg, "")
 				// Clean up any extra whitespace left behind
 				errorMsg = strings.TrimSpace(errorMsg)
-				v.logger.Error("node execution failed, continuing execution", "nodeID", node.Id, "error", errorMsg)
+
+				// Categorize errors to avoid unnecessary stack traces for expected validation errors
+				if isExpectedValidationError(err) {
+					// Expected validation errors - log at WARN level without stack traces
+					v.logger.Warn("node execution failed, continuing execution", "nodeID", node.Id, "error", errorMsg)
+				} else {
+					// Unexpected system errors - log at ERROR level without stack traces for cleaner output
+					v.logger.Error("node execution failed, continuing execution", "nodeID", node.Id, "error", errorMsg)
+				}
 			}
 
 			// Continue to next step in sequence (don't follow jump since this node failed)
@@ -724,6 +732,11 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		}
 	} else if nodeValue := node.GetLoop(); nodeValue != nil {
 		executionLogForNode, err = v.runLoop(node.Id, nodeValue) // loop does not return a jump step
+		if executionLogForNode != nil {
+			v.addExecutionLog(executionLogForNode)
+		}
+	} else if nodeValue := node.GetFilter(); nodeValue != nil {
+		executionLogForNode, err = v.runFilter(node.Id, nodeValue)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
@@ -952,6 +965,18 @@ func (v *VM) runLoop(stepID string, nodeValue *avsproto.LoopNode) (*avsproto.Exe
 	v.mu.Unlock()
 	// v.addExecutionLog(executionLog)
 	return executionLog, err // Loop node itself doesn't dictate a jump in the main plan
+}
+
+func (v *VM) runFilter(stepID string, nodeValue *avsproto.FilterNode) (*avsproto.Execution_Step, error) {
+	p := NewFilterProcessor(v)
+	executionLog, err := p.Execute(stepID, nodeValue)
+	v.mu.Lock()
+	if executionLog != nil {
+		executionLog.Inputs = v.collectInputKeysForLog()
+	}
+	v.mu.Unlock()
+	// v.addExecutionLog(executionLog)
+	return executionLog, err
 }
 
 func (v *VM) runEthTransfer(stepID string, node *avsproto.ETHTransferNode) (*avsproto.Execution_Step, error) {
@@ -1725,7 +1750,10 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		if expression, ok := config["expression"].(string); ok {
 			filterConfig.Expression = expression
 		}
+		// Support both snake_case and camelCase for backward compatibility
 		if sourceId, ok := config["source_id"].(string); ok {
+			filterConfig.SourceId = sourceId
+		} else if sourceId, ok := config["sourceId"].(string); ok {
 			filterConfig.SourceId = sourceId
 		}
 
