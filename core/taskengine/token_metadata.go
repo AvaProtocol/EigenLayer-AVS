@@ -70,8 +70,10 @@ const (
 
 // Chain ID constants
 const (
-	ChainIDEthereum uint64 = 1
-	ChainIDSepolia  uint64 = 11155111
+	ChainIDEthereum    uint64 = 1
+	ChainIDSepolia     uint64 = 11155111
+	ChainIDBase        uint64 = 8453
+	ChainIDBaseSepolia uint64 = 84532
 )
 
 // NewTokenEnrichmentService creates a new token enrichment service
@@ -135,6 +137,10 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 		filename = "ethereum.json"
 	case ChainIDSepolia:
 		filename = "sepolia.json"
+	case ChainIDBase:
+		filename = "base.json"
+	case ChainIDBaseSepolia:
+		filename = "base-sepolia.json"
 	default:
 		// For unknown chains, try ethereum.json as fallback
 		filename = "ethereum.json"
