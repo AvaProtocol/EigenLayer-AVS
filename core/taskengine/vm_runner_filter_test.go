@@ -18,7 +18,10 @@ type MockTokenPrice struct {
 
 func TestFilter(t *testing.T) {
 	node := &avsproto.FilterNode{
-		Config: &avsproto.FilterNode_Config{},
+		Config: &avsproto.FilterNode_Config{
+			Expression: "current.cost > 5",
+			SourceId:   "trades",
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -66,10 +69,6 @@ func TestFilter(t *testing.T) {
 		},
 	})
 
-	// Add input variables that the processor expects
-	vm.AddVar("input", "trades")
-	vm.AddVar("expression", "value.cost > 5")
-
 	n := NewFilterProcessor(vm)
 	step, err := n.Execute("abc123", node)
 	if err != nil {
@@ -92,14 +91,17 @@ func TestFilter(t *testing.T) {
 		t.Errorf("expect return only one element with cost > 5 but got: %s", data[0])
 	}
 
-	if !strings.Contains(step.Log, "Input variable: 'trades', Expression: 'value.cost > 5'") {
+	if !strings.Contains(step.Log, "Source node ID: 'trades', Variable name: 'trades', Original Expression: 'current.cost > 5', Clean Expression: 'current.cost > 5'") {
 		t.Errorf("log doesn't contain execution info")
 	}
 }
 
 func TestFilterComplexLogic(t *testing.T) {
 	node := &avsproto.FilterNode{
-		Config: &avsproto.FilterNode_Config{},
+		Config: &avsproto.FilterNode_Config{
+			Expression: "if (index<=2) { return current.cost > 13; } else { return current.cost < 21; }",
+			SourceId:   "trades",
+		},
 	}
 
 	nodes := []*avsproto.TaskNode{
@@ -158,10 +160,6 @@ func TestFilterComplexLogic(t *testing.T) {
 			"name": "sixth",
 		},
 	})
-
-	// Add input variables that the processor expects
-	vm.AddVar("input", "trades")
-	vm.AddVar("expression", "if (index<=2) { return value.cost > 13; } else { return value.cost < 21; }")
 
 	n := NewFilterProcessor(vm)
 	step, err := n.Execute("abc123", node)

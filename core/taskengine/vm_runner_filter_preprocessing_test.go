@@ -16,7 +16,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 	}{
 		{
 			name:       "age filter with preprocessing using trigger data",
-			expression: "{{ trigger.data.minAge }} <= value.age",
+			expression: "{{ trigger.data.minAge }} <= current.age",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "age": 25},
 				map[string]interface{}{"name": "Bob", "age": 16},
@@ -26,7 +26,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 		},
 		{
 			name:       "age filter under 18 with preprocessing",
-			expression: "value.age < 18",
+			expression: "current.age < 18",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "age": 25},
 				map[string]interface{}{"name": "Bob", "age": 16},
@@ -36,7 +36,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 		},
 		{
 			name:       "name starts with filter with preprocessing",
-			expression: "value.name.startsWith(\"A\")",
+			expression: "current.name.startsWith(\"A\")",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "age": 25},
 				map[string]interface{}{"name": "Bob", "age": 16},
@@ -46,7 +46,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 		},
 		{
 			name:       "complex age range filter with preprocessing",
-			expression: "value.age >= 20 && value.age <= 22",
+			expression: "current.age >= 20 && current.age <= 22",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "age": 21},
 				map[string]interface{}{"name": "Bob", "age": 16},
@@ -57,7 +57,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 		},
 		{
 			name:       "filter without preprocessing",
-			expression: "value.age >= 18",
+			expression: "current.age >= 18",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "age": 25},
 				map[string]interface{}{"name": "Bob", "age": 16},
@@ -67,7 +67,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 		},
 		{
 			name:       "numeric property filter with preprocessing",
-			expression: "value.score > 80",
+			expression: "current.score > 80",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "score": 85},
 				map[string]interface{}{"name": "Bob", "score": 75},
@@ -77,7 +77,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 		},
 		{
 			name:       "boolean property filter with preprocessing",
-			expression: "value.active === true",
+			expression: "current.active === true",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "active": true},
 				map[string]interface{}{"name": "Bob", "active": false},
@@ -99,11 +99,11 @@ func TestFilterNodePreprocessing(t *testing.T) {
 				},
 			})
 
-			vm.AddVar("input", "testInput")
-			vm.AddVar("expression", tc.expression)
-
 			node := &avsproto.FilterNode{
-				Config: &avsproto.FilterNode_Config{},
+				Config: &avsproto.FilterNode_Config{
+					Expression: tc.expression,
+					SourceId:   "testInput",
+				},
 			}
 
 			stepResult, err := processor.Execute("filter1", node)
@@ -166,7 +166,7 @@ func TestFilterNodePreprocessingEdgeCases(t *testing.T) {
 		},
 		{
 			name:       "invalid property access",
-			expression: "{{ value.nonexistent.property }}",
+			expression: "{{ current.nonexistent.property }}",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "age": 25},
 			},
@@ -174,7 +174,7 @@ func TestFilterNodePreprocessingEdgeCases(t *testing.T) {
 		},
 		{
 			name:       "complex expression with index",
-			expression: "{{ index <= 1 && value.age >= 18 }}",
+			expression: "{{ index <= 1 && current.age >= 18 }}",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "age": 25},
 				map[string]interface{}{"name": "Bob", "age": 30},
@@ -191,11 +191,11 @@ func TestFilterNodePreprocessingEdgeCases(t *testing.T) {
 
 			vm.AddVar("testInput", tc.inputData)
 
-			vm.AddVar("input", "testInput")
-			vm.AddVar("expression", tc.expression)
-
 			node := &avsproto.FilterNode{
-				Config: &avsproto.FilterNode_Config{},
+				Config: &avsproto.FilterNode_Config{
+					Expression: tc.expression,
+					SourceId:   "testInput",
+				},
 			}
 
 			stepResult, err := processor.Execute("filter1", node)

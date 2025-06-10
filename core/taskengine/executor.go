@@ -52,6 +52,19 @@ func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
 		return nil, fmt.Errorf("failed to parse task data from storage (data may be corrupted): %w", err)
 	}
 
+	// Debug: Log FilterNode expressions after task retrieval from storage
+	if x.logger != nil {
+		for _, node := range task.Nodes {
+			if filterNode := node.GetFilter(); filterNode != nil && filterNode.Config != nil {
+				x.logger.Info("DEPLOY DEBUG: FilterNode expression after storage retrieval",
+					"task_id", task.Id,
+					"node_id", node.Id,
+					"node_name", node.Name,
+					"expression", filterNode.Config.Expression)
+			}
+		}
+	}
+
 	return task, nil
 }
 
@@ -111,11 +124,37 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	secrets, _ := LoadSecretForTask(x.db, task)
 
+	// Debug: Log FilterNode expressions in task before VM creation
+	if x.logger != nil {
+		for _, node := range task.Nodes {
+			if filterNode := node.GetFilter(); filterNode != nil && filterNode.Config != nil {
+				x.logger.Info("DEPLOY DEBUG: FilterNode expression before VM creation",
+					"task_id", task.Id,
+					"node_id", node.Id,
+					"node_name", node.Name,
+					"expression", filterNode.Config.Expression)
+			}
+		}
+	}
+
 	// Create VM with trigger reason data
 	vm, err := NewVMWithData(task, triggerReason, x.smartWalletConfig, secrets)
 
 	if err != nil {
 		return nil, err
+	}
+
+	// Debug: Log FilterNode expressions in VM after creation
+	if x.logger != nil {
+		for nodeID, taskNode := range vm.TaskNodes {
+			if filterNode := taskNode.GetFilter(); filterNode != nil && filterNode.Config != nil {
+				x.logger.Info("DEPLOY DEBUG: FilterNode expression after VM creation",
+					"task_id", task.Id,
+					"node_id", nodeID,
+					"node_name", taskNode.Name,
+					"expression", filterNode.Config.Expression)
+			}
+		}
 	}
 
 	vm.WithLogger(x.logger).WithDb(x.db)
@@ -134,6 +173,18 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		x.logger.Error("error compile task", "error", err, "edges", task.Edges, "node", task.Nodes, "task trigger data", task.Trigger, "task trigger metadata", queueData)
 		runTaskErr = err
 	} else {
+		// Debug: Log FilterNode expressions after VM compilation
+		if x.logger != nil {
+			for nodeID, taskNode := range vm.TaskNodes {
+				if filterNode := taskNode.GetFilter(); filterNode != nil && filterNode.Config != nil {
+					x.logger.Info("DEPLOY DEBUG: FilterNode expression after VM compilation",
+						"task_id", task.Id,
+						"node_id", nodeID,
+						"node_name", taskNode.Name,
+						"expression", filterNode.Config.Expression)
+				}
+			}
+		}
 		// Create and add a trigger execution step before running nodes
 		// This ensures regular workflows have complete execution history (trigger + nodes)
 
