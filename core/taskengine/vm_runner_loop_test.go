@@ -9,6 +9,15 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// createMockTaskNode is a helper function to create mock TaskNodes for testing
+func createMockTaskNode(id, name string, nodeType avsproto.NodeType) *avsproto.TaskNode {
+	return &avsproto.TaskNode{
+		Id:   id,
+		Name: name,
+		Type: nodeType,
+	}
+}
+
 func TestLoopProcessor_Execute_Sequential(t *testing.T) {
 	vm := NewVM()
 	vm.WithLogger(testutil.GetLogger())
@@ -20,11 +29,7 @@ func TestLoopProcessor_Execute_Sequential(t *testing.T) {
 	})
 
 	// Create a mock data generation node for testing
-	dataGenNode := &avsproto.TaskNode{
-		Id:   "test_data_gen",
-		Name: "testArray",
-		Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
-	}
+	dataGenNode := createMockTaskNode("test_data_gen", "testArray", avsproto.NodeType_NODE_TYPE_CUSTOM_CODE)
 	vm.TaskNodes["test_data_gen"] = dataGenNode
 
 	customCode := &avsproto.CustomCodeNode{
@@ -75,11 +80,7 @@ func TestLoopProcessor_Execute_Parallel(t *testing.T) {
 	})
 
 	// Create a mock data generation node for testing
-	dataGenNode := &avsproto.TaskNode{
-		Id:   "test_data_gen",
-		Name: "testArray",
-		Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
-	}
+	dataGenNode := createMockTaskNode("test_data_gen", "testArray", avsproto.NodeType_NODE_TYPE_CUSTOM_CODE)
 	vm.TaskNodes["test_data_gen"] = dataGenNode
 
 	customCode := &avsproto.CustomCodeNode{
@@ -134,11 +135,7 @@ func TestLoopProcessor_Execute_EmptyArray(t *testing.T) {
 	})
 
 	// Create a mock data generation node for testing
-	dataGenNode := &avsproto.TaskNode{
-		Id:   "test_data_gen_empty",
-		Name: "emptyArray",
-		Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
-	}
+	dataGenNode := createMockTaskNode("test_data_gen_empty", "emptyArray", avsproto.NodeType_NODE_TYPE_CUSTOM_CODE)
 	vm.TaskNodes["test_data_gen_empty"] = dataGenNode
 
 	customCode := &avsproto.CustomCodeNode{
@@ -183,11 +180,7 @@ func TestLoopProcessor_Execute_InvalidInput(t *testing.T) {
 	})
 
 	// Create a mock data generation node for testing
-	dataGenNode := &avsproto.TaskNode{
-		Id:   "test_data_gen_invalid",
-		Name: "notArray",
-		Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
-	}
+	dataGenNode := createMockTaskNode("test_data_gen_invalid", "notArray", avsproto.NodeType_NODE_TYPE_CUSTOM_CODE)
 	vm.TaskNodes["test_data_gen_invalid"] = dataGenNode
 
 	customCode := &avsproto.CustomCodeNode{
@@ -221,11 +214,7 @@ func TestLoopProcessor_Execute_MissingInput(t *testing.T) {
 	processor := NewLoopProcessor(vm)
 
 	// Create a mock data generation node for testing (but don't add corresponding VM variable)
-	dataGenNode := &avsproto.TaskNode{
-		Id:   "test_data_gen_missing",
-		Name: "nonExistentArray",
-		Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
-	}
+	dataGenNode := createMockTaskNode("test_data_gen_missing", "nonExistentArray", avsproto.NodeType_NODE_TYPE_CUSTOM_CODE)
 	vm.TaskNodes["test_data_gen_missing"] = dataGenNode
 
 	customCode := &avsproto.CustomCodeNode{

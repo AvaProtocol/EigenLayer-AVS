@@ -1941,6 +1941,11 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		}
 
+		// Validate that a runner is provided to prevent nil-pointer dereference
+		if loopNode.Runner == nil {
+			return nil, fmt.Errorf("loop node must have either customCode or restApi runner configuration")
+		}
+
 		node.TaskType = &avsproto.TaskNode_Loop{
 			Loop: loopNode,
 		}
