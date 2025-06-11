@@ -919,6 +919,10 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 			if err := json.Unmarshal([]byte(jsonData), &parsedData); err == nil {
 				result["data"] = parsedData
 			} else {
+				// Log the error if JSON parsing fails
+				if n.logger != nil {
+					n.logger.Warn("Failed to unmarshal Loop output", "error", err.Error(), "jsonData", jsonData)
+				}
 				// Fallback to raw string if JSON parsing fails
 				result["data"] = jsonData
 			}
