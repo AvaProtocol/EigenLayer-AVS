@@ -1494,16 +1494,16 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 					NodeId:  "",
 				}, nil
 			}
-			// Return structured data for consistency with other node types
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_CustomCode{
-				CustomCode: &avsproto.CustomCodeNode_Output{
+			// Wrap structured data in LoopNode_Output
+			resp.OutputData = &avsproto.RunNodeWithInputsResp_Loop{
+				Loop: &avsproto.LoopNode_Output{
 					Data: valueData,
 				},
 			}
 		} else {
 			// Empty loop result
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_CustomCode{
-				CustomCode: &avsproto.CustomCodeNode_Output{
+			resp.OutputData = &avsproto.RunNodeWithInputsResp_Loop{
+				Loop: &avsproto.LoopNode_Output{
 					Data: &structpb.Value{
 						Kind: &structpb.Value_ListValue{
 							ListValue: &structpb.ListValue{
