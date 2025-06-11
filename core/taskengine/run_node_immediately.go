@@ -1485,32 +1485,27 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		}
 	case NodeTypeLoop:
 		if result != nil && len(result) > 0 {
-			// For loop nodes, return structured data like other node types
-			valueData, err := structpb.NewValue(result)
+			// For loop nodes, convert structured data to JSON string
+			// (consistent with how Loop nodes store data elsewhere in the codebase)
+			jsonData, err := json.Marshal(result)
 			if err != nil {
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,
-					Error:   fmt.Sprintf("failed to convert loop output: %v", err),
+					Error:   fmt.Sprintf("failed to convert loop output to JSON: %v", err),
 					NodeId:  "",
 				}, nil
 			}
-			// Wrap structured data in LoopNode_Output
+			// Wrap JSON string in LoopNode_Output
 			resp.OutputData = &avsproto.RunNodeWithInputsResp_Loop{
 				Loop: &avsproto.LoopNode_Output{
-					Data: valueData,
+					Data: string(jsonData),
 				},
 			}
 		} else {
-			// Empty loop result
+			// Empty loop result as JSON array string
 			resp.OutputData = &avsproto.RunNodeWithInputsResp_Loop{
 				Loop: &avsproto.LoopNode_Output{
-					Data: &structpb.Value{
-						Kind: &structpb.Value_ListValue{
-							ListValue: &structpb.ListValue{
-								Values: []*structpb.Value{},
-							},
-						},
-					},
+					Data: "[]",
 				},
 			}
 		}
