@@ -968,7 +968,25 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 	}
 
 	// If no specific data was extracted, include basic execution info
+	// BUT preserve empty objects/arrays as-is for consistency
 	if len(result) == 0 {
+		// Check if this was a successful execution with explicitly empty result
+		if executionStep.Success && executionStep.Error == "" {
+			// Check the node type to determine appropriate empty structure
+			// No special handling for CustomCode - it should return exactly what the code returns
+			result["success"] = executionStep.Success
+			result["nodeId"] = executionStep.Id
+			if executionStep.Error != "" {
+				result["error"] = executionStep.Error
+			}
+		} else {
+			result["success"] = executionStep.Success
+			result["nodeId"] = executionStep.Id
+			if executionStep.Error != "" {
+				result["error"] = executionStep.Error
+			}
+		}
+	} else {
 		result["success"] = executionStep.Success
 		result["nodeId"] = executionStep.Id
 		if executionStep.Error != "" {
@@ -1113,12 +1131,42 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			RestApi: restOutput,
 		}
 	case NodeTypeCustomCode:
-		// For custom code nodes
-		valueData, err := structpb.NewValue(result)
+		// For CustomCode immediate execution, return exactly what the JavaScript code returned
+		// Extract the raw data from the wrapped result to avoid nested structures and metadata pollution
+		var rawData interface{}
+
+		if result != nil {
+			// Check if this looks like an extractExecutionResult-processed object with metadata
+			if hasMetadata := (result["success"] != nil || result["nodeId"] != nil); hasMetadata {
+				// This result has been processed by extractExecutionResult, extract the original data
+				if dataField, ok := result["data"]; ok {
+					// Non-object return (like 42, "hello", null) - use the "data" field
+					rawData = dataField
+				} else {
+					// Object return that got metadata added - extract the original object
+					originalObject := make(map[string]interface{})
+					for k, v := range result {
+						// Skip metadata fields added by extractExecutionResult
+						if k != "success" && k != "nodeId" && k != "error" {
+							originalObject[k] = v
+						}
+					}
+					// If nothing remains after removing metadata, it was an empty object
+					rawData = originalObject
+				}
+			} else {
+				// No metadata detected, use result as-is
+				rawData = result
+			}
+		} else {
+			rawData = nil
+		}
+
+		valueData, err := structpb.NewValue(rawData)
 		if err != nil {
 			return &avsproto.RunNodeWithInputsResp{
 				Success: false,
-				Error:   fmt.Sprintf("failed to convert output: %v", err),
+				Error:   fmt.Sprintf("failed to convert CustomCode output: %v", err),
 				NodeId:  "",
 			}, nil
 		}
@@ -1330,8 +1378,10 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			ContractWrite: contractWriteOutput,
 		}
 	case NodeTypeGraphQLQuery:
+		// For GraphQL query nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
+		graphqlOutput := &avsproto.GraphQLQueryNode_Output{}
 		if result != nil && len(result) > 0 {
-			// For GraphQL query nodes, convert result to appropriate format
+			// Set actual GraphQL result data
 			anyData, err := structpb.NewValue(result)
 			if err != nil {
 				return &avsproto.RunNodeWithInputsResp{
@@ -1348,27 +1398,50 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 					NodeId:  "",
 				}, nil
 			}
-			graphqlOutput := &avsproto.GraphQLQueryNode_Output{
-				Data: anyProto,
+			graphqlOutput.Data = anyProto
+		} else {
+			// Set empty object for no result
+			emptyData, err := structpb.NewValue(map[string]interface{}{})
+			if err != nil {
+				return &avsproto.RunNodeWithInputsResp{
+					Success: false,
+					Error:   fmt.Sprintf("failed to create empty GraphQL output: %v", err),
+					NodeId:  "",
+				}, nil
 			}
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_Graphql{
-				Graphql: graphqlOutput,
+			emptyProto, err := anypb.New(emptyData)
+			if err != nil {
+				return &avsproto.RunNodeWithInputsResp{
+					Success: false,
+					Error:   fmt.Sprintf("failed to create empty Any proto for GraphQL: %v", err),
+					NodeId:  "",
+				}, nil
 			}
+			graphqlOutput.Data = emptyProto
+		}
+		resp.OutputData = &avsproto.RunNodeWithInputsResp_Graphql{
+			Graphql: graphqlOutput,
 		}
 	case NodeTypeBranch:
+		// For branch nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
+		branchOutput := &avsproto.BranchNode_Output{}
 		if result != nil && len(result) > 0 {
-			// For branch nodes, convert result to appropriate format
-			branchOutput := &avsproto.BranchNode_Output{}
+			// Set actual branch result data
 			if conditionId, ok := result["conditionId"].(string); ok {
 				branchOutput.ConditionId = conditionId
 			}
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_Branch{
-				Branch: branchOutput,
-			}
+		} else {
+			// Set empty string for no result
+			branchOutput.ConditionId = ""
+		}
+		resp.OutputData = &avsproto.RunNodeWithInputsResp_Branch{
+			Branch: branchOutput,
 		}
 	case NodeTypeFilter:
+		// For filter nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
+		filterOutput := &avsproto.FilterNode_Output{}
 		if result != nil && len(result) > 0 {
-			// For filter nodes, convert result to appropriate format
+			// Set actual filter result data
 			anyData, err := structpb.NewValue(result)
 			if err != nil {
 				return &avsproto.RunNodeWithInputsResp{
@@ -1385,12 +1458,30 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 					NodeId:  "",
 				}, nil
 			}
-			filterOutput := &avsproto.FilterNode_Output{
-				Data: anyProto,
+			filterOutput.Data = anyProto
+		} else {
+			// Set empty array for no result
+			emptyArray := []interface{}{}
+			emptyData, err := structpb.NewValue(emptyArray)
+			if err != nil {
+				return &avsproto.RunNodeWithInputsResp{
+					Success: false,
+					Error:   fmt.Sprintf("failed to create empty Filter output: %v", err),
+					NodeId:  "",
+				}, nil
 			}
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_Filter{
-				Filter: filterOutput,
+			emptyProto, err := anypb.New(emptyData)
+			if err != nil {
+				return &avsproto.RunNodeWithInputsResp{
+					Success: false,
+					Error:   fmt.Sprintf("failed to create empty Any proto for Filter: %v", err),
+					NodeId:  "",
+				}, nil
 			}
+			filterOutput.Data = emptyProto
+		}
+		resp.OutputData = &avsproto.RunNodeWithInputsResp_Filter{
+			Filter: filterOutput,
 		}
 	case NodeTypeLoop:
 		if result != nil && len(result) > 0 {
@@ -1525,32 +1616,49 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 	// Set the appropriate output data based on the trigger type using shared functions
 	switch triggerTypeStr {
 	case NodeTypeBlockTrigger:
+		// For block triggers - always set output structure to avoid OUTPUT_DATA_NOT_SET
 		if result != nil {
 			blockOutput := buildBlockTriggerOutput(result)
 			resp.OutputData = &avsproto.RunTriggerResp_BlockTrigger{
 				BlockTrigger: blockOutput,
 			}
+		} else {
+			// Set empty block trigger output for no result
+			resp.OutputData = &avsproto.RunTriggerResp_BlockTrigger{
+				BlockTrigger: &avsproto.BlockTrigger_Output{},
+			}
 		}
 	case NodeTypeFixedTimeTrigger:
+		// For fixed time triggers - always set output structure to avoid OUTPUT_DATA_NOT_SET
 		if result != nil {
 			fixedTimeOutput := buildFixedTimeTriggerOutput(result)
 			resp.OutputData = &avsproto.RunTriggerResp_FixedTimeTrigger{
 				FixedTimeTrigger: fixedTimeOutput,
 			}
+		} else {
+			// Set empty fixed time trigger output for no result
+			resp.OutputData = &avsproto.RunTriggerResp_FixedTimeTrigger{
+				FixedTimeTrigger: &avsproto.FixedTimeTrigger_Output{},
+			}
 		}
 	case NodeTypeCronTrigger:
+		// For cron triggers - always set output structure to avoid OUTPUT_DATA_NOT_SET
+		cronOutput := &avsproto.CronTrigger_Output{}
 		if result != nil {
-			// Convert result to CronTrigger output
-			cronOutput := &avsproto.CronTrigger_Output{}
+			// Set actual cron trigger result data
 			if timestamp, ok := result["timestamp"].(uint64); ok {
 				cronOutput.Timestamp = timestamp
 			}
 			if timestampISO, ok := result["timestamp_iso"].(string); ok {
 				cronOutput.TimestampIso = timestampISO
 			}
-			resp.OutputData = &avsproto.RunTriggerResp_CronTrigger{
-				CronTrigger: cronOutput,
-			}
+		} else {
+			// Set empty values for no result (cronOutput already initialized)
+			cronOutput.Timestamp = 0
+			cronOutput.TimestampIso = ""
+		}
+		resp.OutputData = &avsproto.RunTriggerResp_CronTrigger{
+			CronTrigger: cronOutput,
 		}
 	case NodeTypeEventTrigger:
 		// Use shared function to build EventTrigger output (handles nil result gracefully)
