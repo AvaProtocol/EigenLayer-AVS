@@ -11,6 +11,14 @@ type TriggerData struct {
 	Output interface{} // Will hold the specific trigger output (BlockTrigger.Output, etc.)
 }
 
+// ExecutionState contains information about task execution state returned to operators
+type ExecutionState struct {
+	RemainingExecutions int64  // How many executions are left for this task
+	TaskStillActive     bool   // Whether the task is still active and should be monitored
+	Status              string // Task status: "active", "exhausted", "cancelled", "expired", etc.
+	Message             string // Optional message for debugging/logging
+}
+
 // ExtractTriggerOutput extracts trigger output from any oneof field (TriggerTaskReq or NotifyTriggersReq)
 func ExtractTriggerOutput(triggerOutput interface{}) interface{} {
 	switch output := triggerOutput.(type) {

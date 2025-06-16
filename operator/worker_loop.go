@@ -189,7 +189,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		case triggerItem := <-timeTriggerCh:
 			o.logger.Info("time trigger", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
 
-			if _, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
+			if resp, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
 				Address:     o.config.OperatorAddress,
 				Signature:   "pending",
 				TaskId:      triggerItem.TaskID,
@@ -201,7 +201,32 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 					},
 				},
 			}); err == nil {
-				o.logger.Debug("Successfully notify aggregator for task hit", "taskid", triggerItem.TaskID)
+				o.logger.Debug("Successfully notify aggregator for task hit",
+					"taskid", triggerItem.TaskID,
+					"remaining_executions", resp.RemainingExecutions,
+					"task_still_active", resp.TaskStillActive,
+					"status", resp.Status)
+
+				// Check if task should stop being monitored
+				if !resp.TaskStillActive || resp.RemainingExecutions == 0 {
+					o.logger.Info("🛑 Task exhausted, requesting stop monitoring",
+						"task_id", triggerItem.TaskID,
+						"remaining_executions", resp.RemainingExecutions,
+						"status", resp.Status,
+						"message", resp.Message)
+
+					// Remove task from time trigger monitoring
+					if o.timeTrigger != nil {
+						if err := o.timeTrigger.RemoveCheck(triggerItem.TaskID); err != nil {
+							o.logger.Warn("Failed to remove exhausted task from time monitoring",
+								"task_id", triggerItem.TaskID,
+								"error", err)
+						} else {
+							o.logger.Info("✅ Removed exhausted task from time monitoring",
+								"task_id", triggerItem.TaskID)
+						}
+					}
+				}
 			} else {
 				// Use debounced logging for trigger notification errors to prevent stack traces
 				var errorType string
@@ -236,7 +261,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 			}
 			blockTasksMutex.Unlock()
 
-			if _, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
+			if resp, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
 				Address:     o.config.OperatorAddress,
 				Signature:   "pending",
 				TaskId:      triggerItem.TaskID,
@@ -254,7 +279,32 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 					},
 				},
 			}); err == nil {
-				o.logger.Debug("Successfully notify aggregator for task hit", "taskid", triggerItem.TaskID)
+				o.logger.Debug("Successfully notify aggregator for task hit",
+					"taskid", triggerItem.TaskID,
+					"remaining_executions", resp.RemainingExecutions,
+					"task_still_active", resp.TaskStillActive,
+					"status", resp.Status)
+
+				// Check if task should stop being monitored
+				if !resp.TaskStillActive || resp.RemainingExecutions == 0 {
+					o.logger.Info("🛑 Task exhausted, requesting stop monitoring",
+						"task_id", triggerItem.TaskID,
+						"remaining_executions", resp.RemainingExecutions,
+						"status", resp.Status,
+						"message", resp.Message)
+
+					// Remove task from block trigger monitoring
+					if o.blockTrigger != nil {
+						if err := o.blockTrigger.RemoveCheck(triggerItem.TaskID); err != nil {
+							o.logger.Warn("Failed to remove exhausted task from block monitoring",
+								"task_id", triggerItem.TaskID,
+								"error", err)
+						} else {
+							o.logger.Info("✅ Removed exhausted task from block monitoring",
+								"task_id", triggerItem.TaskID)
+						}
+					}
+				}
 			} else {
 				// Use debounced logging for trigger notification errors to prevent stack traces
 				var errorType string
@@ -281,7 +331,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		case triggerItem := <-eventTriggerCh:
 			o.logger.Info("event trigger", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
 
-			if _, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
+			if resp, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
 				Address:     o.config.OperatorAddress,
 				Signature:   "pending",
 				TaskId:      triggerItem.TaskID,
@@ -303,7 +353,32 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 					},
 				},
 			}); err == nil {
-				o.logger.Debug("Successfully notify aggregator for task hit", "taskid", triggerItem.TaskID)
+				o.logger.Debug("Successfully notify aggregator for task hit",
+					"taskid", triggerItem.TaskID,
+					"remaining_executions", resp.RemainingExecutions,
+					"task_still_active", resp.TaskStillActive,
+					"status", resp.Status)
+
+				// Check if task should stop being monitored
+				if !resp.TaskStillActive || resp.RemainingExecutions == 0 {
+					o.logger.Info("🛑 Task exhausted, requesting stop monitoring",
+						"task_id", triggerItem.TaskID,
+						"remaining_executions", resp.RemainingExecutions,
+						"status", resp.Status,
+						"message", resp.Message)
+
+					// Remove task from event trigger monitoring
+					if o.eventTrigger != nil {
+						if err := o.eventTrigger.RemoveCheck(triggerItem.TaskID); err != nil {
+							o.logger.Warn("Failed to remove exhausted task from event monitoring",
+								"task_id", triggerItem.TaskID,
+								"error", err)
+						} else {
+							o.logger.Info("✅ Removed exhausted task from event monitoring",
+								"task_id", triggerItem.TaskID)
+						}
+					}
+				}
 			} else {
 				// Use debounced logging for trigger notification errors to prevent stack traces
 				var errorType string
