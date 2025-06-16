@@ -3082,19 +3082,19 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 			// Check if we have transfer log data in the event output
 			if transferLogData := eventOutput.GetTransferLog(); transferLogData != nil {
 				// Use transfer log data to populate rich trigger data matching runTrigger format
-				triggerDataMap["tokenName"] = transferLogData.TokenName
-				triggerDataMap["tokenSymbol"] = transferLogData.TokenSymbol
-				triggerDataMap["tokenDecimals"] = transferLogData.TokenDecimals
-				triggerDataMap["transactionHash"] = transferLogData.TransactionHash
+				triggerDataMap["token_name"] = transferLogData.TokenName
+				triggerDataMap["token_symbol"] = transferLogData.TokenSymbol
+				triggerDataMap["token_decimals"] = transferLogData.TokenDecimals
+				triggerDataMap["transaction_hash"] = transferLogData.TransactionHash
 				triggerDataMap["address"] = transferLogData.Address
-				triggerDataMap["blockNumber"] = transferLogData.BlockNumber
-				triggerDataMap["blockTimestamp"] = transferLogData.BlockTimestamp
-				triggerDataMap["fromAddress"] = transferLogData.FromAddress
-				triggerDataMap["toAddress"] = transferLogData.ToAddress
+				triggerDataMap["block_number"] = transferLogData.BlockNumber
+				triggerDataMap["block_timestamp"] = transferLogData.BlockTimestamp
+				triggerDataMap["from_address"] = transferLogData.FromAddress
+				triggerDataMap["to_address"] = transferLogData.ToAddress
 				triggerDataMap["value"] = transferLogData.Value
-				triggerDataMap["valueFormatted"] = transferLogData.ValueFormatted
-				triggerDataMap["transactionIndex"] = transferLogData.TransactionIndex
-				triggerDataMap["logIndex"] = transferLogData.LogIndex
+				triggerDataMap["value_formatted"] = transferLogData.ValueFormatted
+				triggerDataMap["transaction_index"] = transferLogData.TransactionIndex
+				triggerDataMap["log_index"] = transferLogData.LogIndex
 			} else if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
 				// Fall back to basic EVM log data matching runTrigger format
 				triggerDataMap["block_number"] = evmLog.BlockNumber
