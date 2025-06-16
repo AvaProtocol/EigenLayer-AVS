@@ -286,10 +286,8 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 				"blocksSearched", querySearched)
 		}
 
-		// OPTIMIZATION: For immediate execution, stop after finding events from any query
-		if len(queryEvents) > 0 {
-			break
-		}
+		// Continue processing all queries to find the most recent event across all queries
+		// Don't stop early - we need to check all queries to find the truly most recent event
 	}
 
 	if n.logger != nil {
@@ -473,60 +471,34 @@ func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Ad
 	var allEvents []types.Log
 	var totalSearched uint64
 
-	// PRIORITY SEARCH: First, search very recent blocks for the most recent events
-	// This ensures we find the latest events even if RPC has sync issues
-	recentRanges := []uint64{100, 500, 2000} // Last 100, 500, 2000 blocks
+	// PRIORITY SEARCH: Search very recent blocks first to find the most recent events
+	// Use a single comprehensive search of recent blocks instead of stopping early
+	recentRange := uint64(5000) // Search last 5000 blocks for most recent events
 
-	for _, recentRange := range recentRanges {
-		select {
-		case <-ctx.Done():
+	var fromBlock uint64
+	if currentBlock < recentRange {
+		fromBlock = 0
+	} else {
+		fromBlock = currentBlock - recentRange
+	}
+
+	// Prepare filter query for recent comprehensive search
+	query := ethereum.FilterQuery{
+		FromBlock: big.NewInt(int64(fromBlock)),
+		ToBlock:   big.NewInt(int64(currentBlock)),
+		Addresses: addresses,
+		Topics:    topics,
+	}
+
+	// Search recent blocks comprehensively
+	logs, err := rpcConn.FilterLogs(ctx, query)
+	if err == nil {
+		totalSearched += (currentBlock - fromBlock)
+		allEvents = append(allEvents, logs...)
+
+		if len(logs) > 0 {
+			// Return immediately since we found events in the most recent range
 			return allEvents, totalSearched, nil
-		default:
-		}
-
-		var fromBlock uint64
-		if currentBlock < recentRange {
-			fromBlock = 0
-		} else {
-			fromBlock = currentBlock - recentRange
-		}
-
-		// Prepare filter query for recent search
-		query := ethereum.FilterQuery{
-			FromBlock: big.NewInt(int64(fromBlock)),
-			ToBlock:   big.NewInt(int64(currentBlock)),
-			Addresses: addresses,
-			Topics:    topics,
-		}
-
-		if n.logger != nil {
-			n.logger.Debug("EventTrigger: Priority search for recent events",
-				"fromBlock", fromBlock,
-				"toBlock", currentBlock,
-				"blockRange", currentBlock-fromBlock)
-		}
-
-		// Search recent blocks
-		logs, err := rpcConn.FilterLogs(ctx, query)
-		if err == nil {
-			totalSearched += (currentBlock - fromBlock)
-			allEvents = append(allEvents, logs...)
-
-			if len(logs) > 0 {
-				if n.logger != nil {
-					n.logger.Info("EventTrigger: Found recent events - returning immediately",
-						"fromBlock", fromBlock,
-						"toBlock", currentBlock,
-						"eventsFound", len(logs),
-						"blockRange", currentBlock-fromBlock)
-				}
-				return allEvents, totalSearched, nil
-			}
-		} else if n.logger != nil {
-			n.logger.Debug("EventTrigger: Recent search failed, continuing",
-				"fromBlock", fromBlock,
-				"toBlock", currentBlock,
-				"error", err)
 		}
 	}
 
@@ -693,8 +665,9 @@ func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Ad
 				"blockRange", currentBlock-fromBlock)
 		}
 
-		// If we found events in this range, return them (they should be the most recent available)
-		if len(logs) > 0 {
+		// Continue searching even if we found events to ensure we get the most recent ones
+		// Only return early if we're searching a very recent range (< 5000 blocks)
+		if len(logs) > 0 && (currentBlock-fromBlock) < 5000 {
 			return allEvents, totalSearched, nil
 		}
 

@@ -698,12 +698,18 @@ func (r *RpcServer) SyncMessages(payload *avsproto.SyncMessagesReq, srv avsproto
 
 // Operator action
 func (r *RpcServer) NotifyTriggers(ctx context.Context, payload *avsproto.NotifyTriggersReq) (*avsproto.NotifyTriggersResp, error) {
-	if err := r.engine.AggregateChecksResult(payload.Address, payload); err != nil {
+	// Process the trigger and get execution state information
+	executionState, err := r.engine.AggregateChecksResultWithState(payload.Address, payload)
+	if err != nil {
 		return nil, err
 	}
 
 	return &avsproto.NotifyTriggersResp{
-		UpdatedAt: timestamppb.Now(),
+		UpdatedAt:           timestamppb.Now(),
+		RemainingExecutions: executionState.RemainingExecutions,
+		TaskStillActive:     executionState.TaskStillActive,
+		Status:              executionState.Status,
+		Message:             executionState.Message,
 	}, nil
 }
 
