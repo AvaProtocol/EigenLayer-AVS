@@ -8,7 +8,7 @@ package avsproto
 
 import (
 	context "context"
-	wrappers "github.com/golang/protobuf/ptypes/wrappers"
+	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
