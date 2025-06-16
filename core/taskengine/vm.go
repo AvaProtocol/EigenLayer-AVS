@@ -68,8 +68,8 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 		if inputValue := taskNode.Input.AsInterface(); inputValue != nil {
 			stepData["input"] = inputValue
 		}
-	} else if trigger := c.vm.task.Trigger; trigger != nil && trigger.Id == stepID && trigger.Input != nil {
-		if inputValue := trigger.Input.AsInterface(); inputValue != nil {
+	} else if c.vm.task != nil && c.vm.task.Trigger != nil && c.vm.task.Trigger.Id == stepID && c.vm.task.Trigger.Input != nil {
+		if inputValue := c.vm.task.Trigger.Input.AsInterface(); inputValue != nil {
 			stepData["input"] = inputValue
 		}
 	}
