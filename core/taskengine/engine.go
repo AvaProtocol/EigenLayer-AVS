@@ -252,15 +252,22 @@ func (n *Engine) MustStart() error {
 	if e != nil {
 		panic(e)
 	}
+
+	loadedCount := 0
 	for _, item := range kvs {
 		task := &model.Task{
 			Task: &avsproto.Task{},
 		}
 		err := protojson.Unmarshal(item.Value, task)
 		if err == nil {
-			n.tasks[string(item.Key)] = task
+			n.tasks[task.Id] = task // Fixed: Use task.Id instead of string(item.Key)
+			loadedCount++
+		} else {
+			n.logger.Warn("Failed to unmarshal task during startup", "storage_key", string(item.Key), "error", err)
 		}
 	}
+
+	n.logger.Info("🚀 Engine started successfully", "active_tasks_loaded", loadedCount)
 
 	// Start the batch notification processor
 	go n.processBatchedNotifications()
@@ -941,12 +948,37 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 	// Get task information to determine execution state
 	task, exists := n.tasks[payload.TaskId]
 	if !exists {
-		return &ExecutionState{
-			RemainingExecutions: 0,
-			TaskStillActive:     false,
-			Status:              "not_found",
-			Message:             "Task not found",
-		}, fmt.Errorf("task %s not found", payload.TaskId)
+		// Task not found in memory - this could indicate a synchronization issue
+		// Try to load the task from database as a fallback
+		n.logger.Warn("Task not found in memory, attempting database lookup",
+			"task_id", payload.TaskId,
+			"operator", address,
+			"memory_task_count", len(n.tasks))
+
+		dbTask, dbErr := n.GetTaskByID(payload.TaskId)
+		if dbErr != nil {
+			n.logger.Error("Task not found in database either",
+				"task_id", payload.TaskId,
+				"operator", address,
+				"db_error", dbErr)
+			return &ExecutionState{
+				RemainingExecutions: 0,
+				TaskStillActive:     false,
+				Status:              "not_found",
+				Message:             "Task not found",
+			}, fmt.Errorf("task %s not found", payload.TaskId)
+		}
+
+		// Task found in database but not in memory - add it to memory and continue
+		n.lock.Lock()
+		n.tasks[dbTask.Id] = dbTask
+		n.lock.Unlock()
+		task = dbTask
+
+		n.logger.Info("Task recovered from database and added to memory",
+			"task_id", payload.TaskId,
+			"operator", address,
+			"task_status", task.Status)
 	}
 
 	// Check if task is still runnable
@@ -1443,8 +1475,33 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	vm.WithLogger(n.logger).WithDb(n.db)
 
 	// Add input variables to VM for template processing
+	// Apply dual-access mapping to enable both camelCase and snake_case field access
 	for key, value := range inputVariables {
-		vm.AddVar(key, value)
+		// Apply dual-access mapping if the value is a map with a "data" field
+		if valueMap, ok := value.(map[string]interface{}); ok {
+			if dataField, hasData := valueMap["data"]; hasData {
+				if dataMap, isDataMap := dataField.(map[string]interface{}); isDataMap {
+					// Apply dual-access mapping to the data field
+					dualAccessData := CreateDualAccessMap(dataMap)
+					// Create a new map with the dual-access data
+					processedValue := make(map[string]interface{})
+					for k, v := range valueMap {
+						if k == "data" {
+							processedValue[k] = dualAccessData
+						} else {
+							processedValue[k] = v
+						}
+					}
+					vm.AddVar(key, processedValue)
+				} else {
+					vm.AddVar(key, value)
+				}
+			} else {
+				vm.AddVar(key, value)
+			}
+		} else {
+			vm.AddVar(key, value)
+		}
 	}
 
 	// Step 6: Add trigger data as "trigger" variable for convenient access in JavaScript
@@ -2936,9 +2993,17 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 			triggerDataMap["gasUsed"] = gasUsed
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
-		// Copy all event trigger data
-		for k, v := range triggerOutput {
-			triggerDataMap[k] = v
+		// Handle event trigger data with special processing for transfer_log
+		if transferLogData, hasTransferLog := triggerOutput["transfer_log"].(map[string]interface{}); hasTransferLog {
+			// Flatten transfer_log data to top level for JavaScript access
+			for k, v := range transferLogData {
+				triggerDataMap[k] = v
+			}
+		} else {
+			// For non-transfer events, copy all event trigger data
+			for k, v := range triggerOutput {
+				triggerDataMap[k] = v
+			}
 		}
 	default:
 		// For unknown trigger types, copy all output data
@@ -3082,29 +3147,31 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 			// Check if we have transfer log data in the event output
 			if transferLogData := eventOutput.GetTransferLog(); transferLogData != nil {
 				// Use transfer log data to populate rich trigger data matching runTrigger format
-				triggerDataMap["token_name"] = transferLogData.TokenName
-				triggerDataMap["token_symbol"] = transferLogData.TokenSymbol
-				triggerDataMap["token_decimals"] = transferLogData.TokenDecimals
-				triggerDataMap["transaction_hash"] = transferLogData.TransactionHash
+				// Use camelCase field names for JavaScript compatibility
+				triggerDataMap["tokenName"] = transferLogData.TokenName
+				triggerDataMap["tokenSymbol"] = transferLogData.TokenSymbol
+				triggerDataMap["tokenDecimals"] = transferLogData.TokenDecimals
+				triggerDataMap["transactionHash"] = transferLogData.TransactionHash
 				triggerDataMap["address"] = transferLogData.Address
-				triggerDataMap["block_number"] = transferLogData.BlockNumber
-				triggerDataMap["block_timestamp"] = transferLogData.BlockTimestamp
-				triggerDataMap["from_address"] = transferLogData.FromAddress
-				triggerDataMap["to_address"] = transferLogData.ToAddress
+				triggerDataMap["blockNumber"] = transferLogData.BlockNumber
+				triggerDataMap["blockTimestamp"] = transferLogData.BlockTimestamp
+				triggerDataMap["fromAddress"] = transferLogData.FromAddress
+				triggerDataMap["toAddress"] = transferLogData.ToAddress
 				triggerDataMap["value"] = transferLogData.Value
-				triggerDataMap["value_formatted"] = transferLogData.ValueFormatted
-				triggerDataMap["transaction_index"] = transferLogData.TransactionIndex
-				triggerDataMap["log_index"] = transferLogData.LogIndex
+				triggerDataMap["valueFormatted"] = transferLogData.ValueFormatted
+				triggerDataMap["transactionIndex"] = transferLogData.TransactionIndex
+				triggerDataMap["logIndex"] = transferLogData.LogIndex
 			} else if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
 				// Fall back to basic EVM log data matching runTrigger format
-				triggerDataMap["block_number"] = evmLog.BlockNumber
-				triggerDataMap["log_index"] = evmLog.Index
-				triggerDataMap["tx_hash"] = evmLog.TransactionHash
+				// Use camelCase field names for JavaScript compatibility
+				triggerDataMap["blockNumber"] = evmLog.BlockNumber
+				triggerDataMap["logIndex"] = evmLog.Index
+				triggerDataMap["transactionHash"] = evmLog.TransactionHash
 				triggerDataMap["address"] = evmLog.Address
 				triggerDataMap["topics"] = evmLog.Topics
 				triggerDataMap["data"] = evmLog.Data
-				triggerDataMap["block_hash"] = evmLog.BlockHash
-				triggerDataMap["transaction_index"] = evmLog.TransactionIndex
+				triggerDataMap["blockHash"] = evmLog.BlockHash
+				triggerDataMap["transactionIndex"] = evmLog.TransactionIndex
 				triggerDataMap["removed"] = evmLog.Removed
 			}
 		}

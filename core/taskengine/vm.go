@@ -59,8 +59,17 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 	if c.vm.vars == nil {
 		c.vm.vars = make(map[string]any)
 	}
+
+	// Apply dual-access mapping to node output data if it's a map
+	// This enables both camelCase and snake_case field access for node outputs
+	// Example: apiNode.data.responseData AND apiNode.data.response_data both work
+	var processedData any = data
+	if dataMap, ok := data.(map[string]interface{}); ok {
+		processedData = CreateDualAccessMap(dataMap)
+	}
+
 	c.vm.vars[nodeNameVar] = map[string]any{
-		"data": data,
+		"data": processedData,
 	}
 }
 
@@ -317,7 +326,12 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 				// Use shared function to build trigger data map from protobuf trigger outputs
 				triggerDataMap = buildTriggerDataMapFromProtobuf(triggerData.Type, triggerData.Output)
 			}
-			v.AddVar(triggerNameStd, map[string]any{"data": triggerDataMap})
+
+			// Create dual-access map to support both camelCase and snake_case field access
+			// This enables both template fallback ({{trigger.data.token_symbol}}) and direct JS access
+			// (const {tokenSymbol} = eventTrigger.data AND const {token_symbol} = eventTrigger.data)
+			dualAccessTriggerData := CreateDualAccessMap(triggerDataMap)
+			v.AddVar(triggerNameStd, map[string]any{"data": dualAccessTriggerData})
 		}
 	} else if task != nil { // Fallback if triggerData is nil but task is not
 		triggerNameStd, err := v.GetTriggerNameAsVar()
@@ -1856,9 +1870,26 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		branchConfig := &avsproto.BranchNode_Config{}
 
 		// Handle conditions from client
-		conditionsData, ok := config["conditions"].([]interface{})
-		if !ok || len(conditionsData) == 0 {
-			return nil, fmt.Errorf("branch node requires conditions configuration")
+		conditionsValue, exists := config["conditions"]
+		if !exists {
+			return nil, fmt.Errorf("branch node requires conditions configuration - no conditions field found")
+		}
+
+		conditionsData, ok := conditionsValue.([]interface{})
+		if !ok {
+			// Try to convert from []map[string]interface{} to []interface{}
+			if conditionsSlice, ok := conditionsValue.([]map[string]interface{}); ok {
+				conditionsData = make([]interface{}, len(conditionsSlice))
+				for i, condition := range conditionsSlice {
+					conditionsData[i] = condition
+				}
+			} else {
+				return nil, fmt.Errorf("branch node requires conditions configuration - invalid type: %T", conditionsValue)
+			}
+		}
+
+		if len(conditionsData) == 0 {
+			return nil, fmt.Errorf("branch node requires conditions configuration - empty conditions array")
 		}
 
 		conditions := make([]*avsproto.BranchNode_Condition, len(conditionsData))
@@ -2125,4 +2156,60 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
 	}
 
 	return false, errorMessage, failedCount
+}
+
+// CreateDualAccessMap creates a map with both camelCase and snake_case field names
+// pointing to the same values. This enables JavaScript code to access fields using
+// either naming convention, providing fallback support for direct variable access.
+//
+// Example:
+//
+//	input: {"tokenSymbol": "USDC", "blockNumber": 123}
+//	output: {"tokenSymbol": "USDC", "token_symbol": "USDC", "blockNumber": 123, "block_number": 123}
+//
+// This solves the issue where:
+// - Templates use fallback: {{trigger.data.token_symbol}} -> tries token_symbol, then tokenSymbol
+// - Direct JS access needs both: const {tokenSymbol} = data AND const {token_symbol} = data
+func CreateDualAccessMap(data map[string]interface{}) map[string]interface{} {
+	if data == nil {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+
+	// First, copy all original fields
+	for key, value := range data {
+		result[key] = value
+	}
+
+	// Then, add the alternate naming convention for each field
+	for key, value := range data {
+		// Check if the key contains underscores (snake_case)
+		if strings.Contains(key, "_") {
+			// Convert snake_case to camelCase and add it
+			camelKey := convertToCamelCase(key)
+			if camelKey != key && result[camelKey] == nil {
+				result[camelKey] = value
+			}
+		} else {
+			// Check if the key contains uppercase letters (camelCase)
+			hasCamelCase := false
+			for _, r := range key {
+				if unicode.IsUpper(r) {
+					hasCamelCase = true
+					break
+				}
+			}
+
+			if hasCamelCase {
+				// Convert camelCase to snake_case and add it
+				snakeKey := convertToSnakeCase(key)
+				if snakeKey != key && result[snakeKey] == nil {
+					result[snakeKey] = value
+				}
+			}
+		}
+	}
+
+	return result
 }

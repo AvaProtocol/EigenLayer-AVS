@@ -181,7 +181,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		// Preprocess the expression using the VM's current variable context
 		processedExpression := condition.Expression
 		if strings.Contains(processedExpression, "{{") {
-			processedExpression = r.vm.preprocessText(processedExpression)
+			processedExpression = r.vm.preprocessTextWithVariableMapping(condition.Expression)
 		} else {
 			processedExpression = r.vm.preprocessTextWithVariableMapping(condition.Expression)
 		}

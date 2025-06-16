@@ -90,7 +90,11 @@ func (r *ContractReadProcessor) buildStructuredData(method *abi.Method, result [
 
 // executeMethodCall executes a single method call and returns the result
 func (r *ContractReadProcessor) executeMethodCall(ctx context.Context, contractAbi *abi.ABI, contractAddress common.Address, methodCall *avsproto.ContractReadNode_MethodCall) *avsproto.ContractReadNode_MethodResult {
-	calldata := common.FromHex(methodCall.CallData)
+	// Preprocess template variables in method call data
+	callData := r.vm.preprocessTextWithVariableMapping(methodCall.CallData)
+	methodName := r.vm.preprocessTextWithVariableMapping(methodCall.MethodName)
+
+	calldata := common.FromHex(callData)
 	msg := ethereum.CallMsg{
 		To:   &contractAddress,
 		Data: calldata,
@@ -102,7 +106,7 @@ func (r *ContractReadProcessor) executeMethodCall(ctx context.Context, contractA
 		return &avsproto.ContractReadNode_MethodResult{
 			Success:    false,
 			Error:      fmt.Sprintf("contract call failed: %v", err),
-			MethodName: methodCall.MethodName,
+			MethodName: methodName,
 			Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
 		}
 	}
@@ -123,7 +127,7 @@ func (r *ContractReadProcessor) executeMethodCall(ctx context.Context, contractA
 			"calldata", fmt.Sprintf("0x%x", calldata),
 			"output_length", len(output),
 			"output_hex", fmt.Sprintf("0x%x", output),
-			"method_name", methodCall.MethodName,
+			"method_name", methodName,
 		)
 	}
 
@@ -133,17 +137,17 @@ func (r *ContractReadProcessor) executeMethodCall(ctx context.Context, contractA
 		return &avsproto.ContractReadNode_MethodResult{
 			Success:    false,
 			Error:      fmt.Sprintf("failed to detect method from ABI: %v", err),
-			MethodName: methodCall.MethodName,
+			MethodName: methodName,
 			Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
 		}
 	}
 
 	// Validate that the provided methodName matches the actual method detected from callData
-	if method.Name != methodCall.MethodName {
+	if method.Name != methodName {
 		return &avsproto.ContractReadNode_MethodResult{
 			Success:    false,
-			Error:      fmt.Sprintf("method name mismatch: callData corresponds to '%s' but methodName is '%s'. Please verify the function selector matches the intended method", method.Name, methodCall.MethodName),
-			MethodName: methodCall.MethodName,
+			Error:      fmt.Sprintf("method name mismatch: callData corresponds to '%s' but methodName is '%s'. Please verify the function selector matches the intended method", method.Name, methodName),
+			MethodName: methodName,
 			Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
 		}
 	}
@@ -250,14 +254,18 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		return s, err
 	}
 
+	// Preprocess template variables in configuration
+	contractAddress := r.vm.preprocessTextWithVariableMapping(config.ContractAddress)
+	contractAbi := r.vm.preprocessTextWithVariableMapping(config.ContractAbi)
+
 	// Parse the ABI
-	parsedABI, err := abi.JSON(strings.NewReader(config.ContractAbi))
+	parsedABI, err := abi.JSON(strings.NewReader(contractAbi))
 	if err != nil {
 		err = fmt.Errorf("failed to parse ABI: %w", err)
 		return s, err
 	}
 
-	contractAddr := common.HexToAddress(config.ContractAddress)
+	contractAddr := common.HexToAddress(contractAddress)
 	var results []*avsproto.ContractReadNode_MethodResult
 
 	// Execute each method call serially

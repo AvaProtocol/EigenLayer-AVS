@@ -56,8 +56,9 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 		return executionLog, err
 	}
 
-	destination := config.GetDestination()
-	amountStr := config.GetAmount()
+	// Preprocess template variables in configuration
+	destination := p.vm.preprocessTextWithVariableMapping(config.GetDestination())
+	amountStr := p.vm.preprocessTextWithVariableMapping(config.GetAmount())
 
 	if destination == "" {
 		err := fmt.Errorf("destination address is required for ETH transfer")

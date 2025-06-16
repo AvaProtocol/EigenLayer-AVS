@@ -720,8 +720,38 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 	vm.WithLogger(n.logger).WithDb(n.db)
 
 	// Add input variables to VM for template processing and node access
+	// Apply dual-access mapping to enable both camelCase and snake_case field access
+	processedInputVariables := make(map[string]interface{})
 	for key, value := range inputVariables {
-		vm.AddVar(key, value)
+		// Apply dual-access mapping if the value is a map with a "data" field
+		if valueMap, ok := value.(map[string]interface{}); ok {
+			if dataField, hasData := valueMap["data"]; hasData {
+				if dataMap, isDataMap := dataField.(map[string]interface{}); isDataMap {
+					// Apply dual-access mapping to the data field
+					dualAccessData := CreateDualAccessMap(dataMap)
+					// Create a new map with the dual-access data
+					processedValue := make(map[string]interface{})
+					for k, v := range valueMap {
+						if k == "data" {
+							processedValue[k] = dualAccessData
+						} else {
+							processedValue[k] = v
+						}
+					}
+					vm.AddVar(key, processedValue)
+					processedInputVariables[key] = processedValue
+				} else {
+					vm.AddVar(key, value)
+					processedInputVariables[key] = value
+				}
+			} else {
+				vm.AddVar(key, value)
+				processedInputVariables[key] = value
+			}
+		} else {
+			vm.AddVar(key, value)
+			processedInputVariables[key] = value
+		}
 	}
 
 	// Create node from type and config
@@ -730,8 +760,8 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 		return nil, fmt.Errorf("failed to create node: %w", err)
 	}
 
-	// Execute the node
-	executionStep, err := vm.RunNodeWithInputs(node, inputVariables)
+	// Execute the node with processed input variables
+	executionStep, err := vm.RunNodeWithInputs(node, processedInputVariables)
 	if err != nil {
 		return nil, fmt.Errorf("node execution failed: %w", err)
 	}
@@ -1071,8 +1101,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 	// Log successful execution
 	if n.logger != nil {
-		n.logger.Info("RunNodeImmediatelyRPC: Executed successfully", "nodeTypeStr", nodeTypeStr, "originalNodeType", req.NodeType, "configKeys", getStringMapKeys(nodeConfig), "inputKeys", getStringMapKeys(inputVariables))
-
+		n.logger.Info("RunNodeImmediatelyRPC: Executed successfully", "nodeTypeStr", nodeTypeStr, "originalNodeType", req.NodeType)
 	}
 
 	// Convert result to the appropriate protobuf output type
@@ -1572,7 +1601,7 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 
 	// Log successful execution
 	if n.logger != nil {
-		n.logger.Info("RunTriggerRPC: Executed successfully", "triggerTypeStr", triggerTypeStr, "originalTriggerType", req.TriggerType, "configKeys", getStringMapKeys(triggerConfig))
+		n.logger.Info("RunTriggerRPC: Executed successfully", "triggerTypeStr", triggerTypeStr, "originalTriggerType", req.TriggerType)
 	}
 
 	// Convert result to the appropriate protobuf output type
@@ -1687,4 +1716,13 @@ func isExpectedValidationError(err error) bool {
 
 	// If it doesn't match validation patterns, treat as system error
 	return false
+}
+
+// getMapKeys returns the keys of a map as a slice for debugging
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
