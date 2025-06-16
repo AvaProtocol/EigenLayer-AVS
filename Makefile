@@ -113,6 +113,7 @@ protoc-gen:
 		--go_opt=paths=source_relative \
     	--go-grpc_out=./protobuf \
 		--go-grpc_opt=paths=source_relative \
+		--experimental_allow_proto3_optional \
     	protobuf/avs.proto protobuf/node.proto
 	@echo "Protobuf Go generation complete. Files should be in ./protobuf/ and declare package avsproto."
 

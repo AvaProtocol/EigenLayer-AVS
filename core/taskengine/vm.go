@@ -59,9 +59,22 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 	if c.vm.vars == nil {
 		c.vm.vars = make(map[string]any)
 	}
-	c.vm.vars[nodeNameVar] = map[string]any{
+
+	stepData := map[string]any{
 		"data": data,
 	}
+
+	if taskNode, exists := c.vm.TaskNodes[stepID]; exists && taskNode.Input != nil {
+		if inputValue := taskNode.Input.AsInterface(); inputValue != nil {
+			stepData["input"] = inputValue
+		}
+	} else if trigger := c.vm.task.Trigger; trigger != nil && trigger.Id == stepID && trigger.Input != nil {
+		if inputValue := trigger.Input.AsInterface(); inputValue != nil {
+			stepData["input"] = inputValue
+		}
+	}
+
+	c.vm.vars[nodeNameVar] = stepData
 }
 
 func (c *CommonProcessor) GetOutputVar(stepID string) any {

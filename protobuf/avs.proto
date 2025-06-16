@@ -217,6 +217,9 @@ message TaskTrigger {
   // NEW: Use the enum for type identification (Phase 1: add alongside existing)
   TriggerType type = 8;
   
+  // Input data that can be referenced by subsequent nodes as trigger_name.input
+  google.protobuf.Value input = 9;
+  
   oneof trigger_type {
     // manual task will not be check to be trigger, instead it can be trigger adhoc
     bool               manual = 2;
@@ -546,6 +549,9 @@ message TaskNode {
   
   // NEW: Use the enum for type identification (Phase 1: add alongside existing)
   NodeType type = 1;
+
+  // Input data that can be referenced by subsequent nodes as node_name.input
+  google.protobuf.Value input = 4;
 
   // based on node_type one and only one of these field are set
   oneof task_type {
