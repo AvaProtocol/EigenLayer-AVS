@@ -3,6 +3,8 @@ package trigger
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -524,13 +526,13 @@ func (t *EventTrigger) checkEventSafety(log types.Log) bool {
 	return true // Allow processing
 }
 
-// logMatchesQuery checks if a log matches the given ethereum.FilterQuery
+// logMatchesQuery checks if a log matches a specific ethereum.FilterQuery
 func (t *EventTrigger) logMatchesQuery(log types.Log, query ethereum.FilterQuery) bool {
 	// Check addresses
 	if len(query.Addresses) > 0 {
 		found := false
 		for _, addr := range query.Addresses {
-			if log.Address == addr {
+			if addr == log.Address {
 				found = true
 				break
 			}
@@ -542,19 +544,21 @@ func (t *EventTrigger) logMatchesQuery(log types.Log, query ethereum.FilterQuery
 
 	// Check topics
 	if len(query.Topics) > 0 && len(log.Topics) > 0 {
-		for i, topicOptions := range query.Topics {
+		for i, topicGroup := range query.Topics {
 			if i >= len(log.Topics) {
 				break
 			}
-			if len(topicOptions) > 0 {
+
+			if len(topicGroup) > 0 {
 				found := false
-				for _, expectedTopic := range topicOptions {
+				for _, expectedTopic := range topicGroup {
 					if log.Topics[i] == expectedTopic {
 						found = true
 						break
 					}
 				}
 				if !found {
+
 					return false
 				}
 			}
@@ -690,6 +694,7 @@ func (t *EventTrigger) logMatchesEventQuery(log types.Log, query *avsproto.Event
 }
 
 // buildFilterQueries converts all registered tasks into ethereum.FilterQuery objects
+// Optimized to combine identical or overlapping queries from the same task
 func (t *EventTrigger) buildFilterQueries() []QueryInfo {
 	var allQueries []QueryInfo
 
@@ -697,11 +702,34 @@ func (t *EventTrigger) buildFilterQueries() []QueryInfo {
 		taskID := key.(string)
 		check := value.(*Check)
 
-		// Convert each EventTrigger_Query to ethereum.FilterQuery
+		// Group queries by their filter criteria to identify duplicates/overlaps
+		queryGroups := make(map[string][]int) // queryKey -> []queryIndex
+
+		// Convert each EventTrigger_Query to ethereum.FilterQuery and group by criteria
 		for i, query := range check.Queries {
 			ethQuery := t.convertToFilterQuery(query)
 
-			description := fmt.Sprintf("Task[%s] Query[%d]", taskID, i)
+			// Create a unique key for this query's filter criteria
+			queryKey := t.createQueryKey(ethQuery)
+			queryGroups[queryKey] = append(queryGroups[queryKey], i)
+		}
+
+		// For each unique query criteria, create one optimized query
+		for _, queryIndices := range queryGroups {
+			// Use the first query as the base (they should all be identical)
+			baseQueryIndex := queryIndices[0]
+			baseQuery := check.Queries[baseQueryIndex]
+			ethQuery := t.convertToFilterQuery(baseQuery)
+
+			// Find the maximum maxEventsPerBlock across all identical queries
+			maxEventsPerBlock := baseQuery.GetMaxEventsPerBlock()
+			for _, idx := range queryIndices[1:] {
+				if check.Queries[idx].GetMaxEventsPerBlock() > maxEventsPerBlock {
+					maxEventsPerBlock = check.Queries[idx].GetMaxEventsPerBlock()
+				}
+			}
+
+			description := fmt.Sprintf("Task[%s] Query[%d-%d]", taskID, queryIndices[0], queryIndices[len(queryIndices)-1])
 			if len(ethQuery.Addresses) > 0 {
 				description += fmt.Sprintf(" - contracts:%v", ethQuery.Addresses)
 			}
@@ -709,12 +737,17 @@ func (t *EventTrigger) buildFilterQueries() []QueryInfo {
 				description += fmt.Sprintf(" - %d topic levels", len(ethQuery.Topics))
 			}
 
+			// If we combined multiple queries, add a note
+			if len(queryIndices) > 1 {
+				description += fmt.Sprintf(" (combined %d identical queries)", len(queryIndices))
+			}
+
 			queryInfo := QueryInfo{
 				Query:             ethQuery,
 				Description:       description,
 				TaskID:            taskID,
-				QueryIndex:        i,
-				MaxEventsPerBlock: query.GetMaxEventsPerBlock(),
+				QueryIndex:        baseQueryIndex, // Use the first query index as representative
+				MaxEventsPerBlock: maxEventsPerBlock,
 			}
 
 			allQueries = append(allQueries, queryInfo)
@@ -724,7 +757,7 @@ func (t *EventTrigger) buildFilterQueries() []QueryInfo {
 	})
 
 	if len(allQueries) > 0 {
-		t.logger.Info("🔧 Built filter queries",
+		t.logger.Info("🔧 Built optimized filter queries",
 			"total_queries", len(allQueries))
 
 		// Check for potential overlapping queries from same task
@@ -735,9 +768,9 @@ func (t *EventTrigger) buildFilterQueries() []QueryInfo {
 
 		for taskID, count := range taskQueryCounts {
 			if count > 1 {
-				t.logger.Warn("⚠️ Task has multiple queries - may receive duplicate events",
+				t.logger.Warn("⚠️ Task has multiple unique queries - may receive duplicate events",
 					"task_id", taskID,
-					"query_count", count,
+					"unique_query_count", count,
 					"recommendation", "Consider combining queries to reduce duplicates")
 			}
 		}
@@ -755,6 +788,58 @@ func (t *EventTrigger) buildFilterQueries() []QueryInfo {
 	return allQueries
 }
 
+// createQueryKey creates a unique string key for a filter query's criteria
+func (t *EventTrigger) createQueryKey(query ethereum.FilterQuery) string {
+	var keyParts []string
+
+	// Add addresses (sorted for consistency)
+	if len(query.Addresses) > 0 {
+		addresses := make([]string, len(query.Addresses))
+		for i, addr := range query.Addresses {
+			addresses[i] = addr.Hex()
+		}
+		// Sort addresses for consistent key generation
+		sort.Strings(addresses)
+		keyParts = append(keyParts, fmt.Sprintf("addrs:%v", addresses))
+	}
+
+	// Add topics (preserving wildcard vs specific value distinction AND position)
+	if len(query.Topics) > 0 {
+		for i, topicGroup := range query.Topics {
+			if len(topicGroup) > 0 {
+				// Check if this topic group contains any wildcards (empty hashes)
+				hasWildcard := false
+				specificTopics := make([]string, 0)
+
+				for _, topic := range topicGroup {
+					if topic == (common.Hash{}) {
+						hasWildcard = true
+					} else {
+						specificTopics = append(specificTopics, topic.Hex())
+					}
+				}
+
+				if hasWildcard {
+					// Include wildcard indicator in the key with position
+					// Sort specific topics for consistency when wildcards are present
+					sort.Strings(specificTopics)
+					keyParts = append(keyParts, fmt.Sprintf("topic[%d]:wildcard+%v", i, specificTopics))
+				} else {
+					// Sort specific topics for consistent key generation
+					sort.Strings(specificTopics)
+					keyParts = append(keyParts, fmt.Sprintf("topic[%d]:%v", i, specificTopics))
+				}
+			} else {
+				// Empty topic group means "any value" for this topic position
+				// This is different from having wildcards mixed with specific values
+				keyParts = append(keyParts, fmt.Sprintf("topic[%d]:any", i))
+			}
+		}
+	}
+
+	return strings.Join(keyParts, "|")
+}
+
 // convertToFilterQuery converts a protobuf EventTrigger_Query to ethereum.FilterQuery
 func (t *EventTrigger) convertToFilterQuery(query *avsproto.EventTrigger_Query) ethereum.FilterQuery {
 	var addresses []common.Address
@@ -765,14 +850,51 @@ func (t *EventTrigger) convertToFilterQuery(query *avsproto.EventTrigger_Query) 
 	}
 
 	var topics [][]common.Hash
-	for _, topicFilter := range query.GetTopics() {
-		var topicHashes []common.Hash
-		for _, topicStr := range topicFilter.GetValues() {
-			if hash := common.HexToHash(topicStr); hash != (common.Hash{}) {
-				topicHashes = append(topicHashes, hash)
+
+	// Handle the case where client sends all topic values in a single topic array
+	// This is the format: topics: [{ values: [Transfer signature, FROM address, null] }]
+	if len(query.GetTopics()) == 1 && len(query.GetTopics()[0].GetValues()) > 1 {
+		// Client sent all topic values in a single array, need to split them by position
+		allValues := query.GetTopics()[0].GetValues()
+
+		// Process each topic position
+		for i := 0; i < len(allValues); i++ {
+			if i < len(allValues) {
+				topicStr := allValues[i]
+				if topicStr == "" {
+					// Empty string represents null/wildcard for this topic position
+					topics = append(topics, nil)
+				} else {
+					if hash := common.HexToHash(topicStr); hash != (common.Hash{}) {
+						topics = append(topics, []common.Hash{hash})
+					} else {
+						topics = append(topics, nil)
+					}
+				}
 			}
 		}
-		topics = append(topics, topicHashes)
+	} else {
+		// Original format: each topicFilter represents a separate topic position
+		for _, topicFilter := range query.GetTopics() {
+			allWildcard := true
+			var topicHashes []common.Hash
+			for _, topicStr := range topicFilter.GetValues() {
+				if topicStr == "" {
+					// Empty string represents null/wildcard
+					continue
+				} else {
+					if hash := common.HexToHash(topicStr); hash != (common.Hash{}) {
+						topicHashes = append(topicHashes, hash)
+						allWildcard = false
+					}
+				}
+			}
+			if allWildcard {
+				topics = append(topics, nil) // nil means wildcard for this topic position
+			} else {
+				topics = append(topics, topicHashes)
+			}
+		}
 	}
 
 	return ethereum.FilterQuery{
