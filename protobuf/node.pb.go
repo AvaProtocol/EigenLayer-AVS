@@ -577,10 +577,15 @@ func (*NotifyTriggersReq_EventTrigger) isNotifyTriggersReq_TriggerOutput() {}
 func (*NotifyTriggersReq_ManualTrigger) isNotifyTriggersReq_TriggerOutput() {}
 
 type NotifyTriggersResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	// Task execution state information
+	RemainingExecutions int64  `protobuf:"varint,2,opt,name=remaining_executions,json=remainingExecutions,proto3" json:"remaining_executions,omitempty"` // How many executions are left for this task
+	TaskStillActive     bool   `protobuf:"varint,3,opt,name=task_still_active,json=taskStillActive,proto3" json:"task_still_active,omitempty"`           // Whether the task is still active and should be monitored
+	Status              string `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`                                                       // Task status: "active", "exhausted", "cancelled", "expired", etc.
+	Message             string `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`                                                     // Optional message for debugging/logging
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *NotifyTriggersResp) Reset() {
@@ -618,6 +623,34 @@ func (x *NotifyTriggersResp) GetUpdatedAt() *timestamppb.Timestamp {
 		return x.UpdatedAt
 	}
 	return nil
+}
+
+func (x *NotifyTriggersResp) GetRemainingExecutions() int64 {
+	if x != nil {
+		return x.RemainingExecutions
+	}
+	return 0
+}
+
+func (x *NotifyTriggersResp) GetTaskStillActive() bool {
+	if x != nil {
+		return x.TaskStillActive
+	}
+	return false
+}
+
+func (x *NotifyTriggersResp) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *NotifyTriggersResp) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
 }
 
 // EventOverloadAlert is sent by operators to aggregator when event query processing
@@ -1032,10 +1065,14 @@ const file_node_proto_rawDesc = "" +
 	"\fcron_trigger\x18\a \x01(\v2\x1e.aggregator.CronTrigger.OutputH\x00R\vcronTrigger\x12F\n" +
 	"\revent_trigger\x18\b \x01(\v2\x1f.aggregator.EventTrigger.OutputH\x00R\feventTrigger\x12I\n" +
 	"\x0emanual_trigger\x18\t \x01(\v2 .aggregator.ManualTrigger.OutputH\x00R\rmanualTriggerB\x10\n" +
-	"\x0etrigger_output\"O\n" +
+	"\x0etrigger_output\"\xe0\x01\n" +
 	"\x12NotifyTriggersResp\x129\n" +
 	"\n" +
-	"updated_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\xa0\x02\n" +
+	"updated_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x121\n" +
+	"\x14remaining_executions\x18\x02 \x01(\x03R\x13remainingExecutions\x12*\n" +
+	"\x11task_still_active\x18\x03 \x01(\bR\x0ftaskStillActive\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\x12\x18\n" +
+	"\amessage\x18\x05 \x01(\tR\amessage\"\xa0\x02\n" +
 	"\x12EventOverloadAlert\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12)\n" +
 	"\x10operator_address\x18\x02 \x01(\tR\x0foperatorAddress\x12!\n" +

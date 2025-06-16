@@ -96,6 +96,12 @@ message NotifyTriggersReq {
 
 message NotifyTriggersResp {
   google.protobuf.Timestamp updated_at = 1;
+  
+  // Task execution state information
+  int64 remaining_executions = 2;      // How many executions are left for this task
+  bool task_still_active = 3;          // Whether the task is still active and should be monitored
+  string status = 4;                   // Task status: "active", "exhausted", "cancelled", "expired", etc.
+  string message = 5;                  // Optional message for debugging/logging
 }
 
 // ============================================================================

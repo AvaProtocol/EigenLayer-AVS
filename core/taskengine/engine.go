@@ -922,6 +922,12 @@ func (n *Engine) sendBatchedNotifications() {
 
 // TODO: Merge and verify from multiple operators
 func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyTriggersReq) error {
+	_, err := n.AggregateChecksResultWithState(address, payload)
+	return err
+}
+
+// AggregateChecksResultWithState processes operator trigger notifications and returns execution state info
+func (n *Engine) AggregateChecksResultWithState(address string, payload *avsproto.NotifyTriggersReq) (*ExecutionState, error) {
 	n.lock.Lock()
 	n.logger.Debug("processing aggregator check hit", "operator", address, "task_id", payload.TaskId)
 
@@ -932,6 +938,49 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	n.logger.Debug("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
 	n.lock.Unlock()
 
+	// Get task information to determine execution state
+	task, exists := n.tasks[payload.TaskId]
+	if !exists {
+		return &ExecutionState{
+			RemainingExecutions: 0,
+			TaskStillActive:     false,
+			Status:              "not_found",
+			Message:             "Task not found",
+		}, fmt.Errorf("task %s not found", payload.TaskId)
+	}
+
+	// Check if task is still runnable
+	if !task.IsRunable() {
+		remainingExecutions := int64(0)
+		status := "exhausted"
+		message := "Task has reached execution limit or expired"
+
+		if task.MaxExecution > 0 && task.ExecutionCount >= task.MaxExecution {
+			status = "exhausted"
+			message = fmt.Sprintf("Task has reached maximum executions (%d/%d)", task.ExecutionCount, task.MaxExecution)
+		} else if task.ExpiredAt > 0 && time.Unix(task.ExpiredAt/1000, 0).Before(time.Now()) {
+			status = "expired"
+			message = "Task has expired"
+		} else if task.StartAt > 0 && time.Now().UnixMilli() < task.StartAt {
+			status = "not_started"
+			message = "Task has not reached start time"
+		}
+
+		n.logger.Info("🛑 Task no longer runnable, will inform operator to stop monitoring",
+			"task_id", payload.TaskId,
+			"status", status,
+			"execution_count", task.ExecutionCount,
+			"max_execution", task.MaxExecution)
+
+		return &ExecutionState{
+			RemainingExecutions: remainingExecutions,
+			TaskStillActive:     false,
+			Status:              status,
+			Message:             message,
+		}, nil
+	}
+
+	// Task is still active, process the trigger
 	// Create trigger data
 	triggerData := &TriggerData{
 		Type:   payload.TriggerType,
@@ -972,17 +1021,45 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 	data, err := json.Marshal(queueTaskData)
 	if err != nil {
 		n.logger.Error("error serialize trigger to json", err)
-		return err
+		return &ExecutionState{
+			RemainingExecutions: 0,
+			TaskStillActive:     false,
+			Status:              "error",
+			Message:             "Failed to process trigger",
+		}, err
 	}
 
 	if _, err := n.queue.Enqueue(JobTypeExecuteTask, payload.TaskId, data); err != nil {
 		n.logger.Error("failed to enqueue task", "error", err, "task_id", payload.TaskId)
-		return err
+		return &ExecutionState{
+			RemainingExecutions: 0,
+			TaskStillActive:     false,
+			Status:              "error",
+			Message:             "Failed to queue execution",
+		}, err
 	}
-	n.logger.Debug("enqueue task into the queue system", "task_id", payload.TaskId)
 
-	// if the task can still run, add it back
-	return nil
+	// Calculate remaining executions
+	var remainingExecutions int64
+	if task.MaxExecution == 0 {
+		remainingExecutions = -1 // Unlimited executions
+	} else {
+		remainingExecutions = int64(task.MaxExecution - task.ExecutionCount - 1) // -1 because we just queued one
+		if remainingExecutions < 0 {
+			remainingExecutions = 0
+		}
+	}
+
+	n.logger.Debug("task queued for execution",
+		"task_id", payload.TaskId,
+		"remaining_executions", remainingExecutions)
+
+	return &ExecutionState{
+		RemainingExecutions: remainingExecutions,
+		TaskStillActive:     true,
+		Status:              "active",
+		Message:             "Trigger processed successfully",
+	}, nil
 }
 
 func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksReq) (*avsproto.ListTasksResp, error) {
@@ -2883,6 +2960,25 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 // Returns:
 //   - avsproto.IsExecution_Step_OutputData: the appropriate oneof field for the execution step
 func buildExecutionStepOutputData(triggerType avsproto.TriggerType, triggerOutputProto interface{}) avsproto.IsExecution_Step_OutputData {
+	if triggerOutputProto == nil {
+		// Create empty output structure based on trigger type to avoid nil output
+		switch triggerType {
+		case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
+			return &avsproto.Execution_Step_ManualTrigger{ManualTrigger: &avsproto.ManualTrigger_Output{}}
+		case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
+			return &avsproto.Execution_Step_FixedTimeTrigger{FixedTimeTrigger: &avsproto.FixedTimeTrigger_Output{}}
+		case avsproto.TriggerType_TRIGGER_TYPE_CRON:
+			return &avsproto.Execution_Step_CronTrigger{CronTrigger: &avsproto.CronTrigger_Output{}}
+		case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
+			return &avsproto.Execution_Step_BlockTrigger{BlockTrigger: &avsproto.BlockTrigger_Output{}}
+		case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+			return &avsproto.Execution_Step_EventTrigger{EventTrigger: &avsproto.EventTrigger_Output{
+				// No oneof field set, so GetTransferLog() and GetEvmLog() return nil
+			}}
+		}
+		return nil
+	}
+
 	switch triggerType {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
 		if output, ok := triggerOutputProto.(*avsproto.ManualTrigger_Output); ok {
@@ -2904,7 +3000,31 @@ func buildExecutionStepOutputData(triggerType avsproto.TriggerType, triggerOutpu
 		if output, ok := triggerOutputProto.(*avsproto.EventTrigger_Output); ok {
 			return &avsproto.Execution_Step_EventTrigger{EventTrigger: output}
 		}
+		// If type assertion failed, log the actual type for debugging
+		if triggerOutputProto != nil {
+			// Create empty EventTrigger output as fallback to avoid nil
+			return &avsproto.Execution_Step_EventTrigger{EventTrigger: &avsproto.EventTrigger_Output{
+				// No oneof field set, so GetTransferLog() and GetEvmLog() return nil
+			}}
+		}
 	}
+
+	// Fallback: create empty output structure based on trigger type to avoid nil output
+	switch triggerType {
+	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
+		return &avsproto.Execution_Step_ManualTrigger{ManualTrigger: &avsproto.ManualTrigger_Output{}}
+	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
+		return &avsproto.Execution_Step_FixedTimeTrigger{FixedTimeTrigger: &avsproto.FixedTimeTrigger_Output{}}
+	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
+		return &avsproto.Execution_Step_CronTrigger{CronTrigger: &avsproto.CronTrigger_Output{}}
+	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
+		return &avsproto.Execution_Step_BlockTrigger{BlockTrigger: &avsproto.BlockTrigger_Output{}}
+	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
+		return &avsproto.Execution_Step_EventTrigger{EventTrigger: &avsproto.EventTrigger_Output{
+			// No oneof field set, so GetTransferLog() and GetEvmLog() return nil
+		}}
+	}
+
 	return nil
 }
 
@@ -2961,22 +3081,22 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 		if eventOutput, ok := triggerOutputProto.(*avsproto.EventTrigger_Output); ok {
 			// Check if we have transfer log data in the event output
 			if transferLogData := eventOutput.GetTransferLog(); transferLogData != nil {
-				// Use transfer log data to populate rich trigger data
-				triggerDataMap["token_name"] = transferLogData.TokenName
-				triggerDataMap["token_symbol"] = transferLogData.TokenSymbol
-				triggerDataMap["token_decimals"] = transferLogData.TokenDecimals
-				triggerDataMap["transaction_hash"] = transferLogData.TransactionHash
+				// Use transfer log data to populate rich trigger data matching runTrigger format
+				triggerDataMap["tokenName"] = transferLogData.TokenName
+				triggerDataMap["tokenSymbol"] = transferLogData.TokenSymbol
+				triggerDataMap["tokenDecimals"] = transferLogData.TokenDecimals
+				triggerDataMap["transactionHash"] = transferLogData.TransactionHash
 				triggerDataMap["address"] = transferLogData.Address
-				triggerDataMap["block_number"] = transferLogData.BlockNumber
-				triggerDataMap["block_timestamp"] = transferLogData.BlockTimestamp
-				triggerDataMap["from_address"] = transferLogData.FromAddress
-				triggerDataMap["to_address"] = transferLogData.ToAddress
+				triggerDataMap["blockNumber"] = transferLogData.BlockNumber
+				triggerDataMap["blockTimestamp"] = transferLogData.BlockTimestamp
+				triggerDataMap["fromAddress"] = transferLogData.FromAddress
+				triggerDataMap["toAddress"] = transferLogData.ToAddress
 				triggerDataMap["value"] = transferLogData.Value
-				triggerDataMap["value_formatted"] = transferLogData.ValueFormatted
-				triggerDataMap["transaction_index"] = transferLogData.TransactionIndex
-				triggerDataMap["log_index"] = transferLogData.LogIndex
+				triggerDataMap["valueFormatted"] = transferLogData.ValueFormatted
+				triggerDataMap["transactionIndex"] = transferLogData.TransactionIndex
+				triggerDataMap["logIndex"] = transferLogData.LogIndex
 			} else if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
-				// Fall back to basic EVM log data
+				// Fall back to basic EVM log data matching runTrigger format
 				triggerDataMap["block_number"] = evmLog.BlockNumber
 				triggerDataMap["log_index"] = evmLog.Index
 				triggerDataMap["tx_hash"] = evmLog.TransactionHash

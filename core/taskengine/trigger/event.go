@@ -66,6 +66,10 @@ type EventTrigger struct {
 
 	// Overload alert callback (for operator to notify aggregator)
 	onOverloadAlert func(alert *avsproto.EventOverloadAlert)
+
+	// Add deduplication tracking
+	processedEventsMutex sync.RWMutex
+	processedEvents      map[string]bool // key: "blockNumber-txHash-logIndex"
 }
 
 type SubscriptionInfo struct {
@@ -94,6 +98,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 		eventCounts:              make(map[string]map[uint64]uint32),
 		defaultMaxEventsPerQuery: maxEventsPerQuery,
 		defaultMaxTotalEvents:    maxTotalEvents,
+		processedEvents:          make(map[string]bool),
 	}
 
 	b.ethClient, err = ethclient.Dial(o.RpcURL)
@@ -189,60 +194,61 @@ func (t *EventTrigger) RemoveCheck(id string) error {
 }
 
 func (t *EventTrigger) Run(ctx context.Context) error {
-	// Build filter queries based on registered checks
-	queries := t.buildFilterQueries()
-
-	if len(queries) == 0 {
-		t.logger.Debug("🚫 No filter queries to subscribe to")
-		return nil
-	}
-
 	// Create logs channel that all subscriptions will send to
 	logs := make(chan types.Log, 1000) // Buffered to handle multiple subscriptions
 
-	// Create subscriptions for each query
+	// Build initial filter queries based on registered checks
+	queries := t.buildFilterQueries()
+
+	// Create initial subscriptions if we have queries
 	t.subsMutex.Lock()
 	t.subscriptions = make([]SubscriptionInfo, 0, len(queries))
 
-	for i, queryInfo := range queries {
-		// Use timeout context to prevent indefinite blocking
-		timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		sub, err := t.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
-		cancel() // Clean up timeout context
-		if err != nil {
-			t.logger.Error("❌ Failed to create subscription",
-				"query_index", i,
-				"description", queryInfo.Description,
-				"error", err)
-			// Clean up any successful subscriptions
-			for _, subInfo := range t.subscriptions {
-				subInfo.subscription.Unsubscribe()
+	if len(queries) == 0 {
+		t.logger.Debug("🚫 No initial filter queries to subscribe to - will wait for tasks to be added")
+	} else {
+		// Create subscriptions for each query
+		for i, queryInfo := range queries {
+			// Use timeout context to prevent indefinite blocking
+			timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			sub, err := t.wsEthClient.SubscribeFilterLogs(timeoutCtx, queryInfo.Query, logs)
+			cancel() // Clean up timeout context
+			if err != nil {
+				t.logger.Error("❌ Failed to create subscription",
+					"query_index", i,
+					"description", queryInfo.Description,
+					"error", err)
+				// Clean up any successful subscriptions
+				for _, subInfo := range t.subscriptions {
+					subInfo.subscription.Unsubscribe()
+				}
+				t.subsMutex.Unlock()
+				return err
 			}
-			t.subsMutex.Unlock()
-			return err
+
+			t.subscriptions = append(t.subscriptions, SubscriptionInfo{
+				subscription: sub,
+				query:        queryInfo.Query,
+				description:  queryInfo.Description,
+				taskID:       queryInfo.TaskID,
+				queryIndex:   queryInfo.QueryIndex,
+			})
+
+			t.logger.Info("✅ Created initial subscription",
+				"index", i,
+				"task_id", queryInfo.TaskID,
+				"description", queryInfo.Description,
+				"addresses", queryInfo.Query.Addresses,
+				"topics", queryInfo.Query.Topics)
 		}
-
-		t.subscriptions = append(t.subscriptions, SubscriptionInfo{
-			subscription: sub,
-			query:        queryInfo.Query,
-			description:  queryInfo.Description,
-			taskID:       queryInfo.TaskID,
-			queryIndex:   queryInfo.QueryIndex,
-		})
-
-		t.logger.Info("✅ Created subscription",
-			"index", i,
-			"task_id", queryInfo.TaskID,
-			"description", queryInfo.Description,
-			"addresses", queryInfo.Query.Addresses,
-			"topics", queryInfo.Query.Topics)
 	}
 	t.subsMutex.Unlock()
 
 	// Create error channel that collects errors from all subscriptions
-	errorCh := make(chan error, len(t.subscriptions))
+	errorCh := make(chan error, 100) // Buffered to handle multiple subscription errors
 
 	// Start goroutines to monitor each subscription's error channel
+	t.subsMutex.RLock()
 	for i, subInfo := range t.subscriptions {
 		go func(index int, sub ethereum.Subscription, desc string) {
 			err := <-sub.Err()
@@ -252,7 +258,27 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 			}
 		}(i, subInfo.subscription, subInfo.description)
 	}
+	t.subsMutex.RUnlock()
 
+	// Start cleanup goroutine to prevent memory leaks
+	go func() {
+		ticker := time.NewTicker(30 * time.Minute) // Clean up every 30 minutes
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.done:
+				return
+			case <-ticker.C:
+				t.cleanupOldProcessedEvents(1000) // Keep last 1000 processed events
+				t.cleanupOldEventCounts(100)      // Keep last 100 blocks of event counts
+			}
+		}
+	}()
+
+	// Start the main event loop - this should ALWAYS run, even with no initial subscriptions
 	go func() {
 		defer func() {
 			// Clean up all subscriptions
@@ -277,13 +303,32 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 					"tx", log.TxHash.Hex(),
 					"log_index", log.Index)
 
+				// CRITICAL: Check for duplicates FIRST before any processing
+				// Use txHash-logIndex as unique key (txHash is unique, logIndex distinguishes events within same tx)
+				eventKey := fmt.Sprintf("%s-%d", log.TxHash.Hex(), log.Index)
+
+				t.processedEventsMutex.Lock()
+				if t.processedEvents[eventKey] {
+					t.processedEventsMutex.Unlock()
+					t.logger.Debug("🔄 Skipping duplicate event from multiple subscriptions",
+						"block", log.BlockNumber,
+						"tx", log.TxHash.Hex(),
+						"log_index", log.Index,
+						"event_key", eventKey)
+					continue
+				}
+
+				// Mark as processed immediately to prevent race conditions
+				t.processedEvents[eventKey] = true
+				t.processedEventsMutex.Unlock()
+
 				// Safety check: count events per block per task
 				if !t.checkEventSafety(log) {
 					continue // Skip processing this event due to safety limits
 				}
 
 				// Process the log and match it to tasks
-				if err := t.processLog(log); err != nil {
+				if err := t.processLogInternal(log); err != nil {
 					t.logger.Error("❌ Error processing log", "error", err)
 				}
 
@@ -327,7 +372,8 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 							"task_id", queryInfo.TaskID,
 							"description", queryInfo.Description,
 							"addresses", queryInfo.Query.Addresses,
-							"topics", queryInfo.Query.Topics)
+							"topics", queryInfo.Query.Topics,
+							"warning", "Multiple subscriptions for same task may cause duplicate events")
 
 						// Start error monitoring for new subscription
 						go func(idx int, s ethereum.Subscription, d string) {
@@ -518,8 +564,32 @@ func (t *EventTrigger) logMatchesQuery(log types.Log, query ethereum.FilterQuery
 	return true
 }
 
-// processLog processes an individual log and triggers matching tasks
+// processLog processes an individual log and triggers matching tasks (public interface)
 func (t *EventTrigger) processLog(log types.Log) error {
+	// Create unique key for this event (txHash is unique, logIndex distinguishes events within same tx)
+	eventKey := fmt.Sprintf("%s-%d", log.TxHash.Hex(), log.Index)
+
+	// Check if we've already processed this event
+	t.processedEventsMutex.Lock()
+	if t.processedEvents[eventKey] {
+		t.processedEventsMutex.Unlock()
+		t.logger.Debug("🔄 Skipping duplicate event",
+			"block", log.BlockNumber,
+			"tx", log.TxHash.Hex(),
+			"log_index", log.Index)
+		return nil
+	}
+
+	// Mark this event as processed
+	t.processedEvents[eventKey] = true
+	t.processedEventsMutex.Unlock()
+
+	return t.processLogInternal(log)
+}
+
+// processLogInternal processes an individual log and triggers matching tasks
+// Note: Deduplication should be handled by caller before calling this function
+func (t *EventTrigger) processLogInternal(log types.Log) error {
 	var triggeredTasks []string
 
 	// Check all registered tasks to see which ones match this log
@@ -657,6 +727,21 @@ func (t *EventTrigger) buildFilterQueries() []QueryInfo {
 		t.logger.Info("🔧 Built filter queries",
 			"total_queries", len(allQueries))
 
+		// Check for potential overlapping queries from same task
+		taskQueryCounts := make(map[string]int)
+		for _, q := range allQueries {
+			taskQueryCounts[q.TaskID]++
+		}
+
+		for taskID, count := range taskQueryCounts {
+			if count > 1 {
+				t.logger.Warn("⚠️ Task has multiple queries - may receive duplicate events",
+					"task_id", taskID,
+					"query_count", count,
+					"recommendation", "Consider combining queries to reduce duplicates")
+			}
+		}
+
 		for i, q := range allQueries {
 			t.logger.Info("📋 Query details",
 				"index", i,
@@ -725,5 +810,34 @@ func (t *EventTrigger) cleanupOldEventCounts(blocksToKeep uint64) {
 			delete(blockCounts, oldestBlock)
 			t.logger.Debug("🧹 Cleaned up old event counts", "task_id", taskID, "removed_block", oldestBlock)
 		}
+	}
+}
+
+// Add cleanup for processed events to prevent memory leaks
+func (t *EventTrigger) cleanupOldProcessedEvents(maxEvents uint64) {
+	t.processedEventsMutex.Lock()
+	defer t.processedEventsMutex.Unlock()
+
+	// Remove old events if we have too many
+	currentCount := len(t.processedEvents)
+	if currentCount > int(maxEvents) {
+		// Simple approach: clear a portion of the map to keep memory usage bounded
+		// Since we can't easily determine "oldest" without block numbers in the key,
+		// we'll just clear about half of the events
+		toRemove := currentCount - int(maxEvents)
+		removedCount := 0
+
+		for key := range t.processedEvents {
+			delete(t.processedEvents, key)
+			removedCount++
+			if removedCount >= toRemove {
+				break
+			}
+		}
+
+		t.logger.Debug("🧹 Cleaned up old processed events",
+			"removed", removedCount,
+			"remaining", len(t.processedEvents),
+			"note", "Using simple cleanup since txHash-logIndex keys don't contain timestamps")
 	}
 }

@@ -326,6 +326,82 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 		}
 	}
 
+	// Add trigger configuration data for access by subsequent nodes
+	if task != nil && task.Trigger != nil {
+		triggerConfig := map[string]interface{}{
+			"id":   task.Trigger.Id,
+			"name": task.Trigger.Name,
+			"type": task.Trigger.Type.String(),
+		}
+
+		// Add trigger-specific config data matching SDK interfaces
+		switch {
+		case task.Trigger.GetEvent() != nil:
+			if eventTrigger := task.Trigger.GetEvent(); eventTrigger != nil && eventTrigger.Config != nil {
+				// Convert to match EventTriggerDataType from SDK
+				queries := make([]interface{}, len(eventTrigger.Config.Queries))
+				for i, query := range eventTrigger.Config.Queries {
+					queryMap := map[string]interface{}{}
+
+					// Add addresses if present
+					if len(query.Addresses) > 0 {
+						queryMap["addresses"] = query.Addresses
+					}
+
+					// Convert topics to match SDK structure
+					if len(query.Topics) > 0 {
+						topics := make([]interface{}, len(query.Topics))
+						for j, topic := range query.Topics {
+							topics[j] = map[string]interface{}{
+								"values": topic.Values,
+							}
+						}
+						queryMap["topics"] = topics
+					}
+
+					// Add maxEventsPerBlock if present
+					if query.MaxEventsPerBlock != nil {
+						queryMap["maxEventsPerBlock"] = *query.MaxEventsPerBlock
+					}
+
+					queries[i] = queryMap
+				}
+
+				triggerConfig["data"] = map[string]interface{}{
+					"queries": queries,
+				}
+			}
+
+		case task.Trigger.GetCron() != nil:
+			if cronTrigger := task.Trigger.GetCron(); cronTrigger != nil && cronTrigger.Config != nil {
+				triggerConfig["data"] = map[string]interface{}{
+					"schedules": cronTrigger.Config.Schedules, // matches CronTriggerDataType
+				}
+			}
+
+		case task.Trigger.GetFixedTime() != nil:
+			if fixedTimeTrigger := task.Trigger.GetFixedTime(); fixedTimeTrigger != nil && fixedTimeTrigger.Config != nil {
+				triggerConfig["data"] = map[string]interface{}{
+					"epochs": fixedTimeTrigger.Config.Epochs, // matches FixedTimeTriggerDataType
+				}
+			}
+
+		case task.Trigger.GetBlock() != nil:
+			if blockTrigger := task.Trigger.GetBlock(); blockTrigger != nil && blockTrigger.Config != nil {
+				triggerConfig["data"] = map[string]interface{}{
+					"interval": blockTrigger.Config.Interval, // matches BlockTriggerDataType
+				}
+			}
+
+		case task.Trigger.Type == avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
+			// Manual triggers typically don't have config data, but we include the structure for consistency
+			triggerConfig["data"] = map[string]interface{}{}
+		}
+
+		// Add triggerConfig variable to VM
+		v.AddVar("triggerConfig", triggerConfig)
+	}
+
 	return v, nil
 }
 
