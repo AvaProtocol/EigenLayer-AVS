@@ -721,37 +721,9 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 
 	// Add input variables to VM for template processing and node access
 	// Apply dual-access mapping to enable both camelCase and snake_case field access
-	processedInputVariables := make(map[string]interface{})
-	for key, value := range inputVariables {
-		// Apply dual-access mapping if the value is a map with a "data" field
-		if valueMap, ok := value.(map[string]interface{}); ok {
-			if dataField, hasData := valueMap["data"]; hasData {
-				if dataMap, isDataMap := dataField.(map[string]interface{}); isDataMap {
-					// Apply dual-access mapping to the data field
-					dualAccessData := CreateDualAccessMap(dataMap)
-					// Create a new map with the dual-access data
-					processedValue := make(map[string]interface{})
-					for k, v := range valueMap {
-						if k == "data" {
-							processedValue[k] = dualAccessData
-						} else {
-							processedValue[k] = v
-						}
-					}
-					vm.AddVar(key, processedValue)
-					processedInputVariables[key] = processedValue
-				} else {
-					vm.AddVar(key, value)
-					processedInputVariables[key] = value
-				}
-			} else {
-				vm.AddVar(key, value)
-				processedInputVariables[key] = value
-			}
-		} else {
-			vm.AddVar(key, value)
-			processedInputVariables[key] = value
-		}
+	processedInputVariables := ProcessInputVariablesWithDualAccess(inputVariables)
+	for key, processedValue := range processedInputVariables {
+		vm.AddVar(key, processedValue)
 	}
 
 	// Create node from type and config
