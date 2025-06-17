@@ -1717,12 +1717,3 @@ func isExpectedValidationError(err error) bool {
 	// If it doesn't match validation patterns, treat as system error
 	return false
 }
-
-// getMapKeys returns the keys of a map as a slice for debugging
-func getMapKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}

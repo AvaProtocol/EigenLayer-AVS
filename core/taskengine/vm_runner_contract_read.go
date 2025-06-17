@@ -91,10 +91,10 @@ func (r *ContractReadProcessor) buildStructuredData(method *abi.Method, result [
 // executeMethodCall executes a single method call and returns the result
 func (r *ContractReadProcessor) executeMethodCall(ctx context.Context, contractAbi *abi.ABI, contractAddress common.Address, methodCall *avsproto.ContractReadNode_MethodCall) *avsproto.ContractReadNode_MethodResult {
 	// Preprocess template variables in method call data
-	callData := r.vm.preprocessTextWithVariableMapping(methodCall.CallData)
+	preprocessedCallData := r.vm.preprocessTextWithVariableMapping(methodCall.CallData)
 	methodName := r.vm.preprocessTextWithVariableMapping(methodCall.MethodName)
 
-	calldata := common.FromHex(callData)
+	calldata := common.FromHex(preprocessedCallData)
 	msg := ethereum.CallMsg{
 		To:   &contractAddress,
 		Data: calldata,
