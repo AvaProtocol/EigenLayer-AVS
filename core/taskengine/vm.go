@@ -2388,8 +2388,14 @@ func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface
 			}
 		}
 	case *avsproto.TaskTrigger_Manual:
-		// ManualTrigger is a boolean field, it doesn't have input data structure
-		// Manual triggers don't support input fields in the current protobuf schema
+		// Manual triggers use the top-level TaskTrigger.input field
+		// since the trigger_type is just a boolean, not a nested object
+		if trigger.GetInput() != nil {
+			inputInterface := trigger.GetInput().AsInterface()
+			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
+				return inputMap
+			}
+		}
 		return nil
 	}
 	return nil
