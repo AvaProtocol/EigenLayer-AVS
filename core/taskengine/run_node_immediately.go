@@ -1529,6 +1529,12 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		triggerConfig[k] = v.AsInterface()
 	}
 
+	// Extract trigger input data from the request
+	triggerInput := make(map[string]interface{})
+	for k, v := range req.TriggerInput {
+		triggerInput[k] = v.AsInterface()
+	}
+
 	// Convert TriggerType enum to string
 	triggerTypeStr := TriggerTypeToString(req.TriggerType)
 	if triggerTypeStr == "" {
@@ -1545,8 +1551,8 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		return resp, nil
 	}
 
-	// Execute the trigger immediately (triggers don't accept input variables)
-	result, err := n.runTriggerImmediately(triggerTypeStr, triggerConfig, nil)
+	// Execute the trigger immediately with trigger input data
+	result, err := n.runTriggerImmediately(triggerTypeStr, triggerConfig, triggerInput)
 	if err != nil {
 		if n.logger != nil {
 			// Categorize errors to avoid unnecessary stack traces for expected validation errors

@@ -66,6 +66,14 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	}
 	r.vm.mu.Unlock()
 
+	// Get the node's input data
+	var nodeInput *structpb.Value
+	r.vm.mu.Lock()
+	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
+		nodeInput = taskNode.Input
+	}
+	r.vm.mu.Unlock()
+
 	executionLogStep := &avsproto.Execution_Step{
 		Id:         stepID,
 		OutputData: nil,
@@ -75,6 +83,7 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		StartAt:    t0.UnixMilli(),
 		Type:       avsproto.NodeType_NODE_TYPE_FILTER.String(),
 		Name:       nodeName,
+		Input:      nodeInput, // Include node input data for debugging
 	}
 
 	var logBuilder strings.Builder

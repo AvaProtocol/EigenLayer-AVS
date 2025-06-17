@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type ContractReadProcessor struct {
@@ -215,6 +216,14 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	}
 	r.vm.mu.Unlock()
 
+	// Get the node's input data
+	var nodeInput *structpb.Value
+	r.vm.mu.Lock()
+	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
+		nodeInput = taskNode.Input
+	}
+	r.vm.mu.Unlock()
+
 	s := &avsproto.Execution_Step{
 		Id:         stepID,
 		Log:        "",
@@ -224,6 +233,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		StartAt:    t0,
 		Type:       avsproto.NodeType_NODE_TYPE_CONTRACT_READ.String(),
 		Name:       nodeName,
+		Input:      nodeInput, // Include node input data for debugging
 	}
 
 	var err error
