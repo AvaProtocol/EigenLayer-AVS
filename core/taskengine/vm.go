@@ -367,12 +367,34 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			// This enables both template fallback ({{trigger.data.token_symbol}}) and direct JS access
 			// (const {tokenSymbol} = eventTrigger.data AND const {token_symbol} = eventTrigger.data)
 			dualAccessTriggerData := CreateDualAccessMap(triggerDataMap)
-			v.AddVar(triggerNameStd, map[string]any{"data": dualAccessTriggerData})
+
+			// Extract trigger input data and add it to the trigger variable
+			triggerVarData := map[string]any{"data": dualAccessTriggerData}
+			if task != nil && task.Trigger != nil {
+				triggerInputData := ExtractTriggerInputData(task.Trigger)
+				if triggerInputData != nil {
+					// Create dual-access map for trigger input data as well
+					dualAccessTriggerInput := CreateDualAccessMap(triggerInputData)
+					triggerVarData["input"] = dualAccessTriggerInput
+				}
+			}
+
+			v.AddVar(triggerNameStd, triggerVarData)
 		}
 	} else if task != nil { // Fallback if triggerData is nil but task is not
 		triggerNameStd, err := v.GetTriggerNameAsVar()
 		if err == nil {
-			v.AddVar(triggerNameStd, map[string]any{"data": map[string]any{}}) // Empty data map
+			// Extract trigger input data even when triggerData is nil
+			triggerVarData := map[string]any{"data": map[string]any{}} // Empty data map
+			if task.Trigger != nil {
+				triggerInputData := ExtractTriggerInputData(task.Trigger)
+				if triggerInputData != nil {
+					// Create dual-access map for trigger input data
+					dualAccessTriggerInput := CreateDualAccessMap(triggerInputData)
+					triggerVarData["input"] = dualAccessTriggerInput
+				}
+			}
+			v.AddVar(triggerNameStd, triggerVarData)
 		}
 	}
 
@@ -1631,11 +1653,11 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 						}
 					}
 				} else {
-					// Fallback for non-map variables (backward compatibility)
-					dataKey := fmt.Sprintf("%s.%s", k, DataSuffix)
-					inputKeys = append(inputKeys, dataKey)
+					// For non-map variables (simple scalars like input variables), use the variable name as-is
+					// This fixes the issue where input variables like "userToken" were incorrectly becoming "userToken.data"
+					inputKeys = append(inputKeys, k)
 					if v.logger != nil {
-						v.logger.Info("✅ Added fallback data field", "key", dataKey)
+						v.logger.Info("✅ Added scalar variable", "key", k)
 					}
 				}
 			}
@@ -1667,7 +1689,15 @@ func (v *VM) CollectInputs() map[string]string {
 		} else if varname == WorkflowContextVarName {
 			varname = WorkflowContextVarName // Use as-is, no .data suffix
 		} else {
-			varname = fmt.Sprintf("%s.%s", varname, DataSuffix)
+			// Check if this is a map variable with .data field
+			if valueMap, ok := value.(map[string]any); ok {
+				if _, hasData := valueMap["data"]; hasData {
+					// Only add .data suffix for variables that actually have a data field
+					varname = fmt.Sprintf("%s.%s", varname, DataSuffix)
+				}
+				// For map variables without .data field, use as-is
+			}
+			// For non-map variables (simple scalars like input variables), use as-is
 		}
 		inputs[varname] = valueStr
 	}
@@ -2353,6 +2383,8 @@ func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface
 		return nil
 	}
 
+	fmt.Printf("🔍 ExtractTriggerInputData: trigger type = %T, trigger.GetInput() = %+v\n", trigger.GetTriggerType(), trigger.GetInput())
+
 	// Check each trigger type and extract input from the correct nested object
 	switch trigger.GetTriggerType().(type) {
 	case *avsproto.TaskTrigger_Block:
@@ -2388,13 +2420,20 @@ func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface
 			}
 		}
 	case *avsproto.TaskTrigger_Manual:
+		fmt.Printf("🔍 ExtractTriggerInputData: Processing Manual trigger, trigger.GetInput() = %+v\n", trigger.GetInput())
 		// Manual triggers use the top-level TaskTrigger.input field
 		// since the trigger_type is just a boolean, not a nested object
 		if trigger.GetInput() != nil {
 			inputInterface := trigger.GetInput().AsInterface()
+			fmt.Printf("🔍 ExtractTriggerInputData: Manual trigger inputInterface = %+v, type = %T\n", inputInterface, inputInterface)
 			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
+				fmt.Printf("🔍 ExtractTriggerInputData: Manual trigger returning inputMap = %+v\n", inputMap)
 				return inputMap
+			} else {
+				fmt.Printf("🔍 ExtractTriggerInputData: Manual trigger inputInterface is not map[string]interface{}, got %T\n", inputInterface)
 			}
+		} else {
+			fmt.Printf("🔍 ExtractTriggerInputData: Manual trigger has no input field\n")
 		}
 		return nil
 	}

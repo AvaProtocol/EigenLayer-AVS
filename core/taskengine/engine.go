@@ -950,25 +950,32 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 	// Get task information to determine execution state
 	task, exists := n.tasks[payload.TaskId]
 	if !exists {
-		// Task not found in memory - this could indicate a synchronization issue
-		// Try to load the task from database as a fallback
-		n.logger.Warn("Task not found in memory, attempting database lookup",
-			"task_id", payload.TaskId,
-			"operator", address,
-			"memory_task_count", len(n.tasks))
-
+		// Task not found in memory - try database lookup
 		dbTask, dbErr := n.GetTaskByID(payload.TaskId)
 		if dbErr != nil {
-			n.logger.Error("Task not found in database either",
+			// Task not found in database either - this is likely a stale operator notification
+			// Log at DEBUG level to reduce noise in production
+			n.logger.Debug("Operator notified about non-existent task (likely stale data)",
 				"task_id", payload.TaskId,
 				"operator", address,
-				"db_error", dbErr)
+				"memory_task_count", len(n.tasks))
+
+			// Clean up stale task tracking for this operator
+			n.lock.Lock()
+			if state, exists := n.trackSyncedTasks[address]; exists {
+				delete(state.TaskID, payload.TaskId)
+				n.logger.Debug("Cleaned up stale task from operator tracking",
+					"task_id", payload.TaskId,
+					"operator", address)
+			}
+			n.lock.Unlock()
+
 			return &ExecutionState{
 				RemainingExecutions: 0,
 				TaskStillActive:     false,
 				Status:              "not_found",
-				Message:             "Task not found",
-			}, fmt.Errorf("task %s not found", payload.TaskId)
+				Message:             "Task no longer exists - operator should stop monitoring",
+			}, nil // Return nil error to avoid spam
 		}
 
 		// Task found in database but not in memory - add it to memory and continue
@@ -980,7 +987,8 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 		n.logger.Info("Task recovered from database and added to memory",
 			"task_id", payload.TaskId,
 			"operator", address,
-			"task_status", task.Status)
+			"task_status", task.Status,
+			"memory_task_count_after", len(n.tasks))
 	}
 
 	// Check if task is still runnable
@@ -1554,11 +1562,13 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Add the trigger variable with the actual trigger name for JavaScript access
 	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), map[string]any{"data": triggerDataMap})
 
-	// Extract and add trigger input data if available
-	triggerInputData := ExtractTriggerInputData(trigger)
+	// Step 6.5: Extract and add trigger input data if available (REPLICATE EXACT LOGIC FROM RunTask)
+	triggerInputData := ExtractTriggerInputData(task.Trigger)
+	// Store the extracted trigger input data for reuse in Step 8 (trigger step creation)
+	extractedTriggerInputForStep := triggerInputData
 	if triggerInputData != nil {
-		// Get existing trigger variable and add input data
-		triggerVarName := sanitizeTriggerNameForJS(trigger.GetName())
+		// Get the trigger variable name and add input data (EXACT SAME LOGIC AS RunTask)
+		triggerVarName := sanitizeTriggerNameForJS(task.Trigger.GetName())
 		vm.mu.Lock()
 		existingTriggerVar := vm.vars[triggerVarName]
 		if existingMap, ok := existingTriggerVar.(map[string]any); ok {
@@ -1567,10 +1577,9 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 			existingMap["input"] = processedTriggerInput
 			vm.vars[triggerVarName] = existingMap
 		} else {
-			// Create new trigger variable with both data and input
+			// Create new trigger variable with input data
 			processedTriggerInput := CreateDualAccessMap(triggerInputData)
 			vm.vars[triggerVarName] = map[string]any{
-				"data":  triggerDataMap,
 				"input": processedTriggerInput,
 			}
 		}
@@ -1589,13 +1598,32 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		triggerInputs = append(triggerInputs, key)
 	}
 
-	// Extract trigger input data using the proper extraction function
-	extractedTriggerInput := ExtractTriggerInputData(task.Trigger)
+	// Use the trigger input data extracted in Step 6.5 to avoid calling ExtractTriggerInputData twice
 	var triggerInputProto *structpb.Value
-	if extractedTriggerInput != nil {
-		triggerInputProto, err = structpb.NewValue(extractedTriggerInput)
+	if extractedTriggerInputForStep != nil {
+		n.logger.Info("✅ SimulateTask: Successfully extracted trigger input data", "trigger_id", task.Trigger.Id, "input_data", extractedTriggerInputForStep)
+		triggerInputProto, err = structpb.NewValue(extractedTriggerInputForStep)
 		if err != nil {
 			n.logger.Warn("Failed to convert trigger input data to protobuf", "error", err)
+			// Try a fallback approach: convert to JSON and back to ensure proper formatting
+			jsonBytes, jsonErr := json.Marshal(extractedTriggerInputForStep)
+			if jsonErr == nil {
+				var cleanData interface{}
+				if unmarshalErr := json.Unmarshal(jsonBytes, &cleanData); unmarshalErr == nil {
+					triggerInputProto, err = structpb.NewValue(cleanData)
+					if err == nil {
+						n.logger.Info("✅ Successfully converted trigger input data using JSON fallback")
+					}
+				}
+			}
+		}
+	} else {
+		n.logger.Info("❌ SimulateTask: No trigger input data found", "trigger_id", task.Trigger.Id, "trigger_type", task.Trigger.GetType())
+		// Debug: Check if trigger has input field at all
+		if task.Trigger.GetInput() != nil {
+			n.logger.Info("🔍 SimulateTask: Trigger has input field", "trigger_id", task.Trigger.Id, "input_field_present", true)
+		} else {
+			n.logger.Info("🔍 SimulateTask: Trigger has no input field", "trigger_id", task.Trigger.Id, "input_field_present", false)
 		}
 	}
 
@@ -1617,11 +1645,6 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Add trigger step to execution logs
 	vm.ExecutionLogs = append(vm.ExecutionLogs, triggerStep)
-
-	// Step 8.5: Update VM trigger variable with actual execution results
-	// This ensures subsequent nodes can access the trigger's actual output via eventTrigger.data
-	actualTriggerDataMap := buildTriggerDataMapFromProtobuf(queueData.TriggerType, triggerOutputProto, n.logger)
-	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), map[string]any{"data": actualTriggerDataMap})
 
 	// Step 9: Run the workflow nodes
 	runErr := vm.Run()
