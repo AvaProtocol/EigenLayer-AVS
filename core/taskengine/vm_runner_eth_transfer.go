@@ -7,7 +7,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -31,21 +30,8 @@ func NewETHTransferProcessor(vm *VM, ethClient *ethclient.Client, smartWalletCon
 func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransferNode) (*avsproto.Execution_Step, error) {
 	startTime := time.Now()
 
-	// Look up the task node to get the name
-	var nodeName string = "unknown"
-	p.vm.mu.Lock()
-	if taskNode, exists := p.vm.TaskNodes[stepID]; exists {
-		nodeName = taskNode.Name
-	}
-	p.vm.mu.Unlock()
-
-	// Get the node's input data
-	var nodeInput *structpb.Value
-	p.vm.mu.Lock()
-	if taskNode, exists := p.vm.TaskNodes[stepID]; exists {
-		nodeInput = taskNode.Input
-	}
-	p.vm.mu.Unlock()
+	// Get node data using helper function to reduce duplication
+	nodeName, nodeInput := p.vm.GetNodeDataForExecution(stepID)
 
 	// Create execution log
 	executionLog := &avsproto.Execution_Step{

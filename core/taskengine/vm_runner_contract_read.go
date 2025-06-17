@@ -12,7 +12,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type ContractReadProcessor struct {
@@ -208,21 +207,8 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	ctx := context.Background()
 	t0 := time.Now().UnixMilli()
 
-	// Look up the task node to get the name
-	var nodeName string = "unknown"
-	r.vm.mu.Lock()
-	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
-		nodeName = taskNode.Name
-	}
-	r.vm.mu.Unlock()
-
-	// Get the node's input data
-	var nodeInput *structpb.Value
-	r.vm.mu.Lock()
-	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
-		nodeInput = taskNode.Input
-	}
-	r.vm.mu.Unlock()
+	// Get node data using helper function to reduce duplication
+	nodeName, nodeInput := r.vm.GetNodeDataForExecution(stepID)
 
 	s := &avsproto.Execution_Step{
 		Id:         stepID,
