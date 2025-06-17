@@ -321,10 +321,10 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 				}
 
 				// Use shared function to build trigger data map from the TransferLog protobuf
-				triggerDataMap = buildTriggerDataMapFromProtobuf(avsproto.TriggerType_TRIGGER_TYPE_EVENT, v.parsedTriggerData.Event)
+				triggerDataMap = buildTriggerDataMapFromProtobuf(avsproto.TriggerType_TRIGGER_TYPE_EVENT, v.parsedTriggerData.Event, v.logger)
 			} else {
 				// Use shared function to build trigger data map from protobuf trigger outputs
-				triggerDataMap = buildTriggerDataMapFromProtobuf(triggerData.Type, triggerData.Output)
+				triggerDataMap = buildTriggerDataMapFromProtobuf(triggerData.Type, triggerData.Output, v.logger)
 			}
 
 			// Create dual-access map to support both camelCase and snake_case field access

@@ -239,26 +239,26 @@ func TestBuildTriggerDataMapFromProtobufEventTriggerComprehensive(t *testing.T) 
 			description: "Should map all TransferLog fields including the critical log_index field",
 			verifyFunc: func(t *testing.T, result map[string]interface{}) {
 				expected := map[string]interface{}{
-					"token_name":        "Test Token",
-					"token_symbol":      "TEST",
-					"token_decimals":    uint32(18),
-					"transaction_hash":  "0x1234567890abcdef",
-					"address":           "0xabcdef1234567890",
-					"block_number":      uint64(12345678),
-					"block_timestamp":   uint64(1672531200),
-					"from_address":      "0x1111111111111111",
-					"to_address":        "0x2222222222222222",
-					"value":             "1000000000000000000",
-					"value_formatted":   "1.0",
-					"transaction_index": uint32(5),
-					"log_index":         uint32(3),
-					"type":              "TRIGGER_TYPE_EVENT",
+					"tokenName":        "Test Token",
+					"tokenSymbol":      "TEST",
+					"tokenDecimals":    uint32(18),
+					"transactionHash":  "0x1234567890abcdef",
+					"address":          "0xabcdef1234567890",
+					"blockNumber":      uint64(12345678),
+					"blockTimestamp":   uint64(1672531200),
+					"fromAddress":      "0x1111111111111111",
+					"toAddress":        "0x2222222222222222",
+					"value":            "1000000000000000000",
+					"valueFormatted":   "1.0",
+					"transactionIndex": uint32(5),
+					"logIndex":         uint32(3),
+					"type":             "TRIGGER_TYPE_EVENT",
 				}
 
 				require.Equal(t, expected, result, "All TransferLog fields should be properly mapped")
 
-				require.Contains(t, result, "log_index", "log_index field should be present")
-				require.Equal(t, uint32(3), result["log_index"], "log_index should have correct value")
+				require.Contains(t, result, "logIndex", "logIndex field should be present")
+				require.Equal(t, uint32(3), result["logIndex"], "logIndex should have correct value")
 			},
 		},
 		{
@@ -281,29 +281,29 @@ func TestBuildTriggerDataMapFromProtobufEventTriggerComprehensive(t *testing.T) 
 			description: "Should map all EvmLog fields including log_index",
 			verifyFunc: func(t *testing.T, result map[string]interface{}) {
 				expected := map[string]interface{}{
-					"block_number":      uint64(12345678),
-					"log_index":         uint32(3),
-					"tx_hash":           "0x1234567890abcdef",
-					"address":           "0xabcdef1234567890",
-					"topics":            []string{"0xtopic1", "0xtopic2", "0xtopic3"},
-					"data":              "0xdeadbeef",
-					"block_hash":        "0xblockhash123456",
-					"transaction_index": uint32(5),
-					"removed":           false,
-					"type":              "TRIGGER_TYPE_EVENT",
+					"blockNumber":      uint64(12345678),
+					"logIndex":         uint32(3),
+					"transactionHash":  "0x1234567890abcdef",
+					"address":          "0xabcdef1234567890",
+					"topics":           []string{"0xtopic1", "0xtopic2", "0xtopic3"},
+					"data":             "0xdeadbeef",
+					"blockHash":        "0xblockhash123456",
+					"transactionIndex": uint32(5),
+					"removed":          false,
+					"type":             "TRIGGER_TYPE_EVENT",
 				}
 
 				require.Equal(t, expected, result, "All EvmLog fields should be properly mapped")
 
-				require.Contains(t, result, "log_index", "log_index field should be present")
-				require.Equal(t, uint32(3), result["log_index"], "log_index should have correct value")
+				require.Contains(t, result, "logIndex", "logIndex field should be present")
+				require.Equal(t, uint32(3), result["logIndex"], "logIndex should have correct value")
 			},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := buildTriggerDataMapFromProtobuf(avsproto.TriggerType_TRIGGER_TYPE_EVENT, test.input)
+			result := buildTriggerDataMapFromProtobuf(avsproto.TriggerType_TRIGGER_TYPE_EVENT, test.input, nil)
 
 			require.NotNil(t, result, "buildTriggerDataMapFromProtobuf should never return nil")
 
@@ -325,7 +325,7 @@ func TestBuildTriggerDataMapFromProtobufFieldCompleteness(t *testing.T) {
 		}
 
 		for _, triggerType := range triggerTypes {
-			result := buildTriggerDataMapFromProtobuf(triggerType, nil)
+			result := buildTriggerDataMapFromProtobuf(triggerType, nil, nil)
 			require.Contains(t, result, "type", "All trigger types should include type field")
 			require.Equal(t, triggerType.String(), result["type"], "Type field should match trigger type")
 		}
