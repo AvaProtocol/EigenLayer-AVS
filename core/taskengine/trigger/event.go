@@ -768,7 +768,7 @@ func (t *EventTrigger) buildFilterQueries() []QueryInfo {
 
 		for taskID, count := range taskQueryCounts {
 			if count > 1 {
-				t.logger.Warn("⚠️ Task has multiple unique queries - may receive duplicate events",
+				t.logger.Info("⚠️ Task has multiple unique queries - may receive duplicate events",
 					"task_id", taskID,
 					"unique_query_count", count,
 					"recommendation", "Consider combining queries to reduce duplicates")
