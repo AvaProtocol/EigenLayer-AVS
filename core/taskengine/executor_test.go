@@ -39,7 +39,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 								Id:   "a1",
 								Type: "if",
 								// The test data is of this transaction https://sepolia.etherscan.io/tx/0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8 which is 3.45 token
-								Expression: "Number(triggertest.data.value_formatted) >= 3",
+								Expression: "Number(triggertest.data.valueFormatted) >= 3",
 							},
 						},
 					},
@@ -390,7 +390,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 							{
 								Id:         "condition1",
 								Type:       "if",
-								Expression: "Number(triggertest.data.value_formatted) >= 3",
+								Expression: "Number(triggertest.data.valueFormatted) >= 3",
 							},
 						},
 					},
