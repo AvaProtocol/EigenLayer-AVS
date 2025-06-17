@@ -261,7 +261,7 @@ func (n *Engine) MustStart() error {
 		}
 		err := protojson.Unmarshal(item.Value, task)
 		if err == nil {
-			n.tasks[task.Id] = task // Fixed: Use task.Id instead of string(item.Key)
+			n.tasks[task.Id] = task
 			loadedCount++
 		} else {
 			n.logger.Warn("Failed to unmarshal task during startup", "storage_key", string(item.Key), "error", err)
