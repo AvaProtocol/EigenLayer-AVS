@@ -2307,6 +2307,27 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
 	return false, errorMessage, failedCount
 }
 
+// GetNodeDataForExecution retrieves node name and input data for a given stepID
+// This helper function extracts the repetitive locking pattern used across all vm_runner files
+// to get node information from TaskNodes map.
+//
+// Returns:
+// - nodeName: The name of the node (defaults to "unknown" if not found)
+// - nodeInput: The input data of the node (can be nil)
+func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeInput *structpb.Value) {
+	nodeName = "unknown" // default value
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if taskNode, exists := v.TaskNodes[stepID]; exists {
+		nodeName = taskNode.Name
+		nodeInput = taskNode.Input
+	}
+
+	return nodeName, nodeInput
+}
+
 // ProcessInputVariableWithDualAccess processes a single input variable, applying dual-access mapping
 // to data fields when needed. This extracts the repetitive logic used throughout the codebase
 // for processing input variables in VM contexts.
