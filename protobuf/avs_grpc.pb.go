@@ -100,7 +100,7 @@ type AggregatorClient interface {
 	GetExecutionStats(ctx context.Context, in *GetExecutionStatsReq, opts ...grpc.CallOption) (*GetExecutionStatsResp, error)
 	// RunNodeWithInputs allows executing a single node with provided inputs for testing purposes
 	RunNodeWithInputs(ctx context.Context, in *RunNodeWithInputsReq, opts ...grpc.CallOption) (*RunNodeWithInputsResp, error)
-	// RunTrigger allows executing a single trigger for testing purposes (triggers don't accept inputs)
+	// RunTrigger allows executing a single trigger for testing purposes
 	RunTrigger(ctx context.Context, in *RunTriggerReq, opts ...grpc.CallOption) (*RunTriggerResp, error)
 	// SimulateTask allows executing a complete task simulation including trigger and all workflow nodes
 	SimulateTask(ctx context.Context, in *SimulateTaskReq, opts ...grpc.CallOption) (*Execution, error)
@@ -428,7 +428,7 @@ type AggregatorServer interface {
 	GetExecutionStats(context.Context, *GetExecutionStatsReq) (*GetExecutionStatsResp, error)
 	// RunNodeWithInputs allows executing a single node with provided inputs for testing purposes
 	RunNodeWithInputs(context.Context, *RunNodeWithInputsReq) (*RunNodeWithInputsResp, error)
-	// RunTrigger allows executing a single trigger for testing purposes (triggers don't accept inputs)
+	// RunTrigger allows executing a single trigger for testing purposes
 	RunTrigger(context.Context, *RunTriggerReq) (*RunTriggerResp, error)
 	// SimulateTask allows executing a complete task simulation including trigger and all workflow nodes
 	SimulateTask(context.Context, *SimulateTaskReq) (*Execution, error)

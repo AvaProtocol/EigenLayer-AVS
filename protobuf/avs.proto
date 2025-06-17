@@ -65,6 +65,26 @@ message GetTokenMetadataResp {
 // CLIENT-FACING MESSAGES
 // ============================================================================
 
+// TRIGGER AND NODE INPUT SYSTEM:
+// 
+// All triggers and nodes now support an `input` field of type google.protobuf.Value,
+// which stores user-provided input data as JavaScript objects. This data is available
+// for reference by subsequent nodes during task execution.
+//
+// During task execution, both the output data and input data of each step are accessible:
+// - `node_name.data` or `node_name.output` - The computed output from the node execution
+// - `node_name.input` - The user-provided input data defined when the task/node was created
+//
+// This allows for flexible data flow where:
+// 1. Static configuration is stored in the Config field
+// 2. User-provided runtime data is stored in the input field  
+// 3. Computed results are available in the Output field
+//
+// Example usage in SimulateTask or CreateTask:
+// - Define input data for each node/trigger when creating the task
+// - Reference both computed outputs and input data in subsequent nodes
+// - Use expressions like `${previous_node.data.result}` and `${previous_node.input.user_value}`
+
 message IdReq {
   string id = 1;
 }
@@ -88,6 +108,8 @@ message FixedTimeTrigger {
 
   // Include Config as field so it is generated in Go
   Config config = 1;
+  // Input data provided by user for this trigger
+  google.protobuf.Value input = 2;
 }
 
 // Simple timebase or cron syntax.
@@ -103,6 +125,8 @@ message CronTrigger {
 
   // Include Config as field so it is generated in Go
   Config config = 1;
+  // Input data provided by user for this trigger
+  google.protobuf.Value input = 2;
 }
 
 message BlockTrigger {
@@ -122,6 +146,8 @@ message BlockTrigger {
 
   // Include Config as field so it is generated in Go
   Config config = 1;
+  // Input data provided by user for this trigger
+  google.protobuf.Value input = 2;
 }
 
 // EventTrigger monitors blockchain events using direct RPC filter queries.
@@ -193,6 +219,8 @@ message EventTrigger {
 
   // Include Config as field so it is generated in Go
   Config config = 1;
+  // Input data provided by user for this trigger
+  google.protobuf.Value input = 2;
 }
 
 message ManualTrigger {
@@ -209,6 +237,8 @@ message ManualTrigger {
 
   // Include Config as field so it is generated in Go
   Config config = 1;
+  // Input data provided by user for this trigger
+  google.protobuf.Value input = 2;
 }
 
 message TaskTrigger {
@@ -233,6 +263,8 @@ message TaskTrigger {
     EventTrigger     event   = 6;
   }
   string id = 7;
+  // Input data provided by user for this trigger
+  google.protobuf.Value input = 9;
 }
 
 // gRPC internal error code use up to 17, we extend and start from 1000 to avoid any conflict 
@@ -292,6 +324,8 @@ message ETHTransferNode {
 
   // Include Config and Input as fields so they are generated in Go
   Config config = 1;
+  // Input data provided by user for this node
+  google.protobuf.Value input = 2;
 }
 
 message ContractWriteNode {
@@ -364,6 +398,8 @@ message ContractWriteNode {
 
   // Include Config and Input as fields so they are generated in Go
   Config config = 1;
+  // Input data provided by user for this node
+  google.protobuf.Value input = 2;
 }
 
 message ContractReadNode {
@@ -402,6 +438,8 @@ message ContractReadNode {
 
   // Include Config and Input as fields so they are generated in Go
   Config config = 1;
+  // Input data provided by user for this node
+  google.protobuf.Value input = 2;
 }
 
 
@@ -421,6 +459,8 @@ message GraphQLQueryNode {
 
   // Include Config and Input as fields so they are generated in Go
   Config config = 1;
+  // Input data provided by user for this node
+  google.protobuf.Value input = 2;
 }
 
 message RestAPINode {
@@ -438,6 +478,8 @@ message RestAPINode {
 
   // Include Config and Input as fields so they are generated in Go
   Config config = 1;
+  // Input data provided by user for this node
+  google.protobuf.Value input = 2;
 }
 
 message CustomCodeNode {
@@ -453,6 +495,8 @@ message CustomCodeNode {
 
   // Include Config and Input as fields so they are generated in Go
   Config config = 1;
+  // Input data provided by user for this node
+  google.protobuf.Value input = 2;
 }
 
 message BranchNode {
@@ -475,6 +519,8 @@ message BranchNode {
 
   // Include Config and Input as fields so they are generated in Go
   Config config = 1;
+  // Input data provided by user for this node
+  google.protobuf.Value input = 2;
 }
 
 message FilterNode {
@@ -494,6 +540,8 @@ message FilterNode {
 
   // Include Config and Input as fields so they are generated in Go
   Config config = 1;
+  // Input data provided by user for this node
+  google.protobuf.Value input = 2;
 }
 
 // LoopNode currently not support, but we pre-defined to reverse the field id
@@ -531,6 +579,8 @@ message LoopNode {
 
   // Include Config and Input as fields so they are generated in Go
   Config config = 1;
+  // Input data provided by user for this node
+  google.protobuf.Value input = 2;
 }
 
 // The edge is relationship or direct between node
@@ -567,6 +617,8 @@ message TaskNode {
     LoopNode          loop = 17;
     CustomCodeNode    custom_code = 18;
   }
+  // Input data provided by user for this node
+  google.protobuf.Value input = 19;
 }
 
 message Execution {
@@ -953,7 +1005,7 @@ service Aggregator {
   // RunNodeWithInputs allows executing a single node with provided inputs for testing purposes
   rpc RunNodeWithInputs(RunNodeWithInputsReq) returns (RunNodeWithInputsResp);
   
-  // RunTrigger allows executing a single trigger for testing purposes (triggers don't accept inputs)
+  // RunTrigger allows executing a single trigger for testing purposes
   rpc RunTrigger(RunTriggerReq) returns (RunTriggerResp);
   
   // SimulateTask allows executing a complete task simulation including trigger and all workflow nodes
@@ -1032,6 +1084,7 @@ message RunNodeWithInputsResp {
 message RunTriggerReq {
   TriggerType trigger_type = 1; // Type of trigger to execute using the TriggerType enum
   map<string, google.protobuf.Value> trigger_config = 2; // Configuration for the trigger
+  map<string, google.protobuf.Value> trigger_input = 3; // Input data for the trigger
 }
 
 // Response message for RunTrigger
