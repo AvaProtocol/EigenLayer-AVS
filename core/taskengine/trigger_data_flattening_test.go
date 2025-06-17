@@ -393,8 +393,8 @@ func TestContractReadFallbackResolution(t *testing.T) {
 	contractReadConfig := map[string]interface{}{
 		"contractAddress": "{{eventTrigger.data.contractAddress}}", // camelCase template
 		"contractAbi":     `[{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"}]`,
-		"methodCalls": []map[string]interface{}{
-			{
+		"methodCalls": []interface{}{
+			map[string]interface{}{
 				"methodName": "decimals",
 				"callData":   "0x313ce567",
 			},
