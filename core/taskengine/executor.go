@@ -170,12 +170,12 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		existingTriggerVar := vm.vars[triggerVarName]
 		if existingMap, ok := existingTriggerVar.(map[string]any); ok {
 			// Apply dual-access mapping to trigger input data
-			processedTriggerInput := CreateDualAccessMap(triggerInputData)
+			processedTriggerInput := ProcessInputVariableWithDualAccess(triggerInputData)
 			existingMap["input"] = processedTriggerInput
 			vm.vars[triggerVarName] = existingMap
 		} else {
 			// Create new trigger variable with input data
-			processedTriggerInput := CreateDualAccessMap(triggerInputData)
+			processedTriggerInput := ProcessInputVariableWithDualAccess(triggerInputData)
 			vm.vars[triggerVarName] = map[string]any{
 				"input": processedTriggerInput,
 			}

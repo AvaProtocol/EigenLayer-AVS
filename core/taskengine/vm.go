@@ -2307,6 +2307,54 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
 	return false, errorMessage, failedCount
 }
 
+// ProcessInputVariableWithDualAccess processes a single input variable, applying dual-access mapping
+// to data fields when needed. This extracts the repetitive logic used throughout the codebase
+// for processing input variables in VM contexts.
+//
+// The function:
+// 1. Checks if the value is a map with a "data" field
+// 2. If so, applies CreateDualAccessMap to the data field
+// 3. Returns the processed value ready for VM.AddVar()
+//
+// This eliminates code duplication across engine.go, run_node_immediately.go, executor.go, etc.
+func ProcessInputVariableWithDualAccess(value interface{}) interface{} {
+	// Apply dual-access mapping if the value is a map with a "data" field
+	if valueMap, ok := value.(map[string]interface{}); ok {
+		if dataField, hasData := valueMap["data"]; hasData {
+			if dataMap, isDataMap := dataField.(map[string]interface{}); isDataMap {
+				// Apply dual-access mapping to the data field
+				dualAccessData := CreateDualAccessMap(dataMap)
+				// Create a new map with the dual-access data
+				processedValue := make(map[string]interface{})
+				for k, v := range valueMap {
+					if k == "data" {
+						processedValue[k] = dualAccessData
+					} else {
+						processedValue[k] = v
+					}
+				}
+				return processedValue
+			}
+		}
+	}
+	// Return original value if no processing needed
+	return value
+}
+
+// ProcessInputVariablesWithDualAccess processes a map of input variables, applying dual-access mapping
+// where needed. This is a convenience function for batch processing.
+func ProcessInputVariablesWithDualAccess(inputVariables map[string]interface{}) map[string]interface{} {
+	if inputVariables == nil {
+		return nil
+	}
+
+	processedInputVariables := make(map[string]interface{})
+	for key, value := range inputVariables {
+		processedInputVariables[key] = ProcessInputVariableWithDualAccess(value)
+	}
+	return processedInputVariables
+}
+
 // CreateDualAccessMap creates a map with both camelCase and snake_case field names
 // pointing to the same values. This enables JavaScript code to access fields using
 // either naming convention, providing fallback support for direct variable access.

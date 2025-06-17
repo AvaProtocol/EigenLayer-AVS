@@ -1527,32 +1527,9 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Add input variables to VM for template processing
 	// Apply dual-access mapping to enable both camelCase and snake_case field access
-	for key, value := range inputVariables {
-		// Apply dual-access mapping if the value is a map with a "data" field
-		if valueMap, ok := value.(map[string]interface{}); ok {
-			if dataField, hasData := valueMap["data"]; hasData {
-				if dataMap, isDataMap := dataField.(map[string]interface{}); isDataMap {
-					// Apply dual-access mapping to the data field
-					dualAccessData := CreateDualAccessMap(dataMap)
-					// Create a new map with the dual-access data
-					processedValue := make(map[string]interface{})
-					for k, v := range valueMap {
-						if k == "data" {
-							processedValue[k] = dualAccessData
-						} else {
-							processedValue[k] = v
-						}
-					}
-					vm.AddVar(key, processedValue)
-				} else {
-					vm.AddVar(key, value)
-				}
-			} else {
-				vm.AddVar(key, value)
-			}
-		} else {
-			vm.AddVar(key, value)
-		}
+	processedInputVariables := ProcessInputVariablesWithDualAccess(inputVariables)
+	for key, processedValue := range processedInputVariables {
+		vm.AddVar(key, processedValue)
 	}
 
 	// Step 6: Add trigger data as "trigger" variable for convenient access in JavaScript
