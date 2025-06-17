@@ -2353,25 +2353,18 @@ func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface
 		return nil
 	}
 
-	// Debug logging to trace input extraction
-	fmt.Printf("🔍 ExtractTriggerInputData: Processing trigger type=%v, name=%s\n", trigger.GetType(), trigger.GetName())
-
 	// Check each trigger type and extract input from the correct nested object
 	switch trigger.GetTriggerType().(type) {
 	case *avsproto.TaskTrigger_Block:
 		blockTrigger := trigger.GetBlock()
-		fmt.Printf("🔍 ExtractTriggerInputData: BlockTrigger found, hasInput=%v\n", blockTrigger != nil && blockTrigger.GetInput() != nil)
 		if blockTrigger != nil && blockTrigger.GetInput() != nil {
 			inputInterface := blockTrigger.GetInput().AsInterface()
-			fmt.Printf("🔍 ExtractTriggerInputData: BlockTrigger input extracted: %+v\n", inputInterface)
 			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-				fmt.Printf("✅ ExtractTriggerInputData: BlockTrigger input converted to map: %+v\n", inputMap)
 				return inputMap
 			}
 		}
 	case *avsproto.TaskTrigger_Cron:
 		cronTrigger := trigger.GetCron()
-		fmt.Printf("🔍 ExtractTriggerInputData: CronTrigger found, hasInput=%v\n", cronTrigger != nil && cronTrigger.GetInput() != nil)
 		if cronTrigger != nil && cronTrigger.GetInput() != nil {
 			inputInterface := cronTrigger.GetInput().AsInterface()
 			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
@@ -2380,7 +2373,6 @@ func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface
 		}
 	case *avsproto.TaskTrigger_Event:
 		eventTrigger := trigger.GetEvent()
-		fmt.Printf("🔍 ExtractTriggerInputData: EventTrigger found, hasInput=%v\n", eventTrigger != nil && eventTrigger.GetInput() != nil)
 		if eventTrigger != nil && eventTrigger.GetInput() != nil {
 			inputInterface := eventTrigger.GetInput().AsInterface()
 			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
@@ -2389,7 +2381,6 @@ func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface
 		}
 	case *avsproto.TaskTrigger_FixedTime:
 		fixedTimeTrigger := trigger.GetFixedTime()
-		fmt.Printf("🔍 ExtractTriggerInputData: FixedTimeTrigger found, hasInput=%v\n", fixedTimeTrigger != nil && fixedTimeTrigger.GetInput() != nil)
 		if fixedTimeTrigger != nil && fixedTimeTrigger.GetInput() != nil {
 			inputInterface := fixedTimeTrigger.GetInput().AsInterface()
 			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
@@ -2397,12 +2388,9 @@ func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface
 			}
 		}
 	case *avsproto.TaskTrigger_Manual:
-		fmt.Printf("🔍 ExtractTriggerInputData: ManualTrigger found (no input support)\n")
 		// ManualTrigger is a boolean field, it doesn't have input data structure
 		// Manual triggers don't support input fields in the current protobuf schema
 		return nil
 	}
-
-	fmt.Printf("❌ ExtractTriggerInputData: No input data found for trigger\n")
 	return nil
 }

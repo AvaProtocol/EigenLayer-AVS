@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/status"
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -1588,6 +1589,16 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		triggerInputs = append(triggerInputs, key)
 	}
 
+	// Extract trigger input data using the proper extraction function
+	extractedTriggerInput := ExtractTriggerInputData(task.Trigger)
+	var triggerInputProto *structpb.Value
+	if extractedTriggerInput != nil {
+		triggerInputProto, err = structpb.NewValue(extractedTriggerInput)
+		if err != nil {
+			n.logger.Warn("Failed to convert trigger input data to protobuf", "error", err)
+		}
+	}
+
 	triggerStep := &avsproto.Execution_Step{
 		Id:      task.Trigger.Id, // Use new 'id' field
 		Success: true,
@@ -1598,7 +1609,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Inputs:  triggerInputs,                  // Use inputVariables keys as trigger inputs
 		Type:    queueData.TriggerType.String(), // Use trigger type as string
 		Name:    task.Trigger.Name,              // Use new 'name' field
-		Input:   task.Trigger.Input,             // Include trigger input data for debugging
+		Input:   triggerInputProto,              // Include extracted trigger input data for debugging
 	}
 
 	// Set trigger output data in the step using shared function

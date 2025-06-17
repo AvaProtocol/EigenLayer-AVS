@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -211,6 +212,16 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		// This ensures regular workflows have complete execution history (trigger + nodes)
 
 		// Create trigger step similar to SimulateTask
+		// Extract trigger input data using the proper extraction function
+		triggerInputData := ExtractTriggerInputData(task.Trigger)
+		var triggerInputProto *structpb.Value
+		if triggerInputData != nil {
+			triggerInputProto, err = structpb.NewValue(triggerInputData)
+			if err != nil {
+				x.logger.Warn("Failed to convert trigger input data to protobuf", "error", err)
+			}
+		}
+
 		triggerStep := &avsproto.Execution_Step{
 			Id:      task.Trigger.Id,
 			Success: true,
@@ -221,7 +232,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 			Inputs:  []string{}, // Empty inputs for trigger steps
 			Type:    queueData.TriggerType.String(),
 			Name:    task.Trigger.Name,
-			Input:   task.Trigger.Input, // Include trigger input data for debugging
+			Input:   triggerInputProto, // Include extracted trigger input data for debugging
 		}
 
 		// Set trigger output data in the step based on trigger type
