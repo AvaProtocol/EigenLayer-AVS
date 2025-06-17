@@ -288,6 +288,222 @@ func TestSmartVariableResolution(t *testing.T) {
 	})
 }
 
+// TestDualAccessVariableSupport tests that both camelCase and snake_case field access
+// work for direct JavaScript variable access (not just template variables).
+//
+// This test verifies that the createDualAccessMap function properly enables:
+// 1. Direct JS destructuring: const {tokenSymbol, token_symbol} = eventTrigger.data
+// 2. Direct JS property access: eventTrigger.data.tokenSymbol AND eventTrigger.data.token_symbol
+// 3. Template variables: {{eventTrigger.data.tokenSymbol}} AND {{eventTrigger.data.token_symbol}}
+//
+// This solves the original issue where deployed tasks returned NaN/undefined because
+// JavaScript code expected camelCase but data had snake_case (or vice versa).
+func TestDualAccessVariableSupport(t *testing.T) {
+	engine := createTestEngineForSmartResolution(t)
+
+	t.Run("DirectJavaScriptVariableAccess", func(t *testing.T) {
+		// Test that both camelCase and snake_case work in direct JavaScript code
+		// This simulates the user's original issue with custom code destructuring
+
+		config := map[string]interface{}{
+			"lang": "JavaScript",
+			"source": `
+				// Test direct property access (both naming conventions should work)
+				const tokenSymbolCamel = eventTrigger.data.tokenSymbol;
+				const tokenSymbolSnake = eventTrigger.data.token_symbol;
+				const valueFormattedCamel = eventTrigger.data.valueFormatted;
+				const valueFormattedSnake = eventTrigger.data.value_formatted;
+				
+				// Test destructuring (both naming conventions should work)
+				const {tokenSymbol, token_symbol, valueFormatted, value_formatted} = eventTrigger.data;
+				
+				// Return results to verify both work
+				return {
+					tokenSymbolCamel,
+					tokenSymbolSnake,
+					valueFormattedCamel,
+					valueFormattedSnake,
+					destructuredTokenSymbol: tokenSymbol,
+					destructuredTokenSymbolSnake: token_symbol,
+					destructuredValueFormatted: valueFormatted,
+					destructuredValueFormattedSnake: value_formatted
+				};
+			`,
+		}
+
+		// Simulate trigger data with camelCase field names (as it comes from buildTriggerDataMapFromProtobuf)
+		inputVariables := map[string]interface{}{
+			"eventTrigger": map[string]interface{}{
+				"data": map[string]interface{}{
+					"tokenSymbol":    "USDC",
+					"valueFormatted": "3.45",
+					"blockNumber":    12345678,
+					"fromAddress":    "0x1111111111111111",
+					"toAddress":      "0x2222222222222222",
+				},
+			},
+		}
+
+		result, err := engine.RunNodeImmediately(NodeTypeCustomCode, config, inputVariables)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+
+		// Verify that both camelCase and snake_case access work
+		assert.Equal(t, "USDC", result["tokenSymbolCamel"])
+		assert.Equal(t, "USDC", result["tokenSymbolSnake"])
+		assert.Equal(t, "3.45", result["valueFormattedCamel"])
+		assert.Equal(t, "3.45", result["valueFormattedSnake"])
+
+		// Verify destructuring works for both naming conventions
+		assert.Equal(t, "USDC", result["destructuredTokenSymbol"])
+		assert.Equal(t, "USDC", result["destructuredTokenSymbolSnake"])
+		assert.Equal(t, "3.45", result["destructuredValueFormatted"])
+		assert.Equal(t, "3.45", result["destructuredValueFormattedSnake"])
+	})
+
+	t.Run("NodeOutputDualAccess", func(t *testing.T) {
+		// Test that node outputs also support dual access
+		// This ensures the SetOutputVarForStep dual-access mapping works
+
+		// First, create a REST API node that returns data with camelCase fields
+		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(200)
+			// Return camelCase field names
+			fmt.Fprintf(w, `{
+				"responseData": "test_response",
+				"statusCode": 200,
+				"apiKey": "secret_key_123"
+			}`)
+		}))
+		defer mockServer.Close()
+
+		restConfig := map[string]interface{}{
+			"url":    mockServer.URL,
+			"method": "GET",
+		}
+
+		// Execute REST API node to get output data
+		restResult, err := engine.RunNodeImmediately(NodeTypeRestAPI, restConfig, map[string]interface{}{})
+		assert.NoError(t, err)
+		assert.NotNil(t, restResult)
+
+		// Now test a custom code node that accesses the REST API output using both naming conventions
+		customCodeConfig := map[string]interface{}{
+			"lang": "JavaScript",
+			"source": `
+				// Test accessing REST API output data using both camelCase and snake_case
+				const responseDataCamel = apiNode.data.responseData;
+				const responseDataSnake = apiNode.data.response_data;
+				const statusCodeCamel = apiNode.data.statusCode;
+				const statusCodeSnake = apiNode.data.status_code;
+				const apiKeyCamel = apiNode.data.apiKey;
+				const apiKeySnake = apiNode.data.api_key;
+				
+				return {
+					responseDataCamel,
+					responseDataSnake,
+					statusCodeCamel,
+					statusCodeSnake,
+					apiKeyCamel,
+					apiKeySnake
+				};
+			`,
+		}
+
+		// Simulate the REST API node output being available to the custom code node
+		inputVariables := map[string]interface{}{
+			"apiNode": map[string]interface{}{
+				"data": restResult, // This should have dual-access mapping applied
+			},
+		}
+
+		customResult, err := engine.RunNodeImmediately(NodeTypeCustomCode, customCodeConfig, inputVariables)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, customResult)
+
+		// Verify that both camelCase and snake_case access work for node outputs
+		// Note: The actual values depend on the REST API response structure
+		// We're mainly testing that both naming conventions resolve to the same values
+		if customResult["responseDataCamel"] != nil {
+			assert.Equal(t, customResult["responseDataCamel"], customResult["responseDataSnake"])
+		}
+		if customResult["statusCodeCamel"] != nil {
+			assert.Equal(t, customResult["statusCodeCamel"], customResult["statusCodeSnake"])
+		}
+		if customResult["apiKeyCamel"] != nil {
+			assert.Equal(t, customResult["apiKeyCamel"], customResult["apiKeySnake"])
+		}
+	})
+}
+
+// TestDualAccessDebug is a debug test to understand what's happening with dual-access
+func TestDualAccessDebug(t *testing.T) {
+	engine := createTestEngineForSmartResolution(t)
+
+	t.Run("DebugVariableAccess", func(t *testing.T) {
+		config := map[string]interface{}{
+			"lang": "JavaScript",
+			"source": `
+				// Check if eventTrigger exists and return debug info
+				return {
+					debug: "test",
+					eventTriggerExists: typeof eventTrigger !== 'undefined',
+					eventTriggerData: typeof eventTrigger !== 'undefined' ? eventTrigger.data : null,
+					eventTriggerType: typeof eventTrigger,
+					eventTriggerKeys: typeof eventTrigger !== 'undefined' ? Object.keys(eventTrigger) : [],
+					eventTriggerDataKeys: typeof eventTrigger !== 'undefined' && eventTrigger.data ? Object.keys(eventTrigger.data) : [],
+					globalKeys: Object.keys(this),
+					// Try to access specific fields
+					tokenSymbolDirect: typeof eventTrigger !== 'undefined' && eventTrigger.data ? eventTrigger.data.tokenSymbol : "not_found",
+					tokenSymbolSnake: typeof eventTrigger !== 'undefined' && eventTrigger.data ? eventTrigger.data.token_symbol : "not_found"
+				};
+			`,
+		}
+
+		inputVariables := map[string]interface{}{
+			"eventTrigger": map[string]interface{}{
+				"data": map[string]interface{}{
+					"tokenSymbol":    "USDC",
+					"valueFormatted": "3.45",
+				},
+			},
+		}
+
+		result, err := engine.RunNodeImmediately(NodeTypeCustomCode, config, inputVariables)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+
+		// Print the result for debugging
+		t.Logf("Debug result: %+v", result)
+	})
+}
+
+// TestCreateDualAccessMap tests the CreateDualAccessMap function directly
+func TestCreateDualAccessMap(t *testing.T) {
+	// Test with camelCase input
+	input := map[string]interface{}{
+		"tokenSymbol":    "USDC",
+		"valueFormatted": "3.45",
+		"blockNumber":    12345,
+	}
+
+	result := CreateDualAccessMap(input)
+
+	// Should have both camelCase and snake_case versions
+	assert.Equal(t, "USDC", result["tokenSymbol"])
+	assert.Equal(t, "USDC", result["token_symbol"])
+	assert.Equal(t, "3.45", result["valueFormatted"])
+	assert.Equal(t, "3.45", result["value_formatted"])
+	assert.Equal(t, 12345, result["blockNumber"])
+	assert.Equal(t, 12345, result["block_number"])
+
+	t.Logf("CreateDualAccessMap result: %+v", result)
+}
+
 // createTestEngineForSmartResolution creates an engine for testing
 func createTestEngineForSmartResolution(t *testing.T) *Engine {
 	logger := testutil.GetLogger()

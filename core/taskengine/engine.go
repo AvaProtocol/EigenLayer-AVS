@@ -200,6 +200,7 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 
 	// Initialize TokenEnrichmentService
 	// Always try to initialize, even without RPC, so we can serve whitelist data
+	logger.Debug("initializing TokenEnrichmentService", "has_rpc", rpcConn != nil)
 	tokenService, err := NewTokenEnrichmentService(rpcConn, logger)
 	if err != nil {
 		logger.Warn("Failed to initialize TokenEnrichmentService", "error", err)
@@ -252,15 +253,22 @@ func (n *Engine) MustStart() error {
 	if e != nil {
 		panic(e)
 	}
+
+	loadedCount := 0
 	for _, item := range kvs {
 		task := &model.Task{
 			Task: &avsproto.Task{},
 		}
 		err := protojson.Unmarshal(item.Value, task)
 		if err == nil {
-			n.tasks[string(item.Key)] = task
+			n.tasks[task.Id] = task
+			loadedCount++
+		} else {
+			n.logger.Warn("Failed to unmarshal task during startup", "storage_key", string(item.Key), "error", err)
 		}
 	}
+
+	n.logger.Info("🚀 Engine started successfully", "active_tasks_loaded", loadedCount)
 
 	// Start the batch notification processor
 	go n.processBatchedNotifications()
@@ -941,12 +949,37 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 	// Get task information to determine execution state
 	task, exists := n.tasks[payload.TaskId]
 	if !exists {
-		return &ExecutionState{
-			RemainingExecutions: 0,
-			TaskStillActive:     false,
-			Status:              "not_found",
-			Message:             "Task not found",
-		}, fmt.Errorf("task %s not found", payload.TaskId)
+		// Task not found in memory - this could indicate a synchronization issue
+		// Try to load the task from database as a fallback
+		n.logger.Warn("Task not found in memory, attempting database lookup",
+			"task_id", payload.TaskId,
+			"operator", address,
+			"memory_task_count", len(n.tasks))
+
+		dbTask, dbErr := n.GetTaskByID(payload.TaskId)
+		if dbErr != nil {
+			n.logger.Error("Task not found in database either",
+				"task_id", payload.TaskId,
+				"operator", address,
+				"db_error", dbErr)
+			return &ExecutionState{
+				RemainingExecutions: 0,
+				TaskStillActive:     false,
+				Status:              "not_found",
+				Message:             "Task not found",
+			}, fmt.Errorf("task %s not found", payload.TaskId)
+		}
+
+		// Task found in database but not in memory - add it to memory and continue
+		n.lock.Lock()
+		n.tasks[dbTask.Id] = dbTask
+		n.lock.Unlock()
+		task = dbTask
+
+		n.logger.Info("Task recovered from database and added to memory",
+			"task_id", payload.TaskId,
+			"operator", address,
+			"task_status", task.Status)
 	}
 
 	// Check if task is still runnable
@@ -988,27 +1021,48 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 	}
 
 	// Enrich EventTrigger output if TokenEnrichmentService is available and it's a Transfer event
-	if payload.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_EVENT && n.tokenEnrichmentService != nil {
-		if eventOutput := triggerData.Output.(*avsproto.EventTrigger_Output); eventOutput != nil {
-			if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
-				n.logger.Debug("enriching EventTrigger output from operator",
-					"task_id", payload.TaskId,
-					"tx_hash", evmLog.TransactionHash,
-					"block_number", evmLog.BlockNumber)
+	if payload.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_EVENT {
+		n.logger.Debug("processing event trigger",
+			"task_id", payload.TaskId,
+			"has_token_service", n.tokenEnrichmentService != nil)
 
-				// Fetch full event data from the blockchain using the minimal data from operator
-				if enrichedEventOutput, err := n.enrichEventTriggerFromOperatorData(evmLog); err == nil {
-					// Replace the minimal event output with the enriched one
-					triggerData.Output = enrichedEventOutput
-					n.logger.Debug("successfully enriched EventTrigger output",
+		if n.tokenEnrichmentService != nil {
+			if eventOutput := triggerData.Output.(*avsproto.EventTrigger_Output); eventOutput != nil {
+				if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
+					n.logger.Debug("enriching EventTrigger output from operator",
 						"task_id", payload.TaskId,
-						"has_transfer_log", enrichedEventOutput.GetTransferLog() != nil)
+						"tx_hash", evmLog.TransactionHash,
+						"block_number", evmLog.BlockNumber,
+						"log_index", evmLog.Index,
+						"address", evmLog.Address,
+						"topics_count", len(evmLog.Topics),
+						"data_length", len(evmLog.Data))
+
+					// Fetch full event data from the blockchain using the minimal data from operator
+					if enrichedEventOutput, err := n.enrichEventTriggerFromOperatorData(evmLog); err == nil {
+						// Replace the minimal event output with the enriched one
+						triggerData.Output = enrichedEventOutput
+						n.logger.Debug("successfully enriched EventTrigger output",
+							"task_id", payload.TaskId,
+							"has_transfer_log", enrichedEventOutput.GetTransferLog() != nil,
+							"has_evm_log", enrichedEventOutput.GetEvmLog() != nil)
+					} else {
+						n.logger.Warn("failed to enrich EventTrigger output, using minimal data",
+							"task_id", payload.TaskId,
+							"error", err)
+					}
 				} else {
-					n.logger.Warn("failed to enrich EventTrigger output, using minimal data",
+					n.logger.Debug("EventTrigger output has no EvmLog data",
 						"task_id", payload.TaskId,
-						"error", err)
+						"has_transfer_log", eventOutput.GetTransferLog() != nil)
 				}
+			} else {
+				n.logger.Debug("EventTrigger output is nil",
+					"task_id", payload.TaskId)
 			}
+		} else {
+			n.logger.Debug("TokenEnrichmentService not available for event enrichment",
+				"task_id", payload.TaskId)
 		}
 	}
 
@@ -1016,6 +1070,26 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 		TriggerType:   triggerData.Type,
 		TriggerOutput: triggerData.Output,
 		ExecutionID:   ulid.Make().String(),
+	}
+
+	// For event triggers, if we have enriched data, convert it to a map format that survives JSON serialization
+	if triggerData.Type == avsproto.TriggerType_TRIGGER_TYPE_EVENT {
+		if eventOutput, ok := triggerData.Output.(*avsproto.EventTrigger_Output); ok {
+			// Convert the enriched protobuf data to a map that will survive JSON serialization
+			enrichedDataMap := buildTriggerDataMapFromProtobuf(triggerData.Type, eventOutput, n.logger)
+
+			// Store the enriched data as a map instead of protobuf structure
+			// This ensures the enriched data survives JSON serialization/deserialization
+			queueTaskData.TriggerOutput = map[string]interface{}{
+				"enriched_data": enrichedDataMap,
+				"trigger_type":  triggerData.Type.String(),
+			}
+
+			n.logger.Debug("stored enriched event trigger data for queue execution",
+				"task_id", payload.TaskId,
+				"has_token_symbol", enrichedDataMap["tokenSymbol"] != nil,
+				"has_value_formatted", enrichedDataMap["valueFormatted"] != nil)
+		}
 	}
 
 	data, err := json.Marshal(queueTaskData)
@@ -1443,8 +1517,33 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	vm.WithLogger(n.logger).WithDb(n.db)
 
 	// Add input variables to VM for template processing
+	// Apply dual-access mapping to enable both camelCase and snake_case field access
 	for key, value := range inputVariables {
-		vm.AddVar(key, value)
+		// Apply dual-access mapping if the value is a map with a "data" field
+		if valueMap, ok := value.(map[string]interface{}); ok {
+			if dataField, hasData := valueMap["data"]; hasData {
+				if dataMap, isDataMap := dataField.(map[string]interface{}); isDataMap {
+					// Apply dual-access mapping to the data field
+					dualAccessData := CreateDualAccessMap(dataMap)
+					// Create a new map with the dual-access data
+					processedValue := make(map[string]interface{})
+					for k, v := range valueMap {
+						if k == "data" {
+							processedValue[k] = dualAccessData
+						} else {
+							processedValue[k] = v
+						}
+					}
+					vm.AddVar(key, processedValue)
+				} else {
+					vm.AddVar(key, value)
+				}
+			} else {
+				vm.AddVar(key, value)
+			}
+		} else {
+			vm.AddVar(key, value)
+		}
 	}
 
 	// Step 6: Add trigger data as "trigger" variable for convenient access in JavaScript
@@ -1486,7 +1585,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Step 8.5: Update VM trigger variable with actual execution results
 	// This ensures subsequent nodes can access the trigger's actual output via eventTrigger.data
-	actualTriggerDataMap := buildTriggerDataMapFromProtobuf(queueData.TriggerType, triggerOutputProto)
+	actualTriggerDataMap := buildTriggerDataMapFromProtobuf(queueData.TriggerType, triggerOutputProto, n.logger)
 	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), map[string]any{"data": actualTriggerDataMap})
 
 	// Step 9: Run the workflow nodes
@@ -2406,20 +2505,34 @@ func getStringMapKeys(m map[string]interface{}) []string {
 // enrichEventTriggerFromOperatorData fetches full event data from blockchain and enriches it with token metadata
 func (n *Engine) enrichEventTriggerFromOperatorData(minimalEvmLog *avsproto.Evm_Log) (*avsproto.EventTrigger_Output, error) {
 	if minimalEvmLog.TransactionHash == "" {
+		n.logger.Debug("enrichment failed: transaction hash is empty")
 		return nil, fmt.Errorf("transaction hash is required for enrichment")
 	}
 
 	// Get RPC client (using the global rpcConn variable)
 	if rpcConn == nil {
+		n.logger.Debug("enrichment failed: RPC client not available")
 		return nil, fmt.Errorf("RPC client not available")
 	}
+
+	n.logger.Debug("starting event enrichment",
+		"tx_hash", minimalEvmLog.TransactionHash,
+		"log_index", minimalEvmLog.Index,
+		"block_number", minimalEvmLog.BlockNumber)
 
 	// Fetch transaction receipt to get the full event logs
 	ctx := context.Background()
 	receipt, err := rpcConn.TransactionReceipt(ctx, common.HexToHash(minimalEvmLog.TransactionHash))
 	if err != nil {
+		n.logger.Debug("enrichment failed: could not fetch transaction receipt",
+			"tx_hash", minimalEvmLog.TransactionHash,
+			"error", err)
 		return nil, fmt.Errorf("failed to fetch transaction receipt: %w", err)
 	}
+
+	n.logger.Debug("fetched transaction receipt",
+		"tx_hash", minimalEvmLog.TransactionHash,
+		"logs_count", len(receipt.Logs))
 
 	// Find the specific log that matches the operator's data
 	var targetLog *types.Log
@@ -2431,9 +2544,26 @@ func (n *Engine) enrichEventTriggerFromOperatorData(minimalEvmLog *avsproto.Evm_
 	}
 
 	if targetLog == nil {
+		n.logger.Debug("enrichment failed: log not found in transaction",
+			"tx_hash", minimalEvmLog.TransactionHash,
+			"expected_log_index", minimalEvmLog.Index,
+			"available_log_indices", func() []uint32 {
+				indices := make([]uint32, len(receipt.Logs))
+				for i, log := range receipt.Logs {
+					indices[i] = uint32(log.Index)
+				}
+				return indices
+			}())
 		return nil, fmt.Errorf("log with index %d not found in transaction %s",
 			minimalEvmLog.Index, minimalEvmLog.TransactionHash)
 	}
+
+	n.logger.Debug("found target log",
+		"tx_hash", minimalEvmLog.TransactionHash,
+		"log_index", targetLog.Index,
+		"address", targetLog.Address.Hex(),
+		"topics_count", len(targetLog.Topics),
+		"data_length", len(targetLog.Data))
 
 	// Create enriched EVM log with full data
 	enrichedEvmLog := &avsproto.Evm_Log{
@@ -2459,12 +2589,26 @@ func (n *Engine) enrichEventTriggerFromOperatorData(minimalEvmLog *avsproto.Evm_
 	isTransferEvent := len(targetLog.Topics) > 0 &&
 		targetLog.Topics[0].Hex() == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
+	n.logger.Debug("checking if transfer event",
+		"is_transfer", isTransferEvent,
+		"topics_count", len(targetLog.Topics),
+		"first_topic", func() string {
+			if len(targetLog.Topics) > 0 {
+				return targetLog.Topics[0].Hex()
+			}
+			return "none"
+		}())
+
 	if isTransferEvent && len(targetLog.Topics) >= 3 {
+		n.logger.Debug("processing as transfer event")
+
 		// Get block timestamp for transfer_log
 		header, err := rpcConn.HeaderByNumber(ctx, big.NewInt(int64(targetLog.BlockNumber)))
 		var blockTimestamp uint64
 		if err == nil {
 			blockTimestamp = header.Time * 1000 // Convert to milliseconds
+		} else {
+			n.logger.Debug("could not fetch block header for timestamp", "error", err)
 		}
 
 		// Extract from and to addresses from topics
@@ -2488,10 +2632,22 @@ func (n *Engine) enrichEventTriggerFromOperatorData(minimalEvmLog *avsproto.Evm_
 			LogIndex:         uint32(targetLog.Index),
 		}
 
+		n.logger.Debug("created transfer log",
+			"from", fromAddr,
+			"to", toAddr,
+			"value", value,
+			"token_address", targetLog.Address.Hex())
+
 		// Enrich with token metadata
 		if err := n.tokenEnrichmentService.EnrichTransferLog(enrichedEvmLog, transferLog); err != nil {
 			n.logger.Warn("failed to enrich transfer log with token metadata", "error", err)
 			// Continue without enrichment - partial data is better than no data
+		} else {
+			n.logger.Debug("successfully enriched transfer log",
+				"token_name", transferLog.TokenName,
+				"token_symbol", transferLog.TokenSymbol,
+				"token_decimals", transferLog.TokenDecimals,
+				"value_formatted", transferLog.ValueFormatted)
 		}
 
 		// Use the oneof TransferLog field
@@ -2499,11 +2655,16 @@ func (n *Engine) enrichEventTriggerFromOperatorData(minimalEvmLog *avsproto.Evm_
 			TransferLog: transferLog,
 		}
 	} else {
+		n.logger.Debug("processing as regular EVM log event")
 		// Regular event (not a transfer) - use the oneof EvmLog field
 		enrichedOutput.OutputType = &avsproto.EventTrigger_Output_EvmLog{
 			EvmLog: enrichedEvmLog,
 		}
 	}
+
+	n.logger.Debug("enrichment completed successfully",
+		"has_transfer_log", enrichedOutput.GetTransferLog() != nil,
+		"has_evm_log", enrichedOutput.GetEvmLog() != nil)
 
 	return enrichedOutput, nil
 }
@@ -2936,9 +3097,17 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 			triggerDataMap["gasUsed"] = gasUsed
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
-		// Copy all event trigger data
-		for k, v := range triggerOutput {
-			triggerDataMap[k] = v
+		// Handle event trigger data with special processing for transfer_log
+		if transferLogData, hasTransferLog := triggerOutput["transfer_log"].(map[string]interface{}); hasTransferLog {
+			// Flatten transfer_log data to top level for JavaScript access
+			for k, v := range transferLogData {
+				triggerDataMap[k] = v
+			}
+		} else {
+			// For non-transfer events, copy all event trigger data
+			for k, v := range triggerOutput {
+				triggerDataMap[k] = v
+			}
 		}
 	default:
 		// For unknown trigger types, copy all output data
@@ -3035,13 +3204,14 @@ func buildExecutionStepOutputData(triggerType avsproto.TriggerType, triggerOutpu
 // Parameters:
 //   - triggerType: the type of trigger being processed
 //   - triggerOutputProto: the protobuf trigger output structure (e.g., *avsproto.BlockTrigger_Output)
+//   - logger: optional logger for debugging (can be nil)
 //
 // Returns:
 //   - map[string]interface{}: JavaScript-accessible trigger data map
 //
 // This function differs from buildTriggerDataMap in that it works with structured protobuf data
 // rather than raw trigger output maps, making it suitable for VM initialization.
-func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOutputProto interface{}) map[string]interface{} {
+func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOutputProto interface{}, logger sdklogging.Logger) map[string]interface{} {
 	triggerDataMap := make(map[string]interface{})
 
 	if triggerOutputProto == nil {
@@ -3082,30 +3252,51 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 			// Check if we have transfer log data in the event output
 			if transferLogData := eventOutput.GetTransferLog(); transferLogData != nil {
 				// Use transfer log data to populate rich trigger data matching runTrigger format
-				triggerDataMap["token_name"] = transferLogData.TokenName
-				triggerDataMap["token_symbol"] = transferLogData.TokenSymbol
-				triggerDataMap["token_decimals"] = transferLogData.TokenDecimals
-				triggerDataMap["transaction_hash"] = transferLogData.TransactionHash
+				// Use camelCase field names for JavaScript compatibility
+				triggerDataMap["tokenName"] = transferLogData.TokenName
+				triggerDataMap["tokenSymbol"] = transferLogData.TokenSymbol
+				triggerDataMap["tokenDecimals"] = transferLogData.TokenDecimals
+				triggerDataMap["transactionHash"] = transferLogData.TransactionHash
 				triggerDataMap["address"] = transferLogData.Address
-				triggerDataMap["block_number"] = transferLogData.BlockNumber
-				triggerDataMap["block_timestamp"] = transferLogData.BlockTimestamp
-				triggerDataMap["from_address"] = transferLogData.FromAddress
-				triggerDataMap["to_address"] = transferLogData.ToAddress
+				triggerDataMap["blockNumber"] = transferLogData.BlockNumber
+				triggerDataMap["blockTimestamp"] = transferLogData.BlockTimestamp
+				triggerDataMap["fromAddress"] = transferLogData.FromAddress
+				triggerDataMap["toAddress"] = transferLogData.ToAddress
 				triggerDataMap["value"] = transferLogData.Value
-				triggerDataMap["value_formatted"] = transferLogData.ValueFormatted
-				triggerDataMap["transaction_index"] = transferLogData.TransactionIndex
-				triggerDataMap["log_index"] = transferLogData.LogIndex
-			} else if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
-				// Fall back to basic EVM log data matching runTrigger format
-				triggerDataMap["block_number"] = evmLog.BlockNumber
-				triggerDataMap["log_index"] = evmLog.Index
-				triggerDataMap["tx_hash"] = evmLog.TransactionHash
-				triggerDataMap["address"] = evmLog.Address
-				triggerDataMap["topics"] = evmLog.Topics
-				triggerDataMap["data"] = evmLog.Data
-				triggerDataMap["block_hash"] = evmLog.BlockHash
-				triggerDataMap["transaction_index"] = evmLog.TransactionIndex
-				triggerDataMap["removed"] = evmLog.Removed
+				triggerDataMap["valueFormatted"] = transferLogData.ValueFormatted
+				triggerDataMap["transactionIndex"] = transferLogData.TransactionIndex
+				triggerDataMap["logIndex"] = transferLogData.LogIndex
+			} else if evmLogData := eventOutput.GetEvmLog(); evmLogData != nil {
+				// Use EVM log data for regular events
+				triggerDataMap["address"] = evmLogData.Address
+				triggerDataMap["topics"] = evmLogData.Topics
+				triggerDataMap["data"] = evmLogData.Data
+				triggerDataMap["blockNumber"] = evmLogData.BlockNumber
+				triggerDataMap["transactionHash"] = evmLogData.TransactionHash
+				triggerDataMap["transactionIndex"] = evmLogData.TransactionIndex
+				triggerDataMap["blockHash"] = evmLogData.BlockHash
+				triggerDataMap["logIndex"] = evmLogData.Index
+				triggerDataMap["removed"] = evmLogData.Removed
+			}
+		} else if enrichedDataMap, ok := triggerOutputProto.(map[string]interface{}); ok {
+			// Handle the new enriched data format that survives JSON serialization
+			if enrichedData, hasEnrichedData := enrichedDataMap["enriched_data"].(map[string]interface{}); hasEnrichedData {
+				// Copy all enriched data to the trigger data map
+				for k, v := range enrichedData {
+					triggerDataMap[k] = v
+				}
+				if logger != nil {
+					logger.Debug("loaded enriched event trigger data from queue",
+						"has_token_symbol", triggerDataMap["tokenSymbol"] != nil,
+						"has_value_formatted", triggerDataMap["valueFormatted"] != nil)
+				}
+			} else {
+				// Fallback: copy all data from the map
+				for k, v := range enrichedDataMap {
+					if k != "trigger_type" { // Skip metadata
+						triggerDataMap[k] = v
+					}
+				}
 			}
 		}
 	default:

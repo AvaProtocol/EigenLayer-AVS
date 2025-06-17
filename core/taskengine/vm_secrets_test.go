@@ -54,7 +54,11 @@ func TestSecretAccessPath(t *testing.T) {
 	// Test 3: Verify configVars exists in apContext
 	configVars, exists := apContextMap[ConfigVarsPath]
 	if !exists {
-		t.Errorf("configVars not found in apContext, available keys: %v", getMapKeys(apContextMap))
+		var keys []string
+		for k := range apContextMap {
+			keys = append(keys, k)
+		}
+		t.Errorf("configVars not found in apContext, available keys: %v", keys)
 		return
 	}
 
@@ -62,7 +66,11 @@ func TestSecretAccessPath(t *testing.T) {
 	for key, expectedValue := range testSecrets {
 		actualValue, exists := configVars[key]
 		if !exists {
-			t.Errorf("Secret key '%s' not found in configVars, available keys: %v", key, getMapKeys(configVars))
+			var keys []string
+			for k := range configVars {
+				keys = append(keys, k)
+			}
+			t.Errorf("Secret key '%s' not found in configVars, available keys: %v", key, keys)
 			continue
 		}
 		if actualValue != expectedValue {
@@ -225,20 +233,19 @@ func TestCollectInputsIncludesSecrets(t *testing.T) {
 
 	// Verify that apContext.configVars is included
 	if _, exists := inputs[APContextConfigVarsPath]; !exists {
-		t.Errorf("apContext.configVars not found in CollectInputs output, available keys: %v", getMapKeys(inputs))
+		var keys []string
+		for k := range inputs {
+			keys = append(keys, k)
+		}
+		t.Errorf("apContext.configVars not found in CollectInputs output, available keys: %v", keys)
 	}
 
 	// Verify that test_var.data is included
 	if _, exists := inputs["test_var.data"]; !exists {
-		t.Errorf("test_var.data not found in CollectInputs output, available keys: %v", getMapKeys(inputs))
+		var keys []string
+		for k := range inputs {
+			keys = append(keys, k)
+		}
+		t.Errorf("test_var.data not found in CollectInputs output, available keys: %v", keys)
 	}
-}
-
-// Helper function to get map keys for debugging
-func getMapKeys[K comparable, V any](m map[K]V) []K {
-	keys := make([]K, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }
