@@ -36,6 +36,14 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	}
 	r.vm.mu.Unlock()
 
+	// Get the node's input data
+	var nodeInput *structpb.Value
+	r.vm.mu.Lock()
+	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
+		nodeInput = taskNode.Input
+	}
+	r.vm.mu.Unlock()
+
 	s := &avsproto.Execution_Step{
 		Id:         stepID,
 		OutputData: nil,
@@ -45,6 +53,7 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 		StartAt:    t0,
 		Type:       avsproto.NodeType_NODE_TYPE_LOOP.String(),
 		Name:       nodeName,
+		Input:      nodeInput, // Include node input data for debugging
 	}
 
 	var log strings.Builder

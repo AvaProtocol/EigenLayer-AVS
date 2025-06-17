@@ -11,6 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -298,6 +299,14 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	}
 	r.vm.mu.Unlock()
 
+	// Get the node's input data
+	var nodeInput *structpb.Value
+	r.vm.mu.Lock()
+	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
+		nodeInput = taskNode.Input
+	}
+	r.vm.mu.Unlock()
+
 	s := &avsproto.Execution_Step{
 		Id:         stepID,
 		Log:        "",
@@ -307,6 +316,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		StartAt:    t0,
 		Type:       avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
 		Name:       nodeName,
+		Input:      nodeInput, // Include node input data for debugging
 	}
 
 	var log strings.Builder

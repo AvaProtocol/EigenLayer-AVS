@@ -193,6 +193,14 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	}
 	r.vm.mu.Unlock()
 
+	// Get the node's input data
+	var nodeInput *structpb.Value
+	r.vm.mu.Lock()
+	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
+		nodeInput = taskNode.Input
+	}
+	r.vm.mu.Unlock()
+
 	s := &avsproto.Execution_Step{
 		Id:         stepID,
 		OutputData: nil,
@@ -202,6 +210,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 		StartAt:    t0.UnixMilli(),
 		Type:       avsproto.NodeType_NODE_TYPE_CUSTOM_CODE.String(),
 		Name:       nodeName,
+		Input:      nodeInput, // Include node input data for debugging
 	}
 
 	var sb strings.Builder

@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/status"
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -1553,6 +1554,29 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Add the trigger variable with the actual trigger name for JavaScript access
 	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), map[string]any{"data": triggerDataMap})
 
+	// Extract and add trigger input data if available
+	triggerInputData := ExtractTriggerInputData(trigger)
+	if triggerInputData != nil {
+		// Get existing trigger variable and add input data
+		triggerVarName := sanitizeTriggerNameForJS(trigger.GetName())
+		vm.mu.Lock()
+		existingTriggerVar := vm.vars[triggerVarName]
+		if existingMap, ok := existingTriggerVar.(map[string]any); ok {
+			// Apply dual-access mapping to trigger input data
+			processedTriggerInput := CreateDualAccessMap(triggerInputData)
+			existingMap["input"] = processedTriggerInput
+			vm.vars[triggerVarName] = existingMap
+		} else {
+			// Create new trigger variable with both data and input
+			processedTriggerInput := CreateDualAccessMap(triggerInputData)
+			vm.vars[triggerVarName] = map[string]any{
+				"data":  triggerDataMap,
+				"input": processedTriggerInput,
+			}
+		}
+		vm.mu.Unlock()
+	}
+
 	// Step 7: Compile the workflow
 	if err = vm.Compile(); err != nil {
 		return nil, fmt.Errorf("failed to compile workflow for simulation: %w", err)
@@ -1565,6 +1589,16 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		triggerInputs = append(triggerInputs, key)
 	}
 
+	// Extract trigger input data using the proper extraction function
+	extractedTriggerInput := ExtractTriggerInputData(task.Trigger)
+	var triggerInputProto *structpb.Value
+	if extractedTriggerInput != nil {
+		triggerInputProto, err = structpb.NewValue(extractedTriggerInput)
+		if err != nil {
+			n.logger.Warn("Failed to convert trigger input data to protobuf", "error", err)
+		}
+	}
+
 	triggerStep := &avsproto.Execution_Step{
 		Id:      task.Trigger.Id, // Use new 'id' field
 		Success: true,
@@ -1575,6 +1609,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Inputs:  triggerInputs,                  // Use inputVariables keys as trigger inputs
 		Type:    queueData.TriggerType.String(), // Use trigger type as string
 		Name:    task.Trigger.Name,              // Use new 'name' field
+		Input:   triggerInputProto,              // Include extracted trigger input data for debugging
 	}
 
 	// Set trigger output data in the step using shared function

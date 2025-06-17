@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -38,6 +39,14 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	}
 	p.vm.mu.Unlock()
 
+	// Get the node's input data
+	var nodeInput *structpb.Value
+	p.vm.mu.Lock()
+	if taskNode, exists := p.vm.TaskNodes[stepID]; exists {
+		nodeInput = taskNode.Input
+	}
+	p.vm.mu.Unlock()
+
 	// Create execution log
 	executionLog := &avsproto.Execution_Step{
 		Id:      stepID,
@@ -45,6 +54,7 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 		Success: false,
 		Type:    avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String(),
 		Name:    nodeName,
+		Input:   nodeInput, // Include node input data for debugging
 	}
 
 	// Get configuration
