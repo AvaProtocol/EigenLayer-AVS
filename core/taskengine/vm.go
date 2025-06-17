@@ -8,19 +8,18 @@ import (
 	"time"
 	"unicode"
 
-	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-
-	"github.com/oklog/ulid/v2"
-
+	"github.com/dop251/goja"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/oklog/ulid/v2"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
-	"github.com/dop251/goja"
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
 
 type VMState string
@@ -68,9 +67,46 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 		processedData = CreateDualAccessMap(dataMap)
 	}
 
-	c.vm.vars[nodeNameVar] = map[string]any{
-		"data": processedData,
+	// Get existing variable or create new one
+	existingVar := c.vm.vars[nodeNameVar]
+	var nodeVar map[string]any
+	if existingMap, ok := existingVar.(map[string]any); ok {
+		nodeVar = existingMap
+	} else {
+		nodeVar = make(map[string]any)
 	}
+
+	// Set the output data
+	nodeVar["data"] = processedData
+	c.vm.vars[nodeNameVar] = nodeVar
+}
+
+func (c *CommonProcessor) SetInputVarForStep(stepID string, inputData any) {
+	c.vm.mu.Lock()
+	defer c.vm.mu.Unlock()
+	nodeNameVar := c.vm.getNodeNameAsVarLocked(stepID)
+	if c.vm.vars == nil {
+		c.vm.vars = make(map[string]any)
+	}
+
+	// Apply dual-access mapping to input data if it's a map
+	var processedInput any = inputData
+	if inputMap, ok := inputData.(map[string]interface{}); ok {
+		processedInput = CreateDualAccessMap(inputMap)
+	}
+
+	// Get existing variable or create new one
+	existingVar := c.vm.vars[nodeNameVar]
+	var nodeVar map[string]any
+	if existingMap, ok := existingVar.(map[string]any); ok {
+		nodeVar = existingMap
+	} else {
+		nodeVar = make(map[string]any)
+	}
+
+	// Set the input data
+	nodeVar["input"] = processedInput
+	c.vm.vars[nodeNameVar] = nodeVar
 }
 
 func (c *CommonProcessor) GetOutputVar(stepID string) any {
@@ -780,6 +816,13 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		return nil, fmt.Errorf("executeNode called with nil node")
 	}
 
+	// Extract and set input data for this node (making it available as node_name.input)
+	inputData := ExtractNodeInputData(node)
+	if inputData != nil {
+		processor := &CommonProcessor{vm: v}
+		processor.SetInputVarForStep(node.Id, inputData)
+	}
+
 	var nextStep *Step // This is the *next step in the plan to jump to*, not the execution log step
 	var err error
 
@@ -866,7 +909,7 @@ func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avspro
 	p := NewRestProrcessor(v)                         // v is passed, CommonProcessor uses v.AddVar
 	executionLog, err := p.Execute(stepID, nodeValue) // p.Execute should use SetOutputVarForStep
 	v.mu.Lock()
-	executionLog.Inputs = v.collectInputKeysForLog() // Uses locked v.vars
+	executionLog.Inputs = v.collectInputKeysForLog(stepID) // Pass stepID to exclude current node's variables
 	v.mu.Unlock()
 	// v.addExecutionLog(executionLog) // Caller will add
 	return executionLog, err // RestAPI node doesn't dictate a jump
@@ -888,7 +931,7 @@ func (v *VM) runGraphQL(stepID string, node *avsproto.GraphQLQueryNode) (*avspro
 	_ = dataOutput                                          // Use dataOutput if needed later
 	v.mu.Lock()
 	if executionLog != nil { // Guard against nil log
-		executionLog.Inputs = v.collectInputKeysForLog()
+		executionLog.Inputs = v.collectInputKeysForLog(stepID)
 	}
 	v.mu.Unlock()
 	// v.addExecutionLog(executionLog) // Caller will add
@@ -906,7 +949,7 @@ func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*a
 		executionLog, err := processor.Execute(stepID, node)
 		v.mu.Lock()
 		if executionLog != nil {
-			executionLog.Inputs = v.collectInputKeysForLog()
+			executionLog.Inputs = v.collectInputKeysForLog(stepID)
 		}
 		v.mu.Unlock()
 		return executionLog, err
@@ -932,7 +975,7 @@ func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*a
 	executionLog, err = processor.Execute(stepID, node)
 	v.mu.Lock()
 	if executionLog != nil {
-		executionLog.Inputs = v.collectInputKeysForLog()
+		executionLog.Inputs = v.collectInputKeysForLog(stepID)
 	}
 	v.mu.Unlock()
 	// v.addExecutionLog(executionLog)
@@ -961,7 +1004,7 @@ func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (
 	executionLog, err = processor.Execute(stepID, node)
 	v.mu.Lock()
 	if executionLog != nil {
-		executionLog.Inputs = v.collectInputKeysForLog()
+		executionLog.Inputs = v.collectInputKeysForLog(stepID)
 	}
 	v.mu.Unlock()
 	// v.addExecutionLog(executionLog)
@@ -997,12 +1040,21 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 		if v.logger != nil {
 			v.logger.Error("runCustomCode: CustomCodeNode Config is nil", "stepID", stepID)
 		}
+		// Get the node's input data
+		var nodeInput *structpb.Value
+		v.mu.Lock()
+		if taskNode, exists := v.TaskNodes[stepID]; exists {
+			nodeInput = taskNode.Input
+		}
+		v.mu.Unlock()
+
 		return &avsproto.Execution_Step{
 			Id:      stepID, // Use new 'id' field
 			Success: false,
 			Error:   "CustomCodeNode Config is nil",
 			StartAt: time.Now().UnixMilli(),
 			EndAt:   time.Now().UnixMilli(),
+			Input:   nodeInput, // Include node input data for debugging
 		}, fmt.Errorf("CustomCodeNode Config is nil")
 	}
 
@@ -1011,7 +1063,7 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 	executionLog, err := r.Execute(stepID, node)
 	v.mu.Lock()
 	if executionLog != nil {
-		executionLog.Inputs = v.collectInputKeysForLog()
+		executionLog.Inputs = v.collectInputKeysForLog(stepID)
 	}
 	v.mu.Unlock()
 	// v.addExecutionLog(executionLog)
@@ -1032,7 +1084,7 @@ func (v *VM) runBranch(stepID string, nodeValue *avsproto.BranchNode) (*avsproto
 		// BranchProcessor.Execute should ideally populate its own executionLog.Inputs.
 		// If not, this is a fallback.
 		if executionLog.Inputs == nil {
-			executionLog.Inputs = v.collectInputKeysForLog()
+			executionLog.Inputs = v.collectInputKeysForLog(stepID)
 		}
 		v.mu.Unlock()
 	}
@@ -1050,7 +1102,7 @@ func (v *VM) runLoop(stepID string, nodeValue *avsproto.LoopNode) (*avsproto.Exe
 	executionLog, err := p.Execute(stepID, nodeValue) // Loop processor internally calls RunNodeWithInputs
 	v.mu.Lock()
 	if executionLog != nil {
-		executionLog.Inputs = v.collectInputKeysForLog()
+		executionLog.Inputs = v.collectInputKeysForLog(stepID)
 	}
 	v.mu.Unlock()
 	// v.addExecutionLog(executionLog)
@@ -1062,7 +1114,7 @@ func (v *VM) runFilter(stepID string, nodeValue *avsproto.FilterNode) (*avsproto
 	executionLog, err := p.Execute(stepID, nodeValue)
 	v.mu.Lock()
 	if executionLog != nil {
-		executionLog.Inputs = v.collectInputKeysForLog()
+		executionLog.Inputs = v.collectInputKeysForLog(stepID)
 	}
 	v.mu.Unlock()
 	// v.addExecutionLog(executionLog)
@@ -1084,7 +1136,7 @@ func (v *VM) runEthTransfer(stepID string, node *avsproto.ETHTransferNode) (*avs
 	executionLog, err := processor.Execute(stepID, node)
 	v.mu.Lock()
 	if executionLog != nil {
-		executionLog.Inputs = v.collectInputKeysForLog()
+		executionLog.Inputs = v.collectInputKeysForLog(stepID)
 	}
 	v.mu.Unlock()
 	return executionLog, err
@@ -1515,22 +1567,85 @@ func (v *VM) looksLikeVariableReference(content string) bool {
 	return false
 }
 
-func (v *VM) collectInputKeysForLog() []string {
+func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 	// This function assumes v.mu is already locked by the caller
-	inputKeys := make([]string, 0, len(v.vars))
-	for k := range v.vars {
+	inputKeys := make([]string, 0, len(v.vars)*2) // Allocate space for both .data and .input
+
+	// Get the variable name for the current node to exclude it
+	var excludeVarName string
+	if excludeStepID != "" {
+		excludeVarName = v.getNodeNameAsVarLocked(excludeStepID)
+	}
+
+	// Debug logging to understand what's happening
+	if v.logger != nil {
+		v.logger.Info("🔍 collectInputKeysForLog DEBUG",
+			"excludeStepID", excludeStepID,
+			"excludeVarName", excludeVarName,
+			"totalVars", len(v.vars))
+	}
+
+	for k, value := range v.vars {
 		if !contains(macros.MacroFuncs, k) { // `contains` is a global helper
-			varname := k
-			if varname == APContextVarName { // Specific handling for apContext
-				varname = APContextConfigVarsPath
-			} else if varname == WorkflowContextVarName { // Specific handling for workflowContext
-				varname = WorkflowContextVarName // Use as-is, no .data suffix
-			} else {
-				varname = fmt.Sprintf("%s.%s", varname, DataSuffix)
+			// Debug log each variable being processed
+			if v.logger != nil {
+				v.logger.Info("🔍 Processing variable", "key", k, "exclude", excludeVarName, "match", k == excludeVarName)
 			}
-			inputKeys = append(inputKeys, varname)
+
+			// Skip the current node's own variables from its inputsList
+			if excludeVarName != "" && k == excludeVarName {
+				if v.logger != nil {
+					v.logger.Info("🚫 Excluding current node variable", "key", k)
+				}
+				continue
+			}
+
+			// Skip system variables that shouldn't appear as inputs
+			if k == APContextVarName {
+				inputKeys = append(inputKeys, APContextConfigVarsPath)
+			} else if k == WorkflowContextVarName {
+				inputKeys = append(inputKeys, WorkflowContextVarName) // Use as-is, no .data suffix
+			} else if k == "triggerConfig" {
+				// Skip triggerConfig system variable - it shouldn't appear in inputsList
+				if v.logger != nil {
+					v.logger.Info("🚫 Excluding triggerConfig system variable")
+				}
+				continue
+			} else {
+				// For regular variables, check if they have data and/or input fields
+				if valueMap, ok := value.(map[string]any); ok {
+					// Check for .data field
+					if _, hasData := valueMap["data"]; hasData {
+						dataKey := fmt.Sprintf("%s.%s", k, DataSuffix)
+						inputKeys = append(inputKeys, dataKey)
+						if v.logger != nil {
+							v.logger.Info("✅ Added data field", "key", dataKey)
+						}
+					}
+					// Check for .input field
+					if _, hasInput := valueMap["input"]; hasInput {
+						inputKey := fmt.Sprintf("%s.input", k)
+						inputKeys = append(inputKeys, inputKey)
+						if v.logger != nil {
+							v.logger.Info("✅ Added input field", "key", inputKey)
+						}
+					}
+				} else {
+					// Fallback for non-map variables (backward compatibility)
+					dataKey := fmt.Sprintf("%s.%s", k, DataSuffix)
+					inputKeys = append(inputKeys, dataKey)
+					if v.logger != nil {
+						v.logger.Info("✅ Added fallback data field", "key", dataKey)
+					}
+				}
+			}
 		}
 	}
+
+	if v.logger != nil {
+		v.logger.Info("🔍 Final inputKeys", "keys", inputKeys, "count", len(inputKeys))
+	}
+
 	return inputKeys
 }
 
@@ -1576,6 +1691,7 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 			Error:   "BlockTrigger nodes require real blockchain data - mock data not supported",
 			StartAt: time.Now().UnixMilli(),
 			EndAt:   time.Now().UnixMilli(),
+			Input:   node.Input, // Include node input data for debugging
 		}, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
 	}
 
@@ -2090,13 +2206,15 @@ func (v *VM) createExecutionStep(nodeId string, success bool, errorMsg string, l
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	// Look up the node to get its type and name
+	// Look up the node to get its type, name, and input data
 	var nodeType string = "UNSPECIFIED"
 	var nodeName string = "unknown"
+	var nodeInput *structpb.Value
 
 	if node, exists := v.TaskNodes[nodeId]; exists {
 		nodeType = node.Type.String()
 		nodeName = node.Name
+		nodeInput = node.Input
 	}
 
 	step := &avsproto.Execution_Step{
@@ -2108,6 +2226,7 @@ func (v *VM) createExecutionStep(nodeId string, success bool, errorMsg string, l
 		EndAt:   startTime, // Will be updated by caller if needed
 		Type:    nodeType,  // Use new 'type' field as string
 		Name:    nodeName,  // Use new 'name' field
+		Input:   nodeInput, // Include node input data for debugging
 	}
 
 	return step
@@ -2212,4 +2331,78 @@ func CreateDualAccessMap(data map[string]interface{}) map[string]interface{} {
 	}
 
 	return result
+}
+
+// ExtractNodeInputData extracts input data from a TaskNode protobuf message
+func ExtractNodeInputData(taskNode *avsproto.TaskNode) map[string]interface{} {
+	if taskNode == nil || taskNode.Input == nil {
+		return nil
+	}
+
+	// Convert protobuf.Value to Go native types
+	inputInterface := taskNode.Input.AsInterface()
+	if inputMap, ok := inputInterface.(map[string]interface{}); ok {
+		return inputMap
+	}
+	return nil
+}
+
+// ExtractTriggerInputData extracts input data from a TaskTrigger protobuf message
+func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface{} {
+	if trigger == nil {
+		return nil
+	}
+
+	// Debug logging to trace input extraction
+	fmt.Printf("🔍 ExtractTriggerInputData: Processing trigger type=%v, name=%s\n", trigger.GetType(), trigger.GetName())
+
+	// Check each trigger type and extract input from the correct nested object
+	switch trigger.GetTriggerType().(type) {
+	case *avsproto.TaskTrigger_Block:
+		blockTrigger := trigger.GetBlock()
+		fmt.Printf("🔍 ExtractTriggerInputData: BlockTrigger found, hasInput=%v\n", blockTrigger != nil && blockTrigger.GetInput() != nil)
+		if blockTrigger != nil && blockTrigger.GetInput() != nil {
+			inputInterface := blockTrigger.GetInput().AsInterface()
+			fmt.Printf("🔍 ExtractTriggerInputData: BlockTrigger input extracted: %+v\n", inputInterface)
+			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
+				fmt.Printf("✅ ExtractTriggerInputData: BlockTrigger input converted to map: %+v\n", inputMap)
+				return inputMap
+			}
+		}
+	case *avsproto.TaskTrigger_Cron:
+		cronTrigger := trigger.GetCron()
+		fmt.Printf("🔍 ExtractTriggerInputData: CronTrigger found, hasInput=%v\n", cronTrigger != nil && cronTrigger.GetInput() != nil)
+		if cronTrigger != nil && cronTrigger.GetInput() != nil {
+			inputInterface := cronTrigger.GetInput().AsInterface()
+			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
+				return inputMap
+			}
+		}
+	case *avsproto.TaskTrigger_Event:
+		eventTrigger := trigger.GetEvent()
+		fmt.Printf("🔍 ExtractTriggerInputData: EventTrigger found, hasInput=%v\n", eventTrigger != nil && eventTrigger.GetInput() != nil)
+		if eventTrigger != nil && eventTrigger.GetInput() != nil {
+			inputInterface := eventTrigger.GetInput().AsInterface()
+			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
+				return inputMap
+			}
+		}
+	case *avsproto.TaskTrigger_FixedTime:
+		fixedTimeTrigger := trigger.GetFixedTime()
+		fmt.Printf("🔍 ExtractTriggerInputData: FixedTimeTrigger found, hasInput=%v\n", fixedTimeTrigger != nil && fixedTimeTrigger.GetInput() != nil)
+		if fixedTimeTrigger != nil && fixedTimeTrigger.GetInput() != nil {
+			inputInterface := fixedTimeTrigger.GetInput().AsInterface()
+			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
+				return inputMap
+			}
+		}
+	case *avsproto.TaskTrigger_Manual:
+		fmt.Printf("🔍 ExtractTriggerInputData: ManualTrigger found (no input support)\n")
+		// ManualTrigger is a boolean field, it doesn't have input data structure
+		// Manual triggers don't support input fields in the current protobuf schema
+		return nil
+	}
+
+	fmt.Printf("❌ ExtractTriggerInputData: No input data found for trigger\n")
+	return nil
 }

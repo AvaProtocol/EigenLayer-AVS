@@ -6,6 +6,7 @@ import (
 	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type BranchProcessor struct {
@@ -89,12 +90,21 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	}
 	r.vm.mu.Unlock()
 
+	// Get the node's input data
+	var nodeInput *structpb.Value
+	r.vm.mu.Lock()
+	if taskNode, exists := r.vm.TaskNodes[stepID]; exists {
+		nodeInput = taskNode.Input
+	}
+	r.vm.mu.Unlock()
+
 	executionStep := &avsproto.Execution_Step{
 		Id:      stepID,
 		Success: false, // Default to false, set to true if a condition matches
 		StartAt: t0,
 		Type:    avsproto.NodeType_NODE_TYPE_BRANCH.String(),
 		Name:    nodeName,
+		Input:   nodeInput, // Include node input data for debugging
 	}
 
 	var log strings.Builder

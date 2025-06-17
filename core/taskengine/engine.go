@@ -1553,6 +1553,29 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Add the trigger variable with the actual trigger name for JavaScript access
 	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), map[string]any{"data": triggerDataMap})
 
+	// Extract and add trigger input data if available
+	triggerInputData := ExtractTriggerInputData(trigger)
+	if triggerInputData != nil {
+		// Get existing trigger variable and add input data
+		triggerVarName := sanitizeTriggerNameForJS(trigger.GetName())
+		vm.mu.Lock()
+		existingTriggerVar := vm.vars[triggerVarName]
+		if existingMap, ok := existingTriggerVar.(map[string]any); ok {
+			// Apply dual-access mapping to trigger input data
+			processedTriggerInput := CreateDualAccessMap(triggerInputData)
+			existingMap["input"] = processedTriggerInput
+			vm.vars[triggerVarName] = existingMap
+		} else {
+			// Create new trigger variable with both data and input
+			processedTriggerInput := CreateDualAccessMap(triggerInputData)
+			vm.vars[triggerVarName] = map[string]any{
+				"data":  triggerDataMap,
+				"input": processedTriggerInput,
+			}
+		}
+		vm.mu.Unlock()
+	}
+
 	// Step 7: Compile the workflow
 	if err = vm.Compile(); err != nil {
 		return nil, fmt.Errorf("failed to compile workflow for simulation: %w", err)
@@ -1575,6 +1598,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Inputs:  triggerInputs,                  // Use inputVariables keys as trigger inputs
 		Type:    queueData.TriggerType.String(), // Use trigger type as string
 		Name:    task.Trigger.Name,              // Use new 'name' field
+		Input:   task.Trigger.Input,             // Include trigger input data for debugging
 	}
 
 	// Set trigger output data in the step using shared function

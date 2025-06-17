@@ -639,6 +639,8 @@ message Execution {
     string error = 13;
     string log = 12;
     repeated string inputs = 16;
+    // Input data that was set on this trigger/node
+    google.protobuf.Value input = 19;
     oneof output_data {
       // Trigger outputs
       BlockTrigger.Output block_trigger = 20;

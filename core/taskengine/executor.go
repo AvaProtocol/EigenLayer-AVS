@@ -160,6 +160,28 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	vm.WithLogger(x.logger).WithDb(x.db)
 	initialTaskStatus := task.Status
 
+	// Extract and add trigger input data if available
+	triggerInputData := ExtractTriggerInputData(task.Trigger)
+	if triggerInputData != nil {
+		// Get the trigger variable name and add input data
+		triggerVarName := sanitizeTriggerNameForJS(task.Trigger.GetName())
+		vm.mu.Lock()
+		existingTriggerVar := vm.vars[triggerVarName]
+		if existingMap, ok := existingTriggerVar.(map[string]any); ok {
+			// Apply dual-access mapping to trigger input data
+			processedTriggerInput := CreateDualAccessMap(triggerInputData)
+			existingMap["input"] = processedTriggerInput
+			vm.vars[triggerVarName] = existingMap
+		} else {
+			// Create new trigger variable with input data
+			processedTriggerInput := CreateDualAccessMap(triggerInputData)
+			vm.vars[triggerVarName] = map[string]any{
+				"input": processedTriggerInput,
+			}
+		}
+		vm.mu.Unlock()
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("vm failed to initialize: %w", err)
 	}
@@ -199,6 +221,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 			Inputs:  []string{}, // Empty inputs for trigger steps
 			Type:    queueData.TriggerType.String(),
 			Name:    task.Trigger.Name,
+			Input:   task.Trigger.Input, // Include trigger input data for debugging
 		}
 
 		// Set trigger output data in the step based on trigger type
