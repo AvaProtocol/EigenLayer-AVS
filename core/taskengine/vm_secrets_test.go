@@ -8,6 +8,24 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
+// getNestedStringMapKeys is a helper function to collect keys from a nested string map for testing purposes
+func getNestedStringMapKeys(m map[string]map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// testGetStringMapKeys is a helper function to collect keys from a string map for testing purposes
+func testGetStringMapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // TestSecretAccessPath verifies that secrets are correctly accessible via apContext.configVars
 // and that the access path hasn't changed
 func TestSecretAccessPath(t *testing.T) {
@@ -54,10 +72,7 @@ func TestSecretAccessPath(t *testing.T) {
 	// Test 3: Verify configVars exists in apContext
 	configVars, exists := apContextMap[ConfigVarsPath]
 	if !exists {
-		var keys []string
-		for k := range apContextMap {
-			keys = append(keys, k)
-		}
+		keys := getNestedStringMapKeys(apContextMap)
 		t.Errorf("configVars not found in apContext, available keys: %v", keys)
 		return
 	}
@@ -66,10 +81,7 @@ func TestSecretAccessPath(t *testing.T) {
 	for key, expectedValue := range testSecrets {
 		actualValue, exists := configVars[key]
 		if !exists {
-			var keys []string
-			for k := range configVars {
-				keys = append(keys, k)
-			}
+			keys := testGetStringMapKeys(configVars)
 			t.Errorf("Secret key '%s' not found in configVars, available keys: %v", key, keys)
 			continue
 		}
@@ -233,19 +245,13 @@ func TestCollectInputsIncludesSecrets(t *testing.T) {
 
 	// Verify that apContext.configVars is included
 	if _, exists := inputs[APContextConfigVarsPath]; !exists {
-		var keys []string
-		for k := range inputs {
-			keys = append(keys, k)
-		}
+		keys := testGetStringMapKeys(inputs)
 		t.Errorf("apContext.configVars not found in CollectInputs output, available keys: %v", keys)
 	}
 
 	// Verify that test_var.data is included
 	if _, exists := inputs["test_var.data"]; !exists {
-		var keys []string
-		for k := range inputs {
-			keys = append(keys, k)
-		}
+		keys := testGetStringMapKeys(inputs)
 		t.Errorf("test_var.data not found in CollectInputs output, available keys: %v", keys)
 	}
 }
