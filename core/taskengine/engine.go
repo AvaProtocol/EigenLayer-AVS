@@ -537,6 +537,51 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskReq) (*model.Task, error) {
 	var err error
 
+	// Log the create task request with detailed information
+	n.logger.Info("📥 CreateTask request received",
+		"user", user.Address.Hex(),
+		"smart_wallet_address", taskPayload.SmartWalletAddress,
+		"trigger_type", func() string {
+			if taskPayload.Trigger != nil {
+				return taskPayload.Trigger.Type.String()
+			}
+			return "nil"
+		}(),
+		"nodes_count", len(taskPayload.Nodes),
+		"edges_count", len(taskPayload.Edges),
+		"start_at", taskPayload.StartAt,
+		"expired_at", taskPayload.ExpiredAt,
+		"max_execution", taskPayload.MaxExecution,
+		"name", taskPayload.Name)
+
+	// Log node details for debugging serialization issues
+	if len(taskPayload.Nodes) > 0 {
+		var nodeTypes []string
+		for i, node := range taskPayload.Nodes {
+			nodeType := "unknown"
+			if node != nil {
+				nodeType = node.Type.String()
+			}
+			nodeTypes = append(nodeTypes, fmt.Sprintf("%d:%s", i, nodeType))
+		}
+		n.logger.Debug("📋 CreateTask nodes breakdown",
+			"user", user.Address.Hex(),
+			"node_details", nodeTypes)
+	}
+
+	// Log edge details
+	if len(taskPayload.Edges) > 0 {
+		var edgeDetails []string
+		for i, edge := range taskPayload.Edges {
+			if edge != nil {
+				edgeDetails = append(edgeDetails, fmt.Sprintf("%d:%s->%s", i, edge.Source, edge.Target))
+			}
+		}
+		n.logger.Debug("🔗 CreateTask edges breakdown",
+			"user", user.Address.Hex(),
+			"edge_details", edgeDetails)
+	}
+
 	if taskPayload.SmartWalletAddress != "" {
 		if !ValidWalletAddress(taskPayload.SmartWalletAddress) {
 			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
@@ -572,6 +617,16 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	// Notify operators about the new task
 	n.notifyOperatorsTaskOperation(task.Id, avsproto.MessageOp_MonitorTaskTrigger)
+
+	// Log successful task creation with final counts
+	n.logger.Info("✅ CreateTask completed successfully",
+		"user", user.Address.Hex(),
+		"task_id", task.Id,
+		"smart_wallet_address", task.SmartWalletAddress,
+		"trigger_type", task.Trigger.Type.String(),
+		"final_nodes_count", len(task.Nodes),
+		"final_edges_count", len(task.Edges),
+		"status", task.Status.String())
 
 	return task, nil
 }
@@ -2408,7 +2463,6 @@ func (n *Engine) reassignOrphanedTasks() {
 			n.logger.Info("🔄 Reassigned tasks to operator",
 				"operator", operatorAddr,
 				"operation", "MonitorTaskTrigger",
-				"reassigned_task_ids", taskIDs,
 				"total_reassignments", len(taskIDs))
 		}
 	}
