@@ -451,6 +451,9 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		operatorId:                         [32]byte{0}, // this is set below
 		operatorEcdsaPrivateKey:            operatorEcdsaPrivateKey,
 
+		// Copy apConfigAddr from tempOperator (set by PopulateKnownConfigByChainID)
+		apConfigAddr: tempOperator.apConfigAddr,
+
 		txManager: txMgr,
 		elapsing:  elapsing,
 	}
@@ -493,19 +496,46 @@ func (o *Operator) Start(ctx context.Context) error {
 	if o.signerAddress.Cmp(o.operatorAddr) != 0 {
 		// Ensure alias key is correctly bind to operator address
 		o.logger.Infof("checking operator alias address. operator: %s alias %s", o.operatorAddr, o.signerAddress)
+		o.logger.Infof("APConfig contract address: %s", o.apConfigAddr.Hex())
+
 		apConfigContract, err := apconfig.GetContract(o.config.EthRpcUrl, o.apConfigAddr)
 		if err != nil {
+			o.logger.Infof("❌ Failed to get APConfig contract at %s: %v", o.apConfigAddr.Hex(), err)
 			return fmt.Errorf("failed to get APConfig contract: %w", err)
 		}
-		aliasAddress, err := apConfigContract.GetAlias(nil, o.operatorAddr)
-		if err != nil {
-			panic(err)
+
+		// Create timeout context for the contract call (30 seconds)
+		timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
+		// Create proper call options with timeout
+		callOpts := &bind.CallOpts{
+			Pending: false,
+			Context: timeoutCtx,
 		}
 
+		o.logger.Infof("Calling GetAlias on APConfig contract for operator %s...", o.operatorAddr.Hex())
+		aliasAddress, err := apConfigContract.GetAlias(callOpts, o.operatorAddr)
+		if err != nil {
+			o.logger.Infof("❌ Failed to get alias for operator %s from APConfig contract", o.operatorAddr.Hex())
+			o.logger.Infof("   Contract: %s", o.apConfigAddr.Hex())
+			o.logger.Infof("   RPC: %s", o.config.EthRpcUrl)
+			o.logger.Infof("   Error: %v", err)
+			o.logger.Infof("🔧 SOLUTION: You need to declare/update your alias key mapping in the APConfig contract")
+			o.logger.Infof("   Run: ./out/ap operator declareAlias --config=%s --address=%s", "config/operator-ethereum.yaml", "/path/to/your/alias/key.json")
+			return fmt.Errorf("failed to get alias for operator %s: %w", o.operatorAddr.Hex(), err)
+		}
+
+		o.logger.Infof("Retrieved alias address from contract: %s", aliasAddress.Hex())
 		if o.signerAddress.Cmp(aliasAddress) == 0 {
-			o.logger.Infof("Confirm operator %s matches alias %s", o.operatorAddr, o.signerAddress)
+			o.logger.Infof("✅ Confirmed operator %s matches alias %s", o.operatorAddr, o.signerAddress)
 		} else {
-			panic(fmt.Errorf("ECDSA private key doesn't match operator address"))
+			o.logger.Infof("❌ ALIAS MISMATCH:")
+			o.logger.Infof("   Expected alias (from your key): %s", o.signerAddress.Hex())
+			o.logger.Infof("   Actual alias (from contract):  %s", aliasAddress.Hex())
+			o.logger.Infof("🔧 SOLUTION: Update your alias key mapping in the APConfig contract")
+			o.logger.Infof("   Run: ./out/ap operator declareAlias --config=%s --address=%s", "config/operator-ethereum.yaml", "/path/to/your/correct/alias/key.json")
+			return fmt.Errorf("ECDSA private key doesn't match the declared alias address. Expected: %s, Got: %s", o.signerAddress.Hex(), aliasAddress.Hex())
 		}
 	}
 
