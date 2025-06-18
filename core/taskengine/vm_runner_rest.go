@@ -391,76 +391,84 @@ func escapeJSONString(s string) string {
 }
 
 // preprocessJSONWithVariableMapping processes template variables with JSON-aware escaping
+// Uses the VM's smart variable resolution with fallback support for node_name.data patterns
 func (r *RestProcessor) preprocessJSONWithVariableMapping(text string) string {
 	if r.vm == nil {
 		return text
 	}
 
-	// Get all variables from VM
+	if !strings.Contains(text, "{{") || !strings.Contains(text, "}}") {
+		return text
+	}
+
+	jsvm := NewGojaVM()
 	r.vm.mu.Lock()
-	vars := make(map[string]interface{})
-	for k, v := range r.vm.vars {
-		vars[k] = v
+	currentVars := make(map[string]interface{})
+	for k, val := range r.vm.vars {
+		currentVars[k] = val
 	}
 	r.vm.mu.Unlock()
 
-	// Process template variables with JSON escaping
-	result := text
-
-	// First handle nested object access (e.g., code0.data, eventTrigger.data.tokenSymbol)
-	for varName, varValue := range vars {
-		if varObj, ok := varValue.(map[string]interface{}); ok {
-			// Handle nested properties for this object
-			for propName, propValue := range varObj {
-				nestedPlaceholders := []string{
-					fmt.Sprintf("{{%s.%s}}", varName, propName), // {{code0.data}}
-					fmt.Sprintf("${%s.%s}", varName, propName),  // ${code0.data}
-				}
-
-				for _, placeholder := range nestedPlaceholders {
-					if strings.Contains(result, placeholder) {
-						// Convert value to string
-						var strValue string
-						if propValue == nil {
-							strValue = ""
-						} else {
-							strValue = fmt.Sprintf("%v", propValue)
-						}
-
-						// Apply JSON escaping to the value
-						escapedValue := escapeJSONString(strValue)
-
-						// Replace all occurrences
-						result = strings.ReplaceAll(result, placeholder, escapedValue)
-					}
-				}
-			}
-		}
-
-		// Also handle simple variables (no nesting)
-		simplePlaceholders := []string{
-			fmt.Sprintf("{{%s}}", varName), // {{varName}}
-			fmt.Sprintf("${%s}", varName),  // ${varName}
-		}
-
-		for _, placeholder := range simplePlaceholders {
-			if strings.Contains(result, placeholder) {
-				// Convert value to string
-				var strValue string
-				if varValue == nil {
-					strValue = ""
-				} else {
-					strValue = fmt.Sprintf("%v", varValue)
-				}
-
-				// Apply JSON escaping to the value
-				escapedValue := escapeJSONString(strValue)
-
-				// Replace all occurrences
-				result = strings.ReplaceAll(result, placeholder, escapedValue)
+	for key, value := range currentVars {
+		if err := jsvm.Set(key, value); err != nil {
+			if r.vm.logger != nil {
+				r.vm.logger.Error("failed to set variable in JS VM for JSON preprocessing", "key", key, "error", err)
 			}
 		}
 	}
 
+	result := text
+	for i := 0; i < VMMaxPreprocessIterations; i++ {
+		start := strings.Index(result, "{{")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(result[start:], "}}")
+		if end == -1 {
+			break
+		}
+		end += start // Adjust end to be relative to the start of `result`
+
+		expr := strings.TrimSpace(result[start+2 : end])
+		if expr == "" {
+			result = result[:start] + result[end+2:]
+			continue
+		}
+		// Simple check for nested, though might not be perfect for all cases.
+		if strings.Index(expr, "{{") != -1 || strings.Index(expr, "}}") != -1 {
+			if r.vm.logger != nil {
+				r.vm.logger.Warn("Nested expression detected in JSON preprocessing, replacing with empty string", "expression", expr)
+			}
+			result = result[:start] + result[end+2:]
+			continue
+		}
+
+		// Try to resolve the variable with fallback to camelCase (same as VM)
+		exportedValue, resolved := r.vm.resolveVariableWithFallback(jsvm, expr, currentVars)
+		if !resolved {
+			// Replace with "undefined" instead of removing the expression for JSON compatibility
+			if r.vm.logger != nil {
+				r.vm.logger.Debug("JSON template variable evaluation failed, replacing with 'undefined'", "expression", expr)
+			}
+			result = result[:start] + "undefined" + result[end+2:]
+			continue
+		}
+
+		var replacement string
+		if t, ok := exportedValue.(time.Time); ok {
+			replacement = t.In(time.UTC).Format("2006-01-02 15:04:05.000 +0000 UTC")
+		} else if _, okMap := exportedValue.(map[string]interface{}); okMap {
+			replacement = "[object Object]" // Mimic JS behavior for objects in strings
+		} else if _, okArr := exportedValue.([]interface{}); okArr {
+			replacement = fmt.Sprintf("%v", exportedValue) // Or could be "[object Array]" or stringified JSON
+		} else {
+			replacement = fmt.Sprintf("%v", exportedValue)
+		}
+
+		// Apply JSON escaping to the replacement value
+		escapedReplacement := escapeJSONString(replacement)
+
+		result = result[:start] + escapedReplacement + result[end+2:]
+	}
 	return result
 }
