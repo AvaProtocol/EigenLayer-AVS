@@ -167,10 +167,10 @@ func (r *RpcServer) ListTasks(ctx context.Context, payload *avsproto.ListTasksRe
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
-	r.config.Logger.Info("process list task",
-		"user", user.Address.String(),
-		"smart_wallet_address", payload.SmartWalletAddress,
-	)
+	// r.config.Logger.Info("process list task",
+	// 	"user", user.Address.String(),
+	// 	"smart_wallet_address", payload.SmartWalletAddress,
+	// )
 
 	listTaskResp, err := r.engine.ListTasksByUser(user, payload)
 	if err != nil {
@@ -370,10 +370,10 @@ func (r *RpcServer) GetWorkflowCount(ctx context.Context, req *avsproto.GetWorkf
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
-	r.config.Logger.Info("process workflow count",
-		"user", user.Address.String(),
-		"smart_wallet_address", req.Addresses,
-	)
+	// r.config.Logger.Info("process workflow count",
+	// 	"user", user.Address.String(),
+	// 	"smart_wallet_address", req.Addresses,
+	// )
 
 	return r.engine.GetWorkflowCount(user, req)
 }

@@ -678,7 +678,9 @@ func (t *EventTrigger) logMatchesEventQuery(log types.Log, query *avsproto.Event
 			if len(topicValues) > 0 {
 				found := false
 				for _, expectedTopicStr := range topicValues {
-					if expectedTopic := common.HexToHash(expectedTopicStr); log.Topics[i] == expectedTopic {
+					// Apply same address padding as in filter query building
+					paddedTopicStr := t.padAddressIfNeeded(expectedTopicStr)
+					if expectedTopic := common.HexToHash(paddedTopicStr); log.Topics[i] == expectedTopic {
 						found = true
 						break
 					}
@@ -865,7 +867,9 @@ func (t *EventTrigger) convertToFilterQuery(query *avsproto.EventTrigger_Query) 
 					// Empty string represents null/wildcard for this topic position
 					topics = append(topics, nil)
 				} else {
-					if hash := common.HexToHash(topicStr); hash != (common.Hash{}) {
+					// Check if this looks like an Ethereum address and pad it properly
+					paddedTopicStr := t.padAddressIfNeeded(topicStr)
+					if hash := common.HexToHash(paddedTopicStr); hash != (common.Hash{}) {
 						topics = append(topics, []common.Hash{hash})
 					} else {
 						topics = append(topics, nil)
@@ -883,7 +887,9 @@ func (t *EventTrigger) convertToFilterQuery(query *avsproto.EventTrigger_Query) 
 					// Empty string represents null/wildcard
 					continue
 				} else {
-					if hash := common.HexToHash(topicStr); hash != (common.Hash{}) {
+					// Check if this looks like an Ethereum address and pad it properly
+					paddedTopicStr := t.padAddressIfNeeded(topicStr)
+					if hash := common.HexToHash(paddedTopicStr); hash != (common.Hash{}) {
 						topicHashes = append(topicHashes, hash)
 						allWildcard = false
 					}
@@ -962,4 +968,24 @@ func (t *EventTrigger) cleanupOldProcessedEvents(maxEvents uint64) {
 			"remaining", len(t.processedEvents),
 			"note", "Using simple cleanup since txHash-logIndex keys don't contain timestamps")
 	}
+}
+
+// padAddressIfNeeded checks if a topic string looks like an Ethereum address and pads it to 32 bytes if needed
+func (t *EventTrigger) padAddressIfNeeded(topicStr string) string {
+	// Remove 0x prefix for length check
+	cleanHex := strings.TrimPrefix(strings.ToLower(topicStr), "0x")
+
+	// Check if it looks like an Ethereum address (40 hex characters = 20 bytes)
+	if len(cleanHex) == 40 {
+		// This looks like an Ethereum address, pad it to 32 bytes (64 hex characters)
+		paddedAddr := "0x" + strings.Repeat("0", 24) + cleanHex
+		t.logger.Debug("🔧 Padded address for topic filtering",
+			"original", topicStr,
+			"padded", paddedAddr,
+			"reason", "Ethereum addresses in topics must be 32 bytes")
+		return paddedAddr
+	}
+
+	// If it's already 64 hex characters (32 bytes) or not an address, return as-is
+	return topicStr
 }
