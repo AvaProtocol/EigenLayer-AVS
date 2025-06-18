@@ -712,12 +712,12 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 				"block_monitoring", payload.Capabilities.GetBlockMonitoring(),
 				"time_monitoring", payload.Capabilities.GetTimeMonitoring())
 		} else {
-			n.logger.Warn("⚠️ Operator reconnected with same/older MonotonicClock - NOT resetting task tracking",
+			n.logger.Warn("⚠️ Operator reconnected with same/older MonotonicClock - force-resetting task tracking",
 				"operator", address,
 				"existing_clock", n.trackSyncedTasks[address].MonotonicClock,
 				"new_clock", payload.MonotonicClock,
 				"existing_task_count", len(n.trackSyncedTasks[address].TaskID),
-				"tasks_will_be_skipped", true)
+				"tasks_will_be_skipped", false)
 
 			// CRITICAL FIX: Always reset task tracking on reconnection, regardless of MonotonicClock
 			// This ensures tasks are resent to reconnected operators

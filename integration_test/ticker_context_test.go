@@ -192,9 +192,24 @@ func TestOperatorConnectionStabilization(t *testing.T) {
 		errChan <- err
 	}()
 
-	// Wait for stabilization period to pass
+	// Wait for stabilization period to pass with configurable timeout
 	t.Log("⏳ Waiting for stabilization period...")
-	time.Sleep(12 * time.Second)
+	stabilizationTimeout := 12 * time.Second
+	if testing.Short() {
+		// Use shorter timeout for short tests
+		stabilizationTimeout = 2 * time.Second
+	}
+
+	// Use a timer with context for better control
+	stabilizationTimer := time.NewTimer(stabilizationTimeout)
+	defer stabilizationTimer.Stop()
+
+	select {
+	case <-stabilizationTimer.C:
+		t.Log("✅ Stabilization period completed")
+	case <-time.After(stabilizationTimeout + 3*time.Second):
+		t.Log("⚠️ Timeout waiting for stabilization period")
+	}
 
 	// Disconnect
 	mockServer.Disconnect()

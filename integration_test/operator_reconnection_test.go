@@ -170,9 +170,22 @@ func TestOperatorReconnectionFlow(t *testing.T) {
 		errChan1 <- err
 	}()
 
-	// Wait for operator to stabilize and receive tasks (10+ seconds)
+	// Wait for operator to stabilize and receive tasks with configurable timeout
 	t.Log("⏳ Waiting for operator connection to stabilize...")
-	time.Sleep(12 * time.Second)
+	stabilizationTimeout := 12 * time.Second
+	if testing.Short() {
+		stabilizationTimeout = 3 * time.Second
+	}
+
+	stabilizationTimer := time.NewTimer(stabilizationTimeout)
+	defer stabilizationTimer.Stop()
+
+	select {
+	case <-stabilizationTimer.C:
+		t.Log("✅ Initial connection stabilization completed")
+	case <-time.After(stabilizationTimeout + 2*time.Second):
+		t.Log("⚠️ Timeout during initial connection stabilization")
+	}
 
 	// Verify operator received the task
 	sentTasks1 := mockServer1.GetSentTasks()
@@ -216,9 +229,22 @@ func TestOperatorReconnectionFlow(t *testing.T) {
 		errChan2 <- err
 	}()
 
-	// Wait for operator to stabilize and receive tasks again
+	// Wait for operator to stabilize and receive tasks again with configurable timeout
 	t.Log("⏳ Waiting for reconnected operator to stabilize...")
-	time.Sleep(12 * time.Second)
+	reconnectionTimeout := 12 * time.Second
+	if testing.Short() {
+		reconnectionTimeout = 3 * time.Second
+	}
+
+	reconnectionTimer := time.NewTimer(reconnectionTimeout)
+	defer reconnectionTimer.Stop()
+
+	select {
+	case <-reconnectionTimer.C:
+		t.Log("✅ Reconnection stabilization completed")
+	case <-time.After(reconnectionTimeout + 2*time.Second):
+		t.Log("⚠️ Timeout during reconnection stabilization")
+	}
 
 	// Step 5: Verify operator gets assignments again
 	sentTasks2 := mockServer2.GetSentTasks()
