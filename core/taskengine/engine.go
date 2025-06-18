@@ -536,10 +536,11 @@ func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq)
 // CreateTask records submission data
 func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskReq) (*model.Task, error) {
 	var err error
+	userAddr := user.Address.Hex()
 
 	// Log the create task request with detailed information
 	n.logger.Info("📥 CreateTask request received",
-		"user", user.Address.Hex(),
+		"user", userAddr,
 		"smart_wallet_address", taskPayload.SmartWalletAddress,
 		"trigger_type", func() string {
 			if taskPayload.Trigger != nil {
@@ -565,7 +566,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 			nodeTypes = append(nodeTypes, fmt.Sprintf("%d:%s", i, nodeType))
 		}
 		n.logger.Debug("📋 CreateTask nodes breakdown",
-			"user", user.Address.Hex(),
+			"user", userAddr,
 			"node_details", nodeTypes)
 	}
 
@@ -578,7 +579,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 			}
 		}
 		n.logger.Debug("🔗 CreateTask edges breakdown",
-			"user", user.Address.Hex(),
+			"user", userAddr,
 			"edge_details", edgeDetails)
 	}
 
@@ -620,7 +621,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 
 	// Log successful task creation with final counts
 	n.logger.Info("✅ CreateTask completed successfully",
-		"user", user.Address.Hex(),
+		"user", userAddr,
 		"task_id", task.Id,
 		"smart_wallet_address", task.SmartWalletAddress,
 		"trigger_type", task.Trigger.Type.String(),
