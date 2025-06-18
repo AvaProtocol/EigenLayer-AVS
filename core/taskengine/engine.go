@@ -115,6 +115,10 @@ type operatorState struct {
 
 	// Operator capabilities
 	Capabilities *avsproto.SyncMessagesReq_Capabilities
+
+	// Context cancellation for managing ticker lifecycle
+	TickerCancel context.CancelFunc
+	TickerCtx    context.Context
 }
 
 type PendingNotification struct {
@@ -240,6 +244,14 @@ func (n *Engine) Stop() {
 		n.sendBatchedNotifications()
 		n.notificationTicker.Stop()
 	}
+}
+
+// AddTaskForTesting adds a task directly to the engine's task map for testing purposes
+// This bypasses database storage and validation - only use in tests
+func (n *Engine) AddTaskForTesting(task *model.Task) {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+	n.tasks[task.Id] = task
 }
 
 func (n *Engine) MustStart() error {
@@ -633,15 +645,23 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 }
 
 func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv avsproto.Node_SyncMessagesServer) error {
-	ticker := time.NewTicker(5 * time.Second)
 	address := payload.Address
+	connectionStartTime := time.Now()
+	streamID := fmt.Sprintf("%s-%d", address[len(address)-6:], connectionStartTime.UnixNano()%10000)
 
-	n.logger.Info("open channel to stream check to operator", "operator", address)
+	n.logger.Info("open channel to stream check to operator",
+		"operator", address,
+		"stream_id", streamID,
+		"connection_start_time", connectionStartTime.Format("15:04:05.000"),
+		"monotonic_clock", payload.MonotonicClock)
 
 	// Register this operator's stream for real-time notifications
 	n.streamsMutex.Lock()
 	n.operatorStreams[address] = srv
 	n.streamsMutex.Unlock()
+
+	// Create context for this connection's ticker
+	tickerCtx, tickerCancel := context.WithCancel(context.Background())
 
 	if _, ok := n.trackSyncedTasks[address]; !ok {
 		n.lock.Lock()
@@ -649,6 +669,8 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			MonotonicClock: payload.MonotonicClock,
 			TaskID:         map[string]bool{},
 			Capabilities:   payload.Capabilities,
+			TickerCtx:      tickerCtx,
+			TickerCancel:   tickerCancel,
 		}
 		n.lock.Unlock()
 
@@ -658,25 +680,90 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			"block_monitoring", payload.Capabilities.GetBlockMonitoring(),
 			"time_monitoring", payload.Capabilities.GetTimeMonitoring())
 	} else {
-		// The operator has restated, but we haven't clean it state yet, reset now
+		// The operator has reconnected, cancel any existing ticker and reset state
+		n.lock.Lock()
+
+		// Cancel old ticker if it exists
+		if n.trackSyncedTasks[address].TickerCancel != nil {
+			n.logger.Info("🔄 Canceling old ticker for reconnected operator",
+				"operator", address,
+				"old_stream", "existing")
+			n.trackSyncedTasks[address].TickerCancel()
+		}
+
 		if payload.MonotonicClock > n.trackSyncedTasks[address].MonotonicClock {
+			n.logger.Info("🔄 Operator reconnected with newer MonotonicClock - resetting task tracking",
+				"operator", address,
+				"old_clock", n.trackSyncedTasks[address].MonotonicClock,
+				"new_clock", payload.MonotonicClock,
+				"old_task_count", len(n.trackSyncedTasks[address].TaskID))
+
 			n.trackSyncedTasks[address].TaskID = map[string]bool{}
 			n.trackSyncedTasks[address].MonotonicClock = payload.MonotonicClock
 			n.trackSyncedTasks[address].Capabilities = payload.Capabilities
+
+			// Set new ticker context for this connection
+			n.trackSyncedTasks[address].TickerCtx = tickerCtx
+			n.trackSyncedTasks[address].TickerCancel = tickerCancel
 
 			n.logger.Info("🔄 Operator reconnected with updated capabilities",
 				"operator", address,
 				"event_monitoring", payload.Capabilities.GetEventMonitoring(),
 				"block_monitoring", payload.Capabilities.GetBlockMonitoring(),
 				"time_monitoring", payload.Capabilities.GetTimeMonitoring())
+		} else {
+			n.logger.Warn("⚠️ Operator reconnected with same/older MonotonicClock - NOT resetting task tracking",
+				"operator", address,
+				"existing_clock", n.trackSyncedTasks[address].MonotonicClock,
+				"new_clock", payload.MonotonicClock,
+				"existing_task_count", len(n.trackSyncedTasks[address].TaskID),
+				"tasks_will_be_skipped", true)
+
+			// CRITICAL FIX: Always reset task tracking on reconnection, regardless of MonotonicClock
+			// This ensures tasks are resent to reconnected operators
+			n.logger.Info("🔧 Force-resetting task tracking for reconnected operator",
+				"operator", address,
+				"reason", "ensure_tasks_resent_on_reconnection")
+
+			n.trackSyncedTasks[address].TaskID = map[string]bool{}
+			n.trackSyncedTasks[address].Capabilities = payload.Capabilities
+
+			// Set new ticker context for this connection
+			n.trackSyncedTasks[address].TickerCtx = tickerCtx
+			n.trackSyncedTasks[address].TickerCancel = tickerCancel
 		}
+		n.lock.Unlock()
 	}
+
+	// Create ticker for this connection
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 
 	// Reset the state if the operator disconnect
 	defer func() {
-		n.logger.Info("🔌 Operator disconnecting, cleaning up state", "operator", address)
-		n.trackSyncedTasks[address].TaskID = map[string]bool{}
-		n.trackSyncedTasks[address].MonotonicClock = 0
+		n.logger.Info("🔌 Operator disconnecting, cleaning up state",
+			"operator", address,
+			"stream_id", streamID)
+
+		n.lock.Lock()
+		if n.trackSyncedTasks[address] != nil {
+			// Only cancel the ticker context if it's OUR context (not a newer connection's context)
+			if n.trackSyncedTasks[address].TickerCtx == tickerCtx {
+				n.logger.Info("🔄 Canceling ticker context for this connection",
+					"operator", address,
+					"stream_id", streamID)
+				if n.trackSyncedTasks[address].TickerCancel != nil {
+					n.trackSyncedTasks[address].TickerCancel()
+				}
+				n.trackSyncedTasks[address].TaskID = map[string]bool{}
+				n.trackSyncedTasks[address].MonotonicClock = 0
+			} else {
+				n.logger.Info("🔄 Skipping ticker cancellation - newer connection exists",
+					"operator", address,
+					"stream_id", streamID)
+			}
+		}
+		n.lock.Unlock()
 
 		// Unregister the operator's stream
 		n.streamsMutex.Lock()
@@ -686,20 +773,58 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 		// Reassign tasks that were assigned to this operator
 		n.reassignOrphanedTasks()
 
-		n.logger.Info("✅ Operator cleanup completed", "operator", address)
+		n.logger.Info("✅ Operator cleanup completed",
+			"operator", address,
+			"stream_id", streamID)
 	}()
 
 	//nolint:S1000
 	for {
 		select {
+		case <-tickerCtx.Done():
+			n.logger.Info("🛑 Ticker context canceled, stopping ticker loop",
+				"operator", address,
+				"stream_id", streamID)
+			return nil
 		case <-ticker.C:
+			tickTime := time.Now()
+			connectionAge := time.Since(connectionStartTime)
+
+			n.logger.Info("📟 Ticker fired for operator",
+				"operator", address,
+				"stream_id", streamID,
+				"tick_time", tickTime.Format("15:04:05.000"),
+				"connection_start_time", connectionStartTime.Format("15:04:05.000"),
+				"connection_age", connectionAge.String())
+
 			if n.shutdown {
 				return nil
 			}
 
 			if n.tasks == nil {
+				n.logger.Debug("📭 No tasks available",
+					"operator", address)
 				continue
 			}
+
+			// Add connection stability grace period to prevent race conditions
+			if connectionAge < 10*time.Second {
+				n.logger.Info("⏳ Waiting for connection to stabilize before sending tasks",
+					"operator", address,
+					"stream_id", streamID,
+					"connection_age", connectionAge.String(),
+					"min_required", "10s",
+					"remaining_wait", (10*time.Second - connectionAge).String(),
+					"tick_time", tickTime.Format("15:04:05.000"))
+				continue
+			}
+
+			n.logger.Info("✅ Connection stabilized, proceeding with task assignment",
+				"operator", address,
+				"stream_id", streamID,
+				"connection_age", connectionAge.String(),
+				"stabilization_complete", true,
+				"total_tasks_in_memory", len(n.tasks))
 
 			if !n.CanStreamCheck(address) {
 				// This isn't a consensus approval. It's a feature flag we control server side whether to stream data to the operator or not.
@@ -731,27 +856,90 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 			// Only log when there are actual tasks to send or state changes
 
 			// Reassign orphaned tasks when operators connect/disconnect
+			// IMPORTANT: Only after connection has stabilized to prevent premature assignment
 			n.reassignOrphanedTasks()
 
 			// Aggregate tasks for this operator to reduce logging and improve efficiency
 			var tasksToStream []*model.Task
 			var tasksByTriggerType = make(map[string]int) // Count tasks by trigger type
 			var newAssignments []string                   // Track new task assignments for this operator
+			var orphanedTasksReclaimed []string           // Track orphaned tasks being reclaimed
+
+			n.logger.Debug("🔍 Processing tasks for operator assignment",
+				"operator", address,
+				"total_tasks_in_memory", len(n.tasks))
 
 			for _, task := range n.tasks {
 				if _, ok := n.trackSyncedTasks[address].TaskID[task.Id]; ok {
+					n.logger.Debug("⏭️ Skipping task - already synced to operator",
+						"operator", address,
+						"task_id", task.Id,
+						"task_name", task.Name)
 					continue
+				}
+
+				// CRITICAL FIX: Check for orphaned tasks (assigned to empty string) and reclaim them
+				n.assignmentMutex.RLock()
+				currentAssignment, isAssigned := n.taskAssignments[task.Id]
+				n.assignmentMutex.RUnlock()
+
+				n.logger.Debug("🔍 Checking task assignment status",
+					"operator", address,
+					"task_id", task.Id,
+					"is_assigned", isAssigned,
+					"current_assignment", currentAssignment)
+
+				var wasReclaimed bool
+				if (isAssigned && currentAssignment == "") || !isAssigned {
+					// This task is orphaned (assigned to empty string) OR has no assignment at all
+					// Both cases mean we should reclaim it for this reconnecting operator
+					n.assignmentMutex.Lock()
+					n.taskAssignments[task.Id] = address
+					n.assignmentMutex.Unlock()
+
+					orphanedTasksReclaimed = append(orphanedTasksReclaimed, task.Id)
+					wasReclaimed = true
+
+					previousAssignment := "empty_string"
+					if !isAssigned {
+						previousAssignment = "no_assignment"
+					}
+
+					n.logger.Info("🔄 Reclaimed orphaned task for operator",
+						"task_id", task.Id,
+						"operator", address,
+						"previous_assignment", previousAssignment)
 				}
 
 				// Check if this operator is assigned to handle this task
-				assignedOperator := n.assignTaskToOperator(task)
+				// CRITICAL FIX: Don't call assignTaskToOperator if we just reclaimed the task
+				var assignedOperator string
+				if wasReclaimed {
+					assignedOperator = address // We just assigned it to this operator
+				} else {
+					assignedOperator = n.assignTaskToOperator(task)
+				}
+
 				if assignedOperator != address {
 					// This task is assigned to a different operator
+					n.logger.Debug("⏭️ Skipping task - assigned to different operator",
+						"operator", address,
+						"task_id", task.Id,
+						"assigned_to", assignedOperator)
 					continue
 				}
 
-				// Track this as a new assignment
-				newAssignments = append(newAssignments, task.Id)
+				// Track this as a new assignment (unless it was a reclaimed orphan)
+				isReclaimed := false
+				for _, orphanedId := range orphanedTasksReclaimed {
+					if orphanedId == task.Id {
+						isReclaimed = true
+						break
+					}
+				}
+				if !isReclaimed {
+					newAssignments = append(newAssignments, task.Id)
+				}
 
 				// Check if operator supports this trigger type
 				if !n.supportsTaskTrigger(address, task) {
@@ -767,18 +955,31 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 				tasksByTriggerType[triggerTypeName]++
 			}
 
+			// Log task processing results
+			n.logger.Debug("🔍 Task processing completed for operator",
+				"operator", address,
+				"tasks_to_stream", len(tasksToStream),
+				"new_assignments", len(newAssignments),
+				"orphaned_reclaimed", len(orphanedTasksReclaimed))
+
 			// Log aggregated task assignments per operator
-			if len(newAssignments) > 0 {
+			if len(newAssignments) > 0 || len(orphanedTasksReclaimed) > 0 {
 				n.logger.Info("🔄 Task assignments for operator",
 					"operator", address,
+					"stream_id", streamID,
 					"operation", "MonitorTaskTrigger",
 					"assigned_task_ids", newAssignments,
-					"total_assignments", len(newAssignments))
+					"total_assignments", len(newAssignments),
+					"orphaned_tasks_reclaimed", orphanedTasksReclaimed,
+					"total_reclaimed", len(orphanedTasksReclaimed))
 			}
 
 			// Stream all tasks and log aggregated results
 			if len(tasksToStream) > 0 {
 				successCount := 0
+				failedCount := 0
+				var firstError error
+
 				for _, task := range tasksToStream {
 					resp := avsproto.SyncMessagesResp{
 						Id: task.Id,
@@ -792,29 +993,67 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 						},
 					}
 
-					if err := srv.Send(&resp); err != nil {
-						// return error to cause client to establish re-connect the connection
-						n.logger.Error("error sending check to operator",
+					// Add timeout wrapper for send operation to prevent hanging
+					sendError := make(chan error, 1)
+					go func() {
+						sendError <- srv.Send(&resp)
+					}()
+
+					select {
+					case err := <-sendError:
+						if err != nil {
+							failedCount++
+							if firstError == nil {
+								firstError = err
+							}
+							n.logger.Warn("⚠️ Failed to send task to operator (will retry next cycle)",
+								"task_id", task.Id,
+								"operator", payload.Address,
+								"error", err,
+								"error_type", fmt.Sprintf("%T", err),
+								"grpc_status", grpcstatus.Code(err).String())
+
+							// Check if this is a connection-level error that requires reconnection
+							grpcCode := grpcstatus.Code(err)
+							if grpcCode == codes.Unavailable || grpcCode == codes.Canceled || grpcCode == codes.DeadlineExceeded {
+								n.logger.Error("🔥 Connection-level error detected, operator needs to reconnect",
+									"operator", payload.Address,
+									"error", err,
+									"grpc_code", grpcCode.String())
+								return fmt.Errorf("connection-level error, operator must reconnect: %w", err)
+							}
+						} else {
+							n.lock.Lock()
+							n.trackSyncedTasks[address].TaskID[task.Id] = true
+							n.lock.Unlock()
+							successCount++
+						}
+					case <-time.After(2 * time.Second):
+						failedCount++
+						n.logger.Warn("⏰ Timeout sending task to operator (will retry next cycle)",
 							"task_id", task.Id,
 							"operator", payload.Address,
-							"error", err,
-							"error_type", fmt.Sprintf("%T", err),
-							"grpc_status", grpcstatus.Code(err).String())
-						return fmt.Errorf("cannot send data back to grpc channel: %w", err)
+							"timeout", "2s")
 					}
-
-					n.lock.Lock()
-					n.trackSyncedTasks[address].TaskID[task.Id] = true
-					n.lock.Unlock()
-					successCount++
 				}
 
 				// Log aggregated results instead of individual tasks
-				n.logger.Info("📤 Streamed tasks to operator",
-					"operator", payload.Address,
-					"total_tasks", len(tasksToStream),
-					"successful", successCount,
-					"task_breakdown", tasksByTriggerType)
+				if successCount > 0 || failedCount > 0 {
+					n.logger.Info("📤 Streamed tasks to operator",
+						"operator", payload.Address,
+						"total_tasks", len(tasksToStream),
+						"successful", successCount,
+						"failed", failedCount,
+						"task_breakdown", tasksByTriggerType)
+				}
+
+				// If all tasks failed with connection errors, return error to trigger reconnection
+				if failedCount > 0 && successCount == 0 && firstError != nil {
+					grpcCode := grpcstatus.Code(firstError)
+					if grpcCode == codes.Unavailable || grpcCode == codes.Canceled || grpcCode == codes.DeadlineExceeded {
+						return fmt.Errorf("all task sends failed with connection error: %w", firstError)
+					}
+				}
 			}
 		}
 	}
@@ -2448,6 +2687,14 @@ func (n *Engine) reassignOrphanedTasks() {
 			"orphaned_count", len(orphanedTasks),
 			"active_operators", len(activeOperators))
 
+		if len(activeOperators) == 0 {
+			// No active operators to reassign to - leave tasks unassigned for now
+			// They will be reclaimed when operators reconnect
+			n.logger.Info("⏸️ No active operators available - orphaned tasks will be reclaimed on operator reconnection",
+				"orphaned_count", len(orphanedTasks))
+			return
+		}
+
 		// Track reassignments by operator
 		reassignmentsByOperator := make(map[string][]string)
 
@@ -2455,7 +2702,9 @@ func (n *Engine) reassignOrphanedTasks() {
 		for _, taskID := range orphanedTasks {
 			if task, exists := n.tasks[taskID]; exists {
 				assignedOperator := n.assignTaskToOperator(task)
-				reassignmentsByOperator[assignedOperator] = append(reassignmentsByOperator[assignedOperator], taskID)
+				if assignedOperator != "" {
+					reassignmentsByOperator[assignedOperator] = append(reassignmentsByOperator[assignedOperator], taskID)
+				}
 			}
 		}
 
