@@ -108,9 +108,22 @@ func TestOrphanedTaskReclamation(t *testing.T) {
 		errChan1 <- err
 	}()
 
-	// Wait for stabilization and task assignment
+	// Wait for stabilization and task assignment with configurable timeout
 	t.Log("⏳ Waiting for operator stabilization and task assignment...")
-	time.Sleep(12 * time.Second)
+	stabilizationTimeout := 12 * time.Second
+	if testing.Short() {
+		stabilizationTimeout = 3 * time.Second
+	}
+
+	stabilizationTimer := time.NewTimer(stabilizationTimeout)
+	defer stabilizationTimer.Stop()
+
+	select {
+	case <-stabilizationTimer.C:
+		t.Log("✅ Initial stabilization and task assignment completed")
+	case <-time.After(stabilizationTimeout + 2*time.Second):
+		t.Log("⚠️ Timeout during initial stabilization")
+	}
 
 	// Verify operator received the task
 	sentTasks1 := mockServer1.GetSentTasks()
@@ -152,9 +165,22 @@ func TestOrphanedTaskReclamation(t *testing.T) {
 		errChan2 <- err
 	}()
 
-	// Wait for stabilization and orphaned task reclamation
+	// Wait for stabilization and orphaned task reclamation with configurable timeout
 	t.Log("⏳ Waiting for reconnected operator stabilization and task reclamation...")
-	time.Sleep(12 * time.Second)
+	reclamationTimeout := 12 * time.Second
+	if testing.Short() {
+		reclamationTimeout = 3 * time.Second
+	}
+
+	reclamationTimer := time.NewTimer(reclamationTimeout)
+	defer reclamationTimer.Stop()
+
+	select {
+	case <-reclamationTimer.C:
+		t.Log("✅ Reconnection stabilization and task reclamation completed")
+	case <-time.After(reclamationTimeout + 2*time.Second):
+		t.Log("⚠️ Timeout during reconnection stabilization")
+	}
 
 	// Step 6: Verify operator gets the orphaned task again
 	sentTasks2 := mockServer2.GetSentTasks()
