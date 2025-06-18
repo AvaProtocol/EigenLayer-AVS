@@ -500,7 +500,7 @@ func (o *Operator) Start(ctx context.Context) error {
 
 		apConfigContract, err := apconfig.GetContract(o.config.EthRpcUrl, o.apConfigAddr)
 		if err != nil {
-			o.logger.Infof("❌ Failed to get APConfig contract at %s: %v", o.apConfigAddr.Hex(), err)
+			o.logger.Errorf("❌ Failed to get APConfig contract at %s: %v", o.apConfigAddr.Hex(), err)
 			return fmt.Errorf("failed to get APConfig contract: %w", err)
 		}
 
@@ -517,10 +517,8 @@ func (o *Operator) Start(ctx context.Context) error {
 		o.logger.Infof("Calling GetAlias on APConfig contract for operator %s...", o.operatorAddr.Hex())
 		aliasAddress, err := apConfigContract.GetAlias(callOpts, o.operatorAddr)
 		if err != nil {
-			o.logger.Infof("❌ Failed to get alias for operator %s from APConfig contract", o.operatorAddr.Hex())
-			o.logger.Infof("   Contract: %s", o.apConfigAddr.Hex())
-			o.logger.Infof("   RPC: %s", o.config.EthRpcUrl)
-			o.logger.Infof("   Error: %v", err)
+			o.logger.Errorf("❌ Failed to get alias for operator %s from APConfig contract", o.operatorAddr.Hex())
+			o.logger.Errorf("   Error: %v", err)
 			o.logger.Infof("🔧 SOLUTION: You need to declare/update your alias key mapping in the APConfig contract")
 			o.logger.Infof("   Run: ./out/ap operator declareAlias --config=%s --address=%s", "config/operator-ethereum.yaml", "/path/to/your/alias/key.json")
 			return fmt.Errorf("failed to get alias for operator %s: %w", o.operatorAddr.Hex(), err)
@@ -530,9 +528,9 @@ func (o *Operator) Start(ctx context.Context) error {
 		if o.signerAddress.Cmp(aliasAddress) == 0 {
 			o.logger.Infof("✅ Confirmed operator %s matches alias %s", o.operatorAddr, o.signerAddress)
 		} else {
-			o.logger.Infof("❌ ALIAS MISMATCH:")
-			o.logger.Infof("   Expected alias (from your key): %s", o.signerAddress.Hex())
-			o.logger.Infof("   Actual alias (from contract):  %s", aliasAddress.Hex())
+			o.logger.Errorf("❌ ALIAS MISMATCH:")
+			o.logger.Errorf("   Expected alias (from your key): %s", o.signerAddress.Hex())
+			o.logger.Errorf("   Actual alias (from contract):  %s", aliasAddress.Hex())
 			o.logger.Infof("🔧 SOLUTION: Update your alias key mapping in the APConfig contract")
 			o.logger.Infof("   Run: ./out/ap operator declareAlias --config=%s --address=%s", "config/operator-ethereum.yaml", "/path/to/your/correct/alias/key.json")
 			return fmt.Errorf("ECDSA private key doesn't match the declared alias address. Expected: %s, Got: %s", o.signerAddress.Hex(), aliasAddress.Hex())
@@ -578,12 +576,12 @@ func (o *Operator) retryConnect() error {
 	o.aggregatorConn, err = grpc.NewClient(o.config.AggregatorServerIpPortAddress, opts...)
 	if err != nil {
 		if strings.Contains(err.Error(), "connection refused") {
-			o.logger.Info("❌ Cannot create gRPC client for aggregator",
+			o.logger.Error("❌ Cannot create gRPC client for aggregator",
 				"aggregator_address", o.config.AggregatorServerIpPortAddress,
 				"operator", o.config.OperatorAddress,
 				"raw_error", err)
 		} else {
-			o.logger.Info("❌ Failed to create gRPC client for aggregator",
+			o.logger.Error("❌ Failed to create gRPC client for aggregator",
 				"aggregator_address", o.config.AggregatorServerIpPortAddress,
 				"operator", o.config.OperatorAddress,
 				"raw_error", err)
@@ -606,17 +604,17 @@ func (o *Operator) retryConnect() error {
 
 	if pingErr != nil {
 		if strings.Contains(pingErr.Error(), "connection refused") {
-			o.logger.Info("❌ Cannot connect to aggregator - service appears to be down",
+			o.logger.Error("❌ Cannot connect to aggregator - service appears to be down",
 				"aggregator_address", o.config.AggregatorServerIpPortAddress,
 				"operator", o.config.OperatorAddress,
 				"raw_error", pingErr)
 		} else if strings.Contains(pingErr.Error(), "no such host") || strings.Contains(pingErr.Error(), "name resolution") {
-			o.logger.Info("❌ Cannot resolve aggregator hostname",
+			o.logger.Error("❌ Cannot resolve aggregator hostname",
 				"aggregator_address", o.config.AggregatorServerIpPortAddress,
 				"operator", o.config.OperatorAddress,
 				"raw_error", pingErr)
 		} else {
-			o.logger.Info("❌ Failed to establish connection to aggregator",
+			o.logger.Error("❌ Failed to establish connection to aggregator",
 				"aggregator_address", o.config.AggregatorServerIpPortAddress,
 				"operator", o.config.OperatorAddress,
 				"raw_error", pingErr)

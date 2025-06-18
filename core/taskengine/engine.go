@@ -1595,7 +1595,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 			}
 		}
 	} else {
-		n.logger.Info("❌ SimulateTask: No trigger input data found", "trigger_id", task.Trigger.Id, "trigger_type", task.Trigger.GetType())
+		n.logger.Warn("❌ SimulateTask: No trigger input data found", "trigger_id", task.Trigger.Id, "trigger_type", task.Trigger.GetType())
 		// Debug: Check if trigger has input field at all
 		if task.Trigger.GetInput() != nil {
 			n.logger.Info("🔍 SimulateTask: Trigger has input field", "trigger_id", task.Trigger.Id, "input_field_present", true)
@@ -1909,14 +1909,14 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error)
 
 	task, err := n.GetTask(user, taskID)
 	if err != nil {
-		n.logger.Info("❌ Task not found for deletion", "task_id", taskID, "error", err)
+		n.logger.Warn("❌ Task not found for deletion", "task_id", taskID, "error", err)
 		return false, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
 	n.logger.Info("✅ Retrieved task for deletion", "task_id", taskID, "status", task.Status)
 
 	if task.Status == avsproto.TaskStatus_Executing {
-		n.logger.Info("❌ Cannot delete executing task", "task_id", taskID, "status", task.Status)
+		n.logger.Warn("❌ Cannot delete executing task", "task_id", taskID, "status", task.Status)
 		return false, fmt.Errorf("Only non executing task can be deleted")
 	}
 

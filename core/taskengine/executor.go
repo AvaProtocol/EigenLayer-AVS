@@ -341,7 +341,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	if executionSuccess {
 		x.logger.Info("successfully executing task", "task_id", task.Id, "triggermark", queueData)
 	} else {
-		x.logger.Info("task execution completed with step failures", "task_id", task.Id, "failed_steps", failedStepCount)
+		x.logger.Warn("task execution completed with step failures", "task_id", task.Id, "failed_steps", failedStepCount)
 	}
 
 	return execution, nil
