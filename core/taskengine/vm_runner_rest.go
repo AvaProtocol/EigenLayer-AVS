@@ -112,14 +112,34 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		r.vm.logger.Debug("REST API URL after template processing", "url", url)
 	}
 
-	body = r.vm.preprocessTextWithVariableMapping(body)
-
-	// Process headers map for template variables
+	// Process headers map for template variables first (needed to detect JSON content)
 	processedHeaders := make(map[string]string)
 	for key, value := range headers {
 		processedKey := r.vm.preprocessTextWithVariableMapping(key)
 		processedValue := r.vm.preprocessTextWithVariableMapping(value)
 		processedHeaders[processedKey] = processedValue
+	}
+
+	// Check if this is JSON content by examining headers
+	isJSONContent := false
+	for key, value := range processedHeaders {
+		if strings.ToLower(key) == "content-type" && strings.Contains(strings.ToLower(value), "application/json") {
+			isJSONContent = true
+			break
+		}
+	}
+
+	// Process body with appropriate escaping based on content type
+	if isJSONContent {
+		if r.vm.logger != nil {
+			r.vm.logger.Debug("REST API body before JSON-aware template processing", "body", body)
+		}
+		body = r.preprocessJSONWithVariableMapping(body)
+		if r.vm.logger != nil {
+			r.vm.logger.Debug("REST API body after JSON-aware template processing", "body", body)
+		}
+	} else {
+		body = r.vm.preprocessTextWithVariableMapping(body)
 	}
 
 	// Validate template format in URL, body, and headers for malformed syntax
@@ -351,4 +371,96 @@ func (r *RestProcessor) processResponse(response *resty.Response) map[string]int
 	}
 
 	return responseData
+}
+
+// escapeJSONString properly escapes a string for use within JSON
+func escapeJSONString(s string) string {
+	// Use Go's built-in JSON marshaling to properly escape the string
+	jsonBytes, err := json.Marshal(s)
+	if err != nil {
+		// If marshaling fails, fallback to basic escaping
+		s = strings.ReplaceAll(s, "\\", "\\\\")
+		s = strings.ReplaceAll(s, "\"", "\\\"")
+		s = strings.ReplaceAll(s, "\n", "\\n")
+		s = strings.ReplaceAll(s, "\r", "\\r")
+		s = strings.ReplaceAll(s, "\t", "\\t")
+		return s
+	}
+	// Remove the surrounding quotes that json.Marshal adds
+	return string(jsonBytes[1 : len(jsonBytes)-1])
+}
+
+// preprocessJSONWithVariableMapping processes template variables with JSON-aware escaping
+func (r *RestProcessor) preprocessJSONWithVariableMapping(text string) string {
+	if r.vm == nil {
+		return text
+	}
+
+	// Get all variables from VM
+	r.vm.mu.Lock()
+	vars := make(map[string]interface{})
+	for k, v := range r.vm.vars {
+		vars[k] = v
+	}
+	r.vm.mu.Unlock()
+
+	// Process template variables with JSON escaping
+	result := text
+
+	// First handle nested object access (e.g., code0.data, eventTrigger.data.tokenSymbol)
+	for varName, varValue := range vars {
+		if varObj, ok := varValue.(map[string]interface{}); ok {
+			// Handle nested properties for this object
+			for propName, propValue := range varObj {
+				nestedPlaceholders := []string{
+					fmt.Sprintf("{{%s.%s}}", varName, propName), // {{code0.data}}
+					fmt.Sprintf("${%s.%s}", varName, propName),  // ${code0.data}
+				}
+
+				for _, placeholder := range nestedPlaceholders {
+					if strings.Contains(result, placeholder) {
+						// Convert value to string
+						var strValue string
+						if propValue == nil {
+							strValue = ""
+						} else {
+							strValue = fmt.Sprintf("%v", propValue)
+						}
+
+						// Apply JSON escaping to the value
+						escapedValue := escapeJSONString(strValue)
+
+						// Replace all occurrences
+						result = strings.ReplaceAll(result, placeholder, escapedValue)
+					}
+				}
+			}
+		}
+
+		// Also handle simple variables (no nesting)
+		simplePlaceholders := []string{
+			fmt.Sprintf("{{%s}}", varName), // {{varName}}
+			fmt.Sprintf("${%s}", varName),  // ${varName}
+		}
+
+		for _, placeholder := range simplePlaceholders {
+			if strings.Contains(result, placeholder) {
+				// Convert value to string
+				var strValue string
+				if varValue == nil {
+					strValue = ""
+				} else {
+					strValue = fmt.Sprintf("%v", varValue)
+				}
+
+				// Apply JSON escaping to the value
+				escapedValue := escapeJSONString(strValue)
+
+				// Replace all occurrences
+				result = strings.ReplaceAll(result, placeholder, escapedValue)
+			}
+		}
+	}
+
+	return result
 }
