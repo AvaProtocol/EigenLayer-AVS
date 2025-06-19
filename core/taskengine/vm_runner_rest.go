@@ -11,6 +11,26 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// RestProcessor handles REST API calls with template variable support
+//
+// Global secrets like sendgrid_key can be accessed via templates:
+// Example URL: "https://api.sendgrid.com/v3/user/account"
+// Example Headers: "Authorization": "Bearer {{apContext.configVars.sendgrid_key}}"
+//
+// Available global secrets (configured in aggregator.yaml):
+// - ap_notify_bot_token: Telegram bot token for notifications
+// - sendgrid_key: SendGrid API key for email services
+//
+// Usage example:
+//   URL: https://api.sendgrid.com/v3/user/account
+//   Headers: {
+//     "Authorization": "Bearer {{apContext.configVars.sendgrid_key}}",
+//     "Content-Type": "application/json"
+//   }
+//   Method: GET
+//
+// ... existing code ...
+
 type RestProcessor struct {
 	*CommonProcessor
 	HttpClient *resty.Client
