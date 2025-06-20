@@ -425,9 +425,9 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 
 // StreamMessages setup a streaming connection to receive task from server
 func (o *Operator) StreamMessages() {
-	o.logger.Info("🚀 DEBUG: StreamMessages started - SEGFAULT_FIX_v2.0 - Enhanced logging",
+	o.logger.Info("🚀 DEBUG: StreamMessages started - SEGFAULT_FIX_v3.0 - Complete Protection",
 		"timestamp", time.Now().Format(time.RFC3339),
-		"fix_version", "v2.0")
+		"fix_version", "v3.0")
 
 	id := hex.EncodeToString(o.operatorId[:])
 	ctx := context.Background()
@@ -610,9 +610,21 @@ func (o *Operator) StreamMessages() {
 
 				if trigger := triggerObj.GetEvent(); trigger != nil {
 					o.logger.Info("📥 Monitoring event trigger", "task_id", resp.Id)
-					if err := o.eventTrigger.AddCheck(resp.TaskMetadata); err != nil {
-						o.logger.Info("❌ Failed to add event trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for events")
-					}
+
+					// Safely call AddCheck with panic recovery
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								o.logger.Error("🚨 CRITICAL: eventTrigger.AddCheck() caused segmentation fault",
+									"task_id", resp.Id,
+									"panic", r,
+									"solution", "resp.TaskMetadata is corrupted - cannot add event trigger")
+							}
+						}()
+						if err := o.eventTrigger.AddCheck(resp.TaskMetadata); err != nil {
+							o.logger.Info("❌ Failed to add event trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for events")
+						}
+					}()
 				} else {
 					o.logger.Info("🔍 DEBUG: Event trigger is nil, checking block trigger",
 						"task_id", resp.Id)
@@ -645,9 +657,21 @@ func (o *Operator) StreamMessages() {
 						} else {
 							o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id)
 						}
-						if err := o.blockTrigger.AddCheck(resp.TaskMetadata); err != nil {
-							o.logger.Info("❌ Failed to add block trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for blocks")
-						}
+
+						// Safely call AddCheck with panic recovery
+						func() {
+							defer func() {
+								if r := recover(); r != nil {
+									o.logger.Error("🚨 CRITICAL: blockTrigger.AddCheck() caused segmentation fault",
+										"task_id", resp.Id,
+										"panic", r,
+										"solution", "resp.TaskMetadata is corrupted - cannot add block trigger")
+								}
+							}()
+							if err := o.blockTrigger.AddCheck(resp.TaskMetadata); err != nil {
+								o.logger.Info("❌ Failed to add block trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for blocks")
+							}
+						}()
 					} else {
 						o.logger.Info("🔍 DEBUG: Block trigger is nil, checking cron trigger",
 							"task_id", resp.Id)
@@ -681,9 +705,21 @@ func (o *Operator) StreamMessages() {
 							} else {
 								o.logger.Info("⏰ Monitoring cron trigger", "task_id", resp.Id)
 							}
-							if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
-								o.logger.Info("❌ Failed to add cron trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for scheduled execution")
-							}
+
+							// Safely call AddCheck with panic recovery
+							func() {
+								defer func() {
+									if r := recover(); r != nil {
+										o.logger.Error("🚨 CRITICAL: timeTrigger.AddCheck() caused segmentation fault",
+											"task_id", resp.Id,
+											"panic", r,
+											"solution", "resp.TaskMetadata is corrupted - cannot add cron trigger")
+									}
+								}()
+								if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
+									o.logger.Info("❌ Failed to add cron trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for scheduled execution")
+								}
+							}()
 						} else {
 							o.logger.Info("🔍 DEBUG: Cron trigger is nil, checking fixed time trigger",
 								"task_id", resp.Id)
@@ -723,9 +759,21 @@ func (o *Operator) StreamMessages() {
 								} else {
 									o.logger.Info("📅 Monitoring fixed time trigger", "task_id", resp.Id)
 								}
-								if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
-									o.logger.Info("❌ Failed to add fixed time trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for fixed time execution")
-								}
+
+								// Safely call AddCheck with panic recovery
+								func() {
+									defer func() {
+										if r := recover(); r != nil {
+											o.logger.Error("🚨 CRITICAL: timeTrigger.AddCheck() caused segmentation fault",
+												"task_id", resp.Id,
+												"panic", r,
+												"solution", "resp.TaskMetadata is corrupted - cannot add fixed time trigger")
+										}
+									}()
+									if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
+										o.logger.Info("❌ Failed to add fixed time trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for fixed time execution")
+									}
+								}()
 							} else {
 								// Safely check trigger types for logging without causing crashes
 								var eventNil, blockNil, cronNil, fixedTimeNil bool = true, true, true, true
