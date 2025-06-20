@@ -580,30 +580,31 @@ func (o *Operator) StreamMessages() {
 				}
 
 				// Additional nil check for Trigger field
-				if resp.TaskMetadata.Trigger == nil {
+				triggerObj := resp.TaskMetadata.GetTrigger()
+				if triggerObj == nil {
 					o.logger.Warn("❌ Received MonitorTaskTrigger message with nil Trigger",
 						"task_id", resp.Id,
 						"solution", "This may indicate a protocol mismatch or aggregator issue")
 					continue
 				}
 
-				if trigger := resp.TaskMetadata.GetTrigger().GetEvent(); trigger != nil {
+				if trigger := triggerObj.GetEvent(); trigger != nil {
 					o.logger.Info("📥 Monitoring event trigger", "task_id", resp.Id)
 					if err := o.eventTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Info("❌ Failed to add event trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for events")
 					}
-				} else if trigger := resp.TaskMetadata.GetTrigger().GetBlock(); trigger != nil {
+				} else if trigger := triggerObj.GetBlock(); trigger != nil {
 					o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id, "interval", trigger.Config.Interval)
 					if err := o.blockTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Info("❌ Failed to add block trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for blocks")
 					}
-				} else if trigger := resp.TaskMetadata.GetTrigger().GetCron(); trigger != nil {
+				} else if trigger := triggerObj.GetCron(); trigger != nil {
 					scheduleStr := strings.Join(trigger.Config.Schedules, ", ")
 					o.logger.Info("⏰ Monitoring cron trigger", "task_id", resp.Id, "schedule", scheduleStr)
 					if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Info("❌ Failed to add cron trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for scheduled execution")
 					}
-				} else if trigger := resp.TaskMetadata.GetTrigger().GetFixedTime(); trigger != nil {
+				} else if trigger := triggerObj.GetFixedTime(); trigger != nil {
 					epochCount := len(trigger.Config.Epochs)
 					var epochInfo string
 					if epochCount == 1 {
@@ -618,7 +619,7 @@ func (o *Operator) StreamMessages() {
 				} else {
 					o.logger.Warn("❌ Received MonitorTaskTrigger message with unsupported or missing trigger",
 						"task_id", resp.Id,
-						"trigger_type", resp.TaskMetadata.GetTrigger().GetType(),
+						"trigger_type", triggerObj.GetType(),
 						"solution", "Check if trigger type is supported by this operator version")
 				}
 			}
