@@ -628,8 +628,9 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	n.tasks[task.Id] = task
 	n.lock.Unlock()
 
-	// Notify operators about the new task
-	n.notifyOperatorsTaskOperation(task.Id, avsproto.MessageOp_MonitorTaskTrigger)
+	// Note: MonitorTaskTrigger notifications are handled by StreamCheckToOperator
+	// which sends complete task metadata. The batched notification system is only
+	// for CancelTask/DeleteTask operations that don't need complete metadata.
 
 	// Log successful task creation with final counts
 	n.logger.Info("✅ CreateTask completed successfully",
@@ -1062,6 +1063,15 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 // notifyOperatorsTaskOperation queues notifications for batched sending to operators
 // This method is non-blocking and batches notifications for efficiency
 func (n *Engine) notifyOperatorsTaskOperation(taskID string, operation avsproto.MessageOp) {
+	// MonitorTaskTrigger should not use batched notifications as it requires complete task metadata
+	if operation == avsproto.MessageOp_MonitorTaskTrigger {
+		n.logger.Warn("❌ MonitorTaskTrigger should not be sent via batched notifications",
+			"task_id", taskID,
+			"operation", operation.String(),
+			"solution", "MonitorTaskTrigger is handled by StreamCheckToOperator with complete metadata")
+		return
+	}
+
 	n.notificationMutex.Lock()
 	defer n.notificationMutex.Unlock()
 

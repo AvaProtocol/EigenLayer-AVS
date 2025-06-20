@@ -97,8 +97,10 @@ func TestOperatorReconnectionFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	// Step 1: Create a task that requires event monitoring
+	userAddress := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	user := &model.User{
-		Address: common.HexToAddress("0x1234567890123456789012345678901234567890"),
+		Address:             userAddress,
+		SmartAccountAddress: &userAddress, // Initialize to prevent nil pointer dereference
 	}
 
 	taskReq := &avsproto.CreateTaskReq{
@@ -292,8 +294,10 @@ func TestOperatorReconnectionRaceCondition(t *testing.T) {
 	defer engine.Stop()
 
 	// Create a simple task
+	userAddress := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	user := &model.User{
-		Address: common.HexToAddress("0x1234567890123456789012345678901234567890"),
+		Address:             userAddress,
+		SmartAccountAddress: &userAddress, // Initialize to prevent nil pointer dereference
 	}
 
 	taskReq := &avsproto.CreateTaskReq{
