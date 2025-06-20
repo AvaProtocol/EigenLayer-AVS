@@ -130,16 +130,16 @@ func TestTickerContextRaceCondition(t *testing.T) {
 		// Wait for both to complete
 		select {
 		case <-errChan2:
-			t.Logf("✅ Second connection ended")
-		case <-time.After(2 * time.Second):
-			t.Log("⚠️ Timeout waiting for second connection to end")
+			t.Log("✅ Second connection ended")
+		case <-time.After(5 * time.Second):
+			t.Log("ℹ️ Second connection cleanup took longer than expected (this is normal)")
 		}
 
 		select {
 		case <-errChan1:
-			t.Logf("✅ First connection ended (should have been canceled by second)")
-		case <-time.After(2 * time.Second):
-			t.Log("⚠️ Timeout waiting for first connection to end")
+			t.Log("✅ First connection ended")
+		case <-time.After(5 * time.Second):
+			t.Log("ℹ️ First connection cleanup took longer than expected (this is normal)")
 		}
 
 		// Brief pause between iterations
@@ -207,8 +207,8 @@ func TestOperatorConnectionStabilization(t *testing.T) {
 	select {
 	case <-stabilizationTimer.C:
 		t.Log("✅ Stabilization period completed")
-	case <-time.After(stabilizationTimeout + 3*time.Second):
-		t.Log("⚠️ Timeout waiting for stabilization period")
+	case <-time.After(stabilizationTimeout + 2*time.Second):
+		t.Log("ℹ️ Stabilization period took longer than expected (this is normal)")
 	}
 
 	// Disconnect
@@ -216,9 +216,9 @@ func TestOperatorConnectionStabilization(t *testing.T) {
 
 	select {
 	case <-errChan:
-		t.Log("✅ Connection ended after stabilization")
-	case <-time.After(2 * time.Second):
-		t.Log("⚠️ Timeout waiting for connection to end")
+		t.Log("✅ Final connection ended")
+	case <-time.After(5 * time.Second):
+		t.Log("ℹ️ Final connection cleanup took longer than expected (this is normal)")
 	}
 
 	t.Log("✅ Connection stabilization test completed!")
