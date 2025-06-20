@@ -135,8 +135,14 @@ func TestEventTriggerConditionalFiltering(t *testing.T) {
 				ParsedABIs: make(map[int]*abi.ABI),
 			}
 
+			// Convert Check to EventTaskData for the new API
+			eventData := &EventTaskData{
+				Queries:    check.Queries,
+				ParsedABIs: check.ParsedABIs,
+			}
+
 			// Test the conditional filtering
-			result := eventTrigger.logMatchesEventQuery(mockLog, query, check, 0)
+			result := eventTrigger.logMatchesEventQuery(mockLog, query, eventData, 0)
 
 			if tc.shouldTrigger {
 				assert.True(t, result, "Expected condition to match for: %s", tc.description)
@@ -191,13 +197,19 @@ func TestEventTriggerMultipleConditions(t *testing.T) {
 		ParsedABIs: make(map[int]*abi.ABI),
 	}
 
-	result := eventTrigger.logMatchesEventQuery(mockLog, query, check, 0)
+	// Convert Check to EventTaskData for the new API
+	eventData := &EventTaskData{
+		Queries:    check.Queries,
+		ParsedABIs: check.ParsedABIs,
+	}
+
+	result := eventTrigger.logMatchesEventQuery(mockLog, query, eventData, 0)
 	assert.True(t, result, "Multiple conditions should pass (price > $2000 AND round > 10000)")
 	t.Logf("✅ Multiple conditions test passed")
 
 	// Test case where one condition fails
 	query.Conditions[1].Value = "20000" // Round > 20000 (should fail)
-	result = eventTrigger.logMatchesEventQuery(mockLog, query, check, 0)
+	result = eventTrigger.logMatchesEventQuery(mockLog, query, eventData, 0)
 	assert.False(t, result, "Should fail when one condition doesn't match")
 	t.Logf("🚫 Multiple conditions correctly rejected when one fails")
 }
@@ -230,7 +242,13 @@ func TestEventTriggerWithoutConditions(t *testing.T) {
 		ParsedABIs: make(map[int]*abi.ABI),
 	}
 
-	result := eventTrigger.logMatchesEventQuery(mockLog, query, check, 0)
+	// Convert Check to EventTaskData for the new API
+	eventData := &EventTaskData{
+		Queries:    check.Queries,
+		ParsedABIs: check.ParsedABIs,
+	}
+
+	result := eventTrigger.logMatchesEventQuery(mockLog, query, eventData, 0)
 	assert.True(t, result, "Should match when no conditions are specified (backward compatibility)")
 	t.Logf("✅ Backward compatibility test passed")
 }
@@ -271,7 +289,13 @@ func TestEventTriggerInvalidABI(t *testing.T) {
 		ParsedABIs: make(map[int]*abi.ABI),
 	}
 
-	result := eventTrigger.logMatchesEventQuery(mockLog, query, check, 0)
+	// Convert Check to EventTaskData for the new API
+	eventData := &EventTaskData{
+		Queries:    check.Queries,
+		ParsedABIs: check.ParsedABIs,
+	}
+
+	result := eventTrigger.logMatchesEventQuery(mockLog, query, eventData, 0)
 	assert.False(t, result, "Should fail gracefully with invalid ABI")
 	t.Logf("✅ Invalid ABI handled gracefully")
 }
@@ -447,8 +471,14 @@ func TestSignedIntegerConditions(t *testing.T) {
 				ParsedABIs: make(map[int]*abi.ABI),
 			}
 
+			// Convert Check to EventTaskData for the new API
+			eventData := &EventTaskData{
+				Queries:    check.Queries,
+				ParsedABIs: check.ParsedABIs,
+			}
+
 			// Test the condition evaluation
-			result := eventTrigger.logMatchesEventQuery(mockLog, query, check, 0)
+			result := eventTrigger.logMatchesEventQuery(mockLog, query, eventData, 0)
 
 			if tc.shouldMatch {
 				assert.True(t, result, "Expected condition to match for: %s", tc.description)

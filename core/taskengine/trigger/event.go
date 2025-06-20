@@ -50,7 +50,12 @@ type QueryInfo struct {
 type EventTrigger struct {
 	*CommonTrigger
 
-	checks sync.Map
+	// New unified registry (preferred)
+	registry *TaskRegistry
+
+	// Legacy sync.Map (for backward compatibility)
+	checks     sync.Map
+	legacyMode bool
 
 	// channel that we will push the trigger information back
 	triggerCh chan TriggerMetadata[EventMark]
@@ -97,8 +102,10 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 			logger:    logger,
 		},
 
+		registry:                 NewTaskRegistry(),
 		triggerCh:                triggerCh,
 		checks:                   sync.Map{},
+		legacyMode:               false, // Start in new mode
 		subscriptions:            make([]SubscriptionInfo, 0),
 		updateSubsCh:             make(chan struct{}, 1),
 		eventCounts:              make(map[string]map[uint64]uint32),
@@ -125,7 +132,49 @@ func (t *EventTrigger) SetOverloadAlertCallback(callback func(alert *avsproto.Ev
 	t.onOverloadAlert = callback
 }
 
+// ensureNewFormat ensures we're using the new TaskRegistry format
+// This provides automatic conversion from legacy sync.Map format
+func (t *EventTrigger) ensureNewFormat() {
+	if t.legacyMode {
+		t.logger.Info("🔄 Converting from legacy sync.Map format to new TaskRegistry format")
+
+		// Convert existing data
+		t.registry.ConvertFromSyncMap(&t.checks)
+
+		// Clear old data
+		t.checks = sync.Map{}
+		t.legacyMode = false
+
+		t.logger.Info("✅ Successfully converted to new TaskRegistry format",
+			"task_count", t.registry.GetEventTaskCount())
+	}
+}
+
+// ensureLegacyConversion consolidates legacy data detection and conversion
+// This helper function eliminates code duplication across methods
+func (t *EventTrigger) ensureLegacyConversion() {
+	t.detectLegacyData()
+	t.ensureNewFormat()
+}
+
+// detectLegacyData checks if we have data in the old format
+func (t *EventTrigger) detectLegacyData() {
+	hasLegacyData := false
+	t.checks.Range(func(key, value interface{}) bool {
+		hasLegacyData = true
+		return false // Stop after finding first item
+	})
+
+	if hasLegacyData && t.registry.GetEventTaskCount() == 0 {
+		t.legacyMode = true
+		t.logger.Info("🔍 Detected legacy sync.Map data - will convert on next operation")
+	}
+}
+
 func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) error {
+	// Auto-convert from legacy format if needed
+	t.ensureLegacyConversion()
+
 	sTrigger := check.GetTrigger()
 	if sTrigger == nil {
 		return fmt.Errorf("trigger not found from sync message")
@@ -143,10 +192,10 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 		return fmt.Errorf("no queries found in event trigger config for task %s", taskID)
 	}
 
-	c := &Check{
-		TaskMetadata: check,
-		Queries:      queries,
-		ParsedABIs:   make(map[int]*abi.ABI),
+	// Create EventTaskData for the new registry
+	eventData := &EventTaskData{
+		Queries:    queries,
+		ParsedABIs: make(map[int]*abi.ABI),
 	}
 
 	// Pre-parse ABIs for queries that have conditions to avoid repeated parsing
@@ -161,7 +210,7 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 						"query_index", i,
 						"error", err)
 				} else {
-					c.ParsedABIs[i] = &parsedABI
+					eventData.ParsedABIs[i] = &parsedABI
 					t.logger.Debug("✅ Pre-parsed ABI for conditional filtering",
 						"task_id", taskID,
 						"query_index", i,
@@ -176,7 +225,8 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 		}
 	}
 
-	t.checks.Store(taskID, c)
+	// Add to new registry
+	t.registry.AddTask(taskID, check, eventData, nil, nil)
 
 	// Initialize event counts for this task
 	t.eventCountsMutex.Lock()
@@ -208,17 +258,15 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 }
 
 func (t *EventTrigger) RemoveCheck(id string) error {
-	// Clean up cached ABIs before removing the check
-	if checkValue, exists := t.checks.Load(id); exists {
-		if check, ok := checkValue.(*Check); ok {
-			// Clear cached ABIs to free memory
-			for queryIndex := range check.ParsedABIs {
-				delete(check.ParsedABIs, queryIndex)
-			}
-		}
-	}
+	// Auto-convert from legacy format if needed
+	t.ensureLegacyConversion()
 
-	t.checks.Delete(id)
+	// Remove from new registry (handles cleanup automatically)
+	removed := t.registry.RemoveTask(id)
+
+	if !removed {
+		t.logger.Debug("🤷 Task not found for removal", "task_id", id)
+	}
 
 	// Clean up event counts for this task
 	t.eventCountsMutex.Lock()
@@ -508,10 +556,9 @@ func (t *EventTrigger) checkEventSafety(log types.Log) bool {
 			queryIndex = subInfo.queryIndex
 
 			// Get safety limits for this task
-			if check, exists := t.checks.Load(matchingTaskID); exists {
-				checkObj := check.(Check)
-				if queryIndex < len(checkObj.Queries) {
-					maxEventsPerBlock = checkObj.Queries[queryIndex].GetMaxEventsPerBlock()
+			if entry, exists := t.registry.GetTask(matchingTaskID); exists && entry.EventData != nil {
+				if queryIndex < len(entry.EventData.Queries) {
+					maxEventsPerBlock = entry.EventData.Queries[queryIndex].GetMaxEventsPerBlock()
 				}
 			}
 			break
@@ -639,11 +686,8 @@ func (t *EventTrigger) processLogInternal(log types.Log) error {
 	var triggeredTasks []string
 
 	// Check all registered tasks to see which ones match this log
-	t.checks.Range(func(key any, value any) bool {
-		taskID := key.(string)
-		check := value.(Check)
-
-		if t.logMatchesTask(log, &check) {
+	t.registry.RangeEventTasks(func(taskID string, entry *TaskEntry) bool {
+		if t.logMatchesTaskEntry(log, entry) {
 			triggeredTasks = append(triggeredTasks, taskID)
 
 			// Send trigger notification
@@ -682,9 +726,30 @@ func (t *EventTrigger) processLogInternal(log types.Log) error {
 }
 
 // logMatchesTask checks if a log matches any of the queries for a specific task
+// logMatchesTaskEntry checks if a log matches a task entry (new format)
+func (t *EventTrigger) logMatchesTaskEntry(log types.Log, entry *TaskEntry) bool {
+	if entry.EventData == nil {
+		return false
+	}
+
+	for queryIndex, query := range entry.EventData.Queries {
+		if t.logMatchesEventQuery(log, query, entry.EventData, queryIndex) {
+			return true
+		}
+	}
+	return false
+}
+
+// logMatchesTask checks if a log matches a task check (legacy format - kept for compatibility)
 func (t *EventTrigger) logMatchesTask(log types.Log, check *Check) bool {
+	// Convert to EventTaskData for compatibility
+	eventData := &EventTaskData{
+		Queries:    check.Queries,
+		ParsedABIs: check.ParsedABIs,
+	}
+
 	for i, query := range check.Queries {
-		if t.logMatchesEventQuery(log, query, check, i) {
+		if t.logMatchesEventQuery(log, query, eventData, i) {
 			return true
 		}
 	}
@@ -692,7 +757,8 @@ func (t *EventTrigger) logMatchesTask(log types.Log, check *Check) bool {
 }
 
 // logMatchesEventQuery checks if a log matches a specific EventTrigger_Query
-func (t *EventTrigger) logMatchesEventQuery(log types.Log, query *avsproto.EventTrigger_Query, check *Check, queryIndex int) bool {
+// logMatchesEventQuery checks if a log matches a specific event query (works with both old and new formats)
+func (t *EventTrigger) logMatchesEventQuery(log types.Log, query *avsproto.EventTrigger_Query, eventData *EventTaskData, queryIndex int) bool {
 	// Check addresses
 	addresses := query.GetAddresses()
 	if len(addresses) > 0 {
@@ -737,13 +803,40 @@ func (t *EventTrigger) logMatchesEventQuery(log types.Log, query *avsproto.Event
 	// NEW: Evaluate conditional filtering if conditions are provided
 	conditions := query.GetConditions()
 	if len(conditions) > 0 {
-		return t.evaluateEventConditions(log, query, conditions, check, queryIndex)
+		return t.evaluateEventConditionsWithEventData(log, query, conditions, eventData, queryIndex)
 	}
 
 	return true
 }
 
-// evaluateEventConditions checks if a log matches the provided ABI-based conditions
+// evaluateEventConditionsWithEventData checks if a log matches the provided ABI-based conditions (new format)
+func (t *EventTrigger) evaluateEventConditionsWithEventData(log types.Log, query *avsproto.EventTrigger_Query, conditions []*avsproto.EventCondition, eventData *EventTaskData, queryIndex int) bool {
+	// Use cached ABI if available, otherwise parse it (fallback for backward compatibility)
+	var contractABI *abi.ABI
+	if cachedABI, exists := eventData.ParsedABIs[queryIndex]; exists && cachedABI != nil {
+		contractABI = cachedABI
+		t.logger.Debug("🚀 Using cached ABI for conditional filtering", "query_index", queryIndex)
+	} else {
+		// Fallback: parse ABI on-demand (this should rarely happen with the new caching)
+		abiString := query.GetContractAbi()
+		if abiString == "" {
+			t.logger.Warn("🚫 Conditional filtering requires contract ABI but none provided")
+			return false
+		}
+
+		parsedABI, err := abi.JSON(strings.NewReader(abiString))
+		if err != nil {
+			t.logger.Error("❌ Failed to parse contract ABI for conditional filtering", "error", err)
+			return false
+		}
+		contractABI = &parsedABI
+		t.logger.Debug("⚠️ Parsed ABI on-demand (consider pre-parsing for better performance)", "query_index", queryIndex)
+	}
+
+	return t.evaluateEventConditionsCommon(log, query, conditions, contractABI, queryIndex)
+}
+
+// evaluateEventConditions checks if a log matches the provided ABI-based conditions (legacy format)
 func (t *EventTrigger) evaluateEventConditions(log types.Log, query *avsproto.EventTrigger_Query, conditions []*avsproto.EventCondition, check *Check, queryIndex int) bool {
 	// Use cached ABI if available, otherwise parse it (fallback for backward compatibility)
 	var contractABI *abi.ABI
@@ -767,6 +860,11 @@ func (t *EventTrigger) evaluateEventConditions(log types.Log, query *avsproto.Ev
 		t.logger.Debug("⚠️ Parsed ABI on-demand (consider pre-parsing for better performance)", "query_index", queryIndex)
 	}
 
+	return t.evaluateEventConditionsCommon(log, query, conditions, contractABI, queryIndex)
+}
+
+// evaluateEventConditionsCommon contains the shared logic for both legacy and new formats
+func (t *EventTrigger) evaluateEventConditionsCommon(log types.Log, query *avsproto.EventTrigger_Query, conditions []*avsproto.EventCondition, contractABI *abi.ABI, queryIndex int) bool {
 	// Find the matching event in ABI using the first topic (event signature)
 	if len(log.Topics) == 0 {
 		t.logger.Debug("🚫 Log has no topics, cannot match event signature")
@@ -1109,15 +1207,16 @@ func getMapKeys(m map[string]interface{}) []string {
 func (t *EventTrigger) buildFilterQueries() []QueryInfo {
 	var allQueries []QueryInfo
 
-	t.checks.Range(func(key any, value any) bool {
-		taskID := key.(string)
-		check := value.(*Check)
+	// Auto-convert from legacy format if needed
+	t.ensureLegacyConversion()
+
+	t.registry.RangeEventTasks(func(taskID string, entry *TaskEntry) bool {
 
 		// Group queries by their filter criteria to identify duplicates/overlaps
 		queryGroups := make(map[string][]int) // queryKey -> []queryIndex
 
 		// Convert each EventTrigger_Query to ethereum.FilterQuery and group by criteria
-		for i, query := range check.Queries {
+		for i, query := range entry.EventData.Queries {
 			ethQuery := t.convertToFilterQuery(query)
 
 			// Create a unique key for this query's filter criteria
@@ -1129,14 +1228,14 @@ func (t *EventTrigger) buildFilterQueries() []QueryInfo {
 		for _, queryIndices := range queryGroups {
 			// Use the first query as the base (they should all be identical)
 			baseQueryIndex := queryIndices[0]
-			baseQuery := check.Queries[baseQueryIndex]
+			baseQuery := entry.EventData.Queries[baseQueryIndex]
 			ethQuery := t.convertToFilterQuery(baseQuery)
 
 			// Find the maximum maxEventsPerBlock across all identical queries
 			maxEventsPerBlock := baseQuery.GetMaxEventsPerBlock()
 			for _, idx := range queryIndices[1:] {
-				if check.Queries[idx].GetMaxEventsPerBlock() > maxEventsPerBlock {
-					maxEventsPerBlock = check.Queries[idx].GetMaxEventsPerBlock()
+				if entry.EventData.Queries[idx].GetMaxEventsPerBlock() > maxEventsPerBlock {
+					maxEventsPerBlock = entry.EventData.Queries[idx].GetMaxEventsPerBlock()
 				}
 			}
 
