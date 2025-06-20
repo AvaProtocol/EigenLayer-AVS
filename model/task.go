@@ -82,8 +82,8 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 	}
 
 	// Validate
-	if ok := t.Validate(); !ok {
-		return nil, fmt.Errorf("Invalid task argument")
+	if err := t.ValidateWithError(); err != nil {
+		return nil, fmt.Errorf("Invalid task argument: %w", err)
 	}
 
 	return t, nil
@@ -103,18 +103,59 @@ func (t *Task) FromStorageData(body []byte) error {
 
 // Return a compact json ready to persist to storage
 func (t *Task) Validate() bool {
+	return t.ValidateWithError() == nil
+}
+
+// ValidateWithError returns detailed validation error messages
+func (t *Task) ValidateWithError() error {
 	// Validate block trigger intervals
 	if t.Task.Trigger != nil {
 		if blockTrigger := t.Task.Trigger.GetBlock(); blockTrigger != nil {
-			if config := blockTrigger.GetConfig(); config != nil {
-				if config.GetInterval() <= 0 {
-					return false
-				}
+			config := blockTrigger.GetConfig()
+			// Config must exist and have a valid interval
+			if config == nil {
+				return fmt.Errorf("block trigger config is required but missing")
+			}
+			if config.GetInterval() <= 0 {
+				return fmt.Errorf("block trigger interval must be greater than 0, got %d", config.GetInterval())
+			}
+		}
+
+		// Validate cron trigger
+		if cronTrigger := t.Task.Trigger.GetCron(); cronTrigger != nil {
+			config := cronTrigger.GetConfig()
+			if config == nil {
+				return fmt.Errorf("cron trigger config is required but missing")
+			}
+			if len(config.GetSchedules()) == 0 {
+				return fmt.Errorf("cron trigger must have at least one schedule")
+			}
+		}
+
+		// Validate fixed time trigger
+		if fixedTimeTrigger := t.Task.Trigger.GetFixedTime(); fixedTimeTrigger != nil {
+			config := fixedTimeTrigger.GetConfig()
+			if config == nil {
+				return fmt.Errorf("fixed time trigger config is required but missing")
+			}
+			if len(config.GetEpochs()) == 0 {
+				return fmt.Errorf("fixed time trigger must have at least one epoch")
+			}
+		}
+
+		// Validate event trigger
+		if eventTrigger := t.Task.Trigger.GetEvent(); eventTrigger != nil {
+			config := eventTrigger.GetConfig()
+			if config == nil {
+				return fmt.Errorf("event trigger config is required but missing")
+			}
+			if len(config.GetQueries()) == 0 {
+				return fmt.Errorf("event trigger must have at least one query")
 			}
 		}
 	}
 
-	return true
+	return nil
 }
 
 func (t *Task) ToProtoBuf() (*avsproto.Task, error) {
