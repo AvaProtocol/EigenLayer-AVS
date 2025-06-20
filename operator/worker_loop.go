@@ -256,8 +256,14 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 			blockTasksMap[blockNum] = append(blockTasksMap[blockNum], triggerItem.TaskID)
 
 			taskCount := len(blockTasksMap[blockNum])
-			if taskCount == 1 || taskCount%5 == 0 {
-				o.logger.Info("block trigger summary", "block", blockNum, "task_count", taskCount)
+			// Log at 10, 20, 40, 80, 160...
+			threshold := 10
+			for threshold <= taskCount {
+				if taskCount == threshold {
+					o.logger.Info("block trigger summary", "block", blockNum, "task_count", taskCount)
+					break
+				}
+				threshold *= 2
 			}
 			blockTasksMutex.Unlock()
 
