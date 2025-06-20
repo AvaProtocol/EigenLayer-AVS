@@ -740,3 +740,279 @@ func TestRestRequestTelegramMockServer(t *testing.T) {
 	t.Logf("✅ Verified test fields: message_id=%d, from.first_name='%s', chat.username='%s'",
 		expectedMessageId, expectedFromFirstName, expectedChatUsername)
 }
+
+func TestRestRequestSendGridGlobalSecret(t *testing.T) {
+	// Test values to validate in the SendGrid mock response
+	expectedAccountType := "paid"
+	expectedReputation := 99.8
+
+	// Create mock SendGrid server that mimics SendGrid API response format
+	sendGridServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify it's a SendGrid API call to the user account endpoint
+		if !strings.Contains(r.URL.Path, "/v3/user/account") {
+			t.Errorf("expected SendGrid user account API path, got: %s", r.URL.Path)
+		}
+
+		if r.Method != "GET" {
+			t.Errorf("expected GET request, got %s", r.Method)
+		}
+
+		// Verify that the Authorization header is present and uses the sendgrid_key
+		authHeader := r.Header.Get("Authorization")
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			t.Errorf("expected Authorization header with Bearer token, got: %s", authHeader)
+		}
+
+		// Check that the API key from the template was properly substituted
+		expectedKey := "SENDGRID_KEY_FOR_UNIT_TESTS"
+		if !strings.Contains(authHeader, expectedKey) {
+			t.Errorf("expected sendgrid_key to be substituted in Authorization header, got: %s", authHeader)
+		}
+
+		// Return mock SendGrid account information response
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		sendGridResponse := map[string]interface{}{
+			"type":       expectedAccountType,
+			"reputation": expectedReputation,
+		}
+
+		if err := json.NewEncoder(w).Encode(sendGridResponse); err != nil {
+			t.Errorf("failed to encode response: %v", err)
+		}
+	}))
+	defer sendGridServer.Close()
+
+	// Create REST API node that calls our mock SendGrid server using the global sendgrid_key secret
+	node := &avsproto.RestAPINode{
+		Config: &avsproto.RestAPINode_Config{
+			Url: sendGridServer.URL + "/v3/user/account",
+			Headers: map[string]string{
+				"Authorization": "Bearer {{apContext.configVars.sendgrid_key}}",
+				"Content-Type":  "application/json",
+			},
+			Body:   "",
+			Method: "GET",
+		},
+	}
+
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "sendgrid-test",
+			Name: "restApi",
+			TaskType: &avsproto.TaskNode_RestApi{
+				RestApi: node,
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "e1",
+			Source: trigger.Id,
+			Target: "sendgrid-test",
+		},
+	}
+
+	// Create VM with SendGrid secret available through global macro secrets
+	globalSecrets := map[string]string{
+		"sendgrid_key": "SENDGRID_KEY_FOR_UNIT_TESTS",
+	}
+
+	vm, err := NewVMWithData(&model.Task{
+		Task: &avsproto.Task{
+			Id:      "sendgrid-test",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), globalSecrets)
+
+	if err != nil {
+		t.Fatalf("failed to create VM: %v", err)
+	}
+
+	processor := NewRestProrcessor(vm)
+	step, err := processor.Execute("sendgrid-test", node)
+
+	if err != nil {
+		t.Fatalf("expected successful execution but got error: %v", err)
+	}
+
+	if !step.Success {
+		t.Fatalf("expected step.Success to be true but got false, error: %s", step.Error)
+	}
+
+	// Test the response data structure - verify SendGrid API response is accessible
+	responseData := gow.ValueToMap(step.GetRestApi().Data)
+
+	// Verify no typeUrl/value wrapping (ensuring proper response structure)
+	if _, hasTypeUrl := responseData["typeUrl"]; hasTypeUrl {
+		t.Errorf("❌ Response still has typeUrl field - double-wrapping issue not fixed!")
+	}
+	if _, hasValue := responseData["value"]; hasValue {
+		t.Errorf("❌ Response still has value field - double-wrapping issue not fixed!")
+	}
+
+	// Verify we have proper response structure
+	if responseData == nil {
+		t.Fatalf("❌ Response data is nil")
+	}
+
+	// Check status code
+	statusCode, exists := responseData["statusCode"]
+	if !exists {
+		t.Fatalf("❌ Response missing 'statusCode' field. Available fields: %v", getStringMapKeys(responseData))
+	}
+	if sc, ok := statusCode.(float64); !ok || sc != 200 {
+		t.Errorf("❌ Expected statusCode 200, got: %v (type: %T)", statusCode, statusCode)
+	}
+
+	// Check that we can access the body directly
+	bodyField, exists := responseData["body"]
+	if !exists {
+		t.Fatalf("❌ Response missing 'body' field. Available fields: %v", getStringMapKeys(responseData))
+	}
+
+	bodyMap, ok := bodyField.(map[string]interface{})
+	if !ok {
+		t.Fatalf("❌ Body is not map[string]interface{}, got %T: %v", bodyField, bodyField)
+	}
+
+	// Test 1: account type
+	accountType, exists := bodyMap["type"]
+	if !exists {
+		t.Fatalf("❌ SendGrid response missing 'type' field")
+	}
+	if accType, ok := accountType.(string); !ok || accType != expectedAccountType {
+		t.Errorf("❌ Expected account type='%s', got: %v (type: %T)", expectedAccountType, accountType, accountType)
+	}
+
+	// Test 2: reputation
+	reputation, exists := bodyMap["reputation"]
+	if !exists {
+		t.Fatalf("❌ SendGrid response missing 'reputation' field")
+	}
+	if rep, ok := reputation.(float64); !ok || rep != expectedReputation {
+		t.Errorf("❌ Expected reputation=%f, got: %v (type: %T)", expectedReputation, reputation, reputation)
+	}
+
+	t.Logf("✅ SUCCESS: SendGrid global secret test passed!")
+	t.Logf("✅ sendgrid_key global secret was properly substituted in Authorization header")
+	t.Logf("✅ SendGrid API response structure properly accessible: type='%s', reputation=%f",
+		expectedAccountType, expectedReputation)
+	t.Logf("✅ Verified global secret access via {{apContext.configVars.sendgrid_key}} template")
+}
+
+func TestRestRequestArbitraryGlobalSecret(t *testing.T) {
+	// This test demonstrates that ANY variable name can be used in config
+	// without being defined anywhere in the source code
+
+	// Create a completely arbitrary secret name that doesn't exist anywhere in the codebase
+	arbitrarySecretName := "my_custom_api_service_key_12345"
+	arbitrarySecretValue := "sk_test_arbitrary_value_that_works_dynamically"
+
+	// Create mock server that expects this arbitrary secret
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+
+		// Verify that our arbitrary secret was properly substituted
+		if !strings.Contains(authHeader, arbitrarySecretValue) {
+			t.Errorf("expected arbitrary secret to be substituted in Authorization header, got: %s", authHeader)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "Arbitrary secret works!",
+		})
+	}))
+	defer testServer.Close()
+
+	// Create REST API node using the arbitrary secret name
+	node := &avsproto.RestAPINode{
+		Config: &avsproto.RestAPINode_Config{
+			Url: testServer.URL + "/test",
+			Headers: map[string]string{
+				// Use the arbitrary secret name in template - no source code definition needed!
+				"Authorization": "Bearer {{apContext.configVars." + arbitrarySecretName + "}}",
+				"Content-Type":  "application/json",
+			},
+			Body:   "",
+			Method: "GET",
+		},
+	}
+
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "arbitrary-secret-test",
+			Name: "restApi",
+			TaskType: &avsproto.TaskNode_RestApi{
+				RestApi: node,
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "e1",
+			Source: trigger.Id,
+			Target: "arbitrary-secret-test",
+		},
+	}
+
+	// Create VM with the arbitrary secret - this proves no source code definition is needed
+	globalSecrets := map[string]string{
+		arbitrarySecretName: arbitrarySecretValue, // Any name works!
+	}
+
+	vm, err := NewVMWithData(&model.Task{
+		Task: &avsproto.Task{
+			Id:      "arbitrary-secret-test",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), globalSecrets)
+
+	if err != nil {
+		t.Fatalf("failed to create VM: %v", err)
+	}
+
+	processor := NewRestProrcessor(vm)
+	step, err := processor.Execute("arbitrary-secret-test", node)
+
+	if err != nil {
+		t.Fatalf("expected successful execution but got error: %v", err)
+	}
+
+	if !step.Success {
+		t.Fatalf("expected step.Success to be true but got false, error: %s", step.Error)
+	}
+
+	// Verify the response
+	responseData := gow.ValueToMap(step.GetRestApi().Data)
+	bodyField := responseData["body"].(map[string]interface{})
+
+	if success, ok := bodyField["success"].(bool); !ok || !success {
+		t.Errorf("expected success=true in response")
+	}
+
+	if message, ok := bodyField["message"].(string); !ok || message != "Arbitrary secret works!" {
+		t.Errorf("expected message='Arbitrary secret works!' in response, got: %v", message)
+	}
+
+	t.Logf("✅ SUCCESS: Arbitrary secret test passed!")
+	t.Logf("✅ Secret name '%s' was dynamically loaded from config", arbitrarySecretName)
+	t.Logf("✅ No source code definition needed - template {{apContext.configVars.%s}} works!", arbitrarySecretName)
+	t.Logf("✅ This proves that ANY variable name defined in aggregator.yaml under macros.secrets will work")
+}
