@@ -1258,20 +1258,23 @@ func (n *Engine) AggregateChecksResult(address string, payload *avsproto.NotifyT
 
 // AggregateChecksResultWithState processes operator trigger notifications and returns execution state info
 func (n *Engine) AggregateChecksResultWithState(address string, payload *avsproto.NotifyTriggersReq) (*ExecutionState, error) {
+	// Acquire lock once for all map operations to reduce lock contention
 	n.lock.Lock()
+
 	n.logger.Debug("processing aggregator check hit", "operator", address, "task_id", payload.TaskId)
 
+	// Update operator task tracking
 	if state, exists := n.trackSyncedTasks[address]; exists {
 		state.TaskID[payload.TaskId] = true
 	}
 
-	n.logger.Debug("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
-	n.lock.Unlock()
-
 	// Get task information to determine execution state
 	task, exists := n.tasks[payload.TaskId]
+
 	if !exists {
 		// Task not found in memory - try database lookup
+		n.lock.Unlock() // Release lock for database operation
+
 		dbTask, dbErr := n.GetTaskByID(payload.TaskId)
 		if dbErr != nil {
 			// Task not found in database either - this is likely a stale operator notification
@@ -1302,15 +1305,19 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 		// Task found in database but not in memory - add it to memory and continue
 		n.lock.Lock()
 		n.tasks[dbTask.Id] = dbTask
-		n.lock.Unlock()
 		task = dbTask
+		n.lock.Unlock()
 
 		n.logger.Info("Task recovered from database and added to memory",
 			"task_id", payload.TaskId,
 			"operator", address,
 			"task_status", task.Status,
 			"memory_task_count_after", len(n.tasks))
+	} else {
+		n.lock.Unlock() // Release lock after getting task
 	}
+
+	n.logger.Debug("processed aggregator check hit", "operator", address, "task_id", payload.TaskId)
 
 	// Check if task is still runnable
 	if !task.IsRunable() {
@@ -3682,17 +3689,36 @@ func (n *Engine) DetectAndHandleInvalidTasks() error {
 	n.logger.Info("🔍 Scanning for tasks with invalid configurations...")
 
 	invalidTasks := []string{}
+	updates := make(map[string][]byte)
 
-	// Scan through all tasks in memory
+	// Acquire lock once for the entire operation to reduce lock contention
 	n.lock.Lock()
+
+	// Scan through all tasks in memory and prepare updates
 	for taskID, task := range n.tasks {
 		if err := task.ValidateWithError(); err != nil {
 			invalidTasks = append(invalidTasks, taskID)
 			n.logger.Warn("🚨 Found invalid task configuration",
 				"task_id", taskID,
 				"error", err.Error())
+
+			// Mark task as failed and prepare storage updates
+			task.SetFailed()
+
+			taskJSON, err := task.ToJSON()
+			if err != nil {
+				n.logger.Error("Failed to serialize invalid task for cleanup",
+					"task_id", taskID,
+					"error", err)
+				continue
+			}
+
+			// Prepare the task status update in storage
+			updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON
+			updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed))
 		}
 	}
+
 	n.lock.Unlock()
 
 	if len(invalidTasks) == 0 {
@@ -3703,29 +3729,6 @@ func (n *Engine) DetectAndHandleInvalidTasks() error {
 	n.logger.Warn("🚨 Found invalid tasks, marking as failed",
 		"count", len(invalidTasks),
 		"task_ids", invalidTasks)
-
-	// Mark invalid tasks as failed
-	updates := make(map[string][]byte)
-	for _, taskID := range invalidTasks {
-		n.lock.Lock()
-		if task, exists := n.tasks[taskID]; exists {
-			task.SetFailed()
-
-			taskJSON, err := task.ToJSON()
-			if err != nil {
-				n.logger.Error("Failed to serialize invalid task for cleanup",
-					"task_id", taskID,
-					"error", err)
-				n.lock.Unlock()
-				continue
-			}
-
-			// Update the task status in storage
-			updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON
-			updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed))
-		}
-		n.lock.Unlock()
-	}
 
 	// Batch write the updates
 	if len(updates) > 0 {
