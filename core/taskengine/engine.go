@@ -348,7 +348,7 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 	if listErr != nil && listErr != badger.ErrKeyNotFound {
 		n.logger.Error("Error fetching wallets by owner prefix for ListWallets", "owner", owner.Hex(), "error", listErr)
 		if len(walletsToReturnProto) == 0 {
-			return nil, status.Errorf(codes.Code(avsproto.Error_StorageUnavailable), "Error fetching wallets by owner: %v", listErr)
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), "Error fetching wallets by owner: %v", listErr)
 		}
 	}
 
@@ -438,7 +438,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 
 	if err != nil && err != badger.ErrKeyNotFound {
 		n.logger.Error("Error fetching wallet from DB for GetWallet", "owner", user.Address.Hex(), "wallet", derivedSenderAddress.Hex(), "error", err)
-		return nil, status.Errorf(codes.Code(avsproto.Error_StorageUnavailable), "Error fetching wallet: %v", err)
+		return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), "Error fetching wallet: %v", err)
 	}
 
 	if err == badger.ErrKeyNotFound {
@@ -452,7 +452,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		}
 		if storeErr := StoreWallet(n.db, user.Address, newModelWallet); storeErr != nil {
 			n.logger.Error("Error storing new wallet to DB for GetWallet", "owner", user.Address.Hex(), "walletAddress", derivedSenderAddress.Hex(), "error", storeErr)
-			return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), "Error storing new wallet: %v", storeErr)
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_WRITE_ERROR), "Error storing new wallet: %v", storeErr)
 		}
 		dbModelWallet = newModelWallet
 	}
@@ -1477,7 +1477,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 
 	taskKeys, err := n.db.ListKeysMulti(prefixes)
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
 	}
 
 	// second, do the sort, this is key sorted by ordering of their insertion
@@ -1519,7 +1519,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		taskID := string(model.TaskKeyToId(([]byte(key[2:]))))
 		statusValue, err := n.db.GetKey([]byte(key))
 		if err != nil {
-			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
+			return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
 		}
 		status, _ := strconv.Atoi(string(statusValue))
 
@@ -1616,7 +1616,7 @@ func (n *Engine) GetTaskByID(taskID string) (*model.Task, error) {
 				return task, nil
 			}
 
-			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), TaskStorageCorruptedError)
+			return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
 		}
 	}
 
@@ -2013,7 +2013,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	})
 
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
 	}
 
 	executioResp := &avsproto.ListExecutionsResp{
@@ -2134,7 +2134,7 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 	exec := &avsproto.Execution{}
 	err = protojson.Unmarshal(rawExecution, exec)
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), TaskStorageCorruptedError)
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
 	}
 
 	// No longer need trigger type at execution level - it's in the first step
@@ -2153,7 +2153,7 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 		exec := &avsproto.Execution{}
 		err = protojson.Unmarshal(rawExecution, exec)
 		if err != nil {
-			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), TaskStorageCorruptedError)
+			return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
 		}
 
 		if exec.Success {

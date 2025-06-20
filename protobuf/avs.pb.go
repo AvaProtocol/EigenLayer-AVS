@@ -202,76 +202,171 @@ func (Lang) EnumDescriptor() ([]byte, []int) {
 // gRPC internal error code use up to 17, we extend and start from 1000 to avoid any conflict
 // Guide: https://grpc.io/docs/guides/error/
 // Go: https://github.com/grpc/grpc-go/blob/master/codes/codes.go#L199
-type Error int32
+// Unified error codes for client-server communication
+// Maps to standard gRPC status codes where applicable, but provides domain-specific error details
+type ErrorCode int32
 
 const (
-	// An error that happen when the app can be recovered but the cause is unknow, rarely use, we try to use specific error as much as we can
-	Error_UnknowError Error = 0
-	// internal rpc node error
-	Error_RpcNodeError Error = 1000
-	// storage system isn't available to respond to query
-	Error_StorageUnavailable Error = 2000
-	Error_StorageWriteError  Error = 2001
-	// target chain of smart wallet is error and cannot used to determine smartwallet info
-	Error_SmartWalletRpcError      Error = 6000
-	Error_SmartWalletNotFoundError Error = 6001
-	// Error occurs when we failed to migrate task data and it cannot be decode
-	Error_TaskDataCorrupted    Error = 7000
-	Error_TaskDataMissingError Error = 7001
-	// Trigger Task failed
-	Error_TaskTriggerError Error = 7003
+	// Standard success - no error
+	ErrorCode_ERROR_CODE_UNSPECIFIED ErrorCode = 0
+	// 1000-1999: Authentication and Authorization errors
+	ErrorCode_UNAUTHORIZED      ErrorCode = 1000 // Invalid or missing authentication
+	ErrorCode_FORBIDDEN         ErrorCode = 1001 // Insufficient permissions
+	ErrorCode_INVALID_SIGNATURE ErrorCode = 1002 // Signature verification failed
+	ErrorCode_EXPIRED_TOKEN     ErrorCode = 1003 // Auth token has expired
+	// 2000-2999: Resource Not Found errors
+	ErrorCode_TASK_NOT_FOUND           ErrorCode = 2000 // Task/workflow not found
+	ErrorCode_EXECUTION_NOT_FOUND      ErrorCode = 2001 // Execution not found
+	ErrorCode_WALLET_NOT_FOUND         ErrorCode = 2002 // Smart wallet not found
+	ErrorCode_SECRET_NOT_FOUND         ErrorCode = 2003 // Secret not found
+	ErrorCode_TOKEN_METADATA_NOT_FOUND ErrorCode = 2004 // Token metadata not found
+	// 3000-3999: Validation and Bad Request errors
+	ErrorCode_INVALID_REQUEST          ErrorCode = 3000 // General request validation failed
+	ErrorCode_INVALID_TRIGGER_CONFIG   ErrorCode = 3001 // Trigger configuration is invalid
+	ErrorCode_INVALID_NODE_CONFIG      ErrorCode = 3002 // Node configuration is invalid
+	ErrorCode_INVALID_WORKFLOW         ErrorCode = 3003 // Workflow structure is invalid
+	ErrorCode_INVALID_ADDRESS          ErrorCode = 3004 // Blockchain address format invalid
+	ErrorCode_INVALID_SIGNATURE_FORMAT ErrorCode = 3005 // Signature format invalid
+	ErrorCode_MISSING_REQUIRED_FIELD   ErrorCode = 3006 // Required field is missing
+	// 4000-4999: Resource State errors
+	ErrorCode_TASK_ALREADY_EXISTS    ErrorCode = 4000 // Task with same ID already exists
+	ErrorCode_TASK_ALREADY_COMPLETED ErrorCode = 4001 // Cannot modify completed task
+	ErrorCode_TASK_ALREADY_CANCELLED ErrorCode = 4002 // Cannot modify cancelled task
+	ErrorCode_EXECUTION_IN_PROGRESS  ErrorCode = 4003 // Operation not allowed during execution
+	ErrorCode_WALLET_ALREADY_EXISTS  ErrorCode = 4004 // Wallet already exists for salt
+	ErrorCode_SECRET_ALREADY_EXISTS  ErrorCode = 4005 // Secret with same name exists
+	// 5000-5999: External Service errors
+	ErrorCode_RPC_NODE_ERROR     ErrorCode = 5000 // Blockchain RPC node error
+	ErrorCode_TENDERLY_API_ERROR ErrorCode = 5001 // Tenderly simulation error
+	ErrorCode_TOKEN_LOOKUP_ERROR ErrorCode = 5002 // Token metadata lookup failed
+	ErrorCode_SIMULATION_ERROR   ErrorCode = 5003 // Workflow simulation failed
+	// 6000-6999: Internal System errors
+	ErrorCode_STORAGE_UNAVAILABLE    ErrorCode = 6000 // Database/storage system unavailable
+	ErrorCode_STORAGE_WRITE_ERROR    ErrorCode = 6001 // Failed to write to storage
+	ErrorCode_STORAGE_READ_ERROR     ErrorCode = 6002 // Failed to read from storage
+	ErrorCode_TASK_DATA_CORRUPTED    ErrorCode = 6003 // Task data cannot be decoded
+	ErrorCode_EXECUTION_ENGINE_ERROR ErrorCode = 6004 // Task execution engine error
+	// 7000-7999: Rate Limiting and Quota errors
+	ErrorCode_RATE_LIMIT_EXCEEDED ErrorCode = 7000 // API rate limit exceeded
+	ErrorCode_QUOTA_EXCEEDED      ErrorCode = 7001 // User quota exceeded
+	ErrorCode_TOO_MANY_REQUESTS   ErrorCode = 7002 // Too many concurrent requests
+	// 8000-8999: Smart Wallet specific errors
+	ErrorCode_SMART_WALLET_RPC_ERROR        ErrorCode = 8000 // Smart wallet RPC call failed
+	ErrorCode_SMART_WALLET_NOT_FOUND        ErrorCode = 8001 // Smart wallet address not found
+	ErrorCode_SMART_WALLET_DEPLOYMENT_ERROR ErrorCode = 8002 // Failed to deploy smart wallet
+	ErrorCode_INSUFFICIENT_BALANCE          ErrorCode = 8003 // Insufficient balance for operation
 )
 
-// Enum value maps for Error.
+// Enum value maps for ErrorCode.
 var (
-	Error_name = map[int32]string{
-		0:    "UnknowError",
-		1000: "RpcNodeError",
-		2000: "StorageUnavailable",
-		2001: "StorageWriteError",
-		6000: "SmartWalletRpcError",
-		6001: "SmartWalletNotFoundError",
-		7000: "TaskDataCorrupted",
-		7001: "TaskDataMissingError",
-		7003: "TaskTriggerError",
+	ErrorCode_name = map[int32]string{
+		0:    "ERROR_CODE_UNSPECIFIED",
+		1000: "UNAUTHORIZED",
+		1001: "FORBIDDEN",
+		1002: "INVALID_SIGNATURE",
+		1003: "EXPIRED_TOKEN",
+		2000: "TASK_NOT_FOUND",
+		2001: "EXECUTION_NOT_FOUND",
+		2002: "WALLET_NOT_FOUND",
+		2003: "SECRET_NOT_FOUND",
+		2004: "TOKEN_METADATA_NOT_FOUND",
+		3000: "INVALID_REQUEST",
+		3001: "INVALID_TRIGGER_CONFIG",
+		3002: "INVALID_NODE_CONFIG",
+		3003: "INVALID_WORKFLOW",
+		3004: "INVALID_ADDRESS",
+		3005: "INVALID_SIGNATURE_FORMAT",
+		3006: "MISSING_REQUIRED_FIELD",
+		4000: "TASK_ALREADY_EXISTS",
+		4001: "TASK_ALREADY_COMPLETED",
+		4002: "TASK_ALREADY_CANCELLED",
+		4003: "EXECUTION_IN_PROGRESS",
+		4004: "WALLET_ALREADY_EXISTS",
+		4005: "SECRET_ALREADY_EXISTS",
+		5000: "RPC_NODE_ERROR",
+		5001: "TENDERLY_API_ERROR",
+		5002: "TOKEN_LOOKUP_ERROR",
+		5003: "SIMULATION_ERROR",
+		6000: "STORAGE_UNAVAILABLE",
+		6001: "STORAGE_WRITE_ERROR",
+		6002: "STORAGE_READ_ERROR",
+		6003: "TASK_DATA_CORRUPTED",
+		6004: "EXECUTION_ENGINE_ERROR",
+		7000: "RATE_LIMIT_EXCEEDED",
+		7001: "QUOTA_EXCEEDED",
+		7002: "TOO_MANY_REQUESTS",
+		8000: "SMART_WALLET_RPC_ERROR",
+		8001: "SMART_WALLET_NOT_FOUND",
+		8002: "SMART_WALLET_DEPLOYMENT_ERROR",
+		8003: "INSUFFICIENT_BALANCE",
 	}
-	Error_value = map[string]int32{
-		"UnknowError":              0,
-		"RpcNodeError":             1000,
-		"StorageUnavailable":       2000,
-		"StorageWriteError":        2001,
-		"SmartWalletRpcError":      6000,
-		"SmartWalletNotFoundError": 6001,
-		"TaskDataCorrupted":        7000,
-		"TaskDataMissingError":     7001,
-		"TaskTriggerError":         7003,
+	ErrorCode_value = map[string]int32{
+		"ERROR_CODE_UNSPECIFIED":        0,
+		"UNAUTHORIZED":                  1000,
+		"FORBIDDEN":                     1001,
+		"INVALID_SIGNATURE":             1002,
+		"EXPIRED_TOKEN":                 1003,
+		"TASK_NOT_FOUND":                2000,
+		"EXECUTION_NOT_FOUND":           2001,
+		"WALLET_NOT_FOUND":              2002,
+		"SECRET_NOT_FOUND":              2003,
+		"TOKEN_METADATA_NOT_FOUND":      2004,
+		"INVALID_REQUEST":               3000,
+		"INVALID_TRIGGER_CONFIG":        3001,
+		"INVALID_NODE_CONFIG":           3002,
+		"INVALID_WORKFLOW":              3003,
+		"INVALID_ADDRESS":               3004,
+		"INVALID_SIGNATURE_FORMAT":      3005,
+		"MISSING_REQUIRED_FIELD":        3006,
+		"TASK_ALREADY_EXISTS":           4000,
+		"TASK_ALREADY_COMPLETED":        4001,
+		"TASK_ALREADY_CANCELLED":        4002,
+		"EXECUTION_IN_PROGRESS":         4003,
+		"WALLET_ALREADY_EXISTS":         4004,
+		"SECRET_ALREADY_EXISTS":         4005,
+		"RPC_NODE_ERROR":                5000,
+		"TENDERLY_API_ERROR":            5001,
+		"TOKEN_LOOKUP_ERROR":            5002,
+		"SIMULATION_ERROR":              5003,
+		"STORAGE_UNAVAILABLE":           6000,
+		"STORAGE_WRITE_ERROR":           6001,
+		"STORAGE_READ_ERROR":            6002,
+		"TASK_DATA_CORRUPTED":           6003,
+		"EXECUTION_ENGINE_ERROR":        6004,
+		"RATE_LIMIT_EXCEEDED":           7000,
+		"QUOTA_EXCEEDED":                7001,
+		"TOO_MANY_REQUESTS":             7002,
+		"SMART_WALLET_RPC_ERROR":        8000,
+		"SMART_WALLET_NOT_FOUND":        8001,
+		"SMART_WALLET_DEPLOYMENT_ERROR": 8002,
+		"INSUFFICIENT_BALANCE":          8003,
 	}
 )
 
-func (x Error) Enum() *Error {
-	p := new(Error)
+func (x ErrorCode) Enum() *ErrorCode {
+	p := new(ErrorCode)
 	*p = x
 	return p
 }
 
-func (x Error) String() string {
+func (x ErrorCode) String() string {
 	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
 }
 
-func (Error) Descriptor() protoreflect.EnumDescriptor {
+func (ErrorCode) Descriptor() protoreflect.EnumDescriptor {
 	return file_avs_proto_enumTypes[3].Descriptor()
 }
 
-func (Error) Type() protoreflect.EnumType {
+func (ErrorCode) Type() protoreflect.EnumType {
 	return &file_avs_proto_enumTypes[3]
 }
 
-func (x Error) Number() protoreflect.EnumNumber {
+func (x ErrorCode) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use Error.Descriptor instead.
-func (Error) EnumDescriptor() ([]byte, []int) {
+// Deprecated: Use ErrorCode.Descriptor instead.
+func (ErrorCode) EnumDescriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{3}
 }
 
@@ -8260,17 +8355,47 @@ const file_avs_proto_rawDesc = "" +
 	"\x0eNODE_TYPE_LOOP\x10\t*\x16\n" +
 	"\x04Lang\x12\x0e\n" +
 	"\n" +
-	"JavaScript\x10\x00*\xdf\x01\n" +
-	"\x05Error\x12\x0f\n" +
-	"\vUnknowError\x10\x00\x12\x11\n" +
-	"\fRpcNodeError\x10\xe8\a\x12\x17\n" +
-	"\x12StorageUnavailable\x10\xd0\x0f\x12\x16\n" +
-	"\x11StorageWriteError\x10\xd1\x0f\x12\x18\n" +
-	"\x13SmartWalletRpcError\x10\xf0.\x12\x1d\n" +
-	"\x18SmartWalletNotFoundError\x10\xf1.\x12\x16\n" +
-	"\x11TaskDataCorrupted\x10\xd86\x12\x19\n" +
-	"\x14TaskDataMissingError\x10\xd96\x12\x15\n" +
-	"\x10TaskTriggerError\x10\xdb6*P\n" +
+	"JavaScript\x10\x00*\xf2\a\n" +
+	"\tErrorCode\x12\x1a\n" +
+	"\x16ERROR_CODE_UNSPECIFIED\x10\x00\x12\x11\n" +
+	"\fUNAUTHORIZED\x10\xe8\a\x12\x0e\n" +
+	"\tFORBIDDEN\x10\xe9\a\x12\x16\n" +
+	"\x11INVALID_SIGNATURE\x10\xea\a\x12\x12\n" +
+	"\rEXPIRED_TOKEN\x10\xeb\a\x12\x13\n" +
+	"\x0eTASK_NOT_FOUND\x10\xd0\x0f\x12\x18\n" +
+	"\x13EXECUTION_NOT_FOUND\x10\xd1\x0f\x12\x15\n" +
+	"\x10WALLET_NOT_FOUND\x10\xd2\x0f\x12\x15\n" +
+	"\x10SECRET_NOT_FOUND\x10\xd3\x0f\x12\x1d\n" +
+	"\x18TOKEN_METADATA_NOT_FOUND\x10\xd4\x0f\x12\x14\n" +
+	"\x0fINVALID_REQUEST\x10\xb8\x17\x12\x1b\n" +
+	"\x16INVALID_TRIGGER_CONFIG\x10\xb9\x17\x12\x18\n" +
+	"\x13INVALID_NODE_CONFIG\x10\xba\x17\x12\x15\n" +
+	"\x10INVALID_WORKFLOW\x10\xbb\x17\x12\x14\n" +
+	"\x0fINVALID_ADDRESS\x10\xbc\x17\x12\x1d\n" +
+	"\x18INVALID_SIGNATURE_FORMAT\x10\xbd\x17\x12\x1b\n" +
+	"\x16MISSING_REQUIRED_FIELD\x10\xbe\x17\x12\x18\n" +
+	"\x13TASK_ALREADY_EXISTS\x10\xa0\x1f\x12\x1b\n" +
+	"\x16TASK_ALREADY_COMPLETED\x10\xa1\x1f\x12\x1b\n" +
+	"\x16TASK_ALREADY_CANCELLED\x10\xa2\x1f\x12\x1a\n" +
+	"\x15EXECUTION_IN_PROGRESS\x10\xa3\x1f\x12\x1a\n" +
+	"\x15WALLET_ALREADY_EXISTS\x10\xa4\x1f\x12\x1a\n" +
+	"\x15SECRET_ALREADY_EXISTS\x10\xa5\x1f\x12\x13\n" +
+	"\x0eRPC_NODE_ERROR\x10\x88'\x12\x17\n" +
+	"\x12TENDERLY_API_ERROR\x10\x89'\x12\x17\n" +
+	"\x12TOKEN_LOOKUP_ERROR\x10\x8a'\x12\x15\n" +
+	"\x10SIMULATION_ERROR\x10\x8b'\x12\x18\n" +
+	"\x13STORAGE_UNAVAILABLE\x10\xf0.\x12\x18\n" +
+	"\x13STORAGE_WRITE_ERROR\x10\xf1.\x12\x17\n" +
+	"\x12STORAGE_READ_ERROR\x10\xf2.\x12\x18\n" +
+	"\x13TASK_DATA_CORRUPTED\x10\xf3.\x12\x1b\n" +
+	"\x16EXECUTION_ENGINE_ERROR\x10\xf4.\x12\x18\n" +
+	"\x13RATE_LIMIT_EXCEEDED\x10\xd86\x12\x13\n" +
+	"\x0eQUOTA_EXCEEDED\x10\xd96\x12\x16\n" +
+	"\x11TOO_MANY_REQUESTS\x10\xda6\x12\x1b\n" +
+	"\x16SMART_WALLET_RPC_ERROR\x10\xc0>\x12\x1b\n" +
+	"\x16SMART_WALLET_NOT_FOUND\x10\xc1>\x12\"\n" +
+	"\x1dSMART_WALLET_DEPLOYMENT_ERROR\x10\xc2>\x12\x19\n" +
+	"\x14INSUFFICIENT_BALANCE\x10\xc3>*P\n" +
 	"\n" +
 	"TaskStatus\x12\n" +
 	"\n" +
@@ -8337,7 +8462,7 @@ var file_avs_proto_goTypes = []any{
 	(TriggerType)(0),                                      // 0: aggregator.TriggerType
 	(NodeType)(0),                                         // 1: aggregator.NodeType
 	(Lang)(0),                                             // 2: aggregator.Lang
-	(Error)(0),                                            // 3: aggregator.Error
+	(ErrorCode)(0),                                        // 3: aggregator.ErrorCode
 	(TaskStatus)(0),                                       // 4: aggregator.TaskStatus
 	(ExecutionStatus)(0),                                  // 5: aggregator.ExecutionStatus
 	(*TokenMetadata)(nil),                                 // 6: aggregator.TokenMetadata
