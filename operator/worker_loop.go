@@ -425,9 +425,9 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 
 // StreamMessages setup a streaming connection to receive task from server
 func (o *Operator) StreamMessages() {
-	o.logger.Info("🚀 DEBUG: StreamMessages started - SEGFAULT_FIX_v3.0 - Complete Protection",
+	o.logger.Info("🚀 DEBUG: StreamMessages started - SEGFAULT_FIX_v4.0 - Deep Protection",
 		"timestamp", time.Now().Format(time.RFC3339),
-		"fix_version", "v3.0")
+		"fix_version", "v4.0")
 
 	id := hex.EncodeToString(o.operatorId[:])
 	ctx := context.Background()
@@ -653,7 +653,25 @@ func (o *Operator) StreamMessages() {
 					} else if blockTrigger != nil {
 						// Cast blockTrigger back to proper type for accessing Config
 						if trigger, ok := blockTrigger.(*avspb.BlockTrigger); ok {
-							o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id, "interval", trigger.Config.Interval)
+							// Safely access Config with panic recovery
+							var intervalInfo interface{} = "unknown"
+							func() {
+								defer func() {
+									if r := recover(); r != nil {
+										o.logger.Error("🚨 CRITICAL: trigger.Config access caused segmentation fault",
+											"task_id", resp.Id,
+											"panic", r,
+											"solution", "BlockTrigger.Config is corrupted")
+										intervalInfo = "corrupted"
+									}
+								}()
+								if trigger.Config != nil {
+									intervalInfo = trigger.Config.Interval
+								} else {
+									intervalInfo = "nil_config"
+								}
+							}()
+							o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id, "interval", intervalInfo)
 						} else {
 							o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id)
 						}
@@ -700,8 +718,25 @@ func (o *Operator) StreamMessages() {
 						} else if cronTrigger != nil {
 							// Cast cronTrigger back to proper type for accessing Config
 							if trigger, ok := cronTrigger.(*avspb.CronTrigger); ok {
-								scheduleStr := strings.Join(trigger.Config.Schedules, ", ")
-								o.logger.Info("⏰ Monitoring cron trigger", "task_id", resp.Id, "schedule", scheduleStr)
+								// Safely access Config with panic recovery
+								var scheduleInfo interface{} = "unknown"
+								func() {
+									defer func() {
+										if r := recover(); r != nil {
+											o.logger.Error("🚨 CRITICAL: trigger.Config access caused segmentation fault",
+												"task_id", resp.Id,
+												"panic", r,
+												"solution", "CronTrigger.Config is corrupted")
+											scheduleInfo = "corrupted"
+										}
+									}()
+									if trigger.Config != nil && trigger.Config.Schedules != nil {
+										scheduleInfo = strings.Join(trigger.Config.Schedules, ", ")
+									} else {
+										scheduleInfo = "nil_config"
+									}
+								}()
+								o.logger.Info("⏰ Monitoring cron trigger", "task_id", resp.Id, "schedule", scheduleInfo)
 							} else {
 								o.logger.Info("⏰ Monitoring cron trigger", "task_id", resp.Id)
 							}
@@ -748,13 +783,29 @@ func (o *Operator) StreamMessages() {
 							} else if fixedTimeTrigger != nil {
 								// Cast fixedTimeTrigger back to proper type for accessing Config
 								if trigger, ok := fixedTimeTrigger.(*avspb.FixedTimeTrigger); ok {
-									epochCount := len(trigger.Config.Epochs)
-									var epochInfo string
-									if epochCount == 1 {
-										epochInfo = fmt.Sprintf("epoch: %d", trigger.Config.Epochs[0])
-									} else {
-										epochInfo = fmt.Sprintf("%d epochs", epochCount)
-									}
+									// Safely access Config with panic recovery
+									var epochInfo interface{} = "unknown"
+									func() {
+										defer func() {
+											if r := recover(); r != nil {
+												o.logger.Error("🚨 CRITICAL: trigger.Config access caused segmentation fault",
+													"task_id", resp.Id,
+													"panic", r,
+													"solution", "FixedTimeTrigger.Config is corrupted")
+												epochInfo = "corrupted"
+											}
+										}()
+										if trigger.Config != nil && trigger.Config.Epochs != nil {
+											epochCount := len(trigger.Config.Epochs)
+											if epochCount == 1 {
+												epochInfo = fmt.Sprintf("epoch: %d", trigger.Config.Epochs[0])
+											} else {
+												epochInfo = fmt.Sprintf("%d epochs", epochCount)
+											}
+										} else {
+											epochInfo = "nil_config"
+										}
+									}()
 									o.logger.Info("📅 Monitoring fixed time trigger", "task_id", resp.Id, "epoch_info", epochInfo)
 								} else {
 									o.logger.Info("📅 Monitoring fixed time trigger", "task_id", resp.Id)
