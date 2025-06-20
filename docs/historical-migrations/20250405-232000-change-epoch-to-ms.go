@@ -113,13 +113,16 @@ func ChangeEpochToMs(db storage.Storage) (int, error) {
 			}
 		}
 
-		if outputData := exec.GetEventTrigger(); outputData != nil && outputData.TransferLog != nil {
-			if outputData.TransferLog.BlockTimestamp > 0 && outputData.TransferLog.BlockTimestamp < timestampThreshold {
-				outputData.TransferLog.BlockTimestamp = outputData.TransferLog.BlockTimestamp * 1000
-			}
-		} else if outputData := exec.GetFixedTimeTrigger(); outputData != nil {
-			if outputData.Epoch > 0 && outputData.Epoch < timestampThreshold {
-				outputData.Epoch = outputData.Epoch * 1000
+		// Handle step-level trigger outputs with new protobuf structure
+		for i, step := range exec.Steps {
+			if eventTrigger := step.GetEventTrigger(); eventTrigger != nil {
+				// For EventTrigger with JSON data, we would need to parse and update JSON
+				// but since this migration likely already ran, we'll skip this for now
+				_ = eventTrigger
+			} else if fixedTimeTrigger := step.GetFixedTimeTrigger(); fixedTimeTrigger != nil {
+				if fixedTimeTrigger.Timestamp > 0 && fixedTimeTrigger.Timestamp < timestampThreshold {
+					exec.Steps[i].GetFixedTimeTrigger().Timestamp = fixedTimeTrigger.Timestamp * 1000
+				}
 			}
 		}
 

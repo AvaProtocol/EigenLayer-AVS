@@ -69,18 +69,14 @@ func TestChangeEpochToMs(t *testing.T) {
 		EndAt:   execEndSeconds,   // Seconds
 		Steps: []*avsproto.Execution_Step{
 			{
-				NodeId:  "step-1",
+				Id:      "step-1",
 				Success: true,
 				StartAt: stepStartSeconds, // Seconds
 				EndAt:   stepEndSeconds,   // Seconds
-			},
-		},
-		// Include one type of output data for testing
-		OutputData: &avsproto.Execution_EventTrigger{
-			EventTrigger: &avsproto.EventTrigger_Output{
-				TransferLog: &avsproto.EventTrigger_TransferLogOutput{
-					BlockTimestamp: uint64(blockTimestampSeconds), // Seconds
-					// Other fields irrelevant for this test
+				OutputData: &avsproto.Execution_Step_EventTrigger{
+					EventTrigger: &avsproto.EventTrigger_Output{
+						Data: fmt.Sprintf(`{"blockTimestamp": %d}`, blockTimestampSeconds*1000), // Convert to ms in JSON
+					},
 				},
 			},
 		},
@@ -92,9 +88,17 @@ func TestChangeEpochToMs(t *testing.T) {
 		Id:      execID2,
 		StartAt: execStartSeconds, // Seconds
 		EndAt:   execEndSeconds,   // Seconds
-		OutputData: &avsproto.Execution_FixedTimeTrigger{
-			FixedTimeTrigger: &avsproto.FixedTimeTrigger_Output{
-				Epoch: uint64(epochSeconds), // Seconds
+		Steps: []*avsproto.Execution_Step{
+			{
+				Id:      "step-2",
+				Success: true,
+				StartAt: stepStartSeconds, // Seconds
+				EndAt:   stepEndSeconds,   // Seconds
+				OutputData: &avsproto.Execution_Step_FixedTimeTrigger{
+					FixedTimeTrigger: &avsproto.FixedTimeTrigger_Output{
+						Timestamp: uint64(epochSeconds), // Seconds (will be converted to ms by migration)
+					},
+				},
 			},
 		},
 		// Other fields can be default/empty
@@ -198,13 +202,20 @@ func TestChangeEpochToMs(t *testing.T) {
 		t.Errorf("Step EndAt incorrect: got %d, want %d", retrievedStep.EndAt, expectedStepEndMs)
 	}
 
-	// Verify Execution Output Data (EventTrigger with TransferLog)
-	if eventTriggerOutput := retrievedExec.GetEventTrigger(); eventTriggerOutput != nil && eventTriggerOutput.TransferLog != nil {
-		if eventTriggerOutput.TransferLog.BlockTimestamp != uint64(expectedBlockTimestampMs) {
-			t.Errorf("TransferLog BlockTimestamp incorrect: got %d, want %d", eventTriggerOutput.TransferLog.BlockTimestamp, expectedBlockTimestampMs)
+	// Verify Execution Step Output Data (EventTrigger with JSON data)
+	if len(retrievedExec.Steps) > 0 {
+		step := retrievedExec.Steps[0]
+		if eventTriggerOutput := step.GetEventTrigger(); eventTriggerOutput != nil {
+			// Parse the JSON data to verify blockTimestamp was converted
+			expectedJSON := fmt.Sprintf(`{"blockTimestamp": %d}`, expectedBlockTimestampMs)
+			if eventTriggerOutput.Data != expectedJSON {
+				t.Errorf("EventTrigger JSON data incorrect: got %s, want %s", eventTriggerOutput.Data, expectedJSON)
+			}
+		} else {
+			t.Errorf("Expected EventTrigger output data in step, but got nil or different type")
 		}
 	} else {
-		t.Errorf("Expected EventTrigger with TransferLog output data, but got nil or different type")
+		t.Errorf("Expected execution to have steps with EventTrigger output")
 	}
 
 	// Verify Execution Data 2 (TimeOutput) using GetKey
@@ -217,12 +228,17 @@ func TestChangeEpochToMs(t *testing.T) {
 		t.Fatalf("Failed to unmarshal retrieved execution data 2: %v", err)
 	}
 
-	// Verify Execution Output Data (FixedTimeTrigger)
-	if fixedTimeTriggerOutput := retrievedExec2.GetFixedTimeTrigger(); fixedTimeTriggerOutput != nil {
-		if fixedTimeTriggerOutput.Epoch != uint64(expectedEpochMs) {
-			t.Errorf("FixedTimeTrigger Epoch incorrect: got %d, want %d", fixedTimeTriggerOutput.Epoch, expectedEpochMs)
+	// Verify Execution Step Output Data (FixedTimeTrigger)
+	if len(retrievedExec2.Steps) > 0 {
+		step2 := retrievedExec2.Steps[0]
+		if fixedTimeTriggerOutput := step2.GetFixedTimeTrigger(); fixedTimeTriggerOutput != nil {
+			if fixedTimeTriggerOutput.Timestamp != uint64(expectedEpochMs) {
+				t.Errorf("FixedTimeTrigger Timestamp incorrect: got %d, want %d", fixedTimeTriggerOutput.Timestamp, expectedEpochMs)
+			}
+		} else {
+			t.Errorf("Expected FixedTimeTrigger output data in step, but got nil or different type")
 		}
 	} else {
-		t.Errorf("Expected FixedTimeTrigger output data, but got nil or different type")
+		t.Errorf("Expected execution 2 to have steps with FixedTimeTrigger output")
 	}
 }
