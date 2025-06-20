@@ -697,14 +697,14 @@ func (t *EventTrigger) logMatchesEventQuery(log types.Log, query *avsproto.Event
 	// NEW: Evaluate conditional filtering if conditions are provided
 	conditions := query.GetConditions()
 	if len(conditions) > 0 {
-		return t.evaluateEventConditions(log, query)
+		return t.evaluateEventConditions(log, query, conditions)
 	}
 
 	return true
 }
 
 // evaluateEventConditions checks if a log matches the provided ABI-based conditions
-func (t *EventTrigger) evaluateEventConditions(log types.Log, query *avsproto.EventTrigger_Query) bool {
+func (t *EventTrigger) evaluateEventConditions(log types.Log, query *avsproto.EventTrigger_Query, conditions []*avsproto.EventCondition) bool {
 	abiString := query.GetContractAbi()
 	if abiString == "" {
 		t.logger.Warn("🚫 Conditional filtering requires contract ABI but none provided")
@@ -782,7 +782,6 @@ func (t *EventTrigger) evaluateEventConditions(log types.Log, query *avsproto.Ev
 	}
 
 	// Evaluate all conditions (AND logic - all must pass)
-	conditions := query.GetConditions()
 	for i, condition := range conditions {
 		if !t.evaluateCondition(fieldMap, condition, eventName) {
 			t.logger.Debug("🚫 Condition failed",
