@@ -1149,10 +1149,20 @@ func (n *Engine) sendBatchedNotifications() {
 					resp := avsproto.SyncMessagesResp{
 						Id: notification.TaskID,
 						Op: notification.Operation,
-						TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
-							TaskId: notification.TaskID,
-						},
 					}
+
+					// Only include TaskMetadata for MonitorTaskTrigger operations
+					// For other operations (CancelTask, DeleteTask), TaskMetadata is not needed
+					// and sending incomplete TaskMetadata causes nil pointer issues in operators
+					if notification.Operation == avsproto.MessageOp_MonitorTaskTrigger {
+						// For MonitorTaskTrigger, we would need complete task data
+						// But batched notifications are typically for Cancel/Delete operations
+						// If we ever need to batch MonitorTaskTrigger, we should fetch full task data
+						n.logger.Warn("MonitorTaskTrigger should not be sent via batched notifications",
+							"task_id", notification.TaskID,
+							"operation", notification.Operation.String())
+					}
+					// Note: TaskMetadata is intentionally nil for Cancel/Delete operations
 
 					// Use timeout for each individual notification
 					done := make(chan error, 1)

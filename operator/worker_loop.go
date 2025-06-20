@@ -571,6 +571,22 @@ func (o *Operator) StreamMessages() {
 			case avspb.MessageOp_CancelTask, avspb.MessageOp_DeleteTask:
 				o.processMessage(resp)
 			case avspb.MessageOp_MonitorTaskTrigger:
+				// Add nil check to prevent segmentation fault
+				if resp.TaskMetadata == nil {
+					o.logger.Warn("❌ Received MonitorTaskTrigger message with nil TaskMetadata",
+						"task_id", resp.Id,
+						"solution", "This may indicate a protocol mismatch or aggregator issue")
+					continue
+				}
+
+				// Additional nil check for Trigger field
+				if resp.TaskMetadata.Trigger == nil {
+					o.logger.Warn("❌ Received MonitorTaskTrigger message with nil Trigger",
+						"task_id", resp.Id,
+						"solution", "This may indicate a protocol mismatch or aggregator issue")
+					continue
+				}
+
 				if trigger := resp.TaskMetadata.GetTrigger().GetEvent(); trigger != nil {
 					o.logger.Info("📥 Monitoring event trigger", "task_id", resp.Id)
 					if err := o.eventTrigger.AddCheck(resp.TaskMetadata); err != nil {
@@ -599,6 +615,11 @@ func (o *Operator) StreamMessages() {
 					if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Info("❌ Failed to add fixed time trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for scheduled execution")
 					}
+				} else {
+					o.logger.Warn("❌ Received MonitorTaskTrigger message with unsupported or missing trigger",
+						"task_id", resp.Id,
+						"trigger_type", resp.TaskMetadata.Trigger.GetType(),
+						"solution", "Check if trigger type is supported by this operator version")
 				}
 			}
 		}
