@@ -175,6 +175,12 @@ message EventTrigger {
     // Maximum number of events this query should process per block/time window
     // Used for safety - if exceeded, operator notifies aggregator to cancel task
     optional uint32 max_events_per_block = 3;
+    
+    // Contract ABI JSON string for decoding event data (client-provided)
+    string contract_abi = 4;
+    
+    // Event conditions to evaluate on decoded event data
+    repeated EventCondition conditions = 5;
   }
   
   // Topics represents a single topic position filter (e.g., topic[0], topic[1], etc.)
@@ -1165,4 +1171,12 @@ message SimulateTaskReq {
   repeated TaskNode nodes = 2; // All workflow nodes
   repeated TaskEdge edges = 3; // All edges connecting the nodes
   map<string, google.protobuf.Value> input_variables = 6; // Input variables for the simulation
+}
+
+// EventCondition represents a condition to evaluate on decoded event data
+message EventCondition {
+  string field_name = 1;        // Event field name (e.g., "answer", "roundId")
+  string operator = 2;          // Comparison operator: "gt", "gte", "lt", "lte", "eq", "ne"
+  string value = 3;             // Value to compare against (as string, parsed based on type)
+  string field_type = 4;        // Field type: "uint256", "int256", "address", "bool", "bytes32", etc.
 }

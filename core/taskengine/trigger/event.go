@@ -3,6 +3,7 @@ package trigger
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"sort"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 )
 
 var (
@@ -32,6 +34,8 @@ type EventMark struct {
 type Check struct {
 	TaskMetadata *avsproto.SyncMessagesResp_TaskMetadata
 	Queries      []*avsproto.EventTrigger_Query
+	// Cache parsed ABIs for conditional filtering to avoid repeated JSON parsing
+	ParsedABIs map[int]*abi.ABI // queryIndex -> parsed ABI
 }
 
 // QueryInfo contains a filter query with safety and debugging information
@@ -142,6 +146,34 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 	c := &Check{
 		TaskMetadata: check,
 		Queries:      queries,
+		ParsedABIs:   make(map[int]*abi.ABI),
+	}
+
+	// Pre-parse ABIs for queries that have conditions to avoid repeated parsing
+	for i, query := range queries {
+		conditions := query.GetConditions()
+		if len(conditions) > 0 {
+			abiString := query.GetContractAbi()
+			if abiString != "" {
+				if parsedABI, err := abi.JSON(strings.NewReader(abiString)); err != nil {
+					t.logger.Warn("🚫 Failed to pre-parse ABI for conditional filtering - will skip conditions",
+						"task_id", taskID,
+						"query_index", i,
+						"error", err)
+				} else {
+					c.ParsedABIs[i] = &parsedABI
+					t.logger.Debug("✅ Pre-parsed ABI for conditional filtering",
+						"task_id", taskID,
+						"query_index", i,
+						"conditions_count", len(conditions))
+				}
+			} else {
+				t.logger.Warn("🚫 Query has conditions but no contract ABI provided",
+					"task_id", taskID,
+					"query_index", i,
+					"conditions_count", len(conditions))
+			}
+		}
 	}
 
 	t.checks.Store(taskID, c)
@@ -176,6 +208,16 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 }
 
 func (t *EventTrigger) RemoveCheck(id string) error {
+	// Clean up cached ABIs before removing the check
+	if checkValue, exists := t.checks.Load(id); exists {
+		if check, ok := checkValue.(*Check); ok {
+			// Clear cached ABIs to free memory
+			for queryIndex := range check.ParsedABIs {
+				delete(check.ParsedABIs, queryIndex)
+			}
+		}
+	}
+
 	t.checks.Delete(id)
 
 	// Clean up event counts for this task
@@ -467,7 +509,7 @@ func (t *EventTrigger) checkEventSafety(log types.Log) bool {
 
 			// Get safety limits for this task
 			if check, exists := t.checks.Load(matchingTaskID); exists {
-				checkObj := check.(*Check)
+				checkObj := check.(Check)
 				if queryIndex < len(checkObj.Queries) {
 					maxEventsPerBlock = checkObj.Queries[queryIndex].GetMaxEventsPerBlock()
 				}
@@ -599,9 +641,9 @@ func (t *EventTrigger) processLogInternal(log types.Log) error {
 	// Check all registered tasks to see which ones match this log
 	t.checks.Range(func(key any, value any) bool {
 		taskID := key.(string)
-		check := value.(*Check)
+		check := value.(Check)
 
-		if t.logMatchesTask(log, check) {
+		if t.logMatchesTask(log, &check) {
 			triggeredTasks = append(triggeredTasks, taskID)
 
 			// Send trigger notification
@@ -641,8 +683,8 @@ func (t *EventTrigger) processLogInternal(log types.Log) error {
 
 // logMatchesTask checks if a log matches any of the queries for a specific task
 func (t *EventTrigger) logMatchesTask(log types.Log, check *Check) bool {
-	for _, query := range check.Queries {
-		if t.logMatchesEventQuery(log, query) {
+	for i, query := range check.Queries {
+		if t.logMatchesEventQuery(log, query, check, i) {
 			return true
 		}
 	}
@@ -650,7 +692,7 @@ func (t *EventTrigger) logMatchesTask(log types.Log, check *Check) bool {
 }
 
 // logMatchesEventQuery checks if a log matches a specific EventTrigger_Query
-func (t *EventTrigger) logMatchesEventQuery(log types.Log, query *avsproto.EventTrigger_Query) bool {
+func (t *EventTrigger) logMatchesEventQuery(log types.Log, query *avsproto.EventTrigger_Query, check *Check, queryIndex int) bool {
 	// Check addresses
 	addresses := query.GetAddresses()
 	if len(addresses) > 0 {
@@ -692,7 +734,374 @@ func (t *EventTrigger) logMatchesEventQuery(log types.Log, query *avsproto.Event
 		}
 	}
 
+	// NEW: Evaluate conditional filtering if conditions are provided
+	conditions := query.GetConditions()
+	if len(conditions) > 0 {
+		return t.evaluateEventConditions(log, query, conditions, check, queryIndex)
+	}
+
 	return true
+}
+
+// evaluateEventConditions checks if a log matches the provided ABI-based conditions
+func (t *EventTrigger) evaluateEventConditions(log types.Log, query *avsproto.EventTrigger_Query, conditions []*avsproto.EventCondition, check *Check, queryIndex int) bool {
+	// Use cached ABI if available, otherwise parse it (fallback for backward compatibility)
+	var contractABI *abi.ABI
+	if cachedABI, exists := check.ParsedABIs[queryIndex]; exists && cachedABI != nil {
+		contractABI = cachedABI
+		t.logger.Debug("🚀 Using cached ABI for conditional filtering", "query_index", queryIndex)
+	} else {
+		// Fallback: parse ABI on-demand (this should rarely happen with the new caching)
+		abiString := query.GetContractAbi()
+		if abiString == "" {
+			t.logger.Warn("🚫 Conditional filtering requires contract ABI but none provided")
+			return false
+		}
+
+		parsedABI, err := abi.JSON(strings.NewReader(abiString))
+		if err != nil {
+			t.logger.Error("❌ Failed to parse contract ABI for conditional filtering", "error", err)
+			return false
+		}
+		contractABI = &parsedABI
+		t.logger.Debug("⚠️ Parsed ABI on-demand (consider pre-parsing for better performance)", "query_index", queryIndex)
+	}
+
+	// Find the matching event in ABI using the first topic (event signature)
+	if len(log.Topics) == 0 {
+		t.logger.Debug("🚫 Log has no topics, cannot match event signature")
+		return false
+	}
+
+	eventSignature := log.Topics[0]
+	var matchingEvent *abi.Event
+	var eventName string
+
+	for name, event := range contractABI.Events {
+		if event.ID == eventSignature {
+			matchingEvent = &event
+			eventName = name
+			break
+		}
+	}
+
+	if matchingEvent == nil {
+		t.logger.Debug("🚫 No matching event found in ABI for signature",
+			"signature", eventSignature.Hex())
+		return false
+	}
+
+	// Decode the event data
+	decodedData, err := contractABI.Unpack(eventName, log.Data)
+	if err != nil {
+		t.logger.Error("❌ Failed to decode event data",
+			"event", eventName,
+			"error", err)
+		return false
+	}
+
+	// Create field map for condition evaluation (includes both indexed and non-indexed fields)
+	fieldMap := make(map[string]interface{})
+
+	// Add indexed parameters from topics (skip topic[0] which is event signature)
+	indexedCount := 0
+	nonIndexedCount := 0
+
+	for _, input := range matchingEvent.Inputs {
+		if input.Indexed {
+			// Get from topics (topic[0] is signature, so indexed params start from topic[1])
+			topicIndex := indexedCount + 1
+			if topicIndex < len(log.Topics) {
+				fieldMap[input.Name] = log.Topics[topicIndex]
+				t.logger.Debug("🔍 Added indexed field from topic",
+					"field", input.Name,
+					"value", log.Topics[topicIndex].Hex())
+			}
+			indexedCount++
+		} else {
+			// Get from decoded data
+			if nonIndexedCount < len(decodedData) {
+				fieldMap[input.Name] = decodedData[nonIndexedCount]
+				t.logger.Debug("🔍 Added non-indexed field from data",
+					"field", input.Name,
+					"value", decodedData[nonIndexedCount])
+			}
+			nonIndexedCount++
+		}
+	}
+
+	// Evaluate all conditions (AND logic - all must pass)
+	for i, condition := range conditions {
+		if !t.evaluateCondition(fieldMap, condition, eventName) {
+			t.logger.Debug("🚫 Condition failed",
+				"condition_index", i,
+				"field", condition.GetFieldName(),
+				"operator", condition.GetOperator(),
+				"expected", condition.GetValue())
+			return false
+		}
+	}
+
+	t.logger.Info("✅ All conditions passed for event",
+		"event", eventName,
+		"conditions_count", len(conditions))
+	return true
+}
+
+// evaluateCondition evaluates a single condition against the decoded field data
+func (t *EventTrigger) evaluateCondition(fieldMap map[string]interface{}, condition *avsproto.EventCondition, eventName string) bool {
+	fieldName := condition.GetFieldName()
+	fieldValue, exists := fieldMap[fieldName]
+	if !exists {
+		t.logger.Warn("🚫 Field not found in decoded event data",
+			"field", fieldName,
+			"event", eventName,
+			"available_fields", getMapKeys(fieldMap))
+		return false
+	}
+
+	fieldType := condition.GetFieldType()
+	operator := condition.GetOperator()
+	expectedValue := condition.GetValue()
+
+	t.logger.Debug("🔍 Evaluating condition",
+		"field", fieldName,
+		"type", fieldType,
+		"operator", operator,
+		"field_value", fieldValue,
+		"expected", expectedValue)
+
+	switch fieldType {
+	case "uint256", "uint128", "uint64", "uint32", "uint16", "uint8":
+		return t.evaluateUintCondition(fieldValue, operator, expectedValue)
+	case "int256", "int128", "int64", "int32", "int16", "int8":
+		return t.evaluateIntCondition(fieldValue, operator, expectedValue)
+	case "address":
+		return t.evaluateAddressCondition(fieldValue, operator, expectedValue)
+	case "bool":
+		return t.evaluateBoolCondition(fieldValue, operator, expectedValue)
+	case "bytes32", "bytes":
+		return t.evaluateBytesCondition(fieldValue, operator, expectedValue)
+	default:
+		t.logger.Warn("🚫 Unsupported field type for condition evaluation",
+			"type", fieldType,
+			"field", fieldName)
+		return false
+	}
+}
+
+// evaluateUintCondition handles unsigned integer comparisons
+func (t *EventTrigger) evaluateUintCondition(fieldValue interface{}, operator, expectedValue string) bool {
+	// Convert field value to *big.Int
+	var fieldBigInt *big.Int
+	switch v := fieldValue.(type) {
+	case *big.Int:
+		fieldBigInt = v
+	case uint64:
+		fieldBigInt = new(big.Int).SetUint64(v)
+	case uint32:
+		fieldBigInt = new(big.Int).SetUint64(uint64(v))
+	case common.Hash:
+		fieldBigInt = new(big.Int).SetBytes(v.Bytes())
+	default:
+		t.logger.Error("❌ Cannot convert field value to big.Int",
+			"value", fieldValue,
+			"type", fmt.Sprintf("%T", fieldValue))
+		return false
+	}
+
+	// Parse expected value as big.Int
+	expectedBigInt, ok := new(big.Int).SetString(expectedValue, 10)
+	if !ok {
+		t.logger.Error("❌ Cannot parse expected value as big.Int", "value", expectedValue)
+		return false
+	}
+
+	// Perform comparison
+	switch operator {
+	case "gt":
+		return fieldBigInt.Cmp(expectedBigInt) > 0
+	case "gte":
+		return fieldBigInt.Cmp(expectedBigInt) >= 0
+	case "lt":
+		return fieldBigInt.Cmp(expectedBigInt) < 0
+	case "lte":
+		return fieldBigInt.Cmp(expectedBigInt) <= 0
+	case "eq":
+		return fieldBigInt.Cmp(expectedBigInt) == 0
+	case "ne":
+		return fieldBigInt.Cmp(expectedBigInt) != 0
+	default:
+		t.logger.Error("❌ Unsupported operator for uint condition", "operator", operator)
+		return false
+	}
+}
+
+// evaluateIntCondition handles signed integer comparisons with proper two's complement handling
+func (t *EventTrigger) evaluateIntCondition(fieldValue interface{}, operator, expectedValue string) bool {
+	// Convert field value to *big.Int with proper signed interpretation
+	var fieldBigInt *big.Int
+	switch v := fieldValue.(type) {
+	case *big.Int:
+		fieldBigInt = v
+	case int64:
+		fieldBigInt = big.NewInt(v)
+	case int32:
+		fieldBigInt = big.NewInt(int64(v))
+	case common.Hash:
+		// CRITICAL: Handle two's complement for signed integers
+		// For signed integers, we need to interpret the bytes as two's complement
+		fieldBigInt = new(big.Int).SetBytes(v.Bytes())
+
+		// Check if this should be interpreted as negative (two's complement)
+		// For int256, if the most significant bit is set, it's negative
+		if len(v.Bytes()) == 32 && v.Bytes()[0]&0x80 != 0 {
+			// This is a negative number in two's complement
+			// Convert from unsigned interpretation to signed by subtracting 2^256
+			maxInt256 := new(big.Int)
+			maxInt256.Exp(big.NewInt(2), big.NewInt(256), nil) // 2^256
+			fieldBigInt.Sub(fieldBigInt, maxInt256)
+
+			t.logger.Debug("🔄 Converted two's complement negative value",
+				"original_unsigned", new(big.Int).SetBytes(v.Bytes()).String(),
+				"corrected_signed", fieldBigInt.String(),
+				"hex", v.Hex())
+		}
+	default:
+		t.logger.Error("❌ Cannot convert field value to signed big.Int",
+			"value", fieldValue,
+			"type", fmt.Sprintf("%T", fieldValue))
+		return false
+	}
+
+	// Parse expected value as signed big.Int (supports negative values)
+	expectedBigInt, ok := new(big.Int).SetString(expectedValue, 10)
+	if !ok {
+		t.logger.Error("❌ Cannot parse expected value as signed big.Int", "value", expectedValue)
+		return false
+	}
+
+	t.logger.Debug("🔍 Signed integer comparison",
+		"field_value", fieldBigInt.String(),
+		"expected_value", expectedBigInt.String(),
+		"operator", operator)
+
+	// Perform comparison (same logic as unsigned, but with proper signed values)
+	switch operator {
+	case "gt":
+		return fieldBigInt.Cmp(expectedBigInt) > 0
+	case "gte":
+		return fieldBigInt.Cmp(expectedBigInt) >= 0
+	case "lt":
+		return fieldBigInt.Cmp(expectedBigInt) < 0
+	case "lte":
+		return fieldBigInt.Cmp(expectedBigInt) <= 0
+	case "eq":
+		return fieldBigInt.Cmp(expectedBigInt) == 0
+	case "ne":
+		return fieldBigInt.Cmp(expectedBigInt) != 0
+	default:
+		t.logger.Error("❌ Unsupported operator for signed int condition", "operator", operator)
+		return false
+	}
+}
+
+// evaluateAddressCondition handles address comparisons
+func (t *EventTrigger) evaluateAddressCondition(fieldValue interface{}, operator, expectedValue string) bool {
+	var fieldAddr common.Address
+	switch v := fieldValue.(type) {
+	case common.Address:
+		fieldAddr = v
+	case common.Hash:
+		fieldAddr = common.HexToAddress(v.Hex())
+	case string:
+		fieldAddr = common.HexToAddress(v)
+	default:
+		t.logger.Error("❌ Cannot convert field value to address",
+			"value", fieldValue,
+			"type", fmt.Sprintf("%T", fieldValue))
+		return false
+	}
+
+	expectedAddr := common.HexToAddress(expectedValue)
+
+	switch operator {
+	case "eq":
+		return fieldAddr == expectedAddr
+	case "ne":
+		return fieldAddr != expectedAddr
+	default:
+		t.logger.Error("❌ Unsupported operator for address condition", "operator", operator)
+		return false
+	}
+}
+
+// evaluateBoolCondition handles boolean comparisons
+func (t *EventTrigger) evaluateBoolCondition(fieldValue interface{}, operator, expectedValue string) bool {
+	fieldBool, ok := fieldValue.(bool)
+	if !ok {
+		t.logger.Error("❌ Field value is not boolean",
+			"value", fieldValue,
+			"type", fmt.Sprintf("%T", fieldValue))
+		return false
+	}
+
+	expectedBool := expectedValue == "true"
+
+	switch operator {
+	case "eq":
+		return fieldBool == expectedBool
+	case "ne":
+		return fieldBool != expectedBool
+	default:
+		t.logger.Error("❌ Unsupported operator for bool condition", "operator", operator)
+		return false
+	}
+}
+
+// evaluateBytesCondition handles bytes comparisons
+func (t *EventTrigger) evaluateBytesCondition(fieldValue interface{}, operator, expectedValue string) bool {
+	var fieldHex string
+	switch v := fieldValue.(type) {
+	case common.Hash:
+		fieldHex = v.Hex()
+	case []byte:
+		fieldHex = common.Bytes2Hex(v)
+	case string:
+		fieldHex = v
+	default:
+		t.logger.Error("❌ Cannot convert field value to hex string",
+			"value", fieldValue,
+			"type", fmt.Sprintf("%T", fieldValue))
+		return false
+	}
+
+	// Normalize hex strings (ensure they start with 0x)
+	if !strings.HasPrefix(fieldHex, "0x") {
+		fieldHex = "0x" + fieldHex
+	}
+	if !strings.HasPrefix(expectedValue, "0x") {
+		expectedValue = "0x" + expectedValue
+	}
+
+	switch operator {
+	case "eq":
+		return strings.EqualFold(fieldHex, expectedValue)
+	case "ne":
+		return !strings.EqualFold(fieldHex, expectedValue)
+	default:
+		t.logger.Error("❌ Unsupported operator for bytes condition", "operator", operator)
+		return false
+	}
+}
+
+// getMapKeys is a helper function to get map keys for debugging
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // buildFilterQueries converts all registered tasks into ethereum.FilterQuery objects
