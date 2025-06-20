@@ -261,6 +261,12 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	eigenMetrics := sdkmetrics.NewEigenMetrics(AVS_NAME, c.EigenMetricsIpPortAddress, reg, logger)
 	avsAndEigenMetrics := metrics.NewAvsAndEigenMetrics(AVS_NAME, strings.ToLower(c.OperatorAddress), version.Get(), eigenMetrics, reg)
 
+	// Validate that metrics was created successfully - this should never be nil in production
+	if avsAndEigenMetrics == nil {
+		logger.Errorf("❌ CRITICAL: Failed to create metrics - this indicates a serious initialization problem")
+		return nil, fmt.Errorf("failed to create metrics - this indicates a serious initialization problem")
+	}
+
 	// Setup Node Api
 	nodeApi := nodeapi.NewNodeApi(AVS_NAME, version.Get(), c.NodeApiIpPortAddress, logger)
 

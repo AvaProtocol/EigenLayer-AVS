@@ -128,6 +128,10 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		metricsErrChan = o.metrics.Start(ctx, o.metricsReg)
 	} else {
 		metricsErrChan = make(chan error, 1)
+		if o.config.EnableMetrics && o.metrics == nil {
+			o.logger.Error("🚨 CRITICAL: metrics is nil but EnableMetrics is true - this should never happen in production",
+				"solution", "This indicates a serious initialization problem that needs investigation")
+		}
 	}
 
 	rpcConfig := triggerengine.RpcOption{
@@ -570,9 +574,19 @@ func (o *Operator) StreamMessages() {
 				time.Sleep(time.Duration(retryIntervalSecond) * time.Second)
 				break
 			}
+			// Add nil check for resp to prevent segmentation fault
+			if resp == nil {
+				o.logger.Warn("❌ Received nil response from aggregator stream",
+					"solution", "This may indicate a protocol mismatch or aggregator issue")
+				continue
+			}
 			// Add nil check for metrics to prevent segmentation fault
 			if o.metrics != nil {
 				o.metrics.IncNumTasksReceived(resp.Id)
+			} else {
+				o.logger.Error("🚨 CRITICAL: metrics is nil in StreamMessages - this should never happen in production",
+					"task_id", resp.Id,
+					"solution", "This indicates a serious initialization problem that needs investigation")
 			}
 
 			switch resp.Op {
@@ -700,6 +714,9 @@ func (o *Operator) PingServer() {
 		o.metrics.IncWorkerLoop()
 		elapse := o.elapsing.Report()
 		o.metrics.AddUptime(float64(elapse.Milliseconds()))
+	} else {
+		o.logger.Error("🚨 CRITICAL: metrics is nil in PingServer - this should never happen in production",
+			"solution", "This indicates a serious initialization problem that needs investigation")
 	}
 
 	id := hex.EncodeToString(o.operatorId[:])
@@ -809,5 +826,8 @@ func (o *Operator) PingServer() {
 			// Duplicate logging here with different error types breaks the debounce logic
 		}
 		o.metrics.SetPingDuration(elapsed.Seconds())
+	} else {
+		o.logger.Error("🚨 CRITICAL: metrics is nil in PingServer end - this should never happen in production",
+			"solution", "This indicates a serious initialization problem that needs investigation")
 	}
 }
