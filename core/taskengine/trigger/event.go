@@ -150,6 +150,13 @@ func (t *EventTrigger) ensureNewFormat() {
 	}
 }
 
+// ensureLegacyConversion consolidates legacy data detection and conversion
+// This helper function eliminates code duplication across methods
+func (t *EventTrigger) ensureLegacyConversion() {
+	t.detectLegacyData()
+	t.ensureNewFormat()
+}
+
 // detectLegacyData checks if we have data in the old format
 func (t *EventTrigger) detectLegacyData() {
 	hasLegacyData := false
@@ -166,8 +173,7 @@ func (t *EventTrigger) detectLegacyData() {
 
 func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) error {
 	// Auto-convert from legacy format if needed
-	t.detectLegacyData()
-	t.ensureNewFormat()
+	t.ensureLegacyConversion()
 
 	sTrigger := check.GetTrigger()
 	if sTrigger == nil {
@@ -253,8 +259,7 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 
 func (t *EventTrigger) RemoveCheck(id string) error {
 	// Auto-convert from legacy format if needed
-	t.detectLegacyData()
-	t.ensureNewFormat()
+	t.ensureLegacyConversion()
 
 	// Remove from new registry (handles cleanup automatically)
 	removed := t.registry.RemoveTask(id)
@@ -1203,8 +1208,7 @@ func (t *EventTrigger) buildFilterQueries() []QueryInfo {
 	var allQueries []QueryInfo
 
 	// Auto-convert from legacy format if needed
-	t.detectLegacyData()
-	t.ensureNewFormat()
+	t.ensureLegacyConversion()
 
 	t.registry.RangeEventTasks(func(taskID string, entry *TaskEntry) bool {
 

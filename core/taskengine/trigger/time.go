@@ -68,6 +68,13 @@ func (t *TimeTrigger) ensureNewFormat() {
 	}
 }
 
+// ensureLegacyConversion consolidates legacy data detection and conversion
+// This helper function eliminates code duplication across methods
+func (t *TimeTrigger) ensureLegacyConversion() {
+	t.detectLegacyData()
+	t.ensureNewFormat()
+}
+
 // detectLegacyData checks if we have data in the old format
 func (t *TimeTrigger) detectLegacyData() {
 	hasLegacyData := len(t.jobs) > 0
@@ -117,8 +124,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 	defer t.mu.Unlock()
 
 	// Ensure we're using the new format
-	t.detectLegacyData()
-	t.ensureNewFormat()
+	t.ensureLegacyConversion()
 
 	taskID := check.TaskId
 
@@ -218,8 +224,7 @@ func (t *TimeTrigger) RemoveCheck(taskID string) error {
 	defer t.mu.Unlock()
 
 	// Ensure we're using the new format
-	t.detectLegacyData()
-	t.ensureNewFormat()
+	t.ensureLegacyConversion()
 
 	// Get task from registry
 	task, exists := t.registry.GetTask(taskID)

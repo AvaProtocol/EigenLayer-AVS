@@ -95,6 +95,13 @@ func (b *BlockTrigger) ensureNewFormat() {
 	}
 }
 
+// ensureLegacyConversion consolidates legacy data detection and conversion
+// This helper function eliminates code duplication across methods
+func (b *BlockTrigger) ensureLegacyConversion() {
+	b.detectLegacyData()
+	b.ensureNewFormat()
+}
+
 // detectLegacyData checks if we have data in the old format
 func (b *BlockTrigger) detectLegacyData() {
 	hasLegacyData := len(b.schedule) > 0
@@ -134,8 +141,7 @@ func (b *BlockTrigger) convertFromScheduleMap() {
 // calculateMinInterval finds the minimum interval among all registered tasks
 func (b *BlockTrigger) calculateMinInterval() int64 {
 	// Auto-convert from legacy format if needed
-	b.detectLegacyData()
-	b.ensureNewFormat()
+	b.ensureLegacyConversion()
 
 	minInterval := int64(0)
 
@@ -162,8 +168,7 @@ func (b *BlockTrigger) shouldCheckAtBlock(blockNumber int64) bool {
 
 func (b *BlockTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) error {
 	// Auto-convert from legacy format if needed
-	b.detectLegacyData()
-	b.ensureNewFormat()
+	b.ensureLegacyConversion()
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -230,8 +235,7 @@ func (b *BlockTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 
 func (b *BlockTrigger) RemoveCheck(taskID string) error {
 	// Auto-convert from legacy format if needed
-	b.detectLegacyData()
-	b.ensureNewFormat()
+	b.ensureLegacyConversion()
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
