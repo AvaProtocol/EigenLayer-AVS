@@ -35,7 +35,9 @@ func (m *MockLogger) With(tags ...any) sdklogging.Logger { return m }
 func TestBuildFilterQueriesOptimization(t *testing.T) {
 	// Create a mock event trigger with proper initialization
 	trigger := &EventTrigger{
-		checks: sync.Map{},
+		registry:   NewTaskRegistry(),
+		checks:     sync.Map{},
+		legacyMode: false,
 		CommonTrigger: &CommonTrigger{
 			done:      make(chan bool),
 			shutdown:  false,
@@ -121,7 +123,9 @@ func TestBuildFilterQueriesOptimization(t *testing.T) {
 func TestBuildFilterQueriesDistinguishFromTo(t *testing.T) {
 	// Create a mock event trigger with proper initialization
 	trigger := &EventTrigger{
-		checks: sync.Map{},
+		registry:   NewTaskRegistry(),
+		checks:     sync.Map{},
+		legacyMode: false,
 		CommonTrigger: &CommonTrigger{
 			done:      make(chan bool),
 			shutdown:  false,

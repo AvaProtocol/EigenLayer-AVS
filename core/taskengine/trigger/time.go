@@ -14,8 +14,13 @@ import (
 type TimeTrigger struct {
 	*CommonTrigger
 
-	scheduler gocron.Scheduler
-	jobs      map[string]gocron.Job // map taskID to job for removal
+	// New unified registry (preferred)
+	registry *TaskRegistry
+
+	// Legacy job management (for backward compatibility)
+	scheduler  gocron.Scheduler
+	jobs       map[string]gocron.Job // map taskID to job for removal
+	legacyMode bool
 
 	// channel that we will push the trigger information back
 	triggerCh chan TriggerMetadata[uint64]
@@ -35,24 +40,85 @@ func NewTimeTrigger(triggerCh chan TriggerMetadata[uint64], logger sdklogging.Lo
 			logger:   logger,
 			mu:       sync.Mutex{},
 		},
-		scheduler: scheduler,
-		jobs:      make(map[string]gocron.Job),
-		triggerCh: triggerCh,
+		registry:   NewTaskRegistry(),
+		scheduler:  scheduler,
+		jobs:       make(map[string]gocron.Job),
+		legacyMode: false, // Start in new mode
+		triggerCh:  triggerCh,
 	}
 
 	return &t
 }
 
+// ensureNewFormat ensures we're using the new TaskRegistry format
+// This provides automatic conversion from legacy jobs map format
+func (t *TimeTrigger) ensureNewFormat() {
+	if t.legacyMode {
+		t.logger.Info("🔄 Converting from legacy jobs map format to new TaskRegistry format")
+
+		// Convert existing data
+		t.convertFromJobsMap()
+
+		// Clear old data
+		t.jobs = make(map[string]gocron.Job)
+		t.legacyMode = false
+
+		t.logger.Info("✅ Successfully converted to new TaskRegistry format",
+			"task_count", t.registry.GetTimeTaskCount())
+	}
+}
+
+// detectLegacyData checks if we have data in the old format
+func (t *TimeTrigger) detectLegacyData() {
+	hasLegacyData := len(t.jobs) > 0
+
+	if hasLegacyData && t.registry.GetTimeTaskCount() == 0 {
+		t.legacyMode = true
+		t.logger.Info("🔍 Detected legacy jobs map data - will convert on next operation")
+	}
+}
+
+// convertFromJobsMap converts old jobs map data to the new TaskRegistry
+// This provides backward compatibility during migration
+func (t *TimeTrigger) convertFromJobsMap() {
+	for taskID, job := range t.jobs {
+		// Create TimeTaskData for the new registry
+		timeData := &TimeTaskData{
+			Job:       job,
+			Schedules: []string{}, // We can't recover original schedules from job
+			Epochs:    []int64{},  // We can't recover original epochs from job
+		}
+
+		// We don't have the original TaskMetadata in the old format,
+		// so we'll create a minimal one for compatibility
+		taskMetadata := &avsproto.SyncMessagesResp_TaskMetadata{
+			TaskId: taskID,
+		}
+
+		// Add to new registry
+		t.registry.AddTask(taskID, taskMetadata, nil, nil, timeData)
+
+		t.logger.Debug("🔄 Converted legacy time task",
+			"task_id", taskID)
+	}
+}
+
 func (t *TimeTrigger) epochToCron(epoch int64) string {
-	// Convert epoch to time
-	tm := time.Unix(epoch/1000, 0)
-	// Create cron expression for specific time
-	return fmt.Sprintf("%d %d %d %d %d *", tm.Minute(), tm.Hour(), tm.Day(), tm.Month(), tm.Weekday())
+	// Convert epoch to time in UTC
+	tm := time.Unix(epoch/1000, 0).UTC()
+	// Create cron expression for specific time (minute hour day month *)
+	// Standard cron format: minute hour day month dayofweek
+	// But gocron expects: minute hour day month *
+	return fmt.Sprintf("%d %d %d %d *", tm.Minute(), tm.Hour(), tm.Day(), int(tm.Month()))
 }
 
 func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Ensure we're using the new format
+	t.detectLegacyData()
+	t.ensureNewFormat()
 
 	taskID := check.TaskId
 
@@ -68,10 +134,12 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 
 	var job gocron.Job
 	var err error
+	var schedules []string
+	var epochs []int64
 
 	if fixedTime := check.GetTrigger().GetFixedTime(); fixedTime != nil {
 		// Handle epoch-based scheduling
-		epochs := fixedTime.GetConfig().GetEpochs()
+		epochs = fixedTime.GetConfig().GetEpochs()
 		if len(epochs) == 0 {
 			return fmt.Errorf("no epochs provided")
 		}
@@ -94,11 +162,10 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 			if err != nil {
 				return fmt.Errorf("failed to schedule epoch job: %w", err)
 			}
-			t.jobs[taskID] = job
 		}
 	} else if cronTrigger := check.GetTrigger().GetCron(); cronTrigger != nil {
 		// Handle cron-based scheduling
-		schedules := cronTrigger.GetConfig().GetSchedules()
+		schedules = cronTrigger.GetConfig().GetSchedules()
 		if len(schedules) == 0 {
 			return fmt.Errorf("no cron expressions provided")
 		}
@@ -116,9 +183,22 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 			if err != nil {
 				return fmt.Errorf("failed to schedule cron job: %w", err)
 			}
-			t.jobs[taskID] = job
 		}
 	}
+
+	// Store in new registry format
+	timeData := &TimeTaskData{
+		Job:       job,
+		Schedules: schedules,
+		Epochs:    epochs,
+	}
+
+	t.registry.AddTask(taskID, check, nil, nil, timeData)
+
+	t.logger.Debug("✅ Added time task to registry",
+		"task_id", taskID,
+		"schedules_count", len(schedules),
+		"epochs_count", len(epochs))
 
 	return nil
 }
@@ -137,12 +217,28 @@ func (t *TimeTrigger) RemoveCheck(taskID string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if job, exists := t.jobs[taskID]; exists {
-		if err := t.scheduler.RemoveJob(job.ID()); err != nil {
+	// Ensure we're using the new format
+	t.detectLegacyData()
+	t.ensureNewFormat()
+
+	// Get task from registry
+	task, exists := t.registry.GetTask(taskID)
+	if !exists || task == nil {
+		t.logger.Debug("task not found in registry", "task_id", taskID)
+		return nil
+	}
+
+	// Remove job from scheduler if it exists
+	if task.TimeData != nil && task.TimeData.Job != nil {
+		if err := t.scheduler.RemoveJob(task.TimeData.Job.ID()); err != nil {
 			t.logger.Error("failed to remove job", "task_id", taskID, "error", err)
 		}
-		delete(t.jobs, taskID)
 	}
+
+	// Remove from registry
+	t.registry.RemoveTask(taskID)
+
+	t.logger.Debug("✅ Removed time task from registry", "task_id", taskID)
 
 	return nil
 }
