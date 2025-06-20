@@ -92,6 +92,34 @@ func TestCreateTaskReturnErrorWhenInvalidBlockTriggerInterval(t *testing.T) {
 	}
 }
 
+func TestCreateTaskReturnErrorWhenNilBlockTriggerConfig(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	tr1 := testutil.RestTask()
+	tr1.Trigger.TriggerType = &avsproto.TaskTrigger_Block{
+		Block: &avsproto.BlockTrigger{
+			Config: nil, // This should cause validation to fail
+		},
+	}
+
+	_, err := n.CreateTask(testutil.TestUser1(), tr1)
+
+	if err == nil {
+		t.Error("CreateTask() expected error for nil block trigger config, but got none")
+	}
+
+	if err != nil {
+		t.Logf("CreateTask() correctly rejected nil config with error: %v", err)
+		if !strings.Contains(err.Error(), "block trigger config is required but missing") {
+			t.Errorf("Expected error to contain 'block trigger config is required but missing', got: %v", err)
+		}
+	}
+}
+
 func TestListTasks(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))

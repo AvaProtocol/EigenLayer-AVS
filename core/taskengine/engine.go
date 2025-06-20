@@ -283,6 +283,12 @@ func (n *Engine) MustStart() error {
 
 	n.logger.Info("🚀 Engine started successfully", "active_tasks_loaded", loadedCount)
 
+	// Detect and handle any invalid tasks that may have been created before validation was fixed
+	if err := n.DetectAndHandleInvalidTasks(); err != nil {
+		n.logger.Error("Failed to handle invalid tasks during startup", "error", err)
+		// Don't fail startup, but log the error
+	}
+
 	// Start the batch notification processor
 	go n.processBatchedNotifications()
 
@@ -3668,4 +3674,70 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 	}
 
 	return triggerDataMap
+}
+
+// DetectAndHandleInvalidTasks scans for tasks with invalid configurations
+// and either marks them as failed or removes them based on the strategy
+func (n *Engine) DetectAndHandleInvalidTasks() error {
+	n.logger.Info("🔍 Scanning for tasks with invalid configurations...")
+
+	invalidTasks := []string{}
+
+	// Scan through all tasks in memory
+	n.lock.Lock()
+	for taskID, task := range n.tasks {
+		if err := task.ValidateWithError(); err != nil {
+			invalidTasks = append(invalidTasks, taskID)
+			n.logger.Warn("🚨 Found invalid task configuration",
+				"task_id", taskID,
+				"error", err.Error())
+		}
+	}
+	n.lock.Unlock()
+
+	if len(invalidTasks) == 0 {
+		n.logger.Info("✅ No invalid tasks found")
+		return nil
+	}
+
+	n.logger.Warn("🚨 Found invalid tasks, marking as failed",
+		"count", len(invalidTasks),
+		"task_ids", invalidTasks)
+
+	// Mark invalid tasks as failed
+	updates := make(map[string][]byte)
+	for _, taskID := range invalidTasks {
+		n.lock.Lock()
+		if task, exists := n.tasks[taskID]; exists {
+			task.SetFailed()
+
+			taskJSON, err := task.ToJSON()
+			if err != nil {
+				n.logger.Error("Failed to serialize invalid task for cleanup",
+					"task_id", taskID,
+					"error", err)
+				n.lock.Unlock()
+				continue
+			}
+
+			// Update the task status in storage
+			updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON
+			updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", avsproto.TaskStatus_Failed))
+		}
+		n.lock.Unlock()
+	}
+
+	// Batch write the updates
+	if len(updates) > 0 {
+		if err := n.db.BatchWrite(updates); err != nil {
+			n.logger.Error("Failed to update invalid tasks in storage",
+				"error", err)
+			return err
+		}
+	}
+
+	n.logger.Info("✅ Successfully marked invalid tasks as failed",
+		"count", len(invalidTasks))
+
+	return nil
 }
