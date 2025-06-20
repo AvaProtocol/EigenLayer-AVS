@@ -617,8 +617,34 @@ func (o *Operator) StreamMessages() {
 					o.logger.Info("🔍 DEBUG: Event trigger is nil, checking block trigger",
 						"task_id", resp.Id)
 
-					if trigger := triggerObj.GetBlock(); trigger != nil {
-						o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id, "interval", trigger.Config.Interval)
+					// Safely call GetBlock() with panic recovery
+					var blockTrigger interface{}
+					var getBlockError error
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								getBlockError = fmt.Errorf("GetBlock() panicked: %v", r)
+								o.logger.Error("🚨 CRITICAL: GetBlock() method caused segmentation fault",
+									"task_id", resp.Id,
+									"panic", r,
+									"solution", "triggerObj.GetBlock() is unsafe - skipping block trigger check")
+							}
+						}()
+						blockTrigger = triggerObj.GetBlock()
+					}()
+
+					if getBlockError != nil {
+						o.logger.Error("🚨 CRITICAL: Cannot safely access GetBlock() method",
+							"task_id", resp.Id,
+							"error", getBlockError,
+							"solution", "Skipping block trigger to prevent crash")
+					} else if blockTrigger != nil {
+						// Cast blockTrigger back to proper type for accessing Config
+						if trigger, ok := blockTrigger.(*avspb.BlockTrigger); ok {
+							o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id, "interval", trigger.Config.Interval)
+						} else {
+							o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id)
+						}
 						if err := o.blockTrigger.AddCheck(resp.TaskMetadata); err != nil {
 							o.logger.Info("❌ Failed to add block trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for blocks")
 						}
@@ -626,9 +652,35 @@ func (o *Operator) StreamMessages() {
 						o.logger.Info("🔍 DEBUG: Block trigger is nil, checking cron trigger",
 							"task_id", resp.Id)
 
-						if trigger := triggerObj.GetCron(); trigger != nil {
-							scheduleStr := strings.Join(trigger.Config.Schedules, ", ")
-							o.logger.Info("⏰ Monitoring cron trigger", "task_id", resp.Id, "schedule", scheduleStr)
+						// Safely call GetCron() with panic recovery
+						var cronTrigger interface{}
+						var getCronError error
+						func() {
+							defer func() {
+								if r := recover(); r != nil {
+									getCronError = fmt.Errorf("GetCron() panicked: %v", r)
+									o.logger.Error("🚨 CRITICAL: GetCron() method caused segmentation fault",
+										"task_id", resp.Id,
+										"panic", r,
+										"solution", "triggerObj.GetCron() is unsafe - skipping cron trigger check")
+								}
+							}()
+							cronTrigger = triggerObj.GetCron()
+						}()
+
+						if getCronError != nil {
+							o.logger.Error("🚨 CRITICAL: Cannot safely access GetCron() method",
+								"task_id", resp.Id,
+								"error", getCronError,
+								"solution", "Skipping cron trigger to prevent crash")
+						} else if cronTrigger != nil {
+							// Cast cronTrigger back to proper type for accessing Config
+							if trigger, ok := cronTrigger.(*avspb.CronTrigger); ok {
+								scheduleStr := strings.Join(trigger.Config.Schedules, ", ")
+								o.logger.Info("⏰ Monitoring cron trigger", "task_id", resp.Id, "schedule", scheduleStr)
+							} else {
+								o.logger.Info("⏰ Monitoring cron trigger", "task_id", resp.Id)
+							}
 							if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
 								o.logger.Info("❌ Failed to add cron trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for scheduled execution")
 							}
@@ -636,26 +688,73 @@ func (o *Operator) StreamMessages() {
 							o.logger.Info("🔍 DEBUG: Cron trigger is nil, checking fixed time trigger",
 								"task_id", resp.Id)
 
-							if trigger := triggerObj.GetFixedTime(); trigger != nil {
-								epochCount := len(trigger.Config.Epochs)
-								var epochInfo string
-								if epochCount == 1 {
-									epochInfo = fmt.Sprintf("epoch: %d", trigger.Config.Epochs[0])
+							// Safely call GetFixedTime() with panic recovery
+							var fixedTimeTrigger interface{}
+							var getFixedTimeError error
+							func() {
+								defer func() {
+									if r := recover(); r != nil {
+										getFixedTimeError = fmt.Errorf("GetFixedTime() panicked: %v", r)
+										o.logger.Error("🚨 CRITICAL: GetFixedTime() method caused segmentation fault",
+											"task_id", resp.Id,
+											"panic", r,
+											"solution", "triggerObj.GetFixedTime() is unsafe - skipping fixed time trigger check")
+									}
+								}()
+								fixedTimeTrigger = triggerObj.GetFixedTime()
+							}()
+
+							if getFixedTimeError != nil {
+								o.logger.Error("🚨 CRITICAL: Cannot safely access GetFixedTime() method",
+									"task_id", resp.Id,
+									"error", getFixedTimeError,
+									"solution", "Skipping fixed time trigger to prevent crash")
+							} else if fixedTimeTrigger != nil {
+								// Cast fixedTimeTrigger back to proper type for accessing Config
+								if trigger, ok := fixedTimeTrigger.(*avspb.FixedTimeTrigger); ok {
+									epochCount := len(trigger.Config.Epochs)
+									var epochInfo string
+									if epochCount == 1 {
+										epochInfo = fmt.Sprintf("epoch: %d", trigger.Config.Epochs[0])
+									} else {
+										epochInfo = fmt.Sprintf("%d epochs", epochCount)
+									}
+									o.logger.Info("📅 Monitoring fixed time trigger", "task_id", resp.Id, "epoch_info", epochInfo)
 								} else {
-									epochInfo = fmt.Sprintf("%d epochs", epochCount)
+									o.logger.Info("📅 Monitoring fixed time trigger", "task_id", resp.Id)
 								}
-								o.logger.Info("📅 Monitoring fixed time trigger", "task_id", resp.Id, "epoch_info", epochInfo)
 								if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
 									o.logger.Info("❌ Failed to add fixed time trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for fixed time execution")
 								}
 							} else {
+								// Safely check trigger types for logging without causing crashes
+								var eventNil, blockNil, cronNil, fixedTimeNil bool = true, true, true, true
+
+								// Safe checks with panic recovery
+								func() {
+									defer func() { recover() }()
+									eventNil = (triggerObj.GetEvent() == nil)
+								}()
+								func() {
+									defer func() { recover() }()
+									blockNil = (triggerObj.GetBlock() == nil)
+								}()
+								func() {
+									defer func() { recover() }()
+									cronNil = (triggerObj.GetCron() == nil)
+								}()
+								func() {
+									defer func() { recover() }()
+									fixedTimeNil = (triggerObj.GetFixedTime() == nil)
+								}()
+
 								o.logger.Warn("❓ Unsupported or unrecognized trigger type",
 									"task_id", resp.Id,
 									"trigger_obj_nil", triggerObj == nil,
-									"event_nil", triggerObj.GetEvent() == nil,
-									"block_nil", triggerObj.GetBlock() == nil,
-									"cron_nil", triggerObj.GetCron() == nil,
-									"fixed_time_nil", triggerObj.GetFixedTime() == nil,
+									"event_nil", eventNil,
+									"block_nil", blockNil,
+									"cron_nil", cronNil,
+									"fixed_time_nil", fixedTimeNil,
 									"solution", "Task may not be monitored")
 							}
 						}
