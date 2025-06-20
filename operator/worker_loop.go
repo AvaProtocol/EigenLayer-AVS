@@ -425,6 +425,10 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 
 // StreamMessages setup a streaming connection to receive task from server
 func (o *Operator) StreamMessages() {
+	o.logger.Info("🚀 DEBUG: StreamMessages started - SEGFAULT_FIX_v2.0 - Enhanced logging",
+		"timestamp", time.Now().Format(time.RFC3339),
+		"fix_version", "v2.0")
+
 	id := hex.EncodeToString(o.operatorId[:])
 	ctx := context.Background()
 	o.logger.Info("Subscribe to aggregator to get check")
@@ -510,7 +514,6 @@ func (o *Operator) StreamMessages() {
 				}
 			}
 			time.Sleep(time.Duration(retryIntervalSecond) * time.Second)
-			o.retryConnect()
 			continue
 		}
 
@@ -571,6 +574,11 @@ func (o *Operator) StreamMessages() {
 			case avspb.MessageOp_CancelTask, avspb.MessageOp_DeleteTask:
 				o.processMessage(resp)
 			case avspb.MessageOp_MonitorTaskTrigger:
+				o.logger.Info("🔍 DEBUG: Received MonitorTaskTrigger message",
+					"task_id", resp.Id,
+					"resp_nil", resp == nil,
+					"task_metadata_nil", resp.TaskMetadata == nil)
+
 				// Add nil check to prevent segmentation fault
 				if resp.TaskMetadata == nil {
 					o.logger.Warn("❌ Received MonitorTaskTrigger message with nil TaskMetadata",
@@ -579,8 +587,16 @@ func (o *Operator) StreamMessages() {
 					continue
 				}
 
+				o.logger.Info("🔍 DEBUG: TaskMetadata is not nil, checking GetTrigger()",
+					"task_id", resp.Id,
+					"task_metadata_trigger_nil", resp.TaskMetadata.Trigger == nil)
+
 				// Additional nil check for Trigger field
 				triggerObj := resp.TaskMetadata.GetTrigger()
+				o.logger.Info("🔍 DEBUG: Called GetTrigger()",
+					"task_id", resp.Id,
+					"trigger_obj_nil", triggerObj == nil)
+
 				if triggerObj == nil {
 					o.logger.Warn("❌ Received MonitorTaskTrigger message with nil Trigger",
 						"task_id", resp.Id,
@@ -588,40 +604,66 @@ func (o *Operator) StreamMessages() {
 					continue
 				}
 
+				o.logger.Info("🔍 DEBUG: About to check trigger types",
+					"task_id", resp.Id,
+					"checking_event_trigger", true)
+
 				if trigger := triggerObj.GetEvent(); trigger != nil {
 					o.logger.Info("📥 Monitoring event trigger", "task_id", resp.Id)
 					if err := o.eventTrigger.AddCheck(resp.TaskMetadata); err != nil {
 						o.logger.Info("❌ Failed to add event trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for events")
 					}
-				} else if trigger := triggerObj.GetBlock(); trigger != nil {
-					o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id, "interval", trigger.Config.Interval)
-					if err := o.blockTrigger.AddCheck(resp.TaskMetadata); err != nil {
-						o.logger.Info("❌ Failed to add block trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for blocks")
-					}
-				} else if trigger := triggerObj.GetCron(); trigger != nil {
-					scheduleStr := strings.Join(trigger.Config.Schedules, ", ")
-					o.logger.Info("⏰ Monitoring cron trigger", "task_id", resp.Id, "schedule", scheduleStr)
-					if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
-						o.logger.Info("❌ Failed to add cron trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for scheduled execution")
-					}
-				} else if trigger := triggerObj.GetFixedTime(); trigger != nil {
-					epochCount := len(trigger.Config.Epochs)
-					var epochInfo string
-					if epochCount == 1 {
-						epochInfo = fmt.Sprintf("epoch %d", trigger.Config.Epochs[0])
-					} else {
-						epochInfo = fmt.Sprintf("%d epochs", epochCount)
-					}
-					o.logger.Info("📅 Monitoring fixed time trigger", "task_id", resp.Id, "epochs", epochInfo)
-					if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
-						o.logger.Info("❌ Failed to add fixed time trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for scheduled execution")
-					}
 				} else {
-					o.logger.Warn("❌ Received MonitorTaskTrigger message with unsupported or missing trigger",
-						"task_id", resp.Id,
-						"trigger_type", triggerObj.GetType(),
-						"solution", "Check if trigger type is supported by this operator version")
+					o.logger.Info("🔍 DEBUG: Event trigger is nil, checking block trigger",
+						"task_id", resp.Id)
+
+					if trigger := triggerObj.GetBlock(); trigger != nil {
+						o.logger.Info("📦 Monitoring block trigger", "task_id", resp.Id, "interval", trigger.Config.Interval)
+						if err := o.blockTrigger.AddCheck(resp.TaskMetadata); err != nil {
+							o.logger.Info("❌ Failed to add block trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for blocks")
+						}
+					} else {
+						o.logger.Info("🔍 DEBUG: Block trigger is nil, checking cron trigger",
+							"task_id", resp.Id)
+
+						if trigger := triggerObj.GetCron(); trigger != nil {
+							scheduleStr := strings.Join(trigger.Config.Schedules, ", ")
+							o.logger.Info("⏰ Monitoring cron trigger", "task_id", resp.Id, "schedule", scheduleStr)
+							if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
+								o.logger.Info("❌ Failed to add cron trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for scheduled execution")
+							}
+						} else {
+							o.logger.Info("🔍 DEBUG: Cron trigger is nil, checking fixed time trigger",
+								"task_id", resp.Id)
+
+							if trigger := triggerObj.GetFixedTime(); trigger != nil {
+								epochCount := len(trigger.Config.Epochs)
+								var epochInfo string
+								if epochCount == 1 {
+									epochInfo = fmt.Sprintf("epoch: %d", trigger.Config.Epochs[0])
+								} else {
+									epochInfo = fmt.Sprintf("%d epochs", epochCount)
+								}
+								o.logger.Info("📅 Monitoring fixed time trigger", "task_id", resp.Id, "epoch_info", epochInfo)
+								if err := o.timeTrigger.AddCheck(resp.TaskMetadata); err != nil {
+									o.logger.Info("❌ Failed to add fixed time trigger to monitoring", "error", err, "task_id", resp.Id, "solution", "Task may not be monitored for fixed time execution")
+								}
+							} else {
+								o.logger.Warn("❓ Unsupported or unrecognized trigger type",
+									"task_id", resp.Id,
+									"trigger_obj_nil", triggerObj == nil,
+									"event_nil", triggerObj.GetEvent() == nil,
+									"block_nil", triggerObj.GetBlock() == nil,
+									"cron_nil", triggerObj.GetCron() == nil,
+									"fixed_time_nil", triggerObj.GetFixedTime() == nil,
+									"solution", "Task may not be monitored")
+							}
+						}
+					}
 				}
+
+				o.logger.Info("🔍 DEBUG: Completed MonitorTaskTrigger processing",
+					"task_id", resp.Id)
 			}
 		}
 	}
