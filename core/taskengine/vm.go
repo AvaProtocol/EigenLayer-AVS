@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -258,7 +259,7 @@ func NewVMWithData(task *model.Task, triggerData *TriggerData, smartWalletConfig
 	return NewVMWithDataAndTransferLog(task, triggerData, smartWalletConfig, secrets, nil)
 }
 
-func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *avsproto.EventTrigger_TransferLogOutput) (*VM, error) {
+func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog interface{}) (*VM, error) {
 	var taskOwner common.Address
 	if task != nil && task.Owner != "" {
 		taskOwner = common.HexToAddress(task.Owner)
@@ -349,15 +350,22 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 
 			// If we have transfer log data, use it to populate rich trigger data and create proper Event structure
 			if transferLog != nil {
-				// Create EventTrigger_Output with oneof TransferLog
-				v.parsedTriggerData.Event = &avsproto.EventTrigger_Output{
-					OutputType: &avsproto.EventTrigger_Output_TransferLog{
-						TransferLog: transferLog,
-					},
+				// With new JSON-based structure, transferLog should be a JSON string
+				// Create EventTrigger_Output with JSON data
+				if jsonData, ok := transferLog.(string); ok {
+					v.parsedTriggerData.Event = &avsproto.EventTrigger_Output{
+						Data: jsonData,
+					}
+					// Parse JSON to create trigger data map
+					var parsedData map[string]interface{}
+					if err := json.Unmarshal([]byte(jsonData), &parsedData); err == nil {
+						triggerDataMap = parsedData
+					} else {
+						triggerDataMap = map[string]interface{}{} // Empty map on parse error
+					}
+				} else {
+					triggerDataMap = map[string]interface{}{} // Empty map if not string
 				}
-
-				// Use shared function to build trigger data map from the TransferLog protobuf
-				triggerDataMap = buildTriggerDataMapFromProtobuf(avsproto.TriggerType_TRIGGER_TYPE_EVENT, v.parsedTriggerData.Event, v.logger)
 			} else {
 				// Use shared function to build trigger data map from protobuf trigger outputs
 				triggerDataMap = buildTriggerDataMapFromProtobuf(triggerData.Type, triggerData.Output, v.logger)

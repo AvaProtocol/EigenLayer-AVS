@@ -88,7 +88,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 	}
 
 	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
-	triggerData, _ := testutil.GetTestEventTriggerDataWithTransferData()
+	triggerData := testutil.GetTestEventTriggerDataWithTransferData()
 	execution, err := executor.RunTask(task, &QueueExecutionData{
 		TriggerType:   triggerData.Type,
 		TriggerOutput: triggerData.Output,
@@ -473,12 +473,12 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 	}
 
 	// Get the mock transfer log data for testing
-	_, transferLog := testutil.GetTestEventTriggerDataWithTransferData()
+	transferTriggerData := testutil.GetTestEventTriggerDataWithTransferData()
 
 	// For this test, we need to test the execution with transfer log data
 	// So we'll override the RunTask method behavior by calling the VM directly
 	secrets, _ := LoadSecretForTask(executor.db, task)
-	vm, err := NewVMWithDataAndTransferLog(task, triggerData, executor.smartWalletConfig, secrets, transferLog)
+	vm, err := NewVMWithDataAndTransferLog(task, triggerData, executor.smartWalletConfig, secrets, transferTriggerData.Output)
 	if err != nil {
 		t.Fatalf("error creating VM: %v", err)
 	}

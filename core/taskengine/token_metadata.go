@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -285,38 +284,6 @@ func (t *TokenEnrichmentService) fetchTokenMetadataFromRPC(contractAddress strin
 	}
 
 	return metadata, nil
-}
-
-// EnrichTransferLog enriches a transfer log with token metadata and formatted value
-func (t *TokenEnrichmentService) EnrichTransferLog(evmLog *avsproto.Evm_Log, transferLog *avsproto.EventTrigger_TransferLogOutput) error {
-	if evmLog == nil || transferLog == nil {
-		return fmt.Errorf("evmLog and transferLog cannot be nil")
-	}
-
-	// Get token metadata
-	metadata, err := t.GetTokenMetadata(evmLog.Address)
-	if err != nil {
-		if t.logger != nil {
-			t.logger.Warn("Failed to get token metadata for enrichment",
-				"address", evmLog.Address,
-				"error", err)
-		}
-		// Continue with partial enrichment - don't fail the entire operation
-		return nil
-	}
-
-	// Enrich the transfer log with token metadata
-	transferLog.TokenName = metadata.Name
-	transferLog.TokenSymbol = metadata.Symbol
-	transferLog.TokenDecimals = metadata.Decimals
-
-	// Format the value using token decimals
-	if transferLog.Value != "" {
-		formattedValue := t.FormatTokenValue(transferLog.Value, metadata.Decimals)
-		transferLog.ValueFormatted = formattedValue
-	}
-
-	return nil
 }
 
 // FormatTokenValue formats a hex value string using the specified decimal places

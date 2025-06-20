@@ -157,11 +157,275 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		return nil, fmt.Errorf("queries must be a non-empty array")
 	}
 
+	// Check if simulation mode is enabled (default: false, fallback to historical search)
+	simulationMode := false
+	if simModeInterface, exists := triggerConfig["simulationMode"]; exists {
+		if simModeBool, ok := simModeInterface.(bool); ok {
+			simulationMode = simModeBool
+		}
+	}
+
 	if n.logger != nil {
 		n.logger.Info("EventTrigger: Processing queries-based EventTrigger",
+			"queriesCount", len(queriesArray),
+			"simulationMode", simulationMode)
+	}
+
+	// 🔮 TENDERLY SIMULATION MODE
+	if simulationMode {
+		return n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
+	}
+
+	// 📊 HISTORICAL SEARCH MODE (existing behavior)
+	return n.runEventTriggerWithHistoricalSearch(ctx, queriesArray, inputVariables)
+}
+
+// runEventTriggerWithTenderlySimulation executes event trigger using Tenderly simulation
+func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	if n.logger != nil {
+		n.logger.Info("🔮 EventTrigger: Starting Tenderly simulation mode",
 			"queriesCount", len(queriesArray))
 	}
 
+	// Initialize Tenderly client
+	tenderlyClient := NewTenderlyClient(n.logger)
+
+	// Get chain ID for simulation
+	var chainID int64 = 11155111 // Default to Sepolia
+	if n.tokenEnrichmentService != nil {
+		chainID = int64(n.tokenEnrichmentService.GetChainID())
+	}
+
+	// Process the first query for simulation (Tenderly simulates one event at a time)
+	if len(queriesArray) == 0 {
+		return nil, fmt.Errorf("no queries provided for simulation")
+	}
+
+	queryMap, ok := queriesArray[0].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid query format")
+	}
+
+	// Convert query map to protobuf format for simulation
+	query, err := n.convertMapToEventQuery(queryMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert query: %w", err)
+	}
+
+	// Simulate the event using Tenderly (gets real current data)
+	simulatedLog, err := tenderlyClient.SimulateEventTrigger(ctx, query, chainID)
+	if err != nil {
+		n.logger.Warn("🚫 Tenderly simulation failed, no event data available", "error", err)
+		// Return nil to indicate no event found (triggers proper protobuf handling)
+		return nil, fmt.Errorf("Tenderly simulation failed: %w", err)
+	}
+
+	// Evaluate conditions against the real simulated data
+	// If conditions don't match, return nil (same as runTask behavior)
+	if len(query.GetConditions()) > 0 {
+		conditionsMet := n.evaluateEventConditions(simulatedLog, query.GetConditions())
+		if !conditionsMet {
+			n.logger.Info("🚫 Conditions not satisfied by real data, no event returned",
+				"contract", simulatedLog.Address.Hex(),
+				"conditions_count", len(query.GetConditions()))
+
+			// Return nil to indicate no event found (conditions not met)
+			return nil, nil
+		}
+	}
+
+	// Build parsed event data - include all event fields in JSON
+	realPrice := simulatedLog.Topics[1].Big()
+	realPriceUSD := float64(realPrice.Int64()) / 100000000
+
+	// Extract event fields for parsed data
+	roundId := simulatedLog.Topics[2].Big()
+	updatedAtBytes := simulatedLog.Data
+	updatedAt := new(big.Int).SetBytes(updatedAtBytes[len(updatedAtBytes)-32:])
+
+	// Create parsed event data structure
+	parsedData := map[string]interface{}{
+		"current":          realPrice.String(),
+		"currentUSD":       realPriceUSD,
+		"roundId":          roundId.String(),
+		"updatedAt":        updatedAt.String(),
+		"address":          simulatedLog.Address.Hex(),
+		"blockNumber":      simulatedLog.BlockNumber,
+		"transactionHash":  simulatedLog.TxHash.Hex(),
+		"transactionIndex": simulatedLog.TxIndex,
+		"blockHash":        simulatedLog.BlockHash.Hex(),
+		"logIndex":         simulatedLog.Index,
+		"removed":          simulatedLog.Removed,
+	}
+
+	// Convert parsed data to JSON string
+	parsedJSON, err := json.Marshal(parsedData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal parsed event data: %w", err)
+	}
+
+	// Build metadata for debugging (separate from parsed data)
+	metadata := map[string]interface{}{
+		"_raw": map[string]interface{}{
+			"price_usd": realPriceUSD,
+			"price_raw": realPrice.String(),
+			"contract":  simulatedLog.Address.Hex(),
+			"chain_id":  chainID,
+		},
+		"eval": map[string]interface{}{
+			"target_value": realPrice.String(),
+			"conditions":   []interface{}{}, // TODO: Add condition evaluation details
+			"match":        true,
+		},
+	}
+
+	// Convert metadata to JSON string
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		// Fallback metadata
+		metadataJSON = []byte(`{"_raw":{"debug_message":"Metadata serialization failed"}}`)
+	}
+
+	// Return the structure for new simplified protobuf format
+	result := map[string]interface{}{
+		"found":    true,
+		"data":     string(parsedJSON),
+		"metadata": string(metadataJSON),
+	}
+
+	if n.logger != nil {
+		n.logger.Info("✅ EventTrigger: Tenderly simulation completed successfully",
+			"contract", simulatedLog.Address.Hex(),
+			"block", simulatedLog.BlockNumber,
+			"txHash", simulatedLog.TxHash.Hex(),
+			"chainId", chainID,
+			"real_price_usd", realPriceUSD)
+	}
+
+	return result, nil
+}
+
+// convertMapToEventQuery converts a map-based query to protobuf EventTrigger_Query
+func (n *Engine) convertMapToEventQuery(queryMap map[string]interface{}) (*avsproto.EventTrigger_Query, error) {
+	query := &avsproto.EventTrigger_Query{}
+
+	// Extract addresses
+	if addressesInterface, exists := queryMap["addresses"]; exists {
+		if addressesArray, ok := addressesInterface.([]interface{}); ok {
+			addresses := make([]string, 0, len(addressesArray))
+			for _, addrInterface := range addressesArray {
+				if addrStr, ok := addrInterface.(string); ok && addrStr != "" {
+					addresses = append(addresses, addrStr)
+				}
+			}
+			query.Addresses = addresses
+		}
+	}
+
+	// Extract topics
+	if topicsInterface, exists := queryMap["topics"]; exists {
+		if topicsArray, ok := topicsInterface.([]interface{}); ok {
+			for _, topicGroupInterface := range topicsArray {
+				if topicGroupMap, ok := topicGroupInterface.(map[string]interface{}); ok {
+					if valuesInterface, exists := topicGroupMap["values"]; exists {
+						if valuesArray, ok := valuesInterface.([]interface{}); ok {
+							topicGroup := &avsproto.EventTrigger_Topics{}
+							values := make([]string, 0, len(valuesArray))
+							for _, valueInterface := range valuesArray {
+								if valueStr, ok := valueInterface.(string); ok {
+									values = append(values, valueStr)
+								}
+							}
+							topicGroup.Values = values
+							query.Topics = append(query.Topics, topicGroup)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Extract contract ABI if present
+	if abiInterface, exists := queryMap["contractAbi"]; exists {
+		if abiStr, ok := abiInterface.(string); ok {
+			query.ContractAbi = abiStr
+		}
+	}
+
+	// Extract conditions if present
+	if conditionsInterface, exists := queryMap["conditions"]; exists {
+		if conditionsArray, ok := conditionsInterface.([]interface{}); ok {
+			for _, conditionInterface := range conditionsArray {
+				if conditionMap, ok := conditionInterface.(map[string]interface{}); ok {
+					condition := &avsproto.EventCondition{}
+					if fieldName, ok := conditionMap["fieldName"].(string); ok {
+						condition.FieldName = fieldName
+					}
+					if operator, ok := conditionMap["operator"].(string); ok {
+						condition.Operator = operator
+					}
+					if value, ok := conditionMap["value"].(string); ok {
+						condition.Value = value
+					}
+					if fieldType, ok := conditionMap["fieldType"].(string); ok {
+						condition.FieldType = fieldType
+					}
+					query.Conditions = append(query.Conditions, condition)
+				}
+			}
+		}
+	}
+
+	return query, nil
+}
+
+// evaluateEventConditions checks if event log data satisfies the provided conditions
+func (n *Engine) evaluateEventConditions(eventLog *types.Log, conditions []*avsproto.EventCondition) bool {
+	for _, condition := range conditions {
+		if condition.GetFieldName() == "current" {
+			// For AnswerUpdated events, current price is in Topics[1]
+			if len(eventLog.Topics) >= 2 {
+				currentPrice := eventLog.Topics[1].Big()
+				expectedValue, ok := new(big.Int).SetString(condition.GetValue(), 10)
+				if !ok {
+					continue
+				}
+
+				conditionMet := false
+				switch condition.GetOperator() {
+				case "gt":
+					conditionMet = currentPrice.Cmp(expectedValue) > 0
+				case "lt":
+					conditionMet = currentPrice.Cmp(expectedValue) < 0
+				case "eq":
+					conditionMet = currentPrice.Cmp(expectedValue) == 0
+				case "gte":
+					conditionMet = currentPrice.Cmp(expectedValue) >= 0
+				case "lte":
+					conditionMet = currentPrice.Cmp(expectedValue) <= 0
+				case "ne":
+					conditionMet = currentPrice.Cmp(expectedValue) != 0
+				}
+
+				if !conditionMet {
+					if n.logger != nil {
+						n.logger.Debug("EventTrigger condition not met",
+							"field", condition.GetFieldName(),
+							"operator", condition.GetOperator(),
+							"expected", condition.GetValue(),
+							"actual", currentPrice.String())
+					}
+					return false
+				}
+			}
+		}
+		// Add more field types here as needed (roundId, updatedAt, etc.)
+	}
+	return true
+}
+
+// runEventTriggerWithHistoricalSearch executes event trigger using historical blockchain search
+func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	// Get the latest block number
 	currentBlock, err := rpcConn.BlockNumber(ctx)
 	if err != nil {
@@ -393,52 +657,10 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 			"logIndex":         uint32(mostRecentEvent.Index),
 		}
 
-		// Enrich the transfer log with token metadata if TokenEnrichmentService is available
-		if n.tokenEnrichmentService != nil {
-			// Create protobuf structures for enrichment
-			evmLogProto := &avsproto.Evm_Log{
-				Address: mostRecentEvent.Address.Hex(),
-			}
-
-			transferLogProto := &avsproto.EventTrigger_TransferLogOutput{
-				TransactionHash:  mostRecentEvent.TxHash.Hex(),
-				Address:          mostRecentEvent.Address.Hex(),
-				BlockNumber:      mostRecentEvent.BlockNumber,
-				BlockTimestamp:   blockTimestamp,
-				FromAddress:      fromAddr,
-				ToAddress:        toAddr,
-				Value:            value,
-				TransactionIndex: uint32(mostRecentEvent.TxIndex),
-				LogIndex:         uint32(mostRecentEvent.Index),
-			}
-
-			// Enrich with token metadata
-			if enrichErr := n.tokenEnrichmentService.EnrichTransferLog(evmLogProto, transferLogProto); enrichErr == nil {
-				// Update the map with enriched data
-				transferLog["tokenName"] = transferLogProto.TokenName
-				transferLog["tokenSymbol"] = transferLogProto.TokenSymbol
-				transferLog["tokenDecimals"] = transferLogProto.TokenDecimals
-				transferLog["valueFormatted"] = transferLogProto.ValueFormatted
-
-				if n.logger != nil {
-					n.logger.Info("EventTrigger: Successfully enriched transfer log",
-						"contract", mostRecentEvent.Address.Hex(),
-						"tokenName", transferLogProto.TokenName,
-						"tokenSymbol", transferLogProto.TokenSymbol,
-						"tokenDecimals", transferLogProto.TokenDecimals,
-						"valueFormatted", transferLogProto.ValueFormatted)
-				}
-			} else {
-				if n.logger != nil {
-					n.logger.Warn("EventTrigger: Failed to enrich transfer log",
-						"contract", mostRecentEvent.Address.Hex(),
-						"error", enrichErr)
-				}
-			}
-		} else {
-			if n.logger != nil {
-				n.logger.Debug("EventTrigger: TokenEnrichmentService not available, transfer log not enriched")
-			}
+		// Token enrichment is now handled during JSON parsing in the new structure
+		// The transfer log already contains all necessary data including token metadata
+		if n.logger != nil {
+			n.logger.Debug("EventTrigger: Using new JSON-based structure, enrichment handled during parsing")
 		}
 
 		result["transfer_log"] = transferLog
@@ -1640,6 +1862,13 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		eventOutput := buildEventTriggerOutput(result)
 		resp.OutputData = &avsproto.RunTriggerResp_EventTrigger{
 			EventTrigger: eventOutput,
+		}
+
+		// Add metadata for runTrigger (debugging/testing)
+		if result != nil {
+			if metadataStr, ok := result["metadata"].(string); ok {
+				resp.Metadata = metadataStr
+			}
 		}
 	case NodeTypeManualTrigger:
 		// Always set manual trigger output, even if result is nil

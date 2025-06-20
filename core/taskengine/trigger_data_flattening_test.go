@@ -71,29 +71,27 @@ func TestBuildTriggerDataMapEventTriggerFlattening(t *testing.T) {
 }
 
 // TestBuildTriggerDataMapFromProtobufConsistency tests that both buildTriggerDataMap and
-// buildTriggerDataMapFromProtobuf produce consistent field names for JavaScript access.
+// buildTriggerDataMapFromProtobuf produce consistent field names for JavaScript access with the new JSON approach.
 func TestBuildTriggerDataMapFromProtobufConsistency(t *testing.T) {
-	// Create protobuf transfer log data
-	transferLogProto := &avsproto.EventTrigger_TransferLogOutput{
-		TokenName:        "USDC",
-		TokenSymbol:      "USDC",
-		TokenDecimals:    6,
-		TransactionHash:  "0x1b0b9bee55e3a824dedd1dcfaad1790e19e0a68d6717e385a960092077f8b6a1",
-		Address:          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-		BlockNumber:      8560047,
-		BlockTimestamp:   1750061412000,
-		FromAddress:      "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-		ToAddress:        "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
-		Value:            "0x00000000000000000000000000000000000000000000000000000000004c4b40",
-		ValueFormatted:   "5",
-		TransactionIndex: 63,
-		LogIndex:         83,
-	}
+	// Create protobuf EventTrigger with JSON data
+	jsonData := `{
+		"tokenName": "USDC",
+		"tokenSymbol": "USDC",
+		"tokenDecimals": 6,
+		"transactionHash": "0x1b0b9bee55e3a824dedd1dcfaad1790e19e0a68d6717e385a960092077f8b6a1",
+		"address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+		"blockNumber": 8560047,
+		"blockTimestamp": 1750061412000,
+		"fromAddress": "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
+		"toAddress": "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
+		"value": "0x00000000000000000000000000000000000000000000000000000000004c4b40",
+		"valueFormatted": "5",
+		"transactionIndex": 63,
+		"logIndex": 83
+	}`
 
 	eventOutputProto := &avsproto.EventTrigger_Output{
-		OutputType: &avsproto.EventTrigger_Output_TransferLog{
-			TransferLog: transferLogProto,
-		},
+		Data: jsonData,
 	}
 
 	// Test buildTriggerDataMapFromProtobuf
@@ -105,21 +103,7 @@ func TestBuildTriggerDataMapFromProtobufConsistency(t *testing.T) {
 		"queriesCount":  2,
 		"totalSearched": 5000,
 		"totalEvents":   1,
-		"transfer_log": map[string]interface{}{
-			"tokenName":        "USDC",
-			"tokenSymbol":      "USDC",
-			"tokenDecimals":    uint32(6),
-			"transactionHash":  "0x1b0b9bee55e3a824dedd1dcfaad1790e19e0a68d6717e385a960092077f8b6a1",
-			"address":          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-			"blockNumber":      uint64(8560047),
-			"blockTimestamp":   uint64(1750061412000),
-			"fromAddress":      "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-			"toAddress":        "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
-			"value":            "0x00000000000000000000000000000000000000000000000000000000004c4b40",
-			"valueFormatted":   "5",
-			"transactionIndex": uint32(63),
-			"logIndex":         uint32(83),
-		},
+		"data":          jsonData,
 	}
 
 	// Test buildTriggerDataMap
@@ -137,8 +121,17 @@ func TestBuildTriggerDataMapFromProtobufConsistency(t *testing.T) {
 		assert.Contains(t, protobufResult, field, "buildTriggerDataMapFromProtobuf should have field: %s", field)
 		assert.Contains(t, rawResult, field, "buildTriggerDataMap should have field: %s", field)
 
-		// Both results should have the same values for these fields
-		assert.Equal(t, protobufResult[field], rawResult[field], "Field %s should have same value in both results", field)
+		// Both results should have the same values for these fields (note: JSON parsing converts numbers to float64)
+		protobufValue := protobufResult[field]
+		rawValue := rawResult[field]
+
+		// Handle numeric type differences from JSON parsing
+		if field == "tokenDecimals" || field == "blockNumber" || field == "blockTimestamp" ||
+			field == "transactionIndex" || field == "logIndex" {
+			assert.Equal(t, float64(protobufValue.(int)), rawValue, "Numeric field %s should have same value", field)
+		} else {
+			assert.Equal(t, protobufValue, rawValue, "Field %s should have same value in both results", field)
+		}
 	}
 
 	// Verify that neither result has the nested transfer_log structure

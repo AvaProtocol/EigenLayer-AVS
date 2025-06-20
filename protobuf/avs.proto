@@ -195,32 +195,7 @@ message EventTrigger {
   }
   
   message Output {
-    // Use oneof to ensure exactly one field is set
-    oneof output_type {
-      // When the trigger is not a transfer event, we will have a raw event output only
-      // These shape of data is https://docs.ethers.org/v6/api/providers/#Log
-      Evm.Log evm_log = 1;
-      
-      // For transfer events specifically, we have enriched data
-      TransferLogOutput transfer_log = 2;
-    }
-  }
-  
-  message TransferLogOutput {
-    string token_name = 1;
-    string token_symbol = 2;
-    uint32 token_decimals = 3;
-    string transaction_hash = 4;
-    string address = 5;
-    uint64 block_number = 6;
-    // timestamp of the block (in milliseconds)
-    uint64 block_timestamp = 7;
-    string from_address = 8;
-    string to_address = 9;
-    string value = 10;
-    string value_formatted = 11;
-    uint32 transaction_index = 12;
-    uint32 log_index = 13;
+    string data = 1;  // JSON-encoded parsed event data
   }
 
   // Include Config as field so it is generated in Go
@@ -1072,6 +1047,7 @@ message RunNodeWithInputsResp {
   bool success = 1; // Whether the execution was successful
   string error = 3; // Error message if execution failed
   string node_id = 4; // ID of the executed node
+  string metadata = 5; // Optional JSON-encoded metadata for testing/debugging
   
   // Use specific output types for nodes only
   oneof output_data {
@@ -1100,6 +1076,7 @@ message RunTriggerResp {
   bool success = 1; // Whether the execution was successful
   string error = 2; // Error message if execution failed
   string trigger_id = 3; // ID of the executed trigger
+  string metadata = 4; // Optional JSON-encoded metadata for testing/debugging
   
   // Use specific output types for triggers
   oneof output_data {
@@ -1111,58 +1088,7 @@ message RunTriggerResp {
   }
 }
 
-message Evm {
-  message Log {
-    // Consensus fields
-    string address = 1;                // Address of the contract that generated the event
-    repeated string topics = 2;        // List of topics provided by the contract
-    string data = 3;                   // Supplied by the contract, usually ABI-encoded
 
-    // Derived fields (filled in by the node but not secured by consensus)
-    uint64 block_number = 4;          // Block in which the transaction was included
-    string transaction_hash = 5;               // Hash of the transaction
-    uint32 transaction_index = 6;              // Index of the transaction in the block
-    string block_hash = 7;            // Hash of the block in which the transaction was included
-    uint32 index = 8;                 // Index of the log in the receipt
-    bool removed = 9;                 // True if this log was reverted due to chain reorganization
-  }
-
-  // Define to match https://docs.ethers.org/v6/api/providers/#TransactionReceipt as required in this ticket: https://github.com/AvaProtocol/EigenLayer-AVS/issues/153
-  message TransactionReceipt {
-    string hash = 1;
-    string block_hash = 2; 
-    uint64 block_number = 3;
-    string from = 4; 
-    uint64 gas_used = 6;
-    uint64 gas_price = 7;
-    uint64 cumulative_gas_used = 8;
-    uint64 fee = 9;
-    string contract_address = 10; 
-    uint64 index = 11; 
-    repeated string logs = 12; 
-    string logs_bloom = 13; 
-    string root = 14; 
-    uint32 status = 15;
-    uint32 type = 16;
-    uint64 blob_gas_price = 17; 
-    uint64 blob_gas_used = 18;
-    string to = 19;
-  }
-
-  message UserOp {
-    string sender = 1;
-    string nonce = 2;
-    string init_code = 3;
-    string call_data = 4;
-    string call_gas_limit = 5;
-    string verification_gas_limit = 6;
-    string pre_verification_gas = 7;
-    string max_fee_per_gas = 8;
-    string max_priority_fee_per_gas = 9;
-    string paymaster_and_data = 10;
-    string signature = 11;
-  }
-}
 
 // Request message for SimulateTask
 message SimulateTaskReq {

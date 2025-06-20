@@ -351,49 +351,48 @@ func GetTestSecrets() map[string]string {
 }
 
 func GetTestEventTriggerData() *TriggerData {
+	// Sample JSON event data that would come from parsed event
+	eventData := `{
+		"blockNumber": 7212417,
+		"transactionHash": "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+		"logIndex": 98,
+		"address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+		"removed": false
+	}`
+
 	return &TriggerData{
 		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 		Output: &avsproto.EventTrigger_Output{
-			OutputType: &avsproto.EventTrigger_Output_EvmLog{
-				EvmLog: &avsproto.Evm_Log{
-					BlockNumber:     7212417,
-					TransactionHash: "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-					Index:           98,
-					// Other fields would be populated if available
-					Address: "",
-					Topics:  []string{},
-					Data:    "",
-				},
-			},
+			Data: eventData,
 		},
 	}
 }
 
 // GetTestEventTriggerDataWithTransferData provides trigger data with rich transfer log data for testing
-func GetTestEventTriggerDataWithTransferData() (*TriggerData, *avsproto.EventTrigger_TransferLogOutput) {
-	transferLog := &avsproto.EventTrigger_TransferLogOutput{
-		TokenName:        "USDC",
-		TokenSymbol:      "USDC",
-		TokenDecimals:    6,
-		TransactionHash:  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-		Address:          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-		BlockNumber:      7212417,
-		BlockTimestamp:   1733351604000,
-		FromAddress:      "0x2A6CEbeDF9e737A9C6188c62A68655919c7314DB",
-		ToAddress:        "0xC114FB059434563DC65AC8D57e7976e3eaC534F4",
-		Value:            "3453120",
-		ValueFormatted:   "3.45312",
-		TransactionIndex: 73,
-	}
+func GetTestEventTriggerDataWithTransferData() *TriggerData {
+	// Sample JSON event data for transfer events (parsed from Transfer event)
+	transferEventData := `{
+		"tokenName": "USDC",
+		"tokenSymbol": "USDC", 
+		"tokenDecimals": 6,
+		"from": "0x2A6CEbeDF9e737A9C6188c62A68655919c7314DB",
+		"to": "0xC114FB059434563DC65AC8D57e7976e3eaC534F4",
+		"value": "3453120",
+		"valueFormatted": "3.45312",
+		"transactionHash": "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+		"address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+		"blockNumber": 7212417,
+		"blockTimestamp": 1733351604000,
+		"transactionIndex": 73,
+		"logIndex": 0
+	}`
 
 	triggerData := &TriggerData{
 		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 		Output: &avsproto.EventTrigger_Output{
-			OutputType: &avsproto.EventTrigger_Output_TransferLog{
-				TransferLog: transferLog,
-			},
+			Data: transferEventData,
 		},
 	}
 
-	return triggerData, transferLog
+	return triggerData
 }

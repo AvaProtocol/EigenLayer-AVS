@@ -341,6 +341,13 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		case triggerItem := <-eventTriggerCh:
 			o.logger.Info("event trigger", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
 
+			// Create minimal JSON data for the event trigger with new structure
+			eventData := fmt.Sprintf(`{
+				"blockNumber": %d,
+				"logIndex": %d,
+				"transactionHash": "%s"
+			}`, triggerItem.Marker.BlockNumber, triggerItem.Marker.LogIndex, triggerItem.Marker.TxHash)
+
 			if resp, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
 				Address:     o.config.OperatorAddress,
 				Signature:   "pending",
@@ -348,18 +355,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				TriggerType: avspb.TriggerType_TRIGGER_TYPE_EVENT,
 				TriggerOutput: &avspb.NotifyTriggersReq_EventTrigger{
 					EventTrigger: &avspb.EventTrigger_Output{
-						// Create an EVM log output with the event data using oneof
-						OutputType: &avspb.EventTrigger_Output_EvmLog{
-							EvmLog: &avspb.Evm_Log{
-								BlockNumber:     uint64(triggerItem.Marker.BlockNumber),
-								Index:           uint32(triggerItem.Marker.LogIndex),
-								TransactionHash: triggerItem.Marker.TxHash,
-								// Other fields would be populated if available
-								Address: "",
-								Topics:  []string{},
-								Data:    "",
-							},
-						},
+						Data: eventData,
 					},
 				},
 			}); err == nil {
