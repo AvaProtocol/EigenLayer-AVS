@@ -134,15 +134,21 @@ func TestBlockTrigger_AddCheck_ValidInterval(t *testing.T) {
 		t.Errorf("AddCheck() unexpected error for valid interval: %v", err)
 	}
 
-	// Verify the task was added to the schedule
-	blockTrigger.mu.Lock()
-	defer blockTrigger.mu.Unlock()
-
-	if _, exists := blockTrigger.schedule[10]; !exists {
-		t.Error("Task was not added to schedule for interval 10")
+	// Verify the task was added to the registry
+	if blockTrigger.registry.GetBlockTaskCount() != 1 {
+		t.Error("Expected 1 block task in registry")
 	}
 
-	if _, exists := blockTrigger.schedule[10]["test-task-valid"]; !exists {
-		t.Error("Task ID was not found in schedule for interval 10")
+	entry, exists := blockTrigger.registry.GetTask("test-task-valid")
+	if !exists {
+		t.Error("Task was not found in registry")
+	}
+
+	if entry.BlockData == nil {
+		t.Error("Task does not have BlockData")
+	}
+
+	if entry.BlockData.Interval != 10 {
+		t.Errorf("Expected interval 10, got %d", entry.BlockData.Interval)
 	}
 }

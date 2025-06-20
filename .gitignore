@@ -32,5 +32,13 @@ alias-ecdsa.key.json
 
 keys/
 
+# BadgerDB database files (runtime data)
+cmd/data/
+**/badger/
+*.vlog
+DISCARD
+KEYREGISTRY
+MANIFEST
+
 # Plugin files for semantic release
 .semrel/
