@@ -124,7 +124,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 	taskengine.SetLogger(o.logger)
 
 	var metricsErrChan <-chan error
-	if o.config.EnableMetrics {
+	if o.config.EnableMetrics && o.metrics != nil {
 		metricsErrChan = o.metrics.Start(ctx, o.metricsReg)
 	} else {
 		metricsErrChan = make(chan error, 1)
@@ -570,7 +570,10 @@ func (o *Operator) StreamMessages() {
 				time.Sleep(time.Duration(retryIntervalSecond) * time.Second)
 				break
 			}
-			o.metrics.IncNumTasksReceived(resp.Id)
+			// Add nil check for metrics to prevent segmentation fault
+			if o.metrics != nil {
+				o.metrics.IncNumTasksReceived(resp.Id)
+			}
 
 			switch resp.Op {
 			case avspb.MessageOp_CancelTask, avspb.MessageOp_DeleteTask:
@@ -692,9 +695,12 @@ func (o *Operator) PingServer() {
 		}
 	}()
 
-	o.metrics.IncWorkerLoop()
-	elapse := o.elapsing.Report()
-	o.metrics.AddUptime(float64(elapse.Milliseconds()))
+	// Add nil check for metrics to prevent segmentation fault
+	if o.metrics != nil {
+		o.metrics.IncWorkerLoop()
+		elapse := o.elapsing.Report()
+		o.metrics.AddUptime(float64(elapse.Milliseconds()))
+	}
 
 	id := hex.EncodeToString(o.operatorId[:])
 	start := time.Now()
@@ -793,12 +799,15 @@ func (o *Operator) PingServer() {
 	}
 
 	elapsed := time.Since(start)
-	if err == nil {
-		o.metrics.IncPing("success")
-	} else {
-		o.metrics.IncPing("error")
-		// Don't log additional errors here - they were already logged above with proper debouncing
-		// Duplicate logging here with different error types breaks the debounce logic
+	// Add nil check for metrics to prevent segmentation fault
+	if o.metrics != nil {
+		if err == nil {
+			o.metrics.IncPing("success")
+		} else {
+			o.metrics.IncPing("error")
+			// Don't log additional errors here - they were already logged above with proper debouncing
+			// Duplicate logging here with different error types breaks the debounce logic
+		}
+		o.metrics.SetPingDuration(elapsed.Seconds())
 	}
-	o.metrics.SetPingDuration(elapsed.Seconds())
 }
