@@ -88,17 +88,35 @@ func TestVM_ContractRead_DecimalFormatting(t *testing.T) {
 	if executionStep.Success {
 		// Check that we have contract read output
 		if contractReadOutput := executionStep.GetContractRead(); contractReadOutput != nil {
-			t.Logf("Contract read results count: %d", len(contractReadOutput.Results))
+			var results []interface{}
+			if contractReadOutput.GetData() != nil {
+				// Extract results from the protobuf Value
+				if contractReadOutput.GetData().GetListValue() != nil {
+					// Data is an array
+					for _, item := range contractReadOutput.GetData().GetListValue().GetValues() {
+						results = append(results, item.AsInterface())
+					}
+				} else {
+					// Data might be a single object, wrap it in an array for consistency
+					results = append(results, contractReadOutput.GetData().AsInterface())
+				}
+			}
+
+			t.Logf("Contract read results count: %d", len(results))
 
 			// We should have 1 result (decimals() call is skipped, only latestRoundData() result)
-			if len(contractReadOutput.Results) > 0 {
-				result := contractReadOutput.Results[0]
-				t.Logf("Method result - Success: %v, Method: %s, Fields: %d",
-					result.Success, result.MethodName, len(result.Data))
+			if len(results) > 0 {
+				if resultMap, ok := results[0].(map[string]interface{}); ok {
+					t.Logf("Method result - Success: %v, Method: %s",
+						resultMap["success"], resultMap["methodName"])
 
-				// Log all fields to see the structure
-				for _, field := range result.Data {
-					t.Logf("  Field: %s (%s) = %s", field.Name, field.Type, field.Value)
+					// Log data fields if available
+					if data, ok := resultMap["data"].(map[string]interface{}); ok {
+						t.Logf("  Data fields: %d", len(data))
+						for fieldName, fieldValue := range data {
+							t.Logf("  Field: %s = %v", fieldName, fieldValue)
+						}
+					}
 				}
 			}
 		}
@@ -363,14 +381,31 @@ func TestVM_ContractWrite_BasicExecution(t *testing.T) {
 	// Check the new enhanced output structure
 	if executionStep.Success {
 		contractWriteOutput := executionStep.GetContractWrite()
-		if contractWriteOutput != nil && len(contractWriteOutput.Results) > 0 {
-			result := contractWriteOutput.Results[0]
-			hash := ""
-			if result.Transaction != nil {
-				hash = result.Transaction.Hash
+		if contractWriteOutput != nil && contractWriteOutput.GetData() != nil {
+			var results []interface{}
+			// Extract results from the protobuf Value
+			if contractWriteOutput.GetData().GetListValue() != nil {
+				// Data is an array
+				for _, item := range contractWriteOutput.GetData().GetListValue().GetValues() {
+					results = append(results, item.AsInterface())
+				}
+			} else {
+				// Data might be a single object, wrap it in an array for consistency
+				results = append(results, contractWriteOutput.GetData().AsInterface())
 			}
-			t.Logf("Contract write result - Method: %s, Success: %v, Hash: %s",
-				result.MethodName, result.Success, hash)
+
+			if len(results) > 0 {
+				if resultMap, ok := results[0].(map[string]interface{}); ok {
+					hash := ""
+					if transaction, ok := resultMap["transaction"].(map[string]interface{}); ok {
+						if h, ok := transaction["hash"].(string); ok {
+							hash = h
+						}
+					}
+					t.Logf("Contract write result - Method: %s, Success: %v, Hash: %s",
+						resultMap["methodName"], resultMap["success"], hash)
+				}
+			}
 		}
 	}
 

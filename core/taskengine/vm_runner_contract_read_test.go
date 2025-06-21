@@ -78,16 +78,41 @@ func TestContractReadSimpleReturn(t *testing.T) {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 
-	results := step.GetContractRead().Results
-	if len(results) == 0 || len(results[0].Data) == 0 {
+	var results []interface{}
+	if step.GetContractRead().GetData() != nil {
+		// Extract results from the protobuf Value
+		if step.GetContractRead().GetData().GetListValue() != nil {
+			// Data is an array
+			for _, item := range step.GetContractRead().GetData().GetListValue().GetValues() {
+				results = append(results, item.AsInterface())
+			}
+		} else {
+			// Data might be a single object, wrap it in an array for consistency
+			results = append(results, step.GetContractRead().GetData().AsInterface())
+		}
+	}
+
+	if len(results) == 0 {
 		t.Errorf("expected contract read to return data but got empty results")
 		return
 	}
 
-	// Get the first field value from the first result
-	firstValue := results[0].Data[0].Value
-	if firstValue != "313131" {
-		t.Errorf("read balanceOf doesn't return right data. expect 313131 got %s", firstValue)
+	// Get the first result and extract data
+	if resultMap, ok := results[0].(map[string]interface{}); ok {
+		if data, ok := resultMap["data"].(map[string]interface{}); ok {
+			// Find the balance value - it should be the first/only field in balanceOf
+			for _, value := range data {
+				if valueStr, ok := value.(string); ok && valueStr == "313131" {
+					// Found the expected value
+					return
+				}
+			}
+			t.Errorf("read balanceOf doesn't return right data. expected 313131 but didn't find it in data: %v", data)
+		} else {
+			t.Errorf("expected data field in result but got: %v", resultMap)
+		}
+	} else {
+		t.Errorf("expected result to be a map but got: %v", results[0])
 	}
 }
 
@@ -159,30 +184,60 @@ func TestContractReadComplexReturn(t *testing.T) {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 
-	results := step.GetContractRead().Results
-	if len(results) == 0 || len(results[0].Data) < 5 {
-		t.Errorf("contract read doesn't return right data, wrong length. expect 5 fields, got %d results with %d fields", len(results), len(results[0].Data))
+	var results []interface{}
+	if step.GetContractRead().GetData() != nil {
+		// Extract results from the protobuf Value
+		if step.GetContractRead().GetData().GetListValue() != nil {
+			// Data is an array
+			for _, item := range step.GetContractRead().GetData().GetListValue().GetValues() {
+				results = append(results, item.AsInterface())
+			}
+		} else {
+			// Data might be a single object, wrap it in an array for consistency
+			results = append(results, step.GetContractRead().GetData().AsInterface())
+		}
+	}
+
+	if len(results) == 0 {
+		t.Errorf("expected contract read to return data but got empty results")
 		return
 	}
 
-	// When reading data out and return over the wire, we have to serialize big int to string.
-	roundIdExpected := "18446744073709572839"
-	roundId := results[0].Data[0].Value
-	if roundIdExpected != roundId {
-		t.Errorf("contract read returns incorrect data expect %s got %s", roundIdExpected, roundId)
-	}
-	if results[0].Data[1].Value != "2189300000" {
-		t.Errorf("contract read returns incorrect data expect %s got %s", "2189300000", results[0].Data[1].Value)
-	}
-	if results[0].Data[2].Value != "1733878404" {
-		t.Errorf("contract read returns incorrect data expect %s got %s", "1733878404", results[0].Data[2].Value)
-	}
-	if results[0].Data[3].Value != "1733878404" {
-		t.Errorf("contract read returns incorrect data expect %s got %s", "1733878404", results[0].Data[3].Value)
-	}
+	// Get the first result and extract data
+	if resultMap, ok := results[0].(map[string]interface{}); ok {
+		if data, ok := resultMap["data"].(map[string]interface{}); ok {
+			if len(data) < 5 {
+				t.Errorf("contract read doesn't return right data, wrong length. expect 5 fields, got %d fields", len(data))
+				return
+			}
 
-	if results[0].Data[4].Value != "18446744073709572839" {
-		t.Errorf("contract read returns incorrect data expect %s got %s", "18446744073709572839", results[0].Data[4].Value)
-	}
+			// When reading data out and return over the wire, we have to serialize big int to string.
+			// Check specific field values based on the getRoundData function
+			expectedValues := map[string]string{
+				"roundId":         "18446744073709572839",
+				"answer":          "2189300000",
+				"startedAt":       "1733878404",
+				"updatedAt":       "1733878404",
+				"answeredInRound": "18446744073709572839",
+			}
 
+			for fieldName, expectedValue := range expectedValues {
+				if actualValue, exists := data[fieldName]; exists {
+					if actualValueStr, ok := actualValue.(string); ok {
+						if actualValueStr != expectedValue {
+							t.Errorf("contract read returns incorrect data for field %s: expected %s got %s", fieldName, expectedValue, actualValueStr)
+						}
+					} else {
+						t.Errorf("expected field %s to be string but got %T", fieldName, actualValue)
+					}
+				} else {
+					t.Errorf("expected field %s not found in data: %v", fieldName, data)
+				}
+			}
+		} else {
+			t.Errorf("expected data field in result but got: %v", resultMap)
+		}
+	} else {
+		t.Errorf("expected result to be a map but got: %v", results[0])
+	}
 }

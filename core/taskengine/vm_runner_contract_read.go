@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type ContractReadProcessor struct {
@@ -519,10 +520,36 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 
 	s.Log = log.String()
 
+	// Convert results to Go maps for JSON conversion
+	var resultsArray []interface{}
+	for _, methodResult := range results {
+		resultMap := map[string]interface{}{
+			"methodName": methodResult.MethodName,
+			"success":    methodResult.Success,
+			"error":      methodResult.Error,
+		}
+
+		// Convert structured fields to a map
+		dataMap := make(map[string]interface{})
+		for _, field := range methodResult.Data {
+			dataMap[field.Name] = field.Value
+		}
+		resultMap["data"] = dataMap
+
+		resultsArray = append(resultsArray, resultMap)
+	}
+
+	// Convert results to JSON for the new protobuf structure
+	resultsValue, err := structpb.NewValue(resultsArray)
+	if err != nil {
+		log.WriteString(fmt.Sprintf("Failed to convert results to protobuf Value: %v\n", err))
+		resultsValue = structpb.NewNullValue()
+	}
+
 	// Create output with all results
 	s.OutputData = &avsproto.Execution_Step_ContractRead{
 		ContractRead: &avsproto.ContractReadNode_Output{
-			Results: results,
+			Data: resultsValue,
 		},
 	}
 

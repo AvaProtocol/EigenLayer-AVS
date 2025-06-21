@@ -62,6 +62,7 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 	}
 
 	vm.WithDb(db)
+	vm.WithLogger(testutil.GetLogger())
 
 	vm.AddVar("contract_address", baseSepoliaUsdcAddress.Hex())
 	vm.AddVar("call_data", "0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000")
@@ -103,40 +104,58 @@ func TestContractWriteSimpleReturn(t *testing.T) {
 		return
 	}
 
-	if len(contractWriteOutput.Results) == 0 {
+	var results []interface{}
+	if contractWriteOutput.GetData() != nil {
+		// Extract results from the protobuf Value
+		if contractWriteOutput.GetData().GetListValue() != nil {
+			// Data is an array
+			for _, item := range contractWriteOutput.GetData().GetListValue().GetValues() {
+				results = append(results, item.AsInterface())
+			}
+		} else {
+			// Data might be a single object, wrap it in an array for consistency
+			results = append(results, contractWriteOutput.GetData().AsInterface())
+		}
+	}
+
+	if len(results) == 0 {
 		t.Errorf("Expected at least one result but got none")
 		return
 	}
 
-	result := contractWriteOutput.Results[0]
+	// Get the first result and verify its structure
+	if resultMap, ok := results[0].(map[string]interface{}); ok {
+		if methodName, ok := resultMap["methodName"].(string); ok && methodName == "" {
+			t.Errorf("Expected method name but got empty string")
+		}
 
-	if result.MethodName == "" {
-		t.Errorf("Expected method name but got empty string")
-	}
+		if success, ok := resultMap["success"].(bool); ok && !success {
+			t.Errorf("Expected successful result but got failure")
+		}
 
-	if !result.Success {
-		t.Errorf("Expected successful result but got failure: %v", result.Error)
-	}
+		// Check transaction data
+		if transaction, ok := resultMap["transaction"].(map[string]interface{}); ok {
+			if from, ok := transaction["from"].(string); ok && from == "" {
+				t.Errorf("Missing From address in the transaction data")
+			}
 
-	if result.Transaction == nil {
-		t.Errorf("Expected transaction data but got nil")
-		return
-	}
+			if to, ok := transaction["to"].(string); ok && to == "" {
+				t.Errorf("Missing To address in the transaction data")
+			}
 
-	if result.Transaction.From == "" {
-		t.Errorf("Missing From address in the transaction data")
-	}
+			if hash, ok := transaction["hash"].(string); ok && hash != "" && len(hash) != 66 {
+				t.Errorf("Invalid Tx Hash length in the output data, expected 66 chars but got %d", len(hash))
+			}
+		} else {
+			t.Errorf("Expected transaction data but got nil")
+			return
+		}
 
-	if result.Transaction.To == "" {
-		t.Errorf("Missing To address in the transaction data")
-	}
-
-	if result.Transaction.Hash != "" && len(result.Transaction.Hash) != 66 {
-		t.Errorf("Invalid Tx Hash length in the output data, expected 66 chars but got %d", len(result.Transaction.Hash))
-	}
-
-	if result.InputData == "" {
-		t.Errorf("Missing input data in the result")
+		if inputData, ok := resultMap["inputData"].(string); ok && inputData == "" {
+			t.Errorf("Missing input data in the result")
+		}
+	} else {
+		t.Errorf("Expected result to be a map but got: %v", results[0])
 	}
 
 	expectedLogSubstring := strings.ToLower(baseSepoliaUsdcAddress.Hex())

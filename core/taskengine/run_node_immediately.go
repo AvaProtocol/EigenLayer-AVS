@@ -1321,53 +1321,38 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		} else {
 			result = map[string]interface{}{"data": iface}
 		}
-	} else if contractRead := executionStep.GetContractRead(); contractRead != nil && len(contractRead.GetResults()) > 0 {
-		// ContractRead now returns multiple method results
-		results := contractRead.GetResults()
+	} else if contractRead := executionStep.GetContractRead(); contractRead != nil && contractRead.GetData() != nil {
+		// ContractRead now returns data as protobuf Value
+		var results []interface{}
+
+		// Extract results from the protobuf Value
+		if contractRead.GetData().GetListValue() != nil {
+			// Data is an array
+			for _, item := range contractRead.GetData().GetListValue().GetValues() {
+				results = append(results, item.AsInterface())
+			}
+		} else {
+			// Data might be a single object, wrap it in an array for consistency
+			results = append(results, contractRead.GetData().AsInterface())
+		}
 
 		// For backward compatibility, if there's only one result, expose its fields directly
 		if len(results) == 1 {
-			methodResult := results[0]
-			if methodResult.Success {
-				result["method_name"] = methodResult.GetMethodName()
-
-				// Add structured data with field names
-				if len(methodResult.GetData()) > 0 {
-					structuredData := make(map[string]interface{})
-					for _, field := range methodResult.GetData() {
-						structuredData[field.GetName()] = field.GetValue()
+			if methodResultMap, ok := results[0].(map[string]interface{}); ok {
+				result["method_name"] = methodResultMap["methodName"]
+				if success, ok := methodResultMap["success"].(bool); ok && success {
+					// Add structured data with field names
+					if data, ok := methodResultMap["data"].(map[string]interface{}); ok {
+						result["data"] = data
 					}
-					result["data"] = structuredData
+				} else {
+					result["error"] = methodResultMap["error"]
+					result["method_name"] = methodResultMap["methodName"]
 				}
-			} else {
-				result["error"] = methodResult.GetError()
-				result["method_name"] = methodResult.GetMethodName()
 			}
 		} else {
 			// Multiple method results - return as array
-			var allResults []map[string]interface{}
-			for _, methodResult := range results {
-				methodMap := map[string]interface{}{
-					"method_name": methodResult.GetMethodName(),
-					"success":     methodResult.GetSuccess(),
-				}
-
-				if methodResult.Success {
-					// Add structured data
-					if len(methodResult.GetData()) > 0 {
-						structuredData := make(map[string]interface{})
-						for _, field := range methodResult.GetData() {
-							structuredData[field.GetName()] = field.GetValue()
-						}
-						methodMap["data"] = structuredData
-					}
-				} else {
-					methodMap["error"] = methodResult.GetError()
-				}
-
-				allResults = append(allResults, methodMap)
-			}
-			result["results"] = allResults
+			result["results"] = results
 		}
 	} else if branch := executionStep.GetBranch(); branch != nil {
 		result["conditionId"] = branch.GetConditionId()
@@ -1418,23 +1403,39 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		result["success"] = true
 	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
 		// ContractWrite output now contains enhanced results structure
-		if len(contractWrite.GetResults()) > 0 {
-			// Convert all results to the expected format
+		if contractWrite.GetData() != nil {
+			// Extract results from the protobuf Value
 			var allResults []interface{}
-			for _, methodResult := range contractWrite.GetResults() {
-				allResults = append(allResults, methodResult)
+
+			if contractWrite.GetData().GetListValue() != nil {
+				// Data is an array
+				for _, item := range contractWrite.GetData().GetListValue().GetValues() {
+					allResults = append(allResults, item.AsInterface())
+				}
+			} else {
+				// Data might be a single object, wrap it in an array for consistency
+				allResults = append(allResults, contractWrite.GetData().AsInterface())
 			}
 
-			// Return results array for multiple method calls
-			if len(allResults) > 1 {
-				return map[string]interface{}{"results": allResults}, nil
+			// Return results array AND backward compatibility fields
+			result["results"] = allResults
+
+			// For backward compatibility, also provide legacy fields from first result
+			if len(allResults) > 0 {
+				if firstResultMap, ok := allResults[0].(map[string]interface{}); ok {
+					if transaction, ok := firstResultMap["transaction"].(map[string]interface{}); ok {
+						if hash, ok := transaction["hash"].(string); ok {
+							result["txHash"] = hash
+						}
+						result["transaction"] = transaction
+					}
+					if success, ok := firstResultMap["success"].(bool); ok {
+						result["success"] = success
+					}
+				}
 			}
 
-			// For single method call, maintain backward compatibility
-			firstResult := contractWrite.GetResults()[0]
-			if firstResult.Transaction != nil {
-				return map[string]interface{}{"txHash": firstResult.Transaction.Hash}, nil
-			}
+			return result, nil
 		}
 		return map[string]interface{}{"status": "success"}, nil
 	}
@@ -1662,188 +1663,118 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		// For contract read nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
 		contractReadOutput := &avsproto.ContractReadNode_Output{}
 		if result != nil && len(result) > 0 {
+			// Convert result to the new data structure
+			var resultsArray []interface{}
+
 			// Handle the new multiple method result structure
 			if results, ok := result["results"].([]map[string]interface{}); ok {
 				// Multiple method results
 				for _, methodResult := range results {
-					methodResultProto := &avsproto.ContractReadNode_MethodResult{}
-					if methodName, ok := methodResult["method_name"].(string); ok && methodName != "" {
-						methodResultProto.MethodName = methodName
-					} else {
-						methodResultProto.MethodName = "unknown" // Ensure non-empty method name
+					// Convert each method result to the expected format
+					convertedResult := map[string]interface{}{
+						"methodName": methodResult["method_name"],
+						"success":    methodResult["success"],
+						"error":      methodResult["error"],
+						"data":       methodResult["data"],
 					}
-					if success, ok := methodResult["success"].(bool); ok {
-						methodResultProto.Success = success
-					} else {
-						methodResultProto.Success = false // Default to false if not set
-					}
-					if errorMsg, ok := methodResult["error"].(string); ok && errorMsg != "" {
-						methodResultProto.Error = errorMsg
-					} else {
-						methodResultProto.Error = "" // Ensure error field is never nil
-					}
-
-					// Handle structured data (now the only data field)
-					if data, ok := methodResult["data"].(map[string]interface{}); ok {
-						for fieldName, fieldValue := range data {
-							// Ensure field name and value are never empty
-							name := fieldName
-							if name == "" {
-								name = "unknown_field"
-							}
-
-							value := fmt.Sprintf("%v", fieldValue)
-							if value == "" || value == "<nil>" {
-								value = ""
-							}
-
-							field := &avsproto.ContractReadNode_MethodResult_StructuredField{
-								Name:  name,
-								Type:  "string", // Default type, could be enhanced to detect actual type
-								Value: value,
-							}
-							methodResultProto.Data = append(methodResultProto.Data, field)
-						}
-					}
-
-					contractReadOutput.Results = append(contractReadOutput.Results, methodResultProto)
+					resultsArray = append(resultsArray, convertedResult)
 				}
 			} else {
 				// Single method result (backward compatibility)
-				methodResult := &avsproto.ContractReadNode_MethodResult{}
-
-				if methodName, ok := result["method_name"].(string); ok && methodName != "" {
-					methodResult.MethodName = methodName
-				} else {
-					methodResult.MethodName = "unknown" // Ensure non-empty method name
+				convertedResult := map[string]interface{}{
+					"methodName": result["method_name"],
+					"success":    true,
+					"error":      "",
+					"data":       result["data"],
 				}
 				if errorMsg, ok := result["error"].(string); ok && errorMsg != "" {
-					methodResult.Error = errorMsg
-					methodResult.Success = false
-				} else {
-					methodResult.Error = "" // Ensure error field is never nil
-					methodResult.Success = true
+					convertedResult["error"] = errorMsg
+					convertedResult["success"] = false
 				}
+				resultsArray = append(resultsArray, convertedResult)
+			}
 
-				// Handle structured data (now the only data field)
-				if data, ok := result["data"].(map[string]interface{}); ok {
-					for fieldName, fieldValue := range data {
-						// Ensure field name and value are never empty
-						name := fieldName
-						if name == "" {
-							name = "unknown_field"
-						}
-
-						value := fmt.Sprintf("%v", fieldValue)
-						if value == "" || value == "<nil>" {
-							value = ""
-						}
-
-						field := &avsproto.ContractReadNode_MethodResult_StructuredField{
-							Name:  name,
-							Type:  "string", // Default type, could be enhanced to detect actual type
-							Value: value,
-						}
-						methodResult.Data = append(methodResult.Data, field)
-					}
-				}
-
-				contractReadOutput.Results = []*avsproto.ContractReadNode_MethodResult{methodResult}
+			// Convert to protobuf Value
+			if resultsValue, err := structpb.NewValue(resultsArray); err == nil {
+				contractReadOutput.Data = resultsValue
 			}
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractRead{
 			ContractRead: contractReadOutput,
 		}
-
 	case NodeTypeContractWrite:
 		// For contract write nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
 		contractWriteOutput := &avsproto.ContractWriteNode_Output{}
 		if result != nil && len(result) > 0 {
-			// ContractWrite now uses results array structure
-			var results []*avsproto.ContractWriteNode_MethodResult
+			// Convert result to the new data structure
+			var resultsArray []interface{}
 
 			// Check if we have the new results array format (from VM execution)
-			if resultsArray, ok := result["results"].([]interface{}); ok {
+			if resultsFromVM, ok := result["results"].([]interface{}); ok {
 				// Process each result in the array
-				for _, resultInterface := range resultsArray {
+				for _, resultInterface := range resultsFromVM {
 					if methodResult, ok := resultInterface.(*avsproto.ContractWriteNode_MethodResult); ok {
-						// Direct protobuf result from VM execution
-						results = append(results, methodResult)
+						// Convert protobuf result to map for consistency
+						convertedResult := map[string]interface{}{
+							"methodName": methodResult.MethodName,
+							"success":    methodResult.Success,
+							"inputData":  methodResult.InputData,
+						}
+
+						if methodResult.Transaction != nil {
+							convertedResult["transaction"] = map[string]interface{}{
+								"hash":           methodResult.Transaction.Hash,
+								"status":         methodResult.Transaction.Status,
+								"from":           methodResult.Transaction.From,
+								"to":             methodResult.Transaction.To,
+								"value":          methodResult.Transaction.Value,
+								"timestamp":      methodResult.Transaction.Timestamp,
+								"simulation":     methodResult.Transaction.Simulation,
+								"simulationMode": methodResult.Transaction.SimulationMode,
+								"chainId":        methodResult.Transaction.ChainId,
+							}
+						}
+
+						if methodResult.Error != nil {
+							convertedResult["error"] = map[string]interface{}{
+								"code":    methodResult.Error.Code,
+								"message": methodResult.Error.Message,
+							}
+						}
+
+						resultsArray = append(resultsArray, convertedResult)
 					} else if methodResultMap, ok := resultInterface.(map[string]interface{}); ok {
-						// Map format - convert to protobuf
-						methodResult := &avsproto.ContractWriteNode_MethodResult{}
-
-						if methodName, ok := methodResultMap["method_name"].(string); ok {
-							methodResult.MethodName = methodName
-						} else if methodName, ok := methodResultMap["methodName"].(string); ok {
-							methodResult.MethodName = methodName
-						}
-
-						if success, ok := methodResultMap["success"].(bool); ok {
-							methodResult.Success = success
-						}
-
-						// Handle transaction data
-						if txData, ok := methodResultMap["transaction"].(map[string]interface{}); ok {
-							transaction := &avsproto.ContractWriteNode_TransactionData{}
-							if hash, ok := txData["hash"].(string); ok {
-								transaction.Hash = hash
-							}
-							if status, ok := txData["status"].(string); ok {
-								transaction.Status = status
-							}
-							if from, ok := txData["from"].(string); ok {
-								transaction.From = from
-							}
-							if to, ok := txData["to"].(string); ok {
-								transaction.To = to
-							}
-							methodResult.Transaction = transaction
-						}
-
-						// Handle error data
-						if errorData, ok := methodResultMap["error"].(map[string]interface{}); ok {
-							errorResult := &avsproto.ContractWriteNode_ErrorData{}
-							if code, ok := errorData["code"].(string); ok {
-								errorResult.Code = code
-							}
-							if message, ok := errorData["message"].(string); ok {
-								errorResult.Message = message
-							}
-							methodResult.Error = errorResult
-						}
-
-						if inputData, ok := methodResultMap["input_data"].(string); ok {
-							methodResult.InputData = inputData
-						} else if inputData, ok := methodResultMap["inputData"].(string); ok {
-							methodResult.InputData = inputData
-						}
-
-						results = append(results, methodResult)
+						// Already in map format
+						resultsArray = append(resultsArray, methodResultMap)
 					}
 				}
 			} else {
 				// Fallback: Try to extract transaction hash from result (backward compatibility)
 				if txHash, ok := result["txHash"].(string); ok {
-					results = append(results, &avsproto.ContractWriteNode_MethodResult{
-						MethodName: "unknown",
-						Success:    true,
-						Transaction: &avsproto.ContractWriteNode_TransactionData{
-							Hash: txHash,
+					convertedResult := map[string]interface{}{
+						"methodName": "unknown",
+						"success":    true,
+						"transaction": map[string]interface{}{
+							"hash": txHash,
 						},
-					})
+					}
+					resultsArray = append(resultsArray, convertedResult)
 				} else if transactionHash, ok := result["transactionHash"].(string); ok {
-					results = append(results, &avsproto.ContractWriteNode_MethodResult{
-						MethodName: "unknown",
-						Success:    true,
-						Transaction: &avsproto.ContractWriteNode_TransactionData{
-							Hash: transactionHash,
+					convertedResult := map[string]interface{}{
+						"methodName": "unknown",
+						"success":    true,
+						"transaction": map[string]interface{}{
+							"hash": transactionHash,
 						},
-					})
+					}
+					resultsArray = append(resultsArray, convertedResult)
 				}
 			}
 
-			contractWriteOutput.Results = results
+			// Convert to protobuf Value
+			if resultsValue, err := structpb.NewValue(resultsArray); err == nil {
+				contractWriteOutput.Data = resultsValue
+			}
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractWrite{
 			ContractWrite: contractWriteOutput,

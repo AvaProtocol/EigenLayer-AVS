@@ -281,7 +281,7 @@ func (tc *TenderlyClient) getRealRoundDataViaTenderly(ctx context.Context, contr
 
 	// Make the RPC call
 	var response JSONRPCResponse
-	resp, err := tc.httpClient.R().
+	_, err = tc.httpClient.R().
 		SetContext(ctx).
 		SetBody(rpcRequest).
 		SetResult(&response).
@@ -292,15 +292,8 @@ func (tc *TenderlyClient) getRealRoundDataViaTenderly(ctx context.Context, contr
 	}
 
 	// Log the response for debugging
-	if resp.IsSuccess() {
-		responseJSON, _ := json.MarshalIndent(response, "", "  ")
-		tc.logger.Debug("📥 TENDERLY RPC RESPONSE", "response", string(responseJSON))
-	} else {
-		tc.logger.Error("❌ Tenderly RPC error", "status", resp.StatusCode(), "response", resp.String())
-		return nil, fmt.Errorf("tenderly RPC returned status %d: %s", resp.StatusCode(), resp.String())
-	}
-
 	if response.Error != nil {
+		tc.logger.Error("❌ Tenderly RPC error", "status", response.Error.Code, "response", response.Error.Message)
 		return nil, fmt.Errorf("tenderly RPC error: %s (code: %d)", response.Error.Message, response.Error.Code)
 	}
 
@@ -485,5 +478,174 @@ func (tc *TenderlyClient) createMockTransferLog(contractAddress string, from, to
 		TxIndex:     0,
 		BlockHash:   common.HexToHash(fmt.Sprintf("0x%064x", time.Now().UnixNano()+1)),
 		Removed:     false,
+	}
+}
+
+// SimulateContractWrite simulates a contract write operation using Tenderly
+// This provides consistent simulation behavior for both run_node_immediately and simulateTask
+func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAddress string, callData string, contractABI string, methodName string, chainID int64) (*ContractWriteSimulationResult, error) {
+	tc.logger.Info("🔮 Simulating contract write via Tenderly",
+		"contract", contractAddress,
+		"method", methodName,
+		"chain_id", chainID)
+
+	// For simulation, we use eth_call to see what would happen without actually executing
+	// This gives us the return data and potential revert reasons
+	callParams := CallParams{
+		To:   contractAddress,
+		Data: callData,
+	}
+
+	rpcRequest := JSONRPCRequest{
+		Jsonrpc: "2.0",
+		Method:  "eth_call",
+		Params:  []interface{}{callParams, "latest"},
+		Id:      1,
+	}
+
+	tc.logger.Info("📡 Making Tenderly simulation call for contract write",
+		"contract", contractAddress,
+		"method", methodName,
+		"rpc_url", tc.apiURL)
+
+	// Make the simulation call
+	var response JSONRPCResponse
+	_, err := tc.httpClient.R().
+		SetContext(ctx).
+		SetBody(rpcRequest).
+		SetResult(&response).
+		Post(tc.apiURL)
+
+	if err != nil {
+		return nil, fmt.Errorf("tenderly simulation call failed: %w", err)
+	}
+
+	// Create simulation result
+	result := &ContractWriteSimulationResult{
+		MethodName:      methodName,
+		Success:         true,
+		ContractAddress: contractAddress,
+		InputData:       callData,
+		ChainID:         chainID,
+		SimulationMode:  true,
+	}
+
+	if response.Error != nil {
+		// Simulation failed - this gives us the revert reason
+		result.Success = false
+		result.Error = &ContractWriteErrorData{
+			Code:    "SIMULATION_REVERTED",
+			Message: response.Error.Message,
+		}
+
+		tc.logger.Info("⚠️ Contract write simulation reverted (expected for some operations)",
+			"method", methodName,
+			"error", response.Error.Message)
+	} else if response.Result != "" {
+		// Simulation succeeded - decode return data if ABI is available
+		if contractABI != "" && methodName != "" {
+			returnData := tc.decodeReturnData(response.Result, contractABI, methodName)
+			result.ReturnData = returnData
+		}
+
+		tc.logger.Info("✅ Contract write simulation successful",
+			"method", methodName,
+			"has_return_data", result.ReturnData != nil)
+	}
+
+	// Create mock transaction data for simulation
+	result.Transaction = &ContractWriteTransactionData{
+		Hash:       fmt.Sprintf("0x%064x", time.Now().UnixNano()), // Mock transaction hash
+		Status:     "simulated",
+		From:       "0x0000000000000000000000000000000000000001", // Mock sender
+		To:         contractAddress,
+		Value:      "0",
+		Timestamp:  time.Now().Unix(),
+		Simulation: true,
+	}
+
+	return result, nil
+}
+
+// ContractWriteSimulationResult represents the result of a Tenderly contract write simulation
+type ContractWriteSimulationResult struct {
+	MethodName      string                        `json:"method_name"`
+	Success         bool                          `json:"success"`
+	ContractAddress string                        `json:"contract_address"`
+	InputData       string                        `json:"input_data"`
+	ChainID         int64                         `json:"chain_id"`
+	SimulationMode  bool                          `json:"simulation_mode"`
+	Transaction     *ContractWriteTransactionData `json:"transaction,omitempty"`
+	Error           *ContractWriteErrorData       `json:"error,omitempty"`
+	ReturnData      *ContractWriteReturnData      `json:"return_data,omitempty"`
+}
+
+// ContractWriteTransactionData represents transaction information for simulated writes
+type ContractWriteTransactionData struct {
+	Hash       string `json:"hash"`
+	Status     string `json:"status"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	Value      string `json:"value"`
+	Timestamp  int64  `json:"timestamp"`
+	Simulation bool   `json:"simulation"`
+}
+
+// ContractWriteErrorData represents error information for failed simulations
+type ContractWriteErrorData struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// ContractWriteReturnData represents decoded return data from simulations
+type ContractWriteReturnData struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Value string `json:"value"`
+}
+
+// decodeReturnData attempts to decode return data using the provided ABI and method name
+func (tc *TenderlyClient) decodeReturnData(hexData string, contractABI string, methodName string) *ContractWriteReturnData {
+	if contractABI == "" || methodName == "" || hexData == "" || hexData == "0x" {
+		return nil
+	}
+
+	// Parse the ABI
+	parsedABI, err := abi.JSON(strings.NewReader(contractABI))
+	if err != nil {
+		tc.logger.Warn("Failed to parse contract ABI for return data decoding", "error", err)
+		return nil
+	}
+
+	// Find the method
+	method, exists := parsedABI.Methods[methodName]
+	if !exists {
+		tc.logger.Warn("Method not found in ABI", "method", methodName)
+		return nil
+	}
+
+	// If method has no outputs, return nil
+	if len(method.Outputs) == 0 {
+		return nil
+	}
+
+	// Decode the return data
+	returnData := common.FromHex(hexData)
+	values, err := method.Outputs.Unpack(returnData)
+	if err != nil {
+		tc.logger.Warn("Failed to decode return data", "error", err, "method", methodName)
+		return nil
+	}
+
+	if len(values) == 0 {
+		return nil
+	}
+
+	// For simplicity, return the first output value
+	firstOutput := method.Outputs[0]
+	return &ContractWriteReturnData{
+		Name:  firstOutput.Name,
+		Type:  firstOutput.Type.String(),
+		Value: fmt.Sprintf("%v", values[0]),
 	}
 }
