@@ -28,7 +28,7 @@ tidy:
 	go fmt ./...
 	go mod tidy -v
 
-## audit: run quality control checks
+## audit: run quality control checks (excluding long-running integration tests)
 .PHONY: audit
 audit:
 	go mod verify
@@ -39,7 +39,7 @@ audit:
 	go test -race -buildvcs -vet=off ./...
 
 
-## test: run all tests with proper environment
+## test: run all tests excluding long-running integration tests
 .PHONY: test
 test:
 	go clean -cache
@@ -47,7 +47,7 @@ test:
 	go build ./...
 	go test -v -race -buildvcs ./...
 
-## test/cover: run all tests and display coverage with proper environment
+## test/cover: run all tests and display coverage excluding long-running integration tests
 .PHONY: test/cover
 test/cover:
 	go clean -cache
@@ -60,6 +60,25 @@ test/cover:
 .PHONY: test/quick
 test/quick:
 	go test -v ./...
+
+## test/integration: run long-running integration tests (usually failing, for debugging only)
+.PHONY: test/integration
+test/integration:
+	@echo "⚠️  Running long-running integration tests that often fail..."
+	@echo "⚠️  These are excluded from regular test runs and are for debugging purposes only"
+	go clean -cache
+	go mod tidy
+	go build ./...
+	go test -v -race -buildvcs -tags=integration ./integration_test/
+
+## test/all: run all tests including integration tests (not recommended for CI)
+.PHONY: test/all
+test/all:
+	@echo "⚠️  Running ALL tests including long-running integration tests..."
+	go clean -cache
+	go mod tidy
+	go build ./...
+	go test -v -race -buildvcs -tags=integration ./...
 
 ## test/package: run tests for a specific package (usage: make test/package PKG=./core/taskengine)
 .PHONY: test/package

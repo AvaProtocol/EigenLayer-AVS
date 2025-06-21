@@ -141,6 +141,7 @@ jobs:
           BASE_SEPOLIA_RPC_URL: "${{ secrets.BASE_SEPOLIA_RPC_URL }}"
           BASE_SEPOLIA_BUNDLER_RPC: "${{ secrets.BASE_SEPOLIA_BUNDLER_RPC }}"
           CONTROLLER_PRIVATE_KEY: "${{ secrets.CONTROLLER_PRIVATE_KEY }}"
+          TENDERLY_API_KEY: "${{ secrets.TENDERLY_API_KEY }}"
 
         run: |
           cd ./${{ matrix.test }}

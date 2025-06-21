@@ -181,6 +181,16 @@ message EventTrigger {
     
     // Event conditions to evaluate on decoded event data
     repeated EventCondition conditions = 5;
+    
+    // Method calls for enhanced event data formatting (e.g., decimals, description)
+    repeated MethodCall method_calls = 6;
+  }
+  
+  // Method call configuration for enhanced formatting
+  message MethodCall {
+    string method_name = 1;       // Method name (e.g., "decimals")
+    string call_data = 2;         // Hex-encoded calldata for the method
+    repeated string apply_to_fields = 3;  // Fields to apply formatting to (e.g., ["current", "answer"])
   }
   
   // Topics represents a single topic position filter (e.g., topic[0], topic[1], etc.)
@@ -195,32 +205,7 @@ message EventTrigger {
   }
   
   message Output {
-    // Use oneof to ensure exactly one field is set
-    oneof output_type {
-      // When the trigger is not a transfer event, we will have a raw event output only
-      // These shape of data is https://docs.ethers.org/v6/api/providers/#Log
-      Evm.Log evm_log = 1;
-      
-      // For transfer events specifically, we have enriched data
-      TransferLogOutput transfer_log = 2;
-    }
-  }
-  
-  message TransferLogOutput {
-    string token_name = 1;
-    string token_symbol = 2;
-    uint32 token_decimals = 3;
-    string transaction_hash = 4;
-    string address = 5;
-    uint64 block_number = 6;
-    // timestamp of the block (in milliseconds)
-    uint64 block_timestamp = 7;
-    string from_address = 8;
-    string to_address = 9;
-    string value = 10;
-    string value_formatted = 11;
-    uint32 transaction_index = 12;
-    uint32 log_index = 13;
+    google.protobuf.Value data = 1;  // Parsed event data as structured value
   }
 
   // Include Config as field so it is generated in Go
@@ -276,23 +261,67 @@ message TaskTrigger {
 // gRPC internal error code use up to 17, we extend and start from 1000 to avoid any conflict 
 // Guide: https://grpc.io/docs/guides/error/
 // Go: https://github.com/grpc/grpc-go/blob/master/codes/codes.go#L199
-enum Error {
-  // An error that happen when the app can be recovered but the cause is unknow, rarely use, we try to use specific error as much as we can
-  UnknowError              = 0;
-  // internal rpc node error
-  RpcNodeError             = 1000;
-  // storage system isn't available to respond to query
-  StorageUnavailable       = 2000;
-  StorageWriteError        = 2001;
-  // target chain of smart wallet is error and cannot used to determine smartwallet info
-  SmartWalletRpcError      = 6000;
-  SmartWalletNotFoundError = 6001;
-
-  // Error occurs when we failed to migrate task data and it cannot be decode
-  TaskDataCorrupted    = 7000;
-  TaskDataMissingError = 7001;
-  // Trigger Task failed
-  TaskTriggerError     = 7003;
+// Unified error codes for client-server communication
+// Maps to standard gRPC status codes where applicable, but provides domain-specific error details
+enum ErrorCode {
+  // Standard success - no error
+  ERROR_CODE_UNSPECIFIED = 0;
+  
+  // 1000-1999: Authentication and Authorization errors  
+  UNAUTHORIZED = 1000;              // Invalid or missing authentication
+  FORBIDDEN = 1001;                 // Insufficient permissions
+  INVALID_SIGNATURE = 1002;         // Signature verification failed
+  EXPIRED_TOKEN = 1003;             // Auth token has expired
+  
+  // 2000-2999: Resource Not Found errors
+  TASK_NOT_FOUND = 2000;            // Task/workflow not found
+  EXECUTION_NOT_FOUND = 2001;       // Execution not found  
+  WALLET_NOT_FOUND = 2002;          // Smart wallet not found
+  SECRET_NOT_FOUND = 2003;          // Secret not found
+  TOKEN_METADATA_NOT_FOUND = 2004;  // Token metadata not found
+  
+  // 3000-3999: Validation and Bad Request errors
+  INVALID_REQUEST = 3000;           // General request validation failed
+  INVALID_TRIGGER_CONFIG = 3001;    // Trigger configuration is invalid
+  INVALID_NODE_CONFIG = 3002;       // Node configuration is invalid
+  INVALID_WORKFLOW = 3003;          // Workflow structure is invalid
+  INVALID_ADDRESS = 3004;           // Blockchain address format invalid
+  INVALID_SIGNATURE_FORMAT = 3005;  // Signature format invalid
+  MISSING_REQUIRED_FIELD = 3006;    // Required field is missing
+  
+  // 4000-4999: Resource State errors
+  TASK_ALREADY_EXISTS = 4000;       // Task with same ID already exists
+  TASK_ALREADY_COMPLETED = 4001;    // Cannot modify completed task
+  TASK_ALREADY_CANCELLED = 4002;    // Cannot modify cancelled task
+  EXECUTION_IN_PROGRESS = 4003;     // Operation not allowed during execution
+  WALLET_ALREADY_EXISTS = 4004;     // Wallet already exists for salt
+  SECRET_ALREADY_EXISTS = 4005;     // Secret with same name exists
+  
+  // 5000-5999: External Service errors
+  RPC_NODE_ERROR = 5000;            // Blockchain RPC node error
+  TENDERLY_API_ERROR = 5001;        // Tenderly simulation error
+  TOKEN_LOOKUP_ERROR = 5002;        // Token metadata lookup failed
+  SIMULATION_ERROR = 5003;          // Workflow simulation failed
+  
+  // 6000-6999: Internal System errors  
+  STORAGE_UNAVAILABLE = 6000;       // Database/storage system unavailable
+  STORAGE_WRITE_ERROR = 6001;       // Failed to write to storage
+  STORAGE_READ_ERROR = 6002;        // Failed to read from storage
+  TASK_DATA_CORRUPTED = 6003;       // Task data cannot be decoded
+  EXECUTION_ENGINE_ERROR = 6004;    // Task execution engine error
+  
+  // 7000-7999: Rate Limiting and Quota errors
+  RATE_LIMIT_EXCEEDED = 7000;       // API rate limit exceeded
+  QUOTA_EXCEEDED = 7001;            // User quota exceeded
+  TOO_MANY_REQUESTS = 7002;         // Too many concurrent requests
+  
+  // 8000-8999: Smart Wallet specific errors
+  SMART_WALLET_RPC_ERROR = 8000;    // Smart wallet RPC call failed
+  SMART_WALLET_NOT_FOUND = 8001;    // Smart wallet address not found
+  SMART_WALLET_DEPLOYMENT_ERROR = 8002; // Failed to deploy smart wallet
+  INSUFFICIENT_BALANCE = 8003;      // Insufficient balance for operation
+  
+  // 9000-9999: Reserved for future use
 }
 
 
@@ -412,6 +441,7 @@ message ContractReadNode {
   message MethodCall {
     string call_data = 1;     // Hex-encoded calldata for the method
     string method_name = 2;   // Optional: method name for clarity (e.g. "latestRoundData")
+    repeated string apply_to_fields = 3;  // Fields to apply decimal formatting to (e.g. ["answer"])
   }
 
   message Config {
@@ -1072,6 +1102,7 @@ message RunNodeWithInputsResp {
   bool success = 1; // Whether the execution was successful
   string error = 3; // Error message if execution failed
   string node_id = 4; // ID of the executed node
+  google.protobuf.Value metadata = 5; // Optional structured metadata for testing/debugging
   
   // Use specific output types for nodes only
   oneof output_data {
@@ -1100,6 +1131,7 @@ message RunTriggerResp {
   bool success = 1; // Whether the execution was successful
   string error = 2; // Error message if execution failed
   string trigger_id = 3; // ID of the executed trigger
+  google.protobuf.Value metadata = 4; // Optional structured metadata for testing/debugging
   
   // Use specific output types for triggers
   oneof output_data {
@@ -1111,58 +1143,7 @@ message RunTriggerResp {
   }
 }
 
-message Evm {
-  message Log {
-    // Consensus fields
-    string address = 1;                // Address of the contract that generated the event
-    repeated string topics = 2;        // List of topics provided by the contract
-    string data = 3;                   // Supplied by the contract, usually ABI-encoded
 
-    // Derived fields (filled in by the node but not secured by consensus)
-    uint64 block_number = 4;          // Block in which the transaction was included
-    string transaction_hash = 5;               // Hash of the transaction
-    uint32 transaction_index = 6;              // Index of the transaction in the block
-    string block_hash = 7;            // Hash of the block in which the transaction was included
-    uint32 index = 8;                 // Index of the log in the receipt
-    bool removed = 9;                 // True if this log was reverted due to chain reorganization
-  }
-
-  // Define to match https://docs.ethers.org/v6/api/providers/#TransactionReceipt as required in this ticket: https://github.com/AvaProtocol/EigenLayer-AVS/issues/153
-  message TransactionReceipt {
-    string hash = 1;
-    string block_hash = 2; 
-    uint64 block_number = 3;
-    string from = 4; 
-    uint64 gas_used = 6;
-    uint64 gas_price = 7;
-    uint64 cumulative_gas_used = 8;
-    uint64 fee = 9;
-    string contract_address = 10; 
-    uint64 index = 11; 
-    repeated string logs = 12; 
-    string logs_bloom = 13; 
-    string root = 14; 
-    uint32 status = 15;
-    uint32 type = 16;
-    uint64 blob_gas_price = 17; 
-    uint64 blob_gas_used = 18;
-    string to = 19;
-  }
-
-  message UserOp {
-    string sender = 1;
-    string nonce = 2;
-    string init_code = 3;
-    string call_data = 4;
-    string call_gas_limit = 5;
-    string verification_gas_limit = 6;
-    string pre_verification_gas = 7;
-    string max_fee_per_gas = 8;
-    string max_priority_fee_per_gas = 9;
-    string paymaster_and_data = 10;
-    string signature = 11;
-  }
-}
 
 // Request message for SimulateTask
 message SimulateTaskReq {

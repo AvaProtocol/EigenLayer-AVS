@@ -20,6 +20,7 @@ import (
 	triggerengine "github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger"
 	avspb "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const (
@@ -193,7 +194,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		case triggerItem := <-timeTriggerCh:
 			o.logger.Info("time trigger", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
 
-			if resp, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
+			if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, &avspb.NotifyTriggersReq{
 				Address:     o.config.OperatorAddress,
 				Signature:   "pending",
 				TaskId:      triggerItem.TaskID,
@@ -271,7 +272,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 			}
 			blockTasksMutex.Unlock()
 
-			if resp, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
+			if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, &avspb.NotifyTriggersReq{
 				Address:     o.config.OperatorAddress,
 				Signature:   "pending",
 				TaskId:      triggerItem.TaskID,
@@ -341,25 +342,27 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		case triggerItem := <-eventTriggerCh:
 			o.logger.Info("event trigger", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
 
-			if resp, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
+			// Create structured data for the event trigger
+			eventDataMap := map[string]interface{}{
+				"blockNumber":     triggerItem.Marker.BlockNumber,
+				"logIndex":        triggerItem.Marker.LogIndex,
+				"transactionHash": triggerItem.Marker.TxHash,
+			}
+
+			eventData, err := structpb.NewStruct(eventDataMap)
+			if err != nil {
+				o.logger.Error("Failed to create structured event data", "error", err)
+				continue
+			}
+
+			if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, &avspb.NotifyTriggersReq{
 				Address:     o.config.OperatorAddress,
 				Signature:   "pending",
 				TaskId:      triggerItem.TaskID,
 				TriggerType: avspb.TriggerType_TRIGGER_TYPE_EVENT,
 				TriggerOutput: &avspb.NotifyTriggersReq_EventTrigger{
 					EventTrigger: &avspb.EventTrigger_Output{
-						// Create an EVM log output with the event data using oneof
-						OutputType: &avspb.EventTrigger_Output_EvmLog{
-							EvmLog: &avspb.Evm_Log{
-								BlockNumber:     uint64(triggerItem.Marker.BlockNumber),
-								Index:           uint32(triggerItem.Marker.LogIndex),
-								TransactionHash: triggerItem.Marker.TxHash,
-								// Other fields would be populated if available
-								Address: "",
-								Topics:  []string{},
-								Data:    "",
-							},
-						},
+						Data: structpb.NewStructValue(eventData),
 					},
 				},
 			}); err == nil {

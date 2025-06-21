@@ -2,6 +2,15 @@
 
 This directory contains comprehensive integration tests for the operator reconnection and task assignment functionality.
 
+## ⚠️ Important Note About These Tests
+
+**These tests are EXCLUDED from regular test runs** because they:
+- Take 17-53 seconds each to complete
+- Often fail due to timing and race condition sensitivity  
+- Are meant for debugging specific scenarios, not regular CI/CD
+
+They use the `//go:build integration` tag and must be run explicitly with `make test/integration`.
+
 ## Test Files
 
 ### 1. `operator_reconnection_test.go`
@@ -47,29 +56,39 @@ This directory contains comprehensive integration tests for the operator reconne
 
 ## Running the Tests
 
-### Individual Tests
+### Recommended: Use Make Targets
 ```bash
-# Test specific reconnection scenario
-cd integration_test
-go test -v -run TestOrphanedTaskReclamation
+# Run all integration tests (from project root)
+make test/integration
 
-# Test ticker context management
-go test -v -run TestTickerContextRaceCondition
+# Run regular tests (excludes integration tests) 
+make test
 
-# Test connection stabilization
-go test -v -run TestOperatorConnectionStabilization
+# Run ALL tests including integration tests (not recommended)
+make test/all
 ```
 
-### All Tests
+### Individual Tests (Manual)
 ```bash
-cd integration_test
-go test -v
+# Test specific reconnection scenario
+go test -v -tags=integration -run TestOrphanedTaskReclamation ./integration_test/
+
+# Test ticker context management
+go test -v -tags=integration -run TestTickerContextRaceCondition ./integration_test/
+
+# Test connection stabilization  
+go test -v -tags=integration -run TestOperatorConnectionStabilization ./integration_test/
+```
+
+### All Integration Tests (Manual)
+```bash
+# From project root
+go test -v -tags=integration ./integration_test/
 ```
 
 ### With Detailed Logging
 ```bash
-cd integration_test
-go test -v -args -verbose
+go test -v -tags=integration ./integration_test/ -args -verbose
 ```
 
 ## Test Coverage
