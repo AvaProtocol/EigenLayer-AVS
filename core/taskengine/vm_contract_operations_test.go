@@ -30,7 +30,7 @@ func TestVM_ContractRead_BasicExecution(t *testing.T) {
 			ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
-					CallData:   "0xfeaf968c", // decimals()
+					CallData:   "0x313ce567", // decimals()
 					MethodName: "decimals",
 				},
 			},
@@ -44,6 +44,65 @@ func TestVM_ContractRead_BasicExecution(t *testing.T) {
 
 	// Contract read may succeed or fail depending on network, but should not panic
 	t.Logf("Contract read decimals - Success: %v, Error: %s", executionStep.Success, executionStep.Error)
+}
+
+// TestVM_ContractRead_DecimalFormatting tests the new decimal formatting functionality
+func TestVM_ContractRead_DecimalFormatting(t *testing.T) {
+	SetRpc(testutil.GetTestRPCURL())
+	SetCache(testutil.GetDefaultCache())
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	vm := NewVM()
+	vm.WithDb(db)
+	vm.WithLogger(testutil.GetLogger())
+	vm.smartWalletConfig = testutil.GetTestSmartWalletConfig()
+
+	// Test reading price data with decimal formatting
+	node := &avsproto.ContractReadNode{
+		Config: &avsproto.ContractReadNode_Config{
+			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", // Chainlink ETH/USD
+			ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"latestRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+				{
+					CallData:      "0x313ce567", // decimals()
+					MethodName:    "decimals",
+					ApplyToFields: []string{"answer"}, // Apply decimal formatting to the "answer" field
+				},
+				{
+					CallData:   "0xfeaf968c", // latestRoundData()
+					MethodName: "latestRoundData",
+				},
+			},
+		},
+	}
+
+	executionStep, _ := vm.runContractRead("test_decimal_formatting", node)
+
+	assert.NotNil(t, executionStep)
+	assert.Equal(t, "test_decimal_formatting", executionStep.Id)
+
+	// Contract read may succeed or fail depending on network, but should not panic
+	t.Logf("Contract read with decimal formatting - Success: %v, Error: %s", executionStep.Success, executionStep.Error)
+
+	if executionStep.Success {
+		// Check that we have contract read output
+		if contractReadOutput := executionStep.GetContractRead(); contractReadOutput != nil {
+			t.Logf("Contract read results count: %d", len(contractReadOutput.Results))
+
+			// We should have 1 result (decimals() call is skipped, only latestRoundData() result)
+			if len(contractReadOutput.Results) > 0 {
+				result := contractReadOutput.Results[0]
+				t.Logf("Method result - Success: %v, Method: %s, Fields: %d",
+					result.Success, result.MethodName, len(result.Data))
+
+				// Log all fields to see the structure
+				for _, field := range result.Data {
+					t.Logf("  Field: %s (%s) = %s", field.Name, field.Type, field.Value)
+				}
+			}
+		}
+	}
 }
 
 // TestVM_ContractRead_LatestRoundData tests reading price data

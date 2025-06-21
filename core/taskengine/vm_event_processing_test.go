@@ -6,29 +6,37 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestEvaluateEvent(t *testing.T) {
+	// JSON data for transfer event
+	transferEventData := map[string]interface{}{
+		"address":          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+		"value":            "1500000",
+		"tokenName":        "TestToken",
+		"tokenSymbol":      "TEST",
+		"tokenDecimals":    18,
+		"transactionHash":  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+		"blockNumber":      7212417,
+		"blockTimestamp":   1625097600000,
+		"fromAddress":      "0x0000000000000000000000000000000000000000",
+		"toAddress":        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+		"valueFormatted":   "1.5",
+		"transactionIndex": 0,
+		"logIndex":         98,
+	}
+
+	// Convert to google.protobuf.Value
+	protoValue, err := structpb.NewValue(transferEventData)
+	if err != nil {
+		t.Fatalf("Failed to create protobuf value: %v", err)
+	}
+
 	triggerData := &TriggerData{
 		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 		Output: &avsproto.EventTrigger_Output{
-			OutputType: &avsproto.EventTrigger_Output_TransferLog{
-				TransferLog: &avsproto.EventTrigger_TransferLogOutput{
-					Address:          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-					Value:            "1500000",
-					TokenName:        "TestToken",
-					TokenSymbol:      "TEST",
-					TokenDecimals:    18,
-					TransactionHash:  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-					BlockNumber:      7212417,
-					BlockTimestamp:   1625097600000,
-					FromAddress:      "0x0000000000000000000000000000000000000000",
-					ToAddress:        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-					ValueFormatted:   "1.5",
-					TransactionIndex: 0,
-					LogIndex:         98,
-				},
-			},
+			Data: protoValue,
 		},
 	}
 
@@ -64,22 +72,29 @@ func TestEvaluateEvent(t *testing.T) {
 }
 
 func TestEvaluateEventEvmLog(t *testing.T) {
+	// JSON data for general EVM log event
+	evmLogEventData := map[string]interface{}{
+		"address":          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+		"topics":           []interface{}{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x0000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c7238"},
+		"data":             "0x0000000000000000000000000000000000000000000000000000000000016e36",
+		"blockNumber":      7212417,
+		"transactionHash":  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+		"transactionIndex": 0,
+		"blockHash":        "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+		"logIndex":         98,
+		"removed":          false,
+	}
+
+	// Convert to google.protobuf.Value
+	protoValue, err := structpb.NewValue(evmLogEventData)
+	if err != nil {
+		t.Fatalf("Failed to create protobuf value: %v", err)
+	}
+
 	triggerData := &TriggerData{
 		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 		Output: &avsproto.EventTrigger_Output{
-			OutputType: &avsproto.EventTrigger_Output_EvmLog{
-				EvmLog: &avsproto.Evm_Log{
-					Address:          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-					Topics:           []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x0000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c7238"},
-					Data:             "0x0000000000000000000000000000000000000000000000000000000000016e36",
-					BlockNumber:      7212417,
-					TransactionHash:  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-					TransactionIndex: 0,
-					BlockHash:        "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-					Index:            98,
-					Removed:          false,
-				},
-			},
+			Data: protoValue,
 		},
 	}
 
@@ -114,27 +129,34 @@ func TestEvaluateEventEvmLog(t *testing.T) {
 	}
 }
 
-func TestEventTriggerOneofExclusivity(t *testing.T) {
-	transferLogTriggerData := &TriggerData{
+func TestEventTriggerDataAccessibility(t *testing.T) {
+	// Test with enriched transfer event data
+	transferEventData := map[string]interface{}{
+		"address":          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+		"value":            "1500000",
+		"tokenName":        "TestToken",
+		"tokenSymbol":      "TEST",
+		"tokenDecimals":    18,
+		"transactionHash":  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+		"blockNumber":      7212417,
+		"blockTimestamp":   1625097600000,
+		"fromAddress":      "0x0000000000000000000000000000000000000000",
+		"toAddress":        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+		"valueFormatted":   "1.5",
+		"transactionIndex": 0,
+		"logIndex":         98,
+	}
+
+	// Convert to google.protobuf.Value
+	transferProtoValue, err := structpb.NewValue(transferEventData)
+	if err != nil {
+		t.Fatalf("Failed to create protobuf value: %v", err)
+	}
+
+	transferTriggerData := &TriggerData{
 		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 		Output: &avsproto.EventTrigger_Output{
-			OutputType: &avsproto.EventTrigger_Output_TransferLog{
-				TransferLog: &avsproto.EventTrigger_TransferLogOutput{
-					Address:          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-					Value:            "1500000",
-					TokenName:        "TestToken",
-					TokenSymbol:      "TEST",
-					TokenDecimals:    18,
-					TransactionHash:  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-					BlockNumber:      7212417,
-					BlockTimestamp:   1625097600000,
-					FromAddress:      "0x0000000000000000000000000000000000000000",
-					ToAddress:        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-					ValueFormatted:   "1.5",
-					TransactionIndex: 0,
-					LogIndex:         98,
-				},
-			},
+			Data: transferProtoValue,
 		},
 	}
 
@@ -149,7 +171,7 @@ func TestEventTriggerOneofExclusivity(t *testing.T) {
 				Name: "test_trigger",
 			},
 		},
-	}, transferLogTriggerData, testutil.GetTestSmartWalletConfig(), nil)
+	}, transferTriggerData, testutil.GetTestSmartWalletConfig(), nil)
 
 	if err != nil {
 		t.Fatalf("expect vm initialized, got error: %v", err)
@@ -168,22 +190,29 @@ func TestEventTriggerOneofExclusivity(t *testing.T) {
 		t.Errorf("expected trigger data to be available at key '%s'", triggerName)
 	}
 
+	// Test with basic EVM log event data
+	evmLogEventData := map[string]interface{}{
+		"address":          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+		"topics":           []interface{}{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"},
+		"data":             "0x0000000000000000000000000000000000000000000000000000000000016e36",
+		"blockNumber":      7212417,
+		"transactionHash":  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+		"transactionIndex": 0,
+		"blockHash":        "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+		"logIndex":         98,
+		"removed":          false,
+	}
+
+	// Convert to google.protobuf.Value
+	evmLogProtoValue, err := structpb.NewValue(evmLogEventData)
+	if err != nil {
+		t.Fatalf("Failed to create protobuf value: %v", err)
+	}
+
 	evmLogTriggerData := &TriggerData{
 		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 		Output: &avsproto.EventTrigger_Output{
-			OutputType: &avsproto.EventTrigger_Output_EvmLog{
-				EvmLog: &avsproto.Evm_Log{
-					Address:          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-					Topics:           []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"},
-					Data:             "0x0000000000000000000000000000000000000000000000000000000000016e36",
-					BlockNumber:      7212417,
-					TransactionHash:  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-					TransactionIndex: 0,
-					BlockHash:        "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-					Index:            98,
-					Removed:          false,
-				},
-			},
+			Data: evmLogProtoValue,
 		},
 	}
 

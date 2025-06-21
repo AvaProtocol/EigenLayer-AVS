@@ -47,6 +47,18 @@ To create a new migration, follow these steps:
 
 5. **Documentation**: Add comments to your migration code explaining what it does and why.
 
+## Migration Lifecycle
+
+Once a migration has been successfully applied in production:
+
+1. Comment it out or remove it from the `Migrations` slice in `migrations.go`
+2. Move the migration files to `docs/historical-migrations/` for historical reference
+3. Update the historical migrations README with details about what the migration did
+
+This keeps the active migrations directory clean and focused on migrations that still need to run.
+
 ## Example Migration
 
-An example of migration can be view in function `ChangeEpochToMs`
+An example of an active migration can be viewed in function `TokenMetadataFieldsMigration`.
+
+For examples of completed migrations, see the `docs/historical-migrations/` directory.

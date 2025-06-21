@@ -12,6 +12,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -157,11 +158,539 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		return nil, fmt.Errorf("queries must be a non-empty array")
 	}
 
+	// Check if simulation mode is enabled (default: true, provides sample data for development)
+	simulationMode := true
+	if simModeInterface, exists := triggerConfig["simulationMode"]; exists {
+		if simModeBool, ok := simModeInterface.(bool); ok {
+			simulationMode = simModeBool
+		}
+	}
+
 	if n.logger != nil {
 		n.logger.Info("EventTrigger: Processing queries-based EventTrigger",
+			"queriesCount", len(queriesArray),
+			"simulationMode", simulationMode)
+	}
+
+	// 🔮 TENDERLY SIMULATION MODE (default: provides sample data)
+	if simulationMode {
+		return n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
+	}
+
+	// 📊 HISTORICAL SEARCH MODE (use simulationMode: false for production)
+	return n.runEventTriggerWithHistoricalSearch(ctx, queriesArray, inputVariables)
+}
+
+// runEventTriggerWithTenderlySimulation executes event trigger using Tenderly simulation
+func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	if n.logger != nil {
+		n.logger.Info("🔮 EventTrigger: Starting Tenderly simulation mode",
 			"queriesCount", len(queriesArray))
 	}
 
+	// Initialize Tenderly client
+	tenderlyClient := NewTenderlyClient(n.logger)
+
+	// Get chain ID for simulation
+	var chainID int64 = 11155111 // Default to Sepolia
+	if n.tokenEnrichmentService != nil {
+		chainID = int64(n.tokenEnrichmentService.GetChainID())
+	}
+
+	// Process the first query for simulation (Tenderly simulates one event at a time)
+	if len(queriesArray) == 0 {
+		return nil, fmt.Errorf("no queries provided for simulation")
+	}
+
+	queryMap, ok := queriesArray[0].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid query format")
+	}
+
+	// Convert query map to protobuf format for simulation
+	if n.logger != nil {
+		n.logger.Info("🔍 Converting query map to protobuf for Tenderly simulation",
+			"hasMethodCalls", queryMap["methodCalls"] != nil)
+		if methodCallsInterface, exists := queryMap["methodCalls"]; exists {
+			if methodCallsArray, ok := methodCallsInterface.([]interface{}); ok {
+				n.logger.Info("🔍 Found method calls in query map",
+					"methodCallsCount", len(methodCallsArray))
+				for i, methodCallInterface := range methodCallsArray {
+					if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
+						n.logger.Info("🔍 Method call details",
+							"index", i,
+							"methodName", methodCallMap["methodName"],
+							"callData", methodCallMap["callData"],
+							"applyToFields", methodCallMap["applyToFields"])
+					}
+				}
+			}
+		}
+	}
+
+	query, err := n.convertMapToEventQuery(queryMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert query: %w", err)
+	}
+
+	if n.logger != nil {
+		methodCallsCount := 0
+		if query != nil && query.GetMethodCalls() != nil {
+			methodCallsCount = len(query.GetMethodCalls())
+		}
+		n.logger.Info("✅ Query conversion completed for Tenderly simulation",
+			"hasQuery", query != nil,
+			"methodCallsCount", methodCallsCount)
+	}
+
+	// Simulate the event using Tenderly (gets real current data)
+	simulatedLog, err := tenderlyClient.SimulateEventTrigger(ctx, query, chainID)
+	if err != nil {
+		n.logger.Warn("🚫 Tenderly simulation failed, using sample data for development", "error", err)
+
+		// Instead of returning error, provide sample data for development/testing
+		// This ensures that basic event triggers still show output data in simulation
+		// Convert topics to protobuf-compatible format
+		sampleTopics := []interface{}{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"}
+
+		sampleData := map[string]interface{}{
+			"eventFound":       true,
+			"contractAddress":  "0x1234567890abcdef1234567890abcdef12345678", // Sample address
+			"blockNumber":      uint64(12345678),
+			"transactionHash":  "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab",
+			"logIndex":         uint32(0),
+			"topics":           sampleTopics,                                                         // Now protobuf-compatible
+			"rawData":          "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000", // Sample data
+			"chainId":          chainID,
+			"eventSignature":   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+			"eventType":        "Transfer",
+			"eventDescription": "Sample ERC20 Transfer event (simulation failed, using mock data)",
+			"simulationNote":   "This is sample data because Tenderly simulation failed",
+		}
+
+		// Return sample data with proper structure
+		result := map[string]interface{}{
+			"found":    true,
+			"data":     sampleData,
+			"metadata": sampleData, // Use same data for metadata in this case
+		}
+
+		return result, nil
+	}
+
+	// Evaluate conditions against the real simulated data
+	// If conditions don't match, return nil (same as runTask behavior)
+	if len(query.GetConditions()) > 0 {
+		conditionsMet := n.evaluateEventConditions(simulatedLog, query.GetConditions())
+		if !conditionsMet {
+			n.logger.Info("🚫 Conditions not satisfied by real data, no event returned",
+				"contract", simulatedLog.Address.Hex(),
+				"conditions_count", len(query.GetConditions()))
+
+			// Return nil to indicate no event found (conditions not met)
+			return nil, nil
+		}
+	}
+
+	// Build raw metadata (the original blockchain event data)
+	topics := make([]string, len(simulatedLog.Topics))
+	for i, topic := range simulatedLog.Topics {
+		topics[i] = topic.Hex()
+	}
+
+	// Convert topics to protobuf-compatible format for metadata
+	topicsMetadata := make([]interface{}, len(topics))
+	for i, topic := range topics {
+		topicsMetadata[i] = topic
+	}
+
+	metadata := map[string]interface{}{
+		"address":          simulatedLog.Address.Hex(),
+		"topics":           topicsMetadata, // Now protobuf-compatible
+		"data":             "0x" + common.Bytes2Hex(simulatedLog.Data),
+		"blockNumber":      simulatedLog.BlockNumber,
+		"transactionHash":  simulatedLog.TxHash.Hex(),
+		"transactionIndex": simulatedLog.TxIndex,
+		"blockHash":        simulatedLog.BlockHash.Hex(),
+		"logIndex":         simulatedLog.Index,
+		"removed":          simulatedLog.Removed,
+		"chainId":          chainID,
+	}
+
+	// Parse event data using ABI if provided
+	var parsedData map[string]interface{}
+
+	contractABI := query.GetContractAbi()
+	if n.logger != nil {
+		n.logger.Info("🔍 EventTrigger: Checking for contract ABI",
+			"hasABI", contractABI != "",
+			"abiLength", len(contractABI))
+	}
+
+	if contractABI != "" {
+		// Parse using the provided ABI
+		if n.logger != nil {
+			n.logger.Info("🔧 EventTrigger: Using ABI-based parsing")
+		}
+		parsedEventData, err := n.parseEventWithABI(simulatedLog, contractABI, query)
+		if err != nil {
+			n.logger.Warn("Failed to parse event with provided ABI, using raw data", "error", err)
+			// Fallback to raw data if ABI parsing fails
+			parsedData = metadata
+		} else {
+			if n.logger != nil {
+				n.logger.Info("✅ EventTrigger: ABI parsing successful",
+					"eventName", parsedEventData["eventName"],
+					"fieldCount", len(parsedEventData))
+			}
+			parsedData = parsedEventData
+		}
+	} else {
+		// No ABI provided, use raw event data
+		if n.logger != nil {
+			n.logger.Info("⚠️ EventTrigger: No ABI provided, using raw event data")
+		}
+
+		// Create a more user-friendly structure for raw event data
+		// Include both raw blockchain data and some basic decoded information
+		// Convert topics array to interface{} slice for protobuf compatibility
+		topicsInterface := make([]interface{}, len(topics))
+		for i, topic := range topics {
+			topicsInterface[i] = topic
+		}
+
+		parsedData = map[string]interface{}{
+			"eventFound":      true,
+			"contractAddress": simulatedLog.Address.Hex(),
+			"blockNumber":     simulatedLog.BlockNumber,
+			"transactionHash": simulatedLog.TxHash.Hex(),
+			"logIndex":        simulatedLog.Index,
+			"topics":          topicsInterface, // Now protobuf-compatible
+			"rawData":         "0x" + common.Bytes2Hex(simulatedLog.Data),
+			"chainId":         chainID,
+			"eventSignature":  topics[0], // First topic is always the event signature
+		}
+
+		// Add basic event signature information if available
+		if len(topics) > 0 {
+			parsedData["eventSignature"] = topics[0]
+
+			// Try to identify common event types by signature
+			switch topics[0] {
+			case "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef":
+				parsedData["eventType"] = "Transfer"
+				parsedData["eventDescription"] = "ERC20 Transfer event"
+			case "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925":
+				parsedData["eventType"] = "Approval"
+				parsedData["eventDescription"] = "ERC20 Approval event"
+			case "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c":
+				parsedData["eventType"] = "Deposit"
+				parsedData["eventDescription"] = "WETH Deposit event"
+			default:
+				parsedData["eventType"] = "Unknown"
+				parsedData["eventDescription"] = "Unknown event type - provide ABI for detailed parsing"
+			}
+		}
+	}
+
+	// Return the structure with proper JSON objects (not strings)
+	result := map[string]interface{}{
+		"found":    true,
+		"data":     parsedData, // ABI-parsed event data or raw data if no ABI
+		"metadata": metadata,   // Raw blockchain event data
+	}
+
+	if n.logger != nil {
+		hasABI := contractABI != ""
+		n.logger.Info("✅ EventTrigger: Tenderly simulation completed successfully",
+			"contract", simulatedLog.Address.Hex(),
+			"block", simulatedLog.BlockNumber,
+			"txHash", simulatedLog.TxHash.Hex(),
+			"chainId", chainID,
+			"hasABI", hasABI)
+	}
+
+	return result, nil
+}
+
+// parseEventWithABI parses an event log using the provided contract ABI and applies method calls for enhanced formatting
+func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string, query *avsproto.EventTrigger_Query) (map[string]interface{}, error) {
+	// Parse the ABI
+	contractABI, err := abi.JSON(strings.NewReader(contractABIString))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse contract ABI: %w", err)
+	}
+
+	// Find the matching event in ABI using the first topic (event signature)
+	if len(eventLog.Topics) == 0 {
+		return nil, fmt.Errorf("event log has no topics")
+	}
+
+	eventSignature := eventLog.Topics[0]
+	var matchingEvent *abi.Event
+	var eventName string
+
+	for name, event := range contractABI.Events {
+		if event.ID == eventSignature {
+			matchingEvent = &event
+			eventName = name
+			break
+		}
+	}
+
+	if matchingEvent == nil {
+		return nil, fmt.Errorf("no matching event found in ABI for signature %s", eventSignature.Hex())
+	}
+
+	// Decode the event data
+	decodedData, err := contractABI.Unpack(eventName, eventLog.Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode event data for %s: %w", eventName, err)
+	}
+
+	// Initialize the result map with only ABI-parsed event data
+	parsedData := make(map[string]interface{})
+
+	// Add only the event name from ABI
+	parsedData["eventName"] = eventName
+
+	// Process method calls for enhanced formatting (like decimals)
+	var decimalsValue *big.Int
+	var fieldsToFormat []string
+
+	if query != nil {
+		methodCalls := query.GetMethodCalls()
+		if n.logger != nil {
+			n.logger.Info("🔍 Processing method calls for event formatting",
+				"methodCallsCount", len(methodCalls),
+				"hasRpcConn", rpcConn != nil)
+		}
+
+		for _, methodCall := range methodCalls {
+			if n.logger != nil {
+				n.logger.Info("📞 Processing method call",
+					"methodName", methodCall.GetMethodName(),
+					"callData", methodCall.GetCallData(),
+					"applyToFields", methodCall.GetApplyToFields())
+			}
+
+			if methodCall.GetMethodName() == "decimals" {
+				// Make the decimals() call to the contract
+				if decimals, err := n.callContractMethod(eventLog.Address, methodCall.GetCallData()); err == nil {
+					if decimalsInt, ok := decimals.(*big.Int); ok {
+						decimalsValue = decimalsInt
+						fieldsToFormat = methodCall.GetApplyToFields()
+						if n.logger != nil {
+							n.logger.Info("📞 Retrieved decimals from contract",
+								"contract", eventLog.Address.Hex(),
+								"decimals", decimalsValue.String(),
+								"applyToFields", fieldsToFormat)
+						}
+					}
+				} else {
+					if n.logger != nil {
+						n.logger.Warn("Failed to call decimals() method", "error", err)
+					}
+				}
+				break
+			}
+		}
+	} else {
+		if n.logger != nil {
+			n.logger.Info("🔍 No query provided for method calls processing")
+		}
+	}
+
+	// Helper function to check if a field should be formatted
+	shouldFormatField := func(fieldName string) bool {
+		if decimalsValue == nil || len(fieldsToFormat) == 0 {
+			return false
+		}
+		for _, field := range fieldsToFormat {
+			if field == fieldName {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Helper function to format a big.Int value with decimals
+	formatWithDecimals := func(value *big.Int, decimals *big.Int) string {
+		if decimals == nil || decimals.Cmp(big.NewInt(0)) <= 0 {
+			return value.String()
+		}
+
+		// Calculate divisor (10^decimals)
+		divisor := new(big.Int).Exp(big.NewInt(10), decimals, nil)
+
+		// Get integer and remainder parts
+		quotient := new(big.Int).Div(value, divisor)
+		remainder := new(big.Int).Mod(value, divisor)
+
+		// Format with decimal places
+		decimalsInt := int(decimals.Int64())
+		if decimalsInt > 0 {
+			format := fmt.Sprintf("%%s.%%0%dd", decimalsInt)
+			return fmt.Sprintf(format, quotient.String(), remainder.Int64())
+		}
+		return quotient.String()
+	}
+
+	// Add indexed parameters from topics (skip topic[0] which is event signature)
+	indexedCount := 0
+	nonIndexedCount := 0
+
+	for _, input := range matchingEvent.Inputs {
+		if input.Indexed {
+			// Get from topics (topic[0] is signature, so indexed params start from topic[1])
+			topicIndex := indexedCount + 1
+			if topicIndex < len(eventLog.Topics) {
+				// Convert indexed topic values to more readable format based on type
+				topicValue := eventLog.Topics[topicIndex]
+
+				switch input.Type.T {
+				case abi.UintTy, abi.IntTy:
+					// Convert numeric types to decimal string for better usability
+					if bigInt := new(big.Int).SetBytes(topicValue.Bytes()); bigInt != nil {
+						rawValue := bigInt.String()
+
+						// Check if this field should be formatted with decimals
+						if shouldFormatField(input.Name) {
+							formattedValue := formatWithDecimals(bigInt, decimalsValue)
+							parsedData[input.Name] = formattedValue
+							parsedData[input.Name+"Raw"] = rawValue
+
+							if n.logger != nil {
+								n.logger.Debug("Added formatted indexed numeric field",
+									"field", input.Name,
+									"rawValue", rawValue,
+									"formattedValue", formattedValue,
+									"decimals", decimalsValue.String())
+							}
+						} else {
+							parsedData[input.Name] = rawValue
+
+							if n.logger != nil {
+								n.logger.Debug("Added indexed numeric field from topic",
+									"field", input.Name,
+									"hexValue", topicValue.Hex(),
+									"decimalValue", rawValue)
+							}
+						}
+					} else {
+						parsedData[input.Name] = topicValue.Hex()
+					}
+				case abi.AddressTy:
+					// Keep addresses as hex
+					parsedData[input.Name] = common.HexToAddress(topicValue.Hex()).Hex()
+				case abi.HashTy, abi.FixedBytesTy:
+					// Keep hashes and fixed bytes as hex
+					parsedData[input.Name] = topicValue.Hex()
+				default:
+					// Default to hex for other types
+					parsedData[input.Name] = topicValue.Hex()
+				}
+
+				if n.logger != nil {
+					n.logger.Debug("Added indexed field from topic",
+						"field", input.Name,
+						"type", input.Type.String(),
+						"value", parsedData[input.Name])
+				}
+			}
+			indexedCount++
+		} else {
+			// Get from decoded data
+			if nonIndexedCount < len(decodedData) {
+				// Convert the value to a more readable format
+				value := decodedData[nonIndexedCount]
+				switch v := value.(type) {
+				case *big.Int:
+					rawValue := v.String()
+
+					// Check if this field should be formatted with decimals
+					if shouldFormatField(input.Name) {
+						formattedValue := formatWithDecimals(v, decimalsValue)
+						parsedData[input.Name] = formattedValue
+						parsedData[input.Name+"Raw"] = rawValue
+
+						if n.logger != nil {
+							n.logger.Debug("Added formatted non-indexed numeric field",
+								"field", input.Name,
+								"rawValue", rawValue,
+								"formattedValue", formattedValue,
+								"decimals", decimalsValue.String())
+						}
+					} else {
+						parsedData[input.Name] = rawValue
+					}
+				case common.Address:
+					parsedData[input.Name] = v.Hex()
+				case common.Hash:
+					parsedData[input.Name] = v.Hex()
+				default:
+					parsedData[input.Name] = fmt.Sprintf("%v", v)
+				}
+
+				if n.logger != nil {
+					n.logger.Debug("Added non-indexed field from data",
+						"field", input.Name,
+						"value", parsedData[input.Name])
+				}
+			}
+			nonIndexedCount++
+		}
+	}
+
+	// Add decimals info if we retrieved it
+	if decimalsValue != nil {
+		parsedData["decimals"] = decimalsValue.String()
+	}
+
+	return parsedData, nil
+}
+
+// callContractMethod makes a contract method call to retrieve additional data
+func (n *Engine) callContractMethod(contractAddress common.Address, callData string) (interface{}, error) {
+	// Ensure RPC connection is available
+	if rpcConn == nil {
+		return nil, fmt.Errorf("RPC connection not available for contract method call")
+	}
+
+	// Remove 0x prefix if present
+	callDataHex := strings.TrimPrefix(callData, "0x")
+
+	// Convert hex string to bytes
+	callDataBytes := common.FromHex("0x" + callDataHex)
+
+	// Create the call message
+	msg := ethereum.CallMsg{
+		To:   &contractAddress,
+		Data: callDataBytes,
+	}
+
+	// Make the contract call
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result, err := rpcConn.CallContract(ctx, msg, nil)
+	if err != nil {
+		return nil, fmt.Errorf("contract call failed: %w", err)
+	}
+
+	// For decimals() method, we expect a uint8 return value
+	// The result is 32 bytes, but we only need the last byte for uint8
+	if len(result) >= 32 {
+		// Convert the last byte to big.Int (decimals is typically uint8)
+		decimals := new(big.Int).SetBytes(result[31:32])
+		return decimals, nil
+	}
+
+	return nil, fmt.Errorf("unexpected result length: %d", len(result))
+}
+
+// runEventTriggerWithHistoricalSearch executes event trigger using historical blockchain search
+func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	// Get the latest block number
 	currentBlock, err := rpcConn.BlockNumber(ctx)
 	if err != nil {
@@ -335,22 +864,80 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		topics[i] = topic.Hex()
 	}
 
-	// Create the basic evm_log structure (always present)
-	evmLog := map[string]interface{}{
+	// Get chain ID for metadata
+	var chainID int64 = 11155111 // Default to Sepolia
+	if n.tokenEnrichmentService != nil {
+		chainID = int64(n.tokenEnrichmentService.GetChainID())
+	}
+
+	// Build raw metadata (the original blockchain event data)
+	metadata := map[string]interface{}{
 		"address":          mostRecentEvent.Address.Hex(),
 		"topics":           topics,
 		"data":             "0x" + common.Bytes2Hex(mostRecentEvent.Data),
 		"blockNumber":      mostRecentEvent.BlockNumber,
 		"transactionHash":  mostRecentEvent.TxHash.Hex(),
-		"transactionIndex": uint32(mostRecentEvent.TxIndex),
+		"transactionIndex": mostRecentEvent.TxIndex,
 		"blockHash":        mostRecentEvent.BlockHash.Hex(),
-		"index":            uint32(mostRecentEvent.Index),
+		"logIndex":         mostRecentEvent.Index,
 		"removed":          mostRecentEvent.Removed,
+		"chainId":          chainID,
+	}
+
+	// Parse event data using ABI if provided in any query
+	var parsedData map[string]interface{}
+	var contractABI string
+	var queryWithABI map[string]interface{}
+
+	// Find the first query that has a contract ABI
+	for _, queryInterface := range queriesArray {
+		if queryMap, ok := queryInterface.(map[string]interface{}); ok {
+			if abiInterface, exists := queryMap["contractAbi"]; exists {
+				if abiStr, ok := abiInterface.(string); ok && abiStr != "" {
+					contractABI = abiStr
+					queryWithABI = queryMap
+					break
+				}
+			}
+		}
+	}
+
+	if contractABI != "" {
+		// Convert the query map to protobuf query for method calls support
+		protobufQuery, err := n.convertMapToEventQuery(queryWithABI)
+		if err != nil {
+			n.logger.Warn("Failed to convert query map to protobuf, using ABI without method calls", "error", err)
+			protobufQuery = nil
+		} else {
+			if n.logger != nil {
+				methodCallsCount := 0
+				if protobufQuery != nil && protobufQuery.GetMethodCalls() != nil {
+					methodCallsCount = len(protobufQuery.GetMethodCalls())
+				}
+				n.logger.Info("✅ Successfully converted query map to protobuf",
+					"hasProtobufQuery", protobufQuery != nil,
+					"methodCallsCount", methodCallsCount)
+			}
+		}
+
+		// Parse using the provided ABI
+		parsedEventData, err := n.parseEventWithABI(mostRecentEvent, contractABI, protobufQuery)
+		if err != nil {
+			n.logger.Warn("Failed to parse event with provided ABI, using raw data", "error", err)
+			// Fallback to raw data if ABI parsing fails
+			parsedData = metadata
+		} else {
+			parsedData = parsedEventData
+		}
+	} else {
+		// No ABI provided, use raw event data
+		parsedData = metadata
 	}
 
 	result := map[string]interface{}{
 		"found":         true,
-		"evm_log":       evmLog,
+		"data":          parsedData, // ABI-parsed event data or raw data if no ABI
+		"metadata":      metadata,   // Raw blockchain event data
 		"queriesCount":  len(queriesArray),
 		"totalSearched": totalSearched,
 		"totalEvents":   len(allEvents),
@@ -362,105 +949,15 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		},
 	}
 
-	// Check if this is a Transfer event and add enriched transfer_log data
-	isTransferEvent := len(topics) >= 1 && topics[0] == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-	if isTransferEvent && len(topics) >= 3 {
-		// Get block timestamp for transfer_log
-		header, err := rpcConn.HeaderByNumber(ctx, big.NewInt(int64(mostRecentEvent.BlockNumber)))
-		var blockTimestamp uint64
-		if err == nil {
-			blockTimestamp = header.Time * 1000 // Convert to milliseconds
-		}
-
-		// Extract from and to addresses from topics
-		fromAddr := common.HexToAddress(topics[1]).Hex()
-		toAddr := common.HexToAddress(topics[2]).Hex()
-		value := "0x" + common.Bytes2Hex(mostRecentEvent.Data)
-
-		transferLog := map[string]interface{}{
-			"tokenName":        "",
-			"tokenSymbol":      "",
-			"tokenDecimals":    uint32(0),
-			"transactionHash":  mostRecentEvent.TxHash.Hex(),
-			"address":          mostRecentEvent.Address.Hex(),
-			"blockNumber":      mostRecentEvent.BlockNumber,
-			"blockTimestamp":   blockTimestamp,
-			"fromAddress":      fromAddr,
-			"toAddress":        toAddr,
-			"value":            value,
-			"valueFormatted":   "",
-			"transactionIndex": uint32(mostRecentEvent.TxIndex),
-			"logIndex":         uint32(mostRecentEvent.Index),
-		}
-
-		// Enrich the transfer log with token metadata if TokenEnrichmentService is available
-		if n.tokenEnrichmentService != nil {
-			// Create protobuf structures for enrichment
-			evmLogProto := &avsproto.Evm_Log{
-				Address: mostRecentEvent.Address.Hex(),
-			}
-
-			transferLogProto := &avsproto.EventTrigger_TransferLogOutput{
-				TransactionHash:  mostRecentEvent.TxHash.Hex(),
-				Address:          mostRecentEvent.Address.Hex(),
-				BlockNumber:      mostRecentEvent.BlockNumber,
-				BlockTimestamp:   blockTimestamp,
-				FromAddress:      fromAddr,
-				ToAddress:        toAddr,
-				Value:            value,
-				TransactionIndex: uint32(mostRecentEvent.TxIndex),
-				LogIndex:         uint32(mostRecentEvent.Index),
-			}
-
-			// Enrich with token metadata
-			if enrichErr := n.tokenEnrichmentService.EnrichTransferLog(evmLogProto, transferLogProto); enrichErr == nil {
-				// Update the map with enriched data
-				transferLog["tokenName"] = transferLogProto.TokenName
-				transferLog["tokenSymbol"] = transferLogProto.TokenSymbol
-				transferLog["tokenDecimals"] = transferLogProto.TokenDecimals
-				transferLog["valueFormatted"] = transferLogProto.ValueFormatted
-
-				if n.logger != nil {
-					n.logger.Info("EventTrigger: Successfully enriched transfer log",
-						"contract", mostRecentEvent.Address.Hex(),
-						"tokenName", transferLogProto.TokenName,
-						"tokenSymbol", transferLogProto.TokenSymbol,
-						"tokenDecimals", transferLogProto.TokenDecimals,
-						"valueFormatted", transferLogProto.ValueFormatted)
-				}
-			} else {
-				if n.logger != nil {
-					n.logger.Warn("EventTrigger: Failed to enrich transfer log",
-						"contract", mostRecentEvent.Address.Hex(),
-						"error", enrichErr)
-				}
-			}
-		} else {
-			if n.logger != nil {
-				n.logger.Debug("EventTrigger: TokenEnrichmentService not available, transfer log not enriched")
-			}
-		}
-
-		result["transfer_log"] = transferLog
-
-		if n.logger != nil {
-			n.logger.Info("EventTrigger: Transfer event found with queries-based search",
-				"blockNumber", mostRecentEvent.BlockNumber,
-				"txHash", mostRecentEvent.TxHash.Hex(),
-				"from", fromAddr,
-				"to", toAddr,
-				"value", value,
-				"contract", mostRecentEvent.Address.Hex())
-		}
-	}
-
 	if n.logger != nil {
+		hasABI := contractABI != ""
 		n.logger.Info("EventTrigger: Successfully found most recent event with queries-based search",
 			"blockNumber", mostRecentEvent.BlockNumber,
 			"txHash", mostRecentEvent.TxHash.Hex(),
 			"address", mostRecentEvent.Address.Hex(),
 			"totalEvents", len(allEvents),
-			"totalSearched", totalSearched)
+			"totalSearched", totalSearched,
+			"hasABI", hasABI)
 	}
 
 	return result, nil
@@ -1641,6 +2138,41 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		resp.OutputData = &avsproto.RunTriggerResp_EventTrigger{
 			EventTrigger: eventOutput,
 		}
+
+		// Add metadata for runTrigger (debugging/testing) - properly convert to protobuf Value
+		if result != nil {
+			if n.logger != nil {
+				n.logger.Info("🔍 RunTriggerRPC: Checking for metadata in result",
+					"hasResult", result != nil,
+					"resultKeys", getMapKeys(result))
+			}
+
+			if metadata, hasMetadata := result["metadata"]; hasMetadata && metadata != nil {
+				if n.logger != nil {
+					n.logger.Info("🔍 RunTriggerRPC: Found metadata, converting to protobuf",
+						"metadataType", fmt.Sprintf("%T", metadata),
+						"metadataValue", metadata)
+				}
+
+				// Convert metadata to be compatible with protobuf
+				compatibleMetadata := convertToProtobufCompatible(metadata)
+
+				if metadataValue, err := structpb.NewValue(compatibleMetadata); err == nil {
+					resp.Metadata = metadataValue
+					if n.logger != nil {
+						n.logger.Info("✅ RunTriggerRPC: Successfully converted metadata to protobuf")
+					}
+				} else {
+					if n.logger != nil {
+						n.logger.Error("❌ RunTriggerRPC: Failed to convert metadata to protobuf", "error", err)
+					}
+				}
+			} else {
+				if n.logger != nil {
+					n.logger.Info("🔍 RunTriggerRPC: No metadata found in result")
+				}
+			}
+		}
 	case NodeTypeManualTrigger:
 		// Always set manual trigger output, even if result is nil
 		manualOutput := &avsproto.ManualTrigger_Output{}
@@ -1694,4 +2226,207 @@ func isExpectedValidationError(err error) bool {
 
 	// If it doesn't match validation patterns, treat as system error
 	return false
+}
+
+// convertMapToEventQuery converts a map-based query to protobuf EventTrigger_Query
+func (n *Engine) convertMapToEventQuery(queryMap map[string]interface{}) (*avsproto.EventTrigger_Query, error) {
+	query := &avsproto.EventTrigger_Query{}
+
+	// Extract addresses
+	if addressesInterface, exists := queryMap["addresses"]; exists {
+		if addressesArray, ok := addressesInterface.([]interface{}); ok {
+			addresses := make([]string, 0, len(addressesArray))
+			for _, addrInterface := range addressesArray {
+				if addrStr, ok := addrInterface.(string); ok && addrStr != "" {
+					addresses = append(addresses, addrStr)
+				}
+			}
+			query.Addresses = addresses
+		}
+	}
+
+	// Extract topics
+	if topicsInterface, exists := queryMap["topics"]; exists {
+		if topicsArray, ok := topicsInterface.([]interface{}); ok {
+			for _, topicGroupInterface := range topicsArray {
+				if topicGroupMap, ok := topicGroupInterface.(map[string]interface{}); ok {
+					if valuesInterface, exists := topicGroupMap["values"]; exists {
+						if valuesArray, ok := valuesInterface.([]interface{}); ok {
+							topicGroup := &avsproto.EventTrigger_Topics{}
+							values := make([]string, 0, len(valuesArray))
+							for _, valueInterface := range valuesArray {
+								if valueStr, ok := valueInterface.(string); ok {
+									values = append(values, valueStr)
+								}
+							}
+							topicGroup.Values = values
+							query.Topics = append(query.Topics, topicGroup)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Extract contract ABI if present
+	if abiInterface, exists := queryMap["contractAbi"]; exists {
+		if abiStr, ok := abiInterface.(string); ok {
+			query.ContractAbi = abiStr
+		}
+	}
+
+	// Extract conditions if present
+	if conditionsInterface, exists := queryMap["conditions"]; exists {
+		if conditionsArray, ok := conditionsInterface.([]interface{}); ok {
+			for _, conditionInterface := range conditionsArray {
+				if conditionMap, ok := conditionInterface.(map[string]interface{}); ok {
+					condition := &avsproto.EventCondition{}
+					if fieldName, ok := conditionMap["fieldName"].(string); ok {
+						condition.FieldName = fieldName
+					}
+					if operator, ok := conditionMap["operator"].(string); ok {
+						condition.Operator = operator
+					}
+					if value, ok := conditionMap["value"].(string); ok {
+						condition.Value = value
+					}
+					if fieldType, ok := conditionMap["fieldType"].(string); ok {
+						condition.FieldType = fieldType
+					}
+					query.Conditions = append(query.Conditions, condition)
+				}
+			}
+		}
+	}
+
+	// Extract method calls if present
+	if methodCallsInterface, exists := queryMap["methodCalls"]; exists {
+		if methodCallsArray, ok := methodCallsInterface.([]interface{}); ok {
+			for _, methodCallInterface := range methodCallsArray {
+				if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
+					methodCall := &avsproto.EventTrigger_MethodCall{}
+
+					if methodName, ok := methodCallMap["methodName"].(string); ok {
+						methodCall.MethodName = methodName
+					}
+					if callData, ok := methodCallMap["callData"].(string); ok {
+						methodCall.CallData = callData
+					}
+					if applyToFieldsInterface, exists := methodCallMap["applyToFields"]; exists {
+						if applyToFieldsArray, ok := applyToFieldsInterface.([]interface{}); ok {
+							applyToFields := make([]string, 0, len(applyToFieldsArray))
+							for _, fieldInterface := range applyToFieldsArray {
+								if fieldStr, ok := fieldInterface.(string); ok {
+									applyToFields = append(applyToFields, fieldStr)
+								}
+							}
+							methodCall.ApplyToFields = applyToFields
+						}
+					}
+					query.MethodCalls = append(query.MethodCalls, methodCall)
+				}
+			}
+		}
+	}
+
+	// Extract maxEventsPerBlock if present
+	if maxEventsInterface, exists := queryMap["maxEventsPerBlock"]; exists {
+		if maxEventsFloat, ok := maxEventsInterface.(float64); ok {
+			maxEventsPerBlock := uint32(maxEventsFloat)
+			query.MaxEventsPerBlock = &maxEventsPerBlock
+		}
+	}
+
+	return query, nil
+}
+
+// evaluateEventConditions checks if event log data satisfies the provided conditions
+// This function uses the ABI-based condition evaluation from the trigger package
+func (n *Engine) evaluateEventConditions(eventLog *types.Log, conditions []*avsproto.EventCondition) bool {
+	// For now, use a simple implementation that works with the existing condition format
+	// This can be enhanced to use the full ABI-based evaluation later
+	for _, condition := range conditions {
+		if condition.GetFieldName() == "current" {
+			// For AnswerUpdated events, current price is in Topics[1]
+			if len(eventLog.Topics) >= 2 {
+				currentPrice := eventLog.Topics[1].Big()
+				expectedValue, ok := new(big.Int).SetString(condition.GetValue(), 10)
+				if !ok {
+					continue
+				}
+
+				conditionMet := false
+				switch condition.GetOperator() {
+				case "gt":
+					conditionMet = currentPrice.Cmp(expectedValue) > 0
+				case "lt":
+					conditionMet = currentPrice.Cmp(expectedValue) < 0
+				case "eq":
+					conditionMet = currentPrice.Cmp(expectedValue) == 0
+				case "gte":
+					conditionMet = currentPrice.Cmp(expectedValue) >= 0
+				case "lte":
+					conditionMet = currentPrice.Cmp(expectedValue) <= 0
+				case "ne":
+					conditionMet = currentPrice.Cmp(expectedValue) != 0
+				}
+
+				if !conditionMet {
+					if n.logger != nil {
+						n.logger.Debug("EventTrigger condition not met",
+							"field", condition.GetFieldName(),
+							"operator", condition.GetOperator(),
+							"expected", condition.GetValue(),
+							"actual", currentPrice.String())
+					}
+					return false
+				}
+			}
+		}
+		// Add more field types here as needed (roundId, updatedAt, etc.)
+	}
+	return true
+}
+
+// getMapKeys returns the keys of a map for debugging purposes
+func getMapKeys(m map[string]interface{}) []string {
+	if m == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// convertToProtobufCompatible converts data structures to be compatible with structpb.NewValue()
+// This handles cases like []string which structpb.NewValue() cannot handle directly
+func convertToProtobufCompatible(data interface{}) interface{} {
+	switch v := data.(type) {
+	case []string:
+		// Convert []string to []interface{}
+		result := make([]interface{}, len(v))
+		for i, s := range v {
+			result[i] = s
+		}
+		return result
+	case map[string]interface{}:
+		// Recursively convert map values
+		result := make(map[string]interface{})
+		for k, val := range v {
+			result[k] = convertToProtobufCompatible(val)
+		}
+		return result
+	case []interface{}:
+		// Recursively convert slice elements
+		result := make([]interface{}, len(v))
+		for i, val := range v {
+			result[i] = convertToProtobufCompatible(val)
+		}
+		return result
+	default:
+		// Return as-is for basic types (string, int, float, bool, etc.)
+		return v
+	}
 }

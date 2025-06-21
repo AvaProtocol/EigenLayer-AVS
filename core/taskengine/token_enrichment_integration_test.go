@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
-	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/stretchr/testify/assert"
 )
@@ -32,47 +31,31 @@ func TestTokenEnrichmentIntegration(t *testing.T) {
 		t.Log("❌ TokenEnrichmentService is NOT initialized - this may be expected if RPC is not available")
 	}
 
-	// Test 1: Basic functionality with mock data
-	t.Run("MockTokenEnrichment", func(t *testing.T) {
-		// Create a mock EventTrigger output with known token (USDC from whitelist)
-		evmLog := &avsproto.Evm_Log{
-			Address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", // USDC from sepolia.json
-		}
-
-		transferLog := &avsproto.EventTrigger_TransferLogOutput{
-			Address:     "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-			Value:       "0xf4240", // 1 USDC (1,000,000 micro USDC)
-			FromAddress: "0x1234567890123456789012345678901234567890",
-			ToAddress:   "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-		}
-
-		// Test enrichment if service is available
+	// Test 1: Token metadata service functionality
+	t.Run("TokenMetadataService", func(t *testing.T) {
 		if engine.tokenEnrichmentService != nil {
-			err := engine.tokenEnrichmentService.EnrichTransferLog(evmLog, transferLog)
-			assert.NoError(t, err, "Token enrichment should work without error")
+			// Test token metadata lookup for known USDC contract
+			metadata, err := engine.tokenEnrichmentService.GetTokenMetadata("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
 
-			t.Logf("📋 Enriched transfer log:")
-			t.Logf("  Token Name: %s", transferLog.TokenName)
-			t.Logf("  Token Symbol: %s", transferLog.TokenSymbol)
-			t.Logf("  Token Decimals: %d", transferLog.TokenDecimals)
-			t.Logf("  Value Formatted: %s", transferLog.ValueFormatted)
+			if err == nil && metadata != nil {
+				t.Logf("📋 Token metadata found:")
+				t.Logf("  Token Name: %s", metadata.Name)
+				t.Logf("  Token Symbol: %s", metadata.Symbol)
+				t.Logf("  Token Decimals: %d", metadata.Decimals)
+				t.Logf("  Source: %s", metadata.Source)
 
-			// Verify that token metadata was filled in (either from whitelist or RPC)
-			if transferLog.TokenSymbol == "USDC" {
-				t.Log("✅ Token metadata enriched successfully")
-				// RPC might return different name than whitelist, so be flexible
-				if transferLog.TokenName == "USD Coin" {
-					t.Log("✅ Token name from whitelist: USD Coin")
-				} else if transferLog.TokenName == "USDC" {
-					t.Log("✅ Token name from RPC fallback: USDC")
-				}
-				assert.Equal(t, uint32(6), transferLog.TokenDecimals)
-				assert.Equal(t, "1", transferLog.ValueFormatted)
+				assert.NotEmpty(t, metadata.Symbol, "Token symbol should not be empty")
+				t.Log("✅ Token metadata service working correctly")
 			} else {
-				t.Log("⚠️  Token metadata not found in whitelist or RPC - this may be expected")
+				t.Log("⚠️  Token metadata not found - this may be expected if token not in whitelist")
 			}
+
+			// Test value formatting
+			formattedValue := engine.tokenEnrichmentService.FormatTokenValue("0xf4240", 6) // 1 USDC
+			assert.Equal(t, "1", formattedValue, "Should format 1 USDC correctly")
+			t.Logf("✅ Value formatting: 0xf4240 with 6 decimals = %s", formattedValue)
 		} else {
-			t.Log("⚠️  Skipping enrichment test - TokenEnrichmentService not available")
+			t.Log("⚠️  Skipping token metadata test - TokenEnrichmentService not available")
 		}
 	})
 
@@ -104,20 +87,33 @@ func TestTokenEnrichmentIntegration(t *testing.T) {
 				t.Logf("🔍 Found events: %v", found)
 
 				if found {
-					// If events were found, check for transfer_log enrichment
-					if transferLog, exists := result["transfer_log"]; exists && transferLog != nil {
-						t.Log("✅ Transfer log present in result")
+					// With new JSON-based approach, check if we have event data directly
+					if dataStr, exists := result["data"].(string); exists && dataStr != "" {
+						t.Log("✅ Event data present in JSON format")
 
-						if transferMap, ok := transferLog.(map[string]interface{}); ok {
-							if tokenName, exists := transferMap["tokenName"]; exists && tokenName != "" {
-								t.Logf("✅ Token enrichment worked: %v", tokenName)
-							} else {
-								t.Log("⚠️  Token name not enriched (may be expected if token not in whitelist)")
+						// Try to parse the JSON data
+						var eventData map[string]interface{}
+						if err := json.Unmarshal([]byte(dataStr), &eventData); err == nil {
+							t.Logf("📋 Parsed event data: %v", eventData)
+
+							// Check for common Transfer event fields
+							if address, exists := eventData["address"]; exists {
+								t.Logf("✅ Event address: %v", address)
 							}
+							if blockNumber, exists := eventData["blockNumber"]; exists {
+								t.Logf("✅ Block number: %v", blockNumber)
+							}
+							if txHash, exists := eventData["transactionHash"]; exists {
+								t.Logf("✅ Transaction hash: %v", txHash)
+							}
+						} else {
+							t.Logf("⚠️  Could not parse event data JSON: %v", err)
 						}
+					} else {
+						t.Log("⚠️  No event data found in result")
 					}
 				} else {
-					t.Log("ℹ️  No events found - enrichment not tested")
+					t.Log("ℹ️  No events found - this is expected for most test environments")
 				}
 			}
 		}
