@@ -441,6 +441,7 @@ message ContractReadNode {
   message MethodCall {
     string call_data = 1;     // Hex-encoded calldata for the method
     string method_name = 2;   // Optional: method name for clarity (e.g. "latestRoundData")
+    repeated string apply_to_fields = 3;  // Fields to apply decimal formatting to (e.g. ["answer"])
   }
 
   message Config {

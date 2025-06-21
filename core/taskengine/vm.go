@@ -1891,6 +1891,14 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 					if methodName, ok := methodCallMap["method_name"].(string); ok {
 						methodCall.MethodName = methodName
 					}
+					// Handle applyToFields for decimal formatting
+					if applyToFields, ok := methodCallMap["apply_to_fields"].([]interface{}); ok {
+						for _, field := range applyToFields {
+							if fieldStr, ok := field.(string); ok {
+								methodCall.ApplyToFields = append(methodCall.ApplyToFields, fieldStr)
+							}
+						}
+					}
 					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
 				}
 			}
@@ -1908,6 +1916,20 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 						methodCall.MethodName = methodName
 					} else if methodName, ok := methodCallMap["method_name"].(string); ok {
 						methodCall.MethodName = methodName
+					}
+					// Handle applyToFields for decimal formatting (support both camelCase and snake_case)
+					if applyToFields, ok := methodCallMap["applyToFields"].([]interface{}); ok {
+						for _, field := range applyToFields {
+							if fieldStr, ok := field.(string); ok {
+								methodCall.ApplyToFields = append(methodCall.ApplyToFields, fieldStr)
+							}
+						}
+					} else if applyToFields, ok := methodCallMap["apply_to_fields"].([]interface{}); ok {
+						for _, field := range applyToFields {
+							if fieldStr, ok := field.(string); ok {
+								methodCall.ApplyToFields = append(methodCall.ApplyToFields, fieldStr)
+							}
+						}
 					}
 					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
 				}

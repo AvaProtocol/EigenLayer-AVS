@@ -6531,8 +6531,9 @@ func (x *ContractWriteNode_ReturnData) GetValue() string {
 
 type ContractReadNode_MethodCall struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	CallData      string                 `protobuf:"bytes,1,opt,name=call_data,json=callData,proto3" json:"call_data,omitempty"`       // Hex-encoded calldata for the method
-	MethodName    string                 `protobuf:"bytes,2,opt,name=method_name,json=methodName,proto3" json:"method_name,omitempty"` // Optional: method name for clarity (e.g. "latestRoundData")
+	CallData      string                 `protobuf:"bytes,1,opt,name=call_data,json=callData,proto3" json:"call_data,omitempty"`                  // Hex-encoded calldata for the method
+	MethodName    string                 `protobuf:"bytes,2,opt,name=method_name,json=methodName,proto3" json:"method_name,omitempty"`            // Optional: method name for clarity (e.g. "latestRoundData")
+	ApplyToFields []string               `protobuf:"bytes,3,rep,name=apply_to_fields,json=applyToFields,proto3" json:"apply_to_fields,omitempty"` // Fields to apply decimal formatting to (e.g. ["answer"])
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6579,6 +6580,13 @@ func (x *ContractReadNode_MethodCall) GetMethodName() string {
 		return x.MethodName
 	}
 	return ""
+}
+
+func (x *ContractReadNode_MethodCall) GetApplyToFields() []string {
+	if x != nil {
+		return x.ApplyToFields
+	}
+	return nil
 }
 
 type ContractReadNode_Config struct {
@@ -8019,15 +8027,16 @@ const file_avs_proto_rawDesc = "" +
 	"ReturnData\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x14\n" +
-	"\x05value\x18\x03 \x01(\tR\x05value\"\xbf\x05\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\"\xe7\x05\n" +
 	"\x10ContractReadNode\x12;\n" +
 	"\x06config\x18\x01 \x01(\v2#.aggregator.ContractReadNode.ConfigR\x06config\x12,\n" +
-	"\x05input\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05input\x1aJ\n" +
+	"\x05input\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05input\x1ar\n" +
 	"\n" +
 	"MethodCall\x12\x1b\n" +
 	"\tcall_data\x18\x01 \x01(\tR\bcallData\x12\x1f\n" +
 	"\vmethod_name\x18\x02 \x01(\tR\n" +
-	"methodName\x1a\xa2\x01\n" +
+	"methodName\x12&\n" +
+	"\x0fapply_to_fields\x18\x03 \x03(\tR\rapplyToFields\x1a\xa2\x01\n" +
 	"\x06Config\x12)\n" +
 	"\x10contract_address\x18\x01 \x01(\tR\x0fcontractAddress\x12!\n" +
 	"\fcontract_abi\x18\x02 \x01(\tR\vcontractAbi\x12J\n" +
