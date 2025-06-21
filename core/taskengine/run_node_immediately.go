@@ -1336,22 +1336,28 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 			results = append(results, contractRead.GetData().AsInterface())
 		}
 
-		// For backward compatibility, if there's only one result, expose its fields directly
+		// For single method calls, return the data directly (flattened)
 		if len(results) == 1 {
 			if methodResultMap, ok := results[0].(map[string]interface{}); ok {
-				result["method_name"] = methodResultMap["methodName"]
 				if success, ok := methodResultMap["success"].(bool); ok && success {
-					// Add structured data with field names
+					// Return the data directly for successful single method calls
 					if data, ok := methodResultMap["data"].(map[string]interface{}); ok {
-						result["data"] = data
+						// Return data directly without wrapping
+						for key, value := range data {
+							result[key] = value
+						}
+						// Also include method metadata for debugging
+						result["method_name"] = methodResultMap["methodName"]
 					}
 				} else {
+					// For failed calls, include error information
 					result["error"] = methodResultMap["error"]
 					result["method_name"] = methodResultMap["methodName"]
+					result["success"] = false
 				}
 			}
 		} else {
-			// Multiple method results - return as array
+			// Multiple method results - return as array (keep existing behavior)
 			result["results"] = results
 		}
 	} else if branch := executionStep.GetBranch(); branch != nil {
@@ -1663,40 +1669,69 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		// For contract read nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
 		contractReadOutput := &avsproto.ContractReadNode_Output{}
 		if result != nil && len(result) > 0 {
-			// Convert result to the new data structure
-			var resultsArray []interface{}
-
-			// Handle the new multiple method result structure
-			if results, ok := result["results"].([]map[string]interface{}); ok {
-				// Multiple method results
+			// Check if this is a flattened single method result or multiple results
+			if results, ok := result["results"].([]interface{}); ok {
+				// Multiple method results - convert to expected format
+				var resultsArray []interface{}
 				for _, methodResult := range results {
-					// Convert each method result to the expected format
-					convertedResult := map[string]interface{}{
-						"methodName": methodResult["method_name"],
-						"success":    methodResult["success"],
-						"error":      methodResult["error"],
-						"data":       methodResult["data"],
+					if methodResultMap, ok := methodResult.(map[string]interface{}); ok {
+						convertedResult := map[string]interface{}{
+							"methodName": methodResultMap["methodName"],
+							"success":    methodResultMap["success"],
+							"error":      methodResultMap["error"],
+							"data":       methodResultMap["data"],
+						}
+						resultsArray = append(resultsArray, convertedResult)
 					}
-					resultsArray = append(resultsArray, convertedResult)
+				}
+				// Convert to protobuf Value
+				if resultsValue, err := structpb.NewValue(resultsArray); err == nil {
+					contractReadOutput.Data = resultsValue
 				}
 			} else {
-				// Single method result (backward compatibility)
-				convertedResult := map[string]interface{}{
-					"methodName": result["method_name"],
-					"success":    true,
-					"error":      "",
-					"data":       result["data"],
-				}
-				if errorMsg, ok := result["error"].(string); ok && errorMsg != "" {
-					convertedResult["error"] = errorMsg
-					convertedResult["success"] = false
-				}
-				resultsArray = append(resultsArray, convertedResult)
-			}
+				// Single method result (flattened) - reconstruct the expected format
+				// Extract the data fields (excluding metadata)
+				dataMap := make(map[string]interface{})
+				methodName := "unknown"
+				success := true
+				errorMsg := ""
 
-			// Convert to protobuf Value
-			if resultsValue, err := structpb.NewValue(resultsArray); err == nil {
-				contractReadOutput.Data = resultsValue
+				for key, value := range result {
+					switch key {
+					case "method_name":
+						if name, ok := value.(string); ok {
+							methodName = name
+						}
+					case "success":
+						if s, ok := value.(bool); ok {
+							success = s
+						}
+					case "error":
+						if err, ok := value.(string); ok {
+							errorMsg = err
+						}
+					case "nodeId":
+						// Skip metadata fields
+					default:
+						// This is actual data
+						dataMap[key] = value
+					}
+				}
+
+				// Create the single result structure
+				singleResult := map[string]interface{}{
+					"methodName": methodName,
+					"success":    success,
+					"error":      errorMsg,
+					"data":       dataMap,
+				}
+
+				resultsArray := []interface{}{singleResult}
+
+				// Convert to protobuf Value
+				if resultsValue, err := structpb.NewValue(resultsArray); err == nil {
+					contractReadOutput.Data = resultsValue
+				}
 			}
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractRead{
