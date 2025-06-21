@@ -493,15 +493,14 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 					} else {
 						t.Logf("✅ Data validation passed: JSON data present")
 
-						// Try to parse the JSON to verify it's valid
-						var eventData map[string]interface{}
-						if err := json.Unmarshal([]byte(rpcResult.GetEventTrigger().Data.String()), &eventData); err == nil {
-							t.Logf("✅ JSON data is valid and parseable")
+						// Try to access the structured data to verify it's valid
+						if eventData, ok := rpcResult.GetEventTrigger().Data.AsInterface().(map[string]interface{}); ok {
+							t.Logf("✅ Structured data is valid and accessible")
 							if len(eventData) > 0 {
-								t.Logf("✅ JSON data contains event fields")
+								t.Logf("✅ Structured data contains event fields")
 							}
 						} else {
-							t.Errorf("JSON data should be valid: %v", err)
+							t.Errorf("Structured data should be accessible as map[string]interface{}")
 						}
 					}
 				} else {
