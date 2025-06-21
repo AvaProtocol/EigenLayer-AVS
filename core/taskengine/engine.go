@@ -2980,9 +2980,39 @@ func buildEventTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Eve
 		if found, ok := triggerOutput["found"].(bool); ok && found {
 			// Extract the data from the trigger output
 			if data, ok := triggerOutput["data"]; ok {
-				// Convert to google.protobuf.Value
-				if protoValue, err := structpb.NewValue(data); err == nil {
-					eventOutput.Data = protoValue
+				var dataToConvert interface{}
+				var shouldConvert bool
+
+				// Handle different data types: JSON string, map, or other types
+				switch d := data.(type) {
+				case string:
+					// Try to parse as JSON string
+					var parsedData interface{}
+					if err := json.Unmarshal([]byte(d), &parsedData); err == nil {
+						dataToConvert = parsedData
+						shouldConvert = true
+					} else {
+						// If not valid JSON, treat as plain string (but only if non-empty)
+						if d != "" {
+							dataToConvert = d
+							shouldConvert = true
+						}
+					}
+				case map[string]interface{}:
+					// Direct map data - always valid
+					dataToConvert = d
+					shouldConvert = true
+				default:
+					// Other types (int, bool, etc.) are considered invalid for event data
+					// in the defensive programming context - skip conversion
+					shouldConvert = false
+				}
+
+				// Convert to google.protobuf.Value only if we have valid data
+				if shouldConvert {
+					if protoValue, err := structpb.NewValue(dataToConvert); err == nil {
+						eventOutput.Data = protoValue
+					}
 				}
 			}
 		}
