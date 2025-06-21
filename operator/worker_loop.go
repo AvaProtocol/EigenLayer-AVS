@@ -194,7 +194,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		case triggerItem := <-timeTriggerCh:
 			o.logger.Info("time trigger", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
 
-			if resp, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
+			if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, &avspb.NotifyTriggersReq{
 				Address:     o.config.OperatorAddress,
 				Signature:   "pending",
 				TaskId:      triggerItem.TaskID,
@@ -272,7 +272,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 			}
 			blockTasksMutex.Unlock()
 
-			if resp, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
+			if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, &avspb.NotifyTriggersReq{
 				Address:     o.config.OperatorAddress,
 				Signature:   "pending",
 				TaskId:      triggerItem.TaskID,
@@ -355,7 +355,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				continue
 			}
 
-			if resp, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
+			if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, &avspb.NotifyTriggersReq{
 				Address:     o.config.OperatorAddress,
 				Signature:   "pending",
 				TaskId:      triggerItem.TaskID,
