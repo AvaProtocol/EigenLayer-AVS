@@ -135,8 +135,15 @@ func (tc *TenderlyClient) SimulateEventTrigger(ctx context.Context, query *avspr
 	// Check if this is a Chainlink price feed by looking for AnswerUpdated event signature
 	isChainlinkPriceFeed := tc.isChainlinkPriceFeed(query)
 
+	// Check if this is a Transfer event by looking for Transfer event signature
+	isTransferEvent := tc.isTransferEvent(query)
+
 	if isChainlinkPriceFeed {
 		return tc.simulateChainlinkPriceUpdate(ctx, contractAddress, query, chainID)
+	}
+
+	if isTransferEvent {
+		return tc.simulateTransferEvent(ctx, contractAddress, query, chainID)
 	}
 
 	// For other event types, we might add more simulation strategies
@@ -150,6 +157,20 @@ func (tc *TenderlyClient) isChainlinkPriceFeed(query *avsproto.EventTrigger_Quer
 	for _, topicGroup := range query.GetTopics() {
 		for _, topic := range topicGroup.GetValues() {
 			if strings.EqualFold(topic, answerUpdatedSignature) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isTransferEvent checks if the query is monitoring ERC20 Transfer events
+func (tc *TenderlyClient) isTransferEvent(query *avsproto.EventTrigger_Query) bool {
+	transferSignature := "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+	for _, topicGroup := range query.GetTopics() {
+		for _, topic := range topicGroup.GetValues() {
+			if strings.EqualFold(topic, transferSignature) {
 				return true
 			}
 		}
@@ -374,6 +395,90 @@ func (tc *TenderlyClient) createMockAnswerUpdatedLog(contractAddress string, pri
 			roundIdHash,    // roundId (indexed)
 		},
 		Data:        updatedAtBytes,            // updatedAt (non-indexed)
+		BlockNumber: uint64(time.Now().Unix()), // Use current timestamp as mock block
+		TxHash:      txHash,
+		Index:       0,
+		TxIndex:     0,
+		BlockHash:   common.HexToHash(fmt.Sprintf("0x%064x", time.Now().UnixNano()+1)),
+		Removed:     false,
+	}
+}
+
+// simulateTransferEvent simulates an ERC20 Transfer event for demonstration purposes
+// This creates sample data to show users the expected Transfer event structure
+func (tc *TenderlyClient) simulateTransferEvent(ctx context.Context, contractAddress string, query *avsproto.EventTrigger_Query, chainID int64) (*types.Log, error) {
+	tc.logger.Info("🔄 Simulating ERC20 Transfer event for demonstration",
+		"contract", contractAddress,
+		"chain_id", chainID)
+
+	// Extract from and to addresses from query topics if provided
+	var fromAddress, toAddress common.Address
+
+	// Default addresses for demonstration
+	fromAddress = common.HexToAddress("0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788") // Default from
+	toAddress = common.HexToAddress("0x1234567890123456789012345678901234567890")   // Default to
+
+	// Try to extract addresses from query topics
+	if len(query.GetTopics()) > 0 && len(query.GetTopics()[0].GetValues()) >= 3 {
+		topics := query.GetTopics()[0].GetValues()
+
+		// Topics[1] is from address (if not null)
+		if len(topics) > 1 && topics[1] != "" && topics[1] != "null" {
+			fromAddress = common.HexToAddress(topics[1])
+		}
+
+		// Topics[2] is to address (if not null)
+		if len(topics) > 2 && topics[2] != "" && topics[2] != "null" {
+			toAddress = common.HexToAddress(topics[2])
+		}
+	}
+
+	// Create realistic sample transfer amount (e.g., 100.5 tokens with 18 decimals)
+	transferAmount := big.NewInt(0)
+	transferAmount.SetString("100500000000000000000", 10) // 100.5 * 10^18
+
+	// Create mock Transfer event log
+	simulatedLog := tc.createMockTransferLog(
+		contractAddress,
+		fromAddress,
+		toAddress,
+		transferAmount,
+	)
+
+	tc.logger.Info("✅ Transfer simulation completed with sample data",
+		"event_address", simulatedLog.Address.Hex(),
+		"from", fromAddress.Hex(),
+		"to", toAddress.Hex(),
+		"amount", transferAmount.String(),
+		"block_number", simulatedLog.BlockNumber,
+		"tx_hash", simulatedLog.TxHash.Hex())
+
+	return simulatedLog, nil
+}
+
+// createMockTransferLog creates a mock ERC20 Transfer event log
+func (tc *TenderlyClient) createMockTransferLog(contractAddress string, from, to common.Address, amount *big.Int) *types.Log {
+	// Transfer event signature: Transfer(address indexed from, address indexed to, uint256 value)
+	eventSignature := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+
+	// Convert addresses to 32-byte hashes (indexed parameters)
+	fromHash := common.BytesToHash(common.LeftPadBytes(from.Bytes(), 32))
+	toHash := common.BytesToHash(common.LeftPadBytes(to.Bytes(), 32))
+
+	// Amount is non-indexed, so it goes in the data field
+	amountBytes := common.LeftPadBytes(amount.Bytes(), 32)
+
+	// Create a realistic transaction hash
+	txHash := common.HexToHash(fmt.Sprintf("0x%064x", time.Now().UnixNano()))
+
+	return &types.Log{
+		Address: common.HexToAddress(contractAddress),
+		Topics: []common.Hash{
+			eventSignature, // Transfer event signature
+			fromHash,       // from address (indexed)
+			toHash,         // to address (indexed)
+		},
+		Data:        amountBytes,               // amount (non-indexed)
 		BlockNumber: uint64(time.Now().Unix()), // Use current timestamp as mock block
 		TxHash:      txHash,
 		Index:       0,

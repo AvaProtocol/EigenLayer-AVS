@@ -1,7 +1,6 @@
 package taskengine
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -259,7 +258,7 @@ func NewVMWithData(task *model.Task, triggerData *TriggerData, smartWalletConfig
 	return NewVMWithDataAndTransferLog(task, triggerData, smartWalletConfig, secrets, nil)
 }
 
-func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog interface{}) (*VM, error) {
+func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *structpb.Value) (*VM, error) {
 	var taskOwner common.Address
 	if task != nil && task.Owner != "" {
 		taskOwner = common.HexToAddress(task.Owner)
@@ -350,22 +349,12 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 
 			// If we have transfer log data, use it to populate rich trigger data and create proper Event structure
 			if transferLog != nil {
-				// With new JSON-based structure, transferLog should be a JSON string
-				// Create EventTrigger_Output with JSON data
-				if jsonData, ok := transferLog.(string); ok {
-					v.parsedTriggerData.Event = &avsproto.EventTrigger_Output{
-						Data: jsonData,
-					}
-					// Parse JSON to create trigger data map
-					var parsedData map[string]interface{}
-					if err := json.Unmarshal([]byte(jsonData), &parsedData); err == nil {
-						triggerDataMap = parsedData
-					} else {
-						triggerDataMap = map[string]interface{}{} // Empty map on parse error
-					}
-				} else {
-					triggerDataMap = map[string]interface{}{} // Empty map if not string
+				// New format: google.protobuf.Value
+				v.parsedTriggerData.Event = &avsproto.EventTrigger_Output{
+					Data: transferLog,
 				}
+				// Convert protobuf value to map
+				triggerDataMap = convertProtobufValueToMap(transferLog)
 			} else {
 				// Use shared function to build trigger data map from protobuf trigger outputs
 				triggerDataMap = buildTriggerDataMapFromProtobuf(triggerData.Type, triggerData.Output, v.logger)
@@ -2515,4 +2504,22 @@ func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface
 		return nil
 	}
 	return nil
+}
+
+// convertProtobufValueToMap converts a google.protobuf.Value to a map[string]interface{}
+func convertProtobufValueToMap(value *structpb.Value) map[string]interface{} {
+	if value == nil {
+		return map[string]interface{}{}
+	}
+
+	// Use the built-in AsInterface() method to convert to Go native types
+	interfaceValue := value.AsInterface()
+
+	// Try to convert to map[string]interface{}
+	if mapValue, ok := interfaceValue.(map[string]interface{}); ok {
+		return mapValue
+	}
+
+	// If it's not a map, return empty map
+	return map[string]interface{}{}
 }

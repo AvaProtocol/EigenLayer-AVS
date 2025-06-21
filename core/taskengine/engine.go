@@ -1364,14 +1364,23 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 
 		if n.tokenEnrichmentService != nil {
 			if eventOutput := triggerData.Output.(*avsproto.EventTrigger_Output); eventOutput != nil {
-				// With new JSON-based structure, we just log what we have
-				n.logger.Debug("EventTrigger output with JSON data",
+				// With new structured data, we just log what we have
+				hasData := eventOutput.Data != nil
+				dataLength := 0
+				if hasData {
+					// Convert to string for logging purposes
+					if dataStr, err := eventOutput.Data.MarshalJSON(); err == nil {
+						dataLength = len(dataStr)
+					}
+				}
+
+				n.logger.Debug("EventTrigger output with structured data",
 					"task_id", payload.TaskId,
-					"has_data", eventOutput.Data != "",
-					"data_length", len(eventOutput.Data))
+					"has_data", hasData,
+					"data_length", dataLength)
 
 				// Token enrichment is now handled during event parsing, not here
-				// The JSON data should already include all necessary enriched fields
+				// The structured data should already include all necessary enriched fields
 			} else {
 				n.logger.Debug("EventTrigger output is nil",
 					"task_id", payload.TaskId)
@@ -1793,7 +1802,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Convert trigger output to proper protobuf structure using shared functions
 	var triggerOutputProto interface{}
-	switch trigger.Type {
+	switch triggerType {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
 		triggerOutputProto = buildManualTriggerOutput(triggerOutput)
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
@@ -1805,8 +1814,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
 		triggerOutputProto = buildEventTriggerOutput(triggerOutput)
 	default:
-		// For unknown trigger types, create a manual trigger as fallback
-		triggerOutputProto = buildManualTriggerOutput(triggerOutput)
+		return nil, fmt.Errorf("unsupported trigger type for simulation: %v", triggerType)
 	}
 
 	queueData := &QueueExecutionData{
@@ -2962,7 +2970,7 @@ func sanitizeTriggerNameForJS(triggerName string) string {
 //   - triggerOutput: map containing raw trigger output data from runEventTriggerImmediately
 //
 // Returns:
-//   - *avsproto.EventTrigger_Output: properly structured protobuf output with JSON data
+//   - *avsproto.EventTrigger_Output: properly structured protobuf output with structured data
 func buildEventTriggerOutput(triggerOutput map[string]interface{}) *avsproto.EventTrigger_Output {
 	eventOutput := &avsproto.EventTrigger_Output{}
 
@@ -2970,9 +2978,12 @@ func buildEventTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Eve
 	if triggerOutput != nil {
 		// Check if we found events
 		if found, ok := triggerOutput["found"].(bool); ok && found {
-			// Extract the JSON data string from the trigger output
-			if dataStr, ok := triggerOutput["data"].(string); ok {
-				eventOutput.Data = dataStr
+			// Extract the data from the trigger output
+			if data, ok := triggerOutput["data"]; ok {
+				// Convert to google.protobuf.Value
+				if protoValue, err := structpb.NewValue(data); err == nil {
+					eventOutput.Data = protoValue
+				}
 			}
 		}
 		// If no events found, eventOutput remains with empty data field
@@ -3348,16 +3359,16 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
 		if eventOutput, ok := triggerOutputProto.(*avsproto.EventTrigger_Output); ok {
-			// With new JSON-based structure, parse the JSON data
-			if eventOutput.Data != "" {
-				var eventData map[string]interface{}
-				if err := json.Unmarshal([]byte(eventOutput.Data), &eventData); err == nil {
+			// With new structured data, convert the protobuf value to map
+			if eventOutput.Data != nil {
+				// Convert google.protobuf.Value to map[string]interface{}
+				if eventData, ok := eventOutput.Data.AsInterface().(map[string]interface{}); ok {
 					// Copy all parsed event data to the trigger data map
 					for k, v := range eventData {
 						triggerDataMap[k] = v
 					}
 				} else if logger != nil {
-					logger.Warn("Failed to parse event trigger JSON data", "error", err, "data", eventOutput.Data)
+					logger.Warn("Failed to convert event trigger data to map", "data_type", fmt.Sprintf("%T", eventOutput.Data.AsInterface()))
 				}
 			}
 		} else if enrichedDataMap, ok := triggerOutputProto.(map[string]interface{}); ok {

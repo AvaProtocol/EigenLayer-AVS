@@ -1,11 +1,11 @@
 package taskengine
 
 import (
-	"encoding/json"
 	"testing"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestBuildEventTriggerOutputDefensiveProgramming(t *testing.T) {
@@ -115,26 +115,28 @@ func TestBuildEventTriggerOutputDefensiveProgramming(t *testing.T) {
 			t.Logf("✅ %s: %s", test.name, test.description)
 
 			if test.name == "Found=true with valid JSON data" {
-				require.NotEmpty(t, result.Data, "Data field should be populated")
+				require.NotNil(t, result.Data, "Data field should be populated")
 
-				// Verify the JSON data can be parsed
-				var eventData map[string]interface{}
-				err := json.Unmarshal([]byte(result.Data), &eventData)
-				require.NoError(t, err, "Data should be valid JSON")
-				require.Equal(t, "TestToken", eventData["tokenName"])
-				require.Equal(t, "TEST", eventData["tokenSymbol"])
-				require.Equal(t, float64(18), eventData["tokenDecimals"])
+				// Verify the structured data can be accessed
+				if eventData, ok := result.Data.AsInterface().(map[string]interface{}); ok {
+					require.Equal(t, "TestToken", eventData["tokenName"])
+					require.Equal(t, "TEST", eventData["tokenSymbol"])
+					require.Equal(t, float64(18), eventData["tokenDecimals"])
+				} else {
+					t.Fatal("Data should be convertible to map[string]interface{}")
+				}
 			} else if test.name == "Found=true with event log JSON data" {
-				require.NotEmpty(t, result.Data, "Data field should be populated")
+				require.NotNil(t, result.Data, "Data field should be populated")
 
-				// Verify the JSON data can be parsed
-				var eventData map[string]interface{}
-				err := json.Unmarshal([]byte(result.Data), &eventData)
-				require.NoError(t, err, "Data should be valid JSON")
-				require.Equal(t, "0x123", eventData["address"])
-				require.Equal(t, float64(12345), eventData["blockNumber"])
+				// Verify the structured data can be accessed
+				if eventData, ok := result.Data.AsInterface().(map[string]interface{}); ok {
+					require.Equal(t, "0x123", eventData["address"])
+					require.Equal(t, float64(12345), eventData["blockNumber"])
+				} else {
+					t.Fatal("Data should be convertible to map[string]interface{}")
+				}
 			} else {
-				require.Empty(t, result.Data, "Data should be empty for invalid/empty input")
+				require.Nil(t, result.Data, "Data should be nil for invalid/empty input")
 			}
 		})
 	}
@@ -199,24 +201,28 @@ func TestBuildTriggerDataMapFromProtobufEventTriggerComprehensive(t *testing.T) 
 		},
 		{
 			name: "EventTrigger_Output with JSON transfer data",
-			input: &avsproto.EventTrigger_Output{
-				Data: `{
-					"tokenName": "Test Token",
-					"tokenSymbol": "TEST",
-					"tokenDecimals": 18,
-					"transactionHash": "0x1234567890abcdef",
-					"address": "0xabcdef1234567890",
-					"blockNumber": 12345678,
-					"blockTimestamp": 1672531200,
-					"fromAddress": "0x1111111111111111",
-					"toAddress": "0x2222222222222222",
-					"value": "1000000000000000000",
-					"valueFormatted": "1.0",
+			input: func() *avsproto.EventTrigger_Output {
+				transferData := map[string]interface{}{
+					"tokenName":        "Test Token",
+					"tokenSymbol":      "TEST",
+					"tokenDecimals":    18,
+					"transactionHash":  "0x1234567890abcdef",
+					"address":          "0xabcdef1234567890",
+					"blockNumber":      12345678,
+					"blockTimestamp":   1672531200,
+					"fromAddress":      "0x1111111111111111",
+					"toAddress":        "0x2222222222222222",
+					"value":            "1000000000000000000",
+					"valueFormatted":   "1.0",
 					"transactionIndex": 5,
-					"logIndex": 3
-				}`,
-			},
-			description: "Should parse JSON data and map all fields including logIndex",
+					"logIndex":         3,
+				}
+				protoValue, _ := structpb.NewValue(transferData)
+				return &avsproto.EventTrigger_Output{
+					Data: protoValue,
+				}
+			}(),
+			description: "Should parse structured data and map all fields including logIndex",
 			verifyFunc: func(t *testing.T, result map[string]interface{}) {
 				require.Contains(t, result, "tokenName", "tokenName should be present")
 				require.Equal(t, "Test Token", result["tokenName"])
@@ -230,20 +236,24 @@ func TestBuildTriggerDataMapFromProtobufEventTriggerComprehensive(t *testing.T) 
 		},
 		{
 			name: "EventTrigger_Output with JSON event log data",
-			input: &avsproto.EventTrigger_Output{
-				Data: `{
-					"address": "0xabcdef1234567890",
-					"topics": ["0xtopic1", "0xtopic2", "0xtopic3"],
-					"data": "0xdeadbeef",
-					"blockNumber": 12345678,
-					"transactionHash": "0x1234567890abcdef",
+			input: func() *avsproto.EventTrigger_Output {
+				eventLogData := map[string]interface{}{
+					"address":          "0xabcdef1234567890",
+					"topics":           []interface{}{"0xtopic1", "0xtopic2", "0xtopic3"},
+					"data":             "0xdeadbeef",
+					"blockNumber":      12345678,
+					"transactionHash":  "0x1234567890abcdef",
 					"transactionIndex": 5,
-					"blockHash": "0xblockhash123456",
-					"logIndex": 3,
-					"removed": false
-				}`,
-			},
-			description: "Should parse JSON event log data and map all fields",
+					"blockHash":        "0xblockhash123456",
+					"logIndex":         3,
+					"removed":          false,
+				}
+				protoValue, _ := structpb.NewValue(eventLogData)
+				return &avsproto.EventTrigger_Output{
+					Data: protoValue,
+				}
+			}(),
+			description: "Should parse structured event log data and map all fields",
 			verifyFunc: func(t *testing.T, result map[string]interface{}) {
 				require.Contains(t, result, "address", "address should be present")
 				require.Equal(t, "0xabcdef1234567890", result["address"])
@@ -259,23 +269,12 @@ func TestBuildTriggerDataMapFromProtobufEventTriggerComprehensive(t *testing.T) 
 		{
 			name: "EventTrigger_Output with empty data",
 			input: &avsproto.EventTrigger_Output{
-				Data: "",
+				Data: nil,
 			},
 			description: "Should handle empty data gracefully",
 			verifyFunc: func(t *testing.T, result map[string]interface{}) {
 				require.Equal(t, "TRIGGER_TYPE_EVENT", result["type"], "Should still add trigger type")
 				require.Len(t, result, 1, "Should only contain type field for empty data")
-			},
-		},
-		{
-			name: "EventTrigger_Output with invalid JSON",
-			input: &avsproto.EventTrigger_Output{
-				Data: `{"invalid": json}`,
-			},
-			description: "Should handle invalid JSON gracefully",
-			verifyFunc: func(t *testing.T, result map[string]interface{}) {
-				require.Equal(t, "TRIGGER_TYPE_EVENT", result["type"], "Should still add trigger type")
-				require.Len(t, result, 1, "Should only contain type field for invalid JSON")
 			},
 		},
 	}

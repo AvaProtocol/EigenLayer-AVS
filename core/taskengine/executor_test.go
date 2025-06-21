@@ -11,6 +11,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestExecutorRunTaskSucess(t *testing.T) {
@@ -478,7 +479,14 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 	// For this test, we need to test the execution with transfer log data
 	// So we'll override the RunTask method behavior by calling the VM directly
 	secrets, _ := LoadSecretForTask(executor.db, task)
-	vm, err := NewVMWithDataAndTransferLog(task, triggerData, executor.smartWalletConfig, secrets, transferTriggerData.Output)
+
+	// Extract the Data field from EventTrigger_Output
+	var transferLog *structpb.Value
+	if eventOutput, ok := transferTriggerData.Output.(*avsproto.EventTrigger_Output); ok {
+		transferLog = eventOutput.Data
+	}
+
+	vm, err := NewVMWithDataAndTransferLog(task, triggerData, executor.smartWalletConfig, secrets, transferLog)
 	if err != nil {
 		t.Fatalf("error creating VM: %v", err)
 	}

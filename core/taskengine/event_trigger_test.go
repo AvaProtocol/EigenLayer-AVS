@@ -168,14 +168,14 @@ func TestEventTriggerEndToEndRPC(t *testing.T) {
 		if eventOutput := result.GetEventTrigger(); eventOutput != nil {
 			t.Logf("✅ Event Trigger Output received")
 
-			// Check JSON data
-			if eventOutput.Data != "" {
-				t.Logf("📋 Event JSON Data:")
-				t.Logf("  📦 Data: %s", eventOutput.Data)
+			// Check structured data
+			if eventOutput.Data != nil {
+				t.Logf("📋 Event Structured Data:")
 
-				// Try to parse the JSON data
-				var eventData map[string]interface{}
-				if err := json.Unmarshal([]byte(eventOutput.Data), &eventData); err == nil {
+				// Convert protobuf value to map for logging
+				if eventData, ok := eventOutput.Data.AsInterface().(map[string]interface{}); ok {
+					t.Logf("  📦 Data: %+v", eventData)
+
 					if txHash, exists := eventData["transactionHash"]; exists {
 						t.Logf("  🔗 Transaction Hash: %v", txHash)
 					}
@@ -195,7 +195,7 @@ func TestEventTriggerEndToEndRPC(t *testing.T) {
 						t.Logf("  💰 Value: %v", value)
 					}
 				} else {
-					t.Logf("⚠️  Could not parse JSON data: %v", err)
+					t.Logf("⚠️  Could not convert data to map: %T", eventOutput.Data.AsInterface())
 				}
 			} else {
 				t.Log("ℹ️  No event data (normal when no events found)")
@@ -482,7 +482,7 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 			// Verify RPC response has proper EventTrigger.Output structure
 			if rpcResult.GetEventTrigger() != nil {
 				// Check response structure - with new JSON approach, just check if data is present
-				hasData := rpcResult.GetEventTrigger().Data != ""
+				hasData := rpcResult.GetEventTrigger().Data != nil
 				t.Logf("🔌 RPC Response: has_data=%v", hasData)
 
 				// Validate JSON data based on whether events were found
@@ -495,7 +495,7 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 
 						// Try to parse the JSON to verify it's valid
 						var eventData map[string]interface{}
-						if err := json.Unmarshal([]byte(rpcResult.GetEventTrigger().Data), &eventData); err == nil {
+						if err := json.Unmarshal([]byte(rpcResult.GetEventTrigger().Data.String()), &eventData); err == nil {
 							t.Logf("✅ JSON data is valid and parseable")
 							if len(eventData) > 0 {
 								t.Logf("✅ JSON data contains event fields")

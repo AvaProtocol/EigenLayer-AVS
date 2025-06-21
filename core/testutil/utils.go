@@ -19,6 +19,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const (
@@ -352,18 +353,24 @@ func GetTestSecrets() map[string]string {
 
 func GetTestEventTriggerData() *TriggerData {
 	// Sample JSON event data that would come from parsed event
-	eventData := `{
-		"blockNumber": 7212417,
+	eventData := map[string]interface{}{
+		"blockNumber":     7212417,
 		"transactionHash": "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-		"logIndex": 98,
-		"address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-		"removed": false
-	}`
+		"logIndex":        98,
+		"address":         "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+		"removed":         false,
+	}
+
+	// Convert to google.protobuf.Value
+	protoValue, err := structpb.NewValue(eventData)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create protobuf value: %v", err))
+	}
 
 	return &TriggerData{
 		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 		Output: &avsproto.EventTrigger_Output{
-			Data: eventData,
+			Data: protoValue,
 		},
 	}
 }
@@ -371,26 +378,32 @@ func GetTestEventTriggerData() *TriggerData {
 // GetTestEventTriggerDataWithTransferData provides trigger data with rich transfer log data for testing
 func GetTestEventTriggerDataWithTransferData() *TriggerData {
 	// Sample JSON event data for transfer events (parsed from Transfer event)
-	transferEventData := `{
-		"tokenName": "USDC",
-		"tokenSymbol": "USDC", 
-		"tokenDecimals": 6,
-		"from": "0x2A6CEbeDF9e737A9C6188c62A68655919c7314DB",
-		"to": "0xC114FB059434563DC65AC8D57e7976e3eaC534F4",
-		"value": "3453120",
-		"valueFormatted": "3.45312",
-		"transactionHash": "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
-		"address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-		"blockNumber": 7212417,
-		"blockTimestamp": 1733351604000,
+	transferEventData := map[string]interface{}{
+		"tokenName":        "USDC",
+		"tokenSymbol":      "USDC",
+		"tokenDecimals":    6,
+		"from":             "0x2A6CEbeDF9e737A9C6188c62A68655919c7314DB",
+		"to":               "0xC114FB059434563DC65AC8D57e7976e3eaC534F4",
+		"value":            "3453120",
+		"valueFormatted":   "3.45312",
+		"transactionHash":  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
+		"address":          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+		"blockNumber":      7212417,
+		"blockTimestamp":   1733351604000,
 		"transactionIndex": 73,
-		"logIndex": 0
-	}`
+		"logIndex":         0,
+	}
+
+	// Convert to google.protobuf.Value
+	protoValue, err := structpb.NewValue(transferEventData)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create protobuf value: %v", err))
+	}
 
 	triggerData := &TriggerData{
 		Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
 		Output: &avsproto.EventTrigger_Output{
-			Data: transferEventData,
+			Data: protoValue,
 		},
 	}
 

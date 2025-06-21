@@ -20,6 +20,7 @@ import (
 	triggerengine "github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger"
 	avspb "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const (
@@ -341,12 +342,18 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 		case triggerItem := <-eventTriggerCh:
 			o.logger.Info("event trigger", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
 
-			// Create minimal JSON data for the event trigger with new structure
-			eventData := fmt.Sprintf(`{
-				"blockNumber": %d,
-				"logIndex": %d,
-				"transactionHash": "%s"
-			}`, triggerItem.Marker.BlockNumber, triggerItem.Marker.LogIndex, triggerItem.Marker.TxHash)
+			// Create structured data for the event trigger
+			eventDataMap := map[string]interface{}{
+				"blockNumber":     triggerItem.Marker.BlockNumber,
+				"logIndex":        triggerItem.Marker.LogIndex,
+				"transactionHash": triggerItem.Marker.TxHash,
+			}
+
+			eventData, err := structpb.NewStruct(eventDataMap)
+			if err != nil {
+				o.logger.Error("Failed to create structured event data", "error", err)
+				continue
+			}
 
 			if resp, err := o.nodeRpcClient.NotifyTriggers(context.Background(), &avspb.NotifyTriggersReq{
 				Address:     o.config.OperatorAddress,
@@ -355,7 +362,7 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				TriggerType: avspb.TriggerType_TRIGGER_TYPE_EVENT,
 				TriggerOutput: &avspb.NotifyTriggersReq_EventTrigger{
 					EventTrigger: &avspb.EventTrigger_Output{
-						Data: eventData,
+						Data: structpb.NewStructValue(eventData),
 					},
 				},
 			}); err == nil {

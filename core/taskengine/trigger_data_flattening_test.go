@@ -7,6 +7,7 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // TestBuildTriggerDataMapEventTriggerFlattening tests the specific fix for flattening transfer_log data
@@ -71,39 +72,45 @@ func TestBuildTriggerDataMapEventTriggerFlattening(t *testing.T) {
 }
 
 // TestBuildTriggerDataMapFromProtobufConsistency tests that both buildTriggerDataMap and
-// buildTriggerDataMapFromProtobuf produce consistent field names for JavaScript access with the new JSON approach.
+// buildTriggerDataMapFromProtobuf produce consistent field names for JavaScript access with the new structured approach.
 func TestBuildTriggerDataMapFromProtobufConsistency(t *testing.T) {
-	// Create protobuf EventTrigger with JSON data
-	jsonData := `{
-		"tokenName": "USDC",
-		"tokenSymbol": "USDC",
-		"tokenDecimals": 6,
-		"transactionHash": "0x1b0b9bee55e3a824dedd1dcfaad1790e19e0a68d6717e385a960092077f8b6a1",
-		"address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-		"blockNumber": 8560047,
-		"blockTimestamp": 1750061412000,
-		"fromAddress": "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-		"toAddress": "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
-		"value": "0x00000000000000000000000000000000000000000000000000000000004c4b40",
-		"valueFormatted": "5",
+	// Create structured event data (not JSON string)
+	eventDataMap := map[string]interface{}{
+		"tokenName":        "USDC",
+		"tokenSymbol":      "USDC",
+		"tokenDecimals":    6,
+		"transactionHash":  "0x1b0b9bee55e3a824dedd1dcfaad1790e19e0a68d6717e385a960092077f8b6a1",
+		"address":          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+		"blockNumber":      8560047,
+		"blockTimestamp":   1750061412000,
+		"fromAddress":      "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
+		"toAddress":        "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9",
+		"value":            "0x00000000000000000000000000000000000000000000000000000000004c4b40",
+		"valueFormatted":   "5",
 		"transactionIndex": 63,
-		"logIndex": 83
-	}`
+		"logIndex":         83,
+	}
+
+	// Convert to google.protobuf.Value
+	protoValue, err := structpb.NewValue(eventDataMap)
+	if err != nil {
+		t.Fatalf("Failed to create protobuf value: %v", err)
+	}
 
 	eventOutputProto := &avsproto.EventTrigger_Output{
-		Data: jsonData,
+		Data: protoValue,
 	}
 
 	// Test buildTriggerDataMapFromProtobuf
 	protobufResult := buildTriggerDataMapFromProtobuf(avsproto.TriggerType_TRIGGER_TYPE_EVENT, eventOutputProto, nil)
 
-	// Create raw trigger output data (as it would come from runEventTriggerImmediately)
+	// Create raw trigger output data with structured data (not JSON string)
 	rawTriggerOutput := map[string]interface{}{
 		"found":         true,
 		"queriesCount":  2,
 		"totalSearched": 5000,
 		"totalEvents":   1,
-		"data":          jsonData,
+		"transfer_log":  eventDataMap, // Use structured data, not JSON string
 	}
 
 	// Test buildTriggerDataMap
@@ -121,14 +128,47 @@ func TestBuildTriggerDataMapFromProtobufConsistency(t *testing.T) {
 		assert.Contains(t, protobufResult, field, "buildTriggerDataMapFromProtobuf should have field: %s", field)
 		assert.Contains(t, rawResult, field, "buildTriggerDataMap should have field: %s", field)
 
-		// Both results should have the same values for these fields (note: JSON parsing converts numbers to float64)
+		// Both results should have the same values for these fields
 		protobufValue := protobufResult[field]
 		rawValue := rawResult[field]
 
-		// Handle numeric type differences from JSON parsing
+		// Handle numeric type differences - protobuf may have different types than raw maps
 		if field == "tokenDecimals" || field == "blockNumber" || field == "blockTimestamp" ||
 			field == "transactionIndex" || field == "logIndex" {
-			assert.Equal(t, float64(protobufValue.(int)), rawValue, "Numeric field %s should have same value", field)
+			// Convert both to the same type for comparison
+			var protobufNum, rawNum float64
+
+			switch pv := protobufValue.(type) {
+			case int:
+				protobufNum = float64(pv)
+			case int64:
+				protobufNum = float64(pv)
+			case uint32:
+				protobufNum = float64(pv)
+			case uint64:
+				protobufNum = float64(pv)
+			case float64:
+				protobufNum = pv
+			default:
+				t.Fatalf("Unexpected type for protobuf numeric field %s: %T", field, protobufValue)
+			}
+
+			switch rv := rawValue.(type) {
+			case int:
+				rawNum = float64(rv)
+			case int64:
+				rawNum = float64(rv)
+			case uint32:
+				rawNum = float64(rv)
+			case uint64:
+				rawNum = float64(rv)
+			case float64:
+				rawNum = rv
+			default:
+				t.Fatalf("Unexpected type for raw numeric field %s: %T", field, rawValue)
+			}
+
+			assert.Equal(t, protobufNum, rawNum, "Numeric field %s should have same value", field)
 		} else {
 			assert.Equal(t, protobufValue, rawValue, "Field %s should have same value in both results", field)
 		}
@@ -137,6 +177,10 @@ func TestBuildTriggerDataMapFromProtobufConsistency(t *testing.T) {
 	// Verify that neither result has the nested transfer_log structure
 	assert.NotContains(t, protobufResult, "transfer_log", "buildTriggerDataMapFromProtobuf should not have nested transfer_log")
 	assert.NotContains(t, rawResult, "transfer_log", "buildTriggerDataMap should not have nested transfer_log")
+
+	// Verify that both results have the trigger type
+	assert.Equal(t, "TRIGGER_TYPE_EVENT", protobufResult["type"])
+	assert.NotContains(t, rawResult, "type", "buildTriggerDataMap should not add type field")
 }
 
 // TestJavaScriptFieldAccessPattern tests that the field names work correctly for JavaScript destructuring
