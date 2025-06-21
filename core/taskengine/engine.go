@@ -1363,7 +1363,7 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 			"has_token_service", n.tokenEnrichmentService != nil)
 
 		if n.tokenEnrichmentService != nil {
-			if eventOutput := triggerData.Output.(*avsproto.EventTrigger_Output); eventOutput != nil {
+			if eventOutput, ok := triggerData.Output.(*avsproto.EventTrigger_Output); ok && eventOutput != nil {
 				// With new structured data, we just log what we have
 				hasData := eventOutput.Data != nil
 				dataLength := 0
