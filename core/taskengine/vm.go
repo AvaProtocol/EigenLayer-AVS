@@ -258,7 +258,7 @@ func NewVMWithData(task *model.Task, triggerData *TriggerData, smartWalletConfig
 	return NewVMWithDataAndTransferLog(task, triggerData, smartWalletConfig, secrets, nil)
 }
 
-func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *avsproto.EventTrigger_TransferLogOutput) (*VM, error) {
+func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *structpb.Value) (*VM, error) {
 	var taskOwner common.Address
 	if task != nil && task.Owner != "" {
 		taskOwner = common.HexToAddress(task.Owner)
@@ -349,15 +349,12 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 
 			// If we have transfer log data, use it to populate rich trigger data and create proper Event structure
 			if transferLog != nil {
-				// Create EventTrigger_Output with oneof TransferLog
+				// New format: google.protobuf.Value
 				v.parsedTriggerData.Event = &avsproto.EventTrigger_Output{
-					OutputType: &avsproto.EventTrigger_Output_TransferLog{
-						TransferLog: transferLog,
-					},
+					Data: transferLog,
 				}
-
-				// Use shared function to build trigger data map from the TransferLog protobuf
-				triggerDataMap = buildTriggerDataMapFromProtobuf(avsproto.TriggerType_TRIGGER_TYPE_EVENT, v.parsedTriggerData.Event, v.logger)
+				// Convert protobuf value to map
+				triggerDataMap = convertProtobufValueToMap(transferLog)
 			} else {
 				// Use shared function to build trigger data map from protobuf trigger outputs
 				triggerDataMap = buildTriggerDataMapFromProtobuf(triggerData.Type, triggerData.Output, v.logger)
@@ -1894,6 +1891,14 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 					if methodName, ok := methodCallMap["method_name"].(string); ok {
 						methodCall.MethodName = methodName
 					}
+					// Handle applyToFields for decimal formatting
+					if applyToFields, ok := methodCallMap["apply_to_fields"].([]interface{}); ok {
+						for _, field := range applyToFields {
+							if fieldStr, ok := field.(string); ok {
+								methodCall.ApplyToFields = append(methodCall.ApplyToFields, fieldStr)
+							}
+						}
+					}
 					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
 				}
 			}
@@ -1911,6 +1916,20 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 						methodCall.MethodName = methodName
 					} else if methodName, ok := methodCallMap["method_name"].(string); ok {
 						methodCall.MethodName = methodName
+					}
+					// Handle applyToFields for decimal formatting (support both camelCase and snake_case)
+					if applyToFields, ok := methodCallMap["applyToFields"].([]interface{}); ok {
+						for _, field := range applyToFields {
+							if fieldStr, ok := field.(string); ok {
+								methodCall.ApplyToFields = append(methodCall.ApplyToFields, fieldStr)
+							}
+						}
+					} else if applyToFields, ok := methodCallMap["apply_to_fields"].([]interface{}); ok {
+						for _, field := range applyToFields {
+							if fieldStr, ok := field.(string); ok {
+								methodCall.ApplyToFields = append(methodCall.ApplyToFields, fieldStr)
+							}
+						}
 					}
 					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
 				}
@@ -2507,4 +2526,22 @@ func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface
 		return nil
 	}
 	return nil
+}
+
+// convertProtobufValueToMap converts a google.protobuf.Value to a map[string]interface{}
+func convertProtobufValueToMap(value *structpb.Value) map[string]interface{} {
+	if value == nil {
+		return map[string]interface{}{}
+	}
+
+	// Use the built-in AsInterface() method to convert to Go native types
+	interfaceValue := value.AsInterface()
+
+	// Try to convert to map[string]interface{}
+	if mapValue, ok := interfaceValue.(map[string]interface{}); ok {
+		return mapValue
+	}
+
+	// If it's not a map, return empty map
+	return map[string]interface{}{}
 }

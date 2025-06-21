@@ -34,7 +34,6 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
-	"github.com/ethereum/go-ethereum/core/types"
 )
 
 const (
@@ -349,7 +348,7 @@ func (n *Engine) ListWallets(owner common.Address, payload *avsproto.ListWalletR
 	if listErr != nil && listErr != badger.ErrKeyNotFound {
 		n.logger.Error("Error fetching wallets by owner prefix for ListWallets", "owner", owner.Hex(), "error", listErr)
 		if len(walletsToReturnProto) == 0 {
-			return nil, status.Errorf(codes.Code(avsproto.Error_StorageUnavailable), "Error fetching wallets by owner: %v", listErr)
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), "Error fetching wallets by owner: %v", listErr)
 		}
 	}
 
@@ -439,7 +438,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 
 	if err != nil && err != badger.ErrKeyNotFound {
 		n.logger.Error("Error fetching wallet from DB for GetWallet", "owner", user.Address.Hex(), "wallet", derivedSenderAddress.Hex(), "error", err)
-		return nil, status.Errorf(codes.Code(avsproto.Error_StorageUnavailable), "Error fetching wallet: %v", err)
+		return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), "Error fetching wallet: %v", err)
 	}
 
 	if err == badger.ErrKeyNotFound {
@@ -453,7 +452,7 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		}
 		if storeErr := StoreWallet(n.db, user.Address, newModelWallet); storeErr != nil {
 			n.logger.Error("Error storing new wallet to DB for GetWallet", "owner", user.Address.Hex(), "walletAddress", derivedSenderAddress.Hex(), "error", storeErr)
-			return nil, status.Errorf(codes.Code(avsproto.Error_StorageWriteError), "Error storing new wallet: %v", storeErr)
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_WRITE_ERROR), "Error storing new wallet: %v", storeErr)
 		}
 		dbModelWallet = newModelWallet
 	}
@@ -1364,35 +1363,24 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 			"has_token_service", n.tokenEnrichmentService != nil)
 
 		if n.tokenEnrichmentService != nil {
-			if eventOutput := triggerData.Output.(*avsproto.EventTrigger_Output); eventOutput != nil {
-				if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
-					n.logger.Debug("enriching EventTrigger output from operator",
-						"task_id", payload.TaskId,
-						"tx_hash", evmLog.TransactionHash,
-						"block_number", evmLog.BlockNumber,
-						"log_index", evmLog.Index,
-						"address", evmLog.Address,
-						"topics_count", len(evmLog.Topics),
-						"data_length", len(evmLog.Data))
-
-					// Fetch full event data from the blockchain using the minimal data from operator
-					if enrichedEventOutput, err := n.enrichEventTriggerFromOperatorData(evmLog); err == nil {
-						// Replace the minimal event output with the enriched one
-						triggerData.Output = enrichedEventOutput
-						n.logger.Debug("successfully enriched EventTrigger output",
-							"task_id", payload.TaskId,
-							"has_transfer_log", enrichedEventOutput.GetTransferLog() != nil,
-							"has_evm_log", enrichedEventOutput.GetEvmLog() != nil)
-					} else {
-						n.logger.Warn("failed to enrich EventTrigger output, using minimal data",
-							"task_id", payload.TaskId,
-							"error", err)
+			if eventOutput, ok := triggerData.Output.(*avsproto.EventTrigger_Output); ok && eventOutput != nil {
+				// With new structured data, we just log what we have
+				hasData := eventOutput.Data != nil
+				dataLength := 0
+				if hasData {
+					// Convert to string for logging purposes
+					if dataStr, err := eventOutput.Data.MarshalJSON(); err == nil {
+						dataLength = len(dataStr)
 					}
-				} else {
-					n.logger.Debug("EventTrigger output has no EvmLog data",
-						"task_id", payload.TaskId,
-						"has_transfer_log", eventOutput.GetTransferLog() != nil)
 				}
+
+				n.logger.Debug("EventTrigger output with structured data",
+					"task_id", payload.TaskId,
+					"has_data", hasData,
+					"data_length", dataLength)
+
+				// Token enrichment is now handled during event parsing, not here
+				// The structured data should already include all necessary enriched fields
 			} else {
 				n.logger.Debug("EventTrigger output is nil",
 					"task_id", payload.TaskId)
@@ -1498,7 +1486,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 
 	taskKeys, err := n.db.ListKeysMulti(prefixes)
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
 	}
 
 	// second, do the sort, this is key sorted by ordering of their insertion
@@ -1540,7 +1528,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		taskID := string(model.TaskKeyToId(([]byte(key[2:]))))
 		statusValue, err := n.db.GetKey([]byte(key))
 		if err != nil {
-			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
+			return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
 		}
 		status, _ := strconv.Atoi(string(statusValue))
 
@@ -1637,7 +1625,7 @@ func (n *Engine) GetTaskByID(taskID string) (*model.Task, error) {
 				return task, nil
 			}
 
-			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), TaskStorageCorruptedError)
+			return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
 		}
 	}
 
@@ -1814,7 +1802,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Convert trigger output to proper protobuf structure using shared functions
 	var triggerOutputProto interface{}
-	switch trigger.Type {
+	switch triggerType {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
 		triggerOutputProto = buildManualTriggerOutput(triggerOutput)
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
@@ -1826,8 +1814,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
 		triggerOutputProto = buildEventTriggerOutput(triggerOutput)
 	default:
-		// For unknown trigger types, create a manual trigger as fallback
-		triggerOutputProto = buildManualTriggerOutput(triggerOutput)
+		return nil, fmt.Errorf("unsupported trigger type for simulation: %v", triggerType)
 	}
 
 	queueData := &QueueExecutionData{
@@ -2034,7 +2021,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	})
 
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_StorageUnavailable), StorageUnavailableError)
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
 	}
 
 	executioResp := &avsproto.ListExecutionsResp{
@@ -2155,7 +2142,7 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 	exec := &avsproto.Execution{}
 	err = protojson.Unmarshal(rawExecution, exec)
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), TaskStorageCorruptedError)
+		return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
 	}
 
 	// No longer need trigger type at execution level - it's in the first step
@@ -2174,7 +2161,7 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 		exec := &avsproto.Execution{}
 		err = protojson.Unmarshal(rawExecution, exec)
 		if err != nil {
-			return nil, grpcstatus.Errorf(codes.Code(avsproto.Error_TaskDataCorrupted), TaskStorageCorruptedError)
+			return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
 		}
 
 		if exec.Success {
@@ -2874,173 +2861,6 @@ func getStringMapKeys(m map[string]interface{}) []string {
 	return keys
 }
 
-// enrichEventTriggerFromOperatorData fetches full event data from blockchain and enriches it with token metadata
-func (n *Engine) enrichEventTriggerFromOperatorData(minimalEvmLog *avsproto.Evm_Log) (*avsproto.EventTrigger_Output, error) {
-	if minimalEvmLog.TransactionHash == "" {
-		n.logger.Debug("enrichment failed: transaction hash is empty")
-		return nil, fmt.Errorf("transaction hash is required for enrichment")
-	}
-
-	// Get RPC client (using the global rpcConn variable)
-	if rpcConn == nil {
-		n.logger.Debug("enrichment failed: RPC client not available")
-		return nil, fmt.Errorf("RPC client not available")
-	}
-
-	n.logger.Debug("starting event enrichment",
-		"tx_hash", minimalEvmLog.TransactionHash,
-		"log_index", minimalEvmLog.Index,
-		"block_number", minimalEvmLog.BlockNumber)
-
-	// Fetch transaction receipt to get the full event logs
-	ctx := context.Background()
-	receipt, err := rpcConn.TransactionReceipt(ctx, common.HexToHash(minimalEvmLog.TransactionHash))
-	if err != nil {
-		n.logger.Debug("enrichment failed: could not fetch transaction receipt",
-			"tx_hash", minimalEvmLog.TransactionHash,
-			"error", err)
-		return nil, fmt.Errorf("failed to fetch transaction receipt: %w", err)
-	}
-
-	n.logger.Debug("fetched transaction receipt",
-		"tx_hash", minimalEvmLog.TransactionHash,
-		"logs_count", len(receipt.Logs))
-
-	// Find the specific log that matches the operator's data
-	var targetLog *types.Log
-	for _, log := range receipt.Logs {
-		if uint32(log.Index) == minimalEvmLog.Index {
-			targetLog = log
-			break
-		}
-	}
-
-	if targetLog == nil {
-		n.logger.Debug("enrichment failed: log not found in transaction",
-			"tx_hash", minimalEvmLog.TransactionHash,
-			"expected_log_index", minimalEvmLog.Index,
-			"available_log_indices", func() []uint32 {
-				indices := make([]uint32, len(receipt.Logs))
-				for i, log := range receipt.Logs {
-					indices[i] = uint32(log.Index)
-				}
-				return indices
-			}())
-		return nil, fmt.Errorf("log with index %d not found in transaction %s",
-			minimalEvmLog.Index, minimalEvmLog.TransactionHash)
-	}
-
-	n.logger.Debug("found target log",
-		"tx_hash", minimalEvmLog.TransactionHash,
-		"log_index", targetLog.Index,
-		"address", targetLog.Address.Hex(),
-		"topics_count", len(targetLog.Topics),
-		"data_length", len(targetLog.Data))
-
-	// Create enriched EVM log with full data
-	enrichedEvmLog := &avsproto.Evm_Log{
-		Address:          targetLog.Address.Hex(),
-		Topics:           make([]string, len(targetLog.Topics)),
-		Data:             "0x" + common.Bytes2Hex(targetLog.Data),
-		BlockNumber:      targetLog.BlockNumber,
-		TransactionHash:  targetLog.TxHash.Hex(),
-		TransactionIndex: uint32(targetLog.TxIndex),
-		BlockHash:        targetLog.BlockHash.Hex(),
-		Index:            uint32(targetLog.Index),
-		Removed:          targetLog.Removed,
-	}
-
-	// Convert topics to string array
-	for i, topic := range targetLog.Topics {
-		enrichedEvmLog.Topics[i] = topic.Hex()
-	}
-
-	enrichedOutput := &avsproto.EventTrigger_Output{}
-
-	// Check if this is a Transfer event and enrich with token metadata
-	isTransferEvent := len(targetLog.Topics) > 0 &&
-		targetLog.Topics[0].Hex() == "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-
-	n.logger.Debug("checking if transfer event",
-		"is_transfer", isTransferEvent,
-		"topics_count", len(targetLog.Topics),
-		"first_topic", func() string {
-			if len(targetLog.Topics) > 0 {
-				return targetLog.Topics[0].Hex()
-			}
-			return "none"
-		}())
-
-	if isTransferEvent && len(targetLog.Topics) >= 3 {
-		n.logger.Debug("processing as transfer event")
-
-		// Get block timestamp for transfer_log
-		header, err := rpcConn.HeaderByNumber(ctx, big.NewInt(int64(targetLog.BlockNumber)))
-		var blockTimestamp uint64
-		if err == nil {
-			blockTimestamp = header.Time * 1000 // Convert to milliseconds
-		} else {
-			n.logger.Debug("could not fetch block header for timestamp", "error", err)
-		}
-
-		// Extract from and to addresses from topics
-		fromAddr := common.HexToAddress(targetLog.Topics[1].Hex()).Hex()
-		toAddr := common.HexToAddress(targetLog.Topics[2].Hex()).Hex()
-		value := "0x" + common.Bytes2Hex(targetLog.Data)
-
-		transferLog := &avsproto.EventTrigger_TransferLogOutput{
-			TokenName:        "",
-			TokenSymbol:      "",
-			TokenDecimals:    0,
-			TransactionHash:  targetLog.TxHash.Hex(),
-			Address:          targetLog.Address.Hex(),
-			BlockNumber:      targetLog.BlockNumber,
-			BlockTimestamp:   blockTimestamp,
-			FromAddress:      fromAddr,
-			ToAddress:        toAddr,
-			Value:            value,
-			ValueFormatted:   "",
-			TransactionIndex: uint32(targetLog.TxIndex),
-			LogIndex:         uint32(targetLog.Index),
-		}
-
-		n.logger.Debug("created transfer log",
-			"from", fromAddr,
-			"to", toAddr,
-			"value", value,
-			"token_address", targetLog.Address.Hex())
-
-		// Enrich with token metadata
-		if err := n.tokenEnrichmentService.EnrichTransferLog(enrichedEvmLog, transferLog); err != nil {
-			n.logger.Warn("failed to enrich transfer log with token metadata", "error", err)
-			// Continue without enrichment - partial data is better than no data
-		} else {
-			n.logger.Debug("successfully enriched transfer log",
-				"token_name", transferLog.TokenName,
-				"token_symbol", transferLog.TokenSymbol,
-				"token_decimals", transferLog.TokenDecimals,
-				"value_formatted", transferLog.ValueFormatted)
-		}
-
-		// Use the oneof TransferLog field
-		enrichedOutput.OutputType = &avsproto.EventTrigger_Output_TransferLog{
-			TransferLog: transferLog,
-		}
-	} else {
-		n.logger.Debug("processing as regular EVM log event")
-		// Regular event (not a transfer) - use the oneof EvmLog field
-		enrichedOutput.OutputType = &avsproto.EventTrigger_Output_EvmLog{
-			EvmLog: enrichedEvmLog,
-		}
-	}
-
-	n.logger.Debug("enrichment completed successfully",
-		"has_transfer_log", enrichedOutput.GetTransferLog() != nil,
-		"has_evm_log", enrichedOutput.GetEvmLog() != nil)
-
-	return enrichedOutput, nil
-}
-
 // GetTokenMetadata handles the RPC for token metadata lookup
 func (n *Engine) GetTokenMetadata(user *model.User, payload *avsproto.GetTokenMetadataReq) (*avsproto.GetTokenMetadataResp, error) {
 	// Validate the address parameter
@@ -3150,10 +2970,7 @@ func sanitizeTriggerNameForJS(triggerName string) string {
 //   - triggerOutput: map containing raw trigger output data from runEventTriggerImmediately
 //
 // Returns:
-//   - *avsproto.EventTrigger_Output: properly structured protobuf output with oneof fields
-//
-// The function handles both TransferLog (for Transfer events with enriched token metadata)
-// and EvmLog (for general Ethereum events with raw log data).
+//   - *avsproto.EventTrigger_Output: properly structured protobuf output with structured data
 func buildEventTriggerOutput(triggerOutput map[string]interface{}) *avsproto.EventTrigger_Output {
 	eventOutput := &avsproto.EventTrigger_Output{}
 
@@ -3161,94 +2978,45 @@ func buildEventTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Eve
 	if triggerOutput != nil {
 		// Check if we found events
 		if found, ok := triggerOutput["found"].(bool); ok && found {
-			// We found events - check if we have transfer_log data (for Transfer events)
-			if transferLogData, hasTransferLog := triggerOutput["transfer_log"].(map[string]interface{}); hasTransferLog {
-				// Create TransferLog structure
-				transferLog := &avsproto.EventTrigger_TransferLogOutput{}
+			// Extract the data from the trigger output
+			if data, ok := triggerOutput["data"]; ok {
+				var dataToConvert interface{}
+				var shouldConvert bool
 
-				if tokenName, ok := transferLogData["tokenName"].(string); ok {
-					transferLog.TokenName = tokenName
-				}
-				if tokenSymbol, ok := transferLogData["tokenSymbol"].(string); ok {
-					transferLog.TokenSymbol = tokenSymbol
-				}
-				if tokenDecimals, ok := transferLogData["tokenDecimals"].(uint32); ok {
-					transferLog.TokenDecimals = tokenDecimals
-				}
-				if txHash, ok := transferLogData["transactionHash"].(string); ok {
-					transferLog.TransactionHash = txHash
-				}
-				if address, ok := transferLogData["address"].(string); ok {
-					transferLog.Address = address
-				}
-				if blockNumber, ok := transferLogData["blockNumber"].(uint64); ok {
-					transferLog.BlockNumber = blockNumber
-				}
-				if blockTimestamp, ok := transferLogData["blockTimestamp"].(uint64); ok {
-					transferLog.BlockTimestamp = blockTimestamp
-				}
-				if fromAddress, ok := transferLogData["fromAddress"].(string); ok {
-					transferLog.FromAddress = fromAddress
-				}
-				if toAddress, ok := transferLogData["toAddress"].(string); ok {
-					transferLog.ToAddress = toAddress
-				}
-				if value, ok := transferLogData["value"].(string); ok {
-					transferLog.Value = value
-				}
-				if valueFormatted, ok := transferLogData["valueFormatted"].(string); ok {
-					transferLog.ValueFormatted = valueFormatted
-				}
-				if txIndex, ok := transferLogData["transactionIndex"].(uint32); ok {
-					transferLog.TransactionIndex = txIndex
-				}
-				if logIndex, ok := transferLogData["logIndex"].(uint32); ok {
-					transferLog.LogIndex = logIndex
+				// Handle different data types: JSON string, map, or other types
+				switch d := data.(type) {
+				case string:
+					// Try to parse as JSON string
+					var parsedData interface{}
+					if err := json.Unmarshal([]byte(d), &parsedData); err == nil {
+						dataToConvert = parsedData
+						shouldConvert = true
+					} else {
+						// If not valid JSON, treat as plain string (but only if non-empty)
+						if d != "" {
+							dataToConvert = d
+							shouldConvert = true
+						}
+					}
+				case map[string]interface{}:
+					// Direct map data - always valid
+					dataToConvert = d
+					shouldConvert = true
+				default:
+					// Other types (int, bool, etc.) are considered invalid for event data
+					// in the defensive programming context - skip conversion
+					shouldConvert = false
 				}
 
-				// Set the TransferLog in the oneof field
-				eventOutput.OutputType = &avsproto.EventTrigger_Output_TransferLog{
-					TransferLog: transferLog,
-				}
-			} else if evmLogData, hasEvmLog := triggerOutput["evm_log"].(map[string]interface{}); hasEvmLog {
-				// Create EvmLog structure for general Ethereum events
-				evmLog := &avsproto.Evm_Log{}
-
-				if address, ok := evmLogData["address"].(string); ok {
-					evmLog.Address = address
-				}
-				if topics, ok := evmLogData["topics"].([]string); ok {
-					evmLog.Topics = topics
-				}
-				if data, ok := evmLogData["data"].(string); ok {
-					evmLog.Data = data
-				}
-				if blockNumber, ok := evmLogData["blockNumber"].(uint64); ok {
-					evmLog.BlockNumber = blockNumber
-				}
-				if txHash, ok := evmLogData["transactionHash"].(string); ok {
-					evmLog.TransactionHash = txHash
-				}
-				if txIndex, ok := evmLogData["transactionIndex"].(uint32); ok {
-					evmLog.TransactionIndex = txIndex
-				}
-				if blockHash, ok := evmLogData["blockHash"].(string); ok {
-					evmLog.BlockHash = blockHash
-				}
-				if index, ok := evmLogData["index"].(uint32); ok {
-					evmLog.Index = index
-				}
-				if removed, ok := evmLogData["removed"].(bool); ok {
-					evmLog.Removed = removed
-				}
-
-				// Set the EvmLog in the oneof field
-				eventOutput.OutputType = &avsproto.EventTrigger_Output_EvmLog{
-					EvmLog: evmLog,
+				// Convert to google.protobuf.Value only if we have valid data
+				if shouldConvert {
+					if protoValue, err := structpb.NewValue(dataToConvert); err == nil {
+						eventOutput.Data = protoValue
+					}
 				}
 			}
 		}
-		// If no events found or no event data, eventOutput remains with default empty oneof
+		// If no events found, eventOutput remains with empty data field
 	}
 
 	return eventOutput
@@ -3514,7 +3282,7 @@ func buildExecutionStepOutputData(triggerType avsproto.TriggerType, triggerOutpu
 			return &avsproto.Execution_Step_BlockTrigger{BlockTrigger: &avsproto.BlockTrigger_Output{}}
 		case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
 			return &avsproto.Execution_Step_EventTrigger{EventTrigger: &avsproto.EventTrigger_Output{
-				// No oneof field set, so GetTransferLog() and GetEvmLog() return nil
+				// Empty EventTrigger output with no data
 			}}
 		}
 		return nil
@@ -3545,7 +3313,7 @@ func buildExecutionStepOutputData(triggerType avsproto.TriggerType, triggerOutpu
 		if triggerOutputProto != nil {
 			// Create empty EventTrigger output as fallback to avoid nil
 			return &avsproto.Execution_Step_EventTrigger{EventTrigger: &avsproto.EventTrigger_Output{
-				// No oneof field set, so GetTransferLog() and GetEvmLog() return nil
+				// Empty EventTrigger output with no data
 			}}
 		}
 	}
@@ -3562,7 +3330,7 @@ func buildExecutionStepOutputData(triggerType avsproto.TriggerType, triggerOutpu
 		return &avsproto.Execution_Step_BlockTrigger{BlockTrigger: &avsproto.BlockTrigger_Output{}}
 	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
 		return &avsproto.Execution_Step_EventTrigger{EventTrigger: &avsproto.EventTrigger_Output{
-			// No oneof field set, so GetTransferLog() and GetEvmLog() return nil
+			// Empty EventTrigger output with no data
 		}}
 	}
 
@@ -3621,34 +3389,17 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
 		if eventOutput, ok := triggerOutputProto.(*avsproto.EventTrigger_Output); ok {
-			// Check if we have transfer log data in the event output
-			if transferLogData := eventOutput.GetTransferLog(); transferLogData != nil {
-				// Use transfer log data to populate rich trigger data matching runTrigger format
-				// Use camelCase field names for JavaScript compatibility
-				triggerDataMap["tokenName"] = transferLogData.TokenName
-				triggerDataMap["tokenSymbol"] = transferLogData.TokenSymbol
-				triggerDataMap["tokenDecimals"] = transferLogData.TokenDecimals
-				triggerDataMap["transactionHash"] = transferLogData.TransactionHash
-				triggerDataMap["address"] = transferLogData.Address
-				triggerDataMap["blockNumber"] = transferLogData.BlockNumber
-				triggerDataMap["blockTimestamp"] = transferLogData.BlockTimestamp
-				triggerDataMap["fromAddress"] = transferLogData.FromAddress
-				triggerDataMap["toAddress"] = transferLogData.ToAddress
-				triggerDataMap["value"] = transferLogData.Value
-				triggerDataMap["valueFormatted"] = transferLogData.ValueFormatted
-				triggerDataMap["transactionIndex"] = transferLogData.TransactionIndex
-				triggerDataMap["logIndex"] = transferLogData.LogIndex
-			} else if evmLogData := eventOutput.GetEvmLog(); evmLogData != nil {
-				// Use EVM log data for regular events
-				triggerDataMap["address"] = evmLogData.Address
-				triggerDataMap["topics"] = evmLogData.Topics
-				triggerDataMap["data"] = evmLogData.Data
-				triggerDataMap["blockNumber"] = evmLogData.BlockNumber
-				triggerDataMap["transactionHash"] = evmLogData.TransactionHash
-				triggerDataMap["transactionIndex"] = evmLogData.TransactionIndex
-				triggerDataMap["blockHash"] = evmLogData.BlockHash
-				triggerDataMap["logIndex"] = evmLogData.Index
-				triggerDataMap["removed"] = evmLogData.Removed
+			// With new structured data, convert the protobuf value to map
+			if eventOutput.Data != nil {
+				// Convert google.protobuf.Value to map[string]interface{}
+				if eventData, ok := eventOutput.Data.AsInterface().(map[string]interface{}); ok {
+					// Copy all parsed event data to the trigger data map
+					for k, v := range eventData {
+						triggerDataMap[k] = v
+					}
+				} else if logger != nil {
+					logger.Warn("Failed to convert event trigger data to map", "data_type", fmt.Sprintf("%T", eventOutput.Data.AsInterface()))
+				}
 			}
 		} else if enrichedDataMap, ok := triggerOutputProto.(map[string]interface{}); ok {
 			// Handle the new enriched data format that survives JSON serialization

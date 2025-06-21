@@ -84,7 +84,7 @@ func (r *RpcServer) GetNonce(ctx context.Context, payload *avsproto.NonceRequest
 
 	nonce, err := aa.GetNonce(r.smartWalletRpc, ownerAddress, big.NewInt(0))
 	if err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.Error_SmartWalletRpcError), taskengine.NonceFetchingError)
+		return nil, status.Errorf(codes.Code(avsproto.ErrorCode_SMART_WALLET_RPC_ERROR), taskengine.NonceFetchingError)
 	}
 
 	return &avsproto.NonceResp{

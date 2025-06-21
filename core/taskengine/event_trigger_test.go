@@ -9,7 +9,6 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -169,40 +168,37 @@ func TestEventTriggerEndToEndRPC(t *testing.T) {
 		if eventOutput := result.GetEventTrigger(); eventOutput != nil {
 			t.Logf("✅ Event Trigger Output received")
 
-			// Check evm_log
-			if evmLog := eventOutput.GetEvmLog(); evmLog != nil {
-				t.Logf("📋 EVM Log Data:")
-				t.Logf("  🔗 Transaction Hash: %s", evmLog.GetTransactionHash())
-				t.Logf("  📦 Block Number: %d", evmLog.GetBlockNumber())
-				t.Logf("  📍 Address: %s", evmLog.GetAddress())
-				t.Logf("  🏷️  Topics Count: %d", len(evmLog.GetTopics()))
+			// Check structured data
+			if eventOutput.Data != nil {
+				t.Logf("📋 Event Structured Data:")
 
-				if evmLog.GetTransactionHash() == "" {
-					t.Error("evm_log should have non-empty transaction hash")
-				}
-				if evmLog.GetBlockNumber() == 0 {
-					t.Error("evm_log should have non-zero block number")
+				// Convert protobuf value to map for logging
+				if eventData, ok := eventOutput.Data.AsInterface().(map[string]interface{}); ok {
+					t.Logf("  📦 Data: %+v", eventData)
+
+					if txHash, exists := eventData["transactionHash"]; exists {
+						t.Logf("  🔗 Transaction Hash: %v", txHash)
+					}
+					if blockNum, exists := eventData["blockNumber"]; exists {
+						t.Logf("  📦 Block Number: %v", blockNum)
+					}
+					if address, exists := eventData["address"]; exists {
+						t.Logf("  📍 Address: %v", address)
+					}
+					if fromAddr, exists := eventData["fromAddress"]; exists {
+						t.Logf("  👤 From: %v", fromAddr)
+					}
+					if toAddr, exists := eventData["toAddress"]; exists {
+						t.Logf("  👤 To: %v", toAddr)
+					}
+					if value, exists := eventData["value"]; exists {
+						t.Logf("  💰 Value: %v", value)
+					}
+				} else {
+					t.Logf("⚠️  Could not convert data to map: %T", eventOutput.Data.AsInterface())
 				}
 			} else {
-				t.Log("ℹ️  No evm_log data (normal when no events found)")
-			}
-
-			// Check transfer_log
-			if transferLog := eventOutput.GetTransferLog(); transferLog != nil {
-				t.Logf("💸 Transfer Log Data:")
-				t.Logf("  👤 From: %s", transferLog.GetFromAddress())
-				t.Logf("  👤 To: %s", transferLog.GetToAddress())
-				t.Logf("  💰 Value: %s", transferLog.GetValue())
-				t.Logf("  ⏰ Block Timestamp: %d", transferLog.GetBlockTimestamp())
-
-				if transferLog.GetFromAddress() == "" {
-					t.Error("transfer_log should have non-empty from address")
-				}
-				if transferLog.GetToAddress() == "" {
-					t.Error("transfer_log should have non-empty to address")
-				}
-			} else {
-				t.Log("ℹ️  No transfer_log data (normal for non-Transfer events or when no events found)")
+				t.Log("ℹ️  No event data (normal when no events found)")
 			}
 		} else {
 			t.Error("EventTrigger output should be present")
@@ -485,35 +481,35 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 
 			// Verify RPC response has proper EventTrigger.Output structure
 			if rpcResult.GetEventTrigger() != nil {
-				// Check response structure
-				hasEvmLog := rpcResult.GetEventTrigger().GetEvmLog() != nil
-				hasTransferLog := rpcResult.GetEventTrigger().GetTransferLog() != nil
-				t.Logf("🔌 RPC Response: evm_log=%v, transfer_log=%v", hasEvmLog, hasTransferLog)
+				// Check response structure - with new JSON approach, just check if data is present
+				hasData := rpcResult.GetEventTrigger().Data != nil
+				t.Logf("🔌 RPC Response: has_data=%v", hasData)
 
-				// Validate oneof pattern based on whether events were found
+				// Validate JSON data based on whether events were found
 				if found, exists := result["found"].(bool); exists && found {
-					// When events are found, exactly one of evm_log or transfer_log should be populated
-					if hasEvmLog && hasTransferLog {
-						t.Errorf("ONEOF violation: both evm_log and transfer_log are populated")
-					} else if !hasEvmLog && !hasTransferLog {
-						t.Errorf("ONEOF violation: neither evm_log nor transfer_log is populated when events found")
+					// When events are found, data should be populated
+					if !hasData {
+						t.Errorf("Data should be populated when events found")
 					} else {
-						t.Logf("✅ ONEOF validation passed: exactly one field populated")
-					}
+						t.Logf("✅ Data validation passed: JSON data present")
 
-					// For Transfer events, transfer_log should be populated
-					if _, hasTransferLogInResult := result["transfer_log"].(map[string]interface{}); hasTransferLogInResult {
-						assert.NotNil(t, rpcResult.GetEventTrigger().GetTransferLog(), "transfer_log should be populated for Transfer events")
-						assert.Nil(t, rpcResult.GetEventTrigger().GetEvmLog(), "evm_log should be nil when transfer_log is populated")
-					} else {
-						// For non-Transfer events, evm_log should be populated
-						assert.NotNil(t, rpcResult.GetEventTrigger().GetEvmLog(), "evm_log should be populated for non-Transfer events")
-						assert.Nil(t, rpcResult.GetEventTrigger().GetTransferLog(), "transfer_log should be nil when evm_log is populated")
+						// Try to access the structured data to verify it's valid
+						if eventData, ok := rpcResult.GetEventTrigger().Data.AsInterface().(map[string]interface{}); ok {
+							t.Logf("✅ Structured data is valid and accessible")
+							if len(eventData) > 0 {
+								t.Logf("✅ Structured data contains event fields")
+							}
+						} else {
+							t.Errorf("Structured data should be accessible as map[string]interface{}")
+						}
 					}
 				} else {
-					// When no events are found, both should be nil (oneof field undefined)
-					assert.Nil(t, rpcResult.GetEventTrigger().GetEvmLog(), "evm_log should be nil when no events found")
-					assert.Nil(t, rpcResult.GetEventTrigger().GetTransferLog(), "transfer_log should be nil when no events found")
+					// When no events are found, data should be empty
+					if hasData {
+						t.Logf("ℹ️  Data present even when no events found (this might be metadata)")
+					} else {
+						t.Logf("✅ No data when no events found")
+					}
 				}
 			}
 

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -148,63 +147,6 @@ func TestFormatTokenValue(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
-}
-
-func TestEnrichTransferLog(t *testing.T) {
-	logger := &MockLogger{}
-
-	// Create a temporary directory for test whitelist files
-	tempDir, err := os.MkdirTemp("", "token_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	// Change to temp directory
-	originalWd, _ := os.Getwd()
-	err = os.Chdir(tempDir)
-	require.NoError(t, err)
-	defer os.Chdir(originalWd)
-
-	// Create token_whitelist directory
-	err = os.Mkdir("token_whitelist", 0755)
-	require.NoError(t, err)
-
-	// Create test ethereum.json with USDC
-	testTokens := `[
-		{
-			"name": "USD Coin",
-			"symbol": "USDC",
-			"decimals": 6,
-			"address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
-		}
-	]`
-
-	err = os.WriteFile(filepath.Join("token_whitelist", "ethereum.json"), []byte(testTokens), 0644)
-	require.NoError(t, err)
-
-	service, err := NewTokenEnrichmentService(nil, logger)
-	require.NoError(t, err)
-
-	// Create test EVM log and transfer log
-	evmLog := &avsproto.Evm_Log{
-		Address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-	}
-
-	transferLog := &avsproto.EventTrigger_TransferLogOutput{
-		Address:     "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-		Value:       "0xf4240", // 1 USDC (1,000,000 micro USDC)
-		FromAddress: "0x1234567890123456789012345678901234567890",
-		ToAddress:   "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-	}
-
-	// Test enrichment
-	err = service.EnrichTransferLog(evmLog, transferLog)
-	require.NoError(t, err)
-
-	// Verify enrichment
-	assert.Equal(t, "USD Coin", transferLog.TokenName)
-	assert.Equal(t, "USDC", transferLog.TokenSymbol)
-	assert.Equal(t, uint32(6), transferLog.TokenDecimals)
-	assert.Equal(t, "1", transferLog.ValueFormatted)
 }
 
 func TestIsERC20Contract(t *testing.T) {
