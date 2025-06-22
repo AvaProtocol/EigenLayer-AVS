@@ -1348,6 +1348,10 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 						}
 						// Also include method metadata for debugging
 						result["method_name"] = methodResultMap["methodName"]
+						// Include raw structured fields for metadata
+						if rawStructuredFields, ok := methodResultMap["rawStructuredFields"].([]interface{}); ok {
+							result["rawStructuredFields"] = rawStructuredFields
+						}
 					}
 				} else {
 					// For failed calls, include error information
@@ -1359,6 +1363,23 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		} else {
 			// Multiple method results - return as array (keep existing behavior)
 			result["results"] = results
+
+			// Create metadata._raw array with all method results
+			var rawMethodResults []interface{}
+			for _, methodResult := range results {
+				if methodMap, ok := methodResult.(map[string]interface{}); ok {
+					rawResult := map[string]interface{}{
+						"methodName": methodMap["methodName"],
+						"success":    methodMap["success"],
+						"error":      methodMap["error"],
+						"data":       methodMap["rawStructuredFields"], // The raw structured fields from ABI decoding
+					}
+					rawMethodResults = append(rawMethodResults, rawResult)
+				}
+			}
+
+			// Store raw method results for metadata
+			result["_rawMethodResults"] = rawMethodResults
 		}
 	} else if branch := executionStep.GetBranch(); branch != nil {
 		result["conditionId"] = branch.GetConditionId()
@@ -1671,8 +1692,10 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		if result != nil && len(result) > 0 {
 			// Check if this is a flattened single method result or multiple results
 			if results, ok := result["results"].([]interface{}); ok {
-				// Multiple method results - convert to expected format
+				// Multiple method results - convert to expected format (backward compatibility)
 				var resultsArray []interface{}
+				var rawMethodResults []interface{}
+
 				for _, methodResult := range results {
 					if methodResultMap, ok := methodResult.(map[string]interface{}); ok {
 						convertedResult := map[string]interface{}{
@@ -1682,54 +1705,78 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 							"data":       methodResultMap["data"],
 						}
 						resultsArray = append(resultsArray, convertedResult)
+
+						// Create raw method result for metadata._raw array
+						rawResult := map[string]interface{}{
+							"methodName": methodResultMap["methodName"],
+							"success":    methodResultMap["success"],
+							"error":      methodResultMap["error"],
+							"data":       methodResultMap["rawStructuredFields"], // The raw structured fields from ABI decoding
+						}
+						rawMethodResults = append(rawMethodResults, rawResult)
 					}
 				}
+
+				// Create metadata structure consistent with eventTrigger
+				metadata := map[string]interface{}{
+					"_raw": rawMethodResults,
+				}
+
+				// Set metadata in the top-level metadata field
+				if metadataValue, err := structpb.NewValue(metadata); err == nil {
+					resp.Metadata = metadataValue
+					// Debug log to verify metadata is being set
+					if n.logger != nil {
+						n.logger.Info("Setting contract read metadata for multiple methods", "metadata", metadata)
+					}
+				}
+
 				// Convert to protobuf Value
 				if resultsValue, err := structpb.NewValue(resultsArray); err == nil {
 					contractReadOutput.Data = resultsValue
 				}
 			} else {
-				// Single method result (flattened) - reconstruct the expected format
-				// Extract the data fields (excluding metadata)
+				// Single method result (flattened) - extract metadata and data separately
 				dataMap := make(map[string]interface{})
-				methodName := "unknown"
-				success := true
-				errorMsg := ""
+				var rawMethodResults []interface{}
 
 				for key, value := range result {
 					switch key {
-					case "method_name":
-						if name, ok := value.(string); ok {
-							methodName = name
-						}
-					case "success":
-						if s, ok := value.(bool); ok {
-							success = s
-						}
-					case "error":
-						if err, ok := value.(string); ok {
-							errorMsg = err
-						}
-					case "nodeId":
-						// Skip metadata fields
+					case "method_name", "success", "error", "nodeId":
+						// Skip these as they will be handled in metadata
+					case "rawData":
+						// Skip rawData as it's handled separately
 					default:
-						// This is actual data
+						// This is actual data - include it directly
 						dataMap[key] = value
 					}
 				}
 
-				// Create the single result structure
-				singleResult := map[string]interface{}{
-					"methodName": methodName,
-					"success":    success,
-					"error":      errorMsg,
-					"data":       dataMap,
+				// Create raw method result for metadata._raw array
+				methodResult := map[string]interface{}{
+					"methodName": result["method_name"],
+					"success":    result["success"],
+					"error":      result["error"],
+					"data":       result["rawStructuredFields"], // The raw structured fields from ABI decoding
+				}
+				rawMethodResults = append(rawMethodResults, methodResult)
+
+				// Create metadata structure consistent with eventTrigger
+				metadata := map[string]interface{}{
+					"_raw": rawMethodResults,
 				}
 
-				resultsArray := []interface{}{singleResult}
+				// Set metadata in the top-level metadata field
+				if metadataValue, err := structpb.NewValue(metadata); err == nil {
+					resp.Metadata = metadataValue
+					// Debug log to verify metadata is being set
+					if n.logger != nil {
+						n.logger.Info("Setting contract read metadata", "metadata", metadata)
+					}
+				}
 
-				// Convert to protobuf Value
-				if resultsValue, err := structpb.NewValue(resultsArray); err == nil {
+				// For flattened format, return the data directly (no array wrapper)
+				if resultsValue, err := structpb.NewValue(dataMap); err == nil {
 					contractReadOutput.Data = resultsValue
 				}
 			}

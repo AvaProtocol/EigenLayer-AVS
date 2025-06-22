@@ -1,0 +1,10 @@
+{
+  "commands": {
+    "build": "cd EigenLayer-AVS && make dev-build",
+    "start-aggregator": "cd EigenLayer-AVS && make dev-agg"
+  },
+  "instructions": [
+    "After updating protobuf/avs.proto, run `make protoc-gen` to generate the protobuf files.",
+    "For Go code in the EigenLayer-AVS directory, use `make dev-build` to build and `go test -v ./core/taskengine/...` to run tests."
+  ]
+}

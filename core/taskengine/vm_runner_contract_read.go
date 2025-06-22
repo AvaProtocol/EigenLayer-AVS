@@ -529,20 +529,49 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 			"error":      methodResult.Error,
 		}
 
-		// Convert structured fields to a map
+		// Convert structured fields to a map and extract raw structured data
 		dataMap := make(map[string]interface{})
+		var rawStructuredFields []interface{}
 		for _, field := range methodResult.Data {
-			dataMap[field.Name] = field.Value
+			if field.Name == "_rawContractOutput" {
+				// Skip the raw hex output, we don't need it anymore
+				continue
+			} else {
+				// Regular data fields for the main response
+				dataMap[field.Name] = field.Value
+
+				// Also build the raw structured fields array for metadata
+				rawStructuredFields = append(rawStructuredFields, map[string]interface{}{
+					"name":  field.Name,
+					"type":  field.Type,
+					"value": field.Value,
+				})
+			}
 		}
 		resultMap["data"] = dataMap
+
+		// Include raw structured fields in the result for metadata
+		resultMap["rawStructuredFields"] = rawStructuredFields
 
 		resultsArray = append(resultsArray, resultMap)
 	}
 
 	// Convert results to JSON for the new protobuf structure
-	resultsValue, err := structpb.NewValue(resultsArray)
-	if err != nil {
-		log.WriteString(fmt.Sprintf("Failed to convert results to protobuf Value: %v\n", err))
+	// For single method calls, return the data directly (flattened format)
+	// For multiple method calls, return as array (backward compatibility)
+	var resultsValue *structpb.Value
+	var structErr error
+
+	if len(resultsArray) == 1 {
+		// Single method call - return the result directly for flattened format
+		resultsValue, structErr = structpb.NewValue(resultsArray[0])
+	} else {
+		// Multiple method calls - return as array
+		resultsValue, structErr = structpb.NewValue(resultsArray)
+	}
+
+	if structErr != nil {
+		log.WriteString(fmt.Sprintf("Failed to convert results to protobuf Value: %v\n", structErr))
 		resultsValue = structpb.NewNullValue()
 	}
 
@@ -700,6 +729,16 @@ func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx conte
 				Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
 			}
 		}
+	}
+
+	// Add the raw contract output to the structured data for metadata purposes
+	if len(output) > 0 {
+		// Convert raw bytes to hex string for JSON serialization
+		rawHex := fmt.Sprintf("0x%x", output)
+		structuredData = append(structuredData, &avsproto.ContractReadNode_MethodResult_StructuredField{
+			Name:  "_rawContractOutput",
+			Value: rawHex,
+		})
 	}
 
 	return &avsproto.ContractReadNode_MethodResult{
