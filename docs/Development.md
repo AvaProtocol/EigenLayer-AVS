@@ -43,7 +43,7 @@ Once Docker Compose is up, there are two services running:
 
 Visit http://localhost:8080 to interactively create and construct requests to the gRPC node.
 
-For details on methods and payloads, check the `protocol.md` documentation. Look into the `examples` directory to run example workflows against the local node.
+For details on methods and payloads, check the `Protocol.md` documentation. Look into the `examples` directory to run example workflows against the local node.
 
 ## Running an Operator Locally
 
