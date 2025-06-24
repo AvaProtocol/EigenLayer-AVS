@@ -18,7 +18,7 @@ Then you can run `ap-avs` binary. We make an effort to use pure Go so you can al
 
 ## Run operator
 
-Check how to run an [operator docs](docs/operator.md)
+Check how to run an [operator docs](docs/Operator.md)
 
 ### Run aggregator
 
@@ -149,7 +149,7 @@ Before merging changes from `staging` to `main`, ensure any storage structure ch
 
 # Development guide
 
-View docs/development.md
+View docs/Development.md
 
 ## Testing
 
