@@ -241,3 +241,141 @@ func TestContractReadComplexReturn(t *testing.T) {
 		t.Errorf("expected result to be a map but got: %v", results[0])
 	}
 }
+
+func TestContractReadWithDecimalFormatting(t *testing.T) {
+	node := &avsproto.ContractReadNode{
+		Config: &avsproto.ContractReadNode_Config{
+			ContractAddress: "0xc59E3633BAAC79493d908e63626716e204A45EdF",
+			ContractAbi:     `[{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint80","name":"_roundId","type":"uint80"}],"name":"getRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`,
+			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+				{
+					CallData:      "0x313ce567", // decimals()
+					MethodName:    "decimals",
+					ApplyToFields: []string{"answer"}, // Apply decimal formatting to answer field
+				},
+				{
+					CallData:   "0x9a6fc8f500000000000000000000000000000000000000000000000100000000000052e7",
+					MethodName: "getRoundData",
+				},
+			},
+		},
+	}
+
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "123decimal",
+			Name: "contractQueryWithDecimals",
+			TaskType: &avsproto.TaskNode_ContractRead{
+				ContractRead: node,
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "e1",
+			Source: trigger.Id,
+			Target: "123decimal",
+		},
+	}
+
+	vm, err := NewVMWithData(&model.Task{
+		Task: &avsproto.Task{
+			Id:      "123decimal",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+	if err != nil {
+		t.Errorf("failed to create VM: %v", err)
+		return
+	}
+
+	n := NewContractReadProcessor(vm, testutil.GetRpcClient())
+	step, err := n.Execute("123decimal", node)
+
+	if err != nil {
+		t.Errorf("expected contract read node run succesfull but got error: %v", err)
+	}
+
+	if !step.Success {
+		t.Errorf("expected contract read node run successfully but failed")
+	}
+
+	var results []interface{}
+	if step.GetContractRead().GetData() != nil {
+		// Extract results from the protobuf Value
+		if step.GetContractRead().GetData().GetListValue() != nil {
+			// Data is an array
+			for _, item := range step.GetContractRead().GetData().GetListValue().GetValues() {
+				results = append(results, item.AsInterface())
+			}
+		} else {
+			// Data might be a single object, wrap it in an array for consistency
+			results = append(results, step.GetContractRead().GetData().AsInterface())
+		}
+	}
+
+	if len(results) == 0 {
+		t.Errorf("expected contract read to return data but got empty results")
+		return
+	}
+
+	// Check that rawStructuredFields is NOT present in the response data
+	// This ensures the backend fix is working correctly for simulation
+	for i, result := range results {
+		if resultMap, ok := result.(map[string]interface{}); ok {
+			// Check that rawStructuredFields is not present at the top level of the result
+			if _, exists := resultMap["rawStructuredFields"]; exists {
+				t.Errorf("rawStructuredFields should not be present in result %d, but found: %v", i, resultMap["rawStructuredFields"])
+			}
+
+			// Check that rawStructuredFields is not present in the data field
+			if data, ok := resultMap["data"].(map[string]interface{}); ok {
+				if _, exists := data["rawStructuredFields"]; exists {
+					t.Errorf("rawStructuredFields should not be present in data field of result %d, but found: %v", i, data["rawStructuredFields"])
+				}
+			}
+		}
+	}
+
+	// Verify that we have results for both method calls (decimals and getRoundData)
+	if len(results) != 2 {
+		t.Errorf("expected 2 method results (decimals and getRoundData), got %d", len(results))
+		return
+	}
+
+	// Find the getRoundData result
+	var getRoundDataResult map[string]interface{}
+	for _, result := range results {
+		if resultMap, ok := result.(map[string]interface{}); ok {
+			if methodName, ok := resultMap["methodName"].(string); ok && methodName == "getRoundData" {
+				getRoundDataResult = resultMap
+				break
+			}
+		}
+	}
+
+	if getRoundDataResult == nil {
+		t.Errorf("getRoundData result not found in results")
+		return
+	}
+
+	// Verify that the actual data fields are present in the getRoundData result
+	if data, ok := getRoundDataResult["data"].(map[string]interface{}); ok {
+		// Check that expected fields are present
+		expectedFields := []string{"roundId", "answer", "startedAt", "updatedAt", "answeredInRound"}
+		for _, field := range expectedFields {
+			if _, exists := data[field]; !exists {
+				t.Errorf("expected field %s not found in data: %v", field, data)
+			}
+		}
+	} else {
+		t.Errorf("expected data field in getRoundData result but got: %v", getRoundDataResult)
+	}
+}

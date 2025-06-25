@@ -1694,17 +1694,27 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		if result != nil && len(result) > 0 {
 			// Check if this is a flattened single method result or multiple results
 			if results, ok := result["results"].([]interface{}); ok {
-				// Multiple method results - convert to expected format (backward compatibility)
+				// Multiple method results - return the array directly (no wrapper)
 				var resultsArray []interface{}
 				var rawMethodResults []interface{}
 
 				for _, methodResult := range results {
 					if methodResultMap, ok := methodResult.(map[string]interface{}); ok {
+						// Clean the data field to exclude rawStructuredFields
+						cleanData := make(map[string]interface{})
+						if data, hasData := methodResultMap["data"].(map[string]interface{}); hasData {
+							for key, value := range data {
+								if key != "rawStructuredFields" {
+									cleanData[key] = value
+								}
+							}
+						}
+
 						convertedResult := map[string]interface{}{
 							"methodName": methodResultMap["methodName"],
 							"success":    methodResultMap["success"],
 							"error":      methodResultMap["error"],
-							"data":       methodResultMap["data"],
+							"data":       cleanData,
 						}
 						resultsArray = append(resultsArray, convertedResult)
 
@@ -1733,7 +1743,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 					}
 				}
 
-				// Convert to protobuf Value
+				// Return the array directly as data (no results wrapper)
 				if resultsValue, err := structpb.NewValue(resultsArray); err == nil {
 					contractReadOutput.Data = resultsValue
 				}
@@ -1777,8 +1787,18 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 					}
 				}
 
-				// For flattened format, return the data directly (no array wrapper)
-				if resultsValue, err := structpb.NewValue(dataMap); err == nil {
+				// For single method result, wrap it in an array to maintain consistency
+				singleResultArray := []interface{}{
+					map[string]interface{}{
+						"methodName": result["method_name"],
+						"success":    result["success"],
+						"error":      result["error"],
+						"data":       dataMap,
+					},
+				}
+
+				// Return as array even for single method call
+				if resultsValue, err := structpb.NewValue(singleResultArray); err == nil {
 					contractReadOutput.Data = resultsValue
 				}
 			}
