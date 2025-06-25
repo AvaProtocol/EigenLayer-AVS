@@ -78,16 +78,41 @@ func TestContractReadSimpleReturn(t *testing.T) {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 
-	results := step.GetContractRead().Results
-	if len(results) == 0 || len(results[0].Data) == 0 {
+	var results []interface{}
+	if step.GetContractRead().GetData() != nil {
+		// Extract results from the protobuf Value
+		if step.GetContractRead().GetData().GetListValue() != nil {
+			// Data is an array
+			for _, item := range step.GetContractRead().GetData().GetListValue().GetValues() {
+				results = append(results, item.AsInterface())
+			}
+		} else {
+			// Data might be a single object, wrap it in an array for consistency
+			results = append(results, step.GetContractRead().GetData().AsInterface())
+		}
+	}
+
+	if len(results) == 0 {
 		t.Errorf("expected contract read to return data but got empty results")
 		return
 	}
 
-	// Get the first field value from the first result
-	firstValue := results[0].Data[0].Value
-	if firstValue != "313131" {
-		t.Errorf("read balanceOf doesn't return right data. expect 313131 got %s", firstValue)
+	// Get the first result and extract data
+	if resultMap, ok := results[0].(map[string]interface{}); ok {
+		if data, ok := resultMap["data"].(map[string]interface{}); ok {
+			// Find the balance value - it should be the first/only field in balanceOf
+			for _, value := range data {
+				if valueStr, ok := value.(string); ok && valueStr == "313131" {
+					// Found the expected value
+					return
+				}
+			}
+			t.Errorf("read balanceOf doesn't return right data. expected 313131 but didn't find it in data: %v", data)
+		} else {
+			t.Errorf("expected data field in result but got: %v", resultMap)
+		}
+	} else {
+		t.Errorf("expected result to be a map but got: %v", results[0])
 	}
 }
 
@@ -159,30 +184,198 @@ func TestContractReadComplexReturn(t *testing.T) {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 
-	results := step.GetContractRead().Results
-	if len(results) == 0 || len(results[0].Data) < 5 {
-		t.Errorf("contract read doesn't return right data, wrong length. expect 5 fields, got %d results with %d fields", len(results), len(results[0].Data))
+	var results []interface{}
+	if step.GetContractRead().GetData() != nil {
+		// Extract results from the protobuf Value
+		if step.GetContractRead().GetData().GetListValue() != nil {
+			// Data is an array
+			for _, item := range step.GetContractRead().GetData().GetListValue().GetValues() {
+				results = append(results, item.AsInterface())
+			}
+		} else {
+			// Data might be a single object, wrap it in an array for consistency
+			results = append(results, step.GetContractRead().GetData().AsInterface())
+		}
+	}
+
+	if len(results) == 0 {
+		t.Errorf("expected contract read to return data but got empty results")
 		return
 	}
 
-	// When reading data out and return over the wire, we have to serialize big int to string.
-	roundIdExpected := "18446744073709572839"
-	roundId := results[0].Data[0].Value
-	if roundIdExpected != roundId {
-		t.Errorf("contract read returns incorrect data expect %s got %s", roundIdExpected, roundId)
+	// Get the first result and extract data
+	if resultMap, ok := results[0].(map[string]interface{}); ok {
+		if data, ok := resultMap["data"].(map[string]interface{}); ok {
+			if len(data) < 5 {
+				t.Errorf("contract read doesn't return right data, wrong length. expect 5 fields, got %d fields", len(data))
+				return
+			}
+
+			// When reading data out and return over the wire, we have to serialize big int to string.
+			// Check specific field values based on the getRoundData function
+			expectedValues := map[string]string{
+				"roundId":         "18446744073709572839",
+				"answer":          "2189300000",
+				"startedAt":       "1733878404",
+				"updatedAt":       "1733878404",
+				"answeredInRound": "18446744073709572839",
+			}
+
+			for fieldName, expectedValue := range expectedValues {
+				if actualValue, exists := data[fieldName]; exists {
+					if actualValueStr, ok := actualValue.(string); ok {
+						if actualValueStr != expectedValue {
+							t.Errorf("contract read returns incorrect data for field %s: expected %s got %s", fieldName, expectedValue, actualValueStr)
+						}
+					} else {
+						t.Errorf("expected field %s to be string but got %T", fieldName, actualValue)
+					}
+				} else {
+					t.Errorf("expected field %s not found in data: %v", fieldName, data)
+				}
+			}
+		} else {
+			t.Errorf("expected data field in result but got: %v", resultMap)
+		}
+	} else {
+		t.Errorf("expected result to be a map but got: %v", results[0])
 	}
-	if results[0].Data[1].Value != "2189300000" {
-		t.Errorf("contract read returns incorrect data expect %s got %s", "2189300000", results[0].Data[1].Value)
-	}
-	if results[0].Data[2].Value != "1733878404" {
-		t.Errorf("contract read returns incorrect data expect %s got %s", "1733878404", results[0].Data[2].Value)
-	}
-	if results[0].Data[3].Value != "1733878404" {
-		t.Errorf("contract read returns incorrect data expect %s got %s", "1733878404", results[0].Data[3].Value)
+}
+
+func TestContractReadWithDecimalFormatting(t *testing.T) {
+	node := &avsproto.ContractReadNode{
+		Config: &avsproto.ContractReadNode_Config{
+			ContractAddress: "0xc59E3633BAAC79493d908e63626716e204A45EdF",
+			ContractAbi:     `[{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint80","name":"_roundId","type":"uint80"}],"name":"getRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`,
+			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+				{
+					CallData:      "0x313ce567", // decimals()
+					MethodName:    "decimals",
+					ApplyToFields: []string{"answer"}, // Apply decimal formatting to answer field
+				},
+				{
+					CallData:   "0x9a6fc8f500000000000000000000000000000000000000000000000100000000000052e7",
+					MethodName: "getRoundData",
+				},
+			},
+		},
 	}
 
-	if results[0].Data[4].Value != "18446744073709572839" {
-		t.Errorf("contract read returns incorrect data expect %s got %s", "18446744073709572839", results[0].Data[4].Value)
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "123decimal",
+			Name: "contractQueryWithDecimals",
+			TaskType: &avsproto.TaskNode_ContractRead{
+				ContractRead: node,
+			},
+		},
 	}
 
+	trigger := &avsproto.TaskTrigger{
+		Id:   "triggertest",
+		Name: "triggertest",
+	}
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "e1",
+			Source: trigger.Id,
+			Target: "123decimal",
+		},
+	}
+
+	vm, err := NewVMWithData(&model.Task{
+		Task: &avsproto.Task{
+			Id:      "123decimal",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+	if err != nil {
+		t.Errorf("failed to create VM: %v", err)
+		return
+	}
+
+	n := NewContractReadProcessor(vm, testutil.GetRpcClient())
+	step, err := n.Execute("123decimal", node)
+
+	if err != nil {
+		t.Errorf("expected contract read node run succesfull but got error: %v", err)
+	}
+
+	if !step.Success {
+		t.Errorf("expected contract read node run successfully but failed")
+	}
+
+	var results []interface{}
+	if step.GetContractRead().GetData() != nil {
+		// Extract results from the protobuf Value
+		if step.GetContractRead().GetData().GetListValue() != nil {
+			// Data is an array
+			for _, item := range step.GetContractRead().GetData().GetListValue().GetValues() {
+				results = append(results, item.AsInterface())
+			}
+		} else {
+			// Data might be a single object, wrap it in an array for consistency
+			results = append(results, step.GetContractRead().GetData().AsInterface())
+		}
+	}
+
+	if len(results) == 0 {
+		t.Errorf("expected contract read to return data but got empty results")
+		return
+	}
+
+	// Check that rawStructuredFields is NOT present in the response data
+	// This ensures the backend fix is working correctly for simulation
+	for i, result := range results {
+		if resultMap, ok := result.(map[string]interface{}); ok {
+			// Check that rawStructuredFields is not present at the top level of the result
+			if _, exists := resultMap["rawStructuredFields"]; exists {
+				t.Errorf("rawStructuredFields should not be present in result %d, but found: %v", i, resultMap["rawStructuredFields"])
+			}
+
+			// Check that rawStructuredFields is not present in the data field
+			if data, ok := resultMap["data"].(map[string]interface{}); ok {
+				if _, exists := data["rawStructuredFields"]; exists {
+					t.Errorf("rawStructuredFields should not be present in data field of result %d, but found: %v", i, data["rawStructuredFields"])
+				}
+			}
+		}
+	}
+
+	// Verify that we have results for both method calls (decimals and getRoundData)
+	if len(results) != 2 {
+		t.Errorf("expected 2 method results (decimals and getRoundData), got %d", len(results))
+		return
+	}
+
+	// Find the getRoundData result
+	var getRoundDataResult map[string]interface{}
+	for _, result := range results {
+		if resultMap, ok := result.(map[string]interface{}); ok {
+			if methodName, ok := resultMap["methodName"].(string); ok && methodName == "getRoundData" {
+				getRoundDataResult = resultMap
+				break
+			}
+		}
+	}
+
+	if getRoundDataResult == nil {
+		t.Errorf("getRoundData result not found in results")
+		return
+	}
+
+	// Verify that the actual data fields are present in the getRoundData result
+	if data, ok := getRoundDataResult["data"].(map[string]interface{}); ok {
+		// Check that expected fields are present
+		expectedFields := []string{"roundId", "answer", "startedAt", "updatedAt", "answeredInRound"}
+		for _, field := range expectedFields {
+			if _, exists := data[field]; !exists {
+				t.Errorf("expected field %s not found in data: %v", field, data)
+			}
+		}
+	} else {
+		t.Errorf("expected data field in getRoundData result but got: %v", getRoundDataResult)
+	}
 }

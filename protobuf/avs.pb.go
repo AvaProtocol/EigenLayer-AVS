@@ -6042,8 +6042,9 @@ func (x *ContractWriteNode_MethodCall) GetMethodName() string {
 
 type ContractWriteNode_Output struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Enhanced response structure matching Write_Contract_Spec.md
-	Results       []*ContractWriteNode_MethodResult `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty"`
+	// Changed from repeated MethodResult to google.protobuf.Value for better JavaScript native type support
+	// Data will be a JSON array of method results with enhanced response structure
+	Data          *structpb.Value `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6078,9 +6079,9 @@ func (*ContractWriteNode_Output) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{11, 2}
 }
 
-func (x *ContractWriteNode_Output) GetResults() []*ContractWriteNode_MethodResult {
+func (x *ContractWriteNode_Output) GetData() *structpb.Value {
 	if x != nil {
-		return x.Results
+		return x.Data
 	}
 	return nil
 }
@@ -6180,7 +6181,7 @@ func (x *ContractWriteNode_MethodResult) GetInputData() string {
 type ContractWriteNode_TransactionData struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Hash              string                 `protobuf:"bytes,1,opt,name=hash,proto3" json:"hash,omitempty"`                                                      // Transaction hash
-	Status            string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`                                                  // "pending", "confirmed", "failed"
+	Status            string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`                                                  // "pending", "confirmed", "failed", "simulated"
 	BlockNumber       string                 `protobuf:"bytes,3,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`                     // Block number when mined (null for pending)
 	BlockHash         string                 `protobuf:"bytes,4,opt,name=block_hash,json=blockHash,proto3" json:"block_hash,omitempty"`                           // Block hash when mined
 	GasUsed           string                 `protobuf:"bytes,5,opt,name=gas_used,json=gasUsed,proto3" json:"gas_used,omitempty"`                                 // Actual gas consumed (null for pending)
@@ -6194,6 +6195,9 @@ type ContractWriteNode_TransactionData struct {
 	TransactionIndex  string                 `protobuf:"bytes,13,opt,name=transaction_index,json=transactionIndex,proto3" json:"transaction_index,omitempty"`     // Index in block (null for pending)
 	Confirmations     string                 `protobuf:"bytes,14,opt,name=confirmations,proto3" json:"confirmations,omitempty"`                                   // Number of confirmations
 	Timestamp         int64                  `protobuf:"varint,15,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                          // Transaction timestamp
+	Simulation        bool                   `protobuf:"varint,16,opt,name=simulation,proto3" json:"simulation,omitempty"`                                        // Whether this is a simulation result
+	SimulationMode    string                 `protobuf:"bytes,17,opt,name=simulation_mode,json=simulationMode,proto3" json:"simulation_mode,omitempty"`           // Simulation mode: "tenderly", "mock", etc.
+	ChainId           int64                  `protobuf:"varint,18,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`                               // Chain ID where the simulation was performed
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -6329,6 +6333,27 @@ func (x *ContractWriteNode_TransactionData) GetConfirmations() string {
 func (x *ContractWriteNode_TransactionData) GetTimestamp() int64 {
 	if x != nil {
 		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *ContractWriteNode_TransactionData) GetSimulation() bool {
+	if x != nil {
+		return x.Simulation
+	}
+	return false
+}
+
+func (x *ContractWriteNode_TransactionData) GetSimulationMode() string {
+	if x != nil {
+		return x.SimulationMode
+	}
+	return ""
+}
+
+func (x *ContractWriteNode_TransactionData) GetChainId() int64 {
+	if x != nil {
+		return x.ChainId
 	}
 	return 0
 }
@@ -6722,8 +6747,9 @@ func (x *ContractReadNode_MethodResult) GetError() string {
 
 type ContractReadNode_Output struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Results for each method call, in the same order as the input method_calls
-	Results       []*ContractReadNode_MethodResult `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty"`
+	// Changed from repeated MethodResult to google.protobuf.Value for better JavaScript native type support
+	// Data will be a JSON array of method results with flattened key-value structure
+	Data          *structpb.Value `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6758,9 +6784,9 @@ func (*ContractReadNode_Output) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{12, 3}
 }
 
-func (x *ContractReadNode_Output) GetResults() []*ContractReadNode_MethodResult {
+func (x *ContractReadNode_Output) GetData() *structpb.Value {
 	if x != nil {
-		return x.Results
+		return x.Data
 	}
 	return nil
 }
@@ -7964,7 +7990,7 @@ const file_avs_proto_rawDesc = "" +
 	"\vdestination\x18\x01 \x01(\tR\vdestination\x12\x16\n" +
 	"\x06amount\x18\x02 \x01(\tR\x06amount\x1a3\n" +
 	"\x06Output\x12)\n" +
-	"\x10transaction_hash\x18\x01 \x01(\tR\x0ftransactionHash\"\xd8\r\n" +
+	"\x10transaction_hash\x18\x01 \x01(\tR\x0ftransactionHash\"\xa2\x0e\n" +
 	"\x11ContractWriteNode\x12<\n" +
 	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x12,\n" +
 	"\x05input\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05input\x1a\xc0\x01\n" +
@@ -7977,9 +8003,9 @@ const file_avs_proto_rawDesc = "" +
 	"MethodCall\x12\x1b\n" +
 	"\tcall_data\x18\x01 \x01(\tR\bcallData\x12\x1f\n" +
 	"\vmethod_name\x18\x02 \x01(\tR\n" +
-	"methodName\x1aN\n" +
-	"\x06Output\x12D\n" +
-	"\aresults\x18\x01 \x03(\v2*.aggregator.ContractWriteNode.MethodResultR\aresults\x1a\x84\x03\n" +
+	"methodName\x1a4\n" +
+	"\x06Output\x12*\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\x1a\x84\x03\n" +
 	"\fMethodResult\x12\x1f\n" +
 	"\vmethod_name\x18\x01 \x01(\tR\n" +
 	"methodName\x12\x18\n" +
@@ -7990,7 +8016,7 @@ const file_avs_proto_rawDesc = "" +
 	"\vreturn_data\x18\x06 \x01(\v2(.aggregator.ContractWriteNode.ReturnDataR\n" +
 	"returnData\x12\x1d\n" +
 	"\n" +
-	"input_data\x18\a \x01(\tR\tinputData\x1a\xc5\x03\n" +
+	"input_data\x18\a \x01(\tR\tinputData\x1a\xa9\x04\n" +
 	"\x0fTransactionData\x12\x12\n" +
 	"\x04hash\x18\x01 \x01(\tR\x04hash\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12!\n" +
@@ -8008,7 +8034,12 @@ const file_avs_proto_rawDesc = "" +
 	"\x05nonce\x18\f \x01(\tR\x05nonce\x12+\n" +
 	"\x11transaction_index\x18\r \x01(\tR\x10transactionIndex\x12$\n" +
 	"\rconfirmations\x18\x0e \x01(\tR\rconfirmations\x12\x1c\n" +
-	"\ttimestamp\x18\x0f \x01(\x03R\ttimestamp\x1a\xfc\x01\n" +
+	"\ttimestamp\x18\x0f \x01(\x03R\ttimestamp\x12\x1e\n" +
+	"\n" +
+	"simulation\x18\x10 \x01(\bR\n" +
+	"simulation\x12'\n" +
+	"\x0fsimulation_mode\x18\x11 \x01(\tR\x0esimulationMode\x12\x19\n" +
+	"\bchain_id\x18\x12 \x01(\x03R\achainId\x1a\xfc\x01\n" +
 	"\tEventData\x12\x1d\n" +
 	"\n" +
 	"event_name\x18\x01 \x01(\tR\teventName\x12\x18\n" +
@@ -8027,7 +8058,7 @@ const file_avs_proto_rawDesc = "" +
 	"ReturnData\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x14\n" +
-	"\x05value\x18\x03 \x01(\tR\x05value\"\xe7\x05\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\"\xce\x05\n" +
 	"\x10ContractReadNode\x12;\n" +
 	"\x06config\x18\x01 \x01(\v2#.aggregator.ContractReadNode.ConfigR\x06config\x12,\n" +
 	"\x05input\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05input\x1ar\n" +
@@ -8050,9 +8081,9 @@ const file_avs_proto_rawDesc = "" +
 	"\x0fStructuredField\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x14\n" +
-	"\x05value\x18\x03 \x01(\tR\x05value\x1aM\n" +
-	"\x06Output\x12C\n" +
-	"\aresults\x18\x01 \x03(\v2).aggregator.ContractReadNode.MethodResultR\aresults\"\xf4\x02\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\x1a4\n" +
+	"\x06Output\x12*\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xf4\x02\n" +
 	"\x10GraphQLQueryNode\x12;\n" +
 	"\x06config\x18\x01 \x01(\v2#.aggregator.GraphQLQueryNode.ConfigR\x06config\x12,\n" +
 	"\x05input\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05input\x1a\xc0\x01\n" +
@@ -8776,7 +8807,7 @@ var file_avs_proto_depIdxs = []int32{
 	75,  // 104: aggregator.EventTrigger.Config.queries:type_name -> aggregator.EventTrigger.Query
 	119, // 105: aggregator.EventTrigger.Output.data:type_name -> google.protobuf.Value
 	85,  // 106: aggregator.ContractWriteNode.Config.method_calls:type_name -> aggregator.ContractWriteNode.MethodCall
-	87,  // 107: aggregator.ContractWriteNode.Output.results:type_name -> aggregator.ContractWriteNode.MethodResult
+	119, // 107: aggregator.ContractWriteNode.Output.data:type_name -> google.protobuf.Value
 	88,  // 108: aggregator.ContractWriteNode.MethodResult.transaction:type_name -> aggregator.ContractWriteNode.TransactionData
 	89,  // 109: aggregator.ContractWriteNode.MethodResult.events:type_name -> aggregator.ContractWriteNode.EventData
 	90,  // 110: aggregator.ContractWriteNode.MethodResult.error:type_name -> aggregator.ContractWriteNode.ErrorData
@@ -8784,7 +8815,7 @@ var file_avs_proto_depIdxs = []int32{
 	92,  // 112: aggregator.ContractWriteNode.EventData.decoded:type_name -> aggregator.ContractWriteNode.EventData.DecodedEntry
 	93,  // 113: aggregator.ContractReadNode.Config.method_calls:type_name -> aggregator.ContractReadNode.MethodCall
 	97,  // 114: aggregator.ContractReadNode.MethodResult.data:type_name -> aggregator.ContractReadNode.MethodResult.StructuredField
-	95,  // 115: aggregator.ContractReadNode.Output.results:type_name -> aggregator.ContractReadNode.MethodResult
+	119, // 115: aggregator.ContractReadNode.Output.data:type_name -> google.protobuf.Value
 	100, // 116: aggregator.GraphQLQueryNode.Config.variables:type_name -> aggregator.GraphQLQueryNode.Config.VariablesEntry
 	120, // 117: aggregator.GraphQLQueryNode.Output.data:type_name -> google.protobuf.Any
 	103, // 118: aggregator.RestAPINode.Config.headers:type_name -> aggregator.RestAPINode.Config.HeadersEntry
