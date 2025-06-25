@@ -380,28 +380,40 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 		// Convert error data if present
 		if methodResult.Error != nil {
-			resultMap["error"] = map[string]interface{}{
-				"code":    methodResult.Error.Code,
-				"message": methodResult.Error.Message,
-			}
+			resultMap["error"] = methodResult.Error.Message
+		} else {
+			resultMap["error"] = nil
 		}
 
 		// Convert return data if present
 		if methodResult.ReturnData != nil {
-			resultMap["returnData"] = map[string]interface{}{
-				"name":  methodResult.ReturnData.Name,
-				"type":  methodResult.ReturnData.Type,
-				"value": methodResult.ReturnData.Value,
-			}
+			resultMap["returnData"] = methodResult.ReturnData.Value
+		} else {
+			resultMap["returnData"] = nil
 		}
+
+		// Convert events if present (empty for now, but structure for consistency)
+		resultMap["events"] = []interface{}{}
 
 		resultsArray = append(resultsArray, resultMap)
 	}
 
 	// Convert results to JSON for the new protobuf structure
-	resultsValue, err := structpb.NewValue(resultsArray)
-	if err != nil {
-		log.WriteString(fmt.Sprintf("Failed to convert results to protobuf Value: %v\n", err))
+	// For single method calls, return the data directly (flattened format)
+	// For multiple method calls, return as array (backward compatibility)
+	var resultsValue *structpb.Value
+	var structErr error
+
+	if len(resultsArray) == 1 {
+		// Single method call - return the result directly for flattened format
+		resultsValue, structErr = structpb.NewValue(resultsArray[0])
+	} else {
+		// Multiple method calls - return as array
+		resultsValue, structErr = structpb.NewValue(resultsArray)
+	}
+
+	if structErr != nil {
+		log.WriteString(fmt.Sprintf("Failed to convert results to protobuf Value: %v\n", structErr))
 		resultsValue = structpb.NewNullValue()
 	}
 
