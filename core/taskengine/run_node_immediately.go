@@ -1342,15 +1342,17 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 				if success, ok := methodResultMap["success"].(bool); ok && success {
 					// Return the data directly for successful single method calls
 					if data, ok := methodResultMap["data"].(map[string]interface{}); ok {
-						// Return data directly without wrapping
+						// Return data directly without wrapping, but exclude rawStructuredFields
 						for key, value := range data {
-							result[key] = value
+							if key != "rawStructuredFields" {
+								result[key] = value
+							}
 						}
 						// Also include method metadata for debugging
 						result["method_name"] = methodResultMap["methodName"]
-						// Include raw structured fields for metadata
+						// Store raw structured fields separately for metadata (don't add to main result)
 						if rawStructuredFields, ok := methodResultMap["rawStructuredFields"].([]interface{}); ok {
-							result["rawStructuredFields"] = rawStructuredFields
+							result["rawStructuredFields"] = rawStructuredFields // Keep for metadata generation
 						}
 					}
 				} else {
@@ -1707,13 +1709,13 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 						resultsArray = append(resultsArray, convertedResult)
 
 						// Create raw method result for metadata._raw array
-						rawResult := map[string]interface{}{
+						methodResult := map[string]interface{}{
 							"methodName": methodResultMap["methodName"],
 							"success":    methodResultMap["success"],
 							"error":      methodResultMap["error"],
 							"data":       methodResultMap["rawStructuredFields"], // The raw structured fields from ABI decoding
 						}
-						rawMethodResults = append(rawMethodResults, rawResult)
+						rawMethodResults = append(rawMethodResults, methodResult)
 					}
 				}
 
@@ -1742,8 +1744,8 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 				for key, value := range result {
 					switch key {
-					case "method_name", "success", "error", "nodeId":
-						// Skip these as they will be handled in metadata
+					case "method_name", "success", "error", "nodeId", "rawStructuredFields":
+						// Skip these as they will be handled in metadata or are internal fields
 					case "rawData":
 						// Skip rawData as it's handled separately
 					default:

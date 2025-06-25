@@ -490,7 +490,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 			continue
 		}
 
-		result := r.executeMethodCallWithDecimalFormatting(ctx, &parsedABI, contractAddr, methodCall, decimalsValue, fieldsToFormat)
+		result := r.executeMethodCallWithDecimalFormatting(ctx, &parsedABI, contractAddr, methodCall, decimalsValue, fieldsToFormat, allRawFieldsMetadata)
 		results = append(results, result)
 
 		// Collect raw fields metadata from this method call
@@ -548,6 +548,16 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 				})
 			}
 		}
+
+		// Add raw fields from decimal formatting to the main data
+		if len(allRawFieldsMetadata) > 0 {
+			for key, value := range allRawFieldsMetadata {
+				if key != "decimals" { // Skip the decimals metadata field
+					dataMap[key] = value
+				}
+			}
+		}
+
 		resultMap["data"] = dataMap
 
 		// Include raw structured fields in the result for metadata
@@ -608,7 +618,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 }
 
 // executeMethodCallWithDecimalFormatting executes a single method call with decimal formatting support
-func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx context.Context, contractAbi *abi.ABI, contractAddress common.Address, methodCall *avsproto.ContractReadNode_MethodCall, decimalsValue *big.Int, fieldsToFormat []string) *avsproto.ContractReadNode_MethodResult {
+func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx context.Context, contractAbi *abi.ABI, contractAddress common.Address, methodCall *avsproto.ContractReadNode_MethodCall, decimalsValue *big.Int, fieldsToFormat []string, allRawFieldsMetadata map[string]interface{}) *avsproto.ContractReadNode_MethodResult {
 	// Preprocess template variables in method call data
 	preprocessedCallData := r.vm.preprocessTextWithVariableMapping(methodCall.GetCallData())
 	methodName := r.vm.preprocessTextWithVariableMapping(methodCall.GetMethodName())
@@ -711,11 +721,9 @@ func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx conte
 		// Use decimal formatting
 		structuredData, rawFieldsMetadata = r.buildStructuredDataWithDecimalFormatting(method, result, decimalsValue, fieldsToFormat)
 
-		// Store raw fields metadata for later use (TODO: add to response metadata)
+		// Store raw fields metadata for later use
 		for key, value := range rawFieldsMetadata {
-			// This would be added to the response metadata when supported
-			_ = key
-			_ = value
+			allRawFieldsMetadata[key] = value
 		}
 	} else {
 		// Use regular formatting
