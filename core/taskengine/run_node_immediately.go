@@ -1322,67 +1322,11 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 			result = map[string]interface{}{"data": iface}
 		}
 	} else if contractRead := executionStep.GetContractRead(); contractRead != nil && contractRead.GetData() != nil {
-		// ContractRead now returns data as protobuf Value
-		var results []interface{}
+		// ContractRead now returns data as protobuf Value - use helper function for extraction
+		results := ExtractResultsFromProtobufValue(contractRead.GetData())
 
-		// Extract results from the protobuf Value
-		if contractRead.GetData().GetListValue() != nil {
-			// Data is an array
-			for _, item := range contractRead.GetData().GetListValue().GetValues() {
-				results = append(results, item.AsInterface())
-			}
-		} else {
-			// Data might be a single object, wrap it in an array for consistency
-			results = append(results, contractRead.GetData().AsInterface())
-		}
-
-		// For single method calls, return the data directly (flattened)
-		if len(results) == 1 {
-			if methodResultMap, ok := results[0].(map[string]interface{}); ok {
-				if success, ok := methodResultMap["success"].(bool); ok && success {
-					// Return the data directly for successful single method calls
-					if data, ok := methodResultMap["data"].(map[string]interface{}); ok {
-						// Return data directly without wrapping, but exclude rawStructuredFields
-						for key, value := range data {
-							if key != "rawStructuredFields" {
-								result[key] = value
-							}
-						}
-						// Also include method metadata for debugging
-						result["method_name"] = methodResultMap["methodName"]
-						// Store raw structured fields separately for metadata (don't add to main result)
-						if rawStructuredFields, ok := methodResultMap["rawStructuredFields"].([]interface{}); ok {
-							result["rawStructuredFields"] = rawStructuredFields // Keep for metadata generation
-						}
-					}
-				} else {
-					// For failed calls, include error information
-					result["error"] = methodResultMap["error"]
-					result["method_name"] = methodResultMap["methodName"]
-					result["success"] = false
-				}
-			}
-		} else {
-			// Multiple method results - return as array (keep existing behavior)
-			result["results"] = results
-
-			// Create metadata._raw array with all method results
-			var rawMethodResults []interface{}
-			for _, methodResult := range results {
-				if methodMap, ok := methodResult.(map[string]interface{}); ok {
-					rawResult := map[string]interface{}{
-						"methodName": methodMap["methodName"],
-						"success":    methodMap["success"],
-						"error":      methodMap["error"],
-						"data":       methodMap["rawStructuredFields"], // The raw structured fields from ABI decoding
-					}
-					rawMethodResults = append(rawMethodResults, rawResult)
-				}
-			}
-
-			// Store raw method results for metadata
-			result["_rawMethodResults"] = rawMethodResults
-		}
+		// Process results using helper function that handles single vs multiple method logic
+		result = ProcessContractReadResults(results)
 	} else if branch := executionStep.GetBranch(); branch != nil {
 		result["conditionId"] = branch.GetConditionId()
 	} else if filter := executionStep.GetFilter(); filter != nil && filter.GetData() != nil {
@@ -1433,36 +1377,11 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
 		// ContractWrite output now contains enhanced results structure
 		if contractWrite.GetData() != nil {
-			// Extract results from the protobuf Value
-			var allResults []interface{}
+			// Extract results using helper function
+			allResults := ExtractResultsFromProtobufValue(contractWrite.GetData())
 
-			if contractWrite.GetData().GetListValue() != nil {
-				// Data is an array
-				for _, item := range contractWrite.GetData().GetListValue().GetValues() {
-					allResults = append(allResults, item.AsInterface())
-				}
-			} else {
-				// Data might be a single object, wrap it in an array for consistency
-				allResults = append(allResults, contractWrite.GetData().AsInterface())
-			}
-
-			// Return results array AND backward compatibility fields
+			// Return results array directly without backward compatibility
 			result["results"] = allResults
-
-			// For backward compatibility, also provide legacy fields from first result
-			if len(allResults) > 0 {
-				if firstResultMap, ok := allResults[0].(map[string]interface{}); ok {
-					if transaction, ok := firstResultMap["transaction"].(map[string]interface{}); ok {
-						if hash, ok := transaction["hash"].(string); ok {
-							result["txHash"] = hash
-						}
-						result["transaction"] = transaction
-					}
-					if success, ok := firstResultMap["success"].(bool); ok {
-						result["success"] = success
-					}
-				}
-			}
 
 			return result, nil
 		}
