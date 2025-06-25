@@ -379,8 +379,9 @@ message ContractWriteNode {
   }
 
   message Output {
-    // Enhanced response structure matching Write_Contract_Spec.md
-    repeated MethodResult results = 1;
+    // Changed from repeated MethodResult to google.protobuf.Value for better JavaScript native type support
+    // Data will be a JSON array of method results with enhanced response structure
+    google.protobuf.Value data = 1;
   }
 
   message MethodResult {
@@ -395,7 +396,7 @@ message ContractWriteNode {
 
   message TransactionData {
     string hash = 1;                  // Transaction hash
-    string status = 2;                // "pending", "confirmed", "failed"
+    string status = 2;                // "pending", "confirmed", "failed", "simulated"
     string block_number = 3;          // Block number when mined (null for pending)
     string block_hash = 4;            // Block hash when mined
     string gas_used = 5;              // Actual gas consumed (null for pending)
@@ -409,6 +410,9 @@ message ContractWriteNode {
     string transaction_index = 13;    // Index in block (null for pending)
     string confirmations = 14;        // Number of confirmations
     int64 timestamp = 15;             // Transaction timestamp
+    bool simulation = 16;             // Whether this is a simulation result
+    string simulation_mode = 17;      // Simulation mode: "tenderly", "mock", etc.
+    int64 chain_id = 18;              // Chain ID where the simulation was performed
   }
 
   message EventData {
@@ -468,8 +472,9 @@ message ContractReadNode {
   }
 
   message Output {
-    // Results for each method call, in the same order as the input method_calls
-    repeated MethodResult results = 1;
+    // Changed from repeated MethodResult to google.protobuf.Value for better JavaScript native type support
+    // Data will be a JSON array of method results with flattened key-value structure
+    google.protobuf.Value data = 1;
   }
 
   // Include Config and Input as fields so they are generated in Go

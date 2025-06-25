@@ -15,12 +15,31 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/joho/godotenv"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// init loads environment variables from .env file for testing
+func init() {
+	// Try multiple possible paths for .env file
+	paths := []string{
+		".env",          // Current directory
+		"../.env",       // One level up
+		"../../.env",    // Two levels up (from core/testutil)
+		"../../../.env", // Three levels up
+	}
+
+	for _, path := range paths {
+		if err := godotenv.Load(path); err == nil {
+			// Successfully loaded .env file
+			break
+		}
+	}
+}
 
 const (
 	paymasterAddress = "0xB985af5f96EF2722DC99aEBA573520903B86505e"

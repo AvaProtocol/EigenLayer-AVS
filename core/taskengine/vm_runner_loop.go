@@ -417,48 +417,46 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 		return nil, nil
 	} else if contractReadOutput := executionStep.GetContractRead(); contractReadOutput != nil {
 		// For contract read, convert the results to JSON-compatible format
-		results := contractReadOutput.GetResults()
-		jsonResults := make([]map[string]interface{}, len(results))
-		for i, result := range results {
-			jsonResults[i] = map[string]interface{}{
-				"method_name": result.GetMethodName(),
-				"success":     result.GetSuccess(),
-				"error":       result.GetError(),
-				"data":        convertProtoFieldsToMap(result.GetData()),
+		if contractReadOutput.GetData() != nil {
+			// Extract results from the protobuf Value
+			var results []interface{}
+
+			if contractReadOutput.GetData().GetListValue() != nil {
+				// Data is an array
+				for _, item := range contractReadOutput.GetData().GetListValue().GetValues() {
+					results = append(results, item.AsInterface())
+				}
+			} else {
+				// Data might be a single object, wrap it in an array for consistency
+				results = append(results, contractReadOutput.GetData().AsInterface())
 			}
+
+			return map[string]interface{}{
+				"results": results,
+			}, nil
 		}
-		return map[string]interface{}{
-			"results": jsonResults,
-		}, nil
+		return nil, nil
 	} else if contractWriteOutput := executionStep.GetContractWrite(); contractWriteOutput != nil {
 		// For contract write, convert the results to JSON-compatible format
-		results := contractWriteOutput.GetResults()
-		jsonResults := make([]map[string]interface{}, len(results))
-		for i, result := range results {
-			resultMap := map[string]interface{}{
-				"method_name": result.GetMethodName(),
-				"success":     result.GetSuccess(),
-				"input_data":  result.GetInputData(),
-			}
-			if result.Transaction != nil {
-				resultMap["transaction"] = map[string]interface{}{
-					"hash":   result.Transaction.GetHash(),
-					"status": result.Transaction.GetStatus(),
-					"from":   result.Transaction.GetFrom(),
-					"to":     result.Transaction.GetTo(),
+		if contractWriteOutput.GetData() != nil {
+			// Extract results from the protobuf Value
+			var results []interface{}
+
+			if contractWriteOutput.GetData().GetListValue() != nil {
+				// Data is an array
+				for _, item := range contractWriteOutput.GetData().GetListValue().GetValues() {
+					results = append(results, item.AsInterface())
 				}
+			} else {
+				// Data might be a single object, wrap it in an array for consistency
+				results = append(results, contractWriteOutput.GetData().AsInterface())
 			}
-			if result.Error != nil {
-				resultMap["error"] = map[string]interface{}{
-					"code":    result.Error.GetCode(),
-					"message": result.Error.GetMessage(),
-				}
-			}
-			jsonResults[i] = resultMap
+
+			return map[string]interface{}{
+				"results": results,
+			}, nil
 		}
-		return map[string]interface{}{
-			"results": jsonResults,
-		}, nil
+		return nil, nil
 	} else if ethTransferOutput := executionStep.GetEthTransfer(); ethTransferOutput != nil {
 		return map[string]interface{}{
 			"txHash": ethTransferOutput.GetTransactionHash(),

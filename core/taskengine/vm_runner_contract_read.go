@@ -483,31 +483,28 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	for i, methodCall := range config.MethodCalls {
 		log.WriteString(fmt.Sprintf("Call %d: %s on %s\n", i+1, methodCall.GetMethodName(), config.ContractAddress))
 
-		// Skip decimals() calls that are only used for formatting
-		if methodCall.GetMethodName() == "decimals" && len(methodCall.GetApplyToFields()) > 0 {
-			log.WriteString(fmt.Sprintf("  ⏭️  Skipping decimals() call (used for formatting only)\n"))
-			continue
-		}
-
+		// Execute all method calls, including decimals() calls used for formatting
 		result := r.executeMethodCallWithDecimalFormatting(ctx, &parsedABI, contractAddr, methodCall, decimalsValue, fieldsToFormat)
 		results = append(results, result)
 
 		// Collect raw fields metadata from this method call
 		if result.Success && len(result.Data) > 0 {
-			// Extract raw fields metadata (this would be set by executeMethodCallWithDecimalFormatting)
+			// Extract raw fields metadata from the structured data fields
 			for _, field := range result.Data {
-				// Check if there's a corresponding raw field
-				rawFieldName := field.Name + "Raw"
-				if rawValue, exists := allRawFieldsMetadata[rawFieldName]; exists {
-					// Store in metadata for later use
-					allRawFieldsMetadata[rawFieldName] = rawValue
+				// Check if this is a raw field (ends with "Raw")
+				if strings.HasSuffix(field.Name, "Raw") {
+					allRawFieldsMetadata[field.Name] = field.Value
 				}
 			}
 		}
 
 		// Log the result
 		if result.Success {
-			log.WriteString(fmt.Sprintf("  ✅ Success: %s\n", result.MethodName))
+			if methodCall.GetMethodName() == "decimals" && len(methodCall.GetApplyToFields()) > 0 {
+				log.WriteString(fmt.Sprintf("  ✅ Success: %s (used for formatting)\n", result.MethodName))
+			} else {
+				log.WriteString(fmt.Sprintf("  ✅ Success: %s\n", result.MethodName))
+			}
 		} else {
 			log.WriteString(fmt.Sprintf("  ❌ Failed: %s - %s\n", result.MethodName, result.Error))
 			// If any method call fails, mark the overall execution as failed
@@ -519,10 +516,65 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 
 	s.Log = log.String()
 
+	// Convert results to Go maps for JSON conversion
+	var resultsArray []interface{}
+	for _, methodResult := range results {
+		resultMap := map[string]interface{}{
+			"methodName": methodResult.MethodName,
+			"success":    methodResult.Success,
+			"error":      methodResult.Error,
+		}
+
+		// Convert structured fields to a map and extract raw structured data
+		dataMap := make(map[string]interface{})
+		var rawStructuredFields []interface{}
+		for _, field := range methodResult.Data {
+			if field.Name == "_rawContractOutput" {
+				// Skip the raw hex output, we don't need it anymore
+				continue
+			} else {
+				// Regular data fields for the main response
+				dataMap[field.Name] = field.Value
+
+				// Also build the raw structured fields array for metadata
+				rawStructuredFields = append(rawStructuredFields, map[string]interface{}{
+					"name":  field.Name,
+					"type":  field.Type,
+					"value": field.Value,
+				})
+			}
+		}
+
+		// Add raw fields from decimal formatting to the main data
+		if len(allRawFieldsMetadata) > 0 {
+			for key, value := range allRawFieldsMetadata {
+				if key != "decimals" { // Skip the decimals metadata field
+					dataMap[key] = value
+				}
+			}
+		}
+
+		// Check execution context: if VM has a task, it's simulation (SimulateTask)
+		isSimulation := r.vm.task != nil
+
+		// Include raw structured fields in the result for metadata (only for direct execution)
+		if !isSimulation {
+			resultMap["rawStructuredFields"] = rawStructuredFields
+			dataMap["rawStructuredFields"] = rawStructuredFields
+		}
+
+		resultMap["data"] = dataMap
+
+		resultsArray = append(resultsArray, resultMap)
+	}
+
+	// Convert results to JSON for the new protobuf structure using shared helper
+	resultsValue := ConvertResultsArrayToProtobufValue(resultsArray, &log)
+
 	// Create output with all results
 	s.OutputData = &avsproto.Execution_Step_ContractRead{
 		ContractRead: &avsproto.ContractReadNode_Output{
-			Results: results,
+			Data: resultsValue,
 		},
 	}
 
@@ -649,17 +701,18 @@ func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx conte
 
 	// Build structured data with decimal formatting if needed
 	var structuredData []*avsproto.ContractReadNode_MethodResult_StructuredField
-	var rawFieldsMetadata map[string]interface{}
 
 	if decimalsValue != nil && len(fieldsToFormat) > 0 {
-		// Use decimal formatting
-		structuredData, rawFieldsMetadata = r.buildStructuredDataWithDecimalFormatting(method, result, decimalsValue, fieldsToFormat)
+		// Use decimal formatting and capture raw fields metadata
+		structuredDataFields, rawFieldsMetadata := r.buildStructuredDataWithDecimalFormatting(method, result, decimalsValue, fieldsToFormat)
+		structuredData = structuredDataFields
 
-		// Store raw fields metadata for later use (TODO: add to response metadata)
-		for key, value := range rawFieldsMetadata {
-			// This would be added to the response metadata when supported
-			_ = key
-			_ = value
+		// Add raw fields (like answerRaw) to the structured data
+		for rawFieldName, rawValue := range rawFieldsMetadata {
+			structuredData = append(structuredData, &avsproto.ContractReadNode_MethodResult_StructuredField{
+				Name:  rawFieldName,
+				Value: fmt.Sprintf("%v", rawValue),
+			})
 		}
 	} else {
 		// Use regular formatting
@@ -673,6 +726,16 @@ func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx conte
 				Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
 			}
 		}
+	}
+
+	// Add the raw contract output to the structured data for metadata purposes
+	if len(output) > 0 {
+		// Convert raw bytes to hex string for JSON serialization
+		rawHex := fmt.Sprintf("0x%x", output)
+		structuredData = append(structuredData, &avsproto.ContractReadNode_MethodResult_StructuredField{
+			Name:  "_rawContractOutput",
+			Value: rawHex,
+		})
 	}
 
 	return &avsproto.ContractReadNode_MethodResult{
