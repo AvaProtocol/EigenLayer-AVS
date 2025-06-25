@@ -408,7 +408,7 @@ func GetTestEventTriggerDataWithTransferData() *TriggerData {
 		"transactionHash":  "0x53beb2163994510e0984b436ebc828dc57e480ee671cfbe7ed52776c2a4830c8",
 		"address":          "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
 		"blockNumber":      7212417,
-		"blockTimestamp":   1733351604000,
+		"blockTimestamp":   int64(1733351604000),
 		"transactionIndex": 73,
 		"logIndex":         0,
 	}
