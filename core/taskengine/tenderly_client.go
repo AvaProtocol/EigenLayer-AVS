@@ -96,7 +96,8 @@ func NewTenderlyClient(logger sdklogging.Logger) *TenderlyClient {
 	var apiKey string
 
 	// Try to load from environment
-	if envConfig := os.Getenv("TENDERLY_API_KEY"); envConfig != "" {
+	envConfig := os.Getenv("TENDERLY_API_KEY")
+	if envConfig != "" {
 		if strings.HasPrefix(envConfig, "https://") {
 			// Full Tenderly Gateway URL provided (e.g., https://sepolia.gateway.tenderly.co/7MB9UwJMIQmLyhNxSIMg3X)
 			rpcURL = envConfig
