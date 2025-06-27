@@ -254,11 +254,38 @@ func (r *ContractWriteProcessor) decodeEvents(logs []*types.Log, contractABI *ab
 
 				// Try to decode the event data
 				if decoded, err := contractABI.Unpack(abiEvent.Name, log.Data); err == nil {
-					// Build decoded map
-					for i, input := range abiEvent.Inputs {
-						if i < len(decoded) {
-							eventData.Decoded[input.Name] = fmt.Sprintf("%v", decoded[i])
+					// Create ABI value converter (no decimal formatting for contract write events)
+					converter := NewABIValueConverter(nil, nil)
+
+					// Build decoded map with proper typing
+					indexedCount := 0
+					nonIndexedCount := 0
+
+					for _, input := range abiEvent.Inputs {
+						var valueStr string
+
+						if input.Indexed {
+							// Get from topics (topic[0] is signature, so indexed params start from topic[1])
+							topicIndex := indexedCount + 1
+							if topicIndex < len(log.Topics) {
+								topicValue := log.Topics[topicIndex]
+								valueStr = ConvertTopicValueToString(topicValue, input.Type)
+							}
+							indexedCount++
+						} else {
+							// Get from decoded data
+							if nonIndexedCount < len(decoded) {
+								decodedValue := decoded[nonIndexedCount]
+								valueStr = converter.ConvertABIValueToString(decodedValue, input.Type, input.Name)
+							}
+							nonIndexedCount++
 						}
+
+						// Store in the string map for protobuf compatibility
+						// Note: The protobuf EventData.Decoded is defined as map[string]string
+						// so we must store string values here, but the typing logic above
+						// ensures proper conversion for consistency with event trigger parsing
+						eventData.Decoded[input.Name] = valueStr
 					}
 				}
 

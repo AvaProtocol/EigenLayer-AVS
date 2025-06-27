@@ -501,42 +501,10 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 		}
 	}
 
-	// Helper function to check if a field should be formatted
-	shouldFormatField := func(fieldName string) bool {
-		if decimalsValue == nil || len(fieldsToFormat) == 0 {
-			return false
-		}
-		for _, field := range fieldsToFormat {
-			if field == fieldName {
-				return true
-			}
-		}
-		return false
-	}
+	// Create ABI value converter
+	converter := NewABIValueConverter(decimalsValue, fieldsToFormat)
 
-	// Helper function to format a big.Int value with decimals
-	formatWithDecimals := func(value *big.Int, decimals *big.Int) string {
-		if decimals == nil || decimals.Cmp(big.NewInt(0)) <= 0 {
-			return value.String()
-		}
-
-		// Calculate divisor (10^decimals)
-		divisor := new(big.Int).Exp(big.NewInt(10), decimals, nil)
-
-		// Get integer and remainder parts
-		quotient := new(big.Int).Div(value, divisor)
-		remainder := new(big.Int).Mod(value, divisor)
-
-		// Format with decimal places
-		decimalsInt := int(decimals.Int64())
-		if decimalsInt > 0 {
-			format := fmt.Sprintf("%%s.%%0%dd", decimalsInt)
-			return fmt.Sprintf(format, quotient.String(), remainder.Int64())
-		}
-		return quotient.String()
-	}
-
-	// Add indexed parameters from topics (skip topic[0] which is event signature)
+	// Process event inputs (both indexed and non-indexed)
 	indexedCount := 0
 	nonIndexedCount := 0
 
@@ -545,41 +513,28 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 			// Get from topics (topic[0] is signature, so indexed params start from topic[1])
 			topicIndex := indexedCount + 1
 			if topicIndex < len(eventLog.Topics) {
-				// Convert indexed topic values to more readable format based on type
+				// Convert indexed topic values based on ABI type
 				topicValue := eventLog.Topics[topicIndex]
 
 				switch input.Type.T {
 				case abi.UintTy, abi.IntTy:
-					// Convert numeric types to decimal string for better usability
+					// Convert numeric types to proper types
 					if bigInt := new(big.Int).SetBytes(topicValue.Bytes()); bigInt != nil {
-						rawValue := bigInt.String()
+						parsedData[input.Name] = converter.ConvertABIValueToInterface(bigInt, input.Type, input.Name)
 
-						// Check if this field should be formatted with decimals
-						if shouldFormatField(input.Name) {
-							formattedValue := formatWithDecimals(bigInt, decimalsValue)
-							parsedData[input.Name] = formattedValue
-							parsedData[input.Name+"Raw"] = rawValue
-
-							if n.logger != nil {
-								n.logger.Debug("Added formatted indexed numeric field",
-									"field", input.Name,
-									"rawValue", rawValue,
-									"formattedValue", formattedValue,
-									"decimals", decimalsValue.String())
-							}
-						} else {
-							parsedData[input.Name] = rawValue
-
-							if n.logger != nil {
-								n.logger.Debug("Added indexed numeric field from topic",
-									"field", input.Name,
-									"hexValue", topicValue.Hex(),
-									"decimalValue", rawValue)
-							}
+						if n.logger != nil {
+							n.logger.Debug("Added indexed numeric field",
+								"field", input.Name,
+								"type", input.Type.String(),
+								"value", parsedData[input.Name])
 						}
 					} else {
 						parsedData[input.Name] = topicValue.Hex()
 					}
+				case abi.BoolTy:
+					// Convert boolean from topic
+					boolVal := new(big.Int).SetBytes(topicValue.Bytes()).Cmp(big.NewInt(0)) != 0
+					parsedData[input.Name] = boolVal
 				case abi.AddressTy:
 					// Keep addresses as hex
 					parsedData[input.Name] = common.HexToAddress(topicValue.Hex()).Hex()
@@ -602,39 +557,14 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 		} else {
 			// Get from decoded data
 			if nonIndexedCount < len(decodedData) {
-				// Convert the value to a more readable format
+				// Convert the value using ABI type information
 				value := decodedData[nonIndexedCount]
-				switch v := value.(type) {
-				case *big.Int:
-					rawValue := v.String()
-
-					// Check if this field should be formatted with decimals
-					if shouldFormatField(input.Name) {
-						formattedValue := formatWithDecimals(v, decimalsValue)
-						parsedData[input.Name] = formattedValue
-						parsedData[input.Name+"Raw"] = rawValue
-
-						if n.logger != nil {
-							n.logger.Debug("Added formatted non-indexed numeric field",
-								"field", input.Name,
-								"rawValue", rawValue,
-								"formattedValue", formattedValue,
-								"decimals", decimalsValue.String())
-						}
-					} else {
-						parsedData[input.Name] = rawValue
-					}
-				case common.Address:
-					parsedData[input.Name] = v.Hex()
-				case common.Hash:
-					parsedData[input.Name] = v.Hex()
-				default:
-					parsedData[input.Name] = fmt.Sprintf("%v", v)
-				}
+				parsedData[input.Name] = converter.ConvertABIValueToInterface(value, input.Type, input.Name)
 
 				if n.logger != nil {
 					n.logger.Debug("Added non-indexed field from data",
 						"field", input.Name,
+						"type", input.Type.String(),
 						"value", parsedData[input.Name])
 				}
 			}
@@ -642,9 +572,14 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 		}
 	}
 
+	// Add any raw fields metadata from decimal formatting
+	for key, value := range converter.GetRawFieldsMetadata() {
+		parsedData[key] = value
+	}
+
 	// Add decimals info if we retrieved it
 	if decimalsValue != nil {
-		parsedData["decimals"] = decimalsValue.String()
+		parsedData["decimals"] = decimalsValue.Uint64() // Return as number, not string
 	}
 
 	return parsedData, nil
