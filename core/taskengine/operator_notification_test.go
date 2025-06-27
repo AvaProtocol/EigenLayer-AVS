@@ -100,7 +100,7 @@ func TestNotifyOperatorsTaskOperation_DeleteTask(t *testing.T) {
 	// Delete the task (this should trigger notification)
 	deleted, err := engine.DeleteTaskByUser(user, task.Id)
 	assert.NoError(t, err)
-	assert.True(t, deleted)
+	assert.True(t, deleted.Success)
 
 	// Manually trigger batch processing for immediate testing
 	engine.sendBatchedNotifications()
@@ -157,7 +157,7 @@ func TestNotifyOperatorsTaskOperation_CancelTask(t *testing.T) {
 	// Cancel the task (this should trigger notification)
 	cancelled, err := engine.CancelTaskByUser(user, task.Id)
 	assert.NoError(t, err)
-	assert.True(t, cancelled)
+	assert.True(t, cancelled.Success)
 
 	// Manually trigger batch processing for immediate testing
 	engine.sendBatchedNotifications()
@@ -219,7 +219,7 @@ func TestNotifyOperatorsTaskOperation_OnlyNotifiesTrackingOperators(t *testing.T
 	// Delete the task
 	deleted, err := engine.DeleteTaskByUser(user, task.Id)
 	assert.NoError(t, err)
-	assert.True(t, deleted)
+	assert.True(t, deleted.Success)
 
 	// Manually trigger batch processing for immediate testing
 	engine.sendBatchedNotifications()
@@ -309,4 +309,52 @@ func TestNotifyOperatorsTaskOperation_LockDuration(t *testing.T) {
 		messages := stream.GetReceivedMessages()
 		assert.Len(t, messages, 1, fmt.Sprintf("Operator %d should receive notification", i))
 	}
+}
+
+func TestDeleteTaskRespFields(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	engine := New(db, config, nil, testutil.GetLogger())
+	_ = engine.MustStart()
+	user := testutil.TestUser1()
+
+	taskReq := testutil.RestTask()
+	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	task, err := engine.CreateTask(user, taskReq)
+	assert.NoError(t, err)
+
+	resp, err := engine.DeleteTaskByUser(user, task.Id)
+	assert.NoError(t, err)
+	assert.True(t, resp.Success)
+	assert.Equal(t, "deleted", resp.Status)
+	assert.Equal(t, task.Id, resp.Id)
+	assert.NotEmpty(t, resp.Message)
+	assert.NotZero(t, resp.DeletedAt)
+	assert.Equal(t, "Active", resp.PreviousStatus) // Task is active before deletion
+}
+
+func TestCancelTaskRespFields(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	engine := New(db, config, nil, testutil.GetLogger())
+	_ = engine.MustStart()
+	user := testutil.TestUser1()
+
+	taskReq := testutil.RestTask()
+	taskReq.SmartWalletAddress = user.SmartAccountAddress.Hex()
+	task, err := engine.CreateTask(user, taskReq)
+	assert.NoError(t, err)
+
+	resp, err := engine.CancelTaskByUser(user, task.Id)
+	assert.NoError(t, err)
+	assert.True(t, resp.Success)
+	assert.Equal(t, "cancelled", resp.Status)
+	assert.Equal(t, task.Id, resp.Id)
+	assert.NotEmpty(t, resp.Message)
+	assert.NotZero(t, resp.CancelledAt)
+	assert.Equal(t, "Active", resp.PreviousStatus) // Task is active before cancellation
 }

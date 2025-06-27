@@ -2219,49 +2219,98 @@ func (n *Engine) GetExecutionCount(user *model.User, payload *avsproto.GetExecut
 	}, nil
 }
 
-func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (bool, error) {
+func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (*avsproto.DeleteTaskResp, error) {
 	n.logger.Info("🔄 Starting delete task operation", "task_id", taskID, "user", user.Address.String())
 
 	task, err := n.GetTask(user, taskID)
 	if err != nil {
 		n.logger.Warn("❌ Task not found for deletion", "task_id", taskID, "error", err)
-		return false, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+		return &avsproto.DeleteTaskResp{
+			Success: false,
+			Status:  "not_found",
+			Message: "Task not found",
+			Id:      taskID,
+		}, nil
 	}
 
 	n.logger.Info("✅ Retrieved task for deletion", "task_id", taskID, "status", task.Status)
 
 	if task.Status == avsproto.TaskStatus_Executing {
 		n.logger.Warn("❌ Cannot delete executing task", "task_id", taskID, "status", task.Status)
-		return false, fmt.Errorf("Only non executing task can be deleted")
+		return &avsproto.DeleteTaskResp{
+			Success:        false,
+			Status:         "cannot_delete",
+			Message:        "Only non executing task can be deleted",
+			Id:             taskID,
+			PreviousStatus: task.Status.String(),
+		}, nil
 	}
+
+	previousStatus := task.Status.String()
+	deletedAt := time.Now().UnixMilli()
 
 	n.logger.Info("🗑️ Deleting task storage", "task_id", taskID)
 	if err := n.db.Delete(TaskStorageKey(task.Id, task.Status)); err != nil {
 		n.logger.Error("failed to delete task storage", "error", err, "task_id", task.Id)
-		return false, fmt.Errorf("failed to delete task: %w", err)
+		return &avsproto.DeleteTaskResp{
+			Success: false,
+			Status:  "error",
+			Message: fmt.Sprintf("Failed to delete task: %v", err),
+			Id:      taskID,
+		}, nil
 	}
 
 	n.logger.Info("🗑️ Deleting task user key", "task_id", taskID)
 	if err := n.db.Delete(TaskUserKey(task)); err != nil {
 		n.logger.Error("failed to delete task user key", "error", err, "task_id", task.Id)
-		return false, fmt.Errorf("failed to delete task user key: %w", err)
+		return &avsproto.DeleteTaskResp{
+			Success: false,
+			Status:  "error",
+			Message: fmt.Sprintf("Failed to delete task user key: %v", err),
+			Id:      taskID,
+		}, nil
 	}
 
 	n.logger.Info("📢 Starting operator notifications", "task_id", taskID)
 	n.notifyOperatorsTaskOperation(taskID, avsproto.MessageOp_DeleteTask)
 	n.logger.Info("✅ Delete task operation completed", "task_id", taskID)
 
-	return true, nil
+	return &avsproto.DeleteTaskResp{
+		Success:        true,
+		Status:         "deleted",
+		Message:        "Task deleted successfully",
+		DeletedAt:      deletedAt,
+		Id:             taskID,
+		PreviousStatus: previousStatus,
+	}, nil
 }
 
-func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error) {
+func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (*avsproto.CancelTaskResp, error) {
 	task, err := n.GetTask(user, taskID)
 	if err != nil {
-		return false, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+		return &avsproto.CancelTaskResp{
+			Success: false,
+			Status:  "not_found",
+			Message: "Task not found",
+			Id:      taskID,
+		}, nil
 	}
 
 	if task.Status != avsproto.TaskStatus_Active {
-		return false, fmt.Errorf("Only active task can be cancelled")
+		statusMsg := "already_cancelled"
+		if task.Status == avsproto.TaskStatus_Completed {
+			statusMsg = "cannot_cancel"
+		} else if task.Status == avsproto.TaskStatus_Failed {
+			statusMsg = "cannot_cancel"
+		}
+
+		return &avsproto.CancelTaskResp{
+			Success:        false,
+			Status:         statusMsg,
+			Message:        fmt.Sprintf("Only active task can be cancelled, current status: %s", task.Status.String()),
+			Id:             taskID,
+			PreviousStatus: task.Status.String(),
+		}, nil
 	}
 
 	updates := map[string][]byte{}
@@ -2270,10 +2319,18 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 	// TaskStorageKey now needs task.Status which is Canceled
 	taskJSON, err := task.ToJSON() // Re-serialize task with new status
 	if err != nil {
-		return false, fmt.Errorf("failed to serialize canceled task: %w", err)
+		return &avsproto.CancelTaskResp{
+			Success:        false,
+			Status:         "error",
+			Message:        fmt.Sprintf("Failed to serialize canceled task: %v", err),
+			Id:             taskID,
+			PreviousStatus: oldStatus.String(),
+		}, nil
 	}
 	updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON // Use new status for the key where it's stored
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
+
+	cancelledAt := time.Now().UnixMilli()
 
 	if err = n.db.BatchWrite(updates); err == nil {
 		// Delete the old record, only if oldStatus is different from new Status
@@ -2288,12 +2345,25 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (bool, error)
 		delete(n.tasks, task.Id) // Remove from active tasks map
 		n.lock.Unlock()
 	} else {
-		return false, err
+		return &avsproto.CancelTaskResp{
+			Success:        false,
+			Status:         "error",
+			Message:        fmt.Sprintf("Failed to update task status: %v", err),
+			Id:             taskID,
+			PreviousStatus: oldStatus.String(),
+		}, nil
 	}
 
 	n.notifyOperatorsTaskOperation(taskID, avsproto.MessageOp_CancelTask)
 
-	return true, nil
+	return &avsproto.CancelTaskResp{
+		Success:        true,
+		Status:         "cancelled",
+		Message:        "Task cancelled successfully",
+		CancelledAt:    cancelledAt,
+		Id:             taskID,
+		PreviousStatus: oldStatus.String(),
+	}, nil
 }
 
 // CancelTask cancels a task by ID without user authentication (for internal use like overload alerts)
