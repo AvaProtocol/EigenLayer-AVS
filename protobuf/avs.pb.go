@@ -4415,7 +4415,7 @@ type DeleteTaskResp struct {
 	Status         string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`                                       // Status description: "deleted", "not_found", "cannot_delete"
 	Message        string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`                                     // Human-readable message about what happened
 	DeletedAt      int64                  `protobuf:"varint,4,opt,name=deleted_at,json=deletedAt,proto3" json:"deleted_at,omitempty"`               // Unix timestamp when the task was deleted (if applicable)
-	TaskId         string                 `protobuf:"bytes,5,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`                         // ID of the task that was affected
+	Id             string                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`                                               // ID of the task that was affected
 	PreviousStatus string                 `protobuf:"bytes,6,opt,name=previous_status,json=previousStatus,proto3" json:"previous_status,omitempty"` // Previous status of the task before deletion
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -4479,9 +4479,9 @@ func (x *DeleteTaskResp) GetDeletedAt() int64 {
 	return 0
 }
 
-func (x *DeleteTaskResp) GetTaskId() string {
+func (x *DeleteTaskResp) GetId() string {
 	if x != nil {
-		return x.TaskId
+		return x.Id
 	}
 	return ""
 }
@@ -4500,7 +4500,7 @@ type CancelTaskResp struct {
 	Status         string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`                                       // Status description: "cancelled", "not_found", "already_cancelled", "cannot_cancel"
 	Message        string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`                                     // Human-readable message about what happened
 	CancelledAt    int64                  `protobuf:"varint,4,opt,name=cancelled_at,json=cancelledAt,proto3" json:"cancelled_at,omitempty"`         // Unix timestamp when the task was cancelled (if applicable)
-	TaskId         string                 `protobuf:"bytes,5,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`                         // ID of the task that was affected
+	Id             string                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`                                               // ID of the task that was affected
 	PreviousStatus string                 `protobuf:"bytes,6,opt,name=previous_status,json=previousStatus,proto3" json:"previous_status,omitempty"` // Previous status of the task before cancellation
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -4564,9 +4564,9 @@ func (x *CancelTaskResp) GetCancelledAt() int64 {
 	return 0
 }
 
-func (x *CancelTaskResp) GetTaskId() string {
+func (x *CancelTaskResp) GetId() string {
 	if x != nil {
-		return x.TaskId
+		return x.Id
 	}
 	return ""
 }
@@ -8821,21 +8821,21 @@ const file_avs_proto_rawDesc = "" +
 	"updated_at\x18\x04 \x01(\x03R\tupdatedAt\x12\x1f\n" +
 	"\vsecret_name\x18\x05 \x01(\tR\n" +
 	"secretName\x12\x14\n" +
-	"\x05scope\x18\x06 \x01(\tR\x05scope\"\xbd\x01\n" +
+	"\x05scope\x18\x06 \x01(\tR\x05scope\"\xb4\x01\n" +
 	"\x0eDeleteTaskResp\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12\x1d\n" +
 	"\n" +
-	"deleted_at\x18\x04 \x01(\x03R\tdeletedAt\x12\x17\n" +
-	"\atask_id\x18\x05 \x01(\tR\x06taskId\x12'\n" +
-	"\x0fprevious_status\x18\x06 \x01(\tR\x0epreviousStatus\"\xc1\x01\n" +
+	"deleted_at\x18\x04 \x01(\x03R\tdeletedAt\x12\x0e\n" +
+	"\x02id\x18\x05 \x01(\tR\x02id\x12'\n" +
+	"\x0fprevious_status\x18\x06 \x01(\tR\x0epreviousStatus\"\xb8\x01\n" +
 	"\x0eCancelTaskResp\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12!\n" +
-	"\fcancelled_at\x18\x04 \x01(\x03R\vcancelledAt\x12\x17\n" +
-	"\atask_id\x18\x05 \x01(\tR\x06taskId\x12'\n" +
+	"\fcancelled_at\x18\x04 \x01(\x03R\vcancelledAt\x12\x0e\n" +
+	"\x02id\x18\x05 \x01(\tR\x02id\x12'\n" +
 	"\x0fprevious_status\x18\x06 \x01(\tR\x0epreviousStatus\"3\n" +
 	"\x13GetWorkflowCountReq\x12\x1c\n" +
 	"\taddresses\x18\x01 \x03(\tR\taddresses\",\n" +
