@@ -31,61 +31,7 @@ func NewContractReadProcessor(vm *VM, client *ethclient.Client) *ContractReadPro
 
 // buildStructuredData converts result interface{} array to StructuredField array with named fields
 func (r *ContractReadProcessor) buildStructuredData(method *abi.Method, result []interface{}) ([]*avsproto.ContractReadNode_MethodResult_StructuredField, error) {
-	var structuredFields []*avsproto.ContractReadNode_MethodResult_StructuredField
-
-	// Handle the case where method has outputs but result is empty
-	if len(result) == 0 && len(method.Outputs) > 0 {
-		return structuredFields, nil
-	}
-
-	// If method has no defined outputs, create a generic field
-	if len(method.Outputs) == 0 && len(result) > 0 {
-		for i, item := range result {
-			fieldName := fmt.Sprintf("output_%d", i)
-			fieldType := "unknown"
-			value := fmt.Sprintf("%v", item)
-
-			structuredFields = append(structuredFields, &avsproto.ContractReadNode_MethodResult_StructuredField{
-				Name:  fieldName,
-				Type:  fieldType,
-				Value: value,
-			})
-		}
-		return structuredFields, nil
-	}
-
-	// Map results to named fields based on ABI
-	for i, item := range result {
-		var fieldName, fieldType string
-		if i < len(method.Outputs) {
-			fieldName = method.Outputs[i].Name
-			fieldType = method.Outputs[i].Type.String()
-
-			// Handle empty field names (common in Chainlink contracts)
-			if fieldName == "" {
-				if len(method.Outputs) == 1 {
-					// Single unnamed output - use the method name as field name
-					fieldName = method.Name
-				} else {
-					// Multiple outputs - use positional naming
-					fieldName = fmt.Sprintf("output_%d", i)
-				}
-			}
-		} else {
-			fieldName = fmt.Sprintf("output_%d", i)
-			fieldType = "unknown"
-		}
-
-		// Convert value to string representation
-		value := fmt.Sprintf("%v", item)
-
-		structuredFields = append(structuredFields, &avsproto.ContractReadNode_MethodResult_StructuredField{
-			Name:  fieldName,
-			Type:  fieldType,
-			Value: value,
-		})
-	}
-
+	structuredFields, _ := r.buildStructuredDataWithDecimalFormatting(method, result, nil, nil)
 	return structuredFields, nil
 }
 
@@ -94,66 +40,19 @@ func (r *ContractReadProcessor) buildStructuredDataWithDecimalFormatting(method 
 	var structuredFields []*avsproto.ContractReadNode_MethodResult_StructuredField
 	rawFieldsMetadata := make(map[string]interface{})
 
-	// Helper function to check if a field should be formatted
-	shouldFormatField := func(fieldName string) bool {
-		if decimalsValue == nil || len(fieldsToFormat) == 0 {
-			return false
-		}
-		for _, field := range fieldsToFormat {
-			if field == fieldName {
-				return true
-			}
-		}
-		return false
-	}
-
-	// Helper function to format a big.Int value with decimals
-	formatWithDecimals := func(value *big.Int, decimals *big.Int) string {
-		if decimals == nil || decimals.Cmp(big.NewInt(0)) == 0 {
-			return value.String()
-		}
-
-		// Create divisor: 10^decimals
-		divisor := new(big.Int).Exp(big.NewInt(10), decimals, nil)
-
-		// Calculate quotient and remainder
-		quotient := new(big.Int).Div(value, divisor)
-		remainder := new(big.Int).Mod(value, divisor)
-
-		// Format remainder with leading zeros
-		remainderStr := remainder.String()
-		decimalsInt := int(decimals.Int64())
-
-		// Pad with leading zeros if necessary
-		for len(remainderStr) < decimalsInt {
-			remainderStr = "0" + remainderStr
-		}
-
-		// Remove trailing zeros from remainder
-		remainderStr = strings.TrimRight(remainderStr, "0")
-		if remainderStr == "" {
-			remainderStr = "0"
-		}
-
-		return fmt.Sprintf("%s.%s", quotient.String(), remainderStr)
-	}
-
-	// Handle the case where method has outputs but result is empty
-	if len(result) == 0 && len(method.Outputs) > 0 {
-		return structuredFields, rawFieldsMetadata
-	}
+	// Create ABI value converter
+	converter := NewABIValueConverter(decimalsValue, fieldsToFormat)
 
 	// If method has no defined outputs, create a generic field
 	if len(method.Outputs) == 0 && len(result) > 0 {
 		for i, item := range result {
 			fieldName := fmt.Sprintf("output_%d", i)
 			fieldType := "unknown"
-			value := fmt.Sprintf("%v", item)
 
 			// Check if this field should be formatted with decimals
-			if bigIntValue, ok := item.(*big.Int); ok && shouldFormatField(fieldName) {
+			if bigIntValue, ok := item.(*big.Int); ok && converter.ShouldFormatField(fieldName) {
 				rawValue := bigIntValue.String()
-				formattedValue := formatWithDecimals(bigIntValue, decimalsValue)
+				formattedValue := converter.FormatWithDecimals(bigIntValue, decimalsValue)
 
 				// Store formatted value in field
 				structuredFields = append(structuredFields, &avsproto.ContractReadNode_MethodResult_StructuredField{
@@ -165,6 +64,8 @@ func (r *ContractReadProcessor) buildStructuredDataWithDecimalFormatting(method 
 				// Store raw value in metadata
 				rawFieldsMetadata[fieldName+"Raw"] = rawValue
 			} else {
+				// Use ABI-aware conversion even for unknown types
+				value := fmt.Sprintf("%v", item)
 				structuredFields = append(structuredFields, &avsproto.ContractReadNode_MethodResult_StructuredField{
 					Name:  fieldName,
 					Type:  fieldType,
@@ -178,9 +79,12 @@ func (r *ContractReadProcessor) buildStructuredDataWithDecimalFormatting(method 
 	// Map results to named fields based on ABI
 	for i, item := range result {
 		var fieldName, fieldType string
+		var abiType abi.Type
+
 		if i < len(method.Outputs) {
 			fieldName = method.Outputs[i].Name
 			fieldType = method.Outputs[i].Type.String()
+			abiType = method.Outputs[i].Type
 
 			// Handle empty field names (common in Chainlink contracts)
 			if fieldName == "" {
@@ -195,39 +99,23 @@ func (r *ContractReadProcessor) buildStructuredDataWithDecimalFormatting(method 
 		} else {
 			fieldName = fmt.Sprintf("output_%d", i)
 			fieldType = "unknown"
+			// Use a default string type for unknown fields
+			abiType = abi.Type{T: abi.StringTy}
 		}
 
-		// Check if this field should be formatted with decimals
-		if bigIntValue, ok := item.(*big.Int); ok && shouldFormatField(fieldName) {
-			rawValue := bigIntValue.String()
-			formattedValue := formatWithDecimals(bigIntValue, decimalsValue)
+		// Use ABI-aware conversion
+		value := converter.ConvertABIValueToString(item, abiType, fieldName)
 
-			// Store formatted value in field
-			structuredFields = append(structuredFields, &avsproto.ContractReadNode_MethodResult_StructuredField{
-				Name:  fieldName,
-				Type:  fieldType,
-				Value: formattedValue,
-			})
+		structuredFields = append(structuredFields, &avsproto.ContractReadNode_MethodResult_StructuredField{
+			Name:  fieldName,
+			Type:  fieldType,
+			Value: value,
+		})
+	}
 
-			// Store raw value in metadata
-			rawFieldsMetadata[fieldName+"Raw"] = rawValue
-
-			// Also rename "answer" to match expected variable names
-			if fieldName == "answer" {
-				// The formatted "answer" becomes the main "answer" field
-				// The raw "answer" becomes "answerRaw" in metadata
-				// This maintains backward compatibility while using the new naming convention
-			}
-		} else {
-			// Convert value to string representation
-			value := fmt.Sprintf("%v", item)
-
-			structuredFields = append(structuredFields, &avsproto.ContractReadNode_MethodResult_StructuredField{
-				Name:  fieldName,
-				Type:  fieldType,
-				Value: value,
-			})
-		}
+	// Merge raw fields metadata from converter
+	for key, value := range converter.GetRawFieldsMetadata() {
+		rawFieldsMetadata[key] = value
 	}
 
 	return structuredFields, rawFieldsMetadata
