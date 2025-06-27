@@ -975,6 +975,16 @@ message DeleteSecretReq {
   string org_id = 3;
 }
 
+// Response message for DeleteSecret operation
+message DeleteSecretResp {
+  bool success = 1;                    // Whether the operation completed successfully
+  string status = 2;                   // Status description: "deleted", "not_found", "already_deleted"
+  string message = 3;                  // Human-readable message about what happened
+  int64 deleted_at = 4;                // Unix timestamp when the secret was deleted (if applicable)
+  string secret_name = 5;              // Name of the secret that was affected
+  string scope = 6;                    // Scope of the deleted secret: "user", "workflow", "org"
+}
+
 message GetSignatureFormatReq {
   // The wallet address to include in the signature format
   string wallet = 1;
@@ -983,6 +993,46 @@ message GetSignatureFormatReq {
 message GetSignatureFormatResp {
   // The formatted signature message with server-side values filled in
   string message = 1;
+}
+
+// Response message for CreateSecret operation
+message CreateSecretResp {
+  bool success = 1;                    // Whether the operation completed successfully
+  string status = 2;                   // Status description: "created", "already_exists", "error"
+  string message = 3;                  // Human-readable message about what happened
+  int64 created_at = 4;                // Unix timestamp when the secret was created (if applicable)
+  string secret_name = 5;              // Name of the secret that was affected
+  string scope = 6;                    // Scope of the created secret: "user", "workflow", "org"
+}
+
+// Response message for UpdateSecret operation
+message UpdateSecretResp {
+  bool success = 1;                    // Whether the operation completed successfully
+  string status = 2;                   // Status description: "updated", "not_found", "error"
+  string message = 3;                  // Human-readable message about what happened
+  int64 updated_at = 4;                // Unix timestamp when the secret was updated (if applicable)
+  string secret_name = 5;              // Name of the secret that was affected
+  string scope = 6;                    // Scope of the updated secret: "user", "workflow", "org"
+}
+
+// Response message for DeleteTask operation  
+message DeleteTaskResp {
+  bool success = 1;                    // Whether the operation completed successfully
+  string status = 2;                   // Status description: "deleted", "not_found", "cannot_delete"
+  string message = 3;                  // Human-readable message about what happened
+  int64 deleted_at = 4;                // Unix timestamp when the task was deleted (if applicable)
+  string task_id = 5;                  // ID of the task that was affected
+  string previous_status = 6;          // Previous status of the task before deletion
+}
+
+// Response message for CancelTask operation  
+message CancelTaskResp {
+  bool success = 1;                    // Whether the operation completed successfully
+  string status = 2;                   // Status description: "cancelled", "not_found", "already_cancelled", "cannot_cancel"
+  string message = 3;                  // Human-readable message about what happened
+  int64 cancelled_at = 4;              // Unix timestamp when the task was cancelled (if applicable)
+  string task_id = 5;                  // ID of the task that was affected
+  string previous_status = 6;          // Previous status of the task before cancellation
 }
 
 service Aggregator {
@@ -1008,15 +1058,15 @@ service Aggregator {
   rpc GetExecution(ExecutionReq)     returns (Execution) {};
   rpc GetExecutionStatus(ExecutionReq)     returns (ExecutionStatusResp) {};
 
-  rpc CancelTask(IdReq)                 returns (google.protobuf.BoolValue) {};
-  rpc DeleteTask(IdReq)                 returns (google.protobuf.BoolValue) {};
+  rpc CancelTask(IdReq)                 returns (CancelTaskResp) {};
+  rpc DeleteTask(IdReq)                 returns (DeleteTaskResp) {};
   rpc TriggerTask(TriggerTaskReq)   returns (TriggerTaskResp) {};
 
   // CreateSecret allow you to define a secret to be used in your tasks. The secret can be used with a special syntax of ${{secrets.name }}.
   // You can decide whether to grant secret to a single workflow or many workflow, or all of your workflow
   // By default, your secret is available across all of your tasks.
-  rpc CreateSecret(CreateOrUpdateSecretReq) returns (google.protobuf.BoolValue) {};
-  rpc DeleteSecret(DeleteSecretReq) returns (google.protobuf.BoolValue) {};
+  rpc CreateSecret(CreateOrUpdateSecretReq) returns (CreateSecretResp) {};
+  rpc DeleteSecret(DeleteSecretReq) returns (DeleteSecretResp) {};
 
   // Return all secrets belong to this user. Currently we don't support any fine tune or filter yet.
   // Only secret names and config data are returned. The secret value aren't returned.
@@ -1024,7 +1074,7 @@ service Aggregator {
 
   // For simplicity, currently only the user who create the secrets can update its value, or update its permission.
   // The current implementation is also limited, update is an override action, not an appending action. So when updating, you need to pass the whole payload
-  rpc UpdateSecret(CreateOrUpdateSecretReq) returns (google.protobuf.BoolValue) {};
+  rpc UpdateSecret(CreateOrUpdateSecretReq) returns (UpdateSecretResp) {};
 
   // The spec of these 2 RPCs are based on the following issue:
   // Reference: https://github.com/AvaProtocol/EigenLayer-AVS/issues/150

@@ -159,33 +159,33 @@ func TestDeleteSecret(t *testing.T) {
 	assert.NoError(t, err)
 
 	t.Run("Delete existing secret", func(t *testing.T) {
-		success, err := engine.DeleteSecret(user, &avsproto.DeleteSecretReq{
+		resp, err := engine.DeleteSecret(user, &avsproto.DeleteSecretReq{
 			Name: "delete_test1",
 		})
 		assert.NoError(t, err)
-		assert.True(t, success)
+		assert.True(t, resp.Success)
 
 		// Verify the secret was deleted
-		resp, err := engine.ListSecrets(user, &avsproto.ListSecretsReq{})
+		listResp, err := engine.ListSecrets(user, &avsproto.ListSecretsReq{})
 		assert.NoError(t, err)
-		assert.Len(t, resp.Items, 1)
-		assert.Equal(t, "delete_test2", resp.Items[0].Name)
+		assert.Len(t, listResp.Items, 1)
+		assert.Equal(t, "delete_test2", listResp.Items[0].Name)
 	})
 
 	t.Run("Delete non-existent secret should succeed", func(t *testing.T) {
-		success, err := engine.DeleteSecret(user, &avsproto.DeleteSecretReq{
+		resp, err := engine.DeleteSecret(user, &avsproto.DeleteSecretReq{
 			Name: "non_existent",
 		})
 		assert.NoError(t, err)
-		assert.True(t, success) // Delete operations succeed even if secret doesn't exist
+		assert.True(t, resp.Success) // Delete operations succeed even if secret doesn't exist
 	})
 
 	t.Run("Delete secret with empty name should succeed", func(t *testing.T) {
-		success, err := engine.DeleteSecret(user, &avsproto.DeleteSecretReq{
+		resp, err := engine.DeleteSecret(user, &avsproto.DeleteSecretReq{
 			Name: "",
 		})
 		assert.NoError(t, err)
-		assert.True(t, success) // Implementation doesn't validate empty names
+		assert.True(t, resp.Success) // Implementation doesn't validate empty names
 	})
 }
 
@@ -195,12 +195,12 @@ func TestSecretCRUDIntegration(t *testing.T) {
 
 	t.Run("Complete CRUD lifecycle", func(t *testing.T) {
 		// Create
-		success, err := engine.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+		createResp, err := engine.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
 			Name:   "lifecycle_test",
 			Secret: "initial_value",
 		})
 		assert.NoError(t, err)
-		assert.True(t, success)
+		assert.True(t, createResp)
 
 		// Read (via List)
 		resp, err := engine.ListSecrets(user, &avsproto.ListSecretsReq{})
@@ -209,12 +209,12 @@ func TestSecretCRUDIntegration(t *testing.T) {
 		assert.Equal(t, "lifecycle_test", resp.Items[0].Name)
 
 		// Update
-		success, err = engine.UpdateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+		updateResp, err := engine.UpdateSecret(user, &avsproto.CreateOrUpdateSecretReq{
 			Name:   "lifecycle_test",
 			Secret: "updated_value",
 		})
 		assert.NoError(t, err)
-		assert.True(t, success)
+		assert.True(t, updateResp)
 
 		// Verify update
 		resp, err = engine.ListSecrets(user, &avsproto.ListSecretsReq{})
@@ -223,11 +223,11 @@ func TestSecretCRUDIntegration(t *testing.T) {
 		assert.Equal(t, "lifecycle_test", resp.Items[0].Name)
 
 		// Delete
-		success, err = engine.DeleteSecret(user, &avsproto.DeleteSecretReq{
+		deleteResp, err := engine.DeleteSecret(user, &avsproto.DeleteSecretReq{
 			Name: "lifecycle_test",
 		})
 		assert.NoError(t, err)
-		assert.True(t, success)
+		assert.True(t, deleteResp.Success)
 
 		// Verify deletion
 		resp, err = engine.ListSecrets(user, &avsproto.ListSecretsReq{})
@@ -244,11 +244,12 @@ func TestListSecretsFieldControl(t *testing.T) {
 	}
 
 	// Create a test secret
-	_, err := engine.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
+	createResp, err := engine.CreateSecret(user, &avsproto.CreateOrUpdateSecretReq{
 		Name:   "test_secret",
 		Secret: "secret_value",
 	})
 	assert.NoError(t, err)
+	assert.True(t, createResp)
 
 	t.Run("Default fields only", func(t *testing.T) {
 		resp, err := engine.ListSecrets(user, &avsproto.ListSecretsReq{

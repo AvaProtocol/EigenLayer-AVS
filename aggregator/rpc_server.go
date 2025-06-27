@@ -105,7 +105,7 @@ func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalle
 	return r.engine.ListWallets(user.Address, payload)
 }
 
-func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*wrapperspb.BoolValue, error) {
+func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*avsproto.CancelTaskResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
@@ -122,10 +122,12 @@ func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*wr
 		return nil, err
 	}
 
-	return wrapperspb.Bool(result), nil
+	return &avsproto.CancelTaskResp{
+		Success: result,
+	}, nil
 }
 
-func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.IdReq) (*wrapperspb.BoolValue, error) {
+func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.IdReq) (*avsproto.DeleteTaskResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
@@ -142,7 +144,9 @@ func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.IdReq) (*wr
 		return nil, err
 	}
 
-	return wrapperspb.Bool(result), nil
+	return &avsproto.DeleteTaskResp{
+		Success: result,
+	}, nil
 }
 
 func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.CreateTaskReq) (*avsproto.CreateTaskResp, error) {
@@ -282,7 +286,7 @@ func (r *RpcServer) TriggerTask(ctx context.Context, payload *avsproto.TriggerTa
 	return r.engine.TriggerTask(user, payload)
 }
 
-func (r *RpcServer) CreateSecret(ctx context.Context, payload *avsproto.CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error) {
+func (r *RpcServer) CreateSecret(ctx context.Context, payload *avsproto.CreateOrUpdateSecretReq) (*avsproto.CreateSecretResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
@@ -298,7 +302,9 @@ func (r *RpcServer) CreateSecret(ctx context.Context, payload *avsproto.CreateOr
 		return nil, status.Errorf(codes.InvalidArgument, "")
 	}
 
-	return wrapperspb.Bool(result), nil
+	return &avsproto.CreateSecretResp{
+		Success: result,
+	}, nil
 }
 
 func (r *RpcServer) ListSecrets(ctx context.Context, payload *avsproto.ListSecretsReq) (*avsproto.ListSecretsResp, error) {
@@ -325,7 +331,7 @@ func (r *RpcServer) ListSecrets(ctx context.Context, payload *avsproto.ListSecre
 	return listSecretResp, nil
 }
 
-func (r *RpcServer) UpdateSecret(ctx context.Context, payload *avsproto.CreateOrUpdateSecretReq) (*wrapperspb.BoolValue, error) {
+func (r *RpcServer) UpdateSecret(ctx context.Context, payload *avsproto.CreateOrUpdateSecretReq) (*avsproto.UpdateSecretResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
@@ -341,10 +347,12 @@ func (r *RpcServer) UpdateSecret(ctx context.Context, payload *avsproto.CreateOr
 		return nil, status.Errorf(codes.InvalidArgument, "")
 	}
 
-	return wrapperspb.Bool(result), nil
+	return &avsproto.UpdateSecretResp{
+		Success: result,
+	}, nil
 }
 
-func (r *RpcServer) DeleteSecret(ctx context.Context, payload *avsproto.DeleteSecretReq) (*wrapperspb.BoolValue, error) {
+func (r *RpcServer) DeleteSecret(ctx context.Context, payload *avsproto.DeleteSecretReq) (*avsproto.DeleteSecretResp, error) {
 	user, err := r.verifyAuth(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
@@ -360,7 +368,7 @@ func (r *RpcServer) DeleteSecret(ctx context.Context, payload *avsproto.DeleteSe
 		return nil, status.Errorf(codes.InvalidArgument, "")
 	}
 
-	return wrapperspb.Bool(result), nil
+	return result, nil
 }
 
 // GetWorkflowCount handles the RPC request to get the workflow count
