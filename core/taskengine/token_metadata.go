@@ -286,16 +286,24 @@ func (t *TokenEnrichmentService) fetchTokenMetadataFromRPC(contractAddress strin
 	return metadata, nil
 }
 
-// FormatTokenValue formats a hex value string using the specified decimal places
+// FormatTokenValue formats a value string using the specified decimal places
+// The input value can be either hex (with 0x prefix) or decimal string
 func (t *TokenEnrichmentService) FormatTokenValue(rawValue string, decimals uint32) string {
-	// Remove 0x prefix if present
+	// Convert string to big.Int - handle both hex and decimal formats
+	value := new(big.Int)
+	var ok bool
+
+	// Check if it's a hex string (starts with 0x)
 	if strings.HasPrefix(rawValue, "0x") {
-		rawValue = rawValue[2:]
+		// Remove 0x prefix and parse as hex
+		hexValue := rawValue[2:]
+		_, ok = value.SetString(hexValue, 16)
+	} else {
+		// Parse as decimal string
+		_, ok = value.SetString(rawValue, 10)
 	}
 
-	// Convert hex string to big.Int
-	value := new(big.Int)
-	if _, ok := value.SetString(rawValue, 16); !ok {
+	if !ok {
 		if t.logger != nil {
 			t.logger.Warn("Failed to parse token value", "rawValue", rawValue)
 		}
