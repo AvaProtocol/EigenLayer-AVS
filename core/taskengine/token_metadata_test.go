@@ -135,9 +135,27 @@ func TestFormatTokenValue(t *testing.T) {
 		},
 		{
 			name:     "Value without 0x prefix",
-			value:    "de0b6b3a7640000", // 1 ETH in wei
+			value:    "1000000000000000000", // 1 ETH in wei as decimal string
 			decimals: 18,
 			expected: "1",
+		},
+		{
+			name:     "Decimal string input - USDC",
+			value:    "1000000", // 1 USDC as decimal string
+			decimals: 6,
+			expected: "1",
+		},
+		{
+			name:     "Decimal string input - problematic case from user",
+			value:    "100500000000000000000", // Actual value from user's data
+			decimals: 6,
+			expected: "100500000000000", // Should be 100.5 trillion tokens
+		},
+		{
+			name:     "Large decimal value",
+			value:    "123456789012345678901234567890", // Very large decimal
+			decimals: 18,
+			expected: "123456789012.34567890123456789",
 		},
 	}
 

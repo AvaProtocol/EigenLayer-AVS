@@ -644,18 +644,6 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 			}
 		}
 
-		// Get block timestamp from RPC
-		var blockTimestamp uint64
-		if rpcConn != nil {
-			if blockInfo, err := rpcConn.BlockByNumber(context.Background(), big.NewInt(int64(eventLog.BlockNumber))); err == nil {
-				blockTimestamp = blockInfo.Time() * 1000 // Convert to milliseconds
-			} else {
-				if n.logger != nil {
-					n.logger.Warn("Failed to get block timestamp", "error", err, "blockNumber", eventLog.BlockNumber)
-				}
-			}
-		}
-
 		// Create enriched transfer_log structure with all the fields from TransferLogOutput
 		transferLog := map[string]interface{}{
 			// Token metadata fields
@@ -667,14 +655,13 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 			"transactionHash":  eventLog.TxHash.Hex(),
 			"address":          eventLog.Address.Hex(),
 			"blockNumber":      eventLog.BlockNumber,
-			"blockTimestamp":   blockTimestamp,
 			"transactionIndex": eventLog.TxIndex,
 			"logIndex":         eventLog.Index,
 
 			// Transfer-specific fields (from ABI parsing)
 			"fromAddress": parsedData["from"],
 			"toAddress":   parsedData["to"],
-			"value":       parsedData["value"],
+			"valueRaw":    parsedData["valueRaw"], // Raw uint256 value as string (from ABI converter)
 		}
 
 		// Populate token metadata if available
@@ -683,19 +670,22 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 			transferLog["tokenSymbol"] = tokenMetadata.Symbol
 			transferLog["tokenDecimals"] = tokenMetadata.Decimals
 
-			// Format the value using token decimals
-			if rawValue, ok := parsedData["value"].(string); ok {
+			// Use the formatted value from ABI parsing if available, otherwise format using token metadata
+			if formattedValue, hasFormatted := parsedData["value"]; hasFormatted {
+				transferLog["value"] = formattedValue // Use ABI-formatted value
+			} else if rawValue, ok := parsedData["valueRaw"].(string); ok {
+				// Fallback: format using token metadata if ABI didn't format it
 				formattedValue := n.tokenEnrichmentService.FormatTokenValue(rawValue, tokenMetadata.Decimals)
-				transferLog["valueFormatted"] = formattedValue
+				transferLog["value"] = formattedValue
+			}
 
-				if n.logger != nil {
-					n.logger.Info("✅ Transfer event enrichment completed",
-						"tokenSymbol", tokenMetadata.Symbol,
-						"tokenName", tokenMetadata.Name,
-						"decimals", tokenMetadata.Decimals,
-						"valueRaw", rawValue,
-						"valueFormatted", formattedValue)
-				}
+			if n.logger != nil {
+				n.logger.Info("✅ Transfer event enrichment completed",
+					"tokenSymbol", tokenMetadata.Symbol,
+					"tokenName", tokenMetadata.Name,
+					"decimals", tokenMetadata.Decimals,
+					"valueRaw", parsedData["valueRaw"],
+					"valueFormatted", transferLog["value"])
 			}
 		} else {
 			// Even without token metadata, try to format using decimals from method call
@@ -703,13 +693,14 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 				decimalsUint32 := uint32(decimalsValue.Uint64())
 				transferLog["tokenDecimals"] = decimalsUint32
 
-				// Format value if it's in the fields to format
-				for _, fieldName := range fieldsToFormat {
-					if rawValue, ok := parsedData[fieldName].(string); ok {
-						if n.tokenEnrichmentService != nil {
-							formattedValue := n.tokenEnrichmentService.FormatTokenValue(rawValue, decimalsUint32)
-							transferLog["valueFormatted"] = formattedValue
-						}
+				// Use the formatted value from ABI parsing if available, otherwise format using method call decimals
+				if formattedValue, hasFormatted := parsedData["value"]; hasFormatted {
+					transferLog["value"] = formattedValue // Use ABI-formatted value
+				} else if rawValue, ok := parsedData["valueRaw"].(string); ok {
+					// Fallback: format using method call decimals if ABI didn't format it
+					if n.tokenEnrichmentService != nil {
+						formattedValue := n.tokenEnrichmentService.FormatTokenValue(rawValue, decimalsUint32)
+						transferLog["value"] = formattedValue
 					}
 				}
 			}
