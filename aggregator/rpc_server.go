@@ -122,9 +122,7 @@ func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*av
 		return nil, err
 	}
 
-	return &avsproto.CancelTaskResp{
-		Success: result,
-	}, nil
+	return result, nil
 }
 
 func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.IdReq) (*avsproto.DeleteTaskResp, error) {
@@ -144,9 +142,7 @@ func (r *RpcServer) DeleteTask(ctx context.Context, taskID *avsproto.IdReq) (*av
 		return nil, err
 	}
 
-	return &avsproto.DeleteTaskResp{
-		Success: result,
-	}, nil
+	return result, nil
 }
 
 func (r *RpcServer) CreateTask(ctx context.Context, taskPayload *avsproto.CreateTaskReq) (*avsproto.CreateTaskResp, error) {

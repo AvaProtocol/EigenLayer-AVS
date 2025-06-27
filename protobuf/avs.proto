@@ -1021,7 +1021,7 @@ message DeleteTaskResp {
   string status = 2;                   // Status description: "deleted", "not_found", "cannot_delete"
   string message = 3;                  // Human-readable message about what happened
   int64 deleted_at = 4;                // Unix timestamp when the task was deleted (if applicable)
-  string task_id = 5;                  // ID of the task that was affected
+  string id = 5;                  // ID of the task that was affected
   string previous_status = 6;          // Previous status of the task before deletion
 }
 
@@ -1031,7 +1031,7 @@ message CancelTaskResp {
   string status = 2;                   // Status description: "cancelled", "not_found", "already_cancelled", "cannot_cancel"
   string message = 3;                  // Human-readable message about what happened
   int64 cancelled_at = 4;              // Unix timestamp when the task was cancelled (if applicable)
-  string task_id = 5;                  // ID of the task that was affected
+  string id = 5;                  // ID of the task that was affected
   string previous_status = 6;          // Previous status of the task before cancellation
 }
 
