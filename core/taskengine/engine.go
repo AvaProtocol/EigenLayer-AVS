@@ -2516,7 +2516,7 @@ func (n *Engine) ListSecrets(user *model.User, payload *avsproto.ListSecretsReq)
 	return result, nil
 }
 
-func (n *Engine) DeleteSecret(user *model.User, payload *avsproto.DeleteSecretReq) (bool, error) {
+func (n *Engine) DeleteSecret(user *model.User, payload *avsproto.DeleteSecretReq) (*avsproto.DeleteSecretResp, error) {
 	// No need to check permission, the key is prefixed by user eoa already
 	secret := &model.Secret{
 		Name:       payload.Name,
@@ -2525,9 +2525,54 @@ func (n *Engine) DeleteSecret(user *model.User, payload *avsproto.DeleteSecretRe
 		WorkflowID: payload.WorkflowId,
 	}
 	key, _ := SecretStorageKey(secret)
-	err := n.db.Delete([]byte(key))
 
-	return err == nil, err
+	// Check if secret exists before attempting to delete
+	exists, err := n.db.Exist([]byte(key))
+	if err != nil {
+		return &avsproto.DeleteSecretResp{
+			Success:    false,
+			Status:     "error",
+			Message:    fmt.Sprintf("Error checking secret existence: %v", err),
+			SecretName: payload.Name,
+		}, err
+	}
+
+	if !exists {
+		return &avsproto.DeleteSecretResp{
+			Success:    true,
+			Status:     "not_found",
+			Message:    "Secret not found",
+			SecretName: payload.Name,
+		}, nil
+	}
+
+	// Attempt to delete the secret
+	err = n.db.Delete([]byte(key))
+	if err != nil {
+		return &avsproto.DeleteSecretResp{
+			Success:    false,
+			Status:     "error",
+			Message:    fmt.Sprintf("Error deleting secret: %v", err),
+			SecretName: payload.Name,
+		}, err
+	}
+
+	// Determine scope for response
+	scope := "user"
+	if payload.OrgId != "" {
+		scope = "org"
+	} else if payload.WorkflowId != "" {
+		scope = "workflow"
+	}
+
+	return &avsproto.DeleteSecretResp{
+		Success:    true,
+		Status:     "deleted",
+		Message:    "Secret successfully deleted",
+		DeletedAt:  time.Now().UnixMilli(),
+		SecretName: payload.Name,
+		Scope:      scope,
+	}, nil
 }
 
 // A global counter for the task engine
