@@ -239,8 +239,11 @@ func (s *BadgerStorage) Exist(key []byte) (bool, error) {
 	found := false
 	err := s.db.View(func(txn *badger.Txn) error {
 		_, err := txn.Get(key)
+		if err == badger.ErrKeyNotFound {
+			return nil // Key doesn't exist, but this is not an error condition
+		}
 		if err != nil {
-			return err
+			return err // Return other errors
 		}
 
 		found = true
