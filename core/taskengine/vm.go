@@ -335,7 +335,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 	// Create trigger data variable if we have a valid trigger name and trigger data
 	if triggerData != nil {
 		triggerNameStd, err := v.GetTriggerNameAsVar()
-		fmt.Printf("🔍 VM Creation DEBUG: triggerNameStd = %v, err = %v\n", triggerNameStd, err)
+		v.logger.Debug("VM Creation DEBUG", "triggerNameStd", triggerNameStd, "error", err)
 		if err == nil { // Proceed if trigger name is valid
 			var triggerDataMap map[string]interface{}
 
