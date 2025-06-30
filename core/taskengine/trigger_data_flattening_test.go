@@ -236,54 +236,44 @@ func TestJavaScriptFieldAccessPattern(t *testing.T) {
 // 1. run_node_immediately (RunNodeImmediatelyRPC)
 // 2. simulateTask (SimulateTask)
 // 3. runTask (actual task execution)
-func TestFallbackVariableResolutionConsistency(t *testing.T) {
+func TestCamelCaseVariableResolutionConsistency(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	config := testutil.GetAggregatorConfig()
 	engine := New(db, config, nil, testutil.GetLogger())
 
-	// Test data with snake_case field names (as would come from protobuf/gRPC)
+	// Test data with camelCase field names (consistent naming)
 	testData := map[string]interface{}{
-		"token_name":     "USDC",
-		"token_symbol":   "USDC",
-		"token_decimals": 6,
-		"block_number":   12345,
-		"tx_hash":        "0x123abc",
+		"tokenName":     "USDC",
+		"tokenSymbol":   "USDC",
+		"tokenDecimals": 6,
+		"blockNumber":   12345,
+		"txHash":        "0x123abc",
 	}
 
-	// Create input variables that include a node with snake_case data
+	// Create input variables that include a node with camelCase data
 	inputVariables := map[string]interface{}{
 		"eventTrigger": map[string]interface{}{
 			"data": testData,
 		},
 	}
 
-	// Test custom code that tries to access both camelCase and snake_case versions
+	// Test custom code that accesses camelCase fields
 	customCodeConfig := map[string]interface{}{
 		"source": `
-			// Test accessing snake_case (original)
-			const tokenNameSnake = eventTrigger.data.token_name;
-			const tokenSymbolSnake = eventTrigger.data.token_symbol;
-			const tokenDecimalsSnake = eventTrigger.data.token_decimals;
-			
-			// Test accessing camelCase (fallback)
+			// Test accessing camelCase (consistent naming)
 			const tokenNameCamel = eventTrigger.data.tokenName;
 			const tokenSymbolCamel = eventTrigger.data.tokenSymbol;
 			const tokenDecimalsCamel = eventTrigger.data.tokenDecimals;
 			
 			return {
-				snake_case_access: {
-					token_name: tokenNameSnake,
-					token_symbol: tokenSymbolSnake,
-					token_decimals: tokenDecimalsSnake
-				},
 				camel_case_access: {
 					tokenName: tokenNameCamel,
 					tokenSymbol: tokenSymbolCamel,
 					tokenDecimals: tokenDecimalsCamel
 				},
-				both_should_work: tokenNameSnake === tokenNameCamel && tokenSymbolSnake === tokenSymbolCamel
+				camelCase_works: tokenNameCamel === 'USDC' && tokenSymbolCamel === 'USDC'
 			};
 		`,
 	}
@@ -293,10 +283,9 @@ func TestFallbackVariableResolutionConsistency(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		// Verify both access patterns work
-		assert.Equal(t, "USDC", result["snake_case_access"].(map[string]interface{})["token_name"])
+		// Verify camelCase access works
 		assert.Equal(t, "USDC", result["camel_case_access"].(map[string]interface{})["tokenName"])
-		assert.True(t, result["both_should_work"].(bool), "Both snake_case and camelCase access should return the same values")
+		assert.True(t, result["camelCase_works"].(bool), "CamelCase access should work consistently")
 	})
 
 	t.Run("SimulateTask", func(t *testing.T) {
@@ -352,10 +341,9 @@ func TestFallbackVariableResolutionConsistency(t *testing.T) {
 		assert.NotNil(t, customCodeOutput)
 		result := customCodeOutput.Data.AsInterface().(map[string]interface{})
 
-		// Verify both access patterns work
-		assert.Equal(t, "USDC", result["snake_case_access"].(map[string]interface{})["token_name"])
+		// Verify camelCase access works
 		assert.Equal(t, "USDC", result["camel_case_access"].(map[string]interface{})["tokenName"])
-		assert.True(t, result["both_should_work"].(bool), "Both snake_case and camelCase access should return the same values")
+		assert.True(t, result["camelCase_works"].(bool), "CamelCase access should work consistently")
 	})
 
 	// Note: Testing actual runTask would require setting up a full task in storage and queue system,
@@ -364,19 +352,19 @@ func TestFallbackVariableResolutionConsistency(t *testing.T) {
 	// The main difference was in the branch node preprocessing, which we've now fixed.
 }
 
-// TestBranchNodeFallbackResolution specifically tests that branch nodes can use
-// the fallback variable resolution in their condition expressions
-func TestBranchNodeFallbackResolution(t *testing.T) {
+// TestBranchNodeCamelCaseResolution specifically tests that branch nodes can use
+// camelCase variable names in their condition expressions
+func TestBranchNodeCamelCaseResolution(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	config := testutil.GetAggregatorConfig()
 	engine := New(db, config, nil, testutil.GetLogger())
 
-	// Test data with snake_case field names
+	// Test data with camelCase field names
 	testData := map[string]interface{}{
-		"token_name":   "USDC",
-		"token_amount": 1000,
+		"tokenName":   "USDC",
+		"tokenAmount": 1000,
 	}
 
 	inputVariables := map[string]interface{}{
@@ -385,7 +373,7 @@ func TestBranchNodeFallbackResolution(t *testing.T) {
 		},
 	}
 
-	// Test branch node that uses camelCase in condition (should fallback to snake_case)
+	// Test branch node that uses camelCase in condition
 	branchConfig := map[string]interface{}{
 		"conditions": []map[string]interface{}{
 			{
@@ -396,28 +384,28 @@ func TestBranchNodeFallbackResolution(t *testing.T) {
 		},
 	}
 
-	t.Run("BranchNodeFallbackResolution", func(t *testing.T) {
+	t.Run("BranchNodeCamelCaseResolution", func(t *testing.T) {
 		result, err := engine.RunNodeImmediately("branch", branchConfig, inputVariables)
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 		if result != nil && result["success"] != nil {
-			assert.True(t, result["success"].(bool), "Branch condition should evaluate to true using fallback resolution")
+			assert.True(t, result["success"].(bool), "Branch condition should evaluate to true using camelCase fields")
 		}
 	})
 }
 
-// TestContractReadFallbackResolution tests that contract read nodes can use
-// fallback variable resolution in their configuration
-func TestContractReadFallbackResolution(t *testing.T) {
+// TestContractReadCamelCaseResolution tests that contract read nodes can use
+// camelCase variable names in their configuration
+func TestContractReadCamelCaseResolution(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
 	config := testutil.GetAggregatorConfig()
 	engine := New(db, config, nil, testutil.GetLogger())
 
-	// Test data with snake_case field names
+	// Test data with camelCase field names
 	testData := map[string]interface{}{
-		"contract_address": "0x1234567890123456789012345678901234567890",
+		"contractAddress": "0x1234567890123456789012345678901234567890",
 	}
 
 	inputVariables := map[string]interface{}{
@@ -426,7 +414,7 @@ func TestContractReadFallbackResolution(t *testing.T) {
 		},
 	}
 
-	// Test contract read that uses camelCase template (should fallback to snake_case)
+	// Test contract read that uses camelCase template
 	contractReadConfig := map[string]interface{}{
 		"contractAddress": "{{eventTrigger.data.contractAddress}}", // camelCase template
 		"contractAbi":     `[{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"}]`,
@@ -438,7 +426,7 @@ func TestContractReadFallbackResolution(t *testing.T) {
 		},
 	}
 
-	t.Run("ContractReadFallbackResolution", func(t *testing.T) {
+	t.Run("ContractReadCamelCaseResolution", func(t *testing.T) {
 		// This test will fail with RPC connection error, but we can check that the preprocessing worked
 		// by examining the error message - it should contain the resolved address, not the template
 		result, err := engine.RunNodeImmediately("contractRead", contractReadConfig, inputVariables)
@@ -451,4 +439,69 @@ func TestContractReadFallbackResolution(t *testing.T) {
 		// The result might be nil due to the RPC error, which is expected
 		_ = result
 	})
+}
+
+// TestBlockTriggerFieldNamingConsistency tests that both buildTriggerDataMap and
+// buildTriggerDataMapFromProtobuf use consistent field names for block triggers
+func TestBlockTriggerFieldNamingConsistency(t *testing.T) {
+	// Create block trigger output data (as would come from runBlockTriggerImmediately)
+	rawTriggerOutput := map[string]interface{}{
+		"blockNumber": uint64(12345),
+		"blockHash":   "0xabcdef123456",
+		"timestamp":   uint64(1672531200),
+		"parentHash":  "0x123456abcdef",
+		"difficulty":  "1000000",
+		"gasLimit":    uint64(30000000),
+		"gasUsed":     uint64(21000),
+	}
+
+	// Create protobuf block trigger output
+	blockOutputProto := &avsproto.BlockTrigger_Output{
+		BlockNumber: uint64(12345),
+		BlockHash:   "0xabcdef123456",
+		Timestamp:   uint64(1672531200),
+		ParentHash:  "0x123456abcdef",
+		Difficulty:  "1000000",
+		GasLimit:    uint64(30000000),
+		GasUsed:     uint64(21000),
+	}
+
+	// Test buildTriggerDataMap (used by run_node_immediately)
+	rawResult := buildTriggerDataMap(avsproto.TriggerType_TRIGGER_TYPE_BLOCK, rawTriggerOutput)
+
+	// Test buildTriggerDataMapFromProtobuf (used by runTask)
+	protobufResult := buildTriggerDataMapFromProtobuf(avsproto.TriggerType_TRIGGER_TYPE_BLOCK, blockOutputProto, nil)
+
+	// Verify that both functions use the same field names (camelCase)
+	expectedFields := []string{
+		"blockNumber", "blockHash", "timestamp",
+		"parentHash", "difficulty", "gasLimit", "gasUsed",
+	}
+
+	for _, field := range expectedFields {
+		// Both results should have the same field names
+		assert.Contains(t, rawResult, field, "buildTriggerDataMap should have field: %s", field)
+		assert.Contains(t, protobufResult, field, "buildTriggerDataMapFromProtobuf should have field: %s", field)
+
+		// Both results should have the same values for these fields
+		rawValue := rawResult[field]
+		protobufValue := protobufResult[field]
+		assert.Equal(t, protobufValue, rawValue, "Field %s should have same value in both results", field)
+	}
+
+	// Verify that old snake_case field names are NOT present in rawResult
+	deprecatedFields := []string{"block_number", "block_hash", "parent_hash", "gas_limit", "gas_used"}
+	for _, field := range deprecatedFields {
+		assert.NotContains(t, rawResult, field, "buildTriggerDataMap should NOT have deprecated snake_case field: %s", field)
+	}
+
+	// Verify specific values
+	assert.Equal(t, uint64(12345), rawResult["blockNumber"])
+	assert.Equal(t, uint64(12345), protobufResult["blockNumber"])
+	assert.Equal(t, "0xabcdef123456", rawResult["blockHash"])
+	assert.Equal(t, "0xabcdef123456", protobufResult["blockHash"])
+
+	t.Logf("✅ Block trigger field naming is now consistent:")
+	t.Logf("  rawResult keys: %v", getStringMapKeys(rawResult))
+	t.Logf("  protobufResult keys: %v", getStringMapKeys(protobufResult))
 }

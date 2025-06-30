@@ -130,36 +130,8 @@ func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
 	}
 }
 
-func TestConvertToSnakeCase(t *testing.T) {
-	engine := createTestEngine()
-	defer storage.Destroy(engine.db.(*storage.BadgerStorage))
-
-	testCases := []struct {
-		input    string
-		expected string
-	}{
-		{"camelCase", "camel_case"},
-		{"PascalCase", "pascal_case"},
-		{"simpleword", "simpleword"},
-		{"UPPERCASE", "uppercase"},
-		{"mixedCASEExample", "mixed_case_example"},
-		{"", ""},
-		{"a", "a"},
-		{"A", "a"},
-		{"aB", "a_b"},
-		{"AB", "ab"},
-		{"testHTTPSConnection", "test_https_connection"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.input, func(t *testing.T) {
-			result := convertToSnakeCase(tc.input)
-			if result != tc.expected {
-				t.Errorf("convertToSnakeCase(%q) = %q, expected %q", tc.input, result, tc.expected)
-			}
-		})
-	}
-}
+// TestConvertToSnakeCase was removed as part of cleanup - function no longer exists
+// The dual access mapping functionality has been removed in favor of consistent camelCase usage
 
 func TestSmartTriggerDataFallback(t *testing.T) {
 	engine := createTestEngine()

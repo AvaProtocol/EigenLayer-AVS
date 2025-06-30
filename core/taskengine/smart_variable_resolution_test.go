@@ -30,7 +30,7 @@ import (
 // - Only applies to node_name.data patterns (workflow node outputs)
 // - Other variables like {{workflowContext.user_id}} remain unchanged
 // - Works for nested paths: {{node.data.response.api_key}} -> {{node.data.response.apiKey}}
-func TestSmartVariableResolution(t *testing.T) {
+func TestConsistentCamelCaseResolution(t *testing.T) {
 	engine := createTestEngineForSmartResolution(t)
 
 	// Create a mock server to replace httpbin.org
@@ -61,25 +61,25 @@ func TestSmartVariableResolution(t *testing.T) {
 		"api_token": "test_token_123",
 	})
 
-	t.Run("SnakeCaseToFallbackToCamelCase", func(t *testing.T) {
-		// DEMONSTRATES: Templates use snake_case but data has camelCase (gRPC conversion)
-		// Template: {{triggerNode.data.block_number}} -> Data: triggerNode.data.blockNumber
-		// Expected: Smart resolution should find blockNumber when block_number fails
+	t.Run("CamelCaseTemplateWithCamelCaseData", func(t *testing.T) {
+		// DEMONSTRATES: Templates use camelCase with camelCase data (consistent naming)
+		// Template: {{triggerNode.data.blockNumber}} -> Data: triggerNode.data.blockNumber
+		// Expected: Direct resolution succeeds
 
 		config := map[string]interface{}{
 			"url":    mockServer.URL + "/post",
 			"method": "POST",
-			"body":   `{"block_number": "{{triggerNode.data.block_number}}", "block_hash": "{{triggerNode.data.block_hash}}", "gas_limit": "{{triggerNode.data.gas_limit}}"}`,
+			"body":   `{"blockNumber": "{{triggerNode.data.blockNumber}}", "blockHash": "{{triggerNode.data.blockHash}}", "gasLimit": "{{triggerNode.data.gasLimit}}"}`,
 			"headersMap": [][]string{
 				{"Content-Type", "application/json"},
 			},
 		}
 
-		// Simulate data from a trigger node that was converted to camelCase by gRPC
+		// Simulate data from a trigger node with consistent camelCase naming
 		inputVariables := map[string]interface{}{
 			"triggerNode": map[string]interface{}{
 				"data": map[string]interface{}{
-					"blockNumber": "18500000", // camelCase (as it would come from gRPC)
+					"blockNumber": "18500000", // camelCase (consistent naming)
 					"blockHash":   "0xabc123def456",
 					"gasLimit":    "15000000",
 				},
@@ -88,7 +88,7 @@ func TestSmartVariableResolution(t *testing.T) {
 
 		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
 
-		// Should succeed with the smart resolution
+		// Should succeed with direct resolution
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
@@ -104,9 +104,9 @@ func TestSmartVariableResolution(t *testing.T) {
 		// Check the data field which contains the JSON body that was sent
 		if data, ok := bodyData["data"]; ok {
 			dataStr := fmt.Sprintf("%v", data)
-			assert.Contains(t, dataStr, "18500000", "block_number should be resolved to blockNumber")
-			assert.Contains(t, dataStr, "0xabc123def456", "block_hash should be resolved to blockHash")
-			assert.Contains(t, dataStr, "15000000", "gas_limit should be resolved to gasLimit")
+			assert.Contains(t, dataStr, "18500000", "blockNumber should be resolved directly")
+			assert.Contains(t, dataStr, "0xabc123def456", "blockHash should be resolved directly")
+			assert.Contains(t, dataStr, "15000000", "gasLimit should be resolved directly")
 		}
 	})
 
@@ -154,16 +154,16 @@ func TestSmartVariableResolution(t *testing.T) {
 		}
 	})
 
-	t.Run("MixedSnakeCaseAndCamelCase", func(t *testing.T) {
-		// DEMONSTRATES: Mixed template patterns work together
-		// {{triggerNode.data.block_number}} -> fallback to blockNumber
+	t.Run("ConsistentCamelCaseNaming", func(t *testing.T) {
+		// DEMONSTRATES: Consistent camelCase naming works throughout
+		// {{triggerNode.data.blockNumber}} -> direct camelCase access
 		// {{triggerNode.data.gasUsed}} -> direct camelCase access
-		// {{triggerNode.data.total_gas}} -> fallback to totalGas
+		// {{triggerNode.data.totalGas}} -> direct camelCase access
 
 		config := map[string]interface{}{
 			"url":    mockServer.URL + "/post",
 			"method": "POST",
-			"body":   `{"block_number": "{{triggerNode.data.block_number}}", "gasUsed": "{{triggerNode.data.gasUsed}}", "total_gas": "{{triggerNode.data.total_gas}}"}`,
+			"body":   `{"blockNumber": "{{triggerNode.data.blockNumber}}", "gasUsed": "{{triggerNode.data.gasUsed}}", "totalGas": "{{triggerNode.data.totalGas}}"}`,
 			"headersMap": [][]string{
 				{"Content-Type", "application/json"},
 			},
@@ -172,9 +172,9 @@ func TestSmartVariableResolution(t *testing.T) {
 		inputVariables := map[string]interface{}{
 			"triggerNode": map[string]interface{}{
 				"data": map[string]interface{}{
-					"blockNumber": "18500000", // camelCase - should resolve block_number
+					"blockNumber": "18500000", // camelCase - direct access
 					"gasUsed":     "5000000",  // camelCase - direct access
-					"totalGas":    "15000000", // camelCase - should resolve total_gas
+					"totalGas":    "15000000", // camelCase - direct access
 				},
 			},
 		}
@@ -194,9 +194,9 @@ func TestSmartVariableResolution(t *testing.T) {
 
 		if data, ok := bodyData["data"]; ok {
 			dataStr := fmt.Sprintf("%v", data)
-			assert.Contains(t, dataStr, "18500000") // block_number resolved from blockNumber
+			assert.Contains(t, dataStr, "18500000") // blockNumber direct access
 			assert.Contains(t, dataStr, "5000000")  // gasUsed direct access
-			assert.Contains(t, dataStr, "15000000") // total_gas resolved from totalGas
+			assert.Contains(t, dataStr, "15000000") // totalGas direct access
 		}
 	})
 
@@ -242,15 +242,15 @@ func TestSmartVariableResolution(t *testing.T) {
 	})
 
 	t.Run("NestedFieldPaths", func(t *testing.T) {
-		// DEMONSTRATES: Smart resolution works with nested field paths
-		// {{apiNode.data.response.api_key}} -> tries response.api_key, then response.apiKey
-		// {{apiNode.data.response.status_code}} -> tries response.status_code, then response.statusCode
-		// Converts each snake_case segment in the path independently
+		// DEMONSTRATES: Consistent camelCase naming works with nested field paths
+		// {{apiNode.data.response.apiKey}} -> direct camelCase access
+		// {{apiNode.data.response.statusCode}} -> direct camelCase access
+		// Uses consistent camelCase naming throughout
 
 		config := map[string]interface{}{
 			"url":    mockServer.URL + "/post",
 			"method": "POST",
-			"body":   `{"apiKey": "{{apiNode.data.response.api_key}}", "status": "{{apiNode.data.response.status_code}}"}`,
+			"body":   `{"apiKey": "{{apiNode.data.response.apiKey}}", "status": "{{apiNode.data.response.statusCode}}"}`,
 			"headersMap": [][]string{
 				{"Content-Type", "application/json"},
 			},
@@ -260,8 +260,8 @@ func TestSmartVariableResolution(t *testing.T) {
 			"apiNode": map[string]interface{}{
 				"data": map[string]interface{}{
 					"response": map[string]interface{}{
-						"apiKey":     "secret_key_123", // camelCase - should resolve api_key
-						"statusCode": "200",            // camelCase - should resolve status_code
+						"apiKey":     "secret_key_123", // camelCase - direct access
+						"statusCode": "200",            // camelCase - direct access
 					},
 				},
 			},
@@ -288,45 +288,34 @@ func TestSmartVariableResolution(t *testing.T) {
 	})
 }
 
-// TestDualAccessVariableSupport tests that both camelCase and snake_case field access
-// work for direct JavaScript variable access (not just template variables).
+// TestCamelCaseVariableSupport tests that camelCase field access works for direct JavaScript variable access.
+// The dual access mapping functionality has been removed in favor of consistent camelCase usage.
 //
-// This test verifies that the createDualAccessMap function properly enables:
-// 1. Direct JS destructuring: const {tokenSymbol, token_symbol} = eventTrigger.data
-// 2. Direct JS property access: eventTrigger.data.tokenSymbol AND eventTrigger.data.token_symbol
-// 3. Template variables: {{eventTrigger.data.tokenSymbol}} AND {{eventTrigger.data.token_symbol}}
-//
-// This solves the original issue where deployed tasks returned NaN/undefined because
-// JavaScript code expected camelCase but data had snake_case (or vice versa).
-func TestDualAccessVariableSupport(t *testing.T) {
+// This test verifies that:
+// 1. Direct JS destructuring: const {tokenSymbol} = eventTrigger.data
+// 2. Direct JS property access: eventTrigger.data.tokenSymbol
+// 3. Template variables: {{eventTrigger.data.tokenSymbol}}
+func TestCamelCaseVariableSupport(t *testing.T) {
 	engine := createTestEngineForSmartResolution(t)
 
 	t.Run("DirectJavaScriptVariableAccess", func(t *testing.T) {
-		// Test that both camelCase and snake_case work in direct JavaScript code
-		// This simulates the user's original issue with custom code destructuring
-
+		// Test that camelCase works in direct JavaScript code
 		config := map[string]interface{}{
 			"lang": "JavaScript",
 			"source": `
-				// Test direct property access (both naming conventions should work)
+				// Test direct property access (camelCase should work)
 				const tokenSymbolCamel = eventTrigger.data.tokenSymbol;
-				const tokenSymbolSnake = eventTrigger.data.token_symbol;
 				const valueFormattedCamel = eventTrigger.data.valueFormatted;
-				const valueFormattedSnake = eventTrigger.data.value_formatted;
 				
-				// Test destructuring (both naming conventions should work)
-				const {tokenSymbol, token_symbol, valueFormatted, value_formatted} = eventTrigger.data;
+				// Test destructuring (camelCase should work)
+				const {tokenSymbol, valueFormatted} = eventTrigger.data;
 				
-				// Return results to verify both work
+				// Return results to verify camelCase works
 				return {
 					tokenSymbolCamel,
-					tokenSymbolSnake,
 					valueFormattedCamel,
-					valueFormattedSnake,
 					destructuredTokenSymbol: tokenSymbol,
-					destructuredTokenSymbolSnake: token_symbol,
-					destructuredValueFormatted: valueFormatted,
-					destructuredValueFormattedSnake: value_formatted
+					destructuredValueFormatted: valueFormatted
 				};
 			`,
 		}
@@ -349,22 +338,18 @@ func TestDualAccessVariableSupport(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		// Verify that both camelCase and snake_case access work
+		// Verify that camelCase access works
 		assert.Equal(t, "USDC", result["tokenSymbolCamel"])
-		assert.Equal(t, "USDC", result["tokenSymbolSnake"])
 		assert.Equal(t, "3.45", result["valueFormattedCamel"])
-		assert.Equal(t, "3.45", result["valueFormattedSnake"])
 
-		// Verify destructuring works for both naming conventions
+		// Verify destructuring works for camelCase
 		assert.Equal(t, "USDC", result["destructuredTokenSymbol"])
-		assert.Equal(t, "USDC", result["destructuredTokenSymbolSnake"])
 		assert.Equal(t, "3.45", result["destructuredValueFormatted"])
-		assert.Equal(t, "3.45", result["destructuredValueFormattedSnake"])
 	})
 
-	t.Run("NodeOutputDualAccess", func(t *testing.T) {
-		// Test that node outputs also support dual access
-		// This ensures the SetOutputVarForStep dual-access mapping works
+	t.Run("NodeOutputCamelCase", func(t *testing.T) {
+		// Test that node outputs work with camelCase access
+		// The dual access mapping has been removed
 
 		// First, create a REST API node that returns data with camelCase fields
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -389,25 +374,20 @@ func TestDualAccessVariableSupport(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, restResult)
 
-		// Now test a custom code node that accesses the REST API output using both naming conventions
+		// Now test a custom code node that accesses the REST API output using camelCase
 		customCodeConfig := map[string]interface{}{
 			"lang": "JavaScript",
 			"source": `
-				// Test accessing REST API output data using both camelCase and snake_case
-				const responseDataCamel = apiNode.data.responseData;
-				const responseDataSnake = apiNode.data.response_data;
-				const statusCodeCamel = apiNode.data.statusCode;
-				const statusCodeSnake = apiNode.data.status_code;
-				const apiKeyCamel = apiNode.data.apiKey;
-				const apiKeySnake = apiNode.data.api_key;
+				// Test accessing REST API output data using camelCase
+				// The data is in the body field of the REST API response
+				const responseDataCamel = apiNode.data.body.responseData;
+				const statusCodeCamel = apiNode.data.body.statusCode;
+				const apiKeyCamel = apiNode.data.body.apiKey;
 				
 				return {
 					responseDataCamel,
-					responseDataSnake,
 					statusCodeCamel,
-					statusCodeSnake,
-					apiKeyCamel,
-					apiKeySnake
+					apiKeyCamel
 				};
 			`,
 		}
@@ -415,7 +395,7 @@ func TestDualAccessVariableSupport(t *testing.T) {
 		// Simulate the REST API node output being available to the custom code node
 		inputVariables := map[string]interface{}{
 			"apiNode": map[string]interface{}{
-				"data": restResult, // This should have dual-access mapping applied
+				"data": restResult,
 			},
 		}
 
@@ -424,23 +404,28 @@ func TestDualAccessVariableSupport(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, customResult)
 
-		// Verify that both camelCase and snake_case access work for node outputs
+		// Verify that camelCase access works for node outputs
 		// Note: The actual values depend on the REST API response structure
-		// We're mainly testing that both naming conventions resolve to the same values
 		if customResult["responseDataCamel"] != nil {
-			assert.Equal(t, customResult["responseDataCamel"], customResult["responseDataSnake"])
+			assert.Equal(t, "test_response", customResult["responseDataCamel"])
+		} else {
+			t.Logf("responseDataCamel is nil - REST API response structure: %+v", restResult)
 		}
 		if customResult["statusCodeCamel"] != nil {
-			assert.Equal(t, customResult["statusCodeCamel"], customResult["statusCodeSnake"])
+			assert.Equal(t, float64(200), customResult["statusCodeCamel"])
+		} else {
+			t.Logf("statusCodeCamel is nil - REST API response structure: %+v", restResult)
 		}
 		if customResult["apiKeyCamel"] != nil {
-			assert.Equal(t, customResult["apiKeyCamel"], customResult["apiKeySnake"])
+			assert.Equal(t, "secret_key_123", customResult["apiKeyCamel"])
+		} else {
+			t.Logf("apiKeyCamel is nil - REST API response structure: %+v", restResult)
 		}
 	})
 }
 
-// TestDualAccessDebug is a debug test to understand what's happening with dual-access
-func TestDualAccessDebug(t *testing.T) {
+// TestCamelCaseDebug is a debug test to understand what's happening with camelCase access
+func TestCamelCaseDebug(t *testing.T) {
 	engine := createTestEngineForSmartResolution(t)
 
 	t.Run("DebugVariableAccess", func(t *testing.T) {
@@ -456,9 +441,8 @@ func TestDualAccessDebug(t *testing.T) {
 					eventTriggerKeys: typeof eventTrigger !== 'undefined' ? Object.keys(eventTrigger) : [],
 					eventTriggerDataKeys: typeof eventTrigger !== 'undefined' && eventTrigger.data ? Object.keys(eventTrigger.data) : [],
 					globalKeys: Object.keys(this),
-					// Try to access specific fields
-					tokenSymbolDirect: typeof eventTrigger !== 'undefined' && eventTrigger.data ? eventTrigger.data.tokenSymbol : "not_found",
-					tokenSymbolSnake: typeof eventTrigger !== 'undefined' && eventTrigger.data ? eventTrigger.data.token_symbol : "not_found"
+					// Try to access specific fields (camelCase only)
+					tokenSymbolDirect: typeof eventTrigger !== 'undefined' && eventTrigger.data ? eventTrigger.data.tokenSymbol : "not_found"
 				};
 			`,
 		}
@@ -482,27 +466,8 @@ func TestDualAccessDebug(t *testing.T) {
 	})
 }
 
-// TestCreateDualAccessMap tests the CreateDualAccessMap function directly
-func TestCreateDualAccessMap(t *testing.T) {
-	// Test with camelCase input
-	input := map[string]interface{}{
-		"tokenSymbol":    "USDC",
-		"valueFormatted": "3.45",
-		"blockNumber":    12345,
-	}
-
-	result := CreateDualAccessMap(input)
-
-	// Should have both camelCase and snake_case versions
-	assert.Equal(t, "USDC", result["tokenSymbol"])
-	assert.Equal(t, "USDC", result["token_symbol"])
-	assert.Equal(t, "3.45", result["valueFormatted"])
-	assert.Equal(t, "3.45", result["value_formatted"])
-	assert.Equal(t, 12345, result["blockNumber"])
-	assert.Equal(t, 12345, result["block_number"])
-
-	t.Logf("CreateDualAccessMap result: %+v", result)
-}
+// TestCreateDualAccessMap was removed as part of cleanup - function no longer exists
+// The dual access mapping functionality has been removed in favor of consistent camelCase usage
 
 // createTestEngineForSmartResolution creates an engine for testing
 func createTestEngineForSmartResolution(t *testing.T) *Engine {
