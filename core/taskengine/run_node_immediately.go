@@ -1311,7 +1311,7 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 
 	// Add input variables to VM for template processing and node access
 	// Apply dual-access mapping to enable both camelCase and snake_case field access
-	processedInputVariables := ProcessInputVariablesWithDualAccess(inputVariables)
+	processedInputVariables := inputVariables
 	for key, processedValue := range processedInputVariables {
 		vm.AddVar(key, processedValue)
 	}

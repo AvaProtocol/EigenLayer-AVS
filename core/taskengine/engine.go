@@ -1842,7 +1842,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Add input variables to VM for template processing
 	// Apply dual-access mapping to enable both camelCase and snake_case field access
-	processedInputVariables := ProcessInputVariablesWithDualAccess(inputVariables)
+	processedInputVariables := inputVariables
 	for key, processedValue := range processedInputVariables {
 		vm.AddVar(key, processedValue)
 	}
@@ -1864,15 +1864,12 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		vm.mu.Lock()
 		existingTriggerVar := vm.vars[triggerVarName]
 		if existingMap, ok := existingTriggerVar.(map[string]any); ok {
-			// Apply dual-access mapping to trigger input data
-			processedTriggerInput := CreateDualAccessMap(triggerInputData)
-			existingMap["input"] = processedTriggerInput
+			existingMap["input"] = triggerInputData
 			vm.vars[triggerVarName] = existingMap
 		} else {
 			// Create new trigger variable with input data
-			processedTriggerInput := CreateDualAccessMap(triggerInputData)
 			vm.vars[triggerVarName] = map[string]any{
-				"input": processedTriggerInput,
+				"input": triggerInputData,
 			}
 		}
 		vm.mu.Unlock()
@@ -3494,13 +3491,36 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
 		if blockOutput, ok := triggerOutputProto.(*avsproto.BlockTrigger_Output); ok {
-			triggerDataMap["block_number"] = blockOutput.BlockNumber
-			triggerDataMap["block_hash"] = blockOutput.BlockHash
+			triggerDataMap["blockNumber"] = blockOutput.BlockNumber
+			triggerDataMap["blockHash"] = blockOutput.BlockHash
 			triggerDataMap["timestamp"] = blockOutput.Timestamp
-			triggerDataMap["parent_hash"] = blockOutput.ParentHash
+			triggerDataMap["parentHash"] = blockOutput.ParentHash
 			triggerDataMap["difficulty"] = blockOutput.Difficulty
-			triggerDataMap["gas_limit"] = blockOutput.GasLimit
-			triggerDataMap["gas_used"] = blockOutput.GasUsed
+			triggerDataMap["gasLimit"] = blockOutput.GasLimit
+			triggerDataMap["gasUsed"] = blockOutput.GasUsed
+		} else if rawMap, ok := triggerOutputProto.(map[string]interface{}); ok {
+			// Handle raw map data (from queue/storage) - convert snake_case to camelCase
+			if blockNumber, exists := rawMap["block_number"]; exists {
+				triggerDataMap["blockNumber"] = blockNumber
+			}
+			if blockHash, exists := rawMap["block_hash"]; exists {
+				triggerDataMap["blockHash"] = blockHash
+			}
+			if timestamp, exists := rawMap["timestamp"]; exists {
+				triggerDataMap["timestamp"] = timestamp
+			}
+			if parentHash, exists := rawMap["parent_hash"]; exists {
+				triggerDataMap["parentHash"] = parentHash
+			}
+			if difficulty, exists := rawMap["difficulty"]; exists {
+				triggerDataMap["difficulty"] = difficulty
+			}
+			if gasLimit, exists := rawMap["gas_limit"]; exists {
+				triggerDataMap["gasLimit"] = gasLimit
+			}
+			if gasUsed, exists := rawMap["gas_used"]; exists {
+				triggerDataMap["gasUsed"] = gasUsed
+			}
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
 		if eventOutput, ok := triggerOutputProto.(*avsproto.EventTrigger_Output); ok {

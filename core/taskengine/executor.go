@@ -169,15 +169,12 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		vm.mu.Lock()
 		existingTriggerVar := vm.vars[triggerVarName]
 		if existingMap, ok := existingTriggerVar.(map[string]any); ok {
-			// Apply dual-access mapping to trigger input data
-			processedTriggerInput := ProcessInputVariableWithDualAccess(triggerInputData)
-			existingMap["input"] = processedTriggerInput
+			existingMap["input"] = triggerInputData
 			vm.vars[triggerVarName] = existingMap
 		} else {
 			// Create new trigger variable with input data
-			processedTriggerInput := ProcessInputVariableWithDualAccess(triggerInputData)
 			vm.vars[triggerVarName] = map[string]any{
-				"input": processedTriggerInput,
+				"input": triggerInputData,
 			}
 		}
 		vm.mu.Unlock()

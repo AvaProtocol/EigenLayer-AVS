@@ -469,6 +469,12 @@ func (r *RestProcessor) preprocessJSONWithVariableMapping(text string) string {
 			// Replace with "undefined" instead of removing the expression for JSON compatibility
 			if r.vm.logger != nil {
 				r.vm.logger.Debug("JSON template variable evaluation failed, replacing with 'undefined'", "expression", expr)
+				// Debug: Log available variables
+				varNames := make([]string, 0, len(currentVars))
+				for k := range currentVars {
+					varNames = append(varNames, k)
+				}
+				r.vm.logger.Debug("Available variables in VM", "variables", varNames)
 			}
 			result = result[:start] + "undefined" + result[end+2:]
 			continue

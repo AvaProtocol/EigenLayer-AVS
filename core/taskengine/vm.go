@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/dop251/goja"
 	"github.com/ethereum/go-ethereum/common"
@@ -59,13 +58,8 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 		c.vm.vars = make(map[string]any)
 	}
 
-	// Apply dual-access mapping to node output data if it's a map
-	// This enables both camelCase and snake_case field access for node outputs
-	// Example: apiNode.data.responseData AND apiNode.data.response_data both work
-	var processedData any = data
-	if dataMap, ok := data.(map[string]interface{}); ok {
-		processedData = CreateDualAccessMap(dataMap)
-	}
+	// Use the data directly without dual access mapping
+	processedData := data
 
 	// Get existing variable or create new one
 	existingVar := c.vm.vars[nodeNameVar]
@@ -89,11 +83,8 @@ func (c *CommonProcessor) SetInputVarForStep(stepID string, inputData any) {
 		c.vm.vars = make(map[string]any)
 	}
 
-	// Apply dual-access mapping to input data if it's a map
-	var processedInput any = inputData
-	if inputMap, ok := inputData.(map[string]interface{}); ok {
-		processedInput = CreateDualAccessMap(inputMap)
-	}
+	// Use the input data directly without dual access mapping
+	processedInput := inputData
 
 	// Get existing variable or create new one
 	existingVar := c.vm.vars[nodeNameVar]
@@ -344,6 +335,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 	// Create trigger data variable if we have a valid trigger name and trigger data
 	if triggerData != nil {
 		triggerNameStd, err := v.GetTriggerNameAsVar()
+		fmt.Printf("🔍 VM Creation DEBUG: triggerNameStd = %v, err = %v\n", triggerNameStd, err)
 		if err == nil { // Proceed if trigger name is valid
 			var triggerDataMap map[string]interface{}
 
@@ -358,23 +350,24 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			} else {
 				// Use shared function to build trigger data map from protobuf trigger outputs
 				triggerDataMap = buildTriggerDataMapFromProtobuf(triggerData.Type, triggerData.Output, v.logger)
+
+				// Debug: Log what triggerData we received and what we built
+				fmt.Printf("🔍 VM Creation DEBUG: triggerData.Type = %v, triggerData.Output = %+v\n", triggerData.Type, triggerData.Output)
+				fmt.Printf("🔍 VM Creation DEBUG: buildTriggerDataMapFromProtobuf returned = %+v\n", triggerDataMap)
 			}
 
 			// Create dual-access map to support both camelCase and snake_case field access
-			// This enables both template fallback ({{trigger.data.token_symbol}}) and direct JS access
-			// (const {tokenSymbol} = eventTrigger.data AND const {token_symbol} = eventTrigger.data)
-			dualAccessTriggerData := CreateDualAccessMap(triggerDataMap)
-
 			// Extract trigger input data and add it to the trigger variable
-			triggerVarData := map[string]any{"data": dualAccessTriggerData}
+			triggerVarData := map[string]any{"data": triggerDataMap}
 			if task != nil && task.Trigger != nil {
 				triggerInputData := ExtractTriggerInputData(task.Trigger)
 				if triggerInputData != nil {
-					// Create dual-access map for trigger input data as well
-					dualAccessTriggerInput := CreateDualAccessMap(triggerInputData)
-					triggerVarData["input"] = dualAccessTriggerInput
+					triggerVarData["input"] = triggerInputData
 				}
 			}
+
+			// Debug: Log the final trigger variable data
+			fmt.Printf("🔍 VM Creation DEBUG: Final triggerVarData = %+v\n", triggerVarData)
 
 			v.AddVar(triggerNameStd, triggerVarData)
 		}
@@ -386,9 +379,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			if task.Trigger != nil {
 				triggerInputData := ExtractTriggerInputData(task.Trigger)
 				if triggerInputData != nil {
-					// Create dual-access map for trigger input data
-					dualAccessTriggerInput := CreateDualAccessMap(triggerInputData)
-					triggerVarData["input"] = dualAccessTriggerInput
+					triggerVarData["input"] = triggerInputData
 				}
 			}
 			v.AddVar(triggerNameStd, triggerVarData)
@@ -1163,168 +1154,16 @@ func (v *VM) runEthTransfer(stepID string, node *avsproto.ETHTransferNode) (*avs
 
 // convertToCamelCase converts snake_case to camelCase
 // Example: "block_number" -> "blockNumber", "gas_limit" -> "gasLimit"
-func convertToCamelCase(s string) string {
-	parts := strings.Split(s, "_")
-	if len(parts) <= 1 {
-		return s
-	}
 
-	result := parts[0]
-	for i := 1; i < len(parts); i++ {
-		if len(parts[i]) > 0 {
-			result += strings.ToUpper(parts[i][:1]) + parts[i][1:]
-		}
-	}
-	return result
-}
-
-// convertToSnakeCase converts camelCase to snake_case
-// Example: "blockNumber" -> "block_number"
-func convertToSnakeCase(s string) string {
-	// Handle empty strings
-	if s == "" {
-		return s
-	}
-
-	var result strings.Builder
-	runes := []rune(s)
-
-	for i, r := range runes {
-		// Convert to lowercase
-		lower := unicode.ToLower(r)
-
-		// Add underscore before uppercase letter if:
-		// 1. Not the first character AND
-		// 2. Current character is uppercase AND
-		// 3. Previous character is not uppercase OR next character is lowercase
-		if i > 0 && unicode.IsUpper(r) {
-			prevIsUpper := i > 0 && unicode.IsUpper(runes[i-1])
-			nextIsLower := i < len(runes)-1 && unicode.IsLower(runes[i+1])
-
-			// Add underscore if:
-			// - Previous char is not uppercase (camelCase boundary like "testHTTP" -> "test_HTTP")
-			// - OR this is part of acronym but next char is lowercase (like "HTTP" in "HTTPSConnection" -> "HTTPS_Connection")
-			if !prevIsUpper || nextIsLower {
-				result.WriteRune('_')
-			}
-		}
-
-		result.WriteRune(lower)
-	}
-
-	return result.String()
-}
-
-// resolveVariableWithFallback tries to resolve a variable path, with smart fallback for node_name.data paths
-//
-// PROBLEM: gRPC automatically converts Go snake_case field names to JavaScript camelCase during protobuf conversion.
-// Templates using camelCase (like {{trigger.data.blockNumber}}) expect protobuf-converted field names,
-// but the actual data may still be in snake_case format (like block_number).
-//
-// SOLUTION: For any node_name.data.field_name patterns using camelCase, provide snake_case fallback:
-// 1. First try original path as-is
-// 2. If original uses camelCase and fails, try snake_case conversion as fallback
-// 3. If original uses snake_case, no fallback needed (already native format)
-//
-// Examples:
-//
-//	{{trigger.data.blockNumber}} -> tries blockNumber, then block_number (camelCase with fallback)
-//	{{trigger.data.block_number}} -> tries block_number only (snake_case, no fallback needed)
-//	{{apiNode.data.responseData}} -> tries responseData, then response_data (camelCase with fallback)
-//	{{apiNode.data.response_data}} -> tries response_data only (snake_case, no fallback needed)
-//	{{workflowContext.user_id}} -> tries user_id only (not a node.data pattern)
+// resolveVariableWithFallback tries to resolve a variable path
 func (v *VM) resolveVariableWithFallback(jsvm *goja.Runtime, varPath string, currentVars map[string]any) (interface{}, bool) {
-	// First try the original path
+	// Try to resolve the variable path
 	script := fmt.Sprintf(`(() => { try { return %s; } catch(e) { return undefined; } })()`, varPath)
 	if evaluated, err := jsvm.RunString(script); err == nil {
 		exportedValue := evaluated.Export()
 		// Check if we got a real value (not undefined)
 		if exportedValue != nil && fmt.Sprintf("%v", exportedValue) != "undefined" {
 			return exportedValue, true
-		}
-	}
-
-	// Check if this is a node_name.data.field_name pattern for smart variable resolution fallback
-	if strings.Contains(varPath, ".data.") {
-		parts := strings.Split(varPath, ".data.")
-		if len(parts) == 2 {
-			nodeName := parts[0]
-			fieldPath := parts[1]
-
-			fieldParts := strings.Split(fieldPath, ".")
-
-			// Check if the original field path contains snake_case (underscores)
-			hasSnakeCase := false
-			for _, part := range fieldParts {
-				if strings.Contains(part, "_") {
-					hasSnakeCase = true
-					break
-				}
-			}
-
-			// If we have snake_case, try converting to camelCase as fallback
-			if hasSnakeCase {
-				// Convert snake_case field path to camelCase - handle nested paths like "field.subfield"
-				camelFieldParts := make([]string, len(fieldParts))
-				for i, part := range fieldParts {
-					camelFieldParts[i] = convertToCamelCase(part)
-				}
-				camelFieldPath := strings.Join(camelFieldParts, ".")
-
-				// Try with camelCase field names
-				camelScript := fmt.Sprintf(`(() => { try { return %s.data.%s; } catch(e) { return undefined; } })()`, nodeName, camelFieldPath)
-				if evaluated, err := jsvm.RunString(camelScript); err == nil {
-					exportedValue := evaluated.Export()
-					if exportedValue != nil && fmt.Sprintf("%v", exportedValue) != "undefined" {
-						if v.logger != nil {
-							v.logger.Debug("variable resolved using camelCase fallback",
-								"originalPath", varPath,
-								"resolvedPath", fmt.Sprintf("%s.data.%s", nodeName, camelFieldPath),
-								"value", exportedValue)
-						}
-						return exportedValue, true
-					}
-				}
-			}
-
-			// Check if the original field path contains camelCase (uppercase letters)
-			hasCamelCase := false
-			for _, part := range fieldParts {
-				for _, r := range part {
-					if unicode.IsUpper(r) {
-						hasCamelCase = true
-						break
-					}
-				}
-				if hasCamelCase {
-					break
-				}
-			}
-
-			// If we have camelCase, try converting to snake_case as fallback
-			if hasCamelCase {
-				// Convert camelCase field path to snake_case - handle nested paths like "field.subfield"
-				snakeFieldParts := make([]string, len(fieldParts))
-				for i, part := range fieldParts {
-					snakeFieldParts[i] = convertToSnakeCase(part)
-				}
-				snakeFieldPath := strings.Join(snakeFieldParts, ".")
-
-				// Try with snake_case field names
-				snakeScript := fmt.Sprintf(`(() => { try { return %s.data.%s; } catch(e) { return undefined; } })()`, nodeName, snakeFieldPath)
-				if evaluated, err := jsvm.RunString(snakeScript); err == nil {
-					exportedValue := evaluated.Export()
-					if exportedValue != nil && fmt.Sprintf("%v", exportedValue) != "undefined" {
-						if v.logger != nil {
-							v.logger.Debug("variable resolved using snake_case fallback",
-								"originalPath", varPath,
-								"resolvedPath", fmt.Sprintf("%s.data.%s", nodeName, snakeFieldPath),
-								"value", exportedValue)
-						}
-						return exportedValue, true
-					}
-				}
-			}
 		}
 	}
 
@@ -2345,110 +2184,6 @@ func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeInput 
 	}
 
 	return nodeName, nodeInput
-}
-
-// ProcessInputVariableWithDualAccess processes a single input variable, applying dual-access mapping
-// to data fields when needed. This extracts the repetitive logic used throughout the codebase
-// for processing input variables in VM contexts.
-//
-// The function:
-// 1. Checks if the value is a map with a "data" field
-// 2. If so, applies CreateDualAccessMap to the data field
-// 3. Returns the processed value ready for VM.AddVar()
-//
-// This eliminates code duplication across engine.go, run_node_immediately.go, executor.go, etc.
-func ProcessInputVariableWithDualAccess(value interface{}) interface{} {
-	// Apply dual-access mapping if the value is a map with a "data" field
-	if valueMap, ok := value.(map[string]interface{}); ok {
-		if dataField, hasData := valueMap["data"]; hasData {
-			if dataMap, isDataMap := dataField.(map[string]interface{}); isDataMap {
-				// Apply dual-access mapping to the data field
-				dualAccessData := CreateDualAccessMap(dataMap)
-				// Create a new map with the dual-access data
-				processedValue := make(map[string]interface{})
-				for k, v := range valueMap {
-					if k == "data" {
-						processedValue[k] = dualAccessData
-					} else {
-						processedValue[k] = v
-					}
-				}
-				return processedValue
-			}
-		}
-	}
-	// Return original value if no processing needed
-	return value
-}
-
-// ProcessInputVariablesWithDualAccess processes a map of input variables, applying dual-access mapping
-// where needed. This is a convenience function for batch processing.
-func ProcessInputVariablesWithDualAccess(inputVariables map[string]interface{}) map[string]interface{} {
-	if inputVariables == nil {
-		return nil
-	}
-
-	processedInputVariables := make(map[string]interface{})
-	for key, value := range inputVariables {
-		processedInputVariables[key] = ProcessInputVariableWithDualAccess(value)
-	}
-	return processedInputVariables
-}
-
-// CreateDualAccessMap creates a map with both camelCase and snake_case field names
-// pointing to the same values. This enables JavaScript code to access fields using
-// either naming convention, providing fallback support for direct variable access.
-//
-// Example:
-//
-//	input: {"tokenSymbol": "USDC", "blockNumber": 123}
-//	output: {"tokenSymbol": "USDC", "token_symbol": "USDC", "blockNumber": 123, "block_number": 123}
-//
-// This solves the issue where:
-// - Templates use fallback: {{trigger.data.token_symbol}} -> tries token_symbol, then tokenSymbol
-// - Direct JS access needs both: const {tokenSymbol} = data AND const {token_symbol} = data
-func CreateDualAccessMap(data map[string]interface{}) map[string]interface{} {
-	if data == nil {
-		return nil
-	}
-
-	result := make(map[string]interface{})
-
-	// First, copy all original fields
-	for key, value := range data {
-		result[key] = value
-	}
-
-	// Then, add the alternate naming convention for each field
-	for key, value := range data {
-		// Check if the key contains underscores (snake_case)
-		if strings.Contains(key, "_") {
-			// Convert snake_case to camelCase and add it
-			camelKey := convertToCamelCase(key)
-			if camelKey != key && result[camelKey] == nil {
-				result[camelKey] = value
-			}
-		} else {
-			// Check if the key contains uppercase letters (camelCase)
-			hasCamelCase := false
-			for _, r := range key {
-				if unicode.IsUpper(r) {
-					hasCamelCase = true
-					break
-				}
-			}
-
-			if hasCamelCase {
-				// Convert camelCase to snake_case and add it
-				snakeKey := convertToSnakeCase(key)
-				if snakeKey != key && result[snakeKey] == nil {
-					result[snakeKey] = value
-				}
-			}
-		}
-	}
-
-	return result
 }
 
 // ExtractNodeInputData extracts input data from a TaskNode protobuf message
