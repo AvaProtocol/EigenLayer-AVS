@@ -21,6 +21,26 @@ import (
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
 
+// noOpLogger implements the sdklogging.Logger interface as a no-op to prevent nil pointer dereferences
+type noOpLogger struct{}
+
+func (l *noOpLogger) Info(msg string, keysAndValues ...interface{})        {}
+func (l *noOpLogger) Infof(format string, args ...interface{})             {}
+func (l *noOpLogger) Debug(msg string, keysAndValues ...interface{})       {}
+func (l *noOpLogger) Debugf(format string, args ...interface{})            {}
+func (l *noOpLogger) Error(msg string, keysAndValues ...interface{})       {}
+func (l *noOpLogger) Errorf(format string, args ...interface{})            {}
+func (l *noOpLogger) Warn(msg string, keysAndValues ...interface{})        {}
+func (l *noOpLogger) Warnf(format string, args ...interface{})             {}
+func (l *noOpLogger) Fatal(msg string, keysAndValues ...interface{})       {}
+func (l *noOpLogger) Fatalf(format string, args ...interface{})            {}
+func (l *noOpLogger) With(keysAndValues ...interface{}) sdklogging.Logger  { return l }
+func (l *noOpLogger) WithComponent(componentName string) sdklogging.Logger { return l }
+func (l *noOpLogger) WithName(name string) sdklogging.Logger               { return l }
+func (l *noOpLogger) WithServiceName(serviceName string) sdklogging.Logger { return l }
+func (l *noOpLogger) WithHostName(hostName string) sdklogging.Logger       { return l }
+func (l *noOpLogger) Sync() error                                          { return nil }
+
 type VMState string
 
 const (
@@ -262,6 +282,12 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 	v.triggerData = triggerData
 	v.smartWalletConfig = smartWalletConfig
 	v.parsedTriggerData = &triggerDataType{} // Initialize parsedTriggerData
+
+	// Initialize logger if it's nil to prevent panic
+	if v.logger == nil {
+		// Create a no-op logger to prevent nil pointer dereferences
+		v.logger = &noOpLogger{}
+	}
 
 	// Initialize apContext with configVars containing secrets and macro variables
 	configVars := make(map[string]string)
