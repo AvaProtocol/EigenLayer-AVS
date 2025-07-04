@@ -557,13 +557,15 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 				case abi.UintTy, abi.IntTy:
 					// Convert numeric types to proper types
 					if bigInt := new(big.Int).SetBytes(topicValue.Bytes()); bigInt != nil {
-						parsedData[input.Name] = converter.ConvertABIValueToInterface(bigInt, input.Type, input.Name)
+						convertedValue := converter.ConvertABIValueToInterface(bigInt, input.Type, input.Name)
+						parsedData[input.Name] = convertedValue
 
 						if n.logger != nil {
 							n.logger.Debug("Added indexed numeric field",
 								"field", input.Name,
 								"type", input.Type.String(),
-								"value", parsedData[input.Name])
+								"rawValue", bigInt.String(),
+								"convertedValue", convertedValue)
 						}
 					} else {
 						parsedData[input.Name] = topicValue.Hex()
@@ -596,13 +598,16 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 			if nonIndexedCount < len(decodedData) {
 				// Convert the value using ABI type information
 				value := decodedData[nonIndexedCount]
-				parsedData[input.Name] = converter.ConvertABIValueToInterface(value, input.Type, input.Name)
+
+				convertedValue := converter.ConvertABIValueToInterface(value, input.Type, input.Name)
+				parsedData[input.Name] = convertedValue
 
 				if n.logger != nil {
 					n.logger.Debug("Added non-indexed field from data",
 						"field", input.Name,
 						"type", input.Type.String(),
-						"value", parsedData[input.Name])
+						"rawValue", fmt.Sprintf("%v", value),
+						"convertedValue", convertedValue)
 				}
 			}
 			nonIndexedCount++
@@ -610,7 +615,8 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 	}
 
 	// Add any raw fields metadata from decimal formatting
-	for key, value := range converter.GetRawFieldsMetadata() {
+	rawFieldsMetadata := converter.GetRawFieldsMetadata()
+	for key, value := range rawFieldsMetadata {
 		parsedData[key] = value
 	}
 
@@ -621,13 +627,6 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 
 	// 🔥 ENHANCED TRANSFER EVENT ENRICHMENT
 	// If this is a Transfer event, create enriched transfer_log data
-	if n.logger != nil {
-		n.logger.Info("🔍 Transfer enrichment check",
-			"eventName", eventName,
-			"isTransfer", eventName == "Transfer",
-			"hasTokenService", n.tokenEnrichmentService != nil,
-			"willEnrich", eventName == "Transfer" && n.tokenEnrichmentService != nil)
-	}
 
 	if eventName == "Transfer" && n.tokenEnrichmentService != nil {
 		if n.logger != nil {
