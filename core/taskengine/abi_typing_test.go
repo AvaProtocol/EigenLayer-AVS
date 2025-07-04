@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -249,4 +250,104 @@ func TestDecimalFormattingWithProperTypes(t *testing.T) {
 	t.Logf("Parsed event data without decimal formatting: %+v", parsedData)
 
 	// The decimal formatting would be tested in integration tests with actual RPC calls
+}
+
+func TestValueRawPopulatedWhenDecimalsCallFails(t *testing.T) {
+	// Test ABI for an ERC20 Transfer event
+	testABI := `[{
+		"anonymous": false,
+		"inputs": [
+			{"indexed": true, "internalType": "address", "name": "from", "type": "address"},
+			{"indexed": true, "internalType": "address", "name": "to", "type": "address"},
+			{"indexed": false, "internalType": "uint256", "name": "value", "type": "uint256"}
+		],
+		"name": "Transfer",
+		"type": "event"
+	}]`
+
+	// Create a mock Engine with a logger for debugging
+	engine := &Engine{
+		logger: nil,
+	}
+
+	// Create a mock event log for a transfer of 100.5 tokens in wei
+	mockLog := &types.Log{
+		Address: common.HexToAddress("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"), // WETH address (mainnet)
+		Topics: []common.Hash{
+			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),        // Transfer event signature
+			common.BytesToHash(common.HexToAddress("0xc60e71bd0f2e6d8832fea1a2d56091c48493c788").Bytes()), // from address
+			common.BytesToHash(common.HexToAddress("0x1234567890123456789012345678901234567890").Bytes()), // to address
+		},
+		Data: func() []byte {
+			// Pack 100.5 tokens with 18 decimals = 100500000000000000000 wei
+			parsedABI, _ := abi.JSON(strings.NewReader(testABI))
+			event := parsedABI.Events["Transfer"]
+			value, _ := new(big.Int).SetString("100500000000000000000", 10) // 100.5 ETH in wei
+			data, _ := event.Inputs.NonIndexed().Pack(value)
+			return data
+		}(),
+	}
+
+	// Create a mock query with decimals method call that will fail
+	// This simulates the scenario where we're testing against a mainnet contract
+	// address on a testnet, or any other scenario where decimals() call fails
+	mockQuery := &avsproto.EventTrigger_Query{
+		Addresses:   []string{"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"},
+		ContractAbi: testABI,
+		MethodCalls: []*avsproto.EventTrigger_MethodCall{
+			{
+				MethodName:    "decimals",
+				CallData:      "0x313ce567",
+				ApplyToFields: []string{"value"},
+			},
+		},
+	}
+
+	// Test the parseEventWithABI function with a query that will fail decimals() call
+	parsedData, err := engine.parseEventWithABI(mockLog, testABI, mockQuery)
+	if err != nil {
+		t.Fatalf("Failed to parse event with ABI: %v", err)
+	}
+
+	// Verify the event name
+	if parsedData["eventName"] != "Transfer" {
+		t.Errorf("Expected eventName to be 'Transfer', got %v", parsedData["eventName"])
+	}
+
+	// Verify address fields are correctly parsed
+	fromAddr := parsedData["from"].(string)
+	if !strings.EqualFold(fromAddr, "0xc60e71bd0f2e6d8832fea1a2d56091c48493c788") {
+		t.Errorf("Expected 'from' to be the correct address, got %v", fromAddr)
+	}
+
+	toAddr := parsedData["to"].(string)
+	if !strings.EqualFold(toAddr, "0x1234567890123456789012345678901234567890") {
+		t.Errorf("Expected 'to' to be the correct address, got %v", toAddr)
+	}
+
+	// **CRITICAL TEST**: Verify that valueRaw is populated even when decimals() call fails
+	valueRaw, hasValueRaw := parsedData["valueRaw"]
+	if !hasValueRaw {
+		t.Errorf("Expected 'valueRaw' to be present even when decimals() call fails")
+	}
+
+	if valueRaw != "100500000000000000000" {
+		t.Errorf("Expected 'valueRaw' to be '100500000000000000000', got %v", valueRaw)
+	}
+
+	// Verify the value field contains the raw value (since decimal formatting failed)
+	if parsedData["value"] != "100500000000000000000" {
+		t.Errorf("Expected 'value' to be '100500000000000000000' (raw value when formatting fails), got %v", parsedData["value"])
+	}
+
+	// Verify that decimals field is not set (since the call failed)
+	if _, hasDecimals := parsedData["decimals"]; hasDecimals {
+		t.Errorf("Expected 'decimals' to not be present when decimals() call fails")
+	}
+
+	// Log the parsed data for debugging
+	t.Logf("Parsed event data with failed decimals() call: %+v", parsedData)
+
+	// Verify that this is the exact scenario that was causing the original bug
+	t.Logf("✅ REGRESSION TEST PASSED: valueRaw='%v' is populated even when decimals() call fails", valueRaw)
 }
