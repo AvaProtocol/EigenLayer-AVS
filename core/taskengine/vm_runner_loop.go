@@ -171,10 +171,20 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 
 	log.WriteString(fmt.Sprintf("\nIterating through %d items", len(inputArray)))
 
-	runInParallel := true
+	// Determine execution mode based on configuration
+	executionMode := node.Config.ExecutionMode
+	runInParallel := (executionMode == avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL)
+
+	// Always run sequentially for ContractWrite operations (security requirement)
 	if node.GetContractWrite() != nil {
 		runInParallel = false
-		log.WriteString("\nRunning iterations sequentially due to contract write operation")
+		log.WriteString("\nRunning iterations sequentially due to contract write operation (security requirement)")
+	} else {
+		if runInParallel {
+			log.WriteString("\nRunning iterations in parallel mode")
+		} else {
+			log.WriteString("\nRunning iterations in sequential mode")
+		}
 	}
 
 	results := make([]interface{}, 0, len(inputArray))

@@ -2010,6 +2010,30 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			loopConfig.IterKey = iterKey
 		}
 
+		// Handle execution_mode parameter
+		if executionMode, ok := config["execution_mode"].(string); ok {
+			switch strings.ToLower(executionMode) {
+			case "sequential":
+				loopConfig.ExecutionMode = avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL
+			case "parallel":
+				loopConfig.ExecutionMode = avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL
+			default:
+				loopConfig.ExecutionMode = avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL // Default to sequential for safety
+			}
+		} else if executionMode, ok := config["executionMode"].(string); ok {
+			switch strings.ToLower(executionMode) {
+			case "sequential":
+				loopConfig.ExecutionMode = avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL
+			case "parallel":
+				loopConfig.ExecutionMode = avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL
+			default:
+				loopConfig.ExecutionMode = avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL // Default to sequential for safety
+			}
+		} else {
+			// Default to sequential if not specified (safer default)
+			loopConfig.ExecutionMode = avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL
+		}
+
 		// Handle the nested runner configuration (CustomCode, RestAPI, etc.)
 		loopNode := &avsproto.LoopNode{
 			Config: loopConfig,
