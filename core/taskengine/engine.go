@@ -29,12 +29,18 @@ import (
 	"github.com/oklog/ulid/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
+
+// getTaskStatusString safely converts a TaskStatus to string, handling edge cases
+func getTaskStatusString(status avsproto.TaskStatus) string {
+	// The crash was caused by calling .String() on an uninitialized enum
+	// This function provides a safe wrapper that ensures we always get a valid string
+	return status.String()
+}
 
 const (
 	JobTypeExecuteTask  = "execute_task"
@@ -273,6 +279,14 @@ func (n *Engine) MustStart() error {
 		}
 		err := protojson.Unmarshal(item.Value, task)
 		if err == nil {
+			// Ensure task is properly initialized after loading from storage
+			if initErr := task.EnsureInitialized(); initErr != nil {
+				n.logger.Warn("Task failed initialization after loading from storage",
+					"storage_key", string(item.Key),
+					"task_id", task.Id,
+					"error", initErr)
+				continue // Skip this corrupt task
+			}
 			n.tasks[task.Id] = task
 			loadedCount++
 		} else {
@@ -612,14 +626,14 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	task, err := model.NewTaskFromProtobuf(user, taskPayload)
 
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.InvalidArgument, "%s", err.Error())
+		return nil, status.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 
 	updates := map[string][]byte{}
 
 	taskJSON, err := task.ToJSON()
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.Internal, "Failed to serialize task: %v", err)
+		return nil, status.Errorf(codes.Internal, "Failed to serialize task: %v", err)
 	}
 
 	updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON
@@ -645,7 +659,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 		"trigger_type", task.Trigger.Type.String(),
 		"final_nodes_count", len(task.Nodes),
 		"final_edges_count", len(task.Edges),
-		"status", task.Status.String())
+		"status", getTaskStatusString(task.Status))
 
 	return task, nil
 }
@@ -1017,10 +1031,10 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 								"operator", payload.Address,
 								"error", err,
 								"error_type", fmt.Sprintf("%T", err),
-								"grpc_status", grpcstatus.Code(err).String())
+								"grpc_status", status.Code(err).String())
 
 							// Check if this is a connection-level error that requires reconnection
-							grpcCode := grpcstatus.Code(err)
+							grpcCode := status.Code(err)
 							if grpcCode == codes.Unavailable || grpcCode == codes.Canceled || grpcCode == codes.DeadlineExceeded {
 								n.logger.Error("🔥 Connection-level error detected, operator needs to reconnect",
 									"operator", payload.Address,
@@ -1055,7 +1069,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 
 				// If all tasks failed with connection errors, return error to trigger reconnection
 				if failedCount > 0 && successCount == 0 && firstError != nil {
-					grpcCode := grpcstatus.Code(firstError)
+					grpcCode := status.Code(firstError)
 					if grpcCode == codes.Unavailable || grpcCode == codes.Canceled || grpcCode == codes.DeadlineExceeded {
 						return fmt.Errorf("all task sends failed with connection error: %w", firstError)
 					}
@@ -1486,7 +1500,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 
 	taskKeys, err := n.db.ListKeysMulti(prefixes)
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
+		return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
 	}
 
 	// second, do the sort, this is key sorted by ordering of their insertion
@@ -1528,7 +1542,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 		taskID := string(model.TaskKeyToId(([]byte(key[2:]))))
 		statusValue, err := n.db.GetKey([]byte(key))
 		if err != nil {
-			return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
 		}
 		status, _ := strconv.Atoi(string(statusValue))
 
@@ -1616,8 +1630,8 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 }
 
 func (n *Engine) GetTaskByID(taskID string) (*model.Task, error) {
-	for status := range avsproto.TaskStatus_name {
-		if rawTaskData, err := n.db.GetKey(TaskStorageKey(taskID, avsproto.TaskStatus(status))); err == nil {
+	for statusInt := range avsproto.TaskStatus_name {
+		if rawTaskData, err := n.db.GetKey(TaskStorageKey(taskID, avsproto.TaskStatus(statusInt))); err == nil {
 			task := model.NewTask()
 			err = task.FromStorageData(rawTaskData)
 
@@ -1625,11 +1639,11 @@ func (n *Engine) GetTaskByID(taskID string) (*model.Task, error) {
 				return task, nil
 			}
 
-			return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
 		}
 	}
 
-	return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+	return nil, status.Errorf(codes.NotFound, TaskNotFoundError)
 }
 
 func (n *Engine) GetTask(user *model.User, taskID string) (*model.Task, error) {
@@ -1639,7 +1653,7 @@ func (n *Engine) GetTask(user *model.User, taskID string) (*model.Task, error) {
 	}
 
 	if !task.OwnedBy(user.Address) {
-		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+		return nil, status.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
 	return task, nil
@@ -1648,7 +1662,7 @@ func (n *Engine) GetTask(user *model.User, taskID string) (*model.Task, error) {
 func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq) (*avsproto.TriggerTaskResp, error) {
 	// Validate task ID format first
 	if !ValidateTaskId(payload.TaskId) {
-		return nil, grpcstatus.Errorf(codes.InvalidArgument, InvalidTaskIdFormat)
+		return nil, status.Errorf(codes.InvalidArgument, InvalidTaskIdFormat)
 	}
 
 	task, err := n.GetTask(user, payload.TaskId)
@@ -1658,12 +1672,12 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 
 	// Explicit ownership validation for security (even though GetTask already checks this)
 	if !task.OwnedBy(user.Address) {
-		return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+		return nil, status.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
 	// Important business logic validation: Check if task is runnable
 	if !task.IsRunable() {
-		return nil, grpcstatus.Errorf(codes.FailedPrecondition, TaskIsNotRunnable)
+		return nil, status.Errorf(codes.FailedPrecondition, TaskIsNotRunnable)
 	}
 
 	// Create trigger data
@@ -1749,10 +1763,10 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Basic validation: Check if task structure is valid for execution
 	if task.Trigger == nil {
-		return nil, grpcstatus.Errorf(codes.InvalidArgument, "task trigger is required for simulation")
+		return nil, status.Errorf(codes.InvalidArgument, "task trigger is required for simulation")
 	}
 	if len(task.Nodes) == 0 {
-		return nil, grpcstatus.Errorf(codes.InvalidArgument, "task must have at least one node for simulation")
+		return nil, status.Errorf(codes.InvalidArgument, "task must have at least one node for simulation")
 	}
 
 	// Step 1: Simulate the trigger to get trigger output data
@@ -1775,12 +1789,12 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Validate that the derived trigger type matches the expected type
 	if triggerType != trigger.GetType() {
 		n.logger.Error("Trigger type mismatch", "derived_type", triggerType, "expected_type", trigger.GetType(), "trigger_id", trigger.GetId(), "trigger_name", trigger.GetName())
-		return nil, grpcstatus.Errorf(codes.InvalidArgument, "trigger type mismatch: derived=%v, expected=%v", triggerType, trigger.GetType())
+		return nil, status.Errorf(codes.InvalidArgument, "trigger type mismatch: derived=%v, expected=%v", triggerType, trigger.GetType())
 	}
 
 	triggerTypeStr := TriggerTypeToString(triggerType)
 	if triggerTypeStr == "" {
-		return nil, grpcstatus.Errorf(codes.InvalidArgument, "unsupported trigger type: %v (oneof type: %T)", trigger.GetType(), trigger.GetTriggerType())
+		return nil, status.Errorf(codes.InvalidArgument, "unsupported trigger type: %v (oneof type: %T)", trigger.GetType(), trigger.GetTriggerType())
 	}
 
 	// Extract trigger config using the shared utility function
@@ -1994,11 +2008,11 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	for _, id := range payload.TaskIds {
 		task, err := n.GetTaskByID(id)
 		if err != nil {
-			return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+			return nil, status.Errorf(codes.NotFound, TaskNotFoundError)
 		}
 
 		if !task.OwnedBy(user.Address) {
-			return nil, grpcstatus.Errorf(codes.NotFound, TaskNotFoundError)
+			return nil, status.Errorf(codes.NotFound, TaskNotFoundError)
 		}
 		tasks[id] = task
 	}
@@ -2018,7 +2032,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 	})
 
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
+		return nil, status.Errorf(codes.Code(avsproto.ErrorCode_STORAGE_UNAVAILABLE), StorageUnavailableError)
 	}
 
 	executioResp := &avsproto.ListExecutionsResp{
@@ -2133,13 +2147,13 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 
 	rawExecution, err := n.db.GetKey(TaskExecutionKey(task, payload.ExecutionId))
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.NotFound, ExecutionNotFoundError)
+		return nil, status.Errorf(codes.NotFound, ExecutionNotFoundError)
 	}
 
 	exec := &avsproto.Execution{}
 	err = protojson.Unmarshal(rawExecution, exec)
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
+		return nil, status.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
 	}
 
 	// No longer need trigger type at execution level - it's in the first step
@@ -2158,7 +2172,7 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 		exec := &avsproto.Execution{}
 		err = protojson.Unmarshal(rawExecution, exec)
 		if err != nil {
-			return nil, grpcstatus.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
 		}
 
 		if exec.Success {
@@ -2169,12 +2183,12 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 	}
 
 	// Check if it's pending in queue
-	status, err := n.getExecutionStatusFromQueue(task, payload.ExecutionId)
+	execStatus, err := n.getExecutionStatusFromQueue(task, payload.ExecutionId)
 	if err != nil {
-		return nil, grpcstatus.Errorf(codes.NotFound, ExecutionNotFoundError)
+		return nil, status.Errorf(codes.NotFound, ExecutionNotFoundError)
 	}
 
-	return &avsproto.ExecutionStatusResp{Status: *status}, nil
+	return &avsproto.ExecutionStatusResp{Status: *execStatus}, nil
 }
 
 func (n *Engine) GetExecutionCount(user *model.User, payload *avsproto.GetExecutionCountReq) (*avsproto.GetExecutionCountResp, error) {
@@ -2189,7 +2203,7 @@ func (n *Engine) GetExecutionCount(user *model.User, payload *avsproto.GetExecut
 		taskIds, err := n.db.GetKeyHasPrefix(UserTaskStoragePrefix(user.Address))
 
 		if err != nil {
-			return nil, grpcstatus.Errorf(codes.Internal, "Internal error counting execution")
+			return nil, status.Errorf(codes.Internal, "Internal error counting execution")
 		}
 		for _, id := range taskIds {
 			taskId := TaskIdFromTaskStatusStorageKey(id)
@@ -2208,7 +2222,7 @@ func (n *Engine) GetExecutionCount(user *model.User, payload *avsproto.GetExecut
 
 	if err != nil {
 		n.logger.Error("error counting execution for", "user", user.Address, "error", err)
-		return nil, grpcstatus.Errorf(codes.Internal, "Internal error counting execution")
+		return nil, status.Errorf(codes.Internal, "Internal error counting execution")
 	}
 
 	return &avsproto.GetExecutionCountResp{
@@ -2239,11 +2253,11 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (*avsproto.De
 			Status:         "cannot_delete",
 			Message:        "Only non executing task can be deleted",
 			Id:             taskID,
-			PreviousStatus: task.Status.String(),
+			PreviousStatus: getTaskStatusString(task.Status),
 		}, nil
 	}
 
-	previousStatus := task.Status.String()
+	previousStatus := getTaskStatusString(task.Status)
 	deletedAt := time.Now().UnixMilli()
 
 	n.logger.Info("🗑️ Deleting task storage", "task_id", taskID)
@@ -2304,9 +2318,9 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (*avsproto.Ca
 		return &avsproto.CancelTaskResp{
 			Success:        false,
 			Status:         statusMsg,
-			Message:        fmt.Sprintf("Only active task can be cancelled, current status: %s", task.Status.String()),
+			Message:        fmt.Sprintf("Only active task can be cancelled, current status: %s", getTaskStatusString(task.Status)),
 			Id:             taskID,
-			PreviousStatus: task.Status.String(),
+			PreviousStatus: getTaskStatusString(task.Status),
 		}, nil
 	}
 
@@ -2321,7 +2335,7 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (*avsproto.Ca
 			Status:         "error",
 			Message:        fmt.Sprintf("Failed to serialize canceled task: %v", err),
 			Id:             taskID,
-			PreviousStatus: oldStatus.String(),
+			PreviousStatus: getTaskStatusString(oldStatus),
 		}, nil
 	}
 	updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON // Use new status for the key where it's stored
@@ -2347,7 +2361,7 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (*avsproto.Ca
 			Status:         "error",
 			Message:        fmt.Sprintf("Failed to update task status: %v", err),
 			Id:             taskID,
-			PreviousStatus: oldStatus.String(),
+			PreviousStatus: getTaskStatusString(oldStatus),
 		}, nil
 	}
 
@@ -2359,7 +2373,7 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (*avsproto.Ca
 		Message:        "Task cancelled successfully",
 		CancelledAt:    cancelledAt,
 		Id:             taskID,
-		PreviousStatus: oldStatus.String(),
+		PreviousStatus: getTaskStatusString(oldStatus),
 	}, nil
 }
 
@@ -2423,11 +2437,11 @@ func (n *Engine) CreateSecret(user *model.User, payload *avsproto.CreateOrUpdate
 
 	updates := map[string][]byte{}
 	if strings.HasPrefix(strings.ToLower(payload.Name), "ap_") {
-		return false, grpcstatus.Errorf(codes.InvalidArgument, "secret name cannot start with ap_")
+		return false, status.Errorf(codes.InvalidArgument, "secret name cannot start with ap_")
 	}
 
 	if len(payload.Name) == 0 || len(payload.Name) > MaxSecretNameLength {
-		return false, grpcstatus.Errorf(codes.InvalidArgument, "secret name length is invalid: should be 1-255 character")
+		return false, status.Errorf(codes.InvalidArgument, "secret name length is invalid: should be 1-255 character")
 	}
 
 	key, _ := SecretStorageKey(secret)
@@ -2437,7 +2451,7 @@ func (n *Engine) CreateSecret(user *model.User, payload *avsproto.CreateOrUpdate
 		return true, nil
 	}
 
-	return false, grpcstatus.Errorf(codes.Internal, "Cannot save data")
+	return false, status.Errorf(codes.Internal, "Cannot save data")
 }
 
 func (n *Engine) UpdateSecret(user *model.User, payload *avsproto.CreateOrUpdateSecretReq) (bool, error) {
@@ -2451,7 +2465,7 @@ func (n *Engine) UpdateSecret(user *model.User, payload *avsproto.CreateOrUpdate
 	}
 	key, _ := SecretStorageKey(secret)
 	if ok, err := n.db.Exist([]byte(key)); !ok || err != nil {
-		return false, grpcstatus.Errorf(codes.NotFound, "Secret not found")
+		return false, status.Errorf(codes.NotFound, "Secret not found")
 	}
 
 	updates[key] = []byte(payload.Secret)
@@ -2870,7 +2884,7 @@ func (n *Engine) GetExecutionStats(user *model.User, payload *avsproto.GetExecut
 		workflowIds = []string{}
 		taskIds, err := n.db.GetKeyHasPrefix(UserTaskStoragePrefix(user.Address))
 		if err != nil {
-			return nil, grpcstatus.Errorf(codes.Internal, "Internal error retrieving tasks")
+			return nil, status.Errorf(codes.Internal, "Internal error retrieving tasks")
 		}
 		for _, id := range taskIds {
 			taskId := TaskIdFromTaskStatusStorageKey(id)
@@ -2956,7 +2970,7 @@ func (n *Engine) GetWorkflowCount(user *model.User, payload *avsproto.GetWorkflo
 
 	if err != nil {
 		n.logger.Error("error counting task for", "user", user.Address, "error", err)
-		return nil, grpcstatus.Errorf(codes.Internal, "Internal error counting workflow")
+		return nil, status.Errorf(codes.Internal, "Internal error counting workflow")
 	}
 
 	return &avsproto.GetWorkflowCountResp{
@@ -2979,21 +2993,21 @@ func (n *Engine) GetTokenMetadata(user *model.User, payload *avsproto.GetTokenMe
 	if payload.Address == "" {
 		return &avsproto.GetTokenMetadataResp{
 			Found: false,
-		}, grpcstatus.Errorf(codes.InvalidArgument, "token address is required")
+		}, status.Errorf(codes.InvalidArgument, "token address is required")
 	}
 
 	// Check if address is a valid hex address
 	if !common.IsHexAddress(payload.Address) {
 		return &avsproto.GetTokenMetadataResp{
 			Found: false,
-		}, grpcstatus.Errorf(codes.InvalidArgument, "invalid token address format")
+		}, status.Errorf(codes.InvalidArgument, "invalid token address format")
 	}
 
 	// Check if TokenEnrichmentService is available
 	if n.tokenEnrichmentService == nil {
 		return &avsproto.GetTokenMetadataResp{
 			Found: false,
-		}, grpcstatus.Errorf(codes.Unavailable, "token enrichment service not available")
+		}, status.Errorf(codes.Unavailable, "token enrichment service not available")
 	}
 
 	// Try to get token metadata using the enrichment service

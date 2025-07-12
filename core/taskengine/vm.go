@@ -327,7 +327,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			"maxExecution":       task.MaxExecution,
 			"executionCount":     task.ExecutionCount,
 			"lastRanAt":          task.LastRanAt,
-			"status":             task.Status.String(),
+			"status":             getTaskStatusString(task.Status),
 		}
 		v.AddVar(WorkflowContextVarName, workflowContext)
 	}
