@@ -1991,48 +1991,28 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		// Create loop node with proper configuration
 		loopConfig := &avsproto.LoopNode_Config{}
 
-		// Extract required configuration fields with backward compatibility
-		// Try snake_case first, then camelCase for backward compatibility
-		var sourceId string
-		if val, ok := config["source_id"].(string); ok {
-			sourceId = val
-		} else if val, ok := config["sourceId"].(string); ok {
-			sourceId = val
+		// Extract required configuration fields (camelCase only)
+		if sourceId, ok := config["sourceId"].(string); ok {
+			loopConfig.SourceId = sourceId
 		} else {
-			return nil, fmt.Errorf("loop node requires 'source_id' or 'sourceId' field")
+			return nil, fmt.Errorf("loop node requires 'sourceId' field")
 		}
-		loopConfig.SourceId = sourceId
 
-		var iterVal string
-		if val, ok := config["iter_val"].(string); ok {
-			iterVal = val
-		} else if val, ok := config["iterVal"].(string); ok {
-			iterVal = val
+		if iterVal, ok := config["iterVal"].(string); ok {
+			loopConfig.IterVal = iterVal
 		} else {
-			return nil, fmt.Errorf("loop node requires 'iter_val' or 'iterVal' field")
+			return nil, fmt.Errorf("loop node requires 'iterVal' field")
 		}
-		loopConfig.IterVal = iterVal
 
-		var iterKey string
-		if val, ok := config["iter_key"].(string); ok {
-			iterKey = val
-		} else if val, ok := config["iterKey"].(string); ok {
-			iterKey = val
+		if iterKey, ok := config["iterKey"].(string); ok {
+			loopConfig.IterKey = iterKey
 		} else {
-			return nil, fmt.Errorf("loop node requires 'iter_key' or 'iterKey' field")
-		}
-		loopConfig.IterKey = iterKey
-
-		// Handle execution_mode parameter with backward compatibility
-		var executionModeStr string
-		if val, ok := config["execution_mode"].(string); ok {
-			executionModeStr = val
-		} else if val, ok := config["executionMode"].(string); ok {
-			executionModeStr = val
+			return nil, fmt.Errorf("loop node requires 'iterKey' field")
 		}
 
-		if executionModeStr != "" {
-			switch strings.ToLower(executionModeStr) {
+		// Handle executionMode parameter (camelCase only)
+		if executionMode, ok := config["executionMode"].(string); ok {
+			switch strings.ToLower(executionMode) {
 			case "sequential":
 				loopConfig.ExecutionMode = avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL
 			case "parallel":

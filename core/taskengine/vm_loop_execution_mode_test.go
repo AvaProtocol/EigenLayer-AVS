@@ -10,10 +10,10 @@ import (
 
 func TestCreateNodeFromType_LoopExecutionMode_Sequential(t *testing.T) {
 	config := map[string]interface{}{
-		"source_id":      "testSource",
-		"iter_val":       "item",
-		"iter_key":       "index",
-		"execution_mode": "sequential",
+		"sourceId":      "testSource",
+		"iterVal":       "item",
+		"iterKey":       "index",
+		"executionMode": "sequential",
 		"runner": map[string]interface{}{
 			"type": "customCode",
 			"data": map[string]interface{}{
@@ -46,10 +46,10 @@ func TestCreateNodeFromType_LoopExecutionMode_Sequential(t *testing.T) {
 
 func TestCreateNodeFromType_LoopExecutionMode_Parallel(t *testing.T) {
 	config := map[string]interface{}{
-		"source_id":      "testSource",
-		"iter_val":       "item",
-		"iter_key":       "index",
-		"execution_mode": "parallel",
+		"sourceId":      "testSource",
+		"iterVal":       "item",
+		"iterKey":       "index",
+		"executionMode": "parallel",
 		"runner": map[string]interface{}{
 			"type": "customCode",
 			"data": map[string]interface{}{
@@ -75,10 +75,10 @@ func TestCreateNodeFromType_LoopExecutionMode_Parallel(t *testing.T) {
 
 func TestCreateNodeFromType_LoopExecutionMode_Default(t *testing.T) {
 	config := map[string]interface{}{
-		"source_id": "testSource",
-		"iter_val":  "item",
-		"iter_key":  "index",
-		// execution_mode not specified - should default to sequential
+		"sourceId": "testSource",
+		"iterVal":  "item",
+		"iterKey":  "index",
+		// executionMode not specified - should default to sequential
 		"runner": map[string]interface{}{
 			"type": "customCode",
 			"data": map[string]interface{}{
@@ -104,10 +104,10 @@ func TestCreateNodeFromType_LoopExecutionMode_Default(t *testing.T) {
 
 func TestCreateNodeFromType_LoopExecutionMode_InvalidValue(t *testing.T) {
 	config := map[string]interface{}{
-		"source_id":      "testSource",
-		"iter_val":       "item",
-		"iter_key":       "index",
-		"execution_mode": "invalid_mode", // Invalid value - should default to sequential
+		"sourceId":      "testSource",
+		"iterVal":       "item",
+		"iterKey":       "index",
+		"executionMode": "invalid_mode", // Invalid value - should default to sequential
 		"runner": map[string]interface{}{
 			"type": "customCode",
 			"data": map[string]interface{}{
@@ -147,10 +147,10 @@ func TestCreateNodeFromType_LoopExecutionMode_CaseInsensitive(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			config := map[string]interface{}{
-				"source_id":      "testSource",
-				"iter_val":       "item",
-				"iter_key":       "index",
-				"execution_mode": tc.mode,
+				"sourceId":      "testSource",
+				"iterVal":       "item",
+				"iterKey":       "index",
+				"executionMode": tc.mode,
 				"runner": map[string]interface{}{
 					"type": "customCode",
 					"data": map[string]interface{}{
@@ -178,10 +178,10 @@ func TestCreateNodeFromType_LoopExecutionMode_CaseInsensitive(t *testing.T) {
 
 func TestCreateNodeFromType_LoopExecutionMode_WithRestApiRunner(t *testing.T) {
 	config := map[string]interface{}{
-		"source_id":      "testSource",
-		"iter_val":       "item",
-		"iter_key":       "index",
-		"execution_mode": "sequential",
+		"sourceId":      "testSource",
+		"iterVal":       "item",
+		"iterKey":       "index",
+		"executionMode": "sequential",
 		"runner": map[string]interface{}{
 			"type": "restApi",
 			"data": map[string]interface{}{
@@ -207,7 +207,7 @@ func TestCreateNodeFromType_LoopExecutionMode_WithRestApiRunner(t *testing.T) {
 }
 
 func TestCreateNodeFromType_LoopExecutionMode_CamelCaseFields(t *testing.T) {
-	// Test that camelCase field names are supported for backward compatibility
+	// Test that camelCase field names are the standard format
 	config := map[string]interface{}{
 		"sourceId":      "testSource",
 		"iterVal":       "value",
