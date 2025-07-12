@@ -1717,79 +1717,40 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		// Create contract read node with proper configuration
 		contractConfig := &avsproto.ContractReadNode_Config{}
 
-		// Support both snake_case and camelCase for backward compatibility
-		if address, ok := config["contract_address"].(string); ok {
+		// Use camelCase only for consistency with JavaScript SDK
+		if address, ok := config["contractAddress"].(string); ok {
 			contractConfig.ContractAddress = address
-		} else if address, ok := config["contractAddress"].(string); ok {
-			contractConfig.ContractAddress = address
+		} else {
+			return nil, fmt.Errorf("contract read node requires 'contractAddress' field")
 		}
 
-		if abi, ok := config["contract_abi"].(string); ok {
+		if abi, ok := config["contractAbi"].(string); ok {
 			contractConfig.ContractAbi = abi
-		} else if abi, ok := config["contractAbi"].(string); ok {
-			contractConfig.ContractAbi = abi
+		} else {
+			return nil, fmt.Errorf("contract read node requires 'contractAbi' field")
 		}
 
-		// Handle method calls - for backward compatibility, support single call_data
-		if callData, ok := config["call_data"].(string); ok {
-			// Single method call for backward compatibility
+		// Handle method calls - use camelCase only for consistency
+		if callData, ok := config["callData"].(string); ok {
+			// Single method call
 			methodCall := &avsproto.ContractReadNode_MethodCall{
 				CallData:   callData,
 				MethodName: "", // Will be determined from ABI
 			}
 			contractConfig.MethodCalls = []*avsproto.ContractReadNode_MethodCall{methodCall}
-		} else if callData, ok := config["callData"].(string); ok {
-			// Single method call for backward compatibility (camelCase)
-			methodCall := &avsproto.ContractReadNode_MethodCall{
-				CallData:   callData,
-				MethodName: "", // Will be determined from ABI
-			}
-			contractConfig.MethodCalls = []*avsproto.ContractReadNode_MethodCall{methodCall}
-		} else if methodCalls, ok := config["method_calls"].([]interface{}); ok {
-			// Multiple method calls (snake_case)
-			for _, methodCallInterface := range methodCalls {
-				if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
-					methodCall := &avsproto.ContractReadNode_MethodCall{}
-					if callData, ok := methodCallMap["call_data"].(string); ok {
-						methodCall.CallData = callData
-					}
-					if methodName, ok := methodCallMap["method_name"].(string); ok {
-						methodCall.MethodName = methodName
-					}
-					// Handle applyToFields for decimal formatting
-					if applyToFields, ok := methodCallMap["apply_to_fields"].([]interface{}); ok {
-						for _, field := range applyToFields {
-							if fieldStr, ok := field.(string); ok {
-								methodCall.ApplyToFields = append(methodCall.ApplyToFields, fieldStr)
-							}
-						}
-					}
-					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
-				}
-			}
 		} else if methodCalls, ok := config["methodCalls"].([]interface{}); ok {
-			// Multiple method calls (new clean naming from SDK)
+			// Multiple method calls (camelCase only)
 			for _, methodCallInterface := range methodCalls {
 				if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
 					methodCall := &avsproto.ContractReadNode_MethodCall{}
 					if callData, ok := methodCallMap["callData"].(string); ok {
 						methodCall.CallData = callData
-					} else if callData, ok := methodCallMap["call_data"].(string); ok {
-						methodCall.CallData = callData
 					}
 					if methodName, ok := methodCallMap["methodName"].(string); ok {
 						methodCall.MethodName = methodName
-					} else if methodName, ok := methodCallMap["method_name"].(string); ok {
-						methodCall.MethodName = methodName
 					}
-					// Handle applyToFields for decimal formatting (support both camelCase and snake_case)
+					// Handle applyToFields for decimal formatting
 					if applyToFields, ok := methodCallMap["applyToFields"].([]interface{}); ok {
-						for _, field := range applyToFields {
-							if fieldStr, ok := field.(string); ok {
-								methodCall.ApplyToFields = append(methodCall.ApplyToFields, fieldStr)
-							}
-						}
-					} else if applyToFields, ok := methodCallMap["apply_to_fields"].([]interface{}); ok {
 						for _, field := range applyToFields {
 							if fieldStr, ok := field.(string); ok {
 								methodCall.ApplyToFields = append(methodCall.ApplyToFields, fieldStr)
@@ -1811,54 +1772,34 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		// Create contract write node with proper configuration
 		contractConfig := &avsproto.ContractWriteNode_Config{}
 
-		// Support both snake_case and camelCase for backward compatibility
-		if address, ok := config["contract_address"].(string); ok {
+		// Use camelCase only for consistency with JavaScript SDK
+		if address, ok := config["contractAddress"].(string); ok {
 			contractConfig.ContractAddress = address
-		} else if address, ok := config["contractAddress"].(string); ok {
-			contractConfig.ContractAddress = address
+		} else {
+			return nil, fmt.Errorf("contract write node requires 'contractAddress' field")
 		}
 
-		if abi, ok := config["contract_abi"].(string); ok {
+		if abi, ok := config["contractAbi"].(string); ok {
 			contractConfig.ContractAbi = abi
-		} else if abi, ok := config["contractAbi"].(string); ok {
-			contractConfig.ContractAbi = abi
+		} else {
+			return nil, fmt.Errorf("contract write node requires 'contractAbi' field")
 		}
 
-		// For backward compatibility, support single callData field
-		if callData, ok := config["call_data"].(string); ok {
-			contractConfig.CallData = callData
-		} else if callData, ok := config["callData"].(string); ok {
+		// Use camelCase only for consistency
+		if callData, ok := config["callData"].(string); ok {
 			contractConfig.CallData = callData
 		}
 
-		// Handle method calls array - newer format supports multiple method calls
-		if methodCalls, ok := config["method_calls"].([]interface{}); ok {
-			// Multiple method calls (snake_case)
-			for _, methodCallInterface := range methodCalls {
-				if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
-					methodCall := &avsproto.ContractWriteNode_MethodCall{}
-					if callData, ok := methodCallMap["call_data"].(string); ok {
-						methodCall.CallData = callData
-					}
-					if methodName, ok := methodCallMap["method_name"].(string); ok {
-						methodCall.MethodName = methodName
-					}
-					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
-				}
-			}
-		} else if methodCalls, ok := config["methodCalls"].([]interface{}); ok {
-			// Multiple method calls (new clean naming from SDK)
+		// Handle method calls array - use camelCase only
+		if methodCalls, ok := config["methodCalls"].([]interface{}); ok {
+			// Multiple method calls (camelCase only)
 			for _, methodCallInterface := range methodCalls {
 				if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
 					methodCall := &avsproto.ContractWriteNode_MethodCall{}
 					if callData, ok := methodCallMap["callData"].(string); ok {
 						methodCall.CallData = callData
-					} else if callData, ok := methodCallMap["call_data"].(string); ok {
-						methodCall.CallData = callData
 					}
 					if methodName, ok := methodCallMap["methodName"].(string); ok {
-						methodCall.MethodName = methodName
-					} else if methodName, ok := methodCallMap["method_name"].(string); ok {
 						methodCall.MethodName = methodName
 					}
 					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
@@ -1952,10 +1893,8 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		if expression, ok := config["expression"].(string); ok {
 			filterConfig.Expression = expression
 		}
-		// Support both snake_case and camelCase for backward compatibility
-		if sourceId, ok := config["source_id"].(string); ok {
-			filterConfig.SourceId = sourceId
-		} else if sourceId, ok := config["sourceId"].(string); ok {
+		// Use camelCase only for consistency with JavaScript SDK
+		if sourceId, ok := config["sourceId"].(string); ok {
 			filterConfig.SourceId = sourceId
 		}
 
@@ -2104,6 +2043,77 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 
 			loopNode.Runner = &avsproto.LoopNode_RestApi{
 				RestApi: &avsproto.RestAPINode{Config: rConfig},
+			}
+		case "contractRead":
+			crConfig := &avsproto.ContractReadNode_Config{}
+
+			// Extract contract configuration
+			if contractAddress, ok := runnerConfig["contractAddress"].(string); ok {
+				crConfig.ContractAddress = contractAddress
+			}
+			if contractAbi, ok := runnerConfig["contractAbi"].(string); ok {
+				crConfig.ContractAbi = contractAbi
+			}
+
+			// Handle method calls
+			if methodCalls, ok := runnerConfig["methodCalls"].([]interface{}); ok {
+				for _, methodCallInterface := range methodCalls {
+					if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
+						methodCall := &avsproto.ContractReadNode_MethodCall{}
+						if callData, ok := methodCallMap["callData"].(string); ok {
+							methodCall.CallData = callData
+						}
+						if methodName, ok := methodCallMap["methodName"].(string); ok {
+							methodCall.MethodName = methodName
+						}
+						// Handle applyToFields for decimal formatting
+						if applyToFields, ok := methodCallMap["applyToFields"].([]interface{}); ok {
+							for _, field := range applyToFields {
+								if fieldStr, ok := field.(string); ok {
+									methodCall.ApplyToFields = append(methodCall.ApplyToFields, fieldStr)
+								}
+							}
+						}
+						crConfig.MethodCalls = append(crConfig.MethodCalls, methodCall)
+					}
+				}
+			}
+
+			loopNode.Runner = &avsproto.LoopNode_ContractRead{
+				ContractRead: &avsproto.ContractReadNode{Config: crConfig},
+			}
+		case "contractWrite":
+			cwConfig := &avsproto.ContractWriteNode_Config{}
+
+			// Extract contract configuration
+			if contractAddress, ok := runnerConfig["contractAddress"].(string); ok {
+				cwConfig.ContractAddress = contractAddress
+			}
+			if contractAbi, ok := runnerConfig["contractAbi"].(string); ok {
+				cwConfig.ContractAbi = contractAbi
+			}
+			if callData, ok := runnerConfig["callData"].(string); ok {
+				cwConfig.CallData = callData
+			}
+
+			// Handle method calls array
+			if methodCalls, ok := runnerConfig["methodCalls"].([]interface{}); ok {
+				for _, methodCallInterface := range methodCalls {
+					if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
+						methodCall := &avsproto.ContractWriteNode_MethodCall{}
+						if callData, ok := methodCallMap["callData"].(string); ok {
+							methodCall.CallData = callData
+						}
+						if methodName, ok := methodCallMap["methodName"].(string); ok {
+							methodCall.MethodName = methodName
+						}
+						cwConfig.MethodCalls = append(cwConfig.MethodCalls, methodCall)
+					}
+				}
+			}
+
+			loopNode.Runner = &avsproto.LoopNode_ContractWrite{
+				ContractWrite: &avsproto.ContractWriteNode{Config: cwConfig},
 			}
 		default:
 			return nil, fmt.Errorf("unsupported loop runner type: %s", runnerType)

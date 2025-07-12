@@ -95,7 +95,7 @@ func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) 
 	}
 
 	if contractAddress == "" {
-		return "", "", "", nil, fmt.Errorf("missing required configuration: contract_address")
+		return "", "", "", nil, fmt.Errorf("missing required configuration: contractAddress")
 	}
 
 	// Validate contract address format

@@ -206,6 +206,101 @@ func TestCreateNodeFromType_LoopExecutionMode_WithRestApiRunner(t *testing.T) {
 	assert.NotNil(t, loopNode.GetRestApi())
 }
 
+func TestCreateNodeFromType_LoopExecutionMode_WithContractReadRunner(t *testing.T) {
+	config := map[string]interface{}{
+		"sourceId":      "contractAddresses",
+		"iterVal":       "value",
+		"iterKey":       "index",
+		"executionMode": "sequential",
+		"runner": map[string]interface{}{
+			"type": "contractRead",
+			"data": map[string]interface{}{
+				"config": map[string]interface{}{
+					"contractAddress": "{{value}}",
+					"contractAbi":     `[{"constant":true,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"}]`,
+					"methodCalls": []interface{}{
+						map[string]interface{}{
+							"methodName": "totalSupply",
+							"callData":   "0x18160ddd",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	node, err := CreateNodeFromType(NodeTypeLoop, config, "test-contractread-loop-node")
+
+	require.NoError(t, err)
+	require.NotNil(t, node)
+	assert.Equal(t, avsproto.NodeType_NODE_TYPE_LOOP, node.Type)
+
+	loopNode := node.GetLoop()
+	require.NotNil(t, loopNode)
+	require.NotNil(t, loopNode.Config)
+
+	assert.Equal(t, "contractAddresses", loopNode.Config.SourceId)
+	assert.Equal(t, "value", loopNode.Config.IterVal)
+	assert.Equal(t, "index", loopNode.Config.IterKey)
+	assert.Equal(t, avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL, loopNode.Config.ExecutionMode)
+
+	// Verify the contract read runner is properly configured
+	contractRead := loopNode.GetContractRead()
+	require.NotNil(t, contractRead)
+	assert.Equal(t, "{{value}}", contractRead.Config.ContractAddress)
+	assert.NotEmpty(t, contractRead.Config.ContractAbi)
+	assert.Len(t, contractRead.Config.MethodCalls, 1)
+	assert.Equal(t, "totalSupply", contractRead.Config.MethodCalls[0].MethodName)
+}
+
+func TestCreateNodeFromType_LoopExecutionMode_WithContractWriteRunner(t *testing.T) {
+	config := map[string]interface{}{
+		"sourceId":      "contractAddresses",
+		"iterVal":       "value",
+		"iterKey":       "index",
+		"executionMode": "parallel", // Will be forced to sequential due to contract write
+		"runner": map[string]interface{}{
+			"type": "contractWrite",
+			"data": map[string]interface{}{
+				"config": map[string]interface{}{
+					"contractAddress": "{{value}}",
+					"contractAbi":     `[{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"}]`,
+					"methodCalls": []interface{}{
+						map[string]interface{}{
+							"methodName": "approve",
+							"callData":   "0x095ea7b3000000000000000000000000{{value}}0000000000000000000000000000000000000000000000000000000000000064",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	node, err := CreateNodeFromType(NodeTypeLoop, config, "test-contractwrite-loop-node")
+
+	require.NoError(t, err)
+	require.NotNil(t, node)
+	assert.Equal(t, avsproto.NodeType_NODE_TYPE_LOOP, node.Type)
+
+	loopNode := node.GetLoop()
+	require.NotNil(t, loopNode)
+	require.NotNil(t, loopNode.Config)
+
+	assert.Equal(t, "contractAddresses", loopNode.Config.SourceId)
+	assert.Equal(t, "value", loopNode.Config.IterVal)
+	assert.Equal(t, "index", loopNode.Config.IterKey)
+	// Note: executionMode is set at configuration time, the sequential enforcement happens at runtime
+	assert.Equal(t, avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL, loopNode.Config.ExecutionMode)
+
+	// Verify the contract write runner is properly configured
+	contractWrite := loopNode.GetContractWrite()
+	require.NotNil(t, contractWrite)
+	assert.Equal(t, "{{value}}", contractWrite.Config.ContractAddress)
+	assert.NotEmpty(t, contractWrite.Config.ContractAbi)
+	assert.Len(t, contractWrite.Config.MethodCalls, 1)
+	assert.Equal(t, "approve", contractWrite.Config.MethodCalls[0].MethodName)
+}
+
 func TestCreateNodeFromType_LoopExecutionMode_CamelCaseFields(t *testing.T) {
 	// Test that camelCase field names are the standard format
 	config := map[string]interface{}{
