@@ -66,12 +66,16 @@ func NewMetricsOnlyEconomicCollector(
 	if elReader != nil {
 		if el, ok := elReader.(*sdkelcontracts.ChainReader); ok {
 			elChainReader = el
+		} else {
+			wrappedLogger.Error("Failed type assertion for elReader: expected *sdkelcontracts.ChainReader")
 		}
 	}
 
 	if avsReader != nil {
 		if avs, ok := avsReader.(*sdkavsregistry.ChainReader); ok {
 			avsChainReader = avs
+		} else {
+			wrappedLogger.Error("Failed type assertion for avsReader: expected *sdkavsregistry.ChainReader")
 		}
 	}
 
