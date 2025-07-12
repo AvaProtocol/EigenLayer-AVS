@@ -35,14 +35,14 @@ func TestLoopProcessor_Execute_Sequential(t *testing.T) {
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
-			Source: "return loopItemValueForTest;",
+			Source: "return value;",
 		},
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
 			SourceId: "test_data_gen",
-			IterVal:  "loopItemValueForTest",
+			IterVal:  "value",
 			IterKey:  "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
@@ -86,14 +86,14 @@ func TestLoopProcessor_Execute_Parallel(t *testing.T) {
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
-			Source: "return loopItemValueForTest;",
+			Source: "return value;",
 		},
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
 			SourceId: "test_data_gen",
-			IterVal:  "loopItemValueForTest",
+			IterVal:  "value",
 			IterKey:  "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
@@ -141,14 +141,14 @@ func TestLoopProcessor_Execute_EmptyArray(t *testing.T) {
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
-			Source: "return loopItemValueForTest;",
+			Source: "return value;",
 		},
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
 			SourceId: "test_data_gen_empty",
-			IterVal:  "loopItemValueForTest",
+			IterVal:  "value",
 			IterKey:  "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
@@ -186,14 +186,14 @@ func TestLoopProcessor_Execute_InvalidInput(t *testing.T) {
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
-			Source: "return loopItemValueForTest;",
+			Source: "return value;",
 		},
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
 			SourceId: "test_data_gen_invalid",
-			IterVal:  "loopItemValueForTest",
+			IterVal:  "value",
 			IterKey:  "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
@@ -220,14 +220,14 @@ func TestLoopProcessor_Execute_MissingInput(t *testing.T) {
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
-			Source: "return loopItemValueForTest;",
+			Source: "return value;",
 		},
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
 			SourceId: "test_data_gen_missing",
-			IterVal:  "loopItemValueForTest",
+			IterVal:  "value",
 			IterKey:  "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
@@ -259,14 +259,14 @@ func TestLoopProcessor_Execute_ParallelMode(t *testing.T) {
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
-			Source: "return loopItemValueForTest * 2;", // Simple operation for testing
+			Source: "return value * 2;", // Simple operation for testing
 		},
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
 			SourceId:      "test_data_gen",
-			IterVal:       "loopItemValueForTest",
+			IterVal:       "value",
 			IterKey:       "index",
 			ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL,
 		},
@@ -308,14 +308,14 @@ func TestLoopProcessor_Execute_SequentialMode(t *testing.T) {
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
-			Source: "return loopItemValueForTest * 3;", // Simple operation for testing
+			Source: "return value * 3;", // Simple operation for testing
 		},
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
 			SourceId:      "test_data_gen",
-			IterVal:       "loopItemValueForTest",
+			IterVal:       "value",
 			IterKey:       "index",
 			ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL,
 		},
@@ -364,7 +364,7 @@ func TestLoopProcessor_Execute_ContractWriteAlwaysSequential(t *testing.T) {
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
 			SourceId:      "test_data_gen",
-			IterVal:       "loopItemValueForTest",
+			IterVal:       "value",
 			IterKey:       "index",
 			ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL, // Set to parallel
 		},
@@ -399,14 +399,14 @@ func TestLoopProcessor_Execute_DefaultExecutionMode(t *testing.T) {
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
-			Source: "return loopItemValueForTest;",
+			Source: "return value;",
 		},
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
 			SourceId: "test_data_gen",
-			IterVal:  "loopItemValueForTest",
+			IterVal:  "value",
 			IterKey:  "index",
 			// ExecutionMode not set - should default to sequential (safer default)
 		},

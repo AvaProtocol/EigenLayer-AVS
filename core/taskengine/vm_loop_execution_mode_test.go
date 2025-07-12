@@ -18,7 +18,7 @@ func TestCreateNodeFromType_LoopExecutionMode_Sequential(t *testing.T) {
 			"type": "customCode",
 			"data": map[string]interface{}{
 				"config": map[string]interface{}{
-					"source": "return item * 2;",
+					"source": "return value * 2;",
 					"lang":   "javascript",
 				},
 			},
@@ -54,7 +54,7 @@ func TestCreateNodeFromType_LoopExecutionMode_Parallel(t *testing.T) {
 			"type": "customCode",
 			"data": map[string]interface{}{
 				"config": map[string]interface{}{
-					"source": "return item * 3;",
+					"source": "return value * 3;",
 					"lang":   "javascript",
 				},
 			},
@@ -73,35 +73,6 @@ func TestCreateNodeFromType_LoopExecutionMode_Parallel(t *testing.T) {
 	assert.Equal(t, avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL, loopNode.Config.ExecutionMode)
 }
 
-func TestCreateNodeFromType_LoopExecutionMode_CamelCase(t *testing.T) {
-	config := map[string]interface{}{
-		"sourceId":      "testSource",
-		"iterVal":       "item",
-		"iterKey":       "index",
-		"executionMode": "sequential", // camelCase version
-		"runner": map[string]interface{}{
-			"type": "customCode",
-			"data": map[string]interface{}{
-				"config": map[string]interface{}{
-					"source": "return item;",
-					"lang":   "javascript",
-				},
-			},
-		},
-	}
-
-	node, err := CreateNodeFromType(NodeTypeLoop, config, "test-loop-node")
-
-	require.NoError(t, err)
-	require.NotNil(t, node)
-
-	loopNode := node.GetLoop()
-	require.NotNil(t, loopNode)
-	require.NotNil(t, loopNode.Config)
-
-	assert.Equal(t, avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL, loopNode.Config.ExecutionMode)
-}
-
 func TestCreateNodeFromType_LoopExecutionMode_Default(t *testing.T) {
 	config := map[string]interface{}{
 		"source_id": "testSource",
@@ -112,7 +83,7 @@ func TestCreateNodeFromType_LoopExecutionMode_Default(t *testing.T) {
 			"type": "customCode",
 			"data": map[string]interface{}{
 				"config": map[string]interface{}{
-					"source": "return item;",
+					"source": "return value;",
 					"lang":   "javascript",
 				},
 			},
@@ -141,7 +112,7 @@ func TestCreateNodeFromType_LoopExecutionMode_InvalidValue(t *testing.T) {
 			"type": "customCode",
 			"data": map[string]interface{}{
 				"config": map[string]interface{}{
-					"source": "return item;",
+					"source": "return value;",
 					"lang":   "javascript",
 				},
 			},
@@ -184,7 +155,7 @@ func TestCreateNodeFromType_LoopExecutionMode_CaseInsensitive(t *testing.T) {
 					"type": "customCode",
 					"data": map[string]interface{}{
 						"config": map[string]interface{}{
-							"source": "return item;",
+							"source": "return value;",
 							"lang":   "javascript",
 						},
 					},
@@ -235,32 +206,34 @@ func TestCreateNodeFromType_LoopExecutionMode_WithRestApiRunner(t *testing.T) {
 	assert.NotNil(t, loopNode.GetRestApi())
 }
 
-// TestCreateNodeFromType_LoopExecutionMode_BackwardCompatibility tests that
-// the old loop structure (without runner field) still works
-func TestCreateNodeFromType_LoopExecutionMode_BackwardCompatibility(t *testing.T) {
+func TestCreateNodeFromType_LoopExecutionMode_CamelCaseFields(t *testing.T) {
+	// Test that camelCase field names are supported for backward compatibility
 	config := map[string]interface{}{
-		"source_id":      "testSource",
-		"iter_val":       "item",
-		"iter_key":       "index",
-		"execution_mode": "sequential",
-		// Using old structure for backward compatibility
-		"customCode": map[string]interface{}{
-			"config": map[string]interface{}{
-				"source": "return item;",
-				"lang":   "javascript",
+		"sourceId":      "testSource",
+		"iterVal":       "value",
+		"iterKey":       "index",
+		"executionMode": "sequential",
+		"runner": map[string]interface{}{
+			"type": "customCode",
+			"data": map[string]interface{}{
+				"config": map[string]interface{}{
+					"source": "return { doubled: item * 2 };",
+					"lang":   "javascript",
+				},
 			},
 		},
 	}
 
-	node, err := CreateNodeFromType(NodeTypeLoop, config, "test-loop-node")
+	node, err := CreateNodeFromType("loop", config, "testNodeId")
+	assert.NoError(t, err)
+	assert.NotNil(t, node)
+	assert.Equal(t, avsproto.NodeType_NODE_TYPE_LOOP, node.Type)
 
-	require.NoError(t, err)
-	require.NotNil(t, node)
-
-	loopNode := node.GetLoop()
-	require.NotNil(t, loopNode)
-	require.NotNil(t, loopNode.Config)
-
+	loopNode := node.TaskType.(*avsproto.TaskNode_Loop).Loop
+	assert.NotNil(t, loopNode)
+	assert.NotNil(t, loopNode.Config)
+	assert.Equal(t, "testSource", loopNode.Config.SourceId)
+	assert.Equal(t, "value", loopNode.Config.IterVal)
+	assert.Equal(t, "index", loopNode.Config.IterKey)
 	assert.Equal(t, avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL, loopNode.Config.ExecutionMode)
-	assert.NotNil(t, loopNode.GetCustomCode())
 }

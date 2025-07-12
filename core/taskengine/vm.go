@@ -1991,37 +1991,48 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		// Create loop node with proper configuration
 		loopConfig := &avsproto.LoopNode_Config{}
 
-		// Support both snake_case and camelCase for backward compatibility
-		if sourceId, ok := config["source_id"].(string); ok {
-			loopConfig.SourceId = sourceId
-		} else if sourceId, ok := config["sourceId"].(string); ok {
-			loopConfig.SourceId = sourceId
+		// Extract required configuration fields with backward compatibility
+		// Try snake_case first, then camelCase for backward compatibility
+		var sourceId string
+		if val, ok := config["source_id"].(string); ok {
+			sourceId = val
+		} else if val, ok := config["sourceId"].(string); ok {
+			sourceId = val
+		} else {
+			return nil, fmt.Errorf("loop node requires 'source_id' or 'sourceId' field")
+		}
+		loopConfig.SourceId = sourceId
+
+		var iterVal string
+		if val, ok := config["iter_val"].(string); ok {
+			iterVal = val
+		} else if val, ok := config["iterVal"].(string); ok {
+			iterVal = val
+		} else {
+			return nil, fmt.Errorf("loop node requires 'iter_val' or 'iterVal' field")
+		}
+		loopConfig.IterVal = iterVal
+
+		var iterKey string
+		if val, ok := config["iter_key"].(string); ok {
+			iterKey = val
+		} else if val, ok := config["iterKey"].(string); ok {
+			iterKey = val
+		} else {
+			return nil, fmt.Errorf("loop node requires 'iter_key' or 'iterKey' field")
+		}
+		loopConfig.IterKey = iterKey
+
+		// Handle execution_mode parameter with backward compatibility
+		var executionModeStr string
+		if val, ok := config["execution_mode"].(string); ok {
+			executionModeStr = val
+		} else if val, ok := config["executionMode"].(string); ok {
+			executionModeStr = val
 		}
 
-		if iterVal, ok := config["iter_val"].(string); ok {
-			loopConfig.IterVal = iterVal
-		} else if iterVal, ok := config["iterVal"].(string); ok {
-			loopConfig.IterVal = iterVal
-		}
-
-		if iterKey, ok := config["iter_key"].(string); ok {
-			loopConfig.IterKey = iterKey
-		} else if iterKey, ok := config["iterKey"].(string); ok {
-			loopConfig.IterKey = iterKey
-		}
-
-		// Handle execution_mode parameter
-		if executionMode, ok := config["execution_mode"].(string); ok {
-			switch strings.ToLower(executionMode) {
-			case "sequential":
-				loopConfig.ExecutionMode = avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL
-			case "parallel":
-				loopConfig.ExecutionMode = avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL
-			default:
-				loopConfig.ExecutionMode = avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL // Default to sequential for safety
-			}
-		} else if executionMode, ok := config["executionMode"].(string); ok {
-			switch strings.ToLower(executionMode) {
+		if executionModeStr != "" {
+			switch strings.ToLower(executionModeStr) {
 			case "sequential":
 				loopConfig.ExecutionMode = avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL
 			case "parallel":
@@ -2039,141 +2050,88 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			Config: loopConfig,
 		}
 
-		// Check for the new runner field structure first
-		if runner, ok := config["runner"].(map[string]interface{}); ok {
-			runnerType, hasType := runner["type"].(string)
-			runnerData, hasData := runner["data"].(map[string]interface{})
-
-			if hasType && hasData {
-				if runnerConfig, hasConfig := runnerData["config"].(map[string]interface{}); hasConfig {
-					switch runnerType {
-					case "customCode":
-						ccConfig := &avsproto.CustomCodeNode_Config{}
-						if source, ok := runnerConfig["source"].(string); ok {
-							ccConfig.Source = source
-						}
-						if lang, ok := runnerConfig["lang"].(string); ok {
-							switch strings.ToLower(lang) {
-							case "javascript", "js":
-								ccConfig.Lang = avsproto.Lang_JavaScript
-							default:
-								ccConfig.Lang = avsproto.Lang_JavaScript
-							}
-						} else {
-							ccConfig.Lang = avsproto.Lang_JavaScript
-						}
-						loopNode.Runner = &avsproto.LoopNode_CustomCode{
-							CustomCode: &avsproto.CustomCodeNode{Config: ccConfig},
-						}
-					case "restApi":
-						rConfig := &avsproto.RestAPINode_Config{}
-						if url, ok := runnerConfig["url"].(string); ok {
-							rConfig.Url = url
-						}
-						if method, ok := runnerConfig["method"].(string); ok {
-							rConfig.Method = method
-						}
-						if body, ok := runnerConfig["body"].(string); ok {
-							rConfig.Body = body
-						}
-
-						// Handle headers
-						if headersMap, ok := runnerConfig["headersMap"].([][]string); ok {
-							headers := make(map[string]string)
-							for _, header := range headersMap {
-								if len(header) == 2 {
-									headers[header[0]] = header[1]
-								}
-							}
-							rConfig.Headers = headers
-						} else if headersAny, ok := runnerConfig["headersMap"].([]interface{}); ok {
-							headers := make(map[string]string)
-							for _, headerAny := range headersAny {
-								if headerSlice, ok := headerAny.([]interface{}); ok && len(headerSlice) == 2 {
-									if key, ok := headerSlice[0].(string); ok {
-										if value, ok := headerSlice[1].(string); ok {
-											headers[key] = value
-										}
-									}
-								}
-							}
-							rConfig.Headers = headers
-						}
-
-						loopNode.Runner = &avsproto.LoopNode_RestApi{
-							RestApi: &avsproto.RestAPINode{Config: rConfig},
-						}
-					}
-				}
-			}
-		} else {
-			// Fallback to the old structure for backward compatibility
-			if customCode, ok := config["customCode"].(map[string]interface{}); ok {
-				if customConfig, ok := customCode["config"].(map[string]interface{}); ok {
-					ccConfig := &avsproto.CustomCodeNode_Config{}
-					if source, ok := customConfig["source"].(string); ok {
-						ccConfig.Source = source
-					}
-					if lang, ok := customConfig["lang"].(string); ok {
-						switch strings.ToLower(lang) {
-						case "javascript", "js":
-							ccConfig.Lang = avsproto.Lang_JavaScript
-						default:
-							ccConfig.Lang = avsproto.Lang_JavaScript
-						}
-					} else {
-						ccConfig.Lang = avsproto.Lang_JavaScript
-					}
-					loopNode.Runner = &avsproto.LoopNode_CustomCode{
-						CustomCode: &avsproto.CustomCodeNode{Config: ccConfig},
-					}
-				}
-			} else if restApi, ok := config["restApi"].(map[string]interface{}); ok {
-				if restConfig, ok := restApi["config"].(map[string]interface{}); ok {
-					rConfig := &avsproto.RestAPINode_Config{}
-					if url, ok := restConfig["url"].(string); ok {
-						rConfig.Url = url
-					}
-					if method, ok := restConfig["method"].(string); ok {
-						rConfig.Method = method
-					}
-					if body, ok := restConfig["body"].(string); ok {
-						rConfig.Body = body
-					}
-
-					// Handle headers
-					if headersMap, ok := restConfig["headersMap"].([][]string); ok {
-						headers := make(map[string]string)
-						for _, header := range headersMap {
-							if len(header) == 2 {
-								headers[header[0]] = header[1]
-							}
-						}
-						rConfig.Headers = headers
-					} else if headersAny, ok := restConfig["headersMap"].([]interface{}); ok {
-						headers := make(map[string]string)
-						for _, headerAny := range headersAny {
-							if headerSlice, ok := headerAny.([]interface{}); ok && len(headerSlice) == 2 {
-								if key, ok := headerSlice[0].(string); ok {
-									if value, ok := headerSlice[1].(string); ok {
-										headers[key] = value
-									}
-								}
-							}
-						}
-						rConfig.Headers = headers
-					}
-
-					loopNode.Runner = &avsproto.LoopNode_RestApi{
-						RestApi: &avsproto.RestAPINode{Config: rConfig},
-					}
-				}
-			}
+		// Extract runner configuration (required)
+		runner, ok := config["runner"].(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("loop node requires 'runner' field with nested runner configuration")
 		}
 
-		// Validate that a runner is provided to prevent nil-pointer dereference
+		runnerType, hasType := runner["type"].(string)
+		runnerData, hasData := runner["data"].(map[string]interface{})
+
+		if !hasType || !hasData {
+			return nil, fmt.Errorf("loop node runner requires 'type' and 'data' fields")
+		}
+
+		runnerConfig, hasConfig := runnerData["config"].(map[string]interface{})
+		if !hasConfig {
+			return nil, fmt.Errorf("loop node runner data requires 'config' field")
+		}
+
+		switch runnerType {
+		case "customCode":
+			ccConfig := &avsproto.CustomCodeNode_Config{}
+			if source, ok := runnerConfig["source"].(string); ok {
+				ccConfig.Source = source
+			}
+			if lang, ok := runnerConfig["lang"].(string); ok {
+				switch strings.ToLower(lang) {
+				case "javascript", "js":
+					ccConfig.Lang = avsproto.Lang_JavaScript
+				default:
+					ccConfig.Lang = avsproto.Lang_JavaScript
+				}
+			} else {
+				ccConfig.Lang = avsproto.Lang_JavaScript
+			}
+			loopNode.Runner = &avsproto.LoopNode_CustomCode{
+				CustomCode: &avsproto.CustomCodeNode{Config: ccConfig},
+			}
+		case "restApi":
+			rConfig := &avsproto.RestAPINode_Config{}
+			if url, ok := runnerConfig["url"].(string); ok {
+				rConfig.Url = url
+			}
+			if method, ok := runnerConfig["method"].(string); ok {
+				rConfig.Method = method
+			}
+			if body, ok := runnerConfig["body"].(string); ok {
+				rConfig.Body = body
+			}
+
+			// Handle headers
+			if headersMap, ok := runnerConfig["headersMap"].([][]string); ok {
+				headers := make(map[string]string)
+				for _, header := range headersMap {
+					if len(header) == 2 {
+						headers[header[0]] = header[1]
+					}
+				}
+				rConfig.Headers = headers
+			} else if headersAny, ok := runnerConfig["headersMap"].([]interface{}); ok {
+				headers := make(map[string]string)
+				for _, headerAny := range headersAny {
+					if headerSlice, ok := headerAny.([]interface{}); ok && len(headerSlice) == 2 {
+						if key, ok := headerSlice[0].(string); ok {
+							if value, ok := headerSlice[1].(string); ok {
+								headers[key] = value
+							}
+						}
+					}
+				}
+				rConfig.Headers = headers
+			}
+
+			loopNode.Runner = &avsproto.LoopNode_RestApi{
+				RestApi: &avsproto.RestAPINode{Config: rConfig},
+			}
+		default:
+			return nil, fmt.Errorf("unsupported loop runner type: %s", runnerType)
+		}
+
+		// Validate that a runner is provided
 		if loopNode.Runner == nil {
-			return nil, fmt.Errorf("loop node must have a runner configuration (either using new 'runner' field or legacy 'customCode'/'restApi' fields)")
+			return nil, fmt.Errorf("loop node must have a valid runner configuration")
 		}
 
 		node.TaskType = &avsproto.TaskNode_Loop{
