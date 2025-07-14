@@ -178,3 +178,88 @@ func TestExecutionCountPersistence(t *testing.T) {
 		assert.Equal(t, avsproto.TaskStatus_Completed, newTask.Status, "Task should be completed when max execution is reached")
 	})
 }
+
+func TestEnsureInitialized(t *testing.T) {
+	t.Run("should accept valid Status field", func(t *testing.T) {
+		task := &Task{
+			Task: &avsproto.Task{
+				Id:                 "test-task-id",
+				Owner:              "0x1234567890123456789012345678901234567890",
+				SmartWalletAddress: "0x0987654321098765432109876543210987654321",
+				Status:             avsproto.TaskStatus_Active, // Valid status
+			},
+		}
+
+		err := task.EnsureInitialized()
+		assert.NoError(t, err, "EnsureInitialized should not error")
+		assert.Equal(t, avsproto.TaskStatus_Active, task.Status, "Status should remain Active")
+	})
+
+	t.Run("should preserve existing valid Status", func(t *testing.T) {
+		task := &Task{
+			Task: &avsproto.Task{
+				Id:                 "test-task-id",
+				Owner:              "0x1234567890123456789012345678901234567890",
+				SmartWalletAddress: "0x0987654321098765432109876543210987654321",
+				Status:             avsproto.TaskStatus_Completed,
+			},
+		}
+
+		err := task.EnsureInitialized()
+		assert.NoError(t, err, "EnsureInitialized should not error")
+		assert.Equal(t, avsproto.TaskStatus_Completed, task.Status, "Existing valid status should be preserved")
+	})
+
+	t.Run("should return error for missing critical fields", func(t *testing.T) {
+		task := &Task{
+			Task: &avsproto.Task{
+				Id:     "", // Missing ID - this is critical for storage and logging
+				Owner:  "0x1234567890123456789012345678901234567890",
+				Status: avsproto.TaskStatus_Active,
+			},
+		}
+
+		err := task.EnsureInitialized()
+		assert.Error(t, err, "EnsureInitialized should error for missing ID")
+		assert.Contains(t, err.Error(), "task ID cannot be empty")
+	})
+
+	t.Run("should return error for nil Task", func(t *testing.T) {
+		task := &Task{
+			Task: nil,
+		}
+
+		err := task.EnsureInitialized()
+		assert.Error(t, err, "EnsureInitialized should error for nil Task")
+		assert.Contains(t, err.Error(), "task protobuf struct is nil")
+	})
+}
+
+func TestFromStorageDataWithValidation(t *testing.T) {
+	t.Run("should properly initialize task from valid storage data", func(t *testing.T) {
+		// Create a task with valid data
+		originalTask := &Task{
+			Task: &avsproto.Task{
+				Id:                 "test-task-id",
+				Owner:              "0x1234567890123456789012345678901234567890",
+				SmartWalletAddress: "0x0987654321098765432109876543210987654321",
+				Status:             avsproto.TaskStatus_Active,
+				StartAt:            time.Now().UnixMilli(),
+				MaxExecution:       1,
+			},
+		}
+
+		// Serialize it
+		jsonData, err := originalTask.ToJSON()
+		assert.NoError(t, err, "ToJSON should not error")
+
+		// Simulate loading from storage with potential status corruption
+		// (In real scenarios, corrupt data might have missing/invalid Status)
+		loadedTask := NewTask()
+		err = loadedTask.FromStorageData(jsonData)
+		assert.NoError(t, err, "FromStorageData should not error")
+		assert.Equal(t, avsproto.TaskStatus_Active, loadedTask.Status, "Status should be properly initialized")
+		assert.Equal(t, originalTask.Id, loadedTask.Id, "ID should be preserved")
+		assert.Equal(t, originalTask.Owner, loadedTask.Owner, "Owner should be preserved")
+	})
+}
