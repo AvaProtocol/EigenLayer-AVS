@@ -307,7 +307,9 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	responseData := r.processResponse(response)
 
 	// Convert the response to protobuf Value for storage
-	valueData, err := structpb.NewValue(responseData)
+	// Use convertToProtobufCompatible to handle []string values in headers
+	compatibleData := convertToProtobufCompatible(responseData)
+	valueData, err := structpb.NewValue(compatibleData)
 	if err != nil {
 		if r.vm.logger != nil {
 			r.vm.logger.Error("Failed to convert response to protobuf Value", "error", err)
