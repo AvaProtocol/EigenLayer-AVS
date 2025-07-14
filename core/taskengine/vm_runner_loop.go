@@ -129,30 +129,9 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 				}
 			}
 
-			// If no "data" field or it's not an array, look for any field containing an array
+			// If no "data" field or it's not an array, error out
 			if !ok {
-				log.WriteString(fmt.Sprintf("\nSearching for arrays in top-level fields of: %+v", varMap))
-				for fieldName, fieldValue := range varMap {
-					if dataArr, isArr := fieldValue.([]interface{}); isArr {
-						inputArray = dataArr
-						ok = true
-						log.WriteString(fmt.Sprintf("\nFound array in '%s' field with %d items", fieldName, len(dataArr)))
-						break
-					} else if nestedMap, isMap := fieldValue.(map[string]interface{}); isMap {
-						// Look for arrays in nested maps
-						for nestedFieldName, nestedFieldValue := range nestedMap {
-							if dataArr, isArr := nestedFieldValue.([]interface{}); isArr {
-								inputArray = dataArr
-								ok = true
-								log.WriteString(fmt.Sprintf("\nFound array in nested '%s.%s' field with %d items", fieldName, nestedFieldName, len(dataArr)))
-								break
-							}
-						}
-						if ok {
-							break
-						}
-					}
-				}
+				log.WriteString(fmt.Sprintf("\nData field is not an array: %+v", varMap["data"]))
 			}
 		}
 	} else {
@@ -160,7 +139,7 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	}
 
 	if !ok {
-		err := fmt.Errorf("input %s is not an array and no array field found in output", inputName)
+		err := fmt.Errorf("loop input must be an array")
 		s.Success = false
 		s.Error = err.Error()
 		s.EndAt = time.Now().UnixMilli()
@@ -171,10 +150,20 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 
 	log.WriteString(fmt.Sprintf("\nIterating through %d items", len(inputArray)))
 
-	runInParallel := true
+	// Determine execution mode based on configuration
+	executionMode := node.Config.ExecutionMode
+	runInParallel := (executionMode == avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL)
+
+	// Always run sequentially for ContractWrite operations (security requirement)
 	if node.GetContractWrite() != nil {
 		runInParallel = false
-		log.WriteString("\nRunning iterations sequentially due to contract write operation")
+		log.WriteString("\nRunning iterations sequentially due to contract write operation (security requirement)")
+	} else {
+		if runInParallel {
+			log.WriteString("\nRunning iterations in parallel mode")
+		} else {
+			log.WriteString("\nRunning iterations in sequential mode")
+		}
 	}
 
 	results := make([]interface{}, 0, len(inputArray))
@@ -355,16 +344,20 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 			TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: ethTransfer},
 		}
 	} else if contractWrite := loopNodeDef.GetContractWrite(); contractWrite != nil {
+		// Apply template variable substitution to contract write configuration
+		processedContractWrite := r.processContractWriteTemplates(contractWrite, iterInputs)
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
-			TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: contractWrite},
+			TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: processedContractWrite},
 		}
 	} else if contractRead := loopNodeDef.GetContractRead(); contractRead != nil {
+		// Apply template variable substitution to contract read configuration
+		processedContractRead := r.processContractReadTemplates(contractRead, iterInputs)
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
-			TaskType: &avsproto.TaskNode_ContractRead{ContractRead: contractRead},
+			TaskType: &avsproto.TaskNode_ContractRead{ContractRead: processedContractRead},
 		}
 	} else if graphqlQuery := loopNodeDef.GetGraphqlDataQuery(); graphqlQuery != nil {
 		nestedNode = &avsproto.TaskNode{
@@ -373,10 +366,12 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 			TaskType: &avsproto.TaskNode_GraphqlQuery{GraphqlQuery: graphqlQuery},
 		}
 	} else if restApi := loopNodeDef.GetRestApi(); restApi != nil {
+		// Apply template variable substitution to REST API configuration
+		processedRestApi := r.processRestApiTemplates(restApi, iterInputs)
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
-			TaskType: &avsproto.TaskNode_RestApi{RestApi: restApi},
+			TaskType: &avsproto.TaskNode_RestApi{RestApi: processedRestApi},
 		}
 	} else if customCode := loopNodeDef.GetCustomCode(); customCode != nil {
 		nestedNode = &avsproto.TaskNode{
@@ -651,4 +646,99 @@ func parseGoMapString(s string) interface{} {
 
 	// If parsing fails, return nil so caller can use string representation
 	return nil
+}
+
+// processContractReadTemplates processes template variables in contract read configuration
+func (r *LoopProcessor) processContractReadTemplates(contractRead *avsproto.ContractReadNode, iterInputs map[string]interface{}) *avsproto.ContractReadNode {
+	// Create a copy of the contract read configuration
+	processed := &avsproto.ContractReadNode{
+		Config: &avsproto.ContractReadNode_Config{
+			ContractAddress: r.substituteTemplateVariables(contractRead.Config.ContractAddress, iterInputs),
+			ContractAbi:     r.substituteTemplateVariables(contractRead.Config.ContractAbi, iterInputs),
+		},
+	}
+
+	// Process method calls
+	for _, methodCall := range contractRead.Config.MethodCalls {
+		processedMethodCall := &avsproto.ContractReadNode_MethodCall{
+			CallData:      r.substituteTemplateVariables(methodCall.CallData, iterInputs),
+			MethodName:    r.substituteTemplateVariables(methodCall.MethodName, iterInputs),
+			ApplyToFields: make([]string, len(methodCall.ApplyToFields)),
+		}
+
+		// Copy applyToFields (no template substitution needed for field names)
+		copy(processedMethodCall.ApplyToFields, methodCall.ApplyToFields)
+
+		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
+	}
+
+	return processed
+}
+
+// processContractWriteTemplates processes template variables in contract write configuration
+func (r *LoopProcessor) processContractWriteTemplates(contractWrite *avsproto.ContractWriteNode, iterInputs map[string]interface{}) *avsproto.ContractWriteNode {
+	// Create a copy of the contract write configuration
+	processed := &avsproto.ContractWriteNode{
+		Config: &avsproto.ContractWriteNode_Config{
+			ContractAddress: r.substituteTemplateVariables(contractWrite.Config.ContractAddress, iterInputs),
+			ContractAbi:     r.substituteTemplateVariables(contractWrite.Config.ContractAbi, iterInputs),
+			CallData:        r.substituteTemplateVariables(contractWrite.Config.CallData, iterInputs),
+		},
+	}
+
+	// Process method calls
+	for _, methodCall := range contractWrite.Config.MethodCalls {
+		processedMethodCall := &avsproto.ContractWriteNode_MethodCall{
+			CallData:   r.substituteTemplateVariables(methodCall.CallData, iterInputs),
+			MethodName: r.substituteTemplateVariables(methodCall.MethodName, iterInputs),
+		}
+
+		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
+	}
+
+	return processed
+}
+
+// processRestApiTemplates processes template variables in REST API configuration
+func (r *LoopProcessor) processRestApiTemplates(restApi *avsproto.RestAPINode, iterInputs map[string]interface{}) *avsproto.RestAPINode {
+	// Create a copy of the REST API configuration
+	processed := &avsproto.RestAPINode{
+		Config: &avsproto.RestAPINode_Config{
+			Url:    r.substituteTemplateVariables(restApi.Config.Url, iterInputs),
+			Method: r.substituteTemplateVariables(restApi.Config.Method, iterInputs),
+			Body:   r.substituteTemplateVariables(restApi.Config.Body, iterInputs),
+		},
+	}
+
+	// Process headers
+	if restApi.Config.Headers != nil {
+		processed.Config.Headers = make(map[string]string)
+		for key, value := range restApi.Config.Headers {
+			processedKey := r.substituteTemplateVariables(key, iterInputs)
+			processedValue := r.substituteTemplateVariables(value, iterInputs)
+			processed.Config.Headers[processedKey] = processedValue
+		}
+	}
+
+	return processed
+}
+
+// substituteTemplateVariables replaces template variables like {{value}} and {{index}} with actual values
+func (r *LoopProcessor) substituteTemplateVariables(text string, iterInputs map[string]interface{}) string {
+	if text == "" {
+		return text
+	}
+
+	// Simple template variable substitution
+	// Replace {{value}} with the current iteration value
+	// Replace {{index}} with the current iteration index
+	result := text
+
+	for varName, varValue := range iterInputs {
+		placeholder := fmt.Sprintf("{{%s}}", varName)
+		replacement := fmt.Sprintf("%v", varValue)
+		result = strings.ReplaceAll(result, placeholder, replacement)
+	}
+
+	return result
 }

@@ -32,7 +32,9 @@ func GenerateTaskID() string {
 
 func NewTask() *Task {
 	return &Task{
-		Task: &avsproto.Task{},
+		Task: &avsproto.Task{
+			Status: avsproto.TaskStatus_Active, // Initialize with default status
+		},
 	}
 }
 
@@ -98,7 +100,37 @@ func (t *Task) ToJSON() ([]byte, error) {
 func (t *Task) FromStorageData(body []byte) error {
 	// err := json.Unmarshal(body, t)
 	err := protojson.Unmarshal(body, t.Task)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Ensure task is properly initialized after loading from storage
+	return t.EnsureInitialized()
+}
+
+// EnsureInitialized validates and fixes critical fields that must be set
+// This should be called after loading tasks from storage to ensure data integrity
+func (t *Task) EnsureInitialized() error {
+	if t.Task == nil {
+		return fmt.Errorf("task protobuf struct is nil")
+	}
+
+	// The original crash was caused by calling .String() on uninitialized protobuf enums
+	// For TaskStatus enum, the zero value (0) corresponds to Active, which is valid
+	// The main issue was when the entire protobuf message wasn't properly initialized
+	// By ensuring t.Task is not nil above, we prevent the original crash
+
+	// Only validate truly critical fields that cause runtime crashes
+	// Don't validate business logic fields like Owner, as tests may use empty values
+	if t.Task.Id == "" {
+		// Empty ID can cause issues in storage keys and logging
+		return fmt.Errorf("task ID cannot be empty")
+	}
+
+	// For production safety, we could log warnings for missing non-critical fields
+	// but don't fail initialization to maintain backward compatibility
+
+	return nil
 }
 
 // Return a compact json ready to persist to storage

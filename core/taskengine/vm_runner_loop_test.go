@@ -35,14 +35,14 @@ func TestLoopProcessor_Execute_Sequential(t *testing.T) {
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
-			Source: "return loopItemValueForTest;",
+			Source: "return value;",
 		},
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
 			SourceId: "test_data_gen",
-			IterVal:  "loopItemValueForTest",
+			IterVal:  "value",
 			IterKey:  "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
@@ -86,14 +86,14 @@ func TestLoopProcessor_Execute_Parallel(t *testing.T) {
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
-			Source: "return loopItemValueForTest;",
+			Source: "return value;",
 		},
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
 			SourceId: "test_data_gen",
-			IterVal:  "loopItemValueForTest",
+			IterVal:  "value",
 			IterKey:  "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
@@ -141,14 +141,14 @@ func TestLoopProcessor_Execute_EmptyArray(t *testing.T) {
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
-			Source: "return loopItemValueForTest;",
+			Source: "return value;",
 		},
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
 			SourceId: "test_data_gen_empty",
-			IterVal:  "loopItemValueForTest",
+			IterVal:  "value",
 			IterKey:  "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
@@ -186,14 +186,14 @@ func TestLoopProcessor_Execute_InvalidInput(t *testing.T) {
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
-			Source: "return loopItemValueForTest;",
+			Source: "return value;",
 		},
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
 			SourceId: "test_data_gen_invalid",
-			IterVal:  "loopItemValueForTest",
+			IterVal:  "value",
 			IterKey:  "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
@@ -205,7 +205,7 @@ func TestLoopProcessor_Execute_InvalidInput(t *testing.T) {
 
 	assert.Error(t, err, "Expected an error for invalid input type")
 	assert.False(t, executionLog.Success, "Execution should not be successful")
-	assert.Contains(t, executionLog.Error, "is not an array", "Error message should indicate input is not an array")
+	assert.Contains(t, executionLog.Error, "must be an array", "Error message should indicate input must be an array")
 }
 
 func TestLoopProcessor_Execute_MissingInput(t *testing.T) {
@@ -220,14 +220,14 @@ func TestLoopProcessor_Execute_MissingInput(t *testing.T) {
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
 			Lang:   avsproto.Lang_JavaScript,
-			Source: "return loopItemValueForTest;",
+			Source: "return value;",
 		},
 	}
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
 			SourceId: "test_data_gen_missing",
-			IterVal:  "loopItemValueForTest",
+			IterVal:  "value",
 			IterKey:  "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
@@ -240,4 +240,184 @@ func TestLoopProcessor_Execute_MissingInput(t *testing.T) {
 	assert.Error(t, err, "Expected an error for missing input variable")
 	assert.False(t, executionLog.Success, "Execution should not be successful")
 	assert.Contains(t, executionLog.Error, "not found", "Error message should indicate input variable not found")
+}
+
+func TestLoopProcessor_Execute_ParallelMode(t *testing.T) {
+	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
+	processor := NewLoopProcessor(vm)
+
+	testArray := []interface{}{1.0, 2.0, 3.0, 4.0, 5.0}
+	vm.AddVar("testArray", map[string]interface{}{
+		"data": testArray,
+	})
+
+	// Create a mock data generation node for testing
+	dataGenNode := createMockTaskNode("test_data_gen", "testArray", avsproto.NodeType_NODE_TYPE_CUSTOM_CODE)
+	vm.TaskNodes["test_data_gen"] = dataGenNode
+
+	customCode := &avsproto.CustomCodeNode{
+		Config: &avsproto.CustomCodeNode_Config{
+			Lang:   avsproto.Lang_JavaScript,
+			Source: "return value * 2;", // Simple operation for testing
+		},
+	}
+
+	loopNode := &avsproto.LoopNode{
+		Config: &avsproto.LoopNode_Config{
+			SourceId:      "test_data_gen",
+			IterVal:       "value",
+			IterKey:       "index",
+			ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL,
+		},
+		Runner: &avsproto.LoopNode_CustomCode{
+			CustomCode: customCode,
+		},
+	}
+
+	executionLog, err := processor.Execute("test_loop_parallel", loopNode)
+
+	assert.NoError(t, err)
+	assert.True(t, executionLog.Success, "Execution should be successful")
+	assert.Empty(t, executionLog.Error, "Error message should be empty on success")
+	assert.NotNil(t, executionLog.OutputData, "OutputData should not be nil")
+	assert.Contains(t, executionLog.Log, "parallel mode", "Log should indicate parallel execution")
+
+	outputVar := processor.GetOutputVar("test_loop_parallel")
+	assert.NotNil(t, outputVar, "Output variable should not be nil")
+
+	results, ok := outputVar.([]interface{})
+	assert.True(t, ok, "Output variable should be a slice of interfaces")
+	assert.Equal(t, len(testArray), len(results), "Length of results should match testArray")
+}
+
+func TestLoopProcessor_Execute_SequentialMode(t *testing.T) {
+	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
+	processor := NewLoopProcessor(vm)
+
+	testArray := []interface{}{1.0, 2.0, 3.0, 4.0, 5.0}
+	vm.AddVar("testArray", map[string]interface{}{
+		"data": testArray,
+	})
+
+	// Create a mock data generation node for testing
+	dataGenNode := createMockTaskNode("test_data_gen", "testArray", avsproto.NodeType_NODE_TYPE_CUSTOM_CODE)
+	vm.TaskNodes["test_data_gen"] = dataGenNode
+
+	customCode := &avsproto.CustomCodeNode{
+		Config: &avsproto.CustomCodeNode_Config{
+			Lang:   avsproto.Lang_JavaScript,
+			Source: "return value * 3;", // Simple operation for testing
+		},
+	}
+
+	loopNode := &avsproto.LoopNode{
+		Config: &avsproto.LoopNode_Config{
+			SourceId:      "test_data_gen",
+			IterVal:       "value",
+			IterKey:       "index",
+			ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL,
+		},
+		Runner: &avsproto.LoopNode_CustomCode{
+			CustomCode: customCode,
+		},
+	}
+
+	executionLog, err := processor.Execute("test_loop_sequential", loopNode)
+
+	assert.NoError(t, err)
+	assert.True(t, executionLog.Success, "Execution should be successful")
+	assert.Empty(t, executionLog.Error, "Error message should be empty on success")
+	assert.NotNil(t, executionLog.OutputData, "OutputData should not be nil")
+	assert.Contains(t, executionLog.Log, "sequential mode", "Log should indicate sequential execution")
+
+	outputVar := processor.GetOutputVar("test_loop_sequential")
+	assert.NotNil(t, outputVar, "Output variable should not be nil")
+
+	results, ok := outputVar.([]interface{})
+	assert.True(t, ok, "Output variable should be a slice of interfaces")
+	assert.Equal(t, len(testArray), len(results), "Length of results should match testArray")
+}
+
+func TestLoopProcessor_Execute_ContractWriteAlwaysSequential(t *testing.T) {
+	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
+	processor := NewLoopProcessor(vm)
+
+	testArray := []interface{}{1.0, 2.0, 3.0}
+	vm.AddVar("testArray", map[string]interface{}{
+		"data": testArray,
+	})
+
+	// Create a mock data generation node for testing
+	dataGenNode := createMockTaskNode("test_data_gen", "testArray", avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE)
+	vm.TaskNodes["test_data_gen"] = dataGenNode
+
+	contractWrite := &avsproto.ContractWriteNode{
+		Config: &avsproto.ContractWriteNode_Config{
+			ContractAddress: "0x1234567890123456789012345678901234567890",
+			CallData:        "0x",
+		},
+	}
+
+	loopNode := &avsproto.LoopNode{
+		Config: &avsproto.LoopNode_Config{
+			SourceId:      "test_data_gen",
+			IterVal:       "value",
+			IterKey:       "index",
+			ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL, // Set to parallel
+		},
+		Runner: &avsproto.LoopNode_ContractWrite{
+			ContractWrite: contractWrite,
+		},
+	}
+
+	executionLog, _ := processor.Execute("test_loop_contract_write", loopNode)
+
+	// ContractWrite operations may fail due to missing smart wallet config, but the important part
+	// is that it should attempt sequential execution despite parallel being requested
+	assert.NotNil(t, executionLog, "Execution log should not be nil")
+	assert.Contains(t, executionLog.Log, "sequentially due to contract write operation (security requirement)",
+		"Log should indicate forced sequential execution for contract write")
+}
+
+func TestLoopProcessor_Execute_DefaultExecutionMode(t *testing.T) {
+	vm := NewVM()
+	vm.WithLogger(testutil.GetLogger())
+	processor := NewLoopProcessor(vm)
+
+	testArray := []interface{}{1.0, 2.0, 3.0}
+	vm.AddVar("testArray", map[string]interface{}{
+		"data": testArray,
+	})
+
+	// Create a mock data generation node for testing
+	dataGenNode := createMockTaskNode("test_data_gen", "testArray", avsproto.NodeType_NODE_TYPE_CUSTOM_CODE)
+	vm.TaskNodes["test_data_gen"] = dataGenNode
+
+	customCode := &avsproto.CustomCodeNode{
+		Config: &avsproto.CustomCodeNode_Config{
+			Lang:   avsproto.Lang_JavaScript,
+			Source: "return value;",
+		},
+	}
+
+	loopNode := &avsproto.LoopNode{
+		Config: &avsproto.LoopNode_Config{
+			SourceId: "test_data_gen",
+			IterVal:  "value",
+			IterKey:  "index",
+			// ExecutionMode not set - should default to sequential (safer default)
+		},
+		Runner: &avsproto.LoopNode_CustomCode{
+			CustomCode: customCode,
+		},
+	}
+
+	executionLog, err := processor.Execute("test_loop_default", loopNode)
+
+	assert.NoError(t, err)
+	assert.True(t, executionLog.Success, "Execution should be successful")
+	assert.Contains(t, executionLog.Log, "sequential mode", "Log should indicate sequential execution (default)")
 }

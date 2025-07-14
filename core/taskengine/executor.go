@@ -53,6 +53,11 @@ func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
 		return nil, fmt.Errorf("failed to parse task data from storage (data may be corrupted): %w", err)
 	}
 
+	// Ensure task is properly initialized after loading from storage
+	if initErr := task.EnsureInitialized(); initErr != nil {
+		return nil, fmt.Errorf("task failed initialization after loading from storage (ID: %s): %w", task.Id, initErr)
+	}
+
 	// Debug: Log FilterNode expressions after task retrieval from storage
 	if x.logger != nil {
 		for _, node := range task.Nodes {

@@ -308,7 +308,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 
 	config := node.Config
 	if config.ContractAddress == "" || config.ContractAbi == "" {
-		err = fmt.Errorf("missing required configuration: contract_address and contract_abi are required")
+		err = fmt.Errorf("missing required configuration: contractAddress and contractAbi are required")
 		return s, err
 	}
 

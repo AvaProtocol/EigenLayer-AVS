@@ -37,6 +37,11 @@ enum NodeType {
   NODE_TYPE_LOOP = 9;            // Loop node
 }
 
+enum ExecutionMode {
+  EXECUTION_MODE_SEQUENTIAL = 0;  // Run iterations sequentially (default for safety)
+  EXECUTION_MODE_PARALLEL = 1;    // Run iterations in parallel
+}
+
 // ============================================================================
 // TOKEN METADATA MESSAGES
 // ============================================================================
@@ -595,6 +600,9 @@ message LoopNode {
     string iter_val = 2;
     // iter_key is the variable name that will hold the current key/index during each iteration
     string iter_key = 3;
+    // execution_mode determines whether iterations run in parallel or sequentially
+    // Note: ContractWrite operations always run sequentially regardless of this setting
+    ExecutionMode execution_mode = 4;
   }
 
   // inside the runner, it can access to the current value of the loop iteration through the iter_val/iter_key above
