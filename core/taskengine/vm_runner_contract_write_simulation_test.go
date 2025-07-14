@@ -32,11 +32,12 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 
 		// Test run_node_immediately
 		nodeConfig := map[string]interface{}{
-			"contract_address": baseSepoliaUsdcAddress.Hex(),
-			"method_calls": []interface{}{
+			"contractAddress": baseSepoliaUsdcAddress.Hex(),
+			"contractAbi":     `[{"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}]`,
+			"methodCalls": []interface{}{
 				map[string]interface{}{
-					"call_data":   approveCallData,
-					"method_name": "approve",
+					"callData":   approveCallData,
+					"methodName": "approve",
 				},
 			},
 		}

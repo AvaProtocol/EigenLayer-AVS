@@ -205,7 +205,7 @@ func TestLoopProcessor_Execute_InvalidInput(t *testing.T) {
 
 	assert.Error(t, err, "Expected an error for invalid input type")
 	assert.False(t, executionLog.Success, "Execution should not be successful")
-	assert.Contains(t, executionLog.Error, "is not an array", "Error message should indicate input is not an array")
+	assert.Contains(t, executionLog.Error, "must be an array", "Error message should indicate input must be an array")
 }
 
 func TestLoopProcessor_Execute_MissingInput(t *testing.T) {
