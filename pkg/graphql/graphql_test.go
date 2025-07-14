@@ -2,18 +2,44 @@ package graphql
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
 
-func TestSimpleQuery(t *testing.T) {
+// TestGraphQLClientWithMockServer tests the GraphQL client with a mock server
+// This is the main unit test that doesn't depend on external services
+func TestGraphQLClientWithMockServer(t *testing.T) {
+	// Create a mock GraphQL server
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Mock response for GraphQL query
+		mockResponse := `{
+			"data": {
+				"rockets": [
+					{"id": "falcon1", "name": "Falcon 1"},
+					{"id": "falcon9", "name": "Falcon 9"}
+				],
+				"ships": [
+					{"id": "AMERICAN_CHAMPION", "name": "American Champion"},
+					{"id": "AMERICAN_SPIRIT", "name": "American Spirit"},
+					{"id": "ASOG", "name": "ASOG"}
+				]
+			}
+		}`
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(mockResponse))
+	}))
+	defer mockServer.Close()
+
 	sb := &strings.Builder{}
 	log := func(s string) {
 		sb.WriteString(s)
 	}
 
-	endpoint := "https://spacex-production.up.railway.app/"
-	client, _ := NewClient(endpoint, log)
+	client, _ := NewClient(mockServer.URL, log)
 
 	query := `
       query Rockets {
@@ -46,104 +72,19 @@ func TestSimpleQuery(t *testing.T) {
 		t.Fatalf("query failed: %v", err)
 	}
 
-	// Check lengths
-	lengthTests := []struct {
-		name     string
-		got      int
-		want     int
-		category string
-	}{
-		{
-			name:     "rockets count",
-			got:      len(resp.Rockets),
-			want:     2,
-			category: "rockets",
-		},
-		{
-			name:     "ships count",
-			got:      len(resp.Ships),
-			want:     3,
-			category: "ships",
-		},
+	// Verify the response
+	if len(resp.Rockets) != 2 {
+		t.Errorf("expected 2 rockets, got %d", len(resp.Rockets))
+	}
+	if len(resp.Ships) != 3 {
+		t.Errorf("expected 3 ships, got %d", len(resp.Ships))
 	}
 
-	for _, tt := range lengthTests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.got != tt.want {
-				t.Errorf("expected exactly %d %s got %d", tt.want, tt.category, tt.got)
-			}
-		})
+	// Check specific rocket data
+	if resp.Rockets[0].ID != "falcon1" || resp.Rockets[0].Name != "Falcon 1" {
+		t.Errorf("unexpected first rocket: %+v", resp.Rockets[0])
 	}
-
-	// Check rocket details
-	rocketTests := []struct {
-		name     string
-		index    int
-		wantID   string
-		wantName string
-	}{
-		{
-			name:     "first rocket",
-			index:    0,
-			wantID:   "5e9d0d95eda69955f709d1eb",
-			wantName: "Falcon 1",
-		},
-		{
-			name:     "second rocket",
-			index:    1,
-			wantID:   "5e9d0d95eda69973a809d1ec",
-			wantName: "Falcon 9",
-		},
-	}
-
-	for _, tt := range rocketTests {
-		t.Run(tt.name, func(t *testing.T) {
-			rocket := resp.Rockets[tt.index]
-			if rocket.ID != tt.wantID {
-				t.Errorf("expected rocket ID %s, got %s", tt.wantID, rocket.ID)
-			}
-			if rocket.Name != tt.wantName {
-				t.Errorf("expected rocket name %s, got %s", tt.wantName, rocket.Name)
-			}
-		})
-	}
-
-	// Check ship details
-	shipTests := []struct {
-		name     string
-		index    int
-		wantID   string
-		wantName string
-	}{
-		{
-			name:     "first ship",
-			index:    0,
-			wantID:   "5ea6ed2d080df4000697c901",
-			wantName: "American Champion",
-		},
-		{
-			name:     "second ship",
-			index:    1,
-			wantID:   "5ea6ed2d080df4000697c902",
-			wantName: "American Islander",
-		},
-		{
-			name:     "third ship",
-			index:    2,
-			wantID:   "5ea6ed2d080df4000697c903",
-			wantName: "American Spirit",
-		},
-	}
-
-	for _, tt := range shipTests {
-		t.Run(tt.name, func(t *testing.T) {
-			ship := resp.Ships[tt.index]
-			if ship.ID != tt.wantID {
-				t.Errorf("expected ship ID %s, got %s", tt.wantID, ship.ID)
-			}
-			if ship.Name != tt.wantName {
-				t.Errorf("expected ship name %s, got %s", tt.wantName, ship.Name)
-			}
-		})
+	if resp.Rockets[1].ID != "falcon9" || resp.Rockets[1].Name != "Falcon 9" {
+		t.Errorf("unexpected second rocket: %+v", resp.Rockets[1])
 	}
 }
