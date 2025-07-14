@@ -129,30 +129,9 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 				}
 			}
 
-			// If no "data" field or it's not an array, look for any field containing an array
+			// If no "data" field or it's not an array, error out
 			if !ok {
-				log.WriteString(fmt.Sprintf("\nSearching for arrays in top-level fields of: %+v", varMap))
-				for fieldName, fieldValue := range varMap {
-					if dataArr, isArr := fieldValue.([]interface{}); isArr {
-						inputArray = dataArr
-						ok = true
-						log.WriteString(fmt.Sprintf("\nFound array in '%s' field with %d items", fieldName, len(dataArr)))
-						break
-					} else if nestedMap, isMap := fieldValue.(map[string]interface{}); isMap {
-						// Look for arrays in nested maps
-						for nestedFieldName, nestedFieldValue := range nestedMap {
-							if dataArr, isArr := nestedFieldValue.([]interface{}); isArr {
-								inputArray = dataArr
-								ok = true
-								log.WriteString(fmt.Sprintf("\nFound array in nested '%s.%s' field with %d items", fieldName, nestedFieldName, len(dataArr)))
-								break
-							}
-						}
-						if ok {
-							break
-						}
-					}
-				}
+				log.WriteString(fmt.Sprintf("\nData field is not an array: %+v", varMap["data"]))
 			}
 		}
 	} else {
@@ -160,7 +139,7 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	}
 
 	if !ok {
-		err := fmt.Errorf("input %s is not an array and no array field found in output", inputName)
+		err := fmt.Errorf("loop input must be an array")
 		s.Success = false
 		s.Error = err.Error()
 		s.EndAt = time.Now().UnixMilli()
