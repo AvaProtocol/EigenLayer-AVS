@@ -771,35 +771,36 @@ func (o *Operator) PingServer() {
 
 		shouldLog = o.shouldLogError(errorType, false)
 		if shouldLog {
-			if errorType == "ping_connection_refused" {
+			switch errorType {
+			case "ping_connection_refused":
 				o.logger.Info("❌ Cannot connect to aggregator service - is the aggregator running?",
 					"aggregator_address", o.config.AggregatorServerIpPortAddress,
 					"operator", o.config.OperatorAddress,
 					"solution", "Please ensure the aggregator service is running and accessible",
 					"next_log_in", "3 minutes if error persists",
 					"raw_error", fmt.Sprintf("%v", err))
-			} else if errorType == "ping_timeout" {
+			case "ping_timeout":
 				o.logger.Info("❌ Connection to aggregator timed out",
 					"aggregator_address", o.config.AggregatorServerIpPortAddress,
 					"operator", o.config.OperatorAddress,
 					"solution", "Check network connectivity and aggregator response time",
 					"next_log_in", "3 minutes if error persists",
 					"raw_error", fmt.Sprintf("%v", err))
-			} else if errorType == "ping_service_unavailable" {
+			case "ping_service_unavailable":
 				o.logger.Info("❌ Aggregator service is unavailable",
 					"aggregator_address", o.config.AggregatorServerIpPortAddress,
 					"operator", o.config.OperatorAddress,
 					"solution", "Check if the aggregator is overloaded or experiencing issues",
 					"next_log_in", "3 minutes if error persists",
 					"raw_error", fmt.Sprintf("%v", err))
-			} else if errorType == "ping_connection_closing" {
+			case "ping_connection_closing":
 				o.logger.Info("❌ Connection to aggregator was closed",
 					"aggregator_address", o.config.AggregatorServerIpPortAddress,
 					"operator", o.config.OperatorAddress,
 					"solution", "Connection will be reestablished automatically",
 					"next_log_in", "3 minutes if error persists",
 					"raw_error", fmt.Sprintf("%v", err))
-			} else {
+			default:
 				o.logger.Info("❌ Failed to ping aggregator service",
 					"aggregator_address", o.config.AggregatorServerIpPortAddress,
 					"operator", o.config.OperatorAddress,
@@ -809,11 +810,31 @@ func (o *Operator) PingServer() {
 			}
 		}
 	} else {
-		// Debounce successful ping messages - only log every 3 minutes
+		// Log successful ping status with tiered intervals
 		now := time.Now()
 		timeSinceLastSuccess := now.Sub(o.lastPingSuccessTime)
-		if timeSinceLastSuccess >= errorLogDebounceInterval {
-			o.logger.Debug("✅ Successfully pinged aggregator", "aggregator_address", o.config.AggregatorServerIpPortAddress)
+
+		// Always log the first success after any error (status change)
+		wasInErrorState := o.lastPingSuccessTime.IsZero() || timeSinceLastSuccess >= errorLogDebounceInterval
+
+		// Debug logging every 5 minutes, Info logging every 30 minutes
+		debugInterval := 5 * time.Minute
+		infoInterval := 30 * time.Minute
+		timeSinceLastLog := now.Sub(o.lastPingSuccessTime)
+		shouldLogDebug := timeSinceLastLog >= debugInterval
+		shouldLogInfo := timeSinceLastLog >= infoInterval
+
+		if wasInErrorState {
+			// Status change: error -> success (always INFO level)
+			o.logger.Info("Successfully pinged aggregator", "aggregator_address", o.config.AggregatorServerIpPortAddress)
+			o.lastPingSuccessTime = now
+		} else if shouldLogInfo {
+			// Periodic health confirmation at INFO level (every 30 minutes)
+			o.logger.Info("Successfully pinged aggregator", "aggregator_address", o.config.AggregatorServerIpPortAddress)
+			o.lastPingSuccessTime = now
+		} else if shouldLogDebug {
+			// More frequent logging at DEBUG level (every 5 minutes)
+			o.logger.Debug("Successfully pinged aggregator", "aggregator_address", o.config.AggregatorServerIpPortAddress)
 			o.lastPingSuccessTime = now
 		}
 	}
