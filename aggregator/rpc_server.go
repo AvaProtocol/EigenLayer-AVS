@@ -724,6 +724,22 @@ func (r *RpcServer) Ack(ctx context.Context, payload *avsproto.AckMessageReq) (*
 	return wrapperspb.Bool(true), nil
 }
 
+// HealthCheck provides a simple connection test that doesn't store any data
+func (r *RpcServer) HealthCheck(ctx context.Context, req *avsproto.HealthCheckRequest) (*avsproto.HealthCheckResponse, error) {
+	// Simple health check - just verify the connection works
+	// No authentication required, no data storage
+
+	r.config.Logger.Debug("Health check request received",
+		"operator_address", req.OperatorAddress,
+	)
+
+	return &avsproto.HealthCheckResponse{
+		Status:    "OK",
+		Message:   "Aggregator is running",
+		Timestamp: uint64(time.Now().UnixMilli()),
+	}, nil
+}
+
 // startRpcServer initializes and establish a tcp socket on given address from
 // config file
 func (agg *Aggregator) startRpcServer(ctx context.Context) error {

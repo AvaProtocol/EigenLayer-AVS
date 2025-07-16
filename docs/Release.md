@@ -42,6 +42,35 @@ Due to the EigenSDK package difference on Ethereum mainnet, the implementation o
 
 ## Versioning and Releasing
 
+The project uses **go-semantic-release** as the single source of truth for versioning. Version information is injected at build time using Go's `-ldflags` mechanism, eliminating the need for manual version synchronization.
+
+### Version Management System
+
+#### Version Storage
+- `version/version.go` contains version variables with default values (`"dev"`, `"unknown"`)
+- During builds, the actual version is injected via ldflags
+- No hardcoded versions in the codebase
+
+#### Build-Time Injection
+The version is injected during compilation using:
+```bash
+go build -ldflags="-X 'github.com/AvaProtocol/EigenLayer-AVS/version.semver=v1.2.3' -X 'github.com/AvaProtocol/EigenLayer-AVS/version.revision=abc123'"
+```
+
+#### Development vs Production
+- **Development Builds**: Uses default values (`"dev"` version, `"unknown"` revision) via `make build`
+- **Production Builds**: Uses actual version from go-semantic-release via Docker build args
+
+#### Docker Integration
+Both Dockerfiles support version injection:
+```dockerfile
+ARG RELEASE_TAG
+ARG COMMIT_SHA
+RUN go build -ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.semver=$RELEASE_TAG -X github.com/AvaProtocol/EigenLayer-AVS/version.revision=$COMMIT_SHA" -o /ava
+```
+
+### Automated Versioning Process
+
 The versioning process for GitHub pre-releases is automated using `go-semantic-release` within the `release-on-pr-close.yml` workflow when PRs are merged to `staging`.
 
 ### Commit Message Format
@@ -71,7 +100,7 @@ To see what the new pre-release version would be if a PR were merged to `staging
   ```
 3. Run the below command to dry run (replace `main` with `staging` if simulating merge to staging):
   ```
-  semantic-release --dry --no-ci --token $GITHUB_TOKEN --provider github --provider-opt slug=AvaProtocol/EigenLayer-AVS --update version/version.go --allow-current-branch
+  semantic-release --dry --no-ci --token $GITHUB_TOKEN --provider github --provider-opt slug=AvaProtocol/EigenLayer-AVS --allow-current-branch
   ```
   You should see the new proposed pre-release version in the output.
 
@@ -128,7 +157,32 @@ After thorough testing of a pre-release and its corresponding `avs-dev` image:
 - Each environment uses the same Docker image version (for a given release) but varies in runtime configuration.
 
 
+### Version Testing and Troubleshooting
+
+#### Testing Version Display
+1. **Development**: Run `make build && /tmp/bin/ap version` to see "dev" version
+2. **Docker**: Build with version args to see actual version
+3. **Telemetry**: Check http://localhost:1323/telemetry for version display
+
+#### Troubleshooting
+
+**Version shows "dev" in production**
+- Ensure docker build uses `RELEASE_TAG` and `COMMIT_SHA` args
+- Check that ldflags are properly set in build commands
+
+**Release not created**
+- Verify commit messages follow conventional commit format
+- Check that PR was merged to `main` or `staging` branch
+- Review GitHub Actions logs for errors
+
+#### Best Practices
+1. **Never edit `version/version.go`** - it's managed by the build process
+2. **Use conventional commits** for automatic version calculation
+3. **Let go-semantic-release handle versioning** - no manual version bumps needed
+4. **Build with version injection** for production deployments
+
 ### Important Notes
 
 - Docker images are tagged as described: `staging-<sha>` and `latest` for `avs-dev` (manual); `vX.Y.Z` and `latest` for `ap-avs` (manual, from a git tag).
 - GitHub Pre-release tags (`vX.Y.Z-rc.N`) are created automatically by `go-semantic-release` when PRs merge to `staging`. Stable git tags (`vX.Y.Z`) for production are created manually.
+- Version information is injected at build time - never edit `version/version.go` directly as it's managed by the build process.

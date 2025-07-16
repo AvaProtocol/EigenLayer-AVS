@@ -20,6 +20,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	Node_HealthCheck_FullMethodName         = "/aggregator.Node/HealthCheck"
 	Node_Ping_FullMethodName                = "/aggregator.Node/Ping"
 	Node_SyncMessages_FullMethodName        = "/aggregator.Node/SyncMessages"
 	Node_Ack_FullMethodName                 = "/aggregator.Node/Ack"
@@ -31,6 +32,8 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type NodeClient interface {
+	// Connection testing endpoint - doesn't store any data
+	HealthCheck(ctx context.Context, in *HealthCheckRequest, opts ...grpc.CallOption) (*HealthCheckResponse, error)
 	// Operator endpoint
 	Ping(ctx context.Context, in *Checkin, opts ...grpc.CallOption) (*CheckinResp, error)
 	SyncMessages(ctx context.Context, in *SyncMessagesReq, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SyncMessagesResp], error)
@@ -46,6 +49,16 @@ type nodeClient struct {
 
 func NewNodeClient(cc grpc.ClientConnInterface) NodeClient {
 	return &nodeClient{cc}
+}
+
+func (c *nodeClient) HealthCheck(ctx context.Context, in *HealthCheckRequest, opts ...grpc.CallOption) (*HealthCheckResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HealthCheckResponse)
+	err := c.cc.Invoke(ctx, Node_HealthCheck_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *nodeClient) Ping(ctx context.Context, in *Checkin, opts ...grpc.CallOption) (*CheckinResp, error) {
@@ -111,6 +124,8 @@ func (c *nodeClient) ReportEventOverload(ctx context.Context, in *EventOverloadA
 // All implementations must embed UnimplementedNodeServer
 // for forward compatibility.
 type NodeServer interface {
+	// Connection testing endpoint - doesn't store any data
+	HealthCheck(context.Context, *HealthCheckRequest) (*HealthCheckResponse, error)
 	// Operator endpoint
 	Ping(context.Context, *Checkin) (*CheckinResp, error)
 	SyncMessages(*SyncMessagesReq, grpc.ServerStreamingServer[SyncMessagesResp]) error
@@ -128,6 +143,9 @@ type NodeServer interface {
 // pointer dereference when methods are called.
 type UnimplementedNodeServer struct{}
 
+func (UnimplementedNodeServer) HealthCheck(context.Context, *HealthCheckRequest) (*HealthCheckResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HealthCheck not implemented")
+}
 func (UnimplementedNodeServer) Ping(context.Context, *Checkin) (*CheckinResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Ping not implemented")
 }
@@ -162,6 +180,24 @@ func RegisterNodeServer(s grpc.ServiceRegistrar, srv NodeServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&Node_ServiceDesc, srv)
+}
+
+func _Node_HealthCheck_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HealthCheckRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServer).HealthCheck(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Node_HealthCheck_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServer).HealthCheck(ctx, req.(*HealthCheckRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _Node_Ping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -254,6 +290,10 @@ var Node_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "aggregator.Node",
 	HandlerType: (*NodeServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "HealthCheck",
+			Handler:    _Node_HealthCheck_Handler,
+		},
 		{
 			MethodName: "Ping",
 			Handler:    _Node_Ping_Handler,

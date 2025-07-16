@@ -1,9 +1,24 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8"/>
-    <title>Ava Dashboard</title>
+    <title>Ava Protocol - Operator Dashboard</title>
+    <meta name="description" content="Ava Protocol operator dashboard showing real-time status of EigenLayer AVS operators">
+    <meta name="keywords" content="Ava Protocol, EigenLayer, AVS, operators, blockchain, ethereum">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://app.avaprotocol.org/">
+    <meta property="og:title" content="Ava Protocol - Operator Dashboard">
+    <meta property="og:description" content="Ava Protocol operator dashboard showing real-time status of EigenLayer AVS operators">
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://app.avaprotocol.org/">
+    <meta property="twitter:title" content="Ava Protocol - Operator Dashboard">
+    <meta property="twitter:description" content="Ava Protocol operator dashboard showing real-time status of EigenLayer AVS operators">
 </head>
 <body class="bg-black">
 <div class="bg-black">
@@ -18,8 +33,11 @@
           <div class="min-w-0 flex-auto">
             <p class="text-sm font-semibold leading-6 text-white">
               <a href="{{ .EtherscanURL }}">
-                {{ .Address }}
+                {{ if ne .Name "" }}{{ .Name }}{{ else }}{{ .Address }}{{ end }}
               </a>
+            </p>
+            <p class="mt-1 truncate text-xs leading-5 text-gray-400">
+              {{ if ne .Name "" }}{{ .Address }}{{ end }}
             </p>
             <p class="mt-1 truncate text-xs leading-5 text-gray-400">
               <a href="{{ .EigenlayerURL }}">View on EigenLayer</a>
@@ -57,7 +75,7 @@
     <!-- Center text for version and revision -->
     <div class="text-center mb-8">
       <p class="text-white text-sm">
-        Aggregator v{{.Version}}
+        Aggregator {{.Version}}
         <a href="https://github.com/AvaProtocol/EigenLayer-AVS/commit/{{.Revision}}" class="underline" target="_blank">+{{.Revision}}</a>
       </p>
     </div>

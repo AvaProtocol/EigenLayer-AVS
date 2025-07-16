@@ -26,6 +26,24 @@ type HttpJsonResp[T any] struct {
 }
 
 func (agg *Aggregator) startHttpServer(ctx context.Context) {
+	// Load operator names from JSON file
+	if operatorData, err := res.ReadFile("resources/operators.json"); err == nil {
+		if err := LoadOperatorNames(operatorData); err != nil {
+			agg.logger.Errorf("Failed to load operator names: %v", err)
+		} else {
+			agg.logger.Info("Successfully loaded operator names")
+		}
+	} else {
+		agg.logger.Warnf("No operator names file found: %v", err)
+	}
+
+	// Clean up duplicate operator entries from old storage system
+	if err := agg.operatorPool.CleanupDuplicateOperators(); err != nil {
+		agg.logger.Warnf("Failed to clean up duplicate operators: %v", err)
+	} else {
+		agg.logger.Info("Successfully cleaned up duplicate operator entries")
+	}
+
 	sentryDsn := ""
 
 	if agg.config != nil {
@@ -84,6 +102,14 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 		return c.JSON(http.StatusOK, &HttpJsonResp[[]*OperatorNode]{
 			Data: agg.operatorPool.GetAll(),
 		})
+	})
+
+	e.GET("/favicon.ico", func(c echo.Context) error {
+		faviconData, err := res.ReadFile("resources/favicon.ico")
+		if err != nil {
+			return c.String(http.StatusNotFound, "Favicon not found")
+		}
+		return c.Blob(http.StatusOK, "image/x-icon", faviconData)
 	})
 
 	e.GET("/telemetry", func(c echo.Context) error {

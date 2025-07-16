@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -118,40 +117,24 @@ func (c *EconomicMetricsCollector) getOperatorStake(ctx context.Context, quorumN
 		return 0
 	}
 
-	// Try to get operator ID first
-	operatorId, err := c.avsReader.GetOperatorId(&bind.CallOpts{Context: ctx}, c.operatorAddr)
-	if err != nil {
-		c.logger.Debug("Failed to get operator ID for stake collection",
-			"err", err,
-			"quorum", quorumNum,
-			"operatorAddr", c.operatorAddr.Hex(),
-		)
-		return 0
-	}
-
-	// Check if operator is registered (non-zero operator ID)
-	if operatorId == [32]byte{} {
-		c.logger.Debug("Operator not registered, stake is 0",
-			"quorum", quorumNum,
-			"operatorAddr", c.operatorAddr.Hex(),
-		)
-		return 0
-	}
-
-	// Try to get operator stake from the registry
-	// Note: This is a simplified approach - in production you might want to:
-	// 1. Get the current block number
-	// 2. Query operator state at that block
-	// 3. Sum up stakes across all strategies for the quorum
-
-	// For now, we'll use a placeholder implementation that doesn't cause errors
-	c.logger.Debug("Operator stake collection partially implemented",
+	// For now, skip the actual RPC call that's causing "Unknown block" errors
+	// The stake calculation is not yet implemented anyway, so we can safely return 0
+	// This prevents the metrics collection from failing due to RPC node sync issues
+	c.logger.Debug("Stake collection temporarily disabled to avoid RPC sync issues",
 		"quorum", quorumNum,
 		"operatorAddr", c.operatorAddr.Hex(),
-		"operatorId", fmt.Sprintf("%x", operatorId),
-		"note", "Full stake calculation not yet implemented",
+		"note", "This will be re-enabled when full stake calculation is implemented",
 	)
-
-	// Return 0 for now - this can be enhanced later with proper stake calculation
 	return 0
+
+	// TODO: Re-enable this when implementing full stake calculation
+	// Use a confirmed block number (a few blocks behind) to avoid sync issues
+	// The original implementation was:
+	// 1. Get operator ID from AVS registry
+	// 2. Check if operator is registered (non-zero operator ID)
+	// 3. Get operator stake from the registry
+	// 4. Sum up stakes across all strategies for the quorum
+	//
+	// This was causing "Unknown block" errors because it was querying the "latest" block
+	// which might not be available due to RPC node sync issues or reorganizations
 }
