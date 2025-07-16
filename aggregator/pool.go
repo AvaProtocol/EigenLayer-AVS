@@ -65,7 +65,7 @@ func GetOperatorName(address string) string {
 	if name, exists := operatorNames[address]; exists {
 		return name
 	}
-	return ""
+	return "Unknown"
 }
 
 func (o *OperatorNode) LastSeen() string {
