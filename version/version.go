@@ -11,7 +11,7 @@ func Get() string {
 	return semver
 }
 
-// Commit returns the git commit hash, injected at build time
-func Commit() string {
+// GetRevision returns the revision
+func GetRevision() string {
 	return revision
 }
