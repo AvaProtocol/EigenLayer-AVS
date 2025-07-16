@@ -72,7 +72,6 @@ func TestRunTriggerRPC_ManualTrigger(t *testing.T) {
 
 	nodeConfig := map[string]interface{}{
 		"triggerType": "manual",
-		"runAt":       1672531200,
 	}
 
 	result, err := engine.RunNodeImmediately("manualTrigger", nodeConfig, map[string]interface{}{})

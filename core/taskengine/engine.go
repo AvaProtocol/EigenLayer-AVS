@@ -3287,20 +3287,21 @@ func buildCronTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Cron
 //   - triggerOutput: map containing raw trigger output data from runManualTriggerImmediately
 //
 // Returns:
-//   - *avsproto.ManualTrigger_Output: properly structured protobuf output with run timestamp
+//   - *avsproto.ManualTrigger_Output: properly structured protobuf output with user-defined data
 func buildManualTriggerOutput(triggerOutput map[string]interface{}) *avsproto.ManualTrigger_Output {
-	runAt := uint64(time.Now().Unix()) // Default to current time
+	var data *structpb.Value
 
 	if triggerOutput != nil {
-		if ra, ok := triggerOutput["runAt"]; ok {
-			if raUint, ok := ra.(uint64); ok {
-				runAt = raUint
+		// Include user-defined data - this is the main payload for manual triggers
+		if dataValue, exists := triggerOutput["data"]; exists && dataValue != nil {
+			if pbValue, err := structpb.NewValue(dataValue); err == nil {
+				data = pbValue
 			}
 		}
 	}
 
 	return &avsproto.ManualTrigger_Output{
-		RunAt: runAt,
+		Data: data,
 	}
 }
 
@@ -3323,8 +3324,9 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 	switch triggerType {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
 		triggerDataMap["triggered"] = true
-		if runAt, ok := triggerOutput["runAt"]; ok {
-			triggerDataMap["runAt"] = runAt
+		// Include user-defined data - this is the main payload for manual triggers
+		if data, ok := triggerOutput["data"]; ok {
+			triggerDataMap["data"] = data
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
 		if timestamp, ok := triggerOutput["timestamp"]; ok {
@@ -3491,7 +3493,10 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 	switch triggerType {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
 		if manualOutput, ok := triggerOutputProto.(*avsproto.ManualTrigger_Output); ok {
-			triggerDataMap["run_at"] = manualOutput.RunAt
+			// Include user-defined data - this is the main payload for manual triggers
+			if manualOutput.Data != nil {
+				triggerDataMap["data"] = manualOutput.Data.AsInterface()
+			}
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
 		if timeOutput, ok := triggerOutputProto.(*avsproto.FixedTimeTrigger_Output); ok {

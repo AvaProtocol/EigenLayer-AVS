@@ -1271,15 +1271,29 @@ func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Ad
 
 // runManualTriggerImmediately executes a manual trigger immediately
 func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
-	// Manual triggers are perfect for immediate execution
 	result := map[string]interface{}{
 		"triggered": true,
-		"runAt":     uint64(time.Now().Unix()),
 	}
 
-	if n.logger != nil {
-		n.logger.Info("ManualTrigger executed immediately")
+	// The main purpose of manual triggers is to return user-defined data
+	// Check for data in triggerConfig first, then inputVariables as fallback
+	if data, exists := triggerConfig["data"]; exists && data != nil {
+		result["data"] = data
+		if n.logger != nil {
+			n.logger.Info("ManualTrigger executed with config data", "dataType", fmt.Sprintf("%T", data))
+		}
+	} else if len(inputVariables) > 0 {
+		// If no data in config, use inputVariables as the data
+		result["data"] = inputVariables
+		if n.logger != nil {
+			n.logger.Info("ManualTrigger executed with input variables", "inputCount", len(inputVariables))
+		}
+	} else {
+		if n.logger != nil {
+			n.logger.Info("ManualTrigger executed without data")
+		}
 	}
+
 	return result, nil
 }
 
@@ -2223,8 +2237,11 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		// Always set manual trigger output, even if result is nil
 		manualOutput := &avsproto.ManualTrigger_Output{}
 		if result != nil {
-			if runAt, ok := result["runAt"].(uint64); ok {
-				manualOutput.RunAt = runAt
+			// Include user-defined data - this is the main payload for manual triggers
+			if dataValue, exists := result["data"]; exists && dataValue != nil {
+				if pbValue, err := structpb.NewValue(dataValue); err == nil {
+					manualOutput.Data = pbValue
+				}
 			}
 		}
 		resp.OutputData = &avsproto.RunTriggerResp_ManualTrigger{

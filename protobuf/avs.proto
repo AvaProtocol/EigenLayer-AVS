@@ -226,9 +226,8 @@ message ManualTrigger {
   }
   
   message Output {
-    // Manual triggers typically don't return data
-    // but we keep this for consistency and future extensibility
-    uint64 run_at = 1; // Timestamp when manually run
+    // User-defined data from trigger config - this is the main payload for manual triggers
+    google.protobuf.Value data = 1;
   }
 
   // Include Config as field so it is generated in Go
