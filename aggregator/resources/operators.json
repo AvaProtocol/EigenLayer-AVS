@@ -1,0 +1,163 @@
+[
+  {
+    "address": "0x9B4bA25308D5E1A23315e26ab10d0B6d7B0a1817",
+    "name": "benczi.eth operator",
+    "ethStaked": 0.10,
+    "slashable": 0.0,
+    "stakers": 2,
+    "AVSs": 1
+  },
+  {
+    "address": "0xb42CcE7682cE9Bc9A013eD0C54533545879C5087",
+    "name": "[NODERS]",
+    "ethStaked": 0.10,
+    "slashable": 0.0,
+    "stakers": 3,
+    "AVSs": 1
+  },
+  {
+    "address": "0xa026265a0f01a6e1a19b04655519429df0a57c4e",
+    "name": "stakefish",
+    "ethStaked": 22470.0,
+    "slashable": 0.0,
+    "stakers": 256,
+    "AVSs": 14
+  },
+  {
+    "address": "0x1f8C8b1d78d01bCc42ebdd34Fae60181bD697662",
+    "name": "Kiln",
+    "ethStaked": 38320.0,
+    "slashable": 0.0,
+    "stakers": 3600,
+    "AVSs": 12
+  },
+  {
+    "address": "0xF02fBA1624775bf60D4C7bBFf28bC78547D67E1E",
+    "name": "Tokentraxx",
+    "ethStaked": 38.90,
+    "slashable": 0.0,
+    "stakers": 3,
+    "AVSs": 17
+  },
+  {
+    "address": "0xb5Ead7A953052dA8212DA7e9462D65F91205d06D",
+    "name": "NodeOps",
+    "ethStaked": 30.52,
+    "slashable": 0.0,
+    "stakers": 61,
+    "AVSs": 15
+  },
+  {
+    "address": "0xa5954756792f64ba7bcc4b5fd664b0843a7afe5b",
+    "name": "StakeCat",
+    "ethStaked": 130.10,
+    "slashable": 0.0,
+    "stakers": 90,
+    "AVSs": 11
+  },
+  {
+    "address": "0x96fC0751e0febe7296d4625500f8e4535a002c7d",
+    "name": "Kelp by Kiln",
+    "ethStaked": 104.27,
+    "slashable": 0.0,
+    "stakers": 263,
+    "AVSs": 11
+  },
+  {
+    "address": "0x778328d6adca7a091f0b73d41ad8ea0e793712c3",
+    "name": "Blockscape",
+    "ethStaked": 330.42,
+    "slashable": 0.0,
+    "stakers": 56,
+    "AVSs": 19
+  },
+  {
+    "address": "0x5ACCC90436492F24E6aF278569691e2c942A676d",
+    "name": "EigenYields",
+    "ethStaked": 438430.0,
+    "slashable": 0.0,
+    "stakers": 25800,
+    "AVSs": 32
+  },
+  {
+    "address": "0x2273e70Ea0F159985a9312e875839CbF242f162e",
+    "name": "Figment",
+    "ethStaked": 1250.0,
+    "slashable": 0.0,
+    "stakers": 180,
+    "AVSs": 15
+  },
+  {
+    "address": "0xc6B87cc9e85b07365b6aBEfff061F237F7cf7Dc3",
+    "name": "InfStones",
+    "ethStaked": 890.5,
+    "slashable": 0.0,
+    "stakers": 95,
+    "AVSs": 18
+  },
+  {
+    "address": "0x09e6eb09213bdd3698bd8afb43ec3cb0ecff683e",
+    "name": "P2P.org",
+    "ethStaked": 2100.0,
+    "slashable": 0.0,
+    "stakers": 220,
+    "AVSs": 16
+  },
+  {
+    "address": "0x4fE16Eee64f376FFCdB66439f1D71587218c3ECb",
+    "name": "Chorus One",
+    "ethStaked": 1800.0,
+    "slashable": 0.0,
+    "stakers": 150,
+    "AVSs": 14
+  },
+  {
+    "address": "0x5873ee31494277edea74a96308e1727cfafe7bcf",
+    "name": "Allnodes",
+    "ethStaked": 650.0,
+    "slashable": 0.0,
+    "stakers": 85,
+    "AVSs": 12
+  },
+  {
+    "address": "0xa269a19b31b193acae86cc3c9f4c28ead66e11eb",
+    "name": "Stakely",
+    "ethStaked": 420.0,
+    "slashable": 0.0,
+    "stakers": 65,
+    "AVSs": 10
+  },
+  {
+    "address": "0x529ec9ac9a80428cf8c92557f2eb1b336616f543",
+    "name": "Everstake",
+    "ethStaked": 780.0,
+    "slashable": 0.0,
+    "stakers": 110,
+    "AVSs": 13
+  },
+  {
+    "address": "0x53730f4088B116c807875EB67f71CbB1b065F530",
+    "name": "Coinbase Cloud",
+    "ethStaked": 15600.0,
+    "slashable": 0.0,
+    "stakers": 1200,
+    "AVSs": 20
+  },
+  {
+    "address": "0x3a5DcEc17661d540eF215a56bD5aC35Ac3450b9d",
+    "name": "Lido",
+    "ethStaked": 45000.0,
+    "slashable": 0.0,
+    "stakers": 2800,
+    "AVSs": 25
+  },
+  {
+    "address": "0x72355fa820dbe85ccdc9d6a81afa75f8de6b5766",
+    "name": "Rocket Pool",
+    "ethStaked": 8900.0,
+    "slashable": 0.0,
+    "stakers": 890,
+    "AVSs": 18
+  }
+]
+

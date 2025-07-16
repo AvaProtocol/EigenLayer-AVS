@@ -597,37 +597,34 @@ func (o *Operator) retryConnect() error {
 
 	o.nodeRpcClient = avsproto.NewNodeClient(o.aggregatorConn)
 
-	// Actually test the connection by making a ping call
+	// Actually test the connection by making a health check call
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, pingErr := o.nodeRpcClient.Ping(ctx, &avspb.Checkin{
-		Address:   o.config.OperatorAddress,
-		Id:        "connection-test",
-		Signature: "test",
-		Version:   "connection-test",
+	_, healthErr := o.nodeRpcClient.HealthCheck(ctx, &avspb.HealthCheckRequest{
+		OperatorAddress: o.config.OperatorAddress,
 	})
 
-	if pingErr != nil {
-		if strings.Contains(pingErr.Error(), "connection refused") {
+	if healthErr != nil {
+		if strings.Contains(healthErr.Error(), "connection refused") {
 			o.logger.Error("❌ Cannot connect to aggregator - service appears to be down",
 				"aggregator_address", o.config.AggregatorServerIpPortAddress,
 				"operator", o.config.OperatorAddress,
-				"raw_error", pingErr)
-		} else if strings.Contains(pingErr.Error(), "no such host") || strings.Contains(pingErr.Error(), "name resolution") {
+				"raw_error", healthErr)
+		} else if strings.Contains(healthErr.Error(), "no such host") || strings.Contains(healthErr.Error(), "name resolution") {
 			o.logger.Error("❌ Cannot resolve aggregator hostname",
 				"aggregator_address", o.config.AggregatorServerIpPortAddress,
 				"operator", o.config.OperatorAddress,
-				"raw_error", pingErr)
+				"raw_error", healthErr)
 		} else {
 			o.logger.Error("❌ Failed to establish connection to aggregator",
 				"aggregator_address", o.config.AggregatorServerIpPortAddress,
 				"operator", o.config.OperatorAddress,
-				"raw_error", pingErr)
+				"raw_error", healthErr)
 		}
 		// Close the connection since we couldn't actually connect
 		o.aggregatorConn.Close()
-		return pingErr
+		return healthErr
 	}
 
 	o.logger.Info("✅ Successfully connected to aggregator service",

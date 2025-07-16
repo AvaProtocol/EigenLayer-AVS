@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -15,12 +16,56 @@ import (
 
 type OperatorNode struct {
 	Address       string `json:"address"`
+	Name          string `json:"name"`
 	RemoteIP      string `json:"remote_ip"`
 	LastPingEpoch int64  `json:"last_ping"`
 	Version       string `json:"version"`
 	MetricsPort   int32  `json:"metrics_port"`
 	BlockNumer    int64  `json:"block_number"`
 	EventCount    int64  `json:"event_count"`
+}
+
+// KnownOperator represents an operator from the JSON file
+type KnownOperator struct {
+	Address   string  `json:"address"`
+	Name      string  `json:"name"`
+	EthStaked float64 `json:"ethStaked"`
+	Slashable float64 `json:"slashable"`
+	Stakers   int     `json:"stakers"`
+	AVSs      int     `json:"AVSs"`
+}
+
+var (
+	operatorNames   = make(map[string]string)
+	operatorNamesMu sync.RWMutex
+)
+
+// LoadOperatorNames loads operator names from the JSON file
+func LoadOperatorNames(jsonData []byte) error {
+	var knownOperators []KnownOperator
+	if err := json.Unmarshal(jsonData, &knownOperators); err != nil {
+		return fmt.Errorf("failed to unmarshal operator names: %w", err)
+	}
+
+	operatorNamesMu.Lock()
+	defer operatorNamesMu.Unlock()
+
+	for _, op := range knownOperators {
+		operatorNames[op.Address] = op.Name
+	}
+
+	return nil
+}
+
+// GetOperatorName returns the operator name for a given address
+func GetOperatorName(address string) string {
+	operatorNamesMu.RLock()
+	defer operatorNamesMu.RUnlock()
+
+	if name, exists := operatorNames[address]; exists {
+		return name
+	}
+	return "Unknown"
 }
 
 func (o *OperatorNode) LastSeen() string {
@@ -72,6 +117,7 @@ func (o *OperatorPool) Checkin(payload *avsproto.Checkin) error {
 
 	status := &OperatorNode{
 		Address:       payload.Address,
+		Name:          GetOperatorName(payload.Address),
 		LastPingEpoch: now.Unix(),
 		MetricsPort:   payload.MetricsPort,
 		RemoteIP:      payload.RemoteIP,
@@ -86,11 +132,13 @@ func (o *OperatorPool) Checkin(payload *avsproto.Checkin) error {
 		return fmt.Errorf("cannot update operator status due to json encoding")
 	}
 
-	return o.db.Set(append(operatorPrefix, []byte(payload.Id)...), data)
+	// Use address as key to prevent duplicates from different IDs
+	return o.db.Set(append(operatorPrefix, []byte(payload.Address)...), data)
 }
 
 func (o *OperatorPool) GetAll() []*OperatorNode {
 	var nodes []*OperatorNode
+	seenAddresses := make(map[string]bool)
 
 	kvs, err := o.db.GetByPrefix(operatorPrefix)
 	if err != nil {
@@ -103,10 +151,60 @@ func (o *OperatorPool) GetAll() []*OperatorNode {
 			continue
 		}
 
+		// Skip duplicates - only keep the first occurrence of each address
+		if seenAddresses[node.Address] {
+			continue
+		}
+		seenAddresses[node.Address] = true
+
+		// Ensure name is populated (for backward compatibility with nodes without names)
+		if node.Name == "" {
+			node.Name = GetOperatorName(node.Address)
+		}
+
 		nodes = append(nodes, node)
 	}
 
 	return nodes
+}
+
+// CleanupDuplicateOperators removes old duplicate entries from the database
+// This helps clean up entries from the old ID-based storage system
+func (o *OperatorPool) CleanupDuplicateOperators() error {
+	kvs, err := o.db.GetByPrefix(operatorPrefix)
+	if err != nil {
+		return err
+	}
+
+	addressToKeys := make(map[string][][]byte)
+
+	// Group all keys by operator address
+	for _, kv := range kvs {
+		node := &OperatorNode{}
+		if err := json.Unmarshal(kv.Value, node); err != nil {
+			continue
+		}
+
+		addressToKeys[node.Address] = append(addressToKeys[node.Address], kv.Key)
+	}
+
+	// For each address with multiple keys, keep only the address-based key
+	for address, keys := range addressToKeys {
+		if len(keys) <= 1 {
+			continue // No duplicates
+		}
+
+		expectedKey := append(operatorPrefix, []byte(address)...)
+
+		// Delete all keys except the expected address-based key
+		for _, key := range keys {
+			if string(key) != string(expectedKey) {
+				o.db.Delete(key)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (r *RpcServer) Ping(ctx context.Context, payload *avsproto.Checkin) (*avsproto.CheckinResp, error) {
