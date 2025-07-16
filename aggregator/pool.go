@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -15,12 +16,56 @@ import (
 
 type OperatorNode struct {
 	Address       string `json:"address"`
+	Name          string `json:"name"`
 	RemoteIP      string `json:"remote_ip"`
 	LastPingEpoch int64  `json:"last_ping"`
 	Version       string `json:"version"`
 	MetricsPort   int32  `json:"metrics_port"`
 	BlockNumer    int64  `json:"block_number"`
 	EventCount    int64  `json:"event_count"`
+}
+
+// KnownOperator represents an operator from the JSON file
+type KnownOperator struct {
+	Address   string  `json:"address"`
+	Name      string  `json:"name"`
+	EthStaked float64 `json:"ethStaked"`
+	Slashable float64 `json:"slashable"`
+	Stakers   int     `json:"stakers"`
+	AVSs      int     `json:"AVSs"`
+}
+
+var (
+	operatorNames   = make(map[string]string)
+	operatorNamesMu sync.RWMutex
+)
+
+// LoadOperatorNames loads operator names from the JSON file
+func LoadOperatorNames(jsonData []byte) error {
+	var knownOperators []KnownOperator
+	if err := json.Unmarshal(jsonData, &knownOperators); err != nil {
+		return fmt.Errorf("failed to unmarshal operator names: %w", err)
+	}
+
+	operatorNamesMu.Lock()
+	defer operatorNamesMu.Unlock()
+
+	for _, op := range knownOperators {
+		operatorNames[op.Address] = op.Name
+	}
+
+	return nil
+}
+
+// GetOperatorName returns the operator name for a given address
+func GetOperatorName(address string) string {
+	operatorNamesMu.RLock()
+	defer operatorNamesMu.RUnlock()
+
+	if name, exists := operatorNames[address]; exists {
+		return name
+	}
+	return ""
 }
 
 func (o *OperatorNode) LastSeen() string {
@@ -72,6 +117,7 @@ func (o *OperatorPool) Checkin(payload *avsproto.Checkin) error {
 
 	status := &OperatorNode{
 		Address:       payload.Address,
+		Name:          GetOperatorName(payload.Address),
 		LastPingEpoch: now.Unix(),
 		MetricsPort:   payload.MetricsPort,
 		RemoteIP:      payload.RemoteIP,
@@ -86,7 +132,8 @@ func (o *OperatorPool) Checkin(payload *avsproto.Checkin) error {
 		return fmt.Errorf("cannot update operator status due to json encoding")
 	}
 
-	return o.db.Set(append(operatorPrefix, []byte(payload.Id)...), data)
+	// Use address as key to prevent duplicates from different IDs
+	return o.db.Set(append(operatorPrefix, []byte(payload.Address)...), data)
 }
 
 func (o *OperatorPool) GetAll() []*OperatorNode {
@@ -101,6 +148,11 @@ func (o *OperatorPool) GetAll() []*OperatorNode {
 		node := &OperatorNode{}
 		if err := json.Unmarshal(rawValue.Value, node); err != nil {
 			continue
+		}
+
+		// Ensure name is populated (for backward compatibility with nodes without names)
+		if node.Name == "" {
+			node.Name = GetOperatorName(node.Address)
 		}
 
 		nodes = append(nodes, node)

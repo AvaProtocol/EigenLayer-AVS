@@ -128,7 +128,21 @@ message EventOverloadResponse {
   uint64 timestamp = 3;         // Response timestamp (milliseconds)
 }
 
+// HealthCheck messages for connection testing
+message HealthCheckRequest {
+  string operator_address = 1;  // Optional: operator address for logging
+}
+
+message HealthCheckResponse {
+  string status = 1;             // Status: "OK", "STARTING", etc.
+  string message = 2;            // Optional message
+  uint64 timestamp = 3;          // Response timestamp (milliseconds)
+}
+
 service Node {
+  // Connection testing endpoint - doesn't store any data
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse) {};
+  
   // Operator endpoint
   rpc Ping(Checkin) returns (CheckinResp) {};
   rpc SyncMessages(SyncMessagesReq) returns (stream SyncMessagesResp) {};
