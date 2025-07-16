@@ -221,8 +221,8 @@ message EventTrigger {
 
 message ManualTrigger {
   message Config {
-    // Manual triggers typically don't have configuration parameters
-    // but we keep this for consistency
+    // User-defined data that will be returned in the Output
+    google.protobuf.Value data = 1;
   }
   
   message Output {

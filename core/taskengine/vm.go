@@ -378,13 +378,14 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 				triggerDataMap = buildTriggerDataMapFromProtobuf(triggerData.Type, triggerData.Output, v.logger)
 
 				// Debug: Log what triggerData we received and what we built
-				fmt.Printf("🔍 VM Creation DEBUG: triggerData.Type = %v, triggerData.Output = %+v\n", triggerData.Type, triggerData.Output)
-				fmt.Printf("🔍 VM Creation DEBUG: buildTriggerDataMapFromProtobuf returned = %+v\n", triggerDataMap)
+				v.logger.Debug("VM Creation DEBUG: triggerData received", "triggerData.Type", triggerData.Type, "triggerData.Output", fmt.Sprintf("%+v", triggerData.Output))
+				v.logger.Debug("VM Creation DEBUG: buildTriggerDataMapFromProtobuf result", "triggerDataMap", fmt.Sprintf("%+v", triggerDataMap))
 			}
 
 			// Create dual-access map to support both camelCase and snake_case field access
 			// Extract trigger input data and add it to the trigger variable
 			triggerVarData := map[string]any{"data": triggerDataMap}
+
 			if task != nil && task.Trigger != nil {
 				triggerInputData := ExtractTriggerInputData(task.Trigger)
 				if triggerInputData != nil {
@@ -393,7 +394,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			}
 
 			// Debug: Log the final trigger variable data
-			fmt.Printf("🔍 VM Creation DEBUG: Final triggerVarData = %+v\n", triggerVarData)
+			v.logger.Debug("VM Creation DEBUG: Final trigger variable", "triggerName", triggerNameStd, "triggerVarData", fmt.Sprintf("%+v", triggerVarData))
 
 			v.AddVar(triggerNameStd, triggerVarData)
 		}
@@ -1183,16 +1184,39 @@ func (v *VM) runEthTransfer(stepID string, node *avsproto.ETHTransferNode) (*avs
 
 // resolveVariableWithFallback tries to resolve a variable path
 func (v *VM) resolveVariableWithFallback(jsvm *goja.Runtime, varPath string, currentVars map[string]any) (interface{}, bool) {
+	// Debug: Log the variable path we're trying to resolve
+	if v.logger != nil {
+		v.logger.Debug("resolveVariableWithFallback DEBUG: Attempting to resolve", "varPath", varPath)
+	}
+
 	// Try to resolve the variable path
 	script := fmt.Sprintf(`(() => { try { return %s; } catch(e) { return undefined; } })()`, varPath)
+	if v.logger != nil {
+		v.logger.Debug("resolveVariableWithFallback DEBUG: JavaScript script", "script", script)
+	}
+
 	if evaluated, err := jsvm.RunString(script); err == nil {
 		exportedValue := evaluated.Export()
+		if v.logger != nil {
+			v.logger.Debug("resolveVariableWithFallback DEBUG: JavaScript evaluation result", "exportedValue", exportedValue, "type", fmt.Sprintf("%T", exportedValue))
+		}
+
 		// Check if we got a real value (not undefined)
 		if exportedValue != nil && fmt.Sprintf("%v", exportedValue) != "undefined" {
+			if v.logger != nil {
+				v.logger.Debug("resolveVariableWithFallback DEBUG: Resolution successful", "varPath", varPath, "result", exportedValue)
+			}
 			return exportedValue, true
+		}
+	} else {
+		if v.logger != nil {
+			v.logger.Debug("resolveVariableWithFallback DEBUG: JavaScript evaluation failed", "varPath", varPath, "error", err)
 		}
 	}
 
+	if v.logger != nil {
+		v.logger.Debug("resolveVariableWithFallback DEBUG: Resolution failed", "varPath", varPath)
+	}
 	return nil, false
 }
 
@@ -1215,6 +1239,17 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 		currentVars[k] = val
 	}
 	v.mu.Unlock()
+
+	// Debug: Log all available variables
+	if v.logger != nil {
+		v.logger.Debug("preprocessTextWithVariableMapping DEBUG: Available variables", "vars", func() []string {
+			keys := make([]string, 0, len(currentVars))
+			for k := range currentVars {
+				keys = append(keys, k)
+			}
+			return keys
+		}())
+	}
 
 	for key, value := range currentVars {
 		if err := jsvm.Set(key, value); err != nil {
@@ -1248,6 +1283,11 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 			}
 			result = result[:start] + result[end+2:]
 			continue
+		}
+
+		// Debug: Log the expression we're trying to resolve
+		if v.logger != nil {
+			v.logger.Debug("preprocessTextWithVariableMapping DEBUG: Trying to resolve expression", "expression", expr)
 		}
 
 		// Try to resolve the variable with fallback to camelCase
@@ -1585,6 +1625,18 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 			EndAt:   time.Now().UnixMilli(),
 			Input:   node.Input, // Include node input data for debugging
 		}, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
+	}
+
+	// Validate node name for JavaScript compatibility
+	if err := model.ValidateNodeNameForJavaScript(node.Name); err != nil {
+		return &avsproto.Execution_Step{
+			Id:      node.Id,
+			Success: false,
+			Error:   fmt.Sprintf("Node name validation failed: %v", err),
+			StartAt: time.Now().UnixMilli(),
+			EndAt:   time.Now().UnixMilli(),
+			Input:   node.Input,
+		}, fmt.Errorf("node name validation failed: %w", err)
 	}
 
 	// Create a temporary, clean VM for isolated node execution.
@@ -2346,4 +2398,27 @@ func convertProtobufValueToMap(value *structpb.Value) map[string]interface{} {
 
 	// If it's not a map, return empty map
 	return map[string]interface{}{}
+}
+
+// validateAllNodeNamesForJavaScript validates all node names in a task
+func validateAllNodeNamesForJavaScript(task *model.Task) error {
+	if task == nil {
+		return nil
+	}
+
+	// Validate trigger name
+	if task.Trigger != nil && task.Trigger.Name != "" {
+		if err := model.ValidateNodeNameForJavaScript(task.Trigger.Name); err != nil {
+			return fmt.Errorf("trigger name validation failed: %w", err)
+		}
+	}
+
+	// Validate all node names
+	for _, node := range task.Nodes {
+		if err := model.ValidateNodeNameForJavaScript(node.Name); err != nil {
+			return fmt.Errorf("node '%s' validation failed: %w", node.Id, err)
+		}
+	}
+
+	return nil
 }

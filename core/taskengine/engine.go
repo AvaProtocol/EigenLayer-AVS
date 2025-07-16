@@ -629,6 +629,11 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 		return nil, status.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 
+	// Validate all node names for JavaScript compatibility
+	if err := validateAllNodeNamesForJavaScript(task); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "node name validation failed: %v", err)
+	}
+
 	updates := map[string][]byte{}
 
 	taskJSON, err := task.ToJSON()
@@ -1769,6 +1774,11 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		return nil, status.Errorf(codes.InvalidArgument, "task must have at least one node for simulation")
 	}
 
+	// Validate all node names for JavaScript compatibility
+	if err := validateAllNodeNamesForJavaScript(task); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "node name validation failed: %v", err)
+	}
+
 	// Step 1: Simulate the trigger to get trigger output data
 	// Extract trigger type and config from the TaskTrigger
 	n.logger.Info("SimulateTask received trigger", "trigger_type_raw", trigger.GetType(), "trigger_type_int", int(trigger.GetType()), "trigger_id", trigger.GetId(), "trigger_name", trigger.GetName())
@@ -1866,7 +1876,9 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	triggerDataMap := buildTriggerDataMap(triggerReason.Type, triggerOutput)
 
 	// Add the trigger variable with the actual trigger name for JavaScript access
-	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), map[string]any{"data": triggerDataMap})
+	// Use standard structure for all triggers
+	triggerVar := map[string]any{"data": triggerDataMap}
+	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), triggerVar)
 
 	// Step 6.5: Extract and add trigger input data if available (REPLICATE EXACT LOGIC FROM RunTask)
 	triggerInputData := ExtractTriggerInputData(task.Trigger)
@@ -3323,7 +3335,6 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 
 	switch triggerType {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-		triggerDataMap["triggered"] = true
 		// Include user-defined data - this is the main payload for manual triggers
 		if data, ok := triggerOutput["data"]; ok {
 			triggerDataMap["data"] = data

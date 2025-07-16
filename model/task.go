@@ -1,6 +1,7 @@
 package model
 
 import (
+	"regexp"
 	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -22,6 +23,43 @@ const (
 	ErrEmptyNodesField = "invalid: nodes field cannot be an empty array"
 	ErrEmptyEdgesField = "invalid: edges field cannot be an empty array"
 )
+
+var (
+	// JavaScript identifier validation regex
+	jsIdentifierRegex = regexp.MustCompile(`^[a-zA-Z_$][a-zA-Z0-9_$]*$`)
+
+	// JavaScript reserved words that cannot be used as identifiers
+	jsReservedWords = map[string]bool{
+		"break": true, "case": true, "catch": true, "class": true, "const": true,
+		"continue": true, "debugger": true, "default": true, "delete": true,
+		"do": true, "else": true, "enum": true, "export": true, "extends": true,
+		"false": true, "finally": true, "for": true, "function": true, "if": true,
+		"import": true, "in": true, "instanceof": true, "let": true, "new": true,
+		"null": true, "return": true, "super": true, "switch": true, "this": true,
+		"throw": true, "true": true, "try": true, "typeof": true, "var": true,
+		"void": true, "while": true, "with": true, "yield": true,
+	}
+)
+
+// ValidateNodeNameForJavaScript checks if a node name is valid for use as a JavaScript variable
+// Node names must be valid JavaScript identifiers to be referenced in subsequent nodes
+func ValidateNodeNameForJavaScript(nodeName string) error {
+	if nodeName == "" {
+		return fmt.Errorf("node name cannot be empty")
+	}
+
+	// Check if it matches JavaScript identifier pattern
+	if !jsIdentifierRegex.MatchString(nodeName) {
+		return fmt.Errorf("node name '%s' is not a valid JavaScript identifier - must start with letter, underscore, or dollar sign and contain only letters, numbers, underscores, and dollar signs", nodeName)
+	}
+
+	// Check if it's a reserved word
+	if jsReservedWords[strings.ToLower(nodeName)] {
+		return fmt.Errorf("node name '%s' is a JavaScript reserved word and cannot be used", nodeName)
+	}
+
+	return nil
+}
 
 // Generate a sorted uuid
 func GenerateTaskID() string {
@@ -140,6 +178,20 @@ func (t *Task) Validate() bool {
 
 // ValidateWithError returns detailed validation error messages
 func (t *Task) ValidateWithError() error {
+	// Validate trigger name for JavaScript compatibility
+	if t.Task.Trigger != nil && t.Task.Trigger.Name != "" {
+		if err := ValidateNodeNameForJavaScript(t.Task.Trigger.Name); err != nil {
+			return fmt.Errorf("trigger name validation failed: %w", err)
+		}
+	}
+
+	// Validate all node names for JavaScript compatibility
+	for _, node := range t.Task.Nodes {
+		if err := ValidateNodeNameForJavaScript(node.Name); err != nil {
+			return fmt.Errorf("node '%s' validation failed: %w", node.Id, err)
+		}
+	}
+
 	// Validate block trigger intervals
 	if t.Task.Trigger != nil {
 		if blockTrigger := t.Task.Trigger.GetBlock(); blockTrigger != nil {

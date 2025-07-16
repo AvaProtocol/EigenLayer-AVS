@@ -125,6 +125,11 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		return nil, fmt.Errorf("internal error: invalid execution id")
 	}
 
+	// Validate all node names for JavaScript compatibility
+	if err := validateAllNodeNamesForJavaScript(task); err != nil {
+		return nil, fmt.Errorf("node name validation failed: %w", err)
+	}
+
 	// Convert queue data back to the format expected by the VM
 	triggerReason := GetTriggerReasonOrDefault(queueData, task.Id, x.logger)
 

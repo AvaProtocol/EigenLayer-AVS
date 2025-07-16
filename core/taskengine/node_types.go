@@ -247,7 +247,14 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 			}
 		}
 	case *avsproto.TaskTrigger_Manual:
-		// Manual triggers typically don't have configuration
+		// Manual triggers typically don't have configuration, but we need to extract any data
+		// Check if the trigger has input data that should be used as the trigger data
+		if trigger.GetInput() != nil {
+			inputData := trigger.GetInput().AsInterface()
+			if inputData != nil {
+				triggerConfig["data"] = inputData
+			}
+		}
 		triggerConfig["manual"] = trigger.GetManual()
 	default:
 		// Handle unforeseen trigger types by returning empty configuration

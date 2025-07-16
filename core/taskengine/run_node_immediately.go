@@ -1271,9 +1271,7 @@ func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Ad
 
 // runManualTriggerImmediately executes a manual trigger immediately
 func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
-	result := map[string]interface{}{
-		"triggered": true,
-	}
+	result := map[string]interface{}{}
 
 	// The main purpose of manual triggers is to return user-defined data
 	// Check for data in triggerConfig first, then inputVariables as fallback
@@ -1292,6 +1290,8 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 		if n.logger != nil {
 			n.logger.Info("ManualTrigger executed without data")
 		}
+		// For null/undefined data, set data to null explicitly
+		result["data"] = nil
 	}
 
 	return result, nil
@@ -1333,6 +1333,11 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 	node, err := CreateNodeFromType(nodeType, nodeConfig, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create node: %w", err)
+	}
+
+	// Validate node name for JavaScript compatibility
+	if err := model.ValidateNodeNameForJavaScript(node.Name); err != nil {
+		return nil, fmt.Errorf("node name validation failed: %w", err)
 	}
 
 	// Execute the node with processed input variables
@@ -2238,7 +2243,7 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		manualOutput := &avsproto.ManualTrigger_Output{}
 		if result != nil {
 			// Include user-defined data - this is the main payload for manual triggers
-			if dataValue, exists := result["data"]; exists && dataValue != nil {
+			if dataValue, exists := result["data"]; exists {
 				if pbValue, err := structpb.NewValue(dataValue); err == nil {
 					manualOutput.Data = pbValue
 				}
