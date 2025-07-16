@@ -1,16 +1,18 @@
 package version
 
 var (
-	// Version can also be set through tag release at build time
-	semver   = "1.5.0"
-	revision = "unknow"
+	// Version is set at build time via ldflags by go-semantic-release
+	// Default to "dev" for development builds
+	semver   = "dev"
+	revision = "unknown"
 )
 
-// Get return the version. Note that we're injecting this at build time when we tag release
+// Get return the version. This is injected at build time via ldflags when creating releases
 func Get() string {
 	return semver
 }
 
+// Commit returns the git commit hash, injected at build time
 func Commit() string {
 	return revision
 }

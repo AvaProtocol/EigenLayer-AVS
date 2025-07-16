@@ -37,6 +37,13 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 		agg.logger.Warnf("No operator names file found: %v", err)
 	}
 
+	// Clean up duplicate operator entries from old storage system
+	if err := agg.operatorPool.CleanupDuplicateOperators(); err != nil {
+		agg.logger.Warnf("Failed to clean up duplicate operators: %v", err)
+	} else {
+		agg.logger.Info("Successfully cleaned up duplicate operator entries")
+	}
+
 	sentryDsn := ""
 
 	if agg.config != nil {

@@ -138,6 +138,7 @@ func (o *OperatorPool) Checkin(payload *avsproto.Checkin) error {
 
 func (o *OperatorPool) GetAll() []*OperatorNode {
 	var nodes []*OperatorNode
+	seenAddresses := make(map[string]bool)
 
 	kvs, err := o.db.GetByPrefix(operatorPrefix)
 	if err != nil {
@@ -150,6 +151,12 @@ func (o *OperatorPool) GetAll() []*OperatorNode {
 			continue
 		}
 
+		// Skip duplicates - only keep the first occurrence of each address
+		if seenAddresses[node.Address] {
+			continue
+		}
+		seenAddresses[node.Address] = true
+
 		// Ensure name is populated (for backward compatibility with nodes without names)
 		if node.Name == "" {
 			node.Name = GetOperatorName(node.Address)
@@ -159,6 +166,45 @@ func (o *OperatorPool) GetAll() []*OperatorNode {
 	}
 
 	return nodes
+}
+
+// CleanupDuplicateOperators removes old duplicate entries from the database
+// This helps clean up entries from the old ID-based storage system
+func (o *OperatorPool) CleanupDuplicateOperators() error {
+	kvs, err := o.db.GetByPrefix(operatorPrefix)
+	if err != nil {
+		return err
+	}
+
+	addressToKeys := make(map[string][][]byte)
+
+	// Group all keys by operator address
+	for _, kv := range kvs {
+		node := &OperatorNode{}
+		if err := json.Unmarshal(kv.Value, node); err != nil {
+			continue
+		}
+
+		addressToKeys[node.Address] = append(addressToKeys[node.Address], kv.Key)
+	}
+
+	// For each address with multiple keys, keep only the address-based key
+	for address, keys := range addressToKeys {
+		if len(keys) <= 1 {
+			continue // No duplicates
+		}
+
+		expectedKey := append(operatorPrefix, []byte(address)...)
+
+		// Delete all keys except the expected address-based key
+		for _, key := range keys {
+			if string(key) != string(expectedKey) {
+				o.db.Delete(key)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (r *RpcServer) Ping(ctx context.Context, payload *avsproto.Checkin) (*avsproto.CheckinResp, error) {
