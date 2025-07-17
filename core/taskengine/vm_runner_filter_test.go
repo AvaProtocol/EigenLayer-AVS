@@ -19,7 +19,7 @@ type MockTokenPrice struct {
 func TestFilter(t *testing.T) {
 	node := &avsproto.FilterNode{
 		Config: &avsproto.FilterNode_Config{
-			Expression: "current.cost > 5",
+			Expression: "item.cost > 5",
 			SourceId:   "trades",
 		},
 	}
@@ -91,7 +91,7 @@ func TestFilter(t *testing.T) {
 		t.Errorf("expect return only one element with cost > 5 but got: %s", data[0])
 	}
 
-	if !strings.Contains(step.Log, "Source node ID: 'trades', Variable name: 'trades', Original Expression: 'current.cost > 5', Clean Expression: 'current.cost > 5'") {
+	if !strings.Contains(step.Log, "Source node ID: 'trades', Variable name: 'trades', Original Expression: 'item.cost > 5', Clean Expression: 'item.cost > 5'") {
 		t.Errorf("log doesn't contain execution info")
 	}
 }
@@ -99,7 +99,7 @@ func TestFilter(t *testing.T) {
 func TestFilterComplexLogic(t *testing.T) {
 	node := &avsproto.FilterNode{
 		Config: &avsproto.FilterNode_Config{
-			Expression: "if (index<=2) { return current.cost > 13; } else { return current.cost < 21; }",
+			Expression: "if (index<=2) { return item.cost > 13; } else { return item.cost < 21; }",
 			SourceId:   "trades",
 		},
 	}

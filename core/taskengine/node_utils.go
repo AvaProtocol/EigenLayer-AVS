@@ -11,19 +11,45 @@ import (
 // buildTriggerVariableData creates the proper trigger variable structure for JavaScript VM access
 // This function consolidates the common logic used in VM creation, task execution, and simulation
 func buildTriggerVariableData(trigger *avsproto.TaskTrigger, triggerDataMap map[string]interface{}, triggerInputData map[string]interface{}) map[string]any {
-	triggerVarData := map[string]any{
-		"data": triggerDataMap,
+	triggerVarData := map[string]any{}
+
+	// Handle manual triggers specially - extract headers and pathParams to top level
+	if trigger != nil && trigger.GetType() == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
+		// For manual triggers, the triggerDataMap may contain headers and pathParams
+		// We need to extract them to the top level and put the rest in "data"
+		dataMap := make(map[string]interface{})
+
+		for k, v := range triggerDataMap {
+			switch k {
+			case "headers":
+				triggerVarData["headers"] = v
+			case "pathParams":
+				triggerVarData["pathParams"] = v
+			default:
+				dataMap[k] = v
+			}
+		}
+
+		// Set the data field with the remaining fields
+		if len(dataMap) > 0 {
+			triggerVarData["data"] = dataMap
+		} else {
+			triggerVarData["data"] = nil
+		}
+
+	} else {
+		// For other trigger types, use the original structure
+		triggerVarData["data"] = triggerDataMap
+
+		// Handle the case where triggers have no data to prevent template resolution issues
+		if len(triggerDataMap) == 0 {
+			triggerVarData["data"] = nil
+		}
 	}
 
 	// Add trigger input data if available
 	if triggerInputData != nil {
 		triggerVarData["input"] = triggerInputData
-
-		// For manual triggers, the .data field should contain the input data
-		// since manual triggers don't have meaningful output data during execution
-		if trigger != nil && trigger.GetType() == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
-			triggerVarData["data"] = triggerInputData
-		}
 	}
 
 	return triggerVarData
@@ -49,11 +75,12 @@ func updateTriggerVariableInVM(vm *VM, triggerVarName string, triggerVarData map
 
 // createNodeExecutionStep creates a standardized execution step for node execution
 // This function consolidates the common logic used across all node runners
+// The Input field contains the node's configuration, not input data from previous steps
 func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) *avsproto.Execution_Step {
 	t0 := time.Now()
 
 	// Get node data using helper function to reduce duplication
-	nodeName, nodeInput := vm.GetNodeDataForExecution(stepID)
+	nodeName, nodeConfig := vm.GetNodeDataForExecution(stepID)
 
 	return &avsproto.Execution_Step{
 		Id:         stepID,
@@ -64,7 +91,7 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 		StartAt:    t0.UnixMilli(),
 		Type:       nodeType.String(),
 		Name:       nodeName,
-		Input:      nodeInput, // Include node input data for debugging
+		Input:      nodeConfig, // Include node configuration for debugging
 	}
 }
 
@@ -99,7 +126,7 @@ func setNodeOutputData(processor *CommonProcessor, stepID string, outputData int
 	processor.SetOutputVarForStep(stepID, outputData)
 }
 
-// finalizeExecutionStep finalizes an execution step by setting the end time and final status
+// finalizeExecutionStep sets the final execution step properties
 // This function consolidates the common logic used across node runners
 func finalizeExecutionStep(step *avsproto.Execution_Step, success bool, errorMsg string, logContent string) {
 	step.EndAt = time.Now().UnixMilli()
@@ -117,7 +144,12 @@ func convertStringSliceMapToProtobufCompatible(input map[string][]string) map[st
 		if len(values) == 1 {
 			result[key] = values[0] // Single value as string
 		} else {
-			result[key] = values // Multiple values as array
+			// Convert []string to []interface{} for protobuf compatibility
+			interfaceValues := make([]interface{}, len(values))
+			for i, v := range values {
+				interfaceValues[i] = v
+			}
+			result[key] = interfaceValues // Multiple values as array
 		}
 	}
 	return result

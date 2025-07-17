@@ -88,9 +88,13 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 
 	logBuilder.WriteString(fmt.Sprintf("Filter configuration - source_id: %s, expression: %s\n", sourceID, expression))
 
+	// Determine the variable name to use in JavaScript BEFORE locking mutex
+	inputVarName := r.vm.GetNodeNameAsVar(sourceID)
+	logBuilder.WriteString(fmt.Sprintf("Using input variable: %s (from source: %s)\n", inputVarName, sourceID))
+
 	// Get the input data to filter
 	r.vm.mu.Lock()
-	inputVar, exists := r.vm.vars[r.vm.GetNodeNameAsVar(sourceID)]
+	inputVar, exists := r.vm.vars[inputVarName]
 	r.vm.mu.Unlock()
 
 	if !exists {
@@ -99,10 +103,6 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
 		return executionLogStep, fmt.Errorf(errMsg)
 	}
-
-	// Determine the variable name to use in JavaScript
-	inputVarName := r.vm.GetNodeNameAsVar(sourceID)
-	logBuilder.WriteString(fmt.Sprintf("Using input variable: %s (from source: %s)\n", inputVarName, sourceID))
 
 	// Apply template processing to the expression if it contains {{ }}
 	var processedExpression string

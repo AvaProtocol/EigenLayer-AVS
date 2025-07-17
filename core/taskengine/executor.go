@@ -213,13 +213,14 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		// This ensures regular workflows have complete execution history (trigger + nodes)
 
 		// Create trigger step similar to SimulateTask
-		// Extract trigger input data using the proper extraction function
-		triggerInputData := ExtractTriggerInputData(task.Trigger)
-		var triggerInputProto *structpb.Value
-		if triggerInputData != nil {
-			triggerInputProto, err = structpb.NewValue(triggerInputData)
-			if err != nil {
-				x.logger.Warn("Failed to convert trigger input data to protobuf", "error", err)
+		// Use trigger configuration instead of input data for the execution step's Input field
+		var triggerConfigProto *structpb.Value
+		triggerConfig := TaskTriggerToConfig(task.Trigger)
+		if len(triggerConfig) > 0 {
+			if configProto, err := structpb.NewValue(triggerConfig); err != nil {
+				x.logger.Warn("Failed to convert trigger config to protobuf", "error", err)
+			} else {
+				triggerConfigProto = configProto
 			}
 		}
 
@@ -233,7 +234,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 			Inputs:  []string{}, // Empty inputs for trigger steps
 			Type:    queueData.TriggerType.String(),
 			Name:    task.Trigger.Name,
-			Input:   triggerInputProto, // Include extracted trigger input data for debugging
+			Input:   triggerConfigProto, // Include trigger configuration for debugging
 		}
 
 		// Set trigger output data in the step based on trigger type

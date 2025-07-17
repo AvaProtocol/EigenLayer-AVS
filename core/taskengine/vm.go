@@ -1,8 +1,10 @@
 package taskengine
 
 import (
+	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -401,13 +403,21 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 		triggerNameStd, err := v.GetTriggerNameAsVar()
 		if err == nil {
 			// Extract trigger input data even when triggerData is nil
-			triggerVarData := map[string]any{"data": map[string]any{}} // Empty data map
+			var triggerInputData map[string]interface{}
 			if task.Trigger != nil {
-				triggerInputData := ExtractTriggerInputData(task.Trigger)
-				if triggerInputData != nil {
-					triggerVarData["input"] = triggerInputData
-				}
+				triggerInputData = ExtractTriggerInputData(task.Trigger)
 			}
+
+			// Extract trigger config data to use as the trigger's output data
+			var triggerDataMap map[string]interface{}
+			if task.Trigger != nil {
+				triggerConfig := TaskTriggerToConfig(task.Trigger)
+				// Use the trigger config as the trigger's output data for all trigger types
+				triggerDataMap = triggerConfig
+			}
+
+			// Use shared function to build trigger variable data with config data
+			triggerVarData := buildTriggerVariableData(task.Trigger, triggerDataMap, triggerInputData)
 			v.AddVar(triggerNameStd, triggerVarData)
 		}
 	}
@@ -1304,6 +1314,9 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 		var replacement string
 		if t, ok := exportedValue.(time.Time); ok {
 			replacement = t.In(time.UTC).Format("2006-01-02 15:04:05.000 +0000 UTC")
+		} else if exportedValue == nil {
+			// Handle null values by returning "undefined" for better debugging
+			replacement = "undefined"
 		} else if _, okMap := exportedValue.(map[string]interface{}); okMap {
 			replacement = "[object Object]" // Mimic JS behavior for objects in strings
 		} else if _, okArr := exportedValue.([]interface{}); okArr {
@@ -1342,6 +1355,9 @@ func (v *VM) preprocessText(text string) string {
 	result := text
 	searchPos := 0
 	previousResult := ""
+	consecutiveFailures := 0
+	maxConsecutiveFailures := 10
+
 	for i := 0; i < VMMaxPreprocessIterations; i++ {
 		// Break if result hasn't changed (prevents unnecessary iterations)
 		if result == previousResult && i > 0 {
@@ -1399,11 +1415,61 @@ func (v *VM) preprocessText(text string) string {
 		jsExpr = re.ReplaceAllString(jsExpr, "[$1]")
 
 		script := fmt.Sprintf(`(() => { return %s; })()`, jsExpr)
-		evaluated, err := jsvm.RunString(script)
+
+		// Add panic recovery and timeout protection
+		var evaluated goja.Value
+		var err error
+
+		// Simple timeout using a channel and goroutine
+		resultChan := make(chan struct{})
+
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("panic during JavaScript evaluation: %v", r)
+				}
+				close(resultChan)
+			}()
+
+			// Set a more restrictive timeout for the JS evaluation
+			timeoutCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			// Check if context is cancelled before starting
+			select {
+			case <-timeoutCtx.Done():
+				err = fmt.Errorf("JavaScript evaluation context timeout")
+				return
+			default:
+				// Continue with evaluation
+			}
+
+			evaluated, err = jsvm.RunString(script)
+		}()
+
+		// Wait for result or timeout
+		select {
+		case <-resultChan:
+			// Evaluation completed (successfully or with error)
+		case <-time.After(3 * time.Second):
+			err = fmt.Errorf("JavaScript evaluation timeout after 3 seconds")
+			if v.logger != nil {
+				v.logger.Error("preprocessText evaluation timeout", "expression", expr, "script", script)
+			}
+		}
+
 		if v.logger != nil {
 			v.logger.Debug("evaluating pre-processor script", "task_id", v.GetTaskId(), "script", script, "result", evaluated, "error", err)
 		}
 		if err != nil {
+			consecutiveFailures++
+			if consecutiveFailures >= maxConsecutiveFailures {
+				if v.logger != nil {
+					v.logger.Error("too many consecutive preprocessing failures, stopping", "failures", consecutiveFailures, "expression", expr)
+				}
+				break
+			}
+
 			// Keep the expression unchanged (original behavior)
 			// This is the expected behavior for existing tests
 			if v.logger != nil {
@@ -1414,10 +1480,16 @@ func (v *VM) preprocessText(text string) string {
 			continue
 		}
 
+		// Reset failure counter on success
+		consecutiveFailures = 0
+
 		exportedValue := evaluated.Export()
 		var replacement string
 		if t, ok := exportedValue.(time.Time); ok {
 			replacement = t.In(time.UTC).Format("2006-01-02 15:04:05.000 +0000 UTC")
+		} else if exportedValue == nil {
+			// Handle null values by returning "undefined" for better debugging
+			replacement = "undefined"
 		} else if _, okMap := exportedValue.(map[string]interface{}); okMap {
 			replacement = "[object Object]" // Mimic JS behavior for objects in strings
 		} else if _, okArr := exportedValue.([]interface{}); okArr {
@@ -1551,6 +1623,22 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 						inputKeys = append(inputKeys, inputKey)
 						if v.logger != nil {
 							v.logger.Info("✅ Added input field", "key", inputKey)
+						}
+					}
+					// Check for .headers field (for manual triggers)
+					if _, hasHeaders := valueMap["headers"]; hasHeaders {
+						headersKey := fmt.Sprintf("%s.headers", k)
+						inputKeys = append(inputKeys, headersKey)
+						if v.logger != nil {
+							v.logger.Info("✅ Added headers field", "key", headersKey)
+						}
+					}
+					// Check for .pathParams field (for manual triggers)
+					if _, hasPathParams := valueMap["pathParams"]; hasPathParams {
+						pathParamsKey := fmt.Sprintf("%s.pathParams", k)
+						inputKeys = append(inputKeys, pathParamsKey)
+						if v.logger != nil {
+							v.logger.Info("✅ Added pathParams field", "key", pathParamsKey)
 						}
 					}
 				} else {
@@ -2283,27 +2371,6 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
 	return false, errorMessage, failedCount
 }
 
-// GetNodeDataForExecution retrieves node name and input data for a given stepID
-// This helper function extracts the repetitive locking pattern used across all vm_runner files
-// to get node information from TaskNodes map.
-//
-// Returns:
-// - nodeName: The name of the node (defaults to "unknown" if not found)
-// - nodeInput: The input data of the node (can be nil)
-func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeInput *structpb.Value) {
-	nodeName = "unknown" // default value
-
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	if taskNode, exists := v.TaskNodes[stepID]; exists {
-		nodeName = taskNode.Name
-		nodeInput = taskNode.Input
-	}
-
-	return nodeName, nodeInput
-}
-
 // ExtractNodeInputData extracts input data from a TaskNode protobuf message
 func ExtractNodeInputData(taskNode *avsproto.TaskNode) map[string]interface{} {
 	if taskNode == nil || taskNode.Input == nil {
@@ -2323,8 +2390,6 @@ func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface
 	if trigger == nil {
 		return nil
 	}
-
-	fmt.Printf("🔍 ExtractTriggerInputData: trigger type = %T, trigger.GetInput() = %+v\n", trigger.GetTriggerType(), trigger.GetInput())
 
 	// Check each trigger type and extract input from the correct nested object
 	switch trigger.GetTriggerType().(type) {
@@ -2361,20 +2426,13 @@ func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface
 			}
 		}
 	case *avsproto.TaskTrigger_Manual:
-		fmt.Printf("🔍 ExtractTriggerInputData: Processing Manual trigger, trigger.GetInput() = %+v\n", trigger.GetInput())
 		// Manual triggers use the top-level TaskTrigger.input field
 		// since manual triggers don't have a nested config object like other trigger types
 		if trigger.GetInput() != nil {
 			inputInterface := trigger.GetInput().AsInterface()
-			fmt.Printf("🔍 ExtractTriggerInputData: Manual trigger inputInterface = %+v, type = %T\n", inputInterface, inputInterface)
 			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-				fmt.Printf("🔍 ExtractTriggerInputData: Manual trigger returning inputMap = %+v\n", inputMap)
 				return inputMap
-			} else {
-				fmt.Printf("🔍 ExtractTriggerInputData: Manual trigger inputInterface is not map[string]interface{}, got %T\n", inputInterface)
 			}
-		} else {
-			fmt.Printf("🔍 ExtractTriggerInputData: Manual trigger has no input field\n")
 		}
 		return nil
 	}
@@ -2420,4 +2478,152 @@ func validateAllNodeNamesForJavaScript(task *model.Task) error {
 	}
 
 	return nil
+}
+
+// ExtractNodeConfiguration extracts configuration from a TaskNode based on its type
+// This function returns the configuration that was used to execute the node
+func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{} {
+	if taskNode == nil {
+		return nil
+	}
+
+	switch taskNode.GetTaskType().(type) {
+	case *avsproto.TaskNode_RestApi:
+		restApi := taskNode.GetRestApi()
+		if restApi != nil && restApi.Config != nil {
+			config := map[string]interface{}{
+				"url":    restApi.Config.Url,
+				"method": restApi.Config.Method,
+				"body":   restApi.Config.Body,
+			}
+
+			// Convert headers map to headersMap format (array of key-value pairs)
+			// Convert to []interface{} containing []interface{} for protobuf compatibility
+			if restApi.Config.Headers != nil && len(restApi.Config.Headers) > 0 {
+				// Sort headers by key for consistent ordering
+				keys := make([]string, 0, len(restApi.Config.Headers))
+				for key := range restApi.Config.Headers {
+					keys = append(keys, key)
+				}
+				sort.Strings(keys)
+
+				headersMap := make([]interface{}, 0, len(restApi.Config.Headers))
+				for _, key := range keys {
+					headersMap = append(headersMap, []interface{}{key, restApi.Config.Headers[key]})
+				}
+				config["headersMap"] = headersMap
+			}
+
+			return config
+		}
+	case *avsproto.TaskNode_CustomCode:
+		customCode := taskNode.GetCustomCode()
+		if customCode != nil && customCode.Config != nil {
+			return map[string]interface{}{
+				"source": customCode.Config.Source,
+				"lang":   customCode.Config.Lang.String(),
+			}
+		}
+	case *avsproto.TaskNode_ContractWrite:
+		contractWrite := taskNode.GetContractWrite()
+		if contractWrite != nil && contractWrite.Config != nil {
+			config := map[string]interface{}{
+				"contractAddress": contractWrite.Config.ContractAddress,
+				"contractAbi":     contractWrite.Config.ContractAbi,
+				"callData":        contractWrite.Config.CallData,
+			}
+			if len(contractWrite.Config.MethodCalls) > 0 {
+				config["methodCalls"] = contractWrite.Config.MethodCalls
+			}
+			return config
+		}
+	case *avsproto.TaskNode_ContractRead:
+		contractRead := taskNode.GetContractRead()
+		if contractRead != nil && contractRead.Config != nil {
+			config := map[string]interface{}{
+				"contractAddress": contractRead.Config.ContractAddress,
+				"contractAbi":     contractRead.Config.ContractAbi,
+			}
+			if len(contractRead.Config.MethodCalls) > 0 {
+				config["methodCalls"] = contractRead.Config.MethodCalls
+			}
+			return config
+		}
+	case *avsproto.TaskNode_EthTransfer:
+		ethTransfer := taskNode.GetEthTransfer()
+		if ethTransfer != nil && ethTransfer.Config != nil {
+			return map[string]interface{}{
+				"destination": ethTransfer.Config.Destination,
+				"amount":      ethTransfer.Config.Amount,
+			}
+		}
+	case *avsproto.TaskNode_GraphqlQuery:
+		graphqlQuery := taskNode.GetGraphqlQuery()
+		if graphqlQuery != nil && graphqlQuery.Config != nil {
+			return map[string]interface{}{
+				"url":       graphqlQuery.Config.Url,
+				"query":     graphqlQuery.Config.Query,
+				"variables": graphqlQuery.Config.Variables,
+			}
+		}
+	case *avsproto.TaskNode_Branch:
+		branch := taskNode.GetBranch()
+		if branch != nil && branch.Config != nil {
+			return map[string]interface{}{
+				"conditions": branch.Config.Conditions,
+			}
+		}
+	case *avsproto.TaskNode_Filter:
+		filter := taskNode.GetFilter()
+		if filter != nil && filter.Config != nil {
+			return map[string]interface{}{
+				"sourceId":   filter.Config.SourceId,
+				"expression": filter.Config.Expression,
+			}
+		}
+	case *avsproto.TaskNode_Loop:
+		loop := taskNode.GetLoop()
+		if loop != nil && loop.Config != nil {
+			return map[string]interface{}{
+				"sourceId": loop.Config.SourceId,
+				"iterVal":  loop.Config.IterVal,
+				"iterKey":  loop.Config.IterKey,
+			}
+		}
+	}
+
+	return nil
+}
+
+// GetNodeDataForExecution retrieves node name and configuration data for a given stepID
+// This helper function extracts the repetitive locking pattern used across all vm_runner files
+// to get node information from TaskNodes map.
+//
+// Returns:
+// - nodeName: The name of the node (defaults to "unknown" if not found)
+// - nodeConfig: The configuration data of the node (can be nil)
+func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeConfig *structpb.Value) {
+	nodeName = "unknown" // default value
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if taskNode, exists := v.TaskNodes[stepID]; exists {
+		nodeName = taskNode.Name
+
+		// Extract node configuration instead of input data
+		nodeConfigMap := ExtractNodeConfiguration(taskNode)
+
+		if nodeConfigMap != nil {
+			if configProto, err := structpb.NewValue(nodeConfigMap); err == nil {
+				nodeConfig = configProto
+			} else {
+				if v.logger != nil {
+					v.logger.Error("Failed to convert config to protobuf", "stepID", stepID, "error", err)
+				}
+			}
+		}
+	}
+
+	return nodeName, nodeConfig
 }
