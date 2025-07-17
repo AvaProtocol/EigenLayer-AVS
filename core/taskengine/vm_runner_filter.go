@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -28,9 +29,9 @@ func NewFilterProcessor(vm *VM) *FilterProcessor {
 // processExpression handles different expression patterns and returns a clean JavaScript expression
 func (r *FilterProcessor) processExpression(expression string) string {
 	// Handle different expression patterns:
-	// 1. Full template: "{{ current.age >= 18 }}" -> strip braces, use as JavaScript
-	// 2. Mixed template: "{{ trigger.data.minAge }} <= current.age" -> process variables
-	// 3. Pure JavaScript: "current.age < 18" -> use as-is
+	// 1. Full template: "{{ value.age >= 18 }}" -> strip braces, use as JavaScript
+	// 2. Mixed template: "{{ trigger.data.minAge }} <= value.age" -> process variables
+	// 3. Pure JavaScript: "value.age < 18" -> use as-is
 	cleanExpression := expression
 	if strings.HasPrefix(expression, "{{") && strings.HasSuffix(expression, "}}") && strings.Count(expression, "{{") == 1 {
 		// Full template expression - strip braces and use as JavaScript
@@ -278,22 +279,22 @@ func (r *FilterProcessor) filterArray(data []interface{}, expression string, inp
 	// Determine if we need to wrap the expression in a function
 	var finalExpression string
 	if strings.Contains(expression, "if") || strings.Contains(expression, "return") {
-		finalExpression = fmt.Sprintf("(function(item, index) { %s })", expression)
+		finalExpression = fmt.Sprintf("(function(value, index) { %s })", expression)
 	} else {
-		finalExpression = fmt.Sprintf("(function(item, index) { return %s; })", expression)
+		finalExpression = fmt.Sprintf("(function(value, index) { return %s; })", expression)
 	}
 
 	for i, item := range data {
 		// Set the current item and index in the JS context
-		if err := jsvm.Set("item", item); err != nil {
-			return nil, fmt.Errorf("failed to set item (index %d) in JS VM: %w", i, err)
+		if err := jsvm.Set("value", item); err != nil {
+			return nil, fmt.Errorf("failed to set value (index %d) in JS VM: %w", i, err)
 		}
 		if err := jsvm.Set("index", i); err != nil {
 			return nil, fmt.Errorf("failed to set index %d in JS VM: %w", i, err)
 		}
 
 		// Evaluate the filter expression for this item
-		result, err := jsvm.RunString(fmt.Sprintf("(%s)(item, index)", finalExpression))
+		result, err := jsvm.RunString(fmt.Sprintf("(%s)(value, index)", finalExpression))
 		if err != nil {
 			logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for item %d (%v): %s. Skipping item.\n", i, item, err.Error()))
 			continue
@@ -320,22 +321,22 @@ func (r *FilterProcessor) filterMapArray(data []map[string]interface{}, expressi
 	// Regular expression to detect "if" or "return" outside of string literals or comments
 	controlFlowRegex := regexp.MustCompile(`\b(if|return)\b`)
 	if controlFlowRegex.MatchString(expression) {
-		finalExpression = fmt.Sprintf("(function(item, index) { %s })", expression)
+		finalExpression = fmt.Sprintf("(function(value, index) { %s })", expression)
 	} else {
-		finalExpression = fmt.Sprintf("(function(item, index) { return %s; })", expression)
+		finalExpression = fmt.Sprintf("(function(value, index) { return %s; })", expression)
 	}
 
 	for i, item := range data {
 		// Set the current item and index in the JS context
-		if err := jsvm.Set("item", item); err != nil {
-			return nil, fmt.Errorf("failed to set item (index %d) in JS VM: %w", i, err)
+		if err := jsvm.Set("value", item); err != nil {
+			return nil, fmt.Errorf("failed to set value (index %d) in JS VM: %w", i, err)
 		}
 		if err := jsvm.Set("index", i); err != nil {
 			return nil, fmt.Errorf("failed to set index %d in JS VM: %w", i, err)
 		}
 
 		// Evaluate the filter expression for this item
-		result, err := jsvm.RunString(fmt.Sprintf("(%s)(item, index)", finalExpression))
+		result, err := jsvm.RunString(fmt.Sprintf("(%s)(value, index)", finalExpression))
 		if err != nil {
 			logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for item %d (%v): %s. Skipping item.\n", i, item, err.Error()))
 			continue
@@ -360,13 +361,13 @@ func (r *FilterProcessor) filterSingleMap(data map[string]interface{}, expressio
 	// Determine if we need to wrap the expression in a function
 	var finalExpression string
 	if strings.Contains(expression, "if") || strings.Contains(expression, "return") {
-		finalExpression = fmt.Sprintf("(function(item, index) { %s })", expression)
+		finalExpression = fmt.Sprintf("(function(value, index) { %s })", expression)
 	} else {
-		finalExpression = fmt.Sprintf("(function(item, index) { return %s; })", expression)
+		finalExpression = fmt.Sprintf("(function(value, index) { return %s; })", expression)
 	}
 
 	// Set the map as a variable and evaluate the expression directly
-	if err := jsvm.Set("item", data); err != nil {
+	if err := jsvm.Set("value", data); err != nil {
 		return nil, fmt.Errorf("failed to set input map in JS VM: %w", err)
 	}
 	if err := jsvm.Set("index", 0); err != nil {
@@ -374,7 +375,7 @@ func (r *FilterProcessor) filterSingleMap(data map[string]interface{}, expressio
 	}
 
 	// Evaluate the filter expression for the map
-	result, err := jsvm.RunString(fmt.Sprintf("(%s)(item, index)", finalExpression))
+	result, err := jsvm.RunString(fmt.Sprintf("(%s)(value, index)", finalExpression))
 	if err != nil {
 		logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for map: %s\n", err.Error()))
 		return nil, err
