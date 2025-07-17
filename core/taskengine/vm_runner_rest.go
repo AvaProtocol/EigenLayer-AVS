@@ -80,31 +80,12 @@ func NewMockHTTPExecutor() *MockHTTPExecutor {
 func (m *MockHTTPExecutor) ExecuteRequest(method, url, body string, headers map[string]string) (*resty.Response, error) {
 	// Create a temporary mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		// Set content type to JSON
+		// Set content type to JSON by default
 		w.Header().Set("Content-Type", "application/json")
 
-		// Handle httpbin.org URLs with httpbin.org-like responses
-		if strings.Contains(url, "httpbin.org") {
-			response := map[string]interface{}{
-				"args":    map[string]interface{}{},
-				"data":    body,
-				"files":   map[string]interface{}{},
-				"form":    map[string]interface{}{},
-				"headers": headers,
-				"json":    nil,
-				"origin":  "127.0.0.1",
-				"url":     url,
-			}
-
-			jsonData, err := json.Marshal(response)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(`{"error": "Failed to marshal response"}`))
-				return
-			}
-
-			w.WriteHeader(http.StatusOK)
-			w.Write(jsonData)
+		// Handle mock API endpoints
+		if strings.HasPrefix(url, MockAPIEndpoint) {
+			m.handleMockAPIResponse(w, req, url, method, body, headers)
 		} else if strings.HasSuffix(url, "/data") {
 			response := map[string]interface{}{
 				"success": true,
@@ -165,25 +146,221 @@ func (m *MockHTTPExecutor) ExecuteRequest(method, url, body string, headers map[
 		request.SetBody(body)
 	}
 
+	// Make request to mock server, preserving the original URL path
+	var mockURL string
+	if strings.HasPrefix(url, MockAPIEndpoint) {
+		// Extract the path from the original mock API URL
+		remaining := url[len(MockAPIEndpoint):] // Skip "https://mock-api.ap-aggregator.local"
+		mockURL = server.URL + remaining
+	} else {
+		mockURL = server.URL
+	}
+
 	// Make request to mock server
 	switch strings.ToUpper(method) {
 	case "GET":
-		return request.Get(server.URL)
+		return request.Get(mockURL)
 	case "POST":
-		return request.Post(server.URL)
+		return request.Post(mockURL)
 	case "PUT":
-		return request.Put(server.URL)
+		return request.Put(mockURL)
 	case "DELETE":
-		return request.Delete(server.URL)
+		return request.Delete(mockURL)
 	case "PATCH":
-		return request.Patch(server.URL)
+		return request.Patch(mockURL)
 	case "HEAD":
-		return request.Head(server.URL)
+		return request.Head(mockURL)
 	case "OPTIONS":
-		return request.Options(server.URL)
+		return request.Options(mockURL)
 	default:
 		return nil, fmt.Errorf("unsupported HTTP method: %s", method)
 	}
+}
+
+// handleMockAPIResponse handles mock API responses with proper status codes
+func (m *MockHTTPExecutor) handleMockAPIResponse(w http.ResponseWriter, req *http.Request, url, method, body string, headers map[string]string) {
+	// Use the request path from the mock server (which preserves the original path)
+	requestPath := req.URL.Path
+
+	// Handle /status/{code} endpoints for testing different HTTP status codes
+	if strings.Contains(requestPath, "/status/") {
+		// Extract status code from request path
+		statusStr := ""
+		if idx := strings.Index(requestPath, "/status/"); idx != -1 {
+			remaining := requestPath[idx+8:] // Skip "/status/"
+			// Find the next slash or end of string
+			endIdx := strings.Index(remaining, "/")
+			if endIdx == -1 {
+				endIdx = len(remaining)
+			}
+			statusStr = remaining[:endIdx]
+		}
+
+		// Parse status code
+		var statusCode int
+		if _, err := fmt.Sscanf(statusStr, "%d", &statusCode); err == nil && statusCode >= 100 && statusCode <= 599 {
+			// Set appropriate content type based on status code
+			if statusCode == 204 || statusCode == 304 {
+				// No content responses should not have content-type or body
+				w.Header().Del("Content-Type")
+				w.WriteHeader(statusCode)
+				return
+			}
+
+			// For other status codes, return JSON with status info
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(statusCode)
+
+			// Create appropriate response based on status code
+			var response map[string]interface{}
+			if statusCode >= 400 {
+				// Error responses
+				response = map[string]interface{}{
+					"error": http.StatusText(statusCode),
+					"code":  statusCode,
+					"url":   url,
+				}
+			} else {
+				// Success responses
+				response = map[string]interface{}{
+					"status": http.StatusText(statusCode),
+					"code":   statusCode,
+					"url":    url,
+				}
+			}
+
+			jsonData, err := json.Marshal(response)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(`{"error": "Failed to marshal response"}`))
+				return
+			}
+
+			w.Write(jsonData)
+			return
+		}
+	}
+
+	// Handle /delay/{seconds} endpoints for testing timeouts
+	if strings.Contains(requestPath, "/delay/") {
+		delayStr := ""
+		if idx := strings.Index(requestPath, "/delay/"); idx != -1 {
+			remaining := requestPath[idx+7:] // Skip "/delay/"
+			endIdx := strings.Index(remaining, "/")
+			if endIdx == -1 {
+				endIdx = len(remaining)
+			}
+			delayStr = remaining[:endIdx]
+		}
+
+		var delaySeconds int
+		if _, err := fmt.Sscanf(delayStr, "%d", &delaySeconds); err == nil && delaySeconds > 0 && delaySeconds <= 10 {
+			// Simulate delay (but cap it at 10 seconds for testing)
+			time.Sleep(time.Duration(delaySeconds) * time.Second)
+		}
+	}
+
+	// Handle /headers endpoint
+	if strings.Contains(requestPath, "/headers") {
+		response := map[string]interface{}{
+			"headers": headers,
+		}
+
+		jsonData, err := json.Marshal(response)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error": "Failed to marshal response"}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write(jsonData)
+		return
+	}
+
+	// Handle /ip endpoint
+	if strings.Contains(requestPath, "/ip") {
+		response := map[string]interface{}{
+			"origin": "127.0.0.1",
+		}
+
+		jsonData, err := json.Marshal(response)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error": "Failed to marshal response"}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write(jsonData)
+		return
+	}
+
+	// Default mock API response for other endpoints
+	response := map[string]interface{}{
+		"success": true,
+		"message": "Mock API response from EigenLayer-AVS",
+		"data": map[string]interface{}{
+			"args":    parseQueryParams(url),
+			"body":    body,
+			"headers": headers,
+			"json":    parseJSONBody(body),
+			"method":  method,
+			"url":     url,
+		},
+	}
+
+	jsonData, err := json.Marshal(response)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error": "Failed to marshal response"}`))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(jsonData)
+}
+
+// parseQueryParams extracts query parameters from a URL
+func parseQueryParams(url string) map[string]interface{} {
+	args := make(map[string]interface{})
+
+	// Find the query string part
+	if idx := strings.Index(url, "?"); idx != -1 {
+		queryString := url[idx+1:]
+
+		// Split by & to get individual parameters
+		params := strings.Split(queryString, "&")
+		for _, param := range params {
+			if param != "" {
+				// Split by = to get key and value
+				if eqIdx := strings.Index(param, "="); eqIdx != -1 {
+					key := param[:eqIdx]
+					value := param[eqIdx+1:]
+					args[key] = value
+				} else {
+					// Parameter without value
+					args[param] = ""
+				}
+			}
+		}
+	}
+
+	return args
+}
+
+// parseJSONBody attempts to parse the body as JSON
+func parseJSONBody(body string) interface{} {
+	if body == "" {
+		return nil
+	}
+
+	var jsonData interface{}
+	if err := json.Unmarshal([]byte(body), &jsonData); err == nil {
+		return jsonData
+	}
+
+	return nil
 }
 
 // RestProcessor handles REST API calls with template variable support
@@ -360,7 +537,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	// Determine which executor to use based on URL
 	var executor HTTPRequestExecutor
-	if strings.HasPrefix(url, MockAPIEndpoint+"/") || url == MockAPIEndpoint || strings.Contains(url, "httpbin.org") {
+	if strings.HasPrefix(url, MockAPIEndpoint+"/") || url == MockAPIEndpoint {
 		executor = NewMockHTTPExecutor()
 	} else {
 		executor = r.executor
