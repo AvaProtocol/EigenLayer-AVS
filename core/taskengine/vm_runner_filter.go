@@ -269,7 +269,9 @@ func (r *FilterProcessor) filterMapArray(data []map[string]interface{}, expressi
 
 	// Determine if we need to wrap the expression in a function
 	var finalExpression string
-	if strings.Contains(expression, "if") || strings.Contains(expression, "return") {
+	// Regular expression to detect "if" or "return" outside of string literals or comments
+	controlFlowRegex := regexp.MustCompile(`\b(if|return)\b`)
+	if controlFlowRegex.MatchString(expression) {
 		finalExpression = fmt.Sprintf("(function(item, index) { %s })", expression)
 	} else {
 		finalExpression = fmt.Sprintf("(function(item, index) { return %s; })", expression)
