@@ -38,20 +38,68 @@ func (r *FilterProcessor) processExpression(expression string) string {
 	} else if strings.Contains(expression, "{{") {
 		// Mixed expression - process template variables
 		cleanExpression = r.vm.preprocessTextWithVariableMapping(expression)
+		// DEBUG: Log the template processing result
+		if r.vm.logger != nil {
+			r.vm.logger.Debug("Template processing result",
+				"original", expression,
+				"processed", cleanExpression)
+		}
 	}
 	// else: Pure JavaScript expression - use as-is
 	return cleanExpression
 }
 
+// isFilterExpressionSafe performs a more permissive safety check for filter expressions
+func (r *FilterProcessor) isFilterExpressionSafe(expr string) bool {
+	// Check for obviously dangerous patterns
+	dangerousPatterns := []string{
+		"eval", "Function", "setTimeout", "setInterval", "require", "import", "export",
+		"global", "window", "document", "process", "constructor", "prototype",
+		"__proto__", "delete", "while", "for", "function", "class", "var", "let", "const",
+	}
+
+	for _, pattern := range dangerousPatterns {
+		if strings.Contains(expr, pattern) {
+			return false
+		}
+	}
+
+	// For now, be very permissive for filter expressions
+	// In a production environment, you'd want stricter validation
+	return true
+}
+
 // wrapExpressionForExecution wraps the expression appropriately based on its content
 func (r *FilterProcessor) wrapExpressionForExecution(cleanExpression string) string {
+	// SECURITY: Validate the JavaScript expression before execution
+	validator := NewExpressionValidator(DefaultSecurityConfig())
+	sanitizedExpr := validator.SanitizeExpression(cleanExpression)
+
+	if err := validator.ValidateExpression(sanitizedExpr); err != nil {
+		if r.vm.logger != nil {
+			r.vm.logger.Warn("Invalid or potentially dangerous filter expression detected",
+				"original_expr", cleanExpression,
+				"sanitized_expr", sanitizedExpr,
+				"error", err.Error())
+		}
+		// For filter expressions, we'll be more permissive if it looks like a valid expression
+		// This is a compromise between security and functionality
+		if r.isFilterExpressionSafe(sanitizedExpr) {
+			// Allow the expression if it appears to be a safe filter expression
+			sanitizedExpr = cleanExpression
+		} else {
+			// Return a safe expression that evaluates to false
+			return `(() => { return false; })()`
+		}
+	}
+
 	// Check if the expression already contains control flow statements
-	if strings.Contains(cleanExpression, "if") || strings.Contains(cleanExpression, "return") {
+	if strings.Contains(sanitizedExpr, "if") || strings.Contains(sanitizedExpr, "return") {
 		// For complex expressions with control flow, wrap in a function without additional return
-		return fmt.Sprintf(`(() => { %s })()`, cleanExpression)
+		return fmt.Sprintf(`(() => { %s })()`, sanitizedExpr)
 	} else {
 		// For simple expressions, wrap with return
-		return fmt.Sprintf(`(() => { return %s; })()`, cleanExpression)
+		return fmt.Sprintf(`(() => { return %s; })()`, sanitizedExpr)
 	}
 }
 

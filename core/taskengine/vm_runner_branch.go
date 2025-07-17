@@ -201,6 +201,16 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 			continue
 		}
 
+		// SECURITY: Validate the processed expression before execution
+		validationResult := ValidateCodeInjection(trimmedProcessed)
+		if !validationResult.Valid {
+			log.WriteString("Dangerous expression detected in condition '" + condition.Id + "': " + validationResult.Error + "\n")
+			log.WriteString("Original expression: " + condition.Expression + "\n")
+			log.WriteString("Processed expression: " + trimmedProcessed + "\n")
+			log.WriteString("Condition '" + condition.Id + "' failed security validation, treating as false and continuing\n")
+			continue // Skip this condition (treat as false)
+		}
+
 		// Evaluate the expression
 		wrappedExpression := fmt.Sprintf("(%s)", trimmedProcessed)
 		log.WriteString("Final wrapped expression for '" + condition.Id + "': " + wrappedExpression + "\n")

@@ -1198,6 +1198,15 @@ func (v *VM) resolveVariableWithFallback(jsvm *goja.Runtime, varPath string, cur
 		v.logger.Debug("resolveVariableWithFallback DEBUG: Attempting to resolve", "varPath", varPath)
 	}
 
+	// SECURITY: Validate variable path using centralized security validation
+	validationResult := ValidateCodeInjection(varPath)
+	if !validationResult.Valid {
+		if v.logger != nil {
+			v.logger.Warn("Dangerous variable path detected", "path", varPath, "error", validationResult.Error)
+		}
+		return nil, false
+	}
+
 	// Try to resolve the variable path
 	script := fmt.Sprintf(`(() => { try { return %s; } catch(e) { return undefined; } })()`, varPath)
 	if v.logger != nil {
@@ -1413,6 +1422,17 @@ func (v *VM) preprocessText(text string) string {
 		// Convert dot notation array access to bracket notation
 		re := regexp.MustCompile(`\.(\d+)`)
 		jsExpr = re.ReplaceAllString(jsExpr, "[$1]")
+
+		// SECURITY: Validate template expression using centralized security validation
+		validationResult := ValidateCodeInjection(jsExpr)
+		if !validationResult.Valid {
+			if v.logger != nil {
+				v.logger.Warn("Dangerous template expression detected", "expr", jsExpr, "error", validationResult.Error)
+			}
+			// Replace with "undefined" for safety
+			result = result[:start] + "undefined" + result[end+2:]
+			continue
+		}
 
 		script := fmt.Sprintf(`(() => { return %s; })()`, jsExpr)
 
