@@ -122,3 +122,21 @@ func convertStringSliceMapToProtobufCompatible(input map[string][]string) map[st
 	}
 	return result
 }
+
+// convertArrayOfObjectsToProtobufCompatible converts an array of objects like [{"key":"value"}]
+// to a protobuf-compatible format. This is commonly used for webhook headers and path parameters.
+// It merges all objects in the array into a single map for easier JavaScript access.
+func convertArrayOfObjectsToProtobufCompatible(input []interface{}) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	for _, item := range input {
+		if objMap, ok := item.(map[string]interface{}); ok {
+			// Merge all key-value pairs from each object into the result map
+			for key, value := range objMap {
+				result[key] = value
+			}
+		}
+	}
+
+	return result
+}

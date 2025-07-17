@@ -247,15 +247,18 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 			}
 		}
 	case *avsproto.TaskTrigger_Manual:
-		// Manual triggers typically don't have configuration, but we need to extract any data
-		// Check if the trigger has input data that should be used as the trigger data
+		// Manual triggers extract configuration from the trigger input data
+		// This includes data, headers, and pathParams for webhook testing
 		if trigger.GetInput() != nil {
 			inputData := trigger.GetInput().AsInterface()
 			if inputData != nil {
 				triggerConfig["data"] = inputData
 			}
 		}
-		triggerConfig["manual"] = trigger.GetManual()
+
+		// Note: Additional webhook fields (headers, pathParams) are typically passed
+		// through the RPC trigger configuration when calling trigger endpoints
+		// They will be merged into triggerConfig by the calling functions
 	default:
 		// Handle unforeseen trigger types by returning empty configuration
 		// This ensures consistent behavior for unknown or future trigger types

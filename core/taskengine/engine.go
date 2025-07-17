@@ -1785,11 +1785,11 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Debug: Check what oneof field is set
 	n.logger.Info("SimulateTask trigger oneof debug",
-		"manual", trigger.GetManual(),
 		"fixed_time", trigger.GetFixedTime() != nil,
 		"cron", trigger.GetCron() != nil,
 		"block", trigger.GetBlock() != nil,
 		"event", trigger.GetEvent() != nil,
+		"manual", TaskTriggerToTriggerType(trigger) == avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		"oneof_type", fmt.Sprintf("%T", trigger.GetTriggerType()))
 
 	// Use TaskTriggerToTriggerType to determine type from oneof field instead of just GetType()
@@ -3297,6 +3297,8 @@ func buildCronTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Cron
 //   - *avsproto.ManualTrigger_Output: properly structured protobuf output with user-defined data
 func buildManualTriggerOutput(triggerOutput map[string]interface{}) *avsproto.ManualTrigger_Output {
 	var data *structpb.Value
+	var headers *structpb.Value
+	var pathParams *structpb.Value
 
 	if triggerOutput != nil {
 		// Include user-defined data - this is the main payload for manual triggers
@@ -3305,10 +3307,26 @@ func buildManualTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Ma
 				data = pbValue
 			}
 		}
+
+		// Include headers for webhook testing
+		if headersValue, exists := triggerOutput["headers"]; exists && headersValue != nil {
+			if pbValue, err := structpb.NewValue(headersValue); err == nil {
+				headers = pbValue
+			}
+		}
+
+		// Include path parameters for webhook testing
+		if pathParamsValue, exists := triggerOutput["pathParams"]; exists && pathParamsValue != nil {
+			if pbValue, err := structpb.NewValue(pathParamsValue); err == nil {
+				pathParams = pbValue
+			}
+		}
 	}
 
 	return &avsproto.ManualTrigger_Output{
-		Data: data,
+		Data:       data,
+		Headers:    headers,
+		PathParams: pathParams,
 	}
 }
 
@@ -3333,6 +3351,14 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 		// Include user-defined data - this is the main payload for manual triggers
 		if data, ok := triggerOutput["data"]; ok {
 			triggerDataMap["data"] = data
+		}
+		// Include headers for webhook testing
+		if headers, ok := triggerOutput["headers"]; ok {
+			triggerDataMap["headers"] = headers
+		}
+		// Include path parameters for webhook testing
+		if pathParams, ok := triggerOutput["pathParams"]; ok {
+			triggerDataMap["pathParams"] = pathParams
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
 		if timestamp, ok := triggerOutput["timestamp"]; ok {
@@ -3502,6 +3528,14 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 			// Include user-defined data - this is the main payload for manual triggers
 			if manualOutput.Data != nil {
 				triggerDataMap["data"] = manualOutput.Data.AsInterface()
+			}
+			// Include headers for webhook testing
+			if manualOutput.Headers != nil {
+				triggerDataMap["headers"] = manualOutput.Headers.AsInterface()
+			}
+			// Include path parameters for webhook testing
+			if manualOutput.PathParams != nil {
+				triggerDataMap["pathParams"] = manualOutput.PathParams.AsInterface()
 			}
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:

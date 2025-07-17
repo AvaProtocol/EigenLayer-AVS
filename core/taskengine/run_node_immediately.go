@@ -1294,6 +1294,40 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 		result["data"] = nil
 	}
 
+	// Include headers for webhook testing if provided
+	if headers, exists := triggerConfig["headers"]; exists && headers != nil {
+		// Convert headers using the utility function for protobuf compatibility
+		if headersArray, ok := headers.([]interface{}); ok {
+			convertedHeaders := convertArrayOfObjectsToProtobufCompatible(headersArray)
+			result["headers"] = convertedHeaders
+			if n.logger != nil {
+				n.logger.Info("ManualTrigger executed with headers", "headerCount", len(headersArray))
+			}
+		} else {
+			result["headers"] = headers
+			if n.logger != nil {
+				n.logger.Info("ManualTrigger executed with headers", "headersType", fmt.Sprintf("%T", headers))
+			}
+		}
+	}
+
+	// Include path parameters for webhook testing if provided
+	if pathParams, exists := triggerConfig["pathParams"]; exists && pathParams != nil {
+		// Convert pathParams using the utility function for protobuf compatibility
+		if pathParamsArray, ok := pathParams.([]interface{}); ok {
+			convertedPathParams := convertArrayOfObjectsToProtobufCompatible(pathParamsArray)
+			result["pathParams"] = convertedPathParams
+			if n.logger != nil {
+				n.logger.Info("ManualTrigger executed with pathParams", "pathParamCount", len(pathParamsArray))
+			}
+		} else {
+			result["pathParams"] = pathParams
+			if n.logger != nil {
+				n.logger.Info("ManualTrigger executed with pathParams", "pathParamsType", fmt.Sprintf("%T", pathParams))
+			}
+		}
+	}
+
 	return result, nil
 }
 
@@ -2246,6 +2280,18 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 			if dataValue, exists := result["data"]; exists {
 				if pbValue, err := structpb.NewValue(dataValue); err == nil {
 					manualOutput.Data = pbValue
+				}
+			}
+			// Include headers for webhook testing
+			if headersValue, exists := result["headers"]; exists {
+				if pbValue, err := structpb.NewValue(headersValue); err == nil {
+					manualOutput.Headers = pbValue
+				}
+			}
+			// Include path parameters for webhook testing
+			if pathParamsValue, exists := result["pathParams"]; exists {
+				if pbValue, err := structpb.NewValue(pathParamsValue); err == nil {
+					manualOutput.PathParams = pbValue
 				}
 			}
 		}

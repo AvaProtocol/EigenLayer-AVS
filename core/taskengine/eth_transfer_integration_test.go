@@ -25,7 +25,7 @@ func TestETHTransferTaskIntegration(t *testing.T) {
 		Trigger: &avsproto.TaskTrigger{
 			Id:          "manual_trigger",
 			Name:        "manual",
-			TriggerType: &avsproto.TaskTrigger_Manual{Manual: true},
+			TriggerType: &avsproto.TaskTrigger_Manual{},
 		},
 		Nodes: []*avsproto.TaskNode{
 			{
@@ -166,7 +166,7 @@ func TestETHTransferTaskWithInvalidConfig(t *testing.T) {
 		Trigger: &avsproto.TaskTrigger{
 			Id:          "manual_trigger",
 			Name:        "manual",
-			TriggerType: &avsproto.TaskTrigger_Manual{Manual: true},
+			TriggerType: &avsproto.TaskTrigger_Manual{},
 		},
 		Nodes: []*avsproto.TaskNode{
 			{

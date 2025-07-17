@@ -2363,7 +2363,7 @@ func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface
 	case *avsproto.TaskTrigger_Manual:
 		fmt.Printf("🔍 ExtractTriggerInputData: Processing Manual trigger, trigger.GetInput() = %+v\n", trigger.GetInput())
 		// Manual triggers use the top-level TaskTrigger.input field
-		// since the trigger_type is just a boolean, not a nested object
+		// since manual triggers don't have a nested config object like other trigger types
 		if trigger.GetInput() != nil {
 			inputInterface := trigger.GetInput().AsInterface()
 			fmt.Printf("🔍 ExtractTriggerInputData: Manual trigger inputInterface = %+v, type = %T\n", inputInterface, inputInterface)
