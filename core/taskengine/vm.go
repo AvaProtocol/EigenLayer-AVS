@@ -390,6 +390,11 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 				triggerInputData := ExtractTriggerInputData(task.Trigger)
 				if triggerInputData != nil {
 					triggerVarData["input"] = triggerInputData
+
+					// For manual triggers, the .data field is a pass-through field from the input data
+					if triggerData.Type == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
+						triggerVarData["data"] = triggerInputData
+					}
 				}
 			}
 

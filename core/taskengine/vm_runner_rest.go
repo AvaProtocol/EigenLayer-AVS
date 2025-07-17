@@ -3,12 +3,19 @@ package taskengine
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/go-resty/resty/v2"
 	"google.golang.org/protobuf/types/known/structpb"
+)
+
+// Constants for mock API testing
+const (
+	MockAPIEndpoint = "https://mock-api.ap-aggregator.local"
 )
 
 // RestProcessor handles REST API calls with template variable support
@@ -268,26 +275,34 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		request.SetBody(body)
 	}
 
-	// Execute request
+	// Declare response and error variables
 	var response *resty.Response
 	var err error
-	switch strings.ToUpper(method) {
-	case "GET":
-		response, err = request.Get(url)
-	case "POST":
-		response, err = request.Post(url)
-	case "PUT":
-		response, err = request.Put(url)
-	case "DELETE":
-		response, err = request.Delete(url)
-	case "PATCH":
-		response, err = request.Patch(url)
-	case "HEAD":
-		response, err = request.Head(url)
-	case "OPTIONS":
-		response, err = request.Options(url)
-	default:
-		err = fmt.Errorf("unsupported HTTP method: %s", method)
+
+	// Check if this is a mock URL and return mock response
+	if mockResponse := r.getMockResponse(url, method, body, processedHeaders); mockResponse != nil {
+		response = mockResponse
+		err = nil
+	} else {
+		// Execute actual request
+		switch strings.ToUpper(method) {
+		case "GET":
+			response, err = request.Get(url)
+		case "POST":
+			response, err = request.Post(url)
+		case "PUT":
+			response, err = request.Put(url)
+		case "DELETE":
+			response, err = request.Delete(url)
+		case "PATCH":
+			response, err = request.Patch(url)
+		case "HEAD":
+			response, err = request.Head(url)
+		case "OPTIONS":
+			response, err = request.Options(url)
+		default:
+			err = fmt.Errorf("unsupported HTTP method: %s", method)
+		}
 	}
 
 	if err != nil {
@@ -499,4 +514,107 @@ func (r *RestProcessor) preprocessJSONWithVariableMapping(text string) string {
 		result = result[:start] + escapedReplacement + result[end+2:]
 	}
 	return result
+}
+
+// getMockResponse checks if the URL should be mocked and returns a mock response if applicable
+func (r *RestProcessor) getMockResponse(url, method, body string, headers map[string]string) *resty.Response {
+	// Check if this is a mock URL that should return a predefined response
+	if strings.HasPrefix(url, MockAPIEndpoint+"/") || url == MockAPIEndpoint {
+		// Create a temporary mock server
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			// Set content type to JSON
+			w.Header().Set("Content-Type", "application/json")
+
+			// Create response based on URL path
+			if strings.HasSuffix(url, "/data") {
+				response := map[string]interface{}{
+					"success": true,
+					"message": "Mock API response from EigenLayer-AVS",
+					"data": map[string]interface{}{
+						"timestamp": "2025-01-16T17:00:00Z",
+						"status":    "ok",
+						"receivedData": map[string]interface{}{
+							"url":     url,
+							"method":  method,
+							"body":    body,
+							"headers": headers,
+						},
+					},
+				}
+
+				jsonData, err := json.Marshal(response)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					w.Write([]byte(`{"error": "Failed to marshal response"}`))
+					return
+				}
+
+				w.WriteHeader(http.StatusOK)
+				w.Write(jsonData)
+			} else {
+				// Default mock response for other paths
+				response := map[string]interface{}{
+					"success": true,
+					"message": "Default mock response from EigenLayer-AVS",
+					"path":    url,
+				}
+
+				jsonData, err := json.Marshal(response)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					w.Write([]byte(`{"error": "Failed to marshal response"}`))
+					return
+				}
+
+				w.WriteHeader(http.StatusOK)
+				w.Write(jsonData)
+			}
+		}))
+		defer server.Close()
+
+		// Make request to the mock server
+		request := r.HttpClient.R()
+
+		// Set headers
+		for key, value := range headers {
+			request.SetHeader(key, value)
+		}
+
+		// Set body if provided
+		if body != "" {
+			request.SetBody(body)
+		}
+
+		// Make request to mock server
+		var response *resty.Response
+		var err error
+
+		switch strings.ToUpper(method) {
+		case "GET":
+			response, err = request.Get(server.URL)
+		case "POST":
+			response, err = request.Post(server.URL)
+		case "PUT":
+			response, err = request.Put(server.URL)
+		case "DELETE":
+			response, err = request.Delete(server.URL)
+		case "PATCH":
+			response, err = request.Patch(server.URL)
+		case "HEAD":
+			response, err = request.Head(server.URL)
+		case "OPTIONS":
+			response, err = request.Options(server.URL)
+		default:
+			return nil
+		}
+
+		if err != nil {
+			return nil
+		}
+
+		return response
+	}
+
+	// Return nil if URL should not be mocked
+	return nil
 }
