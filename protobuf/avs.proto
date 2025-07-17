@@ -251,8 +251,9 @@ message TaskTrigger {
   TriggerType type = 8;
   
   oneof trigger_type {
-    // manual task will not be check to be trigger, instead it can be trigger adhoc
-    bool               manual = 2;
+    // manual task with proper ManualTrigger structure for webhook testing
+    ManualTrigger      manual = 2;
+    
     // run at a specific epoch, name inspired by unix `at` utility
     FixedTimeTrigger fixed_time   = 3;
 
