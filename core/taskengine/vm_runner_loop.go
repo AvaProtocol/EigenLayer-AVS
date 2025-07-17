@@ -43,6 +43,7 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	sourceNodeID := node.Config.SourceId
 	iterVal := node.Config.IterVal
 	iterKey := node.Config.IterKey
+	executionMode := node.Config.ExecutionMode
 
 	if sourceNodeID == "" || iterVal == "" {
 		err := fmt.Errorf("missing required configuration: source_id and iter_val are required")
@@ -91,13 +92,13 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 				inputArray = dataArray
 				log.WriteString(fmt.Sprintf("\nExtracted array from 'data' field: %d items", len(inputArray)))
 			} else {
-				err := fmt.Errorf("input variable %s is not an array and doesn't contain a 'data' array field", inputName)
+				err := fmt.Errorf("input variable %s must be an array", inputName)
 				log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 				finalizeExecutionStep(s, false, err.Error(), log.String())
 				return s, err
 			}
 		} else {
-			err := fmt.Errorf("input variable %s is not an array (got %T)", inputName, inputVar)
+			err := fmt.Errorf("input variable %s must be an array", inputName)
 			log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 			finalizeExecutionStep(s, false, err.Error(), log.String())
 			return s, err
@@ -127,13 +128,35 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	success := true
 	var firstError error
 
-	// Determine execution mode based on concurrency setting
+	// Determine execution mode
 	concurrent := false
-	// Note: Concurrent field may not exist in this version of the protobuf
-	// For now, default to sequential execution
+	var executionModeLog string
+
+	// Check if this is a contract write operation (security requirement)
+	isContractWrite := node.GetContractWrite() != nil
+
+	if isContractWrite {
+		// Contract write operations must always be sequential for security
+		concurrent = false
+		executionModeLog = "sequentially due to contract write operation (security requirement)"
+	} else {
+		// For non-contract-write operations, use the configured execution mode
+		switch executionMode {
+		case avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL:
+			concurrent = true
+			executionModeLog = "parallel mode"
+		case avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL:
+			concurrent = false
+			executionModeLog = "sequential mode"
+		default:
+			// Default to sequential (safer)
+			concurrent = false
+			executionModeLog = "sequential mode"
+		}
+	}
 
 	if concurrent {
-		log.WriteString("\nExecuting loop iterations in parallel")
+		log.WriteString(fmt.Sprintf("\nExecuting loop iterations in %s", executionModeLog))
 		// Parallel execution using goroutines
 		var wg sync.WaitGroup
 		var mutex sync.Mutex
@@ -168,7 +191,7 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 
 		wg.Wait()
 	} else {
-		log.WriteString("\nExecuting loop iterations sequentially")
+		log.WriteString(fmt.Sprintf("\nExecuting loop iterations %s", executionModeLog))
 		// Sequential execution
 		for i, item := range inputArray {
 			// Create iteration-specific inputs

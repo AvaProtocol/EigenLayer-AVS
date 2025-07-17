@@ -170,9 +170,32 @@ func TestFilterComplexLogic(t *testing.T) {
 
 	varname := vm.GetNodeNameAsVar("abc123")
 	vm.mu.Lock()
-	tempData, _ := vm.vars[varname]
+	tempData, exists := vm.vars[varname]
 	vm.mu.Unlock()
-	data := tempData.(map[string]any)["data"].([]any)
+
+	if !exists {
+		t.Errorf("Variable %s does not exist", varname)
+		return
+	}
+
+	dataMap, ok := tempData.(map[string]any)
+	if !ok {
+		t.Errorf("Variable %s is not a map[string]any, it's %T", varname, tempData)
+		return
+	}
+
+	dataValue, exists := dataMap["data"]
+	if !exists {
+		t.Errorf("Variable %s does not have a 'data' key", varname)
+		return
+	}
+
+	data, ok := dataValue.([]any)
+	if !ok {
+		t.Errorf("Data value is not []any, it's %T: %v", dataValue, dataValue)
+		return
+	}
+
 	if len(data) != 3 {
 		t.Errorf("expect return only 3 element but got %v", len(data))
 	}

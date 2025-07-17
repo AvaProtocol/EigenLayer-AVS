@@ -86,10 +86,17 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		return executionLogStep, fmt.Errorf(errMsg)
 	}
 
-	logBuilder.WriteString(fmt.Sprintf("Filter configuration - source_id: %s, expression: %s\n", sourceID, expression))
-
 	// Determine the variable name to use in JavaScript BEFORE locking mutex
 	inputVarName := r.vm.GetNodeNameAsVar(sourceID)
+
+	// Clean the expression for processing
+	cleanExpression := r.processExpression(expression)
+
+	// Add the expected log format for the tests
+	logBuilder.WriteString(fmt.Sprintf("Source node ID: '%s', Variable name: '%s', Original Expression: '%s', Clean Expression: '%s'\n",
+		sourceID, inputVarName, expression, cleanExpression))
+
+	logBuilder.WriteString(fmt.Sprintf("Filter configuration - source_id: %s, expression: %s\n", sourceID, expression))
 	logBuilder.WriteString(fmt.Sprintf("Using input variable: %s (from source: %s)\n", inputVarName, sourceID))
 
 	// Get the input data to filter
@@ -110,7 +117,7 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		processedExpression = r.vm.preprocessText(expression)
 		logBuilder.WriteString(fmt.Sprintf("Expression after preprocessing: %s\n", processedExpression))
 	} else {
-		processedExpression = r.vm.preprocessTextWithVariableMapping(expression)
+		processedExpression = cleanExpression
 	}
 
 	logBuilder.WriteString(fmt.Sprintf("Using processed expression: %s\n", processedExpression))
@@ -130,16 +137,6 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		}
 	}
 	r.vm.mu.Unlock()
-
-	// Ensure the expression is wrapped in a function if it contains if/return
-	finalExpression := processedExpression
-	if strings.Contains(processedExpression, "if") || strings.Contains(processedExpression, "return") {
-		finalExpression = fmt.Sprintf("(function(item, index) { %s })", processedExpression)
-	} else {
-		finalExpression = fmt.Sprintf("(function(item, index) { return %s; })", processedExpression)
-	}
-
-	logBuilder.WriteString(fmt.Sprintf("Final wrapped expression: %s\n", finalExpression))
 
 	// Unwrap the data if it's in a map with 'data' key (from previous node output)
 	var actualDataToFilter interface{}
@@ -163,92 +160,15 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	switch data := actualDataToFilter.(type) {
 	case []interface{}:
 		logBuilder.WriteString(fmt.Sprintf("Filtering array with %d items\n", len(data)))
-
-		for i, item := range data {
-			// Set the current item and index in the JS context
-			loopVarNameForItem := fmt.Sprintf("%s_item", inputVarName)
-			if err := jsvm.Set(loopVarNameForItem, item); err != nil {
-				evaluationError = fmt.Errorf("failed to set loop item '%s' (index %d) in JS VM: %w", loopVarNameForItem, i, err)
-				break
-			}
-			if err := jsvm.Set("index", i); err != nil {
-				evaluationError = fmt.Errorf("failed to set index %d in JS VM: %w", i, err)
-				break
-			}
-
-			// Evaluate the filter expression for this item
-			result, err := jsvm.RunString(fmt.Sprintf("(%s)(%s, index)", finalExpression, loopVarNameForItem))
-			if err != nil {
-				logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for item %d (%v): %s. Skipping item.\n", i, item, err.Error()))
-				continue
-			}
-
-			// If the result is truthy, include the item
-			if result.ToBoolean() {
-				filteredResult = append(filteredResult, item)
-				logBuilder.WriteString(fmt.Sprintf("Item %d passed filter\n", i))
-			} else {
-				logBuilder.WriteString(fmt.Sprintf("Item %d filtered out\n", i))
-			}
-		}
-
-		if evaluationError == nil {
-			logBuilder.WriteString(fmt.Sprintf("Filter completed: %d items passed out of %d total\n", len(filteredResult), len(data)))
-		}
+		filteredResult, evaluationError = r.filterArray(data, processedExpression, inputVarName, jsvm, &logBuilder)
 
 	case []map[string]interface{}:
 		logBuilder.WriteString(fmt.Sprintf("Filtering map array with %d items\n", len(data)))
-
-		for i, item := range data {
-			// Set the current item and index in the JS context
-			loopVarNameForItem := fmt.Sprintf("%s_item", inputVarName)
-			if err := jsvm.Set(loopVarNameForItem, item); err != nil {
-				evaluationError = fmt.Errorf("failed to set loop item '%s' (index %d) in JS VM: %w", loopVarNameForItem, i, err)
-				break
-			}
-			if err := jsvm.Set("index", i); err != nil {
-				evaluationError = fmt.Errorf("failed to set index %d in JS VM: %w", i, err)
-				break
-			}
-
-			// Evaluate the filter expression for this item
-			result, err := jsvm.RunString(fmt.Sprintf("(%s)(%s, index)", finalExpression, loopVarNameForItem))
-			if err != nil {
-				logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for item %d (%v): %s. Skipping item.\n", i, item, err.Error()))
-				continue
-			}
-
-			// If the result is truthy, include the item
-			if result.ToBoolean() {
-				filteredResult = append(filteredResult, item)
-				logBuilder.WriteString(fmt.Sprintf("Map item %d passed filter\n", i))
-			} else {
-				logBuilder.WriteString(fmt.Sprintf("Map item %d filtered out\n", i))
-			}
-		}
-
-		if evaluationError == nil {
-			logBuilder.WriteString(fmt.Sprintf("Map filter completed: %d items passed out of %d total\n", len(filteredResult), len(data)))
-		}
+		filteredResult, evaluationError = r.filterMapArray(data, processedExpression, inputVarName, jsvm, &logBuilder)
 
 	case map[string]interface{}:
-		// For map input, set it as a variable and evaluate the expression directly
-		itemVarNameForMap := fmt.Sprintf("%s_item", inputVarName)
-		if err := jsvm.Set(itemVarNameForMap, data); err != nil {
-			evaluationError = fmt.Errorf("failed to set input map as '%s' in JS VM: %w", itemVarNameForMap, err)
-		} else {
-			// Evaluate the filter expression for the map
-			result, err := jsvm.RunString(fmt.Sprintf("(%s)(%s, 0)", finalExpression, itemVarNameForMap))
-			if err != nil {
-				logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for map: %s\n", err.Error()))
-				evaluationError = err
-			} else if result.ToBoolean() {
-				filteredResult = append(filteredResult, data)
-				logBuilder.WriteString("Map passed filter\n")
-			} else {
-				logBuilder.WriteString("Map filtered out\n")
-			}
-		}
+		logBuilder.WriteString("Filtering single map\n")
+		filteredResult, evaluationError = r.filterSingleMap(data, processedExpression, inputVarName, jsvm, &logBuilder)
 
 	default:
 		// Unsupported data type for filtering
@@ -261,33 +181,161 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		return executionLogStep, evaluationError
 	}
 
+	logBuilder.WriteString(fmt.Sprintf("Filter completed: %d items passed\n", len(filteredResult)))
+
 	// Convert result to protobuf and set output
-	outputProtoStruct, err := structpb.NewStruct(map[string]interface{}{
-		"filtered_data": filteredResult,
-		"total_items":   len(filteredResult),
-	})
+	// We need to create a Value that contains a ListValue for AnyToSlice to work properly
+	listValue := &structpb.ListValue{}
+	for _, item := range filteredResult {
+		itemValue, err := structpb.NewValue(item)
+		if err != nil {
+			logBuilder.WriteString(fmt.Sprintf("Error converting item to proto value: %v\n", err))
+			finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
+			return executionLogStep, err
+		}
+		listValue.Values = append(listValue.Values, itemValue)
+	}
+
+	// Wrap the ListValue in a Value
+	outputValue := &structpb.Value{
+		Kind: &structpb.Value_ListValue{
+			ListValue: listValue,
+		},
+	}
+
+	anyOutput, err := anypb.New(outputValue)
 	if err != nil {
-		logBuilder.WriteString(fmt.Sprintf("Error converting execution result to proto struct: %v\n", err))
+		logBuilder.WriteString(fmt.Sprintf("Error marshalling output to Any: %v\n", err))
 		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
 		return executionLogStep, err
 	} else {
-		anyOutput, err := anypb.New(outputProtoStruct)
-		if err != nil {
-			logBuilder.WriteString(fmt.Sprintf("Error marshalling output to Any: %v\n", err))
-			finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
-			return executionLogStep, err
-		} else {
-			executionLogStep.OutputData = &avsproto.Execution_Step_Filter{
-				Filter: &avsproto.FilterNode_Output{
-					Data: anyOutput,
-				},
-			}
-			// Use shared function to set output variable for this step
-			setNodeOutputData(r.CommonProcessor, stepID, filteredResult)
+		executionLogStep.OutputData = &avsproto.Execution_Step_Filter{
+			Filter: &avsproto.FilterNode_Output{
+				Data: anyOutput,
+			},
 		}
+		// Use shared function to set output variable for this step
+		setNodeOutputData(r.CommonProcessor, stepID, filteredResult)
 	}
 
 	// Use shared function to finalize execution step with success
 	finalizeExecutionStep(executionLogStep, true, "", logBuilder.String())
 	return executionLogStep, nil
+}
+
+// filterArray filters an array of interface{} items
+func (r *FilterProcessor) filterArray(data []interface{}, expression string, inputVarName string, jsvm *goja.Runtime, logBuilder *strings.Builder) ([]interface{}, error) {
+	var filteredResult []interface{}
+
+	// Determine if we need to wrap the expression in a function
+	var finalExpression string
+	if strings.Contains(expression, "if") || strings.Contains(expression, "return") {
+		finalExpression = fmt.Sprintf("(function(item, index) { %s })", expression)
+	} else {
+		finalExpression = fmt.Sprintf("(function(item, index) { return %s; })", expression)
+	}
+
+	for i, item := range data {
+		// Set the current item and index in the JS context
+		if err := jsvm.Set("item", item); err != nil {
+			return nil, fmt.Errorf("failed to set item (index %d) in JS VM: %w", i, err)
+		}
+		if err := jsvm.Set("index", i); err != nil {
+			return nil, fmt.Errorf("failed to set index %d in JS VM: %w", i, err)
+		}
+
+		// Evaluate the filter expression for this item
+		result, err := jsvm.RunString(fmt.Sprintf("(%s)(item, index)", finalExpression))
+		if err != nil {
+			logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for item %d (%v): %s. Skipping item.\n", i, item, err.Error()))
+			continue
+		}
+
+		// If the result is truthy, include the item
+		if result.ToBoolean() {
+			filteredResult = append(filteredResult, item)
+			logBuilder.WriteString(fmt.Sprintf("Item %d passed filter\n", i))
+		} else {
+			logBuilder.WriteString(fmt.Sprintf("Item %d filtered out\n", i))
+		}
+	}
+
+	return filteredResult, nil
+}
+
+// filterMapArray filters an array of map[string]interface{} items
+func (r *FilterProcessor) filterMapArray(data []map[string]interface{}, expression string, inputVarName string, jsvm *goja.Runtime, logBuilder *strings.Builder) ([]interface{}, error) {
+	var filteredResult []interface{}
+
+	// Determine if we need to wrap the expression in a function
+	var finalExpression string
+	if strings.Contains(expression, "if") || strings.Contains(expression, "return") {
+		finalExpression = fmt.Sprintf("(function(item, index) { %s })", expression)
+	} else {
+		finalExpression = fmt.Sprintf("(function(item, index) { return %s; })", expression)
+	}
+
+	for i, item := range data {
+		// Set the current item and index in the JS context
+		if err := jsvm.Set("item", item); err != nil {
+			return nil, fmt.Errorf("failed to set item (index %d) in JS VM: %w", i, err)
+		}
+		if err := jsvm.Set("index", i); err != nil {
+			return nil, fmt.Errorf("failed to set index %d in JS VM: %w", i, err)
+		}
+
+		// Evaluate the filter expression for this item
+		result, err := jsvm.RunString(fmt.Sprintf("(%s)(item, index)", finalExpression))
+		if err != nil {
+			logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for item %d (%v): %s. Skipping item.\n", i, item, err.Error()))
+			continue
+		}
+
+		// If the result is truthy, include the item
+		if result.ToBoolean() {
+			filteredResult = append(filteredResult, item)
+			logBuilder.WriteString(fmt.Sprintf("Map item %d passed filter\n", i))
+		} else {
+			logBuilder.WriteString(fmt.Sprintf("Map item %d filtered out\n", i))
+		}
+	}
+
+	return filteredResult, nil
+}
+
+// filterSingleMap filters a single map[string]interface{} item
+func (r *FilterProcessor) filterSingleMap(data map[string]interface{}, expression string, inputVarName string, jsvm *goja.Runtime, logBuilder *strings.Builder) ([]interface{}, error) {
+	var filteredResult []interface{}
+
+	// Determine if we need to wrap the expression in a function
+	var finalExpression string
+	if strings.Contains(expression, "if") || strings.Contains(expression, "return") {
+		finalExpression = fmt.Sprintf("(function(item, index) { %s })", expression)
+	} else {
+		finalExpression = fmt.Sprintf("(function(item, index) { return %s; })", expression)
+	}
+
+	// Set the map as a variable and evaluate the expression directly
+	if err := jsvm.Set("item", data); err != nil {
+		return nil, fmt.Errorf("failed to set input map in JS VM: %w", err)
+	}
+	if err := jsvm.Set("index", 0); err != nil {
+		return nil, fmt.Errorf("failed to set index in JS VM: %w", err)
+	}
+
+	// Evaluate the filter expression for the map
+	result, err := jsvm.RunString(fmt.Sprintf("(%s)(item, index)", finalExpression))
+	if err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for map: %s\n", err.Error()))
+		return nil, err
+	}
+
+	if result.ToBoolean() {
+		filteredResult = append(filteredResult, data)
+		logBuilder.WriteString("Map passed filter\n")
+	} else {
+		logBuilder.WriteString("Map filtered out\n")
+	}
+
+	return filteredResult, nil
 }
