@@ -171,31 +171,17 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	vm.WithLogger(x.logger).WithDb(x.db)
 	initialTaskStatus := task.Status
 
-	// Extract and add trigger input data if available
+	// Extract and add trigger input data if available using shared functions
 	triggerInputData := ExtractTriggerInputData(task.Trigger)
-	if triggerInputData != nil {
-		// Get the trigger variable name and add input data
+	if triggerInputData != nil && task.Trigger != nil {
+		// Get the trigger variable name and update trigger variable using shared function
 		triggerVarName := sanitizeTriggerNameForJS(task.Trigger.GetName())
-		vm.mu.Lock()
-		existingTriggerVar := vm.vars[triggerVarName]
-		if existingMap, ok := existingTriggerVar.(map[string]any); ok {
-			existingMap["input"] = triggerInputData
-			vm.vars[triggerVarName] = existingMap
-		} else {
-			// Create new trigger variable with input data
-			triggerVarData := map[string]any{
-				"input": triggerInputData,
-			}
 
-			// For manual triggers, the .data field should contain the input data
-			// since manual triggers don't have meaningful output data during execution
-			if task.Trigger.GetType() == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
-				triggerVarData["data"] = triggerInputData
-			}
+		// Build trigger variable data using shared function (with empty triggerDataMap since we're just adding input)
+		triggerVarData := buildTriggerVariableData(task.Trigger, map[string]interface{}{}, triggerInputData)
 
-			vm.vars[triggerVarName] = triggerVarData
-		}
-		vm.mu.Unlock()
+		// Update trigger variable in VM using shared function
+		updateTriggerVariableInVM(vm, triggerVarName, triggerVarData)
 	}
 
 	if err != nil {

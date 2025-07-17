@@ -57,22 +57,8 @@ func NewRestProrcessor(vm *VM) *RestProcessor {
 }
 
 func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
-	t0 := time.Now()
-
-	// Get node data using helper function to reduce duplication
-	nodeName, nodeInput := r.vm.GetNodeDataForExecution(stepID)
-
-	executionLogStep := &avsproto.Execution_Step{
-		Id:         stepID,
-		OutputData: nil,
-		Log:        "",
-		Error:      "",
-		Success:    true, // Assume success
-		StartAt:    t0.UnixMilli(),
-		Type:       avsproto.NodeType_NODE_TYPE_REST_API.String(),
-		Name:       nodeName,
-		Input:      nodeInput, // Include node input data for debugging
-	}
+	// Use shared function to create execution step
+	executionLogStep := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_REST_API, r.vm)
 
 	var logBuilder strings.Builder
 	logBuilder.WriteString(fmt.Sprintf("Executing REST API Node ID: %s at %s\n", stepID, time.Now()))
@@ -120,13 +106,10 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	r.vm.mu.Unlock()
 
 	// Validate required fields
-	if url == "" || method == "" {
-		err := fmt.Errorf("missing required configuration: url and method (provide via Config or input variables)")
-		executionLogStep.Success = false
-		executionLogStep.Error = err.Error()
-		executionLogStep.EndAt = time.Now().UnixMilli()
+	if url == "" {
+		err := fmt.Errorf("missing required field: url")
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-		executionLogStep.Log = logBuilder.String()
+		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
 		return executionLogStep, err
 	}
 
@@ -134,12 +117,11 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	if r.vm.logger != nil {
 		r.vm.logger.Debug("REST API URL before template processing", "url", url)
 	}
-	url = r.vm.preprocessTextWithVariableMapping(url)
-	if r.vm.logger != nil {
-		r.vm.logger.Debug("REST API URL after template processing", "url", url)
-	}
 
-	// Process headers map for template variables first (needed to detect JSON content)
+	url = r.vm.preprocessTextWithVariableMapping(url)
+	body = r.preprocessJSONWithVariableMapping(body)
+
+	// Preprocess headers
 	processedHeaders := make(map[string]string)
 	for key, value := range headers {
 		processedKey := r.vm.preprocessTextWithVariableMapping(key)
@@ -147,132 +129,46 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		processedHeaders[processedKey] = processedValue
 	}
 
-	// Check if this is JSON content by examining headers
-	isJSONContent := false
-	for key, value := range processedHeaders {
-		if strings.ToLower(key) == "content-type" && strings.Contains(strings.ToLower(value), "application/json") {
-			isJSONContent = true
-			break
-		}
-	}
-
-	// Process body with appropriate escaping based on content type
-	if isJSONContent {
-		if r.vm.logger != nil {
-			r.vm.logger.Debug("REST API body before JSON-aware template processing", "body", body)
-		}
-		body = r.preprocessJSONWithVariableMapping(body)
-		if r.vm.logger != nil {
-			r.vm.logger.Debug("REST API body after JSON-aware template processing", "body", body)
-		}
-	} else {
-		body = r.vm.preprocessTextWithVariableMapping(body)
-	}
-
-	// Validate template format in URL, body, and headers for malformed syntax
-	if err := r.vm.validateTemplateFormat(url); err != nil {
-		if r.vm.logger != nil {
-			r.vm.logger.Error("REST API URL contains malformed template syntax", "url", url, "error", err)
-		}
-		executionLogStep.Success = false
-		executionLogStep.Error = err.Error()
-		executionLogStep.EndAt = time.Now().UnixMilli()
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-		executionLogStep.Log = logBuilder.String()
-		return executionLogStep, err
-	}
-
-	if err := r.vm.validateTemplateFormat(body); err != nil {
-		if r.vm.logger != nil {
-			r.vm.logger.Error("REST API request body contains malformed template syntax", "body", body, "error", err)
-		}
-		executionLogStep.Success = false
-		executionLogStep.Error = err.Error()
-		executionLogStep.EndAt = time.Now().UnixMilli()
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-		executionLogStep.Log = logBuilder.String()
-		return executionLogStep, err
-	}
-
-	for key, value := range processedHeaders {
-		if err := r.vm.validateTemplateFormat(key); err != nil {
-			if r.vm.logger != nil {
-				r.vm.logger.Error("REST API header key contains malformed template syntax", "key", key, "error", err)
-			}
-			executionLogStep.Success = false
-			executionLogStep.Error = err.Error()
-			executionLogStep.EndAt = time.Now().UnixMilli()
-			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-			executionLogStep.Log = logBuilder.String()
-			return executionLogStep, err
-		}
-		if err := r.vm.validateTemplateFormat(value); err != nil {
-			if r.vm.logger != nil {
-				r.vm.logger.Error("REST API header value contains malformed template syntax", "key", key, "value", value, "error", err)
-			}
-			executionLogStep.Success = false
-			executionLogStep.Error = err.Error()
-			executionLogStep.EndAt = time.Now().UnixMilli()
-			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-			executionLogStep.Log = logBuilder.String()
-			return executionLogStep, err
-		}
-	}
-
-	logBuilder.WriteString(fmt.Sprintf("Making %s request to: %s\n", method, url))
-	if body != "" {
-		logBuilder.WriteString(fmt.Sprintf("Request body: %s\n", body))
-	}
-	if len(processedHeaders) > 0 {
-		logBuilder.WriteString(fmt.Sprintf("Request headers: %v\n", processedHeaders))
-	}
-
-	// Add debug logging for processed request details
 	if r.vm.logger != nil {
-		r.vm.logger.Debug("REST API request details",
-			"method", method,
-			"url", url,
-			"body", body,
-			"headers", processedHeaders)
+		r.vm.logger.Debug("REST API URL after template processing", "url", url)
 	}
 
-	// Validate JSON body if content-type is application/json
-	if body != "" {
-		for key, value := range processedHeaders {
-			if strings.ToLower(key) == "content-type" && strings.Contains(strings.ToLower(value), "application/json") {
-				var jsonTest interface{}
-				if err := json.Unmarshal([]byte(body), &jsonTest); err != nil {
-					errorMsg := fmt.Sprintf("invalid JSON in request body: %v", err)
-					if r.vm.logger != nil {
-						r.vm.logger.Error("REST API request body is not valid JSON",
-							"body", body,
-							"jsonError", err,
-							"url", url)
-					}
-					executionLogStep.Success = false
-					executionLogStep.Error = errorMsg
-					executionLogStep.EndAt = time.Now().UnixMilli()
-					logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
-					logBuilder.WriteString(fmt.Sprintf("Request body: %s\n", body))
-					executionLogStep.Log = logBuilder.String()
-					return executionLogStep, fmt.Errorf(errorMsg)
-				}
-				break
-			}
-		}
+	// Default method to GET if not specified
+	if method == "" {
+		method = "GET"
 	}
 
-	// Create and execute HTTP request
-	request := r.HttpClient.R()
+	// Validate URL format
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		err := fmt.Errorf("invalid URL format (must start with http:// or https://): %s", url)
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
+		return executionLogStep, err
+	}
+
+	// Create resty client
+	client := resty.New()
+	client.SetTimeout(30 * time.Second)
+
+	// Create request
+	request := client.R()
 
 	// Set headers
 	for key, value := range processedHeaders {
 		request.SetHeader(key, value)
 	}
 
-	// Set body if provided
-	if body != "" {
+	// Set body if method supports it
+	if body != "" && (strings.ToUpper(method) == "POST" || strings.ToUpper(method) == "PUT" || strings.ToUpper(method) == "PATCH") {
+		if r.vm.logger != nil {
+			r.vm.logger.Debug("REST API request body", "body", body)
+		}
 		request.SetBody(body)
+	}
+
+	logBuilder.WriteString(fmt.Sprintf("Making %s request to: %s\n", method, url))
+	if body != "" {
+		logBuilder.WriteString(fmt.Sprintf("Request body: %s\n", body))
 	}
 
 	// Declare response and error variables
@@ -306,46 +202,92 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 
 	if err != nil {
-		errorMsg := fmt.Sprintf("HTTP request failed: connection error or timeout: %v", err)
-		executionLogStep.Success = false
-		executionLogStep.Error = errorMsg
-		executionLogStep.EndAt = time.Now().UnixMilli()
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errorMsg))
-		executionLogStep.Log = logBuilder.String()
+		// Format connection errors to match test expectations
+		errorMsg := fmt.Sprintf("HTTP request failed: connection error or timeout - %s", err.Error())
+		logBuilder.WriteString(fmt.Sprintf("Request failed: %s\n", errorMsg))
+		finalizeExecutionStep(executionLogStep, false, errorMsg, logBuilder.String())
 		return executionLogStep, fmt.Errorf(errorMsg)
 	}
 
+	if response == nil {
+		err = fmt.Errorf("received nil response")
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
+		return executionLogStep, err
+	}
+
 	logBuilder.WriteString(fmt.Sprintf("Request completed with status: %d\n", response.StatusCode()))
+	if r.vm.logger != nil {
+		r.vm.logger.Debug("REST API response headers", "headers", response.Header())
+	}
 	logBuilder.WriteString(fmt.Sprintf("Response headers: %v\n", response.Header()))
 
-	// Process response - store full response structure for workflow compatibility
-	responseData := r.processResponse(response)
+	// Parse response
+	var responseData map[string]interface{}
 
-	// Convert the response to protobuf Value for storage
-	// Use convertToProtobufCompatible to handle []string values in headers
-	compatibleData := convertToProtobufCompatible(responseData)
-	valueData, err := structpb.NewValue(compatibleData)
-	if err != nil {
-		if r.vm.logger != nil {
-			r.vm.logger.Error("Failed to convert response to protobuf Value", "error", err)
+	// Convert headers to a protobuf-compatible format
+	convertedHeaders := convertStringSliceMapToProtobufCompatible(response.Header())
+
+	// Try to parse as JSON first
+	bodyStr := string(response.Body())
+	if bodyStr != "" {
+		var jsonData interface{}
+		if err := json.Unmarshal(response.Body(), &jsonData); err == nil {
+			// Successfully parsed as JSON
+			responseData = map[string]interface{}{
+				"body":       jsonData,
+				"headers":    convertedHeaders,
+				"statusCode": response.StatusCode(),
+			}
+		} else {
+			// Not JSON, treat as plain text
+			responseData = map[string]interface{}{
+				"body":       bodyStr,
+				"headers":    convertedHeaders,
+				"statusCode": response.StatusCode(),
+			}
 		}
-		// Create a simple string representation as fallback
-		valueData = structpb.NewStringValue(fmt.Sprintf("Error converting response: %v", err))
+	} else {
+		// Empty body
+		responseData = map[string]interface{}{
+			"body":       "",
+			"headers":    convertedHeaders,
+			"statusCode": response.StatusCode(),
+		}
 	}
 
-	// Store the Value directly in the output
-	outputData := &avsproto.RestAPINode_Output{
-		Data: valueData,
+	// Log HTTP error status codes (4xx, 5xx) but don't treat them as execution failures
+	// The workflow should handle HTTP errors through the status code in response data
+	if response.StatusCode() >= 400 {
+		statusMsg := fmt.Sprintf("HTTP %d: %s", response.StatusCode(), http.StatusText(response.StatusCode()))
+		logBuilder.WriteString(fmt.Sprintf("HTTP Status: %s\n", statusMsg))
+		if r.vm.logger != nil {
+			r.vm.logger.Debug("REST API returned error status code", "statusCode", response.StatusCode(), "status", http.StatusText(response.StatusCode()))
+		}
+		// Continue with normal successful processing - the status code is available in responseData
 	}
+
+	// Create protobuf output
+	outputValue, err := structpb.NewValue(responseData)
+	if err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error converting response to protobuf: %s\n", err.Error()))
+		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
+		return executionLogStep, err
+	}
+
+	outputData := &avsproto.RestAPINode_Output{
+		Data: outputValue,
+	}
+
 	executionLogStep.OutputData = &avsproto.Execution_Step_RestApi{
 		RestApi: outputData,
 	}
 
-	// Set output variable for following nodes (workflow behavior)
-	r.SetOutputVarForStep(stepID, responseData)
+	// Use shared function to set output variable for following nodes (workflow behavior)
+	setNodeOutputData(r.CommonProcessor, stepID, responseData)
 
-	executionLogStep.EndAt = time.Now().UnixMilli()
-	executionLogStep.Log = logBuilder.String()
+	// Use shared function to finalize execution step
+	finalizeExecutionStep(executionLogStep, true, "", logBuilder.String())
 
 	if r.vm.logger != nil {
 		r.vm.logger.Info("REST API request executed successfully", "stepID", stepID, "method", method, "url", url, "statusCode", response.StatusCode())

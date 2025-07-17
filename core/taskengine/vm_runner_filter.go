@@ -56,22 +56,8 @@ func (r *FilterProcessor) wrapExpressionForExecution(cleanExpression string) str
 }
 
 func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*avsproto.Execution_Step, error) {
-	t0 := time.Now()
-
-	// Get node data using helper function to reduce duplication
-	nodeName, nodeInput := r.vm.GetNodeDataForExecution(stepID)
-
-	executionLogStep := &avsproto.Execution_Step{
-		Id:         stepID,
-		OutputData: nil,
-		Log:        "",
-		Error:      "",
-		Success:    true,
-		StartAt:    t0.UnixMilli(),
-		Type:       avsproto.NodeType_NODE_TYPE_FILTER.String(),
-		Name:       nodeName,
-		Input:      nodeInput, // Include node input data for debugging
-	}
+	// Use shared function to create execution step
+	executionLogStep := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_FILTER, r.vm)
 
 	var logBuilder strings.Builder
 	logBuilder.WriteString(fmt.Sprintf("Executing Filter Node ID: %s at %s\n", stepID, time.Now()))
@@ -80,219 +66,228 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	if node.Config == nil {
 		errMsg := "FilterNode Config is nil"
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
-		executionLogStep.Error = errMsg
-		executionLogStep.Success = false
-		executionLogStep.Log = logBuilder.String()
-		executionLogStep.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
 		return executionLogStep, fmt.Errorf(errMsg)
 	}
 
 	expression := node.Config.Expression
-	sourceNodeID := node.Config.SourceId
-
-	if expression == "" || sourceNodeID == "" {
-		errMsg := "missing required configuration: expression and source_id are required"
+	if expression == "" {
+		errMsg := "FilterNode expression is empty"
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
-		executionLogStep.Error = errMsg
-		executionLogStep.Success = false
-		executionLogStep.Log = logBuilder.String()
-		executionLogStep.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
 		return executionLogStep, fmt.Errorf(errMsg)
 	}
 
-	// Handle the case where expression has been preprocessed and became 'undefined'
-	// This can happen in workflow execution where template processing occurs before FilterProcessor
-	if expression == "undefined" || expression == "'undefined'" {
-		errMsg := fmt.Sprintf("FilterNode expression processed as template variable and became '%s' - this indicates the expression was incorrectly preprocessed. FilterNode expressions should not be template-processed.", expression)
+	sourceID := node.Config.SourceId
+	if sourceID == "" {
+		errMsg := "FilterNode sourceId is empty"
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
-		executionLogStep.Error = errMsg
-		executionLogStep.Success = false
-		executionLogStep.Log = logBuilder.String()
-		executionLogStep.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
 		return executionLogStep, fmt.Errorf(errMsg)
 	}
 
-	// Convert source node ID to actual variable name (node name)
-	inputVarName := r.vm.GetNodeNameAsVar(sourceNodeID)
+	logBuilder.WriteString(fmt.Sprintf("Filter configuration - source_id: %s, expression: %s\n", sourceID, expression))
 
-	// Process the expression using the extracted helper function
-	cleanExpression := r.processExpression(expression)
-
-	logBuilder.WriteString(fmt.Sprintf("Source node ID: '%s', Variable name: '%s', Original Expression: '%s', Clean Expression: '%s'\n", sourceNodeID, inputVarName, expression, cleanExpression))
-
-	// Get the input variable from the VM using the resolved variable name
+	// Get the input data to filter
 	r.vm.mu.Lock()
-	rawInputVal, exists := r.vm.vars[inputVarName]
+	inputVar, exists := r.vm.vars[r.vm.GetNodeNameAsVar(sourceID)]
 	r.vm.mu.Unlock()
 
 	if !exists {
-		errMsg := fmt.Sprintf("input variable '%s' not found in VM state for filter node", inputVarName)
+		errMsg := fmt.Sprintf("input variable for source '%s' not found", sourceID)
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
-		executionLogStep.Error = errMsg
-		executionLogStep.Success = false
-		executionLogStep.Log = logBuilder.String()
-		executionLogStep.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
 		return executionLogStep, fmt.Errorf(errMsg)
 	}
-	logBuilder.WriteString(fmt.Sprintf("Retrieved input data from var '%s': %v\n", inputVarName, rawInputVal))
 
-	// Input data might be wrapped, e.g., map[string]interface{}{"data": actual_array_or_object}
-	actualDataToFilter := rawInputVal
-	if mapVal, ok := rawInputVal.(map[string]interface{}); ok {
-		if dataFieldVal, dataOk := mapVal["data"]; dataOk {
-			actualDataToFilter = dataFieldVal
-			logBuilder.WriteString(fmt.Sprintf("Extracted '.data' field for filtering: %v\n", actualDataToFilter))
-		}
+	// Determine the variable name to use in JavaScript
+	inputVarName := r.vm.GetNodeNameAsVar(sourceID)
+	logBuilder.WriteString(fmt.Sprintf("Using input variable: %s (from source: %s)\n", inputVarName, sourceID))
+
+	// Apply template processing to the expression if it contains {{ }}
+	var processedExpression string
+	if strings.Contains(expression, "{{") {
+		processedExpression = r.vm.preprocessText(expression)
+		logBuilder.WriteString(fmt.Sprintf("Expression after preprocessing: %s\n", processedExpression))
+	} else {
+		processedExpression = r.vm.preprocessTextWithVariableMapping(expression)
 	}
 
-	// Reset and prepare the JSVM for this execution
-	r.jsvm.ClearInterrupt()
+	logBuilder.WriteString(fmt.Sprintf("Using processed expression: %s\n", processedExpression))
 
-	// Set other VM variables in the JS environment for context if the filter expression needs them
+	// Create JavaScript VM for expression evaluation
+	jsvm := NewGojaVM()
+
+	// Set all variables from the VM context
 	r.vm.mu.Lock()
 	for key, value := range r.vm.vars {
-		if key == inputVarName {
-			continue
-		}
-		if err := r.jsvm.Set(key, value); err != nil {
+		if err := jsvm.Set(key, value); err != nil {
 			r.vm.mu.Unlock()
-			errMsg := fmt.Sprintf("failed to set context variable '%s' in JS VM for filter: %v", key, err)
+			errMsg := fmt.Sprintf("failed to set variable '%s' in JS VM: %v", key, err)
 			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
-			executionLogStep.Error = errMsg
-			executionLogStep.Success = false
-			executionLogStep.Log = logBuilder.String()
-			executionLogStep.EndAt = time.Now().UnixMilli()
+			finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
 			return executionLogStep, fmt.Errorf(errMsg)
 		}
 	}
 	r.vm.mu.Unlock()
 
-	var filteredResult interface{}
+	// Ensure the expression is wrapped in a function if it contains if/return
+	finalExpression := processedExpression
+	if strings.Contains(processedExpression, "if") || strings.Contains(processedExpression, "return") {
+		finalExpression = fmt.Sprintf("(function(item, index) { %s })", processedExpression)
+	} else {
+		finalExpression = fmt.Sprintf("(function(item, index) { return %s; })", processedExpression)
+	}
+
+	logBuilder.WriteString(fmt.Sprintf("Final wrapped expression: %s\n", finalExpression))
+
+	// Unwrap the data if it's in a map with 'data' key (from previous node output)
+	var actualDataToFilter interface{}
+	if dataMap, ok := inputVar.(map[string]interface{}); ok {
+		if dataValue, exists := dataMap["data"]; exists {
+			actualDataToFilter = dataValue
+			logBuilder.WriteString("Unwrapped input data from 'data' key\n")
+		} else {
+			actualDataToFilter = inputVar
+		}
+	} else {
+		actualDataToFilter = inputVar
+	}
+
+	logBuilder.WriteString(fmt.Sprintf("Data to filter type: %T, content: %v\n", actualDataToFilter, actualDataToFilter))
+
+	var filteredResult []interface{}
 	var evaluationError error
 
-	switch dataToProcess := actualDataToFilter.(type) {
+	// Handle different input types for filtering
+	switch data := actualDataToFilter.(type) {
 	case []interface{}:
-		logBuilder.WriteString(fmt.Sprintf("Input is a slice with %d items. Filtering each item...\n", len(dataToProcess)))
-		resultSlice := make([]interface{}, 0)
-		for i, item := range dataToProcess {
-			loopVarNameForItem := "current" // Use 'current' to match SDK expectations
-			if err := r.jsvm.Set(loopVarNameForItem, item); err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Filtering array with %d items\n", len(data)))
+
+		for i, item := range data {
+			// Set the current item and index in the JS context
+			loopVarNameForItem := fmt.Sprintf("%s_item", inputVarName)
+			if err := jsvm.Set(loopVarNameForItem, item); err != nil {
 				evaluationError = fmt.Errorf("failed to set loop item '%s' (index %d) in JS VM: %w", loopVarNameForItem, i, err)
 				break
 			}
-			if err := r.jsvm.Set("index", i); err != nil {
+			if err := jsvm.Set("index", i); err != nil {
 				evaluationError = fmt.Errorf("failed to set index %d in JS VM: %w", i, err)
 				break
 			}
 
-			// Use the extracted helper function for script wrapping
-			script := r.wrapExpressionForExecution(cleanExpression)
-			val, err := r.jsvm.RunString(script)
+			// Evaluate the filter expression for this item
+			result, err := jsvm.RunString(fmt.Sprintf("(%s)(%s, index)", finalExpression, loopVarNameForItem))
 			if err != nil {
 				logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for item %d (%v): %s. Skipping item.\n", i, item, err.Error()))
 				continue
 			}
-			if boolVal, ok := val.Export().(bool); ok && boolVal {
-				resultSlice = append(resultSlice, item)
-			} else if !ok {
-				logBuilder.WriteString(fmt.Sprintf("Filter expression for item %d did not return a boolean. Got: %T. Skipping item.\n", i, val.Export()))
+
+			// If the result is truthy, include the item
+			if result.ToBoolean() {
+				filteredResult = append(filteredResult, item)
+				logBuilder.WriteString(fmt.Sprintf("Item %d passed filter\n", i))
+			} else {
+				logBuilder.WriteString(fmt.Sprintf("Item %d filtered out\n", i))
 			}
 		}
+
 		if evaluationError == nil {
-			filteredResult = resultSlice
+			logBuilder.WriteString(fmt.Sprintf("Filter completed: %d items passed out of %d total\n", len(filteredResult), len(data)))
 		}
 
 	case []map[string]interface{}:
-		logBuilder.WriteString(fmt.Sprintf("Input is a slice of maps with %d items. Filtering each item...\n", len(dataToProcess)))
-		resultSlice := make([]interface{}, 0)
-		for i, item := range dataToProcess {
-			loopVarNameForItem := "current" // Use 'current' to match SDK expectations
-			if err := r.jsvm.Set(loopVarNameForItem, item); err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Filtering map array with %d items\n", len(data)))
+
+		for i, item := range data {
+			// Set the current item and index in the JS context
+			loopVarNameForItem := fmt.Sprintf("%s_item", inputVarName)
+			if err := jsvm.Set(loopVarNameForItem, item); err != nil {
 				evaluationError = fmt.Errorf("failed to set loop item '%s' (index %d) in JS VM: %w", loopVarNameForItem, i, err)
 				break
 			}
-			if err := r.jsvm.Set("index", i); err != nil {
+			if err := jsvm.Set("index", i); err != nil {
 				evaluationError = fmt.Errorf("failed to set index %d in JS VM: %w", i, err)
 				break
 			}
 
-			// Use the extracted helper function for script wrapping
-			script := r.wrapExpressionForExecution(cleanExpression)
-			val, err := r.jsvm.RunString(script)
+			// Evaluate the filter expression for this item
+			result, err := jsvm.RunString(fmt.Sprintf("(%s)(%s, index)", finalExpression, loopVarNameForItem))
 			if err != nil {
 				logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for item %d (%v): %s. Skipping item.\n", i, item, err.Error()))
 				continue
 			}
-			if boolVal, ok := val.Export().(bool); ok && boolVal {
-				resultSlice = append(resultSlice, item)
-			} else if !ok {
-				logBuilder.WriteString(fmt.Sprintf("Filter expression for item %d did not return a boolean. Got: %T. Skipping item.\n", i, val.Export()))
+
+			// If the result is truthy, include the item
+			if result.ToBoolean() {
+				filteredResult = append(filteredResult, item)
+				logBuilder.WriteString(fmt.Sprintf("Map item %d passed filter\n", i))
+			} else {
+				logBuilder.WriteString(fmt.Sprintf("Map item %d filtered out\n", i))
 			}
 		}
+
 		if evaluationError == nil {
-			filteredResult = resultSlice
+			logBuilder.WriteString(fmt.Sprintf("Map filter completed: %d items passed out of %d total\n", len(filteredResult), len(data)))
 		}
 
 	case map[string]interface{}:
-		logBuilder.WriteString("Input is a map/object. Applying filter expression directly to it...\n")
-		itemVarNameForMap := "current" // Use 'current' to match SDK expectations
-		if err := r.jsvm.Set(itemVarNameForMap, dataToProcess); err != nil {
+		// For map input, set it as a variable and evaluate the expression directly
+		itemVarNameForMap := fmt.Sprintf("%s_item", inputVarName)
+		if err := jsvm.Set(itemVarNameForMap, data); err != nil {
 			evaluationError = fmt.Errorf("failed to set input map as '%s' in JS VM: %w", itemVarNameForMap, err)
 		} else {
-			// Use the extracted helper function for script wrapping
-			script := r.wrapExpressionForExecution(cleanExpression)
-			val, err := r.jsvm.RunString(script)
+			// Evaluate the filter expression for the map
+			result, err := jsvm.RunString(fmt.Sprintf("(%s)(%s, 0)", finalExpression, itemVarNameForMap))
 			if err != nil {
 				logBuilder.WriteString(fmt.Sprintf("Error evaluating filter expression for map: %s\n", err.Error()))
 				evaluationError = err
+			} else if result.ToBoolean() {
+				filteredResult = append(filteredResult, data)
+				logBuilder.WriteString("Map passed filter\n")
 			} else {
-				if boolVal, ok := val.Export().(bool); ok && boolVal {
-					filteredResult = dataToProcess
-					logBuilder.WriteString("Map passed filter.\n")
-				} else {
-					filteredResult = nil
-					logBuilder.WriteString("Map did not pass filter (or expression not boolean).\n")
-				}
+				logBuilder.WriteString("Map filtered out\n")
 			}
 		}
 
 	default:
+		// Unsupported data type for filtering
 		evaluationError = fmt.Errorf("input variable '%s' (after unwrapping) has an unsupported type for filtering: %T", inputVarName, actualDataToFilter)
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", evaluationError.Error()))
 	}
 
 	if evaluationError != nil {
-		executionLogStep.Error = evaluationError.Error()
-		executionLogStep.Success = false
-		executionLogStep.Log = logBuilder.String()
-		executionLogStep.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionLogStep, false, evaluationError.Error(), logBuilder.String())
 		return executionLogStep, evaluationError
 	}
 
-	logBuilder.WriteString(fmt.Sprintf("Filtered result: %v\n", filteredResult))
-
-	outputProtoStruct, err := structpb.NewValue(filteredResult)
+	// Convert result to protobuf and set output
+	outputProtoStruct, err := structpb.NewStruct(map[string]interface{}{
+		"filtered_data": filteredResult,
+		"total_items":   len(filteredResult),
+	})
 	if err != nil {
 		logBuilder.WriteString(fmt.Sprintf("Error converting execution result to proto struct: %v\n", err))
-		executionLogStep.Error = err.Error()
-		executionLogStep.Success = false
+		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
+		return executionLogStep, err
 	} else {
 		anyOutput, err := anypb.New(outputProtoStruct)
 		if err != nil {
 			logBuilder.WriteString(fmt.Sprintf("Error marshalling output to Any: %v\n", err))
-			executionLogStep.Error = err.Error()
-			executionLogStep.Success = false
+			finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
+			return executionLogStep, err
 		} else {
 			executionLogStep.OutputData = &avsproto.Execution_Step_Filter{
 				Filter: &avsproto.FilterNode_Output{
 					Data: anyOutput,
 				},
 			}
-			r.SetOutputVarForStep(stepID, filteredResult)
+			// Use shared function to set output variable for this step
+			setNodeOutputData(r.CommonProcessor, stepID, filteredResult)
 		}
 	}
 
-	executionLogStep.Log = logBuilder.String()
-	executionLogStep.EndAt = time.Now().UnixMilli()
+	// Use shared function to finalize execution step with success
+	finalizeExecutionStep(executionLogStep, true, "", logBuilder.String())
 	return executionLogStep, nil
 }

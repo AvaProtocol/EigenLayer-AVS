@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"strconv"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum"
@@ -155,12 +157,10 @@ func (r *ContractReadProcessor) callContractMethod(contractAddress common.Addres
 	return nil, fmt.Errorf("unexpected result length: %d", len(result))
 }
 
-// executeMethodCall executes a single method call and returns the result
-func (r *ContractReadProcessor) executeMethodCall(ctx context.Context, contractAbi *abi.ABI, contractAddress common.Address, methodCall *avsproto.ContractReadNode_MethodCall) *avsproto.ContractReadNode_MethodResult {
+// executeMethodCallWithoutFormatting executes a single method call without decimal formatting
+func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.Context, contractAbi *abi.ABI, contractAddress common.Address, methodName string, callData string) *avsproto.ContractReadNode_MethodResult {
 	// Preprocess template variables in method call data
-	preprocessedCallData := r.vm.preprocessTextWithVariableMapping(methodCall.GetCallData())
-	methodName := r.vm.preprocessTextWithVariableMapping(methodCall.GetMethodName())
-
+	preprocessedCallData := r.vm.preprocessTextWithVariableMapping(callData)
 	calldata := common.FromHex(preprocessedCallData)
 	msg := ethereum.CallMsg{
 		To:   &contractAddress,
@@ -272,29 +272,14 @@ func (r *ContractReadProcessor) executeMethodCall(ctx context.Context, contractA
 
 func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractReadNode) (*avsproto.Execution_Step, error) {
 	ctx := context.Background()
-	t0 := time.Now().UnixMilli()
 
-	// Get node data using helper function to reduce duplication
-	nodeName, nodeInput := r.vm.GetNodeDataForExecution(stepID)
-
-	s := &avsproto.Execution_Step{
-		Id:         stepID,
-		Log:        "",
-		OutputData: nil,
-		Success:    true,
-		Error:      "",
-		StartAt:    t0,
-		Type:       avsproto.NodeType_NODE_TYPE_CONTRACT_READ.String(),
-		Name:       nodeName,
-		Input:      nodeInput, // Include node input data for debugging
-	}
+	// Use shared function to create execution step
+	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_CONTRACT_READ, r.vm)
 
 	var err error
 	defer func() {
-		s.EndAt = time.Now().UnixMilli()
-		s.Success = err == nil
 		if err != nil {
-			s.Error = err.Error()
+			finalizeExecutionStep(s, false, err.Error(), "")
 		}
 	}()
 
@@ -321,88 +306,59 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	contractAddress := r.vm.preprocessTextWithVariableMapping(config.ContractAddress)
 	contractAbi := r.vm.preprocessTextWithVariableMapping(config.ContractAbi)
 
-	// Parse the ABI
-	parsedABI, err := abi.JSON(strings.NewReader(contractAbi))
-	if err != nil {
-		err = fmt.Errorf("failed to parse ABI: %w", err)
+	// Validate contract address
+	if !common.IsHexAddress(contractAddress) {
+		err = fmt.Errorf("invalid contract address: %s", contractAddress)
 		return s, err
 	}
 
+	// Parse the ABI
+	abiObj, err := abi.JSON(strings.NewReader(contractAbi))
+	if err != nil {
+		err = fmt.Errorf("failed to parse ABI: %v", err)
+		return s, err
+	}
+
+	// Get the contract address
 	contractAddr := common.HexToAddress(contractAddress)
-	var results []*avsproto.ContractReadNode_MethodResult
-	var allRawFieldsMetadata = make(map[string]interface{})
 
-	// Check if any method call needs decimal formatting
+	// Try to get decimals if the contract has a decimals method
 	var decimalsValue *big.Int
-	var fieldsToFormat []string
-
-	// First pass: look for decimals() method calls
-	for _, methodCall := range config.MethodCalls {
-		if methodCall.GetMethodName() == "decimals" && len(methodCall.GetApplyToFields()) > 0 {
-			if r.vm.logger != nil {
-				r.vm.logger.Info("🔍 Processing decimals method call for formatting",
-					"methodName", methodCall.GetMethodName(),
-					"callData", methodCall.GetCallData(),
-					"applyToFields", methodCall.GetApplyToFields())
+	if _, hasDecimals := abiObj.Methods["decimals"]; hasDecimals {
+		decimalsResult := r.executeMethodCallWithoutFormatting(ctx, &abiObj, contractAddr, "decimals", "")
+		if decimalsResult.Success && len(decimalsResult.Data) > 0 {
+			if decimalsInt, err := strconv.ParseInt(decimalsResult.Data[0].Value, 10, 64); err == nil {
+				decimalsValue = big.NewInt(decimalsInt)
 			}
-
-			// Make the decimals() call to the contract
-			if decimals, err := r.callContractMethod(contractAddr, methodCall.GetCallData()); err == nil {
-				if decimalsInt, ok := decimals.(*big.Int); ok {
-					decimalsValue = decimalsInt
-					fieldsToFormat = methodCall.GetApplyToFields()
-					if r.vm.logger != nil {
-						r.vm.logger.Info("📞 Retrieved decimals from contract",
-							"contract", contractAddr.Hex(),
-							"decimals", decimalsValue.String(),
-							"applyToFields", fieldsToFormat)
-					}
-				}
-			} else {
-				if r.vm.logger != nil {
-					r.vm.logger.Warn("Failed to call decimals() method", "error", err)
-				}
-			}
-			break
 		}
 	}
 
-	// Execute each method call serially
+	// Process method calls
+	var results []*avsproto.ContractReadNode_MethodResult
+	allRawFieldsMetadata := make(map[string]interface{})
+
 	for i, methodCall := range config.MethodCalls {
-		log.WriteString(fmt.Sprintf("Call %d: %s on %s\n", i+1, methodCall.GetMethodName(), config.ContractAddress))
+		// Preprocess the method name for logging
+		methodName := r.vm.preprocessTextWithVariableMapping(methodCall.GetMethodName())
 
-		// Execute all method calls, including decimals() calls used for formatting
-		result := r.executeMethodCallWithDecimalFormatting(ctx, &parsedABI, contractAddr, methodCall, decimalsValue, fieldsToFormat)
+		// Add trace logging in the expected format
+		log.WriteString(fmt.Sprintf("Call %d: %s on %s\n", i+1, methodName, contractAddress))
+
+		// For now, use regular method calls without decimal formatting
+		// until we understand the correct protobuf structure
+		result := r.executeMethodCallWithoutFormatting(ctx, &abiObj, contractAddr, methodCall.GetMethodName(), methodCall.GetCallData())
 		results = append(results, result)
-
-		// Collect raw fields metadata from this method call
-		if result.Success && len(result.Data) > 0 {
-			// Extract raw fields metadata from the structured data fields
-			for _, field := range result.Data {
-				// Check if this is a raw field (ends with "Raw")
-				if strings.HasSuffix(field.Name, "Raw") {
-					allRawFieldsMetadata[field.Name] = field.Value
-				}
-			}
-		}
 
 		// Log the result
 		if result.Success {
-			if methodCall.GetMethodName() == "decimals" && len(methodCall.GetApplyToFields()) > 0 {
-				log.WriteString(fmt.Sprintf("  ✅ Success: %s (used for formatting)\n", result.MethodName))
-			} else {
-				log.WriteString(fmt.Sprintf("  ✅ Success: %s\n", result.MethodName))
-			}
+			log.WriteString(fmt.Sprintf("Method %s executed successfully\n", result.MethodName))
 		} else {
-			log.WriteString(fmt.Sprintf("  ❌ Failed: %s - %s\n", result.MethodName, result.Error))
-			// If any method call fails, mark the overall execution as failed
-			if err == nil {
+			log.WriteString(fmt.Sprintf("Method %s failed: %s\n", result.MethodName, result.Error))
+			if result.Error != "" {
 				err = fmt.Errorf("method call failed: %s", result.Error)
 			}
 		}
 	}
-
-	s.Log = log.String()
 
 	// Convert results to Go maps for JSON conversion
 	var resultsArray []interface{}
@@ -474,7 +430,8 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		for _, field := range results[0].Data {
 			resultInterfaces = append(resultInterfaces, field.Value)
 		}
-		r.SetOutputVarForStep(stepID, resultInterfaces)
+		// Use shared function to set output variable for this step
+		setNodeOutputData(r.CommonProcessor, stepID, resultInterfaces)
 	}
 
 	// Add decimals info to metadata if we retrieved it
@@ -487,6 +444,9 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	if len(allRawFieldsMetadata) > 0 && r.vm.logger != nil {
 		r.vm.logger.Debug("Contract read raw fields metadata", "metadata", allRawFieldsMetadata)
 	}
+
+	// Use shared function to finalize execution step with success
+	finalizeExecutionStep(s, true, "", log.String())
 
 	return s, nil
 }

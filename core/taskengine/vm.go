@@ -383,20 +383,14 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			}
 
 			// Create dual-access map to support both camelCase and snake_case field access
-			// Extract trigger input data and add it to the trigger variable
-			triggerVarData := map[string]any{"data": triggerDataMap}
-
+			// Extract trigger input data and create trigger variable using shared function
+			var triggerInputData map[string]interface{}
 			if task != nil && task.Trigger != nil {
-				triggerInputData := ExtractTriggerInputData(task.Trigger)
-				if triggerInputData != nil {
-					triggerVarData["input"] = triggerInputData
-
-					// For manual triggers, the .data field is a pass-through field from the input data
-					if triggerData.Type == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
-						triggerVarData["data"] = triggerInputData
-					}
-				}
+				triggerInputData = ExtractTriggerInputData(task.Trigger)
 			}
+
+			// Use shared function to build trigger variable data
+			triggerVarData := buildTriggerVariableData(task.Trigger, triggerDataMap, triggerInputData)
 
 			// Debug: Log the final trigger variable data
 			v.logger.Debug("VM Creation DEBUG: Final trigger variable", "triggerName", triggerNameStd, "triggerVarData", fmt.Sprintf("%+v", triggerVarData))
@@ -1722,7 +1716,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 	if nodeID == "" {
 		nodeID = "node_" + ulid.Make().String()
 	}
-	node := &avsproto.TaskNode{Id: nodeID, Name: "Single Node Execution: " + nodeType}
+	node := &avsproto.TaskNode{Id: nodeID, Name: "singleNodeExecution_" + nodeType}
 
 	switch nodeType {
 	case NodeTypeRestAPI, "restAPI": // Support both "restApi" and "restAPI" for backward compatibility

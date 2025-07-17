@@ -30,7 +30,7 @@ func TestETHTransferTaskIntegration(t *testing.T) {
 		Nodes: []*avsproto.TaskNode{
 			{
 				Id:   "eth_transfer_1",
-				Name: "Transfer ETH",
+				Name: "TransferETH",
 				TaskType: &avsproto.TaskNode_EthTransfer{
 					EthTransfer: &avsproto.ETHTransferNode{
 						Config: &avsproto.ETHTransferNode_Config{
@@ -171,7 +171,7 @@ func TestETHTransferTaskWithInvalidConfig(t *testing.T) {
 		Nodes: []*avsproto.TaskNode{
 			{
 				Id:   "eth_transfer_1",
-				Name: "Transfer ETH",
+				Name: "TransferETH",
 				TaskType: &avsproto.TaskNode_EthTransfer{
 					EthTransfer: &avsproto.ETHTransferNode{
 						Config: &avsproto.ETHTransferNode_Config{
