@@ -904,3 +904,201 @@ func TestBranchProcessor_Execute_InvalidScriptSyntax(t *testing.T) {
 	assert.True(t, executionLog.Success) // Success with no branch action taken
 	assert.Empty(t, executionLog.Error)  // No error in execution log
 }
+
+// TestBranchNodeSecurity tests that dangerous expressions are blocked
+func TestBranchNodeSecurity(t *testing.T) {
+	// Create a simple VM for testing
+	vm, err := NewVMWithData(&model.Task{
+		Task: &avsproto.Task{
+			Id: "test-task",
+			Trigger: &avsproto.TaskTrigger{
+				Id:   "test-trigger",
+				Name: "test",
+				TriggerType: &avsproto.TaskTrigger_Manual{
+					Manual: &avsproto.ManualTrigger{
+						Config: &avsproto.ManualTrigger_Config{},
+					},
+				},
+			},
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
+	if err != nil {
+		t.Fatalf("Failed to create VM: %v", err)
+	}
+
+	// Set up sample data
+	testData := map[string]interface{}{
+		"age":  25,
+		"name": "Alice",
+	}
+	vm.AddVar("data", testData)
+
+	processor := NewBranchProcessor(vm)
+
+	dangerousExpressions := []struct {
+		name       string
+		expression string
+	}{
+		{
+			name:       "eval injection",
+			expression: "eval('process.exit(1)')",
+		},
+		{
+			name:       "Function constructor",
+			expression: "Function('return process.exit(1)')()",
+		},
+		{
+			name:       "setTimeout injection",
+			expression: "setTimeout('malicious code', 1000)",
+		},
+		{
+			name:       "global access",
+			expression: "global.process.exit(1)",
+		},
+		{
+			name:       "require injection",
+			expression: "require('fs').readFileSync('/etc/passwd')",
+		},
+		{
+			name:       "constructor chaining",
+			expression: "data.constructor.constructor('return process.exit(1)')()",
+		},
+	}
+
+	for _, test := range dangerousExpressions {
+		t.Run(test.name, func(t *testing.T) {
+			// Create a branch node with dangerous expression
+			branchNode := &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: []*avsproto.BranchNode_Condition{
+						{
+							Id:         "dangerous",
+							Type:       "if",
+							Expression: test.expression,
+						},
+					},
+				},
+			}
+
+			// Execute the branch node
+			result, _, err := processor.Execute("test-branch", branchNode)
+
+			// The execution should succeed but skip the dangerous condition
+			if err != nil {
+				t.Errorf("Expected execution to succeed but got error: %v", err)
+			}
+
+			// The result should indicate that no condition was matched (treating dangerous as false)
+			if result == nil {
+				t.Errorf("Expected result to be non-nil")
+			}
+
+			// Check that the log contains security warning
+			if result.Log == "" {
+				t.Errorf("Expected log to be non-empty")
+			}
+
+			logContent := result.Log
+			if !strings.Contains(logContent, "Dangerous expression detected") {
+				t.Errorf("Expected log to contain security warning but got: %s", logContent)
+			}
+
+			if !strings.Contains(logContent, "failed security validation") {
+				t.Errorf("Expected log to contain validation failure message but got: %s", logContent)
+			}
+		})
+	}
+}
+
+// TestBranchNodeSafety tests that legitimate expressions still work
+func TestBranchNodeSafety(t *testing.T) {
+	// Create a simple VM for testing
+	vm, err := NewVMWithData(&model.Task{
+		Task: &avsproto.Task{
+			Id: "test-task",
+			Trigger: &avsproto.TaskTrigger{
+				Id:   "test-trigger",
+				Name: "test",
+				TriggerType: &avsproto.TaskTrigger_Manual{
+					Manual: &avsproto.ManualTrigger{
+						Config: &avsproto.ManualTrigger_Config{},
+					},
+				},
+			},
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
+	if err != nil {
+		t.Fatalf("Failed to create VM: %v", err)
+	}
+
+	// Set up sample data
+	testData := map[string]interface{}{
+		"age":  25,
+		"name": "Alice",
+	}
+	vm.AddVar("data", testData)
+
+	processor := NewBranchProcessor(vm)
+
+	safeExpressions := []struct {
+		name       string
+		expression string
+	}{
+		{
+			name:       "simple comparison",
+			expression: "data.age > 18",
+		},
+		{
+			name:       "string comparison",
+			expression: "data.name == 'Alice'",
+		},
+		{
+			name:       "logical operators",
+			expression: "data.age >= 18 && data.name == 'Alice'",
+		},
+		{
+			name:       "false condition",
+			expression: "data.age < 18",
+		},
+	}
+
+	for _, test := range safeExpressions {
+		t.Run(test.name, func(t *testing.T) {
+			// Create a branch node with safe expression
+			branchNode := &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: []*avsproto.BranchNode_Condition{
+						{
+							Id:         "safe",
+							Type:       "if",
+							Expression: test.expression,
+						},
+					},
+				},
+			}
+
+			// Execute the branch node
+			result, _, err := processor.Execute("test-branch", branchNode)
+
+			// The execution should succeed
+			if err != nil {
+				t.Errorf("Expected execution to succeed but got error: %v", err)
+			}
+
+			// The result should be non-nil
+			if result == nil {
+				t.Errorf("Expected result to be non-nil")
+			}
+
+			// Check that the log does NOT contain security warnings
+			if result.Log != "" {
+				logContent := result.Log
+				if strings.Contains(logContent, "Dangerous expression detected") {
+					t.Errorf("Expected log to NOT contain security warning for safe expression but got: %s", logContent)
+				}
+			}
+		})
+	}
+}

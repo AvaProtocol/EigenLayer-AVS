@@ -26,48 +26,53 @@ func NewLoopProcessor(vm *VM) *LoopProcessor {
 }
 
 func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
-	t0 := time.Now().UnixMilli()
-
-	// Get node data using helper function to reduce duplication
-	nodeName, nodeInput := r.vm.GetNodeDataForExecution(stepID)
-
-	s := &avsproto.Execution_Step{
-		Id:         stepID,
-		OutputData: nil,
-		Log:        "",
-		Error:      "",
-		Success:    true,
-		StartAt:    t0,
-		Type:       avsproto.NodeType_NODE_TYPE_LOOP.String(),
-		Name:       nodeName,
-		Input:      nodeInput, // Include node input data for debugging
-	}
+	// Use shared function to create execution step
+	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_LOOP, r.vm)
 
 	var log strings.Builder
 	log.WriteString(fmt.Sprintf("Start loop execution at %s", time.Now()))
 
+	// Debug logging
+	if r.vm.logger != nil {
+		r.vm.logger.Info("🔄 LoopProcessor.Execute: Starting",
+			"stepID", stepID,
+			"node_exists", node != nil,
+			"execution_step_created", s != nil,
+			"execution_step_input_exists", s != nil && s.Input != nil)
+	}
+
 	// Get configuration from node.Config (new architecture)
 	if node.Config == nil {
 		err := fmt.Errorf("LoopNode Config is nil")
-		s.Success = false
-		s.Error = err.Error()
-		s.EndAt = time.Now().UnixMilli()
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		s.Log = log.String()
+		if r.vm.logger != nil {
+			r.vm.logger.Error("🚫 LoopProcessor.Execute: Config is nil", "stepID", stepID)
+		}
+		finalizeExecutionStep(s, false, err.Error(), log.String())
 		return s, err
 	}
 
 	sourceNodeID := node.Config.SourceId
 	iterVal := node.Config.IterVal
 	iterKey := node.Config.IterKey
+	executionMode := node.Config.ExecutionMode
+
+	if r.vm.logger != nil {
+		r.vm.logger.Info("🔄 LoopProcessor.Execute: Config extracted",
+			"stepID", stepID,
+			"sourceNodeID", sourceNodeID,
+			"iterVal", iterVal,
+			"iterKey", iterKey,
+			"executionMode", executionMode.String())
+	}
 
 	if sourceNodeID == "" || iterVal == "" {
 		err := fmt.Errorf("missing required configuration: source_id and iter_val are required")
-		s.Success = false
-		s.Error = err.Error()
-		s.EndAt = time.Now().UnixMilli()
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		s.Log = log.String()
+		if r.vm.logger != nil {
+			r.vm.logger.Error("🚫 LoopProcessor.Execute: Missing required config", "stepID", stepID, "sourceNodeID", sourceNodeID, "iterVal", iterVal)
+		}
+		finalizeExecutionStep(s, false, err.Error(), log.String())
 		return s, err
 	}
 
@@ -95,11 +100,8 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 
 	if !exists {
 		err := fmt.Errorf("input variable %s not found (tried both as node name and direct variable)", inputName)
-		s.Success = false
-		s.Error = err.Error()
-		s.EndAt = time.Now().UnixMilli()
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		s.Log = log.String()
+		finalizeExecutionStep(s, false, err.Error(), log.String())
 		return s, err
 	}
 
@@ -108,115 +110,122 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 
 	inputArray, ok := inputVar.([]interface{})
 	if !ok {
-		if varMap, isMap := inputVar.(map[string]interface{}); isMap {
-			// First try the standard "data" field
-			if data, hasData := varMap["data"]; hasData {
-				if dataArr, isArr := data.([]interface{}); isArr {
-					inputArray = dataArr
-					ok = true
-					log.WriteString(fmt.Sprintf("\nFound array in 'data' field with %d items", len(dataArr)))
-				} else if dataMap, isMap := data.(map[string]interface{}); isMap {
-					// Check if "data" contains a nested map with arrays
-					log.WriteString(fmt.Sprintf("\nData field is a map: %+v", dataMap))
-					for fieldName, fieldValue := range dataMap {
-						if dataArr, isArr := fieldValue.([]interface{}); isArr {
-							inputArray = dataArr
-							ok = true
-							log.WriteString(fmt.Sprintf("\nFound array in nested 'data.%s' field with %d items", fieldName, len(dataArr)))
-							break
-						}
-					}
-				}
+		// Try to extract from data field if wrapped
+		if dataMap, ok := inputVar.(map[string]interface{}); ok {
+			if dataArray, ok := dataMap["data"].([]interface{}); ok {
+				inputArray = dataArray
+				log.WriteString(fmt.Sprintf("\nExtracted array from 'data' field: %d items", len(inputArray)))
+			} else {
+				err := fmt.Errorf("input variable %s must be an array", inputName)
+				log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+				finalizeExecutionStep(s, false, err.Error(), log.String())
+				return s, err
 			}
-
-			// If no "data" field or it's not an array, error out
-			if !ok {
-				log.WriteString(fmt.Sprintf("\nData field is not an array: %+v", varMap["data"]))
-			}
-		}
-	} else {
-		log.WriteString(fmt.Sprintf("\nInput is already an array with %d items", len(inputArray)))
-	}
-
-	if !ok {
-		err := fmt.Errorf("loop input must be an array")
-		s.Success = false
-		s.Error = err.Error()
-		s.EndAt = time.Now().UnixMilli()
-		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		s.Log = log.String()
-		return s, err
-	}
-
-	log.WriteString(fmt.Sprintf("\nIterating through %d items", len(inputArray)))
-
-	// Determine execution mode based on configuration
-	executionMode := node.Config.ExecutionMode
-	runInParallel := (executionMode == avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL)
-
-	// Always run sequentially for ContractWrite operations (security requirement)
-	if node.GetContractWrite() != nil {
-		runInParallel = false
-		log.WriteString("\nRunning iterations sequentially due to contract write operation (security requirement)")
-	} else {
-		if runInParallel {
-			log.WriteString("\nRunning iterations in parallel mode")
 		} else {
-			log.WriteString("\nRunning iterations in sequential mode")
+			err := fmt.Errorf("input variable %s must be an array", inputName)
+			log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+			finalizeExecutionStep(s, false, err.Error(), log.String())
+			return s, err
 		}
 	}
 
-	results := make([]interface{}, 0, len(inputArray))
+	log.WriteString(fmt.Sprintf("\nInput array has %d items", len(inputArray)))
+
+	// If empty array, return early with empty results
+	if len(inputArray) == 0 {
+		results := []interface{}{}
+		// Use shared function to set output variable for this step
+		setNodeOutputData(r.CommonProcessor, stepID, results)
+
+		s.OutputData = &avsproto.Execution_Step_Loop{
+			Loop: &avsproto.LoopNode_Output{
+				Data: "[]",
+			},
+		}
+		log.WriteString("\nEmpty array input - returning empty results")
+		finalizeExecutionStep(s, true, "", log.String())
+		return s, nil
+	}
+
+	// Process each array item
+	results := make([]interface{}, len(inputArray))
 	success := true
 	var firstError error
 
-	if runInParallel {
-		var wg sync.WaitGroup
-		errorsMutex := &sync.Mutex{}
+	// Determine execution mode
+	concurrent := false
+	var executionModeLog string
 
-		// Pre-allocate results slice with fixed size to maintain order
-		results = make([]interface{}, len(inputArray))
+	// Check if this is a contract write operation (security requirement)
+	isContractWrite := node.GetContractWrite() != nil
+
+	if isContractWrite {
+		// Contract write operations must always be sequential for security
+		concurrent = false
+		executionModeLog = "sequentially due to contract write operation (security requirement)"
+	} else {
+		// For non-contract-write operations, use the configured execution mode
+		switch executionMode {
+		case avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL:
+			concurrent = true
+			executionModeLog = "parallel mode"
+		case avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL:
+			concurrent = false
+			executionModeLog = "sequential mode"
+		default:
+			// Default to sequential (safer)
+			concurrent = false
+			executionModeLog = "sequential mode"
+		}
+	}
+
+	if concurrent {
+		log.WriteString(fmt.Sprintf("\nExecuting loop iterations in %s", executionModeLog))
+		// Parallel execution using goroutines
+		var wg sync.WaitGroup
+		var mutex sync.Mutex
 
 		for i, item := range inputArray {
 			wg.Add(1)
-			go func(index int, valueParam interface{}) {
+			go func(index int, item interface{}) {
 				defer wg.Done()
 
-				iterInputs := map[string]interface{}{}
+				// Create iteration-specific inputs
+				iterInputs := make(map[string]interface{})
+				iterInputs[iterVal] = item
 				if iterKey != "" {
 					iterInputs[iterKey] = index
 				}
-				iterInputs[iterVal] = valueParam
 
-				iterationStepID := fmt.Sprintf("%s.%d", stepID, index)
+				iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, index)
 				resultData, err := r.executeNestedNode(node, iterationStepID, iterInputs)
 
-				// Store result at the correct index to maintain order
+				mutex.Lock()
 				results[index] = resultData
-
 				if err != nil {
-					errorsMutex.Lock()
+					success = false
 					if firstError == nil {
 						firstError = err
-						success = false
 					}
-					errorsMutex.Unlock()
 					log.WriteString(fmt.Sprintf("\nError in iteration %d: %s", index, err.Error()))
 				}
+				mutex.Unlock()
 			}(i, item)
 		}
 
 		wg.Wait()
 	} else {
-		results = make([]interface{}, len(inputArray))
+		log.WriteString(fmt.Sprintf("\nExecuting loop iterations %s", executionModeLog))
+		// Sequential execution
 		for i, item := range inputArray {
-			iterInputs := map[string]interface{}{}
+			// Create iteration-specific inputs
+			iterInputs := make(map[string]interface{})
+			iterInputs[iterVal] = item
 			if iterKey != "" {
 				iterInputs[iterKey] = i
 			}
-			iterInputs[iterVal] = item
 
-			iterationStepID := fmt.Sprintf("%s.%d", stepID, i)
+			iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, i)
 			resultData, err := r.executeNestedNode(node, iterationStepID, iterInputs)
 			results[i] = resultData
 
@@ -230,7 +239,8 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 		}
 	}
 
-	r.SetOutputVarForStep(stepID, results)
+	// Use shared function to set output variable for this step
+	setNodeOutputData(r.CommonProcessor, stepID, results)
 
 	// Convert results to JSON string for output data (Loop expects string, not structpb.Value)
 	// Force JSON serialization by marshal -> unmarshal cycle to ensure compatibility
@@ -320,12 +330,15 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	}
 
 	log.WriteString(fmt.Sprintf("\nCompleted loop execution at %s", time.Now()))
-	s.Log = log.String()
-	s.Success = success
-	s.EndAt = time.Now().UnixMilli()
+
+	// Use shared function to finalize execution step
+	var errorMsg string
+	if !success && firstError != nil {
+		errorMsg = firstError.Error()
+	}
+	finalizeExecutionStep(s, success, errorMsg, log.String())
 
 	if !success && firstError != nil {
-		s.Error = firstError.Error()
 		return s, firstError
 	}
 
@@ -341,6 +354,7 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
 			TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: ethTransfer},
 		}
 	} else if contractWrite := loopNodeDef.GetContractWrite(); contractWrite != nil {
@@ -349,6 +363,7 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
 			TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: processedContractWrite},
 		}
 	} else if contractRead := loopNodeDef.GetContractRead(); contractRead != nil {
@@ -357,12 +372,14 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_READ,
 			TaskType: &avsproto.TaskNode_ContractRead{ContractRead: processedContractRead},
 		}
 	} else if graphqlQuery := loopNodeDef.GetGraphqlDataQuery(); graphqlQuery != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY,
 			TaskType: &avsproto.TaskNode_GraphqlQuery{GraphqlQuery: graphqlQuery},
 		}
 	} else if restApi := loopNodeDef.GetRestApi(); restApi != nil {
@@ -371,12 +388,14 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_REST_API,
 			TaskType: &avsproto.TaskNode_RestApi{RestApi: processedRestApi},
 		}
 	} else if customCode := loopNodeDef.GetCustomCode(); customCode != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
 			TaskType: &avsproto.TaskNode_CustomCode{CustomCode: customCode},
 		}
 	} else {

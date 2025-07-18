@@ -19,7 +19,7 @@ type MockTokenPrice struct {
 func TestFilter(t *testing.T) {
 	node := &avsproto.FilterNode{
 		Config: &avsproto.FilterNode_Config{
-			Expression: "current.cost > 5",
+			Expression: "value.cost > 5",
 			SourceId:   "trades",
 		},
 	}
@@ -91,7 +91,7 @@ func TestFilter(t *testing.T) {
 		t.Errorf("expect return only one element with cost > 5 but got: %s", data[0])
 	}
 
-	if !strings.Contains(step.Log, "Source node ID: 'trades', Variable name: 'trades', Original Expression: 'current.cost > 5', Clean Expression: 'current.cost > 5'") {
+	if !strings.Contains(step.Log, "Source node ID: 'trades', Variable name: 'trades', Original Expression: 'value.cost > 5', Clean Expression: 'value.cost > 5'") {
 		t.Errorf("log doesn't contain execution info")
 	}
 }
@@ -99,7 +99,7 @@ func TestFilter(t *testing.T) {
 func TestFilterComplexLogic(t *testing.T) {
 	node := &avsproto.FilterNode{
 		Config: &avsproto.FilterNode_Config{
-			Expression: "if (index<=2) { return current.cost > 13; } else { return current.cost < 21; }",
+			Expression: "if (index<=2) { return value.cost > 13; } else { return value.cost < 21; }",
 			SourceId:   "trades",
 		},
 	}
@@ -170,9 +170,32 @@ func TestFilterComplexLogic(t *testing.T) {
 
 	varname := vm.GetNodeNameAsVar("abc123")
 	vm.mu.Lock()
-	tempData, _ := vm.vars[varname]
+	tempData, exists := vm.vars[varname]
 	vm.mu.Unlock()
-	data := tempData.(map[string]any)["data"].([]any)
+
+	if !exists {
+		t.Errorf("Variable %s does not exist", varname)
+		return
+	}
+
+	dataMap, ok := tempData.(map[string]any)
+	if !ok {
+		t.Errorf("Variable %s is not a map[string]any, it's %T", varname, tempData)
+		return
+	}
+
+	dataValue, exists := dataMap["data"]
+	if !exists {
+		t.Errorf("Variable %s does not have a 'data' key", varname)
+		return
+	}
+
+	data, ok := dataValue.([]any)
+	if !ok {
+		t.Errorf("Data value is not []any, it's %T: %v", dataValue, dataValue)
+		return
+	}
+
 	if len(data) != 3 {
 		t.Errorf("expect return only 3 element but got %v", len(data))
 	}

@@ -63,9 +63,8 @@ func GetMetadataForTransfer(log *types.Log) (*Metadata, error) {
 		}
 		data, err := json.Marshal(m)
 		if err == nil {
-			if err := cache.Set(cacheKey, data); err != nil {
-				fmt.Printf("Failed to cache token metadata: %v\n", err)
-			}
+			// Ignore cache errors - caching is not critical
+			cache.Set(cacheKey, data)
 		}
 	}
 
@@ -90,9 +89,8 @@ func GetBlock(blockNumber uint64) (*types.Header, error) {
 
 	data, err := json.Marshal(blockHeader)
 	if err == nil {
-		if err := cache.Set(cacheKey, data); err != nil {
-			fmt.Printf("Failed to cache block header: %v\n", err)
-		}
+		// Ignore cache errors - caching is not critical
+		cache.Set(cacheKey, data)
 	}
 
 	return blockHeader, nil

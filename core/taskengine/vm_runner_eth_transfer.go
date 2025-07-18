@@ -28,27 +28,17 @@ func NewETHTransferProcessor(vm *VM, ethClient *ethclient.Client, smartWalletCon
 }
 
 func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransferNode) (*avsproto.Execution_Step, error) {
-	startTime := time.Now()
+	// Use shared function to create execution step
+	executionLog := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_ETH_TRANSFER, p.vm)
 
-	// Get node data using helper function to reduce duplication
-	nodeName, nodeInput := p.vm.GetNodeDataForExecution(stepID)
-
-	// Create execution log
-	executionLog := &avsproto.Execution_Step{
-		Id:      stepID,
-		StartAt: startTime.UnixMilli(),
-		Success: false,
-		Type:    avsproto.NodeType_NODE_TYPE_ETH_TRANSFER.String(),
-		Name:    nodeName,
-		Input:   nodeInput, // Include node input data for debugging
-	}
+	// Initially assume failure until we succeed
+	executionLog.Success = false
 
 	// Get configuration
 	config := node.GetConfig()
 	if config == nil {
 		err := fmt.Errorf("ETHTransferNode config is nil")
-		executionLog.Error = err.Error()
-		executionLog.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionLog, false, err.Error(), "")
 		return executionLog, err
 	}
 
@@ -58,23 +48,20 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 
 	if destination == "" {
 		err := fmt.Errorf("destination address is required for ETH transfer")
-		executionLog.Error = err.Error()
-		executionLog.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionLog, false, err.Error(), "")
 		return executionLog, err
 	}
 
 	if amountStr == "" {
 		err := fmt.Errorf("amount is required for ETH transfer")
-		executionLog.Error = err.Error()
-		executionLog.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionLog, false, err.Error(), "")
 		return executionLog, err
 	}
 
 	// Validate destination address
 	if !common.IsHexAddress(destination) {
 		err := fmt.Errorf("invalid destination address: %s", destination)
-		executionLog.Error = err.Error()
-		executionLog.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionLog, false, err.Error(), "")
 		return executionLog, err
 	}
 
@@ -82,8 +69,7 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	_, ok := new(big.Int).SetString(amountStr, 10)
 	if !ok {
 		err := fmt.Errorf("invalid amount: %s", amountStr)
-		executionLog.Error = err.Error()
-		executionLog.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionLog, false, err.Error(), "")
 		return executionLog, err
 	}
 
@@ -103,20 +89,19 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 		EthTransfer: outputData,
 	}
 
-	// Set output variable for this step
-	p.SetOutputVarForStep(stepID, map[string]interface{}{
+	// Use shared function to set output variable for this step
+	setNodeOutputData(p.CommonProcessor, stepID, map[string]interface{}{
 		"transaction_hash": txHash,
 		"destination":      destination,
 		"amount":           amountStr,
 		"success":          true,
 	})
 
-	// Mark as successful
-	executionLog.Success = true
-	executionLog.EndAt = time.Now().UnixMilli()
+	// Create log message
+	logMessage := fmt.Sprintf("Simulated ETH transfer of %s wei to %s (tx: %s)", amountStr, destination, txHash)
 
-	// Log the simulated transfer
-	executionLog.Log = fmt.Sprintf("Simulated ETH transfer of %s wei to %s (tx: %s)", amountStr, destination, txHash)
+	// Use shared function to finalize execution step
+	finalizeExecutionStep(executionLog, true, "", logMessage)
 
 	return executionLog, nil
 }

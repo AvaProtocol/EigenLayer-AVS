@@ -79,19 +79,11 @@ func (r *BranchProcessor) Validate(node *avsproto.BranchNode) error {
 }
 
 func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*avsproto.Execution_Step, *Step, error) {
-	t0 := time.Now().UnixMilli()
+	// Use shared function to create execution step
+	executionStep := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_BRANCH, r.vm)
 
-	// Get node data using helper function to reduce duplication
-	nodeName, nodeInput := r.vm.GetNodeDataForExecution(stepID)
-
-	executionStep := &avsproto.Execution_Step{
-		Id:      stepID,
-		Success: false, // Default to false, set to true if a condition matches
-		StartAt: t0,
-		Type:    avsproto.NodeType_NODE_TYPE_BRANCH.String(),
-		Name:    nodeName,
-		Input:   nodeInput, // Include node input data for debugging
-	}
+	// Initialize success to false for branches - only set to true when condition matches
+	executionStep.Success = false
 
 	var log strings.Builder
 	log.WriteString("Start branch execution for node " + stepID + " at " + time.Now().Format(time.RFC3339) + "\n")
@@ -100,10 +92,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	if node.Config == nil {
 		err := fmt.Errorf("BranchNode Config is nil")
 		log.WriteString("Error: " + err.Error() + "\n")
-		executionStep.Error = err.Error()
-		executionStep.Success = false
-		executionStep.Log = log.String()
-		executionStep.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionStep, false, err.Error(), log.String())
 		return executionStep, nil, err
 	}
 
@@ -111,40 +100,37 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	if len(conditions) == 0 {
 		err := fmt.Errorf("there is no condition to evaluate")
 		log.WriteString("Error: " + err.Error() + "\n")
-		executionStep.Error = err.Error()
-		executionStep.Success = false
-		executionStep.Log = log.String()
-		executionStep.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionStep, false, err.Error(), log.String())
 		return executionStep, nil, err
 	}
 
 	if conditions[0].Type != "if" {
 		err := fmt.Errorf("the first condition need to be an if but got: " + conditions[0].Type)
 		log.WriteString("Error: " + err.Error() + "\n")
-		executionStep.Error = err.Error()
-		executionStep.Success = false
-		executionStep.Log = log.String()
-		executionStep.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionStep, false, err.Error(), log.String())
 		return executionStep, nil, err
 	}
 
-	// Evaluate conditions
-	for i, condition := range conditions {
-		log.WriteString("Evaluating condition '" + condition.Id + "': " + condition.Expression + "\n")
+	// Initialize JavaScript VM for this branch evaluation
+	jsvm := NewGojaVM()
 
-		// Handle 'else' conditions specially - they should always be true if reached
+	// Set variables from VM context
+	r.vm.mu.Lock()
+	for key, value := range r.vm.vars {
+		if err := jsvm.Set(key, value); err != nil {
+			r.vm.mu.Unlock()
+			log.WriteString("Error setting variable '" + key + "' in JS VM: " + err.Error() + "\n")
+			finalizeExecutionStep(executionStep, false, err.Error(), log.String())
+			return executionStep, nil, err
+		}
+	}
+	r.vm.mu.Unlock()
+
+	// Evaluate conditions in order
+	for _, condition := range conditions {
 		if condition.Type == "else" {
-			// Ensure else condition is not the first condition (validation should catch this, but double-check)
-			if i == 0 {
-				err := fmt.Errorf("else condition cannot be the first condition")
-				log.WriteString("Error: " + err.Error() + "\n")
-				executionStep.Error = err.Error()
-				executionStep.Success = false
-				executionStep.Log = log.String()
-				executionStep.EndAt = time.Now().UnixMilli()
-				return executionStep, nil, err
-			}
-			log.WriteString("Condition '" + condition.Id + "' is an 'else' condition, automatically true\n")
+			// Found an else condition, execute it
+			log.WriteString("Executing else condition '" + condition.Id + "'\n")
 			executionStep.Success = true
 			executionStep.OutputData = &avsproto.Execution_Step_Branch{
 				Branch: &avsproto.BranchNode_Output{
@@ -152,8 +138,33 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 				},
 			}
 			log.WriteString("Branching to else condition '" + condition.Id + "'\n")
-			executionStep.Log = log.String()
-			executionStep.EndAt = time.Now().UnixMilli()
+
+			// Find the actual target node from the edges
+			conditionId := fmt.Sprintf("%s.%s", stepID, condition.Id)
+			var targetNodeId string
+			r.vm.mu.Lock()
+			if r.vm.task != nil && r.vm.task.Edges != nil {
+				for _, edge := range r.vm.task.Edges {
+					if edge.Source == conditionId {
+						targetNodeId = edge.Target
+						break
+					}
+				}
+			}
+			r.vm.mu.Unlock()
+
+			// Set the output variable for the branch node
+			branchOutput := map[string]interface{}{
+				"condition_results": []map[string]interface{}{
+					{
+						"id":           condition.Id,
+						"result":       true,
+						"next_node_id": targetNodeId,
+					},
+				},
+			}
+			// Use shared function to set output variable for this step
+			setNodeOutputData(r.CommonProcessor, stepID, branchOutput)
 
 			// Find the next step in the plan based on this condition ID
 			r.vm.mu.Lock() // Lock for reading vm.plans
@@ -163,47 +174,42 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 				// If no plan exists, create a simple step for unit testing purposes
 				nextStepInPlan = &Step{NodeID: fmt.Sprintf("%s.%s", stepID, condition.Id), Next: []string{}}
 			}
+
+			// Use shared function to finalize execution step
+			finalizeExecutionStep(executionStep, true, "", log.String())
 			return executionStep, nextStepInPlan, nil
 		}
 
-		// For 'if' conditions, evaluate the expression
-		// Check if expression is empty or only whitespace
-		trimmedExpression := strings.TrimSpace(condition.Expression)
-		if trimmedExpression == "" {
+		// Regular if condition
+		expression := condition.Expression
+		if expression == "" {
 			log.WriteString("Condition '" + condition.Id + "' has empty expression, treating as false\n")
-			continue // Skip this condition (treat as false)
+			continue
 		}
 
-		// Preprocess the expression using the VM's current variable context
-		processedExpression := r.vm.preprocessTextWithVariableMapping(condition.Expression)
-		log.WriteString("Processed expression for '" + condition.Id + "': " + processedExpression + "\n")
+		// Preprocess the expression for template variables
+		processedExpression := r.vm.preprocessTextWithVariableMapping(expression)
+		log.WriteString("Condition '" + condition.Id + "' original expression: " + expression + "\n")
+		log.WriteString("Condition '" + condition.Id + "' processed expression: " + processedExpression + "\n")
 
-		// Check if expression became empty after preprocessing (indicates variable resolution failure)
+		// Trim whitespace
 		trimmedProcessed := strings.TrimSpace(processedExpression)
+
+		// Check if the expression is empty after processing
 		if trimmedProcessed == "" {
-			log.WriteString("Condition '" + condition.Id + "' expression became empty after preprocessing, treating as false\n")
+			log.WriteString("Condition '" + condition.Id + "' expression is empty after processing, treating as false\n")
+			continue
+		}
+
+		// SECURITY: Validate the processed expression before execution
+		validationResult := ValidateCodeInjection(trimmedProcessed)
+		if !validationResult.Valid {
+			log.WriteString("Dangerous expression detected in condition '" + condition.Id + "': " + validationResult.Error + "\n")
 			log.WriteString("Original expression: " + condition.Expression + "\n")
-			log.WriteString("Hint: If using trigger variables, use dynamic trigger names instead of 'trigger.data'\n")
+			log.WriteString("Processed expression: " + trimmedProcessed + "\n")
+			log.WriteString("Condition '" + condition.Id + "' failed security validation, treating as false and continuing\n")
 			continue // Skip this condition (treat as false)
 		}
-
-		// Create a temporary JS VM to evaluate the processed expression
-		jsvm := NewGojaVM()
-
-		// Populate the JS VM with variables from the main VM
-		r.vm.mu.Lock()                      // Lock for reading vm.vars
-		for key, value := range r.vm.vars { // CHANGED from r.vm.vars.Range
-			if err := jsvm.Set(key, value); err != nil {
-				r.vm.mu.Unlock()
-				err := fmt.Errorf("failed to set var '" + key + "' in JS VM for branch condition: " + err.Error())
-				log.WriteString("Error setting JS var: " + err.Error() + "\n")
-				executionStep.Error = err.Error()
-				executionStep.Log = log.String()
-				executionStep.EndAt = time.Now().UnixMilli()
-				return executionStep, nil, err
-			}
-		}
-		r.vm.mu.Unlock()
 
 		// Evaluate the expression
 		wrappedExpression := fmt.Sprintf("(%s)", trimmedProcessed)
@@ -234,8 +240,6 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 				},
 			}
 			log.WriteString("Branching to condition '" + condition.Id + "'\n")
-			executionStep.Log = log.String()
-			executionStep.EndAt = time.Now().UnixMilli()
 
 			// Find the actual target node from the edges
 			conditionId := fmt.Sprintf("%s.%s", stepID, condition.Id)
@@ -261,7 +265,8 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 					},
 				},
 			}
-			r.SetOutputVarForStep(stepID, branchOutput)
+			// Use shared function to set output variable for this step
+			setNodeOutputData(r.CommonProcessor, stepID, branchOutput)
 
 			// Find the next step in the plan based on this condition ID
 			r.vm.mu.Lock() // Lock for reading vm.plans
@@ -271,6 +276,9 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 				// If no plan exists, create a simple step for unit testing purposes
 				nextStepInPlan = &Step{NodeID: fmt.Sprintf("%s.%s", stepID, condition.Id), Next: []string{}}
 			}
+
+			// Use shared function to finalize execution step
+			finalizeExecutionStep(executionStep, true, "", log.String())
 			return executionStep, nextStepInPlan, nil
 		}
 	}
@@ -292,35 +300,30 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		// No conditions at all - this is an error
 		noConditionMetError := "no branch condition met"
 		log.WriteString(noConditionMetError + "\n")
-		executionStep.Error = noConditionMetError
-		executionStep.Success = false
-		executionStep.Log = log.String()
-		executionStep.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionStep, false, noConditionMetError, log.String())
 		return executionStep, nil, fmt.Errorf(noConditionMetError)
 	} else if hasElseCondition {
 		// If there's an else condition but we reached here, it means the else condition failed to execute
 		// This should be an error because else conditions should always execute if reached
 		noConditionMetError := "no branch condition met"
 		log.WriteString(noConditionMetError + "\n")
-		executionStep.Error = noConditionMetError
-		executionStep.Success = false
-		executionStep.Log = log.String()
-		executionStep.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(executionStep, false, noConditionMetError, log.String())
 		return executionStep, nil, fmt.Errorf(noConditionMetError)
 	} else {
 		// If there are only 'if' conditions and none matched, this is a valid "no-op" scenario
 		log.WriteString("No conditions matched and no else condition defined - this is a valid no-op.\n")
 		executionStep.Success = true
 		executionStep.OutputData = nil // No branch action taken
-		executionStep.Log = log.String()
-		executionStep.EndAt = time.Now().UnixMilli()
 
 		// Set the output variable for the branch node with empty results
 		branchOutput := map[string]interface{}{
 			"condition_results": []map[string]interface{}{},
 		}
-		r.SetOutputVarForStep(stepID, branchOutput)
+		// Use shared function to set output variable for this step
+		setNodeOutputData(r.CommonProcessor, stepID, branchOutput)
 
+		// Use shared function to finalize execution step
+		finalizeExecutionStep(executionStep, true, "", log.String())
 		return executionStep, nil, nil // Success with no next step
 	}
 }
