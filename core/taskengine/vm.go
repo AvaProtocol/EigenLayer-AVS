@@ -2604,11 +2604,77 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 	case *avsproto.TaskNode_Loop:
 		loop := taskNode.GetLoop()
 		if loop != nil && loop.Config != nil {
-			return map[string]interface{}{
+			config := map[string]interface{}{
 				"sourceId": loop.Config.SourceId,
 				"iterVal":  loop.Config.IterVal,
 				"iterKey":  loop.Config.IterKey,
 			}
+
+			// Add executionMode
+			if loop.Config.ExecutionMode != avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL {
+				config["executionMode"] = loop.Config.ExecutionMode.String()
+			} else {
+				config["executionMode"] = "sequential" // Default value
+			}
+
+			// Add runner information
+			if loop.Runner != nil {
+				switch runner := loop.Runner.(type) {
+				case *avsproto.LoopNode_CustomCode:
+					config["runner"] = map[string]interface{}{
+						"type":   "customCode",
+						"source": runner.CustomCode.Config.Source,
+						"lang":   runner.CustomCode.Config.Lang.String(),
+					}
+				case *avsproto.LoopNode_RestApi:
+					runnerConfig := map[string]interface{}{
+						"type":   "restApi",
+						"url":    runner.RestApi.Config.Url,
+						"method": runner.RestApi.Config.Method,
+						"body":   runner.RestApi.Config.Body,
+					}
+					if runner.RestApi.Config.Headers != nil && len(runner.RestApi.Config.Headers) > 0 {
+						runnerConfig["headers"] = runner.RestApi.Config.Headers
+					}
+					config["runner"] = runnerConfig
+				case *avsproto.LoopNode_ContractRead:
+					runnerConfig := map[string]interface{}{
+						"type":            "contractRead",
+						"contractAddress": runner.ContractRead.Config.ContractAddress,
+						"contractAbi":     runner.ContractRead.Config.ContractAbi,
+					}
+					if len(runner.ContractRead.Config.MethodCalls) > 0 {
+						runnerConfig["methodCalls"] = runner.ContractRead.Config.MethodCalls
+					}
+					config["runner"] = runnerConfig
+				case *avsproto.LoopNode_ContractWrite:
+					runnerConfig := map[string]interface{}{
+						"type":            "contractWrite",
+						"contractAddress": runner.ContractWrite.Config.ContractAddress,
+						"contractAbi":     runner.ContractWrite.Config.ContractAbi,
+						"callData":        runner.ContractWrite.Config.CallData,
+					}
+					if len(runner.ContractWrite.Config.MethodCalls) > 0 {
+						runnerConfig["methodCalls"] = runner.ContractWrite.Config.MethodCalls
+					}
+					config["runner"] = runnerConfig
+				case *avsproto.LoopNode_EthTransfer:
+					config["runner"] = map[string]interface{}{
+						"type":        "ethTransfer",
+						"destination": runner.EthTransfer.Config.Destination,
+						"amount":      runner.EthTransfer.Config.Amount,
+					}
+				case *avsproto.LoopNode_GraphqlDataQuery:
+					config["runner"] = map[string]interface{}{
+						"type":      "graphqlDataQuery",
+						"url":       runner.GraphqlDataQuery.Config.Url,
+						"query":     runner.GraphqlDataQuery.Config.Query,
+						"variables": runner.GraphqlDataQuery.Config.Variables,
+					}
+				}
+			}
+
+			return config
 		}
 	}
 
