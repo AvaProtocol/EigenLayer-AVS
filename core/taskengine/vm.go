@@ -2732,8 +2732,10 @@ func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeConfig
 
 		if nodeConfigMap != nil {
 			// Convert config map to protobuf Value
-			// First remove complex protobuf types that can't be converted
-			cleanedConfig := removeComplexProtobufTypes(nodeConfigMap)
+			// First convert for frontend user-friendly format
+			frontendConfig := convertConfigForFrontend(nodeConfigMap)
+			// Then remove complex protobuf types that can't be converted
+			cleanedConfig := removeComplexProtobufTypes(frontendConfig)
 			// Convert any map[string]string to map[string]interface{} for protobuf compatibility
 			protobufCompatibleConfig := convertMapStringStringToInterface(cleanedConfig)
 			if configProto, err := structpb.NewValue(protobufCompatibleConfig); err == nil {
@@ -2930,6 +2932,23 @@ func convertConfigForFrontend(input map[string]interface{}) map[string]interface
 				} else {
 					result[key] = executionModeStr
 				}
+			} else {
+				result[key] = value
+			}
+		case "headersMap":
+			// Convert headersMap array format back to headers object format for frontend
+			if headersArray, ok := value.([]interface{}); ok {
+				headersObj := make(map[string]string)
+				for _, header := range headersArray {
+					if headerPair, ok := header.([]interface{}); ok && len(headerPair) == 2 {
+						if keyStr, ok := headerPair[0].(string); ok {
+							if valueStr, ok := headerPair[1].(string); ok {
+								headersObj[keyStr] = valueStr
+							}
+						}
+					}
+				}
+				result["headers"] = headersObj
 			} else {
 				result[key] = value
 			}
