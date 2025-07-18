@@ -2547,13 +2547,18 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				"body":   restApi.Config.Body,
 			}
 
-			// Handle headers map format
+			// Handle headers map format - convert to array format like in LoopNode
 			if restApi.Config.Headers != nil && len(restApi.Config.Headers) > 0 {
-				config["headers"] = restApi.Config.Headers
+				headersList := make([]interface{}, 0, len(restApi.Config.Headers))
+				for key, value := range restApi.Config.Headers {
+					headersList = append(headersList, []interface{}{key, value})
+				}
+				config["headersMap"] = headersList
 			}
 
 			fmt.Printf("🔍 ExtractNodeConfiguration: RestApi config extracted: %+v\n", config)
-			return config
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
 		}
 
 	case *avsproto.TaskNode_Loop:
@@ -2569,14 +2574,7 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				}
 
 				// Add execution mode (always include it)
-				executionModeStr := loop.Config.ExecutionMode.String()
-				if executionModeStr == "EXECUTION_MODE_SEQUENTIAL" {
-					config["executionMode"] = "sequential"
-				} else if executionModeStr == "EXECUTION_MODE_PARALLEL" {
-					config["executionMode"] = "parallel"
-				} else {
-					config["executionMode"] = executionModeStr
-				}
+				config["executionMode"] = loop.Config.ExecutionMode.String()
 
 				// Extract runner information from the oneof field
 				runnerConfig := extractLoopRunnerConfig(loop)
@@ -2586,7 +2584,10 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				}
 
 				fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode config final: %+v\n", config)
-				return config
+
+				// Clean up complex protobuf types before returning
+				cleanConfig := removeComplexProtobufTypes(config)
+				return cleanConfig
 			}
 		}
 
@@ -2599,7 +2600,95 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 			}
 
 			fmt.Printf("🔍 ExtractNodeConfiguration: CustomCode config extracted: %+v\n", config)
-			return config
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_GraphqlQuery:
+		graphqlQuery := taskNode.GetGraphqlQuery()
+		if graphqlQuery != nil && graphqlQuery.Config != nil {
+			config := map[string]interface{}{
+				"url":   graphqlQuery.Config.Url,
+				"query": graphqlQuery.Config.Query,
+			}
+
+			// Handle variables map format
+			if graphqlQuery.Config.Variables != nil && len(graphqlQuery.Config.Variables) > 0 {
+				variablesMap := make(map[string]interface{})
+				for key, value := range graphqlQuery.Config.Variables {
+					variablesMap[key] = value
+				}
+				config["variables"] = variablesMap
+			}
+
+			fmt.Printf("🔍 ExtractNodeConfiguration: GraphqlQuery config extracted: %+v\n", config)
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_ContractRead:
+		contractRead := taskNode.GetContractRead()
+		if contractRead != nil && contractRead.Config != nil {
+			config := map[string]interface{}{
+				"contractAddress": contractRead.Config.ContractAddress,
+				"contractAbi":     contractRead.Config.ContractAbi,
+			}
+
+			// Handle method calls - extract fields to simple map for protobuf compatibility
+			if len(contractRead.Config.MethodCalls) > 0 {
+				methodCallsArray := make([]interface{}, len(contractRead.Config.MethodCalls))
+				for i, methodCall := range contractRead.Config.MethodCalls {
+					// Extract fields from protobuf struct into simple map
+					methodCallMap := map[string]interface{}{
+						"methodName": methodCall.MethodName,
+						"callData":   methodCall.CallData,
+					}
+
+					// Convert applyToFields []string to []interface{} for protobuf compatibility
+					if len(methodCall.ApplyToFields) > 0 {
+						applyToFieldsArray := make([]interface{}, len(methodCall.ApplyToFields))
+						for j, field := range methodCall.ApplyToFields {
+							applyToFieldsArray[j] = field
+						}
+						methodCallMap["applyToFields"] = applyToFieldsArray
+					}
+
+					methodCallsArray[i] = methodCallMap
+				}
+				config["methodCalls"] = methodCallsArray
+			}
+
+			fmt.Printf("🔍 ExtractNodeConfiguration: ContractRead config extracted: %+v\n", config)
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_ContractWrite:
+		contractWrite := taskNode.GetContractWrite()
+		if contractWrite != nil && contractWrite.Config != nil {
+			config := map[string]interface{}{
+				"contractAddress": contractWrite.Config.ContractAddress,
+				"contractAbi":     contractWrite.Config.ContractAbi,
+				"callData":        contractWrite.Config.CallData,
+			}
+
+			// Handle method calls - extract fields to simple map for protobuf compatibility
+			if len(contractWrite.Config.MethodCalls) > 0 {
+				methodCallsArray := make([]interface{}, len(contractWrite.Config.MethodCalls))
+				for i, methodCall := range contractWrite.Config.MethodCalls {
+					// Extract fields from protobuf struct into simple map
+					methodCallMap := map[string]interface{}{
+						"methodName": methodCall.MethodName,
+						"callData":   methodCall.CallData,
+					}
+					methodCallsArray[i] = methodCallMap
+				}
+				config["methodCalls"] = methodCallsArray
+			}
+
+			fmt.Printf("🔍 ExtractNodeConfiguration: ContractWrite config extracted: %+v\n", config)
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
 		}
 	}
 
@@ -2643,8 +2732,10 @@ func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeConfig
 
 		if nodeConfigMap != nil {
 			// Convert config map to protobuf Value
-			// First convert any map[string]string to map[string]interface{} for protobuf compatibility
-			protobufCompatibleConfig := convertMapStringStringToInterface(nodeConfigMap)
+			// First remove complex protobuf types that can't be converted
+			cleanedConfig := removeComplexProtobufTypes(nodeConfigMap)
+			// Convert any map[string]string to map[string]interface{} for protobuf compatibility
+			protobufCompatibleConfig := convertMapStringStringToInterface(cleanedConfig)
 			if configProto, err := structpb.NewValue(protobufCompatibleConfig); err == nil {
 				nodeConfig = configProto
 				if v.logger != nil {
@@ -2694,7 +2785,12 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 			"body":   runner.RestApi.Config.Body,
 		}
 		if runner.RestApi.Config.Headers != nil && len(runner.RestApi.Config.Headers) > 0 {
-			config["headers"] = runner.RestApi.Config.Headers
+			// Convert headers map to array of [key, value] pairs as expected by tests
+			headersList := make([]interface{}, 0, len(runner.RestApi.Config.Headers))
+			for key, value := range runner.RestApi.Config.Headers {
+				headersList = append(headersList, []interface{}{key, value})
+			}
+			config["headersMap"] = headersList
 		}
 		return config
 	case *avsproto.LoopNode_ContractRead:
@@ -2725,12 +2821,20 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 			"amount":      runner.EthTransfer.Config.Amount,
 		}
 	case *avsproto.LoopNode_GraphqlDataQuery:
-		return map[string]interface{}{
-			"type":      "graphqlDataQuery",
-			"url":       runner.GraphqlDataQuery.Config.Url,
-			"query":     runner.GraphqlDataQuery.Config.Query,
-			"variables": runner.GraphqlDataQuery.Config.Variables,
+		config := map[string]interface{}{
+			"type":  "graphqlDataQuery",
+			"url":   runner.GraphqlDataQuery.Config.Url,
+			"query": runner.GraphqlDataQuery.Config.Query,
 		}
+		if runner.GraphqlDataQuery.Config.Variables != nil && len(runner.GraphqlDataQuery.Config.Variables) > 0 {
+			// Convert variables map to map[string]interface{} as expected by tests
+			variablesMap := make(map[string]interface{})
+			for key, value := range runner.GraphqlDataQuery.Config.Variables {
+				variablesMap[key] = value
+			}
+			config["variables"] = variablesMap
+		}
+		return config
 	}
 
 	return nil
@@ -2756,8 +2860,93 @@ func convertMapStringStringToInterface(input map[string]interface{}) map[string]
 			// Recursively convert nested maps
 			result[key] = convertMapStringStringToInterface(v)
 		default:
-			// Keep other types as-is
+			// Handle complex protobuf types that can't be converted directly
+			if key == "methodCalls" {
+				// Convert method calls to a simpler format
+				result[key] = convertMethodCallsToSimpleFormat(value)
+			} else {
+				// Keep other types as-is
+				result[key] = value
+			}
+		}
+	}
+	return result
+}
+
+// removeComplexProtobufTypes removes complex protobuf types that can't be converted to structpb.Value
+func removeComplexProtobufTypes(input map[string]interface{}) map[string]interface{} {
+	if input == nil {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+	for key, value := range input {
+		if key == "methodCalls" {
+			// Check if methodCalls is already in simple format ([]interface{} with maps)
+			if methodCallsArray, ok := value.([]interface{}); ok {
+				// If it's already an array of interfaces, keep it as is
+				result[key] = methodCallsArray
+			} else {
+				// Convert method calls to string format to avoid protobuf conversion errors
+				result[key] = fmt.Sprintf("%v", value)
+			}
+		} else if nestedMap, ok := value.(map[string]interface{}); ok {
+			// Recursively clean nested maps
+			result[key] = removeComplexProtobufTypes(nestedMap)
+		} else {
 			result[key] = value
+		}
+	}
+	return result
+}
+
+// convertMethodCallsToSimpleFormat converts protobuf method calls to a simple format for protobuf compatibility
+func convertMethodCallsToSimpleFormat(methodCalls interface{}) interface{} {
+	// Convert method calls to a simple string representation to avoid protobuf conversion errors
+	if methodCalls == nil {
+		return nil
+	}
+
+	// Convert to string representation for protobuf compatibility
+	return fmt.Sprintf("%v", methodCalls)
+}
+
+// convertConfigForFrontend converts internal configuration to user-friendly format for frontend
+func convertConfigForFrontend(input map[string]interface{}) map[string]interface{} {
+	if input == nil {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+	for key, value := range input {
+		switch key {
+		case "executionMode":
+			// Convert execution mode to user-friendly format
+			if executionModeStr, ok := value.(string); ok {
+				if executionModeStr == "EXECUTION_MODE_SEQUENTIAL" {
+					result[key] = "sequential"
+				} else if executionModeStr == "EXECUTION_MODE_PARALLEL" {
+					result[key] = "parallel"
+				} else {
+					result[key] = executionModeStr
+				}
+			} else {
+				result[key] = value
+			}
+		case "runner":
+			// Handle runner configuration recursively
+			if runnerMap, ok := value.(map[string]interface{}); ok {
+				result[key] = convertConfigForFrontend(runnerMap)
+			} else {
+				result[key] = value
+			}
+		default:
+			// For other fields, recursively convert if it's a map
+			if nestedMap, ok := value.(map[string]interface{}); ok {
+				result[key] = convertConfigForFrontend(nestedMap)
+			} else {
+				result[key] = value
+			}
 		}
 	}
 	return result

@@ -116,7 +116,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 				assert.Equal(t, "source-node-id", config["sourceId"])
 				assert.Equal(t, "item", config["iterVal"])
 				assert.Equal(t, "idx", config["iterKey"])
-				assert.Equal(t, "sequential", config["executionMode"])
+				assert.Equal(t, "EXECUTION_MODE_SEQUENTIAL", config["executionMode"])
 
 				runner, ok := config["runner"].(map[string]interface{})
 				require.True(t, ok, "runner should be a map[string]interface{}")
@@ -224,7 +224,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 				assert.Equal(t, "source-node-id", config["sourceId"])
 				assert.Equal(t, "recipient", config["iterVal"])
 				assert.Equal(t, "index", config["iterKey"])
-				assert.Equal(t, "sequential", config["executionMode"])
+				assert.Equal(t, "EXECUTION_MODE_SEQUENTIAL", config["executionMode"])
 
 				runner, ok := config["runner"].(map[string]interface{})
 				require.True(t, ok, "runner should be a map[string]interface{}")
@@ -307,7 +307,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 				assert.Equal(t, "source-node-id", config["sourceId"])
 				assert.Equal(t, "recipient", config["iterVal"])
 				assert.Equal(t, "index", config["iterKey"])
-				assert.Equal(t, "sequential", config["executionMode"])
+				assert.Equal(t, "EXECUTION_MODE_SEQUENTIAL", config["executionMode"])
 
 				runner, ok := config["runner"].(map[string]interface{})
 				require.True(t, ok, "runner should be a map[string]interface{}")
