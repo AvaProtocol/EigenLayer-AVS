@@ -2569,7 +2569,14 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				}
 
 				// Add execution mode (always include it)
-				config["executionMode"] = loop.Config.ExecutionMode.String()
+				executionModeStr := loop.Config.ExecutionMode.String()
+				if executionModeStr == "EXECUTION_MODE_SEQUENTIAL" {
+					config["executionMode"] = "sequential"
+				} else if executionModeStr == "EXECUTION_MODE_PARALLEL" {
+					config["executionMode"] = "parallel"
+				} else {
+					config["executionMode"] = executionModeStr
+				}
 
 				// Extract runner information from the oneof field
 				runnerConfig := extractLoopRunnerConfig(loop)
