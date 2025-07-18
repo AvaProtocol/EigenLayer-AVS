@@ -479,9 +479,8 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 
 	url = r.vm.preprocessTextWithVariableMapping(url)
-	body = r.preprocessJSONWithVariableMapping(body)
 
-	// Preprocess headers
+	// Preprocess headers first so we can check content type
 	processedHeaders := make(map[string]string)
 	for key, value := range headers {
 		processedKey := r.vm.preprocessTextWithVariableMapping(key)
@@ -489,8 +488,32 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		processedHeaders[processedKey] = processedValue
 	}
 
+	// Only apply JSON preprocessing if content type is JSON
+	contentType := ""
+	for key, value := range processedHeaders {
+		if strings.ToLower(key) == "content-type" {
+			contentType = strings.ToLower(value)
+			break
+		}
+	}
+
+	// Check if content type is JSON-related
+	isJSONContent := strings.Contains(contentType, "application/json") ||
+		strings.Contains(contentType, "text/json") ||
+		strings.Contains(contentType, "+json") || // For types like application/vnd.api+json
+		strings.HasSuffix(contentType, "/json")
+
+	if isJSONContent {
+		// Apply JSON-aware preprocessing for JSON content
+		body = r.preprocessJSONWithVariableMapping(body)
+	} else {
+		// Use regular text preprocessing for non-JSON content
+		body = r.vm.preprocessTextWithVariableMapping(body)
+	}
+
 	if r.vm.logger != nil {
 		r.vm.logger.Debug("REST API URL after template processing", "url", url)
+		r.vm.logger.Debug("REST API body preprocessing", "contentType", contentType, "usedJSONPreprocessing", isJSONContent)
 	}
 
 	// Default method to GET if not specified

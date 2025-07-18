@@ -399,18 +399,18 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	}
 
 	// Second pass: Process results and apply decimal formatting where needed
-	fmt.Printf("DEBUG: Reached second pass section\n")
 	if r.vm.logger != nil {
 		r.vm.logger.Debug("Starting second pass to apply decimal formatting")
+		r.vm.logger.Debug("About to start second pass loop", "methodCallsCount", len(config.MethodCalls))
 	}
-
-	fmt.Printf("DEBUG: About to start second pass loop with %d method calls\n", len(config.MethodCalls))
 
 	for i, methodCall := range config.MethodCalls {
 		methodName := r.vm.preprocessTextWithVariableMapping(methodCall.GetMethodName())
 		result := methodResults[i]
 
-		fmt.Printf("DEBUG: Processing method in second pass: %s (hasResult: %t)\n", methodName, result != nil)
+		if r.vm.logger != nil {
+			r.vm.logger.Debug("Processing method in second pass", "methodName", methodName, "hasResult", result != nil)
+		}
 
 		// Check if this method needs decimal formatting applied to any of its fields
 		var needsDecimalFormatting bool
@@ -421,14 +421,20 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		for _, otherMethodCall := range config.MethodCalls {
 			if len(otherMethodCall.GetApplyToFields()) > 0 {
 				otherMethodName := r.vm.preprocessTextWithVariableMapping(otherMethodCall.GetMethodName())
-				fmt.Printf("DEBUG: Checking other method for applyToFields: %s, applyToFields: %v\n", otherMethodName, otherMethodCall.GetApplyToFields())
+				if r.vm.logger != nil {
+					r.vm.logger.Debug("Checking other method for applyToFields", "otherMethodName", otherMethodName, "applyToFields", otherMethodCall.GetApplyToFields())
+				}
 
 				if decimalValue, exists := decimalProviders[otherMethodName]; exists {
-					fmt.Printf("DEBUG: Found decimal provider: %s, decimalValue: %s\n", otherMethodName, decimalValue.String())
+					if r.vm.logger != nil {
+						r.vm.logger.Debug("Found decimal provider", "otherMethodName", otherMethodName, "decimalValue", decimalValue.String())
+					}
 
 					// This other method provides decimal formatting
 					for _, applyToField := range otherMethodCall.GetApplyToFields() {
-						fmt.Printf("DEBUG: Processing applyToField: %s\n", applyToField)
+						if r.vm.logger != nil {
+							r.vm.logger.Debug("Processing applyToField", "applyToField", applyToField)
+						}
 
 						// Parse the method.field format
 						parts := strings.Split(applyToField, ".")

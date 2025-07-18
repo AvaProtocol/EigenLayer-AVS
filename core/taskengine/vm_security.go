@@ -138,8 +138,6 @@ func (v *ExpressionValidator) checkDangerousPatterns(expr string) error {
 		"`", "${",
 		// Regex that could cause ReDoS
 		"RegExp",
-		// JSON manipulation beyond basic stringify/parse
-		"JSON.parse", "JSON.stringify",
 	}
 
 	for _, pattern := range dangerousPatterns {

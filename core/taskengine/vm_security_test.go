@@ -70,8 +70,7 @@ func TestSecurityValidation(t *testing.T) {
 }
 
 func TestFilterExpressionSafety(t *testing.T) {
-	vm := NewVM()
-	processor := NewFilterProcessor(vm)
+	validator := NewExpressionValidator(DefaultSecurityConfig())
 
 	tests := []struct {
 		name            string
@@ -97,14 +96,16 @@ func TestFilterExpressionSafety(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			isSafe := processor.isFilterExpressionSafe(tt.expression)
+			sanitizedExpr := validator.SanitizeExpression(tt.expression)
+			err := validator.ValidateExpression(sanitizedExpr)
+			isBlocked := err != nil
 
-			if tt.shouldBeBlocked && isSafe {
+			if tt.shouldBeBlocked && !isBlocked {
 				t.Errorf("Expected expression '%s' to be blocked but it was allowed", tt.expression)
 			}
 
-			if !tt.shouldBeBlocked && !isSafe {
-				t.Errorf("Expected expression '%s' to be allowed but it was blocked", tt.expression)
+			if !tt.shouldBeBlocked && isBlocked {
+				t.Errorf("Expected expression '%s' to be allowed but it was blocked: %v", tt.expression, err)
 			}
 		})
 	}

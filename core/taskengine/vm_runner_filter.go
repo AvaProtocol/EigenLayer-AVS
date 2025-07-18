@@ -50,26 +50,6 @@ func (r *FilterProcessor) processExpression(expression string) string {
 	return cleanExpression
 }
 
-// isFilterExpressionSafe performs a more permissive safety check for filter expressions
-func (r *FilterProcessor) isFilterExpressionSafe(expr string) bool {
-	// Check for obviously dangerous patterns
-	dangerousPatterns := []string{
-		"eval", "Function", "setTimeout", "setInterval", "require", "import", "export",
-		"global", "window", "document", "process", "constructor", "prototype",
-		"__proto__", "delete", "while", "for", "function", "class", "var", "let", "const",
-	}
-
-	for _, pattern := range dangerousPatterns {
-		if strings.Contains(expr, pattern) {
-			return false
-		}
-	}
-
-	// For now, be very permissive for filter expressions
-	// In a production environment, you'd want stricter validation
-	return true
-}
-
 // wrapExpressionForExecution wraps the expression appropriately based on its content
 func (r *FilterProcessor) wrapExpressionForExecution(cleanExpression string) string {
 	// SECURITY: Validate the JavaScript expression before execution
@@ -83,15 +63,9 @@ func (r *FilterProcessor) wrapExpressionForExecution(cleanExpression string) str
 				"sanitized_expr", sanitizedExpr,
 				"error", err.Error())
 		}
-		// For filter expressions, we'll be more permissive if it looks like a valid expression
-		// This is a compromise between security and functionality
-		if r.isFilterExpressionSafe(sanitizedExpr) {
-			// Allow the expression if it appears to be a safe filter expression
-			sanitizedExpr = cleanExpression
-		} else {
-			// Return a safe expression that evaluates to false
-			return `(() => { return false; })()`
-		}
+		// SECURITY: Never bypass security validation
+		// If validation fails, return a safe expression that evaluates to false
+		return `(() => { return false; })()`
 	}
 
 	// Check if the expression already contains control flow statements
