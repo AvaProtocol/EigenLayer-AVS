@@ -1871,29 +1871,24 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		vm.AddVar(key, processedValue)
 	}
 
-	// Step 6: Add trigger data as "trigger" variable for convenient access in JavaScript
-	// This ensures scripts can access trigger.data regardless of the trigger's name using shared function
+	// Step 6: Add trigger data and input data together for JavaScript access
+	// This ensures scripts can access both trigger.data and trigger.input
+	// The buildTriggerDataMap function will handle EventTrigger data extraction internally
 	triggerDataMap := buildTriggerDataMap(triggerReason.Type, triggerOutput)
 
-	// Add the trigger variable with the actual trigger name for JavaScript access
-	// Use standard structure for all triggers
-	triggerVar := map[string]any{"data": triggerDataMap}
-	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), triggerVar)
-
-	// Step 6.5: Extract and add trigger input data if available using shared functions
-	triggerInputData := ExtractTriggerInputData(task.Trigger)
-	// Note: triggerInputData is used for VM variable creation, not for execution step Input field
-
-	if triggerInputData != nil && task.Trigger != nil {
-		// Get the trigger variable name and update trigger variable using shared function
-		triggerVarName := sanitizeTriggerNameForJS(task.Trigger.GetName())
-
-		// Build trigger variable data using shared function (with empty triggerDataMap since we're just adding input)
-		triggerVarData := buildTriggerVariableData(task.Trigger, map[string]interface{}{}, triggerInputData)
-
-		// Update trigger variable in VM using shared function
-		updateTriggerVariableInVM(vm, triggerVarName, triggerVarData)
+	// Debug logging for EventTriggers to track data extraction
+	if triggerReason.Type == avsproto.TriggerType_TRIGGER_TYPE_EVENT {
+		n.logger.Debug("🔍 SimulateTask: EventTrigger data extraction", "inputKeys", getMapKeys(triggerOutput), "outputKeys", getMapKeys(triggerDataMap))
 	}
+
+	// Extract trigger input data if available
+	triggerInputData := ExtractTriggerInputData(task.Trigger)
+
+	// Build complete trigger variable data using shared function
+	triggerVarData := buildTriggerVariableData(task.Trigger, triggerDataMap, triggerInputData)
+
+	// Add the complete trigger variable with the actual trigger name for JavaScript access
+	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), triggerVarData)
 
 	// Step 7: Compile the workflow
 	if err = vm.Compile(); err != nil {
@@ -3408,9 +3403,32 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 				triggerDataMap[k] = v
 			}
 		} else {
-			// For non-transfer events, copy all event trigger data
-			for k, v := range triggerOutput {
-				triggerDataMap[k] = v
+			// For EventTriggers, check if this is a simulation result structure
+			// Simulation results should always have "found", "metadata", and "data" fields
+			if _, hasFound := triggerOutput["found"]; hasFound {
+				if _, hasMetadata := triggerOutput["metadata"]; hasMetadata {
+					if eventData, hasEventData := triggerOutput["data"].(map[string]interface{}); hasEventData {
+						// Extract the actual event data from the nested "data" field
+						for k, v := range eventData {
+							triggerDataMap[k] = v
+						}
+					} else {
+						// No valid data field in simulation result - this indicates an error
+						// Return null data to make the issue visible
+						triggerDataMap["error"] = "EventTrigger simulation result missing valid data field"
+						triggerDataMap["data"] = nil
+					}
+				} else {
+					// Missing metadata field in simulation result - this indicates an error
+					triggerDataMap["error"] = "EventTrigger simulation result missing metadata field"
+					triggerDataMap["data"] = nil
+				}
+			} else {
+				// Not a simulation result structure - this should be actual event data
+				// Copy all event trigger data directly
+				for k, v := range triggerOutput {
+					triggerDataMap[k] = v
+				}
 			}
 		}
 	default:
