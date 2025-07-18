@@ -1296,35 +1296,19 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 
 	// Include headers for webhook testing if provided
 	if headers, exists := triggerConfig["headers"]; exists && headers != nil {
-		// Convert headers using the utility function for protobuf compatibility
-		if headersArray, ok := headers.([]interface{}); ok {
-			convertedHeaders := convertArrayOfObjectsToProtobufCompatible(headersArray)
-			result["headers"] = convertedHeaders
-			if n.logger != nil {
-				n.logger.Info("ManualTrigger executed with headers", "headerCount", len(headersArray))
-			}
-		} else {
-			result["headers"] = headers
-			if n.logger != nil {
-				n.logger.Info("ManualTrigger executed with headers", "headersType", fmt.Sprintf("%T", headers))
-			}
+		// Preserve the input format exactly - don't convert arrays to objects
+		result["headers"] = headers
+		if n.logger != nil {
+			n.logger.Info("ManualTrigger executed with headers", "headersType", fmt.Sprintf("%T", headers))
 		}
 	}
 
 	// Include path parameters for webhook testing if provided
 	if pathParams, exists := triggerConfig["pathParams"]; exists && pathParams != nil {
-		// Convert pathParams using the utility function for protobuf compatibility
-		if pathParamsArray, ok := pathParams.([]interface{}); ok {
-			convertedPathParams := convertArrayOfObjectsToProtobufCompatible(pathParamsArray)
-			result["pathParams"] = convertedPathParams
-			if n.logger != nil {
-				n.logger.Info("ManualTrigger executed with pathParams", "pathParamCount", len(pathParamsArray))
-			}
-		} else {
-			result["pathParams"] = pathParams
-			if n.logger != nil {
-				n.logger.Info("ManualTrigger executed with pathParams", "pathParamsType", fmt.Sprintf("%T", pathParams))
-			}
+		// Preserve the input format exactly - don't convert arrays to objects
+		result["pathParams"] = pathParams
+		if n.logger != nil {
+			n.logger.Info("ManualTrigger executed with pathParams", "pathParamsType", fmt.Sprintf("%T", pathParams))
 		}
 	}
 

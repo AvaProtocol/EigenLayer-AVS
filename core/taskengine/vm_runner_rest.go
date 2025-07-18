@@ -179,124 +179,104 @@ func (m *MockHTTPExecutor) ExecuteRequest(method, url, body string, headers map[
 
 // handleMockAPIResponse handles mock API responses with proper status codes
 func (m *MockHTTPExecutor) handleMockAPIResponse(w http.ResponseWriter, req *http.Request, url, method, body string, headers map[string]string) {
-	// Use the request path from the mock server (which preserves the original path)
 	requestPath := req.URL.Path
 
-	// Handle /status/{code} endpoints for testing different HTTP status codes
-	if strings.Contains(requestPath, "/status/") {
-		// Extract status code from request path
-		statusStr := ""
-		if idx := strings.Index(requestPath, "/status/"); idx != -1 {
-			remaining := requestPath[idx+8:] // Skip "/status/"
-			// Find the next slash or end of string
-			endIdx := strings.Index(remaining, "/")
-			if endIdx == -1 {
-				endIdx = len(remaining)
-			}
-			statusStr = remaining[:endIdx]
-		}
-
-		// Parse status code
-		var statusCode int
-		if _, err := fmt.Sscanf(statusStr, "%d", &statusCode); err == nil && statusCode >= 100 && statusCode <= 599 {
-			// Set appropriate content type based on status code
-			if statusCode == 204 || statusCode == 304 {
-				// No content responses should not have content-type or body
-				w.Header().Del("Content-Type")
-				w.WriteHeader(statusCode)
-				return
-			}
-
-			// For other status codes, return JSON with status info
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(statusCode)
-
-			// Create appropriate response based on status code
-			var response map[string]interface{}
-			if statusCode >= 400 {
-				// Error responses
-				response = map[string]interface{}{
-					"error": http.StatusText(statusCode),
-					"code":  statusCode,
-					"url":   url,
-				}
-			} else {
-				// Success responses
-				response = map[string]interface{}{
-					"status": http.StatusText(statusCode),
-					"code":   statusCode,
-					"url":    url,
-				}
-			}
-
-			jsonData, err := json.Marshal(response)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(`{"error": "Failed to marshal response"}`))
-				return
-			}
-
-			w.Write(jsonData)
-			return
-		}
-	}
-
-	// Handle /delay/{seconds} endpoints for testing timeouts
-	if strings.Contains(requestPath, "/delay/") {
-		delayStr := ""
-		if idx := strings.Index(requestPath, "/delay/"); idx != -1 {
-			remaining := requestPath[idx+7:] // Skip "/delay/"
-			endIdx := strings.Index(remaining, "/")
-			if endIdx == -1 {
-				endIdx = len(remaining)
-			}
-			delayStr = remaining[:endIdx]
-		}
-
-		var delaySeconds int
-		if _, err := fmt.Sscanf(delayStr, "%d", &delaySeconds); err == nil && delaySeconds > 0 && delaySeconds <= 10 {
-			// Simulate delay (but cap it at 10 seconds for testing)
-			time.Sleep(time.Duration(delaySeconds) * time.Second)
-		}
-	}
-
-	// Handle /headers endpoint
-	if strings.Contains(requestPath, "/headers") {
-		response := map[string]interface{}{
-			"headers": headers,
-		}
-
-		jsonData, err := json.Marshal(response)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`{"error": "Failed to marshal response"}`))
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-		w.Write(jsonData)
+	// Handle specific endpoints
+	if m.handleStatusEndpoint(w, requestPath, url) {
 		return
 	}
 
-	// Handle /ip endpoint
-	if strings.Contains(requestPath, "/ip") {
-		response := map[string]interface{}{
-			"origin": "127.0.0.1",
-		}
+	if m.handleDelayEndpoint(requestPath) {
+		// Delay handling doesn't need response, continue to default
+	}
 
-		jsonData, err := json.Marshal(response)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`{"error": "Failed to marshal response"}`))
-			return
-		}
+	if m.handleHeadersEndpoint(w, requestPath, headers) {
+		return
+	}
 
-		w.WriteHeader(http.StatusOK)
-		w.Write(jsonData)
+	if m.handleIPEndpoint(w, requestPath) {
 		return
 	}
 
 	// Default mock API response for other endpoints
+	m.handleDefaultResponse(w, url, method, body, headers)
+}
+
+// handleStatusEndpoint handles /status/{code} endpoints for testing different HTTP status codes
+func (m *MockHTTPExecutor) handleStatusEndpoint(w http.ResponseWriter, requestPath, url string) bool {
+	if !strings.Contains(requestPath, "/status/") {
+		return false
+	}
+
+	statusStr := m.extractPathParameter(requestPath, "/status/", 8)
+	if statusStr == "" {
+		return false
+	}
+
+	var statusCode int
+	if _, err := fmt.Sscanf(statusStr, "%d", &statusCode); err != nil || statusCode < 100 || statusCode > 599 {
+		return false
+	}
+
+	// Handle no-content responses
+	if statusCode == 204 || statusCode == 304 {
+		w.Header().Del("Content-Type")
+		w.WriteHeader(statusCode)
+		return true
+	}
+
+	// Handle other status codes with JSON response
+	response := m.createStatusResponse(statusCode, url)
+	m.writeJSONResponse(w, response, statusCode)
+	return true
+}
+
+// handleDelayEndpoint handles /delay/{seconds} endpoints for testing timeouts
+func (m *MockHTTPExecutor) handleDelayEndpoint(requestPath string) bool {
+	if !strings.Contains(requestPath, "/delay/") {
+		return false
+	}
+
+	delayStr := m.extractPathParameter(requestPath, "/delay/", 7)
+	if delayStr == "" {
+		return false
+	}
+
+	var delaySeconds int
+	if _, err := fmt.Sscanf(delayStr, "%d", &delaySeconds); err == nil && delaySeconds > 0 && delaySeconds <= 10 {
+		time.Sleep(time.Duration(delaySeconds) * time.Second)
+	}
+	return true
+}
+
+// handleHeadersEndpoint handles /headers endpoint
+func (m *MockHTTPExecutor) handleHeadersEndpoint(w http.ResponseWriter, requestPath string, headers map[string]string) bool {
+	if !strings.Contains(requestPath, "/headers") {
+		return false
+	}
+
+	response := map[string]interface{}{
+		"headers": headers,
+	}
+	m.writeJSONResponse(w, response, http.StatusOK)
+	return true
+}
+
+// handleIPEndpoint handles /ip endpoint
+func (m *MockHTTPExecutor) handleIPEndpoint(w http.ResponseWriter, requestPath string) bool {
+	if !strings.Contains(requestPath, "/ip") {
+		return false
+	}
+
+	response := map[string]interface{}{
+		"origin": "127.0.0.1",
+	}
+	m.writeJSONResponse(w, response, http.StatusOK)
+	return true
+}
+
+// handleDefaultResponse handles the default mock API response
+func (m *MockHTTPExecutor) handleDefaultResponse(w http.ResponseWriter, url, method, body string, headers map[string]string) {
 	response := map[string]interface{}{
 		"success": true,
 		"message": "Mock API response from EigenLayer-AVS",
@@ -309,7 +289,42 @@ func (m *MockHTTPExecutor) handleMockAPIResponse(w http.ResponseWriter, req *htt
 			"url":     url,
 		},
 	}
+	m.writeJSONResponse(w, response, http.StatusOK)
+}
 
+// extractPathParameter extracts a parameter from a URL path
+func (m *MockHTTPExecutor) extractPathParameter(requestPath, prefix string, prefixLen int) string {
+	idx := strings.Index(requestPath, prefix)
+	if idx == -1 {
+		return ""
+	}
+
+	remaining := requestPath[idx+prefixLen:]
+	endIdx := strings.Index(remaining, "/")
+	if endIdx == -1 {
+		endIdx = len(remaining)
+	}
+	return remaining[:endIdx]
+}
+
+// createStatusResponse creates a response based on the status code
+func (m *MockHTTPExecutor) createStatusResponse(statusCode int, url string) map[string]interface{} {
+	if statusCode >= 400 {
+		return map[string]interface{}{
+			"error": http.StatusText(statusCode),
+			"code":  statusCode,
+			"url":   url,
+		}
+	}
+	return map[string]interface{}{
+		"status": http.StatusText(statusCode),
+		"code":   statusCode,
+		"url":    url,
+	}
+}
+
+// writeJSONResponse writes a JSON response with the given status code
+func (m *MockHTTPExecutor) writeJSONResponse(w http.ResponseWriter, response map[string]interface{}, statusCode int) {
 	jsonData, err := json.Marshal(response)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -317,7 +332,8 @@ func (m *MockHTTPExecutor) handleMockAPIResponse(w http.ResponseWriter, req *htt
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
 	w.Write(jsonData)
 }
 

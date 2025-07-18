@@ -79,24 +79,30 @@ eventTrigger = {
 manualTrigger = {
   data: {
     // Runtime data provided during trigger execution
-    apiBaseUrl: "https://api.example.com",
-    apiKey: "key123",
-    environment: "production"
+    // All webhook data is under .data for consistent access
+    data: {
+      // User-defined data payload
+      apiBaseUrl: "https://api.example.com",
+      apiKey: "key123",
+      environment: "production"
+    },
+    headers: {
+      // HTTP headers if this is a webhook trigger
+      "Authorization": "Bearer token123",
+      "Content-Type": "application/json"
+    },
+    pathParams: {
+      // URL path parameters
+      "version": "v1",
+      "format": "json"
+    }
   },
   input: {
     // Configuration data for the manual trigger
     // Usually contains webhook configuration, expected fields, etc.
     webhookPath: "/webhook/manual",
     expectedFields: ["apiBaseUrl", "apiKey"]
-  },
-  headers: [
-    // HTTP headers if this is a webhook trigger
-    { "Authorization": "Bearer token123" }
-  ],
-  pathParams: [
-    // URL path parameters
-    { "version": "v1", "format": "json" }
-  ]
+  }
 }
 ```
 
@@ -203,10 +209,8 @@ The `inputsList` field in execution steps shows what variables were available du
 inputsList: [
   "apContext.configVars",           // Global configuration
   "workflowContext",                // Workflow metadata
-  "eventTrigger.data",              // Trigger output data
+  "eventTrigger.data",              // Trigger output data (includes headers, pathParams for manual triggers)
   "eventTrigger.input",             // Trigger configuration
-  "eventTrigger.headers",           // Trigger headers (if applicable)
-  "eventTrigger.pathParams",        // Trigger path params (if applicable)
   "previousNode.data",              // Previous node output
   "previousNode.input",             // Previous node configuration
   "userVariable1",                  // User-defined variables
@@ -247,11 +251,17 @@ const apiResult = restApiNode.data;
 const triggerConfig = eventTrigger.input;
 const previousProcessing = customCodeNode.data;
 
+// For manual triggers, access webhook data under .data
+const manualTriggerData = manualTrigger.data.data;
+const manualTriggerHeaders = manualTrigger.data.headers;
+const manualTriggerPathParams = manualTrigger.data.pathParams;
+
 // Combine data from multiple sources
 return {
   apiResponse: apiResult.body,
   triggerChain: triggerConfig.chainId,
   previousResult: previousProcessing.result,
+  webhookData: manualTriggerData,
   combinedAt: new Date().toISOString()
 };
 ```

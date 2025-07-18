@@ -1,10 +1,8 @@
 package taskengine
 
 import (
-	"fmt"
 	"time"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
@@ -13,38 +11,13 @@ import (
 func buildTriggerVariableData(trigger *avsproto.TaskTrigger, triggerDataMap map[string]interface{}, triggerInputData map[string]interface{}) map[string]any {
 	triggerVarData := map[string]any{}
 
-	// Handle manual triggers specially - extract headers and pathParams to top level
-	if trigger != nil && trigger.GetType() == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
-		// For manual triggers, the triggerDataMap may contain headers and pathParams
-		// We need to extract them to the top level and put the rest in "data"
-		dataMap := make(map[string]interface{})
-
-		for k, v := range triggerDataMap {
-			switch k {
-			case "headers":
-				triggerVarData["headers"] = v
-			case "pathParams":
-				triggerVarData["pathParams"] = v
-			default:
-				dataMap[k] = v
-			}
-		}
-
-		// Set the data field with the remaining fields
-		if len(dataMap) > 0 {
-			triggerVarData["data"] = dataMap
-		} else {
-			triggerVarData["data"] = nil
-		}
-
-	} else {
-		// For other trigger types, use the original structure
+	// For all trigger types, put all output data under the .data field
+	// This ensures consistent access pattern: triggerName.data.field
+	if len(triggerDataMap) > 0 {
 		triggerVarData["data"] = triggerDataMap
-
+	} else {
 		// Handle the case where triggers have no data to prevent template resolution issues
-		if len(triggerDataMap) == 0 {
-			triggerVarData["data"] = nil
-		}
+		triggerVarData["data"] = nil
 	}
 
 	// Add trigger input data if available
@@ -93,31 +66,6 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 		Name:       nodeName,
 		Input:      nodeConfig, // Include node configuration for debugging
 	}
-}
-
-// extractAndSetNodeInputData extracts input data from a node and sets it as a variable in the VM
-// This function consolidates the common logic used in node execution
-func extractAndSetNodeInputData(vm *VM, node *avsproto.TaskNode) {
-	inputData := ExtractNodeInputData(node)
-	if inputData != nil {
-		processor := &CommonProcessor{vm: vm}
-		processor.SetInputVarForStep(node.Id, inputData)
-	}
-}
-
-// validateNodeForExecution validates a node for execution, including name validation
-// This function consolidates the common validation logic used across node runners
-func validateNodeForExecution(node *avsproto.TaskNode) error {
-	if node == nil {
-		return fmt.Errorf("node cannot be nil")
-	}
-
-	// Validate node name for JavaScript compatibility
-	if err := model.ValidateNodeNameForJavaScript(node.Name); err != nil {
-		return fmt.Errorf("node name validation failed: %w", err)
-	}
-
-	return nil
 }
 
 // setNodeOutputData sets the output data for a node execution step

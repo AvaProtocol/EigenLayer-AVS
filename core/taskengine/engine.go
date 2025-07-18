@@ -3338,24 +3338,12 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 
 	switch triggerType {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-		// For manual triggers, we return the data contents directly rather than wrapping it in another "data" field
-		// This is because the simulation code already wraps the result in triggerVar := map[string]any{"data": triggerDataMap}
 		if data, ok := triggerOutput["data"]; ok {
-			if dataMap, ok := data.(map[string]interface{}); ok {
-				// If data is a map, merge its contents directly into triggerDataMap
-				for k, v := range dataMap {
-					triggerDataMap[k] = v
-				}
-			} else {
-				// If data is not a map, set it as the "data" field (fallback behavior)
-				triggerDataMap["data"] = data
-			}
+			triggerDataMap["data"] = data
 		}
-		// Include headers for webhook testing
 		if headers, ok := triggerOutput["headers"]; ok {
 			triggerDataMap["headers"] = headers
 		}
-		// Include path parameters for webhook testing
 		if pathParams, ok := triggerOutput["pathParams"]; ok {
 			triggerDataMap["pathParams"] = pathParams
 		}
@@ -3547,19 +3535,10 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 	switch triggerType {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
 		if manualOutput, ok := triggerOutputProto.(*avsproto.ManualTrigger_Output); ok {
-			// For manual triggers, we return the data contents directly rather than wrapping it in another "data" field
-			// This is because the buildTriggerVariableData function already wraps the result in triggerVarData := map[string]any{"data": triggerDataMap}
+			// For manual triggers, preserve the nested structure with data field
+			// The test expects to access triggerName.data.data, triggerName.data.headers, etc.
 			if manualOutput.Data != nil {
-				dataInterface := manualOutput.Data.AsInterface()
-				if dataMap, ok := dataInterface.(map[string]interface{}); ok {
-					// If data is a map, merge its contents directly into triggerDataMap
-					for k, v := range dataMap {
-						triggerDataMap[k] = v
-					}
-				} else {
-					// If data is not a map, set it as the "data" field (fallback behavior)
-					triggerDataMap["data"] = dataInterface
-				}
+				triggerDataMap["data"] = manualOutput.Data.AsInterface()
 			} else {
 				// For manual triggers without data, set data to null instead of empty map
 				triggerDataMap["data"] = nil

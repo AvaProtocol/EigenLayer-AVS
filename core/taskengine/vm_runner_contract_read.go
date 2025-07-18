@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
-
-	"strconv"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"

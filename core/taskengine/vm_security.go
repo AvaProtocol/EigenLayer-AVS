@@ -116,14 +116,14 @@ func (v *ExpressionValidator) ValidateExpression(expr string) error {
 
 // checkDangerousPatterns checks for dangerous JavaScript patterns
 func (v *ExpressionValidator) checkDangerousPatterns(expr string) error {
-	// List of dangerous patterns that should never be allowed
-	dangerousPatterns := []string{
+	// Word-based dangerous patterns that should be matched with word boundaries
+	wordPatterns := []string{
 		// Function creation and execution
 		"Function", "eval", "setTimeout", "setInterval", "setImmediate",
 		// Global object access
 		"global", "window", "document", "process", "require", "module", "exports",
 		// Constructor access
-		"constructor", "prototype", "__proto__", "__defineGetter__", "__defineSetter__",
+		"constructor", "prototype",
 		// Error manipulation
 		"Error", "throw", "try", "catch", "finally",
 		// Control flow that could be dangerous
@@ -132,15 +132,30 @@ func (v *ExpressionValidator) checkDangerousPatterns(expr string) error {
 		"var", "let", "const", "function", "class", "import", "export",
 		// Dangerous operators
 		"delete", "typeof", "instanceof", "in", "void", "new",
-		// Comments that could hide malicious code
-		"//", "/*", "*/",
-		// String interpolation
-		"`", "${",
 		// Regex that could cause ReDoS
 		"RegExp",
 	}
 
-	for _, pattern := range dangerousPatterns {
+	// Check word-based patterns with word boundaries
+	for _, pattern := range wordPatterns {
+		// Use word boundaries to avoid false positives
+		wordBoundaryPattern := fmt.Sprintf(`\b%s\b`, regexp.QuoteMeta(pattern))
+		if matched, _ := regexp.MatchString(wordBoundaryPattern, expr); matched {
+			return fmt.Errorf("dangerous pattern detected: %s", pattern)
+		}
+	}
+
+	// Non-word patterns that should be matched with simple string contains
+	nonWordPatterns := []string{
+		// Special property access
+		"__proto__", "__defineGetter__", "__defineSetter__",
+		// Comments that could hide malicious code
+		"//", "/*", "*/",
+		// String interpolation
+		"`", "${",
+	}
+
+	for _, pattern := range nonWordPatterns {
 		if strings.Contains(expr, pattern) {
 			return fmt.Errorf("dangerous pattern detected: %s", pattern)
 		}
