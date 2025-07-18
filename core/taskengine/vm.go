@@ -2507,6 +2507,9 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 		return nil
 	}
 
+	// Debug logging to see what nodes are being processed
+	fmt.Printf("🔍 ExtractNodeConfiguration called for node ID: %s, Type: %s\n", taskNode.Id, taskNode.Type.String())
+
 	switch taskNode.GetTaskType().(type) {
 	case *avsproto.TaskNode_RestApi:
 		restApi := taskNode.GetRestApi()

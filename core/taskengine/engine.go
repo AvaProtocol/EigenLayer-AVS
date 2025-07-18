@@ -3392,7 +3392,7 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 			}
 		} else {
 			// For EventTriggers, check if this is a simulation result structure
-			// Simulation results should always have "found", "metadata", and "data" fields
+			// Simulation results should have "found", "metadata", and "data" fields
 			if _, hasFound := triggerOutput["found"]; hasFound {
 				if _, hasMetadata := triggerOutput["metadata"]; hasMetadata {
 					if eventData, hasEventData := triggerOutput["data"].(map[string]interface{}); hasEventData {
@@ -3401,15 +3401,16 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 							triggerDataMap[k] = v
 						}
 					} else {
-						// No valid data field in simulation result - this indicates an error
-						// Return null data to make the issue visible
-						triggerDataMap["error"] = "EventTrigger simulation result missing valid data field"
-						triggerDataMap["data"] = nil
+						// No valid data field in simulation result - copy all data as-is
+						for k, v := range triggerOutput {
+							triggerDataMap[k] = v
+						}
 					}
 				} else {
-					// Missing metadata field in simulation result - this indicates an error
-					triggerDataMap["error"] = "EventTrigger simulation result missing metadata field"
-					triggerDataMap["data"] = nil
+					// Not a complete simulation result structure - copy all data as-is
+					for k, v := range triggerOutput {
+						triggerDataMap[k] = v
+					}
 				}
 			} else {
 				// Not a simulation result structure - this should be actual event data
