@@ -221,14 +221,21 @@ message EventTrigger {
 
 message ManualTrigger {
   message Config {
-    // Manual triggers typically don't have configuration parameters
-    // but we keep this for consistency
+    // User-defined data that will be returned in the Output
+    google.protobuf.Value data = 1;
+    // Headers for webhook testing - map format consistent with REST API nodes
+    map<string, string> headers = 2;
+    // Path parameters for webhook testing - map format consistent with REST API nodes
+    map<string, string> pathParams = 3;
   }
   
   message Output {
-    // Manual triggers typically don't return data
-    // but we keep this for consistency and future extensibility
-    uint64 run_at = 1; // Timestamp when manually run
+    // User-defined data from trigger config - this is the main payload for manual triggers
+    google.protobuf.Value data = 1;
+    // Headers from trigger config for webhook testing
+    map<string, string> headers = 2;
+    // Path parameters from trigger config for webhook testing
+    map<string, string> pathParams = 3;
   }
 
   // Include Config as field so it is generated in Go
@@ -244,8 +251,9 @@ message TaskTrigger {
   TriggerType type = 8;
   
   oneof trigger_type {
-    // manual task will not be check to be trigger, instead it can be trigger adhoc
-    bool               manual = 2;
+    // manual task with proper ManualTrigger structure for webhook testing
+    ManualTrigger      manual = 2;
+    
     // run at a specific epoch, name inspired by unix `at` utility
     FixedTimeTrigger fixed_time   = 3;
 

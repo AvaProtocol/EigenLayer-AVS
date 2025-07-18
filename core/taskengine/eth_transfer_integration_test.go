@@ -25,12 +25,12 @@ func TestETHTransferTaskIntegration(t *testing.T) {
 		Trigger: &avsproto.TaskTrigger{
 			Id:          "manual_trigger",
 			Name:        "manual",
-			TriggerType: &avsproto.TaskTrigger_Manual{Manual: true},
+			TriggerType: &avsproto.TaskTrigger_Manual{},
 		},
 		Nodes: []*avsproto.TaskNode{
 			{
 				Id:   "eth_transfer_1",
-				Name: "Transfer ETH",
+				Name: "TransferETH",
 				TaskType: &avsproto.TaskNode_EthTransfer{
 					EthTransfer: &avsproto.ETHTransferNode{
 						Config: &avsproto.ETHTransferNode_Config{
@@ -166,12 +166,12 @@ func TestETHTransferTaskWithInvalidConfig(t *testing.T) {
 		Trigger: &avsproto.TaskTrigger{
 			Id:          "manual_trigger",
 			Name:        "manual",
-			TriggerType: &avsproto.TaskTrigger_Manual{Manual: true},
+			TriggerType: &avsproto.TaskTrigger_Manual{},
 		},
 		Nodes: []*avsproto.TaskNode{
 			{
 				Id:   "eth_transfer_1",
-				Name: "Transfer ETH",
+				Name: "TransferETH",
 				TaskType: &avsproto.TaskNode_EthTransfer{
 					EthTransfer: &avsproto.ETHTransferNode{
 						Config: &avsproto.ETHTransferNode_Config{

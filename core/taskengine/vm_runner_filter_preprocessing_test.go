@@ -16,7 +16,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 	}{
 		{
 			name:       "age filter with preprocessing using trigger data",
-			expression: "{{ trigger.data.minAge }} <= current.age",
+			expression: "{{ trigger.data.minAge }} <= value.age",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "age": 25},
 				map[string]interface{}{"name": "Bob", "age": 16},
@@ -26,7 +26,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 		},
 		{
 			name:       "age filter under 18 with preprocessing",
-			expression: "current.age < 18",
+			expression: "value.age < 18",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "age": 25},
 				map[string]interface{}{"name": "Bob", "age": 16},
@@ -36,7 +36,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 		},
 		{
 			name:       "name starts with filter with preprocessing",
-			expression: "current.name.startsWith(\"A\")",
+			expression: "value.name.startsWith(\"A\")",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "age": 25},
 				map[string]interface{}{"name": "Bob", "age": 16},
@@ -46,7 +46,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 		},
 		{
 			name:       "complex age range filter with preprocessing",
-			expression: "current.age >= 20 && current.age <= 22",
+			expression: "value.age >= 20 && value.age <= 22",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "age": 21},
 				map[string]interface{}{"name": "Bob", "age": 16},
@@ -57,7 +57,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 		},
 		{
 			name:       "filter without preprocessing",
-			expression: "current.age >= 18",
+			expression: "value.age >= 18",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "age": 25},
 				map[string]interface{}{"name": "Bob", "age": 16},
@@ -67,7 +67,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 		},
 		{
 			name:       "numeric property filter with preprocessing",
-			expression: "current.score > 80",
+			expression: "value.score > 80",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "score": 85},
 				map[string]interface{}{"name": "Bob", "score": 75},
@@ -77,7 +77,7 @@ func TestFilterNodePreprocessing(t *testing.T) {
 		},
 		{
 			name:       "boolean property filter with preprocessing",
-			expression: "current.active === true",
+			expression: "value.active === true",
 			inputData: []interface{}{
 				map[string]interface{}{"name": "Alice", "active": true},
 				map[string]interface{}{"name": "Bob", "active": false},
@@ -122,7 +122,6 @@ func TestFilterNodePreprocessing(t *testing.T) {
 
 			if stepResult == nil {
 				t.Errorf("expected step result but got none")
-				return
 			}
 
 			varname := vm.GetNodeNameAsVar("filter1")

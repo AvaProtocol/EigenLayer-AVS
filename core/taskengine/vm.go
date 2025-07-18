@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -378,22 +379,22 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 				triggerDataMap = buildTriggerDataMapFromProtobuf(triggerData.Type, triggerData.Output, v.logger)
 
 				// Debug: Log what triggerData we received and what we built
-				fmt.Printf("🔍 VM Creation DEBUG: triggerData.Type = %v, triggerData.Output = %+v\n", triggerData.Type, triggerData.Output)
-				fmt.Printf("🔍 VM Creation DEBUG: buildTriggerDataMapFromProtobuf returned = %+v\n", triggerDataMap)
+				v.logger.Debug("VM Creation DEBUG: triggerData received", "triggerData.Type", triggerData.Type, "triggerData.Output", fmt.Sprintf("%+v", triggerData.Output))
+				v.logger.Debug("VM Creation DEBUG: buildTriggerDataMapFromProtobuf result", "triggerDataMap", fmt.Sprintf("%+v", triggerDataMap))
 			}
 
 			// Create dual-access map to support both camelCase and snake_case field access
-			// Extract trigger input data and add it to the trigger variable
-			triggerVarData := map[string]any{"data": triggerDataMap}
+			// Extract trigger input data and create trigger variable using shared function
+			var triggerInputData map[string]interface{}
 			if task != nil && task.Trigger != nil {
-				triggerInputData := ExtractTriggerInputData(task.Trigger)
-				if triggerInputData != nil {
-					triggerVarData["input"] = triggerInputData
-				}
+				triggerInputData = ExtractTriggerInputData(task.Trigger)
 			}
 
+			// Use shared function to build trigger variable data
+			triggerVarData := buildTriggerVariableData(task.Trigger, triggerDataMap, triggerInputData)
+
 			// Debug: Log the final trigger variable data
-			fmt.Printf("🔍 VM Creation DEBUG: Final triggerVarData = %+v\n", triggerVarData)
+			v.logger.Debug("VM Creation DEBUG: Final trigger variable", "triggerName", triggerNameStd, "triggerVarData", fmt.Sprintf("%+v", triggerVarData))
 
 			v.AddVar(triggerNameStd, triggerVarData)
 		}
@@ -401,13 +402,21 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 		triggerNameStd, err := v.GetTriggerNameAsVar()
 		if err == nil {
 			// Extract trigger input data even when triggerData is nil
-			triggerVarData := map[string]any{"data": map[string]any{}} // Empty data map
+			var triggerInputData map[string]interface{}
 			if task.Trigger != nil {
-				triggerInputData := ExtractTriggerInputData(task.Trigger)
-				if triggerInputData != nil {
-					triggerVarData["input"] = triggerInputData
-				}
+				triggerInputData = ExtractTriggerInputData(task.Trigger)
 			}
+
+			// Extract trigger config data to use as the trigger's output data
+			var triggerDataMap map[string]interface{}
+			if task.Trigger != nil {
+				triggerConfig := TaskTriggerToConfig(task.Trigger)
+				// Use the trigger config as the trigger's output data for all trigger types
+				triggerDataMap = triggerConfig
+			}
+
+			// Use shared function to build trigger variable data with config data
+			triggerVarData := buildTriggerVariableData(task.Trigger, triggerDataMap, triggerInputData)
 			v.AddVar(triggerNameStd, triggerVarData)
 		}
 	}
@@ -1134,13 +1143,39 @@ func (v *VM) runBranch(stepID string, nodeValue *avsproto.BranchNode) (*avsproto
 }
 
 func (v *VM) runLoop(stepID string, nodeValue *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
+	if v.logger != nil {
+		v.logger.Info("🔄 runLoop: Starting LoopNode execution", "stepID", stepID, "nodeValue_exists", nodeValue != nil)
+		if nodeValue != nil && nodeValue.Config != nil {
+			v.logger.Info("🔄 runLoop: LoopNode config", "sourceId", nodeValue.Config.SourceId, "iterVal", nodeValue.Config.IterVal, "iterKey", nodeValue.Config.IterKey)
+		}
+	}
+
 	p := NewLoopProcessor(v)
 	executionLog, err := p.Execute(stepID, nodeValue) // Loop processor internally calls RunNodeWithInputs
+
+	if v.logger != nil {
+		v.logger.Info("🔄 runLoop: After Execute", "stepID", stepID, "executionLog_exists", executionLog != nil, "error", err)
+		if executionLog != nil {
+			v.logger.Info("🔄 runLoop: ExecutionLog before collecting inputs", "stepID", stepID, "success", executionLog.Success, "inputs_count", len(executionLog.Inputs))
+		}
+	}
+
 	v.mu.Lock()
 	if executionLog != nil {
+		if v.logger != nil {
+			v.logger.Info("🔄 runLoop: About to collect inputs", "stepID", stepID)
+		}
 		executionLog.Inputs = v.collectInputKeysForLog(stepID)
+		if v.logger != nil {
+			v.logger.Info("🔄 runLoop: After collecting inputs", "stepID", stepID, "inputs", executionLog.Inputs)
+		}
 	}
 	v.mu.Unlock()
+
+	if v.logger != nil {
+		v.logger.Info("🔄 runLoop: Returning", "stepID", stepID, "executionLog_exists", executionLog != nil, "error", err)
+	}
+
 	// v.addExecutionLog(executionLog)
 	return executionLog, err // Loop node itself doesn't dictate a jump in the main plan
 }
@@ -1183,16 +1218,48 @@ func (v *VM) runEthTransfer(stepID string, node *avsproto.ETHTransferNode) (*avs
 
 // resolveVariableWithFallback tries to resolve a variable path
 func (v *VM) resolveVariableWithFallback(jsvm *goja.Runtime, varPath string, currentVars map[string]any) (interface{}, bool) {
+	// Debug: Log the variable path we're trying to resolve
+	if v.logger != nil {
+		v.logger.Debug("resolveVariableWithFallback DEBUG: Attempting to resolve", "varPath", varPath)
+	}
+
+	// SECURITY: Validate variable path using centralized security validation
+	validationResult := ValidateCodeInjection(varPath)
+	if !validationResult.Valid {
+		if v.logger != nil {
+			v.logger.Warn("Dangerous variable path detected", "path", varPath, "error", validationResult.Error)
+		}
+		return nil, false
+	}
+
 	// Try to resolve the variable path
 	script := fmt.Sprintf(`(() => { try { return %s; } catch(e) { return undefined; } })()`, varPath)
+	if v.logger != nil {
+		v.logger.Debug("resolveVariableWithFallback DEBUG: JavaScript script", "script", script)
+	}
+
 	if evaluated, err := jsvm.RunString(script); err == nil {
 		exportedValue := evaluated.Export()
+		if v.logger != nil {
+			v.logger.Debug("resolveVariableWithFallback DEBUG: JavaScript evaluation result", "exportedValue", exportedValue, "type", fmt.Sprintf("%T", exportedValue))
+		}
+
 		// Check if we got a real value (not undefined)
 		if exportedValue != nil && fmt.Sprintf("%v", exportedValue) != "undefined" {
+			if v.logger != nil {
+				v.logger.Debug("resolveVariableWithFallback DEBUG: Resolution successful", "varPath", varPath, "result", exportedValue)
+			}
 			return exportedValue, true
+		}
+	} else {
+		if v.logger != nil {
+			v.logger.Debug("resolveVariableWithFallback DEBUG: JavaScript evaluation failed", "varPath", varPath, "error", err)
 		}
 	}
 
+	if v.logger != nil {
+		v.logger.Debug("resolveVariableWithFallback DEBUG: Resolution failed", "varPath", varPath)
+	}
 	return nil, false
 }
 
@@ -1215,6 +1282,17 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 		currentVars[k] = val
 	}
 	v.mu.Unlock()
+
+	// Debug: Log all available variables
+	if v.logger != nil {
+		v.logger.Debug("preprocessTextWithVariableMapping DEBUG: Available variables", "vars", func() []string {
+			keys := make([]string, 0, len(currentVars))
+			for k := range currentVars {
+				keys = append(keys, k)
+			}
+			return keys
+		}())
+	}
 
 	for key, value := range currentVars {
 		if err := jsvm.Set(key, value); err != nil {
@@ -1250,6 +1328,11 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 			continue
 		}
 
+		// Debug: Log the expression we're trying to resolve
+		if v.logger != nil {
+			v.logger.Debug("preprocessTextWithVariableMapping DEBUG: Trying to resolve expression", "expression", expr)
+		}
+
 		// Try to resolve the variable with fallback to camelCase
 		exportedValue, resolved := v.resolveVariableWithFallback(jsvm, expr, currentVars)
 		if !resolved {
@@ -1265,6 +1348,9 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 		var replacement string
 		if t, ok := exportedValue.(time.Time); ok {
 			replacement = t.In(time.UTC).Format("2006-01-02 15:04:05.000 +0000 UTC")
+		} else if exportedValue == nil {
+			// Handle null values by returning "undefined" for better debugging
+			replacement = "undefined"
 		} else if _, okMap := exportedValue.(map[string]interface{}); okMap {
 			replacement = "[object Object]" // Mimic JS behavior for objects in strings
 		} else if _, okArr := exportedValue.([]interface{}); okArr {
@@ -1303,6 +1389,9 @@ func (v *VM) preprocessText(text string) string {
 	result := text
 	searchPos := 0
 	previousResult := ""
+	consecutiveFailures := 0
+	maxConsecutiveFailures := 10
+
 	for i := 0; i < VMMaxPreprocessIterations; i++ {
 		// Break if result hasn't changed (prevents unnecessary iterations)
 		if result == previousResult && i > 0 {
@@ -1359,12 +1448,73 @@ func (v *VM) preprocessText(text string) string {
 		re := regexp.MustCompile(`\.(\d+)`)
 		jsExpr = re.ReplaceAllString(jsExpr, "[$1]")
 
+		// SECURITY: Validate template expression using centralized security validation
+		validationResult := ValidateCodeInjection(jsExpr)
+		if !validationResult.Valid {
+			if v.logger != nil {
+				v.logger.Warn("Dangerous template expression detected", "expr", jsExpr, "error", validationResult.Error)
+			}
+			// Replace with "undefined" for safety
+			result = result[:start] + "undefined" + result[end+2:]
+			continue
+		}
+
 		script := fmt.Sprintf(`(() => { return %s; })()`, jsExpr)
-		evaluated, err := jsvm.RunString(script)
+
+		// Add panic recovery and timeout protection
+		var evaluated goja.Value
+		var err error
+
+		// Simple timeout using a channel and goroutine
+		resultChan := make(chan struct{})
+
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("panic during JavaScript evaluation: %v", r)
+				}
+				close(resultChan)
+			}()
+
+			// Set a more restrictive timeout for the JS evaluation
+			timeoutCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			// Check if context is cancelled before starting
+			select {
+			case <-timeoutCtx.Done():
+				err = fmt.Errorf("JavaScript evaluation context timeout")
+				return
+			default:
+				// Continue with evaluation
+			}
+
+			evaluated, err = jsvm.RunString(script)
+		}()
+
+		// Wait for result or timeout
+		select {
+		case <-resultChan:
+			// Evaluation completed (successfully or with error)
+		case <-time.After(3 * time.Second):
+			err = fmt.Errorf("JavaScript evaluation timeout after 3 seconds")
+			if v.logger != nil {
+				v.logger.Error("preprocessText evaluation timeout", "expression", expr, "script", script)
+			}
+		}
+
 		if v.logger != nil {
 			v.logger.Debug("evaluating pre-processor script", "task_id", v.GetTaskId(), "script", script, "result", evaluated, "error", err)
 		}
 		if err != nil {
+			consecutiveFailures++
+			if consecutiveFailures >= maxConsecutiveFailures {
+				if v.logger != nil {
+					v.logger.Error("too many consecutive preprocessing failures, stopping", "failures", consecutiveFailures, "expression", expr)
+				}
+				break
+			}
+
 			// Keep the expression unchanged (original behavior)
 			// This is the expected behavior for existing tests
 			if v.logger != nil {
@@ -1375,10 +1525,16 @@ func (v *VM) preprocessText(text string) string {
 			continue
 		}
 
+		// Reset failure counter on success
+		consecutiveFailures = 0
+
 		exportedValue := evaluated.Export()
 		var replacement string
 		if t, ok := exportedValue.(time.Time); ok {
 			replacement = t.In(time.UTC).Format("2006-01-02 15:04:05.000 +0000 UTC")
+		} else if exportedValue == nil {
+			// Handle null values by returning "undefined" for better debugging
+			replacement = "undefined"
 		} else if _, okMap := exportedValue.(map[string]interface{}); okMap {
 			replacement = "[object Object]" // Mimic JS behavior for objects in strings
 		} else if _, okArr := exportedValue.([]interface{}); okArr {
@@ -1514,6 +1670,22 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 							v.logger.Info("✅ Added input field", "key", inputKey)
 						}
 					}
+					// Check for .headers field (for manual triggers)
+					if _, hasHeaders := valueMap["headers"]; hasHeaders {
+						headersKey := fmt.Sprintf("%s.headers", k)
+						inputKeys = append(inputKeys, headersKey)
+						if v.logger != nil {
+							v.logger.Info("✅ Added headers field", "key", headersKey)
+						}
+					}
+					// Check for .pathParams field (for manual triggers)
+					if _, hasPathParams := valueMap["pathParams"]; hasPathParams {
+						pathParamsKey := fmt.Sprintf("%s.pathParams", k)
+						inputKeys = append(inputKeys, pathParamsKey)
+						if v.logger != nil {
+							v.logger.Info("✅ Added pathParams field", "key", pathParamsKey)
+						}
+					}
 				} else {
 					// For non-map variables (simple scalars like input variables), use the variable name as-is
 					// This fixes the issue where input variables like "userToken" were incorrectly becoming "userToken.data"
@@ -1585,6 +1757,18 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 			EndAt:   time.Now().UnixMilli(),
 			Input:   node.Input, // Include node input data for debugging
 		}, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
+	}
+
+	// Validate node name for JavaScript compatibility
+	if err := model.ValidateNodeNameForJavaScript(node.Name); err != nil {
+		return &avsproto.Execution_Step{
+			Id:      node.Id,
+			Success: false,
+			Error:   fmt.Sprintf("Node name validation failed: %v", err),
+			StartAt: time.Now().UnixMilli(),
+			EndAt:   time.Now().UnixMilli(),
+			Input:   node.Input,
+		}, fmt.Errorf("node name validation failed: %w", err)
 	}
 
 	// Create a temporary, clean VM for isolated node execution.
@@ -1665,7 +1849,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 	if nodeID == "" {
 		nodeID = "node_" + ulid.Make().String()
 	}
-	node := &avsproto.TaskNode{Id: nodeID, Name: "Single Node Execution: " + nodeType}
+	node := &avsproto.TaskNode{Id: nodeID, Name: "singleNodeExecution_" + nodeType}
 
 	switch nodeType {
 	case NodeTypeRestAPI, "restAPI": // Support both "restApi" and "restAPI" for backward compatibility
@@ -2232,27 +2416,6 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
 	return false, errorMessage, failedCount
 }
 
-// GetNodeDataForExecution retrieves node name and input data for a given stepID
-// This helper function extracts the repetitive locking pattern used across all vm_runner files
-// to get node information from TaskNodes map.
-//
-// Returns:
-// - nodeName: The name of the node (defaults to "unknown" if not found)
-// - nodeInput: The input data of the node (can be nil)
-func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeInput *structpb.Value) {
-	nodeName = "unknown" // default value
-
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	if taskNode, exists := v.TaskNodes[stepID]; exists {
-		nodeName = taskNode.Name
-		nodeInput = taskNode.Input
-	}
-
-	return nodeName, nodeInput
-}
-
 // ExtractNodeInputData extracts input data from a TaskNode protobuf message
 func ExtractNodeInputData(taskNode *avsproto.TaskNode) map[string]interface{} {
 	if taskNode == nil || taskNode.Input == nil {
@@ -2272,8 +2435,6 @@ func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface
 	if trigger == nil {
 		return nil
 	}
-
-	fmt.Printf("🔍 ExtractTriggerInputData: trigger type = %T, trigger.GetInput() = %+v\n", trigger.GetTriggerType(), trigger.GetInput())
 
 	// Check each trigger type and extract input from the correct nested object
 	switch trigger.GetTriggerType().(type) {
@@ -2310,20 +2471,13 @@ func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface
 			}
 		}
 	case *avsproto.TaskTrigger_Manual:
-		fmt.Printf("🔍 ExtractTriggerInputData: Processing Manual trigger, trigger.GetInput() = %+v\n", trigger.GetInput())
 		// Manual triggers use the top-level TaskTrigger.input field
-		// since the trigger_type is just a boolean, not a nested object
+		// since manual triggers don't have a nested config object like other trigger types
 		if trigger.GetInput() != nil {
 			inputInterface := trigger.GetInput().AsInterface()
-			fmt.Printf("🔍 ExtractTriggerInputData: Manual trigger inputInterface = %+v, type = %T\n", inputInterface, inputInterface)
 			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-				fmt.Printf("🔍 ExtractTriggerInputData: Manual trigger returning inputMap = %+v\n", inputMap)
 				return inputMap
-			} else {
-				fmt.Printf("🔍 ExtractTriggerInputData: Manual trigger inputInterface is not map[string]interface{}, got %T\n", inputInterface)
 			}
-		} else {
-			fmt.Printf("🔍 ExtractTriggerInputData: Manual trigger has no input field\n")
 		}
 		return nil
 	}
@@ -2346,4 +2500,473 @@ func convertProtobufValueToMap(value *structpb.Value) map[string]interface{} {
 
 	// If it's not a map, return empty map
 	return map[string]interface{}{}
+}
+
+// validateAllNodeNamesForJavaScript validates all node names in a task
+func validateAllNodeNamesForJavaScript(task *model.Task) error {
+	if task == nil {
+		return nil
+	}
+
+	// Validate trigger name
+	if task.Trigger != nil && task.Trigger.Name != "" {
+		if err := model.ValidateNodeNameForJavaScript(task.Trigger.Name); err != nil {
+			return fmt.Errorf("trigger name validation failed: %w", err)
+		}
+	}
+
+	// Validate all node names
+	for _, node := range task.Nodes {
+		if err := model.ValidateNodeNameForJavaScript(node.Name); err != nil {
+			return fmt.Errorf("node '%s' validation failed: %w", node.Id, err)
+		}
+	}
+
+	return nil
+}
+
+// ExtractNodeConfiguration extracts configuration from a TaskNode based on its type
+// This function returns the configuration that was used to execute the node
+func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{} {
+	if taskNode == nil {
+		fmt.Printf("🔍 ExtractNodeConfiguration: taskNode is nil\n")
+		return nil
+	}
+
+	// Note: This function is used in isolated execution contexts where logger might not be available
+	// For debugging, we'll use fmt.Printf as a fallback
+	fmt.Printf("🔍 ExtractNodeConfiguration: Processing node ID: %s, Type: %s\n", taskNode.Id, taskNode.Type.String())
+
+	switch taskNode.GetTaskType().(type) {
+	case *avsproto.TaskNode_RestApi:
+		restApi := taskNode.GetRestApi()
+		if restApi != nil && restApi.Config != nil {
+			config := map[string]interface{}{
+				"url":    restApi.Config.Url,
+				"method": restApi.Config.Method,
+				"body":   restApi.Config.Body,
+			}
+
+			// Handle headers map format - convert to array format like in LoopNode
+			if restApi.Config.Headers != nil && len(restApi.Config.Headers) > 0 {
+				headersList := make([]interface{}, 0, len(restApi.Config.Headers))
+				for key, value := range restApi.Config.Headers {
+					headersList = append(headersList, []interface{}{key, value})
+				}
+				config["headersMap"] = headersList
+			}
+
+			fmt.Printf("🔍 ExtractNodeConfiguration: RestApi config extracted: %+v\n", config)
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_Loop:
+		loop := taskNode.GetLoop()
+		fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode - loop exists: %t\n", loop != nil)
+		if loop != nil {
+			fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode - config exists: %t\n", loop.Config != nil)
+			if loop.Config != nil {
+				config := map[string]interface{}{
+					"sourceId": loop.Config.SourceId,
+					"iterVal":  loop.Config.IterVal,
+					"iterKey":  loop.Config.IterKey,
+				}
+
+				// Add execution mode (always include it)
+				config["executionMode"] = loop.Config.ExecutionMode.String()
+
+				// Extract runner information from the oneof field
+				runnerConfig := extractLoopRunnerConfig(loop)
+				if runnerConfig != nil {
+					config["runner"] = runnerConfig
+					fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode - runner config: %+v\n", runnerConfig)
+				}
+
+				fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode config final: %+v\n", config)
+
+				// Clean up complex protobuf types before returning
+				cleanConfig := removeComplexProtobufTypes(config)
+				return cleanConfig
+			}
+		}
+
+	case *avsproto.TaskNode_CustomCode:
+		customCode := taskNode.GetCustomCode()
+		if customCode != nil && customCode.Config != nil {
+			config := map[string]interface{}{
+				"lang":   customCode.Config.Lang,
+				"source": customCode.Config.Source,
+			}
+
+			fmt.Printf("🔍 ExtractNodeConfiguration: CustomCode config extracted: %+v\n", config)
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_GraphqlQuery:
+		graphqlQuery := taskNode.GetGraphqlQuery()
+		if graphqlQuery != nil && graphqlQuery.Config != nil {
+			config := map[string]interface{}{
+				"url":   graphqlQuery.Config.Url,
+				"query": graphqlQuery.Config.Query,
+			}
+
+			// Handle variables map format
+			if graphqlQuery.Config.Variables != nil && len(graphqlQuery.Config.Variables) > 0 {
+				variablesMap := make(map[string]interface{})
+				for key, value := range graphqlQuery.Config.Variables {
+					variablesMap[key] = value
+				}
+				config["variables"] = variablesMap
+			}
+
+			fmt.Printf("🔍 ExtractNodeConfiguration: GraphqlQuery config extracted: %+v\n", config)
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_ContractRead:
+		contractRead := taskNode.GetContractRead()
+		if contractRead != nil && contractRead.Config != nil {
+			config := map[string]interface{}{
+				"contractAddress": contractRead.Config.ContractAddress,
+				"contractAbi":     contractRead.Config.ContractAbi,
+			}
+
+			// Handle method calls - extract fields to simple map for protobuf compatibility
+			if len(contractRead.Config.MethodCalls) > 0 {
+				methodCallsArray := make([]interface{}, len(contractRead.Config.MethodCalls))
+				for i, methodCall := range contractRead.Config.MethodCalls {
+					// Extract fields from protobuf struct into simple map
+					methodCallMap := map[string]interface{}{
+						"methodName": methodCall.MethodName,
+						"callData":   methodCall.CallData,
+					}
+
+					// Convert applyToFields []string to []interface{} for protobuf compatibility
+					if len(methodCall.ApplyToFields) > 0 {
+						applyToFieldsArray := make([]interface{}, len(methodCall.ApplyToFields))
+						for j, field := range methodCall.ApplyToFields {
+							applyToFieldsArray[j] = field
+						}
+						methodCallMap["applyToFields"] = applyToFieldsArray
+					}
+
+					methodCallsArray[i] = methodCallMap
+				}
+				config["methodCalls"] = methodCallsArray
+			}
+
+			fmt.Printf("🔍 ExtractNodeConfiguration: ContractRead config extracted: %+v\n", config)
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_ContractWrite:
+		contractWrite := taskNode.GetContractWrite()
+		if contractWrite != nil && contractWrite.Config != nil {
+			config := map[string]interface{}{
+				"contractAddress": contractWrite.Config.ContractAddress,
+				"contractAbi":     contractWrite.Config.ContractAbi,
+				"callData":        contractWrite.Config.CallData,
+			}
+
+			// Handle method calls - extract fields to simple map for protobuf compatibility
+			if len(contractWrite.Config.MethodCalls) > 0 {
+				methodCallsArray := make([]interface{}, len(contractWrite.Config.MethodCalls))
+				for i, methodCall := range contractWrite.Config.MethodCalls {
+					// Extract fields from protobuf struct into simple map
+					methodCallMap := map[string]interface{}{
+						"methodName": methodCall.MethodName,
+						"callData":   methodCall.CallData,
+					}
+					methodCallsArray[i] = methodCallMap
+				}
+				config["methodCalls"] = methodCallsArray
+			}
+
+			fmt.Printf("🔍 ExtractNodeConfiguration: ContractWrite config extracted: %+v\n", config)
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+	}
+
+	fmt.Printf("🔍 ExtractNodeConfiguration: No configuration extracted for node type: %s\n", taskNode.Type.String())
+	return nil
+}
+
+// GetNodeDataForExecution retrieves node name and configuration data for a given stepID
+// This helper function extracts the repetitive locking pattern used across all vm_runner files
+// to get node information from TaskNodes map.
+//
+// Returns:
+// - nodeName: The name of the node (defaults to "unknown" if not found)
+// - nodeConfig: The configuration data of the node (can be nil)
+func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeConfig *structpb.Value) {
+	nodeName = "unknown" // default value
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.logger != nil {
+		v.logger.Info("🔍 GetNodeDataForExecution: Starting", "stepID", stepID, "taskNodesCount", len(v.TaskNodes))
+	}
+
+	if taskNode, exists := v.TaskNodes[stepID]; exists {
+		nodeName = taskNode.Name
+
+		if v.logger != nil {
+			v.logger.Info("🔍 GetNodeDataForExecution: Found node", "stepID", stepID, "nodeName", nodeName, "nodeType", taskNode.Type.String())
+		}
+
+		// Extract node configuration instead of input data
+		nodeConfigMap := ExtractNodeConfiguration(taskNode)
+
+		if v.logger != nil {
+			v.logger.Info("🔍 GetNodeDataForExecution: After ExtractNodeConfiguration", "stepID", stepID, "configMap_exists", nodeConfigMap != nil)
+			if nodeConfigMap != nil {
+				v.logger.Info("🔍 GetNodeDataForExecution: Config map keys", "stepID", stepID, "keys", getMapKeys(nodeConfigMap))
+			}
+		}
+
+		if nodeConfigMap != nil {
+			// Convert config map to protobuf Value
+			// First convert for frontend user-friendly format
+			frontendConfig := convertConfigForFrontend(nodeConfigMap)
+			// Then remove complex protobuf types that can't be converted
+			cleanedConfig := removeComplexProtobufTypes(frontendConfig)
+			// Convert any map[string]string to map[string]interface{} for protobuf compatibility
+			protobufCompatibleConfig := convertMapStringStringToInterface(cleanedConfig)
+			if configProto, err := structpb.NewValue(protobufCompatibleConfig); err == nil {
+				nodeConfig = configProto
+				if v.logger != nil {
+					v.logger.Info("🔍 GetNodeDataForExecution: Successfully created protobuf config", "stepID", stepID)
+				}
+			} else {
+				if v.logger != nil {
+					v.logger.Error("🔍 GetNodeDataForExecution: Failed to convert config to protobuf", "stepID", stepID, "error", err)
+				}
+			}
+		} else {
+			if v.logger != nil {
+				v.logger.Warn("🔍 GetNodeDataForExecution: Node config map is nil", "stepID", stepID)
+			}
+		}
+	} else {
+		if v.logger != nil {
+			v.logger.Warn("🔍 GetNodeDataForExecution: Node not found", "stepID", stepID)
+		}
+	}
+
+	if v.logger != nil {
+		v.logger.Info("🔍 GetNodeDataForExecution: Returning", "stepID", stepID, "nodeName", nodeName, "nodeConfig_exists", nodeConfig != nil)
+	}
+
+	return nodeName, nodeConfig
+}
+
+// Helper function to extract runner configuration from LoopNode oneof runner field
+func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
+	if loop == nil {
+		return nil
+	}
+
+	switch runner := loop.GetRunner().(type) {
+	case *avsproto.LoopNode_CustomCode:
+		return map[string]interface{}{
+			"type":   "customCode",
+			"source": runner.CustomCode.Config.Source,
+			"lang":   runner.CustomCode.Config.Lang.String(),
+		}
+	case *avsproto.LoopNode_RestApi:
+		config := map[string]interface{}{
+			"type":   "restApi",
+			"url":    runner.RestApi.Config.Url,
+			"method": runner.RestApi.Config.Method,
+			"body":   runner.RestApi.Config.Body,
+		}
+		if runner.RestApi.Config.Headers != nil && len(runner.RestApi.Config.Headers) > 0 {
+			// Convert headers map to array of [key, value] pairs as expected by tests
+			headersList := make([]interface{}, 0, len(runner.RestApi.Config.Headers))
+			for key, value := range runner.RestApi.Config.Headers {
+				headersList = append(headersList, []interface{}{key, value})
+			}
+			config["headersMap"] = headersList
+		}
+		return config
+	case *avsproto.LoopNode_ContractRead:
+		config := map[string]interface{}{
+			"type":            "contractRead",
+			"contractAddress": runner.ContractRead.Config.ContractAddress,
+			"contractAbi":     runner.ContractRead.Config.ContractAbi,
+		}
+		if len(runner.ContractRead.Config.MethodCalls) > 0 {
+			config["methodCalls"] = runner.ContractRead.Config.MethodCalls
+		}
+		return config
+	case *avsproto.LoopNode_ContractWrite:
+		config := map[string]interface{}{
+			"type":            "contractWrite",
+			"contractAddress": runner.ContractWrite.Config.ContractAddress,
+			"contractAbi":     runner.ContractWrite.Config.ContractAbi,
+			"callData":        runner.ContractWrite.Config.CallData,
+		}
+		if len(runner.ContractWrite.Config.MethodCalls) > 0 {
+			config["methodCalls"] = runner.ContractWrite.Config.MethodCalls
+		}
+		return config
+	case *avsproto.LoopNode_EthTransfer:
+		return map[string]interface{}{
+			"type":        "ethTransfer",
+			"destination": runner.EthTransfer.Config.Destination,
+			"amount":      runner.EthTransfer.Config.Amount,
+		}
+	case *avsproto.LoopNode_GraphqlDataQuery:
+		config := map[string]interface{}{
+			"type":  "graphqlDataQuery",
+			"url":   runner.GraphqlDataQuery.Config.Url,
+			"query": runner.GraphqlDataQuery.Config.Query,
+		}
+		if runner.GraphqlDataQuery.Config.Variables != nil && len(runner.GraphqlDataQuery.Config.Variables) > 0 {
+			// Convert variables map to map[string]interface{} as expected by tests
+			variablesMap := make(map[string]interface{})
+			for key, value := range runner.GraphqlDataQuery.Config.Variables {
+				variablesMap[key] = value
+			}
+			config["variables"] = variablesMap
+		}
+		return config
+	}
+
+	return nil
+}
+
+// Helper function to convert map[string]string to map[string]interface{} for protobuf compatibility
+func convertMapStringStringToInterface(input map[string]interface{}) map[string]interface{} {
+	if input == nil {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+	for key, value := range input {
+		switch v := value.(type) {
+		case map[string]string:
+			// Convert map[string]string to map[string]interface{}
+			interfaceMap := make(map[string]interface{})
+			for k, val := range v {
+				interfaceMap[k] = val
+			}
+			result[key] = interfaceMap
+		case map[string]interface{}:
+			// Recursively convert nested maps
+			result[key] = convertMapStringStringToInterface(v)
+		default:
+			// Handle complex protobuf types that can't be converted directly
+			if key == "methodCalls" {
+				// Convert method calls to a simpler format
+				result[key] = convertMethodCallsToSimpleFormat(value)
+			} else {
+				// Keep other types as-is
+				result[key] = value
+			}
+		}
+	}
+	return result
+}
+
+// removeComplexProtobufTypes removes complex protobuf types that can't be converted to structpb.Value
+func removeComplexProtobufTypes(input map[string]interface{}) map[string]interface{} {
+	if input == nil {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+	for key, value := range input {
+		if key == "methodCalls" {
+			// Check if methodCalls is already in simple format ([]interface{} with maps)
+			if methodCallsArray, ok := value.([]interface{}); ok {
+				// If it's already an array of interfaces, keep it as is
+				result[key] = methodCallsArray
+			} else {
+				// Convert method calls to string format to avoid protobuf conversion errors
+				result[key] = fmt.Sprintf("%v", value)
+			}
+		} else if nestedMap, ok := value.(map[string]interface{}); ok {
+			// Recursively clean nested maps
+			result[key] = removeComplexProtobufTypes(nestedMap)
+		} else {
+			result[key] = value
+		}
+	}
+	return result
+}
+
+// convertMethodCallsToSimpleFormat converts protobuf method calls to a simple format for protobuf compatibility
+func convertMethodCallsToSimpleFormat(methodCalls interface{}) interface{} {
+	// Convert method calls to a simple string representation to avoid protobuf conversion errors
+	if methodCalls == nil {
+		return nil
+	}
+
+	// Convert to string representation for protobuf compatibility
+	return fmt.Sprintf("%v", methodCalls)
+}
+
+// convertConfigForFrontend converts internal configuration to user-friendly format for frontend
+func convertConfigForFrontend(input map[string]interface{}) map[string]interface{} {
+	if input == nil {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+	for key, value := range input {
+		switch key {
+		case "executionMode":
+			// Convert execution mode to user-friendly format
+			if executionModeStr, ok := value.(string); ok {
+				if executionModeStr == "EXECUTION_MODE_SEQUENTIAL" {
+					result[key] = "sequential"
+				} else if executionModeStr == "EXECUTION_MODE_PARALLEL" {
+					result[key] = "parallel"
+				} else {
+					result[key] = executionModeStr
+				}
+			} else {
+				result[key] = value
+			}
+		case "headersMap":
+			// Convert headersMap array format back to headers object format for frontend
+			if headersArray, ok := value.([]interface{}); ok {
+				headersObj := make(map[string]string)
+				for _, header := range headersArray {
+					if headerPair, ok := header.([]interface{}); ok && len(headerPair) == 2 {
+						if keyStr, ok := headerPair[0].(string); ok {
+							if valueStr, ok := headerPair[1].(string); ok {
+								headersObj[keyStr] = valueStr
+							}
+						}
+					}
+				}
+				result["headers"] = headersObj
+			} else {
+				result[key] = value
+			}
+		case "runner":
+			// Handle runner configuration recursively
+			if runnerMap, ok := value.(map[string]interface{}); ok {
+				result[key] = convertConfigForFrontend(runnerMap)
+			} else {
+				result[key] = value
+			}
+		default:
+			// For other fields, recursively convert if it's a map
+			if nestedMap, ok := value.(map[string]interface{}); ok {
+				result[key] = convertConfigForFrontend(nestedMap)
+			} else {
+				result[key] = value
+			}
+		}
+	}
+	return result
 }

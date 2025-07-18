@@ -313,37 +313,22 @@ func (r *ContractWriteProcessor) decodeReturnData(methodName string, contractABI
 }
 
 func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
-	t0 := time.Now().UnixMilli()
-
-	// Get node data using helper function to reduce duplication
-	nodeName, nodeInput := r.vm.GetNodeDataForExecution(stepID)
-
-	s := &avsproto.Execution_Step{
-		Id:         stepID,
-		Log:        "",
-		OutputData: nil,
-		Success:    true,
-		Error:      "",
-		StartAt:    t0,
-		Type:       avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE.String(),
-		Name:       nodeName,
-		Input:      nodeInput, // Include node input data for debugging
-	}
+	// Use shared function to create execution step
+	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE, r.vm)
 
 	var log strings.Builder
 	var err error
 
 	defer func() {
-		s.Log = log.String()
-		s.EndAt = time.Now().UnixMilli()
-		s.Success = err == nil
+		if err != nil {
+			finalizeExecutionStep(s, false, err.Error(), log.String())
+		}
 	}()
 
 	// Get input configuration
 	contractAddress, _, contractAbi, methodCalls, inputErr := r.getInputData(node)
 	if inputErr != nil {
 		err = inputErr
-		s.Error = err.Error()
 		return s, err
 	}
 
@@ -446,7 +431,11 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		// Always provide results array for multi-method scenarios
 		outputVars["results"] = results
 	}
-	r.SetOutputVarForStep(stepID, outputVars)
+	// Use shared function to set output variable for this step
+	setNodeOutputData(r.CommonProcessor, stepID, outputVars)
+
+	// Use shared function to finalize execution step with success
+	finalizeExecutionStep(s, true, "", log.String())
 
 	return s, nil
 }

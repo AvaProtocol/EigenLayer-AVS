@@ -294,7 +294,7 @@ func TestCamelCaseVariableResolutionConsistency(t *testing.T) {
 			Id:          "trigger1",
 			Name:        "manualTrigger",
 			Type:        avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
-			TriggerType: &avsproto.TaskTrigger_Manual{Manual: true},
+			TriggerType: &avsproto.TaskTrigger_Manual{},
 		}
 
 		nodes := []*avsproto.TaskNode{

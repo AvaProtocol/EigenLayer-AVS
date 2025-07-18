@@ -35,29 +35,14 @@ func NewGraphqlQueryProcessor(vm *VM) (*GraphqlQueryProcessor, error) {
 
 func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQueryNode) (*avsproto.Execution_Step, any, error) {
 	ctx := context.Background()
-	t0 := time.Now().UnixMilli()
 
-	// Get node data using helper function to reduce duplication
-	nodeName, nodeInput := r.vm.GetNodeDataForExecution(stepID)
-
-	step := &avsproto.Execution_Step{
-		Id:         stepID,
-		Log:        "",
-		OutputData: nil,
-		Success:    true,
-		Error:      "",
-		StartAt:    t0,
-		Type:       avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY.String(),
-		Name:       nodeName,
-		Input:      nodeInput, // Include node input data for debugging
-	}
+	// Use shared function to create execution step
+	step := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY, r.vm)
 
 	var err error
 	defer func() {
-		step.EndAt = time.Now().UnixMilli()
-		step.Success = err == nil
 		if err != nil {
-			step.Error = err.Error()
+			finalizeExecutionStep(step, false, err.Error(), r.sb.String())
 		}
 	}()
 
@@ -102,8 +87,6 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 		return step, nil, err
 	}
 
-	step.Log = r.sb.String()
-
 	value, err := structpb.NewValue(resp)
 	if err == nil {
 		pbResult, _ := anypb.New(value)
@@ -112,9 +95,13 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 				Data: pbResult,
 			},
 		}
-
 	}
 
-	r.SetOutputVarForStep(stepID, resp)
+	// Use shared function to set output variable for this step
+	setNodeOutputData(r.CommonProcessor, stepID, resp)
+
+	// Use shared function to finalize execution step with success
+	finalizeExecutionStep(step, true, "", r.sb.String())
+
 	return step, resp, err
 }

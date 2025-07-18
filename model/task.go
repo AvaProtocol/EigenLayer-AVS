@@ -1,6 +1,7 @@
 package model
 
 import (
+	"regexp"
 	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -22,6 +23,65 @@ const (
 	ErrEmptyNodesField = "invalid: nodes field cannot be an empty array"
 	ErrEmptyEdgesField = "invalid: edges field cannot be an empty array"
 )
+
+var (
+	// JavaScript identifier validation regex
+	jsIdentifierRegex = regexp.MustCompile(`^[a-zA-Z_$][a-zA-Z0-9_$]*$`)
+
+	// JavaScript reserved words that cannot be used as identifiers
+	// Includes both lowercase and common case variations to avoid runtime string conversion
+	jsReservedWords = map[string]bool{
+		// Lowercase versions
+		"break": true, "case": true, "catch": true, "class": true, "const": true,
+		"continue": true, "debugger": true, "default": true, "delete": true,
+		"do": true, "else": true, "enum": true, "export": true, "extends": true,
+		"false": true, "finally": true, "for": true, "function": true, "if": true,
+		"import": true, "in": true, "instanceof": true, "let": true, "new": true,
+		"null": true, "return": true, "super": true, "switch": true, "this": true,
+		"throw": true, "true": true, "try": true, "typeof": true, "var": true,
+		"void": true, "while": true, "with": true, "yield": true,
+
+		// Common case variations to avoid runtime string conversion
+		"Break": true, "Case": true, "Catch": true, "Class": true, "Const": true,
+		"Continue": true, "Debugger": true, "Default": true, "Delete": true,
+		"Do": true, "Else": true, "Enum": true, "Export": true, "Extends": true,
+		"False": true, "Finally": true, "For": true, "Function": true, "If": true,
+		"Import": true, "In": true, "Instanceof": true, "Let": true, "New": true,
+		"Null": true, "Return": true, "Super": true, "Switch": true, "This": true,
+		"Throw": true, "True": true, "Try": true, "Typeof": true, "Var": true,
+		"Void": true, "While": true, "With": true, "Yield": true,
+
+		// All uppercase versions
+		"BREAK": true, "CASE": true, "CATCH": true, "CLASS": true, "CONST": true,
+		"CONTINUE": true, "DEBUGGER": true, "DEFAULT": true, "DELETE": true,
+		"DO": true, "ELSE": true, "ENUM": true, "EXPORT": true, "EXTENDS": true,
+		"FALSE": true, "FINALLY": true, "FOR": true, "FUNCTION": true, "IF": true,
+		"IMPORT": true, "IN": true, "INSTANCEOF": true, "LET": true, "NEW": true,
+		"NULL": true, "RETURN": true, "SUPER": true, "SWITCH": true, "THIS": true,
+		"THROW": true, "TRUE": true, "TRY": true, "TYPEOF": true, "VAR": true,
+		"VOID": true, "WHILE": true, "WITH": true, "YIELD": true,
+	}
+)
+
+// ValidateNodeNameForJavaScript checks if a node name is valid for use as a JavaScript variable
+// Node names must be valid JavaScript identifiers to be referenced in subsequent nodes
+func ValidateNodeNameForJavaScript(nodeName string) error {
+	if nodeName == "" {
+		return fmt.Errorf("node name cannot be empty")
+	}
+
+	// Check if it matches JavaScript identifier pattern
+	if !jsIdentifierRegex.MatchString(nodeName) {
+		return fmt.Errorf("node name '%s' is not a valid JavaScript identifier - must start with letter, underscore, or dollar sign and contain only letters, numbers, underscores, and dollar signs", nodeName)
+	}
+
+	// Check if it's a reserved word
+	if jsReservedWords[nodeName] {
+		return fmt.Errorf("node name '%s' is a JavaScript reserved word and cannot be used", nodeName)
+	}
+
+	return nil
+}
 
 // Generate a sorted uuid
 func GenerateTaskID() string {
@@ -140,6 +200,20 @@ func (t *Task) Validate() bool {
 
 // ValidateWithError returns detailed validation error messages
 func (t *Task) ValidateWithError() error {
+	// Validate trigger name for JavaScript compatibility
+	if t.Task.Trigger != nil && t.Task.Trigger.Name != "" {
+		if err := ValidateNodeNameForJavaScript(t.Task.Trigger.Name); err != nil {
+			return fmt.Errorf("trigger name validation failed: %w", err)
+		}
+	}
+
+	// Validate all node names for JavaScript compatibility
+	for _, node := range t.Task.Nodes {
+		if err := ValidateNodeNameForJavaScript(node.Name); err != nil {
+			return fmt.Errorf("node '%s' validation failed: %w", node.Id, err)
+		}
+	}
+
 	// Validate block trigger intervals
 	if t.Task.Trigger != nil {
 		if blockTrigger := t.Task.Trigger.GetBlock(); blockTrigger != nil {

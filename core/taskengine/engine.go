@@ -629,6 +629,11 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 		return nil, status.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 
+	// Validate all node names for JavaScript compatibility
+	if err := validateAllNodeNamesForJavaScript(task); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "node name validation failed: %v", err)
+	}
+
 	updates := map[string][]byte{}
 
 	taskJSON, err := task.ToJSON()
@@ -1769,17 +1774,22 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		return nil, status.Errorf(codes.InvalidArgument, "task must have at least one node for simulation")
 	}
 
+	// Validate all node names for JavaScript compatibility
+	if err := validateAllNodeNamesForJavaScript(task); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "node name validation failed: %v", err)
+	}
+
 	// Step 1: Simulate the trigger to get trigger output data
 	// Extract trigger type and config from the TaskTrigger
 	n.logger.Info("SimulateTask received trigger", "trigger_type_raw", trigger.GetType(), "trigger_type_int", int(trigger.GetType()), "trigger_id", trigger.GetId(), "trigger_name", trigger.GetName())
 
 	// Debug: Check what oneof field is set
 	n.logger.Info("SimulateTask trigger oneof debug",
-		"manual", trigger.GetManual(),
 		"fixed_time", trigger.GetFixedTime() != nil,
 		"cron", trigger.GetCron() != nil,
 		"block", trigger.GetBlock() != nil,
 		"event", trigger.GetEvent() != nil,
+		"manual", TaskTriggerToTriggerType(trigger) == avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		"oneof_type", fmt.Sprintf("%T", trigger.GetTriggerType()))
 
 	// Use TaskTriggerToTriggerType to determine type from oneof field instead of just GetType()
@@ -1861,33 +1871,24 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		vm.AddVar(key, processedValue)
 	}
 
-	// Step 6: Add trigger data as "trigger" variable for convenient access in JavaScript
-	// This ensures scripts can access trigger.data regardless of the trigger's name using shared function
+	// Step 6: Add trigger data and input data together for JavaScript access
+	// This ensures scripts can access both trigger.data and trigger.input
+	// The buildTriggerDataMap function will handle EventTrigger data extraction internally
 	triggerDataMap := buildTriggerDataMap(triggerReason.Type, triggerOutput)
 
-	// Add the trigger variable with the actual trigger name for JavaScript access
-	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), map[string]any{"data": triggerDataMap})
-
-	// Step 6.5: Extract and add trigger input data if available (REPLICATE EXACT LOGIC FROM RunTask)
-	triggerInputData := ExtractTriggerInputData(task.Trigger)
-	// Store the extracted trigger input data for reuse in Step 8 (trigger step creation)
-	extractedTriggerInputForStep := triggerInputData
-	if triggerInputData != nil {
-		// Get the trigger variable name and add input data (EXACT SAME LOGIC AS RunTask)
-		triggerVarName := sanitizeTriggerNameForJS(task.Trigger.GetName())
-		vm.mu.Lock()
-		existingTriggerVar := vm.vars[triggerVarName]
-		if existingMap, ok := existingTriggerVar.(map[string]any); ok {
-			existingMap["input"] = triggerInputData
-			vm.vars[triggerVarName] = existingMap
-		} else {
-			// Create new trigger variable with input data
-			vm.vars[triggerVarName] = map[string]any{
-				"input": triggerInputData,
-			}
-		}
-		vm.mu.Unlock()
+	// Debug logging for EventTriggers to track data extraction
+	if triggerReason.Type == avsproto.TriggerType_TRIGGER_TYPE_EVENT {
+		n.logger.Debug("🔍 SimulateTask: EventTrigger data extraction", "inputKeys", getMapKeys(triggerOutput), "outputKeys", getMapKeys(triggerDataMap))
 	}
+
+	// Extract trigger input data if available
+	triggerInputData := ExtractTriggerInputData(task.Trigger)
+
+	// Build complete trigger variable data using shared function
+	triggerVarData := buildTriggerVariableData(task.Trigger, triggerDataMap, triggerInputData)
+
+	// Add the complete trigger variable with the actual trigger name for JavaScript access
+	vm.AddVar(sanitizeTriggerNameForJS(trigger.GetName()), triggerVarData)
 
 	// Step 7: Compile the workflow
 	if err = vm.Compile(); err != nil {
@@ -1901,33 +1902,29 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		triggerInputs = append(triggerInputs, key)
 	}
 
-	// Use the trigger input data extracted in Step 6.5 to avoid calling ExtractTriggerInputData twice
-	var triggerInputProto *structpb.Value
-	if extractedTriggerInputForStep != nil {
-		n.logger.Info("✅ SimulateTask: Successfully extracted trigger input data", "trigger_id", task.Trigger.Id, "input_data", extractedTriggerInputForStep)
-		triggerInputProto, err = structpb.NewValue(extractedTriggerInputForStep)
+	// Use the trigger configuration instead of input data for the execution step's Input field
+	// The Input field should show the configuration used to execute the trigger, not input data from previous steps
+	var triggerConfigProto *structpb.Value
+	triggerConfig = TaskTriggerToConfig(task.Trigger)
+	if len(triggerConfig) > 0 {
+		var err error
+		triggerConfigProto, err = structpb.NewValue(triggerConfig)
 		if err != nil {
-			n.logger.Warn("Failed to convert trigger input data to protobuf", "error", err)
+			n.logger.Warn("Failed to convert trigger config to protobuf", "error", err)
 			// Try a fallback approach: convert to JSON and back to ensure proper formatting
-			jsonBytes, jsonErr := json.Marshal(extractedTriggerInputForStep)
+			jsonBytes, jsonErr := json.Marshal(triggerConfig)
 			if jsonErr == nil {
 				var cleanData interface{}
 				if unmarshalErr := json.Unmarshal(jsonBytes, &cleanData); unmarshalErr == nil {
-					triggerInputProto, err = structpb.NewValue(cleanData)
-					if err == nil {
-						n.logger.Info("✅ Successfully converted trigger input data using JSON fallback")
+					if configProto, err := structpb.NewValue(cleanData); err == nil {
+						triggerConfigProto = configProto
+						n.logger.Info("✅ Successfully converted trigger config using JSON fallback")
 					}
 				}
 			}
 		}
 	} else {
-		n.logger.Warn("❌ SimulateTask: No trigger input data found", "trigger_id", task.Trigger.Id, "trigger_type", task.Trigger.GetType())
-		// Debug: Check if trigger has input field at all
-		if task.Trigger.GetInput() != nil {
-			n.logger.Info("🔍 SimulateTask: Trigger has input field", "trigger_id", task.Trigger.Id, "input_field_present", true)
-		} else {
-			n.logger.Info("🔍 SimulateTask: Trigger has no input field", "trigger_id", task.Trigger.Id, "input_field_present", false)
-		}
+		n.logger.Info("🔍 SimulateTask: No trigger config found", "trigger_id", task.Trigger.Id, "trigger_type", task.Trigger.GetType())
 	}
 
 	triggerStep := &avsproto.Execution_Step{
@@ -1940,7 +1937,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Inputs:  triggerInputs,                  // Use inputVariables keys as trigger inputs
 		Type:    queueData.TriggerType.String(), // Use trigger type as string
 		Name:    task.Trigger.Name,              // Use new 'name' field
-		Input:   triggerInputProto,              // Include extracted trigger input data for debugging
+		Input:   triggerConfigProto,             // Include trigger configuration for debugging
 	}
 
 	// Set trigger output data in the step using shared function
@@ -3287,21 +3284,77 @@ func buildCronTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Cron
 //   - triggerOutput: map containing raw trigger output data from runManualTriggerImmediately
 //
 // Returns:
-//   - *avsproto.ManualTrigger_Output: properly structured protobuf output with run timestamp
+//   - *avsproto.ManualTrigger_Output: properly structured protobuf output with user-defined data
 func buildManualTriggerOutput(triggerOutput map[string]interface{}) *avsproto.ManualTrigger_Output {
-	runAt := uint64(time.Now().Unix()) // Default to current time
+	var data *structpb.Value
+	var headers map[string]string
+	var pathParams map[string]string
 
 	if triggerOutput != nil {
-		if ra, ok := triggerOutput["runAt"]; ok {
-			if raUint, ok := ra.(uint64); ok {
-				runAt = raUint
+		fmt.Printf("🔍 buildManualTriggerOutput called with: %+v\n", triggerOutput)
+
+		// Include user-defined data - this is the main payload for manual triggers
+		if dataValue, exists := triggerOutput["data"]; exists && dataValue != nil {
+			if pbValue, err := structpb.NewValue(dataValue); err == nil {
+				data = pbValue
 			}
+		}
+
+		// Include headers for webhook testing - now using map format
+		if headersValue, exists := triggerOutput["headers"]; exists && headersValue != nil {
+			fmt.Printf("🔍 Headers found in buildManualTriggerOutput: %+v (type: %T)\n", headersValue, headersValue)
+			if headersMap, ok := headersValue.(map[string]string); ok {
+				headers = headersMap
+				fmt.Printf("✅ Headers set as map[string]string: %+v\n", headers)
+			} else if headersMapInterface, ok := headersValue.(map[string]interface{}); ok {
+				// Convert map[string]interface{} to map[string]string
+				stringHeaders := make(map[string]string)
+				for k, v := range headersMapInterface {
+					if strValue, ok := v.(string); ok {
+						stringHeaders[k] = strValue
+					}
+				}
+				headers = stringHeaders
+				fmt.Printf("✅ Headers converted from map[string]interface{}: %+v\n", headers)
+			} else {
+				fmt.Printf("❌ Headers type not supported: %T\n", headersValue)
+			}
+		} else {
+			fmt.Printf("❌ No headers found in buildManualTriggerOutput\n")
+		}
+
+		// Include path parameters for webhook testing - now using map format
+		if pathParamsValue, exists := triggerOutput["pathParams"]; exists && pathParamsValue != nil {
+			fmt.Printf("🔍 PathParams found in buildManualTriggerOutput: %+v (type: %T)\n", pathParamsValue, pathParamsValue)
+			if pathParamsMap, ok := pathParamsValue.(map[string]string); ok {
+				pathParams = pathParamsMap
+				fmt.Printf("✅ PathParams set as map[string]string: %+v\n", pathParams)
+			} else if pathParamsMapInterface, ok := pathParamsValue.(map[string]interface{}); ok {
+				// Convert map[string]interface{} to map[string]string
+				stringPathParams := make(map[string]string)
+				for k, v := range pathParamsMapInterface {
+					if strValue, ok := v.(string); ok {
+						stringPathParams[k] = strValue
+					}
+				}
+				pathParams = stringPathParams
+				fmt.Printf("✅ PathParams converted from map[string]interface{}: %+v\n", pathParams)
+			} else {
+				fmt.Printf("❌ PathParams type not supported: %T\n", pathParamsValue)
+			}
+		} else {
+			fmt.Printf("❌ No pathParams found in buildManualTriggerOutput\n")
 		}
 	}
 
-	return &avsproto.ManualTrigger_Output{
-		RunAt: runAt,
+	result := &avsproto.ManualTrigger_Output{
+		Data:       data,
+		Headers:    headers,
+		PathParams: pathParams,
 	}
+
+	fmt.Printf("🔍 buildManualTriggerOutput returning: %+v\n", result)
+	return result
 }
 
 // buildTriggerDataMap creates a map for JavaScript trigger variable access.
@@ -3322,9 +3375,14 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 
 	switch triggerType {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-		triggerDataMap["triggered"] = true
-		if runAt, ok := triggerOutput["runAt"]; ok {
-			triggerDataMap["runAt"] = runAt
+		if data, ok := triggerOutput["data"]; ok {
+			triggerDataMap["data"] = data
+		}
+		if headers, ok := triggerOutput["headers"]; ok {
+			triggerDataMap["headers"] = headers
+		}
+		if pathParams, ok := triggerOutput["pathParams"]; ok {
+			triggerDataMap["pathParams"] = pathParams
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
 		if timestamp, ok := triggerOutput["timestamp"]; ok {
@@ -3370,9 +3428,33 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 				triggerDataMap[k] = v
 			}
 		} else {
-			// For non-transfer events, copy all event trigger data
-			for k, v := range triggerOutput {
-				triggerDataMap[k] = v
+			// For EventTriggers, check if this is a simulation result structure
+			// Simulation results should have "found", "metadata", and "data" fields
+			if _, hasFound := triggerOutput["found"]; hasFound {
+				if _, hasMetadata := triggerOutput["metadata"]; hasMetadata {
+					if eventData, hasEventData := triggerOutput["data"].(map[string]interface{}); hasEventData {
+						// Extract the actual event data from the nested "data" field
+						for k, v := range eventData {
+							triggerDataMap[k] = v
+						}
+					} else {
+						// No valid data field in simulation result - copy all data as-is
+						for k, v := range triggerOutput {
+							triggerDataMap[k] = v
+						}
+					}
+				} else {
+					// Not a complete simulation result structure - copy all data as-is
+					for k, v := range triggerOutput {
+						triggerDataMap[k] = v
+					}
+				}
+			} else {
+				// Not a simulation result structure - this should be actual event data
+				// Copy all event trigger data directly
+				for k, v := range triggerOutput {
+					triggerDataMap[k] = v
+				}
 			}
 		}
 	default:
@@ -3491,7 +3573,23 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 	switch triggerType {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
 		if manualOutput, ok := triggerOutputProto.(*avsproto.ManualTrigger_Output); ok {
-			triggerDataMap["run_at"] = manualOutput.RunAt
+			if manualOutput.Data != nil {
+				triggerDataMap["data"] = manualOutput.Data.AsInterface()
+			} else {
+				triggerDataMap["data"] = nil
+			}
+			// Include headers for webhook testing - now using map format
+			if manualOutput.Headers != nil {
+				triggerDataMap["headers"] = manualOutput.Headers
+			}
+			// Include path parameters for webhook testing - now using map format
+			if manualOutput.PathParams != nil {
+				triggerDataMap["pathParams"] = manualOutput.PathParams
+			}
+		} else {
+			// If triggerOutputProto is not the expected type (e.g., nil),
+			// set data to null to prevent template resolution issues
+			triggerDataMap["data"] = nil
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
 		if timeOutput, ok := triggerOutputProto.(*avsproto.FixedTimeTrigger_Output); ok {
