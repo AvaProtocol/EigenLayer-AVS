@@ -223,19 +223,19 @@ message ManualTrigger {
   message Config {
     // User-defined data that will be returned in the Output
     google.protobuf.Value data = 1;
-    // Headers for webhook testing - array of objects like [{"headerKeyA":"headerValueA"}]
-    google.protobuf.Value headers = 2;
-    // Path parameters for webhook testing - array of objects like [{"pathKeyA":"pathValueA"}]
-    google.protobuf.Value pathParams = 3;
+    // Headers for webhook testing - map format consistent with REST API nodes
+    map<string, string> headers = 2;
+    // Path parameters for webhook testing - map format consistent with REST API nodes
+    map<string, string> pathParams = 3;
   }
   
   message Output {
     // User-defined data from trigger config - this is the main payload for manual triggers
     google.protobuf.Value data = 1;
     // Headers from trigger config for webhook testing
-    google.protobuf.Value headers = 2;
+    map<string, string> headers = 2;
     // Path parameters from trigger config for webhook testing
-    google.protobuf.Value pathParams = 3;
+    map<string, string> pathParams = 3;
   }
 
   // Include Config as field so it is generated in Go

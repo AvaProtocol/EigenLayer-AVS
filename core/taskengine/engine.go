@@ -3287,10 +3287,12 @@ func buildCronTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Cron
 //   - *avsproto.ManualTrigger_Output: properly structured protobuf output with user-defined data
 func buildManualTriggerOutput(triggerOutput map[string]interface{}) *avsproto.ManualTrigger_Output {
 	var data *structpb.Value
-	var headers *structpb.Value
-	var pathParams *structpb.Value
+	var headers map[string]string
+	var pathParams map[string]string
 
 	if triggerOutput != nil {
+		fmt.Printf("🔍 buildManualTriggerOutput called with: %+v\n", triggerOutput)
+
 		// Include user-defined data - this is the main payload for manual triggers
 		if dataValue, exists := triggerOutput["data"]; exists && dataValue != nil {
 			if pbValue, err := structpb.NewValue(dataValue); err == nil {
@@ -3298,26 +3300,61 @@ func buildManualTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Ma
 			}
 		}
 
-		// Include headers for webhook testing
+		// Include headers for webhook testing - now using map format
 		if headersValue, exists := triggerOutput["headers"]; exists && headersValue != nil {
-			if pbValue, err := structpb.NewValue(headersValue); err == nil {
-				headers = pbValue
+			fmt.Printf("🔍 Headers found in buildManualTriggerOutput: %+v (type: %T)\n", headersValue, headersValue)
+			if headersMap, ok := headersValue.(map[string]string); ok {
+				headers = headersMap
+				fmt.Printf("✅ Headers set as map[string]string: %+v\n", headers)
+			} else if headersMapInterface, ok := headersValue.(map[string]interface{}); ok {
+				// Convert map[string]interface{} to map[string]string
+				stringHeaders := make(map[string]string)
+				for k, v := range headersMapInterface {
+					if strValue, ok := v.(string); ok {
+						stringHeaders[k] = strValue
+					}
+				}
+				headers = stringHeaders
+				fmt.Printf("✅ Headers converted from map[string]interface{}: %+v\n", headers)
+			} else {
+				fmt.Printf("❌ Headers type not supported: %T\n", headersValue)
 			}
+		} else {
+			fmt.Printf("❌ No headers found in buildManualTriggerOutput\n")
 		}
 
-		// Include path parameters for webhook testing
+		// Include path parameters for webhook testing - now using map format
 		if pathParamsValue, exists := triggerOutput["pathParams"]; exists && pathParamsValue != nil {
-			if pbValue, err := structpb.NewValue(pathParamsValue); err == nil {
-				pathParams = pbValue
+			fmt.Printf("🔍 PathParams found in buildManualTriggerOutput: %+v (type: %T)\n", pathParamsValue, pathParamsValue)
+			if pathParamsMap, ok := pathParamsValue.(map[string]string); ok {
+				pathParams = pathParamsMap
+				fmt.Printf("✅ PathParams set as map[string]string: %+v\n", pathParams)
+			} else if pathParamsMapInterface, ok := pathParamsValue.(map[string]interface{}); ok {
+				// Convert map[string]interface{} to map[string]string
+				stringPathParams := make(map[string]string)
+				for k, v := range pathParamsMapInterface {
+					if strValue, ok := v.(string); ok {
+						stringPathParams[k] = strValue
+					}
+				}
+				pathParams = stringPathParams
+				fmt.Printf("✅ PathParams converted from map[string]interface{}: %+v\n", pathParams)
+			} else {
+				fmt.Printf("❌ PathParams type not supported: %T\n", pathParamsValue)
 			}
+		} else {
+			fmt.Printf("❌ No pathParams found in buildManualTriggerOutput\n")
 		}
 	}
 
-	return &avsproto.ManualTrigger_Output{
+	result := &avsproto.ManualTrigger_Output{
 		Data:       data,
 		Headers:    headers,
 		PathParams: pathParams,
 	}
+
+	fmt.Printf("🔍 buildManualTriggerOutput returning: %+v\n", result)
+	return result
 }
 
 // buildTriggerDataMap creates a map for JavaScript trigger variable access.
@@ -3536,21 +3573,18 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 	switch triggerType {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
 		if manualOutput, ok := triggerOutputProto.(*avsproto.ManualTrigger_Output); ok {
-			// For manual triggers, preserve the nested structure with data field
-			// The test expects to access triggerName.data.data, triggerName.data.headers, etc.
 			if manualOutput.Data != nil {
 				triggerDataMap["data"] = manualOutput.Data.AsInterface()
 			} else {
-				// For manual triggers without data, set data to null instead of empty map
 				triggerDataMap["data"] = nil
 			}
-			// Include headers for webhook testing
+			// Include headers for webhook testing - now using map format
 			if manualOutput.Headers != nil {
-				triggerDataMap["headers"] = manualOutput.Headers.AsInterface()
+				triggerDataMap["headers"] = manualOutput.Headers
 			}
-			// Include path parameters for webhook testing
+			// Include path parameters for webhook testing - now using map format
 			if manualOutput.PathParams != nil {
-				triggerDataMap["pathParams"] = manualOutput.PathParams.AsInterface()
+				triggerDataMap["pathParams"] = manualOutput.PathParams
 			}
 		} else {
 			// If triggerOutputProto is not the expected type (e.g., nil),

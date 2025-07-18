@@ -48,19 +48,13 @@ func TestManualTriggerWebhookFields(t *testing.T) {
 
 		// Verify headers field
 		assert.NotNil(t, result.Headers)
-		headersInterface := result.Headers.AsInterface()
-		headersMap, ok := headersInterface.(map[string]interface{})
-		assert.True(t, ok)
-		assert.Equal(t, "Bearer token123", headersMap["Authorization"])
-		assert.Equal(t, "application/json", headersMap["Content-Type"])
+		assert.Equal(t, "Bearer token123", result.Headers["Authorization"])
+		assert.Equal(t, "application/json", result.Headers["Content-Type"])
 
 		// Verify pathParams field
 		assert.NotNil(t, result.PathParams)
-		pathParamsInterface := result.PathParams.AsInterface()
-		pathParamsMap, ok := pathParamsInterface.(map[string]interface{})
-		assert.True(t, ok)
-		assert.Equal(t, "user123", pathParamsMap["userId"])
-		assert.Equal(t, "org456", pathParamsMap["orgId"])
+		assert.Equal(t, "user123", result.PathParams["userId"])
+		assert.Equal(t, "org456", result.PathParams["orgId"])
 	})
 
 	t.Run("buildManualTriggerOutput with nil fields", func(t *testing.T) {

@@ -32,10 +32,22 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	var log strings.Builder
 	log.WriteString(fmt.Sprintf("Start loop execution at %s", time.Now()))
 
+	// Debug logging
+	if r.vm.logger != nil {
+		r.vm.logger.Info("🔄 LoopProcessor.Execute: Starting",
+			"stepID", stepID,
+			"node_exists", node != nil,
+			"execution_step_created", s != nil,
+			"execution_step_input_exists", s != nil && s.Input != nil)
+	}
+
 	// Get configuration from node.Config (new architecture)
 	if node.Config == nil {
 		err := fmt.Errorf("LoopNode Config is nil")
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		if r.vm.logger != nil {
+			r.vm.logger.Error("🚫 LoopProcessor.Execute: Config is nil", "stepID", stepID)
+		}
 		finalizeExecutionStep(s, false, err.Error(), log.String())
 		return s, err
 	}
@@ -45,9 +57,21 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	iterKey := node.Config.IterKey
 	executionMode := node.Config.ExecutionMode
 
+	if r.vm.logger != nil {
+		r.vm.logger.Info("🔄 LoopProcessor.Execute: Config extracted",
+			"stepID", stepID,
+			"sourceNodeID", sourceNodeID,
+			"iterVal", iterVal,
+			"iterKey", iterKey,
+			"executionMode", executionMode.String())
+	}
+
 	if sourceNodeID == "" || iterVal == "" {
 		err := fmt.Errorf("missing required configuration: source_id and iter_val are required")
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		if r.vm.logger != nil {
+			r.vm.logger.Error("🚫 LoopProcessor.Execute: Missing required config", "stepID", stepID, "sourceNodeID", sourceNodeID, "iterVal", iterVal)
+		}
 		finalizeExecutionStep(s, false, err.Error(), log.String())
 		return s, err
 	}
@@ -330,6 +354,7 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
 			TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: ethTransfer},
 		}
 	} else if contractWrite := loopNodeDef.GetContractWrite(); contractWrite != nil {
@@ -338,6 +363,7 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
 			TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: processedContractWrite},
 		}
 	} else if contractRead := loopNodeDef.GetContractRead(); contractRead != nil {
@@ -346,12 +372,14 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_READ,
 			TaskType: &avsproto.TaskNode_ContractRead{ContractRead: processedContractRead},
 		}
 	} else if graphqlQuery := loopNodeDef.GetGraphqlDataQuery(); graphqlQuery != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY,
 			TaskType: &avsproto.TaskNode_GraphqlQuery{GraphqlQuery: graphqlQuery},
 		}
 	} else if restApi := loopNodeDef.GetRestApi(); restApi != nil {
@@ -360,12 +388,14 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_REST_API,
 			TaskType: &avsproto.TaskNode_RestApi{RestApi: processedRestApi},
 		}
 	} else if customCode := loopNodeDef.GetCustomCode(); customCode != nil {
 		nestedNode = &avsproto.TaskNode{
 			Id:       iterationStepID,
 			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
 			TaskType: &avsproto.TaskNode_CustomCode{CustomCode: customCode},
 		}
 	} else {

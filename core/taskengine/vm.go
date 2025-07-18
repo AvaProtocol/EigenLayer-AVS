@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1144,13 +1143,39 @@ func (v *VM) runBranch(stepID string, nodeValue *avsproto.BranchNode) (*avsproto
 }
 
 func (v *VM) runLoop(stepID string, nodeValue *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
+	if v.logger != nil {
+		v.logger.Info("🔄 runLoop: Starting LoopNode execution", "stepID", stepID, "nodeValue_exists", nodeValue != nil)
+		if nodeValue != nil && nodeValue.Config != nil {
+			v.logger.Info("🔄 runLoop: LoopNode config", "sourceId", nodeValue.Config.SourceId, "iterVal", nodeValue.Config.IterVal, "iterKey", nodeValue.Config.IterKey)
+		}
+	}
+
 	p := NewLoopProcessor(v)
 	executionLog, err := p.Execute(stepID, nodeValue) // Loop processor internally calls RunNodeWithInputs
+
+	if v.logger != nil {
+		v.logger.Info("🔄 runLoop: After Execute", "stepID", stepID, "executionLog_exists", executionLog != nil, "error", err)
+		if executionLog != nil {
+			v.logger.Info("🔄 runLoop: ExecutionLog before collecting inputs", "stepID", stepID, "success", executionLog.Success, "inputs_count", len(executionLog.Inputs))
+		}
+	}
+
 	v.mu.Lock()
 	if executionLog != nil {
+		if v.logger != nil {
+			v.logger.Info("🔄 runLoop: About to collect inputs", "stepID", stepID)
+		}
 		executionLog.Inputs = v.collectInputKeysForLog(stepID)
+		if v.logger != nil {
+			v.logger.Info("🔄 runLoop: After collecting inputs", "stepID", stepID, "inputs", executionLog.Inputs)
+		}
 	}
 	v.mu.Unlock()
+
+	if v.logger != nil {
+		v.logger.Info("🔄 runLoop: Returning", "stepID", stepID, "executionLog_exists", executionLog != nil, "error", err)
+	}
+
 	// v.addExecutionLog(executionLog)
 	return executionLog, err // Loop node itself doesn't dictate a jump in the main plan
 }
@@ -2504,11 +2529,13 @@ func validateAllNodeNamesForJavaScript(task *model.Task) error {
 // This function returns the configuration that was used to execute the node
 func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{} {
 	if taskNode == nil {
+		fmt.Printf("🔍 ExtractNodeConfiguration: taskNode is nil\n")
 		return nil
 	}
 
-	// Debug logging to see what nodes are being processed
-	fmt.Printf("🔍 ExtractNodeConfiguration called for node ID: %s, Type: %s\n", taskNode.Id, taskNode.Type.String())
+	// Note: This function is used in isolated execution contexts where logger might not be available
+	// For debugging, we'll use fmt.Printf as a fallback
+	fmt.Printf("🔍 ExtractNodeConfiguration: Processing node ID: %s, Type: %s\n", taskNode.Id, taskNode.Type.String())
 
 	switch taskNode.GetTaskType().(type) {
 	case *avsproto.TaskNode_RestApi:
@@ -2520,167 +2547,56 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				"body":   restApi.Config.Body,
 			}
 
-			// Convert headers map to headersMap format (array of key-value pairs)
-			// Convert to []interface{} containing []interface{} for protobuf compatibility
+			// Handle headers map format
 			if restApi.Config.Headers != nil && len(restApi.Config.Headers) > 0 {
-				// Sort headers by key for consistent ordering
-				keys := make([]string, 0, len(restApi.Config.Headers))
-				for key := range restApi.Config.Headers {
-					keys = append(keys, key)
-				}
-				sort.Strings(keys)
-
-				headersMap := make([]interface{}, 0, len(restApi.Config.Headers))
-				for _, key := range keys {
-					headersMap = append(headersMap, []interface{}{key, restApi.Config.Headers[key]})
-				}
-				config["headersMap"] = headersMap
+				config["headers"] = restApi.Config.Headers
 			}
 
+			fmt.Printf("🔍 ExtractNodeConfiguration: RestApi config extracted: %+v\n", config)
 			return config
 		}
+
+	case *avsproto.TaskNode_Loop:
+		loop := taskNode.GetLoop()
+		fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode - loop exists: %t\n", loop != nil)
+		if loop != nil {
+			fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode - config exists: %t\n", loop.Config != nil)
+			if loop.Config != nil {
+				config := map[string]interface{}{
+					"sourceId": loop.Config.SourceId,
+					"iterVal":  loop.Config.IterVal,
+					"iterKey":  loop.Config.IterKey,
+				}
+
+				// Add execution mode (always include it)
+				config["executionMode"] = loop.Config.ExecutionMode.String()
+
+				// Extract runner information from the oneof field
+				runnerConfig := extractLoopRunnerConfig(loop)
+				if runnerConfig != nil {
+					config["runner"] = runnerConfig
+					fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode - runner config: %+v\n", runnerConfig)
+				}
+
+				fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode config final: %+v\n", config)
+				return config
+			}
+		}
+
 	case *avsproto.TaskNode_CustomCode:
 		customCode := taskNode.GetCustomCode()
 		if customCode != nil && customCode.Config != nil {
-			return map[string]interface{}{
+			config := map[string]interface{}{
+				"lang":   customCode.Config.Lang,
 				"source": customCode.Config.Source,
-				"lang":   customCode.Config.Lang.String(),
-			}
-		}
-	case *avsproto.TaskNode_ContractWrite:
-		contractWrite := taskNode.GetContractWrite()
-		if contractWrite != nil && contractWrite.Config != nil {
-			config := map[string]interface{}{
-				"contractAddress": contractWrite.Config.ContractAddress,
-				"contractAbi":     contractWrite.Config.ContractAbi,
-				"callData":        contractWrite.Config.CallData,
-			}
-			if len(contractWrite.Config.MethodCalls) > 0 {
-				config["methodCalls"] = contractWrite.Config.MethodCalls
-			}
-			return config
-		}
-	case *avsproto.TaskNode_ContractRead:
-		contractRead := taskNode.GetContractRead()
-		if contractRead != nil && contractRead.Config != nil {
-			config := map[string]interface{}{
-				"contractAddress": contractRead.Config.ContractAddress,
-				"contractAbi":     contractRead.Config.ContractAbi,
-			}
-			if len(contractRead.Config.MethodCalls) > 0 {
-				config["methodCalls"] = contractRead.Config.MethodCalls
-			}
-			return config
-		}
-	case *avsproto.TaskNode_EthTransfer:
-		ethTransfer := taskNode.GetEthTransfer()
-		if ethTransfer != nil && ethTransfer.Config != nil {
-			return map[string]interface{}{
-				"destination": ethTransfer.Config.Destination,
-				"amount":      ethTransfer.Config.Amount,
-			}
-		}
-	case *avsproto.TaskNode_GraphqlQuery:
-		graphqlQuery := taskNode.GetGraphqlQuery()
-		if graphqlQuery != nil && graphqlQuery.Config != nil {
-			return map[string]interface{}{
-				"url":       graphqlQuery.Config.Url,
-				"query":     graphqlQuery.Config.Query,
-				"variables": graphqlQuery.Config.Variables,
-			}
-		}
-	case *avsproto.TaskNode_Branch:
-		branch := taskNode.GetBranch()
-		if branch != nil && branch.Config != nil {
-			return map[string]interface{}{
-				"conditions": branch.Config.Conditions,
-			}
-		}
-	case *avsproto.TaskNode_Filter:
-		filter := taskNode.GetFilter()
-		if filter != nil && filter.Config != nil {
-			return map[string]interface{}{
-				"sourceId":   filter.Config.SourceId,
-				"expression": filter.Config.Expression,
-			}
-		}
-	case *avsproto.TaskNode_Loop:
-		loop := taskNode.GetLoop()
-		if loop != nil && loop.Config != nil {
-			config := map[string]interface{}{
-				"sourceId": loop.Config.SourceId,
-				"iterVal":  loop.Config.IterVal,
-				"iterKey":  loop.Config.IterKey,
 			}
 
-			// Add executionMode
-			if loop.Config.ExecutionMode != avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL {
-				config["executionMode"] = loop.Config.ExecutionMode.String()
-			} else {
-				config["executionMode"] = "sequential" // Default value
-			}
-
-			// Add runner information
-			if loop.Runner != nil {
-				switch runner := loop.Runner.(type) {
-				case *avsproto.LoopNode_CustomCode:
-					config["runner"] = map[string]interface{}{
-						"type":   "customCode",
-						"source": runner.CustomCode.Config.Source,
-						"lang":   runner.CustomCode.Config.Lang.String(),
-					}
-				case *avsproto.LoopNode_RestApi:
-					runnerConfig := map[string]interface{}{
-						"type":   "restApi",
-						"url":    runner.RestApi.Config.Url,
-						"method": runner.RestApi.Config.Method,
-						"body":   runner.RestApi.Config.Body,
-					}
-					if runner.RestApi.Config.Headers != nil && len(runner.RestApi.Config.Headers) > 0 {
-						runnerConfig["headers"] = runner.RestApi.Config.Headers
-					}
-					config["runner"] = runnerConfig
-				case *avsproto.LoopNode_ContractRead:
-					runnerConfig := map[string]interface{}{
-						"type":            "contractRead",
-						"contractAddress": runner.ContractRead.Config.ContractAddress,
-						"contractAbi":     runner.ContractRead.Config.ContractAbi,
-					}
-					if len(runner.ContractRead.Config.MethodCalls) > 0 {
-						runnerConfig["methodCalls"] = runner.ContractRead.Config.MethodCalls
-					}
-					config["runner"] = runnerConfig
-				case *avsproto.LoopNode_ContractWrite:
-					runnerConfig := map[string]interface{}{
-						"type":            "contractWrite",
-						"contractAddress": runner.ContractWrite.Config.ContractAddress,
-						"contractAbi":     runner.ContractWrite.Config.ContractAbi,
-						"callData":        runner.ContractWrite.Config.CallData,
-					}
-					if len(runner.ContractWrite.Config.MethodCalls) > 0 {
-						runnerConfig["methodCalls"] = runner.ContractWrite.Config.MethodCalls
-					}
-					config["runner"] = runnerConfig
-				case *avsproto.LoopNode_EthTransfer:
-					config["runner"] = map[string]interface{}{
-						"type":        "ethTransfer",
-						"destination": runner.EthTransfer.Config.Destination,
-						"amount":      runner.EthTransfer.Config.Amount,
-					}
-				case *avsproto.LoopNode_GraphqlDataQuery:
-					config["runner"] = map[string]interface{}{
-						"type":      "graphqlDataQuery",
-						"url":       runner.GraphqlDataQuery.Config.Url,
-						"query":     runner.GraphqlDataQuery.Config.Query,
-						"variables": runner.GraphqlDataQuery.Config.Variables,
-					}
-				}
-			}
-
+			fmt.Printf("🔍 ExtractNodeConfiguration: CustomCode config extracted: %+v\n", config)
 			return config
 		}
 	}
 
+	fmt.Printf("🔍 ExtractNodeConfiguration: No configuration extracted for node type: %s\n", taskNode.Type.String())
 	return nil
 }
 
@@ -2697,22 +2613,145 @@ func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeConfig
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
+	if v.logger != nil {
+		v.logger.Info("🔍 GetNodeDataForExecution: Starting", "stepID", stepID, "taskNodesCount", len(v.TaskNodes))
+	}
+
 	if taskNode, exists := v.TaskNodes[stepID]; exists {
 		nodeName = taskNode.Name
+
+		if v.logger != nil {
+			v.logger.Info("🔍 GetNodeDataForExecution: Found node", "stepID", stepID, "nodeName", nodeName, "nodeType", taskNode.Type.String())
+		}
 
 		// Extract node configuration instead of input data
 		nodeConfigMap := ExtractNodeConfiguration(taskNode)
 
+		if v.logger != nil {
+			v.logger.Info("🔍 GetNodeDataForExecution: After ExtractNodeConfiguration", "stepID", stepID, "configMap_exists", nodeConfigMap != nil)
+			if nodeConfigMap != nil {
+				v.logger.Info("🔍 GetNodeDataForExecution: Config map keys", "stepID", stepID, "keys", getMapKeys(nodeConfigMap))
+			}
+		}
+
 		if nodeConfigMap != nil {
-			if configProto, err := structpb.NewValue(nodeConfigMap); err == nil {
+			// Convert config map to protobuf Value
+			// First convert any map[string]string to map[string]interface{} for protobuf compatibility
+			protobufCompatibleConfig := convertMapStringStringToInterface(nodeConfigMap)
+			if configProto, err := structpb.NewValue(protobufCompatibleConfig); err == nil {
 				nodeConfig = configProto
+				if v.logger != nil {
+					v.logger.Info("🔍 GetNodeDataForExecution: Successfully created protobuf config", "stepID", stepID)
+				}
 			} else {
 				if v.logger != nil {
-					v.logger.Error("Failed to convert config to protobuf", "stepID", stepID, "error", err)
+					v.logger.Error("🔍 GetNodeDataForExecution: Failed to convert config to protobuf", "stepID", stepID, "error", err)
 				}
 			}
+		} else {
+			if v.logger != nil {
+				v.logger.Warn("🔍 GetNodeDataForExecution: Node config map is nil", "stepID", stepID)
+			}
+		}
+	} else {
+		if v.logger != nil {
+			v.logger.Warn("🔍 GetNodeDataForExecution: Node not found", "stepID", stepID)
 		}
 	}
 
+	if v.logger != nil {
+		v.logger.Info("🔍 GetNodeDataForExecution: Returning", "stepID", stepID, "nodeName", nodeName, "nodeConfig_exists", nodeConfig != nil)
+	}
+
 	return nodeName, nodeConfig
+}
+
+// Helper function to extract runner configuration from LoopNode oneof runner field
+func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
+	if loop == nil {
+		return nil
+	}
+
+	switch runner := loop.GetRunner().(type) {
+	case *avsproto.LoopNode_CustomCode:
+		return map[string]interface{}{
+			"type":   "customCode",
+			"source": runner.CustomCode.Config.Source,
+			"lang":   runner.CustomCode.Config.Lang.String(),
+		}
+	case *avsproto.LoopNode_RestApi:
+		config := map[string]interface{}{
+			"type":   "restApi",
+			"url":    runner.RestApi.Config.Url,
+			"method": runner.RestApi.Config.Method,
+			"body":   runner.RestApi.Config.Body,
+		}
+		if runner.RestApi.Config.Headers != nil && len(runner.RestApi.Config.Headers) > 0 {
+			config["headers"] = runner.RestApi.Config.Headers
+		}
+		return config
+	case *avsproto.LoopNode_ContractRead:
+		config := map[string]interface{}{
+			"type":            "contractRead",
+			"contractAddress": runner.ContractRead.Config.ContractAddress,
+			"contractAbi":     runner.ContractRead.Config.ContractAbi,
+		}
+		if len(runner.ContractRead.Config.MethodCalls) > 0 {
+			config["methodCalls"] = runner.ContractRead.Config.MethodCalls
+		}
+		return config
+	case *avsproto.LoopNode_ContractWrite:
+		config := map[string]interface{}{
+			"type":            "contractWrite",
+			"contractAddress": runner.ContractWrite.Config.ContractAddress,
+			"contractAbi":     runner.ContractWrite.Config.ContractAbi,
+			"callData":        runner.ContractWrite.Config.CallData,
+		}
+		if len(runner.ContractWrite.Config.MethodCalls) > 0 {
+			config["methodCalls"] = runner.ContractWrite.Config.MethodCalls
+		}
+		return config
+	case *avsproto.LoopNode_EthTransfer:
+		return map[string]interface{}{
+			"type":        "ethTransfer",
+			"destination": runner.EthTransfer.Config.Destination,
+			"amount":      runner.EthTransfer.Config.Amount,
+		}
+	case *avsproto.LoopNode_GraphqlDataQuery:
+		return map[string]interface{}{
+			"type":      "graphqlDataQuery",
+			"url":       runner.GraphqlDataQuery.Config.Url,
+			"query":     runner.GraphqlDataQuery.Config.Query,
+			"variables": runner.GraphqlDataQuery.Config.Variables,
+		}
+	}
+
+	return nil
+}
+
+// Helper function to convert map[string]string to map[string]interface{} for protobuf compatibility
+func convertMapStringStringToInterface(input map[string]interface{}) map[string]interface{} {
+	if input == nil {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+	for key, value := range input {
+		switch v := value.(type) {
+		case map[string]string:
+			// Convert map[string]string to map[string]interface{}
+			interfaceMap := make(map[string]interface{})
+			for k, val := range v {
+				interfaceMap[k] = val
+			}
+			result[key] = interfaceMap
+		case map[string]interface{}:
+			// Recursively convert nested maps
+			result[key] = convertMapStringStringToInterface(v)
+		default:
+			// Keep other types as-is
+			result[key] = value
+		}
+	}
+	return result
 }

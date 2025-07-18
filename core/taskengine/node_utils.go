@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"fmt"
 	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -11,13 +12,24 @@ import (
 func buildTriggerVariableData(trigger *avsproto.TaskTrigger, triggerDataMap map[string]interface{}, triggerInputData map[string]interface{}) map[string]any {
 	triggerVarData := map[string]any{}
 
-	// For all trigger types, put all output data under the .data field
-	// This ensures consistent access pattern: triggerName.data.field
-	if len(triggerDataMap) > 0 {
-		triggerVarData["data"] = triggerDataMap
+	// For manual triggers, avoid double-wrapping by returning the data directly
+	if trigger != nil && trigger.GetType() == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
+		// For manual triggers, the triggerDataMap already contains the data structure
+		// Return it directly to avoid double-wrapping
+		if len(triggerDataMap) > 0 {
+			for key, value := range triggerDataMap {
+				triggerVarData[key] = value
+			}
+		}
 	} else {
-		// Handle the case where triggers have no data to prevent template resolution issues
-		triggerVarData["data"] = nil
+		// For all other trigger types, put all output data under the .data field
+		// This ensures consistent access pattern: triggerName.data.field
+		if len(triggerDataMap) > 0 {
+			triggerVarData["data"] = triggerDataMap
+		} else {
+			// Handle the case where triggers have no data to prevent template resolution issues
+			triggerVarData["data"] = nil
+		}
 	}
 
 	// Add trigger input data if available
@@ -55,7 +67,24 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 	// Get node data using helper function to reduce duplication
 	nodeName, nodeConfig := vm.GetNodeDataForExecution(stepID)
 
-	return &avsproto.Execution_Step{
+	// Debug logging
+	if vm.logger != nil {
+		vm.logger.Info("🔧 createNodeExecutionStep: Creating execution step",
+			"stepID", stepID,
+			"nodeType", nodeType.String(),
+			"nodeName", nodeName,
+			"nodeConfig_exists", nodeConfig != nil)
+
+		if nodeConfig != nil {
+			// Log the content of nodeConfig
+			vm.logger.Info("🔧 createNodeExecutionStep: Node config details",
+				"stepID", stepID,
+				"nodeConfig_type", fmt.Sprintf("%T", nodeConfig),
+				"nodeConfig_string", nodeConfig.String())
+		}
+	}
+
+	step := &avsproto.Execution_Step{
 		Id:         stepID,
 		OutputData: nil,
 		Log:        "",
@@ -66,6 +95,15 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 		Name:       nodeName,
 		Input:      nodeConfig, // Include node configuration for debugging
 	}
+
+	// Log the final step
+	if vm.logger != nil {
+		vm.logger.Info("🔧 createNodeExecutionStep: Created execution step",
+			"stepID", stepID,
+			"step_input_exists", step.Input != nil)
+	}
+
+	return step
 }
 
 // setNodeOutputData sets the output data for a node execution step
