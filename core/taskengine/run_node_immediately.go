@@ -1271,15 +1271,71 @@ func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Ad
 
 // runManualTriggerImmediately executes a manual trigger immediately
 func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
-	// Manual triggers are perfect for immediate execution
-	result := map[string]interface{}{
-		"triggered": true,
-		"runAt":     uint64(time.Now().Unix()),
+	fmt.Printf("🔍 runManualTriggerImmediately called with triggerConfig: %+v\n", triggerConfig)
+	result := map[string]interface{}{}
+
+	// The main purpose of manual triggers is to return user-defined data
+	// Check for data in triggerConfig first, then inputVariables as fallback
+	if data, exists := triggerConfig["data"]; exists && data != nil {
+		result["data"] = data
+		if n.logger != nil {
+			n.logger.Info("ManualTrigger executed with config data", "dataType", fmt.Sprintf("%T", data))
+		}
+	} else if len(inputVariables) > 0 {
+		// If no data in config, use inputVariables as the data
+		result["data"] = inputVariables
+		if n.logger != nil {
+			n.logger.Info("ManualTrigger executed with input variables", "inputCount", len(inputVariables))
+		}
+	} else {
+		if n.logger != nil {
+			n.logger.Info("ManualTrigger executed without data")
+		}
+		// For null/undefined data, set data to null explicitly
+		result["data"] = nil
 	}
 
-	if n.logger != nil {
-		n.logger.Info("ManualTrigger executed immediately")
+	// Include headers for webhook testing if provided - convert from array format to map format
+	if headers, exists := triggerConfig["headers"]; exists && headers != nil {
+		fmt.Printf("🔍 Headers found in triggerConfig: %+v (type: %T)\n", headers, headers)
+		if headersArray, ok := headers.([]interface{}); ok {
+			// Convert array of objects to map format
+			convertedHeaders := convertArrayOfObjectsToProtobufCompatible(headersArray)
+			result["headers"] = convertedHeaders
+			fmt.Printf("✅ Headers converted from array: %+v\n", convertedHeaders)
+		} else {
+			// Already in map format
+			result["headers"] = headers
+			fmt.Printf("✅ Headers already in map format: %+v\n", headers)
+		}
+		if n.logger != nil {
+			n.logger.Info("ManualTrigger executed with headers", "headersType", fmt.Sprintf("%T", headers))
+		}
+	} else {
+		fmt.Printf("❌ No headers found in triggerConfig\n")
 	}
+
+	// Include path parameters for webhook testing if provided - convert from array format to map format
+	if pathParams, exists := triggerConfig["pathParams"]; exists && pathParams != nil {
+		fmt.Printf("🔍 PathParams found in triggerConfig: %+v (type: %T)\n", pathParams, pathParams)
+		if pathParamsArray, ok := pathParams.([]interface{}); ok {
+			// Convert array of objects to map format
+			convertedPathParams := convertArrayOfObjectsToProtobufCompatible(pathParamsArray)
+			result["pathParams"] = convertedPathParams
+			fmt.Printf("✅ PathParams converted from array: %+v\n", convertedPathParams)
+		} else {
+			// Already in map format
+			result["pathParams"] = pathParams
+			fmt.Printf("✅ PathParams already in map format: %+v\n", pathParams)
+		}
+		if n.logger != nil {
+			n.logger.Info("ManualTrigger executed with pathParams", "pathParamsType", fmt.Sprintf("%T", pathParams))
+		}
+	} else {
+		fmt.Printf("❌ No pathParams found in triggerConfig\n")
+	}
+
+	fmt.Printf("🔍 runManualTriggerImmediately returning result: %+v\n", result)
 	return result, nil
 }
 
@@ -1319,6 +1375,11 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 	node, err := CreateNodeFromType(nodeType, nodeConfig, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create node: %w", err)
+	}
+
+	// Validate node name for JavaScript compatibility
+	if err := model.ValidateNodeNameForJavaScript(node.Name); err != nil {
+		return nil, fmt.Errorf("node name validation failed: %w", err)
 	}
 
 	// Execute the node with processed input variables
@@ -2223,8 +2284,58 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		// Always set manual trigger output, even if result is nil
 		manualOutput := &avsproto.ManualTrigger_Output{}
 		if result != nil {
-			if runAt, ok := result["runAt"].(uint64); ok {
-				manualOutput.RunAt = runAt
+			// Include user-defined data - this is the main payload for manual triggers
+			if dataValue, exists := result["data"]; exists {
+				if pbValue, err := structpb.NewValue(dataValue); err == nil {
+					manualOutput.Data = pbValue
+				}
+			}
+			// Include headers for webhook testing - now using map format
+			if headersValue, exists := result["headers"]; exists {
+				if n.logger != nil {
+					n.logger.Info("🔍 Headers found in result", "headersValue", headersValue, "type", fmt.Sprintf("%T", headersValue))
+				}
+				if headersMap, ok := headersValue.(map[string]string); ok {
+					manualOutput.Headers = headersMap
+					if n.logger != nil {
+						n.logger.Info("✅ Headers set as map[string]string", "headers", headersMap)
+					}
+				} else if headersMapInterface, ok := headersValue.(map[string]interface{}); ok {
+					// Convert map[string]interface{} to map[string]string
+					stringHeaders := make(map[string]string)
+					for k, v := range headersMapInterface {
+						if strValue, ok := v.(string); ok {
+							stringHeaders[k] = strValue
+						}
+					}
+					manualOutput.Headers = stringHeaders
+					if n.logger != nil {
+						n.logger.Info("✅ Headers converted from map[string]interface{}", "headers", stringHeaders)
+					}
+				} else {
+					if n.logger != nil {
+						n.logger.Warn("❌ Headers type not supported", "type", fmt.Sprintf("%T", headersValue))
+					}
+				}
+			} else {
+				if n.logger != nil {
+					n.logger.Info("❌ No headers found in result")
+				}
+			}
+			// Include path parameters for webhook testing - now using map format
+			if pathParamsValue, exists := result["pathParams"]; exists {
+				if pathParamsMap, ok := pathParamsValue.(map[string]string); ok {
+					manualOutput.PathParams = pathParamsMap
+				} else if pathParamsMapInterface, ok := pathParamsValue.(map[string]interface{}); ok {
+					// Convert map[string]interface{} to map[string]string
+					stringPathParams := make(map[string]string)
+					for k, v := range pathParamsMapInterface {
+						if strValue, ok := v.(string); ok {
+							stringPathParams[k] = strValue
+						}
+					}
+					manualOutput.PathParams = stringPathParams
+				}
 			}
 		}
 		resp.OutputData = &avsproto.RunTriggerResp_ManualTrigger{

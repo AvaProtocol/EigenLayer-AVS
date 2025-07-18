@@ -549,7 +549,7 @@ func TestExecutorRunTaskWithBlockTriggerOutputData(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "eth_transfer_1",
-			Name: "Transfer ETH",
+			Name: "TransferETH",
 			TaskType: &avsproto.TaskNode_EthTransfer{
 				EthTransfer: &avsproto.ETHTransferNode{
 					Config: &avsproto.ETHTransferNode_Config{
@@ -634,7 +634,7 @@ func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "eth_transfer_1",
-			Name: "Transfer ETH",
+			Name: "TransferETH",
 			TaskType: &avsproto.TaskNode_EthTransfer{
 				EthTransfer: &avsproto.ETHTransferNode{
 					Config: &avsproto.ETHTransferNode_Config{
@@ -706,7 +706,7 @@ func TestExecutorRunTaskWithCronTriggerOutputData(t *testing.T) {
 	nodes := []*avsproto.TaskNode{
 		{
 			Id:   "eth_transfer_1",
-			Name: "Transfer ETH",
+			Name: "TransferETH",
 			TaskType: &avsproto.TaskNode_EthTransfer{
 				EthTransfer: &avsproto.ETHTransferNode{
 					Config: &avsproto.ETHTransferNode_Config{

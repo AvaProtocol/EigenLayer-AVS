@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/dop251/goja"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -183,22 +182,8 @@ func containsReturnStatement(code string) bool {
 }
 
 func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
-	t0 := time.Now()
-
-	// Get node data using helper function to reduce duplication
-	nodeName, nodeInput := r.vm.GetNodeDataForExecution(stepID)
-
-	s := &avsproto.Execution_Step{
-		Id:         stepID,
-		OutputData: nil,
-		Log:        "",
-		Error:      "",
-		Success:    true,
-		StartAt:    t0.UnixMilli(),
-		Type:       avsproto.NodeType_NODE_TYPE_CUSTOM_CODE.String(),
-		Name:       nodeName,
-		Input:      nodeInput, // Include node input data for debugging
-	}
+	// Use shared function to create execution step
+	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_CUSTOM_CODE, r.vm)
 
 	var sb strings.Builder
 	sb.WriteString("Execute Custom Code: ")
@@ -207,11 +192,8 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	// Get configuration from Config message (static configuration)
 	if node.Config == nil {
 		err := fmt.Errorf("CustomCodeNode Config is nil")
-		s.Success = false
-		s.Error = err.Error()
-		s.EndAt = time.Now().UnixMilli()
 		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		s.Log = sb.String()
+		finalizeExecutionStep(s, false, err.Error(), sb.String())
 		return s, err
 	}
 
@@ -220,11 +202,8 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 
 	if sourceStr == "" {
 		err := fmt.Errorf("missing required configuration: source")
-		s.Success = false
-		s.Error = err.Error()
-		s.EndAt = time.Now().UnixMilli()
 		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		s.Log = sb.String()
+		finalizeExecutionStep(s, false, err.Error(), sb.String())
 		return s, err
 	}
 
@@ -243,11 +222,9 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 			if r.vm.logger != nil {
 				r.vm.logger.Error("failed to set variable in JS VM", "key", key, "error", err)
 			}
-			s.Success = false
-			s.Error = fmt.Sprintf("Failed to set JS variable '%s': %v", key, err)
+			errMsg := fmt.Sprintf("Failed to set JS variable '%s': %v", key, err)
 			sb.WriteString(fmt.Sprintf("\nError setting JS variable '%s': %v", key, err))
-			s.Log = sb.String()
-			s.EndAt = time.Now().UnixMilli()
+			finalizeExecutionStep(s, false, errMsg, sb.String())
 			return s, fmt.Errorf("failed to set JS variable '%s': %w", key, err)
 		}
 	}
@@ -269,11 +246,8 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	// Execute the script
 	result, err := r.jsvm.RunString(codeToExecute)
 	if err != nil {
-		s.Success = false
-		s.Error = err.Error()
 		sb.WriteString(fmt.Sprintf("\nError executing script: %s", err.Error()))
-		s.Log = sb.String()
-		s.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(s, false, err.Error(), sb.String())
 		return s, err
 	}
 
@@ -281,24 +255,24 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	exportedVal := result.Export()
 	outputStruct, err := structpb.NewValue(exportedVal)
 	if err != nil {
-		s.Success = false
-		s.Error = err.Error()
 		sb.WriteString(fmt.Sprintf("\nError converting execution result to Value: %s", err.Error()))
-		s.Log = sb.String()
-		s.EndAt = time.Now().UnixMilli()
+		finalizeExecutionStep(s, false, err.Error(), sb.String())
 		return s, err
 	}
+
 	s.OutputData = &avsproto.Execution_Step_CustomCode{
 		CustomCode: &avsproto.CustomCodeNode_Output{
 			Data: outputStruct,
 		},
 	}
 
-	// Set the output variable in the VM
-	r.SetOutputVarForStep(stepID, exportedVal) // This method in CommonProcessor handles its own locking
+	// Use shared function to set output variable for this step
+	setNodeOutputData(r.CommonProcessor, stepID, exportedVal)
 
 	sb.WriteString(fmt.Sprintf("\nExecution result: %v", exportedVal))
-	s.Log = sb.String()
-	s.EndAt = time.Now().UnixMilli()
+
+	// Use shared function to finalize execution step with success
+	finalizeExecutionStep(s, true, "", sb.String())
+
 	return s, nil
 }

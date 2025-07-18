@@ -247,8 +247,16 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 			}
 		}
 	case *avsproto.TaskTrigger_Manual:
-		// Manual triggers typically don't have configuration
-		triggerConfig["manual"] = trigger.GetManual()
+		manualTrigger := trigger.GetManual()
+		if manualTrigger != nil && manualTrigger.Config != nil {
+			// Use the generic protobuf to map converter for consistency with other triggers
+			configMap, err := gow.ProtoToMap(manualTrigger.Config)
+			if err == nil {
+				for key, value := range configMap {
+					triggerConfig[key] = value
+				}
+			}
+		}
 	default:
 		// Handle unforeseen trigger types by returning empty configuration
 		// This ensures consistent behavior for unknown or future trigger types

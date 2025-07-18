@@ -435,7 +435,7 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 	trigger := &avsproto.TaskTrigger{
 		Id:          triggerID,
 		Name:        "Template Trigger",
-		TriggerType: &avsproto.TaskTrigger_Manual{Manual: true},
+		TriggerType: &avsproto.TaskTrigger_Manual{},
 	}
 
 	edges := []*avsproto.TaskEdge{

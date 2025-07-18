@@ -125,6 +125,11 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		return nil, fmt.Errorf("internal error: invalid execution id")
 	}
 
+	// Validate all node names for JavaScript compatibility
+	if err := validateAllNodeNamesForJavaScript(task); err != nil {
+		return nil, fmt.Errorf("node name validation failed: %w", err)
+	}
+
 	// Convert queue data back to the format expected by the VM
 	triggerReason := GetTriggerReasonOrDefault(queueData, task.Id, x.logger)
 
@@ -166,23 +171,17 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	vm.WithLogger(x.logger).WithDb(x.db)
 	initialTaskStatus := task.Status
 
-	// Extract and add trigger input data if available
+	// Extract and add trigger input data if available using shared functions
 	triggerInputData := ExtractTriggerInputData(task.Trigger)
-	if triggerInputData != nil {
-		// Get the trigger variable name and add input data
+	if triggerInputData != nil && task.Trigger != nil {
+		// Get the trigger variable name and update trigger variable using shared function
 		triggerVarName := sanitizeTriggerNameForJS(task.Trigger.GetName())
-		vm.mu.Lock()
-		existingTriggerVar := vm.vars[triggerVarName]
-		if existingMap, ok := existingTriggerVar.(map[string]any); ok {
-			existingMap["input"] = triggerInputData
-			vm.vars[triggerVarName] = existingMap
-		} else {
-			// Create new trigger variable with input data
-			vm.vars[triggerVarName] = map[string]any{
-				"input": triggerInputData,
-			}
-		}
-		vm.mu.Unlock()
+
+		// Build trigger variable data using shared function (with empty triggerDataMap since we're just adding input)
+		triggerVarData := buildTriggerVariableData(task.Trigger, map[string]interface{}{}, triggerInputData)
+
+		// Update trigger variable in VM using shared function
+		updateTriggerVariableInVM(vm, triggerVarName, triggerVarData)
 	}
 
 	if err != nil {
@@ -214,13 +213,14 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		// This ensures regular workflows have complete execution history (trigger + nodes)
 
 		// Create trigger step similar to SimulateTask
-		// Extract trigger input data using the proper extraction function
-		triggerInputData := ExtractTriggerInputData(task.Trigger)
-		var triggerInputProto *structpb.Value
-		if triggerInputData != nil {
-			triggerInputProto, err = structpb.NewValue(triggerInputData)
-			if err != nil {
-				x.logger.Warn("Failed to convert trigger input data to protobuf", "error", err)
+		// Use trigger configuration instead of input data for the execution step's Input field
+		var triggerConfigProto *structpb.Value
+		triggerConfig := TaskTriggerToConfig(task.Trigger)
+		if len(triggerConfig) > 0 {
+			if configProto, err := structpb.NewValue(triggerConfig); err != nil {
+				x.logger.Warn("Failed to convert trigger config to protobuf", "error", err)
+			} else {
+				triggerConfigProto = configProto
 			}
 		}
 
@@ -234,7 +234,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 			Inputs:  []string{}, // Empty inputs for trigger steps
 			Type:    queueData.TriggerType.String(),
 			Name:    task.Trigger.Name,
-			Input:   triggerInputProto, // Include extracted trigger input data for debugging
+			Input:   triggerConfigProto, // Include trigger configuration for debugging
 		}
 
 		// Set trigger output data in the step based on trigger type
