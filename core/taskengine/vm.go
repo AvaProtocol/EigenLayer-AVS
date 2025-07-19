@@ -572,6 +572,17 @@ func (v *VM) Compile() error {
 			return fmt.Errorf("compile error: target node '%s' in edge '%s' not in TaskNodes", edge.Target, edge.Id)
 		}
 		adj[edge.Source] = append(adj[edge.Source], edge.Target)
+
+		// Debug logging for edge processing
+		if v.logger != nil {
+			v.logger.Info("🔧 VM.Compile: Processing edge",
+				"edgeID", edge.Id,
+				"source", edge.Source,
+				"target", edge.Target,
+				"isBranchSource", isBranchSource,
+				"isTriggerSource", isTriggerSource)
+		}
+
 		// Only count in-degree for edges from actual TaskNodes or triggers
 		// Branch condition edges don't count toward in-degree since they're not real nodes
 		if !isBranchSource {
@@ -638,7 +649,27 @@ func (v *VM) Compile() error {
 	}
 
 	if v.entrypoint == "" {
-		if len(q) > 0 {
+		// If we have a trigger, set it as the entrypoint so vm.Run() can handle the fan-out
+		if v.task.Trigger != nil && v.task.Trigger.Id != "" {
+			v.entrypoint = v.task.Trigger.Id
+			// Add the trigger to the plans so vm.Run() can process it
+			triggerPlan := &Step{NodeID: v.task.Trigger.Id}
+			if nextNodeIDs, ok := adj[v.task.Trigger.Id]; ok {
+				triggerPlan.Next = nextNodeIDs
+				// Debug logging to see what nodes are connected to the trigger
+				if v.logger != nil {
+					v.logger.Info("🔧 VM.Compile: Created trigger plan",
+						"triggerID", v.task.Trigger.Id,
+						"nextNodesCount", len(nextNodeIDs),
+						"nextNodes", nextNodeIDs)
+				}
+			} else {
+				if v.logger != nil {
+					v.logger.Warn("🔧 VM.Compile: No adjacency found for trigger", "triggerID", v.task.Trigger.Id)
+				}
+			}
+			v.plans[v.task.Trigger.Id] = triggerPlan
+		} else if len(q) > 0 {
 			v.entrypoint = q[0]
 		} else if len(v.TaskNodes) > 0 {
 			return fmt.Errorf(invalidEntrypoint + ": no entry point identified (queue empty after all checks)")
@@ -780,6 +811,7 @@ func (v *VM) Run() error {
 		v.mu.Lock() // Lock for accessing TaskNodes and plans
 		stepToExecute = currentStep
 		node, ok = v.TaskNodes[stepToExecute.NodeID]
+
 		v.mu.Unlock()
 
 		if !ok {
@@ -787,21 +819,67 @@ func (v *VM) Run() error {
 			// but it doesn't map directly to a TaskNode (it's a conceptual step).
 			// The actual jump should have been resolved by executeNode (branch).
 			// If we reach here with a non-TaskNode ID, it's likely a conceptual step like "branch1.a1"
-			// that should immediately proceed to its Next nodes.
+			// or a trigger that should immediately proceed to its Next nodes.
 			v.mu.Lock()
-			if len(stepToExecute.Next) > 0 {
-				nextStepID := stepToExecute.Next[0]
-				currentStep = v.plans[nextStepID]
-				v.mu.Unlock()
-				continue
+			if len(stepToExecute.Next) == 0 {
+				currentStep = nil // End of this path
+			} else if len(stepToExecute.Next) == 1 {
+				// Single next step - normal sequential execution
+				currentStep = v.plans[stepToExecute.Next[0]]
+			} else {
+				// Multiple next steps - queue all for execution in the main loop
+				// This handles cases like triggers that fan out to multiple nodes
+				if v.logger != nil {
+					v.logger.Info("🔄 Processing multiple next steps", "count", len(stepToExecute.Next), "steps", stepToExecute.Next)
+				}
+
+				// Create a simple queue of steps to execute
+				stepQueue := make([]*Step, 0, len(stepToExecute.Next))
+				for _, nextStepID := range stepToExecute.Next {
+					if nextStep, exists := v.plans[nextStepID]; exists {
+						stepQueue = append(stepQueue, nextStep)
+					}
+				}
+
+				// Process all steps in the queue sequentially
+				for i, step := range stepQueue {
+					if v.logger != nil {
+						v.logger.Info("🔄 Processing queued step", "step", step.NodeID, "index", i+1, "total", len(stepQueue))
+					}
+
+					// Set current step and let the main loop process it
+					if i == 0 {
+						// First step becomes the current step for this iteration
+						currentStep = step
+					} else {
+						// For additional steps, we need to process them immediately
+						// since the main loop will only process currentStep
+						if node, nodeExists := v.TaskNodes[step.NodeID]; nodeExists {
+							v.mu.Unlock() // Unlock before calling executeNode to avoid deadlock
+							if v.logger != nil {
+								v.logger.Info("🔄 Executing queued node", "nodeID", step.NodeID)
+							}
+							_, err := v.executeNode(node)
+							if err != nil && v.logger != nil {
+								v.logger.Error("🔄 Error executing queued node", "nodeID", step.NodeID, "error", err)
+							} else if v.logger != nil {
+								v.logger.Info("🔄 Successfully executed queued node", "nodeID", step.NodeID)
+							}
+							v.mu.Lock() // Re-lock for the next iteration
+						}
+					}
+				}
+
+				if v.logger != nil {
+					v.logger.Info("🔄 Completed processing all queued steps", "processedCount", len(stepQueue))
+				}
 			}
 			v.mu.Unlock()
-			// If no next step, end execution
-			currentStep = nil
 			continue
 		}
 
 		jump, err := v.executeNode(node) // executeNode calls sub-processors which should use AddVar for VM state changes
+
 		if err != nil {
 			// Instead of aborting on first error, we now continue execution
 			// The failed step should already be logged by executeNode/runXXX methods
@@ -841,15 +919,157 @@ func (v *VM) Run() error {
 		} else { // No jump, proceed to next in sequence
 			if len(stepToExecute.Next) == 0 {
 				currentStep = nil // End of this path
-			} else {
-				// TODO: Support multiple next for parallel execution paths if VM.Run is to manage them.
-				// For now, taking the first.
+			} else if len(stepToExecute.Next) == 1 {
+				// Single next step - normal sequential execution
 				currentStep = v.plans[stepToExecute.Next[0]]
+			} else {
+				// Multiple next steps - execute all sequentially
+				// This handles cases like triggers that fan out to multiple nodes
+				for _, nextStepID := range stepToExecute.Next {
+					if nextStep, exists := v.plans[nextStepID]; exists {
+						v.executeSequentialPath(nextStep)
+					}
+				}
+				currentStep = nil // End execution after all paths complete
 			}
 		}
 		v.mu.Unlock()
 	}
 	return nil
+}
+
+// executeSequentialPath executes a sequential execution path starting from the given step
+// This method is used when a node (like a trigger) fans out to multiple target nodes
+func (v *VM) executeSequentialPath(startStep *Step) {
+	if startStep == nil {
+		return
+	}
+
+	currentStep := startStep
+
+	for currentStep != nil {
+		var node *avsproto.TaskNode
+		var ok bool
+		var stepToExecute *Step
+
+		v.mu.Lock() // Lock for accessing TaskNodes and plans
+		stepToExecute = currentStep
+		node, ok = v.TaskNodes[stepToExecute.NodeID]
+		v.mu.Unlock()
+
+		if !ok {
+			// Handle conceptual steps like branch conditions
+			v.mu.Lock()
+			if len(stepToExecute.Next) > 0 {
+				nextStepID := stepToExecute.Next[0]
+				currentStep = v.plans[nextStepID]
+				v.mu.Unlock()
+				continue
+			}
+			v.mu.Unlock()
+			currentStep = nil
+			continue
+		}
+
+		jump, err := v.executeNode(node)
+		if err != nil {
+			// Log error but continue execution in this parallel path
+			if v.logger != nil {
+				errorMsg := err.Error()
+				stackTraceRegex := regexp.MustCompile(`(?m)^\s*at .*$`)
+				errorMsg = stackTraceRegex.ReplaceAllString(errorMsg, "")
+				errorMsg = strings.TrimSpace(errorMsg)
+
+				if isExpectedValidationError(err) {
+					v.logger.Warn("sequential path node execution failed, continuing", "nodeID", node.Id, "error", errorMsg)
+				} else {
+					v.logger.Error("sequential path node execution failed, continuing", "nodeID", node.Id, "error", errorMsg)
+				}
+			}
+
+			// Continue to next step in this sequential path
+			v.mu.Lock()
+			if len(stepToExecute.Next) == 0 {
+				currentStep = nil
+			} else {
+				currentStep = v.plans[stepToExecute.Next[0]]
+			}
+			v.mu.Unlock()
+			continue
+		}
+
+		v.mu.Lock()
+		if jump != nil { // A jump occurred (e.g. from a branch)
+			currentStep = jump
+		} else { // No jump, proceed to next in sequence
+			if len(stepToExecute.Next) == 0 {
+				currentStep = nil // End of this sequential path
+			} else {
+				// In sequential paths, we only follow the first next step (no further fan-out)
+				currentStep = v.plans[stepToExecute.Next[0]]
+			}
+		}
+		v.mu.Unlock()
+	}
+}
+
+// executeIndependentPath executes a single node independently
+// This method is used when a trigger fans out to multiple target nodes that should be executed independently
+func (v *VM) executeIndependentPath(startStep *Step) {
+	if startStep == nil {
+		if v.logger != nil {
+			v.logger.Warn("🔄 executeIndependentPath: startStep is nil")
+		}
+		return
+	}
+
+	if v.logger != nil {
+		v.logger.Info("🔄 executeIndependentPath: Starting execution", "nodeID", startStep.NodeID)
+	}
+
+	var node *avsproto.TaskNode
+	var ok bool
+
+	v.mu.Lock() // Lock for accessing TaskNodes
+	node, ok = v.TaskNodes[startStep.NodeID]
+	v.mu.Unlock()
+
+	if !ok {
+		// Handle conceptual steps like branch conditions - skip if not a real node
+		if v.logger != nil {
+			v.logger.Debug("executeIndependentPath: skipping non-TaskNode step", "nodeID", startStep.NodeID)
+		}
+		return
+	}
+
+	if v.logger != nil {
+		v.logger.Info("🔄 executeIndependentPath: Found TaskNode, executing",
+			"nodeID", startStep.NodeID,
+			"nodeType", node.Type.String(),
+			"nodeName", node.Name)
+	}
+
+	// Execute the single node independently
+	_, err := v.executeNode(node)
+	if err != nil {
+		// Log error but don't propagate since this is independent execution
+		if v.logger != nil {
+			errorMsg := err.Error()
+			stackTraceRegex := regexp.MustCompile(`(?m)^\s*at .*$`)
+			errorMsg = stackTraceRegex.ReplaceAllString(errorMsg, "")
+			errorMsg = strings.TrimSpace(errorMsg)
+
+			if isExpectedValidationError(err) {
+				v.logger.Warn("independent path node execution failed", "nodeID", node.Id, "error", errorMsg)
+			} else {
+				v.logger.Error("independent path node execution failed", "nodeID", node.Id, "error", errorMsg)
+			}
+		}
+	} else {
+		if v.logger != nil {
+			v.logger.Info("🔄 executeIndependentPath: Successfully executed node", "nodeID", startStep.NodeID)
+		}
+	}
 }
 
 func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
@@ -2581,7 +2801,7 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 		customCode := taskNode.GetCustomCode()
 		if customCode != nil && customCode.Config != nil {
 			config := map[string]interface{}{
-				"lang":   customCode.Config.Lang,
+				"lang":   customCode.Config.Lang.String(),
 				"source": customCode.Config.Source,
 			}
 
@@ -2955,4 +3175,69 @@ func convertConfigForFrontend(input map[string]interface{}) map[string]interface
 		}
 	}
 	return result
+}
+
+// executeStepInMainLoop executes a single step in the main execution loop context
+// This method is used when a trigger fans out to multiple target nodes that should be executed sequentially
+func (v *VM) executeStepInMainLoop(step *Step) {
+	if step == nil {
+		if v.logger != nil {
+			v.logger.Warn("🔄 executeStepInMainLoop: step is nil")
+		}
+		return
+	}
+
+	if v.logger != nil {
+		v.logger.Info("🔄 executeStepInMainLoop: Starting execution", "nodeID", step.NodeID)
+	}
+
+	var node *avsproto.TaskNode
+	var ok bool
+
+	v.mu.Lock() // Lock for accessing TaskNodes
+	node, ok = v.TaskNodes[step.NodeID]
+	v.mu.Unlock()
+
+	if !ok {
+		// Handle conceptual steps like branch conditions - skip if not a real node
+		if v.logger != nil {
+			v.logger.Debug("executeStepInMainLoop: skipping non-TaskNode step", "nodeID", step.NodeID)
+		}
+		return
+	}
+
+	if v.logger != nil {
+		v.logger.Info("🔄 executeStepInMainLoop: Found TaskNode, executing",
+			"nodeID", step.NodeID,
+			"nodeType", node.Type.String(),
+			"nodeName", node.Name)
+	}
+
+	// Execute the single node
+	_, err := v.executeNode(node)
+	if err != nil {
+		// Log error but continue with other steps
+		if v.logger != nil {
+			errorMsg := err.Error()
+			stackTraceRegex := regexp.MustCompile(`(?m)^\s*at .*$`)
+			errorMsg = stackTraceRegex.ReplaceAllString(errorMsg, "")
+			errorMsg = strings.TrimSpace(errorMsg)
+
+			if isExpectedValidationError(err) {
+				v.logger.Warn("main loop step execution failed", "nodeID", node.Id, "error", errorMsg)
+			} else {
+				v.logger.Error("main loop step execution failed", "nodeID", node.Id, "error", errorMsg)
+			}
+		}
+
+		// Create a failed execution step and add it to the logs
+		failedStep := v.createExecutionStep(node.Id, false, err.Error(), fmt.Sprintf("Node execution failed: %s", err.Error()), time.Now().UnixMilli())
+		failedStep.EndAt = time.Now().UnixMilli()
+		v.addExecutionLog(failedStep)
+
+	} else {
+		if v.logger != nil {
+			v.logger.Info("🔄 executeStepInMainLoop: Successfully executed node", "nodeID", step.NodeID)
+		}
+	}
 }

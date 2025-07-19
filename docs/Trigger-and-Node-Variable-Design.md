@@ -433,22 +433,14 @@ Filter nodes filter data based on conditions.
 // Filter node variable structure
 filterNode = {
   data: {
-    // Runtime output from filter operation
-    passed: true,
-    result: {
-      // Filtered data that passed the condition
-      value: "1500000000000000000",
-      from: "0x...",
-      to: "0x...",
-      tokenSymbol: "USDC"
-    },
-    filterExpression: "value > 1000000000000000000"  // 1 ETH
+    // Runtime output from filter operation - the filtered result
+    key: "value1"  // Data that passed the filter condition
   },
   input: {
     // Configuration for filtering
-    expression: "eventTrigger.data.value > 1000000000000000000",
-    sourceData: "eventTrigger.data",
-    description: "Filter large transfers only"
+    inputNodeName: "manualTrigger",  // Node name to get data from
+    expression: "value.key === 'value1'",  // Filter expression
+    description: "Filter items with specific key value"
   }
 }
 ```
@@ -460,25 +452,28 @@ Loop nodes iterate over arrays or objects.
 ```javascript
 // Loop node variable structure
 loopNode = {
-  data: {
-    // Runtime output from loop execution
-    results: [
-      "item1_processed",
-      "item2_processed", 
-      "item3_processed"
-    ],
-    totalIterations: 3,
-    successfulIterations: 3,
-    failedIterations: 0,
-    executionMode: "sequential"
-  },
+  data: [
+    // Runtime output from loop execution - flat array of results
+    "item1_processed",
+    "item2_processed", 
+    "item3_processed"
+  ],
   input: {
     // Configuration for loop operation
-    sourceId: "manualTrigger.data",  // Array to iterate over
+    inputNodeName: "manualTrigger",  // Node name to get array from
     iterVal: "item",                 // Variable name for current item
     iterKey: "index",                // Variable name for current index
     executionMode: "sequential",     // or "parallel"
-    maxIterations: 100
+    maxIterations: 100,
+    runner: {
+      type: "customCode",            // Loop runner type
+      data: {
+        config: {
+          lang: "JavaScript",
+          source: "return item + '_processed';"
+        }
+      }
+    }
   }
 }
 ```
@@ -768,7 +763,7 @@ manualTrigger.data = [
 {
   "type": "loop",
   "config": {
-    "sourceId": "manualTrigger",  // Access the full data array
+    "inputNodeName": "manualTrigger",  // Access the full data array
     "iterVal": "item",
     "iterKey": "index",
     "executionMode": "sequential",
@@ -782,8 +777,8 @@ manualTrigger.data = [
   }
 }
 
-// Loop node output
-loopNode.data.results = [
+// Loop node output - flat array of results
+loopNode.data = [
   "item1: 200",
   "item2: 400", 
   "item3: 600"

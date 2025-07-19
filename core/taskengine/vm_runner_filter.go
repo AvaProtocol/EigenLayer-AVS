@@ -241,6 +241,7 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 			},
 		}
 		// Use shared function to set output variable for this step
+		// Set the actual filtered results directly, not the protobuf-encoded version
 		setNodeOutputData(r.CommonProcessor, stepID, filteredResult)
 	}
 
