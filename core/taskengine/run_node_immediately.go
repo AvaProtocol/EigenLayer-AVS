@@ -1493,17 +1493,23 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		if jsonData != "" {
 			var parsedData interface{}
 			if err := json.Unmarshal([]byte(jsonData), &parsedData); err == nil {
-				result["data"] = parsedData
+				// For LoopNode, return the parsed data directly as the top-level result
+				// This avoids double-wrapping in the RPC response
+				if parsedArray, ok := parsedData.([]interface{}); ok {
+					return map[string]interface{}{"loopResult": parsedArray}, nil
+				} else {
+					return map[string]interface{}{"loopResult": parsedData}, nil
+				}
 			} else {
 				// Log the error if JSON parsing fails
 				if n.logger != nil {
 					n.logger.Warn("Failed to unmarshal Loop output", "error", err.Error(), "jsonData", jsonData)
 				}
 				// Fallback to raw string if JSON parsing fails
-				result["data"] = jsonData
+				return map[string]interface{}{"loopResult": jsonData}, nil
 			}
 		} else {
-			result["data"] = []interface{}{} // Empty array for empty results
+			return map[string]interface{}{"loopResult": []interface{}{}}, nil
 		}
 	} else if graphQL := executionStep.GetGraphql(); graphQL != nil && graphQL.GetData() != nil {
 		var data map[string]interface{}
@@ -2055,10 +2061,18 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			Filter: filterOutput,
 		}
 	case NodeTypeLoop:
-		if result != nil && len(result) > 0 {
-			// For loop nodes, convert structured data to JSON string
-			// (consistent with how Loop nodes store data elsewhere in the codebase)
-			jsonData, err := json.Marshal(result)
+		if result != nil {
+			// Extract the actual loop data from the loopResult key
+			var loopData interface{}
+			if loopResult, exists := result["loopResult"]; exists {
+				loopData = loopResult
+			} else {
+				// Fallback to entire result if no loopResult key
+				loopData = result
+			}
+
+			// Convert loop data to JSON string (consistent with how Loop nodes store data elsewhere)
+			jsonData, err := json.Marshal(loopData)
 			if err != nil {
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,

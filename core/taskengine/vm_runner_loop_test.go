@@ -41,9 +41,9 @@ func TestLoopProcessor_Execute_Sequential(t *testing.T) {
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
-			SourceId: "test_data_gen",
-			IterVal:  "value",
-			IterKey:  "index",
+			InputNodeName: "test_data_gen",
+			IterVal:       "value",
+			IterKey:       "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
@@ -92,9 +92,9 @@ func TestLoopProcessor_Execute_Parallel(t *testing.T) {
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
-			SourceId: "test_data_gen",
-			IterVal:  "value",
-			IterKey:  "index",
+			InputNodeName: "test_data_gen",
+			IterVal:       "value",
+			IterKey:       "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
@@ -147,9 +147,9 @@ func TestLoopProcessor_Execute_EmptyArray(t *testing.T) {
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
-			SourceId: "test_data_gen_empty",
-			IterVal:  "value",
-			IterKey:  "index",
+			InputNodeName: "test_data_gen_empty",
+			IterVal:       "value",
+			IterKey:       "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
@@ -192,9 +192,9 @@ func TestLoopProcessor_Execute_InvalidInput(t *testing.T) {
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
-			SourceId: "test_data_gen_invalid",
-			IterVal:  "value",
-			IterKey:  "index",
+			InputNodeName: "test_data_gen_invalid",
+			IterVal:       "value",
+			IterKey:       "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
@@ -226,9 +226,9 @@ func TestLoopProcessor_Execute_MissingInput(t *testing.T) {
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
-			SourceId: "test_data_gen_missing",
-			IterVal:  "value",
-			IterKey:  "index",
+			InputNodeName: "test_data_gen_missing",
+			IterVal:       "value",
+			IterKey:       "index",
 		},
 		Runner: &avsproto.LoopNode_CustomCode{
 			CustomCode: customCode,
@@ -265,7 +265,7 @@ func TestLoopProcessor_Execute_ParallelMode(t *testing.T) {
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
-			SourceId:      "test_data_gen",
+			InputNodeName: "test_data_gen",
 			IterVal:       "value",
 			IterKey:       "index",
 			ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL,
@@ -314,7 +314,7 @@ func TestLoopProcessor_Execute_SequentialMode(t *testing.T) {
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
-			SourceId:      "test_data_gen",
+			InputNodeName: "test_data_gen",
 			IterVal:       "value",
 			IterKey:       "index",
 			ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL,
@@ -363,7 +363,7 @@ func TestLoopProcessor_Execute_ContractWriteAlwaysSequential(t *testing.T) {
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
-			SourceId:      "test_data_gen",
+			InputNodeName: "test_data_gen",
 			IterVal:       "value",
 			IterKey:       "index",
 			ExecutionMode: avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL, // Set to parallel
@@ -405,9 +405,9 @@ func TestLoopProcessor_Execute_DefaultExecutionMode(t *testing.T) {
 
 	loopNode := &avsproto.LoopNode{
 		Config: &avsproto.LoopNode_Config{
-			SourceId: "test_data_gen",
-			IterVal:  "value",
-			IterKey:  "index",
+			InputNodeName: "test_data_gen",
+			IterVal:       "value",
+			IterKey:       "index",
 			// ExecutionMode not set - should default to sequential (safer default)
 		},
 		Runner: &avsproto.LoopNode_CustomCode{

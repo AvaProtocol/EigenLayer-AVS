@@ -101,8 +101,8 @@ func TestFilterNodePreprocessing(t *testing.T) {
 
 			node := &avsproto.FilterNode{
 				Config: &avsproto.FilterNode_Config{
-					Expression: tc.expression,
-					SourceId:   "testInput",
+					Expression:    tc.expression,
+					InputNodeName: "testInput",
 				},
 			}
 
@@ -192,8 +192,8 @@ func TestFilterNodePreprocessingEdgeCases(t *testing.T) {
 
 			node := &avsproto.FilterNode{
 				Config: &avsproto.FilterNode_Config{
-					Expression: tc.expression,
-					SourceId:   "testInput",
+					Expression:    tc.expression,
+					InputNodeName: "testInput",
 				},
 			}
 

@@ -7839,9 +7839,9 @@ type FilterNode_Config struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Filter node acts like .select or .filter to pluck out element in an array that evaluate the expression to true
 	Expression string `protobuf:"bytes,1,opt,name=expression,proto3" json:"expression,omitempty"`
-	// The node Id of a source node; we will extract the output of the source node at runtime.
+	// The name of the input node whose output data will be filtered.
 	// The data should be iterable (array, object, etc.). Runtime validation will check compatibility.
-	SourceId      string `protobuf:"bytes,2,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	InputNodeName string `protobuf:"bytes,2,opt,name=input_node_name,json=inputNodeName,proto3" json:"input_node_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7883,9 +7883,9 @@ func (x *FilterNode_Config) GetExpression() string {
 	return ""
 }
 
-func (x *FilterNode_Config) GetSourceId() string {
+func (x *FilterNode_Config) GetInputNodeName() string {
 	if x != nil {
-		return x.SourceId
+		return x.InputNodeName
 	}
 	return ""
 }
@@ -7937,9 +7937,8 @@ func (x *FilterNode_Output) GetData() *anypb.Any {
 
 type LoopNode_Config struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// source_variable is the variable name from a previous node whose data will be iterated over.
-	// The node Id of a source node; we will extract the output of the source node at runtime.
-	SourceId string `protobuf:"bytes,1,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	// The name of the input node whose output data will be iterated over.
+	InputNodeName string `protobuf:"bytes,1,opt,name=input_node_name,json=inputNodeName,proto3" json:"input_node_name,omitempty"`
 	// iter_val is the variable name that will hold the current value during each iteration
 	IterVal string `protobuf:"bytes,2,opt,name=iter_val,json=iterVal,proto3" json:"iter_val,omitempty"`
 	// iter_key is the variable name that will hold the current key/index during each iteration
@@ -7981,9 +7980,9 @@ func (*LoopNode_Config) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{18, 0}
 }
 
-func (x *LoopNode_Config) GetSourceId() string {
+func (x *LoopNode_Config) GetInputNodeName() string {
 	if x != nil {
-		return x.SourceId
+		return x.InputNodeName
 	}
 	return ""
 }
@@ -8678,18 +8677,18 @@ const file_avs_proto_rawDesc = "" +
 	"conditions\x18\x01 \x03(\v2 .aggregator.BranchNode.ConditionR\n" +
 	"conditions\x1a+\n" +
 	"\x06Output\x12!\n" +
-	"\fcondition_id\x18\x01 \x01(\tR\vconditionId\"\xec\x01\n" +
+	"\fcondition_id\x18\x01 \x01(\tR\vconditionId\"\xf7\x01\n" +
 	"\n" +
 	"FilterNode\x125\n" +
 	"\x06config\x18\x01 \x01(\v2\x1d.aggregator.FilterNode.ConfigR\x06config\x12,\n" +
-	"\x05input\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05input\x1aE\n" +
+	"\x05input\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05input\x1aP\n" +
 	"\x06Config\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x01 \x01(\tR\n" +
-	"expression\x12\x1b\n" +
-	"\tsource_id\x18\x02 \x01(\tR\bsourceId\x1a2\n" +
+	"expression\x12&\n" +
+	"\x0finput_node_name\x18\x02 \x01(\tR\rinputNodeName\x1a2\n" +
 	"\x06Output\x12(\n" +
-	"\x04data\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\x04data\"\xc7\x05\n" +
+	"\x04data\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\x04data\"\xd2\x05\n" +
 	"\bLoopNode\x12@\n" +
 	"\feth_transfer\x18\n" +
 	" \x01(\v2\x1b.aggregator.ETHTransferNodeH\x00R\vethTransfer\x12F\n" +
@@ -8700,9 +8699,9 @@ const file_avs_proto_rawDesc = "" +
 	"\vcustom_code\x18\x0f \x01(\v2\x1a.aggregator.CustomCodeNodeH\x00R\n" +
 	"customCode\x123\n" +
 	"\x06config\x18\x01 \x01(\v2\x1b.aggregator.LoopNode.ConfigR\x06config\x12,\n" +
-	"\x05input\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05input\x1a\x9d\x01\n" +
-	"\x06Config\x12\x1b\n" +
-	"\tsource_id\x18\x01 \x01(\tR\bsourceId\x12\x19\n" +
+	"\x05input\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05input\x1a\xa8\x01\n" +
+	"\x06Config\x12&\n" +
+	"\x0finput_node_name\x18\x01 \x01(\tR\rinputNodeName\x12\x19\n" +
 	"\biter_val\x18\x02 \x01(\tR\aiterVal\x12\x19\n" +
 	"\biter_key\x18\x03 \x01(\tR\aiterKey\x12@\n" +
 	"\x0eexecution_mode\x18\x04 \x01(\x0e2\x19.aggregator.ExecutionModeR\rexecutionMode\x1a\x1c\n" +
