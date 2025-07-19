@@ -41,20 +41,27 @@ const previousResult = previousNode.data;
 const previousConfig = previousNode.input;
 ```
 
-## Trigger Variable Structure
+## Trigger Types and Variable Structures
 
-### EventTrigger Example
+### EventTrigger
+
+EventTriggers monitor blockchain events and provide enriched event data.
 
 ```javascript
 // EventTrigger variable structure
 eventTrigger = {
   data: {
     // Runtime output from event execution
-    // For transfer events: tokenSymbol, valueFormatted, etc.
-    // For other events: decoded event data
+    // For transfer events: enriched token metadata
     blockNumber: 12345,
     transactionHash: "0x...",
     logIndex: 1,
+    tokenSymbol: "USDC",           // Enriched from token metadata
+    tokenName: "USD Coin",         // Enriched from token metadata
+    valueFormatted: "100.50",      // Formatted with proper decimals
+    from: "0x...",
+    to: "0x...",
+    value: "100500000",            // Raw value in smallest unit
     // ... other runtime data
   },
   input: {
@@ -72,43 +79,145 @@ eventTrigger = {
 }
 ```
 
-### ManualTrigger Example
+**Key Features:**
+- Automatic token enrichment for transfer events
+- Blockchain data extraction and formatting
+- Support for custom event queries
+- Real-time and historical event monitoring
+
+### ManualTrigger
+
+ManualTriggers accept user-provided JSON data and are commonly used for webhooks and manual workflow execution.
 
 ```javascript
 // ManualTrigger variable structure
 manualTrigger = {
   data: {
-    // Runtime data provided during trigger execution
-    // All webhook data is under .data for consistent access
-    data: {
-      // User-defined data payload
-      apiBaseUrl: "https://api.example.com",
-      apiKey: "key123",
-      environment: "production"
-    },
-    headers: {
-      // HTTP headers if this is a webhook trigger
-      "Authorization": "Bearer token123",
-      "Content-Type": "application/json"
-    },
-    pathParams: {
-      // URL path parameters
-      "version": "v1",
-      "format": "json"
-    }
+    // User-provided JSON data - REQUIRED and must be valid JSON
+    // Can be any JSON structure: objects, arrays, primitives
+    
+    // Example 1: JSON Object
+    apiBaseUrl: "https://api.example.com",
+    apiKey: "key123",
+    environment: "production",
+    
+    // Example 2: JSON Array (flattened access)
+    // If data is [{"name": "item1"}, {"name": "item2"}]
+    // Access as: manualTrigger.data (returns the full array)
+    
+    // Example 3: JSON Primitive
+    // If data is "Hello World" or 42 or true
+    // Access as: manualTrigger.data (returns the primitive value)
   },
   input: {
     // Configuration data for the manual trigger
     // Usually contains webhook configuration, expected fields, etc.
     webhookPath: "/webhook/manual",
-    expectedFields: ["apiBaseUrl", "apiKey"]
+    expectedFields: ["apiBaseUrl", "apiKey"],
+    validationRules: {
+      apiKey: { required: true, minLength: 8 }
+    }
   }
 }
 ```
 
-## Node Variable Structure
+**Important Changes (Latest Update):**
+- ✅ **Data is REQUIRED**: ManualTrigger data cannot be null or undefined
+- ✅ **Must be valid JSON**: Accepts any JSON structure (objects, arrays, primitives)
+- ✅ **No string parsing**: Data must be provided as parsed JSON, not JSON strings
+- ✅ **Flexible structure**: Supports objects, arrays, strings, numbers, booleans
+- ✅ **Direct access**: For JSON objects, fields are flattened for easy access
+- ✅ **Array support**: Arrays are accessible directly as `triggerName.data`
 
-### RestAPI Node Example
+**Data Access Patterns:**
+```javascript
+// JSON Object data
+const config = manualTrigger.data; // { apiKey: "...", baseUrl: "..." }
+const apiKey = manualTrigger.apiKey; // Direct field access (if object)
+
+// JSON Array data  
+const items = manualTrigger.data; // [{"name": "item1"}, {"name": "item2"}]
+const firstItem = items[0]; // {"name": "item1"}
+
+// JSON Primitive data
+const message = manualTrigger.data; // "Hello World" or 42 or true
+```
+
+### BlockTrigger
+
+BlockTriggers execute at specified block intervals.
+
+```javascript
+// BlockTrigger variable structure
+blockTrigger = {
+  data: {
+    // Runtime output from block trigger
+    blockNumber: 18500000,
+    blockHash: "0x...",
+    timestamp: 1672531200,
+    parentHash: "0x...",
+    gasLimit: "30000000",
+    gasUsed: "12500000"
+  },
+  input: {
+    // Configuration for block monitoring
+    interval: 100,        // Trigger every 100 blocks
+    chainId: 11155111,
+    startBlock: 18400000  // Optional start block
+  }
+}
+```
+
+### CronTrigger
+
+CronTriggers execute on time-based schedules.
+
+```javascript
+// CronTrigger variable structure
+cronTrigger = {
+  data: {
+    // Runtime output from cron execution
+    executionTime: "2025-01-17T10:30:00Z",
+    scheduledTime: "2025-01-17T10:30:00Z",
+    timezone: "UTC",
+    cronExpression: "0 30 10 * * *"
+  },
+  input: {
+    // Configuration for cron schedule
+    schedule: "0 30 10 * * *",  // Every day at 10:30 AM
+    timezone: "America/New_York",
+    description: "Daily report generation"
+  }
+}
+```
+
+### FixedTimeTrigger
+
+FixedTimeTriggers execute once at a specified time.
+
+```javascript
+// FixedTimeTrigger variable structure
+fixedTimeTrigger = {
+  data: {
+    // Runtime output from fixed time execution
+    executionTime: "2025-01-17T15:00:00Z",
+    scheduledTime: "2025-01-17T15:00:00Z",
+    delay: 0  // Milliseconds between scheduled and actual execution
+  },
+  input: {
+    // Configuration for fixed time execution
+    executeAt: "2025-01-17T15:00:00Z",
+    timezone: "UTC",
+    description: "One-time data migration"
+  }
+}
+```
+
+## Node Types and Variable Structures
+
+### RestAPI Node
+
+RestAPI nodes make HTTP requests to external APIs.
 
 ```javascript
 // RestAPI node variable structure
@@ -116,31 +225,43 @@ restApiNode = {
   data: {
     // Runtime output from API call
     body: {
-      // Response body data
+      // Parsed response body (JSON automatically parsed)
       success: true,
-      data: { /* API response */ }
+      data: { 
+        users: [
+          { id: 1, name: "John", email: "john@example.com" },
+          { id: 2, name: "Jane", email: "jane@example.com" }
+        ]
+      },
+      pagination: { page: 1, total: 50 }
     },
     headers: {
       // Response headers
       "Content-Type": "application/json",
-      "Content-Length": "1234"
+      "Content-Length": "1234",
+      "X-RateLimit-Remaining": "99"
     },
-    statusCode: 200
+    statusCode: 200,
+    duration: 245  // Request duration in milliseconds
   },
   input: {
     // Configuration used for the API call
-    url: "https://api.example.com/data",
-    method: "POST",
-    body: '{"key": "value"}',
-    headersMap: [
-      ["Content-Type", "application/json"],
-      ["Authorization", "Bearer token"]
-    ]
+    url: "https://api.example.com/users",
+    method: "GET",
+    headers: {
+      "Authorization": "Bearer {{secrets.apiToken}}",
+      "Content-Type": "application/json"
+    },
+    body: null,  // For GET requests
+    timeout: 30000,
+    retryCount: 3
   }
 }
 ```
 
-### CustomCode Node Example
+### CustomCode Node
+
+CustomCode nodes execute user-defined JavaScript code.
 
 ```javascript
 // CustomCode node variable structure
@@ -150,12 +271,321 @@ customCodeNode = {
     // This is whatever the JavaScript code returns
     result: "processed successfully",
     timestamp: "2025-01-17T10:30:00Z",
-    processedItems: 42
+    processedItems: 42,
+    summary: {
+      totalProcessed: 100,
+      successful: 98,
+      failed: 2,
+      errors: ["Invalid email format", "Missing required field"]
+    }
   },
   input: {
     // Configuration for the custom code
     lang: "JavaScript",
-    source: "return { result: 'processed successfully', timestamp: new Date().toISOString() };"
+    source: `
+      const items = eventTrigger.data.items || [];
+      let processed = 0;
+      const results = [];
+      
+      for (const item of items) {
+        if (item.email && item.email.includes('@')) {
+          results.push({ ...item, status: 'valid' });
+          processed++;
+        }
+      }
+      
+      return {
+        result: 'processed successfully',
+        timestamp: new Date().toISOString(),
+        processedItems: processed,
+        results: results
+      };
+    `,
+    timeout: 30000
+  }
+}
+```
+
+### ContractRead Node
+
+ContractRead nodes read data from smart contracts.
+
+```javascript
+// ContractRead node variable structure
+contractReadNode = {
+  data: {
+    // Runtime output from contract call
+    result: {
+      // Decoded contract call result
+      balance: "1000000000000000000",  // 1 ETH in wei
+      decimals: 18,
+      symbol: "ETH",
+      name: "Ethereum"
+    },
+    blockNumber: 18500000,
+    gasUsed: "21000"
+  },
+  input: {
+    // Configuration for contract interaction
+    contractAddress: "0x...",
+    methodName: "balanceOf",
+    methodInputs: ["0x742d35Cc6634C0532925a3b8D8FA4fF5C6E4a1e6"],
+    abi: [...],  // Contract ABI
+    chainId: 11155111
+  }
+}
+```
+
+### ContractWrite Node
+
+ContractWrite nodes execute transactions on smart contracts.
+
+```javascript
+// ContractWrite node variable structure
+contractWriteNode = {
+  data: {
+    // Runtime output from transaction
+    transactionHash: "0x...",
+    blockNumber: 18500001,
+    gasUsed: "50000",
+    status: "success",
+    receipt: {
+      // Full transaction receipt
+      logs: [...],
+      events: [...]
+    }
+  },
+  input: {
+    // Configuration for contract transaction
+    contractAddress: "0x...",
+    methodName: "transfer",
+    methodInputs: ["0x742d35Cc6634C0532925a3b8D8FA4fF5C6E4a1e6", "1000000000000000000"],
+    abi: [...],
+    value: "0",  // ETH value to send
+    gasLimit: "100000"
+  }
+}
+```
+
+### EthTransfer Node
+
+EthTransfer nodes send ETH to addresses.
+
+```javascript
+// EthTransfer node variable structure
+ethTransferNode = {
+  data: {
+    // Runtime output from ETH transfer
+    transactionHash: "0x...",
+    blockNumber: 18500001,
+    gasUsed: "21000",
+    status: "success",
+    amountSent: "1000000000000000000",  // 1 ETH in wei
+    recipient: "0x742d35Cc6634C0532925a3b8D8FA4fF5C6E4a1e6"
+  },
+  input: {
+    // Configuration for ETH transfer
+    destination: "0x742d35Cc6634C0532925a3b8D8FA4fF5C6E4a1e6",
+    amount: "1.0",  // Amount in ETH
+    gasLimit: "21000"
+  }
+}
+```
+
+### Branch Node
+
+Branch nodes implement conditional logic in workflows.
+
+```javascript
+// Branch node variable structure
+branchNode = {
+  data: {
+    // Runtime output from branch evaluation
+    conditionResult: true,
+    selectedBranch: "success_branch",
+    evaluatedConditions: [
+      { expression: "eventTrigger.data.value > 1000", result: true },
+      { expression: "eventTrigger.data.from !== '0x0'", result: true }
+    ]
+  },
+  input: {
+    // Configuration for branch logic
+    conditions: [
+      {
+        expression: "eventTrigger.data.value > 1000",
+        target: "success_branch"
+      },
+      {
+        expression: "eventTrigger.data.from !== '0x0'",
+        target: "validation_branch"
+      }
+    ],
+    defaultTarget: "error_branch"
+  }
+}
+```
+
+### Filter Node
+
+Filter nodes filter data based on conditions.
+
+```javascript
+// Filter node variable structure
+filterNode = {
+  data: {
+    // Runtime output from filter operation
+    passed: true,
+    result: {
+      // Filtered data that passed the condition
+      value: "1500000000000000000",
+      from: "0x...",
+      to: "0x...",
+      tokenSymbol: "USDC"
+    },
+    filterExpression: "value > 1000000000000000000"  // 1 ETH
+  },
+  input: {
+    // Configuration for filtering
+    expression: "eventTrigger.data.value > 1000000000000000000",
+    sourceData: "eventTrigger.data",
+    description: "Filter large transfers only"
+  }
+}
+```
+
+### Loop Node
+
+Loop nodes iterate over arrays or objects.
+
+```javascript
+// Loop node variable structure
+loopNode = {
+  data: {
+    // Runtime output from loop execution
+    results: [
+      "item1_processed",
+      "item2_processed", 
+      "item3_processed"
+    ],
+    totalIterations: 3,
+    successfulIterations: 3,
+    failedIterations: 0,
+    executionMode: "sequential"
+  },
+  input: {
+    // Configuration for loop operation
+    sourceId: "manualTrigger.data",  // Array to iterate over
+    iterVal: "item",                 // Variable name for current item
+    iterKey: "index",                // Variable name for current index
+    executionMode: "sequential",     // or "parallel"
+    maxIterations: 100
+  }
+}
+```
+
+### GraphQL Node
+
+GraphQL nodes query GraphQL APIs.
+
+```javascript
+// GraphQL node variable structure  
+graphqlNode = {
+  data: {
+    // Runtime output from GraphQL query
+    data: {
+      // GraphQL response data
+      user: {
+        id: "1",
+        name: "John Doe",
+        email: "john@example.com",
+        posts: [
+          { id: "1", title: "Hello World", content: "..." },
+          { id: "2", title: "GraphQL Guide", content: "..." }
+        ]
+      }
+    },
+    errors: null,  // GraphQL errors if any
+    extensions: {}
+  },
+  input: {
+    // Configuration for GraphQL query
+    endpoint: "https://api.example.com/graphql",
+    query: `
+      query GetUser($id: ID!) {
+        user(id: $id) {
+          id
+          name
+          email
+          posts {
+            id
+            title
+            content
+          }
+        }
+      }
+    `,
+    variables: { id: "1" },
+    headers: {
+      "Authorization": "Bearer {{secrets.graphqlToken}}"
+    }
+  }
+}
+```
+
+## Advanced Features
+
+### Template Variable Resolution
+
+All node configurations support template variables that are resolved at runtime:
+
+```javascript
+// Template examples in node configurations
+{
+  "url": "{{eventTrigger.input.apiBaseUrl}}/users/{{eventTrigger.data.userId}}",
+  "headers": {
+    "Authorization": "Bearer {{secrets.apiToken}}",
+    "X-User-ID": "{{eventTrigger.data.from}}"
+  },
+  "body": JSON.stringify({
+    "blockNumber": "{{eventTrigger.data.blockNumber}}",
+    "amount": "{{eventTrigger.data.valueFormatted}}",
+    "timestamp": "{{eventTrigger.data.timestamp}}"
+  })
+}
+```
+
+### Secret Management
+
+Secrets are securely managed and accessible through the `secrets` namespace:
+
+```javascript
+// Accessing secrets in templates
+"{{secrets.databaseUrl}}"
+"{{secrets.apiKey}}"
+"{{secrets.webhookSecret}}"
+
+// Accessing secrets in CustomCode
+const apiKey = secrets.apiKey;
+const dbUrl = secrets.databaseUrl;
+```
+
+### Error Handling
+
+Comprehensive error information is available for debugging:
+
+```javascript
+// Node with error
+errorNode = {
+  data: null,  // No data when node fails
+  input: { /* original configuration */ },
+  error: {
+    message: "Request timeout after 30000ms",
+    code: "TIMEOUT",
+    details: {
+      url: "https://slow-api.example.com/data",
+      duration: 30001,
+      retryAttempt: 3
+    }
   }
 }
 ```
@@ -209,7 +639,7 @@ The `inputsList` field in execution steps shows what variables were available du
 inputsList: [
   "apContext.configVars",           // Global configuration
   "workflowContext",                // Workflow metadata
-  "eventTrigger.data",              // Trigger output data (includes headers, pathParams for manual triggers)
+  "eventTrigger.data",              // Trigger output data
   "eventTrigger.input",             // Trigger configuration
   "previousNode.data",              // Previous node output
   "previousNode.input",             // Previous node configuration
@@ -230,6 +660,8 @@ const eventConfig = eventTrigger.input;
 // Use trigger output data
 console.log(`Block number: ${eventData.blockNumber}`);
 console.log(`Transaction: ${eventData.transactionHash}`);
+console.log(`Token: ${eventData.tokenSymbol}`);
+console.log(`Amount: ${eventData.valueFormatted}`);
 
 // Use trigger configuration
 console.log(`Monitoring chain: ${eventConfig.chainId}`);
@@ -243,6 +675,39 @@ if (eventConfig.subType === "transfer") {
 }
 ```
 
+### ManualTrigger Data Access Patterns
+
+```javascript
+// In a CustomCode node following a ManualTrigger
+
+// Example 1: JSON Object data
+const userData = manualTrigger.data;
+// Direct field access if data is an object
+const apiKey = manualTrigger.apiKey;        // Direct access
+const baseUrl = manualTrigger.apiBaseUrl;   // Direct access
+
+// Example 2: JSON Array data
+const items = manualTrigger.data;  // Full array
+const firstItem = items[0];        // First array element
+const itemNames = items.map(item => item.name);  // Extract names
+
+// Example 3: Processing different data types
+if (Array.isArray(manualTrigger.data)) {
+  console.log(`Processing ${manualTrigger.data.length} items`);
+  return manualTrigger.data.map(item => ({
+    ...item,
+    processed: true,
+    timestamp: new Date().toISOString()
+  }));
+} else if (typeof manualTrigger.data === 'object') {
+  console.log('Processing object data');
+  return { ...manualTrigger.data, processed: true };
+} else {
+  console.log('Processing primitive data');
+  return { value: manualTrigger.data, processed: true };
+}
+```
+
 ### Chain Node Data Access
 
 ```javascript
@@ -251,32 +716,78 @@ const apiResult = restApiNode.data;
 const triggerConfig = eventTrigger.input;
 const previousProcessing = customCodeNode.data;
 
-// For manual triggers, access webhook data under .data
-const manualTriggerData = manualTrigger.data.data;
-const manualTriggerHeaders = manualTrigger.data.headers;
-const manualTriggerPathParams = manualTrigger.data.pathParams;
-
 // Combine data from multiple sources
 return {
   apiResponse: apiResult.body,
   triggerChain: triggerConfig.chainId,
   previousResult: previousProcessing.result,
-  webhookData: manualTriggerData,
-  combinedAt: new Date().toISOString()
+  blockNumber: eventTrigger.data.blockNumber,
+  combinedAt: new Date().toISOString(),
+  
+  // Error handling
+  hasErrors: !apiResult || apiResult.statusCode !== 200,
+  errors: apiResult ? [] : ['API call failed']
 };
 ```
 
-### Template Usage
+### Template Usage Examples
 
 ```json
 {
   "type": "restApi",
   "config": {
-    "url": "{{eventTrigger.input.apiBaseUrl}}/process",
+    "url": "{{eventTrigger.input.apiBaseUrl}}/transactions/{{eventTrigger.data.transactionHash}}",
     "method": "POST",
-    "body": "{\"blockNumber\": {{eventTrigger.data.blockNumber}}, \"chainId\": {{eventTrigger.input.chainId}}}"
+    "headers": {
+      "Authorization": "Bearer {{secrets.apiToken}}",
+      "Content-Type": "application/json",
+      "X-Chain-ID": "{{eventTrigger.input.chainId}}"
+    },
+    "body": {
+      "blockNumber": "{{eventTrigger.data.blockNumber}}",
+      "amount": "{{eventTrigger.data.valueFormatted}}",
+      "token": "{{eventTrigger.data.tokenSymbol}}",
+      "from": "{{eventTrigger.data.from}}",
+      "to": "{{eventTrigger.data.to}}"
+    }
   }
 }
+```
+
+### Loop Node with ManualTrigger Array
+
+```javascript
+// ManualTrigger with array data
+manualTrigger.data = [
+  { name: "item1", value: 100 },
+  { name: "item2", value: 200 },
+  { name: "item3", value: 300 }
+];
+
+// Loop node configuration
+{
+  "type": "loop",
+  "config": {
+    "sourceId": "manualTrigger",  // Access the full data array
+    "iterVal": "item",
+    "iterKey": "index",
+    "executionMode": "sequential",
+    "runner": {
+      "type": "customCode",
+      "config": {
+        "lang": "JavaScript",
+        "source": "return `${item.name}: ${item.value * 2}`;"
+      }
+    }
+  }
+}
+
+// Loop node output
+loopNode.data.results = [
+  "item1: 200",
+  "item2: 400", 
+  "item3: 600"
+];
 ```
 
 ## Error Handling and Edge Cases
@@ -298,6 +809,13 @@ return {
 - All data is converted to JavaScript-compatible types
 - Complex objects are properly serialized/deserialized
 - Protobuf structures are converted to plain JavaScript objects
+
+### ManualTrigger Validation
+
+- Data is required and cannot be null or undefined
+- Data must be valid JSON (objects, arrays, primitives)
+- String representations of JSON are not parsed
+- Invalid data types result in clear error messages
 
 ## Testing and Validation
 
@@ -321,6 +839,45 @@ expect(nodeStep.inputsList).toContain("triggerName.data");
 expect(nodeStep.inputsList).toContain("triggerName.input");
 ```
 
+### ManualTrigger Test Examples
+
+```javascript
+// Test JSON object data
+const objectData = { apiKey: "test123", baseUrl: "https://api.test.com" };
+const result = await client.runTrigger({
+  triggerType: TriggerType.Manual,
+  triggerConfig: { data: objectData }
+});
+expect(result.success).toBe(true);
+expect(result.data).toEqual(objectData);
+
+// Test JSON array data
+const arrayData = [{ name: "item1" }, { name: "item2" }];
+const result = await client.runTrigger({
+  triggerType: TriggerType.Manual,
+  triggerConfig: { data: arrayData }
+});
+expect(result.success).toBe(true);
+expect(result.data).toEqual(arrayData);
+
+// Test primitive data
+const primitiveData = "Hello World";
+const result = await client.runTrigger({
+  triggerType: TriggerType.Manual,
+  triggerConfig: { data: primitiveData }
+});
+expect(result.success).toBe(true);
+expect(result.data).toEqual(primitiveData);
+
+// Test validation errors
+const result = await client.runTrigger({
+  triggerType: TriggerType.Manual,
+  triggerConfig: { data: null }
+});
+expect(result.success).toBe(false);
+expect(result.error).toContain("ManualTrigger data is required");
+```
+
 ### Execution Step Input Field vs VM Variables
 
 **Important distinction:**
@@ -335,34 +892,6 @@ expect(nodeStep.inputsList).toContain("triggerName.input");
   - `nodeName.data`: Runtime output from node execution  
   - `nodeName.input`: Custom input data provided when creating the node
 
-### EventTrigger Input Field Handling
-
-For EventTriggers, there are two types of input data:
-
-1. **Trigger Configuration** (in execution step `Input` field):
-   ```javascript
-   // Available in triggerStep.input
-   {
-     queries: [
-       { addresses: [...], topics: [...] },
-       { addresses: [...], topics: [...] }
-     ]
-   }
-   ```
-
-2. **Custom Input Data** (in VM variables):
-   ```javascript
-   // Available as eventTrigger.input in subsequent nodes
-   {
-     subType: "transfer",
-     chainId: 11155111,
-     address: "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-     tokens: [{ symbol: "USDC", ... }]
-   }
-   ```
-
-The test failure indicates that the custom input data is not being properly extracted and made available in the VM variable system.
-
 ### Validation Rules
 
 1. Every trigger must expose both `.data` and `.input` fields
@@ -370,6 +899,37 @@ The test failure indicates that the custom input data is not being properly extr
 3. Subsequent nodes must be able to access previous trigger/node variables
 4. Template resolution must work for both `.data` and `.input` fields
 5. InputsList must accurately reflect available variables
+6. ManualTrigger data must be valid JSON and cannot be null
+
+## Best Practices
+
+### 1. Data Structure Design
+
+- Keep trigger input data focused on configuration
+- Use consistent naming conventions across triggers and nodes
+- Structure complex data hierarchically for easy access
+- Include metadata for debugging and monitoring
+
+### 2. Error Handling
+
+- Always check for data availability before accessing
+- Provide meaningful error messages
+- Include context in error objects
+- Use try-catch blocks in CustomCode nodes
+
+### 3. Performance Considerations
+
+- Minimize data copying between nodes
+- Use efficient data structures for large datasets
+- Consider memory usage for long-running workflows
+- Implement proper cleanup for temporary data
+
+### 4. Security
+
+- Validate all external data inputs
+- Use secrets management for sensitive data
+- Sanitize data before using in templates
+- Implement proper access controls
 
 ## Future Enhancements
 
@@ -380,6 +940,9 @@ The test failure indicates that the custom input data is not being properly extr
 3. **Documentation**: Auto-generate variable documentation from protobuf definitions
 4. **Debugging**: Enhanced debugging tools for variable inspection
 5. **Performance**: Optimize variable creation and access patterns
+6. **Schema Validation**: JSON schema validation for ManualTrigger data
+7. **Data Transformation**: Built-in data transformation utilities
+8. **Caching**: Intelligent caching for frequently accessed variables
 
 ### Considerations
 
@@ -387,7 +950,8 @@ The test failure indicates that the custom input data is not being properly extr
 - Performance impact of variable creation and access
 - Memory usage for large variable datasets
 - Security implications of cross-node data access
+- Scalability for complex workflow graphs
 
 ---
 
-This design ensures consistent, predictable access to both configuration and runtime data across the entire workflow execution, enabling powerful data flow patterns while maintaining clear separation between input configuration and output results. 
+This design ensures consistent, predictable access to both configuration and runtime data across the entire workflow execution, enabling powerful data flow patterns while maintaining clear separation between input configuration and output results. The recent updates to ManualTrigger provide more flexible JSON data handling while maintaining strict validation requirements. 
