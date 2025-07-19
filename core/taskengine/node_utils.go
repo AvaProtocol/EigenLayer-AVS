@@ -12,15 +12,31 @@ import (
 func buildTriggerVariableData(trigger *avsproto.TaskTrigger, triggerDataMap map[string]interface{}, triggerInputData map[string]interface{}) map[string]any {
 	triggerVarData := map[string]any{}
 
-	// For manual triggers, avoid double-wrapping by returning the data directly
+	// For manual triggers, handle the JSON data directly
 	if trigger != nil && trigger.GetType() == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
-		// For manual triggers, the triggerDataMap already contains the data structure
-		// Return it directly to avoid double-wrapping
-		if len(triggerDataMap) > 0 {
-			for key, value := range triggerDataMap {
-				triggerVarData[key] = value
+		// For manual triggers, extract the data field and make it accessible directly
+		// This makes manual triggers behave like CustomCode nodes - direct data access
+		// Note: ManualTrigger data can be any valid JSON (objects, arrays, etc.)
+		if data, exists := triggerDataMap["data"]; exists && data != nil {
+			// If the data is a JSON object, flatten it into the trigger variable for easy access
+			if dataMap, ok := data.(map[string]interface{}); ok {
+				// Convert map[string]interface{} to map[string]any and merge with trigger data
+				for k, v := range dataMap {
+					triggerVarData[k] = v
+				}
+			} else if dataMapAny, ok := data.(map[string]any); ok {
+				// Merge map[string]any directly
+				for k, v := range dataMapAny {
+					triggerVarData[k] = v
+				}
+			} else {
+				// For non-object JSON data (arrays, primitives), store it under a "data" key
+				// This allows access like triggerName.data for arrays/primitives
+				triggerVarData["data"] = data
 			}
 		}
+		// If no data or data is null, return empty map
+		// For manual triggers, we've processed the data above, so we skip the normal flow
 	} else {
 		// For all other trigger types, put all output data under the .data field
 		// This ensures consistent access pattern: triggerName.data.field

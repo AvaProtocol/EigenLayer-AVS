@@ -1670,22 +1670,8 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 							v.logger.Info("✅ Added input field", "key", inputKey)
 						}
 					}
-					// Check for .headers field (for manual triggers)
-					if _, hasHeaders := valueMap["headers"]; hasHeaders {
-						headersKey := fmt.Sprintf("%s.headers", k)
-						inputKeys = append(inputKeys, headersKey)
-						if v.logger != nil {
-							v.logger.Info("✅ Added headers field", "key", headersKey)
-						}
-					}
-					// Check for .pathParams field (for manual triggers)
-					if _, hasPathParams := valueMap["pathParams"]; hasPathParams {
-						pathParamsKey := fmt.Sprintf("%s.pathParams", k)
-						inputKeys = append(inputKeys, pathParamsKey)
-						if v.logger != nil {
-							v.logger.Info("✅ Added pathParams field", "key", pathParamsKey)
-						}
-					}
+					// Note: .headers and .pathParams fields are no longer included in ManualTrigger output
+					// They are config-only fields, not output fields
 				} else {
 					// For non-map variables (simple scalars like input variables), use the variable name as-is
 					// This fixes the issue where input variables like "userToken" were incorrectly becoming "userToken.data"
