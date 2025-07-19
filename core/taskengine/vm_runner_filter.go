@@ -104,26 +104,26 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		return executionLogStep, fmt.Errorf(errMsg)
 	}
 
-	sourceID := node.Config.SourceId
-	if sourceID == "" {
-		errMsg := "FilterNode sourceId is empty"
+	inputNodeName := node.Config.InputNodeName
+	if inputNodeName == "" {
+		errMsg := "FilterNode inputNodeName is empty"
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
 		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
 		return executionLogStep, fmt.Errorf(errMsg)
 	}
 
 	// Determine the variable name to use in JavaScript BEFORE locking mutex
-	inputVarName := r.vm.GetNodeNameAsVar(sourceID)
+	inputVarName := r.vm.GetNodeNameAsVar(inputNodeName)
 
 	// Clean the expression for processing
 	cleanExpression := r.processExpression(expression)
 
 	// Add the expected log format for the tests
-	logBuilder.WriteString(fmt.Sprintf("Source node ID: '%s', Variable name: '%s', Original Expression: '%s', Clean Expression: '%s'\n",
-		sourceID, inputVarName, expression, cleanExpression))
+	logBuilder.WriteString(fmt.Sprintf("Input node name: '%s', Variable name: '%s', Original Expression: '%s', Clean Expression: '%s'\n",
+		inputNodeName, inputVarName, expression, cleanExpression))
 
-	logBuilder.WriteString(fmt.Sprintf("Filter configuration - source_id: %s, expression: %s\n", sourceID, expression))
-	logBuilder.WriteString(fmt.Sprintf("Using input variable: %s (from source: %s)\n", inputVarName, sourceID))
+	logBuilder.WriteString(fmt.Sprintf("Filter configuration - input_node_name: %s, expression: %s\n", inputNodeName, expression))
+	logBuilder.WriteString(fmt.Sprintf("Using input variable: %s (from source: %s)\n", inputVarName, inputNodeName))
 
 	// Get the input data to filter
 	r.vm.mu.Lock()
@@ -131,7 +131,7 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	r.vm.mu.Unlock()
 
 	if !exists {
-		errMsg := fmt.Sprintf("input variable for source '%s' not found", sourceID)
+		errMsg := fmt.Sprintf("input variable for source '%s' not found", inputNodeName)
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
 		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
 		return executionLogStep, fmt.Errorf(errMsg)

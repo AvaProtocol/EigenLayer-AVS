@@ -1146,7 +1146,7 @@ func (v *VM) runLoop(stepID string, nodeValue *avsproto.LoopNode) (*avsproto.Exe
 	if v.logger != nil {
 		v.logger.Info("🔄 runLoop: Starting LoopNode execution", "stepID", stepID, "nodeValue_exists", nodeValue != nil)
 		if nodeValue != nil && nodeValue.Config != nil {
-			v.logger.Info("🔄 runLoop: LoopNode config", "sourceId", nodeValue.Config.SourceId, "iterVal", nodeValue.Config.IterVal, "iterKey", nodeValue.Config.IterKey)
+			v.logger.Info("🔄 runLoop: LoopNode config", "inputNodeName", nodeValue.Config.InputNodeName, "iterVal", nodeValue.Config.IterVal, "iterKey", nodeValue.Config.IterKey)
 		}
 	}
 
@@ -2064,8 +2064,8 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			filterConfig.Expression = expression
 		}
 		// Use camelCase only for consistency with JavaScript SDK
-		if sourceId, ok := config["sourceId"].(string); ok {
-			filterConfig.SourceId = sourceId
+		if inputNodeName, ok := config["inputNodeName"].(string); ok {
+			filterConfig.InputNodeName = inputNodeName
 		}
 
 		node.TaskType = &avsproto.TaskNode_Filter{
@@ -2101,10 +2101,10 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		loopConfig := &avsproto.LoopNode_Config{}
 
 		// Extract required configuration fields (camelCase only)
-		if sourceId, ok := config["sourceId"].(string); ok {
-			loopConfig.SourceId = sourceId
+		if inputNodeName, ok := config["inputNodeName"].(string); ok {
+			loopConfig.InputNodeName = inputNodeName
 		} else {
-			return nil, fmt.Errorf("loop node requires 'sourceId' field")
+			return nil, fmt.Errorf("loop node requires 'inputNodeName' field")
 		}
 
 		if iterVal, ok := config["iterVal"].(string); ok {
@@ -2554,9 +2554,9 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 			fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode - config exists: %t\n", loop.Config != nil)
 			if loop.Config != nil {
 				config := map[string]interface{}{
-					"sourceId": loop.Config.SourceId,
-					"iterVal":  loop.Config.IterVal,
-					"iterKey":  loop.Config.IterKey,
+					"inputNodeName": loop.Config.InputNodeName,
+					"iterVal":       loop.Config.IterVal,
+					"iterKey":       loop.Config.IterKey,
 				}
 
 				// Add execution mode (always include it)

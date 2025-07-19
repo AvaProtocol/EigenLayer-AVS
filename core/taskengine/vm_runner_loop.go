@@ -52,7 +52,7 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 		return s, err
 	}
 
-	sourceNodeID := node.Config.SourceId
+	inputNodeName := node.Config.InputNodeName
 	iterVal := node.Config.IterVal
 	iterKey := node.Config.IterKey
 	executionMode := node.Config.ExecutionMode
@@ -60,46 +60,46 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	if r.vm.logger != nil {
 		r.vm.logger.Info("🔄 LoopProcessor.Execute: Config extracted",
 			"stepID", stepID,
-			"sourceNodeID", sourceNodeID,
+			"inputNodeName", inputNodeName,
 			"iterVal", iterVal,
 			"iterKey", iterKey,
 			"executionMode", executionMode.String())
 	}
 
-	if sourceNodeID == "" || iterVal == "" {
-		err := fmt.Errorf("missing required configuration: source_id and iter_val are required")
+	if inputNodeName == "" || iterVal == "" {
+		err := fmt.Errorf("missing required configuration: inputNodeName and iterVal are required")
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 		if r.vm.logger != nil {
-			r.vm.logger.Error("🚫 LoopProcessor.Execute: Missing required config", "stepID", stepID, "sourceNodeID", sourceNodeID, "iterVal", iterVal)
+			r.vm.logger.Error("🚫 LoopProcessor.Execute: Missing required config", "stepID", stepID, "inputNodeName", inputNodeName, "iterVal", iterVal)
 		}
 		finalizeExecutionStep(s, false, err.Error(), log.String())
 		return s, err
 	}
 
-	// In immediate execution, sourceId might be a direct variable name, not a node ID
+	// In immediate execution, inputNodeName might be a direct variable name, not a node ID
 	// Try both approaches: first as node ID (workflow execution), then as direct variable name (immediate execution)
-	var inputName string
+	var inputVarName string
 	var inputVar interface{}
 	var exists bool
 
 	// First try: resolve as node ID (workflow execution)
-	inputName = r.vm.GetNodeNameAsVar(sourceNodeID)
+	inputVarName = r.vm.GetNodeNameAsVar(inputNodeName)
 	r.vm.mu.Lock()
-	inputVar, exists = r.vm.vars[inputName]
+	inputVar, exists = r.vm.vars[inputVarName]
 	r.vm.mu.Unlock()
 
-	// Second try: use sourceId directly as variable name (immediate execution)
+	// Second try: use inputNodeName directly as variable name (immediate execution)
 	if !exists {
-		inputName = sourceNodeID
+		inputVarName = inputNodeName
 		r.vm.mu.Lock()
-		inputVar, exists = r.vm.vars[inputName]
+		inputVar, exists = r.vm.vars[inputVarName]
 		r.vm.mu.Unlock()
 	}
 
-	log.WriteString(fmt.Sprintf("\nLoop configuration - source_id: %s, input_var: %s, iter_val: %s, iter_key: %s", sourceNodeID, inputName, iterVal, iterKey))
+	log.WriteString(fmt.Sprintf("\nLoop configuration - input_node_name: %s, input_var: %s, iter_val: %s, iter_key: %s", inputNodeName, inputVarName, iterVal, iterKey))
 
 	if !exists {
-		err := fmt.Errorf("input variable %s not found (tried both as node name and direct variable)", inputName)
+		err := fmt.Errorf("input variable %s not found (tried both as node name and direct variable)", inputVarName)
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 		finalizeExecutionStep(s, false, err.Error(), log.String())
 		return s, err
@@ -116,13 +116,13 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 				inputArray = dataArray
 				log.WriteString(fmt.Sprintf("\nExtracted array from 'data' field: %d items", len(inputArray)))
 			} else {
-				err := fmt.Errorf("input variable %s must be an array", inputName)
+				err := fmt.Errorf("input variable %s must be an array", inputVarName)
 				log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 				finalizeExecutionStep(s, false, err.Error(), log.String())
 				return s, err
 			}
 		} else {
-			err := fmt.Errorf("input variable %s must be an array", inputName)
+			err := fmt.Errorf("input variable %s must be an array", inputVarName)
 			log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 			finalizeExecutionStep(s, false, err.Error(), log.String())
 			return s, err
