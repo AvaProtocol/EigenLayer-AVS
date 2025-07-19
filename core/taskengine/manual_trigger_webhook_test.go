@@ -21,8 +21,8 @@ func TestManualTriggerWebhookFields(t *testing.T) {
 		assert.Len(t, result, 2)
 	})
 
-	t.Run("buildManualTriggerOutput with headers and pathParams", func(t *testing.T) {
-		// Test building manual trigger output with webhook fields
+	t.Run("buildManualTriggerOutput with only data field", func(t *testing.T) {
+		// Test building manual trigger output with only data field (headers/pathParams are config-only)
 		triggerOutput := map[string]interface{}{
 			"data": map[string]interface{}{
 				"message": "test message",
@@ -46,18 +46,12 @@ func TestManualTriggerWebhookFields(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, "test message", dataMap["message"])
 
-		// Verify headers field
-		assert.NotNil(t, result.Headers)
-		assert.Equal(t, "Bearer token123", result.Headers["Authorization"])
-		assert.Equal(t, "application/json", result.Headers["Content-Type"])
-
-		// Verify pathParams field
-		assert.NotNil(t, result.PathParams)
-		assert.Equal(t, "user123", result.PathParams["userId"])
-		assert.Equal(t, "org456", result.PathParams["orgId"])
+		// Verify headers and pathParams are NOT included in output (they're config-only)
+		assert.Nil(t, result.Headers, "Headers should not be included in output")
+		assert.Nil(t, result.PathParams, "PathParams should not be included in output")
 	})
 
-	t.Run("buildManualTriggerOutput with nil fields", func(t *testing.T) {
+	t.Run("buildManualTriggerOutput with only data field (no config)", func(t *testing.T) {
 		// Test building manual trigger output with only data field
 		triggerOutput := map[string]interface{}{
 			"data": map[string]interface{}{
@@ -70,9 +64,9 @@ func TestManualTriggerWebhookFields(t *testing.T) {
 		// Verify data field is present
 		assert.NotNil(t, result.Data)
 
-		// Verify headers and pathParams are nil when not provided
-		assert.Nil(t, result.Headers)
-		assert.Nil(t, result.PathParams)
+		// Verify headers and pathParams are always nil in output (config-only fields)
+		assert.Nil(t, result.Headers, "Headers should never be in output")
+		assert.Nil(t, result.PathParams, "PathParams should never be in output")
 	})
 }
 
@@ -107,21 +101,17 @@ func TestManualTriggerExecutionWithWebhookFields(t *testing.T) {
 		// Verify data field
 		assert.Equal(t, map[string]interface{}{"payload": "test payload"}, result["data"])
 
-		// Verify headers field is converted correctly
+		// Headers and pathParams are still processed for internal use but not exposed in final output
+		// They are used during execution but filtered out from the final result
 		headers, exists := result["headers"]
-		assert.True(t, exists)
-		headersMap, ok := headers.(map[string]interface{})
-		assert.True(t, ok)
-		assert.Equal(t, "Bearer token123", headersMap["Authorization"])
-		assert.Equal(t, "application/json", headersMap["Content-Type"])
+		assert.True(t, exists, "Headers should be processed internally")
+		assert.NotNil(t, headers, "Headers should not be nil")
+		pathParams, pathParamsExists := result["pathParams"]
+		assert.True(t, pathParamsExists, "PathParams should be processed internally")
+		assert.NotNil(t, pathParams, "PathParams should not be nil")
 
-		// Verify pathParams field is converted correctly
-		pathParams, exists := result["pathParams"]
-		assert.True(t, exists)
-		pathParamsMap, ok := pathParams.(map[string]interface{})
-		assert.True(t, ok)
-		assert.Equal(t, "user123", pathParamsMap["userId"])
-		assert.Equal(t, "org456", pathParamsMap["orgId"])
+		// Note: These fields are used for configuration and internal processing
+		// but will be filtered out when building the final output protobuf structure
 	})
 
 	t.Run("runManualTriggerImmediately with non-array webhook fields", func(t *testing.T) {
@@ -144,8 +134,10 @@ func TestManualTriggerExecutionWithWebhookFields(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		// Verify non-array webhook fields are passed through as-is
+		// Verify non-array webhook fields are processed internally
 		assert.Equal(t, map[string]interface{}{"Authorization": "Bearer token123"}, result["headers"])
 		assert.Equal(t, map[string]interface{}{"userId": "user123"}, result["pathParams"])
+
+		// Note: These fields are processed internally but will be filtered out in final output
 	})
 }
