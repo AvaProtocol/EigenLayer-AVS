@@ -144,25 +144,32 @@ const message = manualTrigger.data; // "Hello World" or 42 or true
 ```
 
 **Execution Step Output Format:**
-Unlike other triggers that wrap their output in a data field, ManualTrigger execution steps return the raw data directly:
+Currently, ManualTrigger execution steps follow the same wrapping pattern as other triggers due to protobuf structure constraints:
 
 ```javascript
-// ManualTrigger execution step output format
+// Current ManualTrigger execution step output format (as of current implementation)
 // Input data: [{"key": "value1"}, {"key": "value2"}]
-// Execution step output: [{"key": "value1"}, {"key": "value2"}]  (direct data)
+// Execution step output: { data: [{"key": "value1"}, {"key": "value2"}] }  (wrapped like other triggers)
 
-// Other triggers wrap in data field:
+// All triggers currently wrap in data field:
 // EventTrigger execution step output: { data: { blockNumber: 123, ... } }
 // BlockTrigger execution step output: { data: { blockNumber: 456, ... } }
+// ManualTrigger execution step output: { data: [{"key": "value1"}, {"key": "value2"}] }
+```
 
-// But ManualTrigger is direct:
-// ManualTrigger execution step output: [{"key": "value1"}, {"key": "value2"}]
+**Future Enhancement (TODO):**
+The original design intent was for ManualTrigger to return raw data directly without wrapping:
+```javascript
+// Desired ManualTrigger execution step output format (future enhancement)
+// Input data: [{"key": "value1"}, {"key": "value2"}]
+// Execution step output: [{"key": "value1"}, {"key": "value2"}]  (direct data, no wrapper)
 ```
 
 **Key Distinction:**
-- **VM Variable Access**: Always use `manualTrigger.data` to access the data in subsequent nodes
-- **Execution Step Output**: Contains the raw data directly without wrapping in a `data` field
-- This design decision makes ManualTrigger outputs more direct and intuitive for API integrations
+- **VM Variable Access**: Always use `manualTrigger.data` to access the data in subsequent nodes (this works correctly)
+- **Execution Step Output**: Currently contains data wrapped in a `data` field like other triggers
+- **Future Enhancement**: Modify protobuf serialization to return raw data directly for ManualTrigger execution steps
+- This would make ManualTrigger outputs more direct and intuitive for API integrations
 
 ### BlockTrigger
 

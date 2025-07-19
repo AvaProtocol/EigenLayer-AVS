@@ -46,9 +46,8 @@ func TestManualTriggerWebhookFields(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, "test message", dataMap["message"])
 
-		// Verify headers and pathParams are NOT included in output (they're config-only)
-		assert.Nil(t, result.Headers, "Headers should not be included in output")
-		assert.Nil(t, result.PathParams, "PathParams should not be included in output")
+		// Note: Headers and PathParams fields have been removed from ManualTrigger.Output
+		// They are now config-only fields and not part of the execution step output
 	})
 
 	t.Run("buildManualTriggerOutput with only data field (no config)", func(t *testing.T) {
@@ -64,9 +63,8 @@ func TestManualTriggerWebhookFields(t *testing.T) {
 		// Verify data field is present
 		assert.NotNil(t, result.Data)
 
-		// Verify headers and pathParams are always nil in output (config-only fields)
-		assert.Nil(t, result.Headers, "Headers should never be in output")
-		assert.Nil(t, result.PathParams, "PathParams should never be in output")
+		// Note: Headers and PathParams fields have been removed from ManualTrigger.Output
+		// They are now config-only fields and not part of the execution step output
 	})
 }
 

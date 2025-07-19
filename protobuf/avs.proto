@@ -232,10 +232,6 @@ message ManualTrigger {
   message Output {
     // User-defined data from trigger config - this is the main payload for manual triggers
     google.protobuf.Value data = 1;
-    // Headers from trigger config for webhook testing
-    map<string, string> headers = 2;
-    // Path parameters from trigger config for webhook testing
-    map<string, string> pathParams = 3;
   }
 
   // Include Config as field so it is generated in Go

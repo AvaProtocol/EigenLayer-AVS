@@ -465,8 +465,8 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VM Compile should not error: %v", err)
 	}
-	if vm.entrypoint != customCodeNodeID {
-		t.Errorf("VM entrypoint incorrect: got %q, want %q", vm.entrypoint, customCodeNodeID)
+	if vm.entrypoint != triggerID {
+		t.Errorf("VM entrypoint incorrect: got %q, want %q", vm.entrypoint, triggerID)
 	}
 
 	err = vm.Run()

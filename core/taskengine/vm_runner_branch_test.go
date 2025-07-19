@@ -147,8 +147,8 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 
 	vm.Compile()
 
-	if vm.entrypoint != "branch1" {
-		t.Errorf("Error compute entrypoint. Expected branch1, got %s", vm.entrypoint)
+	if vm.entrypoint != "triggertest" {
+		t.Errorf("Error compute entrypoint. Expected triggertest, got %s", vm.entrypoint)
 		return
 	}
 

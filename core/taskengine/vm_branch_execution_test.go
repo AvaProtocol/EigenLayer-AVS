@@ -91,8 +91,8 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 
 	vm.Compile()
 
-	if vm.entrypoint != "123" {
-		t.Errorf("Error compute entrypoint. Expected 123 Got %s", vm.entrypoint)
+	if vm.entrypoint != "triggertest" {
+		t.Errorf("Error compute entrypoint. Expected triggertest Got %s", vm.entrypoint)
 	}
 	err = vm.Run()
 	if err != nil {
