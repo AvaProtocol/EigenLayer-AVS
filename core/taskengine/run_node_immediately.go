@@ -1271,64 +1271,73 @@ func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Ad
 
 // runManualTriggerImmediately executes a manual trigger immediately
 func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
-	fmt.Printf("🔍 runManualTriggerImmediately called with triggerConfig: %+v\n", triggerConfig)
-	result := map[string]interface{}{}
-
-	// The main purpose of manual triggers is to return user-defined JSON data
-	// Data is required for ManualTrigger
+	// Validate that data is provided and not null
 	data, exists := triggerConfig["data"]
 	if !exists || data == nil {
-		return nil, fmt.Errorf("ManualTrigger data is required")
+		return nil, fmt.Errorf("ManualTrigger data is required and cannot be null")
 	}
 
-	// Accept any valid JSON structure (objects, arrays, etc.)
-	// The data should already be parsed from JSON by the time it reaches here
-	result["data"] = data
 	if n.logger != nil {
 		n.logger.Info("ManualTrigger executed with valid JSON data", "dataType", fmt.Sprintf("%T", data))
 	}
 
-	// Include headers for webhook testing if provided - convert from array format to map format
-	if headers, exists := triggerConfig["headers"]; exists && headers != nil {
-		fmt.Printf("🔍 Headers found in triggerConfig: %+v (type: %T)\n", headers, headers)
-		if headersArray, ok := headers.([]interface{}); ok {
-			// Convert array of objects to map format
-			convertedHeaders := convertArrayOfObjectsToProtobufCompatible(headersArray)
-			result["headers"] = convertedHeaders
-			fmt.Printf("✅ Headers converted from array: %+v\n", convertedHeaders)
-		} else {
-			// Already in map format
-			result["headers"] = headers
-			fmt.Printf("✅ Headers already in map format: %+v\n", headers)
+	// Process headers
+	headers := make(map[string]interface{})
+	if headersInterface, exists := triggerConfig["headers"]; exists {
+		if headersArray, ok := headersInterface.([]interface{}); ok {
+			// Convert array format to map format
+			convertedHeaders := make(map[string]interface{})
+			for _, item := range headersArray {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					if key, keyOk := itemMap["key"].(string); keyOk {
+						if value, valueOk := itemMap["value"]; valueOk {
+							convertedHeaders[key] = value
+						}
+					}
+				}
+			}
+			headers = convertedHeaders
+		} else if headersMap, ok := headersInterface.(map[string]interface{}); ok {
+			headers = headersMap
 		}
-		if n.logger != nil {
-			n.logger.Info("ManualTrigger executed with headers", "headersType", fmt.Sprintf("%T", headers))
-		}
-	} else {
-		fmt.Printf("❌ No headers found in triggerConfig\n")
 	}
 
-	// Include path parameters for webhook testing if provided - convert from array format to map format
-	if pathParams, exists := triggerConfig["pathParams"]; exists && pathParams != nil {
-		fmt.Printf("🔍 PathParams found in triggerConfig: %+v (type: %T)\n", pathParams, pathParams)
-		if pathParamsArray, ok := pathParams.([]interface{}); ok {
-			// Convert array of objects to map format
-			convertedPathParams := convertArrayOfObjectsToProtobufCompatible(pathParamsArray)
-			result["pathParams"] = convertedPathParams
-			fmt.Printf("✅ PathParams converted from array: %+v\n", convertedPathParams)
-		} else {
-			// Already in map format
-			result["pathParams"] = pathParams
-			fmt.Printf("✅ PathParams already in map format: %+v\n", pathParams)
-		}
-		if n.logger != nil {
-			n.logger.Info("ManualTrigger executed with pathParams", "pathParamsType", fmt.Sprintf("%T", pathParams))
-		}
-	} else {
-		fmt.Printf("❌ No pathParams found in triggerConfig\n")
+	if n.logger != nil {
+		n.logger.Info("ManualTrigger executed with headers", "headersType", fmt.Sprintf("%T", headers))
 	}
 
-	fmt.Printf("🔍 runManualTriggerImmediately returning result: %+v\n", result)
+	// Process path parameters
+	pathParams := make(map[string]interface{})
+	if pathParamsInterface, exists := triggerConfig["pathParams"]; exists {
+		if pathParamsArray, ok := pathParamsInterface.([]interface{}); ok {
+			// Convert array format to map format
+			convertedPathParams := make(map[string]interface{})
+			for _, item := range pathParamsArray {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					if key, keyOk := itemMap["key"].(string); keyOk {
+						if value, valueOk := itemMap["value"]; valueOk {
+							convertedPathParams[key] = value
+						}
+					}
+				}
+			}
+			pathParams = convertedPathParams
+		} else if pathParamsMap, ok := pathParamsInterface.(map[string]interface{}); ok {
+			pathParams = pathParamsMap
+		}
+	}
+
+	if n.logger != nil {
+		n.logger.Info("ManualTrigger executed with pathParams", "pathParamsType", fmt.Sprintf("%T", pathParams))
+	}
+
+	// Return result with processed headers and pathParams
+	result := map[string]interface{}{
+		"data":       triggerConfig["data"],
+		"headers":    headers,
+		"pathParams": pathParams,
+	}
+
 	return result, nil
 }
 
@@ -2334,6 +2343,7 @@ func isExpectedValidationError(err error) bool {
 		"unknown node type for node ID",                     // Filter node execution errors
 		"branch node requires conditionsList configuration", // Branch node configuration errors
 		"failed to create node:",                            // Node creation errors
+		"ManualTrigger data is required",                    // ManualTrigger data validation errors
 	}
 
 	for _, pattern := range validationErrorPatterns {

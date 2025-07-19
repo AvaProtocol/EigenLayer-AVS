@@ -1363,37 +1363,26 @@ func (v *VM) runBranch(stepID string, nodeValue *avsproto.BranchNode) (*avsproto
 }
 
 func (v *VM) runLoop(stepID string, nodeValue *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
-	if v.logger != nil {
-		v.logger.Info("🔄 runLoop: Starting LoopNode execution", "stepID", stepID, "nodeValue_exists", nodeValue != nil)
-		if nodeValue != nil && nodeValue.Config != nil {
-			v.logger.Info("🔄 runLoop: LoopNode config", "inputNodeName", nodeValue.Config.InputNodeName, "iterVal", nodeValue.Config.IterVal, "iterKey", nodeValue.Config.IterKey)
-		}
-	}
 
 	p := NewLoopProcessor(v)
 	executionLog, err := p.Execute(stepID, nodeValue) // Loop processor internally calls RunNodeWithInputs
 
 	if v.logger != nil {
-		v.logger.Info("🔄 runLoop: After Execute", "stepID", stepID, "executionLog_exists", executionLog != nil, "error", err)
 		if executionLog != nil {
-			v.logger.Info("🔄 runLoop: ExecutionLog before collecting inputs", "stepID", stepID, "success", executionLog.Success, "inputs_count", len(executionLog.Inputs))
 		}
 	}
 
 	v.mu.Lock()
 	if executionLog != nil {
 		if v.logger != nil {
-			v.logger.Info("🔄 runLoop: About to collect inputs", "stepID", stepID)
 		}
 		executionLog.Inputs = v.collectInputKeysForLog(stepID)
 		if v.logger != nil {
-			v.logger.Info("🔄 runLoop: After collecting inputs", "stepID", stepID, "inputs", executionLog.Inputs)
 		}
 	}
 	v.mu.Unlock()
 
 	if v.logger != nil {
-		v.logger.Info("🔄 runLoop: Returning", "stepID", stepID, "executionLog_exists", executionLog != nil, "error", err)
 	}
 
 	// v.addExecutionLog(executionLog)
@@ -1839,7 +1828,7 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 
 	// Debug logging to understand what's happening
 	if v.logger != nil {
-		v.logger.Info("🔍 collectInputKeysForLog DEBUG",
+		v.logger.Debug("collectInputKeysForLog processing",
 			"excludeStepID", excludeStepID,
 			"excludeVarName", excludeVarName,
 			"totalVars", len(v.vars))
@@ -1847,16 +1836,8 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 
 	for k, value := range v.vars {
 		if !contains(macros.MacroFuncs, k) { // `contains` is a global helper
-			// Debug log each variable being processed
-			if v.logger != nil {
-				v.logger.Info("🔍 Processing variable", "key", k, "exclude", excludeVarName, "match", k == excludeVarName)
-			}
-
 			// Skip the current node's own variables from its inputsList
 			if excludeVarName != "" && k == excludeVarName {
-				if v.logger != nil {
-					v.logger.Info("🚫 Excluding current node variable", "key", k)
-				}
 				continue
 			}
 
@@ -1867,9 +1848,6 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 				inputKeys = append(inputKeys, WorkflowContextVarName) // Use as-is, no .data suffix
 			} else if k == "triggerConfig" {
 				// Skip triggerConfig system variable - it shouldn't appear in inputsList
-				if v.logger != nil {
-					v.logger.Info("🚫 Excluding triggerConfig system variable")
-				}
 				continue
 			} else {
 				// For regular variables, check if they have data and/or input fields
@@ -1878,34 +1856,43 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 					if _, hasData := valueMap["data"]; hasData {
 						dataKey := fmt.Sprintf("%s.%s", k, DataSuffix)
 						inputKeys = append(inputKeys, dataKey)
-						if v.logger != nil {
-							v.logger.Info("✅ Added data field", "key", dataKey)
-						}
 					}
 					// Check for .input field
 					if _, hasInput := valueMap["input"]; hasInput {
 						inputKey := fmt.Sprintf("%s.input", k)
 						inputKeys = append(inputKeys, inputKey)
-						if v.logger != nil {
-							v.logger.Info("✅ Added input field", "key", inputKey)
+					}
+					// Check for .headers field (for ManualTrigger template access)
+					if _, hasHeaders := valueMap["headers"]; hasHeaders {
+						headersKey := fmt.Sprintf("%s.headers", k)
+						inputKeys = append(inputKeys, headersKey)
+					}
+					// Check for .pathParams field (for ManualTrigger template access)
+					if _, hasPathParams := valueMap["pathParams"]; hasPathParams {
+						pathParamsKey := fmt.Sprintf("%s.pathParams", k)
+						inputKeys = append(inputKeys, pathParamsKey)
+					}
+
+					// Special case: ManualTrigger variables may have flattened data (no .data field)
+					// If the variable is a map but has no .data or .input fields, it might be a ManualTrigger variable
+					// In this case, add the variable name directly to inputKeys
+					if _, hasData := valueMap["data"]; !hasData {
+						if _, hasInput := valueMap["input"]; !hasInput && len(valueMap) > 0 {
+							// This looks like a ManualTrigger variable with flattened data
+							inputKeys = append(inputKeys, k)
 						}
 					}
-					// Note: .headers and .pathParams fields are no longer included in ManualTrigger output
-					// They are config-only fields, not output fields
 				} else {
 					// For non-map variables (simple scalars like input variables), use the variable name as-is
 					// This fixes the issue where input variables like "userToken" were incorrectly becoming "userToken.data"
 					inputKeys = append(inputKeys, k)
-					if v.logger != nil {
-						v.logger.Info("✅ Added scalar variable", "key", k)
-					}
 				}
 			}
 		}
 	}
 
 	if v.logger != nil {
-		v.logger.Info("🔍 Final inputKeys", "keys", inputKeys, "count", len(inputKeys))
+		v.logger.Debug("Final inputKeys", "keys", inputKeys, "count", len(inputKeys))
 	}
 
 	return inputKeys
@@ -2735,13 +2722,10 @@ func validateAllNodeNamesForJavaScript(task *model.Task) error {
 // This function returns the configuration that was used to execute the node
 func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{} {
 	if taskNode == nil {
-		fmt.Printf("🔍 ExtractNodeConfiguration: taskNode is nil\n")
 		return nil
 	}
 
 	// Note: This function is used in isolated execution contexts where logger might not be available
-	// For debugging, we'll use fmt.Printf as a fallback
-	fmt.Printf("🔍 ExtractNodeConfiguration: Processing node ID: %s, Type: %s\n", taskNode.Id, taskNode.Type.String())
 
 	switch taskNode.GetTaskType().(type) {
 	case *avsproto.TaskNode_RestApi:
@@ -2762,16 +2746,13 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				config["headersMap"] = headersList
 			}
 
-			fmt.Printf("🔍 ExtractNodeConfiguration: RestApi config extracted: %+v\n", config)
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
 		}
 
 	case *avsproto.TaskNode_Loop:
 		loop := taskNode.GetLoop()
-		fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode - loop exists: %t\n", loop != nil)
 		if loop != nil {
-			fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode - config exists: %t\n", loop.Config != nil)
 			if loop.Config != nil {
 				config := map[string]interface{}{
 					"inputNodeName": loop.Config.InputNodeName,
@@ -2786,10 +2767,7 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				runnerConfig := extractLoopRunnerConfig(loop)
 				if runnerConfig != nil {
 					config["runner"] = runnerConfig
-					fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode - runner config: %+v\n", runnerConfig)
 				}
-
-				fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode config final: %+v\n", config)
 
 				// Clean up complex protobuf types before returning
 				cleanConfig := removeComplexProtobufTypes(config)
@@ -2805,7 +2783,6 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				"source": customCode.Config.Source,
 			}
 
-			fmt.Printf("🔍 ExtractNodeConfiguration: CustomCode config extracted: %+v\n", config)
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
 		}
@@ -2819,7 +2796,7 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 			}
 
 			// Handle variables map format
-			if graphqlQuery.Config.Variables != nil && len(graphqlQuery.Config.Variables) > 0 {
+			if len(graphqlQuery.Config.Variables) > 0 {
 				variablesMap := make(map[string]interface{})
 				for key, value := range graphqlQuery.Config.Variables {
 					variablesMap[key] = value
@@ -2827,7 +2804,6 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				config["variables"] = variablesMap
 			}
 
-			fmt.Printf("🔍 ExtractNodeConfiguration: GraphqlQuery config extracted: %+v\n", config)
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
 		}
@@ -2864,7 +2840,6 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				config["methodCalls"] = methodCallsArray
 			}
 
-			fmt.Printf("🔍 ExtractNodeConfiguration: ContractRead config extracted: %+v\n", config)
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
 		}
@@ -2892,13 +2867,23 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				config["methodCalls"] = methodCallsArray
 			}
 
-			fmt.Printf("🔍 ExtractNodeConfiguration: ContractWrite config extracted: %+v\n", config)
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_Filter:
+		filter := taskNode.GetFilter()
+		if filter != nil && filter.Config != nil {
+			config := map[string]interface{}{
+				"expression":    filter.Config.Expression,
+				"inputNodeName": filter.Config.InputNodeName,
+			}
+
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
 		}
 	}
 
-	fmt.Printf("🔍 ExtractNodeConfiguration: No configuration extracted for node type: %s\n", taskNode.Type.String())
 	return nil
 }
 
@@ -2916,23 +2901,20 @@ func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeConfig
 	defer v.mu.Unlock()
 
 	if v.logger != nil {
-		v.logger.Info("🔍 GetNodeDataForExecution: Starting", "stepID", stepID, "taskNodesCount", len(v.TaskNodes))
+		v.logger.Debug("GetNodeDataForExecution: Starting", "stepID", stepID, "taskNodesCount", len(v.TaskNodes))
 	}
 
 	if taskNode, exists := v.TaskNodes[stepID]; exists {
 		nodeName = taskNode.Name
 
 		if v.logger != nil {
-			v.logger.Info("🔍 GetNodeDataForExecution: Found node", "stepID", stepID, "nodeName", nodeName, "nodeType", taskNode.Type.String())
 		}
 
 		// Extract node configuration instead of input data
 		nodeConfigMap := ExtractNodeConfiguration(taskNode)
 
 		if v.logger != nil {
-			v.logger.Info("🔍 GetNodeDataForExecution: After ExtractNodeConfiguration", "stepID", stepID, "configMap_exists", nodeConfigMap != nil)
 			if nodeConfigMap != nil {
-				v.logger.Info("🔍 GetNodeDataForExecution: Config map keys", "stepID", stepID, "keys", getMapKeys(nodeConfigMap))
 			}
 		}
 
@@ -2947,7 +2929,6 @@ func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeConfig
 			if configProto, err := structpb.NewValue(protobufCompatibleConfig); err == nil {
 				nodeConfig = configProto
 				if v.logger != nil {
-					v.logger.Info("🔍 GetNodeDataForExecution: Successfully created protobuf config", "stepID", stepID)
 				}
 			} else {
 				if v.logger != nil {
@@ -2966,7 +2947,6 @@ func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeConfig
 	}
 
 	if v.logger != nil {
-		v.logger.Info("🔍 GetNodeDataForExecution: Returning", "stepID", stepID, "nodeName", nodeName, "nodeConfig_exists", nodeConfig != nil)
 	}
 
 	return nodeName, nodeConfig

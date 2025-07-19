@@ -143,6 +143,27 @@ const firstItem = items[0]; // {"name": "item1"}
 const message = manualTrigger.data; // "Hello World" or 42 or true
 ```
 
+**Execution Step Output Format:**
+Unlike other triggers that wrap their output in a data field, ManualTrigger execution steps return the raw data directly:
+
+```javascript
+// ManualTrigger execution step output format
+// Input data: [{"key": "value1"}, {"key": "value2"}]
+// Execution step output: [{"key": "value1"}, {"key": "value2"}]  (direct data)
+
+// Other triggers wrap in data field:
+// EventTrigger execution step output: { data: { blockNumber: 123, ... } }
+// BlockTrigger execution step output: { data: { blockNumber: 456, ... } }
+
+// But ManualTrigger is direct:
+// ManualTrigger execution step output: [{"key": "value1"}, {"key": "value2"}]
+```
+
+**Key Distinction:**
+- **VM Variable Access**: Always use `manualTrigger.data` to access the data in subsequent nodes
+- **Execution Step Output**: Contains the raw data directly without wrapping in a `data` field
+- This design decision makes ManualTrigger outputs more direct and intuitive for API integrations
+
 ### BlockTrigger
 
 BlockTriggers execute at specified block intervals.
@@ -880,6 +901,11 @@ expect(result.error).toContain("ManualTrigger data is required");
 - **Execution Step `Input` field**: Contains configuration data used for debugging/inspection
   - For triggers: Contains trigger configuration (queries, schedules, etc.)
   - For nodes: Contains node configuration (URL, method, source code, etc.)
+
+- **Execution Step `Output` field**: Contains runtime execution results
+  - For most triggers: Wrapped in data field (e.g., `{ data: { blockNumber: 123 } }`)
+  - For ManualTrigger: Raw data directly (e.g., `[{"key": "value1"}]` not wrapped)
+  - For nodes: Contains processed output data
   
 - **VM Variables**: Contains both runtime data and input data for cross-node access
   - `triggerName.data`: Runtime output from trigger execution

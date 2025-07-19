@@ -3289,16 +3289,12 @@ func buildManualTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Ma
 	var data *structpb.Value
 
 	if triggerOutput != nil {
-		fmt.Printf("🔍 buildManualTriggerOutput called with: %+v\n", triggerOutput)
-
 		// Include ONLY the user-defined JSON data - this is the main payload for manual triggers
 		// Headers and pathParams are only used for configuration, not output
 		if dataValue, exists := triggerOutput["data"]; exists && dataValue != nil {
 			// Convert any valid JSON data (objects, arrays, etc.) to protobuf Value
 			if pbValue, err := structpb.NewValue(dataValue); err == nil {
 				data = pbValue
-			} else {
-				fmt.Printf("❌ Failed to convert JSON data to protobuf Value: %v\n", err)
 			}
 		}
 	}
@@ -3307,8 +3303,6 @@ func buildManualTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Ma
 		Data: data,
 		// Headers and PathParams are removed from output - they're config-only fields
 	}
-
-	fmt.Printf("🔍 buildManualTriggerOutput returning: %+v\n", result)
 	return result
 }
 
@@ -3330,9 +3324,10 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 
 	switch triggerType {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-		// For manual triggers, only include the data - headers and pathParams are config-only
-		if data, ok := triggerOutput["data"]; ok {
-			triggerDataMap["data"] = data
+		// For manual triggers, include all fields (data, headers, pathParams) for template access
+		// This allows templates to access ManualTrigger.data.field, ManualTrigger.headers.field, etc.
+		for k, v := range triggerOutput {
+			triggerDataMap[k] = v
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
 		if timestamp, ok := triggerOutput["timestamp"]; ok {
