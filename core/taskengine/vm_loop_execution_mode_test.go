@@ -10,7 +10,7 @@ import (
 
 func TestCreateNodeFromType_LoopExecutionMode_Sequential(t *testing.T) {
 	config := map[string]interface{}{
-		"sourceId":      "testSource",
+		"inputNodeName": "testSource",
 		"iterVal":       "item",
 		"iterKey":       "index",
 		"executionMode": "sequential",
@@ -35,7 +35,7 @@ func TestCreateNodeFromType_LoopExecutionMode_Sequential(t *testing.T) {
 	require.NotNil(t, loopNode)
 	require.NotNil(t, loopNode.Config)
 
-	assert.Equal(t, "testSource", loopNode.Config.SourceId)
+	assert.Equal(t, "testSource", loopNode.Config.InputNodeName)
 	assert.Equal(t, "item", loopNode.Config.IterVal)
 	assert.Equal(t, "index", loopNode.Config.IterKey)
 	assert.Equal(t, avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL, loopNode.Config.ExecutionMode)
@@ -46,7 +46,7 @@ func TestCreateNodeFromType_LoopExecutionMode_Sequential(t *testing.T) {
 
 func TestCreateNodeFromType_LoopExecutionMode_Parallel(t *testing.T) {
 	config := map[string]interface{}{
-		"sourceId":      "testSource",
+		"inputNodeName": "testSource",
 		"iterVal":       "item",
 		"iterKey":       "index",
 		"executionMode": "parallel",
@@ -75,9 +75,9 @@ func TestCreateNodeFromType_LoopExecutionMode_Parallel(t *testing.T) {
 
 func TestCreateNodeFromType_LoopExecutionMode_Default(t *testing.T) {
 	config := map[string]interface{}{
-		"sourceId": "testSource",
-		"iterVal":  "item",
-		"iterKey":  "index",
+		"inputNodeName": "testSource",
+		"iterVal":       "item",
+		"iterKey":       "index",
 		// executionMode not specified - should default to sequential
 		"runner": map[string]interface{}{
 			"type": "customCode",
@@ -104,7 +104,7 @@ func TestCreateNodeFromType_LoopExecutionMode_Default(t *testing.T) {
 
 func TestCreateNodeFromType_LoopExecutionMode_InvalidValue(t *testing.T) {
 	config := map[string]interface{}{
-		"sourceId":      "testSource",
+		"inputNodeName": "testSource",
 		"iterVal":       "item",
 		"iterKey":       "index",
 		"executionMode": "invalid_mode", // Invalid value - should default to sequential
@@ -147,7 +147,7 @@ func TestCreateNodeFromType_LoopExecutionMode_CaseInsensitive(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			config := map[string]interface{}{
-				"sourceId":      "testSource",
+				"inputNodeName": "testSource",
 				"iterVal":       "item",
 				"iterKey":       "index",
 				"executionMode": tc.mode,
@@ -178,7 +178,7 @@ func TestCreateNodeFromType_LoopExecutionMode_CaseInsensitive(t *testing.T) {
 
 func TestCreateNodeFromType_LoopExecutionMode_WithRestApiRunner(t *testing.T) {
 	config := map[string]interface{}{
-		"sourceId":      "testSource",
+		"inputNodeName": "testSource",
 		"iterVal":       "item",
 		"iterKey":       "index",
 		"executionMode": "sequential",
@@ -208,7 +208,7 @@ func TestCreateNodeFromType_LoopExecutionMode_WithRestApiRunner(t *testing.T) {
 
 func TestCreateNodeFromType_LoopExecutionMode_WithContractReadRunner(t *testing.T) {
 	config := map[string]interface{}{
-		"sourceId":      "contractAddresses",
+		"inputNodeName": "contractAddresses",
 		"iterVal":       "value",
 		"iterKey":       "index",
 		"executionMode": "sequential",
@@ -239,7 +239,7 @@ func TestCreateNodeFromType_LoopExecutionMode_WithContractReadRunner(t *testing.
 	require.NotNil(t, loopNode)
 	require.NotNil(t, loopNode.Config)
 
-	assert.Equal(t, "contractAddresses", loopNode.Config.SourceId)
+	assert.Equal(t, "contractAddresses", loopNode.Config.InputNodeName)
 	assert.Equal(t, "value", loopNode.Config.IterVal)
 	assert.Equal(t, "index", loopNode.Config.IterKey)
 	assert.Equal(t, avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL, loopNode.Config.ExecutionMode)
@@ -255,7 +255,7 @@ func TestCreateNodeFromType_LoopExecutionMode_WithContractReadRunner(t *testing.
 
 func TestCreateNodeFromType_LoopExecutionMode_WithContractWriteRunner(t *testing.T) {
 	config := map[string]interface{}{
-		"sourceId":      "contractAddresses",
+		"inputNodeName": "contractAddresses",
 		"iterVal":       "value",
 		"iterKey":       "index",
 		"executionMode": "parallel", // Will be forced to sequential due to contract write
@@ -286,7 +286,7 @@ func TestCreateNodeFromType_LoopExecutionMode_WithContractWriteRunner(t *testing
 	require.NotNil(t, loopNode)
 	require.NotNil(t, loopNode.Config)
 
-	assert.Equal(t, "contractAddresses", loopNode.Config.SourceId)
+	assert.Equal(t, "contractAddresses", loopNode.Config.InputNodeName)
 	assert.Equal(t, "value", loopNode.Config.IterVal)
 	assert.Equal(t, "index", loopNode.Config.IterKey)
 	// Note: executionMode is set at configuration time, the sequential enforcement happens at runtime
@@ -304,7 +304,7 @@ func TestCreateNodeFromType_LoopExecutionMode_WithContractWriteRunner(t *testing
 func TestCreateNodeFromType_LoopExecutionMode_CamelCaseFields(t *testing.T) {
 	// Test that camelCase field names are the standard format
 	config := map[string]interface{}{
-		"sourceId":      "testSource",
+		"inputNodeName": "testSource",
 		"iterVal":       "value",
 		"iterKey":       "index",
 		"executionMode": "sequential",
@@ -327,7 +327,7 @@ func TestCreateNodeFromType_LoopExecutionMode_CamelCaseFields(t *testing.T) {
 	loopNode := node.TaskType.(*avsproto.TaskNode_Loop).Loop
 	assert.NotNil(t, loopNode)
 	assert.NotNil(t, loopNode.Config)
-	assert.Equal(t, "testSource", loopNode.Config.SourceId)
+	assert.Equal(t, "testSource", loopNode.Config.InputNodeName)
 	assert.Equal(t, "value", loopNode.Config.IterVal)
 	assert.Equal(t, "index", loopNode.Config.IterKey)
 	assert.Equal(t, avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL, loopNode.Config.ExecutionMode)

@@ -290,11 +290,24 @@ func TestCamelCaseVariableResolutionConsistency(t *testing.T) {
 
 	t.Run("SimulateTask", func(t *testing.T) {
 		// Create a simple task with manual trigger and custom code node
+		// ManualTrigger needs data for simulation
+		triggerData, _ := structpb.NewValue(map[string]interface{}{
+			"tokenName":     "USDC",
+			"tokenSymbol":   "USDC",
+			"tokenDecimals": 6,
+		})
+
 		trigger := &avsproto.TaskTrigger{
-			Id:          "trigger1",
-			Name:        "manualTrigger",
-			Type:        avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
-			TriggerType: &avsproto.TaskTrigger_Manual{},
+			Id:   "trigger1",
+			Name: "manualTrigger",
+			Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
+			TriggerType: &avsproto.TaskTrigger_Manual{
+				Manual: &avsproto.ManualTrigger{
+					Config: &avsproto.ManualTrigger_Config{
+						Data: triggerData,
+					},
+				},
+			},
 		}
 
 		nodes := []*avsproto.TaskNode{
@@ -323,7 +336,14 @@ func TestCamelCaseVariableResolutionConsistency(t *testing.T) {
 		execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
 		assert.NoError(t, err)
 		assert.NotNil(t, execution)
-		assert.True(t, execution.Success, "Simulation should succeed")
+		if execution != nil {
+			assert.True(t, execution.Success, "Simulation should succeed")
+		}
+
+		// Only proceed if execution is not nil
+		if execution == nil {
+			return
+		}
 
 		// Find the custom code step
 		var customCodeStep *avsproto.Execution_Step

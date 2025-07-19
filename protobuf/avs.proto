@@ -582,9 +582,9 @@ message FilterNode {
     // Filter node acts like .select or .filter to pluck out element in an array that evaluate the expression to true
     string expression = 1;
     
-    // The node Id of a source node; we will extract the output of the source node at runtime.
+    // The name of the input node whose output data will be filtered.
     // The data should be iterable (array, object, etc.). Runtime validation will check compatibility.
-    string source_id = 2;
+    string input_node_name = 2;
   }
 
   message Output {
@@ -601,9 +601,8 @@ message FilterNode {
 // LoopNode currently not support, but we pre-defined to reverse the field id
 message LoopNode {
   message Config {
-    // source_variable is the variable name from a previous node whose data will be iterated over.
-    // The node Id of a source node; we will extract the output of the source node at runtime.
-    string source_id = 1;
+    // The name of the input node whose output data will be iterated over.
+    string input_node_name = 1;
     // iter_val is the variable name that will hold the current value during each iteration
     string iter_val = 2;
     // iter_key is the variable name that will hold the current key/index during each iteration
