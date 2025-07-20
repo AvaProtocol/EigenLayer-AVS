@@ -44,8 +44,8 @@ func TestETHTransferProcessor_Execute_Success(t *testing.T) {
 		t.Fatal("Expected ETH transfer output data, got nil")
 	}
 
-	if ethTransferOutput.TransactionHash == "" {
-		t.Error("Expected transaction hash to be set")
+	if ethTransferOutput.Data == nil {
+		t.Error("Expected ETH transfer data to be set")
 	}
 
 	// Check that output variables were set

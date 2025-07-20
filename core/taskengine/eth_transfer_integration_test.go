@@ -143,11 +143,11 @@ func TestETHTransferTaskIntegration(t *testing.T) {
 		t.Fatal("Expected ETH transfer output data")
 	}
 
-	if ethTransferOutput.TransactionHash == "" {
-		t.Error("Expected transaction hash to be set")
+	if ethTransferOutput.Data == nil {
+		t.Error("Expected ETH transfer data to be set")
 	}
 
-	t.Logf("ETH transfer task executed successfully with transaction hash: %s", ethTransferOutput.TransactionHash)
+	t.Logf("ETH transfer task executed successfully with data: %v", ethTransferOutput.Data)
 }
 
 func TestETHTransferTaskWithInvalidConfig(t *testing.T) {

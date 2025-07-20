@@ -107,8 +107,7 @@ message FixedTimeTrigger {
   }
   
   message Output {
-    uint64 timestamp = 1; // Timestamp in milliseconds
-    string timestamp_iso = 2; // ISO representation of timestamp in UTC (e.g., "2025-05-31T10:30:00.000Z")
+    google.protobuf.Value data = 1;
   }
 
   // Include Config as field so it is generated in Go
@@ -122,8 +121,7 @@ message CronTrigger {
   }
   
   message Output {
-    uint64 timestamp = 1; // Timestamp in milliseconds
-    string timestamp_iso = 2; // ISO representation of timestamp in UTC (e.g., "2025-05-31T10:30:00.000Z")
+    google.protobuf.Value data = 1;
   }
 
   // Include Config as field so it is generated in Go
@@ -136,13 +134,7 @@ message BlockTrigger {
   }
   
   message Output {
-    uint64 block_number = 1;
-    string block_hash = 2;
-    uint64 timestamp = 3;
-    string parent_hash = 4;
-    string difficulty = 5;
-    uint64 gas_limit = 6;
-    uint64 gas_used = 7;
+    google.protobuf.Value data = 1;
   }
 
   // Include Config as field so it is generated in Go
@@ -351,7 +343,7 @@ message ETHTransferNode {
   }
 
   message Output {
-    string transaction_hash = 1;
+    google.protobuf.Value data = 1;
   }
 
   // Include Config as field 
@@ -484,9 +476,9 @@ message GraphQLQueryNode {
   }
 
   message Output {
-    // The data is the result of the graphql query. Becuase this is GraphQL, the data is a json object
-    // The field of the json object is unknow, its depend on the query
-    google.protobuf.Any data = 1;
+    // The data is the result of the graphql query. Because this is GraphQL, the data is a json object
+    // The field of the json object is unknown, it depends on the query
+    google.protobuf.Value data = 1;
   }
 
   // Include Config as field 
@@ -537,10 +529,10 @@ message BranchNode {
   }
 
   message Output {
-    // the output of the branch node is the id of the condition that is true
+    // the output of the branch node contains the condition evaluation results
     // the execution will continue to the next node belong to this condition 
     // In front-end, when rendering the historical execution, we can draw the relationship coming out of the condition that match this id
-    string condition_id = 1;
+    google.protobuf.Value data = 1;
   }
 
   // Include Config as field 
@@ -559,7 +551,7 @@ message FilterNode {
 
   message Output {
     // the output of the filter node is the filtered array after apply the filter expression. It works similar to filter of javascript
-    google.protobuf.Any data = 1;
+    google.protobuf.Value data = 1;
   }
 
   // Include Config as field 
@@ -598,7 +590,7 @@ message LoopNode {
   }
 
   message Output {
-    string data = 1;
+    google.protobuf.Value data = 1;
   }
 
   // Include Config as field 

@@ -184,11 +184,9 @@ func TestCreateNodeFromType_LoopExecutionMode_WithRestApiRunner(t *testing.T) {
 		"executionMode": "sequential",
 		"runner": map[string]interface{}{
 			"type": "restApi",
-			"data": map[string]interface{}{
-				"config": map[string]interface{}{
-					"url":    "https://api.example.com",
-					"method": "GET",
-				},
+			"config": map[string]interface{}{
+				"url":    "https://api.example.com",
+				"method": "GET",
 			},
 		},
 	}
@@ -214,15 +212,13 @@ func TestCreateNodeFromType_LoopExecutionMode_WithContractReadRunner(t *testing.
 		"executionMode": "sequential",
 		"runner": map[string]interface{}{
 			"type": "contractRead",
-			"data": map[string]interface{}{
-				"config": map[string]interface{}{
-					"contractAddress": "{{value}}",
-					"contractAbi":     `[{"constant":true,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"}]`,
-					"methodCalls": []interface{}{
-						map[string]interface{}{
-							"methodName": "totalSupply",
-							"callData":   "0x18160ddd",
-						},
+			"config": map[string]interface{}{
+				"contractAddress": "{{value}}",
+				"contractAbi":     `[{"constant":true,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"}]`,
+				"methodCalls": []interface{}{
+					map[string]interface{}{
+						"methodName": "totalSupply",
+						"callData":   "0x18160ddd",
 					},
 				},
 			},
@@ -261,15 +257,13 @@ func TestCreateNodeFromType_LoopExecutionMode_WithContractWriteRunner(t *testing
 		"executionMode": "parallel", // Will be forced to sequential due to contract write
 		"runner": map[string]interface{}{
 			"type": "contractWrite",
-			"data": map[string]interface{}{
-				"config": map[string]interface{}{
-					"contractAddress": "{{value}}",
-					"contractAbi":     `[{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"}]`,
-					"methodCalls": []interface{}{
-						map[string]interface{}{
-							"methodName": "approve",
-							"callData":   "0x095ea7b3000000000000000000000000{{value}}0000000000000000000000000000000000000000000000000000000000000064",
-						},
+			"config": map[string]interface{}{
+				"contractAddress": "{{value}}",
+				"contractAbi":     `[{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"}]`,
+				"methodCalls": []interface{}{
+					map[string]interface{}{
+						"methodName": "approve",
+						"callData":   "0x095ea7b3000000000000000000000000{{value}}0000000000000000000000000000000000000000000000000000000000000064",
 					},
 				},
 			},

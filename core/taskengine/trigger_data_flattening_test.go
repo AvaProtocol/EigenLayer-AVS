@@ -476,14 +476,9 @@ func TestBlockTriggerFieldNamingConsistency(t *testing.T) {
 	}
 
 	// Create protobuf block trigger output
+	blockData, _ := structpb.NewValue(rawTriggerOutput)
 	blockOutputProto := &avsproto.BlockTrigger_Output{
-		BlockNumber: uint64(12345),
-		BlockHash:   "0xabcdef123456",
-		Timestamp:   uint64(1672531200),
-		ParentHash:  "0x123456abcdef",
-		Difficulty:  "1000000",
-		GasLimit:    uint64(30000000),
-		GasUsed:     uint64(21000),
+		Data: blockData,
 	}
 
 	// Test buildTriggerDataMap (used by run_node_immediately)

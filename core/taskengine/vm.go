@@ -2393,15 +2393,13 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		}
 
 		runnerType, hasType := runner["type"].(string)
-		runnerData, hasData := runner["data"].(map[string]interface{})
-
-		if !hasType || !hasData {
-			return nil, fmt.Errorf("loop node runner requires 'type' and 'data' fields")
+		if !hasType {
+			return nil, fmt.Errorf("loop node runner requires 'type' field")
 		}
 
-		runnerConfig, hasConfig := runnerData["config"].(map[string]interface{})
+		runnerConfig, hasConfig := runner["config"].(map[string]interface{})
 		if !hasConfig {
-			return nil, fmt.Errorf("loop node runner data requires 'config' field")
+			return nil, fmt.Errorf("loop node runner requires 'config' field")
 		}
 
 		switch runnerType {
@@ -3010,68 +3008,102 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 	switch runner := loop.GetRunner().(type) {
 	case *avsproto.LoopNode_CustomCode:
 		return map[string]interface{}{
-			"type":   "customCode",
-			"source": runner.CustomCode.Config.Source,
-			"lang":   runner.CustomCode.Config.Lang.String(),
+			"type": "customCode",
+			"config": map[string]interface{}{
+				"source": runner.CustomCode.Config.Source,
+				"lang":   runner.CustomCode.Config.Lang.String(),
+			},
 		}
 	case *avsproto.LoopNode_RestApi:
 		config := map[string]interface{}{
-			"type":   "restApi",
-			"url":    runner.RestApi.Config.Url,
-			"method": runner.RestApi.Config.Method,
-			"body":   runner.RestApi.Config.Body,
+			"type": "restApi",
+			"config": map[string]interface{}{
+				"url":    runner.RestApi.Config.Url,
+				"method": runner.RestApi.Config.Method,
+				"body":   runner.RestApi.Config.Body,
+			},
 		}
+		// Handle headers if present
 		if runner.RestApi.Config.Headers != nil && len(runner.RestApi.Config.Headers) > 0 {
-			// Convert headers map to array of [key, value] pairs as expected by tests
-			headersList := make([]interface{}, 0, len(runner.RestApi.Config.Headers))
-			for key, value := range runner.RestApi.Config.Headers {
-				headersList = append(headersList, []interface{}{key, value})
-			}
-			config["headersMap"] = headersList
+			config["config"].(map[string]interface{})["headers"] = runner.RestApi.Config.Headers
 		}
 		return config
 	case *avsproto.LoopNode_ContractRead:
-		config := map[string]interface{}{
-			"type":            "contractRead",
+		configData := map[string]interface{}{
 			"contractAddress": runner.ContractRead.Config.ContractAddress,
 			"contractAbi":     runner.ContractRead.Config.ContractAbi,
 		}
+		// Handle method calls if present
 		if len(runner.ContractRead.Config.MethodCalls) > 0 {
-			config["methodCalls"] = runner.ContractRead.Config.MethodCalls
+			methodCallsArray := make([]interface{}, len(runner.ContractRead.Config.MethodCalls))
+			for i, methodCall := range runner.ContractRead.Config.MethodCalls {
+				methodCallMap := map[string]interface{}{
+					"callData":   methodCall.CallData,
+					"methodName": methodCall.MethodName,
+				}
+				// Include applyToFields if present
+				if len(methodCall.ApplyToFields) > 0 {
+					applyToFieldsArray := make([]interface{}, len(methodCall.ApplyToFields))
+					for j, field := range methodCall.ApplyToFields {
+						applyToFieldsArray[j] = field
+					}
+					methodCallMap["applyToFields"] = applyToFieldsArray
+				}
+				methodCallsArray[i] = methodCallMap
+			}
+			configData["methodCalls"] = methodCallsArray
 		}
-		return config
+		return map[string]interface{}{
+			"type":   "contractRead",
+			"config": configData,
+		}
 	case *avsproto.LoopNode_ContractWrite:
-		config := map[string]interface{}{
-			"type":            "contractWrite",
+		configData := map[string]interface{}{
 			"contractAddress": runner.ContractWrite.Config.ContractAddress,
 			"contractAbi":     runner.ContractWrite.Config.ContractAbi,
 			"callData":        runner.ContractWrite.Config.CallData,
 		}
+		// Handle method calls if present
 		if len(runner.ContractWrite.Config.MethodCalls) > 0 {
-			config["methodCalls"] = runner.ContractWrite.Config.MethodCalls
+			methodCallsArray := make([]interface{}, len(runner.ContractWrite.Config.MethodCalls))
+			for i, methodCall := range runner.ContractWrite.Config.MethodCalls {
+				methodCallMap := map[string]interface{}{
+					"callData":   methodCall.CallData,
+					"methodName": methodCall.MethodName,
+				}
+				methodCallsArray[i] = methodCallMap
+			}
+			configData["methodCalls"] = methodCallsArray
 		}
-		return config
+		return map[string]interface{}{
+			"type":   "contractWrite",
+			"config": configData,
+		}
 	case *avsproto.LoopNode_EthTransfer:
 		return map[string]interface{}{
-			"type":        "ethTransfer",
-			"destination": runner.EthTransfer.Config.Destination,
-			"amount":      runner.EthTransfer.Config.Amount,
+			"type": "ethTransfer",
+			"config": map[string]interface{}{
+				"destination": runner.EthTransfer.Config.Destination,
+				"amount":      runner.EthTransfer.Config.Amount,
+			},
 		}
 	case *avsproto.LoopNode_GraphqlDataQuery:
-		config := map[string]interface{}{
-			"type":  "graphqlDataQuery",
+		configData := map[string]interface{}{
 			"url":   runner.GraphqlDataQuery.Config.Url,
 			"query": runner.GraphqlDataQuery.Config.Query,
 		}
+		// Handle variables if present
 		if runner.GraphqlDataQuery.Config.Variables != nil && len(runner.GraphqlDataQuery.Config.Variables) > 0 {
-			// Convert variables map to map[string]interface{} as expected by tests
 			variablesMap := make(map[string]interface{})
 			for key, value := range runner.GraphqlDataQuery.Config.Variables {
 				variablesMap[key] = value
 			}
-			config["variables"] = variablesMap
+			configData["variables"] = variablesMap
 		}
-		return config
+		return map[string]interface{}{
+			"type":   "graphqlDataQuery",
+			"config": configData,
+		}
 	}
 
 	return nil
@@ -3097,14 +3129,8 @@ func convertMapStringStringToInterface(input map[string]interface{}) map[string]
 			// Recursively convert nested maps
 			result[key] = convertMapStringStringToInterface(v)
 		default:
-			// Handle complex protobuf types that can't be converted directly
-			if key == "methodCalls" {
-				// Convert method calls to a simpler format
-				result[key] = convertMethodCallsToSimpleFormat(value)
-			} else {
-				// Keep other types as-is
-				result[key] = value
-			}
+			// Keep other types as-is since methodCalls should already be in correct format after our fixes
+			result[key] = value
 		}
 	}
 	return result
@@ -3119,12 +3145,11 @@ func removeComplexProtobufTypes(input map[string]interface{}) map[string]interfa
 	result := make(map[string]interface{})
 	for key, value := range input {
 		if key == "methodCalls" {
-			// Check if methodCalls is already in simple format ([]interface{} with maps)
+			// methodCalls should always be []interface{} with maps after our fixes
 			if methodCallsArray, ok := value.([]interface{}); ok {
-				// If it's already an array of interfaces, keep it as is
 				result[key] = methodCallsArray
 			} else {
-				// Convert method calls to string format to avoid protobuf conversion errors
+				// Fallback: convert unexpected format to string (should not happen with our fixes)
 				result[key] = fmt.Sprintf("%v", value)
 			}
 		} else if nestedMap, ok := value.(map[string]interface{}); ok {
@@ -3135,17 +3160,6 @@ func removeComplexProtobufTypes(input map[string]interface{}) map[string]interfa
 		}
 	}
 	return result
-}
-
-// convertMethodCallsToSimpleFormat converts protobuf method calls to a simple format for protobuf compatibility
-func convertMethodCallsToSimpleFormat(methodCalls interface{}) interface{} {
-	// Convert method calls to a simple string representation to avoid protobuf conversion errors
-	if methodCalls == nil {
-		return nil
-	}
-
-	// Convert to string representation for protobuf compatibility
-	return fmt.Sprintf("%v", methodCalls)
 }
 
 // convertConfigForFrontend converts internal configuration to user-friendly format for frontend

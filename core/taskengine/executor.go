@@ -177,8 +177,11 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		// Get the trigger variable name and update trigger variable using shared function
 		triggerVarName := sanitizeTriggerNameForJS(task.Trigger.GetName())
 
-		// Build trigger variable data using shared function (with empty triggerDataMap since we're just adding input)
-		triggerVarData := buildTriggerVariableData(task.Trigger, map[string]interface{}{}, triggerInputData)
+		// Build trigger data map from the actual trigger output data
+		triggerDataMap := buildTriggerDataMapFromProtobuf(queueData.TriggerType, queueData.TriggerOutput, x.logger)
+
+		// Build trigger variable data using shared function with ACTUAL trigger output data
+		triggerVarData := buildTriggerVariableData(task.Trigger, triggerDataMap, triggerInputData)
 
 		// Update trigger variable in VM using shared function
 		updateTriggerVariableInVM(vm, triggerVarName, triggerVarData)

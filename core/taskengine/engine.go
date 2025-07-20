@@ -19,6 +19,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/allegro/bigcache/v3"
@@ -3201,14 +3202,26 @@ func buildBlockTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Blo
 		}
 	}
 
+	// Create the data structure with all block information
+	blockData := map[string]interface{}{
+		"blockNumber": blockNumber,
+		"blockHash":   blockHash,
+		"timestamp":   timestamp,
+		"parentHash":  parentHash,
+		"difficulty":  difficulty,
+		"gasLimit":    gasLimit,
+		"gasUsed":     gasUsed,
+	}
+
+	// Convert to protobuf Value
+	dataValue, err := structpb.NewValue(blockData)
+	if err != nil {
+		// Fallback to empty data on error
+		dataValue, _ = structpb.NewValue(map[string]interface{}{})
+	}
+
 	return &avsproto.BlockTrigger_Output{
-		BlockNumber: blockNumber,
-		BlockHash:   blockHash,
-		Timestamp:   timestamp,
-		ParentHash:  parentHash,
-		Difficulty:  difficulty,
-		GasLimit:    gasLimit,
-		GasUsed:     gasUsed,
+		Data: dataValue,
 	}
 }
 
@@ -3238,9 +3251,21 @@ func buildFixedTimeTriggerOutput(triggerOutput map[string]interface{}) *avsproto
 		}
 	}
 
+	// Create the data structure with timestamp information
+	timeData := map[string]interface{}{
+		"timestamp":    timestamp,
+		"timestampIso": timestampISO,
+	}
+
+	// Convert to protobuf Value
+	dataValue, err := structpb.NewValue(timeData)
+	if err != nil {
+		// Fallback to empty data on error
+		dataValue, _ = structpb.NewValue(map[string]interface{}{})
+	}
+
 	return &avsproto.FixedTimeTrigger_Output{
-		Timestamp:    timestamp,
-		TimestampIso: timestampISO,
+		Data: dataValue,
 	}
 }
 
@@ -3270,9 +3295,21 @@ func buildCronTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Cron
 		}
 	}
 
+	// Create the data structure with timestamp information
+	cronData := map[string]interface{}{
+		"timestamp":    timestamp,
+		"timestampIso": timestampISO,
+	}
+
+	// Convert to protobuf Value
+	dataValue, err := structpb.NewValue(cronData)
+	if err != nil {
+		// Fallback to empty data on error
+		dataValue, _ = structpb.NewValue(map[string]interface{}{})
+	}
+
 	return &avsproto.CronTrigger_Output{
-		Timestamp:    timestamp,
-		TimestampIso: timestampISO,
+		Data: dataValue,
 	}
 }
 
@@ -3531,23 +3568,63 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
 		if timeOutput, ok := triggerOutputProto.(*avsproto.FixedTimeTrigger_Output); ok {
-			triggerDataMap["timestamp"] = timeOutput.Timestamp
-			triggerDataMap["timestamp_iso"] = timeOutput.TimestampIso
+			// Extract data from the new standardized data field
+			if timeOutput.Data != nil {
+				dataMap := gow.ValueToMap(timeOutput.Data)
+				if dataMap != nil {
+					if timestamp, ok := dataMap["timestamp"]; ok {
+						triggerDataMap["timestamp"] = timestamp
+					}
+					if timestampIso, ok := dataMap["timestampIso"]; ok {
+						triggerDataMap["timestamp_iso"] = timestampIso
+					}
+				}
+			}
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
 		if cronOutput, ok := triggerOutputProto.(*avsproto.CronTrigger_Output); ok {
-			triggerDataMap["timestamp"] = cronOutput.Timestamp
-			triggerDataMap["timestamp_iso"] = cronOutput.TimestampIso
+			// Extract data from the new standardized data field
+			if cronOutput.Data != nil {
+				dataMap := gow.ValueToMap(cronOutput.Data)
+				if dataMap != nil {
+					if timestamp, ok := dataMap["timestamp"]; ok {
+						triggerDataMap["timestamp"] = timestamp
+					}
+					if timestampIso, ok := dataMap["timestampIso"]; ok {
+						triggerDataMap["timestamp_iso"] = timestampIso
+					}
+				}
+			}
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
 		if blockOutput, ok := triggerOutputProto.(*avsproto.BlockTrigger_Output); ok {
-			triggerDataMap["blockNumber"] = blockOutput.BlockNumber
-			triggerDataMap["blockHash"] = blockOutput.BlockHash
-			triggerDataMap["timestamp"] = blockOutput.Timestamp
-			triggerDataMap["parentHash"] = blockOutput.ParentHash
-			triggerDataMap["difficulty"] = blockOutput.Difficulty
-			triggerDataMap["gasLimit"] = blockOutput.GasLimit
-			triggerDataMap["gasUsed"] = blockOutput.GasUsed
+			// Extract data from the new standardized data field
+			if blockOutput.Data != nil {
+				dataMap := gow.ValueToMap(blockOutput.Data)
+				if dataMap != nil {
+					if blockNumber, ok := dataMap["blockNumber"]; ok {
+						triggerDataMap["blockNumber"] = blockNumber
+					}
+					if blockHash, ok := dataMap["blockHash"]; ok {
+						triggerDataMap["blockHash"] = blockHash
+					}
+					if timestamp, ok := dataMap["timestamp"]; ok {
+						triggerDataMap["timestamp"] = timestamp
+					}
+					if parentHash, ok := dataMap["parentHash"]; ok {
+						triggerDataMap["parentHash"] = parentHash
+					}
+					if difficulty, ok := dataMap["difficulty"]; ok {
+						triggerDataMap["difficulty"] = difficulty
+					}
+					if gasLimit, ok := dataMap["gasLimit"]; ok {
+						triggerDataMap["gasLimit"] = gasLimit
+					}
+					if gasUsed, ok := dataMap["gasUsed"]; ok {
+						triggerDataMap["gasUsed"] = gasUsed
+					}
+				}
+			}
 		} else if rawMap, ok := triggerOutputProto.(map[string]interface{}); ok {
 			// Handle raw map data (from queue/storage) - convert snake_case to camelCase
 			if blockNumber, exists := rawMap["block_number"]; exists {
