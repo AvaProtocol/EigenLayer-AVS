@@ -1881,8 +1881,8 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		n.logger.Debug("🔍 SimulateTask: EventTrigger data extraction", "inputKeys", getMapKeys(triggerOutput), "outputKeys", getMapKeys(triggerDataMap))
 	}
 
-	// Extract trigger input data if available
-	triggerInputData := ExtractTriggerInputData(task.Trigger)
+	// Extract trigger config data if available
+	triggerInputData := TaskTriggerToConfig(task.Trigger)
 
 	// Build complete trigger variable data using shared function
 	triggerVarData := buildTriggerVariableData(task.Trigger, triggerDataMap, triggerInputData)
@@ -1902,29 +1902,29 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		triggerInputs = append(triggerInputs, key)
 	}
 
-	// Use the trigger configuration instead of input data for the execution step's Input field
-	// The Input field should show the configuration used to execute the trigger, not input data from previous steps
+	// Use the trigger config data for the execution step's Config field (includes data, headers, pathParams for ManualTrigger)
+	// The Config field should show the configuration data used to execute the trigger
 	var triggerConfigProto *structpb.Value
-	triggerConfig = TaskTriggerToConfig(task.Trigger)
-	if len(triggerConfig) > 0 {
+	triggerInputData = TaskTriggerToConfig(task.Trigger)
+	if len(triggerInputData) > 0 {
 		var err error
-		triggerConfigProto, err = structpb.NewValue(triggerConfig)
+		triggerConfigProto, err = structpb.NewValue(triggerInputData)
 		if err != nil {
-			n.logger.Warn("Failed to convert trigger config to protobuf", "error", err)
+			n.logger.Warn("Failed to convert trigger input to protobuf", "error", err)
 			// Try a fallback approach: convert to JSON and back to ensure proper formatting
-			jsonBytes, jsonErr := json.Marshal(triggerConfig)
+			jsonBytes, jsonErr := json.Marshal(triggerInputData)
 			if jsonErr == nil {
 				var cleanData interface{}
 				if unmarshalErr := json.Unmarshal(jsonBytes, &cleanData); unmarshalErr == nil {
-					if configProto, err := structpb.NewValue(cleanData); err == nil {
-						triggerConfigProto = configProto
-						n.logger.Info("✅ Successfully converted trigger config using JSON fallback")
+					if inputProto, err := structpb.NewValue(cleanData); err == nil {
+						triggerConfigProto = inputProto
+						n.logger.Info("✅ Successfully converted trigger input using JSON fallback")
 					}
 				}
 			}
 		}
 	} else {
-		n.logger.Info("🔍 SimulateTask: No trigger config found", "trigger_id", task.Trigger.Id, "trigger_type", task.Trigger.GetType())
+		n.logger.Info("🔍 SimulateTask: No trigger input found", "trigger_id", task.Trigger.Id, "trigger_type", task.Trigger.GetType())
 	}
 
 	triggerStep := &avsproto.Execution_Step{
@@ -1937,7 +1937,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Inputs:  triggerInputs,                  // Use inputVariables keys as trigger inputs
 		Type:    queueData.TriggerType.String(), // Use trigger type as string
 		Name:    task.Trigger.Name,              // Use new 'name' field
-		Input:   triggerConfigProto,             // Include trigger configuration for debugging
+		Config:  triggerConfigProto,             // Include trigger configuration data for debugging
 	}
 
 	// Set trigger output data in the step using shared function

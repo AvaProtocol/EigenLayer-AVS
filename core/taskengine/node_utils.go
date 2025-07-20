@@ -101,14 +101,14 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 		StartAt:    t0.UnixMilli(),
 		Type:       nodeType.String(),
 		Name:       nodeName,
-		Input:      nodeConfig, // Include node configuration for debugging
+		Config:     nodeConfig, // Include node configuration for debugging
 	}
 
 	// Log the final step
 	if vm.logger != nil {
 		vm.logger.Debug("createNodeExecutionStep: Created execution step",
 			"stepID", stepID,
-			"step_input_exists", step.Input != nil)
+			"step_config_exists", step.Config != nil)
 	}
 
 	return step

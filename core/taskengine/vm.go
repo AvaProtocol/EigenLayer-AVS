@@ -17,6 +17,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -387,7 +388,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			// Extract trigger input data and create trigger variable using shared function
 			var triggerInputData map[string]interface{}
 			if task != nil && task.Trigger != nil {
-				triggerInputData = ExtractTriggerInputData(task.Trigger)
+				triggerInputData = TaskTriggerToConfig(task.Trigger)
 			}
 
 			// Use shared function to build trigger variable data
@@ -404,7 +405,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			// Extract trigger input data even when triggerData is nil
 			var triggerInputData map[string]interface{}
 			if task.Trigger != nil {
-				triggerInputData = ExtractTriggerInputData(task.Trigger)
+				triggerInputData = TaskTriggerToConfig(task.Trigger)
 			}
 
 			// Extract trigger config data to use as the trigger's output data
@@ -1296,20 +1297,41 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 			if v.logger != nil {
 				v.logger.Error("runCustomCode: BlockTrigger nodes require real blockchain data - mock data not supported", "stepID", stepID, "name", taskNode.Name)
 			}
-			executionLog := v.createExecutionStep(stepID, false, "BlockTrigger nodes require real blockchain data - mock data not supported", "", time.Now().UnixMilli())
-			executionLog.EndAt = time.Now().UnixMilli()
-			return executionLog, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
+
+			// Get node configuration for error step
+			var nodeConfig *structpb.Value
+			nodeConfigMap := ExtractNodeConfiguration(taskNode)
+			if nodeConfigMap != nil {
+				if configProto, err := structpb.NewValue(nodeConfigMap); err == nil {
+					nodeConfig = configProto
+				}
+			}
+
+			return &avsproto.Execution_Step{
+				Id:      stepID, // Use new 'id' field
+				Success: false,
+				Error:   "BlockTrigger nodes require real blockchain data - mock data not supported",
+				StartAt: time.Now().UnixMilli(),
+				EndAt:   time.Now().UnixMilli(),
+				Config:  nodeConfig, // Include node configuration data for debugging
+			}, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
 		}
 
 		// If Config is nil and it's not a blockTrigger, return an error
 		if v.logger != nil {
 			v.logger.Error("runCustomCode: CustomCodeNode Config is nil", "stepID", stepID)
 		}
-		// Get the node's input data
-		var nodeInput *structpb.Value
+		// Get the node's configuration data
+		var nodeConfig *structpb.Value
 		v.mu.Lock()
 		if taskNode, exists := v.TaskNodes[stepID]; exists {
-			nodeInput = taskNode.Input
+			// Extract node configuration instead of the removed input field
+			nodeConfigMap := ExtractNodeConfiguration(taskNode)
+			if nodeConfigMap != nil {
+				if configProto, err := structpb.NewValue(nodeConfigMap); err == nil {
+					nodeConfig = configProto
+				}
+			}
 		}
 		v.mu.Unlock()
 
@@ -1319,7 +1341,7 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 			Error:   "CustomCodeNode Config is nil",
 			StartAt: time.Now().UnixMilli(),
 			EndAt:   time.Now().UnixMilli(),
-			Input:   nodeInput, // Include node input data for debugging
+			Config:  nodeConfig, // Include node configuration data for debugging
 		}, fmt.Errorf("CustomCodeNode Config is nil")
 	}
 
@@ -1942,25 +1964,43 @@ func (v *VM) GetTaskId() string {
 func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[string]interface{}) (*avsproto.Execution_Step, error) {
 	// Special handling for blockTrigger - require real blockchain data
 	if node.GetCustomCode() != nil && node.Name == "Single Node Execution: "+NodeTypeBlockTrigger {
+		// Get node configuration for error step
+		var nodeConfig *structpb.Value
+		nodeConfigMap := ExtractNodeConfiguration(node)
+		if nodeConfigMap != nil {
+			if configProto, err := structpb.NewValue(nodeConfigMap); err == nil {
+				nodeConfig = configProto
+			}
+		}
+
 		return &avsproto.Execution_Step{
 			Id:      node.Id, // Use new 'id' field
 			Success: false,
 			Error:   "BlockTrigger nodes require real blockchain data - mock data not supported",
 			StartAt: time.Now().UnixMilli(),
 			EndAt:   time.Now().UnixMilli(),
-			Input:   node.Input, // Include node input data for debugging
+			Config:  nodeConfig, // Include node configuration data for debugging
 		}, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
 	}
 
 	// Validate node name for JavaScript compatibility
 	if err := model.ValidateNodeNameForJavaScript(node.Name); err != nil {
+		// Get node configuration for error step
+		var nodeConfig *structpb.Value
+		nodeConfigMap := ExtractNodeConfiguration(node)
+		if nodeConfigMap != nil {
+			if configProto, err := structpb.NewValue(nodeConfigMap); err == nil {
+				nodeConfig = configProto
+			}
+		}
+
 		return &avsproto.Execution_Step{
 			Id:      node.Id,
 			Success: false,
 			Error:   fmt.Sprintf("Node name validation failed: %v", err),
 			StartAt: time.Now().UnixMilli(),
 			EndAt:   time.Now().UnixMilli(),
-			Input:   node.Input,
+			Config:  nodeConfig, // Include node configuration data for debugging
 		}, fmt.Errorf("node name validation failed: %w", err)
 	}
 
@@ -2538,15 +2578,22 @@ func (v *VM) createExecutionStep(nodeId string, success bool, errorMsg string, l
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	// Look up the node to get its type, name, and input data
+	// Look up the node to get its type, name, and configuration data
 	var nodeType string = "UNSPECIFIED"
 	var nodeName string = "unknown"
-	var nodeInput *structpb.Value
+	var nodeConfig *structpb.Value
 
 	if node, exists := v.TaskNodes[nodeId]; exists {
 		nodeType = node.Type.String()
 		nodeName = node.Name
-		nodeInput = node.Input
+
+		// Extract node configuration instead of the removed input field
+		nodeConfigMap := ExtractNodeConfiguration(node)
+		if nodeConfigMap != nil {
+			if configProto, err := structpb.NewValue(nodeConfigMap); err == nil {
+				nodeConfig = configProto
+			}
+		}
 	}
 
 	step := &avsproto.Execution_Step{
@@ -2555,10 +2602,10 @@ func (v *VM) createExecutionStep(nodeId string, success bool, errorMsg string, l
 		Error:   errorMsg,
 		Log:     logMsg,
 		StartAt: startTime,
-		EndAt:   startTime, // Will be updated by caller if needed
-		Type:    nodeType,  // Use new 'type' field as string
-		Name:    nodeName,  // Use new 'name' field
-		Input:   nodeInput, // Include node input data for debugging
+		EndAt:   startTime,  // Will be updated by caller if needed
+		Type:    nodeType,   // Use new 'type' field as string
+		Name:    nodeName,   // Use new 'name' field
+		Config:  nodeConfig, // Include node configuration data for debugging
 	}
 
 	return step
@@ -2609,67 +2656,69 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
 	return false, errorMessage, failedCount
 }
 
-// ExtractNodeInputData extracts input data from a TaskNode protobuf message
+// ExtractNodeInputData extracts configuration data from a TaskNode protobuf message
+// This function now extracts from the Config field since the duplicate input field was removed
 func ExtractNodeInputData(taskNode *avsproto.TaskNode) map[string]interface{} {
-	if taskNode == nil || taskNode.Input == nil {
+	if taskNode == nil {
 		return nil
 	}
 
-	// Convert protobuf.Value to Go native types
-	inputInterface := taskNode.Input.AsInterface()
-	if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-		return inputMap
-	}
-	return nil
+	// Extract configuration from the appropriate node type
+	return ExtractNodeConfiguration(taskNode)
 }
 
-// ExtractTriggerInputData extracts input data from a TaskTrigger protobuf message
-func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface{} {
+// ExtractTriggerConfigData extracts configuration data from a TaskTrigger protobuf message
+// This function now extracts from the Config field since the duplicate input field was removed
+func ExtractTriggerConfigData(trigger *avsproto.TaskTrigger) map[string]interface{} {
 	if trigger == nil {
 		return nil
 	}
 
-	// Check each trigger type and extract input from the correct nested object
+	// Check each trigger type and extract config from the correct nested object
 	switch trigger.GetTriggerType().(type) {
 	case *avsproto.TaskTrigger_Block:
 		blockTrigger := trigger.GetBlock()
-		if blockTrigger != nil && blockTrigger.GetInput() != nil {
-			inputInterface := blockTrigger.GetInput().AsInterface()
-			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-				return inputMap
+		if blockTrigger != nil && blockTrigger.Config != nil {
+			// Use the same approach as TaskTriggerToConfig for consistency
+			configMap, err := gow.ProtoToMap(blockTrigger.Config)
+			if err == nil {
+				return configMap
 			}
 		}
 	case *avsproto.TaskTrigger_Cron:
 		cronTrigger := trigger.GetCron()
-		if cronTrigger != nil && cronTrigger.GetInput() != nil {
-			inputInterface := cronTrigger.GetInput().AsInterface()
-			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-				return inputMap
+		if cronTrigger != nil && cronTrigger.Config != nil {
+			// Use the same approach as TaskTriggerToConfig for consistency
+			configMap, err := gow.ProtoToMap(cronTrigger.Config)
+			if err == nil {
+				return configMap
 			}
 		}
 	case *avsproto.TaskTrigger_Event:
 		eventTrigger := trigger.GetEvent()
-		if eventTrigger != nil && eventTrigger.GetInput() != nil {
-			inputInterface := eventTrigger.GetInput().AsInterface()
-			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-				return inputMap
+		if eventTrigger != nil && eventTrigger.Config != nil {
+			// Use the same approach as TaskTriggerToConfig for consistency
+			configMap, err := gow.ProtoToMap(eventTrigger.Config)
+			if err == nil {
+				return configMap
 			}
 		}
 	case *avsproto.TaskTrigger_FixedTime:
 		fixedTimeTrigger := trigger.GetFixedTime()
-		if fixedTimeTrigger != nil && fixedTimeTrigger.GetInput() != nil {
-			inputInterface := fixedTimeTrigger.GetInput().AsInterface()
-			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-				return inputMap
+		if fixedTimeTrigger != nil && fixedTimeTrigger.Config != nil {
+			// Use the same approach as TaskTriggerToConfig for consistency
+			configMap, err := gow.ProtoToMap(fixedTimeTrigger.Config)
+			if err == nil {
+				return configMap
 			}
 		}
 	case *avsproto.TaskTrigger_Manual:
-		// Manual triggers use the top-level TaskTrigger.input field
-		// since manual triggers don't have a nested config object like other trigger types
-		if trigger.GetInput() != nil {
-			inputInterface := trigger.GetInput().AsInterface()
-			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-				return inputMap
+		manualTrigger := trigger.GetManual()
+		if manualTrigger != nil && manualTrigger.Config != nil {
+			// Use the same approach as TaskTriggerToConfig for consistency
+			configMap, err := gow.ProtoToMap(manualTrigger.Config)
+			if err == nil {
+				return configMap
 			}
 		}
 		return nil

@@ -38,7 +38,7 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 			"stepID", stepID,
 			"node_exists", node != nil,
 			"execution_step_created", s != nil,
-			"execution_step_input_exists", s != nil && s.Input != nil)
+			"execution_step_config_exists", s != nil && s.Config != nil)
 	}
 
 	// Get configuration from node.Config (new architecture)

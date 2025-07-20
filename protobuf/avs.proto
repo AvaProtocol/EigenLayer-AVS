@@ -113,8 +113,6 @@ message FixedTimeTrigger {
 
   // Include Config as field so it is generated in Go
   Config config = 1;
-  // Input data provided by user for this trigger
-  google.protobuf.Value input = 2;
 }
 
 // Simple timebase or cron syntax.
@@ -130,8 +128,6 @@ message CronTrigger {
 
   // Include Config as field so it is generated in Go
   Config config = 1;
-  // Input data provided by user for this trigger
-  google.protobuf.Value input = 2;
 }
 
 message BlockTrigger {
@@ -151,8 +147,6 @@ message BlockTrigger {
 
   // Include Config as field so it is generated in Go
   Config config = 1;
-  // Input data provided by user for this trigger
-  google.protobuf.Value input = 2;
 }
 
 // EventTrigger monitors blockchain events using direct RPC filter queries.
@@ -215,8 +209,6 @@ message EventTrigger {
 
   // Include Config as field so it is generated in Go
   Config config = 1;
-  // Input data provided by user for this trigger
-  google.protobuf.Value input = 2;
 }
 
 message ManualTrigger {
@@ -236,8 +228,6 @@ message ManualTrigger {
 
   // Include Config as field so it is generated in Go
   Config config = 1;
-  // Input data provided by user for this trigger
-  google.protobuf.Value input = 2;
 }
 
 message TaskTrigger {
@@ -263,8 +253,6 @@ message TaskTrigger {
     EventTrigger     event   = 6;
   }
   string id = 7;
-  // Input data provided by user for this trigger
-  google.protobuf.Value input = 9;
 }
 
 // gRPC internal error code use up to 17, we extend and start from 1000 to avoid any conflict 
@@ -366,10 +354,8 @@ message ETHTransferNode {
     string transaction_hash = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 message ContractWriteNode {
@@ -444,10 +430,8 @@ message ContractWriteNode {
     string value = 3;                 // The actual return value as string
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 message ContractReadNode {
@@ -486,10 +470,8 @@ message ContractReadNode {
     google.protobuf.Value data = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 
@@ -507,10 +489,8 @@ message GraphQLQueryNode {
     google.protobuf.Any data = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 message RestAPINode {
@@ -526,16 +506,14 @@ message RestAPINode {
     google.protobuf.Value data = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 message CustomCodeNode {
   message Config {
     Lang lang = 1;  // Language is static config set at creation time
-    string source = 2;  // Source code can be provided as input variable
+    string source = 2;  // Source code
   }
 
   message Output {
@@ -543,10 +521,8 @@ message CustomCodeNode {
     google.protobuf.Value data = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 message BranchNode {
@@ -567,10 +543,8 @@ message BranchNode {
     string condition_id = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 message FilterNode {
@@ -588,10 +562,8 @@ message FilterNode {
     google.protobuf.Any data = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 // LoopNode currently not support, but we pre-defined to reverse the field id
@@ -629,10 +601,8 @@ message LoopNode {
     string data = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 // The edge is relationship or direct between node
@@ -669,8 +639,6 @@ message TaskNode {
     LoopNode          loop = 17;
     CustomCodeNode    custom_code = 18;
   }
-  // Input data provided by user for this node
-  google.protobuf.Value input = 19;
 }
 
 message Execution {
@@ -691,8 +659,8 @@ message Execution {
     string error = 13;
     string log = 12;
     repeated string inputs = 16;
-    // Input data that was set on this trigger/node
-    google.protobuf.Value input = 19;
+    // Configuration data that was set on this trigger/node
+    google.protobuf.Value config = 19;
     oneof output_data {
       // Trigger outputs
       BlockTrigger.Output block_trigger = 20;

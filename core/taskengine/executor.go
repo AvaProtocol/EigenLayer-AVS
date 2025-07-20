@@ -171,8 +171,8 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	vm.WithLogger(x.logger).WithDb(x.db)
 	initialTaskStatus := task.Status
 
-	// Extract and add trigger input data if available using shared functions
-	triggerInputData := ExtractTriggerInputData(task.Trigger)
+	// Extract and add trigger config data if available using shared functions
+	triggerInputData := TaskTriggerToConfig(task.Trigger)
 	if triggerInputData != nil && task.Trigger != nil {
 		// Get the trigger variable name and update trigger variable using shared function
 		triggerVarName := sanitizeTriggerNameForJS(task.Trigger.GetName())
@@ -213,14 +213,15 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		// This ensures regular workflows have complete execution history (trigger + nodes)
 
 		// Create trigger step similar to SimulateTask
-		// Use trigger configuration instead of input data for the execution step's Input field
+		// Use trigger config data for the execution step's Config field (includes data, headers, pathParams for ManualTrigger)
 		var triggerConfigProto *structpb.Value
-		triggerConfig := TaskTriggerToConfig(task.Trigger)
-		if len(triggerConfig) > 0 {
-			if configProto, err := structpb.NewValue(triggerConfig); err != nil {
-				x.logger.Warn("Failed to convert trigger config to protobuf", "error", err)
+		triggerInputData := TaskTriggerToConfig(task.Trigger)
+
+		if len(triggerInputData) > 0 {
+			if inputProto, err := structpb.NewValue(triggerInputData); err != nil {
+				x.logger.Warn("Failed to convert trigger input to protobuf", "error", err)
 			} else {
-				triggerConfigProto = configProto
+				triggerConfigProto = inputProto
 			}
 		}
 
@@ -234,7 +235,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 			Inputs:  []string{}, // Empty inputs for trigger steps
 			Type:    queueData.TriggerType.String(),
 			Name:    task.Trigger.Name,
-			Input:   triggerConfigProto, // Include trigger configuration for debugging
+			Config:  triggerConfigProto, // Include trigger configuration data for debugging
 		}
 
 		// Set trigger output data in the step based on trigger type
