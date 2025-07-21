@@ -1083,7 +1083,7 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 	}
 
 	// Extract and set input data for this node (making it available as node_name.input)
-	inputData := ExtractNodeInputData(node)
+	inputData := ExtractNodeConfiguration(node)
 	if inputData != nil {
 		processor := &CommonProcessor{vm: v}
 		processor.SetInputVarForStep(node.Id, inputData)
@@ -2652,17 +2652,6 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
 	}
 
 	return false, errorMessage, failedCount
-}
-
-// ExtractNodeInputData extracts configuration data from a TaskNode protobuf message
-// This function now extracts from the Config field since the duplicate input field was removed
-func ExtractNodeInputData(taskNode *avsproto.TaskNode) map[string]interface{} {
-	if taskNode == nil {
-		return nil
-	}
-
-	// Extract configuration from the appropriate node type
-	return ExtractNodeConfiguration(taskNode)
 }
 
 // ExtractTriggerConfigData extracts configuration data from a TaskTrigger protobuf message
