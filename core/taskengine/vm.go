@@ -3166,6 +3166,13 @@ func removeComplexProtobufTypes(input map[string]interface{}) map[string]interfa
 				// Fallback: convert unexpected format to string (should not happen with our fixes)
 				result[key] = fmt.Sprintf("%v", value)
 			}
+		} else if stringMap, ok := value.(map[string]string); ok {
+			// Convert map[string]string to map[string]interface{} for protobuf compatibility
+			interfaceMap := make(map[string]interface{})
+			for k, v := range stringMap {
+				interfaceMap[k] = v
+			}
+			result[key] = interfaceMap
 		} else if nestedMap, ok := value.(map[string]interface{}); ok {
 			// Recursively clean nested maps
 			result[key] = removeComplexProtobufTypes(nestedMap)

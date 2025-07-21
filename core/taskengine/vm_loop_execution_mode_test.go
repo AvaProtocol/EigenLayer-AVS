@@ -175,7 +175,7 @@ func TestCreateNodeFromType_LoopExecutionMode_WithRestApiRunner(t *testing.T) {
 		"runner": map[string]interface{}{
 			"type": "restApi",
 			"config": map[string]interface{}{
-				"url":    "https://api.example.com",
+				"url":    MockAPIEndpoint,
 				"method": "GET",
 			},
 		},

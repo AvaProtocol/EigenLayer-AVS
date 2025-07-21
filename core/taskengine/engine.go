@@ -3150,11 +3150,43 @@ func buildEventTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Eve
 // This shared function eliminates code duplication between SimulateTask, RunTriggerRPC,
 // and regular task execution flows.
 //
+// IMPORTANT: Type Conversion Limitation
+// =====================================
+// This function converts uint64 values to protobuf Value structures using structpb.NewValue().
+// Due to protobuf's internal use of JSON, all numeric types get converted to float64.
+// This means:
+//   - Input:  blockNumber: uint64(12345)
+//   - Output: blockNumber: float64(12345) (via protobuf)
+//
+// This type conversion happens because:
+// 1. structpb.NewValue() uses JSON internally
+// 2. JSON only has one numeric type (float64 in Go)
+// 3. All integers get converted to float64
+//
+// Impact:
+// - buildTriggerDataMap() preserves uint64 types (works with raw data)
+// - buildTriggerDataMapFromProtobuf() returns float64 types (works with protobuf data)
+// - This creates inconsistency between different data paths
+//
+// Client Consistency Requirement:
+// The key requirement is that client input should match execution step output.
+// As long as users get back the same values they provided, the internal conversion is acceptable.
+//
+// Potential Solutions:
+// 1. Avoid protobuf conversion when not needed (preserve raw data) - requires major refactoring
+// 2. Use custom protobuf types that preserve integer types - complex implementation
+// 3. Accept the conversion and ensure client consistency - current approach
+//
+// Currently using solution #3: clients typically send JSON with float64 numbers anyway,
+// so the protobuf conversion maintains consistency from the client perspective.
+// Tests verify that user input matches execution step output values and types.
+//
 // Parameters:
 //   - triggerOutput: map containing raw trigger output data from runBlockTriggerImmediately
 //
 // Returns:
 //   - *avsproto.BlockTrigger_Output: properly structured protobuf output with block data
+//     (note: numeric values will be float64 due to protobuf conversion)
 func buildBlockTriggerOutput(triggerOutput map[string]interface{}) *avsproto.BlockTrigger_Output {
 	blockNumber := uint64(0)
 	blockHash := ""
