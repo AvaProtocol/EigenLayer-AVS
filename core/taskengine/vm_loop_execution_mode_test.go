@@ -16,11 +16,9 @@ func TestCreateNodeFromType_LoopExecutionMode_Sequential(t *testing.T) {
 		"executionMode": "sequential",
 		"runner": map[string]interface{}{
 			"type": "customCode",
-			"data": map[string]interface{}{
-				"config": map[string]interface{}{
-					"source": "return value * 2;",
-					"lang":   "javascript",
-				},
+			"config": map[string]interface{}{
+				"source": "return value * 2;",
+				"lang":   "javascript",
 			},
 		},
 	}
@@ -52,11 +50,9 @@ func TestCreateNodeFromType_LoopExecutionMode_Parallel(t *testing.T) {
 		"executionMode": "parallel",
 		"runner": map[string]interface{}{
 			"type": "customCode",
-			"data": map[string]interface{}{
-				"config": map[string]interface{}{
-					"source": "return value * 3;",
-					"lang":   "javascript",
-				},
+			"config": map[string]interface{}{
+				"source": "return value * 3;",
+				"lang":   "javascript",
 			},
 		},
 	}
@@ -81,11 +77,9 @@ func TestCreateNodeFromType_LoopExecutionMode_Default(t *testing.T) {
 		// executionMode not specified - should default to sequential
 		"runner": map[string]interface{}{
 			"type": "customCode",
-			"data": map[string]interface{}{
-				"config": map[string]interface{}{
-					"source": "return value;",
-					"lang":   "javascript",
-				},
+			"config": map[string]interface{}{
+				"source": "return value;",
+				"lang":   "javascript",
 			},
 		},
 	}
@@ -110,11 +104,9 @@ func TestCreateNodeFromType_LoopExecutionMode_InvalidValue(t *testing.T) {
 		"executionMode": "invalid_mode", // Invalid value - should default to sequential
 		"runner": map[string]interface{}{
 			"type": "customCode",
-			"data": map[string]interface{}{
-				"config": map[string]interface{}{
-					"source": "return value;",
-					"lang":   "javascript",
-				},
+			"config": map[string]interface{}{
+				"source": "return value;",
+				"lang":   "javascript",
 			},
 		},
 	}
@@ -153,11 +145,9 @@ func TestCreateNodeFromType_LoopExecutionMode_CaseInsensitive(t *testing.T) {
 				"executionMode": tc.mode,
 				"runner": map[string]interface{}{
 					"type": "customCode",
-					"data": map[string]interface{}{
-						"config": map[string]interface{}{
-							"source": "return value;",
-							"lang":   "javascript",
-						},
+					"config": map[string]interface{}{
+						"source": "return value;",
+						"lang":   "javascript",
 					},
 				},
 			}
@@ -184,11 +174,9 @@ func TestCreateNodeFromType_LoopExecutionMode_WithRestApiRunner(t *testing.T) {
 		"executionMode": "sequential",
 		"runner": map[string]interface{}{
 			"type": "restApi",
-			"data": map[string]interface{}{
-				"config": map[string]interface{}{
-					"url":    "https://api.example.com",
-					"method": "GET",
-				},
+			"config": map[string]interface{}{
+				"url":    MockAPIEndpoint,
+				"method": "GET",
 			},
 		},
 	}
@@ -214,15 +202,13 @@ func TestCreateNodeFromType_LoopExecutionMode_WithContractReadRunner(t *testing.
 		"executionMode": "sequential",
 		"runner": map[string]interface{}{
 			"type": "contractRead",
-			"data": map[string]interface{}{
-				"config": map[string]interface{}{
-					"contractAddress": "{{value}}",
-					"contractAbi":     `[{"constant":true,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"}]`,
-					"methodCalls": []interface{}{
-						map[string]interface{}{
-							"methodName": "totalSupply",
-							"callData":   "0x18160ddd",
-						},
+			"config": map[string]interface{}{
+				"contractAddress": "{{value}}",
+				"contractAbi":     `[{"constant":true,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"}]`,
+				"methodCalls": []interface{}{
+					map[string]interface{}{
+						"methodName": "totalSupply",
+						"callData":   "0x18160ddd",
 					},
 				},
 			},
@@ -261,15 +247,13 @@ func TestCreateNodeFromType_LoopExecutionMode_WithContractWriteRunner(t *testing
 		"executionMode": "parallel", // Will be forced to sequential due to contract write
 		"runner": map[string]interface{}{
 			"type": "contractWrite",
-			"data": map[string]interface{}{
-				"config": map[string]interface{}{
-					"contractAddress": "{{value}}",
-					"contractAbi":     `[{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"}]`,
-					"methodCalls": []interface{}{
-						map[string]interface{}{
-							"methodName": "approve",
-							"callData":   "0x095ea7b3000000000000000000000000{{value}}0000000000000000000000000000000000000000000000000000000000000064",
-						},
+			"config": map[string]interface{}{
+				"contractAddress": "{{value}}",
+				"contractAbi":     `[{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"}]`,
+				"methodCalls": []interface{}{
+					map[string]interface{}{
+						"methodName": "approve",
+						"callData":   "0x095ea7b3000000000000000000000000{{value}}0000000000000000000000000000000000000000000000000000000000000064",
 					},
 				},
 			},
@@ -310,11 +294,9 @@ func TestCreateNodeFromType_LoopExecutionMode_CamelCaseFields(t *testing.T) {
 		"executionMode": "sequential",
 		"runner": map[string]interface{}{
 			"type": "customCode",
-			"data": map[string]interface{}{
-				"config": map[string]interface{}{
-					"source": "return { doubled: item * 2 };",
-					"lang":   "javascript",
-				},
+			"config": map[string]interface{}{
+				"source": "return { doubled: item * 2 };",
+				"lang":   "javascript",
 			},
 		},
 	}

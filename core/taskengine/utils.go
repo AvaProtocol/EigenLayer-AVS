@@ -153,18 +153,12 @@ func NewGojaVMWithModules() (*goja.Runtime, *modules.Registry, error) {
 // with consistent handling for single vs multiple method calls.
 // This consolidates the repeated conversion logic used across contract processors.
 func ConvertResultsArrayToProtobufValue(resultsArray []interface{}, log *strings.Builder) *structpb.Value {
-	// For single method calls, return the data directly (flattened format)
-	// For multiple method calls, return as array (backward compatibility)
+	// Always return as array for consistency, regardless of single or multiple method calls
 	var resultsValue *structpb.Value
 	var structErr error
 
-	if len(resultsArray) == 1 {
-		// Single method call - return the result directly for flattened format
-		resultsValue, structErr = structpb.NewValue(resultsArray[0])
-	} else {
-		// Multiple method calls - return as array
-		resultsValue, structErr = structpb.NewValue(resultsArray)
-	}
+	// Always return as array to maintain consistent data structure
+	resultsValue, structErr = structpb.NewValue(resultsArray)
 
 	if structErr != nil {
 		if log != nil {

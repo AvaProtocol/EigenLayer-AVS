@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -38,7 +39,7 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 			"stepID", stepID,
 			"node_exists", node != nil,
 			"execution_step_created", s != nil,
-			"execution_step_input_exists", s != nil && s.Input != nil)
+			"execution_step_config_exists", s != nil && s.Config != nil)
 	}
 
 	// Get configuration from node.Config (new architecture)
@@ -137,10 +138,19 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 		// Use shared function to set output variable for this step
 		setNodeOutputData(r.CommonProcessor, stepID, results)
 
+		// Convert empty results to protobuf Value
+		dataValue, err := structpb.NewValue(results)
+		if err != nil {
+			// Fallback to empty data on error
+			dataValue, _ = structpb.NewValue([]interface{}{})
+		}
+
+		loopOutput := &avsproto.LoopNode_Output{
+			Data: dataValue,
+		}
+
 		s.OutputData = &avsproto.Execution_Step_Loop{
-			Loop: &avsproto.LoopNode_Output{
-				Data: "[]",
-			},
+			Loop: loopOutput,
 		}
 		log.WriteString("\nEmpty array input - returning empty results")
 		finalizeExecutionStep(s, true, "", log.String())
@@ -276,12 +286,21 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 		}
 	}
 
-	resultsJSON, err := json.Marshal(jsonSerializableResults)
+	_, err := json.Marshal(jsonSerializableResults)
 	if err == nil {
+		// Convert results to protobuf Value
+		dataValue, protoErr := structpb.NewValue(jsonSerializableResults)
+		if protoErr != nil {
+			// Fallback to empty data on error
+			dataValue, _ = structpb.NewValue([]interface{}{})
+		}
+
+		loopOutput := &avsproto.LoopNode_Output{
+			Data: dataValue,
+		}
+
 		s.OutputData = &avsproto.Execution_Step_Loop{
-			Loop: &avsproto.LoopNode_Output{
-				Data: string(resultsJSON),
-			},
+			Loop: loopOutput,
 		}
 		log.WriteString(fmt.Sprintf("\nSuccessfully set output data with %d results", len(results)))
 	} else {
@@ -304,11 +323,20 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 		}
 
 		// Try to marshal the parsed results
-		if parsedJSON, parseErr := json.Marshal(fallbackResults); parseErr == nil {
+		if _, parseErr := json.Marshal(fallbackResults); parseErr == nil {
+			// Convert fallback results to protobuf Value
+			dataValue, protoErr := structpb.NewValue(fallbackResults)
+			if protoErr != nil {
+				// Fallback to empty data on error
+				dataValue, _ = structpb.NewValue([]interface{}{})
+			}
+
+			loopOutput := &avsproto.LoopNode_Output{
+				Data: dataValue,
+			}
+
 			s.OutputData = &avsproto.Execution_Step_Loop{
-				Loop: &avsproto.LoopNode_Output{
-					Data: string(parsedJSON),
-				},
+				Loop: loopOutput,
 			}
 		} else {
 			// Final fallback: string array
@@ -320,11 +348,21 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 					stringResults[i] = "null"
 				}
 			}
-			finalJSON, _ := json.Marshal(stringResults)
+			_, _ = json.Marshal(stringResults)
+
+			// Convert string results to protobuf Value
+			dataValue, protoErr := structpb.NewValue(stringResults)
+			if protoErr != nil {
+				// Fallback to empty data on error
+				dataValue, _ = structpb.NewValue([]interface{}{})
+			}
+
+			loopOutput := &avsproto.LoopNode_Output{
+				Data: dataValue,
+			}
+
 			s.OutputData = &avsproto.Execution_Step_Loop{
-				Loop: &avsproto.LoopNode_Output{
-					Data: string(finalJSON),
-				},
+				Loop: loopOutput,
 			}
 		}
 	}
@@ -457,7 +495,7 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 			var results []interface{}
 
 			if contractWriteOutput.GetData().GetListValue() != nil {
-				// Data is an array
+				// Data is an array - return directly
 				for _, item := range contractWriteOutput.GetData().GetListValue().GetValues() {
 					results = append(results, item.AsInterface())
 				}
@@ -466,23 +504,28 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 				results = append(results, contractWriteOutput.GetData().AsInterface())
 			}
 
-			return map[string]interface{}{
-				"results": results,
-			}, nil
+			// Return results array directly, not wrapped in a "results" object
+			return results, nil
 		}
 		return nil, nil
 	} else if ethTransferOutput := executionStep.GetEthTransfer(); ethTransferOutput != nil {
-		return map[string]interface{}{
-			"txHash": ethTransferOutput.GetTransactionHash(),
-		}, nil
+		// Extract transaction hash from the new data field
+		if ethTransferOutput.Data != nil {
+			dataMap := gow.ValueToMap(ethTransferOutput.Data)
+			if dataMap != nil {
+				if txHash, ok := dataMap["transactionHash"]; ok {
+					return map[string]interface{}{
+						"txHash": txHash,
+					}, nil
+				}
+			}
+		}
+		return nil, nil
 	} else if graphqlOutput := executionStep.GetGraphql(); graphqlOutput != nil {
 		if graphqlOutput.Data != nil {
-			// Use a generic map to unmarshal GraphQL data
-			var result map[string]interface{}
-			structVal := &structpb.Struct{}
-			if err := graphqlOutput.Data.UnmarshalTo(structVal); err == nil {
-				result = structVal.AsMap()
-				return convertToJSONCompatible(result), nil
+			// Extract data from the new standardized data field
+			if dataMap := gow.ValueToMap(graphqlOutput.Data); dataMap != nil {
+				return convertToJSONCompatible(dataMap), nil
 			}
 		}
 		return nil, nil

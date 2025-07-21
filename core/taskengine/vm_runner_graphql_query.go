@@ -9,7 +9,6 @@ import (
 
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/graphql"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
-	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -89,10 +88,10 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 
 	value, err := structpb.NewValue(resp)
 	if err == nil {
-		pbResult, _ := anypb.New(value)
+		// Use the Value directly instead of wrapping in Any
 		step.OutputData = &avsproto.Execution_Step_Graphql{
 			Graphql: &avsproto.GraphQLQueryNode_Output{
-				Data: pbResult,
+				Data: value,
 			},
 		}
 	}

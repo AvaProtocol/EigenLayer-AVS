@@ -41,6 +41,71 @@ const previousResult = previousNode.data;
 const previousConfig = previousNode.input;
 ```
 
+### 4. Execution Step Config Consistency
+
+**CRITICAL REQUIREMENT**: The `config` field in execution steps must be identical to the original node/trigger creation structure. This serves as a debugging tool for tracking what was configured into each component.
+
+```javascript
+// ✅ CORRECT: Backend preserves original structure
+// Original LoopNode creation:
+{
+  type: "loop",
+  data: {
+    inputNodeName: "sourceNode",
+    iterVal: "value", 
+    iterKey: "index",
+    runner: {
+      type: "restApi",
+      data: {
+        config: {
+          url: "{{value}}",
+          method: "GET",
+          body: ""
+        }
+      }
+    }
+  }
+}
+
+// Execution step config field (MUST be identical):
+{
+  executionMode: "sequential",
+  inputNodeName: "sourceNode", 
+  iterVal: "value",
+  iterKey: "index",
+  runner: {
+    type: "restApi",
+    data: {
+      config: {
+        url: "{{value}}",      // ✅ Preserved structure
+        method: "GET",         // ✅ Preserved structure  
+        body: ""               // ✅ Preserved structure
+      }
+    }
+  }
+}
+
+// ❌ WRONG: Flattened structure breaks consistency
+{
+  executionMode: "sequential",
+  inputNodeName: "sourceNode",
+  iterVal: "value", 
+  iterKey: "index",
+  runner: {
+    type: "restApi",
+    url: "{{value}}",         // ❌ Flattened - breaks debugging
+    method: "GET",            // ❌ Flattened - breaks debugging
+    body: ""                  // ❌ Flattened - breaks debugging
+  }
+}
+```
+
+**Key Requirements:**
+- Backend must NOT flatten or transform the original data structure
+- SDK and backend must maintain consistency between creation and execution config
+- The config field is for debugging/inspection - it must match the original structure
+- All runner types (restApi, customCode, contractRead, contractWrite, etc.) must preserve their nested structure
+
 ## Trigger Types and Variable Structures
 
 ### EventTrigger
@@ -142,6 +207,40 @@ const firstItem = items[0]; // {"name": "item1"}
 // JSON Primitive data
 const message = manualTrigger.data; // "Hello World" or 42 or true
 ```
+
+**Execution Step Output Format:**
+As part of the standardization effort, all triggers and nodes now use consistent **Direct Mapping** for execution step outputs:
+
+```javascript
+// STANDARDIZED execution step output format (Direct Mapping)
+// Input data: [{"key": "value1"}, {"key": "value2"}]
+// Execution step output: [{"key": "value1"}, {"key": "value2"}]  (direct data, no wrapper)
+
+// All triggers use Direct Mapping:
+// EventTrigger execution step output: { blockNumber: 123, chainId: 11155111, ... }
+// BlockTrigger execution step output: { blockNumber: 456, timestamp: 1672531200, ... }
+// ManualTrigger execution step output: [{"key": "value1"}, {"key": "value2"}]
+// CronTrigger execution step output: { executionTime: "2025-01-17T10:30:00Z", ... }
+// FixedTimeTrigger execution step output: { executionTime: "2025-01-17T15:00:00Z", ... }
+
+// All nodes use Direct Mapping:
+// CustomCodeNode execution step output: { result: "processed", processedItems: 42, ... }
+// RestAPINode execution step output: { body: {...}, statusCode: 200, headers: {...} }
+// ContractReadNode execution step output: [{ methodName: "balanceOf", data: [...] }]
+// ContractWriteNode execution step output: [{ transactionHash: "0x...", success: true }]
+// ETHTransferNode execution step output: { transactionHash: "0x...", amountSent: "1.0" }
+// BranchNode execution step output: { conditionResult: true, selectedBranch: "success" }
+// LoopNode execution step output: ["item1_processed", "item2_processed", ...]
+// FilterNode execution step output: [{ key: "value1" }]
+// GraphQLNode execution step output: { data: { user: {...} }, errors: null }
+```
+
+**Key Benefits of Direct Mapping:**
+- **Consistent Structure**: All triggers and nodes return data directly without intermediate wrappers
+- **Simplified SDK Code**: Single output handling function for all types
+- **Better Developer Experience**: Predictable output format across all execution steps
+- **Type Safety**: Clean, native JavaScript objects/arrays without nested data fields
+- **API Consistency**: Uniform response structure for all workflow components
 
 ### BlockTrigger
 
@@ -433,22 +532,14 @@ Filter nodes filter data based on conditions.
 // Filter node variable structure
 filterNode = {
   data: {
-    // Runtime output from filter operation
-    passed: true,
-    result: {
-      // Filtered data that passed the condition
-      value: "1500000000000000000",
-      from: "0x...",
-      to: "0x...",
-      tokenSymbol: "USDC"
-    },
-    filterExpression: "value > 1000000000000000000"  // 1 ETH
+    // Runtime output from filter operation - the filtered result
+    key: "value1"  // Data that passed the filter condition
   },
   input: {
     // Configuration for filtering
-    expression: "eventTrigger.data.value > 1000000000000000000",
-    sourceData: "eventTrigger.data",
-    description: "Filter large transfers only"
+    inputNodeName: "manualTrigger",  // Node name to get data from
+    expression: "value.key === 'value1'",  // Filter expression
+    description: "Filter items with specific key value"
   }
 }
 ```
@@ -460,25 +551,28 @@ Loop nodes iterate over arrays or objects.
 ```javascript
 // Loop node variable structure
 loopNode = {
-  data: {
-    // Runtime output from loop execution
-    results: [
-      "item1_processed",
-      "item2_processed", 
-      "item3_processed"
-    ],
-    totalIterations: 3,
-    successfulIterations: 3,
-    failedIterations: 0,
-    executionMode: "sequential"
-  },
+  data: [
+    // Runtime output from loop execution - flat array of results
+    "item1_processed",
+    "item2_processed", 
+    "item3_processed"
+  ],
   input: {
     // Configuration for loop operation
-    sourceId: "manualTrigger.data",  // Array to iterate over
+    inputNodeName: "manualTrigger",  // Node name to get array from
     iterVal: "item",                 // Variable name for current item
     iterKey: "index",                // Variable name for current index
     executionMode: "sequential",     // or "parallel"
-    maxIterations: 100
+    maxIterations: 100,
+    runner: {
+      type: "customCode",            // Loop runner type
+      data: {
+        config: {
+          lang: "JavaScript",
+          source: "return item + '_processed';"
+        }
+      }
+    }
   }
 }
 ```
@@ -768,7 +862,7 @@ manualTrigger.data = [
 {
   "type": "loop",
   "config": {
-    "sourceId": "manualTrigger",  // Access the full data array
+    "inputNodeName": "manualTrigger",  // Access the full data array
     "iterVal": "item",
     "iterKey": "index",
     "executionMode": "sequential",
@@ -782,8 +876,8 @@ manualTrigger.data = [
   }
 }
 
-// Loop node output
-loopNode.data.results = [
+// Loop node output - flat array of results
+loopNode.data = [
   "item1: 200",
   "item2: 400", 
   "item3: 600"
@@ -885,6 +979,11 @@ expect(result.error).toContain("ManualTrigger data is required");
 - **Execution Step `Input` field**: Contains configuration data used for debugging/inspection
   - For triggers: Contains trigger configuration (queries, schedules, etc.)
   - For nodes: Contains node configuration (URL, method, source code, etc.)
+
+- **Execution Step `Output` field**: Contains runtime execution results
+  - For most triggers: Wrapped in data field (e.g., `{ data: { blockNumber: 123 } }`)
+  - For ManualTrigger: Raw data directly (e.g., `[{"key": "value1"}]` not wrapped)
+  - For nodes: Contains processed output data
   
 - **VM Variables**: Contains both runtime data and input data for cross-node access
   - `triggerName.data`: Runtime output from trigger execution
@@ -930,6 +1029,301 @@ expect(result.error).toContain("ManualTrigger data is required");
 - Use secrets management for sensitive data
 - Sanitize data before using in templates
 - Implement proper access controls
+
+## Output Data Structure Standardization
+
+### Standardization Plan (2025)
+
+To improve code maintainability and provide consistent developer experience, we are standardizing all triggers and nodes to use **Direct Mapping** with `google.protobuf.Value data = 1` structure.
+
+#### **Phase 1: Protobuf Standardization**
+
+All trigger and node Output messages will use the standardized structure:
+
+```protobuf
+// STANDARDIZED structure for ALL triggers
+message BlockTrigger {
+  message Output {
+    google.protobuf.Value data = 1;  // ✅ Standardized (was: multiple fields)
+  }
+}
+
+message EventTrigger {
+  message Output {
+    google.protobuf.Value data = 1;  // ✅ Already correct
+  }
+}
+
+message ManualTrigger {
+  message Output {
+    google.protobuf.Value data = 1;  // ✅ Already correct
+  }
+}
+
+message CronTrigger {
+  message Output {
+    google.protobuf.Value data = 1;  // ✅ Standardized (was: multiple fields)
+  }
+}
+
+message FixedTimeTrigger {
+  message Output {
+    google.protobuf.Value data = 1;  // ✅ Standardized (was: multiple fields)
+  }
+}
+
+// STANDARDIZED structure for ALL nodes
+message CustomCodeNode {
+  message Output {
+    google.protobuf.Value data = 1;  // ✅ Already correct
+  }
+}
+
+message RestAPINode {
+  message Output {
+    google.protobuf.Value data = 1;  // ✅ Already correct
+  }
+}
+
+message ContractReadNode {
+  message Output {
+    google.protobuf.Value data = 1;  // ✅ Already correct
+  }
+}
+
+message ContractWriteNode {
+  message Output {
+    google.protobuf.Value data = 1;  // ✅ Already correct
+  }
+}
+
+message ETHTransferNode {
+  message Output {
+    google.protobuf.Value data = 1;  // ❌ Currently: string transaction_hash = 1;
+  }
+}
+
+message BranchNode {
+  message Output {
+    google.protobuf.Value data = 1;  // ❌ Currently: string condition_id = 1;
+  }
+}
+
+message LoopNode {
+  message Output {
+    google.protobuf.Value data = 1;  // ❌ Currently: string data = 1;
+  }
+}
+
+message FilterNode {
+  message Output {
+    google.protobuf.Value data = 1;  // ✅ Already correct (uses Any, will migrate to Value)
+  }
+}
+
+message GraphQLQueryNode {
+  message Output {
+    google.protobuf.Value data = 1;  // ❌ Currently: google.protobuf.Any data = 1;
+  }
+}
+```
+
+#### **Phase 2: Backend Implementation**
+
+Update all backend trigger and node implementations to populate the `data` field:
+
+```go
+// Example: BlockTrigger backend implementation
+func createBlockTriggerOutput(blockInfo *BlockInfo) *avsproto.BlockTrigger_Output {
+    outputData := map[string]interface{}{
+        "blockNumber": blockInfo.Number,
+        "blockHash": blockInfo.Hash,
+        "timestamp": blockInfo.Timestamp,
+        "parentHash": blockInfo.ParentHash,
+        "difficulty": blockInfo.Difficulty,
+        "gasLimit": blockInfo.GasLimit,
+        "gasUsed": blockInfo.GasUsed,
+    }
+    
+    dataValue, err := convertToProtobufValue(outputData)
+    if err != nil {
+        return nil
+    }
+    
+    return &avsproto.BlockTrigger_Output{
+        Data: dataValue, // ✅ Standardized approach
+    }
+}
+
+// Example: ETHTransferNode backend implementation
+func createETHTransferOutput(txHash string, amount string, recipient string) *avsproto.ETHTransferNode_Output {
+    outputData := map[string]interface{}{
+        "transactionHash": txHash,
+        "amountSent": amount,
+        "recipient": recipient,
+        "status": "success",
+    }
+    
+    dataValue, err := convertToProtobufValue(outputData)
+    if err != nil {
+        return nil
+    }
+    
+    return &avsproto.ETHTransferNode_Output{
+        Data: dataValue, // ✅ Standardized approach
+    }
+}
+```
+
+#### **Phase 3: SDK Simplification**
+
+Replace the complex switch statement with a unified output handler:
+
+```typescript
+// SIMPLIFIED SDK mapping - ONE function handles ALL cases
+static getOutput(step: avs_pb.Execution.Step): OutputDataProps {
+  const outputData = this.extractOutputData(step);
+  if (!outputData) return null;
+  
+  // ALL triggers and nodes use the same Direct Mapping logic
+  if (typeof outputData.hasData === "function" && outputData.hasData()) {
+    try {
+      return convertProtobufValueToJs(outputData.getData());
+    } catch (error) {
+      console.warn("Failed to convert protobuf Value to JavaScript:", error);
+      return outputData.getData();
+    }
+  } else if (outputData.data) {
+    // For plain objects, try to convert or use directly
+    return typeof outputData.data.getKindCase === "function"
+      ? convertProtobufValueToJs(outputData.data)
+      : outputData.data;
+  }
+  
+  return null;
+}
+
+private static extractOutputData(step: avs_pb.Execution.Step): any {
+  // Simple switch to get the output object - all handled identically
+  const outputCase = this.getOutputDataCase(step);
+  switch (outputCase) {
+    case avs_pb.Execution.Step.OutputDataCase.BLOCK_TRIGGER:
+      return typeof step.getBlockTrigger === "function" 
+        ? step.getBlockTrigger() 
+        : (step as any).blockTrigger;
+    case avs_pb.Execution.Step.OutputDataCase.EVENT_TRIGGER:
+      return typeof step.getEventTrigger === "function" 
+        ? step.getEventTrigger() 
+        : (step as any).eventTrigger;
+    case avs_pb.Execution.Step.OutputDataCase.MANUAL_TRIGGER:
+      return typeof step.getManualTrigger === "function" 
+        ? step.getManualTrigger() 
+        : (step as any).manualTrigger;
+    case avs_pb.Execution.Step.OutputDataCase.CUSTOM_CODE:
+      return typeof step.getCustomCode === "function" 
+        ? step.getCustomCode() 
+        : (step as any).customCode;
+    case avs_pb.Execution.Step.OutputDataCase.REST_API:
+      return typeof step.getRestApi === "function" 
+        ? step.getRestApi() 
+        : (step as any).restApi;
+    // ... all other cases follow the same pattern
+    default:
+      return null;
+  }
+}
+```
+
+#### **Migration Priority**
+
+1. **High Priority** (Breaking inconsistencies):
+   - ✅ **LoopNode**: Fix `string data = 1` → `google.protobuf.Value data = 1`
+   - ✅ **GraphQLNode**: Migrate `google.protobuf.Any data = 1` → `google.protobuf.Value data = 1`
+
+2. **Medium Priority** (Standardize triggers):
+   - ✅ **BlockTrigger**: Migrate multiple fields → `google.protobuf.Value data = 1`
+   - ✅ **CronTrigger**: Migrate multiple fields → `google.protobuf.Value data = 1`  
+   - ✅ **FixedTimeTrigger**: Migrate multiple fields → `google.protobuf.Value data = 1`
+
+3. **Low Priority** (Simple nodes):
+   - ✅ **ETHTransferNode**: Migrate `string transaction_hash = 1` → `google.protobuf.Value data = 1`
+   - ✅ **BranchNode**: Migrate `string condition_id = 1` → `google.protobuf.Value data = 1`
+
+#### **Backward Compatibility Strategy**
+
+During migration, support both old and new formats:
+
+```typescript
+// Backward compatibility during migration
+static getOutput(step: avs_pb.Execution.Step): OutputDataProps {
+  // Try new standardized approach first
+  const standardizedOutput = this.getStandardizedOutput(step);
+  if (standardizedOutput !== undefined) {
+    return standardizedOutput;
+  }
+  
+  // Fallback to legacy format for unmigrated types
+  return this.getLegacyOutput(step);
+}
+
+private static getStandardizedOutput(step: avs_pb.Execution.Step): OutputDataProps | undefined {
+  // Handle all types that have been migrated to google.protobuf.Value data = 1
+  const outputData = this.extractOutputData(step);
+  if (!outputData) return undefined;
+  
+  // Check if this type uses the new standardized format
+  if (this.usesStandardizedFormat(step)) {
+    return this.convertProtobufValueOutput(outputData);
+  }
+  
+  return undefined;
+}
+
+private static getLegacyOutput(step: avs_pb.Execution.Step): OutputDataProps {
+  // Handle legacy formats during migration period
+  const outputCase = this.getOutputDataCase(step);
+  switch (outputCase) {
+    case avs_pb.Execution.Step.OutputDataCase.ETH_TRANSFER:
+      // Legacy: direct transaction_hash field
+      const ethTransfer = this.extractOutputData(step);
+      return { transactionHash: ethTransfer?.transactionHash };
+    case avs_pb.Execution.Step.OutputDataCase.BRANCH:
+      // Legacy: direct condition_id field  
+      const branch = this.extractOutputData(step);
+      return { conditionId: branch?.conditionId };
+    // ... other legacy cases
+    default:
+      return null;
+  }
+}
+```
+
+### Benefits of Standardization
+
+1. **Code Simplification**:
+   - **Before**: 15+ different output handling cases with special logic
+   - **After**: 1 unified output handling function
+
+2. **Consistency**:
+   - **Before**: Mixed output structures (`{data: ...}` vs direct vs wrapped)
+   - **After**: All outputs are JavaScript native objects/arrays
+
+3. **Developer Experience**:
+   - **Before**: Different output formats require different access patterns
+   - **After**: Predictable, consistent output structure across all components
+
+4. **Type Safety**:
+   ```typescript
+   // Clean, predictable types after standardization
+   interface StepOutput {
+     output: string | number | boolean | object | array | null; // Always direct data
+   }
+   ```
+
+5. **Maintainability**:
+   - Single output conversion function
+   - Consistent protobuf structure
+   - Unified backend implementation patterns
 
 ## Future Enhancements
 

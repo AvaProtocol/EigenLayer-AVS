@@ -2,7 +2,6 @@ package taskengine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -10,12 +9,12 @@ import (
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -1271,64 +1270,73 @@ func (n *Engine) searchEventsForQuery(ctx context.Context, addresses []common.Ad
 
 // runManualTriggerImmediately executes a manual trigger immediately
 func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
-	fmt.Printf("🔍 runManualTriggerImmediately called with triggerConfig: %+v\n", triggerConfig)
-	result := map[string]interface{}{}
-
-	// The main purpose of manual triggers is to return user-defined JSON data
-	// Data is required for ManualTrigger
+	// Validate that data is provided and not null
 	data, exists := triggerConfig["data"]
 	if !exists || data == nil {
-		return nil, fmt.Errorf("ManualTrigger data is required")
+		return nil, fmt.Errorf("ManualTrigger data is required and cannot be null")
 	}
 
-	// Accept any valid JSON structure (objects, arrays, etc.)
-	// The data should already be parsed from JSON by the time it reaches here
-	result["data"] = data
 	if n.logger != nil {
 		n.logger.Info("ManualTrigger executed with valid JSON data", "dataType", fmt.Sprintf("%T", data))
 	}
 
-	// Include headers for webhook testing if provided - convert from array format to map format
-	if headers, exists := triggerConfig["headers"]; exists && headers != nil {
-		fmt.Printf("🔍 Headers found in triggerConfig: %+v (type: %T)\n", headers, headers)
-		if headersArray, ok := headers.([]interface{}); ok {
-			// Convert array of objects to map format
-			convertedHeaders := convertArrayOfObjectsToProtobufCompatible(headersArray)
-			result["headers"] = convertedHeaders
-			fmt.Printf("✅ Headers converted from array: %+v\n", convertedHeaders)
-		} else {
-			// Already in map format
-			result["headers"] = headers
-			fmt.Printf("✅ Headers already in map format: %+v\n", headers)
+	// Process headers
+	headers := make(map[string]interface{})
+	if headersInterface, exists := triggerConfig["headers"]; exists {
+		if headersArray, ok := headersInterface.([]interface{}); ok {
+			// Convert array format to map format
+			convertedHeaders := make(map[string]interface{})
+			for _, item := range headersArray {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					if key, keyOk := itemMap["key"].(string); keyOk {
+						if value, valueOk := itemMap["value"]; valueOk {
+							convertedHeaders[key] = value
+						}
+					}
+				}
+			}
+			headers = convertedHeaders
+		} else if headersMap, ok := headersInterface.(map[string]interface{}); ok {
+			headers = headersMap
 		}
-		if n.logger != nil {
-			n.logger.Info("ManualTrigger executed with headers", "headersType", fmt.Sprintf("%T", headers))
-		}
-	} else {
-		fmt.Printf("❌ No headers found in triggerConfig\n")
 	}
 
-	// Include path parameters for webhook testing if provided - convert from array format to map format
-	if pathParams, exists := triggerConfig["pathParams"]; exists && pathParams != nil {
-		fmt.Printf("🔍 PathParams found in triggerConfig: %+v (type: %T)\n", pathParams, pathParams)
-		if pathParamsArray, ok := pathParams.([]interface{}); ok {
-			// Convert array of objects to map format
-			convertedPathParams := convertArrayOfObjectsToProtobufCompatible(pathParamsArray)
-			result["pathParams"] = convertedPathParams
-			fmt.Printf("✅ PathParams converted from array: %+v\n", convertedPathParams)
-		} else {
-			// Already in map format
-			result["pathParams"] = pathParams
-			fmt.Printf("✅ PathParams already in map format: %+v\n", pathParams)
-		}
-		if n.logger != nil {
-			n.logger.Info("ManualTrigger executed with pathParams", "pathParamsType", fmt.Sprintf("%T", pathParams))
-		}
-	} else {
-		fmt.Printf("❌ No pathParams found in triggerConfig\n")
+	if n.logger != nil {
+		n.logger.Info("ManualTrigger executed with headers", "headersType", fmt.Sprintf("%T", headers))
 	}
 
-	fmt.Printf("🔍 runManualTriggerImmediately returning result: %+v\n", result)
+	// Process path parameters
+	pathParams := make(map[string]interface{})
+	if pathParamsInterface, exists := triggerConfig["pathParams"]; exists {
+		if pathParamsArray, ok := pathParamsInterface.([]interface{}); ok {
+			// Convert array format to map format
+			convertedPathParams := make(map[string]interface{})
+			for _, item := range pathParamsArray {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					if key, keyOk := itemMap["key"].(string); keyOk {
+						if value, valueOk := itemMap["value"]; valueOk {
+							convertedPathParams[key] = value
+						}
+					}
+				}
+			}
+			pathParams = convertedPathParams
+		} else if pathParamsMap, ok := pathParamsInterface.(map[string]interface{}); ok {
+			pathParams = pathParamsMap
+		}
+	}
+
+	if n.logger != nil {
+		n.logger.Info("ManualTrigger executed with pathParams", "pathParamsType", fmt.Sprintf("%T", pathParams))
+	}
+
+	// Return result with processed headers and pathParams
+	result := map[string]interface{}{
+		"data":       triggerConfig["data"],
+		"headers":    headers,
+		"pathParams": pathParams,
+	}
+
 	return result, nil
 }
 
@@ -1474,57 +1482,62 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		// Process results using helper function that handles single vs multiple method logic
 		result = ProcessContractReadResults(results)
 	} else if branch := executionStep.GetBranch(); branch != nil {
-		result["conditionId"] = branch.GetConditionId()
-	} else if filter := executionStep.GetFilter(); filter != nil && filter.GetData() != nil {
-		var data interface{}
-		structVal := &structpb.Value{}
-		if err := filter.GetData().UnmarshalTo(structVal); err == nil {
-			data = structVal.AsInterface()
-		} else {
-			if n.logger != nil {
-				n.logger.Warn("Failed to unmarshal Filter output", "error", err.Error())
+		// Extract conditionId from the new data field
+		if branch.Data != nil {
+			dataMap := gow.ValueToMap(branch.Data)
+			if dataMap != nil {
+				if conditionId, ok := dataMap["conditionId"]; ok {
+					result["conditionId"] = conditionId
+				}
 			}
-			data = string(filter.GetData().GetValue())
+		}
+	} else if filter := executionStep.GetFilter(); filter != nil && filter.Data != nil {
+		// Extract data from the new standardized data field
+		data := gow.ValueToMap(filter.Data)
+		if data == nil {
+			// Try as array if not a map
+			if arrayData := gow.ValueToSlice(filter.Data); arrayData != nil {
+				data = map[string]interface{}{"data": arrayData}
+			} else {
+				// Fallback to direct interface conversion
+				data = map[string]interface{}{"data": filter.Data.AsInterface()}
+			}
 		}
 		result["data"] = data
 	} else if loop := executionStep.GetLoop(); loop != nil {
-		// Parse JSON string back to array/object for SDK response
-		jsonData := loop.GetData()
-		if jsonData != "" {
-			var parsedData interface{}
-			if err := json.Unmarshal([]byte(jsonData), &parsedData); err == nil {
-				// For LoopNode, return the parsed data directly as the top-level result
-				// This avoids double-wrapping in the RPC response
-				if parsedArray, ok := parsedData.([]interface{}); ok {
-					return map[string]interface{}{"loopResult": parsedArray}, nil
-				} else {
-					return map[string]interface{}{"loopResult": parsedData}, nil
-				}
+		// Extract data from the new standardized data field
+		if loop.Data != nil {
+			// Try to get as array first (most common for loop results)
+			if arrayData := gow.ValueToSlice(loop.Data); arrayData != nil {
+				return map[string]interface{}{"loopResult": arrayData}, nil
+			} else if mapData := gow.ValueToMap(loop.Data); mapData != nil {
+				return map[string]interface{}{"loopResult": mapData}, nil
 			} else {
-				// Log the error if JSON parsing fails
-				if n.logger != nil {
-					n.logger.Warn("Failed to unmarshal Loop output", "error", err.Error(), "jsonData", jsonData)
-				}
-				// Fallback to raw string if JSON parsing fails
-				return map[string]interface{}{"loopResult": jsonData}, nil
+				// Fallback to direct interface conversion
+				return map[string]interface{}{"loopResult": loop.Data.AsInterface()}, nil
 			}
 		} else {
+			// No data available - return empty array
 			return map[string]interface{}{"loopResult": []interface{}{}}, nil
 		}
-	} else if graphQL := executionStep.GetGraphql(); graphQL != nil && graphQL.GetData() != nil {
-		var data map[string]interface{}
-		structVal := &structpb.Struct{}
-		if err := graphQL.GetData().UnmarshalTo(structVal); err == nil {
-			data = structVal.AsMap()
+	} else if graphQL := executionStep.GetGraphql(); graphQL != nil && graphQL.Data != nil {
+		// Extract data from the new standardized data field
+		if data := gow.ValueToMap(graphQL.Data); data != nil {
+			result = data
 		} else {
-			if n.logger != nil {
-				n.logger.Warn("Failed to unmarshal GraphQL output", "error", err.Error())
-			}
-			data = map[string]interface{}{"raw_output": string(graphQL.GetData().GetValue())}
+			// Fallback to direct interface conversion
+			result = map[string]interface{}{"data": graphQL.Data.AsInterface()}
 		}
-		result = data
 	} else if ethTransfer := executionStep.GetEthTransfer(); ethTransfer != nil {
-		result["txHash"] = ethTransfer.GetTransactionHash()
+		// Extract transaction hash from the new data field
+		if ethTransfer.Data != nil {
+			dataMap := gow.ValueToMap(ethTransfer.Data)
+			if dataMap != nil {
+				if txHash, ok := dataMap["transactionHash"]; ok {
+					result["txHash"] = txHash
+				}
+			}
+		}
 		result["success"] = true
 	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
 		// ContractWrite output now contains enhanced results structure
@@ -1750,11 +1763,22 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		}
 	case NodeTypeETHTransfer:
 		// For ETH transfer nodes - set empty structure if no result or extract transaction hash
-		ethOutput := &avsproto.ETHTransferNode_Output{}
+		// Create ETH transfer output with new data field
+		ethData := map[string]interface{}{}
 		if result != nil {
 			if txHash, ok := result["txHash"].(string); ok {
-				ethOutput.TransactionHash = txHash
+				ethData["transactionHash"] = txHash
 			}
+		}
+
+		// Convert to protobuf Value
+		dataValue, err := structpb.NewValue(ethData)
+		if err != nil {
+			dataValue, _ = structpb.NewValue(map[string]interface{}{})
+		}
+
+		ethOutput := &avsproto.ETHTransferNode_Output{
+			Data: dataValue,
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_EthTransfer{
 			EthTransfer: ethOutput,
@@ -1911,11 +1935,20 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 						}
 
 						if methodResult.Error != nil {
-							convertedResult["error"] = map[string]interface{}{
-								"code":    methodResult.Error.Code,
-								"message": methodResult.Error.Message,
-							}
+							convertedResult["error"] = methodResult.Error.Message
+						} else {
+							convertedResult["error"] = nil
 						}
+
+						// Convert return data if present
+						if methodResult.ReturnData != nil {
+							convertedResult["returnData"] = methodResult.ReturnData.Value
+						} else {
+							convertedResult["returnData"] = nil
+						}
+
+						// Convert events if present (empty for now, but structure for consistency)
+						convertedResult["events"] = []interface{}{}
 
 						resultsArray = append(resultsArray, convertedResult)
 					} else if methodResultMap, ok := resultInterface.(map[string]interface{}); ok {
@@ -1955,11 +1988,12 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			ContractWrite: contractWriteOutput,
 		}
 	case NodeTypeGraphQLQuery:
-		// For GraphQL query nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
-		graphqlOutput := &avsproto.GraphQLQueryNode_Output{}
+		// For GraphQL query nodes - create output with new data field
+		var dataValue *structpb.Value
+		var err error
 		if result != nil && len(result) > 0 {
 			// Set actual GraphQL result data
-			anyData, err := structpb.NewValue(result)
+			dataValue, err = structpb.NewValue(result)
 			if err != nil {
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,
@@ -1967,18 +2001,9 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 					NodeId:  "",
 				}, nil
 			}
-			anyProto, err := anypb.New(anyData)
-			if err != nil {
-				return &avsproto.RunNodeWithInputsResp{
-					Success: false,
-					Error:   fmt.Sprintf("failed to create Any proto for GraphQL: %v", err),
-					NodeId:  "",
-				}, nil
-			}
-			graphqlOutput.Data = anyProto
 		} else {
 			// Set empty object for no result
-			emptyData, err := structpb.NewValue(map[string]interface{}{})
+			dataValue, err = structpb.NewValue(map[string]interface{}{})
 			if err != nil {
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,
@@ -1986,40 +2011,46 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 					NodeId:  "",
 				}, nil
 			}
-			emptyProto, err := anypb.New(emptyData)
-			if err != nil {
-				return &avsproto.RunNodeWithInputsResp{
-					Success: false,
-					Error:   fmt.Sprintf("failed to create empty Any proto for GraphQL: %v", err),
-					NodeId:  "",
-				}, nil
-			}
-			graphqlOutput.Data = emptyProto
+		}
+
+		graphqlOutput := &avsproto.GraphQLQueryNode_Output{
+			Data: dataValue,
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_Graphql{
 			Graphql: graphqlOutput,
 		}
 	case NodeTypeBranch:
-		// For branch nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
-		branchOutput := &avsproto.BranchNode_Output{}
+		// For branch nodes - create output with new data field
+		branchData := map[string]interface{}{}
 		if result != nil && len(result) > 0 {
 			// Set actual branch result data
 			if conditionId, ok := result["conditionId"].(string); ok {
-				branchOutput.ConditionId = conditionId
+				branchData["conditionId"] = conditionId
 			}
 		} else {
 			// Set empty string for no result
-			branchOutput.ConditionId = ""
+			branchData["conditionId"] = ""
+		}
+
+		// Convert to protobuf Value
+		dataValue, err := structpb.NewValue(branchData)
+		if err != nil {
+			dataValue, _ = structpb.NewValue(map[string]interface{}{})
+		}
+
+		branchOutput := &avsproto.BranchNode_Output{
+			Data: dataValue,
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_Branch{
 			Branch: branchOutput,
 		}
 	case NodeTypeFilter:
-		// For filter nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
-		filterOutput := &avsproto.FilterNode_Output{}
+		// For filter nodes - create output with new data field
+		var dataValue *structpb.Value
+		var err error
 		if result != nil && len(result) > 0 {
 			// Set actual filter result data
-			anyData, err := structpb.NewValue(result)
+			dataValue, err = structpb.NewValue(result)
 			if err != nil {
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,
@@ -2027,19 +2058,10 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 					NodeId:  "",
 				}, nil
 			}
-			anyProto, err := anypb.New(anyData)
-			if err != nil {
-				return &avsproto.RunNodeWithInputsResp{
-					Success: false,
-					Error:   fmt.Sprintf("failed to create Any proto for Filter: %v", err),
-					NodeId:  "",
-				}, nil
-			}
-			filterOutput.Data = anyProto
 		} else {
 			// Set empty array for no result
 			emptyArray := []interface{}{}
-			emptyData, err := structpb.NewValue(emptyArray)
+			dataValue, err = structpb.NewValue(emptyArray)
 			if err != nil {
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,
@@ -2047,15 +2069,10 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 					NodeId:  "",
 				}, nil
 			}
-			emptyProto, err := anypb.New(emptyData)
-			if err != nil {
-				return &avsproto.RunNodeWithInputsResp{
-					Success: false,
-					Error:   fmt.Sprintf("failed to create empty Any proto for Filter: %v", err),
-					NodeId:  "",
-				}, nil
-			}
-			filterOutput.Data = emptyProto
+		}
+
+		filterOutput := &avsproto.FilterNode_Output{
+			Data: dataValue,
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_Filter{
 			Filter: filterOutput,
@@ -2071,26 +2088,32 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				loopData = result
 			}
 
-			// Convert loop data to JSON string (consistent with how Loop nodes store data elsewhere)
-			jsonData, err := json.Marshal(loopData)
+			// Convert loop data to protobuf Value
+			dataValue, err := structpb.NewValue(loopData)
 			if err != nil {
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,
-					Error:   fmt.Sprintf("failed to convert loop output to JSON: %v", err),
+					Error:   fmt.Sprintf("failed to convert loop output: %v", err),
 					NodeId:  "",
 				}, nil
 			}
-			// Wrap JSON string in LoopNode_Output
+
 			resp.OutputData = &avsproto.RunNodeWithInputsResp_Loop{
 				Loop: &avsproto.LoopNode_Output{
-					Data: string(jsonData),
+					Data: dataValue,
 				},
 			}
 		} else {
-			// Empty loop result as JSON array string
+			// Empty loop result as empty array
+			emptyArray := []interface{}{}
+			dataValue, err := structpb.NewValue(emptyArray)
+			if err != nil {
+				dataValue, _ = structpb.NewValue([]interface{}{})
+			}
+
 			resp.OutputData = &avsproto.RunNodeWithInputsResp_Loop{
 				Loop: &avsproto.LoopNode_Output{
-					Data: "[]",
+					Data: dataValue,
 				},
 			}
 		}
@@ -2229,19 +2252,30 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		}
 	case NodeTypeCronTrigger:
 		// For cron triggers - always set output structure to avoid OUTPUT_DATA_NOT_SET
-		cronOutput := &avsproto.CronTrigger_Output{}
+		cronData := map[string]interface{}{}
 		if result != nil {
 			// Set actual cron trigger result data
 			if timestamp, ok := result["timestamp"].(uint64); ok {
-				cronOutput.Timestamp = timestamp
+				cronData["timestamp"] = timestamp
 			}
 			if timestampISO, ok := result["timestamp_iso"].(string); ok {
-				cronOutput.TimestampIso = timestampISO
+				cronData["timestampIso"] = timestampISO
 			}
 		} else {
-			// Set empty values for no result (cronOutput already initialized)
-			cronOutput.Timestamp = 0
-			cronOutput.TimestampIso = ""
+			// Set empty values for no result
+			cronData["timestamp"] = uint64(0)
+			cronData["timestampIso"] = ""
+		}
+
+		// Convert to protobuf Value
+		dataValue, err := structpb.NewValue(cronData)
+		if err != nil {
+			// Fallback to empty data on error
+			dataValue, _ = structpb.NewValue(map[string]interface{}{})
+		}
+
+		cronOutput := &avsproto.CronTrigger_Output{
+			Data: dataValue,
 		}
 		resp.OutputData = &avsproto.RunTriggerResp_CronTrigger{
 			CronTrigger: cronOutput,
@@ -2334,6 +2368,7 @@ func isExpectedValidationError(err error) bool {
 		"unknown node type for node ID",                     // Filter node execution errors
 		"branch node requires conditionsList configuration", // Branch node configuration errors
 		"failed to create node:",                            // Node creation errors
+		"ManualTrigger data is required",                    // ManualTrigger data validation errors
 	}
 
 	for _, pattern := range validationErrorPatterns {

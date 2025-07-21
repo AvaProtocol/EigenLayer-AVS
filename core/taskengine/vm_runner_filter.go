@@ -8,7 +8,6 @@ import (
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/dop251/goja"
-	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -229,20 +228,15 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		},
 	}
 
-	anyOutput, err := anypb.New(outputValue)
-	if err != nil {
-		logBuilder.WriteString(fmt.Sprintf("Error marshalling output to Any: %v\n", err))
-		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
-		return executionLogStep, err
-	} else {
-		executionLogStep.OutputData = &avsproto.Execution_Step_Filter{
-			Filter: &avsproto.FilterNode_Output{
-				Data: anyOutput,
-			},
-		}
-		// Use shared function to set output variable for this step
-		setNodeOutputData(r.CommonProcessor, stepID, filteredResult)
+	// Use the Value directly instead of wrapping in Any
+	executionLogStep.OutputData = &avsproto.Execution_Step_Filter{
+		Filter: &avsproto.FilterNode_Output{
+			Data: outputValue,
+		},
 	}
+	// Use shared function to set output variable for this step
+	// Set the actual filtered results directly, not the protobuf-encoded version
+	setNodeOutputData(r.CommonProcessor, stepID, filteredResult)
 
 	// Use shared function to finalize execution step with success
 	finalizeExecutionStep(executionLogStep, true, "", logBuilder.String())

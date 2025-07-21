@@ -6,6 +6,7 @@ import (
 	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type BranchProcessor struct {
@@ -132,10 +133,24 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 			// Found an else condition, execute it
 			log.WriteString("Executing else condition '" + condition.Id + "'\n")
 			executionStep.Success = true
+			// Create standardized branch data
+			branchData := map[string]interface{}{
+				"conditionId": fmt.Sprintf("%s.%s", stepID, condition.Id),
+			}
+
+			// Convert to protobuf Value
+			dataValue, err := structpb.NewValue(branchData)
+			if err != nil {
+				// Fallback to empty data on error
+				dataValue, _ = structpb.NewValue(map[string]interface{}{})
+			}
+
+			branchOutput := &avsproto.BranchNode_Output{
+				Data: dataValue,
+			}
+
 			executionStep.OutputData = &avsproto.Execution_Step_Branch{
-				Branch: &avsproto.BranchNode_Output{
-					ConditionId: fmt.Sprintf("%s.%s", stepID, condition.Id),
-				},
+				Branch: branchOutput,
 			}
 			log.WriteString("Branching to else condition '" + condition.Id + "'\n")
 
@@ -154,7 +169,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 			r.vm.mu.Unlock()
 
 			// Set the output variable for the branch node
-			branchOutput := map[string]interface{}{
+			branchVarOutput := map[string]interface{}{
 				"condition_results": []map[string]interface{}{
 					{
 						"id":           condition.Id,
@@ -164,7 +179,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 				},
 			}
 			// Use shared function to set output variable for this step
-			setNodeOutputData(r.CommonProcessor, stepID, branchOutput)
+			setNodeOutputData(r.CommonProcessor, stepID, branchVarOutput)
 
 			// Find the next step in the plan based on this condition ID
 			r.vm.mu.Lock() // Lock for reading vm.plans
@@ -234,10 +249,25 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		log.WriteString("Condition '" + condition.Id + "' evaluated to: " + fmt.Sprintf("%t\n", boolValue))
 		if boolValue {
 			executionStep.Success = true
+
+			// Create standardized branch data
+			branchData := map[string]interface{}{
+				"conditionId": fmt.Sprintf("%s.%s", stepID, condition.Id),
+			}
+
+			// Convert to protobuf Value
+			dataValue, err := structpb.NewValue(branchData)
+			if err != nil {
+				// Fallback to empty data on error
+				dataValue, _ = structpb.NewValue(map[string]interface{}{})
+			}
+
+			branchOutput := &avsproto.BranchNode_Output{
+				Data: dataValue,
+			}
+
 			executionStep.OutputData = &avsproto.Execution_Step_Branch{
-				Branch: &avsproto.BranchNode_Output{
-					ConditionId: fmt.Sprintf("%s.%s", stepID, condition.Id),
-				},
+				Branch: branchOutput,
 			}
 			log.WriteString("Branching to condition '" + condition.Id + "'\n")
 
@@ -256,7 +286,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 			r.vm.mu.Unlock()
 
 			// Set the output variable for the branch node
-			branchOutput := map[string]interface{}{
+			branchVarOutput := map[string]interface{}{
 				"condition_results": []map[string]interface{}{
 					{
 						"id":           condition.Id,
@@ -266,7 +296,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 				},
 			}
 			// Use shared function to set output variable for this step
-			setNodeOutputData(r.CommonProcessor, stepID, branchOutput)
+			setNodeOutputData(r.CommonProcessor, stepID, branchVarOutput)
 
 			// Find the next step in the plan based on this condition ID
 			r.vm.mu.Lock() // Lock for reading vm.plans
@@ -316,11 +346,11 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		executionStep.OutputData = nil // No branch action taken
 
 		// Set the output variable for the branch node with empty results
-		branchOutput := map[string]interface{}{
+		branchVarOutput := map[string]interface{}{
 			"condition_results": []map[string]interface{}{},
 		}
 		// Use shared function to set output variable for this step
-		setNodeOutputData(r.CommonProcessor, stepID, branchOutput)
+		setNodeOutputData(r.CommonProcessor, stepID, branchVarOutput)
 
 		// Use shared function to finalize execution step
 		finalizeExecutionStep(executionStep, true, "", log.String())

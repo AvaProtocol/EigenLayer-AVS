@@ -17,6 +17,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -56,7 +57,46 @@ const (
 	ConfigVarsPath                    = "configVars"
 	APContextConfigVarsPath           = APContextVarName + "." + ConfigVarsPath
 	DataSuffix                        = "data"
+	MaxExecutionDepth                 = 50 // Maximum depth for nested workflow execution
 )
+
+// ExecutionTask represents a single task in the execution queue
+type ExecutionTask struct {
+	Node           *avsproto.TaskNode
+	InputVariables map[string]interface{}
+	StepID         string
+	Depth          int
+	ParentStepID   string
+	IterationIndex int                   // For loop iterations
+	ResultChannel  chan *ExecutionResult // Channel to send result back to parent
+}
+
+// ExecutionResult represents the result of an execution task
+type ExecutionResult struct {
+	Step   *avsproto.Execution_Step
+	Error  error
+	StepID string
+	Data   interface{} // For loop iterations, this contains the result data
+}
+
+// ExecutionQueue manages a queue of execution tasks
+type ExecutionQueue struct {
+	tasks   chan *ExecutionTask
+	workers int
+	vm      *VM
+}
+
+// NewExecutionQueue creates a new execution queue
+func NewExecutionQueue(vm *VM, workers int) *ExecutionQueue {
+	if workers <= 0 {
+		workers = 1 // Default to single worker for sequential execution
+	}
+	return &ExecutionQueue{
+		tasks:   make(chan *ExecutionTask, workers*10), // Buffer to prevent blocking
+		workers: workers,
+		vm:      vm,
+	}
+}
 
 type Step struct {
 	NodeID string
@@ -387,7 +427,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			// Extract trigger input data and create trigger variable using shared function
 			var triggerInputData map[string]interface{}
 			if task != nil && task.Trigger != nil {
-				triggerInputData = ExtractTriggerInputData(task.Trigger)
+				triggerInputData = TaskTriggerToConfig(task.Trigger)
 			}
 
 			// Use shared function to build trigger variable data
@@ -404,7 +444,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			// Extract trigger input data even when triggerData is nil
 			var triggerInputData map[string]interface{}
 			if task.Trigger != nil {
-				triggerInputData = ExtractTriggerInputData(task.Trigger)
+				triggerInputData = TaskTriggerToConfig(task.Trigger)
 			}
 
 			// Extract trigger config data to use as the trigger's output data
@@ -572,6 +612,17 @@ func (v *VM) Compile() error {
 			return fmt.Errorf("compile error: target node '%s' in edge '%s' not in TaskNodes", edge.Target, edge.Id)
 		}
 		adj[edge.Source] = append(adj[edge.Source], edge.Target)
+
+		// Debug logging for edge processing
+		if v.logger != nil {
+			v.logger.Info("🔧 VM.Compile: Processing edge",
+				"edgeID", edge.Id,
+				"source", edge.Source,
+				"target", edge.Target,
+				"isBranchSource", isBranchSource,
+				"isTriggerSource", isTriggerSource)
+		}
+
 		// Only count in-degree for edges from actual TaskNodes or triggers
 		// Branch condition edges don't count toward in-degree since they're not real nodes
 		if !isBranchSource {
@@ -638,7 +689,27 @@ func (v *VM) Compile() error {
 	}
 
 	if v.entrypoint == "" {
-		if len(q) > 0 {
+		// If we have a trigger, set it as the entrypoint so vm.Run() can handle the fan-out
+		if v.task.Trigger != nil && v.task.Trigger.Id != "" {
+			v.entrypoint = v.task.Trigger.Id
+			// Add the trigger to the plans so vm.Run() can process it
+			triggerPlan := &Step{NodeID: v.task.Trigger.Id}
+			if nextNodeIDs, ok := adj[v.task.Trigger.Id]; ok {
+				triggerPlan.Next = nextNodeIDs
+				// Debug logging to see what nodes are connected to the trigger
+				if v.logger != nil {
+					v.logger.Info("🔧 VM.Compile: Created trigger plan",
+						"triggerID", v.task.Trigger.Id,
+						"nextNodesCount", len(nextNodeIDs),
+						"nextNodes", nextNodeIDs)
+				}
+			} else {
+				if v.logger != nil {
+					v.logger.Warn("🔧 VM.Compile: No adjacency found for trigger", "triggerID", v.task.Trigger.Id)
+				}
+			}
+			v.plans[v.task.Trigger.Id] = triggerPlan
+		} else if len(q) > 0 {
 			v.entrypoint = q[0]
 		} else if len(v.TaskNodes) > 0 {
 			return fmt.Errorf(invalidEntrypoint + ": no entry point identified (queue empty after all checks)")
@@ -780,6 +851,7 @@ func (v *VM) Run() error {
 		v.mu.Lock() // Lock for accessing TaskNodes and plans
 		stepToExecute = currentStep
 		node, ok = v.TaskNodes[stepToExecute.NodeID]
+
 		v.mu.Unlock()
 
 		if !ok {
@@ -787,21 +859,67 @@ func (v *VM) Run() error {
 			// but it doesn't map directly to a TaskNode (it's a conceptual step).
 			// The actual jump should have been resolved by executeNode (branch).
 			// If we reach here with a non-TaskNode ID, it's likely a conceptual step like "branch1.a1"
-			// that should immediately proceed to its Next nodes.
+			// or a trigger that should immediately proceed to its Next nodes.
 			v.mu.Lock()
-			if len(stepToExecute.Next) > 0 {
-				nextStepID := stepToExecute.Next[0]
-				currentStep = v.plans[nextStepID]
-				v.mu.Unlock()
-				continue
+			if len(stepToExecute.Next) == 0 {
+				currentStep = nil // End of this path
+			} else if len(stepToExecute.Next) == 1 {
+				// Single next step - normal sequential execution
+				currentStep = v.plans[stepToExecute.Next[0]]
+			} else {
+				// Multiple next steps - queue all for execution in the main loop
+				// This handles cases like triggers that fan out to multiple nodes
+				if v.logger != nil {
+					v.logger.Info("🔄 Processing multiple next steps", "count", len(stepToExecute.Next), "steps", stepToExecute.Next)
+				}
+
+				// Create a simple queue of steps to execute
+				stepQueue := make([]*Step, 0, len(stepToExecute.Next))
+				for _, nextStepID := range stepToExecute.Next {
+					if nextStep, exists := v.plans[nextStepID]; exists {
+						stepQueue = append(stepQueue, nextStep)
+					}
+				}
+
+				// Process all steps in the queue sequentially
+				for i, step := range stepQueue {
+					if v.logger != nil {
+						v.logger.Info("🔄 Processing queued step", "step", step.NodeID, "index", i+1, "total", len(stepQueue))
+					}
+
+					// Set current step and let the main loop process it
+					if i == 0 {
+						// First step becomes the current step for this iteration
+						currentStep = step
+					} else {
+						// For additional steps, we need to process them immediately
+						// since the main loop will only process currentStep
+						if node, nodeExists := v.TaskNodes[step.NodeID]; nodeExists {
+							v.mu.Unlock() // Unlock before calling executeNode to avoid deadlock
+							if v.logger != nil {
+								v.logger.Info("🔄 Executing queued node", "nodeID", step.NodeID)
+							}
+							_, err := v.executeNode(node)
+							if err != nil && v.logger != nil {
+								v.logger.Error("🔄 Error executing queued node", "nodeID", step.NodeID, "error", err)
+							} else if v.logger != nil {
+								v.logger.Info("🔄 Successfully executed queued node", "nodeID", step.NodeID)
+							}
+							v.mu.Lock() // Re-lock for the next iteration
+						}
+					}
+				}
+
+				if v.logger != nil {
+					v.logger.Info("🔄 Completed processing all queued steps", "processedCount", len(stepQueue))
+				}
 			}
 			v.mu.Unlock()
-			// If no next step, end execution
-			currentStep = nil
 			continue
 		}
 
 		jump, err := v.executeNode(node) // executeNode calls sub-processors which should use AddVar for VM state changes
+
 		if err != nil {
 			// Instead of aborting on first error, we now continue execution
 			// The failed step should already be logged by executeNode/runXXX methods
@@ -841,15 +959,157 @@ func (v *VM) Run() error {
 		} else { // No jump, proceed to next in sequence
 			if len(stepToExecute.Next) == 0 {
 				currentStep = nil // End of this path
-			} else {
-				// TODO: Support multiple next for parallel execution paths if VM.Run is to manage them.
-				// For now, taking the first.
+			} else if len(stepToExecute.Next) == 1 {
+				// Single next step - normal sequential execution
 				currentStep = v.plans[stepToExecute.Next[0]]
+			} else {
+				// Multiple next steps - execute all sequentially
+				// This handles cases like triggers that fan out to multiple nodes
+				for _, nextStepID := range stepToExecute.Next {
+					if nextStep, exists := v.plans[nextStepID]; exists {
+						v.executeSequentialPath(nextStep)
+					}
+				}
+				currentStep = nil // End execution after all paths complete
 			}
 		}
 		v.mu.Unlock()
 	}
 	return nil
+}
+
+// executeSequentialPath executes a sequential execution path starting from the given step
+// This method is used when a node (like a trigger) fans out to multiple target nodes
+func (v *VM) executeSequentialPath(startStep *Step) {
+	if startStep == nil {
+		return
+	}
+
+	currentStep := startStep
+
+	for currentStep != nil {
+		var node *avsproto.TaskNode
+		var ok bool
+		var stepToExecute *Step
+
+		v.mu.Lock() // Lock for accessing TaskNodes and plans
+		stepToExecute = currentStep
+		node, ok = v.TaskNodes[stepToExecute.NodeID]
+		v.mu.Unlock()
+
+		if !ok {
+			// Handle conceptual steps like branch conditions
+			v.mu.Lock()
+			if len(stepToExecute.Next) > 0 {
+				nextStepID := stepToExecute.Next[0]
+				currentStep = v.plans[nextStepID]
+				v.mu.Unlock()
+				continue
+			}
+			v.mu.Unlock()
+			currentStep = nil
+			continue
+		}
+
+		jump, err := v.executeNode(node)
+		if err != nil {
+			// Log error but continue execution in this parallel path
+			if v.logger != nil {
+				errorMsg := err.Error()
+				stackTraceRegex := regexp.MustCompile(`(?m)^\s*at .*$`)
+				errorMsg = stackTraceRegex.ReplaceAllString(errorMsg, "")
+				errorMsg = strings.TrimSpace(errorMsg)
+
+				if isExpectedValidationError(err) {
+					v.logger.Warn("sequential path node execution failed, continuing", "nodeID", node.Id, "error", errorMsg)
+				} else {
+					v.logger.Error("sequential path node execution failed, continuing", "nodeID", node.Id, "error", errorMsg)
+				}
+			}
+
+			// Continue to next step in this sequential path
+			v.mu.Lock()
+			if len(stepToExecute.Next) == 0 {
+				currentStep = nil
+			} else {
+				currentStep = v.plans[stepToExecute.Next[0]]
+			}
+			v.mu.Unlock()
+			continue
+		}
+
+		v.mu.Lock()
+		if jump != nil { // A jump occurred (e.g. from a branch)
+			currentStep = jump
+		} else { // No jump, proceed to next in sequence
+			if len(stepToExecute.Next) == 0 {
+				currentStep = nil // End of this sequential path
+			} else {
+				// In sequential paths, we only follow the first next step (no further fan-out)
+				currentStep = v.plans[stepToExecute.Next[0]]
+			}
+		}
+		v.mu.Unlock()
+	}
+}
+
+// executeIndependentPath executes a single node independently
+// This method is used when a trigger fans out to multiple target nodes that should be executed independently
+func (v *VM) executeIndependentPath(startStep *Step) {
+	if startStep == nil {
+		if v.logger != nil {
+			v.logger.Warn("🔄 executeIndependentPath: startStep is nil")
+		}
+		return
+	}
+
+	if v.logger != nil {
+		v.logger.Info("🔄 executeIndependentPath: Starting execution", "nodeID", startStep.NodeID)
+	}
+
+	var node *avsproto.TaskNode
+	var ok bool
+
+	v.mu.Lock() // Lock for accessing TaskNodes
+	node, ok = v.TaskNodes[startStep.NodeID]
+	v.mu.Unlock()
+
+	if !ok {
+		// Handle conceptual steps like branch conditions - skip if not a real node
+		if v.logger != nil {
+			v.logger.Debug("executeIndependentPath: skipping non-TaskNode step", "nodeID", startStep.NodeID)
+		}
+		return
+	}
+
+	if v.logger != nil {
+		v.logger.Info("🔄 executeIndependentPath: Found TaskNode, executing",
+			"nodeID", startStep.NodeID,
+			"nodeType", node.Type.String(),
+			"nodeName", node.Name)
+	}
+
+	// Execute the single node independently
+	_, err := v.executeNode(node)
+	if err != nil {
+		// Log error but don't propagate since this is independent execution
+		if v.logger != nil {
+			errorMsg := err.Error()
+			stackTraceRegex := regexp.MustCompile(`(?m)^\s*at .*$`)
+			errorMsg = stackTraceRegex.ReplaceAllString(errorMsg, "")
+			errorMsg = strings.TrimSpace(errorMsg)
+
+			if isExpectedValidationError(err) {
+				v.logger.Warn("independent path node execution failed", "nodeID", node.Id, "error", errorMsg)
+			} else {
+				v.logger.Error("independent path node execution failed", "nodeID", node.Id, "error", errorMsg)
+			}
+		}
+	} else {
+		if v.logger != nil {
+			v.logger.Info("🔄 executeIndependentPath: Successfully executed node", "nodeID", startStep.NodeID)
+		}
+	}
 }
 
 func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
@@ -862,7 +1122,7 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 	}
 
 	// Extract and set input data for this node (making it available as node_name.input)
-	inputData := ExtractNodeInputData(node)
+	inputData := ExtractNodeConfiguration(node)
 	if inputData != nil {
 		processor := &CommonProcessor{vm: v}
 		processor.SetInputVarForStep(node.Id, inputData)
@@ -1076,20 +1336,41 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 			if v.logger != nil {
 				v.logger.Error("runCustomCode: BlockTrigger nodes require real blockchain data - mock data not supported", "stepID", stepID, "name", taskNode.Name)
 			}
-			executionLog := v.createExecutionStep(stepID, false, "BlockTrigger nodes require real blockchain data - mock data not supported", "", time.Now().UnixMilli())
-			executionLog.EndAt = time.Now().UnixMilli()
-			return executionLog, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
+
+			// Get node configuration for error step
+			var nodeConfig *structpb.Value
+			nodeConfigMap := ExtractNodeConfiguration(taskNode)
+			if nodeConfigMap != nil {
+				if configProto, err := structpb.NewValue(nodeConfigMap); err == nil {
+					nodeConfig = configProto
+				}
+			}
+
+			return &avsproto.Execution_Step{
+				Id:      stepID, // Use new 'id' field
+				Success: false,
+				Error:   "BlockTrigger nodes require real blockchain data - mock data not supported",
+				StartAt: time.Now().UnixMilli(),
+				EndAt:   time.Now().UnixMilli(),
+				Config:  nodeConfig, // Include node configuration data for debugging
+			}, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
 		}
 
 		// If Config is nil and it's not a blockTrigger, return an error
 		if v.logger != nil {
 			v.logger.Error("runCustomCode: CustomCodeNode Config is nil", "stepID", stepID)
 		}
-		// Get the node's input data
-		var nodeInput *structpb.Value
+		// Get the node's configuration data
+		var nodeConfig *structpb.Value
 		v.mu.Lock()
 		if taskNode, exists := v.TaskNodes[stepID]; exists {
-			nodeInput = taskNode.Input
+			// Extract node configuration instead of the removed input field
+			nodeConfigMap := ExtractNodeConfiguration(taskNode)
+			if nodeConfigMap != nil {
+				if configProto, err := structpb.NewValue(nodeConfigMap); err == nil {
+					nodeConfig = configProto
+				}
+			}
 		}
 		v.mu.Unlock()
 
@@ -1099,7 +1380,7 @@ func (v *VM) runCustomCode(stepID string, node *avsproto.CustomCodeNode) (*avspr
 			Error:   "CustomCodeNode Config is nil",
 			StartAt: time.Now().UnixMilli(),
 			EndAt:   time.Now().UnixMilli(),
-			Input:   nodeInput, // Include node input data for debugging
+			Config:  nodeConfig, // Include node configuration data for debugging
 		}, fmt.Errorf("CustomCodeNode Config is nil")
 	}
 
@@ -1143,40 +1424,15 @@ func (v *VM) runBranch(stepID string, nodeValue *avsproto.BranchNode) (*avsproto
 }
 
 func (v *VM) runLoop(stepID string, nodeValue *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
-	if v.logger != nil {
-		v.logger.Info("🔄 runLoop: Starting LoopNode execution", "stepID", stepID, "nodeValue_exists", nodeValue != nil)
-		if nodeValue != nil && nodeValue.Config != nil {
-			v.logger.Info("🔄 runLoop: LoopNode config", "inputNodeName", nodeValue.Config.InputNodeName, "iterVal", nodeValue.Config.IterVal, "iterKey", nodeValue.Config.IterKey)
-		}
-	}
-
-	p := NewLoopProcessor(v)
-	executionLog, err := p.Execute(stepID, nodeValue) // Loop processor internally calls RunNodeWithInputs
-
-	if v.logger != nil {
-		v.logger.Info("🔄 runLoop: After Execute", "stepID", stepID, "executionLog_exists", executionLog != nil, "error", err)
-		if executionLog != nil {
-			v.logger.Info("🔄 runLoop: ExecutionLog before collecting inputs", "stepID", stepID, "success", executionLog.Success, "inputs_count", len(executionLog.Inputs))
-		}
-	}
+	// Use the new queue-based execution instead of the old recursive approach
+	executionLog, err := v.executeLoopWithQueue(stepID, nodeValue)
 
 	v.mu.Lock()
 	if executionLog != nil {
-		if v.logger != nil {
-			v.logger.Info("🔄 runLoop: About to collect inputs", "stepID", stepID)
-		}
 		executionLog.Inputs = v.collectInputKeysForLog(stepID)
-		if v.logger != nil {
-			v.logger.Info("🔄 runLoop: After collecting inputs", "stepID", stepID, "inputs", executionLog.Inputs)
-		}
 	}
 	v.mu.Unlock()
 
-	if v.logger != nil {
-		v.logger.Info("🔄 runLoop: Returning", "stepID", stepID, "executionLog_exists", executionLog != nil, "error", err)
-	}
-
-	// v.addExecutionLog(executionLog)
 	return executionLog, err // Loop node itself doesn't dictate a jump in the main plan
 }
 
@@ -1619,7 +1875,7 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 
 	// Debug logging to understand what's happening
 	if v.logger != nil {
-		v.logger.Info("🔍 collectInputKeysForLog DEBUG",
+		v.logger.Debug("collectInputKeysForLog processing",
 			"excludeStepID", excludeStepID,
 			"excludeVarName", excludeVarName,
 			"totalVars", len(v.vars))
@@ -1627,16 +1883,8 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 
 	for k, value := range v.vars {
 		if !contains(macros.MacroFuncs, k) { // `contains` is a global helper
-			// Debug log each variable being processed
-			if v.logger != nil {
-				v.logger.Info("🔍 Processing variable", "key", k, "exclude", excludeVarName, "match", k == excludeVarName)
-			}
-
 			// Skip the current node's own variables from its inputsList
 			if excludeVarName != "" && k == excludeVarName {
-				if v.logger != nil {
-					v.logger.Info("🚫 Excluding current node variable", "key", k)
-				}
 				continue
 			}
 
@@ -1647,9 +1895,6 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 				inputKeys = append(inputKeys, WorkflowContextVarName) // Use as-is, no .data suffix
 			} else if k == "triggerConfig" {
 				// Skip triggerConfig system variable - it shouldn't appear in inputsList
-				if v.logger != nil {
-					v.logger.Info("🚫 Excluding triggerConfig system variable")
-				}
 				continue
 			} else {
 				// For regular variables, check if they have data and/or input fields
@@ -1658,34 +1903,43 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 					if _, hasData := valueMap["data"]; hasData {
 						dataKey := fmt.Sprintf("%s.%s", k, DataSuffix)
 						inputKeys = append(inputKeys, dataKey)
-						if v.logger != nil {
-							v.logger.Info("✅ Added data field", "key", dataKey)
-						}
 					}
 					// Check for .input field
 					if _, hasInput := valueMap["input"]; hasInput {
 						inputKey := fmt.Sprintf("%s.input", k)
 						inputKeys = append(inputKeys, inputKey)
-						if v.logger != nil {
-							v.logger.Info("✅ Added input field", "key", inputKey)
+					}
+					// Check for .headers field (for ManualTrigger template access)
+					if _, hasHeaders := valueMap["headers"]; hasHeaders {
+						headersKey := fmt.Sprintf("%s.headers", k)
+						inputKeys = append(inputKeys, headersKey)
+					}
+					// Check for .pathParams field (for ManualTrigger template access)
+					if _, hasPathParams := valueMap["pathParams"]; hasPathParams {
+						pathParamsKey := fmt.Sprintf("%s.pathParams", k)
+						inputKeys = append(inputKeys, pathParamsKey)
+					}
+
+					// Special case: ManualTrigger variables may have flattened data (no .data field)
+					// If the variable is a map but has no .data or .input fields, it might be a ManualTrigger variable
+					// In this case, add the variable name directly to inputKeys
+					if _, hasData := valueMap["data"]; !hasData {
+						if _, hasInput := valueMap["input"]; !hasInput && len(valueMap) > 0 {
+							// This looks like a ManualTrigger variable with flattened data
+							inputKeys = append(inputKeys, k)
 						}
 					}
-					// Note: .headers and .pathParams fields are no longer included in ManualTrigger output
-					// They are config-only fields, not output fields
 				} else {
 					// For non-map variables (simple scalars like input variables), use the variable name as-is
 					// This fixes the issue where input variables like "userToken" were incorrectly becoming "userToken.data"
 					inputKeys = append(inputKeys, k)
-					if v.logger != nil {
-						v.logger.Info("✅ Added scalar variable", "key", k)
-					}
 				}
 			}
 		}
 	}
 
 	if v.logger != nil {
-		v.logger.Info("🔍 Final inputKeys", "keys", inputKeys, "count", len(inputKeys))
+		v.logger.Debug("Final inputKeys", "keys", inputKeys, "count", len(inputKeys))
 	}
 
 	return inputKeys
@@ -1735,25 +1989,43 @@ func (v *VM) GetTaskId() string {
 func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[string]interface{}) (*avsproto.Execution_Step, error) {
 	// Special handling for blockTrigger - require real blockchain data
 	if node.GetCustomCode() != nil && node.Name == "Single Node Execution: "+NodeTypeBlockTrigger {
+		// Get node configuration for error step
+		var nodeConfig *structpb.Value
+		nodeConfigMap := ExtractNodeConfiguration(node)
+		if nodeConfigMap != nil {
+			if configProto, err := structpb.NewValue(nodeConfigMap); err == nil {
+				nodeConfig = configProto
+			}
+		}
+
 		return &avsproto.Execution_Step{
 			Id:      node.Id, // Use new 'id' field
 			Success: false,
 			Error:   "BlockTrigger nodes require real blockchain data - mock data not supported",
 			StartAt: time.Now().UnixMilli(),
 			EndAt:   time.Now().UnixMilli(),
-			Input:   node.Input, // Include node input data for debugging
+			Config:  nodeConfig, // Include node configuration data for debugging
 		}, fmt.Errorf("BlockTrigger nodes require real blockchain data - mock data not supported")
 	}
 
 	// Validate node name for JavaScript compatibility
 	if err := model.ValidateNodeNameForJavaScript(node.Name); err != nil {
+		// Get node configuration for error step
+		var nodeConfig *structpb.Value
+		nodeConfigMap := ExtractNodeConfiguration(node)
+		if nodeConfigMap != nil {
+			if configProto, err := structpb.NewValue(nodeConfigMap); err == nil {
+				nodeConfig = configProto
+			}
+		}
+
 		return &avsproto.Execution_Step{
 			Id:      node.Id,
 			Success: false,
 			Error:   fmt.Sprintf("Node name validation failed: %v", err),
 			StartAt: time.Now().UnixMilli(),
 			EndAt:   time.Now().UnixMilli(),
-			Input:   node.Input,
+			Config:  nodeConfig, // Include node configuration data for debugging
 		}, fmt.Errorf("node name validation failed: %w", err)
 	}
 
@@ -2146,15 +2418,13 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		}
 
 		runnerType, hasType := runner["type"].(string)
-		runnerData, hasData := runner["data"].(map[string]interface{})
-
-		if !hasType || !hasData {
-			return nil, fmt.Errorf("loop node runner requires 'type' and 'data' fields")
+		if !hasType {
+			return nil, fmt.Errorf("loop node runner requires 'type' field")
 		}
 
-		runnerConfig, hasConfig := runnerData["config"].(map[string]interface{})
+		runnerConfig, hasConfig := runner["config"].(map[string]interface{})
 		if !hasConfig {
-			return nil, fmt.Errorf("loop node runner data requires 'config' field")
+			return nil, fmt.Errorf("loop node runner requires 'config' field")
 		}
 
 		switch runnerType {
@@ -2331,15 +2601,22 @@ func (v *VM) createExecutionStep(nodeId string, success bool, errorMsg string, l
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	// Look up the node to get its type, name, and input data
+	// Look up the node to get its type, name, and configuration data
 	var nodeType string = "UNSPECIFIED"
 	var nodeName string = "unknown"
-	var nodeInput *structpb.Value
+	var nodeConfig *structpb.Value
 
 	if node, exists := v.TaskNodes[nodeId]; exists {
 		nodeType = node.Type.String()
 		nodeName = node.Name
-		nodeInput = node.Input
+
+		// Extract node configuration instead of the removed input field
+		nodeConfigMap := ExtractNodeConfiguration(node)
+		if nodeConfigMap != nil {
+			if configProto, err := structpb.NewValue(nodeConfigMap); err == nil {
+				nodeConfig = configProto
+			}
+		}
 	}
 
 	step := &avsproto.Execution_Step{
@@ -2348,10 +2625,10 @@ func (v *VM) createExecutionStep(nodeId string, success bool, errorMsg string, l
 		Error:   errorMsg,
 		Log:     logMsg,
 		StartAt: startTime,
-		EndAt:   startTime, // Will be updated by caller if needed
-		Type:    nodeType,  // Use new 'type' field as string
-		Name:    nodeName,  // Use new 'name' field
-		Input:   nodeInput, // Include node input data for debugging
+		EndAt:   startTime,  // Will be updated by caller if needed
+		Type:    nodeType,   // Use new 'type' field as string
+		Name:    nodeName,   // Use new 'name' field
+		Config:  nodeConfig, // Include node configuration data for debugging
 	}
 
 	return step
@@ -2402,67 +2679,58 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
 	return false, errorMessage, failedCount
 }
 
-// ExtractNodeInputData extracts input data from a TaskNode protobuf message
-func ExtractNodeInputData(taskNode *avsproto.TaskNode) map[string]interface{} {
-	if taskNode == nil || taskNode.Input == nil {
-		return nil
-	}
-
-	// Convert protobuf.Value to Go native types
-	inputInterface := taskNode.Input.AsInterface()
-	if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-		return inputMap
-	}
-	return nil
-}
-
-// ExtractTriggerInputData extracts input data from a TaskTrigger protobuf message
-func ExtractTriggerInputData(trigger *avsproto.TaskTrigger) map[string]interface{} {
+// ExtractTriggerConfigData extracts configuration data from a TaskTrigger protobuf message
+// This function now extracts from the Config field since the duplicate input field was removed
+func ExtractTriggerConfigData(trigger *avsproto.TaskTrigger) map[string]interface{} {
 	if trigger == nil {
 		return nil
 	}
 
-	// Check each trigger type and extract input from the correct nested object
+	// Check each trigger type and extract config from the correct nested object
 	switch trigger.GetTriggerType().(type) {
 	case *avsproto.TaskTrigger_Block:
 		blockTrigger := trigger.GetBlock()
-		if blockTrigger != nil && blockTrigger.GetInput() != nil {
-			inputInterface := blockTrigger.GetInput().AsInterface()
-			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-				return inputMap
+		if blockTrigger != nil && blockTrigger.Config != nil {
+			// Use the same approach as TaskTriggerToConfig for consistency
+			configMap, err := gow.ProtoToMap(blockTrigger.Config)
+			if err == nil {
+				return configMap
 			}
 		}
 	case *avsproto.TaskTrigger_Cron:
 		cronTrigger := trigger.GetCron()
-		if cronTrigger != nil && cronTrigger.GetInput() != nil {
-			inputInterface := cronTrigger.GetInput().AsInterface()
-			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-				return inputMap
+		if cronTrigger != nil && cronTrigger.Config != nil {
+			// Use the same approach as TaskTriggerToConfig for consistency
+			configMap, err := gow.ProtoToMap(cronTrigger.Config)
+			if err == nil {
+				return configMap
 			}
 		}
 	case *avsproto.TaskTrigger_Event:
 		eventTrigger := trigger.GetEvent()
-		if eventTrigger != nil && eventTrigger.GetInput() != nil {
-			inputInterface := eventTrigger.GetInput().AsInterface()
-			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-				return inputMap
+		if eventTrigger != nil && eventTrigger.Config != nil {
+			// Use the same approach as TaskTriggerToConfig for consistency
+			configMap, err := gow.ProtoToMap(eventTrigger.Config)
+			if err == nil {
+				return configMap
 			}
 		}
 	case *avsproto.TaskTrigger_FixedTime:
 		fixedTimeTrigger := trigger.GetFixedTime()
-		if fixedTimeTrigger != nil && fixedTimeTrigger.GetInput() != nil {
-			inputInterface := fixedTimeTrigger.GetInput().AsInterface()
-			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-				return inputMap
+		if fixedTimeTrigger != nil && fixedTimeTrigger.Config != nil {
+			// Use the same approach as TaskTriggerToConfig for consistency
+			configMap, err := gow.ProtoToMap(fixedTimeTrigger.Config)
+			if err == nil {
+				return configMap
 			}
 		}
 	case *avsproto.TaskTrigger_Manual:
-		// Manual triggers use the top-level TaskTrigger.input field
-		// since manual triggers don't have a nested config object like other trigger types
-		if trigger.GetInput() != nil {
-			inputInterface := trigger.GetInput().AsInterface()
-			if inputMap, ok := inputInterface.(map[string]interface{}); ok {
-				return inputMap
+		manualTrigger := trigger.GetManual()
+		if manualTrigger != nil && manualTrigger.Config != nil {
+			// Use the same approach as TaskTriggerToConfig for consistency
+			configMap, err := gow.ProtoToMap(manualTrigger.Config)
+			if err == nil {
+				return configMap
 			}
 		}
 		return nil
@@ -2515,13 +2783,10 @@ func validateAllNodeNamesForJavaScript(task *model.Task) error {
 // This function returns the configuration that was used to execute the node
 func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{} {
 	if taskNode == nil {
-		fmt.Printf("🔍 ExtractNodeConfiguration: taskNode is nil\n")
 		return nil
 	}
 
 	// Note: This function is used in isolated execution contexts where logger might not be available
-	// For debugging, we'll use fmt.Printf as a fallback
-	fmt.Printf("🔍 ExtractNodeConfiguration: Processing node ID: %s, Type: %s\n", taskNode.Id, taskNode.Type.String())
 
 	switch taskNode.GetTaskType().(type) {
 	case *avsproto.TaskNode_RestApi:
@@ -2542,16 +2807,13 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				config["headersMap"] = headersList
 			}
 
-			fmt.Printf("🔍 ExtractNodeConfiguration: RestApi config extracted: %+v\n", config)
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
 		}
 
 	case *avsproto.TaskNode_Loop:
 		loop := taskNode.GetLoop()
-		fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode - loop exists: %t\n", loop != nil)
 		if loop != nil {
-			fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode - config exists: %t\n", loop.Config != nil)
 			if loop.Config != nil {
 				config := map[string]interface{}{
 					"inputNodeName": loop.Config.InputNodeName,
@@ -2566,10 +2828,7 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				runnerConfig := extractLoopRunnerConfig(loop)
 				if runnerConfig != nil {
 					config["runner"] = runnerConfig
-					fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode - runner config: %+v\n", runnerConfig)
 				}
-
-				fmt.Printf("🔍 ExtractNodeConfiguration: LoopNode config final: %+v\n", config)
 
 				// Clean up complex protobuf types before returning
 				cleanConfig := removeComplexProtobufTypes(config)
@@ -2581,11 +2840,10 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 		customCode := taskNode.GetCustomCode()
 		if customCode != nil && customCode.Config != nil {
 			config := map[string]interface{}{
-				"lang":   customCode.Config.Lang,
+				"lang":   customCode.Config.Lang.String(),
 				"source": customCode.Config.Source,
 			}
 
-			fmt.Printf("🔍 ExtractNodeConfiguration: CustomCode config extracted: %+v\n", config)
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
 		}
@@ -2599,7 +2857,7 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 			}
 
 			// Handle variables map format
-			if graphqlQuery.Config.Variables != nil && len(graphqlQuery.Config.Variables) > 0 {
+			if len(graphqlQuery.Config.Variables) > 0 {
 				variablesMap := make(map[string]interface{})
 				for key, value := range graphqlQuery.Config.Variables {
 					variablesMap[key] = value
@@ -2607,7 +2865,6 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				config["variables"] = variablesMap
 			}
 
-			fmt.Printf("🔍 ExtractNodeConfiguration: GraphqlQuery config extracted: %+v\n", config)
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
 		}
@@ -2644,7 +2901,6 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				config["methodCalls"] = methodCallsArray
 			}
 
-			fmt.Printf("🔍 ExtractNodeConfiguration: ContractRead config extracted: %+v\n", config)
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
 		}
@@ -2672,13 +2928,23 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				config["methodCalls"] = methodCallsArray
 			}
 
-			fmt.Printf("🔍 ExtractNodeConfiguration: ContractWrite config extracted: %+v\n", config)
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_Filter:
+		filter := taskNode.GetFilter()
+		if filter != nil && filter.Config != nil {
+			config := map[string]interface{}{
+				"expression":    filter.Config.Expression,
+				"inputNodeName": filter.Config.InputNodeName,
+			}
+
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
 		}
 	}
 
-	fmt.Printf("🔍 ExtractNodeConfiguration: No configuration extracted for node type: %s\n", taskNode.Type.String())
 	return nil
 }
 
@@ -2696,23 +2962,20 @@ func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeConfig
 	defer v.mu.Unlock()
 
 	if v.logger != nil {
-		v.logger.Info("🔍 GetNodeDataForExecution: Starting", "stepID", stepID, "taskNodesCount", len(v.TaskNodes))
+		v.logger.Debug("GetNodeDataForExecution: Starting", "stepID", stepID, "taskNodesCount", len(v.TaskNodes))
 	}
 
 	if taskNode, exists := v.TaskNodes[stepID]; exists {
 		nodeName = taskNode.Name
 
 		if v.logger != nil {
-			v.logger.Info("🔍 GetNodeDataForExecution: Found node", "stepID", stepID, "nodeName", nodeName, "nodeType", taskNode.Type.String())
 		}
 
 		// Extract node configuration instead of input data
 		nodeConfigMap := ExtractNodeConfiguration(taskNode)
 
 		if v.logger != nil {
-			v.logger.Info("🔍 GetNodeDataForExecution: After ExtractNodeConfiguration", "stepID", stepID, "configMap_exists", nodeConfigMap != nil)
 			if nodeConfigMap != nil {
-				v.logger.Info("🔍 GetNodeDataForExecution: Config map keys", "stepID", stepID, "keys", getMapKeys(nodeConfigMap))
 			}
 		}
 
@@ -2727,7 +2990,6 @@ func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeConfig
 			if configProto, err := structpb.NewValue(protobufCompatibleConfig); err == nil {
 				nodeConfig = configProto
 				if v.logger != nil {
-					v.logger.Info("🔍 GetNodeDataForExecution: Successfully created protobuf config", "stepID", stepID)
 				}
 			} else {
 				if v.logger != nil {
@@ -2746,7 +3008,6 @@ func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeConfig
 	}
 
 	if v.logger != nil {
-		v.logger.Info("🔍 GetNodeDataForExecution: Returning", "stepID", stepID, "nodeName", nodeName, "nodeConfig_exists", nodeConfig != nil)
 	}
 
 	return nodeName, nodeConfig
@@ -2761,68 +3022,102 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 	switch runner := loop.GetRunner().(type) {
 	case *avsproto.LoopNode_CustomCode:
 		return map[string]interface{}{
-			"type":   "customCode",
-			"source": runner.CustomCode.Config.Source,
-			"lang":   runner.CustomCode.Config.Lang.String(),
+			"type": "customCode",
+			"config": map[string]interface{}{
+				"source": runner.CustomCode.Config.Source,
+				"lang":   runner.CustomCode.Config.Lang.String(),
+			},
 		}
 	case *avsproto.LoopNode_RestApi:
 		config := map[string]interface{}{
-			"type":   "restApi",
-			"url":    runner.RestApi.Config.Url,
-			"method": runner.RestApi.Config.Method,
-			"body":   runner.RestApi.Config.Body,
+			"type": "restApi",
+			"config": map[string]interface{}{
+				"url":    runner.RestApi.Config.Url,
+				"method": runner.RestApi.Config.Method,
+				"body":   runner.RestApi.Config.Body,
+			},
 		}
+		// Handle headers if present
 		if runner.RestApi.Config.Headers != nil && len(runner.RestApi.Config.Headers) > 0 {
-			// Convert headers map to array of [key, value] pairs as expected by tests
-			headersList := make([]interface{}, 0, len(runner.RestApi.Config.Headers))
-			for key, value := range runner.RestApi.Config.Headers {
-				headersList = append(headersList, []interface{}{key, value})
-			}
-			config["headersMap"] = headersList
+			config["config"].(map[string]interface{})["headers"] = runner.RestApi.Config.Headers
 		}
 		return config
 	case *avsproto.LoopNode_ContractRead:
-		config := map[string]interface{}{
-			"type":            "contractRead",
+		configData := map[string]interface{}{
 			"contractAddress": runner.ContractRead.Config.ContractAddress,
 			"contractAbi":     runner.ContractRead.Config.ContractAbi,
 		}
+		// Handle method calls if present
 		if len(runner.ContractRead.Config.MethodCalls) > 0 {
-			config["methodCalls"] = runner.ContractRead.Config.MethodCalls
+			methodCallsArray := make([]interface{}, len(runner.ContractRead.Config.MethodCalls))
+			for i, methodCall := range runner.ContractRead.Config.MethodCalls {
+				methodCallMap := map[string]interface{}{
+					"callData":   methodCall.CallData,
+					"methodName": methodCall.MethodName,
+				}
+				// Include applyToFields if present
+				if len(methodCall.ApplyToFields) > 0 {
+					applyToFieldsArray := make([]interface{}, len(methodCall.ApplyToFields))
+					for j, field := range methodCall.ApplyToFields {
+						applyToFieldsArray[j] = field
+					}
+					methodCallMap["applyToFields"] = applyToFieldsArray
+				}
+				methodCallsArray[i] = methodCallMap
+			}
+			configData["methodCalls"] = methodCallsArray
 		}
-		return config
+		return map[string]interface{}{
+			"type":   "contractRead",
+			"config": configData,
+		}
 	case *avsproto.LoopNode_ContractWrite:
-		config := map[string]interface{}{
-			"type":            "contractWrite",
+		configData := map[string]interface{}{
 			"contractAddress": runner.ContractWrite.Config.ContractAddress,
 			"contractAbi":     runner.ContractWrite.Config.ContractAbi,
 			"callData":        runner.ContractWrite.Config.CallData,
 		}
+		// Handle method calls if present
 		if len(runner.ContractWrite.Config.MethodCalls) > 0 {
-			config["methodCalls"] = runner.ContractWrite.Config.MethodCalls
+			methodCallsArray := make([]interface{}, len(runner.ContractWrite.Config.MethodCalls))
+			for i, methodCall := range runner.ContractWrite.Config.MethodCalls {
+				methodCallMap := map[string]interface{}{
+					"callData":   methodCall.CallData,
+					"methodName": methodCall.MethodName,
+				}
+				methodCallsArray[i] = methodCallMap
+			}
+			configData["methodCalls"] = methodCallsArray
 		}
-		return config
+		return map[string]interface{}{
+			"type":   "contractWrite",
+			"config": configData,
+		}
 	case *avsproto.LoopNode_EthTransfer:
 		return map[string]interface{}{
-			"type":        "ethTransfer",
-			"destination": runner.EthTransfer.Config.Destination,
-			"amount":      runner.EthTransfer.Config.Amount,
+			"type": "ethTransfer",
+			"config": map[string]interface{}{
+				"destination": runner.EthTransfer.Config.Destination,
+				"amount":      runner.EthTransfer.Config.Amount,
+			},
 		}
 	case *avsproto.LoopNode_GraphqlDataQuery:
-		config := map[string]interface{}{
-			"type":  "graphqlDataQuery",
+		configData := map[string]interface{}{
 			"url":   runner.GraphqlDataQuery.Config.Url,
 			"query": runner.GraphqlDataQuery.Config.Query,
 		}
+		// Handle variables if present
 		if runner.GraphqlDataQuery.Config.Variables != nil && len(runner.GraphqlDataQuery.Config.Variables) > 0 {
-			// Convert variables map to map[string]interface{} as expected by tests
 			variablesMap := make(map[string]interface{})
 			for key, value := range runner.GraphqlDataQuery.Config.Variables {
 				variablesMap[key] = value
 			}
-			config["variables"] = variablesMap
+			configData["variables"] = variablesMap
 		}
-		return config
+		return map[string]interface{}{
+			"type":   "graphqlDataQuery",
+			"config": configData,
+		}
 	}
 
 	return nil
@@ -2848,14 +3143,8 @@ func convertMapStringStringToInterface(input map[string]interface{}) map[string]
 			// Recursively convert nested maps
 			result[key] = convertMapStringStringToInterface(v)
 		default:
-			// Handle complex protobuf types that can't be converted directly
-			if key == "methodCalls" {
-				// Convert method calls to a simpler format
-				result[key] = convertMethodCallsToSimpleFormat(value)
-			} else {
-				// Keep other types as-is
-				result[key] = value
-			}
+			// Keep other types as-is since methodCalls should already be in correct format after our fixes
+			result[key] = value
 		}
 	}
 	return result
@@ -2870,14 +3159,20 @@ func removeComplexProtobufTypes(input map[string]interface{}) map[string]interfa
 	result := make(map[string]interface{})
 	for key, value := range input {
 		if key == "methodCalls" {
-			// Check if methodCalls is already in simple format ([]interface{} with maps)
+			// methodCalls should always be []interface{} with maps after our fixes
 			if methodCallsArray, ok := value.([]interface{}); ok {
-				// If it's already an array of interfaces, keep it as is
 				result[key] = methodCallsArray
 			} else {
-				// Convert method calls to string format to avoid protobuf conversion errors
+				// Fallback: convert unexpected format to string (should not happen with our fixes)
 				result[key] = fmt.Sprintf("%v", value)
 			}
+		} else if stringMap, ok := value.(map[string]string); ok {
+			// Convert map[string]string to map[string]interface{} for protobuf compatibility
+			interfaceMap := make(map[string]interface{})
+			for k, v := range stringMap {
+				interfaceMap[k] = v
+			}
+			result[key] = interfaceMap
 		} else if nestedMap, ok := value.(map[string]interface{}); ok {
 			// Recursively clean nested maps
 			result[key] = removeComplexProtobufTypes(nestedMap)
@@ -2886,17 +3181,6 @@ func removeComplexProtobufTypes(input map[string]interface{}) map[string]interfa
 		}
 	}
 	return result
-}
-
-// convertMethodCallsToSimpleFormat converts protobuf method calls to a simple format for protobuf compatibility
-func convertMethodCallsToSimpleFormat(methodCalls interface{}) interface{} {
-	// Convert method calls to a simple string representation to avoid protobuf conversion errors
-	if methodCalls == nil {
-		return nil
-	}
-
-	// Convert to string representation for protobuf compatibility
-	return fmt.Sprintf("%v", methodCalls)
 }
 
 // convertConfigForFrontend converts internal configuration to user-friendly format for frontend
@@ -2956,3 +3240,550 @@ func convertConfigForFrontend(input map[string]interface{}) map[string]interface
 	}
 	return result
 }
+
+// executeStepInMainLoop executes a single step in the main execution loop context
+// This method is used when a trigger fans out to multiple target nodes that should be executed sequentially
+func (v *VM) executeStepInMainLoop(step *Step) {
+	if step == nil {
+		if v.logger != nil {
+			v.logger.Warn("🔄 executeStepInMainLoop: step is nil")
+		}
+		return
+	}
+
+	if v.logger != nil {
+		v.logger.Info("🔄 executeStepInMainLoop: Starting execution", "nodeID", step.NodeID)
+	}
+
+	var node *avsproto.TaskNode
+	var ok bool
+
+	v.mu.Lock() // Lock for accessing TaskNodes
+	node, ok = v.TaskNodes[step.NodeID]
+	v.mu.Unlock()
+
+	if !ok {
+		// Handle conceptual steps like branch conditions - skip if not a real node
+		if v.logger != nil {
+			v.logger.Debug("executeStepInMainLoop: skipping non-TaskNode step", "nodeID", step.NodeID)
+		}
+		return
+	}
+
+	if v.logger != nil {
+		v.logger.Info("🔄 executeStepInMainLoop: Found TaskNode, executing",
+			"nodeID", step.NodeID,
+			"nodeType", node.Type.String(),
+			"nodeName", node.Name)
+	}
+
+	// Execute the single node
+	_, err := v.executeNode(node)
+	if err != nil {
+		// Log error but continue with other steps
+		if v.logger != nil {
+			errorMsg := err.Error()
+			stackTraceRegex := regexp.MustCompile(`(?m)^\s*at .*$`)
+			errorMsg = stackTraceRegex.ReplaceAllString(errorMsg, "")
+			errorMsg = strings.TrimSpace(errorMsg)
+
+			if isExpectedValidationError(err) {
+				v.logger.Warn("main loop step execution failed", "nodeID", node.Id, "error", errorMsg)
+			} else {
+				v.logger.Error("main loop step execution failed", "nodeID", node.Id, "error", errorMsg)
+			}
+		}
+
+		// Create a failed execution step and add it to the logs
+		failedStep := v.createExecutionStep(node.Id, false, err.Error(), fmt.Sprintf("Node execution failed: %s", err.Error()), time.Now().UnixMilli())
+		failedStep.EndAt = time.Now().UnixMilli()
+		v.addExecutionLog(failedStep)
+
+	} else {
+		if v.logger != nil {
+			v.logger.Info("🔄 executeStepInMainLoop: Successfully executed node", "nodeID", step.NodeID)
+		}
+	}
+}
+
+// Start begins processing tasks with worker goroutines
+func (eq *ExecutionQueue) Start() {
+	for i := 0; i < eq.workers; i++ {
+		go eq.worker()
+	}
+}
+
+// Stop closes the task channel to stop accepting new tasks
+func (eq *ExecutionQueue) Stop() {
+	close(eq.tasks)
+}
+
+// Submit adds a task to the execution queue
+func (eq *ExecutionQueue) Submit(task *ExecutionTask) error {
+	if task.Depth > MaxExecutionDepth {
+		return fmt.Errorf("maximum execution depth (%d) exceeded", MaxExecutionDepth)
+	}
+
+	select {
+	case eq.tasks <- task:
+		return nil
+	default:
+		return fmt.Errorf("execution queue is full")
+	}
+}
+
+// worker processes tasks from the queue
+func (eq *ExecutionQueue) worker() {
+	for task := range eq.tasks {
+		result := eq.executeTask(task)
+		if task.ResultChannel != nil {
+			select {
+			case task.ResultChannel <- result:
+			default:
+				// Channel might be closed, log but don't block
+				if eq.vm.logger != nil {
+					eq.vm.logger.Warn("Failed to send execution result - channel closed", "stepID", task.StepID)
+				}
+			}
+		}
+	}
+}
+
+// executeTask executes a single task without creating a new VM
+func (eq *ExecutionQueue) executeTask(task *ExecutionTask) *ExecutionResult {
+	if task.Node == nil {
+		return &ExecutionResult{
+			Error:  fmt.Errorf("task node is nil"),
+			StepID: task.StepID,
+		}
+	}
+
+	// Set input variables in the VM context for this execution
+	eq.vm.mu.Lock()
+	if eq.vm.vars == nil {
+		eq.vm.vars = make(map[string]any)
+	}
+
+	// Store original variables to restore later
+	originalVars := make(map[string]any)
+	for key, value := range task.InputVariables {
+		if originalValue, exists := eq.vm.vars[key]; exists {
+			originalVars[key] = originalValue
+		}
+		eq.vm.vars[key] = value
+	}
+	eq.vm.mu.Unlock()
+
+	// Execute the node directly without creating a new VM
+	step, err := eq.vm.executeNodeDirect(task.Node, task.StepID)
+
+	// Restore original variables
+	eq.vm.mu.Lock()
+	for key := range task.InputVariables {
+		if originalValue, exists := originalVars[key]; exists {
+			eq.vm.vars[key] = originalValue
+		} else {
+			delete(eq.vm.vars, key)
+		}
+	}
+	eq.vm.mu.Unlock()
+
+	// Extract result data for loops
+	var resultData interface{}
+	if step != nil && step.Success {
+		resultData = eq.extractResultData(step)
+	}
+
+	return &ExecutionResult{
+		Step:   step,
+		Error:  err,
+		StepID: task.StepID,
+		Data:   resultData,
+	}
+}
+
+// extractResultData extracts the actual result data from an execution step
+func (eq *ExecutionQueue) extractResultData(step *avsproto.Execution_Step) interface{} {
+	if customCodeOutput := step.GetCustomCode(); customCodeOutput != nil && customCodeOutput.Data != nil {
+		return customCodeOutput.Data.AsInterface()
+	}
+	if restApiOutput := step.GetRestApi(); restApiOutput != nil && restApiOutput.Data != nil {
+		return restApiOutput.Data.AsInterface()
+	}
+	if contractReadOutput := step.GetContractRead(); contractReadOutput != nil && contractReadOutput.Data != nil {
+		return contractReadOutput.Data.AsInterface()
+	}
+	if contractWriteOutput := step.GetContractWrite(); contractWriteOutput != nil && contractWriteOutput.Data != nil {
+		return contractWriteOutput.Data.AsInterface()
+	}
+	if ethTransferOutput := step.GetEthTransfer(); ethTransferOutput != nil && ethTransferOutput.Data != nil {
+		return ethTransferOutput.Data.AsInterface()
+	}
+	return nil
+}
+
+// executeNodeDirect executes a node directly without creating a new VM or updating execution logs
+// This is used by the execution queue to avoid recursive VM creation
+func (v *VM) executeNodeDirect(node *avsproto.TaskNode, stepID string) (*avsproto.Execution_Step, error) {
+	if node == nil {
+		return nil, fmt.Errorf("executeNodeDirect called with nil node")
+	}
+
+	// Extract and set input data for this node (making it available as node_name.input)
+	inputData := ExtractNodeConfiguration(node)
+	if inputData != nil {
+		processor := &CommonProcessor{vm: v}
+		processor.SetInputVarForStep(stepID, inputData)
+	}
+
+	var executionLogForNode *avsproto.Execution_Step
+	var err error
+
+	// Execute the appropriate node type
+	if nodeValue := node.GetRestApi(); nodeValue != nil {
+		executionLogForNode, err = v.runRestApi(stepID, nodeValue)
+	} else if nodeValue := node.GetBranch(); nodeValue != nil {
+		var nextStep *Step
+		executionLogForNode, nextStep, err = v.runBranch(stepID, nodeValue)
+		// Note: We ignore nextStep in direct execution as we don't follow jumps
+		_ = nextStep
+	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
+		executionLogForNode, err = v.runGraphQL(stepID, nodeValue)
+	} else if nodeValue := node.GetCustomCode(); nodeValue != nil {
+		executionLogForNode, err = v.runCustomCode(stepID, nodeValue)
+	} else if nodeValue := node.GetContractRead(); nodeValue != nil {
+		executionLogForNode, err = v.runContractRead(stepID, nodeValue)
+	} else if nodeValue := node.GetContractWrite(); nodeValue != nil {
+		executionLogForNode, err = v.runContractWrite(stepID, nodeValue)
+	} else if nodeValue := node.GetFilter(); nodeValue != nil {
+		executionLogForNode, err = v.runFilter(stepID, nodeValue)
+	} else if nodeValue := node.GetEthTransfer(); nodeValue != nil {
+		executionLogForNode, err = v.runEthTransfer(stepID, nodeValue)
+	} else if nodeValue := node.GetLoop(); nodeValue != nil {
+		// For loop nodes, we need special handling to use the execution queue
+		return v.executeLoopWithQueue(stepID, nodeValue)
+	} else {
+		err = fmt.Errorf("unknown node type for node ID %s", stepID)
+	}
+
+	return executionLogForNode, err
+}
+
+// executeLoopWithQueue executes a loop node using the execution queue instead of recursive VM calls
+func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
+	// Use shared function to create execution step
+	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_LOOP, v)
+
+	var log strings.Builder
+	log.WriteString(fmt.Sprintf("Start loop execution at %s", time.Now()))
+
+	// Get configuration from node.Config
+	if node.Config == nil {
+		err := fmt.Errorf("LoopNode Config is nil")
+		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		finalizeExecutionStep(s, false, err.Error(), log.String())
+		return s, err
+	}
+
+	inputNodeName := node.Config.InputNodeName
+	iterVal := node.Config.IterVal
+	iterKey := node.Config.IterKey
+	executionMode := node.Config.ExecutionMode
+
+	// Resolve input variable
+	var inputVarName string
+	var inputVar interface{}
+	var exists bool
+
+	inputVarName = v.GetNodeNameAsVar(inputNodeName)
+	v.mu.Lock()
+	inputVar, exists = v.vars[inputVarName]
+	v.mu.Unlock()
+
+	if !exists {
+		inputVarName = inputNodeName
+		v.mu.Lock()
+		inputVar, exists = v.vars[inputVarName]
+		v.mu.Unlock()
+	}
+
+	if !exists {
+		err := fmt.Errorf("input variable %s not found", inputVarName)
+		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		finalizeExecutionStep(s, false, err.Error(), log.String())
+		return s, err
+	}
+
+	inputArray, ok := inputVar.([]interface{})
+	if !ok {
+		err := fmt.Errorf("input variable %s is not an array", inputVarName)
+		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		finalizeExecutionStep(s, false, err.Error(), log.String())
+		return s, err
+	}
+
+	// Determine execution mode
+	concurrent := false
+	isContractWrite := node.GetContractWrite() != nil
+	var executionModeLog string
+
+	if isContractWrite {
+		concurrent = false
+		executionModeLog = "sequentially due to contract write operation (security requirement)"
+	} else {
+		switch executionMode {
+		case avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL:
+			concurrent = true
+			executionModeLog = "parallel mode"
+		case avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL:
+			concurrent = false
+			executionModeLog = "sequential mode"
+		default:
+			concurrent = false
+			executionModeLog = "sequential mode"
+		}
+	}
+
+	// Create execution queue for this loop
+	workers := 1
+	if concurrent {
+		workers = len(inputArray)
+		if workers > 10 { // Limit max workers to prevent resource exhaustion
+			workers = 10
+		}
+	}
+
+	eq := NewExecutionQueue(v, workers)
+	eq.Start()
+	defer eq.Stop()
+
+	results := make([]interface{}, len(inputArray))
+	success := true
+	var firstError error
+
+	if concurrent {
+		log.WriteString(fmt.Sprintf("\nExecuting loop iterations in %s with %d workers", executionModeLog, workers))
+		// Parallel execution using the queue
+		resultChannels := make([]chan *ExecutionResult, len(inputArray))
+
+		for i, item := range inputArray {
+			iterInputs := make(map[string]interface{})
+			iterInputs[iterVal] = item
+			if iterKey != "" {
+				iterInputs[iterKey] = i
+			}
+
+			iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, i)
+			nestedNode := v.createNestedNodeFromLoop(node, iterationStepID, iterInputs)
+
+			resultChannel := make(chan *ExecutionResult, 1)
+			resultChannels[i] = resultChannel
+
+			task := &ExecutionTask{
+				Node:           nestedNode,
+				InputVariables: iterInputs,
+				StepID:         iterationStepID,
+				Depth:          1, // Loop iterations are depth 1
+				ResultChannel:  resultChannel,
+				IterationIndex: i,
+			}
+
+			if err := eq.Submit(task); err != nil {
+				log.WriteString(fmt.Sprintf("\nError submitting iteration %d: %s", i, err.Error()))
+				success = false
+				if firstError == nil {
+					firstError = err
+				}
+			}
+		}
+
+		// Collect results
+		for i, resultChannel := range resultChannels {
+			select {
+			case result := <-resultChannel:
+				if result.Error != nil {
+					success = false
+					if firstError == nil {
+						firstError = result.Error
+					}
+					log.WriteString(fmt.Sprintf("\nError in iteration %d: %s", i, result.Error.Error()))
+				} else {
+					results[i] = result.Data
+				}
+				close(resultChannel)
+			case <-time.After(30 * time.Second): // Timeout for each iteration
+				success = false
+				err := fmt.Errorf("iteration %d timed out", i)
+				if firstError == nil {
+					firstError = err
+				}
+				log.WriteString(fmt.Sprintf("\nTimeout in iteration %d", i))
+				close(resultChannel)
+			}
+		}
+	} else {
+		log.WriteString(fmt.Sprintf("\nExecuting loop iterations %s", executionModeLog))
+		// Sequential execution using the queue
+		for i, item := range inputArray {
+			iterInputs := make(map[string]interface{})
+			iterInputs[iterVal] = item
+			if iterKey != "" {
+				iterInputs[iterKey] = i
+			}
+
+			iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, i)
+			nestedNode := v.createNestedNodeFromLoop(node, iterationStepID, iterInputs)
+
+			resultChannel := make(chan *ExecutionResult, 1)
+			task := &ExecutionTask{
+				Node:           nestedNode,
+				InputVariables: iterInputs,
+				StepID:         iterationStepID,
+				Depth:          1,
+				ResultChannel:  resultChannel,
+				IterationIndex: i,
+			}
+
+			if err := eq.Submit(task); err != nil {
+				success = false
+				if firstError == nil {
+					firstError = err
+				}
+				log.WriteString(fmt.Sprintf("\nError submitting iteration %d: %s", i, err.Error()))
+				continue
+			}
+
+			// Wait for result
+			select {
+			case result := <-resultChannel:
+				if result.Error != nil {
+					success = false
+					if firstError == nil {
+						firstError = result.Error
+					}
+					log.WriteString(fmt.Sprintf("\nError in iteration %d: %s", i, result.Error.Error()))
+				} else {
+					results[i] = result.Data
+				}
+				close(resultChannel)
+			case <-time.After(30 * time.Second):
+				success = false
+				err := fmt.Errorf("iteration %d timed out", i)
+				if firstError == nil {
+					firstError = err
+				}
+				log.WriteString(fmt.Sprintf("\nTimeout in iteration %d", i))
+				close(resultChannel)
+			}
+		}
+	}
+
+	// Set output variable for this step
+	processor := &CommonProcessor{vm: v}
+	setNodeOutputData(processor, stepID, results)
+
+	// Convert results to JSON-compatible format
+	jsonSerializableResults := make([]interface{}, len(results))
+	for i, result := range results {
+		if result != nil {
+			jsonSerializableResults[i] = convertToJSONCompatible(result)
+		} else {
+			jsonSerializableResults[i] = nil
+		}
+	}
+
+	// Convert to protobuf Value for output
+	outputValue, err := structpb.NewValue(jsonSerializableResults)
+	if err != nil {
+		outputValue, _ = structpb.NewValue([]interface{}{})
+	}
+
+	loopOutput := &avsproto.LoopNode_Output{
+		Data: outputValue,
+	}
+
+	s.OutputData = &avsproto.Execution_Step_Loop{
+		Loop: loopOutput,
+	}
+
+	if !success && firstError != nil {
+		finalizeExecutionStep(s, false, firstError.Error(), log.String())
+		return s, firstError
+	}
+
+	finalizeExecutionStep(s, true, "", log.String())
+	return s, nil
+}
+
+// createNestedNodeFromLoop creates a nested node for loop iteration
+func (v *VM) createNestedNodeFromLoop(loopNodeDef *avsproto.LoopNode, iterationStepID string, iterInputs map[string]interface{}) *avsproto.TaskNode {
+	nodeName := fmt.Sprintf("loop_iteration_%s", iterationStepID)
+
+	if ethTransfer := loopNodeDef.GetEthTransfer(); ethTransfer != nil {
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
+			TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: ethTransfer},
+		}
+	} else if contractWrite := loopNodeDef.GetContractWrite(); contractWrite != nil {
+		// Apply template variable substitution
+		processedContractWrite := v.processContractWriteTemplates(contractWrite, iterInputs)
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
+			TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: processedContractWrite},
+		}
+	} else if contractRead := loopNodeDef.GetContractRead(); contractRead != nil {
+		processedContractRead := v.processContractReadTemplates(contractRead, iterInputs)
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_READ,
+			TaskType: &avsproto.TaskNode_ContractRead{ContractRead: processedContractRead},
+		}
+	} else if graphqlQuery := loopNodeDef.GetGraphqlDataQuery(); graphqlQuery != nil {
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY,
+			TaskType: &avsproto.TaskNode_GraphqlQuery{GraphqlQuery: graphqlQuery},
+		}
+	} else if restApi := loopNodeDef.GetRestApi(); restApi != nil {
+		processedRestApi := v.processRestApiTemplates(restApi, iterInputs)
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_REST_API,
+			TaskType: &avsproto.TaskNode_RestApi{RestApi: processedRestApi},
+		}
+	} else if customCode := loopNodeDef.GetCustomCode(); customCode != nil {
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
+			TaskType: &avsproto.TaskNode_CustomCode{CustomCode: customCode},
+		}
+	}
+
+	return nil
+}
+
+// Helper methods for template processing (these need to be moved from LoopProcessor)
+func (v *VM) processContractWriteTemplates(contractWrite *avsproto.ContractWriteNode, iterInputs map[string]interface{}) *avsproto.ContractWriteNode {
+	// TODO: Implement template processing - for now return as-is
+	return contractWrite
+}
+
+func (v *VM) processContractReadTemplates(contractRead *avsproto.ContractReadNode, iterInputs map[string]interface{}) *avsproto.ContractReadNode {
+	// TODO: Implement template processing - for now return as-is
+	return contractRead
+}
+
+func (v *VM) processRestApiTemplates(restApi *avsproto.RestAPINode, iterInputs map[string]interface{}) *avsproto.RestAPINode {
+	// TODO: Implement template processing - for now return as-is
+	return restApi
+}
+
+// executeSequentialPath executes a sequential execution path starting from the given step
