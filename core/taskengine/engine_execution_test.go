@@ -9,6 +9,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestGetExecution(t *testing.T) {
@@ -28,7 +29,11 @@ func TestGetExecution(t *testing.T) {
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
 			BlockTrigger: &avsproto.BlockTrigger_Output{
-				BlockNumber: uint64(101),
+				Data: &structpb.Value{
+					Kind: &structpb.Value_NumberValue{
+						NumberValue: 101,
+					},
+				},
 			},
 		},
 		IsBlocking: true,
@@ -138,7 +143,11 @@ func TestTriggerSync(t *testing.T) {
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
 			BlockTrigger: &avsproto.BlockTrigger_Output{
-				BlockNumber: uint64(101),
+				Data: &structpb.Value{
+					Kind: &structpb.Value_NumberValue{
+						NumberValue: 101,
+					},
+				},
 			},
 		},
 		IsBlocking: true,
@@ -248,7 +257,11 @@ func TestTriggerAsync(t *testing.T) {
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
 			BlockTrigger: &avsproto.BlockTrigger_Output{
-				BlockNumber: uint64(101),
+				Data: &structpb.Value{
+					Kind: &structpb.Value_NumberValue{
+						NumberValue: 101,
+					},
+				},
 			},
 		},
 		IsBlocking: true,
@@ -359,7 +372,11 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
 			BlockTrigger: &avsproto.BlockTrigger_Output{
-				BlockNumber: uint64(101),
+				Data: &structpb.Value{
+					Kind: &structpb.Value_NumberValue{
+						NumberValue: 101,
+					},
+				},
 			},
 		},
 		IsBlocking: true,
@@ -375,7 +392,11 @@ func TestTriggerCompletedTaskReturnError(t *testing.T) {
 		TriggerType: avsproto.TriggerType_TRIGGER_TYPE_BLOCK,
 		TriggerOutput: &avsproto.TriggerTaskReq_BlockTrigger{
 			BlockTrigger: &avsproto.BlockTrigger_Output{
-				BlockNumber: uint64(101),
+				Data: &structpb.Value{
+					Kind: &structpb.Value_NumberValue{
+						NumberValue: 101,
+					},
+				},
 			},
 		},
 		IsBlocking: true,

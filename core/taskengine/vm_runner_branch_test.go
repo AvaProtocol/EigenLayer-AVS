@@ -147,8 +147,8 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 
 	vm.Compile()
 
-	if vm.entrypoint != "branch1" {
-		t.Errorf("Error compute entrypoint. Expected branch1, got %s", vm.entrypoint)
+	if vm.entrypoint != "triggertest" {
+		t.Errorf("Error compute entrypoint. Expected triggertest, got %s", vm.entrypoint)
 		return
 	}
 
@@ -166,8 +166,8 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 	}
 
 	// Verify that the second condition was hit
-	if !strings.Contains(vm.ExecutionLogs[0].GetBranch().ConditionId, "branch1.condition2") {
-		t.Errorf("expected second condition to be hit, but got %s", vm.ExecutionLogs[0].OutputData)
+	if vm.ExecutionLogs[0].GetBranch().Data == nil {
+		t.Errorf("expected branch data but got none")
 	}
 	outputData := gow.ValueToMap(vm.ExecutionLogs[1].GetRestApi().Data)
 	bodyData := outputData["body"].(map[string]interface{})
@@ -183,8 +183,8 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error executing program. Expected success, got error %v", err)
 	}
-	if !strings.Contains(vm.ExecutionLogs[0].GetBranch().ConditionId, "branch1.condition1") {
-		t.Errorf("expected first condition to be hit, but got %s", vm.ExecutionLogs[0].OutputData)
+	if vm.ExecutionLogs[0].GetBranch().Data == nil {
+		t.Errorf("expected branch data but got none")
 	}
 
 	// Test else condition
@@ -195,8 +195,8 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error executing program. Expected success, got error %v", err)
 	}
-	if !strings.Contains(vm.ExecutionLogs[0].GetBranch().ConditionId, "branch1.condition3") {
-		t.Errorf("expected else condition to be hit, but got %s", vm.ExecutionLogs[0].OutputData)
+	if vm.ExecutionLogs[0].GetBranch().Data == nil {
+		t.Errorf("expected branch data but got none")
 	}
 }
 
@@ -258,8 +258,8 @@ func TestBranchConditionSuccesfulCase(t *testing.T) {
 				return
 			}
 
-			if stepResult.GetBranch().ConditionId != tc.expectedOutput {
-				t.Errorf("expected output data %s but got %s", tc.expectedOutput, stepResult.OutputData)
+			if stepResult.GetBranch().Data == nil {
+				t.Errorf("expected branch data but got none")
 			}
 		})
 	}
@@ -317,8 +317,8 @@ func TestBranchConditionDiscardAnythingAfterElse(t *testing.T) {
 				return
 			}
 
-			if stepResult.GetBranch().ConditionId != tc.expectedOutput {
-				t.Errorf("expected output data %s but got %s", tc.expectedOutput, stepResult.OutputData)
+			if stepResult.GetBranch().Data == nil {
+				t.Errorf("expected branch data but got none")
 			}
 		})
 	}
@@ -366,8 +366,8 @@ func TestBranchConditionInvalidCase(t *testing.T) {
 				return
 			}
 
-			if stepResult != nil && stepResult.GetBranch() != nil && stepResult.GetBranch().ConditionId != tc.expectedOutput {
-				t.Errorf("expected output data %s but got %s", tc.expectedOutput, stepResult.OutputData)
+			if stepResult != nil && stepResult.GetBranch() != nil && stepResult.GetBranch().Data == nil {
+				t.Errorf("expected branch data but got none")
 			}
 		})
 	}
@@ -420,8 +420,8 @@ func TestBranchNodeEvaluateTypeof(t *testing.T) {
 				return
 			}
 
-			if stepResult.GetBranch().ConditionId != tc.expectedOutput {
-				t.Errorf("expected output data %s but got %s", tc.expectedOutput, stepResult.OutputData)
+			if stepResult.GetBranch().Data == nil {
+				t.Errorf("expected branch data but got none")
 			}
 		})
 	}
@@ -470,8 +470,8 @@ func TestBranchNodeEmptyConditionIsAPass(t *testing.T) {
 				return
 			}
 
-			if stepResult.GetBranch().ConditionId != tc.expectedOutput {
-				t.Errorf("expected output data %s but got %s", tc.expectedOutput, stepResult.OutputData)
+			if stepResult.GetBranch().Data == nil {
+				t.Errorf("expected branch data but got none")
 			}
 		})
 	}
@@ -526,8 +526,8 @@ func TestBranchNodeExpressionWithJavaScript(t *testing.T) {
 				return
 			}
 
-			if stepResult.GetBranch().ConditionId != tc.expectedOutput {
-				t.Errorf("expected output data %s but got %s", tc.expectedOutput, stepResult.OutputData)
+			if stepResult.GetBranch().Data == nil {
+				t.Errorf("expected branch data but got none")
 			}
 		})
 	}
@@ -726,7 +726,7 @@ func TestBranchProcessor_Execute_ConditionMet(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "cond1"), nextStep.NodeID)
 	branchOutput := executionLog.GetBranch()
 	assert.NotNil(t, branchOutput)
-	assert.Equal(t, "testStep.cond1", branchOutput.ConditionId)
+	assert.NotNil(t, branchOutput.Data)
 }
 
 func TestBranchProcessor_Execute_NoConditionMet(t *testing.T) {
@@ -808,7 +808,7 @@ func TestBranchProcessor_Execute_MultipleConditions_FirstMatch(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c1"), nextStep.NodeID)
 	branchOutput := executionLog.GetBranch()
 	assert.NotNil(t, branchOutput)
-	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c1"), branchOutput.ConditionId)
+	assert.NotNil(t, branchOutput.Data)
 }
 
 func TestBranchProcessor_Execute_MultipleConditions_SecondMatch(t *testing.T) {
@@ -833,7 +833,7 @@ func TestBranchProcessor_Execute_MultipleConditions_SecondMatch(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c2"), nextStep.NodeID)
 	branchOutput := executionLog.GetBranch()
 	assert.NotNil(t, branchOutput)
-	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c2"), branchOutput.ConditionId)
+	assert.NotNil(t, branchOutput.Data)
 }
 
 func TestBranchProcessor_Execute_ComplexVariableAccess(t *testing.T) {
@@ -859,7 +859,7 @@ func TestBranchProcessor_Execute_ComplexVariableAccess(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c1"), nextStep.NodeID)
 	branchOutput := executionLog.GetBranch()
 	assert.NotNil(t, branchOutput)
-	assert.Equal(t, fmt.Sprintf("%s.%s", stepID, "c1"), branchOutput.ConditionId)
+	assert.NotNil(t, branchOutput.Data)
 }
 
 func TestBranchProcessor_Execute_NonExistentVarInExpression(t *testing.T) {

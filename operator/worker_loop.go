@@ -201,8 +201,14 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				TriggerType: avspb.TriggerType_TRIGGER_TYPE_CRON,
 				TriggerOutput: &avspb.NotifyTriggersReq_CronTrigger{
 					CronTrigger: &avspb.CronTrigger_Output{
-						Timestamp:    uint64(triggerItem.Marker),
-						TimestampIso: time.Unix(0, int64(triggerItem.Marker)*1000000).UTC().Format("2006-01-02T15:04:05.000Z"),
+						Data: func() *structpb.Value {
+							cronData := map[string]interface{}{
+								"timestamp":    uint64(triggerItem.Marker),
+								"timestampIso": time.Unix(0, int64(triggerItem.Marker)*1000000).UTC().Format("2006-01-02T15:04:05.000Z"),
+							}
+							dataValue, _ := structpb.NewValue(cronData)
+							return dataValue
+						}(),
 					},
 				},
 			}); err == nil {
@@ -279,14 +285,19 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				TriggerType: avspb.TriggerType_TRIGGER_TYPE_BLOCK,
 				TriggerOutput: &avspb.NotifyTriggersReq_BlockTrigger{
 					BlockTrigger: &avspb.BlockTrigger_Output{
-						BlockNumber: uint64(triggerItem.Marker),
-						// Other block fields would be populated here if available
-						BlockHash:  "",
-						Timestamp:  0,
-						ParentHash: "",
-						Difficulty: "",
-						GasLimit:   0,
-						GasUsed:    0,
+						Data: func() *structpb.Value {
+							blockData := map[string]interface{}{
+								"blockNumber": uint64(triggerItem.Marker),
+								"blockHash":   "",
+								"timestamp":   0,
+								"parentHash":  "",
+								"difficulty":  "",
+								"gasLimit":    0,
+								"gasUsed":     0,
+							}
+							dataValue, _ := structpb.NewValue(blockData)
+							return dataValue
+						}(),
 					},
 				},
 			}); err == nil {

@@ -14,29 +14,21 @@ func buildTriggerVariableData(trigger *avsproto.TaskTrigger, triggerDataMap map[
 
 	// For manual triggers, handle the JSON data directly
 	if trigger != nil && trigger.GetType() == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
-		// For manual triggers, extract the data field and make it accessible directly
-		// This makes manual triggers behave like CustomCode nodes - direct data access
-		// Note: ManualTrigger data can be any valid JSON (objects, arrays, etc.)
-		if data, exists := triggerDataMap["data"]; exists && data != nil {
-			// If the data is a JSON object, flatten it into the trigger variable for easy access
-			if dataMap, ok := data.(map[string]interface{}); ok {
-				// Convert map[string]interface{} to map[string]any and merge with trigger data
-				for k, v := range dataMap {
-					triggerVarData[k] = v
-				}
-			} else if dataMapAny, ok := data.(map[string]any); ok {
-				// Merge map[string]any directly
-				for k, v := range dataMapAny {
-					triggerVarData[k] = v
-				}
-			} else {
-				// For non-object JSON data (arrays, primitives), store it under a "data" key
-				// This allows access like triggerName.data for arrays/primitives
-				triggerVarData["data"] = data
+		// For manual triggers, preserve the full structure (data, headers, pathParams) for template access
+		// This allows templates to access ManualTrigger.data.field, ManualTrigger.headers.field, etc.
+		// Note: The trigger step output will still only contain the data field (handled separately in step creation)
+
+		// Include all fields from triggerDataMap (data, headers, pathParams)
+		for k, v := range triggerDataMap {
+			triggerVarData[k] = v
+		}
+
+		// Also include any input data if available
+		for k, v := range triggerInputData {
+			if _, exists := triggerVarData[k]; !exists {
+				triggerVarData[k] = v
 			}
 		}
-		// If no data or data is null, return empty map
-		// For manual triggers, we've processed the data above, so we skip the normal flow
 	} else {
 		// For all other trigger types, put all output data under the .data field
 		// This ensures consistent access pattern: triggerName.data.field
@@ -85,7 +77,7 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 
 	// Debug logging
 	if vm.logger != nil {
-		vm.logger.Info("🔧 createNodeExecutionStep: Creating execution step",
+		vm.logger.Debug("createNodeExecutionStep: Creating execution step",
 			"stepID", stepID,
 			"nodeType", nodeType.String(),
 			"nodeName", nodeName,
@@ -93,7 +85,7 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 
 		if nodeConfig != nil {
 			// Log the content of nodeConfig
-			vm.logger.Info("🔧 createNodeExecutionStep: Node config details",
+			vm.logger.Debug("createNodeExecutionStep: Node config details",
 				"stepID", stepID,
 				"nodeConfig_type", fmt.Sprintf("%T", nodeConfig),
 				"nodeConfig_string", nodeConfig.String())
@@ -109,14 +101,14 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 		StartAt:    t0.UnixMilli(),
 		Type:       nodeType.String(),
 		Name:       nodeName,
-		Input:      nodeConfig, // Include node configuration for debugging
+		Config:     nodeConfig, // Include node configuration for debugging
 	}
 
 	// Log the final step
 	if vm.logger != nil {
-		vm.logger.Info("🔧 createNodeExecutionStep: Created execution step",
+		vm.logger.Debug("createNodeExecutionStep: Created execution step",
 			"stepID", stepID,
-			"step_input_exists", step.Input != nil)
+			"step_config_exists", step.Config != nil)
 	}
 
 	return step

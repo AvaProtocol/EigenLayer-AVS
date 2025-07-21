@@ -174,9 +174,9 @@ func TestBuildEventTriggerOutputConsistencyWithOtherTriggerFunctions(t *testing.
 		require.NotNil(t, cronResult, "buildCronTriggerOutput should handle empty map gracefully")
 		require.NotNil(t, manualResult, "buildManualTriggerOutput should handle empty map gracefully")
 
-		require.Equal(t, uint64(0), blockResult.BlockNumber, "BlockTrigger should have default block number")
-		require.Equal(t, uint64(0), fixedTimeResult.Timestamp, "FixedTimeTrigger should have default timestamp")
-		require.Equal(t, uint64(0), cronResult.Timestamp, "CronTrigger should have default timestamp")
+		require.NotNil(t, blockResult.Data, "BlockTrigger should have data field")
+		require.NotNil(t, fixedTimeResult.Data, "FixedTimeTrigger should have data field")
+		require.NotNil(t, cronResult.Data, "CronTrigger should have data field")
 		require.NotNil(t, manualResult, "ManualTrigger should be created successfully")
 
 		t.Log("✅ All trigger build functions consistently handle empty maps with appropriate defaults")

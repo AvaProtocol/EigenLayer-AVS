@@ -19,6 +19,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/allegro/bigcache/v3"
@@ -1881,8 +1882,8 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		n.logger.Debug("🔍 SimulateTask: EventTrigger data extraction", "inputKeys", getMapKeys(triggerOutput), "outputKeys", getMapKeys(triggerDataMap))
 	}
 
-	// Extract trigger input data if available
-	triggerInputData := ExtractTriggerInputData(task.Trigger)
+	// Extract trigger config data if available
+	triggerInputData := TaskTriggerToConfig(task.Trigger)
 
 	// Build complete trigger variable data using shared function
 	triggerVarData := buildTriggerVariableData(task.Trigger, triggerDataMap, triggerInputData)
@@ -1902,29 +1903,29 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		triggerInputs = append(triggerInputs, key)
 	}
 
-	// Use the trigger configuration instead of input data for the execution step's Input field
-	// The Input field should show the configuration used to execute the trigger, not input data from previous steps
+	// Use the trigger config data for the execution step's Config field (includes data, headers, pathParams for ManualTrigger)
+	// The Config field should show the configuration data used to execute the trigger
 	var triggerConfigProto *structpb.Value
-	triggerConfig = TaskTriggerToConfig(task.Trigger)
-	if len(triggerConfig) > 0 {
+	triggerInputData = TaskTriggerToConfig(task.Trigger)
+	if len(triggerInputData) > 0 {
 		var err error
-		triggerConfigProto, err = structpb.NewValue(triggerConfig)
+		triggerConfigProto, err = structpb.NewValue(triggerInputData)
 		if err != nil {
-			n.logger.Warn("Failed to convert trigger config to protobuf", "error", err)
+			n.logger.Warn("Failed to convert trigger input to protobuf", "error", err)
 			// Try a fallback approach: convert to JSON and back to ensure proper formatting
-			jsonBytes, jsonErr := json.Marshal(triggerConfig)
+			jsonBytes, jsonErr := json.Marshal(triggerInputData)
 			if jsonErr == nil {
 				var cleanData interface{}
 				if unmarshalErr := json.Unmarshal(jsonBytes, &cleanData); unmarshalErr == nil {
-					if configProto, err := structpb.NewValue(cleanData); err == nil {
-						triggerConfigProto = configProto
-						n.logger.Info("✅ Successfully converted trigger config using JSON fallback")
+					if inputProto, err := structpb.NewValue(cleanData); err == nil {
+						triggerConfigProto = inputProto
+						n.logger.Info("✅ Successfully converted trigger input using JSON fallback")
 					}
 				}
 			}
 		}
 	} else {
-		n.logger.Info("🔍 SimulateTask: No trigger config found", "trigger_id", task.Trigger.Id, "trigger_type", task.Trigger.GetType())
+		n.logger.Info("🔍 SimulateTask: No trigger input found", "trigger_id", task.Trigger.Id, "trigger_type", task.Trigger.GetType())
 	}
 
 	triggerStep := &avsproto.Execution_Step{
@@ -1937,7 +1938,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Inputs:  triggerInputs,                  // Use inputVariables keys as trigger inputs
 		Type:    queueData.TriggerType.String(), // Use trigger type as string
 		Name:    task.Trigger.Name,              // Use new 'name' field
-		Input:   triggerConfigProto,             // Include trigger configuration for debugging
+		Config:  triggerConfigProto,             // Include trigger configuration data for debugging
 	}
 
 	// Set trigger output data in the step using shared function
@@ -3149,11 +3150,43 @@ func buildEventTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Eve
 // This shared function eliminates code duplication between SimulateTask, RunTriggerRPC,
 // and regular task execution flows.
 //
+// IMPORTANT: Type Conversion Limitation
+// =====================================
+// This function converts uint64 values to protobuf Value structures using structpb.NewValue().
+// Due to protobuf's internal use of JSON, all numeric types get converted to float64.
+// This means:
+//   - Input:  blockNumber: uint64(12345)
+//   - Output: blockNumber: float64(12345) (via protobuf)
+//
+// This type conversion happens because:
+// 1. structpb.NewValue() uses JSON internally
+// 2. JSON only has one numeric type (float64 in Go)
+// 3. All integers get converted to float64
+//
+// Impact:
+// - buildTriggerDataMap() preserves uint64 types (works with raw data)
+// - buildTriggerDataMapFromProtobuf() returns float64 types (works with protobuf data)
+// - This creates inconsistency between different data paths
+//
+// Client Consistency Requirement:
+// The key requirement is that client input should match execution step output.
+// As long as users get back the same values they provided, the internal conversion is acceptable.
+//
+// Potential Solutions:
+// 1. Avoid protobuf conversion when not needed (preserve raw data) - requires major refactoring
+// 2. Use custom protobuf types that preserve integer types - complex implementation
+// 3. Accept the conversion and ensure client consistency - current approach
+//
+// Currently using solution #3: clients typically send JSON with float64 numbers anyway,
+// so the protobuf conversion maintains consistency from the client perspective.
+// Tests verify that user input matches execution step output values and types.
+//
 // Parameters:
 //   - triggerOutput: map containing raw trigger output data from runBlockTriggerImmediately
 //
 // Returns:
 //   - *avsproto.BlockTrigger_Output: properly structured protobuf output with block data
+//     (note: numeric values will be float64 due to protobuf conversion)
 func buildBlockTriggerOutput(triggerOutput map[string]interface{}) *avsproto.BlockTrigger_Output {
 	blockNumber := uint64(0)
 	blockHash := ""
@@ -3201,14 +3234,26 @@ func buildBlockTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Blo
 		}
 	}
 
+	// Create the data structure with all block information
+	blockData := map[string]interface{}{
+		"blockNumber": blockNumber,
+		"blockHash":   blockHash,
+		"timestamp":   timestamp,
+		"parentHash":  parentHash,
+		"difficulty":  difficulty,
+		"gasLimit":    gasLimit,
+		"gasUsed":     gasUsed,
+	}
+
+	// Convert to protobuf Value
+	dataValue, err := structpb.NewValue(blockData)
+	if err != nil {
+		// Fallback to empty data on error
+		dataValue, _ = structpb.NewValue(map[string]interface{}{})
+	}
+
 	return &avsproto.BlockTrigger_Output{
-		BlockNumber: blockNumber,
-		BlockHash:   blockHash,
-		Timestamp:   timestamp,
-		ParentHash:  parentHash,
-		Difficulty:  difficulty,
-		GasLimit:    gasLimit,
-		GasUsed:     gasUsed,
+		Data: dataValue,
 	}
 }
 
@@ -3238,9 +3283,21 @@ func buildFixedTimeTriggerOutput(triggerOutput map[string]interface{}) *avsproto
 		}
 	}
 
+	// Create the data structure with timestamp information
+	timeData := map[string]interface{}{
+		"timestamp":    timestamp,
+		"timestampIso": timestampISO,
+	}
+
+	// Convert to protobuf Value
+	dataValue, err := structpb.NewValue(timeData)
+	if err != nil {
+		// Fallback to empty data on error
+		dataValue, _ = structpb.NewValue(map[string]interface{}{})
+	}
+
 	return &avsproto.FixedTimeTrigger_Output{
-		Timestamp:    timestamp,
-		TimestampIso: timestampISO,
+		Data: dataValue,
 	}
 }
 
@@ -3270,9 +3327,21 @@ func buildCronTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Cron
 		}
 	}
 
+	// Create the data structure with timestamp information
+	cronData := map[string]interface{}{
+		"timestamp":    timestamp,
+		"timestampIso": timestampISO,
+	}
+
+	// Convert to protobuf Value
+	dataValue, err := structpb.NewValue(cronData)
+	if err != nil {
+		// Fallback to empty data on error
+		dataValue, _ = structpb.NewValue(map[string]interface{}{})
+	}
+
 	return &avsproto.CronTrigger_Output{
-		Timestamp:    timestamp,
-		TimestampIso: timestampISO,
+		Data: dataValue,
 	}
 }
 
@@ -3289,16 +3358,12 @@ func buildManualTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Ma
 	var data *structpb.Value
 
 	if triggerOutput != nil {
-		fmt.Printf("🔍 buildManualTriggerOutput called with: %+v\n", triggerOutput)
-
 		// Include ONLY the user-defined JSON data - this is the main payload for manual triggers
 		// Headers and pathParams are only used for configuration, not output
 		if dataValue, exists := triggerOutput["data"]; exists && dataValue != nil {
 			// Convert any valid JSON data (objects, arrays, etc.) to protobuf Value
 			if pbValue, err := structpb.NewValue(dataValue); err == nil {
 				data = pbValue
-			} else {
-				fmt.Printf("❌ Failed to convert JSON data to protobuf Value: %v\n", err)
 			}
 		}
 	}
@@ -3307,8 +3372,6 @@ func buildManualTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Ma
 		Data: data,
 		// Headers and PathParams are removed from output - they're config-only fields
 	}
-
-	fmt.Printf("🔍 buildManualTriggerOutput returning: %+v\n", result)
 	return result
 }
 
@@ -3330,9 +3393,10 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 
 	switch triggerType {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-		// For manual triggers, only include the data - headers and pathParams are config-only
-		if data, ok := triggerOutput["data"]; ok {
-			triggerDataMap["data"] = data
+		// For manual triggers, include all fields (data, headers, pathParams) for template access
+		// This allows templates to access ManualTrigger.data.field, ManualTrigger.headers.field, etc.
+		for k, v := range triggerOutput {
+			triggerDataMap[k] = v
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
 		if timestamp, ok := triggerOutput["timestamp"]; ok {
@@ -3536,23 +3600,63 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
 		if timeOutput, ok := triggerOutputProto.(*avsproto.FixedTimeTrigger_Output); ok {
-			triggerDataMap["timestamp"] = timeOutput.Timestamp
-			triggerDataMap["timestamp_iso"] = timeOutput.TimestampIso
+			// Extract data from the new standardized data field
+			if timeOutput.Data != nil {
+				dataMap := gow.ValueToMap(timeOutput.Data)
+				if dataMap != nil {
+					if timestamp, ok := dataMap["timestamp"]; ok {
+						triggerDataMap["timestamp"] = timestamp
+					}
+					if timestampIso, ok := dataMap["timestampIso"]; ok {
+						triggerDataMap["timestamp_iso"] = timestampIso
+					}
+				}
+			}
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_CRON:
 		if cronOutput, ok := triggerOutputProto.(*avsproto.CronTrigger_Output); ok {
-			triggerDataMap["timestamp"] = cronOutput.Timestamp
-			triggerDataMap["timestamp_iso"] = cronOutput.TimestampIso
+			// Extract data from the new standardized data field
+			if cronOutput.Data != nil {
+				dataMap := gow.ValueToMap(cronOutput.Data)
+				if dataMap != nil {
+					if timestamp, ok := dataMap["timestamp"]; ok {
+						triggerDataMap["timestamp"] = timestamp
+					}
+					if timestampIso, ok := dataMap["timestampIso"]; ok {
+						triggerDataMap["timestamp_iso"] = timestampIso
+					}
+				}
+			}
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
 		if blockOutput, ok := triggerOutputProto.(*avsproto.BlockTrigger_Output); ok {
-			triggerDataMap["blockNumber"] = blockOutput.BlockNumber
-			triggerDataMap["blockHash"] = blockOutput.BlockHash
-			triggerDataMap["timestamp"] = blockOutput.Timestamp
-			triggerDataMap["parentHash"] = blockOutput.ParentHash
-			triggerDataMap["difficulty"] = blockOutput.Difficulty
-			triggerDataMap["gasLimit"] = blockOutput.GasLimit
-			triggerDataMap["gasUsed"] = blockOutput.GasUsed
+			// Extract data from the new standardized data field
+			if blockOutput.Data != nil {
+				dataMap := gow.ValueToMap(blockOutput.Data)
+				if dataMap != nil {
+					if blockNumber, ok := dataMap["blockNumber"]; ok {
+						triggerDataMap["blockNumber"] = blockNumber
+					}
+					if blockHash, ok := dataMap["blockHash"]; ok {
+						triggerDataMap["blockHash"] = blockHash
+					}
+					if timestamp, ok := dataMap["timestamp"]; ok {
+						triggerDataMap["timestamp"] = timestamp
+					}
+					if parentHash, ok := dataMap["parentHash"]; ok {
+						triggerDataMap["parentHash"] = parentHash
+					}
+					if difficulty, ok := dataMap["difficulty"]; ok {
+						triggerDataMap["difficulty"] = difficulty
+					}
+					if gasLimit, ok := dataMap["gasLimit"]; ok {
+						triggerDataMap["gasLimit"] = gasLimit
+					}
+					if gasUsed, ok := dataMap["gasUsed"]; ok {
+						triggerDataMap["gasUsed"] = gasUsed
+					}
+				}
+			}
 		} else if rawMap, ok := triggerOutputProto.(map[string]interface{}); ok {
 			// Handle raw map data (from queue/storage) - convert snake_case to camelCase
 			if blockNumber, exists := rawMap["block_number"]; exists {

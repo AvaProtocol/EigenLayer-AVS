@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -79,9 +80,20 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	// Simulate transaction hash
 	txHash := fmt.Sprintf("0x%064d", time.Now().UnixNano())
 
-	// Create output data
+	// Create output data using standardized data field
+	ethData := map[string]interface{}{
+		"transactionHash": txHash,
+	}
+
+	// Convert to protobuf Value
+	dataValue, err := structpb.NewValue(ethData)
+	if err != nil {
+		// Fallback to empty data on error
+		dataValue, _ = structpb.NewValue(map[string]interface{}{})
+	}
+
 	outputData := &avsproto.ETHTransferNode_Output{
-		TransactionHash: txHash,
+		Data: dataValue,
 	}
 
 	// Set execution log output
