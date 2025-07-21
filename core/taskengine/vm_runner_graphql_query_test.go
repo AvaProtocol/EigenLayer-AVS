@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -95,7 +96,19 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 		} `json:"launches"`
 	}
 
-	err = gow.AnyToStruct(step.GetGraphql().Data, &output)
+	dataMap := gow.ValueToMap(step.GetGraphql().Data)
+	if dataMap == nil {
+		t.Errorf("expected graphql data but got nil")
+		return
+	}
+
+	jsonBytes, err := json.Marshal(dataMap)
+	if err != nil {
+		t.Errorf("failed to marshal data map: %v", err)
+		return
+	}
+
+	err = json.Unmarshal(jsonBytes, &output)
 	if err != nil {
 		t.Errorf("expected the data output in json format, but failed to decode %v", err)
 	}

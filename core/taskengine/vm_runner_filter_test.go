@@ -213,7 +213,7 @@ func TestFilterComplexLogic(t *testing.T) {
 		t.Errorf("expect third elemt is fourth  but got: %s", name3)
 	}
 
-	data2 := gow.AnyToSlice(step.GetFilter().Data)
+	data2 := gow.ValueToSlice(step.GetFilter().Data)
 	if !reflect.DeepEqual(
 		[]float64{15, 20, 19},
 		[]float64{

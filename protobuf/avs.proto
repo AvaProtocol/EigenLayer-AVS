@@ -107,14 +107,11 @@ message FixedTimeTrigger {
   }
   
   message Output {
-    uint64 timestamp = 1; // Timestamp in milliseconds
-    string timestamp_iso = 2; // ISO representation of timestamp in UTC (e.g., "2025-05-31T10:30:00.000Z")
+    google.protobuf.Value data = 1;
   }
 
   // Include Config as field so it is generated in Go
   Config config = 1;
-  // Input data provided by user for this trigger
-  google.protobuf.Value input = 2;
 }
 
 // Simple timebase or cron syntax.
@@ -124,14 +121,11 @@ message CronTrigger {
   }
   
   message Output {
-    uint64 timestamp = 1; // Timestamp in milliseconds
-    string timestamp_iso = 2; // ISO representation of timestamp in UTC (e.g., "2025-05-31T10:30:00.000Z")
+    google.protobuf.Value data = 1;
   }
 
   // Include Config as field so it is generated in Go
   Config config = 1;
-  // Input data provided by user for this trigger
-  google.protobuf.Value input = 2;
 }
 
 message BlockTrigger {
@@ -140,19 +134,11 @@ message BlockTrigger {
   }
   
   message Output {
-    uint64 block_number = 1;
-    string block_hash = 2;
-    uint64 timestamp = 3;
-    string parent_hash = 4;
-    string difficulty = 5;
-    uint64 gas_limit = 6;
-    uint64 gas_used = 7;
+    google.protobuf.Value data = 1;
   }
 
   // Include Config as field so it is generated in Go
   Config config = 1;
-  // Input data provided by user for this trigger
-  google.protobuf.Value input = 2;
 }
 
 // EventTrigger monitors blockchain events using direct RPC filter queries.
@@ -215,8 +201,6 @@ message EventTrigger {
 
   // Include Config as field so it is generated in Go
   Config config = 1;
-  // Input data provided by user for this trigger
-  google.protobuf.Value input = 2;
 }
 
 message ManualTrigger {
@@ -232,16 +216,10 @@ message ManualTrigger {
   message Output {
     // User-defined data from trigger config - this is the main payload for manual triggers
     google.protobuf.Value data = 1;
-    // Headers from trigger config for webhook testing
-    map<string, string> headers = 2;
-    // Path parameters from trigger config for webhook testing
-    map<string, string> pathParams = 3;
   }
 
   // Include Config as field so it is generated in Go
   Config config = 1;
-  // Input data provided by user for this trigger
-  google.protobuf.Value input = 2;
 }
 
 message TaskTrigger {
@@ -267,8 +245,6 @@ message TaskTrigger {
     EventTrigger     event   = 6;
   }
   string id = 7;
-  // Input data provided by user for this trigger
-  google.protobuf.Value input = 9;
 }
 
 // gRPC internal error code use up to 17, we extend and start from 1000 to avoid any conflict 
@@ -367,13 +343,11 @@ message ETHTransferNode {
   }
 
   message Output {
-    string transaction_hash = 1;
+    google.protobuf.Value data = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 message ContractWriteNode {
@@ -448,10 +422,8 @@ message ContractWriteNode {
     string value = 3;                 // The actual return value as string
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 message ContractReadNode {
@@ -490,10 +462,8 @@ message ContractReadNode {
     google.protobuf.Value data = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 
@@ -506,15 +476,13 @@ message GraphQLQueryNode {
   }
 
   message Output {
-    // The data is the result of the graphql query. Becuase this is GraphQL, the data is a json object
-    // The field of the json object is unknow, its depend on the query
-    google.protobuf.Any data = 1;
+    // The data is the result of the graphql query. Because this is GraphQL, the data is a json object
+    // The field of the json object is unknown, it depends on the query
+    google.protobuf.Value data = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 message RestAPINode {
@@ -530,16 +498,14 @@ message RestAPINode {
     google.protobuf.Value data = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 message CustomCodeNode {
   message Config {
     Lang lang = 1;  // Language is static config set at creation time
-    string source = 2;  // Source code can be provided as input variable
+    string source = 2;  // Source code
   }
 
   message Output {
@@ -547,10 +513,8 @@ message CustomCodeNode {
     google.protobuf.Value data = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 message BranchNode {
@@ -565,16 +529,14 @@ message BranchNode {
   }
 
   message Output {
-    // the output of the branch node is the id of the condition that is true
+    // the output of the branch node contains the condition evaluation results
     // the execution will continue to the next node belong to this condition 
     // In front-end, when rendering the historical execution, we can draw the relationship coming out of the condition that match this id
-    string condition_id = 1;
+    google.protobuf.Value data = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 message FilterNode {
@@ -589,13 +551,11 @@ message FilterNode {
 
   message Output {
     // the output of the filter node is the filtered array after apply the filter expression. It works similar to filter of javascript
-    google.protobuf.Any data = 1;
+    google.protobuf.Value data = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 // LoopNode currently not support, but we pre-defined to reverse the field id
@@ -630,13 +590,11 @@ message LoopNode {
   }
 
   message Output {
-    string data = 1;
+    google.protobuf.Value data = 1;
   }
 
-  // Include Config and Input as fields so they are generated in Go
+  // Include Config as field 
   Config config = 1;
-  // Input data provided by user for this node
-  google.protobuf.Value input = 2;
 }
 
 // The edge is relationship or direct between node
@@ -673,8 +631,6 @@ message TaskNode {
     LoopNode          loop = 17;
     CustomCodeNode    custom_code = 18;
   }
-  // Input data provided by user for this node
-  google.protobuf.Value input = 19;
 }
 
 message Execution {
@@ -695,8 +651,8 @@ message Execution {
     string error = 13;
     string log = 12;
     repeated string inputs = 16;
-    // Input data that was set on this trigger/node
-    google.protobuf.Value input = 19;
+    // Configuration data that was set on this trigger/node
+    google.protobuf.Value config = 19;
     oneof output_data {
       // Trigger outputs
       BlockTrigger.Output block_trigger = 20;

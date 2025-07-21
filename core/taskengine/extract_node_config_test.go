@@ -32,7 +32,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 							Runner: &avsproto.LoopNode_RestApi{
 								RestApi: &avsproto.RestAPINode{
 									Config: &avsproto.RestAPINode_Config{
-										Url:    "https://api.example.com/data",
+										Url:    MockAPIEndpoint + "/data",
 										Method: "GET",
 										Body:   "",
 										Headers: map[string]string{
@@ -57,25 +57,15 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 				runner, ok := config["runner"].(map[string]interface{})
 				require.True(t, ok, "runner should be a map[string]interface{}")
 				assert.Equal(t, "restApi", runner["type"])
-				assert.Equal(t, "https://api.example.com/data", runner["url"])
-				assert.Equal(t, "GET", runner["method"])
-				assert.Equal(t, "", runner["body"])
 
-				headersMap, ok := runner["headersMap"].([]interface{})
-				require.True(t, ok, "headersMap should be a []interface{}")
-				require.Len(t, headersMap, 3, "should have 3 headers")
+				runnerConfig, ok := runner["config"].(map[string]interface{})
+				require.True(t, ok, "runner config should be a map[string]interface{}")
+				assert.Equal(t, MockAPIEndpoint+"/data", runnerConfig["url"])
+				assert.Equal(t, "GET", runnerConfig["method"])
+				assert.Equal(t, "", runnerConfig["body"])
 
-				// Convert to map for easier testing
-				headers := make(map[string]string)
-				for _, pair := range headersMap {
-					if pairSlice, ok := pair.([]interface{}); ok && len(pairSlice) == 2 {
-						if key, ok := pairSlice[0].(string); ok {
-							if value, ok := pairSlice[1].(string); ok {
-								headers[key] = value
-							}
-						}
-					}
-				}
+				headers, ok := runnerConfig["headers"].(map[string]interface{})
+				require.True(t, ok, "headers should be a map[string]interface{}")
 				assert.Equal(t, "Bearer token123", headers["Authorization"])
 				assert.Equal(t, "application/json", headers["Content-Type"])
 				assert.Equal(t, "AvaProtocol/1.0", headers["User-Agent"])
@@ -97,7 +87,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 							Runner: &avsproto.LoopNode_GraphqlDataQuery{
 								GraphqlDataQuery: &avsproto.GraphQLQueryNode{
 									Config: &avsproto.GraphQLQueryNode_Config{
-										Url:   "https://api.thegraph.com/subgraphs/name/example",
+										Url:   MockAPIEndpoint + "/graphql",
 										Query: "query($id: ID!) { user(id: $id) { name email } }",
 										Variables: map[string]string{
 											"id":     "{{item.id}}",
@@ -121,10 +111,13 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 				runner, ok := config["runner"].(map[string]interface{})
 				require.True(t, ok, "runner should be a map[string]interface{}")
 				assert.Equal(t, "graphqlDataQuery", runner["type"])
-				assert.Equal(t, "https://api.thegraph.com/subgraphs/name/example", runner["url"])
-				assert.Equal(t, "query($id: ID!) { user(id: $id) { name email } }", runner["query"])
 
-				variables, ok := runner["variables"].(map[string]interface{})
+				runnerConfig, ok := runner["config"].(map[string]interface{})
+				require.True(t, ok, "runner config should be a map[string]interface{}")
+				assert.Equal(t, MockAPIEndpoint+"/graphql", runnerConfig["url"])
+				assert.Equal(t, "query($id: ID!) { user(id: $id) { name email } }", runnerConfig["query"])
+
+				variables, ok := runnerConfig["variables"].(map[string]interface{})
 				require.True(t, ok, "variables should be a map[string]interface{}")
 				assert.Equal(t, "{{item.id}}", variables["id"])
 				assert.Equal(t, "10", variables["limit"])
@@ -178,10 +171,13 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 				runner, ok := config["runner"].(map[string]interface{})
 				require.True(t, ok, "runner should be a map[string]interface{}")
 				assert.Equal(t, "contractRead", runner["type"])
-				assert.Equal(t, "0x1234567890123456789012345678901234567890", runner["contractAddress"])
-				assert.Contains(t, runner["contractAbi"], "decimals")
 
-				methodCalls, ok := runner["methodCalls"]
+				runnerConfig, ok := runner["config"].(map[string]interface{})
+				require.True(t, ok, "runner config should be a map[string]interface{}")
+				assert.Equal(t, "0x1234567890123456789012345678901234567890", runnerConfig["contractAddress"])
+				assert.Contains(t, runnerConfig["contractAbi"], "decimals")
+
+				methodCalls, ok := runnerConfig["methodCalls"]
 				require.True(t, ok, "methodCalls should be present")
 				// methodCalls should be a slice that can be converted to protobuf
 				assert.NotNil(t, methodCalls)
@@ -229,11 +225,14 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 				runner, ok := config["runner"].(map[string]interface{})
 				require.True(t, ok, "runner should be a map[string]interface{}")
 				assert.Equal(t, "contractWrite", runner["type"])
-				assert.Equal(t, "0x1234567890123456789012345678901234567890", runner["contractAddress"])
-				assert.Contains(t, runner["contractAbi"], "transfer")
-				assert.Equal(t, "0xa9059cbb", runner["callData"])
 
-				methodCalls, ok := runner["methodCalls"]
+				runnerConfig, ok := runner["config"].(map[string]interface{})
+				require.True(t, ok, "runner config should be a map[string]interface{}")
+				assert.Equal(t, "0x1234567890123456789012345678901234567890", runnerConfig["contractAddress"])
+				assert.Contains(t, runnerConfig["contractAbi"], "transfer")
+				assert.Equal(t, "0xa9059cbb", runnerConfig["callData"])
+
+				methodCalls, ok := runnerConfig["methodCalls"]
 				require.True(t, ok, "methodCalls should be present")
 				assert.NotNil(t, methodCalls)
 			},
@@ -273,8 +272,11 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 				runner, ok := config["runner"].(map[string]interface{})
 				require.True(t, ok, "runner should be a map[string]interface{}")
 				assert.Equal(t, "customCode", runner["type"])
-				assert.Equal(t, "return data.value * 2;", runner["source"])
-				assert.Equal(t, "JavaScript", runner["lang"])
+
+				runnerConfig, ok := runner["config"].(map[string]interface{})
+				require.True(t, ok, "runner config should be a map[string]interface{}")
+				assert.Equal(t, "return data.value * 2;", runnerConfig["source"])
+				assert.Equal(t, "JavaScript", runnerConfig["lang"])
 			},
 		},
 		{
@@ -312,8 +314,11 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 				runner, ok := config["runner"].(map[string]interface{})
 				require.True(t, ok, "runner should be a map[string]interface{}")
 				assert.Equal(t, "ethTransfer", runner["type"])
-				assert.Equal(t, "{{recipient.address}}", runner["destination"])
-				assert.Equal(t, "{{recipient.amount}}", runner["amount"])
+
+				runnerConfig, ok := runner["config"].(map[string]interface{})
+				require.True(t, ok, "runner config should be a map[string]interface{}")
+				assert.Equal(t, "{{recipient.address}}", runnerConfig["destination"])
+				assert.Equal(t, "{{recipient.amount}}", runnerConfig["amount"])
 			},
 		},
 	}
@@ -377,7 +382,7 @@ func TestExtractNodeConfiguration_ProtobufCompatibility(t *testing.T) {
 							Runner: &avsproto.LoopNode_RestApi{
 								RestApi: &avsproto.RestAPINode{
 									Config: &avsproto.RestAPINode_Config{
-										Url:    "https://example.com",
+										Url:    MockAPIEndpoint,
 										Method: "GET",
 										Headers: map[string]string{
 											"Authorization": "Bearer test-token",
@@ -408,7 +413,7 @@ func TestExtractNodeConfiguration_ProtobufCompatibility(t *testing.T) {
 							Runner: &avsproto.LoopNode_GraphqlDataQuery{
 								GraphqlDataQuery: &avsproto.GraphQLQueryNode{
 									Config: &avsproto.GraphQLQueryNode_Config{
-										Url:   "https://graphql.example.com",
+										Url:   MockAPIEndpoint + "/graphql",
 										Query: "query { test }",
 										Variables: map[string]string{
 											"var1": "value1",
@@ -473,7 +478,7 @@ func TestExtractNodeConfiguration_StandaloneNodesProtobufCompatibility(t *testin
 					TaskType: &avsproto.TaskNode_RestApi{
 						RestApi: &avsproto.RestAPINode{
 							Config: &avsproto.RestAPINode_Config{
-								Url:    "https://example.com",
+								Url:    MockAPIEndpoint,
 								Method: "GET",
 								Headers: map[string]string{
 									"Authorization": "Bearer test-token",
@@ -494,7 +499,7 @@ func TestExtractNodeConfiguration_StandaloneNodesProtobufCompatibility(t *testin
 					TaskType: &avsproto.TaskNode_GraphqlQuery{
 						GraphqlQuery: &avsproto.GraphQLQueryNode{
 							Config: &avsproto.GraphQLQueryNode_Config{
-								Url:   "https://graphql.example.com",
+								Url:   MockAPIEndpoint + "/graphql",
 								Query: "query { test }",
 								Variables: map[string]string{
 									"var1": "value1",
