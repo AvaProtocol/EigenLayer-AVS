@@ -57,7 +57,46 @@ const (
 	ConfigVarsPath                    = "configVars"
 	APContextConfigVarsPath           = APContextVarName + "." + ConfigVarsPath
 	DataSuffix                        = "data"
+	MaxExecutionDepth                 = 50 // Maximum depth for nested workflow execution
 )
+
+// ExecutionTask represents a single task in the execution queue
+type ExecutionTask struct {
+	Node           *avsproto.TaskNode
+	InputVariables map[string]interface{}
+	StepID         string
+	Depth          int
+	ParentStepID   string
+	IterationIndex int                   // For loop iterations
+	ResultChannel  chan *ExecutionResult // Channel to send result back to parent
+}
+
+// ExecutionResult represents the result of an execution task
+type ExecutionResult struct {
+	Step   *avsproto.Execution_Step
+	Error  error
+	StepID string
+	Data   interface{} // For loop iterations, this contains the result data
+}
+
+// ExecutionQueue manages a queue of execution tasks
+type ExecutionQueue struct {
+	tasks   chan *ExecutionTask
+	workers int
+	vm      *VM
+}
+
+// NewExecutionQueue creates a new execution queue
+func NewExecutionQueue(vm *VM, workers int) *ExecutionQueue {
+	if workers <= 0 {
+		workers = 1 // Default to single worker for sequential execution
+	}
+	return &ExecutionQueue{
+		tasks:   make(chan *ExecutionTask, workers*10), // Buffer to prevent blocking
+		workers: workers,
+		vm:      vm,
+	}
+}
 
 type Step struct {
 	NodeID string
@@ -1385,29 +1424,15 @@ func (v *VM) runBranch(stepID string, nodeValue *avsproto.BranchNode) (*avsproto
 }
 
 func (v *VM) runLoop(stepID string, nodeValue *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
-
-	p := NewLoopProcessor(v)
-	executionLog, err := p.Execute(stepID, nodeValue) // Loop processor internally calls RunNodeWithInputs
-
-	if v.logger != nil {
-		if executionLog != nil {
-		}
-	}
+	// Use the new queue-based execution instead of the old recursive approach
+	executionLog, err := v.executeLoopWithQueue(stepID, nodeValue)
 
 	v.mu.Lock()
 	if executionLog != nil {
-		if v.logger != nil {
-		}
 		executionLog.Inputs = v.collectInputKeysForLog(stepID)
-		if v.logger != nil {
-		}
 	}
 	v.mu.Unlock()
 
-	if v.logger != nil {
-	}
-
-	// v.addExecutionLog(executionLog)
 	return executionLog, err // Loop node itself doesn't dictate a jump in the main plan
 }
 
@@ -3273,3 +3298,485 @@ func (v *VM) executeStepInMainLoop(step *Step) {
 		}
 	}
 }
+
+// Start begins processing tasks with worker goroutines
+func (eq *ExecutionQueue) Start() {
+	for i := 0; i < eq.workers; i++ {
+		go eq.worker()
+	}
+}
+
+// Stop closes the task channel to stop accepting new tasks
+func (eq *ExecutionQueue) Stop() {
+	close(eq.tasks)
+}
+
+// Submit adds a task to the execution queue
+func (eq *ExecutionQueue) Submit(task *ExecutionTask) error {
+	if task.Depth > MaxExecutionDepth {
+		return fmt.Errorf("maximum execution depth (%d) exceeded", MaxExecutionDepth)
+	}
+
+	select {
+	case eq.tasks <- task:
+		return nil
+	default:
+		return fmt.Errorf("execution queue is full")
+	}
+}
+
+// worker processes tasks from the queue
+func (eq *ExecutionQueue) worker() {
+	for task := range eq.tasks {
+		result := eq.executeTask(task)
+		if task.ResultChannel != nil {
+			select {
+			case task.ResultChannel <- result:
+			default:
+				// Channel might be closed, log but don't block
+				if eq.vm.logger != nil {
+					eq.vm.logger.Warn("Failed to send execution result - channel closed", "stepID", task.StepID)
+				}
+			}
+		}
+	}
+}
+
+// executeTask executes a single task without creating a new VM
+func (eq *ExecutionQueue) executeTask(task *ExecutionTask) *ExecutionResult {
+	if task.Node == nil {
+		return &ExecutionResult{
+			Error:  fmt.Errorf("task node is nil"),
+			StepID: task.StepID,
+		}
+	}
+
+	// Set input variables in the VM context for this execution
+	eq.vm.mu.Lock()
+	if eq.vm.vars == nil {
+		eq.vm.vars = make(map[string]any)
+	}
+
+	// Store original variables to restore later
+	originalVars := make(map[string]any)
+	for key, value := range task.InputVariables {
+		if originalValue, exists := eq.vm.vars[key]; exists {
+			originalVars[key] = originalValue
+		}
+		eq.vm.vars[key] = value
+	}
+	eq.vm.mu.Unlock()
+
+	// Execute the node directly without creating a new VM
+	step, err := eq.vm.executeNodeDirect(task.Node, task.StepID)
+
+	// Restore original variables
+	eq.vm.mu.Lock()
+	for key := range task.InputVariables {
+		if originalValue, exists := originalVars[key]; exists {
+			eq.vm.vars[key] = originalValue
+		} else {
+			delete(eq.vm.vars, key)
+		}
+	}
+	eq.vm.mu.Unlock()
+
+	// Extract result data for loops
+	var resultData interface{}
+	if step != nil && step.Success {
+		resultData = eq.extractResultData(step)
+	}
+
+	return &ExecutionResult{
+		Step:   step,
+		Error:  err,
+		StepID: task.StepID,
+		Data:   resultData,
+	}
+}
+
+// extractResultData extracts the actual result data from an execution step
+func (eq *ExecutionQueue) extractResultData(step *avsproto.Execution_Step) interface{} {
+	if customCodeOutput := step.GetCustomCode(); customCodeOutput != nil && customCodeOutput.Data != nil {
+		return customCodeOutput.Data.AsInterface()
+	}
+	if restApiOutput := step.GetRestApi(); restApiOutput != nil && restApiOutput.Data != nil {
+		return restApiOutput.Data.AsInterface()
+	}
+	if contractReadOutput := step.GetContractRead(); contractReadOutput != nil && contractReadOutput.Data != nil {
+		return contractReadOutput.Data.AsInterface()
+	}
+	if contractWriteOutput := step.GetContractWrite(); contractWriteOutput != nil && contractWriteOutput.Data != nil {
+		return contractWriteOutput.Data.AsInterface()
+	}
+	if ethTransferOutput := step.GetEthTransfer(); ethTransferOutput != nil && ethTransferOutput.Data != nil {
+		return ethTransferOutput.Data.AsInterface()
+	}
+	return nil
+}
+
+// executeNodeDirect executes a node directly without creating a new VM or updating execution logs
+// This is used by the execution queue to avoid recursive VM creation
+func (v *VM) executeNodeDirect(node *avsproto.TaskNode, stepID string) (*avsproto.Execution_Step, error) {
+	if node == nil {
+		return nil, fmt.Errorf("executeNodeDirect called with nil node")
+	}
+
+	// Extract and set input data for this node (making it available as node_name.input)
+	inputData := ExtractNodeConfiguration(node)
+	if inputData != nil {
+		processor := &CommonProcessor{vm: v}
+		processor.SetInputVarForStep(stepID, inputData)
+	}
+
+	var executionLogForNode *avsproto.Execution_Step
+	var err error
+
+	// Execute the appropriate node type
+	if nodeValue := node.GetRestApi(); nodeValue != nil {
+		executionLogForNode, err = v.runRestApi(stepID, nodeValue)
+	} else if nodeValue := node.GetBranch(); nodeValue != nil {
+		var nextStep *Step
+		executionLogForNode, nextStep, err = v.runBranch(stepID, nodeValue)
+		// Note: We ignore nextStep in direct execution as we don't follow jumps
+		_ = nextStep
+	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
+		executionLogForNode, err = v.runGraphQL(stepID, nodeValue)
+	} else if nodeValue := node.GetCustomCode(); nodeValue != nil {
+		executionLogForNode, err = v.runCustomCode(stepID, nodeValue)
+	} else if nodeValue := node.GetContractRead(); nodeValue != nil {
+		executionLogForNode, err = v.runContractRead(stepID, nodeValue)
+	} else if nodeValue := node.GetContractWrite(); nodeValue != nil {
+		executionLogForNode, err = v.runContractWrite(stepID, nodeValue)
+	} else if nodeValue := node.GetFilter(); nodeValue != nil {
+		executionLogForNode, err = v.runFilter(stepID, nodeValue)
+	} else if nodeValue := node.GetEthTransfer(); nodeValue != nil {
+		executionLogForNode, err = v.runEthTransfer(stepID, nodeValue)
+	} else if nodeValue := node.GetLoop(); nodeValue != nil {
+		// For loop nodes, we need special handling to use the execution queue
+		return v.executeLoopWithQueue(stepID, nodeValue)
+	} else {
+		err = fmt.Errorf("unknown node type for node ID %s", stepID)
+	}
+
+	return executionLogForNode, err
+}
+
+// executeLoopWithQueue executes a loop node using the execution queue instead of recursive VM calls
+func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsproto.Execution_Step, error) {
+	// Use shared function to create execution step
+	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_LOOP, v)
+
+	var log strings.Builder
+	log.WriteString(fmt.Sprintf("Start loop execution at %s", time.Now()))
+
+	// Get configuration from node.Config
+	if node.Config == nil {
+		err := fmt.Errorf("LoopNode Config is nil")
+		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		finalizeExecutionStep(s, false, err.Error(), log.String())
+		return s, err
+	}
+
+	inputNodeName := node.Config.InputNodeName
+	iterVal := node.Config.IterVal
+	iterKey := node.Config.IterKey
+	executionMode := node.Config.ExecutionMode
+
+	// Resolve input variable
+	var inputVarName string
+	var inputVar interface{}
+	var exists bool
+
+	inputVarName = v.GetNodeNameAsVar(inputNodeName)
+	v.mu.Lock()
+	inputVar, exists = v.vars[inputVarName]
+	v.mu.Unlock()
+
+	if !exists {
+		inputVarName = inputNodeName
+		v.mu.Lock()
+		inputVar, exists = v.vars[inputVarName]
+		v.mu.Unlock()
+	}
+
+	if !exists {
+		err := fmt.Errorf("input variable %s not found", inputVarName)
+		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		finalizeExecutionStep(s, false, err.Error(), log.String())
+		return s, err
+	}
+
+	inputArray, ok := inputVar.([]interface{})
+	if !ok {
+		err := fmt.Errorf("input variable %s is not an array", inputVarName)
+		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		finalizeExecutionStep(s, false, err.Error(), log.String())
+		return s, err
+	}
+
+	// Determine execution mode
+	concurrent := false
+	isContractWrite := node.GetContractWrite() != nil
+	var executionModeLog string
+
+	if isContractWrite {
+		concurrent = false
+		executionModeLog = "sequentially due to contract write operation (security requirement)"
+	} else {
+		switch executionMode {
+		case avsproto.ExecutionMode_EXECUTION_MODE_PARALLEL:
+			concurrent = true
+			executionModeLog = "parallel mode"
+		case avsproto.ExecutionMode_EXECUTION_MODE_SEQUENTIAL:
+			concurrent = false
+			executionModeLog = "sequential mode"
+		default:
+			concurrent = false
+			executionModeLog = "sequential mode"
+		}
+	}
+
+	// Create execution queue for this loop
+	workers := 1
+	if concurrent {
+		workers = len(inputArray)
+		if workers > 10 { // Limit max workers to prevent resource exhaustion
+			workers = 10
+		}
+	}
+
+	eq := NewExecutionQueue(v, workers)
+	eq.Start()
+	defer eq.Stop()
+
+	results := make([]interface{}, len(inputArray))
+	success := true
+	var firstError error
+
+	if concurrent {
+		log.WriteString(fmt.Sprintf("\nExecuting loop iterations in %s with %d workers", executionModeLog, workers))
+		// Parallel execution using the queue
+		resultChannels := make([]chan *ExecutionResult, len(inputArray))
+
+		for i, item := range inputArray {
+			iterInputs := make(map[string]interface{})
+			iterInputs[iterVal] = item
+			if iterKey != "" {
+				iterInputs[iterKey] = i
+			}
+
+			iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, i)
+			nestedNode := v.createNestedNodeFromLoop(node, iterationStepID, iterInputs)
+
+			resultChannel := make(chan *ExecutionResult, 1)
+			resultChannels[i] = resultChannel
+
+			task := &ExecutionTask{
+				Node:           nestedNode,
+				InputVariables: iterInputs,
+				StepID:         iterationStepID,
+				Depth:          1, // Loop iterations are depth 1
+				ResultChannel:  resultChannel,
+				IterationIndex: i,
+			}
+
+			if err := eq.Submit(task); err != nil {
+				log.WriteString(fmt.Sprintf("\nError submitting iteration %d: %s", i, err.Error()))
+				success = false
+				if firstError == nil {
+					firstError = err
+				}
+			}
+		}
+
+		// Collect results
+		for i, resultChannel := range resultChannels {
+			select {
+			case result := <-resultChannel:
+				if result.Error != nil {
+					success = false
+					if firstError == nil {
+						firstError = result.Error
+					}
+					log.WriteString(fmt.Sprintf("\nError in iteration %d: %s", i, result.Error.Error()))
+				} else {
+					results[i] = result.Data
+				}
+				close(resultChannel)
+			case <-time.After(30 * time.Second): // Timeout for each iteration
+				success = false
+				err := fmt.Errorf("iteration %d timed out", i)
+				if firstError == nil {
+					firstError = err
+				}
+				log.WriteString(fmt.Sprintf("\nTimeout in iteration %d", i))
+				close(resultChannel)
+			}
+		}
+	} else {
+		log.WriteString(fmt.Sprintf("\nExecuting loop iterations %s", executionModeLog))
+		// Sequential execution using the queue
+		for i, item := range inputArray {
+			iterInputs := make(map[string]interface{})
+			iterInputs[iterVal] = item
+			if iterKey != "" {
+				iterInputs[iterKey] = i
+			}
+
+			iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, i)
+			nestedNode := v.createNestedNodeFromLoop(node, iterationStepID, iterInputs)
+
+			resultChannel := make(chan *ExecutionResult, 1)
+			task := &ExecutionTask{
+				Node:           nestedNode,
+				InputVariables: iterInputs,
+				StepID:         iterationStepID,
+				Depth:          1,
+				ResultChannel:  resultChannel,
+				IterationIndex: i,
+			}
+
+			if err := eq.Submit(task); err != nil {
+				success = false
+				if firstError == nil {
+					firstError = err
+				}
+				log.WriteString(fmt.Sprintf("\nError submitting iteration %d: %s", i, err.Error()))
+				continue
+			}
+
+			// Wait for result
+			select {
+			case result := <-resultChannel:
+				if result.Error != nil {
+					success = false
+					if firstError == nil {
+						firstError = result.Error
+					}
+					log.WriteString(fmt.Sprintf("\nError in iteration %d: %s", i, result.Error.Error()))
+				} else {
+					results[i] = result.Data
+				}
+				close(resultChannel)
+			case <-time.After(30 * time.Second):
+				success = false
+				err := fmt.Errorf("iteration %d timed out", i)
+				if firstError == nil {
+					firstError = err
+				}
+				log.WriteString(fmt.Sprintf("\nTimeout in iteration %d", i))
+				close(resultChannel)
+			}
+		}
+	}
+
+	// Set output variable for this step
+	processor := &CommonProcessor{vm: v}
+	setNodeOutputData(processor, stepID, results)
+
+	// Convert results to JSON-compatible format
+	jsonSerializableResults := make([]interface{}, len(results))
+	for i, result := range results {
+		if result != nil {
+			jsonSerializableResults[i] = convertToJSONCompatible(result)
+		} else {
+			jsonSerializableResults[i] = nil
+		}
+	}
+
+	// Convert to protobuf Value for output
+	outputValue, err := structpb.NewValue(jsonSerializableResults)
+	if err != nil {
+		outputValue, _ = structpb.NewValue([]interface{}{})
+	}
+
+	loopOutput := &avsproto.LoopNode_Output{
+		Data: outputValue,
+	}
+
+	s.OutputData = &avsproto.Execution_Step_Loop{
+		Loop: loopOutput,
+	}
+
+	if !success && firstError != nil {
+		finalizeExecutionStep(s, false, firstError.Error(), log.String())
+		return s, firstError
+	}
+
+	finalizeExecutionStep(s, true, "", log.String())
+	return s, nil
+}
+
+// createNestedNodeFromLoop creates a nested node for loop iteration
+func (v *VM) createNestedNodeFromLoop(loopNodeDef *avsproto.LoopNode, iterationStepID string, iterInputs map[string]interface{}) *avsproto.TaskNode {
+	nodeName := fmt.Sprintf("loop_iteration_%s", iterationStepID)
+
+	if ethTransfer := loopNodeDef.GetEthTransfer(); ethTransfer != nil {
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
+			TaskType: &avsproto.TaskNode_EthTransfer{EthTransfer: ethTransfer},
+		}
+	} else if contractWrite := loopNodeDef.GetContractWrite(); contractWrite != nil {
+		// Apply template variable substitution
+		processedContractWrite := v.processContractWriteTemplates(contractWrite, iterInputs)
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE,
+			TaskType: &avsproto.TaskNode_ContractWrite{ContractWrite: processedContractWrite},
+		}
+	} else if contractRead := loopNodeDef.GetContractRead(); contractRead != nil {
+		processedContractRead := v.processContractReadTemplates(contractRead, iterInputs)
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CONTRACT_READ,
+			TaskType: &avsproto.TaskNode_ContractRead{ContractRead: processedContractRead},
+		}
+	} else if graphqlQuery := loopNodeDef.GetGraphqlDataQuery(); graphqlQuery != nil {
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY,
+			TaskType: &avsproto.TaskNode_GraphqlQuery{GraphqlQuery: graphqlQuery},
+		}
+	} else if restApi := loopNodeDef.GetRestApi(); restApi != nil {
+		processedRestApi := v.processRestApiTemplates(restApi, iterInputs)
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_REST_API,
+			TaskType: &avsproto.TaskNode_RestApi{RestApi: processedRestApi},
+		}
+	} else if customCode := loopNodeDef.GetCustomCode(); customCode != nil {
+		return &avsproto.TaskNode{
+			Id:       iterationStepID,
+			Name:     nodeName,
+			Type:     avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
+			TaskType: &avsproto.TaskNode_CustomCode{CustomCode: customCode},
+		}
+	}
+
+	return nil
+}
+
+// Helper methods for template processing (these need to be moved from LoopProcessor)
+func (v *VM) processContractWriteTemplates(contractWrite *avsproto.ContractWriteNode, iterInputs map[string]interface{}) *avsproto.ContractWriteNode {
+	// TODO: Implement template processing - for now return as-is
+	return contractWrite
+}
+
+func (v *VM) processContractReadTemplates(contractRead *avsproto.ContractReadNode, iterInputs map[string]interface{}) *avsproto.ContractReadNode {
+	// TODO: Implement template processing - for now return as-is
+	return contractRead
+}
+
+func (v *VM) processRestApiTemplates(restApi *avsproto.RestAPINode, iterInputs map[string]interface{}) *avsproto.RestAPINode {
+	// TODO: Implement template processing - for now return as-is
+	return restApi
+}
+
+// executeSequentialPath executes a sequential execution path starting from the given step
