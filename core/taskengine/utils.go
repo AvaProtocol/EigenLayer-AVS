@@ -207,8 +207,13 @@ func ProcessContractReadResults(results []interface{}) map[string]interface{} {
 					"methodName": methodMap["methodName"],
 					"success":    methodMap["success"],
 					"error":      methodMap["error"],
-					"data":       methodMap["rawStructuredFields"], // The raw structured fields from ABI decoding
 				}
+
+				// Use the data field from the method result
+				if data, ok := methodMap["data"]; ok {
+					rawResult["data"] = data
+				}
+
 				rawMethodResults = append(rawMethodResults, rawResult)
 			}
 		}
@@ -224,20 +229,19 @@ func ProcessContractReadResults(results []interface{}) map[string]interface{} {
 func processSingleContractReadResult(methodResult interface{}, result map[string]interface{}) map[string]interface{} {
 	if methodResultMap, ok := methodResult.(map[string]interface{}); ok {
 		if success, ok := methodResultMap["success"].(bool); ok && success {
-			// Return the data directly for successful single method calls
-			if data, ok := methodResultMap["data"].(map[string]interface{}); ok {
-				// Return data directly without wrapping, but exclude rawStructuredFields
-				for key, value := range data {
-					if key != "rawStructuredFields" {
-						result[key] = value
+			// Use "value" field from new format
+			if value, ok := methodResultMap["value"]; ok {
+				if valueMap, ok := value.(map[string]interface{}); ok {
+					// Return data directly without wrapping
+					for key, val := range valueMap {
+						result[key] = val
 					}
+				} else {
+					// Single value result (e.g., for balanceOf)
+					result["data"] = value
 				}
 				// Also include method metadata for debugging
 				result["method_name"] = methodResultMap["methodName"]
-				// Store raw structured fields separately for metadata (don't add to main result)
-				if rawStructuredFields, ok := methodResultMap["rawStructuredFields"].([]interface{}); ok {
-					result["rawStructuredFields"] = rawStructuredFields // Keep for metadata generation
-				}
 			}
 		} else {
 			// For failed calls, include error information

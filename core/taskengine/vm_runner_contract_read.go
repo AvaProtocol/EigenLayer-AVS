@@ -113,13 +113,14 @@ func (r *ContractReadProcessor) buildStructuredDataWithDecimalFormatting(method 
 			abiType = abi.Type{T: abi.StringTy}
 		}
 
-		// Debug logging for each field
+		// Debug logging for each field with concrete examples
 		if r.vm.logger != nil {
 			r.vm.logger.Debug("Processing field in buildStructuredDataWithDecimalFormatting",
-				"fieldName", fieldName,
-				"fieldType", fieldType,
-				"shouldFormat", converter.ShouldFormatField(fieldName),
-				"itemType", fmt.Sprintf("%T", item))
+				"fieldName", fieldName, // e.g., "roundId", "answer", "startedAt"
+				"fieldType", fieldType, // e.g., "uint80", "int256", "uint256"
+				"rawValue", fmt.Sprintf("%v", item), // e.g., "18446744073709572839", "2189300000"
+				"shouldFormat", converter.ShouldFormatField(fieldName), // e.g., true for "answer", false for "roundId"
+				"itemType", fmt.Sprintf("%T", item)) // e.g., "*big.Int", "string"
 		}
 
 		// Use ABI-aware conversion
@@ -137,10 +138,11 @@ func (r *ContractReadProcessor) buildStructuredDataWithDecimalFormatting(method 
 		rawFieldsMetadata[key] = value
 	}
 
-	// Debug logging for raw fields metadata
+	// Debug logging for raw fields metadata with concrete examples
 	if r.vm.logger != nil {
 		r.vm.logger.Debug("buildStructuredDataWithDecimalFormatting completed",
-			"rawFieldsMetadata", rawFieldsMetadata)
+			"rawFieldsMetadata", rawFieldsMetadata, // e.g., {"answerRaw": "2189300000", "decimals": "8"}
+			"fieldCount", len(structuredFields)) // e.g., 5 (for getRoundData: roundId, answer, startedAt, updatedAt, answeredInRound)
 	}
 
 	return structuredFields, rawFieldsMetadata
@@ -366,7 +368,10 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		log.WriteString(fmt.Sprintf("Call %d: %s on %s\n", i+1, methodName, contractAddress))
 
 		if r.vm.logger != nil {
-			r.vm.logger.Debug("Processing method with applyToFields", "methodName", methodName, "applyToFields", methodCall.GetApplyToFields())
+			r.vm.logger.Debug("Processing method with applyToFields",
+				"methodName", methodName, // e.g., "decimals", "getRoundData"
+				"applyToFields", methodCall.GetApplyToFields(), // e.g., ["getRoundData.answer"] (decimals applies to answer field)
+				"callData", methodCall.GetCallData()) // e.g., "0x313ce567" (decimals()), "0xfeaf968c" (latestRoundData())
 		}
 
 		// Execute the method call
@@ -380,7 +385,11 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 					decimalValue := big.NewInt(decimalsInt)
 					decimalProviders[methodName] = decimalValue
 					if r.vm.logger != nil {
-						r.vm.logger.Debug("Method provides decimal value", "methodName", methodName, "decimalValue", decimalValue.String(), "applyToFields", methodCall.GetApplyToFields())
+						r.vm.logger.Debug("Method provides decimal value",
+							"methodName", methodName, // e.g., "decimals"
+							"decimalValue", decimalValue.String(), // e.g., "8" (USDC has 8 decimals), "18" (ETH has 18 decimals)
+							"applyToFields", methodCall.GetApplyToFields(), // e.g., ["getRoundData.answer"] - will format answer field
+							"resultValue", result.Data[0].Value) // e.g., "8" - the actual decimals() return value
 					}
 				}
 			}
@@ -448,7 +457,11 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 						targetFieldName := parts[1]
 
 						if r.vm.logger != nil {
-							r.vm.logger.Debug("Parsed applyToField", "targetMethodName", targetMethodName, "targetFieldName", targetFieldName, "currentMethodName", methodName)
+							r.vm.logger.Debug("Parsed applyToField",
+								"targetMethodName", targetMethodName, // e.g., "getRoundData"
+								"targetFieldName", targetFieldName, // e.g., "answer"
+								"currentMethodName", methodName, // e.g., "getRoundData"
+								"applyToField", applyToField) // e.g., "getRoundData.answer" (original format)
 						}
 
 						// Check if this is the target method and has the target field
@@ -459,7 +472,11 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 
 							for _, field := range result.Data {
 								if r.vm.logger != nil {
-									r.vm.logger.Debug("Checking field in result", "fieldName", field.Name, "targetFieldName", targetFieldName)
+									r.vm.logger.Debug("Checking field in result",
+										"fieldName", field.Name, // e.g., "roundId", "answer", "startedAt"
+										"fieldValue", field.Value, // e.g., "18446744073709572839", "2189300000", "1733878404"
+										"targetFieldName", targetFieldName, // e.g., "answer" (the field we want to format)
+										"isMatch", field.Name == targetFieldName) // e.g., true when field.Name = "answer" and targetFieldName = "answer"
 								}
 
 								if field.Name == targetFieldName {
@@ -467,7 +484,13 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 									decimalsValue = decimalValue
 									fieldsToFormat = append(fieldsToFormat, targetFieldName)
 									if r.vm.logger != nil {
-										r.vm.logger.Debug("Method field will be formatted with decimals", "methodName", methodName, "fieldName", targetFieldName, "decimalValue", decimalValue.String(), "fromMethod", otherMethodName)
+										r.vm.logger.Debug("Method field will be formatted with decimals",
+											"methodName", methodName, // e.g., "getRoundData"
+											"fieldName", targetFieldName, // e.g., "answer"
+											"rawValue", field.Value, // e.g., "2189300000" (raw 8-decimal value)
+											"decimalValue", decimalValue.String(), // e.g., "8" (USDC decimals)
+											"fromMethod", otherMethodName, // e.g., "decimals" (method that provided the decimal count)
+											"willFormat", fmt.Sprintf("%s.%s", methodName, targetFieldName)) // e.g., "getRoundData.answer"
 									}
 									break
 								}

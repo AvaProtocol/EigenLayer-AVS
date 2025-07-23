@@ -1540,15 +1540,17 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 	}
 	v.mu.Unlock()
 
-	// Debug: Log all available variables
+	// Debug: Log all available variables with concrete examples
 	if v.logger != nil {
-		v.logger.Debug("preprocessTextWithVariableMapping DEBUG: Available variables", "vars", func() []string {
-			keys := make([]string, 0, len(currentVars))
-			for k := range currentVars {
-				keys = append(keys, k)
-			}
-			return keys
-		}())
+		v.logger.Debug("preprocessTextWithVariableMapping DEBUG: Available variables",
+			"vars", func() []string {
+				keys := make([]string, 0, len(currentVars))
+				for k := range currentVars {
+					keys = append(keys, k)
+				}
+				return keys
+			}(), // e.g., ["eventTrigger", "apiCallNode", "customCodeNode"] - actual variable names accessible in templates
+			"varCount", len(currentVars)) // e.g., 3 (number of variables available for template resolution)
 	}
 
 	for key, value := range currentVars {
@@ -1585,9 +1587,11 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 			continue
 		}
 
-		// Debug: Log the expression we're trying to resolve
+		// Debug: Log the expression we're trying to resolve with concrete examples
 		if v.logger != nil {
-			v.logger.Debug("preprocessTextWithVariableMapping DEBUG: Trying to resolve expression", "expression", expr)
+			v.logger.Debug("preprocessTextWithVariableMapping DEBUG: Trying to resolve expression",
+				"expression", expr, // e.g., "eventTrigger.data.transactionHash", "apiCallNode.data.body.users[0].name"
+				"templateContext", fmt.Sprintf("{{%s}}", expr)) // e.g., "{{eventTrigger.data.transactionHash}}" - full template syntax
 		}
 
 		// Try to resolve the variable with fallback to camelCase

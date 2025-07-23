@@ -97,19 +97,17 @@ func TestContractReadSimpleReturn(t *testing.T) {
 		return
 	}
 
-	// Get the first result and extract data
+	// Get the first result and extract value
 	if resultMap, ok := results[0].(map[string]interface{}); ok {
-		if data, ok := resultMap["data"].(map[string]interface{}); ok {
-			// Find the balance value - it should be the first/only field in balanceOf
-			for _, value := range data {
-				if valueStr, ok := value.(string); ok && valueStr == "313131" {
-					// Found the expected value
-					return
-				}
+		if value, ok := resultMap["value"]; ok {
+			// For balanceOf, the value should be the direct result (single output)
+			if valueStr, ok := value.(string); ok && valueStr == "313131" {
+				// Found the expected value
+				return
 			}
-			t.Errorf("read balanceOf doesn't return right data. expected 313131 but didn't find it in data: %v", data)
+			t.Errorf("read balanceOf doesn't return right data. expected 313131 but got: %v", value)
 		} else {
-			t.Errorf("expected data field in result but got: %v", resultMap)
+			t.Errorf("expected value field in result but got: %v", resultMap)
 		}
 	} else {
 		t.Errorf("expected result to be a map but got: %v", results[0])
@@ -203,39 +201,44 @@ func TestContractReadComplexReturn(t *testing.T) {
 		return
 	}
 
-	// Get the first result and extract data
+	// Get the first result and extract value
 	if resultMap, ok := results[0].(map[string]interface{}); ok {
-		if data, ok := resultMap["data"].(map[string]interface{}); ok {
-			if len(data) < 5 {
-				t.Errorf("contract read doesn't return right data, wrong length. expect 5 fields, got %d fields", len(data))
-				return
-			}
+		if value, ok := resultMap["value"]; ok {
+			// For getRoundData, the value should be a map with multiple fields
+			if valueMap, ok := value.(map[string]interface{}); ok {
+				if len(valueMap) < 5 {
+					t.Errorf("contract read doesn't return right data, wrong length. expect 5 fields, got %d fields", len(valueMap))
+					return
+				}
 
-			// When reading data out and return over the wire, we have to serialize big int to string.
-			// Check specific field values based on the getRoundData function
-			expectedValues := map[string]string{
-				"roundId":         "18446744073709572839",
-				"answer":          "2189300000",
-				"startedAt":       "1733878404",
-				"updatedAt":       "1733878404",
-				"answeredInRound": "18446744073709572839",
-			}
+				// When reading data out and return over the wire, we have to serialize big int to string.
+				// Check specific field values based on the getRoundData function
+				expectedValues := map[string]string{
+					"roundId":         "18446744073709572839",
+					"answer":          "2189300000",
+					"startedAt":       "1733878404",
+					"updatedAt":       "1733878404",
+					"answeredInRound": "18446744073709572839",
+				}
 
-			for fieldName, expectedValue := range expectedValues {
-				if actualValue, exists := data[fieldName]; exists {
-					if actualValueStr, ok := actualValue.(string); ok {
-						if actualValueStr != expectedValue {
-							t.Errorf("contract read returns incorrect data for field %s: expected %s got %s", fieldName, expectedValue, actualValueStr)
+				for fieldName, expectedValue := range expectedValues {
+					if actualValue, exists := valueMap[fieldName]; exists {
+						if actualValueStr, ok := actualValue.(string); ok {
+							if actualValueStr != expectedValue {
+								t.Errorf("contract read returns incorrect data for field %s: expected %s got %s", fieldName, expectedValue, actualValueStr)
+							}
+						} else {
+							t.Errorf("expected field %s to be string but got %T", fieldName, actualValue)
 						}
 					} else {
-						t.Errorf("expected field %s to be string but got %T", fieldName, actualValue)
+						t.Errorf("expected field %s not found in value: %v", fieldName, valueMap)
 					}
-				} else {
-					t.Errorf("expected field %s not found in data: %v", fieldName, data)
 				}
+			} else {
+				t.Errorf("expected value to be a map but got %T: %v", value, value)
 			}
 		} else {
-			t.Errorf("expected data field in result but got: %v", resultMap)
+			t.Errorf("expected value field in result but got: %v", resultMap)
 		}
 	} else {
 		t.Errorf("expected result to be a map but got: %v", results[0])
@@ -335,10 +338,12 @@ func TestContractReadWithDecimalFormatting(t *testing.T) {
 				t.Errorf("rawStructuredFields should not be present in result %d, but found: %v", i, resultMap["rawStructuredFields"])
 			}
 
-			// Check that rawStructuredFields is not present in the data field
-			if data, ok := resultMap["data"].(map[string]interface{}); ok {
-				if _, exists := data["rawStructuredFields"]; exists {
-					t.Errorf("rawStructuredFields should not be present in data field of result %d, but found: %v", i, data["rawStructuredFields"])
+			// Check that rawStructuredFields is not present in the value field
+			if value, ok := resultMap["value"]; ok {
+				if valueMap, ok := value.(map[string]interface{}); ok {
+					if _, exists := valueMap["rawStructuredFields"]; exists {
+						t.Errorf("rawStructuredFields should not be present in value field of result %d, but found: %v", i, valueMap["rawStructuredFields"])
+					}
 				}
 			}
 		}
@@ -366,16 +371,20 @@ func TestContractReadWithDecimalFormatting(t *testing.T) {
 		return
 	}
 
-	// Verify that the actual data fields are present in the getRoundData result
-	if data, ok := getRoundDataResult["data"].(map[string]interface{}); ok {
-		// Check that expected fields are present
-		expectedFields := []string{"roundId", "answer", "startedAt", "updatedAt", "answeredInRound"}
-		for _, field := range expectedFields {
-			if _, exists := data[field]; !exists {
-				t.Errorf("expected field %s not found in data: %v", field, data)
+	// Verify that the actual value fields are present in the getRoundData result
+	if value, ok := getRoundDataResult["value"]; ok {
+		if valueMap, ok := value.(map[string]interface{}); ok {
+			// Check that expected fields are present
+			expectedFields := []string{"roundId", "answer", "startedAt", "updatedAt", "answeredInRound"}
+			for _, field := range expectedFields {
+				if _, exists := valueMap[field]; !exists {
+					t.Errorf("expected field %s not found in value: %v", field, valueMap)
+				}
 			}
+		} else {
+			t.Errorf("expected value to be a map but got %T: %v", value, value)
 		}
 	} else {
-		t.Errorf("expected data field in getRoundData result but got: %v", getRoundDataResult)
+		t.Errorf("expected value field in getRoundData result but got: %v", getRoundDataResult)
 	}
 }

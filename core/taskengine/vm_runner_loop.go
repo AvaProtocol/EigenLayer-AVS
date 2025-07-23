@@ -113,10 +113,10 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	if !ok {
 		// Try to extract from data field if wrapped (common for trigger variables)
 		if dataMap, ok := inputVar.(map[string]interface{}); ok {
-			log.WriteString(fmt.Sprintf("\nInput variable is a map with keys: %v", getMapKeys(dataMap)))
+			log.WriteString(fmt.Sprintf("\nInput variable is a map with keys: %v", getMapKeys(dataMap))) // e.g., ["data", "status", "headers"] or ["blockNumber", "timestamp", "hash"]
 
 			if dataValue, hasData := dataMap["data"]; hasData {
-				log.WriteString(fmt.Sprintf("\nFound 'data' field of type: %T", dataValue))
+				log.WriteString(fmt.Sprintf("\nFound 'data' field of type: %T", dataValue)) // e.g., "[]interface{}" for arrays, "map[string]interface{}" for objects
 
 				// Try different array types that might be present
 				if dataArray, ok := dataValue.([]interface{}); ok {

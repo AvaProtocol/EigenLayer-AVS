@@ -102,21 +102,36 @@ func TestVM_ContractRead_DecimalFormatting(t *testing.T) {
 				}
 			}
 
-			t.Logf("Contract read results count: %d", len(results))
+			// Validate we have the expected 2 results (decimals + latestRoundData)
+			assert.Equal(t, 2, len(results), "Expected 2 method results (decimals + latestRoundData)")
 
-			// We should have 1 result (decimals() call is skipped, only latestRoundData() result)
-			if len(results) > 0 {
-				if resultMap, ok := results[0].(map[string]interface{}); ok {
-					t.Logf("Method result - Success: %v, Method: %s",
-						resultMap["success"], resultMap["methodName"])
+			if len(results) >= 2 {
+				// Validate first result (decimals)
+				decimalsResult, ok := results[0].(map[string]interface{})
+				assert.True(t, ok, "First result should be a map")
+				assert.Equal(t, "decimals", decimalsResult["methodName"])
+				assert.Equal(t, true, decimalsResult["success"])
 
-					// Log data fields if available
-					if data, ok := resultMap["data"].(map[string]interface{}); ok {
-						t.Logf("  Data fields: %d", len(data))
-						for fieldName, fieldValue := range data {
-							t.Logf("  Field: %s = %v", fieldName, fieldValue)
+				// Validate second result (latestRoundData)
+				roundDataResult, ok := results[1].(map[string]interface{})
+				assert.True(t, ok, "Second result should be a map")
+				assert.Equal(t, "latestRoundData", roundDataResult["methodName"])
+				assert.Equal(t, true, roundDataResult["success"])
+
+				// Validate latestRoundData has expected fields in value
+				if value, ok := roundDataResult["value"]; ok {
+					if valueMap, ok := value.(map[string]interface{}); ok {
+						expectedFields := []string{"roundId", "answer", "startedAt", "updatedAt", "answeredInRound"}
+						for _, field := range expectedFields {
+							assert.Contains(t, valueMap, field, "latestRoundData should contain field: %s", field)
 						}
+						// Validate we have exactly the expected number of fields
+						assert.Equal(t, len(expectedFields), len(valueMap), "latestRoundData should have exactly %d fields", len(expectedFields))
+					} else {
+						t.Errorf("latestRoundData value should be a map, got %T", value)
 					}
+				} else {
+					t.Error("latestRoundData result should have a value field")
 				}
 			}
 		}
