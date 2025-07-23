@@ -3806,18 +3806,93 @@ func (v *VM) createNestedNodeFromLoop(loopNodeDef *avsproto.LoopNode, iterationS
 
 // Helper methods for template processing (these need to be moved from LoopProcessor)
 func (v *VM) processContractWriteTemplates(contractWrite *avsproto.ContractWriteNode, iterInputs map[string]interface{}) *avsproto.ContractWriteNode {
-	// TODO: Implement template processing - for now return as-is
-	return contractWrite
+	// Create a copy of the contract write configuration
+	processed := &avsproto.ContractWriteNode{
+		Config: &avsproto.ContractWriteNode_Config{
+			ContractAddress: v.substituteTemplateVariables(contractWrite.Config.ContractAddress, iterInputs),
+			ContractAbi:     v.substituteTemplateVariables(contractWrite.Config.ContractAbi, iterInputs),
+			CallData:        v.substituteTemplateVariables(contractWrite.Config.CallData, iterInputs),
+		},
+	}
+
+	// Process method calls
+	for _, methodCall := range contractWrite.Config.MethodCalls {
+		processedMethodCall := &avsproto.ContractWriteNode_MethodCall{
+			CallData:   v.substituteTemplateVariables(methodCall.CallData, iterInputs),
+			MethodName: v.substituteTemplateVariables(methodCall.MethodName, iterInputs),
+		}
+
+		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
+	}
+
+	return processed
 }
 
 func (v *VM) processContractReadTemplates(contractRead *avsproto.ContractReadNode, iterInputs map[string]interface{}) *avsproto.ContractReadNode {
-	// TODO: Implement template processing - for now return as-is
-	return contractRead
+	// Create a copy of the contract read configuration
+	processed := &avsproto.ContractReadNode{
+		Config: &avsproto.ContractReadNode_Config{
+			ContractAddress: v.substituteTemplateVariables(contractRead.Config.ContractAddress, iterInputs),
+			ContractAbi:     v.substituteTemplateVariables(contractRead.Config.ContractAbi, iterInputs),
+		},
+	}
+
+	// Process method calls
+	for _, methodCall := range contractRead.Config.MethodCalls {
+		processedMethodCall := &avsproto.ContractReadNode_MethodCall{
+			CallData:      v.substituteTemplateVariables(methodCall.CallData, iterInputs),
+			MethodName:    v.substituteTemplateVariables(methodCall.MethodName, iterInputs),
+			ApplyToFields: make([]string, len(methodCall.ApplyToFields)),
+		}
+
+		// Copy applyToFields (no template substitution needed for field names)
+		copy(processedMethodCall.ApplyToFields, methodCall.ApplyToFields)
+
+		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
+	}
+
+	return processed
 }
 
 func (v *VM) processRestApiTemplates(restApi *avsproto.RestAPINode, iterInputs map[string]interface{}) *avsproto.RestAPINode {
-	// TODO: Implement template processing - for now return as-is
-	return restApi
+	// Create a copy of the REST API configuration
+	processed := &avsproto.RestAPINode{
+		Config: &avsproto.RestAPINode_Config{
+			Url:    v.substituteTemplateVariables(restApi.Config.Url, iterInputs),
+			Method: v.substituteTemplateVariables(restApi.Config.Method, iterInputs),
+			Body:   v.substituteTemplateVariables(restApi.Config.Body, iterInputs),
+		},
+	}
+
+	// Process headers
+	if restApi.Config.Headers != nil {
+		processed.Config.Headers = make(map[string]string)
+		for key, value := range restApi.Config.Headers {
+			processedKey := v.substituteTemplateVariables(key, iterInputs)
+			processedValue := v.substituteTemplateVariables(value, iterInputs)
+			processed.Config.Headers[processedKey] = processedValue
+		}
+	}
+
+	return processed
 }
 
-// getMapKeys returns the keys of a map for debugging purposes
+// substituteTemplateVariables replaces template variables like {{value}} and {{index}} with actual values
+func (v *VM) substituteTemplateVariables(text string, iterInputs map[string]interface{}) string {
+	if text == "" {
+		return text
+	}
+
+	// Simple template variable substitution
+	// Replace {{value}} with the current iteration value
+	// Replace {{index}} with the current iteration index
+	result := text
+
+	for varName, varValue := range iterInputs {
+		placeholder := fmt.Sprintf("{{%s}}", varName)
+		replacement := fmt.Sprintf("%v", varValue)
+		result = strings.ReplaceAll(result, placeholder, replacement)
+	}
+
+	return result
+}
