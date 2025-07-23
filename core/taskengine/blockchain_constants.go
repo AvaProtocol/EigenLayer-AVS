@@ -1,5 +1,16 @@
 package taskengine
 
+// Ethereum gas cost constants
+const (
+	// StandardGasCost represents the standard gas cost for a simple Ethereum transaction (21000 gas)
+	// This is the minimum gas required for a basic ETH transfer between externally owned accounts
+	StandardGasCost = uint64(21000)
+
+	// StandardGasCostHex is the hexadecimal representation of StandardGasCost
+	// Used in transaction receipts and other hex-encoded contexts
+	StandardGasCostHex = "0x5208"
+)
+
 // ChainBlockRanges defines the search ranges for different blockchain networks
 // Based on chain-specific block times and configured for 1-month, 2-month, and 4-month periods
 type ChainBlockRanges struct {

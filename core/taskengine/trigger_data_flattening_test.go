@@ -475,7 +475,7 @@ func TestBlockTriggerFieldNamingConsistency(t *testing.T) {
 		"parentHash":  "0x123456abcdef",
 		"difficulty":  "1000000",
 		"gasLimit":    uint64(30000000),
-		"gasUsed":     uint64(21000),
+		"gasUsed":     StandardGasCost,
 	}
 
 	// Create protobuf block trigger output
@@ -547,7 +547,7 @@ func TestClientInputOutputConsistency(t *testing.T) {
 		"parentHash":  "0x123456abcdef",
 		"difficulty":  "1000000",
 		"gasLimit":    float64(30000000),
-		"gasUsed":     float64(21000),
+		"gasUsed":     float64(StandardGasCost),
 	}
 
 	t.Log("📥 Client Input (what user provides):")
