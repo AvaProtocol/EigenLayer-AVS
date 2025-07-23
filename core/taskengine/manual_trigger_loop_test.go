@@ -211,3 +211,234 @@ func TestLoopNode_ManualTriggerDataAccess(t *testing.T) {
 		}
 	})
 }
+
+func TestRestApiStandardFormat(t *testing.T) {
+	// Create VM
+	vm := NewVM()
+	if vm == nil {
+		t.Fatal("Failed to create VM")
+	}
+
+	// Add input variables to VM
+	inputVariables := map[string]interface{}{
+		"manualTrigger": map[string]interface{}{
+			"data": []interface{}{
+				map[string]interface{}{"key": "value1"},
+				map[string]interface{}{"key": "value2"},
+			},
+			"input": map[string]interface{}{
+				"data":       []interface{}{map[string]interface{}{"key": "value1"}, map[string]interface{}{"key": "value2"}},
+				"headers":    []interface{}{map[string]interface{}{"key": "headerKey", "value": "headerValue"}},
+				"pathParams": []interface{}{map[string]interface{}{"key": "pathKey", "value": "pathValue"}},
+			},
+		},
+	}
+
+	for key, value := range inputVariables {
+		vm.AddVar(key, value)
+	}
+
+	// Create a loop node with REST API runner to test standard format
+	loopNode, err := CreateNodeFromType("loop", map[string]interface{}{
+		"inputNodeName": "manualTrigger",
+		"iterVal":       "value",
+		"iterKey":       "index",
+		"executionMode": "sequential",
+		"runner": map[string]interface{}{
+			"type": "restApi",
+			"config": map[string]interface{}{
+				"url":    "https://mock-api.ap-aggregator.local",
+				"method": "GET",
+				"body":   "",
+			},
+		},
+	}, "")
+
+	require.NoError(t, err, "Failed to create loop node")
+	require.NotNil(t, loopNode, "Loop node should not be nil")
+
+	// Execute the loop node using RunNodeWithInputs
+	executionStep, err := vm.RunNodeWithInputs(loopNode, inputVariables)
+
+	// Should succeed
+	require.NoError(t, err, "Expected successful execution")
+	require.NotNil(t, executionStep, "Expected execution step")
+	require.True(t, executionStep.Success, "Expected successful execution, got error: %s", executionStep.Error)
+
+	// Extract the loop result
+	loopOutput := executionStep.GetLoop()
+	require.NotNil(t, loopOutput, "Expected loop output")
+	require.NotNil(t, loopOutput.Data, "Expected loop data")
+
+	// Convert to Go interface
+	loopResultInterface := loopOutput.Data.AsInterface()
+	loopArray, ok := loopResultInterface.([]interface{})
+	require.True(t, ok, "Expected loopResult to be array, got %T: %+v", loopResultInterface, loopResultInterface)
+	require.Len(t, loopArray, 2, "Expected 2 loop iterations")
+
+	// Check each iteration result for standard format
+	for i, iterResult := range loopArray {
+		iterMap, ok := iterResult.(map[string]interface{})
+		require.True(t, ok, "Expected iteration %d result to be map, got %T: %+v", i, iterResult, iterResult)
+
+		// Debug: Log the actual response content
+		t.Logf("🔍 Iteration %d response: %+v", i, iterMap)
+
+		// Verify we have the standard REST API response format
+		status, hasStatus := iterMap["status"]
+		require.True(t, hasStatus, "Expected 'status' field in iteration %d result: %+v", i, iterMap)
+
+		statusText, hasStatusText := iterMap["statusText"]
+		require.True(t, hasStatusText, "Expected 'statusText' field in iteration %d result: %+v", i, iterMap)
+
+		url, hasUrl := iterMap["url"]
+		require.True(t, hasUrl, "Expected 'url' field in iteration %d result: %+v", i, iterMap)
+
+		headers, hasHeaders := iterMap["headers"]
+		require.True(t, hasHeaders, "Expected 'headers' field in iteration %d result: %+v", i, iterMap)
+
+		data, hasData := iterMap["data"]
+		require.True(t, hasData, "Expected 'data' field in iteration %d result: %+v", i, iterMap)
+
+		// Verify field types and values
+		var statusInt int
+		switch s := status.(type) {
+		case int:
+			statusInt = s
+		case float64:
+			statusInt = int(s)
+		default:
+			t.Errorf("Expected status to be int or float64 in iteration %d, got %T", i, status)
+			continue
+		}
+		assert.Equal(t, 200, statusInt, "Expected status 200 in iteration %d", i)
+
+		statusTextStr, ok := statusText.(string)
+		require.True(t, ok, "Expected statusText to be string in iteration %d, got %T", i, statusText)
+		assert.Equal(t, "OK", statusTextStr, "Expected statusText 'OK' in iteration %d", i)
+
+		urlStr, ok := url.(string)
+		require.True(t, ok, "Expected url to be string in iteration %d, got %T", i, url)
+		assert.Equal(t, "https://mock-api.ap-aggregator.local", urlStr, "Expected correct URL in iteration %d", i)
+
+		headersMap, ok := headers.(map[string]interface{})
+		require.True(t, ok, "Expected headers to be map in iteration %d, got %T", i, headers)
+		assert.NotEmpty(t, headersMap, "Expected non-empty headers map in iteration %d", i)
+
+		// Verify data field contains the response body content
+		dataMap, ok := data.(map[string]interface{})
+		require.True(t, ok, "Expected data to be map in iteration %d, got %T: %+v", i, data, data)
+
+		// The data should contain the mock API response fields
+		_, hasArgs := dataMap["args"]
+		_, hasDataField := dataMap["data"]
+		_, hasMethod := dataMap["method"]
+		_, hasUrlInData := dataMap["url"]
+
+		assert.True(t, hasArgs, "Expected 'args' field in data")
+		assert.True(t, hasDataField, "Expected 'data' field in data")
+		assert.True(t, hasMethod, "Expected 'method' field in data")
+		assert.True(t, hasUrlInData, "Expected 'url' field in data")
+
+		t.Logf("✅ Iteration %d standard format verified: status=%v, statusText=%s, url=%s, headers=%T, data=%T",
+			i, status, statusTextStr, urlStr, headers, data)
+	}
+}
+
+func TestRegularRestApiStandardFormat(t *testing.T) {
+	// Create VM
+	vm := NewVM()
+	if vm == nil {
+		t.Fatal("Failed to create VM")
+	}
+
+	// Create a regular REST API node (not in a loop)
+	restApiNode, err := CreateNodeFromType("restApi", map[string]interface{}{
+		"url":    "https://mock-api.ap-aggregator.local",
+		"method": "GET",
+		"body":   "",
+	}, "")
+
+	require.NoError(t, err, "Failed to create REST API node")
+	require.NotNil(t, restApiNode, "REST API node should not be nil")
+
+	// Execute the REST API node using RunNodeWithInputs
+	executionStep, err := vm.RunNodeWithInputs(restApiNode, map[string]interface{}{})
+
+	// Should succeed
+	require.NoError(t, err, "Expected successful execution")
+	require.NotNil(t, executionStep, "Expected execution step")
+	require.True(t, executionStep.Success, "Expected successful execution, got error: %s", executionStep.Error)
+
+	// Extract the REST API result
+	restApiOutput := executionStep.GetRestApi()
+	require.NotNil(t, restApiOutput, "Expected REST API output")
+	require.NotNil(t, restApiOutput.Data, "Expected REST API data")
+
+	// Convert to Go interface
+	resultInterface := restApiOutput.Data.AsInterface()
+	resultMap, ok := resultInterface.(map[string]interface{})
+	require.True(t, ok, "Expected result to be map, got %T: %+v", resultInterface, resultInterface)
+
+	// Debug: Log the actual response content
+	t.Logf("🔍 Regular REST API response: %+v", resultMap)
+
+	// Verify we have the standard REST API response format
+	status, hasStatus := resultMap["status"]
+	require.True(t, hasStatus, "Expected 'status' field in result: %+v", resultMap)
+
+	statusText, hasStatusText := resultMap["statusText"]
+	require.True(t, hasStatusText, "Expected 'statusText' field in result: %+v", resultMap)
+
+	url, hasUrl := resultMap["url"]
+	require.True(t, hasUrl, "Expected 'url' field in result: %+v", resultMap)
+
+	headers, hasHeaders := resultMap["headers"]
+	require.True(t, hasHeaders, "Expected 'headers' field in result: %+v", resultMap)
+
+	data, hasData := resultMap["data"]
+	require.True(t, hasData, "Expected 'data' field in result: %+v", resultMap)
+
+	// Verify field types and values
+	var statusInt int
+	switch s := status.(type) {
+	case int:
+		statusInt = s
+	case float64:
+		statusInt = int(s)
+	default:
+		t.Errorf("Expected status to be int or float64, got %T", status)
+		return
+	}
+	assert.Equal(t, 200, statusInt, "Expected status 200")
+
+	statusTextStr, ok := statusText.(string)
+	require.True(t, ok, "Expected statusText to be string, got %T", statusText)
+	assert.Equal(t, "OK", statusTextStr, "Expected statusText 'OK'")
+
+	urlStr, ok := url.(string)
+	require.True(t, ok, "Expected url to be string, got %T", url)
+	assert.Equal(t, "https://mock-api.ap-aggregator.local", urlStr, "Expected correct URL")
+
+	headersMap, ok := headers.(map[string]interface{})
+	require.True(t, ok, "Expected headers to be map, got %T", headers)
+	assert.NotEmpty(t, headersMap, "Expected non-empty headers map")
+
+	// Verify data field contains the response body content
+	dataMap, ok := data.(map[string]interface{})
+	require.True(t, ok, "Expected data to be map, got %T: %+v", data, data)
+
+	// The data should contain the mock API response fields
+	_, hasArgs := dataMap["args"]
+	_, hasDataField := dataMap["data"]
+	_, hasMethod := dataMap["method"]
+	_, hasUrlInData := dataMap["url"]
+
+	assert.True(t, hasArgs, "Expected 'args' field in data")
+	assert.True(t, hasDataField, "Expected 'data' field in data")
+	assert.True(t, hasMethod, "Expected 'method' field in data")
+	assert.True(t, hasUrlInData, "Expected 'url' field in data")
+
+	t.Logf("✅ Regular REST API standard format verified: status=%v, statusText=%s, url=%s, headers=%T, data=%T",
+		status, statusTextStr, urlStr, headers, data)
+}

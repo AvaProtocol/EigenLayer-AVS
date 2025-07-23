@@ -69,9 +69,9 @@ func ProcessRestAPIResponseRaw(responseData map[string]interface{}) map[string]i
 		return responseData
 	}
 
-	// Get body data
-	bodyData, hasBody := responseData["body"]
-	if !hasBody {
+	// Get data from response
+	bodyData, hasData := responseData["data"]
+	if !hasData {
 		bodyData = ""
 	}
 

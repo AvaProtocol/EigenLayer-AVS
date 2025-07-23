@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v5.29.2
-// source: node.proto
+// source: protobuf/node.proto
 
 package avsproto
 
@@ -318,5 +318,5 @@ var Node_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "node.proto",
+	Metadata: "protobuf/node.proto",
 }

@@ -1787,112 +1787,32 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		// For contract read nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
 		contractReadOutput := &avsproto.ContractReadNode_Output{}
 		if result != nil && len(result) > 0 {
-			// Check if this is a flattened single method result or multiple results
-			if results, ok := result["results"].([]interface{}); ok {
-				// Multiple method results - return the array directly (no wrapper)
+			// The ContractRead processor now returns results in the new standardized format:
+			// { methodName, methodABI, success, error, value }
+			// We need to extract this from the protobuf Value structure
+
+			// Check if we have the new results array format (from VM execution)
+			if resultsFromVM, ok := result["results"].([]interface{}); ok {
+				// Process each result in the array - they're already in the correct format
 				var resultsArray []interface{}
-				var rawMethodResults []interface{}
-
-				for _, methodResult := range results {
-					if methodResultMap, ok := methodResult.(map[string]interface{}); ok {
-						// Clean the data field to exclude rawStructuredFields
-						cleanData := make(map[string]interface{})
-						if data, hasData := methodResultMap["data"].(map[string]interface{}); hasData {
-							for key, value := range data {
-								if key != "rawStructuredFields" {
-									cleanData[key] = value
-								}
-							}
-						}
-
-						convertedResult := map[string]interface{}{
-							"methodName": methodResultMap["methodName"],
-							"success":    methodResultMap["success"],
-							"error":      methodResultMap["error"],
-							"data":       cleanData,
-						}
-						resultsArray = append(resultsArray, convertedResult)
-
-						// Create raw method result for metadata._raw array
-						methodResult := map[string]interface{}{
-							"methodName": methodResultMap["methodName"],
-							"success":    methodResultMap["success"],
-							"error":      methodResultMap["error"],
-							"data":       methodResultMap["rawStructuredFields"], // The raw structured fields from ABI decoding
-						}
-						rawMethodResults = append(rawMethodResults, methodResult)
+				for _, resultInterface := range resultsFromVM {
+					if methodResultMap, ok := resultInterface.(map[string]interface{}); ok {
+						// Results are already in the new format: {methodName, methodABI, success, error, value}
+						// Just pass them through directly
+						resultsArray = append(resultsArray, methodResultMap)
 					}
 				}
 
-				// Create metadata structure consistent with eventTrigger
-				metadata := map[string]interface{}{
-					"_raw": rawMethodResults,
-				}
-
-				// Set metadata in the top-level metadata field
-				if metadataValue, err := structpb.NewValue(metadata); err == nil {
-					resp.Metadata = metadataValue
-					// Debug log to verify metadata is being set
-					if n.logger != nil {
-						n.logger.Info("Setting contract read metadata for multiple methods", "metadata", metadata)
-					}
-				}
-
-				// Return the array directly as data (no results wrapper)
+				// Convert to protobuf Value
 				if resultsValue, err := structpb.NewValue(resultsArray); err == nil {
 					contractReadOutput.Data = resultsValue
 				}
 			} else {
-				// Single method result (flattened) - extract metadata and data separately
-				dataMap := make(map[string]interface{})
-				var rawMethodResults []interface{}
+				// Single method result - should also be in the new format
+				// Wrap it in an array to maintain consistency
+				singleResultArray := []interface{}{result}
 
-				for key, value := range result {
-					switch key {
-					case "method_name", "success", "error", "nodeId", "rawStructuredFields":
-						// Skip these as they will be handled in metadata or are internal fields
-					case "rawData":
-						// Skip rawData as it's handled separately
-					default:
-						// This is actual data - include it directly
-						dataMap[key] = value
-					}
-				}
-
-				// Create raw method result for metadata._raw array
-				methodResult := map[string]interface{}{
-					"methodName": result["method_name"],
-					"success":    result["success"],
-					"error":      result["error"],
-					"data":       result["rawStructuredFields"], // The raw structured fields from ABI decoding
-				}
-				rawMethodResults = append(rawMethodResults, methodResult)
-
-				// Create metadata structure consistent with eventTrigger
-				metadata := map[string]interface{}{
-					"_raw": rawMethodResults,
-				}
-
-				// Set metadata in the top-level metadata field
-				if metadataValue, err := structpb.NewValue(metadata); err == nil {
-					resp.Metadata = metadataValue
-					// Debug log to verify metadata is being set
-					if n.logger != nil {
-						n.logger.Info("Setting contract read metadata", "metadata", metadata)
-					}
-				}
-
-				// For single method result, wrap it in an array to maintain consistency
-				singleResultArray := []interface{}{
-					map[string]interface{}{
-						"methodName": result["method_name"],
-						"success":    result["success"],
-						"error":      result["error"],
-						"data":       dataMap,
-					},
-				}
-
-				// Return as array even for single method call
+				// Convert to protobuf Value
 				if resultsValue, err := structpb.NewValue(singleResultArray); err == nil {
 					contractReadOutput.Data = resultsValue
 				}
@@ -1917,38 +1837,25 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 						convertedResult := map[string]interface{}{
 							"methodName": methodResult.MethodName,
 							"success":    methodResult.Success,
-							"inputData":  methodResult.InputData,
+							"error":      methodResult.Error,
 						}
 
-						if methodResult.Transaction != nil {
-							convertedResult["transaction"] = map[string]interface{}{
-								"hash":           methodResult.Transaction.Hash,
-								"status":         methodResult.Transaction.Status,
-								"from":           methodResult.Transaction.From,
-								"to":             methodResult.Transaction.To,
-								"value":          methodResult.Transaction.Value,
-								"timestamp":      methodResult.Transaction.Timestamp,
-								"simulation":     methodResult.Transaction.Simulation,
-								"simulationMode": methodResult.Transaction.SimulationMode,
-								"chainId":        methodResult.Transaction.ChainId,
-							}
+						// Add methodABI if available
+						if methodResult.MethodAbi != nil {
+							convertedResult["methodABI"] = methodResult.MethodAbi.AsInterface()
 						}
 
-						if methodResult.Error != nil {
-							convertedResult["error"] = methodResult.Error.Message
+						// Add flexible receipt
+						if methodResult.Receipt != nil {
+							convertedResult["receipt"] = methodResult.Receipt.AsInterface()
+						}
+
+						// Add return value
+						if methodResult.Value != nil {
+							convertedResult["value"] = methodResult.Value.AsInterface()
 						} else {
-							convertedResult["error"] = nil
+							convertedResult["value"] = nil
 						}
-
-						// Convert return data if present
-						if methodResult.ReturnData != nil {
-							convertedResult["returnData"] = methodResult.ReturnData.Value
-						} else {
-							convertedResult["returnData"] = nil
-						}
-
-						// Convert events if present (empty for now, but structure for consistency)
-						convertedResult["events"] = []interface{}{}
 
 						resultsArray = append(resultsArray, convertedResult)
 					} else if methodResultMap, ok := resultInterface.(map[string]interface{}); ok {

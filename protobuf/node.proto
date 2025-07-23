@@ -5,7 +5,7 @@ option go_package = "./avsproto";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
-import "avs.proto";
+import "protobuf/avs.proto";
 
 message Checkin {
   string id = 1;

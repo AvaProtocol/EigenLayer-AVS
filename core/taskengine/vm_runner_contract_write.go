@@ -16,6 +16,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type SendUserOpFunc func(
@@ -165,149 +166,150 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	if err != nil {
 		r.vm.logger.Warn("🚫 Tenderly simulation failed, using mock result", "error", err)
 
-		// Create a mock successful result when Tenderly fails
-		return &avsproto.ContractWriteNode_MethodResult{
-			MethodName: methodName,
-			Success:    true,
-			Transaction: &avsproto.ContractWriteNode_TransactionData{
-				Hash:           fmt.Sprintf("0x%064x", time.Now().UnixNano()),
-				Status:         "simulated",
-				From:           "0x0000000000000000000000000000000000000001",
-				To:             contractAddress.Hex(),
-				Value:          "0",
-				Timestamp:      t0.Unix(),
-				Simulation:     true,
-				SimulationMode: "mock_fallback",
-				ChainId:        chainID,
-			},
-			InputData: methodCall.CallData,
-		}
+		// Create a mock result when Tenderly fails
+		return r.createMockContractWriteResult(methodName, contractAddress.Hex(), methodCall.CallData, contractAbi, t0, chainID)
 	}
 
-	// Convert Tenderly simulation result to protobuf format
-	methodResult := &avsproto.ContractWriteNode_MethodResult{
-		MethodName: simulationResult.MethodName,
-		Success:    simulationResult.Success,
-		InputData:  simulationResult.InputData,
-	}
-
-	// Convert transaction data
-	if simulationResult.Transaction != nil {
-		methodResult.Transaction = &avsproto.ContractWriteNode_TransactionData{
-			Hash:           simulationResult.Transaction.Hash,
-			Status:         simulationResult.Transaction.Status,
-			From:           simulationResult.Transaction.From,
-			To:             simulationResult.Transaction.To,
-			Value:          simulationResult.Transaction.Value,
-			Timestamp:      simulationResult.Transaction.Timestamp,
-			Simulation:     simulationResult.Transaction.Simulation,
-			SimulationMode: "tenderly",
-			ChainId:        chainID,
-		}
-	}
-
-	// Convert error data if present
-	if simulationResult.Error != nil {
-		methodResult.Error = &avsproto.ContractWriteNode_ErrorData{
-			Code:    simulationResult.Error.Code,
-			Message: simulationResult.Error.Message,
-		}
-	}
-
-	// Convert return data if present
-	if simulationResult.ReturnData != nil {
-		methodResult.ReturnData = &avsproto.ContractWriteNode_ReturnData{
-			Name:  simulationResult.ReturnData.Name,
-			Type:  simulationResult.ReturnData.Type,
-			Value: simulationResult.ReturnData.Value,
-		}
-	}
-
-	r.vm.logger.Info("✅ Tenderly simulation completed",
-		"method", methodName,
-		"success", methodResult.Success,
-		"simulation_mode", "tenderly")
-
-	return methodResult
+	// Convert Tenderly simulation result to legacy protobuf format
+	return r.convertTenderlyResultToFlexibleFormat(simulationResult, contractAbi, methodCall.CallData)
 }
 
-func (r *ContractWriteProcessor) decodeEvents(logs []*types.Log, contractABI *abi.ABI) []*avsproto.ContractWriteNode_EventData {
-	var events []*avsproto.ContractWriteNode_EventData
-
-	for _, log := range logs {
-		// Try to find matching event in ABI
-		for _, abiEvent := range contractABI.Events {
-			if len(log.Topics) > 0 && log.Topics[0] == abiEvent.ID {
-				// Found matching event
-				eventData := &avsproto.ContractWriteNode_EventData{
-					EventName: abiEvent.Name,
-					Address:   log.Address.Hex(),
-					Topics:    make([]string, len(log.Topics)),
-					Data:      common.Bytes2Hex(log.Data),
-					Decoded:   make(map[string]string),
+// createMockContractWriteResult creates a mock result when Tenderly fails
+func (r *ContractWriteProcessor) createMockContractWriteResult(methodName, contractAddress, callData string, contractAbi *abi.ABI, startTime time.Time, chainID int64) *avsproto.ContractWriteNode_MethodResult {
+	// Extract methodABI from contract ABI if available
+	var methodABI *structpb.Value
+	if contractAbi != nil {
+		if method, exists := contractAbi.Methods[methodName]; exists {
+			if abiMap := r.extractMethodABI(&method); abiMap != nil {
+				if abiValue, err := structpb.NewValue(abiMap); err == nil {
+					methodABI = abiValue
 				}
-
-				// Convert topics to hex strings
-				for i, topic := range log.Topics {
-					eventData.Topics[i] = topic.Hex()
-				}
-
-				// Try to decode the event data
-				if decoded, err := contractABI.Unpack(abiEvent.Name, log.Data); err == nil {
-					// Create ABI value converter (no decimal formatting for contract write events)
-					converter := NewABIValueConverter(nil, nil)
-
-					// Build decoded map with proper typing
-					indexedCount := 0
-					nonIndexedCount := 0
-
-					for _, input := range abiEvent.Inputs {
-						var valueStr string
-
-						if input.Indexed {
-							// Get from topics (topic[0] is signature, so indexed params start from topic[1])
-							topicIndex := indexedCount + 1
-							if topicIndex < len(log.Topics) {
-								topicValue := log.Topics[topicIndex]
-								valueStr = ConvertTopicValueToString(topicValue, input.Type)
-							}
-							indexedCount++
-						} else {
-							// Get from decoded data
-							if nonIndexedCount < len(decoded) {
-								decodedValue := decoded[nonIndexedCount]
-								valueStr = converter.ConvertABIValueToString(decodedValue, input.Type, input.Name)
-							}
-							nonIndexedCount++
-						}
-
-						// Store in the string map for protobuf compatibility
-						// Note: The protobuf EventData.Decoded is defined as map[string]string
-						// so we must store string values here, but the typing logic above
-						// ensures proper conversion for consistency with event trigger parsing
-						eventData.Decoded[input.Name] = valueStr
-					}
-				}
-
-				events = append(events, eventData)
-				break
 			}
 		}
 	}
 
-	return events
+	// Create flexible receipt as JSON object
+	receiptMap := map[string]interface{}{
+		"transactionHash": fmt.Sprintf("0x%064x", startTime.UnixNano()),
+		"logs":            []interface{}{}, // Empty logs array
+		// All other fields can be added dynamically as needed
+	}
+
+	receipt, _ := structpb.NewValue(receiptMap)
+
+	return &avsproto.ContractWriteNode_MethodResult{
+		MethodName: methodName,
+		MethodAbi:  methodABI,
+		Success:    true,
+		Error:      "",
+		Receipt:    receipt,
+		Value:      nil, // Mock transactions don't have return values
+	}
 }
 
-func (r *ContractWriteProcessor) decodeReturnData(methodName string, contractABI *abi.ABI) *avsproto.ContractWriteNode_ReturnData {
-	// For write functions, return data is typically just success (bool)
-	// This is a placeholder - in practice, most write functions don't return meaningful data
-	if method, exists := contractABI.Methods[methodName]; exists && len(method.Outputs) > 0 {
-		// Most write functions return bool success
-		return &avsproto.ContractWriteNode_ReturnData{
-			Name:  method.Outputs[0].Name,
-			Type:  method.Outputs[0].Type.String(),
-			Value: "true", // Default success value
+// convertTenderlyResultToLegacyFormat converts Tenderly result to new flexible format
+func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *ContractWriteSimulationResult, contractAbi *abi.ABI, callData string) *avsproto.ContractWriteNode_MethodResult {
+	// Extract methodABI from contract ABI if available
+	var methodABI *structpb.Value
+	if contractAbi != nil {
+		if method, exists := contractAbi.Methods[result.MethodName]; exists {
+			if abiMap := r.extractMethodABI(&method); abiMap != nil {
+				if abiValue, err := structpb.NewValue(abiMap); err == nil {
+					methodABI = abiValue
+				}
+			}
 		}
+	}
+
+	// Create flexible receipt as JSON object with Tenderly data and standard fields
+	receiptMap := map[string]interface{}{
+		"transactionHash":   result.Transaction.Hash,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              // ✅ From Tenderly
+		"from":              result.Transaction.From,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              // ✅ From Tenderly
+		"to":                result.Transaction.To,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // ✅ From Tenderly
+		"blockNumber":       "0x1",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // Mock value for simulation
+		"blockHash":         "0x0000000000000000000000000000000000000000000000000000000000000001",                                                                                                                                                                                                                                                                                                                                                                                                                                                                 // Mock value
+		"transactionIndex":  "0x0",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // Mock value for simulation
+		"gasUsed":           "0x5208",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             // Mock value (21000 gas)
+		"cumulativeGasUsed": "0x5208",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             // Mock value
+		"effectiveGasPrice": "0x3b9aca00",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         // Mock value (1 gwei)
+		"status":            "0x1",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // Success status as string
+		"logsBloom":         "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", // Empty logs bloom
+		"logs":              []interface{}{},                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      // Empty logs array
+		"type":              "0x2",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // EIP-1559 transaction type
+	}
+
+	receipt, _ := structpb.NewValue(receiptMap)
+
+	// Extract return value from Tenderly response
+	var returnValue *structpb.Value
+	if result.ReturnData != nil {
+		// Map returnData.value to our value field
+		if valueProto, err := structpb.NewValue(result.ReturnData.Value); err == nil {
+			returnValue = valueProto
+		}
+	}
+
+	// Handle errors
+	errorMsg := ""
+	success := result.Success
+	if result.Error != nil {
+		errorMsg = result.Error.Message
+		success = false
+	}
+
+	return &avsproto.ContractWriteNode_MethodResult{
+		MethodName: result.MethodName,
+		MethodAbi:  methodABI,
+		Success:    success,
+		Error:      errorMsg,
+		Receipt:    receipt,
+		Value:      returnValue,
+	}
+}
+
+// extractMethodABI extracts ABI information for a specific method
+func (r *ContractWriteProcessor) extractMethodABI(method *abi.Method) map[string]interface{} {
+	if method == nil {
+		return nil
+	}
+
+	// Convert inputs
+	inputs := make([]interface{}, len(method.Inputs))
+	for i, input := range method.Inputs {
+		inputs[i] = map[string]interface{}{
+			"name": input.Name,
+			"type": input.Type.String(),
+		}
+	}
+
+	// Convert outputs
+	outputs := make([]interface{}, len(method.Outputs))
+	for i, output := range method.Outputs {
+		outputs[i] = map[string]interface{}{
+			"name": output.Name,
+			"type": output.Type.String(),
+		}
+	}
+
+	return map[string]interface{}{
+		"name":            method.Name,
+		"type":            "function",
+		"inputs":          inputs,
+		"outputs":         outputs,
+		"stateMutability": method.StateMutability,
+		"constant":        method.Constant,
+		"payable":         method.Payable,
+	}
+}
+
+// convertMethodABIToProtobuf converts methodABI map to protobuf Value
+func (r *ContractWriteProcessor) convertMethodABIToProtobuf(methodABI map[string]interface{}) *structpb.Value {
+	if methodABI == nil {
+		return nil
+	}
+
+	if abiValue, err := structpb.NewValue(methodABI); err == nil {
+		return abiValue
 	}
 	return nil
 }
@@ -358,53 +360,56 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		results = append(results, result)
 
 		if result.Success {
-			log.WriteString(fmt.Sprintf("✅ Success: %s (tx: %s)\n", result.MethodName, result.Transaction.Hash))
+			// Extract transaction hash from flexible receipt
+			var txHash string
+			if result.Receipt != nil {
+				if receiptMap := result.Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
+					if hash, ok := receiptMap["transactionHash"].(string); ok {
+						txHash = hash
+					}
+				}
+			}
+			log.WriteString(fmt.Sprintf("✅ Success: %s (tx: %s)\n", result.MethodName, txHash))
 		} else {
-			log.WriteString(fmt.Sprintf("❌ Failed: %s - %s\n", result.MethodName, result.Error.Message))
+			log.WriteString(fmt.Sprintf("❌ Failed: %s - %s\n", result.MethodName, result.Error))
 			// Don't fail the entire execution for individual method failures
 		}
 	}
 
-	// Convert results to Go maps for JSON conversion
+	// Convert results to Go maps for JSON conversion using standardized format
 	var resultsArray []interface{}
 	for _, methodResult := range results {
 		resultMap := map[string]interface{}{
 			"methodName": methodResult.MethodName,
 			"success":    methodResult.Success,
-			"inputData":  methodResult.InputData,
+			"error":      methodResult.Error,
 		}
 
-		// Convert transaction data
-		if methodResult.Transaction != nil {
-			resultMap["transaction"] = map[string]interface{}{
-				"hash":           methodResult.Transaction.Hash,
-				"status":         methodResult.Transaction.Status,
-				"from":           methodResult.Transaction.From,
-				"to":             methodResult.Transaction.To,
-				"value":          methodResult.Transaction.Value,
-				"timestamp":      methodResult.Transaction.Timestamp,
-				"simulation":     methodResult.Transaction.Simulation,
-				"simulationMode": methodResult.Transaction.SimulationMode,
-				"chainId":        methodResult.Transaction.ChainId,
+		// Add methodABI if available
+		if methodResult.MethodAbi != nil {
+			resultMap["methodABI"] = methodResult.MethodAbi.AsInterface()
+		}
+
+		// Add flexible receipt - already in the correct JSON format
+		if methodResult.Receipt != nil {
+			resultMap["receipt"] = methodResult.Receipt.AsInterface()
+		}
+
+		// Add blockNumber for convenience if available in receipt
+		if methodResult.Receipt != nil {
+			if receiptMap := methodResult.Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
+				if blockNumber, ok := receiptMap["blockNumber"]; ok {
+					resultMap["blockNumber"] = blockNumber
+				}
 			}
 		}
 
-		// Convert error data if present
-		if methodResult.Error != nil {
-			resultMap["error"] = methodResult.Error.Message
+		// Add return value
+		if methodResult.Value != nil {
+			resultMap["value"] = methodResult.Value.AsInterface()
 		} else {
-			resultMap["error"] = nil
+			resultMap["value"] = nil
 		}
-
-		// Convert return data if present
-		if methodResult.ReturnData != nil {
-			resultMap["returnData"] = methodResult.ReturnData.Value
-		} else {
-			resultMap["returnData"] = nil
-		}
-
-		// Convert events if present (empty for now, but structure for consistency)
-		resultMap["events"] = []interface{}{}
 
 		resultsArray = append(resultsArray, resultMap)
 	}
@@ -424,8 +429,17 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	if len(results) > 0 {
 		// For single method calls, set the result as the main output
 		if len(results) == 1 && results[0].Success {
-			outputVars["transaction"] = results[0].Transaction
-			outputVars["hash"] = results[0].Transaction.Hash
+			// Extract transaction hash from flexible receipt
+			var txHash string
+			if results[0].Receipt != nil {
+				if receiptMap := results[0].Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
+					if hash, ok := receiptMap["transactionHash"].(string); ok {
+						txHash = hash
+					}
+				}
+			}
+			outputVars["receipt"] = results[0].Receipt
+			outputVars["hash"] = txHash
 			outputVars["success"] = results[0].Success
 		}
 		// Always provide results array for multi-method scenarios

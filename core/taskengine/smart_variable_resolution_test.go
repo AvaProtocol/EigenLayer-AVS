@@ -97,7 +97,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 		assert.Equal(t, float64(200), result["statusCode"])
 
 		// The mock server returns JSON in the body field
-		bodyData, ok := result["body"].(map[string]interface{})
+		bodyData, ok := result["data"].(map[string]interface{})
 		assert.True(t, ok, "body should be a map")
 		assert.Equal(t, "POST", bodyData["method"])
 
@@ -143,7 +143,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 		assert.Equal(t, float64(200), result["statusCode"])
 
 		// The mock server returns JSON in the body field
-		bodyData, ok := result["body"].(map[string]interface{})
+		bodyData, ok := result["data"].(map[string]interface{})
 		assert.True(t, ok, "body should be a map")
 		assert.Equal(t, "POST", bodyData["method"])
 
@@ -188,7 +188,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 		assert.Equal(t, float64(200), result["statusCode"])
 
 		// The mock server returns JSON in the body field
-		bodyData, ok := result["body"].(map[string]interface{})
+		bodyData, ok := result["data"].(map[string]interface{})
 		assert.True(t, ok, "body should be a map")
 		assert.Equal(t, "POST", bodyData["method"])
 
@@ -230,7 +230,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 		assert.Equal(t, float64(200), result["statusCode"])
 
 		// The mock server returns JSON in the body field
-		bodyData, ok := result["body"].(map[string]interface{})
+		bodyData, ok := result["data"].(map[string]interface{})
 		assert.True(t, ok, "body should be a map")
 		assert.Equal(t, "POST", bodyData["method"])
 
@@ -276,7 +276,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 		assert.Equal(t, float64(200), result["statusCode"])
 
 		// The mock server returns JSON in the body field
-		bodyData, ok := result["body"].(map[string]interface{})
+		bodyData, ok := result["data"].(map[string]interface{})
 		assert.True(t, ok, "body should be a map")
 		assert.Equal(t, "POST", bodyData["method"])
 

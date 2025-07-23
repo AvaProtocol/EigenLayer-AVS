@@ -407,63 +407,349 @@ customCodeNode = {
 
 ### ContractRead Node
 
-ContractRead nodes read data from smart contracts.
+ContractRead nodes read data from smart contracts and support multiple method calls in a single execution.
+
+#### Configuration Requirements
+
+**CRITICAL**: `contractAbi` must be provided as an **array only** (not JSON string):
+
+```javascript
+// ✅ CORRECT: contractAbi as array
+{
+  contractAddress: "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+  contractAbi: [
+    {
+      constant: true,
+      inputs: [],
+      name: "name",
+      outputs: [{ name: "", type: "string" }],
+      payable: false,
+      stateMutability: "view",
+      type: "function"
+    },
+    {
+      constant: true,
+      inputs: [],
+      name: "symbol", 
+      outputs: [{ name: "", type: "string" }],
+      payable: false,
+      stateMutability: "view",
+      type: "function"
+    }
+  ],
+  methodCalls: [
+    { callData: "0x06fdde03", methodName: "name" },
+    { callData: "0x95d89b41", methodName: "symbol" }
+  ]
+}
+
+// ❌ WRONG: contractAbi as JSON string
+{
+  contractAbi: "[{\"constant\":true,\"name\":\"name\"...}]"  // Will cause error
+}
+```
+
+#### Output Data Structure
+
+ContractRead nodes return an **array of method results**, where each result corresponds to a method call:
 
 ```javascript
 // ContractRead node variable structure
 contractReadNode = {
-  data: {
-    // Runtime output from contract call
-    result: {
-      // Decoded contract call result
-      balance: "1000000000000000000",  // 1 ETH in wei
-      decimals: 18,
-      symbol: "ETH",
-      name: "Ethereum"
+  data: [
+    // Array of method results - each object corresponds to one methodCall
+    {
+      methodName: "name",
+      value: "Wrapped Ether",           // Decoded value from contract call
+      success: true,
+      error: "",
+      methodABI: {                      // Single ABI entry for this method
+        name: "name", 
+        type: "string", 
+        value: "Wrapped Ether"
+      }
     },
-    blockNumber: 18500000,
-    gasUsed: "21000"
-  },
+    {
+      methodName: "symbol", 
+      value: "WETH",                    // Decoded value from contract call
+      success: true,
+      error: "",
+      methodABI: {                      // Single ABI entry for this method
+        name: "symbol",
+        type: "string", 
+        value: "WETH"
+      }
+    }
+  ],
   input: {
     // Configuration for contract interaction
-    contractAddress: "0x...",
-    methodName: "balanceOf",
-    methodInputs: ["0x742d35Cc6634C0532925a3b8D8FA4fF5C6E4a1e6"],
-    abi: [...],  // Contract ABI
-    chainId: 11155111
+    contractAddress: "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+    contractAbi: [...],                 // Full ABI array as provided in config
+    methodCalls: [
+      { callData: "0x06fdde03", methodName: "name" },
+      { callData: "0x95d89b41", methodName: "symbol" }
+    ]
   }
 }
 ```
 
+#### Multiple Method Calls
+
+ContractRead nodes execute multiple method calls **sequentially** in the order specified:
+
+```javascript
+// Input configuration with multiple methods
+{
+  contractAddress: "0xA0b86a33E6441b8D9c5a8d3d7E0b8d6e4d2e8f1a",
+  contractAbi: [...],  // Array of ABI entries
+  methodCalls: [
+    { callData: "0x06fdde03", methodName: "name" },
+    { callData: "0x95d89b41", methodName: "symbol" },
+    { callData: "0x313ce567", methodName: "decimals" }
+  ]
+}
+
+// Output: Array with 3 results
+contractReadNode.data = [
+  { methodName: "name", value: "Token Name", success: true, ... },
+  { methodName: "symbol", value: "TKN", success: true, ... },
+  { methodName: "decimals", value: "18", success: true, ... }
+]
+```
+
 ### ContractWrite Node
 
-ContractWrite nodes execute transactions on smart contracts.
+ContractWrite nodes execute transactions on smart contracts and support multiple method calls in a single execution.
+
+#### Configuration Requirements
+
+**CRITICAL**: `contractAbi` must be provided as an **array only** (not JSON string):
+
+```javascript
+// ✅ CORRECT: contractAbi as array
+{
+  contractAddress: "0xA0b86a33E6441b8D9c5a8d3d7E0b8d6e4d2e8f1a",
+  contractAbi: [
+    {
+      constant: false,
+      inputs: [
+        { name: "to", type: "address" },
+        { name: "value", type: "uint256" }
+      ],
+      name: "transfer",
+      outputs: [{ name: "", type: "bool" }],
+      payable: false,
+      stateMutability: "nonpayable",
+      type: "function"
+    },
+    {
+      constant: false,
+      inputs: [
+        { name: "spender", type: "address" },
+        { name: "value", type: "uint256" }
+      ],
+      name: "approve",
+      outputs: [{ name: "", type: "bool" }],
+      payable: false,
+      stateMutability: "nonpayable",
+      type: "function"
+    }
+  ],
+  methodCalls: [
+    { 
+      callData: "0xa9059cbb000000000000...", 
+      methodName: "transfer",
+      value: "0",
+      gasLimit: "50000"
+    },
+    { 
+      callData: "0x095ea7b3000000000000...", 
+      methodName: "approve",
+      value: "0",
+      gasLimit: "45000"
+    }
+  ]
+}
+
+// ❌ WRONG: contractAbi as JSON string
+{
+  contractAbi: "[{\"constant\":false,\"name\":\"transfer\"...}]"  // Will cause error
+}
+```
+
+#### Output Data Structure
+
+ContractWrite nodes return an **array of transaction results**, where each result corresponds to a method call:
 
 ```javascript
 // ContractWrite node variable structure
 contractWriteNode = {
-  data: {
-    // Runtime output from transaction
-    transactionHash: "0x...",
-    blockNumber: 18500001,
-    gasUsed: "50000",
-    status: "success",
-    receipt: {
-      // Full transaction receipt
-      logs: [...],
-      events: [...]
+  data: [
+    // Array of transaction results - each object corresponds to one methodCall
+    {
+      methodName: "transfer",
+      methodABI: {
+        // ABI entry for this specific method
+        constant: false,
+        inputs: [
+          { name: "to", type: "address" },
+          { name: "value", type: "uint256" }
+        ],
+        name: "transfer",
+        outputs: [{ name: "", type: "bool" }],
+        payable: false,
+        stateMutability: "nonpayable",
+        type: "function"
+      },
+      success: true,
+      error: "",
+      receipt: {
+        transactionHash: "0x1234567890abcdef...",
+        transactionIndex: 42,
+        blockHash: "0xabcdef1234567890...",
+        blockNumber: 19283712,
+        from: "0xuser...",
+        to: "0xcontract...",
+        contractAddress: null,  // null for regular calls, address for deployments
+        cumulativeGasUsed: "1234567",
+        gasUsed: "65321",
+        effectiveGasPrice: "20000000000",  // optional (EIP-1559 chains)
+        logsBloom: "0x00000000000000000000000000000000...",
+        logs: [
+          // Transaction logs/events
+          {
+            address: "0xcontract...",
+            topics: ["0x..."],
+            data: "0x...",
+            blockNumber: 19283712,
+            transactionHash: "0x1234567890abcdef...",
+            transactionIndex: 42,
+            blockHash: "0xabcdef1234567890...",
+            logIndex: 1,
+            removed: false
+          }
+        ],
+        status: "success",  // 'success' or 'reverted'
+        type: "eip1559"     // 'legacy' | 'eip1559' | 'eip2930'
+      },
+      blockNumber: 19283712,
+      value: true  // Return value from contract method (null if no return value)
+    },
+    {
+      methodName: "approve",
+      methodABI: {
+        // ABI entry for this specific method
+        constant: false,
+        inputs: [
+          { name: "spender", type: "address" },
+          { name: "value", type: "uint256" }
+        ],
+        name: "approve",
+        outputs: [{ name: "", type: "bool" }],
+        payable: false,
+        stateMutability: "nonpayable",
+        type: "function"
+      },
+      success: true,
+      error: "",
+      receipt: {
+        transactionHash: "0xabcdef1234567890...",
+        transactionIndex: 43,
+        blockHash: "0xfedcba0987654321...",
+        blockNumber: 19283713,
+        from: "0xuser...",
+        to: "0xcontract...",
+        contractAddress: null,  // null for regular calls, address for deployments
+        cumulativeGasUsed: "1299888",
+        gasUsed: "45123",
+        effectiveGasPrice: "20000000000",  // optional (EIP-1559 chains)
+        logsBloom: "0x00000000000000000000000000000000...",
+        logs: [
+          // Transaction logs/events
+          {
+            address: "0xcontract...",
+            topics: ["0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"],
+            data: "0x...",
+            blockNumber: 19283713,
+            transactionHash: "0xabcdef1234567890...",
+            transactionIndex: 43,
+            blockHash: "0xfedcba0987654321...",
+            logIndex: 2,
+            removed: false
+          }
+        ],
+        status: "success",  // 'success' or 'reverted'
+        type: "eip1559"     // 'legacy' | 'eip1559' | 'eip2930'
+      },
+      blockNumber: 19283713,
+      value: true  // Return value from contract method (null if no return value)
     }
-  },
+  ],
   input: {
-    // Configuration for contract transaction
-    contractAddress: "0x...",
-    methodName: "transfer",
-    methodInputs: ["0x742d35Cc6634C0532925a3b8D8FA4fF5C6E4a1e6", "1000000000000000000"],
-    abi: [...],
-    value: "0",  // ETH value to send
-    gasLimit: "100000"
+    // Configuration for contract transactions
+    contractAddress: "0xA0b86a33E6441b8D9c5a8d3d7E0b8d6e4d2e8f1a",
+    contractAbi: [...],                 // Full ABI array as provided in config
+    methodCalls: [
+      { 
+        callData: "0xa9059cbb000000000000...", 
+        methodName: "transfer",
+        value: "0",
+        gasLimit: "50000"
+      },
+      { 
+        callData: "0x095ea7b3000000000000...", 
+        methodName: "approve",
+        value: "0",
+        gasLimit: "45000"
+      }
+    ]
   }
 }
+```
+
+#### Multiple Method Calls
+
+ContractWrite nodes execute multiple method calls **sequentially** in the order specified. Each method call creates a separate transaction:
+
+```javascript
+// Input configuration with multiple methods
+{
+  contractAddress: "0xA0b86a33E6441b8D9c5a8d3d7E0b8d6e4d2e8f1a",
+  contractAbi: [...],  // Array of ABI entries
+  methodCalls: [
+    { callData: "0xa9059cbb...", methodName: "transfer", gasLimit: "50000" },
+    { callData: "0x095ea7b3...", methodName: "approve", gasLimit: "45000" },
+    { callData: "0x23b872dd...", methodName: "transferFrom", gasLimit: "55000" }
+  ]
+}
+
+// Output: Array with 3 transaction results
+contractWriteNode.data = [
+  { 
+    methodName: "transfer", 
+    methodABI: {...}, 
+    success: true, 
+    receipt: {...}, 
+    blockNumber: 19283712,
+    value: true
+  },
+  { 
+    methodName: "approve", 
+    methodABI: {...}, 
+    success: true, 
+    receipt: {...}, 
+    blockNumber: 19283713,
+    value: true
+  },
+  { 
+    methodName: "transferFrom", 
+    methodABI: {...}, 
+    success: true, 
+    receipt: {...}, 
+    blockNumber: 19283714,
+    value: true
+  }
+]
 ```
 
 ### EthTransfer Node
@@ -546,7 +832,9 @@ filterNode = {
 
 ### Loop Node
 
-Loop nodes iterate over arrays or objects.
+Loop nodes iterate over arrays or objects and support various runner types including contract interactions.
+
+#### Basic Loop Structure
 
 ```javascript
 // Loop node variable structure
@@ -576,6 +864,293 @@ loopNode = {
   }
 }
 ```
+
+#### Loop with ContractRead Runner
+
+Loop nodes can execute contract read operations for each iteration. **CRITICAL**: `contractAbi` must be provided as an **array only**.
+
+```javascript
+// Loop node configuration with contractRead runner
+{
+  type: "loop",
+  inputNodeName: "manualTrigger",
+  iterVal: "value",
+  iterKey: "index", 
+  executionMode: "sequential",
+  runner: {
+    type: "contractRead",
+    config: {
+      contractAddress: "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+      contractAbi: [
+        // ✅ CORRECT: Array format only
+        {
+          constant: true,
+          inputs: [],
+          name: "name",
+          outputs: [{ name: "", type: "string" }],
+          payable: false,
+          stateMutability: "view",
+          type: "function"
+        },
+        {
+          constant: true,
+          inputs: [],
+          name: "symbol",
+          outputs: [{ name: "", type: "string" }],
+          payable: false,
+          stateMutability: "view", 
+          type: "function"
+        }
+      ],
+      methodCalls: [
+        { callData: "0x06fdde03", methodName: "name" },
+        { callData: "0x95d89b41", methodName: "symbol" }
+      ]
+    }
+  }
+}
+
+// ❌ WRONG: contractAbi as JSON string will cause error
+{
+  runner: {
+    type: "contractRead",
+    config: {
+      contractAbi: "[{\"constant\":true,\"name\":\"name\"...}]"  // Will fail
+    }
+  }
+}
+```
+
+**Loop with ContractRead Output Structure:**
+
+```javascript
+// Loop node output when using contractRead runner
+loopNode = {
+  data: [
+    // Each iteration returns an array of method results
+    [
+      { methodName: "name", value: "Wrapped Ether", success: true, ... },
+      { methodName: "symbol", value: "WETH", success: true, ... }
+    ],
+    [
+      { methodName: "name", value: "Wrapped Ether", success: true, ... },
+      { methodName: "symbol", value: "WETH", success: true, ... }
+    ]
+  ],
+  input: { /* loop configuration */ }
+}
+```
+
+**Expected Output Format for Multiple Method Calls:**
+
+For a loop with 2 iterations and 2 method calls per iteration:
+
+```javascript
+// Input: manualTrigger.data = [{ key: "value1" }, { key: "value2" }]
+// methodCalls: [{ methodName: "name" }, { methodName: "symbol" }]
+
+// Expected output structure:
+loopNode.data = [
+  // Iteration 1 result (array of method results)
+  [
+    {
+      methodName: "name",
+      value: "Wrapped Ether",
+      success: true,
+      error: "",
+      methodABI: { name: "name", type: "string", value: "Wrapped Ether" }
+    },
+    {
+      methodName: "symbol", 
+      value: "WETH",
+      success: true,
+      error: "",
+      methodABI: { name: "symbol", type: "string", value: "WETH" }
+    }
+  ],
+  // Iteration 2 result (array of method results)
+  [
+    {
+      methodName: "name",
+      value: "Wrapped Ether", 
+      success: true,
+      error: "",
+      methodABI: { name: "name", type: "string", value: "Wrapped Ether" }
+    },
+    {
+      methodName: "symbol",
+      value: "WETH",
+      success: true, 
+      error: "",
+      methodABI: { name: "symbol", type: "string", value: "WETH" }
+    }
+  ]
+]
+```
+
+#### Loop with ContractWrite Runner
+
+Loop nodes can execute contract write operations for each iteration. **CRITICAL**: `contractAbi` must be provided as an **array only**.
+
+```javascript
+// Loop node configuration with contractWrite runner
+{
+  type: "loop",
+  inputNodeName: "manualTrigger",
+  iterVal: "recipient",
+  iterKey: "index",
+  executionMode: "sequential", 
+  runner: {
+    type: "contractWrite",
+    config: {
+      contractAddress: "0xA0b86a33E6441b8D9c5a8d3d7E0b8d6e4d2e8f1a",
+      contractAbi: [
+        // ✅ CORRECT: Array format only
+        {
+          constant: false,
+          inputs: [
+            { name: "to", type: "address" },
+            { name: "value", type: "uint256" }
+          ],
+          name: "transfer",
+          outputs: [{ name: "", type: "bool" }],
+          payable: false,
+          stateMutability: "nonpayable",
+          type: "function"
+        }
+      ],
+      methodCalls: [
+        {
+          callData: "0xa9059cbb{{recipient.address}}{{recipient.amount}}", 
+          methodName: "transfer",
+          value: "0",
+          gasLimit: "50000"
+        }
+      ]
+    }
+  }
+}
+```
+
+**Loop with ContractWrite Output Structure:**
+
+```javascript
+// Loop node output when using contractWrite runner
+loopNode = {
+  data: [
+    // Each iteration returns an array of transaction results
+    [
+      {
+        methodName: "transfer",
+        methodABI: {
+          // ABI entry for this specific method
+          constant: false,
+          inputs: [
+            { name: "to", type: "address" },
+            { name: "value", type: "uint256" }
+          ],
+          name: "transfer",
+          outputs: [{ name: "", type: "bool" }],
+          payable: false,
+          stateMutability: "nonpayable",
+          type: "function"
+        },
+        success: true,
+        error: "",
+        receipt: {
+          transactionHash: "0x1234567890abcdef...",
+          transactionIndex: 42,
+          blockHash: "0xabcdef1234567890...",
+          blockNumber: 19283712,
+          from: "0xuser...",
+          to: "0xcontract...",
+          contractAddress: null,  // null for regular calls, address for deployments
+          cumulativeGasUsed: "1234567",
+          gasUsed: "65321",
+          effectiveGasPrice: "20000000000",  // optional (EIP-1559 chains)
+          logsBloom: "0x00000000000000000000000000000000...",
+          logs: [
+            {
+              address: "0xcontract...",
+              topics: ["0x..."],
+              data: "0x...",
+              blockNumber: 19283712,
+              transactionHash: "0x1234567890abcdef...",
+              transactionIndex: 42,
+              blockHash: "0xabcdef1234567890...",
+              logIndex: 1,
+              removed: false
+            }
+          ],
+          status: "success",  // 'success' or 'reverted'
+          type: "eip1559"     // 'legacy' | 'eip1559' | 'eip2930'
+        },
+        blockNumber: 19283712,
+        value: true  // Return value from contract method (null if no return value)
+      }
+    ],
+    [
+      {
+        methodName: "transfer",
+        methodABI: {
+          // ABI entry for this specific method
+          constant: false,
+          inputs: [
+            { name: "to", type: "address" },
+            { name: "value", type: "uint256" }
+          ],
+          name: "transfer",
+          outputs: [{ name: "", type: "bool" }],
+          payable: false,
+          stateMutability: "nonpayable",
+          type: "function"
+        },
+        success: true,
+        error: "",
+        receipt: {
+          transactionHash: "0xabcdef1234567890...",
+          transactionIndex: 43,
+          blockHash: "0xfedcba0987654321...",
+          blockNumber: 19283713,
+          from: "0xuser...",
+          to: "0xcontract...",
+          contractAddress: null,  // null for regular calls, address for deployments
+          cumulativeGasUsed: "1299888",
+          gasUsed: "65321",
+          effectiveGasPrice: "20000000000",  // optional (EIP-1559 chains)
+          logsBloom: "0x00000000000000000000000000000000...",
+          logs: [
+            {
+              address: "0xcontract...",
+              topics: ["0x..."],
+              data: "0x...",
+              blockNumber: 19283713,
+              transactionHash: "0xabcdef1234567890...",
+              transactionIndex: 43,
+              blockHash: "0xfedcba0987654321...",
+              logIndex: 2,
+              removed: false
+            }
+          ],
+          status: "success",  // 'success' or 'reverted'
+          type: "eip1559"     // 'legacy' | 'eip1559' | 'eip2930'
+        },
+        blockNumber: 19283713,
+        value: true  // Return value from contract method (null if no return value)
+      }
+    ]
+  ],
+  input: { /* loop configuration */ }
+}
+```
+
+#### Key Requirements for Contract Runners in Loops
+
+1. **Array-Only contractAbi**: Both `contractRead` and `contractWrite` runners in loops must use array format for `contractAbi`
+2. **Multiple Method Support**: Each iteration can execute multiple method calls sequentially
+3. **Consistent Output**: Each iteration returns an array of results, even for single method calls
+4. **Template Variables**: Loop runners support template variables like `{{value}}`, `{{index}}` for dynamic configuration
+5. **Error Handling**: Individual method failures don't stop the loop; errors are captured in the result structure
 
 ### GraphQL Node
 

@@ -167,7 +167,7 @@ message EventTrigger {
     // Used for safety - if exceeded, operator notifies aggregator to cancel task
     optional uint32 max_events_per_block = 3;
     
-    // Contract ABI JSON string for decoding event data (client-provided)
+    // Contract ABI as JSON string (converted from array input)
     string contract_abi = 4;
     
     // Event conditions to evaluate on decoded event data
@@ -354,7 +354,7 @@ message ContractWriteNode {
   message Config {
     string contract_address = 1;
     string call_data = 2;
-    // The ABI is required to decode events and return values for enhanced response structure
+    // The ABI as JSON string (converted from array input)
     string contract_abi = 3;
     // Support for multiple method calls in sequence (similar to ContractRead)
     repeated MethodCall method_calls = 4;
@@ -372,54 +372,13 @@ message ContractWriteNode {
   }
 
   message MethodResult {
-    string method_name = 1;           // The name of the method called
-    bool success = 2;                 // Whether this specific method call succeeded
-    TransactionData transaction = 3;   // Transaction details
-    repeated EventData events = 4;     // Decoded events emitted
-    ErrorData error = 5;              // Error details if failed
-    ReturnData return_data = 6;       // Decoded return value
-    string input_data = 7;            // Raw input calldata for debugging
-  }
-
-  message TransactionData {
-    string hash = 1;                  // Transaction hash
-    string status = 2;                // "pending", "confirmed", "failed", "simulated"
-    string block_number = 3;          // Block number when mined (null for pending)
-    string block_hash = 4;            // Block hash when mined
-    string gas_used = 5;              // Actual gas consumed (null for pending)
-    string gas_limit = 6;             // Gas limit set
-    string gas_price = 7;             // Gas price paid
-    string effective_gas_price = 8;   // Effective gas price (EIP-1559)
-    string from = 9;                  // Sender address (smart wallet)
-    string to = 10;                   // Target contract address
-    string value = 11;                // ETH value sent (usually "0" for contract calls)
-    string nonce = 12;                // Transaction nonce
-    string transaction_index = 13;    // Index in block (null for pending)
-    string confirmations = 14;        // Number of confirmations
-    int64 timestamp = 15;             // Transaction timestamp
-    bool simulation = 16;             // Whether this is a simulation result
-    string simulation_mode = 17;      // Simulation mode: "tenderly", "mock", etc.
-    int64 chain_id = 18;              // Chain ID where the simulation was performed
-  }
-
-  message EventData {
-    string event_name = 1;            // Decoded event name (e.g. "Transfer")
-    string address = 2;               // Contract address that emitted the event
-    repeated string topics = 3;       // Raw topics array
-    string data = 4;                  // Raw data field
-    map<string, string> decoded = 5;  // Decoded event parameters with names
-  }
-
-  message ErrorData {
-    string code = 1;                  // Error classification: "EXECUTION_REVERTED", "OUT_OF_GAS", etc.
-    string message = 2;               // Human-readable error message
-    string revert_reason = 3;         // Encoded revert message from contract
-  }
-
-  message ReturnData {
-    string name = 1;                  // Return value name from ABI (may be empty)
-    string type = 2;                  // Solidity type (e.g. "bool", "uint256")
-    string value = 3;                 // The actual return value as string
+    string method_name = 1;                   // The name of the method called
+    google.protobuf.Value method_abi = 2;     // Complete ABI entry for this method
+    bool success = 3;                         // Whether this specific method call succeeded
+    string error = 4;                         // Error message if failed (empty if success)
+    google.protobuf.Value receipt = 5;        // Flexible receipt as JSON object
+    optional uint64 block_number = 6;         // Block number (duplicate from receipt for convenience)
+    google.protobuf.Value value = 7;          // Return value from contract method (null if no return)
   }
 
   // Include Config as field 
@@ -435,7 +394,7 @@ message ContractReadNode {
 
   message Config {
     string contract_address = 1;
-    // The ABI is required to decode the return values
+    // The ABI as JSON string (converted from array input)
     string contract_abi = 2;
     // Array of method calls to execute serially
     repeated MethodCall method_calls = 3;

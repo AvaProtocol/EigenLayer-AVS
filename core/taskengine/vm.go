@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -2166,10 +2167,15 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			return nil, fmt.Errorf("contract read node requires 'contractAddress' field")
 		}
 
-		if abi, ok := config["contractAbi"].(string); ok {
-			contractConfig.ContractAbi = abi
+		if contractAbiArray, ok := config["contractAbi"].([]interface{}); ok {
+			// Convert array to JSON string for protobuf storage
+			if abiBytes, err := json.Marshal(contractAbiArray); err == nil {
+				contractConfig.ContractAbi = string(abiBytes)
+			} else {
+				return nil, fmt.Errorf("failed to convert contractAbi array to JSON: %v", err)
+			}
 		} else {
-			return nil, fmt.Errorf("contract read node requires 'contractAbi' field")
+			return nil, fmt.Errorf("contract read node requires 'contractAbi' field as array")
 		}
 
 		// Handle method calls - use camelCase only for consistency
@@ -2491,8 +2497,17 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			if contractAddress, ok := runnerConfig["contractAddress"].(string); ok {
 				crConfig.ContractAddress = contractAddress
 			}
-			if contractAbi, ok := runnerConfig["contractAbi"].(string); ok {
-				crConfig.ContractAbi = contractAbi
+
+			// Handle contractAbi - accept only array format
+			if contractAbiArray, ok := runnerConfig["contractAbi"].([]interface{}); ok {
+				// Convert array to JSON string for protobuf storage
+				if abiBytes, err := json.Marshal(contractAbiArray); err == nil {
+					crConfig.ContractAbi = string(abiBytes)
+				} else {
+					return nil, fmt.Errorf("failed to convert contractAbi array to JSON: %v", err)
+				}
+			} else {
+				return nil, fmt.Errorf("loop node contractRead runner requires 'contractAbi' field as array")
 			}
 
 			// Handle method calls
@@ -3895,4 +3910,54 @@ func (v *VM) substituteTemplateVariables(text string, iterInputs map[string]inte
 	}
 
 	return result
+}
+
+// getStatusText returns the standard HTTP status text for a given status code
+func getStatusText(statusCode int) string {
+	switch statusCode {
+	case 200:
+		return "OK"
+	case 201:
+		return "Created"
+	case 202:
+		return "Accepted"
+	case 204:
+		return "No Content"
+	case 400:
+		return "Bad Request"
+	case 401:
+		return "Unauthorized"
+	case 403:
+		return "Forbidden"
+	case 404:
+		return "Not Found"
+	case 405:
+		return "Method Not Allowed"
+	case 409:
+		return "Conflict"
+	case 422:
+		return "Unprocessable Entity"
+	case 429:
+		return "Too Many Requests"
+	case 500:
+		return "Internal Server Error"
+	case 502:
+		return "Bad Gateway"
+	case 503:
+		return "Service Unavailable"
+	case 504:
+		return "Gateway Timeout"
+	default:
+		if statusCode >= 200 && statusCode < 300 {
+			return "Success"
+		} else if statusCode >= 300 && statusCode < 400 {
+			return "Redirection"
+		} else if statusCode >= 400 && statusCode < 500 {
+			return "Client Error"
+		} else if statusCode >= 500 && statusCode < 600 {
+			return "Server Error"
+		} else {
+			return "Unknown"
+		}
+	}
 }

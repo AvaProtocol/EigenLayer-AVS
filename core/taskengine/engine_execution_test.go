@@ -91,9 +91,9 @@ func TestGetExecution(t *testing.T) {
 	}
 
 	var bodyContent string
-	if bodyStr, ok := responseData["body"].(string); ok {
+	if bodyStr, ok := responseData["data"].(string); ok {
 		bodyContent = bodyStr
-	} else if bodyMap, ok := responseData["body"].(map[string]interface{}); ok {
+	} else if bodyMap, ok := responseData["data"].(map[string]interface{}); ok {
 		if bodyBytes, err := json.Marshal(bodyMap); err == nil {
 			bodyContent = string(bodyBytes)
 		} else {
@@ -101,7 +101,7 @@ func TestGetExecution(t *testing.T) {
 			return
 		}
 	} else {
-		t.Errorf("Response body is neither string nor map, got type: %T", responseData["body"])
+		t.Errorf("Response data is neither string nor map, got type: %T", responseData["data"])
 		return
 	}
 
@@ -205,9 +205,9 @@ func TestTriggerSync(t *testing.T) {
 	}
 
 	var bodyContent string
-	if bodyStr, ok := responseData["body"].(string); ok {
+	if bodyStr, ok := responseData["data"].(string); ok {
 		bodyContent = bodyStr
-	} else if bodyMap, ok := responseData["body"].(map[string]interface{}); ok {
+	} else if bodyMap, ok := responseData["data"].(map[string]interface{}); ok {
 		if bodyBytes, err := json.Marshal(bodyMap); err == nil {
 			bodyContent = string(bodyBytes)
 		} else {
@@ -215,7 +215,7 @@ func TestTriggerSync(t *testing.T) {
 			return
 		}
 	} else {
-		t.Errorf("Response body is neither string nor map, got type: %T", responseData["body"])
+		t.Errorf("Response data is neither string nor map, got type: %T", responseData["data"])
 		return
 	}
 
@@ -319,9 +319,9 @@ func TestTriggerAsync(t *testing.T) {
 	}
 
 	var bodyContent string
-	if bodyStr, ok := responseData["body"].(string); ok {
+	if bodyStr, ok := responseData["data"].(string); ok {
 		bodyContent = bodyStr
-	} else if bodyMap, ok := responseData["body"].(map[string]interface{}); ok {
+	} else if bodyMap, ok := responseData["data"].(map[string]interface{}); ok {
 		if bodyBytes, err := json.Marshal(bodyMap); err == nil {
 			bodyContent = string(bodyBytes)
 		} else {
@@ -329,7 +329,7 @@ func TestTriggerAsync(t *testing.T) {
 			return
 		}
 	} else {
-		t.Errorf("Response body is neither string nor map, got type: %T", responseData["body"])
+		t.Errorf("Response data is neither string nor map, got type: %T", responseData["data"])
 		return
 	}
 
