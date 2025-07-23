@@ -204,7 +204,17 @@ func TestCreateNodeFromType_LoopExecutionMode_WithContractReadRunner(t *testing.
 			"type": "contractRead",
 			"config": map[string]interface{}{
 				"contractAddress": "{{value}}",
-				"contractAbi":     `[{"constant":true,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"}]`,
+				"contractAbi": []interface{}{
+					map[string]interface{}{
+						"constant":        true,
+						"inputs":          []interface{}{},
+						"name":            "totalSupply",
+						"outputs":         []interface{}{map[string]interface{}{"name": "", "type": "uint256"}},
+						"payable":         false,
+						"stateMutability": "view",
+						"type":            "function",
+					},
+				},
 				"methodCalls": []interface{}{
 					map[string]interface{}{
 						"methodName": "totalSupply",

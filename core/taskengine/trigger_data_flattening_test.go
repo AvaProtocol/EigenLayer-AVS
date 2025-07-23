@@ -440,7 +440,15 @@ func TestContractReadCamelCaseResolution(t *testing.T) {
 	// Test contract read that uses camelCase template
 	contractReadConfig := map[string]interface{}{
 		"contractAddress": "{{eventTrigger.data.contractAddress}}", // camelCase template
-		"contractAbi":     `[{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"}]`,
+		"contractAbi": []interface{}{
+			map[string]interface{}{
+				"inputs":          []interface{}{},
+				"name":            "decimals",
+				"outputs":         []interface{}{map[string]interface{}{"internalType": "uint8", "name": "", "type": "uint8"}},
+				"stateMutability": "view",
+				"type":            "function",
+			},
+		},
 		"methodCalls": []interface{}{
 			map[string]interface{}{
 				"methodName": "decimals",

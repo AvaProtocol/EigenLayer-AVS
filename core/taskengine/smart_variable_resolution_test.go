@@ -94,7 +94,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 
 		// With new behavior, full response structure is returned
 		// Check that we have the raw response structure
-		assert.Equal(t, float64(200), result["statusCode"])
+		assert.Equal(t, 200.0, result["status"]) // Note: field is "status", JSON conversion makes it float64
 
 		// The mock server returns JSON in the body field
 		bodyData, ok := result["data"].(map[string]interface{})
@@ -140,7 +140,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 		assert.NotNil(t, result)
 
 		// With new behavior, full response structure is returned
-		assert.Equal(t, float64(200), result["statusCode"])
+		assert.Equal(t, 200.0, result["status"])
 
 		// The mock server returns JSON in the body field
 		bodyData, ok := result["data"].(map[string]interface{})
@@ -185,7 +185,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 		assert.NotNil(t, result)
 
 		// With new behavior, full response structure is returned
-		assert.Equal(t, float64(200), result["statusCode"])
+		assert.Equal(t, 200.0, result["status"])
 
 		// The mock server returns JSON in the body field
 		bodyData, ok := result["data"].(map[string]interface{})
@@ -227,7 +227,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 		assert.NotNil(t, result)
 
 		// With new behavior, full response structure is returned
-		assert.Equal(t, float64(200), result["statusCode"])
+		assert.Equal(t, 200.0, result["status"])
 
 		// The mock server returns JSON in the body field
 		bodyData, ok := result["data"].(map[string]interface{})
@@ -273,7 +273,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 		assert.NotNil(t, result)
 
 		// With new behavior, full response structure is returned
-		assert.Equal(t, float64(200), result["statusCode"])
+		assert.Equal(t, 200.0, result["status"])
 
 		// The mock server returns JSON in the body field
 		bodyData, ok := result["data"].(map[string]interface{})
@@ -283,7 +283,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 		if data, ok := bodyData["data"]; ok {
 			dataStr := fmt.Sprintf("%v", data)
 			assert.Contains(t, dataStr, "secret_key_123") // api_key resolved from apiKey
-			assert.Contains(t, dataStr, "200")            // status_code resolved from statusCode
+			assert.Contains(t, dataStr, "200")            // status_code resolved from status
 		}
 	})
 }
@@ -379,10 +379,10 @@ func TestCamelCaseVariableSupport(t *testing.T) {
 			"lang": "JavaScript",
 			"source": `
 				// Test accessing REST API output data using camelCase
-				// The data is in the body field of the REST API response
-				const responseDataCamel = apiNode.data.body.responseData;
-				const statusCodeCamel = apiNode.data.body.statusCode;
-				const apiKeyCamel = apiNode.data.body.apiKey;
+				// The data is in the data field of the REST API response (parsed JSON body)
+				const responseDataCamel = apiNode.data.data.responseData;
+				const statusCodeCamel = apiNode.data.data.statusCode;
+				const apiKeyCamel = apiNode.data.data.apiKey;
 				
 				return {
 					responseDataCamel,

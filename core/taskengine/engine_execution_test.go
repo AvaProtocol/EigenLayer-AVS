@@ -105,12 +105,12 @@ func TestGetExecution(t *testing.T) {
 		return
 	}
 
-	if !strings.Contains(bodyContent, "httpbin.org") {
+	if !strings.Contains(bodyContent, "mock-api.ap-aggregator.local") {
 		maxLen := 100
 		if len(bodyContent) < maxLen {
 			maxLen = len(bodyContent)
 		}
-		t.Errorf("Invalid output data. Expected body to contain 'httpbin.org' but got: %s", bodyContent[:maxLen]+"...")
+		t.Errorf("Invalid output data. Expected body to contain 'mock-api.ap-aggregator.local' but got: %s", bodyContent[:maxLen]+"...")
 	}
 
 	executionStatus, err := n.GetExecutionStatus(testutil.TestUser1(), &avsproto.ExecutionReq{
@@ -219,12 +219,12 @@ func TestTriggerSync(t *testing.T) {
 		return
 	}
 
-	if !strings.Contains(bodyContent, "httpbin.org") {
+	if !strings.Contains(bodyContent, "mock-api.ap-aggregator.local") {
 		maxLen := 100
 		if len(bodyContent) < maxLen {
 			maxLen = len(bodyContent)
 		}
-		t.Errorf("Invalid output data. Expected body to contain 'httpbin.org' but got: %s", bodyContent[:maxLen]+"...")
+		t.Errorf("Invalid output data. Expected body to contain 'mock-api.ap-aggregator.local' but got: %s", bodyContent[:maxLen]+"...")
 	}
 
 	executionStatus, err := n.GetExecutionStatus(testutil.TestUser1(), &avsproto.ExecutionReq{
@@ -333,12 +333,12 @@ func TestTriggerAsync(t *testing.T) {
 		return
 	}
 
-	if !strings.Contains(bodyContent, "httpbin.org") {
+	if !strings.Contains(bodyContent, "mock-api.ap-aggregator.local") {
 		maxLen := 100
 		if len(bodyContent) < maxLen {
 			maxLen = len(bodyContent)
 		}
-		t.Errorf("Invalid output data. Expected body to contain 'httpbin.org' but got: %s", bodyContent[:maxLen]+"...")
+		t.Errorf("Invalid output data. Expected body to contain 'mock-api.ap-aggregator.local' but got: %s", bodyContent[:maxLen]+"...")
 	}
 
 	executionStatus, err := n.GetExecutionStatus(testutil.TestUser1(), &avsproto.ExecutionReq{

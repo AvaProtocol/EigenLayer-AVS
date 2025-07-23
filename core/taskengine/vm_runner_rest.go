@@ -277,12 +277,11 @@ func (m *MockHTTPExecutor) handleIPEndpoint(w http.ResponseWriter, requestPath s
 
 // handleDefaultResponse handles the default mock API response
 func (m *MockHTTPExecutor) handleDefaultResponse(w http.ResponseWriter, url, method, body string, headers map[string]string) {
-	// Return the API response data wrapped in a map structure
+	// Return the API response data wrapped in a map structure, compatible with httpbin.org format
 	response := map[string]interface{}{
 		"args":    parseQueryParams(url),
-		"body":    body,
+		"data":    parseJSONBody(body), // data is the parsed JSON body (not raw string)
 		"headers": headers,
-		"json":    parseJSONBody(body),
 		"method":  method,
 		"url":     url,
 	}
