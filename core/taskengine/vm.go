@@ -3516,10 +3516,44 @@ func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsp
 
 	inputArray, ok := inputVar.([]interface{})
 	if !ok {
-		err := fmt.Errorf("input variable %s is not an array", inputVarName)
-		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		finalizeExecutionStep(s, false, err.Error(), log.String())
-		return s, err
+		// Try to extract from data field if wrapped (common for trigger variables)
+		if dataMap, ok := inputVar.(map[string]interface{}); ok {
+			log.WriteString(fmt.Sprintf("\nInput variable is a map with keys: %v", getMapKeys(dataMap)))
+
+			if dataValue, hasData := dataMap["data"]; hasData {
+				log.WriteString(fmt.Sprintf("\nFound 'data' field of type: %T", dataValue))
+
+				// Try different array types that might be present
+				if dataArray, ok := dataValue.([]interface{}); ok {
+					inputArray = dataArray
+					log.WriteString(fmt.Sprintf("\nExtracted array from 'data' field: %d items", len(inputArray)))
+				} else if dataSlice, ok := dataValue.([]any); ok {
+					// Handle []any type
+					inputArray = make([]interface{}, len(dataSlice))
+					for i, v := range dataSlice {
+						inputArray[i] = v
+					}
+					log.WriteString(fmt.Sprintf("\nExtracted []any array from 'data' field: %d items", len(inputArray)))
+				} else {
+					// Data field exists but is not an array
+					err := fmt.Errorf("input variable %s.data is type %T, expected array", inputVarName, dataValue)
+					log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+					finalizeExecutionStep(s, false, err.Error(), log.String())
+					return s, err
+				}
+			} else {
+				// No data field found
+				err := fmt.Errorf("input variable %s is not an array and has no 'data' field (available keys: %v)", inputVarName, getMapKeys(dataMap))
+				log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+				finalizeExecutionStep(s, false, err.Error(), log.String())
+				return s, err
+			}
+		} else {
+			err := fmt.Errorf("input variable %s is type %T, expected array or object with 'data' field", inputVarName, inputVar)
+			log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+			finalizeExecutionStep(s, false, err.Error(), log.String())
+			return s, err
+		}
 	}
 
 	// Determine execution mode
@@ -3786,4 +3820,4 @@ func (v *VM) processRestApiTemplates(restApi *avsproto.RestAPINode, iterInputs m
 	return restApi
 }
 
-// executeSequentialPath executes a sequential execution path starting from the given step
+// getMapKeys returns the keys of a map for debugging purposes
