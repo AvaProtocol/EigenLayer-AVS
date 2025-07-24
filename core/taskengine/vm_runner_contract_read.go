@@ -321,30 +321,37 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	}
 
 	config := node.Config
-	if config.ContractAddress == "" || config.ContractAbi == "" {
+	// Note: ABI is handled directly from protobuf Values using optimized parsing
+	if config.ContractAddress == "" || len(config.ContractAbi) == 0 {
 		err = fmt.Errorf("missing required configuration: contractAddress and contractAbi are required")
 		return s, err
 	}
+
+	// Validate contract address
+	if !common.IsHexAddress(config.ContractAddress) {
+		err = fmt.Errorf("invalid contract address: %s", config.ContractAddress)
+		return s, err
+	}
+
+	contractAddress := r.vm.preprocessTextWithVariableMapping(config.ContractAddress)
+	// Note: ABI is never subject to template variable substitution
 
 	if len(config.MethodCalls) == 0 {
 		err = fmt.Errorf("no method calls specified")
 		return s, err
 	}
 
-	// Preprocess template variables in configuration
-	contractAddress := r.vm.preprocessTextWithVariableMapping(config.ContractAddress)
-	contractAbi := r.vm.preprocessTextWithVariableMapping(config.ContractAbi)
-
-	// Validate contract address
-	if !common.IsHexAddress(contractAddress) {
-		err = fmt.Errorf("invalid contract address: %s", contractAddress)
-		return s, err
-	}
-
-	// Parse the ABI
-	parsedABI, err := abi.JSON(strings.NewReader(contractAbi))
-	if err != nil {
-		err = fmt.Errorf("failed to parse ABI: %v", err)
+	// Parse the ABI - OPTIMIZED: Use protobuf Values directly
+	var parsedABI *abi.ABI
+	if len(config.ContractAbi) > 0 {
+		if optimizedParsedABI, parseErr := ParseABIOptimized(config.ContractAbi); parseErr == nil {
+			parsedABI = optimizedParsedABI
+		} else {
+			err = fmt.Errorf("failed to parse ABI: %v", parseErr)
+			return s, err
+		}
+	} else {
+		err = fmt.Errorf("missing required configuration: contractAbi is required")
 		return s, err
 	}
 
@@ -375,7 +382,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		}
 
 		// Execute the method call using existing callData (backend will handle methodParams separately)
-		result := r.executeMethodCallWithoutFormatting(ctx, &parsedABI, contractAddr, methodCall.GetMethodName(), methodCall.GetCallData())
+		result := r.executeMethodCallWithoutFormatting(ctx, parsedABI, contractAddr, methodCall.GetMethodName(), methodCall.GetCallData())
 		methodResults = append(methodResults, result)
 
 		// If this method has applyToFields, it provides decimal formatting for other methods
@@ -510,7 +517,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 			if r.vm.logger != nil {
 				r.vm.logger.Debug("Re-executing method with decimal formatting", "methodName", methodName, "fieldsToFormat", fieldsToFormat)
 			}
-			formattedResult := r.executeMethodCallWithDecimalFormatting(ctx, &parsedABI, contractAddr, methodCall, decimalsValue, fieldsToFormat)
+			formattedResult := r.executeMethodCallWithDecimalFormatting(ctx, parsedABI, contractAddr, methodCall, decimalsValue, fieldsToFormat)
 			results = append(results, formattedResult)
 
 			// Collect raw fields metadata

@@ -48,15 +48,15 @@ func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConf
 	return r
 }
 
-func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) (string, string, string, []*avsproto.ContractWriteNode_MethodCall, error) {
-	var contractAddress, callData, contractAbi string
+func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) (string, string, []*avsproto.ContractWriteNode_MethodCall, error) {
+	var contractAddress, callData string
 	var methodCalls []*avsproto.ContractWriteNode_MethodCall
 
 	// Priority 1: Use node.Config if available (static configuration)
 	if node.Config != nil {
 		contractAddress = node.Config.ContractAddress
 		callData = node.Config.CallData
-		contractAbi = node.Config.ContractAbi
+		// Note: ABI is handled directly from protobuf Values in Execute method for optimization
 		methodCalls = node.Config.MethodCalls
 	}
 
@@ -72,17 +72,11 @@ func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) 
 			callData = dataStr
 		}
 	}
-	if abi, exists := r.vm.vars["contract_abi"]; exists {
-		if abiStr, ok := abi.(string); ok {
-			contractAbi = abiStr
-		}
-	}
 	r.vm.mu.Unlock()
 
 	// Apply template variable preprocessing
 	contractAddress = r.vm.preprocessTextWithVariableMapping(contractAddress)
 	callData = r.vm.preprocessTextWithVariableMapping(callData)
-	contractAbi = r.vm.preprocessTextWithVariableMapping(contractAbi)
 
 	// If we have method_calls from config but also call_data from variables, prefer method_calls
 	// If no method_calls but we have call_data, create a single method call
@@ -96,19 +90,19 @@ func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) 
 	}
 
 	if contractAddress == "" {
-		return "", "", "", nil, fmt.Errorf("missing required configuration: contractAddress")
+		return "", "", nil, fmt.Errorf("missing required configuration: contractAddress")
 	}
 
 	// Validate contract address format
 	if !common.IsHexAddress(contractAddress) {
-		return "", "", "", nil, fmt.Errorf("invalid contract address format: %s", contractAddress)
+		return "", "", nil, fmt.Errorf("invalid contract address format: %s", contractAddress)
 	}
 
 	if len(methodCalls) == 0 {
-		return "", "", "", nil, fmt.Errorf("missing required configuration: either method_calls or call_data must be provided")
+		return "", "", nil, fmt.Errorf("missing required configuration: either method_calls or call_data must be provided")
 	}
 
-	return contractAddress, callData, contractAbi, methodCalls, nil
+	return contractAddress, callData, methodCalls, nil
 }
 
 func (r *ContractWriteProcessor) executeMethodCall(
@@ -329,7 +323,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	}()
 
 	// Get input configuration
-	contractAddress, _, contractAbi, methodCalls, inputErr := r.getInputData(node)
+	contractAddress, _, methodCalls, inputErr := r.getInputData(node)
 	if inputErr != nil {
 		err = inputErr
 		return s, err
@@ -338,14 +332,14 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	log.WriteString(fmt.Sprintf("Contract Write Node: %s\n", contractAddress))
 	log.WriteString(fmt.Sprintf("Number of method calls: %d\n", len(methodCalls)))
 
-	// Parse ABI if provided
+	// Parse ABI if provided - OPTIMIZED: Use protobuf Values directly
 	var parsedABI *abi.ABI
-	if contractAbi != "" {
-		if parsed, parseErr := abi.JSON(strings.NewReader(contractAbi)); parseErr == nil {
-			parsedABI = &parsed
-			log.WriteString("ABI parsed successfully for event decoding\n")
+	if node.Config != nil && len(node.Config.ContractAbi) > 0 {
+		if optimizedParsedABI, parseErr := ParseABIOptimized(node.Config.ContractAbi); parseErr == nil {
+			parsedABI = optimizedParsedABI
+			log.WriteString("✅ ABI parsed successfully using optimized shared method (no string conversion)\n")
 		} else {
-			log.WriteString(fmt.Sprintf("Warning: Failed to parse ABI: %v\n", parseErr))
+			log.WriteString(fmt.Sprintf("Warning: Failed to parse ABI with optimized method: %v\n", parseErr))
 		}
 	}
 

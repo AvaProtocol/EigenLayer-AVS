@@ -1,6 +1,7 @@
 package trigger
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strings"
@@ -11,9 +12,28 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
+
+// convertJSONABIToProtobufValues converts a JSON ABI string to protobuf Values for tests
+func convertJSONABIToProtobufValues(jsonABI string) []*structpb.Value {
+	var abiArray []interface{}
+	if err := json.Unmarshal([]byte(jsonABI), &abiArray); err != nil {
+		panic("Failed to parse ABI JSON in test: " + err.Error())
+	}
+
+	abiValues := make([]*structpb.Value, len(abiArray))
+	for i, item := range abiArray {
+		if value, err := structpb.NewValue(item); err != nil {
+			panic("Failed to convert ABI item to protobuf Value: " + err.Error())
+		} else {
+			abiValues[i] = value
+		}
+	}
+	return abiValues
+}
 
 // Chainlink Price Feed ABI - AnswerUpdated event
 const ChainlinkAggregatorABI = `[
@@ -125,7 +145,7 @@ func TestEventTriggerConditionalFiltering(t *testing.T) {
 						Values: []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"}, // AnswerUpdated signature
 					},
 				},
-				ContractAbi: ChainlinkAggregatorABI,
+				ContractAbi: convertJSONABIToProtobufValues(ChainlinkAggregatorABI),
 				Conditions:  []*avsproto.EventCondition{tc.priceCondition},
 			}
 
@@ -174,7 +194,7 @@ func TestEventTriggerMultipleConditions(t *testing.T) {
 				Values: []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"},
 			},
 		},
-		ContractAbi: ChainlinkAggregatorABI,
+		ContractAbi: convertJSONABIToProtobufValues(ChainlinkAggregatorABI),
 		Conditions: []*avsproto.EventCondition{
 			{
 				FieldName: "current",
@@ -272,7 +292,11 @@ func TestEventTriggerInvalidABI(t *testing.T) {
 				Values: []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"},
 			},
 		},
-		ContractAbi: "invalid json abi",
+		ContractAbi: func() []*structpb.Value {
+			// Create invalid ABI structure for testing error handling
+			invalidValue, _ := structpb.NewValue("invalid json abi")
+			return []*structpb.Value{invalidValue}
+		}(),
 		Conditions: []*avsproto.EventCondition{
 			{
 				FieldName: "current",
@@ -461,7 +485,7 @@ func TestSignedIntegerConditions(t *testing.T) {
 						Values: []string{mockLog.Topics[0].Hex()}, // Use actual signature from mock log
 					},
 				},
-				ContractAbi: createSignedIntegerABI(),
+				ContractAbi: convertJSONABIToProtobufValues(createSignedIntegerABI()),
 				Conditions:  []*avsproto.EventCondition{tc.condition},
 			}
 
@@ -596,7 +620,7 @@ func createSignedIntegerEventLog(value *big.Int) types.Log {
 		},
 		Data:        []byte{},
 		BlockNumber: 12345,
-		TxHash:      common.HexToHash("0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef"),
+		TxHash:      common.HexToHash("0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef"),
 		Index:       0,
 	}
 }

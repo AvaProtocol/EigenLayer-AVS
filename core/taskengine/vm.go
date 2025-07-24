@@ -2,7 +2,6 @@ package taskengine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -1249,7 +1248,7 @@ func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*a
 	var executionLog *avsproto.Execution_Step
 
 	// Check if node has empty config first - let processor handle this case
-	if node.Config != nil && (node.Config.ContractAddress == "" || len(node.Config.MethodCalls) == 0 || node.Config.ContractAbi == "") {
+	if node.Config != nil && (node.Config.ContractAddress == "" || len(node.Config.MethodCalls) == 0 || len(node.Config.ContractAbi) == 0) {
 		// Empty config case - create a mock processor to handle the error
 		processor := NewContractReadProcessor(v, nil)
 		executionLog, err := processor.Execute(stepID, node)
@@ -2172,11 +2171,11 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		}
 
 		if contractAbiArray, ok := config["contractAbi"].([]interface{}); ok {
-			// Convert array to JSON string for protobuf storage
-			if abiBytes, err := json.Marshal(contractAbiArray); err == nil {
-				contractConfig.ContractAbi = string(abiBytes)
+			// Convert array to protobuf Values for storage
+			if abiValues, err := ConvertInterfaceArrayToProtobufValues(contractAbiArray); err == nil {
+				contractConfig.ContractAbi = abiValues
 			} else {
-				return nil, fmt.Errorf("failed to convert contractAbi array to JSON: %v", err)
+				return nil, fmt.Errorf("failed to convert contractAbi array to protobuf Values: %v", err)
 			}
 		} else {
 			return nil, fmt.Errorf("contract read node requires 'contractAbi' field as array")
@@ -2243,10 +2242,15 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			return nil, fmt.Errorf("contract write node requires 'contractAddress' field")
 		}
 
-		if abi, ok := config["contractAbi"].(string); ok {
-			contractConfig.ContractAbi = abi
+		if contractAbiArray, ok := config["contractAbi"].([]interface{}); ok {
+			// Convert array to protobuf Values for storage
+			if abiValues, err := ConvertInterfaceArrayToProtobufValues(contractAbiArray); err == nil {
+				contractConfig.ContractAbi = abiValues
+			} else {
+				return nil, fmt.Errorf("failed to convert contractAbi array to protobuf Values: %v", err)
+			}
 		} else {
-			return nil, fmt.Errorf("contract write node requires 'contractAbi' field")
+			return nil, fmt.Errorf("contract write node requires 'contractAbi' field as array")
 		}
 
 		// Use camelCase only for consistency
@@ -2528,11 +2532,11 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 
 			// Handle contractAbi - accept only array format
 			if contractAbiArray, ok := runnerConfig["contractAbi"].([]interface{}); ok {
-				// Convert array to JSON string for protobuf storage
-				if abiBytes, err := json.Marshal(contractAbiArray); err == nil {
-					crConfig.ContractAbi = string(abiBytes)
+				// Convert array to protobuf Values for storage
+				if abiValues, err := ConvertInterfaceArrayToProtobufValues(contractAbiArray); err == nil {
+					crConfig.ContractAbi = abiValues
 				} else {
-					return nil, fmt.Errorf("failed to convert contractAbi array to JSON: %v", err)
+					return nil, fmt.Errorf("failed to convert contractAbi array to protobuf Values: %v", err)
 				}
 			} else {
 				return nil, fmt.Errorf("loop node contractRead runner requires 'contractAbi' field as array")
@@ -2584,8 +2588,14 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			if contractAddress, ok := runnerConfig["contractAddress"].(string); ok {
 				cwConfig.ContractAddress = contractAddress
 			}
-			if contractAbi, ok := runnerConfig["contractAbi"].(string); ok {
-				cwConfig.ContractAbi = contractAbi
+			// Handle contractAbi - accept only array format
+			if contractAbiArray, ok := runnerConfig["contractAbi"].([]interface{}); ok {
+				// Convert array to protobuf Values for storage
+				if abiValues, err := ConvertInterfaceArrayToProtobufValues(contractAbiArray); err == nil {
+					cwConfig.ContractAbi = abiValues
+				} else {
+					return nil, fmt.Errorf("failed to convert contractAbi array to protobuf Values for loop contractWrite: %v", err)
+				}
 			}
 			if callData, ok := runnerConfig["callData"].(string); ok {
 				cwConfig.CallData = callData
@@ -2927,9 +2937,15 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 	case *avsproto.TaskNode_ContractRead:
 		contractRead := taskNode.GetContractRead()
 		if contractRead != nil && contractRead.Config != nil {
+			// Convert contractAbi from protobuf Values back to array
+			var contractAbiArray []interface{}
+			for _, value := range contractRead.Config.ContractAbi {
+				contractAbiArray = append(contractAbiArray, value.AsInterface())
+			}
+
 			config := map[string]interface{}{
 				"contractAddress": contractRead.Config.ContractAddress,
-				"contractAbi":     contractRead.Config.ContractAbi,
+				"contractAbi":     contractAbiArray,
 			}
 
 			// Handle method calls - extract fields to simple map for protobuf compatibility
@@ -2968,9 +2984,15 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 	case *avsproto.TaskNode_ContractWrite:
 		contractWrite := taskNode.GetContractWrite()
 		if contractWrite != nil && contractWrite.Config != nil {
+			// Convert contractAbi from protobuf Values back to array
+			var contractAbiArray []interface{}
+			for _, value := range contractWrite.Config.ContractAbi {
+				contractAbiArray = append(contractAbiArray, value.AsInterface())
+			}
+
 			config := map[string]interface{}{
 				"contractAddress": contractWrite.Config.ContractAddress,
-				"contractAbi":     contractWrite.Config.ContractAbi,
+				"contractAbi":     contractAbiArray,
 				"callData":        contractWrite.Config.CallData,
 			}
 
@@ -3114,9 +3136,15 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 		}
 		return config
 	case *avsproto.LoopNode_ContractRead:
+		// Convert contractAbi from protobuf Values back to array
+		var contractAbiArray []interface{}
+		for _, value := range runner.ContractRead.Config.ContractAbi {
+			contractAbiArray = append(contractAbiArray, value.AsInterface())
+		}
+
 		configData := map[string]interface{}{
 			"contractAddress": runner.ContractRead.Config.ContractAddress,
-			"contractAbi":     runner.ContractRead.Config.ContractAbi,
+			"contractAbi":     contractAbiArray,
 		}
 		// Handle method calls if present
 		if len(runner.ContractRead.Config.MethodCalls) > 0 {
@@ -3149,9 +3177,15 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 			"config": configData,
 		}
 	case *avsproto.LoopNode_ContractWrite:
+		// Convert contractAbi from protobuf Values back to array
+		var contractAbiArray []interface{}
+		for _, value := range runner.ContractWrite.Config.ContractAbi {
+			contractAbiArray = append(contractAbiArray, value.AsInterface())
+		}
+
 		configData := map[string]interface{}{
 			"contractAddress": runner.ContractWrite.Config.ContractAddress,
-			"contractAbi":     runner.ContractWrite.Config.ContractAbi,
+			"contractAbi":     contractAbiArray,
 			"callData":        runner.ContractWrite.Config.CallData,
 		}
 		// Handle method calls if present
@@ -3913,7 +3947,7 @@ func (v *VM) processContractWriteTemplates(contractWrite *avsproto.ContractWrite
 	processed := &avsproto.ContractWriteNode{
 		Config: &avsproto.ContractWriteNode_Config{
 			ContractAddress: v.substituteTemplateVariables(contractWrite.Config.ContractAddress, iterInputs),
-			ContractAbi:     v.substituteTemplateVariables(contractWrite.Config.ContractAbi, iterInputs),
+			ContractAbi:     contractWrite.Config.ContractAbi, // ⚠️ CRITICAL: ABI is NEVER subject to template substitution
 			CallData:        v.substituteTemplateVariables(contractWrite.Config.CallData, iterInputs),
 		},
 	}
@@ -3937,7 +3971,7 @@ func (v *VM) processContractReadTemplates(contractRead *avsproto.ContractReadNod
 	processed := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: v.substituteTemplateVariables(contractRead.Config.ContractAddress, iterInputs),
-			ContractAbi:     v.substituteTemplateVariables(contractRead.Config.ContractAbi, iterInputs),
+			ContractAbi:     contractRead.Config.ContractAbi, // ⚠️ CRITICAL: ABI is NEVER subject to template substitution
 		},
 	}
 

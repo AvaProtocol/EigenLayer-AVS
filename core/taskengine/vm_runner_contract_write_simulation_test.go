@@ -30,10 +30,38 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		config := testutil.GetAggregatorConfig()
 		engine := New(db, config, nil, testutil.GetLogger())
 
+		// Create ABI as parsed array (what CreateNodeFromType expects)
+		contractAbi := []interface{}{
+			map[string]interface{}{
+				"inputs": []interface{}{
+					map[string]interface{}{
+						"internalType": "address",
+						"name":         "spender",
+						"type":         "address",
+					},
+					map[string]interface{}{
+						"internalType": "uint256",
+						"name":         "amount",
+						"type":         "uint256",
+					},
+				},
+				"name": "approve",
+				"outputs": []interface{}{
+					map[string]interface{}{
+						"internalType": "bool",
+						"name":         "",
+						"type":         "bool",
+					},
+				},
+				"stateMutability": "nonpayable",
+				"type":            "function",
+			},
+		}
+
 		// Test run_node_immediately
 		nodeConfig := map[string]interface{}{
 			"contractAddress": baseSepoliaUsdcAddress.Hex(),
-			"contractAbi":     `[{"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}]`,
+			"contractAbi":     contractAbi, // Now using parsed array instead of JSON string
 			"methodCalls": []interface{}{
 				map[string]interface{}{
 					"callData":   approveCallData,

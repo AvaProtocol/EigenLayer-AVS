@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -337,81 +338,32 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	var isTransferEvent bool
 
 	contractABI := query.GetContractAbi()
-	if n.logger != nil {
-		n.logger.Info("🔍 EventTrigger: Checking for contract ABI",
-			"hasABI", contractABI != "",
-			"abiLength", len(contractABI))
-	}
-
-	if contractABI != "" {
-		// Parse using the provided ABI
+	// OPTIMIZED: Use protobuf Values directly without string conversion
+	if len(contractABI) > 0 {
 		if n.logger != nil {
-			n.logger.Info("🔧 EventTrigger: Using ABI-based parsing")
+			n.logger.Info("🔍 EventTrigger: Using optimized ABI parsing (no string conversion)",
+				"hasABI", true,
+				"abiElementCount", len(contractABI))
 		}
-		parsedEventData, err := n.parseEventWithABI(simulatedLog, contractABI, query)
-		if err != nil {
-			n.logger.Warn("Failed to parse event with provided ABI, using raw data", "error", err)
-			// Fallback to raw data if ABI parsing fails
-			parsedData = metadata
-		} else {
-			if n.logger != nil {
-				n.logger.Info("✅ EventTrigger: ABI parsing successful",
-					"eventName", parsedEventData["eventName"],
-					"fieldCount", len(parsedEventData))
-			}
+
+		if parsedEventData, err := n.parseEventWithABIOptimized(simulatedLog, contractABI, query); err == nil {
+			// Success with optimized parsing
 			parsedData = parsedEventData
 
 			// Check if this is enriched transfer data
 			if eventName, ok := parsedEventData["eventName"].(string); ok && eventName == "Transfer" {
 				isTransferEvent = true
 			}
+		} else {
+			n.logger.Warn("Failed to parse event with optimized ABI method, using raw data", "error", err)
+			// Fallback to raw data if optimized ABI parsing fails
+			parsedData = metadata
 		}
 	} else {
-		// No ABI provided, use raw event data
 		if n.logger != nil {
-			n.logger.Info("⚠️ EventTrigger: No ABI provided, using raw event data")
+			n.logger.Info("🔍 EventTrigger: No ABI provided, using raw log data")
 		}
-
-		// Create a more user-friendly structure for raw event data
-		// Include both raw blockchain data and some basic decoded information
-		// Convert topics array to interface{} slice for protobuf compatibility
-		topicsInterface := make([]interface{}, len(topics))
-		for i, topic := range topics {
-			topicsInterface[i] = topic
-		}
-
-		parsedData = map[string]interface{}{
-			"eventFound":      true,
-			"contractAddress": simulatedLog.Address.Hex(),
-			"blockNumber":     simulatedLog.BlockNumber,
-			"transactionHash": simulatedLog.TxHash.Hex(),
-			"logIndex":        simulatedLog.Index,
-			"topics":          topicsInterface, // Now protobuf-compatible
-			"rawData":         "0x" + common.Bytes2Hex(simulatedLog.Data),
-			"chainId":         chainID,
-			"eventSignature":  topics[0], // First topic is always the event signature
-		}
-
-		// Add basic event signature information if available
-		if len(topics) > 0 {
-			parsedData["eventSignature"] = topics[0]
-
-			// Try to identify common event types by signature
-			switch topics[0] {
-			case "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef":
-				parsedData["eventType"] = "Transfer"
-				parsedData["eventDescription"] = "ERC20 Transfer event"
-			case "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925":
-				parsedData["eventType"] = "Approval"
-				parsedData["eventDescription"] = "ERC20 Approval event"
-			case "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c":
-				parsedData["eventType"] = "Deposit"
-				parsedData["eventDescription"] = "WETH Deposit event"
-			default:
-				parsedData["eventType"] = "Unknown"
-				parsedData["eventDescription"] = "Unknown event type - provide ABI for detailed parsing"
-			}
-		}
+		parsedData = metadata
 	}
 
 	// Build the result structure based on event type
@@ -437,7 +389,7 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	}
 
 	if n.logger != nil {
-		hasABI := contractABI != ""
+		hasABI := len(contractABI) > 0
 		n.logger.Info("✅ EventTrigger: Tenderly simulation completed successfully",
 			"contract", simulatedLog.Address.Hex(),
 			"block", simulatedLog.BlockNumber,
@@ -457,6 +409,34 @@ func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string
 		return nil, fmt.Errorf("failed to parse contract ABI: %w", err)
 	}
 
+	// Find the matching event in ABI using the first topic (event signature)
+	return n.parseEventWithParsedABI(eventLog, &contractABI, query)
+}
+
+// parseEventWithABIOptimized efficiently parses an event using protobuf Values without string conversion
+func (n *Engine) parseEventWithABIOptimized(eventLog *types.Log, abiValues []*structpb.Value, query *avsproto.EventTrigger_Query) (map[string]interface{}, error) {
+	if len(abiValues) == 0 {
+		return nil, fmt.Errorf("empty ABI provided")
+	}
+
+	// Use the optimized helper to get bytes.Reader directly
+	reader, err := ConvertContractAbiToReader(abiValues)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert ABI to reader: %v", err)
+	}
+
+	// Parse ABI directly from bytes.Reader - no string conversion!
+	contractABI, err := abi.JSON(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse contract ABI: %w", err)
+	}
+
+	// Find the matching event in ABI using the first topic (event signature)
+	return n.parseEventWithParsedABI(eventLog, &contractABI, query)
+}
+
+// parseEventWithParsedABI contains the shared logic for both optimized and legacy methods
+func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.ABI, query *avsproto.EventTrigger_Query) (map[string]interface{}, error) {
 	// Find the matching event in ABI using the first topic (event signature)
 	if len(eventLog.Topics) == 0 {
 		return nil, fmt.Errorf("event log has no topics")
@@ -2331,7 +2311,13 @@ func (n *Engine) convertMapToEventQuery(queryMap map[string]interface{}) (*avspr
 	// Extract contract ABI if present
 	if abiInterface, exists := queryMap["contractAbi"]; exists {
 		if abiStr, ok := abiInterface.(string); ok {
-			query.ContractAbi = abiStr
+			// Parse the JSON string back to array and convert to protobuf Values
+			var abiArray []interface{}
+			if err := json.Unmarshal([]byte(abiStr), &abiArray); err == nil {
+				if abiValues, err := ConvertInterfaceArrayToProtobufValues(abiArray); err == nil {
+					query.ContractAbi = abiValues
+				}
+			}
 		}
 	}
 

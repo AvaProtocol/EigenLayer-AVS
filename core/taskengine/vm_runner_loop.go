@@ -736,7 +736,7 @@ func (r *LoopProcessor) processContractReadTemplates(contractRead *avsproto.Cont
 	processed := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: r.substituteTemplateVariables(contractRead.Config.ContractAddress, iterInputs),
-			ContractAbi:     r.substituteTemplateVariables(contractRead.Config.ContractAbi, iterInputs),
+			ContractAbi:     contractRead.Config.ContractAbi, // ⚠️ CRITICAL: ABI is NEVER subject to template substitution
 		},
 	}
 
@@ -764,7 +764,7 @@ func (r *LoopProcessor) processContractWriteTemplates(contractWrite *avsproto.Co
 	processed := &avsproto.ContractWriteNode{
 		Config: &avsproto.ContractWriteNode_Config{
 			ContractAddress: r.substituteTemplateVariables(contractWrite.Config.ContractAddress, iterInputs),
-			ContractAbi:     r.substituteTemplateVariables(contractWrite.Config.ContractAbi, iterInputs),
+			ContractAbi:     contractWrite.Config.ContractAbi, // ⚠️ CRITICAL: ABI is NEVER subject to template substitution
 			CallData:        r.substituteTemplateVariables(contractWrite.Config.CallData, iterInputs),
 		},
 	}

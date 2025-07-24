@@ -7,10 +7,13 @@ import (
 	"math/big"
 	"strings"
 
+	"bytes"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/modules"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
 	"github.com/dop251/goja"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -267,4 +270,83 @@ func SubstituteTemplateVariablesArray(arr []string, iterInputs map[string]interf
 		result[i] = substituteFunc(item, iterInputs)
 	}
 	return result
+}
+
+// ConvertContractAbiToReader converts a []*structpb.Value array (from protobuf) directly to bytes.Reader
+// for efficient ABI parsing without unnecessary string conversion.
+func ConvertContractAbiToReader(abiValues []*structpb.Value) (*bytes.Reader, error) {
+	if len(abiValues) == 0 {
+		return bytes.NewReader([]byte("[]")), nil
+	}
+
+	// Convert each protobuf Value back to Go interface{}
+	abiArray := make([]interface{}, len(abiValues))
+	for i, value := range abiValues {
+		abiArray[i] = value.AsInterface()
+	}
+
+	// Marshal directly to JSON bytes
+	abiBytes, err := json.Marshal(abiArray)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert contractAbi array to JSON: %v", err)
+	}
+
+	// Return bytes.Reader directly - no string conversion!
+	return bytes.NewReader(abiBytes), nil
+}
+
+// ParseABIOptimized efficiently parses ABI from protobuf Values without string conversion
+// This function is shared between ContractReadProcessor and ContractWriteProcessor
+func ParseABIOptimized(abiValues []*structpb.Value) (*abi.ABI, error) {
+	if len(abiValues) == 0 {
+		return nil, fmt.Errorf("empty ABI")
+	}
+
+	// Use the optimized helper to get bytes.Reader directly
+	reader, err := ConvertContractAbiToReader(abiValues)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert ABI to reader: %v", err)
+	}
+
+	// Parse ABI directly from bytes.Reader - no string conversion!
+	parsedABI, err := abi.JSON(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ABI: %v", err)
+	}
+
+	return &parsedABI, nil
+}
+
+// ConvertInterfaceArrayToProtobufValues converts a []interface{} array to []*structpb.Value array
+// for protobuf contractAbi field storage.
+func ConvertInterfaceArrayToProtobufValues(abiArray []interface{}) ([]*structpb.Value, error) {
+	if len(abiArray) == 0 {
+		return []*structpb.Value{}, nil
+	}
+
+	// Convert each interface{} to protobuf Value
+	abiValues := make([]*structpb.Value, len(abiArray))
+	for i, item := range abiArray {
+		value, err := structpb.NewValue(item)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert contractAbi element %d to protobuf Value: %v", i, err)
+		}
+		abiValues[i] = value
+	}
+
+	return abiValues, nil
+}
+
+// ConvertJSONABIToProtobufValues converts a JSON ABI string to protobuf Values
+// This is primarily used by test files to convert user-input format ABIs
+func ConvertJSONABIToProtobufValues(jsonABI string) []*structpb.Value {
+	var abiArray []interface{}
+	if err := json.Unmarshal([]byte(jsonABI), &abiArray); err != nil {
+		return nil
+	}
+	abiValues, err := ConvertInterfaceArrayToProtobufValues(abiArray)
+	if err != nil {
+		return nil
+	}
+	return abiValues
 }

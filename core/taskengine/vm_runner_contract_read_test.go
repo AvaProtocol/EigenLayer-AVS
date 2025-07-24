@@ -9,11 +9,23 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
+// Test ABI data - mirrors real user input format (same as JavaScript SDK tests)
+const (
+	// ERC20 balanceOf function - what users actually provide
+	testBalanceOfABI = `[{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`
+
+	// Chainlink getRoundData function - what users actually provide
+	testGetRoundDataABI = `[{"inputs":[{"internalType":"uint80","name":"_roundId","type":"uint80"}],"name":"getRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`
+
+	// Combined decimals + getRoundData ABI - what users actually provide
+	testDecimalsAndGetRoundDataABI = `[{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint80","name":"_roundId","type":"uint80"}],"name":"getRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`
+)
+
 func TestContractReadSimpleReturn(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
-			ContractAbi:     `[{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`,
+			ContractAbi:     ConvertJSONABIToProtobufValues(testBalanceOfABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:   "0x70a08231000000000000000000000000ce289bb9fb0a9591317981223cbe33d5dc42268d",
@@ -118,7 +130,7 @@ func TestContractReadComplexReturn(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0xc59E3633BAAC79493d908e63626716e204A45EdF",
-			ContractAbi:     `[{"inputs":[{"internalType":"uint80","name":"_roundId","type":"uint80"}],"name":"getRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`,
+			ContractAbi:     ConvertJSONABIToProtobufValues(testGetRoundDataABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:   "0x9a6fc8f500000000000000000000000000000000000000000000000100000000000052e7",
@@ -249,7 +261,7 @@ func TestContractReadWithDecimalFormatting(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0xc59E3633BAAC79493d908e63626716e204A45EdF",
-			ContractAbi:     `[{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint80","name":"_roundId","type":"uint80"}],"name":"getRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`,
+			ContractAbi:     ConvertJSONABIToProtobufValues(testDecimalsAndGetRoundDataABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:      "0x313ce567", // decimals()

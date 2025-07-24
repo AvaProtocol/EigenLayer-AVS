@@ -167,8 +167,8 @@ message EventTrigger {
     // Used for safety - if exceeded, operator notifies aggregator to cancel task
     optional uint32 max_events_per_block = 3;
     
-    // Contract ABI as JSON string (converted from array input)
-    string contract_abi = 4;
+    // Contract ABI as array of ABI elements
+    repeated google.protobuf.Value contract_abi = 4;
     
     // Event conditions to evaluate on decoded event data
     repeated EventCondition conditions = 5;
@@ -354,8 +354,8 @@ message ContractWriteNode {
   message Config {
     string contract_address = 1;
     string call_data = 2;
-    // The ABI as JSON string (converted from array input)
-    string contract_abi = 3;
+    // The ABI as array of ABI elements
+    repeated google.protobuf.Value contract_abi = 3;
     // Support for multiple method calls in sequence (similar to ContractRead)
     repeated MethodCall method_calls = 4;
   }
@@ -396,8 +396,8 @@ message ContractReadNode {
 
   message Config {
     string contract_address = 1;
-    // The ABI as JSON string (converted from array input)
-    string contract_abi = 2;
+    // The ABI as array of ABI elements
+    repeated google.protobuf.Value contract_abi = 2;
     // Array of method calls to execute serially
     repeated MethodCall method_calls = 3;
   }

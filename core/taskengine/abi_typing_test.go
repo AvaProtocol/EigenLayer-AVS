@@ -288,12 +288,22 @@ func TestValueRawPopulatedWhenDecimalsCallFails(t *testing.T) {
 		}(),
 	}
 
+	// Convert testABI string to protobuf Value array
+	var abiArray []interface{}
+	if err := json.Unmarshal([]byte(testABI), &abiArray); err != nil {
+		t.Fatalf("Failed to parse test ABI: %v", err)
+	}
+	abiValues, err := ConvertInterfaceArrayToProtobufValues(abiArray)
+	if err != nil {
+		t.Fatalf("Failed to convert ABI to protobuf values: %v", err)
+	}
+
 	// Create a mock query with decimals method call that will fail
 	// This simulates the scenario where we're testing against a mainnet contract
 	// address on a testnet, or any other scenario where decimals() call fails
 	mockQuery := &avsproto.EventTrigger_Query{
 		Addresses:   []string{"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"},
-		ContractAbi: testABI,
+		ContractAbi: abiValues,
 		MethodCalls: []*avsproto.EventTrigger_MethodCall{
 			{
 				MethodName:    "decimals",

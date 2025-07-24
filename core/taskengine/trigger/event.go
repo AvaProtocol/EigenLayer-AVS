@@ -1,6 +1,7 @@
 package trigger
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
@@ -18,7 +19,37 @@ import (
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/accounts/abi"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// parseABIOptimized efficiently parses ABI from protobuf Values without string conversion
+func parseABIOptimized(abiValues []*structpb.Value) (*abi.ABI, error) {
+	if len(abiValues) == 0 {
+		return nil, fmt.Errorf("empty ABI")
+	}
+
+	// Convert protobuf Values to JSON bytes directly
+	abiArray := make([]interface{}, len(abiValues))
+	for i, value := range abiValues {
+		abiArray[i] = value.AsInterface()
+	}
+
+	// Marshal to JSON bytes
+	jsonBytes, err := protojson.Marshal(&structpb.ListValue{Values: abiValues})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal ABI to JSON: %v", err)
+	}
+
+	// Parse ABI directly from bytes using bytes.NewReader
+	reader := bytes.NewReader(jsonBytes)
+	parsedABI, err := abi.JSON(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ABI: %v", err)
+	}
+
+	return &parsedABI, nil
+}
 
 var (
 // Legacy whitelist removed - no longer needed since we use dynamic filtering
@@ -202,25 +233,21 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 	for i, query := range queries {
 		conditions := query.GetConditions()
 		if len(conditions) > 0 {
-			abiString := query.GetContractAbi()
-			if abiString != "" {
-				if parsedABI, err := abi.JSON(strings.NewReader(abiString)); err != nil {
+			abiValues := query.GetContractAbi()
+			// Convert contractAbi from protobuf Value array using optimized shared function
+			if len(abiValues) > 0 {
+				if parsedABI, err := parseABIOptimized(abiValues); err != nil {
 					t.logger.Warn("🚫 Failed to pre-parse ABI for conditional filtering - will skip conditions",
 						"task_id", taskID,
 						"query_index", i,
 						"error", err)
 				} else {
-					eventData.ParsedABIs[i] = &parsedABI
-					t.logger.Debug("✅ Pre-parsed ABI for conditional filtering",
+					eventData.ParsedABIs[i] = parsedABI
+					t.logger.Debug("✅ Pre-parsed ABI for conditional filtering using shared optimized function",
 						"task_id", taskID,
 						"query_index", i,
-						"conditions_count", len(conditions))
+						"method_count", len(parsedABI.Methods))
 				}
-			} else {
-				t.logger.Warn("🚫 Query has conditions but no contract ABI provided",
-					"task_id", taskID,
-					"query_index", i,
-					"conditions_count", len(conditions))
 			}
 		}
 	}
@@ -818,19 +845,19 @@ func (t *EventTrigger) evaluateEventConditionsWithEventData(log types.Log, query
 		t.logger.Debug("🚀 Using cached ABI for conditional filtering", "query_index", queryIndex)
 	} else {
 		// Fallback: parse ABI on-demand (this should rarely happen with the new caching)
-		abiString := query.GetContractAbi()
-		if abiString == "" {
+		abiValues := query.GetContractAbi()
+		if len(abiValues) > 0 {
+			if parsedABI, err := parseABIOptimized(abiValues); err != nil {
+				t.logger.Error("❌ Failed to parse contract ABI for conditional filtering", "error", err)
+				return false
+			} else {
+				contractABI = parsedABI
+				t.logger.Debug("⚠️ Parsed ABI on-demand using shared optimized function (consider pre-parsing for better performance)", "query_index", queryIndex)
+			}
+		} else {
 			t.logger.Warn("🚫 Conditional filtering requires contract ABI but none provided")
 			return false
 		}
-
-		parsedABI, err := abi.JSON(strings.NewReader(abiString))
-		if err != nil {
-			t.logger.Error("❌ Failed to parse contract ABI for conditional filtering", "error", err)
-			return false
-		}
-		contractABI = &parsedABI
-		t.logger.Debug("⚠️ Parsed ABI on-demand (consider pre-parsing for better performance)", "query_index", queryIndex)
 	}
 
 	return t.evaluateEventConditionsCommon(log, query, conditions, contractABI, queryIndex)
@@ -845,19 +872,19 @@ func (t *EventTrigger) evaluateEventConditions(log types.Log, query *avsproto.Ev
 		t.logger.Debug("🚀 Using cached ABI for conditional filtering", "query_index", queryIndex)
 	} else {
 		// Fallback: parse ABI on-demand (this should rarely happen with the new caching)
-		abiString := query.GetContractAbi()
-		if abiString == "" {
+		abiValues := query.GetContractAbi()
+		if len(abiValues) > 0 {
+			if parsedABI, err := parseABIOptimized(abiValues); err != nil {
+				t.logger.Error("❌ Failed to parse contract ABI for conditional filtering", "error", err)
+				return false
+			} else {
+				contractABI = parsedABI
+				t.logger.Debug("⚠️ Parsed ABI on-demand using shared optimized function (consider pre-parsing for better performance)", "query_index", queryIndex)
+			}
+		} else {
 			t.logger.Warn("🚫 Conditional filtering requires contract ABI but none provided")
 			return false
 		}
-
-		parsedABI, err := abi.JSON(strings.NewReader(abiString))
-		if err != nil {
-			t.logger.Error("❌ Failed to parse contract ABI for conditional filtering", "error", err)
-			return false
-		}
-		contractABI = &parsedABI
-		t.logger.Debug("⚠️ Parsed ABI on-demand (consider pre-parsing for better performance)", "query_index", queryIndex)
 	}
 
 	return t.evaluateEventConditionsCommon(log, query, conditions, contractABI, queryIndex)

@@ -413,6 +413,8 @@ ContractRead nodes read data from smart contracts and support multiple method ca
 
 **CRITICAL**: `contractAbi` must be provided as an **array only** (not JSON string):
 
+**⚠️ CRITICAL - NO TEMPLATE SUBSTITUTION IN ABI**: The `contractAbi` field is **NEVER** subject to template variable replacement. ABI data must be taken as-is from user input without any `{{variable}}` processing. Template substitution is only applied to other fields like `contractAddress`, `methodParams`, etc.
+
 ```javascript
 // ✅ CORRECT: contractAbi as array
 {
@@ -524,6 +526,8 @@ ContractWrite nodes execute transactions on smart contracts and support multiple
 #### Configuration Requirements
 
 **CRITICAL**: `contractAbi` must be provided as an **array only** (not JSON string):
+
+**⚠️ CRITICAL - NO TEMPLATE SUBSTITUTION IN ABI**: The `contractAbi` field is **NEVER** subject to template variable replacement. ABI data must be taken as-is from user input without any `{{variable}}` processing. Template substitution is only applied to other fields like `contractAddress`, `methodParams`, etc.
 
 ```javascript
 // ✅ CORRECT: contractAbi as array
@@ -869,6 +873,8 @@ loopNode = {
 
 Loop nodes can execute contract read operations for each iteration. **CRITICAL**: `contractAbi` must be provided as an **array only**.
 
+**⚠️ CRITICAL - NO TEMPLATE SUBSTITUTION IN ABI**: The `contractAbi` field is **NEVER** subject to template variable replacement. ABI data must be taken as-is from user input without any `{{variable}}` processing. Template substitution is only applied to other fields like `contractAddress`, `methodParams`, etc.
+
 ```javascript
 // Loop node configuration with contractRead runner
 {
@@ -991,6 +997,8 @@ loopNode.data = [
 #### Loop with ContractWrite Runner
 
 Loop nodes can execute contract write operations for each iteration. **CRITICAL**: `contractAbi` must be provided as an **array only**.
+
+**⚠️ CRITICAL - NO TEMPLATE SUBSTITUTION IN ABI**: The `contractAbi` field is **NEVER** subject to template variable replacement. ABI data must be taken as-is from user input without any `{{variable}}` processing. Template substitution is only applied to other fields like `contractAddress`, `methodParams`, etc.
 
 ```javascript
 // Loop node configuration with contractWrite runner
@@ -1206,6 +1214,24 @@ graphqlNode = {
 ### Template Variable Resolution
 
 All node configurations support template variables that are resolved at runtime:
+
+**⚠️ CRITICAL - ABI FIELDS NEVER SUPPORT TEMPLATE VARIABLES**: Any field named `contractAbi` (in ContractRead, ContractWrite, Loop nodes, or EventTrigger) is **NEVER** subject to template variable replacement. ABI data must be taken as-is from user input without any `{{variable}}` processing. This ensures ABI integrity and prevents template injection vulnerabilities.
+
+#### Template Variable Support by Field
+
+**✅ Fields that SUPPORT template variables:**
+- `contractAddress` - Contract addresses can be dynamically resolved
+- `methodParams` - Method parameters support dynamic values like `["{{value.address}}"]`
+- `callData` - Pre-encoded call data can include template variables
+- `url` - API endpoints can be dynamically constructed
+- `body` - Request bodies can include dynamic data
+- `headers` - Request headers can include dynamic tokens/values
+- `methodName` - Method names can be dynamically resolved
+- All other non-ABI configuration fields
+
+**❌ Fields that NEVER support template variables:**
+- `contractAbi` - ABI arrays are always used as-is from user input
+- `applyToFields` - Field names are literal identifiers, not template variables
 
 ```javascript
 // Template examples in node configurations
