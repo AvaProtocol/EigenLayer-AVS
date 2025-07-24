@@ -119,6 +119,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 ) *avsproto.ContractWriteNode_MethodResult {
 	t0 := time.Now()
 
+	// Use existing callData (backend will handle methodParams separately)
 	calldata := common.FromHex(methodCall.CallData)
 
 	// Resolve method name from ABI if not provided or if provided name is "unknown"

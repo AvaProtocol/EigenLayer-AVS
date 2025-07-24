@@ -6279,8 +6279,9 @@ func (x *ContractWriteNode_Config) GetMethodCalls() []*ContractWriteNode_MethodC
 
 type ContractWriteNode_MethodCall struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	CallData      string                 `protobuf:"bytes,1,opt,name=call_data,json=callData,proto3" json:"call_data,omitempty"`       // Hex-encoded calldata for the method
-	MethodName    string                 `protobuf:"bytes,2,opt,name=method_name,json=methodName,proto3" json:"method_name,omitempty"` // Method name for clarity and response mapping
+	CallData      string                 `protobuf:"bytes,1,opt,name=call_data,json=callData,proto3" json:"call_data,omitempty"`             // Hex-encoded calldata for the method (used when methodParams is not provided)
+	MethodName    string                 `protobuf:"bytes,2,opt,name=method_name,json=methodName,proto3" json:"method_name,omitempty"`       // Method name for clarity and response mapping
+	MethodParams  []string               `protobuf:"bytes,3,rep,name=method_params,json=methodParams,proto3" json:"method_params,omitempty"` // Array of Handlebars templates for method parameters (e.g. ["{{value.sender}}", "{{value.recipient}}", "{{value.amount}}"])
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6327,6 +6328,13 @@ func (x *ContractWriteNode_MethodCall) GetMethodName() string {
 		return x.MethodName
 	}
 	return ""
+}
+
+func (x *ContractWriteNode_MethodCall) GetMethodParams() []string {
+	if x != nil {
+		return x.MethodParams
+	}
+	return nil
 }
 
 type ContractWriteNode_Output struct {
@@ -6469,9 +6477,10 @@ func (x *ContractWriteNode_MethodResult) GetValue() *structpb.Value {
 
 type ContractReadNode_MethodCall struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	CallData      string                 `protobuf:"bytes,1,opt,name=call_data,json=callData,proto3" json:"call_data,omitempty"`                  // Hex-encoded calldata for the method
+	CallData      string                 `protobuf:"bytes,1,opt,name=call_data,json=callData,proto3" json:"call_data,omitempty"`                  // Hex-encoded calldata for the method (used when methodParams is not provided)
 	MethodName    string                 `protobuf:"bytes,2,opt,name=method_name,json=methodName,proto3" json:"method_name,omitempty"`            // Optional: method name for clarity (e.g. "latestRoundData")
 	ApplyToFields []string               `protobuf:"bytes,3,rep,name=apply_to_fields,json=applyToFields,proto3" json:"apply_to_fields,omitempty"` // Fields to apply decimal formatting to (e.g. ["answer"])
+	MethodParams  []string               `protobuf:"bytes,4,rep,name=method_params,json=methodParams,proto3" json:"method_params,omitempty"`      // Handlebars template for method parameters (e.g. "{{value.address}}")
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6523,6 +6532,13 @@ func (x *ContractReadNode_MethodCall) GetMethodName() string {
 func (x *ContractReadNode_MethodCall) GetApplyToFields() []string {
 	if x != nil {
 		return x.ApplyToFields
+	}
+	return nil
+}
+
+func (x *ContractReadNode_MethodCall) GetMethodParams() []string {
+	if x != nil {
+		return x.MethodParams
 	}
 	return nil
 }
@@ -7904,19 +7920,20 @@ const file_protobuf_avs_proto_rawDesc = "" +
 	"\vdestination\x18\x01 \x01(\tR\vdestination\x12\x16\n" +
 	"\x06amount\x18\x02 \x01(\tR\x06amount\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xc8\x05\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xed\x05\n" +
 	"\x11ContractWriteNode\x12<\n" +
 	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x1a\xc0\x01\n" +
 	"\x06Config\x12)\n" +
 	"\x10contract_address\x18\x01 \x01(\tR\x0fcontractAddress\x12\x1b\n" +
 	"\tcall_data\x18\x02 \x01(\tR\bcallData\x12!\n" +
 	"\fcontract_abi\x18\x03 \x01(\tR\vcontractAbi\x12K\n" +
-	"\fmethod_calls\x18\x04 \x03(\v2(.aggregator.ContractWriteNode.MethodCallR\vmethodCalls\x1aJ\n" +
+	"\fmethod_calls\x18\x04 \x03(\v2(.aggregator.ContractWriteNode.MethodCallR\vmethodCalls\x1ao\n" +
 	"\n" +
 	"MethodCall\x12\x1b\n" +
 	"\tcall_data\x18\x01 \x01(\tR\bcallData\x12\x1f\n" +
 	"\vmethod_name\x18\x02 \x01(\tR\n" +
-	"methodName\x1a4\n" +
+	"methodName\x12#\n" +
+	"\rmethod_params\x18\x03 \x03(\tR\fmethodParams\x1a4\n" +
 	"\x06Output\x12*\n" +
 	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\x1a\xaf\x02\n" +
 	"\fMethodResult\x12\x1f\n" +
@@ -7929,15 +7946,16 @@ const file_protobuf_avs_proto_rawDesc = "" +
 	"\areceipt\x18\x05 \x01(\v2\x16.google.protobuf.ValueR\areceipt\x12&\n" +
 	"\fblock_number\x18\x06 \x01(\x04H\x00R\vblockNumber\x88\x01\x01\x12,\n" +
 	"\x05value\x18\a \x01(\v2\x16.google.protobuf.ValueR\x05valueB\x0f\n" +
-	"\r_block_number\"\xa0\x05\n" +
+	"\r_block_number\"\xc6\x05\n" +
 	"\x10ContractReadNode\x12;\n" +
-	"\x06config\x18\x01 \x01(\v2#.aggregator.ContractReadNode.ConfigR\x06config\x1ar\n" +
+	"\x06config\x18\x01 \x01(\v2#.aggregator.ContractReadNode.ConfigR\x06config\x1a\x97\x01\n" +
 	"\n" +
 	"MethodCall\x12\x1b\n" +
 	"\tcall_data\x18\x01 \x01(\tR\bcallData\x12\x1f\n" +
 	"\vmethod_name\x18\x02 \x01(\tR\n" +
 	"methodName\x12&\n" +
-	"\x0fapply_to_fields\x18\x03 \x03(\tR\rapplyToFields\x1a\xa2\x01\n" +
+	"\x0fapply_to_fields\x18\x03 \x03(\tR\rapplyToFields\x12#\n" +
+	"\rmethod_params\x18\x04 \x03(\tR\fmethodParams\x1a\xa2\x01\n" +
 	"\x06Config\x12)\n" +
 	"\x10contract_address\x18\x01 \x01(\tR\x0fcontractAddress\x12!\n" +
 	"\fcontract_abi\x18\x02 \x01(\tR\vcontractAbi\x12J\n" +

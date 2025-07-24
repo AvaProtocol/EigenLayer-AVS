@@ -504,9 +504,8 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 				results = append(results, contractReadOutput.GetData().AsInterface())
 			}
 
-			return map[string]interface{}{
-				"results": results,
-			}, nil
+			// Return results array directly, not wrapped in a "results" object (consistent with contract write)
+			return results, nil
 		}
 		return nil, nil
 	} else if contractWriteOutput := executionStep.GetContractWrite(); contractWriteOutput != nil {
@@ -746,6 +745,7 @@ func (r *LoopProcessor) processContractReadTemplates(contractRead *avsproto.Cont
 		processedMethodCall := &avsproto.ContractReadNode_MethodCall{
 			CallData:      r.substituteTemplateVariables(methodCall.CallData, iterInputs),
 			MethodName:    r.substituteTemplateVariables(methodCall.MethodName, iterInputs),
+			MethodParams:  SubstituteTemplateVariablesArray(methodCall.MethodParams, iterInputs, r.substituteTemplateVariables),
 			ApplyToFields: make([]string, len(methodCall.ApplyToFields)),
 		}
 

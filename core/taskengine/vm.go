@@ -2201,6 +2201,18 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 					if methodName, ok := methodCallMap["methodName"].(string); ok {
 						methodCall.MethodName = methodName
 					}
+					// Handle methodParams field as string array for handlebars templating
+					if methodParamsInterface, ok := methodCallMap["methodParams"]; ok {
+						if methodParamsArray, ok := methodParamsInterface.([]interface{}); ok {
+							methodParams := make([]string, len(methodParamsArray))
+							for i, param := range methodParamsArray {
+								if paramStr, ok := param.(string); ok {
+									methodParams[i] = paramStr
+								}
+							}
+							methodCall.MethodParams = methodParams
+						}
+					}
 					// Handle applyToFields for decimal formatting
 					if applyToFields, ok := methodCallMap["applyToFields"].([]interface{}); ok {
 						for _, field := range applyToFields {
@@ -2253,6 +2265,18 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 					}
 					if methodName, ok := methodCallMap["methodName"].(string); ok {
 						methodCall.MethodName = methodName
+					}
+					// Handle methodParams field as string array for handlebars templating
+					if methodParamsInterface, ok := methodCallMap["methodParams"]; ok {
+						if methodParamsArray, ok := methodParamsInterface.([]interface{}); ok {
+							methodParams := make([]string, len(methodParamsArray))
+							for i, param := range methodParamsArray {
+								if paramStr, ok := param.(string); ok {
+									methodParams[i] = paramStr
+								}
+							}
+							methodCall.MethodParams = methodParams
+						}
 					}
 					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
 				}
@@ -2524,6 +2548,18 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 						}
 						if methodName, ok := methodCallMap["methodName"].(string); ok {
 							methodCall.MethodName = methodName
+						}
+						// Handle methodParams field as string array for handlebars templating
+						if methodParamsInterface, ok := methodCallMap["methodParams"]; ok {
+							if methodParamsArray, ok := methodParamsInterface.([]interface{}); ok {
+								methodParams := make([]string, len(methodParamsArray))
+								for i, param := range methodParamsArray {
+									if paramStr, ok := param.(string); ok {
+										methodParams[i] = paramStr
+									}
+								}
+								methodCall.MethodParams = methodParams
+							}
 						}
 						// Handle applyToFields for decimal formatting
 						if applyToFields, ok := methodCallMap["applyToFields"].([]interface{}); ok {
@@ -2906,6 +2942,11 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 						"callData":   methodCall.CallData,
 					}
 
+					// Include methodParams if present
+					if len(methodCall.MethodParams) > 0 {
+						methodCallMap["methodParams"] = methodCall.MethodParams
+					}
+
 					// Convert applyToFields []string to []interface{} for protobuf compatibility
 					if len(methodCall.ApplyToFields) > 0 {
 						applyToFieldsArray := make([]interface{}, len(methodCall.ApplyToFields))
@@ -2942,6 +2983,12 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 						"methodName": methodCall.MethodName,
 						"callData":   methodCall.CallData,
 					}
+
+					// Include methodParams if present
+					if len(methodCall.MethodParams) > 0 {
+						methodCallMap["methodParams"] = methodCall.MethodParams
+					}
+
 					methodCallsArray[i] = methodCallMap
 				}
 				config["methodCalls"] = methodCallsArray
@@ -3022,7 +3069,12 @@ func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeConfig
 		}
 	} else {
 		if v.logger != nil {
-			v.logger.Warn("🔍 GetNodeDataForExecution: Node not found", "stepID", stepID)
+			// For loop iteration step IDs, this is expected behavior - use debug level to avoid noise
+			if strings.Contains(stepID, "_iter_") {
+				v.logger.Debug("🔍 GetNodeDataForExecution: Loop iteration node (expected)", "stepID", stepID)
+			} else {
+				v.logger.Warn("🔍 GetNodeDataForExecution: Node not found", "stepID", stepID)
+			}
 		}
 	}
 
@@ -3074,6 +3126,12 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 					"callData":   methodCall.CallData,
 					"methodName": methodCall.MethodName,
 				}
+
+				// Include methodParams if present
+				if len(methodCall.MethodParams) > 0 {
+					methodCallMap["methodParams"] = methodCall.MethodParams
+				}
+
 				// Include applyToFields if present
 				if len(methodCall.ApplyToFields) > 0 {
 					applyToFieldsArray := make([]interface{}, len(methodCall.ApplyToFields))
@@ -3104,6 +3162,12 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 					"callData":   methodCall.CallData,
 					"methodName": methodCall.MethodName,
 				}
+
+				// Include methodParams if present
+				if len(methodCall.MethodParams) > 0 {
+					methodCallMap["methodParams"] = methodCall.MethodParams
+				}
+
 				methodCallsArray[i] = methodCallMap
 			}
 			configData["methodCalls"] = methodCallsArray
@@ -3430,10 +3494,30 @@ func (eq *ExecutionQueue) extractResultData(step *avsproto.Execution_Step) inter
 		return restApiOutput.Data.AsInterface()
 	}
 	if contractReadOutput := step.GetContractRead(); contractReadOutput != nil && contractReadOutput.Data != nil {
-		return contractReadOutput.Data.AsInterface()
+		// For contract read, return individual objects for single method calls to avoid double nesting in loops
+		rawData := contractReadOutput.Data.AsInterface()
+		if dataArray, ok := rawData.([]interface{}); ok {
+			if len(dataArray) == 1 {
+				// Single method call - return individual object to avoid [[{...}], [{...}]] in loops
+				return dataArray[0]
+			}
+			// Multiple method calls - return the array
+			return dataArray
+		}
+		return rawData
 	}
 	if contractWriteOutput := step.GetContractWrite(); contractWriteOutput != nil && contractWriteOutput.Data != nil {
-		return contractWriteOutput.Data.AsInterface()
+		// For contract write, return individual objects for single method calls to avoid double nesting in loops (same as ContractRead)
+		rawData := contractWriteOutput.Data.AsInterface()
+		if dataArray, ok := rawData.([]interface{}); ok {
+			if len(dataArray) == 1 {
+				// Single method call - return individual object to avoid [[{...}], [{...}]] in loops
+				return dataArray[0]
+			}
+			// Multiple method calls - return the array
+			return dataArray
+		}
+		return rawData
 	}
 	if ethTransferOutput := step.GetEthTransfer(); ethTransferOutput != nil && ethTransferOutput.Data != nil {
 		return ethTransferOutput.Data.AsInterface()
@@ -3837,8 +3921,9 @@ func (v *VM) processContractWriteTemplates(contractWrite *avsproto.ContractWrite
 	// Process method calls
 	for _, methodCall := range contractWrite.Config.MethodCalls {
 		processedMethodCall := &avsproto.ContractWriteNode_MethodCall{
-			CallData:   v.substituteTemplateVariables(methodCall.CallData, iterInputs),
-			MethodName: v.substituteTemplateVariables(methodCall.MethodName, iterInputs),
+			CallData:     v.substituteTemplateVariables(methodCall.CallData, iterInputs),
+			MethodName:   v.substituteTemplateVariables(methodCall.MethodName, iterInputs),
+			MethodParams: SubstituteTemplateVariablesArray(methodCall.MethodParams, iterInputs, v.substituteTemplateVariables),
 		}
 
 		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
@@ -3861,6 +3946,7 @@ func (v *VM) processContractReadTemplates(contractRead *avsproto.ContractReadNod
 		processedMethodCall := &avsproto.ContractReadNode_MethodCall{
 			CallData:      v.substituteTemplateVariables(methodCall.CallData, iterInputs),
 			MethodName:    v.substituteTemplateVariables(methodCall.MethodName, iterInputs),
+			MethodParams:  SubstituteTemplateVariablesArray(methodCall.MethodParams, iterInputs, v.substituteTemplateVariables),
 			ApplyToFields: make([]string, len(methodCall.ApplyToFields)),
 		}
 

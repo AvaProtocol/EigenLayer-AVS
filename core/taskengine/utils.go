@@ -253,3 +253,18 @@ func processSingleContractReadResult(methodResult interface{}, result map[string
 
 	return result
 }
+
+// SubstituteTemplateVariablesArray is a shared utility function that replaces template variables
+// in each element of a string array using the provided substitution function.
+// This eliminates code duplication between VM and LoopProcessor implementations.
+func SubstituteTemplateVariablesArray(arr []string, iterInputs map[string]interface{}, substituteFunc func(string, map[string]interface{}) string) []string {
+	if len(arr) == 0 {
+		return arr
+	}
+
+	result := make([]string, len(arr))
+	for i, item := range arr {
+		result[i] = substituteFunc(item, iterInputs)
+	}
+	return result
+}

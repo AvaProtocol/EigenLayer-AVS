@@ -374,7 +374,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 				"callData", methodCall.GetCallData()) // e.g., "0x313ce567" (decimals()), "0xfeaf968c" (latestRoundData())
 		}
 
-		// Execute the method call
+		// Execute the method call using existing callData (backend will handle methodParams separately)
 		result := r.executeMethodCallWithoutFormatting(ctx, &parsedABI, contractAddr, methodCall.GetMethodName(), methodCall.GetCallData())
 		methodResults = append(methodResults, result)
 
