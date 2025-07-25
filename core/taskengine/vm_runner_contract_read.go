@@ -466,6 +466,11 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		r.vm.logger.Debug("About to start second pass loop", "methodCallsCount", len(config.MethodCalls))
 	}
 
+	// Store original raw results for metadata (before any decimal formatting)
+	// methodResults contains the raw, unformatted results from the first pass
+	var rawResultsForMetadata []*avsproto.ContractReadNode_MethodResult
+	rawResultsForMetadata = append(rawResultsForMetadata, methodResults...)
+
 	for i, methodCall := range config.MethodCalls {
 		methodName := r.vm.preprocessTextWithVariableMapping(methodCall.GetMethodName())
 		result := methodResults[i]
@@ -597,7 +602,11 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		r.vm.logger.Debug("Processing results for data/metadata separation", "resultCount", len(results))
 	}
 
-	for _, methodResult := range results {
+	// Use rawResultsForMetadata for metadata (raw, unformatted data)
+	for i, methodResult := range results {
+		// Get the corresponding raw result for metadata
+		rawResult := rawResultsForMetadata[i]
+
 		// Create metadata entry (full backend response)
 		metadataEntry := map[string]interface{}{
 			"methodName": methodResult.MethodName,
@@ -618,15 +627,18 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		} else {
 			metadataEntry["methodABI"] = nil
 		}
-		// Extract the primary return value for the metadata's "value" field (raw format)
+		// Extract the primary return value for the metadata's "value" field (raw format - no decimal formatting applied)
 		var metadataValue interface{}
-		if len(methodResult.Data) > 0 {
-			if len(methodResult.Data) == 1 {
-				metadataValue = methodResult.Data[0].Value
+		if len(rawResult.Data) > 0 {
+			if len(rawResult.Data) == 1 {
+				metadataValue = rawResult.Data[0].Value
 			} else {
 				valueMap := make(map[string]interface{})
-				for _, field := range methodResult.Data {
-					valueMap[field.Name] = field.Value
+				for _, field := range rawResult.Data {
+					// Only include the original raw fields, exclude any "Raw" suffixed fields
+					if !strings.HasSuffix(field.Name, "Raw") {
+						valueMap[field.Name] = field.Value
+					}
 				}
 				metadataValue = valueMap
 			}
@@ -638,7 +650,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 			r.vm.logger.Debug("Added metadata entry", "methodName", methodResult.MethodName, "metadataEntry", metadataEntry)
 		}
 
-		// Add to combined clean data object (user-friendly format)
+		// Add to combined clean data object (user-friendly format - with decimal formatting applied)
 		if len(methodResult.Data) > 0 {
 			if len(methodResult.Data) == 1 {
 				// Single output: add directly as {methodName: value}

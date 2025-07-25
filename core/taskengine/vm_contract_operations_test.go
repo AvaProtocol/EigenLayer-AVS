@@ -107,7 +107,7 @@ func TestVM_ContractRead_DecimalFormatting(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", // Chainlink ETH/USD
-			ContractAbi:     mustConvertJSONABIToProtobufValues(testChainlinkABI),
+			ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:      "0x313ce567", // decimals()
@@ -199,7 +199,7 @@ func TestVM_ContractRead_LatestRoundData(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
-			ContractAbi:     mustConvertJSONABIToProtobufValues(testLatestRoundDataABI),
+			ContractAbi:     MustConvertJSONABIToProtobufValues(testLatestRoundDataABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:   "0xfeaf968c", // This is decimals, but for demo purposes
@@ -235,7 +235,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
 					ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
-					ContractAbi:     mustConvertJSONABIToProtobufValues(testDecimalsABI),
+					ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
 							CallData:   "0xfeaf968c",
@@ -265,7 +265,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
 					ContractAddress: "invalid-address",
-					ContractAbi:     mustConvertJSONABIToProtobufValues(testDecimalsABI),
+					ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
 							CallData:   "0xfeaf968c",
@@ -306,7 +306,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
 					ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", // Valid Chainlink contract
-					ContractAbi:     mustConvertJSONABIToProtobufValues(testChainlinkABI),
+					ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
 							CallData:   "0x313ce567",      // decimals() function selector
@@ -335,7 +335,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
 					ContractAddress: "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c", // Client's contract address
-					ContractAbi:     mustConvertJSONABIToProtobufValues(testChainlinkABI),
+					ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
 							CallData:   "0x313ce567",      // decimals() function selector - this is correct for decimals
@@ -364,7 +364,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
 					ContractAddress: "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c", // Address that returns empty data
-					ContractAbi:     mustConvertJSONABIToProtobufValues(testChainlinkABI),
+					ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
 							CallData:   "0xfeaf968c",      // latestRoundData() function selector - correct
@@ -422,7 +422,7 @@ func TestVM_ContractWrite_BasicExecution(t *testing.T) {
 	node := &avsproto.ContractWriteNode{
 		Config: &avsproto.ContractWriteNode_Config{
 			ContractAddress: "0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E", // Test address
-			ContractAbi:     mustConvertJSONABIToProtobufValues(testTransferABI),
+			ContractAbi:     MustConvertJSONABIToProtobufValues(testTransferABI),
 			MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 				{
 					CallData:   "0xa9059cbb", // transfer function selector
@@ -494,7 +494,7 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
 					ContractAddress: "0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E",
-					ContractAbi:     mustConvertJSONABIToProtobufValues(testSimpleFunctionABI),
+					ContractAbi:     MustConvertJSONABIToProtobufValues(testSimpleFunctionABI),
 					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 						{
 							CallData:   "0xa9059cbb",
@@ -523,7 +523,7 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
 					ContractAddress: "invalid-address",
-					ContractAbi:     mustConvertJSONABIToProtobufValues(testSimpleFunctionABI),
+					ContractAbi:     MustConvertJSONABIToProtobufValues(testSimpleFunctionABI),
 					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 						{
 							CallData:   "0xa9059cbb",
