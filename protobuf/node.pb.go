@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.6
 // 	protoc        v5.29.2
-// source: protobuf/node.proto
+// source: node.proto
 
 package avsproto
 
@@ -62,11 +62,11 @@ func (x MessageOp) String() string {
 }
 
 func (MessageOp) Descriptor() protoreflect.EnumDescriptor {
-	return file_protobuf_node_proto_enumTypes[0].Descriptor()
+	return file_node_proto_enumTypes[0].Descriptor()
 }
 
 func (MessageOp) Type() protoreflect.EnumType {
-	return &file_protobuf_node_proto_enumTypes[0]
+	return &file_node_proto_enumTypes[0]
 }
 
 func (x MessageOp) Number() protoreflect.EnumNumber {
@@ -75,7 +75,7 @@ func (x MessageOp) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use MessageOp.Descriptor instead.
 func (MessageOp) EnumDescriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{0}
+	return file_node_proto_rawDescGZIP(), []int{0}
 }
 
 type Checkin struct {
@@ -95,7 +95,7 @@ type Checkin struct {
 
 func (x *Checkin) Reset() {
 	*x = Checkin{}
-	mi := &file_protobuf_node_proto_msgTypes[0]
+	mi := &file_node_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -107,7 +107,7 @@ func (x *Checkin) String() string {
 func (*Checkin) ProtoMessage() {}
 
 func (x *Checkin) ProtoReflect() protoreflect.Message {
-	mi := &file_protobuf_node_proto_msgTypes[0]
+	mi := &file_node_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -120,7 +120,7 @@ func (x *Checkin) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Checkin.ProtoReflect.Descriptor instead.
 func (*Checkin) Descriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{0}
+	return file_node_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Checkin) GetId() string {
@@ -195,7 +195,7 @@ type CheckinResp struct {
 
 func (x *CheckinResp) Reset() {
 	*x = CheckinResp{}
-	mi := &file_protobuf_node_proto_msgTypes[1]
+	mi := &file_node_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -207,7 +207,7 @@ func (x *CheckinResp) String() string {
 func (*CheckinResp) ProtoMessage() {}
 
 func (x *CheckinResp) ProtoReflect() protoreflect.Message {
-	mi := &file_protobuf_node_proto_msgTypes[1]
+	mi := &file_node_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -220,7 +220,7 @@ func (x *CheckinResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckinResp.ProtoReflect.Descriptor instead.
 func (*CheckinResp) Descriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{1}
+	return file_node_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *CheckinResp) GetUpdatedAt() *timestamppb.Timestamp {
@@ -243,7 +243,7 @@ type SyncMessagesReq struct {
 
 func (x *SyncMessagesReq) Reset() {
 	*x = SyncMessagesReq{}
-	mi := &file_protobuf_node_proto_msgTypes[2]
+	mi := &file_node_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -255,7 +255,7 @@ func (x *SyncMessagesReq) String() string {
 func (*SyncMessagesReq) ProtoMessage() {}
 
 func (x *SyncMessagesReq) ProtoReflect() protoreflect.Message {
-	mi := &file_protobuf_node_proto_msgTypes[2]
+	mi := &file_node_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -268,7 +268,7 @@ func (x *SyncMessagesReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncMessagesReq.ProtoReflect.Descriptor instead.
 func (*SyncMessagesReq) Descriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{2}
+	return file_node_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SyncMessagesReq) GetId() string {
@@ -318,7 +318,7 @@ type SyncMessagesResp struct {
 
 func (x *SyncMessagesResp) Reset() {
 	*x = SyncMessagesResp{}
-	mi := &file_protobuf_node_proto_msgTypes[3]
+	mi := &file_node_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -330,7 +330,7 @@ func (x *SyncMessagesResp) String() string {
 func (*SyncMessagesResp) ProtoMessage() {}
 
 func (x *SyncMessagesResp) ProtoReflect() protoreflect.Message {
-	mi := &file_protobuf_node_proto_msgTypes[3]
+	mi := &file_node_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -343,7 +343,7 @@ func (x *SyncMessagesResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncMessagesResp.ProtoReflect.Descriptor instead.
 func (*SyncMessagesResp) Descriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{3}
+	return file_node_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SyncMessagesResp) GetId() string {
@@ -376,7 +376,7 @@ type AckMessageReq struct {
 
 func (x *AckMessageReq) Reset() {
 	*x = AckMessageReq{}
-	mi := &file_protobuf_node_proto_msgTypes[4]
+	mi := &file_node_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -388,7 +388,7 @@ func (x *AckMessageReq) String() string {
 func (*AckMessageReq) ProtoMessage() {}
 
 func (x *AckMessageReq) ProtoReflect() protoreflect.Message {
-	mi := &file_protobuf_node_proto_msgTypes[4]
+	mi := &file_node_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -401,7 +401,7 @@ func (x *AckMessageReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AckMessageReq.ProtoReflect.Descriptor instead.
 func (*AckMessageReq) Descriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{4}
+	return file_node_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *AckMessageReq) GetId() string {
@@ -434,7 +434,7 @@ type NotifyTriggersReq struct {
 
 func (x *NotifyTriggersReq) Reset() {
 	*x = NotifyTriggersReq{}
-	mi := &file_protobuf_node_proto_msgTypes[5]
+	mi := &file_node_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -446,7 +446,7 @@ func (x *NotifyTriggersReq) String() string {
 func (*NotifyTriggersReq) ProtoMessage() {}
 
 func (x *NotifyTriggersReq) ProtoReflect() protoreflect.Message {
-	mi := &file_protobuf_node_proto_msgTypes[5]
+	mi := &file_node_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -459,7 +459,7 @@ func (x *NotifyTriggersReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NotifyTriggersReq.ProtoReflect.Descriptor instead.
 func (*NotifyTriggersReq) Descriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{5}
+	return file_node_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *NotifyTriggersReq) GetAddress() string {
@@ -590,7 +590,7 @@ type NotifyTriggersResp struct {
 
 func (x *NotifyTriggersResp) Reset() {
 	*x = NotifyTriggersResp{}
-	mi := &file_protobuf_node_proto_msgTypes[6]
+	mi := &file_node_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -602,7 +602,7 @@ func (x *NotifyTriggersResp) String() string {
 func (*NotifyTriggersResp) ProtoMessage() {}
 
 func (x *NotifyTriggersResp) ProtoReflect() protoreflect.Message {
-	mi := &file_protobuf_node_proto_msgTypes[6]
+	mi := &file_node_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -615,7 +615,7 @@ func (x *NotifyTriggersResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NotifyTriggersResp.ProtoReflect.Descriptor instead.
 func (*NotifyTriggersResp) Descriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{6}
+	return file_node_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *NotifyTriggersResp) GetUpdatedAt() *timestamppb.Timestamp {
@@ -671,7 +671,7 @@ type EventOverloadAlert struct {
 
 func (x *EventOverloadAlert) Reset() {
 	*x = EventOverloadAlert{}
-	mi := &file_protobuf_node_proto_msgTypes[7]
+	mi := &file_node_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -683,7 +683,7 @@ func (x *EventOverloadAlert) String() string {
 func (*EventOverloadAlert) ProtoMessage() {}
 
 func (x *EventOverloadAlert) ProtoReflect() protoreflect.Message {
-	mi := &file_protobuf_node_proto_msgTypes[7]
+	mi := &file_node_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -696,7 +696,7 @@ func (x *EventOverloadAlert) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventOverloadAlert.ProtoReflect.Descriptor instead.
 func (*EventOverloadAlert) Descriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{7}
+	return file_node_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *EventOverloadAlert) GetTaskId() string {
@@ -767,7 +767,7 @@ type EventOverloadResponse struct {
 
 func (x *EventOverloadResponse) Reset() {
 	*x = EventOverloadResponse{}
-	mi := &file_protobuf_node_proto_msgTypes[8]
+	mi := &file_node_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -779,7 +779,7 @@ func (x *EventOverloadResponse) String() string {
 func (*EventOverloadResponse) ProtoMessage() {}
 
 func (x *EventOverloadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protobuf_node_proto_msgTypes[8]
+	mi := &file_node_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -792,7 +792,7 @@ func (x *EventOverloadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventOverloadResponse.ProtoReflect.Descriptor instead.
 func (*EventOverloadResponse) Descriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{8}
+	return file_node_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *EventOverloadResponse) GetTaskCancelled() bool {
@@ -826,7 +826,7 @@ type HealthCheckRequest struct {
 
 func (x *HealthCheckRequest) Reset() {
 	*x = HealthCheckRequest{}
-	mi := &file_protobuf_node_proto_msgTypes[9]
+	mi := &file_node_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -838,7 +838,7 @@ func (x *HealthCheckRequest) String() string {
 func (*HealthCheckRequest) ProtoMessage() {}
 
 func (x *HealthCheckRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protobuf_node_proto_msgTypes[9]
+	mi := &file_node_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -851,7 +851,7 @@ func (x *HealthCheckRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheckRequest.ProtoReflect.Descriptor instead.
 func (*HealthCheckRequest) Descriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{9}
+	return file_node_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *HealthCheckRequest) GetOperatorAddress() string {
@@ -872,7 +872,7 @@ type HealthCheckResponse struct {
 
 func (x *HealthCheckResponse) Reset() {
 	*x = HealthCheckResponse{}
-	mi := &file_protobuf_node_proto_msgTypes[10]
+	mi := &file_node_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -884,7 +884,7 @@ func (x *HealthCheckResponse) String() string {
 func (*HealthCheckResponse) ProtoMessage() {}
 
 func (x *HealthCheckResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protobuf_node_proto_msgTypes[10]
+	mi := &file_node_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -897,7 +897,7 @@ func (x *HealthCheckResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheckResponse.ProtoReflect.Descriptor instead.
 func (*HealthCheckResponse) Descriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{10}
+	return file_node_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *HealthCheckResponse) GetStatus() string {
@@ -932,7 +932,7 @@ type Checkin_Status struct {
 
 func (x *Checkin_Status) Reset() {
 	*x = Checkin_Status{}
-	mi := &file_protobuf_node_proto_msgTypes[11]
+	mi := &file_node_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -944,7 +944,7 @@ func (x *Checkin_Status) String() string {
 func (*Checkin_Status) ProtoMessage() {}
 
 func (x *Checkin_Status) ProtoReflect() protoreflect.Message {
-	mi := &file_protobuf_node_proto_msgTypes[11]
+	mi := &file_node_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -957,7 +957,7 @@ func (x *Checkin_Status) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Checkin_Status.ProtoReflect.Descriptor instead.
 func (*Checkin_Status) Descriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{0, 0}
+	return file_node_proto_rawDescGZIP(), []int{0, 0}
 }
 
 func (x *Checkin_Status) GetUptime() int64 {
@@ -993,7 +993,7 @@ type SyncMessagesReq_Capabilities struct {
 
 func (x *SyncMessagesReq_Capabilities) Reset() {
 	*x = SyncMessagesReq_Capabilities{}
-	mi := &file_protobuf_node_proto_msgTypes[12]
+	mi := &file_node_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1005,7 +1005,7 @@ func (x *SyncMessagesReq_Capabilities) String() string {
 func (*SyncMessagesReq_Capabilities) ProtoMessage() {}
 
 func (x *SyncMessagesReq_Capabilities) ProtoReflect() protoreflect.Message {
-	mi := &file_protobuf_node_proto_msgTypes[12]
+	mi := &file_node_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1018,7 +1018,7 @@ func (x *SyncMessagesReq_Capabilities) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncMessagesReq_Capabilities.ProtoReflect.Descriptor instead.
 func (*SyncMessagesReq_Capabilities) Descriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{2, 0}
+	return file_node_proto_rawDescGZIP(), []int{2, 0}
 }
 
 func (x *SyncMessagesReq_Capabilities) GetEventMonitoring() bool {
@@ -1055,7 +1055,7 @@ type SyncMessagesResp_TaskMetadata struct {
 
 func (x *SyncMessagesResp_TaskMetadata) Reset() {
 	*x = SyncMessagesResp_TaskMetadata{}
-	mi := &file_protobuf_node_proto_msgTypes[13]
+	mi := &file_node_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1067,7 +1067,7 @@ func (x *SyncMessagesResp_TaskMetadata) String() string {
 func (*SyncMessagesResp_TaskMetadata) ProtoMessage() {}
 
 func (x *SyncMessagesResp_TaskMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_protobuf_node_proto_msgTypes[13]
+	mi := &file_node_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1080,7 +1080,7 @@ func (x *SyncMessagesResp_TaskMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncMessagesResp_TaskMetadata.ProtoReflect.Descriptor instead.
 func (*SyncMessagesResp_TaskMetadata) Descriptor() ([]byte, []int) {
-	return file_protobuf_node_proto_rawDescGZIP(), []int{3, 0}
+	return file_node_proto_rawDescGZIP(), []int{3, 0}
 }
 
 func (x *SyncMessagesResp_TaskMetadata) GetTaskId() string {
@@ -1111,12 +1111,13 @@ func (x *SyncMessagesResp_TaskMetadata) GetTrigger() *TaskTrigger {
 	return nil
 }
 
-var File_protobuf_node_proto protoreflect.FileDescriptor
+var File_node_proto protoreflect.FileDescriptor
 
-const file_protobuf_node_proto_rawDesc = "" +
+const file_node_proto_rawDesc = "" +
 	"\n" +
-	"\x13protobuf/node.proto\x12\n" +
-	"aggregator\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x12protobuf/avs.proto\"\xa7\x03\n" +
+	"\n" +
+	"node.proto\x12\n" +
+	"aggregator\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/wrappers.proto\x1a\tavs.proto\"\xa7\x03\n" +
 	"\aCheckin\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x1c\n" +
@@ -1215,20 +1216,20 @@ const file_protobuf_node_proto_rawDesc = "" +
 	"./avsprotob\x06proto3"
 
 var (
-	file_protobuf_node_proto_rawDescOnce sync.Once
-	file_protobuf_node_proto_rawDescData []byte
+	file_node_proto_rawDescOnce sync.Once
+	file_node_proto_rawDescData []byte
 )
 
-func file_protobuf_node_proto_rawDescGZIP() []byte {
-	file_protobuf_node_proto_rawDescOnce.Do(func() {
-		file_protobuf_node_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_protobuf_node_proto_rawDesc), len(file_protobuf_node_proto_rawDesc)))
+func file_node_proto_rawDescGZIP() []byte {
+	file_node_proto_rawDescOnce.Do(func() {
+		file_node_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)))
 	})
-	return file_protobuf_node_proto_rawDescData
+	return file_node_proto_rawDescData
 }
 
-var file_protobuf_node_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_protobuf_node_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
-var file_protobuf_node_proto_goTypes = []any{
+var file_node_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_node_proto_goTypes = []any{
 	(MessageOp)(0),                        // 0: aggregator.MessageOp
 	(*Checkin)(nil),                       // 1: aggregator.Checkin
 	(*CheckinResp)(nil),                   // 2: aggregator.CheckinResp
@@ -1254,7 +1255,7 @@ var file_protobuf_node_proto_goTypes = []any{
 	(*TaskTrigger)(nil),                   // 22: aggregator.TaskTrigger
 	(*wrapperspb.BoolValue)(nil),          // 23: google.protobuf.BoolValue
 }
-var file_protobuf_node_proto_depIdxs = []int32{
+var file_node_proto_depIdxs = []int32{
 	12, // 0: aggregator.Checkin.status:type_name -> aggregator.Checkin.Status
 	15, // 1: aggregator.CheckinResp.updated_at:type_name -> google.protobuf.Timestamp
 	13, // 2: aggregator.SyncMessagesReq.capabilities:type_name -> aggregator.SyncMessagesReq.Capabilities
@@ -1288,13 +1289,13 @@ var file_protobuf_node_proto_depIdxs = []int32{
 	0,  // [0:14] is the sub-list for field type_name
 }
 
-func init() { file_protobuf_node_proto_init() }
-func file_protobuf_node_proto_init() {
-	if File_protobuf_node_proto != nil {
+func init() { file_node_proto_init() }
+func file_node_proto_init() {
+	if File_node_proto != nil {
 		return
 	}
-	file_protobuf_avs_proto_init()
-	file_protobuf_node_proto_msgTypes[5].OneofWrappers = []any{
+	file_avs_proto_init()
+	file_node_proto_msgTypes[5].OneofWrappers = []any{
 		(*NotifyTriggersReq_BlockTrigger)(nil),
 		(*NotifyTriggersReq_FixedTimeTrigger)(nil),
 		(*NotifyTriggersReq_CronTrigger)(nil),
@@ -1305,18 +1306,18 @@ func file_protobuf_node_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protobuf_node_proto_rawDesc), len(file_protobuf_node_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_protobuf_node_proto_goTypes,
-		DependencyIndexes: file_protobuf_node_proto_depIdxs,
-		EnumInfos:         file_protobuf_node_proto_enumTypes,
-		MessageInfos:      file_protobuf_node_proto_msgTypes,
+		GoTypes:           file_node_proto_goTypes,
+		DependencyIndexes: file_node_proto_depIdxs,
+		EnumInfos:         file_node_proto_enumTypes,
+		MessageInfos:      file_node_proto_msgTypes,
 	}.Build()
-	File_protobuf_node_proto = out.File
-	file_protobuf_node_proto_goTypes = nil
-	file_protobuf_node_proto_depIdxs = nil
+	File_node_proto = out.File
+	file_node_proto_goTypes = nil
+	file_node_proto_depIdxs = nil
 }

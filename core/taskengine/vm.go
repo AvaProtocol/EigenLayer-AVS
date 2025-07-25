@@ -3278,10 +3278,30 @@ func removeComplexProtobufTypes(input map[string]interface{}) map[string]interfa
 		if key == "methodCalls" {
 			// methodCalls should always be []interface{} with maps after our fixes
 			if methodCallsArray, ok := value.([]interface{}); ok {
-				result[key] = methodCallsArray
+				// Process each method call to handle []string in methodParams
+				cleanedMethodCalls := make([]interface{}, len(methodCallsArray))
+				for i, methodCall := range methodCallsArray {
+					if methodCallMap, ok := methodCall.(map[string]interface{}); ok {
+						cleanedMethodCalls[i] = removeComplexProtobufTypes(methodCallMap)
+					} else {
+						cleanedMethodCalls[i] = methodCall
+					}
+				}
+				result[key] = cleanedMethodCalls
 			} else {
 				// Fallback: convert unexpected format to string (should not happen with our fixes)
 				result[key] = fmt.Sprintf("%v", value)
+			}
+		} else if key == "methodParams" {
+			// Convert []string to []interface{} for protobuf compatibility
+			if stringSlice, ok := value.([]string); ok {
+				interfaceSlice := make([]interface{}, len(stringSlice))
+				for i, str := range stringSlice {
+					interfaceSlice[i] = str
+				}
+				result[key] = interfaceSlice
+			} else {
+				result[key] = value
 			}
 		} else if stringMap, ok := value.(map[string]string); ok {
 			// Convert map[string]string to map[string]interface{} for protobuf compatibility
@@ -3290,6 +3310,13 @@ func removeComplexProtobufTypes(input map[string]interface{}) map[string]interfa
 				interfaceMap[k] = v
 			}
 			result[key] = interfaceMap
+		} else if stringSlice, ok := value.([]string); ok {
+			// Convert any []string to []interface{} for protobuf compatibility
+			interfaceSlice := make([]interface{}, len(stringSlice))
+			for i, str := range stringSlice {
+				interfaceSlice[i] = str
+			}
+			result[key] = interfaceSlice
 		} else if nestedMap, ok := value.(map[string]interface{}); ok {
 			// Recursively clean nested maps
 			result[key] = removeComplexProtobufTypes(nestedMap)

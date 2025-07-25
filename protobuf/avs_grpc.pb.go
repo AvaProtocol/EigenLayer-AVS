@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v5.29.2
-// source: protobuf/avs.proto
+// source: avs.proto
 
 package avsproto
 
@@ -1123,5 +1123,5 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "protobuf/avs.proto",
+	Metadata: "avs.proto",
 }

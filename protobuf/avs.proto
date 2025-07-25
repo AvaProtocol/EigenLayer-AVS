@@ -421,6 +421,8 @@ message ContractReadNode {
     // Changed from repeated MethodResult to google.protobuf.Value for better JavaScript native type support
     // Data will be a JSON array of method results with flattened key-value structure
     google.protobuf.Value data = 1;
+    // Metadata contains the raw backend responses with methodName, methodABI, success, error details
+    google.protobuf.Value metadata = 2;
   }
 
   // Include Config as field 

@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type ContractReadProcessor struct {
@@ -184,8 +185,54 @@ func (r *ContractReadProcessor) callContractMethod(contractAddress common.Addres
 
 // executeMethodCallWithoutFormatting executes a single method call without decimal formatting
 func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.Context, contractAbi *abi.ABI, contractAddress common.Address, methodName string, callData string) *avsproto.ContractReadNode_MethodResult {
+	// Generate calldata if not provided
+	var finalCallData string
+	if callData == "" && methodName != "" {
+		// Generate calldata from method name for methods with no parameters
+		if contractAbi != nil {
+			if method, exists := contractAbi.Methods[methodName]; exists {
+				if len(method.Inputs) == 0 {
+					// Method has no inputs, generate calldata from method signature
+					calldata, err := contractAbi.Pack(methodName)
+					if err != nil {
+						return &avsproto.ContractReadNode_MethodResult{
+							Success:    false,
+							Error:      fmt.Sprintf("failed to generate calldata for method %s: %v", methodName, err),
+							MethodName: methodName,
+							Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+						}
+					}
+					finalCallData = fmt.Sprintf("0x%x", calldata)
+				} else {
+					return &avsproto.ContractReadNode_MethodResult{
+						Success:    false,
+						Error:      fmt.Sprintf("method %s requires parameters but callData is empty", methodName),
+						MethodName: methodName,
+						Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+					}
+				}
+			} else {
+				return &avsproto.ContractReadNode_MethodResult{
+					Success:    false,
+					Error:      fmt.Sprintf("method %s not found in contract ABI", methodName),
+					MethodName: methodName,
+					Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+				}
+			}
+		} else {
+			return &avsproto.ContractReadNode_MethodResult{
+				Success:    false,
+				Error:      "contract ABI is required to generate calldata",
+				MethodName: methodName,
+				Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+			}
+		}
+	} else {
+		finalCallData = callData
+	}
+
 	// Preprocess template variables in method call data
-	preprocessedCallData := r.vm.preprocessTextWithVariableMapping(callData)
+	preprocessedCallData := r.vm.preprocessTextWithVariableMapping(finalCallData)
 	calldata := common.FromHex(preprocessedCallData)
 	msg := ethereum.CallMsg{
 		To:   &contractAddress,
@@ -512,19 +559,27 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 			}
 		}
 
-		// Re-execute the method with decimal formatting if needed
-		if needsDecimalFormatting && decimalsValue != nil {
+		// Apply decimal formatting to existing result if needed (avoid re-execution)
+		if needsDecimalFormatting && decimalsValue != nil && result.Success {
 			if r.vm.logger != nil {
-				r.vm.logger.Debug("Re-executing method with decimal formatting", "methodName", methodName, "fieldsToFormat", fieldsToFormat)
+				r.vm.logger.Debug("Applying decimal formatting to existing result", "methodName", methodName, "fieldsToFormat", fieldsToFormat)
 			}
-			formattedResult := r.executeMethodCallWithDecimalFormatting(ctx, parsedABI, contractAddr, methodCall, decimalsValue, fieldsToFormat)
+
+			// Apply decimal formatting to the existing successful result
+			formattedData, rawFieldsMetadata := r.applyDecimalFormattingToResult(result.Data, decimalsValue, fieldsToFormat)
+
+			// Create new result with formatted data
+			formattedResult := &avsproto.ContractReadNode_MethodResult{
+				Success:    true,
+				Error:      "",
+				MethodName: result.MethodName,
+				Data:       formattedData,
+			}
 			results = append(results, formattedResult)
 
 			// Collect raw fields metadata
-			for _, field := range formattedResult.Data {
-				if strings.HasSuffix(field.Name, "Raw") {
-					allRawFieldsMetadata[field.Name] = field.Value
-				}
+			for fieldName, fieldValue := range rawFieldsMetadata {
+				allRawFieldsMetadata[fieldName] = fieldValue
 			}
 		} else {
 			if r.vm.logger != nil {
@@ -535,52 +590,109 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	}
 
 	// Convert results to standardized format
-	var resultsArray []interface{}
+	var resultsArray []interface{}                                              // For metadata (raw backend responses)
+	var combinedCleanData map[string]interface{} = make(map[string]interface{}) // For data (single flattened object)
+
+	if r.vm.logger != nil {
+		r.vm.logger.Debug("Processing results for data/metadata separation", "resultCount", len(results))
+	}
+
 	for _, methodResult := range results {
-		resultMap := map[string]interface{}{
+		// Create metadata entry (full backend response)
+		metadataEntry := map[string]interface{}{
 			"methodName": methodResult.MethodName,
 			"success":    methodResult.Success,
 			"error":      methodResult.Error,
 		}
-
-		// Extract methodABI from contract ABI if available
+		// Add methodABI to metadata if available
 		if len(parsedABI.Methods) > 0 {
 			if method, exists := parsedABI.Methods[methodResult.MethodName]; exists {
 				if methodABI := r.extractMethodABI(&method); methodABI != nil {
-					resultMap["methodABI"] = methodABI
+					metadataEntry["methodABI"] = methodABI
+				} else {
+					metadataEntry["methodABI"] = nil
 				}
+			} else {
+				metadataEntry["methodABI"] = nil
+			}
+		} else {
+			metadataEntry["methodABI"] = nil
+		}
+		// Extract the primary return value for the metadata's "value" field (raw format)
+		var metadataValue interface{}
+		if len(methodResult.Data) > 0 {
+			if len(methodResult.Data) == 1 {
+				metadataValue = methodResult.Data[0].Value
+			} else {
+				valueMap := make(map[string]interface{})
+				for _, field := range methodResult.Data {
+					valueMap[field.Name] = field.Value
+				}
+				metadataValue = valueMap
 			}
 		}
+		metadataEntry["value"] = metadataValue
+		resultsArray = append(resultsArray, metadataEntry)
 
-		// Extract the primary return value for the "value" field
-		var primaryValue interface{}
+		if r.vm.logger != nil {
+			r.vm.logger.Debug("Added metadata entry", "methodName", methodResult.MethodName, "metadataEntry", metadataEntry)
+		}
+
+		// Add to combined clean data object (user-friendly format)
 		if len(methodResult.Data) > 0 {
-			// For single output methods, use the first (and usually only) field value
 			if len(methodResult.Data) == 1 {
-				primaryValue = methodResult.Data[0].Value
+				// Single output: add directly as {methodName: value}
+				combinedCleanData[methodResult.MethodName] = methodResult.Data[0].Value
 			} else {
-				// For multiple outputs, create a map of field names to values
+				// Multiple outputs: create a map of field names to values
 				valueMap := make(map[string]interface{})
 				for _, field := range methodResult.Data {
 					if field.Name != "_rawContractOutput" && !strings.HasSuffix(field.Name, "Raw") {
 						valueMap[field.Name] = field.Value
 					}
 				}
-				primaryValue = valueMap
-			}
-		}
-		resultMap["value"] = primaryValue
 
-		resultsArray = append(resultsArray, resultMap)
+				// Include raw fields in the clean data for applyToFields support
+				for _, field := range methodResult.Data {
+					if strings.HasSuffix(field.Name, "Raw") {
+						valueMap[field.Name] = field.Value
+					}
+				}
+
+				// Add as {methodName: valueMap}
+				combinedCleanData[methodResult.MethodName] = valueMap
+			}
+		} else {
+			// No data, set to nil
+			combinedCleanData[methodResult.MethodName] = nil
+		}
+
+		if r.vm.logger != nil {
+			r.vm.logger.Debug("Added to combined clean data", "methodName", methodResult.MethodName, "currentCombinedData", combinedCleanData)
+		}
 	}
 
-	// Convert results to JSON for the new protobuf structure using shared helper
+	if r.vm.logger != nil {
+		r.vm.logger.Debug("Final data structures constructed", "resultsArrayLength", len(resultsArray), "combinedCleanDataKeys", len(combinedCleanData))
+	}
+
+	// Convert both to protobuf values
 	resultsValue := ConvertResultsArrayToProtobufValue(resultsArray, &log)
 
-	// Create output with all results
+	// Convert the single combined object to protobuf
+	var cleanDataValue *structpb.Value
+	var structErr error
+	cleanDataValue, structErr = structpb.NewValue(combinedCleanData)
+	if structErr != nil {
+		log.WriteString(fmt.Sprintf("Failed to convert combined clean data to protobuf Value: %v\n", structErr))
+		cleanDataValue = structpb.NewNullValue()
+	}
+
+	// Create output with both data and metadata
 	s.OutputData = &avsproto.Execution_Step_ContractRead{
 		ContractRead: &avsproto.ContractReadNode_Output{
-			Data: resultsValue,
+			Data:     cleanDataValue,
+			Metadata: resultsValue,
 		},
 	}
 
@@ -613,6 +725,64 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	finalizeExecutionStep(s, true, "", log.String())
 
 	return s, nil
+}
+
+// applyDecimalFormattingToResult applies decimal formatting to existing result data
+func (r *ContractReadProcessor) applyDecimalFormattingToResult(originalData []*avsproto.ContractReadNode_MethodResult_StructuredField, decimalsValue *big.Int, fieldsToFormat []string) ([]*avsproto.ContractReadNode_MethodResult_StructuredField, map[string]string) {
+	if len(originalData) == 0 || decimalsValue == nil || len(fieldsToFormat) == 0 {
+		return originalData, make(map[string]string)
+	}
+
+	// Create a map of fields to format for quick lookup
+	formatFieldsMap := make(map[string]bool)
+	for _, field := range fieldsToFormat {
+		formatFieldsMap[field] = true
+	}
+
+	// Create new structured data with decimal formatting applied
+	var formattedData []*avsproto.ContractReadNode_MethodResult_StructuredField
+	rawFieldsMetadata := make(map[string]string)
+
+	for _, field := range originalData {
+		if formatFieldsMap[field.Name] {
+			// Apply decimal formatting to this field
+			if rawValue, ok := new(big.Int).SetString(field.Value, 10); ok {
+				// Store the raw value
+				rawFieldName := field.Name + "Raw"
+				rawFieldsMetadata[rawFieldName] = field.Value
+
+				// Format the value with decimals using ABIValueConverter
+				converter := &ABIValueConverter{}
+				formattedValue := converter.FormatWithDecimals(rawValue, decimalsValue)
+
+				// Add both formatted and raw fields
+				formattedData = append(formattedData, &avsproto.ContractReadNode_MethodResult_StructuredField{
+					Name:  field.Name,
+					Value: formattedValue,
+				})
+				formattedData = append(formattedData, &avsproto.ContractReadNode_MethodResult_StructuredField{
+					Name:  rawFieldName,
+					Value: field.Value,
+				})
+
+				if r.vm.logger != nil {
+					r.vm.logger.Debug("Applied decimal formatting",
+						"fieldName", field.Name,
+						"rawValue", field.Value,
+						"formattedValue", formattedValue,
+						"decimals", decimalsValue.String())
+				}
+			} else {
+				// If we can't parse as big int, keep original
+				formattedData = append(formattedData, field)
+			}
+		} else {
+			// Keep original field as-is
+			formattedData = append(formattedData, field)
+		}
+	}
+
+	return formattedData, rawFieldsMetadata
 }
 
 // extractMethodABI extracts ABI information for a specific method
@@ -656,7 +826,44 @@ func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx conte
 	preprocessedCallData := r.vm.preprocessTextWithVariableMapping(methodCall.GetCallData())
 	methodName := r.vm.preprocessTextWithVariableMapping(methodCall.GetMethodName())
 
-	calldata := common.FromHex(preprocessedCallData)
+	// Generate callData from methodName and methodParams if callData is empty (same logic as executeMethodCallWithoutFormatting)
+	var finalCallData string
+	if preprocessedCallData == "" && methodName != "" {
+		// Find the method in the ABI
+		method, exists := contractAbi.Methods[methodName]
+		if !exists {
+			return &avsproto.ContractReadNode_MethodResult{
+				Success:    false,
+				Error:      fmt.Sprintf("method %s not found in ABI", methodName),
+				MethodName: methodName,
+				Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+			}
+		}
+
+		// Parse method parameters from the protobuf
+		var methodParams []interface{}
+		for _, param := range methodCall.GetMethodParams() {
+			methodParams = append(methodParams, param)
+		}
+
+		// Pack the method call
+		packedData, err := method.Inputs.Pack(methodParams...)
+		if err != nil {
+			return &avsproto.ContractReadNode_MethodResult{
+				Success:    false,
+				Error:      fmt.Sprintf("failed to pack method parameters: %v", err),
+				MethodName: methodName,
+				Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+			}
+		}
+
+		// Combine method selector with packed parameters
+		finalCallData = fmt.Sprintf("0x%x%x", method.ID, packedData)
+	} else {
+		finalCallData = preprocessedCallData
+	}
+
+	calldata := common.FromHex(finalCallData)
 	msg := ethereum.CallMsg{
 		To:   &contractAddress,
 		Data: calldata,

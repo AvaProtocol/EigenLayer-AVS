@@ -25,7 +25,7 @@ func TestContractReadSimpleReturn(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
-			ContractAbi:     ConvertJSONABIToProtobufValues(testBalanceOfABI),
+			ContractAbi:     mustConvertJSONABIToProtobufValues(testBalanceOfABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:   "0x70a08231000000000000000000000000ce289bb9fb0a9591317981223cbe33d5dc42268d",
@@ -130,7 +130,7 @@ func TestContractReadComplexReturn(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0xc59E3633BAAC79493d908e63626716e204A45EdF",
-			ContractAbi:     ConvertJSONABIToProtobufValues(testGetRoundDataABI),
+			ContractAbi:     mustConvertJSONABIToProtobufValues(testGetRoundDataABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:   "0x9a6fc8f500000000000000000000000000000000000000000000000100000000000052e7",
@@ -261,7 +261,7 @@ func TestContractReadWithDecimalFormatting(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0xc59E3633BAAC79493d908e63626716e204A45EdF",
-			ContractAbi:     ConvertJSONABIToProtobufValues(testDecimalsAndGetRoundDataABI),
+			ContractAbi:     mustConvertJSONABIToProtobufValues(testDecimalsAndGetRoundDataABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:      "0x313ce567", // decimals()

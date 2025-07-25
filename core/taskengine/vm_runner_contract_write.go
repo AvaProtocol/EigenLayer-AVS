@@ -113,8 +113,41 @@ func (r *ContractWriteProcessor) executeMethodCall(
 ) *avsproto.ContractWriteNode_MethodResult {
 	t0 := time.Now()
 
-	// Use existing callData (backend will handle methodParams separately)
-	calldata := common.FromHex(methodCall.CallData)
+	// Substitute template variables in methodParams before generating calldata
+	// Use preprocessTextWithVariableMapping for each parameter to support dot notation like {{value.address}}
+	resolvedMethodParams := make([]string, len(methodCall.MethodParams))
+	for i, param := range methodCall.MethodParams {
+		resolvedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(param)
+	}
+
+	// Use shared utility to generate or use existing calldata
+	callData, err := GenerateOrUseCallData(methodCall.MethodName, methodCall.CallData, resolvedMethodParams, contractAbi)
+	if err != nil {
+		if r.vm != nil && r.vm.logger != nil {
+			r.vm.logger.Error("❌ Failed to get/generate calldata for contract write",
+				"methodName", methodCall.MethodName,
+				"providedCallData", methodCall.CallData,
+				"rawMethodParams", methodCall.MethodParams,
+				"resolvedMethodParams", resolvedMethodParams,
+				"error", err)
+		}
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success:    false,
+			Error:      fmt.Sprintf("failed to get/generate calldata: %v", err),
+			MethodName: methodCall.MethodName,
+		}
+	}
+
+	// Log successful calldata generation if needed
+	if methodCall.CallData == "" && callData != "" && r.vm != nil && r.vm.logger != nil {
+		r.vm.logger.Debug("✅ Generated calldata from methodName and methodParams for contract write",
+			"methodName", methodCall.MethodName,
+			"rawMethodParams", methodCall.MethodParams,
+			"resolvedMethodParams", resolvedMethodParams,
+			"generatedCallData", callData)
+	}
+
+	calldata := common.FromHex(callData)
 
 	// Resolve method name from ABI if not provided or if provided name is "unknown"
 	methodName := methodCall.MethodName
@@ -152,7 +185,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	simulationResult, err := tenderlyClient.SimulateContractWrite(
 		ctx,
 		contractAddress.Hex(),
-		methodCall.CallData,
+		callData,
 		contractAbiStr,
 		methodName,
 		chainID,
@@ -162,11 +195,11 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		r.vm.logger.Warn("🚫 Tenderly simulation failed, using mock result", "error", err)
 
 		// Create a mock result when Tenderly fails
-		return r.createMockContractWriteResult(methodName, contractAddress.Hex(), methodCall.CallData, contractAbi, t0, chainID)
+		return r.createMockContractWriteResult(methodName, contractAddress.Hex(), callData, contractAbi, t0, chainID)
 	}
 
 	// Convert Tenderly simulation result to legacy protobuf format
-	return r.convertTenderlyResultToFlexibleFormat(simulationResult, contractAbi, methodCall.CallData)
+	return r.convertTenderlyResultToFlexibleFormat(simulationResult, contractAbi, callData)
 }
 
 // createMockContractWriteResult creates a mock result when Tenderly fails

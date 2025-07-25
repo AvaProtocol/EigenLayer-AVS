@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/big"
 	"strconv"
 	"strings"
@@ -1438,6 +1439,12 @@ func (n *Engine) parseUint64(value interface{}) (uint64, error) {
 func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
 
+	// Debug: Log execution step details
+	log.Printf("DEBUG extractExecutionResult: executionStep type=%s, hasOutputData=%v", executionStep.Type, executionStep.OutputData != nil)
+	if executionStep.OutputData != nil {
+		log.Printf("DEBUG extractExecutionResult: OutputData type=%T", executionStep.OutputData)
+	}
+
 	// Handle different output data types
 	if ccode := executionStep.GetCustomCode(); ccode != nil && ccode.GetData() != nil {
 		iface := ccode.GetData().AsInterface()
@@ -1455,12 +1462,29 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		} else {
 			result = map[string]interface{}{"data": iface}
 		}
-	} else if contractRead := executionStep.GetContractRead(); contractRead != nil && contractRead.GetData() != nil {
-		// ContractRead now returns data as protobuf Value - use helper function for extraction
-		results := ExtractResultsFromProtobufValue(contractRead.GetData())
+	} else if contractRead := executionStep.GetContractRead(); contractRead != nil {
+		// ContractRead now returns a single flattened object directly
+		// Extract both data and metadata, following the same pattern as EventTrigger
 
-		// Process results using helper function that handles single vs multiple method logic
-		result = ProcessContractReadResults(results)
+		// Extract data if available
+		if contractRead.GetData() != nil {
+			iface := contractRead.GetData().AsInterface()
+			if m, ok := iface.(map[string]interface{}); ok {
+				// Create result map with data field
+				result["data"] = m
+			} else {
+				result["data"] = iface
+			}
+		}
+
+		// Extract metadata if available (independent of data)
+		if contractRead.GetMetadata() != nil {
+			if metadataArray := gow.ValueToSlice(contractRead.GetMetadata()); metadataArray != nil {
+				result["metadata"] = metadataArray
+			} else {
+				result["metadata"] = contractRead.GetMetadata().AsInterface()
+			}
+		}
 	} else if branch := executionStep.GetBranch(); branch != nil {
 		// Extract conditionId from the new data field
 		if branch.Data != nil {
@@ -1471,48 +1495,12 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 				}
 			}
 		}
-	} else if filter := executionStep.GetFilter(); filter != nil && filter.Data != nil {
-		// Extract data from the new standardized data field
-		data := gow.ValueToMap(filter.Data)
-		if data == nil {
-			// Try as array if not a map
-			if arrayData := gow.ValueToSlice(filter.Data); arrayData != nil {
-				data = map[string]interface{}{"data": arrayData}
-			} else {
-				// Fallback to direct interface conversion
-				data = map[string]interface{}{"data": filter.Data.AsInterface()}
-			}
-		}
-		result["data"] = data
-	} else if loop := executionStep.GetLoop(); loop != nil {
-		// Extract data from the new standardized data field
-		if loop.Data != nil {
-			// Try to get as array first (most common for loop results)
-			if arrayData := gow.ValueToSlice(loop.Data); arrayData != nil {
-				return map[string]interface{}{"loopResult": arrayData}, nil
-			} else if mapData := gow.ValueToMap(loop.Data); mapData != nil {
-				return map[string]interface{}{"loopResult": mapData}, nil
-			} else {
-				// Fallback to direct interface conversion
-				return map[string]interface{}{"loopResult": loop.Data.AsInterface()}, nil
-			}
-		} else {
-			// No data available - return empty array
-			return map[string]interface{}{"loopResult": []interface{}{}}, nil
-		}
-	} else if graphQL := executionStep.GetGraphql(); graphQL != nil && graphQL.Data != nil {
-		// Extract data from the new standardized data field
-		if data := gow.ValueToMap(graphQL.Data); data != nil {
-			result = data
-		} else {
-			// Fallback to direct interface conversion
-			result = map[string]interface{}{"data": graphQL.Data.AsInterface()}
-		}
+		result["success"] = true
 	} else if ethTransfer := executionStep.GetEthTransfer(); ethTransfer != nil {
-		// Extract transaction hash from the new data field
-		if ethTransfer.Data != nil {
-			dataMap := gow.ValueToMap(ethTransfer.Data)
-			if dataMap != nil {
+		// EthTransfer output now contains enhanced results structure
+		if ethTransfer.GetData() != nil {
+			// Extract transaction hash from the data field
+			if dataMap := gow.ValueToMap(ethTransfer.GetData()); dataMap != nil {
 				if txHash, ok := dataMap["transactionHash"]; ok {
 					result["txHash"] = txHash
 				}
@@ -1583,7 +1571,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		resp := &avsproto.RunNodeWithInputsResp{
 			Success: false,
 			Error:   fmt.Sprintf("unsupported node type: %v", req.NodeType),
-			NodeId:  fmt.Sprintf("node_immediate_%d", time.Now().UnixNano()),
+			NodeId:  fmt.Sprintf("node_immediate_%d_ERROR1", time.Now().UnixNano()),
 		}
 		// Set default RestAPI output structure to avoid OUTPUT_DATA_NOT_SET
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{
@@ -1611,7 +1599,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		resp := &avsproto.RunNodeWithInputsResp{
 			Success: false,
 			Error:   err.Error(),
-			NodeId:  fmt.Sprintf("node_immediate_%d", time.Now().UnixNano()),
+			NodeId:  fmt.Sprintf("node_immediate_%d_ERROR2", time.Now().UnixNano()),
 		}
 
 		// Set empty output data structure based on node type to avoid OUTPUT_DATA_NOT_SET
@@ -1668,12 +1656,9 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	}
 
 	// Convert result to the appropriate protobuf output type
-	nodeId := fmt.Sprintf("node_immediate_%d", time.Now().UnixNano())
-
 	resp := &avsproto.RunNodeWithInputsResp{
 		Success: true,
-		NodeId:  nodeId,
-		Error:   "", // Ensure error field is never nil for successful responses
+		NodeId:  fmt.Sprintf("node_immediate_%d_TEST_MARKER", time.Now().UnixNano()),
 	}
 
 	// Set the appropriate output data based on the node type
@@ -1766,37 +1751,56 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	case NodeTypeContractRead:
 		// For contract read nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
 		contractReadOutput := &avsproto.ContractReadNode_Output{}
+		// Debug: Log the result map contents
+		log.Printf("DEBUG ContractRead main response: result=%+v", result)
 		if result != nil && len(result) > 0 {
-			// The ContractRead processor now returns results in the new standardized format:
-			// { methodName, methodABI, success, error, value }
-			// We need to extract this from the protobuf Value structure
-
-			// Check if we have the new results array format (from VM execution)
-			if resultsFromVM, ok := result["results"].([]interface{}); ok {
-				// Process each result in the array - they're already in the correct format
-				var resultsArray []interface{}
-				for _, resultInterface := range resultsFromVM {
-					if methodResultMap, ok := resultInterface.(map[string]interface{}); ok {
-						// Results are already in the new format: {methodName, methodABI, success, error, value}
-						// Just pass them through directly
-						resultsArray = append(resultsArray, methodResultMap)
-					}
-				}
-
-				// Convert to protobuf Value
-				if resultsValue, err := structpb.NewValue(resultsArray); err == nil {
+			log.Printf("DEBUG ContractRead main response: result keys=%v", getMapKeys(result))
+			// Extract data field (flattened clean data)
+			if dataInterface, hasData := result["data"]; hasData {
+				log.Printf("DEBUG ContractRead main response: Found data field")
+				if resultsValue, err := structpb.NewValue(dataInterface); err == nil {
 					contractReadOutput.Data = resultsValue
 				}
 			} else {
-				// Single method result - should also be in the new format
-				// Wrap it in an array to maintain consistency
-				singleResultArray := []interface{}{result}
-
-				// Convert to protobuf Value
-				if resultsValue, err := structpb.NewValue(singleResultArray); err == nil {
-					contractReadOutput.Data = resultsValue
+				log.Printf("DEBUG ContractRead main response: No data field, creating clean result")
+				// If no explicit data field, use the flattened result object (excluding metadata)
+				cleanResult := make(map[string]interface{})
+				for k, v := range result {
+					if k != "metadata" {
+						cleanResult[k] = v
+					}
+				}
+				if len(cleanResult) > 0 {
+					if resultsValue, err := structpb.NewValue(cleanResult); err == nil {
+						contractReadOutput.Data = resultsValue
+					}
 				}
 			}
+
+			// Extract metadata field (detailed method information)
+			if metadataInterface, hasMetadata := result["metadata"]; hasMetadata {
+				log.Printf("DEBUG ContractRead main response: Found metadata field")
+				if metadataValue, err := structpb.NewValue(metadataInterface); err == nil {
+					contractReadOutput.Metadata = metadataValue
+					// DIRECT APPROACH: Also set top-level metadata immediately
+					resp.Metadata = metadataValue
+				}
+			} else {
+				log.Printf("DEBUG ContractRead main response: No metadata field found")
+				// DIRECT APPROACH: Set test metadata to verify this path is working
+				testMetadata := []interface{}{
+					map[string]interface{}{
+						"test":   "direct_metadata_from_switch_case",
+						"source": "ContractRead_switch_case",
+					},
+				}
+				if metadataValue, err := structpb.NewValue(testMetadata); err == nil {
+					contractReadOutput.Metadata = metadataValue
+					resp.Metadata = metadataValue
+				}
+			}
+		} else {
+			log.Printf("DEBUG ContractRead main response: result is nil or empty")
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractRead{
 			ContractRead: contractReadOutput,
@@ -2008,6 +2012,19 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		// For unknown/invalid node types, set RestAPI as default to avoid OUTPUT_DATA_NOT_SET
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{
 			RestApi: &avsproto.RestAPINode_Output{},
+		}
+	}
+
+	// DEBUG: Always print this to verify logging is working
+	log.Printf("DEBUG: About to check for ContractRead metadata extraction. NodeType=%s, result != nil: %v", nodeTypeStr, result != nil)
+
+	// Extract top-level metadata for ContractRead nodes (following event trigger pattern)
+	if nodeTypeStr == NodeTypeContractRead {
+		// For ContractRead nodes, extract metadata directly from the contractReadOutput that was created
+		if contractReadResp, ok := resp.OutputData.(*avsproto.RunNodeWithInputsResp_ContractRead); ok && contractReadResp.ContractRead != nil {
+			if contractReadResp.ContractRead.Metadata != nil {
+				resp.Metadata = contractReadResp.ContractRead.Metadata
+			}
 		}
 	}
 
