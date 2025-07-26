@@ -109,17 +109,17 @@ func TestContractReadSimpleReturn(t *testing.T) {
 		return
 	}
 
-	// Get the first result and extract value
+	// Get the first result and extract balanceOf value
 	if resultMap, ok := results[0].(map[string]interface{}); ok {
-		if value, ok := resultMap["value"]; ok {
+		if balanceOfValue, ok := resultMap["balanceOf"]; ok {
 			// For balanceOf, the value should be the direct result (single output)
-			if valueStr, ok := value.(string); ok && valueStr == "313131" {
+			if valueStr, ok := balanceOfValue.(string); ok && valueStr == "313131" {
 				// Found the expected value
 				return
 			}
-			t.Errorf("read balanceOf doesn't return right data. expected 313131 but got: %v", value)
+			t.Errorf("read balanceOf doesn't return right data. expected 313131 but got: %v", balanceOfValue)
 		} else {
-			t.Errorf("expected value field in result but got: %v", resultMap)
+			t.Errorf("expected balanceOf field in result but got: %v", resultMap)
 		}
 	} else {
 		t.Errorf("expected result to be a map but got: %v", results[0])
@@ -213,11 +213,11 @@ func TestContractReadComplexReturn(t *testing.T) {
 		return
 	}
 
-	// Get the first result and extract value
+	// Get the first result and extract getRoundData
 	if resultMap, ok := results[0].(map[string]interface{}); ok {
-		if value, ok := resultMap["value"]; ok {
+		if getRoundDataValue, ok := resultMap["getRoundData"]; ok {
 			// For getRoundData, the value should be a map with multiple fields
-			if valueMap, ok := value.(map[string]interface{}); ok {
+			if valueMap, ok := getRoundDataValue.(map[string]interface{}); ok {
 				if len(valueMap) < 5 {
 					t.Errorf("contract read doesn't return right data, wrong length. expect 5 fields, got %d fields", len(valueMap))
 					return
@@ -243,14 +243,14 @@ func TestContractReadComplexReturn(t *testing.T) {
 							t.Errorf("expected field %s to be string but got %T", fieldName, actualValue)
 						}
 					} else {
-						t.Errorf("expected field %s not found in value: %v", fieldName, valueMap)
+						t.Errorf("expected field %s not found in getRoundData: %v", fieldName, valueMap)
 					}
 				}
 			} else {
-				t.Errorf("expected value to be a map but got %T: %v", value, value)
+				t.Errorf("expected getRoundData to be a map but got %T: %v", getRoundDataValue, getRoundDataValue)
 			}
 		} else {
-			t.Errorf("expected value field in result but got: %v", resultMap)
+			t.Errorf("expected getRoundData field in result but got: %v", resultMap)
 		}
 	} else {
 		t.Errorf("expected result to be a map but got: %v", results[0])
@@ -361,21 +361,35 @@ func TestContractReadWithDecimalFormatting(t *testing.T) {
 		}
 	}
 
-	// Verify that we have results for both method calls (decimals and getRoundData)
-	if len(results) != 2 {
-		t.Errorf("expected 2 method results (decimals and getRoundData), got %d", len(results))
+	// The backend now returns a single flattened object with both method results
+	if len(results) != 1 {
+		t.Errorf("expected 1 combined result object, got %d", len(results))
 		return
 	}
 
-	// Find the getRoundData result
-	var getRoundDataResult map[string]interface{}
-	for _, result := range results {
-		if resultMap, ok := result.(map[string]interface{}); ok {
-			if methodName, ok := resultMap["methodName"].(string); ok && methodName == "getRoundData" {
-				getRoundDataResult = resultMap
-				break
-			}
-		}
+	// Get the combined result
+	combinedResult, ok := results[0].(map[string]interface{})
+	if !ok {
+		t.Errorf("expected result to be a map, got %T", results[0])
+		return
+	}
+
+	// Verify both methods are present in the combined result
+	if _, hasDecimals := combinedResult["decimals"]; !hasDecimals {
+		t.Errorf("expected 'decimals' field in combined result")
+		return
+	}
+
+	if _, hasGetRoundData := combinedResult["getRoundData"]; !hasGetRoundData {
+		t.Errorf("expected 'getRoundData' field in combined result")
+		return
+	}
+
+	// Extract the getRoundData result
+	getRoundDataResult, ok := combinedResult["getRoundData"].(map[string]interface{})
+	if !ok {
+		t.Errorf("expected getRoundData to be a map, got %T", combinedResult["getRoundData"])
+		return
 	}
 
 	if getRoundDataResult == nil {
@@ -383,20 +397,11 @@ func TestContractReadWithDecimalFormatting(t *testing.T) {
 		return
 	}
 
-	// Verify that the actual value fields are present in the getRoundData result
-	if value, ok := getRoundDataResult["value"]; ok {
-		if valueMap, ok := value.(map[string]interface{}); ok {
-			// Check that expected fields are present
-			expectedFields := []string{"roundId", "answer", "startedAt", "updatedAt", "answeredInRound"}
-			for _, field := range expectedFields {
-				if _, exists := valueMap[field]; !exists {
-					t.Errorf("expected field %s not found in value: %v", field, valueMap)
-				}
-			}
-		} else {
-			t.Errorf("expected value to be a map but got %T: %v", value, value)
+	// Verify that the actual fields are present directly in the getRoundData result
+	expectedFields := []string{"roundId", "answer", "startedAt", "updatedAt", "answeredInRound"}
+	for _, field := range expectedFields {
+		if _, exists := getRoundDataResult[field]; !exists {
+			t.Errorf("expected field %s not found in getRoundData result: %v", field, getRoundDataResult)
 		}
-	} else {
-		t.Errorf("expected value field in getRoundData result but got: %v", getRoundDataResult)
 	}
 }

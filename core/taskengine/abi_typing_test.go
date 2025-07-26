@@ -335,17 +335,9 @@ func TestValueRawPopulatedWhenDecimalsCallFails(t *testing.T) {
 		t.Errorf("Expected 'to' to be the correct address, got %v", toAddr)
 	}
 
-	// **CRITICAL TEST**: Verify that valueRaw is populated even when decimals() call fails
-	valueRaw, hasValueRaw := parsedData["valueRaw"]
-	if !hasValueRaw {
-		t.Errorf("Expected 'valueRaw' to be present even when decimals() call fails")
-	}
-
-	if valueRaw != "100500000000000000000" {
-		t.Errorf("Expected 'valueRaw' to be '100500000000000000000', got %v", valueRaw)
-	}
-
-	// Verify the value field contains the raw value (since decimal formatting failed)
+	// **CRITICAL TEST**: Verify that value field contains the raw value when decimals() call fails
+	// Note: With the new backend design, we no longer create separate "Raw" fields
+	// Instead, the main field contains the raw value when decimal formatting fails
 	if parsedData["value"] != "100500000000000000000" {
 		t.Errorf("Expected 'value' to be '100500000000000000000' (raw value when formatting fails), got %v", parsedData["value"])
 	}
@@ -359,5 +351,6 @@ func TestValueRawPopulatedWhenDecimalsCallFails(t *testing.T) {
 	t.Logf("Parsed event data with failed decimals() call: %+v", parsedData)
 
 	// Verify that this is the exact scenario that was causing the original bug
-	t.Logf("✅ REGRESSION TEST PASSED: valueRaw='%v' is populated even when decimals() call fails", valueRaw)
+	// The test now verifies that the main 'value' field contains the raw value when formatting fails
+	t.Logf("✅ REGRESSION TEST PASSED: 'value' field contains raw value when decimals() call fails")
 }

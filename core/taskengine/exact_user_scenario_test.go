@@ -65,7 +65,7 @@ func TestExactUserScenarioLoopBehavior(t *testing.T) {
 				"methodCalls": []interface{}{
 					map[string]interface{}{
 						"methodName":   "balanceOf",
-						"methodParams": "{{value.address}}", // Handlebars template using loop variable
+						"methodParams": []interface{}{"{{value.address}}"}, // Handlebars template using loop variable
 					},
 				},
 			},
@@ -103,7 +103,7 @@ func TestExactUserScenarioLoopBehavior(t *testing.T) {
 
 	methodCall := contractReadRunner.Config.MethodCalls[0]
 	assert.Equal(t, "balanceOf", methodCall.MethodName, "Method name should be set")
-	assert.Equal(t, "{{value.address}}", methodCall.MethodParams, "MethodParams should be set")
+	assert.Equal(t, []string{"{{value.address}}"}, methodCall.MethodParams, "MethodParams should be set")
 
 	t.Logf("✅ NEW METHODPARAMS STRUCTURE WORKING!")
 	t.Logf("   - Loop runs once per item in manualTrigger.data (2 items)")
