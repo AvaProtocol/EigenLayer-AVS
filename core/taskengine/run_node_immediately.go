@@ -1519,6 +1519,13 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 			return result, nil
 		}
 		return map[string]interface{}{"status": "success"}, nil
+	} else if loop := executionStep.GetLoop(); loop != nil {
+		// Loop output contains the array of iteration results
+		if loop.GetData() != nil {
+			iface := loop.GetData().AsInterface()
+			// Store loop data in loopResult key for run_node_immediately.go to extract
+			result["loopResult"] = iface
+		}
 	}
 
 	// If no specific data was extracted, include basic execution info

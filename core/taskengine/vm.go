@@ -112,6 +112,13 @@ func (c *CommonProcessor) SetVar(name string, data any) {
 }
 
 func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
+	// Skip storing iteration step results in global VM vars to avoid polluting inputsList
+	if strings.Contains(stepID, "_iter_") {
+		// Iteration step results should not be stored as global variables
+		// They are collected by the loop execution logic directly
+		return
+	}
+
 	c.vm.mu.Lock()
 	defer c.vm.mu.Unlock()
 	nodeNameVar := c.vm.getNodeNameAsVarLocked(stepID) // Use locked version to avoid deadlock
@@ -3503,6 +3510,7 @@ func (eq *ExecutionQueue) executeTask(task *ExecutionTask) *ExecutionResult {
 	}
 
 	// Set input variables in the VM context for this execution
+	// For loop iterations, we'll clean them up immediately after execution
 	eq.vm.mu.Lock()
 	if eq.vm.vars == nil {
 		eq.vm.vars = make(map[string]any)

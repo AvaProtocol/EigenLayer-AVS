@@ -453,33 +453,54 @@ ContractRead nodes read data from smart contracts and support multiple method ca
 
 #### Output Data Structure
 
-ContractRead nodes return an **array of method results**, where each result corresponds to a method call:
+ContractRead nodes return a **flattened object** in the `data` field containing all method call results combined into a single level, plus a `metadata` array containing raw method results:
 
 ```javascript
 // ContractRead node variable structure
 contractReadNode = {
-  data: [
-    // Array of method results - each object corresponds to one methodCall
+  data: {
+    // Flattened object with all method results combined
+    name: "Wrapped Ether",            // From name() method call
+    symbol: "WETH",                   // From symbol() method call
+    decimals: "18",                   // From decimals() method call
+    totalSupply: "10000000.0"         // From totalSupply() method call, formatted with decimals
+  },
+  metadata: [
+    // Array of raw method results for debugging/inspection
     {
       methodName: "name",
-      value: "Wrapped Ether",           // Decoded value from contract call
+      value: "Wrapped Ether",         // Raw unformatted value
       success: true,
       error: "",
-      methodABI: {                      // Single ABI entry for this method
-        name: "name", 
-        type: "string", 
-        value: "Wrapped Ether"
+      methodABI: {
+        name: "name",
+        type: "function",
+        inputs: [],
+        outputs: [{ name: "", type: "string" }]
       }
     },
     {
       methodName: "symbol", 
-      value: "WETH",                    // Decoded value from contract call
+      value: "WETH",                  // Raw unformatted value
       success: true,
       error: "",
-      methodABI: {                      // Single ABI entry for this method
+      methodABI: {
         name: "symbol",
-        type: "string", 
-        value: "WETH"
+        type: "function",
+        inputs: [],
+        outputs: [{ name: "", type: "string" }]
+      }
+    },
+    {
+      methodName: "totalSupply",
+      value: "10000000000000000000000000", // Raw unformatted value (before decimal division)
+      success: true,
+      error: "",
+      methodABI: {
+        name: "totalSupply",
+        type: "function",
+        inputs: [],
+        outputs: [{ name: "", type: "uint256" }]
       }
     }
   ],
@@ -493,6 +514,133 @@ contractReadNode = {
     ]
   }
 }
+```
+
+#### Decimal Formatting with ApplyToFields
+
+ContractRead nodes support automatic decimal formatting using the `applyToFields` configuration. This feature allows you to format large integer values (like wei amounts) into human-readable decimal format using decimal places from another method call.
+
+**Key Features:**
+- **No Raw Field Creation**: The backend does NOT create `${variable}Raw` fields automatically
+- **Simplified Syntax**: For single-value methods, use just the method name (e.g., `"totalSupply"`)
+- **Dot Notation Support**: For complex objects, use `"methodName.fieldName"` format
+- **Decimal Provider**: One method provides decimal places, another provides the value to format
+
+```javascript
+// Example: USDC token with decimal formatting
+const contractReadConfig = {
+  contractAddress: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", // USDC on Sepolia
+  contractAbi: [
+    {
+      name: "totalSupply",
+      outputs: [{ name: "", type: "uint256" }],
+      type: "function"
+    },
+    {
+      name: "decimals", 
+      outputs: [{ name: "", type: "uint8" }],
+      type: "function"
+    }
+  ],
+  methodCalls: [
+    {
+      methodName: "decimals",
+      methodParams: [],
+      applyToFields: ["totalSupply"]  // ✅ Simplified: just method name for single values
+    },
+    {
+      methodName: "totalSupply", 
+      methodParams: []
+    }
+  ]
+};
+
+// Expected output structure:
+contractReadNode = {
+  data: {
+    decimals: "6",                    // Decimal places provider
+    totalSupply: "411948958523.310916" // ✅ Formatted: divided by 10^6
+    // Note: No totalSupplyRaw field created
+  },
+  metadata: [
+    {
+      methodName: "decimals",
+      value: "6",                     // Raw unformatted value
+      success: true,
+      error: "",
+      methodABI: { /* ABI details */ }
+    },
+    {
+      methodName: "totalSupply",
+      value: "411948958523310916",    // Raw unformatted value (before decimal division)
+      success: true,
+      error: "",
+      methodABI: { /* ABI details */ }
+    }
+  ]
+}
+```
+
+**ApplyToFields Syntax Rules:**
+
+1. **Single Value Methods** (Simplified Syntax):
+   ```javascript
+   // For methods that return a single unnamed value
+   applyToFields: ["totalSupply"]           // ✅ Correct: method name only
+   applyToFields: ["totalSupply.totalSupply"] // ❌ Unnecessary: dot notation not needed
+   ```
+
+2. **Complex Object Methods** (Dot Notation):
+   ```javascript
+   // For methods that return objects with named fields
+   applyToFields: ["latestRoundData.answer"]    // ✅ Correct: methodName.fieldName
+   applyToFields: ["getRoundData.answer"]       // ✅ Correct: format specific field
+   ```
+
+3. **Backend Processing Logic**:
+   - **No Dot**: Apply formatting directly to the method's return value
+   - **With Dot**: Apply formatting to the specified field within the method's return object
+   - **No Raw Fields**: Backend does not create `${variable}Raw` fields automatically
+
+**Real-World Example - Chainlink Oracle:**
+
+```javascript
+// Chainlink ETH/USD price feed with decimal formatting
+const oracleConfig = {
+  contractAddress: "0xB0C712f98daE15264c8E26132BCC91C40aD4d5F9",
+  methodCalls: [
+    {
+      methodName: "decimals",
+      methodParams: [],
+      applyToFields: ["latestRoundData.answer"] // Format the answer field
+    },
+    {
+      methodName: "latestRoundData",
+      methodParams: []
+    }
+  ]
+};
+
+// Output with decimal formatting applied:
+contractReadNode.data = [
+  {
+    methodName: "decimals", 
+    value: { decimals: "8" },
+    success: true
+  },
+  {
+    methodName: "latestRoundData",
+    value: {
+      roundId: "18446744073709572839",
+      answer: "2189.30000000",           // ✅ Formatted: 218930000000 ÷ 10^8
+      startedAt: "1733878404",
+      updatedAt: "1733878404", 
+      answeredInRound: "18446744073709572839"
+      // Note: No answerRaw field created automatically
+    },
+    success: true
+  }
+]
 ```
 
 #### Multiple Method Calls

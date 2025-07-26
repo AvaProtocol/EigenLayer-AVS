@@ -62,7 +62,6 @@ func (r *ContractReadProcessor) buildStructuredDataWithDecimalFormatting(method 
 
 			// Check if this field should be formatted with decimals
 			if bigIntValue, ok := item.(*big.Int); ok && converter.ShouldFormatField(fieldName) {
-				rawValue := bigIntValue.String()
 				formattedValue := converter.FormatWithDecimals(bigIntValue, decimalsValue)
 
 				// Store formatted value in field
@@ -71,9 +70,6 @@ func (r *ContractReadProcessor) buildStructuredDataWithDecimalFormatting(method 
 					Type:  fieldType,
 					Value: formattedValue,
 				})
-
-				// Store raw value in metadata
-				rawFieldsMetadata[fieldName+"Raw"] = rawValue
 			} else {
 				// Use ABI-aware conversion even for unknown types
 				value := fmt.Sprintf("%v", item)
@@ -503,17 +499,24 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 							r.vm.logger.Debug("Processing applyToField", "applyToField", applyToField)
 						}
 
-						// Parse the method.field format
+						// Parse the method.field format or just method name for single values
 						parts := strings.Split(applyToField, ".")
-						if len(parts) != 2 {
+						var targetMethodName, targetFieldName string
+
+						if len(parts) == 1 {
+							// Simple format: just method name (for single value methods)
+							targetMethodName = parts[0]
+							targetFieldName = parts[0] // Use method name as field name for single outputs
+						} else if len(parts) == 2 {
+							// Dot notation format: methodName.fieldName
+							targetMethodName = parts[0]
+							targetFieldName = parts[1]
+						} else {
 							if r.vm.logger != nil {
-								r.vm.logger.Debug("Invalid applyToFields format", "applyToField", applyToField, "expected", "methodName.fieldName", "parts", parts)
+								r.vm.logger.Debug("Invalid applyToFields format", "applyToField", applyToField, "expected", "methodName or methodName.fieldName", "parts", parts)
 							}
 							continue
 						}
-
-						targetMethodName := parts[0]
-						targetFieldName := parts[1]
 
 						if r.vm.logger != nil {
 							r.vm.logger.Debug("Parsed applyToField",
@@ -659,14 +662,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 				// Multiple outputs: create a map of field names to values
 				valueMap := make(map[string]interface{})
 				for _, field := range methodResult.Data {
-					if field.Name != "_rawContractOutput" && !strings.HasSuffix(field.Name, "Raw") {
-						valueMap[field.Name] = field.Value
-					}
-				}
-
-				// Include raw fields in the clean data for applyToFields support
-				for _, field := range methodResult.Data {
-					if strings.HasSuffix(field.Name, "Raw") {
+					if field.Name != "_rawContractOutput" {
 						valueMap[field.Name] = field.Value
 					}
 				}
@@ -759,22 +755,14 @@ func (r *ContractReadProcessor) applyDecimalFormattingToResult(originalData []*a
 		if formatFieldsMap[field.Name] {
 			// Apply decimal formatting to this field
 			if rawValue, ok := new(big.Int).SetString(field.Value, 10); ok {
-				// Store the raw value
-				rawFieldName := field.Name + "Raw"
-				rawFieldsMetadata[rawFieldName] = field.Value
-
 				// Format the value with decimals using ABIValueConverter
 				converter := &ABIValueConverter{}
 				formattedValue := converter.FormatWithDecimals(rawValue, decimalsValue)
 
-				// Add both formatted and raw fields
+				// Add only the formatted field (no Raw field creation)
 				formattedData = append(formattedData, &avsproto.ContractReadNode_MethodResult_StructuredField{
 					Name:  field.Name,
 					Value: formattedValue,
-				})
-				formattedData = append(formattedData, &avsproto.ContractReadNode_MethodResult_StructuredField{
-					Name:  rawFieldName,
-					Value: field.Value,
 				})
 
 				if r.vm.logger != nil {
@@ -969,17 +957,9 @@ func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx conte
 	var structuredData []*avsproto.ContractReadNode_MethodResult_StructuredField
 
 	if decimalsValue != nil && len(fieldsToFormat) > 0 {
-		// Use decimal formatting and capture raw fields metadata
-		structuredDataFields, rawFieldsMetadata := r.buildStructuredDataWithDecimalFormatting(method, result, decimalsValue, fieldsToFormat)
+		// Use decimal formatting (no raw fields creation)
+		structuredDataFields, _ := r.buildStructuredDataWithDecimalFormatting(method, result, decimalsValue, fieldsToFormat)
 		structuredData = structuredDataFields
-
-		// Add raw fields (like answerRaw) to the structured data
-		for rawFieldName, rawValue := range rawFieldsMetadata {
-			structuredData = append(structuredData, &avsproto.ContractReadNode_MethodResult_StructuredField{
-				Name:  rawFieldName,
-				Value: fmt.Sprintf("%v", rawValue),
-			})
-		}
 	} else {
 		// Use regular formatting
 		var err error

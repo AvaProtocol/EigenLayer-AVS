@@ -489,23 +489,11 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 		}
 		return nil, nil
 	} else if contractReadOutput := executionStep.GetContractRead(); contractReadOutput != nil {
-		// For contract read, convert the results to JSON-compatible format
+		// For contract read, return the flattened data directly (same as standalone contract_read response)
 		if contractReadOutput.GetData() != nil {
-			// Extract results from the protobuf Value
-			var results []interface{}
-
-			if contractReadOutput.GetData().GetListValue() != nil {
-				// Data is an array
-				for _, item := range contractReadOutput.GetData().GetListValue().GetValues() {
-					results = append(results, item.AsInterface())
-				}
-			} else {
-				// Data might be a single object, wrap it in an array for consistency
-				results = append(results, contractReadOutput.GetData().AsInterface())
-			}
-
-			// Return results array directly, not wrapped in a "results" object (consistent with contract write)
-			return results, nil
+			// Return the flattened data object directly, not as an array
+			// This matches the standalone contract_read response format
+			return contractReadOutput.GetData().AsInterface(), nil
 		}
 		return nil, nil
 	} else if contractWriteOutput := executionStep.GetContractWrite(); contractWriteOutput != nil {
