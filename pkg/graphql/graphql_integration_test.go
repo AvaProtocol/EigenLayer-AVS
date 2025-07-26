@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// checkAPIAvailability checks if the external API is accessible
+// checkAPIAvailabilityIntegration checks if the external API is accessible
 func checkAPIAvailabilityIntegration(endpoint string) bool {
 	client := &http.Client{
 		Timeout: 5 * time.Second,
