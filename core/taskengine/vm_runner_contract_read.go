@@ -206,26 +206,24 @@ func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.C
 				} else {
 					// Method has inputs, generate calldata from methodParams
 					// Parse method parameters from the protobuf and preprocess template variables
-					var methodParams []interface{}
+					var methodParams []string
 					for _, param := range methodCall.GetMethodParams() {
 						// Preprocess template variables in each parameter
 						preprocessedParam := r.vm.preprocessTextWithVariableMapping(param)
 						methodParams = append(methodParams, preprocessedParam)
 					}
 
-					// Pack the method call
-					packedData, err := method.Inputs.Pack(methodParams...)
+					// Use the shared utility to generate calldata with proper type conversion
+					callDataHex, err := GenerateCallData(methodName, methodParams, contractAbi)
 					if err != nil {
 						return &avsproto.ContractReadNode_MethodResult{
 							Success:    false,
-							Error:      fmt.Sprintf("failed to pack method parameters: %v", err),
+							Error:      fmt.Sprintf("failed to generate calldata: %v", err),
 							MethodName: methodName,
 							Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
 						}
 					}
-
-					// Combine method selector with packed parameters
-					finalCallData = fmt.Sprintf("0x%x%x", method.ID, packedData)
+					finalCallData = callDataHex
 				}
 			} else {
 				return &avsproto.ContractReadNode_MethodResult{

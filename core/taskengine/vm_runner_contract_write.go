@@ -107,7 +107,7 @@ func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) 
 
 func (r *ContractWriteProcessor) executeMethodCall(
 	ctx context.Context,
-	contractAbi *abi.ABI,
+	parsedABI *abi.ABI,
 	contractAddress common.Address,
 	methodCall *avsproto.ContractWriteNode_MethodCall,
 ) *avsproto.ContractWriteNode_MethodResult {
@@ -121,7 +121,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	}
 
 	// Use shared utility to generate or use existing calldata
-	callData, err := GenerateOrUseCallData(methodCall.MethodName, methodCall.CallData, resolvedMethodParams, contractAbi)
+	callData, err := GenerateOrUseCallData(methodCall.MethodName, methodCall.CallData, resolvedMethodParams, parsedABI)
 	if err != nil {
 		if r.vm != nil && r.vm.logger != nil {
 			r.vm.logger.Error("❌ Failed to get/generate calldata for contract write",
@@ -151,8 +151,8 @@ func (r *ContractWriteProcessor) executeMethodCall(
 
 	// Resolve method name from ABI if not provided or if provided name is "unknown"
 	methodName := methodCall.MethodName
-	if contractAbi != nil && (methodName == "" || methodName == "unknown") {
-		if method, err := byte4.GetMethodFromCalldata(*contractAbi, calldata); err == nil {
+	if parsedABI != nil && (methodName == "" || methodName == "unknown") {
+		if method, err := byte4.GetMethodFromCalldata(*parsedABI, calldata); err == nil {
 			methodName = method.Name
 		}
 	}
@@ -175,7 +175,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 
 	// Get contract ABI as string
 	var contractAbiStr string
-	if contractAbi != nil {
+	if parsedABI != nil {
 		// Convert ABI back to JSON string for Tenderly
 		// For now, we'll use an empty string and let Tenderly handle it
 		contractAbiStr = ""
@@ -195,19 +195,19 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		r.vm.logger.Warn("🚫 Tenderly simulation failed, using mock result", "error", err)
 
 		// Create a mock result when Tenderly fails
-		return r.createMockContractWriteResult(methodName, contractAddress.Hex(), callData, contractAbi, t0, chainID)
+		return r.createMockContractWriteResult(methodName, contractAddress.Hex(), callData, parsedABI, t0, chainID)
 	}
 
 	// Convert Tenderly simulation result to legacy protobuf format
-	return r.convertTenderlyResultToFlexibleFormat(simulationResult, contractAbi, callData)
+	return r.convertTenderlyResultToFlexibleFormat(simulationResult, parsedABI, callData)
 }
 
 // createMockContractWriteResult creates a mock result when Tenderly fails
-func (r *ContractWriteProcessor) createMockContractWriteResult(methodName, contractAddress, callData string, contractAbi *abi.ABI, startTime time.Time, chainID int64) *avsproto.ContractWriteNode_MethodResult {
+func (r *ContractWriteProcessor) createMockContractWriteResult(methodName, contractAddress, callData string, parsedABI *abi.ABI, startTime time.Time, chainID int64) *avsproto.ContractWriteNode_MethodResult {
 	// Extract methodABI from contract ABI if available
 	var methodABI *structpb.Value
-	if contractAbi != nil {
-		if method, exists := contractAbi.Methods[methodName]; exists {
+	if parsedABI != nil {
+		if method, exists := parsedABI.Methods[methodName]; exists {
 			if abiMap := r.extractMethodABI(&method); abiMap != nil {
 				if abiValue, err := structpb.NewValue(abiMap); err == nil {
 					methodABI = abiValue
@@ -236,11 +236,11 @@ func (r *ContractWriteProcessor) createMockContractWriteResult(methodName, contr
 }
 
 // convertTenderlyResultToLegacyFormat converts Tenderly result to new flexible format
-func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *ContractWriteSimulationResult, contractAbi *abi.ABI, callData string) *avsproto.ContractWriteNode_MethodResult {
+func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *ContractWriteSimulationResult, parsedABI *abi.ABI, callData string) *avsproto.ContractWriteNode_MethodResult {
 	// Extract methodABI from contract ABI if available
 	var methodABI *structpb.Value
-	if contractAbi != nil {
-		if method, exists := contractAbi.Methods[result.MethodName]; exists {
+	if parsedABI != nil {
+		if method, exists := parsedABI.Methods[result.MethodName]; exists {
 			if abiMap := r.extractMethodABI(&method); abiMap != nil {
 				if abiValue, err := structpb.NewValue(abiMap); err == nil {
 					methodABI = abiValue
@@ -328,18 +328,6 @@ func (r *ContractWriteProcessor) extractMethodABI(method *abi.Method) map[string
 		"constant":        method.Constant,
 		"payable":         method.Payable,
 	}
-}
-
-// convertMethodABIToProtobuf converts methodABI map to protobuf Value
-func (r *ContractWriteProcessor) convertMethodABIToProtobuf(methodABI map[string]interface{}) *structpb.Value {
-	if methodABI == nil {
-		return nil
-	}
-
-	if abiValue, err := structpb.NewValue(methodABI); err == nil {
-		return abiValue
-	}
-	return nil
 }
 
 func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {

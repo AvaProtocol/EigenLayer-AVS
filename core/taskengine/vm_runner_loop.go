@@ -733,9 +733,19 @@ func (r *LoopProcessor) processContractReadTemplates(contractRead *avsproto.Cont
 		processedMethodCall := &avsproto.ContractReadNode_MethodCall{
 			CallData:      r.substituteTemplateVariables(methodCall.CallData, iterInputs),
 			MethodName:    r.substituteTemplateVariables(methodCall.MethodName, iterInputs),
-			MethodParams:  SubstituteTemplateVariablesArray(methodCall.MethodParams, iterInputs, r.substituteTemplateVariables),
 			ApplyToFields: make([]string, len(methodCall.ApplyToFields)),
 		}
+
+		// Process methodParams with advanced template variable preprocessing (same as standalone contract_read)
+		// This supports dot notation like {{value.address}} in addition to simple {{value}} substitution
+		processedMethodParams := make([]string, len(methodCall.MethodParams))
+		for i, param := range methodCall.MethodParams {
+			// First apply loop-specific template substitution ({{value}}, {{index}})
+			paramWithLoopVars := r.substituteTemplateVariables(param, iterInputs)
+			// Then apply advanced preprocessing for dot notation and other VM variables
+			processedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(paramWithLoopVars)
+		}
+		processedMethodCall.MethodParams = processedMethodParams
 
 		// Copy applyToFields (no template substitution needed for field names)
 		copy(processedMethodCall.ApplyToFields, methodCall.ApplyToFields)
@@ -763,6 +773,17 @@ func (r *LoopProcessor) processContractWriteTemplates(contractWrite *avsproto.Co
 			CallData:   r.substituteTemplateVariables(methodCall.CallData, iterInputs),
 			MethodName: r.substituteTemplateVariables(methodCall.MethodName, iterInputs),
 		}
+
+		// Process methodParams with advanced template variable preprocessing (same as standalone contract_write)
+		// This supports dot notation like {{value.address}} in addition to simple {{value}} substitution
+		processedMethodParams := make([]string, len(methodCall.MethodParams))
+		for i, param := range methodCall.MethodParams {
+			// First apply loop-specific template substitution ({{value}}, {{index}})
+			paramWithLoopVars := r.substituteTemplateVariables(param, iterInputs)
+			// Then apply advanced preprocessing for dot notation and other VM variables
+			processedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(paramWithLoopVars)
+		}
+		processedMethodCall.MethodParams = processedMethodParams
 
 		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
 	}

@@ -2550,6 +2550,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 
 			// Handle method calls
+			var fieldsNeedingDecimals []string // Track fields that need decimal formatting
 			if methodCalls, ok := runnerConfig["methodCalls"].([]interface{}); ok {
 				for _, methodCallInterface := range methodCalls {
 					if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
@@ -2572,6 +2573,12 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 								methodCall.MethodParams = methodParams
 							}
 						}
+
+						// Handle applyDecimalsTo field (convert to applyToFields pattern)
+						if applyDecimalsTo, ok := methodCallMap["applyDecimalsTo"].(string); ok {
+							fieldsNeedingDecimals = append(fieldsNeedingDecimals, applyDecimalsTo)
+						}
+
 						// Handle applyToFields for decimal formatting
 						if applyToFields, ok := methodCallMap["applyToFields"].([]interface{}); ok {
 							for _, field := range applyToFields {
@@ -2582,6 +2589,16 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 						}
 						crConfig.MethodCalls = append(crConfig.MethodCalls, methodCall)
 					}
+				}
+
+				// Add decimals method call if any fields need decimal formatting
+				if len(fieldsNeedingDecimals) > 0 {
+					decimalsMethodCall := &avsproto.ContractReadNode_MethodCall{
+						MethodName:    "decimals",
+						MethodParams:  []string{},            // decimals() takes no parameters
+						ApplyToFields: fieldsNeedingDecimals, // Apply to the fields that requested decimal formatting
+					}
+					crConfig.MethodCalls = append(crConfig.MethodCalls, decimalsMethodCall)
 				}
 			}
 

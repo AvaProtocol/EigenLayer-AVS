@@ -85,7 +85,7 @@ func TestEventTriggerConditionalFiltering(t *testing.T) {
 		{
 			name: "Price above threshold should trigger",
 			priceCondition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "gt",
 				Value:     "200000000000", // $2000 with 8 decimals
 				FieldType: "int256",
@@ -97,7 +97,7 @@ func TestEventTriggerConditionalFiltering(t *testing.T) {
 		{
 			name: "Price below threshold should not trigger",
 			priceCondition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "gt",
 				Value:     "200000000000", // $2000 with 8 decimals
 				FieldType: "int256",
@@ -109,7 +109,7 @@ func TestEventTriggerConditionalFiltering(t *testing.T) {
 		{
 			name: "Exact price match should trigger",
 			priceCondition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "eq",
 				Value:     "200000000000", // $2000 with 8 decimals
 				FieldType: "int256",
@@ -121,7 +121,7 @@ func TestEventTriggerConditionalFiltering(t *testing.T) {
 		{
 			name: "Price drop below threshold",
 			priceCondition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "lt",
 				Value:     "180000000000", // $1800 with 8 decimals
 				FieldType: "int256",
@@ -197,13 +197,13 @@ func TestEventTriggerMultipleConditions(t *testing.T) {
 		ContractAbi: convertJSONABIToProtobufValues(ChainlinkAggregatorABI),
 		Conditions: []*avsproto.EventCondition{
 			{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "gt",
 				Value:     "200000000000", // Price > $2000
 				FieldType: "int256",
 			},
 			{
-				FieldName: "roundId",
+				FieldName: "AnswerUpdated.roundId",
 				Operator:  "gt",
 				Value:     "10000", // Round > 10000
 				FieldType: "uint256",
@@ -299,7 +299,7 @@ func TestEventTriggerInvalidABI(t *testing.T) {
 		}(),
 		Conditions: []*avsproto.EventCondition{
 			{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "gt",
 				Value:     "200000000000",
 				FieldType: "int256",
@@ -402,7 +402,7 @@ func TestSignedIntegerConditions(t *testing.T) {
 			name:       "Positive value comparison",
 			fieldValue: big.NewInt(1000),
 			condition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "gt",
 				Value:     "500",
 				FieldType: "int256",
@@ -414,7 +414,7 @@ func TestSignedIntegerConditions(t *testing.T) {
 			name:       "Negative value comparison - greater than negative",
 			fieldValue: big.NewInt(-100),
 			condition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "gt",
 				Value:     "-200",
 				FieldType: "int256",
@@ -426,7 +426,7 @@ func TestSignedIntegerConditions(t *testing.T) {
 			name:       "Negative value comparison - less than positive",
 			fieldValue: big.NewInt(-100),
 			condition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "lt",
 				Value:     "50",
 				FieldType: "int256",
@@ -438,7 +438,7 @@ func TestSignedIntegerConditions(t *testing.T) {
 			name:       "Negative value equality",
 			fieldValue: big.NewInt(-12345),
 			condition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "eq",
 				Value:     "-12345",
 				FieldType: "int256",
@@ -450,7 +450,7 @@ func TestSignedIntegerConditions(t *testing.T) {
 			name:       "Large negative value (close to int256 min)",
 			fieldValue: new(big.Int).Neg(new(big.Int).Exp(big.NewInt(2), big.NewInt(255), nil)), // -2^255
 			condition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "lt",
 				Value:     "0",
 				FieldType: "int256",
@@ -462,7 +462,7 @@ func TestSignedIntegerConditions(t *testing.T) {
 			name:       "Zero comparison",
 			fieldValue: big.NewInt(0),
 			condition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "eq",
 				Value:     "0",
 				FieldType: "int256",
