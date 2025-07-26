@@ -3,12 +3,14 @@ package taskengine
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/stretchr/testify/assert"
 )
+
+// Test ABI data - mirrors real user input format (same as JavaScript SDK tests)
+const testDecimalsABIForRunners = `[{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"}]`
 
 // TestVM_ContractReadRunner tests the contract read node runner
 func TestVM_ContractReadRunner(t *testing.T) {
@@ -25,7 +27,7 @@ func TestVM_ContractReadRunner(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", // Chainlink ETH/USD price feed
-			ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+			ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABIForRunners),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:   "0xfeaf968c", // decimals() function
@@ -62,7 +64,7 @@ func TestVM_ContractReadRunner_MissingConfig(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
-			ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+			ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABIForRunners),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:   "0xfeaf968c",

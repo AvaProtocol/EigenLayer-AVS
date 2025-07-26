@@ -9,6 +9,18 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// Test ABI data - mirrors real user input format (same as JavaScript SDK tests)
+const (
+	// Simple decimals function - what users actually provide
+	testDecimalsABIForConfig = `[{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"}]`
+
+	// ERC20 transfer function with inputs - what users actually provide
+	testTransferABIForConfig = `[{"inputs":[{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"transfer","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}]`
+
+	// Simple transfer function - what users actually provide
+	testSimpleTransferABI = `[{"inputs":[],"name":"transfer","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
+)
+
 func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -141,7 +153,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 								ContractRead: &avsproto.ContractReadNode{
 									Config: &avsproto.ContractReadNode_Config{
 										ContractAddress: "0x1234567890123456789012345678901234567890",
-										ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+										ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABIForConfig),
 										MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 											{
 												CallData:      "0x313ce567",
@@ -175,7 +187,10 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 				runnerConfig, ok := runner["config"].(map[string]interface{})
 				require.True(t, ok, "runner config should be a map[string]interface{}")
 				assert.Equal(t, "0x1234567890123456789012345678901234567890", runnerConfig["contractAddress"])
-				assert.Contains(t, runnerConfig["contractAbi"], "decimals")
+				// Verify contractAbi is properly converted array
+				contractAbi, ok := runnerConfig["contractAbi"].([]interface{})
+				require.True(t, ok, "contractAbi should be []interface{}")
+				assert.NotEmpty(t, contractAbi, "contractAbi should not be empty")
 
 				methodCalls, ok := runnerConfig["methodCalls"]
 				require.True(t, ok, "methodCalls should be present")
@@ -200,7 +215,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 								ContractWrite: &avsproto.ContractWriteNode{
 									Config: &avsproto.ContractWriteNode_Config{
 										ContractAddress: "0x1234567890123456789012345678901234567890",
-										ContractAbi:     "[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"to\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"transfer\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+										ContractAbi:     MustConvertJSONABIToProtobufValues(testTransferABIForConfig),
 										CallData:        "0xa9059cbb",
 										MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 											{
@@ -229,7 +244,10 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 				runnerConfig, ok := runner["config"].(map[string]interface{})
 				require.True(t, ok, "runner config should be a map[string]interface{}")
 				assert.Equal(t, "0x1234567890123456789012345678901234567890", runnerConfig["contractAddress"])
-				assert.Contains(t, runnerConfig["contractAbi"], "transfer")
+				// Verify contractAbi is properly converted array
+				contractAbi, ok := runnerConfig["contractAbi"].([]interface{})
+				require.True(t, ok, "contractAbi should be []interface{}")
+				assert.NotEmpty(t, contractAbi, "contractAbi should not be empty")
 				assert.Equal(t, "0xa9059cbb", runnerConfig["callData"])
 
 				methodCalls, ok := runnerConfig["methodCalls"]
@@ -521,7 +539,7 @@ func TestExtractNodeConfiguration_StandaloneNodesProtobufCompatibility(t *testin
 						ContractRead: &avsproto.ContractReadNode{
 							Config: &avsproto.ContractReadNode_Config{
 								ContractAddress: "0x1234567890123456789012345678901234567890",
-								ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+								ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABIForConfig),
 								MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 									{
 										CallData:      "0x313ce567",
@@ -545,7 +563,7 @@ func TestExtractNodeConfiguration_StandaloneNodesProtobufCompatibility(t *testin
 						ContractWrite: &avsproto.ContractWriteNode{
 							Config: &avsproto.ContractWriteNode_Config{
 								ContractAddress: "0x1234567890123456789012345678901234567890",
-								ContractAbi:     "[{\"inputs\":[],\"name\":\"transfer\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+								ContractAbi:     MustConvertJSONABIToProtobufValues(testSimpleTransferABI),
 								MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 									{
 										CallData:   "0xa9059cbb",

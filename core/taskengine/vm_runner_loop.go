@@ -111,19 +111,40 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 
 	inputArray, ok := inputVar.([]interface{})
 	if !ok {
-		// Try to extract from data field if wrapped
+		// Try to extract from data field if wrapped (common for trigger variables)
 		if dataMap, ok := inputVar.(map[string]interface{}); ok {
-			if dataArray, ok := dataMap["data"].([]interface{}); ok {
-				inputArray = dataArray
-				log.WriteString(fmt.Sprintf("\nExtracted array from 'data' field: %d items", len(inputArray)))
+			log.WriteString(fmt.Sprintf("\nInput variable is a map with keys: %v", getMapKeys(dataMap))) // e.g., ["data", "status", "headers"] or ["blockNumber", "timestamp", "hash"]
+
+			if dataValue, hasData := dataMap["data"]; hasData {
+				log.WriteString(fmt.Sprintf("\nFound 'data' field of type: %T", dataValue)) // e.g., "[]interface{}" for arrays, "map[string]interface{}" for objects
+
+				// Try different array types that might be present
+				if dataArray, ok := dataValue.([]interface{}); ok {
+					inputArray = dataArray
+					log.WriteString(fmt.Sprintf("\nExtracted array from 'data' field: %d items", len(inputArray)))
+				} else if dataSlice, ok := dataValue.([]any); ok {
+					// Handle []any type
+					inputArray = make([]interface{}, len(dataSlice))
+					for i, v := range dataSlice {
+						inputArray[i] = v
+					}
+					log.WriteString(fmt.Sprintf("\nExtracted []any array from 'data' field: %d items", len(inputArray)))
+				} else {
+					// Data field exists but is not an array
+					err := fmt.Errorf("input variable %s.data is type %T, expected array", inputVarName, dataValue)
+					log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+					finalizeExecutionStep(s, false, err.Error(), log.String())
+					return s, err
+				}
 			} else {
-				err := fmt.Errorf("input variable %s must be an array", inputVarName)
+				// No data field found
+				err := fmt.Errorf("input variable %s is not an array and has no 'data' field (available keys: %v)", inputVarName, getMapKeys(dataMap))
 				log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 				finalizeExecutionStep(s, false, err.Error(), log.String())
 				return s, err
 			}
 		} else {
-			err := fmt.Errorf("input variable %s must be an array", inputVarName)
+			err := fmt.Errorf("input variable %s is type %T, expected array or object with 'data' field", inputVarName, inputVar)
 			log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 			finalizeExecutionStep(s, false, err.Error(), log.String())
 			return s, err
@@ -468,24 +489,11 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 		}
 		return nil, nil
 	} else if contractReadOutput := executionStep.GetContractRead(); contractReadOutput != nil {
-		// For contract read, convert the results to JSON-compatible format
+		// For contract read, return the flattened data directly (same as standalone contract_read response)
 		if contractReadOutput.GetData() != nil {
-			// Extract results from the protobuf Value
-			var results []interface{}
-
-			if contractReadOutput.GetData().GetListValue() != nil {
-				// Data is an array
-				for _, item := range contractReadOutput.GetData().GetListValue().GetValues() {
-					results = append(results, item.AsInterface())
-				}
-			} else {
-				// Data might be a single object, wrap it in an array for consistency
-				results = append(results, contractReadOutput.GetData().AsInterface())
-			}
-
-			return map[string]interface{}{
-				"results": results,
-			}, nil
+			// Return the flattened data object directly, not as an array
+			// This matches the standalone contract_read response format
+			return contractReadOutput.GetData().AsInterface(), nil
 		}
 		return nil, nil
 	} else if contractWriteOutput := executionStep.GetContractWrite(); contractWriteOutput != nil {
@@ -716,7 +724,7 @@ func (r *LoopProcessor) processContractReadTemplates(contractRead *avsproto.Cont
 	processed := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: r.substituteTemplateVariables(contractRead.Config.ContractAddress, iterInputs),
-			ContractAbi:     r.substituteTemplateVariables(contractRead.Config.ContractAbi, iterInputs),
+			ContractAbi:     contractRead.Config.ContractAbi, // ⚠️ CRITICAL: ABI is NEVER subject to template substitution
 		},
 	}
 
@@ -727,6 +735,17 @@ func (r *LoopProcessor) processContractReadTemplates(contractRead *avsproto.Cont
 			MethodName:    r.substituteTemplateVariables(methodCall.MethodName, iterInputs),
 			ApplyToFields: make([]string, len(methodCall.ApplyToFields)),
 		}
+
+		// Process methodParams with advanced template variable preprocessing (same as standalone contract_read)
+		// This supports dot notation like {{value.address}} in addition to simple {{value}} substitution
+		processedMethodParams := make([]string, len(methodCall.MethodParams))
+		for i, param := range methodCall.MethodParams {
+			// First apply loop-specific template substitution ({{value}}, {{index}})
+			paramWithLoopVars := r.substituteTemplateVariables(param, iterInputs)
+			// Then apply advanced preprocessing for dot notation and other VM variables
+			processedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(paramWithLoopVars)
+		}
+		processedMethodCall.MethodParams = processedMethodParams
 
 		// Copy applyToFields (no template substitution needed for field names)
 		copy(processedMethodCall.ApplyToFields, methodCall.ApplyToFields)
@@ -743,7 +762,7 @@ func (r *LoopProcessor) processContractWriteTemplates(contractWrite *avsproto.Co
 	processed := &avsproto.ContractWriteNode{
 		Config: &avsproto.ContractWriteNode_Config{
 			ContractAddress: r.substituteTemplateVariables(contractWrite.Config.ContractAddress, iterInputs),
-			ContractAbi:     r.substituteTemplateVariables(contractWrite.Config.ContractAbi, iterInputs),
+			ContractAbi:     contractWrite.Config.ContractAbi, // ⚠️ CRITICAL: ABI is NEVER subject to template substitution
 			CallData:        r.substituteTemplateVariables(contractWrite.Config.CallData, iterInputs),
 		},
 	}
@@ -754,6 +773,17 @@ func (r *LoopProcessor) processContractWriteTemplates(contractWrite *avsproto.Co
 			CallData:   r.substituteTemplateVariables(methodCall.CallData, iterInputs),
 			MethodName: r.substituteTemplateVariables(methodCall.MethodName, iterInputs),
 		}
+
+		// Process methodParams with advanced template variable preprocessing (same as standalone contract_write)
+		// This supports dot notation like {{value.address}} in addition to simple {{value}} substitution
+		processedMethodParams := make([]string, len(methodCall.MethodParams))
+		for i, param := range methodCall.MethodParams {
+			// First apply loop-specific template substitution ({{value}}, {{index}})
+			paramWithLoopVars := r.substituteTemplateVariables(param, iterInputs)
+			// Then apply advanced preprocessing for dot notation and other VM variables
+			processedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(paramWithLoopVars)
+		}
+		processedMethodCall.MethodParams = processedMethodParams
 
 		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
 	}

@@ -16,7 +16,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
 					Config: &avsproto.RestAPINode_Config{
-						Url:    "https://httpbin.org/get",
+						Url:    "https://mock-api.ap-aggregator.local/get",
 						Method: "GET",
 					},
 				},
@@ -32,7 +32,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 							{
 								Id:         "condition1",
 								Type:       "if",
-								Expression: "httpnode.data.body.url == 'https://httpbin.org/get'",
+								Expression: "httpnode.data.url == 'https://mock-api.ap-aggregator.local/get'",
 							},
 						},
 					},
@@ -45,7 +45,7 @@ func TestRunTaskWithBranchNode(t *testing.T) {
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
 					Config: &avsproto.RestAPINode_Config{
-						Url:    "https://httpbin.org/get",
+						Url:    "https://mock-api.ap-aggregator.local/get",
 						Method: "GET",
 					},
 				},

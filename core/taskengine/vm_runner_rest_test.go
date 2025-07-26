@@ -123,23 +123,23 @@ func TestRestRequest(t *testing.T) {
 
 	dataMap := gow.ValueToMap(step.GetRestApi().Data)
 
-	// Check if body field exists
-	bodyField, exists := dataMap["body"]
+	// Check if data field exists (standard format)
+	responseData, exists := dataMap["data"]
 	if !exists {
-		t.Errorf("response does not contain 'body' field, available fields: %v", dataMap)
+		t.Errorf("response does not contain 'data' field, available fields: %v", dataMap)
 		return
 	}
 
-	bodyMap, ok := bodyField.(map[string]any)
+	responseMap, ok := responseData.(map[string]any)
 	if !ok {
-		t.Errorf("body field is not map[string]any, got %T: %v", bodyField, bodyField)
+		t.Errorf("data field is not map[string]any, got %T: %v", responseData, responseData)
 		return
 	}
 
-	// Check if form field exists in body
-	formField, exists := bodyMap["form"]
+	// Check if form field exists in response data
+	formField, exists := responseMap["form"]
 	if !exists {
-		t.Errorf("response body does not contain 'form' field, available fields: %v", bodyMap)
+		t.Errorf("response data does not contain 'form' field, available fields: %v", responseMap)
 		return
 	}
 
@@ -306,8 +306,8 @@ func TestRestRequestRenderVars(t *testing.T) {
 	}
 
 	responseData := gow.ValueToMap(step.GetRestApi().Data)
-	if responseData["body"].(string) != "my name is unit test" {
-		t.Errorf("expected response to be 'my name is unit test', got: %s", responseData["body"])
+	if responseData["data"].(string) != "my name is unit test" {
+		t.Errorf("expected response to be 'my name is unit test', got: %s", responseData["data"])
 	}
 }
 
@@ -387,8 +387,8 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 		t.Errorf("expected rest node run successfully but failed")
 	}
 	responseData := gow.ValueToMap(step.GetRestApi().Data)
-	if responseData["body"].(string) != "my name is first" {
-		t.Errorf("expected response to be 'my name is first', got: %s", responseData["body"])
+	if responseData["data"].(string) != "my name is first" {
+		t.Errorf("expected response to be 'my name is first', got: %s", responseData["data"])
 	}
 
 	// Second execution with different value
@@ -407,8 +407,8 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 		t.Errorf("expected rest node run successfully but failed")
 	}
 	responseData2 := gow.ValueToMap(step.GetRestApi().Data)
-	if responseData2["body"].(string) != "my name is second" {
-		t.Errorf("expected response to be 'my name is second', got: %s", responseData2["body"])
+	if responseData2["data"].(string) != "my name is second" {
+		t.Errorf("expected response to be 'my name is second', got: %s", responseData2["data"])
 	}
 
 	// Verify original node values remain unchanged
@@ -502,8 +502,8 @@ func TestRestRequestErrorHandling(t *testing.T) {
 
 	// Verify the response data contains the 404 status
 	responseData := gow.ValueToMap(step.GetRestApi().Data)
-	if statusCode, ok := responseData["statusCode"].(float64); !ok || statusCode != 404 {
-		t.Errorf("expected statusCode 404 in response data, got: %v", responseData["statusCode"])
+	if status, ok := responseData["status"].(float64); !ok || status != 404 {
+		t.Errorf("expected status 404 in response data, got: %v", responseData["status"])
 	}
 
 	// Test 500 Server Error
@@ -531,8 +531,8 @@ func TestRestRequestErrorHandling(t *testing.T) {
 
 	// Verify the response data contains the 500 status
 	responseData = gow.ValueToMap(step.GetRestApi().Data)
-	if statusCode, ok := responseData["statusCode"].(float64); !ok || statusCode != 500 {
-		t.Errorf("expected statusCode 500 in response data, got: %v", responseData["statusCode"])
+	if status, ok := responseData["status"].(float64); !ok || status != 500 {
+		t.Errorf("expected status 500 in response data, got: %v", responseData["status"])
 	}
 }
 
@@ -657,19 +657,19 @@ func TestRestRequestTelegramMockServer(t *testing.T) {
 		t.Fatalf("❌ Response data is nil")
 	}
 
-	// Check that we can access the body directly
-	bodyField, exists := responseData["body"]
+	// Check that we can access the data directly (standard format)
+	dataField, exists := responseData["data"]
 	if !exists {
-		t.Fatalf("❌ Response missing 'body' field. Available fields: %v", getStringMapKeys(responseData))
+		t.Fatalf("❌ Response missing 'data' field. Available fields: %v", getStringMapKeys(responseData))
 	}
 
-	bodyMap, ok := bodyField.(map[string]interface{})
+	dataMap, ok := dataField.(map[string]interface{})
 	if !ok {
-		t.Fatalf("❌ Body is not map[string]interface{}, got %T: %v", bodyField, bodyField)
+		t.Fatalf("❌ Data is not map[string]interface{}, got %T: %v", dataField, dataField)
 	}
 
 	// Test basic response structure
-	okField, exists := bodyMap["ok"]
+	okField, exists := dataMap["ok"]
 	if !exists {
 		t.Fatalf("❌ Telegram response missing 'ok' field")
 	}
@@ -678,7 +678,7 @@ func TestRestRequestTelegramMockServer(t *testing.T) {
 	}
 
 	// Get result object
-	resultField, exists := bodyMap["result"]
+	resultField, exists := dataMap["result"]
 	if !exists {
 		t.Fatalf("❌ Telegram response missing 'result' field")
 	}
@@ -727,18 +727,18 @@ func TestRestRequestTelegramMockServer(t *testing.T) {
 		t.Fatalf("❌ Chat is not map[string]interface{}, got %T", chatField)
 	}
 
-	chatUsername, exists := chatMap["username"]
+	username, exists := chatMap["username"]
 	if !exists {
 		t.Fatalf("❌ Chat missing 'username' field")
 	}
-	if username, ok := chatUsername.(string); !ok || username != expectedChatUsername {
-		t.Errorf("❌ Expected chat.username='%s', got: %v", expectedChatUsername, chatUsername)
+	if user, ok := username.(string); !ok || user != expectedChatUsername {
+		t.Errorf("❌ Expected chat.username='%s', got: %v", expectedChatUsername, username)
 	}
 
-	t.Logf("✅ SUCCESS: Telegram mock server test passed!")
-	t.Logf("✅ Response structure properly accessible without typeUrl/value wrapping")
-	t.Logf("✅ Verified test fields: message_id=%d, from.first_name='%s', chat.username='%s'",
-		expectedMessageId, expectedFromFirstName, expectedChatUsername)
+	t.Logf("✅ All Telegram response fields verified successfully")
+	t.Logf("✅ message_id: %v", messageId)
+	t.Logf("✅ from.first_name: %v", firstName)
+	t.Logf("✅ chat.username: %v", username)
 }
 
 func TestRestRequestSendGridGlobalSecret(t *testing.T) {
@@ -864,27 +864,27 @@ func TestRestRequestSendGridGlobalSecret(t *testing.T) {
 	}
 
 	// Check status code
-	statusCode, exists := responseData["statusCode"]
+	status, exists := responseData["status"]
 	if !exists {
-		t.Fatalf("❌ Response missing 'statusCode' field. Available fields: %v", getStringMapKeys(responseData))
+		t.Fatalf("❌ Response missing 'status' field. Available fields: %v", getStringMapKeys(responseData))
 	}
-	if sc, ok := statusCode.(float64); !ok || sc != 200 {
-		t.Errorf("❌ Expected statusCode 200, got: %v (type: %T)", statusCode, statusCode)
+	if sc, ok := status.(float64); !ok || sc != 200 {
+		t.Errorf("❌ Expected status 200, got: %v (type: %T)", status, status)
 	}
 
-	// Check that we can access the body directly
-	bodyField, exists := responseData["body"]
+	// Check that we can access the data directly (standard format)
+	dataField, exists := responseData["data"]
 	if !exists {
-		t.Fatalf("❌ Response missing 'body' field. Available fields: %v", getStringMapKeys(responseData))
+		t.Fatalf("❌ Response missing 'data' field. Available fields: %v", getStringMapKeys(responseData))
 	}
 
-	bodyMap, ok := bodyField.(map[string]interface{})
+	dataMap, ok := dataField.(map[string]interface{})
 	if !ok {
-		t.Fatalf("❌ Body is not map[string]interface{}, got %T: %v", bodyField, bodyField)
+		t.Fatalf("❌ Data is not map[string]interface{}, got %T: %v", dataField, dataField)
 	}
 
 	// Test 1: account type
-	accountType, exists := bodyMap["type"]
+	accountType, exists := dataMap["type"]
 	if !exists {
 		t.Fatalf("❌ SendGrid response missing 'type' field")
 	}
@@ -893,7 +893,7 @@ func TestRestRequestSendGridGlobalSecret(t *testing.T) {
 	}
 
 	// Test 2: reputation
-	reputation, exists := bodyMap["reputation"]
+	reputation, exists := dataMap["reputation"]
 	if !exists {
 		t.Fatalf("❌ SendGrid response missing 'reputation' field")
 	}
@@ -1001,14 +1001,14 @@ func TestRestRequestArbitraryGlobalSecret(t *testing.T) {
 
 	// Verify the response
 	responseData := gow.ValueToMap(step.GetRestApi().Data)
-	bodyField := responseData["body"].(map[string]interface{})
+	dataField := responseData["data"].(map[string]interface{})
 
-	if success, ok := bodyField["success"].(bool); !ok || !success {
+	if success, ok := dataField["success"].(bool); !ok || !success {
 		t.Errorf("expected success=true in response")
 	}
 
-	if message, ok := bodyField["message"].(string); !ok || message != "Arbitrary secret works!" {
-		t.Errorf("expected message='Arbitrary secret works!' in response, got: %v", message)
+	if message, ok := dataField["message"].(string); !ok || message != "Arbitrary secret works!" {
+		t.Errorf("expected message='Arbitrary secret works!' in response, got: %v", dataField["message"])
 	}
 
 	t.Logf("✅ SUCCESS: Arbitrary secret test passed!")

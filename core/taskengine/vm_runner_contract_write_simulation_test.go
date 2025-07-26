@@ -30,10 +30,38 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		config := testutil.GetAggregatorConfig()
 		engine := New(db, config, nil, testutil.GetLogger())
 
+		// Create ABI as parsed array (what CreateNodeFromType expects)
+		contractAbi := []interface{}{
+			map[string]interface{}{
+				"inputs": []interface{}{
+					map[string]interface{}{
+						"internalType": "address",
+						"name":         "spender",
+						"type":         "address",
+					},
+					map[string]interface{}{
+						"internalType": "uint256",
+						"name":         "amount",
+						"type":         "uint256",
+					},
+				},
+				"name": "approve",
+				"outputs": []interface{}{
+					map[string]interface{}{
+						"internalType": "bool",
+						"name":         "",
+						"type":         "bool",
+					},
+				},
+				"stateMutability": "nonpayable",
+				"type":            "function",
+			},
+		}
+
 		// Test run_node_immediately
 		nodeConfig := map[string]interface{}{
 			"contractAddress": baseSepoliaUsdcAddress.Hex(),
-			"contractAbi":     `[{"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}]`,
+			"contractAbi":     contractAbi, // Now using parsed array instead of JSON string
 			"methodCalls": []interface{}{
 				map[string]interface{}{
 					"callData":   approveCallData,
@@ -50,18 +78,25 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		// Verify simulation metadata is present
 		if results, ok := result["results"].([]interface{}); ok && len(results) > 0 {
 			if firstResult, ok := results[0].(*avsproto.ContractWriteNode_MethodResult); ok {
-				assert.NotNil(t, firstResult.Transaction, "Should have transaction data")
-				assert.True(t, firstResult.Transaction.Simulation, "Should be marked as simulation")
-				assert.Contains(t, []string{"tenderly", "mock_fallback"}, firstResult.Transaction.SimulationMode, "Should have simulation mode")
-				assert.Equal(t, "simulated", firstResult.Transaction.Status, "Status should be 'simulated'")
-				assert.NotEmpty(t, firstResult.Transaction.Hash, "Should have mock transaction hash")
+				assert.NotNil(t, firstResult.Receipt, "Should have receipt data")
+
+				// Extract receipt data
+				var txHash string
+				if firstResult.Receipt != nil {
+					if receiptMap := firstResult.Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
+						if hash, ok := receiptMap["transactionHash"].(string); ok {
+							txHash = hash
+						}
+					}
+				}
+
+				assert.NotEmpty(t, txHash, "Should have transaction hash in receipt")
 
 				t.Logf("✅ Contract write simulation successful:")
 				t.Logf("   Method: %s", firstResult.MethodName)
 				t.Logf("   Success: %t", firstResult.Success)
-				t.Logf("   Simulation Mode: %s", firstResult.Transaction.SimulationMode)
-				t.Logf("   Transaction Hash: %s", firstResult.Transaction.Hash)
-				t.Logf("   Chain ID: %d", firstResult.Transaction.ChainId)
+				t.Logf("   Transaction Hash: %s", txHash)
+				t.Logf("   Receipt: %+v", firstResult.Receipt.AsInterface())
 			}
 		}
 	})

@@ -204,7 +204,17 @@ func TestCreateNodeFromType_LoopExecutionMode_WithContractReadRunner(t *testing.
 			"type": "contractRead",
 			"config": map[string]interface{}{
 				"contractAddress": "{{value}}",
-				"contractAbi":     `[{"constant":true,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"}]`,
+				"contractAbi": []interface{}{
+					map[string]interface{}{
+						"constant":        true,
+						"inputs":          []interface{}{},
+						"name":            "totalSupply",
+						"outputs":         []interface{}{map[string]interface{}{"name": "", "type": "uint256"}},
+						"payable":         false,
+						"stateMutability": "view",
+						"type":            "function",
+					},
+				},
 				"methodCalls": []interface{}{
 					map[string]interface{}{
 						"methodName": "totalSupply",
@@ -240,6 +250,33 @@ func TestCreateNodeFromType_LoopExecutionMode_WithContractReadRunner(t *testing.
 }
 
 func TestCreateNodeFromType_LoopExecutionMode_WithContractWriteRunner(t *testing.T) {
+	// Create ABI as parsed array (what CreateNodeFromType expects for loop runners)
+	contractAbi := []interface{}{
+		map[string]interface{}{
+			"constant": false,
+			"inputs": []interface{}{
+				map[string]interface{}{
+					"name": "_spender",
+					"type": "address",
+				},
+				map[string]interface{}{
+					"name": "_value",
+					"type": "uint256",
+				},
+			},
+			"name": "approve",
+			"outputs": []interface{}{
+				map[string]interface{}{
+					"name": "",
+					"type": "bool",
+				},
+			},
+			"payable":         false,
+			"stateMutability": "nonpayable",
+			"type":            "function",
+		},
+	}
+
 	config := map[string]interface{}{
 		"inputNodeName": "contractAddresses",
 		"iterVal":       "value",
@@ -249,7 +286,7 @@ func TestCreateNodeFromType_LoopExecutionMode_WithContractWriteRunner(t *testing
 			"type": "contractWrite",
 			"config": map[string]interface{}{
 				"contractAddress": "{{value}}",
-				"contractAbi":     `[{"constant":false,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"}]`,
+				"contractAbi":     contractAbi, // Now using parsed array instead of JSON string
 				"methodCalls": []interface{}{
 					map[string]interface{}{
 						"methodName": "approve",

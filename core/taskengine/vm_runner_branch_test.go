@@ -170,7 +170,7 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 		t.Errorf("expected branch data but got none")
 	}
 	outputData := gow.ValueToMap(vm.ExecutionLogs[1].GetRestApi().Data)
-	bodyData := outputData["body"].(map[string]interface{})
+	bodyData := outputData["data"].(map[string]interface{})
 	if bodyData["name"].(string) != "hit=second_condition" {
 		t.Errorf("expected second notification to be executed, but got %s", vm.ExecutionLogs[1].OutputData)
 	}

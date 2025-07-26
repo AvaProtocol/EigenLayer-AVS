@@ -288,12 +288,22 @@ func TestValueRawPopulatedWhenDecimalsCallFails(t *testing.T) {
 		}(),
 	}
 
+	// Convert testABI string to protobuf Value array
+	var abiArray []interface{}
+	if err := json.Unmarshal([]byte(testABI), &abiArray); err != nil {
+		t.Fatalf("Failed to parse test ABI: %v", err)
+	}
+	abiValues, err := ConvertInterfaceArrayToProtobufValues(abiArray)
+	if err != nil {
+		t.Fatalf("Failed to convert ABI to protobuf values: %v", err)
+	}
+
 	// Create a mock query with decimals method call that will fail
 	// This simulates the scenario where we're testing against a mainnet contract
 	// address on a testnet, or any other scenario where decimals() call fails
 	mockQuery := &avsproto.EventTrigger_Query{
 		Addresses:   []string{"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"},
-		ContractAbi: testABI,
+		ContractAbi: abiValues,
 		MethodCalls: []*avsproto.EventTrigger_MethodCall{
 			{
 				MethodName:    "decimals",
@@ -325,17 +335,9 @@ func TestValueRawPopulatedWhenDecimalsCallFails(t *testing.T) {
 		t.Errorf("Expected 'to' to be the correct address, got %v", toAddr)
 	}
 
-	// **CRITICAL TEST**: Verify that valueRaw is populated even when decimals() call fails
-	valueRaw, hasValueRaw := parsedData["valueRaw"]
-	if !hasValueRaw {
-		t.Errorf("Expected 'valueRaw' to be present even when decimals() call fails")
-	}
-
-	if valueRaw != "100500000000000000000" {
-		t.Errorf("Expected 'valueRaw' to be '100500000000000000000', got %v", valueRaw)
-	}
-
-	// Verify the value field contains the raw value (since decimal formatting failed)
+	// **CRITICAL TEST**: Verify that value field contains the raw value when decimals() call fails
+	// Note: With the new backend design, we no longer create separate "Raw" fields
+	// Instead, the main field contains the raw value when decimal formatting fails
 	if parsedData["value"] != "100500000000000000000" {
 		t.Errorf("Expected 'value' to be '100500000000000000000' (raw value when formatting fails), got %v", parsedData["value"])
 	}
@@ -349,5 +351,6 @@ func TestValueRawPopulatedWhenDecimalsCallFails(t *testing.T) {
 	t.Logf("Parsed event data with failed decimals() call: %+v", parsedData)
 
 	// Verify that this is the exact scenario that was causing the original bug
-	t.Logf("✅ REGRESSION TEST PASSED: valueRaw='%v' is populated even when decimals() call fails", valueRaw)
+	// The test now verifies that the main 'value' field contains the raw value when formatting fails
+	t.Logf("✅ REGRESSION TEST PASSED: 'value' field contains raw value when decimals() call fails")
 }

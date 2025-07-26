@@ -440,7 +440,15 @@ func TestContractReadCamelCaseResolution(t *testing.T) {
 	// Test contract read that uses camelCase template
 	contractReadConfig := map[string]interface{}{
 		"contractAddress": "{{eventTrigger.data.contractAddress}}", // camelCase template
-		"contractAbi":     `[{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"}]`,
+		"contractAbi": []interface{}{
+			map[string]interface{}{
+				"inputs":          []interface{}{},
+				"name":            "decimals",
+				"outputs":         []interface{}{map[string]interface{}{"internalType": "uint8", "name": "", "type": "uint8"}},
+				"stateMutability": "view",
+				"type":            "function",
+			},
+		},
 		"methodCalls": []interface{}{
 			map[string]interface{}{
 				"methodName": "decimals",
@@ -475,7 +483,7 @@ func TestBlockTriggerFieldNamingConsistency(t *testing.T) {
 		"parentHash":  "0x123456abcdef",
 		"difficulty":  "1000000",
 		"gasLimit":    uint64(30000000),
-		"gasUsed":     uint64(21000),
+		"gasUsed":     StandardGasCost,
 	}
 
 	// Create protobuf block trigger output
@@ -547,7 +555,7 @@ func TestClientInputOutputConsistency(t *testing.T) {
 		"parentHash":  "0x123456abcdef",
 		"difficulty":  "1000000",
 		"gasLimit":    float64(30000000),
-		"gasUsed":     float64(21000),
+		"gasUsed":     float64(StandardGasCost),
 	}
 
 	t.Log("📥 Client Input (what user provides):")
