@@ -975,11 +975,43 @@ func (t *EventTrigger) evaluateEventConditionsCommon(log types.Log, query *avspr
 
 // evaluateCondition evaluates a single condition against the decoded field data
 func (t *EventTrigger) evaluateCondition(fieldMap map[string]interface{}, condition *avsproto.EventCondition, eventName string) bool {
-	fieldName := condition.GetFieldName()
-	fieldValue, exists := fieldMap[fieldName]
+	conditionFieldName := condition.GetFieldName()
+
+	// Parse the eventName.fieldName format (same as applyToFields logic)
+	var targetEventName, targetFieldName string
+	parts := strings.Split(conditionFieldName, ".")
+
+	if len(parts) == 1 {
+		// Simple format: just eventName (for single field events or when applying to all fields)
+		targetEventName = parts[0]
+		targetFieldName = parts[0] // Use event name as field name fallback
+	} else if len(parts) == 2 {
+		// Dot notation format: eventName.fieldName
+		targetEventName = parts[0]
+		targetFieldName = parts[1]
+	} else {
+		t.logger.Warn("🚫 Invalid condition fieldName format",
+			"fieldName", conditionFieldName,
+			"expected", "eventName or eventName.fieldName",
+			"parts", parts)
+		return false
+	}
+
+	// Check if this condition targets the current event
+	if targetEventName != eventName {
+		t.logger.Debug("🔄 Skipping condition for different event",
+			"conditionTargetEvent", targetEventName,
+			"currentEvent", eventName,
+			"conditionField", conditionFieldName)
+		return true // Skip conditions that don't target this event (treat as pass)
+	}
+
+	// Look up the actual field value using the parsed field name
+	fieldValue, exists := fieldMap[targetFieldName]
 	if !exists {
 		t.logger.Warn("🚫 Field not found in decoded event data",
-			"field", fieldName,
+			"targetField", targetFieldName,
+			"conditionField", conditionFieldName,
 			"event", eventName,
 			"available_fields", getMapKeys(fieldMap))
 		return false
@@ -989,8 +1021,11 @@ func (t *EventTrigger) evaluateCondition(fieldMap map[string]interface{}, condit
 	operator := condition.GetOperator()
 	expectedValue := condition.GetValue()
 
-	t.logger.Debug("🔍 Evaluating condition",
-		"field", fieldName,
+	t.logger.Debug("🔍 Evaluating condition with eventName.fieldName pattern",
+		"conditionField", conditionFieldName,
+		"targetEvent", targetEventName,
+		"targetField", targetFieldName,
+		"currentEvent", eventName,
 		"type", fieldType,
 		"operator", operator,
 		"field_value", fieldValue,
@@ -1001,6 +1036,9 @@ func (t *EventTrigger) evaluateCondition(fieldMap map[string]interface{}, condit
 		return t.evaluateUintCondition(fieldValue, operator, expectedValue)
 	case "int256", "int128", "int64", "int32", "int16", "int8":
 		return t.evaluateIntCondition(fieldValue, operator, expectedValue)
+	case "decimal":
+		// Handle decimal type (formatted values) - treat as int256 for comparison
+		return t.evaluateIntCondition(fieldValue, operator, expectedValue)
 	case "address":
 		return t.evaluateAddressCondition(fieldValue, operator, expectedValue)
 	case "bool":
@@ -1010,7 +1048,8 @@ func (t *EventTrigger) evaluateCondition(fieldMap map[string]interface{}, condit
 	default:
 		t.logger.Warn("🚫 Unsupported field type for condition evaluation",
 			"type", fieldType,
-			"field", fieldName)
+			"field", targetFieldName,
+			"conditionField", conditionFieldName)
 		return false
 	}
 }

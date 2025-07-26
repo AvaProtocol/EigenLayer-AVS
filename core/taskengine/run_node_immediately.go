@@ -2,7 +2,6 @@ package taskengine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"math/big"
@@ -471,7 +470,7 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 	// Add only the event name from ABI
 	parsedData["eventName"] = eventName
 
-	// Process method calls for enhanced formatting (like decimals)
+	// Process method calls for decimal formatting
 	var decimalsValue *big.Int
 	var fieldsToFormat []string
 
@@ -496,12 +495,60 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 				if decimals, err := n.callContractMethod(eventLog.Address, methodCall.GetCallData()); err == nil {
 					if decimalsInt, ok := decimals.(*big.Int); ok {
 						decimalsValue = decimalsInt
-						fieldsToFormat = methodCall.GetApplyToFields()
+
+						// Process applyToFields to extract field names for the current event
+						// Format: "eventName.fieldName" or just "eventName" for single field
+						var processedFields []string
+						for _, applyToField := range methodCall.GetApplyToFields() {
+							if n.logger != nil {
+								n.logger.Debug("Processing applyToField", "applyToField", applyToField, "eventName", eventName)
+							}
+
+							// Parse the eventName.fieldName format or just eventName for single values
+							parts := strings.Split(applyToField, ".")
+							var targetEventName, targetFieldName string
+
+							if len(parts) == 1 {
+								// Simple format: just eventName (for single field events or when applying to all fields)
+								targetEventName = parts[0]
+								targetFieldName = parts[0] // Use event name as field name fallback
+							} else if len(parts) == 2 {
+								// Dot notation format: eventName.fieldName
+								targetEventName = parts[0]
+								targetFieldName = parts[1]
+							} else {
+								if n.logger != nil {
+									n.logger.Debug("Invalid applyToFields format", "applyToField", applyToField, "expected", "eventName or eventName.fieldName", "parts", parts)
+								}
+								continue
+							}
+
+							// Check if this applyToField targets the current event
+							if targetEventName == eventName {
+								processedFields = append(processedFields, targetFieldName)
+								if n.logger != nil {
+									n.logger.Debug("Added field for decimal formatting",
+										"targetEventName", targetEventName,
+										"targetFieldName", targetFieldName,
+										"currentEventName", eventName)
+								}
+							} else {
+								if n.logger != nil {
+									n.logger.Debug("Skipping applyToField for different event",
+										"targetEventName", targetEventName,
+										"currentEventName", eventName)
+								}
+							}
+						}
+
+						fieldsToFormat = processedFields
 						if n.logger != nil {
 							n.logger.Info("📞 Retrieved decimals from contract",
 								"contract", eventLog.Address.Hex(),
 								"decimals", decimalsValue.String(),
-								"applyToFields", fieldsToFormat)
+								"originalApplyToFields", methodCall.GetApplyToFields(),
+								"processedFieldsToFormat", fieldsToFormat,
+								"eventName", eventName)
 						}
 					}
 				} else {
@@ -1526,6 +1573,19 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 			// Store loop data in loopResult key for run_node_immediately.go to extract
 			result["loopResult"] = iface
 		}
+	} else if filter := executionStep.GetFilter(); filter != nil {
+		// Filter output contains the filtered array results
+		if filter.GetData() != nil {
+			iface := filter.GetData().AsInterface()
+			// Store filter data directly in result for consistency with other nodes
+			if filterArray, ok := iface.([]interface{}); ok {
+				// Return the filtered array wrapped in a map
+				return map[string]interface{}{"data": filterArray}, nil
+			} else {
+				// Fallback: store in data field
+				result["data"] = iface
+			}
+		}
 	}
 
 	// If no specific data was extracted, include basic execution info
@@ -2332,16 +2392,18 @@ func (n *Engine) convertMapToEventQuery(queryMap map[string]interface{}) (*avspr
 		}
 	}
 
-	// Extract contract ABI if present
+	// Extract contract ABI if present - must be an array like ContractRead
 	if abiInterface, exists := queryMap["contractAbi"]; exists {
-		if abiStr, ok := abiInterface.(string); ok {
-			// Parse the JSON string back to array and convert to protobuf Values
-			var abiArray []interface{}
-			if err := json.Unmarshal([]byte(abiStr), &abiArray); err == nil {
-				if abiValues, err := ConvertInterfaceArrayToProtobufValues(abiArray); err == nil {
-					query.ContractAbi = abiValues
-				}
+		if abiArray, ok := abiInterface.([]interface{}); ok {
+			// Convert array directly to protobuf Values (same as ContractRead)
+			if abiValues, err := ConvertInterfaceArrayToProtobufValues(abiArray); err == nil {
+				query.ContractAbi = abiValues
+			} else {
+				return nil, fmt.Errorf("failed to convert contractAbi array to protobuf values: %v", err)
 			}
+		} else {
+			// Strictly reject non-array contractAbi
+			return nil, fmt.Errorf("contractAbi must be an array of ABI elements, got %T", abiInterface)
 		}
 	}
 

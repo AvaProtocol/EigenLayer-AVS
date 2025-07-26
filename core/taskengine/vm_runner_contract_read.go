@@ -180,11 +180,15 @@ func (r *ContractReadProcessor) callContractMethod(contractAddress common.Addres
 }
 
 // executeMethodCallWithoutFormatting executes a single method call without decimal formatting
-func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.Context, contractAbi *abi.ABI, contractAddress common.Address, methodName string, callData string) *avsproto.ContractReadNode_MethodResult {
-	// Generate calldata if not provided
+func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.Context, contractAbi *abi.ABI, contractAddress common.Address, methodCall *avsproto.ContractReadNode_MethodCall) *avsproto.ContractReadNode_MethodResult {
+	// Preprocess template variables in method call data
+	preprocessedCallData := r.vm.preprocessTextWithVariableMapping(methodCall.GetCallData())
+	methodName := r.vm.preprocessTextWithVariableMapping(methodCall.GetMethodName())
+
+	// Generate callData from methodName and methodParams if callData is empty
 	var finalCallData string
-	if callData == "" && methodName != "" {
-		// Generate calldata from method name for methods with no parameters
+	if preprocessedCallData == "" && methodName != "" {
+		// Find the method in the ABI
 		if contractAbi != nil {
 			if method, exists := contractAbi.Methods[methodName]; exists {
 				if len(method.Inputs) == 0 {
@@ -200,12 +204,28 @@ func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.C
 					}
 					finalCallData = fmt.Sprintf("0x%x", calldata)
 				} else {
-					return &avsproto.ContractReadNode_MethodResult{
-						Success:    false,
-						Error:      fmt.Sprintf("method %s requires parameters but callData is empty", methodName),
-						MethodName: methodName,
-						Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+					// Method has inputs, generate calldata from methodParams
+					// Parse method parameters from the protobuf and preprocess template variables
+					var methodParams []interface{}
+					for _, param := range methodCall.GetMethodParams() {
+						// Preprocess template variables in each parameter
+						preprocessedParam := r.vm.preprocessTextWithVariableMapping(param)
+						methodParams = append(methodParams, preprocessedParam)
 					}
+
+					// Pack the method call
+					packedData, err := method.Inputs.Pack(methodParams...)
+					if err != nil {
+						return &avsproto.ContractReadNode_MethodResult{
+							Success:    false,
+							Error:      fmt.Sprintf("failed to pack method parameters: %v", err),
+							MethodName: methodName,
+							Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+						}
+					}
+
+					// Combine method selector with packed parameters
+					finalCallData = fmt.Sprintf("0x%x%x", method.ID, packedData)
 				}
 			} else {
 				return &avsproto.ContractReadNode_MethodResult{
@@ -224,12 +244,10 @@ func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.C
 			}
 		}
 	} else {
-		finalCallData = callData
+		finalCallData = preprocessedCallData
 	}
 
-	// Preprocess template variables in method call data
-	preprocessedCallData := r.vm.preprocessTextWithVariableMapping(finalCallData)
-	calldata := common.FromHex(preprocessedCallData)
+	calldata := common.FromHex(finalCallData)
 	msg := ethereum.CallMsg{
 		To:   &contractAddress,
 		Data: calldata,
@@ -425,7 +443,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		}
 
 		// Execute the method call using existing callData (backend will handle methodParams separately)
-		result := r.executeMethodCallWithoutFormatting(ctx, parsedABI, contractAddr, methodCall.GetMethodName(), methodCall.GetCallData())
+		result := r.executeMethodCallWithoutFormatting(ctx, parsedABI, contractAddr, methodCall)
 		methodResults = append(methodResults, result)
 
 		// If this method has applyToFields, it provides decimal formatting for other methods
@@ -840,10 +858,12 @@ func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx conte
 			}
 		}
 
-		// Parse method parameters from the protobuf
+		// Parse method parameters from the protobuf and preprocess template variables
 		var methodParams []interface{}
 		for _, param := range methodCall.GetMethodParams() {
-			methodParams = append(methodParams, param)
+			// Preprocess template variables in each parameter
+			preprocessedParam := r.vm.preprocessTextWithVariableMapping(param)
+			methodParams = append(methodParams, preprocessedParam)
 		}
 
 		// Pack the method call
