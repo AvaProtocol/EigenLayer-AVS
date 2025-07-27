@@ -513,15 +513,15 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 		// If we get a result, validate its structure
 		assert.True(t, result["found"].(bool), "Should find simulated event")
 
-		// Check if we have the new structured data format
+		// Check if we have the raw blockchain log data format
 		if eventData, hasData := result["data"].(map[string]interface{}); hasData && eventData != nil {
-			// New format: structured data map
-			// Validate structured event data
-			assert.NotNil(t, eventData["contractAddress"], "Should have contract address")
+			// Raw blockchain log format: validate raw log fields
+			assert.NotNil(t, eventData["address"], "Should have contract address")
 			assert.NotNil(t, eventData["blockNumber"], "Should have block number")
-			assert.NotNil(t, eventData["eventFound"], "Should have eventFound field")
+			assert.NotNil(t, eventData["topics"], "Should have topics")
+			assert.NotNil(t, eventData["data"], "Should have raw data")
 
-			fmt.Printf("✅ New structured data format detected\n")
+			fmt.Printf("✅ Raw blockchain log data format detected\n")
 		} else if evmLog, hasEvmLog := result["evm_log"]; hasEvmLog && evmLog != nil {
 			// Legacy format: evm_log structure
 			assert.NotNil(t, evmLog, "Should have evm_log")
@@ -1504,13 +1504,12 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		require.True(t, ok, "data should be a map[string]interface{}")
 		require.NotNil(t, eventData, "Should have event data")
 
-		// Verify expected fields in the event data
-		assert.NotNil(t, eventData["eventFound"], "Should have eventFound field")
-		assert.NotNil(t, eventData["contractAddress"], "Should have contract address")
+		// Verify expected fields in the raw blockchain log data
+		assert.NotNil(t, eventData["address"], "Should have contract address")
 		assert.NotNil(t, eventData["blockNumber"], "Should have block number")
 		assert.NotNil(t, eventData["transactionHash"], "Should have transaction hash")
 		assert.NotNil(t, eventData["topics"], "Should have topics")
-		assert.NotNil(t, eventData["rawData"], "Should have raw data")
+		assert.NotNil(t, eventData["data"], "Should have raw data")
 
 		// Get the metadata map directly (not a JSON string)
 		metadata, ok := result["metadata"].(map[string]interface{})
@@ -1521,12 +1520,12 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		assert.NotNil(t, metadata["blockNumber"], "Should have blockNumber in metadata")
 
 		t.Logf("✅ Tenderly simulation successful!")
-		t.Logf("📊 Sample Event Data Structure:")
-		t.Logf("   Event Found: %v", eventData["eventFound"])
-		t.Logf("   Contract: %v", eventData["contractAddress"])
+		t.Logf("📊 Raw Blockchain Log Data Structure:")
+		t.Logf("   Contract Address: %v", eventData["address"])
 		t.Logf("   Block: %v", eventData["blockNumber"])
 		t.Logf("   TX Hash: %v", eventData["transactionHash"])
-		t.Logf("   Event Type: %v", eventData["eventType"])
+		t.Logf("   Topics: %v", eventData["topics"])
+		t.Logf("   Data: %v", eventData["data"])
 
 		// Print the complete data structure for documentation
 		t.Logf("\n📋 Complete Event Data:")
@@ -1576,15 +1575,15 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		require.True(t, ok, "data should be a map[string]interface{}")
 		require.NotNil(t, eventData, "Should have event data")
 
-		// Verify we have event data (the condition logic is tested elsewhere)
-		assert.NotNil(t, eventData["eventFound"], "Should have eventFound field")
-		assert.NotNil(t, eventData["contractAddress"], "Should have contract address")
+		// Verify we have raw blockchain log data (the condition logic is tested elsewhere)
+		assert.NotNil(t, eventData["address"], "Should have contract address")
 		assert.NotNil(t, eventData["blockNumber"], "Should have block number")
+		assert.NotNil(t, eventData["topics"], "Should have topics")
 
 		t.Logf("✅ Condition evaluation successful!")
-		t.Logf("   Event Found: %v", eventData["eventFound"])
-		t.Logf("   Contract: %v", eventData["contractAddress"])
-		t.Logf("   Event Type: %v", eventData["eventType"])
+		t.Logf("   Contract Address: %v", eventData["address"])
+		t.Logf("   Block Number: %v", eventData["blockNumber"])
+		t.Logf("   Topics: %v", eventData["topics"])
 		t.Logf("   Condition: simulation mode provides sample data ✅")
 	})
 
@@ -1765,19 +1764,19 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		require.NotNil(t, transferData, "Should have Transfer event data")
 
 		t.Logf("\n🎉 === SAMPLE TRANSFER EVENT DATA STRUCTURE ===")
-		t.Logf("✅ Success! Here's the sample data structure users can reference:")
+		t.Logf("✅ Success! Here's the raw blockchain log data structure users can reference:")
 		t.Logf("")
-		t.Logf("📋 Event Data Fields:")
-		t.Logf("   eventFound: %v", transferData["eventFound"])
-		t.Logf("   contractAddress: %v", transferData["contractAddress"])
+		t.Logf("📋 Raw Blockchain Log Fields:")
+		t.Logf("   address: %v", transferData["address"])
 		t.Logf("   blockNumber: %v", transferData["blockNumber"])
 		t.Logf("   transactionHash: %v", transferData["transactionHash"])
-		t.Logf("   eventType: %v", transferData["eventType"])
-		t.Logf("   eventDescription: %v", transferData["eventDescription"])
 		t.Logf("   topics: %v", transferData["topics"])
-		t.Logf("   rawData: %v", transferData["rawData"])
+		t.Logf("   data: %v", transferData["data"])
+		t.Logf("   blockHash: %v", transferData["blockHash"])
+		t.Logf("   logIndex: %v", transferData["logIndex"])
+		t.Logf("   removed: %v", transferData["removed"])
 		t.Logf("   chainId: %v", transferData["chainId"])
-		t.Logf("   eventSignature: %v", transferData["eventSignature"])
+		t.Logf("   transactionIndex: %v", transferData["transactionIndex"])
 
 		t.Logf("\n📄 Complete JSON Structure for Documentation:")
 		prettyJSON, _ := json.MarshalIndent(transferData, "", "  ")
@@ -1795,22 +1794,22 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		t.Logf("\n💡 === HOW TO USE THIS DATA ===")
 		t.Logf("1. Set 'simulationMode': true in your trigger config")
 		t.Logf("2. Use the exact same query structure as above")
-		t.Logf("3. The response will have this exact data structure")
-		t.Logf("4. Users can reference fields like: data.fromAddress, data.value, etc.")
+		t.Logf("3. The response will have this exact raw blockchain log data structure")
+		t.Logf("4. Users can reference fields like: data.address, data.topics, data.data, etc.")
 		t.Logf("5. For production: set 'simulationMode': false to use real blockchain data")
 
-		// Verify all expected event fields are present
+		// Verify all expected raw blockchain log fields are present
 		expectedFields := []string{
-			"eventFound", "contractAddress", "blockNumber", "transactionHash",
-			"eventType", "eventDescription", "topics", "rawData", "chainId", "eventSignature",
+			"address", "blockNumber", "transactionHash", "topics", "data",
+			"blockHash", "logIndex", "removed", "chainId", "transactionIndex",
 		}
 
 		for _, field := range expectedFields {
 			assert.NotNil(t, transferData[field], "Should have field: %s", field)
 		}
 
-		t.Logf("\n✅ All expected event fields are present!")
-		t.Logf("🎯 Users now have a complete sample data structure to reference")
+		t.Logf("\n✅ All expected raw blockchain log fields are present!")
+		t.Logf("🎯 Users now have a complete raw blockchain log data structure to reference")
 	})
 
 	t.Run("CompareWithHistoricalSearch", func(t *testing.T) {
