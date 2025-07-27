@@ -99,13 +99,19 @@ func TestManualTriggerExecutionWithWebhookFields(t *testing.T) {
 		// Verify data field
 		assert.Equal(t, map[string]interface{}{"payload": "test payload"}, result["data"])
 
-		// Headers and pathParams are still processed for internal use but not exposed in final output
-		// They are used during execution but filtered out from the final result
-		headers, exists := result["headers"]
-		assert.True(t, exists, "Headers should be processed internally")
+		// Headers and pathParams should be nested under input field
+		input, inputExists := result["input"]
+		assert.True(t, inputExists, "Input field should exist")
+		assert.NotNil(t, input, "Input should not be nil")
+
+		inputMap, ok := input.(map[string]interface{})
+		assert.True(t, ok, "Input should be a map")
+
+		headers, exists := inputMap["headers"]
+		assert.True(t, exists, "Headers should be processed and nested under input")
 		assert.NotNil(t, headers, "Headers should not be nil")
-		pathParams, pathParamsExists := result["pathParams"]
-		assert.True(t, pathParamsExists, "PathParams should be processed internally")
+		pathParams, pathParamsExists := inputMap["pathParams"]
+		assert.True(t, pathParamsExists, "PathParams should be processed and nested under input")
 		assert.NotNil(t, pathParams, "PathParams should not be nil")
 
 		// Note: These fields are used for configuration and internal processing
@@ -132,9 +138,14 @@ func TestManualTriggerExecutionWithWebhookFields(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		// Verify non-array webhook fields are processed internally
-		assert.Equal(t, map[string]interface{}{"Authorization": "Bearer token123"}, result["headers"])
-		assert.Equal(t, map[string]interface{}{"userId": "user123"}, result["pathParams"])
+		// Verify non-array webhook fields are processed and nested under input
+		input, inputExists := result["input"]
+		assert.True(t, inputExists, "Input field should exist")
+		inputMap, ok := input.(map[string]interface{})
+		assert.True(t, ok, "Input should be a map")
+
+		assert.Equal(t, map[string]interface{}{"Authorization": "Bearer token123"}, inputMap["headers"])
+		assert.Equal(t, map[string]interface{}{"userId": "user123"}, inputMap["pathParams"])
 
 		// Note: These fields are processed internally but will be filtered out in final output
 	})
