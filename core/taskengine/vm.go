@@ -112,6 +112,13 @@ func (c *CommonProcessor) SetVar(name string, data any) {
 }
 
 func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
+	// Skip storing iteration step results in global VM vars to avoid polluting inputsList
+	if strings.Contains(stepID, "_iter_") {
+		// Iteration step results should not be stored as global variables
+		// They are collected by the loop execution logic directly
+		return
+	}
+
 	c.vm.mu.Lock()
 	defer c.vm.mu.Unlock()
 	nodeNameVar := c.vm.getNodeNameAsVarLocked(stepID) // Use locked version to avoid deadlock
@@ -1248,7 +1255,7 @@ func (v *VM) runContractRead(stepID string, node *avsproto.ContractReadNode) (*a
 	var executionLog *avsproto.Execution_Step
 
 	// Check if node has empty config first - let processor handle this case
-	if node.Config != nil && (node.Config.ContractAddress == "" || len(node.Config.MethodCalls) == 0 || node.Config.ContractAbi == "") {
+	if node.Config != nil && (node.Config.ContractAddress == "" || len(node.Config.MethodCalls) == 0 || len(node.Config.ContractAbi) == 0) {
 		// Empty config case - create a mock processor to handle the error
 		processor := NewContractReadProcessor(v, nil)
 		executionLog, err := processor.Execute(stepID, node)
@@ -1539,15 +1546,17 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 	}
 	v.mu.Unlock()
 
-	// Debug: Log all available variables
+	// Debug: Log all available variables with concrete examples
 	if v.logger != nil {
-		v.logger.Debug("preprocessTextWithVariableMapping DEBUG: Available variables", "vars", func() []string {
-			keys := make([]string, 0, len(currentVars))
-			for k := range currentVars {
-				keys = append(keys, k)
-			}
-			return keys
-		}())
+		v.logger.Debug("preprocessTextWithVariableMapping DEBUG: Available variables",
+			"vars", func() []string {
+				keys := make([]string, 0, len(currentVars))
+				for k := range currentVars {
+					keys = append(keys, k)
+				}
+				return keys
+			}(), // e.g., ["eventTrigger", "apiCallNode", "customCodeNode"] - actual variable names accessible in templates
+			"varCount", len(currentVars)) // e.g., 3 (number of variables available for template resolution)
 	}
 
 	for key, value := range currentVars {
@@ -1584,9 +1593,11 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 			continue
 		}
 
-		// Debug: Log the expression we're trying to resolve
+		// Debug: Log the expression we're trying to resolve with concrete examples
 		if v.logger != nil {
-			v.logger.Debug("preprocessTextWithVariableMapping DEBUG: Trying to resolve expression", "expression", expr)
+			v.logger.Debug("preprocessTextWithVariableMapping DEBUG: Trying to resolve expression",
+				"expression", expr, // e.g., "eventTrigger.data.transactionHash", "apiCallNode.data.body.users[0].name"
+				"templateContext", fmt.Sprintf("{{%s}}", expr)) // e.g., "{{eventTrigger.data.transactionHash}}" - full template syntax
 		}
 
 		// Try to resolve the variable with fallback to camelCase
@@ -2166,10 +2177,15 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			return nil, fmt.Errorf("contract read node requires 'contractAddress' field")
 		}
 
-		if abi, ok := config["contractAbi"].(string); ok {
-			contractConfig.ContractAbi = abi
+		if contractAbiArray, ok := config["contractAbi"].([]interface{}); ok {
+			// Convert array to protobuf Values for storage
+			if abiValues, err := ConvertInterfaceArrayToProtobufValues(contractAbiArray); err == nil {
+				contractConfig.ContractAbi = abiValues
+			} else {
+				return nil, fmt.Errorf("failed to convert contractAbi array to protobuf Values: %v", err)
+			}
 		} else {
-			return nil, fmt.Errorf("contract read node requires 'contractAbi' field")
+			return nil, fmt.Errorf("contract read node requires 'contractAbi' field as array")
 		}
 
 		// Handle method calls - use camelCase only for consistency
@@ -2190,6 +2206,18 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 					}
 					if methodName, ok := methodCallMap["methodName"].(string); ok {
 						methodCall.MethodName = methodName
+					}
+					// Handle methodParams field as string array for handlebars templating
+					if methodParamsInterface, ok := methodCallMap["methodParams"]; ok {
+						if methodParamsArray, ok := methodParamsInterface.([]interface{}); ok {
+							methodParams := make([]string, len(methodParamsArray))
+							for i, param := range methodParamsArray {
+								if paramStr, ok := param.(string); ok {
+									methodParams[i] = paramStr
+								}
+							}
+							methodCall.MethodParams = methodParams
+						}
 					}
 					// Handle applyToFields for decimal formatting
 					if applyToFields, ok := methodCallMap["applyToFields"].([]interface{}); ok {
@@ -2221,10 +2249,15 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			return nil, fmt.Errorf("contract write node requires 'contractAddress' field")
 		}
 
-		if abi, ok := config["contractAbi"].(string); ok {
-			contractConfig.ContractAbi = abi
+		if contractAbiArray, ok := config["contractAbi"].([]interface{}); ok {
+			// Convert array to protobuf Values for storage
+			if abiValues, err := ConvertInterfaceArrayToProtobufValues(contractAbiArray); err == nil {
+				contractConfig.ContractAbi = abiValues
+			} else {
+				return nil, fmt.Errorf("failed to convert contractAbi array to protobuf Values: %v", err)
+			}
 		} else {
-			return nil, fmt.Errorf("contract write node requires 'contractAbi' field")
+			return nil, fmt.Errorf("contract write node requires 'contractAbi' field as array")
 		}
 
 		// Use camelCase only for consistency
@@ -2243,6 +2276,18 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 					}
 					if methodName, ok := methodCallMap["methodName"].(string); ok {
 						methodCall.MethodName = methodName
+					}
+					// Handle methodParams field as string array for handlebars templating
+					if methodParamsInterface, ok := methodCallMap["methodParams"]; ok {
+						if methodParamsArray, ok := methodParamsInterface.([]interface{}); ok {
+							methodParams := make([]string, len(methodParamsArray))
+							for i, param := range methodParamsArray {
+								if paramStr, ok := param.(string); ok {
+									methodParams[i] = paramStr
+								}
+							}
+							methodCall.MethodParams = methodParams
+						}
 					}
 					contractConfig.MethodCalls = append(contractConfig.MethodCalls, methodCall)
 				}
@@ -2491,11 +2536,21 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			if contractAddress, ok := runnerConfig["contractAddress"].(string); ok {
 				crConfig.ContractAddress = contractAddress
 			}
-			if contractAbi, ok := runnerConfig["contractAbi"].(string); ok {
-				crConfig.ContractAbi = contractAbi
+
+			// Handle contractAbi - accept only array format
+			if contractAbiArray, ok := runnerConfig["contractAbi"].([]interface{}); ok {
+				// Convert array to protobuf Values for storage
+				if abiValues, err := ConvertInterfaceArrayToProtobufValues(contractAbiArray); err == nil {
+					crConfig.ContractAbi = abiValues
+				} else {
+					return nil, fmt.Errorf("failed to convert contractAbi array to protobuf Values: %v", err)
+				}
+			} else {
+				return nil, fmt.Errorf("loop node contractRead runner requires 'contractAbi' field as array")
 			}
 
 			// Handle method calls
+			var fieldsNeedingDecimals []string // Track fields that need decimal formatting
 			if methodCalls, ok := runnerConfig["methodCalls"].([]interface{}); ok {
 				for _, methodCallInterface := range methodCalls {
 					if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
@@ -2506,6 +2561,24 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 						if methodName, ok := methodCallMap["methodName"].(string); ok {
 							methodCall.MethodName = methodName
 						}
+						// Handle methodParams field as string array for handlebars templating
+						if methodParamsInterface, ok := methodCallMap["methodParams"]; ok {
+							if methodParamsArray, ok := methodParamsInterface.([]interface{}); ok {
+								methodParams := make([]string, len(methodParamsArray))
+								for i, param := range methodParamsArray {
+									if paramStr, ok := param.(string); ok {
+										methodParams[i] = paramStr
+									}
+								}
+								methodCall.MethodParams = methodParams
+							}
+						}
+
+						// Handle applyDecimalsTo field (convert to applyToFields pattern)
+						if applyDecimalsTo, ok := methodCallMap["applyDecimalsTo"].(string); ok {
+							fieldsNeedingDecimals = append(fieldsNeedingDecimals, applyDecimalsTo)
+						}
+
 						// Handle applyToFields for decimal formatting
 						if applyToFields, ok := methodCallMap["applyToFields"].([]interface{}); ok {
 							for _, field := range applyToFields {
@@ -2516,6 +2589,16 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 						}
 						crConfig.MethodCalls = append(crConfig.MethodCalls, methodCall)
 					}
+				}
+
+				// Add decimals method call if any fields need decimal formatting
+				if len(fieldsNeedingDecimals) > 0 {
+					decimalsMethodCall := &avsproto.ContractReadNode_MethodCall{
+						MethodName:    "decimals",
+						MethodParams:  []string{},            // decimals() takes no parameters
+						ApplyToFields: fieldsNeedingDecimals, // Apply to the fields that requested decimal formatting
+					}
+					crConfig.MethodCalls = append(crConfig.MethodCalls, decimalsMethodCall)
 				}
 			}
 
@@ -2529,8 +2612,14 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			if contractAddress, ok := runnerConfig["contractAddress"].(string); ok {
 				cwConfig.ContractAddress = contractAddress
 			}
-			if contractAbi, ok := runnerConfig["contractAbi"].(string); ok {
-				cwConfig.ContractAbi = contractAbi
+			// Handle contractAbi - accept only array format
+			if contractAbiArray, ok := runnerConfig["contractAbi"].([]interface{}); ok {
+				// Convert array to protobuf Values for storage
+				if abiValues, err := ConvertInterfaceArrayToProtobufValues(contractAbiArray); err == nil {
+					cwConfig.ContractAbi = abiValues
+				} else {
+					return nil, fmt.Errorf("failed to convert contractAbi array to protobuf Values for loop contractWrite: %v", err)
+				}
 			}
 			if callData, ok := runnerConfig["callData"].(string); ok {
 				cwConfig.CallData = callData
@@ -2872,9 +2961,15 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 	case *avsproto.TaskNode_ContractRead:
 		contractRead := taskNode.GetContractRead()
 		if contractRead != nil && contractRead.Config != nil {
+			// Convert contractAbi from protobuf Values back to array
+			var contractAbiArray []interface{}
+			for _, value := range contractRead.Config.ContractAbi {
+				contractAbiArray = append(contractAbiArray, value.AsInterface())
+			}
+
 			config := map[string]interface{}{
 				"contractAddress": contractRead.Config.ContractAddress,
-				"contractAbi":     contractRead.Config.ContractAbi,
+				"contractAbi":     contractAbiArray,
 			}
 
 			// Handle method calls - extract fields to simple map for protobuf compatibility
@@ -2885,6 +2980,11 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 					methodCallMap := map[string]interface{}{
 						"methodName": methodCall.MethodName,
 						"callData":   methodCall.CallData,
+					}
+
+					// Include methodParams if present
+					if len(methodCall.MethodParams) > 0 {
+						methodCallMap["methodParams"] = methodCall.MethodParams
 					}
 
 					// Convert applyToFields []string to []interface{} for protobuf compatibility
@@ -2908,9 +3008,15 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 	case *avsproto.TaskNode_ContractWrite:
 		contractWrite := taskNode.GetContractWrite()
 		if contractWrite != nil && contractWrite.Config != nil {
+			// Convert contractAbi from protobuf Values back to array
+			var contractAbiArray []interface{}
+			for _, value := range contractWrite.Config.ContractAbi {
+				contractAbiArray = append(contractAbiArray, value.AsInterface())
+			}
+
 			config := map[string]interface{}{
 				"contractAddress": contractWrite.Config.ContractAddress,
-				"contractAbi":     contractWrite.Config.ContractAbi,
+				"contractAbi":     contractAbiArray,
 				"callData":        contractWrite.Config.CallData,
 			}
 
@@ -2923,6 +3029,12 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 						"methodName": methodCall.MethodName,
 						"callData":   methodCall.CallData,
 					}
+
+					// Include methodParams if present
+					if len(methodCall.MethodParams) > 0 {
+						methodCallMap["methodParams"] = methodCall.MethodParams
+					}
+
 					methodCallsArray[i] = methodCallMap
 				}
 				config["methodCalls"] = methodCallsArray
@@ -3003,7 +3115,12 @@ func (v *VM) GetNodeDataForExecution(stepID string) (nodeName string, nodeConfig
 		}
 	} else {
 		if v.logger != nil {
-			v.logger.Warn("🔍 GetNodeDataForExecution: Node not found", "stepID", stepID)
+			// For loop iteration step IDs, this is expected behavior - use debug level to avoid noise
+			if strings.Contains(stepID, "_iter_") {
+				v.logger.Debug("🔍 GetNodeDataForExecution: Loop iteration node (expected)", "stepID", stepID)
+			} else {
+				v.logger.Warn("🔍 GetNodeDataForExecution: Node not found", "stepID", stepID)
+			}
 		}
 	}
 
@@ -3043,9 +3160,15 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 		}
 		return config
 	case *avsproto.LoopNode_ContractRead:
+		// Convert contractAbi from protobuf Values back to array
+		var contractAbiArray []interface{}
+		for _, value := range runner.ContractRead.Config.ContractAbi {
+			contractAbiArray = append(contractAbiArray, value.AsInterface())
+		}
+
 		configData := map[string]interface{}{
 			"contractAddress": runner.ContractRead.Config.ContractAddress,
-			"contractAbi":     runner.ContractRead.Config.ContractAbi,
+			"contractAbi":     contractAbiArray,
 		}
 		// Handle method calls if present
 		if len(runner.ContractRead.Config.MethodCalls) > 0 {
@@ -3055,6 +3178,12 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 					"callData":   methodCall.CallData,
 					"methodName": methodCall.MethodName,
 				}
+
+				// Include methodParams if present
+				if len(methodCall.MethodParams) > 0 {
+					methodCallMap["methodParams"] = methodCall.MethodParams
+				}
+
 				// Include applyToFields if present
 				if len(methodCall.ApplyToFields) > 0 {
 					applyToFieldsArray := make([]interface{}, len(methodCall.ApplyToFields))
@@ -3072,9 +3201,15 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 			"config": configData,
 		}
 	case *avsproto.LoopNode_ContractWrite:
+		// Convert contractAbi from protobuf Values back to array
+		var contractAbiArray []interface{}
+		for _, value := range runner.ContractWrite.Config.ContractAbi {
+			contractAbiArray = append(contractAbiArray, value.AsInterface())
+		}
+
 		configData := map[string]interface{}{
 			"contractAddress": runner.ContractWrite.Config.ContractAddress,
-			"contractAbi":     runner.ContractWrite.Config.ContractAbi,
+			"contractAbi":     contractAbiArray,
 			"callData":        runner.ContractWrite.Config.CallData,
 		}
 		// Handle method calls if present
@@ -3085,6 +3220,12 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 					"callData":   methodCall.CallData,
 					"methodName": methodCall.MethodName,
 				}
+
+				// Include methodParams if present
+				if len(methodCall.MethodParams) > 0 {
+					methodCallMap["methodParams"] = methodCall.MethodParams
+				}
+
 				methodCallsArray[i] = methodCallMap
 			}
 			configData["methodCalls"] = methodCallsArray
@@ -3161,10 +3302,30 @@ func removeComplexProtobufTypes(input map[string]interface{}) map[string]interfa
 		if key == "methodCalls" {
 			// methodCalls should always be []interface{} with maps after our fixes
 			if methodCallsArray, ok := value.([]interface{}); ok {
-				result[key] = methodCallsArray
+				// Process each method call to handle []string in methodParams
+				cleanedMethodCalls := make([]interface{}, len(methodCallsArray))
+				for i, methodCall := range methodCallsArray {
+					if methodCallMap, ok := methodCall.(map[string]interface{}); ok {
+						cleanedMethodCalls[i] = removeComplexProtobufTypes(methodCallMap)
+					} else {
+						cleanedMethodCalls[i] = methodCall
+					}
+				}
+				result[key] = cleanedMethodCalls
 			} else {
 				// Fallback: convert unexpected format to string (should not happen with our fixes)
 				result[key] = fmt.Sprintf("%v", value)
+			}
+		} else if key == "methodParams" {
+			// Convert []string to []interface{} for protobuf compatibility
+			if stringSlice, ok := value.([]string); ok {
+				interfaceSlice := make([]interface{}, len(stringSlice))
+				for i, str := range stringSlice {
+					interfaceSlice[i] = str
+				}
+				result[key] = interfaceSlice
+			} else {
+				result[key] = value
 			}
 		} else if stringMap, ok := value.(map[string]string); ok {
 			// Convert map[string]string to map[string]interface{} for protobuf compatibility
@@ -3173,6 +3334,13 @@ func removeComplexProtobufTypes(input map[string]interface{}) map[string]interfa
 				interfaceMap[k] = v
 			}
 			result[key] = interfaceMap
+		} else if stringSlice, ok := value.([]string); ok {
+			// Convert any []string to []interface{} for protobuf compatibility
+			interfaceSlice := make([]interface{}, len(stringSlice))
+			for i, str := range stringSlice {
+				interfaceSlice[i] = str
+			}
+			result[key] = interfaceSlice
 		} else if nestedMap, ok := value.(map[string]interface{}); ok {
 			// Recursively clean nested maps
 			result[key] = removeComplexProtobufTypes(nestedMap)
@@ -3359,6 +3527,7 @@ func (eq *ExecutionQueue) executeTask(task *ExecutionTask) *ExecutionResult {
 	}
 
 	// Set input variables in the VM context for this execution
+	// For loop iterations, we'll clean them up immediately after execution
 	eq.vm.mu.Lock()
 	if eq.vm.vars == nil {
 		eq.vm.vars = make(map[string]any)
@@ -3411,10 +3580,30 @@ func (eq *ExecutionQueue) extractResultData(step *avsproto.Execution_Step) inter
 		return restApiOutput.Data.AsInterface()
 	}
 	if contractReadOutput := step.GetContractRead(); contractReadOutput != nil && contractReadOutput.Data != nil {
-		return contractReadOutput.Data.AsInterface()
+		// For contract read, return individual objects for single method calls to avoid double nesting in loops
+		rawData := contractReadOutput.Data.AsInterface()
+		if dataArray, ok := rawData.([]interface{}); ok {
+			if len(dataArray) == 1 {
+				// Single method call - return individual object to avoid [[{...}], [{...}]] in loops
+				return dataArray[0]
+			}
+			// Multiple method calls - return the array
+			return dataArray
+		}
+		return rawData
 	}
 	if contractWriteOutput := step.GetContractWrite(); contractWriteOutput != nil && contractWriteOutput.Data != nil {
-		return contractWriteOutput.Data.AsInterface()
+		// For contract write, return individual objects for single method calls to avoid double nesting in loops (same as ContractRead)
+		rawData := contractWriteOutput.Data.AsInterface()
+		if dataArray, ok := rawData.([]interface{}); ok {
+			if len(dataArray) == 1 {
+				// Single method call - return individual object to avoid [[{...}], [{...}]] in loops
+				return dataArray[0]
+			}
+			// Multiple method calls - return the array
+			return dataArray
+		}
+		return rawData
 	}
 	if ethTransferOutput := step.GetEthTransfer(); ethTransferOutput != nil && ethTransferOutput.Data != nil {
 		return ethTransferOutput.Data.AsInterface()
@@ -3516,10 +3705,44 @@ func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsp
 
 	inputArray, ok := inputVar.([]interface{})
 	if !ok {
-		err := fmt.Errorf("input variable %s is not an array", inputVarName)
-		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		finalizeExecutionStep(s, false, err.Error(), log.String())
-		return s, err
+		// Try to extract from data field if wrapped (common for trigger variables)
+		if dataMap, ok := inputVar.(map[string]interface{}); ok {
+			log.WriteString(fmt.Sprintf("\nInput variable is a map with keys: %v", getMapKeys(dataMap)))
+
+			if dataValue, hasData := dataMap["data"]; hasData {
+				log.WriteString(fmt.Sprintf("\nFound 'data' field of type: %T", dataValue))
+
+				// Try different array types that might be present
+				if dataArray, ok := dataValue.([]interface{}); ok {
+					inputArray = dataArray
+					log.WriteString(fmt.Sprintf("\nExtracted array from 'data' field: %d items", len(inputArray)))
+				} else if dataSlice, ok := dataValue.([]any); ok {
+					// Handle []any type
+					inputArray = make([]interface{}, len(dataSlice))
+					for i, v := range dataSlice {
+						inputArray[i] = v
+					}
+					log.WriteString(fmt.Sprintf("\nExtracted []any array from 'data' field: %d items", len(inputArray)))
+				} else {
+					// Data field exists but is not an array
+					err := fmt.Errorf("input variable %s.data is type %T, expected array", inputVarName, dataValue)
+					log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+					finalizeExecutionStep(s, false, err.Error(), log.String())
+					return s, err
+				}
+			} else {
+				// No data field found
+				err := fmt.Errorf("input variable %s is not an array and has no 'data' field (available keys: %v)", inputVarName, getMapKeys(dataMap))
+				log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+				finalizeExecutionStep(s, false, err.Error(), log.String())
+				return s, err
+			}
+		} else {
+			err := fmt.Errorf("input variable %s is type %T, expected array or object with 'data' field", inputVarName, inputVar)
+			log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+			finalizeExecutionStep(s, false, err.Error(), log.String())
+			return s, err
+		}
 	}
 
 	// Determine execution mode
@@ -3772,18 +3995,145 @@ func (v *VM) createNestedNodeFromLoop(loopNodeDef *avsproto.LoopNode, iterationS
 
 // Helper methods for template processing (these need to be moved from LoopProcessor)
 func (v *VM) processContractWriteTemplates(contractWrite *avsproto.ContractWriteNode, iterInputs map[string]interface{}) *avsproto.ContractWriteNode {
-	// TODO: Implement template processing - for now return as-is
-	return contractWrite
+	// Create a copy of the contract write configuration
+	processed := &avsproto.ContractWriteNode{
+		Config: &avsproto.ContractWriteNode_Config{
+			ContractAddress: v.substituteTemplateVariables(contractWrite.Config.ContractAddress, iterInputs),
+			ContractAbi:     contractWrite.Config.ContractAbi, // ⚠️ CRITICAL: ABI is NEVER subject to template substitution
+			CallData:        v.substituteTemplateVariables(contractWrite.Config.CallData, iterInputs),
+		},
+	}
+
+	// Process method calls
+	for _, methodCall := range contractWrite.Config.MethodCalls {
+		processedMethodCall := &avsproto.ContractWriteNode_MethodCall{
+			CallData:     v.substituteTemplateVariables(methodCall.CallData, iterInputs),
+			MethodName:   v.substituteTemplateVariables(methodCall.MethodName, iterInputs),
+			MethodParams: SubstituteTemplateVariablesArray(methodCall.MethodParams, iterInputs, v.substituteTemplateVariables),
+		}
+
+		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
+	}
+
+	return processed
 }
 
 func (v *VM) processContractReadTemplates(contractRead *avsproto.ContractReadNode, iterInputs map[string]interface{}) *avsproto.ContractReadNode {
-	// TODO: Implement template processing - for now return as-is
-	return contractRead
+	// Create a copy of the contract read configuration
+	processed := &avsproto.ContractReadNode{
+		Config: &avsproto.ContractReadNode_Config{
+			ContractAddress: v.substituteTemplateVariables(contractRead.Config.ContractAddress, iterInputs),
+			ContractAbi:     contractRead.Config.ContractAbi, // ⚠️ CRITICAL: ABI is NEVER subject to template substitution
+		},
+	}
+
+	// Process method calls
+	for _, methodCall := range contractRead.Config.MethodCalls {
+		processedMethodCall := &avsproto.ContractReadNode_MethodCall{
+			CallData:      v.substituteTemplateVariables(methodCall.CallData, iterInputs),
+			MethodName:    v.substituteTemplateVariables(methodCall.MethodName, iterInputs),
+			MethodParams:  SubstituteTemplateVariablesArray(methodCall.MethodParams, iterInputs, v.substituteTemplateVariables),
+			ApplyToFields: make([]string, len(methodCall.ApplyToFields)),
+		}
+
+		// Copy applyToFields (no template substitution needed for field names)
+		copy(processedMethodCall.ApplyToFields, methodCall.ApplyToFields)
+
+		processed.Config.MethodCalls = append(processed.Config.MethodCalls, processedMethodCall)
+	}
+
+	return processed
 }
 
 func (v *VM) processRestApiTemplates(restApi *avsproto.RestAPINode, iterInputs map[string]interface{}) *avsproto.RestAPINode {
-	// TODO: Implement template processing - for now return as-is
-	return restApi
+	// Create a copy of the REST API configuration
+	processed := &avsproto.RestAPINode{
+		Config: &avsproto.RestAPINode_Config{
+			Url:    v.substituteTemplateVariables(restApi.Config.Url, iterInputs),
+			Method: v.substituteTemplateVariables(restApi.Config.Method, iterInputs),
+			Body:   v.substituteTemplateVariables(restApi.Config.Body, iterInputs),
+		},
+	}
+
+	// Process headers
+	if restApi.Config.Headers != nil {
+		processed.Config.Headers = make(map[string]string)
+		for key, value := range restApi.Config.Headers {
+			processedKey := v.substituteTemplateVariables(key, iterInputs)
+			processedValue := v.substituteTemplateVariables(value, iterInputs)
+			processed.Config.Headers[processedKey] = processedValue
+		}
+	}
+
+	return processed
 }
 
-// executeSequentialPath executes a sequential execution path starting from the given step
+// substituteTemplateVariables replaces template variables like {{value}} and {{index}} with actual values
+func (v *VM) substituteTemplateVariables(text string, iterInputs map[string]interface{}) string {
+	if text == "" {
+		return text
+	}
+
+	// Simple template variable substitution
+	// Replace {{value}} with the current iteration value
+	// Replace {{index}} with the current iteration index
+	result := text
+
+	for varName, varValue := range iterInputs {
+		placeholder := fmt.Sprintf("{{%s}}", varName)
+		replacement := fmt.Sprintf("%v", varValue)
+		result = strings.ReplaceAll(result, placeholder, replacement)
+	}
+
+	return result
+}
+
+// getStatusText returns the standard HTTP status text for a given status code
+func getStatusText(statusCode int) string {
+	switch statusCode {
+	case 200:
+		return "OK"
+	case 201:
+		return "Created"
+	case 202:
+		return "Accepted"
+	case 204:
+		return "No Content"
+	case 400:
+		return "Bad Request"
+	case 401:
+		return "Unauthorized"
+	case 403:
+		return "Forbidden"
+	case 404:
+		return "Not Found"
+	case 405:
+		return "Method Not Allowed"
+	case 409:
+		return "Conflict"
+	case 422:
+		return "Unprocessable Entity"
+	case 429:
+		return "Too Many Requests"
+	case 500:
+		return "Internal Server Error"
+	case 502:
+		return "Bad Gateway"
+	case 503:
+		return "Service Unavailable"
+	case 504:
+		return "Gateway Timeout"
+	default:
+		if statusCode >= 200 && statusCode < 300 {
+			return "Success"
+		} else if statusCode >= 300 && statusCode < 400 {
+			return "Redirection"
+		} else if statusCode >= 400 && statusCode < 500 {
+			return "Client Error"
+		} else if statusCode >= 500 && statusCode < 600 {
+			return "Server Error"
+		} else {
+			return "Unknown"
+		}
+	}
+}

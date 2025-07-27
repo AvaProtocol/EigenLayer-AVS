@@ -9,11 +9,23 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
+// Test ABI data - mirrors real user input format (same as JavaScript SDK tests)
+const (
+	// ERC20 balanceOf function - what users actually provide
+	testBalanceOfABI = `[{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`
+
+	// Chainlink getRoundData function - what users actually provide
+	testGetRoundDataABI = `[{"inputs":[{"internalType":"uint80","name":"_roundId","type":"uint80"}],"name":"getRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`
+
+	// Combined decimals + getRoundData ABI - what users actually provide
+	testDecimalsAndGetRoundDataABI = `[{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint80","name":"_roundId","type":"uint80"}],"name":"getRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`
+)
+
 func TestContractReadSimpleReturn(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
-			ContractAbi:     `[{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]`,
+			ContractAbi:     MustConvertJSONABIToProtobufValues(testBalanceOfABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:   "0x70a08231000000000000000000000000ce289bb9fb0a9591317981223cbe33d5dc42268d",
@@ -97,19 +109,17 @@ func TestContractReadSimpleReturn(t *testing.T) {
 		return
 	}
 
-	// Get the first result and extract data
+	// Get the first result and extract balanceOf value
 	if resultMap, ok := results[0].(map[string]interface{}); ok {
-		if data, ok := resultMap["data"].(map[string]interface{}); ok {
-			// Find the balance value - it should be the first/only field in balanceOf
-			for _, value := range data {
-				if valueStr, ok := value.(string); ok && valueStr == "313131" {
-					// Found the expected value
-					return
-				}
+		if balanceOfValue, ok := resultMap["balanceOf"]; ok {
+			// For balanceOf, the value should be the direct result (single output)
+			if valueStr, ok := balanceOfValue.(string); ok && valueStr == "313131" {
+				// Found the expected value
+				return
 			}
-			t.Errorf("read balanceOf doesn't return right data. expected 313131 but didn't find it in data: %v", data)
+			t.Errorf("read balanceOf doesn't return right data. expected 313131 but got: %v", balanceOfValue)
 		} else {
-			t.Errorf("expected data field in result but got: %v", resultMap)
+			t.Errorf("expected balanceOf field in result but got: %v", resultMap)
 		}
 	} else {
 		t.Errorf("expected result to be a map but got: %v", results[0])
@@ -120,7 +130,7 @@ func TestContractReadComplexReturn(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0xc59E3633BAAC79493d908e63626716e204A45EdF",
-			ContractAbi:     `[{"inputs":[{"internalType":"uint80","name":"_roundId","type":"uint80"}],"name":"getRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`,
+			ContractAbi:     MustConvertJSONABIToProtobufValues(testGetRoundDataABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:   "0x9a6fc8f500000000000000000000000000000000000000000000000100000000000052e7",
@@ -203,39 +213,44 @@ func TestContractReadComplexReturn(t *testing.T) {
 		return
 	}
 
-	// Get the first result and extract data
+	// Get the first result and extract getRoundData
 	if resultMap, ok := results[0].(map[string]interface{}); ok {
-		if data, ok := resultMap["data"].(map[string]interface{}); ok {
-			if len(data) < 5 {
-				t.Errorf("contract read doesn't return right data, wrong length. expect 5 fields, got %d fields", len(data))
-				return
-			}
+		if getRoundDataValue, ok := resultMap["getRoundData"]; ok {
+			// For getRoundData, the value should be a map with multiple fields
+			if valueMap, ok := getRoundDataValue.(map[string]interface{}); ok {
+				if len(valueMap) < 5 {
+					t.Errorf("contract read doesn't return right data, wrong length. expect 5 fields, got %d fields", len(valueMap))
+					return
+				}
 
-			// When reading data out and return over the wire, we have to serialize big int to string.
-			// Check specific field values based on the getRoundData function
-			expectedValues := map[string]string{
-				"roundId":         "18446744073709572839",
-				"answer":          "2189300000",
-				"startedAt":       "1733878404",
-				"updatedAt":       "1733878404",
-				"answeredInRound": "18446744073709572839",
-			}
+				// When reading data out and return over the wire, we have to serialize big int to string.
+				// Check specific field values based on the getRoundData function
+				expectedValues := map[string]string{
+					"roundId":         "18446744073709572839",
+					"answer":          "2189300000",
+					"startedAt":       "1733878404",
+					"updatedAt":       "1733878404",
+					"answeredInRound": "18446744073709572839",
+				}
 
-			for fieldName, expectedValue := range expectedValues {
-				if actualValue, exists := data[fieldName]; exists {
-					if actualValueStr, ok := actualValue.(string); ok {
-						if actualValueStr != expectedValue {
-							t.Errorf("contract read returns incorrect data for field %s: expected %s got %s", fieldName, expectedValue, actualValueStr)
+				for fieldName, expectedValue := range expectedValues {
+					if actualValue, exists := valueMap[fieldName]; exists {
+						if actualValueStr, ok := actualValue.(string); ok {
+							if actualValueStr != expectedValue {
+								t.Errorf("contract read returns incorrect data for field %s: expected %s got %s", fieldName, expectedValue, actualValueStr)
+							}
+						} else {
+							t.Errorf("expected field %s to be string but got %T", fieldName, actualValue)
 						}
 					} else {
-						t.Errorf("expected field %s to be string but got %T", fieldName, actualValue)
+						t.Errorf("expected field %s not found in getRoundData: %v", fieldName, valueMap)
 					}
-				} else {
-					t.Errorf("expected field %s not found in data: %v", fieldName, data)
 				}
+			} else {
+				t.Errorf("expected getRoundData to be a map but got %T: %v", getRoundDataValue, getRoundDataValue)
 			}
 		} else {
-			t.Errorf("expected data field in result but got: %v", resultMap)
+			t.Errorf("expected getRoundData field in result but got: %v", resultMap)
 		}
 	} else {
 		t.Errorf("expected result to be a map but got: %v", results[0])
@@ -246,7 +261,7 @@ func TestContractReadWithDecimalFormatting(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0xc59E3633BAAC79493d908e63626716e204A45EdF",
-			ContractAbi:     `[{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint80","name":"_roundId","type":"uint80"}],"name":"getRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`,
+			ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsAndGetRoundDataABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:      "0x313ce567", // decimals()
@@ -335,30 +350,46 @@ func TestContractReadWithDecimalFormatting(t *testing.T) {
 				t.Errorf("rawStructuredFields should not be present in result %d, but found: %v", i, resultMap["rawStructuredFields"])
 			}
 
-			// Check that rawStructuredFields is not present in the data field
-			if data, ok := resultMap["data"].(map[string]interface{}); ok {
-				if _, exists := data["rawStructuredFields"]; exists {
-					t.Errorf("rawStructuredFields should not be present in data field of result %d, but found: %v", i, data["rawStructuredFields"])
+			// Check that rawStructuredFields is not present in the value field
+			if value, ok := resultMap["value"]; ok {
+				if valueMap, ok := value.(map[string]interface{}); ok {
+					if _, exists := valueMap["rawStructuredFields"]; exists {
+						t.Errorf("rawStructuredFields should not be present in value field of result %d, but found: %v", i, valueMap["rawStructuredFields"])
+					}
 				}
 			}
 		}
 	}
 
-	// Verify that we have results for both method calls (decimals and getRoundData)
-	if len(results) != 2 {
-		t.Errorf("expected 2 method results (decimals and getRoundData), got %d", len(results))
+	// The backend now returns a single flattened object with both method results
+	if len(results) != 1 {
+		t.Errorf("expected 1 combined result object, got %d", len(results))
 		return
 	}
 
-	// Find the getRoundData result
-	var getRoundDataResult map[string]interface{}
-	for _, result := range results {
-		if resultMap, ok := result.(map[string]interface{}); ok {
-			if methodName, ok := resultMap["methodName"].(string); ok && methodName == "getRoundData" {
-				getRoundDataResult = resultMap
-				break
-			}
-		}
+	// Get the combined result
+	combinedResult, ok := results[0].(map[string]interface{})
+	if !ok {
+		t.Errorf("expected result to be a map, got %T", results[0])
+		return
+	}
+
+	// Verify both methods are present in the combined result
+	if _, hasDecimals := combinedResult["decimals"]; !hasDecimals {
+		t.Errorf("expected 'decimals' field in combined result")
+		return
+	}
+
+	if _, hasGetRoundData := combinedResult["getRoundData"]; !hasGetRoundData {
+		t.Errorf("expected 'getRoundData' field in combined result")
+		return
+	}
+
+	// Extract the getRoundData result
+	getRoundDataResult, ok := combinedResult["getRoundData"].(map[string]interface{})
+	if !ok {
+		t.Errorf("expected getRoundData to be a map, got %T", combinedResult["getRoundData"])
+		return
 	}
 
 	if getRoundDataResult == nil {
@@ -366,16 +397,11 @@ func TestContractReadWithDecimalFormatting(t *testing.T) {
 		return
 	}
 
-	// Verify that the actual data fields are present in the getRoundData result
-	if data, ok := getRoundDataResult["data"].(map[string]interface{}); ok {
-		// Check that expected fields are present
-		expectedFields := []string{"roundId", "answer", "startedAt", "updatedAt", "answeredInRound"}
-		for _, field := range expectedFields {
-			if _, exists := data[field]; !exists {
-				t.Errorf("expected field %s not found in data: %v", field, data)
-			}
+	// Verify that the actual fields are present directly in the getRoundData result
+	expectedFields := []string{"roundId", "answer", "startedAt", "updatedAt", "answeredInRound"}
+	for _, field := range expectedFields {
+		if _, exists := getRoundDataResult[field]; !exists {
+			t.Errorf("expected field %s not found in getRoundData result: %v", field, getRoundDataResult)
 		}
-	} else {
-		t.Errorf("expected data field in getRoundData result but got: %v", getRoundDataResult)
 	}
 }

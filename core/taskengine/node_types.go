@@ -249,12 +249,29 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 	case *avsproto.TaskTrigger_Manual:
 		manualTrigger := trigger.GetManual()
 		if manualTrigger != nil && manualTrigger.Config != nil {
-			// Use the generic protobuf to map converter for consistency with other triggers
-			configMap, err := gow.ProtoToMap(manualTrigger.Config)
-			if err == nil {
-				for key, value := range configMap {
-					triggerConfig[key] = value
+			// For ManualTrigger, access protobuf fields directly to preserve structured data
+			// This avoids the JSON roundtrip in gow.ProtoToMap that converts arrays/objects to JSON strings
+			if manualTrigger.Config.Data != nil {
+				// Use .AsInterface() to preserve original data types (objects, arrays, primitives)
+				triggerConfig["data"] = manualTrigger.Config.Data.AsInterface()
+			}
+
+			// Handle headers
+			if len(manualTrigger.Config.Headers) > 0 {
+				headers := make(map[string]interface{})
+				for k, v := range manualTrigger.Config.Headers {
+					headers[k] = v
 				}
+				triggerConfig["headers"] = headers
+			}
+
+			// Handle pathParams
+			if len(manualTrigger.Config.PathParams) > 0 {
+				pathParams := make(map[string]interface{})
+				for k, v := range manualTrigger.Config.PathParams {
+					pathParams[k] = v
+				}
+				triggerConfig["pathParams"] = pathParams
 			}
 		}
 	default:

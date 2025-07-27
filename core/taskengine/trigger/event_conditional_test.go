@@ -1,6 +1,7 @@
 package trigger
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strings"
@@ -11,9 +12,28 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
+
+// convertJSONABIToProtobufValues converts a JSON ABI string to protobuf Values for tests
+func convertJSONABIToProtobufValues(jsonABI string) []*structpb.Value {
+	var abiArray []interface{}
+	if err := json.Unmarshal([]byte(jsonABI), &abiArray); err != nil {
+		panic("Failed to parse ABI JSON in test: " + err.Error())
+	}
+
+	abiValues := make([]*structpb.Value, len(abiArray))
+	for i, item := range abiArray {
+		if value, err := structpb.NewValue(item); err != nil {
+			panic("Failed to convert ABI item to protobuf Value: " + err.Error())
+		} else {
+			abiValues[i] = value
+		}
+	}
+	return abiValues
+}
 
 // Chainlink Price Feed ABI - AnswerUpdated event
 const ChainlinkAggregatorABI = `[
@@ -65,7 +85,7 @@ func TestEventTriggerConditionalFiltering(t *testing.T) {
 		{
 			name: "Price above threshold should trigger",
 			priceCondition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "gt",
 				Value:     "200000000000", // $2000 with 8 decimals
 				FieldType: "int256",
@@ -77,7 +97,7 @@ func TestEventTriggerConditionalFiltering(t *testing.T) {
 		{
 			name: "Price below threshold should not trigger",
 			priceCondition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "gt",
 				Value:     "200000000000", // $2000 with 8 decimals
 				FieldType: "int256",
@@ -89,7 +109,7 @@ func TestEventTriggerConditionalFiltering(t *testing.T) {
 		{
 			name: "Exact price match should trigger",
 			priceCondition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "eq",
 				Value:     "200000000000", // $2000 with 8 decimals
 				FieldType: "int256",
@@ -101,7 +121,7 @@ func TestEventTriggerConditionalFiltering(t *testing.T) {
 		{
 			name: "Price drop below threshold",
 			priceCondition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "lt",
 				Value:     "180000000000", // $1800 with 8 decimals
 				FieldType: "int256",
@@ -125,7 +145,7 @@ func TestEventTriggerConditionalFiltering(t *testing.T) {
 						Values: []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"}, // AnswerUpdated signature
 					},
 				},
-				ContractAbi: ChainlinkAggregatorABI,
+				ContractAbi: convertJSONABIToProtobufValues(ChainlinkAggregatorABI),
 				Conditions:  []*avsproto.EventCondition{tc.priceCondition},
 			}
 
@@ -174,16 +194,16 @@ func TestEventTriggerMultipleConditions(t *testing.T) {
 				Values: []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"},
 			},
 		},
-		ContractAbi: ChainlinkAggregatorABI,
+		ContractAbi: convertJSONABIToProtobufValues(ChainlinkAggregatorABI),
 		Conditions: []*avsproto.EventCondition{
 			{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "gt",
 				Value:     "200000000000", // Price > $2000
 				FieldType: "int256",
 			},
 			{
-				FieldName: "roundId",
+				FieldName: "AnswerUpdated.roundId",
 				Operator:  "gt",
 				Value:     "10000", // Round > 10000
 				FieldType: "uint256",
@@ -272,10 +292,14 @@ func TestEventTriggerInvalidABI(t *testing.T) {
 				Values: []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"},
 			},
 		},
-		ContractAbi: "invalid json abi",
+		ContractAbi: func() []*structpb.Value {
+			// Create invalid ABI structure for testing error handling
+			invalidValue, _ := structpb.NewValue("invalid json abi")
+			return []*structpb.Value{invalidValue}
+		}(),
 		Conditions: []*avsproto.EventCondition{
 			{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "gt",
 				Value:     "200000000000",
 				FieldType: "int256",
@@ -378,7 +402,7 @@ func TestSignedIntegerConditions(t *testing.T) {
 			name:       "Positive value comparison",
 			fieldValue: big.NewInt(1000),
 			condition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "gt",
 				Value:     "500",
 				FieldType: "int256",
@@ -390,7 +414,7 @@ func TestSignedIntegerConditions(t *testing.T) {
 			name:       "Negative value comparison - greater than negative",
 			fieldValue: big.NewInt(-100),
 			condition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "gt",
 				Value:     "-200",
 				FieldType: "int256",
@@ -402,7 +426,7 @@ func TestSignedIntegerConditions(t *testing.T) {
 			name:       "Negative value comparison - less than positive",
 			fieldValue: big.NewInt(-100),
 			condition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "lt",
 				Value:     "50",
 				FieldType: "int256",
@@ -414,7 +438,7 @@ func TestSignedIntegerConditions(t *testing.T) {
 			name:       "Negative value equality",
 			fieldValue: big.NewInt(-12345),
 			condition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "eq",
 				Value:     "-12345",
 				FieldType: "int256",
@@ -426,7 +450,7 @@ func TestSignedIntegerConditions(t *testing.T) {
 			name:       "Large negative value (close to int256 min)",
 			fieldValue: new(big.Int).Neg(new(big.Int).Exp(big.NewInt(2), big.NewInt(255), nil)), // -2^255
 			condition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "lt",
 				Value:     "0",
 				FieldType: "int256",
@@ -438,7 +462,7 @@ func TestSignedIntegerConditions(t *testing.T) {
 			name:       "Zero comparison",
 			fieldValue: big.NewInt(0),
 			condition: &avsproto.EventCondition{
-				FieldName: "current",
+				FieldName: "AnswerUpdated.current",
 				Operator:  "eq",
 				Value:     "0",
 				FieldType: "int256",
@@ -461,7 +485,7 @@ func TestSignedIntegerConditions(t *testing.T) {
 						Values: []string{mockLog.Topics[0].Hex()}, // Use actual signature from mock log
 					},
 				},
-				ContractAbi: createSignedIntegerABI(),
+				ContractAbi: convertJSONABIToProtobufValues(createSignedIntegerABI()),
 				Conditions:  []*avsproto.EventCondition{tc.condition},
 			}
 
@@ -596,7 +620,7 @@ func createSignedIntegerEventLog(value *big.Int) types.Log {
 		},
 		Data:        []byte{},
 		BlockNumber: 12345,
-		TxHash:      common.HexToHash("0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef"),
+		TxHash:      common.HexToHash("0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef"),
 		Index:       0,
 	}
 }

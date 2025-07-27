@@ -11,6 +11,24 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// Test ABI data - mirrors real user input format (same as JavaScript SDK tests)
+const (
+	// Simple decimals function - what users actually provide
+	testDecimalsABI = `[{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"}]`
+
+	// Chainlink latestRoundData function - what users actually provide
+	testLatestRoundDataABI = `[{"inputs":[],"name":"latestRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`
+
+	// Combined Chainlink ABI - what users actually provide
+	testChainlinkABI = `[{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"latestRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}]`
+
+	// ERC20 transfer function - what users actually provide
+	testTransferABI = `[{"inputs":[{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"transfer","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}]`
+
+	// Simple test function - what users actually provide
+	testSimpleFunctionABI = `[{"inputs":[],"name":"test","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
+)
+
 // TestVM_ContractRead_BasicExecution tests basic contract reading functionality
 func TestVM_ContractRead_BasicExecution(t *testing.T) {
 	SetRpc(testutil.GetTestRPCURL())
@@ -24,10 +42,34 @@ func TestVM_ContractRead_BasicExecution(t *testing.T) {
 	vm.smartWalletConfig = testutil.GetTestSmartWalletConfig()
 
 	// Test reading decimals from ETH/USD price feed
+
+	// Define ABI as proper Go data structure (much cleaner!)
+	decimalsABI := []interface{}{
+		map[string]interface{}{
+			"inputs": []interface{}{},
+			"name":   "decimals",
+			"outputs": []interface{}{
+				map[string]interface{}{
+					"internalType": "uint8",
+					"name":         "",
+					"type":         "uint8",
+				},
+			},
+			"stateMutability": "view",
+			"type":            "function",
+		},
+	}
+
+	// Convert to protobuf Values (only once, cleanly)
+	decimalsABIValues, err := ConvertInterfaceArrayToProtobufValues(decimalsABI)
+	if err != nil {
+		t.Fatalf("Failed to convert ABI: %v", err)
+	}
+
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", // Chainlink ETH/USD
-			ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+			ContractAbi:     decimalsABIValues,
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:   "0x313ce567", // decimals()
@@ -59,10 +101,13 @@ func TestVM_ContractRead_DecimalFormatting(t *testing.T) {
 	vm.smartWalletConfig = testutil.GetTestSmartWalletConfig()
 
 	// Test reading price data with decimal formatting
+
+	// Use the global chainlinkABI definition for consistency
+
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", // Chainlink ETH/USD
-			ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"latestRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+			ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:      "0x313ce567", // decimals()
@@ -102,21 +147,36 @@ func TestVM_ContractRead_DecimalFormatting(t *testing.T) {
 				}
 			}
 
-			t.Logf("Contract read results count: %d", len(results))
+			// Validate we have the expected 2 results (decimals + latestRoundData)
+			assert.Equal(t, 2, len(results), "Expected 2 method results (decimals + latestRoundData)")
 
-			// We should have 1 result (decimals() call is skipped, only latestRoundData() result)
-			if len(results) > 0 {
-				if resultMap, ok := results[0].(map[string]interface{}); ok {
-					t.Logf("Method result - Success: %v, Method: %s",
-						resultMap["success"], resultMap["methodName"])
+			if len(results) >= 2 {
+				// Validate first result (decimals)
+				decimalsResult, ok := results[0].(map[string]interface{})
+				assert.True(t, ok, "First result should be a map")
+				assert.Equal(t, "decimals", decimalsResult["methodName"])
+				assert.Equal(t, true, decimalsResult["success"])
 
-					// Log data fields if available
-					if data, ok := resultMap["data"].(map[string]interface{}); ok {
-						t.Logf("  Data fields: %d", len(data))
-						for fieldName, fieldValue := range data {
-							t.Logf("  Field: %s = %v", fieldName, fieldValue)
+				// Validate second result (latestRoundData)
+				roundDataResult, ok := results[1].(map[string]interface{})
+				assert.True(t, ok, "Second result should be a map")
+				assert.Equal(t, "latestRoundData", roundDataResult["methodName"])
+				assert.Equal(t, true, roundDataResult["success"])
+
+				// Validate latestRoundData has expected fields in value
+				if value, ok := roundDataResult["value"]; ok {
+					if valueMap, ok := value.(map[string]interface{}); ok {
+						expectedFields := []string{"roundId", "answer", "startedAt", "updatedAt", "answeredInRound"}
+						for _, field := range expectedFields {
+							assert.Contains(t, valueMap, field, "latestRoundData should contain field: %s", field)
 						}
+						// Validate we have exactly the expected number of fields
+						assert.Equal(t, len(expectedFields), len(valueMap), "latestRoundData should have exactly %d fields", len(expectedFields))
+					} else {
+						t.Errorf("latestRoundData value should be a map, got %T", value)
 					}
+				} else {
+					t.Error("latestRoundData result should have a value field")
 				}
 			}
 		}
@@ -139,7 +199,7 @@ func TestVM_ContractRead_LatestRoundData(t *testing.T) {
 	node := &avsproto.ContractReadNode{
 		Config: &avsproto.ContractReadNode_Config{
 			ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
-			ContractAbi:     "[{\"inputs\":[],\"name\":\"latestRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+			ContractAbi:     MustConvertJSONABIToProtobufValues(testLatestRoundDataABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
 					CallData:   "0xfeaf968c", // This is decimals, but for demo purposes
@@ -175,7 +235,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
 					ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
-					ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+					ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
 							CallData:   "0xfeaf968c",
@@ -205,7 +265,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
 					ContractAddress: "invalid-address",
-					ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+					ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
 							CallData:   "0xfeaf968c",
@@ -246,7 +306,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
 					ContractAddress: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419", // Valid Chainlink contract
-					ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"latestRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+					ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
 							CallData:   "0x313ce567",      // decimals() function selector
@@ -275,7 +335,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
 					ContractAddress: "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c", // Client's contract address
-					ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"description\",\"outputs\":[{\"internalType\":\"string\",\"name\":\"\",\"type\":\"string\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"version\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint80\",\"name\":\"_roundId\",\"type\":\"uint80\"}],\"name\":\"getRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"latestRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+					ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
 							CallData:   "0x313ce567",      // decimals() function selector - this is correct for decimals
@@ -304,7 +364,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractReadNode{
 				Config: &avsproto.ContractReadNode_Config{
 					ContractAddress: "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c", // Address that returns empty data
-					ContractAbi:     "[{\"inputs\":[],\"name\":\"decimals\",\"outputs\":[{\"internalType\":\"uint8\",\"name\":\"\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"latestRoundData\",\"outputs\":[{\"internalType\":\"uint80\",\"name\":\"roundId\",\"type\":\"uint80\"},{\"internalType\":\"int256\",\"name\":\"answer\",\"type\":\"int256\"},{\"internalType\":\"uint256\",\"name\":\"startedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"updatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint80\",\"name\":\"answeredInRound\",\"type\":\"uint80\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+					ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
 							CallData:   "0xfeaf968c",      // latestRoundData() function selector - correct
@@ -362,7 +422,7 @@ func TestVM_ContractWrite_BasicExecution(t *testing.T) {
 	node := &avsproto.ContractWriteNode{
 		Config: &avsproto.ContractWriteNode_Config{
 			ContractAddress: "0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E", // Test address
-			ContractAbi:     "[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"to\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"transfer\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+			ContractAbi:     MustConvertJSONABIToProtobufValues(testTransferABI),
 			MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 				{
 					CallData:   "0xa9059cbb", // transfer function selector
@@ -434,7 +494,7 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
 					ContractAddress: "0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E",
-					ContractAbi:     "[{\"inputs\":[],\"name\":\"test\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+					ContractAbi:     MustConvertJSONABIToProtobufValues(testSimpleFunctionABI),
 					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 						{
 							CallData:   "0xa9059cbb",
@@ -463,7 +523,7 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 			node: &avsproto.ContractWriteNode{
 				Config: &avsproto.ContractWriteNode_Config{
 					ContractAddress: "invalid-address",
-					ContractAbi:     "[{\"inputs\":[],\"name\":\"test\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+					ContractAbi:     MustConvertJSONABIToProtobufValues(testSimpleFunctionABI),
 					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 						{
 							CallData:   "0xa9059cbb",
