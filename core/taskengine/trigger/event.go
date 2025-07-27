@@ -1,6 +1,7 @@
 package trigger
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
@@ -18,7 +19,37 @@ import (
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/accounts/abi"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// parseABIOptimized efficiently parses ABI from protobuf Values without string conversion
+func parseABIOptimized(abiValues []*structpb.Value) (*abi.ABI, error) {
+	if len(abiValues) == 0 {
+		return nil, fmt.Errorf("empty ABI")
+	}
+
+	// Convert protobuf Values to JSON bytes directly
+	abiArray := make([]interface{}, len(abiValues))
+	for i, value := range abiValues {
+		abiArray[i] = value.AsInterface()
+	}
+
+	// Marshal to JSON bytes
+	jsonBytes, err := protojson.Marshal(&structpb.ListValue{Values: abiValues})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal ABI to JSON: %v", err)
+	}
+
+	// Parse ABI directly from bytes using bytes.NewReader
+	reader := bytes.NewReader(jsonBytes)
+	parsedABI, err := abi.JSON(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ABI: %v", err)
+	}
+
+	return &parsedABI, nil
+}
 
 var (
 // Legacy whitelist removed - no longer needed since we use dynamic filtering
@@ -202,25 +233,21 @@ func (t *EventTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) e
 	for i, query := range queries {
 		conditions := query.GetConditions()
 		if len(conditions) > 0 {
-			abiString := query.GetContractAbi()
-			if abiString != "" {
-				if parsedABI, err := abi.JSON(strings.NewReader(abiString)); err != nil {
+			abiValues := query.GetContractAbi()
+			// Convert contractAbi from protobuf Value array using optimized shared function
+			if len(abiValues) > 0 {
+				if parsedABI, err := parseABIOptimized(abiValues); err != nil {
 					t.logger.Warn("🚫 Failed to pre-parse ABI for conditional filtering - will skip conditions",
 						"task_id", taskID,
 						"query_index", i,
 						"error", err)
 				} else {
-					eventData.ParsedABIs[i] = &parsedABI
-					t.logger.Debug("✅ Pre-parsed ABI for conditional filtering",
+					eventData.ParsedABIs[i] = parsedABI
+					t.logger.Debug("✅ Pre-parsed ABI for conditional filtering using shared optimized function",
 						"task_id", taskID,
 						"query_index", i,
-						"conditions_count", len(conditions))
+						"method_count", len(parsedABI.Methods))
 				}
-			} else {
-				t.logger.Warn("🚫 Query has conditions but no contract ABI provided",
-					"task_id", taskID,
-					"query_index", i,
-					"conditions_count", len(conditions))
 			}
 		}
 	}
@@ -818,19 +845,19 @@ func (t *EventTrigger) evaluateEventConditionsWithEventData(log types.Log, query
 		t.logger.Debug("🚀 Using cached ABI for conditional filtering", "query_index", queryIndex)
 	} else {
 		// Fallback: parse ABI on-demand (this should rarely happen with the new caching)
-		abiString := query.GetContractAbi()
-		if abiString == "" {
+		abiValues := query.GetContractAbi()
+		if len(abiValues) > 0 {
+			if parsedABI, err := parseABIOptimized(abiValues); err != nil {
+				t.logger.Error("❌ Failed to parse contract ABI for conditional filtering", "error", err)
+				return false
+			} else {
+				contractABI = parsedABI
+				t.logger.Debug("⚠️ Parsed ABI on-demand using shared optimized function (consider pre-parsing for better performance)", "query_index", queryIndex)
+			}
+		} else {
 			t.logger.Warn("🚫 Conditional filtering requires contract ABI but none provided")
 			return false
 		}
-
-		parsedABI, err := abi.JSON(strings.NewReader(abiString))
-		if err != nil {
-			t.logger.Error("❌ Failed to parse contract ABI for conditional filtering", "error", err)
-			return false
-		}
-		contractABI = &parsedABI
-		t.logger.Debug("⚠️ Parsed ABI on-demand (consider pre-parsing for better performance)", "query_index", queryIndex)
 	}
 
 	return t.evaluateEventConditionsCommon(log, query, conditions, contractABI, queryIndex)
@@ -845,19 +872,19 @@ func (t *EventTrigger) evaluateEventConditions(log types.Log, query *avsproto.Ev
 		t.logger.Debug("🚀 Using cached ABI for conditional filtering", "query_index", queryIndex)
 	} else {
 		// Fallback: parse ABI on-demand (this should rarely happen with the new caching)
-		abiString := query.GetContractAbi()
-		if abiString == "" {
+		abiValues := query.GetContractAbi()
+		if len(abiValues) > 0 {
+			if parsedABI, err := parseABIOptimized(abiValues); err != nil {
+				t.logger.Error("❌ Failed to parse contract ABI for conditional filtering", "error", err)
+				return false
+			} else {
+				contractABI = parsedABI
+				t.logger.Debug("⚠️ Parsed ABI on-demand using shared optimized function (consider pre-parsing for better performance)", "query_index", queryIndex)
+			}
+		} else {
 			t.logger.Warn("🚫 Conditional filtering requires contract ABI but none provided")
 			return false
 		}
-
-		parsedABI, err := abi.JSON(strings.NewReader(abiString))
-		if err != nil {
-			t.logger.Error("❌ Failed to parse contract ABI for conditional filtering", "error", err)
-			return false
-		}
-		contractABI = &parsedABI
-		t.logger.Debug("⚠️ Parsed ABI on-demand (consider pre-parsing for better performance)", "query_index", queryIndex)
 	}
 
 	return t.evaluateEventConditionsCommon(log, query, conditions, contractABI, queryIndex)
@@ -948,11 +975,43 @@ func (t *EventTrigger) evaluateEventConditionsCommon(log types.Log, query *avspr
 
 // evaluateCondition evaluates a single condition against the decoded field data
 func (t *EventTrigger) evaluateCondition(fieldMap map[string]interface{}, condition *avsproto.EventCondition, eventName string) bool {
-	fieldName := condition.GetFieldName()
-	fieldValue, exists := fieldMap[fieldName]
+	conditionFieldName := condition.GetFieldName()
+
+	// Parse the eventName.fieldName format (same as applyToFields logic)
+	var targetEventName, targetFieldName string
+	parts := strings.Split(conditionFieldName, ".")
+
+	if len(parts) == 1 {
+		// Simple format: just eventName (for single field events or when applying to all fields)
+		targetEventName = parts[0]
+		targetFieldName = parts[0] // Use event name as field name fallback
+	} else if len(parts) == 2 {
+		// Dot notation format: eventName.fieldName
+		targetEventName = parts[0]
+		targetFieldName = parts[1]
+	} else {
+		t.logger.Warn("🚫 Invalid condition fieldName format",
+			"fieldName", conditionFieldName,
+			"expected", "eventName or eventName.fieldName",
+			"parts", parts)
+		return false
+	}
+
+	// Check if this condition targets the current event
+	if targetEventName != eventName {
+		t.logger.Debug("🔄 Skipping condition for different event",
+			"conditionTargetEvent", targetEventName,
+			"currentEvent", eventName,
+			"conditionField", conditionFieldName)
+		return true // Skip conditions that don't target this event (treat as pass)
+	}
+
+	// Look up the actual field value using the parsed field name
+	fieldValue, exists := fieldMap[targetFieldName]
 	if !exists {
 		t.logger.Warn("🚫 Field not found in decoded event data",
-			"field", fieldName,
+			"targetField", targetFieldName,
+			"conditionField", conditionFieldName,
 			"event", eventName,
 			"available_fields", getMapKeys(fieldMap))
 		return false
@@ -962,8 +1021,11 @@ func (t *EventTrigger) evaluateCondition(fieldMap map[string]interface{}, condit
 	operator := condition.GetOperator()
 	expectedValue := condition.GetValue()
 
-	t.logger.Debug("🔍 Evaluating condition",
-		"field", fieldName,
+	t.logger.Debug("🔍 Evaluating condition with eventName.fieldName pattern",
+		"conditionField", conditionFieldName,
+		"targetEvent", targetEventName,
+		"targetField", targetFieldName,
+		"currentEvent", eventName,
 		"type", fieldType,
 		"operator", operator,
 		"field_value", fieldValue,
@@ -974,6 +1036,9 @@ func (t *EventTrigger) evaluateCondition(fieldMap map[string]interface{}, condit
 		return t.evaluateUintCondition(fieldValue, operator, expectedValue)
 	case "int256", "int128", "int64", "int32", "int16", "int8":
 		return t.evaluateIntCondition(fieldValue, operator, expectedValue)
+	case "decimal":
+		// Handle decimal type (formatted values) - treat as int256 for comparison
+		return t.evaluateIntCondition(fieldValue, operator, expectedValue)
 	case "address":
 		return t.evaluateAddressCondition(fieldValue, operator, expectedValue)
 	case "bool":
@@ -983,7 +1048,8 @@ func (t *EventTrigger) evaluateCondition(fieldMap map[string]interface{}, condit
 	default:
 		t.logger.Warn("🚫 Unsupported field type for condition evaluation",
 			"type", fieldType,
-			"field", fieldName)
+			"field", targetFieldName,
+			"conditionField", conditionFieldName)
 		return false
 	}
 }

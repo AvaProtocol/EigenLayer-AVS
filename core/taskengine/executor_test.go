@@ -124,7 +124,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 	}
 
 	outputData := gow.ValueToMap(execution.Steps[2].GetRestApi().Data)
-	bodyData := outputData["body"].(map[string]interface{})
+	bodyData := outputData["data"].(map[string]interface{})
 	if bodyData["message"].(string) != "I'm hit" {
 		t.Errorf("expect message to be 'I'm hit' but got %s", bodyData["message"])
 	}

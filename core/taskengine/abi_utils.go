@@ -82,11 +82,7 @@ func (c *ABIValueConverter) ConvertABIValueToInterface(value interface{}, abiTyp
 			// Check if this field should be formatted with decimals
 			shouldFormat := c.ShouldFormatField(fieldName)
 
-			// Always store raw value for the "value" field (for Transfer events)
-			// OR for any field that should be formatted with decimals
-			if fieldName == "value" || shouldFormat {
-				c.rawFieldsMetadata[fieldName+"Raw"] = bigInt.String()
-			}
+			// No longer storing raw values as separate fields
 
 			if shouldFormat {
 				formattedValue := c.FormatWithDecimals(bigInt, c.decimalsValue)
@@ -173,11 +169,7 @@ func (c *ABIValueConverter) ConvertABIValueToString(value interface{}, abiType a
 			// Check if this field should be formatted with decimals
 			shouldFormat := c.ShouldFormatField(fieldName)
 
-			// Always store raw value for the "value" field (for Transfer events)
-			// OR for any field that should be formatted with decimals
-			if fieldName == "value" || shouldFormat {
-				c.rawFieldsMetadata[fieldName+"Raw"] = bigInt.String()
-			}
+			// No longer storing raw values as separate fields
 
 			if shouldFormat {
 				formattedValue := c.FormatWithDecimals(bigInt, c.decimalsValue)
