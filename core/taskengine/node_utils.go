@@ -14,20 +14,24 @@ func buildTriggerVariableData(trigger *avsproto.TaskTrigger, triggerDataMap map[
 
 	// For manual triggers, handle the JSON data directly
 	if trigger != nil && trigger.GetType() == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
-		// For manual triggers, preserve the full structure (data, headers, pathParams) for template access
-		// This allows templates to access ManualTrigger.data.field, ManualTrigger.headers.field, etc.
-		// Note: The trigger step output will still only contain the data field (handled separately in step creation)
+		// For manual triggers, preserve the proper structure with data at top level and input nested
+		// This allows templates to access ManualTrigger.data and ManualTrigger.input.headers, etc.
 
-		// Include all fields from triggerDataMap (data, headers, pathParams)
-		for k, v := range triggerDataMap {
-			triggerVarData[k] = v
+		// Put main data at top level for direct access
+		if data, exists := triggerDataMap["data"]; exists {
+			triggerVarData["data"] = data
 		}
 
-		// Also include any input data if available
-		for k, v := range triggerInputData {
-			if _, exists := triggerVarData[k]; !exists {
-				triggerVarData[k] = v
+		// Include input data structure if available
+		if triggerInputData != nil {
+			triggerVarData["input"] = triggerInputData
+		} else {
+			// If no input data provided, create input structure from triggerDataMap
+			inputData := map[string]interface{}{}
+			for k, v := range triggerDataMap {
+				inputData[k] = v
 			}
+			triggerVarData["input"] = inputData
 		}
 	} else {
 		// For all other trigger types, put all output data under the .data field

@@ -147,6 +147,7 @@ func (c *CommonProcessor) SetInputVarForStep(stepID string, inputData any) {
 	c.vm.mu.Lock()
 	defer c.vm.mu.Unlock()
 	nodeNameVar := c.vm.getNodeNameAsVarLocked(stepID)
+
 	if c.vm.vars == nil {
 		c.vm.vars = make(map[string]any)
 	}
@@ -1899,6 +1900,12 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 				continue
 			}
 
+			// Skip iteration variables from inputsList - they are temporary and shouldn't appear
+			// as available inputs for subsequent steps
+			if strings.Contains(k, "_iter_") {
+				continue
+			}
+
 			// Skip system variables that shouldn't appear as inputs
 			if k == APContextVarName {
 				inputKeys = append(inputKeys, APContextConfigVarsPath)
@@ -1919,16 +1926,6 @@ func (v *VM) collectInputKeysForLog(excludeStepID string) []string {
 					if _, hasInput := valueMap["input"]; hasInput {
 						inputKey := fmt.Sprintf("%s.input", k)
 						inputKeys = append(inputKeys, inputKey)
-					}
-					// Check for .headers field (for ManualTrigger template access)
-					if _, hasHeaders := valueMap["headers"]; hasHeaders {
-						headersKey := fmt.Sprintf("%s.headers", k)
-						inputKeys = append(inputKeys, headersKey)
-					}
-					// Check for .pathParams field (for ManualTrigger template access)
-					if _, hasPathParams := valueMap["pathParams"]; hasPathParams {
-						pathParamsKey := fmt.Sprintf("%s.pathParams", k)
-						inputKeys = append(inputKeys, pathParamsKey)
 					}
 
 					// Special case: ManualTrigger variables may have flattened data (no .data field)
@@ -3618,11 +3615,15 @@ func (v *VM) executeNodeDirect(node *avsproto.TaskNode, stepID string) (*avsprot
 		return nil, fmt.Errorf("executeNodeDirect called with nil node")
 	}
 
-	// Extract and set input data for this node (making it available as node_name.input)
-	inputData := ExtractNodeConfiguration(node)
-	if inputData != nil {
-		processor := &CommonProcessor{vm: v}
-		processor.SetInputVarForStep(stepID, inputData)
+	// For loop iterations, don't store node configuration as input variables in global VM vars
+	// This prevents iteration-specific variables from polluting the inputsList for subsequent steps
+	if !strings.Contains(stepID, "_iter_") {
+		// Extract and set input data for this node (making it available as node_name.input)
+		inputData := ExtractNodeConfiguration(node)
+		if inputData != nil {
+			processor := &CommonProcessor{vm: v}
+			processor.SetInputVarForStep(stepID, inputData)
+		}
 	}
 
 	var executionLogForNode *avsproto.Execution_Step

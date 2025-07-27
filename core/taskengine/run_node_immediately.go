@@ -1358,11 +1358,16 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 		n.logger.Info("ManualTrigger executed with pathParams", "pathParamsType", fmt.Sprintf("%T", pathParams))
 	}
 
-	// Return result with processed headers and pathParams
+	// Return result with proper nested structure
+	// The main data should be at the top level for direct access
+	// The input structure should contain data, headers, and pathParams for template access
 	result := map[string]interface{}{
-		"data":       triggerConfig["data"],
-		"headers":    headers,
-		"pathParams": pathParams,
+		"data": triggerConfig["data"],
+		"input": map[string]interface{}{
+			"data":       triggerConfig["data"],
+			"headers":    headers,
+			"pathParams": pathParams,
+		},
 	}
 
 	return result, nil
