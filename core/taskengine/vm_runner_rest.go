@@ -277,17 +277,13 @@ func (m *MockHTTPExecutor) handleIPEndpoint(w http.ResponseWriter, requestPath s
 
 // handleDefaultResponse handles the default mock API response
 func (m *MockHTTPExecutor) handleDefaultResponse(w http.ResponseWriter, url, method, body string, headers map[string]string) {
+	// Return the API response data wrapped in a map structure, compatible with httpbin.org format
 	response := map[string]interface{}{
-		"success": true,
-		"message": "Mock API response from EigenLayer-AVS",
-		"data": map[string]interface{}{
-			"args":    parseQueryParams(url),
-			"body":    body,
-			"headers": headers,
-			"json":    parseJSONBody(body),
-			"method":  method,
-			"url":     url,
-		},
+		"args":    parseQueryParams(url),
+		"data":    parseJSONBody(body), // data is the parsed JSON body (not raw string)
+		"headers": headers,
+		"method":  method,
+		"url":     url,
 	}
 	m.writeJSONResponse(w, response, http.StatusOK)
 }
@@ -606,38 +602,33 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 	logBuilder.WriteString(fmt.Sprintf("Response headers: %v\n", response.Header()))
 
-	// Parse response
+	// Parse response and transform to standard format
 	var responseData map[string]interface{}
 
 	// Convert headers to a protobuf-compatible format
 	convertedHeaders := convertStringSliceMapToProtobufCompatible(response.Header())
 
-	// Try to parse as JSON first
+	// Parse response body
+	var bodyData interface{}
 	bodyStr := string(response.Body())
 	if bodyStr != "" {
 		var jsonData interface{}
 		if err := json.Unmarshal(response.Body(), &jsonData); err == nil {
-			// Successfully parsed as JSON
-			responseData = map[string]interface{}{
-				"body":       jsonData,
-				"headers":    convertedHeaders,
-				"statusCode": response.StatusCode(),
-			}
+			bodyData = jsonData
 		} else {
-			// Not JSON, treat as plain text
-			responseData = map[string]interface{}{
-				"body":       bodyStr,
-				"headers":    convertedHeaders,
-				"statusCode": response.StatusCode(),
-			}
+			bodyData = bodyStr
 		}
 	} else {
-		// Empty body
-		responseData = map[string]interface{}{
-			"body":       "",
-			"headers":    convertedHeaders,
-			"statusCode": response.StatusCode(),
-		}
+		bodyData = ""
+	}
+
+	// Create standard format response
+	responseData = map[string]interface{}{
+		"status":     response.StatusCode(),
+		"statusText": getStatusText(response.StatusCode()),
+		"url":        url,
+		"headers":    convertedHeaders,
+		"data":       bodyData,
 	}
 
 	// Log HTTP error status codes (4xx, 5xx) but don't treat them as execution failures
@@ -724,13 +715,13 @@ func (r *RestProcessor) processResponse(response *resty.Response) map[string]int
 		// Try to parse as JSON first
 		var jsonData interface{}
 		if err := json.Unmarshal(responseBody, &jsonData); err == nil {
-			responseData["body"] = jsonData
+			responseData["data"] = jsonData
 		} else {
 			// Fallback to string if not valid JSON
-			responseData["body"] = string(responseBody)
+			responseData["data"] = string(responseBody)
 		}
 	} else {
-		responseData["body"] = ""
+		responseData["data"] = ""
 	}
 
 	return responseData

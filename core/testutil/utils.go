@@ -257,7 +257,7 @@ func RestTask() *avsproto.CreateTaskReq {
 		TaskType: &avsproto.TaskNode_RestApi{
 			RestApi: &avsproto.RestAPINode{
 				Config: &avsproto.RestAPINode_Config{
-					Url:    "https://httpbin.org/post",
+					Url:    "https://mock-api.ap-aggregator.local/post", // Use MockAPIEndpoint instead of httpbin.org
 					Method: "POST",
 					Body:   "test=data",
 				},
