@@ -12,6 +12,11 @@ import (
 func buildTriggerVariableData(trigger *avsproto.TaskTrigger, triggerDataMap map[string]interface{}, triggerInputData map[string]interface{}) map[string]interface{} {
 	triggerVarData := make(map[string]interface{})
 
+	// Check if trigger is nil to avoid runtime panic
+	if trigger == nil {
+		return triggerVarData
+	}
+
 	// For manual triggers, use the actual user data from triggerInputData
 	if trigger.GetType() == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
 		if inputData, exists := triggerInputData["data"]; exists {
@@ -31,12 +36,12 @@ func buildTriggerVariableData(trigger *avsproto.TaskTrigger, triggerDataMap map[
 
 // updateTriggerVariableInVM updates the trigger variable in the VM with proper mutex handling
 // This function consolidates the common logic used in task execution and simulation
-func updateTriggerVariableInVM(vm *VM, triggerVarName string, triggerVarData map[string]any) {
+func updateTriggerVariableInVM(vm *VM, triggerVarName string, triggerVarData map[string]interface{}) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
 	existingTriggerVar := vm.vars[triggerVarName]
-	if existingMap, ok := existingTriggerVar.(map[string]any); ok {
+	if existingMap, ok := existingTriggerVar.(map[string]interface{}); ok {
 		// Merge with existing trigger variable data
 		for key, value := range triggerVarData {
 			existingMap[key] = value
