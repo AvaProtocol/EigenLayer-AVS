@@ -9,44 +9,21 @@ import (
 
 // buildTriggerVariableData creates the proper trigger variable structure for JavaScript VM access
 // This function consolidates the common logic used in VM creation, task execution, and simulation
-func buildTriggerVariableData(trigger *avsproto.TaskTrigger, triggerDataMap map[string]interface{}, triggerInputData map[string]interface{}) map[string]any {
-	triggerVarData := map[string]any{}
+func buildTriggerVariableData(trigger *avsproto.TaskTrigger, triggerDataMap map[string]interface{}, triggerInputData map[string]interface{}) map[string]interface{} {
+	triggerVarData := make(map[string]interface{})
 
-	// For manual triggers, handle the JSON data directly
-	if trigger != nil && trigger.GetType() == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
-		// For manual triggers, preserve the proper structure with data at top level and input nested
-		// This allows templates to access ManualTrigger.data and ManualTrigger.input.headers, etc.
-
-		// Put main data at top level for direct access
-		if data, exists := triggerDataMap["data"]; exists {
-			triggerVarData["data"] = data
+	// For manual triggers, use the actual user data from triggerInputData
+	if trigger.GetType() == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
+		if inputData, exists := triggerInputData["data"]; exists {
+			triggerVarData["data"] = inputData
 		}
-
-		// Include input data structure if available
+		triggerVarData["input"] = triggerInputData
+	} else {
+		// For other trigger types, use the trigger output data
+		triggerVarData["data"] = triggerDataMap
 		if triggerInputData != nil {
 			triggerVarData["input"] = triggerInputData
-		} else {
-			// If no input data provided, create input structure from triggerDataMap
-			inputData := map[string]interface{}{}
-			for k, v := range triggerDataMap {
-				inputData[k] = v
-			}
-			triggerVarData["input"] = inputData
 		}
-	} else {
-		// For all other trigger types, put all output data under the .data field
-		// This ensures consistent access pattern: triggerName.data.field
-		if len(triggerDataMap) > 0 {
-			triggerVarData["data"] = triggerDataMap
-		} else {
-			// Handle the case where triggers have no data to prevent template resolution issues
-			triggerVarData["data"] = nil
-		}
-	}
-
-	// Add trigger input data if available
-	if triggerInputData != nil {
-		triggerVarData["input"] = triggerInputData
 	}
 
 	return triggerVarData
@@ -56,6 +33,8 @@ func buildTriggerVariableData(trigger *avsproto.TaskTrigger, triggerDataMap map[
 // This function consolidates the common logic used in task execution and simulation
 func updateTriggerVariableInVM(vm *VM, triggerVarName string, triggerVarData map[string]any) {
 	vm.mu.Lock()
+	defer vm.mu.Unlock()
+
 	existingTriggerVar := vm.vars[triggerVarName]
 	if existingMap, ok := existingTriggerVar.(map[string]any); ok {
 		// Merge with existing trigger variable data
@@ -67,7 +46,6 @@ func updateTriggerVariableInVM(vm *VM, triggerVarName string, triggerVarData map
 		// Create new trigger variable
 		vm.vars[triggerVarName] = triggerVarData
 	}
-	vm.mu.Unlock()
 }
 
 // createNodeExecutionStep creates a standardized execution step for node execution
