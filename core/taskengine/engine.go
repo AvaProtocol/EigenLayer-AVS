@@ -1707,7 +1707,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 	// Create base response with always-available fields
 	response := &avsproto.TriggerTaskResp{
 		ExecutionId: queueTaskData.ExecutionID,
-		WorkflowId:  payload.TaskId, // taskId is the workflowId
+		WorkflowId:  payload.TaskId, // taskId and workflowId refer to the same entity. Consider renaming for consistency.
 	}
 
 	if payload.IsBlocking {
