@@ -126,7 +126,7 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 			Nodes    []*OperatorNode
 		}{
 			Version:  version.Get(),
-			Revision: version.Commit(),
+			Revision: version.GetRevision(),
 			Nodes:    agg.operatorPool.GetAll(),
 		}
 		var buf bytes.Buffer
