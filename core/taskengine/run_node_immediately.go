@@ -1823,18 +1823,13 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	case NodeTypeContractRead:
 		// For contract read nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
 		contractReadOutput := &avsproto.ContractReadNode_Output{}
-		// Debug: Log the result map contents
-		log.Printf("DEBUG ContractRead main response: result=%+v", result)
 		if result != nil && len(result) > 0 {
-			log.Printf("DEBUG ContractRead main response: result keys=%v", getMapKeys(result))
 			// Extract data field (flattened clean data)
 			if dataInterface, hasData := result["data"]; hasData {
-				log.Printf("DEBUG ContractRead main response: Found data field")
 				if resultsValue, err := structpb.NewValue(dataInterface); err == nil {
 					contractReadOutput.Data = resultsValue
 				}
 			} else {
-				log.Printf("DEBUG ContractRead main response: No data field, creating clean result")
 				// If no explicit data field, use the flattened result object (excluding metadata)
 				cleanResult := make(map[string]interface{})
 				for k, v := range result {
@@ -1851,29 +1846,12 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 			// Extract metadata field (detailed method information)
 			if metadataInterface, hasMetadata := result["metadata"]; hasMetadata {
-				log.Printf("DEBUG ContractRead main response: Found metadata field")
 				if metadataValue, err := structpb.NewValue(metadataInterface); err == nil {
 					contractReadOutput.Metadata = metadataValue
-					// DIRECT APPROACH: Also set top-level metadata immediately
-					resp.Metadata = metadataValue
-				}
-			} else {
-				log.Printf("DEBUG ContractRead main response: No metadata field found")
-				// DIRECT APPROACH: Set test metadata to verify this path is working
-				testMetadata := []interface{}{
-					map[string]interface{}{
-						"test":   "direct_metadata_from_switch_case",
-						"source": "ContractRead_switch_case",
-					},
-				}
-				if metadataValue, err := structpb.NewValue(testMetadata); err == nil {
-					contractReadOutput.Metadata = metadataValue
-					resp.Metadata = metadataValue
 				}
 			}
-		} else {
-			log.Printf("DEBUG ContractRead main response: result is nil or empty")
 		}
+
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractRead{
 			ContractRead: contractReadOutput,
 		}
@@ -2086,9 +2064,6 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			RestApi: &avsproto.RestAPINode_Output{},
 		}
 	}
-
-	// DEBUG: Always print this to verify logging is working
-	log.Printf("DEBUG: About to check for ContractRead metadata extraction. NodeType=%s, result != nil: %v", nodeTypeStr, result != nil)
 
 	// Extract top-level metadata for ContractRead nodes (following event trigger pattern)
 	if nodeTypeStr == NodeTypeContractRead {
