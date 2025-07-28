@@ -1704,6 +1704,12 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 		return nil, err
 	}
 
+	// Create base response with always-available fields
+	response := &avsproto.TriggerTaskResp{
+		ExecutionId: queueTaskData.ExecutionID,
+		WorkflowId:  payload.TaskId, // taskId and workflowId refer to the same entity. Consider renaming for consistency.
+	}
+
 	if payload.IsBlocking {
 		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger)
 		execution, runErr := executor.RunTask(task, &queueTaskData)
@@ -1723,11 +1729,21 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 		}
 
 		if execution != nil {
-			return &avsproto.TriggerTaskResp{
-				ExecutionId: queueTaskData.ExecutionID,
-				Status:      avsproto.ExecutionStatus_EXECUTION_STATUS_COMPLETED,
-			}, nil
+			// For blocking mode, populate all execution fields like getExecution response
+			response.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_COMPLETED
+			response.StartAt = &execution.StartAt
+			response.EndAt = &execution.EndAt
+			response.Success = &execution.Success
+			if execution.Error != "" {
+				response.Error = &execution.Error
+			}
+			response.Steps = execution.Steps
+			return response, nil
 		}
+	} else {
+		// For non-blocking mode, only set startAt (execution has started)
+		startTime := time.Now().UnixMilli()
+		response.StartAt = &startTime
 	}
 
 	// Add async execution
@@ -1743,10 +1759,8 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 	}
 	n.logger.Debug("enqueue task into the queue system", "task_id", payload.TaskId)
 
-	return &avsproto.TriggerTaskResp{
-		ExecutionId: queueTaskData.ExecutionID,
-		Status:      avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING,
-	}, nil
+	response.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING
+	return response, nil
 }
 
 // SimulateTask executes a complete task simulation by first running the trigger immediately,
