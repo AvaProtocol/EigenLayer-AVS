@@ -3586,17 +3586,12 @@ func buildTriggerDataMapFromProtobuf(triggerType avsproto.TriggerType, triggerOu
 
 	switch triggerType {
 	case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-		if manualOutput, ok := triggerOutputProto.(*avsproto.ManualTrigger_Output); ok {
-			if manualOutput.Data != nil {
-				triggerDataMap["data"] = manualOutput.Data.AsInterface()
-			} else {
-				triggerDataMap["data"] = nil
+		if manualOutput, ok := triggerOutputProto.(*avsproto.ManualTrigger_Output); ok && manualOutput.Data != nil {
+			triggerDataMap["data"] = manualOutput.Data.AsInterface()
+		} else if mapOutput, ok := triggerOutputProto.(map[string]interface{}); ok {
+			if dataField, exists := mapOutput["data"]; exists {
+				triggerDataMap["data"] = dataField
 			}
-			// Headers and PathParams are config-only fields, not included in output
-		} else {
-			// If triggerOutputProto is not the expected type (e.g., nil),
-			// set data to null to prevent template resolution issues
-			triggerDataMap["data"] = nil
 		}
 	case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
 		if timeOutput, ok := triggerOutputProto.(*avsproto.FixedTimeTrigger_Output); ok {
