@@ -21,5 +21,10 @@ var Migrations = []migrator.Migration{
 		Name:     "20250603-183034-token-metadata-fields",
 		Function: TokenMetadataFieldsMigration,
 	},
+	// Protobuf structure cleanup migration for v1.9.6 - removes/cancels workflows with incompatible data structures
+	{
+		Name:     "20250128-120000-protobuf-structure-cleanup",
+		Function: ProtobufStructureCleanupMigration,
+	},
 	// Each migration should be added to this list
 }
