@@ -410,7 +410,6 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 	// Create trigger data variable if we have a valid trigger name and trigger data
 	if triggerData != nil {
 		triggerNameStd, err := v.GetTriggerNameAsVar()
-		v.logger.Debug("VM Creation DEBUG", "triggerNameStd", triggerNameStd, "error", err)
 		if err == nil { // Proceed if trigger name is valid
 			var triggerDataMap map[string]interface{}
 
@@ -425,10 +424,6 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			} else {
 				// Use shared function to build trigger data map from protobuf trigger outputs
 				triggerDataMap = buildTriggerDataMapFromProtobuf(triggerData.Type, triggerData.Output, v.logger)
-
-				// Debug: Log what triggerData we received and what we built
-				v.logger.Debug("VM Creation DEBUG: triggerData received", "triggerData.Type", triggerData.Type, "triggerData.Output", fmt.Sprintf("%+v", triggerData.Output))
-				v.logger.Debug("VM Creation DEBUG: buildTriggerDataMapFromProtobuf result", "triggerDataMap", fmt.Sprintf("%+v", triggerDataMap))
 			}
 
 			// Create dual-access map to support both camelCase and snake_case field access
@@ -440,9 +435,6 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 
 			// Use shared function to build trigger variable data
 			triggerVarData := buildTriggerVariableData(task.Trigger, triggerDataMap, triggerInputData)
-
-			// Debug: Log the final trigger variable data
-			v.logger.Debug("VM Creation DEBUG: Final trigger variable", "triggerName", triggerNameStd, "triggerVarData", fmt.Sprintf("%+v", triggerVarData))
 
 			v.AddVar(triggerNameStd, triggerVarData)
 		}
@@ -1482,11 +1474,6 @@ func (v *VM) runEthTransfer(stepID string, node *avsproto.ETHTransferNode) (*avs
 
 // resolveVariableWithFallback tries to resolve a variable path
 func (v *VM) resolveVariableWithFallback(jsvm *goja.Runtime, varPath string, currentVars map[string]any) (interface{}, bool) {
-	// Debug: Log the variable path we're trying to resolve
-	if v.logger != nil {
-		v.logger.Debug("resolveVariableWithFallback DEBUG: Attempting to resolve", "varPath", varPath)
-	}
-
 	// SECURITY: Validate variable path using centralized security validation
 	validationResult := ValidateCodeInjection(varPath)
 	if !validationResult.Valid {
@@ -1498,32 +1485,16 @@ func (v *VM) resolveVariableWithFallback(jsvm *goja.Runtime, varPath string, cur
 
 	// Try to resolve the variable path
 	script := fmt.Sprintf(`(() => { try { return %s; } catch(e) { return undefined; } })()`, varPath)
-	if v.logger != nil {
-		v.logger.Debug("resolveVariableWithFallback DEBUG: JavaScript script", "script", script)
-	}
 
 	if evaluated, err := jsvm.RunString(script); err == nil {
 		exportedValue := evaluated.Export()
-		if v.logger != nil {
-			v.logger.Debug("resolveVariableWithFallback DEBUG: JavaScript evaluation result", "exportedValue", exportedValue, "type", fmt.Sprintf("%T", exportedValue))
-		}
 
 		// Check if we got a real value (not undefined)
 		if exportedValue != nil && fmt.Sprintf("%v", exportedValue) != "undefined" {
-			if v.logger != nil {
-				v.logger.Debug("resolveVariableWithFallback DEBUG: Resolution successful", "varPath", varPath, "result", exportedValue)
-			}
 			return exportedValue, true
-		}
-	} else {
-		if v.logger != nil {
-			v.logger.Debug("resolveVariableWithFallback DEBUG: JavaScript evaluation failed", "varPath", varPath, "error", err)
 		}
 	}
 
-	if v.logger != nil {
-		v.logger.Debug("resolveVariableWithFallback DEBUG: Resolution failed", "varPath", varPath)
-	}
 	return nil, false
 }
 
@@ -1546,19 +1517,6 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 		currentVars[k] = val
 	}
 	v.mu.Unlock()
-
-	// Debug: Log all available variables with concrete examples
-	if v.logger != nil {
-		v.logger.Debug("preprocessTextWithVariableMapping DEBUG: Available variables",
-			"vars", func() []string {
-				keys := make([]string, 0, len(currentVars))
-				for k := range currentVars {
-					keys = append(keys, k)
-				}
-				return keys
-			}(), // e.g., ["eventTrigger", "apiCallNode", "customCodeNode"] - actual variable names accessible in templates
-			"varCount", len(currentVars)) // e.g., 3 (number of variables available for template resolution)
-	}
 
 	for key, value := range currentVars {
 		if err := jsvm.Set(key, value); err != nil {
@@ -1592,13 +1550,6 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 			}
 			result = result[:start] + result[end+2:]
 			continue
-		}
-
-		// Debug: Log the expression we're trying to resolve with concrete examples
-		if v.logger != nil {
-			v.logger.Debug("preprocessTextWithVariableMapping DEBUG: Trying to resolve expression",
-				"expression", expr, // e.g., "eventTrigger.data.transactionHash", "apiCallNode.data.body.users[0].name"
-				"templateContext", fmt.Sprintf("{{%s}}", expr)) // e.g., "{{eventTrigger.data.transactionHash}}" - full template syntax
 		}
 
 		// Try to resolve the variable with fallback to camelCase

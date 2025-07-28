@@ -162,11 +162,6 @@ func ConvertResultsArrayToProtobufValue(resultsArray []interface{}, log *strings
 	var resultsValue *structpb.Value
 	var structErr error
 
-	// Debug: Log the input array
-	if log != nil {
-		log.WriteString(fmt.Sprintf("DEBUG ConvertResultsArrayToProtobufValue: Converting array with %d entries: %+v\n", len(resultsArray), resultsArray))
-	}
-
 	// Always return as array to maintain consistent data structure
 	resultsValue, structErr = structpb.NewValue(resultsArray)
 
@@ -175,11 +170,6 @@ func ConvertResultsArrayToProtobufValue(resultsArray []interface{}, log *strings
 			log.WriteString(fmt.Sprintf("Failed to convert results to protobuf Value: %v\n", structErr))
 		}
 		resultsValue = structpb.NewNullValue()
-	} else {
-		// Debug: Log successful conversion
-		if log != nil {
-			log.WriteString(fmt.Sprintf("DEBUG ConvertResultsArrayToProtobufValue: Successfully converted to protobuf, isNull: %v\n", resultsValue == nil || resultsValue.Kind == nil))
-		}
 	}
 
 	return resultsValue
