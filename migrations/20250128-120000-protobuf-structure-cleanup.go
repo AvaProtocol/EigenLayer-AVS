@@ -52,7 +52,15 @@ func ProtobufStructureCleanupMigration(db storage.Storage) (int, error) {
 		// Create a model.Task and load from storage data
 		task := model.NewTask()
 		if err := task.FromStorageData(data); err != nil {
-			log.Printf("Warning: Failed to unmarshal workflow %s: %v", key, err)
+			// Tasks that fail to unmarshal are causing production crashes
+			// We need to delete them entirely as they can't be processed
+			log.Printf("Deleting workflow %s due to unmarshal error (likely unknown protobuf fields): %v", key, err)
+			if delErr := db.Delete([]byte(key)); delErr != nil {
+				log.Printf("Warning: Failed to delete corrupted workflow %s: %v", key, delErr)
+			} else {
+				workflowsCanceled++
+				recordsUpdated++
+			}
 			continue
 		}
 
@@ -71,6 +79,38 @@ func ProtobufStructureCleanupMigration(db storage.Storage) (int, error) {
 						shouldCancel = true
 						reasons = append(reasons, "old manual trigger boolean structure")
 					}
+				}
+			}
+
+			// Check for block triggers missing config (causing production crashes)
+			if blockTrigger := task.Task.Trigger.GetBlock(); blockTrigger != nil {
+				if blockTrigger.Config == nil {
+					shouldCancel = true
+					reasons = append(reasons, "block trigger missing required config")
+				}
+			}
+
+			// Check for cron triggers missing config
+			if cronTrigger := task.Task.Trigger.GetCron(); cronTrigger != nil {
+				if cronTrigger.Config == nil {
+					shouldCancel = true
+					reasons = append(reasons, "cron trigger missing required config")
+				}
+			}
+
+			// Check for fixed time triggers missing config
+			if fixedTimeTrigger := task.Task.Trigger.GetFixedTime(); fixedTimeTrigger != nil {
+				if fixedTimeTrigger.Config == nil {
+					shouldCancel = true
+					reasons = append(reasons, "fixed time trigger missing required config")
+				}
+			}
+
+			// Check for event triggers missing config
+			if eventTrigger := task.Task.Trigger.GetEvent(); eventTrigger != nil {
+				if eventTrigger.Config == nil {
+					shouldCancel = true
+					reasons = append(reasons, "event trigger missing required config")
 				}
 			}
 		}

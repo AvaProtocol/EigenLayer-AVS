@@ -319,6 +319,20 @@ func NewVMWithData(task *model.Task, triggerData *TriggerData, smartWalletConfig
 }
 
 func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *structpb.Value) (*VM, error) {
+	// Add safety checks to prevent nil pointer dereferences
+	if task == nil {
+		return nil, fmt.Errorf("task cannot be nil")
+	}
+	if triggerData == nil {
+		return nil, fmt.Errorf("triggerData cannot be nil")
+	}
+	if smartWalletConfig == nil {
+		return nil, fmt.Errorf("smartWalletConfig cannot be nil")
+	}
+	if secrets == nil {
+		secrets = make(map[string]string) // Initialize empty map if nil
+	}
+
 	var taskOwner common.Address
 	if task != nil && task.Owner != "" {
 		taskOwner = common.HexToAddress(task.Owner)
