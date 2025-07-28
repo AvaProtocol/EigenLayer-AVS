@@ -120,8 +120,12 @@ Before merging changes from `staging` to `main`, ensure any storage structure ch
    - Required field additions (without `omitempty`)
    - Field type changes
    - Field removals
+   - **Protobuf message structure changes** (manual analysis required)
+   - **Trigger/node output format changes** (manual analysis required)
 
 3. **Migration Process**
+
+   **For Go Struct Changes (Automated):**
    ```bash
    # First checkout staging branch
    git checkout staging
@@ -133,19 +137,53 @@ Before merging changes from `staging` to `main`, ensure any storage structure ch
    go run scripts/migration/create_migration.go main
    ```
    
+   **For Protobuf Changes (Manual Analysis Required):**
+   ```bash
+   # Compare protobuf changes between branches
+   git diff origin/main..staging protobuf/
+   
+   # Analyze for breaking changes in:
+   # - Trigger output structures (e.g., timestamp -> data field)
+   # - Node input/output formats (e.g., input field removal)
+   # - Manual trigger structure changes (boolean -> ManualTrigger)
+   # - Contract ABI format changes (string -> array)
+   ```
+
+4. **Migration Types**
+
+   **Automated Migration (Go Structs):**
    The migration script will:
    - Create a timestamped migration file in `./migrations`
    - Include detected changes as comments
    - Provide example migration code
    - Add the migration to `Migrations` slice in `./migrations/migrations.go`
-   - Test thoroughly before merging to `main`
 
-4. **No Migration Needed For**
+   **Manual Migration (Protobuf Changes):**
+   - Create migration file manually following existing patterns
+   - Focus on data cleanup rather than backward compatibility
+   - Cancel/remove incompatible workflows and executions
+   - Clear cached data that needs regeneration
+
+5. **No Migration Needed For**
    - Adding fields with `omitempty` JSON tags
    - Runtime-only changes
    - Backward-compatible modifications
+   - New optional protobuf fields
 
-> **Important**: Always run migrations before merging to `main`. The script will warn if changes require migration.
+6. **Active Migrations**
+   
+   Current active migrations that will run on deployment:
+   
+   - `20250603-183034-token-metadata-fields` - TokenMetadata struct field additions
+   - `20250128-120000-protobuf-structure-cleanup` - v1.9.6 protobuf structure cleanup
+     - Cancels workflows with incompatible trigger structures
+     - Removes executions with old trigger output formats
+     - Cleans cached data for regeneration
+     - **Impact**: Workflows with old manual triggers or loop/filter nodes will be canceled
+
+> **Important**: Always run migrations before merging to `main`. For protobuf changes, manual analysis is required as the automated scripts may not detect all breaking changes.
+
+> **v1.9.6 Note**: The protobuf structure cleanup migration will cancel workflows with incompatible structures. Ensure critical workflows are backed up before deployment.
 
 # Development guide
 
