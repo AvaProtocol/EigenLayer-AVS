@@ -121,6 +121,14 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 }
 
 func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) (*avsproto.Execution, error) {
+	// Load secrets for the task
+	secrets, err := LoadSecretForTask(x.db, task)
+	if err != nil {
+		x.logger.Warn("Failed to load secrets for task", "error", err, "task_id", task.Id)
+		// Don't fail the task, just use empty secrets
+		secrets = make(map[string]string)
+	}
+
 	if queueData == nil || queueData.ExecutionID == "" {
 		return nil, fmt.Errorf("internal error: invalid execution id")
 	}
@@ -132,8 +140,6 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	// Convert queue data back to the format expected by the VM
 	triggerReason := GetTriggerReasonOrDefault(queueData, task.Id, x.logger)
-
-	secrets, _ := LoadSecretForTask(x.db, task)
 
 	// Debug: Log FilterNode expressions in task before VM creation
 	if x.logger != nil {
