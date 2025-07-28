@@ -24,12 +24,23 @@ func ProtobufStructureCleanupMigration(db storage.Storage) (int, error) {
 	executionsDeleted := 0
 
 	// 1. Clean up workflows with incompatible trigger structures
-	workflowKeys, err := db.ListKeys("task:")
+	// Focus on active tasks since they are the ones that could cause runtime issues
+	activeWorkflowKeys, err := db.ListKeys("t:a:")
 	if err != nil {
-		return 0, fmt.Errorf("failed to list workflow keys: %w", err)
+		return 0, fmt.Errorf("failed to list active workflow keys: %w", err)
 	}
 
-	log.Printf("Found %d workflows to examine", len(workflowKeys))
+	// Also check executing tasks that might be stuck with old structures
+	executingWorkflowKeys, err := db.ListKeys("t:x:")
+	if err != nil {
+		log.Printf("Warning: Failed to list executing workflow keys: %v", err)
+		executingWorkflowKeys = []string{} // Continue with empty list
+	}
+
+	// Combine both lists
+	workflowKeys := append(activeWorkflowKeys, executingWorkflowKeys...)
+	log.Printf("Found %d workflows to examine (%d active, %d executing)",
+		len(workflowKeys), len(activeWorkflowKeys), len(executingWorkflowKeys))
 
 	for _, key := range workflowKeys {
 		data, err := db.GetKey([]byte(key))
@@ -118,7 +129,7 @@ func ProtobufStructureCleanupMigration(db storage.Storage) (int, error) {
 	}
 
 	// 2. Clean up execution data with old trigger output structures
-	executionKeys, err := db.ListKeys("execution:")
+	executionKeys, err := db.ListKeys("history:")
 	if err != nil {
 		log.Printf("Warning: Failed to list execution keys: %v", err)
 	} else {
