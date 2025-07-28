@@ -840,6 +840,16 @@ message TriggerTaskResp {
   // In async mode, the execution_id is created ahead of time and not materialized, calling GetExecutionStatus on it will return Status=Pending for example. Once Status=Completed you can call GetExecution to get all log and detail. Call GetExecution before it is completed will result in "Execution Not Found"
   string execution_id = 1;
   ExecutionStatus status = 2;
+  
+  // Always return the workflow ID
+  string workflow_id = 3;
+  
+  // Optional execution fields - populated when isBlocking=true or when execution is complete
+  optional int64 start_at = 4; // timestamp when execution started (in milliseconds) - available for non-blocking
+  optional int64 end_at = 5;   // timestamp when execution ended (in milliseconds) - only available for blocking
+  optional bool success = 6;   // execution success status - only available for blocking
+  optional string error = 7;   // error message if execution failed - only available for blocking
+  repeated Execution.Step steps = 8; // execution steps - only available for blocking
 }
 
 message CreateOrUpdateSecretReq {

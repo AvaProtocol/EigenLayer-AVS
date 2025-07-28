@@ -3,7 +3,6 @@ package taskengine
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/big"
 	"strconv"
 	"strings"
@@ -1490,12 +1489,6 @@ func (n *Engine) parseUint64(value interface{}) (uint64, error) {
 // extractExecutionResult extracts the result data from an execution step (legacy version with success/error fields)
 func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
-
-	// Debug: Log execution step details
-	log.Printf("DEBUG extractExecutionResult: executionStep type=%s, hasOutputData=%v", executionStep.Type, executionStep.OutputData != nil)
-	if executionStep.OutputData != nil {
-		log.Printf("DEBUG extractExecutionResult: OutputData type=%T", executionStep.OutputData)
-	}
 
 	// Handle different output data types
 	if ccode := executionStep.GetCustomCode(); ccode != nil && ccode.GetData() != nil {
