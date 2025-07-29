@@ -307,7 +307,7 @@ func TestValueRawPopulatedWhenDecimalsCallFails(t *testing.T) {
 		MethodCalls: []*avsproto.EventTrigger_MethodCall{
 			{
 				MethodName:    "decimals",
-				CallData:      stringPtr("0x313ce567"),
+				MethodParams:  []string{}, // No parameters for decimals()
 				ApplyToFields: []string{"value"},
 			},
 		},
