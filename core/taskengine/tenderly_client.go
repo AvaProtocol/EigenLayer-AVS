@@ -433,6 +433,39 @@ func (tc *TenderlyClient) simulateTransferEvent(ctx context.Context, contractAdd
 	// This will be properly formatted later when the decimals are retrieved via method call
 	transferAmount := GetSampleTransferAmount(18) // Default to 18 decimals (ETH-like)
 
+	// 🚨 FIX: Check if this contract is USDC/USDT (6 decimals) and use appropriate amount
+	// USDC on Sepolia: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238
+	// USDT typically also has 6 decimals
+	contractAddr := strings.ToLower(contractAddress)
+	knownUSDCAddresses := []string{
+		"0x1c7d4b196cb0c7b01d743fbc6116a902379c7238", // Sepolia USDC
+		"0xa0b86a33e6c3a68a2e1e4c40c2b4b6b7d8b8a9c6", // Mainnet USDC (example)
+		"0xdac17f958d2ee523a2206206994597c13d831ec7", // Mainnet USDT
+	}
+
+	// Check if this is a known 6-decimal token
+	isUSDCLike := false
+	for _, addr := range knownUSDCAddresses {
+		if contractAddr == addr {
+			isUSDCLike = true
+			break
+		}
+	}
+
+	if isUSDCLike {
+		// Use 6 decimals for USDC-like tokens: 1.5 USDC = 1500000
+		transferAmount = GetSampleTransferAmount(6)
+		tc.logger.Info("🪙 Using 6-decimal amount for USDC-like token",
+			"contract", contractAddress,
+			"amount", transferAmount.String())
+	} else {
+		// Default to 18 decimals for ETH-like tokens: 1.5 ETH = 1500000000000000000
+		transferAmount = GetSampleTransferAmount(18)
+		tc.logger.Info("💎 Using 18-decimal amount for ETH-like token",
+			"contract", contractAddress,
+			"amount", transferAmount.String())
+	}
+
 	// Create mock Transfer event log
 	simulatedLog := tc.createMockTransferLog(
 		contractAddress,

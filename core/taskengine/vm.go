@@ -2661,6 +2661,8 @@ func (v *VM) createExecutionStep(nodeId string, success bool, errorMsg string, l
 		if nodeConfigMap != nil {
 			if configProto, err := structpb.NewValue(nodeConfigMap); err == nil {
 				nodeConfig = configProto
+			} else if v.logger != nil {
+				v.logger.Warn("Failed to convert node config to protobuf", "nodeId", nodeId, "nodeType", nodeType, "error", err)
 			}
 		}
 	}
@@ -3132,8 +3134,12 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 			methodCallsArray := make([]interface{}, len(runner.ContractRead.Config.MethodCalls))
 			for i, methodCall := range runner.ContractRead.Config.MethodCalls {
 				methodCallMap := map[string]interface{}{
-					"callData":   methodCall.CallData,
 					"methodName": methodCall.MethodName,
+				}
+
+				// Include callData only if it's set (it's optional)
+				if methodCall.CallData != nil {
+					methodCallMap["callData"] = *methodCall.CallData
 				}
 
 				// Include methodParams if present
@@ -3174,8 +3180,12 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 			methodCallsArray := make([]interface{}, len(runner.ContractWrite.Config.MethodCalls))
 			for i, methodCall := range runner.ContractWrite.Config.MethodCalls {
 				methodCallMap := map[string]interface{}{
-					"callData":   methodCall.CallData,
 					"methodName": methodCall.MethodName,
+				}
+
+				// Include callData only if it's set (it's optional)
+				if methodCall.CallData != nil {
+					methodCallMap["callData"] = *methodCall.CallData
 				}
 
 				// Include methodParams if present

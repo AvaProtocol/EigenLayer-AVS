@@ -156,13 +156,13 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 										ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABIForConfig),
 										MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 											{
-												CallData:      stringPtr("0x313ce567"),
 												MethodName:    "decimals",
+												MethodParams:  []string{}, // No parameters for decimals()
 												ApplyToFields: []string{"balance", "amount"},
 											},
 											{
-												CallData:      stringPtr("0x70a082310000000000000000000000001234567890123456789012345678901234567890"),
 												MethodName:    "balanceOf",
+												MethodParams:  []string{"0x1234567890123456789012345678901234567890"}, // address parameter
 												ApplyToFields: []string{"balance"},
 											},
 										},
@@ -216,11 +216,10 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 									Config: &avsproto.ContractWriteNode_Config{
 										ContractAddress: "0x1234567890123456789012345678901234567890",
 										ContractAbi:     MustConvertJSONABIToProtobufValues(testTransferABIForConfig),
-										CallData:        "0xa9059cbb",
 										MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 											{
-												CallData:   stringPtr("0xa9059cbb0000000000000000000000009876543210987654321098765432109876543210000000000000000000000000000000000000000000000000de0b6b3a7640000"),
-												MethodName: "transfer",
+												MethodName:   "transfer",
+												MethodParams: []string{"0x9876543210987654321098765432109876543210", "1000000000000000000"}, // recipient, amount
 											},
 										},
 									},
@@ -542,8 +541,8 @@ func TestExtractNodeConfiguration_StandaloneNodesProtobufCompatibility(t *testin
 								ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABIForConfig),
 								MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 									{
-										CallData:      stringPtr("0x313ce567"),
 										MethodName:    "decimals",
+										MethodParams:  []string{}, // No parameters for decimals()
 										ApplyToFields: []string{"balance", "amount"},
 									},
 								},
@@ -566,8 +565,8 @@ func TestExtractNodeConfiguration_StandaloneNodesProtobufCompatibility(t *testin
 								ContractAbi:     MustConvertJSONABIToProtobufValues(testSimpleTransferABI),
 								MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 									{
-										CallData:   stringPtr("0xa9059cbb"),
-										MethodName: "transfer",
+										MethodName:   "transfer",
+										MethodParams: []string{"0x9876543210987654321098765432109876543210", "1000000000000000000"}, // recipient, amount
 									},
 								},
 							},
