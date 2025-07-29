@@ -320,12 +320,7 @@ func NewVMWithData(task *model.Task, triggerData *TriggerData, smartWalletConfig
 
 func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, smartWalletConfig *config.SmartWalletConfig, secrets map[string]string, transferLog *structpb.Value) (*VM, error) {
 	// Add safety checks to prevent nil pointer dereferences
-	if task == nil {
-		return nil, fmt.Errorf("task cannot be nil")
-	}
-	if triggerData == nil {
-		return nil, fmt.Errorf("triggerData cannot be nil")
-	}
+	// Note: task and triggerData can be nil for testing utilities like runNodeWithInputs
 	if smartWalletConfig == nil {
 		return nil, fmt.Errorf("smartWalletConfig cannot be nil")
 	}
@@ -2154,7 +2149,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		if callData, ok := config["callData"].(string); ok {
 			// Single method call
 			methodCall := &avsproto.ContractReadNode_MethodCall{
-				CallData:   callData,
+				CallData:   &callData,
 				MethodName: "", // Will be determined from ABI
 			}
 			contractConfig.MethodCalls = []*avsproto.ContractReadNode_MethodCall{methodCall}
@@ -2164,7 +2159,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
 					methodCall := &avsproto.ContractReadNode_MethodCall{}
 					if callData, ok := methodCallMap["callData"].(string); ok {
-						methodCall.CallData = callData
+						methodCall.CallData = &callData
 					}
 					if methodName, ok := methodCallMap["methodName"].(string); ok {
 						methodCall.MethodName = methodName
@@ -2234,7 +2229,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
 					methodCall := &avsproto.ContractWriteNode_MethodCall{}
 					if callData, ok := methodCallMap["callData"].(string); ok {
-						methodCall.CallData = callData
+						methodCall.CallData = &callData
 					}
 					if methodName, ok := methodCallMap["methodName"].(string); ok {
 						methodCall.MethodName = methodName
@@ -2518,7 +2513,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 					if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
 						methodCall := &avsproto.ContractReadNode_MethodCall{}
 						if callData, ok := methodCallMap["callData"].(string); ok {
-							methodCall.CallData = callData
+							methodCall.CallData = &callData
 						}
 						if methodName, ok := methodCallMap["methodName"].(string); ok {
 							methodCall.MethodName = methodName
@@ -2593,7 +2588,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 					if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
 						methodCall := &avsproto.ContractWriteNode_MethodCall{}
 						if callData, ok := methodCallMap["callData"].(string); ok {
-							methodCall.CallData = callData
+							methodCall.CallData = &callData
 						}
 						if methodName, ok := methodCallMap["methodName"].(string); ok {
 							methodCall.MethodName = methodName
@@ -3972,8 +3967,13 @@ func (v *VM) processContractWriteTemplates(contractWrite *avsproto.ContractWrite
 
 	// Process method calls
 	for _, methodCall := range contractWrite.Config.MethodCalls {
+		var processedCallData *string
+		if methodCall.CallData != nil {
+			// Use callData as-is without template substitution (callData should be literal hex string)
+			processedCallData = methodCall.CallData
+		}
 		processedMethodCall := &avsproto.ContractWriteNode_MethodCall{
-			CallData:     v.substituteTemplateVariables(methodCall.CallData, iterInputs),
+			CallData:     processedCallData,
 			MethodName:   v.substituteTemplateVariables(methodCall.MethodName, iterInputs),
 			MethodParams: SubstituteTemplateVariablesArray(methodCall.MethodParams, iterInputs, v.substituteTemplateVariables),
 		}
@@ -3995,8 +3995,13 @@ func (v *VM) processContractReadTemplates(contractRead *avsproto.ContractReadNod
 
 	// Process method calls
 	for _, methodCall := range contractRead.Config.MethodCalls {
+		var processedCallData *string
+		if methodCall.CallData != nil {
+			// Use callData as-is without template substitution (callData should be literal hex string)
+			processedCallData = methodCall.CallData
+		}
 		processedMethodCall := &avsproto.ContractReadNode_MethodCall{
-			CallData:      v.substituteTemplateVariables(methodCall.CallData, iterInputs),
+			CallData:      processedCallData,
 			MethodName:    v.substituteTemplateVariables(methodCall.MethodName, iterInputs),
 			MethodParams:  SubstituteTemplateVariablesArray(methodCall.MethodParams, iterInputs, v.substituteTemplateVariables),
 			ApplyToFields: make([]string, len(methodCall.ApplyToFields)),

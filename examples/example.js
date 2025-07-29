@@ -708,7 +708,7 @@ async function scheduleMonitor(owner, token, target) {
             // As an user, they have 2 option to provide telegram bot token:
             // 1. Use their own bot by putting the token directly here. That user is the only one see their own tasks/logs
             // 2. (Prefered way) Use Ava Protocol Bot token. However, now because the user can see their own task config, we cannot use the raw token and has to use a variable here.
-            url: "https://api.telegram.org/bot{{ap_notify_bot_token}}/sendMessage?parse_mode=MarkdownV2",
+            url: "https://api.telegram.org/bot{{ap_notify_bot_token}}/sendMessage?parse_mode=HTML",
             //url: `https://webhook.site/4a2cb0c4-86ea-4189-b1e3-ce168f5d4840`,
             method: "POST",
             //body: "chat_id=-4609037622&disable_notification=true&text=%2AWallet+${target.toLowerCase()}+receive+{{ trigger1.data.data }} {{ trigger1.data.token_symbol }} at {{ trigger1.data.tx_hash }}%2A",

@@ -181,8 +181,11 @@ func (r *ContractReadProcessor) callContractMethod(contractAddress common.Addres
 
 // executeMethodCallWithoutFormatting executes a single method call without decimal formatting
 func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.Context, contractAbi *abi.ABI, contractAddress common.Address, methodCall *avsproto.ContractReadNode_MethodCall) *avsproto.ContractReadNode_MethodResult {
-	// Preprocess template variables in method call data
-	preprocessedCallData := r.vm.preprocessTextWithVariableMapping(methodCall.GetCallData())
+	// Use callData as-is without template substitution (callData should be literal hex string)
+	var preprocessedCallData string
+	if methodCall.CallData != nil {
+		preprocessedCallData = *methodCall.CallData
+	}
 	methodName := r.vm.preprocessTextWithVariableMapping(methodCall.GetMethodName())
 
 	// Generate callData from methodName and methodParams if callData is empty
@@ -838,8 +841,11 @@ func (r *ContractReadProcessor) extractMethodABI(method *abi.Method) map[string]
 
 // executeMethodCallWithDecimalFormatting executes a single method call with decimal formatting support
 func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx context.Context, contractAbi *abi.ABI, contractAddress common.Address, methodCall *avsproto.ContractReadNode_MethodCall, decimalsValue *big.Int, fieldsToFormat []string) *avsproto.ContractReadNode_MethodResult {
-	// Preprocess template variables in method call data
-	preprocessedCallData := r.vm.preprocessTextWithVariableMapping(methodCall.GetCallData())
+	// Use callData as-is without template substitution (callData should be literal hex string)
+	var preprocessedCallData string
+	if methodCall.CallData != nil {
+		preprocessedCallData = *methodCall.CallData
+	}
 	methodName := r.vm.preprocessTextWithVariableMapping(methodCall.GetMethodName())
 
 	// Generate callData from methodName and methodParams if callData is empty (same logic as executeMethodCallWithoutFormatting)

@@ -82,9 +82,8 @@ func (c *ABIValueConverter) ConvertABIValueToInterface(value interface{}, abiTyp
 			// Check if this field should be formatted with decimals
 			shouldFormat := c.ShouldFormatField(fieldName)
 
-			// No longer storing raw values as separate fields
-
 			if shouldFormat {
+				// Apply decimal formatting directly to the field value
 				formattedValue := c.FormatWithDecimals(bigInt, c.decimalsValue)
 				return formattedValue
 			}

@@ -83,7 +83,7 @@ func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) 
 	if len(methodCalls) == 0 && callData != "" {
 		methodCalls = []*avsproto.ContractWriteNode_MethodCall{
 			{
-				CallData:   callData,
+				CallData:   &callData,
 				MethodName: "unknown", // Will be resolved from ABI if available
 			},
 		}
@@ -121,7 +121,11 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	}
 
 	// Use shared utility to generate or use existing calldata
-	callData, err := GenerateOrUseCallData(methodCall.MethodName, methodCall.CallData, resolvedMethodParams, parsedABI)
+	var existingCallData string
+	if methodCall.CallData != nil {
+		existingCallData = *methodCall.CallData
+	}
+	callData, err := GenerateOrUseCallData(methodCall.MethodName, existingCallData, resolvedMethodParams, parsedABI)
 	if err != nil {
 		if r.vm != nil && r.vm.logger != nil {
 			r.vm.logger.Error("❌ Failed to get/generate calldata for contract write",
@@ -139,7 +143,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	}
 
 	// Log successful calldata generation if needed
-	if methodCall.CallData == "" && callData != "" && r.vm != nil && r.vm.logger != nil {
+	if existingCallData == "" && callData != "" && r.vm != nil && r.vm.logger != nil {
 		r.vm.logger.Debug("✅ Generated calldata from methodName and methodParams for contract write",
 			"methodName", methodCall.MethodName,
 			"rawMethodParams", methodCall.MethodParams,

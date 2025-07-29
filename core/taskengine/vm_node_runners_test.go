@@ -30,7 +30,7 @@ func TestVM_ContractReadRunner(t *testing.T) {
 			ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABIForRunners),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
-					CallData:   "0xfeaf968c", // decimals() function
+					CallData:   stringPtr("0xfeaf968c"), // decimals() function
 					MethodName: "decimals",
 				},
 			},
@@ -67,7 +67,7 @@ func TestVM_ContractReadRunner_MissingConfig(t *testing.T) {
 			ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABIForRunners),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
-					CallData:   "0xfeaf968c",
+					CallData:   stringPtr("0xfeaf968c"),
 					MethodName: "decimals",
 				},
 			},
