@@ -260,9 +260,8 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 		fromTopic := common.BytesToHash(fromAddress.Bytes())
 		toTopic := common.BytesToHash(toAddress.Bytes())
 
-		// Sample value: 100.5 tokens with 18 decimals = 100500000000000000000 wei
-		sampleValue := big.NewInt(0)
-		sampleValue.SetString("100500000000000000000", 10)
+		// Use dynamic sample value based on decimals (default to 18 decimals like ETH)
+		sampleValue := GetSampleTransferAmount(18)
 		sampleData := common.LeftPadBytes(sampleValue.Bytes(), 32)
 
 		// Create sample log with current timestamp-based block number for uniqueness
@@ -490,8 +489,25 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 			}
 
 			if methodCall.GetMethodName() == "decimals" {
+				// Generate callData from methodName and methodParams if callData is empty
+				var existingCallData string
+				if methodCall.CallData != nil {
+					existingCallData = *methodCall.CallData
+				}
+				callData, err := GenerateOrUseCallData(methodCall.GetMethodName(), existingCallData, methodCall.GetMethodParams(), contractABI)
+				if err != nil {
+					if n.logger != nil {
+						n.logger.Error("❌ Failed to generate callData for decimals method",
+							"methodName", methodCall.GetMethodName(),
+							"providedCallData", methodCall.GetCallData(),
+							"methodParams", methodCall.GetMethodParams(),
+							"error", err)
+					}
+					continue // Skip this method call
+				}
+
 				// Make the decimals() call to the contract
-				if decimals, err := n.callContractMethod(eventLog.Address, methodCall.GetCallData()); err == nil {
+				if decimals, err := n.callContractMethod(eventLog.Address, callData); err == nil {
 					if decimalsInt, ok := decimals.(*big.Int); ok {
 						decimalsValue = decimalsInt
 
@@ -669,39 +685,43 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 			}
 		}
 
-		// Create enriched transfer_log structure with all the fields from TransferLogOutput
-		transferLog := map[string]interface{}{
-			// Token metadata fields
-			"tokenName":     "Unknown Token",
-			"tokenSymbol":   "UNKNOWN",
-			"tokenDecimals": uint32(18), // Default to 18 decimals
+		// Create standardized transfer event response structure
+		// Initialize with default values (logIndex and transactionIndex excluded - available in metadata)
+		transferResponse := CreateStandardizedTransferResponse(
+			eventLog.Address.Hex(), // contractAddress
+			eventLog.TxHash.Hex(),  // txHash
+			eventLog.BlockNumber,   // blockNumber
+			"",                     // fromAddr (will be populated below)
+			"",                     // toAddr (will be populated below)
+			"Unknown Token",        // tokenName (default)
+			"UNKNOWN",              // tokenSymbol (default)
+			18,                     // tokenDecimals (default)
+			"0",                    // value (will be populated below)
+		)
 
-			// Event data fields
-			"transactionHash":  eventLog.TxHash.Hex(),
-			"address":          eventLog.Address.Hex(),
-			"blockNumber":      eventLog.BlockNumber,
-			"transactionIndex": eventLog.TxIndex,
-			"logIndex":         eventLog.Index,
-
-			// Transfer-specific fields (from ABI parsing)
-			"fromAddress": parsedData["from"],
-			"toAddress":   parsedData["to"],
-			"valueRaw":    parsedData["valueRaw"], // Raw uint256 value as string (from ABI converter)
+		// Populate transfer-specific fields from ABI parsing
+		if fromAddr, ok := parsedData["from"].(string); ok {
+			transferResponse.FromAddress = fromAddr
+		}
+		if toAddr, ok := parsedData["to"].(string); ok {
+			transferResponse.ToAddress = toAddr
 		}
 
 		// Populate token metadata if available
 		if tokenMetadata != nil {
-			transferLog["tokenName"] = tokenMetadata.Name
-			transferLog["tokenSymbol"] = tokenMetadata.Symbol
-			transferLog["tokenDecimals"] = tokenMetadata.Decimals
+			transferResponse.TokenName = tokenMetadata.Name
+			transferResponse.TokenSymbol = tokenMetadata.Symbol
+			transferResponse.TokenDecimals = tokenMetadata.Decimals
 
 			// Use the formatted value from ABI parsing if available, otherwise format using token metadata
 			if formattedValue, hasFormatted := parsedData["value"]; hasFormatted {
-				transferLog["value"] = formattedValue // Use ABI-formatted value
+				if valueStr, ok := formattedValue.(string); ok {
+					transferResponse.Value = valueStr
+				}
 			} else if rawValue, ok := parsedData["valueRaw"].(string); ok {
 				// Fallback: format using token metadata if ABI didn't format it
 				formattedValue := n.tokenEnrichmentService.FormatTokenValue(rawValue, tokenMetadata.Decimals)
-				transferLog["value"] = formattedValue
+				transferResponse.Value = formattedValue
 			}
 
 			if n.logger != nil {
@@ -709,23 +729,24 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 					"tokenSymbol", tokenMetadata.Symbol,
 					"tokenName", tokenMetadata.Name,
 					"decimals", tokenMetadata.Decimals,
-					"valueRaw", parsedData["valueRaw"],
-					"valueFormatted", transferLog["value"])
+					"value", transferResponse.Value)
 			}
 		} else {
 			// Even without token metadata, try to format using decimals from method call
 			if decimalsValue != nil && len(fieldsToFormat) > 0 {
 				decimalsUint32 := uint32(decimalsValue.Uint64())
-				transferLog["tokenDecimals"] = decimalsUint32
+				transferResponse.TokenDecimals = decimalsUint32
 
 				// Use the formatted value from ABI parsing if available, otherwise format using method call decimals
 				if formattedValue, hasFormatted := parsedData["value"]; hasFormatted {
-					transferLog["value"] = formattedValue // Use ABI-formatted value
+					if valueStr, ok := formattedValue.(string); ok {
+						transferResponse.Value = valueStr
+					}
 				} else if rawValue, ok := parsedData["valueRaw"].(string); ok {
 					// Fallback: format using method call decimals if ABI didn't format it
 					if n.tokenEnrichmentService != nil {
 						formattedValue := n.tokenEnrichmentService.FormatTokenValue(rawValue, decimalsUint32)
-						transferLog["value"] = formattedValue
+						transferResponse.Value = formattedValue
 					}
 				}
 			}
@@ -737,9 +758,37 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 			}
 		}
 
-		// Return the enriched transfer_log structure instead of basic parsed data
-		// This provides all the rich fields that were previously available in TransferLogOutput
-		return transferLog, nil
+		// Add proper blockTimestamp for real events (not simulated)
+		// For real events, we can get the actual block timestamp if needed
+		if eventLog.BlockNumber > 0 && rpcConn != nil {
+			// Get actual block timestamp for real events
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			header, err := rpcConn.HeaderByNumber(ctx, big.NewInt(int64(eventLog.BlockNumber)))
+			cancel()
+
+			if err == nil {
+				transferResponse.BlockTimestamp = int64(header.Time)
+			}
+			// If error, keep the default timestamp from CreateStandardizedTransferResponse
+		}
+
+		// Convert standardized response to map for compatibility with existing code
+		// This provides all the standardized fields without deprecated or duplicate ones
+		// Note: logIndex and transactionIndex are excluded as they're available in metadata
+		transferMap := map[string]interface{}{
+			"address":         transferResponse.Address,
+			"tokenName":       transferResponse.TokenName,
+			"tokenSymbol":     transferResponse.TokenSymbol,
+			"tokenDecimals":   transferResponse.TokenDecimals,
+			"transactionHash": transferResponse.TransactionHash,
+			"blockNumber":     transferResponse.BlockNumber,
+			"blockTimestamp":  transferResponse.BlockTimestamp,
+			"fromAddress":     transferResponse.FromAddress,
+			"toAddress":       transferResponse.ToAddress,
+			"value":           transferResponse.Value,
+		}
+
+		return transferMap, nil
 	}
 
 	// For non-Transfer events, return basic parsed data
@@ -2415,7 +2464,19 @@ func (n *Engine) convertMapToEventQuery(queryMap map[string]interface{}) (*avspr
 						methodCall.MethodName = methodName
 					}
 					if callData, ok := methodCallMap["callData"].(string); ok {
-						methodCall.CallData = callData
+						methodCall.CallData = &callData
+					}
+					// Handle methodParams field as string array
+					if methodParamsInterface, ok := methodCallMap["methodParams"]; ok {
+						if methodParamsArray, ok := methodParamsInterface.([]interface{}); ok {
+							methodParams := make([]string, len(methodParamsArray))
+							for i, param := range methodParamsArray {
+								if paramStr, ok := param.(string); ok {
+									methodParams[i] = paramStr
+								}
+							}
+							methodCall.MethodParams = methodParams
+						}
 					}
 					if applyToFieldsInterface, exists := methodCallMap["applyToFields"]; exists {
 						if applyToFieldsArray, ok := applyToFieldsInterface.([]interface{}); ok {

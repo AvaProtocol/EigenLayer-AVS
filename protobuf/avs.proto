@@ -180,8 +180,9 @@ message EventTrigger {
   // Method call configuration for enhanced formatting
   message MethodCall {
     string method_name = 1;       // Method name (e.g., "decimals")
-    string call_data = 2;         // Hex-encoded calldata for the method
+    optional string call_data = 2;         // Hex-encoded calldata for the method (used when method_params is not provided)
     repeated string apply_to_fields = 3;  // Fields to apply formatting to (e.g., ["current", "answer"])
+    repeated string method_params = 4; // Array of Handlebars templates for method parameters (e.g. ["{{value.sender}}", "{{value.recipient}}", "{{value.amount}}"])
   }
   
   // Topics represents a single topic position filter (e.g., topic[0], topic[1], etc.)
@@ -361,9 +362,10 @@ message ContractWriteNode {
   }
 
   message MethodCall {
-    string call_data = 1;     // Hex-encoded calldata for the method (used when methodParams is not provided)
+    optional string call_data = 1;     // Hex-encoded calldata for the method (used when methodParams is not provided)
     string method_name = 2;   // Method name for clarity and response mapping
-    repeated string method_params = 3; // Array of Handlebars templates for method parameters (e.g. ["{{value.sender}}", "{{value.recipient}}", "{{value.amount}}"])
+    repeated string apply_to_fields = 3;  // Fields to apply formatting to (e.g., ["current", "answer"])
+    repeated string method_params = 4; // Array of Handlebars templates for method parameters (e.g. ["{{value.sender}}", "{{value.recipient}}", "{{value.amount}}"])
   }
 
   message Output {
@@ -388,7 +390,7 @@ message ContractWriteNode {
 
 message ContractReadNode {
   message MethodCall {
-    string call_data = 1;     // Hex-encoded calldata for the method (used when methodParams is not provided)
+    optional string call_data = 1;     // Hex-encoded calldata for the method (used when methodParams is not provided)
     string method_name = 2;   // Optional: method name for clarity (e.g. "latestRoundData")
     repeated string apply_to_fields = 3;  // Fields to apply decimal formatting to (e.g. ["answer"])
     repeated string method_params = 4; // Handlebars template for method parameters (e.g. "{{value.address}}")

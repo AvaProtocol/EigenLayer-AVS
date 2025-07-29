@@ -427,9 +427,11 @@ func (tc *TenderlyClient) simulateTransferEvent(ctx context.Context, contractAdd
 		}
 	}
 
-	// Create realistic sample transfer amount (e.g., 100.5 tokens with 18 decimals)
-	transferAmount := big.NewInt(0)
-	transferAmount.SetString("100500000000000000000", 10) // 100.5 * 10^18
+	// Create realistic sample transfer amount based on token decimals
+	// Use dynamic amounts: ETH-like tokens (18 decimals) get 1.5 tokens, others get 100.5 tokens
+	// For simulation, we don't know the exact decimals, so use a reasonable default for ETH-like tokens
+	// This will be properly formatted later when the decimals are retrieved via method call
+	transferAmount := GetSampleTransferAmount(18) // Default to 18 decimals (ETH-like)
 
 	// Create mock Transfer event log
 	simulatedLog := tc.createMockTransferLog(

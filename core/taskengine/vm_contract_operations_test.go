@@ -72,7 +72,7 @@ func TestVM_ContractRead_BasicExecution(t *testing.T) {
 			ContractAbi:     decimalsABIValues,
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
-					CallData:   "0x313ce567", // decimals()
+					CallData:   stringPtr("0x313ce567"), // decimals()
 					MethodName: "decimals",
 				},
 			},
@@ -110,12 +110,12 @@ func TestVM_ContractRead_DecimalFormatting(t *testing.T) {
 			ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
-					CallData:      "0x313ce567", // decimals()
+					CallData:      stringPtr("0x313ce567"), // decimals()
 					MethodName:    "decimals",
 					ApplyToFields: []string{"answer"}, // Apply decimal formatting to the "answer" field
 				},
 				{
-					CallData:   "0xfeaf968c", // latestRoundData()
+					CallData:   stringPtr("0xfeaf968c"), // latestRoundData()
 					MethodName: "latestRoundData",
 				},
 			},
@@ -202,7 +202,7 @@ func TestVM_ContractRead_LatestRoundData(t *testing.T) {
 			ContractAbi:     MustConvertJSONABIToProtobufValues(testLatestRoundDataABI),
 			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 				{
-					CallData:   "0xfeaf968c", // This is decimals, but for demo purposes
+					CallData:   stringPtr("0xfeaf968c"), // This is decimals, but for demo purposes
 					MethodName: "decimals",
 				},
 			},
@@ -238,7 +238,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 					ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
-							CallData:   "0xfeaf968c",
+							CallData:   stringPtr("0xfeaf968c"),
 							MethodName: "decimals",
 						},
 					},
@@ -268,7 +268,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 					ContractAbi:     MustConvertJSONABIToProtobufValues(testDecimalsABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
-							CallData:   "0xfeaf968c",
+							CallData:   stringPtr("0xfeaf968c"),
 							MethodName: "decimals",
 						},
 					},
@@ -309,8 +309,8 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 					ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
-							CallData:   "0x313ce567",      // decimals() function selector
-							MethodName: "latestRoundData", // Wrong method name - should be "decimals"
+							CallData:   stringPtr("0x313ce567"), // decimals() function selector
+							MethodName: "latestRoundData",       // Wrong method name - should be "decimals"
 						},
 					},
 				},
@@ -338,8 +338,8 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 					ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
-							CallData:   "0x313ce567",      // decimals() function selector - this is correct for decimals
-							MethodName: "latestRoundData", // Wrong! This should be "decimals"
+							CallData:   stringPtr("0x313ce567"), // decimals() function selector - this is correct for decimals
+							MethodName: "latestRoundData",       // Wrong! This should be "decimals"
 						},
 					},
 				},
@@ -367,12 +367,12 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 					ContractAbi:     MustConvertJSONABIToProtobufValues(testChainlinkABI),
 					MethodCalls: []*avsproto.ContractReadNode_MethodCall{
 						{
-							CallData:   "0xfeaf968c",      // latestRoundData() function selector - correct
-							MethodName: "latestRoundData", // Correct method name
+							CallData:   stringPtr("0xfeaf968c"), // latestRoundData() function selector - correct
+							MethodName: "latestRoundData",       // Correct method name
 						},
 						{
-							CallData:   "0x313ce567", // decimals() function selector - correct
-							MethodName: "decimals",   // Correct method name
+							CallData:   stringPtr("0x313ce567"), // decimals() function selector - correct
+							MethodName: "decimals",              // Correct method name
 						},
 					},
 				},
@@ -425,7 +425,7 @@ func TestVM_ContractWrite_BasicExecution(t *testing.T) {
 			ContractAbi:     MustConvertJSONABIToProtobufValues(testTransferABI),
 			MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 				{
-					CallData:   "0xa9059cbb", // transfer function selector
+					CallData:   stringPtr("0xa9059cbb"), // transfer function selector
 					MethodName: "transfer",
 				},
 			},
@@ -497,7 +497,7 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 					ContractAbi:     MustConvertJSONABIToProtobufValues(testSimpleFunctionABI),
 					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 						{
-							CallData:   "0xa9059cbb",
+							CallData:   stringPtr("0xa9059cbb"),
 							MethodName: "test",
 						},
 					},
@@ -526,7 +526,7 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 					ContractAbi:     MustConvertJSONABIToProtobufValues(testSimpleFunctionABI),
 					MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 						{
-							CallData:   "0xa9059cbb",
+							CallData:   stringPtr("0xa9059cbb"),
 							MethodName: "test",
 						},
 					},

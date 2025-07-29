@@ -730,8 +730,13 @@ func (r *LoopProcessor) processContractReadTemplates(contractRead *avsproto.Cont
 
 	// Process method calls
 	for _, methodCall := range contractRead.Config.MethodCalls {
+		var processedCallData *string
+		if methodCall.CallData != nil {
+			// Use callData as-is without template substitution (callData should be literal hex string)
+			processedCallData = methodCall.CallData
+		}
 		processedMethodCall := &avsproto.ContractReadNode_MethodCall{
-			CallData:      r.substituteTemplateVariables(methodCall.CallData, iterInputs),
+			CallData:      processedCallData,
 			MethodName:    r.substituteTemplateVariables(methodCall.MethodName, iterInputs),
 			ApplyToFields: make([]string, len(methodCall.ApplyToFields)),
 		}
@@ -769,8 +774,13 @@ func (r *LoopProcessor) processContractWriteTemplates(contractWrite *avsproto.Co
 
 	// Process method calls
 	for _, methodCall := range contractWrite.Config.MethodCalls {
+		var processedCallData *string
+		if methodCall.CallData != nil {
+			// Use callData as-is without template substitution (callData should be literal hex string)
+			processedCallData = methodCall.CallData
+		}
 		processedMethodCall := &avsproto.ContractWriteNode_MethodCall{
-			CallData:   r.substituteTemplateVariables(methodCall.CallData, iterInputs),
+			CallData:   processedCallData,
 			MethodName: r.substituteTemplateVariables(methodCall.MethodName, iterInputs),
 		}
 

@@ -29,6 +29,13 @@ func (tu *TestUtils) MustConvertJSONABIToProtobufValues(jsonABI string) []*struc
 	return result
 }
 
+// Helper function to convert string literals to string pointers for protobuf fields
+// This is needed because protobuf generated structs use *string for optional fields
+// but we want to use clear, readable calldata strings in tests
+func stringPtr(s string) *string {
+	return &s
+}
+
 // Global instance for easy access in tests
 var TestUtilsInstance = &TestUtils{}
 
