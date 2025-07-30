@@ -496,8 +496,8 @@ func TestRestRequestErrorHandling(t *testing.T) {
 		t.Errorf("HTTP 404 should not cause execution error, but got: %v", err)
 	}
 
-	if !step.Success {
-		t.Errorf("expected step.Success to be true even for 404 response")
+	if step.Success {
+		t.Errorf("expected step.Success to be false for 404 response (HTTP errors are failures)")
 	}
 
 	// Verify the response data contains the 404 status
@@ -525,8 +525,8 @@ func TestRestRequestErrorHandling(t *testing.T) {
 		t.Errorf("HTTP 500 should not cause execution error, but got: %v", err)
 	}
 
-	if !step.Success {
-		t.Errorf("expected step.Success to be true even for 500 response")
+	if step.Success {
+		t.Errorf("expected step.Success to be false for 500 response (HTTP errors are failures)")
 	}
 
 	// Verify the response data contains the 500 status
