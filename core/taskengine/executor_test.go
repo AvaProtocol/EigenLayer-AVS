@@ -315,8 +315,8 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	if !execution.Success {
-		t.Errorf("Expected success status but got failure: %s", execution.Error)
+	if execution.Success {
+		t.Errorf("Expected failure status when a node fails (HTTP 503), but got success")
 	}
 
 	if len(execution.Steps) != 3 {
@@ -333,9 +333,9 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 	// 		t.Errorf("step id doesn't match, expect rest1 but got: %s", execution.Steps[2].Id)
 	// 	}
 
-	// Verify that the REST API step captured the 503 status code
-	if !execution.Steps[2].Success {
-		t.Errorf("REST API step should succeed even with 503 status, but got failure: %s", execution.Steps[1].Error)
+	// Verify that the REST API step correctly failed with 503 status code
+	if execution.Steps[2].Success {
+		t.Errorf("REST API step should fail with 503 status (HTTP errors are failures), but got success")
 	}
 
 	// The 503 status code should be available in the step's output data for workflow logic to handle

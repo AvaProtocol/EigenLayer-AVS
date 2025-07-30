@@ -410,18 +410,42 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 
 	// For Transfer events with enriched data, structure it properly
 	if isTransferEvent {
-		// parsedData contains the enriched transfer_log structure
-		result["transfer_log"] = parsedData
-		result["data"] = parsedData // Also provide as data for backward compatibility
+		// Merge enriched data with raw blockchain metadata for complete access
+		mergedData := make(map[string]interface{})
+
+		// Add all raw blockchain fields from metadata
+		for key, value := range metadata {
+			mergedData[key] = value
+		}
+
+		// Add/override with enriched fields from parsedData
+		for key, value := range parsedData {
+			mergedData[key] = value
+		}
+
+		result["transfer_log"] = mergedData
+		result["data"] = mergedData // Also provide as data for backward compatibility
 
 		if n.logger != nil {
-			n.logger.Info("✅ EventTrigger: Created enriched transfer_log structure",
+			n.logger.Info("✅ EventTrigger: Created enriched transfer_log structure with raw blockchain fields",
 				"tokenSymbol", parsedData["tokenSymbol"],
 				"blockTimestamp", parsedData["blockTimestamp"])
 		}
 	} else {
-		// For non-Transfer events, use standard data structure
-		result["data"] = parsedData
+		// For non-Transfer events, merge raw metadata with enriched data
+		mergedData := make(map[string]interface{})
+
+		// Add all raw blockchain fields from metadata
+		for key, value := range metadata {
+			mergedData[key] = value
+		}
+
+		// Add/override with enriched fields from parsedData
+		for key, value := range parsedData {
+			mergedData[key] = value
+		}
+
+		result["data"] = mergedData
 	}
 
 	if n.logger != nil {
@@ -2621,6 +2645,13 @@ func getMapKeys(m map[string]interface{}) []string {
 // This handles cases like []string which structpb.NewValue() cannot handle directly
 func convertToProtobufCompatible(data interface{}) interface{} {
 	switch v := data.(type) {
+	case []common.Hash:
+		// Convert []common.Hash to []interface{} of strings
+		result := make([]interface{}, len(v))
+		for i, h := range v {
+			result[i] = h.Hex()
+		}
+		return result
 	case []string:
 		// Convert []string to []interface{}
 		result := make([]interface{}, len(v))
