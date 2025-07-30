@@ -351,13 +351,43 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 			}
 
 		case triggerItem := <-eventTriggerCh:
-			o.logger.Info("event trigger", "task_id", triggerItem.TaskID, "marker", triggerItem.Marker)
+			hasEnrichedData := triggerItem.Marker.EnrichedData != nil
+			o.logger.Info("event trigger",
+				"task_id", triggerItem.TaskID,
+				"marker", triggerItem.Marker,
+				"has_enriched_data", hasEnrichedData)
 
 			// Create structured data for the event trigger
-			eventDataMap := map[string]interface{}{
-				"blockNumber":     triggerItem.Marker.BlockNumber,
-				"logIndex":        triggerItem.Marker.LogIndex,
-				"transactionHash": triggerItem.Marker.TxHash,
+			var eventDataMap map[string]interface{}
+
+			if triggerItem.Marker.EnrichedData != nil {
+				// Use enriched data if available (includes token metadata, addresses, etc.)
+				eventDataMap = triggerItem.Marker.EnrichedData
+
+				// Ensure basic fields are still available for backward compatibility
+				if _, exists := eventDataMap["blockNumber"]; !exists {
+					eventDataMap["blockNumber"] = triggerItem.Marker.BlockNumber
+				}
+				if _, exists := eventDataMap["logIndex"]; !exists {
+					eventDataMap["logIndex"] = triggerItem.Marker.LogIndex
+				}
+				if _, exists := eventDataMap["transactionHash"]; !exists {
+					eventDataMap["transactionHash"] = triggerItem.Marker.TxHash
+				}
+
+				o.logger.Debug("✅ Using enriched event data for task execution",
+					"task_id", triggerItem.TaskID,
+					"enriched_fields", len(eventDataMap))
+			} else {
+				// Fall back to basic metadata if no enriched data
+				eventDataMap = map[string]interface{}{
+					"blockNumber":     triggerItem.Marker.BlockNumber,
+					"logIndex":        triggerItem.Marker.LogIndex,
+					"transactionHash": triggerItem.Marker.TxHash,
+				}
+
+				o.logger.Debug("📋 Using basic event metadata (no enrichment available)",
+					"task_id", triggerItem.TaskID)
 			}
 
 			eventData, err := structpb.NewStruct(eventDataMap)

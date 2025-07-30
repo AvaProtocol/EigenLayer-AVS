@@ -43,6 +43,22 @@ func (l *noOpLogger) WithServiceName(serviceName string) sdklogging.Logger { ret
 func (l *noOpLogger) WithHostName(hostName string) sdklogging.Logger       { return l }
 func (l *noOpLogger) Sync() error                                          { return nil }
 
+// getChainNameFromId maps chain ID to human-readable chain name
+func getChainNameFromId(chainId uint64) string {
+	switch chainId {
+	case 1:
+		return "Ethereum"
+	case 11155111:
+		return "Sepolia"
+	case 8453:
+		return "Base"
+	case 84532:
+		return "Base Sepolia"
+	default:
+		return "Unknown"
+	}
+}
+
 type VMState string
 
 const (
@@ -273,6 +289,32 @@ func (v *VM) WithDb(db storage.Storage) *VM {
 	return v
 }
 
+// WithChainName updates the workflowContext with the chain name based on chainId
+func (v *VM) WithChainName(chainId uint64) *VM {
+	chainName := getChainNameFromId(chainId)
+
+	// Debug logging
+	if v.logger != nil {
+		v.logger.Info("🔗 WithChainName called", "chainId", chainId, "chainName", chainName)
+	}
+
+	// Update workflowContext if it exists
+	if workflowContextInterface, exists := v.vars[WorkflowContextVarName]; exists {
+		if workflowContext, ok := workflowContextInterface.(map[string]interface{}); ok {
+			workflowContext["chain"] = chainName
+			if v.logger != nil {
+				v.logger.Info("✅ Updated workflowContext with chain name", "chainName", chainName)
+			}
+		}
+	} else {
+		if v.logger != nil {
+			v.logger.Warn("⚠️ workflowContext not found in VM vars")
+		}
+	}
+
+	return v
+}
+
 func (v *VM) GetTriggerNameAsVar() (string, error) {
 	// This method doesn't modify VM state directly, so mutex is not strictly needed
 	// unless task can be modified concurrently, which is unlikely during this call.
@@ -386,6 +428,7 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			"executionCount":     task.ExecutionCount,
 			"lastRanAt":          task.LastRanAt,
 			"status":             getTaskStatusString(task.Status),
+			"chain":              "Unknown", // Default value, will be updated if chainId is available
 		}
 		v.AddVar(WorkflowContextVarName, workflowContext)
 	}
@@ -2092,29 +2135,31 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			restConfig.Body = body
 		}
 
-		// Handle headers - can be map[string]string or [][]string (headersMap format)
-		if headers, ok := config["headers"].(map[string]string); ok {
-			restConfig.Headers = headers
-		} else if headersMap, ok := config["headersMap"].([][]string); ok {
-			headers := make(map[string]string)
-			for _, header := range headersMap {
-				if len(header) == 2 {
-					headers[header[0]] = header[1]
+		// Handle headers - only support standard map[string]string format
+		if headersInterface, exists := config["headers"]; exists {
+			if headers, ok := headersInterface.(map[string]string); ok {
+				restConfig.Headers = headers
+			} else {
+				// Debug: Log the actual type we received
+				if nodeID != "" { // Only log for real nodes, not empty test cases
+					fmt.Printf("DEBUG: CreateNodeFromType headers type mismatch - got %T, expected map[string]string, value: %+v\n", headersInterface, headersInterface)
 				}
-			}
-			restConfig.Headers = headers
-		} else if headersAny, ok := config["headersMap"].([]interface{}); ok {
-			headers := make(map[string]string)
-			for _, headerAny := range headersAny {
-				if headerSlice, ok := headerAny.([]interface{}); ok && len(headerSlice) == 2 {
-					if key, ok := headerSlice[0].(string); ok {
-						if value, ok := headerSlice[1].(string); ok {
-							headers[key] = value
+				// Try to convert from map[string]interface{} to map[string]string
+				if headersMap, ok := headersInterface.(map[string]interface{}); ok {
+					convertedHeaders := make(map[string]string)
+					for k, v := range headersMap {
+						if vStr, ok := v.(string); ok {
+							convertedHeaders[k] = vStr
+						}
+					}
+					if len(convertedHeaders) > 0 {
+						restConfig.Headers = convertedHeaders
+						if nodeID != "" {
+							fmt.Printf("DEBUG: CreateNodeFromType successfully converted headers from map[string]interface{} to map[string]string: %+v\n", convertedHeaders)
 						}
 					}
 				}
 			}
-			restConfig.Headers = headers
 		}
 
 		node.TaskType = &avsproto.TaskNode_RestApi{
@@ -2456,30 +2501,13 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			if method, ok := runnerConfig["method"].(string); ok {
 				rConfig.Method = method
 			}
+
 			if body, ok := runnerConfig["body"].(string); ok {
 				rConfig.Body = body
 			}
 
-			// Handle headers
-			if headersMap, ok := runnerConfig["headersMap"].([][]string); ok {
-				headers := make(map[string]string)
-				for _, header := range headersMap {
-					if len(header) == 2 {
-						headers[header[0]] = header[1]
-					}
-				}
-				rConfig.Headers = headers
-			} else if headersAny, ok := runnerConfig["headersMap"].([]interface{}); ok {
-				headers := make(map[string]string)
-				for _, headerAny := range headersAny {
-					if headerSlice, ok := headerAny.([]interface{}); ok && len(headerSlice) == 2 {
-						if key, ok := headerSlice[0].(string); ok {
-							if value, ok := headerSlice[1].(string); ok {
-								headers[key] = value
-							}
-						}
-					}
-				}
+			// Handle headers - only support standard map[string]string format
+			if headers, ok := runnerConfig["headers"].(map[string]string); ok {
 				rConfig.Headers = headers
 			}
 
@@ -2846,13 +2874,9 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				"body":   restApi.Config.Body,
 			}
 
-			// Handle headers map format - convert to array format like in LoopNode
-			if restApi.Config.Headers != nil && len(restApi.Config.Headers) > 0 {
-				headersList := make([]interface{}, 0, len(restApi.Config.Headers))
-				for key, value := range restApi.Config.Headers {
-					headersList = append(headersList, []interface{}{key, value})
-				}
-				config["headersMap"] = headersList
+			// Handle headers - use standard map format
+			if len(restApi.Config.Headers) > 0 {
+				config["headers"] = restApi.Config.Headers
 			}
 
 			// Clean up complex protobuf types before returning
@@ -3340,23 +3364,7 @@ func convertConfigForFrontend(input map[string]interface{}) map[string]interface
 			} else {
 				result[key] = value
 			}
-		case "headersMap":
-			// Convert headersMap array format back to headers object format for frontend
-			if headersArray, ok := value.([]interface{}); ok {
-				headersObj := make(map[string]string)
-				for _, header := range headersArray {
-					if headerPair, ok := header.([]interface{}); ok && len(headerPair) == 2 {
-						if keyStr, ok := headerPair[0].(string); ok {
-							if valueStr, ok := headerPair[1].(string); ok {
-								headersObj[keyStr] = valueStr
-							}
-						}
-					}
-				}
-				result["headers"] = headersObj
-			} else {
-				result[key] = value
-			}
+
 		case "runner":
 			// Handle runner configuration recursively
 			if runnerMap, ok := value.(map[string]interface{}); ok {

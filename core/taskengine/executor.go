@@ -18,18 +18,20 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
-func NewExecutor(config *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger) *TaskExecutor {
+func NewExecutor(config *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger, tokenEnrichmentService *TokenEnrichmentService) *TaskExecutor {
 	return &TaskExecutor{
-		db:                db,
-		logger:            logger,
-		smartWalletConfig: config,
+		db:                     db,
+		logger:                 logger,
+		smartWalletConfig:      config,
+		tokenEnrichmentService: tokenEnrichmentService,
 	}
 }
 
 type TaskExecutor struct {
-	db                storage.Storage
-	logger            sdklogging.Logger
-	smartWalletConfig *config.SmartWalletConfig
+	db                     storage.Storage
+	logger                 sdklogging.Logger
+	smartWalletConfig      *config.SmartWalletConfig
+	tokenEnrichmentService *TokenEnrichmentService
 }
 
 type QueueExecutionData struct {
@@ -159,6 +161,47 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	if err != nil {
 		return nil, err
+	}
+
+	// Add chain name to workflowContext - extract chainId from enriched event data first, fallback to tokenEnrichmentService
+	var chainId uint64
+	var chainIdSource string
+
+	// Try to extract chainId from enriched event data in the trigger reason
+	if triggerReason != nil && triggerReason.Output != nil {
+		// Handle the enriched data format that survives JSON serialization
+		if enrichedDataMap, ok := triggerReason.Output.(map[string]interface{}); ok {
+			if enrichedData, hasEnrichedData := enrichedDataMap["enriched_data"].(map[string]interface{}); hasEnrichedData {
+				// Try different numeric types for chainId
+				if chainIdFloat, ok := enrichedData["chainId"].(float64); ok {
+					chainId = uint64(chainIdFloat)
+					chainIdSource = "enriched_event_data"
+				} else if chainIdInt, ok := enrichedData["chainId"].(int64); ok {
+					chainId = uint64(chainIdInt)
+					chainIdSource = "enriched_event_data"
+				} else if chainIdUint, ok := enrichedData["chainId"].(uint64); ok {
+					chainId = chainIdUint
+					chainIdSource = "enriched_event_data"
+				}
+			}
+		}
+	}
+
+	// Fallback to tokenEnrichmentService if chainId not found in enriched data
+	if chainId == 0 && x.tokenEnrichmentService != nil {
+		chainId = x.tokenEnrichmentService.GetChainID()
+		chainIdSource = "tokenEnrichmentService"
+	}
+
+	if chainId > 0 {
+		if x.logger != nil {
+			x.logger.Info("🔗 Executor: Adding chain name to VM", "chainId", chainId, "source", chainIdSource)
+		}
+		vm.WithChainName(chainId)
+	} else {
+		if x.logger != nil {
+			x.logger.Warn("⚠️ Executor: No chainId available for chain name resolution")
+		}
 	}
 
 	// Debug: Log FilterNode expressions in VM after creation

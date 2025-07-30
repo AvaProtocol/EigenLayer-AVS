@@ -88,7 +88,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), nil)
 	triggerData := testutil.GetTestEventTriggerDataWithTransferData()
 	execution, err := executor.RunTask(task, &QueueExecutionData{
 		TriggerType:   triggerData.Type,
@@ -195,7 +195,7 @@ func TestExecutorRunTaskWithBranchSilentFailureBehavior(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), nil)
 	triggerData := testutil.GetTestEventTriggerData()
 	execution, err := executor.RunTask(task, &QueueExecutionData{
 		TriggerType:   triggerData.Type,
@@ -303,7 +303,7 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), nil)
 	triggerData := testutil.GetTestEventTriggerData()
 	execution, err := executor.RunTask(task, &QueueExecutionData{
 		TriggerType:   triggerData.Type,
@@ -462,7 +462,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 	}
 
 	// Create executor
-	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), nil)
 
 	// Get the event trigger data with EvmLog data
 	testTriggerData := testutil.GetTestEventTriggerData()
@@ -590,7 +590,7 @@ func TestExecutorRunTaskWithBlockTriggerOutputData(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), nil)
 	triggerData := testutil.GetTestEventTriggerData()
 	execution, err := executor.RunTask(task, &QueueExecutionData{
 		TriggerType:   triggerData.Type,
@@ -675,7 +675,7 @@ func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), nil)
 	triggerData := testutil.GetTestEventTriggerData()
 	execution, err := executor.RunTask(task, &QueueExecutionData{
 		TriggerType:   triggerData.Type,
@@ -747,7 +747,7 @@ func TestExecutorRunTaskWithCronTriggerOutputData(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), nil)
 	triggerData := testutil.GetTestEventTriggerData()
 	execution, err := executor.RunTask(task, &QueueExecutionData{
 		TriggerType:   triggerData.Type,

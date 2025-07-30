@@ -5,7 +5,7 @@
 EventTrigger expression returning `null` despite matching transfer events existing:
 
 ```
-Expression: 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef&&contracts=[0x7b79995e5f793a07bc00c21412e50ecae098e7f9,0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238]&&from=0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9||to=0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9
+Expression: 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef&&contracts=[0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14,0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238]&&from=0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9||to=0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9
 
 Transaction: https://sepolia.etherscan.io/tx/0x9ff1829f35bd28b0ead18be3c0d9c98dd320e20a87fbad28a6b735d2c7f475cf
 Result: null (no aggregator or operator logs)

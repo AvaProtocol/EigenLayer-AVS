@@ -18,6 +18,23 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// getRealisticBlockNumberForChain returns a realistic block number for simulation based on chain ID
+func getRealisticBlockNumberForChain(chainID int64) uint64 {
+	switch chainID {
+	case 1: // Ethereum mainnet
+		return 19500000 + uint64(time.Now().Unix()%100000) // ~19.5M + small random offset
+	case 11155111: // Sepolia testnet
+		return 6500000 + uint64(time.Now().Unix()%100000) // ~6.5M + small random offset
+	case 137: // Polygon mainnet
+		return 52000000 + uint64(time.Now().Unix()%100000) // ~52M + small random offset
+	case 56: // BSC mainnet
+		return 35000000 + uint64(time.Now().Unix()%100000) // ~35M + small random offset
+	default:
+		// Default to Sepolia-like numbers for unknown chains
+		return 6500000 + uint64(time.Now().Unix()%100000)
+	}
+}
+
 // RunNodeImmediately executes a single node immediately for testing/simulation purposes.
 // This is different from workflow execution - it runs the node right now, ignoring any scheduling.
 func (n *Engine) RunNodeImmediately(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
@@ -232,6 +249,21 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 		return nil, fmt.Errorf("failed to convert query: %w", err)
 	}
 
+	// Convert all queries for direction determination
+	var allQueries []*avsproto.EventTrigger_Query
+	for i, queryInterface := range queriesArray {
+		if queryMapItem, ok := queryInterface.(map[string]interface{}); ok {
+			convertedQuery, err := n.convertMapToEventQuery(queryMapItem)
+			if err != nil {
+				if n.logger != nil {
+					n.logger.Warn("Failed to convert query for direction determination", "queryIndex", i, "error", err)
+				}
+				continue
+			}
+			allQueries = append(allQueries, convertedQuery)
+		}
+	}
+
 	if n.logger != nil {
 		methodCallsCount := 0
 		if query != nil && query.GetMethodCalls() != nil {
@@ -261,12 +293,11 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 		toTopic := common.BytesToHash(toAddress.Bytes())
 
 		// Use dynamic sample value based on decimals (default to 18 decimals like ETH)
-		sampleValue := GetSampleTransferAmount(18)
+		sampleValue := GetSampleTransferAmount(uint32(18))
 		sampleData := common.LeftPadBytes(sampleValue.Bytes(), 32)
 
-		// Create sample log with current timestamp-based block number for uniqueness
-		currentTime := time.Now().Unix()
-		sampleBlockNumber := uint64(1750000000 + currentTime) // Use timestamp to make it unique
+		// Create sample log with realistic block number for the chain
+		sampleBlockNumber := getRealisticBlockNumberForChain(chainID)
 
 		sampleLog := &types.Log{
 			Address:     sampleAddress,
@@ -319,8 +350,8 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	}
 
 	metadata := map[string]interface{}{
-		"address":          simulatedLog.Address.Hex(),
-		"topics":           topicsMetadata, // Now protobuf-compatible
+		"tokenContract":    simulatedLog.Address.Hex(), // Renamed for clarity
+		"topics":           topicsMetadata,             // Now protobuf-compatible
 		"data":             "0x" + common.Bytes2Hex(simulatedLog.Data),
 		"blockNumber":      simulatedLog.BlockNumber,
 		"transactionHash":  simulatedLog.TxHash.Hex(),
@@ -331,37 +362,44 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 		"chainId":          chainID,
 	}
 
-	// Parse event data using ABI if provided
-	var parsedData map[string]interface{}
-	var isTransferEvent bool
+	// Use shared enrichment logic instead of duplicate ABI parsing and token enrichment
+	enrichmentParams := SharedEventEnrichmentParams{
+		EventLog:               simulatedLog,
+		ContractABI:            query.GetContractAbi(),
+		Query:                  query,
+		AllQueries:             allQueries, // Pass all queries for direction determination
+		TokenEnrichmentService: n.tokenEnrichmentService,
+		RpcClient:              rpcConn, // Use the global rpcConn from simulation context
+		Logger:                 n.logger,
+		ChainID:                chainID, // Add chainID for chain name resolution
+	}
 
-	contractABI := query.GetContractAbi()
-	// OPTIMIZED: Use protobuf Values directly without string conversion
-	if len(contractABI) > 0 {
+	// Enrich the event data using shared logic
+	enrichmentResult, err := EnrichEventWithTokenMetadata(enrichmentParams)
+	if err != nil {
 		if n.logger != nil {
-			n.logger.Info("🔍 EventTrigger: Using optimized ABI parsing (no string conversion)",
-				"hasABI", true,
-				"abiElementCount", len(contractABI))
+			n.logger.Warn("Failed to enrich simulated event data, using basic metadata", "error", err)
 		}
+		// Fallback to basic metadata if shared enrichment fails
+		enrichmentResult = &SharedEventEnrichmentResult{
+			ParsedData:      metadata,
+			IsTransferEvent: false,
+			EventName:       "Unknown",
+		}
+	}
 
-		if parsedEventData, err := n.parseEventWithABIOptimized(simulatedLog, contractABI, query); err == nil {
-			// Success with optimized parsing
-			parsedData = parsedEventData
+	// Extract results from shared enrichment
+	parsedData := enrichmentResult.ParsedData
+	isTransferEvent := enrichmentResult.IsTransferEvent
 
-			// Check if this is enriched transfer data
-			if eventName, ok := parsedEventData["eventName"].(string); ok && eventName == "Transfer" {
-				isTransferEvent = true
-			}
-		} else {
-			n.logger.Warn("Failed to parse event with optimized ABI method, using raw data", "error", err)
-			// Fallback to raw data if optimized ABI parsing fails
-			parsedData = metadata
-		}
-	} else {
-		if n.logger != nil {
-			n.logger.Info("🔍 EventTrigger: No ABI provided, using raw log data")
-		}
-		parsedData = metadata
+	if n.logger != nil {
+		n.logger.Info("✅ SharedEventEnrichment: Simulation completed successfully",
+			"contract", simulatedLog.Address.Hex(),
+			"block", simulatedLog.BlockNumber,
+			"txHash", simulatedLog.TxHash.Hex(),
+			"chainId", chainID,
+			"is_transfer", isTransferEvent,
+			"event_name", enrichmentResult.EventName)
 	}
 
 	// Build the result structure based on event type
@@ -387,7 +425,7 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	}
 
 	if n.logger != nil {
-		hasABI := len(contractABI) > 0
+		hasABI := len(query.GetContractAbi()) > 0
 		n.logger.Info("✅ EventTrigger: Tenderly simulation completed successfully",
 			"contract", simulatedLog.Address.Hex(),
 			"block", simulatedLog.BlockNumber,
@@ -767,7 +805,7 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 			cancel()
 
 			if err == nil {
-				transferResponse.BlockTimestamp = int64(header.Time)
+				transferResponse.BlockTimestamp = int64(header.Time) * 1000 // Convert to milliseconds for JavaScript compatibility
 			}
 			// If error, keep the default timestamp from CreateStandardizedTransferResponse
 		}
@@ -1017,7 +1055,7 @@ func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, querie
 
 	// Build raw metadata (the original blockchain event data)
 	metadata := map[string]interface{}{
-		"address":          mostRecentEvent.Address.Hex(),
+		"tokenContract":    mostRecentEvent.Address.Hex(), // Renamed for clarity
 		"topics":           topics,
 		"data":             "0x" + common.Bytes2Hex(mostRecentEvent.Data),
 		"blockNumber":      mostRecentEvent.BlockNumber,
@@ -1445,6 +1483,19 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 	}
 
 	vm.WithLogger(n.logger).WithDb(n.db)
+
+	// Add chain name to workflowContext if token enrichment service is available
+	if n.tokenEnrichmentService != nil {
+		chainId := n.tokenEnrichmentService.GetChainID()
+		if n.logger != nil {
+			n.logger.Info("🔗 RunNodeImmediately: Adding chain name to VM", "chainId", chainId)
+		}
+		vm.WithChainName(chainId)
+	} else {
+		if n.logger != nil {
+			n.logger.Warn("⚠️ RunNodeImmediately: No token enrichment service available for chain name")
+		}
+	}
 
 	// Add input variables to VM for template processing and node access
 	// Apply dual-access mapping to enable both camelCase and snake_case field access

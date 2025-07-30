@@ -80,7 +80,7 @@ func CreateStandardizedTransferResponse(
 		TokenDecimals:   tokenDecimals,
 		TransactionHash: txHash,
 		BlockNumber:     blockNumber,
-		BlockTimestamp:  time.Now().Unix(), // Default for simulation; will be overridden for real events
+		BlockTimestamp:  time.Now().Unix() * 1000, // Convert to milliseconds for JavaScript compatibility
 		FromAddress:     fromAddr,
 		ToAddress:       toAddr,
 		Value:           value,
