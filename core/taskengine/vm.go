@@ -2962,7 +2962,13 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 					// Extract fields from protobuf struct into simple map
 					methodCallMap := map[string]interface{}{
 						"methodName": methodCall.MethodName,
-						"callData":   methodCall.CallData,
+					}
+
+					// Handle optional callData field (now *string in protobuf)
+					if methodCall.CallData != nil {
+						methodCallMap["callData"] = *methodCall.CallData
+					} else {
+						methodCallMap["callData"] = ""
 					}
 
 					// Include methodParams if present
@@ -3000,7 +3006,7 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 			config := map[string]interface{}{
 				"contractAddress": contractWrite.Config.ContractAddress,
 				"contractAbi":     contractAbiArray,
-				"callData":        contractWrite.Config.CallData,
+				"callData":        contractWrite.Config.CallData, // Config level callData is still a regular string
 			}
 
 			// Handle method calls - extract fields to simple map for protobuf compatibility
@@ -3010,7 +3016,13 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 					// Extract fields from protobuf struct into simple map
 					methodCallMap := map[string]interface{}{
 						"methodName": methodCall.MethodName,
-						"callData":   methodCall.CallData,
+					}
+
+					// Handle optional callData field (now *string in protobuf)
+					if methodCall.CallData != nil {
+						methodCallMap["callData"] = *methodCall.CallData
+					} else {
+						methodCallMap["callData"] = ""
 					}
 
 					// Include methodParams if present

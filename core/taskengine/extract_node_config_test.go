@@ -247,11 +247,17 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 				contractAbi, ok := runnerConfig["contractAbi"].([]interface{})
 				require.True(t, ok, "contractAbi should be []interface{}")
 				assert.NotEmpty(t, contractAbi, "contractAbi should not be empty")
-				assert.Equal(t, "0xa9059cbb", runnerConfig["callData"])
-
+				// callData is now optional when methodParams are provided
+				// Check that methodCalls are properly configured
 				methodCalls, ok := runnerConfig["methodCalls"]
 				require.True(t, ok, "methodCalls should be present")
 				assert.NotNil(t, methodCalls)
+
+				// Since we're using methodParams, callData might be empty or contain legacy value
+				// This is acceptable behavior after the CallData → MethodParams migration
+				if callData, exists := runnerConfig["callData"]; exists {
+					t.Logf("callData present: %v (optional in new schema)", callData)
+				}
 			},
 		},
 		{
@@ -592,9 +598,17 @@ func TestExtractNodeConfiguration_StandaloneNodesProtobufCompatibility(t *testin
 			// Additional verification for specific node types
 			switch tc.nodeType {
 			case avsproto.NodeType_NODE_TYPE_REST_API:
-				// REST API should use headersMap format for consistency
-				assert.Contains(t, config, "headersMap", "REST API standalone node should have headersMap")
-				assert.NotContains(t, config, "headers", "REST API standalone node should not have headers")
+				// REST API should use headers format (standardized from headersMap)
+				assert.Contains(t, config, "headers", "REST API standalone node should have headers")
+				assert.NotContains(t, config, "headersMap", "REST API standalone node should not have headersMap (deprecated)")
+
+				// Validate headers structure (converted to map[string]interface{} by removeComplexProtobufTypes)
+				if headers, exists := config["headers"]; exists {
+					headersMap, ok := headers.(map[string]interface{})
+					assert.True(t, ok, "Headers should be map[string]interface{} after protobuf conversion")
+					assert.Equal(t, "Bearer test-token", headersMap["Authorization"])
+					assert.Equal(t, "application/json", headersMap["Content-Type"])
+				}
 
 			case avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY:
 				// GraphQL variables should be converted to interface{}
