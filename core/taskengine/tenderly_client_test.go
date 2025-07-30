@@ -516,7 +516,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 		// Check if we have the raw blockchain log data format
 		if eventData, hasData := result["data"].(map[string]interface{}); hasData && eventData != nil {
 			// Raw blockchain log format: validate raw log fields
-			assert.NotNil(t, eventData["address"], "Should have contract address")
+			assert.NotNil(t, eventData["tokenContract"], "Should have contract address")
 			assert.NotNil(t, eventData["blockNumber"], "Should have block number")
 			assert.NotNil(t, eventData["topics"], "Should have topics")
 			assert.NotNil(t, eventData["data"], "Should have raw data")
@@ -689,7 +689,7 @@ func printEngineResult(result map[string]interface{}) {
 
 	if evmLog, ok := result["evm_log"].(map[string]interface{}); ok {
 		fmt.Printf("\n🔍 EVM LOG ANALYSIS:\n")
-		fmt.Printf("Address: %s\n", evmLog["address"])
+		fmt.Printf("Address: %s\n", evmLog["tokenContract"])
 		fmt.Printf("Block: %v\n", evmLog["blockNumber"])
 		fmt.Printf("TX Hash: %s\n", evmLog["transactionHash"])
 
@@ -1505,7 +1505,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		require.NotNil(t, eventData, "Should have event data")
 
 		// Verify expected fields in the raw blockchain log data
-		assert.NotNil(t, eventData["address"], "Should have contract address")
+		assert.NotNil(t, eventData["tokenContract"], "Should have contract address")
 		assert.NotNil(t, eventData["blockNumber"], "Should have block number")
 		assert.NotNil(t, eventData["transactionHash"], "Should have transaction hash")
 		assert.NotNil(t, eventData["topics"], "Should have topics")
@@ -1516,12 +1516,12 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		require.True(t, ok, "metadata should be a map[string]interface{}")
 		require.NotNil(t, metadata, "Should have metadata")
 
-		assert.NotNil(t, metadata["address"], "Should have address in metadata")
+		assert.NotNil(t, metadata["tokenContract"], "Should have address in metadata")
 		assert.NotNil(t, metadata["blockNumber"], "Should have blockNumber in metadata")
 
 		t.Logf("✅ Tenderly simulation successful!")
 		t.Logf("📊 Raw Blockchain Log Data Structure:")
-		t.Logf("   Contract Address: %v", eventData["address"])
+		t.Logf("   Contract Address: %v", eventData["tokenContract"])
 		t.Logf("   Block: %v", eventData["blockNumber"])
 		t.Logf("   TX Hash: %v", eventData["transactionHash"])
 		t.Logf("   Topics: %v", eventData["topics"])
@@ -1576,12 +1576,12 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		require.NotNil(t, eventData, "Should have event data")
 
 		// Verify we have raw blockchain log data (the condition logic is tested elsewhere)
-		assert.NotNil(t, eventData["address"], "Should have contract address")
+		assert.NotNil(t, eventData["tokenContract"], "Should have contract address")
 		assert.NotNil(t, eventData["blockNumber"], "Should have block number")
 		assert.NotNil(t, eventData["topics"], "Should have topics")
 
 		t.Logf("✅ Condition evaluation successful!")
-		t.Logf("   Contract Address: %v", eventData["address"])
+		t.Logf("   Contract Address: %v", eventData["tokenContract"])
 		t.Logf("   Block Number: %v", eventData["blockNumber"])
 		t.Logf("   Topics: %v", eventData["topics"])
 		t.Logf("   Condition: simulation mode provides sample data ✅")
@@ -1767,7 +1767,7 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		t.Logf("✅ Success! Here's the raw blockchain log data structure users can reference:")
 		t.Logf("")
 		t.Logf("📋 Raw Blockchain Log Fields:")
-		t.Logf("   address: %v", transferData["address"])
+		t.Logf("   address: %v", transferData["tokenContract"])
 		t.Logf("   blockNumber: %v", transferData["blockNumber"])
 		t.Logf("   transactionHash: %v", transferData["transactionHash"])
 		t.Logf("   topics: %v", transferData["topics"])
@@ -1798,9 +1798,9 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		t.Logf("4. Users can reference fields like: data.address, data.topics, data.data, etc.")
 		t.Logf("5. For production: set 'simulationMode': false to use real blockchain data")
 
-		// Verify all expected raw blockchain log fields are present
+		// Verify all expected enriched event fields are present
 		expectedFields := []string{
-			"address", "blockNumber", "transactionHash", "topics", "data",
+			"tokenContract", "blockNumber", "transactionHash", "topics", "data",
 			"blockHash", "logIndex", "removed", "chainId", "transactionIndex",
 		}
 

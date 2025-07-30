@@ -3173,7 +3173,9 @@ func buildEventTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Eve
 
 				// Convert to google.protobuf.Value only if we have valid data
 				if shouldConvert {
-					if protoValue, err := structpb.NewValue(dataToConvert); err == nil {
+					// Convert data to protobuf-compatible format before serialization
+					compatibleData := convertToProtobufCompatible(dataToConvert)
+					if protoValue, err := structpb.NewValue(compatibleData); err == nil {
 						eventOutput.Data = protoValue
 					}
 				}
