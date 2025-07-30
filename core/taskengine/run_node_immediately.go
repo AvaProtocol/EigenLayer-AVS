@@ -1994,7 +1994,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				// Fallback: Try to extract transaction hash from result (backward compatibility)
 				if txHash, ok := result["txHash"].(string); ok {
 					convertedResult := map[string]interface{}{
-						"methodName": "unknown",
+						"methodName": UnknownMethodName,
 						"success":    true,
 						"transaction": map[string]interface{}{
 							"hash": txHash,
@@ -2003,7 +2003,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 					resultsArray = append(resultsArray, convertedResult)
 				} else if transactionHash, ok := result["transactionHash"].(string); ok {
 					convertedResult := map[string]interface{}{
-						"methodName": "unknown",
+						"methodName": UnknownMethodName,
 						"success":    true,
 						"transaction": map[string]interface{}{
 							"hash": transactionHash,

@@ -478,7 +478,7 @@ func (tc *TenderlyClient) simulateTransferEvent(ctx context.Context, contractAdd
 	contractAddr := strings.ToLower(contractAddress)
 	knownUSDCAddresses := []string{
 		"0x1c7d4b196cb0c7b01d743fbc6116a902379c7238", // USDC on Sepolia
-		"0xa0b86a33e6b99d86c1c87c5a29b8a6b2ccd6ec73", // USDT on Sepolia (example)
+		"0xaa8e23fb1079ea71e0a56f48a2aa51851d8433d0", // USDT on Sepolia
 	}
 
 	for _, usdcAddr := range knownUSDCAddresses {

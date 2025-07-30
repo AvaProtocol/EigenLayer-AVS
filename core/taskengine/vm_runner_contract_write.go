@@ -84,7 +84,7 @@ func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) 
 		methodCalls = []*avsproto.ContractWriteNode_MethodCall{
 			{
 				CallData:   &callData,
-				MethodName: "unknown", // Will be resolved from ABI if available
+				MethodName: UnknownMethodName, // Will be resolved from ABI if available
 			},
 		}
 	}
@@ -153,9 +153,9 @@ func (r *ContractWriteProcessor) executeMethodCall(
 
 	calldata := common.FromHex(callData)
 
-	// Resolve method name from ABI if not provided or if provided name is "unknown"
+	// Resolve method name from ABI if not provided or if provided name is UnknownMethodName
 	methodName := methodCall.MethodName
-	if parsedABI != nil && (methodName == "" || methodName == "unknown") {
+	if parsedABI != nil && (methodName == "" || methodName == UnknownMethodName) {
 		if method, err := byte4.GetMethodFromCalldata(*parsedABI, calldata); err == nil {
 			methodName = method.Name
 		}

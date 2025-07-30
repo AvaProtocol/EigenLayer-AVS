@@ -106,15 +106,17 @@ https://aggregator.avaprotocol.org/telemetry
 Before merging changes from `staging` to `main`, ensure any storage structure changes are properly migrated:
 
 1. **Check for Storage Changes**
+
    ```bash
    # First checkout staging branch
    git checkout staging
-   
+
    # Compare with main to detect storage changes
    go run scripts/compare_storage_structure.go main
    ```
 
 2. **When Migration is Needed**
+
    - Storage key format changes
    - Non-backward-compatible data structure changes
    - Required field additions (without `omitempty`)
@@ -126,22 +128,24 @@ Before merging changes from `staging` to `main`, ensure any storage structure ch
 3. **Migration Process**
 
    **For Go Struct Changes (Automated):**
+
    ```bash
    # First checkout staging branch
    git checkout staging
-   
+
    # Compare with main to detect storage changes
    go run scripts/compare_storage_structure.go main
-   
+
    # If changes are detected, generate a migration file
    go run scripts/migration/create_migration.go main
    ```
-   
+
    **For Protobuf Changes (Manual Analysis Required):**
+
    ```bash
    # Compare protobuf changes between branches
    git diff origin/main..staging protobuf/
-   
+
    # Analyze for breaking changes in:
    # - Trigger output structures (e.g., timestamp -> data field)
    # - Node input/output formats (e.g., input field removal)
@@ -153,27 +157,30 @@ Before merging changes from `staging` to `main`, ensure any storage structure ch
 
    **Automated Migration (Go Structs):**
    The migration script will:
+
    - Create a timestamped migration file in `./migrations`
    - Include detected changes as comments
    - Provide example migration code
    - Add the migration to `Migrations` slice in `./migrations/migrations.go`
 
    **Manual Migration (Protobuf Changes):**
+
    - Create migration file manually following existing patterns
    - Focus on data cleanup rather than backward compatibility
    - Cancel/remove incompatible workflows and executions
    - Clear cached data that needs regeneration
 
 5. **No Migration Needed For**
+
    - Adding fields with `omitempty` JSON tags
    - Runtime-only changes
    - Backward-compatible modifications
    - New optional protobuf fields
 
 6. **Active Migrations**
-   
+
    Current active migrations that will run on deployment:
-   
+
    - `20250603-183034-token-metadata-fields` - TokenMetadata struct field additions
    - `20250128-120000-protobuf-structure-cleanup` - v1.9.6 protobuf structure cleanup
      - Cancels workflows with incompatible trigger structures
@@ -259,6 +266,20 @@ make audit
 - Include linting in CI/CD pipelines to enforce code quality standards
 - Fix linting issues as they arise rather than letting them accumulate
 
+### Get all Github CI/CD failures
+
+The script is configured in Makefile, so run the below command to retrieve failed tests.
+`make cicd-failed RUN_ID=16632516768`
+
+Example output:
+
+```
+make cicd-failed RUN_ID=16632516768
+--- FAIL: TestEventTriggerQueriesBasedMultipleContracts (0.07s)
+--- FAIL: TestEventTriggerQueriesBasedMultipleContracts/Transfer_FROM_target_address_(any_token) (0.00s)
+--- FAIL: TestEventTriggerQueriesBasedMultipleContracts/Transfer_TO_target_address_(any_token) (0.00s)
+```
+
 ## Dependencies
 
 ## Update Protobuf Definitions
@@ -287,13 +308,13 @@ make protoc-gen
 
 ### Expected File Structure & Go Package
 
-*   **Proto source files:** Reside in the `protobuf/` directory (e.g., `protobuf/avs.proto`, `protobuf/node.proto`).
-*   **`go_package` option:** Both `avs.proto` and `node.proto` use `option go_package = "github.com/AvaProtocol/EigenLayer-AVS/protobuf;avsproto";`.
-    *   This directs `protoc-gen-go` to generate files that will be part of the Go package aliased as `avsproto`.
-    *   The import path for this package in your Go code will be `github.com/AvaProtocol/EigenLayer-AVS/protobuf` (assuming `github.com/AvaProtocol/EigenLayer-AVS` is your module name from `go.mod`).
-*   **Generated Go files:** The `make protoc-gen` command is configured (via `--go_out=.` and the `go_package` option) to place the generated `*.pb.go` and `*_grpc.pb.go` files directly into the `protobuf/` directory.
-    *   Example: `protobuf/avs.pb.go`, `protobuf/node.pb.go`.
-    *   All these generated files will contain the Go package declaration: `package avsproto`.
+- **Proto source files:** Reside in the `protobuf/` directory (e.g., `protobuf/avs.proto`, `protobuf/node.proto`).
+- **`go_package` option:** Both `avs.proto` and `node.proto` use `option go_package = "github.com/AvaProtocol/EigenLayer-AVS/protobuf;avsproto";`.
+  - This directs `protoc-gen-go` to generate files that will be part of the Go package aliased as `avsproto`.
+  - The import path for this package in your Go code will be `github.com/AvaProtocol/EigenLayer-AVS/protobuf` (assuming `github.com/AvaProtocol/EigenLayer-AVS` is your module name from `go.mod`).
+- **Generated Go files:** The `make protoc-gen` command is configured (via `--go_out=.` and the `go_package` option) to place the generated `*.pb.go` and `*_grpc.pb.go` files directly into the `protobuf/` directory.
+  - Example: `protobuf/avs.pb.go`, `protobuf/node.pb.go`.
+  - All these generated files will contain the Go package declaration: `package avsproto`.
 
 ### Using the Generated Code in Go
 

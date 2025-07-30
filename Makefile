@@ -97,6 +97,14 @@ test/clean:
 	go build ./...
 	go test -v -race -buildvcs ./...
 
+## cicd-failed: print cleaned test failures from GitHub Actions logs (usage: make cicd-failed RUN_ID=123456789)
+.PHONY: cicd-failed
+cicd-failed:
+ifndef RUN_ID
+	$(error RUN_ID is not set. Usage: make cicd-failed RUN_ID=123456789)
+endif
+	@gh run view $(RUN_ID) --log | grep "FAIL:" | sed -E 's/^.*([ ]{4}--- FAIL:|--- FAIL:)/\1/'
+
 ## build: build the application
 .PHONY: build
 build:

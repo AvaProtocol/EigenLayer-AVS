@@ -2140,10 +2140,6 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			if headers, ok := headersInterface.(map[string]string); ok {
 				restConfig.Headers = headers
 			} else {
-				// Debug: Log the actual type we received
-				if nodeID != "" { // Only log for real nodes, not empty test cases
-					fmt.Printf("DEBUG: CreateNodeFromType headers type mismatch - got %T, expected map[string]string, value: %+v\n", headersInterface, headersInterface)
-				}
 				// Try to convert from map[string]interface{} to map[string]string
 				if headersMap, ok := headersInterface.(map[string]interface{}); ok {
 					convertedHeaders := make(map[string]string)
@@ -2154,9 +2150,6 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 					}
 					if len(convertedHeaders) > 0 {
 						restConfig.Headers = convertedHeaders
-						if nodeID != "" {
-							fmt.Printf("DEBUG: CreateNodeFromType successfully converted headers from map[string]interface{} to map[string]string: %+v\n", convertedHeaders)
-						}
 					}
 				}
 			}

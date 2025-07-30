@@ -11,6 +11,13 @@ const (
 	StandardGasCostHex = "0x5208"
 )
 
+// Contract method constants
+const (
+	// UnknownMethodName represents a placeholder for contract method names that need to be resolved from ABI
+	// Used when call_data is available but method_name is not explicitly provided
+	UnknownMethodName = "unknown"
+)
+
 // ChainBlockRanges defines the search ranges for different blockchain networks
 // Based on chain-specific block times and configured for 1-month, 2-month, and 4-month periods
 type ChainBlockRanges struct {
