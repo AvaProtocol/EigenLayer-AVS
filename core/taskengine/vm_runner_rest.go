@@ -445,9 +445,15 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		method = node.Config.Method
 		body = node.Config.Body
 		headers = node.Config.Headers
+		if r.vm.logger != nil {
+			r.vm.logger.Debug("REST API extracted headers from node config", "stepID", stepID, "headers", headers)
+		}
 	}
 	if headers == nil {
 		headers = make(map[string]string)
+		if r.vm.logger != nil {
+			r.vm.logger.Debug("REST API headers were nil, initialized empty map", "stepID", stepID)
+		}
 	}
 
 	// Extract and merge input variables from VM vars (runtime variables override config)
@@ -469,11 +475,19 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 	if headersVar, exists := r.vm.vars["headers"]; exists {
 		if headersMap, ok := headersVar.(map[string]string); ok {
+			if r.vm.logger != nil {
+				r.vm.logger.Debug("REST API overriding headers with VM variable", "stepID", stepID, "originalHeaders", headers, "newHeaders", headersMap)
+			}
 			headers = headersMap
+		} else {
+			if r.vm.logger != nil {
+				r.vm.logger.Debug("REST API found headers VM var but wrong type", "stepID", stepID, "headersVarType", fmt.Sprintf("%T", headersVar))
+			}
 		}
-	}
-	if headersMapVar, exists := r.vm.vars["headersMap"]; exists {
-		r.parseHeadersMap(headersMapVar, headers)
+	} else {
+		if r.vm.logger != nil {
+			r.vm.logger.Debug("REST API no headers VM variable found, keeping config headers", "stepID", stepID, "headers", headers)
+		}
 	}
 	r.vm.mu.Unlock()
 
@@ -525,6 +539,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	if r.vm.logger != nil {
 		r.vm.logger.Debug("REST API URL after template processing", "url", url)
+		r.vm.logger.Debug("REST API processedHeaders for content-type detection", "processedHeaders", processedHeaders)
 		r.vm.logger.Debug("REST API body preprocessing", "contentType", contentType, "usedJSONPreprocessing", isJSONContent)
 	}
 
@@ -631,17 +646,6 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		"data":       bodyData,
 	}
 
-	// Log HTTP error status codes (4xx, 5xx) but don't treat them as execution failures
-	// The workflow should handle HTTP errors through the status code in response data
-	if response.StatusCode() >= 400 {
-		statusMsg := fmt.Sprintf("HTTP %d: %s", response.StatusCode(), http.StatusText(response.StatusCode()))
-		logBuilder.WriteString(fmt.Sprintf("HTTP Status: %s\n", statusMsg))
-		if r.vm.logger != nil {
-			r.vm.logger.Debug("REST API returned error status code", "statusCode", response.StatusCode(), "status", http.StatusText(response.StatusCode()))
-		}
-		// Continue with normal successful processing - the status code is available in responseData
-	}
-
 	// Create protobuf output
 	outputValue, err := structpb.NewValue(responseData)
 	if err != nil {
@@ -661,70 +665,29 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	// Use shared function to set output variable for following nodes (workflow behavior)
 	setNodeOutputData(r.CommonProcessor, stepID, responseData)
 
-	// Use shared function to finalize execution step
-	finalizeExecutionStep(executionLogStep, true, "", logBuilder.String())
+	// Determine if the step was successful based on HTTP status code
+	var stepSuccess bool
+	var errorMessage string
 
-	if r.vm.logger != nil {
-		r.vm.logger.Info("REST API request executed successfully", "stepID", stepID, "method", method, "url", url, "statusCode", response.StatusCode())
-	}
-
-	return executionLogStep, nil
-}
-
-// parseHeadersMap handles different headersMap formats
-func (r *RestProcessor) parseHeadersMap(headersMapVal interface{}, headers map[string]string) {
-	if headersMap, ok := headersMapVal.([][]string); ok {
-		for _, header := range headersMap {
-			if len(header) == 2 {
-				headers[header[0]] = header[1]
-			}
-		}
-	} else if headersAny, ok := headersMapVal.([]interface{}); ok {
-		for _, headerAny := range headersAny {
-			if headerSlice, ok := headerAny.([]interface{}); ok && len(headerSlice) == 2 {
-				if key, ok := headerSlice[0].(string); ok {
-					if value, ok := headerSlice[1].(string); ok {
-						headers[key] = value
-					}
-				}
-			}
-		}
-	}
-}
-
-// processResponse converts HTTP response to structured data for workflow compatibility
-func (r *RestProcessor) processResponse(response *resty.Response) map[string]interface{} {
-	responseData := make(map[string]interface{})
-
-	// Always include basic response info
-	responseData["statusCode"] = response.StatusCode()
-
-	// Convert http.Header (map[string][]string) to protobuf-compatible format
-	headers := make(map[string]interface{})
-	for key, values := range response.Header() {
-		if len(values) == 1 {
-			headers[key] = values[0] // Single value as string
-		} else {
-			headers[key] = values // Multiple values as array
-		}
-	}
-	responseData["headers"] = headers
-
-	responseBody := response.Body()
-	if len(responseBody) > 0 {
-		// Try to parse as JSON first
-		var jsonData interface{}
-		if err := json.Unmarshal(responseBody, &jsonData); err == nil {
-			responseData["data"] = jsonData
-		} else {
-			// Fallback to string if not valid JSON
-			responseData["data"] = string(responseBody)
+	if response.StatusCode() >= 400 {
+		stepSuccess = false
+		errorMessage = fmt.Sprintf("HTTP %d: %s", response.StatusCode(), http.StatusText(response.StatusCode()))
+		logBuilder.WriteString(fmt.Sprintf("HTTP Status Error: %s\n", errorMessage))
+		if r.vm.logger != nil {
+			r.vm.logger.Warn("REST API returned error status code", "stepID", stepID, "statusCode", response.StatusCode(), "status", http.StatusText(response.StatusCode()))
 		}
 	} else {
-		responseData["data"] = ""
+		stepSuccess = true
+		errorMessage = ""
+		if r.vm.logger != nil {
+			r.vm.logger.Info("REST API request executed successfully", "stepID", stepID, "method", method, "url", url, "statusCode", response.StatusCode())
+		}
 	}
 
-	return responseData
+	// Use shared function to finalize execution step
+	finalizeExecutionStep(executionLogStep, stepSuccess, errorMessage, logBuilder.String())
+
+	return executionLogStep, nil
 }
 
 // escapeJSONString properly escapes a string for use within JSON

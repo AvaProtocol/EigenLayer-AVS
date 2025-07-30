@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -60,6 +61,10 @@ type EventMark struct {
 	BlockNumber uint64
 	LogIndex    uint
 	TxHash      string
+
+	// Optional enriched event data (for Transfer events and others)
+	// If nil, only basic metadata is available
+	EnrichedData map[string]interface{} `json:"enrichedData,omitempty"`
 }
 
 type Check struct {
@@ -112,6 +117,9 @@ type EventTrigger struct {
 	// Add deduplication tracking
 	processedEventsMutex sync.RWMutex
 	processedEvents      map[string]bool // key: "blockNumber-txHash-logIndex"
+
+	// Token enrichment service for enriching Transfer events
+	tokenEnrichmentService *taskengine.TokenEnrichmentService
 }
 
 type SubscriptionInfo struct {
@@ -153,6 +161,20 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 	b.wsEthClient, err = ethclient.Dial(o.WsRpcURL)
 	if err != nil {
 		panic(err)
+	}
+
+	// Initialize TokenEnrichmentService for event enrichment
+	logger.Debug("EventTrigger: initializing TokenEnrichmentService", "has_rpc", b.ethClient != nil)
+	tokenService, err := taskengine.NewTokenEnrichmentService(b.ethClient, logger)
+	if err != nil {
+		logger.Warn("EventTrigger: Failed to initialize TokenEnrichmentService", "error", err)
+		// Continue without token enrichment - will fall back to basic event data
+		b.tokenEnrichmentService = nil
+	} else {
+		b.tokenEnrichmentService = tokenService
+		if logger != nil {
+			logger.Info("EventTrigger: TokenEnrichmentService initialized successfully")
+		}
 	}
 
 	return &b
@@ -717,12 +739,8 @@ func (t *EventTrigger) processLogInternal(log types.Log) error {
 		if t.logMatchesTaskEntry(log, entry) {
 			triggeredTasks = append(triggeredTasks, taskID)
 
-			// Send trigger notification
-			marker := EventMark{
-				BlockNumber: log.BlockNumber,
-				LogIndex:    uint(log.Index),
-				TxHash:      log.TxHash.Hex(),
-			}
+			// Try to enrich the event data using shared enrichment logic
+			marker := t.createEnrichedEventMark(log, entry)
 
 			triggerMeta := TriggerMetadata[EventMark]{
 				TaskID: taskID,
@@ -731,13 +749,15 @@ func (t *EventTrigger) processLogInternal(log types.Log) error {
 
 			select {
 			case t.triggerCh <- triggerMeta:
-				t.logger.Info("🎯 Task triggered",
+				hasEnrichedData := marker.EnrichedData != nil
+				t.logger.Info("🎯 Task triggered with enriched data",
 					"task_id", taskID,
 					"block", log.BlockNumber,
 					"tx", log.TxHash.Hex(),
-					"log_index", log.Index)
+					"log_index", log.Index,
+					"has_enriched_data", hasEnrichedData)
 			default:
-				t.logger.Warn("⚠️ Trigger channel full, dropping trigger", "task_id", taskID)
+				t.logger.Warn("⚠️ Trigger channel full, dropping enriched trigger", "task_id", taskID)
 			}
 		}
 		return true
@@ -750,6 +770,64 @@ func (t *EventTrigger) processLogInternal(log types.Log) error {
 	}
 
 	return nil
+}
+
+// createEnrichedEventMark creates an EventMark with optional enriched data using shared enrichment logic
+func (t *EventTrigger) createEnrichedEventMark(log types.Log, entry *TaskEntry) EventMark {
+	// Create basic EventMark
+	marker := EventMark{
+		BlockNumber: log.BlockNumber,
+		LogIndex:    uint(log.Index),
+		TxHash:      log.TxHash.Hex(),
+	}
+
+	// Try to enrich the event if we have TokenEnrichmentService and task data
+	if t.tokenEnrichmentService != nil && entry.EventData != nil && len(entry.EventData.Queries) > 0 {
+		// Use the first query for enrichment (most tasks have one query)
+		query := entry.EventData.Queries[0]
+		contractABI := query.GetContractAbi()
+
+		// Use the shared enrichment function
+		enrichmentParams := taskengine.SharedEventEnrichmentParams{
+			EventLog:               &log,
+			ContractABI:            contractABI,
+			Query:                  query,
+			AllQueries:             entry.EventData.Queries, // Pass all queries for direction determination
+			TokenEnrichmentService: t.tokenEnrichmentService,
+			RpcClient:              t.ethClient, // Use the RPC client from CommonTrigger
+			Logger:                 t.logger,
+			ChainID:                int64(t.tokenEnrichmentService.GetChainID()), // Add chainID for chain name resolution
+		}
+
+		// Enrich the event data using shared logic
+		enrichmentResult, err := taskengine.EnrichEventWithTokenMetadata(enrichmentParams)
+		if err != nil {
+			t.logger.Warn("Failed to enrich event data, using basic metadata",
+				"error", err,
+				"block", log.BlockNumber,
+				"tx", log.TxHash.Hex())
+			// Return basic marker if enrichment fails
+			return marker
+		}
+
+		// Add the enriched data to the marker
+		marker.EnrichedData = enrichmentResult.ParsedData
+
+		t.logger.Debug("✅ Event enriched with shared logic",
+			"block", log.BlockNumber,
+			"tx", log.TxHash.Hex(),
+			"is_transfer", enrichmentResult.IsTransferEvent,
+			"event_name", enrichmentResult.EventName)
+	} else {
+		// Log why enrichment was skipped
+		if t.tokenEnrichmentService == nil {
+			t.logger.Debug("Skipping event enrichment - no TokenEnrichmentService available")
+		} else if entry.EventData == nil || len(entry.EventData.Queries) == 0 {
+			t.logger.Debug("Skipping event enrichment - no query data available")
+		}
+	}
+
+	return marker
 }
 
 // logMatchesTask checks if a log matches any of the queries for a specific task

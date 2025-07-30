@@ -3,6 +3,7 @@ package taskengine
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -183,5 +184,50 @@ func TestListTasks(t *testing.T) {
 	}
 	if result.Items[0].Name != "t2" && result.Items[1].Name != "t1" {
 		t.Errorf("list task returns wrong data. expect t2, t1 got %s, %s", result.Items[0].Name, result.Items[1].Name)
+	}
+}
+
+func TestCreateTaskReturnErrorWhenExpirationTooClose(t *testing.T) {
+	db := testutil.TestMustDB()
+	defer storage.Destroy(db.(*storage.BadgerStorage))
+
+	config := testutil.GetAggregatorConfig()
+	n := New(db, config, nil, testutil.GetLogger())
+
+	// Test case 1: Expiration date 30 minutes from now (should fail)
+	tr1 := testutil.RestTask()
+	now := time.Now()
+	expiredAtTooClose := now.Add(30*time.Minute).Unix() * 1000 // 30 minutes from now in milliseconds
+	tr1.ExpiredAt = expiredAtTooClose
+
+	_, err := n.CreateTask(testutil.TestUser1(), tr1)
+
+	if err == nil {
+		t.Errorf("expect error when creating task with expiration date too close to current time")
+	}
+
+	if !strings.Contains(err.Error(), "too close to current time") {
+		t.Errorf("expect error message to contain 'too close to current time' but got %s", err.Error())
+	}
+
+	// Test case 2: Expiration date 2 hours from now (should succeed)
+	tr2 := testutil.RestTask()
+	expiredAtValid := now.Add(2*time.Hour).Unix() * 1000 // 2 hours from now in milliseconds
+	tr2.ExpiredAt = expiredAtValid
+
+	_, err = n.CreateTask(testutil.TestUser1(), tr2)
+
+	if err != nil {
+		t.Errorf("expect no error when creating task with valid expiration date, but got %s", err.Error())
+	}
+
+	// Test case 3: No expiration date (ExpiredAt = 0, should succeed)
+	tr3 := testutil.RestTask()
+	tr3.ExpiredAt = 0
+
+	_, err = n.CreateTask(testutil.TestUser1(), tr3)
+
+	if err != nil {
+		t.Errorf("expect no error when creating task with no expiration date, but got %s", err.Error())
 	}
 }

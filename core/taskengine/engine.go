@@ -624,6 +624,22 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
 		}
 	}
+
+	// Validate task expiration date - must be at least 1 hour from now
+	if taskPayload.ExpiredAt > 0 {
+		now := time.Now().Unix() * 1000 // Convert to milliseconds for consistency with frontend
+		expiredAtMs := taskPayload.ExpiredAt
+		timeDifferenceMs := expiredAtMs - now
+		minimumTimeMs := int64(60 * 60 * 1000) // 1 hour in milliseconds
+
+		if timeDifferenceMs < minimumTimeMs {
+			minutesRemaining := float64(timeDifferenceMs) / (60 * 1000)
+			return nil, status.Errorf(codes.InvalidArgument,
+				"task expiration date is too close to current time. The task must expire at least 1 hour from now. Current remaining time: %.1f minutes",
+				minutesRemaining)
+		}
+	}
+
 	task, err := model.NewTaskFromProtobuf(user, taskPayload)
 
 	if err != nil {
@@ -1711,7 +1727,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 	}
 
 	if payload.IsBlocking {
-		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger)
+		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger, n.tokenEnrichmentService)
 		execution, runErr := executor.RunTask(task, &queueTaskData)
 		if runErr != nil {
 			n.logger.Error("failed to run blocking task", runErr)
@@ -1878,6 +1894,15 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	vm.WithLogger(n.logger).WithDb(n.db)
+
+	// Add chain name to workflowContext if token enrichment service is available
+	if n.tokenEnrichmentService != nil {
+		chainId := n.tokenEnrichmentService.GetChainID()
+		n.logger.Info("🔗 Engine: Adding chain name to VM", "chainId", chainId)
+		vm.WithChainName(chainId)
+	} else {
+		n.logger.Warn("⚠️ Engine: No token enrichment service available for chain name")
+	}
 
 	// Add input variables to VM for template processing
 	// Apply dual-access mapping to enable both camelCase and snake_case field access
