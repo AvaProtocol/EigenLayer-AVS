@@ -370,8 +370,10 @@ message ContractWriteNode {
 
   message Output {
     // Changed from repeated MethodResult to google.protobuf.Value for better JavaScript native type support
-    // Data will be a JSON array of method results with enhanced response structure
+    // Data will be a flattened JSON object with decoded event logs (user-facing results)
     google.protobuf.Value data = 1;
+    // Metadata contains the raw method execution results with receipts and detailed information
+    google.protobuf.Value metadata = 2;
   }
 
   message MethodResult {
