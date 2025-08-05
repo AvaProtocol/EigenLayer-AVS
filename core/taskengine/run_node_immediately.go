@@ -2035,7 +2035,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 										}
 
 										// Decode each event log
-										for i, logInterface := range logsArray {
+										for _, logInterface := range logsArray {
 											if logMap, ok := logInterface.(map[string]interface{}); ok {
 												if contractABI != nil {
 													// Convert to types.Log structure for decoding
@@ -2072,17 +2072,36 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 													if decodedEvent, err := n.parseEventWithParsedABI(eventLog, contractABI, nil); err == nil {
 														// Add decoded event data to flattened result
 														for key, value := range decodedEvent {
-															// Use eventName_fieldName format to avoid conflicts
+															// Use eventName.fieldName format with dot notation to avoid conflicts
 															if eventName, hasEventName := decodedEvent["eventName"]; hasEventName {
 																if eventNameStr, ok := eventName.(string); ok && key != "eventName" {
-																	flatKey := fmt.Sprintf("%s_%s", eventNameStr, key)
+																	flatKey := fmt.Sprintf("%s.%s", eventNameStr, key)
 																	decodedEventsData[flatKey] = value
 																}
 															}
 														}
 
-														// Also add the event with index for multiple events
-														eventKey := fmt.Sprintf("event_%d", i)
+														// Also add the complete event object with a descriptive key for multiple events
+														var eventKey string
+														if eventName, hasEventName := decodedEvent["eventName"]; hasEventName {
+															if eventNameStr, ok := eventName.(string); ok {
+																// Try to get transaction hash or log index for uniqueness
+																var uniqueSuffix string
+																if txHash, hasTxHash := logMap["transactionHash"]; hasTxHash {
+																	if txHashStr, ok := txHash.(string); ok {
+																		uniqueSuffix = txHashStr
+																	}
+																} else if logIndex, hasLogIndex := logMap["logIndex"]; hasLogIndex {
+																	uniqueSuffix = fmt.Sprintf("%x", logIndex)
+																} else {
+																	// Fallback to eventLog.Index if logMap doesn't have logIndex
+																	uniqueSuffix = fmt.Sprintf("%d", eventLog.Index)
+																}
+																eventKey = fmt.Sprintf("%s_%s", eventNameStr, uniqueSuffix)
+															}
+														} else {
+															eventKey = fmt.Sprintf("event_%d", eventLog.Index)
+														}
 														decodedEventsData[eventKey] = decodedEvent
 													}
 												}
