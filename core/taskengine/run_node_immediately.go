@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -1978,6 +1979,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		if result != nil && len(result) > 0 {
 			// Convert result to the new data structure
 			var resultsArray []interface{}
+			var decodedEventsData = make(map[string]interface{})
 
 			// Check if we have the new results array format (from VM execution)
 			if resultsFromVM, ok := result["results"].([]interface{}); ok {
@@ -2009,6 +2011,87 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 						}
 
 						resultsArray = append(resultsArray, convertedResult)
+
+						// 🚀 NEW: Decode event logs from transaction receipt
+						if methodResult.Receipt != nil {
+							receiptData := methodResult.Receipt.AsInterface()
+							if receiptMap, ok := receiptData.(map[string]interface{}); ok {
+								if logs, hasLogs := receiptMap["logs"]; hasLogs {
+									if logsArray, ok := logs.([]interface{}); ok {
+										// Get contract ABI for event decoding
+										var contractABI *abi.ABI
+										if methodResult.MethodAbi != nil {
+											if abiData := methodResult.MethodAbi.AsInterface(); abiData != nil {
+												if abiMap, ok := abiData.(map[string]interface{}); ok {
+													if abiString, hasABI := abiMap["contractABI"]; hasABI {
+														if abiStr, ok := abiString.(string); ok {
+															if parsed, err := abi.JSON(strings.NewReader(abiStr)); err == nil {
+																contractABI = &parsed
+															}
+														}
+													}
+												}
+											}
+										}
+
+										// Decode each event log
+										for i, logInterface := range logsArray {
+											if logMap, ok := logInterface.(map[string]interface{}); ok {
+												if contractABI != nil {
+													// Convert to types.Log structure for decoding
+													eventLog := &types.Log{}
+
+													// Parse address
+													if addr, hasAddr := logMap["address"]; hasAddr {
+														if addrStr, ok := addr.(string); ok {
+															eventLog.Address = common.HexToAddress(addrStr)
+														}
+													}
+
+													// Parse topics
+													if topics, hasTopics := logMap["topics"]; hasTopics {
+														if topicsArray, ok := topics.([]interface{}); ok {
+															for _, topic := range topicsArray {
+																if topicStr, ok := topic.(string); ok {
+																	eventLog.Topics = append(eventLog.Topics, common.HexToHash(topicStr))
+																}
+															}
+														}
+													}
+
+													// Parse data
+													if data, hasData := logMap["data"]; hasData {
+														if dataStr, ok := data.(string); ok {
+															if dataBytes, err := hexutil.Decode(dataStr); err == nil {
+																eventLog.Data = dataBytes
+															}
+														}
+													}
+
+													// Decode the event using existing logic
+													if decodedEvent, err := n.parseEventWithParsedABI(eventLog, contractABI, nil); err == nil {
+														// Add decoded event data to flattened result
+														for key, value := range decodedEvent {
+															// Use eventName_fieldName format to avoid conflicts
+															if eventName, hasEventName := decodedEvent["eventName"]; hasEventName {
+																if eventNameStr, ok := eventName.(string); ok && key != "eventName" {
+																	flatKey := fmt.Sprintf("%s_%s", eventNameStr, key)
+																	decodedEventsData[flatKey] = value
+																}
+															}
+														}
+
+														// Also add the event with index for multiple events
+														eventKey := fmt.Sprintf("event_%d", i)
+														decodedEventsData[eventKey] = decodedEvent
+													}
+												}
+											}
+										}
+									}
+								}
+							}
+						}
 					} else if methodResultMap, ok := resultInterface.(map[string]interface{}); ok {
 						// Already in map format
 						resultsArray = append(resultsArray, methodResultMap)
@@ -2037,9 +2120,18 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				}
 			}
 
-			// Convert to protobuf Value
-			if resultsValue, err := structpb.NewValue(resultsArray); err == nil {
-				contractWriteOutput.Data = resultsValue
+			// 🚀 NEW: Set data field with decoded events (flattened format like ContractRead)
+			if len(decodedEventsData) > 0 {
+				if dataValue, err := structpb.NewValue(decodedEventsData); err == nil {
+					contractWriteOutput.Data = dataValue
+				}
+			}
+
+			// 🚀 NEW: Set metadata field with detailed method information
+			if len(resultsArray) > 0 {
+				if metadataValue, err := structpb.NewValue(resultsArray); err == nil {
+					contractWriteOutput.Metadata = metadataValue
+				}
 			}
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractWrite{
@@ -2188,6 +2280,16 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		if contractReadResp, ok := resp.OutputData.(*avsproto.RunNodeWithInputsResp_ContractRead); ok && contractReadResp.ContractRead != nil {
 			if contractReadResp.ContractRead.Metadata != nil {
 				resp.Metadata = contractReadResp.ContractRead.Metadata
+			}
+		}
+	}
+
+	// 🚀 NEW: Extract top-level metadata for ContractWrite nodes (for consistency with ContractRead)
+	if nodeTypeStr == NodeTypeContractWrite {
+		// For ContractWrite nodes, extract metadata directly from the contractWriteOutput that was created
+		if contractWriteResp, ok := resp.OutputData.(*avsproto.RunNodeWithInputsResp_ContractWrite); ok && contractWriteResp.ContractWrite != nil {
+			if contractWriteResp.ContractWrite.Metadata != nil {
+				resp.Metadata = contractWriteResp.ContractWrite.Metadata
 			}
 		}
 	}
