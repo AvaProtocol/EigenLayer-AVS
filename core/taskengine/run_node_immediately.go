@@ -418,42 +418,18 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 
 	// For Transfer events with enriched data, structure it properly
 	if isTransferEvent {
-		// Merge enriched data with raw blockchain metadata for complete access
-		mergedData := make(map[string]interface{})
-
-		// Add all raw blockchain fields from metadata
-		for key, value := range metadata {
-			mergedData[key] = value
-		}
-
-		// Add/override with enriched fields from parsedData
-		for key, value := range parsedData {
-			mergedData[key] = value
-		}
-
-		result["transfer_log"] = mergedData
-		result["data"] = mergedData // Also provide as data for backward compatibility
+		// Keep enriched data separate from raw blockchain metadata
+		result["transfer_log"] = parsedData // Only enriched data
+		result["data"] = parsedData         // Only enriched data for backward compatibility
 
 		if n.logger != nil {
-			n.logger.Info("✅ EventTrigger: Created enriched transfer_log structure with raw blockchain fields",
+			n.logger.Info("✅ EventTrigger: Created enriched transfer_log structure (enriched data only)",
 				"tokenSymbol", parsedData["tokenSymbol"],
 				"blockTimestamp", parsedData["blockTimestamp"])
 		}
 	} else {
-		// For non-Transfer events, merge raw metadata with enriched data
-		mergedData := make(map[string]interface{})
-
-		// Add all raw blockchain fields from metadata
-		for key, value := range metadata {
-			mergedData[key] = value
-		}
-
-		// Add/override with enriched fields from parsedData
-		for key, value := range parsedData {
-			mergedData[key] = value
-		}
-
-		result["data"] = mergedData
+		// For non-Transfer events, use only enriched/parsed data
+		result["data"] = parsedData // Only enriched/parsed data
 	}
 
 	if n.logger != nil {
@@ -473,28 +449,6 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 func (n *Engine) parseEventWithABI(eventLog *types.Log, contractABIString string, query *avsproto.EventTrigger_Query) (map[string]interface{}, error) {
 	// Parse the ABI
 	contractABI, err := abi.JSON(strings.NewReader(contractABIString))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse contract ABI: %w", err)
-	}
-
-	// Find the matching event in ABI using the first topic (event signature)
-	return n.parseEventWithParsedABI(eventLog, &contractABI, query)
-}
-
-// parseEventWithABIOptimized efficiently parses an event using protobuf Values without string conversion
-func (n *Engine) parseEventWithABIOptimized(eventLog *types.Log, abiValues []*structpb.Value, query *avsproto.EventTrigger_Query) (map[string]interface{}, error) {
-	if len(abiValues) == 0 {
-		return nil, fmt.Errorf("empty ABI provided")
-	}
-
-	// Use the optimized helper to get bytes.Reader directly
-	reader, err := ConvertContractAbiToReader(abiValues)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert ABI to reader: %v", err)
-	}
-
-	// Parse ABI directly from bytes.Reader - no string conversion!
-	contractABI, err := abi.JSON(reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse contract ABI: %w", err)
 	}
