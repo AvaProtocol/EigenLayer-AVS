@@ -463,7 +463,17 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 									// Convert log map to types.Log structure for parsing
 									if eventLog := r.convertMapToEventLog(logMap); eventLog != nil {
 										// Parse the log using shared event parsing function
-										if decodedEvent, _, err := parseEventWithABIShared(eventLog, parsedABI, nil, r.vm.logger); err == nil {
+										decodedEvent, _, err := parseEventWithABIShared(eventLog, parsedABI, nil, r.vm.logger)
+										if err != nil {
+											if r.vm != nil && r.vm.logger != nil {
+												r.vm.logger.Warn("Failed to parse event from transaction receipt log",
+													"contractAddress", eventLog.Address.Hex(),
+													"blockNumber", eventLog.BlockNumber,
+													"txHash", eventLog.TxHash.Hex(),
+													"logIndex", eventLog.Index,
+													"error", err)
+											}
+										} else {
 											// Flatten event fields into methodEvents
 											for key, value := range decodedEvent {
 												if key != "eventName" { // Skip meta field
@@ -568,7 +578,14 @@ func (r *ContractWriteProcessor) convertMapToEventLog(logMap map[string]interfac
 	// Parse other fields if needed
 	if blockNumber, hasBN := logMap["blockNumber"]; hasBN {
 		if bnStr, ok := blockNumber.(string); ok {
-			if bn, err := strconv.ParseUint(strings.TrimPrefix(bnStr, "0x"), 16, 64); err == nil {
+			bn, err := strconv.ParseUint(strings.TrimPrefix(bnStr, "0x"), 16, 64)
+			if err != nil {
+				if r.vm != nil && r.vm.logger != nil {
+					r.vm.logger.Warn("Failed to parse blockNumber from transaction receipt log",
+						"blockNumber", bnStr,
+						"error", err)
+				}
+			} else {
 				eventLog.BlockNumber = bn
 			}
 		}

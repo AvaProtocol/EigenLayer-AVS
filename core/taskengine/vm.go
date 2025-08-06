@@ -3541,36 +3541,8 @@ func (eq *ExecutionQueue) executeTask(task *ExecutionTask) *ExecutionResult {
 		}
 	}
 
-	// Set input variables in the VM context for this execution
-	// For loop iterations, we'll clean them up immediately after execution
-	eq.vm.mu.Lock()
-	if eq.vm.vars == nil {
-		eq.vm.vars = make(map[string]any)
-	}
-
-	// Store original variables to restore later
-	originalVars := make(map[string]any)
-	for key, value := range task.InputVariables {
-		if originalValue, exists := eq.vm.vars[key]; exists {
-			originalVars[key] = originalValue
-		}
-		eq.vm.vars[key] = value
-	}
-	eq.vm.mu.Unlock()
-
-	// Execute the node directly without creating a new VM
-	step, err := eq.vm.executeNodeDirect(task.Node, task.StepID)
-
-	// Restore original variables
-	eq.vm.mu.Lock()
-	for key := range task.InputVariables {
-		if originalValue, exists := originalVars[key]; exists {
-			eq.vm.vars[key] = originalValue
-		} else {
-			delete(eq.vm.vars, key)
-		}
-	}
-	eq.vm.mu.Unlock()
+	// Execute the node with temporary variables to avoid race conditions in parallel execution
+	step, err := eq.vm.executeNodeDirectWithVars(task.Node, task.StepID, task.InputVariables)
 
 	// Extract result data for loops
 	var resultData interface{}
@@ -3624,6 +3596,123 @@ func (eq *ExecutionQueue) extractResultData(step *avsproto.Execution_Step) inter
 		return ethTransferOutput.Data.AsInterface()
 	}
 	return nil
+}
+
+// executeNodeDirectWithVars executes a node directly with isolated variables without modifying shared VM state
+// This is used by the execution queue for parallel execution to avoid race conditions
+func (v *VM) executeNodeDirectWithVars(node *avsproto.TaskNode, stepID string, tempVars map[string]interface{}) (*avsproto.Execution_Step, error) {
+	if node == nil {
+		return nil, fmt.Errorf("executeNodeDirectWithVars called with nil node")
+	}
+
+	// Create isolated execution context by merging shared vars with temp vars
+	isolatedVars := make(map[string]any)
+
+	// First copy shared variables (read-only access)
+	v.mu.Lock()
+	for key, value := range v.vars {
+		isolatedVars[key] = deepCopyValue(value)
+	}
+	v.mu.Unlock()
+
+	// Then overlay the temporary variables (iteration-specific) with deep copies
+	for key, value := range tempVars {
+		isolatedVars[key] = deepCopyValue(value)
+	}
+
+	// Debug: Log the isolated variables being used for execution
+	if v.logger != nil {
+		v.logger.Debug("Executing with isolated variables",
+			"stepID", stepID,
+			"tempVars", tempVars,
+			"isolatedVars", isolatedVars)
+	}
+
+	// Execute the node with isolated context
+	return v.executeNodeWithIsolatedVars(node, stepID, isolatedVars)
+}
+
+// executeNodeWithIsolatedVars executes a node with completely isolated variables
+func (v *VM) executeNodeWithIsolatedVars(node *avsproto.TaskNode, stepID string, isolatedVars map[string]any) (*avsproto.Execution_Step, error) {
+	// For loop iterations, don't store node configuration as input variables
+	if !strings.Contains(stepID, "_iter_") {
+		// Extract and set input data for this node (making it available as node_name.input)
+		inputData := ExtractNodeConfiguration(node)
+		if inputData != nil {
+			processor := &CommonProcessor{vm: v}
+			processor.SetInputVarForStep(stepID, inputData)
+		}
+	}
+
+	var executionLogForNode *avsproto.Execution_Step
+	var err error
+
+	// Execute the appropriate node type with isolated variables
+	if nodeValue := node.GetCustomCode(); nodeValue != nil {
+		executionLogForNode, err = v.runCustomCodeWithIsolatedVars(stepID, nodeValue, isolatedVars)
+	} else if nodeValue := node.GetRestApi(); nodeValue != nil {
+		// For other node types, fall back to regular execution (they may need similar isolation)
+		executionLogForNode, err = v.runRestApi(stepID, nodeValue)
+	} else if nodeValue := node.GetBranch(); nodeValue != nil {
+		var nextStep *Step
+		executionLogForNode, nextStep, err = v.runBranch(stepID, nodeValue)
+		_ = nextStep // Ignore nextStep in direct execution
+	} else if nodeValue := node.GetGraphqlQuery(); nodeValue != nil {
+		executionLogForNode, err = v.runGraphQL(stepID, nodeValue)
+	} else if nodeValue := node.GetContractRead(); nodeValue != nil {
+		executionLogForNode, err = v.runContractRead(stepID, nodeValue)
+	} else if nodeValue := node.GetContractWrite(); nodeValue != nil {
+		executionLogForNode, err = v.runContractWrite(stepID, nodeValue)
+	} else if nodeValue := node.GetFilter(); nodeValue != nil {
+		executionLogForNode, err = v.runFilter(stepID, nodeValue)
+	} else if nodeValue := node.GetEthTransfer(); nodeValue != nil {
+		executionLogForNode, err = v.runEthTransfer(stepID, nodeValue)
+	} else if nodeValue := node.GetLoop(); nodeValue != nil {
+		// For loop nodes, use the execution queue
+		return v.executeLoopWithQueue(stepID, nodeValue)
+	} else {
+		err = fmt.Errorf("unknown node type for node ID %s", stepID)
+	}
+
+	return executionLogForNode, err
+}
+
+// deepCopyValue creates a deep copy of a value to prevent sharing references in parallel execution
+func deepCopyValue(value interface{}) interface{} {
+	if value == nil {
+		return nil
+	}
+
+	switch v := value.(type) {
+	case map[string]interface{}:
+		copy := make(map[string]interface{})
+		for key, val := range v {
+			copy[key] = deepCopyValue(val)
+		}
+		return copy
+	case []interface{}:
+		copy := make([]interface{}, len(v))
+		for i, val := range v {
+			copy[i] = deepCopyValue(val)
+		}
+		return copy
+	default:
+		// For primitive types (int, string, bool, float64, etc.), return as-is
+		// These are passed by value in Go, so no deep copy needed
+		return value
+	}
+}
+
+// runCustomCodeWithIsolatedVars executes custom code with isolated variables for parallel execution
+func (v *VM) runCustomCodeWithIsolatedVars(stepID string, node *avsproto.CustomCodeNode, isolatedVars map[string]any) (*avsproto.Execution_Step, error) {
+	// Create a JS processor with isolated variables
+	jsProcessor := NewJSProcessorWithIsolatedVars(v, isolatedVars)
+	if jsProcessor == nil {
+		return nil, fmt.Errorf("failed to create JS processor with isolated vars")
+	}
+
+	// Execute the custom code
+	return jsProcessor.Execute(stepID, node)
 }
 
 // executeNodeDirect executes a node directly without creating a new VM or updating execution logs
@@ -3817,6 +3906,16 @@ func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsp
 
 			iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, i)
 			nestedNode := v.createNestedNodeFromLoop(node, iterationStepID, iterInputs)
+
+			// Debug: Log what variables are being set for this iteration
+			if v.logger != nil {
+				v.logger.Debug("Creating parallel task",
+					"iteration", i,
+					"item", item,
+					"iterVal", iterVal,
+					"iterKey", iterKey,
+					"iterInputs", iterInputs)
+			}
 
 			resultChannel := make(chan *ExecutionResult, 1)
 			resultChannels[i] = resultChannel

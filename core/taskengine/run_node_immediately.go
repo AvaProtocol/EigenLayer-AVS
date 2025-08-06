@@ -72,7 +72,14 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 
 	// Check if a specific block number is requested
 	if configBlockNumber, ok := triggerConfig["blockNumber"]; ok {
-		if blockNum, err := n.parseUint64(configBlockNumber); err == nil {
+		blockNum, err := n.parseUint64(configBlockNumber)
+		if err != nil {
+			if n.logger != nil {
+				n.logger.Debug("Failed to parse blockNumber from trigger config, using latest block",
+					"blockNumber", configBlockNumber,
+					"error", err)
+			}
+		} else {
 			blockNumber = blockNum
 		}
 	}
