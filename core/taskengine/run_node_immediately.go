@@ -72,7 +72,14 @@ func (n *Engine) runBlockTriggerImmediately(triggerConfig map[string]interface{}
 
 	// Check if a specific block number is requested
 	if configBlockNumber, ok := triggerConfig["blockNumber"]; ok {
-		if blockNum, err := n.parseUint64(configBlockNumber); err == nil {
+		blockNum, err := n.parseUint64(configBlockNumber)
+		if err != nil {
+			if n.logger != nil {
+				n.logger.Debug("Failed to parse blockNumber from trigger config, using latest block",
+					"blockNumber", configBlockNumber,
+					"error", err)
+			}
+		} else {
 			blockNumber = blockNum
 		}
 	}
@@ -351,7 +358,7 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	}
 
 	metadata := map[string]interface{}{
-		"tokenContract":    simulatedLog.Address.Hex(), // Renamed for clarity
+		"address":          simulatedLog.Address.Hex(), // Original contract address
 		"topics":           topicsMetadata,             // Now protobuf-compatible
 		"data":             "0x" + common.Bytes2Hex(simulatedLog.Data),
 		"blockNumber":      simulatedLog.BlockNumber,
@@ -1080,7 +1087,7 @@ func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, querie
 
 	// Build raw metadata (the original blockchain event data)
 	metadata := map[string]interface{}{
-		"tokenContract":    mostRecentEvent.Address.Hex(), // Renamed for clarity
+		"address":          mostRecentEvent.Address.Hex(), // Original contract address
 		"topics":           topics,
 		"data":             "0x" + common.Bytes2Hex(mostRecentEvent.Data),
 		"blockNumber":      mostRecentEvent.BlockNumber,
@@ -1501,7 +1508,7 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 		secrets = make(map[string]string)
 	}
 
-	// Create a clean VM for isolated execution with proper secrets
+	// Create a clean VM for isolated execution with proper secrets (no task needed for immediate execution)
 	vm, err := NewVMWithData(nil, nil, n.smartWalletConfig, secrets)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VM: %w", err)
@@ -1679,16 +1686,32 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		result["success"] = true
 	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
 		// ContractWrite output now contains enhanced results structure
-		if contractWrite.GetData() != nil {
-			// Extract results using helper function
-			allResults := ExtractResultsFromProtobufValue(contractWrite.GetData())
+		// Data contains decoded events (flattened by method name), Metadata contains method results
 
-			// Return results array directly without backward compatibility
+		// Extract data if available (decoded events organized by method name)
+		if contractWrite.GetData() != nil {
+			iface := contractWrite.GetData().AsInterface()
+			if m, ok := iface.(map[string]interface{}); ok {
+				result["data"] = m
+			} else {
+				result["data"] = iface
+			}
+		}
+
+		// Extract metadata if available (method results array)
+		if contractWrite.GetMetadata() != nil {
+			// Extract results from metadata (method results array)
+			allResults := ExtractResultsFromProtobufValue(contractWrite.GetMetadata())
 			result["results"] = allResults
 
-			return result, nil
+			if metadataArray := gow.ValueToSlice(contractWrite.GetMetadata()); metadataArray != nil {
+				result["metadata"] = metadataArray
+			} else {
+				result["metadata"] = contractWrite.GetMetadata().AsInterface()
+			}
 		}
-		return map[string]interface{}{"status": "success"}, nil
+
+		return result, nil
 	} else if loop := executionStep.GetLoop(); loop != nil {
 		// Loop output contains the array of iteration results
 		if loop.GetData() != nil {
@@ -1706,6 +1729,19 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 				return map[string]interface{}{"data": filterArray}, nil
 			} else {
 				// Fallback: store in data field
+				result["data"] = iface
+			}
+		}
+	} else if graphql := executionStep.GetGraphql(); graphql != nil {
+		// GraphQL output contains the query results
+		if graphql.GetData() != nil {
+			// Extract the actual GraphQL response data
+			iface := graphql.GetData().AsInterface()
+			// Return the GraphQL data directly (it should already be in the correct format)
+			if graphqlData, ok := iface.(map[string]interface{}); ok {
+				return graphqlData, nil
+			} else {
+				// Fallback: wrap in data field
 				result["data"] = iface
 			}
 		}
@@ -1976,10 +2012,15 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	case NodeTypeContractWrite:
 		// For contract write nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
 		contractWriteOutput := &avsproto.ContractWriteNode_Output{}
+		// Always create the data structure, even if result is nil/empty
+		var resultsArray []interface{}
+		var decodedEventsData = make(map[string]interface{})
+
 		if result != nil && len(result) > 0 {
-			// Convert result to the new data structure
-			var resultsArray []interface{}
-			var decodedEventsData = make(map[string]interface{})
+			// First, try to extract data directly (flattened events organized by method name)
+			if dataFromVM, ok := result["data"].(map[string]interface{}); ok {
+				decodedEventsData = dataFromVM
+			}
 
 			// Check if we have the new results array format (from VM execution)
 			if resultsFromVM, ok := result["results"].([]interface{}); ok {
@@ -2012,12 +2053,13 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 						resultsArray = append(resultsArray, convertedResult)
 
-						// 🚀 NEW: Decode event logs from transaction receipt
+						// 🚀 NEW: Parse events for this specific method and store by method name
+						methodEvents := make(map[string]interface{})
 						if methodResult.Receipt != nil {
 							receiptData := methodResult.Receipt.AsInterface()
 							if receiptMap, ok := receiptData.(map[string]interface{}); ok {
 								if logs, hasLogs := receiptMap["logs"]; hasLogs {
-									if logsArray, ok := logs.([]interface{}); ok {
+									if logsArray, ok := logs.([]interface{}); ok && len(logsArray) > 0 {
 										// Get contract ABI for event decoding
 										var contractABI *abi.ABI
 										if methodResult.MethodAbi != nil {
@@ -2034,7 +2076,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 											}
 										}
 
-										// Decode each event log
+										// Decode each event log for this method
 										for _, logInterface := range logsArray {
 											if logMap, ok := logInterface.(map[string]interface{}); ok {
 												if contractABI != nil {
@@ -2070,39 +2112,12 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 													// Decode the event using existing logic
 													if decodedEvent, err := n.parseEventWithParsedABI(eventLog, contractABI, nil); err == nil {
-														// Add decoded event data to flattened result
+														// Flatten event fields into methodEvents
 														for key, value := range decodedEvent {
-															// Use eventName.fieldName format with dot notation to avoid conflicts
-															if eventName, hasEventName := decodedEvent["eventName"]; hasEventName {
-																if eventNameStr, ok := eventName.(string); ok && key != "eventName" {
-																	flatKey := fmt.Sprintf("%s.%s", eventNameStr, key)
-																	decodedEventsData[flatKey] = value
-																}
+															if key != "eventName" { // Skip meta field
+																methodEvents[key] = value
 															}
 														}
-
-														// Also add the complete event object with a descriptive key for multiple events
-														var eventKey string
-														if eventName, hasEventName := decodedEvent["eventName"]; hasEventName {
-															if eventNameStr, ok := eventName.(string); ok {
-																// Try to get transaction hash or log index for uniqueness
-																var uniqueSuffix string
-																if txHash, hasTxHash := logMap["transactionHash"]; hasTxHash {
-																	if txHashStr, ok := txHash.(string); ok {
-																		uniqueSuffix = txHashStr
-																	}
-																} else if logIndex, hasLogIndex := logMap["logIndex"]; hasLogIndex {
-																	uniqueSuffix = fmt.Sprintf("%x", logIndex)
-																} else {
-																	// Fallback to eventLog.Index if logMap doesn't have logIndex
-																	uniqueSuffix = fmt.Sprintf("%d", eventLog.Index)
-																}
-																eventKey = fmt.Sprintf("%s_%s", eventNameStr, uniqueSuffix)
-															}
-														} else {
-															eventKey = fmt.Sprintf("event_%d", eventLog.Index)
-														}
-														decodedEventsData[eventKey] = decodedEvent
 													}
 												}
 											}
@@ -2111,6 +2126,9 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 								}
 							}
 						}
+
+						// Store events for this method (empty object if no events)
+						decodedEventsData[methodResult.MethodName] = methodEvents
 					} else if methodResultMap, ok := resultInterface.(map[string]interface{}); ok {
 						// Already in map format
 						resultsArray = append(resultsArray, methodResultMap)
@@ -2139,18 +2157,18 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				}
 			}
 
-			// 🚀 NEW: Set data field with decoded events (flattened format like ContractRead)
-			if len(decodedEventsData) > 0 {
-				if dataValue, err := structpb.NewValue(decodedEventsData); err == nil {
-					contractWriteOutput.Data = dataValue
-				}
-			}
+		}
 
-			// 🚀 NEW: Set metadata field with detailed method information
-			if len(resultsArray) > 0 {
-				if metadataValue, err := structpb.NewValue(resultsArray); err == nil {
-					contractWriteOutput.Metadata = metadataValue
-				}
+		// 🚀 NEW: Set data field with decoded events (flattened format like ContractRead)
+		// Always set data field - empty object if no events, flattened events if present
+		if dataValue, err := structpb.NewValue(decodedEventsData); err == nil {
+			contractWriteOutput.Data = dataValue
+		}
+
+		// 🚀 NEW: Set metadata field with detailed method information
+		if len(resultsArray) > 0 {
+			if metadataValue, err := structpb.NewValue(resultsArray); err == nil {
+				contractWriteOutput.Metadata = metadataValue
 			}
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractWrite{

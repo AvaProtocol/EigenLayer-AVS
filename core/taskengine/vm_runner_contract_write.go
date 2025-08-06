@@ -3,6 +3,7 @@ package taskengine
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -193,6 +194,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		contractAbiStr,
 		methodName,
 		chainID,
+		r.owner.Hex(), // Pass the user's wallet address for simulation
 	)
 
 	if err != nil {
@@ -442,10 +444,74 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// Convert results to JSON for the new protobuf structure using shared helper
 	resultsValue := ConvertResultsArrayToProtobufValue(resultsArray, &log)
 
-	// Create output with all results
+	// 🚀 NEW: Create decoded events data organized by method name
+	var decodedEventsData = make(map[string]interface{})
+
+	// Parse events from each method's transaction receipt
+	for _, methodResult := range results {
+		methodEvents := make(map[string]interface{})
+
+		// Extract logs from receipt if available
+		if methodResult.Receipt != nil {
+			if receiptMap := methodResult.Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
+				if logs, hasLogs := receiptMap["logs"]; hasLogs {
+					if logsArray, ok := logs.([]interface{}); ok && len(logsArray) > 0 {
+						// Decode each event log using contract ABI
+						for _, logInterface := range logsArray {
+							if logMap, ok := logInterface.(map[string]interface{}); ok {
+								if parsedABI != nil {
+									// Convert log map to types.Log structure for parsing
+									if eventLog := r.convertMapToEventLog(logMap); eventLog != nil {
+										// Parse the log using shared event parsing function
+										decodedEvent, _, err := parseEventWithABIShared(eventLog, parsedABI, nil, r.vm.logger)
+										if err != nil {
+											if r.vm != nil && r.vm.logger != nil {
+												r.vm.logger.Warn("Failed to parse event from transaction receipt log",
+													"contractAddress", eventLog.Address.Hex(),
+													"blockNumber", eventLog.BlockNumber,
+													"txHash", eventLog.TxHash.Hex(),
+													"logIndex", eventLog.Index,
+													"error", err)
+											}
+										} else {
+											// Flatten event fields into methodEvents
+											for key, value := range decodedEvent {
+												if key != "eventName" { // Skip meta field
+													methodEvents[key] = value
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Store events for this method (empty object if no events)
+		decodedEventsData[methodResult.MethodName] = methodEvents
+	}
+
+	// Convert decoded events to protobuf Value
+	var dataValue *structpb.Value
+	if len(decodedEventsData) > 0 {
+		if dv, err := structpb.NewValue(decodedEventsData); err == nil {
+			dataValue = dv
+		}
+	} else {
+		// Create empty object for consistency with contractRead format
+		if dv, err := structpb.NewValue(map[string]interface{}{}); err == nil {
+			dataValue = dv
+		}
+	}
+
+	// Create output with flattened event data in Data field and method results in Metadata field
 	s.OutputData = &avsproto.Execution_Step_ContractWrite{
 		ContractWrite: &avsproto.ContractWriteNode_Output{
-			Data: resultsValue,
+			Data:     dataValue,    // Flattened decoded events (empty object if no events)
+			Metadata: resultsValue, // Method results array (detailed transaction info)
 		},
 	}
 
@@ -477,4 +543,59 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	finalizeExecutionStep(s, true, "", log.String())
 
 	return s, nil
+}
+
+// convertMapToEventLog converts a log map from receipt to types.Log structure for event parsing
+func (r *ContractWriteProcessor) convertMapToEventLog(logMap map[string]interface{}) *types.Log {
+	eventLog := &types.Log{}
+
+	// Parse address
+	if addr, hasAddr := logMap["address"]; hasAddr {
+		if addrStr, ok := addr.(string); ok {
+			eventLog.Address = common.HexToAddress(addrStr)
+		}
+	}
+
+	// Parse topics
+	if topics, hasTopics := logMap["topics"]; hasTopics {
+		if topicsArray, ok := topics.([]interface{}); ok {
+			for _, topic := range topicsArray {
+				if topicStr, ok := topic.(string); ok {
+					eventLog.Topics = append(eventLog.Topics, common.HexToHash(topicStr))
+				}
+			}
+		}
+	}
+
+	// Parse data
+	if data, hasData := logMap["data"]; hasData {
+		if dataStr, ok := data.(string); ok {
+			dataBytes := common.FromHex(dataStr)
+			eventLog.Data = dataBytes
+		}
+	}
+
+	// Parse other fields if needed
+	if blockNumber, hasBN := logMap["blockNumber"]; hasBN {
+		if bnStr, ok := blockNumber.(string); ok {
+			bn, err := strconv.ParseUint(strings.TrimPrefix(bnStr, "0x"), 16, 64)
+			if err != nil {
+				if r.vm != nil && r.vm.logger != nil {
+					r.vm.logger.Warn("Failed to parse blockNumber from transaction receipt log",
+						"blockNumber", bnStr,
+						"error", err)
+				}
+			} else {
+				eventLog.BlockNumber = bn
+			}
+		}
+	}
+
+	if txHash, hasTxHash := logMap["transactionHash"]; hasTxHash {
+		if txHashStr, ok := txHash.(string); ok {
+			eventLog.TxHash = common.HexToHash(txHashStr)
+		}
+	}
+
+	return eventLog
 }

@@ -50,6 +50,7 @@ type RPCError struct {
 // Call parameters for eth_call
 type CallParams struct {
 	To   string `json:"to"`
+	From string `json:"from,omitempty"`
 	Data string `json:"data"`
 }
 
@@ -538,16 +539,18 @@ func (tc *TenderlyClient) createMockTransferLog(contractAddress string, from, to
 }
 
 // SimulateContractWrite simulates a contract write operation using Tenderly
-func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAddress string, callData string, contractABI string, methodName string, chainID int64) (*ContractWriteSimulationResult, error) {
+func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAddress string, callData string, contractABI string, methodName string, chainID int64, fromAddress string) (*ContractWriteSimulationResult, error) {
 	tc.logger.Info("🔮 Simulating contract write via Tenderly",
 		"contract", contractAddress,
 		"method", methodName,
+		"from", fromAddress,
 		"chain_id", chainID)
 
 	// For simulation, we use eth_call to see what would happen without actually executing
 	// This gives us the return data and potential revert reasons
 	callParams := CallParams{
 		To:   contractAddress,
+		From: fromAddress,
 		Data: callData,
 	}
 
@@ -612,7 +615,7 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 	result.Transaction = &ContractWriteTransactionData{
 		Hash:       fmt.Sprintf("0x%064x", time.Now().UnixNano()), // Mock transaction hash
 		Status:     "simulated",
-		From:       "0x0000000000000000000000000000000000000001", // Mock sender
+		From:       fromAddress, // Use the actual user's wallet address
 		To:         contractAddress,
 		Value:      "0",
 		Timestamp:  time.Now().Unix(),

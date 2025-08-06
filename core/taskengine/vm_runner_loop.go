@@ -497,25 +497,14 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 		}
 		return nil, nil
 	} else if contractWriteOutput := executionStep.GetContractWrite(); contractWriteOutput != nil {
-		// For contract write, convert the results to JSON-compatible format
+		// For contract write, return the flattened data directly (same as contract_read response)
 		if contractWriteOutput.GetData() != nil {
-			// Extract results from the protobuf Value
-			var results []interface{}
-
-			if contractWriteOutput.GetData().GetListValue() != nil {
-				// Data is an array - return directly
-				for _, item := range contractWriteOutput.GetData().GetListValue().GetValues() {
-					results = append(results, item.AsInterface())
-				}
-			} else {
-				// Data might be a single object, wrap it in an array for consistency
-				results = append(results, contractWriteOutput.GetData().AsInterface())
-			}
-
-			// Return results array directly, not wrapped in a "results" object
-			return results, nil
+			// Return the flattened data object directly, consistent with contract_read
+			// This matches the standalone contract_read response format for consistency
+			return contractWriteOutput.GetData().AsInterface(), nil
 		}
-		return nil, nil
+		// Return empty object for consistency with contractRead format when no data
+		return map[string]interface{}{}, nil
 	} else if ethTransferOutput := executionStep.GetEthTransfer(); ethTransferOutput != nil {
 		// Extract transaction hash from the new data field
 		if ethTransferOutput.Data != nil {

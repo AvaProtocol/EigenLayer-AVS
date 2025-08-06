@@ -138,6 +138,9 @@ func parseEventWithABIShared(eventLog *types.Log, contractABI *abi.ABI, query *a
 	parsedData := make(map[string]interface{})
 	parsedData["eventName"] = eventName
 
+	// Create ABI value converter for proper type conversion
+	converter := NewABIValueConverter(nil, nil)
+
 	// Add indexed parameters from topics (skip topic[0] which is event signature)
 	indexedCount := 0
 	nonIndexedCount := 0
@@ -151,14 +154,17 @@ func parseEventWithABIShared(eventLog *types.Log, contractABI *abi.ABI, query *a
 					// Convert hash to address for indexed address parameters
 					parsedData[input.Name] = common.HexToAddress(eventLog.Topics[topicIndex].Hex()).Hex()
 				} else {
-					parsedData[input.Name] = eventLog.Topics[topicIndex]
+					// Convert common.Hash to hex string for structpb compatibility
+					parsedData[input.Name] = eventLog.Topics[topicIndex].Hex()
 				}
 			}
 			indexedCount++
 		} else {
-			// Get from decoded data
+			// Get from decoded data and convert to structpb-compatible type
 			if nonIndexedCount < len(decodedData) {
-				parsedData[input.Name] = decodedData[nonIndexedCount]
+				rawValue := decodedData[nonIndexedCount]
+				// Use ABI converter to ensure structpb compatibility
+				parsedData[input.Name] = converter.ConvertABIValueToInterface(rawValue, input.Type, input.Name)
 			}
 			nonIndexedCount++
 		}
@@ -368,13 +374,19 @@ func findCommonAddress(fromAddresses, toAddresses []string) string {
 
 // createBasicEventMetadata creates basic metadata structure for events without ABI
 func createBasicEventMetadata(eventLog *types.Log) map[string]interface{} {
+	// Convert topics from []common.Hash to []string for structpb compatibility
+	topicsHex := make([]string, len(eventLog.Topics))
+	for i, topic := range eventLog.Topics {
+		topicsHex[i] = topic.Hex()
+	}
+
 	return map[string]interface{}{
 		"tokenContract":   eventLog.Address.Hex(), // Renamed from "address" for clarity
 		"blockNumber":     eventLog.BlockNumber,
 		"transactionHash": eventLog.TxHash.Hex(),
 		"logIndex":        eventLog.Index,
 		"blockHash":       eventLog.BlockHash.Hex(),
-		"topics":          eventLog.Topics,
+		"topics":          topicsHex,
 		"data":            common.Bytes2Hex(eventLog.Data),
 		"removed":         eventLog.Removed,
 	}
