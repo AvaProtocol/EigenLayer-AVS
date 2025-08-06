@@ -1516,7 +1516,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		require.True(t, ok, "metadata should be a map[string]interface{}")
 		require.NotNil(t, metadata, "Should have metadata")
 
-		assert.NotNil(t, metadata["tokenContract"], "Should have address in metadata")
+		assert.NotNil(t, metadata["address"], "Should have address in metadata")
 		assert.NotNil(t, metadata["blockNumber"], "Should have blockNumber in metadata")
 
 		t.Logf("✅ Tenderly simulation successful!")

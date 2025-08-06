@@ -74,6 +74,63 @@ func NewJSProcessor(vm *VM) *JSProcessor {
 	return &r
 }
 
+// NewJSProcessorWithIsolatedVars creates a JS processor with isolated variables for parallel execution
+func NewJSProcessorWithIsolatedVars(vm *VM, isolatedVars map[string]any) *JSProcessor {
+	// ALWAYS create a fresh JS VM for isolated execution to prevent variable sharing
+	jsvm, registry, err := NewGojaVMWithModules()
+	if err != nil {
+		if vm.logger != nil {
+			vm.logger.Error("failed to initialize JS VM with modules", "error", err)
+		}
+		jsvm = NewGojaVM()
+	}
+
+	r := JSProcessor{
+		CommonProcessor: &CommonProcessor{
+			vm: vm,
+		},
+		jsvm:     jsvm,
+		registry: registry,
+	}
+
+	// Set built-in macros first
+	for key, value := range macros.GetEnvs(nil) {
+		if err := r.jsvm.Set(key, value); err != nil {
+			if vm.logger != nil {
+				vm.logger.Error("failed to set macro env in JS VM", "key", key, "error", err)
+			}
+		}
+	}
+
+	// Use isolated variables instead of shared VM vars
+	// Set these AFTER macros to ensure they take precedence
+	for key, value := range isolatedVars {
+		// Debug: Log each variable being set with more detail
+		if vm.logger != nil {
+			vm.logger.Info("Setting isolated JS variable",
+				"key", key,
+				"value", value,
+				"valueType", fmt.Sprintf("%T", value))
+		}
+		if err := r.jsvm.Set(key, value); err != nil {
+			if vm.logger != nil {
+				vm.logger.Error("failed to set isolated variable in JS VM", "key", key, "error", err)
+			}
+			return nil
+		}
+	}
+
+	if registry != nil {
+		if err := r.jsvm.Set("require", registry.RequireFunction(jsvm)); err != nil {
+			if vm.logger != nil {
+				vm.logger.Error("failed to set require function in JS VM", "error", err)
+			}
+		}
+	}
+
+	return &r
+}
+
 func transformES6Imports(code string) string {
 	// Find all import statements
 	matches := importRegex.FindAllStringSubmatch(code, -1)
