@@ -2647,6 +2647,41 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				Config: customConfig,
 			},
 		}
+	case NodeTypeGraphQLQuery:
+		node.Type = avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY
+		// Create GraphQL query node with proper configuration
+		graphqlConfig := &avsproto.GraphQLQueryNode_Config{}
+
+		if url, ok := config["url"].(string); ok {
+			graphqlConfig.Url = url
+		} else {
+			return nil, fmt.Errorf("GraphQL query node requires 'url' field")
+		}
+
+		if query, ok := config["query"].(string); ok {
+			graphqlConfig.Query = query
+		} else {
+			return nil, fmt.Errorf("GraphQL query node requires 'query' field")
+		}
+
+		// Handle variables map (optional)
+		if variablesInterface, exists := config["variables"]; exists {
+			if variablesMap, ok := variablesInterface.(map[string]interface{}); ok {
+				variables := make(map[string]string)
+				for key, value := range variablesMap {
+					if valueStr, ok := value.(string); ok {
+						variables[key] = valueStr
+					}
+				}
+				graphqlConfig.Variables = variables
+			}
+		}
+
+		node.TaskType = &avsproto.TaskNode_GraphqlQuery{
+			GraphqlQuery: &avsproto.GraphQLQueryNode{
+				Config: graphqlConfig,
+			},
+		}
 	default:
 		return nil, fmt.Errorf("unsupported node type for CreateNodeFromType: %s", nodeType)
 	}

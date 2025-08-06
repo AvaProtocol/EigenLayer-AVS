@@ -42,7 +42,16 @@ func (n *Engine) RunNodeImmediately(nodeType string, nodeConfig map[string]inter
 	if IsTriggerNodeType(nodeType) {
 		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
 	} else {
-		return n.runProcessingNodeWithInputs(nodeType, nodeConfig, inputVariables)
+		return n.runProcessingNodeWithInputs(nodeType, nodeConfig, inputVariables, "")
+	}
+}
+
+// runNodeImmediatelyWithUser executes a single node with user context for proper address handling
+func (n *Engine) runNodeImmediatelyWithUser(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, userAddress string) (map[string]interface{}, error) {
+	if IsTriggerNodeType(nodeType) {
+		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
+	} else {
+		return n.runProcessingNodeWithInputs(nodeType, nodeConfig, inputVariables, userAddress)
 	}
 }
 
@@ -1485,7 +1494,7 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 }
 
 // runProcessingNodeWithInputs handles execution of processing node types
-func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, userAddress string) (map[string]interface{}, error) {
 	// Check if this is actually a trigger type that was misrouted
 	if IsTriggerNodeType(nodeType) {
 		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
@@ -1501,13 +1510,18 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 		secrets = make(map[string]string)
 	}
 
-	// Create a clean VM for isolated execution with proper secrets
+	// Create a clean VM for isolated execution with proper secrets (no task needed for immediate execution)
 	vm, err := NewVMWithData(nil, nil, n.smartWalletConfig, secrets)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VM: %w", err)
 	}
 
 	vm.WithLogger(n.logger).WithDb(n.db)
+
+	// Set TaskOwner if userAddress is provided (for proper Tenderly simulation)
+	if userAddress != "" {
+		vm.TaskOwner = common.HexToAddress(userAddress)
+	}
 
 	// Add chain name to workflowContext if token enrichment service is available
 	if n.tokenEnrichmentService != nil {
@@ -1679,9 +1693,10 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		result["success"] = true
 	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
 		// ContractWrite output now contains enhanced results structure
-		if contractWrite.GetData() != nil {
-			// Extract results using helper function
-			allResults := ExtractResultsFromProtobufValue(contractWrite.GetData())
+		// Data contains decoded events, Metadata contains method results
+		if contractWrite.GetMetadata() != nil {
+			// Extract results from metadata (method results array)
+			allResults := ExtractResultsFromProtobufValue(contractWrite.GetMetadata())
 
 			// Return results array directly without backward compatibility
 			result["results"] = allResults
@@ -1706,6 +1721,19 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 				return map[string]interface{}{"data": filterArray}, nil
 			} else {
 				// Fallback: store in data field
+				result["data"] = iface
+			}
+		}
+	} else if graphql := executionStep.GetGraphql(); graphql != nil {
+		// GraphQL output contains the query results
+		if graphql.GetData() != nil {
+			// Extract the actual GraphQL response data
+			iface := graphql.GetData().AsInterface()
+			// Return the GraphQL data directly (it should already be in the correct format)
+			if graphqlData, ok := iface.(map[string]interface{}); ok {
+				return graphqlData, nil
+			} else {
+				// Fallback: wrap in data field
 				result["data"] = iface
 			}
 		}
@@ -1770,8 +1798,8 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		return resp, nil
 	}
 
-	// Execute the node immediately
-	result, err := n.RunNodeImmediately(nodeTypeStr, nodeConfig, inputVariables)
+	// Execute the node immediately with user context
+	result, err := n.runNodeImmediatelyWithUser(nodeTypeStr, nodeConfig, inputVariables, user.Address.Hex())
 	if err != nil {
 		if n.logger != nil {
 			// Categorize errors to avoid unnecessary stack traces for expected validation errors

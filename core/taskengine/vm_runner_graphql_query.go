@@ -63,6 +63,16 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	endpoint = r.vm.preprocessTextWithVariableMapping(endpoint)
 	queryStr = r.vm.preprocessTextWithVariableMapping(queryStr)
 
+	// Process GraphQL variables from Config
+	variables := make(map[string]interface{})
+	if node.Config.GetVariables() != nil {
+		for key, value := range node.Config.GetVariables() {
+			// Preprocess each variable value for template variables
+			processedValue := r.vm.preprocessTextWithVariableMapping(value)
+			variables[key] = processedValue
+		}
+	}
+
 	// Initialize client with the URL from Config
 	log := func(s string) {
 		r.sb.WriteString(s)
@@ -81,6 +91,23 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	var resp map[string]any
 	r.sb.WriteString(fmt.Sprintf("Execute GraphQL %s at %s", u.Hostname(), time.Now()))
 	query := graphql.NewRequest(queryStr)
+
+	// Add variables to the GraphQL request
+	for key, value := range variables {
+		query.Var(key, value)
+	}
+
+	// Add The Graph API key if querying gateway.thegraph.com
+	if strings.Contains(u.Hostname(), "gateway.thegraph.com") {
+		if apiKey, exists := r.vm.secrets["thegraph_api_key"]; exists && apiKey != "" {
+			query.Header["Authorization"] = "Bearer " + apiKey
+			r.sb.WriteString(fmt.Sprintf(" with API key authentication"))
+		} else {
+			r.sb.WriteString(fmt.Sprintf(" (no thegraph_api_key found in configuration)"))
+		}
+	}
+
+	r.sb.WriteString(fmt.Sprintf("request variables: %v query: %v", variables, queryStr))
 	err = client.Run(ctx, query, &resp)
 	if err != nil {
 		return step, nil, err

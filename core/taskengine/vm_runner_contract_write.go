@@ -193,6 +193,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		contractAbiStr,
 		methodName,
 		chainID,
+		r.owner.Hex(), // Pass the user's wallet address for simulation
 	)
 
 	if err != nil {
@@ -442,10 +443,30 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// Convert results to JSON for the new protobuf structure using shared helper
 	resultsValue := ConvertResultsArrayToProtobufValue(resultsArray, &log)
 
-	// Create output with all results
+	// 🚀 NEW: Create decoded events data (consistent with runNodeWithInputs approach)
+	var decodedEventsData = make(map[string]interface{})
+
+	// TODO: Decode event logs from transaction receipts (similar to run_node_immediately.go)
+	// For now, we'll have an empty object since most transactions don't emit events in simulation
+
+	// Convert decoded events to protobuf Value
+	var dataValue *structpb.Value
+	if len(decodedEventsData) > 0 {
+		if dv, err := structpb.NewValue(decodedEventsData); err == nil {
+			dataValue = dv
+		}
+	} else {
+		// Create empty object for consistency with contractRead format
+		if dv, err := structpb.NewValue(map[string]interface{}{}); err == nil {
+			dataValue = dv
+		}
+	}
+
+	// Create output with flattened event data in Data field and method results in Metadata field
 	s.OutputData = &avsproto.Execution_Step_ContractWrite{
 		ContractWrite: &avsproto.ContractWriteNode_Output{
-			Data: resultsValue,
+			Data:     dataValue,    // Flattened decoded events (empty object if no events)
+			Metadata: resultsValue, // Method results array (detailed transaction info)
 		},
 	}
 
