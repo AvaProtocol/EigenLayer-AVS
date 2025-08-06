@@ -42,16 +42,7 @@ func (n *Engine) RunNodeImmediately(nodeType string, nodeConfig map[string]inter
 	if IsTriggerNodeType(nodeType) {
 		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
 	} else {
-		return n.runProcessingNodeWithInputs(nodeType, nodeConfig, inputVariables, "")
-	}
-}
-
-// runNodeImmediatelyWithUser executes a single node with user context for proper address handling
-func (n *Engine) runNodeImmediatelyWithUser(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, userAddress string) (map[string]interface{}, error) {
-	if IsTriggerNodeType(nodeType) {
-		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
-	} else {
-		return n.runProcessingNodeWithInputs(nodeType, nodeConfig, inputVariables, userAddress)
+		return n.runProcessingNodeWithInputs(nodeType, nodeConfig, inputVariables)
 	}
 }
 
@@ -1494,7 +1485,7 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 }
 
 // runProcessingNodeWithInputs handles execution of processing node types
-func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, userAddress string) (map[string]interface{}, error) {
+func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	// Check if this is actually a trigger type that was misrouted
 	if IsTriggerNodeType(nodeType) {
 		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
@@ -1517,11 +1508,6 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 	}
 
 	vm.WithLogger(n.logger).WithDb(n.db)
-
-	// Set TaskOwner if userAddress is provided (for proper Tenderly simulation)
-	if userAddress != "" {
-		vm.TaskOwner = common.HexToAddress(userAddress)
-	}
 
 	// Add chain name to workflowContext if token enrichment service is available
 	if n.tokenEnrichmentService != nil {
@@ -1693,17 +1679,32 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		result["success"] = true
 	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
 		// ContractWrite output now contains enhanced results structure
-		// Data contains decoded events, Metadata contains method results
+		// Data contains decoded events (flattened by method name), Metadata contains method results
+
+		// Extract data if available (decoded events organized by method name)
+		if contractWrite.GetData() != nil {
+			iface := contractWrite.GetData().AsInterface()
+			if m, ok := iface.(map[string]interface{}); ok {
+				result["data"] = m
+			} else {
+				result["data"] = iface
+			}
+		}
+
+		// Extract metadata if available (method results array)
 		if contractWrite.GetMetadata() != nil {
 			// Extract results from metadata (method results array)
 			allResults := ExtractResultsFromProtobufValue(contractWrite.GetMetadata())
-
-			// Return results array directly without backward compatibility
 			result["results"] = allResults
 
-			return result, nil
+			if metadataArray := gow.ValueToSlice(contractWrite.GetMetadata()); metadataArray != nil {
+				result["metadata"] = metadataArray
+			} else {
+				result["metadata"] = contractWrite.GetMetadata().AsInterface()
+			}
 		}
-		return map[string]interface{}{"status": "success"}, nil
+
+		return result, nil
 	} else if loop := executionStep.GetLoop(); loop != nil {
 		// Loop output contains the array of iteration results
 		if loop.GetData() != nil {
@@ -1798,8 +1799,8 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		return resp, nil
 	}
 
-	// Execute the node immediately with user context
-	result, err := n.runNodeImmediatelyWithUser(nodeTypeStr, nodeConfig, inputVariables, user.Address.Hex())
+	// Execute the node immediately
+	result, err := n.RunNodeImmediately(nodeTypeStr, nodeConfig, inputVariables)
 	if err != nil {
 		if n.logger != nil {
 			// Categorize errors to avoid unnecessary stack traces for expected validation errors
@@ -2004,10 +2005,15 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	case NodeTypeContractWrite:
 		// For contract write nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
 		contractWriteOutput := &avsproto.ContractWriteNode_Output{}
+		// Always create the data structure, even if result is nil/empty
+		var resultsArray []interface{}
+		var decodedEventsData = make(map[string]interface{})
+
 		if result != nil && len(result) > 0 {
-			// Convert result to the new data structure
-			var resultsArray []interface{}
-			var decodedEventsData = make(map[string]interface{})
+			// First, try to extract data directly (flattened events organized by method name)
+			if dataFromVM, ok := result["data"].(map[string]interface{}); ok {
+				decodedEventsData = dataFromVM
+			}
 
 			// Check if we have the new results array format (from VM execution)
 			if resultsFromVM, ok := result["results"].([]interface{}); ok {
@@ -2040,12 +2046,13 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 						resultsArray = append(resultsArray, convertedResult)
 
-						// 🚀 NEW: Decode event logs from transaction receipt
+						// 🚀 NEW: Parse events for this specific method and store by method name
+						methodEvents := make(map[string]interface{})
 						if methodResult.Receipt != nil {
 							receiptData := methodResult.Receipt.AsInterface()
 							if receiptMap, ok := receiptData.(map[string]interface{}); ok {
 								if logs, hasLogs := receiptMap["logs"]; hasLogs {
-									if logsArray, ok := logs.([]interface{}); ok {
+									if logsArray, ok := logs.([]interface{}); ok && len(logsArray) > 0 {
 										// Get contract ABI for event decoding
 										var contractABI *abi.ABI
 										if methodResult.MethodAbi != nil {
@@ -2062,7 +2069,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 											}
 										}
 
-										// Decode each event log
+										// Decode each event log for this method
 										for _, logInterface := range logsArray {
 											if logMap, ok := logInterface.(map[string]interface{}); ok {
 												if contractABI != nil {
@@ -2098,39 +2105,12 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 													// Decode the event using existing logic
 													if decodedEvent, err := n.parseEventWithParsedABI(eventLog, contractABI, nil); err == nil {
-														// Add decoded event data to flattened result
+														// Flatten event fields into methodEvents
 														for key, value := range decodedEvent {
-															// Use eventName.fieldName format with dot notation to avoid conflicts
-															if eventName, hasEventName := decodedEvent["eventName"]; hasEventName {
-																if eventNameStr, ok := eventName.(string); ok && key != "eventName" {
-																	flatKey := fmt.Sprintf("%s.%s", eventNameStr, key)
-																	decodedEventsData[flatKey] = value
-																}
+															if key != "eventName" { // Skip meta field
+																methodEvents[key] = value
 															}
 														}
-
-														// Also add the complete event object with a descriptive key for multiple events
-														var eventKey string
-														if eventName, hasEventName := decodedEvent["eventName"]; hasEventName {
-															if eventNameStr, ok := eventName.(string); ok {
-																// Try to get transaction hash or log index for uniqueness
-																var uniqueSuffix string
-																if txHash, hasTxHash := logMap["transactionHash"]; hasTxHash {
-																	if txHashStr, ok := txHash.(string); ok {
-																		uniqueSuffix = txHashStr
-																	}
-																} else if logIndex, hasLogIndex := logMap["logIndex"]; hasLogIndex {
-																	uniqueSuffix = fmt.Sprintf("%x", logIndex)
-																} else {
-																	// Fallback to eventLog.Index if logMap doesn't have logIndex
-																	uniqueSuffix = fmt.Sprintf("%d", eventLog.Index)
-																}
-																eventKey = fmt.Sprintf("%s_%s", eventNameStr, uniqueSuffix)
-															}
-														} else {
-															eventKey = fmt.Sprintf("event_%d", eventLog.Index)
-														}
-														decodedEventsData[eventKey] = decodedEvent
 													}
 												}
 											}
@@ -2139,6 +2119,9 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 								}
 							}
 						}
+
+						// Store events for this method (empty object if no events)
+						decodedEventsData[methodResult.MethodName] = methodEvents
 					} else if methodResultMap, ok := resultInterface.(map[string]interface{}); ok {
 						// Already in map format
 						resultsArray = append(resultsArray, methodResultMap)
@@ -2167,18 +2150,18 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				}
 			}
 
-			// 🚀 NEW: Set data field with decoded events (flattened format like ContractRead)
-			if len(decodedEventsData) > 0 {
-				if dataValue, err := structpb.NewValue(decodedEventsData); err == nil {
-					contractWriteOutput.Data = dataValue
-				}
-			}
+		}
 
-			// 🚀 NEW: Set metadata field with detailed method information
-			if len(resultsArray) > 0 {
-				if metadataValue, err := structpb.NewValue(resultsArray); err == nil {
-					contractWriteOutput.Metadata = metadataValue
-				}
+		// 🚀 NEW: Set data field with decoded events (flattened format like ContractRead)
+		// Always set data field - empty object if no events, flattened events if present
+		if dataValue, err := structpb.NewValue(decodedEventsData); err == nil {
+			contractWriteOutput.Data = dataValue
+		}
+
+		// 🚀 NEW: Set metadata field with detailed method information
+		if len(resultsArray) > 0 {
+			if metadataValue, err := structpb.NewValue(resultsArray); err == nil {
+				contractWriteOutput.Metadata = metadataValue
 			}
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractWrite{
