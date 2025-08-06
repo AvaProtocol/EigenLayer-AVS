@@ -351,7 +351,7 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	}
 
 	metadata := map[string]interface{}{
-		"tokenContract":    simulatedLog.Address.Hex(), // Renamed for clarity
+		"address":          simulatedLog.Address.Hex(), // Original contract address
 		"topics":           topicsMetadata,             // Now protobuf-compatible
 		"data":             "0x" + common.Bytes2Hex(simulatedLog.Data),
 		"blockNumber":      simulatedLog.BlockNumber,
@@ -1080,7 +1080,7 @@ func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, querie
 
 	// Build raw metadata (the original blockchain event data)
 	metadata := map[string]interface{}{
-		"tokenContract":    mostRecentEvent.Address.Hex(), // Renamed for clarity
+		"address":          mostRecentEvent.Address.Hex(), // Original contract address
 		"topics":           topics,
 		"data":             "0x" + common.Bytes2Hex(mostRecentEvent.Data),
 		"blockNumber":      mostRecentEvent.BlockNumber,
