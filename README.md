@@ -334,6 +334,63 @@ func main() {
 
 **Important:** If you change the `go_package` option in the `.proto` files or the output paths in the `Makefile`, you will likely need to update the import paths in your Go codebase accordingly.
 
+## Testing Bundler Connectivity
+
+The Ava Protocol uses ERC-4337 bundlers for smart wallet transactions. You can test bundler connectivity using the following commands:
+
+### Basic Connectivity Test
+
+Test if the bundler is responding:
+
+```bash
+curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj17Urz1aMATV1ySn4R \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}'
+```
+
+**Expected Response:**
+```json
+{"jsonrpc": "2.0", "id": 1, "result": "0xaa36a7"}
+```
+
+### ERC-4337 EntryPoint Support
+
+Check which EntryPoint contracts the bundler supports:
+
+```bash
+curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj17Urz1aMATV1ySn4R \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"eth_supportedEntryPoints","params":[],"id":1}'
+```
+
+**Expected Response:**
+```json
+{"jsonrpc": "2.0", "id": 1, "result": ["0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108", "0x0000000071727De22E5E9d8BAf0edAc6f37da032", "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"]}
+```
+
+### Gas Estimation Test
+
+Test UserOp gas estimation (will fail for non-deployed accounts, which is expected):
+
+```bash
+curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj17Urz1aMATV1ySn4R \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"eth_estimateUserOperationGas","params":[{"sender":"0x69bb9251D3c2066DcF7aDAFe3E7CE36E76990617","nonce":"0x0","initCode":"0x","callData":"0x","callGasLimit":"0x0","verificationGasLimit":"0x0","preVerificationGas":"0x0","maxFeePerGas":"0x0","maxPriorityFeePerGas":"0x0","paymasterAndData":"0x","signature":"0x"},"0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"],"id":1}'
+```
+
+**Expected Response (for non-deployed account):**
+```json
+{"jsonrpc": "2.0", "id": 1, "error": {"code": -32500, "message": "AA20 account not deployed"}}
+```
+
+### Troubleshooting
+
+- **Connection refused**: Check network connectivity and firewall settings
+- **401 Unauthorized**: Verify the API key in the bundler URL
+- **Parse error**: Check JSON formatting and Content-Type header
+- **AA20 account not deployed**: Normal for testing with random addresses
+- **Method not found**: Bundler may not support that specific ERC-4337 method
+
 ## Getting started
 
 Coming soon

@@ -3,6 +3,7 @@ package taskengine
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
@@ -162,11 +164,42 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		}
 	}
 
-	// ALWAYS USE TENDERLY SIMULATION FOR CONTRACT WRITES
+	// 🔍 DEBUG: Log all configuration details
+	r.vm.logger.Info("🔍 CONTRACT WRITE DEBUG - Configuration Analysis",
+		"has_smart_wallet_config", r.smartWalletConfig != nil,
+		"method_name", methodName,
+		"contract_address", contractAddress.Hex())
+
+	if r.smartWalletConfig != nil {
+		r.vm.logger.Info("🔍 CONTRACT WRITE DEBUG - Smart Wallet Config Details",
+			"enable_real_transactions", r.smartWalletConfig.EnableRealTransactions,
+			"bundler_url", r.smartWalletConfig.BundlerURL,
+			"factory_address", r.smartWalletConfig.FactoryAddress,
+			"entrypoint_address", r.smartWalletConfig.EntrypointAddress)
+	} else {
+		r.vm.logger.Warn("⚠️ CONTRACT WRITE DEBUG - Smart wallet config is NIL!")
+	}
+
+	// Check if real transactions are enabled
+	if r.smartWalletConfig != nil && r.smartWalletConfig.EnableRealTransactions {
+		r.vm.logger.Info("🚀 CONTRACT WRITE DEBUG - Using real UserOp transaction path",
+			"contract", contractAddress.Hex(),
+			"method", methodName)
+
+		return r.executeRealUserOpTransaction(ctx, contractAddress, callData, methodName, parsedABI, t0)
+	}
+
+	// FALLBACK TO TENDERLY SIMULATION FOR CONTRACT WRITES
 	// This provides consistent behavior between run_node_immediately and simulateTask
-	r.vm.logger.Info("🔮 Using Tenderly simulation for contract write",
+	r.vm.logger.Info("🔮 CONTRACT WRITE DEBUG - Using Tenderly simulation path",
 		"contract", contractAddress.Hex(),
-		"method", methodName)
+		"method", methodName,
+		"reason", func() string {
+			if r.smartWalletConfig == nil {
+				return "smart_wallet_config_is_nil"
+			}
+			return "enable_real_transactions_is_false"
+		}())
 
 	// Initialize Tenderly client
 	tenderlyClient := NewTenderlyClient(r.vm.logger)
@@ -206,6 +239,219 @@ func (r *ContractWriteProcessor) executeMethodCall(
 
 	// Convert Tenderly simulation result to legacy protobuf format
 	return r.convertTenderlyResultToFlexibleFormat(simulationResult, parsedABI, callData)
+}
+
+// executeRealUserOpTransaction executes a real UserOp transaction for contract writes
+func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Context, contractAddress common.Address, callData string, methodName string, parsedABI *abi.ABI, startTime time.Time) *avsproto.ContractWriteNode_MethodResult {
+	r.vm.logger.Info("🔍 REAL USEROP DEBUG - Starting real UserOp transaction execution",
+		"contract_address", contractAddress.Hex(),
+		"method_name", methodName,
+		"calldata_length", len(callData),
+		"calldata", callData)
+
+	// Convert hex calldata to bytes
+	callDataBytes := common.FromHex(callData)
+
+	// Create smart wallet execute calldata: execute(target, value, data)
+	smartWalletCallData, err := aa.PackExecute(
+		contractAddress, // target contract
+		big.NewInt(0),   // ETH value (0 for contract calls)
+		callDataBytes,   // contract method calldata
+	)
+	if err != nil {
+		r.vm.logger.Error("Failed to pack smart wallet execute calldata", "error", err)
+		// Return error result - workflow execution FAILS (no fallback for deployed workflows)
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to pack smart wallet execute calldata: %v", err),
+		}
+	}
+
+	// Set up factory address for AA operations
+	aa.SetFactoryAddress(r.smartWalletConfig.FactoryAddress)
+	aa.SetEntrypointAddress(r.smartWalletConfig.EntrypointAddress)
+
+	// Determine if paymaster should be used based on transaction limits and whitelist
+	var paymasterReq *preset.VerifyingPaymasterRequest
+	if r.shouldUsePaymaster() {
+		paymasterReq = preset.GetVerifyingPaymasterRequestForDuration(
+			r.smartWalletConfig.PaymasterAddress,
+			15*time.Minute, // 15 minute validity window
+		)
+		r.vm.logger.Info("🎫 Using paymaster for sponsored transaction",
+			"paymaster", r.smartWalletConfig.PaymasterAddress.Hex(),
+			"owner", r.owner.Hex())
+	} else {
+		r.vm.logger.Info("💰 Using regular transaction (no paymaster)",
+			"owner", r.owner.Hex())
+	}
+
+	// Send UserOp transaction
+	userOp, receipt, err := r.sendUserOpFunc(
+		r.smartWalletConfig,
+		r.owner,
+		smartWalletCallData,
+		paymasterReq,
+	)
+
+	// Increment transaction counter for this address (regardless of success/failure)
+	if r.vm.db != nil {
+		counterKey := ContractWriteCounterKey(r.owner)
+		if _, err := r.vm.db.IncCounter(counterKey, 0); err != nil {
+			r.vm.logger.Warn("Failed to increment transaction counter", "error", err)
+		}
+	}
+
+	if err != nil {
+		r.vm.logger.Error("🚫 BUNDLER FAILED - UserOp transaction failed, workflow execution FAILED",
+			"bundler_error", err,
+			"bundler_url", r.smartWalletConfig.BundlerURL,
+			"method", methodName,
+			"contract", contractAddress.Hex())
+
+		// Return error result - deployed workflows should FAIL when bundler is unavailable
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success: false,
+			Error:   fmt.Sprintf("Bundler failed - UserOp transaction could not be sent: %v", err),
+		}
+	}
+
+	// Create result from real transaction
+	return r.createRealTransactionResult(methodName, contractAddress.Hex(), callData, parsedABI, userOp, receipt)
+}
+
+// createRealTransactionResult creates a result from a real UserOp transaction
+func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contractAddress, callData string, parsedABI *abi.ABI, userOp *userop.UserOperation, receipt *types.Receipt) *avsproto.ContractWriteNode_MethodResult {
+	// Extract methodABI from contract ABI if available
+	var methodABI *structpb.Value
+	if parsedABI != nil {
+		if method, exists := parsedABI.Methods[methodName]; exists {
+			if abiMap := r.extractMethodABI(&method); abiMap != nil {
+				if abiValue, err := structpb.NewValue(abiMap); err == nil {
+					methodABI = abiValue
+				}
+			}
+		}
+	}
+
+	// Create receipt data from real transaction
+	var receiptMap map[string]interface{}
+	if receipt != nil {
+		// Get transaction details for from/to fields
+		var fromAddr, toAddr string
+		if r.smartWalletConfig != nil {
+			// For UserOp transactions, 'from' is the smart wallet address
+			// Note: We don't have ethclient here, so we'll use the owner address as fallback
+			fromAddr = r.owner.Hex()
+			toAddr = contractAddress // contractAddress is already a string
+		} else {
+			// Fallback for regular transactions
+			fromAddr = r.owner.Hex()
+			toAddr = contractAddress // contractAddress is already a string
+		}
+
+		// Real transaction receipt with standard Ethereum fields
+		receiptMap = map[string]interface{}{
+			"transactionHash":   receipt.TxHash.Hex(),
+			"blockNumber":       fmt.Sprintf("0x%x", receipt.BlockNumber.Uint64()),
+			"blockHash":         receipt.BlockHash.Hex(),
+			"transactionIndex":  fmt.Sprintf("0x%x", receipt.TransactionIndex),
+			"from":              fromAddr,
+			"to":                toAddr,
+			"gasUsed":           fmt.Sprintf("0x%x", receipt.GasUsed),
+			"cumulativeGasUsed": fmt.Sprintf("0x%x", receipt.CumulativeGasUsed),
+			"effectiveGasPrice": fmt.Sprintf("0x%x", receipt.EffectiveGasPrice.Uint64()),
+			"status":            fmt.Sprintf("0x%x", receipt.Status),
+			"type":              fmt.Sprintf("0x%x", receipt.Type),
+			"logsBloom":         fmt.Sprintf("0x%x", receipt.Bloom),
+			"logs":              convertLogsToInterface(receipt.Logs),
+		}
+	} else {
+		// UserOp submitted but receipt not available yet
+		receiptMap = map[string]interface{}{
+			"userOpHash":      userOp.GetUserOpHash(r.smartWalletConfig.EntrypointAddress, big.NewInt(11155111)).Hex(),
+			"sender":          userOp.Sender.Hex(),
+			"nonce":           fmt.Sprintf("0x%x", userOp.Nonce.Uint64()),
+			"status":          "pending",
+			"transactionHash": "pending", // Will be available once bundler processes the UserOp
+		}
+	}
+
+	receiptValue, _ := structpb.NewValue(receiptMap)
+
+	return &avsproto.ContractWriteNode_MethodResult{
+		MethodName: methodName,
+		MethodAbi:  methodABI,
+		Success:    receipt != nil && receipt.Status == 1, // Success if receipt exists and status is 1
+		Error:      "",
+		Receipt:    receiptValue,
+		Value:      nil, // Real transactions don't return values directly
+	}
+}
+
+// convertLogsToInterface converts transaction logs to interface{} for protobuf compatibility
+func convertLogsToInterface(logs []*types.Log) []interface{} {
+	result := make([]interface{}, len(logs))
+	for i, log := range logs {
+		// Convert topics to []interface{} for protobuf compatibility
+		topics := make([]interface{}, len(log.Topics))
+		for j, topic := range log.Topics {
+			topics[j] = topic.Hex()
+		}
+
+		result[i] = map[string]interface{}{
+			"address":          log.Address.Hex(),
+			"topics":           topics,
+			"data":             common.Bytes2Hex(log.Data),
+			"blockNumber":      fmt.Sprintf("0x%x", log.BlockNumber),
+			"transactionHash":  log.TxHash.Hex(),
+			"transactionIndex": fmt.Sprintf("0x%x", log.TxIndex),
+			"blockHash":        log.BlockHash.Hex(),
+			"logIndex":         fmt.Sprintf("0x%x", log.Index),
+			"removed":          log.Removed,
+		}
+	}
+	return result
+}
+
+// shouldUsePaymaster determines if paymaster should be used based on transaction limits and whitelist
+func (r *ContractWriteProcessor) shouldUsePaymaster() bool {
+	// Check if address is whitelisted (unlimited paymaster usage)
+	for _, whitelistedAddr := range r.smartWalletConfig.WhitelistAddresses {
+		if whitelistedAddr == r.owner {
+			r.vm.logger.Debug("Address is whitelisted, using paymaster", "owner", r.owner.Hex())
+			return true
+		}
+	}
+
+	// Check transaction count for non-whitelisted addresses
+	if r.vm.db != nil {
+		counterKey := ContractWriteCounterKey(r.owner)
+		transactionCount, err := r.vm.db.GetCounter(counterKey)
+		if err != nil {
+			r.vm.logger.Warn("Failed to get transaction counter, defaulting to paymaster", "error", err)
+			return true // Default to paymaster on error
+		}
+
+		// Allow 10 free transactions for non-whitelisted addresses (0-indexed, so < 10)
+		const freeTransactionLimit = 10
+		if transactionCount < freeTransactionLimit {
+			r.vm.logger.Debug("Within free transaction limit, using paymaster",
+				"owner", r.owner.Hex(),
+				"count", transactionCount,
+				"limit", freeTransactionLimit)
+			return true
+		}
+
+		r.vm.logger.Debug("Exceeded free transaction limit, using regular transaction",
+			"owner", r.owner.Hex(),
+			"count", transactionCount,
+			"limit", freeTransactionLimit)
+		return false
+	}
+
+	// Default to paymaster if no database available
+	return true
 }
 
 // createMockContractWriteResult creates a mock result when Tenderly fails

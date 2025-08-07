@@ -11,7 +11,8 @@ func TestETHTransferProcessor_Execute_Success(t *testing.T) {
 	vm := NewVM()
 	vm.WithLogger(testutil.GetLogger())
 
-	processor := NewETHTransferProcessor(vm, nil, nil, testutil.TestUser1().Address)
+	testUserAddress := testutil.TestUser1().Address
+	processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
 
 	node := &avsproto.ETHTransferNode{
 		Config: &avsproto.ETHTransferNode_Config{
@@ -76,7 +77,8 @@ func TestETHTransferProcessor_Execute_InvalidDestination(t *testing.T) {
 	vm := NewVM()
 	vm.WithLogger(testutil.GetLogger())
 
-	processor := NewETHTransferProcessor(vm, nil, nil, testutil.TestUser1().Address)
+	testUserAddress := testutil.TestUser1().Address
+	processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
 
 	node := &avsproto.ETHTransferNode{
 		Config: &avsproto.ETHTransferNode_Config{
@@ -108,7 +110,8 @@ func TestETHTransferProcessor_Execute_InvalidAmount(t *testing.T) {
 	vm := NewVM()
 	vm.WithLogger(testutil.GetLogger())
 
-	processor := NewETHTransferProcessor(vm, nil, nil, testutil.TestUser1().Address)
+	testUserAddress := testutil.TestUser1().Address
+	processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
 
 	node := &avsproto.ETHTransferNode{
 		Config: &avsproto.ETHTransferNode_Config{
@@ -140,7 +143,8 @@ func TestETHTransferProcessor_Execute_MissingConfig(t *testing.T) {
 	vm := NewVM()
 	vm.WithLogger(testutil.GetLogger())
 
-	processor := NewETHTransferProcessor(vm, nil, nil, testutil.TestUser1().Address)
+	testUserAddress := testutil.TestUser1().Address
+	processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
 
 	node := &avsproto.ETHTransferNode{
 		Config: nil,
@@ -169,7 +173,8 @@ func TestETHTransferProcessor_Execute_EmptyDestination(t *testing.T) {
 	vm := NewVM()
 	vm.WithLogger(testutil.GetLogger())
 
-	processor := NewETHTransferProcessor(vm, nil, nil, testutil.TestUser1().Address)
+	testUserAddress := testutil.TestUser1().Address
+	processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
 
 	node := &avsproto.ETHTransferNode{
 		Config: &avsproto.ETHTransferNode_Config{
@@ -201,7 +206,8 @@ func TestETHTransferProcessor_Execute_EmptyAmount(t *testing.T) {
 	vm := NewVM()
 	vm.WithLogger(testutil.GetLogger())
 
-	processor := NewETHTransferProcessor(vm, nil, nil, testutil.TestUser1().Address)
+	testUserAddress := testutil.TestUser1().Address
+	processor := NewETHTransferProcessor(vm, nil, nil, &testUserAddress)
 
 	node := &avsproto.ETHTransferNode{
 		Config: &avsproto.ETHTransferNode_Config{

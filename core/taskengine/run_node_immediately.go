@@ -1033,6 +1033,12 @@ func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, querie
 		topics[i] = topic.Hex()
 	}
 
+	// Convert topics to protobuf-compatible format for metadata
+	topicsMetadata := make([]interface{}, len(topics))
+	for i, topic := range topics {
+		topicsMetadata[i] = topic
+	}
+
 	// Get chain ID for metadata
 	var chainID int64 = 11155111 // Default to Sepolia
 	if n.tokenEnrichmentService != nil {
@@ -1042,7 +1048,7 @@ func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, querie
 	// Build raw metadata (the original blockchain event data)
 	metadata := map[string]interface{}{
 		"address":          mostRecentEvent.Address.Hex(), // Original contract address
-		"topics":           topics,
+		"topics":           topicsMetadata,
 		"data":             "0x" + common.Bytes2Hex(mostRecentEvent.Data),
 		"blockNumber":      mostRecentEvent.BlockNumber,
 		"transactionHash":  mostRecentEvent.TxHash.Hex(),

@@ -374,10 +374,10 @@ func findCommonAddress(fromAddresses, toAddresses []string) string {
 
 // createBasicEventMetadata creates basic metadata structure for events without ABI
 func createBasicEventMetadata(eventLog *types.Log) map[string]interface{} {
-	// Convert topics from []common.Hash to []string for structpb compatibility
-	topicsHex := make([]string, len(eventLog.Topics))
+	// Convert topics from []common.Hash to []interface{} for structpb compatibility
+	topicsInterface := make([]interface{}, len(eventLog.Topics))
 	for i, topic := range eventLog.Topics {
-		topicsHex[i] = topic.Hex()
+		topicsInterface[i] = topic.Hex()
 	}
 
 	return map[string]interface{}{
@@ -386,7 +386,7 @@ func createBasicEventMetadata(eventLog *types.Log) map[string]interface{} {
 		"transactionHash": eventLog.TxHash.Hex(),
 		"logIndex":        eventLog.Index,
 		"blockHash":       eventLog.BlockHash.Hex(),
-		"topics":          topicsHex,
+		"topics":          topicsInterface,
 		"data":            common.Bytes2Hex(eventLog.Data),
 		"removed":         eventLog.Removed,
 	}
