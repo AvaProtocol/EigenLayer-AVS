@@ -1357,6 +1357,22 @@ func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (
 	}
 	defer rpcClient.Close()
 
+	// 🔍 DEBUG: Log VM smart wallet config before creating processor
+	v.logger.Info("🔍 VM DEBUG - Smart wallet config for contract write",
+		"has_config", v.smartWalletConfig != nil,
+		"task_owner", v.TaskOwner.Hex())
+
+	if v.smartWalletConfig != nil {
+		v.logger.Info("🔍 VM DEBUG - Smart wallet config details",
+			"enable_real_transactions", v.smartWalletConfig.EnableRealTransactions,
+			"bundler_url", v.smartWalletConfig.BundlerURL,
+			"factory_address", v.smartWalletConfig.FactoryAddress,
+			"entrypoint_address", v.smartWalletConfig.EntrypointAddress,
+			"eth_rpc_url", v.smartWalletConfig.EthRpcUrl)
+	} else {
+		v.logger.Warn("⚠️ VM DEBUG - Smart wallet config is NIL in VM!")
+	}
+
 	processor := NewContractWriteProcessor(v, rpcClient, v.smartWalletConfig, v.TaskOwner)
 	executionLog, err = processor.Execute(stepID, node)
 	v.mu.Lock()
@@ -1511,7 +1527,7 @@ func (v *VM) runEthTransfer(stepID string, node *avsproto.ETHTransferNode) (*avs
 
 	// For now, we don't need an actual ETH client connection for simulation
 	// In the future, this would use the actual ETH RPC client
-	processor := NewETHTransferProcessor(v, nil, v.smartWalletConfig, v.TaskOwner)
+	processor := NewETHTransferProcessor(v, nil, v.smartWalletConfig, &v.TaskOwner)
 	executionLog, err := processor.Execute(stepID, node)
 	v.mu.Lock()
 	if executionLog != nil {
