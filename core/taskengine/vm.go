@@ -3050,7 +3050,6 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 			config := map[string]interface{}{
 				"contractAddress": contractWrite.Config.ContractAddress,
 				"contractAbi":     contractAbiArray,
-				"callData":        contractWrite.Config.CallData, // Config level callData is still a regular string
 			}
 
 			// Handle method calls - extract fields to simple map for protobuf compatibility
@@ -3253,8 +3252,8 @@ func extractLoopRunnerConfig(loop *avsproto.LoopNode) map[string]interface{} {
 		configData := map[string]interface{}{
 			"contractAddress": runner.ContractWrite.Config.ContractAddress,
 			"contractAbi":     contractAbiArray,
-			"callData":        runner.ContractWrite.Config.CallData,
 		}
+
 		// Handle method calls if present
 		if len(runner.ContractWrite.Config.MethodCalls) > 0 {
 			methodCallsArray := make([]interface{}, len(runner.ContractWrite.Config.MethodCalls))
@@ -3536,14 +3535,40 @@ func (eq *ExecutionQueue) worker() {
 	for task := range eq.tasks {
 		result := eq.executeTask(task)
 		if task.ResultChannel != nil {
-			select {
-			case task.ResultChannel <- result:
-			default:
-				// Channel might be closed, log but don't block
-				if eq.vm.logger != nil {
-					eq.vm.logger.Warn("Failed to send execution result - channel closed", "stepID", task.StepID)
-				}
+			// Use a panic-safe, non-blocking send helper. Sending on a closed channel panics in Go.
+			// In a select, a send-to-closed can still be chosen and panic. We must therefore guard
+			// against it with a defer-recover and also avoid blocking the worker goroutine.
+			eq.safeSendResult(task.ResultChannel, result, task.StepID)
+		}
+	}
+}
+
+// safeSendResult attempts to deliver the execution result to the provided channel without risking
+// a process-wide crash. It serves two goals:
+// 1) Never panic if the receiver closed the channel (send on closed channel panics in Go)
+// 2) Never block the worker if the receiver is not ready (keep queue throughput predictable)
+//
+// Contract:
+// - Ownership of the ResultChannel lies with the sender (the worker). Callers MUST NOT close it.
+// - If the receiver closes the channel anyway, we recover and log a warning, then drop the result.
+// - If the channel is full/unavailable, we log a warning and drop the result to keep the system healthy.
+func (eq *ExecutionQueue) safeSendResult(ch chan *ExecutionResult, res *ExecutionResult, stepID string) {
+	defer func() {
+		if r := recover(); r != nil {
+			if eq.vm != nil && eq.vm.logger != nil {
+				eq.vm.logger.Warn("Recovered from panic while sending execution result - channel closed", "stepID", stepID)
 			}
+		}
+	}()
+
+	// Non-blocking send: if the receiver isn't ready (or channel is closed and select picks default),
+	// we log and move on. If the runtime selects the send on a closed channel, the defer above recovers.
+	select {
+	case ch <- res:
+		// delivered
+	default:
+		if eq.vm != nil && eq.vm.logger != nil {
+			eq.vm.logger.Warn("Failed to send execution result - receiver not ready or channel closed", "stepID", stepID)
 		}
 	}
 }
