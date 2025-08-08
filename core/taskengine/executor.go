@@ -12,6 +12,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
+	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -218,6 +219,33 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	vm.WithLogger(x.logger).WithDb(x.db)
+	// Resolve AA sender strictly for deployed runs: require task.SmartWalletAddress be valid
+	if task != nil && task.Owner != "" {
+		if task.SmartWalletAddress == "" || !common.IsHexAddress(task.SmartWalletAddress) {
+			return nil, fmt.Errorf("invalid or missing task smart wallet address for deployed run")
+		}
+		owner := common.HexToAddress(task.Owner)
+		// Ensure the provided wallet belongs to owner
+		// Validate ownership using engine's ListWallets
+		resp, err := (&Engine{db: x.db, smartWalletConfig: x.smartWalletConfig, logger: x.logger}).ListWallets(owner, &avsproto.ListWalletReq{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to list wallets for owner %s: %w", owner.Hex(), err)
+		}
+		var okMatch bool
+		for _, w := range resp.GetItems() {
+			if strings.EqualFold(w.GetAddress(), task.SmartWalletAddress) {
+				okMatch = true
+				break
+			}
+		}
+		if !okMatch {
+			return nil, fmt.Errorf("task smart wallet address does not belong to owner")
+		}
+		vm.AddVar("aa_sender", common.HexToAddress(task.SmartWalletAddress).Hex())
+		if x.logger != nil {
+			x.logger.Info("Executor: AA sender resolved", "sender", task.SmartWalletAddress)
+		}
+	}
 	initialTaskStatus := task.Status
 
 	// Extract and add trigger config data if available using shared functions
@@ -293,8 +321,17 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		// Set trigger output data in the step based on trigger type
 		switch queueData.TriggerType {
 		case avsproto.TriggerType_TRIGGER_TYPE_MANUAL:
-			if output, ok := queueData.TriggerOutput.(*avsproto.ManualTrigger_Output); ok {
+			if output, ok := queueData.TriggerOutput.(*avsproto.ManualTrigger_Output); ok && output != nil {
 				triggerStep.OutputData = &avsproto.Execution_Step_ManualTrigger{ManualTrigger: output}
+			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
+				// Convert JSON-decoded map back to ManualTrigger_Output
+				var dataVal *structpb.Value
+				if raw, exists := m["data"]; exists && raw != nil {
+					if pb, err := structpb.NewValue(raw); err == nil {
+						dataVal = pb
+					}
+				}
+				triggerStep.OutputData = &avsproto.Execution_Step_ManualTrigger{ManualTrigger: &avsproto.ManualTrigger_Output{Data: dataVal}}
 			}
 		case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
 			if output, ok := queueData.TriggerOutput.(*avsproto.FixedTimeTrigger_Output); ok {

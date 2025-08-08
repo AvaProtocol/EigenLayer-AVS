@@ -1920,6 +1920,35 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	vm.WithLogger(n.logger).WithDb(n.db)
+	// Resolve AA sender for simulation: require workflowContext.runner in inputVariables to match an existing wallet; no fallback
+	{
+		owner := user.Address
+		var chosenSender common.Address
+		if wfCtxIface, ok := inputVariables["workflowContext"]; ok {
+			if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
+				if runnerIface, ok := wfCtx["runner"]; ok {
+					if runnerStr, ok := runnerIface.(string); ok && runnerStr != "" {
+						resp, err := n.ListWallets(owner, &avsproto.ListWalletReq{})
+						if err == nil {
+							for _, w := range resp.GetItems() {
+								if strings.EqualFold(w.GetAddress(), runnerStr) {
+									chosenSender = common.HexToAddress(w.GetAddress())
+									break
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		if (chosenSender == common.Address{}) {
+			return nil, fmt.Errorf("runner does not match any existing smart wallet for owner %s", owner.Hex())
+		}
+		vm.AddVar("aa_sender", chosenSender.Hex())
+		if n.logger != nil {
+			n.logger.Info("SimulateTask: AA sender resolved", "sender", chosenSender.Hex())
+		}
+	}
 
 	// Add chain name to workflowContext if token enrichment service is available
 	if n.tokenEnrichmentService != nil {

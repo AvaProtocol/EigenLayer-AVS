@@ -27,6 +27,7 @@ type SendUserOpFunc func(
 	owner common.Address,
 	callData []byte,
 	paymasterReq *preset.VerifyingPaymasterRequest,
+	senderOverride *common.Address,
 ) (*userop.UserOperation, *types.Receipt, error)
 
 type ContractWriteProcessor struct {
@@ -271,6 +272,30 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	aa.SetFactoryAddress(r.smartWalletConfig.FactoryAddress)
 	aa.SetEntrypointAddress(r.smartWalletConfig.EntrypointAddress)
 
+	// Optional runner validation: if workflowContext.runner is provided, ensure it matches
+	// one of the owner EOA's known smart wallets (authoritative). If wallet list cannot be checked,
+	// fall back to checking the derived salt:0 address as a best-effort sanity check.
+	if wfCtxIface, ok := r.vm.vars[WorkflowContextVarName]; ok {
+		if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
+			if runnerIface, ok := wfCtx["runner"]; ok {
+				if runnerStr, ok := runnerIface.(string); ok && runnerStr != "" {
+					client, err := ethclient.Dial(r.smartWalletConfig.EthRpcUrl)
+					if err == nil {
+						// derive sender at salt:0
+						sender, derr := aa.GetSenderAddress(client, r.owner, big.NewInt(0))
+						client.Close()
+						if derr == nil && sender != nil {
+							if !strings.EqualFold(sender.Hex(), runnerStr) {
+								// Do not fail solely on derived salt:0 mismatch; authoritative check is the wallet list in run_node path
+								r.vm.logger.Warn("runner does not match derived salt:0; proceeding (wallet list validation applies in run_node)", "expected", sender.Hex(), "runner", runnerStr)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Determine if paymaster should be used based on transaction limits and whitelist
 	var paymasterReq *preset.VerifyingPaymasterRequest
 	if r.shouldUsePaymaster() {
@@ -286,12 +311,24 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 			"owner", r.owner.Hex())
 	}
 
-	// Send UserOp transaction
+	// Determine AA overrides from VM vars: prefer senderOverride; else saltOverride
+	var senderOverride *common.Address
+	r.vm.mu.Lock()
+	if v, ok := r.vm.vars["aa_sender"]; ok {
+		if s, ok2 := v.(string); ok2 && common.IsHexAddress(s) {
+			addr := common.HexToAddress(s)
+			senderOverride = &addr
+		}
+	}
+	r.vm.mu.Unlock()
+
+	// Send UserOp transaction with overrides
 	userOp, receipt, err := r.sendUserOpFunc(
 		r.smartWalletConfig,
 		r.owner,
 		smartWalletCallData,
 		paymasterReq,
+		senderOverride,
 	)
 
 	// Increment transaction counter for this address (regardless of success/failure)
@@ -707,6 +744,10 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 								if parsedABI != nil {
 									// Convert log map to types.Log structure for parsing
 									if eventLog := r.convertMapToEventLog(logMap); eventLog != nil {
+										// Filter: only decode logs from the target contract address
+										if !strings.EqualFold(eventLog.Address.Hex(), contractAddress) {
+											continue
+										}
 										// Parse the log using shared event parsing function
 										decodedEvent, _, err := parseEventWithABIShared(eventLog, parsedABI, nil, r.vm.logger)
 										if err != nil {

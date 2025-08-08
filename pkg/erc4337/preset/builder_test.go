@@ -100,7 +100,7 @@ func TestSendUserOp(t *testing.T) {
 		t.Errorf("expect pack userop successfully but got error: %v", err)
 	}
 
-	userop, receipt, err := SendUserOp(smartWalletConfig, owner, calldata, nil)
+	userop, receipt, err := SendUserOp(smartWalletConfig, owner, calldata, nil, nil)
 	if err != nil || userop == nil {
 		t.Errorf("UserOp failed to send; error %v", err)
 	}
@@ -290,6 +290,7 @@ func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
 		invalidPaymasterAddress,
 		validUntil,
 		validAfter,
+		nil,
 	)
 
 	if err == nil {

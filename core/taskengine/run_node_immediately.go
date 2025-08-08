@@ -1476,6 +1476,46 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 
 	vm.WithLogger(n.logger).WithDb(n.db)
 
+	// Set TaskOwner from workflowContext.eoaAddress if provided via input variables
+	if wfCtxIface, ok := inputVariables["workflowContext"]; ok {
+		if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
+			if eoaIface, ok := wfCtx["eoaAddress"]; ok {
+				if eoaStr, ok := eoaIface.(string); ok && eoaStr != "" {
+					vm.TaskOwner = common.HexToAddress(eoaStr)
+					if n.logger != nil {
+						n.logger.Info("RunNodeImmediately: Set TaskOwner from workflowContext.eoaAddress", "taskOwner", vm.TaskOwner.Hex())
+					}
+				}
+			}
+
+			// Resolve AA sender preference: strictly require workflowContext.runner to match owner's wallets
+			var chosenSender common.Address
+			if runnerIface, ok := wfCtx["runner"]; ok {
+				if runnerStr, ok := runnerIface.(string); ok && runnerStr != "" {
+					resp, err := n.ListWallets(vm.TaskOwner, &avsproto.ListWalletReq{})
+					if err != nil {
+						return nil, fmt.Errorf("failed to list wallets for owner %s: %w", vm.TaskOwner.Hex(), err)
+					}
+					for _, w := range resp.GetItems() {
+						if strings.EqualFold(w.GetAddress(), runnerStr) {
+							chosenSender = common.HexToAddress(w.GetAddress())
+							break
+						}
+					}
+					if (chosenSender == common.Address{}) {
+						return nil, fmt.Errorf("runner %s does not match any existing smart wallet for owner %s", runnerStr, vm.TaskOwner.Hex())
+					}
+				}
+			}
+			if (chosenSender != common.Address{}) {
+				vm.AddVar("aa_sender", chosenSender.Hex())
+				if n.logger != nil {
+					n.logger.Info("RunNodeImmediately: AA sender resolved", "sender", chosenSender.Hex())
+				}
+			}
+		}
+	}
+
 	// Add chain name to workflowContext if token enrichment service is available
 	if n.tokenEnrichmentService != nil {
 		chainId := n.tokenEnrichmentService.GetChainID()
@@ -1836,12 +1876,13 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		return resp, nil
 	}
 
-	// Log successful execution
+	// Log successful execution (success determined by node execution)
 	if n.logger != nil {
 		n.logger.Info("RunNodeImmediatelyRPC: Executed successfully", "nodeTypeStr", nodeTypeStr, "originalNodeType", req.NodeType)
 	}
 
 	// Convert result to the appropriate protobuf output type
+	// Success/Error are already encoded inside 'result' for immediate execution path
 	resp := &avsproto.RunNodeWithInputsResp{
 		Success: true,
 		NodeId:  fmt.Sprintf("node_immediate_%d_TEST_MARKER", time.Now().UnixNano()),
