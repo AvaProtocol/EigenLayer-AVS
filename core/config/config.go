@@ -85,6 +85,8 @@ type SmartWalletConfig struct {
 	BundlerURL        string
 	FactoryAddress    common.Address
 	EntrypointAddress common.Address
+	// ChainID of the connected network (derived at runtime from RPC)
+	ChainID int64
 
 	ControllerPrivateKey *ecdsa.PrivateKey
 	PaymasterAddress     common.Address
@@ -268,6 +270,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			BundlerURL:             configRaw.SmartWallet.BundlerURL,
 			FactoryAddress:         common.HexToAddress(configRaw.SmartWallet.FactoryAddress),
 			EntrypointAddress:      common.HexToAddress(configRaw.SmartWallet.EntrypointAddress),
+			ChainID:                chainId.Int64(),
 			ControllerPrivateKey:   controllerPrivateKey,
 			PaymasterAddress:       common.HexToAddress(configRaw.SmartWallet.PaymasterAddress),
 			WhitelistAddresses:     convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),

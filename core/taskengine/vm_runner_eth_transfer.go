@@ -227,7 +227,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		txHash = receipt.TxHash.Hex()
 	} else if userOp != nil {
 		// Fallback: use a deterministic hash based on UserOp
-		txHash = fmt.Sprintf("0x%064x", userOp.GetUserOpHash(aa.EntrypointAddress, big.NewInt(11155111)))
+		txHash = fmt.Sprintf("0x%064x", userOp.GetUserOpHash(aa.EntrypointAddress, big.NewInt(p.smartWalletConfig.ChainID)))
 	} else {
 		txHash = fmt.Sprintf("0x%064d", time.Now().UnixNano())
 	}

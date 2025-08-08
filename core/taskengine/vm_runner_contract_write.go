@@ -406,7 +406,7 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 	} else {
 		// UserOp submitted but receipt not available yet
 		receiptMap = map[string]interface{}{
-			"userOpHash":      userOp.GetUserOpHash(r.smartWalletConfig.EntrypointAddress, big.NewInt(11155111)).Hex(),
+			"userOpHash":      userOp.GetUserOpHash(r.smartWalletConfig.EntrypointAddress, big.NewInt(r.smartWalletConfig.ChainID)).Hex(),
 			"sender":          userOp.Sender.Hex(),
 			"nonce":           fmt.Sprintf("0x%x", userOp.Nonce.Uint64()),
 			"status":          "pending",
