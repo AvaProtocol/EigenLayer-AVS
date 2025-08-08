@@ -793,13 +793,13 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		}
 	}
 
-	// Create output with flattened event data in Data field and method results in Metadata field
+	// Create output with flattened event data in Data field and attach method results to step-level metadata
 	s.OutputData = &avsproto.Execution_Step_ContractWrite{
 		ContractWrite: &avsproto.ContractWriteNode_Output{
-			Data:     dataValue,    // Flattened decoded events (empty object if no events)
-			Metadata: resultsValue, // Method results array (detailed transaction info)
+			Data: dataValue, // Flattened decoded events (empty object if no events)
 		},
 	}
+	s.Metadata = resultsValue
 
 	// Set output variables for backward compatibility and chaining
 	outputVars := make(map[string]any)

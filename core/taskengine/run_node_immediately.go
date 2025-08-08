@@ -1641,7 +1641,7 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		}
 	} else if contractRead := executionStep.GetContractRead(); contractRead != nil {
 		// ContractRead now returns a single flattened object directly
-		// Extract both data and metadata, following the same pattern as EventTrigger
+		// Data is in output; metadata is at step level
 
 		// Extract data if available
 		if contractRead.GetData() != nil {
@@ -1654,12 +1654,12 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 			}
 		}
 
-		// Extract metadata if available (independent of data)
-		if contractRead.GetMetadata() != nil {
-			if metadataArray := gow.ValueToSlice(contractRead.GetMetadata()); metadataArray != nil {
+		// Extract metadata from step-level metadata
+		if executionStep.Metadata != nil {
+			if metadataArray := gow.ValueToSlice(executionStep.Metadata); metadataArray != nil {
 				result["metadata"] = metadataArray
 			} else {
-				result["metadata"] = contractRead.GetMetadata().AsInterface()
+				result["metadata"] = executionStep.Metadata.AsInterface()
 			}
 		}
 	} else if branch := executionStep.GetBranch(); branch != nil {
@@ -1686,7 +1686,7 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		result["success"] = true
 	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
 		// ContractWrite output now contains enhanced results structure
-		// Data contains decoded events (flattened by method name), Metadata contains method results
+		// Data contains decoded events (flattened by method name); method results are in step-level metadata
 
 		// Extract data if available (decoded events organized by method name)
 		if contractWrite.GetData() != nil {
@@ -1698,16 +1698,16 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 			}
 		}
 
-		// Extract metadata if available (method results array)
-		if contractWrite.GetMetadata() != nil {
-			// Extract results from metadata (method results array)
-			allResults := ExtractResultsFromProtobufValue(contractWrite.GetMetadata())
+		// Extract results and metadata from step-level metadata
+		if executionStep.Metadata != nil {
+			// Extract results array
+			allResults := ExtractResultsFromProtobufValue(executionStep.Metadata)
 			result["results"] = allResults
 
-			if metadataArray := gow.ValueToSlice(contractWrite.GetMetadata()); metadataArray != nil {
+			if metadataArray := gow.ValueToSlice(executionStep.Metadata); metadataArray != nil {
 				result["metadata"] = metadataArray
 			} else {
-				result["metadata"] = contractWrite.GetMetadata().AsInterface()
+				result["metadata"] = executionStep.Metadata.AsInterface()
 			}
 		}
 
@@ -1999,10 +1999,10 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				}
 			}
 
-			// Extract metadata field (detailed method information)
+			// Extract metadata field (detailed method information) into top-level response metadata only
 			if metadataInterface, hasMetadata := result["metadata"]; hasMetadata {
 				if metadataValue, err := structpb.NewValue(metadataInterface); err == nil {
-					contractReadOutput.Metadata = metadataValue
+					resp.Metadata = metadataValue
 				}
 			}
 		}
@@ -2169,7 +2169,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		// 🚀 NEW: Set metadata field with detailed method information
 		if len(resultsArray) > 0 {
 			if metadataValue, err := structpb.NewValue(resultsArray); err == nil {
-				contractWriteOutput.Metadata = metadataValue
+				resp.Metadata = metadataValue
 			}
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractWrite{
@@ -2315,21 +2315,13 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	// Extract top-level metadata for ContractRead nodes (following event trigger pattern)
 	if nodeTypeStr == NodeTypeContractRead {
 		// For ContractRead nodes, extract metadata directly from the contractReadOutput that was created
-		if contractReadResp, ok := resp.OutputData.(*avsproto.RunNodeWithInputsResp_ContractRead); ok && contractReadResp.ContractRead != nil {
-			if contractReadResp.ContractRead.Metadata != nil {
-				resp.Metadata = contractReadResp.ContractRead.Metadata
-			}
-		}
+		// ContractRead now does not embed metadata inside output; nothing to copy here
 	}
 
 	// 🚀 NEW: Extract top-level metadata for ContractWrite nodes (for consistency with ContractRead)
 	if nodeTypeStr == NodeTypeContractWrite {
 		// For ContractWrite nodes, extract metadata directly from the contractWriteOutput that was created
-		if contractWriteResp, ok := resp.OutputData.(*avsproto.RunNodeWithInputsResp_ContractWrite); ok && contractWriteResp.ContractWrite != nil {
-			if contractWriteResp.ContractWrite.Metadata != nil {
-				resp.Metadata = contractWriteResp.ContractWrite.Metadata
-			}
-		}
+		// ContractWrite now does not embed metadata inside output; nothing to copy here
 	}
 
 	return resp, nil
