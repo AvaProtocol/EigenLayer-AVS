@@ -24,6 +24,14 @@ import (
 	sdkutils "github.com/Layr-Labs/eigensdk-go/utils"
 )
 
+// DefaultMaxWalletsPerOwner defines the default cap used when the YAML config omits
+// or specifies a non-positive value for max wallets per owner. Unlimited is not supported.
+const DefaultMaxWalletsPerOwner = 5
+
+// HardMaxWalletsPerOwner defines the absolute maximum allowed, regardless of config.
+// Any configured value above this will be clamped down to this hard limit.
+const HardMaxWalletsPerOwner = 2000
+
 // Config contains all of the configuration information for a credible squaring aggregators and challengers.
 // Operators use a separate config. (see config-files/operator.anvil.yaml)
 type Config struct {
@@ -84,6 +92,10 @@ type SmartWalletConfig struct {
 
 	// Enable real UserOp transactions instead of simulation
 	EnableRealTransactions bool
+
+	// Maximum number of smart wallets allowed per EOA owner
+	// Unlimited is NOT supported. If zero or negative, the default limit is applied.
+	MaxWalletsPerOwner int
 }
 
 type BackupConfig struct {
@@ -120,6 +132,7 @@ type ConfigRaw struct {
 		PaymasterAddress       string   `yaml:"paymaster_address"`
 		WhitelistAddresses     []string `yaml:"whitelist_addresses"`
 		EnableRealTransactions bool     `yaml:"enable_real_transactions"`
+		MaxWalletsPerOwner     int      `yaml:"max_wallets_per_owner"`
 	} `yaml:"smart_wallet"`
 
 	Backup struct {
@@ -213,6 +226,15 @@ func NewConfig(configFilePath string) (*Config, error) {
 		panic(err)
 	}
 
+	// Enforce sane default for max wallets per owner (no unlimited allowed)
+	if configRaw.SmartWallet.MaxWalletsPerOwner <= 0 {
+		configRaw.SmartWallet.MaxWalletsPerOwner = DefaultMaxWalletsPerOwner
+	}
+	// Enforce hard upper bound to prevent abuse
+	if configRaw.SmartWallet.MaxWalletsPerOwner > HardMaxWalletsPerOwner {
+		configRaw.SmartWallet.MaxWalletsPerOwner = HardMaxWalletsPerOwner
+	}
+
 	if configRaw.BackupDir == "" {
 		// If backup dir is not set, use the default path, usually this path will be mount from our docker compose host
 		configRaw.BackupDir = "/tmp/ap-avs-backup"
@@ -250,6 +272,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			PaymasterAddress:       common.HexToAddress(configRaw.SmartWallet.PaymasterAddress),
 			WhitelistAddresses:     convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
 			EnableRealTransactions: configRaw.SmartWallet.EnableRealTransactions,
+			MaxWalletsPerOwner:     configRaw.SmartWallet.MaxWalletsPerOwner,
 		},
 
 		BackupConfig: BackupConfig{

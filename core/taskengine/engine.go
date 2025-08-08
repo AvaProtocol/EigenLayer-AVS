@@ -439,6 +439,32 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		return nil, err
 	}
 
+	// Enforce max smart wallet count per owner before deriving a new one
+	// Count existing wallets stored for this owner
+	if n.smartWalletConfig != nil {
+		maxAllowed := n.smartWalletConfig.MaxWalletsPerOwner
+		if maxAllowed <= 0 {
+			maxAllowed = config.DefaultMaxWalletsPerOwner
+		}
+		if maxAllowed > config.HardMaxWalletsPerOwner {
+			maxAllowed = config.HardMaxWalletsPerOwner
+		}
+		// Fetch all wallets for this owner and count unique addresses
+		dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+		if listErr == nil {
+			unique := make(map[string]struct{})
+			for _, item := range dbItems {
+				storedModelWallet := &model.SmartWallet{}
+				if err := storedModelWallet.FromStorageData(item.Value); err == nil && storedModelWallet.Address != nil {
+					unique[strings.ToLower(storedModelWallet.Address.Hex())] = struct{}{}
+				}
+			}
+			if len(unique) >= maxAllowed {
+				return nil, status.Errorf(codes.ResourceExhausted, "max smart wallet count reached for owner (limit=%d)", maxAllowed)
+			}
+		}
+	}
+
 	derivedSenderAddress, err := aa.GetSenderAddressForFactory(rpcConn, user.Address, factoryAddr, saltBig)
 	if err != nil || derivedSenderAddress == nil || *derivedSenderAddress == (common.Address{}) {
 		var errMsg string
