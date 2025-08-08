@@ -50,13 +50,16 @@ type VerifyingPaymasterRequest struct {
 }
 
 func GetVerifyingPaymasterRequestForDuration(address common.Address, duration time.Duration) *VerifyingPaymasterRequest {
-	currentTime := time.Now().Unix()
+	// Use a small negative skew to tolerate clock drift between services and the bundler
+	const skewSeconds int64 = 60 // 1 minute skew
+	now := time.Now().Unix()
+	validAfter := now - skewSeconds
+	validUntil := now + int64(duration.Seconds())
+
 	return &VerifyingPaymasterRequest{
 		PaymasterAddress: address,
-		ValidUntil:       big.NewInt(currentTime + int64(duration.Seconds())),
-		// Create validUntil and validAfter values (1 hour from now and current time)
-		// Due to clock drift between server, we subtract 3 seconds to be on the safe side
-		ValidAfter: big.NewInt(currentTime - 3),
+		ValidUntil:       big.NewInt(validUntil),
+		ValidAfter:       big.NewInt(validAfter),
 	}
 }
 
@@ -65,11 +68,14 @@ func GetVerifyingPaymasterRequestForDuration(address common.Address, duration ti
 // If the userops is executed, the transaction Receipt is also returned.
 // If paymasterReq is nil, a standard UserOp without paymaster is sent.
 // If paymasterReq is provided, it will use the paymaster parameters.
+// senderOverride: If provided, use this as the smart account sender.
+// saltOverride: If provided (and the account is not yet deployed), use this salt to produce initCode.
 func SendUserOp(
 	smartWalletConfig *config.SmartWalletConfig,
 	owner common.Address,
 	callData []byte,
 	paymasterReq *VerifyingPaymasterRequest,
+	senderOverride *common.Address,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	var userOp *userop.UserOperation
 	var err error
@@ -96,7 +102,7 @@ func SendUserOp(
 	// Build the userOp based on whether paymaster is requested or not
 	if paymasterReq == nil {
 		// Standard UserOp without paymaster
-		userOp, err = BuildUserOp(smartWalletConfig, client, bundlerClient, owner, callData)
+		userOp, err = BuildUserOp(smartWalletConfig, client, bundlerClient, owner, callData, senderOverride)
 	} else {
 		// UserOp with paymaster support
 		userOp, err = BuildUserOpWithPaymaster(
@@ -108,6 +114,7 @@ func SendUserOp(
 			paymasterReq.PaymasterAddress,
 			paymasterReq.ValidUntil,
 			paymasterReq.ValidAfter,
+			senderOverride,
 		)
 	}
 
@@ -177,8 +184,20 @@ func BuildUserOp(
 	bundlerClient *bundler.BundlerClient,
 	owner common.Address,
 	callData []byte,
+	senderOverride *common.Address,
 ) (*userop.UserOperation, error) {
-	sender, _ := aa.GetSenderAddress(client, owner, accountSalt)
+	// Resolve sender
+	var sender *common.Address
+	if senderOverride != nil {
+		so := *senderOverride
+		sender = &so
+	} else {
+		var err error
+		sender, err = aa.GetSenderAddress(client, owner, accountSalt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to derive sender address: %w", err)
+		}
+	}
 
 	initCode := "0x"
 	code, err := client.CodeAt(context.Background(), *sender, nil)
@@ -188,6 +207,10 @@ func BuildUserOp(
 
 	// account not initialize, feed in init code
 	if len(code) == 0 {
+		if senderOverride != nil {
+			// We cannot derive factory salt from sender alone; require pre-deployed account when overriding sender
+			return nil, fmt.Errorf("sender %s is not deployed; deploy it first or omit senderOverride", sender.Hex())
+		}
 		initCode, _ = aa.GetInitCode(owner.Hex(), accountSalt)
 	}
 
@@ -253,9 +276,10 @@ func BuildUserOpWithPaymaster(
 	paymasterAddress common.Address,
 	validUntil *big.Int,
 	validAfter *big.Int,
+	senderOverride *common.Address,
 ) (*userop.UserOperation, error) {
 	// First build the basic user operation
-	userOp, err := BuildUserOp(smartWalletConfig, client, bundlerClient, owner, callData)
+	userOp, err := BuildUserOp(smartWalletConfig, client, bundlerClient, owner, callData, senderOverride)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build base UserOp: %w", err)
 	}

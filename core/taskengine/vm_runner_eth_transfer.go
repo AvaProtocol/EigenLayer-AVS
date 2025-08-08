@@ -189,12 +189,24 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 			"owner", p.taskOwner.Hex())
 	}
 
-	// Send UserOp transaction
+	// AA overrides from VM
+	var senderOverride *common.Address
+	p.vm.mu.Lock()
+	if v, ok := p.vm.vars["aa_sender"]; ok {
+		if s, ok2 := v.(string); ok2 && common.IsHexAddress(s) {
+			addr := common.HexToAddress(s)
+			senderOverride = &addr
+		}
+	}
+	p.vm.mu.Unlock()
+
+	// Send UserOp transaction with overrides
 	userOp, receipt, err := preset.SendUserOp(
 		p.smartWalletConfig,
 		*p.taskOwner,
 		smartWalletCallData,
 		paymasterReq,
+		senderOverride,
 	)
 
 	if err != nil {
