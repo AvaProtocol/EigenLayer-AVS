@@ -416,42 +416,41 @@ func convertLogsToInterface(logs []*types.Log) []interface{} {
 
 // shouldUsePaymaster determines if paymaster should be used based on transaction limits and whitelist
 func (r *ContractWriteProcessor) shouldUsePaymaster() bool {
-	// Check if address is whitelisted (unlimited paymaster usage)
-	for _, whitelistedAddr := range r.smartWalletConfig.WhitelistAddresses {
-		if whitelistedAddr == r.owner {
-			r.vm.logger.Debug("Address is whitelisted, using paymaster", "owner", r.owner.Hex())
-			return true
+	// Priority 1: If smart wallet already has ETH balance, do NOT use paymaster
+	// This covers the case where the wallet can self-fund deployment and calls
+	if r.client != nil {
+		// Derive the smart wallet (sender) address using salt 0 (default path)
+		senderAddr, err := aa.GetSenderAddress(r.client, r.owner, big.NewInt(0))
+		if err == nil && senderAddr != nil {
+			bal, balErr := r.client.BalanceAt(context.Background(), *senderAddr, nil)
+			if balErr == nil && bal != nil && bal.Sign() > 0 {
+				if r.vm.logger != nil {
+					r.vm.logger.Debug("Smart wallet has ETH balance, not using paymaster",
+						"owner", r.owner.Hex(), "wallet", senderAddr.Hex(), "balanceWei", bal.String())
+				}
+				return false
+			}
+		} else if r.vm.logger != nil {
+			r.vm.logger.Debug("Could not derive smart wallet address for balance check; proceeding to consider paymaster",
+				"owner", r.owner.Hex(), "error", err)
 		}
 	}
 
-	// Check transaction count for non-whitelisted addresses
-	if r.vm.db != nil {
-		counterKey := ContractWriteCounterKey(r.owner)
-		transactionCount, err := r.vm.db.GetCounter(counterKey)
-		if err != nil {
-			r.vm.logger.Warn("Failed to get transaction counter, defaulting to paymaster", "error", err)
-			return true // Default to paymaster on error
+	// Priority 2: If no ETH on wallet, and a paymaster is configured, use paymaster as fallback for creation/sponsorship
+	if (r.smartWalletConfig.PaymasterAddress != common.Address{}) {
+		if r.vm.logger != nil {
+			r.vm.logger.Debug("Using paymaster as fallback (wallet has no ETH or balance unknown)",
+				"owner", r.owner.Hex(), "paymaster", r.smartWalletConfig.PaymasterAddress.Hex())
 		}
-
-		// Allow 10 free transactions for non-whitelisted addresses (0-indexed, so < 10)
-		const freeTransactionLimit = 10
-		if transactionCount < freeTransactionLimit {
-			r.vm.logger.Debug("Within free transaction limit, using paymaster",
-				"owner", r.owner.Hex(),
-				"count", transactionCount,
-				"limit", freeTransactionLimit)
-			return true
-		}
-
-		r.vm.logger.Debug("Exceeded free transaction limit, using regular transaction",
-			"owner", r.owner.Hex(),
-			"count", transactionCount,
-			"limit", freeTransactionLimit)
-		return false
+		return true
 	}
 
-	// Default to paymaster if no database available
-	return true
+	// No ETH and no paymaster configured → do not force paymaster; bundler will fail (AA21) and we propagate failure
+	if r.vm.logger != nil {
+		r.vm.logger.Debug("No wallet ETH and no paymaster configured; proceeding without paymaster (may fail)",
+			"owner", r.owner.Hex())
+	}
+	return false
 }
 
 // createMockContractWriteResult creates a mock result when Tenderly fails
