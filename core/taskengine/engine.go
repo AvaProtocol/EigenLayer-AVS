@@ -937,7 +937,15 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 				"operator", address,
 				"total_tasks_in_memory", len(n.tasks))
 
-			for _, task := range n.tasks {
+			// Iterate over a snapshot to avoid concurrent map iteration/write panics
+			n.lock.Lock()
+			snapshot := make([]*model.Task, 0, len(n.tasks))
+			for _, t := range n.tasks {
+				snapshot = append(snapshot, t)
+			}
+			n.lock.Unlock()
+
+			for _, task := range snapshot {
 				if _, ok := n.trackSyncedTasks[address].TaskID[task.Id]; ok {
 					n.logger.Debug("⏭️ Skipping task - already synced to operator",
 						"operator", address,
