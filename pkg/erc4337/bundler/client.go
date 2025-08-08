@@ -18,6 +18,17 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 )
 
+// safePreview returns a truncated preview of s with ellipsis when longer than n
+func safePreview(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+
 // BundlerClient defines a client for interacting with an EIP-4337 bundler RPC endpoint.
 type BundlerClient struct {
 	client *rpc.Client
@@ -81,9 +92,9 @@ func (bc *BundlerClient) sendUserOperationHTTP(
 	fmt.Printf("  UserOp Structure:\n")
 	fmt.Printf("    sender: %s\n", uo.Sender)
 	fmt.Printf("    nonce: %s\n", uo.Nonce)
-	fmt.Printf("    initCode: %s\n", uo.InitCode[:min(50, len(uo.InitCode))]+"...")
-	fmt.Printf("    callData: %s\n", uo.CallData[:min(50, len(uo.CallData))]+"...")
-	fmt.Printf("    signature: %s\n", uo.Signature[:min(50, len(uo.Signature))]+"...")
+	fmt.Printf("    initCode: %s\n", safePreview(uo.InitCode, 50))
+	fmt.Printf("    callData: %s\n", safePreview(uo.CallData, 50))
+	fmt.Printf("    signature: %s\n", safePreview(uo.Signature, 50))
 	fmt.Printf("🔍 END BUNDLER SEND DEBUG\n\n")
 
 	// Create JSON-RPC request

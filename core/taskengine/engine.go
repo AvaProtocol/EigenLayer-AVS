@@ -1920,33 +1920,46 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	vm.WithLogger(n.logger).WithDb(n.db)
-	// Resolve AA sender for simulation: require workflowContext.runner in inputVariables to match an existing wallet; no fallback
+	// Resolve AA sender for simulation ONLY if the workflow contains AA-relevant nodes
+	// (contractWrite or ethTransfer). For non-AA workflows (e.g., CustomCode), skip this requirement.
 	{
-		owner := user.Address
-		var chosenSender common.Address
-		if wfCtxIface, ok := inputVariables["workflowContext"]; ok {
-			if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
-				if runnerIface, ok := wfCtx["runner"]; ok {
-					if runnerStr, ok := runnerIface.(string); ok && runnerStr != "" {
-						resp, err := n.ListWallets(owner, &avsproto.ListWalletReq{})
-						if err == nil {
-							for _, w := range resp.GetItems() {
-								if strings.EqualFold(w.GetAddress(), runnerStr) {
-									chosenSender = common.HexToAddress(w.GetAddress())
-									break
+		requiresAA := false
+		for _, tn := range task.Nodes {
+			if tn.GetContractWrite() != nil || tn.GetEthTransfer() != nil {
+				requiresAA = true
+				break
+			}
+		}
+
+		if requiresAA {
+			owner := user.Address
+			var chosenSender common.Address
+			if wfCtxIface, ok := inputVariables["workflowContext"]; ok {
+				if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
+					if runnerIface, ok := wfCtx["runner"]; ok {
+						if runnerStr, ok := runnerIface.(string); ok && runnerStr != "" {
+							resp, err := n.ListWallets(owner, &avsproto.ListWalletReq{})
+							if err == nil {
+								for _, w := range resp.GetItems() {
+									if strings.EqualFold(w.GetAddress(), runnerStr) {
+										chosenSender = common.HexToAddress(w.GetAddress())
+										break
+									}
 								}
 							}
 						}
 					}
 				}
 			}
-		}
-		if (chosenSender == common.Address{}) {
-			return nil, fmt.Errorf("runner does not match any existing smart wallet for owner %s", owner.Hex())
-		}
-		vm.AddVar("aa_sender", chosenSender.Hex())
-		if n.logger != nil {
-			n.logger.Info("SimulateTask: AA sender resolved", "sender", chosenSender.Hex())
+			if (chosenSender == common.Address{}) {
+				return nil, fmt.Errorf("runner does not match any existing smart wallet for owner %s", owner.Hex())
+			}
+			vm.AddVar("aa_sender", chosenSender.Hex())
+			if n.logger != nil {
+				n.logger.Info("SimulateTask: AA sender resolved", "sender", chosenSender.Hex())
+			}
+		} else if n.logger != nil {
+			n.logger.Info("SimulateTask: Skipping AA sender resolution (no AA-relevant nodes in workflow)")
 		}
 	}
 

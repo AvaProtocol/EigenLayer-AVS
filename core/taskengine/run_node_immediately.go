@@ -162,11 +162,6 @@ func (n *Engine) runCronTriggerImmediately(triggerConfig map[string]interface{},
 
 // runEventTriggerImmediately executes an event trigger immediately using the new queries-based system
 func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
-	// Ensure RPC connection is available
-	if rpcConn == nil {
-		return nil, fmt.Errorf("RPC connection not available for EventTrigger execution")
-	}
-
 	// Create a context with timeout to prevent hanging tests
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -198,10 +193,15 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 
 	// 🔮 TENDERLY SIMULATION MODE (default: provides sample data)
 	if simulationMode {
+		// Simulation path does not require an RPC connection
 		return n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
 	}
 
 	// 📊 HISTORICAL SEARCH MODE (use simulationMode: false for production)
+	// Ensure RPC connection is available for historical on-chain queries
+	if rpcConn == nil {
+		return nil, fmt.Errorf("RPC connection not available for EventTrigger historical search")
+	}
 	return n.runEventTriggerWithHistoricalSearch(ctx, queriesArray, inputVariables)
 }
 
@@ -377,7 +377,7 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 		Query:                  query,
 		AllQueries:             allQueries, // Pass all queries for direction determination
 		TokenEnrichmentService: n.tokenEnrichmentService,
-		RpcClient:              rpcConn, // Use the global rpcConn from simulation context
+		RpcClient:              nil, // Explicitly nil in simulation to avoid RPC dependency
 		Logger:                 n.logger,
 		ChainID:                chainID, // Add chainID for chain name resolution
 	}
