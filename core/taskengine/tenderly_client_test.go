@@ -1758,8 +1758,8 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		assert.NotEmpty(t, result["data"], "Should have Transfer event data")
 		assert.NotEmpty(t, result["metadata"], "Should have metadata")
 
-		// Get and display the Transfer event data structure
-		transferData, ok := result["data"].(map[string]interface{})
+		// Get and display the raw blockchain log data structure (now under metadata)
+		transferData, ok := result["metadata"].(map[string]interface{})
 		require.True(t, ok, "data should be a map[string]interface{}")
 		require.NotNil(t, transferData, "Should have Transfer event data")
 
@@ -1767,7 +1767,7 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		t.Logf("✅ Success! Here's the raw blockchain log data structure users can reference:")
 		t.Logf("")
 		t.Logf("📋 Raw Blockchain Log Fields:")
-		t.Logf("   address: %v", transferData["tokenContract"])
+		t.Logf("   address: %v", transferData["address"])
 		t.Logf("   blockNumber: %v", transferData["blockNumber"])
 		t.Logf("   transactionHash: %v", transferData["transactionHash"])
 		t.Logf("   topics: %v", transferData["topics"])
@@ -1798,9 +1798,9 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		t.Logf("4. Users can reference fields like: data.address, data.topics, data.data, etc.")
 		t.Logf("5. For production: set 'simulationMode': false to use real blockchain data")
 
-		// Verify all expected enriched event fields are present
+		// Verify all expected raw blockchain log fields are present (now in metadata)
 		expectedFields := []string{
-			"tokenContract", "blockNumber", "transactionHash", "topics", "data",
+			"address", "blockNumber", "transactionHash", "topics", "data",
 			"blockHash", "logIndex", "removed", "chainId", "transactionIndex",
 		}
 

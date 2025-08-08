@@ -209,7 +209,7 @@ func BuildUserOp(
 	if len(code) == 0 {
 		if senderOverride != nil {
 			// We cannot derive factory salt from sender alone; require pre-deployed account when overriding sender
-			return nil, fmt.Errorf("sender %s is not deployed; deploy it first or omit senderOverride", sender.Hex())
+			return nil, fmt.Errorf("sender %s is not deployed; deploy it first or omit the specified sender address", sender.Hex())
 		}
 		initCode, _ = aa.GetInitCode(owner.Hex(), accountSalt)
 	}
