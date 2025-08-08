@@ -3,8 +3,6 @@ package aggregator;
 
 option go_package = "./avsproto";
 
-import "google/protobuf/wrappers.proto";
-import "google/protobuf/any.proto";
 import "google/protobuf/struct.proto";
 
 // ============================================================================
@@ -372,8 +370,6 @@ message ContractWriteNode {
     // Changed from repeated MethodResult to google.protobuf.Value for better JavaScript native type support
     // Data will be a flattened JSON object with decoded event logs (user-facing results)
     google.protobuf.Value data = 1;
-    // Metadata contains the raw method execution results with receipts and detailed information
-    google.protobuf.Value metadata = 2;
   }
 
   message MethodResult {
@@ -425,8 +421,6 @@ message ContractReadNode {
     // Changed from repeated MethodResult to google.protobuf.Value for better JavaScript native type support
     // Data will be a JSON array of method results with flattened key-value structure
     google.protobuf.Value data = 1;
-    // Metadata contains the raw backend responses with methodName, methodABI, success, error details
-    google.protobuf.Value metadata = 2;
   }
 
   // Include Config as field 
@@ -620,6 +614,8 @@ message Execution {
     repeated string inputs = 16;
     // Configuration data that was set on this trigger/node
     google.protobuf.Value config = 19;
+    // Optional structured metadata for testing/debugging; not consumed by subsequent nodes
+    google.protobuf.Value metadata = 25;
     oneof output_data {
       // Trigger outputs
       BlockTrigger.Output block_trigger = 20;

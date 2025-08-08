@@ -715,13 +715,13 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		cleanDataValue = structpb.NewNullValue()
 	}
 
-	// Create output with both data and metadata
+	// Create output with data only; attach detailed results to step-level metadata
 	s.OutputData = &avsproto.Execution_Step_ContractRead{
 		ContractRead: &avsproto.ContractReadNode_Output{
-			Data:     cleanDataValue,
-			Metadata: resultsValue,
+			Data: cleanDataValue,
 		},
 	}
+	s.Metadata = resultsValue
 
 	// Set output variables for backward compatibility
 	// For single method calls, set the first result as the main output
