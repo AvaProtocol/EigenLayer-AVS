@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net/http"
 	"time"
@@ -37,7 +38,8 @@ type BundlerClient struct {
 
 // NewBundlerClient creates a new BundlerClient that connects to the given URL.
 func NewBundlerClient(url string) (*BundlerClient, error) {
-	// Use DialHTTP instead of Dial for HTTP-based bundler endpoints
+	// Use DialHTTP instead of Dial as it is more compatible with HTTP-based bundler
+	// endpoints, but it also supports other protocols such as WebSocket.
 	c, err := rpc.DialHTTP(url)
 	if err != nil {
 		return nil, fmt.Errorf("Error creating bundler client: %w", err)
@@ -59,7 +61,7 @@ func (bc *BundlerClient) SendUserOperation(
 	// Try HTTP method first (similar to gas estimation fix)
 	txHash, err := bc.sendUserOperationHTTP(ctx, userOp, entrypoint)
 	if err != nil {
-		fmt.Printf("⚠️ HTTP SendUserOperation failed, trying RPC fallback: %v\n", err)
+		log.Printf("⚠️ HTTP SendUserOperation failed, trying RPC fallback: %v", err)
 		// Fallback to RPC method
 		return bc.sendUserOperationRPC(ctx, userOp, entrypoint)
 	}
@@ -86,16 +88,16 @@ func (bc *BundlerClient) sendUserOperationHTTP(
 		Signature:            fmt.Sprintf("0x%x", userOp.Signature),
 	}
 
-	fmt.Printf("🔍 BUNDLER SEND DEBUG - eth_sendUserOperation\n")
-	fmt.Printf("  Method: eth_sendUserOperation\n")
-	fmt.Printf("  Entrypoint: %s\n", entrypoint.Hex())
-	fmt.Printf("  UserOp Structure:\n")
-	fmt.Printf("    sender: %s\n", uo.Sender)
-	fmt.Printf("    nonce: %s\n", uo.Nonce)
-	fmt.Printf("    initCode: %s\n", safePreview(uo.InitCode, 50))
-	fmt.Printf("    callData: %s\n", safePreview(uo.CallData, 50))
-	fmt.Printf("    signature: %s\n", safePreview(uo.Signature, 50))
-	fmt.Printf("🔍 END BUNDLER SEND DEBUG\n\n")
+	log.Printf("🔍 BUNDLER SEND DEBUG - eth_sendUserOperation")
+	log.Printf("  Method: eth_sendUserOperation")
+	log.Printf("  Entrypoint: %s", entrypoint.Hex())
+	log.Printf("  UserOp Structure:")
+	log.Printf("    sender: %s", uo.Sender)
+	log.Printf("    nonce: %s", uo.Nonce)
+	log.Printf("    initCode: %s", safePreview(uo.InitCode, 50))
+	log.Printf("    callData: %s", safePreview(uo.CallData, 50))
+	log.Printf("    signature: %s", safePreview(uo.Signature, 50))
+	log.Printf("🔍 END BUNDLER SEND DEBUG")
 
 	// Create JSON-RPC request
 	reqData := map[string]interface{}{
@@ -110,10 +112,10 @@ func (bc *BundlerClient) sendUserOperationHTTP(
 		return "", fmt.Errorf("failed to marshal JSON-RPC request: %w", err)
 	}
 
-	fmt.Printf("🔍 HTTP SEND REQUEST DEBUG\n")
-	fmt.Printf("  URL: %s\n", bc.url)
-	fmt.Printf("  Request Body: %s\n", string(reqBody))
-	fmt.Printf("🔍 END HTTP SEND REQUEST DEBUG\n\n")
+	log.Printf("🔍 HTTP SEND REQUEST DEBUG")
+	log.Printf("  URL: %s", bc.url)
+	log.Printf("  Request Body: %s", string(reqBody))
+	log.Printf("🔍 END HTTP SEND REQUEST DEBUG")
 
 	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, "POST", bc.url, bytes.NewBuffer(reqBody))
@@ -136,10 +138,10 @@ func (bc *BundlerClient) sendUserOperationHTTP(
 		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	fmt.Printf("🔍 HTTP SEND RESPONSE DEBUG\n")
-	fmt.Printf("  Status Code: %d\n", resp.StatusCode)
-	fmt.Printf("  Response Body: %s\n", string(respBody))
-	fmt.Printf("🔍 END HTTP SEND RESPONSE DEBUG\n\n")
+	log.Printf("🔍 HTTP SEND RESPONSE DEBUG")
+	log.Printf("  Status Code: %d", resp.StatusCode)
+	log.Printf("  Response Body: %s", string(respBody))
+	log.Printf("🔍 END HTTP SEND RESPONSE DEBUG")
 
 	// Check for HTTP errors
 	if resp.StatusCode != 200 {
@@ -233,26 +235,26 @@ func (bc *BundlerClient) EstimateUserOperationGas(
 	}
 
 	// 🔍 DEBUG: Log the complete bundler request details
-	fmt.Printf("\n🔍 BUNDLER REQUEST DEBUG - eth_estimateUserOperationGas\n")
-	fmt.Printf("  Method: eth_estimateUserOperationGas\n")
-	fmt.Printf("  Entrypoint: %s\n", entrypoint.Hex())
-	fmt.Printf("  UserOp Structure:\n")
-	fmt.Printf("    sender: %s\n", uo.Sender.Hex())
-	fmt.Printf("    nonce: %s\n", uo.Nonce)
-	fmt.Printf("    initCode: %s\n", uo.InitCode)
-	fmt.Printf("    callData: %s\n", uo.CallData)
-	fmt.Printf("    callGasLimit: %s\n", uo.CallGasLimit)
-	fmt.Printf("    verificationGasLimit: %s\n", uo.VerificationGasLimit)
-	fmt.Printf("    preVerificationGas: %s\n", uo.PreVerificationGas)
-	fmt.Printf("    maxFeePerGas: %s\n", uo.MaxFeePerGas)
-	fmt.Printf("    maxPriorityFeePerGas: %s\n", uo.MaxPriorityFeePerGas)
-	fmt.Printf("    paymasterAndData: %s\n", uo.PaymasterAndData)
-	fmt.Printf("    signature: %s\n", uo.Signature)
-	fmt.Printf("  Full JSON-RPC Call Parameters:\n")
-	fmt.Printf("    [0] UserOp: %+v\n", uo)
-	fmt.Printf("    [1] Entrypoint: %s\n", entrypoint.Hex())
-	fmt.Printf("    [2] Override: %+v\n", map[string]string{})
-	fmt.Printf("🔍 END BUNDLER REQUEST DEBUG\n\n")
+	log.Printf("🔍 BUNDLER REQUEST DEBUG - eth_estimateUserOperationGas")
+	log.Printf("  Method: eth_estimateUserOperationGas")
+	log.Printf("  Entrypoint: %s", entrypoint.Hex())
+	log.Printf("  UserOp Structure:")
+	log.Printf("    sender: %s", uo.Sender.Hex())
+	log.Printf("    nonce: %s", uo.Nonce)
+	log.Printf("    initCode: %s", uo.InitCode)
+	log.Printf("    callData: %s", uo.CallData)
+	log.Printf("    callGasLimit: %s", uo.CallGasLimit)
+	log.Printf("    verificationGasLimit: %s", uo.VerificationGasLimit)
+	log.Printf("    preVerificationGas: %s", uo.PreVerificationGas)
+	log.Printf("    maxFeePerGas: %s", uo.MaxFeePerGas)
+	log.Printf("    maxPriorityFeePerGas: %s", uo.MaxPriorityFeePerGas)
+	log.Printf("    paymasterAndData: %s", uo.PaymasterAndData)
+	log.Printf("    signature: %s", uo.Signature)
+	log.Printf("  Full JSON-RPC Call Parameters:")
+	log.Printf("    [0] UserOp: %+v", uo)
+	log.Printf("    [1] Entrypoint: %s", entrypoint.Hex())
+	log.Printf("    [2] Override: %+v", map[string]string{})
+	log.Printf("🔍 END BUNDLER REQUEST DEBUG")
 
 	// Use direct HTTP request instead of RPC client for better compatibility
 	gasResult, err := bc.estimateUserOperationGasHTTP(ctx, uo, entrypoint)
@@ -303,10 +305,10 @@ func (bc *BundlerClient) estimateUserOperationGasHTTP(ctx context.Context, uo Us
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	fmt.Printf("🔍 HTTP REQUEST DEBUG\n")
-	fmt.Printf("  URL: %s\n", bc.url)
-	fmt.Printf("  Request Body: %s\n", string(requestBody))
-	fmt.Printf("🔍 END HTTP REQUEST DEBUG\n\n")
+	log.Printf("🔍 HTTP REQUEST DEBUG")
+	log.Printf("  URL: %s", bc.url)
+	log.Printf("  Request Body: %s", string(requestBody))
+	log.Printf("🔍 END HTTP REQUEST DEBUG")
 
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", bc.url, bytes.NewBuffer(requestBody))
@@ -330,10 +332,10 @@ func (bc *BundlerClient) estimateUserOperationGasHTTP(ctx context.Context, uo Us
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	fmt.Printf("🔍 HTTP RESPONSE DEBUG\n")
-	fmt.Printf("  Status Code: %d\n", resp.StatusCode)
-	fmt.Printf("  Response Body: %s\n", string(respBody))
-	fmt.Printf("🔍 END HTTP RESPONSE DEBUG\n\n")
+	log.Printf("🔍 HTTP RESPONSE DEBUG")
+	log.Printf("  Status Code: %d", resp.StatusCode)
+	log.Printf("  Response Body: %s", string(respBody))
+	log.Printf("🔍 END HTTP RESPONSE DEBUG")
 
 	// Check for HTTP errors
 	if resp.StatusCode != 200 {
