@@ -149,7 +149,12 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 		return c.HTMLBlob(http.StatusOK, buf.Bytes())
 	})
 
+	addr := ":1323"
+	if agg.config != nil && agg.config.HttpBindAddress != "" {
+		addr = agg.config.HttpBindAddress
+	}
+	agg.logger.Info("HTTP server listening", "address", addr)
 	goSafe(func() {
-		e.Logger.Fatal(e.Start(":1323"))
+		e.Logger.Fatal(e.Start(addr))
 	})
 }
