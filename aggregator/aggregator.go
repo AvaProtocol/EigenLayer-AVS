@@ -256,6 +256,11 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 
 	agg.logger.Infof("Starting aggregator %s", version.Get())
 
+	// Configure panic behavior for background goroutines: re-panic in development, log-only in production
+	SetRepanicOnPanic(agg.config != nil && agg.config.Environment == logging.Development)
+	// Provide structured logger to package-level helpers
+	SetPackageLogger(agg.logger)
+
 	agg.init()
 
 	agg.logger.Infof("Initialize Storage")
