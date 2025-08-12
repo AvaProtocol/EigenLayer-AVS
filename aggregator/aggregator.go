@@ -301,6 +301,13 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 
 	agg.db.Close()
 
+	// Ensure Sentry flushes any buffered events on shutdown
+	// We don't import Sentry at top-level to avoid coupling Start to Sentry when disabled
+	// Import here is fine for build; but Go requires imports at top. So we add in file imports.
+	// Flush with a small timeout; ignore result
+	// Note: If Sentry wasn't initialized, Flush is a no-op.
+	sentryFlushSafely(2 * time.Second)
+
 	return nil
 }
 

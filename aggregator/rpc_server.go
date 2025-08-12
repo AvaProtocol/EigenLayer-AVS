@@ -11,6 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/getsentry/sentry-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
@@ -614,8 +615,8 @@ func (r *RpcServer) ReportEventOverload(ctx context.Context, alert *avsproto.Eve
 		responseMessage = "Task was already cancelled or not found"
 	}
 
-	// TODO: Integrate with Sentry for alerting
-	// sentry.CaptureMessage(fmt.Sprintf("Event overload detected for task %s: %s", alert.TaskId, alert.Details))
+	// Capture a message in Sentry for visibility
+	sentry.CaptureMessage(fmt.Sprintf("Event overload detected for task %s: %s", alert.TaskId, alert.Details))
 
 	r.config.Logger.Info("🛑 Task cancelled due to event overload",
 		"task_id", alert.TaskId,
@@ -793,10 +794,10 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		"address", lis.Addr(),
 	)
 
-	go func() {
+	goSafe(func() {
 		if err := s.Serve(lis); err != nil {
 			agg.logger.Error("gRPC server failed to serve", "error", err.Error())
 		}
-	}()
+	})
 	return nil
 }
