@@ -149,7 +149,7 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 		return c.HTMLBlob(http.StatusOK, buf.Bytes())
 	})
 
-	addr := ":1323"
+	addr := ":8080"
 	if agg.config != nil && agg.config.HttpBindAddress != "" {
 		addr = agg.config.HttpBindAddress
 	}

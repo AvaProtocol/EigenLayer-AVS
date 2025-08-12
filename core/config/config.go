@@ -299,7 +299,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 	}
 	if config.HttpBindAddress == "" {
 		// Default HTTP bind address if not provided
-		config.HttpBindAddress = ":1323"
+		config.HttpBindAddress = ":8080"
 	}
 	config.validate()
 	return config, nil
