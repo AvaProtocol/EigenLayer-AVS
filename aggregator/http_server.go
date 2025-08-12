@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/getsentry/sentry-go"
 	sentryecho "github.com/getsentry/sentry-go/echo"
 	"github.com/labstack/echo/v4"
@@ -50,7 +51,7 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 		sentryDsn = agg.config.SentryDsn
 	}
 
-	fmt.Printf("Sentry DSN from config: %s\n", sentryDsn)
+	agg.logger.Infof("Sentry DSN from config: %s", sentryDsn)
 
 	if sentryDsn != "" {
 		serverName := ""
@@ -58,12 +59,22 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 			serverName = agg.config.ServerName
 		}
 
-		fmt.Printf("Sentry ServerName from config: %s\n", serverName)
+		agg.logger.Infof("Sentry ServerName from config: %s", serverName)
+
+		env := "production"
+		if agg.config != nil && agg.config.Environment == sdklogging.Development {
+			env = "development"
+		}
+
+		release := fmt.Sprintf("%s@%s", version.Get(), version.GetRevision())
 
 		// To initialize Sentry's handler, you need to initialize Sentry itself beforehand
 		if err := sentry.Init(sentry.ClientOptions{
-			Dsn:        sentryDsn,
-			ServerName: serverName,
+			Dsn:              sentryDsn,
+			ServerName:       serverName,
+			Environment:      env,
+			Release:          release,
+			AttachStacktrace: true,
 			// Set TracesSampleRate to 1.0 to capture 100%
 			// of transactions for tracing.
 			// We recommend adjusting this value in production.
@@ -79,16 +90,16 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 	e := echo.New()
 
 	e.Use(middleware.Logger())
-	e.Use(middleware.Recover())
 
-	// Once it's done, you can attach the handler as one of your middleware
-	// Only add Sentry middleware if DSN was provided and Sentry initialized
+	// Register Sentry before Recover so panics are reported
 	if sentryDsn != "" {
 		e.Use(sentryecho.New(sentryecho.Options{
 			Repanic:         true,
 			WaitForDelivery: false,
 		}))
 	}
+
+	e.Use(middleware.Recover())
 
 	e.GET("/up", func(c echo.Context) error {
 		if agg.status == runningStatus {
@@ -138,7 +149,7 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 		return c.HTMLBlob(http.StatusOK, buf.Bytes())
 	})
 
-	go func() {
+	goSafe(func() {
 		e.Logger.Fatal(e.Start(":1323"))
-	}()
+	})
 }
