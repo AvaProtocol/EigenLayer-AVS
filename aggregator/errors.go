@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/getsentry/sentry-go"
 )
 
@@ -18,6 +19,12 @@ var repanicOnPanic bool
 
 // SetRepanicOnPanic toggles whether recovered panics should be re-thrown.
 func SetRepanicOnPanic(v bool) { repanicOnPanic = v }
+
+// packageLogger allows package-level helpers to log using the project's structured logger when available.
+var packageLogger sdklogging.Logger
+
+// SetPackageLogger injects the structured logger for use in package-level helpers.
+func SetPackageLogger(l sdklogging.Logger) { packageLogger = l }
 
 // goSafe runs a function in a goroutine-like wrapper that recovers panics and reports to Sentry if available.
 // Use this for background tasks so panics are not silently lost.
@@ -33,7 +40,11 @@ func goSafe(fn func()) {
 					panic(r)
 				}
 				// In production, log and continue to keep the process alive.
-				log.Printf("Recovered panic in goSafe: %v", r)
+				if packageLogger != nil {
+					packageLogger.Error("Recovered panic in goSafe", "panic", fmt.Sprintf("%v", r))
+				} else {
+					log.Printf("Recovered panic in goSafe: %v", r)
+				}
 			}
 		}()
 		fn()
