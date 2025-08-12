@@ -33,7 +33,7 @@ func sentryRecover(rec interface{}) {
 	// Use build-time import to Sentry in this single file to avoid circular deps.
 	// If Sentry isn't initialized, this is a no-op.
 	// Avoid adding as required dep elsewhere.
-	// nolint:staticcheck // best-effort reporting only
+	// nolint:staticcheck,SA1019 // Suppress staticcheck (SA1019: deprecated API) because Sentry Recover is used for best-effort panic reporting; safe to ignore deprecation in this context.
 	sentry.CurrentHub().Recover(rec)
 }
 
