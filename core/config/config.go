@@ -51,6 +51,7 @@ type Config struct {
 	OperatorStateRetrieverAddr        common.Address
 	AutomationRegistryCoordinatorAddr common.Address
 	RpcBindAddress                    string
+	HttpBindAddress                   string
 	RegisterOperatorOnStartup         bool
 	// json:"-" skips this field when marshaling (only used for logging to stdout), since SignerFn doesnt implement marshalJson
 	SignerFn          signerv2.SignerFn `json:"-"`
@@ -115,7 +116,8 @@ type ConfigRaw struct {
 	SentryDsn       string              `yaml:"sentry_dsn,omitempty"`
 	ServerName      string              `yaml:"server_name,omitempty"`
 
-	RpcBindAddress string `yaml:"rpc_bind_address"`
+	RpcBindAddress  string `yaml:"rpc_bind_address"`
+	HttpBindAddress string `yaml:"http_bind_address"`
 
 	OperatorStateRetrieverAddr string `yaml:"operator_state_retriever_address"`
 	AVSRegistryCoordinatorAddr string `yaml:"avs_registry_coordinator_address"`
@@ -256,6 +258,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 		OperatorStateRetrieverAddr:        common.HexToAddress(configRaw.OperatorStateRetrieverAddr),
 		AutomationRegistryCoordinatorAddr: common.HexToAddress(configRaw.AVSRegistryCoordinatorAddr),
 		RpcBindAddress:                    configRaw.RpcBindAddress,
+		HttpBindAddress:                   configRaw.HttpBindAddress,
 		SignerFn:                          signerV2,
 		TxMgr:                             txMgr,
 		AggregatorAddress:                 aggregatorAddr,
@@ -294,6 +297,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 	if config.SocketPath == "" {
 		config.SocketPath = "/tmp/ap.sock"
 	}
+	// If HttpBindAddress is empty, HTTP server will be disabled (startup code will skip starting it)
 	config.validate()
 	return config, nil
 }
