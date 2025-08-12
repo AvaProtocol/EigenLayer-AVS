@@ -27,6 +27,11 @@ type HttpJsonResp[T any] struct {
 }
 
 func (agg *Aggregator) startHttpServer(ctx context.Context) {
+	// If http_bind_address is not set, skip HTTP server startup entirely
+	if agg.config == nil || agg.config.HttpBindAddress == "" {
+		agg.logger.Info("HTTP server disabled: no http_bind_address configured")
+		return
+	}
 	// Load operator names from JSON file
 	if operatorData, err := res.ReadFile("resources/operators.json"); err == nil {
 		if err := LoadOperatorNames(operatorData); err != nil {
@@ -149,12 +154,11 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 		return c.HTMLBlob(http.StatusOK, buf.Bytes())
 	})
 
-	addr := ":8080"
-	if agg.config != nil && agg.config.HttpBindAddress != "" {
-		addr = agg.config.HttpBindAddress
-	}
+	addr := agg.config.HttpBindAddress
 	agg.logger.Info("HTTP server listening", "address", addr)
 	goSafe(func() {
-		e.Logger.Fatal(e.Start(addr))
+		if err := e.Start(addr); err != nil {
+			agg.logger.Warn("HTTP server failed to start; continuing without HTTP endpoint", "address", addr, "error", err)
+		}
 	})
 }

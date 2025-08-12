@@ -297,10 +297,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 	if config.SocketPath == "" {
 		config.SocketPath = "/tmp/ap.sock"
 	}
-	if config.HttpBindAddress == "" {
-		// Default HTTP bind address if not provided
-		config.HttpBindAddress = ":8080"
-	}
+	// If HttpBindAddress is empty, HTTP server will be disabled (startup code will skip starting it)
 	config.validate()
 	return config, nil
 }
