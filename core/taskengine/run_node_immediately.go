@@ -1474,7 +1474,7 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 		return nil, fmt.Errorf("failed to create VM: %w", err)
 	}
 
-	vm.WithLogger(n.logger).WithDb(n.db)
+	vm.WithLogger(n.logger).WithDb(n.db).SetSimulation(true)
 
 	// Set TaskOwner from workflowContext.eoaAddress if provided via input variables
 	if wfCtxIface, ok := inputVariables["workflowContext"]; ok {
@@ -1557,8 +1557,16 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 		return nil, fmt.Errorf("execution failed: %s", executionStep.Error)
 	}
 
-	// Extract and return the result data
-	return n.extractExecutionResult(executionStep)
+	// Extract result and attach execution context
+	result, err := n.extractExecutionResult(executionStep)
+	if err != nil {
+		return nil, err
+	}
+	// Always include execution_context for immediate runs
+	result["execution_context"] = map[string]interface{}{
+		"is_simulated": true,
+	}
+	return result, nil
 }
 
 // LoadSecretsForImmediateExecution loads secrets for immediate node execution

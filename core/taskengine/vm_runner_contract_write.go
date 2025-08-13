@@ -173,7 +173,6 @@ func (r *ContractWriteProcessor) executeMethodCall(
 
 	if r.smartWalletConfig != nil {
 		r.vm.logger.Info("🔍 CONTRACT WRITE DEBUG - Smart Wallet Config Details",
-			"enable_real_transactions", r.smartWalletConfig.EnableRealTransactions,
 			"bundler_url", r.smartWalletConfig.BundlerURL,
 			"factory_address", r.smartWalletConfig.FactoryAddress,
 			"entrypoint_address", r.smartWalletConfig.EntrypointAddress)
@@ -181,8 +180,17 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		r.vm.logger.Warn("⚠️ CONTRACT WRITE DEBUG - Smart wallet config is NIL!")
 	}
 
-	// Check if real transactions are enabled
-	if r.smartWalletConfig != nil && r.smartWalletConfig.EnableRealTransactions {
+	// Real transactions only when not in simulation context
+	// In deployed workflows, smartWalletConfig must be present; otherwise fail
+	if !r.vm.IsSimulation && r.smartWalletConfig == nil {
+		r.vm.logger.Error("Contract write in deployed mode without smart wallet config")
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success:    false,
+			Error:      "smart wallet config is required for deployed contract write",
+			MethodName: methodName,
+		}
+	}
+	if r.smartWalletConfig != nil && !r.vm.IsSimulation {
 		r.vm.logger.Info("🚀 CONTRACT WRITE DEBUG - Using real UserOp transaction path",
 			"contract", contractAddress.Hex(),
 			"method", methodName)
@@ -190,16 +198,19 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		return r.executeRealUserOpTransaction(ctx, contractAddress, callData, methodName, parsedABI, t0)
 	}
 
-	// FALLBACK TO TENDERLY SIMULATION FOR CONTRACT WRITES
-	// This provides consistent behavior between run_node_immediately and simulateTask
+	// Simulation path for contract writes (SimulateTask / RunNodeImmediately)
+	// Provides consistent behavior between run_node_immediately and simulateTask
 	r.vm.logger.Info("🔮 CONTRACT WRITE DEBUG - Using Tenderly simulation path",
 		"contract", contractAddress.Hex(),
 		"method", methodName,
 		"reason", func() string {
+			if r.vm.IsSimulation {
+				return "vm_is_simulation"
+			}
 			if r.smartWalletConfig == nil {
 				return "smart_wallet_config_is_nil"
 			}
-			return "enable_real_transactions_is_false"
+			return "unknown"
 		}())
 
 	// Initialize Tenderly client
@@ -666,6 +677,13 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		log.WriteString(fmt.Sprintf("\nExecuting method %d: %s\n", i+1, methodCall.MethodName))
 
 		result := r.executeMethodCall(ctx, parsedABI, contractAddr, methodCall)
+		// Ensure MethodName is populated to avoid empty keys downstream
+		if result.MethodName == "" {
+			result.MethodName = methodCall.MethodName
+			if result.MethodName == "" {
+				result.MethodName = fmt.Sprintf("method_%d", i+1)
+			}
+		}
 		results = append(results, result)
 
 		if result.Success {
@@ -730,7 +748,16 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	var decodedEventsData = make(map[string]interface{})
 
 	// Parse events from each method's transaction receipt
-	for _, methodResult := range results {
+	for idx, methodResult := range results {
+		// Defensive: ensure method name is non-empty
+		methodName := methodResult.MethodName
+		if methodName == "" {
+			if idx < len(methodCalls) && methodCalls[idx].MethodName != "" {
+				methodName = methodCalls[idx].MethodName
+			} else {
+				methodName = fmt.Sprintf("method_%d", idx+1)
+			}
+		}
 		methodEvents := make(map[string]interface{})
 
 		// Extract logs from receipt if available
@@ -777,7 +804,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		}
 
 		// Store events for this method (empty object if no events)
-		decodedEventsData[methodResult.MethodName] = methodEvents
+		decodedEventsData[methodName] = methodEvents
 	}
 
 	// Convert decoded events to protobuf Value

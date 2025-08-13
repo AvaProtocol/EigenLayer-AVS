@@ -247,6 +247,10 @@ type VM struct {
 	smartWalletConfig *config.SmartWalletConfig
 	logger            sdklogging.Logger
 	db                storage.Storage
+	// IsSimulation indicates whether this VM is executing in a simulation context
+	// (SimulateTask or RunNodeImmediately). In simulation, write operations must not
+	// send real transactions and should use Tenderly or mock paths instead.
+	IsSimulation bool
 }
 
 func NewVM() *VM {
@@ -263,6 +267,12 @@ func NewVM() *VM {
 	for key, value := range envVars {
 		v.vars[key] = value
 	}
+	return v
+}
+
+// SetSimulation sets whether this VM is executing in simulation context.
+func (v *VM) SetSimulation(isSimulation bool) *VM {
+	v.IsSimulation = isSimulation
 	return v
 }
 
@@ -1364,7 +1374,6 @@ func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (
 
 	if v.smartWalletConfig != nil {
 		v.logger.Info("🔍 VM DEBUG - Smart wallet config details",
-			"enable_real_transactions", v.smartWalletConfig.EnableRealTransactions,
 			"bundler_url", v.smartWalletConfig.BundlerURL,
 			"factory_address", v.smartWalletConfig.FactoryAddress,
 			"entrypoint_address", v.smartWalletConfig.EntrypointAddress,

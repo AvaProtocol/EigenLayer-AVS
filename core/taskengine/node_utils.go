@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"google.golang.org/protobuf/types/known/structpb"
+
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
@@ -89,6 +91,28 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 		Type:       nodeType.String(),
 		Name:       nodeName,
 		Config:     nodeConfig, // Include node configuration for debugging
+	}
+
+	// Attach execution_context to the step (e.g., is_simulated, chain_id, provider)
+	if vm != nil {
+		provider := "real"
+		if vm.IsSimulation {
+			provider = "tenderly"
+		}
+		var chainID interface{} = nil
+		if vm.smartWalletConfig != nil && vm.smartWalletConfig.ChainID != 0 {
+			chainID = vm.smartWalletConfig.ChainID
+		}
+		ctxMap := map[string]interface{}{
+			"is_simulated": vm.IsSimulation,
+			"provider":     provider,
+		}
+		if chainID != nil {
+			ctxMap["chain_id"] = chainID
+		}
+		if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
+			step.ExecutionContext = ctxVal
+		}
 	}
 
 	// Log the final step

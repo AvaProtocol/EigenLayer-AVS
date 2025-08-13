@@ -1927,7 +1927,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		return nil, fmt.Errorf("failed to create VM for simulation: %w", err)
 	}
 
-	vm.WithLogger(n.logger).WithDb(n.db)
+	vm.WithLogger(n.logger).WithDb(n.db).SetSimulation(true)
 	// Resolve AA sender for simulation ONLY if the workflow contains AA-relevant nodes
 	// (contractWrite or ethTransfer). For non-AA workflows (e.g., CustomCode), skip this requirement.
 	{
