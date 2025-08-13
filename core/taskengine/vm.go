@@ -2073,6 +2073,9 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 	tempVM.db = v.db
 	tempVM.secrets = v.secrets // Inherit secrets
 	tempVM.TaskID = v.TaskID   // Inherit original TaskID for logging context
+	// Propagate simulation mode and task owner for correct execution behavior
+	tempVM.IsSimulation = v.IsSimulation
+	tempVM.TaskOwner = v.TaskOwner
 
 	tempVM.mu.Lock()
 	tempVM.TaskNodes[node.Id] = node // Add the single node to its map

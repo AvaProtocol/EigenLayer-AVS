@@ -180,9 +180,58 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		r.vm.logger.Warn("⚠️ CONTRACT WRITE DEBUG - Smart wallet config is NIL!")
 	}
 
-	// Real transactions only when not in simulation context
-	// In deployed workflows, smartWalletConfig must be present; otherwise fail
-	if !r.vm.IsSimulation && r.smartWalletConfig == nil {
+	// Log VM mode (simulation flag only)
+	r.vm.logger.Info("🔧 CONTRACT WRITE DEBUG - VM mode", "is_simulation", r.vm.IsSimulation)
+
+	// If simulation flag is set, always use simulation path (SimulateTask / RunNodeImmediately)
+	if r.vm.IsSimulation {
+		r.vm.logger.Info("🔮 CONTRACT WRITE DEBUG - Using Tenderly simulation path",
+			"contract", contractAddress.Hex(),
+			"method", methodName,
+			"reason", "vm_is_simulation")
+
+		// Initialize Tenderly client
+		tenderlyClient := NewTenderlyClient(r.vm.logger)
+
+		// Get chain ID for simulation
+		var chainID int64 = 11155111 // Default to Sepolia
+		if r.smartWalletConfig != nil {
+			// Try to extract chain ID from RPC URL or use default
+			chainID = 11155111 // Sepolia default
+		}
+
+		// Get contract ABI as string
+		var contractAbiStr string
+		if parsedABI != nil {
+			// Convert ABI back to JSON string for Tenderly
+			// For now, we'll use an empty string and let Tenderly handle it
+			contractAbiStr = ""
+		}
+
+		// Simulate the contract write using Tenderly
+		simulationResult, err := tenderlyClient.SimulateContractWrite(
+			ctx,
+			contractAddress.Hex(),
+			callData,
+			contractAbiStr,
+			methodName,
+			chainID,
+			r.owner.Hex(), // Pass the user's wallet address for simulation
+		)
+
+		if err != nil {
+			r.vm.logger.Warn("🚫 Tenderly simulation failed, using mock result", "error", err)
+
+			// Create a mock result when Tenderly fails
+			return r.createMockContractWriteResult(methodName, contractAddress.Hex(), callData, parsedABI, t0, chainID)
+		}
+
+		// Convert Tenderly simulation result to legacy protobuf format
+		return r.convertTenderlyResultToFlexibleFormat(simulationResult, parsedABI, callData)
+	}
+
+	// Deployed workflows (simulation flag is false): require smartWalletConfig and use real UserOp path
+	if r.smartWalletConfig == nil {
 		r.vm.logger.Error("Contract write in deployed mode without smart wallet config")
 		return &avsproto.ContractWriteNode_MethodResult{
 			Success:    false,
@@ -190,67 +239,12 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			MethodName: methodName,
 		}
 	}
-	if r.smartWalletConfig != nil && !r.vm.IsSimulation {
-		r.vm.logger.Info("🚀 CONTRACT WRITE DEBUG - Using real UserOp transaction path",
-			"contract", contractAddress.Hex(),
-			"method", methodName)
 
-		return r.executeRealUserOpTransaction(ctx, contractAddress, callData, methodName, parsedABI, t0)
-	}
-
-	// Simulation path for contract writes (SimulateTask / RunNodeImmediately)
-	// Provides consistent behavior between run_node_immediately and simulateTask
-	r.vm.logger.Info("🔮 CONTRACT WRITE DEBUG - Using Tenderly simulation path",
+	r.vm.logger.Info("🚀 CONTRACT WRITE DEBUG - Using real UserOp transaction path",
 		"contract", contractAddress.Hex(),
-		"method", methodName,
-		"reason", func() string {
-			if r.vm.IsSimulation {
-				return "vm_is_simulation"
-			}
-			if r.smartWalletConfig == nil {
-				return "smart_wallet_config_is_nil"
-			}
-			return "unknown"
-		}())
+		"method", methodName)
 
-	// Initialize Tenderly client
-	tenderlyClient := NewTenderlyClient(r.vm.logger)
-
-	// Get chain ID for simulation
-	var chainID int64 = 11155111 // Default to Sepolia
-	if r.smartWalletConfig != nil {
-		// Try to extract chain ID from RPC URL or use default
-		chainID = 11155111 // Sepolia default
-	}
-
-	// Get contract ABI as string
-	var contractAbiStr string
-	if parsedABI != nil {
-		// Convert ABI back to JSON string for Tenderly
-		// For now, we'll use an empty string and let Tenderly handle it
-		contractAbiStr = ""
-	}
-
-	// Simulate the contract write using Tenderly
-	simulationResult, err := tenderlyClient.SimulateContractWrite(
-		ctx,
-		contractAddress.Hex(),
-		callData,
-		contractAbiStr,
-		methodName,
-		chainID,
-		r.owner.Hex(), // Pass the user's wallet address for simulation
-	)
-
-	if err != nil {
-		r.vm.logger.Warn("🚫 Tenderly simulation failed, using mock result", "error", err)
-
-		// Create a mock result when Tenderly fails
-		return r.createMockContractWriteResult(methodName, contractAddress.Hex(), callData, parsedABI, t0, chainID)
-	}
-
-	// Convert Tenderly simulation result to legacy protobuf format
-	return r.convertTenderlyResultToFlexibleFormat(simulationResult, parsedABI, callData)
+	return r.executeRealUserOpTransaction(ctx, contractAddress, callData, methodName, parsedABI, t0)
 }
 
 // executeRealUserOpTransaction executes a real UserOp transaction for contract writes

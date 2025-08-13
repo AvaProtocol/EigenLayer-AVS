@@ -947,10 +947,6 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 
 			for _, task := range snapshot {
 				if _, ok := n.trackSyncedTasks[address].TaskID[task.Id]; ok {
-					n.logger.Debug("⏭️ Skipping task - already synced to operator",
-						"operator", address,
-						"task_id", task.Id,
-						"task_name", task.Name)
 					continue
 				}
 
