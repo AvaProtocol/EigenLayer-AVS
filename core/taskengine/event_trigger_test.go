@@ -162,7 +162,8 @@ func TestEventTriggerEndToEndRPC(t *testing.T) {
 			return
 		}
 
-		t.Logf("Trigger ID: %s", result.TriggerId)
+		// TriggerId was removed from RunTriggerResp; keep test output concise
+		t.Logf("RunTriggerRPC returned success response")
 
 		// Check for event trigger output
 		if eventOutput := result.GetEventTrigger(); eventOutput != nil {

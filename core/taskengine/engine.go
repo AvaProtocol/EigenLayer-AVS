@@ -2056,6 +2056,24 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Config:  triggerConfigProto,             // Include trigger configuration data for debugging
 	}
 
+	// Attach execution_context on trigger step
+	if vm != nil {
+		provider := "real"
+		if vm.IsSimulation {
+			provider = "tenderly"
+		}
+		ctxMap := map[string]interface{}{
+			"is_simulated": vm.IsSimulation,
+			"provider":     provider,
+		}
+		if vm.smartWalletConfig != nil && vm.smartWalletConfig.ChainID != 0 {
+			ctxMap["chain_id"] = vm.smartWalletConfig.ChainID
+		}
+		if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
+			triggerStep.ExecutionContext = ctxVal
+		}
+	}
+
 	// Set trigger output data in the step using shared function
 	triggerStep.OutputData = buildExecutionStepOutputData(queueData.TriggerType, triggerOutputProto)
 

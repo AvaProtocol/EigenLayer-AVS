@@ -1805,7 +1805,6 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		resp := &avsproto.RunNodeWithInputsResp{
 			Success: false,
 			Error:   fmt.Sprintf("unsupported node type: %v", req.NodeType),
-			NodeId:  fmt.Sprintf("node_immediate_%d_ERROR1", time.Now().UnixNano()),
 		}
 		// Set default RestAPI output structure to avoid OUTPUT_DATA_NOT_SET
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{
@@ -1833,7 +1832,6 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		resp := &avsproto.RunNodeWithInputsResp{
 			Success: false,
 			Error:   err.Error(),
-			NodeId:  fmt.Sprintf("node_immediate_%d_ERROR2", time.Now().UnixNano()),
 		}
 
 		// Set empty output data structure based on node type to avoid OUTPUT_DATA_NOT_SET
@@ -1893,7 +1891,6 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	// Success/Error are already encoded inside 'result' for immediate execution path
 	resp := &avsproto.RunNodeWithInputsResp{
 		Success: true,
-		NodeId:  fmt.Sprintf("node_immediate_%d_TEST_MARKER", time.Now().UnixNano()),
 	}
 
 	// Set the appropriate output data based on the node type
@@ -1906,7 +1903,6 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			return &avsproto.RunNodeWithInputsResp{
 				Success: false,
 				Error:   fmt.Sprintf("failed to convert REST API output: %v", err),
-				NodeId:  "",
 			}, nil
 		}
 		restOutput := &avsproto.RestAPINode_Output{
@@ -1952,7 +1948,6 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			return &avsproto.RunNodeWithInputsResp{
 				Success: false,
 				Error:   fmt.Sprintf("failed to convert CustomCode output: %v", err),
-				NodeId:  "",
 			}, nil
 		}
 		customOutput := &avsproto.CustomCodeNode_Output{
@@ -2194,7 +2189,6 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,
 					Error:   fmt.Sprintf("failed to convert GraphQL output: %v", err),
-					NodeId:  "",
 				}, nil
 			}
 		} else {
@@ -2204,7 +2198,6 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,
 					Error:   fmt.Sprintf("failed to create empty GraphQL output: %v", err),
-					NodeId:  "",
 				}, nil
 			}
 		}
@@ -2251,7 +2244,6 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,
 					Error:   fmt.Sprintf("failed to convert Filter output: %v", err),
-					NodeId:  "",
 				}, nil
 			}
 		} else {
@@ -2262,7 +2254,6 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,
 					Error:   fmt.Sprintf("failed to create empty Filter output: %v", err),
-					NodeId:  "",
 				}, nil
 			}
 		}
@@ -2290,7 +2281,6 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,
 					Error:   fmt.Sprintf("failed to convert loop output: %v", err),
-					NodeId:  "",
 				}, nil
 			}
 
@@ -2332,6 +2322,21 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		// ContractWrite now does not embed metadata inside output; nothing to copy here
 	}
 
+	// Attach execution_context indicating immediate run is simulated
+	{
+		provider := "tenderly"
+		ctxMap := map[string]interface{}{
+			"is_simulated": true,
+			"provider":     provider,
+		}
+		if n.smartWalletConfig != nil && n.smartWalletConfig.ChainID != 0 {
+			ctxMap["chain_id"] = n.smartWalletConfig.ChainID
+		}
+		if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
+			resp.ExecutionContext = ctxVal
+		}
+	}
+
 	return resp, nil
 }
 
@@ -2354,9 +2359,8 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 	if triggerTypeStr == "" {
 		// For unsupported trigger types, return error but still set output data to avoid OUTPUT_DATA_NOT_SET
 		resp := &avsproto.RunTriggerResp{
-			Success:   false,
-			Error:     fmt.Sprintf("unsupported trigger type: %v", req.TriggerType),
-			TriggerId: fmt.Sprintf("trigger_immediate_%d", time.Now().UnixNano()),
+			Success: false,
+			Error:   fmt.Sprintf("unsupported trigger type: %v", req.TriggerType),
 		}
 		// Set default ManualTrigger output structure to avoid OUTPUT_DATA_NOT_SET
 		resp.OutputData = &avsproto.RunTriggerResp_ManualTrigger{
@@ -2382,9 +2386,8 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		// Create response with failure status but still set appropriate output data structure
 		// to avoid OUTPUT_DATA_NOT_SET errors on client side
 		resp := &avsproto.RunTriggerResp{
-			Success:   false,
-			Error:     err.Error(),
-			TriggerId: fmt.Sprintf("trigger_immediate_%d", time.Now().UnixNano()),
+			Success: false,
+			Error:   err.Error(),
 		}
 
 		// Set empty output data structure based on trigger type to avoid OUTPUT_DATA_NOT_SET
@@ -2426,8 +2429,7 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 
 	// Convert result to the appropriate protobuf output type
 	resp := &avsproto.RunTriggerResp{
-		Success:   true,
-		TriggerId: fmt.Sprintf("trigger_immediate_%d", time.Now().UnixNano()),
+		Success: true,
 	}
 
 	// Set the appropriate output data based on the trigger type using shared functions
@@ -2543,6 +2545,21 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		}
 		resp.OutputData = &avsproto.RunTriggerResp_ManualTrigger{
 			ManualTrigger: manualOutput,
+		}
+	}
+
+	// Attach execution_context indicating immediate run is simulated
+	{
+		provider := "tenderly"
+		ctxMap := map[string]interface{}{
+			"is_simulated": true,
+			"provider":     provider,
+		}
+		if n.smartWalletConfig != nil && n.smartWalletConfig.ChainID != 0 {
+			ctxMap["chain_id"] = n.smartWalletConfig.ChainID
+		}
+		if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
+			resp.ExecutionContext = ctxVal
 		}
 	}
 
