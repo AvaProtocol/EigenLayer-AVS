@@ -612,7 +612,7 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 			"input":                    callData,
 			"gas":                      8000000,
 			"gas_price":                "0x0",
-			"max_fee_per_gas":          "0x0",
+			"max_fee_per_gas":          maxFeePerGasHex,
 			"max_priority_fee_per_gas": "0x0",
 			"value":                    "0x0",
 			"save":                     false,
@@ -644,8 +644,8 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 			"from": fromAddress,
 			"to":   contractAddress,
 			"gas":  fmt.Sprintf("0x%x", 8_000_000),
-			// Force zero-fee simulation to avoid balance requirement
-			"maxFeePerGas":         "0x0",
+			// Must be >= base fee (we used baseFee*2 above)
+			"maxFeePerGas":         maxFeePerGasHex,
 			"maxPriorityFeePerGas": "0x0",
 			"value":                "0x0",
 			"data":                 callData,
