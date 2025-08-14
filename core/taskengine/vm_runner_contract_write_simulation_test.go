@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"os"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
@@ -13,6 +14,13 @@ import (
 )
 
 func TestContractWriteTenderlySimulation(t *testing.T) {
+	// Run when Tenderly Gateway is configured; skip only if missing API key/URL
+	if os.Getenv("TENDERLY_API_KEY") == "" {
+		t.Skip("Skipping Tenderly simulation: TENDERLY_API_KEY not set")
+	}
+	if os.Getenv("FACTORY_ADDRESS") == "" {
+		t.Skip("Skipping Tenderly simulation: FACTORY_ADDRESS not set (needed to resolve salt:0 wallet)")
+	}
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
@@ -70,7 +78,18 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 			},
 		}
 
-		result, err := engine.RunNodeImmediately("contractWrite", nodeConfig, map[string]interface{}{})
+		// Provide minimal workflowContext to satisfy backend validation
+		// Use a funded, deployed wallet: derive from TEST_PRIVATE_KEY salt 0 via engine.GetWallet
+		// For unit test simplicity, pass the same address for eoa and runner (backend will use runner)
+		funded := "0x5Df343de7d99fd64b2479189692C1dAb8f46184a" // known salt:0 for provided TEST_PRIVATE_KEY
+		triggerData := map[string]interface{}{
+			"workflowContext": map[string]interface{}{
+				"eoaAddress": funded,
+				"runner":     funded,
+			},
+		}
+
+		result, err := engine.RunNodeImmediately("contractWrite", nodeConfig, triggerData)
 
 		require.NoError(t, err, "RunNodeImmediately should succeed with Tenderly simulation")
 		require.NotNil(t, result, "Should get simulation result")

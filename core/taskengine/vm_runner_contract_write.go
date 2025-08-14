@@ -278,10 +278,13 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		)
 
 		if err != nil {
-			r.vm.logger.Warn("🚫 Tenderly simulation failed, using mock result", "error", err)
-
-			// Create a mock result when Tenderly fails
-			return r.createMockContractWriteResult(methodName, contractAddress.Hex(), callData, parsedABI, t0, chainID)
+			r.vm.logger.Warn("🚫 Tenderly simulation failed", "error", err)
+			// Return failure result without mock data
+			return &avsproto.ContractWriteNode_MethodResult{
+				MethodName: methodName,
+				Success:    false,
+				Error:      fmt.Sprintf("tenderly simulation failed: %v", err),
+			}
 		}
 
 		// Convert Tenderly simulation result to legacy protobuf format

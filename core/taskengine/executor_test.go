@@ -3,6 +3,7 @@ package taskengine
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -146,6 +147,11 @@ func TestExecutorRunTaskWithBranchSilentFailureBehavior(t *testing.T) {
 	SetCache(testutil.GetDefaultCache())
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"message":"ok"}`))
+	}))
+	defer ts.Close()
 
 	nodes := []*avsproto.TaskNode{
 		{
@@ -171,7 +177,7 @@ func TestExecutorRunTaskWithBranchSilentFailureBehavior(t *testing.T) {
 			TaskType: &avsproto.TaskNode_RestApi{
 				RestApi: &avsproto.RestAPINode{
 					Config: &avsproto.RestAPINode_Config{
-						Url:    "https://httpbin.org/post",
+						Url:    ts.URL,
 						Method: "POST",
 						Body:   "hit=notification1",
 					},
@@ -638,6 +644,9 @@ func TestExecutorRunTaskWithBlockTriggerOutputData(t *testing.T) {
 }
 
 func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
+	if os.Getenv("SEPOLIA_BUNDLER_RPC") == "" {
+		t.Skip("Skipping FixedTimeTrigger ETH transfer test: SEPOLIA_BUNDLER_RPC not configured")
+	}
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
@@ -710,6 +719,9 @@ func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
 }
 
 func TestExecutorRunTaskWithCronTriggerOutputData(t *testing.T) {
+	if os.Getenv("SEPOLIA_BUNDLER_RPC") == "" {
+		t.Skip("Skipping CronTrigger ETH transfer test: SEPOLIA_BUNDLER_RPC not configured")
+	}
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 

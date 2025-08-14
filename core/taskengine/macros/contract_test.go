@@ -19,11 +19,7 @@ type answer struct {
 }
 
 func TestQueryContract(t *testing.T) {
-	rpc := os.Getenv("RPC_URL")
-	if rpc == "" {
-		// Use known Sepolia endpoint if available via env ETH_RPC_URL
-		rpc = os.Getenv("ETH_RPC_URL")
-	}
+	rpc := os.Getenv("SEPOLIA_RPC")
 	if rpc == "" {
 		t.Skip("Skipping TestQueryContract: RPC_URL/ETH_RPC_URL not set for Sepolia")
 	}
@@ -49,10 +45,7 @@ func TestQueryContract(t *testing.T) {
 }
 
 func TestExpression(t *testing.T) {
-	rpc := os.Getenv("RPC_URL")
-	if rpc == "" {
-		rpc = os.Getenv("ETH_RPC_URL")
-	}
+	rpc := os.Getenv("SEPOLIA_RPC")
 	if rpc == "" {
 		t.Skip("Skipping TestExpression: RPC_URL/ETH_RPC_URL not set for Sepolia")
 	}
@@ -102,10 +95,7 @@ func TestExpression(t *testing.T) {
 }
 
 func TestExpressionDynamic(t *testing.T) {
-	rpc := os.Getenv("RPC_URL")
-	if rpc == "" {
-		rpc = os.Getenv("ETH_RPC_URL")
-	}
+	rpc := os.Getenv("SEPOLIA_RPC")
 	if rpc == "" {
 		t.Skip("Skipping TestExpressionDynamic: RPC_URL/ETH_RPC_URL not set for Sepolia")
 	}

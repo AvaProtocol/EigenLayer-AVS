@@ -46,11 +46,11 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 	}
 
 	// Prefer env overrides; fallback to known-good Sepolia endpoints for local tests
-	ethRPC := os.Getenv("ETH_RPC_URL")
+	ethRPC := os.Getenv("SEPOLIA_RPC")
 	if ethRPC == "" {
 		ethRPC = "https://ethereum-sepolia.core.chainstack.com/2504cb0765f0edf6c33d99095148006f"
 	}
-	bundlerURL := os.Getenv("BUNDLER_URL")
+	bundlerURL := os.Getenv("SEPOLIA_BUNDLER_RPC")
 	if bundlerURL == "" {
 		bundlerURL = "https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj17Urz1aMATV1ySn4R"
 	}
