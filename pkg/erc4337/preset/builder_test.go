@@ -54,16 +54,27 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 	if bundlerURL == "" {
 		bundlerURL = "https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj17Urz1aMATV1ySn4R"
 	}
-	ethWS := os.Getenv("ETH_WS_URL")
+	ethWS := os.Getenv("SEPOLIA_WS")
+	if ethWS == "" {
+		if strings.HasPrefix(ethRPC, "https://") {
+			ethWS = strings.Replace(ethRPC, "https://", "wss://", 1)
+		}
+	}
 
 	return &config.SmartWalletConfig{
-		EthRpcUrl:            ethRPC,
-		BundlerURL:           bundlerURL,
-		EthWsUrl:             ethWS,
-		FactoryAddress:       common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
-		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+		EthRpcUrl:  ethRPC,
+		BundlerURL: bundlerURL,
+		EthWsUrl:   ethWS,
+		FactoryAddress: common.HexToAddress(func() string {
+			v := os.Getenv("FACTORY_ADDRESS")
+			if v != "" {
+				return v
+			}
+			return config.DefaultFactoryProxyAddressHex
+		}()),
+		EntrypointAddress:    common.HexToAddress(config.DefaultEntrypointAddressHex),
 		ControllerPrivateKey: controllerPrivateKey,
-		PaymasterAddress:     common.HexToAddress("0xB985af5f96EF2722DC99aEBA573520903B86505e"),
+		PaymasterAddress:     common.HexToAddress(config.DefaultPaymasterAddressHex),
 		WhitelistAddresses:   []common.Address{},
 	}
 }

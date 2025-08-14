@@ -606,17 +606,19 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		// Tenderly HTTP API supports `state_objects` to override account state
 		balanceOverride := "0x56BC75E2D63100000" // 100 ETH
 		body := map[string]interface{}{
-			"network_id":           fmt.Sprintf("%d", chainID),
-			"from":                 fromAddress,
-			"to":                   contractAddress,
-			"input":                callData,
-			"gas":                  8000000,
-			"gas_price":            "0x0",
-			"value":                "0x0",
-			"save":                 false,
-			"save_if_fails":        false,
-			"simulation_type":      "full",
-			"generate_access_list": false,
+			"network_id":               fmt.Sprintf("%d", chainID),
+			"from":                     fromAddress,
+			"to":                       contractAddress,
+			"input":                    callData,
+			"gas":                      8000000,
+			"gas_price":                "0x0",
+			"max_fee_per_gas":          "0x0",
+			"max_priority_fee_per_gas": "0x0",
+			"value":                    "0x0",
+			"save":                     false,
+			"save_if_fails":            false,
+			"simulation_type":          "full",
+			"generate_access_list":     false,
 			"state_objects": map[string]interface{}{
 				strings.ToLower(fromAddress): map[string]interface{}{
 					"balance": balanceOverride,
@@ -639,10 +641,11 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		response.Result = simResult
 	} else {
 		txObject := map[string]interface{}{
-			"from":                 fromAddress,
-			"to":                   contractAddress,
-			"gas":                  fmt.Sprintf("0x%x", 8_000_000),
-			"maxFeePerGas":         maxFeePerGasHex,
+			"from": fromAddress,
+			"to":   contractAddress,
+			"gas":  fmt.Sprintf("0x%x", 8_000_000),
+			// Force zero-fee simulation to avoid balance requirement
+			"maxFeePerGas":         "0x0",
 			"maxPriorityFeePerGas": "0x0",
 			"value":                "0x0",
 			"data":                 callData,

@@ -32,7 +32,7 @@ func init() {
 }
 
 const (
-	paymasterAddress = "0xB985af5f96EF2722DC99aEBA573520903B86505e"
+	paymasterAddress = config.DefaultPaymasterAddressHex
 )
 
 // TriggerData represents the flattened trigger information for testing
@@ -334,8 +334,8 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 			EthRpcUrl:          os.Getenv("SEPOLIA_RPC"),
 			BundlerURL:         os.Getenv("SEPOLIA_BUNDLER_RPC"),
 			EthWsUrl:           os.Getenv("SEPOLIA_WS"),
-			FactoryAddress:     common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
-			EntrypointAddress:  common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+			FactoryAddress:     common.HexToAddress(firstNonEmpty(os.Getenv("FACTORY_ADDRESS"), config.DefaultFactoryProxyAddressHex)),
+			EntrypointAddress:  common.HexToAddress(config.DefaultEntrypointAddressHex),
 			PaymasterAddress:   common.HexToAddress(paymasterAddress),
 			WhitelistAddresses: []common.Address{},
 		}
@@ -355,12 +355,11 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 	}
 
 	return &config.SmartWalletConfig{
-		EthRpcUrl:  os.Getenv("SEPOLIA_RPC"),
-		BundlerURL: os.Getenv("SEPOLIA_BUNDLER_RPC"),
-		EthWsUrl:   os.Getenv("SEPOLIA_WS"),
-		//FactoryAddress:       common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
-		FactoryAddress:       common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
-		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+		EthRpcUrl:            os.Getenv("SEPOLIA_RPC"),
+		BundlerURL:           os.Getenv("SEPOLIA_BUNDLER_RPC"),
+		EthWsUrl:             os.Getenv("SEPOLIA_WS"),
+		FactoryAddress:       common.HexToAddress(firstNonEmpty(os.Getenv("FACTORY_ADDRESS"), config.DefaultFactoryProxyAddressHex)),
+		EntrypointAddress:    common.HexToAddress(config.DefaultEntrypointAddressHex),
 		ControllerPrivateKey: controllerPrivateKey,
 		PaymasterAddress:     common.HexToAddress(paymasterAddress),
 		WhitelistAddresses:   []common.Address{},
@@ -376,8 +375,8 @@ func GetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 			EthRpcUrl:          firstNonEmpty(os.Getenv("BASE_SEPOLIA_RPC"), os.Getenv("SEPOLIA_RPC")),
 			BundlerURL:         firstNonEmpty(os.Getenv("BASE_SEPOLIA_BUNDLER_RPC"), os.Getenv("SEPOLIA_BUNDLER_RPC")),
 			EthWsUrl:           strings.Replace(firstNonEmpty(os.Getenv("BASE_SEPOLIA_RPC"), os.Getenv("SEPOLIA_RPC")), "https://", "wss://", 1),
-			FactoryAddress:     common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
-			EntrypointAddress:  common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+			FactoryAddress:     common.HexToAddress(firstNonEmpty(os.Getenv("FACTORY_ADDRESS"), config.DefaultFactoryProxyAddressHex)),
+			EntrypointAddress:  common.HexToAddress(config.DefaultEntrypointAddressHex),
 			PaymasterAddress:   common.HexToAddress(paymasterAddress),
 			WhitelistAddresses: []common.Address{},
 		}
@@ -388,8 +387,8 @@ func GetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 			EthRpcUrl:          firstNonEmpty(os.Getenv("BASE_SEPOLIA_RPC"), os.Getenv("SEPOLIA_RPC")),
 			BundlerURL:         firstNonEmpty(os.Getenv("BASE_SEPOLIA_BUNDLER_RPC"), os.Getenv("SEPOLIA_BUNDLER_RPC")),
 			EthWsUrl:           strings.Replace(firstNonEmpty(os.Getenv("BASE_SEPOLIA_RPC"), os.Getenv("SEPOLIA_RPC")), "https://", "wss://", 1),
-			FactoryAddress:     common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
-			EntrypointAddress:  common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+			FactoryAddress:     common.HexToAddress(firstNonEmpty(os.Getenv("FACTORY_ADDRESS"), config.DefaultFactoryProxyAddressHex)),
+			EntrypointAddress:  common.HexToAddress(config.DefaultEntrypointAddressHex),
 			PaymasterAddress:   common.HexToAddress(paymasterAddress),
 			WhitelistAddresses: []common.Address{},
 		}
@@ -399,8 +398,8 @@ func GetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 		EthRpcUrl:            os.Getenv("BASE_SEPOLIA_RPC"),
 		BundlerURL:           os.Getenv("BASE_SEPOLIA_BUNDLER_RPC"),
 		EthWsUrl:             strings.Replace(os.Getenv("BASE_SEPOLIA_RPC"), "https://", "wss://", 1),
-		FactoryAddress:       common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
-		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+		FactoryAddress:       common.HexToAddress(firstNonEmpty(os.Getenv("FACTORY_ADDRESS"), config.DefaultFactoryProxyAddressHex)),
+		EntrypointAddress:    common.HexToAddress(config.DefaultEntrypointAddressHex),
 		ControllerPrivateKey: controllerPrivateKey,
 		PaymasterAddress:     common.HexToAddress(paymasterAddress),
 		WhitelistAddresses:   []common.Address{},

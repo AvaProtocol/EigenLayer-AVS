@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"os"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -253,11 +254,17 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 				// Create a mock smart wallet config with a test RPC URL
 				// to ensure we test the contract address validation, not RPC URL validation
 				config := &config.SmartWalletConfig{
-					EthRpcUrl:         "http://localhost:99999/definitely-not-a-real-endpoint", // Guaranteed to fail
-					BundlerURL:        "https://bundler.test",
-					EthWsUrl:          "wss://localhost:99999/ws",
-					FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
-					EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+					EthRpcUrl:  "http://localhost:99999/definitely-not-a-real-endpoint", // Guaranteed to fail
+					BundlerURL: "https://bundler.test",
+					EthWsUrl:   "wss://localhost:99999/ws",
+					FactoryAddress: common.HexToAddress(func() string {
+						v := os.Getenv("FACTORY_ADDRESS")
+						if v != "" {
+							return v
+						}
+						return config.DefaultFactoryProxyAddressHex
+					}()),
+					EntrypointAddress: common.HexToAddress(config.DefaultEntrypointAddressHex),
 					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
 				}
 				v.smartWalletConfig = config
@@ -294,11 +301,17 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			setupVM: func(v *VM) {
 				// Use a valid RPC URL to test the validation logic
 				config := &config.SmartWalletConfig{
-					EthRpcUrl:         "https://sepolia.drpc.org", // Real endpoint for testing
-					BundlerURL:        "https://bundler.test",
-					EthWsUrl:          "wss://sepolia.drpc.org",
-					FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
-					EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+					EthRpcUrl:  "https://sepolia.drpc.org", // Real endpoint for testing
+					BundlerURL: "https://bundler.test",
+					EthWsUrl:   "wss://sepolia.drpc.org",
+					FactoryAddress: common.HexToAddress(func() string {
+						v := os.Getenv("FACTORY_ADDRESS")
+						if v != "" {
+							return v
+						}
+						return config.DefaultFactoryProxyAddressHex
+					}()),
+					EntrypointAddress: common.HexToAddress(config.DefaultEntrypointAddressHex),
 					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
 				}
 				v.smartWalletConfig = config
@@ -323,11 +336,17 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			setupVM: func(v *VM) {
 				// Use a valid RPC URL to test the validation logic
 				config := &config.SmartWalletConfig{
-					EthRpcUrl:         "https://sepolia.drpc.org", // Real endpoint for testing
-					BundlerURL:        "https://bundler.test",
-					EthWsUrl:          "wss://sepolia.drpc.org",
-					FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
-					EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+					EthRpcUrl:  "https://sepolia.drpc.org", // Real endpoint for testing
+					BundlerURL: "https://bundler.test",
+					EthWsUrl:   "wss://sepolia.drpc.org",
+					FactoryAddress: common.HexToAddress(func() string {
+						v := os.Getenv("FACTORY_ADDRESS")
+						if v != "" {
+							return v
+						}
+						return config.DefaultFactoryProxyAddressHex
+					}()),
+					EntrypointAddress: common.HexToAddress(config.DefaultEntrypointAddressHex),
 					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
 				}
 				v.smartWalletConfig = config
@@ -352,11 +371,17 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			setupVM: func(v *VM) {
 				// Use a valid RPC URL but point to a non-existent contract or one that returns empty data
 				config := &config.SmartWalletConfig{
-					EthRpcUrl:         "https://sepolia.drpc.org", // Real endpoint
-					BundlerURL:        "https://bundler.test",
-					EthWsUrl:          "wss://sepolia.drpc.org",
-					FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
-					EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+					EthRpcUrl:  "https://sepolia.drpc.org", // Real endpoint
+					BundlerURL: "https://bundler.test",
+					EthWsUrl:   "wss://sepolia.drpc.org",
+					FactoryAddress: common.HexToAddress(func() string {
+						v := os.Getenv("FACTORY_ADDRESS")
+						if v != "" {
+							return v
+						}
+						return config.DefaultFactoryProxyAddressHex
+					}()),
+					EntrypointAddress: common.HexToAddress(config.DefaultEntrypointAddressHex),
 					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
 				}
 				v.smartWalletConfig = config
@@ -511,11 +536,17 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 			setupVM: func(v *VM) {
 				// Use a properly configured smart wallet config to ensure we test address validation
 				config := &config.SmartWalletConfig{
-					EthRpcUrl:         "https://sepolia.drpc.org", // Valid RPC URL
-					BundlerURL:        "https://bundler.test",
-					EthWsUrl:          "wss://sepolia.drpc.org",
-					FactoryAddress:    common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
-					EntrypointAddress: common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+					EthRpcUrl:  "https://sepolia.drpc.org", // Valid RPC URL
+					BundlerURL: "https://bundler.test",
+					EthWsUrl:   "wss://sepolia.drpc.org",
+					FactoryAddress: common.HexToAddress(func() string {
+						v := os.Getenv("FACTORY_ADDRESS")
+						if v != "" {
+							return v
+						}
+						return config.DefaultFactoryProxyAddressHex
+					}()),
+					EntrypointAddress: common.HexToAddress(config.DefaultEntrypointAddressHex),
 					PaymasterAddress:  common.HexToAddress("0x742d35Cc6634C0532925a3b8D091d2B5e57a9C7E"),
 				}
 				v.smartWalletConfig = config
