@@ -119,7 +119,8 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	t0 := time.Now()
 
 	// VERY OBVIOUS DEBUG - use Info to avoid noisy error-level logs in normal flow
-	r.vm.logger.Info("🚨 CONTRACT WRITE PROCESSOR - executeMethodCall STARTED",
+	// Log method execution start at debug level for development/troubleshooting
+	r.vm.logger.Debug("ContractWriteProcessor: executeMethodCall started",
 		"method", methodCall.MethodName,
 		"contract", contractAddress.Hex(),
 		"timestamp", time.Now().Format("15:04:05.000"))
