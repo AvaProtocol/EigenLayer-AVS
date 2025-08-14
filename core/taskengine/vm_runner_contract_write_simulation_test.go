@@ -1,11 +1,13 @@
 package taskengine
 
 import (
+	"math/big"
 	"os"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
@@ -78,14 +80,18 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 			},
 		}
 
+		// Seed a wallet in DB to make ListWallets(owner) deterministic in CI
+		// Use distinct EOA (owner) and smart wallet (runner)
+		ownerEOA := common.HexToAddress("0xD7050816337a3f8f690F8083B5Ff8019D50c0E50")
+		runnerAddr := common.HexToAddress("0x5Df343de7d99fd64b2479189692C1dAb8f46184a")
+		factory := testutil.GetAggregatorConfig().SmartWallet.FactoryAddress
+		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: &runnerAddr, Factory: &factory, Salt: big.NewInt(0)})
+
 		// Provide minimal workflowContext to satisfy backend validation
-		// Use a funded, deployed wallet: derive from TEST_PRIVATE_KEY salt 0 via engine.GetWallet
-		// For unit test simplicity, pass the same address for eoa and runner (backend will use runner)
-		funded := "0x5Df343de7d99fd64b2479189692C1dAb8f46184a" // known salt:0 for provided TEST_PRIVATE_KEY
 		triggerData := map[string]interface{}{
 			"workflowContext": map[string]interface{}{
-				"eoaAddress": funded,
-				"runner":     funded,
+				"eoaAddress": ownerEOA.Hex(),
+				"runner":     runnerAddr.Hex(),
 			},
 		}
 

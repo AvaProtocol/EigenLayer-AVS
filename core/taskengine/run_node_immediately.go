@@ -1514,6 +1514,9 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 			}
 
 			// Strictly require runner for contractWrite; validate against owner's wallets
+			if n.logger != nil {
+				n.logger.Info("RunNodeImmediately: runner validation decision", "nodeType", nodeType)
+			}
 			if strings.EqualFold(nodeType, "contractWrite") {
 				// Require owner
 				if (vm.TaskOwner == common.Address{}) {
@@ -1554,7 +1557,7 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 	}
 
 	// even if inputVariables doesn't contain the workflowContext key at all, we still enforce that ContractWrite must provide it (and error if it's missing)
-	if nodeType == NodeTypeContractWrite {
+	if strings.EqualFold(nodeType, NodeTypeContractWrite) {
 		// Require non-zero TaskOwner (set from workflowContext.eoaAddress)
 		if (vm.TaskOwner == common.Address{}) {
 			if n.logger != nil {
