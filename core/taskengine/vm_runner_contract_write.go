@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -117,8 +118,8 @@ func (r *ContractWriteProcessor) executeMethodCall(
 ) *avsproto.ContractWriteNode_MethodResult {
 	t0 := time.Now()
 
-	// VERY OBVIOUS DEBUG - This should show up in logs if the latest code is running
-	r.vm.logger.Error("🚨 CONTRACT WRITE PROCESSOR - executeMethodCall STARTED",
+	// VERY OBVIOUS DEBUG - use Info to avoid noisy error-level logs in normal flow
+	r.vm.logger.Info("🚨 CONTRACT WRITE PROCESSOR - executeMethodCall STARTED",
 		"method", methodCall.MethodName,
 		"contract", contractAddress.Hex(),
 		"timestamp", time.Now().Format("15:04:05.000"))
@@ -223,9 +224,14 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		"method", methodName,
 		"contract", contractAddress.Hex())
 
-	// TEMPORARY FIX: Force simulation for all contract writes to debug the issue
-	// TODO: Remove this and fix the root cause of IsSimulation being false
-	forceSimulation := true
+	// TEMPORARY: Make force simulation configurable via env for debugging only
+	// TODO: Remove once IsSimulation propagation is fully reliable
+	forceSimulation := false
+	if v := os.Getenv("FORCE_SIMULATION"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			forceSimulation = parsed
+		}
+	}
 
 	// If simulation flag is set OR forcing simulation, always use simulation path
 	if r.vm.IsSimulation || isRunNodeWithInputs || forceSimulation {
