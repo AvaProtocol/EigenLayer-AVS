@@ -397,7 +397,7 @@ Coming soon
 
 ## Contract address
 
-### Holesky Testnet
+### Holesky Testnet (Deprecated)
 
 | Name                   | Address                                                                                                                         |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
@@ -410,6 +410,19 @@ Coming soon
 | PauserRegistry         | [`0x3A8ea6e4202CdDe4a9e0cCE19c4Dc1739ba2cF0b`](https://holesky.etherscan.io/address/0x3A8ea6e4202CdDe4a9e0cCE19c4Dc1739ba2cF0b) |
 | StakeRegistry          | [`0x7BacD5dd5A7C3acf8bf1a3c88fB0D00B68EE626A`](https://holesky.etherscan.io/address/0x7BacD5dd5A7C3acf8bf1a3c88fB0D00B68EE626A) |
 | ApConfig               | [`0xb8abbb082ecaae8d1cd68378cf3b060f6f0e07eb`](https://holesky.etherscan.io/address/0xb8abbb082ecaae8d1cd68378cf3b060f6f0e07eb) |
+
+### Sepolia Testnet
+| Name                   | Address                                                                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| ProxyAdmin             | [`0x122c2D0Af2042ec0a6676d4dFd4d0c66dc40DDcf`](https://sepolia.etherscan.io/address/0x122c2D0Af2042ec0a6676d4dFd4d0c66dc40DDcf) |
+| ServiceManager         | [`0x80D492e1002F9C24b26179a024B8aA871fEbBC9D`](https://sepolia.etherscan.io/address/0x80D492e1002F9C24b26179a024B8aA871fEbBC9D) |
+| RegistryCoordinator    | [`0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD`](https://sepolia.etherscan.io/address/0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD) |
+| BLSApkRegistry         | [`0xC7fe896a9f0529b0e2B8193EBaf911BcD9d84A3F`](https://sepolia.etherscan.io/address/0xC7fe896a9f0529b0e2B8193EBaf911BcD9d84A3F) |
+| IndexRegistry          | [`0xdb8771619A7c2b9050CE66321A0652BC889399c2`](https://sepolia.etherscan.io/address/0xdb8771619A7c2b9050CE66321A0652BC889399c2) |
+| OperatorStateRetriever | [`0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605`](https://sepolia.etherscan.io/address/0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605) |
+| PauserRegistry         | [`0x3b36CE97b7fdf2571354679130a80F9E1450679b`](https://sepolia.etherscan.io/address/0x3b36CE97b7fdf2571354679130a80F9E1450679b) |
+| StakeRegistry          | [`0x6dFAdB7E0ff7CAC8682f9C733890150210206E05`](https://sepolia.etherscan.io/address/0x6dFAdB7E0ff7CAC8682f9C733890150210206E05) |
+| ApConfig               | [`0xFf2E98967A8607F9Acd5CC9024cC5dE5DF0D60a3`](https://sepolia.etherscan.io/address/0xFf2E98967A8607F9Acd5CC9024cC5dE5DF0D60a3) |
 
 ### Ethereum Mainnet
 

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"google.golang.org/protobuf/types/known/structpb"
+
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
@@ -91,6 +93,28 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 		Config:     nodeConfig, // Include node configuration for debugging
 	}
 
+	// Attach execution_context to the step (e.g., is_simulated, chain_id, provider)
+	if vm != nil {
+		provider := "real"
+		if vm.IsSimulation {
+			provider = "tenderly"
+		}
+		var chainID interface{} = nil
+		if vm.smartWalletConfig != nil && vm.smartWalletConfig.ChainID != 0 {
+			chainID = vm.smartWalletConfig.ChainID
+		}
+		ctxMap := map[string]interface{}{
+			"is_simulated": vm.IsSimulation,
+			"provider":     provider,
+		}
+		if chainID != nil {
+			ctxMap["chain_id"] = chainID
+		}
+		if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
+			step.ExecutionContext = ctxVal
+		}
+	}
+
 	// Log the final step
 	if vm.logger != nil {
 		vm.logger.Debug("createNodeExecutionStep: Created execution step",
@@ -114,6 +138,61 @@ func finalizeExecutionStep(step *avsproto.Execution_Step, success bool, errorMsg
 	step.Success = success
 	step.Error = errorMsg
 	step.Log = logContent
+}
+
+// ---- Shared helpers for determining step success across runners ----
+
+// hasReceiptFailure returns true if the given receipt has a status field equal to "0x0" (failure)
+func hasReceiptFailure(receipt *structpb.Value) bool {
+	if receipt == nil {
+		return false
+	}
+	if recMap, ok := receipt.AsInterface().(map[string]interface{}); ok {
+		if statusVal, ok2 := recMap["status"].(string); ok2 && (statusVal == "0x0" || statusVal == "0X0") {
+			return true
+		}
+	}
+	return false
+}
+
+// computeWriteStepSuccess inspects ContractWrite method results to derive step success and an error message
+func computeWriteStepSuccess(results []*avsproto.ContractWriteNode_MethodResult) (bool, string) {
+	stepSuccess := true
+	stepErrorMsg := ""
+	for _, mr := range results {
+		if mr == nil {
+			continue
+		}
+		if !mr.Success || hasReceiptFailure(mr.Receipt) {
+			stepSuccess = false
+			if stepErrorMsg == "" {
+				if mr.Error != "" {
+					stepErrorMsg = mr.Error
+				} else {
+					stepErrorMsg = "one or more contract writes failed"
+				}
+			}
+		}
+	}
+	return stepSuccess, stepErrorMsg
+}
+
+// computeReadStepSuccess inspects ContractRead method results to derive step success and an error message
+func computeReadStepSuccess(results []*avsproto.ContractReadNode_MethodResult) (bool, string) {
+	stepSuccess := true
+	stepErrorMsg := ""
+	for _, mr := range results {
+		if mr == nil {
+			continue
+		}
+		if !mr.Success {
+			stepSuccess = false
+			if stepErrorMsg == "" && mr.Error != "" {
+				stepErrorMsg = mr.Error
+			}
+		}
+	}
+	return stepSuccess, stepErrorMsg
 }
 
 // convertStringSliceMapToProtobufCompatible converts a map[string][]string to protobuf-compatible map[string]interface{}

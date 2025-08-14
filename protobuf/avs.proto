@@ -616,6 +616,8 @@ message Execution {
     google.protobuf.Value config = 19;
     // Optional structured metadata for testing/debugging; not consumed by subsequent nodes
     google.protobuf.Value metadata = 25;
+    // Optional execution context for runtime flags and extra info (e.g., is_simulated)
+    google.protobuf.Value execution_context = 26;
     oneof output_data {
       // Trigger outputs
       BlockTrigger.Output block_trigger = 20;
@@ -1100,8 +1102,9 @@ message RunNodeWithInputsReq {
 message RunNodeWithInputsResp {
   bool success = 1; // Whether the execution was successful
   string error = 3; // Error message if execution failed
-  string node_id = 4; // ID of the executed node
   google.protobuf.Value metadata = 5; // Optional structured metadata for testing/debugging
+  // Optional execution context for runtime flags and extra info (e.g., is_simulated)
+  google.protobuf.Value execution_context = 6;
   
   // Use specific output types for nodes only
   oneof output_data {
@@ -1129,8 +1132,9 @@ message RunTriggerReq {
 message RunTriggerResp {
   bool success = 1; // Whether the execution was successful
   string error = 2; // Error message if execution failed
-  string trigger_id = 3; // ID of the executed trigger
   google.protobuf.Value metadata = 4; // Optional structured metadata for testing/debugging
+  // Optional execution context for runtime flags and extra info (e.g., is_simulated)
+  google.protobuf.Value execution_context = 5;
   
   // Use specific output types for triggers
   oneof output_data {

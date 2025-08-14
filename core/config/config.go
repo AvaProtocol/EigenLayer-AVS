@@ -93,9 +93,6 @@ type SmartWalletConfig struct {
 	PaymasterAddress     common.Address
 	WhitelistAddresses   []common.Address
 
-	// Enable real UserOp transactions instead of simulation
-	EnableRealTransactions bool
-
 	// Maximum number of smart wallets allowed per EOA owner
 	// Unlimited is NOT supported. If zero or negative, the default limit is applied.
 	MaxWalletsPerOwner int
@@ -127,16 +124,15 @@ type ConfigRaw struct {
 	JwtSecret string `yaml:"jwt_secret"`
 
 	SmartWallet struct {
-		EthRpcUrl              string   `yaml:"eth_rpc_url"`
-		EthWsUrl               string   `yaml:"eth_ws_url"`
-		BundlerURL             string   `yaml:"bundler_url"`
-		FactoryAddress         string   `yaml:"factory_address"`
-		EntrypointAddress      string   `yaml:"entrypoint_address"`
-		ControllerPrivateKey   string   `yaml:"controller_private_key"`
-		PaymasterAddress       string   `yaml:"paymaster_address"`
-		WhitelistAddresses     []string `yaml:"whitelist_addresses"`
-		EnableRealTransactions bool     `yaml:"enable_real_transactions"`
-		MaxWalletsPerOwner     int      `yaml:"max_wallets_per_owner"`
+		EthRpcUrl            string   `yaml:"eth_rpc_url"`
+		EthWsUrl             string   `yaml:"eth_ws_url"`
+		BundlerURL           string   `yaml:"bundler_url"`
+		FactoryAddress       string   `yaml:"factory_address"`
+		EntrypointAddress    string   `yaml:"entrypoint_address"`
+		ControllerPrivateKey string   `yaml:"controller_private_key"`
+		PaymasterAddress     string   `yaml:"paymaster_address"`
+		WhitelistAddresses   []string `yaml:"whitelist_addresses"`
+		MaxWalletsPerOwner   int      `yaml:"max_wallets_per_owner"`
 	} `yaml:"smart_wallet"`
 
 	Backup struct {
@@ -268,17 +264,16 @@ func NewConfig(configFilePath string) (*Config, error) {
 		JwtSecret: []byte(configRaw.JwtSecret),
 
 		SmartWallet: &SmartWalletConfig{
-			EthRpcUrl:              configRaw.SmartWallet.EthRpcUrl,
-			EthWsUrl:               configRaw.SmartWallet.EthWsUrl,
-			BundlerURL:             configRaw.SmartWallet.BundlerURL,
-			FactoryAddress:         common.HexToAddress(configRaw.SmartWallet.FactoryAddress),
-			EntrypointAddress:      common.HexToAddress(configRaw.SmartWallet.EntrypointAddress),
-			ChainID:                chainId.Int64(),
-			ControllerPrivateKey:   controllerPrivateKey,
-			PaymasterAddress:       common.HexToAddress(configRaw.SmartWallet.PaymasterAddress),
-			WhitelistAddresses:     convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
-			EnableRealTransactions: configRaw.SmartWallet.EnableRealTransactions,
-			MaxWalletsPerOwner:     configRaw.SmartWallet.MaxWalletsPerOwner,
+			EthRpcUrl:            configRaw.SmartWallet.EthRpcUrl,
+			EthWsUrl:             configRaw.SmartWallet.EthWsUrl,
+			BundlerURL:           configRaw.SmartWallet.BundlerURL,
+			FactoryAddress:       common.HexToAddress(configRaw.SmartWallet.FactoryAddress),
+			EntrypointAddress:    common.HexToAddress(configRaw.SmartWallet.EntrypointAddress),
+			ChainID:              chainId.Int64(),
+			ControllerPrivateKey: controllerPrivateKey,
+			PaymasterAddress:     common.HexToAddress(configRaw.SmartWallet.PaymasterAddress),
+			WhitelistAddresses:   convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
+			MaxWalletsPerOwner:   configRaw.SmartWallet.MaxWalletsPerOwner,
 		},
 
 		BackupConfig: BackupConfig{
