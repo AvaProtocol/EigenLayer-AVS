@@ -171,7 +171,7 @@ dev-build:
 
 ## dev-agg: run aggregator locally with dev build
 dev-agg:dev-build
-	./out/ap aggregator
+	./out/ap aggregator --config=config/aggregator.yaml
 ## dev-agg: run operator locally with dev build
 dev-op:
 	./out/ap operator --config=config/operator.yaml

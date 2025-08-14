@@ -984,6 +984,7 @@ func (v *VM) runKahnScheduler() error {
 	var wg sync.WaitGroup
 	wg.Add(workers)
 
+	var closeOnce sync.Once
 	worker := func() {
 		defer wg.Done()
 		for id := range ready {
@@ -1007,35 +1008,15 @@ func (v *VM) runKahnScheduler() error {
 				}
 			}
 			processed++
+			if processed == int64(total) {
+				closeOnce.Do(func() { close(ready) })
+			}
 			mu.Unlock()
 		}
 	}
 
 	for i := 0; i < workers; i++ {
 		go worker()
-	}
-
-	// Close the ready channel when all nodes have been processed using a done channel
-	doneCh := make(chan struct{})
-	go func() {
-		for i := 0; i < total; i++ {
-			<-doneCh
-		}
-		close(ready)
-	}()
-
-	// Wrap worker to signal completion for each processed node
-	originalWorker := worker
-	worker = func() {
-		originalWorker()
-		// Signal completion for the batch processed by this worker
-		mu.Lock()
-		completed := processed
-		processed = 0
-		mu.Unlock()
-		for i := int64(0); i < completed; i++ {
-			doneCh <- struct{}{}
-		}
 	}
 
 	wg.Wait()
