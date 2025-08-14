@@ -647,16 +647,14 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 			"value":                "0x0",
 			"data":                 callData,
 		}
-		// Add stateOverrides to fund the runner during simulation
+		// Embed stateOverrides inside txObject (Tenderly RPC expects overrides within the tx object)
 		balanceOverride := "0x56BC75E2D63100000" // 100 ETH
-		overrides := map[string]interface{}{
-			"stateOverrides": map[string]interface{}{
-				strings.ToLower(fromAddress): map[string]interface{}{
-					"balance": balanceOverride,
-				},
+		txObject["stateOverrides"] = map[string]interface{}{
+			strings.ToLower(fromAddress): map[string]interface{}{
+				"balance": balanceOverride,
 			},
 		}
-		rpcRequest := JSONRPCRequest{Jsonrpc: "2.0", Method: "tenderly_simulateTransaction", Params: []interface{}{txObject, latestHex, overrides}, Id: 1}
+		rpcRequest := JSONRPCRequest{Jsonrpc: "2.0", Method: "tenderly_simulateTransaction", Params: []interface{}{txObject, latestHex}, Id: 1}
 		tc.logger.Info("📡 Making Tenderly simulation call for contract write", "rpc_url", tc.apiURL)
 		_, err := tc.httpClient.R().SetContext(ctx).SetBody(rpcRequest).SetResult(&response).Post(tc.apiURL)
 		if err != nil {
