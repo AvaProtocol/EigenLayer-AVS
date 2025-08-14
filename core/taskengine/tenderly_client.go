@@ -128,7 +128,7 @@ func NewTenderlyClient(logger sdklogging.Logger) *TenderlyClient {
 		apiKey:     apiKey,
 	}
 
-	// Optional HTTP Simulation API credentials
+	// Optional HTTP Simulation API credentials (canonical names in .env)
 	if acc := os.Getenv("TENDERLY_ACCOUNT"); acc != "" {
 		tc.accountName = acc
 	}
@@ -603,22 +603,19 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		usedHTTP = true
 		simURL := fmt.Sprintf("https://api.tenderly.co/api/v1/account/%s/project/%s/simulate", tc.accountName, tc.projectName)
 		// Provide a generous temporary balance to the runner so gas checks don't fail in simulation
-		// Tenderly HTTP API supports `state_objects` to override account state
 		balanceOverride := "0x56BC75E2D63100000" // 100 ETH
+		// Match the documented quick simulation shape you provided
 		body := map[string]interface{}{
-			"network_id":               fmt.Sprintf("%d", chainID),
-			"from":                     fromAddress,
-			"to":                       contractAddress,
-			"input":                    callData,
-			"gas":                      8000000,
-			"gas_price":                "0x0",
-			"max_fee_per_gas":          maxFeePerGasHex,
-			"max_priority_fee_per_gas": "0x0",
-			"value":                    "0x0",
-			"save":                     false,
-			"save_if_fails":            false,
-			"simulation_type":          "full",
-			"generate_access_list":     false,
+			"network_id":      fmt.Sprintf("%d", chainID),
+			"block_number":    latestHex,
+			"from":            fromAddress,
+			"to":              contractAddress,
+			"gas":             8000000,
+			"gas_price":       0,
+			"value":           0,
+			"input":           callData,
+			"simulation_type": "quick",
+			// Optional conveniences kept compatible
 			"state_objects": map[string]interface{}{
 				strings.ToLower(fromAddress): map[string]interface{}{
 					"balance": balanceOverride,
