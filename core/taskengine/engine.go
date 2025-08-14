@@ -1784,6 +1784,21 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 				response.Error = &execution.Error
 			}
 			response.Steps = execution.Steps
+
+			// EXTRA SAFETY: persist execution synchronously for immediate ListExecutions visibility
+			// Sanitize before persistence as protobuf Value rejects NaN/Inf
+			sanitizeExecutionForPersistence(execution)
+			mo := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
+			if b, mErr := mo.Marshal(execution); mErr == nil {
+				key := TaskExecutionKey(task, execution.Id)
+				if setErr := n.db.Set(key, b); setErr != nil {
+					n.logger.Error("TriggerTask: failed to persist execution synchronously", "task_id", task.Id, "execution_id", execution.Id, "error", setErr)
+				} else if n.logger != nil {
+					n.logger.Info("TriggerTask: persisted execution synchronously", "task_id", task.Id, "execution_id", execution.Id, "key", string(key))
+				}
+			} else if n.logger != nil {
+				n.logger.Error("TriggerTask: failed to marshal execution for persistence", "task_id", task.Id, "execution_id", execution.Id, "error", mErr)
+			}
 			return response, nil
 		}
 	} else {
@@ -1793,6 +1808,8 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 	}
 
 	// Add async execution
+	// Ensure the execution is also persisted synchronously when blocking is requested
+	// (Already handled above). For non-blocking, enqueue the job as usual.
 	data, err := json.Marshal(queueTaskData)
 	if err != nil {
 		n.logger.Error("error serialize trigger to json", "error", err)
@@ -1955,13 +1972,44 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 					}
 				}
 			}
+
+			// Fallbacks for simulation: if runner missing or not matched, use known smart wallet
+			if (chosenSender == common.Address{}) {
+				// Prefer the user's default smart account address when available
+				if user.SmartAccountAddress != nil && (*user.SmartAccountAddress != common.Address{}) {
+					chosenSender = *user.SmartAccountAddress
+				} else {
+					// As a last resort, pick the first wallet owned by the user (if any)
+					if resp, err := n.ListWallets(owner, &avsproto.ListWalletReq{}); err == nil && len(resp.GetItems()) > 0 {
+						chosenSender = common.HexToAddress(resp.GetItems()[0].GetAddress())
+					}
+				}
+			}
+
 			if (chosenSender == common.Address{}) {
 				return nil, fmt.Errorf("runner does not match any existing smart wallet for owner %s", owner.Hex())
 			}
+
+			// Set aa_sender for simulation writes to always use the runner (smart wallet)
 			vm.AddVar("aa_sender", chosenSender.Hex())
 			if n.logger != nil {
 				n.logger.Info("SimulateTask: AA sender resolved", "sender", chosenSender.Hex())
 			}
+
+			// Also ensure workflowContext.runner is available in the VM for downstream nodes
+			vm.mu.Lock()
+			if wfCtxIface, ok := vm.vars[WorkflowContextVarName]; ok {
+				if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
+					if _, hasRunner := wfCtx["runner"]; !hasRunner || wfCtx["runner"] == "" {
+						wfCtx["runner"] = chosenSender.Hex()
+					}
+					// Keep aliases in sync when possible
+					if _, hasSWA := wfCtx["smartWalletAddress"]; !hasSWA || wfCtx["smartWalletAddress"] == "" {
+						wfCtx["smartWalletAddress"] = chosenSender.Hex()
+					}
+				}
+			}
+			vm.mu.Unlock()
 		} else if n.logger != nil {
 			n.logger.Info("SimulateTask: Skipping AA sender resolution (no AA-relevant nodes in workflow)")
 		}
@@ -2144,12 +2192,35 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 		tasks[id] = task
 	}
 
-	prefixes := make([]string, len(payload.TaskIds))
+	// Build prefixes slice correctly with zero length to avoid leading empty entries
+	prefixes := make([]string, 0, len(payload.TaskIds))
 	for _, id := range payload.TaskIds {
 		prefixes = append(prefixes, string(TaskExecutionPrefix(id)))
 	}
 
+	if n.logger != nil {
+		n.logger.Info("ListExecutions: scanning prefixes", "count", len(prefixes), "prefixes", prefixes)
+	}
 	executionKeys, err := n.db.ListKeysMulti(prefixes)
+	if n.logger != nil {
+		n.logger.Info("ListExecutions: found execution keys", "count", len(executionKeys))
+	}
+
+	// Fallback: if no keys found using ListKeysMulti, try value scan per prefix
+	if len(executionKeys) == 0 {
+		for _, id := range payload.TaskIds {
+			items, getErr := n.db.GetByPrefix(TaskExecutionPrefix(id))
+			if getErr != nil {
+				continue
+			}
+			for _, kv := range items {
+				executionKeys = append(executionKeys, string(kv.Key))
+			}
+		}
+		if n.logger != nil {
+			n.logger.Info("ListExecutions: fallback GetByPrefix yielded keys", "count", len(executionKeys))
+		}
+	}
 
 	// second, do the sort, this is key sorted by ordering of their insertion
 	sort.Slice(executionKeys, func(i, j int) bool {

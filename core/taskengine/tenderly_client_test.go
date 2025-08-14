@@ -614,8 +614,16 @@ func TestTenderlyGateway_RealRPCCalls_Integration(t *testing.T) {
 			fmt.Printf("🔍 RESPONSE ANALYSIS:\n")
 			fmt.Printf("JSON-RPC Version: %s\n", response.Jsonrpc)
 			fmt.Printf("Request ID: %d\n", response.Id)
-			fmt.Printf("Result Length: %d bytes\n", len(response.Result))
-			fmt.Printf("Raw Result: %s\n", response.Result)
+			// response.Result is interface{}; avoid len() on interface to satisfy vet.
+			switch v := response.Result.(type) {
+			case string:
+				fmt.Printf("Result Length: %d bytes\n", len(v))
+				fmt.Printf("Raw Result: %s\n", v)
+			default:
+				rb, _ := json.Marshal(v)
+				fmt.Printf("Result Length: %d bytes\n", len(rb))
+				fmt.Printf("Raw Result: %s\n", string(rb))
+			}
 
 			if response.Error != nil {
 				fmt.Printf("❌ RPC Error: %s (code: %d)\n", response.Error.Message, response.Error.Code)

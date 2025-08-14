@@ -140,6 +140,61 @@ func finalizeExecutionStep(step *avsproto.Execution_Step, success bool, errorMsg
 	step.Log = logContent
 }
 
+// ---- Shared helpers for determining step success across runners ----
+
+// hasReceiptFailure returns true if the given receipt has a status field equal to "0x0" (failure)
+func hasReceiptFailure(receipt *structpb.Value) bool {
+	if receipt == nil {
+		return false
+	}
+	if recMap, ok := receipt.AsInterface().(map[string]interface{}); ok {
+		if statusVal, ok2 := recMap["status"].(string); ok2 && (statusVal == "0x0" || statusVal == "0X0") {
+			return true
+		}
+	}
+	return false
+}
+
+// computeWriteStepSuccess inspects ContractWrite method results to derive step success and an error message
+func computeWriteStepSuccess(results []*avsproto.ContractWriteNode_MethodResult) (bool, string) {
+	stepSuccess := true
+	stepErrorMsg := ""
+	for _, mr := range results {
+		if mr == nil {
+			continue
+		}
+		if !mr.Success || hasReceiptFailure(mr.Receipt) {
+			stepSuccess = false
+			if stepErrorMsg == "" {
+				if mr.Error != "" {
+					stepErrorMsg = mr.Error
+				} else {
+					stepErrorMsg = "one or more contract writes failed"
+				}
+			}
+		}
+	}
+	return stepSuccess, stepErrorMsg
+}
+
+// computeReadStepSuccess inspects ContractRead method results to derive step success and an error message
+func computeReadStepSuccess(results []*avsproto.ContractReadNode_MethodResult) (bool, string) {
+	stepSuccess := true
+	stepErrorMsg := ""
+	for _, mr := range results {
+		if mr == nil {
+			continue
+		}
+		if !mr.Success {
+			stepSuccess = false
+			if stepErrorMsg == "" && mr.Error != "" {
+				stepErrorMsg = mr.Error
+			}
+		}
+	}
+	return stepSuccess, stepErrorMsg
+}
+
 // convertStringSliceMapToProtobufCompatible converts a map[string][]string to protobuf-compatible map[string]interface{}
 // Single values are stored as strings, multiple values as arrays
 // This is commonly needed for HTTP headers and similar structures

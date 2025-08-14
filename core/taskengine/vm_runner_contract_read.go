@@ -758,8 +758,9 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		r.vm.logger.Debug("Contract read raw fields metadata", "metadata", allRawFieldsMetadata)
 	}
 
-	// Use shared function to finalize execution step with success
-	finalizeExecutionStep(s, true, "", log.String())
+	// Determine step success from method results: any method with Success == false marks step as failed
+	stepSuccess, stepErrorMsg := computeReadStepSuccess(results)
+	finalizeExecutionStep(s, stepSuccess, stepErrorMsg, log.String())
 
 	return s, nil
 }
