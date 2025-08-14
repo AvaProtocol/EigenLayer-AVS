@@ -37,6 +37,17 @@ const HardMaxWalletsPerOwner = 2000
 // smart_wallet.factory_address field, this value will be used.
 const DefaultFactoryProxyAddressHex = "0xB99BC2E399e06CddCF5E725c0ea341E8f0322834"
 
+// DefaultEntrypointAddressHex is the default ERC-4337 EntryPoint address used
+// across supported chains. If the aggregator config omits the
+// smart_wallet.entrypoint_address field, this value will be used.
+const DefaultEntrypointAddressHex = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
+
+// DefaultPaymasterAddressHex is the default VerifyingPaymaster address
+// controlled by us and deployed uniformly across supported chains. If the
+// aggregator config omits the smart_wallet.paymaster_address field, this
+// value will be used.
+const DefaultPaymasterAddressHex = "0xB985af5f96EF2722DC99aEBA573520903B86505e"
+
 // Config contains all of the configuration information for a credible squaring aggregators and challengers.
 // Operators use a separate config. (see config-files/operator.anvil.yaml)
 type Config struct {
@@ -273,10 +284,10 @@ func NewConfig(configFilePath string) (*Config, error) {
 			EthWsUrl:             configRaw.SmartWallet.EthWsUrl,
 			BundlerURL:           configRaw.SmartWallet.BundlerURL,
 			FactoryAddress:       common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.FactoryAddress, DefaultFactoryProxyAddressHex)),
-			EntrypointAddress:    common.HexToAddress(configRaw.SmartWallet.EntrypointAddress),
+			EntrypointAddress:    common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.EntrypointAddress, DefaultEntrypointAddressHex)),
 			ChainID:              chainId.Int64(),
 			ControllerPrivateKey: controllerPrivateKey,
-			PaymasterAddress:     common.HexToAddress(configRaw.SmartWallet.PaymasterAddress),
+			PaymasterAddress:     common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.PaymasterAddress, DefaultPaymasterAddressHex)),
 			WhitelistAddresses:   convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
 			MaxWalletsPerOwner:   configRaw.SmartWallet.MaxWalletsPerOwner,
 		},
