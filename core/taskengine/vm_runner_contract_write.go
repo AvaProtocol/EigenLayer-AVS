@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -225,17 +224,8 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		"method", methodName,
 		"contract", contractAddress.Hex())
 
-	// TEMPORARY: Make force simulation configurable via env for debugging only
-	// TODO: Remove once IsSimulation propagation is fully reliable
-	forceSimulation := false
-	if v := os.Getenv("FORCE_SIMULATION"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			forceSimulation = parsed
-		}
-	}
-
 	// If simulation flag is set OR forcing simulation, always use simulation path
-	if r.vm.IsSimulation || isRunNodeWithInputs || forceSimulation {
+	if r.vm.IsSimulation || isRunNodeWithInputs {
 		r.vm.logger.Info("🔮 CONTRACT WRITE DEBUG - Using Tenderly simulation path",
 			"contract", contractAddress.Hex(),
 			"method", methodName,

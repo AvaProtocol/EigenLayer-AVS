@@ -1015,20 +1015,28 @@ func (v *VM) runKahnScheduler() error {
 		go worker()
 	}
 
-	// Close the ready channel when all nodes have been scheduled and processed
+	// Close the ready channel when all nodes have been processed using a done channel
+	doneCh := make(chan struct{})
 	go func() {
-		// Busy-wait lightly; for a robust solution, track enqueued vs completed counts
-		for {
-			mu.Lock()
-			done := processed >= int64(total)
-			mu.Unlock()
-			if done {
-				close(ready)
-				return
-			}
-			time.Sleep(5 * time.Millisecond)
+		for i := 0; i < total; i++ {
+			<-doneCh
 		}
+		close(ready)
 	}()
+
+	// Wrap worker to signal completion for each processed node
+	originalWorker := worker
+	worker = func() {
+		originalWorker()
+		// Signal completion for the batch processed by this worker
+		mu.Lock()
+		completed := processed
+		processed = 0
+		mu.Unlock()
+		for i := int64(0); i < completed; i++ {
+			doneCh <- struct{}{}
+		}
+	}
 
 	wg.Wait()
 	return nil
