@@ -305,7 +305,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			}
 		}
 		// Finally, attach Tenderly logs into the flexible receipt (do this last to avoid overwrites)
-		r.vm.logger.Error("🔍 LOG ATTACHMENT CHECK",
+		r.vm.logger.Debug("🔍 LOG ATTACHMENT CHECK",
 			"mr_nil", mr == nil,
 			"receipt_nil", mr == nil || mr.Receipt == nil,
 			"simulation_nil", simulationResult == nil,
@@ -317,23 +317,27 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			}())
 
 		if mr != nil && mr.Receipt != nil && simulationResult != nil && len(simulationResult.ReceiptLogs) > 0 {
-			r.vm.logger.Error("🔍 CRITICAL DEBUG - About to attach Tenderly logs to receipt",
+			r.vm.logger.Debug("About to attach Tenderly logs to receipt",
 				"logs_count", len(simulationResult.ReceiptLogs))
 			if recMap, ok := mr.Receipt.AsInterface().(map[string]interface{}); ok {
-				recMap["logs"] = simulationResult.ReceiptLogs
-				r.vm.logger.Error("🔍 CRITICAL DEBUG - Attached logs to receipt map",
+				logsIface := make([]interface{}, 0, len(simulationResult.ReceiptLogs))
+				for _, m := range simulationResult.ReceiptLogs {
+					logsIface = append(logsIface, m)
+				}
+				recMap["logs"] = logsIface
+				r.vm.logger.Debug("Attached logs to receipt map",
 					"logs_count", len(simulationResult.ReceiptLogs))
 				if newVal, err := structpb.NewValue(recMap); err == nil {
 					mr.Receipt = newVal
-					r.vm.logger.Error("🔍 CRITICAL DEBUG - Successfully updated receipt with logs")
+					r.vm.logger.Debug("Updated receipt with logs")
 				} else {
-					r.vm.logger.Error("🔍 CRITICAL DEBUG - Failed to create new receipt value", "error", err)
+					r.vm.logger.Error("Failed to create new receipt value", "error", err)
 				}
 			} else {
-				r.vm.logger.Error("🔍 CRITICAL DEBUG - Failed to cast receipt to map")
+				r.vm.logger.Error("Failed to cast receipt to map")
 			}
 		} else {
-			r.vm.logger.Error("🔍 CRITICAL DEBUG - NOT attaching logs",
+			r.vm.logger.Debug("Not attaching logs",
 				"mr_nil", mr == nil,
 				"receipt_nil", mr == nil || mr.Receipt == nil,
 				"simulation_nil", simulationResult == nil,
