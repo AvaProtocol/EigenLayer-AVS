@@ -32,6 +32,11 @@ const DefaultMaxWalletsPerOwner = 5
 // Any configured value above this will be clamped down to this hard limit.
 const HardMaxWalletsPerOwner = 2000
 
+// DefaultFactoryProxyAddressHex is the default smart wallet factory Proxy address
+// deployed across supported chains. If the aggregator config omits the
+// smart_wallet.factory_address field, this value will be used.
+const DefaultFactoryProxyAddressHex = "0xB99BC2E399e06CddCF5E725c0ea341E8f0322834"
+
 // Config contains all of the configuration information for a credible squaring aggregators and challengers.
 // Operators use a separate config. (see config-files/operator.anvil.yaml)
 type Config struct {
@@ -267,7 +272,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			EthRpcUrl:            configRaw.SmartWallet.EthRpcUrl,
 			EthWsUrl:             configRaw.SmartWallet.EthWsUrl,
 			BundlerURL:           configRaw.SmartWallet.BundlerURL,
-			FactoryAddress:       common.HexToAddress(configRaw.SmartWallet.FactoryAddress),
+			FactoryAddress:       common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.FactoryAddress, DefaultFactoryProxyAddressHex)),
 			EntrypointAddress:    common.HexToAddress(configRaw.SmartWallet.EntrypointAddress),
 			ChainID:              chainId.Int64(),
 			ControllerPrivateKey: controllerPrivateKey,
@@ -305,6 +310,16 @@ func (c *Config) validate() {
 	if c.AutomationRegistryCoordinatorAddr == common.HexToAddress("") {
 		panic("Config: AutomationRegistryCoordinatorAddr is required")
 	}
+}
+
+// firstNonEmpty returns the first non-empty string among the arguments.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func ReadYamlConfig(path string, o interface{}) error {
