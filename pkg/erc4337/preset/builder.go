@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
@@ -186,17 +187,19 @@ func BuildUserOp(
 	callData []byte,
 	senderOverride *common.Address,
 ) (*userop.UserOperation, error) {
-	// Resolve sender
-	var sender *common.Address
+	// Resolve sender by deriving from owner (salt:0). If an override is provided, it must match
+	// the derived address; if not deployed, we will include initCode to auto-deploy instead of erroring.
+	derivedSender, err := aa.GetSenderAddress(client, owner, accountSalt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive sender address: %w", err)
+	}
+	var sender *common.Address = derivedSender
 	if senderOverride != nil {
 		so := *senderOverride
-		sender = &so
-	} else {
-		var err error
-		sender, err = aa.GetSenderAddress(client, owner, accountSalt)
-		if err != nil {
-			return nil, fmt.Errorf("failed to derive sender address: %w", err)
+		if !strings.EqualFold(so.Hex(), derivedSender.Hex()) {
+			return nil, fmt.Errorf("sender override %s does not match derived sender %s", so.Hex(), derivedSender.Hex())
 		}
+		// Use the derived sender to ensure initCode (if needed) matches the factory derivation
 	}
 
 	initCode := "0x"
@@ -205,12 +208,8 @@ func BuildUserOp(
 		return nil, err
 	}
 
-	// account not initialize, feed in init code
+	// account not initialized, feed in init code
 	if len(code) == 0 {
-		if senderOverride != nil {
-			// We cannot derive factory salt from sender alone; require pre-deployed account when overriding sender
-			return nil, fmt.Errorf("sender %s is not deployed; deploy it first or omit the specified sender address", sender.Hex())
-		}
 		initCode, _ = aa.GetInitCode(owner.Hex(), accountSalt)
 	}
 
@@ -278,7 +277,8 @@ func BuildUserOpWithPaymaster(
 	validAfter *big.Int,
 	senderOverride *common.Address,
 ) (*userop.UserOperation, error) {
-	// First build the basic user operation
+	// First build the basic user operation (auto-deploy if needed). If override is provided,
+	// it must match the derived sender from owner.
 	userOp, err := BuildUserOp(smartWalletConfig, client, bundlerClient, owner, callData, senderOverride)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build base UserOp: %w", err)
