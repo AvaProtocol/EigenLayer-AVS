@@ -2812,9 +2812,9 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
 	failedNodesList := strings.Join(failedStepNames, ", ")
 
 	if failedCount == 1 {
-		errorMessage = fmt.Sprintf("This %d step encountered error: %s", failedCount, failedNodesList)
+		errorMessage = fmt.Sprintf("These %d steps failed: %s", failedCount, failedNodesList)
 	} else {
-		errorMessage = fmt.Sprintf("These %d steps encountered error: %s", failedCount, failedNodesList)
+		errorMessage = fmt.Sprintf("These %d steps failed: %s", failedCount, failedNodesList)
 	}
 
 	return false, errorMessage, failedCount
