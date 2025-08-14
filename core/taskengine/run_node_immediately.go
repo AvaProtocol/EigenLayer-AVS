@@ -2428,11 +2428,17 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		// ContractWrite now does not embed metadata inside output; nothing to copy here
 	}
 
-	// Attach execution_context indicating immediate run is simulated
+	// Attach execution_context; treat writes/events as simulated (Tenderly), reads and others as real RPC
 	{
-		provider := "tenderly"
+		isSimulated := false
+		provider := "rpc"
+		if nodeTypeStr == NodeTypeContractWrite || nodeTypeStr == NodeTypeEventTrigger {
+			isSimulated = true
+			provider = "tenderly"
+		}
+
 		ctxMap := map[string]interface{}{
-			"is_simulated": true,
+			"is_simulated": isSimulated,
 			"provider":     provider,
 		}
 		if n.smartWalletConfig != nil && n.smartWalletConfig.ChainID != 0 {

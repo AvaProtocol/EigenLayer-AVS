@@ -249,13 +249,21 @@ func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.C
 	}
 
 	calldata := common.FromHex(finalCallData)
-	msg := ethereum.CallMsg{
+	// Use runner smart wallet as the caller when available
+	callMsg := ethereum.CallMsg{
 		To:   &contractAddress,
 		Data: calldata,
 	}
+	if r.vm != nil {
+		if aaSenderVar, ok := r.vm.vars["aa_sender"]; ok {
+			if aaSenderStr, ok2 := aaSenderVar.(string); ok2 && common.IsHexAddress(aaSenderStr) {
+				callMsg.From = common.HexToAddress(aaSenderStr)
+			}
+		}
+	}
 
 	// Execute the contract call
-	output, err := r.client.CallContract(ctx, msg, nil)
+	output, err := r.client.CallContract(ctx, callMsg, nil)
 	if err != nil {
 		return &avsproto.ContractReadNode_MethodResult{
 			Success:    false,
@@ -899,13 +907,21 @@ func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx conte
 	}
 
 	calldata := common.FromHex(finalCallData)
-	msg := ethereum.CallMsg{
+	// Use runner smart wallet as the caller when available
+	callMsg := ethereum.CallMsg{
 		To:   &contractAddress,
 		Data: calldata,
 	}
+	if r.vm != nil {
+		if aaSenderVar, ok := r.vm.vars["aa_sender"]; ok {
+			if aaSenderStr, ok2 := aaSenderVar.(string); ok2 && common.IsHexAddress(aaSenderStr) {
+				callMsg.From = common.HexToAddress(aaSenderStr)
+			}
+		}
+	}
 
 	// Execute the contract call
-	output, err := r.client.CallContract(ctx, msg, nil)
+	output, err := r.client.CallContract(ctx, callMsg, nil)
 	if err != nil {
 		return &avsproto.ContractReadNode_MethodResult{
 			Success:    false,
