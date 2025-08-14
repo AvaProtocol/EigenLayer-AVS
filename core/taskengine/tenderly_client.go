@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -573,6 +574,13 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 	if latestErr != nil || latestHex == "" {
 		return nil, fmt.Errorf("failed to fetch latest block number from Tenderly: %w", latestErr)
 	}
+	// Convert latest block hex to integer for HTTP simulate API
+	var latestNum uint64
+	if strings.HasPrefix(latestHex, "0x") {
+		if n, err := strconv.ParseUint(strings.TrimPrefix(latestHex, "0x"), 16, 64); err == nil {
+			latestNum = n
+		}
+	}
 
 	// Fetch base fee to construct valid EIP-1559 fee fields and avoid base-fee reverts
 	baseFeeHex, _ := tc.GetLatestBaseFee(ctx)
@@ -607,7 +615,7 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		// Match the documented quick simulation shape you provided
 		body := map[string]interface{}{
 			"network_id":      fmt.Sprintf("%d", chainID),
-			"block_number":    latestHex,
+			"block_number":    latestNum,
 			"from":            fromAddress,
 			"to":              contractAddress,
 			"gas":             8000000,
@@ -634,6 +642,12 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		var simResult map[string]interface{}
 		if uerr := json.Unmarshal(httpResp.Body(), &simResult); uerr != nil {
 			return nil, fmt.Errorf("failed to parse tenderly HTTP simulation response: %w", uerr)
+		}
+		// Tenderly HTTP may return {"error":{...}} with 200; treat as failure
+		if errObj, ok := simResult["error"].(map[string]interface{}); ok {
+			msg, _ := errObj["message"].(string)
+			slug, _ := errObj["slug"].(string)
+			return nil, fmt.Errorf("tenderly HTTP simulate error: %s (%s)", msg, slug)
 		}
 		response.Result = simResult
 	} else {
