@@ -639,6 +639,14 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		if httpErr != nil {
 			return nil, fmt.Errorf("tenderly HTTP simulation failed: %w", httpErr)
 		}
+		// Debug: print full Tenderly HTTP response with account/project context
+		tc.logger.Debug("Tenderly HTTP simulate raw response",
+			"status", httpResp.Status(),
+			"code", httpResp.StatusCode(),
+			"account", tc.accountName,
+			"project", tc.projectName,
+			"url", simURL,
+			"body", string(httpResp.Body()))
 		var simResult map[string]interface{}
 		if uerr := json.Unmarshal(httpResp.Body(), &simResult); uerr != nil {
 			return nil, fmt.Errorf("failed to parse tenderly HTTP simulation response: %w", uerr)
