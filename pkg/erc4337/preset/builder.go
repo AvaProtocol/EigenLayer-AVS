@@ -197,9 +197,17 @@ func BuildUserOp(
 	if senderOverride != nil {
 		so := *senderOverride
 		if !strings.EqualFold(so.Hex(), derivedSender.Hex()) {
-			return nil, fmt.Errorf("sender override %s does not match derived sender %s", so.Hex(), derivedSender.Hex())
+			// Allow override if it's already deployed; otherwise require derived address for initCode path
+			codeAtOverride, err := client.CodeAt(context.Background(), so, nil)
+			if err != nil {
+				return nil, fmt.Errorf("failed to check override sender code: %w", err)
+			}
+			if len(codeAtOverride) == 0 {
+				return nil, fmt.Errorf("sender override %s does not match derived sender %s and override is not deployed", so.Hex(), derivedSender.Hex())
+			}
+			sender = &so
 		}
-		// Use the derived sender to ensure initCode (if needed) matches the factory derivation
+		// If equal, keep derivedSender in sender
 	}
 
 	initCode := "0x"
