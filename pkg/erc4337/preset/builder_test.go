@@ -45,10 +45,21 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 		controllerPrivateKey, _ = crypto.HexToECDSA(dummyKey)
 	}
 
+	// Prefer env overrides; fallback to known-good Sepolia endpoints for local tests
+	ethRPC := os.Getenv("ETH_RPC_URL")
+	if ethRPC == "" {
+		ethRPC = "https://ethereum-sepolia.core.chainstack.com/2504cb0765f0edf6c33d99095148006f"
+	}
+	bundlerURL := os.Getenv("BUNDLER_URL")
+	if bundlerURL == "" {
+		bundlerURL = "https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj17Urz1aMATV1ySn4R"
+	}
+	ethWS := os.Getenv("ETH_WS_URL")
+
 	return &config.SmartWalletConfig{
-		EthRpcUrl:            "https://sepolia.base.org",
-		BundlerURL:           "https://api.stackup.sh/v1/node/sepolia-bundler",
-		EthWsUrl:             "wss://sepolia.base.org",
+		EthRpcUrl:            ethRPC,
+		BundlerURL:           bundlerURL,
+		EthWsUrl:             ethWS,
 		FactoryAddress:       common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
 		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
 		ControllerPrivateKey: controllerPrivateKey,
@@ -63,6 +74,13 @@ func TestSendUserOp(t *testing.T) {
 	}
 
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
+
+	if smartWalletConfig.BundlerURL == "" || smartWalletConfig.EthRpcUrl == "" {
+		t.Skip("Skipping TestSendUserOp: missing BundlerURL or EthRpcUrl for Sepolia")
+	}
+	if !strings.Contains(strings.ToLower(smartWalletConfig.BundlerURL), "sepolia") || !strings.Contains(strings.ToLower(smartWalletConfig.EthRpcUrl), "sepolia") {
+		t.Skip("Skipping TestSendUserOp: configured endpoints are not Sepolia")
+	}
 
 	aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
 

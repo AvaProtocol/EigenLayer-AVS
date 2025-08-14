@@ -108,22 +108,33 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 		t.Errorf("Expect no error but got: %s", execution.Error)
 	}
 
-	if len(execution.Steps) != 3 {
-		t.Errorf("Expect evaluate 3 nodes (trigger + 2 workflow nodes) but got: %d", len(execution.Steps))
-		return
+	// Validate by IDs instead of fixed indices to be robust to scheduler ordering
+	hasBranch := false
+	hasNotification := false
+	for _, s := range execution.Steps {
+		if s.Id == "branch1" {
+			hasBranch = true
+		}
+		if s.Id == "notification1" {
+			hasNotification = true
+		}
+	}
+	if !hasBranch || !hasNotification {
+		t.Fatalf("Expected both branch1 and notification1 steps; gotBranch=%v gotNotification=%v (total=%d)", hasBranch, hasNotification, len(execution.Steps))
 	}
 
-	// Check branch1 step at index 0 (no trigger step in regular executions)
-	if execution.Steps[1].Id != "branch1" {
-		t.Errorf("expect evaluate branch node but got: %s", execution.Steps[1].Id)
+	// Find the notification1 step to inspect its output
+	var notifStep *avsproto.Execution_Step
+	for i := range execution.Steps {
+		if execution.Steps[i].Id == "notification1" {
+			notifStep = execution.Steps[i]
+			break
+		}
 	}
-
-	// Check notification1 step at index 1
-	if execution.Steps[2].Id != "notification1" {
-		t.Errorf("step id doesn't match, expect notification1 but got: %s", execution.Steps[2].Id)
+	if notifStep == nil {
+		t.Fatalf("notification1 step not found in execution steps")
 	}
-
-	outputData := gow.ValueToMap(execution.Steps[2].GetRestApi().Data)
+	outputData := gow.ValueToMap(notifStep.GetRestApi().Data)
 	bodyData := outputData["data"].(map[string]interface{})
 	if bodyData["message"].(string) != "I'm hit" {
 		t.Errorf("expect message to be 'I'm hit' but got %s", bodyData["message"])

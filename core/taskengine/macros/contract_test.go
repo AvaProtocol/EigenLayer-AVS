@@ -19,7 +19,18 @@ type answer struct {
 }
 
 func TestQueryContract(t *testing.T) {
-	conn, _ := ethclient.Dial(os.Getenv("RPC_URL"))
+	rpc := os.Getenv("RPC_URL")
+	if rpc == "" {
+		// Use known Sepolia endpoint if available via env ETH_RPC_URL
+		rpc = os.Getenv("ETH_RPC_URL")
+	}
+	if rpc == "" {
+		t.Skip("Skipping TestQueryContract: RPC_URL/ETH_RPC_URL not set for Sepolia")
+	}
+	conn, err := ethclient.Dial(rpc)
+	if err != nil {
+		t.Skipf("Skipping TestQueryContract: failed to dial RPC %s: %v", rpc, err)
+	}
 
 	r, err := QueryContract(
 		conn,
@@ -38,7 +49,14 @@ func TestQueryContract(t *testing.T) {
 }
 
 func TestExpression(t *testing.T) {
-	SetRpc(os.Getenv("RPC_URL"))
+	rpc := os.Getenv("RPC_URL")
+	if rpc == "" {
+		rpc = os.Getenv("ETH_RPC_URL")
+	}
+	if rpc == "" {
+		t.Skip("Skipping TestExpression: RPC_URL/ETH_RPC_URL not set for Sepolia")
+	}
+	SetRpc(rpc)
 
 	p, e := CompileExpression(`priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306")`)
 	if e != nil {
@@ -84,7 +102,14 @@ func TestExpression(t *testing.T) {
 }
 
 func TestExpressionDynamic(t *testing.T) {
-	SetRpc(os.Getenv("RPC_URL"))
+	rpc := os.Getenv("RPC_URL")
+	if rpc == "" {
+		rpc = os.Getenv("ETH_RPC_URL")
+	}
+	if rpc == "" {
+		t.Skip("Skipping TestExpressionDynamic: RPC_URL/ETH_RPC_URL not set for Sepolia")
+	}
+	SetRpc(rpc)
 
 	// https://sepolia.etherscan.io/address/0x9aCb42Ac07C72cFc29Cd95d9DEaC807E93ada1F6#code
 	match, e := RunExpressionQuery(`
