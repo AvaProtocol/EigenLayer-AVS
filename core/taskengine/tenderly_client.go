@@ -644,22 +644,13 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 			"from": fromAddress,
 			"to":   contractAddress,
 			"gas":  fmt.Sprintf("0x%x", 8_000_000),
-			// Must be >= base fee (we used baseFee*2 above)
-			"maxFeePerGas":         maxFeePerGasHex,
-			"maxPriorityFeePerGas": "0x0",
-			"value":                "0x0",
-			"data":                 callData,
+			// Use legacy gasPrice=0 to bypass base-fee accounting in simulation
+			"gasPrice": "0x0",
+			"value":    "0x0",
+			"data":     callData,
 		}
-		// Provide stateOverrides via the third parameter (Tenderly Gateway expects overrides outside the tx object)
-		balanceOverride := "0x56BC75E2D63100000" // 100 ETH
-		overrides := map[string]interface{}{
-			"stateOverrides": map[string]interface{}{
-				strings.ToLower(fromAddress): map[string]interface{}{
-					"balance": balanceOverride,
-				},
-			},
-		}
-		rpcRequest := JSONRPCRequest{Jsonrpc: "2.0", Method: "tenderly_simulateTransaction", Params: []interface{}{txObject, latestHex, overrides}, Id: 1}
+		// Call RPC without overrides (some gateways reject extra params). We already use gasPrice=0 and value=0.
+		rpcRequest := JSONRPCRequest{Jsonrpc: "2.0", Method: "tenderly_simulateTransaction", Params: []interface{}{txObject, latestHex}, Id: 1}
 		tc.logger.Info("📡 Making Tenderly simulation call for contract write", "rpc_url", tc.apiURL)
 		_, err := tc.httpClient.R().SetContext(ctx).SetBody(rpcRequest).SetResult(&response).Post(tc.apiURL)
 		if err != nil {
