@@ -11,6 +11,7 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -123,5 +124,86 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 				t.Logf("   Receipt: %+v", firstResult.Receipt.AsInterface())
 			}
 		}
+	})
+
+	// Replicate client request: transfer(to, amount) using derived runner (salt:0)
+	t.Run("RunNodeImmediately_Transfer_WithDerivedRunner_UsesTenderlySimulation", func(t *testing.T) {
+		if os.Getenv("TENDERLY_API_KEY") == "" {
+			t.Skip("Skipping Tenderly simulation: TENDERLY_API_KEY not set")
+		}
+		if os.Getenv("FACTORY_ADDRESS") == "" {
+			t.Skip("Skipping Tenderly simulation: FACTORY_ADDRESS not set")
+		}
+
+		db := testutil.TestMustDB()
+		defer storage.Destroy(db.(*storage.BadgerStorage))
+
+		config := testutil.GetAggregatorConfig()
+		engine := New(db, config, nil, testutil.GetLogger())
+
+		smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
+		aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
+
+		// Owner EOA and transfer params from client sample
+		ownerEOA := common.HexToAddress("0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788")
+		toAddr := "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788"
+		amount := "1000000"
+
+		// Derive runner using salt:0 via factory on chain
+		rpcURL := smartWalletConfig.EthRpcUrl
+		if rpcURL == "" {
+			t.Skip("Skipping: SEPOLIA_RPC not configured")
+		}
+		ethc, err := ethclient.Dial(rpcURL)
+		require.NoError(t, err, "Failed to connect RPC for derivation")
+		derivedRunner, derr := aa.GetSenderAddress(ethc, ownerEOA, big.NewInt(0))
+		require.NoError(t, derr, "Failed to derive runner")
+
+		// Seed wallet for validation
+		factory := smartWalletConfig.FactoryAddress
+		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: derivedRunner, Factory: &factory, Salt: big.NewInt(0)})
+
+		// Minimal ABI for transfer(address,uint256)
+		transferAbi := []interface{}{
+			map[string]interface{}{
+				"inputs": []interface{}{
+					map[string]interface{}{"internalType": "address", "name": "to", "type": "address"},
+					map[string]interface{}{"internalType": "uint256", "name": "value", "type": "uint256"},
+				},
+				"name":            "transfer",
+				"outputs":         []interface{}{map[string]interface{}{"internalType": "bool", "name": "", "type": "bool"}},
+				"stateMutability": "nonpayable",
+				"type":            "function",
+			},
+		}
+
+		nodeConfig := map[string]interface{}{
+			"contractAddress": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+			"contractAbi":     transferAbi,
+			"methodCalls": []interface{}{
+				map[string]interface{}{
+					"methodName":   "transfer",
+					"methodParams": []interface{}{toAddr, amount},
+				},
+			},
+			"value":    "0",
+			"gasLimit": "210000",
+		}
+
+		triggerData := map[string]interface{}{
+			"workflowContext": map[string]interface{}{
+				"id":         "test-run-node-immediately-transfer",
+				"chainId":    11155111,
+				"name":       "Recurring Transfer with report",
+				"eoaAddress": ownerEOA.Hex(),
+				"runner":     derivedRunner.Hex(),
+				"chain":      "Sepolia",
+			},
+			"timeTrigger": map[string]interface{}{"data": map[string]interface{}{}, "input": map[string]interface{}{"schedules": []interface{}{"*/5 * * * *"}}},
+		}
+
+		result, err := engine.RunNodeImmediately("contractWrite", nodeConfig, triggerData)
+		require.NoError(t, err, "RunNodeImmediately should not error for simulation")
+		require.NotNil(t, result)
 	})
 }
