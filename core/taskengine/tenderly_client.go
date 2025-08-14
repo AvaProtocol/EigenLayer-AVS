@@ -557,7 +557,7 @@ func (tc *TenderlyClient) createMockTransferLog(contractAddress string, from, to
 
 // SimulateContractWrite simulates a contract write operation using Tenderly
 func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAddress string, callData string, contractABI string, methodName string, chainID int64, fromAddress string) (*ContractWriteSimulationResult, error) {
-	tc.logger.Error("🚨 VERY OBVIOUS DEBUG - SimulateContractWrite called with latest code",
+	tc.logger.Debug("🚨 VERY OBVIOUS DEBUG - SimulateContractWrite called with latest code",
 		"contract", contractAddress,
 		"method", methodName,
 		"from", fromAddress,

@@ -864,12 +864,12 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		var result *avsproto.ContractWriteNode_MethodResult
 		func() {
 			defer func() {
-				if r := recover(); r != nil {
-					log.WriteString(fmt.Sprintf("🚨 PANIC in executeMethodCall: %v\n", r))
+				if rcv := recover(); rcv != nil {
+					log.WriteString(fmt.Sprintf("🚨 PANIC in executeMethodCall: %v\n", rcv))
 					result = &avsproto.ContractWriteNode_MethodResult{
 						MethodName: methodCall.MethodName,
 						Success:    false,
-						Error:      fmt.Sprintf("panic during execution: %v", r),
+						Error:      fmt.Sprintf("panic during execution: %v", rcv),
 					}
 				}
 			}()
