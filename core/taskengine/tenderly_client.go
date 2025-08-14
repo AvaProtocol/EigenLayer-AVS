@@ -721,7 +721,7 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		}
 
 		// FIRST: Let's see ALL keys in the Tenderly response
-		tc.logger.Error("🔍 STEP 1 - ALL TENDERLY RESPONSE KEYS")
+		tc.logger.Debug("🔍 STEP 1 - ALL TENDERLY RESPONSE KEYS")
 		if m, ok := resultForExtraction.(map[string]interface{}); ok {
 			allKeys := make([]string, 0, len(m))
 			for key := range m {
