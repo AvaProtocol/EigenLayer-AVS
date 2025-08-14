@@ -3,6 +3,7 @@ package taskengine
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -380,6 +381,9 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		Steps:   vm.ExecutionLogs, // Contains all steps including failed ones
 	}
 
+	// Ensure no NaN/Inf sneak into protobuf Values (which reject them)
+	sanitizeExecutionForPersistence(execution)
+
 	if !executionSuccess {
 		x.logger.Error("task execution completed with failures",
 			"error", executionError,
@@ -405,9 +409,28 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
 
 	// update execution log
-	executionByte, err := protojson.Marshal(execution)
-	if err == nil {
-		updates[string(TaskExecutionKey(task, execution.Id))] = executionByte
+	var executionByte []byte
+	{
+		// Prefer deterministic marshal with unpopulated fields to avoid nil-related issues
+		mo := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
+		b, mErr := mo.Marshal(execution)
+		if mErr != nil {
+			// Fallback to default marshal
+			if x.logger != nil {
+				x.logger.Error("Executor: protojson.MarshalOptions failed, falling back", "error", mErr)
+			}
+			b, mErr = protojson.Marshal(execution)
+		}
+		if mErr == nil {
+			executionByte = b
+			key := string(TaskExecutionKey(task, execution.Id))
+			updates[key] = executionByte
+			if x.logger != nil {
+				x.logger.Info("Executor: persisting execution", "task_id", task.Id, "execution_id", execution.Id, "key", key)
+			}
+		} else if x.logger != nil {
+			x.logger.Error("Executor: failed to serialize execution for persistence", "task_id", task.Id, "execution_id", execution.Id, "error", mErr)
+		}
 	}
 
 	if err = x.db.BatchWrite(updates); err != nil {
@@ -437,4 +460,86 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	return execution, nil
+}
+
+// sanitizeExecutionForPersistence walks execution steps and replaces any NaN/Inf float
+// occurrences inside step output/config/metadata with safe JSON values (nil or 0).
+func sanitizeExecutionForPersistence(exec *avsproto.Execution) {
+	if exec == nil || len(exec.Steps) == 0 {
+		return
+	}
+	for _, step := range exec.Steps {
+		if step == nil {
+			continue
+		}
+		// Sanitize Config value
+		if step.Config != nil {
+			step.Config = sanitizeProtoValue(step.Config)
+		}
+		// Sanitize known Output oneofs by converting to map and cleaning numeric values
+		// ManualTrigger
+		if out := step.GetManualTrigger(); out != nil && out.Data != nil {
+			out.Data = sanitizeProtoValue(out.Data)
+		}
+		// FixedTime/Cron/Block/Event triggers may carry numeric maps; they typically don't include floats, skip
+		if out := step.GetRestApi(); out != nil && out.Data != nil {
+			out.Data = sanitizeProtoValue(out.Data)
+		}
+		if out := step.GetCustomCode(); out != nil && out.Data != nil {
+			out.Data = sanitizeProtoValue(out.Data)
+		}
+		if out := step.GetContractRead(); out != nil && out.Data != nil {
+			out.Data = sanitizeProtoValue(out.Data)
+		}
+		if out := step.GetContractWrite(); out != nil && out.Data != nil {
+			out.Data = sanitizeProtoValue(out.Data)
+		}
+		if out := step.GetEthTransfer(); out != nil && out.Data != nil {
+			out.Data = sanitizeProtoValue(out.Data)
+		}
+		if out := step.GetGraphql(); out != nil && out.Data != nil {
+			out.Data = sanitizeProtoValue(out.Data)
+		}
+	}
+}
+
+// sanitizeProtoValue returns a new *structpb.Value with any NaN/Inf replaced.
+func sanitizeProtoValue(v *structpb.Value) *structpb.Value {
+	if v == nil {
+		return nil
+	}
+	iface := v.AsInterface()
+	clean := sanitizeInterface(iface)
+	pb, err := structpb.NewValue(clean)
+	if err != nil {
+		// As a last resort, return null
+		nullVal, _ := structpb.NewValue(nil)
+		return nullVal
+	}
+	return pb
+}
+
+// sanitizeInterface recursively replaces NaN/Inf with safe values.
+func sanitizeInterface(x interface{}) interface{} {
+	switch t := x.(type) {
+	case float64:
+		if math.IsNaN(t) || math.IsInf(t, 0) {
+			return 0
+		}
+		return t
+	case map[string]interface{}:
+		m := make(map[string]interface{}, len(t))
+		for k, v := range t {
+			m[k] = sanitizeInterface(v)
+		}
+		return m
+	case []interface{}:
+		s := make([]interface{}, len(t))
+		for i, v := range t {
+			s[i] = sanitizeInterface(v)
+		}
+		return s
+	default:
+		return x
+	}
 }

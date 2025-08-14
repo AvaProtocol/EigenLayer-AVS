@@ -247,6 +247,10 @@ type VM struct {
 	smartWalletConfig *config.SmartWalletConfig
 	logger            sdklogging.Logger
 	db                storage.Storage
+	// IsSimulation indicates whether this VM is executing in a simulation context
+	// (SimulateTask or RunNodeImmediately). In simulation, write operations must not
+	// send real transactions and should use Tenderly or mock paths instead.
+	IsSimulation bool
 }
 
 func NewVM() *VM {
@@ -263,6 +267,12 @@ func NewVM() *VM {
 	for key, value := range envVars {
 		v.vars[key] = value
 	}
+	return v
+}
+
+// SetSimulation sets whether this VM is executing in simulation context.
+func (v *VM) SetSimulation(isSimulation bool) *VM {
+	v.IsSimulation = isSimulation
 	return v
 }
 
@@ -892,141 +902,135 @@ func (v *VM) Run() error {
 		return nil
 	}
 
-	currentStep := v.plans[v.entrypoint]
-	v.mu.Unlock() // Unlock before starting loop
+	v.mu.Unlock()
 
-	for currentStep != nil {
-		var node *avsproto.TaskNode
-		var ok bool
-		var stepToExecute *Step // Need a copy for potential modification if jump occurs
+	// Use a Kahn-style scheduler to respect DAG dependencies with parallel forks and join-only release
+	return v.runKahnScheduler()
+}
 
-		v.mu.Lock() // Lock for accessing TaskNodes and plans
-		stepToExecute = currentStep
-		node, ok = v.TaskNodes[stepToExecute.NodeID]
+// runKahnScheduler executes the task graph using Kahn's algorithm with parallel execution of ready nodes.
+// A node becomes ready only when all of its predecessors have completed (success or failure).
+func (v *VM) runKahnScheduler() error {
+	// Build adjacency and predecessor counts from edges, skipping branch condition conceptual nodes
+	adj := make(map[string][]string)
+	predCount := make(map[string]int)
+	nodes := make(map[string]bool)
 
-		v.mu.Unlock()
-
-		if !ok {
-			// This can happen if a branch condition ID is in currentStep.NodeID
-			// but it doesn't map directly to a TaskNode (it's a conceptual step).
-			// The actual jump should have been resolved by executeNode (branch).
-			// If we reach here with a non-TaskNode ID, it's likely a conceptual step like "branch1.a1"
-			// or a trigger that should immediately proceed to its Next nodes.
-			v.mu.Lock()
-			if len(stepToExecute.Next) == 0 {
-				currentStep = nil // End of this path
-			} else if len(stepToExecute.Next) == 1 {
-				// Single next step - normal sequential execution
-				currentStep = v.plans[stepToExecute.Next[0]]
-			} else {
-				// Multiple next steps - queue all for execution in the main loop
-				// This handles cases like triggers that fan out to multiple nodes
-				if v.logger != nil {
-					v.logger.Info("🔄 Processing multiple next steps", "count", len(stepToExecute.Next), "steps", stepToExecute.Next)
-				}
-
-				// Create a simple queue of steps to execute
-				stepQueue := make([]*Step, 0, len(stepToExecute.Next))
-				for _, nextStepID := range stepToExecute.Next {
-					if nextStep, exists := v.plans[nextStepID]; exists {
-						stepQueue = append(stepQueue, nextStep)
-					}
-				}
-
-				// Process all steps in the queue sequentially
-				for i, step := range stepQueue {
-					if v.logger != nil {
-						v.logger.Info("🔄 Processing queued step", "step", step.NodeID, "index", i+1, "total", len(stepQueue))
-					}
-
-					// Set current step and let the main loop process it
-					if i == 0 {
-						// First step becomes the current step for this iteration
-						currentStep = step
-					} else {
-						// For additional steps, we need to process them immediately
-						// since the main loop will only process currentStep
-						if node, nodeExists := v.TaskNodes[step.NodeID]; nodeExists {
-							v.mu.Unlock() // Unlock before calling executeNode to avoid deadlock
-							if v.logger != nil {
-								v.logger.Info("🔄 Executing queued node", "nodeID", step.NodeID)
-							}
-							_, err := v.executeNode(node)
-							if err != nil && v.logger != nil {
-								v.logger.Error("🔄 Error executing queued node", "nodeID", step.NodeID, "error", err)
-							} else if v.logger != nil {
-								v.logger.Info("🔄 Successfully executed queued node", "nodeID", step.NodeID)
-							}
-							v.mu.Lock() // Re-lock for the next iteration
-						}
-					}
-				}
-
-				if v.logger != nil {
-					v.logger.Info("🔄 Completed processing all queued steps", "processedCount", len(stepQueue))
-				}
-			}
-			v.mu.Unlock()
-			continue
-		}
-
-		jump, err := v.executeNode(node) // executeNode calls sub-processors which should use AddVar for VM state changes
-
-		if err != nil {
-			// Instead of aborting on first error, we now continue execution
-			// The failed step should already be logged by executeNode/runXXX methods
-			// Log the error but continue to next step
-			if v.logger != nil {
-				errorMsg := err.Error()
-				// Use regex to remove stack-trace lines for cleaner logging (common in JS errors)
-				stackTraceRegex := regexp.MustCompile(`(?m)^\s*at .*$`)
-				errorMsg = stackTraceRegex.ReplaceAllString(errorMsg, "")
-				// Clean up any extra whitespace left behind
-				errorMsg = strings.TrimSpace(errorMsg)
-
-				// Categorize errors to avoid unnecessary stack traces for expected validation errors
-				if isExpectedValidationError(err) {
-					// Expected validation errors - log at WARN level without stack traces
-					v.logger.Warn("node execution failed, continuing execution", "nodeID", node.Id, "error", errorMsg)
-				} else {
-					// Unexpected system errors - log at ERROR level without stack traces for cleaner output
-					v.logger.Error("node execution failed, continuing execution", "nodeID", node.Id, "error", errorMsg)
-				}
-			}
-
-			// Continue to next step in sequence (don't follow jump since this node failed)
-			v.mu.Lock()
-			if len(stepToExecute.Next) == 0 {
-				currentStep = nil // End of this path
-			} else {
-				currentStep = v.plans[stepToExecute.Next[0]]
-			}
-			v.mu.Unlock()
-			continue
-		}
-
-		v.mu.Lock()      // Lock for plan navigation
-		if jump != nil { // A jump occurred (e.g. from a branch)
-			currentStep = jump
-		} else { // No jump, proceed to next in sequence
-			if len(stepToExecute.Next) == 0 {
-				currentStep = nil // End of this path
-			} else if len(stepToExecute.Next) == 1 {
-				// Single next step - normal sequential execution
-				currentStep = v.plans[stepToExecute.Next[0]]
-			} else {
-				// Multiple next steps - execute all sequentially
-				// This handles cases like triggers that fan out to multiple nodes
-				for _, nextStepID := range stepToExecute.Next {
-					if nextStep, exists := v.plans[nextStepID]; exists {
-						v.executeSequentialPath(nextStep)
-					}
-				}
-				currentStep = nil // End execution after all paths complete
-			}
-		}
-		v.mu.Unlock()
+	v.mu.Lock()
+	for id := range v.TaskNodes {
+		nodes[id] = true
+		predCount[id] = 0
 	}
+	trigger := v.task.Trigger
+	edges := v.task.Edges
+	v.mu.Unlock()
+
+	for _, e := range edges {
+		if strings.Contains(e.Source, ".") { // skip branch condition edges here
+			continue
+		}
+		// Validate targets exist
+		v.mu.Lock()
+		_, srcOK := v.TaskNodes[e.Source]
+		_, tgtOK := v.TaskNodes[e.Target]
+		v.mu.Unlock()
+		if !srcOK && (trigger == nil || e.Source != trigger.Id) {
+			continue
+		}
+		if !tgtOK {
+			continue
+		}
+		adj[e.Source] = append(adj[e.Source], e.Target)
+		// Count predecessor if source is a real task node (trigger handled later)
+		if srcOK {
+			predCount[e.Target]++
+		}
+	}
+
+	// Initial ready set
+	ready := make(chan string, len(nodes))
+	scheduled := make(map[string]bool)
+	var total int
+	for _ = range nodes {
+		total++
+	}
+
+	// If trigger exists, its direct targets are effectively reduced by 1 predecessor
+	if trigger != nil && trigger.Id != "" {
+		for _, e := range edges {
+			if e.Source == trigger.Id {
+				if _, exists := predCount[e.Target]; exists {
+					if predCount[e.Target] > 0 {
+						predCount[e.Target]--
+					}
+				}
+			}
+		}
+	}
+
+	for nodeID, c := range predCount {
+		if c == 0 {
+			ready <- nodeID
+			scheduled[nodeID] = true
+		}
+	}
+
+	var processed int64
+	var mu sync.Mutex
+	workers := len(nodes)
+	if workers > 16 {
+		workers = 16
+	}
+	var wg sync.WaitGroup
+	wg.Add(workers)
+
+	worker := func() {
+		defer wg.Done()
+		for id := range ready {
+			// Execute node
+			v.mu.Lock()
+			node := v.TaskNodes[id]
+			v.mu.Unlock()
+			if node != nil {
+				_, _ = v.executeNode(node) // errors logged internally; treated as completion
+			}
+
+			// On completion, decrement successors
+			mu.Lock()
+			for _, succ := range adj[id] {
+				if _, exists := predCount[succ]; exists {
+					predCount[succ]--
+					if predCount[succ] == 0 && !scheduled[succ] {
+						ready <- succ
+						scheduled[succ] = true
+					}
+				}
+			}
+			processed++
+			mu.Unlock()
+		}
+	}
+
+	for i := 0; i < workers; i++ {
+		go worker()
+	}
+
+	// Close the ready channel when all nodes have been scheduled and processed
+	go func() {
+		// Busy-wait lightly; for a robust solution, track enqueued vs completed counts
+		for {
+			mu.Lock()
+			done := processed >= int64(total)
+			mu.Unlock()
+			if done {
+				close(ready)
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	wg.Wait()
 	return nil
 }
 
@@ -1364,13 +1368,28 @@ func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (
 
 	if v.smartWalletConfig != nil {
 		v.logger.Info("🔍 VM DEBUG - Smart wallet config details",
-			"enable_real_transactions", v.smartWalletConfig.EnableRealTransactions,
 			"bundler_url", v.smartWalletConfig.BundlerURL,
 			"factory_address", v.smartWalletConfig.FactoryAddress,
 			"entrypoint_address", v.smartWalletConfig.EntrypointAddress,
 			"eth_rpc_url", v.smartWalletConfig.EthRpcUrl)
 	} else {
 		v.logger.Warn("⚠️ VM DEBUG - Smart wallet config is NIL in VM!")
+	}
+
+	// For contract write, extract and set aa_sender from workflowContext.runner if available
+	if wfCtxIface, ok := v.vars[WorkflowContextVarName]; ok {
+		if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
+			if runnerIface, ok := wfCtx["runner"]; ok {
+				if runnerStr, ok := runnerIface.(string); ok && runnerStr != "" && common.IsHexAddress(runnerStr) {
+					v.AddVar("aa_sender", runnerStr)
+					if v.logger != nil {
+						v.logger.Info("🔄 VM DEBUG - Set aa_sender from workflowContext.runner",
+							"runner", runnerStr,
+							"owner", v.TaskOwner.Hex())
+					}
+				}
+			}
+		}
 	}
 
 	processor := NewContractWriteProcessor(v, rpcClient, v.smartWalletConfig, v.TaskOwner)
@@ -2064,6 +2083,19 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 	tempVM.db = v.db
 	tempVM.secrets = v.secrets // Inherit secrets
 	tempVM.TaskID = v.TaskID   // Inherit original TaskID for logging context
+	// Propagate simulation mode and task owner for correct execution behavior
+	// FORCE simulation for RunNodeWithInputs - it should NEVER execute real transactions
+	tempVM.IsSimulation = true // Force simulation for RunNodeWithInputs
+	tempVM.TaskOwner = v.TaskOwner
+
+	// CRITICAL DEBUG: Log simulation flag propagation
+	if v.logger != nil {
+		v.logger.Error("🔧 RunNodeWithInputs CRITICAL DEBUG - VM simulation flag",
+			"original_vm_is_simulation", v.IsSimulation,
+			"temp_vm_is_simulation", tempVM.IsSimulation,
+			"forced_simulation", true,
+			"node_type", node.Type.String())
+	}
 
 	tempVM.mu.Lock()
 	tempVM.TaskNodes[node.Id] = node // Add the single node to its map

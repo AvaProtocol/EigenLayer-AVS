@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -10,6 +11,13 @@ import (
 )
 
 func TestETHTransferTaskIntegration(t *testing.T) {
+	// Skip in CI or when external Sepolia endpoints not configured
+	if os.Getenv("RUN_SEPOLIA_E2E") == "" {
+		t.Skip("Skipping TestETHTransferTaskIntegration: RUN_SEPOLIA_E2E not set")
+	}
+	if os.Getenv("SEPOLIA_BUNDLER_RPC") == "" || os.Getenv("SEPOLIA_RPC") == "" {
+		t.Skip("Skipping TestETHTransferTaskIntegration: SEPOLIA_BUNDLER_RPC/SEPOLIA_RPC not set")
+	}
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 

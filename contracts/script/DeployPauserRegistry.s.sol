@@ -1,4 +1,4 @@
-pragma solidity ^0.8.25;
+pragma solidity ^0.8.12;
 
 import "forge-std/Script.sol";
 import "@eigenlayer-core/contracts/permissions/PauserRegistry.sol";

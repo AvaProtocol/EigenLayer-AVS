@@ -25,20 +25,10 @@ import (
 
 // init loads environment variables from .env file for testing
 func init() {
-	// Try multiple possible paths for .env file
-	paths := []string{
-		".env",          // Current directory
-		"../.env",       // One level up
-		"../../.env",    // Two levels up (from core/testutil)
-		"../../../.env", // Three levels up
-	}
-
-	for _, path := range paths {
-		if err := godotenv.Load(path); err == nil {
-			// Successfully loaded .env file
-			break
-		}
-	}
+	// Load only from repo root files without fuzzy search.
+	// First load .env if present (non-fatal), then overlay .env.test for test secrets.
+	_ = godotenv.Load(".env")
+	_ = godotenv.Overload(".env.test")
 }
 
 const (
@@ -52,21 +42,31 @@ type TriggerData struct {
 }
 
 func GetTestRPCURL() string {
-	v := os.Getenv("RPC_URL")
-	if v == "" {
-		return "https://sepolia.drpc.org"
+	if v := os.Getenv("SEPOLIA_RPC"); v != "" {
+		return v
 	}
-
-	return v
+	return "https://sepolia.drpc.org"
 }
 
 func GetTestWsRPCURL() string {
-	v := os.Getenv("WS_RPC_URL")
-	if v == "" {
-		return "wss://sepolia.drpc.org"
+	if v := os.Getenv("SEPOLIA_WS"); v != "" {
+		return v
 	}
+	// Derive from HTTP RPC
+	if http := GetTestRPCURL(); strings.HasPrefix(http, "https://") {
+		return strings.Replace(http, "https://", "wss://", 1)
+	}
+	return "wss://sepolia.drpc.org"
+}
 
-	return v
+// firstNonEmpty returns the first non-empty string in the provided list.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func GetRpcClient() *ethclient.Client {
@@ -326,15 +326,38 @@ func JsFastTask() *avsproto.CreateTaskReq {
 }
 
 func GetTestSmartWalletConfig() *config.SmartWalletConfig {
-	controllerPrivateKey, err := crypto.HexToECDSA(os.Getenv("CONTROLLER_PRIVATE_KEY"))
+	controllerEnv := os.Getenv("CONTROLLER_PRIVATE_KEY")
+	// In CI or local without key, return a minimal config that avoids panicking; tests that need
+	// real ERC-4337 will be gated and skipped.
+	if controllerEnv == "" {
+		return &config.SmartWalletConfig{
+			EthRpcUrl:          os.Getenv("SEPOLIA_RPC"),
+			BundlerURL:         os.Getenv("SEPOLIA_BUNDLER_RPC"),
+			EthWsUrl:           os.Getenv("SEPOLIA_WS"),
+			FactoryAddress:     common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
+			EntrypointAddress:  common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+			PaymasterAddress:   common.HexToAddress(paymasterAddress),
+			WhitelistAddresses: []common.Address{},
+		}
+	}
+	controllerPrivateKey, err := crypto.HexToECDSA(controllerEnv)
 	if err != nil {
-		panic("Invalid controller private key from env. Ensure CONTROLLER_PRIVATE_KEY is ECDSA key of the controller wallet")
+		// Fallback to non-panicking minimal config
+		return &config.SmartWalletConfig{
+			EthRpcUrl:          os.Getenv("SEPOLIA_RPC"),
+			BundlerURL:         os.Getenv("SEPOLIA_BUNDLER_RPC"),
+			EthWsUrl:           os.Getenv("SEPOLIA_WS"),
+			FactoryAddress:     common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
+			EntrypointAddress:  common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+			PaymasterAddress:   common.HexToAddress(paymasterAddress),
+			WhitelistAddresses: []common.Address{},
+		}
 	}
 
 	return &config.SmartWalletConfig{
-		EthRpcUrl:  os.Getenv("RPC_URL"),
-		BundlerURL: os.Getenv("BUNDLER_RPC"),
-		EthWsUrl:   strings.Replace(os.Getenv("RPC_URL"), "https://", "wss://", 1),
+		EthRpcUrl:  os.Getenv("SEPOLIA_RPC"),
+		BundlerURL: os.Getenv("SEPOLIA_BUNDLER_RPC"),
+		EthWsUrl:   os.Getenv("SEPOLIA_WS"),
 		//FactoryAddress:       common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
 		FactoryAddress:       common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
 		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
@@ -347,15 +370,35 @@ func GetTestSmartWalletConfig() *config.SmartWalletConfig {
 // Get smart wallet config for base
 // Using base sepolia to run test because it's very cheap and fast
 func GetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
-	controllerPrivateKey, err := crypto.HexToECDSA(os.Getenv("CONTROLLER_PRIVATE_KEY"))
+	controllerEnv := os.Getenv("CONTROLLER_PRIVATE_KEY")
+	if controllerEnv == "" {
+		return &config.SmartWalletConfig{
+			EthRpcUrl:          firstNonEmpty(os.Getenv("BASE_SEPOLIA_RPC"), os.Getenv("SEPOLIA_RPC")),
+			BundlerURL:         firstNonEmpty(os.Getenv("BASE_SEPOLIA_BUNDLER_RPC"), os.Getenv("SEPOLIA_BUNDLER_RPC")),
+			EthWsUrl:           strings.Replace(firstNonEmpty(os.Getenv("BASE_SEPOLIA_RPC"), os.Getenv("SEPOLIA_RPC")), "https://", "wss://", 1),
+			FactoryAddress:     common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
+			EntrypointAddress:  common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+			PaymasterAddress:   common.HexToAddress(paymasterAddress),
+			WhitelistAddresses: []common.Address{},
+		}
+	}
+	controllerPrivateKey, err := crypto.HexToECDSA(controllerEnv)
 	if err != nil {
-		panic("Invalid controller private key from env. Ensure CONTROLLER_PRIVATE_KEY is ECDSA key of the controller wallet")
+		return &config.SmartWalletConfig{
+			EthRpcUrl:          firstNonEmpty(os.Getenv("BASE_SEPOLIA_RPC"), os.Getenv("SEPOLIA_RPC")),
+			BundlerURL:         firstNonEmpty(os.Getenv("BASE_SEPOLIA_BUNDLER_RPC"), os.Getenv("SEPOLIA_BUNDLER_RPC")),
+			EthWsUrl:           strings.Replace(firstNonEmpty(os.Getenv("BASE_SEPOLIA_RPC"), os.Getenv("SEPOLIA_RPC")), "https://", "wss://", 1),
+			FactoryAddress:     common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
+			EntrypointAddress:  common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
+			PaymasterAddress:   common.HexToAddress(paymasterAddress),
+			WhitelistAddresses: []common.Address{},
+		}
 	}
 
 	return &config.SmartWalletConfig{
-		EthRpcUrl:            os.Getenv("BASE_SEPOLIA_RPC_URL"),
+		EthRpcUrl:            os.Getenv("BASE_SEPOLIA_RPC"),
 		BundlerURL:           os.Getenv("BASE_SEPOLIA_BUNDLER_RPC"),
-		EthWsUrl:             strings.Replace(os.Getenv("BASE_SEPOLIA_RPC_URL"), "https://", "wss://", 1),
+		EthWsUrl:             strings.Replace(os.Getenv("BASE_SEPOLIA_RPC"), "https://", "wss://", 1),
 		FactoryAddress:       common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
 		EntrypointAddress:    common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
 		ControllerPrivateKey: controllerPrivateKey,

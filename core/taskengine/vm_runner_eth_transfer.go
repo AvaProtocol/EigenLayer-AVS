@@ -77,8 +77,8 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 		return executionLog, err
 	}
 
-	// Check if real transactions are enabled
-	if p.smartWalletConfig != nil && p.smartWalletConfig.EnableRealTransactions {
+	// Real transactions only when not in simulation context
+	if p.smartWalletConfig != nil && !p.vm.IsSimulation {
 		p.vm.logger.Info("🚀 ETH TRANSFER DEBUG - Using real UserOp transaction path",
 			"destination", destination,
 			"amount", amountStr)
@@ -86,15 +86,18 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 		return p.executeRealETHTransfer(stepID, destination, amountStr, executionLog)
 	}
 
-	// FALLBACK TO SIMULATION
+	// Simulation path for ETH transfers (SimulateTask / RunNodeImmediately)
 	p.vm.logger.Info("🔮 ETH TRANSFER DEBUG - Using simulation path",
 		"destination", destination,
 		"amount", amountStr,
 		"reason", func() string {
+			if p.vm.IsSimulation {
+				return "vm_is_simulation"
+			}
 			if p.smartWalletConfig == nil {
 				return "smart_wallet_config_is_nil"
 			}
-			return "enable_real_transactions_is_false"
+			return "unknown"
 		}())
 
 	// Simulate transaction hash

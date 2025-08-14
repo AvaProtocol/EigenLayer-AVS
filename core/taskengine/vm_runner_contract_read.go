@@ -626,18 +626,28 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 
 	// Use rawResultsForMetadata for metadata (raw, unformatted data)
 	for i, methodResult := range results {
+		// Ensure method name is populated to avoid empty keys in outputs
+		effectiveMethodName := methodResult.MethodName
+		if effectiveMethodName == "" {
+			if i < len(config.MethodCalls) && config.MethodCalls[i] != nil && config.MethodCalls[i].MethodName != "" {
+				effectiveMethodName = config.MethodCalls[i].MethodName
+			} else {
+				effectiveMethodName = fmt.Sprintf("method_%d", i+1)
+			}
+			methodResult.MethodName = effectiveMethodName
+		}
 		// Get the corresponding raw result for metadata
 		rawResult := rawResultsForMetadata[i]
 
 		// Create metadata entry (full backend response)
 		metadataEntry := map[string]interface{}{
-			"methodName": methodResult.MethodName,
+			"methodName": effectiveMethodName,
 			"success":    methodResult.Success,
 			"error":      methodResult.Error,
 		}
 		// Add methodABI to metadata if available
 		if len(parsedABI.Methods) > 0 {
-			if method, exists := parsedABI.Methods[methodResult.MethodName]; exists {
+			if method, exists := parsedABI.Methods[effectiveMethodName]; exists {
 				if methodABI := r.extractMethodABI(&method); methodABI != nil {
 					metadataEntry["methodABI"] = methodABI
 				} else {
@@ -669,14 +679,14 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		resultsArray = append(resultsArray, metadataEntry)
 
 		if r.vm.logger != nil {
-			r.vm.logger.Debug("Added metadata entry", "methodName", methodResult.MethodName, "metadataEntry", metadataEntry)
+			r.vm.logger.Debug("Added metadata entry", "methodName", effectiveMethodName, "metadataEntry", metadataEntry)
 		}
 
 		// Add to combined clean data object (user-friendly format - with decimal formatting applied)
 		if len(methodResult.Data) > 0 {
 			if len(methodResult.Data) == 1 {
 				// Single output: add directly as {methodName: value}
-				combinedCleanData[methodResult.MethodName] = methodResult.Data[0].Value
+				combinedCleanData[effectiveMethodName] = methodResult.Data[0].Value
 			} else {
 				// Multiple outputs: create a map of field names to values
 				valueMap := make(map[string]interface{})
@@ -687,15 +697,15 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 				}
 
 				// Add as {methodName: valueMap}
-				combinedCleanData[methodResult.MethodName] = valueMap
+				combinedCleanData[effectiveMethodName] = valueMap
 			}
 		} else {
 			// No data, set to nil
-			combinedCleanData[methodResult.MethodName] = nil
+			combinedCleanData[effectiveMethodName] = nil
 		}
 
 		if r.vm.logger != nil {
-			r.vm.logger.Debug("Added to combined clean data", "methodName", methodResult.MethodName, "currentCombinedData", combinedCleanData)
+			r.vm.logger.Debug("Added to combined clean data", "methodName", effectiveMethodName, "currentCombinedData", combinedCleanData)
 		}
 	}
 
@@ -748,8 +758,9 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		r.vm.logger.Debug("Contract read raw fields metadata", "metadata", allRawFieldsMetadata)
 	}
 
-	// Use shared function to finalize execution step with success
-	finalizeExecutionStep(s, true, "", log.String())
+	// Determine step success from method results: any method with Success == false marks step as failed
+	stepSuccess, stepErrorMsg := computeReadStepSuccess(results)
+	finalizeExecutionStep(s, stepSuccess, stepErrorMsg, log.String())
 
 	return s, nil
 }

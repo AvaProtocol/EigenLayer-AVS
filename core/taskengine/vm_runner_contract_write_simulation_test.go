@@ -1,10 +1,13 @@
 package taskengine
 
 import (
+	"math/big"
+	"os"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
@@ -13,6 +16,13 @@ import (
 )
 
 func TestContractWriteTenderlySimulation(t *testing.T) {
+	// Run when Tenderly Gateway is configured; skip only if missing API key/URL
+	if os.Getenv("TENDERLY_API_KEY") == "" {
+		t.Skip("Skipping Tenderly simulation: TENDERLY_API_KEY not set")
+	}
+	if os.Getenv("FACTORY_ADDRESS") == "" {
+		t.Skip("Skipping Tenderly simulation: FACTORY_ADDRESS not set (needed to resolve salt:0 wallet)")
+	}
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
@@ -70,7 +80,22 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 			},
 		}
 
-		result, err := engine.RunNodeImmediately("contractWrite", nodeConfig, map[string]interface{}{})
+		// Seed a wallet in DB to make ListWallets(owner) deterministic in CI
+		// Use distinct EOA (owner) and smart wallet (runner)
+		ownerEOA := common.HexToAddress("0xD7050816337a3f8f690F8083B5Ff8019D50c0E50")
+		runnerAddr := common.HexToAddress("0x5Df343de7d99fd64b2479189692C1dAb8f46184a")
+		factory := testutil.GetAggregatorConfig().SmartWallet.FactoryAddress
+		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: &runnerAddr, Factory: &factory, Salt: big.NewInt(0)})
+
+		// Provide minimal workflowContext to satisfy backend validation
+		triggerData := map[string]interface{}{
+			"workflowContext": map[string]interface{}{
+				"eoaAddress": ownerEOA.Hex(),
+				"runner":     runnerAddr.Hex(),
+			},
+		}
+
+		result, err := engine.RunNodeImmediately("contractWrite", nodeConfig, triggerData)
 
 		require.NoError(t, err, "RunNodeImmediately should succeed with Tenderly simulation")
 		require.NotNil(t, result, "Should get simulation result")
