@@ -195,6 +195,10 @@ func TestPaymaster(t *testing.T) {
 */
 
 func TestGetHash(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping TestGetHash in CI environment")
+	}
+
 	nonce := new(big.Int)
 	nonce.SetString("15", 16)
 

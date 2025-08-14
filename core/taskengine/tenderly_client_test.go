@@ -616,13 +616,19 @@ func TestTenderlyGateway_RealRPCCalls_Integration(t *testing.T) {
 			fmt.Printf("Request ID: %d\n", response.Id)
 			// response.Result is interface{}; avoid len() on interface to satisfy vet.
 			switch v := response.Result.(type) {
+			case nil:
+				fmt.Printf("Result is nil\n")
 			case string:
 				fmt.Printf("Result Length: %d bytes\n", len(v))
 				fmt.Printf("Raw Result: %s\n", v)
 			default:
-				rb, _ := json.Marshal(v)
-				fmt.Printf("Result Length: %d bytes\n", len(rb))
-				fmt.Printf("Raw Result: %s\n", string(rb))
+				rb, err := json.Marshal(v)
+				if err != nil {
+					fmt.Printf("Result could not be marshaled to JSON: %v\n", err)
+				} else {
+					fmt.Printf("Result Length: %d bytes\n", len(rb))
+					fmt.Printf("Raw Result: %s\n", string(rb))
+				}
 			}
 
 			if response.Error != nil {
