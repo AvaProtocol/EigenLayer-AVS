@@ -389,6 +389,10 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 	// Create TenderlyClient with real API key
 	tenderlyClient := NewTenderlyClient(logger)
 
+	if os.Getenv("TENDERLY_API_KEY") == "" {
+		t.Skip("Skipping Tenderly end-to-end integration: TENDERLY_API_KEY not set")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -403,10 +407,10 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 			},
 		}
 
-		fmt.Printf("\n🔮 === TENDERLY END-TO-END TEST: Basic AnswerUpdated Simulation ===\n")
-		fmt.Printf("📍 Contract: %s (Sepolia ETH/USD)\n", SEPOLIA_ETH_USD_FEED)
-		fmt.Printf("🔍 Event: AnswerUpdated\n")
-		fmt.Printf("⚡ Mode: Real Tenderly API call\n\n")
+		fmt.Printf("\n=== TENDERLY END-TO-END TEST: Basic AnswerUpdated Simulation ===\n")
+		fmt.Printf("Contract: %s (Sepolia ETH/USD)\n", SEPOLIA_ETH_USD_FEED)
+		fmt.Printf("Event: AnswerUpdated\n")
+		fmt.Printf("Mode: Real Tenderly API call\n\n")
 
 		// Execute simulation
 		simulatedLog, err := tenderlyClient.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
@@ -419,7 +423,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 		assert.Len(t, simulatedLog.Topics, 3, "AnswerUpdated should have 3 topics")
 		assert.Equal(t, ANSWER_UPDATED_SIG, simulatedLog.Topics[0].Hex(), "First topic should be AnswerUpdated signature")
 
-		fmt.Printf("✅ Simulation successful!\n")
+		fmt.Printf("Simulation successful.\n")
 		printSimulatedLog(simulatedLog)
 	})
 
@@ -442,7 +446,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 			},
 		}
 
-		fmt.Printf("\n🎯 === CONDITIONAL SIMULATION: Price > $2000 ===\n")
+		fmt.Printf("\n=== CONDITIONAL SIMULATION: Price > $2000 ===\n")
 
 		simulatedLog, err := tenderlyClient.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
 
@@ -451,18 +455,18 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 
 		// Validate that the simulated price satisfies the condition
 		priceHex := simulatedLog.Topics[1].Hex()
-		fmt.Printf("🏷️  Simulated price (hex): %s\n", priceHex)
+		fmt.Printf("Simulated price (hex): %s\n", priceHex)
 
 		// The price should be > $2000 (200000000000 in 8-decimal format)
 		assert.Equal(t, SEPOLIA_ETH_USD_FEED, simulatedLog.Address.Hex())
 
-		fmt.Printf("✅ Conditional simulation successful!\n")
+		fmt.Printf("Conditional simulation successful.\n")
 		printSimulatedLog(simulatedLog)
 	})
 
 	t.Run("Real Integration with Engine", func(t *testing.T) {
 		// Test the full integration through the Engine
-		fmt.Printf("\n🚀 === FULL ENGINE INTEGRATION TEST ===\n")
+		fmt.Printf("\n=== FULL ENGINE INTEGRATION TEST ===\n")
 
 		// Create test engine
 		db := testutil.TestMustDB()
@@ -500,8 +504,8 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 		// The result can be nil if conditions are not met or simulation fails
 		// This is expected behavior for Tenderly simulation
 		if result == nil {
-			fmt.Printf("⚠️  No event simulated (conditions not met or simulation failed)\n")
-			fmt.Printf("💡 This is expected behavior when:\n")
+			fmt.Printf("No event simulated (conditions not met or simulation failed)\n")
+			fmt.Printf("This can happen when:\n")
 			fmt.Printf("   - Current price doesn't meet the condition\n")
 			fmt.Printf("   - Tenderly API is unavailable\n")
 			fmt.Printf("   - Network connectivity issues\n")
@@ -533,7 +537,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 		// Check common fields
 		assert.NotNil(t, result["found"], "Should have 'found' field")
 
-		fmt.Printf("✅ Full engine integration successful!\n")
+		fmt.Printf("Full engine integration successful.\n")
 		printEngineResult(result)
 	})
 }
@@ -543,25 +547,29 @@ func TestTenderlyGateway_RealRPCCalls_Integration(t *testing.T) {
 	logger := testutil.GetLogger()
 	client := NewTenderlyClient(logger)
 
+	if os.Getenv("TENDERLY_API_KEY") == "" {
+		t.Skip("Skipping Tenderly Gateway integration: TENDERLY_API_KEY not set")
+	}
+
 	ctx := context.Background()
 
-	fmt.Printf("\n🌐 === REAL TENDERLY GATEWAY RPC TEST ===\n")
-	fmt.Printf("🔗 Gateway URL: %s\n", client.apiURL)
-	fmt.Printf("🔑 API Key: %s\n", client.apiKey)
+	fmt.Printf("\n=== REAL TENDERLY GATEWAY RPC TEST ===\n")
+	fmt.Printf("Gateway URL: %s\n", client.apiURL)
+	fmt.Printf("API Key: %s\n", client.apiKey)
 
 	// Test 1: Real latestRoundData call to see actual request/response
 	t.Run("Real latestRoundData RPC Call", func(t *testing.T) {
-		fmt.Printf("\n📡 Making real Tenderly Gateway RPC call...\n")
-		fmt.Printf("🎯 Target: %s (Sepolia ETH/USD)\n", SEPOLIA_ETH_USD_FEED)
-		fmt.Printf("🔧 Method: eth_call -> latestRoundData()\n\n")
+		fmt.Printf("\nMaking real Tenderly Gateway RPC call...\n")
+		fmt.Printf("Target: %s (Sepolia ETH/USD)\n", SEPOLIA_ETH_USD_FEED)
+		fmt.Printf("Method: eth_call -> latestRoundData()\n\n")
 
 		roundData, err := client.getRealRoundDataViaTenderly(ctx, SEPOLIA_ETH_USD_FEED, SEPOLIA_CHAIN_ID)
 
 		require.NoError(t, err, "Should successfully call Tenderly Gateway RPC")
 		require.NotNil(t, roundData, "Should get round data")
 
-		fmt.Printf("✅ RPC call successful!\n")
-		fmt.Printf("\n📊 REAL CHAINLINK DATA FROM TENDERLY GATEWAY:\n")
+		fmt.Printf("RPC call successful.\n")
+		fmt.Printf("\nREAL CHAINLINK DATA FROM TENDERLY GATEWAY:\n")
 		fmt.Printf("   Contract: %s\n", SEPOLIA_ETH_USD_FEED)
 		fmt.Printf("   Round ID: %s\n", roundData.RoundId.String())
 		fmt.Printf("   Answer (raw): %s\n", roundData.Answer.String())
@@ -573,7 +581,7 @@ func TestTenderlyGateway_RealRPCCalls_Integration(t *testing.T) {
 
 	// Test 2: Show actual JSON-RPC request/response format
 	t.Run("Direct JSON-RPC Request Analysis", func(t *testing.T) {
-		fmt.Printf("\n🔧 === DIRECT JSON-RPC CALL ANALYSIS ===\n")
+		fmt.Printf("\n=== DIRECT JSON-RPC CALL ANALYSIS ===\n")
 
 		// Create JSON-RPC request
 		rpcRequest := JSONRPCRequest{
@@ -589,7 +597,7 @@ func TestTenderlyGateway_RealRPCCalls_Integration(t *testing.T) {
 			Id: 1,
 		}
 
-		fmt.Printf("📤 JSON-RPC REQUEST:\n")
+		fmt.Printf("JSON-RPC REQUEST:\n")
 		requestJSON, _ := json.MarshalIndent(rpcRequest, "", "  ")
 		fmt.Printf("%s\n\n", string(requestJSON))
 
@@ -603,7 +611,7 @@ func TestTenderlyGateway_RealRPCCalls_Integration(t *testing.T) {
 
 		require.NoError(t, err, "RPC call should succeed")
 
-		fmt.Printf("📥 JSON-RPC RESPONSE:\n")
+		fmt.Printf("JSON-RPC RESPONSE:\n")
 		fmt.Printf("Status Code: %d\n", resp.StatusCode())
 
 		if resp.IsSuccess() {
@@ -632,12 +640,12 @@ func TestTenderlyGateway_RealRPCCalls_Integration(t *testing.T) {
 			}
 
 			if response.Error != nil {
-				fmt.Printf("❌ RPC Error: %s (code: %d)\n", response.Error.Message, response.Error.Code)
+				fmt.Printf("RPC Error: %s (code: %d)\n", response.Error.Message, response.Error.Code)
 			} else {
-				fmt.Printf("✅ Call successful\n")
+				fmt.Printf("Call successful\n")
 			}
 		} else {
-			fmt.Printf("❌ HTTP Error Response: %s\n", resp.String())
+			fmt.Printf("HTTP Error Response: %s\n", resp.String())
 		}
 	})
 
@@ -753,6 +761,9 @@ func BenchmarkTenderlySimulation(b *testing.B) {
 }
 
 func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *testing.T) {
+	if os.Getenv("TENDERLY_API_KEY") == "" {
+		t.Skip("Skipping Tenderly comprehensive integration: TENDERLY_API_KEY not set")
+	}
 
 	logger := testutil.GetLogger()
 	client := NewTenderlyClient(logger)
@@ -761,6 +772,9 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 
 	// First, get the current real price from Tenderly to use in our tests
 	t.Run("GetCurrentPriceData", func(t *testing.T) {
+		if os.Getenv("TENDERLY_API_KEY") == "" {
+			t.Skip("Skipping: TENDERLY_API_KEY not set")
+		}
 		t.Logf("🔗 Using Tenderly Gateway: %s", client.apiURL)
 
 		roundData, err := client.getRealRoundDataViaTenderly(ctx, SEPOLIA_ETH_USD_FEED, SEPOLIA_CHAIN_ID)
@@ -782,6 +796,9 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 
 	// Test 1: Condition that SHOULD match (price > very low threshold)
 	t.Run("ConditionShouldMatch_GreaterThan", func(t *testing.T) {
+		if os.Getenv("TENDERLY_API_KEY") == "" {
+			t.Skip("Skipping: TENDERLY_API_KEY not set")
+		}
 		currentPriceFloat := ctx.Value("currentPriceFloat").(float64)
 
 		// Set threshold much lower than current price to ensure it matches
@@ -805,7 +822,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 			},
 		}
 
-		t.Logf("🎯 TESTING CONDITION THAT SHOULD MATCH:")
+		t.Logf("TESTING CONDITION THAT SHOULD MATCH:")
 		t.Logf("   Current Price: $%.2f", currentPriceFloat)
 		t.Logf("   Condition: price > $%.2f", thresholdFloat)
 		t.Logf("   Expected: MATCH ✅")
@@ -821,13 +838,13 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 		assert.True(t, simulatedPrice.Cmp(big.NewInt(thresholdRaw)) > 0,
 			"Simulated price should be greater than threshold")
 
-		t.Logf("✅ CONDITION MATCHED:")
+		t.Logf("CONDITION MATCHED:")
 		t.Logf("   Simulated Price: $%.2f (raw: %s)", simulatedPriceFloat, simulatedPrice.String())
 		t.Logf("   Threshold: $%.2f (raw: %d)", thresholdFloat, thresholdRaw)
 		t.Logf("   Condition Satisfied: %s > %d ✅", simulatedPrice.String(), thresholdRaw)
 
 		// Show complete raw event structure
-		t.Logf("\n📋 RAW EVENT STRUCTURE:")
+		t.Logf("\nRAW EVENT STRUCTURE:")
 		t.Logf("   Address: %s", simulatedLog.Address.Hex())
 		t.Logf("   Block Number: %d", simulatedLog.BlockNumber)
 		t.Logf("   Transaction Hash: %s", simulatedLog.TxHash.Hex())
@@ -839,6 +856,9 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 
 	// Test 2: Condition that SHOULD NOT match (price > very high threshold)
 	t.Run("ConditionShouldNotMatch_GreaterThan", func(t *testing.T) {
+		if os.Getenv("TENDERLY_API_KEY") == "" {
+			t.Skip("Skipping: TENDERLY_API_KEY not set")
+		}
 		currentPriceFloat := ctx.Value("currentPriceFloat").(float64)
 
 		// Set threshold much higher than current price to test non-matching
@@ -862,7 +882,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 			},
 		}
 
-		t.Logf("🎯 TESTING CONDITION THAT SHOULD NOT MATCH:")
+		t.Logf("TESTING CONDITION THAT SHOULD NOT MATCH:")
 		t.Logf("   Current Price: $%.2f", currentPriceFloat)
 		t.Logf("   Condition: price > $%.2f", thresholdFloat)
 		t.Logf("   Expected: REAL BEHAVIOR - Return real data that doesn't satisfy condition")
@@ -886,10 +906,10 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 		conditionSatisfied := simulatedPrice.Cmp(big.NewInt(thresholdRaw)) > 0
 
 		if conditionSatisfied {
-			t.Logf("⚠️  UNEXPECTED: Real price actually satisfies the high threshold!")
+			t.Logf("UNEXPECTED: Real price actually satisfies the high threshold!")
 			t.Logf("   This means the current ETH price is > $%.2f", thresholdFloat)
 		} else {
-			t.Logf("✅ EXPECTED: Real price does not satisfy the high threshold")
+			t.Logf("EXPECTED: Real price does not satisfy the high threshold")
 			t.Logf("   Real price $%.2f < threshold $%.2f", simulatedPriceFloat, thresholdFloat)
 		}
 
@@ -904,7 +924,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 		assert.True(t, priceDifference < 100.0,
 			"Simulated price should be close to real current price (within $100)")
 
-		t.Logf("\n💡 IMPLEMENTATION NOTE:")
+		t.Logf("\nIMPLEMENTATION NOTE:")
 		t.Logf("   Tenderly simulation returns REAL current price data")
 		t.Logf("   It does NOT generate artificial data to satisfy conditions")
 		t.Logf("   This is more realistic for testing real-world scenarios")
@@ -943,7 +963,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 			},
 		}
 
-		t.Logf("🎯 TESTING MULTIPLE CONDITIONS (RANGE):")
+		t.Logf("TESTING MULTIPLE CONDITIONS (RANGE):")
 		t.Logf("   Current Price: $%.2f", currentPriceFloat)
 		t.Logf("   Condition 1: price > $%.2f", minThreshold)
 		t.Logf("   Condition 2: price < $%.2f", maxThreshold)
@@ -960,7 +980,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 		condition1Met := simulatedPrice.Cmp(big.NewInt(minThresholdRaw)) > 0
 		condition2Met := simulatedPrice.Cmp(big.NewInt(maxThresholdRaw)) < 0
 
-		t.Logf("✅ MULTIPLE CONDITIONS RESULT:")
+		t.Logf("MULTIPLE CONDITIONS RESULT:")
 		t.Logf("   Simulated Price: $%.2f", simulatedPriceFloat)
 		t.Logf("   Condition 1 (> $%.2f): %t", minThreshold, condition1Met)
 		t.Logf("   Condition 2 (< $%.2f): %t", maxThreshold, condition2Met)
@@ -979,7 +999,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 			},
 		}
 
-		t.Logf("🔬 ANALYZING RAW SIMULATION DATA STRUCTURE:")
+		t.Logf("ANALYZING RAW SIMULATION DATA STRUCTURE:")
 
 		simulatedLog, err := client.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
 		require.NoError(t, err)
@@ -991,7 +1011,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 		updatedAtBytes := simulatedLog.Data
 		updatedAt := new(big.Int).SetBytes(updatedAtBytes[len(updatedAtBytes)-32:])
 
-		t.Logf("\n📊 COMPLETE EVENT BREAKDOWN:")
+		t.Logf("\nCOMPLETE EVENT BREAKDOWN:")
 		t.Logf("   === Event Metadata ===")
 		t.Logf("   Contract Address: %s", simulatedLog.Address.Hex())
 		t.Logf("   Block Number: %d", simulatedLog.BlockNumber)
@@ -1077,6 +1097,9 @@ func TestTenderlySimulation_EnhancedConditionHandling_PROPOSAL(t *testing.T) {
 
 // Test the enhanced condition handling behavior
 func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testing.T) {
+	if os.Getenv("TENDERLY_API_KEY") == "" {
+		t.Skip("Skipping enhanced condition handling integration: TENDERLY_API_KEY not set")
+	}
 
 	logger := testutil.GetLogger()
 	client := NewTenderlyClient(logger)
@@ -1542,10 +1565,10 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		t.Logf("   Data: %v", eventData["data"])
 
 		// Print the complete data structure for documentation
-		t.Logf("\n📋 Complete Event Data:")
+		t.Logf("\nComplete Event Data:")
 		eventDataJSON, _ := json.MarshalIndent(eventData, "", "  ")
 		t.Logf("%s", string(eventDataJSON))
-		t.Logf("\n🔍 Complete Metadata:")
+		t.Logf("\nComplete Metadata:")
 		metadataJSON, _ := json.MarshalIndent(metadata, "", "  ")
 		t.Logf("%s", string(metadataJSON))
 	})
@@ -1574,7 +1597,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 			},
 		}
 
-		t.Logf("🎯 Testing Tenderly simulation with conditions")
+		t.Logf("Testing Tenderly simulation with conditions")
 
 		result, err := engine.runEventTriggerImmediately(triggerConfig, map[string]interface{}{})
 
@@ -1594,7 +1617,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		assert.NotNil(t, eventData["blockNumber"], "Should have block number")
 		assert.NotNil(t, eventData["topics"], "Should have topics")
 
-		t.Logf("✅ Condition evaluation successful!")
+		t.Logf("Condition evaluation successful.")
 		t.Logf("   Contract Address: %v", eventData["tokenContract"])
 		t.Logf("   Block Number: %v", eventData["blockNumber"])
 		t.Logf("   Topics: %v", eventData["topics"])
@@ -1624,19 +1647,19 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 			},
 		}
 
-		t.Logf("🔄 Testing Transfer event simulation (may not be supported by Tenderly)")
+		t.Logf("Testing Transfer event simulation (may not be supported by Tenderly)")
 
 		result, err := engine.runEventTriggerImmediately(triggerConfig, map[string]interface{}{})
 
 		if err != nil {
-			t.Logf("⚠️  Transfer simulation failed (expected): %v", err)
-			t.Logf("💡 Note: Tenderly simulation is optimized for Chainlink price feeds")
-			t.Logf("💡 For Transfer events, use historical search mode (simulationMode: false)")
+			t.Logf("Transfer simulation failed (expected): %v", err)
+			t.Logf("Note: Tenderly simulation is optimized for Chainlink price feeds")
+			t.Logf("For Transfer events, use historical search mode (simulationMode: false)")
 			return
 		}
 
 		if result == nil {
-			t.Logf("⚠️  Transfer simulation returned nil (expected for unsupported event types)")
+			t.Logf("Transfer simulation returned nil (expected for unsupported event types)")
 			return
 		}
 
@@ -1827,7 +1850,7 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 	})
 
 	t.Run("CompareWithHistoricalSearch", func(t *testing.T) {
-		t.Logf("🔍 === COMPARISON: SIMULATION vs HISTORICAL SEARCH ===")
+		t.Logf("=== COMPARISON: SIMULATION vs HISTORICAL SEARCH ===")
 
 		// Test historical search (simulationMode: false)
 		historicalConfig := map[string]interface{}{
@@ -1854,8 +1877,8 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		require.NoError(t, err, "Historical search should not error")
 
 		if found, ok := historicalResult["found"].(bool); ok && !found {
-			t.Logf("📊 Historical Search Result: No events found (as expected)")
-			t.Logf("💡 This is why simulation mode is useful for getting sample data!")
+			t.Logf("Historical Search Result: No events found (as expected)")
+			t.Logf("This is why simulation mode is useful for getting sample data!")
 			t.Logf("   - Historical search: searches real blockchain (may find nothing)")
 			t.Logf("   - Simulation mode: always provides sample data structure")
 		} else {

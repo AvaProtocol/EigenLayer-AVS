@@ -562,6 +562,9 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 }
 
 func TestExecutorRunTaskWithBlockTriggerOutputData(t *testing.T) {
+	if os.Getenv("SEPOLIA_BUNDLER_RPC") == "" {
+		t.Skip("Skipping BlockTrigger ETH transfer test: SEPOLIA_BUNDLER_RPC not configured")
+	}
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
