@@ -869,24 +869,63 @@ func (tc *TenderlyClient) GetLatestBaseFee(ctx context.Context) (string, error) 
 // extractLogsFromTenderlyResult tries best-effort extraction of logs from Tenderly simulation payload
 func (tc *TenderlyClient) extractLogsFromTenderlyResult(res interface{}) []map[string]interface{} {
 	toLogs := func(v interface{}) []map[string]interface{} {
-		tc.logger.Error("🔍 toLogs: processing value", "type", fmt.Sprintf("%T", v))
+		// Accept []interface{} and normalize each log entry
 		arr, ok := v.([]interface{})
-		if !ok {
-			tc.logger.Error("🔍 toLogs: value is not []interface{}", "type", fmt.Sprintf("%T", v))
+		if !ok || len(arr) == 0 {
 			return nil
 		}
-		if len(arr) == 0 {
-			tc.logger.Error("🔍 toLogs: empty array")
-			return nil
+		normalize := func(m map[string]interface{}) (map[string]interface{}, bool) {
+			// Tenderly often returns { raw: { address, topics, data }, ... }
+			if raw, ok := m["raw"].(map[string]interface{}); ok {
+				out := map[string]interface{}{}
+				if addr, ok := raw["address"].(string); ok {
+					out["address"] = addr
+				}
+				// topics could be []string or []interface{}
+				switch t := raw["topics"].(type) {
+				case []interface{}:
+					out["topics"] = t
+				case []string:
+					tmp := make([]interface{}, 0, len(t))
+					for _, s := range t {
+						tmp = append(tmp, s)
+					}
+					out["topics"] = tmp
+				}
+				if data, ok := raw["data"].(string); ok {
+					out["data"] = data
+				} else {
+					out["data"] = "0x"
+				}
+				return out, out["address"] != nil
+			}
+			// Already in receipt log shape
+			if m["address"] != nil && (m["topics"] != nil || m["data"] != nil) {
+				if ts, ok := m["topics"].([]string); ok {
+					tmp := make([]interface{}, 0, len(ts))
+					for _, s := range ts {
+						tmp = append(tmp, s)
+					}
+					m["topics"] = tmp
+				}
+				if _, ok := m["data"].(string); !ok {
+					m["data"] = "0x"
+				}
+				return m, true
+			}
+			return nil, false
 		}
-		tc.logger.Error("🔍 toLogs: processing array", "length", len(arr))
 		out := make([]map[string]interface{}, 0, len(arr))
 		for _, it := range arr {
 			if m, ok := it.(map[string]interface{}); ok {
-				out = append(out, m)
+				if norm, ok := normalize(m); ok {
+					out = append(out, norm)
+				}
 			}
 		}
-		tc.logger.Error("🔍 toLogs: final result", "count", len(out))
+		if len(out) == 0 {
+			return nil
+		}
 		return out
 	}
 
@@ -935,6 +974,36 @@ func (tc *TenderlyClient) extractLogsFromTenderlyResult(res interface{}) []map[s
 					return logs
 				}
 			}
+		}
+	}
+
+	// Fallback deep search for any nested field named "logs"
+	var dfs func(interface{}) []map[string]interface{}
+	dfs = func(node interface{}) []map[string]interface{} {
+		switch n := node.(type) {
+		case map[string]interface{}:
+			for k, v := range n {
+				if strings.EqualFold(k, "logs") {
+					if logs := toLogs(v); len(logs) > 0 {
+						return logs
+					}
+				}
+				if res := dfs(v); len(res) > 0 {
+					return res
+				}
+			}
+		case []interface{}:
+			for _, item := range n {
+				if res := dfs(item); len(res) > 0 {
+					return res
+				}
+			}
+		}
+		return nil
+	}
+	if root, ok := res.(map[string]interface{}); ok {
+		if logs := dfs(root); len(logs) > 0 {
+			return logs
 		}
 	}
 
