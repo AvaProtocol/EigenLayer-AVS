@@ -439,11 +439,11 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 			r.smartWalletConfig.PaymasterAddress,
 			15*time.Minute, // 15 minute validity window
 		)
-		r.vm.logger.Info("🎫 Using paymaster for sponsored transaction",
+		r.vm.logger.Info("Using paymaster for sponsored transaction",
 			"paymaster", r.smartWalletConfig.PaymasterAddress.Hex(),
 			"owner", r.owner.Hex())
 	} else {
-		r.vm.logger.Info("💰 Using regular transaction (no paymaster)",
+		r.vm.logger.Info("Using regular transaction (no paymaster)",
 			"owner", r.owner.Hex())
 	}
 
@@ -618,23 +618,37 @@ func convertLogsToInterface(logs []*types.Log) []interface{} {
 
 // shouldUsePaymaster determines if paymaster should be used based on transaction limits and whitelist
 func (r *ContractWriteProcessor) shouldUsePaymaster() bool {
-	// Priority 1: If smart wallet already has ETH balance, do NOT use paymaster
-	// This covers the case where the wallet can self-fund deployment and calls
+	// Priority 1: If the intended sender (aa_sender override or derived) has ETH balance, do NOT use paymaster
 	if r.client != nil {
-		// Derive the smart wallet (sender) address using salt 0 (default path)
-		senderAddr, err := aa.GetSenderAddress(r.client, r.owner, big.NewInt(0))
-		if err == nil && senderAddr != nil {
-			bal, balErr := r.client.BalanceAt(context.Background(), *senderAddr, nil)
-			if balErr == nil && bal != nil && bal.Sign() > 0 {
+		// Prefer aa_sender override when present
+		var checkAddr *common.Address
+		if r.vm != nil {
+			r.vm.mu.Lock()
+			if v, ok := r.vm.vars["aa_sender"]; ok {
+				if s, ok2 := v.(string); ok2 && common.IsHexAddress(s) {
+					addr := common.HexToAddress(s)
+					checkAddr = &addr
+				}
+			}
+			r.vm.mu.Unlock()
+		}
+		if checkAddr == nil {
+			// Fallback to derived sender at salt 0
+			if derived, err := aa.GetSenderAddress(r.client, r.owner, big.NewInt(0)); err == nil {
+				checkAddr = derived
+			} else if r.vm.logger != nil {
+				r.vm.logger.Debug("Could not derive smart wallet address for balance check; proceeding to consider paymaster",
+					"owner", r.owner.Hex(), "error", err)
+			}
+		}
+		if checkAddr != nil {
+			if bal, balErr := r.client.BalanceAt(context.Background(), *checkAddr, nil); balErr == nil && bal != nil && bal.Sign() > 0 {
 				if r.vm.logger != nil {
-					r.vm.logger.Debug("Smart wallet has ETH balance, not using paymaster",
-						"owner", r.owner.Hex(), "wallet", senderAddr.Hex(), "balanceWei", bal.String())
+					r.vm.logger.Debug("Sender has ETH balance, not using paymaster",
+						"owner", r.owner.Hex(), "wallet", checkAddr.Hex(), "balanceWei", bal.String())
 				}
 				return false
 			}
-		} else if r.vm.logger != nil {
-			r.vm.logger.Debug("Could not derive smart wallet address for balance check; proceeding to consider paymaster",
-				"owner", r.owner.Hex(), "error", err)
 		}
 	}
 
