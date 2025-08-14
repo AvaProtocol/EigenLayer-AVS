@@ -602,6 +602,9 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 	if tc.accountName != "" && tc.projectName != "" && tc.accessKey != "" {
 		usedHTTP = true
 		simURL := fmt.Sprintf("https://api.tenderly.co/api/v1/account/%s/project/%s/simulate", tc.accountName, tc.projectName)
+		// Provide a generous temporary balance to the runner so gas checks don't fail in simulation
+		// Tenderly HTTP API supports `state_objects` to override account state
+		balanceOverride := "0x56BC75E2D63100000" // 100 ETH
 		body := map[string]interface{}{
 			"network_id":           fmt.Sprintf("%d", chainID),
 			"from":                 fromAddress,
@@ -614,6 +617,11 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 			"save_if_fails":        false,
 			"simulation_type":      "full",
 			"generate_access_list": false,
+			"state_objects": map[string]interface{}{
+				strings.ToLower(fromAddress): map[string]interface{}{
+					"balance": balanceOverride,
+				},
+			},
 		}
 		tc.logger.Info("📡 Making Tenderly HTTP simulation call for contract write", "url", simURL)
 		httpResp, httpErr := tc.httpClient.R().
@@ -639,7 +647,16 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 			"value":                "0x0",
 			"data":                 callData,
 		}
-		rpcRequest := JSONRPCRequest{Jsonrpc: "2.0", Method: "tenderly_simulateTransaction", Params: []interface{}{txObject, latestHex}, Id: 1}
+		// Add stateOverrides to fund the runner during simulation
+		balanceOverride := "0x56BC75E2D63100000" // 100 ETH
+		overrides := map[string]interface{}{
+			"stateOverrides": map[string]interface{}{
+				strings.ToLower(fromAddress): map[string]interface{}{
+					"balance": balanceOverride,
+				},
+			},
+		}
+		rpcRequest := JSONRPCRequest{Jsonrpc: "2.0", Method: "tenderly_simulateTransaction", Params: []interface{}{txObject, latestHex, overrides}, Id: 1}
 		tc.logger.Info("📡 Making Tenderly simulation call for contract write", "rpc_url", tc.apiURL)
 		_, err := tc.httpClient.R().SetContext(ctx).SetBody(rpcRequest).SetResult(&response).Post(tc.apiURL)
 		if err != nil {
