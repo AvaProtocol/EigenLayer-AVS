@@ -69,8 +69,8 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 }
 
 func TestSendUserOp(t *testing.T) {
-	if os.Getenv("CI") != "" {
-		t.Skip("Skipping test in CI environment")
+	if os.Getenv("CI") != "" || os.Getenv("SEPOLIA_BUNDLER_RPC") == "" || os.Getenv("SEPOLIA_RPC") == "" {
+		t.Skip("Skipping TestSendUserOp: CI or missing SEPOLIA endpoints")
 	}
 
 	smartWalletConfig := mockGetBaseTestSmartWalletConfig()
@@ -195,8 +195,8 @@ func TestPaymaster(t *testing.T) {
 */
 
 func TestGetHash(t *testing.T) {
-	if os.Getenv("CI") != "" {
-		t.Skip("Skipping TestGetHash in CI environment")
+	if os.Getenv("CI") != "" || os.Getenv("SEPOLIA_RPC") == "" {
+		t.Skip("Skipping TestGetHash: CI or missing SEPOLIA_RPC")
 	}
 
 	nonce := new(big.Int)
