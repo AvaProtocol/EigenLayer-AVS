@@ -773,6 +773,19 @@ func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *C
 		}
 	}
 
+	// Fallback: If provider didn't return output data, infer boolean success for
+	// functions that return a single bool (e.g., ERC20 transfer) so clients don't
+	// receive an empty object `{}`.
+	if returnValue == nil && parsedABI != nil {
+		if method, exists := parsedABI.Methods[result.MethodName]; exists {
+			if len(method.Outputs) == 1 && method.Outputs[0].Type.String() == "bool" {
+				if v, err := structpb.NewValue(result.Success); err == nil {
+					returnValue = v
+				}
+			}
+		}
+	}
+
 	// Handle errors
 	errorMsg := ""
 	success := result.Success
