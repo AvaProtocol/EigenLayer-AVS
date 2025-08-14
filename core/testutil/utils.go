@@ -25,31 +25,10 @@ import (
 
 // init loads environment variables from .env file for testing
 func init() {
-	// Load base .env if present, then overlay with .env.test for test-specific secrets.
-	// Search across common relative locations from this package.
-	basePaths := []string{
-		".env",          // Current directory
-		"../.env",       // One level up
-		"../../.env",    // Two levels up (from core/testutil)
-		"../../../.env", // Three levels up
-	}
-	for _, path := range basePaths {
-		if err := godotenv.Load(path); err == nil {
-			break
-		}
-	}
-
-	testPaths := []string{
-		".env.test",          // Current directory
-		"../.env.test",       // One level up
-		"../../.env.test",    // Two levels up (from core/testutil)
-		"../../../.env.test", // Three levels up
-	}
-	for _, path := range testPaths {
-		if err := godotenv.Overload(path); err == nil {
-			break
-		}
-	}
+	// Load only from repo root files without fuzzy search.
+	// First load .env if present (non-fatal), then overlay .env.test for test secrets.
+	_ = godotenv.Load(".env")
+	_ = godotenv.Overload(".env.test")
 }
 
 const (

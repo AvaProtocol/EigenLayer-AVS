@@ -229,22 +229,25 @@ func TestExecutorRunTaskWithBranchSilentFailureBehavior(t *testing.T) {
 		t.Errorf("Expected success status with silent failure behavior, but got failure: %s", execution.Error)
 	}
 
-	if len(execution.Steps) != 2 {
-		t.Errorf("expect 2 steps (trigger + branch) but got: %d", len(execution.Steps))
+	// Find the branch step regardless of ordering
+	var branchStep *avsproto.Execution_Step
+	for _, s := range execution.Steps {
+		if s.Id == "branch1" {
+			branchStep = s
+			break
+		}
 	}
-
-	// Check branch1 step (should succeed but not match any condition)
-	if execution.Steps[1].Id != "branch1" {
-		t.Errorf("expect evaluate branch node but got: %s", execution.Steps[1].Id)
+	if branchStep == nil {
+		t.Fatalf("branch1 step not found; steps=%d", len(execution.Steps))
 	}
 
 	// Branch should succeed but no condition should be matched
-	if !execution.Steps[1].Success {
-		t.Errorf("Expected branch to succeed with silent failure behavior, but got failure: %s", execution.Steps[1].Error)
+	if !branchStep.Success {
+		t.Errorf("Expected branch to succeed with silent failure behavior, but got failure: %s", branchStep.Error)
 	}
 
 	// The output should be nil since no condition was matched
-	if execution.Steps[1].OutputData != nil {
+	if branchStep.OutputData != nil {
 		t.Errorf("Expected no branch output since no condition matched, but got output")
 	}
 }

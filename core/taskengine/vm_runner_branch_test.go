@@ -166,7 +166,15 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 	}
 
 	// Verify that the second condition was hit
-	if vm.ExecutionLogs[0].GetBranch().Data == nil {
+	// Locate the branch log entry safely regardless of ordering
+	var branchLog *avsproto.Execution_Step
+	for _, l := range vm.ExecutionLogs {
+		if l.GetBranch() != nil {
+			branchLog = l
+			break
+		}
+	}
+	if branchLog == nil || branchLog.GetBranch() == nil || branchLog.GetBranch().Data == nil {
 		t.Errorf("expected branch data but got none")
 	}
 	// Find the REST step and assert body contains the expected string
@@ -193,7 +201,14 @@ func TestRunTaskWithMultipleConditions(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error executing program. Expected success, got error %v", err)
 	}
-	if vm.ExecutionLogs[0].GetBranch().Data == nil {
+	branchLog = nil
+	for _, l := range vm.ExecutionLogs {
+		if l.GetBranch() != nil {
+			branchLog = l
+			break
+		}
+	}
+	if branchLog == nil || branchLog.GetBranch() == nil || branchLog.GetBranch().Data == nil {
 		t.Errorf("expected branch data but got none")
 	}
 

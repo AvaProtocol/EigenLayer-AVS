@@ -1514,7 +1514,7 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 			}
 
 			// Strictly require runner for contractWrite; validate against owner's wallets
-			if nodeType == NodeTypeContractWrite {
+			if strings.EqualFold(nodeType, "contractWrite") {
 				// Require owner
 				if (vm.TaskOwner == common.Address{}) {
 					return nil, fmt.Errorf("workflowContext.eoaAddress is required for contractWrite")
