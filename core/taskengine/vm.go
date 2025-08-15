@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -1672,7 +1673,13 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 			// Handle null values by returning "undefined" for better debugging
 			replacement = "undefined"
 		} else if _, okMap := exportedValue.(map[string]interface{}); okMap {
-			replacement = "[object Object]" // Mimic JS behavior for objects in strings
+			// For objects, serialize as JSON instead of "[object Object]"
+			// This is needed for contract write operations that pass objects as struct parameters
+			if jsonBytes, err := json.Marshal(exportedValue); err == nil {
+				replacement = string(jsonBytes)
+			} else {
+				replacement = "[object Object]" // Fallback to original behavior if JSON marshaling fails
+			}
 		} else if _, okArr := exportedValue.([]interface{}); okArr {
 			replacement = fmt.Sprintf("%v", exportedValue) // Or could be "[object Array]" or stringified JSON
 		} else {
@@ -1856,7 +1863,13 @@ func (v *VM) preprocessText(text string) string {
 			// Handle null values by returning "undefined" for better debugging
 			replacement = "undefined"
 		} else if _, okMap := exportedValue.(map[string]interface{}); okMap {
-			replacement = "[object Object]" // Mimic JS behavior for objects in strings
+			// For objects, serialize as JSON instead of "[object Object]"
+			// This is needed for contract write operations that pass objects as struct parameters
+			if jsonBytes, err := json.Marshal(exportedValue); err == nil {
+				replacement = string(jsonBytes)
+			} else {
+				replacement = "[object Object]" // Fallback to original behavior if JSON marshaling fails
+			}
 		} else if _, okArr := exportedValue.([]interface{}); okArr {
 			replacement = fmt.Sprintf("%v", exportedValue) // Or could be "[object Array]" or stringified JSON
 		} else {
