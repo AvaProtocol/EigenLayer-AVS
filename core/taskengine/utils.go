@@ -502,7 +502,28 @@ func parseABIParameter(param string, abiType abi.Type) (interface{}, error) {
 			// Parse each element according to its type
 			var tupleElements []interface{}
 			for i, element := range arrayElements {
-				elementStr := fmt.Sprintf("%v", element)
+				// Convert element to string, handling different JSON types properly
+				var elementStr string
+				switch v := element.(type) {
+				case string:
+					elementStr = v
+				case float64:
+					// JSON numbers become float64, convert to string without decimal if it's a whole number
+					if v == float64(int64(v)) {
+						elementStr = fmt.Sprintf("%.0f", v)
+					} else {
+						elementStr = fmt.Sprintf("%g", v)
+					}
+				case bool:
+					if v {
+						elementStr = "true"
+					} else {
+						elementStr = "false"
+					}
+				default:
+					elementStr = fmt.Sprintf("%v", element)
+				}
+
 				parsedElement, err := parseABIParameter(elementStr, *abiType.TupleElems[i])
 				if err != nil {
 					return nil, fmt.Errorf("failed to parse tuple element %d: %v", i, err)

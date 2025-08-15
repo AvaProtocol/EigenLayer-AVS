@@ -2,9 +2,13 @@ package taskengine
 
 import (
 	"encoding/json"
+	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -206,5 +210,84 @@ func TestObjectSerializationInTemplates(t *testing.T) {
 		// and convert the object to an ordered array based on ABI field order
 
 		t.Logf("✅ Object parameter correctly formatted as JSON object: %s", result)
+	})
+
+	t.Run("Tuple_Parameter_Parsing_With_Mixed_Types", func(t *testing.T) {
+		// Test the actual ABI parsing with mixed types (addresses, numbers, etc.)
+		// This simulates what happens in the contract write processor
+
+		// Create a mock ABI for quoteExactInputSingle with the correct struct
+		abiJSON := `[{
+			"inputs": [{
+				"components": [
+					{"internalType": "address", "name": "tokenIn", "type": "address"},
+					{"internalType": "address", "name": "tokenOut", "type": "address"},
+					{"internalType": "uint256", "name": "amountIn", "type": "uint256"},
+					{"internalType": "uint24", "name": "fee", "type": "uint24"},
+					{"internalType": "uint160", "name": "sqrtPriceLimitX96", "type": "uint160"}
+				],
+				"internalType": "struct IQuoterV2.QuoteExactInputSingleParams",
+				"name": "params",
+				"type": "tuple"
+			}],
+			"name": "quoteExactInputSingle",
+			"outputs": [
+				{"internalType": "uint256", "name": "amountOut", "type": "uint256"},
+				{"internalType": "uint160", "name": "sqrtPriceX96After", "type": "uint160"},
+				{"internalType": "uint32", "name": "initializedTicksCrossed", "type": "uint32"},
+				{"internalType": "uint256", "name": "gasEstimate", "type": "uint256"}
+			],
+			"stateMutability": "nonpayable",
+			"type": "function"
+		}]`
+
+		// Parse the ABI
+		parsedABI, err := abi.JSON(strings.NewReader(abiJSON))
+		assert.NoError(t, err, "Should parse ABI successfully")
+
+		method := parsedABI.Methods["quoteExactInputSingle"]
+		assert.NotNil(t, method, "Should find quoteExactInputSingle method")
+		assert.Equal(t, 1, len(method.Inputs), "Method should have 1 input")
+		assert.Equal(t, abi.TupleTy, method.Inputs[0].Type.T, "Input should be a tuple type")
+
+		// Test JSON array parameter (what our object-to-tuple conversion produces)
+		jsonArrayParam := `["0xfff9976782d46cc05630d1f6ebab18b2324d6b14","0xda317c1d3e835dd5f1be459006471acaa1289068","80000000000000000",500,0]`
+
+		// Parse the parameter using our utility function
+		parsedParam, err := parseABIParameter(jsonArrayParam, method.Inputs[0].Type)
+		assert.NoError(t, err, "Should parse tuple parameter successfully")
+
+		// Verify the parsed parameter structure
+		tupleElements, ok := parsedParam.([]interface{})
+		assert.True(t, ok, "Parsed parameter should be a slice of interfaces")
+		assert.Equal(t, 5, len(tupleElements), "Tuple should have 5 elements")
+
+		// Verify each element type
+		tokenIn, ok := tupleElements[0].(common.Address)
+		assert.True(t, ok, "First element should be an address")
+		assert.Equal(t, strings.ToLower("0xfff9976782d46cc05630d1f6ebab18b2324d6b14"), strings.ToLower(tokenIn.Hex()), "TokenIn address should match (case-insensitive)")
+
+		tokenOut, ok := tupleElements[1].(common.Address)
+		assert.True(t, ok, "Second element should be an address")
+		assert.Equal(t, strings.ToLower("0xda317c1d3e835dd5f1be459006471acaa1289068"), strings.ToLower(tokenOut.Hex()), "TokenOut address should match (case-insensitive)")
+
+		amountIn, ok := tupleElements[2].(*big.Int)
+		assert.True(t, ok, "Third element should be a *big.Int")
+		assert.Equal(t, "80000000000000000", amountIn.String(), "AmountIn should match")
+
+		fee, ok := tupleElements[3].(*big.Int)
+		assert.True(t, ok, "Fourth element should be a *big.Int")
+		assert.Equal(t, "500", fee.String(), "Fee should match")
+
+		sqrtPriceLimitX96, ok := tupleElements[4].(*big.Int)
+		assert.True(t, ok, "Fifth element should be a *big.Int")
+		assert.Equal(t, "0", sqrtPriceLimitX96.String(), "SqrtPriceLimitX96 should match")
+
+		t.Logf("✅ Tuple parameter parsing successful:")
+		t.Logf("  - TokenIn: %s", tokenIn.Hex())
+		t.Logf("  - TokenOut: %s", tokenOut.Hex())
+		t.Logf("  - AmountIn: %s", amountIn.String())
+		t.Logf("  - Fee: %s", fee.String())
+		t.Logf("  - SqrtPriceLimitX96: %s", sqrtPriceLimitX96.String())
 	})
 }
