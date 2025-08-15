@@ -141,7 +141,7 @@ jobs:
           SEPOLIA_BUNDLER_RPC: "${{ vars.SEPOLIA_BUNDLER_RPC }}"
           BASE_SEPOLIA_RPC: "${{ vars.BASE_SEPOLIA_RPC }}"
           BASE_SEPOLIA_BUNDLER_RPC: "${{ vars.BASE_SEPOLIA_BUNDLER_RPC }}"
-          FACTORY_ADDRESS: "${{ vars.FACTORY_ADDRESS }}"
+
           # Secrets
           CONTROLLER_PRIVATE_KEY: "${{ secrets.CONTROLLER_PRIVATE_KEY }}"
           TENDERLY_API_KEY: "${{ secrets.TENDERLY_API_KEY }}"
