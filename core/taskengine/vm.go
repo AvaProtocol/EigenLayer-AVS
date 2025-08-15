@@ -165,7 +165,7 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 
 	// 🔍 DEBUG: Log what we're storing in VM vars
 	if c.vm.logger != nil {
-		c.vm.logger.Error("🔍 VM DEBUG - SetOutputVarForStep",
+		c.vm.logger.Debug("🔍 VM DEBUG - SetOutputVarForStep",
 			"stepID", stepID,
 			"nodeNameVar", nodeNameVar,
 			"processedData_type", fmt.Sprintf("%T", processedData),
