@@ -132,6 +132,14 @@ func ToDecimal(ivalue interface{}, decimals int) decimal.Decimal {
 func NewGojaVM() *goja.Runtime {
 	vm := goja.New()
 	macros.ConfigureGojaRuntime(vm)
+
+	// Add console.log support for debugging
+	console := vm.NewObject()
+	console.Set("log", func(args ...interface{}) {
+		fmt.Printf("🔍 JS CONSOLE: %v\n", args)
+	})
+	vm.Set("console", console)
+
 	return vm
 }
 
@@ -139,6 +147,13 @@ func NewGojaVM() *goja.Runtime {
 func NewGojaVMWithModules() (*goja.Runtime, *modules.Registry, error) {
 	vm := goja.New()
 	macros.ConfigureGojaRuntime(vm)
+
+	// Add console.log support for debugging
+	console := vm.NewObject()
+	console.Set("log", func(args ...interface{}) {
+		fmt.Printf("🔍 JS CONSOLE: %v\n", args)
+	})
+	vm.Set("console", console)
 
 	registry := modules.NewRegistry()
 

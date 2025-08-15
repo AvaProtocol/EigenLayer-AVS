@@ -1833,9 +1833,23 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, inputVariables map[string]interface{}) (*avsproto.Execution, error) {
 	// Create a temporary task structure for simulation (not saved to storage)
 	simulationTaskID := ulid.Make().String()
+
+	// Extract workflow name from inputVariables.workflowContext.name
+	workflowName := ""
+	if workflowContext, exists := inputVariables["workflowContext"]; exists {
+		if wfCtx, ok := workflowContext.(map[string]interface{}); ok {
+			if nameVar, nameExists := wfCtx["name"]; nameExists {
+				if nameStr, ok := nameVar.(string); ok {
+					workflowName = nameStr
+				}
+			}
+		}
+	}
+
 	task := &model.Task{
 		Task: &avsproto.Task{
 			Id:      simulationTaskID,
+			Name:    workflowName, // Set workflow name for simulation
 			Owner:   user.Address.Hex(),
 			Trigger: trigger,
 			Nodes:   nodes,
