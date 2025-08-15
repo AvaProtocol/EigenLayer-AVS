@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -150,6 +151,30 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	resolvedMethodParams := make([]string, len(methodCall.MethodParams))
 	for i, param := range methodCall.MethodParams {
 		resolvedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(param)
+	}
+
+	// Handle JSON arrays: if a single parameter is a JSON array, expand it into individual parameters
+	// This supports struct/tuple parameters where the client returns an array from custom code
+	if len(resolvedMethodParams) == 1 {
+		param := resolvedMethodParams[0]
+		// Check if the parameter looks like a JSON array
+		if strings.HasPrefix(param, "[") && strings.HasSuffix(param, "]") {
+			var arrayElements []interface{}
+			if err := json.Unmarshal([]byte(param), &arrayElements); err == nil {
+				// Successfully parsed as JSON array - expand into individual string parameters
+				expandedParams := make([]string, len(arrayElements))
+				for j, element := range arrayElements {
+					expandedParams[j] = fmt.Sprintf("%v", element)
+				}
+				resolvedMethodParams = expandedParams
+				if r.vm != nil && r.vm.logger != nil {
+					r.vm.logger.Info("🔄 CONTRACT WRITE - Expanded JSON array into individual parameters",
+						"original_param", param,
+						"expanded_count", len(expandedParams),
+						"expanded_params", expandedParams)
+				}
+			}
+		}
 	}
 
 	// Use shared utility to generate or use existing calldata

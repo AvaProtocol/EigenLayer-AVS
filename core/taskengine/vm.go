@@ -1681,7 +1681,13 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 				replacement = "[object Object]" // Fallback to original behavior if JSON marshaling fails
 			}
 		} else if _, okArr := exportedValue.([]interface{}); okArr {
-			replacement = fmt.Sprintf("%v", exportedValue) // Or could be "[object Array]" or stringified JSON
+			// For arrays, serialize as JSON instead of Go's default format
+			// This is needed for contract write operations that pass arrays as parameters
+			if jsonBytes, err := json.Marshal(exportedValue); err == nil {
+				replacement = string(jsonBytes)
+			} else {
+				replacement = fmt.Sprintf("%v", exportedValue) // Fallback to original behavior if JSON marshaling fails
+			}
 		} else {
 			replacement = fmt.Sprintf("%v", exportedValue)
 		}
@@ -1871,7 +1877,13 @@ func (v *VM) preprocessText(text string) string {
 				replacement = "[object Object]" // Fallback to original behavior if JSON marshaling fails
 			}
 		} else if _, okArr := exportedValue.([]interface{}); okArr {
-			replacement = fmt.Sprintf("%v", exportedValue) // Or could be "[object Array]" or stringified JSON
+			// For arrays, serialize as JSON instead of Go's default format
+			// This is needed for contract write operations that pass arrays as parameters
+			if jsonBytes, err := json.Marshal(exportedValue); err == nil {
+				replacement = string(jsonBytes)
+			} else {
+				replacement = fmt.Sprintf("%v", exportedValue) // Fallback to original behavior if JSON marshaling fails
+			}
 		} else {
 			replacement = fmt.Sprintf("%v", exportedValue)
 		}

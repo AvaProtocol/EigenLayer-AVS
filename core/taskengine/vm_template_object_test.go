@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
@@ -81,5 +82,49 @@ func TestObjectSerializationInTemplates(t *testing.T) {
 
 		t.Logf("✅ Individual field: %s", result1)
 		t.Logf("✅ Nested object JSON: %s", result2)
+	})
+
+	t.Run("Array_Serialization_JSON_Format", func(t *testing.T) {
+		vm := NewVM()
+		vm.logger = testutil.GetLogger()
+		vm.IsSimulation = true
+
+		// Test array serialization (needed for struct/tuple parameters)
+		testArray := []interface{}{
+			"0xfff9976782d46cc05630d1f6ebab18b2324d6b14", // tokenIn
+			"0xda317c1d3e835dd5f1be459006471acaa1289068", // tokenOut
+			"80000000000000000",                          // amountIn
+			500,                                          // fee
+			0,                                            // sqrtPriceLimitX96
+		}
+
+		vm.AddVar("test_params", map[string]interface{}{
+			"data": testArray,
+		})
+
+		// Test template resolution
+		template := "{{test_params.data}}"
+		result := vm.preprocessTextWithVariableMapping(template)
+
+		t.Logf("Template: %s", template)
+		t.Logf("Result: %s", result)
+
+		// Should be valid JSON array
+		assert.True(t, result[0] == '[' && result[len(result)-1] == ']',
+			"Result should be a JSON array (start with [ and end with ])")
+
+		// Should contain all the expected values
+		assert.Contains(t, result, "0xfff9976782d46cc05630d1f6ebab18b2324d6b14", "Result should contain tokenIn address")
+		assert.Contains(t, result, "0xda317c1d3e835dd5f1be459006471acaa1289068", "Result should contain tokenOut address")
+		assert.Contains(t, result, "80000000000000000", "Result should contain amountIn")
+		assert.Contains(t, result, "500", "Result should contain fee")
+
+		// Verify it's parseable as JSON
+		var parsedArray []interface{}
+		err := json.Unmarshal([]byte(result), &parsedArray)
+		assert.NoError(t, err, "Result should be valid JSON")
+		assert.Len(t, parsedArray, 5, "Parsed array should have 5 elements")
+
+		t.Logf("✅ Array properly serialized as JSON: %s", result)
 	})
 }
