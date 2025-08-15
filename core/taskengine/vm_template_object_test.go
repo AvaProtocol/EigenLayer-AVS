@@ -163,4 +163,48 @@ func TestObjectSerializationInTemplates(t *testing.T) {
 
 		t.Logf("✅ Struct parameter correctly formatted as JSON array: %s", result)
 	})
+
+	t.Run("Object_To_Struct_Parameter", func(t *testing.T) {
+		// Test that JavaScript objects are properly serialized for struct parameters
+		// This is the preferred approach for better developer experience
+		vm := NewVM()
+		vm.logger = testutil.GetLogger()
+		vm.IsSimulation = true
+
+		// Simulate a JavaScript object (much more readable than arrays)
+		testObject := map[string]interface{}{
+			"tokenIn":           "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+			"tokenOut":          "0xda317c1d3e835dd5f1be459006471acaa1289068",
+			"amountIn":          "80000000000000000",
+			"fee":               500,
+			"sqrtPriceLimitX96": 0,
+		}
+
+		vm.AddVar("quote_params", map[string]interface{}{
+			"data": testObject,
+		})
+
+		// Test template resolution produces JSON object
+		template := "{{quote_params.data}}"
+		result := vm.preprocessTextWithVariableMapping(template)
+
+		t.Logf("Template: %s", template)
+		t.Logf("Result: %s", result)
+
+		// Should be valid JSON object
+		assert.True(t, result[0] == '{' && result[len(result)-1] == '}',
+			"Result should be a JSON object for struct parameter")
+
+		// Should contain all expected fields
+		assert.Contains(t, result, "tokenIn", "Result should contain tokenIn field")
+		assert.Contains(t, result, "tokenOut", "Result should contain tokenOut field")
+		assert.Contains(t, result, "amountIn", "Result should contain amountIn field")
+		assert.Contains(t, result, "fee", "Result should contain fee field")
+		assert.Contains(t, result, "sqrtPriceLimitX96", "Result should contain sqrtPriceLimitX96 field")
+
+		// The contract write processor should detect this as a struct parameter
+		// and convert the object to an ordered array based on ABI field order
+
+		t.Logf("✅ Object parameter correctly formatted as JSON object: %s", result)
+	})
 }

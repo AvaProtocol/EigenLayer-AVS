@@ -153,29 +153,63 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		resolvedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(param)
 	}
 
-	// Handle JSON arrays: if a single parameter is a JSON array, check if it should be treated as a struct
-	// This supports struct/tuple parameters where the client returns an array from custom code
+	// Handle JSON objects/arrays: convert to appropriate format based on method signature
+	// This supports struct/tuple parameters where the client returns objects or arrays from custom code
 	if len(resolvedMethodParams) == 1 {
 		param := resolvedMethodParams[0]
-		// Check if the parameter looks like a JSON array
-		if strings.HasPrefix(param, "[") && strings.HasSuffix(param, "]") {
-			var arrayElements []interface{}
-			if err := json.Unmarshal([]byte(param), &arrayElements); err == nil {
-				// Check if this method expects a struct parameter by examining the ABI
-				if parsedABI != nil {
-					if method, exists := parsedABI.Methods[methodCall.MethodName]; exists {
-						// If method expects exactly 1 parameter and it's a tuple (struct), keep as single parameter
-						if len(method.Inputs) == 1 && method.Inputs[0].Type.T == abi.TupleTy {
-							// Keep the original JSON array as a single parameter for struct handling
-							if r.vm != nil && r.vm.logger != nil {
-								r.vm.logger.Info("🔄 CONTRACT WRITE - Detected struct parameter, keeping JSON array as single parameter",
-									"method", methodCall.MethodName,
-									"param_type", method.Inputs[0].Type.String(),
-									"array_elements", len(arrayElements))
+
+		// Check if this method expects a struct parameter by examining the ABI
+		if parsedABI != nil {
+			if method, exists := parsedABI.Methods[methodCall.MethodName]; exists {
+				if len(method.Inputs) == 1 && method.Inputs[0].Type.T == abi.TupleTy {
+					// Method expects a single struct/tuple parameter
+					tupleType := method.Inputs[0].Type
+
+					// Handle JSON object - convert to ordered array based on struct field order
+					if strings.HasPrefix(param, "{") && strings.HasSuffix(param, "}") {
+						var objData map[string]interface{}
+						if err := json.Unmarshal([]byte(param), &objData); err == nil {
+							// Convert object to ordered array based on ABI struct field order
+							orderedArray := make([]interface{}, len(tupleType.TupleElems))
+							for i := range tupleType.TupleElems {
+								fieldName := tupleType.TupleRawNames[i]
+								if value, exists := objData[fieldName]; exists {
+									orderedArray[i] = value
+								} else {
+									// Field missing - this will cause an error in ABI parsing
+									if r.vm != nil && r.vm.logger != nil {
+										r.vm.logger.Error("❌ CONTRACT WRITE - Missing field in struct object",
+											"method", methodCall.MethodName,
+											"missing_field", fieldName,
+											"available_fields", getMapKeys(objData))
+									}
+								}
 							}
-							// Don't expand - keep as single JSON array parameter for struct processing
-						} else {
-							// Method expects multiple parameters - expand the array
+
+							// Convert back to JSON array string for ABI processing
+							if jsonBytes, err := json.Marshal(orderedArray); err == nil {
+								resolvedMethodParams[0] = string(jsonBytes)
+								if r.vm != nil && r.vm.logger != nil {
+									r.vm.logger.Info("🔄 CONTRACT WRITE - Converted object to ordered array for struct",
+										"method", methodCall.MethodName,
+										"struct_fields", tupleType.TupleRawNames,
+										"ordered_array", string(jsonBytes))
+								}
+							}
+						}
+					} else if strings.HasPrefix(param, "[") && strings.HasSuffix(param, "]") {
+						// Handle JSON array - already in correct format for struct processing
+						if r.vm != nil && r.vm.logger != nil {
+							r.vm.logger.Info("🔄 CONTRACT WRITE - Detected struct parameter with JSON array",
+								"method", methodCall.MethodName,
+								"param_type", tupleType.String())
+						}
+					}
+				} else if len(method.Inputs) > 1 {
+					// Method expects multiple parameters - expand JSON array if provided
+					if strings.HasPrefix(param, "[") && strings.HasSuffix(param, "]") {
+						var arrayElements []interface{}
+						if err := json.Unmarshal([]byte(param), &arrayElements); err == nil {
 							expandedParams := make([]string, len(arrayElements))
 							for j, element := range arrayElements {
 								expandedParams[j] = fmt.Sprintf("%v", element)
