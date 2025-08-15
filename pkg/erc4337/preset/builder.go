@@ -38,9 +38,9 @@ var (
 
 	// example tx send to entrypoint: https://sepolia.basescan.org/tx/0x7580ac508a2ac34cf6a4f4346fb6b4f09edaaa4f946f42ecdb2bfd2a633d43af#eventlog
 	userOpEventTopic0 = common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f")
-	// waiting 60 seconds for the tx hash to propagate to the network
+	// waiting 180 seconds for the tx hash to propagate to the network (increased for deployed workflows)
 	// if we cannot get it after that, we need to consolidate with some indexer to get this data later on
-	waitingForBundleTx = 60 * time.Second
+	waitingForBundleTx = 180 * time.Second
 )
 
 // VerifyingPaymasterRequest contains the parameters needed for paymaster functionality. This use the reference from https://github.com/eth-optimism/paymaster-reference
@@ -78,6 +78,9 @@ func SendUserOp(
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
 ) (*userop.UserOperation, *types.Receipt, error) {
+	log.Printf("🚀 DEPLOYED WORKFLOW: SendUserOp started - owner: %s, calldata_length: %d, bundler: %s",
+		owner.Hex(), len(callData), smartWalletConfig.BundlerURL)
+
 	var userOp *userop.UserOperation
 	var err error
 	entrypoint := smartWalletConfig.EntrypointAddress
@@ -120,14 +123,84 @@ func SendUserOp(
 	}
 
 	if err != nil {
+		log.Printf("🚨 DEPLOYED WORKFLOW ERROR: Failed to build UserOp - %v", err)
 		return nil, nil, err
 	}
 
-	// Send the UserOp to the bundler
-	txResult, err := bundlerClient.SendUserOperation(context.Background(), *userOp, aa.EntrypointAddress)
+	log.Printf("🔍 DEPLOYED WORKFLOW: UserOp built successfully, sending to bundler - sender: %s", userOp.Sender.Hex())
+
+	// Send the UserOp to the bundler with dynamic nonce fetching
+	var txResult string
+	maxRetries := 3
+	chainID, err := client.ChainID(context.Background())
+	if err != nil {
+		return userOp, nil, fmt.Errorf("failed to get chain ID: %w", err)
+	}
+
+	for retry := 0; retry < maxRetries; retry++ {
+		// Fetch fresh nonce right before each send attempt
+		freshNonce := aa.MustNonce(client, userOp.Sender, accountSalt)
+		userOp.Nonce = freshNonce
+
+		log.Printf("🔄 DEPLOYED WORKFLOW: Attempt %d/%d - Using nonce: %s", retry+1, maxRetries, freshNonce.String())
+
+		// Re-estimate gas with current nonce (only on first attempt or if previous failed due to gas)
+		if retry == 0 || (err != nil && strings.Contains(err.Error(), "gas")) {
+			userOp.Signature, _ = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, dummySigForGasEstimation.Bytes())
+			gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *userOp, aa.EntrypointAddress, map[string]any{})
+			if gasErr == nil && gas != nil {
+				userOp.PreVerificationGas = gas.PreVerificationGas
+				userOp.VerificationGasLimit = gas.VerificationGasLimit
+				userOp.CallGasLimit = gas.CallGasLimit
+			} else if retry == 0 {
+				// Only fail on first attempt if gas estimation fails
+				log.Printf("🚨 DEPLOYED WORKFLOW ERROR: Failed to estimate gas - %v", gasErr)
+				return userOp, nil, fmt.Errorf("failed to estimate gas: %w", gasErr)
+			}
+		}
+
+		// Sign with current nonce
+		userOpHash := userOp.GetUserOpHash(aa.EntrypointAddress, chainID)
+		userOp.Signature, err = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, userOpHash.Bytes())
+		if err != nil {
+			log.Printf("🚨 DEPLOYED WORKFLOW ERROR: Failed to sign UserOp - %v", err)
+			return userOp, nil, fmt.Errorf("failed to sign UserOp: %w", err)
+		}
+
+		// Attempt to send
+		txResult, err = bundlerClient.SendUserOperation(context.Background(), *userOp, aa.EntrypointAddress)
+
+		// If successful, break
+		if err == nil && txResult != "" {
+			log.Printf("✅ DEPLOYED WORKFLOW: UserOp sent successfully on attempt %d - nonce: %s, txResult: %s", retry+1, freshNonce.String(), txResult)
+			break
+		}
+
+		// Log the error and decide whether to retry
+		log.Printf("🔄 DEPLOYED WORKFLOW: Attempt %d failed - error: %v", retry+1, err)
+
+		// For nonce errors, always retry (nonce will be refetched)
+		if err != nil && strings.Contains(err.Error(), "AA25 invalid account nonce") {
+			if retry < maxRetries-1 {
+				log.Printf("🔄 DEPLOYED WORKFLOW: Nonce conflict, will refetch and retry")
+				continue
+			}
+		}
+
+		// For other errors, don't retry unless it's a transient network error
+		if err != nil && !strings.Contains(err.Error(), "AA25 invalid account nonce") &&
+			!strings.Contains(err.Error(), "timeout") && !strings.Contains(err.Error(), "connection") {
+			log.Printf("🚨 DEPLOYED WORKFLOW: Non-retryable error, stopping: %v", err)
+			break
+		}
+	}
+
 	if err != nil || txResult == "" {
+		log.Printf("🚨 DEPLOYED WORKFLOW ERROR: Failed to send UserOp to bundler after %d retries - err: %v, txResult: %s", maxRetries, err, txResult)
 		return userOp, nil, fmt.Errorf("error sending transaction to bundler: %w", err)
 	}
+
+	log.Printf("✅ DEPLOYED WORKFLOW: UserOp sent successfully - txResult: %s", txResult)
 
 	// When the userops get run on-chain, the entrypoint contract emits this event:
 	// UserOperationEvent (index_topic_1 bytes32 userOpHash, index_topic_2 address sender, index_topic_3 address paymaster,
@@ -162,16 +235,20 @@ func SendUserOp(
 			}
 		case vLog := <-logs:
 			// Print the transaction hash of the log
-			log.Printf("got the respective transaction hash: %s for userops hash: %s\n", vLog.TxHash.Hex(), txResult)
+			log.Printf("🎯 DEPLOYED WORKFLOW: got the respective transaction hash: %s for userops hash: %s\n", vLog.TxHash.Hex(), txResult)
 
 			receipt, err := client.TransactionReceipt(context.Background(), vLog.TxHash)
 			if err != nil {
-				log.Printf("Failed to get receipt: %v", err)
+				log.Printf("🚨 DEPLOYED WORKFLOW ERROR: Failed to get receipt: %v", err)
 				continue
 			}
 
+			log.Printf("✅ DEPLOYED WORKFLOW: Receipt retrieved successfully - status: %d, gas_used: %d, logs_count: %d",
+				receipt.Status, receipt.GasUsed, len(receipt.Logs))
+
 			return userOp, receipt, nil
 		case <-timeout:
+			log.Printf("⏰ DEPLOYED WORKFLOW WARNING: Transaction receipt timeout - no receipt received within timeout period")
 			return userOp, nil, nil
 		}
 	}
@@ -226,10 +303,10 @@ func BuildUserOp(
 		return nil, fmt.Errorf("failed to suggest gas fees: %w", err)
 	}
 
-	nonce := aa.MustNonce(client, *sender, accountSalt)
+	// Initialize UserOp with temporary nonce (will be set dynamically before sending)
 	userOp := userop.UserOperation{
 		Sender:   *sender,
-		Nonce:    nonce,
+		Nonce:    big.NewInt(0), // Placeholder - will be set dynamically
 		InitCode: common.FromHex(initCode),
 		CallData: callData,
 
@@ -243,28 +320,7 @@ func BuildUserOp(
 		PaymasterAndData:     common.FromHex("0x"),
 	}
 
-	chainID, err := client.ChainID(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get chain ID: %w", err)
-	}
-
-	userOp.Signature, _ = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, dummySigForGasEstimation.Bytes())
-
-	gas, e := bundlerClient.EstimateUserOperationGas(context.Background(), userOp, aa.EntrypointAddress, map[string]any{})
-	if gas == nil {
-		return nil, fmt.Errorf("error estimated gas from bundler: %w", e)
-	}
-
-	userOp.PreVerificationGas = gas.PreVerificationGas
-	userOp.VerificationGasLimit = gas.VerificationGasLimit
-	userOp.CallGasLimit = gas.CallGasLimit
-	// userOp.VerificationGas = gas.VerificationGas
-
-	userOpHash := userOp.GetUserOpHash(aa.EntrypointAddress, chainID)
-	userOp.Signature, err = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, userOpHash.Bytes())
-	if err != nil {
-		return nil, fmt.Errorf("failed to sign UserOp: %w", err)
-	}
+	// Gas estimation and signing will be done dynamically in the send loop
 
 	return &userOp, nil
 }
