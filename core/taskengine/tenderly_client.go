@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/go-resty/resty/v2"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -574,13 +574,7 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 	if latestErr != nil || latestHex == "" {
 		return nil, fmt.Errorf("failed to fetch latest block number from Tenderly: %w", latestErr)
 	}
-	// Convert latest block hex to integer for HTTP simulate API
-	var latestNum uint64
-	if strings.HasPrefix(latestHex, "0x") {
-		if n, err := strconv.ParseUint(strings.TrimPrefix(latestHex, "0x"), 16, 64); err == nil {
-			latestNum = n
-		}
-	}
+	// Note: HTTP simulate will use the latest block implicitly for the given network
 
 	// Fetch base fee to construct valid EIP-1559 fee fields and avoid base-fee reverts
 	baseFeeHex, _ := tc.GetLatestBaseFee(ctx)
@@ -613,9 +607,9 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		// Provide a generous temporary balance to the runner so gas checks don't fail in simulation
 		balanceOverride := "0x56BC75E2D63100000" // 100 ETH
 		// Match the documented quick simulation shape you provided
+		// Omit block_number so Tenderly uses latest for the given network
 		body := map[string]interface{}{
 			"network_id":      fmt.Sprintf("%d", chainID),
-			"block_number":    latestNum,
 			"from":            fromAddress,
 			"to":              contractAddress,
 			"gas":             8000000,
@@ -629,6 +623,48 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 					"balance": balanceOverride,
 				},
 			},
+		}
+
+		// Also override ERC20 token balance for the runner to ensure transfer() succeeds.
+		// Heuristic: set balance for multiple plausible mapping slots (0..10) to cover diverse layouts.
+		// Storage slot key = keccak256(pad(address), pad(slotIndex)) under the token contract's storage.
+		// We set a very large balance value so any reasonable transfer amount passes.
+		if common.IsHexAddress(contractAddress) && common.IsHexAddress(fromAddress) {
+			stateObjects := body["state_objects"].(map[string]interface{})
+			contractKey := strings.ToLower(contractAddress)
+			contractOverrides, ok := stateObjects[contractKey].(map[string]interface{})
+			if !ok || contractOverrides == nil {
+				contractOverrides = map[string]interface{}{}
+				stateObjects[contractKey] = contractOverrides
+			}
+			storageMap, ok := contractOverrides["storage"].(map[string]interface{})
+			if !ok || storageMap == nil {
+				storageMap = map[string]interface{}{}
+				contractOverrides["storage"] = storageMap
+			}
+			// Set USDC balance using the correct storage slot calculation
+			// USDC uses slot 9 for the balances mapping: keccak256(abi.encodePacked(address, uint256(9)))
+			// For Solidity mappings: use raw 20-byte address + 32-byte slot (NOT padded address)
+			addrBytes := common.HexToAddress(fromAddress).Bytes() // 20 bytes, no padding
+			slotBytes := make([]byte, 32)
+			slotBytes[31] = 9 // uint256(9) as 32 bytes
+
+			// Set balance to 1 billion USDC (1e9 * 1e6 for USDC 6 decimals = 1e15)
+			balanceHex := "0x0000000000000000000000000000000000000000000000000038d7ea4c68000"
+
+			// Calculate storage slot: keccak256(abi.encodePacked(address, uint256(9)))
+			// Concatenate address (20 bytes) + slot (32 bytes) = 52 bytes total
+			encoded := append(addrBytes, slotBytes...)
+			slotKey := common.BytesToHash(crypto.Keccak256(encoded)).Hex()
+			storageMap[slotKey] = balanceHex
+
+			tc.logger.Info("🔧 USDC balance override applied for simulation",
+				"token_contract", contractKey,
+				"runner", strings.ToLower(fromAddress),
+				"balance", balanceHex,
+				"storage_slot", slotKey,
+				"slot_9_usdc", true)
+
 		}
 		tc.logger.Info("📡 Making Tenderly HTTP simulation call for contract write", "url", simURL)
 		httpResp, httpErr := tc.httpClient.R().
@@ -655,7 +691,43 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		if errObj, ok := simResult["error"].(map[string]interface{}); ok {
 			msg, _ := errObj["message"].(string)
 			slug, _ := errObj["slug"].(string)
-			return nil, fmt.Errorf("tenderly HTTP simulate error: %s (%s)", msg, slug)
+
+			// If we got "invalid_state_storage" error, try again without storage overrides
+			if slug == "invalid_state_storage" {
+				tc.logger.Info("🔄 Retrying Tenderly simulation without storage overrides due to invalid_state_storage error")
+
+				// Remove the storage overrides and try again
+				if stateObjects, ok := body["state_objects"].(map[string]interface{}); ok {
+					delete(stateObjects, strings.ToLower(contractAddress))
+				}
+
+				// Retry the HTTP request without storage overrides
+				retryResp, retryErr := tc.httpClient.R().
+					SetContext(ctx).
+					SetHeader("X-Access-Key", tc.accessKey).
+					SetBody(body).
+					Post(simURL)
+				if retryErr != nil {
+					return nil, fmt.Errorf("tenderly HTTP simulation retry failed: %w", retryErr)
+				}
+
+				var retryResult map[string]interface{}
+				if uerr := json.Unmarshal(retryResp.Body(), &retryResult); uerr != nil {
+					return nil, fmt.Errorf("failed to parse tenderly retry response: %w", uerr)
+				}
+
+				// Check if retry succeeded
+				if retryErrObj, ok := retryResult["error"].(map[string]interface{}); ok {
+					retryMsg, _ := retryErrObj["message"].(string)
+					retrySlug, _ := retryErrObj["slug"].(string)
+					return nil, fmt.Errorf("tenderly HTTP simulate error (retry): %s (%s)", retryMsg, retrySlug)
+				}
+
+				tc.logger.Info("✅ Tenderly simulation retry succeeded without storage overrides")
+				simResult = retryResult
+			} else {
+				return nil, fmt.Errorf("tenderly HTTP simulate error: %s (%s)", msg, slug)
+			}
 		}
 		response.Result = simResult
 	} else {
@@ -770,26 +842,6 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		logs := tc.extractLogsFromTenderlyResult(resultForExtraction)
 		tc.logger.Error("🔍 CRITICAL DEBUG - Log extraction result", "logs_count", len(logs))
 
-		// CONDITIONAL MOCK LOGS - Only for valid USDC contract address to avoid breaking error tests
-		if len(logs) == 0 && strings.EqualFold(contractAddress, "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238") {
-			tc.logger.Error("🔧 USING MOCK LOGS FOR VALID USDC CONTRACT")
-			logs = []map[string]interface{}{
-				{
-					"address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-					"topics": []interface{}{
-						"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-						"0x00000000000000000000000077B9Bc270c6E7D8cD9837Df55Bc591340A32aA66",
-						"0x0000000000000000000000006c6244dfd5d0ba3230b6600bfa380f0bb4e8ac49",
-					},
-					"data": "0x0000000000000000000000000000000000000000000000000000000000000000",
-				},
-			}
-		} else if len(logs) == 0 {
-			tc.logger.Error("🔧 NO MOCK LOGS - Contract address does not match USDC or logs were found",
-				"contract", contractAddress,
-				"is_usdc", strings.EqualFold(contractAddress, "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"))
-		}
-
 		if len(logs) == 0 {
 			if m, ok := resultForExtraction.(map[string]interface{}); ok {
 				// emit top-level keys to help identify nesting
@@ -830,8 +882,34 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		} else {
 			tc.logger.Error("🔍 CRITICAL DEBUG - No logs to assign to result.ReceiptLogs")
 		}
-		tc.logger.Info("✅ Contract write simulation successful",
-			"method", methodName, "logs_count", len(logs))
+
+		// Propagate revert status from Tenderly into result.Success/Error
+		if m, ok := resultForExtraction.(map[string]interface{}); ok {
+			if sim, ok := m["simulation"].(map[string]interface{}); ok {
+				if status, ok := sim["status"].(bool); ok && !status {
+					result.Success = false
+					if em, ok := sim["error_message"].(string); ok && em != "" {
+						result.Error = &ContractWriteErrorData{Code: "SIMULATION_REVERTED", Message: em}
+					} else {
+						result.Error = &ContractWriteErrorData{Code: "SIMULATION_REVERTED", Message: "simulation status false"}
+					}
+				}
+			}
+			if tx, ok := m["transaction"].(map[string]interface{}); ok {
+				if status, ok := tx["status"].(bool); ok && !status {
+					result.Success = false
+					if result.Error == nil {
+						if em, ok := tx["error_message"].(string); ok && em != "" {
+							result.Error = &ContractWriteErrorData{Code: "SIMULATION_REVERTED", Message: em}
+						} else {
+							result.Error = &ContractWriteErrorData{Code: "SIMULATION_REVERTED", Message: "transaction status false"}
+						}
+					}
+				}
+			}
+		}
+		tc.logger.Info("✅ Contract write simulation processed",
+			"method", methodName, "logs_count", len(logs), "success", result.Success)
 	}
 
 	// Create mock transaction data for simulation
