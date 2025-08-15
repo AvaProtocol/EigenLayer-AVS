@@ -485,6 +485,35 @@ func parseABIParameter(param string, abiType abi.Type) (interface{}, error) {
 		// For now, return error to indicate unsupported
 		return nil, fmt.Errorf("array/slice parameters not yet supported in generateCallData")
 
+	case abi.TupleTy:
+		// Handle struct/tuple parameters
+		// If param is a JSON array, parse it and convert elements to appropriate types
+		if strings.HasPrefix(param, "[") && strings.HasSuffix(param, "]") {
+			var arrayElements []interface{}
+			if err := json.Unmarshal([]byte(param), &arrayElements); err != nil {
+				return nil, fmt.Errorf("failed to parse JSON array for tuple: %v", err)
+			}
+
+			// Validate that we have the right number of elements
+			if len(arrayElements) != len(abiType.TupleElems) {
+				return nil, fmt.Errorf("tuple expects %d elements, got %d", len(abiType.TupleElems), len(arrayElements))
+			}
+
+			// Parse each element according to its type
+			var tupleElements []interface{}
+			for i, element := range arrayElements {
+				elementStr := fmt.Sprintf("%v", element)
+				parsedElement, err := parseABIParameter(elementStr, *abiType.TupleElems[i])
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse tuple element %d: %v", i, err)
+				}
+				tupleElements = append(tupleElements, parsedElement)
+			}
+
+			return tupleElements, nil
+		}
+		return nil, fmt.Errorf("tuple parameter must be a JSON array")
+
 	default:
 		return nil, fmt.Errorf("unsupported ABI type: %s", abiType.String())
 	}

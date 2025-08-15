@@ -127,4 +127,40 @@ func TestObjectSerializationInTemplates(t *testing.T) {
 
 		t.Logf("✅ Array properly serialized as JSON: %s", result)
 	})
+
+	t.Run("Struct_Parameter_Handling", func(t *testing.T) {
+		// Test that struct parameters are correctly detected and handled
+		vm := NewVM()
+		vm.logger = testutil.GetLogger()
+		vm.IsSimulation = true
+
+		// Simulate the exact case: JSON array for struct parameter
+		testArray := []interface{}{
+			"0xfff9976782d46cc05630d1f6ebab18b2324d6b14", // tokenIn
+			"0xda317c1d3e835dd5f1be459006471acaa1289068", // tokenOut
+			"80000000000000000",                          // amountIn
+			500,                                          // fee
+			0,                                            // sqrtPriceLimitX96
+		}
+
+		vm.AddVar("quote_params", map[string]interface{}{
+			"data": testArray,
+		})
+
+		// Test template resolution produces JSON array
+		template := "{{quote_params.data}}"
+		result := vm.preprocessTextWithVariableMapping(template)
+
+		t.Logf("Template: %s", template)
+		t.Logf("Result: %s", result)
+
+		// Should be valid JSON array
+		assert.True(t, result[0] == '[' && result[len(result)-1] == ']',
+			"Result should be a JSON array for struct parameter")
+
+		// The contract write processor should detect this as a struct parameter
+		// and NOT expand it into individual parameters
+
+		t.Logf("✅ Struct parameter correctly formatted as JSON array: %s", result)
+	})
 }

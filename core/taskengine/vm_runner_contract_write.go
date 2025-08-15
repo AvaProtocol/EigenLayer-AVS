@@ -153,7 +153,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		resolvedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(param)
 	}
 
-	// Handle JSON arrays: if a single parameter is a JSON array, expand it into individual parameters
+	// Handle JSON arrays: if a single parameter is a JSON array, check if it should be treated as a struct
 	// This supports struct/tuple parameters where the client returns an array from custom code
 	if len(resolvedMethodParams) == 1 {
 		param := resolvedMethodParams[0]
@@ -161,17 +161,33 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		if strings.HasPrefix(param, "[") && strings.HasSuffix(param, "]") {
 			var arrayElements []interface{}
 			if err := json.Unmarshal([]byte(param), &arrayElements); err == nil {
-				// Successfully parsed as JSON array - expand into individual string parameters
-				expandedParams := make([]string, len(arrayElements))
-				for j, element := range arrayElements {
-					expandedParams[j] = fmt.Sprintf("%v", element)
-				}
-				resolvedMethodParams = expandedParams
-				if r.vm != nil && r.vm.logger != nil {
-					r.vm.logger.Info("🔄 CONTRACT WRITE - Expanded JSON array into individual parameters",
-						"original_param", param,
-						"expanded_count", len(expandedParams),
-						"expanded_params", expandedParams)
+				// Check if this method expects a struct parameter by examining the ABI
+				if parsedABI != nil {
+					if method, exists := parsedABI.Methods[methodCall.MethodName]; exists {
+						// If method expects exactly 1 parameter and it's a tuple (struct), keep as single parameter
+						if len(method.Inputs) == 1 && method.Inputs[0].Type.T == abi.TupleTy {
+							// Keep the original JSON array as a single parameter for struct handling
+							if r.vm != nil && r.vm.logger != nil {
+								r.vm.logger.Info("🔄 CONTRACT WRITE - Detected struct parameter, keeping JSON array as single parameter",
+									"method", methodCall.MethodName,
+									"param_type", method.Inputs[0].Type.String(),
+									"array_elements", len(arrayElements))
+							}
+							// Don't expand - keep as single JSON array parameter for struct processing
+						} else {
+							// Method expects multiple parameters - expand the array
+							expandedParams := make([]string, len(arrayElements))
+							for j, element := range arrayElements {
+								expandedParams[j] = fmt.Sprintf("%v", element)
+							}
+							resolvedMethodParams = expandedParams
+							if r.vm != nil && r.vm.logger != nil {
+								r.vm.logger.Info("🔄 CONTRACT WRITE - Expanded JSON array into individual parameters",
+									"method", methodCall.MethodName,
+									"expanded_count", len(expandedParams))
+							}
+						}
+					}
 				}
 			}
 		}
