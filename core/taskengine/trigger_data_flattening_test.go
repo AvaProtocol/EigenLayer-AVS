@@ -544,8 +544,8 @@ func TestBlockTriggerFieldNamingConsistency(t *testing.T) {
 
 	t.Log("✅ Block trigger field naming is consistent between both functions")
 	t.Log("⚠️  NOTE: Protobuf conversion changes uint64 to float64 - this is a known limitation")
-	t.Logf("  rawResult keys: %v", getMapKeys(rawResult))
-	t.Logf("  protobufResult keys: %v", getMapKeys(protobufResult))
+	t.Logf("  rawResult keys: %v", GetMapKeys(rawResult))
+	t.Logf("  protobufResult keys: %v", GetMapKeys(protobufResult))
 }
 
 // TestClientInputOutputConsistency tests that user input values match what they get back in execution steps

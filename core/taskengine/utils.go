@@ -518,3 +518,16 @@ func parseABIParameter(param string, abiType abi.Type) (interface{}, error) {
 		return nil, fmt.Errorf("unsupported ABI type: %s", abiType.String())
 	}
 }
+
+// GetMapKeys returns the keys of a map[string]interface{} as a slice of strings
+// This is a utility function used across multiple files for debugging purposes
+func GetMapKeys(m map[string]interface{}) []string {
+	if m == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}

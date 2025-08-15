@@ -2052,7 +2052,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Debug logging for EventTriggers to track data extraction
 	if triggerReason.Type == avsproto.TriggerType_TRIGGER_TYPE_EVENT {
-		n.logger.Debug("🔍 SimulateTask: EventTrigger data extraction", "inputKeys", getMapKeys(triggerOutput), "outputKeys", getMapKeys(triggerDataMap))
+		n.logger.Debug("🔍 SimulateTask: EventTrigger data extraction", "inputKeys", GetMapKeys(triggerOutput), "outputKeys", GetMapKeys(triggerDataMap))
 	}
 
 	// Extract trigger config data if available

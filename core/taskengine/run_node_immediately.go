@@ -2618,7 +2618,7 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 			if n.logger != nil {
 				n.logger.Info("🔍 RunTriggerRPC: Checking for metadata in result",
 					"hasResult", result != nil,
-					"resultKeys", getMapKeys(result))
+					"resultKeys", GetMapKeys(result))
 			}
 
 			if metadata, hasMetadata := result["metadata"]; hasMetadata && metadata != nil {
@@ -2900,18 +2900,6 @@ func (n *Engine) evaluateEventConditions(eventLog *types.Log, conditions []*avsp
 		// Add more field types here as needed (roundId, updatedAt, etc.)
 	}
 	return true
-}
-
-// getMapKeys returns the keys of a map for debugging purposes
-func getMapKeys(m map[string]interface{}) []string {
-	if m == nil {
-		return nil
-	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }
 
 // convertToProtobufCompatible converts data structures to be compatible with structpb.NewValue()

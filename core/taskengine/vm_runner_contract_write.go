@@ -181,7 +181,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 										r.vm.logger.Error("❌ CONTRACT WRITE - Missing field in struct object",
 											"method", methodCall.MethodName,
 											"missing_field", fieldName,
-											"available_fields", getMapKeys(objData))
+											"available_fields", GetMapKeys(objData))
 									}
 								}
 							}

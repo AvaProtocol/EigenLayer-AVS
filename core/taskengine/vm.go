@@ -3934,7 +3934,7 @@ func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsp
 	if !ok {
 		// Try to extract from data field if wrapped (common for trigger variables)
 		if dataMap, ok := inputVar.(map[string]interface{}); ok {
-			log.WriteString(fmt.Sprintf("\nInput variable is a map with keys: %v", getMapKeys(dataMap)))
+			log.WriteString(fmt.Sprintf("\nInput variable is a map with keys: %v", GetMapKeys(dataMap)))
 
 			if dataValue, hasData := dataMap["data"]; hasData {
 				log.WriteString(fmt.Sprintf("\nFound 'data' field of type: %T", dataValue))
@@ -3959,7 +3959,7 @@ func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsp
 				}
 			} else {
 				// No data field found
-				err := fmt.Errorf("input variable %s is not an array and has no 'data' field (available keys: %v)", inputVarName, getMapKeys(dataMap))
+				err := fmt.Errorf("input variable %s is not an array and has no 'data' field (available keys: %v)", inputVarName, GetMapKeys(dataMap))
 				log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 				finalizeExecutionStep(s, false, err.Error(), log.String())
 				return s, err
