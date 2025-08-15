@@ -565,6 +565,9 @@ func TestExecutorRunTaskWithBlockTriggerOutputData(t *testing.T) {
 	if os.Getenv("SEPOLIA_BUNDLER_RPC") == "" {
 		t.Skip("Skipping BlockTrigger ETH transfer test: SEPOLIA_BUNDLER_RPC not configured")
 	}
+	if os.Getenv("CONTROLLER_PRIVATE_KEY") == "" {
+		t.Skip("Skipping BlockTrigger ETH transfer test: CONTROLLER_PRIVATE_KEY not configured")
+	}
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
@@ -653,6 +656,9 @@ func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
 	if os.Getenv("SEPOLIA_BUNDLER_RPC") == "" {
 		t.Skip("Skipping FixedTimeTrigger ETH transfer test: SEPOLIA_BUNDLER_RPC not configured")
 	}
+	if os.Getenv("CONTROLLER_PRIVATE_KEY") == "" {
+		t.Skip("Skipping FixedTimeTrigger ETH transfer test: CONTROLLER_PRIVATE_KEY not configured")
+	}
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
@@ -727,6 +733,9 @@ func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
 func TestExecutorRunTaskWithCronTriggerOutputData(t *testing.T) {
 	if os.Getenv("SEPOLIA_BUNDLER_RPC") == "" {
 		t.Skip("Skipping CronTrigger ETH transfer test: SEPOLIA_BUNDLER_RPC not configured")
+	}
+	if os.Getenv("CONTROLLER_PRIVATE_KEY") == "" {
+		t.Skip("Skipping CronTrigger ETH transfer test: CONTROLLER_PRIVATE_KEY not configured")
 	}
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
