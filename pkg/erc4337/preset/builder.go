@@ -137,12 +137,12 @@ func SendUserOp(
 		return userOp, nil, fmt.Errorf("failed to get chain ID: %w", err)
 	}
 
-	for retry := 0; retry < maxRetries; retry++ {
-		// Fetch fresh nonce right before each send attempt
-		freshNonce := aa.MustNonce(client, userOp.Sender, accountSalt)
-		userOp.Nonce = freshNonce
+	// Fetch nonce before entering the retry loop
+	freshNonce := aa.MustNonce(client, userOp.Sender, accountSalt)
+	userOp.Nonce = freshNonce
 
-		log.Printf("🔄 DEPLOYED WORKFLOW: Attempt %d/%d - Using nonce: %s", retry+1, maxRetries, freshNonce.String())
+	for retry := 0; retry < maxRetries; retry++ {
+		log.Printf("🔄 DEPLOYED WORKFLOW: Attempt %d/%d - Using nonce: %s", retry+1, maxRetries, userOp.Nonce.String())
 
 		// Re-estimate gas with current nonce (only on first attempt or if previous failed due to gas)
 		if retry == 0 || (err != nil && strings.Contains(err.Error(), "gas")) {
@@ -172,17 +172,20 @@ func SendUserOp(
 
 		// If successful, break
 		if err == nil && txResult != "" {
-			log.Printf("✅ DEPLOYED WORKFLOW: UserOp sent successfully on attempt %d - nonce: %s, txResult: %s", retry+1, freshNonce.String(), txResult)
+			log.Printf("✅ DEPLOYED WORKFLOW: UserOp sent successfully on attempt %d - nonce: %s, txResult: %s", retry+1, userOp.Nonce.String(), txResult)
 			break
 		}
 
 		// Log the error and decide whether to retry
 		log.Printf("🔄 DEPLOYED WORKFLOW: Attempt %d failed - error: %v", retry+1, err)
 
-		// For nonce errors, always retry (nonce will be refetched)
+		// For nonce errors, refetch nonce and retry
 		if err != nil && strings.Contains(err.Error(), "AA25 invalid account nonce") {
 			if retry < maxRetries-1 {
-				log.Printf("🔄 DEPLOYED WORKFLOW: Nonce conflict, will refetch and retry")
+				log.Printf("🔄 DEPLOYED WORKFLOW: Nonce conflict detected, refetching fresh nonce")
+				freshNonce = aa.MustNonce(client, userOp.Sender, accountSalt)
+				userOp.Nonce = freshNonce
+				log.Printf("🔄 DEPLOYED WORKFLOW: Updated nonce to: %s", freshNonce.String())
 				continue
 			}
 		}
