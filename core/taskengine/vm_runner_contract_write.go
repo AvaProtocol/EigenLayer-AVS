@@ -235,11 +235,44 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		tenderlyClient := NewTenderlyClient(r.vm.logger)
 
 		// Get chain ID for simulation
-		var chainID int64 = 11155111 // Default to Sepolia
-		if r.smartWalletConfig != nil {
-			// Try to extract chain ID from RPC URL or use default
-			chainID = 11155111 // Sepolia default
+		// STRICT: In runNode path, chainId must be provided via workflowContext.chainId
+		var chainID int64
+		foundChainID := false
+		if wfCtxIface, ok := r.vm.vars[WorkflowContextVarName]; ok {
+			if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
+				if cid, ok := wfCtx["chainId"]; ok {
+					switch v := cid.(type) {
+					case int64:
+						chainID = v
+						foundChainID = true
+					case int:
+						chainID = int64(v)
+						foundChainID = true
+					case float64:
+						chainID = int64(v)
+						foundChainID = true
+					case string:
+						if strings.HasPrefix(strings.ToLower(v), "0x") {
+							if parsed, err := strconv.ParseInt(strings.TrimPrefix(strings.ToLower(v), "0x"), 16, 64); err == nil {
+								chainID = parsed
+								foundChainID = true
+							}
+						} else if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+							chainID = parsed
+							foundChainID = true
+						}
+					}
+				}
+			}
 		}
+		if !foundChainID {
+			return &avsproto.ContractWriteNode_MethodResult{
+				MethodName: methodName,
+				Success:    false,
+				Error:      "workflowContext.chainId is required for runNode contractWrite",
+			}
+		}
+		r.vm.logger.Debug("ContractWrite: resolved chain id for simulation", "chain_id", chainID)
 
 		// Get contract ABI as string
 		var contractAbiStr string
@@ -375,20 +408,12 @@ func (r *ContractWriteProcessor) executeMethodCall(
 
 // executeRealUserOpTransaction executes a real UserOp transaction for contract writes
 func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Context, contractAddress common.Address, callData string, methodName string, parsedABI *abi.ABI, startTime time.Time) *avsproto.ContractWriteNode_MethodResult {
-	// Get the actual sender (runner) from VM variables for contract write operations
-	senderAddress := r.owner // Default to owner (eoaAddress)
-	if aaSenderVar, ok := r.vm.vars["aa_sender"]; ok {
-		if aaSenderStr, ok := aaSenderVar.(string); ok && aaSenderStr != "" {
-			senderAddress = common.HexToAddress(aaSenderStr)
-		}
-	}
-
 	r.vm.logger.Info("🔍 REAL USEROP DEBUG - Starting real UserOp transaction execution",
 		"contract_address", contractAddress.Hex(),
 		"method_name", methodName,
 		"calldata_length", len(callData),
 		"calldata", callData,
-		"sender", senderAddress.Hex())
+		"owner_eoaAddress", r.owner.Hex())
 
 	// Convert hex calldata to bytes
 	callDataBytes := common.FromHex(callData)
@@ -400,7 +425,11 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		callDataBytes,   // contract method calldata
 	)
 	if err != nil {
-		r.vm.logger.Error("Failed to pack smart wallet execute calldata", "error", err)
+		r.vm.logger.Error("🚨 DEPLOYED WORKFLOW ERROR: Failed to pack smart wallet execute calldata",
+			"error", err,
+			"contract_address", contractAddress.Hex(),
+			"method_name", methodName,
+			"calldata_bytes_length", len(callDataBytes))
 		// Return error result - workflow execution FAILS (no fallback for deployed workflows)
 		return &avsproto.ContractWriteNode_MethodResult{
 			Success: false,
@@ -451,24 +480,35 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 			"owner", r.owner.Hex())
 	}
 
-	// Determine AA overrides from VM vars: prefer senderOverride; else saltOverride
+	// Determine AA overrides from VM vars: get smart wallet address for senderOverride
 	var senderOverride *common.Address
 	r.vm.mu.Lock()
 	if v, ok := r.vm.vars["aa_sender"]; ok {
 		if s, ok2 := v.(string); ok2 && common.IsHexAddress(s) {
 			addr := common.HexToAddress(s)
 			senderOverride = &addr
+			r.vm.logger.Info("🔍 DEPLOYED WORKFLOW: UserOp sender configuration",
+				"owner_eoaAddress", r.owner.Hex(),
+				"senderOverride_smartWallet", addr.Hex(),
+				"aa_sender_var", s)
 		}
 	}
 	r.vm.mu.Unlock()
 
-	// Send UserOp transaction with overrides
+	if senderOverride == nil {
+		r.vm.logger.Error("🚨 DEPLOYED WORKFLOW ERROR: aa_sender not found in VM vars",
+			"owner_eoaAddress", r.owner.Hex())
+	}
+
+	// Send UserOp transaction with correct parameters:
+	// - owner: EOA address (r.owner) for smart wallet derivation
+	// - senderOverride: smart wallet address (aa_sender) for the actual transaction
 	userOp, receipt, err := r.sendUserOpFunc(
 		r.smartWalletConfig,
-		senderAddress, // Use runner address for real transaction
+		r.owner, // Use EOA address (owner) for smart wallet derivation
 		smartWalletCallData,
 		paymasterReq,
-		senderOverride,
+		senderOverride, // Smart wallet address from aa_sender
 	)
 
 	// Increment transaction counter for this address (regardless of success/failure)
@@ -499,6 +539,23 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 
 // createRealTransactionResult creates a result from a real UserOp transaction
 func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contractAddress, callData string, parsedABI *abi.ABI, userOp *userop.UserOperation, receipt *types.Receipt) *avsproto.ContractWriteNode_MethodResult {
+	r.vm.logger.Info("🔍 DEPLOYED WORKFLOW: Creating real transaction result",
+		"method_name", methodName,
+		"contract_address", contractAddress,
+		"has_receipt", receipt != nil,
+		"has_userop", userOp != nil)
+
+	if receipt != nil {
+		r.vm.logger.Info("📋 DEPLOYED WORKFLOW: Transaction receipt details",
+			"tx_hash", receipt.TxHash.Hex(),
+			"status", receipt.Status,
+			"gas_used", receipt.GasUsed,
+			"block_number", receipt.BlockNumber.Uint64(),
+			"logs_count", len(receipt.Logs))
+	} else {
+		r.vm.logger.Error("🚨 DEPLOYED WORKFLOW ERROR: No receipt available for transaction result")
+	}
+
 	// Extract methodABI from contract ABI if available
 	var methodABI *structpb.Value
 	if parsedABI != nil {
@@ -585,11 +642,27 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 		r.vm.logger.Error("🔍 REAL TRANSACTION DEBUG - No receipt available")
 	}
 
+	success := receipt != nil && receipt.Status == 1
+	errorMsg := ""
+	if !success {
+		if receipt == nil {
+			errorMsg = "No transaction receipt received"
+		} else if receipt.Status != 1 {
+			errorMsg = fmt.Sprintf("Transaction failed with status %d", receipt.Status)
+		}
+	}
+
+	r.vm.logger.Info("🎯 DEPLOYED WORKFLOW: Final transaction result",
+		"method_name", methodName,
+		"success", success,
+		"error_msg", errorMsg,
+		"has_receipt_value", receiptValue != nil)
+
 	return &avsproto.ContractWriteNode_MethodResult{
 		MethodName: methodName,
 		MethodAbi:  methodABI,
-		Success:    receipt != nil && receipt.Status == 1, // Success if receipt exists and status is 1
-		Error:      "",
+		Success:    success,
+		Error:      errorMsg,
 		Receipt:    receiptValue,
 		Value:      nil, // Real transactions don't return values directly
 	}
@@ -910,6 +983,11 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			}
 			log.WriteString(fmt.Sprintf("✅ Success: %s (tx: %s)\n", result.MethodName, txHash))
 		} else {
+			r.vm.logger.Error("🚨 DEPLOYED WORKFLOW: Method execution failed",
+				"method_name", result.MethodName,
+				"error_message", result.Error,
+				"error_length", len(result.Error),
+				"success", result.Success)
 			log.WriteString(fmt.Sprintf("❌ Failed: %s - %s\n", result.MethodName, result.Error))
 			// Don't fail the entire execution for individual method failures
 		}
@@ -1073,6 +1151,13 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// Also expose flattened decoded events under "data" for callers that read from VM vars
 	outputVars["data"] = decodedEventsData
 
+	// 🔍 DEBUG: Log what we're storing in outputVars
+	r.vm.logger.Error("🔍 CONTRACT WRITE DEBUG - Setting outputVars",
+		"stepID", stepID,
+		"outputVars_keys", getOutputVarKeys(outputVars),
+		"decodedEventsData", decodedEventsData,
+		"decodedEventsData_size", len(decodedEventsData))
+
 	// Use shared function to set output variable for this step
 	setNodeOutputData(r.CommonProcessor, stepID, outputVars)
 
@@ -1083,6 +1168,15 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	finalizeExecutionStep(s, stepSuccess, stepErrorMsg, log.String())
 
 	return s, nil
+}
+
+// getOutputVarKeys returns the keys of a map as a slice of strings for debugging
+func getOutputVarKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // convertMapToEventLog converts a log map from receipt to types.Log structure for event parsing
