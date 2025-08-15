@@ -742,16 +742,8 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	s.Metadata = resultsValue
 
 	// Set output variables for backward compatibility
-	// For single method calls, set the first result as the main output
-	if len(results) > 0 && results[0].Success {
-		// Convert structured fields to interface{} for VM variable setting
-		var resultInterfaces []interface{}
-		for _, field := range results[0].Data {
-			resultInterfaces = append(resultInterfaces, field.Value)
-		}
-		// Use shared function to set output variable for this step
-		setNodeOutputData(r.CommonProcessor, stepID, resultInterfaces)
-	}
+	// Use shared function to set output variable for this step with proper object structure
+	setNodeOutputData(r.CommonProcessor, stepID, combinedCleanData)
 
 	// Add decimals info to metadata if we retrieved it
 	if len(decimalProviders) > 0 {
