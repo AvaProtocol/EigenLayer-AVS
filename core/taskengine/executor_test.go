@@ -3,7 +3,6 @@ package taskengine
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -561,248 +560,176 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 	}
 }
 
-func TestExecutorRunTaskWithBlockTriggerOutputData(t *testing.T) {
-	if os.Getenv("SEPOLIA_BUNDLER_RPC") == "" {
-		t.Skip("Skipping BlockTrigger ETH transfer test: SEPOLIA_BUNDLER_RPC not configured")
-	}
-	if os.Getenv("CONTROLLER_PRIVATE_KEY") == "" {
-		t.Skip("Skipping BlockTrigger ETH transfer test: CONTROLLER_PRIVATE_KEY not configured")
-	}
-	db := testutil.TestMustDB()
-	defer storage.Destroy(db.(*storage.BadgerStorage))
-
-	// Create a simple task with block trigger and ETH transfer node
-	nodes := []*avsproto.TaskNode{
-		{
-			Id:   "eth_transfer_1",
-			Name: "TransferETH",
-			TaskType: &avsproto.TaskNode_EthTransfer{
-				EthTransfer: &avsproto.ETHTransferNode{
-					Config: &avsproto.ETHTransferNode_Config{
-						Destination: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
-						Amount:      "1000000000000000000", // 1 ETH in wei
-					},
-				},
-			},
-		},
+// TestBlockTriggerOutputDataStructure tests that block trigger output data is properly structured
+// This replaces the expensive integration test that tried to do real ETH transfers
+func TestBlockTriggerOutputDataStructure(t *testing.T) {
+	// Test the actual trigger output data structure conversion - what the original test should have been testing
+	rawTriggerOutput := map[string]interface{}{
+		"blockNumber": uint64(12345),
+		"blockHash":   "0xabcdef123456",
+		"timestamp":   uint64(1672531200),
+		"parentHash":  "0x123456abcdef",
+		"difficulty":  "1000000",
+		"gasLimit":    uint64(30000000),
+		"gasUsed":     uint64(21000),
 	}
 
-	trigger := &avsproto.TaskTrigger{
-		Id:   "block_trigger",
-		Name: "blockTrigger",
-		TriggerType: &avsproto.TaskTrigger_Block{
-			Block: &avsproto.BlockTrigger{
-				Config: &avsproto.BlockTrigger_Config{
-					Interval: 5,
-				},
-			},
-		},
+	// Test buildBlockTriggerOutput function (the actual logic being tested)
+	blockOutput := buildBlockTriggerOutput(rawTriggerOutput)
+
+	// Verify the output structure
+	if blockOutput == nil {
+		t.Fatal("buildBlockTriggerOutput should not return nil")
 	}
 
-	edges := []*avsproto.TaskEdge{
-		{
-			Id:     "edge_1",
-			Source: trigger.Id,
-			Target: "eth_transfer_1",
-		},
+	if blockOutput.Data == nil {
+		t.Fatal("BlockTrigger output Data should not be nil")
 	}
 
-	task := &model.Task{
-		Task: &avsproto.Task{
-			Id:      "BlockTriggerTaskID123",
-			Nodes:   nodes,
-			Edges:   edges,
-			Trigger: trigger,
-		},
+	// Verify data can be converted back
+	dataMap := blockOutput.Data.AsInterface().(map[string]interface{})
+	if dataMap == nil {
+		t.Fatal("BlockTrigger output Data should convert to map")
 	}
 
-	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), nil)
-	triggerData := testutil.GetTestEventTriggerData()
-	execution, err := executor.RunTask(task, &QueueExecutionData{
-		TriggerType:   triggerData.Type,
-		TriggerOutput: triggerData.Output,
-		ExecutionID:   "block_exec123",
-	})
-
-	// Basic execution checks
-	if execution.Id != "block_exec123" {
-		t.Errorf("expect execution id is block_exec123 but got: %s", execution.Id)
+	// Test specific fields and the known uint64->float64 conversion
+	if blockNumber, exists := dataMap["blockNumber"]; exists {
+		// Due to protobuf conversion, uint64 becomes float64
+		if blockNumFloat, ok := blockNumber.(float64); ok {
+			if blockNumFloat != 12345.0 {
+				t.Errorf("Expected blockNumber 12345.0, got %v", blockNumFloat)
+			}
+		} else {
+			t.Errorf("Expected blockNumber to be float64 after protobuf conversion, got %T", blockNumber)
+		}
+	} else {
+		t.Error("blockNumber field missing from output")
 	}
 
-	if !execution.Success {
-		t.Errorf("expect success status but got failure: %s", execution.Error)
+	// Test string fields remain unchanged
+	if blockHash, exists := dataMap["blockHash"]; exists {
+		if hashStr, ok := blockHash.(string); ok {
+			if hashStr != "0xabcdef123456" {
+				t.Errorf("Expected blockHash '0xabcdef123456', got %v", hashStr)
+			}
+		} else {
+			t.Errorf("Expected blockHash to be string, got %T", blockHash)
+		}
+	} else {
+		t.Error("blockHash field missing from output")
 	}
 
-	if err != nil || execution.Error != "" {
-		t.Errorf("expect no error but got: %s", execution.Error)
-	}
-
-	// Verify execution steps
-	if len(execution.Steps) != 2 {
-		t.Errorf("expect 2 steps (trigger + node) but got: %d", len(execution.Steps))
-	}
-
-	// Check eth_transfer_1 step at index 0 (no trigger step in regular executions)
-	if execution.Steps[1].Id != "eth_transfer_1" {
-		t.Errorf("expect step NodeId is eth_transfer_1 but got: %s", execution.Steps[1].Id)
-	}
-
-	if !execution.Steps[1].Success {
-		t.Errorf("expect step to succeed but got failure: %s", execution.Steps[1].Error)
-	}
+	t.Log("✅ Block trigger output data structure test passed")
 }
 
-func TestExecutorRunTaskWithFixedTimeTriggerOutputData(t *testing.T) {
-	if os.Getenv("SEPOLIA_BUNDLER_RPC") == "" {
-		t.Skip("Skipping FixedTimeTrigger ETH transfer test: SEPOLIA_BUNDLER_RPC not configured")
-	}
-	if os.Getenv("CONTROLLER_PRIVATE_KEY") == "" {
-		t.Skip("Skipping FixedTimeTrigger ETH transfer test: CONTROLLER_PRIVATE_KEY not configured")
-	}
-	db := testutil.TestMustDB()
-	defer storage.Destroy(db.(*storage.BadgerStorage))
-
-	// Create a simple task with fixed time trigger and ETH transfer node
-	nodes := []*avsproto.TaskNode{
-		{
-			Id:   "eth_transfer_1",
-			Name: "TransferETH",
-			TaskType: &avsproto.TaskNode_EthTransfer{
-				EthTransfer: &avsproto.ETHTransferNode{
-					Config: &avsproto.ETHTransferNode_Config{
-						Destination: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
-						Amount:      "1000000000000000000", // 1 ETH in wei
-					},
-				},
-			},
-		},
+// TestFixedTimeTriggerOutputDataStructure tests that fixed time trigger output data is properly structured
+func TestFixedTimeTriggerOutputDataStructure(t *testing.T) {
+	// Test the actual trigger output data structure conversion
+	rawTriggerOutput := map[string]interface{}{
+		"timestamp":     uint64(1672531200),
+		"timestamp_iso": "2023-01-01T00:00:00Z",
 	}
 
-	trigger := &avsproto.TaskTrigger{
-		Id:   "fixed_time_trigger",
-		Name: "fixedTimeTrigger",
-		TriggerType: &avsproto.TaskTrigger_FixedTime{
-			FixedTime: &avsproto.FixedTimeTrigger{
-				Config: &avsproto.FixedTimeTrigger_Config{
-					Epochs: []int64{1640995200}, // Example epoch timestamp
-				},
-			},
-		},
+	// Test buildFixedTimeTriggerOutput function
+	fixedTimeOutput := buildFixedTimeTriggerOutput(rawTriggerOutput)
+
+	// Verify the output structure
+	if fixedTimeOutput == nil {
+		t.Fatal("buildFixedTimeTriggerOutput should not return nil")
 	}
 
-	edges := []*avsproto.TaskEdge{
-		{
-			Id:     "edge_1",
-			Source: trigger.Id,
-			Target: "eth_transfer_1",
-		},
+	if fixedTimeOutput.Data == nil {
+		t.Fatal("FixedTimeTrigger output Data should not be nil")
 	}
 
-	task := &model.Task{
-		Task: &avsproto.Task{
-			Id:      "FixedTimeTriggerTaskID123",
-			Nodes:   nodes,
-			Edges:   edges,
-			Trigger: trigger,
-		},
+	// Verify data can be converted back
+	dataMap := fixedTimeOutput.Data.AsInterface().(map[string]interface{})
+	if dataMap == nil {
+		t.Fatal("FixedTimeTrigger output Data should convert to map")
 	}
 
-	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), nil)
-	triggerData := testutil.GetTestEventTriggerData()
-	execution, err := executor.RunTask(task, &QueueExecutionData{
-		TriggerType:   triggerData.Type,
-		TriggerOutput: triggerData.Output,
-		ExecutionID:   "fixed_time_exec123",
-	})
-
-	// Since we removed mock data generation, this test should now succeed
-	// because the VM execution path uses real trigger data from TriggerReason
-	if execution.Id != "fixed_time_exec123" {
-		t.Errorf("expect execution id is fixed_time_exec123 but got: %s", execution.Id)
+	// Test timestamp field and the known uint64->float64 conversion
+	if timestamp, exists := dataMap["timestamp"]; exists {
+		// Due to protobuf conversion, uint64 becomes float64
+		if timestampFloat, ok := timestamp.(float64); ok {
+			if timestampFloat != 1672531200.0 {
+				t.Errorf("Expected timestamp 1672531200.0, got %v", timestampFloat)
+			}
+		} else {
+			t.Errorf("Expected timestamp to be float64 after protobuf conversion, got %T", timestamp)
+		}
+	} else {
+		t.Error("timestamp field missing from output")
 	}
 
-	if !execution.Success {
-		t.Errorf("expect success status but got failure: %s", execution.Error)
+	// Test timestampIso field remains string
+	if timestampIso, exists := dataMap["timestampIso"]; exists {
+		if isoStr, ok := timestampIso.(string); ok {
+			if isoStr != "2023-01-01T00:00:00Z" {
+				t.Errorf("Expected timestampIso '2023-01-01T00:00:00Z', got %v", isoStr)
+			}
+		} else {
+			t.Errorf("Expected timestampIso to be string, got %T", timestampIso)
+		}
+	} else {
+		t.Error("timestampIso field missing from output")
 	}
 
-	if err != nil || execution.Error != "" {
-		t.Errorf("expect no error but got: %s", execution.Error)
-	}
+	t.Log("✅ Fixed time trigger output data structure test passed")
 }
 
-func TestExecutorRunTaskWithCronTriggerOutputData(t *testing.T) {
-	if os.Getenv("SEPOLIA_BUNDLER_RPC") == "" {
-		t.Skip("Skipping CronTrigger ETH transfer test: SEPOLIA_BUNDLER_RPC not configured")
-	}
-	if os.Getenv("CONTROLLER_PRIVATE_KEY") == "" {
-		t.Skip("Skipping CronTrigger ETH transfer test: CONTROLLER_PRIVATE_KEY not configured")
-	}
-	db := testutil.TestMustDB()
-	defer storage.Destroy(db.(*storage.BadgerStorage))
-
-	// Create a simple task with cron trigger and ETH transfer node
-	nodes := []*avsproto.TaskNode{
-		{
-			Id:   "eth_transfer_1",
-			Name: "TransferETH",
-			TaskType: &avsproto.TaskNode_EthTransfer{
-				EthTransfer: &avsproto.ETHTransferNode{
-					Config: &avsproto.ETHTransferNode_Config{
-						Destination: "0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b6",
-						Amount:      "1000000000000000000", // 1 ETH in wei
-					},
-				},
-			},
-		},
+// TestCronTriggerOutputDataStructure tests that cron trigger output data is properly structured
+func TestCronTriggerOutputDataStructure(t *testing.T) {
+	// Test the actual trigger output data structure conversion
+	rawTriggerOutput := map[string]interface{}{
+		"timestamp":     uint64(1672531200),
+		"timestamp_iso": "2023-01-01T00:00:00Z",
 	}
 
-	trigger := &avsproto.TaskTrigger{
-		Id:   "cron_trigger",
-		Name: "cronTrigger",
-		TriggerType: &avsproto.TaskTrigger_Cron{
-			Cron: &avsproto.CronTrigger{
-				Config: &avsproto.CronTrigger_Config{
-					Schedules: []string{"0 0 * * *"}, // Daily at midnight
-				},
-			},
-		},
+	// Test buildCronTriggerOutput function
+	cronOutput := buildCronTriggerOutput(rawTriggerOutput)
+
+	// Verify the output structure
+	if cronOutput == nil {
+		t.Fatal("buildCronTriggerOutput should not return nil")
 	}
 
-	edges := []*avsproto.TaskEdge{
-		{
-			Id:     "edge_1",
-			Source: trigger.Id,
-			Target: "eth_transfer_1",
-		},
+	if cronOutput.Data == nil {
+		t.Fatal("CronTrigger output Data should not be nil")
 	}
 
-	task := &model.Task{
-		Task: &avsproto.Task{
-			Id:      "CronTriggerTaskID123",
-			Nodes:   nodes,
-			Edges:   edges,
-			Trigger: trigger,
-		},
+	// Verify data can be converted back
+	dataMap := cronOutput.Data.AsInterface().(map[string]interface{})
+	if dataMap == nil {
+		t.Fatal("CronTrigger output Data should convert to map")
 	}
 
-	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), nil)
-	triggerData := testutil.GetTestEventTriggerData()
-	execution, err := executor.RunTask(task, &QueueExecutionData{
-		TriggerType:   triggerData.Type,
-		TriggerOutput: triggerData.Output,
-		ExecutionID:   "cron_exec123",
-	})
-
-	// Basic execution checks
-	if execution.Id != "cron_exec123" {
-		t.Errorf("expect execution id is cron_exec123 but got: %s", execution.Id)
+	// Test timestamp field and the known uint64->float64 conversion
+	if timestamp, exists := dataMap["timestamp"]; exists {
+		// Due to protobuf conversion, uint64 becomes float64
+		if timestampFloat, ok := timestamp.(float64); ok {
+			if timestampFloat != 1672531200.0 {
+				t.Errorf("Expected timestamp 1672531200.0, got %v", timestampFloat)
+			}
+		} else {
+			t.Errorf("Expected timestamp to be float64 after protobuf conversion, got %T", timestamp)
+		}
+	} else {
+		t.Error("timestamp field missing from output")
 	}
 
-	if !execution.Success {
-		t.Errorf("expect success status but got failure: %s", execution.Error)
+	// Test timestampIso field remains string
+	if timestampIso, exists := dataMap["timestampIso"]; exists {
+		if isoStr, ok := timestampIso.(string); ok {
+			if isoStr != "2023-01-01T00:00:00Z" {
+				t.Errorf("Expected timestampIso '2023-01-01T00:00:00Z', got %v", isoStr)
+			}
+		} else {
+			t.Errorf("Expected timestampIso to be string, got %T", timestampIso)
+		}
+	} else {
+		t.Error("timestampIso field missing from output")
 	}
 
-	if err != nil || execution.Error != "" {
-		t.Errorf("expect no error but got: %s", execution.Error)
-	}
+	t.Log("✅ Cron trigger output data structure test passed")
 }
