@@ -338,7 +338,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			}
 		}
 		// Finally, attach Tenderly logs into the flexible receipt (do this last to avoid overwrites)
-		r.vm.logger.Debug("🔍 LOG ATTACHMENT CHECK",
+		r.vm.logger.Debug("LOG ATTACHMENT CHECK",
 			"mr_nil", mr == nil,
 			"receipt_nil", mr == nil || mr.Receipt == nil,
 			"simulation_nil", simulationResult == nil,
