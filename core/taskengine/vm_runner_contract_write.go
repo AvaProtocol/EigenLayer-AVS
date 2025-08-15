@@ -1152,7 +1152,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	outputVars["data"] = decodedEventsData
 
 	// 🔍 DEBUG: Log what we're storing in outputVars
-	r.vm.logger.Error("🔍 CONTRACT WRITE DEBUG - Setting outputVars",
+	r.vm.logger.Debug("🔍 CONTRACT WRITE DEBUG - Setting outputVars",
 		"stepID", stepID,
 		"outputVars_keys", getOutputVarKeys(outputVars),
 		"decodedEventsData", decodedEventsData,
