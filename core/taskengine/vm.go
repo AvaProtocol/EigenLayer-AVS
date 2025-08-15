@@ -142,8 +142,13 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 		c.vm.vars = make(map[string]any)
 	}
 
-	// Use the data directly without dual access mapping
-	processedData := data
+	// Extract the actual data field from outputVars if it exists, otherwise use the data directly
+	var processedData any = data
+	if outputVars, ok := data.(map[string]any); ok {
+		if dataField, hasData := outputVars["data"]; hasData {
+			processedData = dataField
+		}
+	}
 
 	// Get existing variable or create new one
 	existingVar := c.vm.vars[nodeNameVar]
@@ -154,9 +159,19 @@ func (c *CommonProcessor) SetOutputVarForStep(stepID string, data any) {
 		nodeVar = make(map[string]any)
 	}
 
-	// Set the output data
+	// Set the output data (now correctly extracted)
 	nodeVar["data"] = processedData
 	c.vm.vars[nodeNameVar] = nodeVar
+
+	// 🔍 DEBUG: Log what we're storing in VM vars
+	if c.vm.logger != nil {
+		c.vm.logger.Error("🔍 VM DEBUG - SetOutputVarForStep",
+			"stepID", stepID,
+			"nodeNameVar", nodeNameVar,
+			"processedData_type", fmt.Sprintf("%T", processedData),
+			"nodeVar_keys", getVMVarKeys(nodeVar),
+			"processedData_content", processedData)
+	}
 }
 
 func (c *CommonProcessor) SetInputVarForStep(stepID string, inputData any) {
@@ -200,6 +215,15 @@ func (c *CommonProcessor) GetOutputVar(stepID string) any {
 		return valueMap["data"]
 	}
 	return nil
+}
+
+// getVMVarKeys returns the keys of a VM variable map as a slice of strings for debugging
+func getVMVarKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 type triggerDataType struct {
@@ -299,7 +323,7 @@ func (v *VM) WithDb(db storage.Storage) *VM {
 	return v
 }
 
-// WithChainName updates the workflowContext with the chain name based on chainId
+// WithChainName updates the workflowContext with the chain name and chainId based on chainId
 func (v *VM) WithChainName(chainId uint64) *VM {
 	chainName := getChainNameFromId(chainId)
 
@@ -312,8 +336,9 @@ func (v *VM) WithChainName(chainId uint64) *VM {
 	if workflowContextInterface, exists := v.vars[WorkflowContextVarName]; exists {
 		if workflowContext, ok := workflowContextInterface.(map[string]interface{}); ok {
 			workflowContext["chain"] = chainName
+			workflowContext["chainId"] = int64(chainId) // Add chainId for contract write operations
 			if v.logger != nil {
-				v.logger.Info("✅ Updated workflowContext with chain name", "chainName", chainName)
+				v.logger.Info("✅ Updated workflowContext with chain name and chainId", "chainName", chainName, "chainId", chainId)
 			}
 		}
 	} else {
