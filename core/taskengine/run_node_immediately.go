@@ -1584,6 +1584,10 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 		vm.AddVar(key, processedValue)
 	}
 
+	// Store raw node configuration in VM variables for processors to access
+	// This allows access to fields like 'value' and 'gasLimit' that aren't in protobuf schema
+	vm.AddVar("nodeConfig", nodeConfig)
+
 	// Add chain name to workflowContext if token enrichment service is available
 	if n.tokenEnrichmentService != nil {
 		chainId := n.tokenEnrichmentService.GetChainID()

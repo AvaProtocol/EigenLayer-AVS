@@ -289,6 +289,26 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			r.vm.logger.Info("Using latest block for simulation context", "block", latestHex)
 		}
 
+		// Extract transaction value from VM variables (passed from raw nodeConfig)
+		var transactionValue string = "0" // Default to 0 if not specified
+		r.vm.mu.Lock()
+		if nodeConfigIface, exists := r.vm.vars["nodeConfig"]; exists {
+			if nodeConfig, ok := nodeConfigIface.(map[string]interface{}); ok {
+				if valueIface, exists := nodeConfig["value"]; exists {
+					if valueStr, ok := valueIface.(string); ok && valueStr != "" {
+						transactionValue = valueStr
+						if r.vm.logger != nil {
+							r.vm.logger.Info("Using transaction value from configuration",
+								"value", transactionValue,
+								"method", methodName,
+								"contract", contractAddress.Hex())
+						}
+					}
+				}
+			}
+		}
+		r.vm.mu.Unlock()
+
 		// Simulate the contract write using Tenderly
 
 		simulationResult, err := tenderlyClient.SimulateContractWrite(
@@ -299,6 +319,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			methodName,
 			chainID,
 			senderAddress.Hex(), // Use runner (smart wallet) address for simulation
+			transactionValue,    // Pass the transaction value
 		)
 
 		if err != nil {

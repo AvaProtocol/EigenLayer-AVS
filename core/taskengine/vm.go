@@ -2102,12 +2102,9 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 	tempVM.IsSimulation = true // Force simulation for RunNodeWithInputs
 	tempVM.TaskOwner = v.TaskOwner
 
-	// CRITICAL DEBUG: Log simulation flag propagation
+	// Log simulation mode for debugging
 	if v.logger != nil {
-		v.logger.Error("🔧 RunNodeWithInputs CRITICAL DEBUG - VM simulation flag",
-			"original_vm_is_simulation", v.IsSimulation,
-			"temp_vm_is_simulation", tempVM.IsSimulation,
-			"forced_simulation", true,
+		v.logger.Debug("RunNodeWithInputs using simulation mode",
 			"node_type", node.Type.String())
 	}
 
@@ -2121,6 +2118,16 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 			tempVM.vars = make(map[string]any)
 		}
 		tempVM.vars[APContextVarName] = apContextValue
+	}
+	// Copy nodeConfig if it exists (contains raw configuration including value and gasLimit)
+	if nodeConfigValue, ok := v.vars["nodeConfig"]; ok {
+		if tempVM.vars == nil { // Ensure tempVM.vars is initialized
+			tempVM.vars = make(map[string]any)
+		}
+		tempVM.vars["nodeConfig"] = nodeConfigValue
+		if v.logger != nil {
+			v.logger.Debug("Copied nodeConfig to temporary VM for node execution")
+		}
 	}
 	v.mu.Unlock()
 

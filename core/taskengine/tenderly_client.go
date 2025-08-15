@@ -557,17 +557,13 @@ func (tc *TenderlyClient) createMockTransferLog(contractAddress string, from, to
 }
 
 // SimulateContractWrite simulates a contract write operation using Tenderly
-func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAddress string, callData string, contractABI string, methodName string, chainID int64, fromAddress string) (*ContractWriteSimulationResult, error) {
-	tc.logger.Debug("🚨 VERY OBVIOUS DEBUG - SimulateContractWrite called with latest code",
+func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAddress string, callData string, contractABI string, methodName string, chainID int64, fromAddress string, value string) (*ContractWriteSimulationResult, error) {
+	tc.logger.Info("Simulating contract write via Tenderly",
 		"contract", contractAddress,
 		"method", methodName,
 		"from", fromAddress,
-		"chain_id", chainID)
-	tc.logger.Info("🔮 Simulating contract write via Tenderly",
-		"contract", contractAddress,
-		"method", methodName,
-		"from", fromAddress,
-		"chain_id", chainID)
+		"chain_id", chainID,
+		"value", value)
 
 	// Require the latest block number so simulation runs against a concrete block context
 	latestHex, latestErr := tc.GetLatestBlockNumber(ctx)
@@ -614,7 +610,7 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 			"to":              contractAddress,
 			"gas":             8000000,
 			"gas_price":       0,
-			"value":           0,
+			"value":           value, // Use the provided value parameter instead of hardcoding 0
 			"input":           callData,
 			"simulation_type": "quick",
 			// Optional conveniences kept compatible
