@@ -631,6 +631,16 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		// We set a very large balance value so any reasonable transfer amount passes.
 		if common.IsHexAddress(contractAddress) && common.IsHexAddress(fromAddress) {
 			stateObjects := body["state_objects"].(map[string]interface{})
+
+			// Set ETH balance for the sender (following Tenderly documentation pattern)
+			senderKey := strings.ToLower(fromAddress)
+			senderOverrides, ok := stateObjects[senderKey].(map[string]interface{})
+			if !ok || senderOverrides == nil {
+				senderOverrides = map[string]interface{}{}
+				stateObjects[senderKey] = senderOverrides
+			}
+			// Set 10 ETH balance (0x8AC7230489E80000 = 10 * 10^18)
+			senderOverrides["balance"] = "0x8AC7230489E80000"
 			contractKey := strings.ToLower(contractAddress)
 			contractOverrides, ok := stateObjects[contractKey].(map[string]interface{})
 			if !ok || contractOverrides == nil {
@@ -642,28 +652,56 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 				storageMap = map[string]interface{}{}
 				contractOverrides["storage"] = storageMap
 			}
-			// Set USDC balance using the correct storage slot calculation
-			// USDC uses slot 9 for the balances mapping: keccak256(abi.encodePacked(address, uint256(9)))
-			// For Solidity mappings: use raw 20-byte address + 32-byte slot (NOT padded address)
-			addrBytes := common.HexToAddress(fromAddress).Bytes() // 20 bytes, no padding
-			slotBytes := make([]byte, 32)
-			slotBytes[31] = 9 // uint256(9) as 32 bytes
+			// Set USDC balance using multiple storage slot calculation approaches
+			// USDC uses slot 9 for the balances mapping
 
 			// Set balance to 1 billion USDC (1e9 * 1e6 for USDC 6 decimals = 1e15)
 			balanceHex := "0x0000000000000000000000000000000000000000000000000038d7ea4c68000"
 
-			// Calculate storage slot: keccak256(abi.encodePacked(address, uint256(9)))
-			// Concatenate address (20 bytes) + slot (32 bytes) = 52 bytes total
-			encoded := append(addrBytes, slotBytes...)
-			slotKey := common.BytesToHash(crypto.Keccak256(encoded)).Hex()
-			storageMap[slotKey] = balanceHex
+			// Try both approaches as different contracts may use different patterns
 
-			tc.logger.Info("🔧 USDC balance override applied for simulation",
+			// Approach 1: Standard Solidity abi.encodePacked(address, uint256(slot))
+			// Uses 20-byte address + 32-byte slot
+			addrBytes := common.HexToAddress(fromAddress).Bytes() // 20 bytes, no padding
+			slotBytes := make([]byte, 32)
+			slotBytes[31] = 9 // uint256(9) as 32 bytes
+			encoded1 := append(addrBytes, slotBytes...)
+			slotKey1 := common.BytesToHash(crypto.Keccak256(encoded1)).Hex()
+			storageMap[slotKey1] = balanceHex
+
+			// Approach 2: Tenderly documentation style with 32-byte padded address
+			// Uses 32-byte padded address + 32-byte slot (64 bytes total)
+			paddedAddr := make([]byte, 32)
+			copy(paddedAddr[12:], addrBytes) // Right-pad address to 32 bytes
+			encoded2 := append(paddedAddr, slotBytes...)
+			slotKey2 := common.BytesToHash(crypto.Keccak256(encoded2)).Hex()
+			storageMap[slotKey2] = balanceHex
+
+			// Also try to clear any potential blacklist flags (common in USDC)
+			// Some tokens use different slots for blacklists, try multiple approaches
+			for blacklistSlot := 10; blacklistSlot <= 12; blacklistSlot++ {
+				blacklistSlotBytes := make([]byte, 32)
+				blacklistSlotBytes[31] = byte(blacklistSlot)
+
+				// Standard approach (20-byte address + 32-byte slot)
+				encodedBlacklist1 := append(addrBytes, blacklistSlotBytes...)
+				blacklistKey1 := common.BytesToHash(crypto.Keccak256(encodedBlacklist1)).Hex()
+				storageMap[blacklistKey1] = "0x0000000000000000000000000000000000000000000000000000000000000000" // false
+
+				// Tenderly docs approach (32-byte padded address + 32-byte slot)
+				encodedBlacklist2 := append(paddedAddr, blacklistSlotBytes...)
+				blacklistKey2 := common.BytesToHash(crypto.Keccak256(encodedBlacklist2)).Hex()
+				storageMap[blacklistKey2] = "0x0000000000000000000000000000000000000000000000000000000000000000" // false
+			}
+
+			tc.logger.Info("🔧 Comprehensive balance and blacklist overrides applied",
 				"token_contract", contractKey,
 				"runner", strings.ToLower(fromAddress),
-				"balance", balanceHex,
-				"storage_slot", slotKey,
-				"slot_9_usdc", true)
+				"eth_balance", "10 ETH",
+				"usdc_balance", balanceHex,
+				"storage_slot_standard", slotKey1,
+				"storage_slot_padded", slotKey2,
+				"blacklist_slots_cleared", "10-12")
 
 		}
 		tc.logger.Info("📡 Making Tenderly HTTP simulation call for contract write", "url", simURL)
