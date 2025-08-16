@@ -408,6 +408,9 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 	// Use existing contract read infrastructure for direct calls
 	methodCallResults := make(map[string]interface{})
 
+	// Initialize raw metadata storage for contractReadResponse
+	var rawContractMetadata []interface{}
+
 	// Collect all method calls first for batch execution (needed for applyToFields logic)
 	var allMethodCalls []*avsproto.ContractReadNode_MethodCall
 
@@ -507,6 +510,14 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 						"resultKeys", GetMapKeys(dataMap))
 				}
 			}
+
+			// Extract raw metadata for contractReadResponse
+			if executionStep.Metadata != nil {
+				if metadataArray, ok := executionStep.Metadata.AsInterface().([]interface{}); ok {
+					// Store raw metadata for later use in buildEventTriggerResponse
+					rawContractMetadata = metadataArray
+				}
+			}
 		}
 	}
 
@@ -520,7 +531,7 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 	conditionResults, allConditionsMet := n.evaluateConditionsWithDetails(methodCallResults, queryMap)
 
 	// Build enhanced response structure
-	response := n.buildEventTriggerResponse(methodCallResults, conditionResults, allConditionsMet, chainID)
+	response := n.buildEventTriggerResponse(methodCallResults, conditionResults, allConditionsMet, chainID, rawContractMetadata)
 
 	n.logger.Info("✅ Direct contract calls completed",
 		"methodResults", len(methodCallResults),
@@ -829,7 +840,7 @@ func (n *Engine) formatValueForDisplay(value interface{}) string {
 }
 
 // buildEventTriggerResponse builds the enhanced response structure
-func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}, conditionResults []ConditionResult, allConditionsMet bool, chainID int64) map[string]interface{} {
+func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}, conditionResults []ConditionResult, allConditionsMet bool, chainID int64, rawContractMetadata []interface{}) map[string]interface{} {
 	response := make(map[string]interface{})
 
 	// Add execution context
@@ -841,9 +852,29 @@ func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}
 	// Always include the contract read data in the data field
 	response["data"] = methodCallData
 
+	// Build contractReadResponse from raw metadata if available, otherwise use formatted data
+	var contractReadResponse interface{}
+	if len(rawContractMetadata) > 0 {
+		// Extract raw values from metadata array
+		rawData := make(map[string]interface{})
+		for _, metadataEntry := range rawContractMetadata {
+			if entryMap, ok := metadataEntry.(map[string]interface{}); ok {
+				if methodName, hasMethod := entryMap["methodName"].(string); hasMethod {
+					if value, hasValue := entryMap["value"]; hasValue {
+						rawData[methodName] = value
+					}
+				}
+			}
+		}
+		contractReadResponse = rawData
+	} else {
+		// Fallback to formatted data if raw metadata not available
+		contractReadResponse = methodCallData
+	}
+
 	// Always include metadata with contract read response and condition evaluation
 	response["metadata"] = map[string]interface{}{
-		"contractReadResponse": methodCallData,
+		"contractReadResponse": contractReadResponse,
 		"conditionEvaluation":  conditionResults,
 		"executionContext":     response["executionContext"],
 	}
@@ -1214,7 +1245,8 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	}
 
 	// Always return enhanced response format with proper data and metadata
-	response := n.buildEventTriggerResponse(methodCallResults, conditionResults, allConditionsMet, chainID)
+	// For simulation path, we don't have raw metadata, so pass empty slice
+	response := n.buildEventTriggerResponse(methodCallResults, conditionResults, allConditionsMet, chainID, []interface{}{})
 	// Override executionContext for simulation
 	response["executionContext"] = map[string]interface{}{
 		"chainId":     chainID,
