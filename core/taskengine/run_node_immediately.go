@@ -548,9 +548,23 @@ func (n *Engine) evaluateConditionsWithDetails(data map[string]interface{}, quer
 		return []ConditionResult{}, true
 	}
 
-	conditionsArray, ok := conditionsInterface.([]interface{})
-	if !ok || len(conditionsArray) == 0 {
-		// No valid conditions - all conditions met by default
+	// Handle both []interface{} and []map[string]interface{} types
+	var conditionsArray []interface{}
+	if directArray, ok := conditionsInterface.([]interface{}); ok {
+		conditionsArray = directArray
+	} else if mapArray, ok := conditionsInterface.([]map[string]interface{}); ok {
+		// Convert []map[string]interface{} to []interface{}
+		conditionsArray = make([]interface{}, len(mapArray))
+		for i, condMap := range mapArray {
+			conditionsArray[i] = condMap
+		}
+	} else {
+		// Unsupported type - no valid conditions
+		return []ConditionResult{}, true
+	}
+
+	if len(conditionsArray) == 0 {
+		// No conditions to evaluate - all conditions met by default
 		return []ConditionResult{}, true
 	}
 
@@ -824,40 +838,36 @@ func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}
 		"isSimulated": false, // Direct calls are real, not simulated
 	}
 
+	// Always include the contract read data in the data field
+	response["data"] = methodCallData
+
+	// Always include metadata with contract read response and condition evaluation
+	response["metadata"] = map[string]interface{}{
+		"contractReadResponse": methodCallData,
+		"conditionEvaluation":  conditionResults,
+		"executionContext":     response["executionContext"],
+	}
+
 	if allConditionsMet {
-		// Success case: conditions met, include data normally
+		// Success case: conditions met
 		response["success"] = true
-		response["data"] = methodCallData
 		response["error"] = ""
 	} else {
-		// Failure case: conditions not met, include data in error message as JSON
+		// Failure case: conditions not met
 		response["success"] = false
 
-		// Create comprehensive data object including method results and condition details
-		errorData := make(map[string]interface{})
-
-		// Include all method call data
-		for key, value := range methodCallData {
-			errorData[key] = value
+		// Build error message with condition details
+		var failedConditions []string
+		for _, condition := range conditionResults {
+			if !condition.Passed {
+				failedConditions = append(failedConditions, condition.Reason)
+			}
 		}
 
-		// Include condition evaluation details
-		errorData["conditions"] = conditionResults
-
-		// Convert to JSON string for error message
-		errorDataJSON, err := json.Marshal(errorData)
-		if err != nil {
-			response["error"] = fmt.Sprintf("Conditions not met. Data serialization failed: %v", err)
+		if len(failedConditions) > 0 {
+			response["error"] = fmt.Sprintf("Conditions not met: %s", strings.Join(failedConditions, "; "))
 		} else {
-			response["error"] = fmt.Sprintf("Conditions not met. Data: %s", string(errorDataJSON))
-		}
-
-		// Add metadata field for runNodeImmediately compatibility
-		// This contains the contract read response data (like contractRead nodes)
-		response["metadata"] = map[string]interface{}{
-			"contractReadResponse": methodCallData,
-			"conditionEvaluation":  conditionResults,
-			"executionContext":     response["executionContext"],
+			response["error"] = "Conditions not met"
 		}
 	}
 
