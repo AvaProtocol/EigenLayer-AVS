@@ -1175,10 +1175,11 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// 🚀 NEW: Create decoded events data organized by method name
 	var decodedEventsData = make(map[string]interface{})
 
-	// First, add return values to decodedEventsData (for view functions that return data)
+	// PRIORITY LOGIC: Add return values first, events will override if present
+	// Rule: Events take priority (more descriptive) over return values when both exist
 	for _, methodResult := range results {
 		r.vm.logger.Info("🔍 CRITICAL DEBUG - Processing methodResult for decodedEventsData",
-			"method", methodResult.MethodName, 
+			"method", methodResult.MethodName,
 			"value_nil", methodResult.Value == nil,
 			"value_content", func() interface{} {
 				if methodResult.Value != nil {
@@ -1189,7 +1190,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		if methodResult.Value != nil {
 			// Add return values under method name
 			decodedEventsData[methodResult.MethodName] = methodResult.Value.AsInterface()
-			r.vm.logger.Info("✅ CRITICAL DEBUG - Added return value to decodedEventsData",
+			r.vm.logger.Info("✅ Added return value to decodedEventsData (will be overridden by events if present)",
 				"method", methodResult.MethodName,
 				"data", methodResult.Value.AsInterface())
 		} else {
@@ -1263,26 +1264,16 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			}
 		}
 
-		// Store events for this method, preserving existing return values
+		// PRIORITY LOGIC: Events take priority over return values
 		if len(methodEvents) > 0 {
-			// If we have events, merge them with any existing return values
-			if existing, hasExisting := decodedEventsData[methodName]; hasExisting {
-				if existingMap, ok := existing.(map[string]interface{}); ok {
-					// Merge events with existing return values
-					for key, value := range methodEvents {
-						existingMap[key] = value
-					}
-					decodedEventsData[methodName] = existingMap
-				} else {
-					// Replace if existing data isn't a map
-					decodedEventsData[methodName] = methodEvents
-				}
-			} else {
-				// No existing data, just set events
-				decodedEventsData[methodName] = methodEvents
-			}
+			// If we have events, use ONLY event data (events are more descriptive)
+			decodedEventsData[methodName] = methodEvents
+			r.vm.logger.Info("✅ EVENT PRIORITY - Using event data only (overriding return values)",
+				"method", methodName,
+				"event_fields", len(methodEvents),
+				"event_data", methodEvents)
 		}
-		// If no events, preserve existing return values (don't overwrite with empty map)
+		// If no events, preserve existing return values (return values only when no events)
 	}
 
 	// Convert decoded events to protobuf Value
