@@ -3225,11 +3225,12 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		// ContractWrite now does not embed metadata inside output; nothing to copy here
 	}
 
-	// Attach execution_context; treat writes/events as simulated (Tenderly), reads and others as real RPC
-	{
+	// Attach execution_context; treat writes as simulated (Tenderly), reads and others as real RPC
+	// Skip for EventTrigger since it provides its own executionContext in metadata
+	if nodeTypeStr != NodeTypeEventTrigger {
 		isSimulated := false
 		provider := "rpc"
-		if nodeTypeStr == NodeTypeContractWrite || nodeTypeStr == NodeTypeEventTrigger {
+		if nodeTypeStr == NodeTypeContractWrite {
 			isSimulated = true
 			provider = "tenderly"
 		}
