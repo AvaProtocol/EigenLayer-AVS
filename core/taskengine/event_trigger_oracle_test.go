@@ -25,11 +25,44 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 	t.Log("=== Testing Oracle Price EventTrigger with Conditions ===")
 
 	// Oracle contract ABI for decimals and latestAnswer methods
-	oracleABI := []string{
-		`{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"}`,
-		`{"inputs":[],"name":"latestAnswer","outputs":[{"internalType":"int256","name":"","type":"int256"}],"stateMutability":"view","type":"function"}`,
-		`{"inputs":[],"name":"latestRoundData","outputs":[{"internalType":"uint80","name":"roundId","type":"uint80"},{"internalType":"int256","name":"answer","type":"int256"},{"internalType":"uint256","name":"startedAt","type":"uint256"},{"internalType":"uint256","name":"updatedAt","type":"uint256"},{"internalType":"uint80","name":"answeredInRound","type":"uint80"}],"stateMutability":"view","type":"function"}`,
-		`{"anonymous":false,"inputs":[{"indexed":true,"internalType":"int256","name":"current","type":"int256"},{"indexed":true,"internalType":"uint256","name":"roundId","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"updatedAt","type":"uint256"}],"name":"AnswerUpdated","type":"event"}`,
+	oracleABI := []interface{}{
+		map[string]interface{}{
+			"inputs":          []interface{}{},
+			"name":            "decimals",
+			"outputs":         []interface{}{map[string]interface{}{"internalType": "uint8", "name": "", "type": "uint8"}},
+			"stateMutability": "view",
+			"type":            "function",
+		},
+		map[string]interface{}{
+			"inputs":          []interface{}{},
+			"name":            "latestAnswer",
+			"outputs":         []interface{}{map[string]interface{}{"internalType": "int256", "name": "", "type": "int256"}},
+			"stateMutability": "view",
+			"type":            "function",
+		},
+		map[string]interface{}{
+			"inputs": []interface{}{},
+			"name":   "latestRoundData",
+			"outputs": []interface{}{
+				map[string]interface{}{"internalType": "uint80", "name": "roundId", "type": "uint80"},
+				map[string]interface{}{"internalType": "int256", "name": "answer", "type": "int256"},
+				map[string]interface{}{"internalType": "uint256", "name": "startedAt", "type": "uint256"},
+				map[string]interface{}{"internalType": "uint256", "name": "updatedAt", "type": "uint256"},
+				map[string]interface{}{"internalType": "uint80", "name": "answeredInRound", "type": "uint80"},
+			},
+			"stateMutability": "view",
+			"type":            "function",
+		},
+		map[string]interface{}{
+			"anonymous": false,
+			"inputs": []interface{}{
+				map[string]interface{}{"indexed": true, "internalType": "int256", "name": "current", "type": "int256"},
+				map[string]interface{}{"indexed": true, "internalType": "uint256", "name": "roundId", "type": "uint256"},
+				map[string]interface{}{"indexed": false, "internalType": "uint256", "name": "updatedAt", "type": "uint256"},
+			},
+			"name": "AnswerUpdated",
+			"type": "event",
+		},
 	}
 
 	// Test oracle contract address (Chainlink ETH/USD on Sepolia)
@@ -348,8 +381,16 @@ func TestEventTriggerSmartDetection(t *testing.T) {
 			name: "MethodCalls only - should use direct calls",
 			queries: []interface{}{
 				map[string]interface{}{
-					"addresses":   []interface{}{"0x694AA1769357215DE4FAC081bf1f309aDC325306"},
-					"contractAbi": []string{`{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"}`},
+					"addresses": []interface{}{"0x694AA1769357215DE4FAC081bf1f309aDC325306"},
+					"contractAbi": []interface{}{
+						map[string]interface{}{
+							"inputs":          []interface{}{},
+							"name":            "decimals",
+							"outputs":         []interface{}{map[string]interface{}{"internalType": "uint8", "name": "", "type": "uint8"}},
+							"stateMutability": "view",
+							"type":            "function",
+						},
+					},
 					"methodCalls": []interface{}{
 						map[string]interface{}{
 							"methodName":   "decimals",
@@ -382,8 +423,16 @@ func TestEventTriggerSmartDetection(t *testing.T) {
 			name: "Both topics and methodCalls - should use simulation",
 			queries: []interface{}{
 				map[string]interface{}{
-					"addresses":   []interface{}{"0x694AA1769357215DE4FAC081bf1f309aDC325306"},
-					"contractAbi": []string{`{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"}`},
+					"addresses": []interface{}{"0x694AA1769357215DE4FAC081bf1f309aDC325306"},
+					"contractAbi": []interface{}{
+						map[string]interface{}{
+							"inputs":          []interface{}{},
+							"name":            "decimals",
+							"outputs":         []interface{}{map[string]interface{}{"internalType": "uint8", "name": "", "type": "uint8"}},
+							"stateMutability": "view",
+							"type":            "function",
+						},
+					},
 					"topics": []interface{}{
 						map[string]interface{}{
 							"values": []interface{}{
