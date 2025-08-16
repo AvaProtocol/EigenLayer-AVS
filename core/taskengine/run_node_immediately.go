@@ -572,11 +572,14 @@ func (n *Engine) evaluateConditionsWithDetails(data map[string]interface{}, quer
 		passed := n.evaluateCondition(actualValue, operator, expectedValue, fieldType)
 		reason := n.buildConditionReason(actualValue, operator, expectedValue, passed)
 
+		// Convert actualValue to display format for JSON serialization
+		displayActualValue := n.formatValueForDisplay(actualValue)
+
 		results[i] = ConditionResult{
 			FieldName:     fieldName,
 			Operator:      operator,
 			ExpectedValue: expectedValue,
-			ActualValue:   actualValue,
+			ActualValue:   displayActualValue, // Use formatted display value
 			Passed:        passed,
 			Reason:        reason,
 		}
@@ -685,40 +688,68 @@ func (n *Engine) convertToFloat(value interface{}) (float64, error) {
 
 // buildConditionReason builds a human-readable reason for condition result
 func (n *Engine) buildConditionReason(actualValue interface{}, operator, expectedValue string, passed bool) string {
+	// Convert hex values to human-readable decimal format for display
+	displayValue := n.formatValueForDisplay(actualValue)
+
 	if passed {
 		switch operator {
 		case "lt", "less_than":
-			return fmt.Sprintf("Value %v is less than %s", actualValue, expectedValue)
+			return fmt.Sprintf("Value %s is less than %s", displayValue, expectedValue)
 		case "gt", "greater_than":
-			return fmt.Sprintf("Value %v is greater than %s", actualValue, expectedValue)
+			return fmt.Sprintf("Value %s is greater than %s", displayValue, expectedValue)
 		case "eq", "equals":
-			return fmt.Sprintf("Value %v equals %s", actualValue, expectedValue)
+			return fmt.Sprintf("Value %s equals %s", displayValue, expectedValue)
 		case "ne", "not_equals":
-			return fmt.Sprintf("Value %v does not equal %s", actualValue, expectedValue)
+			return fmt.Sprintf("Value %s does not equal %s", displayValue, expectedValue)
 		case "lte", "less_than_or_equal":
-			return fmt.Sprintf("Value %v is less than or equal to %s", actualValue, expectedValue)
+			return fmt.Sprintf("Value %s is less than or equal to %s", displayValue, expectedValue)
 		case "gte", "greater_than_or_equal":
-			return fmt.Sprintf("Value %v is greater than or equal to %s", actualValue, expectedValue)
+			return fmt.Sprintf("Value %s is greater than or equal to %s", displayValue, expectedValue)
 		default:
 			return "Condition passed"
 		}
 	} else {
 		switch operator {
 		case "lt", "less_than":
-			return fmt.Sprintf("Value %v is not less than %s", actualValue, expectedValue)
+			return fmt.Sprintf("Value %s is not less than %s", displayValue, expectedValue)
 		case "gt", "greater_than":
-			return fmt.Sprintf("Value %v is not greater than %s", actualValue, expectedValue)
+			return fmt.Sprintf("Value %s is not greater than %s", displayValue, expectedValue)
 		case "eq", "equals":
-			return fmt.Sprintf("Value %v does not equal %s", actualValue, expectedValue)
+			return fmt.Sprintf("Value %s does not equal %s", displayValue, expectedValue)
 		case "ne", "not_equals":
-			return fmt.Sprintf("Value %v equals %s (expected not equal)", actualValue, expectedValue)
+			return fmt.Sprintf("Value %s equals %s (expected not equal)", displayValue, expectedValue)
 		case "lte", "less_than_or_equal":
-			return fmt.Sprintf("Value %v is not less than or equal to %s", actualValue, expectedValue)
+			return fmt.Sprintf("Value %s is not less than or equal to %s", displayValue, expectedValue)
 		case "gte", "greater_than_or_equal":
-			return fmt.Sprintf("Value %v is not greater than or equal to %s", actualValue, expectedValue)
+			return fmt.Sprintf("Value %s is not greater than or equal to %s", displayValue, expectedValue)
 		default:
 			return "Condition failed"
 		}
+	}
+}
+
+// formatValueForDisplay converts hex values to human-readable decimal format
+func (n *Engine) formatValueForDisplay(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		// Check if it's a hex string
+		if strings.HasPrefix(v, "0x") && len(v) > 2 {
+			// Try to parse as big int
+			if bigInt, success := new(big.Int).SetString(v, 0); success {
+				return bigInt.String() // Return decimal representation
+			}
+		}
+		return v
+	case *big.Int:
+		return v.String()
+	case int, int8, int16, int32, int64:
+		return fmt.Sprintf("%d", v)
+	case uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprintf("%d", v)
+	case float32, float64:
+		return fmt.Sprintf("%.2f", v)
+	default:
+		return fmt.Sprintf("%v", v)
 	}
 }
 
