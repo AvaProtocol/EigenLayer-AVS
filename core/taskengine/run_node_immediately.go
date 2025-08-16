@@ -438,13 +438,18 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 		// Extract applyToFields
 		var applyToFields []string
 		if applyToFieldsInterface, exists := methodCallMap["applyToFields"]; exists {
+			// Handle both []string and []interface{} types
 			if applyToFieldsArray, ok := applyToFieldsInterface.([]interface{}); ok {
+				// Handle []interface{} type
 				applyToFields = make([]string, len(applyToFieldsArray))
 				for i, field := range applyToFieldsArray {
 					if fieldStr, ok := field.(string); ok {
 						applyToFields[i] = fieldStr
 					}
 				}
+			} else if applyToFieldsStringArray, ok := applyToFieldsInterface.([]string); ok {
+				// Handle []string type (direct assignment)
+				applyToFields = applyToFieldsStringArray
 			}
 		}
 
