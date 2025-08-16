@@ -917,6 +917,65 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 			tc.logger.Error("🔍 CRITICAL DEBUG - No logs to assign to result.ReceiptLogs")
 		}
 
+		// Extract and decode output data from Tenderly response
+		if m, ok := resultForExtraction.(map[string]interface{}); ok {
+			var outputHex string
+
+			// Primary location: Check call_trace for the main contract call output
+			if tx, ok := m["transaction"].(map[string]interface{}); ok {
+				if callTrace, ok := tx["call_trace"].([]interface{}); ok && len(callTrace) > 0 {
+					// Look for the main contract call (first entry in call trace)
+					if mainCall, ok := callTrace[0].(map[string]interface{}); ok {
+						if output, exists := mainCall["output"].(string); exists && output != "" && output != "0x" {
+							outputHex = output
+							tc.logger.Info("🔍 Found output in call_trace[0]", "output", output)
+						}
+					}
+				}
+			}
+
+			// Fallback: Check transaction.output
+			if outputHex == "" {
+				if tx, ok := m["transaction"].(map[string]interface{}); ok {
+					if output, exists := tx["output"].(string); exists && output != "" && output != "0x" {
+						outputHex = output
+						tc.logger.Info("🔍 Found output in transaction", "output", output)
+					}
+				}
+			}
+
+			// Fallback: Check top-level output
+			if outputHex == "" {
+				if output, exists := m["output"].(string); exists && output != "" && output != "0x" {
+					outputHex = output
+					tc.logger.Info("🔍 Found output at top level", "output", output)
+				}
+			}
+
+			// Fallback: Check simulation.output
+			if outputHex == "" {
+				if sim, ok := m["simulation"].(map[string]interface{}); ok {
+					if output, exists := sim["output"].(string); exists && output != "" && output != "0x" {
+						outputHex = output
+						tc.logger.Info("🔍 Found output in simulation", "output", output)
+					}
+				}
+			}
+
+			// Decode the output if found
+			if outputHex != "" {
+				tc.logger.Info("🔍 Attempting to decode output", "hex", outputHex, "method", methodName)
+				if decodedOutput := tc.decodeReturnDataComplete(outputHex, contractABI, methodName); decodedOutput != nil {
+					result.ReturnData = decodedOutput
+					tc.logger.Info("✅ Successfully decoded output", "method", methodName, "decoded", decodedOutput)
+				} else {
+					tc.logger.Warn("⚠️ Failed to decode output", "method", methodName, "hex", outputHex)
+				}
+			} else {
+				tc.logger.Info("ℹ️ No output found in Tenderly response", "method", methodName)
+			}
+		}
+
 		// Propagate revert status from Tenderly into result.Success/Error
 		if m, ok := resultForExtraction.(map[string]interface{}); ok {
 			if sim, ok := m["simulation"].(map[string]interface{}); ok {
@@ -1239,6 +1298,93 @@ func (tc *TenderlyClient) decodeReturnData(hexData string, contractABI string, m
 	}
 
 	// For simplicity, return the first output value
+	firstOutput := method.Outputs[0]
+	return &ContractWriteReturnData{
+		Name:  firstOutput.Name,
+		Type:  firstOutput.Type.String(),
+		Value: fmt.Sprintf("%v", values[0]),
+	}
+}
+
+// decodeReturnDataComplete decodes all return values from a method call
+func (tc *TenderlyClient) decodeReturnDataComplete(hexData string, contractABI string, methodName string) *ContractWriteReturnData {
+	if contractABI == "" || methodName == "" || hexData == "" || hexData == "0x" {
+		return nil
+	}
+
+	// Parse the ABI
+	parsedABI, err := abi.JSON(strings.NewReader(contractABI))
+	if err != nil {
+		tc.logger.Warn("Failed to parse contract ABI for complete return data decoding", "error", err)
+		return nil
+	}
+
+	// Find the method
+	method, exists := parsedABI.Methods[methodName]
+	if !exists {
+		tc.logger.Warn("Method not found in ABI for complete decoding", "method", methodName)
+		return nil
+	}
+
+	// If method has no outputs, return nil
+	if len(method.Outputs) == 0 {
+		return nil
+	}
+
+	// Decode the return data
+	returnData := common.FromHex(hexData)
+	values, err := method.Outputs.Unpack(returnData)
+	if err != nil {
+		tc.logger.Warn("Failed to decode complete return data", "error", err, "method", methodName)
+		return nil
+	}
+
+	if len(values) == 0 {
+		return nil
+	}
+
+	// Create a structured map of all return values
+	resultMap := make(map[string]interface{})
+	for i, value := range values {
+		output := method.Outputs[i]
+		fieldName := output.Name
+		if fieldName == "" {
+			fieldName = fmt.Sprintf("output_%d", i)
+		}
+
+		// Format the value based on its type
+		var formattedValue interface{}
+		switch output.Type.String() {
+		case "uint256", "uint160", "uint32", "uint24", "uint8":
+			// For numeric types, convert to string to preserve precision
+			formattedValue = fmt.Sprintf("%v", value)
+		case "address":
+			// For addresses, ensure proper hex formatting
+			if addr, ok := value.(common.Address); ok {
+				formattedValue = addr.Hex()
+			} else {
+				formattedValue = fmt.Sprintf("%v", value)
+			}
+		case "bool":
+			formattedValue = value
+		default:
+			formattedValue = fmt.Sprintf("%v", value)
+		}
+
+		resultMap[fieldName] = formattedValue
+		tc.logger.Info("🔍 Decoded output field", "field", fieldName, "type", output.Type.String(), "value", formattedValue)
+	}
+
+	// Convert the map to a JSON string for the Value field
+	if jsonBytes, err := json.Marshal(resultMap); err == nil {
+		return &ContractWriteReturnData{
+			Name:  methodName + "_outputs",
+			Type:  "object",
+			Value: string(jsonBytes),
+		}
+	}
+
+	// Fallback to first output if JSON encoding fails
 	firstOutput := method.Outputs[0]
 	return &ContractWriteReturnData{
 		Name:  firstOutput.Name,

@@ -353,8 +353,15 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		var contractAbiStr string
 		if parsedABI != nil {
 			// Convert ABI back to JSON string for Tenderly
-			// For now, we'll use an empty string and let Tenderly handle it
-			contractAbiStr = ""
+			if abiBytes, err := json.Marshal(parsedABI); err == nil {
+				contractAbiStr = string(abiBytes)
+				r.vm.logger.Debug("✅ CONTRACT WRITE - Converted parsed ABI to JSON string for Tenderly",
+					"method", methodName, "abi_length", len(contractAbiStr))
+			} else {
+				r.vm.logger.Warn("⚠️ CONTRACT WRITE - Failed to marshal ABI to JSON",
+					"method", methodName, "error", err)
+				contractAbiStr = ""
+			}
 		}
 
 		// Ensure we use the latest block number for simulation context to enable realistic execution data
@@ -940,9 +947,18 @@ func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *C
 	// Extract return value from Tenderly response
 	var returnValue *structpb.Value
 	if result.ReturnData != nil {
-		// Map returnData.value to our value field
-		if valueProto, err := structpb.NewValue(result.ReturnData.Value); err == nil {
-			returnValue = valueProto
+		// Parse the JSON value from ReturnData and convert to protobuf
+		var parsedValue interface{}
+		if err := json.Unmarshal([]byte(result.ReturnData.Value), &parsedValue); err == nil {
+			// Successfully parsed JSON, convert to protobuf
+			if valueProto, err := structpb.NewValue(parsedValue); err == nil {
+				returnValue = valueProto
+			}
+		} else {
+			// Fallback: treat as raw string if JSON parsing fails
+			if valueProto, err := structpb.NewValue(result.ReturnData.Value); err == nil {
+				returnValue = valueProto
+			}
 		}
 	}
 

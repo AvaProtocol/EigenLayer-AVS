@@ -291,6 +291,146 @@ func TestObjectSerializationInTemplates(t *testing.T) {
 		t.Logf("  - SqrtPriceLimitX96: %s", sqrtPriceLimitX96.String())
 	})
 
+	// Test output decoding from Tenderly call trace
+	t.Run("Output_Decoding_From_Call_Trace", func(t *testing.T) {
+		// Create a mock Tenderly client
+		logger := testutil.GetLogger()
+		client := NewTenderlyClient(logger)
+
+		// Create the ABI for quoteExactInputSingle
+		abiStr := `[{
+			"inputs": [{
+				"components": [
+					{"internalType": "address", "name": "tokenIn", "type": "address"},
+					{"internalType": "address", "name": "tokenOut", "type": "address"},
+					{"internalType": "uint256", "name": "amountIn", "type": "uint256"},
+					{"internalType": "uint24", "name": "fee", "type": "uint24"},
+					{"internalType": "uint160", "name": "sqrtPriceLimitX96", "type": "uint160"}
+				],
+				"internalType": "struct IQuoterV2.QuoteExactInputSingleParams",
+				"name": "params",
+				"type": "tuple"
+			}],
+			"name": "quoteExactInputSingle",
+			"outputs": [
+				{"internalType": "uint256", "name": "amountOut", "type": "uint256"},
+				{"internalType": "uint160", "name": "sqrtPriceX96After", "type": "uint160"},
+				{"internalType": "uint32", "name": "initializedTicksCrossed", "type": "uint32"},
+				{"internalType": "uint256", "name": "gasEstimate", "type": "uint256"}
+			],
+			"stateMutability": "nonpayable",
+			"type": "function"
+		}]`
+
+		// Test the decodeReturnDataComplete function
+		outputHex := "0x0000000000000000000000000000000000000000000000000000000006deb1c00000000000000000000000000000000000003354c91f18b2cd7808451d70ccf100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000016cf1"
+
+		decoded := client.decodeReturnDataComplete(outputHex, abiStr, "quoteExactInputSingle")
+		if decoded == nil {
+			t.Fatal("Expected decoded output, got nil")
+		}
+
+		// Verify the structure
+		if decoded.Name != "quoteExactInputSingle_outputs" {
+			t.Errorf("Expected name 'quoteExactInputSingle_outputs', got '%s'", decoded.Name)
+		}
+		if decoded.Type != "object" {
+			t.Errorf("Expected type 'object', got '%s'", decoded.Type)
+		}
+
+		// Parse the JSON value
+		var resultMap map[string]interface{}
+		if err := json.Unmarshal([]byte(decoded.Value), &resultMap); err != nil {
+			t.Fatalf("Failed to parse decoded JSON: %v", err)
+		}
+
+		// Check amountOut
+		amountOutStr, ok := resultMap["amountOut"].(string)
+		if !ok {
+			t.Fatalf("Expected amountOut to be string, got %T", resultMap["amountOut"])
+		}
+		if amountOutStr != "115257792" {
+			t.Errorf("Expected amountOut '115257792', got '%s'", amountOutStr)
+		}
+
+		// Check sqrtPriceX96After
+		sqrtPriceStr, ok := resultMap["sqrtPriceX96After"].(string)
+		if !ok {
+			t.Fatalf("Expected sqrtPriceX96After to be string, got %T", resultMap["sqrtPriceX96After"])
+		}
+		// Just verify it's not empty and is numeric
+		if sqrtPriceStr == "" {
+			t.Error("Expected sqrtPriceX96After to be non-empty")
+		}
+
+		// Check initializedTicksCrossed
+		ticksCrossedStr, ok := resultMap["initializedTicksCrossed"].(string)
+		if !ok {
+			t.Fatalf("Expected initializedTicksCrossed to be string, got %T", resultMap["initializedTicksCrossed"])
+		}
+		if ticksCrossedStr != "1" {
+			t.Errorf("Expected initializedTicksCrossed '1', got '%s'", ticksCrossedStr)
+		}
+
+		// Check gasEstimate
+		gasEstimateStr, ok := resultMap["gasEstimate"].(string)
+		if !ok {
+			t.Fatalf("Expected gasEstimate to be string, got %T", resultMap["gasEstimate"])
+		}
+		if gasEstimateStr != "93425" {
+			t.Errorf("Expected gasEstimate '93425', got '%s'", gasEstimateStr)
+		}
+
+		t.Logf("✅ Successfully decoded all 4 return values: amountOut=%s, sqrtPrice=%s, ticksCrossed=%s, gasEstimate=%s",
+			amountOutStr, sqrtPriceStr, ticksCrossedStr, gasEstimateStr)
+	})
+
+	// Test ABI marshaling for Tenderly decoding
+	t.Run("ABI_Marshaling_For_Tenderly", func(t *testing.T) {
+		// Create the ABI for quoteExactInputSingle
+		abiStr := `[{
+			"inputs": [{
+				"components": [
+					{"internalType": "address", "name": "tokenIn", "type": "address"},
+					{"internalType": "address", "name": "tokenOut", "type": "address"},
+					{"internalType": "uint256", "name": "amountIn", "type": "uint256"},
+					{"internalType": "uint24", "name": "fee", "type": "uint24"},
+					{"internalType": "uint160", "name": "sqrtPriceLimitX96", "type": "uint160"}
+				],
+				"internalType": "struct IQuoterV2.QuoteExactInputSingleParams",
+				"name": "params",
+				"type": "tuple"
+			}],
+			"name": "quoteExactInputSingle",
+			"outputs": [
+				{"internalType": "uint256", "name": "amountOut", "type": "uint256"},
+				{"internalType": "uint160", "name": "sqrtPriceX96After", "type": "uint160"},
+				{"internalType": "uint32", "name": "initializedTicksCrossed", "type": "uint32"},
+				{"internalType": "uint256", "name": "gasEstimate", "type": "uint256"}
+			],
+			"stateMutability": "nonpayable",
+			"type": "function"
+		}]`
+
+		// Parse the ABI
+		parsedABI, err := abi.JSON(strings.NewReader(abiStr))
+		assert.NoError(t, err)
+
+		// Marshal it back to JSON (simulating what the contract write processor does)
+		abiBytes, err := json.Marshal(parsedABI)
+		assert.NoError(t, err)
+
+		abiJSON := string(abiBytes)
+		assert.NotEmpty(t, abiJSON)
+		assert.Contains(t, abiJSON, "quoteExactInputSingle")
+		assert.Contains(t, abiJSON, "amountOut")
+		assert.Contains(t, abiJSON, "sqrtPriceX96After")
+
+		t.Logf("✅ Successfully marshaled ABI back to JSON for Tenderly")
+		t.Logf("   ABI length: %d characters", len(abiJSON))
+		t.Logf("   Contains method: quoteExactInputSingle")
+	})
+
 	t.Run("Full_ABI_Packing_Test", func(t *testing.T) {
 		// Test the full ABI packing process that's failing in the real system
 		// This will trigger our debug output and show us what's wrong
