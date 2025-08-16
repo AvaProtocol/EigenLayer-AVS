@@ -944,19 +944,40 @@ func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *C
 	// Extract return value from Tenderly response
 	var returnValue *structpb.Value
 	if result.ReturnData != nil {
+		r.vm.logger.Info("🔍 CRITICAL DEBUG - ReturnData found",
+			"method", result.MethodName,
+			"returnData_name", result.ReturnData.Name,
+			"returnData_type", result.ReturnData.Type,
+			"returnData_value", result.ReturnData.Value)
+
 		// Parse the JSON value from ReturnData and convert to protobuf
 		var parsedValue interface{}
 		if err := json.Unmarshal([]byte(result.ReturnData.Value), &parsedValue); err == nil {
 			// Successfully parsed JSON, convert to protobuf
 			if valueProto, err := structpb.NewValue(parsedValue); err == nil {
 				returnValue = valueProto
+				r.vm.logger.Info("✅ CRITICAL DEBUG - Successfully created returnValue protobuf",
+					"method", result.MethodName,
+					"parsedValue", parsedValue)
+			} else {
+				r.vm.logger.Error("❌ CRITICAL DEBUG - Failed to create protobuf from parsedValue",
+					"method", result.MethodName,
+					"error", err)
 			}
 		} else {
+			r.vm.logger.Error("❌ CRITICAL DEBUG - Failed to unmarshal JSON from ReturnData.Value",
+				"method", result.MethodName,
+				"error", err,
+				"raw_value", result.ReturnData.Value)
+
 			// Fallback: treat as raw string if JSON parsing fails
 			if valueProto, err := structpb.NewValue(result.ReturnData.Value); err == nil {
 				returnValue = valueProto
 			}
 		}
+	} else {
+		r.vm.logger.Error("❌ CRITICAL DEBUG - ReturnData is nil",
+			"method", result.MethodName)
 	}
 
 	// No fallback default value. If provider does not return output data, Value remains nil
