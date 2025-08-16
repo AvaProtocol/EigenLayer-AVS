@@ -569,7 +569,6 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 								}
 
 								if field.Name == targetFieldName {
-									fmt.Printf("✅ DEBUG: Found field match! field.Name=%s, targetFieldName=%s, value=%s\n", field.Name, targetFieldName, field.Value)
 									needsDecimalFormatting = true
 									decimalsValue = decimalValue
 									fieldsToFormat = append(fieldsToFormat, targetFieldName)

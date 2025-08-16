@@ -574,8 +574,8 @@ func (n *Engine) evaluateConditionsWithDetails(data map[string]interface{}, quer
 		expectedValue, _ := conditionMap["value"].(string)
 		fieldType, _ := conditionMap["fieldType"].(string)
 
-		// Get actual value from data
-		actualValue, exists := data[fieldName]
+		// Get actual value from data - support nested field access
+		actualValue, exists := n.getNestedFieldValue(data, fieldName)
 		if !exists {
 			results[i] = ConditionResult{
 				FieldName:     fieldName,
@@ -611,6 +611,46 @@ func (n *Engine) evaluateConditionsWithDetails(data map[string]interface{}, quer
 	}
 
 	return results, allConditionsMet
+}
+
+// getNestedFieldValue retrieves a value from nested data structure
+// Supports both direct field access ("answer") and nested access ("latestRoundData.answer")
+func (n *Engine) getNestedFieldValue(data map[string]interface{}, fieldName string) (interface{}, bool) {
+	// Handle dot notation for nested field access
+	parts := strings.Split(fieldName, ".")
+
+	if len(parts) == 1 {
+		// Direct field access
+		value, exists := data[fieldName]
+		return value, exists
+	}
+
+	// Nested field access
+	current := data
+	for i, part := range parts {
+		if current == nil {
+			return nil, false
+		}
+
+		value, exists := current[part]
+		if !exists {
+			return nil, false
+		}
+
+		// If this is the last part, return the value
+		if i == len(parts)-1 {
+			return value, true
+		}
+
+		// Otherwise, continue traversing - value must be a map
+		if nextMap, ok := value.(map[string]interface{}); ok {
+			current = nextMap
+		} else {
+			return nil, false
+		}
+	}
+
+	return nil, false
 }
 
 // evaluateCondition evaluates a single condition
@@ -3644,6 +3684,20 @@ func convertToProtobufCompatible(data interface{}) interface{} {
 		result := make([]interface{}, len(v))
 		for i, val := range v {
 			result[i] = convertToProtobufCompatible(val)
+		}
+		return result
+	case []ConditionResult:
+		// Convert []ConditionResult to []interface{} of maps
+		result := make([]interface{}, len(v))
+		for i, cr := range v {
+			result[i] = map[string]interface{}{
+				"fieldName":     cr.FieldName,
+				"operator":      cr.Operator,
+				"expectedValue": cr.ExpectedValue,
+				"actualValue":   cr.ActualValue,
+				"passed":        cr.Passed,
+				"reason":        cr.Reason,
+			}
 		}
 		return result
 	default:

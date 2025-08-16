@@ -98,7 +98,7 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 			},
 			conditions: []map[string]interface{}{
 				{
-					"fieldName": "answer", // Use answer field from latestRoundData
+					"fieldName": "latestRoundData.answer", // Use answer field from latestRoundData
 					"operator":  "lt",
 					"value":     "500000000000", // 5000 * 10^8 (assuming 8 decimals)
 					"fieldType": "decimal",
@@ -123,7 +123,7 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 			},
 			conditions: []map[string]interface{}{
 				{
-					"fieldName": "answer", // Use answer field from latestRoundData
+					"fieldName": "latestRoundData.answer", // Use answer field from latestRoundData
 					"operator":  "lt",
 					"value":     "1000", // Much smaller value to ensure condition fails
 					"fieldType": "decimal",
@@ -154,7 +154,7 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 					"fieldType": "uint8",
 				},
 				{
-					"fieldName": "answer", // Use answer field from latestRoundData
+					"fieldName": "latestRoundData.answer", // Use answer field from latestRoundData
 					"operator":  "gt",
 					"value":     "100000000000", // 1000 * 10^8
 					"fieldType": "decimal",
