@@ -216,10 +216,17 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 			"simulationMode", simulationMode)
 	}
 
-	// 🔮 TENDERLY SIMULATION MODE (default: provides sample data)
+	// 🔮 SMART DETECTION: Determine if this should use direct calls or simulation
 	if simulationMode {
-		// Simulation path does not require an RPC connection
-		return n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
+		// Check if this is a direct method call scenario (oracle reading)
+		if n.shouldUseDirectCalls(queriesArray) {
+			n.logger.Info("🎯 EventTrigger: Using direct contract calls for method-only queries")
+			return n.runEventTriggerWithDirectCalls(ctx, queriesArray, inputVariables)
+		} else {
+			// Traditional simulation path for event-based queries
+			n.logger.Info("🔮 EventTrigger: Using Tenderly simulation for event-based queries")
+			return n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
+		}
 	}
 
 	// 📊 HISTORICAL SEARCH MODE (use simulationMode: false for production)
@@ -228,6 +235,435 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		return nil, fmt.Errorf("RPC connection not available for EventTrigger historical search")
 	}
 	return n.runEventTriggerWithHistoricalSearch(ctx, queriesArray, inputVariables)
+}
+
+// shouldUseDirectCalls determines if the query should use direct contract calls vs simulation
+func (n *Engine) shouldUseDirectCalls(queriesArray []interface{}) bool {
+	for _, queryInterface := range queriesArray {
+		queryMap, ok := queryInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Check if query has topics (indicates event-based query)
+		if topicsInterface, exists := queryMap["topics"]; exists {
+			if topicsArray, ok := topicsInterface.([]interface{}); ok && len(topicsArray) > 0 {
+				// Has topics - this is event-based, use simulation
+				return false
+			}
+		}
+
+		// Check if query has methodCalls (indicates direct contract calls)
+		if methodCallsInterface, exists := queryMap["methodCalls"]; exists {
+			if methodCallsArray, ok := methodCallsInterface.([]interface{}); ok && len(methodCallsArray) > 0 {
+				// Has methodCalls but no topics - this is direct call scenario
+				return true
+			}
+		}
+	}
+
+	// Default to simulation if unclear
+	return false
+}
+
+// runEventTriggerWithDirectCalls executes eventTrigger using direct contract calls (oracle reading)
+func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	if n.logger != nil {
+		n.logger.Info("🎯 EventTrigger: Starting direct contract calls mode",
+			"queriesCount", len(queriesArray))
+	}
+
+	// Process the first query (for now, handle single query)
+	if len(queriesArray) == 0 {
+		return nil, fmt.Errorf("no queries provided for direct calls")
+	}
+
+	queryMap, ok := queriesArray[0].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid query format")
+	}
+
+	// Extract contract address
+	addressesInterface, exists := queryMap["addresses"]
+	if !exists {
+		return nil, fmt.Errorf("addresses required for direct contract calls")
+	}
+
+	addressesArray, ok := addressesInterface.([]interface{})
+	if !ok || len(addressesArray) == 0 {
+		return nil, fmt.Errorf("invalid addresses format")
+	}
+
+	contractAddressStr, ok := addressesArray[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid contract address format")
+	}
+
+	// Parse contract ABI
+	contractAbiInterface, exists := queryMap["contractAbi"]
+	if !exists {
+		return nil, fmt.Errorf("contractAbi required for direct contract calls")
+	}
+
+	// Convert ABI to string array for parsing
+	abiArray, ok := contractAbiInterface.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid contractAbi format")
+	}
+
+	abiStrings := make([]string, len(abiArray))
+	for i, abiItem := range abiArray {
+		if abiStr, ok := abiItem.(string); ok {
+			abiStrings[i] = abiStr
+		} else {
+			return nil, fmt.Errorf("invalid ABI item format at index %d", i)
+		}
+	}
+
+	// ABI strings will be converted to protobuf Values below
+
+	// Execute method calls directly
+	methodCallsInterface, exists := queryMap["methodCalls"]
+	if !exists {
+		return nil, fmt.Errorf("methodCalls required for direct contract calls")
+	}
+
+	methodCallsArray, ok := methodCallsInterface.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid methodCalls format")
+	}
+
+	// Use existing contract read infrastructure for direct calls
+	methodCallResults := make(map[string]interface{})
+
+	for _, methodCallInterface := range methodCallsArray {
+		methodCallMap, ok := methodCallInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		methodName, ok := methodCallMap["methodName"].(string)
+		if !ok {
+			continue
+		}
+
+		// Extract method params
+		var methodParams []string
+		if paramsInterface, exists := methodCallMap["methodParams"]; exists {
+			if paramsArray, ok := paramsInterface.([]interface{}); ok {
+				methodParams = make([]string, len(paramsArray))
+				for i, param := range paramsArray {
+					if paramStr, ok := param.(string); ok {
+						methodParams[i] = paramStr
+					}
+				}
+			}
+		}
+
+		n.logger.Info("🔍 Executing direct contract call",
+			"contract", contractAddressStr,
+			"method", methodName,
+			"params", methodParams)
+
+		// Convert ABI array to protobuf Values for compatibility
+		abiValues := make([]*structpb.Value, len(abiStrings))
+		for i, abiStr := range abiStrings {
+			val, err := structpb.NewValue(abiStr)
+			if err != nil {
+				n.logger.Error("❌ Failed to convert ABI string to protobuf value",
+					"index", i,
+					"error", err)
+				continue
+			}
+			abiValues[i] = val
+		}
+
+		// Create a temporary contractRead node for execution
+		contractReadNode := &avsproto.ContractReadNode{
+			Config: &avsproto.ContractReadNode_Config{
+				ContractAddress: contractAddressStr,
+				ContractAbi:     abiValues,
+				MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+					{
+						MethodName:   methodName,
+						MethodParams: methodParams,
+					},
+				},
+			},
+		}
+
+		// Create a temporary VM for contract read execution
+		tempVM := &VM{
+			logger:            n.logger,
+			smartWalletConfig: n.smartWalletConfig, // Use the engine's smart wallet config
+		}
+		tempVM.SetSimulation(true) // Use simulation mode for reads
+
+		// Execute the contract read using VM's runContractRead
+		executionStep, err := tempVM.runContractRead("temp_step", contractReadNode)
+		if err != nil {
+			n.logger.Error("❌ Failed to execute direct contract call",
+				"method", methodName,
+				"error", err)
+			continue
+		}
+
+		// Extract result from execution step
+		if executionStep != nil && executionStep.Success {
+			if contractReadOutput := executionStep.GetContractRead(); contractReadOutput != nil {
+				if contractReadOutput.Data != nil {
+					if resultData, ok := contractReadOutput.Data.AsInterface().(map[string]interface{}); ok {
+						// Merge method results
+						for key, value := range resultData {
+							methodCallResults[key] = value
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Evaluate conditions against the method call results
+	conditionResults, allConditionsMet := n.evaluateConditionsWithDetails(methodCallResults, queryMap)
+
+	// Build enhanced response structure
+	response := n.buildEventTriggerResponse(methodCallResults, conditionResults, allConditionsMet)
+
+	n.logger.Info("✅ Direct contract calls completed",
+		"methodResults", len(methodCallResults),
+		"conditionsMet", allConditionsMet,
+		"results", methodCallResults)
+
+	return response, nil
+}
+
+// ConditionResult represents the result of evaluating a single condition
+type ConditionResult struct {
+	FieldName     string      `json:"fieldName"`
+	Operator      string      `json:"operator"`
+	ExpectedValue string      `json:"expectedValue"`
+	ActualValue   interface{} `json:"actualValue"`
+	Passed        bool        `json:"passed"`
+	Reason        string      `json:"reason,omitempty"`
+}
+
+// evaluateConditionsWithDetails evaluates conditions and returns detailed results
+func (n *Engine) evaluateConditionsWithDetails(data map[string]interface{}, queryMap map[string]interface{}) ([]ConditionResult, bool) {
+	conditionsInterface, exists := queryMap["conditions"]
+	if !exists {
+		// No conditions to evaluate - all conditions met by default
+		return []ConditionResult{}, true
+	}
+
+	conditionsArray, ok := conditionsInterface.([]interface{})
+	if !ok || len(conditionsArray) == 0 {
+		// No valid conditions - all conditions met by default
+		return []ConditionResult{}, true
+	}
+
+	results := make([]ConditionResult, len(conditionsArray))
+	allConditionsMet := true
+
+	for i, conditionInterface := range conditionsArray {
+		conditionMap, ok := conditionInterface.(map[string]interface{})
+		if !ok {
+			results[i] = ConditionResult{
+				FieldName: "unknown",
+				Passed:    false,
+				Reason:    "Invalid condition format",
+			}
+			allConditionsMet = false
+			continue
+		}
+
+		fieldName, _ := conditionMap["fieldName"].(string)
+		operator, _ := conditionMap["operator"].(string)
+		expectedValue, _ := conditionMap["value"].(string)
+		fieldType, _ := conditionMap["fieldType"].(string)
+
+		// Get actual value from data
+		actualValue, exists := data[fieldName]
+		if !exists {
+			results[i] = ConditionResult{
+				FieldName:     fieldName,
+				Operator:      operator,
+				ExpectedValue: expectedValue,
+				ActualValue:   nil,
+				Passed:        false,
+				Reason:        fmt.Sprintf("Field '%s' not found in method call results", fieldName),
+			}
+			allConditionsMet = false
+			continue
+		}
+
+		// Evaluate the condition
+		passed := n.evaluateCondition(actualValue, operator, expectedValue, fieldType)
+		reason := n.buildConditionReason(actualValue, operator, expectedValue, passed)
+
+		results[i] = ConditionResult{
+			FieldName:     fieldName,
+			Operator:      operator,
+			ExpectedValue: expectedValue,
+			ActualValue:   actualValue,
+			Passed:        passed,
+			Reason:        reason,
+		}
+
+		if !passed {
+			allConditionsMet = false
+		}
+	}
+
+	return results, allConditionsMet
+}
+
+// evaluateCondition evaluates a single condition
+func (n *Engine) evaluateCondition(actualValue interface{}, operator, expectedValue, fieldType string) bool {
+	switch operator {
+	case "lt", "less_than":
+		return n.evaluateLessThan(actualValue, expectedValue, fieldType)
+	case "gt", "greater_than":
+		return n.evaluateGreaterThan(actualValue, expectedValue, fieldType)
+	case "eq", "equals":
+		return n.evaluateEquals(actualValue, expectedValue, fieldType)
+	case "ne", "not_equals":
+		return !n.evaluateEquals(actualValue, expectedValue, fieldType)
+	case "lte", "less_than_or_equal":
+		return n.evaluateLessThan(actualValue, expectedValue, fieldType) || n.evaluateEquals(actualValue, expectedValue, fieldType)
+	case "gte", "greater_than_or_equal":
+		return n.evaluateGreaterThan(actualValue, expectedValue, fieldType) || n.evaluateEquals(actualValue, expectedValue, fieldType)
+	default:
+		n.logger.Warn("🚫 Unsupported condition operator", "operator", operator)
+		return false
+	}
+}
+
+// evaluateLessThan evaluates less than comparison
+func (n *Engine) evaluateLessThan(actualValue interface{}, expectedValue, fieldType string) bool {
+	switch fieldType {
+	case "decimal", "uint256", "uint128", "uint64", "uint32", "uint16", "uint8":
+		actualFloat, err1 := n.convertToFloat(actualValue)
+		expectedFloat, err2 := n.convertToFloat(expectedValue)
+		if err1 != nil || err2 != nil {
+			return false
+		}
+		return actualFloat < expectedFloat
+	default:
+		return false
+	}
+}
+
+// evaluateGreaterThan evaluates greater than comparison
+func (n *Engine) evaluateGreaterThan(actualValue interface{}, expectedValue, fieldType string) bool {
+	switch fieldType {
+	case "decimal", "uint256", "uint128", "uint64", "uint32", "uint16", "uint8":
+		actualFloat, err1 := n.convertToFloat(actualValue)
+		expectedFloat, err2 := n.convertToFloat(expectedValue)
+		if err1 != nil || err2 != nil {
+			return false
+		}
+		return actualFloat > expectedFloat
+	default:
+		return false
+	}
+}
+
+// evaluateEquals evaluates equality comparison
+func (n *Engine) evaluateEquals(actualValue interface{}, expectedValue, fieldType string) bool {
+	switch fieldType {
+	case "decimal", "uint256", "uint128", "uint64", "uint32", "uint16", "uint8":
+		actualFloat, err1 := n.convertToFloat(actualValue)
+		expectedFloat, err2 := n.convertToFloat(expectedValue)
+		if err1 != nil || err2 != nil {
+			return false
+		}
+		return actualFloat == expectedFloat
+	case "string", "address":
+		actualStr := fmt.Sprintf("%v", actualValue)
+		return actualStr == expectedValue
+	case "bool":
+		actualBool, ok := actualValue.(bool)
+		if !ok {
+			return false
+		}
+		expectedBool := expectedValue == "true"
+		return actualBool == expectedBool
+	default:
+		return fmt.Sprintf("%v", actualValue) == expectedValue
+	}
+}
+
+// convertToFloat converts various types to float64 for numeric comparison
+func (n *Engine) convertToFloat(value interface{}) (float64, error) {
+	switch v := value.(type) {
+	case float64:
+		return v, nil
+	case int:
+		return float64(v), nil
+	case int64:
+		return float64(v), nil
+	case string:
+		return strconv.ParseFloat(v, 64)
+	default:
+		// Try to convert to string then parse
+		str := fmt.Sprintf("%v", value)
+		return strconv.ParseFloat(str, 64)
+	}
+}
+
+// buildConditionReason builds a human-readable reason for condition result
+func (n *Engine) buildConditionReason(actualValue interface{}, operator, expectedValue string, passed bool) string {
+	if passed {
+		switch operator {
+		case "lt", "less_than":
+			return fmt.Sprintf("Value %v is less than %s", actualValue, expectedValue)
+		case "gt", "greater_than":
+			return fmt.Sprintf("Value %v is greater than %s", actualValue, expectedValue)
+		case "eq", "equals":
+			return fmt.Sprintf("Value %v equals %s", actualValue, expectedValue)
+		case "ne", "not_equals":
+			return fmt.Sprintf("Value %v does not equal %s", actualValue, expectedValue)
+		case "lte", "less_than_or_equal":
+			return fmt.Sprintf("Value %v is less than or equal to %s", actualValue, expectedValue)
+		case "gte", "greater_than_or_equal":
+			return fmt.Sprintf("Value %v is greater than or equal to %s", actualValue, expectedValue)
+		default:
+			return "Condition passed"
+		}
+	} else {
+		switch operator {
+		case "lt", "less_than":
+			return fmt.Sprintf("Value %v is not less than %s", actualValue, expectedValue)
+		case "gt", "greater_than":
+			return fmt.Sprintf("Value %v is not greater than %s", actualValue, expectedValue)
+		case "eq", "equals":
+			return fmt.Sprintf("Value %v does not equal %s", actualValue, expectedValue)
+		case "ne", "not_equals":
+			return fmt.Sprintf("Value %v equals %s (expected not equal)", actualValue, expectedValue)
+		case "lte", "less_than_or_equal":
+			return fmt.Sprintf("Value %v is not less than or equal to %s", actualValue, expectedValue)
+		case "gte", "greater_than_or_equal":
+			return fmt.Sprintf("Value %v is not greater than or equal to %s", actualValue, expectedValue)
+		default:
+			return "Condition failed"
+		}
+	}
+}
+
+// buildEventTriggerResponse builds the enhanced response structure
+func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}, conditionResults []ConditionResult, allConditionsMet bool) map[string]interface{} {
+	response := make(map[string]interface{})
+
+	// Always include method call data
+	for key, value := range methodCallData {
+		response[key] = value
+	}
+
+	// Add condition evaluation metadata
+	response["conditionsMet"] = allConditionsMet
+	response["matchedConditions"] = conditionResults
+
+	return response
 }
 
 // runEventTriggerWithTenderlySimulation executes event trigger using Tenderly simulation
