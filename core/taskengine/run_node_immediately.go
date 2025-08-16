@@ -20,6 +20,15 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// getMapKeys returns the keys of a map for debugging
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // getRealisticBlockNumberForChain returns a realistic block number for simulation based on chain ID
 func getRealisticBlockNumberForChain(chainID int64) uint64 {
 	switch chainID {
@@ -57,6 +66,7 @@ func (n *Engine) runTriggerImmediately(triggerType string, triggerConfig map[str
 	case NodeTypeCronTrigger:
 		return n.runCronTriggerImmediately(triggerConfig, inputVariables)
 	case NodeTypeEventTrigger:
+		fmt.Printf("🎯 DEBUG: About to call runEventTriggerImmediately\n")
 		return n.runEventTriggerImmediately(triggerConfig, inputVariables)
 	case NodeTypeManualTrigger:
 		return n.runManualTriggerImmediately(triggerConfig, inputVariables)
@@ -188,6 +198,11 @@ func (n *Engine) runCronTriggerImmediately(triggerConfig map[string]interface{},
 
 // runEventTriggerImmediately executes an event trigger immediately using the new queries-based system
 func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	fmt.Printf("🚀 DEBUG: runEventTriggerImmediately called with config keys: %v\n", getMapKeys(triggerConfig))
+	if n.logger != nil {
+		n.logger.Info("🚀 runEventTriggerImmediately: Starting execution")
+	}
+
 	// Create a context with timeout to prevent hanging tests
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -195,13 +210,18 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	// Parse the new queries-based configuration
 	queriesInterface, ok := triggerConfig["queries"]
 	if !ok {
+		if n.logger != nil {
+			n.logger.Info("🚀 runEventTriggerImmediately: No queries found, falling back to legacy mode")
+		}
 		return nil, fmt.Errorf("queries is required for EventTrigger")
 	}
 
 	queriesArray, ok := queriesInterface.([]interface{})
 	if !ok || len(queriesArray) == 0 {
+		fmt.Printf("🚀 DEBUG: queries validation failed - ok: %v, len: %d\n", ok, len(queriesArray))
 		return nil, fmt.Errorf("queries must be a non-empty array")
 	}
+	fmt.Printf("🚀 DEBUG: queries validation passed - found %d queries\n", len(queriesArray))
 
 	// Check if simulation mode is enabled (default: true, provides sample data for development)
 	simulationMode := true
@@ -210,6 +230,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 			simulationMode = simModeBool
 		}
 	}
+	fmt.Printf("🚀 DEBUG: simulationMode = %v\n", simulationMode)
 
 	if n.logger != nil {
 		n.logger.Info("EventTrigger: Processing queries-based EventTrigger",
@@ -218,12 +239,20 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	}
 
 	// 🔮 SMART DETECTION: Determine if this should use direct calls or simulation
+	fmt.Printf("🚀 DEBUG: About to check simulationMode\n")
 	if simulationMode {
+		fmt.Printf("🚀 DEBUG: In simulationMode branch\n")
 		// Check if this is a direct method call scenario (oracle reading)
-		if n.shouldUseDirectCalls(queriesArray) {
+		fmt.Printf("🚀 DEBUG: About to call shouldUseDirectCalls\n")
+		shouldUseDirect := n.shouldUseDirectCalls(queriesArray)
+		fmt.Printf("🚀 DEBUG: shouldUseDirectCalls returned: %v\n", shouldUseDirect)
+
+		if shouldUseDirect {
+			fmt.Printf("🚀 DEBUG: Taking direct calls path\n")
 			n.logger.Info("🎯 EventTrigger: Using direct contract calls for method-only queries")
 			return n.runEventTriggerWithDirectCalls(ctx, queriesArray, inputVariables)
 		} else {
+			fmt.Printf("🚀 DEBUG: Taking simulation path\n")
 			// Traditional simulation path for event-based queries
 			n.logger.Info("🔮 EventTrigger: Using Tenderly simulation for event-based queries")
 			return n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
@@ -240,30 +269,79 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 
 // shouldUseDirectCalls determines if the query should use direct contract calls vs simulation
 func (n *Engine) shouldUseDirectCalls(queriesArray []interface{}) bool {
-	for _, queryInterface := range queriesArray {
+	fmt.Printf("🔍 DEBUG: shouldUseDirectCalls called with %d queries\n", len(queriesArray))
+	if n.logger != nil {
+		n.logger.Info("🔍 shouldUseDirectCalls: Analyzing queries", "queryCount", len(queriesArray))
+	}
+
+	for i, queryInterface := range queriesArray {
+		fmt.Printf("🔍 DEBUG: Processing query %d\n", i)
 		queryMap, ok := queryInterface.(map[string]interface{})
 		if !ok {
+			fmt.Printf("🔍 DEBUG: Query %d is not a map\n", i)
+			if n.logger != nil {
+				n.logger.Info("🔍 shouldUseDirectCalls: Query not a map", "queryIndex", i)
+			}
 			continue
 		}
+		fmt.Printf("🔍 DEBUG: Query %d is a map with keys: %v\n", i, getMapKeys(queryMap))
 
 		// Check if query has topics (indicates event-based query)
 		if topicsInterface, exists := queryMap["topics"]; exists {
+			fmt.Printf("🔍 DEBUG: Query %d has topics field\n", i)
 			if topicsArray, ok := topicsInterface.([]interface{}); ok && len(topicsArray) > 0 {
 				// Has topics - this is event-based, use simulation
+				fmt.Printf("🔍 DEBUG: Query %d has %d topics, returning false (simulation)\n", i, len(topicsArray))
+				if n.logger != nil {
+					n.logger.Info("🔍 shouldUseDirectCalls: Found topics, using simulation", "queryIndex", i, "topicsCount", len(topicsArray))
+				}
 				return false
 			}
+		} else {
+			fmt.Printf("🔍 DEBUG: Query %d has NO topics field\n", i)
 		}
 
 		// Check if query has methodCalls (indicates direct contract calls)
 		if methodCallsInterface, exists := queryMap["methodCalls"]; exists {
-			if methodCallsArray, ok := methodCallsInterface.([]interface{}); ok && len(methodCallsArray) > 0 {
-				// Has methodCalls but no topics - this is direct call scenario
-				return true
+			fmt.Printf("🔍 DEBUG: Query %d has methodCalls field (type: %T)\n", i, methodCallsInterface)
+
+			// Handle both []interface{} and []map[string]interface{} types
+			var methodCallsCount int
+			if methodCallsArray, ok := methodCallsInterface.([]interface{}); ok {
+				methodCallsCount = len(methodCallsArray)
+				fmt.Printf("🔍 DEBUG: Query %d methodCalls is []interface{} with length %d\n", i, methodCallsCount)
+			} else if methodCallsMapArray, ok := methodCallsInterface.([]map[string]interface{}); ok {
+				methodCallsCount = len(methodCallsMapArray)
+				fmt.Printf("🔍 DEBUG: Query %d methodCalls is []map[string]interface{} with length %d\n", i, methodCallsCount)
+			} else {
+				fmt.Printf("🔍 DEBUG: Query %d methodCalls field is unknown type: %T\n", i, methodCallsInterface)
+				methodCallsCount = 0
 			}
+
+			if methodCallsCount > 0 {
+				// Has methodCalls but no topics - this is direct call scenario
+				fmt.Printf("🔍 DEBUG: Query %d has %d methodCalls, returning true (direct calls)\n", i, methodCallsCount)
+				if n.logger != nil {
+					n.logger.Info("🔍 shouldUseDirectCalls: Found methodCalls without topics, using direct calls", "queryIndex", i, "methodCallsCount", methodCallsCount)
+				}
+				return true
+			} else {
+				fmt.Printf("🔍 DEBUG: Query %d methodCalls array is empty\n", i)
+			}
+		} else {
+			fmt.Printf("🔍 DEBUG: Query %d has NO methodCalls field\n", i)
+		}
+
+		fmt.Printf("🔍 DEBUG: Query %d has neither topics nor methodCalls\n", i)
+		if n.logger != nil {
+			n.logger.Info("🔍 shouldUseDirectCalls: Query has neither topics nor methodCalls", "queryIndex", i)
 		}
 	}
 
 	// Default to simulation if unclear
+	if n.logger != nil {
+		n.logger.Info("🔍 shouldUseDirectCalls: No clear signal, defaulting to simulation")
+	}
 	return false
 }
 

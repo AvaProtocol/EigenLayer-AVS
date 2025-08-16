@@ -185,6 +185,10 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 				"queries": []interface{}{query},
 			}
 
+			// Debug: Print the trigger configuration
+			configJSON, _ := json.MarshalIndent(triggerConfig, "", "  ")
+			t.Logf("Trigger Config:\n%s", string(configJSON))
+
 			// Execute the trigger
 			result, err := engine.runTriggerImmediately("eventTrigger", triggerConfig, map[string]interface{}{})
 			require.NoError(t, err, "runTriggerImmediately should not return an error")
