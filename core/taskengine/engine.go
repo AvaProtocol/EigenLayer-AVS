@@ -2101,13 +2101,36 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		n.logger.Info("🔍 SimulateTask: No trigger input found", "trigger_id", task.Trigger.Id, "trigger_type", task.Trigger.GetType())
 	}
 
+	// Check if trigger output indicates success or failure
+	triggerSuccess := true
+	triggerError := ""
+	triggerLogMessage := fmt.Sprintf("Simulated trigger: %s executed successfully", task.Trigger.Name)
+
+	if triggerOutput != nil {
+		// Check for enhanced response format with success field
+		if successValue, hasSuccess := triggerOutput["success"]; hasSuccess {
+			if successBool, ok := successValue.(bool); ok {
+				triggerSuccess = successBool
+				if !triggerSuccess {
+					// Extract error message for failed triggers
+					if errorValue, hasError := triggerOutput["error"]; hasError {
+						if errorStr, ok := errorValue.(string); ok {
+							triggerError = errorStr
+						}
+					}
+					triggerLogMessage = fmt.Sprintf("Simulated trigger: %s conditions not met", task.Trigger.Name)
+				}
+			}
+		}
+	}
+
 	triggerStep := &avsproto.Execution_Step{
 		Id:      task.Trigger.Id, // Use new 'id' field
-		Success: true,
-		Error:   "",
+		Success: triggerSuccess,
+		Error:   triggerError,
 		StartAt: triggerStartTime.UnixMilli(), // Use actual trigger start time
 		EndAt:   triggerEndTime.UnixMilli(),   // Use actual trigger end time
-		Log:     fmt.Sprintf("Simulated trigger: %s executed successfully", task.Trigger.Name),
+		Log:     triggerLogMessage,
 		Inputs:  triggerInputs,                  // Use inputVariables keys as trigger inputs
 		Type:    queueData.TriggerType.String(), // Use trigger type as string
 		Name:    task.Trigger.Name,              // Use new 'name' field
@@ -2134,6 +2157,15 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Set trigger output data in the step using shared function
 	triggerStep.OutputData = buildExecutionStepOutputData(queueData.TriggerType, triggerOutputProto)
+
+	// Set metadata for enhanced response format when conditions are not met
+	if triggerOutput != nil && !triggerSuccess {
+		if metadataValue, hasMetadata := triggerOutput["executionContext"]; hasMetadata {
+			if metadataProto, err := structpb.NewValue(metadataValue); err == nil {
+				triggerStep.Metadata = metadataProto
+			}
+		}
+	}
 
 	// Add trigger step to execution logs
 	vm.ExecutionLogs = append(vm.ExecutionLogs, triggerStep)
@@ -3707,32 +3739,64 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 				triggerDataMap[k] = v
 			}
 		} else {
-			// For EventTriggers, check if this is a simulation result structure
-			// Simulation results should have "found", "metadata", and "data" fields
-			if _, hasFound := triggerOutput["found"]; hasFound {
-				if _, hasMetadata := triggerOutput["metadata"]; hasMetadata {
+			// Check for enhanced response format first (new format with success field)
+			if successValue, hasSuccess := triggerOutput["success"]; hasSuccess {
+				// Enhanced response format - extract data appropriately
+				if successBool, ok := successValue.(bool); ok && !successBool {
+					// Conditions not met - data is in error message as JSON string
+					if errorValue, hasError := triggerOutput["error"]; hasError {
+						if errorStr, ok := errorValue.(string); ok {
+							// Try to extract data from error message
+							if strings.HasPrefix(errorStr, "Conditions not met. Data: ") {
+								jsonStr := strings.TrimPrefix(errorStr, "Conditions not met. Data: ")
+								var errorData map[string]interface{}
+								if err := json.Unmarshal([]byte(jsonStr), &errorData); err == nil {
+									// Successfully extracted data from error message
+									for k, v := range errorData {
+										if k != "conditions" { // Skip conditions metadata
+											triggerDataMap[k] = v
+										}
+									}
+								}
+							}
+						}
+					}
+				} else {
+					// Conditions met - data is in data field
 					if eventData, hasEventData := triggerOutput["data"].(map[string]interface{}); hasEventData {
-						// Extract the actual event data from the nested "data" field
 						for k, v := range eventData {
 							triggerDataMap[k] = v
 						}
+					}
+				}
+			} else {
+				// Legacy format - check if this is a simulation result structure
+				// Simulation results should have "found", "metadata", and "data" fields
+				if _, hasFound := triggerOutput["found"]; hasFound {
+					if _, hasMetadata := triggerOutput["metadata"]; hasMetadata {
+						if eventData, hasEventData := triggerOutput["data"].(map[string]interface{}); hasEventData {
+							// Extract the actual event data from the nested "data" field
+							for k, v := range eventData {
+								triggerDataMap[k] = v
+							}
+						} else {
+							// No valid data field in simulation result - copy all data as-is
+							for k, v := range triggerOutput {
+								triggerDataMap[k] = v
+							}
+						}
 					} else {
-						// No valid data field in simulation result - copy all data as-is
+						// Not a complete simulation result structure - copy all data as-is
 						for k, v := range triggerOutput {
 							triggerDataMap[k] = v
 						}
 					}
 				} else {
-					// Not a complete simulation result structure - copy all data as-is
+					// Not a simulation result structure - this should be actual event data
+					// Copy all event trigger data directly
 					for k, v := range triggerOutput {
 						triggerDataMap[k] = v
 					}
-				}
-			} else {
-				// Not a simulation result structure - this should be actual event data
-				// Copy all event trigger data directly
-				for k, v := range triggerOutput {
-					triggerDataMap[k] = v
 				}
 			}
 		}
