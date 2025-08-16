@@ -1177,9 +1177,24 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 	// First, add return values to decodedEventsData (for view functions that return data)
 	for _, methodResult := range results {
+		r.vm.logger.Info("🔍 CRITICAL DEBUG - Processing methodResult for decodedEventsData",
+			"method", methodResult.MethodName, 
+			"value_nil", methodResult.Value == nil,
+			"value_content", func() interface{} {
+				if methodResult.Value != nil {
+					return methodResult.Value.AsInterface()
+				}
+				return "nil"
+			}())
 		if methodResult.Value != nil {
 			// Add return values under method name
 			decodedEventsData[methodResult.MethodName] = methodResult.Value.AsInterface()
+			r.vm.logger.Info("✅ CRITICAL DEBUG - Added return value to decodedEventsData",
+				"method", methodResult.MethodName,
+				"data", methodResult.Value.AsInterface())
+		} else {
+			r.vm.logger.Error("❌ CRITICAL DEBUG - methodResult.Value is nil",
+				"method", methodResult.MethodName)
 		}
 	}
 
@@ -1248,8 +1263,26 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			}
 		}
 
-		// Store events for this method (empty object if no events)
-		decodedEventsData[methodName] = methodEvents
+		// Store events for this method, preserving existing return values
+		if len(methodEvents) > 0 {
+			// If we have events, merge them with any existing return values
+			if existing, hasExisting := decodedEventsData[methodName]; hasExisting {
+				if existingMap, ok := existing.(map[string]interface{}); ok {
+					// Merge events with existing return values
+					for key, value := range methodEvents {
+						existingMap[key] = value
+					}
+					decodedEventsData[methodName] = existingMap
+				} else {
+					// Replace if existing data isn't a map
+					decodedEventsData[methodName] = methodEvents
+				}
+			} else {
+				// No existing data, just set events
+				decodedEventsData[methodName] = methodEvents
+			}
+		}
+		// If no events, preserve existing return values (don't overwrite with empty map)
 	}
 
 	// Convert decoded events to protobuf Value
