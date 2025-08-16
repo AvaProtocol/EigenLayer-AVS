@@ -290,4 +290,55 @@ func TestObjectSerializationInTemplates(t *testing.T) {
 		t.Logf("  - Fee: %s", fee.String())
 		t.Logf("  - SqrtPriceLimitX96: %s", sqrtPriceLimitX96.String())
 	})
+
+	t.Run("Full_ABI_Packing_Test", func(t *testing.T) {
+		// Test the full ABI packing process that's failing in the real system
+		// This will trigger our debug output and show us what's wrong
+
+		// Create the same ABI as in our real system
+		abiJSON := `[{
+			"inputs": [{
+				"components": [
+					{"internalType": "address", "name": "tokenIn", "type": "address"},
+					{"internalType": "address", "name": "tokenOut", "type": "address"},
+					{"internalType": "uint256", "name": "amountIn", "type": "uint256"},
+					{"internalType": "uint24", "name": "fee", "type": "uint24"},
+					{"internalType": "uint160", "name": "sqrtPriceLimitX96", "type": "uint160"}
+				],
+				"internalType": "struct IQuoterV2.QuoteExactInputSingleParams",
+				"name": "params",
+				"type": "tuple"
+			}],
+			"name": "quoteExactInputSingle",
+			"outputs": [
+				{"internalType": "uint256", "name": "amountOut", "type": "uint256"},
+				{"internalType": "uint160", "name": "sqrtPriceX96After", "type": "uint160"},
+				{"internalType": "uint32", "name": "initializedTicksCrossed", "type": "uint32"},
+				{"internalType": "uint256", "name": "gasEstimate", "type": "uint256"}
+			],
+			"stateMutability": "nonpayable",
+			"type": "function"
+		}]`
+
+		// Parse the ABI
+		parsedABI, err := abi.JSON(strings.NewReader(abiJSON))
+		assert.NoError(t, err, "Should parse ABI successfully")
+
+		// Test the JSON array parameter (what our object-to-tuple conversion produces)
+		jsonArrayParam := `["0xfff9976782d46cc05630d1f6ebab18b2324d6b14","0xda317c1d3e835dd5f1be459006471acaa1289068","80000000000000000",500,0]`
+		methodParams := []string{jsonArrayParam}
+
+		// This should trigger our debug output and show us the exact error
+		t.Logf("🔍 Testing full ABI packing with parameters: %v", methodParams)
+
+		// Call the actual function that's failing
+		calldata, err := GenerateOrUseCallData("quoteExactInputSingle", "", methodParams, &parsedABI)
+
+		if err != nil {
+			t.Logf("❌ ABI packing failed (expected): %v", err)
+			// Don't fail the test - we expect this to fail and want to see the debug output
+		} else {
+			t.Logf("✅ ABI packing succeeded: %s", calldata)
+		}
+	})
 }

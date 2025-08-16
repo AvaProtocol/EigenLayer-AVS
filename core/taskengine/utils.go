@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"reflect"
 	"strings"
 
 	"bytes"
@@ -408,10 +409,71 @@ func GenerateCallData(methodName string, methodParams []string, contractAbi *abi
 		if err != nil {
 			return "", fmt.Errorf("failed to parse parameter %d (%s): %v", i, param, err)
 		}
+
 		args = append(args, parsedArg)
 	}
 
 	// Pack the method call using go-ethereum ABI
+	// For struct parameters, we might need to handle them specially
+	if len(method.Inputs) == 1 && method.Inputs[0].Type.T == abi.TupleTy {
+		// Special handling for single struct parameter
+		if slice, ok := args[0].([]interface{}); ok {
+			// Create a struct type dynamically using reflection to match the ABI tuple definition
+			tupleType := method.Inputs[0].Type
+
+			// Create struct fields based on the tuple definition
+			var fields []reflect.StructField
+			for i := range tupleType.TupleElems {
+				fieldName := tupleType.TupleRawNames[i]
+				// Capitalize first letter for exported field (Go requirement)
+				if len(fieldName) > 0 {
+					fieldName = strings.ToUpper(fieldName[:1]) + fieldName[1:]
+				}
+
+				// Use the actual type of the slice element
+				var fieldType reflect.Type
+				if i < len(slice) {
+					fieldType = reflect.TypeOf(slice[i])
+				} else {
+					fieldType = reflect.TypeOf((*interface{})(nil)).Elem()
+				}
+
+				fields = append(fields, reflect.StructField{
+					Name: fieldName,
+					Type: fieldType,
+				})
+			}
+
+			// Create the struct type and instance
+			structType := reflect.StructOf(fields)
+			structValue := reflect.New(structType).Elem()
+
+			// Set the field values from the slice
+			for i, value := range slice {
+				if i < structValue.NumField() {
+					field := structValue.Field(i)
+					if field.CanSet() {
+						field.Set(reflect.ValueOf(value))
+					}
+				}
+			}
+
+			// Pack the struct using the ABI
+			structInterface := structValue.Interface()
+			packedArgs, err := method.Inputs.Pack(structInterface)
+			if err != nil {
+				return "", fmt.Errorf("failed to pack struct arguments: %v", err)
+			}
+
+			// Combine method selector with packed arguments
+			selector := contractAbi.Methods[methodName].ID
+			calldata := append(selector, packedArgs...)
+
+			return fmt.Sprintf("0x%x", calldata), nil
+		}
+	}
+
+	// Fallback to normal packing
 	calldata, err := contractAbi.Pack(methodName, args...)
 	if err != nil {
 		return "", fmt.Errorf("failed to pack method call: %v", err)
@@ -531,6 +593,11 @@ func parseABIParameter(param string, abiType abi.Type) (interface{}, error) {
 				tupleElements = append(tupleElements, parsedElement)
 			}
 
+			// For Go ethereum ABI library, we need to return the tuple elements
+			// in a way that can be unpacked. The library expects struct-like data.
+			// Let's try returning a map or a different structure
+
+			// Actually, let's try returning the slice but handle it differently in the caller
 			return tupleElements, nil
 		}
 		return nil, fmt.Errorf("tuple parameter must be a JSON array")
