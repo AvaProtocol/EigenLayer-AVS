@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -660,28 +661,40 @@ func (n *Engine) buildConditionReason(actualValue interface{}, operator, expecte
 func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}, conditionResults []ConditionResult, allConditionsMet bool, chainID int64) map[string]interface{} {
 	response := make(map[string]interface{})
 
-	// Always include method call data
-	for key, value := range methodCallData {
-		response[key] = value
-	}
-
-	// Build metadata section with condition evaluation details
-	metadata := map[string]interface{}{
-		"triggered":         allConditionsMet,
-		"matchedConditions": conditionResults,
-	}
-
-	// Add reason when not triggered
-	if !allConditionsMet {
-		metadata["reason"] = "conditions not met"
-	}
-
-	response["metadata"] = metadata
-
 	// Add execution context
 	response["executionContext"] = map[string]interface{}{
 		"chainId":     chainID,
 		"isSimulated": false, // Direct calls are real, not simulated
+	}
+
+	if allConditionsMet {
+		// Success case: conditions met, include data normally
+		response["success"] = true
+		for key, value := range methodCallData {
+			response[key] = value
+		}
+	} else {
+		// Failure case: conditions not met, include data in error message as JSON
+		response["success"] = false
+
+		// Create comprehensive data object including method results and condition details
+		errorData := make(map[string]interface{})
+
+		// Include all method call data
+		for key, value := range methodCallData {
+			errorData[key] = value
+		}
+
+		// Include condition evaluation details
+		errorData["conditions"] = conditionResults
+
+		// Convert to JSON string for error message
+		errorDataJSON, err := json.Marshal(errorData)
+		if err != nil {
+			response["error"] = fmt.Sprintf("Conditions not met. Data serialization failed: %v", err)
+		} else {
+			response["error"] = fmt.Sprintf("Conditions not met. Data: %s", string(errorDataJSON))
+		}
 	}
 
 	return response

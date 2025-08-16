@@ -2204,8 +2204,15 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 // shouldContinueWorkflowExecution checks trigger output to determine if workflow should continue
 func (n *Engine) shouldContinueWorkflowExecution(triggerOutput map[string]interface{}, triggerType avsproto.TriggerType) bool {
-	// For eventTrigger, check the triggered field in metadata
+	// For eventTrigger, check the success field
 	if triggerType == avsproto.TriggerType_TRIGGER_TYPE_EVENT {
+		if success, exists := triggerOutput["success"]; exists {
+			if successBool, ok := success.(bool); ok {
+				return successBool
+			}
+		}
+
+		// Fallback: check legacy triggered field in metadata for backward compatibility
 		if metadata, exists := triggerOutput["metadata"]; exists {
 			if metadataMap, ok := metadata.(map[string]interface{}); ok {
 				if triggered, exists := metadataMap["triggered"]; exists {
@@ -2223,7 +2230,7 @@ func (n *Engine) shouldContinueWorkflowExecution(triggerOutput map[string]interf
 			}
 		}
 
-		// If no triggered/conditionsMet field found, assume triggered (for historical events)
+		// If no success/triggered/conditionsMet field found, assume triggered (for historical events)
 		return true
 	}
 
