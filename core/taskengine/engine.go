@@ -3379,49 +3379,56 @@ func buildEventTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Eve
 
 	// Check if we have event data and populate appropriately
 	if triggerOutput != nil {
-		// Check if we found events
+		// Handle both legacy event format (found: true) and new direct calls format (success: true/false)
+		var dataToConvert interface{}
+		var shouldConvert bool
+
+		// Check for legacy event format first
 		if found, ok := triggerOutput["found"].(bool); ok && found {
-			// Extract the data from the trigger output
+			// Legacy event format - extract data
 			if data, ok := triggerOutput["data"]; ok {
-				var dataToConvert interface{}
-				var shouldConvert bool
+				dataToConvert = data
+				shouldConvert = true
+			}
+		} else if data, hasData := triggerOutput["data"]; hasData {
+			// New direct calls format - always include data regardless of success status
+			dataToConvert = data
+			shouldConvert = true
+		}
 
-				// Handle different data types: JSON string, map, or other types
-				switch d := data.(type) {
-				case string:
-					// Try to parse as JSON string
-					var parsedData interface{}
-					if err := json.Unmarshal([]byte(d), &parsedData); err == nil {
-						dataToConvert = parsedData
-						shouldConvert = true
-					} else {
-						// If not valid JSON, treat as plain string (but only if non-empty)
-						if d != "" {
-							dataToConvert = d
-							shouldConvert = true
-						}
+		// Convert data if we have any
+		if shouldConvert && dataToConvert != nil {
+			// Handle different data types: JSON string, map, or other types
+			var finalData interface{}
+			switch d := dataToConvert.(type) {
+			case string:
+				// Try to parse as JSON string
+				var parsedData interface{}
+				if err := json.Unmarshal([]byte(d), &parsedData); err == nil {
+					finalData = parsedData
+				} else {
+					// If not valid JSON, treat as plain string (but only if non-empty)
+					if d != "" {
+						finalData = d
 					}
-				case map[string]interface{}:
-					// Direct map data - always valid
-					dataToConvert = d
-					shouldConvert = true
-				default:
-					// Other types (int, bool, etc.) are considered invalid for event data
-					// in the defensive programming context - skip conversion
-					shouldConvert = false
 				}
+			case map[string]interface{}:
+				// Direct map data - always valid
+				finalData = d
+			default:
+				// Other types (arrays, primitives, etc.)
+				finalData = d
+			}
 
-				// Convert to google.protobuf.Value only if we have valid data
-				if shouldConvert {
-					// Convert data to protobuf-compatible format before serialization
-					compatibleData := convertToProtobufCompatible(dataToConvert)
-					if protoValue, err := structpb.NewValue(compatibleData); err == nil {
-						eventOutput.Data = protoValue
-					}
+			// Convert to google.protobuf.Value only if we have valid data
+			if finalData != nil {
+				// Convert data to protobuf-compatible format before serialization
+				compatibleData := convertToProtobufCompatible(finalData)
+				if protoValue, err := structpb.NewValue(compatibleData); err == nil {
+					eventOutput.Data = protoValue
 				}
 			}
 		}
-		// If no events found, eventOutput remains with empty data field
 	}
 
 	return eventOutput

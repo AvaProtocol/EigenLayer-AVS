@@ -3305,8 +3305,27 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 	}
 
 	// Convert result to the appropriate protobuf output type
+	// Extract success status from trigger result (default to true if not specified)
+	triggerSuccess := true
+	if result != nil {
+		if successValue, hasSuccess := result["success"]; hasSuccess {
+			if successBool, ok := successValue.(bool); ok {
+				triggerSuccess = successBool
+			}
+		}
+	}
+
 	resp := &avsproto.RunTriggerResp{
-		Success: true,
+		Success: triggerSuccess,
+	}
+
+	// Extract error message from trigger result if success is false
+	if !triggerSuccess && result != nil {
+		if errorValue, hasError := result["error"]; hasError {
+			if errorStr, ok := errorValue.(string); ok && errorStr != "" {
+				resp.Error = errorStr
+			}
+		}
 	}
 
 	// Set the appropriate output data based on the trigger type using shared functions
