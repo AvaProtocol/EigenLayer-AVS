@@ -190,6 +190,7 @@ func (n *Engine) runCronTriggerImmediately(triggerConfig map[string]interface{},
 func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	if n.logger != nil {
 		n.logger.Info("🚀 runEventTriggerImmediately: Starting execution")
+		n.logger.Info("🚀 DEBUG: Function called with config", "configKeys", GetMapKeys(triggerConfig))
 	}
 
 	// Create a context with timeout to prevent hanging tests
@@ -228,6 +229,9 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	if simulationMode {
 		// Check if this is a direct method call scenario (oracle reading)
 		shouldUseDirect := n.shouldUseDirectCalls(queriesArray)
+		n.logger.Info("🔍 EventTrigger: Route determination",
+			"shouldUseDirect", shouldUseDirect,
+			"queriesCount", len(queriesArray))
 
 		if shouldUseDirect {
 			n.logger.Info("🎯 EventTrigger: Using direct contract calls for method-only queries")
@@ -1099,87 +1103,65 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 			"event_name", enrichmentResult.EventName)
 	}
 
-	// Check conditions against the enriched data and return enhanced response if not met
-	if hasConditions {
-		conditionsMet := n.evaluateEventConditions(simulatedLog, query.GetConditions())
-		if !conditionsMet {
-			n.logger.Info("🚫 Conditions not satisfied by simulation data, returning enhanced response",
-				"contract", simulatedLog.Address.Hex(),
-				"conditions_count", len(query.GetConditions()))
-
-			// Execute method calls to get additional data for enhanced response
-			methodCallResults := make(map[string]interface{})
-			if query.GetMethodCalls() != nil && len(query.GetMethodCalls()) > 0 {
-				for _, methodCall := range query.GetMethodCalls() {
-					if methodCall.GetMethodName() != "" {
-						result, err := n.executeMethodCallForSimulation(ctx, methodCall, queryMap, chainID)
-						if err != nil {
-							n.logger.Warn("Failed to execute method call for enhanced response",
-								"method", methodCall.GetMethodName(),
-								"error", err)
-							continue
-						}
-						// Merge results
-						for key, value := range result {
-							methodCallResults[key] = value
-						}
-					}
+	// Execute method calls to get additional data for enhanced response
+	methodCallResults := make(map[string]interface{})
+	n.logger.Info("🔧 EventTrigger simulation: Checking method calls",
+		"hasMethodCalls", query.GetMethodCalls() != nil,
+		"methodCallsCount", len(query.GetMethodCalls()))
+	if query.GetMethodCalls() != nil && len(query.GetMethodCalls()) > 0 {
+		n.logger.Info("🔧 EventTrigger simulation: Executing method calls",
+			"methodCallsCount", len(query.GetMethodCalls()))
+		for _, methodCall := range query.GetMethodCalls() {
+			if methodCall.GetMethodName() != "" {
+				n.logger.Info("🔧 Executing method call",
+					"methodName", methodCall.GetMethodName(),
+					"methodParams", methodCall.GetMethodParams())
+				result, err := n.executeMethodCallForSimulation(ctx, methodCall, queryMap, chainID)
+				if err != nil {
+					n.logger.Warn("Failed to execute method call for enhanced response",
+						"method", methodCall.GetMethodName(),
+						"error", err)
+					continue
+				}
+				n.logger.Info("✅ Method call result",
+					"methodName", methodCall.GetMethodName(),
+					"resultKeys", GetMapKeys(result))
+				// Merge results
+				for key, value := range result {
+					methodCallResults[key] = value
 				}
 			}
-
-			// Add enriched event data to method call results
-			for key, value := range parsedData {
-				methodCallResults[key] = value
-			}
-
-			// Evaluate conditions with details for enhanced response
-			conditionResults, allConditionsMet := n.evaluateConditionsWithDetails(methodCallResults, queryMap)
-
-			// Build enhanced response format
-			response := n.buildEventTriggerResponse(methodCallResults, conditionResults, allConditionsMet, chainID)
-			// Override executionContext for simulation
-			response["executionContext"] = map[string]interface{}{
-				"chainId":     chainID,
-				"isSimulated": true,
-				"provider":    "tenderly",
-			}
-			return response, nil
 		}
 	}
 
-	// Build the result structure based on event type (original success path)
-	result := map[string]interface{}{
-		"found":    true,
-		"metadata": metadata, // Raw blockchain event data
+	// Add enriched event data to method call results
+	for key, value := range parsedData {
+		methodCallResults[key] = value
 	}
 
-	// For Transfer events with enriched data, structure it properly
-	if isTransferEvent {
-		// Keep enriched data separate from raw blockchain metadata
-		result["transfer_log"] = parsedData // Only enriched data
-		result["data"] = parsedData         // Only enriched data for backward compatibility
-
-		if n.logger != nil {
-			n.logger.Info("✅ EventTrigger: Created enriched transfer_log structure (enriched data only)",
-				"tokenSymbol", parsedData["tokenSymbol"],
-				"blockTimestamp", parsedData["blockTimestamp"])
-		}
-	} else {
-		// For non-Transfer events, use only enriched/parsed data
-		result["data"] = parsedData // Only enriched/parsed data
+	// Evaluate conditions with details for enhanced response
+	var conditionResults []ConditionResult
+	var allConditionsMet bool = true
+	if hasConditions {
+		conditionResults, allConditionsMet = n.evaluateConditionsWithDetails(methodCallResults, queryMap)
 	}
 
-	if n.logger != nil {
-		hasABI := len(query.GetContractAbi()) > 0
-		n.logger.Info("✅ EventTrigger: Tenderly simulation completed successfully",
-			"contract", simulatedLog.Address.Hex(),
-			"block", simulatedLog.BlockNumber,
-			"txHash", simulatedLog.TxHash.Hex(),
-			"chainId", chainID,
-			"hasABI", hasABI)
+	// Always return enhanced response format with proper data and metadata
+	response := n.buildEventTriggerResponse(methodCallResults, conditionResults, allConditionsMet, chainID)
+	// Override executionContext for simulation
+	response["executionContext"] = map[string]interface{}{
+		"chainId":     chainID,
+		"isSimulated": true,
+		"provider":    "tenderly",
 	}
 
-	return result, nil
+	n.logger.Info("✅ EventTrigger simulation: Returning enhanced response format",
+		"contract", simulatedLog.Address.Hex(),
+		"hasConditions", hasConditions,
+		"allConditionsMet", allConditionsMet,
+		"dataKeys", GetMapKeys(methodCallResults))
+
+	return response, nil
 }
 
 // parseEventWithABI parses an event log using the provided contract ABI and applies method calls for enhanced formatting

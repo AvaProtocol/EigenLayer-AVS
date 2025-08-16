@@ -199,6 +199,9 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 			result, err := engine.runTriggerImmediately("eventTrigger", triggerConfig, map[string]interface{}{})
 			require.NoError(t, err, "runTriggerImmediately should not return an error")
 
+			// Debug: Print actual response for analysis
+			t.Logf("📋 ACTUAL RESPONSE: %+v", result)
+
 			// Verify the response structure
 			require.Contains(t, result, "success", "Response should have success field")
 			require.Contains(t, result, "executionContext", "Response should have executionContext field")
