@@ -764,6 +764,108 @@ func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}
 	return response
 }
 
+// executeMethodCallForSimulation executes a single method call for simulation path
+func (n *Engine) executeMethodCallForSimulation(ctx context.Context, methodCall *avsproto.EventTrigger_MethodCall, queryMap map[string]interface{}, chainID int64) (map[string]interface{}, error) {
+	// Extract contract address and ABI from queryMap
+	contractAddressInterface, exists := queryMap["addresses"]
+	if !exists {
+		return nil, fmt.Errorf("addresses field required")
+	}
+
+	addressesArray, ok := contractAddressInterface.([]interface{})
+	if !ok || len(addressesArray) == 0 {
+		return nil, fmt.Errorf("addresses must be a non-empty array")
+	}
+
+	contractAddressStr, ok := addressesArray[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("contract address must be a string")
+	}
+
+	// Extract ABI
+	contractAbiInterface, exists := queryMap["contractAbi"]
+	if !exists {
+		return nil, fmt.Errorf("contractAbi field required")
+	}
+
+	abiArray, ok := contractAbiInterface.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid contractAbi format")
+	}
+
+	// Convert ABI items directly to protobuf Values (same as direct calls path)
+	abiValues := make([]*structpb.Value, len(abiArray))
+	for i, abiItem := range abiArray {
+		if abiStr, ok := abiItem.(string); ok {
+			// ABI item is a JSON string, parse it to map first
+			var abiMap map[string]interface{}
+			if err := json.Unmarshal([]byte(abiStr), &abiMap); err != nil {
+				return nil, fmt.Errorf("failed to parse ABI JSON string at index %d: %v", i, err)
+			}
+			val, err := structpb.NewValue(abiMap)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert parsed ABI to protobuf value at index %d: %v", i, err)
+			}
+			abiValues[i] = val
+		} else if abiMap, ok := abiItem.(map[string]interface{}); ok {
+			// ABI item is already a map, convert directly to protobuf Value
+			val, err := structpb.NewValue(abiMap)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert ABI map to protobuf value at index %d: %v", i, err)
+			}
+			abiValues[i] = val
+		} else {
+			return nil, fmt.Errorf("invalid ABI item format at index %d (expected string or map, got %T)", i, abiItem)
+		}
+	}
+
+	// Get method params as strings (ContractReadNode expects []string)
+	methodParams := methodCall.GetMethodParams()
+
+	// Create a temporary contractRead node for execution (same as direct calls)
+	contractReadNode := &avsproto.ContractReadNode{
+		Config: &avsproto.ContractReadNode_Config{
+			ContractAddress: contractAddressStr,
+			ContractAbi:     abiValues,
+			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+				{
+					MethodName:   methodCall.GetMethodName(),
+					MethodParams: methodParams,
+				},
+			},
+		},
+	}
+
+	// Create a temporary VM for contract read execution using proper initialization
+	tempVM := NewVM()
+	tempVM.logger = n.logger
+	tempVM.smartWalletConfig = n.smartWalletConfig // Use the engine's smart wallet config
+	tempVM.SetSimulation(true)                     // Use simulation mode for reads
+
+	// Execute the contract read using VM's runContractRead
+	executionStep, err := tempVM.runContractRead("temp_step", contractReadNode)
+	if err != nil {
+		return nil, fmt.Errorf("contract read failed: %v", err)
+	}
+
+	// Extract result from execution step
+	results := make(map[string]interface{})
+	if executionStep != nil && executionStep.Success {
+		contractReadOutput := executionStep.GetContractRead()
+		if contractReadOutput != nil && contractReadOutput.Data != nil {
+			dataInterface := contractReadOutput.Data.AsInterface()
+			if resultData, ok := dataInterface.(map[string]interface{}); ok {
+				// Merge method results
+				for key, value := range resultData {
+					results[key] = value
+				}
+			}
+		}
+	}
+
+	return results, nil
+}
+
 // runEventTriggerWithTenderlySimulation executes event trigger using Tenderly simulation
 func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	if n.logger != nil {
@@ -890,17 +992,57 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 		simulatedLog = sampleLog
 	}
 
+	// Extract method call results first (before condition evaluation)
+	methodCallResults := make(map[string]interface{})
+	if query.GetMethodCalls() != nil && len(query.GetMethodCalls()) > 0 {
+		n.logger.Info("🔍 Simulation: Executing method calls for condition evaluation",
+			"methodCallsCount", len(query.GetMethodCalls()))
+		// Execute method calls to get data like decimals, current price, etc.
+		for _, methodCall := range query.GetMethodCalls() {
+			if methodCall.GetMethodName() != "" {
+				n.logger.Info("🔍 Simulation: Executing method call",
+					"method", methodCall.GetMethodName())
+				// Use the same contract read logic as direct calls
+				result, err := n.executeMethodCallForSimulation(ctx, methodCall, queryMap, chainID)
+				if err != nil {
+					n.logger.Warn("Failed to execute method call in simulation",
+						"method", methodCall.GetMethodName(),
+						"error", err)
+					continue
+				}
+				n.logger.Info("🔍 Simulation: Method call result",
+					"method", methodCall.GetMethodName(),
+					"result", result)
+				// Merge results
+				for key, value := range result {
+					methodCallResults[key] = value
+				}
+			}
+		}
+		n.logger.Info("🔍 Simulation: All method call results merged",
+			"methodCallResults", methodCallResults)
+	}
+
 	// Evaluate conditions against the real simulated data
-	// If conditions don't match, return nil (same as runTask behavior)
+	var conditionResults []ConditionResult
+	var allConditionsMet bool = true
+
 	if len(query.GetConditions()) > 0 {
-		conditionsMet := n.evaluateEventConditions(simulatedLog, query.GetConditions())
-		if !conditionsMet {
-			n.logger.Info("🚫 Conditions not satisfied by real data, no event returned",
+		conditionResults, allConditionsMet = n.evaluateConditionsWithDetails(methodCallResults, queryMap)
+		if !allConditionsMet {
+			n.logger.Info("🚫 Conditions not satisfied by real data, returning enhanced response",
 				"contract", simulatedLog.Address.Hex(),
 				"conditions_count", len(query.GetConditions()))
 
-			// Return nil to indicate no event found (conditions not met)
-			return nil, nil
+			// Return enhanced response format (same as direct calls)
+			response := n.buildEventTriggerResponse(methodCallResults, conditionResults, allConditionsMet, chainID)
+			// Override executionContext for simulation
+			response["executionContext"] = map[string]interface{}{
+				"chainId":     chainID,
+				"isSimulated": true,
+				"provider":    "tenderly",
+			}
+			return response, nil
 		}
 	}
 
