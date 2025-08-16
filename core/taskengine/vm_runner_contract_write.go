@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"strconv"
 	"strings"
@@ -113,6 +114,7 @@ func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) 
 func (r *ContractWriteProcessor) executeMethodCall(
 	ctx context.Context,
 	parsedABI *abi.ABI,
+	originalAbiString string,
 	contractAddress common.Address,
 	methodCall *avsproto.ContractWriteNode_MethodCall,
 ) *avsproto.ContractWriteNode_MethodResult {
@@ -351,17 +353,12 @@ func (r *ContractWriteProcessor) executeMethodCall(
 
 		// Get contract ABI as string
 		var contractAbiStr string
-		if parsedABI != nil {
-			// Convert ABI back to JSON string for Tenderly
-			if abiBytes, err := json.Marshal(parsedABI); err == nil {
-				contractAbiStr = string(abiBytes)
-				r.vm.logger.Debug("✅ CONTRACT WRITE - Converted parsed ABI to JSON string for Tenderly",
-					"method", methodName, "abi_length", len(contractAbiStr))
-			} else {
-				r.vm.logger.Warn("⚠️ CONTRACT WRITE - Failed to marshal ABI to JSON",
-					"method", methodName, "error", err)
-				contractAbiStr = ""
-			}
+		if parsedABI != nil && originalAbiString != "" {
+			// Use the original ABI string that was successfully parsed
+			// Don't re-marshal the parsed ABI as it changes the structure
+			contractAbiStr = originalAbiString
+			r.vm.logger.Debug("✅ CONTRACT WRITE - Using original ABI string for Tenderly",
+				"method", methodName, "abi_length", len(contractAbiStr))
 		}
 
 		// Ensure we use the latest block number for simulation context to enable realistic execution data
@@ -1042,7 +1039,15 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 	// Parse ABI if provided - OPTIMIZED: Use protobuf Values directly
 	var parsedABI *abi.ABI
+	var originalAbiString string
 	if node.Config != nil && len(node.Config.ContractAbi) > 0 {
+		// Get the original ABI string for Tenderly decoding
+		if abiReader, readerErr := ConvertContractAbiToReader(node.Config.ContractAbi); readerErr == nil {
+			if abiBytes, readErr := io.ReadAll(abiReader); readErr == nil {
+				originalAbiString = string(abiBytes)
+			}
+		}
+
 		if optimizedParsedABI, parseErr := ParseABIOptimized(node.Config.ContractAbi); parseErr == nil {
 			parsedABI = optimizedParsedABI
 			log.WriteString("✅ ABI parsed successfully using optimized shared method (no string conversion)\n")
@@ -1072,7 +1077,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					}
 				}
 			}()
-			result = r.executeMethodCall(ctx, parsedABI, contractAddr, methodCall)
+			result = r.executeMethodCall(ctx, parsedABI, originalAbiString, contractAddr, methodCall)
 		}()
 		// Ensure MethodName is populated to avoid empty keys downstream
 		if result.MethodName == "" {
