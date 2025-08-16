@@ -408,6 +408,9 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 	// Use existing contract read infrastructure for direct calls
 	methodCallResults := make(map[string]interface{})
 
+	// Collect all method calls first for batch execution (needed for applyToFields logic)
+	var allMethodCalls []*avsproto.ContractReadNode_MethodCall
+
 	for _, methodCallInterface := range methodCallsArray {
 		methodCallMap, ok := methodCallInterface.(map[string]interface{})
 		if !ok {
@@ -432,24 +435,44 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 			}
 		}
 
-		n.logger.Info("🔍 Executing direct contract call",
-			"contract", contractAddressStr,
+		// Extract applyToFields
+		var applyToFields []string
+		if applyToFieldsInterface, exists := methodCallMap["applyToFields"]; exists {
+			if applyToFieldsArray, ok := applyToFieldsInterface.([]interface{}); ok {
+				applyToFields = make([]string, len(applyToFieldsArray))
+				for i, field := range applyToFieldsArray {
+					if fieldStr, ok := field.(string); ok {
+						applyToFields[i] = fieldStr
+					}
+				}
+			}
+		}
+
+		n.logger.Info("🔍 Collecting method call for batch execution",
 			"method", methodName,
-			"params", methodParams)
+			"params", methodParams,
+			"applyToFields", applyToFields)
 
-		// abiValues already created above during ABI processing
+		// Add to batch for later execution
+		allMethodCalls = append(allMethodCalls, &avsproto.ContractReadNode_MethodCall{
+			MethodName:    methodName,
+			MethodParams:  methodParams,
+			ApplyToFields: applyToFields,
+		})
+	}
 
-		// Create a temporary contractRead node for execution
+	// Execute all method calls together in a single contractRead node for proper applyToFields logic
+	if len(allMethodCalls) > 0 {
+		n.logger.Info("🔍 Executing batch of direct contract calls",
+			"contract", contractAddressStr,
+			"methodCallsCount", len(allMethodCalls))
+
+		// Create a temporary contractRead node with ALL method calls
 		contractReadNode := &avsproto.ContractReadNode{
 			Config: &avsproto.ContractReadNode_Config{
 				ContractAddress: contractAddressStr,
 				ContractAbi:     abiValues,
-				MethodCalls: []*avsproto.ContractReadNode_MethodCall{
-					{
-						MethodName:   methodName,
-						MethodParams: methodParams,
-					},
-				},
+				MethodCalls:     allMethodCalls, // ✅ Execute all methods together for applyToFields
 			},
 		}
 
@@ -463,33 +486,22 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 		executionStep, err := tempVM.runContractRead("temp_step", contractReadNode)
 		if err != nil {
 			if n.logger != nil {
-				n.logger.Error("❌ Failed to execute direct contract call",
-					"method", methodName,
+				n.logger.Error("❌ Failed to execute batch contract calls",
 					"error", err)
 			}
-			continue
-		}
-
-		// Extract result from execution step
-		if executionStep != nil {
-			if executionStep.Success {
-				contractReadOutput := executionStep.GetContractRead()
-				if contractReadOutput != nil {
-					if contractReadOutput.Data != nil {
-						dataInterface := contractReadOutput.Data.AsInterface()
-						if resultData, ok := dataInterface.(map[string]interface{}); ok {
-							// Merge method results
-							for key, value := range resultData {
-								methodCallResults[key] = value
-							}
-						} else {
-						}
-					} else {
+		} else {
+			// Extract results from execution step
+			contractReadOutput := executionStep.GetContractRead()
+			if contractReadOutput != nil && contractReadOutput.Data != nil {
+				if dataMap, ok := contractReadOutput.Data.AsInterface().(map[string]interface{}); ok {
+					// Merge results into methodCallResults
+					for key, value := range dataMap {
+						methodCallResults[key] = value
 					}
-				} else {
+					n.logger.Info("✅ Batch contract calls successful",
+						"resultKeys", GetMapKeys(dataMap))
 				}
 			}
-		} else {
 		}
 	}
 
