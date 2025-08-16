@@ -423,11 +423,17 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 		}
 	}
 
+	// Get chain ID for response context
+	var chainID int64 = 11155111 // Default to Sepolia
+	if n.tokenEnrichmentService != nil {
+		chainID = int64(n.tokenEnrichmentService.GetChainID())
+	}
+
 	// Evaluate conditions against the method call results
 	conditionResults, allConditionsMet := n.evaluateConditionsWithDetails(methodCallResults, queryMap)
 
 	// Build enhanced response structure
-	response := n.buildEventTriggerResponse(methodCallResults, conditionResults, allConditionsMet)
+	response := n.buildEventTriggerResponse(methodCallResults, conditionResults, allConditionsMet, chainID)
 
 	n.logger.Info("✅ Direct contract calls completed",
 		"methodResults", len(methodCallResults),
@@ -651,7 +657,7 @@ func (n *Engine) buildConditionReason(actualValue interface{}, operator, expecte
 }
 
 // buildEventTriggerResponse builds the enhanced response structure
-func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}, conditionResults []ConditionResult, allConditionsMet bool) map[string]interface{} {
+func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}, conditionResults []ConditionResult, allConditionsMet bool, chainID int64) map[string]interface{} {
 	response := make(map[string]interface{})
 
 	// Always include method call data
@@ -659,9 +665,24 @@ func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}
 		response[key] = value
 	}
 
-	// Add condition evaluation metadata
-	response["conditionsMet"] = allConditionsMet
-	response["matchedConditions"] = conditionResults
+	// Build metadata section with condition evaluation details
+	metadata := map[string]interface{}{
+		"triggered":         allConditionsMet,
+		"matchedConditions": conditionResults,
+	}
+
+	// Add reason when not triggered
+	if !allConditionsMet {
+		metadata["reason"] = "conditions not met"
+	}
+
+	response["metadata"] = metadata
+
+	// Add execution context
+	response["executionContext"] = map[string]interface{}{
+		"chainId":     chainID,
+		"isSimulated": false, // Direct calls are real, not simulated
+	}
 
 	return response
 }

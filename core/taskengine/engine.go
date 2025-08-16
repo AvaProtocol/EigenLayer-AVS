@@ -2138,9 +2138,22 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Add trigger step to execution logs
 	vm.ExecutionLogs = append(vm.ExecutionLogs, triggerStep)
 
-	// Step 9: Run the workflow nodes
-	runErr := vm.Run()
-	nodeEndTime := time.Now()
+	// Step 9: Check trigger result to decide whether to continue workflow execution
+	shouldContinue := n.shouldContinueWorkflowExecution(triggerOutput, triggerType)
+
+	var runErr error
+	var nodeEndTime time.Time
+
+	if shouldContinue {
+		// Run the workflow nodes
+		runErr = vm.Run()
+		nodeEndTime = time.Now()
+		n.logger.Info("✅ Workflow execution continued - trigger conditions met")
+	} else {
+		// Skip workflow execution - trigger conditions not met
+		nodeEndTime = time.Now()
+		n.logger.Info("🚫 Workflow execution skipped - trigger conditions not met")
+	}
 
 	// Step 10: Analyze execution results from all steps
 	executionSuccess, executionError, failedStepCount := vm.AnalyzeExecutionResult()
@@ -2187,6 +2200,35 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	n.logger.Info("workflow simulation completed successfully", "task_id", task.Id, "simulation_id", simulationID, "steps", len(execution.Steps))
 	return execution, nil
+}
+
+// shouldContinueWorkflowExecution checks trigger output to determine if workflow should continue
+func (n *Engine) shouldContinueWorkflowExecution(triggerOutput map[string]interface{}, triggerType avsproto.TriggerType) bool {
+	// For eventTrigger, check the triggered field in metadata
+	if triggerType == avsproto.TriggerType_TRIGGER_TYPE_EVENT {
+		if metadata, exists := triggerOutput["metadata"]; exists {
+			if metadataMap, ok := metadata.(map[string]interface{}); ok {
+				if triggered, exists := metadataMap["triggered"]; exists {
+					if triggeredBool, ok := triggered.(bool); ok {
+						return triggeredBool
+					}
+				}
+			}
+		}
+
+		// Fallback: check legacy conditionsMet field for backward compatibility
+		if conditionsMet, exists := triggerOutput["conditionsMet"]; exists {
+			if conditionsMetBool, ok := conditionsMet.(bool); ok {
+				return conditionsMetBool
+			}
+		}
+
+		// If no triggered/conditionsMet field found, assume triggered (for historical events)
+		return true
+	}
+
+	// For other trigger types (manual, cron, block, fixedTime), always continue
+	return true
 }
 
 // List Execution for a given task id
