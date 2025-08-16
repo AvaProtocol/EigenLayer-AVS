@@ -759,6 +759,14 @@ func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}
 		} else {
 			response["error"] = fmt.Sprintf("Conditions not met. Data: %s", string(errorDataJSON))
 		}
+
+		// Add metadata field for runNodeImmediately compatibility
+		// This contains the contract read response data (like contractRead nodes)
+		response["metadata"] = map[string]interface{}{
+			"contractReadResponse": methodCallData,
+			"conditionEvaluation":  conditionResults,
+			"executionContext":     response["executionContext"],
+		}
 	}
 
 	return response
@@ -3286,7 +3294,7 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 			EventTrigger: eventOutput,
 		}
 
-		// Add metadata for runTrigger (debugging/testing) - properly convert to protobuf Value
+		// Add metadata for runTrigger (debugging/testing) - use shared function
 		if result != nil {
 			if n.logger != nil {
 				n.logger.Info("🔍 RunTriggerRPC: Checking for metadata in result",
@@ -3294,7 +3302,8 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 					"resultKeys", GetMapKeys(result))
 			}
 
-			if metadata, hasMetadata := result["metadata"]; hasMetadata && metadata != nil {
+			// Use shared function to extract metadata
+			if metadata := extractTriggerMetadata(result); metadata != nil {
 				if n.logger != nil {
 					n.logger.Info("🔍 RunTriggerRPC: Found metadata, converting to protobuf",
 						"metadataType", fmt.Sprintf("%T", metadata),

@@ -2101,27 +2101,11 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		n.logger.Info("🔍 SimulateTask: No trigger input found", "trigger_id", task.Trigger.Id, "trigger_type", task.Trigger.GetType())
 	}
 
-	// Check if trigger output indicates success or failure
-	triggerSuccess := true
-	triggerError := ""
+	// Use shared function to extract trigger status
+	triggerSuccess, triggerError := extractTriggerStatus(triggerOutput)
 	triggerLogMessage := fmt.Sprintf("Simulated trigger: %s executed successfully", task.Trigger.Name)
-
-	if triggerOutput != nil {
-		// Check for enhanced response format with success field
-		if successValue, hasSuccess := triggerOutput["success"]; hasSuccess {
-			if successBool, ok := successValue.(bool); ok {
-				triggerSuccess = successBool
-				if !triggerSuccess {
-					// Extract error message for failed triggers
-					if errorValue, hasError := triggerOutput["error"]; hasError {
-						if errorStr, ok := errorValue.(string); ok {
-							triggerError = errorStr
-						}
-					}
-					triggerLogMessage = fmt.Sprintf("Simulated trigger: %s conditions not met", task.Trigger.Name)
-				}
-			}
-		}
+	if !triggerSuccess {
+		triggerLogMessage = fmt.Sprintf("Simulated trigger: %s conditions not met", task.Trigger.Name)
 	}
 
 	triggerStep := &avsproto.Execution_Step{
@@ -2158,10 +2142,10 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Set trigger output data in the step using shared function
 	triggerStep.OutputData = buildExecutionStepOutputData(queueData.TriggerType, triggerOutputProto)
 
-	// Set metadata for enhanced response format when conditions are not met
-	if triggerOutput != nil && !triggerSuccess {
-		if metadataValue, hasMetadata := triggerOutput["executionContext"]; hasMetadata {
-			if metadataProto, err := structpb.NewValue(metadataValue); err == nil {
+	// Set metadata using shared function when conditions are not met
+	if !triggerSuccess {
+		if metadata := extractTriggerMetadata(triggerOutput); metadata != nil {
+			if metadataProto, err := structpb.NewValue(metadata); err == nil {
 				triggerStep.Metadata = metadataProto
 			}
 		}
@@ -3808,6 +3792,73 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 	}
 
 	return triggerDataMap
+}
+
+// Shared functions for eventTrigger response processing
+// These functions are used by both runNodeImmediately and simulateWorkflow
+
+// extractTriggerStatus extracts success/error status from trigger output
+func extractTriggerStatus(triggerOutput map[string]interface{}) (bool, string) {
+	if triggerOutput == nil {
+		return true, ""
+	}
+
+	// Check for enhanced response format with success field
+	if successValue, hasSuccess := triggerOutput["success"]; hasSuccess {
+		if successBool, ok := successValue.(bool); ok {
+			if !successBool {
+				// Extract error message for failed triggers
+				if errorValue, hasError := triggerOutput["error"]; hasError {
+					if errorStr, ok := errorValue.(string); ok {
+						return false, errorStr
+					}
+				}
+				return false, "Conditions not met"
+			}
+			return true, ""
+		}
+	}
+
+	// Legacy format - assume success if no explicit failure
+	return true, ""
+}
+
+// extractTriggerMetadata extracts metadata from trigger output for runNodeImmediately
+func extractTriggerMetadata(triggerOutput map[string]interface{}) map[string]interface{} {
+	if triggerOutput == nil {
+		return nil
+	}
+
+	// Check for enhanced response format first
+	if metadataValue, hasMetadata := triggerOutput["metadata"]; hasMetadata {
+		if metadataMap, ok := metadataValue.(map[string]interface{}); ok {
+			return metadataMap
+		}
+	}
+
+	// Legacy format - check for metadata field
+	if metadataValue, hasMetadata := triggerOutput["metadata"]; hasMetadata {
+		if metadataMap, ok := metadataValue.(map[string]interface{}); ok {
+			return metadataMap
+		}
+	}
+
+	return nil
+}
+
+// extractTriggerExecutionContext extracts execution context from trigger output
+func extractTriggerExecutionContext(triggerOutput map[string]interface{}) map[string]interface{} {
+	if triggerOutput == nil {
+		return nil
+	}
+
+	if execCtxValue, hasExecCtx := triggerOutput["executionContext"]; hasExecCtx {
+		if execCtxMap, ok := execCtxValue.(map[string]interface{}); ok {
+			return execCtxMap
+		}
+	}
+
+	return nil
 }
 
 // buildExecutionStepOutputData creates the appropriate OutputData oneof field for execution steps.
