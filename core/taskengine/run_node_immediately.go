@@ -670,9 +670,8 @@ func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}
 	if allConditionsMet {
 		// Success case: conditions met, include data normally
 		response["success"] = true
-		for key, value := range methodCallData {
-			response[key] = value
-		}
+		response["data"] = methodCallData
+		response["error"] = ""
 	} else {
 		// Failure case: conditions not met, include data in error message as JSON
 		response["success"] = false
