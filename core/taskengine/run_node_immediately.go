@@ -992,59 +992,8 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 		simulatedLog = sampleLog
 	}
 
-	// Extract method call results first (before condition evaluation)
-	methodCallResults := make(map[string]interface{})
-	if query.GetMethodCalls() != nil && len(query.GetMethodCalls()) > 0 {
-		n.logger.Info("🔍 Simulation: Executing method calls for condition evaluation",
-			"methodCallsCount", len(query.GetMethodCalls()))
-		// Execute method calls to get data like decimals, current price, etc.
-		for _, methodCall := range query.GetMethodCalls() {
-			if methodCall.GetMethodName() != "" {
-				n.logger.Info("🔍 Simulation: Executing method call",
-					"method", methodCall.GetMethodName())
-				// Use the same contract read logic as direct calls
-				result, err := n.executeMethodCallForSimulation(ctx, methodCall, queryMap, chainID)
-				if err != nil {
-					n.logger.Warn("Failed to execute method call in simulation",
-						"method", methodCall.GetMethodName(),
-						"error", err)
-					continue
-				}
-				n.logger.Info("🔍 Simulation: Method call result",
-					"method", methodCall.GetMethodName(),
-					"result", result)
-				// Merge results
-				for key, value := range result {
-					methodCallResults[key] = value
-				}
-			}
-		}
-		n.logger.Info("🔍 Simulation: All method call results merged",
-			"methodCallResults", methodCallResults)
-	}
-
-	// Evaluate conditions against the real simulated data
-	var conditionResults []ConditionResult
-	var allConditionsMet bool = true
-
-	if len(query.GetConditions()) > 0 {
-		conditionResults, allConditionsMet = n.evaluateConditionsWithDetails(methodCallResults, queryMap)
-		if !allConditionsMet {
-			n.logger.Info("🚫 Conditions not satisfied by real data, returning enhanced response",
-				"contract", simulatedLog.Address.Hex(),
-				"conditions_count", len(query.GetConditions()))
-
-			// Return enhanced response format (same as direct calls)
-			response := n.buildEventTriggerResponse(methodCallResults, conditionResults, allConditionsMet, chainID)
-			// Override executionContext for simulation
-			response["executionContext"] = map[string]interface{}{
-				"chainId":     chainID,
-				"isSimulated": true,
-				"provider":    "tenderly",
-			}
-			return response, nil
-		}
-	}
+	// Check if conditions exist - if so, we need to evaluate them after enrichment
+	hasConditions := len(query.GetConditions()) > 0
 
 	// Build raw metadata (the original blockchain event data)
 	topics := make([]string, len(simulatedLog.Topics))
@@ -1111,7 +1060,55 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 			"event_name", enrichmentResult.EventName)
 	}
 
-	// Build the result structure based on event type
+	// Check conditions against the enriched data and return enhanced response if not met
+	if hasConditions {
+		conditionsMet := n.evaluateEventConditions(simulatedLog, query.GetConditions())
+		if !conditionsMet {
+			n.logger.Info("🚫 Conditions not satisfied by simulation data, returning enhanced response",
+				"contract", simulatedLog.Address.Hex(),
+				"conditions_count", len(query.GetConditions()))
+
+			// Execute method calls to get additional data for enhanced response
+			methodCallResults := make(map[string]interface{})
+			if query.GetMethodCalls() != nil && len(query.GetMethodCalls()) > 0 {
+				for _, methodCall := range query.GetMethodCalls() {
+					if methodCall.GetMethodName() != "" {
+						result, err := n.executeMethodCallForSimulation(ctx, methodCall, queryMap, chainID)
+						if err != nil {
+							n.logger.Warn("Failed to execute method call for enhanced response",
+								"method", methodCall.GetMethodName(),
+								"error", err)
+							continue
+						}
+						// Merge results
+						for key, value := range result {
+							methodCallResults[key] = value
+						}
+					}
+				}
+			}
+
+			// Add enriched event data to method call results
+			for key, value := range parsedData {
+				methodCallResults[key] = value
+			}
+
+			// Evaluate conditions with details for enhanced response
+			conditionResults, allConditionsMet := n.evaluateConditionsWithDetails(methodCallResults, queryMap)
+
+			// Build enhanced response format
+			response := n.buildEventTriggerResponse(methodCallResults, conditionResults, allConditionsMet, chainID)
+			// Override executionContext for simulation
+			response["executionContext"] = map[string]interface{}{
+				"chainId":     chainID,
+				"isSimulated": true,
+				"provider":    "tenderly",
+			}
+			return response, nil
+		}
+	}
+
+	// Build the result structure based on event type (original success path)
 	result := map[string]interface{}{
 		"found":    true,
 		"metadata": metadata, // Raw blockchain event data
