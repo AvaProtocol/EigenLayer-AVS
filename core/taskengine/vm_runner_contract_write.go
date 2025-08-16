@@ -1154,6 +1154,14 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// 🚀 NEW: Create decoded events data organized by method name
 	var decodedEventsData = make(map[string]interface{})
 
+	// First, add return values to decodedEventsData (for view functions that return data)
+	for _, methodResult := range results {
+		if methodResult.Value != nil {
+			// Add return values under method name
+			decodedEventsData[methodResult.MethodName] = methodResult.Value.AsInterface()
+		}
+	}
+
 	// Parse events from each method's transaction receipt
 	for idx, methodResult := range results {
 		// Defensive: ensure method name is non-empty
