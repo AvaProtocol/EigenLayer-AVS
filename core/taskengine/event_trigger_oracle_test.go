@@ -230,13 +230,9 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 				errorMsg, ok := result["error"].(string)
 				require.True(t, ok, "error should be a string")
 				assert.Contains(t, errorMsg, "Conditions not met", "Error should mention conditions not met")
-				assert.Contains(t, errorMsg, "Data:", "Error should contain data")
 
-				// Verify we can parse the data from error message
-				assert.Contains(t, errorMsg, "\"conditions\":", "Error should contain condition details")
-				for _, expectedField := range tc.expectedDataFields {
-					assert.Contains(t, errorMsg, expectedField, "Error data should contain %s field", expectedField)
-				}
+				// Note: After security fix, error messages no longer contain full data/conditions
+				// to prevent sensitive information leakage. Only failed reason descriptions are included.
 
 				// Verify executionContext is still present
 				execCtx, ok := result["executionContext"].(map[string]interface{})
