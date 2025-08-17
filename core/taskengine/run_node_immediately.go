@@ -297,9 +297,7 @@ func (n *Engine) shouldUseDirectCalls(queriesArray []interface{}) bool {
 					n.logger.Info("🔍 shouldUseDirectCalls: Found methodCalls without topics, using direct calls", "queryIndex", i, "methodCallsCount", methodCallsCount)
 				}
 				return true
-			} else {
 			}
-		} else {
 		}
 
 		if n.logger != nil {

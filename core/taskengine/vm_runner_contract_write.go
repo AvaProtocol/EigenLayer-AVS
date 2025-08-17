@@ -178,12 +178,17 @@ func (r *ContractWriteProcessor) executeMethodCall(
 								if value, exists := objData[fieldName]; exists {
 									orderedArray[i] = value
 								} else {
-									// Field missing - this will cause an error in ABI parsing
+									// Field missing - return error immediately
 									if r.vm != nil && r.vm.logger != nil {
 										r.vm.logger.Error("❌ CONTRACT WRITE - Missing field in struct object",
 											"method", methodCall.MethodName,
 											"missing_field", fieldName,
 											"available_fields", GetMapKeys(objData))
+									}
+									return &avsproto.ContractWriteNode_MethodResult{
+										MethodName: methodCall.MethodName,
+										Success:    false,
+										Error:      fmt.Sprintf("missing required field '%s' in struct parameter for method '%s'", fieldName, methodCall.MethodName),
 									}
 								}
 							}
@@ -364,24 +369,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		// Note: HTTP Simulation API automatically uses the latest block context
 
 		// Extract transaction value from VM variables (passed from raw nodeConfig)
-		var transactionValue string = "0" // Default to 0 if not specified
-		r.vm.mu.Lock()
-		if nodeConfigIface, exists := r.vm.vars["nodeConfig"]; exists {
-			if nodeConfig, ok := nodeConfigIface.(map[string]interface{}); ok {
-				if valueIface, exists := nodeConfig["value"]; exists {
-					if valueStr, ok := valueIface.(string); ok && valueStr != "" {
-						transactionValue = valueStr
-						if r.vm.logger != nil {
-							r.vm.logger.Info("Using transaction value from configuration",
-								"value", transactionValue,
-								"method", methodName,
-								"contract", contractAddress.Hex())
-						}
-					}
-				}
-			}
-		}
-		r.vm.mu.Unlock()
+		transactionValue := r.extractTransactionValue(methodName, contractAddress.Hex())
 
 		// Simulate the contract write using Tenderly
 
@@ -1423,4 +1411,41 @@ func (r *ContractWriteProcessor) convertMapToEventLog(logMap map[string]interfac
 	}
 
 	return eventLog
+}
+
+// extractTransactionValue extracts the transaction value from nodeConfig with proper error handling
+func (r *ContractWriteProcessor) extractTransactionValue(methodName, contractAddress string) string {
+	transactionValue := "0" // Default to 0 if not specified
+
+	r.vm.mu.Lock()
+	defer r.vm.mu.Unlock()
+
+	nodeConfigIface, exists := r.vm.vars["nodeConfig"]
+	if !exists {
+		return transactionValue
+	}
+
+	nodeConfig, ok := nodeConfigIface.(map[string]interface{})
+	if !ok {
+		return transactionValue
+	}
+
+	valueIface, exists := nodeConfig["value"]
+	if !exists {
+		return transactionValue
+	}
+
+	valueStr, ok := valueIface.(string)
+	if !ok || valueStr == "" {
+		return transactionValue
+	}
+
+	if r.vm.logger != nil {
+		r.vm.logger.Info("Using transaction value from configuration",
+			"value", valueStr,
+			"method", methodName,
+			"contract", contractAddress)
+	}
+
+	return valueStr
 }
