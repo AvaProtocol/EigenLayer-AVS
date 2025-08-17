@@ -13,6 +13,8 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/getsentry/sentry-go"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/apconfig"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/signer"
@@ -75,6 +77,10 @@ type OperatorConfig struct {
 	EnableMetrics                 bool   `yaml:"enable_metrics"`
 	NodeApiIpPortAddress          string `yaml:"node_api_ip_port_address"`
 	EnableNodeApi                 bool   `yaml:"enable_node_api"`
+
+	// Optional Sentry integration
+	SentryDsn  string `yaml:"sentry_dsn,omitempty"`
+	ServerName string `yaml:"server_name,omitempty"`
 
 	DbPath string `yaml:"db_path"`
 
@@ -247,6 +253,29 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	logger, err := sdklogging.NewZapLogger(logLevel)
 	if err != nil {
 		return nil, err
+	}
+
+	// Initialize Sentry if DSN provided
+	if c.SentryDsn != "" {
+		env := "development"
+		if c.Production {
+			env = "production"
+		}
+		serverName := c.OperatorAddress
+		if c.ServerName != "" {
+			serverName = c.ServerName
+		}
+		if err := sentry.Init(sentry.ClientOptions{
+			Dsn:              c.SentryDsn,
+			ServerName:       serverName,
+			Environment:      env,
+			AttachStacktrace: true,
+			TracesSampleRate: 0.0,
+		}); err != nil {
+			logger.Errorf("Sentry initialization failed: %v", err)
+		} else {
+			logger.Infof("Sentry initialized for operator: %s", serverName)
+		}
 	}
 
 	// Log concise configuration for startup
@@ -499,6 +528,8 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 
 // main entry function to bootstrap an operator
 func (o *Operator) Start(ctx context.Context) error {
+	// Ensure Sentry flushes buffered events on shutdown (no-op if not initialized)
+	defer sentry.Flush(2 * time.Second)
 	if o.signerAddress.Cmp(o.operatorAddr) != 0 {
 		// Ensure alias key is correctly bind to operator address
 		o.logger.Infof("checking operator alias address. operator: %s alias %s", o.operatorAddr, o.signerAddress)
