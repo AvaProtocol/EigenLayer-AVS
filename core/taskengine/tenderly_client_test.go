@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -2076,9 +2075,15 @@ func TestEndToEndValuePropagation(t *testing.T) {
 		// Execute the node using the same flow as the aggregator
 		result, err := engine.RunNodeImmediately(nodeType, nodeConfig, inputVariables)
 
-		// Check for smart wallet validation error (pre-existing test configuration issue)
-		if err != nil && strings.Contains(err.Error(), "does not match any existing smart wallet") {
-			t.Skipf("⏭️  Skipping E2E test - hardcoded addresses don't match smart wallet validation: %v", err)
+		// Check for smart wallet validation error
+		// Note: The runner address (0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e) should be the salt:0
+		// derivation of the EOA (0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788) on Sepolia chain.
+		// This validation failure suggests a test environment configuration issue.
+		if err != nil && err.Error() == "runner 0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e does not match any existing smart wallet for owner 0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788" {
+			t.Skipf("⏭️  Skipping E2E test - smart wallet validation failed in test environment. "+
+				"Runner should be salt:0 derivation of EOA on Sepolia (chainId: %v). "+
+				"This appears to be a test environment configuration issue, not a code issue.",
+				inputVariables["workflowContext"].(map[string]interface{})["chainId"])
 			return
 		}
 
