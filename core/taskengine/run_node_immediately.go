@@ -888,7 +888,11 @@ func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}
 		}
 
 		if len(failedReasons) > 0 {
-			response["error"] = fmt.Sprintf("Conditions not met: %s", strings.Join(failedReasons, "; "))
+			// Include data and conditions in error message for debugging
+			dataJSON, _ := json.Marshal(methodCallData)
+			conditionsJSON, _ := json.Marshal(queryMap["conditions"])
+			response["error"] = fmt.Sprintf("Conditions not met: %s. Data: %s, \"conditions\": %s",
+				strings.Join(failedReasons, "; "), string(dataJSON), string(conditionsJSON))
 		} else {
 			response["error"] = "Conditions not met"
 		}

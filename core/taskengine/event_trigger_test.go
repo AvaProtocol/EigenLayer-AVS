@@ -647,14 +647,14 @@ func TestEventTriggerQueriesBasedConfiguration(t *testing.T) {
 					return
 				}
 
-				// Verify result structure
-				if found, exists := result["found"].(bool); exists {
-					t.Logf("✅ Query processing completed: found=%v", found)
+				// Verify result structure (new format uses 'success' instead of 'found')
+				if success, exists := result["success"].(bool); exists {
+					t.Logf("✅ Query processing completed: success=%v", success)
 					if queriesCount, exists := result["queriesCount"]; exists {
 						t.Logf("📋 Queries processed: %v", queriesCount)
 					}
 				} else {
-					t.Errorf("Result missing 'found' field")
+					t.Errorf("Result missing 'success' field")
 				}
 			}
 		})

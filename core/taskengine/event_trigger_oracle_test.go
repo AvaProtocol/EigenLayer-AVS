@@ -156,7 +156,7 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 				{
 					"fieldName": "latestRoundData.answer", // Use answer field from latestRoundData
 					"operator":  "gt",
-					"value":     "100000000000", // 1000 * 10^8
+					"value":     "1000", // $1000 (already decimal formatted)
 					"fieldType": "decimal",
 				},
 			},

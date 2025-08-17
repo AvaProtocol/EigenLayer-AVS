@@ -3416,8 +3416,19 @@ func buildEventTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Eve
 				// Direct map data - always valid
 				finalData = d
 			default:
-				// Other types (arrays, primitives, etc.)
-				finalData = d
+				// For defensive programming, only accept complex data types (maps, arrays, strings)
+				// Reject simple primitives like numbers, booleans as they're likely invalid event data
+				switch d.(type) {
+				case []interface{}, []map[string]interface{}:
+					// Arrays are valid
+					finalData = d
+				case int, int32, int64, float32, float64, bool:
+					// Simple primitives are considered invalid for event data
+					finalData = nil
+				default:
+					// Other complex types are valid
+					finalData = d
+				}
 			}
 
 			// Convert to google.protobuf.Value only if we have valid data
