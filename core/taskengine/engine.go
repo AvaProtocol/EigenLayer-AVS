@@ -2052,7 +2052,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Debug logging for EventTriggers to track data extraction
 	if triggerReason.Type == avsproto.TriggerType_TRIGGER_TYPE_EVENT {
-		n.logger.Debug("🔍 SimulateTask: EventTrigger data extraction", "inputKeys", getMapKeys(triggerOutput), "outputKeys", getMapKeys(triggerDataMap))
+		n.logger.Debug("🔍 SimulateTask: EventTrigger data extraction", "inputKeys", GetMapKeys(triggerOutput), "outputKeys", GetMapKeys(triggerDataMap))
 	}
 
 	// Extract trigger config data if available
@@ -2101,13 +2101,20 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		n.logger.Info("🔍 SimulateTask: No trigger input found", "trigger_id", task.Trigger.Id, "trigger_type", task.Trigger.GetType())
 	}
 
+	// Use shared function to extract trigger status
+	triggerSuccess, triggerError := extractTriggerStatus(triggerOutput)
+	triggerLogMessage := fmt.Sprintf("Simulated trigger: %s executed successfully", task.Trigger.Name)
+	if !triggerSuccess {
+		triggerLogMessage = fmt.Sprintf("Simulated trigger: %s conditions not met", task.Trigger.Name)
+	}
+
 	triggerStep := &avsproto.Execution_Step{
 		Id:      task.Trigger.Id, // Use new 'id' field
-		Success: true,
-		Error:   "",
+		Success: triggerSuccess,
+		Error:   triggerError,
 		StartAt: triggerStartTime.UnixMilli(), // Use actual trigger start time
 		EndAt:   triggerEndTime.UnixMilli(),   // Use actual trigger end time
-		Log:     fmt.Sprintf("Simulated trigger: %s executed successfully", task.Trigger.Name),
+		Log:     triggerLogMessage,
 		Inputs:  triggerInputs,                  // Use inputVariables keys as trigger inputs
 		Type:    queueData.TriggerType.String(), // Use trigger type as string
 		Name:    task.Trigger.Name,              // Use new 'name' field
@@ -2116,9 +2123,9 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Attach execution_context on trigger step
 	if vm != nil {
-		provider := "real"
+		provider := string(ProviderChainRPC)
 		if vm.IsSimulation {
-			provider = "tenderly"
+			provider = string(ProviderTenderly)
 		}
 		ctxMap := map[string]interface{}{
 			"is_simulated": vm.IsSimulation,
@@ -2135,12 +2142,34 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Set trigger output data in the step using shared function
 	triggerStep.OutputData = buildExecutionStepOutputData(queueData.TriggerType, triggerOutputProto)
 
+	// Set metadata using shared function when conditions are not met
+	if !triggerSuccess {
+		if metadata := extractTriggerMetadata(triggerOutput); metadata != nil {
+			if metadataProto, err := structpb.NewValue(metadata); err == nil {
+				triggerStep.Metadata = metadataProto
+			}
+		}
+	}
+
 	// Add trigger step to execution logs
 	vm.ExecutionLogs = append(vm.ExecutionLogs, triggerStep)
 
-	// Step 9: Run the workflow nodes
-	runErr := vm.Run()
-	nodeEndTime := time.Now()
+	// Step 9: Check trigger result to decide whether to continue workflow execution
+	shouldContinue := n.shouldContinueWorkflowExecution(triggerOutput, triggerType)
+
+	var runErr error
+	var nodeEndTime time.Time
+
+	if shouldContinue {
+		// Run the workflow nodes
+		runErr = vm.Run()
+		nodeEndTime = time.Now()
+		n.logger.Info("✅ Workflow execution continued - trigger conditions met")
+	} else {
+		// Skip workflow execution - trigger conditions not met
+		nodeEndTime = time.Now()
+		n.logger.Info("🚫 Workflow execution skipped - trigger conditions not met")
+	}
 
 	// Step 10: Analyze execution results from all steps
 	executionSuccess, executionError, failedStepCount := vm.AnalyzeExecutionResult()
@@ -2187,6 +2216,42 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	n.logger.Info("workflow simulation completed successfully", "task_id", task.Id, "simulation_id", simulationID, "steps", len(execution.Steps))
 	return execution, nil
+}
+
+// shouldContinueWorkflowExecution checks trigger output to determine if workflow should continue
+func (n *Engine) shouldContinueWorkflowExecution(triggerOutput map[string]interface{}, triggerType avsproto.TriggerType) bool {
+	// For eventTrigger, check the success field
+	if triggerType == avsproto.TriggerType_TRIGGER_TYPE_EVENT {
+		if success, exists := triggerOutput["success"]; exists {
+			if successBool, ok := success.(bool); ok {
+				return successBool
+			}
+		}
+
+		// Fallback: check legacy triggered field in metadata for backward compatibility
+		if metadata, exists := triggerOutput["metadata"]; exists {
+			if metadataMap, ok := metadata.(map[string]interface{}); ok {
+				if triggered, exists := metadataMap["triggered"]; exists {
+					if triggeredBool, ok := triggered.(bool); ok {
+						return triggeredBool
+					}
+				}
+			}
+		}
+
+		// Fallback: check legacy conditionsMet field for backward compatibility
+		if conditionsMet, exists := triggerOutput["conditionsMet"]; exists {
+			if conditionsMetBool, ok := conditionsMet.(bool); ok {
+				return conditionsMetBool
+			}
+		}
+
+		// If no success/triggered/conditionsMet field found, assume triggered (for historical events)
+		return true
+	}
+
+	// For other trigger types (manual, cron, block, fixedTime), always continue
+	return true
 }
 
 // List Execution for a given task id
@@ -3314,49 +3379,67 @@ func buildEventTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Eve
 
 	// Check if we have event data and populate appropriately
 	if triggerOutput != nil {
-		// Check if we found events
-		if found, ok := triggerOutput["found"].(bool); ok && found {
-			// Extract the data from the trigger output
+		// Handle both legacy event format (found: true) and new direct calls format (success: true/false)
+		var dataToConvert interface{}
+		var shouldConvert bool
+
+		// Check for legacy event format first
+		if success, ok := triggerOutput["success"].(bool); ok && success {
+			// Legacy event format - extract data
 			if data, ok := triggerOutput["data"]; ok {
-				var dataToConvert interface{}
-				var shouldConvert bool
+				dataToConvert = data
+				shouldConvert = true
+			}
+		} else if data, hasData := triggerOutput["data"]; hasData {
+			// New direct calls format - always include data regardless of success status
+			dataToConvert = data
+			shouldConvert = true
+		}
 
-				// Handle different data types: JSON string, map, or other types
-				switch d := data.(type) {
-				case string:
-					// Try to parse as JSON string
-					var parsedData interface{}
-					if err := json.Unmarshal([]byte(d), &parsedData); err == nil {
-						dataToConvert = parsedData
-						shouldConvert = true
-					} else {
-						// If not valid JSON, treat as plain string (but only if non-empty)
-						if d != "" {
-							dataToConvert = d
-							shouldConvert = true
-						}
+		// Convert data if we have any
+		if shouldConvert && dataToConvert != nil {
+			// Handle different data types: JSON string, map, or other types
+			var finalData interface{}
+			switch d := dataToConvert.(type) {
+			case string:
+				// Try to parse as JSON string
+				var parsedData interface{}
+				if err := json.Unmarshal([]byte(d), &parsedData); err == nil {
+					finalData = parsedData
+				} else {
+					// If not valid JSON, treat as plain string (but only if non-empty)
+					if d != "" {
+						finalData = d
 					}
-				case map[string]interface{}:
-					// Direct map data - always valid
-					dataToConvert = d
-					shouldConvert = true
-				default:
-					// Other types (int, bool, etc.) are considered invalid for event data
-					// in the defensive programming context - skip conversion
-					shouldConvert = false
 				}
+			case map[string]interface{}:
+				// Direct map data - always valid
+				finalData = d
+			default:
+				// For defensive programming, only accept complex data types (maps, arrays, strings)
+				// Reject simple primitives like numbers, booleans as they're likely invalid event data
+				switch d.(type) {
+				case []interface{}, []map[string]interface{}:
+					// Arrays are valid
+					finalData = d
+				case int, int32, int64, float32, float64, bool:
+					// Simple primitives are considered invalid for event data
+					finalData = nil
+				default:
+					// Other complex types are valid
+					finalData = d
+				}
+			}
 
-				// Convert to google.protobuf.Value only if we have valid data
-				if shouldConvert {
-					// Convert data to protobuf-compatible format before serialization
-					compatibleData := convertToProtobufCompatible(dataToConvert)
-					if protoValue, err := structpb.NewValue(compatibleData); err == nil {
-						eventOutput.Data = protoValue
-					}
+			// Convert to google.protobuf.Value only if we have valid data
+			if finalData != nil {
+				// Convert data to protobuf-compatible format before serialization
+				compatibleData := convertToProtobufCompatible(finalData)
+				if protoValue, err := structpb.NewValue(compatibleData); err == nil {
+					eventOutput.Data = protoValue
 				}
 			}
 		}
-		// If no events found, eventOutput remains with empty data field
 	}
 
 	return eventOutput
@@ -3658,32 +3741,70 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 				triggerDataMap[k] = v
 			}
 		} else {
-			// For EventTriggers, check if this is a simulation result structure
-			// Simulation results should have "found", "metadata", and "data" fields
-			if _, hasFound := triggerOutput["found"]; hasFound {
-				if _, hasMetadata := triggerOutput["metadata"]; hasMetadata {
+			// Check for enhanced response format first (new format with success field)
+			if successValue, hasSuccess := triggerOutput["success"]; hasSuccess {
+				// Enhanced response format - extract data appropriately
+				if successBool, ok := successValue.(bool); ok && !successBool {
+					// Conditions not met - data is in error message as JSON string
+					if errorValue, hasError := triggerOutput["error"]; hasError {
+						if errorStr, ok := errorValue.(string); ok {
+							// Try to extract data from error message
+							if strings.HasPrefix(errorStr, "Conditions not met. Data: ") {
+								jsonStr := strings.TrimPrefix(errorStr, "Conditions not met. Data: ")
+								var errorData map[string]interface{}
+								if err := json.Unmarshal([]byte(jsonStr), &errorData); err == nil {
+									// Successfully extracted data from error message
+									for k, v := range errorData {
+										if k != "conditions" { // Skip conditions metadata
+											triggerDataMap[k] = v
+										}
+									}
+								}
+							}
+						}
+					}
+				} else {
+					// Conditions met - data is in data field
 					if eventData, hasEventData := triggerOutput["data"].(map[string]interface{}); hasEventData {
-						// Extract the actual event data from the nested "data" field
 						for k, v := range eventData {
 							triggerDataMap[k] = v
 						}
 					} else {
-						// No valid data field in simulation result - copy all data as-is
+						// No data field but success=true - copy all fields as-is
+						// This handles cases where event data is directly in the triggerOutput
+						for k, v := range triggerOutput {
+							triggerDataMap[k] = v
+						}
+					}
+				}
+			} else {
+				// Legacy format - check if this is a simulation result structure
+				// Simulation results should have "success", "metadata", and "data" fields
+				if _, hasSuccess := triggerOutput["success"]; hasSuccess {
+					if _, hasMetadata := triggerOutput["metadata"]; hasMetadata {
+						if eventData, hasEventData := triggerOutput["data"].(map[string]interface{}); hasEventData {
+							// Extract the actual event data from the nested "data" field
+							for k, v := range eventData {
+								triggerDataMap[k] = v
+							}
+						} else {
+							// No valid data field in simulation result - copy all data as-is
+							for k, v := range triggerOutput {
+								triggerDataMap[k] = v
+							}
+						}
+					} else {
+						// Not a complete simulation result structure - copy all data as-is
 						for k, v := range triggerOutput {
 							triggerDataMap[k] = v
 						}
 					}
 				} else {
-					// Not a complete simulation result structure - copy all data as-is
+					// Not a simulation result structure - this should be actual event data
+					// Copy all event trigger data directly
 					for k, v := range triggerOutput {
 						triggerDataMap[k] = v
 					}
-				}
-			} else {
-				// Not a simulation result structure - this should be actual event data
-				// Copy all event trigger data directly
-				for k, v := range triggerOutput {
-					triggerDataMap[k] = v
 				}
 			}
 		}
@@ -3695,6 +3816,71 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 	}
 
 	return triggerDataMap
+}
+
+// Shared functions for eventTrigger response processing
+// These functions are used by both runNodeImmediately and simulateWorkflow
+
+// extractTriggerStatus extracts success/error status from trigger output
+func extractTriggerStatus(triggerOutput map[string]interface{}) (bool, string) {
+	if triggerOutput == nil {
+		return true, ""
+	}
+
+	// Check for enhanced response format with success field
+	if successValue, hasSuccess := triggerOutput["success"]; hasSuccess {
+		if successBool, ok := successValue.(bool); ok {
+			if !successBool {
+				// Extract error message for failed triggers
+				if errorValue, hasError := triggerOutput["error"]; hasError {
+					if errorStr, ok := errorValue.(string); ok {
+						return false, errorStr
+					}
+				}
+				return false, "Conditions not met"
+			}
+			return true, ""
+		}
+	}
+
+	// Legacy format - assume success if no explicit failure
+	return true, ""
+}
+
+// extractTriggerMetadata extracts metadata from trigger output for runNodeImmediately
+func extractTriggerMetadata(triggerOutput map[string]interface{}) interface{} {
+	if triggerOutput == nil {
+		return nil
+	}
+
+	// Check for metadata field (can be array or map)
+	if metadataValue, hasMetadata := triggerOutput["metadata"]; hasMetadata {
+		// New format - array of method responses (like contract_read)
+		if metadataArray, ok := metadataValue.([]interface{}); ok {
+			return metadataArray
+		}
+		// Legacy format - map
+		if metadataMap, ok := metadataValue.(map[string]interface{}); ok {
+			return metadataMap
+		}
+	}
+
+	return nil
+}
+
+// extractTriggerExecutionContext extracts execution context from trigger output
+func extractTriggerExecutionContext(triggerOutput map[string]interface{}) map[string]interface{} {
+	if triggerOutput == nil {
+		return nil
+	}
+
+	if execCtxValue, hasExecCtx := triggerOutput["executionContext"]; hasExecCtx {
+		if execCtxMap, ok := execCtxValue.(map[string]interface{}); ok {
+			return execCtxMap
+		}
+	}
+
+	return nil
 }
 
 // buildExecutionStepOutputData creates the appropriate OutputData oneof field for execution steps.

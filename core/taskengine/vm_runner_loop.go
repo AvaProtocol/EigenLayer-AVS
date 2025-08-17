@@ -113,7 +113,7 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	if !ok {
 		// Try to extract from data field if wrapped (common for trigger variables)
 		if dataMap, ok := inputVar.(map[string]interface{}); ok {
-			log.WriteString(fmt.Sprintf("\nInput variable is a map with keys: %v", getMapKeys(dataMap))) // e.g., ["data", "status", "headers"] or ["blockNumber", "timestamp", "hash"]
+			log.WriteString(fmt.Sprintf("\nInput variable is a map with keys: %v", GetMapKeys(dataMap))) // e.g., ["data", "status", "headers"] or ["blockNumber", "timestamp", "hash"]
 
 			if dataValue, hasData := dataMap["data"]; hasData {
 				log.WriteString(fmt.Sprintf("\nFound 'data' field of type: %T", dataValue)) // e.g., "[]interface{}" for arrays, "map[string]interface{}" for objects
@@ -138,7 +138,7 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 				}
 			} else {
 				// No data field found
-				err := fmt.Errorf("input variable %s is not an array and has no 'data' field (available keys: %v)", inputVarName, getMapKeys(dataMap))
+				err := fmt.Errorf("input variable %s is not an array and has no 'data' field (available keys: %v)", inputVarName, GetMapKeys(dataMap))
 				log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 				finalizeExecutionStep(s, false, err.Error(), log.String())
 				return s, err

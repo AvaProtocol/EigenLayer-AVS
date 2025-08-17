@@ -142,9 +142,13 @@ jobs:
           BASE_SEPOLIA_RPC: "${{ vars.BASE_SEPOLIA_RPC }}"
           BASE_SEPOLIA_BUNDLER_RPC: "${{ vars.BASE_SEPOLIA_BUNDLER_RPC }}"
 
+          # Tenderly HTTP API credentials
+          TENDERLY_ACCOUNT: "${{ vars.TENDERLY_ACCOUNT }}"
+          TENDERLY_PROJECT: "${{ vars.TENDERLY_PROJECT }}"
+
           # Secrets
           CONTROLLER_PRIVATE_KEY: "${{ secrets.CONTROLLER_PRIVATE_KEY }}"
-          TENDERLY_API_KEY: "${{ secrets.TENDERLY_API_KEY }}"
+          TENDERLY_ACCESS_KEY: "${{ secrets.TENDERLY_ACCESS_KEY }}"
 
         run: |
           cd ./${{ matrix.test }}

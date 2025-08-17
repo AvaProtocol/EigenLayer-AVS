@@ -59,8 +59,8 @@ func TestEventTriggerEndToEndRPC(t *testing.T) {
 		}
 
 		// Check if we found events
-		if found, ok := result["found"].(bool); ok {
-			if found {
+		if success, ok := result["success"].(bool); ok {
+			if success {
 				t.Log("✅ SUCCESS: Found real events on Ethereum chain!")
 
 				// Validate evm_log structure (always present when found=true)
@@ -422,8 +422,8 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 			}
 
 			// Log the parsing results
-			if found, exists := result["found"].(bool); exists {
-				t.Logf("✅ Queries-based search completed: found=%v", found)
+			if success, exists := result["success"].(bool); exists {
+				t.Logf("✅ Queries-based search completed: success=%v", success)
 
 				if queriesCount, exists := result["queriesCount"]; exists {
 					t.Logf("📋 Queries processed: %v", queriesCount)
@@ -435,7 +435,7 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 					t.Logf("🔍 Total blocks searched: %v", totalSearched)
 				}
 
-				if found {
+				if success {
 					// Verify evm_log structure
 					if evmLog, exists := result["evm_log"].(map[string]interface{}); exists && evmLog != nil {
 						t.Logf("✅ evm_log present with address: %v", evmLog["address"])
@@ -487,7 +487,7 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 				t.Logf("🔌 RPC Response: has_data=%v", hasData)
 
 				// Validate JSON data based on whether events were found
-				if found, exists := result["found"].(bool); exists && found {
+				if success, exists := result["success"].(bool); exists && success {
 					// When events are found, data should be populated
 					if !hasData {
 						t.Errorf("Data should be populated when events found")
@@ -647,14 +647,14 @@ func TestEventTriggerQueriesBasedConfiguration(t *testing.T) {
 					return
 				}
 
-				// Verify result structure
-				if found, exists := result["found"].(bool); exists {
-					t.Logf("✅ Query processing completed: found=%v", found)
+				// Verify result structure (new format uses 'success' instead of 'found')
+				if success, exists := result["success"].(bool); exists {
+					t.Logf("✅ Query processing completed: success=%v", success)
 					if queriesCount, exists := result["queriesCount"]; exists {
 						t.Logf("📋 Queries processed: %v", queriesCount)
 					}
 				} else {
-					t.Errorf("Result missing 'found' field")
+					t.Errorf("Result missing 'success' field")
 				}
 			}
 		})
@@ -733,9 +733,9 @@ func TestEventTriggerQueriesBasedUserScenario(t *testing.T) {
 	}
 
 	// Display detailed results
-	if found, exists := result["found"].(bool); exists {
+	if success, exists := result["success"].(bool); exists {
 		t.Logf("🔍 Search Results:")
-		t.Logf("   Found events: %v", found)
+		t.Logf("   Found events: %v", success)
 
 		if queriesCount, exists := result["queriesCount"]; exists {
 			t.Logf("   📋 Queries processed: %v", queriesCount)
@@ -747,7 +747,7 @@ func TestEventTriggerQueriesBasedUserScenario(t *testing.T) {
 			t.Logf("   🔢 Total events found: %v", totalEvents)
 		}
 
-		if found {
+		if success {
 			t.Log("✅ SUCCESS: Found matching events!")
 
 			// Show event details

@@ -780,8 +780,13 @@ func (r *RestProcessor) preprocessJSONWithVariableMapping(text string) string {
 		var replacement string
 		if t, ok := exportedValue.(time.Time); ok {
 			replacement = t.In(time.UTC).Format("2006-01-02 15:04:05.000 +0000 UTC")
-		} else if _, okMap := exportedValue.(map[string]interface{}); okMap {
-			replacement = "[object Object]" // Mimic JS behavior for objects in strings
+		} else if mapValue, okMap := exportedValue.(map[string]interface{}); okMap {
+			// Serialize objects as JSON instead of "[object Object]" for better usability
+			if jsonBytes, err := json.Marshal(mapValue); err == nil {
+				replacement = string(jsonBytes)
+			} else {
+				replacement = "[object Object]" // Fallback to old behavior if JSON marshal fails
+			}
 		} else if _, okArr := exportedValue.([]interface{}); okArr {
 			replacement = fmt.Sprintf("%v", exportedValue) // Or could be "[object Array]" or stringified JSON
 		} else {

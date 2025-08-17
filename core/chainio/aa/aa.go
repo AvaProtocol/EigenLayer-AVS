@@ -114,3 +114,16 @@ func PackExecute(targetAddress common.Address, ethValue *big.Int, calldata []byt
 
 	return simpleAccountABI.Pack("execute", targetAddress, ethValue, calldata)
 }
+
+// Generate calldata for batch UserOps - executes multiple contract calls in one transaction
+func PackExecuteBatch(targetAddresses []common.Address, calldataArray [][]byte) ([]byte, error) {
+	var err error
+	if simpleAccountABI == nil {
+		simpleAccountABI, err = simpleaccount.SimpleAccountMetaData.GetAbi()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return simpleAccountABI.Pack("executeBatch", targetAddresses, calldataArray)
+}

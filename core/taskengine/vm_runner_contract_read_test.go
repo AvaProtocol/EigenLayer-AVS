@@ -266,7 +266,7 @@ func TestContractReadWithDecimalFormatting(t *testing.T) {
 				{
 					CallData:      stringPtr("0x313ce567"), // decimals()
 					MethodName:    "decimals",
-					ApplyToFields: []string{"answer"}, // Apply decimal formatting to answer field
+					ApplyToFields: []string{"getRoundData.answer"}, // Apply decimal formatting to getRoundData.answer field
 				},
 				{
 					CallData:   stringPtr("0x9a6fc8f500000000000000000000000000000000000000000000000100000000000052e7"),

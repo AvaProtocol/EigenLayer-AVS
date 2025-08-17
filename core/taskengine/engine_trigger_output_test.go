@@ -30,41 +30,41 @@ func TestBuildEventTriggerOutputDefensiveProgramming(t *testing.T) {
 		{
 			name: "Invalid types for all fields",
 			input: map[string]interface{}{
-				"found": "not_a_bool",
-				"data":  12345,
+				"success": "not_a_bool",
+				"data":    12345,
 			},
 			expectedResult: true,
 			description:    "Should handle invalid types gracefully",
 		},
 		{
-			name: "Found=false",
+			name: "Success=false",
 			input: map[string]interface{}{
-				"found": false,
+				"success": false,
 			},
 			expectedResult: true,
 			description:    "Should return empty output when found=false",
 		},
 		{
-			name: "Found=true but no event data",
+			name: "Success=true but no event data",
 			input: map[string]interface{}{
-				"found": true,
+				"success": true,
 			},
 			expectedResult: true,
 			description:    "Should return empty output when found=true but no event data",
 		},
 		{
-			name: "Found=true with invalid data type",
+			name: "Success=true with invalid data type",
 			input: map[string]interface{}{
-				"found": true,
-				"data":  12345,
+				"success": true,
+				"data":    12345,
 			},
 			expectedResult: true,
 			description:    "Should handle invalid data type gracefully",
 		},
 		{
-			name: "Found=true with valid JSON data",
+			name: "Success=true with valid JSON data",
 			input: map[string]interface{}{
-				"found": true,
+				"success": true,
 				"data": `{
 					"tokenName": "TestToken",
 					"tokenSymbol": "TEST",
@@ -85,9 +85,9 @@ func TestBuildEventTriggerOutputDefensiveProgramming(t *testing.T) {
 			description:    "Should properly store valid JSON data",
 		},
 		{
-			name: "Found=true with event log JSON data",
+			name: "Success=true with event log JSON data",
 			input: map[string]interface{}{
-				"found": true,
+				"success": true,
 				"data": `{
 					"address": "0x123",
 					"topics": ["0xtopic1", "0xtopic2"],
@@ -114,7 +114,7 @@ func TestBuildEventTriggerOutputDefensiveProgramming(t *testing.T) {
 
 			t.Logf("✅ %s: %s", test.name, test.description)
 
-			if test.name == "Found=true with valid JSON data" {
+			if test.name == "Success=true with valid JSON data" {
 				require.NotNil(t, result.Data, "Data field should be populated")
 
 				// Verify the structured data can be accessed
@@ -125,7 +125,7 @@ func TestBuildEventTriggerOutputDefensiveProgramming(t *testing.T) {
 				} else {
 					t.Fatal("Data should be convertible to map[string]interface{}")
 				}
-			} else if test.name == "Found=true with event log JSON data" {
+			} else if test.name == "Success=true with event log JSON data" {
 				require.NotNil(t, result.Data, "Data field should be populated")
 
 				// Verify the structured data can be accessed
