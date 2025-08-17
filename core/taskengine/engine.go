@@ -3384,7 +3384,7 @@ func buildEventTriggerOutput(triggerOutput map[string]interface{}) *avsproto.Eve
 		var shouldConvert bool
 
 		// Check for legacy event format first
-		if found, ok := triggerOutput["found"].(bool); ok && found {
+		if success, ok := triggerOutput["success"].(bool); ok && success {
 			// Legacy event format - extract data
 			if data, ok := triggerOutput["data"]; ok {
 				dataToConvert = data
@@ -3773,8 +3773,8 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 				}
 			} else {
 				// Legacy format - check if this is a simulation result structure
-				// Simulation results should have "found", "metadata", and "data" fields
-				if _, hasFound := triggerOutput["found"]; hasFound {
+				// Simulation results should have "success", "metadata", and "data" fields
+				if _, hasSuccess := triggerOutput["success"]; hasSuccess {
 					if _, hasMetadata := triggerOutput["metadata"]; hasMetadata {
 						if eventData, hasEventData := triggerOutput["data"].(map[string]interface{}); hasEventData {
 							// Extract the actual event data from the nested "data" field

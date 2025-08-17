@@ -1549,13 +1549,21 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		assert.NotNil(t, eventData["topics"], "Should have topics")
 		assert.NotNil(t, eventData["data"], "Should have raw data")
 
-		// Get the metadata map directly (not a JSON string)
-		metadata, ok := result["metadata"].(map[string]interface{})
-		require.True(t, ok, "metadata should be a map[string]interface{}")
+		// Get the metadata array (new format)
+		metadata, ok := result["metadata"].([]interface{})
+		require.True(t, ok, "metadata should be a []interface{}")
 		require.NotNil(t, metadata, "Should have metadata")
+		require.NotEmpty(t, metadata, "Should have metadata entries")
 
-		assert.NotNil(t, metadata["address"], "Should have address in metadata")
-		assert.NotNil(t, metadata["blockNumber"], "Should have blockNumber in metadata")
+		// Check the first metadata entry (simulation event log)
+		firstEntry, ok := metadata[0].(map[string]interface{})
+		require.True(t, ok, "First metadata entry should be a map")
+
+		eventLog, ok := firstEntry["eventLog"].(map[string]interface{})
+		require.True(t, ok, "Should have eventLog in metadata")
+
+		assert.NotNil(t, eventLog["address"], "Should have address in metadata")
+		assert.NotNil(t, eventLog["blockNumber"], "Should have blockNumber in metadata")
 
 		t.Logf("✅ Tenderly simulation successful!")
 		t.Logf("📊 Raw Blockchain Log Data Structure:")
@@ -1796,10 +1804,18 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		assert.NotEmpty(t, result["data"], "Should have Transfer event data")
 		assert.NotEmpty(t, result["metadata"], "Should have metadata")
 
-		// Get and display the raw blockchain log data structure (now under metadata)
-		transferData, ok := result["metadata"].(map[string]interface{})
-		require.True(t, ok, "data should be a map[string]interface{}")
-		require.NotNil(t, transferData, "Should have Transfer event data")
+		// Get the metadata array (new format)
+		metadata, ok := result["metadata"].([]interface{})
+		require.True(t, ok, "metadata should be a []interface{}")
+		require.NotNil(t, metadata, "Should have metadata")
+		require.NotEmpty(t, metadata, "Should have metadata entries")
+
+		// Check the first metadata entry (simulation event log)
+		firstEntry, ok := metadata[0].(map[string]interface{})
+		require.True(t, ok, "First metadata entry should be a map")
+
+		transferData, ok := firstEntry["eventLog"].(map[string]interface{})
+		require.True(t, ok, "Should have eventLog in metadata")
 
 		t.Logf("\n🎉 === SAMPLE TRANSFER EVENT DATA STRUCTURE ===")
 		t.Logf("✅ Success! Here's the raw blockchain log data structure users can reference:")
@@ -1819,11 +1835,6 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		t.Logf("\n📄 Complete JSON Structure for Documentation:")
 		prettyJSON, _ := json.MarshalIndent(transferData, "", "  ")
 		t.Logf("%s", string(prettyJSON))
-
-		// Get metadata
-		metadata, ok := result["metadata"].(map[string]interface{})
-		require.True(t, ok, "metadata should be a map[string]interface{}")
-		require.NotNil(t, metadata, "Should have metadata")
 
 		t.Logf("\n🔍 Metadata Structure:")
 		metadataJSON, _ := json.MarshalIndent(metadata, "", "  ")
@@ -1877,7 +1888,7 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		historicalResult, err := engine.runEventTriggerImmediately(historicalConfig, map[string]interface{}{})
 		require.NoError(t, err, "Historical search should not error")
 
-		if found, ok := historicalResult["found"].(bool); ok && !found {
+		if success, ok := historicalResult["success"].(bool); ok && !success {
 			t.Logf("Historical Search Result: No events found (as expected)")
 			t.Logf("This is why simulation mode is useful for getting sample data!")
 			t.Logf("   - Historical search: searches real blockchain (may find nothing)")

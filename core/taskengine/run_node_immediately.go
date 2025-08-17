@@ -1250,7 +1250,18 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	// For direct calls, success means conditions were met
 	// Since this is simulation path, we found events, so success = true
 	eventsFound := true
-	response := n.buildEventTriggerResponse(methodCallResults, eventsFound, chainID, []interface{}{}, queryMap)
+
+	// For Tenderly simulation, create metadata in the expected format
+	// Include the raw blockchain event data as metadata
+	simulationMetadata := []interface{}{
+		map[string]interface{}{
+			"eventLog": metadata, // Raw blockchain log data
+			"source":   "tenderly_simulation",
+			"success":  true,
+		},
+	}
+
+	response := n.buildEventTriggerResponse(methodCallResults, eventsFound, chainID, simulationMetadata, queryMap)
 
 	n.logger.Info("✅ EventTrigger simulation: Returning enhanced response format",
 		"contract", simulatedLog.Address.Hex(),
@@ -1820,7 +1831,7 @@ func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, querie
 		}
 
 		return map[string]interface{}{
-			"found":         false,
+			"success":       false,
 			"evm_log":       nil,
 			"queriesCount":  len(queriesArray),
 			"totalSearched": totalSearched,
@@ -1933,7 +1944,7 @@ func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, querie
 
 	// Build the result structure based on event type
 	result := map[string]interface{}{
-		"found":         true,
+		"success":       true,
 		"metadata":      metadata, // Raw blockchain event data
 		"queriesCount":  len(queriesArray),
 		"totalSearched": totalSearched,
