@@ -2123,9 +2123,9 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Attach execution_context on trigger step
 	if vm != nil {
-		provider := "real"
+		provider := string(ProviderChainRPC)
 		if vm.IsSimulation {
-			provider = "tenderly"
+			provider = string(ProviderTenderly)
 		}
 		ctxMap := map[string]interface{}{
 			"is_simulated": vm.IsSimulation,
@@ -3831,20 +3831,18 @@ func extractTriggerStatus(triggerOutput map[string]interface{}) (bool, string) {
 }
 
 // extractTriggerMetadata extracts metadata from trigger output for runNodeImmediately
-func extractTriggerMetadata(triggerOutput map[string]interface{}) map[string]interface{} {
+func extractTriggerMetadata(triggerOutput map[string]interface{}) interface{} {
 	if triggerOutput == nil {
 		return nil
 	}
 
-	// Check for enhanced response format first
+	// Check for metadata field (can be array or map)
 	if metadataValue, hasMetadata := triggerOutput["metadata"]; hasMetadata {
-		if metadataMap, ok := metadataValue.(map[string]interface{}); ok {
-			return metadataMap
+		// New format - array of method responses (like contract_read)
+		if metadataArray, ok := metadataValue.([]interface{}); ok {
+			return metadataArray
 		}
-	}
-
-	// Legacy format - check for metadata field
-	if metadataValue, hasMetadata := triggerOutput["metadata"]; hasMetadata {
+		// Legacy format - map
 		if metadataMap, ok := metadataValue.(map[string]interface{}); ok {
 			return metadataMap
 		}

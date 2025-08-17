@@ -95,9 +95,9 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 
 	// Attach execution_context to the step (e.g., is_simulated, chain_id, provider)
 	if vm != nil {
-		provider := "real"
+		provider := string(ProviderChainRPC)
 		if vm.IsSimulation {
-			provider = "tenderly"
+			provider = string(ProviderTenderly)
 		}
 		var chainID interface{} = nil
 		if vm.smartWalletConfig != nil && vm.smartWalletConfig.ChainID != 0 {

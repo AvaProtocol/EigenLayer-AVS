@@ -528,10 +528,10 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 	}
 
 	// Evaluate conditions against the method call results
-	conditionResults, allConditionsMet := n.evaluateConditionsWithDetails(methodCallResults, queryMap)
+	_, allConditionsMet := n.evaluateConditionsWithDetails(methodCallResults, queryMap)
 
 	// Build enhanced response structure
-	response := n.buildEventTriggerResponse(methodCallResults, conditionResults, allConditionsMet, chainID, rawContractMetadata)
+	response := n.buildEventTriggerResponse(methodCallResults, allConditionsMet, chainID, rawContractMetadata, queryMap)
 
 	n.logger.Info("✅ Direct contract calls completed",
 		"methodResults", len(methodCallResults),
@@ -840,43 +840,32 @@ func (n *Engine) formatValueForDisplay(value interface{}) string {
 }
 
 // buildEventTriggerResponse builds the enhanced response structure
-func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}, conditionResults []ConditionResult, allConditionsMet bool, chainID int64, rawContractMetadata []interface{}) map[string]interface{} {
+func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}, allConditionsMet bool, chainID int64, rawContractMetadata []interface{}, queryMap map[string]interface{}) map[string]interface{} {
 	response := make(map[string]interface{})
-
-	// Add execution context
-	response["executionContext"] = map[string]interface{}{
-		"chainId":     chainID,
-		"isSimulated": false, // Direct calls are real, not simulated
-	}
 
 	// Always include the contract read data in the data field
 	response["data"] = methodCallData
 
-	// Build contractReadResponse from raw metadata if available, otherwise use formatted data
-	var contractReadResponse interface{}
+	// Set metadata as array of method objects without the value field
 	if len(rawContractMetadata) > 0 {
-		// Extract raw values from metadata array
-		rawData := make(map[string]interface{})
-		for _, metadataEntry := range rawContractMetadata {
+		// Remove only the "value" field from each metadata entry
+		cleanedMetadata := make([]interface{}, len(rawContractMetadata))
+		for i, metadataEntry := range rawContractMetadata {
 			if entryMap, ok := metadataEntry.(map[string]interface{}); ok {
-				if methodName, hasMethod := entryMap["methodName"].(string); hasMethod {
-					if value, hasValue := entryMap["value"]; hasValue {
-						rawData[methodName] = value
+				// Create a copy without the "value" field
+				cleanEntry := make(map[string]interface{})
+				for k, v := range entryMap {
+					if k != "value" {
+						cleanEntry[k] = v
 					}
 				}
+				cleanedMetadata[i] = cleanEntry
 			}
 		}
-		contractReadResponse = rawData
+		response["metadata"] = cleanedMetadata
 	} else {
-		// Fallback to formatted data if raw metadata not available
-		contractReadResponse = methodCallData
-	}
-
-	// Always include metadata with contract read response and condition evaluation
-	response["metadata"] = map[string]interface{}{
-		"contractReadResponse": contractReadResponse,
-		"conditionEvaluation":  conditionResults,
-		"executionContext":     response["executionContext"],
+		// Fallback to empty array if no raw metadata available
+		response["metadata"] = []interface{}{}
 	}
 
 	if allConditionsMet {
@@ -884,23 +873,29 @@ func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}
 		response["success"] = true
 		response["error"] = ""
 	} else {
-		// Failure case: conditions not met
+		// Failure case: conditions not met - need to evaluate conditions to get detailed error
 		response["success"] = false
 
-		// Build error message with condition details
-		var failedConditions []string
+		// Get the actual condition evaluation to build a detailed error message
+		conditionResults, _ := n.evaluateConditionsWithDetails(methodCallData, queryMap)
+
+		// Build detailed error message
+		var failedReasons []string
 		for _, condition := range conditionResults {
 			if !condition.Passed {
-				failedConditions = append(failedConditions, condition.Reason)
+				failedReasons = append(failedReasons, condition.Reason)
 			}
 		}
 
-		if len(failedConditions) > 0 {
-			response["error"] = fmt.Sprintf("Conditions not met: %s", strings.Join(failedConditions, "; "))
+		if len(failedReasons) > 0 {
+			response["error"] = fmt.Sprintf("Conditions not met: %s", strings.Join(failedReasons, "; "))
 		} else {
 			response["error"] = "Conditions not met"
 		}
 	}
+
+	// Add executionContext for EventTrigger direct calls (real RPC calls, not simulated)
+	response["executionContext"] = GetExecutionContext(chainID, false)
 
 	return response
 }
@@ -1237,22 +1232,21 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 		methodCallResults[key] = value
 	}
 
+	// Always include chainId in the response data for consistency
+	methodCallResults["chainId"] = chainID
+
 	// Evaluate conditions with details for enhanced response
-	var conditionResults []ConditionResult
 	var allConditionsMet bool = true
 	if hasConditions {
-		conditionResults, allConditionsMet = n.evaluateConditionsWithDetails(methodCallResults, queryMap)
+		_, allConditionsMet = n.evaluateConditionsWithDetails(methodCallResults, queryMap)
 	}
 
 	// Always return enhanced response format with proper data and metadata
-	// For simulation path, we don't have raw metadata, so pass empty slice
-	response := n.buildEventTriggerResponse(methodCallResults, conditionResults, allConditionsMet, chainID, []interface{}{})
-	// Override executionContext for simulation
-	response["executionContext"] = map[string]interface{}{
-		"chainId":     chainID,
-		"isSimulated": true,
-		"provider":    "tenderly",
-	}
+	// For simulation path (event-based triggers), success means events were found
+	// For direct calls, success means conditions were met
+	// Since this is simulation path, we found events, so success = true
+	eventsFound := true
+	response := n.buildEventTriggerResponse(methodCallResults, eventsFound, chainID, []interface{}{}, queryMap)
 
 	n.logger.Info("✅ EventTrigger simulation: Returning enhanced response format",
 		"contract", simulatedLog.Address.Hex(),
@@ -3229,10 +3223,10 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	// Skip for EventTrigger since it provides its own executionContext in metadata
 	if nodeTypeStr != NodeTypeEventTrigger {
 		isSimulated := false
-		provider := "rpc"
+		provider := string(ProviderChainRPC)
 		if nodeTypeStr == NodeTypeContractWrite {
 			isSimulated = true
-			provider = "tenderly"
+			provider = string(ProviderTenderly)
 		}
 
 		ctxMap := map[string]interface{}{
@@ -3478,19 +3472,25 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		}
 	}
 
-	// Attach execution_context indicating immediate run is simulated
-	{
-		provider := "tenderly"
-		ctxMap := map[string]interface{}{
-			"is_simulated": true,
-			"provider":     provider,
+	// Attach execution_context
+	// For EventTrigger, use the trigger's own executionContext if available
+	// For other triggers, use the generic RPC wrapper context
+	var ctxMap map[string]interface{}
+	if triggerTypeStr == "eventTrigger" && result != nil {
+		if execCtx, hasExecCtx := result["executionContext"]; hasExecCtx {
+			if execCtxMap, ok := execCtx.(map[string]interface{}); ok {
+				ctxMap = execCtxMap
+			}
 		}
-		if n.smartWalletConfig != nil && n.smartWalletConfig.ChainID != 0 {
-			ctxMap["chain_id"] = n.smartWalletConfig.ChainID
-		}
-		if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
-			resp.ExecutionContext = ctxVal
-		}
+	}
+
+	// Fallback to generic RPC wrapper context if no specific context found
+	if ctxMap == nil {
+		ctxMap = GetExecutionContext(n.smartWalletConfig.ChainID, true)
+	}
+
+	if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
+		resp.ExecutionContext = ctxVal
 	}
 
 	return resp, nil
