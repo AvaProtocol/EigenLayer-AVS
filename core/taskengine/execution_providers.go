@@ -15,11 +15,6 @@ const (
 )
 
 // Use existing chain ID constants from token_metadata.go
-// Additional chain IDs not in token_metadata.go
-const (
-	// ChainIDHolesky represents Holesky testnet
-	ChainIDHolesky int64 = 17000
-)
 
 // GetNetworkName returns a human-readable name for the given chain ID
 func GetNetworkName(chainID int64) string {
@@ -32,8 +27,6 @@ func GetNetworkName(chainID int64) string {
 		return "base"
 	case ChainIDBaseSepolia:
 		return "base-sepolia"
-	case uint64(ChainIDHolesky):
-		return "holesky"
 	default:
 		return "unknown"
 	}

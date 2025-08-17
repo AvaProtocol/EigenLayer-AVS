@@ -232,7 +232,7 @@ func (agg *Aggregator) init() {
 	if agg.chainID.Cmp(config.MainnetChainID) == 0 {
 		config.CurrentChainEnv = config.EthereumEnv
 	} else {
-		config.CurrentChainEnv = config.HoleskyEnv
+		config.CurrentChainEnv = config.SepoliaEnv
 	}
 
 	// Setup account abstraction config

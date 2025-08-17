@@ -5,7 +5,7 @@ import "math/big"
 type ChainEnv string
 
 const (
-	HoleskyEnv  = ChainEnv("holesky")
+	SepoliaEnv  = ChainEnv("sepolia")
 	EthereumEnv = ChainEnv("ethereum")
 )
 
@@ -15,12 +15,12 @@ var (
 
 	etherscanURLs = map[ChainEnv]string{
 		EthereumEnv: "https://etherscan.io",
-		HoleskyEnv:  "https://holesky.etherscan.io",
+		SepoliaEnv:  "https://sepolia.etherscan.io",
 	}
 
 	eigenlayerAppURLs = map[ChainEnv]string{
 		EthereumEnv: "https://app.eigenlayer.xyz",
-		HoleskyEnv:  "https://holesky.eigenlayer.xyz",
+		SepoliaEnv:  "https://sepolia.eigenlayer.xyz",
 	}
 )
 
