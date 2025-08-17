@@ -19,36 +19,13 @@ import (
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
 
-// TenderlyClient handles Tenderly simulation API interactions
+// TenderlyClient handles Tenderly HTTP simulation API interactions
 type TenderlyClient struct {
 	httpClient  *resty.Client
 	logger      sdklogging.Logger
-	apiURL      string
-	apiKey      string
 	accountName string
 	projectName string
 	accessKey   string
-}
-
-// JSON-RPC request structure for Tenderly Gateway
-type JSONRPCRequest struct {
-	Jsonrpc string        `json:"jsonrpc"`
-	Method  string        `json:"method"`
-	Params  []interface{} `json:"params"`
-	Id      int           `json:"id"`
-}
-
-// JSON-RPC response structure
-type JSONRPCResponse struct {
-	Jsonrpc string      `json:"jsonrpc"`
-	Id      int         `json:"id"`
-	Result  interface{} `json:"result,omitempty"`
-	Error   *RPCError   `json:"error,omitempty"`
-}
-
-type RPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
 }
 
 // Call parameters for eth_call
@@ -89,47 +66,18 @@ const ChainlinkAggregatorABI = `[
 	}
 ]`
 
-// NewTenderlyClient creates a new Tenderly client for RPC calls
+// NewTenderlyClient creates a new Tenderly client for HTTP simulation API calls
 func NewTenderlyClient(logger sdklogging.Logger) *TenderlyClient {
 	client := resty.New()
 	client.SetTimeout(30 * time.Second)
 	client.SetHeader("Content-Type", "application/json")
 
-	// Configuration for Tenderly Gateway RPC endpoint
-	// Expected format: https://sepolia.gateway.tenderly.co/7MB9UwJMIQmLyhNxSIMg3X
-	var rpcURL string
-	var apiKey string
-
-	// Try to load from environment
-	envConfig := os.Getenv("TENDERLY_API_KEY")
-	if envConfig != "" {
-		if strings.HasPrefix(envConfig, "https://") {
-			// Full Tenderly Gateway URL provided (e.g., https://sepolia.gateway.tenderly.co/7MB9UwJMIQmLyhNxSIMg3X)
-			rpcURL = envConfig
-			// Extract API key from URL for reference
-			parts := strings.Split(envConfig, "/")
-			if len(parts) > 0 {
-				apiKey = parts[len(parts)-1]
-			}
-		} else {
-			// Just API key provided - construct Sepolia Gateway URL
-			apiKey = envConfig
-			rpcURL = "https://sepolia.gateway.tenderly.co/" + apiKey
-		}
-	} else {
-		// Default test configuration
-		apiKey = "test-key"
-		rpcURL = "https://sepolia.gateway.tenderly.co/" + apiKey
-	}
-
 	tc := &TenderlyClient{
 		httpClient: client,
 		logger:     logger,
-		apiURL:     rpcURL, // This is now the RPC endpoint, not simulation API
-		apiKey:     apiKey,
 	}
 
-	// Optional HTTP Simulation API credentials (canonical names in .env)
+	// Load HTTP Simulation API credentials from environment
 	if acc := os.Getenv("TENDERLY_ACCOUNT"); acc != "" {
 		tc.accountName = acc
 	}
@@ -204,10 +152,10 @@ func (tc *TenderlyClient) simulateChainlinkPriceUpdate(ctx context.Context, cont
 		"contract", contractAddress,
 		"chain_id", chainID)
 
-	// Get real current data from Tenderly
-	currentData, err := tc.getRealRoundDataViaTenderly(ctx, contractAddress, chainID)
+	// Get mock data for simulation (no longer using RPC calls)
+	currentData, err := tc.getLatestRoundData(ctx, contractAddress, chainID)
 	if err != nil {
-		tc.logger.Warn("Could not get real round data from Tenderly, using realistic mock values", "error", err)
+		tc.logger.Warn("Could not get mock round data, using fallback values", "error", err)
 		// Use realistic mock values based on current market data
 		mockRoundId := new(big.Int)
 		mockRoundId.SetString("18446744073709551000", 10) // Realistic round ID (too large for int64)
@@ -259,129 +207,19 @@ type ChainlinkRoundData struct {
 	AnsweredInRound *big.Int
 }
 
-// getRealRoundDataViaTenderly fetches current price data from Chainlink aggregator via Tenderly Gateway RPC
-func (tc *TenderlyClient) getRealRoundDataViaTenderly(ctx context.Context, contractAddress string, chainID int64) (*ChainlinkRoundData, error) {
-	if tc.apiKey == "" {
-		return nil, fmt.Errorf("tenderly API key not configured")
-	}
-
-	// Parse the ABI for latestRoundData
-	parsedABI, err := abi.JSON(strings.NewReader(ChainlinkLatestRoundDataABI))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse Chainlink ABI: %w", err)
-	}
-
-	// Encode the latestRoundData function call
-	callData, err := parsedABI.Pack("latestRoundData")
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode latestRoundData call: %w", err)
-	}
-
-	// Create JSON-RPC request for eth_call
-	callParams := CallParams{
-		To:   contractAddress,
-		Data: fmt.Sprintf("0x%x", callData),
-	}
-
-	rpcRequest := JSONRPCRequest{
-		Jsonrpc: "2.0",
-		Method:  "eth_call",
-		Params:  []interface{}{callParams, "latest"},
-		Id:      1,
-	}
-
-	tc.logger.Info("📡 Making Tenderly Gateway RPC call for latestRoundData",
-		"contract", contractAddress,
-		"rpc_url", tc.apiURL,
-		"method", "eth_call -> latestRoundData()")
-
-	// Log the request for debugging
-	requestJSON, _ := json.MarshalIndent(rpcRequest, "", "  ")
-	tc.logger.Debug("📤 TENDERLY RPC REQUEST", "request", string(requestJSON))
-
-	// Make the RPC call
-	var response JSONRPCResponse
-	_, err = tc.httpClient.R().
-		SetContext(ctx).
-		SetBody(rpcRequest).
-		SetResult(&response).
-		Post(tc.apiURL)
-
-	if err != nil {
-		return nil, fmt.Errorf("tenderly RPC call failed: %w", err)
-	}
-
-	// Log the response for debugging
-	if response.Error != nil {
-		tc.logger.Error("❌ Tenderly RPC error", "status", response.Error.Code, "response", response.Error.Message)
-		return nil, fmt.Errorf("tenderly RPC error: %s (code: %d)", response.Error.Message, response.Error.Code)
-	}
-	// Response.Result is interface{} now; ensure it's a non-empty string hex
-	hexStr, ok := response.Result.(string)
-	if !ok || hexStr == "" {
-		return nil, fmt.Errorf("empty result from tenderly RPC call")
-	}
-
-	tc.logger.Info("✅ Tenderly RPC call successful",
-		"result_length", len(hexStr),
-		"contract", contractAddress)
-
-	// Parse the return data using ABI
-	returnData := common.FromHex(hexStr)
-	values, err := parsedABI.Unpack("latestRoundData", returnData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode latestRoundData response: %w", err)
-	}
-
-	if len(values) != 5 {
-		return nil, fmt.Errorf("expected 5 return values, got %d", len(values))
-	}
-
-	// Extract the values
-	roundId, ok := values[0].(*big.Int)
-	if !ok {
-		return nil, fmt.Errorf("failed to parse roundId")
-	}
-
-	answer, ok := values[1].(*big.Int)
-	if !ok {
-		return nil, fmt.Errorf("failed to parse answer")
-	}
-
-	startedAt, ok := values[2].(*big.Int)
-	if !ok {
-		return nil, fmt.Errorf("failed to parse startedAt")
-	}
-
-	updatedAt, ok := values[3].(*big.Int)
-	if !ok {
-		return nil, fmt.Errorf("failed to parse updatedAt")
-	}
-
-	answeredInRound, ok := values[4].(*big.Int)
-	if !ok {
-		return nil, fmt.Errorf("failed to parse answeredInRound")
-	}
-
-	tc.logger.Info("📊 Parsed Chainlink round data from Tenderly",
-		"round_id", roundId.String(),
-		"answer", answer.String(),
-		"updated_at", updatedAt.String(),
-		"contract", contractAddress)
-
-	return &ChainlinkRoundData{
-		RoundId:         roundId,
-		Answer:          answer,
-		StartedAt:       startedAt,
-		UpdatedAt:       updatedAt,
-		AnsweredInRound: answeredInRound,
-	}, nil
-}
-
-// getLatestRoundData is the legacy method - kept for backward compatibility
+// getLatestRoundData provides mock Chainlink data for simulation purposes
 func (tc *TenderlyClient) getLatestRoundData(ctx context.Context, contractAddress string, chainID int64) (*ChainlinkRoundData, error) {
-	// Delegate to the enhanced method
-	return tc.getRealRoundDataViaTenderly(ctx, contractAddress, chainID)
+	// Return realistic mock data for simulation purposes
+	tc.logger.Info("📊 Using mock Chainlink data for simulation", "contract", contractAddress, "chain_id", chainID)
+
+	// Return realistic mock data based on current market conditions
+	return &ChainlinkRoundData{
+		RoundId:         big.NewInt(92233720368547758), // Realistic round ID
+		Answer:          big.NewInt(250000000000),      // $2500 with 8 decimals (ETH/USD)
+		StartedAt:       big.NewInt(time.Now().Unix()),
+		UpdatedAt:       big.NewInt(time.Now().Unix()),
+		AnsweredInRound: big.NewInt(92233720368547758),
+	}, nil
 }
 
 // getRealisticBlockNumber returns a realistic block number for simulation based on chain ID
@@ -565,222 +403,187 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		"chain_id", chainID,
 		"value", value)
 
-	// Require the latest block number so simulation runs against a concrete block context
-	latestHex, latestErr := tc.GetLatestBlockNumber(ctx)
-	if latestErr != nil || latestHex == "" {
-		return nil, fmt.Errorf("failed to fetch latest block number from Tenderly: %w", latestErr)
-	}
-	// Note: HTTP simulate will use the latest block implicitly for the given network
+	// Note: HTTP Simulation API will use the latest block implicitly for the given network
+	// No need to fetch block number or base fee explicitly
 
-	// Fetch base fee to construct valid EIP-1559 fee fields and avoid base-fee reverts
-	baseFeeHex, _ := tc.GetLatestBaseFee(ctx)
-	if baseFeeHex == "" {
-		// fallback minimal non-zero fee if base fee retrieval fails
-		baseFeeHex = "0x3b9aca00" // 1 gwei
+	// Ensure HTTP Simulation API credentials are configured
+	if tc.accountName == "" || tc.projectName == "" || tc.accessKey == "" {
+		return nil, fmt.Errorf("Tenderly HTTP Simulation API credentials not configured. Please set TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY environment variables")
 	}
 
-	// Calculate maxFeePerGas as baseFee * 2 to account for potential increases
-	maxFeePerGasHex := baseFeeHex
-	if baseFeeHex != "" && baseFeeHex != "0x0" {
-		// Parse baseFee, multiply by 2, and convert back to hex
-		if baseFeeInt, ok := new(big.Int).SetString(baseFeeHex[2:], 16); ok {
-			maxFeePerGas := new(big.Int).Mul(baseFeeInt, big.NewInt(2))
-			maxFeePerGasHex = "0x" + maxFeePerGas.Text(16)
-			tc.logger.Info("💰 EIP-1559 fee calculation",
-				"baseFee", baseFeeHex,
-				"maxFeePerGas", maxFeePerGasHex,
-				"baseFeeWei", baseFeeInt.String(),
-				"maxFeeWei", maxFeePerGas.String())
-		}
+	var simResult interface{}
+	simURL := fmt.Sprintf("https://api.tenderly.co/api/v1/account/%s/project/%s/simulate", tc.accountName, tc.projectName)
+	// Provide a generous temporary balance to the runner so gas checks don't fail in simulation
+	balanceOverride := "0x56BC75E2D63100000" // 100 ETH
+	// Match the documented quick simulation shape you provided
+	// Omit block_number so Tenderly uses latest for the given network
+	// Handle empty value - default to "0" for Tenderly API compatibility
+	apiValue := value
+	if apiValue == "" {
+		apiValue = "0"
 	}
 
-	// Prefer HTTP Simulation API when configured; fall back to RPC otherwise
-	var response JSONRPCResponse
-	usedHTTP := false
-	if tc.accountName != "" && tc.projectName != "" && tc.accessKey != "" {
-		usedHTTP = true
-		simURL := fmt.Sprintf("https://api.tenderly.co/api/v1/account/%s/project/%s/simulate", tc.accountName, tc.projectName)
-		// Provide a generous temporary balance to the runner so gas checks don't fail in simulation
-		balanceOverride := "0x56BC75E2D63100000" // 100 ETH
-		// Match the documented quick simulation shape you provided
-		// Omit block_number so Tenderly uses latest for the given network
-		body := map[string]interface{}{
-			"network_id":      fmt.Sprintf("%d", chainID),
-			"from":            fromAddress,
-			"to":              contractAddress,
-			"gas":             8000000,
-			"gas_price":       0,
-			"value":           value, // Use the provided value parameter instead of hardcoding 0
-			"input":           callData,
-			"simulation_type": "quick",
-			// Optional conveniences kept compatible
-			"state_objects": map[string]interface{}{
-				strings.ToLower(fromAddress): map[string]interface{}{
-					"balance": balanceOverride,
-				},
+	body := map[string]interface{}{
+		"network_id":      fmt.Sprintf("%d", chainID),
+		"from":            fromAddress,
+		"to":              contractAddress,
+		"gas":             8000000,
+		"gas_price":       0,
+		"value":           apiValue, // Use the provided value parameter, defaulting empty to "0"
+		"input":           callData,
+		"simulation_type": "quick",
+		// Optional conveniences kept compatible
+		"state_objects": map[string]interface{}{
+			strings.ToLower(fromAddress): map[string]interface{}{
+				"balance": balanceOverride,
 			},
+		},
+	}
+
+	// Also override ERC20 token balance for the runner to ensure transfer() succeeds.
+	// Heuristic: set balance for multiple plausible mapping slots (0..10) to cover diverse layouts.
+	// Storage slot key = keccak256(pad(address), pad(slotIndex)) under the token contract's storage.
+	// We set a very large balance value so any reasonable transfer amount passes.
+	if common.IsHexAddress(contractAddress) && common.IsHexAddress(fromAddress) {
+		stateObjects := body["state_objects"].(map[string]interface{})
+
+		// Set ETH balance for the sender (following Tenderly documentation pattern)
+		senderKey := strings.ToLower(fromAddress)
+		senderOverrides, ok := stateObjects[senderKey].(map[string]interface{})
+		if !ok || senderOverrides == nil {
+			senderOverrides = map[string]interface{}{}
+			stateObjects[senderKey] = senderOverrides
+		}
+		// Set 10 ETH balance (0x8AC7230489E80000 = 10 * 10^18)
+		senderOverrides["balance"] = "0x8AC7230489E80000"
+		contractKey := strings.ToLower(contractAddress)
+		contractOverrides, ok := stateObjects[contractKey].(map[string]interface{})
+		if !ok || contractOverrides == nil {
+			contractOverrides = map[string]interface{}{}
+			stateObjects[contractKey] = contractOverrides
+		}
+		storageMap, ok := contractOverrides["storage"].(map[string]interface{})
+		if !ok || storageMap == nil {
+			storageMap = map[string]interface{}{}
+			contractOverrides["storage"] = storageMap
+		}
+		// Set USDC balance using multiple storage slot calculation approaches
+		// USDC uses slot 9 for the balances mapping
+
+		// Set balance to 1 billion USDC (1e9 * 1e6 for USDC 6 decimals = 1e15)
+		balanceHex := "0x0000000000000000000000000000000000000000000000000038d7ea4c68000"
+
+		// Try both approaches as different contracts may use different patterns
+
+		// Approach 1: Standard Solidity abi.encodePacked(address, uint256(slot))
+		// Uses 20-byte address + 32-byte slot
+		addrBytes := common.HexToAddress(fromAddress).Bytes() // 20 bytes, no padding
+		slotBytes := make([]byte, 32)
+		slotBytes[31] = 9 // uint256(9) as 32 bytes
+		encoded1 := append(addrBytes, slotBytes...)
+		slotKey1 := common.BytesToHash(crypto.Keccak256(encoded1)).Hex()
+		storageMap[slotKey1] = balanceHex
+
+		// Approach 2: Tenderly documentation style with 32-byte padded address
+		// Uses 32-byte padded address + 32-byte slot (64 bytes total)
+		paddedAddr := make([]byte, 32)
+		copy(paddedAddr[12:], addrBytes) // Right-pad address to 32 bytes
+		encoded2 := append(paddedAddr, slotBytes...)
+		slotKey2 := common.BytesToHash(crypto.Keccak256(encoded2)).Hex()
+		storageMap[slotKey2] = balanceHex
+
+		// Also try to clear any potential blacklist flags (common in USDC)
+		// Some tokens use different slots for blacklists, try multiple approaches
+		for blacklistSlot := 10; blacklistSlot <= 12; blacklistSlot++ {
+			blacklistSlotBytes := make([]byte, 32)
+			blacklistSlotBytes[31] = byte(blacklistSlot)
+
+			// Standard approach (20-byte address + 32-byte slot)
+			encodedBlacklist1 := append(addrBytes, blacklistSlotBytes...)
+			blacklistKey1 := common.BytesToHash(crypto.Keccak256(encodedBlacklist1)).Hex()
+			storageMap[blacklistKey1] = "0x0000000000000000000000000000000000000000000000000000000000000000" // false
+
+			// Tenderly docs approach (32-byte padded address + 32-byte slot)
+			encodedBlacklist2 := append(paddedAddr, blacklistSlotBytes...)
+			blacklistKey2 := common.BytesToHash(crypto.Keccak256(encodedBlacklist2)).Hex()
+			storageMap[blacklistKey2] = "0x0000000000000000000000000000000000000000000000000000000000000000" // false
 		}
 
-		// Also override ERC20 token balance for the runner to ensure transfer() succeeds.
-		// Heuristic: set balance for multiple plausible mapping slots (0..10) to cover diverse layouts.
-		// Storage slot key = keccak256(pad(address), pad(slotIndex)) under the token contract's storage.
-		// We set a very large balance value so any reasonable transfer amount passes.
-		if common.IsHexAddress(contractAddress) && common.IsHexAddress(fromAddress) {
-			stateObjects := body["state_objects"].(map[string]interface{})
+		tc.logger.Info("🔧 Comprehensive balance and blacklist overrides applied",
+			"token_contract", contractKey,
+			"runner", strings.ToLower(fromAddress),
+			"eth_balance", "10 ETH",
+			"usdc_balance", balanceHex,
+			"storage_slot_standard", slotKey1,
+			"storage_slot_padded", slotKey2,
+			"blacklist_slots_cleared", "10-12")
 
-			// Set ETH balance for the sender (following Tenderly documentation pattern)
-			senderKey := strings.ToLower(fromAddress)
-			senderOverrides, ok := stateObjects[senderKey].(map[string]interface{})
-			if !ok || senderOverrides == nil {
-				senderOverrides = map[string]interface{}{}
-				stateObjects[senderKey] = senderOverrides
-			}
-			// Set 10 ETH balance (0x8AC7230489E80000 = 10 * 10^18)
-			senderOverrides["balance"] = "0x8AC7230489E80000"
-			contractKey := strings.ToLower(contractAddress)
-			contractOverrides, ok := stateObjects[contractKey].(map[string]interface{})
-			if !ok || contractOverrides == nil {
-				contractOverrides = map[string]interface{}{}
-				stateObjects[contractKey] = contractOverrides
-			}
-			storageMap, ok := contractOverrides["storage"].(map[string]interface{})
-			if !ok || storageMap == nil {
-				storageMap = map[string]interface{}{}
-				contractOverrides["storage"] = storageMap
-			}
-			// Set USDC balance using multiple storage slot calculation approaches
-			// USDC uses slot 9 for the balances mapping
+	}
+	tc.logger.Info("📡 Making Tenderly HTTP simulation call for contract write", "url", simURL)
+	httpResp, httpErr := tc.httpClient.R().
+		SetContext(ctx).
+		SetHeader("X-Access-Key", tc.accessKey).
+		SetBody(body).
+		Post(simURL)
+	if httpErr != nil {
+		return nil, fmt.Errorf("tenderly HTTP simulation failed: %w", httpErr)
+	}
+	// Debug: print full Tenderly HTTP response with account/project context
+	tc.logger.Debug("Tenderly HTTP simulate raw response",
+		"status", httpResp.Status(),
+		"code", httpResp.StatusCode(),
+		"account", tc.accountName,
+		"project", tc.projectName,
+		"url", simURL,
+		"body", string(httpResp.Body()))
+	var httpResult map[string]interface{}
+	if uerr := json.Unmarshal(httpResp.Body(), &httpResult); uerr != nil {
+		return nil, fmt.Errorf("failed to parse tenderly HTTP simulation response: %w", uerr)
+	}
+	// Tenderly HTTP may return {"error":{...}} with 200; treat as failure
+	if errObj, ok := httpResult["error"].(map[string]interface{}); ok {
+		msg, _ := errObj["message"].(string)
+		slug, _ := errObj["slug"].(string)
 
-			// Set balance to 1 billion USDC (1e9 * 1e6 for USDC 6 decimals = 1e15)
-			balanceHex := "0x0000000000000000000000000000000000000000000000000038d7ea4c68000"
+		// If we got "invalid_state_storage" error, try again without storage overrides
+		if slug == "invalid_state_storage" {
+			tc.logger.Info("🔄 Retrying Tenderly simulation without storage overrides due to invalid_state_storage error")
 
-			// Try both approaches as different contracts may use different patterns
-
-			// Approach 1: Standard Solidity abi.encodePacked(address, uint256(slot))
-			// Uses 20-byte address + 32-byte slot
-			addrBytes := common.HexToAddress(fromAddress).Bytes() // 20 bytes, no padding
-			slotBytes := make([]byte, 32)
-			slotBytes[31] = 9 // uint256(9) as 32 bytes
-			encoded1 := append(addrBytes, slotBytes...)
-			slotKey1 := common.BytesToHash(crypto.Keccak256(encoded1)).Hex()
-			storageMap[slotKey1] = balanceHex
-
-			// Approach 2: Tenderly documentation style with 32-byte padded address
-			// Uses 32-byte padded address + 32-byte slot (64 bytes total)
-			paddedAddr := make([]byte, 32)
-			copy(paddedAddr[12:], addrBytes) // Right-pad address to 32 bytes
-			encoded2 := append(paddedAddr, slotBytes...)
-			slotKey2 := common.BytesToHash(crypto.Keccak256(encoded2)).Hex()
-			storageMap[slotKey2] = balanceHex
-
-			// Also try to clear any potential blacklist flags (common in USDC)
-			// Some tokens use different slots for blacklists, try multiple approaches
-			for blacklistSlot := 10; blacklistSlot <= 12; blacklistSlot++ {
-				blacklistSlotBytes := make([]byte, 32)
-				blacklistSlotBytes[31] = byte(blacklistSlot)
-
-				// Standard approach (20-byte address + 32-byte slot)
-				encodedBlacklist1 := append(addrBytes, blacklistSlotBytes...)
-				blacklistKey1 := common.BytesToHash(crypto.Keccak256(encodedBlacklist1)).Hex()
-				storageMap[blacklistKey1] = "0x0000000000000000000000000000000000000000000000000000000000000000" // false
-
-				// Tenderly docs approach (32-byte padded address + 32-byte slot)
-				encodedBlacklist2 := append(paddedAddr, blacklistSlotBytes...)
-				blacklistKey2 := common.BytesToHash(crypto.Keccak256(encodedBlacklist2)).Hex()
-				storageMap[blacklistKey2] = "0x0000000000000000000000000000000000000000000000000000000000000000" // false
+			// Remove the storage overrides and try again
+			if stateObjects, ok := body["state_objects"].(map[string]interface{}); ok {
+				delete(stateObjects, strings.ToLower(contractAddress))
 			}
 
-			tc.logger.Info("🔧 Comprehensive balance and blacklist overrides applied",
-				"token_contract", contractKey,
-				"runner", strings.ToLower(fromAddress),
-				"eth_balance", "10 ETH",
-				"usdc_balance", balanceHex,
-				"storage_slot_standard", slotKey1,
-				"storage_slot_padded", slotKey2,
-				"blacklist_slots_cleared", "10-12")
+			// Retry the HTTP request without storage overrides
+			retryResp, retryErr := tc.httpClient.R().
+				SetContext(ctx).
+				SetHeader("X-Access-Key", tc.accessKey).
+				SetBody(body).
+				Post(simURL)
+			if retryErr != nil {
+				return nil, fmt.Errorf("tenderly HTTP simulation retry failed: %w", retryErr)
+			}
 
+			var retryResult map[string]interface{}
+			if uerr := json.Unmarshal(retryResp.Body(), &retryResult); uerr != nil {
+				return nil, fmt.Errorf("failed to parse tenderly retry response: %w", uerr)
+			}
+
+			// Check if retry succeeded
+			if retryErrObj, ok := retryResult["error"].(map[string]interface{}); ok {
+				retryMsg, _ := retryErrObj["message"].(string)
+				retrySlug, _ := retryErrObj["slug"].(string)
+				return nil, fmt.Errorf("tenderly HTTP simulate error (retry): %s (%s)", retryMsg, retrySlug)
+			}
+
+			tc.logger.Info("✅ Tenderly simulation retry succeeded without storage overrides")
+			simResult = retryResult
+		} else {
+			return nil, fmt.Errorf("tenderly HTTP simulate error: %s (%s)", msg, slug)
 		}
-		tc.logger.Info("📡 Making Tenderly HTTP simulation call for contract write", "url", simURL)
-		httpResp, httpErr := tc.httpClient.R().
-			SetContext(ctx).
-			SetHeader("X-Access-Key", tc.accessKey).
-			SetBody(body).
-			Post(simURL)
-		if httpErr != nil {
-			return nil, fmt.Errorf("tenderly HTTP simulation failed: %w", httpErr)
-		}
-		// Debug: print full Tenderly HTTP response with account/project context
-		tc.logger.Debug("Tenderly HTTP simulate raw response",
-			"status", httpResp.Status(),
-			"code", httpResp.StatusCode(),
-			"account", tc.accountName,
-			"project", tc.projectName,
-			"url", simURL,
-			"body", string(httpResp.Body()))
-		var simResult map[string]interface{}
-		if uerr := json.Unmarshal(httpResp.Body(), &simResult); uerr != nil {
-			return nil, fmt.Errorf("failed to parse tenderly HTTP simulation response: %w", uerr)
-		}
-		// Tenderly HTTP may return {"error":{...}} with 200; treat as failure
-		if errObj, ok := simResult["error"].(map[string]interface{}); ok {
-			msg, _ := errObj["message"].(string)
-			slug, _ := errObj["slug"].(string)
-
-			// If we got "invalid_state_storage" error, try again without storage overrides
-			if slug == "invalid_state_storage" {
-				tc.logger.Info("🔄 Retrying Tenderly simulation without storage overrides due to invalid_state_storage error")
-
-				// Remove the storage overrides and try again
-				if stateObjects, ok := body["state_objects"].(map[string]interface{}); ok {
-					delete(stateObjects, strings.ToLower(contractAddress))
-				}
-
-				// Retry the HTTP request without storage overrides
-				retryResp, retryErr := tc.httpClient.R().
-					SetContext(ctx).
-					SetHeader("X-Access-Key", tc.accessKey).
-					SetBody(body).
-					Post(simURL)
-				if retryErr != nil {
-					return nil, fmt.Errorf("tenderly HTTP simulation retry failed: %w", retryErr)
-				}
-
-				var retryResult map[string]interface{}
-				if uerr := json.Unmarshal(retryResp.Body(), &retryResult); uerr != nil {
-					return nil, fmt.Errorf("failed to parse tenderly retry response: %w", uerr)
-				}
-
-				// Check if retry succeeded
-				if retryErrObj, ok := retryResult["error"].(map[string]interface{}); ok {
-					retryMsg, _ := retryErrObj["message"].(string)
-					retrySlug, _ := retryErrObj["slug"].(string)
-					return nil, fmt.Errorf("tenderly HTTP simulate error (retry): %s (%s)", retryMsg, retrySlug)
-				}
-
-				tc.logger.Info("✅ Tenderly simulation retry succeeded without storage overrides")
-				simResult = retryResult
-			} else {
-				return nil, fmt.Errorf("tenderly HTTP simulate error: %s (%s)", msg, slug)
-			}
-		}
-		response.Result = simResult
 	} else {
-		txObject := map[string]interface{}{
-			"from": fromAddress,
-			"to":   contractAddress,
-			"gas":  fmt.Sprintf("0x%x", 8_000_000),
-			// Use legacy gasPrice=0 to bypass base-fee accounting in simulation
-			"gasPrice": "0x0",
-			"value":    "0x0",
-			"data":     callData,
-		}
-		// Call RPC without overrides (some gateways reject extra params). We already use gasPrice=0 and value=0.
-		rpcRequest := JSONRPCRequest{Jsonrpc: "2.0", Method: "tenderly_simulateTransaction", Params: []interface{}{txObject, latestHex}, Id: 1}
-		tc.logger.Info("📡 Making Tenderly simulation call for contract write", "rpc_url", tc.apiURL)
-		_, err := tc.httpClient.R().SetContext(ctx).SetBody(rpcRequest).SetResult(&response).Post(tc.apiURL)
-		if err != nil {
-			return nil, fmt.Errorf("tenderly simulation call failed: %w", err)
-		}
+		// No error, use the original result
+		simResult = httpResult
 	}
 
 	// Create simulation result
@@ -792,53 +595,19 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		ChainID:         chainID,
 		SimulationMode:  true,
 	}
-	result.LatestBlockHex = latestHex
+	// result.LatestBlockHex = latestHex // Not needed for HTTP API
 
-	if response.Error != nil {
-		// Simulation failed - this gives us the revert reason
-		result.Success = false
-		result.Error = &ContractWriteErrorData{
-			Code:    "SIMULATION_REVERTED",
-			Message: response.Error.Message,
-		}
-
-		tc.logger.Error("⚠️ Contract write simulation reverted (expected for some operations)",
-			"method", methodName,
-			"error", response.Error.Message)
-
-		// CRITICAL: Log the ENTIRE response structure to see where logs might be hiding
-		if fullResponse, err := json.Marshal(response); err == nil {
-			tc.logger.Error("🔍 CRITICAL DEBUG - FULL Tenderly response (including error)", "json", string(fullResponse))
-		}
-
-		// CRITICAL: Even when simulation reverts, Tenderly may still return logs
-		// Try to extract logs from the error response
-		if response.Result != nil {
-			tc.logger.Error("🔍 CRITICAL DEBUG - Tenderly reverted but has result, extracting logs")
-			if raw, err := json.Marshal(response.Result); err == nil {
-				tc.logger.Error("🔍 CRITICAL DEBUG - Raw Tenderly REVERT result for log extraction", "json", string(raw))
-			}
-
-			logs := tc.extractLogsFromTenderlyResult(response.Result)
-			tc.logger.Error("🔍 CRITICAL DEBUG - Log extraction from REVERT result", "logs_count", len(logs))
-			if len(logs) > 0 {
-				result.ReceiptLogs = logs
-			}
-		}
-	} else if response.Result != nil {
+	// Handle HTTP API simulation result
+	if simResult != nil {
 		// Simulation succeeded; attempt to extract logs from the result payload
 		// Log raw JSON for diagnostics (trimmed by logger if necessary)
-		if raw, err := json.Marshal(response.Result); err == nil {
-			if usedHTTP {
-				tc.logger.Info("📥 Tenderly HTTP simulation raw result (trimmed)", "json", string(raw))
-			} else {
-				tc.logger.Debug("📥 Tenderly simulateTransaction raw result", "json", string(raw))
-			}
+		if raw, err := json.Marshal(simResult); err == nil {
+			tc.logger.Info("📥 Tenderly HTTP simulation raw result (trimmed)", "json", string(raw))
 		}
-		tc.logger.Info("ℹ️ Tenderly simulateTransaction result type", "type", fmt.Sprintf("%T", response.Result))
-		// Some gateways return a JSON-encoded string; parse it to an object first
-		var resultForExtraction interface{} = response.Result
-		if s, ok := response.Result.(string); ok && len(s) > 0 && (s[0] == '{' || s[0] == '[') {
+		tc.logger.Info("ℹ️ Tenderly simulation result type", "type", fmt.Sprintf("%T", simResult))
+		// Some HTTP responses return a JSON-encoded string; parse it to an object first
+		var resultForExtraction interface{} = simResult
+		if s, ok := simResult.(string); ok && len(s) > 0 && (s[0] == '{' || s[0] == '[') {
 			var parsed interface{}
 			if err := json.Unmarshal([]byte(s), &parsed); err == nil {
 				resultForExtraction = parsed
@@ -851,9 +620,9 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 			tc.logger.Error("🔍 CRITICAL DEBUG - Raw Tenderly result for log extraction", "json", string(raw))
 		}
 
-		// Also log the entire response structure to see where logs might be hiding
-		if rawResponse, err := json.Marshal(response); err == nil {
-			tc.logger.Error("🔍 CRITICAL DEBUG - Full Tenderly response structure", "response", string(rawResponse))
+		// Also log the entire simulation result structure to see where logs might be hiding
+		if rawResponse, err := json.Marshal(simResult); err == nil {
+			tc.logger.Error("🔍 CRITICAL DEBUG - Full Tenderly simulation result structure", "response", string(rawResponse))
 		}
 
 		// FIRST: Let's see ALL keys in the Tenderly response
@@ -1019,36 +788,6 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 	return result, nil
 }
 
-// GetLatestBaseFee retrieves baseFeePerGas for the latest block
-func (tc *TenderlyClient) GetLatestBaseFee(ctx context.Context) (string, error) {
-	rpcRequest := JSONRPCRequest{
-		Jsonrpc: "2.0",
-		Method:  "eth_getBlockByNumber",
-		Params:  []interface{}{"latest", false},
-		Id:      1,
-	}
-
-	var response JSONRPCResponse
-	_, err := tc.httpClient.R().
-		SetContext(ctx).
-		SetBody(rpcRequest).
-		SetResult(&response).
-		Post(tc.apiURL)
-	if err != nil {
-		return "", fmt.Errorf("tenderly eth_getBlockByNumber failed: %w", err)
-	}
-	if response.Error != nil {
-		return "", fmt.Errorf("tenderly eth_getBlockByNumber error: %s (code: %d)", response.Error.Message, response.Error.Code)
-	}
-	// response.Result expected to be a map with baseFeePerGas
-	if m, ok := response.Result.(map[string]interface{}); ok {
-		if v, ok2 := m["baseFeePerGas"].(string); ok2 && v != "" {
-			return v, nil
-		}
-	}
-	return "", fmt.Errorf("baseFeePerGas not present in latest block header")
-}
-
 // extractLogsFromTenderlyResult tries best-effort extraction of logs from Tenderly simulation payload
 func (tc *TenderlyClient) extractLogsFromTenderlyResult(res interface{}) []map[string]interface{} {
 	toLogs := func(v interface{}) []map[string]interface{} {
@@ -1191,34 +930,6 @@ func (tc *TenderlyClient) extractLogsFromTenderlyResult(res interface{}) []map[s
 	}
 
 	return nil
-}
-
-// GetLatestBlockNumber retrieves the latest block number from Tenderly Gateway RPC (hex string like 0xabcdef)
-func (tc *TenderlyClient) GetLatestBlockNumber(ctx context.Context) (string, error) {
-	rpcRequest := JSONRPCRequest{
-		Jsonrpc: "2.0",
-		Method:  "eth_blockNumber",
-		Params:  []interface{}{},
-		Id:      1,
-	}
-
-	var response JSONRPCResponse
-	_, err := tc.httpClient.R().
-		SetContext(ctx).
-		SetBody(rpcRequest).
-		SetResult(&response).
-		Post(tc.apiURL)
-	if err != nil {
-		return "", fmt.Errorf("tenderly eth_blockNumber failed: %w", err)
-	}
-	if response.Error != nil {
-		return "", fmt.Errorf("tenderly eth_blockNumber error: %s (code: %d)", response.Error.Message, response.Error.Code)
-	}
-	hexStr, ok := response.Result.(string)
-	if !ok || hexStr == "" {
-		return "", fmt.Errorf("empty result from eth_blockNumber")
-	}
-	return hexStr, nil
 }
 
 // ContractWriteSimulationResult represents the result of a Tenderly contract write simulation

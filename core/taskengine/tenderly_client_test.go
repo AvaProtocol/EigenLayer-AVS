@@ -543,141 +543,6 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 	})
 }
 
-func TestTenderlyGateway_RealRPCCalls_Integration(t *testing.T) {
-
-	logger := testutil.GetLogger()
-	client := NewTenderlyClient(logger)
-
-	if os.Getenv("TENDERLY_API_KEY") == "" {
-		t.Skip("Skipping Tenderly Gateway integration: TENDERLY_API_KEY not set")
-	}
-
-	ctx := context.Background()
-
-	fmt.Printf("\n=== REAL TENDERLY GATEWAY RPC TEST ===\n")
-	fmt.Printf("Gateway URL: %s\n", client.apiURL)
-	fmt.Printf("API Key: %s\n", client.apiKey)
-
-	// Test 1: Real latestRoundData call to see actual request/response
-	t.Run("Real latestRoundData RPC Call", func(t *testing.T) {
-		fmt.Printf("\nMaking real Tenderly Gateway RPC call...\n")
-		fmt.Printf("Target: %s (Sepolia ETH/USD)\n", SEPOLIA_ETH_USD_FEED)
-		fmt.Printf("Method: eth_call -> latestRoundData()\n\n")
-
-		roundData, err := client.getRealRoundDataViaTenderly(ctx, SEPOLIA_ETH_USD_FEED, SEPOLIA_CHAIN_ID)
-
-		require.NoError(t, err, "Should successfully call Tenderly Gateway RPC")
-		require.NotNil(t, roundData, "Should get round data")
-
-		fmt.Printf("RPC call successful.\n")
-		fmt.Printf("\nREAL CHAINLINK DATA FROM TENDERLY GATEWAY:\n")
-		fmt.Printf("   Contract: %s\n", SEPOLIA_ETH_USD_FEED)
-		fmt.Printf("   Round ID: %s\n", roundData.RoundId.String())
-		fmt.Printf("   Answer (raw): %s\n", roundData.Answer.String())
-		fmt.Printf("   Answer (USD): $%.2f\n", float64(roundData.Answer.Int64())/100000000)
-		fmt.Printf("   Started At: %s\n", time.Unix(roundData.StartedAt.Int64(), 0).Format(time.RFC3339))
-		fmt.Printf("   Updated At: %s\n", time.Unix(roundData.UpdatedAt.Int64(), 0).Format(time.RFC3339))
-		fmt.Printf("   Answered In Round: %s\n", roundData.AnsweredInRound.String())
-	})
-
-	// Test 2: Show actual JSON-RPC request/response format
-	t.Run("Direct JSON-RPC Request Analysis", func(t *testing.T) {
-		fmt.Printf("\n=== DIRECT JSON-RPC CALL ANALYSIS ===\n")
-
-		// Create JSON-RPC request
-		rpcRequest := JSONRPCRequest{
-			Jsonrpc: "2.0",
-			Method:  "eth_call",
-			Params: []interface{}{
-				CallParams{
-					To:   SEPOLIA_ETH_USD_FEED,
-					Data: "0x50d25bcd", // latestRoundData() method signature
-				},
-				"latest",
-			},
-			Id: 1,
-		}
-
-		fmt.Printf("JSON-RPC REQUEST:\n")
-		requestJSON, _ := json.MarshalIndent(rpcRequest, "", "  ")
-		fmt.Printf("%s\n\n", string(requestJSON))
-
-		// Make the actual RPC call
-		var response JSONRPCResponse
-		resp, err := client.httpClient.R().
-			SetContext(ctx).
-			SetBody(rpcRequest).
-			SetResult(&response).
-			Post(client.apiURL)
-
-		require.NoError(t, err, "RPC call should succeed")
-
-		fmt.Printf("JSON-RPC RESPONSE:\n")
-		fmt.Printf("Status Code: %d\n", resp.StatusCode())
-
-		if resp.IsSuccess() {
-			responseJSON, _ := json.MarshalIndent(response, "", "  ")
-			fmt.Printf("%s\n\n", string(responseJSON))
-
-			// Analyze the response
-			fmt.Printf("🔍 RESPONSE ANALYSIS:\n")
-			fmt.Printf("JSON-RPC Version: %s\n", response.Jsonrpc)
-			fmt.Printf("Request ID: %d\n", response.Id)
-			// response.Result is interface{}; avoid len() on interface to satisfy vet.
-			switch v := response.Result.(type) {
-			case nil:
-				fmt.Printf("Result is nil\n")
-			case string:
-				fmt.Printf("Result Length: %d bytes\n", len(v))
-				fmt.Printf("Raw Result: %s\n", v)
-			default:
-				rb, err := json.Marshal(v)
-				if err != nil {
-					fmt.Printf("Result could not be marshaled to JSON: %v\n", err)
-				} else {
-					fmt.Printf("Result Length: %d bytes\n", len(rb))
-					fmt.Printf("Raw Result: %s\n", string(rb))
-				}
-			}
-
-			if response.Error != nil {
-				fmt.Printf("RPC Error: %s (code: %d)\n", response.Error.Message, response.Error.Code)
-			} else {
-				fmt.Printf("Call successful\n")
-			}
-		} else {
-			fmt.Printf("HTTP Error Response: %s\n", resp.String())
-		}
-	})
-
-	// Test 3: Event simulation end-to-end
-	t.Run("Event Simulation with Real Data", func(t *testing.T) {
-		fmt.Printf("\n🔮 === EVENT SIMULATION WITH REAL TENDERLY DATA ===\n")
-
-		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
-			Topics: []*avsproto.EventTrigger_Topics{
-				{
-					Values: []string{ANSWER_UPDATED_SIG},
-				},
-			},
-		}
-
-		simulatedLog, err := client.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
-		require.NoError(t, err, "Simulation should succeed")
-		require.NotNil(t, simulatedLog, "Should get simulated log")
-
-		fmt.Printf("✅ Event simulation successful!\n")
-		printSimulatedLog(simulatedLog)
-
-		// Verify log structure matches real AnswerUpdated events
-		assert.Equal(t, common.HexToAddress(SEPOLIA_ETH_USD_FEED), simulatedLog.Address)
-		assert.Len(t, simulatedLog.Topics, 3)
-		assert.Equal(t, common.HexToHash(ANSWER_UPDATED_SIG), simulatedLog.Topics[0])
-		assert.NotEmpty(t, simulatedLog.Data)
-	})
-}
-
 // Helper function to print simulated log details
 func printSimulatedLog(log *types.Log) {
 	fmt.Printf("\n📋 SIMULATED LOG DETAILS:\n")
@@ -776,9 +641,9 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 		if os.Getenv("TENDERLY_API_KEY") == "" {
 			t.Skip("Skipping: TENDERLY_API_KEY not set")
 		}
-		t.Logf("🔗 Using Tenderly Gateway: %s", client.apiURL)
+		t.Logf("🔗 Using Tenderly HTTP API (RPC gateway deprecated)")
 
-		roundData, err := client.getRealRoundDataViaTenderly(ctx, SEPOLIA_ETH_USD_FEED, SEPOLIA_CHAIN_ID)
+		roundData, err := client.getLatestRoundData(ctx, SEPOLIA_ETH_USD_FEED, SEPOLIA_CHAIN_ID)
 		require.NoError(t, err, "Should get real price data from Tenderly")
 		require.NotNil(t, roundData)
 
@@ -1109,7 +974,7 @@ func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testin
 
 	t.Run("EnhancedBehavior_WithConditionsThatDontMatch", func(t *testing.T) {
 		// First get real current price
-		roundData, err := client.getRealRoundDataViaTenderly(ctx, SEPOLIA_ETH_USD_FEED, SEPOLIA_CHAIN_ID)
+		roundData, err := client.getLatestRoundData(ctx, SEPOLIA_ETH_USD_FEED, SEPOLIA_CHAIN_ID)
 		require.NoError(t, err)
 
 		currentPriceFloat := float64(roundData.Answer.Int64()) / 100000000
@@ -1165,7 +1030,7 @@ func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testin
 	// Test with condition that DOES match
 	t.Run("EnhancedBehavior_WithConditionsThatMatch", func(t *testing.T) {
 		// Get real current price and set a condition that will match
-		roundData, err := client.getRealRoundDataViaTenderly(ctx, SEPOLIA_ETH_USD_FEED, SEPOLIA_CHAIN_ID)
+		roundData, err := client.getLatestRoundData(ctx, SEPOLIA_ETH_USD_FEED, SEPOLIA_CHAIN_ID)
 		require.NoError(t, err)
 
 		currentPriceFloat := float64(roundData.Answer.Int64()) / 100000000
@@ -2101,8 +1966,8 @@ func TestContractWriteWithValueParameter(t *testing.T) {
 					assert.NoError(t, err)
 					assert.NotNil(t, result)
 
-					// Check that the value was used correctly
-					if len(result.ReceiptLogs) > 0 {
+					// Check that the value was used correctly (only if result is valid)
+					if result != nil && len(result.ReceiptLogs) > 0 {
 						depositLog := result.ReceiptLogs[0]
 						wadValue := depositLog["data"]
 

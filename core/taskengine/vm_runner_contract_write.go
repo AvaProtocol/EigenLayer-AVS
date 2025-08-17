@@ -361,12 +361,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 				"method", methodName, "abi_length", len(contractAbiStr))
 		}
 
-		// Ensure we use the latest block number for simulation context to enable realistic execution data
-		if latestHex, err := tenderlyClient.GetLatestBlockNumber(ctx); err != nil {
-			r.vm.logger.Warn("Failed to fetch latest block number from Tenderly; proceeding with 'latest' tag", "error", err)
-		} else {
-			r.vm.logger.Info("Using latest block for simulation context", "block", latestHex)
-		}
+		// Note: HTTP Simulation API automatically uses the latest block context
 
 		// Extract transaction value from VM variables (passed from raw nodeConfig)
 		var transactionValue string = "0" // Default to 0 if not specified
