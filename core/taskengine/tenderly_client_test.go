@@ -516,7 +516,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 		}
 
 		// If we get a result, validate its structure
-		assert.True(t, result["found"].(bool), "Should find simulated event")
+		assert.True(t, result["success"].(bool), "Should find simulated event")
 
 		// Check if we have the raw blockchain log data format
 		if eventData, hasData := result["data"].(map[string]interface{}); hasData && eventData != nil {
@@ -536,7 +536,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 		}
 
 		// Check common fields
-		assert.NotNil(t, result["found"], "Should have 'found' field")
+		assert.NotNil(t, result["success"], "Should have 'success' field")
 
 		fmt.Printf("Full engine integration successful.\n")
 		printEngineResult(result)
@@ -1533,7 +1533,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		require.NotNil(t, result, "Should get simulation result")
 
 		// Verify the structure matches the new protobuf format
-		assert.True(t, result["found"].(bool), "Should find simulated event")
+		assert.True(t, result["success"].(bool), "Should find simulated event")
 		assert.NotEmpty(t, result["data"], "Should have event data")
 		assert.NotEmpty(t, result["metadata"], "Should have metadata")
 
@@ -1606,7 +1606,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		require.NotNil(t, result, "Should get simulation result")
 
 		// Verify the result structure
-		assert.True(t, result["found"].(bool), "Should find event that meets condition")
+		assert.True(t, result["success"].(bool), "Should find event that meets condition")
 
 		// Get and verify the data directly
 		eventData, ok := result["data"].(map[string]interface{})
@@ -1666,7 +1666,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 
 		// If it succeeds, document the structure
 		t.Logf("✅ Transfer simulation unexpectedly succeeded!")
-		if found, ok := result["found"].(bool); ok && found {
+		if success, ok := result["success"].(bool); ok && success {
 			if eventData, ok := result["data"].(map[string]interface{}); ok {
 				eventDataJSON, _ := json.MarshalIndent(eventData, "", "  ")
 				t.Logf("📊 Transfer Event Data: %s", string(eventDataJSON))
@@ -1715,10 +1715,10 @@ func TestEventTriggerImmediately_HistoricalSearch_Unit(t *testing.T) {
 		require.NotNil(t, result, "Should get result even if no events found")
 
 		// Document the "no events found" structure
-		if found, ok := result["found"].(bool); ok && !found {
+		if success, ok := result["success"].(bool); ok && !success {
 			t.Logf("✅ No events found (expected for historical search)")
 			t.Logf("📊 No Events Response Structure:")
-			t.Logf("   found: %v", result["found"])
+			t.Logf("   success: %v", result["success"])
 			t.Logf("   message: %v", result["message"])
 			t.Logf("   queriesCount: %v", result["queriesCount"])
 			t.Logf("   totalSearched: %v", result["totalSearched"])
@@ -1792,7 +1792,7 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		require.NotNil(t, result, "Should get simulation result")
 
 		// Verify we got meaningful data
-		assert.True(t, result["found"].(bool), "Should find simulated Transfer event")
+		assert.True(t, result["success"].(bool), "Should find simulated Transfer event")
 		assert.NotEmpty(t, result["data"], "Should have Transfer event data")
 		assert.NotEmpty(t, result["metadata"], "Should have metadata")
 
