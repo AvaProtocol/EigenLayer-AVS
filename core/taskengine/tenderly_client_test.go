@@ -390,8 +390,8 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 	// Create TenderlyClient with real API key
 	tenderlyClient := NewTenderlyClient(logger)
 
-	if os.Getenv("TENDERLY_API_KEY") == "" {
-		t.Skip("Skipping Tenderly end-to-end integration: TENDERLY_API_KEY not set")
+	if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
+		t.Skip("Skipping Tenderly end-to-end integration: TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -600,9 +600,8 @@ func printEngineResult(result map[string]interface{}) {
 
 // Benchmark the simulation performance
 func BenchmarkTenderlySimulation(b *testing.B) {
-	apiKey := os.Getenv("TENDERLY_API_KEY")
-	if apiKey == "" {
-		b.Skip("Skipping benchmark - set TENDERLY_API_KEY environment variable")
+	if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
+		b.Skip("Skipping benchmark - set TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY environment variables")
 	}
 
 	logger := testutil.GetLogger()
@@ -627,8 +626,8 @@ func BenchmarkTenderlySimulation(b *testing.B) {
 }
 
 func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *testing.T) {
-	if os.Getenv("TENDERLY_API_KEY") == "" {
-		t.Skip("Skipping Tenderly comprehensive integration: TENDERLY_API_KEY not set")
+	if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
+		t.Skip("Skipping Tenderly comprehensive integration: TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
 	}
 
 	logger := testutil.GetLogger()
@@ -638,8 +637,8 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 
 	// First, get the current real price from Tenderly to use in our tests
 	t.Run("GetCurrentPriceData", func(t *testing.T) {
-		if os.Getenv("TENDERLY_API_KEY") == "" {
-			t.Skip("Skipping: TENDERLY_API_KEY not set")
+		if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
+			t.Skip("Skipping: TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
 		}
 		t.Logf("🔗 Using Tenderly HTTP API (RPC gateway deprecated)")
 
@@ -662,8 +661,8 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 
 	// Test 1: Condition that SHOULD match (price > very low threshold)
 	t.Run("ConditionShouldMatch_GreaterThan", func(t *testing.T) {
-		if os.Getenv("TENDERLY_API_KEY") == "" {
-			t.Skip("Skipping: TENDERLY_API_KEY not set")
+		if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
+			t.Skip("Skipping: TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
 		}
 		currentPriceFloat := ctx.Value("currentPriceFloat").(float64)
 
@@ -722,8 +721,8 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 
 	// Test 2: Condition that SHOULD NOT match (price > very high threshold)
 	t.Run("ConditionShouldNotMatch_GreaterThan", func(t *testing.T) {
-		if os.Getenv("TENDERLY_API_KEY") == "" {
-			t.Skip("Skipping: TENDERLY_API_KEY not set")
+		if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
+			t.Skip("Skipping: TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
 		}
 		currentPriceFloat := ctx.Value("currentPriceFloat").(float64)
 
@@ -963,8 +962,8 @@ func TestTenderlySimulation_EnhancedConditionHandling_PROPOSAL(t *testing.T) {
 
 // Test the enhanced condition handling behavior
 func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testing.T) {
-	if os.Getenv("TENDERLY_API_KEY") == "" {
-		t.Skip("Skipping enhanced condition handling integration: TENDERLY_API_KEY not set")
+	if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
+		t.Skip("Skipping enhanced condition handling integration: TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
 	}
 
 	logger := testutil.GetLogger()
@@ -1617,7 +1616,7 @@ func TestEventTriggerImmediately_HistoricalSearch_Unit(t *testing.T) {
 // TestTransferEventSampleData_ForUserDocumentation demonstrates how to get sample Transfer event data
 // This test shows users exactly how to use Tenderly simulation to get meaningful Transfer event structures
 func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
-	// This test uses TENDERLY_API_KEY for simulation
+	// This test uses TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY for simulation
 
 	logger := testutil.GetLogger()
 
@@ -1941,8 +1940,8 @@ func TestContractWriteWithValueParameter(t *testing.T) {
 				t.Logf("🧪 Testing value: %s", tc.value)
 
 				// Skip actual simulation if no API key
-				if os.Getenv("TENDERLY_API_KEY") == "" {
-					t.Logf("⏭️  Skipping actual simulation - no TENDERLY_API_KEY")
+				if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
+					t.Logf("⏭️  Skipping actual simulation - TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
 					t.Logf("✅ Function signature accepts value parameter: %s", tc.value)
 					t.Logf("✅ Enhanced SimulateContractWrite can handle value: %s", tc.value)
 					return
@@ -2065,8 +2064,8 @@ func TestEndToEndValuePropagation(t *testing.T) {
 		t.Logf("   - Runner: %s", inputVariables["workflowContext"].(map[string]interface{})["runner"])
 
 		// Skip if no Tenderly API key
-		if os.Getenv("TENDERLY_API_KEY") == "" {
-			t.Logf("⏭️  Skipping E2E test - no TENDERLY_API_KEY")
+		if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
+			t.Logf("⏭️  Skipping E2E test - TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
 			t.Logf("✅ Configuration includes value field: %s", nodeConfig["value"])
 			t.Logf("✅ This would be passed through to Tenderly simulation")
 			t.Logf("✅ Expected result: WETH Deposit event with wad=%s", nodeConfig["value"])
