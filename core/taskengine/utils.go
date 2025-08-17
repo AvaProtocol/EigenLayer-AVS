@@ -450,11 +450,12 @@ func GenerateCallData(methodName string, methodParams []string, contractAbi *abi
 
 			// Set the field values from the slice
 			for i, value := range slice {
-				if i < structValue.NumField() {
-					field := structValue.Field(i)
-					if field.CanSet() {
-						field.Set(reflect.ValueOf(value))
-					}
+				if i >= len(slice) || i >= structValue.NumField() {
+					break // Prevent index out of range panics
+				}
+				field := structValue.Field(i)
+				if field.CanSet() {
+					field.Set(reflect.ValueOf(value))
 				}
 			}
 

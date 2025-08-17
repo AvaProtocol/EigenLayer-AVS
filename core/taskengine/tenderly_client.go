@@ -19,6 +19,11 @@ import (
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
 
+// Constants for storage values
+const (
+	STORAGE_FALSE_VALUE = "0x0000000000000000000000000000000000000000000000000000000000000000" // false value for storage
+)
+
 // TenderlyClient handles Tenderly HTTP simulation API interactions
 type TenderlyClient struct {
 	httpClient  *resty.Client
@@ -501,12 +506,12 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 			// Standard approach (20-byte address + 32-byte slot)
 			encodedBlacklist1 := append(addrBytes, blacklistSlotBytes...)
 			blacklistKey1 := common.BytesToHash(crypto.Keccak256(encodedBlacklist1)).Hex()
-			storageMap[blacklistKey1] = "0x0000000000000000000000000000000000000000000000000000000000000000" // false
+			storageMap[blacklistKey1] = STORAGE_FALSE_VALUE // false
 
 			// Tenderly docs approach (32-byte padded address + 32-byte slot)
 			encodedBlacklist2 := append(paddedAddr, blacklistSlotBytes...)
 			blacklistKey2 := common.BytesToHash(crypto.Keccak256(encodedBlacklist2)).Hex()
-			storageMap[blacklistKey2] = "0x0000000000000000000000000000000000000000000000000000000000000000" // false
+			storageMap[blacklistKey2] = STORAGE_FALSE_VALUE // false
 		}
 
 		tc.logger.Info("🔧 Comprehensive balance and blacklist overrides applied",
