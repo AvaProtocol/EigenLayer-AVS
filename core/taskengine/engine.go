@@ -3769,6 +3769,12 @@ func buildTriggerDataMap(triggerType avsproto.TriggerType, triggerOutput map[str
 						for k, v := range eventData {
 							triggerDataMap[k] = v
 						}
+					} else {
+						// No data field but success=true - copy all fields as-is
+						// This handles cases where event data is directly in the triggerOutput
+						for k, v := range triggerOutput {
+							triggerDataMap[k] = v
+						}
 					}
 				}
 			} else {
