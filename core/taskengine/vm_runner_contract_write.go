@@ -1194,7 +1194,9 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				"method", methodResult.MethodName,
 				"data", methodResult.Value.AsInterface())
 		} else {
-			r.vm.logger.Error("❌ CRITICAL DEBUG - methodResult.Value is nil",
+			// For methods with no return value, create empty object to maintain structure
+			decodedEventsData[methodResult.MethodName] = map[string]interface{}{}
+			r.vm.logger.Info("✅ Added empty object for method with no return value",
 				"method", methodResult.MethodName)
 		}
 	}

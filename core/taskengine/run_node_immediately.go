@@ -3007,8 +3007,14 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 							}
 						}
 
-						// Store events for this method (empty object if no events)
-						decodedEventsData[methodResult.MethodName] = methodEvents
+						// Store events for this method only if events exist (preserve return values otherwise)
+						if len(methodEvents) > 0 {
+							// Events take priority over return values
+							decodedEventsData[methodResult.MethodName] = methodEvents
+						} else {
+							// No events found - preserve any existing return values
+							// If no return values either, this will remain empty
+						}
 					} else if methodResultMap, ok := resultInterface.(map[string]interface{}); ok {
 						// Already in map format
 						resultsArray = append(resultsArray, methodResultMap)
