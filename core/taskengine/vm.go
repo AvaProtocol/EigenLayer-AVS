@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -1672,9 +1673,21 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 			// Handle null values by returning "undefined" for better debugging
 			replacement = "undefined"
 		} else if _, okMap := exportedValue.(map[string]interface{}); okMap {
-			replacement = "[object Object]" // Mimic JS behavior for objects in strings
+			// For objects, serialize as JSON instead of "[object Object]"
+			// This is needed for contract write operations that pass objects as struct parameters
+			if jsonBytes, err := json.Marshal(exportedValue); err == nil {
+				replacement = string(jsonBytes)
+			} else {
+				replacement = "[object Object]" // Fallback to original behavior if JSON marshaling fails
+			}
 		} else if _, okArr := exportedValue.([]interface{}); okArr {
-			replacement = fmt.Sprintf("%v", exportedValue) // Or could be "[object Array]" or stringified JSON
+			// For arrays, serialize as JSON instead of Go's default format
+			// This is needed for contract write operations that pass arrays as parameters
+			if jsonBytes, err := json.Marshal(exportedValue); err == nil {
+				replacement = string(jsonBytes)
+			} else {
+				replacement = fmt.Sprintf("%v", exportedValue) // Fallback to original behavior if JSON marshaling fails
+			}
 		} else {
 			replacement = fmt.Sprintf("%v", exportedValue)
 		}
@@ -1856,9 +1869,21 @@ func (v *VM) preprocessText(text string) string {
 			// Handle null values by returning "undefined" for better debugging
 			replacement = "undefined"
 		} else if _, okMap := exportedValue.(map[string]interface{}); okMap {
-			replacement = "[object Object]" // Mimic JS behavior for objects in strings
+			// For objects, serialize as JSON instead of "[object Object]"
+			// This is needed for contract write operations that pass objects as struct parameters
+			if jsonBytes, err := json.Marshal(exportedValue); err == nil {
+				replacement = string(jsonBytes)
+			} else {
+				replacement = "[object Object]" // Fallback to original behavior if JSON marshaling fails
+			}
 		} else if _, okArr := exportedValue.([]interface{}); okArr {
-			replacement = fmt.Sprintf("%v", exportedValue) // Or could be "[object Array]" or stringified JSON
+			// For arrays, serialize as JSON instead of Go's default format
+			// This is needed for contract write operations that pass arrays as parameters
+			if jsonBytes, err := json.Marshal(exportedValue); err == nil {
+				replacement = string(jsonBytes)
+			} else {
+				replacement = fmt.Sprintf("%v", exportedValue) // Fallback to original behavior if JSON marshaling fails
+			}
 		} else {
 			replacement = fmt.Sprintf("%v", exportedValue)
 		}
@@ -2102,12 +2127,9 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 	tempVM.IsSimulation = true // Force simulation for RunNodeWithInputs
 	tempVM.TaskOwner = v.TaskOwner
 
-	// CRITICAL DEBUG: Log simulation flag propagation
+	// Log simulation mode for debugging
 	if v.logger != nil {
-		v.logger.Error("🔧 RunNodeWithInputs CRITICAL DEBUG - VM simulation flag",
-			"original_vm_is_simulation", v.IsSimulation,
-			"temp_vm_is_simulation", tempVM.IsSimulation,
-			"forced_simulation", true,
+		v.logger.Debug("RunNodeWithInputs using simulation mode",
 			"node_type", node.Type.String())
 	}
 
@@ -2121,6 +2143,16 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 			tempVM.vars = make(map[string]any)
 		}
 		tempVM.vars[APContextVarName] = apContextValue
+	}
+	// Copy nodeConfig if it exists (contains raw configuration including value and gasLimit)
+	if nodeConfigValue, ok := v.vars["nodeConfig"]; ok {
+		if tempVM.vars == nil { // Ensure tempVM.vars is initialized
+			tempVM.vars = make(map[string]any)
+		}
+		tempVM.vars["nodeConfig"] = nodeConfigValue
+		if v.logger != nil {
+			v.logger.Debug("Copied nodeConfig to temporary VM for node execution")
+		}
 	}
 	v.mu.Unlock()
 
@@ -3902,7 +3934,7 @@ func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsp
 	if !ok {
 		// Try to extract from data field if wrapped (common for trigger variables)
 		if dataMap, ok := inputVar.(map[string]interface{}); ok {
-			log.WriteString(fmt.Sprintf("\nInput variable is a map with keys: %v", getMapKeys(dataMap)))
+			log.WriteString(fmt.Sprintf("\nInput variable is a map with keys: %v", GetMapKeys(dataMap)))
 
 			if dataValue, hasData := dataMap["data"]; hasData {
 				log.WriteString(fmt.Sprintf("\nFound 'data' field of type: %T", dataValue))
@@ -3927,7 +3959,7 @@ func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsp
 				}
 			} else {
 				// No data field found
-				err := fmt.Errorf("input variable %s is not an array and has no 'data' field (available keys: %v)", inputVarName, getMapKeys(dataMap))
+				err := fmt.Errorf("input variable %s is not an array and has no 'data' field (available keys: %v)", inputVarName, GetMapKeys(dataMap))
 				log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 				finalizeExecutionStep(s, false, err.Error(), log.String())
 				return s, err

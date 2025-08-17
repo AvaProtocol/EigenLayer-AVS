@@ -59,10 +59,10 @@ The aggregator is currently run and managed by the Ava Protocol team. Depend on
 testnet or mainnet, you would need to point your operator to the right address
 in the operator config file.
 
-#### Holesky Testnet
+#### Sepolia Testnet
 
-- aggregator-holesky.avaprotocol.org:2206
-- [https://api-explorer-holesky.avaprotocol.org/](https://api-explorer-holesky.avaprotocol.org/)
+- aggregator-sepolia.avaprotocol.org:2206
+- [https://api-explorer-sepolia.avaprotocol.org/](https://api-explorer-sepolia.avaprotocol.org/)
 
 #### Mainnet
 
@@ -82,7 +82,7 @@ Currently, Ava Protocol has deployed our operator on the testnet. Community memb
 
 ### Testnet
 
-- Ava Protocol's operator: [0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d](https://holesky.eigenlayer.xyz/operator/0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d).
+- Ava Protocol's operator: [0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d](https://sepolia.eigenlayer.xyz/operator/0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d).
 
 ### Mainnet
 
@@ -95,7 +95,7 @@ operator on our telemetry dashboard as below
 
 ### Testnet
 
-https://aggregator-holesky.avaprotocol.org/telemetry
+https://aggregator-sepolia.avaprotocol.org/telemetry
 
 ### Mainnet
 

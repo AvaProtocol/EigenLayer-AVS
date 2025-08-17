@@ -1091,7 +1091,7 @@ func (t *EventTrigger) evaluateCondition(fieldMap map[string]interface{}, condit
 			"targetField", targetFieldName,
 			"conditionField", conditionFieldName,
 			"event", eventName,
-			"available_fields", getMapKeys(fieldMap))
+			"available_fields", taskengine.GetMapKeys(fieldMap))
 		return false
 	}
 
@@ -1335,15 +1335,6 @@ func (t *EventTrigger) evaluateBytesCondition(fieldValue interface{}, operator, 
 		t.logger.Error("❌ Unsupported operator for bytes condition", "operator", operator)
 		return false
 	}
-}
-
-// getMapKeys is a helper function to get map keys for debugging
-func getMapKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }
 
 // buildFilterQueries converts all registered tasks into ethereum.FilterQuery objects

@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -187,6 +188,11 @@ func (n *Engine) runCronTriggerImmediately(triggerConfig map[string]interface{},
 
 // runEventTriggerImmediately executes an event trigger immediately using the new queries-based system
 func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	if n.logger != nil {
+		n.logger.Info("🚀 runEventTriggerImmediately: Starting execution")
+		n.logger.Info("🚀 DEBUG: Function called with config", "configKeys", GetMapKeys(triggerConfig))
+	}
+
 	// Create a context with timeout to prevent hanging tests
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -194,6 +200,9 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	// Parse the new queries-based configuration
 	queriesInterface, ok := triggerConfig["queries"]
 	if !ok {
+		if n.logger != nil {
+			n.logger.Info("🚀 runEventTriggerImmediately: No queries found, falling back to legacy mode")
+		}
 		return nil, fmt.Errorf("queries is required for EventTrigger")
 	}
 
@@ -216,10 +225,22 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 			"simulationMode", simulationMode)
 	}
 
-	// 🔮 TENDERLY SIMULATION MODE (default: provides sample data)
+	// 🔮 SMART DETECTION: Determine if this should use direct calls or simulation
 	if simulationMode {
-		// Simulation path does not require an RPC connection
-		return n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
+		// Check if this is a direct method call scenario (oracle reading)
+		shouldUseDirect := n.shouldUseDirectCalls(queriesArray)
+		n.logger.Info("🔍 EventTrigger: Route determination",
+			"shouldUseDirect", shouldUseDirect,
+			"queriesCount", len(queriesArray))
+
+		if shouldUseDirect {
+			n.logger.Info("🎯 EventTrigger: Using direct contract calls for method-only queries")
+			return n.runEventTriggerWithDirectCalls(ctx, queriesArray, inputVariables)
+		} else {
+			// Traditional simulation path for event-based queries
+			n.logger.Info("🔮 EventTrigger: Using Tenderly simulation for event-based queries")
+			return n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
+		}
 	}
 
 	// 📊 HISTORICAL SEARCH MODE (use simulationMode: false for production)
@@ -228,6 +249,757 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		return nil, fmt.Errorf("RPC connection not available for EventTrigger historical search")
 	}
 	return n.runEventTriggerWithHistoricalSearch(ctx, queriesArray, inputVariables)
+}
+
+// shouldUseDirectCalls determines if the query should use direct contract calls vs simulation
+func (n *Engine) shouldUseDirectCalls(queriesArray []interface{}) bool {
+	if n.logger != nil {
+		n.logger.Info("🔍 shouldUseDirectCalls: Analyzing queries", "queryCount", len(queriesArray))
+	}
+
+	for i, queryInterface := range queriesArray {
+		queryMap, ok := queryInterface.(map[string]interface{})
+		if !ok {
+			if n.logger != nil {
+				n.logger.Info("🔍 shouldUseDirectCalls: Query not a map", "queryIndex", i)
+			}
+			continue
+		}
+
+		// Check if query has topics (indicates event-based query)
+		if topicsInterface, exists := queryMap["topics"]; exists {
+			if topicsArray, ok := topicsInterface.([]interface{}); ok && len(topicsArray) > 0 {
+				// Has topics - this is event-based, use simulation
+				if n.logger != nil {
+					n.logger.Info("🔍 shouldUseDirectCalls: Found topics, using simulation", "queryIndex", i, "topicsCount", len(topicsArray))
+				}
+				return false
+			}
+		} else {
+		}
+
+		// Check if query has methodCalls (indicates direct contract calls)
+		if methodCallsInterface, exists := queryMap["methodCalls"]; exists {
+
+			// Handle both []interface{} and []map[string]interface{} types
+			var methodCallsCount int
+			if methodCallsArray, ok := methodCallsInterface.([]interface{}); ok {
+				methodCallsCount = len(methodCallsArray)
+			} else if methodCallsMapArray, ok := methodCallsInterface.([]map[string]interface{}); ok {
+				methodCallsCount = len(methodCallsMapArray)
+			} else {
+				methodCallsCount = 0
+			}
+
+			if methodCallsCount > 0 {
+				// Has methodCalls but no topics - this is direct call scenario
+				if n.logger != nil {
+					n.logger.Info("🔍 shouldUseDirectCalls: Found methodCalls without topics, using direct calls", "queryIndex", i, "methodCallsCount", methodCallsCount)
+				}
+				return true
+			}
+		}
+
+		if n.logger != nil {
+			n.logger.Info("🔍 shouldUseDirectCalls: Query has neither topics nor methodCalls", "queryIndex", i)
+		}
+	}
+
+	// Default to simulation if unclear
+	if n.logger != nil {
+		n.logger.Info("🔍 shouldUseDirectCalls: No clear signal, defaulting to simulation")
+	}
+	return false
+}
+
+// runEventTriggerWithDirectCalls executes eventTrigger using direct contract calls (oracle reading)
+func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	if n.logger != nil {
+		n.logger.Info("🎯 EventTrigger: Starting direct contract calls mode",
+			"queriesCount", len(queriesArray))
+	}
+
+	// Process the first query (for now, handle single query)
+	if len(queriesArray) == 0 {
+		return nil, fmt.Errorf("no queries provided for direct calls")
+	}
+
+	queryMap, ok := queriesArray[0].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid query format")
+	}
+
+	// Extract contract address
+	addressesInterface, exists := queryMap["addresses"]
+	if !exists {
+		return nil, fmt.Errorf("addresses required for direct contract calls")
+	}
+
+	addressesArray, ok := addressesInterface.([]interface{})
+	if !ok || len(addressesArray) == 0 {
+		return nil, fmt.Errorf("invalid addresses format")
+	}
+
+	contractAddressStr, ok := addressesArray[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid contract address format")
+	}
+
+	// Parse contract ABI
+	contractAbiInterface, exists := queryMap["contractAbi"]
+	if !exists {
+		return nil, fmt.Errorf("contractAbi required for direct contract calls")
+	}
+
+	// Convert ABI to string array for parsing - handle both string and map formats
+	abiArray, ok := contractAbiInterface.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid contractAbi format")
+	}
+
+	// Convert ABI items directly to protobuf Values (no intermediate JSON strings)
+	abiValues := make([]*structpb.Value, len(abiArray))
+	for i, abiItem := range abiArray {
+		if abiStr, ok := abiItem.(string); ok {
+			// ABI item is a JSON string, parse it to map first
+			var abiMap map[string]interface{}
+			if err := json.Unmarshal([]byte(abiStr), &abiMap); err != nil {
+				return nil, fmt.Errorf("failed to parse ABI JSON string at index %d: %v", i, err)
+			}
+			val, err := structpb.NewValue(abiMap)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert parsed ABI to protobuf value at index %d: %v", i, err)
+			}
+			abiValues[i] = val
+		} else if abiMap, ok := abiItem.(map[string]interface{}); ok {
+			// ABI item is already a map, convert directly to protobuf Value
+			val, err := structpb.NewValue(abiMap)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert ABI map to protobuf value at index %d: %v", i, err)
+			}
+			abiValues[i] = val
+		} else {
+			return nil, fmt.Errorf("invalid ABI item format at index %d (expected string or map, got %T)", i, abiItem)
+		}
+	}
+
+	// Execute method calls directly
+	methodCallsInterface, exists := queryMap["methodCalls"]
+	if !exists {
+		return nil, fmt.Errorf("methodCalls required for direct contract calls")
+	}
+
+	// Handle both []interface{} and []map[string]interface{} types for methodCalls
+	var methodCallsArray []interface{}
+	if methodCallsInterfaceArray, ok := methodCallsInterface.([]interface{}); ok {
+		methodCallsArray = methodCallsInterfaceArray
+	} else if methodCallsMapArray, ok := methodCallsInterface.([]map[string]interface{}); ok {
+		// Convert []map[string]interface{} to []interface{}
+		methodCallsArray = make([]interface{}, len(methodCallsMapArray))
+		for i, methodCall := range methodCallsMapArray {
+			methodCallsArray[i] = methodCall
+		}
+	} else {
+		return nil, fmt.Errorf("invalid methodCalls format (expected []interface{} or []map[string]interface{}, got %T)", methodCallsInterface)
+	}
+
+	// Use existing contract read infrastructure for direct calls
+	methodCallResults := make(map[string]interface{})
+
+	// Initialize raw metadata storage for contractReadResponse
+	var rawContractMetadata []interface{}
+
+	// Collect all method calls first for batch execution (needed for applyToFields logic)
+	var allMethodCalls []*avsproto.ContractReadNode_MethodCall
+
+	for _, methodCallInterface := range methodCallsArray {
+		methodCallMap, ok := methodCallInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		methodName, ok := methodCallMap["methodName"].(string)
+		if !ok {
+			continue
+		}
+
+		// Extract method params
+		var methodParams []string
+		if paramsInterface, exists := methodCallMap["methodParams"]; exists {
+			if paramsArray, ok := paramsInterface.([]interface{}); ok {
+				methodParams = make([]string, len(paramsArray))
+				for i, param := range paramsArray {
+					if paramStr, ok := param.(string); ok {
+						methodParams[i] = paramStr
+					}
+				}
+			}
+		}
+
+		// Extract applyToFields
+		var applyToFields []string
+		if applyToFieldsInterface, exists := methodCallMap["applyToFields"]; exists {
+			// Handle both []string and []interface{} types
+			if applyToFieldsArray, ok := applyToFieldsInterface.([]interface{}); ok {
+				// Handle []interface{} type
+				applyToFields = make([]string, len(applyToFieldsArray))
+				for i, field := range applyToFieldsArray {
+					if fieldStr, ok := field.(string); ok {
+						applyToFields[i] = fieldStr
+					}
+				}
+			} else if applyToFieldsStringArray, ok := applyToFieldsInterface.([]string); ok {
+				// Handle []string type (direct assignment)
+				applyToFields = applyToFieldsStringArray
+			}
+		}
+
+		n.logger.Info("🔍 Collecting method call for batch execution",
+			"method", methodName,
+			"params", methodParams,
+			"applyToFields", applyToFields)
+
+		// Add to batch for later execution
+		allMethodCalls = append(allMethodCalls, &avsproto.ContractReadNode_MethodCall{
+			MethodName:    methodName,
+			MethodParams:  methodParams,
+			ApplyToFields: applyToFields,
+		})
+	}
+
+	// Execute all method calls together in a single contractRead node for proper applyToFields logic
+	if len(allMethodCalls) > 0 {
+		n.logger.Info("🔍 Executing batch of direct contract calls",
+			"contract", contractAddressStr,
+			"methodCallsCount", len(allMethodCalls))
+
+		// Create a temporary contractRead node with ALL method calls
+		contractReadNode := &avsproto.ContractReadNode{
+			Config: &avsproto.ContractReadNode_Config{
+				ContractAddress: contractAddressStr,
+				ContractAbi:     abiValues,
+				MethodCalls:     allMethodCalls, // ✅ Execute all methods together for applyToFields
+			},
+		}
+
+		// Create a temporary VM for contract read execution using proper initialization
+		tempVM := NewVM()
+		tempVM.logger = n.logger
+		tempVM.smartWalletConfig = n.smartWalletConfig // Use the engine's smart wallet config
+		tempVM.SetSimulation(true)                     // Use simulation mode for reads
+
+		// Execute the contract read using VM's runContractRead
+		executionStep, err := tempVM.runContractRead("temp_step", contractReadNode)
+		if err != nil {
+			if n.logger != nil {
+				n.logger.Error("❌ Failed to execute batch contract calls",
+					"error", err)
+			}
+		} else {
+			// Extract results from execution step
+			contractReadOutput := executionStep.GetContractRead()
+			if contractReadOutput != nil && contractReadOutput.Data != nil {
+				if dataMap, ok := contractReadOutput.Data.AsInterface().(map[string]interface{}); ok {
+					// Merge results into methodCallResults
+					for key, value := range dataMap {
+						methodCallResults[key] = value
+					}
+					n.logger.Info("✅ Batch contract calls successful",
+						"resultKeys", GetMapKeys(dataMap))
+				}
+			}
+
+			// Extract raw metadata for contractReadResponse
+			if executionStep.Metadata != nil {
+				if metadataArray, ok := executionStep.Metadata.AsInterface().([]interface{}); ok {
+					// Store raw metadata for later use in buildEventTriggerResponse
+					rawContractMetadata = metadataArray
+				}
+			}
+		}
+	}
+
+	// Get chain ID for response context
+	var chainID int64 = 11155111 // Default to Sepolia
+	if n.tokenEnrichmentService != nil {
+		chainID = int64(n.tokenEnrichmentService.GetChainID())
+	}
+
+	// Evaluate conditions against the method call results
+	_, allConditionsMet := n.evaluateConditionsWithDetails(methodCallResults, queryMap)
+
+	// Build enhanced response structure
+	response := n.buildEventTriggerResponse(methodCallResults, allConditionsMet, chainID, rawContractMetadata, queryMap)
+
+	n.logger.Info("✅ Direct contract calls completed",
+		"methodResults", len(methodCallResults),
+		"conditionsMet", allConditionsMet,
+		"results", methodCallResults)
+
+	return response, nil
+}
+
+// ConditionResult represents the result of evaluating a single condition
+type ConditionResult struct {
+	FieldName     string      `json:"fieldName"`
+	Operator      string      `json:"operator"`
+	ExpectedValue string      `json:"expectedValue"`
+	ActualValue   interface{} `json:"actualValue"`
+	Passed        bool        `json:"passed"`
+	Reason        string      `json:"reason,omitempty"`
+}
+
+// evaluateConditionsWithDetails evaluates conditions and returns detailed results
+func (n *Engine) evaluateConditionsWithDetails(data map[string]interface{}, queryMap map[string]interface{}) ([]ConditionResult, bool) {
+	conditionsInterface, exists := queryMap["conditions"]
+	if !exists {
+		// No conditions to evaluate - all conditions met by default
+		return []ConditionResult{}, true
+	}
+
+	// Handle both []interface{} and []map[string]interface{} types
+	var conditionsArray []interface{}
+	if directArray, ok := conditionsInterface.([]interface{}); ok {
+		conditionsArray = directArray
+	} else if mapArray, ok := conditionsInterface.([]map[string]interface{}); ok {
+		// Convert []map[string]interface{} to []interface{}
+		conditionsArray = make([]interface{}, len(mapArray))
+		for i, condMap := range mapArray {
+			conditionsArray[i] = condMap
+		}
+	} else {
+		// Unsupported type - no valid conditions
+		return []ConditionResult{}, true
+	}
+
+	if len(conditionsArray) == 0 {
+		// No conditions to evaluate - all conditions met by default
+		return []ConditionResult{}, true
+	}
+
+	results := make([]ConditionResult, len(conditionsArray))
+	allConditionsMet := true
+
+	for i, conditionInterface := range conditionsArray {
+		conditionMap, ok := conditionInterface.(map[string]interface{})
+		if !ok {
+			results[i] = ConditionResult{
+				FieldName: "unknown",
+				Passed:    false,
+				Reason:    "Invalid condition format",
+			}
+			allConditionsMet = false
+			continue
+		}
+
+		fieldName, _ := conditionMap["fieldName"].(string)
+		operator, _ := conditionMap["operator"].(string)
+		expectedValue, _ := conditionMap["value"].(string)
+		fieldType, _ := conditionMap["fieldType"].(string)
+
+		// Get actual value from data - support nested field access
+		actualValue, exists := n.getNestedFieldValue(data, fieldName)
+		if !exists {
+			results[i] = ConditionResult{
+				FieldName:     fieldName,
+				Operator:      operator,
+				ExpectedValue: expectedValue,
+				ActualValue:   nil,
+				Passed:        false,
+				Reason:        fmt.Sprintf("Field '%s' not found in method call results", fieldName),
+			}
+			allConditionsMet = false
+			continue
+		}
+
+		// Evaluate the condition
+		passed := n.evaluateCondition(actualValue, operator, expectedValue, fieldType)
+		reason := n.buildConditionReason(actualValue, operator, expectedValue, passed)
+
+		// Convert actualValue to display format for JSON serialization
+		displayActualValue := n.formatValueForDisplay(actualValue)
+
+		results[i] = ConditionResult{
+			FieldName:     fieldName,
+			Operator:      operator,
+			ExpectedValue: expectedValue,
+			ActualValue:   displayActualValue, // Use formatted display value
+			Passed:        passed,
+			Reason:        reason,
+		}
+
+		if !passed {
+			allConditionsMet = false
+		}
+	}
+
+	return results, allConditionsMet
+}
+
+// getNestedFieldValue retrieves a value from nested data structure
+// Supports both direct field access ("answer") and nested access ("latestRoundData.answer")
+func (n *Engine) getNestedFieldValue(data map[string]interface{}, fieldName string) (interface{}, bool) {
+	// Handle dot notation for nested field access
+	parts := strings.Split(fieldName, ".")
+
+	if len(parts) == 1 {
+		// Direct field access
+		value, exists := data[fieldName]
+		return value, exists
+	}
+
+	// Nested field access
+	current := data
+	for i, part := range parts {
+		if current == nil {
+			return nil, false
+		}
+
+		value, exists := current[part]
+		if !exists {
+			return nil, false
+		}
+
+		// If this is the last part, return the value
+		if i == len(parts)-1 {
+			return value, true
+		}
+
+		// Otherwise, continue traversing - value must be a map
+		if nextMap, ok := value.(map[string]interface{}); ok {
+			current = nextMap
+		} else {
+			return nil, false
+		}
+	}
+
+	return nil, false
+}
+
+// evaluateCondition evaluates a single condition
+func (n *Engine) evaluateCondition(actualValue interface{}, operator, expectedValue, fieldType string) bool {
+	switch operator {
+	case "lt", "less_than":
+		return n.evaluateLessThan(actualValue, expectedValue, fieldType)
+	case "gt", "greater_than":
+		return n.evaluateGreaterThan(actualValue, expectedValue, fieldType)
+	case "eq", "equals":
+		return n.evaluateEquals(actualValue, expectedValue, fieldType)
+	case "ne", "not_equals":
+		return !n.evaluateEquals(actualValue, expectedValue, fieldType)
+	case "lte", "less_than_or_equal":
+		return n.evaluateLessThan(actualValue, expectedValue, fieldType) || n.evaluateEquals(actualValue, expectedValue, fieldType)
+	case "gte", "greater_than_or_equal":
+		return n.evaluateGreaterThan(actualValue, expectedValue, fieldType) || n.evaluateEquals(actualValue, expectedValue, fieldType)
+	default:
+		n.logger.Warn("🚫 Unsupported condition operator", "operator", operator)
+		return false
+	}
+}
+
+// evaluateLessThan evaluates less than comparison
+func (n *Engine) evaluateLessThan(actualValue interface{}, expectedValue, fieldType string) bool {
+	switch fieldType {
+	case "decimal", "uint256", "uint128", "uint64", "uint32", "uint16", "uint8":
+		actualFloat, err1 := n.convertToFloat(actualValue)
+		expectedFloat, err2 := n.convertToFloat(expectedValue)
+		if err1 != nil || err2 != nil {
+			return false
+		}
+		return actualFloat < expectedFloat
+	default:
+		return false
+	}
+}
+
+// evaluateGreaterThan evaluates greater than comparison
+func (n *Engine) evaluateGreaterThan(actualValue interface{}, expectedValue, fieldType string) bool {
+	switch fieldType {
+	case "decimal", "uint256", "uint128", "uint64", "uint32", "uint16", "uint8":
+		actualFloat, err1 := n.convertToFloat(actualValue)
+		expectedFloat, err2 := n.convertToFloat(expectedValue)
+		if err1 != nil || err2 != nil {
+			return false
+		}
+		return actualFloat > expectedFloat
+	default:
+		return false
+	}
+}
+
+// evaluateEquals evaluates equality comparison
+func (n *Engine) evaluateEquals(actualValue interface{}, expectedValue, fieldType string) bool {
+	switch fieldType {
+	case "decimal", "uint256", "uint128", "uint64", "uint32", "uint16", "uint8":
+		actualFloat, err1 := n.convertToFloat(actualValue)
+		expectedFloat, err2 := n.convertToFloat(expectedValue)
+		if err1 != nil || err2 != nil {
+			return false
+		}
+		return actualFloat == expectedFloat
+	case "string", "address":
+		actualStr := fmt.Sprintf("%v", actualValue)
+		return actualStr == expectedValue
+	case "bool":
+		actualBool, ok := actualValue.(bool)
+		if !ok {
+			return false
+		}
+		expectedBool := expectedValue == "true"
+		return actualBool == expectedBool
+	default:
+		return fmt.Sprintf("%v", actualValue) == expectedValue
+	}
+}
+
+// convertToFloat converts various types to float64 for numeric comparison
+func (n *Engine) convertToFloat(value interface{}) (float64, error) {
+	switch v := value.(type) {
+	case float64:
+		return v, nil
+	case int:
+		return float64(v), nil
+	case int64:
+		return float64(v), nil
+	case string:
+		return strconv.ParseFloat(v, 64)
+	default:
+		// Try to convert to string then parse
+		str := fmt.Sprintf("%v", value)
+		return strconv.ParseFloat(str, 64)
+	}
+}
+
+// buildConditionReason builds a human-readable reason for condition result
+func (n *Engine) buildConditionReason(actualValue interface{}, operator, expectedValue string, passed bool) string {
+	// Convert hex values to human-readable decimal format for display
+	displayValue := n.formatValueForDisplay(actualValue)
+
+	if passed {
+		switch operator {
+		case "lt", "less_than":
+			return fmt.Sprintf("Value %s is less than %s", displayValue, expectedValue)
+		case "gt", "greater_than":
+			return fmt.Sprintf("Value %s is greater than %s", displayValue, expectedValue)
+		case "eq", "equals":
+			return fmt.Sprintf("Value %s equals %s", displayValue, expectedValue)
+		case "ne", "not_equals":
+			return fmt.Sprintf("Value %s does not equal %s", displayValue, expectedValue)
+		case "lte", "less_than_or_equal":
+			return fmt.Sprintf("Value %s is less than or equal to %s", displayValue, expectedValue)
+		case "gte", "greater_than_or_equal":
+			return fmt.Sprintf("Value %s is greater than or equal to %s", displayValue, expectedValue)
+		default:
+			return "Condition passed"
+		}
+	} else {
+		switch operator {
+		case "lt", "less_than":
+			return fmt.Sprintf("Value %s is not less than %s", displayValue, expectedValue)
+		case "gt", "greater_than":
+			return fmt.Sprintf("Value %s is not greater than %s", displayValue, expectedValue)
+		case "eq", "equals":
+			return fmt.Sprintf("Value %s does not equal %s", displayValue, expectedValue)
+		case "ne", "not_equals":
+			return fmt.Sprintf("Value %s equals %s (expected not equal)", displayValue, expectedValue)
+		case "lte", "less_than_or_equal":
+			return fmt.Sprintf("Value %s is not less than or equal to %s", displayValue, expectedValue)
+		case "gte", "greater_than_or_equal":
+			return fmt.Sprintf("Value %s is not greater than or equal to %s", displayValue, expectedValue)
+		default:
+			return "Condition failed"
+		}
+	}
+}
+
+// formatValueForDisplay converts hex values to human-readable decimal format
+func (n *Engine) formatValueForDisplay(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		// Check if it's a hex string
+		if strings.HasPrefix(v, "0x") && len(v) > 2 {
+			// Try to parse as big int
+			if bigInt, success := new(big.Int).SetString(v, 0); success {
+				return bigInt.String() // Return decimal representation
+			}
+		}
+		return v
+	case *big.Int:
+		return v.String()
+	case int, int8, int16, int32, int64:
+		return fmt.Sprintf("%d", v)
+	case uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprintf("%d", v)
+	case float32, float64:
+		return fmt.Sprintf("%.2f", v)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// buildEventTriggerResponse builds the enhanced response structure
+func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}, allConditionsMet bool, chainID int64, rawContractMetadata []interface{}, queryMap map[string]interface{}) map[string]interface{} {
+	response := make(map[string]interface{})
+
+	// Always include the contract read data in the data field
+	response["data"] = methodCallData
+
+	// Set metadata as array of method objects without the value field
+	if len(rawContractMetadata) > 0 {
+		// Remove only the "value" field from each metadata entry
+		cleanedMetadata := make([]interface{}, len(rawContractMetadata))
+		for i, metadataEntry := range rawContractMetadata {
+			if entryMap, ok := metadataEntry.(map[string]interface{}); ok {
+				// Create a copy without the "value" field
+				cleanEntry := make(map[string]interface{})
+				for k, v := range entryMap {
+					if k != "value" {
+						cleanEntry[k] = v
+					}
+				}
+				cleanedMetadata[i] = cleanEntry
+			}
+		}
+		response["metadata"] = cleanedMetadata
+	} else {
+		// Fallback to empty array if no raw metadata available
+		response["metadata"] = []interface{}{}
+	}
+
+	if allConditionsMet {
+		// Success case: conditions met
+		response["success"] = true
+		response["error"] = ""
+	} else {
+		// Failure case: conditions not met - need to evaluate conditions to get detailed error
+		response["success"] = false
+
+		// Get the actual condition evaluation to build a detailed error message
+		conditionResults, _ := n.evaluateConditionsWithDetails(methodCallData, queryMap)
+
+		// Build detailed error message
+		var failedReasons []string
+		for _, condition := range conditionResults {
+			if !condition.Passed {
+				failedReasons = append(failedReasons, condition.Reason)
+			}
+		}
+
+		if len(failedReasons) > 0 {
+			// Only include failed reasons in error message to avoid leaking sensitive data
+			response["error"] = fmt.Sprintf("Conditions not met: %s",
+				strings.Join(failedReasons, "; "))
+		} else {
+			response["error"] = "Conditions not met"
+		}
+	}
+
+	// Add executionContext for EventTrigger direct calls (real RPC calls, not simulated)
+	response["executionContext"] = GetExecutionContext(chainID, false)
+
+	return response
+}
+
+// executeMethodCallForSimulation executes a single method call for simulation path
+func (n *Engine) executeMethodCallForSimulation(ctx context.Context, methodCall *avsproto.EventTrigger_MethodCall, queryMap map[string]interface{}, chainID int64) (map[string]interface{}, error) {
+	// Extract contract address and ABI from queryMap
+	contractAddressInterface, exists := queryMap["addresses"]
+	if !exists {
+		return nil, fmt.Errorf("addresses field required")
+	}
+
+	addressesArray, ok := contractAddressInterface.([]interface{})
+	if !ok || len(addressesArray) == 0 {
+		return nil, fmt.Errorf("addresses must be a non-empty array")
+	}
+
+	contractAddressStr, ok := addressesArray[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("contract address must be a string")
+	}
+
+	// Extract ABI
+	contractAbiInterface, exists := queryMap["contractAbi"]
+	if !exists {
+		return nil, fmt.Errorf("contractAbi field required")
+	}
+
+	abiArray, ok := contractAbiInterface.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid contractAbi format")
+	}
+
+	// Convert ABI items directly to protobuf Values (same as direct calls path)
+	abiValues := make([]*structpb.Value, len(abiArray))
+	for i, abiItem := range abiArray {
+		if abiStr, ok := abiItem.(string); ok {
+			// ABI item is a JSON string, parse it to map first
+			var abiMap map[string]interface{}
+			if err := json.Unmarshal([]byte(abiStr), &abiMap); err != nil {
+				return nil, fmt.Errorf("failed to parse ABI JSON string at index %d: %v", i, err)
+			}
+			val, err := structpb.NewValue(abiMap)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert parsed ABI to protobuf value at index %d: %v", i, err)
+			}
+			abiValues[i] = val
+		} else if abiMap, ok := abiItem.(map[string]interface{}); ok {
+			// ABI item is already a map, convert directly to protobuf Value
+			val, err := structpb.NewValue(abiMap)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert ABI map to protobuf value at index %d: %v", i, err)
+			}
+			abiValues[i] = val
+		} else {
+			return nil, fmt.Errorf("invalid ABI item format at index %d (expected string or map, got %T)", i, abiItem)
+		}
+	}
+
+	// Get method params as strings (ContractReadNode expects []string)
+	methodParams := methodCall.GetMethodParams()
+
+	// Create a temporary contractRead node for execution (same as direct calls)
+	contractReadNode := &avsproto.ContractReadNode{
+		Config: &avsproto.ContractReadNode_Config{
+			ContractAddress: contractAddressStr,
+			ContractAbi:     abiValues,
+			MethodCalls: []*avsproto.ContractReadNode_MethodCall{
+				{
+					MethodName:   methodCall.GetMethodName(),
+					MethodParams: methodParams,
+				},
+			},
+		},
+	}
+
+	// Create a temporary VM for contract read execution using proper initialization
+	tempVM := NewVM()
+	tempVM.logger = n.logger
+	tempVM.smartWalletConfig = n.smartWalletConfig // Use the engine's smart wallet config
+	tempVM.SetSimulation(true)                     // Use simulation mode for reads
+
+	// Execute the contract read using VM's runContractRead
+	executionStep, err := tempVM.runContractRead("temp_step", contractReadNode)
+	if err != nil {
+		return nil, fmt.Errorf("contract read failed: %v", err)
+	}
+
+	// Extract result from execution step
+	results := make(map[string]interface{})
+	if executionStep != nil && executionStep.Success {
+		contractReadOutput := executionStep.GetContractRead()
+		if contractReadOutput != nil && contractReadOutput.Data != nil {
+			dataInterface := contractReadOutput.Data.AsInterface()
+			if resultData, ok := dataInterface.(map[string]interface{}); ok {
+				// Merge method results
+				for key, value := range resultData {
+					results[key] = value
+				}
+			}
+		}
+	}
+
+	return results, nil
 }
 
 // runEventTriggerWithTenderlySimulation executes event trigger using Tenderly simulation
@@ -356,19 +1128,8 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 		simulatedLog = sampleLog
 	}
 
-	// Evaluate conditions against the real simulated data
-	// If conditions don't match, return nil (same as runTask behavior)
-	if len(query.GetConditions()) > 0 {
-		conditionsMet := n.evaluateEventConditions(simulatedLog, query.GetConditions())
-		if !conditionsMet {
-			n.logger.Info("🚫 Conditions not satisfied by real data, no event returned",
-				"contract", simulatedLog.Address.Hex(),
-				"conditions_count", len(query.GetConditions()))
-
-			// Return nil to indicate no event found (conditions not met)
-			return nil, nil
-		}
-	}
+	// Check if conditions exist - if so, we need to evaluate them after enrichment
+	hasConditions := len(query.GetConditions()) > 0
 
 	// Build raw metadata (the original blockchain event data)
 	topics := make([]string, len(simulatedLog.Topics))
@@ -435,39 +1196,76 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 			"event_name", enrichmentResult.EventName)
 	}
 
-	// Build the result structure based on event type
-	result := map[string]interface{}{
-		"found":    true,
-		"metadata": metadata, // Raw blockchain event data
-	}
-
-	// For Transfer events with enriched data, structure it properly
-	if isTransferEvent {
-		// Keep enriched data separate from raw blockchain metadata
-		result["transfer_log"] = parsedData // Only enriched data
-		result["data"] = parsedData         // Only enriched data for backward compatibility
-
-		if n.logger != nil {
-			n.logger.Info("✅ EventTrigger: Created enriched transfer_log structure (enriched data only)",
-				"tokenSymbol", parsedData["tokenSymbol"],
-				"blockTimestamp", parsedData["blockTimestamp"])
+	// Execute method calls to get additional data for enhanced response
+	methodCallResults := make(map[string]interface{})
+	n.logger.Info("🔧 EventTrigger simulation: Checking method calls",
+		"hasMethodCalls", query.GetMethodCalls() != nil,
+		"methodCallsCount", len(query.GetMethodCalls()))
+	if query.GetMethodCalls() != nil && len(query.GetMethodCalls()) > 0 {
+		n.logger.Info("🔧 EventTrigger simulation: Executing method calls",
+			"methodCallsCount", len(query.GetMethodCalls()))
+		for _, methodCall := range query.GetMethodCalls() {
+			if methodCall.GetMethodName() != "" {
+				n.logger.Info("🔧 Executing method call",
+					"methodName", methodCall.GetMethodName(),
+					"methodParams", methodCall.GetMethodParams())
+				result, err := n.executeMethodCallForSimulation(ctx, methodCall, queryMap, chainID)
+				if err != nil {
+					n.logger.Warn("Failed to execute method call for enhanced response",
+						"method", methodCall.GetMethodName(),
+						"error", err)
+					continue
+				}
+				n.logger.Info("✅ Method call result",
+					"methodName", methodCall.GetMethodName(),
+					"resultKeys", GetMapKeys(result))
+				// Merge results
+				for key, value := range result {
+					methodCallResults[key] = value
+				}
+			}
 		}
-	} else {
-		// For non-Transfer events, use only enriched/parsed data
-		result["data"] = parsedData // Only enriched/parsed data
 	}
 
-	if n.logger != nil {
-		hasABI := len(query.GetContractAbi()) > 0
-		n.logger.Info("✅ EventTrigger: Tenderly simulation completed successfully",
-			"contract", simulatedLog.Address.Hex(),
-			"block", simulatedLog.BlockNumber,
-			"txHash", simulatedLog.TxHash.Hex(),
-			"chainId", chainID,
-			"hasABI", hasABI)
+	// Add enriched event data to method call results
+	for key, value := range parsedData {
+		methodCallResults[key] = value
 	}
 
-	return result, nil
+	// Always include chainId in the response data for consistency
+	methodCallResults["chainId"] = chainID
+
+	// Evaluate conditions with details for enhanced response
+	var allConditionsMet bool = true
+	if hasConditions {
+		_, allConditionsMet = n.evaluateConditionsWithDetails(methodCallResults, queryMap)
+	}
+
+	// Always return enhanced response format with proper data and metadata
+	// For simulation path (event-based triggers), success means events were found
+	// For direct calls, success means conditions were met
+	// Since this is simulation path, we found events, so success = true
+	eventsFound := true
+
+	// For Tenderly simulation, create metadata in the expected format
+	// Include the raw blockchain event data as metadata
+	simulationMetadata := []interface{}{
+		map[string]interface{}{
+			"eventLog": metadata, // Raw blockchain log data
+			"source":   "tenderly_simulation",
+			"success":  true,
+		},
+	}
+
+	response := n.buildEventTriggerResponse(methodCallResults, eventsFound, chainID, simulationMetadata, queryMap)
+
+	n.logger.Info("✅ EventTrigger simulation: Returning enhanced response format",
+		"contract", simulatedLog.Address.Hex(),
+		"hasConditions", hasConditions,
+		"allConditionsMet", allConditionsMet,
+		"dataKeys", GetMapKeys(methodCallResults))
+
+	return response, nil
 }
 
 // parseEventWithABI parses an event log using the provided contract ABI and applies method calls for enhanced formatting
@@ -1029,7 +1827,7 @@ func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, querie
 		}
 
 		return map[string]interface{}{
-			"found":         false,
+			"success":       false,
 			"evm_log":       nil,
 			"queriesCount":  len(queriesArray),
 			"totalSearched": totalSearched,
@@ -1142,7 +1940,7 @@ func (n *Engine) runEventTriggerWithHistoricalSearch(ctx context.Context, querie
 
 	// Build the result structure based on event type
 	result := map[string]interface{}{
-		"found":         true,
+		"success":       true,
 		"metadata":      metadata, // Raw blockchain event data
 		"queriesCount":  len(queriesArray),
 		"totalSearched": totalSearched,
@@ -1583,6 +2381,10 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 	for key, processedValue := range processedInputVariables {
 		vm.AddVar(key, processedValue)
 	}
+
+	// Store raw node configuration in VM variables for processors to access
+	// This allows access to fields like 'value' and 'gasLimit' that aren't in protobuf schema
+	vm.AddVar("nodeConfig", nodeConfig)
 
 	// Add chain name to workflowContext if token enrichment service is available
 	if n.tokenEnrichmentService != nil {
@@ -2216,8 +3018,14 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 							}
 						}
 
-						// Store events for this method (empty object if no events)
-						decodedEventsData[methodResult.MethodName] = methodEvents
+						// Store events for this method only if events exist (preserve return values otherwise)
+						if len(methodEvents) > 0 {
+							// Events take priority over return values
+							decodedEventsData[methodResult.MethodName] = methodEvents
+						} else {
+							// No events found - preserve any existing return values
+							// If no return values either, this will remain empty
+						}
 					} else if methodResultMap, ok := resultInterface.(map[string]interface{}); ok {
 						// Already in map format
 						resultsArray = append(resultsArray, methodResultMap)
@@ -2428,13 +3236,14 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		// ContractWrite now does not embed metadata inside output; nothing to copy here
 	}
 
-	// Attach execution_context; treat writes/events as simulated (Tenderly), reads and others as real RPC
-	{
+	// Attach execution_context; treat writes as simulated (Tenderly), reads and others as real RPC
+	// Skip for EventTrigger since it provides its own executionContext in metadata
+	if nodeTypeStr != NodeTypeEventTrigger {
 		isSimulated := false
-		provider := "rpc"
-		if nodeTypeStr == NodeTypeContractWrite || nodeTypeStr == NodeTypeEventTrigger {
+		provider := string(ProviderChainRPC)
+		if nodeTypeStr == NodeTypeContractWrite {
 			isSimulated = true
-			provider = "tenderly"
+			provider = string(ProviderTenderly)
 		}
 
 		ctxMap := map[string]interface{}{
@@ -2540,8 +3349,27 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 	}
 
 	// Convert result to the appropriate protobuf output type
+	// Extract success status from trigger result (default to true if not specified)
+	triggerSuccess := true
+	if result != nil {
+		if successValue, hasSuccess := result["success"]; hasSuccess {
+			if successBool, ok := successValue.(bool); ok {
+				triggerSuccess = successBool
+			}
+		}
+	}
+
 	resp := &avsproto.RunTriggerResp{
-		Success: true,
+		Success: triggerSuccess,
+	}
+
+	// Extract error message from trigger result if success is false
+	if !triggerSuccess && result != nil {
+		if errorValue, hasError := result["error"]; hasError {
+			if errorStr, ok := errorValue.(string); ok && errorStr != "" {
+				resp.Error = errorStr
+			}
+		}
 	}
 
 	// Set the appropriate output data based on the trigger type using shared functions
@@ -2609,15 +3437,16 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 			EventTrigger: eventOutput,
 		}
 
-		// Add metadata for runTrigger (debugging/testing) - properly convert to protobuf Value
+		// Add metadata for runTrigger (debugging/testing) - use shared function
 		if result != nil {
 			if n.logger != nil {
 				n.logger.Info("🔍 RunTriggerRPC: Checking for metadata in result",
 					"hasResult", result != nil,
-					"resultKeys", getMapKeys(result))
+					"resultKeys", GetMapKeys(result))
 			}
 
-			if metadata, hasMetadata := result["metadata"]; hasMetadata && metadata != nil {
+			// Use shared function to extract metadata
+			if metadata := extractTriggerMetadata(result); metadata != nil {
 				if n.logger != nil {
 					n.logger.Info("🔍 RunTriggerRPC: Found metadata, converting to protobuf",
 						"metadataType", fmt.Sprintf("%T", metadata),
@@ -2660,19 +3489,25 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		}
 	}
 
-	// Attach execution_context indicating immediate run is simulated
-	{
-		provider := "tenderly"
-		ctxMap := map[string]interface{}{
-			"is_simulated": true,
-			"provider":     provider,
+	// Attach execution_context
+	// For EventTrigger, use the trigger's own executionContext if available
+	// For other triggers, use the generic RPC wrapper context
+	var ctxMap map[string]interface{}
+	if triggerTypeStr == "eventTrigger" && result != nil {
+		if execCtx, hasExecCtx := result["executionContext"]; hasExecCtx {
+			if execCtxMap, ok := execCtx.(map[string]interface{}); ok {
+				ctxMap = execCtxMap
+			}
 		}
-		if n.smartWalletConfig != nil && n.smartWalletConfig.ChainID != 0 {
-			ctxMap["chain_id"] = n.smartWalletConfig.ChainID
-		}
-		if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
-			resp.ExecutionContext = ctxVal
-		}
+	}
+
+	// Fallback to generic RPC wrapper context if no specific context found
+	if ctxMap == nil {
+		ctxMap = GetExecutionContext(n.smartWalletConfig.ChainID, true)
+	}
+
+	if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
+		resp.ExecutionContext = ctxVal
 	}
 
 	return resp, nil
@@ -2898,18 +3733,6 @@ func (n *Engine) evaluateEventConditions(eventLog *types.Log, conditions []*avsp
 	return true
 }
 
-// getMapKeys returns the keys of a map for debugging purposes
-func getMapKeys(m map[string]interface{}) []string {
-	if m == nil {
-		return nil
-	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
 // convertToProtobufCompatible converts data structures to be compatible with structpb.NewValue()
 // This handles cases like []string which structpb.NewValue() cannot handle directly
 func convertToProtobufCompatible(data interface{}) interface{} {
@@ -2940,6 +3763,20 @@ func convertToProtobufCompatible(data interface{}) interface{} {
 		result := make([]interface{}, len(v))
 		for i, val := range v {
 			result[i] = convertToProtobufCompatible(val)
+		}
+		return result
+	case []ConditionResult:
+		// Convert []ConditionResult to []interface{} of maps
+		result := make([]interface{}, len(v))
+		for i, cr := range v {
+			result[i] = map[string]interface{}{
+				"fieldName":     cr.FieldName,
+				"operator":      cr.Operator,
+				"expectedValue": cr.ExpectedValue,
+				"actualValue":   cr.ActualValue,
+				"passed":        cr.Passed,
+				"reason":        cr.Reason,
+			}
 		}
 		return result
 	default:

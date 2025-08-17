@@ -27,6 +27,10 @@ import (
 func init() {
 	// Load only from repo root files without fuzzy search.
 	// First load .env if present (non-fatal), then overlay .env.test for test secrets.
+	// Use relative paths that work from any subdirectory by going up to project root
+	_ = godotenv.Load("../../.env")
+	_ = godotenv.Overload("../../.env.test")
+	// Also try loading from current directory (for tests run from project root)
 	_ = godotenv.Load(".env")
 	_ = godotenv.Overload(".env.test")
 }

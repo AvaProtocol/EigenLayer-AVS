@@ -85,14 +85,10 @@ func (r *RpcServer) GetKey(ctx context.Context, payload *avsproto.GetKeyReq) (*a
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid Chain ID format")
 	}
 
-	// TODO: Remove this special handling for Holesky (17000) once testnet chain is changed.
-	// This allows a requested chainId of 17000 to be valid against a SmartWallet chainId of 11155111.
-	isHoleskyDevnetCase := chainIDStr == "17000"
-
 	// Special handling for Ethereum Mainnet (1) to allow requests if server is on a different chain (e.g., Base).
 	isEthereumMainnetCase := chainIDStr == "1"
 
-	if r.chainID != nil && chainID.Cmp(r.chainID) != 0 && !isHoleskyDevnetCase && !isEthereumMainnetCase {
+	if r.chainID != nil && chainID.Cmp(r.chainID) != 0 && !isEthereumMainnetCase {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid chainId: requested chainId %s does not match SmartWallet chainId %d", chainIDStr, r.chainID.Int64())
 	}
 

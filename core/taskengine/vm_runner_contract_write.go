@@ -2,7 +2,9 @@ package taskengine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"strconv"
 	"strings"
@@ -112,6 +114,7 @@ func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) 
 func (r *ContractWriteProcessor) executeMethodCall(
 	ctx context.Context,
 	parsedABI *abi.ABI,
+	originalAbiString string,
 	contractAddress common.Address,
 	methodCall *avsproto.ContractWriteNode_MethodCall,
 ) *avsproto.ContractWriteNode_MethodResult {
@@ -150,6 +153,85 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	resolvedMethodParams := make([]string, len(methodCall.MethodParams))
 	for i, param := range methodCall.MethodParams {
 		resolvedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(param)
+	}
+
+	// Handle JSON objects/arrays: convert to appropriate format based on method signature
+	// This supports struct/tuple parameters where the client returns objects or arrays from custom code
+	if len(resolvedMethodParams) == 1 {
+		param := resolvedMethodParams[0]
+
+		// Check if this method expects a struct parameter by examining the ABI
+		if parsedABI != nil {
+			if method, exists := parsedABI.Methods[methodCall.MethodName]; exists {
+				if len(method.Inputs) == 1 && method.Inputs[0].Type.T == abi.TupleTy {
+					// Method expects a single struct/tuple parameter
+					tupleType := method.Inputs[0].Type
+
+					// Handle JSON object - convert to ordered array based on struct field order
+					if strings.HasPrefix(param, "{") && strings.HasSuffix(param, "}") {
+						var objData map[string]interface{}
+						if err := json.Unmarshal([]byte(param), &objData); err == nil {
+							// Convert object to ordered array based on ABI struct field order
+							orderedArray := make([]interface{}, len(tupleType.TupleElems))
+							for i := range tupleType.TupleElems {
+								fieldName := tupleType.TupleRawNames[i]
+								if value, exists := objData[fieldName]; exists {
+									orderedArray[i] = value
+								} else {
+									// Field missing - return error immediately
+									if r.vm != nil && r.vm.logger != nil {
+										r.vm.logger.Error("❌ CONTRACT WRITE - Missing field in struct object",
+											"method", methodCall.MethodName,
+											"missing_field", fieldName,
+											"available_fields", GetMapKeys(objData))
+									}
+									return &avsproto.ContractWriteNode_MethodResult{
+										MethodName: methodCall.MethodName,
+										Success:    false,
+										Error:      fmt.Sprintf("missing required field '%s' in struct parameter for method '%s'", fieldName, methodCall.MethodName),
+									}
+								}
+							}
+
+							// Convert back to JSON array string for ABI processing
+							if jsonBytes, err := json.Marshal(orderedArray); err == nil {
+								resolvedMethodParams[0] = string(jsonBytes)
+								if r.vm != nil && r.vm.logger != nil {
+									r.vm.logger.Info("🔄 CONTRACT WRITE - Converted object to ordered array for struct",
+										"method", methodCall.MethodName,
+										"struct_fields", tupleType.TupleRawNames,
+										"ordered_array", string(jsonBytes))
+								}
+							}
+						}
+					} else if strings.HasPrefix(param, "[") && strings.HasSuffix(param, "]") {
+						// Handle JSON array - already in correct format for struct processing
+						if r.vm != nil && r.vm.logger != nil {
+							r.vm.logger.Info("🔄 CONTRACT WRITE - Detected struct parameter with JSON array",
+								"method", methodCall.MethodName,
+								"param_type", tupleType.String())
+						}
+					}
+				} else if len(method.Inputs) > 1 {
+					// Method expects multiple parameters - expand JSON array if provided
+					if strings.HasPrefix(param, "[") && strings.HasSuffix(param, "]") {
+						var arrayElements []interface{}
+						if err := json.Unmarshal([]byte(param), &arrayElements); err == nil {
+							expandedParams := make([]string, len(arrayElements))
+							for j, element := range arrayElements {
+								expandedParams[j] = fmt.Sprintf("%v", element)
+							}
+							resolvedMethodParams = expandedParams
+							if r.vm != nil && r.vm.logger != nil {
+								r.vm.logger.Info("🔄 CONTRACT WRITE - Expanded JSON array into individual parameters",
+									"method", methodCall.MethodName,
+									"expanded_count", len(expandedParams))
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Use shared utility to generate or use existing calldata
@@ -276,18 +358,18 @@ func (r *ContractWriteProcessor) executeMethodCall(
 
 		// Get contract ABI as string
 		var contractAbiStr string
-		if parsedABI != nil {
-			// Convert ABI back to JSON string for Tenderly
-			// For now, we'll use an empty string and let Tenderly handle it
-			contractAbiStr = ""
+		if parsedABI != nil && originalAbiString != "" {
+			// Use the original ABI string that was successfully parsed
+			// Don't re-marshal the parsed ABI as it changes the structure
+			contractAbiStr = originalAbiString
+			r.vm.logger.Debug("✅ CONTRACT WRITE - Using original ABI string for Tenderly",
+				"method", methodName, "abi_length", len(contractAbiStr))
 		}
 
-		// Ensure we use the latest block number for simulation context to enable realistic execution data
-		if latestHex, err := tenderlyClient.GetLatestBlockNumber(ctx); err != nil {
-			r.vm.logger.Warn("Failed to fetch latest block number from Tenderly; proceeding with 'latest' tag", "error", err)
-		} else {
-			r.vm.logger.Info("Using latest block for simulation context", "block", latestHex)
-		}
+		// Note: HTTP Simulation API automatically uses the latest block context
+
+		// Extract transaction value from VM variables (passed from raw nodeConfig)
+		transactionValue := r.extractTransactionValue(methodName, contractAddress.Hex())
 
 		// Simulate the contract write using Tenderly
 
@@ -299,6 +381,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			methodName,
 			chainID,
 			senderAddress.Hex(), // Use runner (smart wallet) address for simulation
+			transactionValue,    // Pass the transaction value
 		)
 
 		if err != nil {
@@ -844,10 +927,40 @@ func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *C
 	// Extract return value from Tenderly response
 	var returnValue *structpb.Value
 	if result.ReturnData != nil {
-		// Map returnData.value to our value field
-		if valueProto, err := structpb.NewValue(result.ReturnData.Value); err == nil {
-			returnValue = valueProto
+		r.vm.logger.Info("🔍 CRITICAL DEBUG - ReturnData found",
+			"method", result.MethodName,
+			"returnData_name", result.ReturnData.Name,
+			"returnData_type", result.ReturnData.Type,
+			"returnData_value", result.ReturnData.Value)
+
+		// Parse the JSON value from ReturnData and convert to protobuf
+		var parsedValue interface{}
+		if err := json.Unmarshal([]byte(result.ReturnData.Value), &parsedValue); err == nil {
+			// Successfully parsed JSON, convert to protobuf
+			if valueProto, err := structpb.NewValue(parsedValue); err == nil {
+				returnValue = valueProto
+				r.vm.logger.Info("✅ CRITICAL DEBUG - Successfully created returnValue protobuf",
+					"method", result.MethodName,
+					"parsedValue", parsedValue)
+			} else {
+				r.vm.logger.Error("❌ CRITICAL DEBUG - Failed to create protobuf from parsedValue",
+					"method", result.MethodName,
+					"error", err)
+			}
+		} else {
+			r.vm.logger.Error("❌ CRITICAL DEBUG - Failed to unmarshal JSON from ReturnData.Value",
+				"method", result.MethodName,
+				"error", err,
+				"raw_value", result.ReturnData.Value)
+
+			// Fallback: treat as raw string if JSON parsing fails
+			if valueProto, err := structpb.NewValue(result.ReturnData.Value); err == nil {
+				returnValue = valueProto
+			}
 		}
+	} else {
+		r.vm.logger.Error("❌ CRITICAL DEBUG - ReturnData is nil",
+			"method", result.MethodName)
 	}
 
 	// No fallback default value. If provider does not return output data, Value remains nil
@@ -930,7 +1043,15 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 	// Parse ABI if provided - OPTIMIZED: Use protobuf Values directly
 	var parsedABI *abi.ABI
+	var originalAbiString string
 	if node.Config != nil && len(node.Config.ContractAbi) > 0 {
+		// Get the original ABI string for Tenderly decoding
+		if abiReader, readerErr := ConvertContractAbiToReader(node.Config.ContractAbi); readerErr == nil {
+			if abiBytes, readErr := io.ReadAll(abiReader); readErr == nil {
+				originalAbiString = string(abiBytes)
+			}
+		}
+
 		if optimizedParsedABI, parseErr := ParseABIOptimized(node.Config.ContractAbi); parseErr == nil {
 			parsedABI = optimizedParsedABI
 			log.WriteString("✅ ABI parsed successfully using optimized shared method (no string conversion)\n")
@@ -960,7 +1081,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					}
 				}
 			}()
-			result = r.executeMethodCall(ctx, parsedABI, contractAddr, methodCall)
+			result = r.executeMethodCall(ctx, parsedABI, originalAbiString, contractAddr, methodCall)
 		}()
 		// Ensure MethodName is populated to avoid empty keys downstream
 		if result.MethodName == "" {
@@ -1037,6 +1158,32 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// 🚀 NEW: Create decoded events data organized by method name
 	var decodedEventsData = make(map[string]interface{})
 
+	// PRIORITY LOGIC: Add return values first, events will override if present
+	// Rule: Events take priority (more descriptive) over return values when both exist
+	for _, methodResult := range results {
+		r.vm.logger.Info("🔍 CRITICAL DEBUG - Processing methodResult for decodedEventsData",
+			"method", methodResult.MethodName,
+			"value_nil", methodResult.Value == nil,
+			"value_content", func() interface{} {
+				if methodResult.Value != nil {
+					return methodResult.Value.AsInterface()
+				}
+				return "nil"
+			}())
+		if methodResult.Value != nil {
+			// Add return values under method name
+			decodedEventsData[methodResult.MethodName] = methodResult.Value.AsInterface()
+			r.vm.logger.Info("✅ Added return value to decodedEventsData (will be overridden by events if present)",
+				"method", methodResult.MethodName,
+				"data", methodResult.Value.AsInterface())
+		} else {
+			// For methods with no return value, create empty object to maintain structure
+			decodedEventsData[methodResult.MethodName] = map[string]interface{}{}
+			r.vm.logger.Info("✅ Added empty object for method with no return value",
+				"method", methodResult.MethodName)
+		}
+	}
+
 	// Parse events from each method's transaction receipt
 	for idx, methodResult := range results {
 		// Defensive: ensure method name is non-empty
@@ -1102,8 +1249,16 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			}
 		}
 
-		// Store events for this method (empty object if no events)
-		decodedEventsData[methodName] = methodEvents
+		// PRIORITY LOGIC: Events take priority over return values
+		if len(methodEvents) > 0 {
+			// If we have events, use ONLY event data (events are more descriptive)
+			decodedEventsData[methodName] = methodEvents
+			r.vm.logger.Info("✅ EVENT PRIORITY - Using event data only (overriding return values)",
+				"method", methodName,
+				"event_fields", len(methodEvents),
+				"event_data", methodEvents)
+		}
+		// If no events, preserve existing return values (return values only when no events)
 	}
 
 	// Convert decoded events to protobuf Value
@@ -1256,4 +1411,41 @@ func (r *ContractWriteProcessor) convertMapToEventLog(logMap map[string]interfac
 	}
 
 	return eventLog
+}
+
+// extractTransactionValue extracts the transaction value from nodeConfig with proper error handling
+func (r *ContractWriteProcessor) extractTransactionValue(methodName, contractAddress string) string {
+	transactionValue := "0" // Default to 0 if not specified
+
+	r.vm.mu.Lock()
+	defer r.vm.mu.Unlock()
+
+	nodeConfigIface, exists := r.vm.vars["nodeConfig"]
+	if !exists {
+		return transactionValue
+	}
+
+	nodeConfig, ok := nodeConfigIface.(map[string]interface{})
+	if !ok {
+		return transactionValue
+	}
+
+	valueIface, exists := nodeConfig["value"]
+	if !exists {
+		return transactionValue
+	}
+
+	valueStr, ok := valueIface.(string)
+	if !ok || valueStr == "" {
+		return transactionValue
+	}
+
+	if r.vm.logger != nil {
+		r.vm.logger.Info("Using transaction value from configuration",
+			"value", valueStr,
+			"method", methodName,
+			"contract", contractAddress)
+	}
+
+	return valueStr
 }

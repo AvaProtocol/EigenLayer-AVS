@@ -83,10 +83,10 @@ func TestTokenEnrichmentIntegration(t *testing.T) {
 			t.Logf("📋 EventTrigger result structure:\n%s", string(resultJSON))
 
 			// Check if the result has the expected structure
-			if found, ok := result["found"].(bool); ok {
-				t.Logf("🔍 Found events: %v", found)
+			if success, ok := result["success"].(bool); ok {
+				t.Logf("🔍 Found events: %v", success)
 
-				if found {
+				if success {
 					// With new JSON-based approach, check if we have event data directly
 					if dataStr, exists := result["data"].(string); exists && dataStr != "" {
 						t.Log("✅ Event data present in JSON format")

@@ -365,8 +365,8 @@ func TestRunJavaScriptCanAccessSecretsWithapContext(t *testing.T) {
 	assertStructpbValueIsString(t, customCodeOutput, "my name is my_awesome_secret_value", "TestRunJavaScriptCanAccessSecretsWithapContext: string check failed")
 }
 
-// TestRunJavaScriptObjectInTemplate verifies that using an object result
-// directly in templating results in Go's map string representation.
+// TestRunJavaScriptObjectResultRendering verifies that using an object result
+// directly in templating results in proper JSON serialization instead of "[object Object]".
 func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 	// --- Setup ---
 	logger := testutil.GetLogger()
@@ -479,8 +479,10 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 		t.Fatalf("Expected 2 execution steps, got %d", len(vm.ExecutionLogs))
 	}
 
-	if capturedBody != "{\"output_from_js\": \"[object Object]\"}" {
-		t.Errorf("expected output_from_js to be [object Object] but got %q", capturedBody)
+	// Expected: JSON serialization of the JavaScript object instead of "[object Object]"
+	expectedBody := "{\"output_from_js\": \"{\"id\":123,\"message\":\"test\"}\"}"
+	if capturedBody != expectedBody {
+		t.Errorf("expected output_from_js to be properly JSON serialized but got %q", capturedBody)
 	}
 
 	// Optional: Verify logs for completeness

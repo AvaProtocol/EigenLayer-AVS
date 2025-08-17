@@ -20,7 +20,7 @@ import (
 func TestBuildTriggerDataMapEventTriggerFlattening(t *testing.T) {
 	// Test data with nested transfer_log structure (as it comes from runEventTriggerImmediately)
 	triggerOutput := map[string]interface{}{
-		"found":         true,
+		"success":       true,
 		"queriesCount":  2,
 		"totalSearched": 5000,
 		"totalEvents":   1,
@@ -64,13 +64,13 @@ func TestBuildTriggerDataMapEventTriggerFlattening(t *testing.T) {
 
 	// Test with non-transfer event (should copy all data as-is)
 	nonTransferOutput := map[string]interface{}{
-		"found":        true,
+		"success":      true,
 		"someField":    "someValue",
 		"anotherField": 123,
 	}
 
 	nonTransferResult := buildTriggerDataMap(avsproto.TriggerType_TRIGGER_TYPE_EVENT, nonTransferOutput)
-	assert.Equal(t, true, nonTransferResult["found"])
+	assert.Equal(t, true, nonTransferResult["success"])
 	assert.Equal(t, "someValue", nonTransferResult["someField"])
 	assert.Equal(t, 123, nonTransferResult["anotherField"])
 }
@@ -110,7 +110,7 @@ func TestBuildTriggerDataMapFromProtobufConsistency(t *testing.T) {
 
 	// Create raw trigger output data with structured data (not JSON string)
 	rawTriggerOutput := map[string]interface{}{
-		"found":         true,
+		"success":       true,
 		"queriesCount":  2,
 		"totalSearched": 5000,
 		"totalEvents":   1,
@@ -193,7 +193,7 @@ func TestJavaScriptFieldAccessPattern(t *testing.T) {
 	// const { tokenSymbol, valueFormatted, fromAddress, toAddress, blockTimestamp } = eventTrigger.data;
 
 	triggerOutput := map[string]interface{}{
-		"found": true,
+		"success": true,
 		"transfer_log": map[string]interface{}{
 			"tokenSymbol":    "USDC",
 			"valueFormatted": "5",
@@ -544,8 +544,8 @@ func TestBlockTriggerFieldNamingConsistency(t *testing.T) {
 
 	t.Log("✅ Block trigger field naming is consistent between both functions")
 	t.Log("⚠️  NOTE: Protobuf conversion changes uint64 to float64 - this is a known limitation")
-	t.Logf("  rawResult keys: %v", getMapKeys(rawResult))
-	t.Logf("  protobufResult keys: %v", getMapKeys(protobufResult))
+	t.Logf("  rawResult keys: %v", GetMapKeys(rawResult))
+	t.Logf("  protobufResult keys: %v", GetMapKeys(protobufResult))
 }
 
 // TestClientInputOutputConsistency tests that user input values match what they get back in execution steps
