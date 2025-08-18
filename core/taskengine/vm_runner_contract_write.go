@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
@@ -500,6 +502,18 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 
 	// Convert hex calldata to bytes
 	callDataBytes := common.FromHex(callData)
+
+	// 🔍 PRE-FLIGHT VALIDATION: Check for common failure scenarios before gas estimation
+	if validationErr := r.validateTransactionBeforeGasEstimation(methodName, callData, callDataBytes, contractAddress); validationErr != nil {
+		r.vm.logger.Error("🚫 PRE-FLIGHT VALIDATION FAILED - Skipping gas estimation to avoid bundler error",
+			"validation_error", validationErr.Error(),
+			"method", methodName,
+			"contract", contractAddress.Hex())
+		return &avsproto.ContractWriteNode_MethodResult{
+			Success: false,
+			Error:   fmt.Sprintf("Pre-flight validation failed: %v", validationErr),
+		}
+	}
 
 	// Create smart wallet execute calldata: execute(target, value, data)
 	smartWalletCallData, err := aa.PackExecute(
@@ -1214,11 +1228,34 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 											"data_length", len(eventLog.Data),
 											"contract_address", contractAddress)
 
-										// Filter: only decode logs from the target contract address
-										if !strings.EqualFold(eventLog.Address.Hex(), contractAddress) {
-											r.vm.logger.Error("🔍 EVENT DEBUG - Address mismatch, skipping",
+										// Method 2: Dynamic pool discovery from transaction logs
+										// First pass: collect all unique addresses from logs to build relevant address list
+										relevantAddresses := []string{contractAddress} // Always include the target contract
+
+										// Scan all logs in this transaction to find pool addresses
+										if poolAddresses := r.discoverPoolAddressesFromLogs(logsArray); len(poolAddresses) > 0 {
+											for _, poolAddr := range poolAddresses {
+												relevantAddresses = append(relevantAddresses, poolAddr)
+											}
+											r.vm.logger.Info("🔍 DYNAMIC POOL DISCOVERY - Found pool addresses from transaction logs",
+												"method", methodResult.MethodName,
+												"pool_count", len(poolAddresses),
+												"pools", poolAddresses)
+										}
+
+										// Check if current log is from any relevant address
+										isRelevantAddress := false
+										for _, addr := range relevantAddresses {
+											if strings.EqualFold(eventLog.Address.Hex(), addr) {
+												isRelevantAddress = true
+												break
+											}
+										}
+
+										if !isRelevantAddress {
+											r.vm.logger.Debug("🔍 EVENT DEBUG - Address not relevant, skipping",
 												"log_address", eventLog.Address.Hex(),
-												"expected_address", contractAddress)
+												"relevant_addresses", relevantAddresses)
 											continue
 										}
 
@@ -1448,4 +1485,328 @@ func (r *ContractWriteProcessor) extractTransactionValue(methodName, contractAdd
 	}
 
 	return valueStr
+}
+
+// calculatePoolAddresses calculates pool addresses from router method calldata
+func (r *ContractWriteProcessor) calculatePoolAddresses(methodName, callData string, parsedABI *abi.ABI) []common.Address {
+	var poolAddresses []common.Address
+
+	if parsedABI == nil || callData == "" {
+		return poolAddresses
+	}
+
+	// Handle Uniswap V3 exactInputSingle
+	if methodName == "exactInputSingle" {
+		if pools := r.calculateUniswapV3PoolFromExactInputSingle(callData, parsedABI); len(pools) > 0 {
+			poolAddresses = append(poolAddresses, pools...)
+		}
+	}
+
+	// Handle other DEX methods as needed
+	// TODO: Add support for other methods like exactInput, swapExactTokensForTokens, etc.
+
+	return poolAddresses
+}
+
+// calculateUniswapV3PoolFromExactInputSingle extracts pool address from exactInputSingle calldata
+func (r *ContractWriteProcessor) calculateUniswapV3PoolFromExactInputSingle(callData string, parsedABI *abi.ABI) []common.Address {
+	var poolAddresses []common.Address
+
+	// Get the exactInputSingle method from ABI
+	method, exists := parsedABI.Methods["exactInputSingle"]
+	if !exists {
+		return poolAddresses
+	}
+
+	// Decode the calldata
+	callDataBytes := common.FromHex(callData)
+	if len(callDataBytes) < 4 {
+		return poolAddresses
+	}
+
+	// Remove the method selector (first 4 bytes)
+	inputData := callDataBytes[4:]
+
+	// Unpack the parameters
+	values, err := method.Inputs.Unpack(inputData)
+	if err != nil {
+		r.vm.logger.Warn("Failed to unpack exactInputSingle parameters", "error", err)
+		return poolAddresses
+	}
+
+	if len(values) == 0 {
+		return poolAddresses
+	}
+
+	// ExactInputSingleParams struct should be the first parameter
+	if paramsStruct, ok := values[0].(struct {
+		TokenIn           common.Address
+		TokenOut          common.Address
+		Fee               *big.Int
+		Recipient         common.Address
+		Deadline          *big.Int
+		AmountIn          *big.Int
+		AmountOutMinimum  *big.Int
+		SqrtPriceLimitX96 *big.Int
+	}); ok {
+		// Calculate pool address using Uniswap V3 formula
+		poolAddr := r.computeUniswapV3PoolAddress(paramsStruct.TokenIn, paramsStruct.TokenOut, paramsStruct.Fee.Uint64())
+		if poolAddr != (common.Address{}) {
+			poolAddresses = append(poolAddresses, poolAddr)
+			r.vm.logger.Info("🔍 POOL CALCULATION - Calculated Uniswap V3 pool address",
+				"tokenIn", paramsStruct.TokenIn.Hex(),
+				"tokenOut", paramsStruct.TokenOut.Hex(),
+				"fee", paramsStruct.Fee.Uint64(),
+				"poolAddress", poolAddr.Hex())
+		}
+	} else {
+		// Try alternative unpacking approach for different struct layouts
+		r.vm.logger.Warn("Failed to cast exactInputSingle params to expected struct, trying alternative approach")
+
+		// Manual parameter extraction based on ABI structure
+		if len(method.Inputs) >= 1 && method.Inputs[0].Type.String() == "tuple" {
+			// The tuple should contain (tokenIn, tokenOut, fee, recipient, deadline, amountIn, amountOutMinimum, sqrtPriceLimitX96)
+			if tupleValues, ok := values[0].([]interface{}); ok && len(tupleValues) >= 8 {
+				if tokenIn, ok1 := tupleValues[0].(common.Address); ok1 {
+					if tokenOut, ok2 := tupleValues[1].(common.Address); ok2 {
+						if fee, ok3 := tupleValues[2].(*big.Int); ok3 {
+							poolAddr := r.computeUniswapV3PoolAddress(tokenIn, tokenOut, fee.Uint64())
+							if poolAddr != (common.Address{}) {
+								poolAddresses = append(poolAddresses, poolAddr)
+								r.vm.logger.Info("🔍 POOL CALCULATION - Calculated Uniswap V3 pool address (alternative method)",
+									"tokenIn", tokenIn.Hex(),
+									"tokenOut", tokenOut.Hex(),
+									"fee", fee.Uint64(),
+									"poolAddress", poolAddr.Hex())
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return poolAddresses
+}
+
+// computeUniswapV3PoolAddress computes the deterministic pool address for Uniswap V3
+func (r *ContractWriteProcessor) computeUniswapV3PoolAddress(tokenA, tokenB common.Address, fee uint64) common.Address {
+	// Uniswap V3 Factory address on mainnet/testnets
+	factory := common.HexToAddress("0x1F98431c8aD98523631AE4a59f267346ea31F984")
+
+	// Ensure token0 < token1 (Uniswap V3 convention)
+	token0, token1 := tokenA, tokenB
+	if bytes.Compare(tokenA.Bytes(), tokenB.Bytes()) > 0 {
+		token0, token1 = tokenB, tokenA
+	}
+
+	// Create the salt: keccak256(abi.encode(token0, token1, fee))
+	feeBytes := make([]byte, 32)
+	big.NewInt(int64(fee)).FillBytes(feeBytes[32-3:]) // fee is uint24, so last 3 bytes
+
+	salt := crypto.Keccak256Hash(
+		common.LeftPadBytes(token0.Bytes(), 32),
+		common.LeftPadBytes(token1.Bytes(), 32),
+		feeBytes,
+	)
+
+	// Uniswap V3 Pool bytecode hash (this is the init code hash for pool contracts)
+	initCodeHash := common.HexToHash("0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54")
+
+	// CREATE2 address calculation: keccak256(0xff + factory + salt + initCodeHash)[12:]
+	data := append([]byte{0xff}, factory.Bytes()...)
+	data = append(data, salt.Bytes()...)
+	data = append(data, initCodeHash.Bytes()...)
+
+	hash := crypto.Keccak256Hash(data)
+
+	// Take the last 20 bytes as the address
+	var addr common.Address
+	copy(addr[:], hash[12:])
+
+	return addr
+}
+
+// discoverPoolAddressesFromLogs scans transaction logs to find pool addresses dynamically
+func (r *ContractWriteProcessor) discoverPoolAddressesFromLogs(logsArray []interface{}) []string {
+	var poolAddresses []string
+	addressSet := make(map[string]bool) // Use map to avoid duplicates
+
+	// Known DEX event signatures that indicate a pool/token contract
+	dexEventSignatures := map[string]string{
+		"0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67": "Uniswap V3 Swap",
+		"0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822": "Uniswap V2 Swap",
+		"0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1": "SushiSwap Swap",
+		"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef": "ERC20 Transfer",
+	}
+
+	// First pass: scan all logs to identify pool/token addresses
+	for _, logInterface := range logsArray {
+		if logMap, ok := logInterface.(map[string]interface{}); ok {
+			// Extract address and topics
+			if addressInterface, hasAddress := logMap["address"]; hasAddress {
+				if addressStr, ok := addressInterface.(string); ok {
+					if topicsInterface, hasTopics := logMap["topics"]; hasTopics {
+						if topicsArray, ok := topicsInterface.([]interface{}); ok && len(topicsArray) > 0 {
+							if topic0Interface, ok := topicsArray[0].(string); ok {
+								// Check if this log has a DEX-related event signature
+								if eventType, isDexEvent := dexEventSignatures[topic0Interface]; isDexEvent {
+									if !addressSet[addressStr] {
+										addressSet[addressStr] = true
+										poolAddresses = append(poolAddresses, addressStr)
+										r.vm.logger.Info("🔍 DYNAMIC POOL DISCOVERY - Found DEX-related address",
+											"address", addressStr,
+											"event_type", eventType,
+											"topic0", topic0Interface)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return poolAddresses
+}
+
+// validateTransactionBeforeGasEstimation performs pre-flight checks to avoid common gas estimation failures
+func (r *ContractWriteProcessor) validateTransactionBeforeGasEstimation(methodName, callData string, callDataBytes []byte, contractAddress common.Address) error {
+	// 1. Check for empty or invalid calldata
+	if len(callDataBytes) < 4 {
+		return fmt.Errorf("invalid calldata: too short (length: %d)", len(callDataBytes))
+	}
+
+	// 2. Method-specific validations
+	switch methodName {
+	case "exactInputSingle":
+		return r.validateUniswapExactInputSingle(callData, callDataBytes)
+	case "quoteExactInputSingle":
+		return r.validateUniswapQuoteExactInputSingle(callData, callDataBytes)
+	case "approve":
+		return r.validateERC20Approve(callData, callDataBytes)
+	}
+
+	// 3. General validations for all methods
+	return r.validateGeneralTransactionParameters(methodName, callDataBytes, contractAddress)
+}
+
+// validateUniswapExactInputSingle validates Uniswap V3 exactInputSingle parameters
+func (r *ContractWriteProcessor) validateUniswapExactInputSingle(callData string, callDataBytes []byte) error {
+	// Try to decode the parameters to check for invalid values
+	if len(callDataBytes) < 4 {
+		return fmt.Errorf("exactInputSingle: calldata too short")
+	}
+
+	// Remove method selector (first 4 bytes)
+	inputData := callDataBytes[4:]
+	if len(inputData) < 32*8 { // Minimum size for ExactInputSingleParams struct
+		return fmt.Errorf("exactInputSingle: insufficient parameter data")
+	}
+
+	// Extract key parameters (basic validation without full ABI decoding)
+	// Parameter layout: (tokenIn, tokenOut, fee, recipient, deadline, amountIn, amountOutMinimum, sqrtPriceLimitX96)
+
+	// Check amountIn (6th parameter, at offset 32*5)
+	amountInOffset := 32 * 5
+	if len(inputData) > amountInOffset+32 {
+		amountInBytes := inputData[amountInOffset : amountInOffset+32]
+		amountIn := new(big.Int).SetBytes(amountInBytes)
+
+		if amountIn.Cmp(big.NewInt(0)) == 0 {
+			return fmt.Errorf("exactInputSingle: amountIn is zero - cannot swap zero tokens")
+		}
+
+		r.vm.logger.Info("🔍 PRE-FLIGHT VALIDATION - exactInputSingle parameters",
+			"amountIn", amountIn.String(),
+			"amountIn_hex", fmt.Sprintf("0x%x", amountIn))
+	}
+
+	// Check for deadline (5th parameter, at offset 32*4)
+	deadlineOffset := 32 * 4
+	if len(inputData) > deadlineOffset+32 {
+		deadlineBytes := inputData[deadlineOffset : deadlineOffset+32]
+		deadline := new(big.Int).SetBytes(deadlineBytes)
+		currentTime := time.Now().Unix()
+
+		if deadline.Int64() < currentTime {
+			return fmt.Errorf("exactInputSingle: deadline has expired (deadline: %d, current: %d)", deadline.Int64(), currentTime)
+		}
+	}
+
+	return nil
+}
+
+// validateUniswapQuoteExactInputSingle validates Uniswap V3 quoteExactInputSingle parameters
+func (r *ContractWriteProcessor) validateUniswapQuoteExactInputSingle(callData string, callDataBytes []byte) error {
+	if len(callDataBytes) < 4 {
+		return fmt.Errorf("quoteExactInputSingle: calldata too short")
+	}
+
+	// Remove method selector (first 4 bytes)
+	inputData := callDataBytes[4:]
+	if len(inputData) < 32*5 { // Minimum size for QuoteExactInputSingleParams struct
+		return fmt.Errorf("quoteExactInputSingle: insufficient parameter data")
+	}
+
+	// Check amountIn (3rd parameter, at offset 32*2)
+	amountInOffset := 32 * 2
+	if len(inputData) > amountInOffset+32 {
+		amountInBytes := inputData[amountInOffset : amountInOffset+32]
+		amountIn := new(big.Int).SetBytes(amountInBytes)
+
+		if amountIn.Cmp(big.NewInt(0)) == 0 {
+			return fmt.Errorf("quoteExactInputSingle: amountIn is zero - cannot quote zero tokens")
+		}
+
+		r.vm.logger.Info("🔍 PRE-FLIGHT VALIDATION - quoteExactInputSingle parameters",
+			"amountIn", amountIn.String())
+	}
+
+	return nil
+}
+
+// validateERC20Approve validates ERC20 approve parameters
+func (r *ContractWriteProcessor) validateERC20Approve(callData string, callDataBytes []byte) error {
+	if len(callDataBytes) < 4 {
+		return fmt.Errorf("approve: calldata too short")
+	}
+
+	// Remove method selector (first 4 bytes)
+	inputData := callDataBytes[4:]
+	if len(inputData) < 64 { // spender (32 bytes) + amount (32 bytes)
+		return fmt.Errorf("approve: insufficient parameter data")
+	}
+
+	// Extract spender address (first 32 bytes, but address is in last 20 bytes)
+	spenderBytes := inputData[12:32] // Skip first 12 bytes of padding
+	spender := common.BytesToAddress(spenderBytes)
+
+	if spender == (common.Address{}) {
+		return fmt.Errorf("approve: spender address is zero")
+	}
+
+	r.vm.logger.Info("🔍 PRE-FLIGHT VALIDATION - approve parameters",
+		"spender", spender.Hex())
+
+	return nil
+}
+
+// validateGeneralTransactionParameters performs general validation for all transaction types
+func (r *ContractWriteProcessor) validateGeneralTransactionParameters(methodName string, callDataBytes []byte, contractAddress common.Address) error {
+	// Check contract address is not zero
+	if contractAddress == (common.Address{}) {
+		return fmt.Errorf("%s: contract address is zero", methodName)
+	}
+
+	// Check method selector is valid (first 4 bytes)
+	if len(callDataBytes) >= 4 {
+		methodSelector := fmt.Sprintf("0x%x", callDataBytes[:4])
+		r.vm.logger.Debug("🔍 PRE-FLIGHT VALIDATION - Method selector",
+			"method", methodName,
+			"selector", methodSelector)
+	}
+
+	return nil
 }
