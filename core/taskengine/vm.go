@@ -973,6 +973,17 @@ func (v *VM) runKahnScheduler() error {
 		}
 	}
 
+	// Identify targets reachable only from branch condition edges; add one gating predecessor
+	branchTargets := make(map[string]bool)
+	for _, e := range edges {
+		if strings.Contains(e.Source, ".") {
+			if _, exists := predCount[e.Target]; exists {
+				branchTargets[e.Target] = true
+				predCount[e.Target]++ // gating count so they are not initially ready
+			}
+		}
+	}
+
 	// Initial ready set
 	ready := make(chan string, len(nodes))
 	scheduled := make(map[string]bool)
@@ -980,6 +991,7 @@ func (v *VM) runKahnScheduler() error {
 	for _ = range nodes {
 		total++
 	}
+	var scheduledCount int64
 
 	// If trigger exists, its direct targets are effectively reduced by 1 predecessor
 	if trigger != nil && trigger.Id != "" {
@@ -996,8 +1008,12 @@ func (v *VM) runKahnScheduler() error {
 
 	for nodeID, c := range predCount {
 		if c == 0 {
+			if branchTargets[nodeID] {
+				continue // still gated by branch until a condition is selected
+			}
 			ready <- nodeID
 			scheduled[nodeID] = true
+			scheduledCount++
 		}
 	}
 
@@ -1018,8 +1034,11 @@ func (v *VM) runKahnScheduler() error {
 			v.mu.Lock()
 			node := v.TaskNodes[id]
 			v.mu.Unlock()
+			var selected *Step
 			if node != nil {
-				_, _ = v.executeNode(node) // errors logged internally; treated as completion
+				var err error
+				selected, err = v.executeNode(node) // non-nil when a branch selects a condition path
+				_ = err
 			}
 
 			// On completion, decrement successors
@@ -1030,11 +1049,35 @@ func (v *VM) runKahnScheduler() error {
 					if predCount[succ] == 0 && !scheduled[succ] {
 						ready <- succ
 						scheduled[succ] = true
+						scheduledCount++
 					}
 				}
 			}
+
+			// If a branch selected a concrete condition path (e.g., "branch1.1"),
+			// schedule only successors of that selected condition node now.
+			if selected != nil {
+				v.mu.Lock()
+				plan, ok := v.plans[selected.NodeID]
+				v.mu.Unlock()
+				if ok && plan != nil {
+					for _, succ := range plan.Next {
+						if _, exists := predCount[succ]; exists {
+							if predCount[succ] > 0 {
+								predCount[succ]-- // remove branch gating
+							}
+							if predCount[succ] == 0 && !scheduled[succ] {
+								ready <- succ
+								scheduled[succ] = true
+								scheduledCount++
+							}
+						}
+					}
+				}
+			}
+
 			processed++
-			if processed == int64(total) {
+			if processed == scheduledCount { // all scheduled nodes completed
 				closeOnce.Do(func() { close(ready) })
 			}
 			mu.Unlock()

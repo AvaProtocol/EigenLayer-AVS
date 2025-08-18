@@ -8,6 +8,7 @@ import (
 
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -80,6 +81,8 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 			Environment:      env,
 			Release:          release,
 			AttachStacktrace: true,
+			Debug:            env == "development",
+			EnableTracing:    env == "development",
 			// Set TracesSampleRate to 1.0 to capture 100%
 			// of transactions for tracing.
 			// We recommend adjusting this value in production.
@@ -96,15 +99,18 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 
 	e.Use(middleware.Logger())
 
-	// Register Sentry before Recover so panics are reported
+	// Important: Recover must be registered BEFORE Sentry so that Sentry wraps the handler.
+	// Order of execution in Echo is the order of registration; the last registered is the innermost.
+	// With Recover outer and Sentry inner, panics hit Sentry first, then repanic to Recover.
+	e.Use(middleware.Recover())
+
 	if sentryDsn != "" {
 		e.Use(sentryecho.New(sentryecho.Options{
 			Repanic:         true,
-			WaitForDelivery: false,
+			WaitForDelivery: true,
+			Timeout:         3 * time.Second,
 		}))
 	}
-
-	e.Use(middleware.Recover())
 
 	e.GET("/up", func(c echo.Context) error {
 		if agg.status == runningStatus {
@@ -167,6 +173,10 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 
 	// This deliberately triggers a panic so that echo's Sentry middleware captures it
 	e.GET("/_debug/sentry/panic", func(c echo.Context) error {
+		// Force synchronous flush on panic to ensure the event is delivered before returning
+		if sentryDsn != "" {
+			defer sentry.Flush(3 * time.Second)
+		}
 		panic("manual sentry panic test from /_debug/sentry/panic")
 	})
 
