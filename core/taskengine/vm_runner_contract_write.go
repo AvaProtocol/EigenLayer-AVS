@@ -1721,15 +1721,15 @@ func (r *ContractWriteProcessor) validateUniswapExactInputSingle(callData string
 
 	// Remove method selector (first 4 bytes)
 	inputData := callDataBytes[4:]
-	if len(inputData) < 32*8 { // Minimum size for ExactInputSingleParams struct
+	if len(inputData) < 32*7 { // Minimum size for ExactInputSingleParams struct (7 parameters)
 		return fmt.Errorf("exactInputSingle: insufficient parameter data")
 	}
 
 	// Extract key parameters (basic validation without full ABI decoding)
-	// Parameter layout: (tokenIn, tokenOut, fee, recipient, deadline, amountIn, amountOutMinimum, sqrtPriceLimitX96)
+	// Parameter layout: (tokenIn, tokenOut, fee, recipient, amountIn, amountOutMinimum, sqrtPriceLimitX96)
 
-	// Check amountIn (6th parameter, at offset 32*5)
-	amountInOffset := 32 * 5
+	// Check amountIn (5th parameter, at offset 32*4)
+	amountInOffset := 32 * 4
 	if len(inputData) > amountInOffset+32 {
 		amountInBytes := inputData[amountInOffset : amountInOffset+32]
 		amountIn := new(big.Int).SetBytes(amountInBytes)
@@ -1743,17 +1743,8 @@ func (r *ContractWriteProcessor) validateUniswapExactInputSingle(callData string
 			"amountIn_hex", fmt.Sprintf("0x%x", amountIn))
 	}
 
-	// Check for deadline (5th parameter, at offset 32*4)
-	deadlineOffset := 32 * 4
-	if len(inputData) > deadlineOffset+32 {
-		deadlineBytes := inputData[deadlineOffset : deadlineOffset+32]
-		deadline := new(big.Int).SetBytes(deadlineBytes)
-		currentTime := time.Now().Unix()
-
-		if deadline.Int64() < currentTime {
-			return fmt.Errorf("exactInputSingle: deadline has expired (deadline: %d, current: %d)", deadline.Int64(), currentTime)
-		}
-	}
+	// Note: ExactInputSingleParams doesn't have a deadline field - deadline is handled by multicall wrapper if needed
+	// So we skip deadline validation for this method
 
 	return nil
 }

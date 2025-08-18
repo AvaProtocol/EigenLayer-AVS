@@ -31,13 +31,12 @@ func TestValidateTransactionBeforeGasEstimation(t *testing.T) {
 		// Create calldata for exactInputSingle with zero amountIn
 		// Method selector for exactInputSingle: 0x04e45aaf
 		methodSelector := "04e45aaf"
-		// Parameters: tokenIn, tokenOut, fee, recipient, deadline, amountIn=0, amountOutMinimum, sqrtPriceLimitX96
+		// Parameters: tokenIn, tokenOut, fee, recipient, amountIn=0, amountOutMinimum, sqrtPriceLimitX96
 		params := ""
 		params += "000000000000000000000000fff9976782d46cc05630d1f6ebab18b2324d6b14" // tokenIn (WETH)
 		params += "0000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c7238" // tokenOut (USDC)
 		params += "0000000000000000000000000000000000000000000000000000000000000bb8" // fee (3000)
 		params += "00000000000000000000000071c8f4d7d5291edcb3a081802e7efb2788bd232e" // recipient
-		params += "0000000000000000000000000000000000000000000000000000000067890123" // deadline (future)
 		params += "0000000000000000000000000000000000000000000000000000000000000000" // amountIn = 0 ❌
 		params += "0000000000000000000000000000000000000000000000000000000000000000" // amountOutMinimum
 		params += "0000000000000000000000000000000000000000000000000000000000000000" // sqrtPriceLimitX96
@@ -60,7 +59,6 @@ func TestValidateTransactionBeforeGasEstimation(t *testing.T) {
 		params += "0000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c7238" // tokenOut (USDC)
 		params += "0000000000000000000000000000000000000000000000000000000000000bb8" // fee (3000)
 		params += "00000000000000000000000071c8f4d7d5291edcb3a081802e7efb2788bd232e" // recipient
-		params += "00000000000000000000000000000000000000000000000000000000ffffffff" // deadline (far future)
 		params += "000000000000000000000000000000000000000000000000011c37937e080000" // amountIn = 0.08 WETH ✅
 		params += "0000000000000000000000000000000000000000000000000000000000000000" // amountOutMinimum
 		params += "0000000000000000000000000000000000000000000000000000000000000000" // sqrtPriceLimitX96
@@ -72,29 +70,6 @@ func TestValidateTransactionBeforeGasEstimation(t *testing.T) {
 		err := processor.validateTransactionBeforeGasEstimation("exactInputSingle", callData, callDataBytes, contractAddr)
 
 		assert.NoError(t, err)
-	})
-
-	t.Run("Should validate exactInputSingle with expired deadline", func(t *testing.T) {
-		// Create calldata with deadline in the past
-		methodSelector := "04e45aaf"
-		params := ""
-		params += "000000000000000000000000fff9976782d46cc05630d1f6ebab18b2324d6b14" // tokenIn (WETH)
-		params += "0000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c7238" // tokenOut (USDC)
-		params += "0000000000000000000000000000000000000000000000000000000000000bb8" // fee (3000)
-		params += "00000000000000000000000071c8f4d7d5291edcb3a081802e7efb2788bd232e" // recipient
-		params += "0000000000000000000000000000000000000000000000000000000000000001" // deadline = 1 (past) ❌
-		params += "000000000000000000000000000000000000000000000000011c37937e080000" // amountIn = 0.08 WETH
-		params += "0000000000000000000000000000000000000000000000000000000000000000" // amountOutMinimum
-		params += "0000000000000000000000000000000000000000000000000000000000000000" // sqrtPriceLimitX96
-
-		callData := "0x" + methodSelector + params
-		callDataBytes := common.FromHex(callData)
-		contractAddr := common.HexToAddress("0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E")
-
-		err := processor.validateTransactionBeforeGasEstimation("exactInputSingle", callData, callDataBytes, contractAddr)
-
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "deadline has expired")
 	})
 
 	t.Run("Should validate quoteExactInputSingle with zero amountIn", func(t *testing.T) {
