@@ -107,7 +107,7 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 	if sentryDsn != "" {
 		e.Use(sentryecho.New(sentryecho.Options{
 			Repanic:         true,
-			WaitForDelivery: true,
+			WaitForDelivery: false, // Don't block HTTP responses waiting for Sentry delivery
 			Timeout:         3 * time.Second,
 		}))
 	}

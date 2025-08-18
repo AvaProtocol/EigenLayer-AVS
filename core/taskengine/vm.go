@@ -1038,7 +1038,9 @@ func (v *VM) runKahnScheduler() error {
 			if node != nil {
 				var err error
 				selected, err = v.executeNode(node) // non-nil when a branch selects a condition path
-				_ = err
+				if err != nil {
+					v.logger.Error("Error executing node %s: %v", node.Id, err)
+				}
 			}
 
 			// On completion, decrement successors
