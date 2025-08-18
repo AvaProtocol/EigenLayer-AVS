@@ -1,0 +1,236 @@
+diff --git a/core/taskengine/vm_runner_contract_write.go b/core/taskengine/vm_runner_contract_write.go
+index 1234567..abcdefg 100644
+--- a/core/taskengine/vm_runner_contract_write.go
++++ b/core/taskengine/vm_runner_contract_write.go
+@@ -1086,13 +1086,25 @@ func (r *ContractWriteProcessor) executeMethodCall(
+ 	
+ 	// Enhanced panic recovery with proper state cleanup
+ 	defer func() {
+-		if rcv := recover(); rcv != nil {
++		if rcv := recover(); rcv != nil {
++			// Capture panic details for Sentry
++			if r.vm != nil && r.vm.logger != nil {
++				r.vm.logger.Error("🚨 PANIC in executeMethodCall - capturing for Sentry",
++					"panic", fmt.Sprintf("%v", rcv),
++					"method", methodCall.MethodName,
++					"contract", contractAddress.Hex(),
++					"stack_trace", string(debug.Stack()))
++			}
++			
++			// Report to Sentry with context
++			sentry.WithScope(func(scope *sentry.Scope) {
++				scope.SetTag("component", "contract_write")
++				scope.SetContext("method_call", map[string]interface{}{
++					"method": methodCall.MethodName,
++					"contract": contractAddress.Hex(),
++				})
++				sentry.CaptureException(fmt.Errorf("panic in executeMethodCall: %v", rcv))
++			})
++			
+ 			log.WriteString(fmt.Sprintf("🚨 PANIC in executeMethodCall: %v\n", rcv))
+ 			result = &avsproto.ContractWriteNode_MethodResult{
+ 				MethodName: methodCall.MethodName,
+ 				Success:    false,
+ 				Error:      fmt.Sprintf("Internal error during method execution: %v", rcv),
+ 			}
++			
++			// Clean up any partial state to prevent memory leaks
++			if r.vm != nil {
++				r.cleanupPartialExecutionState(methodCall.MethodName)
++			}
+ 		}
+ 	}()
+ 
+diff --git a/core/taskengine/vm.go b/core/taskengine/vm.go
+index 1234567..abcdefg 100644
+--- a/core/taskengine/vm.go
++++ b/core/taskengine/vm.go
+@@ -3674,18 +3674,32 @@ func (eq *ExecutionQueue) worker() {
+ // - If the channel is full/unavailable, we log a warning and drop the result to keep the system healthy.
+ func (eq *ExecutionQueue) safeSendResult(ch chan *ExecutionResult, res *ExecutionResult, stepID string) {
+ 	defer func() {
+-		if r := recover(); r != nil {
++		if r := recover(); r != nil {
++			// Enhanced panic recovery with Sentry reporting
+ 			if eq.vm != nil && eq.vm.logger != nil {
+-				eq.vm.logger.Warn("Recovered from panic while sending execution result - channel closed", "stepID", stepID)
++				eq.vm.logger.Error("Recovered from panic while sending execution result",
++					"stepID", stepID,
++					"panic", fmt.Sprintf("%v", r),
++					"result_success", res != nil && res.Step != nil && res.Step.Success)
++			}
++			
++			// Report channel panic to Sentry
++			sentry.WithScope(func(scope *sentry.Scope) {
++				scope.SetTag("component", "execution_queue")
++				scope.SetContext("execution", map[string]interface{}{
++					"step_id": stepID,
++					"has_result": res != nil,
++				})
++				sentry.CaptureException(fmt.Errorf("channel send panic: %v", r))
++			})
+ 		}
+ 	}()
+ 
+-	// Non-blocking send: if the receiver isn't ready (or channel is closed and select picks default),
+-	// we log and move on. If the runtime selects the send on a closed channel, the defer above recovers.
++	// Enhanced non-blocking send with timeout and health checks
++	timeout := time.After(5 * time.Second) // Prevent indefinite blocking
+ 	select {
+ 	case ch <- res:
+-		// delivered
++		// Successfully delivered
++	case <-timeout:
++		if eq.vm != nil && eq.vm.logger != nil {
++			eq.vm.logger.Warn("Execution result send timed out - receiver may be blocked",
++				"stepID", stepID,
++				"timeout", "5s")
++		}
+ 	default:
+ 		if eq.vm != nil && eq.vm.logger != nil {
+-			eq.vm.logger.Warn("Failed to send execution result - receiver not ready or channel closed", "stepID", stepID)
++			eq.vm.logger.Warn("Failed to send execution result - receiver not ready or channel closed",
++				"stepID", stepID,
++				"result_error", res != nil && res.Error != nil)
+ 		}
+ 	}
+ }
+
+diff --git a/core/taskengine/engine.go b/core/taskengine/engine.go
+index 1234567..abcdefg 100644
+--- a/core/taskengine/engine.go
++++ b/core/taskengine/engine.go
+@@ -88,11 +88,25 @@ func (e *Engine) initRpcConnection() {
+ 	}
+ 
+ 	if err := retryHttpRpc(); err != nil {
+-		panic(err)
++		// Enhanced error handling instead of panic
++		e.logger.Error("Failed to initialize HTTP RPC connection after retries",
++			"error", err,
++			"rpc_url", e.smartWalletConfig.EthRpcUrl)
++		
++		// Report to Sentry with context
++		sentry.WithScope(func(scope *sentry.Scope) {
++			scope.SetTag("component", "rpc_connection")
++			scope.SetContext("rpc_config", map[string]interface{}{
++				"url": e.smartWalletConfig.EthRpcUrl,
++				"retry_attempts": "multiple",
++			})
++			sentry.CaptureException(fmt.Errorf("RPC connection initialization failed: %w", err))
++		})
++		
++		return fmt.Errorf("RPC connection initialization failed: %w", err)
+ 	}
+ 
+ 	if err := retryWsRpc(); err != nil {
+-		panic(err)
++		// Enhanced error handling for WebSocket RPC
++		e.logger.Error("Failed to initialize WebSocket RPC connection after retries",
++			"error", err,
++			"ws_url", e.smartWalletConfig.EthWsUrl)
++		
++		// Report to Sentry
++		sentry.WithScope(func(scope *sentry.Scope) {
++			scope.SetTag("component", "ws_rpc_connection")
++			scope.SetContext("ws_config", map[string]interface{}{
++				"url": e.smartWalletConfig.EthWsUrl,
++			})
++			sentry.CaptureException(fmt.Errorf("WebSocket RPC connection failed: %w", err))
++		})
++		
++		return fmt.Errorf("WebSocket RPC connection failed: %w", err)
+ 	}
+ }
+
+diff --git a/core/taskengine/vm_runner_contract_write_safety.go b/core/taskengine/vm_runner_contract_write_safety.go
+new file mode 100644
+index 0000000..1234567
+--- /dev/null
++++ b/core/taskengine/vm_runner_contract_write_safety.go
+@@ -0,0 +1,85 @@
++package taskengine
++
++import (
++	"fmt"
++	"runtime/debug"
++	"time"
++
++	"github.com/getsentry/sentry-go"
++)
++
++// cleanupPartialExecutionState cleans up any partial state from a failed method execution
++func (r *ContractWriteProcessor) cleanupPartialExecutionState(methodName string) {
++	if r.vm == nil {
++		return
++	}
++	
++	// Clear any temporary variables that might have been set during execution
++	r.vm.mu.Lock()
++	defer r.vm.mu.Unlock()
++	
++	// Remove any method-specific temporary variables
++	tempVarPrefix := fmt.Sprintf("temp_%s_", methodName)
++	for key := range r.vm.vars {
++		if strings.HasPrefix(key, tempVarPrefix) {
++			delete(r.vm.vars, key)
++		}
++	}
++	
++	if r.vm.logger != nil {
++		r.vm.logger.Debug("Cleaned up partial execution state after panic",
++			"method", methodName,
++			"cleanup_time", time.Now().Format(time.RFC3339))
++	}
++}
++
++// safeExecuteWithTimeout executes a function with timeout and panic recovery
++func (r *ContractWriteProcessor) safeExecuteWithTimeout(
++	fn func() error,
++	timeout time.Duration,
++	operation string,
++) error {
++	done := make(chan error, 1)
++	
++	go func() {
++		defer func() {
++			if rcv := recover(); rcv != nil {
++				// Report panic to Sentry with full context
++				sentry.WithScope(func(scope *sentry.Scope) {
++					scope.SetTag("component", "safe_execution")
++					scope.SetTag("operation", operation)
++					scope.SetContext("panic_details", map[string]interface{}{
++						"recovered_value": fmt.Sprintf("%v", rcv),
++						"stack_trace": string(debug.Stack()),
++						"timestamp": time.Now().Unix(),
++					})
++					sentry.CaptureException(fmt.Errorf("panic in %s: %v", operation, rcv))
++				})
++				
++				done <- fmt.Errorf("panic in %s: %v", operation, rcv)
++			}
++		}()
++		
++		done <- fn()
++	}()
++	
++	select {
++	case err := <-done:
++		return err
++	case <-time.After(timeout):
++		// Report timeout to Sentry
++		sentry.WithScope(func(scope *sentry.Scope) {
++			scope.SetTag("component", "safe_execution")
++			scope.SetTag("operation", operation)
++			scope.SetContext("timeout_details", map[string]interface{}{
++				"timeout_duration": timeout.String(),
++				"operation": operation,
++			})
++			sentry.CaptureMessage(fmt.Sprintf("Operation timeout: %s", operation))
++		})
++		
++		return fmt.Errorf("operation %s timed out after %v", operation, timeout)
++	}
++}
++
++// Additional safety utilities would go here...

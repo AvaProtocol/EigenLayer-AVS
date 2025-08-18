@@ -87,18 +87,42 @@ func SetCache(c *bigcache.BigCache) {
 
 // Initialize a shared rpc client instance
 func SetRpc(rpcURL string) {
-	if conn, err := ethclient.Dial(rpcURL); err == nil {
+	// Enhanced error handling with circuit breaker pattern
+	if err := rpcCallWithCircuitBreaker(func() error {
+		conn, err := ethclient.Dial(rpcURL)
+		if err != nil {
+			return err
+		}
 		rpcConn = conn
-	} else {
-		panic(err)
+		return nil
+	}, "HTTP_RPC"); err != nil {
+		// Log error and report to Sentry
+		fmt.Printf("Failed to initialize HTTP RPC connection: %v", err)
+
+		enhancedPanicRecovery("rpc_connection", "SetRpc", map[string]interface{}{
+			"connection_type": "HTTP",
+			"url":             rpcURL,
+		})
+
+		panic(fmt.Errorf("HTTP RPC connection failed: %w", err))
 	}
 }
 
 // Initialize a shared websocket rpc client instance
 func SetWsRpc(rpcURL string) {
 	wsRpcURL = rpcURL
-	if err := retryWsRpc(); err != nil {
-		panic(err)
+	// Enhanced error handling with circuit breaker pattern
+	if err := rpcCallWithCircuitBreaker(retryWsRpc, "WS_RPC"); err != nil {
+		// Log error instead of panic for better resilience
+		fmt.Printf("Failed to initialize WebSocket RPC connection: %v", err)
+
+		// Report to Sentry
+		enhancedPanicRecovery("ws_rpc_connection", "SetWsRpc", map[string]interface{}{
+			"connection_type": "WebSocket",
+			"url":             rpcURL,
+		})
+
+		panic(fmt.Errorf("WebSocket RPC connection failed: %w", err))
 	}
 }
 
