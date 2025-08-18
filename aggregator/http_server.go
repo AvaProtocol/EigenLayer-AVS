@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"os"
 	"text/template"
 
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -80,6 +82,8 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 			Environment:      env,
 			Release:          release,
 			AttachStacktrace: true,
+			Debug:            env == "development",
+			EnableTracing:    env == "development",
 			// Set TracesSampleRate to 1.0 to capture 100%
 			// of transactions for tracing.
 			// We recommend adjusting this value in production.
@@ -96,15 +100,18 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 
 	e.Use(middleware.Logger())
 
-	// Register Sentry before Recover so panics are reported
+	// Important: Recover must be registered BEFORE Sentry so that Sentry wraps the handler.
+	// Order of execution in Echo is the order of registration; the last registered is the innermost.
+	// With Recover outer and Sentry inner, panics hit Sentry first, then repanic to Recover.
+	e.Use(middleware.Recover())
+
 	if sentryDsn != "" {
 		e.Use(sentryecho.New(sentryecho.Options{
 			Repanic:         true,
-			WaitForDelivery: false,
+			WaitForDelivery: false, // Don't block HTTP responses waiting for Sentry delivery
+			Timeout:         3 * time.Second,
 		}))
 	}
-
-	e.Use(middleware.Recover())
 
 	e.GET("/up", func(c echo.Context) error {
 		if agg.status == runningStatus {
@@ -153,6 +160,29 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 
 		return c.HTMLBlob(http.StatusOK, buf.Bytes())
 	})
+
+	// Register debug endpoints only if not in production
+	if os.Getenv("APP_ENV") != "production" {
+		// Debug endpoints to validate Sentry wiring from a running instance
+		// These are lightweight and safe: they are no-ops if Sentry isn't initialized
+		e.GET("/_debug/sentry/message", func(c echo.Context) error {
+			msg := c.QueryParam("msg")
+			if msg == "" {
+				msg = "manual sentry test from /_debug/sentry/message"
+			}
+			sentry.CaptureMessage(msg)
+			return c.JSON(http.StatusOK, map[string]string{"status": "ok", "sent": msg})
+		})
+
+		// This deliberately triggers a panic so that echo's Sentry middleware captures it
+		e.GET("/_debug/sentry/panic", func(c echo.Context) error {
+			// Force synchronous flush on panic to ensure the event is delivered before returning
+			if sentryDsn != "" {
+				defer sentry.Flush(3 * time.Second)
+			}
+			panic("manual sentry panic test from /_debug/sentry/panic")
+		})
+	}
 
 	addr := agg.config.HttpBindAddress
 	agg.logger.Info("HTTP server listening", "address", addr)

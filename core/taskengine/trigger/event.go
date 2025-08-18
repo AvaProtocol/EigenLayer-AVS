@@ -15,6 +15,7 @@ import (
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
@@ -443,6 +444,18 @@ func (t *EventTrigger) Run(ctx context.Context) error {
 					"block", log.BlockNumber,
 					"tx", log.TxHash.Hex(),
 					"log_index", log.Index)
+
+				// Extra debug: detect Chainlink AnswerUpdated from known aggregator event signature
+				// AnswerUpdated(int256 current, uint256 roundId, uint256 updatedAt)
+				if len(log.Topics) > 0 {
+					answerUpdatedSig := crypto.Keccak256Hash([]byte("AnswerUpdated(int256,uint256,uint256)"))
+					if log.Topics[0] == answerUpdatedSig {
+						t.logger.Info("🔔 Detected Chainlink AnswerUpdated event",
+							"block", log.BlockNumber,
+							"tx", log.TxHash.Hex(),
+							"address", log.Address.Hex())
+					}
+				}
 
 				// CRITICAL: Check for duplicates FIRST before any processing
 				// Use txHash-logIndex as unique key (txHash is unique, logIndex distinguishes events within same tx)
