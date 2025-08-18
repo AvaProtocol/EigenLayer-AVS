@@ -1847,6 +1847,12 @@ func (v *VM) preprocessText(text string) string {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
+					// Enhanced panic recovery with Sentry reporting
+					enhancedPanicRecovery("javascript_vm", "evaluateJavaScript", map[string]interface{}{
+						"script_length":  len(script),
+						"has_vm_context": jsvm != nil,
+						"panic_type":     fmt.Sprintf("%T", r),
+					})
 					err = fmt.Errorf("panic during JavaScript evaluation: %v", r)
 				}
 				close(resultChan)
@@ -3563,7 +3569,8 @@ func convertConfigForFrontend(input map[string]interface{}) map[string]interface
 // executeStepInMainLoop executes a single step in the main execution loop context
 // This method is used when a trigger fans out to multiple target nodes that should be executed sequentially
 func (v *VM) executeStepInMainLoop(step *Step) {
-	if step == nil {
+	// Enhanced nil safety with Sentry reporting
+	if err := nilSafetyGuard(step, "step", "executeStepInMainLoop"); err != nil {
 		if v.logger != nil {
 			v.logger.Warn("🔄 executeStepInMainLoop: step is nil")
 		}
@@ -3676,20 +3683,31 @@ func (eq *ExecutionQueue) worker() {
 func (eq *ExecutionQueue) safeSendResult(ch chan *ExecutionResult, res *ExecutionResult, stepID string) {
 	defer func() {
 		if r := recover(); r != nil {
+			// Enhanced panic recovery with Sentry reporting
 			if eq.vm != nil && eq.vm.logger != nil {
-				eq.vm.logger.Warn("Recovered from panic while sending execution result - channel closed", "stepID", stepID)
+				eq.vm.logger.Error("Recovered from panic while sending execution result",
+					"stepID", stepID,
+					"panic", fmt.Sprintf("%v", r),
+					"result_success", res != nil && res.Step != nil && res.Step.Success)
 			}
+
+			// Report channel panic to Sentry
+			enhancedPanicRecovery("execution_queue", "safeSendResult", map[string]interface{}{
+				"step_id":           stepID,
+				"has_result":        res != nil,
+				"channel_operation": "send",
+			})
 		}
 	}()
 
-	// Non-blocking send: if the receiver isn't ready (or channel is closed and select picks default),
-	// we log and move on. If the runtime selects the send on a closed channel, the defer above recovers.
-	select {
-	case ch <- res:
-		// delivered
-	default:
+	// Enhanced non-blocking send with timeout to prevent indefinite blocking
+	err := safeChannelSend(ch, res, 5*time.Second, fmt.Sprintf("execution_result_%s", stepID))
+	if err != nil {
 		if eq.vm != nil && eq.vm.logger != nil {
-			eq.vm.logger.Warn("Failed to send execution result - receiver not ready or channel closed", "stepID", stepID)
+			eq.vm.logger.Warn("Failed to send execution result",
+				"stepID", stepID,
+				"error", err.Error(),
+				"result_error", res != nil && res.Error != nil)
 		}
 	}
 }

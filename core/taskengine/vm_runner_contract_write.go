@@ -1087,11 +1087,31 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		func() {
 			defer func() {
 				if rcv := recover(); rcv != nil {
+					// Enhanced panic recovery with Sentry reporting
+					if r.vm != nil && r.vm.logger != nil {
+						r.vm.logger.Error("🚨 PANIC in executeMethodCall - capturing for Sentry",
+							"panic", fmt.Sprintf("%v", rcv),
+							"method", methodCall.MethodName,
+							"contract", contractAddr.Hex())
+					}
+
+					// Report to Sentry with context
+					enhancedPanicRecovery("contract_write", "executeMethodCall", map[string]interface{}{
+						"method":     methodCall.MethodName,
+						"contract":   contractAddr.Hex(),
+						"panic_type": fmt.Sprintf("%T", rcv),
+					})
+
 					log.WriteString(fmt.Sprintf("🚨 PANIC in executeMethodCall: %v\n", rcv))
 					result = &avsproto.ContractWriteNode_MethodResult{
 						MethodName: methodCall.MethodName,
 						Success:    false,
 						Error:      fmt.Sprintf("panic during execution: %v", rcv),
+					}
+
+					// Clean up any partial state to prevent memory leaks
+					if r.vm != nil {
+						r.cleanupPartialExecutionState(methodCall.MethodName)
 					}
 				}
 			}()
