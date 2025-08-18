@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"os"
 	"text/template"
 
 	"context"
@@ -160,25 +161,28 @@ func (agg *Aggregator) startHttpServer(ctx context.Context) {
 		return c.HTMLBlob(http.StatusOK, buf.Bytes())
 	})
 
-	// Debug endpoints to validate Sentry wiring from a running instance
-	// These are lightweight and safe: they are no-ops if Sentry isn't initialized
-	e.GET("/_debug/sentry/message", func(c echo.Context) error {
-		msg := c.QueryParam("msg")
-		if msg == "" {
-			msg = "manual sentry test from /_debug/sentry/message"
-		}
-		sentry.CaptureMessage(msg)
-		return c.JSON(http.StatusOK, map[string]string{"status": "ok", "sent": msg})
-	})
+	// Register debug endpoints only if not in production
+	if os.Getenv("APP_ENV") != "production" {
+		// Debug endpoints to validate Sentry wiring from a running instance
+		// These are lightweight and safe: they are no-ops if Sentry isn't initialized
+		e.GET("/_debug/sentry/message", func(c echo.Context) error {
+			msg := c.QueryParam("msg")
+			if msg == "" {
+				msg = "manual sentry test from /_debug/sentry/message"
+			}
+			sentry.CaptureMessage(msg)
+			return c.JSON(http.StatusOK, map[string]string{"status": "ok", "sent": msg})
+		})
 
-	// This deliberately triggers a panic so that echo's Sentry middleware captures it
-	e.GET("/_debug/sentry/panic", func(c echo.Context) error {
-		// Force synchronous flush on panic to ensure the event is delivered before returning
-		if sentryDsn != "" {
-			defer sentry.Flush(3 * time.Second)
-		}
-		panic("manual sentry panic test from /_debug/sentry/panic")
-	})
+		// This deliberately triggers a panic so that echo's Sentry middleware captures it
+		e.GET("/_debug/sentry/panic", func(c echo.Context) error {
+			// Force synchronous flush on panic to ensure the event is delivered before returning
+			if sentryDsn != "" {
+				defer sentry.Flush(3 * time.Second)
+			}
+			panic("manual sentry panic test from /_debug/sentry/panic")
+		})
+	}
 
 	addr := agg.config.HttpBindAddress
 	agg.logger.Info("HTTP server listening", "address", addr)
