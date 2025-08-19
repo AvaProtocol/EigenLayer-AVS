@@ -17,7 +17,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/joho/godotenv"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
@@ -25,22 +24,129 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// init loads environment variables from .env files for testing
+var testConfig *config.Config
+
+// init loads test configuration from config/aggregator.yaml
 func init() {
-	// Load from repo root reliably using this file's path
+	// Load test configuration from aggregator.yaml
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))
-		_ = godotenv.Load(filepath.Join(repoRoot, ".env"))
-		_ = godotenv.Overload(filepath.Join(repoRoot, ".env.test"))
+		configPath := filepath.Join(repoRoot, "config", "aggregator.yaml")
+
+		var err error
+		testConfig, err = config.NewConfig(configPath)
+		if err != nil {
+			// Fallback: try current working directory
+			testConfig, err = config.NewConfig("config/aggregator.yaml")
+			if err != nil {
+				log.Printf("Warning: Could not load test config from aggregator.yaml: %v", err)
+				testConfig = nil
+			}
+		}
 	}
-	// Fallback to current working directory
-	_ = godotenv.Load(".env")
-	_ = godotenv.Overload(".env.test")
 }
 
 const (
 	paymasterAddress = config.DefaultPaymasterAddressHex
 )
+
+// GetTestConfig returns the loaded test configuration from aggregator.yaml
+func GetTestConfig() *config.Config {
+	return testConfig
+}
+
+// GetTestRPC returns the RPC URL for tests from aggregator config
+func GetTestRPC() string {
+	if testConfig != nil && testConfig.EthHttpRpcUrl != "" {
+		return testConfig.EthHttpRpcUrl
+	}
+	return "https://sepolia.drpc.org"
+}
+
+// GetTestWsRPC returns the WebSocket RPC URL for tests from aggregator config
+func GetTestWsRPC() string {
+	if testConfig != nil && testConfig.EthWsRpcUrl != "" {
+		return testConfig.EthWsRpcUrl
+	}
+	// Derive from HTTP RPC
+	if http := GetTestRPC(); strings.HasPrefix(http, "https://") {
+		return strings.Replace(http, "https://", "wss://", 1)
+	}
+	return "wss://sepolia.drpc.org"
+}
+
+// GetTestBundlerRPC returns the bundler RPC URL for tests from aggregator config
+func GetTestBundlerRPC() string {
+	if testConfig != nil && testConfig.SmartWallet != nil && testConfig.SmartWallet.BundlerURL != "" {
+		return testConfig.SmartWallet.BundlerURL
+	}
+	return ""
+}
+
+// GetTestTenderlyAccount returns the Tenderly account for tests from aggregator config
+func GetTestTenderlyAccount() string {
+	if testConfig != nil {
+		return testConfig.TenderlyAccount
+	}
+	return ""
+}
+
+// GetTestTenderlyProject returns the Tenderly project for tests from aggregator config
+func GetTestTenderlyProject() string {
+	if testConfig != nil {
+		return testConfig.TenderlyProject
+	}
+	return ""
+}
+
+// GetTestTenderlyAccessKey returns the Tenderly access key for tests from aggregator config
+func GetTestTenderlyAccessKey() string {
+	if testConfig != nil {
+		return testConfig.TenderlyAccessKey
+	}
+	return ""
+}
+
+// GetTestPrivateKey returns the test private key from aggregator config
+func GetTestPrivateKey() string {
+	if testConfig != nil && testConfig.TestPrivateKey != "" {
+		return testConfig.TestPrivateKey
+	}
+	return ""
+}
+
+// GetTestControllerPrivateKey returns the controller private key for tests from aggregator config
+func GetTestControllerPrivateKey() string {
+	if testConfig != nil && testConfig.SmartWallet != nil && testConfig.SmartWallet.ControllerPrivateKey != nil {
+		return fmt.Sprintf("%x", testConfig.SmartWallet.ControllerPrivateKey.D)
+	}
+	// Fallback to test_private_key if controller key not available
+	return GetTestPrivateKey()
+}
+
+// GetTestFactoryAddress returns the factory address for tests from aggregator config
+func GetTestFactoryAddress() string {
+	if testConfig != nil && testConfig.SmartWallet != nil {
+		return testConfig.SmartWallet.FactoryAddress.Hex()
+	}
+	return config.DefaultFactoryProxyAddressHex
+}
+
+// GetTestEntrypointAddress returns the entrypoint address for tests from aggregator config
+func GetTestEntrypointAddress() string {
+	if testConfig != nil && testConfig.SmartWallet != nil {
+		return testConfig.SmartWallet.EntrypointAddress.Hex()
+	}
+	return config.DefaultEntrypointAddressHex
+}
+
+// GetTestPaymasterAddress returns the paymaster address for tests from aggregator config
+func GetTestPaymasterAddress() string {
+	if testConfig != nil && testConfig.SmartWallet != nil {
+		return testConfig.SmartWallet.PaymasterAddress.Hex()
+	}
+	return config.DefaultPaymasterAddressHex
+}
 
 // TriggerData represents the flattened trigger information for testing
 type TriggerData struct {
@@ -49,21 +155,11 @@ type TriggerData struct {
 }
 
 func GetTestRPCURL() string {
-	if v := os.Getenv("SEPOLIA_RPC"); v != "" {
-		return v
-	}
-	return "https://sepolia.drpc.org"
+	return GetTestRPC()
 }
 
 func GetTestWsRPCURL() string {
-	if v := os.Getenv("SEPOLIA_WS"); v != "" {
-		return v
-	}
-	// Derive from HTTP RPC
-	if http := GetTestRPCURL(); strings.HasPrefix(http, "https://") {
-		return strings.Replace(http, "https://", "wss://", 1)
-	}
-	return "wss://sepolia.drpc.org"
+	return GetTestWsRPC()
 }
 
 // firstNonEmpty returns the first non-empty string in the provided list.
@@ -200,12 +296,11 @@ func TestUser2() *model.User {
 func GetAggregatorConfig() *config.Config {
 	return &config.Config{
 		SmartWallet: &config.SmartWalletConfig{
-			EthRpcUrl: GetTestRPCURL(),
-			EthWsUrl:  GetTestWsRPCURL(),
-			//	FactoryAddress:    common.HexToAddress(os.Getenv("FACTORY_ADDRESS")),
-			FactoryAddress:     common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
-			EntrypointAddress:  common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
-			PaymasterAddress:   common.HexToAddress(paymasterAddress),
+			EthRpcUrl:          GetTestRPCURL(),
+			EthWsUrl:           GetTestWsRPCURL(),
+			FactoryAddress:     common.HexToAddress(GetTestFactoryAddress()),
+			EntrypointAddress:  common.HexToAddress(GetTestEntrypointAddress()),
+			PaymasterAddress:   common.HexToAddress(GetTestPaymasterAddress()),
 			WhitelistAddresses: []common.Address{},
 		},
 	}
@@ -333,82 +428,83 @@ func JsFastTask() *avsproto.CreateTaskReq {
 }
 
 func GetTestSmartWalletConfig() *config.SmartWalletConfig {
-	controllerEnv := os.Getenv("CONTROLLER_PRIVATE_KEY")
+	controllerKeyHex := GetTestControllerPrivateKey()
 	// In CI or local without key, return a minimal config that avoids panicking; tests that need
 	// real ERC-4337 will be gated and skipped.
-	if controllerEnv == "" {
+	if controllerKeyHex == "" {
 		return &config.SmartWalletConfig{
-			EthRpcUrl:          os.Getenv("SEPOLIA_RPC"),
-			BundlerURL:         os.Getenv("SEPOLIA_BUNDLER_RPC"),
-			EthWsUrl:           os.Getenv("SEPOLIA_WS"),
-			FactoryAddress:     common.HexToAddress(firstNonEmpty(os.Getenv("FACTORY_ADDRESS"), config.DefaultFactoryProxyAddressHex)),
-			EntrypointAddress:  common.HexToAddress(config.DefaultEntrypointAddressHex),
-			PaymasterAddress:   common.HexToAddress(paymasterAddress),
+			EthRpcUrl:          GetTestRPC(),
+			BundlerURL:         GetTestBundlerRPC(),
+			EthWsUrl:           GetTestWsRPC(),
+			FactoryAddress:     common.HexToAddress(GetTestFactoryAddress()),
+			EntrypointAddress:  common.HexToAddress(GetTestEntrypointAddress()),
+			PaymasterAddress:   common.HexToAddress(GetTestPaymasterAddress()),
 			WhitelistAddresses: []common.Address{},
 		}
 	}
-	controllerPrivateKey, err := crypto.HexToECDSA(controllerEnv)
+	controllerPrivateKey, err := crypto.HexToECDSA(controllerKeyHex)
 	if err != nil {
 		// Fallback to non-panicking minimal config
 		return &config.SmartWalletConfig{
-			EthRpcUrl:          os.Getenv("SEPOLIA_RPC"),
-			BundlerURL:         os.Getenv("SEPOLIA_BUNDLER_RPC"),
-			EthWsUrl:           os.Getenv("SEPOLIA_WS"),
-			FactoryAddress:     common.HexToAddress("0x29adA1b5217242DEaBB142BC3b1bCfFdd56008e7"),
-			EntrypointAddress:  common.HexToAddress("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"),
-			PaymasterAddress:   common.HexToAddress(paymasterAddress),
+			EthRpcUrl:          GetTestRPC(),
+			BundlerURL:         GetTestBundlerRPC(),
+			EthWsUrl:           GetTestWsRPC(),
+			FactoryAddress:     common.HexToAddress(GetTestFactoryAddress()),
+			EntrypointAddress:  common.HexToAddress(GetTestEntrypointAddress()),
+			PaymasterAddress:   common.HexToAddress(GetTestPaymasterAddress()),
 			WhitelistAddresses: []common.Address{},
 		}
 	}
 
 	return &config.SmartWalletConfig{
-		EthRpcUrl:            os.Getenv("SEPOLIA_RPC"),
-		BundlerURL:           os.Getenv("SEPOLIA_BUNDLER_RPC"),
-		EthWsUrl:             os.Getenv("SEPOLIA_WS"),
-		FactoryAddress:       common.HexToAddress(firstNonEmpty(os.Getenv("FACTORY_ADDRESS"), config.DefaultFactoryProxyAddressHex)),
-		EntrypointAddress:    common.HexToAddress(config.DefaultEntrypointAddressHex),
+		EthRpcUrl:            GetTestRPC(),
+		BundlerURL:           GetTestBundlerRPC(),
+		EthWsUrl:             GetTestWsRPC(),
+		FactoryAddress:       common.HexToAddress(GetTestFactoryAddress()),
+		EntrypointAddress:    common.HexToAddress(GetTestEntrypointAddress()),
 		ControllerPrivateKey: controllerPrivateKey,
-		PaymasterAddress:     common.HexToAddress(paymasterAddress),
+		PaymasterAddress:     common.HexToAddress(GetTestPaymasterAddress()),
 		WhitelistAddresses:   []common.Address{},
 	}
 }
 
 // Get smart wallet config for base
 // Using base sepolia to run test because it's very cheap and fast
+// Note: Currently uses same config as Sepolia since Base Sepolia config is not in aggregator.yaml
 func GetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
-	controllerEnv := os.Getenv("CONTROLLER_PRIVATE_KEY")
-	if controllerEnv == "" {
+	controllerKeyHex := GetTestControllerPrivateKey()
+	if controllerKeyHex == "" {
 		return &config.SmartWalletConfig{
-			EthRpcUrl:          firstNonEmpty(os.Getenv("BASE_SEPOLIA_RPC"), os.Getenv("SEPOLIA_RPC")),
-			BundlerURL:         firstNonEmpty(os.Getenv("BASE_SEPOLIA_BUNDLER_RPC"), os.Getenv("SEPOLIA_BUNDLER_RPC")),
-			EthWsUrl:           strings.Replace(firstNonEmpty(os.Getenv("BASE_SEPOLIA_RPC"), os.Getenv("SEPOLIA_RPC")), "https://", "wss://", 1),
-			FactoryAddress:     common.HexToAddress(firstNonEmpty(os.Getenv("FACTORY_ADDRESS"), config.DefaultFactoryProxyAddressHex)),
-			EntrypointAddress:  common.HexToAddress(config.DefaultEntrypointAddressHex),
-			PaymasterAddress:   common.HexToAddress(paymasterAddress),
+			EthRpcUrl:          GetTestRPC(),
+			BundlerURL:         GetTestBundlerRPC(),
+			EthWsUrl:           GetTestWsRPC(),
+			FactoryAddress:     common.HexToAddress(GetTestFactoryAddress()),
+			EntrypointAddress:  common.HexToAddress(GetTestEntrypointAddress()),
+			PaymasterAddress:   common.HexToAddress(GetTestPaymasterAddress()),
 			WhitelistAddresses: []common.Address{},
 		}
 	}
-	controllerPrivateKey, err := crypto.HexToECDSA(controllerEnv)
+	controllerPrivateKey, err := crypto.HexToECDSA(controllerKeyHex)
 	if err != nil {
 		return &config.SmartWalletConfig{
-			EthRpcUrl:          firstNonEmpty(os.Getenv("BASE_SEPOLIA_RPC"), os.Getenv("SEPOLIA_RPC")),
-			BundlerURL:         firstNonEmpty(os.Getenv("BASE_SEPOLIA_BUNDLER_RPC"), os.Getenv("SEPOLIA_BUNDLER_RPC")),
-			EthWsUrl:           strings.Replace(firstNonEmpty(os.Getenv("BASE_SEPOLIA_RPC"), os.Getenv("SEPOLIA_RPC")), "https://", "wss://", 1),
-			FactoryAddress:     common.HexToAddress(firstNonEmpty(os.Getenv("FACTORY_ADDRESS"), config.DefaultFactoryProxyAddressHex)),
-			EntrypointAddress:  common.HexToAddress(config.DefaultEntrypointAddressHex),
-			PaymasterAddress:   common.HexToAddress(paymasterAddress),
+			EthRpcUrl:          GetTestRPC(),
+			BundlerURL:         GetTestBundlerRPC(),
+			EthWsUrl:           GetTestWsRPC(),
+			FactoryAddress:     common.HexToAddress(GetTestFactoryAddress()),
+			EntrypointAddress:  common.HexToAddress(GetTestEntrypointAddress()),
+			PaymasterAddress:   common.HexToAddress(GetTestPaymasterAddress()),
 			WhitelistAddresses: []common.Address{},
 		}
 	}
 
 	return &config.SmartWalletConfig{
-		EthRpcUrl:            os.Getenv("BASE_SEPOLIA_RPC"),
-		BundlerURL:           os.Getenv("BASE_SEPOLIA_BUNDLER_RPC"),
-		EthWsUrl:             strings.Replace(os.Getenv("BASE_SEPOLIA_RPC"), "https://", "wss://", 1),
-		FactoryAddress:       common.HexToAddress(firstNonEmpty(os.Getenv("FACTORY_ADDRESS"), config.DefaultFactoryProxyAddressHex)),
-		EntrypointAddress:    common.HexToAddress(config.DefaultEntrypointAddressHex),
+		EthRpcUrl:            GetTestRPC(),
+		BundlerURL:           GetTestBundlerRPC(),
+		EthWsUrl:             GetTestWsRPC(),
+		FactoryAddress:       common.HexToAddress(GetTestFactoryAddress()),
+		EntrypointAddress:    common.HexToAddress(GetTestEntrypointAddress()),
 		ControllerPrivateKey: controllerPrivateKey,
-		PaymasterAddress:     common.HexToAddress(paymasterAddress),
+		PaymasterAddress:     common.HexToAddress(GetTestPaymasterAddress()),
 		WhitelistAddresses:   []common.Address{},
 	}
 }

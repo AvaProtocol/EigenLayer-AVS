@@ -295,7 +295,8 @@ func TestObjectSerializationInTemplates(t *testing.T) {
 	t.Run("Output_Decoding_From_Call_Trace", func(t *testing.T) {
 		// Create a mock Tenderly client
 		logger := testutil.GetLogger()
-		client := NewTenderlyClient(nil, logger)
+		testConfig := testutil.GetTestConfig()
+		client := NewTenderlyClient(testConfig, logger)
 
 		// Create the ABI for quoteExactInputSingle
 		abiStr := `[{

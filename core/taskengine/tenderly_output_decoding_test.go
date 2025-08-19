@@ -10,7 +10,8 @@ import (
 
 func TestTenderlyOutputDecoding(t *testing.T) {
 	logger := testutil.GetLogger()
-	client := NewTenderlyClient(nil, logger)
+	testConfig := testutil.GetTestConfig()
+	client := NewTenderlyClient(testConfig, logger)
 
 	t.Run("QuoteExactInputSingle_Complete_Decoding", func(t *testing.T) {
 		// Real Tenderly output from the logs
