@@ -315,8 +315,8 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			"method", methodName,
 			"reason", "vm_is_simulation")
 
-		// Initialize Tenderly client
-		tenderlyClient := NewTenderlyClient(r.vm.logger)
+		// Use shared Tenderly client from VM
+		tenderlyClient := r.vm.tenderlyClient
 
 		// Get chain ID for simulation
 		// STRICT: In runNode path, chainId must be provided via workflowContext.chainId

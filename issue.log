@@ -1,0 +1,38 @@
+check out the current config of operator in production— what values are the same as default values and can be skiipped, what values are required but not set, what should be the value of target_chain.eth_rpc_url and eth_ws_url, chainstack endpoints?
+
+# Operator Configuration for ethereum
+
+production: true
+
+operator_address: 0xc6B87cc9e85b07365b6aBEfff061F237F7cf7Dc3
+
+avs_registry_coordinator_address: 0x8DE3Ee0dE880161Aa0CD8Bf9F8F6a7AfEeB9A44B
+operator_state_retriever_address: 0xb3af70D5f72C04D1f490ff49e5aB189fA7122713
+
+# Chain configuration
+eth_rpc_url: https://ethereum-mainnet.core.chainstack.com/411ed76e2b8095feb47de8d04fe5c3a4
+eth_ws_url: wss://ethereum-mainnet.core.chainstack.com/411ed76e2b8095feb47de8d04fe5c3a4
+
+# Key paths
+ecdsa_private_key_store_path: /app/.operator-keys/operator.ecdsa.key.json
+bls_private_key_store_path: /app/.operator-keys/operator.bls.key.json
+
+# Database configuration
+db_path: /app/db
+
+# Aggregator connection
+aggregator_server_ip_port_address: aggregator.avaprotocol.org:2206
+
+# Metrics and API configuration
+eigen_metrics_ip_port_address: 0.0.0.0:9090
+enable_metrics: true
+node_api_ip_port_address: 0.0.0.0:9010
+enable_node_api: true
+
+# Sentry
+sentry_dsn:
+
+# Destination chain
+target_chain:
+  eth_rpc_url:
+  eth_ws_url:

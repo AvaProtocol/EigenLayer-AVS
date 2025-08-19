@@ -276,6 +276,9 @@ type VM struct {
 	// (SimulateTask or RunNodeImmediately). In simulation, write operations must not
 	// send real transactions and should use Tenderly or mock paths instead.
 	IsSimulation bool
+
+	// Shared clients
+	tenderlyClient *TenderlyClient
 }
 
 func NewVM() *VM {
@@ -324,6 +327,7 @@ func (v *VM) WithDb(db storage.Storage) *VM {
 	return v
 }
 
+// WithConfig attaches the aggregator configuration to the VM for downstream helpers
 // WithChainName updates the workflowContext with the chain name and chainId based on chainId
 func (v *VM) WithChainName(chainId uint64) *VM {
 	chainName := getChainNameFromId(chainId)

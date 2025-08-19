@@ -192,6 +192,9 @@ type Engine struct {
 	// Token enrichment service for ERC20 transfers
 	tokenEnrichmentService *TokenEnrichmentService
 
+	// Shared clients
+	tenderlyClient *TenderlyClient
+
 	// Debouncing for operator approval logging
 	lastApprovalLogTime map[string]time.Time
 	approvalLogMutex    *sync.RWMutex
@@ -229,9 +232,6 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		logger: logger,
 	}
 
-	// Expose config globally for helpers such as the Tenderly client
-	SetGlobalAggregatorConfig(config)
-
 	SetRpc(config.SmartWallet.EthRpcUrl)
 	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
 	//SetWsRpc(config.SmartWallet.EthWsUrl)
@@ -260,6 +260,9 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 			logger.Info("TokenEnrichmentService initialized successfully with whitelist-only support (no RPC)")
 		}
 	}
+
+	// Initialize shared Tenderly client from config
+	e.tenderlyClient = NewTenderlyClient(config, logger)
 
 	return &e
 }
@@ -1980,6 +1983,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VM for simulation: %w", err)
 	}
+	vm.tenderlyClient = n.tenderlyClient
 
 	vm.WithLogger(n.logger).WithDb(n.db).SetSimulation(true)
 	// Resolve AA sender for simulation ONLY if the workflow contains AA-relevant nodes
