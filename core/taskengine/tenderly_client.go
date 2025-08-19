@@ -20,6 +20,26 @@ import (
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
 
+// NoOpLogger is a logger that does nothing, used as a fallback when no logger is provided
+type NoOpLogger struct{}
+
+func (l *NoOpLogger) Info(msg string, keysAndValues ...interface{})        {}
+func (l *NoOpLogger) Infof(format string, args ...interface{})             {}
+func (l *NoOpLogger) Debug(msg string, keysAndValues ...interface{})       {}
+func (l *NoOpLogger) Debugf(format string, args ...interface{})            {}
+func (l *NoOpLogger) Error(msg string, keysAndValues ...interface{})       {}
+func (l *NoOpLogger) Errorf(format string, args ...interface{})            {}
+func (l *NoOpLogger) Warn(msg string, keysAndValues ...interface{})        {}
+func (l *NoOpLogger) Warnf(format string, args ...interface{})             {}
+func (l *NoOpLogger) Fatal(msg string, keysAndValues ...interface{})       {}
+func (l *NoOpLogger) Fatalf(format string, args ...interface{})            {}
+func (l *NoOpLogger) With(keysAndValues ...interface{}) sdklogging.Logger  { return l }
+func (l *NoOpLogger) WithComponent(componentName string) sdklogging.Logger { return l }
+func (l *NoOpLogger) WithName(name string) sdklogging.Logger               { return l }
+func (l *NoOpLogger) WithServiceName(serviceName string) sdklogging.Logger { return l }
+func (l *NoOpLogger) WithHostName(hostName string) sdklogging.Logger       { return l }
+func (l *NoOpLogger) Sync() error                                          { return nil }
+
 // Constants for storage values
 const (
 	STORAGE_FALSE_VALUE = "0x0000000000000000000000000000000000000000000000000000000000000000" // false value for storage
@@ -78,6 +98,12 @@ func NewTenderlyClient(cfg *config.Config, logger sdklogging.Logger) *TenderlyCl
 	client := resty.New()
 	client.SetTimeout(30 * time.Second)
 	client.SetHeader("Content-Type", "application/json")
+
+	// Ensure logger is not nil to prevent panics
+	if logger == nil {
+		// Create a no-op logger if none provided
+		logger = &NoOpLogger{}
+	}
 
 	tc := &TenderlyClient{
 		httpClient: client,
