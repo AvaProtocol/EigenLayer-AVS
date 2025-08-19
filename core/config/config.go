@@ -94,6 +94,11 @@ type Config struct {
 	ApprovedOperators []common.Address
 
 	MetricsReg *prometheus.Registry
+
+	// Tenderly HTTP Simulation API credentials (optional)
+	TenderlyAccount   string
+	TenderlyProject   string
+	TenderlyAccessKey string
 }
 
 type SmartWalletConfig struct {
@@ -163,6 +168,11 @@ type ConfigRaw struct {
 	ApprovedOperators []string `yaml:"approved_operators"`
 
 	Macros map[string]map[string]string `yaml:"macros"`
+
+	// Optional Tenderly HTTP Simulation API credentials
+	TenderlyAccount   string `yaml:"tenderly_account"`
+	TenderlyProject   string `yaml:"tenderly_project"`
+	TenderlyAccessKey string `yaml:"tenderly_access_key"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
@@ -303,6 +313,11 @@ func NewConfig(configFilePath string) (*Config, error) {
 		MacroSecrets:      configRaw.Macros["secrets"],
 		ApprovedOperators: convertToAddressSlice(configRaw.ApprovedOperators),
 		MetricsReg:        reg,
+
+		// Pass through Tenderly credentials (if provided in YAML)
+		TenderlyAccount:   configRaw.TenderlyAccount,
+		TenderlyProject:   configRaw.TenderlyProject,
+		TenderlyAccessKey: configRaw.TenderlyAccessKey,
 	}
 
 	if config.SocketPath == "" {
