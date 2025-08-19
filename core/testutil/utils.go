@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -23,14 +25,15 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// init loads environment variables from .env file for testing
+// init loads environment variables from .env files for testing
 func init() {
-	// Load only from repo root files without fuzzy search.
-	// First load .env if present (non-fatal), then overlay .env.test for test secrets.
-	// Use relative paths that work from any subdirectory by going up to project root
-	_ = godotenv.Load("../../.env")
-	_ = godotenv.Overload("../../.env.test")
-	// Also try loading from current directory (for tests run from project root)
+	// Load from repo root reliably using this file's path
+	if _, thisFile, _, ok := runtime.Caller(0); ok {
+		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))
+		_ = godotenv.Load(filepath.Join(repoRoot, ".env"))
+		_ = godotenv.Overload(filepath.Join(repoRoot, ".env.test"))
+	}
+	// Fallback to current working directory
 	_ = godotenv.Load(".env")
 	_ = godotenv.Overload(".env.test")
 }
