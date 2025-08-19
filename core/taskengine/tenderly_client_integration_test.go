@@ -20,7 +20,8 @@ func TestTenderlyClient_TransactionRevert_Integration(t *testing.T) {
 	// Skip if no Tenderly API key - this requires real network calls
 
 	logger := testutil.GetLogger()
-	client := NewTenderlyClient(nil, logger)
+	testConfig := testutil.GetTestConfig()
+	client := NewTenderlyClient(testConfig, logger)
 
 	// Create a query with invalid contract address to trigger revert
 	query := &avsproto.EventTrigger_Query{
@@ -64,7 +65,8 @@ func TestTenderlyClient_InvalidContractCall_Integration(t *testing.T) {
 	// Skip if no Tenderly API key - this requires real network calls
 
 	logger := testutil.GetLogger()
-	client := NewTenderlyClient(nil, logger)
+	testConfig := testutil.GetTestConfig()
+	client := NewTenderlyClient(testConfig, logger)
 
 	// Create a query with a valid contract address but invalid chain ID
 	query := &avsproto.EventTrigger_Query{
@@ -97,7 +99,8 @@ func TestTenderlyClient_InvalidContractCall_Integration(t *testing.T) {
 func TestTenderlyClient_NetworkError_Integration(t *testing.T) {
 
 	logger := testutil.GetLogger()
-	client := NewTenderlyClient(nil, logger)
+	testConfig := testutil.GetTestConfig()
+	client := NewTenderlyClient(testConfig, logger)
 
 	// Create a valid query
 	query := &avsproto.EventTrigger_Query{

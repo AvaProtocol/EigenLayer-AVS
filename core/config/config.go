@@ -99,6 +99,9 @@ type Config struct {
 	TenderlyAccount   string
 	TenderlyProject   string
 	TenderlyAccessKey string
+
+	// Test private key for Go tests (optional)
+	TestPrivateKey string
 }
 
 type SmartWalletConfig struct {
@@ -173,6 +176,9 @@ type ConfigRaw struct {
 	TenderlyAccount   string `yaml:"tenderly_account"`
 	TenderlyProject   string `yaml:"tenderly_project"`
 	TenderlyAccessKey string `yaml:"tenderly_access_key"`
+
+	// Test private key for Go tests (optional)
+	TestPrivateKey string `yaml:"test_private_key"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
@@ -318,6 +324,9 @@ func NewConfig(configFilePath string) (*Config, error) {
 		TenderlyAccount:   configRaw.TenderlyAccount,
 		TenderlyProject:   configRaw.TenderlyProject,
 		TenderlyAccessKey: configRaw.TenderlyAccessKey,
+
+		// Pass through test private key (if provided in YAML)
+		TestPrivateKey: configRaw.TestPrivateKey,
 	}
 
 	if config.SocketPath == "" {

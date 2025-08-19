@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"os"
 	"testing"
 	"time"
 
@@ -387,12 +386,14 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 
 	logger := testutil.GetLogger()
 
-	// Create TenderlyClient with real API key
-	tenderlyClient := NewTenderlyClient(nil, logger)
-
-	if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
-		t.Skip("Skipping Tenderly end-to-end integration: TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
+	// Get test config for Tenderly credentials
+	testConfig := testutil.GetTestConfig()
+	if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
+		t.Skip("Skipping Tenderly end-to-end integration: Tenderly credentials must be set in config/aggregator.yaml")
 	}
+
+	// Create TenderlyClient with test config
+	tenderlyClient := NewTenderlyClient(testConfig, logger)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -600,12 +601,13 @@ func printEngineResult(result map[string]interface{}) {
 
 // Benchmark the simulation performance
 func BenchmarkTenderlySimulation(b *testing.B) {
-	if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
-		b.Skip("Skipping benchmark - set TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY environment variables")
+	testConfig := testutil.GetTestConfig()
+	if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
+		b.Skip("Skipping benchmark - Tenderly credentials must be set in config/aggregator.yaml")
 	}
 
 	logger := testutil.GetLogger()
-	client := NewTenderlyClient(nil, logger)
+	client := NewTenderlyClient(testConfig, logger)
 
 	query := &avsproto.EventTrigger_Query{
 		Addresses: []string{SEPOLIA_ETH_USD_FEED},
@@ -626,19 +628,20 @@ func BenchmarkTenderlySimulation(b *testing.B) {
 }
 
 func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *testing.T) {
-	if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
-		t.Skip("Skipping Tenderly comprehensive integration: TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
+	testConfig := testutil.GetTestConfig()
+	if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
+		t.Skip("Skipping Tenderly comprehensive integration: Tenderly credentials must be set in config/aggregator.yaml")
 	}
 
 	logger := testutil.GetLogger()
-	client := NewTenderlyClient(nil, logger)
+	client := NewTenderlyClient(testConfig, logger)
 
 	ctx := context.Background()
 
 	// First, get the current real price from Tenderly to use in our tests
 	t.Run("GetCurrentPriceData", func(t *testing.T) {
-		if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
-			t.Skip("Skipping: TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
+		if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
+			t.Skip("Skipping: Tenderly credentials must be set in config/aggregator.yaml")
 		}
 		t.Logf("🔗 Using Tenderly HTTP API (RPC gateway deprecated)")
 
@@ -661,8 +664,8 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 
 	// Test 1: Condition that SHOULD match (price > very low threshold)
 	t.Run("ConditionShouldMatch_GreaterThan", func(t *testing.T) {
-		if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
-			t.Skip("Skipping: TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
+		if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
+			t.Skip("Skipping: Tenderly credentials must be set in config/aggregator.yaml")
 		}
 		currentPriceFloat := ctx.Value("currentPriceFloat").(float64)
 
@@ -721,8 +724,8 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 
 	// Test 2: Condition that SHOULD NOT match (price > very high threshold)
 	t.Run("ConditionShouldNotMatch_GreaterThan", func(t *testing.T) {
-		if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
-			t.Skip("Skipping: TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
+		if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
+			t.Skip("Skipping: Tenderly credentials must be set in config/aggregator.yaml")
 		}
 		currentPriceFloat := ctx.Value("currentPriceFloat").(float64)
 
@@ -962,12 +965,13 @@ func TestTenderlySimulation_EnhancedConditionHandling_PROPOSAL(t *testing.T) {
 
 // Test the enhanced condition handling behavior
 func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testing.T) {
-	if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
-		t.Skip("Skipping enhanced condition handling integration: TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
+	testConfig := testutil.GetTestConfig()
+	if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
+		t.Skip("Skipping enhanced condition handling integration: Tenderly credentials must be set in config/aggregator.yaml")
 	}
 
 	logger := testutil.GetLogger()
-	client := NewTenderlyClient(nil, logger)
+	client := NewTenderlyClient(testConfig, logger)
 
 	ctx := context.Background()
 
@@ -1894,7 +1898,8 @@ func TestContractWriteWithValueParameter(t *testing.T) {
 
 	t.Run("Enhanced_SimulateContractWrite_With_Value", func(t *testing.T) {
 		logger := testutil.GetLogger()
-		client := NewTenderlyClient(nil, logger)
+		testConfig := testutil.GetTestConfig()
+		client := NewTenderlyClient(testConfig, logger)
 
 		// Test configuration
 		wethAddress := "0xfff9976782d46cc05630d1f6ebab18b2324d6b14"
@@ -1940,8 +1945,9 @@ func TestContractWriteWithValueParameter(t *testing.T) {
 				t.Logf("🧪 Testing value: %s", tc.value)
 
 				// Skip actual simulation if no API key
-				if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
-					t.Logf("⏭️  Skipping actual simulation - TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
+				testConfig := testutil.GetTestConfig()
+				if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
+					t.Logf("⏭️  Skipping actual simulation - Tenderly credentials must be set in config/aggregator.yaml")
 					t.Logf("✅ Function signature accepts value parameter: %s", tc.value)
 					t.Logf("✅ Enhanced SimulateContractWrite can handle value: %s", tc.value)
 					return
@@ -2064,8 +2070,9 @@ func TestEndToEndValuePropagation(t *testing.T) {
 		t.Logf("   - Runner: %s", inputVariables["workflowContext"].(map[string]interface{})["runner"])
 
 		// Skip if no Tenderly API key
-		if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
-			t.Logf("⏭️  Skipping E2E test - TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
+		testConfig := testutil.GetTestConfig()
+		if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
+			t.Logf("⏭️  Skipping E2E test - Tenderly credentials must be set in config/aggregator.yaml")
 			t.Logf("✅ Configuration includes value field: %s", nodeConfig["value"])
 			t.Logf("✅ This would be passed through to Tenderly simulation")
 			t.Logf("✅ Expected result: WETH Deposit event with wad=%s", nodeConfig["value"])

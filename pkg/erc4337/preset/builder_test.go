@@ -14,6 +14,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa/paymaster"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 
@@ -24,15 +25,12 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/ethclient/gethclient"
 	"github.com/ethereum/go-ethereum/rpc"
-
-	// Load test env vars from .env.test via core/testutil side-effects
-	_ "github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 )
 
 const dummyPaymasterAndDataHex = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 
 func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
-	key := os.Getenv("TEST_PRIVATE_KEY")
+	key := testutil.GetTestPrivateKey()
 	var controllerPrivateKey *ecdsa.PrivateKey
 	var err error
 
@@ -48,33 +46,12 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 		controllerPrivateKey, _ = crypto.HexToECDSA(dummyKey)
 	}
 
-	// Prefer env overrides; fallback to known-good Sepolia endpoints for local tests
-	ethRPC := os.Getenv("SEPOLIA_RPC")
-	if ethRPC == "" {
-		ethRPC = "https://ethereum-sepolia.core.chainstack.com/2504cb0765f0edf6c33d99095148006f"
-	}
-	bundlerURL := os.Getenv("SEPOLIA_BUNDLER_RPC")
-	if bundlerURL == "" {
-		bundlerURL = "https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj17Urz1aMATV1ySn4R"
-	}
-	ethWS := os.Getenv("SEPOLIA_WS")
-	if ethWS == "" {
-		if strings.HasPrefix(ethRPC, "https://") {
-			ethWS = strings.Replace(ethRPC, "https://", "wss://", 1)
-		}
-	}
-
+	// Use centralized test config
 	return &config.SmartWalletConfig{
-		EthRpcUrl:  ethRPC,
-		BundlerURL: bundlerURL,
-		EthWsUrl:   ethWS,
-		FactoryAddress: common.HexToAddress(func() string {
-			v := os.Getenv("FACTORY_ADDRESS")
-			if v != "" {
-				return v
-			}
-			return config.DefaultFactoryProxyAddressHex
-		}()),
+		EthRpcUrl:            testutil.GetTestRPC(),
+		BundlerURL:           testutil.GetTestBundlerRPC(),
+		EthWsUrl:             testutil.GetTestWsRPC(),
+		FactoryAddress:       common.HexToAddress(testutil.GetTestFactoryAddress()),
 		EntrypointAddress:    common.HexToAddress(config.DefaultEntrypointAddressHex),
 		ControllerPrivateKey: controllerPrivateKey,
 		PaymasterAddress:     common.HexToAddress(config.DefaultPaymasterAddressHex),
