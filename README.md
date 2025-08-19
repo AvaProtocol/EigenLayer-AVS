@@ -343,7 +343,7 @@ The Ava Protocol uses ERC-4337 bundlers for smart wallet transactions. You can t
 Test if the bundler is responding:
 
 ```bash
-curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj17Urz1aMATV1ySn4R \
+curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey= \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}'
 ```
@@ -358,7 +358,7 @@ curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj1
 Check which EntryPoint contracts the bundler supports:
 
 ```bash
-curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj17Urz1aMATV1ySn4R \
+curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey= \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"eth_supportedEntryPoints","params":[],"id":1}'
 ```
@@ -373,7 +373,7 @@ curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj1
 Test UserOp gas estimation (will fail for non-deployed accounts, which is expected):
 
 ```bash
-curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj17Urz1aMATV1ySn4R \
+curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey= \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"eth_estimateUserOperationGas","params":[{"sender":"0x69bb9251D3c2066DcF7aDAFe3E7CE36E76990617","nonce":"0x0","initCode":"0x","callData":"0x","callGasLimit":"0x0","verificationGasLimit":"0x0","preVerificationGas":"0x0","maxFeePerGas":"0x0","maxPriorityFeePerGas":"0x0","paymasterAndData":"0x","signature":"0x"},"0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"],"id":1}'
 ```
