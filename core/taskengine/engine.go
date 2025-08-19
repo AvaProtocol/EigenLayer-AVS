@@ -229,6 +229,9 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		logger: logger,
 	}
 
+	// Expose config globally for helpers such as the Tenderly client
+	SetGlobalAggregatorConfig(config)
+
 	SetRpc(config.SmartWallet.EthRpcUrl)
 	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
 	//SetWsRpc(config.SmartWallet.EthWsUrl)

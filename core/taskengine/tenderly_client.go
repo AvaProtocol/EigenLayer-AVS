@@ -82,15 +82,35 @@ func NewTenderlyClient(logger sdklogging.Logger) *TenderlyClient {
 		logger:     logger,
 	}
 
-	// Load HTTP Simulation API credentials from environment
-	if acc := os.Getenv("TENDERLY_ACCOUNT"); acc != "" {
-		tc.accountName = acc
+	// Load HTTP Simulation API credentials from config first (preferred), then env as fallback
+	// We access global aggregator config via a helper on Engine when available.
+	// If not available in runtime, fall back to environment variables for tests.
+	if globalConfig := GetGlobalAggregatorConfig(); globalConfig != nil {
+		if globalConfig.TenderlyAccount != "" {
+			tc.accountName = globalConfig.TenderlyAccount
+		}
+		if globalConfig.TenderlyProject != "" {
+			tc.projectName = globalConfig.TenderlyProject
+		}
+		if globalConfig.TenderlyAccessKey != "" {
+			tc.accessKey = globalConfig.TenderlyAccessKey
+		}
 	}
-	if proj := os.Getenv("TENDERLY_PROJECT"); proj != "" {
-		tc.projectName = proj
+	// Fallback to env vars if any field is still empty
+	if tc.accountName == "" {
+		if acc := os.Getenv("TENDERLY_ACCOUNT"); acc != "" {
+			tc.accountName = acc
+		}
 	}
-	if key := os.Getenv("TENDERLY_ACCESS_KEY"); key != "" {
-		tc.accessKey = key
+	if tc.projectName == "" {
+		if proj := os.Getenv("TENDERLY_PROJECT"); proj != "" {
+			tc.projectName = proj
+		}
+	}
+	if tc.accessKey == "" {
+		if key := os.Getenv("TENDERLY_ACCESS_KEY"); key != "" {
+			tc.accessKey = key
+		}
 	}
 
 	return tc
