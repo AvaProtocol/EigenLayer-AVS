@@ -1009,8 +1009,8 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 			"queriesCount", len(queriesArray))
 	}
 
-	// Initialize Tenderly client
-	tenderlyClient := NewTenderlyClient(n.logger)
+	// Use shared Tenderly client from engine
+	tenderlyClient := n.tenderlyClient
 
 	// Get chain ID for simulation
 	var chainID int64 = 11155111 // Default to Sepolia
@@ -2297,6 +2297,7 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 		return nil, fmt.Errorf("failed to create VM: %w", err)
 	}
 
+	vm.tenderlyClient = n.tenderlyClient
 	vm.WithLogger(n.logger).WithDb(n.db).SetSimulation(true)
 
 	// Set TaskOwner from workflowContext.eoaAddress if provided via input variables

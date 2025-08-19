@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -72,7 +73,8 @@ const ChainlinkAggregatorABI = `[
 ]`
 
 // NewTenderlyClient creates a new Tenderly client for HTTP simulation API calls
-func NewTenderlyClient(logger sdklogging.Logger) *TenderlyClient {
+// Config must provide Tenderly credentials via aggregator.yaml; no env fallbacks.
+func NewTenderlyClient(cfg *config.Config, logger sdklogging.Logger) *TenderlyClient {
 	client := resty.New()
 	client.SetTimeout(30 * time.Second)
 	client.SetHeader("Content-Type", "application/json")
@@ -82,35 +84,11 @@ func NewTenderlyClient(logger sdklogging.Logger) *TenderlyClient {
 		logger:     logger,
 	}
 
-	// Load HTTP Simulation API credentials from config first (preferred), then env as fallback
-	// We access global aggregator config via a helper on Engine when available.
-	// If not available in runtime, fall back to environment variables for tests.
-	if globalConfig := GetGlobalAggregatorConfig(); globalConfig != nil {
-		if globalConfig.TenderlyAccount != "" {
-			tc.accountName = globalConfig.TenderlyAccount
-		}
-		if globalConfig.TenderlyProject != "" {
-			tc.projectName = globalConfig.TenderlyProject
-		}
-		if globalConfig.TenderlyAccessKey != "" {
-			tc.accessKey = globalConfig.TenderlyAccessKey
-		}
-	}
-	// Fallback to env vars if any field is still empty
-	if tc.accountName == "" {
-		if acc := os.Getenv("TENDERLY_ACCOUNT"); acc != "" {
-			tc.accountName = acc
-		}
-	}
-	if tc.projectName == "" {
-		if proj := os.Getenv("TENDERLY_PROJECT"); proj != "" {
-			tc.projectName = proj
-		}
-	}
-	if tc.accessKey == "" {
-		if key := os.Getenv("TENDERLY_ACCESS_KEY"); key != "" {
-			tc.accessKey = key
-		}
+	// Load HTTP Simulation API credentials strictly from config (aggregator.yaml)
+	if cfg != nil {
+		tc.accountName = cfg.TenderlyAccount
+		tc.projectName = cfg.TenderlyProject
+		tc.accessKey = cfg.TenderlyAccessKey
 	}
 
 	return tc

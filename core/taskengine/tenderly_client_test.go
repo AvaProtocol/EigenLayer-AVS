@@ -388,7 +388,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 	logger := testutil.GetLogger()
 
 	// Create TenderlyClient with real API key
-	tenderlyClient := NewTenderlyClient(logger)
+	tenderlyClient := NewTenderlyClient(nil, logger)
 
 	if os.Getenv("TENDERLY_ACCOUNT") == "" || os.Getenv("TENDERLY_PROJECT") == "" || os.Getenv("TENDERLY_ACCESS_KEY") == "" {
 		t.Skip("Skipping Tenderly end-to-end integration: TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY must be set")
@@ -605,7 +605,7 @@ func BenchmarkTenderlySimulation(b *testing.B) {
 	}
 
 	logger := testutil.GetLogger()
-	client := NewTenderlyClient(logger)
+	client := NewTenderlyClient(nil, logger)
 
 	query := &avsproto.EventTrigger_Query{
 		Addresses: []string{SEPOLIA_ETH_USD_FEED},
@@ -631,7 +631,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 	}
 
 	logger := testutil.GetLogger()
-	client := NewTenderlyClient(logger)
+	client := NewTenderlyClient(nil, logger)
 
 	ctx := context.Background()
 
@@ -967,7 +967,7 @@ func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testin
 	}
 
 	logger := testutil.GetLogger()
-	client := NewTenderlyClient(logger)
+	client := NewTenderlyClient(nil, logger)
 
 	ctx := context.Background()
 
@@ -1894,7 +1894,7 @@ func TestContractWriteWithValueParameter(t *testing.T) {
 
 	t.Run("Enhanced_SimulateContractWrite_With_Value", func(t *testing.T) {
 		logger := testutil.GetLogger()
-		client := NewTenderlyClient(logger)
+		client := NewTenderlyClient(nil, logger)
 
 		// Test configuration
 		wethAddress := "0xfff9976782d46cc05630d1f6ebab18b2324d6b14"
