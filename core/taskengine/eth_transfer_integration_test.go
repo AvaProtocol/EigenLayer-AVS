@@ -15,8 +15,12 @@ func TestETHTransferTaskIntegration(t *testing.T) {
 	if os.Getenv("RUN_SEPOLIA_E2E") == "" {
 		t.Skip("Skipping TestETHTransferTaskIntegration: RUN_SEPOLIA_E2E not set")
 	}
-	if os.Getenv("SEPOLIA_BUNDLER_RPC") == "" || os.Getenv("SEPOLIA_RPC") == "" {
-		t.Skip("Skipping TestETHTransferTaskIntegration: SEPOLIA_BUNDLER_RPC/SEPOLIA_RPC not set")
+
+	// Check if RPC endpoints are configured
+	testConfig := testutil.GetTestConfig()
+	if testConfig == nil || testConfig.SmartWallet == nil ||
+		testConfig.SmartWallet.EthRpcUrl == "" || testConfig.SmartWallet.BundlerURL == "" {
+		t.Skip("Skipping TestETHTransferTaskIntegration: RPC/Bundler URLs not configured in config/aggregator.yaml")
 	}
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))

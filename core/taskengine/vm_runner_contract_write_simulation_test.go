@@ -2,7 +2,6 @@ package taskengine
 
 import (
 	"math/big"
-	"os"
 	"testing"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
@@ -17,9 +16,10 @@ import (
 )
 
 func TestContractWriteTenderlySimulation(t *testing.T) {
-	// Run when Tenderly HTTP credentials are configured; skip only if missing access key
-	if os.Getenv("TENDERLY_ACCESS_KEY") == "" {
-		t.Skip("Skipping Tenderly simulation: TENDERLY_ACCESS_KEY not set")
+	// Skip if no Tenderly credentials in config
+	testConfig := testutil.GetTestConfig()
+	if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
+		t.Skip("Skipping Tenderly simulation: Tenderly credentials not configured in config/aggregator.yaml")
 	}
 
 	db := testutil.TestMustDB()
@@ -233,8 +233,10 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 
 	// Replicate client request: transfer(to, amount) using derived runner (salt:0)
 	t.Run("RunNodeImmediately_Transfer_WithDerivedRunner_UsesTenderlySimulation", func(t *testing.T) {
-		if os.Getenv("TENDERLY_ACCESS_KEY") == "" {
-			t.Skip("Skipping Tenderly simulation: TENDERLY_ACCESS_KEY not set")
+		// Skip if no Tenderly credentials in config
+		testConfig := testutil.GetTestConfig()
+		if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
+			t.Skip("Skipping Tenderly simulation: Tenderly credentials not configured in config/aggregator.yaml")
 		}
 
 		db := testutil.TestMustDB()
@@ -254,7 +256,7 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		// Derive runner using salt:0 via factory on chain
 		rpcURL := smartWalletConfig.EthRpcUrl
 		if rpcURL == "" {
-			t.Skip("Skipping: SEPOLIA_RPC not configured")
+			t.Skip("Skipping: RPC URL not configured in config/aggregator.yaml")
 		}
 		ethc, err := ethclient.Dial(rpcURL)
 		require.NoError(t, err, "Failed to connect RPC for derivation")
