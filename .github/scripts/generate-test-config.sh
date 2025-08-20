@@ -22,6 +22,7 @@ smart_wallet:
   eth_rpc_url: "${SEPOLIA_RPC}"
   eth_ws_url: "${SEPOLIA_WS}"
   bundler_url: "${SEPOLIA_BUNDLER_RPC}"
+  controller_private_key: "${CONTROLLER_PRIVATE_KEY}"
   # Omit factory_address, entrypoint_address, and paymaster_address to use defaults from config.go constants:
   # - DefaultFactoryProxyAddressHex = "0xB99BC2E399e06CddCF5E725c0ea341E8f0322834"
   # - DefaultEntrypointAddressHex = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"  
