@@ -120,8 +120,8 @@ func GetTestControllerPrivateKey() string {
 	if testConfig != nil && testConfig.SmartWallet != nil && testConfig.SmartWallet.ControllerPrivateKey != nil {
 		return fmt.Sprintf("%x", testConfig.SmartWallet.ControllerPrivateKey.D)
 	}
-	// Fallback to test_private_key if controller key not available
-	return GetTestPrivateKey()
+	// No fallback - controller key and test key serve different purposes
+	return ""
 }
 
 // GetTestFactoryAddress returns the factory address for tests from aggregator config
