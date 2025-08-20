@@ -399,12 +399,6 @@ func (tc *TenderlyClient) createMockTransferLog(contractAddress string, from, to
 
 // SimulateContractWrite simulates a contract write operation using Tenderly
 func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAddress string, callData string, contractABI string, methodName string, chainID int64, fromAddress string, value string) (*ContractWriteSimulationResult, error) {
-	// Defensive check: if logger is nil for any reason, use a no-op logger to prevent panic
-	if tc.logger == nil {
-		// This should never happen in normal operation, but prevents production panics
-		// Create a minimal no-op logger inline
-		tc.logger = &noOpLogger{}
-	}
 	tc.logger.Info("Simulating contract write via Tenderly",
 		"contract", contractAddress,
 		"method", methodName,
