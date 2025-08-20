@@ -22,10 +22,10 @@ smart_wallet:
   eth_rpc_url: "${SEPOLIA_RPC}"
   eth_ws_url: "${SEPOLIA_WS}"
   bundler_url: "${SEPOLIA_BUNDLER_RPC}"
-  # Use known defaults; tests that need specific addresses can override via config accessors
-  factory_address: "0xB99BC2E399e06CddCF5E725c0ea341E8f0322834"
-  entrypoint_address: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
-  paymaster_address: "0x0000000000000000000000000000000000000000"
+  # Omit factory_address, entrypoint_address, and paymaster_address to use defaults from config.go constants:
+  # - DefaultFactoryProxyAddressHex = "0xB99BC2E399e06CddCF5E725c0ea341E8f0322834"
+  # - DefaultEntrypointAddressHex = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"  
+  # - DefaultPaymasterAddressHex = "0xB985af5f96EF2722DC99aEBA573520903B86505e"
 
 # Tenderly HTTP Simulation API
 tenderly_account: "${TENDERLY_ACCOUNT}"
