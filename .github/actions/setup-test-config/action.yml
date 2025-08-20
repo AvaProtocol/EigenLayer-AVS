@@ -1,0 +1,23 @@
+name: 'Setup Test Configuration'
+description: 'Generate config/aggregator.yaml for CI unit tests'
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate and verify config/aggregator.yaml
+      env:
+        # Consolidated CI variables
+        SEPOLIA_RPC: "${{ vars.SEPOLIA_RPC }}"
+        SEPOLIA_WS: "${{ vars.SEPOLIA_WS }}"
+        SEPOLIA_BUNDLER_RPC: "${{ vars.SEPOLIA_BUNDLER_RPC }}"
+        BASE_SEPOLIA_RPC: "${{ vars.BASE_SEPOLIA_RPC }}"
+        BASE_SEPOLIA_BUNDLER_RPC: "${{ vars.BASE_SEPOLIA_BUNDLER_RPC }}"
+
+        # Tenderly HTTP API credentials
+        TENDERLY_ACCOUNT: "${{ vars.TENDERLY_ACCOUNT }}"
+        TENDERLY_PROJECT: "${{ vars.TENDERLY_PROJECT }}"
+
+        # Secrets
+        CONTROLLER_PRIVATE_KEY: "${{ secrets.CONTROLLER_PRIVATE_KEY }}"
+        TENDERLY_ACCESS_KEY: "${{ secrets.TENDERLY_ACCESS_KEY }}"
+      shell: bash
+      run: ./.github/scripts/generate-test-config.sh
