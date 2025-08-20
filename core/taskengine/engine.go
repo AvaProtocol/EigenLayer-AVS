@@ -262,7 +262,9 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	}
 
 	// Initialize shared Tenderly client from config
+	logger.Info("🔧 Engine.New: Creating TenderlyClient", "logger_nil", logger == nil)
 	e.tenderlyClient = NewTenderlyClient(config, logger)
+	logger.Info("🔧 Engine.New: TenderlyClient created", "tenderlyClient_nil", e.tenderlyClient == nil)
 
 	return &e
 }

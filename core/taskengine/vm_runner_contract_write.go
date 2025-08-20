@@ -317,6 +317,14 @@ func (r *ContractWriteProcessor) executeMethodCall(
 
 		// Use shared Tenderly client from VM
 		tenderlyClient := r.vm.tenderlyClient
+		if tenderlyClient == nil {
+			return &avsproto.ContractWriteNode_MethodResult{
+				MethodName: methodCall.MethodName,
+				Success:    false,
+				Error:      "tenderlyClient is nil - cannot simulate contract write",
+				Value:      nil,
+			}
+		}
 
 		// Get chain ID for simulation
 		// STRICT: In runNode path, chainId must be provided via workflowContext.chainId

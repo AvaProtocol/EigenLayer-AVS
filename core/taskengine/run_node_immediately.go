@@ -2297,6 +2297,17 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 		return nil, fmt.Errorf("failed to create VM: %w", err)
 	}
 
+	// Debug: Check if tenderlyClient is nil before assigning
+	if n.tenderlyClient == nil {
+		if n.logger != nil {
+			n.logger.Error("🚨 CRITICAL: Engine tenderlyClient is nil during VM creation")
+		}
+	} else {
+		if n.logger != nil {
+			n.logger.Info("✅ Engine tenderlyClient assigned to VM successfully")
+		}
+	}
+
 	vm.tenderlyClient = n.tenderlyClient
 	vm.WithLogger(n.logger).WithDb(n.db).SetSimulation(true)
 
