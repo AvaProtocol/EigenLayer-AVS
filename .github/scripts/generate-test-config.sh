@@ -42,8 +42,8 @@ tenderly_account: "${TENDERLY_ACCOUNT}"
 tenderly_project: "${TENDERLY_PROJECT}"
 tenderly_access_key: "${TENDERLY_ACCESS_KEY}"
 
-# Test private key (only used in tests)
-test_private_key: "${CONTROLLER_PRIVATE_KEY}"
+# Test private key (only used in tests, separate from controller key)
+test_private_key: "${TEST_PRIVATE_KEY}"
 YAML
 
 echo "Verifying config/aggregator.yaml..."

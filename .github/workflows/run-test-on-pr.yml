@@ -97,6 +97,7 @@ jobs:
           tenderly-project: ${{ vars.TENDERLY_PROJECT }}
           controller-private-key: ${{ secrets.CONTROLLER_PRIVATE_KEY }}
           tenderly-access-key: ${{ secrets.TENDERLY_ACCESS_KEY }}
+          test-private-key: ${{ secrets.TEST_PRIVATE_KEY }}
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -158,6 +159,7 @@ jobs:
           tenderly-project: ${{ vars.TENDERLY_PROJECT }}
           controller-private-key: ${{ secrets.CONTROLLER_PRIVATE_KEY }}
           tenderly-access-key: ${{ secrets.TENDERLY_ACCESS_KEY }}
+          test-private-key: ${{ secrets.TEST_PRIVATE_KEY }}
 
       - name: Run Go test
         run: |
