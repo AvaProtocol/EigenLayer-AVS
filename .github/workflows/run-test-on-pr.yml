@@ -107,8 +107,8 @@ jobs:
           # Auto-generated for CI unit tests
           environment: development
           # Global RPCs used by components that read top-level fields
-          eth_http_rpc_url: "${SEPOLIA_RPC}"
-          eth_ws_rpc_url: "${SEPOLIA_WS}"
+          eth_rpc_url: "${SEPOLIA_RPC}"
+          eth_ws_url: "${SEPOLIA_WS}"
           smart_wallet:
             eth_rpc_url: "${SEPOLIA_RPC}"
             eth_ws_url: "${SEPOLIA_WS}"
@@ -158,8 +158,8 @@ jobs:
           environment: development
 
           # Global RPCs used by components that read top-level fields
-          eth_http_rpc_url: "${SEPOLIA_RPC}"
-          eth_ws_rpc_url: "${SEPOLIA_WS}"
+          eth_rpc_url: "${SEPOLIA_RPC}"
+          eth_ws_url: "${SEPOLIA_WS}"
 
           smart_wallet:
             eth_rpc_url: "${SEPOLIA_RPC}"
@@ -212,8 +212,8 @@ jobs:
           environment: development
 
           # Global RPCs used by components that read top-level fields
-          eth_http_rpc_url: "${SEPOLIA_RPC}"
-          eth_ws_rpc_url: "${SEPOLIA_WS}"
+          eth_rpc_url: "${SEPOLIA_RPC}"
+          eth_ws_url: "${SEPOLIA_WS}"
 
           smart_wallet:
             eth_rpc_url: "${SEPOLIA_RPC}"
@@ -266,8 +266,8 @@ jobs:
           environment: development
 
           # Global RPCs used by components that read top-level fields
-          eth_http_rpc_url: "${SEPOLIA_RPC}"
-          eth_ws_rpc_url: "${SEPOLIA_WS}"
+          eth_rpc_url: "${SEPOLIA_RPC}"
+          eth_ws_url: "${SEPOLIA_WS}"
 
           smart_wallet:
             eth_rpc_url: "${SEPOLIA_RPC}"
@@ -371,8 +371,8 @@ jobs:
           environment: development
 
           # Global RPCs used by components that read top-level fields
-          eth_http_rpc_url: "${SEPOLIA_RPC}"
-          eth_ws_rpc_url: "${SEPOLIA_WS}"
+          eth_rpc_url: "${SEPOLIA_RPC}"
+          eth_ws_url: "${SEPOLIA_WS}"
 
           smart_wallet:
             eth_rpc_url: "${SEPOLIA_RPC}"
