@@ -18,6 +18,15 @@ eth_ws_url: "${SEPOLIA_WS}"
 # ECDSA private key for aggregator (from test config)
 ecdsa_private_key: "${CONTROLLER_PRIVATE_KEY}"
 
+rpc_bind_address: "0.0.0.0:2206"
+http_bind_address: "0.0.0.0:8080"
+
+# EigenLayer core contracts on Sepolia (from official deployment)
+avs_registry_coordinator_address: "0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD"
+operator_state_retriever_address: "0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605"
+
+jwt_secret: "test-jwt-secret-for-ci-only"
+
 smart_wallet:
   eth_rpc_url: "${SEPOLIA_RPC}"
   eth_ws_url: "${SEPOLIA_WS}"
