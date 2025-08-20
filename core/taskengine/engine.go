@@ -537,9 +537,10 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		n.logger.Debug("Using mock address derivation due to nil rpcConn (test environment)", "owner", user.Address.Hex(), "salt", saltBig.String())
 
 		// Create a deterministic address based on owner + factory + salt for testing
-		mockAddr := common.BytesToAddress(crypto.Keccak256(
-			append(append(user.Address.Bytes(), factoryAddr.Bytes()...), saltBig.Bytes()...)[:20],
-		))
+		// Concatenate the bytes, hash with Keccak256, and take the last 20 bytes for the address
+		concatenated := append(append(user.Address.Bytes(), factoryAddr.Bytes()...), saltBig.Bytes()...)
+		hash := crypto.Keccak256(concatenated)
+		mockAddr := common.BytesToAddress(hash[12:]) // Take the last 20 bytes
 		derivedSenderAddress = &mockAddr
 	}
 
