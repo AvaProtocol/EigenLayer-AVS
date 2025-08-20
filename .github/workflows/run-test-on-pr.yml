@@ -87,6 +87,16 @@ jobs:
 
       - name: Setup test configuration
         uses: ./.github/actions/setup-test-config
+        with:
+          sepolia-rpc: ${{ vars.SEPOLIA_RPC }}
+          sepolia-ws: ${{ vars.SEPOLIA_WS }}
+          sepolia-bundler-rpc: ${{ vars.SEPOLIA_BUNDLER_RPC }}
+          base-sepolia-rpc: ${{ vars.BASE_SEPOLIA_RPC }}
+          base-sepolia-bundler-rpc: ${{ vars.BASE_SEPOLIA_BUNDLER_RPC }}
+          tenderly-account: ${{ vars.TENDERLY_ACCOUNT }}
+          tenderly-project: ${{ vars.TENDERLY_PROJECT }}
+          controller-private-key: ${{ secrets.CONTROLLER_PRIVATE_KEY }}
+          tenderly-access-key: ${{ secrets.TENDERLY_ACCESS_KEY }}
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -138,6 +148,16 @@ jobs:
 
       - name: Setup test configuration
         uses: ./.github/actions/setup-test-config
+        with:
+          sepolia-rpc: ${{ vars.SEPOLIA_RPC }}
+          sepolia-ws: ${{ vars.SEPOLIA_WS }}
+          sepolia-bundler-rpc: ${{ vars.SEPOLIA_BUNDLER_RPC }}
+          base-sepolia-rpc: ${{ vars.BASE_SEPOLIA_RPC }}
+          base-sepolia-bundler-rpc: ${{ vars.BASE_SEPOLIA_BUNDLER_RPC }}
+          tenderly-account: ${{ vars.TENDERLY_ACCOUNT }}
+          tenderly-project: ${{ vars.TENDERLY_PROJECT }}
+          controller-private-key: ${{ secrets.CONTROLLER_PRIVATE_KEY }}
+          tenderly-access-key: ${{ secrets.TENDERLY_ACCESS_KEY }}
 
       - name: Run Go test
         run: |
