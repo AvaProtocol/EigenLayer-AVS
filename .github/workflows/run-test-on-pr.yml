@@ -161,6 +161,9 @@ jobs:
           eth_rpc_url: "${SEPOLIA_RPC}"
           eth_ws_url: "${SEPOLIA_WS}"
 
+          # ECDSA private key for aggregator (from test config)
+          ecdsa_private_key: "${CONTROLLER_PRIVATE_KEY}"
+
           smart_wallet:
             eth_rpc_url: "${SEPOLIA_RPC}"
             eth_ws_url: "${SEPOLIA_WS}"
@@ -215,6 +218,9 @@ jobs:
           eth_rpc_url: "${SEPOLIA_RPC}"
           eth_ws_url: "${SEPOLIA_WS}"
 
+          # ECDSA private key for aggregator (from test config)
+          ecdsa_private_key: "${CONTROLLER_PRIVATE_KEY}"
+
           smart_wallet:
             eth_rpc_url: "${SEPOLIA_RPC}"
             eth_ws_url: "${SEPOLIA_WS}"
@@ -268,6 +274,9 @@ jobs:
           # Global RPCs used by components that read top-level fields
           eth_rpc_url: "${SEPOLIA_RPC}"
           eth_ws_url: "${SEPOLIA_WS}"
+
+          # ECDSA private key for aggregator (from test config)
+          ecdsa_private_key: "${CONTROLLER_PRIVATE_KEY}"
 
           smart_wallet:
             eth_rpc_url: "${SEPOLIA_RPC}"
@@ -373,6 +382,9 @@ jobs:
           # Global RPCs used by components that read top-level fields
           eth_rpc_url: "${SEPOLIA_RPC}"
           eth_ws_url: "${SEPOLIA_WS}"
+
+          # ECDSA private key for aggregator (from test config)
+          ecdsa_private_key: "${CONTROLLER_PRIVATE_KEY}"
 
           smart_wallet:
             eth_rpc_url: "${SEPOLIA_RPC}"
