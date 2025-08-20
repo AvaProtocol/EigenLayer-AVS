@@ -38,7 +38,11 @@ func TestTaskStatCount(t *testing.T) {
 	statSvc := NewStatService(db)
 	// Query statistics using the same smart wallet address used for task creation
 	addr := common.HexToAddress(smartWalletAddress)
-	result, _ := statSvc.GetTaskCount(&model.SmartWallet{Address: &addr})
+	owner := testutil.TestUser1().Address
+	result, _ := statSvc.GetTaskCount(&model.SmartWallet{
+		Owner:   &owner,
+		Address: &addr,
+	})
 
 	if !reflect.DeepEqual(
 		result, &model.SmartWalletTaskStat{
