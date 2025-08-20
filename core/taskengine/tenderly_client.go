@@ -411,7 +411,7 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 
 	// Ensure HTTP Simulation API credentials are configured
 	if tc.accountName == "" || tc.projectName == "" || tc.accessKey == "" {
-		return nil, fmt.Errorf("Tenderly HTTP Simulation API credentials not configured. Please set TENDERLY_ACCOUNT, TENDERLY_PROJECT, and TENDERLY_ACCESS_KEY environment variables")
+		return nil, fmt.Errorf("Tenderly HTTP Simulation API credentials not configured. Please set tenderly_account, tenderly_project, and tenderly_access_key in config/aggregator.yaml")
 	}
 
 	var simResult interface{}

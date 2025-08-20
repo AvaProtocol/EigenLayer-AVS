@@ -9,6 +9,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func TestTaskStatCount(t *testing.T) {
@@ -17,8 +18,6 @@ func TestTaskStatCount(t *testing.T) {
 
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
-
-	user1 := testutil.TestUser1()
 
 	// Get a wallet for the user to derive the correct smart wallet address
 	walletResp, err := n.GetWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
@@ -37,7 +36,9 @@ func TestTaskStatCount(t *testing.T) {
 	n.CreateTask(testutil.TestUser1(), tr1)
 
 	statSvc := NewStatService(db)
-	result, _ := statSvc.GetTaskCount(user1.ToSmartWallet())
+	// Query statistics using the same smart wallet address used for task creation
+	addr := common.HexToAddress(smartWalletAddress)
+	result, _ := statSvc.GetTaskCount(&model.SmartWallet{Address: &addr})
 
 	if !reflect.DeepEqual(
 		result, &model.SmartWalletTaskStat{
