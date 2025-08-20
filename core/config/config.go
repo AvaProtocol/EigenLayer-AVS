@@ -96,9 +96,9 @@ type Config struct {
 	MetricsReg *prometheus.Registry
 
 	// Tenderly HTTP Simulation API credentials (optional)
-	TenderlyAccount   string
-	TenderlyProject   string
-	TenderlyAccessKey string
+	TenderlyAccount   string `yaml:"tenderly_account"`
+	TenderlyProject   string `yaml:"tenderly_project"`
+	TenderlyAccessKey string `yaml:"tenderly_access_key"`
 
 	// Test private key for Go tests (optional)
 	TestPrivateKey string
@@ -172,7 +172,7 @@ type ConfigRaw struct {
 
 	Macros map[string]map[string]string `yaml:"macros"`
 
-	// Optional Tenderly HTTP Simulation API credentials
+	// Tenderly HTTP Simulation API credentials (optional)
 	TenderlyAccount   string `yaml:"tenderly_account"`
 	TenderlyProject   string `yaml:"tenderly_project"`
 	TenderlyAccessKey string `yaml:"tenderly_access_key"`
