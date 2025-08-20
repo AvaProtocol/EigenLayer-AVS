@@ -28,6 +28,9 @@ inputs:
   tenderly-access-key:
     description: 'Tenderly access key'
     required: true
+  test-private-key:
+    description: 'Test private key for Go unit tests (separate from controller key)'
+    required: true
 runs:
   using: 'composite'
   steps:
@@ -47,5 +50,6 @@ runs:
         # Secrets
         CONTROLLER_PRIVATE_KEY: "${{ inputs.controller-private-key }}"
         TENDERLY_ACCESS_KEY: "${{ inputs.tenderly-access-key }}"
+        TEST_PRIVATE_KEY: "${{ inputs.test-private-key }}"
       shell: bash
       run: ./.github/scripts/generate-test-config.sh
