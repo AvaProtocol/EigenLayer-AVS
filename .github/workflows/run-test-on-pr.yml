@@ -139,6 +139,60 @@ jobs:
           fi
           test -s config/aggregator.yaml || (echo "config/aggregator.yaml missing"; exit 1)
 
+      - name: Generate config/aggregator.yaml for tests (per-job workspace)
+        env:
+          # Consolidated CI variables
+          SEPOLIA_RPC: "${{ vars.SEPOLIA_RPC }}"
+          SEPOLIA_WS: "${{ vars.SEPOLIA_WS }}"
+          SEPOLIA_BUNDLER_RPC: "${{ vars.SEPOLIA_BUNDLER_RPC }}"
+          BASE_SEPOLIA_RPC: "${{ vars.BASE_SEPOLIA_RPC }}"
+          BASE_SEPOLIA_BUNDLER_RPC: "${{ vars.BASE_SEPOLIA_BUNDLER_RPC }}"
+
+          # Tenderly HTTP API credentials
+          TENDERLY_ACCOUNT: "${{ vars.TENDERLY_ACCOUNT }}"
+          TENDERLY_PROJECT: "${{ vars.TENDERLY_PROJECT }}"
+
+          # Secrets
+          CONTROLLER_PRIVATE_KEY: "${{ secrets.CONTROLLER_PRIVATE_KEY }}"
+          TENDERLY_ACCESS_KEY: "${{ secrets.TENDERLY_ACCESS_KEY }}"
+        run: |
+          mkdir -p config
+          cat > config/aggregator.yaml <<'YAML'
+          # Auto-generated for CI unit tests
+          environment: development
+
+          # Global RPCs used by components that read top-level fields
+          eth_http_rpc_url: "${SEPOLIA_RPC}"
+          eth_ws_rpc_url: "${SEPOLIA_WS}"
+
+          smart_wallet:
+            eth_rpc_url: "${SEPOLIA_RPC}"
+            eth_ws_url: "${SEPOLIA_WS}"
+            bundler_url: "${SEPOLIA_BUNDLER_RPC}"
+            # Use known defaults; tests that need specific addresses can override via config accessors
+            factory_address: "0xB99BC2E399e06CddCF5E725c0ea341E8f0322834"
+            entrypoint_address: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
+            paymaster_address: "0x0000000000000000000000000000000000000000"
+
+          # Tenderly HTTP Simulation API
+          tenderly_account: "${TENDERLY_ACCOUNT}"
+          tenderly_project: "${TENDERLY_PROJECT}"
+          tenderly_access_key: "${TENDERLY_ACCESS_KEY}"
+
+          # Test private key (only used in tests)
+          test_private_key: "${CONTROLLER_PRIVATE_KEY}"
+          YAML
+
+      - name: Verify aggregator.yaml exists (per-job workspace)
+        run: |
+          echo "pwd=$(pwd)"
+          ls -la || true
+          ls -la config || true
+          if [ -f config/aggregator.yaml ]; then
+            sed -n '1,40p' config/aggregator.yaml | sed -e 's/tenderly_access_key:.*/tenderly_access_key: ***REDACTED***/' -e 's/test_private_key:.*/test_private_key: ***REDACTED***/' -e 's/bundler_url:.*/bundler_url: ***REDACTED***/'
+          fi
+          test -s config/aggregator.yaml || (echo "config/aggregator.yaml missing"; exit 1)
+
       - name: Generate config/aggregator.yaml for tests
         env:
           # Consolidated CI variables
