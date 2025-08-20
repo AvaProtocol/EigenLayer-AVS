@@ -26,10 +26,19 @@ func TestETHTransferTaskIntegration(t *testing.T) {
 
 	user := testutil.TestUser1()
 
+	// Get a wallet for the user to derive the correct smart wallet address
+	walletResp, err := n.GetWallet(user, &avsproto.GetWalletReq{
+		Salt: "12345",
+	})
+	if err != nil {
+		t.Fatalf("Failed to get wallet: %v", err)
+	}
+	smartWalletAddress := walletResp.Address
+
 	// Create an ETH transfer task
 	tr := &avsproto.CreateTaskReq{
 		Name:               "ETH Transfer Test",
-		SmartWalletAddress: "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6",
+		SmartWalletAddress: smartWalletAddress,
 		Trigger: &avsproto.TaskTrigger{
 			Id:          "manual_trigger",
 			Name:        "manual",
@@ -167,10 +176,19 @@ func TestETHTransferTaskWithInvalidConfig(t *testing.T) {
 
 	user := testutil.TestUser1()
 
+	// Get a wallet for the user to derive the correct smart wallet address
+	walletResp, err := n.GetWallet(user, &avsproto.GetWalletReq{
+		Salt: "12345",
+	})
+	if err != nil {
+		t.Fatalf("Failed to get wallet: %v", err)
+	}
+	smartWalletAddress := walletResp.Address
+
 	// Create an ETH transfer task with invalid destination
 	tr := &avsproto.CreateTaskReq{
 		Name:               "Invalid ETH Transfer Test",
-		SmartWalletAddress: "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6",
+		SmartWalletAddress: smartWalletAddress,
 		Trigger: &avsproto.TaskTrigger{
 			Id:          "manual_trigger",
 			Name:        "manual",

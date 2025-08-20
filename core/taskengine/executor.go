@@ -227,19 +227,15 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		}
 		owner := common.HexToAddress(task.Owner)
 		// Ensure the provided wallet belongs to owner
-		// Validate ownership using engine's ListWallets
-		resp, err := (&Engine{db: x.db, smartWalletConfig: x.smartWalletConfig, logger: x.logger}).ListWallets(owner, &avsproto.ListWalletReq{})
+		// Use ValidWalletOwner which only requires database access (no RPC)
+		user := &model.User{Address: owner}
+		smartWalletAddr := common.HexToAddress(task.SmartWalletAddress)
+
+		isValid, err := ValidWalletOwner(x.db, user, smartWalletAddr)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list wallets for owner %s: %w", owner.Hex(), err)
+			return nil, fmt.Errorf("failed to validate wallet ownership for owner %s: %w", owner.Hex(), err)
 		}
-		var okMatch bool
-		for _, w := range resp.GetItems() {
-			if strings.EqualFold(w.GetAddress(), task.SmartWalletAddress) {
-				okMatch = true
-				break
-			}
-		}
-		if !okMatch {
+		if !isValid {
 			return nil, fmt.Errorf("task smart wallet address does not belong to owner")
 		}
 		vm.AddVar("aa_sender", common.HexToAddress(task.SmartWalletAddress).Hex())

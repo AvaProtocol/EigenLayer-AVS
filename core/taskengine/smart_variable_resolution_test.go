@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -476,14 +475,6 @@ func createTestEngineForSmartResolution(t *testing.T) *Engine {
 	db := testutil.TestMustDB()
 	t.Cleanup(func() { db.Close() })
 
-	// Create a dummy smartWalletConfig for testing
-	smartWalletConfig := &config.SmartWalletConfig{
-		EthRpcUrl: "http://localhost:8545", // Dummy RPC URL for testing
-	}
-
-	return &Engine{
-		logger:            logger,
-		db:                db,
-		smartWalletConfig: smartWalletConfig,
-	}
+	config := testutil.GetAggregatorConfig()
+	return New(db, config, nil, logger)
 }

@@ -127,30 +127,49 @@ func TestListTasks(t *testing.T) {
 
 	config := testutil.GetAggregatorConfig()
 	n := New(db, config, nil, testutil.GetLogger())
-	n.GetWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
+
+	// Get three different wallets with different salts to derive different smart wallet addresses
+	wallet1Resp, err := n.GetWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
 		Salt: "12345",
 	})
-	n.GetWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
+	if err != nil {
+		t.Fatalf("Failed to get wallet 1: %v", err)
+	}
+	smartWallet1Address := wallet1Resp.Address
+
+	wallet2Resp, err := n.GetWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
 		Salt: "6789",
 	})
+	if err != nil {
+		t.Fatalf("Failed to get wallet 2: %v", err)
+	}
+	smartWallet2Address := wallet2Resp.Address
+
+	wallet3Resp, err := n.GetWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
+		Salt: "99999",
+	})
+	if err != nil {
+		t.Fatalf("Failed to get wallet 3: %v", err)
+	}
+	smartWallet3Address := wallet3Resp.Address
 
 	tr1 := testutil.RestTask()
 	tr1.Name = "t1"
-	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	tr1.SmartWalletAddress = smartWallet1Address
 	n.CreateTask(testutil.TestUser1(), tr1)
 
 	tr2 := testutil.RestTask()
 	tr2.Name = "t2"
-	tr2.SmartWalletAddress = "0x961d2DD008960A9777571D78D21Ec9C3E5c6020c"
+	tr2.SmartWalletAddress = smartWallet2Address
 	n.CreateTask(testutil.TestUser1(), tr2)
 
 	tr3 := testutil.RestTask()
 	tr3.Name = "t3"
-	tr3.SmartWalletAddress = "0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4"
+	tr3.SmartWalletAddress = smartWallet3Address
 	n.CreateTask(testutil.TestUser1(), tr3)
 
 	result, err := n.ListTasksByUser(testutil.TestUser1(), &avsproto.ListTasksReq{
-		SmartWalletAddress: []string{"0x5D36dCdB35D0C85D88C5AA31E37cac165B480ba4"},
+		SmartWalletAddress: []string{smartWallet3Address},
 	})
 
 	if err != nil {
@@ -174,8 +193,8 @@ func TestListTasks(t *testing.T) {
 
 	result, err = n.ListTasksByUser(testutil.TestUser1(), &avsproto.ListTasksReq{
 		SmartWalletAddress: []string{
-			"0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6",
-			"0x961d2DD008960A9777571D78D21Ec9C3E5c6020c",
+			smartWallet1Address,
+			smartWallet2Address,
 		},
 	})
 
