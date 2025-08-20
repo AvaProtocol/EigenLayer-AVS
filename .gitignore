@@ -50,3 +50,7 @@ MANIFEST
 *_logs.txt
 _aggregator-*.txt
 _operator-*.txt
+
+# Environment files
+.env.test
+.env.local

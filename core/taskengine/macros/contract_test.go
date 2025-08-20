@@ -2,9 +2,9 @@ package macros
 
 import (
 	"math/big"
-	"os"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/expr-lang/expr"
@@ -19,10 +19,11 @@ type answer struct {
 }
 
 func TestQueryContract(t *testing.T) {
-	rpc := os.Getenv("SEPOLIA_RPC")
-	if rpc == "" {
-		t.Skip("Skipping TestQueryContract: RPC_URL/ETH_RPC_URL not set for Sepolia")
+	testConfig := testutil.GetTestConfig()
+	if testConfig == nil || testConfig.SmartWallet == nil || testConfig.SmartWallet.EthRpcUrl == "" {
+		t.Skip("Skipping TestQueryContract: RPC URL not configured in config/aggregator.yaml")
 	}
+	rpc := testConfig.SmartWallet.EthRpcUrl
 	conn, err := ethclient.Dial(rpc)
 	if err != nil {
 		t.Skipf("Skipping TestQueryContract: failed to dial RPC %s: %v", rpc, err)
@@ -45,10 +46,11 @@ func TestQueryContract(t *testing.T) {
 }
 
 func TestExpression(t *testing.T) {
-	rpc := os.Getenv("SEPOLIA_RPC")
-	if rpc == "" {
-		t.Skip("Skipping TestExpression: RPC_URL/ETH_RPC_URL not set for Sepolia")
+	testConfig := testutil.GetTestConfig()
+	if testConfig == nil || testConfig.SmartWallet == nil || testConfig.SmartWallet.EthRpcUrl == "" {
+		t.Skip("Skipping TestExpression: RPC URL not configured in config/aggregator.yaml")
 	}
+	rpc := testConfig.SmartWallet.EthRpcUrl
 	SetRpc(rpc)
 
 	p, e := CompileExpression(`priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306")`)
@@ -95,10 +97,11 @@ func TestExpression(t *testing.T) {
 }
 
 func TestExpressionDynamic(t *testing.T) {
-	rpc := os.Getenv("SEPOLIA_RPC")
-	if rpc == "" {
-		t.Skip("Skipping TestExpressionDynamic: RPC_URL/ETH_RPC_URL not set for Sepolia")
+	testConfig := testutil.GetTestConfig()
+	if testConfig == nil || testConfig.SmartWallet == nil || testConfig.SmartWallet.EthRpcUrl == "" {
+		t.Skip("Skipping TestExpressionDynamic: RPC URL not configured in config/aggregator.yaml")
 	}
+	rpc := testConfig.SmartWallet.EthRpcUrl
 	SetRpc(rpc)
 
 	// https://sepolia.etherscan.io/address/0x9aCb42Ac07C72cFc29Cd95d9DEaC807E93ada1F6#code
