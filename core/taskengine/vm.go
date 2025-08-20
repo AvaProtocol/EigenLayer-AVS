@@ -2181,6 +2181,8 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 	// FORCE simulation for RunNodeWithInputs - it should NEVER execute real transactions
 	tempVM.IsSimulation = true // Force simulation for RunNodeWithInputs
 	tempVM.TaskOwner = v.TaskOwner
+	// Propagate shared clients (e.g., Tenderly)
+	tempVM.tenderlyClient = v.tenderlyClient
 
 	// Log simulation mode for debugging
 	if v.logger != nil {
