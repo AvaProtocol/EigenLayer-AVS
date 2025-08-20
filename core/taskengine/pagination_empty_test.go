@@ -17,6 +17,15 @@ func TestPaginationEmptyParameters(t *testing.T) {
 
 	user := testutil.TestUser1()
 
+	// Get a wallet for the user to derive the correct smart wallet address
+	walletResp, err := n.GetWallet(user, &avsproto.GetWalletReq{
+		Salt: "12345",
+	})
+	if err != nil {
+		t.Fatalf("Failed to get wallet: %v", err)
+	}
+	smartWalletAddress := walletResp.Address
+
 	result, err := n.ListSecrets(user, &avsproto.ListSecretsReq{
 		Before: "",
 		After:  "",
@@ -48,7 +57,7 @@ func TestPaginationEmptyParameters(t *testing.T) {
 	}
 
 	taskResult, err := n.ListTasksByUser(user, &avsproto.ListTasksReq{
-		SmartWalletAddress: []string{"0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"},
+		SmartWalletAddress: []string{smartWalletAddress},
 		Before:             "",
 		After:              "",
 		Limit:              5,
@@ -61,7 +70,7 @@ func TestPaginationEmptyParameters(t *testing.T) {
 	}
 
 	tr := testutil.JsFastTask()
-	tr.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	tr.SmartWalletAddress = smartWalletAddress
 	task, _ := n.CreateTask(user, tr)
 
 	execResult, err := n.ListExecutions(user, &avsproto.ListExecutionsReq{

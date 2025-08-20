@@ -13,8 +13,8 @@ func ValidWalletAddress(address string) bool {
 }
 
 func ValidWalletOwner(db storage.Storage, u *model.User, smartWalletAddress common.Address) (bool, error) {
-	// the smart wallet address is the default one
-	if u.SmartAccountAddress.Hex() == smartWalletAddress.Hex() {
+	// the smart wallet address is the default one (if SmartAccountAddress is set)
+	if u.SmartAccountAddress != nil && u.SmartAccountAddress.Hex() == smartWalletAddress.Hex() {
 		return true, nil
 	}
 

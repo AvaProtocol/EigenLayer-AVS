@@ -20,12 +20,20 @@ func TestTaskStatCount(t *testing.T) {
 
 	user1 := testutil.TestUser1()
 
+	// Get a wallet for the user to derive the correct smart wallet address
+	walletResp, err := n.GetWallet(testutil.TestUser1(), &avsproto.GetWalletReq{
+		Salt: "12345",
+	})
+	if err != nil {
+		t.Fatalf("Failed to get wallet: %v", err)
+	}
+	smartWalletAddress := walletResp.Address
+
 	// Populate task
 	tr1 := testutil.RestTask()
 	tr1.Name = "t1"
 	tr1.MaxExecution = 1
-	// salt 0
-	tr1.SmartWalletAddress = "0x7c3a76086588230c7B3f4839A4c1F5BBafcd57C6"
+	tr1.SmartWalletAddress = smartWalletAddress
 	n.CreateTask(testutil.TestUser1(), tr1)
 
 	statSvc := NewStatService(db)

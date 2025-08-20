@@ -3,7 +3,6 @@ package taskengine
 import (
 	"testing"
 
-	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
@@ -12,15 +11,8 @@ import (
 func createTestEngine() *Engine {
 	logger := testutil.GetLogger()
 	db := testutil.TestMustDB()
-	// Create a dummy smartWalletConfig for testing
-	smartWalletConfig := &config.SmartWalletConfig{
-		EthRpcUrl: "http://localhost:8545", // Dummy RPC URL for testing
-	}
-	return &Engine{
-		logger:            logger,
-		db:                db,
-		smartWalletConfig: smartWalletConfig,
-	}
+	config := testutil.GetAggregatorConfig()
+	return New(db, config, nil, logger)
 }
 
 func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
