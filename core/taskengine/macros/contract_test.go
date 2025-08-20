@@ -20,8 +20,11 @@ type answer struct {
 
 func TestQueryContract(t *testing.T) {
 	testConfig := testutil.GetTestConfig()
-	if testConfig == nil || testConfig.SmartWallet == nil || testConfig.SmartWallet.EthRpcUrl == "" {
-		t.Skip("Skipping TestQueryContract: RPC URL not configured in config/aggregator.yaml")
+	if testConfig == nil {
+		t.Fatal("Test config is nil - config/aggregator.yaml not loaded")
+	}
+	if testConfig.SmartWallet == nil || testConfig.SmartWallet.EthRpcUrl == "" {
+		t.Fatal("RPC URL not configured in config/aggregator.yaml")
 	}
 	rpc := testConfig.SmartWallet.EthRpcUrl
 	conn, err := ethclient.Dial(rpc)
@@ -47,8 +50,11 @@ func TestQueryContract(t *testing.T) {
 
 func TestExpression(t *testing.T) {
 	testConfig := testutil.GetTestConfig()
-	if testConfig == nil || testConfig.SmartWallet == nil || testConfig.SmartWallet.EthRpcUrl == "" {
-		t.Skip("Skipping TestExpression: RPC URL not configured in config/aggregator.yaml")
+	if testConfig == nil {
+		t.Fatal("Test config is nil - config/aggregator.yaml not loaded")
+	}
+	if testConfig.SmartWallet == nil || testConfig.SmartWallet.EthRpcUrl == "" {
+		t.Fatal("RPC URL not configured in config/aggregator.yaml")
 	}
 	rpc := testConfig.SmartWallet.EthRpcUrl
 	SetRpc(rpc)
@@ -98,8 +104,11 @@ func TestExpression(t *testing.T) {
 
 func TestExpressionDynamic(t *testing.T) {
 	testConfig := testutil.GetTestConfig()
-	if testConfig == nil || testConfig.SmartWallet == nil || testConfig.SmartWallet.EthRpcUrl == "" {
-		t.Skip("Skipping TestExpressionDynamic: RPC URL not configured in config/aggregator.yaml")
+	if testConfig == nil {
+		t.Fatal("Test config is nil - config/aggregator.yaml not loaded")
+	}
+	if testConfig.SmartWallet == nil || testConfig.SmartWallet.EthRpcUrl == "" {
+		t.Fatal("RPC URL not configured in config/aggregator.yaml")
 	}
 	rpc := testConfig.SmartWallet.EthRpcUrl
 	SetRpc(rpc)
