@@ -303,6 +303,10 @@ func GetAggregatorConfig() *config.Config {
 			PaymasterAddress:   common.HexToAddress(GetTestPaymasterAddress()),
 			WhitelistAddresses: []common.Address{},
 		},
+		// Include Tenderly credentials for tests
+		TenderlyAccount:   GetTestTenderlyAccount(),
+		TenderlyProject:   GetTestTenderlyProject(),
+		TenderlyAccessKey: GetTestTenderlyAccessKey(),
 	}
 }
 
