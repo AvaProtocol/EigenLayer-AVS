@@ -42,3 +42,6 @@ MANIFEST
 
 # Plugin files for semantic release
 .semrel/
+
+*.log
+*.zip
