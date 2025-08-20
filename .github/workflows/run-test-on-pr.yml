@@ -103,7 +103,7 @@ jobs:
           TENDERLY_ACCESS_KEY: "${{ secrets.TENDERLY_ACCESS_KEY }}"
         run: |
           mkdir -p config
-          cat > config/aggregator.yaml <<'YAML'
+          cat > config/aggregator.yaml <<YAML
           # Auto-generated for CI unit tests
           environment: development
           # Global RPCs used by components that read top-level fields
@@ -153,7 +153,7 @@ jobs:
           TENDERLY_ACCESS_KEY: "${{ secrets.TENDERLY_ACCESS_KEY }}"
         run: |
           mkdir -p config
-          cat > config/aggregator.yaml <<'YAML'
+          cat > config/aggregator.yaml <<YAML
           # Auto-generated for CI unit tests
           environment: development
 
@@ -207,7 +207,7 @@ jobs:
           TENDERLY_ACCESS_KEY: "${{ secrets.TENDERLY_ACCESS_KEY }}"
         run: |
           mkdir -p config
-          cat > config/aggregator.yaml <<'YAML'
+          cat > config/aggregator.yaml <<YAML
           # Auto-generated for CI unit tests
           environment: development
 
@@ -261,7 +261,7 @@ jobs:
           TENDERLY_ACCESS_KEY: "${{ secrets.TENDERLY_ACCESS_KEY }}"
         run: |
           mkdir -p config
-          cat > config/aggregator.yaml <<'YAML'
+          cat > config/aggregator.yaml <<YAML
           # Auto-generated for CI unit tests
           environment: development
 
@@ -366,7 +366,7 @@ jobs:
           TENDERLY_ACCESS_KEY: "${{ secrets.TENDERLY_ACCESS_KEY }}"
         run: |
           mkdir -p config
-          cat > config/aggregator.yaml <<'YAML'
+          cat > config/aggregator.yaml <<YAML
           # Auto-generated for CI unit tests
           environment: development
 
