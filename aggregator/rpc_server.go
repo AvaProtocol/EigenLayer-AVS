@@ -100,9 +100,6 @@ func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalle
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
-	r.config.Logger.Info("process list wallet",
-		"address", user.Address.String(),
-	)
 	return r.engine.ListWallets(user.Address, payload)
 }
 
@@ -193,11 +190,6 @@ func (r *RpcServer) ListExecutions(ctx context.Context, payload *avsproto.ListEx
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
-	r.config.Logger.Info("process list execution",
-		"user", user.Address.String(),
-		"task_id", payload.TaskIds,
-	)
-
 	listExecResp, err := r.engine.ListExecutions(user, payload)
 	if err != nil {
 		contextFields := map[string]interface{}{
@@ -218,11 +210,6 @@ func (r *RpcServer) GetExecution(ctx context.Context, payload *avsproto.Executio
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
-	r.config.Logger.Info("process get execution",
-		"user", user.Address.String(),
-		"task_id", payload.TaskId,
-		"execution_id", payload.ExecutionId,
-	)
 	return r.engine.GetExecution(user, payload)
 }
 
@@ -232,11 +219,6 @@ func (r *RpcServer) GetExecutionStatus(ctx context.Context, payload *avsproto.Ex
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
-	r.config.Logger.Info("process get execution",
-		"user", user.Address.String(),
-		"task_id", payload.TaskId,
-		"execution_id", payload.ExecutionId,
-	)
 	return r.engine.GetExecutionStatus(user, payload)
 }
 
@@ -245,11 +227,6 @@ func (r *RpcServer) GetTask(ctx context.Context, payload *avsproto.IdReq) (*avsp
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
-
-	r.config.Logger.Info("process get task",
-		"user", user.Address.String(),
-		"task_id", payload.Id,
-	)
 
 	if payload.Id == "" {
 		return nil, status.Errorf(codes.InvalidArgument, taskengine.TaskIDMissing)
@@ -390,11 +367,6 @@ func (r *RpcServer) GetExecutionCount(ctx context.Context, req *avsproto.GetExec
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
-	r.config.Logger.Info("process execution count",
-		"user", user.Address.String(),
-		"workflow_ids", req.WorkflowIds,
-	)
-
 	return r.engine.GetExecutionCount(user, req)
 }
 
@@ -403,12 +375,6 @@ func (r *RpcServer) GetExecutionStats(ctx context.Context, req *avsproto.GetExec
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
-
-	r.config.Logger.Info("process execution stats",
-		"user", user.Address.String(),
-		"workflow_ids", req.WorkflowIds,
-		"days", req.Days,
-	)
 
 	return r.engine.GetExecutionStats(user, req)
 }
