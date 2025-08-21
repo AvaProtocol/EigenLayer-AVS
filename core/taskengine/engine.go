@@ -2339,6 +2339,8 @@ func (n *Engine) shouldContinueWorkflowExecution(triggerOutput map[string]interf
 // List Execution for a given task id
 func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutionsReq) (*avsproto.ListExecutionsResp, error) {
 	// Validate all tasks own by the caller, if there are any tasks won't be owned by caller, we return permission error
+	// Admin users (authenticated with API key) use zero address and can access any task
+	isAdminUser := user.Address == (common.Address{})
 	tasks := make(map[string]*model.Task)
 
 	for _, id := range payload.TaskIds {
@@ -2347,7 +2349,7 @@ func (n *Engine) ListExecutions(user *model.User, payload *avsproto.ListExecutio
 			return nil, status.Errorf(codes.NotFound, TaskNotFoundError)
 		}
 
-		if !task.OwnedBy(user.Address) {
+		if !isAdminUser && !task.OwnedBy(user.Address) {
 			return nil, status.Errorf(codes.NotFound, TaskNotFoundError)
 		}
 		tasks[id] = task
