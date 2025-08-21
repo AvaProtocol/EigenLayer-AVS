@@ -60,6 +60,7 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		"bundler", agg.config.SmartWallet.BundlerURL,
 		"factory", agg.config.SmartWallet.FactoryAddress,
 		"entrypoint", agg.config.SmartWallet.EntrypointAddress,
+		"paymaster", agg.config.SmartWallet.PaymasterAddress,
 	)
 
 	agg.queue = apqueue.New(agg.db, agg.logger, &apqueue.QueueOption{
