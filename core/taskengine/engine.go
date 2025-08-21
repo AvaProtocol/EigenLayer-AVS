@@ -1782,7 +1782,10 @@ func (n *Engine) GetTask(user *model.User, taskID string) (*model.Task, error) {
 		return nil, err
 	}
 
-	if !task.OwnedBy(user.Address) {
+	// Admin users (authenticated with API key) use zero address and can access any task
+	isAdminUser := user.Address == (common.Address{})
+
+	if !isAdminUser && !task.OwnedBy(user.Address) {
 		return nil, status.Errorf(codes.NotFound, TaskNotFoundError)
 	}
 
