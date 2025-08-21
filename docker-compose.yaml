@@ -11,13 +11,30 @@ services:
       - "1323:1323"
     networks:
       - ava
-        #
-        #  backend:
-        #    image: example/database
-        #    volumes:
-        #      - db-data:/etc/data
-        #    networks:
-        #      - back-tier
+    environment:
+      # Core configuration (required)
+      - ETH_RPC_URL=${ETH_RPC_URL}
+      - ETH_WS_URL=${ETH_WS_URL}
+      
+      # Private keys and secrets (should be provided via .env file)
+      - ECDSA_PRIVATE_KEY=${ECDSA_PRIVATE_KEY}
+      - CONTROLLER_PRIVATE_KEY=${CONTROLLER_PRIVATE_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      
+      # API keys and tokens
+      - TENDERLY_ACCESS_KEY=${TENDERLY_ACCESS_KEY}
+      - AP_NOTIFY_BOT_TOKEN=${AP_NOTIFY_BOT_TOKEN}
+      - SENDGRID_KEY=${SENDGRID_KEY}
+      - THEGRAPH_API_KEY=${THEGRAPH_API_KEY}
+      
+      # Smart wallet configuration
+      - BUNDLER_URL=${BUNDLER_URL}
+      - MAX_WALLETS_PER_OWNER=${MAX_WALLETS_PER_OWNER:-5}
+      
+      # Optional overrides
+      - TENDERLY_ACCOUNT=${TENDERLY_ACCOUNT}
+      - TENDERLY_PROJECT=${TENDERLY_PROJECT}
+      - SERVER_NAME=${SERVER_NAME:-aggregator-docker}
     volumes:
       - ./config:/app/config
       - db-data:/tmp/app-avs
@@ -27,6 +44,33 @@ services:
       retries: 15
       start_period: 3s
       timeout: 3s
+
+  operator:
+    image: avaprotocol/avs
+    command: ["operator"]
+    build:
+      context: .
+      dockerfile: dockerfiles/operator.Dockerfile
+    networks:
+      - ava
+    environment:
+      # Core configuration (required)
+      - ETH_RPC_URL=${ETH_RPC_URL}
+      - ETH_WS_URL=${ETH_WS_URL}
+      
+      # Operator private key
+      - ECDSA_PRIVATE_KEY=${OPERATOR_PRIVATE_KEY}
+      
+      # Aggregator connection
+      - AGGREGATOR_ADDRESS=${AGGREGATOR_ADDRESS:-aggregator:2206}
+      
+      # Optional overrides
+      - SERVER_NAME=${OPERATOR_SERVER_NAME:-operator-docker}
+    volumes:
+      - ./config:/app/config
+    depends_on:
+      aggregator:
+        condition: service_healthy
   grpcui:
     image: fullstorydev/grpcui
     command: ["-plaintext", "aggregator:2206"]
