@@ -181,7 +181,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 			}
 
 			cronExpr := t.epochToCron(epoch)
-			job, err := t.scheduler.NewJob(
+			epochJob, err := t.scheduler.NewJob(
 				gocron.CronJob(cronExpr, false),
 				gocron.NewTask(triggerFunc),
 				// In FixedTime, we want to run the job only once
@@ -190,7 +190,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 			if err != nil {
 				return fmt.Errorf("failed to schedule epoch job: %w", err)
 			}
-			jobs = append(jobs, job)
+			jobs = append(jobs, epochJob)
 		}
 	} else if cronTrigger := check.GetTrigger().GetCron(); cronTrigger != nil {
 		// Handle cron-based scheduling
@@ -214,7 +214,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 			}
 
 			// Schedule with calculated start time to prevent immediate execution
-			job, err := t.scheduler.NewJob(
+			cronJob, err := t.scheduler.NewJob(
 				gocron.CronJob(cronExpr, false),
 				gocron.NewTask(triggerFunc),
 				gocron.WithStartAt(gocron.WithStartDateTime(nextExecTime)),
@@ -222,7 +222,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 			if err != nil {
 				return fmt.Errorf("failed to schedule cron job: %w", err)
 			}
-			jobs = append(jobs, job)
+			jobs = append(jobs, cronJob)
 		}
 	}
 
