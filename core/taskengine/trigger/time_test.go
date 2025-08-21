@@ -60,7 +60,7 @@ func TestTimeTrigger_AddCheck_CronTrigger(t *testing.T) {
 	require.NotNil(t, task.TimeData)
 	assert.Equal(t, []string{"0 0 * * *"}, task.TimeData.Schedules)
 	assert.Empty(t, task.TimeData.Epochs)
-	assert.NotNil(t, task.TimeData.Job)
+	assert.NotEmpty(t, task.TimeData.Jobs)
 }
 
 func TestTimeTrigger_AddCheck_FixedTimeTrigger(t *testing.T) {
@@ -100,7 +100,7 @@ func TestTimeTrigger_AddCheck_FixedTimeTrigger(t *testing.T) {
 	require.NotNil(t, task.TimeData)
 	assert.Empty(t, task.TimeData.Schedules)
 	assert.Equal(t, []int64{futureEpoch}, task.TimeData.Epochs)
-	assert.NotNil(t, task.TimeData.Job)
+	assert.NotEmpty(t, task.TimeData.Jobs)
 }
 
 func TestTimeTrigger_AddCheck_PastEpochSkipped(t *testing.T) {

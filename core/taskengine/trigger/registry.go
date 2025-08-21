@@ -42,9 +42,9 @@ type BlockTaskData struct {
 
 // TimeTaskData contains time trigger specific data
 type TimeTaskData struct {
-	Job       gocron.Job // The scheduled job
-	Schedules []string   // Original cron schedules
-	Epochs    []int64    // Original epochs for fixed time triggers
+	Jobs      []gocron.Job // All scheduled jobs (one per cron schedule + epochs)
+	Schedules []string     // Original cron schedules
+	Epochs    []int64      // Original epochs for fixed time triggers
 }
 
 // NewTaskRegistry creates a new unified task registry
