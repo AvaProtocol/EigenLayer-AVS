@@ -32,6 +32,21 @@ Automates the process of promoting a pre-release to a full release and triggerin
 - `avaprotocol/avs-dev:v1.13.2` and `avaprotocol/avs-dev:latest`
 - `avaprotocol/ap-avs:v1.13.2` and `avaprotocol/ap-avs:latest`
 
+### `check-gh-setup.sh`
+
+Verifies that GitHub CLI is properly configured for release automation.
+
+**What it checks:**
+- GitHub CLI installation and authentication
+- Repository access and permissions
+- Existing releases and pre-releases
+- Required workflow files
+
+**Usage:**
+```bash
+./.github/scripts/check-gh-setup.sh
+```
+
 ### `generate-test-config.sh`
 
 Generates test configuration files for the GitHub Actions workflows.
