@@ -68,15 +68,7 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	})
 	agg.worker = apqueue.NewWorker(agg.queue, agg.db)
 
-	// Create token enrichment service for chain-aware workflow execution
-	tokenService, err := taskengine.NewTokenEnrichmentService(agg.ethRpcClient, agg.logger)
-	if err != nil {
-		agg.logger.Warn("Failed to create token enrichment service", "error", err)
-		// Continue with nil service - chain name will default to "Unknown"
-		tokenService = nil
-	}
-
-	taskExecutor := taskengine.NewExecutor(agg.config.SmartWallet, agg.db, agg.logger, tokenService)
+	taskExecutor := taskengine.NewExecutor(agg.config.SmartWallet, agg.db, agg.logger, nil)
 	taskengine.SetMacroVars(agg.config.MacroVars)
 	taskengine.SetMacroSecrets(agg.config.MacroSecrets)
 	taskengine.SetCache(agg.cache)
