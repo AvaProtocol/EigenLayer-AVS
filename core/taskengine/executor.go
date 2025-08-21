@@ -614,17 +614,7 @@ func (x *TaskExecutor) validateDerivedWallet(owner common.Address, smartWalletAd
 	// This uses the configured limit from aggregator.yaml
 	maxWallets := int64(x.smartWalletConfig.MaxWalletsPerOwner)
 
-	// Optimization: Limit the search range for performance
-	// For most use cases, wallets are created with low salt values
-	searchLimit := maxWallets
-	if maxWallets > 100 {
-		// Cap the search at 100 for performance, but log when we hit this limit
-		searchLimit = 100
-		x.logger.Debug("Limiting wallet derivation search for performance",
-			"owner", owner.Hex(), "max_configured", maxWallets, "search_limit", searchLimit)
-	}
-
-	for salt := int64(0); salt < searchLimit; salt++ {
+	for salt := int64(0); salt < maxWallets; salt++ {
 		derivedAddr, err := aa.GetSenderAddressForFactory(rpcClient, owner, factoryAddr, big.NewInt(salt))
 		if err != nil {
 			// Log error for debugging but continue with next salt
@@ -639,18 +629,12 @@ func (x *TaskExecutor) validateDerivedWallet(owner common.Address, smartWalletAd
 				"factory", factoryAddr.Hex(), "salt", salt)
 			return true, nil
 		}
-
-		// Progress logging for long searches
-		if salt > 0 && salt%20 == 0 {
-			x.logger.Debug("Wallet derivation progress",
-				"owner", owner.Hex(), "salts_checked", salt+1, "target", smartWalletAddr.Hex())
-		}
 	}
 
 	x.logger.Debug("No matching derived wallet found",
 		"owner", owner.Hex(), "wallet", smartWalletAddr.Hex(),
-		"factory", factoryAddr.Hex(), "salts_checked", searchLimit)
-	return false, fmt.Errorf("wallet address cannot be derived from owner with factory %s (checked %d salts)", factoryAddr.Hex(), searchLimit)
+		"factory", factoryAddr.Hex(), "salts_checked", maxWallets)
+	return false, fmt.Errorf("wallet address cannot be derived from owner with factory %s (checked %d salts)", factoryAddr.Hex(), maxWallets)
 }
 
 // persistFailedExecution persists a failed execution record to the database
