@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"strings"
 	"time"
 
@@ -14,8 +15,10 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/apqueue"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
@@ -220,30 +223,54 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	vm.WithLogger(x.logger).WithDb(x.db)
-	// Resolve AA sender strictly for deployed runs: require task.SmartWalletAddress be valid
+
+	// Initialize timing and execution record BEFORE validation to ensure we always have a record
+	t0 := time.Now()
+	task.ExecutionCount += 1
+	task.LastRanAt = t0.UnixMilli()
+	initialTaskStatus := task.Status
+
+	// Create execution record immediately - this ensures we have a record even if validation fails
+	execution := &avsproto.Execution{
+		Id:      queueData.ExecutionID,
+		StartAt: t0.UnixMilli(),
+		EndAt:   0,                            // Will be set when execution completes or fails
+		Success: false,                        // Default to false, will be updated if successful
+		Error:   "",                           // Will be populated if there are errors
+		Steps:   []*avsproto.Execution_Step{}, // Will be populated during execution
+	}
+
+	// Wallet validation - if this fails, we'll record the failure and return the execution record
 	if task != nil && task.Owner != "" {
 		if task.SmartWalletAddress == "" || !common.IsHexAddress(task.SmartWalletAddress) {
-			return nil, fmt.Errorf("invalid or missing task smart wallet address for deployed run")
+			execution.EndAt = time.Now().UnixMilli()
+			execution.Error = "invalid or missing task smart wallet address for deployed run"
+			x.persistFailedExecution(task, execution, initialTaskStatus)
+			return execution, nil // Return execution record with failure details
 		}
 		owner := common.HexToAddress(task.Owner)
-		// Ensure the provided wallet belongs to owner
-		// Use ValidWalletOwner which only requires database access (no RPC)
 		user := &model.User{Address: owner}
 		smartWalletAddr := common.HexToAddress(task.SmartWalletAddress)
 
-		isValid, err := ValidWalletOwner(x.db, user, smartWalletAddr)
+		// Enhanced wallet validation that handles any legitimately derived wallet
+		isValid, err := x.validateWalletOwnership(user, smartWalletAddr)
 		if err != nil {
-			return nil, fmt.Errorf("failed to validate wallet ownership for owner %s: %w", owner.Hex(), err)
+			execution.EndAt = time.Now().UnixMilli()
+			execution.Error = fmt.Sprintf("failed to validate wallet ownership for owner %s: %v", owner.Hex(), err)
+			x.persistFailedExecution(task, execution, initialTaskStatus)
+			return execution, nil // Return execution record with failure details
 		}
 		if !isValid {
-			return nil, fmt.Errorf("task smart wallet address does not belong to owner")
+			execution.EndAt = time.Now().UnixMilli()
+			execution.Error = "task smart wallet address does not belong to owner"
+			x.persistFailedExecution(task, execution, initialTaskStatus)
+			return execution, nil // Return execution record with failure details
 		}
 		vm.AddVar("aa_sender", common.HexToAddress(task.SmartWalletAddress).Hex())
 		if x.logger != nil {
 			x.logger.Info("Executor: AA sender resolved", "sender", task.SmartWalletAddress)
 		}
 	}
-	initialTaskStatus := task.Status
 
 	// Extract and add trigger config data if available using shared functions
 	triggerInputData := TaskTriggerToConfig(task.Trigger)
@@ -264,10 +291,6 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	if err != nil {
 		return nil, fmt.Errorf("vm failed to initialize: %w", err)
 	}
-
-	t0 := time.Now()
-	task.ExecutionCount += 1
-	task.LastRanAt = t0.UnixMilli()
 
 	var runTaskErr error = nil
 	if err = vm.Compile(); err != nil {
@@ -368,14 +391,11 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	// Analyze execution results from all steps (including failed ones)
 	executionSuccess, executionError, failedStepCount := vm.AnalyzeExecutionResult()
 
-	execution := &avsproto.Execution{
-		Id:      queueData.ExecutionID,
-		StartAt: t0.UnixMilli(),
-		EndAt:   t1.UnixMilli(),
-		Success: executionSuccess, // Based on analysis of all steps
-		Error:   executionError,   // Comprehensive error message from failed steps
-		Steps:   vm.ExecutionLogs, // Contains all steps including failed ones
-	}
+	// Update the execution record we created earlier with the final results
+	execution.EndAt = t1.UnixMilli()
+	execution.Success = executionSuccess // Based on analysis of all steps
+	execution.Error = executionError     // Comprehensive error message from failed steps
+	execution.Steps = vm.ExecutionLogs   // Contains all steps including failed ones
 
 	// Ensure no NaN/Inf sneak into protobuf Values (which reject them)
 	sanitizeExecutionForPersistence(execution)
@@ -537,5 +557,122 @@ func sanitizeInterface(x interface{}) interface{} {
 		return s
 	default:
 		return x
+	}
+}
+
+// validateWalletOwnership performs comprehensive wallet ownership validation
+// This handles default wallets (salt:0), stored wallets, and legitimately derived wallets
+func (x *TaskExecutor) validateWalletOwnership(user *model.User, smartWalletAddr common.Address) (bool, error) {
+	// Step 1: Load the user's default smart wallet address (salt:0) for comparison
+	if x.smartWalletConfig != nil && x.smartWalletConfig.EthRpcUrl != "" {
+		if rpcClient, err := ethclient.Dial(x.smartWalletConfig.EthRpcUrl); err == nil {
+			// Load the default smart wallet address (salt:0)
+			if err := user.LoadDefaultSmartWallet(rpcClient); err != nil {
+				x.logger.Warn("Failed to load default smart wallet for validation",
+					"owner", user.Address.Hex(), "error", err)
+			}
+			rpcClient.Close()
+		}
+	}
+
+	// Step 2: Use the standard ValidWalletOwner function (checks default + database)
+	if isValid, err := ValidWalletOwner(x.db, user, smartWalletAddr); err == nil && isValid {
+		return true, nil
+	} else if err != nil {
+		x.logger.Debug("ValidWalletOwner check failed", "owner", user.Address.Hex(),
+			"wallet", smartWalletAddr.Hex(), "error", err)
+	}
+
+	// Step 3: Enhanced validation - check if this is a legitimately derived wallet
+	// This handles cases where the wallet was derived but not stored in the database
+	if x.smartWalletConfig != nil && x.smartWalletConfig.EthRpcUrl != "" {
+		if isValid, err := x.validateDerivedWallet(user.Address, smartWalletAddr); err == nil && isValid {
+			x.logger.Info("Wallet validated as legitimate derived wallet",
+				"owner", user.Address.Hex(), "wallet", smartWalletAddr.Hex())
+			return true, nil
+		} else if err != nil {
+			x.logger.Debug("Derived wallet validation failed", "owner", user.Address.Hex(),
+				"wallet", smartWalletAddr.Hex(), "error", err)
+		}
+	}
+
+	return false, nil
+}
+
+// validateDerivedWallet checks if a wallet address can be legitimately derived
+// from the owner using the configured factory (for any salt value)
+func (x *TaskExecutor) validateDerivedWallet(owner common.Address, smartWalletAddr common.Address) (bool, error) {
+	rpcClient, err := ethclient.Dial(x.smartWalletConfig.EthRpcUrl)
+	if err != nil {
+		return false, fmt.Errorf("failed to connect to RPC: %w", err)
+	}
+	defer rpcClient.Close()
+
+	factoryAddr := x.smartWalletConfig.FactoryAddress
+
+	// Try salt values from 0 to max_wallets_per_owner to see if any produce the target wallet address
+	// This uses the configured limit from aggregator.yaml
+	maxWallets := int64(x.smartWalletConfig.MaxWalletsPerOwner)
+	for salt := int64(0); salt < maxWallets; salt++ {
+		derivedAddr, err := aa.GetSenderAddressForFactory(rpcClient, owner, factoryAddr, big.NewInt(salt))
+		if err != nil {
+			continue // Skip this salt value if derivation fails
+		}
+
+		if derivedAddr != nil && strings.EqualFold(derivedAddr.Hex(), smartWalletAddr.Hex()) {
+			x.logger.Debug("Found matching derived wallet",
+				"owner", owner.Hex(), "wallet", smartWalletAddr.Hex(),
+				"factory", factoryAddr.Hex(), "salt", salt)
+			return true, nil
+		}
+	}
+
+	return false, fmt.Errorf("wallet address cannot be derived from owner with factory %s", factoryAddr.Hex())
+}
+
+// persistFailedExecution persists a failed execution record to the database
+// This ensures that failed executions (like wallet validation failures) are recorded for troubleshooting
+func (x *TaskExecutor) persistFailedExecution(task *model.Task, execution *avsproto.Execution, initialTaskStatus avsproto.TaskStatus) {
+	// Log the failure for debugging
+	x.logger.Error("task execution failed during validation",
+		"error", execution.Error,
+		"task_id", task.Id,
+		"execution_id", execution.Id,
+		"reason", "validation_failure")
+
+	// Ensure no NaN/Inf sneak into protobuf Values (which reject them)
+	sanitizeExecutionForPersistence(execution)
+
+	// Prepare batch update for task + execution log
+	updates := map[string][]byte{}
+
+	// Update task data
+	if taskJSON, err := task.ToJSON(); err == nil {
+		updates[string(TaskStorageKey(task.Id, task.Status))] = taskJSON
+		updates[string(TaskUserKey(task))] = []byte(fmt.Sprintf("%d", task.Status))
+	} else {
+		x.logger.Error("Failed to serialize task for persistence", "task_id", task.Id, "error", err)
+	}
+
+	// Update execution log
+	mo := protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
+	if executionByte, mErr := mo.Marshal(execution); mErr == nil {
+		key := string(TaskExecutionKey(task, execution.Id))
+		updates[key] = executionByte
+		x.logger.Info("Executor: persisting failed execution", "task_id", task.Id, "execution_id", execution.Id, "key", key)
+	} else {
+		x.logger.Error("Executor: failed to serialize execution for persistence", "task_id", task.Id, "execution_id", execution.Id, "error", mErr)
+	}
+
+	// Persist to database
+	if err := x.db.BatchWrite(updates); err != nil {
+		x.logger.Error("error persisting failed execution", "task_id", task.Id, "execution_id", execution.Id, "error", err)
+	}
+
+	// Clean up old task status if it changed
+	if task.Status != initialTaskStatus {
+		if err := x.db.Delete(TaskStorageKey(task.Id, initialTaskStatus)); err != nil {
+			x.logger.Error("error cleaning up old task status", "task_id", task.Id, "error", err)
+		}
 	}
 }
