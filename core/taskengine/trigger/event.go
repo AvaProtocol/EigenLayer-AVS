@@ -164,19 +164,25 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 		panic(err)
 	}
 
-	// Initialize TokenEnrichmentService for event enrichment
-	logger.Debug("EventTrigger: initializing TokenEnrichmentService", "has_rpc", b.ethClient != nil)
-	tokenService, err := taskengine.NewTokenEnrichmentService(b.ethClient, logger)
-	if err != nil {
-		logger.Warn("EventTrigger: Failed to initialize TokenEnrichmentService", "error", err)
-		// Continue without token enrichment - will fall back to basic event data
-		b.tokenEnrichmentService = nil
+	// Use global TokenEnrichmentService or initialize if not set
+	if taskengine.GetTokenEnrichmentService() == nil {
+		logger.Debug("EventTrigger: initializing global TokenEnrichmentService", "has_rpc", b.ethClient != nil)
+		tokenService, err := taskengine.NewTokenEnrichmentService(b.ethClient, logger)
+		if err != nil {
+			logger.Warn("EventTrigger: Failed to initialize TokenEnrichmentService", "error", err)
+			// Continue without token enrichment - will fall back to basic event data
+		} else {
+			taskengine.SetTokenEnrichmentService(tokenService)
+			if logger != nil {
+				logger.Debug("EventTrigger: Global TokenEnrichmentService initialized successfully")
+			}
+		}
 	} else {
-		b.tokenEnrichmentService = tokenService
 		if logger != nil {
-			logger.Debug("EventTrigger: TokenEnrichmentService initialized successfully")
+			logger.Debug("EventTrigger: Using existing global TokenEnrichmentService")
 		}
 	}
+	b.tokenEnrichmentService = taskengine.GetTokenEnrichmentService()
 
 	return &b
 }

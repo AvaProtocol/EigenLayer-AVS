@@ -48,6 +48,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 func (agg *Aggregator) stopTaskEngine() {
@@ -68,7 +69,25 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	})
 	agg.worker = apqueue.NewWorker(agg.queue, agg.db)
 
-	taskExecutor := taskengine.NewExecutor(agg.config.SmartWallet, agg.db, agg.logger, nil)
+	// Initialize global TokenEnrichmentService if not already set
+	if taskengine.GetTokenEnrichmentService() == nil && agg.config.SmartWallet.EthRpcUrl != "" {
+		rpcClient, err := ethclient.Dial(agg.config.SmartWallet.EthRpcUrl)
+		if err != nil {
+			agg.logger.Warn("Failed to connect to RPC for TokenEnrichmentService", "error", err)
+		} else {
+			tokenService, err := taskengine.NewTokenEnrichmentService(rpcClient, agg.logger)
+			if err != nil {
+				agg.logger.Warn("Failed to initialize TokenEnrichmentService", "error", err)
+			} else {
+				taskengine.SetTokenEnrichmentService(tokenService)
+				agg.logger.Info("Global TokenEnrichmentService initialized",
+					"chainID", tokenService.GetChainID(),
+					"cacheSize", tokenService.GetCacheSize())
+			}
+		}
+	}
+
+	taskExecutor := taskengine.NewExecutor(agg.config.SmartWallet, agg.db, agg.logger)
 	taskengine.SetMacroVars(agg.config.MacroVars)
 	taskengine.SetMacroSecrets(agg.config.MacroSecrets)
 	taskengine.SetCache(agg.cache)

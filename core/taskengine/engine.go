@@ -66,6 +66,9 @@ var (
 	macroSecrets map[string]string
 	cache        *bigcache.BigCache
 
+	// Global token enrichment service for shared token metadata and chain detection
+	globalTokenService *TokenEnrichmentService
+
 	defaultSalt = big.NewInt(0)
 )
 
@@ -85,6 +88,16 @@ func SetMacroSecrets(v map[string]string) {
 
 func SetCache(c *bigcache.BigCache) {
 	cache = c
+}
+
+// SetTokenEnrichmentService sets the global token enrichment service
+func SetTokenEnrichmentService(service *TokenEnrichmentService) {
+	globalTokenService = service
+}
+
+// GetTokenEnrichmentService returns the global token enrichment service
+func GetTokenEnrichmentService() *TokenEnrichmentService {
+	return globalTokenService
 }
 
 // Initialize a shared rpc client instance
@@ -254,34 +267,39 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
 	//SetWsRpc(config.SmartWallet.EthWsUrl)
 
-	// Initialize TokenEnrichmentService for token metadata and chain detection
-	logger.Debug("initializing TokenEnrichmentService", "has_rpc", rpcConn != nil)
-	tokenService, err := NewTokenEnrichmentService(rpcConn, logger)
-	if err != nil {
-		logger.Warn("Failed to initialize TokenEnrichmentService", "error", err)
-		// Don't fail engine initialization, continue without token enrichment
-	} else {
-		e.tokenEnrichmentService = tokenService
-
-		// Load token whitelist data into cache
-		if err := tokenService.LoadWhitelist(); err != nil {
-			logger.Warn("Failed to load token whitelist", "error", err)
-			// Don't fail engine initialization, continue with RPC-only token enrichment
-		}
-
-		// Single consolidated log message
-		if rpcConn != nil {
-			logger.Info("TokenEnrichmentService ready",
-				"chainID", tokenService.GetChainID(),
-				"whitelistTokens", tokenService.GetCacheSize(),
-				"rpcSupport", true)
+	// Use global TokenEnrichmentService or initialize if not set
+	if globalTokenService == nil {
+		logger.Debug("initializing global TokenEnrichmentService", "has_rpc", rpcConn != nil)
+		tokenService, err := NewTokenEnrichmentService(rpcConn, logger)
+		if err != nil {
+			logger.Warn("Failed to initialize TokenEnrichmentService", "error", err)
+			// Don't fail engine initialization, continue without token enrichment
 		} else {
-			logger.Info("TokenEnrichmentService ready",
-				"chainID", tokenService.GetChainID(),
-				"whitelistTokens", tokenService.GetCacheSize(),
-				"rpcSupport", false)
+			globalTokenService = tokenService
+
+			// Load token whitelist data into cache
+			if err := tokenService.LoadWhitelist(); err != nil {
+				logger.Warn("Failed to load token whitelist", "error", err)
+				// Don't fail engine initialization, continue with RPC-only token enrichment
+			}
+
+			// Single consolidated log message
+			if rpcConn != nil {
+				logger.Info("Global TokenEnrichmentService initialized",
+					"chainID", tokenService.GetChainID(),
+					"whitelistTokens", tokenService.GetCacheSize(),
+					"rpcSupport", true)
+			} else {
+				logger.Info("Global TokenEnrichmentService initialized",
+					"chainID", tokenService.GetChainID(),
+					"whitelistTokens", tokenService.GetCacheSize(),
+					"rpcSupport", false)
+			}
 		}
+	} else {
+		logger.Debug("Using existing global TokenEnrichmentService")
 	}
+	e.tokenEnrichmentService = globalTokenService
 
 	// Initialize shared Tenderly client from config
 	e.tenderlyClient = NewTenderlyClient(config, logger)
@@ -1841,7 +1859,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 	}
 
 	if payload.IsBlocking {
-		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger, n.tokenEnrichmentService)
+		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger)
 		execution, runErr := executor.RunTask(task, &queueTaskData)
 		if runErr != nil {
 			n.logger.Error("failed to run blocking task", runErr)

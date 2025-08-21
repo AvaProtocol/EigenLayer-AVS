@@ -23,12 +23,12 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
-func NewExecutor(config *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger, tokenEnrichmentService *TokenEnrichmentService) *TaskExecutor {
+func NewExecutor(config *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger) *TaskExecutor {
 	return &TaskExecutor{
 		db:                     db,
 		logger:                 logger,
 		smartWalletConfig:      config,
-		tokenEnrichmentService: tokenEnrichmentService,
+		tokenEnrichmentService: GetTokenEnrichmentService(),
 	}
 }
 
