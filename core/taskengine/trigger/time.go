@@ -12,6 +12,10 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+// cronParser is a shared cron parser configuration to ensure consistency
+// and reduce duplication across the codebase
+var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+
 type TimeTrigger struct {
 	*CommonTrigger
 
@@ -92,9 +96,9 @@ func (t *TimeTrigger) convertFromJobsMap() {
 	for taskID, job := range t.jobs {
 		// Create TimeTaskData for the new registry
 		timeData := &TimeTaskData{
-			Job:       job,
-			Schedules: []string{}, // We can't recover original schedules from job
-			Epochs:    []int64{},  // We can't recover original epochs from job
+			Jobs:      []gocron.Job{job}, // Convert single job to slice
+			Schedules: []string{},        // We can't recover original schedules from job
+			Epochs:    []int64{},         // We can't recover original epochs from job
 		}
 
 		// We don't have the original TaskMetadata in the old format,
@@ -114,8 +118,7 @@ func (t *TimeTrigger) convertFromJobsMap() {
 // calculateNextCronTime calculates the next execution time for a given cron expression
 // to prevent immediate execution upon registration
 func (t *TimeTrigger) calculateNextCronTime(cronExpr string) (time.Time, error) {
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-	schedule, err := parser.Parse(cronExpr)
+	schedule, err := cronParser.Parse(cronExpr)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("failed to parse cron expression %s: %w", cronExpr, err)
 	}
@@ -158,8 +161,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 		}
 	}
 
-	var job gocron.Job
-	var err error
+	var jobs []gocron.Job
 	var schedules []string
 	var epochs []int64
 
@@ -179,7 +181,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 			}
 
 			cronExpr := t.epochToCron(epoch)
-			job, err = t.scheduler.NewJob(
+			job, err := t.scheduler.NewJob(
 				gocron.CronJob(cronExpr, false),
 				gocron.NewTask(triggerFunc),
 				// In FixedTime, we want to run the job only once
@@ -188,6 +190,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 			if err != nil {
 				return fmt.Errorf("failed to schedule epoch job: %w", err)
 			}
+			jobs = append(jobs, job)
 		}
 	} else if cronTrigger := check.GetTrigger().GetCron(); cronTrigger != nil {
 		// Handle cron-based scheduling
@@ -206,30 +209,26 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 			// to prevent immediate execution
 			nextExecTime, err := t.calculateNextCronTime(cronExpr)
 			if err != nil {
-				t.logger.Error("failed to calculate next cron time", "cron", cronExpr, "error", err)
-				// Fallback to immediate scheduling if calculation fails
-				job, err = t.scheduler.NewJob(
-					gocron.CronJob(cronExpr, false),
-					gocron.NewTask(triggerFunc),
-				)
-			} else {
-				// Schedule with calculated start time to prevent immediate execution
-				job, err = t.scheduler.NewJob(
-					gocron.CronJob(cronExpr, false),
-					gocron.NewTask(triggerFunc),
-					gocron.WithStartAt(gocron.WithStartDateTime(nextExecTime)),
-				)
+				t.logger.Error("failed to calculate next cron time, skipping invalid cron expression", "cron", cronExpr, "error", err)
+				continue // Skip this invalid cron expression
 			}
 
+			// Schedule with calculated start time to prevent immediate execution
+			job, err := t.scheduler.NewJob(
+				gocron.CronJob(cronExpr, false),
+				gocron.NewTask(triggerFunc),
+				gocron.WithStartAt(gocron.WithStartDateTime(nextExecTime)),
+			)
 			if err != nil {
 				return fmt.Errorf("failed to schedule cron job: %w", err)
 			}
+			jobs = append(jobs, job)
 		}
 	}
 
 	// Store in new registry format
 	timeData := &TimeTaskData{
-		Job:       job,
+		Jobs:      jobs,
 		Schedules: schedules,
 		Epochs:    epochs,
 	}
@@ -268,10 +267,14 @@ func (t *TimeTrigger) RemoveCheck(taskID string) error {
 		return nil
 	}
 
-	// Remove job from scheduler if it exists
-	if task.TimeData != nil && task.TimeData.Job != nil {
-		if err := t.scheduler.RemoveJob(task.TimeData.Job.ID()); err != nil {
-			t.logger.Error("failed to remove job", "task_id", taskID, "error", err)
+	// Remove all jobs from scheduler if they exist
+	if task.TimeData != nil && len(task.TimeData.Jobs) > 0 {
+		for i, job := range task.TimeData.Jobs {
+			if job != nil {
+				if err := t.scheduler.RemoveJob(job.ID()); err != nil {
+					t.logger.Error("failed to remove job", "task_id", taskID, "job_index", i, "error", err)
+				}
+			}
 		}
 	}
 
