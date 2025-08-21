@@ -120,7 +120,7 @@ func NewTokenEnrichmentService(rpcClient *ethclient.Client, logger sdklogging.Lo
 	}
 
 	if logger != nil {
-		logger.Info("TokenEnrichmentService initialized",
+		logger.Debug("TokenEnrichmentService initialized",
 			"chainID", service.chainID,
 			"whitelistTokens", len(service.cache))
 	}
@@ -180,7 +180,7 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 	t.cacheMux.Unlock()
 
 	if t.logger != nil {
-		t.logger.Info("Loaded token whitelist",
+		t.logger.Debug("Loaded token whitelist",
 			"file", whitelistPath,
 			"tokenCount", len(tokens),
 			"chainID", t.chainID)

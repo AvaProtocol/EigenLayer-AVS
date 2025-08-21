@@ -174,7 +174,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 	} else {
 		b.tokenEnrichmentService = tokenService
 		if logger != nil {
-			logger.Info("EventTrigger: TokenEnrichmentService initialized successfully")
+			logger.Debug("EventTrigger: TokenEnrichmentService initialized successfully")
 		}
 	}
 
