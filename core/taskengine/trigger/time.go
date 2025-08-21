@@ -9,6 +9,7 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	gocron "github.com/go-co-op/gocron/v2"
+	"github.com/robfig/cron/v3"
 )
 
 type TimeTrigger struct {
@@ -110,6 +111,25 @@ func (t *TimeTrigger) convertFromJobsMap() {
 	}
 }
 
+// calculateNextCronTime calculates the next execution time for a given cron expression
+// to prevent immediate execution upon registration
+func (t *TimeTrigger) calculateNextCronTime(cronExpr string) (time.Time, error) {
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+	schedule, err := parser.Parse(cronExpr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to parse cron expression %s: %w", cronExpr, err)
+	}
+
+	// Get the next execution time from now
+	nextTime := schedule.Next(time.Now())
+	t.logger.Debug("calculated next cron execution time",
+		"cron", cronExpr,
+		"current_time", time.Now().Format(time.RFC3339),
+		"next_time", nextTime.Format(time.RFC3339))
+
+	return nextTime, nil
+}
+
 func (t *TimeTrigger) epochToCron(epoch int64) string {
 	// Convert epoch to time in UTC
 	tm := time.Unix(epoch/1000, 0).UTC()
@@ -182,10 +202,25 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 				continue
 			}
 
-			job, err = t.scheduler.NewJob(
-				gocron.CronJob(cronExpr, false),
-				gocron.NewTask(triggerFunc),
-			)
+			// Calculate the next execution time based on cron expression
+			// to prevent immediate execution
+			nextExecTime, err := t.calculateNextCronTime(cronExpr)
+			if err != nil {
+				t.logger.Error("failed to calculate next cron time", "cron", cronExpr, "error", err)
+				// Fallback to immediate scheduling if calculation fails
+				job, err = t.scheduler.NewJob(
+					gocron.CronJob(cronExpr, false),
+					gocron.NewTask(triggerFunc),
+				)
+			} else {
+				// Schedule with calculated start time to prevent immediate execution
+				job, err = t.scheduler.NewJob(
+					gocron.CronJob(cronExpr, false),
+					gocron.NewTask(triggerFunc),
+					gocron.WithStartAt(gocron.WithStartDateTime(nextExecTime)),
+				)
+			}
+
 			if err != nil {
 				return fmt.Errorf("failed to schedule cron job: %w", err)
 			}
