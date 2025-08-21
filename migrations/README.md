@@ -62,6 +62,32 @@ For protobuf message structure changes, manual migration creation is required:
 
 4. **Error Handling**: Properly handle errors and return them to the migrator.
 
+## Managing Completed Migrations
+
+Once migrations have been successfully applied in production and consistently report 0 records updated, they should be archived to reduce startup overhead:
+
+1. **Move to Historical**: Move completed migration files to `docs/historical-migrations/YYYY-completed/`
+2. **Add Build Tags**: Add `//go:build historical_migrations` to prevent inclusion in builds
+3. **Update migrations.go**: Remove from the active `Migrations` slice with a comment indicating where they were moved
+4. **Document Status**: Update the historical migrations README with completion details
+
+### Checking Migration Status
+
+Use the migration status tool to see which migrations have been applied:
+
+```bash
+./scripts/check-migrations.sh
+```
+
+This will show all applied migrations with their completion timestamps and record counts.
+
+### Benefits of Archiving
+
+- **Faster Startup**: Reduces processing time during application initialization
+- **Cleaner Codebase**: Removes completed migration logic from active builds
+- **Better Maintenance**: Easier to identify which migrations are still active
+- **Preserved History**: Maintains migration records in database and documentation
+
 5. **Documentation**: Add comments to your migration code explaining what it does and why.
 
 6. **Data Safety**: For breaking changes, prefer canceling/removing incompatible data over attempting complex transformations.
