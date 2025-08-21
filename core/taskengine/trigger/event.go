@@ -182,6 +182,7 @@ func NewEventTrigger(o *RpcOption, triggerCh chan TriggerMetadata[EventMark], lo
 			logger.Debug("EventTrigger: Using existing global TokenEnrichmentService")
 		}
 	}
+	// Only assign if we have a valid service (could be nil if initialization failed)
 	b.tokenEnrichmentService = taskengine.GetTokenEnrichmentService()
 
 	return &b

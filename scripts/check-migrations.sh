@@ -104,7 +104,7 @@ func main() {
 					records = strings.TrimPrefix(part, "records=")
 				} else if strings.HasPrefix(part, "ts=") {
 					tsStr := strings.TrimPrefix(part, "ts=")
-					if ts, err := time.Parse("1", tsStr); err == nil {
+					if ts, err := time.Parse("1136239445", tsStr); err == nil {
 						timestamp = ts.Format("2006-01-02 15:04:05")
 					} else {
 						timestamp = tsStr
