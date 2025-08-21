@@ -221,6 +221,9 @@ type Engine struct {
 	pendingNotifications map[string][]PendingNotification // operatorAddr -> list of notifications
 	notificationMutex    *sync.RWMutex
 	notificationTicker   *time.Ticker
+
+	// Cron scheduler for automatic workflow triggering
+	cronScheduler *CronSchedulerManager
 }
 
 // create a new task engine using given storage, config and queueu
@@ -249,6 +252,9 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 
 		logger: logger,
 	}
+
+	// Initialize cron scheduler
+	e.cronScheduler = NewCronSchedulerManager(db, queue, logger)
 
 	SetRpc(config.SmartWallet.EthRpcUrl)
 	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
@@ -294,6 +300,13 @@ func (n *Engine) Stop() {
 		}
 	}
 	n.shutdown = true
+
+	// Stop the cron scheduler
+	if n.cronScheduler != nil {
+		if err := n.cronScheduler.Stop(); err != nil {
+			n.logger.Error("Failed to stop cron scheduler", "error", err)
+		}
+	}
 
 	// Send any remaining notifications before shutting down
 	if n.notificationTicker != nil {
@@ -355,6 +368,12 @@ func (n *Engine) MustStart() error {
 
 	// Start the batch notification processor
 	go n.processBatchedNotifications()
+
+	// Start the cron scheduler
+	if err := n.cronScheduler.Start(); err != nil {
+		n.logger.Error("Failed to start cron scheduler", "error", err)
+		return fmt.Errorf("failed to start cron scheduler: %w", err)
+	}
 
 	return nil
 }
@@ -776,6 +795,12 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	// Note: MonitorTaskTrigger notifications are handled by StreamCheckToOperator
 	// which sends complete task metadata. The batched notification system is only
 	// for CancelTask/DeleteTask operations that don't need complete metadata.
+
+	// Add task to cron scheduler if it has cron or fixed-time triggers
+	if err := n.cronScheduler.AddTask(task); err != nil {
+		n.logger.Error("Failed to add task to cron scheduler", "task_id", task.Id, "error", err)
+		// Don't fail task creation, but log the error
+	}
 
 	// Log successful task creation with final counts
 	n.logger.Info("✅ CreateTask completed successfully",
@@ -2638,6 +2663,12 @@ func (n *Engine) DeleteTaskByUser(user *model.User, taskID string) (*avsproto.De
 		}, nil
 	}
 
+	// Remove task from cron scheduler
+	if err := n.cronScheduler.RemoveTask(taskID); err != nil {
+		n.logger.Error("Failed to remove task from cron scheduler", "task_id", taskID, "error", err)
+		// Don't fail deletion, but log the error
+	}
+
 	n.logger.Info("📢 Starting operator notifications", "task_id", taskID)
 	n.notifyOperatorsTaskOperation(taskID, avsproto.MessageOp_DeleteTask)
 	n.logger.Info("✅ Delete task operation completed", "task_id", taskID)
@@ -2711,6 +2742,12 @@ func (n *Engine) CancelTaskByUser(user *model.User, taskID string) (*avsproto.Ca
 		n.lock.Lock()
 		delete(n.tasks, task.Id) // Remove from active tasks map
 		n.lock.Unlock()
+
+		// Remove task from cron scheduler
+		if err := n.cronScheduler.RemoveTask(taskID); err != nil {
+			n.logger.Error("Failed to remove task from cron scheduler", "task_id", taskID, "error", err)
+			// Don't fail cancellation, but log the error
+		}
 	} else {
 		return &avsproto.CancelTaskResp{
 			Success:        false,
@@ -2772,6 +2809,12 @@ func (n *Engine) CancelTask(taskID string) (bool, error) {
 		n.lock.Lock()
 		delete(n.tasks, task.Id) // Remove from active tasks map
 		n.lock.Unlock()
+
+		// Remove task from cron scheduler
+		if err := n.cronScheduler.RemoveTask(taskID); err != nil {
+			n.logger.Error("Failed to remove task from cron scheduler", "task_id", taskID, "error", err)
+			// Don't fail cancellation, but log the error
+		}
 	} else {
 		return false, err
 	}
