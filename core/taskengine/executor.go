@@ -613,10 +613,24 @@ func (x *TaskExecutor) validateDerivedWallet(owner common.Address, smartWalletAd
 	// Try salt values from 0 to max_wallets_per_owner to see if any produce the target wallet address
 	// This uses the configured limit from aggregator.yaml
 	maxWallets := int64(x.smartWalletConfig.MaxWalletsPerOwner)
-	for salt := int64(0); salt < maxWallets; salt++ {
+
+	// Optimization: Limit the search range for performance
+	// For most use cases, wallets are created with low salt values
+	searchLimit := maxWallets
+	if maxWallets > 100 {
+		// Cap the search at 100 for performance, but log when we hit this limit
+		searchLimit = 100
+		x.logger.Debug("Limiting wallet derivation search for performance",
+			"owner", owner.Hex(), "max_configured", maxWallets, "search_limit", searchLimit)
+	}
+
+	for salt := int64(0); salt < searchLimit; salt++ {
 		derivedAddr, err := aa.GetSenderAddressForFactory(rpcClient, owner, factoryAddr, big.NewInt(salt))
 		if err != nil {
-			continue // Skip this salt value if derivation fails
+			// Log error for debugging but continue with next salt
+			x.logger.Debug("Failed to derive wallet address",
+				"owner", owner.Hex(), "factory", factoryAddr.Hex(), "salt", salt, "error", err)
+			continue
 		}
 
 		if derivedAddr != nil && strings.EqualFold(derivedAddr.Hex(), smartWalletAddr.Hex()) {
@@ -625,9 +639,18 @@ func (x *TaskExecutor) validateDerivedWallet(owner common.Address, smartWalletAd
 				"factory", factoryAddr.Hex(), "salt", salt)
 			return true, nil
 		}
+
+		// Progress logging for long searches
+		if salt > 0 && salt%20 == 0 {
+			x.logger.Debug("Wallet derivation progress",
+				"owner", owner.Hex(), "salts_checked", salt+1, "target", smartWalletAddr.Hex())
+		}
 	}
 
-	return false, fmt.Errorf("wallet address cannot be derived from owner with factory %s", factoryAddr.Hex())
+	x.logger.Debug("No matching derived wallet found",
+		"owner", owner.Hex(), "wallet", smartWalletAddr.Hex(),
+		"factory", factoryAddr.Hex(), "salts_checked", searchLimit)
+	return false, fmt.Errorf("wallet address cannot be derived from owner with factory %s (checked %d salts)", factoryAddr.Hex(), searchLimit)
 }
 
 // persistFailedExecution persists a failed execution record to the database
