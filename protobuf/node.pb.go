@@ -1049,7 +1049,7 @@ type SyncMessagesResp_TaskMetadata struct {
 	Remain    int64        `protobuf:"varint,2,opt,name=remain,proto3" json:"remain,omitempty"`
 	ExpiredAt int64        `protobuf:"varint,3,opt,name=expired_at,json=expiredAt,proto3" json:"expired_at,omitempty"`
 	Trigger   *TaskTrigger `protobuf:"bytes,4,opt,name=trigger,proto3" json:"trigger,omitempty"`
-	// task won't be check before this (timestamp in milliseconds)
+	// task won't be checked before this (timestamp in milliseconds)
 	StartAt       int64 `protobuf:"varint,5,opt,name=start_at,json=startAt,proto3" json:"start_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
