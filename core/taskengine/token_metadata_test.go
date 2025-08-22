@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Mock logger for testing
+// MockLogger for testing
 type MockLogger struct{}
 
 func (l *MockLogger) Debug(msg string, keysAndValues ...interface{}) {}
