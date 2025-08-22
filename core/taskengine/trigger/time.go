@@ -226,12 +226,13 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 			}
 
 			// Handle case where startAt is in the past (operator started after workflow creation)
+			now := time.Now()
 			var cronJob gocron.Job
-			if nextExecTime.Before(time.Now()) {
+			if nextExecTime.Before(now) {
 				t.logger.Warn("calculated cron start time is in the past, scheduling to start immediately",
 					"task_id", check.TaskId, "cron", cronExpr,
 					"calculated_start", nextExecTime.Format(time.RFC3339),
-					"current_time", time.Now().Format(time.RFC3339))
+					"current_time", now.Format(time.RFC3339))
 				// Schedule without WithStartDateTime - will use current time and cron schedule
 				cronJob, err = t.scheduler.NewJob(
 					gocron.CronJob(cronExpr, false),
