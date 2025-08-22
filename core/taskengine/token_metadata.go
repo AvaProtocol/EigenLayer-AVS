@@ -90,24 +90,22 @@ func NewTokenEnrichmentService(rpcClient *ethclient.Client, logger sdklogging.Lo
 		erc20ABI:  parsedABI,
 	}
 
-	// Get chain ID
-	if rpcClient != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+	// Get chain ID - this is critical for proper operation
+	if rpcClient == nil {
+		return nil, fmt.Errorf("RPC client is required for TokenEnrichmentService - cannot operate without chain connection")
+	}
 
-		chainID, err := rpcClient.ChainID(ctx)
-		if err != nil {
-			if logger != nil {
-				logger.Warn("Failed to get chain ID from RPC", "error", err)
-			}
-			// Default to Ethereum mainnet if we can't detect
-			service.chainID = ChainIDEthereum
-		} else {
-			service.chainID = chainID.Uint64()
-		}
-	} else {
-		// Default to Ethereum mainnet if no RPC client
-		service.chainID = ChainIDEthereum
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	chainID, err := rpcClient.ChainID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chain ID from RPC: %w", err)
+	}
+
+	service.chainID = chainID.Uint64()
+	if logger != nil {
+		logger.Info("TokenEnrichmentService chain ID detected", "chainID", service.chainID)
 	}
 
 	// Load token whitelist for the detected chain

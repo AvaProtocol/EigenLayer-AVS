@@ -247,13 +247,40 @@ func NewConfig(configFilePath string) (*Config, error) {
 		return nil, err
 	}
 
-	chainId, err := ethRpcClient.ChainID(context.Background())
-	if err != nil {
-		logger.Error("Cannot get chainId", "err", err)
-		return nil, err
+	// Validate that smart wallet RPC URL is configured - this is critical for contract operations
+	if configRaw.SmartWallet.EthRpcUrl == "" {
+		logger.Error("smart_wallet.eth_rpc_url is required but not configured")
+		return nil, fmt.Errorf("critical configuration error: smart_wallet.eth_rpc_url must be set")
 	}
 
-	signerV2, _, err := signerv2.SignerFromConfig(signerv2.Config{PrivateKey: ecdsaPrivateKey}, chainId)
+	// Create separate RPC client for smart wallet operations (contract read/write)
+	smartWalletRpcClient, err := eth.NewInstrumentedClient(configRaw.SmartWallet.EthRpcUrl, rpcCallsCollector)
+	if err != nil {
+		logger.Error("Cannot create smart wallet RPC client", "url", configRaw.SmartWallet.EthRpcUrl, "err", err)
+		return nil, fmt.Errorf("critical error: failed to connect to smart wallet RPC: %w", err)
+	}
+
+	// Get chain ID from smart wallet RPC (for contract operations)
+	smartWalletChainId, err := smartWalletRpcClient.ChainID(context.Background())
+	if err != nil {
+		logger.Error("Cannot get smart wallet chainId", "url", configRaw.SmartWallet.EthRpcUrl, "err", err)
+		return nil, fmt.Errorf("critical error: failed to get chain ID from smart wallet RPC: %w", err)
+	}
+
+	// Get chain ID from main EigenLayer RPC (for EigenLayer operations)
+	eigenLayerChainId, err := ethRpcClient.ChainID(context.Background())
+	if err != nil {
+		logger.Error("Cannot get EigenLayer chainId", "url", configRaw.EthRpcUrl, "err", err)
+		return nil, fmt.Errorf("failed to get chain ID from EigenLayer RPC: %w", err)
+	}
+
+	logger.Info("Chain ID configuration",
+		"eigenlayer_chain_id", eigenLayerChainId.Int64(),
+		"eigenlayer_rpc", configRaw.EthRpcUrl,
+		"smart_wallet_chain_id", smartWalletChainId.Int64(),
+		"smart_wallet_rpc", configRaw.SmartWallet.EthRpcUrl)
+
+	signerV2, _, err := signerv2.SignerFromConfig(signerv2.Config{PrivateKey: ecdsaPrivateKey}, eigenLayerChainId)
 	if err != nil {
 		panic(err)
 	}
@@ -313,7 +340,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			BundlerURL:           configRaw.SmartWallet.BundlerURL,
 			FactoryAddress:       common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.FactoryAddress, DefaultFactoryProxyAddressHex)),
 			EntrypointAddress:    common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.EntrypointAddress, DefaultEntrypointAddressHex)),
-			ChainID:              chainId.Int64(),
+			ChainID:              smartWalletChainId.Int64(), // Use smart wallet chain ID, not EigenLayer chain ID
 			ControllerPrivateKey: controllerPrivateKey,
 			PaymasterAddress:     common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.PaymasterAddress, DefaultPaymasterAddressHex)),
 			WhitelistAddresses:   convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
