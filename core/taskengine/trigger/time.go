@@ -117,16 +117,28 @@ func (t *TimeTrigger) convertFromJobsMap() {
 
 // calculateNextCronTime calculates the next execution time for a given cron expression
 // to prevent immediate execution upon registration
-func (t *TimeTrigger) calculateNextCronTime(cronExpr string) (time.Time, error) {
+func (t *TimeTrigger) calculateNextCronTime(cronExpr string, startAt int64) (time.Time, error) {
 	schedule, err := cronParser.Parse(cronExpr)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("failed to parse cron expression %s: %w", cronExpr, err)
 	}
 
-	// Get the next execution time from now
-	nextTime := schedule.Next(time.Now())
+	// Use startAt as the reference time for cron calculation
+	// This ensures cron schedules respect the workflow's submission time
+	var referenceTime time.Time
+	if startAt > 0 {
+		referenceTime = time.UnixMilli(startAt)
+	} else {
+		// Fallback to current time for backward compatibility
+		referenceTime = time.Now()
+		t.logger.Warn("startAt not provided, using current time as reference", "cron", cronExpr)
+	}
+
+	// Get the next execution time from the reference time
+	nextTime := schedule.Next(referenceTime)
 	t.logger.Debug("calculated next cron execution time",
 		"cron", cronExpr,
+		"reference_time", referenceTime.Format(time.RFC3339),
 		"current_time", time.Now().Format(time.RFC3339),
 		"next_time", nextTime.Format(time.RFC3339))
 
@@ -207,7 +219,7 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 
 			// Calculate the next execution time based on cron expression
 			// to prevent immediate execution
-			nextExecTime, err := t.calculateNextCronTime(cronExpr)
+			nextExecTime, err := t.calculateNextCronTime(cronExpr, check.GetStartAt())
 			if err != nil {
 				t.logger.Error("failed to calculate next cron time, skipping invalid cron expression", "cron", cronExpr, "error", err)
 				continue // Skip this invalid cron expression

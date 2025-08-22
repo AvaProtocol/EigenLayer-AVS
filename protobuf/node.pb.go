@@ -1046,9 +1046,11 @@ type SyncMessagesResp_TaskMetadata struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	TaskId string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	// how many time this task can run
-	Remain        int64        `protobuf:"varint,2,opt,name=remain,proto3" json:"remain,omitempty"`
-	ExpiredAt     int64        `protobuf:"varint,3,opt,name=expired_at,json=expiredAt,proto3" json:"expired_at,omitempty"`
-	Trigger       *TaskTrigger `protobuf:"bytes,4,opt,name=trigger,proto3" json:"trigger,omitempty"`
+	Remain    int64        `protobuf:"varint,2,opt,name=remain,proto3" json:"remain,omitempty"`
+	ExpiredAt int64        `protobuf:"varint,3,opt,name=expired_at,json=expiredAt,proto3" json:"expired_at,omitempty"`
+	Trigger   *TaskTrigger `protobuf:"bytes,4,opt,name=trigger,proto3" json:"trigger,omitempty"`
+	// task won't be check before this (timestamp in milliseconds)
+	StartAt       int64 `protobuf:"varint,5,opt,name=start_at,json=startAt,proto3" json:"start_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1111,6 +1113,13 @@ func (x *SyncMessagesResp_TaskMetadata) GetTrigger() *TaskTrigger {
 	return nil
 }
 
+func (x *SyncMessagesResp_TaskMetadata) GetStartAt() int64 {
+	if x != nil {
+		return x.StartAt
+	}
+	return 0
+}
+
 var File_node_proto protoreflect.FileDescriptor
 
 const file_node_proto_rawDesc = "" +
@@ -1147,17 +1156,18 @@ const file_node_proto_rawDesc = "" +
 	"\fCapabilities\x12)\n" +
 	"\x10event_monitoring\x18\x01 \x01(\bR\x0feventMonitoring\x12)\n" +
 	"\x10block_monitoring\x18\x02 \x01(\bR\x0fblockMonitoring\x12'\n" +
-	"\x0ftime_monitoring\x18\x03 \x01(\bR\x0etimeMonitoring\"\xad\x02\n" +
+	"\x0ftime_monitoring\x18\x03 \x01(\bR\x0etimeMonitoring\"\xc8\x02\n" +
 	"\x10SyncMessagesResp\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12%\n" +
 	"\x02op\x18\x02 \x01(\x0e2\x15.aggregator.MessageOpR\x02op\x12N\n" +
-	"\rtask_metadata\x18\x03 \x01(\v2).aggregator.SyncMessagesResp.TaskMetadataR\ftaskMetadata\x1a\x91\x01\n" +
+	"\rtask_metadata\x18\x03 \x01(\v2).aggregator.SyncMessagesResp.TaskMetadataR\ftaskMetadata\x1a\xac\x01\n" +
 	"\fTaskMetadata\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x16\n" +
 	"\x06remain\x18\x02 \x01(\x03R\x06remain\x12\x1d\n" +
 	"\n" +
 	"expired_at\x18\x03 \x01(\x03R\texpiredAt\x121\n" +
-	"\atrigger\x18\x04 \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\"\x1f\n" +
+	"\atrigger\x18\x04 \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\x12\x19\n" +
+	"\bstart_at\x18\x05 \x01(\x03R\astartAt\"\x1f\n" +
 	"\rAckMessageReq\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\xa7\x04\n" +
 	"\x11NotifyTriggersReq\x12\x18\n" +
