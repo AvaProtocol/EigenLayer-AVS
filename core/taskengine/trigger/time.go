@@ -3,8 +3,6 @@ package trigger
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -136,81 +134,13 @@ func (t *TimeTrigger) calculateNextCronTime(cronExpr string, startAt int64) (tim
 		t.logger.Warn("startAt not provided, using current time as reference", "cron", cronExpr)
 	}
 
-	// Special handling for interval-based cron expressions (e.g., */10 * * * *)
-	// These should execute at fixed intervals from the startAt time, not at calendar boundaries
-	if t.isIntervalBasedCron(cronExpr) {
-		nextTime, err := t.calculateIntervalBasedNextTime(cronExpr, referenceTime)
-		if err == nil {
-			t.logger.Debug("calculated interval-based next cron execution time",
-				"cron", cronExpr,
-				"reference_time", referenceTime.Format(time.RFC3339),
-				"current_time", time.Now().Format(time.RFC3339),
-				"next_time", nextTime.Format(time.RFC3339),
-				"method", "interval-based")
-			return nextTime, nil
-		}
-		// If interval-based calculation fails, fall back to standard cron
-		t.logger.Warn("interval-based calculation failed, falling back to standard cron",
-			"cron", cronExpr, "error", err)
-	}
-
-	// Standard cron calculation for non-interval expressions
+	// Get the next execution time from the reference time
 	nextTime := schedule.Next(referenceTime)
 	t.logger.Debug("calculated next cron execution time",
 		"cron", cronExpr,
 		"reference_time", referenceTime.Format(time.RFC3339),
 		"current_time", time.Now().Format(time.RFC3339),
-		"next_time", nextTime.Format(time.RFC3339),
-		"method", "standard-cron")
-
-	return nextTime, nil
-}
-
-// isIntervalBasedCron checks if a cron expression is interval-based (e.g., */N format)
-func (t *TimeTrigger) isIntervalBasedCron(cronExpr string) bool {
-	// Check for interval patterns like */10, */5, etc. in the minute field
-	// Format: "minute hour day month dayofweek"
-	fields := strings.Fields(cronExpr)
-	if len(fields) >= 1 {
-		minuteField := fields[0]
-		return strings.HasPrefix(minuteField, "*/")
-	}
-	return false
-}
-
-// calculateIntervalBasedNextTime calculates the next execution time for interval-based cron expressions
-// This ensures execution happens at fixed intervals from the reference time, not calendar boundaries
-func (t *TimeTrigger) calculateIntervalBasedNextTime(cronExpr string, referenceTime time.Time) (time.Time, error) {
-	fields := strings.Fields(cronExpr)
-	if len(fields) < 1 {
-		return time.Time{}, fmt.Errorf("invalid cron expression format")
-	}
-
-	minuteField := fields[0]
-	if !strings.HasPrefix(minuteField, "*/") {
-		return time.Time{}, fmt.Errorf("not an interval-based minute field: %s", minuteField)
-	}
-
-	// Extract the interval (e.g., "*/10" -> 10)
-	intervalStr := strings.TrimPrefix(minuteField, "*/")
-	interval, err := strconv.Atoi(intervalStr)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid interval value: %s", intervalStr)
-	}
-
-	if interval <= 0 || interval > 59 {
-		return time.Time{}, fmt.Errorf("interval must be between 1 and 59 minutes: %d", interval)
-	}
-
-	// Calculate next execution time as referenceTime + interval minutes
-	// If current time is past the reference time, find the next interval boundary
-	currentTime := time.Now()
-
-	// Start from reference time and add intervals until we get a future time
-	nextTime := referenceTime
-	for !nextTime.After(currentTime) {
-		nextTime = nextTime.Add(time.Duration(interval) * time.Minute)
-	}
+		"next_time", nextTime.Format(time.RFC3339))
 
 	return nextTime, nil
 }
