@@ -250,7 +250,8 @@ func NewConfig(configFilePath string) (*Config, error) {
 	// Validate that smart wallet RPC URL is configured - this is critical for contract operations
 	if configRaw.SmartWallet.EthRpcUrl == "" {
 		logger.Error("smart_wallet.eth_rpc_url is required but not configured")
-		return nil, fmt.Errorf("critical configuration error: smart_wallet.eth_rpc_url must be set")
+		logger.Error("smart_wallet.eth_rpc_url is required but not configured. This RPC URL is critical for Base aggregator contract operations; without it, the aggregator cannot interact with the blockchain.")
+		return nil, fmt.Errorf("critical configuration error: smart_wallet.eth_rpc_url must be set because it is required for Base aggregator contract operations")
 	}
 
 	// Create separate RPC client for smart wallet operations (contract read/write)
