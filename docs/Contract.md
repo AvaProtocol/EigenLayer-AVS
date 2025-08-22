@@ -28,10 +28,12 @@ We use a consistent contract address across six networks:
 
 ### Bundler Addresses
 
-| Network      | Address                                      | Type | Notes                            |
-| ------------ | -------------------------------------------- | ---- | -------------------------------- |
-| Mainnet      | `0x6A99324303928aF456aA21f3C88dc58E812D9B40` | EOA  | Mainnet bundler                  |
-| Base Sepolia | `0xE164dd09e720640F6695cB6cED0308065ceFECd9` | EOA  | Testnet bundler for Base Sepolia |
+| Network       | Address                                      | Chain ID | Type | Notes                            |
+| ------------- | -------------------------------------------- | -------- | ---- | -------------------------------- |
+| Ethereum      | `0x6A99324303928aF456aA21f3C88dc58E812D9B40` | 1        | EOA  | Production bundler for Ethereum  |
+| Base          | `0x6A99324303928aF456aA21f3C88dc58E812D9B40` | 8453     | EOA  | Production bundler for Base      |
+| Sepolia       | `0xE164dd09e720640F6695cB6cED0308065ceFECd9` | 11155111 | EOA  | Testnet bundler for Sepolia      |
+| Base Sepolia  | `0xE164dd09e720640F6695cB6cED0308065ceFECd9` | 84532    | EOA  | Testnet bundler for Base Sepolia |
 
 ## Fee Structure and Pre-funding
 
@@ -92,6 +94,6 @@ For tasks where we cover the fee:
 
 - The Factory Proxy is responsible for deploying new smart wallets
 - Smart wallets are dynamically generated with new addresses
-- The bundler is an EOA (Externally Owned Account) that can send transactions. Its address on mainnet is `0x6A99324303928aF456aA21f3C88dc58E812D9B40`
+- The bundler is an EOA (Externally Owned Account) that can send transactions. Production bundler address: `0x6A99324303928aF456aA21f3C88dc58E812D9B40` (Ethereum & Base), Testnet bundler address: `0xE164dd09e720640F6695cB6cED0308065ceFECd9` (Sepolia & Base Sepolia)
 - We use [Voltaire](https://github.com/candidelabs/voltaire) as our bundler implementation
 - The execution flow follows [ERC4337](https://eips.ethereum.org/EIPS/eip-4337) specification
