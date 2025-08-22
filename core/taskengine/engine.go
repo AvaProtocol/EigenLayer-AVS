@@ -1161,6 +1161,7 @@ func (n *Engine) StreamCheckToOperator(payload *avsproto.SyncMessagesReq, srv av
 							Remain:    task.MaxExecution,
 							ExpiredAt: task.ExpiredAt,
 							Trigger:   task.Trigger,
+							StartAt:   task.StartAt,
 						},
 					}
 

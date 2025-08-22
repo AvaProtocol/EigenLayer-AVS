@@ -66,6 +66,8 @@ message SyncMessagesResp {
     int64 remain = 2;
     int64 expired_at = 3;
     TaskTrigger trigger = 4;
+    // task won't be check before this (timestamp in milliseconds)
+    int64 start_at = 5;
   };
 
   TaskMetadata task_metadata = 3;
