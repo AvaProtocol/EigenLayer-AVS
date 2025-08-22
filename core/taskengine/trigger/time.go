@@ -225,12 +225,26 @@ func (t *TimeTrigger) AddCheck(check *avsproto.SyncMessagesResp_TaskMetadata) er
 				continue // Skip this invalid cron expression
 			}
 
-			// Schedule with calculated start time to prevent immediate execution
-			cronJob, err := t.scheduler.NewJob(
-				gocron.CronJob(cronExpr, false),
-				gocron.NewTask(triggerFunc),
-				gocron.WithStartAt(gocron.WithStartDateTime(nextExecTime)),
-			)
+			// Handle case where startAt is in the past (operator started after workflow creation)
+			var cronJob gocron.Job
+			if nextExecTime.Before(time.Now()) {
+				t.logger.Warn("calculated cron start time is in the past, scheduling to start immediately",
+					"task_id", check.TaskId, "cron", cronExpr,
+					"calculated_start", nextExecTime.Format(time.RFC3339),
+					"current_time", time.Now().Format(time.RFC3339))
+				// Schedule without WithStartDateTime - will use current time and cron schedule
+				cronJob, err = t.scheduler.NewJob(
+					gocron.CronJob(cronExpr, false),
+					gocron.NewTask(triggerFunc),
+				)
+			} else {
+				// Schedule with calculated start time to prevent immediate execution
+				cronJob, err = t.scheduler.NewJob(
+					gocron.CronJob(cronExpr, false),
+					gocron.NewTask(triggerFunc),
+					gocron.WithStartAt(gocron.WithStartDateTime(nextExecTime)),
+				)
+			}
 			if err != nil {
 				return fmt.Errorf("failed to schedule cron job: %w", err)
 			}
