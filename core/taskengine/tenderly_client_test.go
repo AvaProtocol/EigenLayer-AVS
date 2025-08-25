@@ -1387,6 +1387,18 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 							"values": []interface{}{ANSWER_UPDATED_SIG},
 						},
 					},
+					"contractAbi": []interface{}{
+						map[string]interface{}{
+							"anonymous": false,
+							"inputs": []interface{}{
+								map[string]interface{}{"indexed": true, "internalType": "int256", "name": "current", "type": "int256"},
+								map[string]interface{}{"indexed": true, "internalType": "uint256", "name": "roundId", "type": "uint256"},
+								map[string]interface{}{"indexed": false, "internalType": "uint256", "name": "updatedAt", "type": "uint256"},
+							},
+							"name": "AnswerUpdated",
+							"type": "event",
+						},
+					},
 				},
 			},
 		}
@@ -1460,6 +1472,18 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 					"topics": []interface{}{
 						map[string]interface{}{
 							"values": []interface{}{ANSWER_UPDATED_SIG},
+						},
+					},
+					"contractAbi": []interface{}{
+						map[string]interface{}{
+							"anonymous": false,
+							"inputs": []interface{}{
+								map[string]interface{}{"indexed": true, "internalType": "int256", "name": "current", "type": "int256"},
+								map[string]interface{}{"indexed": true, "internalType": "uint256", "name": "roundId", "type": "uint256"},
+								map[string]interface{}{"indexed": false, "internalType": "uint256", "name": "updatedAt", "type": "uint256"},
+							},
+							"name": "AnswerUpdated",
+							"type": "event",
 						},
 					},
 					"conditions": []interface{}{
