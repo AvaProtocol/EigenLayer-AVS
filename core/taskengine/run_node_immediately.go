@@ -781,7 +781,7 @@ func (n *Engine) evaluateCondition(actualValue interface{}, operator, expectedVa
 // evaluateLessThan evaluates less than comparison
 func (n *Engine) evaluateLessThan(actualValue interface{}, expectedValue, fieldType string) bool {
 	switch fieldType {
-	case "decimal", "uint256", "uint128", "uint64", "uint32", "uint16", "uint8":
+	case "decimal", "int256", "uint256", "uint128", "uint64", "uint32", "uint16", "uint8", "int128", "int64", "int32", "int16", "int8":
 		actualFloat, err1 := n.convertToFloat(actualValue)
 		expectedFloat, err2 := n.convertToFloat(expectedValue)
 		if err1 != nil || err2 != nil {
@@ -796,7 +796,7 @@ func (n *Engine) evaluateLessThan(actualValue interface{}, expectedValue, fieldT
 // evaluateGreaterThan evaluates greater than comparison
 func (n *Engine) evaluateGreaterThan(actualValue interface{}, expectedValue, fieldType string) bool {
 	switch fieldType {
-	case "decimal", "uint256", "uint128", "uint64", "uint32", "uint16", "uint8":
+	case "decimal", "int256", "uint256", "uint128", "uint64", "uint32", "uint16", "uint8", "int128", "int64", "int32", "int16", "int8":
 		actualFloat, err1 := n.convertToFloat(actualValue)
 		expectedFloat, err2 := n.convertToFloat(expectedValue)
 		if err1 != nil || err2 != nil {
@@ -811,7 +811,7 @@ func (n *Engine) evaluateGreaterThan(actualValue interface{}, expectedValue, fie
 // evaluateEquals evaluates equality comparison
 func (n *Engine) evaluateEquals(actualValue interface{}, expectedValue, fieldType string) bool {
 	switch fieldType {
-	case "decimal", "uint256", "uint128", "uint64", "uint32", "uint16", "uint8":
+	case "decimal", "int256", "uint256", "uint128", "uint64", "uint32", "uint16", "uint8", "int128", "int64", "int32", "int16", "int8":
 		actualFloat, err1 := n.convertToFloat(actualValue)
 		expectedFloat, err2 := n.convertToFloat(expectedValue)
 		if err1 != nil || err2 != nil {
@@ -1328,12 +1328,20 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	// Add the parsed ABI fields as flattened data
 	response["data"] = parsedData
 
-	// Add raw event log fields as metadata (no execution context in metadata)
-	response["metadata"] = enrichmentResult.RawEventData
+	// Add raw event log fields as metadata in the expected array format
+	response["metadata"] = []interface{}{
+		map[string]interface{}{
+			"eventLog": enrichmentResult.RawEventData,
+		},
+	}
 
-	// Always successful for simulated events
-	response["success"] = true
-	response["error"] = ""
+	// Set success based on condition evaluation
+	response["success"] = allConditionsMet
+	if !allConditionsMet {
+		response["error"] = "Conditions not met for simulated event"
+	} else {
+		response["error"] = ""
+	}
 
 	// Add execution context (chainId, isSimulated, provider)
 	response["executionContext"] = GetExecutionContext(chainID, true) // true = isSimulation
