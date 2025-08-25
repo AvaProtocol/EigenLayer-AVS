@@ -1410,12 +1410,12 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		require.True(t, ok, "data should be a map[string]interface{}")
 		require.NotNil(t, eventData, "Should have event data")
 
-		// Verify expected fields in the raw blockchain log data
-		assert.NotNil(t, eventData["tokenContract"], "Should have contract address")
-		assert.NotNil(t, eventData["blockNumber"], "Should have block number")
-		assert.NotNil(t, eventData["transactionHash"], "Should have transaction hash")
-		assert.NotNil(t, eventData["topics"], "Should have topics")
-		assert.NotNil(t, eventData["data"], "Should have raw data")
+		// Verify expected fields in the parsed AnswerUpdated event data
+		assert.NotNil(t, eventData["current"], "Should have current price")
+		assert.NotNil(t, eventData["roundId"], "Should have round ID")
+		assert.NotNil(t, eventData["updatedAt"], "Should have updated timestamp")
+		assert.NotNil(t, eventData["eventName"], "Should have event name")
+		assert.Equal(t, "AnswerUpdated", eventData["eventName"], "Event name should be AnswerUpdated")
 
 		// Get the metadata array (new format)
 		metadata, ok := result["metadata"].([]interface{})
@@ -1489,15 +1489,17 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		require.True(t, ok, "data should be a map[string]interface{}")
 		require.NotNil(t, eventData, "Should have event data")
 
-		// Verify we have raw blockchain log data (the condition logic is tested elsewhere)
-		assert.NotNil(t, eventData["tokenContract"], "Should have contract address")
-		assert.NotNil(t, eventData["blockNumber"], "Should have block number")
-		assert.NotNil(t, eventData["topics"], "Should have topics")
+		// Verify we have parsed AnswerUpdated event data (the condition logic is tested elsewhere)
+		assert.NotNil(t, eventData["current"], "Should have current price")
+		assert.NotNil(t, eventData["roundId"], "Should have round ID")
+		assert.NotNil(t, eventData["updatedAt"], "Should have updated timestamp")
+		assert.NotNil(t, eventData["eventName"], "Should have event name")
 
 		t.Logf("Condition evaluation successful.")
-		t.Logf("   Contract Address: %v", eventData["tokenContract"])
-		t.Logf("   Block Number: %v", eventData["blockNumber"])
-		t.Logf("   Topics: %v", eventData["topics"])
+		t.Logf("   Current Price: %v", eventData["current"])
+		t.Logf("   Round ID: %v", eventData["roundId"])
+		t.Logf("   Updated At: %v", eventData["updatedAt"])
+		t.Logf("   Event Name: %v", eventData["eventName"])
 		t.Logf("   Condition: simulation mode provides sample data ✅")
 	})
 
@@ -1672,18 +1674,13 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		assert.NotEmpty(t, result["data"], "Should have Transfer event data")
 		assert.NotEmpty(t, result["metadata"], "Should have metadata")
 
-		// Get the metadata array (new format)
-		metadata, ok := result["metadata"].([]interface{})
-		require.True(t, ok, "metadata should be a []interface{}")
+		// Get the metadata object (new format - raw event log structure)
+		metadata, ok := result["metadata"].(map[string]interface{})
+		require.True(t, ok, "metadata should be a map[string]interface{}")
 		require.NotNil(t, metadata, "Should have metadata")
-		require.NotEmpty(t, metadata, "Should have metadata entries")
 
-		// Check the first metadata entry (simulation event log)
-		firstEntry, ok := metadata[0].(map[string]interface{})
-		require.True(t, ok, "First metadata entry should be a map")
-
-		transferData, ok := firstEntry["eventLog"].(map[string]interface{})
-		require.True(t, ok, "Should have eventLog in metadata")
+		// The metadata IS the raw event log data (no nested eventLog)
+		transferData := metadata
 
 		t.Logf("\n🎉 === SAMPLE TRANSFER EVENT DATA STRUCTURE ===")
 		t.Logf("✅ Success! Here's the raw blockchain log data structure users can reference:")
@@ -1705,7 +1702,7 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 		t.Logf("%s", string(prettyJSON))
 
 		t.Logf("\n🔍 Metadata Structure:")
-		metadataJSON, _ := json.MarshalIndent(metadata, "", "  ")
+		metadataJSON, _ := json.MarshalIndent(transferData, "", "  ")
 		t.Logf("%s", string(metadataJSON))
 
 		t.Logf("\n💡 === HOW TO USE THIS DATA ===")
