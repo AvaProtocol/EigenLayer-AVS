@@ -429,11 +429,19 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 	return response, nil
 }
 
+// Simulation constants for AnswerUpdated events
+const (
+	// DefaultSimulatedETHPrice represents $2500 with 8 decimals (ETH/USD)
+	DefaultSimulatedETHPrice = 250000000000
+	// DefaultSimulatedRoundID represents a realistic round ID for Chainlink price feeds
+	DefaultSimulatedRoundID = 92233720368547758
+)
+
 // createSimulatedAnswerUpdatedLog creates a simulated Chainlink AnswerUpdated event log for consistency
 func (n *Engine) createSimulatedAnswerUpdatedLog(contractAddress string, chainID int64) *types.Log {
 	// Use realistic mock data for simulation
-	currentPrice := big.NewInt(250000000000) // $2500 with 8 decimals (ETH/USD)
-	roundId := big.NewInt(92233720368547758) // Realistic round ID
+	currentPrice := big.NewInt(DefaultSimulatedETHPrice)
+	roundId := big.NewInt(DefaultSimulatedRoundID)
 	updatedAt := big.NewInt(time.Now().Unix())
 
 	// AnswerUpdated event signature: AnswerUpdated(int256 current, uint256 roundId, uint256 updatedAt)
@@ -3491,36 +3499,16 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 
 		// Add metadata for runTrigger (debugging/testing) - use shared function
 		if result != nil {
-			if n.logger != nil {
-				n.logger.Info("🔍 RunTriggerRPC: Checking for metadata in result",
-					"hasResult", result != nil,
-					"resultKeys", GetMapKeys(result))
-			}
-
 			// Use shared function to extract metadata
 			if metadata := extractTriggerMetadata(result); metadata != nil {
-				if n.logger != nil {
-					n.logger.Info("🔍 RunTriggerRPC: Found metadata, converting to protobuf",
-						"metadataType", fmt.Sprintf("%T", metadata),
-						"metadataValue", metadata)
-				}
 
 				// Convert metadata to be compatible with protobuf
 				compatibleMetadata := convertToProtobufCompatible(metadata)
 
 				if metadataValue, err := structpb.NewValue(compatibleMetadata); err == nil {
 					resp.Metadata = metadataValue
-					if n.logger != nil {
-						n.logger.Info("✅ RunTriggerRPC: Successfully converted metadata to protobuf")
-					}
-				} else {
-					if n.logger != nil {
-						n.logger.Error("❌ RunTriggerRPC: Failed to convert metadata to protobuf", "error", err)
-					}
-				}
-			} else {
-				if n.logger != nil {
-					n.logger.Info("🔍 RunTriggerRPC: No metadata found in result")
+				} else if n.logger != nil {
+					n.logger.Error("Failed to convert metadata to protobuf", "error", err)
 				}
 			}
 		}

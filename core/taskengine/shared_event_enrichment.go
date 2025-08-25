@@ -180,12 +180,9 @@ func parseEventWithABIShared(eventLog *types.Log, contractABI *abi.ABI, query *a
 				switch input.Type.T {
 				case abi.UintTy, abi.IntTy:
 					// Convert numeric types to proper types
-					if bigInt := new(big.Int).SetBytes(topicValue.Bytes()); bigInt != nil {
-						convertedValue := converter.ConvertABIValueToInterface(bigInt, input.Type, input.Name)
-						parsedData[input.Name] = convertedValue
-					} else {
-						parsedData[input.Name] = topicValue.Hex()
-					}
+					bigInt := new(big.Int).SetBytes(topicValue.Bytes())
+					convertedValue := converter.ConvertABIValueToInterface(bigInt, input.Type, input.Name)
+					parsedData[input.Name] = convertedValue
 				case abi.BoolTy:
 					// Convert boolean from topic
 					boolVal := new(big.Int).SetBytes(topicValue.Bytes()).Cmp(big.NewInt(0)) != 0
