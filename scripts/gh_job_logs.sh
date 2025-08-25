@@ -94,8 +94,15 @@ if gh run view --log --job="$JOB_ID" --repo "$REPO" > "$OUTFILE"; then
   echo "✅ Logs saved to: $OUTFILE"
   echo "📊 Log file size: $(wc -l < "$OUTFILE") lines"
   
-  # Show quick summary of failures if any
-  if grep -q "FAIL\|ERROR\|error:" "$OUTFILE" 2>/dev/null; then
+  # Show quick summary of test failures if any
+  if grep -q "--- FAIL:" "$OUTFILE" 2>/dev/null; then
+    echo ""
+    echo "🚨 Test Failures Found:"
+    grep -n "--- FAIL:" "$OUTFILE" | head -10
+    if [[ $(grep -c "--- FAIL:" "$OUTFILE") -gt 10 ]]; then
+      echo "... and $(( $(grep -c "--- FAIL:" "$OUTFILE") - 10 )) more test failures"
+    fi
+  elif grep -q "FAIL\|ERROR\|error:" "$OUTFILE" 2>/dev/null; then
     echo ""
     echo "🚨 Found failures/errors in logs:"
     grep -n "FAIL\|ERROR\|error:" "$OUTFILE" | head -5

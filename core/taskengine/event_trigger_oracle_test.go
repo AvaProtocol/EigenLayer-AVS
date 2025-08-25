@@ -23,7 +23,7 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 
 	t.Log("=== Testing Oracle Price EventTrigger with Conditions ===")
 
-	// Oracle contract ABI for decimals and latestRoundData methods
+	// Oracle contract ABI for AnswerUpdated event (now returns event format instead of method calls)
 	oracleABI := []interface{}{
 		map[string]interface{}{
 			"inputs":          []interface{}{},
@@ -45,7 +45,7 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 			"stateMutability": "view",
 			"type":            "function",
 		},
-
+		// AnswerUpdated event definition - this is what we now return
 		map[string]interface{}{
 			"anonymous": false,
 			"inputs": []interface{}{
@@ -70,26 +70,24 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 		description        string
 	}{
 		{
-			name: "Oracle decimals call - no conditions (always success)",
+			name: "Oracle AnswerUpdated event - no conditions (always success)",
 			methodCalls: []map[string]interface{}{
 				{
-					"methodName":    "decimals",
-					"methodParams":  []string{},
-					"applyToFields": []string{"latestRoundData.answer"},
+					"methodName":   "decimals",
+					"methodParams": []string{},
 				},
 			},
 			conditions:         []map[string]interface{}{},
 			expectedSuccess:    true,
-			expectedDataFields: []string{"decimals"},
+			expectedDataFields: []string{"current", "roundId", "updatedAt", "eventName"}, // AnswerUpdated event fields
 			description:        "Should always succeed when no conditions are specified",
 		},
 		{
-			name: "Oracle price check - conditions met (price < 5000)",
+			name: "Oracle AnswerUpdated event - conditions met (price < 5000)",
 			methodCalls: []map[string]interface{}{
 				{
-					"methodName":    "decimals",
-					"methodParams":  []string{},
-					"applyToFields": []string{"latestRoundData.answer"},
+					"methodName":   "decimals",
+					"methodParams": []string{},
 				},
 				{
 					"methodName":   "latestRoundData",
@@ -98,23 +96,22 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 			},
 			conditions: []map[string]interface{}{
 				{
-					"fieldName": "latestRoundData.answer", // Use answer field from latestRoundData
+					"fieldName": "current", // AnswerUpdated event field (current price)
 					"operator":  "lt",
 					"value":     "500000000000", // 5000 * 10^8 (assuming 8 decimals)
-					"fieldType": "decimal",
+					"fieldType": "int256",
 				},
 			},
-			expectedSuccess:    true, // Assuming current ETH price < $5000
-			expectedDataFields: []string{"decimals", "latestRoundData"},
+			expectedSuccess:    true,                                                     // Assuming current ETH price < $5000
+			expectedDataFields: []string{"current", "roundId", "updatedAt", "eventName"}, // AnswerUpdated event fields
 			description:        "Should succeed when price is below threshold",
 		},
 		{
-			name: "Oracle price check - conditions NOT met (price < 1000)",
+			name: "Oracle AnswerUpdated event - conditions NOT met (price < 1000)",
 			methodCalls: []map[string]interface{}{
 				{
-					"methodName":    "decimals",
-					"methodParams":  []string{},
-					"applyToFields": []string{"latestRoundData.answer"},
+					"methodName":   "decimals",
+					"methodParams": []string{},
 				},
 				{
 					"methodName":   "latestRoundData",
@@ -123,23 +120,22 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 			},
 			conditions: []map[string]interface{}{
 				{
-					"fieldName": "latestRoundData.answer", // Use answer field from latestRoundData
+					"fieldName": "current", // AnswerUpdated event field (current price)
 					"operator":  "lt",
 					"value":     "1000", // Much smaller value to ensure condition fails
-					"fieldType": "decimal",
+					"fieldType": "int256",
 				},
 			},
-			expectedSuccess:    false, // Assuming current ETH price > $1000
-			expectedDataFields: []string{"decimals", "latestRoundData"},
+			expectedSuccess:    false,                                                    // Assuming current ETH price > $1000
+			expectedDataFields: []string{"current", "roundId", "updatedAt", "eventName"}, // AnswerUpdated event fields
 			description:        "Should fail when price is above threshold, but data should be in error",
 		},
 		{
-			name: "Oracle multiple conditions - decimals and price",
+			name: "Oracle AnswerUpdated event - multiple conditions",
 			methodCalls: []map[string]interface{}{
 				{
-					"methodName":    "decimals",
-					"methodParams":  []string{},
-					"applyToFields": []string{"latestRoundData.answer"},
+					"methodName":   "decimals",
+					"methodParams": []string{},
 				},
 				{
 					"methodName":   "latestRoundData",
@@ -148,20 +144,20 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 			},
 			conditions: []map[string]interface{}{
 				{
-					"fieldName": "decimals",
-					"operator":  "eq",
-					"value":     "8",
-					"fieldType": "uint8",
+					"fieldName": "current", // AnswerUpdated event field (current price)
+					"operator":  "gt",
+					"value":     "100000000000", // $1000 * 10^8 (with 8 decimals)
+					"fieldType": "int256",
 				},
 				{
-					"fieldName": "latestRoundData.answer", // Use answer field from latestRoundData
+					"fieldName": "roundId", // AnswerUpdated event field
 					"operator":  "gt",
-					"value":     "1000", // $1000 (already decimal formatted)
-					"fieldType": "decimal",
+					"value":     "0",
+					"fieldType": "uint256",
 				},
 			},
-			expectedSuccess:    true, // Assuming decimals=8 and price > $1000
-			expectedDataFields: []string{"decimals", "latestRoundData"},
+			expectedSuccess:    true,                                                     // Assuming price > $1000 and roundId > 0
+			expectedDataFields: []string{"current", "roundId", "updatedAt", "eventName"}, // AnswerUpdated event fields
 			description:        "Should succeed when both conditions are met",
 		},
 	}
@@ -218,7 +214,7 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 				require.True(t, ok, "executionContext should be a map")
 				assert.Contains(t, execCtx, "chainId", "executionContext should have chainId")
 				assert.Contains(t, execCtx, "isSimulated", "executionContext should have isSimulated")
-				assert.Equal(t, false, execCtx["isSimulated"], "Direct calls should have isSimulated=false")
+				assert.Equal(t, true, execCtx["isSimulated"], "Simulated event calls should have isSimulated=true")
 
 			} else {
 				// FAILURE CASE: Conditions not met
@@ -237,7 +233,7 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 				// Verify executionContext is still present
 				execCtx, ok := result["executionContext"].(map[string]interface{})
 				require.True(t, ok, "executionContext should be present even on failure")
-				assert.Equal(t, false, execCtx["isSimulated"], "Direct calls should have isSimulated=false")
+				assert.Equal(t, true, execCtx["isSimulated"], "Simulated event calls should have isSimulated=true")
 			}
 
 			t.Logf("✅ Test passed: %s", tc.name)
