@@ -229,16 +229,10 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	if simulationMode {
 		// Check if this is a direct method call scenario (oracle reading)
 		shouldUseDirect := n.shouldUseDirectCalls(queriesArray)
-		n.logger.Info("🔍 EventTrigger: Route determination",
-			"shouldUseDirect", shouldUseDirect,
-			"queriesCount", len(queriesArray))
 
 		if shouldUseDirect {
-			n.logger.Info("🎯 EventTrigger: Using direct contract calls for method-only queries")
 			return n.runEventTriggerWithDirectCalls(ctx, queriesArray, inputVariables)
 		} else {
-			// Traditional simulation path for event-based queries
-			n.logger.Info("🔮 EventTrigger: Using Tenderly simulation for event-based queries")
 			return n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
 		}
 	}
@@ -413,18 +407,44 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 	// Add raw event log fields as metadata (no execution context in metadata)
 	response["metadata"] = enrichmentResult.RawEventData
 
-	// Always successful for simulated events
-	response["success"] = true
-	response["error"] = ""
+	// Evaluate conditions if present
+	conditionsMet := true
+	errorMessage := ""
+	if conditionsInterface, hasConditions := queryMap["conditions"]; hasConditions {
+		// Handle both []interface{} and []map[string]interface{} types
+		var conditionsArray []interface{}
+		if conditionsInterfaceArray, ok := conditionsInterface.([]interface{}); ok {
+			conditionsArray = conditionsInterfaceArray
+		} else if conditionsMapArray, ok := conditionsInterface.([]map[string]interface{}); ok {
+			// Convert []map[string]interface{} to []interface{}
+			conditionsArray = make([]interface{}, len(conditionsMapArray))
+			for i, condMap := range conditionsMapArray {
+				conditionsArray[i] = condMap
+			}
+		}
+
+		if len(conditionsArray) > 0 {
+			conditionsMet = n.evaluateConditionsAgainstEventData(enrichmentResult.ParsedData, conditionsArray)
+			if !conditionsMet {
+				errorMessage = "Conditions not met for simulated event"
+			}
+		}
+	}
+
+	// Set success based on condition evaluation
+	response["success"] = conditionsMet
+	response["error"] = errorMessage
 
 	// Add execution context (chainId, isSimulated, provider)
 	response["executionContext"] = GetExecutionContext(chainID, true) // true = isSimulation
 
-	n.logger.Info("✅ Simulated AnswerUpdated event created successfully",
-		"contract", contractAddressStr,
-		"chainId", chainID,
-		"eventName", enrichmentResult.EventName,
-		"hasEnrichedData", enrichmentResult.ParsedData != nil)
+	if conditionsMet && n.logger != nil {
+		n.logger.Info("✅ Simulated AnswerUpdated event created successfully",
+			"contract", contractAddressStr,
+			"chainId", chainID,
+			"eventName", enrichmentResult.EventName,
+			"hasEnrichedData", enrichmentResult.ParsedData != nil)
+	}
 
 	return response, nil
 }
@@ -3723,6 +3743,109 @@ func (n *Engine) convertMapToEventQuery(queryMap map[string]interface{}) (*avspr
 	}
 
 	return query, nil
+}
+
+// evaluateConditionsAgainstEventData evaluates conditions against parsed event data
+func (n *Engine) evaluateConditionsAgainstEventData(eventData map[string]interface{}, conditionsArray []interface{}) bool {
+	for _, conditionInterface := range conditionsArray {
+		conditionMap, ok := conditionInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		fieldName, _ := conditionMap["fieldName"].(string)
+		operator, _ := conditionMap["operator"].(string)
+		expectedValue, _ := conditionMap["value"].(string)
+		fieldType, _ := conditionMap["fieldType"].(string)
+
+		// Get the actual field value from event data
+		actualValue, exists := eventData[fieldName]
+		if !exists {
+			if n.logger != nil {
+				n.logger.Debug("Condition field not found in event data",
+					"fieldName", fieldName,
+					"availableFields", GetMapKeys(eventData))
+			}
+			return false
+		}
+
+		// Evaluate condition based on field type
+		conditionMet := false
+		switch fieldType {
+		case "int256":
+			conditionMet = n.evaluateInt256Condition(actualValue, operator, expectedValue)
+		case "uint256":
+			conditionMet = n.evaluateUint256Condition(actualValue, operator, expectedValue)
+		case "decimal":
+			// Treat decimal as int256 for comparison
+			conditionMet = n.evaluateInt256Condition(actualValue, operator, expectedValue)
+		default:
+			if n.logger != nil {
+				n.logger.Warn("Unsupported field type for condition evaluation",
+					"fieldType", fieldType,
+					"fieldName", fieldName)
+			}
+			return false
+		}
+
+		if !conditionMet {
+			if n.logger != nil {
+				n.logger.Debug("Condition not met",
+					"fieldName", fieldName,
+					"operator", operator,
+					"expectedValue", expectedValue,
+					"actualValue", actualValue)
+			}
+			return false
+		}
+	}
+	return true
+}
+
+// evaluateInt256Condition evaluates int256 field conditions
+func (n *Engine) evaluateInt256Condition(actualValue interface{}, operator, expectedValue string) bool {
+	// Convert actual value to big.Int
+	var actualBig *big.Int
+	switch v := actualValue.(type) {
+	case string:
+		actualBig, _ = new(big.Int).SetString(v, 10)
+	case int64:
+		actualBig = big.NewInt(v)
+	case *big.Int:
+		actualBig = v
+	default:
+		return false
+	}
+
+	// Convert expected value to big.Int
+	expectedBig, ok := new(big.Int).SetString(expectedValue, 10)
+	if !ok {
+		return false
+	}
+
+	// Compare based on operator
+	switch operator {
+	case "lt":
+		return actualBig.Cmp(expectedBig) < 0
+	case "gt":
+		return actualBig.Cmp(expectedBig) > 0
+	case "eq":
+		return actualBig.Cmp(expectedBig) == 0
+	case "lte":
+		return actualBig.Cmp(expectedBig) <= 0
+	case "gte":
+		return actualBig.Cmp(expectedBig) >= 0
+	case "ne":
+		return actualBig.Cmp(expectedBig) != 0
+	default:
+		return false
+	}
+}
+
+// evaluateUint256Condition evaluates uint256 field conditions
+func (n *Engine) evaluateUint256Condition(actualValue interface{}, operator, expectedValue string) bool {
+	// Reuse int256 logic since big.Int handles both
+	return n.evaluateInt256Condition(actualValue, operator, expectedValue)
 }
 
 // evaluateEventConditions checks if event log data satisfies the provided conditions
