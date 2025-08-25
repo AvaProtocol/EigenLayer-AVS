@@ -487,6 +487,18 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 							"values": []interface{}{ANSWER_UPDATED_SIG},
 						},
 					},
+					"contractAbi": []interface{}{
+						map[string]interface{}{
+							"anonymous": false,
+							"inputs": []interface{}{
+								map[string]interface{}{"indexed": true, "internalType": "int256", "name": "current", "type": "int256"},
+								map[string]interface{}{"indexed": true, "internalType": "uint256", "name": "roundId", "type": "uint256"},
+								map[string]interface{}{"indexed": false, "internalType": "uint256", "name": "updatedAt", "type": "uint256"},
+							},
+							"name": "AnswerUpdated",
+							"type": "event",
+						},
+					},
 					"conditions": []interface{}{
 						map[string]interface{}{
 							"fieldName": "current",
@@ -519,15 +531,24 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 		// If we get a result, validate its structure
 		assert.True(t, result["success"].(bool), "Should find simulated event")
 
-		// Check if we have the raw blockchain log data format
+		// Check if we have the new consistent format: parsed fields in data, raw log in metadata
 		if eventData, hasData := result["data"].(map[string]interface{}); hasData && eventData != nil {
-			// Raw blockchain log format: validate raw log fields
-			assert.NotNil(t, eventData["tokenContract"], "Should have contract address")
-			assert.NotNil(t, eventData["blockNumber"], "Should have block number")
-			assert.NotNil(t, eventData["topics"], "Should have topics")
-			assert.NotNil(t, eventData["data"], "Should have raw data")
+			// New format: parsed ABI fields in data
+			assert.NotNil(t, eventData["current"], "Should have parsed current price")
+			assert.NotNil(t, eventData["roundId"], "Should have parsed round ID")
+			assert.NotNil(t, eventData["updatedAt"], "Should have parsed updated timestamp")
+			assert.NotNil(t, eventData["eventName"], "Should have parsed event name")
 
-			fmt.Printf("✅ Raw blockchain log data format detected\n")
+			// Check metadata contains raw blockchain log fields
+			if metadata, hasMetadata := result["metadata"].(map[string]interface{}); hasMetadata && metadata != nil {
+				assert.NotNil(t, metadata["address"], "Should have contract address in metadata")
+				assert.NotNil(t, metadata["blockNumber"], "Should have block number in metadata")
+				assert.NotNil(t, metadata["topics"], "Should have topics in metadata")
+				assert.NotNil(t, metadata["data"], "Should have raw data in metadata")
+				fmt.Printf("✅ New consistent format detected: parsed fields in data, raw log in metadata\n")
+			} else {
+				t.Errorf("Should have metadata with raw blockchain log data")
+			}
 		} else if evmLog, hasEvmLog := result["evm_log"]; hasEvmLog && evmLog != nil {
 			// Legacy format: evm_log structure
 			assert.NotNil(t, evmLog, "Should have evm_log")
@@ -1429,21 +1450,14 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		assert.NotNil(t, eventData["eventName"], "Should have event name")
 		assert.Equal(t, "AnswerUpdated", eventData["eventName"], "Event name should be AnswerUpdated")
 
-		// Get the metadata array (new format)
-		metadata, ok := result["metadata"].([]interface{})
-		require.True(t, ok, "metadata should be a []interface{}")
+		// Get the metadata object (direct format)
+		metadata, ok := result["metadata"].(map[string]interface{})
+		require.True(t, ok, "metadata should be a map[string]interface{}")
 		require.NotNil(t, metadata, "Should have metadata")
-		require.NotEmpty(t, metadata, "Should have metadata entries")
 
-		// Check the first metadata entry (simulation event log)
-		firstEntry, ok := metadata[0].(map[string]interface{})
-		require.True(t, ok, "First metadata entry should be a map")
-
-		eventLog, ok := firstEntry["eventLog"].(map[string]interface{})
-		require.True(t, ok, "Should have eventLog in metadata")
-
-		assert.NotNil(t, eventLog["address"], "Should have address in metadata")
-		assert.NotNil(t, eventLog["blockNumber"], "Should have blockNumber in metadata")
+		// Check the metadata contains raw event log fields
+		assert.NotNil(t, metadata["address"], "Should have address in metadata")
+		assert.NotNil(t, metadata["blockNumber"], "Should have blockNumber in metadata")
 
 		t.Logf("✅ Tenderly simulation successful!")
 		t.Logf("📊 Raw Blockchain Log Data Structure:")

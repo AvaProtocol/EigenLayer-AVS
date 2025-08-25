@@ -1328,12 +1328,8 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	// Add the parsed ABI fields as flattened data
 	response["data"] = parsedData
 
-	// Add raw event log fields as metadata in the expected array format
-	response["metadata"] = []interface{}{
-		map[string]interface{}{
-			"eventLog": enrichmentResult.RawEventData,
-		},
-	}
+	// Add raw event log fields as metadata (direct format for backward compatibility)
+	response["metadata"] = enrichmentResult.RawEventData
 
 	// Set success based on condition evaluation
 	response["success"] = allConditionsMet
