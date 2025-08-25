@@ -31,6 +31,7 @@ type SharedEventEnrichmentParams struct {
 // SharedEventEnrichmentResult contains the enriched event data
 type SharedEventEnrichmentResult struct {
 	ParsedData      map[string]interface{}
+	RawEventData    map[string]interface{}
 	IsTransferEvent bool
 	EventName       string
 }
@@ -40,7 +41,30 @@ type SharedEventEnrichmentResult struct {
 func EnrichEventWithTokenMetadata(params SharedEventEnrichmentParams) (*SharedEventEnrichmentResult, error) {
 	result := &SharedEventEnrichmentResult{
 		ParsedData:      make(map[string]interface{}),
+		RawEventData:    make(map[string]interface{}),
 		IsTransferEvent: false,
+	}
+
+	// Create raw event data structure (the blockchain log structure)
+	if params.EventLog != nil {
+		// Convert topics to string array
+		topics := make([]string, len(params.EventLog.Topics))
+		for i, topic := range params.EventLog.Topics {
+			topics[i] = topic.Hex()
+		}
+
+		result.RawEventData = map[string]interface{}{
+			"address":          params.EventLog.Address.Hex(),
+			"topics":           topics,
+			"data":             "0x" + common.Bytes2Hex(params.EventLog.Data),
+			"blockNumber":      params.EventLog.BlockNumber,
+			"transactionHash":  params.EventLog.TxHash.Hex(),
+			"transactionIndex": params.EventLog.TxIndex,
+			"blockHash":        params.EventLog.BlockHash.Hex(),
+			"logIndex":         params.EventLog.Index,
+			"removed":          params.EventLog.Removed,
+			"chainId":          params.ChainID,
+		}
 	}
 
 	// Parse event data using ABI if provided
@@ -150,12 +174,31 @@ func parseEventWithABIShared(eventLog *types.Log, contractABI *abi.ABI, query *a
 			// Get from topics (topic[0] is signature, so indexed params start from topic[1])
 			topicIndex := indexedCount + 1
 			if topicIndex < len(eventLog.Topics) {
-				if input.Type.T == abi.AddressTy {
-					// Convert hash to address for indexed address parameters
-					parsedData[input.Name] = common.HexToAddress(eventLog.Topics[topicIndex].Hex()).Hex()
-				} else {
-					// Convert common.Hash to hex string for structpb compatibility
-					parsedData[input.Name] = eventLog.Topics[topicIndex].Hex()
+				// Convert indexed topic values based on ABI type (using existing pattern)
+				topicValue := eventLog.Topics[topicIndex]
+
+				switch input.Type.T {
+				case abi.UintTy, abi.IntTy:
+					// Convert numeric types to proper types
+					if bigInt := new(big.Int).SetBytes(topicValue.Bytes()); bigInt != nil {
+						convertedValue := converter.ConvertABIValueToInterface(bigInt, input.Type, input.Name)
+						parsedData[input.Name] = convertedValue
+					} else {
+						parsedData[input.Name] = topicValue.Hex()
+					}
+				case abi.BoolTy:
+					// Convert boolean from topic
+					boolVal := new(big.Int).SetBytes(topicValue.Bytes()).Cmp(big.NewInt(0)) != 0
+					parsedData[input.Name] = boolVal
+				case abi.AddressTy:
+					// Keep addresses as hex
+					parsedData[input.Name] = common.HexToAddress(topicValue.Hex()).Hex()
+				case abi.HashTy, abi.FixedBytesTy:
+					// Keep hashes and fixed bytes as hex
+					parsedData[input.Name] = topicValue.Hex()
+				default:
+					// Default to hex for other types
+					parsedData[input.Name] = topicValue.Hex()
 				}
 			}
 			indexedCount++
