@@ -312,16 +312,17 @@ func (n *Engine) shouldUseDirectCalls(queriesArray []interface{}) bool {
 	return false
 }
 
-// runEventTriggerWithDirectCalls executes eventTrigger using direct contract calls (oracle reading)
+// runEventTriggerWithDirectCalls executes eventTrigger by creating simulated AnswerUpdated events for oracle reading
+// This ensures consistency with deployed tasks and simulate workflow by returning event data instead of method call results
 func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	if n.logger != nil {
-		n.logger.Info("🎯 EventTrigger: Starting direct contract calls mode",
+		n.logger.Info("🎯 EventTrigger: Creating simulated AnswerUpdated events for consistency",
 			"queriesCount", len(queriesArray))
 	}
 
 	// Process the first query (for now, handle single query)
 	if len(queriesArray) == 0 {
-		return nil, fmt.Errorf("no queries provided for direct calls")
+		return nil, fmt.Errorf("no queries provided for simulated events")
 	}
 
 	queryMap, ok := queriesArray[0].(map[string]interface{})
@@ -332,7 +333,7 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 	// Extract contract address
 	addressesInterface, exists := queryMap["addresses"]
 	if !exists {
-		return nil, fmt.Errorf("addresses required for direct contract calls")
+		return nil, fmt.Errorf("addresses required for simulated events")
 	}
 
 	addressesArray, ok := addressesInterface.([]interface{})
@@ -345,198 +346,250 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 		return nil, fmt.Errorf("invalid contract address format")
 	}
 
-	// Parse contract ABI
-	contractAbiInterface, exists := queryMap["contractAbi"]
-	if !exists {
-		return nil, fmt.Errorf("contractAbi required for direct contract calls")
-	}
-
-	// Convert ABI to string array for parsing - handle both string and map formats
-	abiArray, ok := contractAbiInterface.([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid contractAbi format")
-	}
-
-	// Convert ABI items directly to protobuf Values (no intermediate JSON strings)
-	abiValues := make([]*structpb.Value, len(abiArray))
-	for i, abiItem := range abiArray {
-		if abiStr, ok := abiItem.(string); ok {
-			// ABI item is a JSON string, parse it to map first
-			var abiMap map[string]interface{}
-			if err := json.Unmarshal([]byte(abiStr), &abiMap); err != nil {
-				return nil, fmt.Errorf("failed to parse ABI JSON string at index %d: %v", i, err)
-			}
-			val, err := structpb.NewValue(abiMap)
-			if err != nil {
-				return nil, fmt.Errorf("failed to convert parsed ABI to protobuf value at index %d: %v", i, err)
-			}
-			abiValues[i] = val
-		} else if abiMap, ok := abiItem.(map[string]interface{}); ok {
-			// ABI item is already a map, convert directly to protobuf Value
-			val, err := structpb.NewValue(abiMap)
-			if err != nil {
-				return nil, fmt.Errorf("failed to convert ABI map to protobuf value at index %d: %v", i, err)
-			}
-			abiValues[i] = val
-		} else {
-			return nil, fmt.Errorf("invalid ABI item format at index %d (expected string or map, got %T)", i, abiItem)
-		}
-	}
-
-	// Execute method calls directly
-	methodCallsInterface, exists := queryMap["methodCalls"]
-	if !exists {
-		return nil, fmt.Errorf("methodCalls required for direct contract calls")
-	}
-
-	// Handle both []interface{} and []map[string]interface{} types for methodCalls
-	var methodCallsArray []interface{}
-	if methodCallsInterfaceArray, ok := methodCallsInterface.([]interface{}); ok {
-		methodCallsArray = methodCallsInterfaceArray
-	} else if methodCallsMapArray, ok := methodCallsInterface.([]map[string]interface{}); ok {
-		// Convert []map[string]interface{} to []interface{}
-		methodCallsArray = make([]interface{}, len(methodCallsMapArray))
-		for i, methodCall := range methodCallsMapArray {
-			methodCallsArray[i] = methodCall
-		}
-	} else {
-		return nil, fmt.Errorf("invalid methodCalls format (expected []interface{} or []map[string]interface{}, got %T)", methodCallsInterface)
-	}
-
-	// Use existing contract read infrastructure for direct calls
-	methodCallResults := make(map[string]interface{})
-
-	// Initialize raw metadata storage for contractReadResponse
-	var rawContractMetadata []interface{}
-
-	// Collect all method calls first for batch execution (needed for applyToFields logic)
-	var allMethodCalls []*avsproto.ContractReadNode_MethodCall
-
-	for _, methodCallInterface := range methodCallsArray {
-		methodCallMap, ok := methodCallInterface.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		methodName, ok := methodCallMap["methodName"].(string)
-		if !ok {
-			continue
-		}
-
-		// Extract method params
-		var methodParams []string
-		if paramsInterface, exists := methodCallMap["methodParams"]; exists {
-			if paramsArray, ok := paramsInterface.([]interface{}); ok {
-				methodParams = make([]string, len(paramsArray))
-				for i, param := range paramsArray {
-					if paramStr, ok := param.(string); ok {
-						methodParams[i] = paramStr
-					}
-				}
-			}
-		}
-
-		// Extract applyToFields
-		var applyToFields []string
-		if applyToFieldsInterface, exists := methodCallMap["applyToFields"]; exists {
-			// Handle both []string and []interface{} types
-			if applyToFieldsArray, ok := applyToFieldsInterface.([]interface{}); ok {
-				// Handle []interface{} type
-				applyToFields = make([]string, len(applyToFieldsArray))
-				for i, field := range applyToFieldsArray {
-					if fieldStr, ok := field.(string); ok {
-						applyToFields[i] = fieldStr
-					}
-				}
-			} else if applyToFieldsStringArray, ok := applyToFieldsInterface.([]string); ok {
-				// Handle []string type (direct assignment)
-				applyToFields = applyToFieldsStringArray
-			}
-		}
-
-		n.logger.Info("🔍 Collecting method call for batch execution",
-			"method", methodName,
-			"params", methodParams,
-			"applyToFields", applyToFields)
-
-		// Add to batch for later execution
-		allMethodCalls = append(allMethodCalls, &avsproto.ContractReadNode_MethodCall{
-			MethodName:    methodName,
-			MethodParams:  methodParams,
-			ApplyToFields: applyToFields,
-		})
-	}
-
-	// Execute all method calls together in a single contractRead node for proper applyToFields logic
-	if len(allMethodCalls) > 0 {
-		n.logger.Info("🔍 Executing batch of direct contract calls",
-			"contract", contractAddressStr,
-			"methodCallsCount", len(allMethodCalls))
-
-		// Create a temporary contractRead node with ALL method calls
-		contractReadNode := &avsproto.ContractReadNode{
-			Config: &avsproto.ContractReadNode_Config{
-				ContractAddress: contractAddressStr,
-				ContractAbi:     abiValues,
-				MethodCalls:     allMethodCalls, // ✅ Execute all methods together for applyToFields
-			},
-		}
-
-		// Create a temporary VM for contract read execution using proper initialization
-		tempVM := NewVM()
-		tempVM.logger = n.logger
-		tempVM.smartWalletConfig = n.smartWalletConfig // Use the engine's smart wallet config
-		tempVM.SetSimulation(true)                     // Use simulation mode for reads
-
-		// Execute the contract read using VM's runContractRead
-		executionStep, err := tempVM.runContractRead("temp_step", contractReadNode)
-		if err != nil {
-			if n.logger != nil {
-				n.logger.Error("❌ Failed to execute batch contract calls",
-					"error", err)
-			}
-		} else {
-			// Extract results from execution step
-			contractReadOutput := executionStep.GetContractRead()
-			if contractReadOutput != nil && contractReadOutput.Data != nil {
-				if dataMap, ok := contractReadOutput.Data.AsInterface().(map[string]interface{}); ok {
-					// Merge results into methodCallResults
-					for key, value := range dataMap {
-						methodCallResults[key] = value
-					}
-					n.logger.Info("✅ Batch contract calls successful",
-						"resultKeys", GetMapKeys(dataMap))
-				}
-			}
-
-			// Extract raw metadata for contractReadResponse
-			if executionStep.Metadata != nil {
-				if metadataArray, ok := executionStep.Metadata.AsInterface().([]interface{}); ok {
-					// Store raw metadata for later use in buildEventTriggerResponse
-					rawContractMetadata = metadataArray
-				}
-			}
-		}
-	}
-
 	// Get chain ID for response context
 	var chainID int64 = 11155111 // Default to Sepolia
 	if n.tokenEnrichmentService != nil {
 		chainID = int64(n.tokenEnrichmentService.GetChainID())
 	}
 
-	// Evaluate conditions against the method call results
-	_, allConditionsMet := n.evaluateConditionsWithDetails(methodCallResults, queryMap)
+	// Create simulated AnswerUpdated event using the same logic as TenderlyClient
+	simulatedLog := n.createSimulatedAnswerUpdatedLog(contractAddressStr, chainID)
 
-	// Build enhanced response structure
-	response := n.buildEventTriggerResponse(methodCallResults, allConditionsMet, chainID, rawContractMetadata, queryMap)
+	// Parse contract ABI for enrichment (if available)
+	var contractABI []interface{}
+	if contractAbiInterface, exists := queryMap["contractAbi"]; exists {
+		if abiArray, ok := contractAbiInterface.([]interface{}); ok {
+			contractABI = abiArray
+		}
+	}
 
-	n.logger.Info("✅ Direct contract calls completed",
-		"methodResults", len(methodCallResults),
-		"conditionsMet", allConditionsMet,
-		"results", methodCallResults)
+	// Use the shared enrichment function to process the simulated log
+	enrichmentParams := SharedEventEnrichmentParams{
+		EventLog:               simulatedLog,
+		ContractABI:            nil, // Will be converted from contractABI below
+		TokenEnrichmentService: n.tokenEnrichmentService,
+		RpcClient:              rpcConn, // Use global RPC connection
+		Logger:                 n.logger,
+		ChainID:                chainID,
+	}
+
+	// Convert contractABI to protobuf Values for enrichment
+	if len(contractABI) > 0 {
+		abiValues := make([]*structpb.Value, len(contractABI))
+		for i, abiItem := range contractABI {
+			if abiStr, ok := abiItem.(string); ok {
+				// ABI item is a JSON string, parse it to map first
+				var abiMap map[string]interface{}
+				if err := json.Unmarshal([]byte(abiStr), &abiMap); err == nil {
+					if val, err := structpb.NewValue(abiMap); err == nil {
+						abiValues[i] = val
+					}
+				}
+			} else if abiMap, ok := abiItem.(map[string]interface{}); ok {
+				// ABI item is already a map, convert directly to protobuf Value
+				if val, err := structpb.NewValue(abiMap); err == nil {
+					abiValues[i] = val
+				}
+			}
+		}
+		enrichmentParams.ContractABI = abiValues
+	}
+
+	// Enrich the simulated event data
+	enrichmentResult, err := EnrichEventWithTokenMetadata(enrichmentParams)
+	if err != nil {
+		n.logger.Warn("Failed to enrich simulated event data, using basic metadata",
+			"error", err)
+		// Create basic event response without enrichment
+		return n.createBasicSimulatedEventResponse(simulatedLog, chainID), nil
+	}
+
+	// Create response with enriched event data (same format as deployed tasks and simulate workflow)
+	response := make(map[string]interface{})
+
+	// Add the parsed ABI fields as flattened data (like Transfer event format)
+	response["data"] = enrichmentResult.ParsedData
+
+	// Add raw event log fields as metadata (no execution context in metadata)
+	response["metadata"] = enrichmentResult.RawEventData
+
+	// Always successful for simulated events
+	response["success"] = true
+	response["error"] = ""
+
+	// Add execution context (chainId, isSimulated, provider)
+	response["executionContext"] = GetExecutionContext(chainID, true) // true = isSimulation
+
+	n.logger.Info("✅ Simulated AnswerUpdated event created successfully",
+		"contract", contractAddressStr,
+		"chainId", chainID,
+		"eventName", enrichmentResult.EventName,
+		"hasEnrichedData", enrichmentResult.ParsedData != nil)
 
 	return response, nil
+}
+
+// createSimulatedAnswerUpdatedLog creates a simulated Chainlink AnswerUpdated event log for consistency
+func (n *Engine) createSimulatedAnswerUpdatedLog(contractAddress string, chainID int64) *types.Log {
+	// Use realistic mock data for simulation
+	currentPrice := big.NewInt(250000000000) // $2500 with 8 decimals (ETH/USD)
+	roundId := big.NewInt(92233720368547758) // Realistic round ID
+	updatedAt := big.NewInt(time.Now().Unix())
+
+	// AnswerUpdated event signature: AnswerUpdated(int256 current, uint256 roundId, uint256 updatedAt)
+	eventSignature := common.HexToHash("0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f")
+
+	// Convert price to 32-byte hash (indexed parameter)
+	priceHash := common.BytesToHash(common.LeftPadBytes(currentPrice.Bytes(), 32))
+
+	// Convert roundId to 32-byte hash (indexed parameter)
+	roundIdHash := common.BytesToHash(common.LeftPadBytes(roundId.Bytes(), 32))
+
+	// updatedAt is non-indexed, so it goes in the data field
+	updatedAtBytes := common.LeftPadBytes(updatedAt.Bytes(), 32)
+
+	// Create a realistic transaction hash
+	txHash := common.HexToHash(fmt.Sprintf("0x%064x", time.Now().UnixNano()))
+
+	// Use realistic block number based on chain ID
+	blockNumber := getRealisticBlockNumberForChain(chainID)
+
+	return &types.Log{
+		Address: common.HexToAddress(contractAddress),
+		Topics: []common.Hash{
+			eventSignature, // Event signature
+			priceHash,      // current (indexed)
+			roundIdHash,    // roundId (indexed)
+		},
+		Data:        updatedAtBytes, // updatedAt (non-indexed)
+		BlockNumber: blockNumber,
+		TxHash:      txHash,
+		Index:       0,
+		TxIndex:     0,
+		BlockHash:   common.HexToHash(fmt.Sprintf("0x%064x", time.Now().UnixNano()+1)),
+		Removed:     false,
+	}
+}
+
+// createBasicSimulatedEventResponse creates a basic event response when enrichment fails
+func (n *Engine) createBasicSimulatedEventResponse(log *types.Log, chainID int64) map[string]interface{} {
+	response := make(map[string]interface{})
+
+	// Create basic parsed data (without ABI enrichment, just basic fields)
+	parsedData := map[string]interface{}{
+		"eventName": "AnswerUpdated",
+		// Add basic unparsed event data when ABI parsing fails
+		"raw_data":   "0x" + common.Bytes2Hex(log.Data),
+		"raw_topics": make([]string, len(log.Topics)),
+	}
+
+	// Convert topics to string array
+	for i, topic := range log.Topics {
+		parsedData["raw_topics"].([]string)[i] = topic.Hex()
+	}
+
+	// Create raw event log metadata (no execution context in metadata)
+	topics := make([]string, len(log.Topics))
+	for i, topic := range log.Topics {
+		topics[i] = topic.Hex()
+	}
+
+	metadata := map[string]interface{}{
+		"address":          log.Address.Hex(),
+		"topics":           topics,
+		"data":             "0x" + common.Bytes2Hex(log.Data),
+		"blockNumber":      log.BlockNumber,
+		"transactionHash":  log.TxHash.Hex(),
+		"transactionIndex": log.TxIndex,
+		"blockHash":        log.BlockHash.Hex(),
+		"logIndex":         log.Index,
+		"removed":          log.Removed,
+		"chainId":          chainID,
+	}
+
+	response["data"] = parsedData
+	response["metadata"] = metadata
+	response["success"] = true
+	response["error"] = ""
+
+	// Add execution context (chainId, isSimulated, provider)
+	response["executionContext"] = GetExecutionContext(chainID, true) // true = isSimulation
+
+	return response
+}
+
+// buildEventTriggerResponseWithSimulation builds an event trigger response with optional simulation flag
+func (n *Engine) buildEventTriggerResponseWithSimulation(methodCallData map[string]interface{}, allConditionsMet bool, chainID int64, rawContractMetadata []interface{}, queryMap map[string]interface{}, isSimulation bool) map[string]interface{} {
+	response := make(map[string]interface{})
+
+	// Always include the contract read data in the data field
+	response["data"] = methodCallData
+
+	// Set metadata as array of method objects without the value field
+	if len(rawContractMetadata) > 0 {
+		// Remove only the "value" field from each metadata entry and add simulation flag
+		cleanedMetadata := make([]interface{}, len(rawContractMetadata))
+		for i, metadataEntry := range rawContractMetadata {
+			if entryMap, ok := metadataEntry.(map[string]interface{}); ok {
+				// Create a copy without the "value" field
+				cleanEntry := make(map[string]interface{})
+				for k, v := range entryMap {
+					if k != "value" {
+						cleanEntry[k] = v
+					}
+				}
+				// Add simulation flag to metadata
+				if isSimulation {
+					cleanEntry["isSimulation"] = true
+				}
+				cleanedMetadata[i] = cleanEntry
+			}
+		}
+		response["metadata"] = cleanedMetadata
+	} else {
+		// Fallback to empty array if no raw metadata available
+		metadata := []interface{}{}
+		if isSimulation {
+			metadata = append(metadata, map[string]interface{}{
+				"isSimulation": true,
+				"source":       "simulation",
+			})
+		}
+		response["metadata"] = metadata
+	}
+
+	if allConditionsMet {
+		// Success case: conditions met
+		response["success"] = true
+		response["error"] = ""
+	} else {
+		// Failure case: conditions not met - need to evaluate conditions to get detailed error
+		response["success"] = false
+
+		// Get the actual condition evaluation to build a detailed error message
+		conditionResults, _ := n.evaluateConditionsWithDetails(methodCallData, queryMap)
+
+		// Build detailed error message
+		var failedReasons []string
+		for _, condition := range conditionResults {
+			if !condition.Passed {
+				failedReasons = append(failedReasons, condition.Reason)
+			}
+		}
+
+		if len(failedReasons) > 0 {
+			// Only include failed reasons in error message to avoid leaking sensitive data
+			response["error"] = fmt.Sprintf("Conditions not met: %s",
+				strings.Join(failedReasons, "; "))
+		} else {
+			response["error"] = "Conditions not met"
+		}
+	}
+
+	// Add executionContext with simulation flag
+	response["executionContext"] = GetExecutionContext(chainID, isSimulation)
+
+	return response
 }
 
 // ConditionResult represents the result of evaluating a single condition
@@ -1241,23 +1294,21 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 		_, allConditionsMet = n.evaluateConditionsWithDetails(methodCallResults, queryMap)
 	}
 
-	// Always return enhanced response format with proper data and metadata
-	// For simulation path (event-based triggers), success means events were found
-	// For direct calls, success means conditions were met
-	// Since this is simulation path, we found events, so success = true
-	eventsFound := true
+	// Create response following the same pattern as runEventTriggerWithDirectCalls
+	response := make(map[string]interface{})
 
-	// For Tenderly simulation, create metadata in the expected format
-	// Include the raw blockchain event data as metadata
-	simulationMetadata := []interface{}{
-		map[string]interface{}{
-			"eventLog": metadata, // Raw blockchain log data
-			"source":   "tenderly_simulation",
-			"success":  true,
-		},
-	}
+	// Add the parsed ABI fields as flattened data
+	response["data"] = parsedData
 
-	response := n.buildEventTriggerResponse(methodCallResults, eventsFound, chainID, simulationMetadata, queryMap)
+	// Add raw event log fields as metadata (no execution context in metadata)
+	response["metadata"] = enrichmentResult.RawEventData
+
+	// Always successful for simulated events
+	response["success"] = true
+	response["error"] = ""
+
+	// Add execution context (chainId, isSimulated, provider)
+	response["executionContext"] = GetExecutionContext(chainID, true) // true = isSimulation
 
 	n.logger.Info("✅ EventTrigger simulation: Returning enhanced response format",
 		"contract", simulatedLog.Address.Hex(),
