@@ -3763,11 +3763,27 @@ func (n *Engine) evaluateConditionsAgainstEventData(eventData map[string]interfa
 		fieldType, _ := conditionMap["fieldType"].(string)
 
 		// Get the actual field value from event data
-		actualValue, exists := eventData[fieldName]
+		// Handle eventName.fieldName format by extracting just the field name
+		actualFieldName := fieldName
+		if strings.Contains(fieldName, ".") {
+			parts := strings.Split(fieldName, ".")
+			if len(parts) == 2 {
+				actualFieldName = parts[1] // Use just the field name part
+				if n.logger != nil {
+					n.logger.Debug("Parsed eventName.fieldName format",
+						"original", fieldName,
+						"eventName", parts[0],
+						"fieldName", actualFieldName)
+				}
+			}
+		}
+
+		actualValue, exists := eventData[actualFieldName]
 		if !exists {
 			if n.logger != nil {
 				n.logger.Debug("Condition field not found in event data",
-					"fieldName", fieldName,
+					"originalFieldName", fieldName,
+					"actualFieldName", actualFieldName,
 					"availableFields", GetMapKeys(eventData))
 			}
 			return false
