@@ -147,15 +147,44 @@ func SendUserOp(
 		// Re-estimate gas with current nonce (only on first attempt or if previous failed due to gas)
 		if retry == 0 || (err != nil && strings.Contains(err.Error(), "gas")) {
 			userOp.Signature, _ = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, dummySigForGasEstimation.Bytes())
+
+			// Gas estimation debug logging
+			log.Printf("GAS ESTIMATION DEBUG: Starting gas estimation for UserOp")
+			log.Printf("  Sender: %s", userOp.Sender.Hex())
+			log.Printf("  Nonce: %s", userOp.Nonce.String())
+			log.Printf("  CallData length: %d bytes", len(userOp.CallData))
+			log.Printf("  InitCode length: %d bytes", len(userOp.InitCode))
+			log.Printf("  MaxFeePerGas: %s wei", userOp.MaxFeePerGas.String())
+			log.Printf("  MaxPriorityFeePerGas: %s wei", userOp.MaxPriorityFeePerGas.String())
+			log.Printf("  Bundler URL: %s", smartWalletConfig.BundlerURL)
+
 			gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *userOp, aa.EntrypointAddress, map[string]any{})
 			if gasErr == nil && gas != nil {
+				// Gas estimation success logging
+				log.Printf("✅ GAS ESTIMATION SUCCESS:")
+				log.Printf("  PreVerificationGas: %s wei", gas.PreVerificationGas.String())
+				log.Printf("  VerificationGasLimit: %s wei", gas.VerificationGasLimit.String())
+				log.Printf("  CallGasLimit: %s wei", gas.CallGasLimit.String())
+
+				// Calculate total gas and cost estimates
+				totalGasLimit := new(big.Int).Add(gas.PreVerificationGas, new(big.Int).Add(gas.VerificationGasLimit, gas.CallGasLimit))
+				estimatedCost := new(big.Int).Mul(totalGasLimit, userOp.MaxFeePerGas)
+				log.Printf("  Total Gas Limit: %s", totalGasLimit.String())
+				log.Printf("  Estimated Max Cost: %s wei", estimatedCost.String())
+
 				userOp.PreVerificationGas = gas.PreVerificationGas
 				userOp.VerificationGasLimit = gas.VerificationGasLimit
 				userOp.CallGasLimit = gas.CallGasLimit
 			} else if retry == 0 {
+				// Gas estimation failure logging
+				log.Printf("❌ GAS ESTIMATION FAILED:")
+				log.Printf("  Error: %v", gasErr)
+				log.Printf("  Bundler URL: %s", smartWalletConfig.BundlerURL)
+				log.Printf("  Entry Point: %s", aa.EntrypointAddress.Hex())
 				// Only fail on first attempt if gas estimation fails
-				log.Printf("🚨 DEPLOYED WORKFLOW ERROR: Failed to estimate gas - %v", gasErr)
 				return userOp, nil, fmt.Errorf("failed to estimate gas: %w", gasErr)
+			} else {
+				log.Printf("❌ GAS ESTIMATION FAILED on retry %d: %v", retry+1, gasErr)
 			}
 		}
 
@@ -167,17 +196,57 @@ func SendUserOp(
 			return userOp, nil, fmt.Errorf("failed to sign UserOp: %w", err)
 		}
 
+		// Bundler send debug logging
+		log.Printf("BUNDLER SEND DEBUG: Preparing to send UserOp to bundler")
+		log.Printf("  Final Gas Limits:")
+		log.Printf("    CallGasLimit: %s", userOp.CallGasLimit.String())
+		log.Printf("    VerificationGasLimit: %s", userOp.VerificationGasLimit.String())
+		log.Printf("    PreVerificationGas: %s", userOp.PreVerificationGas.String())
+		log.Printf("  Final Gas Prices:")
+		log.Printf("    MaxFeePerGas: %s wei", userOp.MaxFeePerGas.String())
+		log.Printf("    MaxPriorityFeePerGas: %s wei", userOp.MaxPriorityFeePerGas.String())
+		log.Printf("  UserOp Details:")
+		log.Printf("    Sender: %s", userOp.Sender.Hex())
+		log.Printf("    Nonce: %s", userOp.Nonce.String())
+		log.Printf("    Paymaster: %d bytes", len(userOp.PaymasterAndData))
+
+		// Calculate total estimated cost for prefund check
+		totalGasLimit := new(big.Int).Add(userOp.PreVerificationGas, new(big.Int).Add(userOp.VerificationGasLimit, userOp.CallGasLimit))
+		estimatedMaxCost := new(big.Int).Mul(totalGasLimit, userOp.MaxFeePerGas)
+		log.Printf("  PREFUND REQUIREMENT: %s wei (total gas * maxFeePerGas)", estimatedMaxCost.String())
+
+		// Check sender balance before sending to bundler
+		if balance, balErr := client.BalanceAt(context.Background(), userOp.Sender, nil); balErr == nil {
+			log.Printf("  SENDER BALANCE: %s wei", balance.String())
+			if balance.Cmp(estimatedMaxCost) >= 0 {
+				log.Printf("  ✅ PREFUND CHECK: Sufficient balance (%s >= %s)", balance.String(), estimatedMaxCost.String())
+			} else {
+				log.Printf("  ❌ PREFUND CHECK: Insufficient balance (%s < %s)", balance.String(), estimatedMaxCost.String())
+				log.Printf("  SHORTFALL: Need %s more wei", new(big.Int).Sub(estimatedMaxCost, balance).String())
+			}
+		} else {
+			log.Printf("  ❌ BALANCE CHECK FAILED: %v", balErr)
+		}
+
 		// Attempt to send
 		txResult, err = bundlerClient.SendUserOperation(context.Background(), *userOp, aa.EntrypointAddress)
 
-		// If successful, break
+		// Bundler send result logging
 		if err == nil && txResult != "" {
-			log.Printf("✅ DEPLOYED WORKFLOW: UserOp sent successfully on attempt %d - nonce: %s, txResult: %s", retry+1, userOp.Nonce.String(), txResult)
+			log.Printf("✅ BUNDLER SEND SUCCESS:")
+			log.Printf("  Attempt: %d/%d", retry+1, maxRetries)
+			log.Printf("  Nonce used: %s", userOp.Nonce.String())
+			log.Printf("  UserOp hash: %s", txResult)
+			log.Printf("  Bundler URL: %s", smartWalletConfig.BundlerURL)
 			break
 		}
 
-		// Log the error and decide whether to retry
-		log.Printf("🔄 DEPLOYED WORKFLOW: Attempt %d failed - error: %v", retry+1, err)
+		// Bundler send failure logging
+		log.Printf("❌ BUNDLER SEND FAILED:")
+		log.Printf("  Attempt: %d/%d", retry+1, maxRetries)
+		log.Printf("  Error: %v", err)
+		log.Printf("  TxResult: %s", txResult)
+		log.Printf("  Bundler URL: %s", smartWalletConfig.BundlerURL)
 
 		// For nonce errors, refetch nonce and retry
 		if err != nil && strings.Contains(err.Error(), "AA25 invalid account nonce") {
