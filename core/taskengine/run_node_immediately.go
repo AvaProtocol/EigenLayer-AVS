@@ -729,6 +729,14 @@ func (n *Engine) getNestedFieldValue(data map[string]interface{}, fieldName stri
 		return value, exists
 	}
 
+	// For eventName.fieldName format (e.g., "AnswerUpdated.current"), try just the field name
+	if len(parts) == 2 {
+		fieldNameOnly := parts[1]
+		if value, exists := data[fieldNameOnly]; exists {
+			return value, true
+		}
+	}
+
 	// Nested field access
 	current := data
 	for i, part := range parts {
@@ -3769,23 +3777,11 @@ func (n *Engine) evaluateConditionsAgainstEventData(eventData map[string]interfa
 			parts := strings.Split(fieldName, ".")
 			if len(parts) == 2 {
 				actualFieldName = parts[1] // Use just the field name part
-				if n.logger != nil {
-					n.logger.Debug("Parsed eventName.fieldName format",
-						"original", fieldName,
-						"eventName", parts[0],
-						"fieldName", actualFieldName)
-				}
 			}
 		}
 
 		actualValue, exists := eventData[actualFieldName]
 		if !exists {
-			if n.logger != nil {
-				n.logger.Debug("Condition field not found in event data",
-					"originalFieldName", fieldName,
-					"actualFieldName", actualFieldName,
-					"availableFields", GetMapKeys(eventData))
-			}
 			return false
 		}
 
@@ -3809,13 +3805,6 @@ func (n *Engine) evaluateConditionsAgainstEventData(eventData map[string]interfa
 		}
 
 		if !conditionMet {
-			if n.logger != nil {
-				n.logger.Debug("Condition not met",
-					"fieldName", fieldName,
-					"operator", operator,
-					"expectedValue", expectedValue,
-					"actualValue", actualValue)
-			}
 			return false
 		}
 	}
@@ -3837,6 +3826,10 @@ func (n *Engine) evaluateInt256Condition(actualValue interface{}, operator, expe
 		return false
 	}
 
+	if actualBig == nil {
+		return false
+	}
+
 	// Convert expected value to big.Int
 	expectedBig, ok := new(big.Int).SetString(expectedValue, 10)
 	if !ok {
@@ -3844,22 +3837,25 @@ func (n *Engine) evaluateInt256Condition(actualValue interface{}, operator, expe
 	}
 
 	// Compare based on operator
+	var result bool
 	switch operator {
 	case "lt":
-		return actualBig.Cmp(expectedBig) < 0
+		result = actualBig.Cmp(expectedBig) < 0
 	case "gt":
-		return actualBig.Cmp(expectedBig) > 0
+		result = actualBig.Cmp(expectedBig) > 0
 	case "eq":
-		return actualBig.Cmp(expectedBig) == 0
+		result = actualBig.Cmp(expectedBig) == 0
 	case "lte":
-		return actualBig.Cmp(expectedBig) <= 0
+		result = actualBig.Cmp(expectedBig) <= 0
 	case "gte":
-		return actualBig.Cmp(expectedBig) >= 0
+		result = actualBig.Cmp(expectedBig) >= 0
 	case "ne":
-		return actualBig.Cmp(expectedBig) != 0
+		result = actualBig.Cmp(expectedBig) != 0
 	default:
 		return false
 	}
+
+	return result
 }
 
 // evaluateUint256Condition evaluates uint256 field conditions
