@@ -2178,16 +2178,24 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 	tempVM.secrets = v.secrets // Inherit secrets
 	tempVM.TaskID = v.TaskID   // Inherit original TaskID for logging context
 	// Propagate simulation mode and task owner for correct execution behavior
-	// FORCE simulation for RunNodeWithInputs - it should NEVER execute real transactions
-	tempVM.IsSimulation = true // Force simulation for RunNodeWithInputs
+	// For RunNodeWithInputs calls from deployed workflows (like loop nodes), inherit the parent VM's simulation mode
+	// Only force simulation for direct SDK calls to runNodeImmediately
+	if v.isDirectSDKCall() {
+		tempVM.IsSimulation = true // Force simulation for direct SDK calls
+	} else {
+		tempVM.IsSimulation = v.IsSimulation // Inherit parent VM's simulation mode for deployed workflows
+	}
 	tempVM.TaskOwner = v.TaskOwner
 	// Propagate shared clients (e.g., Tenderly)
 	tempVM.tenderlyClient = v.tenderlyClient
 
 	// Log simulation mode for debugging
 	if v.logger != nil {
-		v.logger.Debug("RunNodeWithInputs using simulation mode",
-			"node_type", node.Type.String())
+		v.logger.Debug("RunNodeWithInputs simulation mode decision",
+			"node_type", node.Type.String(),
+			"parent_is_simulation", v.IsSimulation,
+			"is_direct_sdk_call", v.isDirectSDKCall(),
+			"temp_vm_is_simulation", tempVM.IsSimulation)
 	}
 
 	tempVM.mu.Lock()
@@ -4452,4 +4460,19 @@ func getStatusText(statusCode int) string {
 			return "Unknown"
 		}
 	}
+}
+
+// isDirectSDKCall determines if RunNodeWithInputs is being called directly from SDK (should simulate)
+// vs being called from deployed workflow execution like loop nodes (should inherit simulation mode)
+func (v *VM) isDirectSDKCall() bool {
+	// Check if this is a direct SDK call by looking for the task_type variable
+	// Direct SDK calls set task_type to "run_node_with_inputs"
+	if taskTypeVar, ok := v.vars["task_type"]; ok {
+		if taskTypeStr, ok := taskTypeVar.(string); ok {
+			return taskTypeStr == "run_node_with_inputs"
+		}
+	}
+
+	// If no task_type variable, this is likely a deployed workflow call (like from loop nodes)
+	return false
 }
