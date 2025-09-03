@@ -26,11 +26,12 @@ import (
 )
 
 var (
-	// Dummy value to fullfil validation.
-	// Gas info is calculated and return by bundler RPC
-	callGasLimit         = big.NewInt(10000000)
-	verificationGasLimit = big.NewInt(10000000)
-	preVerificationGas   = big.NewInt(10000000)
+	// Default gas limit used for initial UserOp construction before bundler estimation
+	// Gas info is calculated and returned by bundler RPC
+	DEFAULT_GAS_LIMIT    = big.NewInt(10000000)
+	callGasLimit         = DEFAULT_GAS_LIMIT
+	verificationGasLimit = DEFAULT_GAS_LIMIT
+	preVerificationGas   = DEFAULT_GAS_LIMIT
 
 	// the signature isnt important, only length check
 	dummySigForGasEstimation = crypto.Keccak256Hash(common.FromHex("0xdead123"))
@@ -208,7 +209,7 @@ func SendUserOp(
 		log.Printf("  UserOp Details:")
 		log.Printf("    Sender: %s", userOp.Sender.Hex())
 		log.Printf("    Nonce: %s", userOp.Nonce.String())
-		log.Printf("    Paymaster: %d bytes", len(userOp.PaymasterAndData))
+		log.Printf("    PaymasterAndData: %d bytes", len(userOp.PaymasterAndData))
 
 		// Calculate total estimated cost for prefund check
 		totalGasLimit := new(big.Int).Add(userOp.PreVerificationGas, new(big.Int).Add(userOp.VerificationGasLimit, userOp.CallGasLimit))

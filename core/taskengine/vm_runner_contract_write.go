@@ -707,13 +707,15 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 			// Add gas estimation details if available from userOp
 			if userOp != nil {
 				executionLogBuilder.WriteString("Gas Requirements (if estimated):\n")
-				if userOp.CallGasLimit != nil && userOp.CallGasLimit.Cmp(big.NewInt(10000000)) != 0 {
+				// Only show gas limits if they were actually estimated (not default values)
+				defaultGasLimit := big.NewInt(10000000)
+				if userOp.CallGasLimit != nil && userOp.CallGasLimit.Cmp(defaultGasLimit) != 0 {
 					executionLogBuilder.WriteString(fmt.Sprintf("  CallGasLimit: %s\n", userOp.CallGasLimit.String()))
 				}
-				if userOp.VerificationGasLimit != nil && userOp.VerificationGasLimit.Cmp(big.NewInt(10000000)) != 0 {
+				if userOp.VerificationGasLimit != nil && userOp.VerificationGasLimit.Cmp(defaultGasLimit) != 0 {
 					executionLogBuilder.WriteString(fmt.Sprintf("  VerificationGasLimit: %s\n", userOp.VerificationGasLimit.String()))
 				}
-				if userOp.PreVerificationGas != nil && userOp.PreVerificationGas.Cmp(big.NewInt(10000000)) != 0 {
+				if userOp.PreVerificationGas != nil && userOp.PreVerificationGas.Cmp(defaultGasLimit) != 0 {
 					executionLogBuilder.WriteString(fmt.Sprintf("  PreVerificationGas: %s\n", userOp.PreVerificationGas.String()))
 				}
 				if userOp.MaxFeePerGas != nil {
