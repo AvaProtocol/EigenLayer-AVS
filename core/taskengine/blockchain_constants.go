@@ -9,6 +9,10 @@ const (
 	// StandardGasCostHex is the hexadecimal representation of StandardGasCost
 	// Used in transaction receipts and other hex-encoded contexts
 	StandardGasCostHex = "0x5208"
+
+	// DefaultGasLimit represents the default gas limit used for UserOp construction before bundler estimation
+	// This is a placeholder value that gets replaced by actual gas estimation from the bundler
+	DefaultGasLimit = 10000000
 )
 
 // Contract method constants
