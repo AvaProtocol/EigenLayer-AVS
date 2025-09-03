@@ -708,8 +708,8 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 			if userOp != nil {
 				executionLogBuilder.WriteString("Gas Requirements (if estimated):\n")
 				// Only show gas limits if they were actually estimated (not default values)
-				// Import the constant from preset package to avoid magic numbers
-				defaultGasLimit := big.NewInt(10000000) // TODO: Import preset.DEFAULT_GAS_LIMIT when available
+				const DEFAULT_GAS_LIMIT_VALUE = 10000000 // Default gas limit for UserOp construction
+				defaultGasLimit := big.NewInt(DEFAULT_GAS_LIMIT_VALUE)
 				if userOp.CallGasLimit != nil && userOp.CallGasLimit.Cmp(defaultGasLimit) != 0 {
 					executionLogBuilder.WriteString(fmt.Sprintf("  CallGasLimit: %s\n", userOp.CallGasLimit.String()))
 				}

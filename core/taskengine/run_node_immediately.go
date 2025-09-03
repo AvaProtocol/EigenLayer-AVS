@@ -3782,6 +3782,12 @@ func (n *Engine) evaluateConditionsAgainstEventData(eventData map[string]interfa
 
 		actualValue, exists := eventData[actualFieldName]
 		if !exists {
+			if n.logger != nil {
+				n.logger.Debug("Condition field not found in event data",
+					"originalFieldName", fieldName,
+					"actualFieldName", actualFieldName,
+					"availableFields", GetMapKeys(eventData))
+			}
 			return false
 		}
 
