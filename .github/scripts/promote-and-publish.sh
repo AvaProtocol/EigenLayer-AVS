@@ -33,38 +33,55 @@ echo -e "${GREEN}✅ GitHub CLI is installed and authenticated${NC}"
 REPO=$(gh repo view --json owner,name --jq '.owner.login + "/" + .name')
 echo -e "${BLUE}📦 Working with repository: ${REPO}${NC}"
 
-# Get the latest pre-release
-echo -e "${BLUE}🔍 Finding the latest pre-release...${NC}"
-LATEST_PRERELEASE=$(gh release list --repo "$REPO" --limit 50 --json tagName,isPrerelease,createdAt | \
-    jq -r '.[] | select(.isPrerelease == true) | .tagName' | head -1)
+# Get all pre-releases that need to be promoted
+echo -e "${BLUE}🔍 Finding all pre-releases to promote...${NC}"
+PRERELEASES=$(gh release list --repo "$REPO" --limit 50 --json tagName,isPrerelease,createdAt | \
+    jq -r '.[] | select(.isPrerelease == true) | .tagName' | sort -V)
 
-if [ -z "$LATEST_PRERELEASE" ]; then
-    echo -e "${RED}❌ No pre-release found. Make sure a pre-release exists.${NC}"
+if [ -z "$PRERELEASES" ]; then
+    echo -e "${RED}❌ No pre-releases found. Make sure pre-releases exist.${NC}"
     exit 1
 fi
 
-echo -e "${GREEN}✅ Found latest pre-release: ${LATEST_PRERELEASE}${NC}"
+# Convert to array for easier processing
+PRERELEASE_ARRAY=($PRERELEASES)
+PRERELEASE_COUNT=${#PRERELEASE_ARRAY[@]}
 
-# Validate version format (should be like v1.13.2)
-if [[ ! "$LATEST_PRERELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo -e "${YELLOW}⚠️  Warning: Version format doesn't match expected pattern (v1.13.2)${NC}"
-    echo -e "${YELLOW}   Found: ${LATEST_PRERELEASE}${NC}"
-    read -p "Continue anyway? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo -e "${BLUE}👋 Cancelled by user${NC}"
-        exit 0
+echo -e "${GREEN}✅ Found ${PRERELEASE_COUNT} pre-release(s) to promote:${NC}"
+for release in "${PRERELEASE_ARRAY[@]}"; do
+    echo -e "   • ${release}"
+done
+
+# Validate version formats
+echo -e "${BLUE}🔍 Validating version formats...${NC}"
+for release in "${PRERELEASE_ARRAY[@]}"; do
+    if [[ ! "$release" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo -e "${YELLOW}⚠️  Warning: Version format doesn't match expected pattern (v1.13.2)${NC}"
+        echo -e "${YELLOW}   Found: ${release}${NC}"
+        read -p "Continue anyway? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo -e "${BLUE}👋 Cancelled by user${NC}"
+            exit 0
+        fi
+        break
     fi
-fi
+done
+
+# Get the latest (highest version) pre-release for Docker latest tags
+LATEST_PRERELEASE="${PRERELEASE_ARRAY[-1]}"
 
 # Confirm promotion
-echo -e "${YELLOW}📋 About to promote pre-release to full release:${NC}"
-echo -e "   Pre-release: ${LATEST_PRERELEASE}"
+echo -e "${YELLOW}📋 About to promote ${PRERELEASE_COUNT} pre-release(s) to full release(s):${NC}"
+for release in "${PRERELEASE_ARRAY[@]}"; do
+    echo -e "   • ${release}"
+done
+echo -e "   Latest version (${LATEST_PRERELEASE}) will be tagged as 'latest'"
 echo -e "   This will:"
-echo -e "   • Convert pre-release to full release"
-echo -e "   • Mark it as the latest release"
-echo -e "   • Trigger dev Docker build (avaprotocol/avs-dev)"
-echo -e "   • Trigger prod Docker build (avaprotocol/ap-avs) with 'latest' tag"
+echo -e "   • Convert all pre-releases to full releases"
+echo -e "   • Mark latest version as the latest release"
+echo -e "   • Trigger Docker builds for all versions"
+echo -e "   • Tag latest version Docker images as 'latest'"
 echo
 
 read -p "Continue? (y/N): " -n 1 -r
@@ -74,57 +91,101 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 0
 fi
 
-# Promote pre-release to full release
-echo -e "${BLUE}🔄 Promoting pre-release to full release...${NC}"
-gh release edit "$LATEST_PRERELEASE" --repo "$REPO" --prerelease=false --latest
+# Promote all pre-releases to full releases
+echo -e "${BLUE}🔄 Promoting pre-releases to full releases...${NC}"
 
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✅ Successfully promoted ${LATEST_PRERELEASE} to full release${NC}"
-else
-    echo -e "${RED}❌ Failed to promote pre-release${NC}"
+PROMOTION_SUCCESS=true
+for i in "${!PRERELEASE_ARRAY[@]}"; do
+    release="${PRERELEASE_ARRAY[$i]}"
+    echo -e "${BLUE}   Processing ${release}...${NC}"
+    
+    # Only mark the latest version as "latest"
+    if [ "$release" = "$LATEST_PRERELEASE" ]; then
+        gh release edit "$release" --repo "$REPO" --prerelease=false --latest
+    else
+        gh release edit "$release" --repo "$REPO" --prerelease=false
+    fi
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}   ✅ Successfully promoted ${release} to full release${NC}"
+    else
+        echo -e "${RED}   ❌ Failed to promote ${release}${NC}"
+        PROMOTION_SUCCESS=false
+    fi
+done
+
+if [ "$PROMOTION_SUCCESS" != true ]; then
+    echo -e "${RED}❌ Some promotions failed${NC}"
     exit 1
 fi
 
-# Wait a moment for GitHub to process the change
+# Wait a moment for GitHub to process the changes
 sleep 2
 
-# Trigger dev Docker workflow
-echo -e "${BLUE}🐳 Triggering dev Docker build workflow...${NC}"
-gh workflow run "publish-dev-docker.yml" \
-    --repo "$REPO" \
-    --field git_tag="$LATEST_PRERELEASE" \
-    --field branch_name="main" \
-    --field fast_build=false
+# Trigger Docker workflows for all promoted releases
+echo -e "${BLUE}🐳 Triggering Docker build workflows for all versions...${NC}"
 
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✅ Dev Docker workflow triggered successfully${NC}"
-    echo -e "   • Git tag: ${LATEST_PRERELEASE}"
-    echo -e "   • Branch: main"
-    echo -e "   • Image: avaprotocol/avs-dev:${LATEST_PRERELEASE}"
-    echo -e "   • Image: avaprotocol/avs-dev:latest"
-else
-    echo -e "${RED}❌ Failed to trigger dev Docker workflow${NC}"
-fi
+DOCKER_SUCCESS=true
+for release in "${PRERELEASE_ARRAY[@]}"; do
+    echo -e "${BLUE}   Building Docker images for ${release}...${NC}"
+    
+    # Determine if this version should be tagged as 'latest'
+    TAG_LATEST=false
+    if [ "$release" = "$LATEST_PRERELEASE" ]; then
+        TAG_LATEST=true
+    fi
+    
+    # Trigger dev Docker workflow
+    echo -e "${BLUE}     🐳 Dev Docker build...${NC}"
+    gh workflow run "publish-dev-docker.yml" \
+        --repo "$REPO" \
+        --field git_tag="$release" \
+        --field branch_name="main" \
+        --field fast_build=false
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}     ✅ Dev Docker workflow triggered for ${release}${NC}"
+        if [ "$TAG_LATEST" = true ]; then
+            echo -e "        • Image: avaprotocol/avs-dev:${release} (latest)"
+        else
+            echo -e "        • Image: avaprotocol/avs-dev:${release}"
+        fi
+    else
+        echo -e "${RED}     ❌ Failed to trigger dev Docker workflow for ${release}${NC}"
+        DOCKER_SUCCESS=false
+    fi
+    
+    # Wait between workflows to avoid rate limiting
+    sleep 1
+    
+    # Trigger production Docker workflow
+    echo -e "${BLUE}     🏭 Production Docker build...${NC}"
+    gh workflow run "publish-prod-docker.yml" \
+        --repo "$REPO" \
+        --field git_tag="$release" \
+        --field branch_name="main" \
+        --field tag_latest="$TAG_LATEST"
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}     ✅ Production Docker workflow triggered for ${release}${NC}"
+        if [ "$TAG_LATEST" = true ]; then
+            echo -e "        • Image: avaprotocol/ap-avs:${release} (latest)"
+        else
+            echo -e "        • Image: avaprotocol/ap-avs:${release}"
+        fi
+    else
+        echo -e "${RED}     ❌ Failed to trigger production Docker workflow for ${release}${NC}"
+        DOCKER_SUCCESS=false
+    fi
+    
+    # Wait between versions to avoid overwhelming the system
+    if [ "$release" != "$LATEST_PRERELEASE" ]; then
+        sleep 2
+    fi
+done
 
-# Wait a moment between workflow triggers
-sleep 1
-
-# Trigger production Docker workflow
-echo -e "${BLUE}🏭 Triggering production Docker build workflow...${NC}"
-gh workflow run "publish-prod-docker.yml" \
-    --repo "$REPO" \
-    --field git_tag="$LATEST_PRERELEASE" \
-    --field branch_name="main" \
-    --field tag_latest=true
-
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✅ Production Docker workflow triggered successfully${NC}"
-    echo -e "   • Git tag: ${LATEST_PRERELEASE}"
-    echo -e "   • Branch: main"
-    echo -e "   • Image: avaprotocol/ap-avs:${LATEST_PRERELEASE}"
-    echo -e "   • Image: avaprotocol/ap-avs:latest"
-else
-    echo -e "${RED}❌ Failed to trigger production Docker workflow${NC}"
+if [ "$DOCKER_SUCCESS" != true ]; then
+    echo -e "${YELLOW}⚠️  Some Docker workflows failed to trigger${NC}"
 fi
 
 # Show workflow status links
@@ -136,9 +197,17 @@ echo -e "   Prod workflow: https://github.com/${REPO}/actions/workflows/publish-
 echo
 echo -e "${GREEN}🎉 Process completed successfully!${NC}"
 echo -e "${BLUE}📋 Summary:${NC}"
-echo -e "   • Released: ${LATEST_PRERELEASE} (now marked as latest)"
-echo -e "   • Dev Docker: avaprotocol/avs-dev:${LATEST_PRERELEASE} & latest"
-echo -e "   • Prod Docker: avaprotocol/ap-avs:${LATEST_PRERELEASE} & latest"
+echo -e "   • Promoted ${PRERELEASE_COUNT} pre-release(s) to full release(s):"
+for release in "${PRERELEASE_ARRAY[@]}"; do
+    if [ "$release" = "$LATEST_PRERELEASE" ]; then
+        echo -e "     - ${release} (marked as latest)"
+    else
+        echo -e "     - ${release}"
+    fi
+done
+echo -e "   • Dev Docker images: avaprotocol/avs-dev (all versions)"
+echo -e "   • Prod Docker images: avaprotocol/ap-avs (all versions)"
+echo -e "   • Latest tags point to: ${LATEST_PRERELEASE}"
 echo
 echo -e "${YELLOW}💡 Next steps:${NC}"
 echo -e "   • Monitor the workflow runs above"
