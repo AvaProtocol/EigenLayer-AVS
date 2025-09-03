@@ -20,6 +20,8 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/byte4"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -508,11 +510,20 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		"calldata", callData,
 		"owner_eoaAddress", r.owner.Hex())
 
+	// Initialize execution log builder to capture all details
+	var executionLogBuilder strings.Builder
+	executionLogBuilder.WriteString(fmt.Sprintf("UserOp Transaction Execution for %s\n", methodName))
+	executionLogBuilder.WriteString(fmt.Sprintf("Contract: %s\n", contractAddress.Hex()))
+	executionLogBuilder.WriteString(fmt.Sprintf("Owner EOA: %s\n", r.owner.Hex()))
+
 	// Convert hex calldata to bytes
 	callDataBytes := common.FromHex(callData)
 
 	// 🔍 PRE-FLIGHT VALIDATION: Check for common failure scenarios before gas estimation
 	if validationErr := r.validateTransactionBeforeGasEstimation(methodName, callData, callDataBytes, contractAddress); validationErr != nil {
+		executionLogBuilder.WriteString(fmt.Sprintf("❌ PRE-FLIGHT VALIDATION FAILED: %v\n", validationErr))
+		executionLogBuilder.WriteString("Skipped gas estimation to avoid bundler error\n")
+
 		r.vm.logger.Error("🚫 PRE-FLIGHT VALIDATION FAILED - Skipping gas estimation to avoid bundler error",
 			"validation_error", validationErr.Error(),
 			"method", methodName,
@@ -524,12 +535,19 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	}
 
 	// Create smart wallet execute calldata: execute(target, value, data)
+	executionLogBuilder.WriteString(fmt.Sprintf("Packing smart wallet execute calldata...\n"))
+	executionLogBuilder.WriteString(fmt.Sprintf("  Target contract: %s\n", contractAddress.Hex()))
+	executionLogBuilder.WriteString(fmt.Sprintf("  ETH value: 0\n"))
+	executionLogBuilder.WriteString(fmt.Sprintf("  Method calldata: %d bytes\n", len(callDataBytes)))
+
 	smartWalletCallData, err := aa.PackExecute(
 		contractAddress, // target contract
 		big.NewInt(0),   // ETH value (0 for contract calls)
 		callDataBytes,   // contract method calldata
 	)
 	if err != nil {
+		executionLogBuilder.WriteString(fmt.Sprintf("❌ CALLDATA PACKING FAILED: %v\n", err))
+
 		r.vm.logger.Error("🚨 DEPLOYED WORKFLOW ERROR: Failed to pack smart wallet execute calldata",
 			"error", err,
 			"contract_address", contractAddress.Hex(),
@@ -541,6 +559,8 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 			Error:   fmt.Sprintf("Failed to pack smart wallet execute calldata: %v", err),
 		}
 	}
+
+	executionLogBuilder.WriteString(fmt.Sprintf("✅ Smart wallet calldata packed: %d bytes\n", len(smartWalletCallData)))
 
 	// Set up factory address for AA operations
 	aa.SetFactoryAddress(r.smartWalletConfig.FactoryAddress)
@@ -601,9 +621,58 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	r.vm.mu.Unlock()
 
 	if senderOverride == nil {
+		executionLogBuilder.WriteString("WARNING: aa_sender not found in VM vars\n")
 		r.vm.logger.Error("🚨 DEPLOYED WORKFLOW ERROR: aa_sender not found in VM vars",
 			"owner_eoaAddress", r.owner.Hex())
+	} else {
+		executionLogBuilder.WriteString(fmt.Sprintf("✅ Smart wallet sender: %s\n", senderOverride.Hex()))
 	}
+
+	// Add paymaster information to execution log
+	if paymasterReq != nil {
+		executionLogBuilder.WriteString(fmt.Sprintf("Using paymaster: %s\n", r.smartWalletConfig.PaymasterAddress.Hex()))
+	} else {
+		executionLogBuilder.WriteString("No paymaster (self-funded transaction)\n")
+	}
+
+	executionLogBuilder.WriteString(fmt.Sprintf("Bundler URL: %s\n", r.smartWalletConfig.BundlerURL))
+
+	// Pre-send gas estimation to capture in logs
+	executionLogBuilder.WriteString("Performing gas estimation...\n")
+
+	// Create a temporary UserOp for gas estimation
+	rpcClient, rpcErr := ethclient.Dial(r.smartWalletConfig.EthRpcUrl)
+	if rpcErr != nil {
+		executionLogBuilder.WriteString(fmt.Sprintf("❌ Failed to connect to RPC: %v\n", rpcErr))
+	} else {
+		defer rpcClient.Close()
+
+		_, bundlerErr := bundler.NewBundlerClient(r.smartWalletConfig.BundlerURL)
+		if bundlerErr != nil {
+			executionLogBuilder.WriteString(fmt.Sprintf("❌ Failed to create bundler client: %v\n", bundlerErr))
+		} else {
+			// Check smart wallet balance
+			smartWalletAddr := senderOverride
+			if smartWalletAddr != nil {
+				if balance, balErr := rpcClient.BalanceAt(ctx, *smartWalletAddr, nil); balErr == nil {
+					executionLogBuilder.WriteString(fmt.Sprintf("Smart wallet balance: %s wei\n", balance.String()))
+				} else {
+					executionLogBuilder.WriteString(fmt.Sprintf("❌ Failed to check balance: %v\n", balErr))
+				}
+			}
+
+			// Try to get current gas prices
+			if maxFee, maxPriority, feeErr := eip1559.SuggestFee(rpcClient); feeErr == nil {
+				executionLogBuilder.WriteString(fmt.Sprintf("Current gas prices:\n"))
+				executionLogBuilder.WriteString(fmt.Sprintf("  MaxFeePerGas: %s wei\n", maxFee.String()))
+				executionLogBuilder.WriteString(fmt.Sprintf("  MaxPriorityFeePerGas: %s wei\n", maxPriority.String()))
+			} else {
+				executionLogBuilder.WriteString(fmt.Sprintf("❌ Failed to get gas prices: %v\n", feeErr))
+			}
+		}
+	}
+
+	executionLogBuilder.WriteString("Sending UserOp to bundler...\n")
 
 	// Send UserOp transaction with correct parameters:
 	// - owner: EOA address (r.owner) for smart wallet derivation
@@ -625,21 +694,95 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	}
 
 	if err != nil {
+		// Add detailed error information to execution log
+		executionLogBuilder.WriteString(fmt.Sprintf("❌ BUNDLER FAILED: UserOp transaction could not be sent\n"))
+		executionLogBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
+
+		// Check if this is specifically the AA21 prefund error and add detailed explanation
+		if strings.Contains(err.Error(), "AA21") {
+			executionLogBuilder.WriteString("AA21 PREFUND ERROR DETECTED\n")
+			executionLogBuilder.WriteString("This indicates insufficient ETH balance for gas fees\n")
+			executionLogBuilder.WriteString("Solution: Fund the smart wallet with ETH for gas fees\n")
+
+			// Add gas estimation details if available from userOp
+			if userOp != nil {
+				executionLogBuilder.WriteString("Gas Requirements (if estimated):\n")
+				if userOp.CallGasLimit != nil && userOp.CallGasLimit.Cmp(big.NewInt(10000000)) != 0 {
+					executionLogBuilder.WriteString(fmt.Sprintf("  CallGasLimit: %s\n", userOp.CallGasLimit.String()))
+				}
+				if userOp.VerificationGasLimit != nil && userOp.VerificationGasLimit.Cmp(big.NewInt(10000000)) != 0 {
+					executionLogBuilder.WriteString(fmt.Sprintf("  VerificationGasLimit: %s\n", userOp.VerificationGasLimit.String()))
+				}
+				if userOp.PreVerificationGas != nil && userOp.PreVerificationGas.Cmp(big.NewInt(10000000)) != 0 {
+					executionLogBuilder.WriteString(fmt.Sprintf("  PreVerificationGas: %s\n", userOp.PreVerificationGas.String()))
+				}
+				if userOp.MaxFeePerGas != nil {
+					executionLogBuilder.WriteString(fmt.Sprintf("  MaxFeePerGas: %s wei\n", userOp.MaxFeePerGas.String()))
+				}
+			}
+		}
+
 		r.vm.logger.Error("🚫 BUNDLER FAILED - UserOp transaction failed, workflow execution FAILED",
 			"bundler_error", err,
 			"bundler_url", r.smartWalletConfig.BundlerURL,
 			"method", methodName,
-			"contract", contractAddress.Hex())
+			"contract", contractAddress.Hex(),
+			"sender_smart_wallet", func() string {
+				if senderOverride != nil {
+					return senderOverride.Hex()
+				}
+				return "not_set"
+			}(),
+			"owner_eoa", r.owner.Hex())
 
-		// Return error result - deployed workflows should FAIL when bundler is unavailable
+		// Check if this is specifically the AA21 prefund error
+		if strings.Contains(err.Error(), "AA21") {
+			r.vm.logger.Error("🚨 AA21 PREFUND ERROR DETECTED - This indicates insufficient ETH balance for gas fees",
+				"error_code", "AA21",
+				"meaning", "didn't pay prefund",
+				"solution", "Fund the smart wallet with ETH for gas fees")
+		}
+
+		// Create comprehensive error message with all details
+		var errorBuilder strings.Builder
+		errorBuilder.WriteString(fmt.Sprintf("Bundler failed - UserOp transaction could not be sent: %v\n", err))
+		errorBuilder.WriteString(executionLogBuilder.String())
+
+		// Return error result with detailed execution log
 		return &avsproto.ContractWriteNode_MethodResult{
-			Success: false,
-			Error:   fmt.Sprintf("Bundler failed - UserOp transaction could not be sent: %v", err),
+			Success:    false,
+			Error:      errorBuilder.String(),
+			MethodName: methodName,
 		}
 	}
 
+	// Add success information to execution log
+	executionLogBuilder.WriteString("✅ BUNDLER SUCCESS: UserOp transaction sent successfully\n")
+	if userOp != nil {
+		executionLogBuilder.WriteString(fmt.Sprintf("UserOp Hash: %s\n", func() string {
+			if receipt != nil {
+				return receipt.TxHash.Hex()
+			}
+			return "pending"
+		}()))
+		executionLogBuilder.WriteString(fmt.Sprintf("Sender: %s\n", userOp.Sender.Hex()))
+		executionLogBuilder.WriteString(fmt.Sprintf("Nonce: %s\n", userOp.Nonce.String()))
+	}
+	if receipt != nil {
+		executionLogBuilder.WriteString(fmt.Sprintf("Transaction Hash: %s\n", receipt.TxHash.Hex()))
+		executionLogBuilder.WriteString(fmt.Sprintf("Gas Used: %d\n", receipt.GasUsed))
+		executionLogBuilder.WriteString(fmt.Sprintf("Block Number: %d\n", receipt.BlockNumber.Uint64()))
+	}
+
 	// Create result from real transaction
-	return r.createRealTransactionResult(methodName, contractAddress.Hex(), callData, parsedABI, userOp, receipt)
+	result := r.createRealTransactionResult(methodName, contractAddress.Hex(), callData, parsedABI, userOp, receipt)
+
+	// If result has additional error information, append our detailed logs
+	if result != nil && !result.Success && result.Error != "" {
+		result.Error = result.Error + "\n" + executionLogBuilder.String()
+	}
+
+	return result
 }
 
 // createRealTransactionResult creates a result from a real UserOp transaction
@@ -1088,7 +1231,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// Execute each method call
 	ctx := context.Background()
 	for i, methodCall := range methodCalls {
-		log.WriteString(fmt.Sprintf("\nExecuting method %d: %s\n", i+1, methodCall.MethodName))
+		log.WriteString(fmt.Sprintf("Executing method %d: %s\n", i+1, methodCall.MethodName))
 
 		// Add panic recovery to ensure individual method failures don't break the loop
 		var result *avsproto.ContractWriteNode_MethodResult
@@ -1151,7 +1294,32 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				"error_message", result.Error,
 				"error_length", len(result.Error),
 				"success", result.Success)
+
+			// Add detailed failure information to execution log
 			log.WriteString(fmt.Sprintf("❌ Failed: %s - %s\n", result.MethodName, result.Error))
+
+			// If this is a bundler/AA error, add additional debugging information
+			if strings.Contains(result.Error, "Bundler failed") || strings.Contains(result.Error, "AA21") {
+				log.WriteString("BUNDLER FAILURE DETAILS:\n")
+				log.WriteString(fmt.Sprintf("  Bundler URL: %s\n", r.smartWalletConfig.BundlerURL))
+				log.WriteString(fmt.Sprintf("  Entry Point: %s\n", r.smartWalletConfig.EntrypointAddress.Hex()))
+				log.WriteString(fmt.Sprintf("  Factory: %s\n", r.smartWalletConfig.FactoryAddress.Hex()))
+
+				if strings.Contains(result.Error, "AA21") {
+					log.WriteString("AA21 ERROR EXPLANATION:\n")
+					log.WriteString("  - AA21 means 'didn't pay prefund'\n")
+					log.WriteString("  - This indicates insufficient ETH balance for gas fees\n")
+					log.WriteString("  - Solution: Fund the smart wallet with ETH\n")
+					log.WriteString(fmt.Sprintf("  - Smart wallet address: %s\n", func() string {
+						if v, ok := r.vm.vars["aa_sender"]; ok {
+							if s, ok2 := v.(string); ok2 {
+								return s
+							}
+						}
+						return "not_available"
+					}()))
+				}
+			}
 			// Don't fail the entire execution for individual method failures
 		}
 	}
