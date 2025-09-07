@@ -96,7 +96,24 @@ func buildERC20WithdrawalCalldata(tokenAddress, recipient common.Address, amount
 func ResolveSmartWalletAddress(client *ethclient.Client, owner common.Address, params *WithdrawalParams) (*common.Address, error) {
 	// If explicit address provided, validate it belongs to the owner
 	if params.SmartWalletAddress != nil {
-		// TODO: Add ownership validation if needed
+		// Ownership validation: check that the provided smart wallet address matches the expected address for the owner
+		salt := big.NewInt(0)
+		if params.Salt != nil {
+			salt = params.Salt
+		}
+		var expectedAddr *common.Address
+		var err error
+		if params.FactoryAddress != nil {
+			expectedAddr, err = aa.GetSenderAddressForFactory(client, owner, *params.FactoryAddress, salt)
+		} else {
+			expectedAddr, err = aa.GetSenderAddress(client, owner, salt)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to compute expected smart wallet address: %w", err)
+		}
+		if *expectedAddr != *params.SmartWalletAddress {
+			return nil, fmt.Errorf("provided smart wallet address does not belong to the owner")
+		}
 		return params.SmartWalletAddress, nil
 	}
 
