@@ -25,6 +25,7 @@ const (
 	Aggregator_GetWallet_FullMethodName          = "/aggregator.Aggregator/GetWallet"
 	Aggregator_SetWallet_FullMethodName          = "/aggregator.Aggregator/SetWallet"
 	Aggregator_ListWallets_FullMethodName        = "/aggregator.Aggregator/ListWallets"
+	Aggregator_WithdrawFunds_FullMethodName      = "/aggregator.Aggregator/WithdrawFunds"
 	Aggregator_CreateTask_FullMethodName         = "/aggregator.Aggregator/CreateTask"
 	Aggregator_ListTasks_FullMethodName          = "/aggregator.Aggregator/ListTasks"
 	Aggregator_GetTask_FullMethodName            = "/aggregator.Aggregator/GetTask"
@@ -60,6 +61,8 @@ type AggregatorClient interface {
 	GetWallet(ctx context.Context, in *GetWalletReq, opts ...grpc.CallOption) (*GetWalletResp, error)
 	SetWallet(ctx context.Context, in *SetWalletReq, opts ...grpc.CallOption) (*GetWalletResp, error)
 	ListWallets(ctx context.Context, in *ListWalletReq, opts ...grpc.CallOption) (*ListWalletResp, error)
+	// Withdraw funds from a smart wallet using UserOp
+	WithdrawFunds(ctx context.Context, in *WithdrawFundsReq, opts ...grpc.CallOption) (*WithdrawFundsResp, error)
 	// Task Management Operation
 	CreateTask(ctx context.Context, in *CreateTaskReq, opts ...grpc.CallOption) (*CreateTaskResp, error)
 	ListTasks(ctx context.Context, in *ListTasksReq, opts ...grpc.CallOption) (*ListTasksResp, error)
@@ -169,6 +172,16 @@ func (c *aggregatorClient) ListWallets(ctx context.Context, in *ListWalletReq, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListWalletResp)
 	err := c.cc.Invoke(ctx, Aggregator_ListWallets_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *aggregatorClient) WithdrawFunds(ctx context.Context, in *WithdrawFundsReq, opts ...grpc.CallOption) (*WithdrawFundsResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WithdrawFundsResp)
+	err := c.cc.Invoke(ctx, Aggregator_WithdrawFunds_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -388,6 +401,8 @@ type AggregatorServer interface {
 	GetWallet(context.Context, *GetWalletReq) (*GetWalletResp, error)
 	SetWallet(context.Context, *SetWalletReq) (*GetWalletResp, error)
 	ListWallets(context.Context, *ListWalletReq) (*ListWalletResp, error)
+	// Withdraw funds from a smart wallet using UserOp
+	WithdrawFunds(context.Context, *WithdrawFundsReq) (*WithdrawFundsResp, error)
 	// Task Management Operation
 	CreateTask(context.Context, *CreateTaskReq) (*CreateTaskResp, error)
 	ListTasks(context.Context, *ListTasksReq) (*ListTasksResp, error)
@@ -460,6 +475,9 @@ func (UnimplementedAggregatorServer) SetWallet(context.Context, *SetWalletReq) (
 }
 func (UnimplementedAggregatorServer) ListWallets(context.Context, *ListWalletReq) (*ListWalletResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWallets not implemented")
+}
+func (UnimplementedAggregatorServer) WithdrawFunds(context.Context, *WithdrawFundsReq) (*WithdrawFundsResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method WithdrawFunds not implemented")
 }
 func (UnimplementedAggregatorServer) CreateTask(context.Context, *CreateTaskReq) (*CreateTaskResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTask not implemented")
@@ -646,6 +664,24 @@ func _Aggregator_ListWallets_Handler(srv interface{}, ctx context.Context, dec f
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AggregatorServer).ListWallets(ctx, req.(*ListWalletReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Aggregator_WithdrawFunds_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WithdrawFundsReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AggregatorServer).WithdrawFunds(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Aggregator_WithdrawFunds_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AggregatorServer).WithdrawFunds(ctx, req.(*WithdrawFundsReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1040,6 +1076,10 @@ var Aggregator_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListWallets",
 			Handler:    _Aggregator_ListWallets_Handler,
+		},
+		{
+			MethodName: "WithdrawFunds",
+			Handler:    _Aggregator_WithdrawFunds_Handler,
 		},
 		{
 			MethodName: "CreateTask",

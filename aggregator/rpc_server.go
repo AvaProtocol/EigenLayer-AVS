@@ -24,6 +24,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
@@ -101,6 +102,163 @@ func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalle
 	}
 
 	return r.engine.ListWallets(user.Address, payload)
+}
+
+// WithdrawFunds handles withdrawal of funds from a smart wallet using UserOp
+func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.WithdrawFundsReq) (*avsproto.WithdrawFundsResp, error) {
+	// Authenticate the user
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process withdraw funds",
+		"user", user.Address.String(),
+		"recipient", payload.RecipientAddress,
+		"amount", payload.Amount,
+		"token", payload.Token,
+		"smart_wallet", payload.SmartWalletAddress,
+	)
+
+	// Validate required parameters
+	if payload.RecipientAddress == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "recipient address is required")
+	}
+	if payload.Amount == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "amount is required")
+	}
+	if payload.Token == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "token is required")
+	}
+
+	// Validate recipient address format
+	if !common.IsHexAddress(payload.RecipientAddress) {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid recipient address format")
+	}
+
+	// Parse amount
+	amount, success := new(big.Int).SetString(payload.Amount, 10)
+	if !success || amount == nil || amount.Cmp(big.NewInt(0)) <= 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid amount: must be a positive integer")
+	}
+
+	// Build withdrawal parameters
+	params := &WithdrawalParams{
+		RecipientAddress: common.HexToAddress(payload.RecipientAddress),
+		Amount:           amount,
+		Token:            payload.Token,
+	}
+
+	// Handle smart wallet address resolution
+	if payload.SmartWalletAddress != "" {
+		if !common.IsHexAddress(payload.SmartWalletAddress) {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid smart wallet address format")
+		}
+		addr := common.HexToAddress(payload.SmartWalletAddress)
+		params.SmartWalletAddress = &addr
+	}
+
+	// Handle salt
+	if payload.Salt != "" {
+		salt, success := new(big.Int).SetString(payload.Salt, 10)
+		if !success {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid salt format")
+		}
+		params.Salt = salt
+	}
+
+	// Handle factory address
+	if payload.FactoryAddress != "" {
+		if !common.IsHexAddress(payload.FactoryAddress) {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid factory address format")
+		}
+		addr := common.HexToAddress(payload.FactoryAddress)
+		params.FactoryAddress = &addr
+	}
+
+	// Resolve smart wallet address
+	smartWalletAddress, err := ResolveSmartWalletAddress(r.smartWalletRpc, user.Address, params)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to resolve smart wallet address: %v", err)
+	}
+
+	// Build withdrawal calldata
+	callData, err := BuildWithdrawalCalldata(params)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to build withdrawal calldata: %v", err)
+	}
+
+	// Check if smart wallet config is available
+	if r.config.SmartWallet == nil {
+		return nil, status.Errorf(codes.Internal, "smart wallet configuration not available")
+	}
+
+	// Send UserOp via preset.SendUserOp
+	userOp, receipt, err := preset.SendUserOp(
+		r.config.SmartWallet,
+		user.Address,
+		callData,
+		nil,                // No paymaster for now
+		smartWalletAddress, // Use resolved smart wallet address
+	)
+
+	if err != nil {
+		r.config.Logger.Error("failed to send withdrawal UserOp",
+			"error", err,
+			"user", user.Address.String(),
+			"recipient", payload.RecipientAddress,
+			"amount", payload.Amount,
+		)
+		return &avsproto.WithdrawFundsResp{
+			Success:            false,
+			Status:             "failed",
+			Message:            fmt.Sprintf("failed to send withdrawal transaction: %v", err),
+			SubmittedAt:        time.Now().Unix(),
+			SmartWalletAddress: smartWalletAddress.Hex(),
+			RecipientAddress:   payload.RecipientAddress,
+			Amount:             payload.Amount,
+			Token:              payload.Token,
+		}, nil
+	}
+
+	// Prepare response
+	resp := &avsproto.WithdrawFundsResp{
+		Success:            true,
+		SubmittedAt:        time.Now().Unix(),
+		SmartWalletAddress: smartWalletAddress.Hex(),
+		RecipientAddress:   payload.RecipientAddress,
+		Amount:             payload.Amount,
+		Token:              payload.Token,
+	}
+
+	if userOp != nil {
+		// Get UserOp hash
+		userOpHash := userOp.GetUserOpHash(r.config.SmartWallet.EntrypointAddress, big.NewInt(int64(r.config.SmartWallet.ChainID)))
+		resp.UserOpHash = userOpHash.Hex()
+	}
+
+	if receipt != nil {
+		resp.Status = "confirmed"
+		resp.Message = "withdrawal transaction confirmed"
+		resp.TransactionHash = receipt.TxHash.Hex()
+		r.config.Logger.Info("withdrawal transaction confirmed",
+			"user", user.Address.String(),
+			"recipient", payload.RecipientAddress,
+			"amount", payload.Amount,
+			"txHash", receipt.TxHash.Hex(),
+		)
+	} else {
+		resp.Status = "pending"
+		resp.Message = "withdrawal transaction submitted, waiting for confirmation"
+		r.config.Logger.Info("withdrawal transaction submitted",
+			"user", user.Address.String(),
+			"recipient", payload.RecipientAddress,
+			"amount", payload.Amount,
+			"userOpHash", resp.UserOpHash,
+		)
+	}
+
+	return resp, nil
 }
 
 func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*avsproto.CancelTaskResp, error) {

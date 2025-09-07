@@ -814,6 +814,41 @@ message SetWalletReq {
   bool is_hidden = 3;
 }
 
+// Request message for WithdrawFunds operation
+message WithdrawFundsReq {
+  // The recipient address to send funds to
+  string recipient_address = 1;
+  
+  // The amount to withdraw in wei for ETH or smallest token unit for ERC20
+  string amount = 2;
+  
+  // Token type: "ETH" for native ETH, or contract address for ERC20 tokens
+  string token = 3;
+  
+  // Optional: Override the smart wallet to withdraw from (defaults to user's default wallet)
+  string smart_wallet_address = 4;
+  
+  // Optional: Salt for deriving smart wallet address if smart_wallet_address is not provided
+  string salt = 5;
+  
+  // Optional: Factory address for smart wallet derivation
+  string factory_address = 6;
+}
+
+// Response message for WithdrawFunds operation
+message WithdrawFundsResp {
+  bool success = 1;                    // Whether the operation completed successfully
+  string status = 2;                   // Status description: "pending", "submitted", "failed"
+  string message = 3;                  // Human-readable message about what happened
+  string user_op_hash = 4;             // UserOperation hash from bundler
+  string transaction_hash = 5;         // Blockchain transaction hash (if available)
+  int64 submitted_at = 6;              // Unix timestamp when UserOp was submitted
+  string smart_wallet_address = 7;     // Smart wallet address used for withdrawal
+  string recipient_address = 8;        // Recipient address
+  string amount = 9;                   // Amount withdrawn
+  string token = 10;                   // Token type (ETH or contract address)
+}
+
 message TriggerTaskReq {
   string task_id = 1;
   
@@ -993,6 +1028,9 @@ service Aggregator {
   rpc GetWallet(GetWalletReq)       returns (GetWalletResp) {};
   rpc SetWallet(SetWalletReq)       returns (GetWalletResp) {};
   rpc ListWallets(ListWalletReq)    returns (ListWalletResp) {};
+  
+  // Withdraw funds from a smart wallet using UserOp
+  rpc WithdrawFunds(WithdrawFundsReq) returns (WithdrawFundsResp) {};
 
   
   // Task Management Operation
