@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/big"
 	"os"
 	"strings"
@@ -35,6 +36,10 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 	var err error
 
 	if key == "" {
+		// SECURITY WARNING: Using insecure fallback key for development only
+		// Configure TEST_PRIVATE_KEY environment variable with a funded test key
+		// This fallback key should never be used in production or with real funds
+		log.Println("WARNING: Using insecure fallback private key. Set TEST_PRIVATE_KEY environment variable.")
 		key = "1111111111111111111111111111111111111111111111111111111111111111"
 	} else if strings.HasPrefix(key, "0x") {
 		key = key[2:]
@@ -42,6 +47,8 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 
 	controllerPrivateKey, err = crypto.HexToECDSA(key)
 	if err != nil {
+		// SECURITY WARNING: Using insecure fallback key for development only
+		log.Println("WARNING: Failed to parse private key, using insecure fallback. Set TEST_PRIVATE_KEY environment variable.")
 		dummyKey := "1111111111111111111111111111111111111111111111111111111111111111"
 		controllerPrivateKey, _ = crypto.HexToECDSA(dummyKey)
 	}

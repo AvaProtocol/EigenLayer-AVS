@@ -196,6 +196,38 @@ Before merging changes from `staging` to `main`, ensure any storage structure ch
 
 View docs/Development.md
 
+## Testing
+
+### Test Configuration
+
+For integration tests that require interaction with blockchain networks, you need to configure test credentials:
+
+#### Required Environment Variables
+
+```bash
+# Test private key (must have funds on test networks)
+TEST_PRIVATE_KEY=your_test_private_key_here
+
+# Test network endpoints  
+SEPOLIA_RPC=https://your-sepolia-rpc-endpoint
+SEPOLIA_BUNDLER_RPC=https://your-sepolia-bundler-endpoint
+```
+
+#### Security Notice
+
+⚠️ **SECURITY WARNING**: 
+- Never use private keys containing real funds for testing
+- Use dedicated test keys funded only with testnet tokens
+- The fallback private key (all 1's) is insecure and only for development
+- Always configure proper test keys via environment variables or config files
+
+#### Test Key Setup
+
+1. Generate a new private key for testing (or use an existing test key)
+2. Fund the corresponding address with testnet tokens (Sepolia ETH, test USDC, etc.)
+3. Set the `TEST_PRIVATE_KEY` environment variable or add it to your config
+4. Ensure the key has sufficient balance for test transactions
+
 ## Troubleshooting
 
 For production troubleshooting and debugging workflows, see [docs/Troubleshooting.md](docs/Troubleshooting.md)
