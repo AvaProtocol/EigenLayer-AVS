@@ -1140,6 +1140,7 @@ message RunNodeWithInputsReq {
 message RunNodeWithInputsResp {
   bool success = 1; // Whether the execution was successful
   string error = 3; // Error message if execution failed
+  // Field 4 (node_id) was removed in Aug 2025 - do not reuse this field number
   google.protobuf.Value metadata = 5; // Optional structured metadata for testing/debugging
   // Optional execution context for runtime flags and extra info (e.g., is_simulated)
   google.protobuf.Value execution_context = 6;
@@ -1170,6 +1171,7 @@ message RunTriggerReq {
 message RunTriggerResp {
   bool success = 1; // Whether the execution was successful
   string error = 2; // Error message if execution failed
+  // Field 3 (trigger_id) was removed in Aug 2025 - do not reuse this field number
   google.protobuf.Value metadata = 4; // Optional structured metadata for testing/debugging
   // Optional execution context for runtime flags and extra info (e.g., is_simulated)
   google.protobuf.Value execution_context = 5;
