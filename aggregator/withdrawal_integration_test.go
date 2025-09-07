@@ -109,7 +109,7 @@ func TestWithdrawERC20UserOp(t *testing.T) {
 	params := &WithdrawalParams{
 		RecipientAddress: common.HexToAddress("0xe0f7d11fd714674722d325cd86062a5f1882e13a"), // Test recipient
 		Amount:           big.NewInt(1000),                                                  // 1000 units
-		Token:            "0x036cbd53842c5426634e7929541ec2318f3dcf7e",                      // Base Sepolia USDC
+		Token:            "0x036cbd53842c5426634e7929541ec2318f3dcf7e",                      // Sepolia USDC
 	}
 
 	// Build withdrawal calldata

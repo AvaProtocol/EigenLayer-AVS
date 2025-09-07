@@ -217,7 +217,6 @@ func TestBuildERC20WithdrawalCalldata(t *testing.T) {
 func TestResolveSmartWalletAddress(t *testing.T) {
 	// Since this function requires an actual ethclient connection,
 	// we'll test the logic flow and parameter handling
-	_ = common.HexToAddress("0x742d35cc6F67C30F87b00286c1A4E49D5FDb302D")
 
 	tests := []struct {
 		name   string

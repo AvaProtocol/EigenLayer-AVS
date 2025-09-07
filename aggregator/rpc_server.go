@@ -198,7 +198,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 		r.config.SmartWallet,
 		user.Address,
 		callData,
-		nil,                // No paymaster for now
+		nil,                // TODO: Add paymaster support for gas sponsorship
 		smartWalletAddress, // Use resolved smart wallet address
 	)
 
