@@ -232,23 +232,24 @@ func TestResolveSmartWalletAddress(t *testing.T) {
 			},
 		},
 		{
-			name: "salt provided for derivation",
+			name: "explicit smart wallet address provided",
 			params: &WithdrawalParams{
-				Salt: big.NewInt(123),
-			},
-		},
-		{
-			name: "factory address provided",
-			params: &WithdrawalParams{
-				FactoryAddress: func() *common.Address {
+				RecipientAddress: common.HexToAddress("0x1234567890123456789012345678901234567890"),
+				Amount:           big.NewInt(1000000000000000000),
+				Token:            "ETH",
+				SmartWalletAddress: func() *common.Address {
 					addr := common.HexToAddress("0xF4cE7E7F7A53B8b88FF4b59Dd96D0b5b5b4A9b9b")
 					return &addr
 				}(),
 			},
 		},
 		{
-			name:   "default parameters (salt=0, default factory)",
-			params: &WithdrawalParams{},
+			name: "minimal parameters",
+			params: &WithdrawalParams{
+				RecipientAddress: common.HexToAddress("0x1234567890123456789012345678901234567890"),
+				Amount:           big.NewInt(1000000000000000000),
+				Token:            "ETH",
+			},
 		},
 	}
 
@@ -268,15 +269,8 @@ func TestResolveSmartWalletAddress(t *testing.T) {
 				assert.NotNil(t, tt.params.SmartWalletAddress)
 			}
 
-			if tt.params.Salt != nil {
-				// Should use the provided salt
-				assert.NotNil(t, tt.params.Salt)
-			}
-
-			if tt.params.FactoryAddress != nil {
-				// Should use the provided factory address
-				assert.NotNil(t, tt.params.FactoryAddress)
-			}
+			// Validate basic parameter structure
+			assert.NotNil(t, tt.params)
 		})
 	}
 }

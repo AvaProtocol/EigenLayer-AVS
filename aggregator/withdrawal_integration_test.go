@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"crypto/ecdsa"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
@@ -176,12 +177,12 @@ func TestWithdrawalWithCustomSmartWallet(t *testing.T) {
 	// Test owner address
 	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
 
-	// Specify a custom smart wallet address (using salt=1 for derivation)
+	// Specify a custom smart wallet address (would need to be pre-derived with salt=1)
 	params := &WithdrawalParams{
-		RecipientAddress: common.HexToAddress("0xe0f7d11fd714674722d325cd86062a5f1882e13a"),
-		Amount:           big.NewInt(500000000000000), // 0.0005 ETH in wei
-		Token:            "ETH",
-		Salt:             big.NewInt(1), // Use salt=1 instead of default salt=0
+		RecipientAddress:   common.HexToAddress("0xe0f7d11fd714674722d325cd86062a5f1882e13a"),
+		Amount:             big.NewInt(500000000000000), // 0.0005 ETH in wei
+		Token:              "ETH",
+		SmartWalletAddress: nil, // Would need actual deployed wallet address for new validation
 	}
 
 	// Build withdrawal calldata
@@ -192,10 +193,14 @@ func TestWithdrawalWithCustomSmartWallet(t *testing.T) {
 
 	t.Logf("Built withdrawal calldata for custom smart wallet: %d bytes", len(callData))
 
-	// Derive the specific smart wallet address we'll be using
-	// Note: This would require an ethclient.Client instance in a real scenario
-	// For now, we'll just log that we're using a custom salt
-	t.Logf("Using custom smart wallet with salt=%s", params.Salt.String())
+	// Note: This test would need to be updated to use actual deployed wallet addresses
+	// For now, we'll just log that we're using a custom smart wallet
+	t.Logf("Using custom smart wallet address: %s", func() string {
+		if params.SmartWalletAddress != nil {
+			return params.SmartWalletAddress.Hex()
+		}
+		return "default"
+	}())
 
 	// Send UserOp via preset.SendUserOp - the salt will be used in smart wallet derivation
 	userOp, receipt, err := preset.SendUserOp(

@@ -8,7 +8,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 // ERC20 transfer function signature: transfer(address,uint256)
@@ -21,10 +20,8 @@ var erc20ABI = `[{"constant":false,"inputs":[{"name":"_to","type":"address"},{"n
 type WithdrawalParams struct {
 	RecipientAddress   common.Address
 	Amount             *big.Int
-	Token              string // "ETH" or contract address
-	SmartWalletAddress *common.Address
-	Salt               *big.Int
-	FactoryAddress     *common.Address
+	Token              string          // "ETH" or contract address
+	SmartWalletAddress *common.Address // Required - must be from user's getWallet() call
 }
 
 // ValidateWithdrawalParams validates the withdrawal parameters
@@ -90,43 +87,4 @@ func buildERC20WithdrawalCalldata(tokenAddress, recipient common.Address, amount
 	// - value: 0 (no ETH transfer needed for ERC20)
 	// - data: transfer function calldata
 	return aa.PackExecute(tokenAddress, big.NewInt(0), transferCalldata)
-}
-
-// ResolveSmartWalletAddress resolves the smart wallet address to use for withdrawal
-func ResolveSmartWalletAddress(client *ethclient.Client, owner common.Address, params *WithdrawalParams) (*common.Address, error) {
-	// If explicit address provided, validate it belongs to the owner
-	if params.SmartWalletAddress != nil {
-		// Ownership validation: check that the provided smart wallet address matches the expected address for the owner
-		salt := big.NewInt(0)
-		if params.Salt != nil {
-			salt = params.Salt
-		}
-		var expectedAddr *common.Address
-		var err error
-		if params.FactoryAddress != nil {
-			expectedAddr, err = aa.GetSenderAddressForFactory(client, owner, *params.FactoryAddress, salt)
-		} else {
-			expectedAddr, err = aa.GetSenderAddress(client, owner, salt)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to compute expected smart wallet address: %w", err)
-		}
-		if *expectedAddr != *params.SmartWalletAddress {
-			return nil, fmt.Errorf("provided smart wallet address does not belong to the owner")
-		}
-		return params.SmartWalletAddress, nil
-	}
-
-	// Use salt if provided, otherwise default to 0
-	salt := big.NewInt(0)
-	if params.Salt != nil {
-		salt = params.Salt
-	}
-
-	// Use factory address if provided, otherwise use default
-	if params.FactoryAddress != nil {
-		return aa.GetSenderAddressForFactory(client, owner, *params.FactoryAddress, salt)
-	}
-
-	return aa.GetSenderAddress(client, owner, salt)
 }

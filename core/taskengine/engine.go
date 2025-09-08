@@ -618,6 +618,11 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 	return resp, nil
 }
 
+// GetWalletFromDB retrieves wallet information from database for validation purposes
+func (n *Engine) GetWalletFromDB(owner common.Address, smartWalletAddress string) (*model.SmartWallet, error) {
+	return GetWallet(n.db, owner, smartWalletAddress)
+}
+
 // SetWallet is the gRPC handler for the SetWallet RPC.
 // It uses the owner (from auth context), salt, and factory_address from payload to identify/derive the wallet.
 // It then sets the IsHidden status for that wallet.

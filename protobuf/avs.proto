@@ -825,14 +825,8 @@ message WithdrawFundsReq {
   // Token type: "ETH" for native ETH, or contract address for ERC20 tokens
   string token = 3;
   
-  // Optional: Override the smart wallet to withdraw from (defaults to user's default wallet)
+  // Required: Smart wallet address to withdraw from (must be from user's getWallet() call)
   string smart_wallet_address = 4;
-  
-  // Optional: Salt for deriving smart wallet address if smart_wallet_address is not provided
-  string salt = 5;
-  
-  // Optional: Factory address for smart wallet derivation
-  string factory_address = 6;
 }
 
 // Response message for WithdrawFunds operation

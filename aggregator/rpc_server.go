@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/allegro/bigcache/v3"
@@ -158,29 +159,17 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 		params.SmartWalletAddress = &addr
 	}
 
-	// Handle salt
-	if payload.Salt != "" {
-		salt, success := new(big.Int).SetString(payload.Salt, 10)
-		if !success {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid salt format")
-		}
-		params.Salt = salt
+	// Validate smart wallet address - it must be provided and exist in user's wallet data
+	if params.SmartWalletAddress == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "smart wallet address is required - must be obtained from getWallet() call first")
+	}
+	// Validate that the provided address belongs to the authenticated user by checking wallet database
+	validationErr := r.validateSmartWalletOwnership(user.Address, *params.SmartWalletAddress)
+	if validationErr != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid smart wallet address: %v", validationErr)
 	}
 
-	// Handle factory address
-	if payload.FactoryAddress != "" {
-		if !common.IsHexAddress(payload.FactoryAddress) {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid factory address format")
-		}
-		addr := common.HexToAddress(payload.FactoryAddress)
-		params.FactoryAddress = &addr
-	}
-
-	// Resolve smart wallet address
-	smartWalletAddress, err := ResolveSmartWalletAddress(r.smartWalletRpc, user.Address, params)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to resolve smart wallet address: %v", err)
-	}
+	smartWalletAddress := params.SmartWalletAddress
 
 	// Build withdrawal calldata
 	callData, err := BuildWithdrawalCalldata(params)
@@ -198,8 +187,8 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 		r.config.SmartWallet,
 		user.Address,
 		callData,
-		nil,                // Paymaster support for gas sponsorship is not implemented. See API documentation for this known limitation.
-		smartWalletAddress, // Use resolved smart wallet address
+		nil,                // No paymaster for withdrawals (self-funded)
+		smartWalletAddress, // Use validated smart wallet address from database
 	)
 
 	if err != nil {
@@ -259,6 +248,31 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 	}
 
 	return resp, nil
+}
+
+// validateSmartWalletOwnership validates that the smart wallet address belongs to the specified owner and is deployed
+func (r *RpcServer) validateSmartWalletOwnership(owner common.Address, smartWalletAddress common.Address) error {
+	// Validate wallet exists in database and belongs to owner
+	modelWallet, err := r.engine.GetWalletFromDB(owner, smartWalletAddress.Hex())
+	if err != nil {
+		return fmt.Errorf("smart wallet address %s not found for owner %s: %w", smartWalletAddress.Hex(), owner.Hex(), err)
+	}
+
+	// Validate ownership
+	if modelWallet.Owner == nil || !strings.EqualFold(modelWallet.Owner.Hex(), owner.Hex()) {
+		return fmt.Errorf("smart wallet address %s does not belong to owner %s", smartWalletAddress.Hex(), owner.Hex())
+	}
+
+	// Validate wallet is deployed on-chain
+	code, err := r.smartWalletRpc.CodeAt(context.Background(), smartWalletAddress, nil)
+	if err != nil {
+		return fmt.Errorf("failed to check if smart wallet is deployed: %w", err)
+	}
+	if len(code) == 0 {
+		return fmt.Errorf("smart wallet %s is not deployed yet - please deploy it first by making a transaction", smartWalletAddress.Hex())
+	}
+
+	return nil
 }
 
 func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*avsproto.CancelTaskResp, error) {

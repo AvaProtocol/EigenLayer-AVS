@@ -681,7 +681,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		r.smartWalletConfig,
 		r.owner, // Use EOA address (owner) for smart wallet derivation
 		smartWalletCallData,
-		paymasterReq,
+		nil,            // No paymaster for contract writes (self-funded)
 		senderOverride, // Smart wallet address from aa_sender
 	)
 
