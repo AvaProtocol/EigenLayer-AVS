@@ -82,8 +82,7 @@ func SendUserOp(
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
 ) (*userop.UserOperation, *types.Receipt, error) {
-	log.Printf("🚀 DEPLOYED WORKFLOW: SendUserOp started - owner: %s, calldata_length: %d, bundler: %s",
-		owner.Hex(), len(callData), smartWalletConfig.BundlerURL)
+	log.Printf("SendUserOp started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
 
 	var userOp *userop.UserOperation
 	var err error
@@ -420,8 +419,7 @@ func SendUserOpWithWsClient(
 	senderOverride *common.Address,
 	wsClient *ethclient.Client,
 ) (*userop.UserOperation, *types.Receipt, error) {
-	log.Printf("🚀 DEPLOYED WORKFLOW: SendUserOpWithWsClient started - owner: %s, calldata_length: %d, bundler: %s",
-		owner.Hex(), len(callData), smartWalletConfig.BundlerURL)
+	log.Printf("SendUserOpWithWsClient started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
 
 	var userOp *userop.UserOperation
 	var err error
