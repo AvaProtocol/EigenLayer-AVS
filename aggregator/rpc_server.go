@@ -10,6 +10,7 @@ import (
 
 	"github.com/allegro/bigcache/v3"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/getsentry/sentry-go"
@@ -26,6 +27,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
@@ -44,8 +46,9 @@ type RpcServer struct {
 
 	ethrpc *ethclient.Client
 
-	smartWalletRpc *ethclient.Client
-	chainID        *big.Int
+	smartWalletRpc   *ethclient.Client
+	smartWalletWsRpc *ethclient.Client // Global WebSocket client for transaction monitoring
+	chainID          *big.Int
 }
 
 // Get nonce of an existing smart wallet of a given owner
@@ -182,13 +185,11 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 		return nil, status.Errorf(codes.Internal, "smart wallet configuration not available")
 	}
 
-	// Send UserOp via preset.SendUserOp
-	userOp, receipt, err := preset.SendUserOp(
-		r.config.SmartWallet,
+	// Send UserOp via preset.SendUserOp with global WebSocket client
+	userOp, receipt, err := r.sendUserOpWithGlobalWs(
 		user.Address,
 		callData,
-		nil,                // No paymaster for withdrawals (self-funded)
-		smartWalletAddress, // Use validated smart wallet address from database
+		smartWalletAddress,
 	)
 
 	if err != nil {
@@ -273,6 +274,35 @@ func (r *RpcServer) validateSmartWalletOwnership(owner common.Address, smartWall
 	}
 
 	return nil
+}
+
+// sendUserOpWithGlobalWs sends a UserOp using the global WebSocket client for efficient transaction monitoring
+func (r *RpcServer) sendUserOpWithGlobalWs(
+	owner common.Address,
+	callData []byte,
+	smartWalletAddress *common.Address,
+) (*userop.UserOperation, *types.Receipt, error) {
+	// Use global WebSocket client if available, otherwise fall back to creating new connection
+	if r.smartWalletWsRpc != nil {
+		return preset.SendUserOpWithWsClient(
+			r.config.SmartWallet,
+			owner,
+			callData,
+			nil, // No paymaster for withdrawals
+			smartWalletAddress,
+			r.smartWalletWsRpc, // Use global WebSocket client
+		)
+	} else {
+		// Fallback to original method (creates new WebSocket connection)
+		r.config.Logger.Warn("Global WebSocket client not available, using fallback method")
+		return preset.SendUserOp(
+			r.config.SmartWallet,
+			owner,
+			callData,
+			nil, // No paymaster for withdrawals
+			smartWalletAddress,
+		)
+	}
 }
 
 func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*avsproto.CancelTaskResp, error) {
@@ -901,6 +931,14 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		panic(err)
 	}
 
+	// Create global WebSocket client for transaction monitoring
+	smartwalletWsClient, err := ethclient.Dial(agg.config.SmartWallet.EthWsUrl)
+	if err != nil {
+		agg.logger.Warn("Failed to create WebSocket client for transaction monitoring", "error", err, "wsUrl", agg.config.SmartWallet.EthWsUrl)
+		// Continue without WebSocket - withdrawals will work but won't wait for confirmation
+		smartwalletWsClient = nil
+	}
+
 	smartWalletChainID, err := smartwalletClient.ChainID(context.Background())
 	if err != nil {
 		panic(err)
@@ -911,8 +949,9 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		db:     agg.db,
 		engine: agg.engine,
 
-		ethrpc:         ethrpc,
-		smartWalletRpc: smartwalletClient,
+		ethrpc:           ethrpc,
+		smartWalletRpc:   smartwalletClient,
+		smartWalletWsRpc: smartwalletWsClient,
 
 		config:       agg.config,
 		operatorPool: agg.operatorPool,

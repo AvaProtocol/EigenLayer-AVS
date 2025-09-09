@@ -419,6 +419,22 @@ curl -X POST https://bundler-sepolia.avaprotocol.org/rpc?apikey= \
 {"jsonrpc": "2.0", "id": 1, "error": {"code": -32500, "message": "AA20 account not deployed"}}
 ```
 
+### User Operation Debugging Scripts
+
+Query and debug user operations using the provided scripts:
+
+```bash
+# Query specific user operation by hash
+./scripts/query_userop.sh 0x1234567890abcdef... [status|receipt|both]
+
+# Debug bundler connectivity and health
+./scripts/bundler_debug.sh
+
+# Search recent user operations (requires SEPOLIA_RPC)
+export SEPOLIA_RPC=https://sepolia.infura.io/v3/YOUR_KEY
+./scripts/search_recent_userops.sh [sender_address] [blocks_back]
+```
+
 ### Troubleshooting
 
 - **Connection refused**: Check network connectivity and firewall settings

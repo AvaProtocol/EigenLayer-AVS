@@ -681,7 +681,8 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		r.smartWalletConfig,
 		r.owner, // Use EOA address (owner) for smart wallet derivation
 		smartWalletCallData,
-		nil,            // No paymaster for contract writes (self-funded)
+		// TODO: Make paymasterReq configurable if paymaster-sponsored contract writes are needed in the future.
+		nil,            // No paymaster for contract writes (self-funded). See TODO above.
 		senderOverride, // Smart wallet address from aa_sender
 	)
 
@@ -709,14 +710,17 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 				executionLogBuilder.WriteString("Gas Requirements (if estimated):\n")
 				// Only show gas limits if they were actually estimated (not default values)
 				// Use the shared constant from preset package to avoid duplication
-				defaultGasLimit := preset.DEFAULT_GAS_LIMIT
-				if userOp.CallGasLimit != nil && userOp.CallGasLimit.Cmp(defaultGasLimit) != 0 {
+				defaultCallGasLimit := preset.DEFAULT_CALL_GAS_LIMIT
+				defaultVerificationGasLimit := preset.DEFAULT_VERIFICATION_GAS_LIMIT
+				defaultPreVerificationGas := preset.DEFAULT_PREVERIFICATION_GAS
+
+				if userOp.CallGasLimit != nil && userOp.CallGasLimit.Cmp(defaultCallGasLimit) != 0 {
 					executionLogBuilder.WriteString(fmt.Sprintf("  CallGasLimit: %s\n", userOp.CallGasLimit.String()))
 				}
-				if userOp.VerificationGasLimit != nil && userOp.VerificationGasLimit.Cmp(defaultGasLimit) != 0 {
+				if userOp.VerificationGasLimit != nil && userOp.VerificationGasLimit.Cmp(defaultVerificationGasLimit) != 0 {
 					executionLogBuilder.WriteString(fmt.Sprintf("  VerificationGasLimit: %s\n", userOp.VerificationGasLimit.String()))
 				}
-				if userOp.PreVerificationGas != nil && userOp.PreVerificationGas.Cmp(defaultGasLimit) != 0 {
+				if userOp.PreVerificationGas != nil && userOp.PreVerificationGas.Cmp(defaultPreVerificationGas) != 0 {
 					executionLogBuilder.WriteString(fmt.Sprintf("  PreVerificationGas: %s\n", userOp.PreVerificationGas.String()))
 				}
 				if userOp.MaxFeePerGas != nil {
