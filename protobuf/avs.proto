@@ -814,6 +814,35 @@ message SetWalletReq {
   bool is_hidden = 3;
 }
 
+// Request message for WithdrawFunds operation
+message WithdrawFundsReq {
+  // The recipient address to send funds to
+  string recipient_address = 1;
+  
+  // The amount to withdraw in wei for ETH or smallest token unit for ERC20
+  string amount = 2;
+  
+  // Token type: "ETH" for native ETH, or contract address for ERC20 tokens
+  string token = 3;
+  
+  // Required: Smart wallet address to withdraw from (must be from user's getWallet() call)
+  string smart_wallet_address = 4;
+}
+
+// Response message for WithdrawFunds operation
+message WithdrawFundsResp {
+  bool success = 1;                    // Whether the operation completed successfully
+  string status = 2;                   // Status description: "pending", "submitted", "failed"
+  string message = 3;                  // Human-readable message about what happened
+  string user_op_hash = 4;             // UserOperation hash from bundler
+  string transaction_hash = 5;         // Blockchain transaction hash (if available)
+  int64 submitted_at = 6;              // Unix timestamp when UserOp was submitted
+  string smart_wallet_address = 7;     // Smart wallet address used for withdrawal
+  string recipient_address = 8;        // Recipient address
+  string amount = 9;                   // Amount withdrawn
+  string token = 10;                   // Token type (ETH or contract address)
+}
+
 message TriggerTaskReq {
   string task_id = 1;
   
@@ -993,6 +1022,9 @@ service Aggregator {
   rpc GetWallet(GetWalletReq)       returns (GetWalletResp) {};
   rpc SetWallet(SetWalletReq)       returns (GetWalletResp) {};
   rpc ListWallets(ListWalletReq)    returns (ListWalletResp) {};
+  
+  // Withdraw funds from a smart wallet using UserOp
+  rpc WithdrawFunds(WithdrawFundsReq) returns (WithdrawFundsResp) {};
 
   
   // Task Management Operation
@@ -1102,6 +1134,7 @@ message RunNodeWithInputsReq {
 message RunNodeWithInputsResp {
   bool success = 1; // Whether the execution was successful
   string error = 3; // Error message if execution failed
+  // Field 4 (node_id) was removed in Aug 2025 - do not reuse this field number
   google.protobuf.Value metadata = 5; // Optional structured metadata for testing/debugging
   // Optional execution context for runtime flags and extra info (e.g., is_simulated)
   google.protobuf.Value execution_context = 6;
@@ -1132,6 +1165,7 @@ message RunTriggerReq {
 message RunTriggerResp {
   bool success = 1; // Whether the execution was successful
   string error = 2; // Error message if execution failed
+  // Field 3 (trigger_id) was removed in Aug 2025 - do not reuse this field number
   google.protobuf.Value metadata = 4; // Optional structured metadata for testing/debugging
   // Optional execution context for runtime flags and extra info (e.g., is_simulated)
   google.protobuf.Value execution_context = 5;

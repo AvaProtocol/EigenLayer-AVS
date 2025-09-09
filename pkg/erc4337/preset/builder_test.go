@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/big"
 	"os"
 	"strings"
@@ -35,15 +36,14 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 	var err error
 
 	if key == "" {
-		key = "1111111111111111111111111111111111111111111111111111111111111111"
+		log.Fatal("TEST_PRIVATE_KEY environment variable is not set. Please configure it with a funded test key. Aborting.")
 	} else if strings.HasPrefix(key, "0x") {
 		key = key[2:]
 	}
 
 	controllerPrivateKey, err = crypto.HexToECDSA(key)
 	if err != nil {
-		dummyKey := "1111111111111111111111111111111111111111111111111111111111111111"
-		controllerPrivateKey, _ = crypto.HexToECDSA(dummyKey)
+		log.Fatalf("Failed to parse TEST_PRIVATE_KEY: %v. Aborting.", err)
 	}
 
 	// Use centralized test config
@@ -98,7 +98,7 @@ func TestSendUserOp(t *testing.T) {
 		// https://sepolia.basescan.org/tx/0x812290f4a588cb62bd4a46698ece51d576a75729af5dda497badb0ef8f8cddfa
 		// https://sepolia.basescan.org/tx/0xef607557e727ae1602c6e74a625cffc57aa7108c4d470d38b96cfd4539ee978f
 		//common.HexToAddress("0x0a0c037267a690e9792f4660c29989babec9cffb"),
-		common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e"), // base sepolia usdc
+		common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"), // Sepolia USDC
 		big.NewInt(0),
 		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8"),
 		// common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000001b125981304000"),
@@ -144,7 +144,7 @@ func TestPaymaster(t *testing.T) {
 	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
 
 	calldata, err := aa.PackExecute(
-		common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e"), // base sepolia usdc
+		common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"), // Sepolia USDC
 		big.NewInt(0),
 		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a00000000000000000000000000000000000000000000000000000000000003e8"),
 	)
@@ -286,7 +286,7 @@ func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
 	validAfter := big.NewInt(0)
 
 	calldata, err := aa.PackExecute(
-		common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e"),
+		common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"), // Sepolia USDC
 		big.NewInt(0),
 		common.FromHex("0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e8"),
 	)

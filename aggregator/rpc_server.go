@@ -9,6 +9,7 @@ import (
 
 	"github.com/allegro/bigcache/v3"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/getsentry/sentry-go"
@@ -24,6 +25,8 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
@@ -42,8 +45,9 @@ type RpcServer struct {
 
 	ethrpc *ethclient.Client
 
-	smartWalletRpc *ethclient.Client
-	chainID        *big.Int
+	smartWalletRpc   *ethclient.Client
+	smartWalletWsRpc *ethclient.Client // Global WebSocket client for transaction monitoring
+	chainID          *big.Int
 }
 
 // Get nonce of an existing smart wallet of a given owner
@@ -101,6 +105,203 @@ func (r *RpcServer) ListWallets(ctx context.Context, payload *avsproto.ListWalle
 	}
 
 	return r.engine.ListWallets(user.Address, payload)
+}
+
+// WithdrawFunds handles withdrawal of funds from a smart wallet using UserOp
+func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.WithdrawFundsReq) (*avsproto.WithdrawFundsResp, error) {
+	// Authenticate the user
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process withdraw funds",
+		"user", user.Address.String(),
+		"recipient", payload.RecipientAddress,
+		"amount", payload.Amount,
+		"token", payload.Token,
+		"smart_wallet", payload.SmartWalletAddress,
+	)
+
+	// Validate required parameters
+	if payload.RecipientAddress == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "recipient address is required")
+	}
+	if payload.Amount == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "amount is required")
+	}
+	if payload.Token == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "token is required")
+	}
+
+	// Validate recipient address format
+	if !common.IsHexAddress(payload.RecipientAddress) {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid recipient address format")
+	}
+
+	// Parse amount
+	amount, success := new(big.Int).SetString(payload.Amount, 10)
+	if !success || amount == nil || amount.Cmp(big.NewInt(0)) <= 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid amount: must be a positive integer")
+	}
+
+	// Build withdrawal parameters
+	params := &WithdrawalParams{
+		RecipientAddress: common.HexToAddress(payload.RecipientAddress),
+		Amount:           amount,
+		Token:            payload.Token,
+	}
+
+	// Handle smart wallet address resolution
+	if payload.SmartWalletAddress != "" {
+		if !common.IsHexAddress(payload.SmartWalletAddress) {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid smart wallet address format")
+		}
+		addr := common.HexToAddress(payload.SmartWalletAddress)
+		params.SmartWalletAddress = &addr
+	}
+
+	// Validate smart wallet address - it must be provided and exist in user's wallet data
+	if params.SmartWalletAddress == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "smart wallet address is required - must be obtained from getWallet() call first")
+	}
+	// Validate that the provided address belongs to the authenticated user by checking wallet database
+	validationErr := r.validateSmartWalletOwnership(user.Address, *params.SmartWalletAddress)
+	if validationErr != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid smart wallet address: %v", validationErr)
+	}
+
+	smartWalletAddress := params.SmartWalletAddress
+
+	// Build withdrawal calldata
+	callData, err := BuildWithdrawalCalldata(params)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to build withdrawal calldata: %v", err)
+	}
+
+	// Check if smart wallet config is available
+	if r.config.SmartWallet == nil {
+		return nil, status.Errorf(codes.Internal, "smart wallet configuration not available")
+	}
+
+	// Send UserOp via preset.SendUserOp with global WebSocket client
+	userOp, receipt, err := r.sendUserOpWithGlobalWs(
+		user.Address,
+		callData,
+		smartWalletAddress,
+	)
+
+	if err != nil {
+		r.config.Logger.Error("failed to send withdrawal UserOp",
+			"error", err,
+			"user", user.Address.String(),
+			"recipient", payload.RecipientAddress,
+			"amount", payload.Amount,
+		)
+		return &avsproto.WithdrawFundsResp{
+			Success:            false,
+			Status:             "failed",
+			Message:            fmt.Sprintf("failed to send withdrawal transaction: %v", err),
+			SubmittedAt:        time.Now().Unix(),
+			SmartWalletAddress: smartWalletAddress.Hex(),
+			RecipientAddress:   payload.RecipientAddress,
+			Amount:             payload.Amount,
+			Token:              payload.Token,
+		}, nil
+	}
+
+	// Prepare response
+	resp := &avsproto.WithdrawFundsResp{
+		Success:            true,
+		SubmittedAt:        time.Now().Unix(),
+		SmartWalletAddress: smartWalletAddress.Hex(),
+		RecipientAddress:   payload.RecipientAddress,
+		Amount:             payload.Amount,
+		Token:              payload.Token,
+	}
+
+	if userOp != nil {
+		// Get UserOp hash
+		userOpHash := userOp.GetUserOpHash(r.config.SmartWallet.EntrypointAddress, big.NewInt(int64(r.config.SmartWallet.ChainID)))
+		resp.UserOpHash = userOpHash.Hex()
+	}
+
+	if receipt != nil {
+		resp.Status = "confirmed"
+		resp.Message = "withdrawal transaction confirmed"
+		resp.TransactionHash = receipt.TxHash.Hex()
+		r.config.Logger.Info("withdrawal transaction confirmed",
+			"user", user.Address.String(),
+			"recipient", payload.RecipientAddress,
+			"amount", payload.Amount,
+			"txHash", receipt.TxHash.Hex(),
+		)
+	} else {
+		resp.Status = "pending"
+		resp.Message = "withdrawal transaction submitted, waiting for confirmation"
+		r.config.Logger.Info("withdrawal transaction submitted",
+			"user", user.Address.String(),
+			"recipient", payload.RecipientAddress,
+			"amount", payload.Amount,
+			"userOpHash", resp.UserOpHash,
+		)
+	}
+
+	return resp, nil
+}
+
+// validateSmartWalletOwnership validates that the smart wallet address belongs to the specified owner and is deployed
+func (r *RpcServer) validateSmartWalletOwnership(owner common.Address, smartWalletAddress common.Address) error {
+	// Validate wallet exists in database and belongs to owner
+	modelWallet, err := r.engine.GetWalletFromDB(owner, smartWalletAddress.Hex())
+	if err != nil {
+		return fmt.Errorf("smart wallet address %s not found for owner %s: %w", smartWalletAddress.Hex(), owner.Hex(), err)
+	}
+
+	// Validate ownership using direct address comparison for consistency
+	if modelWallet.Owner == nil || *modelWallet.Owner != owner {
+		return fmt.Errorf("smart wallet address %s does not belong to owner %s", smartWalletAddress.Hex(), owner.Hex())
+	}
+
+	// Validate wallet is deployed on-chain
+	code, err := r.smartWalletRpc.CodeAt(context.Background(), smartWalletAddress, nil)
+	if err != nil {
+		return fmt.Errorf("failed to check if smart wallet is deployed: %w", err)
+	}
+	if len(code) == 0 {
+		return fmt.Errorf("smart wallet %s is not deployed yet - please deploy it first by making a transaction", smartWalletAddress.Hex())
+	}
+
+	return nil
+}
+
+// sendUserOpWithGlobalWs sends a UserOp using the global WebSocket client for efficient transaction monitoring
+func (r *RpcServer) sendUserOpWithGlobalWs(
+	owner common.Address,
+	callData []byte,
+	smartWalletAddress *common.Address,
+) (*userop.UserOperation, *types.Receipt, error) {
+	// Use global WebSocket client if available, otherwise fall back to creating new connection
+	if r.smartWalletWsRpc != nil {
+		return preset.SendUserOpWithWsClient(
+			r.config.SmartWallet,
+			owner,
+			callData,
+			nil, // No paymaster for withdrawals
+			smartWalletAddress,
+			r.smartWalletWsRpc, // Use global WebSocket client
+		)
+	} else {
+		// Fallback to original method (creates new WebSocket connection)
+		r.config.Logger.Warn("Global WebSocket client not available, using fallback method")
+		return preset.SendUserOp(
+			r.config.SmartWallet,
+			owner,
+			callData,
+			nil, // No paymaster for withdrawals
+			smartWalletAddress,
+		)
+	}
 }
 
 func (r *RpcServer) CancelTask(ctx context.Context, taskID *avsproto.IdReq) (*avsproto.CancelTaskResp, error) {
@@ -729,6 +930,14 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		panic(err)
 	}
 
+	// Create global WebSocket client for transaction monitoring
+	smartwalletWsClient, err := ethclient.Dial(agg.config.SmartWallet.EthWsUrl)
+	if err != nil {
+		agg.logger.Warn("Failed to create WebSocket client for transaction monitoring", "error", err, "wsUrl", agg.config.SmartWallet.EthWsUrl)
+		// Continue without WebSocket - withdrawals will work but won't wait for confirmation
+		smartwalletWsClient = nil
+	}
+
 	smartWalletChainID, err := smartwalletClient.ChainID(context.Background())
 	if err != nil {
 		panic(err)
@@ -739,8 +948,9 @@ func (agg *Aggregator) startRpcServer(ctx context.Context) error {
 		db:     agg.db,
 		engine: agg.engine,
 
-		ethrpc:         ethrpc,
-		smartWalletRpc: smartwalletClient,
+		ethrpc:           ethrpc,
+		smartWalletRpc:   smartwalletClient,
+		smartWalletWsRpc: smartwalletWsClient,
 
 		config:       agg.config,
 		operatorPool: agg.operatorPool,

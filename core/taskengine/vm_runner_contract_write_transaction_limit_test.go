@@ -42,7 +42,7 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
 	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
 
-	contractAddress := common.HexToAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e")
+	contractAddress := common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238") // Sepolia USDC
 	node := &avsproto.ContractWriteNode{
 		ContractAddress: contractAddress.Hex(),
 		CallData:        "0xa9059cbb000000000000000000000000e0f7d11fd714674722d325cd86062a5f1882e13a000000000000000000000000000000000000000000000000000000000000003e8",
