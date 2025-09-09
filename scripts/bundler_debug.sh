@@ -6,7 +6,15 @@
 set -e
 
 # Configuration
-BUNDLER_RPC="${SEPOLIA_BUNDLER_RPC:-https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj17Urz1ySn4R}"
+BUNDLER_RPC="${SEPOLIA_BUNDLER_RPC:-}"
+
+# Validate required environment variable
+if [ -z "$BUNDLER_RPC" ]; then
+    echo "Error: SEPOLIA_BUNDLER_RPC environment variable is not set."
+    echo "Please set it to your bundler RPC URL with API key."
+    echo "Example: export SEPOLIA_BUNDLER_RPC='https://bundler-sepolia.avaprotocol.org/rpc?apikey=YOUR_API_KEY'"
+    exit 1
+fi
 
 # Colors for output
 RED='\033[0;31m'
