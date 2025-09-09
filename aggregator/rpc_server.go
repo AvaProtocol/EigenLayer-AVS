@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/allegro/bigcache/v3"
@@ -259,8 +258,8 @@ func (r *RpcServer) validateSmartWalletOwnership(owner common.Address, smartWall
 		return fmt.Errorf("smart wallet address %s not found for owner %s: %w", smartWalletAddress.Hex(), owner.Hex(), err)
 	}
 
-	// Validate ownership
-	if modelWallet.Owner == nil || !strings.EqualFold(modelWallet.Owner.Hex(), owner.Hex()) {
+	// Validate ownership using direct address comparison for consistency
+	if modelWallet.Owner == nil || *modelWallet.Owner != owner {
 		return fmt.Errorf("smart wallet address %s does not belong to owner %s", smartWalletAddress.Hex(), owner.Hex())
 	}
 

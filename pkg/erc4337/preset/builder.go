@@ -28,6 +28,8 @@ import (
 var (
 	// Realistic gas limits for UserOp construction (bundler estimation often fails)
 	// These values are based on actual ETH transfer and smart wallet operations
+	// Last validated: Sept 2025. To update: run representative UserOperations on target network,
+	// observe actual gas usage, and adjust these values accordingly
 	DEFAULT_CALL_GAS_LIMIT         = big.NewInt(100000) // 100K for smart wallet execute + ETH transfer
 	DEFAULT_VERIFICATION_GAS_LIMIT = big.NewInt(150000) // 150K for signature verification
 	DEFAULT_PREVERIFICATION_GAS    = big.NewInt(50000)  // 50K for bundler overhead
