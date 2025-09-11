@@ -69,7 +69,7 @@ for release in "${PRERELEASE_ARRAY[@]}"; do
 done
 
 # Get the latest (highest version) pre-release for Docker latest tags
-LATEST_PRERELEASE="${PRERELEASE_ARRAY[${#PRERELEASE_ARRAY[@]}-1]}"
+LATEST_PRERELEASE="${PRERELEASE_ARRAY[-1]}"
 
 # Confirm promotion
 echo -e "${YELLOW}📋 About to promote ${PRERELEASE_COUNT} pre-release(s) to full release(s):${NC}"
