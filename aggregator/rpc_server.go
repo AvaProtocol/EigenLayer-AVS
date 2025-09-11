@@ -232,6 +232,7 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 		resp.TransactionHash = receipt.TxHash.Hex()
 		r.config.Logger.Info("withdrawal transaction confirmed",
 			"user", user.Address.String(),
+			"smartWallet", smartWalletAddress.Hex(),
 			"recipient", payload.RecipientAddress,
 			"amount", payload.Amount,
 			"txHash", receipt.TxHash.Hex(),

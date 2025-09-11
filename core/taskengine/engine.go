@@ -520,32 +520,6 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 		return nil, err
 	}
 
-	// Enforce max smart wallet count per owner before deriving a new one
-	// Count existing wallets stored for this owner
-	if n.smartWalletConfig != nil {
-		maxAllowed := n.smartWalletConfig.MaxWalletsPerOwner
-		if maxAllowed <= 0 {
-			maxAllowed = config.DefaultMaxWalletsPerOwner
-		}
-		if maxAllowed > config.HardMaxWalletsPerOwner {
-			maxAllowed = config.HardMaxWalletsPerOwner
-		}
-		// Fetch all wallets for this owner and count unique addresses
-		dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(user.Address))
-		if listErr == nil {
-			unique := make(map[string]struct{})
-			for _, item := range dbItems {
-				storedModelWallet := &model.SmartWallet{}
-				if err := storedModelWallet.FromStorageData(item.Value); err == nil && storedModelWallet.Address != nil {
-					unique[strings.ToLower(storedModelWallet.Address.Hex())] = struct{}{}
-				}
-			}
-			if len(unique) >= maxAllowed {
-				return nil, status.Errorf(codes.ResourceExhausted, "max smart wallet count reached for owner (limit=%d)", maxAllowed)
-			}
-		}
-	}
-
 	var derivedSenderAddress *common.Address
 	var err error
 
@@ -582,6 +556,32 @@ func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*a
 	}
 
 	if err == badger.ErrKeyNotFound {
+		// Enforce max smart wallet count per owner before creating a new wallet entry
+		// This check only applies when creating new wallet entries, not accessing existing ones
+		if n.smartWalletConfig != nil {
+			maxAllowed := n.smartWalletConfig.MaxWalletsPerOwner
+			if maxAllowed <= 0 {
+				maxAllowed = config.DefaultMaxWalletsPerOwner
+			}
+			if maxAllowed > config.HardMaxWalletsPerOwner {
+				maxAllowed = config.HardMaxWalletsPerOwner
+			}
+			// Fetch all wallets for this owner and count unique addresses
+			dbItems, listErr := n.db.GetByPrefix(WalletByOwnerPrefix(user.Address))
+			if listErr == nil {
+				unique := make(map[string]struct{})
+				for _, item := range dbItems {
+					storedModelWallet := &model.SmartWallet{}
+					if err := storedModelWallet.FromStorageData(item.Value); err == nil && storedModelWallet.Address != nil {
+						unique[strings.ToLower(storedModelWallet.Address.Hex())] = struct{}{}
+					}
+				}
+				if len(unique) >= maxAllowed {
+					return nil, status.Errorf(codes.ResourceExhausted, "max smart wallet count reached for owner (limit=%d)", maxAllowed)
+				}
+			}
+		}
+
 		n.logger.Info("Wallet not found in DB for GetWallet, creating new entry", "owner", user.Address.Hex(), "walletAddress", derivedSenderAddress.Hex())
 		newModelWallet := &model.SmartWallet{
 			Owner:    &user.Address,
