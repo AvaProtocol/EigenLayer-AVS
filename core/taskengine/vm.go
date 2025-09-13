@@ -2900,7 +2900,7 @@ const (
 	ExecutionSuccess ExecutionResultStatus = iota
 	// ExecutionPartialSuccess indicates some steps succeeded but at least one failed
 	ExecutionPartialSuccess
-	// ExecutionFailure indicates execution failed (no steps succeeded or critical failure)
+	// ExecutionFailure indicates execution failed (all steps failed or critical failure)
 	ExecutionFailure
 )
 
@@ -2953,17 +2953,21 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int, ExecutionResultStatus)
 		// Mixed results: some succeeded, some failed (partial success)
 		resultStatus = ExecutionPartialSuccess
 		success = false // Keep false for backward compatibility, but provide status for detailed handling
-		failedNodesList := strings.Join(failedStepNames, ", ")
-		errorMessage = fmt.Sprintf("Partial success: %d of %d steps failed: %s", failedCount, totalSteps, failedNodesList)
+		errorMessage = formatExecutionErrorMessage("Partial success", failedCount, totalSteps, failedStepNames)
 	} else {
 		// All steps failed or no successful steps
 		resultStatus = ExecutionFailure
 		success = false
-		failedNodesList := strings.Join(failedStepNames, ", ")
-		errorMessage = fmt.Sprintf("All %d steps failed: %s", failedCount, failedNodesList)
+		errorMessage = formatExecutionErrorMessage("All", failedCount, failedCount, failedStepNames)
 	}
 
 	return success, errorMessage, failedCount, resultStatus
+}
+
+// formatExecutionErrorMessage creates a standardized error message for execution results
+func formatExecutionErrorMessage(prefix string, failedCount, totalCount int, failedStepNames []string) string {
+	failedNodesList := strings.Join(failedStepNames, ", ")
+	return fmt.Sprintf("%s: %d of %d steps failed: %s", prefix, failedCount, totalCount, failedNodesList)
 }
 
 // ExtractTriggerConfigData extracts configuration data from a TaskTrigger protobuf message
