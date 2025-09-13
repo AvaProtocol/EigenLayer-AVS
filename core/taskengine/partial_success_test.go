@@ -1,6 +1,7 @@
 package taskengine
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -155,9 +156,9 @@ func TestAnalyzeExecutionResult_AllFailure(t *testing.T) {
 	}
 
 	// Check that error message contains all failures information
-	expectedSubstring := "All 3 steps failed"
-	if len(errorMessage) == 0 || errorMessage[:len(expectedSubstring)] != expectedSubstring {
-		t.Errorf("Expected error message to start with '%s', got: %s", expectedSubstring, errorMessage)
+	expectedSubstring := "All: 3 of 3 steps failed"
+	if len(errorMessage) == 0 || !strings.Contains(errorMessage, expectedSubstring) {
+		t.Errorf("Expected error message to contain '%s', got: %s", expectedSubstring, errorMessage)
 	}
 }
 
