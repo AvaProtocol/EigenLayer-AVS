@@ -238,6 +238,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		Success: false,                        // Default to false, will be updated if successful
 		Error:   "",                           // Will be populated if there are errors
 		Steps:   []*avsproto.Execution_Step{}, // Will be populated during execution
+		Index:   task.ExecutionCount - 1,      // 0-based index (ExecutionCount was already incremented)
 	}
 
 	// Wallet validation - if this fails, we'll record the failure and return the execution record
@@ -389,7 +390,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	// Analyze execution results from all steps (including failed ones)
-	executionSuccess, executionError, failedStepCount := vm.AnalyzeExecutionResult()
+	executionSuccess, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Update the execution record we created earlier with the final results
 	execution.EndAt = t1.UnixMilli()
@@ -400,7 +401,18 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	// Ensure no NaN/Inf sneak into protobuf Values (which reject them)
 	sanitizeExecutionForPersistence(execution)
 
-	if !executionSuccess {
+	// Log execution status based on result type
+	switch resultStatus {
+	case ExecutionSuccess:
+		x.logger.Info("task execution completed successfully", "task_id", task.Id, "execution_id", queueData.ExecutionID, "total_steps", len(vm.ExecutionLogs))
+	case ExecutionPartialSuccess:
+		x.logger.Warn("task execution completed with partial success",
+			"error", executionError,
+			"task_id", task.Id,
+			"execution_id", queueData.ExecutionID,
+			"failed_steps", failedStepCount,
+			"total_steps", len(vm.ExecutionLogs))
+	case ExecutionFailure:
 		x.logger.Error("task execution completed with failures",
 			"error", executionError,
 			"task_id", task.Id,
@@ -469,9 +481,13 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		return execution, fmt.Errorf("System error executing task %s: %v", task.Id, runTaskErr)
 	}
 
-	if executionSuccess {
+	// Final execution status logging based on result type
+	switch resultStatus {
+	case ExecutionSuccess:
 		x.logger.Info("successfully executing task", "task_id", task.Id, "triggermark", queueData)
-	} else {
+	case ExecutionPartialSuccess:
+		x.logger.Info("task execution completed with partial success", "task_id", task.Id, "failed_steps", failedStepCount, "triggermark", queueData)
+	default: // ExecutionFailure or other
 		x.logger.Warn("task execution completed with step failures", "task_id", task.Id, "failed_steps", failedStepCount)
 	}
 
