@@ -475,10 +475,11 @@ func (TaskStatus) EnumDescriptor() ([]byte, []int) {
 type ExecutionStatus int32
 
 const (
-	ExecutionStatus_EXECUTION_STATUS_UNSPECIFIED ExecutionStatus = 0
-	ExecutionStatus_EXECUTION_STATUS_PENDING     ExecutionStatus = 1
-	ExecutionStatus_EXECUTION_STATUS_COMPLETED   ExecutionStatus = 2
-	ExecutionStatus_EXECUTION_STATUS_FAILED      ExecutionStatus = 3
+	ExecutionStatus_EXECUTION_STATUS_UNSPECIFIED     ExecutionStatus = 0
+	ExecutionStatus_EXECUTION_STATUS_PENDING         ExecutionStatus = 1
+	ExecutionStatus_EXECUTION_STATUS_COMPLETED       ExecutionStatus = 2
+	ExecutionStatus_EXECUTION_STATUS_FAILED          ExecutionStatus = 3
+	ExecutionStatus_EXECUTION_STATUS_PARTIAL_SUCCESS ExecutionStatus = 4
 )
 
 // Enum value maps for ExecutionStatus.
@@ -488,12 +489,14 @@ var (
 		1: "EXECUTION_STATUS_PENDING",
 		2: "EXECUTION_STATUS_COMPLETED",
 		3: "EXECUTION_STATUS_FAILED",
+		4: "EXECUTION_STATUS_PARTIAL_SUCCESS",
 	}
 	ExecutionStatus_value = map[string]int32{
-		"EXECUTION_STATUS_UNSPECIFIED": 0,
-		"EXECUTION_STATUS_PENDING":     1,
-		"EXECUTION_STATUS_COMPLETED":   2,
-		"EXECUTION_STATUS_FAILED":      3,
+		"EXECUTION_STATUS_UNSPECIFIED":     0,
+		"EXECUTION_STATUS_PENDING":         1,
+		"EXECUTION_STATUS_COMPLETED":       2,
+		"EXECUTION_STATUS_FAILED":          3,
+		"EXECUTION_STATUS_PARTIAL_SUCCESS": 4,
 	}
 )
 
@@ -8763,12 +8766,13 @@ const file_avs_proto_rawDesc = "" +
 	"\n" +
 	"\x06Failed\x10\x02\x12\f\n" +
 	"\bCanceled\x10\x03\x12\r\n" +
-	"\tExecuting\x10\x04*\x8e\x01\n" +
+	"\tExecuting\x10\x04*\xb4\x01\n" +
 	"\x0fExecutionStatus\x12 \n" +
 	"\x1cEXECUTION_STATUS_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18EXECUTION_STATUS_PENDING\x10\x01\x12\x1e\n" +
 	"\x1aEXECUTION_STATUS_COMPLETED\x10\x02\x12\x1b\n" +
-	"\x17EXECUTION_STATUS_FAILED\x10\x032\xf6\x0f\n" +
+	"\x17EXECUTION_STATUS_FAILED\x10\x03\x12$\n" +
+	" EXECUTION_STATUS_PARTIAL_SUCCESS\x10\x042\xf6\x0f\n" +
 	"\n" +
 	"Aggregator\x126\n" +
 	"\x06GetKey\x12\x15.aggregator.GetKeyReq\x1a\x13.aggregator.KeyResp\"\x00\x12]\n" +
