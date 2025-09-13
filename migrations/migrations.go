@@ -31,4 +31,9 @@ var Migrations = []migrator.Migration{
 	// ACTIVE MIGRATIONS
 	// ========================================
 	// Add new migrations here that need to be applied
+	{
+		// Add proper execution indexes to existing executions based on creation order
+		Name:     "20250913-185000-add-execution-indexes",
+		Function: AddExecutionIndexes,
+	},
 }

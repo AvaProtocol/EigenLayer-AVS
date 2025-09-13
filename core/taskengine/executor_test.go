@@ -533,6 +533,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		Success: runErr == nil,
 		Error:   "",
 		Steps:   vm.ExecutionLogs,
+		Index:   0, // Test execution
 	}
 
 	if runErr != nil {

@@ -2281,7 +2281,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	// Step 10: Analyze execution results from all steps
-	executionSuccess, executionError, failedStepCount := vm.AnalyzeExecutionResult()
+	executionSuccess, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Create execution result with proper success/error analysis
 	execution := &avsproto.Execution{
@@ -2291,15 +2291,31 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Success: executionSuccess,             // Based on analysis of all steps
 		Error:   executionError,               // Comprehensive error message from failed steps
 		Steps:   vm.ExecutionLogs,             // Now contains both trigger and node steps (including failed ones)
+		Index:   task.ExecutionCount,          // Use current execution count for simulation (0-based)
 	}
 
-	if !executionSuccess {
+	// Log execution status based on result type
+	switch resultStatus {
+	case ExecutionSuccess:
+		n.logger.Info("workflow simulation completed successfully", "task_id", task.Id, "simulation_id", simulationID, "steps", len(execution.Steps))
+	case ExecutionPartialSuccess:
 		// Clean up error message to avoid stack traces in logs
 		cleanErrorMsg := executionError
-		// Use regex to remove stack-trace lines for cleaner logging (common in JS errors)
 		stackTraceRegex := regexp.MustCompile(`(?m)^\s*at .*$`)
 		cleanErrorMsg = stackTraceRegex.ReplaceAllString(cleanErrorMsg, "")
-		// Clean up any extra whitespace left behind
+		cleanErrorMsg = strings.TrimSpace(cleanErrorMsg)
+
+		n.logger.Warn("workflow simulation completed with partial success",
+			"error", cleanErrorMsg,
+			"task_id", task.Id,
+			"simulation_id", simulationID,
+			"failed_steps", failedStepCount,
+			"total_steps", len(vm.ExecutionLogs))
+	case ExecutionFailure:
+		// Clean up error message to avoid stack traces in logs
+		cleanErrorMsg := executionError
+		stackTraceRegex := regexp.MustCompile(`(?m)^\s*at .*$`)
+		cleanErrorMsg = stackTraceRegex.ReplaceAllString(cleanErrorMsg, "")
 		cleanErrorMsg = strings.TrimSpace(cleanErrorMsg)
 
 		n.logger.Error("workflow simulation completed with failures",
@@ -2308,10 +2324,9 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 			"simulation_id", simulationID,
 			"failed_steps", failedStepCount,
 			"total_steps", len(vm.ExecutionLogs))
-		// Don't return error here - we want to return the execution result with failed steps
-		return execution, nil
 	}
 
+	// Handle VM-level errors if they occurred
 	if runErr != nil {
 		// This should not happen if AnalyzeExecutionResult is working correctly,
 		// but handle it as a fallback for VM-level errors
@@ -2320,10 +2335,8 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 			execution.Error = fmt.Sprintf("VM execution error: %s", runErr.Error())
 			execution.Success = false
 		}
-		return execution, nil
 	}
 
-	n.logger.Info("workflow simulation completed successfully", "task_id", task.Id, "simulation_id", simulationID, "steps", len(execution.Steps))
 	return execution, nil
 }
 
@@ -2563,10 +2576,28 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
 		}
 
+		// Analyze execution steps to determine if it's full success, partial success, or full failure
 		if exec.Success {
 			return &avsproto.ExecutionStatusResp{Status: avsproto.ExecutionStatus_EXECUTION_STATUS_COMPLETED}, nil
 		} else {
-			return &avsproto.ExecutionStatusResp{Status: avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED}, nil
+			// Check if any steps succeeded (partial success)
+			hasSuccessfulSteps := false
+			hasFailedSteps := false
+
+			for _, step := range exec.Steps {
+				if step.Success {
+					hasSuccessfulSteps = true
+				} else if step.Error != "" {
+					hasFailedSteps = true
+				}
+			}
+
+			// Determine status based on step analysis
+			if hasSuccessfulSteps && hasFailedSteps {
+				return &avsproto.ExecutionStatusResp{Status: avsproto.ExecutionStatus_EXECUTION_STATUS_PARTIAL_SUCCESS}, nil
+			} else {
+				return &avsproto.ExecutionStatusResp{Status: avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED}, nil
+			}
 		}
 	}
 

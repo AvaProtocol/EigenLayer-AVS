@@ -64,9 +64,10 @@ func TestChangeEpochToMs(t *testing.T) {
 
 	// Create Sample Execution Data
 	sampleExec := &avsproto.Execution{
-		Id:      execID,
-		StartAt: execStartSeconds, // Seconds
-		EndAt:   execEndSeconds,   // Seconds
+		Id:             execID,
+		StartAt:        execStartSeconds, // Seconds
+		EndAt:          execEndSeconds,   // Seconds
+		Index:          0,                // Migration test execution
 		Steps: []*avsproto.Execution_Step{
 			{
 				Id:      "step-1",
@@ -85,9 +86,10 @@ func TestChangeEpochToMs(t *testing.T) {
 	// Add another execution to test TimeOutput
 	execID2 := "exec-def"
 	sampleExec2 := &avsproto.Execution{
-		Id:      execID2,
-		StartAt: execStartSeconds, // Seconds
-		EndAt:   execEndSeconds,   // Seconds
+		Id:             execID2,
+		StartAt:        execStartSeconds, // Seconds
+		EndAt:          execEndSeconds,   // Seconds
+		Index:          1,                // Migration test execution (second)
 		Steps: []*avsproto.Execution_Step{
 			{
 				Id:      "step-2",

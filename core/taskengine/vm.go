@@ -2892,49 +2892,87 @@ func (v *VM) createExecutionStep(nodeId string, success bool, errorMsg string, l
 	return step
 }
 
-// AnalyzeExecutionResult examines all execution steps and determines overall success/failure
-// Returns (success, errorMessage, failedStepCount)
-func (v *VM) AnalyzeExecutionResult() (bool, string, int) {
+// ExecutionResultStatus represents the different states of execution completion
+type ExecutionResultStatus int
+
+const (
+	// ExecutionSuccess indicates all steps completed successfully
+	ExecutionSuccess ExecutionResultStatus = iota
+	// ExecutionPartialSuccess indicates some steps succeeded but at least one failed
+	ExecutionPartialSuccess
+	// ExecutionFailure indicates execution failed (all steps failed or critical failure)
+	ExecutionFailure
+)
+
+// getStepDisplayName extracts the display name for a step, preferring the name over ID
+func getStepDisplayName(step *avsproto.Execution_Step) string {
+	stepName := step.Name
+	if stepName == "" || stepName == "unknown" {
+		stepName = step.Id
+	}
+	return stepName
+}
+
+// AnalyzeExecutionResult examines all execution steps and determines overall success/failure/partial status
+// Returns (success, errorMessage, failedStepCount, resultStatus)
+func (v *VM) AnalyzeExecutionResult() (bool, string, int, ExecutionResultStatus) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
 	if len(v.ExecutionLogs) == 0 {
-		return false, "no execution steps found", 0
+		return false, "no execution steps found", 0, ExecutionFailure
 	}
 
 	var failedStepNames []string
+	var successfulStepNames []string
 	var firstErrorMessage string
 
 	for _, step := range v.ExecutionLogs {
+		stepName := getStepDisplayName(step)
+
 		if !step.Success && step.Error != "" {
 			if firstErrorMessage == "" {
 				firstErrorMessage = step.Error
 			}
-			// Collect the step name (prefer name over ID)
-			stepName := step.Name
-			if stepName == "" || stepName == "unknown" {
-				stepName = step.Id
-			}
 			failedStepNames = append(failedStepNames, stepName)
+		} else if step.Success {
+			successfulStepNames = append(successfulStepNames, stepName)
 		}
 	}
 
 	failedCount := len(failedStepNames)
-	if failedCount == 0 {
-		return true, "", 0
-	}
+	successfulCount := len(successfulStepNames)
+	totalSteps := len(v.ExecutionLogs)
 
-	// Build error message with failed step count and failed node names
+	// Determine execution status and success flag
+	var resultStatus ExecutionResultStatus
+	var success bool
 	var errorMessage string
-	failedNodesList := strings.Join(failedStepNames, ", ")
 
-	if failedCount == 1 {
-		errorMessage = fmt.Sprintf("These %d steps failed: %s", failedCount, failedNodesList)
+	if failedCount == 0 {
+		// All steps succeeded
+		resultStatus = ExecutionSuccess
+		success = true
+		errorMessage = ""
+	} else if successfulCount > 0 {
+		// Mixed results: some succeeded, some failed (partial success)
+		resultStatus = ExecutionPartialSuccess
+		success = false // Keep false for backward compatibility, but provide status for detailed handling
+		errorMessage = formatExecutionErrorMessage("Partial success", failedCount, totalSteps, failedStepNames)
 	} else {
-		errorMessage = fmt.Sprintf("These %d steps failed: %s", failedCount, failedNodesList)
+		// All steps failed or no successful steps
+		resultStatus = ExecutionFailure
+		success = false
+		errorMessage = formatExecutionErrorMessage("All", failedCount, failedCount, failedStepNames)
 	}
 
-	return false, errorMessage, failedCount
+	return success, errorMessage, failedCount, resultStatus
+}
+
+// formatExecutionErrorMessage creates a standardized error message for execution results
+func formatExecutionErrorMessage(prefix string, failedCount, totalCount int, failedStepNames []string) string {
+	failedNodesList := strings.Join(failedStepNames, ", ")
+	return fmt.Sprintf("%s: %d of %d steps failed: %s", prefix, failedCount, totalCount, failedNodesList)
 }
 
 // ExtractTriggerConfigData extracts configuration data from a TaskTrigger protobuf message
