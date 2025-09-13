@@ -3,7 +3,7 @@ repos:
     hooks:
       - id: go-fmt
         name: go fmt
-        entry: bash -c 'go fmt $(go list ./... | grep -v "/migrations")'  
+        entry: bash -c 'go fmt $(go list ./... | grep -v "/migrations")'
         language: system
         types: [go]
         pass_filenames: false
