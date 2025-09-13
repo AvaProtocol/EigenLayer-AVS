@@ -2904,6 +2904,15 @@ const (
 	ExecutionFailure
 )
 
+// getStepDisplayName extracts the display name for a step, preferring the name over ID
+func getStepDisplayName(step *avsproto.Execution_Step) string {
+	stepName := step.Name
+	if stepName == "" || stepName == "unknown" {
+		stepName = step.Id
+	}
+	return stepName
+}
+
 // AnalyzeExecutionResult examines all execution steps and determines overall success/failure/partial status
 // Returns (success, errorMessage, failedStepCount, resultStatus)
 func (v *VM) AnalyzeExecutionResult() (bool, string, int, ExecutionResultStatus) {
@@ -2919,11 +2928,7 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int, ExecutionResultStatus)
 	var firstErrorMessage string
 
 	for _, step := range v.ExecutionLogs {
-		// Collect the step name (prefer name over ID)
-		stepName := step.Name
-		if stepName == "" || stepName == "unknown" {
-			stepName = step.Id
-		}
+		stepName := getStepDisplayName(step)
 
 		if !step.Success && step.Error != "" {
 			if firstErrorMessage == "" {
