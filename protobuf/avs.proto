@@ -327,7 +327,7 @@ enum TaskStatus {
 enum ExecutionStatus {
   EXECUTION_STATUS_UNSPECIFIED = 0;
   EXECUTION_STATUS_PENDING = 1;
-  EXECUTION_STATUS_COMPLETED = 2;
+  EXECUTION_STATUS_SUCCESS = 2;
   EXECUTION_STATUS_FAILED = 3;
   EXECUTION_STATUS_PARTIAL_SUCCESS = 4;
 }
@@ -600,7 +600,7 @@ message Execution {
   
   int64 start_at = 2; // timestamp when execution started (in milliseconds)
   int64 end_at   = 3; // timestamp when execution ended (in milliseconds)
-  bool   success = 4;
+  ExecutionStatus status = 4; // detailed execution status (success, failed, partial_success, etc.)
   string error   = 5;
   
   // index indicates which run this is for the workflow (0-based: 0=1st run, 1=2nd run, etc.)

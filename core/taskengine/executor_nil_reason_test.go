@@ -71,7 +71,7 @@ func TestExecutorRunTaskWithNilReason(t *testing.T) {
 		t.Errorf("Expected no error with unspecified trigger type, but got: %v", err)
 	}
 
-	if !execution.Success {
+	if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS {
 		t.Errorf("Expected success status but got failure")
 	}
 

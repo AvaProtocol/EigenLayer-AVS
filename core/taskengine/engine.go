@@ -1884,10 +1884,12 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 
 		if execution != nil {
 			// For blocking mode, populate all execution fields like getExecution response
-			response.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_COMPLETED
+			response.Status = execution.Status // Use the actual execution status instead of hardcoded COMPLETED
 			response.StartAt = &execution.StartAt
 			response.EndAt = &execution.EndAt
-			response.Success = &execution.Success
+			// Set the legacy success field for backward compatibility with client SDK
+			legacySuccess := execution.Status == avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS
+			response.Success = &legacySuccess
 			if execution.Error != "" {
 				response.Error = &execution.Error
 			}
@@ -2281,17 +2283,17 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	}
 
 	// Step 10: Analyze execution results from all steps
-	executionSuccess, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
+	_, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
 
-	// Create execution result with proper success/error analysis
+	// Create execution result with proper status/error analysis
 	execution := &avsproto.Execution{
 		Id:      simulationID,
-		StartAt: triggerStartTime.UnixMilli(), // Start with trigger start time
-		EndAt:   nodeEndTime.UnixMilli(),      // End with node completion time
-		Success: executionSuccess,             // Based on analysis of all steps
-		Error:   executionError,               // Comprehensive error message from failed steps
-		Steps:   vm.ExecutionLogs,             // Now contains both trigger and node steps (including failed ones)
-		Index:   task.ExecutionCount,          // Use current execution count for simulation (0-based)
+		StartAt: triggerStartTime.UnixMilli(),           // Start with trigger start time
+		EndAt:   nodeEndTime.UnixMilli(),                // End with node completion time
+		Status:  convertToExecutionStatus(resultStatus), // Use enum status instead of boolean
+		Error:   executionError,                         // Comprehensive error message from failed steps
+		Steps:   vm.ExecutionLogs,                       // Now contains both trigger and node steps (including failed ones)
+		Index:   task.ExecutionCount,                    // Use current execution count for simulation (0-based)
 	}
 
 	// Log execution status based on result type
@@ -2333,7 +2335,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		n.logger.Error("workflow simulation had VM-level error", "vm_error", runErr, "task_id", task.Id, "simulation_id", simulationID)
 		if execution.Error == "" {
 			execution.Error = fmt.Sprintf("VM execution error: %s", runErr.Error())
-			execution.Success = false
+			execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
 		}
 	}
 
@@ -2576,29 +2578,9 @@ func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.Executio
 			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
 		}
 
-		// Analyze execution steps to determine if it's full success, partial success, or full failure
-		if exec.Success {
-			return &avsproto.ExecutionStatusResp{Status: avsproto.ExecutionStatus_EXECUTION_STATUS_COMPLETED}, nil
-		} else {
-			// Check if any steps succeeded (partial success)
-			hasSuccessfulSteps := false
-			hasFailedSteps := false
-
-			for _, step := range exec.Steps {
-				if step.Success {
-					hasSuccessfulSteps = true
-				} else if step.Error != "" {
-					hasFailedSteps = true
-				}
-			}
-
-			// Determine status based on step analysis
-			if hasSuccessfulSteps && hasFailedSteps {
-				return &avsproto.ExecutionStatusResp{Status: avsproto.ExecutionStatus_EXECUTION_STATUS_PARTIAL_SUCCESS}, nil
-			} else {
-				return &avsproto.ExecutionStatusResp{Status: avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED}, nil
-			}
-		}
+		// Return the execution status directly from the stored execution
+		// The status field now contains the proper enum value from AnalyzeExecutionResult
+		return &avsproto.ExecutionStatusResp{Status: exec.Status}, nil
 	}
 
 	// Check if it's pending in queue
@@ -3336,7 +3318,7 @@ func (n *Engine) GetExecutionStats(user *model.User, payload *avsproto.GetExecut
 			}
 
 			total++
-			if execution.Success {
+			if execution.Status == avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS {
 				succeeded++
 			} else {
 				failed++

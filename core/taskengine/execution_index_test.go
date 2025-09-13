@@ -97,7 +97,7 @@ func TestExecutionIndexIncrement(t *testing.T) {
 		}
 
 		// Verify execution was successful
-		if !execution.Success {
+		if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS {
 			t.Logf("Execution %d error: %s", i, execution.Error)
 			t.Fatalf("Expected execution %d to be successful, but it failed", i)
 		}
