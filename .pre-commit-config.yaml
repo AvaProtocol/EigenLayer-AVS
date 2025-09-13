@@ -17,7 +17,7 @@ repos:
 
       - id: go-vet
         name: go vet
-        entry: bash -c 'go vet $(go list ./... | grep -v "/migrations")'  
+        entry: bash -c 'go vet $(go list ./... | grep -v "/migrations")'
         language: system
         types: [go]
         pass_filenames: false
