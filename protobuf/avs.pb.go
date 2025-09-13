@@ -419,7 +419,7 @@ type TaskStatus int32
 
 const (
 	TaskStatus_Active TaskStatus = 0
-	// Task is completd when it's reaching its max_execution or its expiration time
+	// Task is completed when it's reaching its max_execution or its expiration time
 	TaskStatus_Completed TaskStatus = 1
 	TaskStatus_Failed    TaskStatus = 2
 	TaskStatus_Canceled  TaskStatus = 3
