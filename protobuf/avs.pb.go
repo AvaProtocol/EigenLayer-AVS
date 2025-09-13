@@ -1949,13 +1949,16 @@ func (*TaskNode_Loop) isTaskNode_TaskType() {}
 func (*TaskNode_CustomCode) isTaskNode_TaskType() {}
 
 type Execution struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	StartAt       int64                  `protobuf:"varint,2,opt,name=start_at,json=startAt,proto3" json:"start_at,omitempty"` // timestamp when execution started (in milliseconds)
-	EndAt         int64                  `protobuf:"varint,3,opt,name=end_at,json=endAt,proto3" json:"end_at,omitempty"`       // timestamp when execution ended (in milliseconds)
-	Success       bool                   `protobuf:"varint,4,opt,name=success,proto3" json:"success,omitempty"`
-	Error         string                 `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
-	Steps         []*Execution_Step      `protobuf:"bytes,8,rep,name=steps,proto3" json:"steps,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Id      string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	StartAt int64                  `protobuf:"varint,2,opt,name=start_at,json=startAt,proto3" json:"start_at,omitempty"` // timestamp when execution started (in milliseconds)
+	EndAt   int64                  `protobuf:"varint,3,opt,name=end_at,json=endAt,proto3" json:"end_at,omitempty"`       // timestamp when execution ended (in milliseconds)
+	Success bool                   `protobuf:"varint,4,opt,name=success,proto3" json:"success,omitempty"`
+	Error   string                 `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
+	// index indicates which run this is for the workflow (0-based: 0=1st run, 1=2nd run, etc.)
+	// This helps clients understand execution order without calculating based on timestamps
+	Index         int64             `protobuf:"varint,6,opt,name=index,proto3" json:"index,omitempty"`
+	Steps         []*Execution_Step `protobuf:"bytes,8,rep,name=steps,proto3" json:"steps,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2023,6 +2026,13 @@ func (x *Execution) GetError() string {
 		return x.Error
 	}
 	return ""
+}
+
+func (x *Execution) GetIndex() int64 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
 }
 
 func (x *Execution) GetSteps() []*Execution_Step {
@@ -8351,13 +8361,14 @@ const file_avs_proto_rawDesc = "" +
 	"\x04loop\x18\x11 \x01(\v2\x14.aggregator.LoopNodeH\x00R\x04loop\x12=\n" +
 	"\vcustom_code\x18\x12 \x01(\v2\x1a.aggregator.CustomCodeNodeH\x00R\n" +
 	"customCodeB\v\n" +
-	"\ttask_type\"\xf6\v\n" +
+	"\ttask_type\"\x8c\f\n" +
 	"\tExecution\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\bstart_at\x18\x02 \x01(\x03R\astartAt\x12\x15\n" +
 	"\x06end_at\x18\x03 \x01(\x03R\x05endAt\x12\x18\n" +
 	"\asuccess\x18\x04 \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\x120\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\x12\x14\n" +
+	"\x05index\x18\x06 \x01(\x03R\x05index\x120\n" +
 	"\x05steps\x18\b \x03(\v2\x1a.aggregator.Execution.StepR\x05steps\x1a\xc4\n" +
 	"\n" +
 	"\x04Step\x12\x0e\n" +

@@ -215,6 +215,7 @@ func TestGetExecutionStatus_PartialSuccess(t *testing.T) {
 		EndAt:   time.Now().UnixMilli(),
 		Success: false, // Overall success is false
 		Error:   "Partial success: 1 of 3 steps failed: Database Query",
+		Index:   0, // First execution
 		Steps: []*avsproto.Execution_Step{
 			{
 				Id:      "trigger1",
@@ -302,6 +303,7 @@ func TestGetExecutionStatus_FullSuccess(t *testing.T) {
 		EndAt:   time.Now().UnixMilli(),
 		Success: true, // Overall success is true
 		Error:   "",
+		Index:   0, // First execution
 		Steps: []*avsproto.Execution_Step{
 			{
 				Id:      "trigger1",
@@ -383,6 +385,7 @@ func TestGetExecutionStatus_FullFailure(t *testing.T) {
 		EndAt:   time.Now().UnixMilli(),
 		Success: false, // Overall success is false
 		Error:   "All 2 steps failed: Manual Trigger, HTTP Request",
+		Index:   0, // First execution
 		Steps: []*avsproto.Execution_Step{
 			{
 				Id:      "trigger1",

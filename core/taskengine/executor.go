@@ -238,6 +238,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		Success: false,                        // Default to false, will be updated if successful
 		Error:   "",                           // Will be populated if there are errors
 		Steps:   []*avsproto.Execution_Step{}, // Will be populated during execution
+		Index:   task.ExecutionCount - 1,      // 0-based index (ExecutionCount was already incremented)
 	}
 
 	// Wallet validation - if this fails, we'll record the failure and return the execution record

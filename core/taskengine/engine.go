@@ -2291,6 +2291,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		Success: executionSuccess,             // Based on analysis of all steps
 		Error:   executionError,               // Comprehensive error message from failed steps
 		Steps:   vm.ExecutionLogs,             // Now contains both trigger and node steps (including failed ones)
+		Index:   task.ExecutionCount,          // Use current execution count for simulation (0-based)
 	}
 
 	// Log execution status based on result type

@@ -83,6 +83,7 @@ func TestCustomCodeNodeJSONSerialization(t *testing.T) {
 	execution := &avsproto.Execution{
 		Id:      "test_execution",
 		Success: true,
+		Index:   0, // Test execution
 		Steps: []*avsproto.Execution_Step{
 			step,
 		},
