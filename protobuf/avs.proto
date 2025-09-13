@@ -316,7 +316,7 @@ enum ErrorCode {
 // TaskStatus represents status of the task. The transition is as follow
 enum TaskStatus {
   Active    = 0;
-  // Task is completd when it's reaching its max_execution or its expiration time
+  // Task is completed when it reaches its max_execution or its expiration time
   Completed = 1;
   Failed    = 2;
   Canceled  = 3;
@@ -329,6 +329,7 @@ enum ExecutionStatus {
   EXECUTION_STATUS_PENDING = 1;
   EXECUTION_STATUS_COMPLETED = 2;
   EXECUTION_STATUS_FAILED = 3;
+  EXECUTION_STATUS_PARTIAL_SUCCESS = 4;
 }
 
 
@@ -601,6 +602,10 @@ message Execution {
   int64 end_at   = 3; // timestamp when execution ended (in milliseconds)
   bool   success = 4;
   string error   = 5;
+  
+  // index indicates which run this is for the workflow (0-based: 0=1st run, 1=2nd run, etc.)
+  // This helps clients understand execution order without calculating based on timestamps
+  int64 index = 6;
 
   message Step {
     string id = 1;

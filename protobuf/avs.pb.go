@@ -419,7 +419,7 @@ type TaskStatus int32
 
 const (
 	TaskStatus_Active TaskStatus = 0
-	// Task is completd when it's reaching its max_execution or its expiration time
+	// Task is completed when it's reaching its max_execution or its expiration time
 	TaskStatus_Completed TaskStatus = 1
 	TaskStatus_Failed    TaskStatus = 2
 	TaskStatus_Canceled  TaskStatus = 3
@@ -475,10 +475,11 @@ func (TaskStatus) EnumDescriptor() ([]byte, []int) {
 type ExecutionStatus int32
 
 const (
-	ExecutionStatus_EXECUTION_STATUS_UNSPECIFIED ExecutionStatus = 0
-	ExecutionStatus_EXECUTION_STATUS_PENDING     ExecutionStatus = 1
-	ExecutionStatus_EXECUTION_STATUS_COMPLETED   ExecutionStatus = 2
-	ExecutionStatus_EXECUTION_STATUS_FAILED      ExecutionStatus = 3
+	ExecutionStatus_EXECUTION_STATUS_UNSPECIFIED     ExecutionStatus = 0
+	ExecutionStatus_EXECUTION_STATUS_PENDING         ExecutionStatus = 1
+	ExecutionStatus_EXECUTION_STATUS_COMPLETED       ExecutionStatus = 2
+	ExecutionStatus_EXECUTION_STATUS_FAILED          ExecutionStatus = 3
+	ExecutionStatus_EXECUTION_STATUS_PARTIAL_SUCCESS ExecutionStatus = 4
 )
 
 // Enum value maps for ExecutionStatus.
@@ -488,12 +489,14 @@ var (
 		1: "EXECUTION_STATUS_PENDING",
 		2: "EXECUTION_STATUS_COMPLETED",
 		3: "EXECUTION_STATUS_FAILED",
+		4: "EXECUTION_STATUS_PARTIAL_SUCCESS",
 	}
 	ExecutionStatus_value = map[string]int32{
-		"EXECUTION_STATUS_UNSPECIFIED": 0,
-		"EXECUTION_STATUS_PENDING":     1,
-		"EXECUTION_STATUS_COMPLETED":   2,
-		"EXECUTION_STATUS_FAILED":      3,
+		"EXECUTION_STATUS_UNSPECIFIED":     0,
+		"EXECUTION_STATUS_PENDING":         1,
+		"EXECUTION_STATUS_COMPLETED":       2,
+		"EXECUTION_STATUS_FAILED":          3,
+		"EXECUTION_STATUS_PARTIAL_SUCCESS": 4,
 	}
 )
 
@@ -1946,13 +1949,16 @@ func (*TaskNode_Loop) isTaskNode_TaskType() {}
 func (*TaskNode_CustomCode) isTaskNode_TaskType() {}
 
 type Execution struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	StartAt       int64                  `protobuf:"varint,2,opt,name=start_at,json=startAt,proto3" json:"start_at,omitempty"` // timestamp when execution started (in milliseconds)
-	EndAt         int64                  `protobuf:"varint,3,opt,name=end_at,json=endAt,proto3" json:"end_at,omitempty"`       // timestamp when execution ended (in milliseconds)
-	Success       bool                   `protobuf:"varint,4,opt,name=success,proto3" json:"success,omitempty"`
-	Error         string                 `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
-	Steps         []*Execution_Step      `protobuf:"bytes,8,rep,name=steps,proto3" json:"steps,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Id      string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	StartAt int64                  `protobuf:"varint,2,opt,name=start_at,json=startAt,proto3" json:"start_at,omitempty"` // timestamp when execution started (in milliseconds)
+	EndAt   int64                  `protobuf:"varint,3,opt,name=end_at,json=endAt,proto3" json:"end_at,omitempty"`       // timestamp when execution ended (in milliseconds)
+	Success bool                   `protobuf:"varint,4,opt,name=success,proto3" json:"success,omitempty"`
+	Error   string                 `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
+	// index indicates which run this is for the workflow (0-based: 0=1st run, 1=2nd run, etc.)
+	// This helps clients understand execution order without calculating based on timestamps
+	Index         int64             `protobuf:"varint,6,opt,name=index,proto3" json:"index,omitempty"`
+	Steps         []*Execution_Step `protobuf:"bytes,8,rep,name=steps,proto3" json:"steps,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2020,6 +2026,13 @@ func (x *Execution) GetError() string {
 		return x.Error
 	}
 	return ""
+}
+
+func (x *Execution) GetIndex() int64 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
 }
 
 func (x *Execution) GetSteps() []*Execution_Step {
@@ -8348,13 +8361,14 @@ const file_avs_proto_rawDesc = "" +
 	"\x04loop\x18\x11 \x01(\v2\x14.aggregator.LoopNodeH\x00R\x04loop\x12=\n" +
 	"\vcustom_code\x18\x12 \x01(\v2\x1a.aggregator.CustomCodeNodeH\x00R\n" +
 	"customCodeB\v\n" +
-	"\ttask_type\"\xf6\v\n" +
+	"\ttask_type\"\x8c\f\n" +
 	"\tExecution\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\bstart_at\x18\x02 \x01(\x03R\astartAt\x12\x15\n" +
 	"\x06end_at\x18\x03 \x01(\x03R\x05endAt\x12\x18\n" +
 	"\asuccess\x18\x04 \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\x120\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\x12\x14\n" +
+	"\x05index\x18\x06 \x01(\x03R\x05index\x120\n" +
 	"\x05steps\x18\b \x03(\v2\x1a.aggregator.Execution.StepR\x05steps\x1a\xc4\n" +
 	"\n" +
 	"\x04Step\x12\x0e\n" +
@@ -8763,12 +8777,13 @@ const file_avs_proto_rawDesc = "" +
 	"\n" +
 	"\x06Failed\x10\x02\x12\f\n" +
 	"\bCanceled\x10\x03\x12\r\n" +
-	"\tExecuting\x10\x04*\x8e\x01\n" +
+	"\tExecuting\x10\x04*\xb4\x01\n" +
 	"\x0fExecutionStatus\x12 \n" +
 	"\x1cEXECUTION_STATUS_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18EXECUTION_STATUS_PENDING\x10\x01\x12\x1e\n" +
 	"\x1aEXECUTION_STATUS_COMPLETED\x10\x02\x12\x1b\n" +
-	"\x17EXECUTION_STATUS_FAILED\x10\x032\xf6\x0f\n" +
+	"\x17EXECUTION_STATUS_FAILED\x10\x03\x12$\n" +
+	" EXECUTION_STATUS_PARTIAL_SUCCESS\x10\x042\xf6\x0f\n" +
 	"\n" +
 	"Aggregator\x126\n" +
 	"\x06GetKey\x12\x15.aggregator.GetKeyReq\x1a\x13.aggregator.KeyResp\"\x00\x12]\n" +
