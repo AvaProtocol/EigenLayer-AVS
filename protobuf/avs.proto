@@ -316,7 +316,7 @@ enum ErrorCode {
 // TaskStatus represents status of the task. The transition is as follow
 enum TaskStatus {
   Active    = 0;
-  // Task is completed when it's reaching its max_execution or its expiration time
+  // Task is completed when it reaches its max_execution or its expiration time
   Completed = 1;
   Failed    = 2;
   Canceled  = 3;
