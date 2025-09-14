@@ -107,7 +107,7 @@ func TestAnalyzeExecutionResult_PartialSuccess(t *testing.T) {
 
 	// Check that error message contains partial success information
 	expectedSubstring := "Partial success: 1 of 4 steps failed"
-	if len(errorMessage) == 0 || errorMessage[:len(expectedSubstring)] != expectedSubstring {
+	if !strings.HasPrefix(errorMessage, expectedSubstring) {
 		t.Errorf("Expected error message to start with '%s', got: %s", expectedSubstring, errorMessage)
 	}
 }

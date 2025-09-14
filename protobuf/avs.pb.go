@@ -3665,11 +3665,11 @@ type TriggerTaskResp struct {
 	// Always return the workflow ID
 	WorkflowId string `protobuf:"bytes,3,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
 	// Optional execution fields - populated when isBlocking=true or when execution is complete
-	StartAt       *int64            `protobuf:"varint,4,opt,name=start_at,json=startAt,proto3,oneof" json:"start_at,omitempty"` // timestamp when execution started (in milliseconds) - populated when isBlocking=true or when execution is complete, making it available for both blocking and non-blocking modes
-	EndAt         *int64            `protobuf:"varint,5,opt,name=end_at,json=endAt,proto3,oneof" json:"end_at,omitempty"`       // timestamp when execution ended (in milliseconds) - only available for blocking
-	Success       *bool             `protobuf:"varint,6,opt,name=success,proto3,oneof" json:"success,omitempty"`                // execution success status - only available for blocking
-	Error         *string           `protobuf:"bytes,7,opt,name=error,proto3,oneof" json:"error,omitempty"`                     // error message if execution failed - only available for blocking
-	Steps         []*Execution_Step `protobuf:"bytes,8,rep,name=steps,proto3" json:"steps,omitempty"`                           // execution steps - only available for blocking
+	StartAt *int64 `protobuf:"varint,4,opt,name=start_at,json=startAt,proto3,oneof" json:"start_at,omitempty"` // timestamp when execution started (in milliseconds) - populated when isBlocking=true or when execution is complete, making it available for both blocking and non-blocking modes
+	EndAt   *int64 `protobuf:"varint,5,opt,name=end_at,json=endAt,proto3,oneof" json:"end_at,omitempty"`       // timestamp when execution ended (in milliseconds) - only available for blocking
+	// Field 6 (success) was removed - do not reuse this field number
+	Error         *string           `protobuf:"bytes,7,opt,name=error,proto3,oneof" json:"error,omitempty"` // error message if execution failed - only available for blocking
+	Steps         []*Execution_Step `protobuf:"bytes,8,rep,name=steps,proto3" json:"steps,omitempty"`       // execution steps - only available for blocking
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3737,13 +3737,6 @@ func (x *TriggerTaskResp) GetEndAt() int64 {
 		return *x.EndAt
 	}
 	return 0
-}
-
-func (x *TriggerTaskResp) GetSuccess() bool {
-	if x != nil && x.Success != nil {
-		return *x.Success
-	}
-	return false
 }
 
 func (x *TriggerTaskResp) GetError() string {
@@ -8520,21 +8513,18 @@ const file_avs_proto_rawDesc = "" +
 	"\x0emanual_trigger\x18\a \x01(\v2 .aggregator.ManualTrigger.OutputH\x00R\rmanualTrigger\x12\x1f\n" +
 	"\vis_blocking\x18\b \x01(\bR\n" +
 	"isBlockingB\x10\n" +
-	"\x0etrigger_output\"\xe0\x02\n" +
+	"\x0etrigger_output\"\xb5\x02\n" +
 	"\x0fTriggerTaskResp\x12!\n" +
 	"\fexecution_id\x18\x01 \x01(\tR\vexecutionId\x123\n" +
 	"\x06status\x18\x02 \x01(\x0e2\x1b.aggregator.ExecutionStatusR\x06status\x12\x1f\n" +
 	"\vworkflow_id\x18\x03 \x01(\tR\n" +
 	"workflowId\x12\x1e\n" +
 	"\bstart_at\x18\x04 \x01(\x03H\x00R\astartAt\x88\x01\x01\x12\x1a\n" +
-	"\x06end_at\x18\x05 \x01(\x03H\x01R\x05endAt\x88\x01\x01\x12\x1d\n" +
-	"\asuccess\x18\x06 \x01(\bH\x02R\asuccess\x88\x01\x01\x12\x19\n" +
-	"\x05error\x18\a \x01(\tH\x03R\x05error\x88\x01\x01\x120\n" +
+	"\x06end_at\x18\x05 \x01(\x03H\x01R\x05endAt\x88\x01\x01\x12\x19\n" +
+	"\x05error\x18\a \x01(\tH\x02R\x05error\x88\x01\x01\x120\n" +
 	"\x05steps\x18\b \x03(\v2\x1a.aggregator.Execution.StepR\x05stepsB\v\n" +
 	"\t_start_atB\t\n" +
-	"\a_end_atB\n" +
-	"\n" +
-	"\b_successB\b\n" +
+	"\a_end_atB\b\n" +
 	"\x06_error\"}\n" +
 	"\x17CreateOrUpdateSecretReq\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
