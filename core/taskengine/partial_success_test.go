@@ -214,7 +214,7 @@ func TestGetExecutionStatus_PartialSuccess(t *testing.T) {
 		Id:      "test-execution-id",
 		StartAt: time.Now().UnixMilli(),
 		EndAt:   time.Now().UnixMilli(),
-		Success: false, // Overall success is false
+		Status:  avsproto.ExecutionStatus_EXECUTION_STATUS_PARTIAL_SUCCESS, // Overall status is partial success
 		Error:   "Partial success: 1 of 3 steps failed: Database Query",
 		Index:   0, // First execution
 		Steps: []*avsproto.Execution_Step{
@@ -302,7 +302,7 @@ func TestGetExecutionStatus_FullSuccess(t *testing.T) {
 		Id:      "test-execution-id",
 		StartAt: time.Now().UnixMilli(),
 		EndAt:   time.Now().UnixMilli(),
-		Success: true, // Overall success is true
+		Status:  avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS, // Overall status is success
 		Error:   "",
 		Index:   0, // First execution
 		Steps: []*avsproto.Execution_Step{
@@ -351,9 +351,9 @@ func TestGetExecutionStatus_FullSuccess(t *testing.T) {
 		t.Fatalf("GetExecutionStatus failed: %v", err)
 	}
 
-	// Verify that it returns COMPLETED status
-	if statusResp.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_COMPLETED {
-		t.Errorf("Expected EXECUTION_STATUS_COMPLETED, got %v", statusResp.Status)
+	// Verify that it returns SUCCESS status
+	if statusResp.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS {
+		t.Errorf("Expected EXECUTION_STATUS_SUCCESS, got %v", statusResp.Status)
 	}
 }
 
@@ -384,7 +384,7 @@ func TestGetExecutionStatus_FullFailure(t *testing.T) {
 		Id:      "test-execution-id",
 		StartAt: time.Now().UnixMilli(),
 		EndAt:   time.Now().UnixMilli(),
-		Success: false, // Overall success is false
+		Status:  avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED, // Overall status is failed
 		Error:   "All 2 steps failed: Manual Trigger, HTTP Request",
 		Index:   0, // First execution
 		Steps: []*avsproto.Execution_Step{

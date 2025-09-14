@@ -130,8 +130,8 @@ func TestGetExecution(t *testing.T) {
 		t.Fatalf("Error getting execution status after processing: %v", err)
 	}
 
-	if executionStatus.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_COMPLETED {
-		t.Errorf("expected status to be completed but got %v", executionStatus.Status)
+	if executionStatus.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS {
+		t.Errorf("expected status to be success but got %v", executionStatus.Status)
 	}
 }
 
@@ -253,8 +253,8 @@ func TestTriggerSync(t *testing.T) {
 		t.Fatalf("Error getting execution status after processing: %v", err)
 	}
 
-	if executionStatus.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_COMPLETED {
-		t.Errorf("expected status to be completed but got %v", executionStatus.Status)
+	if executionStatus.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS {
+		t.Errorf("expected status to be success but got %v", executionStatus.Status)
 	}
 }
 
@@ -376,8 +376,8 @@ func TestTriggerAsync(t *testing.T) {
 		t.Fatalf("Error getting execution status after processing: %v", err)
 	}
 
-	if executionStatus.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_COMPLETED {
-		t.Errorf("expected status to be completed but got %v", executionStatus.Status)
+	if executionStatus.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS {
+		t.Errorf("expected status to be success but got %v", executionStatus.Status)
 	}
 }
 

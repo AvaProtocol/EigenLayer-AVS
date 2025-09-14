@@ -731,7 +731,7 @@ func (r *RpcServer) SimulateTask(ctx context.Context, req *avsproto.SimulateTask
 	r.config.Logger.Info("simulate task completed",
 		"user", user.Address.String(),
 		"trigger_name", req.Trigger.Name,
-		"success", execution.Success,
+		"status", execution.Status,
 		"execution_id", execution.Id,
 		"steps_count", len(execution.Steps),
 	)
