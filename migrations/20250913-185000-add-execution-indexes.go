@@ -99,7 +99,6 @@ func AddExecutionIndexes(db storage.Storage) (int, error) {
 
 		// Assign sequential indexes starting from 0
 		for index, execWithKey := range executions {
-			// Set the proper index (0-based) for all executions
 			execWithKey.Execution.Index = int64(index)
 
 			// Serialize the updated execution
