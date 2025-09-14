@@ -234,11 +234,11 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	execution := &avsproto.Execution{
 		Id:      queueData.ExecutionID,
 		StartAt: t0.UnixMilli(),
-		EndAt:   0,                            // Will be set when execution completes or fails
-		Success: false,                        // Default to false, will be updated if successful
-		Error:   "",                           // Will be populated if there are errors
-		Steps:   []*avsproto.Execution_Step{}, // Will be populated during execution
-		Index:   task.ExecutionCount - 1,      // 0-based index (ExecutionCount was already incremented)
+		EndAt:   0,                                                 // Will be set when execution completes or fails
+		Status:  avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING, // Default to pending, will be updated based on results
+		Error:   "",                                                // Will be populated if there are errors
+		Steps:   []*avsproto.Execution_Step{},                      // Will be populated during execution
+		Index:   task.ExecutionCount - 1,                           // 0-based index (ExecutionCount was already incremented)
 	}
 
 	// Wallet validation - if this fails, we'll record the failure and return the execution record
@@ -246,6 +246,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		if task.SmartWalletAddress == "" || !common.IsHexAddress(task.SmartWalletAddress) {
 			execution.EndAt = time.Now().UnixMilli()
 			execution.Error = "invalid or missing task smart wallet address for deployed run"
+			execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
 			x.persistFailedExecution(task, execution, initialTaskStatus)
 			return execution, nil // Return execution record with failure details
 		}
@@ -258,12 +259,14 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		if err != nil {
 			execution.EndAt = time.Now().UnixMilli()
 			execution.Error = fmt.Sprintf("failed to validate wallet ownership for owner %s: %v", owner.Hex(), err)
+			execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
 			x.persistFailedExecution(task, execution, initialTaskStatus)
 			return execution, nil // Return execution record with failure details
 		}
 		if !isValid {
 			execution.EndAt = time.Now().UnixMilli()
 			execution.Error = "task smart wallet address does not belong to owner"
+			execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
 			x.persistFailedExecution(task, execution, initialTaskStatus)
 			return execution, nil // Return execution record with failure details
 		}
@@ -390,13 +393,13 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	}
 
 	// Analyze execution results from all steps (including failed ones)
-	executionSuccess, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
+	_, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
 
 	// Update the execution record we created earlier with the final results
 	execution.EndAt = t1.UnixMilli()
-	execution.Success = executionSuccess // Based on analysis of all steps
-	execution.Error = executionError     // Comprehensive error message from failed steps
-	execution.Steps = vm.ExecutionLogs   // Contains all steps including failed ones
+	execution.Status = convertToExecutionStatus(resultStatus) // Based on analysis of all steps
+	execution.Error = executionError                          // Comprehensive error message from failed steps
+	execution.Steps = vm.ExecutionLogs                        // Contains all steps including failed ones
 
 	// Ensure no NaN/Inf sneak into protobuf Values (which reject them)
 	sanitizeExecutionForPersistence(execution)
@@ -427,7 +430,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		x.logger.Error("task execution had VM-level error", "vm_error", runTaskErr, "task_id", task.Id, "execution_id", queueData.ExecutionID)
 		if execution.Error == "" {
 			execution.Error = fmt.Sprintf("VM execution error: %s", runTaskErr.Error())
-			execution.Success = false
+			execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
 		}
 	}
 

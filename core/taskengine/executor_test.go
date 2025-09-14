@@ -100,7 +100,7 @@ func TestExecutorRunTaskSucess(t *testing.T) {
 		t.Errorf("expect no error but got %v", err)
 	}
 
-	if !execution.Success {
+	if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS {
 		t.Errorf("Expect success status but got failure")
 	}
 
@@ -224,7 +224,7 @@ func TestExecutorRunTaskWithBranchSilentFailureBehavior(t *testing.T) {
 		t.Errorf("Expected no error with silent failure behavior, but got: %v", err)
 	}
 
-	if !execution.Success {
+	if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS {
 		t.Errorf("Expected success status with silent failure behavior, but got failure: %s", execution.Error)
 	}
 
@@ -334,7 +334,7 @@ func TestExecutorRunTaskComputeSuccessFalseWhenANodeFailedToRun(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	if execution.Success {
+	if execution.Status == avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS {
 		t.Errorf("Expected failure status when a node fails (HTTP 503), but got success")
 	}
 
@@ -530,7 +530,7 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 		Id:      "test_exec123",
 		StartAt: t0.UnixMilli(),
 		EndAt:   t1.UnixMilli(),
-		Success: runErr == nil,
+		Status:  avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS,
 		Error:   "",
 		Steps:   vm.ExecutionLogs,
 		Index:   0, // Test execution
@@ -538,13 +538,14 @@ func TestExecutorRunTaskReturnAllExecutionData(t *testing.T) {
 
 	if runErr != nil {
 		execution.Error = runErr.Error()
+		execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
 	}
 
 	if execution.Id != "test_exec123" {
 		t.Errorf("expect execution id is test_exec123 but got: %s", execution.Id)
 	}
 
-	if !execution.Success {
+	if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS {
 		t.Errorf("expect success status but got failure")
 	}
 

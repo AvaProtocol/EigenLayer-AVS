@@ -2975,6 +2975,20 @@ func formatExecutionErrorMessage(prefix string, failedCount, totalCount int, fai
 	return fmt.Sprintf("%s: %d of %d steps failed: %s", prefix, failedCount, totalCount, failedNodesList)
 }
 
+// convertToExecutionStatus converts ExecutionResultStatus to protobuf ExecutionStatus enum
+func convertToExecutionStatus(resultStatus ExecutionResultStatus) avsproto.ExecutionStatus {
+	switch resultStatus {
+	case ExecutionSuccess:
+		return avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS
+	case ExecutionPartialSuccess:
+		return avsproto.ExecutionStatus_EXECUTION_STATUS_PARTIAL_SUCCESS
+	case ExecutionFailure:
+		return avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
+	default:
+		return avsproto.ExecutionStatus_EXECUTION_STATUS_UNSPECIFIED
+	}
+}
+
 // ExtractTriggerConfigData extracts configuration data from a TaskTrigger protobuf message
 // This function now extracts from the Config field since the duplicate input field was removed
 func ExtractTriggerConfigData(trigger *avsproto.TaskTrigger) map[string]interface{} {

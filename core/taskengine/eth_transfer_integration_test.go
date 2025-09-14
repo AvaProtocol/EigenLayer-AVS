@@ -128,8 +128,8 @@ func TestETHTransferTaskIntegration(t *testing.T) {
 		t.Fatal("Execution is nil")
 	}
 
-	if !execution.Success {
-		t.Errorf("Expected execution to succeed, got success=%v, error=%s", execution.Success, execution.Error)
+	if execution.Status != avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS {
+		t.Errorf("Expected execution to succeed, got status=%v, error=%s", execution.Status, execution.Error)
 	}
 
 	if len(execution.Steps) == 0 {
@@ -268,7 +268,7 @@ func TestETHTransferTaskWithInvalidConfig(t *testing.T) {
 	}
 
 	// The execution should have failed
-	if execution.Success {
+	if execution.Status == avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS {
 		t.Error("Expected execution to fail due to invalid destination address")
 		return
 	}

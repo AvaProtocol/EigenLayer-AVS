@@ -341,7 +341,7 @@ func TestCamelCaseVariableResolutionConsistency(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, execution)
 		if execution != nil {
-			assert.True(t, execution.Success, "Simulation should succeed")
+			assert.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS, execution.Status, "Simulation should succeed")
 		}
 
 		// Only proceed if execution is not nil
