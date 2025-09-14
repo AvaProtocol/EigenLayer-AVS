@@ -883,7 +883,7 @@ message TriggerTaskResp {
   // Optional execution fields - populated when isBlocking=true or when execution is complete
   optional int64 start_at = 4; // timestamp when execution started (in milliseconds) - populated when isBlocking=true or when execution is complete, making it available for both blocking and non-blocking modes
   optional int64 end_at = 5;   // timestamp when execution ended (in milliseconds) - only available for blocking
-  optional bool success = 6;   // execution success status - only available for blocking
+  // Field 6 (success) was removed - do not reuse this field number
   optional string error = 7;   // error message if execution failed - only available for blocking
   repeated Execution.Step steps = 8; // execution steps - only available for blocking
 }

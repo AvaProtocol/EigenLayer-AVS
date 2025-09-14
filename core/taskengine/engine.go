@@ -1884,12 +1884,9 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 
 		if execution != nil {
 			// For blocking mode, populate all execution fields like getExecution response
-			response.Status = execution.Status // Use the actual execution status instead of hardcoded COMPLETED
+			response.Status = execution.Status
 			response.StartAt = &execution.StartAt
 			response.EndAt = &execution.EndAt
-			// Set the legacy success field for backward compatibility with client SDK
-			legacySuccess := execution.Status == avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS
-			response.Success = &legacySuccess
 			if execution.Error != "" {
 				response.Error = &execution.Error
 			}
