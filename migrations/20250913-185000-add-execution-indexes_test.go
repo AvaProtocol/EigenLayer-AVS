@@ -49,7 +49,7 @@ func TestAddExecutionIndexes(t *testing.T) {
 			Id:      exec.executionID,
 			StartAt: exec.timestamp.UnixMilli(),
 			EndAt:   exec.timestamp.Add(time.Minute).UnixMilli(),
-			Success: true,
+			Status:  avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS,
 			Index:   0, // Old data doesn't have proper indexes
 			Steps: []*avsproto.Execution_Step{
 				{
@@ -79,8 +79,8 @@ func TestAddExecutionIndexes(t *testing.T) {
 			Id:      exec.executionID,
 			StartAt: exec.timestamp.UnixMilli(),
 			EndAt:   exec.timestamp.Add(time.Minute).UnixMilli(),
-			Success: false, // Mix of success/failure
-			Index:   0,     // Old data doesn't have proper indexes
+			Status:  avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED,
+			Index:   0, // Old data doesn't have proper indexes
 			Steps: []*avsproto.Execution_Step{
 				{
 					Id:      "step-1",
@@ -218,7 +218,7 @@ func TestAddExecutionIndexes_RealULIDs(t *testing.T) {
 			Id:      executionULID.String(),
 			StartAt: ulid.Time(executionULID.Time()).UnixMilli(),
 			EndAt:   ulid.Time(executionULID.Time()).Add(time.Minute).UnixMilli(),
-			Success: true,
+			Status:  avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS,
 			Index:   0, // All start with index 0
 			Steps: []*avsproto.Execution_Step{
 				{
