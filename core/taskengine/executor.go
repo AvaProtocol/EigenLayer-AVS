@@ -43,6 +43,18 @@ func reconstructTriggerOutputData(m map[string]interface{}, logger sdklogging.Lo
 			}
 		}
 	}
+
+	// Fallback: try to convert the entire map if "data" key doesn't exist or is nil
+	if pb, err := structpb.NewValue(m); err == nil {
+		return pb
+	} else {
+		if logger != nil {
+			logger.Debug("Failed to reconstruct trigger output data from entire map",
+				"error", err,
+				"map_type", fmt.Sprintf("%T", m))
+		}
+	}
+
 	return nil
 }
 

@@ -2,12 +2,46 @@ package operator
 
 import (
 	"context"
+	"regexp"
 	"time"
 
 	"google.golang.org/protobuf/types/known/structpb"
 
 	avspb "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
+
+// isValidTaskIDFormat validates that a string looks like a valid task ID
+// Task IDs are typically ULIDs or UUIDs with specific format constraints
+func isValidTaskIDFormat(id string) bool {
+	if id == "" {
+		return false
+	}
+
+	// Check for common task ID patterns:
+	// 1. ULID format (26 characters, base32)
+	// 2. UUID format (36 characters with hyphens)
+	// 3. Simple alphanumeric format (at least 8 characters)
+
+	// ULID pattern: 26 characters, base32 encoded
+	ulidPattern := regexp.MustCompile(`^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$`)
+	if ulidPattern.MatchString(id) {
+		return true
+	}
+
+	// UUID pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	uuidPattern := regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	if uuidPattern.MatchString(id) {
+		return true
+	}
+
+	// Alphanumeric pattern: at least 8 characters, alphanumeric with optional hyphens/underscores
+	alphanumericPattern := regexp.MustCompile(`^[a-zA-Z0-9_-]{8,}$`)
+	if alphanumericPattern.MatchString(id) {
+		return true
+	}
+
+	return false
+}
 
 func (o *Operator) processMessage(resp *avspb.SyncMessagesResp) {
 	switch resp.Op {
@@ -18,6 +52,17 @@ func (o *Operator) processMessage(resp *avspb.SyncMessagesResp) {
 			taskID = resp.TaskMetadata.TaskId
 		} else {
 			// Fallback to using the message ID as task ID
+			o.logger.Warn("TaskMetadata missing, falling back to message ID as task ID",
+				"message_id", resp.Id,
+				"operation", resp.Op)
+
+			// Validate that the message ID looks like a valid task ID
+			if !isValidTaskIDFormat(resp.Id) {
+				o.logger.Error("Message ID does not appear to be a valid task ID format",
+					"message_id", resp.Id,
+					"operation", resp.Op)
+				return
+			}
 			taskID = resp.Id
 		}
 
@@ -32,6 +77,17 @@ func (o *Operator) processMessage(resp *avspb.SyncMessagesResp) {
 			taskID = resp.TaskMetadata.TaskId
 		} else {
 			// Fallback to using the message ID as task ID
+			o.logger.Warn("TaskMetadata missing, falling back to message ID as task ID",
+				"message_id", resp.Id,
+				"operation", resp.Op)
+
+			// Validate that the message ID looks like a valid task ID
+			if !isValidTaskIDFormat(resp.Id) {
+				o.logger.Error("Message ID does not appear to be a valid task ID format",
+					"message_id", resp.Id,
+					"operation", resp.Op)
+				return
+			}
 			taskID = resp.Id
 		}
 
