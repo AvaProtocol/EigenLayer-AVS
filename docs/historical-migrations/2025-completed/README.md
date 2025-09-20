@@ -29,9 +29,22 @@ This migration handled cleanup of incompatible data structures after major proto
 - Cleaned cached trigger and node data
 - Removed workflows using deprecated source_id fields
 
+### 20250913-185000-add-execution-indexes
+**Status**: ✅ Completed and archived  
+**Purpose**: Add proper execution indexes to existing executions based on creation order  
+**Date Applied**: September 2025  
+**Production Status**: Successfully applied, added sequential indexes to all execution records
+
+This migration handled adding execution sequence tracking:
+- Scanned all execution records in database (history:* keys)
+- Grouped executions by Task ID
+- Sorted executions by ULID creation time (chronological order)
+- Assigned sequential indexes (0, 1, 2, ...) to each execution within a task
+- Updated execution records in-place with new Index field
+
 ## Migration Status
 
-Both migrations have been successfully applied in production and consistently report 0 records updated, indicating:
+All three migrations have been successfully applied in production and consistently report 0 records updated, indicating:
 - All target data structures have been properly migrated
 - No legacy data remains that requires transformation
 - The migrations can be safely archived
