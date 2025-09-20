@@ -21,7 +21,6 @@ import (
 	triggerengine "github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/trigger"
 	avspb "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/version"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -291,9 +290,9 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				"gasUsed":     uint64(0),
 			}
 
-			// Try to fetch full block data from RPC
-			if ethClient, err := ethclient.Dial(o.config.TargetChain.EthRpcUrl); err == nil {
-				if header, err := ethClient.HeaderByNumber(ctx, big.NewInt(triggerItem.Marker)); err == nil {
+			// Try to fetch full block data from RPC using shared targetEthClient
+			if o.targetEthClient != nil {
+				if header, err := o.targetEthClient.HeaderByNumber(ctx, big.NewInt(triggerItem.Marker)); err == nil {
 					// Populate with real blockchain data
 					blockData["blockHash"] = header.Hash().Hex()
 					blockData["timestamp"] = header.Time
@@ -313,13 +312,10 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 						"block_number", triggerItem.Marker,
 						"error", err)
 				}
-				ethClient.Close()
 			} else {
-				o.logger.Warn("⚠️ Failed to connect to RPC for block data, using minimal block data",
+				o.logger.Warn("⚠️ Target RPC client not available, using minimal block data",
 					"task_id", triggerItem.TaskID,
-					"block_number", triggerItem.Marker,
-					"rpc_url", o.config.TargetChain.EthRpcUrl,
-					"error", err)
+					"block_number", triggerItem.Marker)
 			}
 
 			if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, &avspb.NotifyTriggersReq{

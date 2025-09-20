@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/ethereum/go-ethereum/ethclient"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	avspb "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -60,21 +59,19 @@ func (o *Operator) processMessage(resp *avspb.SyncMessagesResp) {
 
 // executeImmediateBlockTrigger executes a block trigger immediately with current block data
 func (o *Operator) executeImmediateBlockTrigger(taskID string) {
-	ctx := context.Background()
+	// Create context with timeout to avoid hanging on slow RPC endpoints
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	// Get current block number from RPC
-	ethClient, err := ethclient.Dial(o.config.TargetChain.EthRpcUrl)
-	if err != nil {
-		o.logger.Error("Failed to connect to RPC for immediate block trigger",
-			"task_id", taskID,
-			"rpc_url", o.config.TargetChain.EthRpcUrl,
-			"error", err)
+	// Use shared targetEthClient instead of creating new connection
+	if o.targetEthClient == nil {
+		o.logger.Error("Target RPC client not available for immediate block trigger",
+			"task_id", taskID)
 		return
 	}
-	defer ethClient.Close()
 
-	// Get current block header
-	header, err := ethClient.HeaderByNumber(ctx, nil) // nil means latest block
+	// Get current block header with timeout context
+	header, err := o.targetEthClient.HeaderByNumber(ctx, nil) // nil means latest block
 	if err != nil {
 		o.logger.Error("Failed to get current block header for immediate trigger",
 			"task_id", taskID,
@@ -82,11 +79,11 @@ func (o *Operator) executeImmediateBlockTrigger(taskID string) {
 		return
 	}
 
-	blockNumber := header.Number.Int64()
+	blockNumber := header.Number.Uint64()
 
 	// Create block data similar to normal block trigger processing
 	blockData := map[string]interface{}{
-		"blockNumber": uint64(blockNumber),
+		"blockNumber": blockNumber,
 		"blockHash":   header.Hash().Hex(),
 		"timestamp":   header.Time,
 		"parentHash":  header.ParentHash.Hex(),
@@ -132,7 +129,9 @@ func (o *Operator) executeImmediateBlockTrigger(taskID string) {
 
 // executeImmediateTimeTrigger executes a time/cron trigger immediately
 func (o *Operator) executeImmediateTimeTrigger(taskID string) {
-	ctx := context.Background()
+	// Create context with timeout to avoid hanging on slow aggregator endpoints
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	// Get current timestamp in nanoseconds
 	currentTime := time.Now()
