@@ -46,8 +46,10 @@ func (o *Operator) processMessage(resp *avspb.SyncMessagesResp) {
 			// Check the trigger type from the task metadata using the oneof field
 			if resp.TaskMetadata.Trigger.GetBlock() != nil {
 				o.executeImmediateBlockTrigger(taskID)
-			} else if resp.TaskMetadata.Trigger.GetCron() != nil || resp.TaskMetadata.Trigger.GetFixedTime() != nil {
-				o.executeImmediateTimeTrigger(taskID)
+			} else if resp.TaskMetadata.Trigger.GetCron() != nil {
+				o.executeImmediateTimeTrigger(taskID, avspb.TriggerType_TRIGGER_TYPE_CRON)
+			} else if resp.TaskMetadata.Trigger.GetFixedTime() != nil {
+				o.executeImmediateTimeTrigger(taskID, avspb.TriggerType_TRIGGER_TYPE_FIXED_TIME)
 			} else {
 				o.logger.Warn("unsupported immediate trigger type for task", "task_id", taskID)
 			}
@@ -128,7 +130,7 @@ func (o *Operator) executeImmediateBlockTrigger(taskID string) {
 }
 
 // executeImmediateTimeTrigger executes a time/cron trigger immediately
-func (o *Operator) executeImmediateTimeTrigger(taskID string) {
+func (o *Operator) executeImmediateTimeTrigger(taskID string, triggerType avspb.TriggerType) {
 	// Create context with timeout to avoid hanging on slow aggregator endpoints
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -137,31 +139,53 @@ func (o *Operator) executeImmediateTimeTrigger(taskID string) {
 	currentTime := time.Now()
 	timestampNanos := uint64(currentTime.UnixNano())
 
-	cronData := map[string]interface{}{
+	timeData := map[string]interface{}{
 		"timestamp":    timestampNanos,
 		"timestampIso": currentTime.UTC().Format("2006-01-02T15:04:05.000Z"),
 	}
 
 	o.logger.Info("🚀 Executing immediate time trigger",
 		"task_id", taskID,
+		"trigger_type", triggerType.String(),
 		"timestamp", timestampNanos,
 		"timestamp_iso", currentTime.UTC().Format("2006-01-02T15:04:05.000Z"))
 
-	// Send trigger notification to aggregator
-	if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, &avspb.NotifyTriggersReq{
-		Address:     o.config.OperatorAddress,
-		Signature:   "pending",
-		TaskId:      taskID,
-		TriggerType: avspb.TriggerType_TRIGGER_TYPE_CRON,
-		TriggerOutput: &avspb.NotifyTriggersReq_CronTrigger{
-			CronTrigger: &avspb.CronTrigger_Output{
-				Data: func() *structpb.Value {
-					dataValue, _ := structpb.NewValue(cronData)
-					return dataValue
-				}(),
+	// Create the NotifyTriggersReq with appropriate trigger output based on the trigger type
+	var notifyReq *avspb.NotifyTriggersReq
+	if triggerType == avspb.TriggerType_TRIGGER_TYPE_CRON {
+		notifyReq = &avspb.NotifyTriggersReq{
+			Address:     o.config.OperatorAddress,
+			Signature:   "pending",
+			TaskId:      taskID,
+			TriggerType: triggerType,
+			TriggerOutput: &avspb.NotifyTriggersReq_CronTrigger{
+				CronTrigger: &avspb.CronTrigger_Output{
+					Data: func() *structpb.Value {
+						dataValue, _ := structpb.NewValue(timeData)
+						return dataValue
+					}(),
+				},
 			},
-		},
-	}); err == nil {
+		}
+	} else {
+		notifyReq = &avspb.NotifyTriggersReq{
+			Address:     o.config.OperatorAddress,
+			Signature:   "pending",
+			TaskId:      taskID,
+			TriggerType: triggerType,
+			TriggerOutput: &avspb.NotifyTriggersReq_FixedTimeTrigger{
+				FixedTimeTrigger: &avspb.FixedTimeTrigger_Output{
+					Data: func() *structpb.Value {
+						dataValue, _ := structpb.NewValue(timeData)
+						return dataValue
+					}(),
+				},
+			},
+		}
+	}
+
+	// Send trigger notification to aggregator
+	if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, notifyReq); err == nil {
 		o.logger.Info("✅ Successfully executed immediate time trigger",
 			"task_id", taskID,
 			"timestamp", timestampNanos,

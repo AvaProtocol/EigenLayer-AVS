@@ -26,7 +26,7 @@ import (
 // reconstructTriggerOutputData is a helper function to reconstruct trigger output data
 // from JSON-decoded maps back to protobuf Values. This reduces duplication across
 // different trigger types that all follow the same pattern.
-func reconstructTriggerOutputData(m map[string]interface{}) *structpb.Value {
+func reconstructTriggerOutputData(m map[string]interface{}, logger sdklogging.Logger) *structpb.Value {
 	if m == nil {
 		return nil
 	}
@@ -34,6 +34,13 @@ func reconstructTriggerOutputData(m map[string]interface{}) *structpb.Value {
 	if raw, exists := m["data"]; exists && raw != nil {
 		if pb, err := structpb.NewValue(raw); err == nil {
 			return pb
+		} else {
+			// Log the error to help with debugging malformed trigger output data
+			if logger != nil {
+				logger.Debug("Failed to reconstruct trigger output data from JSON-decoded map",
+					"error", err,
+					"raw_data_type", fmt.Sprintf("%T", raw))
+			}
 		}
 	}
 	return nil
@@ -365,7 +372,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 				triggerStep.OutputData = &avsproto.Execution_Step_ManualTrigger{ManualTrigger: output}
 			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
 				// Convert JSON-decoded map back to ManualTrigger_Output using helper
-				dataVal := reconstructTriggerOutputData(m)
+				dataVal := reconstructTriggerOutputData(m, x.logger)
 				triggerStep.OutputData = &avsproto.Execution_Step_ManualTrigger{ManualTrigger: &avsproto.ManualTrigger_Output{Data: dataVal}}
 			}
 		case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
@@ -373,7 +380,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 				triggerStep.OutputData = &avsproto.Execution_Step_FixedTimeTrigger{FixedTimeTrigger: output}
 			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
 				// Convert JSON-decoded map back to FixedTimeTrigger_Output using helper
-				dataVal := reconstructTriggerOutputData(m)
+				dataVal := reconstructTriggerOutputData(m, x.logger)
 				triggerStep.OutputData = &avsproto.Execution_Step_FixedTimeTrigger{FixedTimeTrigger: &avsproto.FixedTimeTrigger_Output{Data: dataVal}}
 			}
 		case avsproto.TriggerType_TRIGGER_TYPE_CRON:
@@ -381,7 +388,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 				triggerStep.OutputData = &avsproto.Execution_Step_CronTrigger{CronTrigger: output}
 			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
 				// Convert JSON-decoded map back to CronTrigger_Output using helper
-				dataVal := reconstructTriggerOutputData(m)
+				dataVal := reconstructTriggerOutputData(m, x.logger)
 				triggerStep.OutputData = &avsproto.Execution_Step_CronTrigger{CronTrigger: &avsproto.CronTrigger_Output{Data: dataVal}}
 			}
 		case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
@@ -389,7 +396,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 				triggerStep.OutputData = &avsproto.Execution_Step_BlockTrigger{BlockTrigger: output}
 			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
 				// Convert JSON-decoded map back to BlockTrigger_Output using helper
-				dataVal := reconstructTriggerOutputData(m)
+				dataVal := reconstructTriggerOutputData(m, x.logger)
 				triggerStep.OutputData = &avsproto.Execution_Step_BlockTrigger{BlockTrigger: &avsproto.BlockTrigger_Output{Data: dataVal}}
 			}
 		case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
@@ -397,7 +404,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 				triggerStep.OutputData = &avsproto.Execution_Step_EventTrigger{EventTrigger: output}
 			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
 				// Convert JSON-decoded map back to EventTrigger_Output using helper
-				dataVal := reconstructTriggerOutputData(m)
+				dataVal := reconstructTriggerOutputData(m, x.logger)
 				triggerStep.OutputData = &avsproto.Execution_Step_EventTrigger{EventTrigger: &avsproto.EventTrigger_Output{Data: dataVal}}
 			}
 		}
