@@ -1846,7 +1846,7 @@ func (n *Engine) instructOperatorImmediateTrigger(taskID string) error {
 	// Create immediate trigger notification for all connected operators
 	notification := PendingNotification{
 		TaskID:    taskID,
-		Operation: avsproto.MessageOp_ImmediateTrigger, // We need to add this new operation type
+		Operation: avsproto.MessageOp_ImmediateTrigger,
 		Timestamp: time.Now(),
 	}
 
