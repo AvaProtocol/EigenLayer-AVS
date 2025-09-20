@@ -358,20 +358,56 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 				triggerStep.OutputData = &avsproto.Execution_Step_ManualTrigger{ManualTrigger: &avsproto.ManualTrigger_Output{Data: dataVal}}
 			}
 		case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
-			if output, ok := queueData.TriggerOutput.(*avsproto.FixedTimeTrigger_Output); ok {
+			if output, ok := queueData.TriggerOutput.(*avsproto.FixedTimeTrigger_Output); ok && output != nil {
 				triggerStep.OutputData = &avsproto.Execution_Step_FixedTimeTrigger{FixedTimeTrigger: output}
+			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
+				// Convert JSON-decoded map back to FixedTimeTrigger_Output
+				var dataVal *structpb.Value
+				if raw, exists := m["data"]; exists && raw != nil {
+					if pb, err := structpb.NewValue(raw); err == nil {
+						dataVal = pb
+					}
+				}
+				triggerStep.OutputData = &avsproto.Execution_Step_FixedTimeTrigger{FixedTimeTrigger: &avsproto.FixedTimeTrigger_Output{Data: dataVal}}
 			}
 		case avsproto.TriggerType_TRIGGER_TYPE_CRON:
-			if output, ok := queueData.TriggerOutput.(*avsproto.CronTrigger_Output); ok {
+			if output, ok := queueData.TriggerOutput.(*avsproto.CronTrigger_Output); ok && output != nil {
 				triggerStep.OutputData = &avsproto.Execution_Step_CronTrigger{CronTrigger: output}
+			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
+				// Convert JSON-decoded map back to CronTrigger_Output
+				var dataVal *structpb.Value
+				if raw, exists := m["data"]; exists && raw != nil {
+					if pb, err := structpb.NewValue(raw); err == nil {
+						dataVal = pb
+					}
+				}
+				triggerStep.OutputData = &avsproto.Execution_Step_CronTrigger{CronTrigger: &avsproto.CronTrigger_Output{Data: dataVal}}
 			}
 		case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
-			if output, ok := queueData.TriggerOutput.(*avsproto.BlockTrigger_Output); ok {
+			if output, ok := queueData.TriggerOutput.(*avsproto.BlockTrigger_Output); ok && output != nil {
 				triggerStep.OutputData = &avsproto.Execution_Step_BlockTrigger{BlockTrigger: output}
+			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
+				// Convert JSON-decoded map back to BlockTrigger_Output
+				var dataVal *structpb.Value
+				if raw, exists := m["data"]; exists && raw != nil {
+					if pb, err := structpb.NewValue(raw); err == nil {
+						dataVal = pb
+					}
+				}
+				triggerStep.OutputData = &avsproto.Execution_Step_BlockTrigger{BlockTrigger: &avsproto.BlockTrigger_Output{Data: dataVal}}
 			}
 		case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
-			if output, ok := queueData.TriggerOutput.(*avsproto.EventTrigger_Output); ok {
+			if output, ok := queueData.TriggerOutput.(*avsproto.EventTrigger_Output); ok && output != nil {
 				triggerStep.OutputData = &avsproto.Execution_Step_EventTrigger{EventTrigger: output}
+			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
+				// Convert JSON-decoded map back to EventTrigger_Output
+				var dataVal *structpb.Value
+				if raw, exists := m["data"]; exists && raw != nil {
+					if pb, err := structpb.NewValue(raw); err == nil {
+						dataVal = pb
+					}
+				}
+				triggerStep.OutputData = &avsproto.Execution_Step_EventTrigger{EventTrigger: &avsproto.EventTrigger_Output{Data: dataVal}}
 			}
 		}
 
