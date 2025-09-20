@@ -126,6 +126,8 @@ type Operator struct {
 	ethClient   *eth.InstrumentedClient
 	ethWsClient *eth.InstrumentedClient
 	txManager   *txmgr.SimpleTxManager
+	// Target chain ethclient for trigger operations (may be different from main ethClient)
+	targetEthClient *eth.InstrumentedClient
 
 	metricsReg       *prometheus.Registry
 	metrics          metrics.MetricsGenerator
@@ -330,6 +332,20 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 		}
 	}
 
+	// Initialize target chain RPC client for trigger operations
+	var targetEthClient *eth.InstrumentedClient
+	targetRpcUrl := c.TargetChain.EthRpcUrl
+	if targetRpcUrl == "" {
+		// Use main chain RPC if target chain is not specified
+		targetRpcUrl = c.EthRpcUrl
+	}
+	targetEthClient, err = eth.NewInstrumentedClient(targetRpcUrl, rpcCallsCollector)
+	if err != nil {
+		logger.Errorf("Cannot connect to target chain RPC endpoint", "url", targetRpcUrl, "err", err)
+		return nil, fmt.Errorf("failed to connect to target chain RPC endpoint %s: %w", targetRpcUrl, err)
+	}
+	logger.Infof("🎯 Connected to target chain for triggers: %s", targetRpcUrl)
+
 	var blsRemoteSigner blssignerV1.SignerClient
 	var blsKeyPair *bls.KeyPair
 	if c.BlsRemoteSigner.GrpcUrl != "" {
@@ -458,15 +474,16 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	reg.MustRegister(economicMetricsCollector)
 
 	operator := &Operator{
-		config:      &c,
-		logger:      logger,
-		metricsReg:  reg,
-		metrics:     avsAndEigenMetrics,
-		nodeApi:     nodeApi,
-		ethClient:   ethRpcClient,
-		ethWsClient: ethWsClient,
-		avsWriter:   avsWriter,
-		avsReader:   avsReader,
+		config:          &c,
+		logger:          logger,
+		metricsReg:      reg,
+		metrics:         avsAndEigenMetrics,
+		nodeApi:         nodeApi,
+		ethClient:       ethRpcClient,
+		ethWsClient:     ethWsClient,
+		targetEthClient: targetEthClient,
+		avsWriter:       avsWriter,
+		avsReader:       avsReader,
 
 		// avsSubscriber:                      avsSubscriber,
 		eigenlayerReader: sdkClients.ElChainReader,

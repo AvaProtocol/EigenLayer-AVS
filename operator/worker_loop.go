@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"runtime/debug"
 	"sort"
@@ -278,6 +279,45 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 			}
 			blockTasksMutex.Unlock()
 
+			// Fetch real block data from RPC to match runBlockTriggerImmediately behavior
+			blockData := map[string]interface{}{
+				"blockNumber": uint64(triggerItem.Marker),
+				"blockHash":   "",
+				"timestamp":   uint64(0),
+				"parentHash":  "",
+				"difficulty":  "",
+				"gasLimit":    uint64(0),
+				"gasUsed":     uint64(0),
+			}
+
+			// Try to fetch full block data from RPC using shared targetEthClient
+			if o.targetEthClient != nil {
+				if header, err := o.targetEthClient.HeaderByNumber(ctx, big.NewInt(triggerItem.Marker)); err == nil {
+					// Populate with real blockchain data
+					blockData["blockHash"] = header.Hash().Hex()
+					blockData["timestamp"] = header.Time
+					blockData["parentHash"] = header.ParentHash.Hex()
+					blockData["difficulty"] = header.Difficulty.String()
+					blockData["gasLimit"] = header.GasLimit
+					blockData["gasUsed"] = header.GasUsed
+
+					o.logger.Debug("✅ Fetched real block data for trigger",
+						"task_id", triggerItem.TaskID,
+						"block_number", triggerItem.Marker,
+						"block_hash", header.Hash().Hex(),
+						"timestamp", header.Time)
+				} else {
+					o.logger.Warn("⚠️ Failed to fetch block header, using minimal block data",
+						"task_id", triggerItem.TaskID,
+						"block_number", triggerItem.Marker,
+						"error", err)
+				}
+			} else {
+				o.logger.Warn("⚠️ Target RPC client not available, using minimal block data",
+					"task_id", triggerItem.TaskID,
+					"block_number", triggerItem.Marker)
+			}
+
 			if resp, err := o.nodeRpcClient.NotifyTriggers(ctx, &avspb.NotifyTriggersReq{
 				Address:     o.config.OperatorAddress,
 				Signature:   "pending",
@@ -286,15 +326,6 @@ func (o *Operator) runWorkLoop(ctx context.Context) error {
 				TriggerOutput: &avspb.NotifyTriggersReq_BlockTrigger{
 					BlockTrigger: &avspb.BlockTrigger_Output{
 						Data: func() *structpb.Value {
-							blockData := map[string]interface{}{
-								"blockNumber": uint64(triggerItem.Marker),
-								"blockHash":   "",
-								"timestamp":   0,
-								"parentHash":  "",
-								"difficulty":  "",
-								"gasLimit":    0,
-								"gasUsed":     0,
-							}
 							dataValue, _ := structpb.NewValue(blockData)
 							return dataValue
 						}(),
