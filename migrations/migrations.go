@@ -22,6 +22,7 @@ var Migrations = []migrator.Migration{
 	// ========================================
 	// - 20250603-183034-token-metadata-fields (moved to docs/historical-migrations/2025-completed/)
 	// - 20250128-120000-protobuf-structure-cleanup (moved to docs/historical-migrations/2025-completed/)
+	// - 20250913-185000-add-execution-indexes (moved to docs/historical-migrations/2025-completed/)
 	//
 	// These migrations have been successfully applied in production and consistently
 	// report 0 records updated. They have been archived to reduce startup overhead.
@@ -31,9 +32,4 @@ var Migrations = []migrator.Migration{
 	// ACTIVE MIGRATIONS
 	// ========================================
 	// Add new migrations here that need to be applied
-	{
-		// Add proper execution indexes to existing executions based on creation order
-		Name:     "20250913-185000-add-execution-indexes",
-		Function: AddExecutionIndexes,
-	},
 }
