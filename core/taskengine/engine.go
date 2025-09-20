@@ -1898,21 +1898,20 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 				n.logger.Error("Failed to instruct operator for immediate trigger", "error", err, "task_id", task.Id)
 			}
 			// Fall back to original logic if operator instruction fails
-		} else {
-			// Return success response - the operator will handle the actual trigger with real blockchain data
+		} else if !payload.IsBlocking {
+			// For non-blocking mode, return success response - the operator will handle the actual trigger with real blockchain data
 			response := &avsproto.TriggerTaskResp{
 				ExecutionId: ulid.Make().String(), // Generate execution ID for tracking
 				WorkflowId:  payload.TaskId,
 			}
 
-			if !payload.IsBlocking {
-				// For non-blocking mode, set startAt to indicate trigger was initiated
-				startTime := time.Now().UnixMilli()
-				response.StartAt = &startTime
-			}
+			// For non-blocking mode, set startAt to indicate trigger was initiated
+			startTime := time.Now().UnixMilli()
+			response.StartAt = &startTime
 
 			return response, nil
 		}
+		// For blocking mode, continue with normal execution flow even for block triggers
 	}
 
 	// For non-block triggers, use the original logic
