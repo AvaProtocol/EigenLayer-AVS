@@ -23,6 +23,41 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
+// reconstructTriggerOutputData is a helper function to reconstruct trigger output data
+// from JSON-decoded maps back to protobuf Values. This reduces duplication across
+// different trigger types that all follow the same pattern.
+func reconstructTriggerOutputData(m map[string]interface{}, logger sdklogging.Logger) *structpb.Value {
+	if m == nil {
+		return nil
+	}
+
+	if raw, exists := m["data"]; exists && raw != nil {
+		if pb, err := structpb.NewValue(raw); err == nil {
+			return pb
+		} else {
+			// Log the error to help with debugging malformed trigger output data
+			if logger != nil {
+				logger.Debug("Failed to reconstruct trigger output data from JSON-decoded map",
+					"error", err,
+					"raw_data_type", fmt.Sprintf("%T", raw))
+			}
+		}
+	}
+
+	// Fallback: try to convert the entire map if "data" key doesn't exist or is nil
+	if pb, err := structpb.NewValue(m); err == nil {
+		return pb
+	} else {
+		if logger != nil {
+			logger.Debug("Failed to reconstruct trigger output data from entire map",
+				"error", err,
+				"map_type", fmt.Sprintf("%T", m))
+		}
+	}
+
+	return nil
+}
+
 func NewExecutor(config *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger) *TaskExecutor {
 	return &TaskExecutor{
 		db:                     db,
@@ -348,30 +383,41 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 			if output, ok := queueData.TriggerOutput.(*avsproto.ManualTrigger_Output); ok && output != nil {
 				triggerStep.OutputData = &avsproto.Execution_Step_ManualTrigger{ManualTrigger: output}
 			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
-				// Convert JSON-decoded map back to ManualTrigger_Output
-				var dataVal *structpb.Value
-				if raw, exists := m["data"]; exists && raw != nil {
-					if pb, err := structpb.NewValue(raw); err == nil {
-						dataVal = pb
-					}
-				}
+				// Convert JSON-decoded map back to ManualTrigger_Output using helper
+				dataVal := reconstructTriggerOutputData(m, x.logger)
 				triggerStep.OutputData = &avsproto.Execution_Step_ManualTrigger{ManualTrigger: &avsproto.ManualTrigger_Output{Data: dataVal}}
 			}
 		case avsproto.TriggerType_TRIGGER_TYPE_FIXED_TIME:
-			if output, ok := queueData.TriggerOutput.(*avsproto.FixedTimeTrigger_Output); ok {
+			if output, ok := queueData.TriggerOutput.(*avsproto.FixedTimeTrigger_Output); ok && output != nil {
 				triggerStep.OutputData = &avsproto.Execution_Step_FixedTimeTrigger{FixedTimeTrigger: output}
+			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
+				// Convert JSON-decoded map back to FixedTimeTrigger_Output using helper
+				dataVal := reconstructTriggerOutputData(m, x.logger)
+				triggerStep.OutputData = &avsproto.Execution_Step_FixedTimeTrigger{FixedTimeTrigger: &avsproto.FixedTimeTrigger_Output{Data: dataVal}}
 			}
 		case avsproto.TriggerType_TRIGGER_TYPE_CRON:
-			if output, ok := queueData.TriggerOutput.(*avsproto.CronTrigger_Output); ok {
+			if output, ok := queueData.TriggerOutput.(*avsproto.CronTrigger_Output); ok && output != nil {
 				triggerStep.OutputData = &avsproto.Execution_Step_CronTrigger{CronTrigger: output}
+			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
+				// Convert JSON-decoded map back to CronTrigger_Output using helper
+				dataVal := reconstructTriggerOutputData(m, x.logger)
+				triggerStep.OutputData = &avsproto.Execution_Step_CronTrigger{CronTrigger: &avsproto.CronTrigger_Output{Data: dataVal}}
 			}
 		case avsproto.TriggerType_TRIGGER_TYPE_BLOCK:
-			if output, ok := queueData.TriggerOutput.(*avsproto.BlockTrigger_Output); ok {
+			if output, ok := queueData.TriggerOutput.(*avsproto.BlockTrigger_Output); ok && output != nil {
 				triggerStep.OutputData = &avsproto.Execution_Step_BlockTrigger{BlockTrigger: output}
+			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
+				// Convert JSON-decoded map back to BlockTrigger_Output using helper
+				dataVal := reconstructTriggerOutputData(m, x.logger)
+				triggerStep.OutputData = &avsproto.Execution_Step_BlockTrigger{BlockTrigger: &avsproto.BlockTrigger_Output{Data: dataVal}}
 			}
 		case avsproto.TriggerType_TRIGGER_TYPE_EVENT:
-			if output, ok := queueData.TriggerOutput.(*avsproto.EventTrigger_Output); ok {
+			if output, ok := queueData.TriggerOutput.(*avsproto.EventTrigger_Output); ok && output != nil {
 				triggerStep.OutputData = &avsproto.Execution_Step_EventTrigger{EventTrigger: output}
+			} else if m, ok := queueData.TriggerOutput.(map[string]interface{}); ok && m != nil {
+				// Convert JSON-decoded map back to EventTrigger_Output using helper
+				dataVal := reconstructTriggerOutputData(m, x.logger)
+				triggerStep.OutputData = &avsproto.Execution_Step_EventTrigger{EventTrigger: &avsproto.EventTrigger_Output{Data: dataVal}}
 			}
 		}
 

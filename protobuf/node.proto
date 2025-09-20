@@ -53,6 +53,7 @@ enum MessageOp {
   CancelTask         = 2;
   DeleteTask         = 3;
   CompletedTask      = 4;
+  ImmediateTrigger   = 5;
 }
 
 message SyncMessagesResp {

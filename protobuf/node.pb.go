@@ -31,6 +31,7 @@ const (
 	MessageOp_CancelTask         MessageOp = 2
 	MessageOp_DeleteTask         MessageOp = 3
 	MessageOp_CompletedTask      MessageOp = 4
+	MessageOp_ImmediateTrigger   MessageOp = 5
 )
 
 // Enum value maps for MessageOp.
@@ -41,6 +42,7 @@ var (
 		2: "CancelTask",
 		3: "DeleteTask",
 		4: "CompletedTask",
+		5: "ImmediateTrigger",
 	}
 	MessageOp_value = map[string]int32{
 		"Unset":              0,
@@ -48,6 +50,7 @@ var (
 		"CancelTask":         2,
 		"DeleteTask":         3,
 		"CompletedTask":      4,
+		"ImmediateTrigger":   5,
 	}
 )
 
@@ -1207,7 +1210,7 @@ const file_node_proto_rawDesc = "" +
 	"\x13HealthCheckResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1c\n" +
-	"\ttimestamp\x18\x03 \x01(\x04R\ttimestamp*a\n" +
+	"\ttimestamp\x18\x03 \x01(\x04R\ttimestamp*w\n" +
 	"\tMessageOp\x12\t\n" +
 	"\x05Unset\x10\x00\x12\x16\n" +
 	"\x12MonitorTaskTrigger\x10\x01\x12\x0e\n" +
@@ -1215,7 +1218,8 @@ const file_node_proto_rawDesc = "" +
 	"CancelTask\x10\x02\x12\x0e\n" +
 	"\n" +
 	"DeleteTask\x10\x03\x12\x11\n" +
-	"\rCompletedTask\x10\x042\xcc\x03\n" +
+	"\rCompletedTask\x10\x04\x12\x14\n" +
+	"\x10ImmediateTrigger\x10\x052\xcc\x03\n" +
 	"\x04Node\x12P\n" +
 	"\vHealthCheck\x12\x1e.aggregator.HealthCheckRequest\x1a\x1f.aggregator.HealthCheckResponse\"\x00\x126\n" +
 	"\x04Ping\x12\x13.aggregator.Checkin\x1a\x17.aggregator.CheckinResp\"\x00\x12M\n" +

@@ -1819,6 +1819,51 @@ func (n *Engine) GetTask(user *model.User, taskID string) (*model.Task, error) {
 	return task, nil
 }
 
+// instructOperatorImmediateTrigger instructs the connected operator to trigger the task immediately
+// with the current block number, bypassing the normal interval waiting
+func (n *Engine) instructOperatorImmediateTrigger(taskID string) error {
+	// Get the current block number to pass to the operator
+	if rpcConn == nil {
+		return fmt.Errorf("RPC connection not available for immediate block trigger")
+	}
+
+	currentBlock, err := rpcConn.BlockNumber(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to get current block number: %w", err)
+	}
+
+	if n.logger != nil {
+		n.logger.Info("Instructing operator to trigger immediately",
+			"task_id", taskID,
+			"current_block", currentBlock)
+	}
+
+	// Add immediate trigger instruction to pending notifications
+	// This will be sent to operators in the next batch
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	// Create immediate trigger notification for all connected operators
+	notification := PendingNotification{
+		TaskID:    taskID,
+		Operation: avsproto.MessageOp_ImmediateTrigger,
+		Timestamp: time.Now(),
+	}
+
+	// Add to pending notifications for all operators
+	for operatorAddr := range n.trackSyncedTasks {
+		n.pendingNotifications[operatorAddr] = append(n.pendingNotifications[operatorAddr], notification)
+		if n.logger != nil {
+			n.logger.Debug("Added immediate trigger notification for operator",
+				"operator", operatorAddr,
+				"task_id", taskID,
+				"current_block", currentBlock)
+		}
+	}
+
+	return nil
+}
+
 func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq) (*avsproto.TriggerTaskResp, error) {
 	// Validate task ID format first
 	if !ValidateTaskId(payload.TaskId) {
@@ -1840,7 +1885,36 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 		return nil, status.Errorf(codes.FailedPrecondition, TaskIsNotRunnable)
 	}
 
-	// Create trigger data
+	// For manual block triggers, instruct the operator to trigger immediately with current block
+	if payload.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_BLOCK {
+		if n.logger != nil {
+			n.logger.Info("Manual block trigger detected - instructing operator to trigger immediately", "task_id", task.Id)
+		}
+
+		// Send immediate trigger instruction to operator
+		err := n.instructOperatorImmediateTrigger(task.Id)
+		if err != nil {
+			if n.logger != nil {
+				n.logger.Error("Failed to instruct operator for immediate trigger", "error", err, "task_id", task.Id)
+			}
+			// Fall back to original logic if operator instruction fails
+		} else if !payload.IsBlocking {
+			// For non-blocking mode, return success response - the operator will handle the actual trigger with real blockchain data
+			response := &avsproto.TriggerTaskResp{
+				ExecutionId: ulid.Make().String(), // Generate execution ID for tracking
+				WorkflowId:  payload.TaskId,
+			}
+
+			// For non-blocking mode, set startAt to indicate trigger was initiated
+			startTime := time.Now().UnixMilli()
+			response.StartAt = &startTime
+
+			return response, nil
+		}
+		// For blocking mode, continue with normal execution flow even for block triggers
+	}
+
+	// For non-block triggers, use the original logic
 	triggerData := &TriggerData{
 		Type:   payload.TriggerType,
 		Output: ExtractTriggerOutput(payload.TriggerOutput),
