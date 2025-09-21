@@ -294,7 +294,7 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 				Config: &avsproto.ContractReadNode_Config{},
 			},
 			expectError: true,
-			errorText:   "missing required configuration: contractAddress and contractAbi are required",
+			errorText:   "contractAddress is required",
 		},
 		{
 			name: "Method Name Mismatch",
