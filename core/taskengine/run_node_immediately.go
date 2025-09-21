@@ -3575,7 +3575,8 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 
 	// Fallback to generic RPC wrapper context if no specific context found
 	if ctxMap == nil {
-		ctxMap = GetExecutionContext(n.smartWalletConfig.ChainID, true)
+		// Trigger operations themselves are not simulated, so isSimulated should be false
+		ctxMap = GetExecutionContext(n.smartWalletConfig.ChainID, false)
 	}
 
 	if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
