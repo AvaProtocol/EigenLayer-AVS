@@ -1143,6 +1143,7 @@ message RunNodeWithInputsResp {
   google.protobuf.Value metadata = 5; // Optional structured metadata for testing/debugging
   // Optional execution context for runtime flags and extra info (e.g., is_simulated)
   google.protobuf.Value execution_context = 6;
+  ErrorCode error_code = 7; // Structured error code for better client-side error handling
   
   // Use specific output types for nodes only
   oneof output_data {
@@ -1174,6 +1175,7 @@ message RunTriggerResp {
   google.protobuf.Value metadata = 4; // Optional structured metadata for testing/debugging
   // Optional execution context for runtime flags and extra info (e.g., is_simulated)
   google.protobuf.Value execution_context = 5;
+  ErrorCode error_code = 6; // Structured error code for better client-side error handling
   
   // Use specific output types for triggers
   oneof output_data {

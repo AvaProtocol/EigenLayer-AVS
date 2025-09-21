@@ -2776,7 +2776,11 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		}
 
 		// Build structured failure metadata for method-level nodes (contract read/write)
-		resp := &avsproto.RunNodeWithInputsResp{Success: false, Error: err.Error()}
+		resp := &avsproto.RunNodeWithInputsResp{
+			Success:   false,
+			Error:     err.Error(),
+			ErrorCode: GetErrorCodeForProtobuf(err),
+		}
 
 		switch nodeTypeStr {
 		case NodeTypeContractWrite:
@@ -3399,8 +3403,9 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		// Create response with failure status but still set appropriate output data structure
 		// to avoid OUTPUT_DATA_NOT_SET errors on client side
 		resp := &avsproto.RunTriggerResp{
-			Success: false,
-			Error:   err.Error(),
+			Success:   false,
+			Error:     err.Error(),
+			ErrorCode: GetErrorCodeForProtobuf(err),
 		}
 
 		// Set empty output data structure based on trigger type to avoid OUTPUT_DATA_NOT_SET
@@ -3614,6 +3619,15 @@ func isExpectedValidationError(err error) bool {
 		"branch node requires conditionsList configuration", // Branch node configuration errors
 		"failed to create node:",                            // Node creation errors
 		"ManualTrigger data is required",                    // ManualTrigger data validation errors
+		"methodCalls[].methodName is required",              // Contract read method name validation
+		"contractAddress is required",                       // Contract address validation
+		"contractAbi is required",                           // Contract ABI validation
+		"methodCalls is required",                           // Method calls validation
+		"inputNodeName is required",                         // Loop node input validation
+		"iterVal is required",                               // Loop node iteration variable validation
+		"url is required",                                   // REST API/GraphQL URL validation
+		"query is required",                                 // GraphQL query validation
+		"source is required",                                // CustomCode source validation
 	}
 
 	for _, pattern := range validationErrorPatterns {

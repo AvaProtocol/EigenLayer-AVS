@@ -55,7 +55,7 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	queryStr := node.Config.Query
 
 	if endpoint == "" || queryStr == "" {
-		err = fmt.Errorf("missing required configuration: url and query")
+		err = NewMissingRequiredFieldError("url and query")
 		return step, nil, err
 	}
 
