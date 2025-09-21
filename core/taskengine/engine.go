@@ -2183,7 +2183,13 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 			}
 
 			if (chosenSender == common.Address{}) {
-				return nil, fmt.Errorf("runner does not match any existing smart wallet for owner %s", owner.Hex())
+				return nil, NewStructuredError(
+					avsproto.ErrorCode_SMART_WALLET_NOT_FOUND,
+					fmt.Sprintf("runner does not match any existing smart wallet for owner %s", owner.Hex()),
+					map[string]interface{}{
+						"owner": owner.Hex(),
+					},
+				)
 			}
 
 			// Set aa_sender for simulation writes to always use the runner (smart wallet)

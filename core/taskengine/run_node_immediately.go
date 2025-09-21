@@ -203,12 +203,12 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		if n.logger != nil {
 			n.logger.Info("🚀 runEventTriggerImmediately: No queries found, falling back to legacy mode")
 		}
-		return nil, fmt.Errorf("queries is required for EventTrigger")
+		return nil, NewMissingRequiredFieldError("queries")
 	}
 
 	queriesArray, ok := queriesInterface.([]interface{})
 	if !ok || len(queriesArray) == 0 {
-		return nil, fmt.Errorf("queries must be a non-empty array")
+		return nil, NewInvalidNodeConfigError("queries must be a non-empty array")
 	}
 
 	// Check if simulation mode is enabled (default: true, provides sample data for development)
@@ -327,17 +327,17 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 	// Extract contract address
 	addressesInterface, exists := queryMap["addresses"]
 	if !exists {
-		return nil, fmt.Errorf("addresses required for simulated events")
+		return nil, NewMissingRequiredFieldError("addresses")
 	}
 
 	addressesArray, ok := addressesInterface.([]interface{})
 	if !ok || len(addressesArray) == 0 {
-		return nil, fmt.Errorf("invalid addresses format")
+		return nil, NewInvalidNodeConfigError("invalid addresses format")
 	}
 
 	contractAddressStr, ok := addressesArray[0].(string)
 	if !ok {
-		return nil, fmt.Errorf("invalid contract address format")
+		return nil, NewInvalidAddressError("invalid contract address format")
 	}
 
 	// Get chain ID for response context
@@ -994,28 +994,28 @@ func (n *Engine) executeMethodCallForSimulation(ctx context.Context, methodCall 
 	// Extract contract address and ABI from queryMap
 	contractAddressInterface, exists := queryMap["addresses"]
 	if !exists {
-		return nil, fmt.Errorf("addresses field required")
+		return nil, NewMissingRequiredFieldError("addresses")
 	}
 
 	addressesArray, ok := contractAddressInterface.([]interface{})
 	if !ok || len(addressesArray) == 0 {
-		return nil, fmt.Errorf("addresses must be a non-empty array")
+		return nil, NewInvalidNodeConfigError("addresses must be a non-empty array")
 	}
 
 	contractAddressStr, ok := addressesArray[0].(string)
 	if !ok {
-		return nil, fmt.Errorf("contract address must be a string")
+		return nil, NewInvalidAddressError("contract address must be a string")
 	}
 
 	// Extract ABI
 	contractAbiInterface, exists := queryMap["contractAbi"]
 	if !exists {
-		return nil, fmt.Errorf("contractAbi field required")
+		return nil, NewMissingRequiredFieldError("contractAbi")
 	}
 
 	abiArray, ok := contractAbiInterface.([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("invalid contractAbi format")
+		return nil, NewInvalidNodeConfigError("invalid contractAbi format")
 	}
 
 	// Convert ABI items directly to protobuf Values (same as direct calls path)
@@ -1040,7 +1040,7 @@ func (n *Engine) executeMethodCallForSimulation(ctx context.Context, methodCall 
 			}
 			abiValues[i] = val
 		} else {
-			return nil, fmt.Errorf("invalid ABI item format at index %d (expected string or map, got %T)", i, abiItem)
+			return nil, NewInvalidNodeConfigError(fmt.Sprintf("invalid ABI item format at index %d (expected string or map, got %T)", i, abiItem))
 		}
 	}
 
@@ -1109,12 +1109,12 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 
 	// Process the first query for simulation (Tenderly simulates one event at a time)
 	if len(queriesArray) == 0 {
-		return nil, fmt.Errorf("no queries provided for simulation")
+		return nil, NewMissingRequiredFieldError("queries")
 	}
 
 	queryMap, ok := queriesArray[0].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("invalid query format")
+		return nil, NewInvalidNodeConfigError("invalid query format")
 	}
 
 	// Convert query map to protobuf format for simulation
@@ -2435,7 +2435,14 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 					}
 				}
 				if (chosenSender == common.Address{}) {
-					return nil, fmt.Errorf("runner %s does not match any existing smart wallet for owner %s", runnerStr, vm.TaskOwner.Hex())
+					return nil, NewStructuredError(
+						avsproto.ErrorCode_SMART_WALLET_NOT_FOUND,
+						fmt.Sprintf("runner %s does not match any existing smart wallet for owner %s", runnerStr, vm.TaskOwner.Hex()),
+						map[string]interface{}{
+							"runner": runnerStr,
+							"owner":  vm.TaskOwner.Hex(),
+						},
+					)
 				}
 
 				vm.AddVar("aa_sender", chosenSender.Hex())
@@ -2784,25 +2791,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 		switch nodeTypeStr {
 		case NodeTypeContractWrite:
-			// One failed method entry inferred from config
-			failedMethod := map[string]interface{}{
-				"methodName": "",
-				"success":    false,
-				"error":      err.Error(),
-				"value":      nil,
-			}
-			if name, ok := nodeConfig["methodName"].(string); ok {
-				failedMethod["methodName"] = name
-			}
-			if calls, ok := nodeConfig["methodCalls"].([]interface{}); ok && len(calls) > 0 {
-				if first, ok := calls[0].(map[string]interface{}); ok {
-					if mn, ok := first["methodName"].(string); ok {
-						failedMethod["methodName"] = mn
-					}
-				}
-			}
-			metaVal, _ := structpb.NewValue([]interface{}{failedMethod})
-			resp.Metadata = metaVal
+			// No metadata for failed operations - metadata is only for successful contract call raw data
 			// Build empty data object with method keys for shape consistency
 			dataMap := map[string]interface{}{}
 			if calls, ok := nodeConfig["methodCalls"].([]interface{}); ok {
@@ -2817,22 +2806,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			dataVal, _ := structpb.NewValue(dataMap)
 			resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractWrite{ContractWrite: &avsproto.ContractWriteNode_Output{Data: dataVal}}
 		case NodeTypeContractRead:
-			// Similar structure for read
-			failedMethod := map[string]interface{}{
-				"methodName": "",
-				"success":    false,
-				"error":      err.Error(),
-				"data":       []interface{}{},
-			}
-			if calls, ok := nodeConfig["methodCalls"].([]interface{}); ok && len(calls) > 0 {
-				if first, ok := calls[0].(map[string]interface{}); ok {
-					if mn, ok := first["methodName"].(string); ok {
-						failedMethod["methodName"] = mn
-					}
-				}
-			}
-			metaVal, _ := structpb.NewValue([]interface{}{failedMethod})
-			resp.Metadata = metaVal
+			// No metadata for failed operations - metadata is only for successful contract call raw data
 			// Build empty data object with method keys for shape consistency
 			dataMap := map[string]interface{}{}
 			if calls, ok := nodeConfig["methodCalls"].([]interface{}); ok {
@@ -3628,6 +3602,13 @@ func isExpectedValidationError(err error) bool {
 		"url is required",                                   // REST API/GraphQL URL validation
 		"query is required",                                 // GraphQL query validation
 		"source is required",                                // CustomCode source validation
+		"does not match any existing smart wallet",          // Smart wallet validation
+		"queries is required",                               // EventTrigger queries validation
+		"addresses is required",                             // EventTrigger addresses validation
+		"contractAbi is required",                           // EventTrigger contractAbi validation
+		"invalid query format",                              // EventTrigger query format validation
+		"invalid addresses format",                          // EventTrigger addresses format validation
+		"invalid contractAbi format",                        // EventTrigger ABI format validation
 	}
 
 	for _, pattern := range validationErrorPatterns {
