@@ -188,6 +188,16 @@ func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.C
 	}
 	methodName := r.vm.preprocessTextWithVariableMapping(methodCall.GetMethodName())
 
+	// Validate methodName is provided when callData is not specified
+	if preprocessedCallData == "" && methodName == "" {
+		return &avsproto.ContractReadNode_MethodResult{
+			Success:    false,
+			Error:      "method name is required - please specify a method name (e.g., 'balanceOf', 'symbol', 'decimals') to call on the smart contract",
+			MethodName: methodName,
+			Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+		}
+	}
+
 	// Generate callData from methodName and methodParams if callData is empty
 	var finalCallData string
 	if preprocessedCallData == "" && methodName != "" {
@@ -858,6 +868,16 @@ func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx conte
 		preprocessedCallData = *methodCall.CallData
 	}
 	methodName := r.vm.preprocessTextWithVariableMapping(methodCall.GetMethodName())
+
+	// Validate methodName is provided when callData is not specified
+	if preprocessedCallData == "" && methodName == "" {
+		return &avsproto.ContractReadNode_MethodResult{
+			Success:    false,
+			Error:      "method name is required - please specify a method name (e.g., 'balanceOf', 'symbol', 'decimals') to call on the smart contract",
+			MethodName: methodName,
+			Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+		}
+	}
 
 	// Generate callData from methodName and methodParams if callData is empty (same logic as executeMethodCallWithoutFormatting)
 	var finalCallData string
