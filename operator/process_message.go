@@ -91,12 +91,17 @@ func (o *Operator) processMessage(resp *avspb.SyncMessagesResp) {
 			taskID = resp.Id
 		}
 
-		o.logger.Info("processing immediate trigger request", "task_id", taskID)
+		o.logger.Debug("📨 Received immediate trigger instruction from aggregator",
+			"task_id", taskID,
+			"operator", o.config.OperatorAddress,
+			"has_task_metadata", resp.TaskMetadata != nil)
 
 		// For immediate trigger, we need to know which trigger type to execute
 		// Check the task metadata to determine trigger type
 		if resp.TaskMetadata != nil && resp.TaskMetadata.Trigger != nil {
-			o.logger.Info("executing immediate trigger", "task_id", taskID)
+			o.logger.Debug("🔥 Executing immediate trigger",
+				"task_id", taskID,
+				"trigger_type", resp.TaskMetadata.Trigger.Type.String())
 
 			// Execute the appropriate trigger type immediately
 			// Check the trigger type from the task metadata using the oneof field

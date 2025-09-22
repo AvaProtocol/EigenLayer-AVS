@@ -871,11 +871,27 @@ func (r *RpcServer) SyncMessages(payload *avsproto.SyncMessagesReq, srv avsproto
 
 // Operator action
 func (r *RpcServer) NotifyTriggers(ctx context.Context, payload *avsproto.NotifyTriggersReq) (*avsproto.NotifyTriggersResp, error) {
+	r.config.Logger.Debug("📨 Operator triggered workflow execution",
+		"operator", payload.Address,
+		"task_id", payload.TaskId,
+		"trigger_type", payload.TriggerType.String())
+
 	// Process the trigger and get execution state information
 	executionState, err := r.engine.AggregateChecksResultWithState(payload.Address, payload)
 	if err != nil {
+		r.config.Logger.Error("❌ Failed to process operator trigger",
+			"operator", payload.Address,
+			"task_id", payload.TaskId,
+			"error", err)
 		return nil, err
 	}
+
+	r.config.Logger.Debug("✅ Operator trigger processed successfully",
+		"operator", payload.Address,
+		"task_id", payload.TaskId,
+		"status", executionState.Status,
+		"remaining_executions", executionState.RemainingExecutions,
+		"task_still_active", executionState.TaskStillActive)
 
 	return &avsproto.NotifyTriggersResp{
 		UpdatedAt:           timestamppb.Now(),

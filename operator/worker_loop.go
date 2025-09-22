@@ -553,9 +553,23 @@ func (o *Operator) StreamMessages() {
 						"aggregator_address", o.config.AggregatorServerIpPortAddress,
 						"operator", o.config.OperatorAddress,
 						"solution", "Ensure aggregator service is running and accessible",
-						"retry_in", "15 seconds",
+						"retry_in", "60 seconds",
 						"next_log_in", "3 minutes if error persists",
 						"raw_error", fmt.Sprintf("%v", err))
+				}
+
+				// Try to recreate connection even for connection refused - aggregator might have restarted
+				if recreateErr := o.recreateGrpcConnection(); recreateErr != nil {
+					o.logger.Debug("🔄 Connection recreation failed (aggregator likely still down)",
+						"aggregator_address", o.config.AggregatorServerIpPortAddress,
+						"operator", o.config.OperatorAddress,
+						"raw_error", recreateErr)
+					// Continue to sleep and retry
+				} else {
+					o.logger.Info("✅ Connection recreated successfully after connection refused - retrying immediately",
+						"aggregator_address", o.config.AggregatorServerIpPortAddress,
+						"operator", o.config.OperatorAddress)
+					continue
 				}
 			} else if strings.Contains(err.Error(), "Unavailable") {
 				errorType = "stream_service_unavailable"
@@ -565,21 +579,50 @@ func (o *Operator) StreamMessages() {
 						"aggregator_address", o.config.AggregatorServerIpPortAddress,
 						"operator", o.config.OperatorAddress,
 						"solution", "Aggregator may be overloaded or experiencing issues",
-						"retry_in", "15 seconds",
+						"retry_in", "60 seconds",
 						"next_log_in", "3 minutes if error persists",
 						"raw_error", fmt.Sprintf("%v", err))
+				}
+
+				// Try to recreate connection for unavailable service - aggregator might have restarted
+				if recreateErr := o.recreateGrpcConnection(); recreateErr != nil {
+					o.logger.Debug("🔄 Connection recreation failed (aggregator likely still unavailable)",
+						"aggregator_address", o.config.AggregatorServerIpPortAddress,
+						"operator", o.config.OperatorAddress,
+						"raw_error", recreateErr)
+					// Continue to sleep and retry
+				} else {
+					o.logger.Info("✅ Connection recreated successfully after service unavailable - retrying immediately",
+						"aggregator_address", o.config.AggregatorServerIpPortAddress,
+						"operator", o.config.OperatorAddress)
+					continue
 				}
 			} else if strings.Contains(err.Error(), "Canceled") || strings.Contains(err.Error(), "connection is closing") {
 				errorType = "stream_connection_closing"
 				shouldLog = o.shouldLogError(errorType, true)
 				if shouldLog {
-					o.logger.Info("❌ Failed to open task stream to aggregator",
+					o.logger.Info("❌ gRPC connection is closing - will recreate connection",
 						"aggregator_address", o.config.AggregatorServerIpPortAddress,
 						"operator", o.config.OperatorAddress,
-						"solution", "Check network connectivity and aggregator service status",
+						"solution", "Recreating gRPC client to establish fresh connection",
 						"retry_in", "15 seconds",
 						"next_log_in", "3 minutes if error persists",
 						"raw_error", fmt.Sprintf("%v", err))
+				}
+
+				// Recreate the gRPC connection when it's in closing state
+				if recreateErr := o.recreateGrpcConnection(); recreateErr != nil {
+					o.logger.Error("❌ Failed to recreate gRPC connection",
+						"aggregator_address", o.config.AggregatorServerIpPortAddress,
+						"operator", o.config.OperatorAddress,
+						"raw_error", recreateErr)
+					// Still sleep and retry even if recreation failed
+				} else {
+					o.logger.Info("✅ gRPC connection recreated successfully - attempting to reconnect immediately",
+						"aggregator_address", o.config.AggregatorServerIpPortAddress,
+						"operator", o.config.OperatorAddress)
+					// Skip the sleep and try immediately with the new connection
+					continue
 				}
 			} else {
 				errorType = "stream_other_error"
@@ -625,13 +668,21 @@ func (o *Operator) StreamMessages() {
 					errorType = "stream_receive_connection_closing"
 					shouldLog = o.shouldLogError(errorType, true)
 					if shouldLog {
-						o.logger.Info("❌ Error receiving task data from aggregator",
+						o.logger.Info("❌ Stream connection is closing - will recreate gRPC client",
 							"aggregator_address", o.config.AggregatorServerIpPortAddress,
 							"operator", o.config.OperatorAddress,
-							"solution", "Will retry stream connection",
+							"solution", "Recreating gRPC client to establish fresh connection",
 							"retry_in", "15 seconds",
 							"next_log_in", "3 minutes if error persists",
 							"raw_error", fmt.Sprintf("%v", err))
+					}
+
+					// Recreate the gRPC connection when stream receive detects closing state
+					if recreateErr := o.recreateGrpcConnection(); recreateErr != nil {
+						o.logger.Error("❌ Failed to recreate gRPC connection during stream receive",
+							"aggregator_address", o.config.AggregatorServerIpPortAddress,
+							"operator", o.config.OperatorAddress,
+							"raw_error", recreateErr)
 					}
 				} else {
 					errorType = "stream_receive_error"
@@ -866,12 +917,20 @@ func (o *Operator) PingServer() {
 					"next_log_in", "3 minutes if error persists",
 					"raw_error", fmt.Sprintf("%v", err))
 			case "ping_connection_closing":
-				o.logger.Info("❌ Connection to aggregator was closed",
+				o.logger.Info("❌ Connection to aggregator was closed - recreating gRPC client",
 					"aggregator_address", o.config.AggregatorServerIpPortAddress,
 					"operator", o.config.OperatorAddress,
-					"solution", "Connection will be reestablished automatically",
+					"solution", "Recreating gRPC client to establish fresh connection",
 					"next_log_in", "3 minutes if error persists",
 					"raw_error", fmt.Sprintf("%v", err))
+
+				// Recreate the gRPC connection when ping detects closing state
+				if recreateErr := o.recreateGrpcConnection(); recreateErr != nil {
+					o.logger.Error("❌ Failed to recreate gRPC connection during ping",
+						"aggregator_address", o.config.AggregatorServerIpPortAddress,
+						"operator", o.config.OperatorAddress,
+						"raw_error", recreateErr)
+				}
 			default:
 				o.logger.Info("❌ Failed to ping aggregator service",
 					"aggregator_address", o.config.AggregatorServerIpPortAddress,

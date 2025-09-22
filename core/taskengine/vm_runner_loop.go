@@ -67,11 +67,20 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 			"executionMode", executionMode.String())
 	}
 
-	if inputNodeName == "" || iterVal == "" {
-		err := fmt.Errorf("missing required configuration: inputNodeName and iterVal are required")
+	if inputNodeName == "" {
+		err := NewMissingRequiredFieldError("inputNodeName")
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 		if r.vm.logger != nil {
-			r.vm.logger.Error("🚫 LoopProcessor.Execute: Missing required config", "stepID", stepID, "inputNodeName", inputNodeName, "iterVal", iterVal)
+			r.vm.logger.Error("🚫 LoopProcessor.Execute: Missing required config", "stepID", stepID, "inputNodeName", inputNodeName)
+		}
+		finalizeExecutionStep(s, false, err.Error(), log.String())
+		return s, err
+	}
+	if iterVal == "" {
+		err := NewMissingRequiredFieldError("iterVal")
+		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		if r.vm.logger != nil {
+			r.vm.logger.Error("🚫 LoopProcessor.Execute: Missing required config", "stepID", stepID, "iterVal", iterVal)
 		}
 		finalizeExecutionStep(s, false, err.Error(), log.String())
 		return s, err

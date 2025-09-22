@@ -493,7 +493,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	// Validate required fields
 	if url == "" {
-		err := fmt.Errorf("missing required field: url")
+		err := NewMissingRequiredFieldError("url")
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
 		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
 		return executionLogStep, err
