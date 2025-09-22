@@ -1431,7 +1431,10 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 	// Acquire lock once for all map operations to reduce lock contention
 	n.lock.Lock()
 
-	n.logger.Debug("processing aggregator check hit", "operator", address, "task_id", payload.TaskId)
+	n.logger.Debug("🔄 Processing operator trigger notification",
+		"operator", address,
+		"task_id", payload.TaskId,
+		"trigger_type", payload.TriggerType.String())
 
 	// Update operator task tracking
 	if state, exists := n.trackSyncedTasks[address]; exists {
@@ -1888,7 +1891,9 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 	// For manual block triggers, instruct the operator to trigger immediately with current block
 	if payload.TriggerType == avsproto.TriggerType_TRIGGER_TYPE_BLOCK {
 		if n.logger != nil {
-			n.logger.Info("Manual block trigger detected - instructing operator to trigger immediately", "task_id", task.Id)
+			n.logger.Debug("Manual block trigger detected - instructing operator to trigger immediately",
+				"task_id", task.Id,
+				"user", user.Address.String())
 		}
 
 		// Send immediate trigger instruction to operator
@@ -2183,7 +2188,13 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 			}
 
 			if (chosenSender == common.Address{}) {
-				return nil, fmt.Errorf("runner does not match any existing smart wallet for owner %s", owner.Hex())
+				return nil, NewStructuredError(
+					avsproto.ErrorCode_SMART_WALLET_NOT_FOUND,
+					fmt.Sprintf("runner does not match any existing smart wallet for owner %s", owner.Hex()),
+					map[string]interface{}{
+						"owner": owner.Hex(),
+					},
+				)
 			}
 
 			// Set aa_sender for simulation writes to always use the runner (smart wallet)

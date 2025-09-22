@@ -188,6 +188,16 @@ func (r *ContractReadProcessor) executeMethodCallWithoutFormatting(ctx context.C
 	}
 	methodName := r.vm.preprocessTextWithVariableMapping(methodCall.GetMethodName())
 
+	// Validate methodName is provided when callData is not specified
+	if preprocessedCallData == "" && methodName == "" {
+		return &avsproto.ContractReadNode_MethodResult{
+			Success:    false,
+			Error:      NewMissingRequiredFieldError("methodCalls[].methodName").Error(),
+			MethodName: methodName,
+			Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+		}
+	}
+
 	// Generate callData from methodName and methodParams if callData is empty
 	var finalCallData string
 	if preprocessedCallData == "" && methodName != "" {
@@ -392,14 +402,18 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 
 	config := node.Config
 	// Note: ABI is handled directly from protobuf Values using optimized parsing
-	if config.ContractAddress == "" || len(config.ContractAbi) == 0 {
-		err = fmt.Errorf("missing required configuration: contractAddress and contractAbi are required")
+	if config.ContractAddress == "" {
+		err = NewMissingRequiredFieldError("contractAddress")
+		return s, err
+	}
+	if len(config.ContractAbi) == 0 {
+		err = NewMissingRequiredFieldError("contractAbi")
 		return s, err
 	}
 
 	// Validate contract address
 	if !common.IsHexAddress(config.ContractAddress) {
-		err = fmt.Errorf("invalid contract address: %s", config.ContractAddress)
+		err = NewInvalidAddressError(config.ContractAddress)
 		return s, err
 	}
 
@@ -407,7 +421,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	// Note: ABI is never subject to template variable substitution
 
 	if len(config.MethodCalls) == 0 {
-		err = fmt.Errorf("no method calls specified")
+		err = NewMissingRequiredFieldError("methodCalls")
 		return s, err
 	}
 
@@ -421,7 +435,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 			return s, err
 		}
 	} else {
-		err = fmt.Errorf("missing required configuration: contractAbi is required")
+		err = NewMissingRequiredFieldError("contractAbi")
 		return s, err
 	}
 
@@ -858,6 +872,16 @@ func (r *ContractReadProcessor) executeMethodCallWithDecimalFormatting(ctx conte
 		preprocessedCallData = *methodCall.CallData
 	}
 	methodName := r.vm.preprocessTextWithVariableMapping(methodCall.GetMethodName())
+
+	// Validate methodName is provided when callData is not specified
+	if preprocessedCallData == "" && methodName == "" {
+		return &avsproto.ContractReadNode_MethodResult{
+			Success:    false,
+			Error:      NewMissingRequiredFieldError("methodCalls[].methodName").Error(),
+			MethodName: methodName,
+			Data:       []*avsproto.ContractReadNode_MethodResult_StructuredField{},
+		}
+	}
 
 	// Generate callData from methodName and methodParams if callData is empty (same logic as executeMethodCallWithoutFormatting)
 	var finalCallData string

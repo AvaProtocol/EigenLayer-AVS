@@ -95,16 +95,19 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 
 	// Attach execution_context to the step (e.g., is_simulated, chain_id, provider)
 	if vm != nil {
+		// Only contract write operations should be marked as simulated and use Tenderly
+		isSimulated := nodeType == avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE
 		provider := string(ProviderChainRPC)
-		if vm.IsSimulation {
+		if isSimulated {
 			provider = string(ProviderTenderly)
 		}
+
 		var chainID interface{} = nil
 		if vm.smartWalletConfig != nil && vm.smartWalletConfig.ChainID != 0 {
 			chainID = vm.smartWalletConfig.ChainID
 		}
 		ctxMap := map[string]interface{}{
-			"is_simulated": vm.IsSimulation,
+			"is_simulated": isSimulated,
 			"provider":     provider,
 		}
 		if chainID != nil {

@@ -100,16 +100,16 @@ func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) 
 	}
 
 	if contractAddress == "" {
-		return "", "", nil, fmt.Errorf("missing required configuration: contractAddress")
+		return "", "", nil, NewMissingRequiredFieldError("contractAddress")
 	}
 
 	// Validate contract address format
 	if !common.IsHexAddress(contractAddress) {
-		return "", "", nil, fmt.Errorf("invalid contract address format: %s", contractAddress)
+		return "", "", nil, NewInvalidAddressError(contractAddress)
 	}
 
 	if len(methodCalls) == 0 {
-		return "", "", nil, fmt.Errorf("missing required configuration: either method_calls or call_data must be provided")
+		return "", "", nil, NewMissingRequiredFieldError("methodCalls or callData")
 	}
 
 	return contractAddress, callData, methodCalls, nil

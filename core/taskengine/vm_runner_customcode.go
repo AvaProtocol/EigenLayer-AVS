@@ -258,7 +258,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	sourceStr := node.Config.Source
 
 	if sourceStr == "" {
-		err := fmt.Errorf("missing required configuration: source")
+		err := NewMissingRequiredFieldError("source")
 		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 		finalizeExecutionStep(s, false, err.Error(), sb.String())
 		return s, err

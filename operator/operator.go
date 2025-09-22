@@ -772,3 +772,58 @@ func (o *Operator) GetSignature(ctx context.Context, message []byte) (*blscrypto
 
 	return sig, nil
 }
+
+// recreateGrpcConnection recreates the gRPC connection and client when the connection is in a closing state
+func (o *Operator) recreateGrpcConnection() error {
+	o.logger.Info("🔄 Recreating gRPC connection due to connection closing error",
+		"aggregator_address", o.config.AggregatorServerIpPortAddress,
+		"operator", o.config.OperatorAddress)
+
+	// Close existing connection if it exists
+	if o.aggregatorConn != nil {
+		o.aggregatorConn.Close()
+	}
+
+	// Recreate the connection using the same logic as Start()
+	opts := []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithPerRPCCredentials(auth.ClientAuth{
+			EcdsaPrivateKey: o.operatorEcdsaPrivateKey,
+			SignerAddr:      o.operatorAddr,
+		}),
+	}
+
+	var err error
+	o.aggregatorConn, err = grpc.NewClient(o.config.AggregatorServerIpPortAddress, opts...)
+	if err != nil {
+		o.logger.Error("❌ Failed to recreate gRPC client for aggregator",
+			"aggregator_address", o.config.AggregatorServerIpPortAddress,
+			"operator", o.config.OperatorAddress,
+			"raw_error", err)
+		return err
+	}
+
+	o.nodeRpcClient = avsproto.NewNodeClient(o.aggregatorConn)
+
+	// Test the new connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, healthErr := o.nodeRpcClient.HealthCheck(ctx, &avspb.HealthCheckRequest{
+		OperatorAddress: o.config.OperatorAddress,
+	})
+
+	if healthErr != nil {
+		o.logger.Error("❌ Health check failed after recreating gRPC connection",
+			"aggregator_address", o.config.AggregatorServerIpPortAddress,
+			"operator", o.config.OperatorAddress,
+			"raw_error", healthErr)
+		return healthErr
+	}
+
+	o.logger.Info("✅ Successfully recreated gRPC connection to aggregator",
+		"aggregator_address", o.config.AggregatorServerIpPortAddress,
+		"operator", o.config.OperatorAddress)
+
+	return nil
+}
