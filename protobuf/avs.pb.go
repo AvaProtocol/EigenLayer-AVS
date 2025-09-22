@@ -2060,13 +2060,17 @@ type Task struct {
 	// return how many time this task has run
 	ExecutionCount int64 `protobuf:"varint,9,opt,name=execution_count,json=executionCount,proto3" json:"execution_count,omitempty"`
 	// timestamp when task was last executed (in milliseconds)
-	LastRanAt     int64        `protobuf:"varint,10,opt,name=last_ran_at,json=lastRanAt,proto3" json:"last_ran_at,omitempty"`
-	Status        TaskStatus   `protobuf:"varint,11,opt,name=status,proto3,enum=aggregator.TaskStatus" json:"status,omitempty"`
-	Trigger       *TaskTrigger `protobuf:"bytes,12,opt,name=trigger,proto3" json:"trigger,omitempty"`
-	Nodes         []*TaskNode  `protobuf:"bytes,13,rep,name=nodes,proto3" json:"nodes,omitempty"`
-	Edges         []*TaskEdge  `protobuf:"bytes,14,rep,name=edges,proto3" json:"edges,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	LastRanAt int64        `protobuf:"varint,10,opt,name=last_ran_at,json=lastRanAt,proto3" json:"last_ran_at,omitempty"`
+	Status    TaskStatus   `protobuf:"varint,11,opt,name=status,proto3,enum=aggregator.TaskStatus" json:"status,omitempty"`
+	Trigger   *TaskTrigger `protobuf:"bytes,12,opt,name=trigger,proto3" json:"trigger,omitempty"`
+	Nodes     []*TaskNode  `protobuf:"bytes,13,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	Edges     []*TaskEdge  `protobuf:"bytes,14,rep,name=edges,proto3" json:"edges,omitempty"`
+	// Input variables defined at workflow creation time
+	// These variables are available globally to all nodes during execution
+	// and can be referenced using JavaScript template syntax like ${variableName}
+	InputVariables map[string]*structpb.Value `protobuf:"bytes,15,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Task) Reset() {
@@ -2197,6 +2201,13 @@ func (x *Task) GetEdges() []*TaskEdge {
 	return nil
 }
 
+func (x *Task) GetInputVariables() map[string]*structpb.Value {
+	if x != nil {
+		return x.InputVariables
+	}
+	return nil
+}
+
 type CreateTaskReq struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	Trigger      *TaskTrigger           `protobuf:"bytes,1,opt,name=trigger,proto3" json:"trigger,omitempty"`
@@ -2209,8 +2220,12 @@ type CreateTaskReq struct {
 	Name               string      `protobuf:"bytes,6,opt,name=name,proto3" json:"name,omitempty"`
 	Nodes              []*TaskNode `protobuf:"bytes,7,rep,name=nodes,proto3" json:"nodes,omitempty"`
 	Edges              []*TaskEdge `protobuf:"bytes,8,rep,name=edges,proto3" json:"edges,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Input variables to be stored with the workflow definition
+	// These variables will be available globally to all nodes during execution
+	// and can be referenced using JavaScript template syntax like ${variableName}
+	InputVariables map[string]*structpb.Value `protobuf:"bytes,9,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *CreateTaskReq) Reset() {
@@ -2295,6 +2310,13 @@ func (x *CreateTaskReq) GetNodes() []*TaskNode {
 func (x *CreateTaskReq) GetEdges() []*TaskEdge {
 	if x != nil {
 		return x.Edges
+	}
+	return nil
+}
+
+func (x *CreateTaskReq) GetInputVariables() map[string]*structpb.Value {
+	if x != nil {
+		return x.InputVariables
 	}
 	return nil
 }
@@ -8409,7 +8431,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x04loop\x18\v \x01(\v2\x1b.aggregator.LoopNode.OutputH\x00R\x04loop\x12\x19\n" +
 	"\bstart_at\x18\x0e \x01(\x03R\astartAt\x12\x15\n" +
 	"\x06end_at\x18\x0f \x01(\x03R\x05endAtB\r\n" +
-	"\voutput_data\"\xf8\x03\n" +
+	"\voutput_data\"\xa2\x05\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\tR\x05owner\x120\n" +
@@ -8426,7 +8448,11 @@ const file_avs_proto_rawDesc = "" +
 	"\x06status\x18\v \x01(\x0e2\x16.aggregator.TaskStatusR\x06status\x121\n" +
 	"\atrigger\x18\f \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\x12*\n" +
 	"\x05nodes\x18\r \x03(\v2\x14.aggregator.TaskNodeR\x05nodes\x12*\n" +
-	"\x05edges\x18\x0e \x03(\v2\x14.aggregator.TaskEdgeR\x05edges\"\xbf\x02\n" +
+	"\x05edges\x18\x0e \x03(\v2\x14.aggregator.TaskEdgeR\x05edges\x12M\n" +
+	"\x0finput_variables\x18\x0f \x03(\v2$.aggregator.Task.InputVariablesEntryR\x0einputVariables\x1aY\n" +
+	"\x13InputVariablesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\xf2\x03\n" +
 	"\rCreateTaskReq\x121\n" +
 	"\atrigger\x18\x01 \x01(\v2\x17.aggregator.TaskTriggerR\atrigger\x12\x19\n" +
 	"\bstart_at\x18\x02 \x01(\x03R\astartAt\x12\x1d\n" +
@@ -8436,7 +8462,11 @@ const file_avs_proto_rawDesc = "" +
 	"\x14smart_wallet_address\x18\x05 \x01(\tR\x12smartWalletAddress\x12\x12\n" +
 	"\x04name\x18\x06 \x01(\tR\x04name\x12*\n" +
 	"\x05nodes\x18\a \x03(\v2\x14.aggregator.TaskNodeR\x05nodes\x12*\n" +
-	"\x05edges\x18\b \x03(\v2\x14.aggregator.TaskEdgeR\x05edges\" \n" +
+	"\x05edges\x18\b \x03(\v2\x14.aggregator.TaskEdgeR\x05edges\x12V\n" +
+	"\x0finput_variables\x18\t \x03(\v2-.aggregator.CreateTaskReq.InputVariablesEntryR\x0einputVariables\x1aY\n" +
+	"\x13InputVariablesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\" \n" +
 	"\x0eCreateTaskResp\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"$\n" +
 	"\fNonceRequest\x12\x14\n" +
@@ -8842,7 +8872,7 @@ func file_avs_proto_rawDescGZIP() []byte {
 }
 
 var file_avs_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_avs_proto_msgTypes = make([]protoimpl.MessageInfo, 117)
+var file_avs_proto_msgTypes = make([]protoimpl.MessageInfo, 119)
 var file_avs_proto_goTypes = []any{
 	(TriggerType)(0),                                      // 0: aggregator.TriggerType
 	(NodeType)(0),                                         // 1: aggregator.NodeType
@@ -8963,12 +8993,14 @@ var file_avs_proto_goTypes = []any{
 	(*LoopNode_Config)(nil),                               // 116: aggregator.LoopNode.Config
 	(*LoopNode_Output)(nil),                               // 117: aggregator.LoopNode.Output
 	(*Execution_Step)(nil),                                // 118: aggregator.Execution.Step
-	nil,                                                   // 119: aggregator.RunNodeWithInputsReq.NodeConfigEntry
-	nil,                                                   // 120: aggregator.RunNodeWithInputsReq.InputVariablesEntry
-	nil,                                                   // 121: aggregator.RunTriggerReq.TriggerConfigEntry
-	nil,                                                   // 122: aggregator.RunTriggerReq.TriggerInputEntry
-	nil,                                                   // 123: aggregator.SimulateTaskReq.InputVariablesEntry
-	(*structpb.Value)(nil),                                // 124: google.protobuf.Value
+	nil,                                                   // 119: aggregator.Task.InputVariablesEntry
+	nil,                                                   // 120: aggregator.CreateTaskReq.InputVariablesEntry
+	nil,                                                   // 121: aggregator.RunNodeWithInputsReq.NodeConfigEntry
+	nil,                                                   // 122: aggregator.RunNodeWithInputsReq.InputVariablesEntry
+	nil,                                                   // 123: aggregator.RunTriggerReq.TriggerConfigEntry
+	nil,                                                   // 124: aggregator.RunTriggerReq.TriggerInputEntry
+	nil,                                                   // 125: aggregator.SimulateTaskReq.InputVariablesEntry
+	(*structpb.Value)(nil),                                // 126: google.protobuf.Value
 }
 var file_avs_proto_depIdxs = []int32{
 	7,   // 0: aggregator.GetTokenMetadataResp.token:type_name -> aggregator.TokenMetadata
@@ -9014,171 +9046,175 @@ var file_avs_proto_depIdxs = []int32{
 	16,  // 40: aggregator.Task.trigger:type_name -> aggregator.TaskTrigger
 	27,  // 41: aggregator.Task.nodes:type_name -> aggregator.TaskNode
 	26,  // 42: aggregator.Task.edges:type_name -> aggregator.TaskEdge
-	16,  // 43: aggregator.CreateTaskReq.trigger:type_name -> aggregator.TaskTrigger
-	27,  // 44: aggregator.CreateTaskReq.nodes:type_name -> aggregator.TaskNode
-	26,  // 45: aggregator.CreateTaskReq.edges:type_name -> aggregator.TaskEdge
-	35,  // 46: aggregator.ListWalletResp.items:type_name -> aggregator.SmartWallet
-	29,  // 47: aggregator.ListTasksResp.items:type_name -> aggregator.Task
-	54,  // 48: aggregator.ListTasksResp.page_info:type_name -> aggregator.PageInfo
-	28,  // 49: aggregator.ListExecutionsResp.items:type_name -> aggregator.Execution
-	54,  // 50: aggregator.ListExecutionsResp.page_info:type_name -> aggregator.PageInfo
-	6,   // 51: aggregator.ExecutionStatusResp.status:type_name -> aggregator.ExecutionStatus
-	0,   // 52: aggregator.TriggerTaskReq.trigger_type:type_name -> aggregator.TriggerType
-	82,  // 53: aggregator.TriggerTaskReq.block_trigger:type_name -> aggregator.BlockTrigger.Output
-	78,  // 54: aggregator.TriggerTaskReq.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
-	80,  // 55: aggregator.TriggerTaskReq.cron_trigger:type_name -> aggregator.CronTrigger.Output
-	87,  // 56: aggregator.TriggerTaskReq.event_trigger:type_name -> aggregator.EventTrigger.Output
-	89,  // 57: aggregator.TriggerTaskReq.manual_trigger:type_name -> aggregator.ManualTrigger.Output
-	6,   // 58: aggregator.TriggerTaskResp.status:type_name -> aggregator.ExecutionStatus
-	118, // 59: aggregator.TriggerTaskResp.steps:type_name -> aggregator.Execution.Step
-	55,  // 60: aggregator.ListSecretsResp.items:type_name -> aggregator.Secret
-	54,  // 61: aggregator.ListSecretsResp.page_info:type_name -> aggregator.PageInfo
-	1,   // 62: aggregator.RunNodeWithInputsReq.node_type:type_name -> aggregator.NodeType
-	119, // 63: aggregator.RunNodeWithInputsReq.node_config:type_name -> aggregator.RunNodeWithInputsReq.NodeConfigEntry
-	120, // 64: aggregator.RunNodeWithInputsReq.input_variables:type_name -> aggregator.RunNodeWithInputsReq.InputVariablesEntry
-	124, // 65: aggregator.RunNodeWithInputsResp.metadata:type_name -> google.protobuf.Value
-	124, // 66: aggregator.RunNodeWithInputsResp.execution_context:type_name -> google.protobuf.Value
-	4,   // 67: aggregator.RunNodeWithInputsResp.error_code:type_name -> aggregator.ErrorCode
-	93,  // 68: aggregator.RunNodeWithInputsResp.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
-	104, // 69: aggregator.RunNodeWithInputsResp.graphql:type_name -> aggregator.GraphQLQueryNode.Output
-	101, // 70: aggregator.RunNodeWithInputsResp.contract_read:type_name -> aggregator.ContractReadNode.Output
-	96,  // 71: aggregator.RunNodeWithInputsResp.contract_write:type_name -> aggregator.ContractWriteNode.Output
-	110, // 72: aggregator.RunNodeWithInputsResp.custom_code:type_name -> aggregator.CustomCodeNode.Output
-	107, // 73: aggregator.RunNodeWithInputsResp.rest_api:type_name -> aggregator.RestAPINode.Output
-	113, // 74: aggregator.RunNodeWithInputsResp.branch:type_name -> aggregator.BranchNode.Output
-	115, // 75: aggregator.RunNodeWithInputsResp.filter:type_name -> aggregator.FilterNode.Output
-	117, // 76: aggregator.RunNodeWithInputsResp.loop:type_name -> aggregator.LoopNode.Output
-	0,   // 77: aggregator.RunTriggerReq.trigger_type:type_name -> aggregator.TriggerType
-	121, // 78: aggregator.RunTriggerReq.trigger_config:type_name -> aggregator.RunTriggerReq.TriggerConfigEntry
-	122, // 79: aggregator.RunTriggerReq.trigger_input:type_name -> aggregator.RunTriggerReq.TriggerInputEntry
-	124, // 80: aggregator.RunTriggerResp.metadata:type_name -> google.protobuf.Value
-	124, // 81: aggregator.RunTriggerResp.execution_context:type_name -> google.protobuf.Value
-	4,   // 82: aggregator.RunTriggerResp.error_code:type_name -> aggregator.ErrorCode
-	82,  // 83: aggregator.RunTriggerResp.block_trigger:type_name -> aggregator.BlockTrigger.Output
-	78,  // 84: aggregator.RunTriggerResp.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
-	80,  // 85: aggregator.RunTriggerResp.cron_trigger:type_name -> aggregator.CronTrigger.Output
-	87,  // 86: aggregator.RunTriggerResp.event_trigger:type_name -> aggregator.EventTrigger.Output
-	89,  // 87: aggregator.RunTriggerResp.manual_trigger:type_name -> aggregator.ManualTrigger.Output
-	16,  // 88: aggregator.SimulateTaskReq.trigger:type_name -> aggregator.TaskTrigger
-	27,  // 89: aggregator.SimulateTaskReq.nodes:type_name -> aggregator.TaskNode
-	26,  // 90: aggregator.SimulateTaskReq.edges:type_name -> aggregator.TaskEdge
-	123, // 91: aggregator.SimulateTaskReq.input_variables:type_name -> aggregator.SimulateTaskReq.InputVariablesEntry
-	124, // 92: aggregator.FixedTimeTrigger.Output.data:type_name -> google.protobuf.Value
-	124, // 93: aggregator.CronTrigger.Output.data:type_name -> google.protobuf.Value
-	124, // 94: aggregator.BlockTrigger.Output.data:type_name -> google.protobuf.Value
-	85,  // 95: aggregator.EventTrigger.Query.topics:type_name -> aggregator.EventTrigger.Topics
-	124, // 96: aggregator.EventTrigger.Query.contract_abi:type_name -> google.protobuf.Value
-	76,  // 97: aggregator.EventTrigger.Query.conditions:type_name -> aggregator.EventCondition
-	84,  // 98: aggregator.EventTrigger.Query.method_calls:type_name -> aggregator.EventTrigger.MethodCall
-	83,  // 99: aggregator.EventTrigger.Config.queries:type_name -> aggregator.EventTrigger.Query
-	124, // 100: aggregator.EventTrigger.Output.data:type_name -> google.protobuf.Value
-	124, // 101: aggregator.ManualTrigger.Config.data:type_name -> google.protobuf.Value
-	90,  // 102: aggregator.ManualTrigger.Config.headers:type_name -> aggregator.ManualTrigger.Config.HeadersEntry
-	91,  // 103: aggregator.ManualTrigger.Config.pathParams:type_name -> aggregator.ManualTrigger.Config.PathParamsEntry
-	124, // 104: aggregator.ManualTrigger.Output.data:type_name -> google.protobuf.Value
-	124, // 105: aggregator.ETHTransferNode.Output.data:type_name -> google.protobuf.Value
-	124, // 106: aggregator.ContractWriteNode.Config.contract_abi:type_name -> google.protobuf.Value
-	95,  // 107: aggregator.ContractWriteNode.Config.method_calls:type_name -> aggregator.ContractWriteNode.MethodCall
-	124, // 108: aggregator.ContractWriteNode.Output.data:type_name -> google.protobuf.Value
-	124, // 109: aggregator.ContractWriteNode.MethodResult.method_abi:type_name -> google.protobuf.Value
-	124, // 110: aggregator.ContractWriteNode.MethodResult.receipt:type_name -> google.protobuf.Value
-	124, // 111: aggregator.ContractWriteNode.MethodResult.value:type_name -> google.protobuf.Value
-	124, // 112: aggregator.ContractReadNode.Config.contract_abi:type_name -> google.protobuf.Value
-	98,  // 113: aggregator.ContractReadNode.Config.method_calls:type_name -> aggregator.ContractReadNode.MethodCall
-	102, // 114: aggregator.ContractReadNode.MethodResult.data:type_name -> aggregator.ContractReadNode.MethodResult.StructuredField
-	124, // 115: aggregator.ContractReadNode.Output.data:type_name -> google.protobuf.Value
-	105, // 116: aggregator.GraphQLQueryNode.Config.variables:type_name -> aggregator.GraphQLQueryNode.Config.VariablesEntry
-	124, // 117: aggregator.GraphQLQueryNode.Output.data:type_name -> google.protobuf.Value
-	108, // 118: aggregator.RestAPINode.Config.headers:type_name -> aggregator.RestAPINode.Config.HeadersEntry
-	124, // 119: aggregator.RestAPINode.Output.data:type_name -> google.protobuf.Value
-	3,   // 120: aggregator.CustomCodeNode.Config.lang:type_name -> aggregator.Lang
-	124, // 121: aggregator.CustomCodeNode.Output.data:type_name -> google.protobuf.Value
-	111, // 122: aggregator.BranchNode.Config.conditions:type_name -> aggregator.BranchNode.Condition
-	124, // 123: aggregator.BranchNode.Output.data:type_name -> google.protobuf.Value
-	124, // 124: aggregator.FilterNode.Output.data:type_name -> google.protobuf.Value
-	2,   // 125: aggregator.LoopNode.Config.execution_mode:type_name -> aggregator.ExecutionMode
-	124, // 126: aggregator.LoopNode.Output.data:type_name -> google.protobuf.Value
-	124, // 127: aggregator.Execution.Step.config:type_name -> google.protobuf.Value
-	124, // 128: aggregator.Execution.Step.metadata:type_name -> google.protobuf.Value
-	124, // 129: aggregator.Execution.Step.execution_context:type_name -> google.protobuf.Value
-	82,  // 130: aggregator.Execution.Step.block_trigger:type_name -> aggregator.BlockTrigger.Output
-	78,  // 131: aggregator.Execution.Step.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
-	80,  // 132: aggregator.Execution.Step.cron_trigger:type_name -> aggregator.CronTrigger.Output
-	87,  // 133: aggregator.Execution.Step.event_trigger:type_name -> aggregator.EventTrigger.Output
-	89,  // 134: aggregator.Execution.Step.manual_trigger:type_name -> aggregator.ManualTrigger.Output
-	93,  // 135: aggregator.Execution.Step.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
-	104, // 136: aggregator.Execution.Step.graphql:type_name -> aggregator.GraphQLQueryNode.Output
-	101, // 137: aggregator.Execution.Step.contract_read:type_name -> aggregator.ContractReadNode.Output
-	96,  // 138: aggregator.Execution.Step.contract_write:type_name -> aggregator.ContractWriteNode.Output
-	110, // 139: aggregator.Execution.Step.custom_code:type_name -> aggregator.CustomCodeNode.Output
-	107, // 140: aggregator.Execution.Step.rest_api:type_name -> aggregator.RestAPINode.Output
-	113, // 141: aggregator.Execution.Step.branch:type_name -> aggregator.BranchNode.Output
-	115, // 142: aggregator.Execution.Step.filter:type_name -> aggregator.FilterNode.Output
-	117, // 143: aggregator.Execution.Step.loop:type_name -> aggregator.LoopNode.Output
-	124, // 144: aggregator.RunNodeWithInputsReq.NodeConfigEntry.value:type_name -> google.protobuf.Value
-	124, // 145: aggregator.RunNodeWithInputsReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	124, // 146: aggregator.RunTriggerReq.TriggerConfigEntry.value:type_name -> google.protobuf.Value
-	124, // 147: aggregator.RunTriggerReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
-	124, // 148: aggregator.SimulateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
-	43,  // 149: aggregator.Aggregator.GetKey:input_type -> aggregator.GetKeyReq
-	59,  // 150: aggregator.Aggregator.GetSignatureFormat:input_type -> aggregator.GetSignatureFormatReq
-	32,  // 151: aggregator.Aggregator.GetNonce:input_type -> aggregator.NonceRequest
-	45,  // 152: aggregator.Aggregator.GetWallet:input_type -> aggregator.GetWalletReq
-	47,  // 153: aggregator.Aggregator.SetWallet:input_type -> aggregator.SetWalletReq
-	34,  // 154: aggregator.Aggregator.ListWallets:input_type -> aggregator.ListWalletReq
-	48,  // 155: aggregator.Aggregator.WithdrawFunds:input_type -> aggregator.WithdrawFundsReq
-	30,  // 156: aggregator.Aggregator.CreateTask:input_type -> aggregator.CreateTaskReq
-	37,  // 157: aggregator.Aggregator.ListTasks:input_type -> aggregator.ListTasksReq
-	10,  // 158: aggregator.Aggregator.GetTask:input_type -> aggregator.IdReq
-	39,  // 159: aggregator.Aggregator.ListExecutions:input_type -> aggregator.ListExecutionsReq
-	41,  // 160: aggregator.Aggregator.GetExecution:input_type -> aggregator.ExecutionReq
-	41,  // 161: aggregator.Aggregator.GetExecutionStatus:input_type -> aggregator.ExecutionReq
-	10,  // 162: aggregator.Aggregator.CancelTask:input_type -> aggregator.IdReq
-	10,  // 163: aggregator.Aggregator.DeleteTask:input_type -> aggregator.IdReq
-	50,  // 164: aggregator.Aggregator.TriggerTask:input_type -> aggregator.TriggerTaskReq
-	52,  // 165: aggregator.Aggregator.CreateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
-	57,  // 166: aggregator.Aggregator.DeleteSecret:input_type -> aggregator.DeleteSecretReq
-	53,  // 167: aggregator.Aggregator.ListSecrets:input_type -> aggregator.ListSecretsReq
-	52,  // 168: aggregator.Aggregator.UpdateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
-	65,  // 169: aggregator.Aggregator.GetWorkflowCount:input_type -> aggregator.GetWorkflowCountReq
-	67,  // 170: aggregator.Aggregator.GetExecutionCount:input_type -> aggregator.GetExecutionCountReq
-	69,  // 171: aggregator.Aggregator.GetExecutionStats:input_type -> aggregator.GetExecutionStatsReq
-	71,  // 172: aggregator.Aggregator.RunNodeWithInputs:input_type -> aggregator.RunNodeWithInputsReq
-	73,  // 173: aggregator.Aggregator.RunTrigger:input_type -> aggregator.RunTriggerReq
-	75,  // 174: aggregator.Aggregator.SimulateTask:input_type -> aggregator.SimulateTaskReq
-	8,   // 175: aggregator.Aggregator.GetTokenMetadata:input_type -> aggregator.GetTokenMetadataReq
-	44,  // 176: aggregator.Aggregator.GetKey:output_type -> aggregator.KeyResp
-	60,  // 177: aggregator.Aggregator.GetSignatureFormat:output_type -> aggregator.GetSignatureFormatResp
-	33,  // 178: aggregator.Aggregator.GetNonce:output_type -> aggregator.NonceResp
-	46,  // 179: aggregator.Aggregator.GetWallet:output_type -> aggregator.GetWalletResp
-	46,  // 180: aggregator.Aggregator.SetWallet:output_type -> aggregator.GetWalletResp
-	36,  // 181: aggregator.Aggregator.ListWallets:output_type -> aggregator.ListWalletResp
-	49,  // 182: aggregator.Aggregator.WithdrawFunds:output_type -> aggregator.WithdrawFundsResp
-	31,  // 183: aggregator.Aggregator.CreateTask:output_type -> aggregator.CreateTaskResp
-	38,  // 184: aggregator.Aggregator.ListTasks:output_type -> aggregator.ListTasksResp
-	29,  // 185: aggregator.Aggregator.GetTask:output_type -> aggregator.Task
-	40,  // 186: aggregator.Aggregator.ListExecutions:output_type -> aggregator.ListExecutionsResp
-	28,  // 187: aggregator.Aggregator.GetExecution:output_type -> aggregator.Execution
-	42,  // 188: aggregator.Aggregator.GetExecutionStatus:output_type -> aggregator.ExecutionStatusResp
-	64,  // 189: aggregator.Aggregator.CancelTask:output_type -> aggregator.CancelTaskResp
-	63,  // 190: aggregator.Aggregator.DeleteTask:output_type -> aggregator.DeleteTaskResp
-	51,  // 191: aggregator.Aggregator.TriggerTask:output_type -> aggregator.TriggerTaskResp
-	61,  // 192: aggregator.Aggregator.CreateSecret:output_type -> aggregator.CreateSecretResp
-	58,  // 193: aggregator.Aggregator.DeleteSecret:output_type -> aggregator.DeleteSecretResp
-	56,  // 194: aggregator.Aggregator.ListSecrets:output_type -> aggregator.ListSecretsResp
-	62,  // 195: aggregator.Aggregator.UpdateSecret:output_type -> aggregator.UpdateSecretResp
-	66,  // 196: aggregator.Aggregator.GetWorkflowCount:output_type -> aggregator.GetWorkflowCountResp
-	68,  // 197: aggregator.Aggregator.GetExecutionCount:output_type -> aggregator.GetExecutionCountResp
-	70,  // 198: aggregator.Aggregator.GetExecutionStats:output_type -> aggregator.GetExecutionStatsResp
-	72,  // 199: aggregator.Aggregator.RunNodeWithInputs:output_type -> aggregator.RunNodeWithInputsResp
-	74,  // 200: aggregator.Aggregator.RunTrigger:output_type -> aggregator.RunTriggerResp
-	28,  // 201: aggregator.Aggregator.SimulateTask:output_type -> aggregator.Execution
-	9,   // 202: aggregator.Aggregator.GetTokenMetadata:output_type -> aggregator.GetTokenMetadataResp
-	176, // [176:203] is the sub-list for method output_type
-	149, // [149:176] is the sub-list for method input_type
-	149, // [149:149] is the sub-list for extension type_name
-	149, // [149:149] is the sub-list for extension extendee
-	0,   // [0:149] is the sub-list for field type_name
+	119, // 43: aggregator.Task.input_variables:type_name -> aggregator.Task.InputVariablesEntry
+	16,  // 44: aggregator.CreateTaskReq.trigger:type_name -> aggregator.TaskTrigger
+	27,  // 45: aggregator.CreateTaskReq.nodes:type_name -> aggregator.TaskNode
+	26,  // 46: aggregator.CreateTaskReq.edges:type_name -> aggregator.TaskEdge
+	120, // 47: aggregator.CreateTaskReq.input_variables:type_name -> aggregator.CreateTaskReq.InputVariablesEntry
+	35,  // 48: aggregator.ListWalletResp.items:type_name -> aggregator.SmartWallet
+	29,  // 49: aggregator.ListTasksResp.items:type_name -> aggregator.Task
+	54,  // 50: aggregator.ListTasksResp.page_info:type_name -> aggregator.PageInfo
+	28,  // 51: aggregator.ListExecutionsResp.items:type_name -> aggregator.Execution
+	54,  // 52: aggregator.ListExecutionsResp.page_info:type_name -> aggregator.PageInfo
+	6,   // 53: aggregator.ExecutionStatusResp.status:type_name -> aggregator.ExecutionStatus
+	0,   // 54: aggregator.TriggerTaskReq.trigger_type:type_name -> aggregator.TriggerType
+	82,  // 55: aggregator.TriggerTaskReq.block_trigger:type_name -> aggregator.BlockTrigger.Output
+	78,  // 56: aggregator.TriggerTaskReq.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
+	80,  // 57: aggregator.TriggerTaskReq.cron_trigger:type_name -> aggregator.CronTrigger.Output
+	87,  // 58: aggregator.TriggerTaskReq.event_trigger:type_name -> aggregator.EventTrigger.Output
+	89,  // 59: aggregator.TriggerTaskReq.manual_trigger:type_name -> aggregator.ManualTrigger.Output
+	6,   // 60: aggregator.TriggerTaskResp.status:type_name -> aggregator.ExecutionStatus
+	118, // 61: aggregator.TriggerTaskResp.steps:type_name -> aggregator.Execution.Step
+	55,  // 62: aggregator.ListSecretsResp.items:type_name -> aggregator.Secret
+	54,  // 63: aggregator.ListSecretsResp.page_info:type_name -> aggregator.PageInfo
+	1,   // 64: aggregator.RunNodeWithInputsReq.node_type:type_name -> aggregator.NodeType
+	121, // 65: aggregator.RunNodeWithInputsReq.node_config:type_name -> aggregator.RunNodeWithInputsReq.NodeConfigEntry
+	122, // 66: aggregator.RunNodeWithInputsReq.input_variables:type_name -> aggregator.RunNodeWithInputsReq.InputVariablesEntry
+	126, // 67: aggregator.RunNodeWithInputsResp.metadata:type_name -> google.protobuf.Value
+	126, // 68: aggregator.RunNodeWithInputsResp.execution_context:type_name -> google.protobuf.Value
+	4,   // 69: aggregator.RunNodeWithInputsResp.error_code:type_name -> aggregator.ErrorCode
+	93,  // 70: aggregator.RunNodeWithInputsResp.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
+	104, // 71: aggregator.RunNodeWithInputsResp.graphql:type_name -> aggregator.GraphQLQueryNode.Output
+	101, // 72: aggregator.RunNodeWithInputsResp.contract_read:type_name -> aggregator.ContractReadNode.Output
+	96,  // 73: aggregator.RunNodeWithInputsResp.contract_write:type_name -> aggregator.ContractWriteNode.Output
+	110, // 74: aggregator.RunNodeWithInputsResp.custom_code:type_name -> aggregator.CustomCodeNode.Output
+	107, // 75: aggregator.RunNodeWithInputsResp.rest_api:type_name -> aggregator.RestAPINode.Output
+	113, // 76: aggregator.RunNodeWithInputsResp.branch:type_name -> aggregator.BranchNode.Output
+	115, // 77: aggregator.RunNodeWithInputsResp.filter:type_name -> aggregator.FilterNode.Output
+	117, // 78: aggregator.RunNodeWithInputsResp.loop:type_name -> aggregator.LoopNode.Output
+	0,   // 79: aggregator.RunTriggerReq.trigger_type:type_name -> aggregator.TriggerType
+	123, // 80: aggregator.RunTriggerReq.trigger_config:type_name -> aggregator.RunTriggerReq.TriggerConfigEntry
+	124, // 81: aggregator.RunTriggerReq.trigger_input:type_name -> aggregator.RunTriggerReq.TriggerInputEntry
+	126, // 82: aggregator.RunTriggerResp.metadata:type_name -> google.protobuf.Value
+	126, // 83: aggregator.RunTriggerResp.execution_context:type_name -> google.protobuf.Value
+	4,   // 84: aggregator.RunTriggerResp.error_code:type_name -> aggregator.ErrorCode
+	82,  // 85: aggregator.RunTriggerResp.block_trigger:type_name -> aggregator.BlockTrigger.Output
+	78,  // 86: aggregator.RunTriggerResp.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
+	80,  // 87: aggregator.RunTriggerResp.cron_trigger:type_name -> aggregator.CronTrigger.Output
+	87,  // 88: aggregator.RunTriggerResp.event_trigger:type_name -> aggregator.EventTrigger.Output
+	89,  // 89: aggregator.RunTriggerResp.manual_trigger:type_name -> aggregator.ManualTrigger.Output
+	16,  // 90: aggregator.SimulateTaskReq.trigger:type_name -> aggregator.TaskTrigger
+	27,  // 91: aggregator.SimulateTaskReq.nodes:type_name -> aggregator.TaskNode
+	26,  // 92: aggregator.SimulateTaskReq.edges:type_name -> aggregator.TaskEdge
+	125, // 93: aggregator.SimulateTaskReq.input_variables:type_name -> aggregator.SimulateTaskReq.InputVariablesEntry
+	126, // 94: aggregator.FixedTimeTrigger.Output.data:type_name -> google.protobuf.Value
+	126, // 95: aggregator.CronTrigger.Output.data:type_name -> google.protobuf.Value
+	126, // 96: aggregator.BlockTrigger.Output.data:type_name -> google.protobuf.Value
+	85,  // 97: aggregator.EventTrigger.Query.topics:type_name -> aggregator.EventTrigger.Topics
+	126, // 98: aggregator.EventTrigger.Query.contract_abi:type_name -> google.protobuf.Value
+	76,  // 99: aggregator.EventTrigger.Query.conditions:type_name -> aggregator.EventCondition
+	84,  // 100: aggregator.EventTrigger.Query.method_calls:type_name -> aggregator.EventTrigger.MethodCall
+	83,  // 101: aggregator.EventTrigger.Config.queries:type_name -> aggregator.EventTrigger.Query
+	126, // 102: aggregator.EventTrigger.Output.data:type_name -> google.protobuf.Value
+	126, // 103: aggregator.ManualTrigger.Config.data:type_name -> google.protobuf.Value
+	90,  // 104: aggregator.ManualTrigger.Config.headers:type_name -> aggregator.ManualTrigger.Config.HeadersEntry
+	91,  // 105: aggregator.ManualTrigger.Config.pathParams:type_name -> aggregator.ManualTrigger.Config.PathParamsEntry
+	126, // 106: aggregator.ManualTrigger.Output.data:type_name -> google.protobuf.Value
+	126, // 107: aggregator.ETHTransferNode.Output.data:type_name -> google.protobuf.Value
+	126, // 108: aggregator.ContractWriteNode.Config.contract_abi:type_name -> google.protobuf.Value
+	95,  // 109: aggregator.ContractWriteNode.Config.method_calls:type_name -> aggregator.ContractWriteNode.MethodCall
+	126, // 110: aggregator.ContractWriteNode.Output.data:type_name -> google.protobuf.Value
+	126, // 111: aggregator.ContractWriteNode.MethodResult.method_abi:type_name -> google.protobuf.Value
+	126, // 112: aggregator.ContractWriteNode.MethodResult.receipt:type_name -> google.protobuf.Value
+	126, // 113: aggregator.ContractWriteNode.MethodResult.value:type_name -> google.protobuf.Value
+	126, // 114: aggregator.ContractReadNode.Config.contract_abi:type_name -> google.protobuf.Value
+	98,  // 115: aggregator.ContractReadNode.Config.method_calls:type_name -> aggregator.ContractReadNode.MethodCall
+	102, // 116: aggregator.ContractReadNode.MethodResult.data:type_name -> aggregator.ContractReadNode.MethodResult.StructuredField
+	126, // 117: aggregator.ContractReadNode.Output.data:type_name -> google.protobuf.Value
+	105, // 118: aggregator.GraphQLQueryNode.Config.variables:type_name -> aggregator.GraphQLQueryNode.Config.VariablesEntry
+	126, // 119: aggregator.GraphQLQueryNode.Output.data:type_name -> google.protobuf.Value
+	108, // 120: aggregator.RestAPINode.Config.headers:type_name -> aggregator.RestAPINode.Config.HeadersEntry
+	126, // 121: aggregator.RestAPINode.Output.data:type_name -> google.protobuf.Value
+	3,   // 122: aggregator.CustomCodeNode.Config.lang:type_name -> aggregator.Lang
+	126, // 123: aggregator.CustomCodeNode.Output.data:type_name -> google.protobuf.Value
+	111, // 124: aggregator.BranchNode.Config.conditions:type_name -> aggregator.BranchNode.Condition
+	126, // 125: aggregator.BranchNode.Output.data:type_name -> google.protobuf.Value
+	126, // 126: aggregator.FilterNode.Output.data:type_name -> google.protobuf.Value
+	2,   // 127: aggregator.LoopNode.Config.execution_mode:type_name -> aggregator.ExecutionMode
+	126, // 128: aggregator.LoopNode.Output.data:type_name -> google.protobuf.Value
+	126, // 129: aggregator.Execution.Step.config:type_name -> google.protobuf.Value
+	126, // 130: aggregator.Execution.Step.metadata:type_name -> google.protobuf.Value
+	126, // 131: aggregator.Execution.Step.execution_context:type_name -> google.protobuf.Value
+	82,  // 132: aggregator.Execution.Step.block_trigger:type_name -> aggregator.BlockTrigger.Output
+	78,  // 133: aggregator.Execution.Step.fixed_time_trigger:type_name -> aggregator.FixedTimeTrigger.Output
+	80,  // 134: aggregator.Execution.Step.cron_trigger:type_name -> aggregator.CronTrigger.Output
+	87,  // 135: aggregator.Execution.Step.event_trigger:type_name -> aggregator.EventTrigger.Output
+	89,  // 136: aggregator.Execution.Step.manual_trigger:type_name -> aggregator.ManualTrigger.Output
+	93,  // 137: aggregator.Execution.Step.eth_transfer:type_name -> aggregator.ETHTransferNode.Output
+	104, // 138: aggregator.Execution.Step.graphql:type_name -> aggregator.GraphQLQueryNode.Output
+	101, // 139: aggregator.Execution.Step.contract_read:type_name -> aggregator.ContractReadNode.Output
+	96,  // 140: aggregator.Execution.Step.contract_write:type_name -> aggregator.ContractWriteNode.Output
+	110, // 141: aggregator.Execution.Step.custom_code:type_name -> aggregator.CustomCodeNode.Output
+	107, // 142: aggregator.Execution.Step.rest_api:type_name -> aggregator.RestAPINode.Output
+	113, // 143: aggregator.Execution.Step.branch:type_name -> aggregator.BranchNode.Output
+	115, // 144: aggregator.Execution.Step.filter:type_name -> aggregator.FilterNode.Output
+	117, // 145: aggregator.Execution.Step.loop:type_name -> aggregator.LoopNode.Output
+	126, // 146: aggregator.Task.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	126, // 147: aggregator.CreateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	126, // 148: aggregator.RunNodeWithInputsReq.NodeConfigEntry.value:type_name -> google.protobuf.Value
+	126, // 149: aggregator.RunNodeWithInputsReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	126, // 150: aggregator.RunTriggerReq.TriggerConfigEntry.value:type_name -> google.protobuf.Value
+	126, // 151: aggregator.RunTriggerReq.TriggerInputEntry.value:type_name -> google.protobuf.Value
+	126, // 152: aggregator.SimulateTaskReq.InputVariablesEntry.value:type_name -> google.protobuf.Value
+	43,  // 153: aggregator.Aggregator.GetKey:input_type -> aggregator.GetKeyReq
+	59,  // 154: aggregator.Aggregator.GetSignatureFormat:input_type -> aggregator.GetSignatureFormatReq
+	32,  // 155: aggregator.Aggregator.GetNonce:input_type -> aggregator.NonceRequest
+	45,  // 156: aggregator.Aggregator.GetWallet:input_type -> aggregator.GetWalletReq
+	47,  // 157: aggregator.Aggregator.SetWallet:input_type -> aggregator.SetWalletReq
+	34,  // 158: aggregator.Aggregator.ListWallets:input_type -> aggregator.ListWalletReq
+	48,  // 159: aggregator.Aggregator.WithdrawFunds:input_type -> aggregator.WithdrawFundsReq
+	30,  // 160: aggregator.Aggregator.CreateTask:input_type -> aggregator.CreateTaskReq
+	37,  // 161: aggregator.Aggregator.ListTasks:input_type -> aggregator.ListTasksReq
+	10,  // 162: aggregator.Aggregator.GetTask:input_type -> aggregator.IdReq
+	39,  // 163: aggregator.Aggregator.ListExecutions:input_type -> aggregator.ListExecutionsReq
+	41,  // 164: aggregator.Aggregator.GetExecution:input_type -> aggregator.ExecutionReq
+	41,  // 165: aggregator.Aggregator.GetExecutionStatus:input_type -> aggregator.ExecutionReq
+	10,  // 166: aggregator.Aggregator.CancelTask:input_type -> aggregator.IdReq
+	10,  // 167: aggregator.Aggregator.DeleteTask:input_type -> aggregator.IdReq
+	50,  // 168: aggregator.Aggregator.TriggerTask:input_type -> aggregator.TriggerTaskReq
+	52,  // 169: aggregator.Aggregator.CreateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
+	57,  // 170: aggregator.Aggregator.DeleteSecret:input_type -> aggregator.DeleteSecretReq
+	53,  // 171: aggregator.Aggregator.ListSecrets:input_type -> aggregator.ListSecretsReq
+	52,  // 172: aggregator.Aggregator.UpdateSecret:input_type -> aggregator.CreateOrUpdateSecretReq
+	65,  // 173: aggregator.Aggregator.GetWorkflowCount:input_type -> aggregator.GetWorkflowCountReq
+	67,  // 174: aggregator.Aggregator.GetExecutionCount:input_type -> aggregator.GetExecutionCountReq
+	69,  // 175: aggregator.Aggregator.GetExecutionStats:input_type -> aggregator.GetExecutionStatsReq
+	71,  // 176: aggregator.Aggregator.RunNodeWithInputs:input_type -> aggregator.RunNodeWithInputsReq
+	73,  // 177: aggregator.Aggregator.RunTrigger:input_type -> aggregator.RunTriggerReq
+	75,  // 178: aggregator.Aggregator.SimulateTask:input_type -> aggregator.SimulateTaskReq
+	8,   // 179: aggregator.Aggregator.GetTokenMetadata:input_type -> aggregator.GetTokenMetadataReq
+	44,  // 180: aggregator.Aggregator.GetKey:output_type -> aggregator.KeyResp
+	60,  // 181: aggregator.Aggregator.GetSignatureFormat:output_type -> aggregator.GetSignatureFormatResp
+	33,  // 182: aggregator.Aggregator.GetNonce:output_type -> aggregator.NonceResp
+	46,  // 183: aggregator.Aggregator.GetWallet:output_type -> aggregator.GetWalletResp
+	46,  // 184: aggregator.Aggregator.SetWallet:output_type -> aggregator.GetWalletResp
+	36,  // 185: aggregator.Aggregator.ListWallets:output_type -> aggregator.ListWalletResp
+	49,  // 186: aggregator.Aggregator.WithdrawFunds:output_type -> aggregator.WithdrawFundsResp
+	31,  // 187: aggregator.Aggregator.CreateTask:output_type -> aggregator.CreateTaskResp
+	38,  // 188: aggregator.Aggregator.ListTasks:output_type -> aggregator.ListTasksResp
+	29,  // 189: aggregator.Aggregator.GetTask:output_type -> aggregator.Task
+	40,  // 190: aggregator.Aggregator.ListExecutions:output_type -> aggregator.ListExecutionsResp
+	28,  // 191: aggregator.Aggregator.GetExecution:output_type -> aggregator.Execution
+	42,  // 192: aggregator.Aggregator.GetExecutionStatus:output_type -> aggregator.ExecutionStatusResp
+	64,  // 193: aggregator.Aggregator.CancelTask:output_type -> aggregator.CancelTaskResp
+	63,  // 194: aggregator.Aggregator.DeleteTask:output_type -> aggregator.DeleteTaskResp
+	51,  // 195: aggregator.Aggregator.TriggerTask:output_type -> aggregator.TriggerTaskResp
+	61,  // 196: aggregator.Aggregator.CreateSecret:output_type -> aggregator.CreateSecretResp
+	58,  // 197: aggregator.Aggregator.DeleteSecret:output_type -> aggregator.DeleteSecretResp
+	56,  // 198: aggregator.Aggregator.ListSecrets:output_type -> aggregator.ListSecretsResp
+	62,  // 199: aggregator.Aggregator.UpdateSecret:output_type -> aggregator.UpdateSecretResp
+	66,  // 200: aggregator.Aggregator.GetWorkflowCount:output_type -> aggregator.GetWorkflowCountResp
+	68,  // 201: aggregator.Aggregator.GetExecutionCount:output_type -> aggregator.GetExecutionCountResp
+	70,  // 202: aggregator.Aggregator.GetExecutionStats:output_type -> aggregator.GetExecutionStatsResp
+	72,  // 203: aggregator.Aggregator.RunNodeWithInputs:output_type -> aggregator.RunNodeWithInputsResp
+	74,  // 204: aggregator.Aggregator.RunTrigger:output_type -> aggregator.RunTriggerResp
+	28,  // 205: aggregator.Aggregator.SimulateTask:output_type -> aggregator.Execution
+	9,   // 206: aggregator.Aggregator.GetTokenMetadata:output_type -> aggregator.GetTokenMetadataResp
+	180, // [180:207] is the sub-list for method output_type
+	153, // [153:180] is the sub-list for method input_type
+	153, // [153:153] is the sub-list for extension type_name
+	153, // [153:153] is the sub-list for extension extendee
+	0,   // [0:153] is the sub-list for field type_name
 }
 
 func init() { file_avs_proto_init() }
@@ -9265,7 +9301,7 @@ func file_avs_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_avs_proto_rawDesc), len(file_avs_proto_rawDesc)),
 			NumEnums:      7,
-			NumMessages:   117,
+			NumMessages:   119,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

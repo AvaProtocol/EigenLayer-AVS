@@ -679,6 +679,11 @@ message Task {
   TaskTrigger trigger = 12;
   repeated TaskNode nodes = 13;
   repeated TaskEdge edges = 14;
+  
+  // Input variables defined at workflow creation time
+  // These variables are available globally to all nodes during execution
+  // and can be referenced using JavaScript template syntax like ${variableName}
+  map<string, google.protobuf.Value> input_variables = 15;
 }
 
 
@@ -697,6 +702,11 @@ message CreateTaskReq {
   string name                  = 6;
   repeated TaskNode nodes      = 7;
   repeated TaskEdge edges      = 8;
+  
+  // Input variables to be stored with the workflow definition
+  // These variables will be available globally to all nodes during execution
+  // and can be referenced using JavaScript template syntax like ${variableName}
+  map<string, google.protobuf.Value> input_variables = 9;
 }
 
 message CreateTaskResp {
