@@ -1,5 +1,7 @@
 # Ava Protocol Automation On Ethereum
 
+> **Latest Update**: Enhanced with structured error system (ErrorCode enum) and improved operator reconnection logic for better reliability.
+
 The Ava Protocol AVS can be compiled directly using Go version 1.22+. Ensure you have the appropriate version of Go installed on your development environment.
 
 Check Go version:
