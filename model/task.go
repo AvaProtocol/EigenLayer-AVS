@@ -129,13 +129,14 @@ func NewTaskFromProtobuf(user *User, body *avsproto.CreateTaskReq) (*Task, error
 			Owner:              owner.Hex(),
 			SmartWalletAddress: aaAddress.Hex(),
 
-			Trigger:      body.Trigger,
-			Nodes:        body.Nodes,
-			Edges:        body.Edges,
-			Name:         body.Name,
-			ExpiredAt:    body.ExpiredAt,
-			StartAt:      body.StartAt,
-			MaxExecution: body.MaxExecution,
+			Trigger:        body.Trigger,
+			Nodes:          body.Nodes,
+			Edges:          body.Edges,
+			Name:           body.Name,
+			ExpiredAt:      body.ExpiredAt,
+			StartAt:        body.StartAt,
+			MaxExecution:   body.MaxExecution,
+			InputVariables: body.InputVariables, // Store input variables with the task
 
 			// initial state for task
 			Status: avsproto.TaskStatus_Active,

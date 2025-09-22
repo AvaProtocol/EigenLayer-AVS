@@ -471,6 +471,16 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 			"chain":              "Unknown", // Default value, will be updated if chainId is available
 		}
 		v.AddVar(WorkflowContextVarName, workflowContext)
+
+		// Add input variables from task definition to VM
+		// These variables were defined during workflow creation and are now available globally
+		if task.InputVariables != nil {
+			for key, protoValue := range task.InputVariables {
+				// Convert protobuf Value to Go native type
+				nativeValue := protoValue.AsInterface()
+				v.AddVar(key, nativeValue)
+			}
+		}
 	}
 
 	// Parse trigger-specific data based on the flattened structure
