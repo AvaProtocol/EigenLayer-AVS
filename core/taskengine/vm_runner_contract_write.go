@@ -1646,31 +1646,17 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// Check for gas information from Tenderly simulations
 	if !hasGasInfo {
 		// Try to extract gas info from simulation results stored in the results
-		// This is a bit more complex since we need to check if any of the results came from Tenderly
 		for _, methodResult := range results {
-			// Check if this looks like a Tenderly simulation result
 			if methodResult.Receipt != nil {
 				if receiptMap := methodResult.Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
-					// Look for simulation-specific patterns
-					if txHash, ok := receiptMap["transactionHash"].(string); ok && strings.HasPrefix(txHash, "0x") && len(txHash) == 66 {
-						// Check if this receipt has standard gas information (could be from Tenderly)
-						if gasUsedHex, ok := receiptMap["gasUsed"].(string); ok && gasUsedHex != "" && gasUsedHex != StandardGasCostHex && gasUsedHex != DefaultGasPriceHex {
-							// This looks like real gas data, not our fallback values
-							gasUsedBig := new(big.Int)
-							if _, ok := gasUsedBig.SetString(strings.TrimPrefix(gasUsedHex, "0x"), 16); ok {
-								// Try to get gas price - only consider it complete gas info if we have both
-								if effectiveGasPriceHex, ok := receiptMap["effectiveGasPrice"].(string); ok && effectiveGasPriceHex != "" && effectiveGasPriceHex != DefaultGasPriceHex {
-									gasPriceBig := new(big.Int)
-									if _, ok := gasPriceBig.SetString(strings.TrimPrefix(effectiveGasPriceHex, "0x"), 16); ok {
-										// Only set gas info when we have BOTH real gas used AND real gas price
-										totalGasUsed = gasUsedBig.String()
-										totalGasPrice = gasPriceBig.String()
-										totalGasCost = new(big.Int).Mul(gasUsedBig, gasPriceBig).String()
-										hasGasInfo = true
-									}
-								}
-							}
-						}
+					// Use helper method to extract and validate gas data
+					gasResult := r.extractValidGasDataFromReceipt(receiptMap)
+					if gasResult.valid {
+						totalGasUsed = gasResult.gasUsed.String()
+						totalGasPrice = gasResult.gasPrice.String()
+						totalGasCost = gasResult.gasCost.String()
+						hasGasInfo = true
+						break // Found valid gas info, no need to check other results
 					}
 				}
 			}
@@ -2064,6 +2050,58 @@ func (r *ContractWriteProcessor) validateUniswapExactInputSingle(callData string
 	// So we skip deadline validation for this method
 
 	return nil
+}
+
+// gasDataResult represents the result of gas data extraction from a receipt
+type gasDataResult struct {
+	gasUsed  *big.Int
+	gasPrice *big.Int
+	gasCost  *big.Int
+	valid    bool
+}
+
+// extractValidGasDataFromReceipt extracts and validates gas data from a transaction receipt
+// Returns gasDataResult with valid=true only if both gas used and gas price are real values
+// (not our fallback constants) and can be parsed successfully
+func (r *ContractWriteProcessor) extractValidGasDataFromReceipt(receiptMap map[string]interface{}) gasDataResult {
+	result := gasDataResult{valid: false}
+
+	// Look for simulation-specific patterns
+	txHash, ok := receiptMap["transactionHash"].(string)
+	if !ok || !strings.HasPrefix(txHash, "0x") || len(txHash) != 66 {
+		return result
+	}
+
+	// Check if this receipt has standard gas information (could be from Tenderly)
+	gasUsedHex, ok := receiptMap["gasUsed"].(string)
+	if !ok || gasUsedHex == "" || gasUsedHex == StandardGasCostHex {
+		return result
+	}
+
+	// This looks like real gas data, not our fallback values
+	gasUsedBig := new(big.Int)
+	if _, ok := gasUsedBig.SetString(strings.TrimPrefix(gasUsedHex, "0x"), 16); !ok {
+		return result
+	}
+
+	// Try to get gas price - only consider it complete gas info if we have both
+	effectiveGasPriceHex, ok := receiptMap["effectiveGasPrice"].(string)
+	if !ok || effectiveGasPriceHex == "" || effectiveGasPriceHex == DefaultGasPriceHex {
+		return result
+	}
+
+	gasPriceBig := new(big.Int)
+	if _, ok := gasPriceBig.SetString(strings.TrimPrefix(effectiveGasPriceHex, "0x"), 16); !ok {
+		return result
+	}
+
+	// Only set gas info when we have BOTH real gas used AND real gas price
+	result.gasUsed = gasUsedBig
+	result.gasPrice = gasPriceBig
+	result.gasCost = new(big.Int).Mul(gasUsedBig, gasPriceBig)
+	result.valid = true
+
+	return result
 }
 
 // validateUniswapQuoteExactInputSingle validates Uniswap V3 quoteExactInputSingle parameters

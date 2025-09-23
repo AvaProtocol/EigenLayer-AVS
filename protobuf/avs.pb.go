@@ -1960,7 +1960,7 @@ type Execution struct {
 	Index int64 `protobuf:"varint,6,opt,name=index,proto3" json:"index,omitempty"`
 	// Total gas cost for the entire workflow execution (sum of all blockchain operations)
 	// Units are in wei. Use string for large numbers to avoid overflow.
-	TotalGasCost  string            `protobuf:"bytes,30,opt,name=total_gas_cost,json=totalGasCost,proto3" json:"total_gas_cost,omitempty"`
+	TotalGasCost  string            `protobuf:"bytes,7,opt,name=total_gas_cost,json=totalGasCost,proto3" json:"total_gas_cost,omitempty"`
 	Steps         []*Execution_Step `protobuf:"bytes,8,rep,name=steps,proto3" json:"steps,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -8436,7 +8436,7 @@ const file_avs_proto_rawDesc = "" +
 	"\x06status\x18\x04 \x01(\x0e2\x1b.aggregator.ExecutionStatusR\x06status\x12\x14\n" +
 	"\x05error\x18\x05 \x01(\tR\x05error\x12\x14\n" +
 	"\x05index\x18\x06 \x01(\x03R\x05index\x12$\n" +
-	"\x0etotal_gas_cost\x18\x1e \x01(\tR\ftotalGasCost\x120\n" +
+	"\x0etotal_gas_cost\x18\a \x01(\tR\ftotalGasCost\x120\n" +
 	"\x05steps\x18\b \x03(\v2\x1a.aggregator.Execution.StepR\x05steps\x1a\xa2\v\n" +
 	"\x04Step\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +

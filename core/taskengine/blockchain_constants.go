@@ -15,7 +15,8 @@ const (
 	DefaultGasLimit = 10000000
 
 	// DefaultGasPrice represents 0.5 gwei in wei (500 million wei)
-	// Updated to be more realistic based on current network conditions (~0.17 gwei as of Sept 2025)
+	// Although current network conditions are ~0.17 gwei as of Sept 2025, we use 0.5 gwei as a conservative fallback
+	// to account for potential network volatility and to reduce the risk of underpriced transactions.
 	// Used as fallback gas price when real gas price is not available from network or simulation
 	DefaultGasPrice = uint64(500000000)
 

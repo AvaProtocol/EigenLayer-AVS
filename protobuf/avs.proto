@@ -609,7 +609,7 @@ message Execution {
   
   // Total gas cost for the entire workflow execution (sum of all blockchain operations)
   // Units are in wei. Use string for large numbers to avoid overflow.
-  string total_gas_cost = 30;
+  string total_gas_cost = 7;
 
   message Step {
     string id = 1;
