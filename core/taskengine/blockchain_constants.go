@@ -13,6 +13,16 @@ const (
 	// DefaultGasLimit represents the default gas limit used for UserOp construction before bundler estimation
 	// This is a placeholder value that gets replaced by actual gas estimation from the bundler
 	DefaultGasLimit = 10000000
+
+	// DefaultGasPrice represents 0.5 gwei in wei (500 million wei)
+	// Although current network conditions are ~0.17 gwei as of Sept 2025, we use 0.5 gwei as a conservative fallback
+	// to account for potential network volatility and to reduce the risk of underpriced transactions.
+	// Used as fallback gas price when real gas price is not available from network or simulation
+	DefaultGasPrice = uint64(500000000)
+
+	// DefaultGasPriceHex is the hexadecimal representation of DefaultGasPrice (0.5 gwei)
+	// Used in transaction receipts and other hex-encoded contexts
+	DefaultGasPriceHex = "0x1dcd6500"
 )
 
 // Contract method constants

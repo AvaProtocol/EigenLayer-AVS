@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"regexp"
 	"strings"
 	"sync"
@@ -2977,6 +2978,54 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int, ExecutionResultStatus)
 	}
 
 	return success, errorMessage, failedCount, resultStatus
+}
+
+// CalculateTotalGasCost sums up gas costs from all execution steps that involve blockchain operations
+func (v *VM) CalculateTotalGasCost() string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	totalGasCost := new(big.Int)
+	gasCostFound := false
+
+	for _, step := range v.ExecutionLogs {
+		// Only consider blockchain operations that might have gas costs
+		if step.Type == "CONTRACT_WRITE" || step.Type == "ETH_TRANSFER" {
+			if step.TotalGasCost != "" && step.TotalGasCost != "0" {
+				if stepGasCost, ok := new(big.Int).SetString(step.TotalGasCost, 10); ok {
+					totalGasCost.Add(totalGasCost, stepGasCost)
+					gasCostFound = true
+					if v.logger != nil {
+						v.logger.Debug("Added gas cost to total",
+							"step_id", step.Id,
+							"step_type", step.Type,
+							"step_gas_cost", step.TotalGasCost)
+					}
+				}
+			}
+		}
+	}
+
+	if !gasCostFound {
+		return "0"
+	}
+
+	totalGasCostStr := totalGasCost.String()
+	if v.logger != nil {
+		v.logger.Info("✅ Calculated total gas cost for workflow",
+			"total_gas_cost_wei", totalGasCostStr,
+			"steps_with_gas", func() int {
+				count := 0
+				for _, step := range v.ExecutionLogs {
+					if step.TotalGasCost != "" && step.TotalGasCost != "0" {
+						count++
+					}
+				}
+				return count
+			}())
+	}
+
+	return totalGasCostStr
 }
 
 // formatExecutionErrorMessage creates a standardized error message for execution results
