@@ -748,6 +748,93 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 			}
 		}
 
+		// Extract gas information from Tenderly response
+		if m, ok := resultForExtraction.(map[string]interface{}); ok {
+			// Gas information can be in multiple locations in Tenderly response:
+			// 1. transaction.gas_used
+			// 2. simulation.gas_used
+			// 3. transaction.gas_price
+			var gasUsed, gasPrice string
+
+			// Check transaction object for gas information
+			if tx, ok := m["transaction"].(map[string]interface{}); ok {
+				if gu, exists := tx["gas_used"]; exists {
+					if gasUsedStr, ok := gu.(string); ok {
+						gasUsed = gasUsedStr
+					} else if gasUsedFloat, ok := gu.(float64); ok {
+						gasUsed = fmt.Sprintf("%.0f", gasUsedFloat)
+					} else if gasUsedInt, ok := gu.(int64); ok {
+						gasUsed = fmt.Sprintf("%d", gasUsedInt)
+					}
+				}
+				if gp, exists := tx["gas_price"]; exists {
+					if gasPriceStr, ok := gp.(string); ok {
+						gasPrice = gasPriceStr
+					} else if gasPriceFloat, ok := gp.(float64); ok {
+						gasPrice = fmt.Sprintf("%.0f", gasPriceFloat)
+					} else if gasPriceInt, ok := gp.(int64); ok {
+						gasPrice = fmt.Sprintf("%d", gasPriceInt)
+					}
+				}
+			}
+
+			// Check simulation object for gas information (fallback)
+			if gasUsed == "" {
+				if sim, ok := m["simulation"].(map[string]interface{}); ok {
+					if gu, exists := sim["gas_used"]; exists {
+						if gasUsedStr, ok := gu.(string); ok {
+							gasUsed = gasUsedStr
+						} else if gasUsedFloat, ok := gu.(float64); ok {
+							gasUsed = fmt.Sprintf("%.0f", gasUsedFloat)
+						} else if gasUsedInt, ok := gu.(int64); ok {
+							gasUsed = fmt.Sprintf("%d", gasUsedInt)
+						}
+					}
+					if gasPrice == "" {
+						if gp, exists := sim["gas_price"]; exists {
+							if gasPriceStr, ok := gp.(string); ok {
+								gasPrice = gasPriceStr
+							} else if gasPriceFloat, ok := gp.(float64); ok {
+								gasPrice = fmt.Sprintf("%.0f", gasPriceFloat)
+							} else if gasPriceInt, ok := gp.(int64); ok {
+								gasPrice = fmt.Sprintf("%d", gasPriceInt)
+							}
+						}
+					}
+				}
+			}
+
+			// Calculate total gas cost if both gas_used and gas_price are available
+			if gasUsed != "" && gasPrice != "" {
+				// Convert strings to big.Int for accurate calculation
+				gasUsedBig, gasUsedOk := new(big.Int).SetString(gasUsed, 10)
+				gasPriceBig, gasPriceOk := new(big.Int).SetString(gasPrice, 10)
+				if gasUsedOk && gasPriceOk {
+					totalGasCost := new(big.Int).Mul(gasUsedBig, gasPriceBig)
+					result.GasUsed = gasUsed
+					result.GasPrice = gasPrice
+					result.TotalGasCost = totalGasCost.String()
+					tc.logger.Info("✅ Extracted gas information from Tenderly",
+						"gas_used", gasUsed,
+						"gas_price", gasPrice,
+						"total_gas_cost", result.TotalGasCost)
+				} else {
+					tc.logger.Warn("Failed to parse gas values as big integers",
+						"gas_used", gasUsed,
+						"gas_price", gasPrice)
+					// Store individual values even if calculation failed
+					result.GasUsed = gasUsed
+					result.GasPrice = gasPrice
+				}
+			} else if gasUsed != "" {
+				// Only gas used is available
+				result.GasUsed = gasUsed
+				tc.logger.Info("⚠️ Only gas_used available from Tenderly", "gas_used", gasUsed)
+			} else {
+				tc.logger.Warn("⚠️ No gas information found in Tenderly response")
+			}
+		}
+
 		// Propagate revert status from Tenderly into result.Success/Error
 		if m, ok := resultForExtraction.(map[string]interface{}); ok {
 			if sim, ok := m["simulation"].(map[string]interface{}); ok {
@@ -948,6 +1035,10 @@ type ContractWriteSimulationResult struct {
 	ReturnData      *ContractWriteReturnData      `json:"return_data,omitempty"`
 	LatestBlockHex  string                        `json:"latest_block_hex,omitempty"`
 	ReceiptLogs     []map[string]interface{}      `json:"receipt_logs,omitempty"`
+	// Gas information from Tenderly simulation
+	GasUsed      string `json:"gas_used,omitempty"`
+	GasPrice     string `json:"gas_price,omitempty"`
+	TotalGasCost string `json:"total_gas_cost,omitempty"`
 }
 
 // ContractWriteTransactionData represents transaction information for simulated writes

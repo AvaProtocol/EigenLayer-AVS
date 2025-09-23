@@ -606,6 +606,10 @@ message Execution {
   // index indicates which run this is for the workflow (0-based: 0=1st run, 1=2nd run, etc.)
   // This helps clients understand execution order without calculating based on timestamps
   int64 index = 6;
+  
+  // Total gas cost for the entire workflow execution (sum of all blockchain operations)
+  // Units are in wei. Use string for large numbers to avoid overflow.
+  string total_gas_cost = 30;
 
   message Step {
     string id = 1;
@@ -623,6 +627,12 @@ message Execution {
     google.protobuf.Value metadata = 25;
     // Optional execution context for runtime flags and extra info (e.g., is_simulated)
     google.protobuf.Value execution_context = 26;
+    
+    // Gas cost tracking fields for blockchain operations (contract_write, eth_transfer)
+    // Units are in wei for precision. Use string for large numbers to avoid overflow.
+    string gas_used = 27;       // Amount of gas consumed by the transaction
+    string gas_price = 28;      // Gas price in wei per gas unit
+    string total_gas_cost = 29; // Total cost (gas_used * gas_price) in wei
     oneof output_data {
       // Trigger outputs
       BlockTrigger.Output block_trigger = 20;

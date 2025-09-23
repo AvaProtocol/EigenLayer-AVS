@@ -441,11 +441,15 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	// Analyze execution results from all steps (including failed ones)
 	_, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
 
+	// Calculate total gas cost for the workflow
+	totalGasCost := vm.CalculateTotalGasCost()
+
 	// Update the execution record we created earlier with the final results
 	execution.EndAt = t1.UnixMilli()
 	execution.Status = convertToExecutionStatus(resultStatus) // Based on analysis of all steps
 	execution.Error = executionError                          // Comprehensive error message from failed steps
 	execution.Steps = vm.ExecutionLogs                        // Contains all steps including failed ones
+	execution.TotalGasCost = totalGasCost                     // Total gas cost for the entire workflow
 
 	// Ensure no NaN/Inf sneak into protobuf Values (which reject them)
 	sanitizeExecutionForPersistence(execution)

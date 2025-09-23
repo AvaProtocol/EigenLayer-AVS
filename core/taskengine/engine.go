@@ -2367,15 +2367,19 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Step 10: Analyze execution results from all steps
 	_, executionError, failedStepCount, resultStatus := vm.AnalyzeExecutionResult()
 
+	// Step 11: Calculate total gas cost for the workflow
+	totalGasCost := vm.CalculateTotalGasCost()
+
 	// Create execution result with proper status/error analysis
 	execution := &avsproto.Execution{
-		Id:      simulationID,
-		StartAt: triggerStartTime.UnixMilli(),           // Start with trigger start time
-		EndAt:   nodeEndTime.UnixMilli(),                // End with node completion time
-		Status:  convertToExecutionStatus(resultStatus), // Use enum status instead of boolean
-		Error:   executionError,                         // Comprehensive error message from failed steps
-		Steps:   vm.ExecutionLogs,                       // Now contains both trigger and node steps (including failed ones)
-		Index:   task.ExecutionCount,                    // Use current execution count for simulation (0-based)
+		Id:           simulationID,
+		StartAt:      triggerStartTime.UnixMilli(),           // Start with trigger start time
+		EndAt:        nodeEndTime.UnixMilli(),                // End with node completion time
+		Status:       convertToExecutionStatus(resultStatus), // Use enum status instead of boolean
+		Error:        executionError,                         // Comprehensive error message from failed steps
+		Steps:        vm.ExecutionLogs,                       // Now contains both trigger and node steps (including failed ones)
+		Index:        task.ExecutionCount,                    // Use current execution count for simulation (0-based)
+		TotalGasCost: totalGasCost,                           // Total gas cost for the entire workflow
 	}
 
 	// Log execution status based on result type

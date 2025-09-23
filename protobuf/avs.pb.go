@@ -1957,7 +1957,10 @@ type Execution struct {
 	Error   string                 `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
 	// index indicates which run this is for the workflow (0-based: 0=1st run, 1=2nd run, etc.)
 	// This helps clients understand execution order without calculating based on timestamps
-	Index         int64             `protobuf:"varint,6,opt,name=index,proto3" json:"index,omitempty"`
+	Index int64 `protobuf:"varint,6,opt,name=index,proto3" json:"index,omitempty"`
+	// Total gas cost for the entire workflow execution (sum of all blockchain operations)
+	// Units are in wei. Use string for large numbers to avoid overflow.
+	TotalGasCost  string            `protobuf:"bytes,30,opt,name=total_gas_cost,json=totalGasCost,proto3" json:"total_gas_cost,omitempty"`
 	Steps         []*Execution_Step `protobuf:"bytes,8,rep,name=steps,proto3" json:"steps,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2033,6 +2036,13 @@ func (x *Execution) GetIndex() int64 {
 		return x.Index
 	}
 	return 0
+}
+
+func (x *Execution) GetTotalGasCost() string {
+	if x != nil {
+		return x.TotalGasCost
+	}
+	return ""
 }
 
 func (x *Execution) GetSteps() []*Execution_Step {
@@ -7784,6 +7794,11 @@ type Execution_Step struct {
 	Metadata *structpb.Value `protobuf:"bytes,25,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	// Optional execution context for runtime flags and extra info (e.g., is_simulated)
 	ExecutionContext *structpb.Value `protobuf:"bytes,26,opt,name=execution_context,json=executionContext,proto3" json:"execution_context,omitempty"`
+	// Gas cost tracking fields for blockchain operations (contract_write, eth_transfer)
+	// Units are in wei for precision. Use string for large numbers to avoid overflow.
+	GasUsed      string `protobuf:"bytes,27,opt,name=gas_used,json=gasUsed,proto3" json:"gas_used,omitempty"`                  // Amount of gas consumed by the transaction
+	GasPrice     string `protobuf:"bytes,28,opt,name=gas_price,json=gasPrice,proto3" json:"gas_price,omitempty"`               // Gas price in wei per gas unit
+	TotalGasCost string `protobuf:"bytes,29,opt,name=total_gas_cost,json=totalGasCost,proto3" json:"total_gas_cost,omitempty"` // Total cost (gas_used * gas_price) in wei
 	// Types that are valid to be assigned to OutputData:
 	//
 	//	*Execution_Step_BlockTrigger
@@ -7907,6 +7922,27 @@ func (x *Execution_Step) GetExecutionContext() *structpb.Value {
 		return x.ExecutionContext
 	}
 	return nil
+}
+
+func (x *Execution_Step) GetGasUsed() string {
+	if x != nil {
+		return x.GasUsed
+	}
+	return ""
+}
+
+func (x *Execution_Step) GetGasPrice() string {
+	if x != nil {
+		return x.GasPrice
+	}
+	return ""
+}
+
+func (x *Execution_Step) GetTotalGasCost() string {
+	if x != nil {
+		return x.TotalGasCost
+	}
+	return ""
 }
 
 func (x *Execution_Step) GetOutputData() isExecution_Step_OutputData {
@@ -8392,16 +8428,16 @@ const file_avs_proto_rawDesc = "" +
 	"\x04loop\x18\x11 \x01(\v2\x14.aggregator.LoopNodeH\x00R\x04loop\x12=\n" +
 	"\vcustom_code\x18\x12 \x01(\v2\x1a.aggregator.CustomCodeNodeH\x00R\n" +
 	"customCodeB\v\n" +
-	"\ttask_type\"\xa7\f\n" +
+	"\ttask_type\"\xab\r\n" +
 	"\tExecution\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\bstart_at\x18\x02 \x01(\x03R\astartAt\x12\x15\n" +
 	"\x06end_at\x18\x03 \x01(\x03R\x05endAt\x123\n" +
 	"\x06status\x18\x04 \x01(\x0e2\x1b.aggregator.ExecutionStatusR\x06status\x12\x14\n" +
 	"\x05error\x18\x05 \x01(\tR\x05error\x12\x14\n" +
-	"\x05index\x18\x06 \x01(\x03R\x05index\x120\n" +
-	"\x05steps\x18\b \x03(\v2\x1a.aggregator.Execution.StepR\x05steps\x1a\xc4\n" +
-	"\n" +
+	"\x05index\x18\x06 \x01(\x03R\x05index\x12$\n" +
+	"\x0etotal_gas_cost\x18\x1e \x01(\tR\ftotalGasCost\x120\n" +
+	"\x05steps\x18\b \x03(\v2\x1a.aggregator.Execution.StepR\x05steps\x1a\xa2\v\n" +
 	"\x04Step\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x11 \x01(\tR\x04type\x12\x12\n" +
@@ -8412,7 +8448,10 @@ const file_avs_proto_rawDesc = "" +
 	"\x06inputs\x18\x10 \x03(\tR\x06inputs\x12.\n" +
 	"\x06config\x18\x13 \x01(\v2\x16.google.protobuf.ValueR\x06config\x122\n" +
 	"\bmetadata\x18\x19 \x01(\v2\x16.google.protobuf.ValueR\bmetadata\x12C\n" +
-	"\x11execution_context\x18\x1a \x01(\v2\x16.google.protobuf.ValueR\x10executionContext\x12F\n" +
+	"\x11execution_context\x18\x1a \x01(\v2\x16.google.protobuf.ValueR\x10executionContext\x12\x19\n" +
+	"\bgas_used\x18\x1b \x01(\tR\agasUsed\x12\x1b\n" +
+	"\tgas_price\x18\x1c \x01(\tR\bgasPrice\x12$\n" +
+	"\x0etotal_gas_cost\x18\x1d \x01(\tR\ftotalGasCost\x12F\n" +
 	"\rblock_trigger\x18\x14 \x01(\v2\x1f.aggregator.BlockTrigger.OutputH\x00R\fblockTrigger\x12S\n" +
 	"\x12fixed_time_trigger\x18\x15 \x01(\v2#.aggregator.FixedTimeTrigger.OutputH\x00R\x10fixedTimeTrigger\x12C\n" +
 	"\fcron_trigger\x18\x16 \x01(\v2\x1e.aggregator.CronTrigger.OutputH\x00R\vcronTrigger\x12F\n" +
