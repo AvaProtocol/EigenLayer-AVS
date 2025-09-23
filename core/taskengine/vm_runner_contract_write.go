@@ -1077,19 +1077,37 @@ func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *C
 	}
 
 	receiptMap := map[string]interface{}{
-		"transactionHash":   result.Transaction.Hash,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              // ✅ From Tenderly
-		"from":              result.Transaction.From,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              // ✅ From Tenderly
-		"to":                result.Transaction.To,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // ✅ From Tenderly
-		"blockNumber":       "0x1",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // Mock value for simulation
-		"blockHash":         "0x0000000000000000000000000000000000000000000000000000000000000001",                                                                                                                                                                                                                                                                                                                                                                                                                                                                 // Mock value
-		"transactionIndex":  "0x0",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // Mock value for simulation
-		"gasUsed":           StandardGasCostHex,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   // Standard gas cost for simple transaction
-		"cumulativeGasUsed": StandardGasCostHex,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   // Standard gas cost for simple transaction
-		"effectiveGasPrice": "0x3b9aca00",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         // Mock value (1 gwei)
-		"status":            receiptStatus,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        // Success/failure status based on actual result
-		"logsBloom":         "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", // Empty logs bloom
-		"logs":              receiptLogs,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          // Logs from Tenderly simulation
-		"type":              "0x2",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // EIP-1559 transaction type
+		"transactionHash":  result.Transaction.Hash,                                              // ✅ From Tenderly
+		"from":             result.Transaction.From,                                              // ✅ From Tenderly
+		"to":               result.Transaction.To,                                                // ✅ From Tenderly
+		"blockNumber":      "0x1",                                                                // Mock value for simulation
+		"blockHash":        "0x0000000000000000000000000000000000000000000000000000000000000001", // Mock value
+		"transactionIndex": "0x0",                                                                // Mock value for simulation
+		"gasUsed": func() string {
+			if gasUsed := r.getGasUsedFromTenderly(result); gasUsed != "" {
+				return gasUsed
+			}
+			// Use standard gas cost as fallback for receipt compatibility
+			return StandardGasCostHex
+		}(),
+		"cumulativeGasUsed": func() string {
+			if gasUsed := r.getGasUsedFromTenderly(result); gasUsed != "" {
+				return gasUsed
+			}
+			// Use standard gas cost as fallback for receipt compatibility
+			return StandardGasCostHex
+		}(),
+		"effectiveGasPrice": func() string {
+			if gasPrice := r.getGasPriceFromTenderly(result); gasPrice != "" {
+				return gasPrice
+			}
+			// Use default gas price as fallback for receipt compatibility
+			return DefaultGasPriceHex
+		}(),
+		"status":    receiptStatus,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        // Success/failure status based on actual result
+		"logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", // Empty logs bloom
+		"logs":      receiptLogs,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          // Logs from Tenderly simulation
+		"type":      "0x2",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // EIP-1559 transaction type
 	}
 
 	// Logs are now populated from real simulation provider (Tenderly)
@@ -1156,6 +1174,30 @@ func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *C
 }
 
 // extractMethodABI extracts ABI information for a specific method
+// getGasUsedFromTenderly extracts gas used from Tenderly simulation result or returns empty string
+func (r *ContractWriteProcessor) getGasUsedFromTenderly(result *ContractWriteSimulationResult) string {
+	if result != nil && result.GasUsed != "" {
+		// Convert decimal string to hex for receipt format
+		if gasUsedBig, ok := new(big.Int).SetString(result.GasUsed, 10); ok {
+			return fmt.Sprintf("0x%x", gasUsedBig)
+		}
+	}
+	// Return empty string when real gas data is unavailable - don't show fake values
+	return ""
+}
+
+// getGasPriceFromTenderly extracts gas price from Tenderly simulation result or returns empty string
+func (r *ContractWriteProcessor) getGasPriceFromTenderly(result *ContractWriteSimulationResult) string {
+	if result != nil && result.GasPrice != "" {
+		// Convert decimal string to hex for receipt format
+		if gasPriceBig, ok := new(big.Int).SetString(result.GasPrice, 10); ok {
+			return fmt.Sprintf("0x%x", gasPriceBig)
+		}
+	}
+	// Return empty string when real gas data is unavailable - don't show fake values
+	return ""
+}
+
 func (r *ContractWriteProcessor) extractMethodABI(method *abi.Method) map[string]interface{} {
 	if method == nil {
 		return nil
@@ -1559,6 +1601,84 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// Determine step success: any failed method or receipt.status == 0x0 marks the step as failed
 	stepSuccess, stepErrorMsg := computeWriteStepSuccess(results)
 
+	// Calculate total gas costs from all method results
+	totalGasUsed := "0"
+	totalGasPrice := "0"
+	totalGasCost := "0"
+	hasGasInfo := false
+
+	for _, methodResult := range results {
+		if methodResult.Receipt != nil {
+			if receiptMap := methodResult.Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
+				// Extract gas information from receipt
+				if gasUsedHex, ok := receiptMap["gasUsed"].(string); ok && gasUsedHex != "" {
+					// Convert hex to decimal for aggregation
+					gasUsedBig := new(big.Int)
+					if _, ok := gasUsedBig.SetString(strings.TrimPrefix(gasUsedHex, "0x"), 16); ok {
+						// Add to total gas used
+						totalGasUsedBig := new(big.Int)
+						if _, ok := totalGasUsedBig.SetString(totalGasUsed, 10); ok {
+							totalGasUsedBig.Add(totalGasUsedBig, gasUsedBig)
+							totalGasUsed = totalGasUsedBig.String()
+							hasGasInfo = true
+						}
+
+						// Get gas price (prefer effectiveGasPrice over gasPrice)
+						if effectiveGasPriceHex, ok := receiptMap["effectiveGasPrice"].(string); ok && effectiveGasPriceHex != "" {
+							gasPriceBig := new(big.Int)
+							if _, ok := gasPriceBig.SetString(strings.TrimPrefix(effectiveGasPriceHex, "0x"), 16); ok {
+								totalGasPrice = gasPriceBig.String()
+								// Calculate gas cost for this method: gasUsed * gasPrice
+								methodGasCost := new(big.Int).Mul(gasUsedBig, gasPriceBig)
+								totalGasCostBig := new(big.Int)
+								if _, ok := totalGasCostBig.SetString(totalGasCost, 10); ok {
+									totalGasCostBig.Add(totalGasCostBig, methodGasCost)
+									totalGasCost = totalGasCostBig.String()
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Check for gas information from Tenderly simulations
+	if !hasGasInfo {
+		// Try to extract gas info from simulation results stored in the results
+		for _, methodResult := range results {
+			if methodResult.Receipt != nil {
+				if receiptMap := methodResult.Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
+					// Use helper method to extract and validate gas data
+					gasResult := r.extractValidGasDataFromReceipt(receiptMap)
+					if gasResult.valid {
+						totalGasUsed = gasResult.gasUsed.String()
+						totalGasPrice = gasResult.gasPrice.String()
+						totalGasCost = gasResult.gasCost.String()
+						hasGasInfo = true
+						break // Found valid gas info, no need to check other results
+					}
+				}
+			}
+		}
+	}
+
+	// Set gas cost information in the execution step if we found any
+	if hasGasInfo && totalGasUsed != "0" {
+		s.GasUsed = totalGasUsed
+		s.GasPrice = totalGasPrice
+		s.TotalGasCost = totalGasCost
+		r.vm.logger.Info("✅ Set gas cost information in execution step",
+			"step_id", stepID,
+			"gas_used", totalGasUsed,
+			"gas_price", totalGasPrice,
+			"total_gas_cost", totalGasCost)
+	} else {
+		r.vm.logger.Debug("⚠️ No gas cost information available for execution step",
+			"step_id", stepID,
+			"results_count", len(results))
+	}
+
 	// Finalize step with computed success and error message
 	finalizeExecutionStep(s, stepSuccess, stepErrorMsg, log.String())
 
@@ -1930,6 +2050,58 @@ func (r *ContractWriteProcessor) validateUniswapExactInputSingle(callData string
 	// So we skip deadline validation for this method
 
 	return nil
+}
+
+// gasDataResult represents the result of gas data extraction from a receipt
+type gasDataResult struct {
+	gasUsed  *big.Int
+	gasPrice *big.Int
+	gasCost  *big.Int
+	valid    bool
+}
+
+// extractValidGasDataFromReceipt extracts and validates gas data from a transaction receipt
+// Returns gasDataResult with valid=true only if both gas used and gas price are real values
+// (not our fallback constants) and can be parsed successfully
+func (r *ContractWriteProcessor) extractValidGasDataFromReceipt(receiptMap map[string]interface{}) gasDataResult {
+	result := gasDataResult{valid: false}
+
+	// Look for simulation-specific patterns
+	txHash, ok := receiptMap["transactionHash"].(string)
+	if !ok || !strings.HasPrefix(txHash, "0x") || len(txHash) != 66 {
+		return result
+	}
+
+	// Check if this receipt has standard gas information (could be from Tenderly)
+	gasUsedHex, ok := receiptMap["gasUsed"].(string)
+	if !ok || gasUsedHex == "" || gasUsedHex == StandardGasCostHex {
+		return result
+	}
+
+	// This looks like real gas data, not our fallback values
+	gasUsedBig := new(big.Int)
+	if _, ok := gasUsedBig.SetString(strings.TrimPrefix(gasUsedHex, "0x"), 16); !ok {
+		return result
+	}
+
+	// Try to get gas price - only consider it complete gas info if we have both
+	effectiveGasPriceHex, ok := receiptMap["effectiveGasPrice"].(string)
+	if !ok || effectiveGasPriceHex == "" || effectiveGasPriceHex == DefaultGasPriceHex {
+		return result
+	}
+
+	gasPriceBig := new(big.Int)
+	if _, ok := gasPriceBig.SetString(strings.TrimPrefix(effectiveGasPriceHex, "0x"), 16); !ok {
+		return result
+	}
+
+	// Only set gas info when we have BOTH real gas used AND real gas price
+	result.gasUsed = gasUsedBig
+	result.gasPrice = gasPriceBig
+	result.gasCost = new(big.Int).Mul(gasUsedBig, gasPriceBig)
+	result.valid = true
+
+	return result
 }
 
 // validateUniswapQuoteExactInputSingle validates Uniswap V3 quoteExactInputSingle parameters

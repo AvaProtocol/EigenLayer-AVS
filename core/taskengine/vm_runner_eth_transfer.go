@@ -272,6 +272,34 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	// Create log message
 	logMessage := fmt.Sprintf("Real ETH transfer of %s wei to %s (tx: %s)", amountStr, destination, txHash)
 
+	// Extract gas information from receipt if available
+	if receipt != nil {
+		// Convert types.Receipt to gas cost information
+		gasUsed := receipt.GasUsed
+		gasPrice := receipt.EffectiveGasPrice
+
+		if gasUsed > 0 && gasPrice != nil && gasPrice.Cmp(big.NewInt(0)) > 0 {
+			// Calculate total gas cost: gasUsed * gasPrice
+			totalGasCost := new(big.Int).Mul(big.NewInt(int64(gasUsed)), gasPrice)
+
+			// Set gas cost fields in execution step
+			executionLog.GasUsed = big.NewInt(int64(gasUsed)).String()
+			executionLog.GasPrice = gasPrice.String()
+			executionLog.TotalGasCost = totalGasCost.String()
+
+			p.vm.logger.Info("✅ Set gas cost information for ETH transfer",
+				"step_id", stepID,
+				"gas_used", executionLog.GasUsed,
+				"gas_price", executionLog.GasPrice,
+				"total_gas_cost", executionLog.TotalGasCost)
+		} else {
+			p.vm.logger.Debug("⚠️ No gas cost information available from ETH transfer receipt",
+				"step_id", stepID,
+				"gas_used", gasUsed,
+				"gas_price", gasPrice)
+		}
+	}
+
 	// Use shared function to finalize execution step
 	finalizeExecutionStep(executionLog, true, "", logMessage)
 
