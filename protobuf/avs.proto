@@ -1110,6 +1110,10 @@ service Aggregator {
   // GetTokenMetadata allows looking up ERC20 token metadata by contract address
   rpc GetTokenMetadata(GetTokenMetadataReq) returns (GetTokenMetadataResp);
   
+  // EstimateFees provides comprehensive fee estimation for workflow deployment
+  // Includes gas costs, automation fees, smart wallet creation fees, and promotional discounts
+  // Called before CreateTask to help users understand total costs
+  rpc EstimateFees(EstimateFeesReq) returns (EstimateFeesResp);
 
 }
 
@@ -1216,6 +1220,120 @@ message SimulateTaskReq {
   repeated TaskNode nodes = 2; // All workflow nodes
   repeated TaskEdge edges = 3; // All edges connecting the nodes
   map<string, google.protobuf.Value> input_variables = 6; // Input variables for the simulation
+}
+
+// Request message for EstimateFees
+message EstimateFeesReq {
+  // Complete workflow definition for fee estimation (similar to SimulateTaskReq)
+  TaskTrigger trigger = 1;          // The trigger configuration
+  repeated TaskNode nodes = 2;      // All workflow nodes
+  repeated TaskEdge edges = 3;      // All edges connecting the nodes
+  
+  // Workflow lifecycle parameters
+  int64 created_at = 4;            // Timestamp when workflow will be created (milliseconds)
+  int64 expire_at = 5;             // Timestamp when workflow will expire (milliseconds)
+  int64 max_execution = 6;         // Maximum number of executions allowed
+  
+  // Smart wallet runner (optional - if not provided, extracted from input_variables)
+  // This is kept for backward compatibility, but input_variables.workflowContext.runner is preferred
+  string runner = 7;               // Smart wallet address to use for gas estimation
+  
+  // Input variables for workflow execution simulation
+  // Expected to contain workflowContext with runner, chainId, and other execution context
+  map<string, google.protobuf.Value> input_variables = 8;
+}
+
+// Fee amount in both native token and USD
+message FeeAmount {
+  string native_token_amount = 1;    // Amount in native token (wei for ETH)
+  string native_token_symbol = 2;    // Native token symbol (e.g., "ETH", "BNB", "MATIC")
+  string usd_amount = 3;             // Equivalent amount in USD (with 2 decimal places)
+  string ap_token_amount = 4;        // Future: Amount in AP tokens
+}
+
+// Gas fee breakdown for blockchain operations
+message GasFeeBreakdown {
+  FeeAmount total_gas_fees = 1;      // Total estimated gas costs
+  
+  // Per-operation breakdown
+  repeated GasOperationFee operations = 2;
+  
+  // Gas estimation metadata
+  string gas_price_gwei = 3;         // Current gas price in Gwei
+  string total_gas_units = 4;        // Total estimated gas units
+  bool estimation_accurate = 5;      // Whether estimation used real RPC or fallback
+  string estimation_method = 6;      // "rpc_estimate" or "tenderly_simulation" or "fallback"
+}
+
+// Individual gas operation fee
+message GasOperationFee {
+  string operation_type = 1;         // "contract_write", "eth_transfer", "smart_wallet_creation"
+  string node_id = 2;                // Associated node ID
+  string method_name = 3;            // Contract method name (for contract_write)
+  FeeAmount fee = 4;                 // Fee for this operation
+  string gas_units = 5;              // Estimated gas units for this operation
+}
+
+// Smart wallet creation fees
+message SmartWalletCreationFee {
+  bool creation_required = 1;        // Whether new smart wallet deployment is needed
+  FeeAmount creation_fee = 2;        // Gas cost for factory.createAccount()
+  FeeAmount initial_funding = 3;     // Recommended initial funding amount
+  string wallet_address = 4;         // Predicted or existing wallet address
+}
+
+// Automation fee structure based on trigger type and duration
+message AutomationFee {
+  FeeAmount base_fee = 1;            // Base automation fee
+  FeeAmount monitoring_fee = 2;      // Ongoing monitoring cost (for time/event triggers)
+  FeeAmount execution_fee = 3;       // Per-execution fee
+  
+  // Fee calculation details
+  string trigger_type = 4;           // "manual", "cron", "event", "block", "fixed_time"
+  int64 estimated_executions = 5;    // Estimated number of executions over workflow lifetime
+  int64 duration_minutes = 6;        // How long monitoring will run (minutes)
+  string fee_calculation_method = 7;  // Description of how fee was calculated
+}
+
+// Promotional discounts and fee reductions
+message FeeDiscount {
+  string discount_type = 1;          // "new_user", "volume", "promotional", "beta_program"
+  string discount_name = 2;          // Human-readable discount name
+  string applies_to = 3;             // "gas_fees", "automation_fees", "creation_fees", "all"
+  float discount_percentage = 4;     // Discount percentage (0.0 to 100.0)
+  FeeAmount discount_amount = 5;     // Absolute discount amount
+  string expiry_date = 6;           // When discount expires (ISO 8601 format)
+  string terms = 7;                  // Terms and conditions for discount
+}
+
+// Response message for EstimateFees
+message EstimateFeesResp {
+  bool success = 1;                  // Whether fee estimation was successful
+  string error = 2;                  // Error message if estimation failed
+  ErrorCode error_code = 3;          // Structured error code
+  
+  // Fee breakdown
+  GasFeeBreakdown gas_fees = 4;               // Estimated gas fees
+  AutomationFee automation_fees = 5;          // Automation and monitoring fees
+  SmartWalletCreationFee creation_fees = 6;   // Smart wallet creation fees (if needed)
+  
+  // Total fees
+  FeeAmount total_fees = 7;          // Sum of all fees
+  
+  // Discounts and promotions
+  repeated FeeDiscount discounts = 8; // Applied discounts
+  FeeAmount total_discounts = 9;     // Total discount amount
+  FeeAmount final_total = 10;        // Final total after discounts
+  
+  // Estimation metadata
+  int64 estimated_at = 11;           // Timestamp when estimation was performed
+  string chain_id = 12;              // Blockchain chain ID
+  string price_data_source = 13;     // Source of price data ("coingecko", "chainlink", "cached")
+  int64 price_data_age_seconds = 14; // Age of price data in seconds
+  
+  // Warnings and recommendations
+  repeated string warnings = 15;      // Warnings about fee estimation
+  repeated string recommendations = 16; // Recommendations for cost optimization
 }
 
 // EventCondition represents a condition to evaluate on decoded event data

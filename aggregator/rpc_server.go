@@ -24,6 +24,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/auth"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
+	"github.com/AvaProtocol/EigenLayer-AVS/core/services"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
@@ -48,6 +49,44 @@ type RpcServer struct {
 	smartWalletRpc   *ethclient.Client
 	smartWalletWsRpc *ethclient.Client // Global WebSocket client for transaction monitoring
 	chainID          *big.Int
+}
+
+// FallbackPriceService provides hardcoded fallback prices when Moralis is unavailable
+type FallbackPriceService struct{}
+
+func newFallbackPriceService() *FallbackPriceService {
+	return &FallbackPriceService{}
+}
+
+func (fps *FallbackPriceService) GetNativeTokenPriceUSD(chainID int64) (*big.Float, error) {
+	// Only include chains that the aggregator actually supports: Ethereum and Base
+	fallbackPrices := map[int64]float64{
+		1:        2500.0, // Ethereum Mainnet
+		11155111: 2500.0, // Ethereum Sepolia
+		8453:     2500.0, // Base Mainnet
+		84532:    2500.0, // Base Sepolia
+	}
+
+	if price, exists := fallbackPrices[chainID]; exists {
+		return big.NewFloat(price), nil
+	}
+	return big.NewFloat(2500.0), nil // Default ETH price
+}
+
+func (fps *FallbackPriceService) GetNativeTokenSymbol(chainID int64) string {
+	// Only include chains that the aggregator actually supports: Ethereum and Base
+	// All supported chains use ETH as the native token
+	tokenSymbols := map[int64]string{
+		1:        "ETH", // Ethereum Mainnet
+		11155111: "ETH", // Ethereum Sepolia
+		8453:     "ETH", // Base Mainnet
+		84532:    "ETH", // Base Sepolia
+	}
+
+	if symbol, exists := tokenSymbols[chainID]; exists {
+		return symbol
+	}
+	return "ETH"
 }
 
 // Get nonce of an existing smart wallet of a given owner
@@ -923,6 +962,89 @@ func (r *RpcServer) HealthCheck(ctx context.Context, req *avsproto.HealthCheckRe
 		Message:   "Aggregator is running",
 		Timestamp: uint64(time.Now().UnixMilli()),
 	}, nil
+}
+
+// EstimateFees provides comprehensive fee estimation for workflow deployment
+func (r *RpcServer) EstimateFees(ctx context.Context, req *avsproto.EstimateFeesReq) (*avsproto.EstimateFeesResp, error) {
+	// Authenticate the user
+	user, err := r.verifyAuth(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
+	}
+
+	r.config.Logger.Info("process estimate fees",
+		"user", user.Address.String(),
+		"trigger_type", req.Trigger.Type.String(),
+		"nodes_count", len(req.Nodes),
+		"runner", req.Runner)
+
+	// Validate required fields
+	if req.Trigger == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "trigger is required")
+	}
+	if len(req.Nodes) == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "at least one node is required")
+	}
+	if req.CreatedAt <= 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "created_at must be a positive timestamp")
+	}
+	if req.ExpireAt <= 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "expire_at must be a positive timestamp")
+	}
+	if req.ExpireAt <= req.CreatedAt {
+		return nil, status.Errorf(codes.InvalidArgument, "expire_at must be after created_at")
+	}
+
+	// Create price service (Moralis if API key available, otherwise fallback)
+	var priceService taskengine.PriceService
+	if r.config.MoralisApiKey != "" {
+		priceService = services.GetMoralisService(r.config.MoralisApiKey, r.config.Logger)
+	} else {
+		r.config.Logger.Warn("No Moralis API key configured, using fallback price service for fee estimation")
+		priceService = newFallbackPriceService()
+	}
+
+	// Create fee estimator
+	feeEstimator := taskengine.NewFeeEstimator(
+		r.config.Logger,
+		r.smartWalletRpc,
+		r.engine.GetTenderlyClient(),
+		r.config.SmartWallet,
+		priceService,
+	)
+
+	// Perform fee estimation
+	resp, err := feeEstimator.EstimateFees(ctx, req)
+	if err != nil {
+		r.config.Logger.Error("failed to estimate fees",
+			"error", err.Error(),
+			"user", user.Address.String(),
+			"trigger_type", req.Trigger.Type.String())
+		return nil, status.Errorf(codes.Internal, "failed to estimate fees: %v", err)
+	}
+
+	if !resp.Success {
+		// Map custom error codes to gRPC status codes
+		grpcCode := codes.Internal
+		switch resp.ErrorCode {
+		case avsproto.ErrorCode_SMART_WALLET_NOT_FOUND:
+			grpcCode = codes.NotFound
+		case avsproto.ErrorCode_INVALID_REQUEST:
+			grpcCode = codes.InvalidArgument
+		case avsproto.ErrorCode_SIMULATION_ERROR:
+			grpcCode = codes.Unavailable
+		default:
+			grpcCode = codes.Internal
+		}
+		return nil, status.Errorf(grpcCode, resp.Error)
+	}
+
+	r.config.Logger.Info("✅ fee estimation completed successfully",
+		"user", user.Address.String(),
+		"final_total_usd", resp.FinalTotal.UsdAmount,
+		"estimation_method", resp.GasFees.EstimationMethod)
+
+	return resp, nil
 }
 
 // startRpcServer initializes and establish a tcp socket on given address from

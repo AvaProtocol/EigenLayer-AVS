@@ -100,6 +100,9 @@ type Config struct {
 	TenderlyProject   string `yaml:"tenderly_project"`
 	TenderlyAccessKey string `yaml:"tenderly_access_key"`
 
+	// Moralis Web3 Data API key for token price lookup (optional)
+	MoralisApiKey string `yaml:"moralis_api_key"`
+
 	// Test private key for Go tests (optional)
 	TestPrivateKey string
 }
@@ -176,6 +179,9 @@ type ConfigRaw struct {
 	TenderlyAccount   string `yaml:"tenderly_account"`
 	TenderlyProject   string `yaml:"tenderly_project"`
 	TenderlyAccessKey string `yaml:"tenderly_access_key"`
+
+	// Moralis Web3 Data API key for token price lookup (optional)
+	MoralisApiKey string `yaml:"moralis_api_key"`
 
 	// Test private key for Go tests (optional)
 	TestPrivateKey string `yaml:"test_private_key"`
@@ -364,6 +370,9 @@ func NewConfig(configFilePath string) (*Config, error) {
 		TenderlyAccount:   configRaw.TenderlyAccount,
 		TenderlyProject:   configRaw.TenderlyProject,
 		TenderlyAccessKey: configRaw.TenderlyAccessKey,
+
+		// Pass through Moralis API key (from YAML or environment variable)
+		MoralisApiKey: firstNonEmpty(configRaw.MoralisApiKey, os.Getenv("MORALIS_API_KEY")),
 
 		// Pass through test private key (if provided in YAML)
 		TestPrivateKey: configRaw.TestPrivateKey,
