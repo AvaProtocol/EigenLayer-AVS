@@ -226,16 +226,17 @@ func (tc *TenderlyClient) getLatestRoundData(ctx context.Context, contractAddres
 }
 
 // getRealisticBlockNumber returns a realistic block number for simulation based on chain ID
+// Only includes chains that the aggregator actually supports: Ethereum and Base
 func (tc *TenderlyClient) getRealisticBlockNumber(chainID int64) uint64 {
 	switch chainID {
 	case 1: // Ethereum mainnet
 		return 19500000 + uint64(time.Now().Unix()%100000) // ~19.5M + small random offset
 	case 11155111: // Sepolia testnet
 		return 6500000 + uint64(time.Now().Unix()%100000) // ~6.5M + small random offset
-	case 137: // Polygon mainnet
-		return 52000000 + uint64(time.Now().Unix()%100000) // ~52M + small random offset
-	case 56: // BSC mainnet
-		return 35000000 + uint64(time.Now().Unix()%100000) // ~35M + small random offset
+	case 8453: // Base mainnet
+		return 11500000 + uint64(time.Now().Unix()%100000) // ~11.5M + small random offset
+	case 84532: // Base Sepolia testnet
+		return 14400000 + uint64(time.Now().Unix()%100000) // ~14.4M + small random offset
 	default:
 		// Default to Sepolia-like numbers for unknown chains
 		return 6500000 + uint64(time.Now().Unix()%100000)

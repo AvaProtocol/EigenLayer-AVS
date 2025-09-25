@@ -41,27 +41,6 @@ func TestBlockSearchRanges(t *testing.T) {
 			expectedFourMonths: 518400, // ~12 days at 2s blocks (1/10 of original 5184000)
 		},
 		{
-			name:               "BNB Smart Chain Mainnet",
-			chainID:            56,
-			expectedOneMonth:   345600,  // ~3 days at 0.75s blocks (1/10 of original 3456000)
-			expectedTwoMonths:  691200,  // ~6 days at 0.75s blocks (1/10 of original 6912000)
-			expectedFourMonths: 1382400, // ~12 days at 0.75s blocks (1/10 of original 13824000)
-		},
-		{
-			name:               "BNB Smart Chain Testnet",
-			chainID:            97,
-			expectedOneMonth:   345600,  // ~3 days at 0.75s blocks (1/10 of original 3456000)
-			expectedTwoMonths:  691200,  // ~6 days at 0.75s blocks (1/10 of original 6912000)
-			expectedFourMonths: 1382400, // ~12 days at 0.75s blocks (1/10 of original 13824000)
-		},
-		{
-			name:               "Polygon Mainnet",
-			chainID:            137,
-			expectedOneMonth:   129600, // ~3 days at 2s blocks (1/10 of original 1296000)
-			expectedTwoMonths:  259200, // ~6 days at 2s blocks (1/10 of original 2592000)
-			expectedFourMonths: 518400, // ~12 days at 2s blocks (1/10 of original 5184000)
-		},
-		{
 			name:               "Unknown Chain (defaults to Ethereum)",
 			chainID:            999999,
 			expectedOneMonth:   21600, // Default to reduced Ethereum timing (1/10 of original 216000)
@@ -128,15 +107,8 @@ func TestBlockCalculations(t *testing.T) {
 			name:           "Base - 2 second blocks",
 			blockTimeMs:    2000,
 			expectedDaily:  43200, // 86400 / 2 = 43200
-			chain:          "Base/Polygon",
+			chain:          "Base",
 			blockTimeFloat: 2.0,
-		},
-		{
-			name:           "BNB Chain - 0.75 second blocks",
-			blockTimeMs:    750,
-			expectedDaily:  115200, // 86400 / 0.75 = 115200
-			chain:          "BNB Chain",
-			blockTimeFloat: 0.75,
 		},
 	}
 
@@ -169,7 +141,8 @@ func TestBlockCalculations(t *testing.T) {
 }
 
 func BenchmarkGetChainSearchRanges(b *testing.B) {
-	chainIDs := []uint64{1, 56, 8453, 137, 11155111, 84532, 97}
+	// Only include supported chains: Ethereum and Base
+	chainIDs := []uint64{1, 11155111, 8453, 84532}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

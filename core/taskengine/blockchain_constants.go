@@ -42,6 +42,7 @@ type ChainBlockRanges struct {
 
 // BlockSearchRanges maps chain IDs to their respective block search ranges
 // These are calculated based on average block times and target time periods
+// Only includes chains that the aggregator actually supports: Ethereum and Base
 var BlockSearchRanges = map[uint64]ChainBlockRanges{
 	// Ethereum Mainnet (Chain ID: 1)
 	// Block time: ~12 seconds
@@ -73,57 +74,6 @@ var BlockSearchRanges = map[uint64]ChainBlockRanges{
 	// Base Sepolia Testnet (Chain ID: 84532)
 	// Block time: ~2 seconds (same as mainnet)
 	84532: {
-		OneMonth:   129600, // ~3 days of recent history (1/10 of 1296000)
-		TwoMonths:  259200, // ~6 days of recent history (1/10 of 2592000)
-		FourMonths: 518400, // ~12 days of recent history (1/10 of 5184000)
-	},
-
-	// BNB Smart Chain Mainnet (Chain ID: 56)
-	// Block time: ~0.75 seconds (after Maxwell hardfork)
-	// 1/10 of original ranges to balance search coverage with RPC limits
-	56: {
-		OneMonth:   345600,  // ~3 days of recent history (1/10 of 3456000)
-		TwoMonths:  691200,  // ~6 days of recent history (1/10 of 6912000)
-		FourMonths: 1382400, // ~12 days of recent history (1/10 of 13824000)
-	},
-
-	// BNB Smart Chain Testnet (Chain ID: 97)
-	// Block time: ~0.75 seconds (same as mainnet)
-	97: {
-		OneMonth:   345600,  // ~3 days of recent history (1/10 of 3456000)
-		TwoMonths:  691200,  // ~6 days of recent history (1/10 of 6912000)
-		FourMonths: 1382400, // ~12 days of recent history (1/10 of 13824000)
-	},
-
-	// Polygon Mainnet (Chain ID: 137)
-	// Block time: ~2 seconds
-	// 1/10 of original ranges to balance search coverage with RPC limits
-	137: {
-		OneMonth:   129600, // ~3 days of recent history (1/10 of 1296000)
-		TwoMonths:  259200, // ~6 days of recent history (1/10 of 2592000)
-		FourMonths: 518400, // ~12 days of recent history (1/10 of 5184000)
-	},
-
-	// Polygon Mumbai Testnet (Chain ID: 80001)
-	// Block time: ~2 seconds (same as mainnet)
-	80001: {
-		OneMonth:   129600, // ~3 days of recent history (1/10 of 1296000)
-		TwoMonths:  259200, // ~6 days of recent history (1/10 of 2592000)
-		FourMonths: 518400, // ~12 days of recent history (1/10 of 5184000)
-	},
-
-	// Avalanche C-Chain (Chain ID: 43114)
-	// Block time: ~2 seconds
-	// 1/10 of original ranges to balance search coverage with RPC limits
-	43114: {
-		OneMonth:   129600, // ~3 days of recent history (1/10 of 1296000)
-		TwoMonths:  259200, // ~6 days of recent history (1/10 of 2592000)
-		FourMonths: 518400, // ~12 days of recent history (1/10 of 5184000)
-	},
-
-	// Avalanche Fuji Testnet (Chain ID: 43113)
-	// Block time: ~2 seconds (same as mainnet)
-	43113: {
 		OneMonth:   129600, // ~3 days of recent history (1/10 of 1296000)
 		TwoMonths:  259200, // ~6 days of recent history (1/10 of 2592000)
 		FourMonths: 518400, // ~12 days of recent history (1/10 of 5184000)
