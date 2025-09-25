@@ -89,6 +89,11 @@ func (fps *FallbackPriceService) GetNativeTokenSymbol(chainID int64) string {
 	return "ETH"
 }
 
+// FallbackPriceInfo provides information about fallback pricing for logging
+func (fps *FallbackPriceService) FallbackPriceInfo() string {
+	return "using conservative ETH price of $2500"
+}
+
 // Get nonce of an existing smart wallet of a given owner
 func (r *RpcServer) GetWallet(ctx context.Context, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
 	user, err := r.verifyAuth(ctx)
@@ -1000,8 +1005,18 @@ func (r *RpcServer) EstimateFees(ctx context.Context, req *avsproto.EstimateFees
 	if r.config.MoralisApiKey != "" {
 		priceService = services.GetMoralisService(r.config.MoralisApiKey, r.config.Logger)
 	} else {
-		r.config.Logger.Warn("No Moralis API key configured, using fallback price service for fee estimation")
 		priceService = newFallbackPriceService()
+		var fallbackPriceInfo string
+		// Try to extract fallback price info for logging
+		type fallbackPricer interface {
+			FallbackPriceInfo() string
+		}
+		if fp, ok := priceService.(fallbackPricer); ok {
+			fallbackPriceInfo = fp.FallbackPriceInfo()
+		} else {
+			fallbackPriceInfo = "unknown fallback price"
+		}
+		r.config.Logger.Warn(fmt.Sprintf("No Moralis API key configured, using fallback price service for fee estimation (%s)", fallbackPriceInfo))
 	}
 
 	// Create fee estimator

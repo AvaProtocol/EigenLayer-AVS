@@ -208,7 +208,15 @@ func (ms *MoralisService) GetPriceDataAge(chainID int64) int64 {
 // fetchTokenPrice fetches token price from Moralis Web3 Data API
 func (ms *MoralisService) fetchTokenPrice(chainID int64, chainToken ChainToken) (*big.Float, error) {
 	if ms.apiKey == "" {
-		return nil, fmt.Errorf("moralis API key not configured")
+		// Try to return cached price as fallback
+		cacheKey := fmt.Sprintf("chain_%d", chainID)
+		ms.cacheMux.RLock()
+		cachedPrice, exists := ms.cache[cacheKey]
+		ms.cacheMux.RUnlock()
+		if exists {
+			return cachedPrice.Price, nil
+		}
+		return nil, fmt.Errorf("moralis API key not configured and no cached price available")
 	}
 
 	// Convert chainID to Moralis chain format
