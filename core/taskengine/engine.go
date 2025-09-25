@@ -308,6 +308,11 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 	return &e
 }
 
+// GetTenderlyClient returns the shared Tenderly client for fee estimation and simulation
+func (n *Engine) GetTenderlyClient() *TenderlyClient {
+	return n.tenderlyClient
+}
+
 func (n *Engine) Stop() {
 	if n.seq != nil {
 		if err := n.seq.Release(); err != nil {
