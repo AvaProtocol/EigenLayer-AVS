@@ -143,6 +143,22 @@ func finalizeExecutionStep(step *avsproto.Execution_Step, success bool, errorMsg
 	step.Log = logContent
 }
 
+// finalizeExecutionStepWithError finalizes an execution step and includes error code
+func finalizeExecutionStepWithError(step *avsproto.Execution_Step, success bool, err error, logContent string) {
+	step.EndAt = time.Now().UnixMilli()
+	step.Success = success
+
+	if err != nil {
+		step.Error = err.Error()
+
+		// Set error code directly for consistency with runNodeImmediately
+		errorCode := GetErrorCode(err)
+		step.ErrorCode = errorCode
+	}
+
+	step.Log = logContent
+}
+
 // ---- Shared helpers for determining step success across runners ----
 
 // hasReceiptFailure returns true if the given receipt has a status field equal to "0x0" (failure)
