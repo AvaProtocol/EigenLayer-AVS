@@ -86,7 +86,7 @@ func TestRestRequestMoralisWalletBalances(t *testing.T) {
 	require.NoError(t, err, "failed to create VM")
 
 	// Create REST API processor
-	processor := NewRestProrcessor(vm)
+	processor := NewRestProcessor(vm)
 
 	// Execute the node
 	stepID := "moralis-wallet-balances"
