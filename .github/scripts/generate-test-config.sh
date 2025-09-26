@@ -44,6 +44,11 @@ tenderly_access_key: "${TENDERLY_ACCESS_KEY}"
 
 # Test private key (only used in tests, separate from controller key)
 test_private_key: "${TEST_PRIVATE_KEY}"
+
+# Moralis API integration (if available)
+macros:
+  secrets:
+    moralis_api_key: "${MORALIS_API_KEY:-}"
 YAML
 
 echo "Verifying config/aggregator.yaml..."
