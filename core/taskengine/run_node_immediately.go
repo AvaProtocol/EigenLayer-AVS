@@ -2513,11 +2513,14 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 	// Execute the node with processed input variables
 	executionStep, err := vm.RunNodeWithInputs(node, processedInputVariables)
 	if err != nil {
-		return nil, fmt.Errorf("node execution failed: %w", err)
+		// Return the original error to preserve structured error codes
+		return nil, err
 	}
 
 	if !executionStep.Success {
-		return nil, fmt.Errorf("execution failed: %s", executionStep.Error)
+		// Return the original error to preserve structured error codes
+		// The error from RunNodeWithInputs contains the structured error with proper error codes
+		return nil, err
 	}
 
 	// Extract result

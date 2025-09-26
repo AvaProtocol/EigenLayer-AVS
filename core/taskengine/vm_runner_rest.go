@@ -495,7 +495,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	if url == "" {
 		err := NewMissingRequiredFieldError("url")
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
+		finalizeExecutionStepWithError(executionLogStep, false, err, logBuilder.String())
 		return executionLogStep, err
 	}
 
