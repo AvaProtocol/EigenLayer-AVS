@@ -619,6 +619,7 @@ message Execution {
     string name = 18;
     bool success = 2;
     string error = 13;
+    ErrorCode error_code = 31;
     string log = 12;
     repeated string inputs = 16;
     // Configuration data that was set on this trigger/node

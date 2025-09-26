@@ -250,7 +250,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	if node.Config == nil {
 		err := fmt.Errorf("CustomCodeNode Config is nil")
 		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		finalizeExecutionStep(s, false, err.Error(), sb.String())
+		finalizeExecutionStepWithError(s, false, err, sb.String())
 		return s, err
 	}
 
@@ -260,7 +260,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	if sourceStr == "" {
 		err := NewMissingRequiredFieldError("source")
 		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		finalizeExecutionStep(s, false, err.Error(), sb.String())
+		finalizeExecutionStepWithError(s, false, err, sb.String())
 		return s, err
 	}
 
@@ -279,9 +279,8 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 			if r.vm.logger != nil {
 				r.vm.logger.Error("failed to set variable in JS VM", "key", key, "error", err)
 			}
-			errMsg := fmt.Sprintf("Failed to set JS variable '%s': %v", key, err)
 			sb.WriteString(fmt.Sprintf("\nError setting JS variable '%s': %v", key, err))
-			finalizeExecutionStep(s, false, errMsg, sb.String())
+			finalizeExecutionStepWithError(s, false, fmt.Errorf("failed to set JS variable '%s': %w", key, err), sb.String())
 			return s, fmt.Errorf("failed to set JS variable '%s': %w", key, err)
 		}
 	}
@@ -304,7 +303,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	result, err := r.jsvm.RunString(codeToExecute)
 	if err != nil {
 		sb.WriteString(fmt.Sprintf("\nError executing script: %s", err.Error()))
-		finalizeExecutionStep(s, false, err.Error(), sb.String())
+		finalizeExecutionStepWithError(s, false, err, sb.String())
 		return s, err
 	}
 
@@ -313,7 +312,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	outputStruct, err := structpb.NewValue(exportedVal)
 	if err != nil {
 		sb.WriteString(fmt.Sprintf("\nError converting execution result to Value: %s", err.Error()))
-		finalizeExecutionStep(s, false, err.Error(), sb.String())
+		finalizeExecutionStepWithError(s, false, err, sb.String())
 		return s, err
 	}
 

@@ -31,6 +31,9 @@ inputs:
   test-private-key:
     description: 'Test private key for Go unit tests (separate from controller key)'
     required: true
+  moralis-api-key:
+    description: 'Moralis Web3 Data API key for token balance integration tests'
+    required: false
 runs:
   using: 'composite'
   steps:
@@ -51,5 +54,6 @@ runs:
         CONTROLLER_PRIVATE_KEY: "${{ inputs.controller-private-key }}"
         TENDERLY_ACCESS_KEY: "${{ inputs.tenderly-access-key }}"
         TEST_PRIVATE_KEY: "${{ inputs.test-private-key }}"
+        MORALIS_API_KEY: "${{ inputs.moralis-api-key }}"
       shell: bash
       run: ./.github/scripts/generate-test-config.sh
