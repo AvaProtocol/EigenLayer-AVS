@@ -1588,13 +1588,6 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// Also expose flattened decoded events under "data" for callers that read from VM vars
 	outputVars["data"] = decodedEventsData
 
-	// 🔍 DEBUG: Log what we're storing in outputVars
-	r.vm.logger.Debug("🔍 CONTRACT WRITE DEBUG - Setting outputVars",
-		"stepID", stepID,
-		"outputVars_keys", getOutputVarKeys(outputVars),
-		"decodedEventsData", decodedEventsData,
-		"decodedEventsData_size", len(decodedEventsData))
-
 	// Use shared function to set output variable for this step
 	setNodeOutputData(r.CommonProcessor, stepID, outputVars)
 

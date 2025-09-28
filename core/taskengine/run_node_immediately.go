@@ -2517,17 +2517,18 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 		return nil, err
 	}
 
-	if !executionStep.Success {
-		// Return the original error to preserve structured error codes
-		// The error from RunNodeWithInputs contains the structured error with proper error codes
-		return nil, err
+	// ALWAYS extract result (even for failed steps) to ensure consistent success/error fields
+	result, extractErr := n.extractExecutionResult(executionStep)
+	if extractErr != nil {
+		return nil, extractErr
 	}
 
-	// Extract result
-	result, err := n.extractExecutionResult(executionStep)
-	if err != nil {
-		return nil, err
+	// For failed steps, still return the result (which now contains success=false, error=message)
+	// but also return the original error for structured error codes
+	if !executionStep.Success {
+		return result, err
 	}
+
 	return result, nil
 }
 
@@ -2609,6 +2610,7 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		} else {
 			result = map[string]interface{}{"data": iface}
 		}
+
 	} else if contractRead := executionStep.GetContractRead(); contractRead != nil {
 		// ContractRead now returns a single flattened object directly
 		// Data is in output; metadata is at step level
@@ -2717,31 +2719,11 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		}
 	}
 
-	// If no specific data was extracted, include basic execution info
-	// BUT preserve empty objects/arrays as-is for consistency
-	if len(result) == 0 {
-		// Check if this was a successful execution with explicitly empty result
-		if executionStep.Success && executionStep.Error == "" {
-			// Check the node type to determine appropriate empty structure
-			// No special handling for CustomCode - it should return exactly what the code returns
-			result["success"] = executionStep.Success
-			result["nodeId"] = executionStep.Id
-			if executionStep.Error != "" {
-				result["error"] = executionStep.Error
-			}
-		} else {
-			result["success"] = executionStep.Success
-			result["nodeId"] = executionStep.Id
-			if executionStep.Error != "" {
-				result["error"] = executionStep.Error
-			}
-		}
-	} else {
-		result["success"] = executionStep.Success
-		result["nodeId"] = executionStep.Id
-		if executionStep.Error != "" {
-			result["error"] = executionStep.Error
-		}
+	// ALWAYS add step success/error fields for ALL node types (general approach)
+	// This ensures consistent behavior across runNodeImmediately, runTrigger, and simulateTask
+	result["success"] = executionStep.Success
+	if executionStep.Error != "" {
+		result["error"] = executionStep.Error
 	}
 
 	return result, nil
@@ -2852,25 +2834,72 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 	// Convert result to the appropriate protobuf output type
 	// Success/Error are already encoded inside 'result' for immediate execution path
-	resp := &avsproto.RunNodeWithInputsResp{Success: true}
+
+	// Extract success/error from result (now consistently populated by extractExecutionResult for all node types)
+	var responseSuccess bool = true
+	var responseError string = ""
+
+	if result != nil {
+		if successVal, ok := result["success"]; ok {
+			if successBool, ok := successVal.(bool); ok {
+				responseSuccess = successBool
+			}
+		}
+		if errorVal, hasError := result["error"]; hasError {
+			if errorStr, ok := errorVal.(string); ok && errorStr != "" {
+				responseError = errorStr
+			}
+		}
+
+	}
+
+	resp := &avsproto.RunNodeWithInputsResp{
+		Success:   responseSuccess,
+		Error:     responseError,
+		ErrorCode: avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED, // Default for successful operations
+	}
 
 	// Set the appropriate output data based on the node type
 	// Always set output data structure even if result is empty to avoid OUTPUT_DATA_NOT_SET
 	switch nodeTypeStr {
 	case NodeTypeRestAPI:
-		// Convert result directly to protobuf Value for REST API (no Any wrapping needed)
-		valueData, err := structpb.NewValue(result)
+		// For REST API: extract data/error to top level, put raw response in metadata
+		var cleanData interface{}
+		var rawResponse interface{}
+
+		if result != nil {
+			// Extract the raw response for metadata
+			rawResponse = result
+
+			// Extract only the 'data' field from the raw response for top-level data
+			if dataField, ok := result["data"]; ok {
+				cleanData = dataField
+			} else {
+				cleanData = map[string]interface{}{}
+			}
+		}
+
+		// Convert clean data to protobuf Value
+		valueData, err := structpb.NewValue(cleanData)
 		if err != nil {
 			return &avsproto.RunNodeWithInputsResp{
 				Success: false,
 				Error:   fmt.Sprintf("failed to convert REST API output: %v", err),
 			}, nil
 		}
+
 		restOutput := &avsproto.RestAPINode_Output{
 			Data: valueData,
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{
 			RestApi: restOutput,
+		}
+
+		// Set raw response as metadata
+		if rawResponse != nil {
+			if metadataValue, err := structpb.NewValue(rawResponse); err == nil {
+				resp.Metadata = metadataValue
+			}
 		}
 	case NodeTypeCustomCode:
 		// For CustomCode immediate execution, return exactly what the JavaScript code returned
@@ -3140,7 +3169,9 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		if len(resultsArray) > 0 {
 			if metadataValue, err := structpb.NewValue(resultsArray); err == nil {
 				resp.Metadata = metadataValue
+			} else {
 			}
+		} else {
 		}
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractWrite{
 			ContractWrite: contractWriteOutput,
@@ -3330,6 +3361,11 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
 			resp.ExecutionContext = ctxVal
 		}
+	}
+
+	// For failed operations, set a non-zero error code so it doesn't serialize as undefined
+	if !resp.Success {
+		resp.ErrorCode = avsproto.ErrorCode_INVALID_REQUEST // Use a non-zero error code
 	}
 
 	return resp, nil
