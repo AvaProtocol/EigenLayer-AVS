@@ -1846,27 +1846,91 @@ func (n *Engine) instructOperatorImmediateTrigger(taskID string) error {
 			"current_block", currentBlock)
 	}
 
-	// Add immediate trigger instruction to pending notifications
-	// This will be sent to operators in the next batch
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	// Create immediate trigger notification for all connected operators
-	notification := PendingNotification{
-		TaskID:    taskID,
-		Operation: avsproto.MessageOp_ImmediateTrigger,
-		Timestamp: time.Now(),
+	// Get the task to include proper metadata
+	task, err := n.GetTaskByID(taskID)
+	if err != nil {
+		return fmt.Errorf("failed to get task for immediate trigger: %w", err)
 	}
 
-	// Add to pending notifications for all operators
+	// Send immediate trigger instruction directly to operators with task metadata
+	// This bypasses the batched notification system to ensure operators get complete task information
+	n.streamsMutex.RLock()
+	operatorStreams := make(map[string]avsproto.Node_SyncMessagesServer)
+	for operatorAddr, stream := range n.operatorStreams {
+		operatorStreams[operatorAddr] = stream
+	}
+	n.streamsMutex.RUnlock()
+
+	// Send immediate trigger notification to ALL connected operators
+	// For immediate triggers, we don't wait for task assignment - we send to all connected operators
+	// The operators will handle the trigger if they're capable, regardless of current task assignments
+	n.lock.Lock()
+	allConnectedOperators := make([]string, 0)
 	for operatorAddr := range n.trackSyncedTasks {
-		n.pendingNotifications[operatorAddr] = append(n.pendingNotifications[operatorAddr], notification)
-		if n.logger != nil {
-			n.logger.Debug("Added immediate trigger notification for operator",
-				"operator", operatorAddr,
-				"task_id", taskID,
-				"current_block", currentBlock)
+		allConnectedOperators = append(allConnectedOperators, operatorAddr)
+	}
+	n.lock.Unlock()
+
+	// Send immediate trigger notification with complete task metadata to all connected operators
+	successCount := 0
+	for _, operatorAddr := range allConnectedOperators {
+		if stream, exists := operatorStreams[operatorAddr]; exists {
+			resp := avsproto.SyncMessagesResp{
+				Id: taskID,
+				Op: avsproto.MessageOp_ImmediateTrigger,
+				TaskMetadata: &avsproto.SyncMessagesResp_TaskMetadata{
+					TaskId:    task.Id,
+					Remain:    task.MaxExecution,
+					ExpiredAt: task.ExpiredAt,
+					Trigger:   task.Trigger,
+					StartAt:   task.StartAt,
+				},
+			}
+
+			// Send with timeout to prevent hanging
+			done := make(chan error, 1)
+			go func() {
+				done <- stream.Send(&resp)
+			}()
+
+			select {
+			case err := <-done:
+				if err != nil {
+					if n.logger != nil {
+						n.logger.Error("Failed to send immediate trigger notification to operator",
+							"operator", operatorAddr,
+							"task_id", taskID,
+							"error", err)
+					}
+				} else {
+					successCount++
+					if n.logger != nil {
+						n.logger.Debug("✅ Sent immediate trigger notification to operator",
+							"operator", operatorAddr,
+							"task_id", taskID,
+							"current_block", currentBlock)
+					}
+				}
+			case <-time.After(2 * time.Second):
+				if n.logger != nil {
+					n.logger.Warn("⏰ Timeout sending immediate trigger notification to operator",
+						"operator", operatorAddr,
+						"task_id", taskID,
+						"timeout", "2s")
+				}
+			}
 		}
+	}
+
+	if successCount == 0 {
+		return fmt.Errorf("failed to send immediate trigger notification to any operator")
+	}
+
+	if n.logger != nil {
+		n.logger.Info("✅ Successfully sent immediate trigger notifications",
+			"task_id", taskID,
+			"operators_notified", successCount,
+			"total_connected_operators", len(allConnectedOperators))
 	}
 
 	return nil
