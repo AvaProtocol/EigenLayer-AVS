@@ -501,7 +501,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 					},
 					"conditions": []interface{}{
 						map[string]interface{}{
-							"fieldName": "current",
+							"fieldName": "AnswerUpdated.current", // Use nested field path for new data structure
 							"operator":  "gt",
 							"value":     "100000000", // $1.00 - very low threshold to ensure match
 							"fieldType": "int256",
@@ -533,11 +533,15 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 
 		// Check if we have the new consistent format: parsed fields in data, raw log in metadata
 		if eventData, hasData := result["data"].(map[string]interface{}); hasData && eventData != nil {
-			// New format: parsed ABI fields in data
-			assert.NotNil(t, eventData["current"], "Should have parsed current price")
-			assert.NotNil(t, eventData["roundId"], "Should have parsed round ID")
-			assert.NotNil(t, eventData["updatedAt"], "Should have parsed updated timestamp")
-			assert.NotNil(t, eventData["eventName"], "Should have parsed event name")
+			// New nested format: parsed ABI fields nested under event name
+			if answerUpdatedData, hasAnswerUpdated := eventData["AnswerUpdated"].(map[string]interface{}); hasAnswerUpdated {
+				assert.NotNil(t, answerUpdatedData["current"], "Should have parsed current price")
+				assert.NotNil(t, answerUpdatedData["roundId"], "Should have parsed round ID")
+				assert.NotNil(t, answerUpdatedData["updatedAt"], "Should have parsed updated timestamp")
+				fmt.Printf("✅ New nested format detected: event fields under 'AnswerUpdated' key\n")
+			} else {
+				t.Errorf("Expected AnswerUpdated event data in nested format")
+			}
 
 			// Check metadata contains raw blockchain log fields
 			if metadata, hasMetadata := result["metadata"].(map[string]interface{}); hasMetadata && metadata != nil {
@@ -545,7 +549,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 				assert.NotNil(t, metadata["blockNumber"], "Should have block number in metadata")
 				assert.NotNil(t, metadata["topics"], "Should have topics in metadata")
 				assert.NotNil(t, metadata["data"], "Should have raw data in metadata")
-				fmt.Printf("✅ New consistent format detected: parsed fields in data, raw log in metadata\n")
+				fmt.Printf("✅ New nested format detected: parsed fields nested under event name, raw log in metadata\n")
 			} else {
 				t.Errorf("Should have metadata with raw blockchain log data")
 			}

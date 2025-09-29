@@ -70,39 +70,40 @@ func TestABIFieldTyping(t *testing.T) {
 		t.Fatalf("Failed to parse event with ABI: %v", err)
 	}
 
-	// Verify the event name
-	if parsedData["eventName"] != "TestEvent" {
-		t.Errorf("Expected eventName to be 'TestEvent', got %v", parsedData["eventName"])
+	// Verify the event data is nested under the event name (correct behavior)
+	eventData, exists := parsedData["TestEvent"].(map[string]interface{})
+	if !exists {
+		t.Fatalf("Expected event data to be nested under 'TestEvent' key, got: %+v", parsedData)
 	}
 
 	// Verify address fields are hex strings (adjust for Ethereum address checksumming)
-	fromAddr := parsedData["from"].(string)
+	fromAddr := eventData["from"].(string)
 	if !strings.EqualFold(fromAddr, "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd") {
-		t.Errorf("Expected 'from' to be a hex address (case insensitive), got %v (type: %T)", parsedData["from"], parsedData["from"])
+		t.Errorf("Expected 'from' to be a hex address (case insensitive), got %v (type: %T)", eventData["from"], eventData["from"])
 	}
 
-	if parsedData["to"] != "0x1111111111111111111111111111111111111111" {
-		t.Errorf("Expected 'to' to be a hex address, got %v (type: %T)", parsedData["to"], parsedData["to"])
+	if eventData["to"] != "0x1111111111111111111111111111111111111111" {
+		t.Errorf("Expected 'to' to be a hex address, got %v (type: %T)", eventData["to"], eventData["to"])
 	}
 
 	// Verify uint256 is returned as string (to avoid precision loss)
-	if parsedData["value"] != "1000000000000000000" {
-		t.Errorf("Expected 'value' to be '1000000000000000000', got %v (type: %T)", parsedData["value"], parsedData["value"])
+	if eventData["value"] != "1000000000000000000" {
+		t.Errorf("Expected 'value' to be '1000000000000000000', got %v (type: %T)", eventData["value"], eventData["value"])
 	}
 
 	// Verify uint8 is returned as string (since the current implementation converts to string)
-	if parsedData["decimals"] != "18" {
-		t.Errorf("Expected 'decimals' to be '18', got %v (type: %T)", parsedData["decimals"], parsedData["decimals"])
+	if eventData["decimals"] != "18" {
+		t.Errorf("Expected 'decimals' to be '18', got %v (type: %T)", eventData["decimals"], eventData["decimals"])
 	}
 
 	// Verify bool is returned as actual boolean
-	if parsedData["success"] != true {
-		t.Errorf("Expected 'success' to be true, got %v (type: %T)", parsedData["success"], parsedData["success"])
+	if eventData["success"] != true {
+		t.Errorf("Expected 'success' to be true, got %v (type: %T)", eventData["success"], eventData["success"])
 	}
 
 	// Verify string is returned as string
-	if parsedData["message"] != "Test message" {
-		t.Errorf("Expected 'message' to be 'Test message', got %v (type: %T)", parsedData["message"], parsedData["message"])
+	if eventData["message"] != "Test message" {
+		t.Errorf("Expected 'message' to be 'Test message', got %v (type: %T)", eventData["message"], eventData["message"])
 	}
 
 	// Print the parsed data for debugging
@@ -240,9 +241,15 @@ func TestDecimalFormattingWithProperTypes(t *testing.T) {
 		t.Fatalf("Failed to parse event with ABI: %v", err)
 	}
 
+	// Verify the event data is nested under the event name
+	transferData, exists := parsedData["Transfer"].(map[string]interface{})
+	if !exists {
+		t.Fatalf("Expected Transfer event data to be nested under 'Transfer' key, got: %+v", parsedData)
+	}
+
 	// Verify the raw value is correct (should be string for uint256)
-	if parsedData["value"] != "1500000000000000000" {
-		t.Errorf("Expected 'value' to be '1500000000000000000', got %v", parsedData["value"])
+	if transferData["value"] != "1500000000000000000" {
+		t.Errorf("Expected 'value' to be '1500000000000000000', got %v", transferData["value"])
 	}
 
 	// Test with decimal formatting (this would require a working RPC connection in practice)
@@ -319,18 +326,19 @@ func TestValueRawPopulatedWhenDecimalsCallFails(t *testing.T) {
 		t.Fatalf("Failed to parse event with ABI: %v", err)
 	}
 
-	// Verify the event name
-	if parsedData["eventName"] != "Transfer" {
-		t.Errorf("Expected eventName to be 'Transfer', got %v", parsedData["eventName"])
+	// Verify the event data is nested under the event name (correct behavior)
+	transferData, exists := parsedData["Transfer"].(map[string]interface{})
+	if !exists {
+		t.Fatalf("Expected Transfer event data to be nested under 'Transfer' key, got: %+v", parsedData)
 	}
 
 	// Verify address fields are correctly parsed
-	fromAddr := parsedData["from"].(string)
+	fromAddr := transferData["from"].(string)
 	if !strings.EqualFold(fromAddr, "0xc60e71bd0f2e6d8832fea1a2d56091c48493c788") {
 		t.Errorf("Expected 'from' to be the correct address, got %v", fromAddr)
 	}
 
-	toAddr := parsedData["to"].(string)
+	toAddr := transferData["to"].(string)
 	if !strings.EqualFold(toAddr, "0x1234567890123456789012345678901234567890") {
 		t.Errorf("Expected 'to' to be the correct address, got %v", toAddr)
 	}
@@ -338,12 +346,12 @@ func TestValueRawPopulatedWhenDecimalsCallFails(t *testing.T) {
 	// **CRITICAL TEST**: Verify that value field contains the raw value when decimals() call fails
 	// Note: With the new backend design, we no longer create separate "Raw" fields
 	// Instead, the main field contains the raw value when decimal formatting fails
-	if parsedData["value"] != "100500000000000000000" {
-		t.Errorf("Expected 'value' to be '100500000000000000000' (raw value when formatting fails), got %v", parsedData["value"])
+	if transferData["value"] != "100500000000000000000" {
+		t.Errorf("Expected 'value' to be '100500000000000000000' (raw value when formatting fails), got %v", transferData["value"])
 	}
 
 	// Verify that decimals field is not set (since the call failed)
-	if _, hasDecimals := parsedData["decimals"]; hasDecimals {
+	if _, hasDecimals := transferData["decimals"]; hasDecimals {
 		t.Errorf("Expected 'decimals' to not be present when decimals() call fails")
 	}
 
