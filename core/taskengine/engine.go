@@ -503,6 +503,7 @@ func (n *Engine) validateNonZeroAddress(factoryAddr common.Address, methodName, 
 // GetWallet is the gRPC handler for the GetWallet RPC.
 // It uses the owner (from auth context), salt, and factory_address from payload to derive the wallet address.
 func (n *Engine) GetWallet(user *model.User, payload *avsproto.GetWalletReq) (*avsproto.GetWalletResp, error) {
+	// Allow empty factory address (uses default), but validate non-empty ones
 	if payload.GetFactoryAddress() != "" && !common.IsHexAddress(payload.GetFactoryAddress()) {
 		return nil, status.Errorf(codes.InvalidArgument, InvalidFactoryAddressError)
 	}
@@ -632,6 +633,7 @@ func (n *Engine) GetWalletFromDB(owner common.Address, smartWalletAddress string
 // It uses the owner (from auth context), salt, and factory_address from payload to identify/derive the wallet.
 // It then sets the IsHidden status for that wallet.
 func (n *Engine) SetWallet(owner common.Address, payload *avsproto.SetWalletReq) (*avsproto.GetWalletResp, error) {
+	// Allow empty factory address (uses default), but validate non-empty ones
 	if payload.GetFactoryAddress() != "" && !common.IsHexAddress(payload.GetFactoryAddress()) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid factory address format: %s", payload.GetFactoryAddress())
 	}
@@ -751,7 +753,7 @@ func (n *Engine) CreateTask(user *model.User, taskPayload *avsproto.CreateTaskRe
 	}
 
 	if taskPayload.SmartWalletAddress != "" {
-		if !ValidWalletAddress(taskPayload.SmartWalletAddress) {
+		if !common.IsHexAddress(taskPayload.SmartWalletAddress) {
 			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
 		}
 
@@ -1651,7 +1653,7 @@ func (n *Engine) ListTasksByUser(user *model.User, payload *avsproto.ListTasksRe
 			return nil, status.Errorf(codes.InvalidArgument, MissingSmartWalletAddressError)
 		}
 
-		if !ValidWalletAddress(smartWalletAddress) {
+		if !common.IsHexAddress(smartWalletAddress) {
 			return nil, status.Errorf(codes.InvalidArgument, InvalidSmartAccountAddressError)
 		}
 

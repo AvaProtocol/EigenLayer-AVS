@@ -1455,7 +1455,7 @@ func (v *VM) runContractWrite(stepID string, node *avsproto.ContractWriteNode) (
 	if wfCtxIface, ok := v.vars[WorkflowContextVarName]; ok {
 		if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
 			if runnerIface, ok := wfCtx["runner"]; ok {
-				if runnerStr, ok := runnerIface.(string); ok && runnerStr != "" && common.IsHexAddress(runnerStr) {
+				if runnerStr, ok := runnerIface.(string); ok && common.IsHexAddress(runnerStr) {
 					v.AddVar("aa_sender", runnerStr)
 					if v.logger != nil {
 						v.logger.Info("🔄 VM DEBUG - Set aa_sender from workflowContext.runner",

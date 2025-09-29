@@ -32,6 +32,131 @@ ap-avs aggregator
 
 Note: The Ava Protocol team currently manages the aggregator, and the communication IP address between the operator and the aggregator is hardcoded in the operator.
 
+### Configurable Fee Rates
+
+The aggregator supports configurable fee rates for workflow execution and monitoring. This allows for dynamic pricing adjustments without code deployments, environment-specific pricing, and A/B testing of pricing models.
+
+#### Configuration Overview
+
+Fee rates are completely **optional** and **backward compatible**. The aggregator will work exactly as before without any configuration changes. When fee rates are configured, they override the hardcoded defaults.
+
+#### Adding Fee Configuration
+
+To configure custom fee rates, add a `fee_rates:` section to your existing aggregator YAML configuration file:
+
+```yaml
+# Your existing aggregator config (unchanged)
+environment: development
+db_path: /tmp/ap-avs/db
+ecdsa_private_key: your_private_key_here
+# ... other existing config fields ...
+
+# 🆕 Optional fee rates configuration
+fee_rates:
+  # Base fees (one-time per workflow)
+  base_fee_usd: 0.0
+  
+  # Monitoring fees (per minute) - cost to monitor triggers
+  manual_monitoring_fee_usd_per_minute: 0.0      # Manual triggers free
+  fixed_time_monitoring_fee_usd_per_minute: 0.000017  # ~$0.01/day
+  cron_monitoring_fee_usd_per_minute: 0.000033        # ~$0.02/day
+  block_monitoring_fee_usd_per_minute: 0.000033       # ~$0.02/day
+  event_monitoring_fee_usd_per_minute: 0.000083       # ~$0.05/day base
+  
+  # Per-execution fees - cost for each trigger activation
+  manual_execution_fee_usd: 0.0      # Manual executions free
+  scheduled_execution_fee_usd: 0.005 # $0.005 per scheduled execution
+  block_execution_fee_usd: 0.01      # $0.01 per block trigger
+  event_execution_fee_usd: 0.01      # $0.01 per event trigger
+  
+  # Event monitoring scaling factors
+  event_address_fee_usd_per_minute: 0.000008  # ~$0.005/day per address
+  event_topic_fee_usd_per_minute: 0.000003    # ~$0.002/day per topic
+```
+
+#### Configuration Files
+
+The aggregator uses configuration files from the `config/` directory:
+
+- **Default**: `./config/aggregator.yaml` 
+- **Custom**: Specify with `--config` flag
+
+**Available config files:**
+- `config/aggregator.yaml` - Default configuration
+- `config/aggregator-sepolia.yaml` - Sepolia testnet
+- `config/aggregator-base.yaml` - Base network
+- `config/aggregator-ethereum.yaml` - Ethereum mainnet
+
+#### Starting with Custom Config
+
+```bash
+# Use default config (./config/aggregator.yaml)
+./ap-avs aggregator
+
+# Use specific config file
+./ap-avs aggregator --config ./config/aggregator-sepolia.yaml
+./ap-avs aggregator -c ./path/to/your/config.yaml
+```
+
+#### Pricing Strategies
+
+**All fields are optional** - only specify rates you want to override:
+
+**Beta Testing (Free Everything):**
+```yaml
+fee_rates:
+  scheduled_execution_fee_usd: 0.0
+  block_execution_fee_usd: 0.0
+  event_execution_fee_usd: 0.0
+  # All monitoring fees default to existing values
+```
+
+**Premium Pricing (Selective Overrides):**
+```yaml
+fee_rates:
+  # Only override specific rates
+  block_execution_fee_usd: 0.02      # 2x default rate
+  event_execution_fee_usd: 0.015     # 1.5x default rate
+  # All other fees use hardcoded defaults
+```
+
+**Environment-Specific Pricing:**
+```yaml
+# Production - Higher rates
+fee_rates:
+  scheduled_execution_fee_usd: 0.01  # 2x default
+  
+# Development - Free rates  
+fee_rates:
+  scheduled_execution_fee_usd: 0.0   # Free for development
+```
+
+#### Default Values
+
+When no `fee_rates` section is provided, these hardcoded defaults are used:
+
+- **Base Fee**: $0.00 (one-time per workflow)
+- **Manual Monitoring**: $0.00/minute (free)
+- **Fixed Time Monitoring**: $0.000017/minute (~$0.01/day)
+- **Cron Monitoring**: $0.000033/minute (~$0.02/day) 
+- **Block Monitoring**: $0.000033/minute (~$0.02/day)
+- **Event Monitoring**: $0.000083/minute (~$0.05/day base)
+- **Manual Execution**: $0.00 (free)
+- **Scheduled Execution**: $0.005 per execution
+- **Block Execution**: $0.01 per execution
+- **Event Execution**: $0.01 per execution
+- **Event Address Fee**: $0.000008/minute per monitored address
+- **Event Topic Fee**: $0.000003/minute per topic filter
+
+#### Benefits
+
+- **Dynamic Pricing**: Change rates without code deployments
+- **Environment-Specific**: Different rates for dev/staging/production
+- **A/B Testing**: Test different pricing models
+- **Backward Compatible**: Works without any configuration changes
+- **Partial Overrides**: Only specify rates you want to change
+- **Zero Disruption**: Existing configurations continue to work
+
 # How it works
 
 <table><tr><td bgcolor='white'><img src="docs/highlevel-diagram.png"/></td></tr></table>

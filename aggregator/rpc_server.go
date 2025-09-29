@@ -1019,14 +1019,28 @@ func (r *RpcServer) EstimateFees(ctx context.Context, req *avsproto.EstimateFees
 		r.config.Logger.Warn(fmt.Sprintf("No Moralis API key configured, using fallback price service for fee estimation (%s)", fallbackPriceInfo))
 	}
 
-	// Create fee estimator
-	feeEstimator := taskengine.NewFeeEstimator(
-		r.config.Logger,
-		r.smartWalletRpc,
-		r.engine.GetTenderlyClient(),
-		r.config.SmartWallet,
-		priceService,
-	)
+	// Create fee estimator - use configuration-aware version if fee rates are configured
+	var feeEstimator *taskengine.FeeEstimator
+	if r.config.FeeRates != nil {
+		// Use configurable fee rates from YAML configuration
+		feeEstimator = taskengine.NewFeeEstimatorWithConfig(
+			r.config.Logger,
+			r.smartWalletRpc,
+			r.engine.GetTenderlyClient(),
+			r.config.SmartWallet,
+			priceService,
+			r.config.FeeRates,
+		)
+	} else {
+		// Use hardcoded defaults (backwards compatible)
+		feeEstimator = taskengine.NewFeeEstimator(
+			r.config.Logger,
+			r.smartWalletRpc,
+			r.engine.GetTenderlyClient(),
+			r.config.SmartWallet,
+			priceService,
+		)
+	}
 
 	// Perform fee estimation
 	resp, err := feeEstimator.EstimateFees(ctx, req)

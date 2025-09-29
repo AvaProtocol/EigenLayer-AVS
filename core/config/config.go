@@ -105,6 +105,32 @@ type Config struct {
 
 	// Test private key for Go tests (optional)
 	TestPrivateKey string
+
+	// Fee rates configuration for task execution pricing
+	FeeRates *FeeRatesConfig
+}
+
+// FeeRatesConfig defines configurable pricing for different trigger types and operations
+type FeeRatesConfig struct {
+	// Base fees (one-time per workflow)
+	BaseFeeUSD float64
+
+	// Monitoring fees (per minute)
+	ManualMonitoringFeeUSDPerMinute    float64
+	FixedTimeMonitoringFeeUSDPerMinute float64
+	CronMonitoringFeeUSDPerMinute      float64
+	BlockMonitoringFeeUSDPerMinute     float64
+	EventMonitoringFeeUSDPerMinute     float64
+
+	// Per-execution fees
+	ManualExecutionFeeUSD    float64
+	ScheduledExecutionFeeUSD float64
+	BlockExecutionFeeUSD     float64
+	EventExecutionFeeUSD     float64
+
+	// Event monitoring scaling factors
+	EventAddressFeeUSDPerMinute float64
+	EventTopicFeeUSDPerMinute   float64
 }
 
 type SmartWalletConfig struct {
@@ -185,6 +211,29 @@ type ConfigRaw struct {
 
 	// Test private key for Go tests (optional)
 	TestPrivateKey string `yaml:"test_private_key"`
+
+	// Fee rates configuration for task execution pricing
+	FeeRates struct {
+		// Base fees (one-time per workflow)
+		BaseFeeUSD float64 `yaml:"base_fee_usd"`
+
+		// Monitoring fees (per minute)
+		ManualMonitoringFeeUSDPerMinute    float64 `yaml:"manual_monitoring_fee_usd_per_minute"`
+		FixedTimeMonitoringFeeUSDPerMinute float64 `yaml:"fixed_time_monitoring_fee_usd_per_minute"`
+		CronMonitoringFeeUSDPerMinute      float64 `yaml:"cron_monitoring_fee_usd_per_minute"`
+		BlockMonitoringFeeUSDPerMinute     float64 `yaml:"block_monitoring_fee_usd_per_minute"`
+		EventMonitoringFeeUSDPerMinute     float64 `yaml:"event_monitoring_fee_usd_per_minute"`
+
+		// Per-execution fees
+		ManualExecutionFeeUSD    float64 `yaml:"manual_execution_fee_usd"`
+		ScheduledExecutionFeeUSD float64 `yaml:"scheduled_execution_fee_usd"`
+		BlockExecutionFeeUSD     float64 `yaml:"block_execution_fee_usd"`
+		EventExecutionFeeUSD     float64 `yaml:"event_execution_fee_usd"`
+
+		// Event monitoring scaling factors
+		EventAddressFeeUSDPerMinute float64 `yaml:"event_address_fee_usd_per_minute"`
+		EventTopicFeeUSDPerMinute   float64 `yaml:"event_topic_fee_usd_per_minute"`
+	} `yaml:"fee_rates"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
@@ -376,6 +425,9 @@ func NewConfig(configFilePath string) (*Config, error) {
 
 		// Pass through test private key (if provided in YAML)
 		TestPrivateKey: configRaw.TestPrivateKey,
+
+		// Initialize fee rates - use defaults if no YAML config provided
+		FeeRates: loadFeeRatesFromConfig(configRaw.FeeRates),
 	}
 
 	if config.SocketPath == "" {
@@ -421,4 +473,82 @@ func ReadYamlConfig(path string, o interface{}) error {
 	}
 
 	return nil
+}
+
+// loadFeeRatesFromConfig loads fee rates from configuration with fallback to hardcoded defaults
+// This function works completely without YAML configuration - all fields are optional
+// The hardcoded defaults match exactly what was previously in getDefaultAutomationRates()
+func loadFeeRatesFromConfig(configRates struct {
+	// Base fees (one-time per workflow)
+	BaseFeeUSD float64 `yaml:"base_fee_usd"`
+
+	// Monitoring fees (per minute)
+	ManualMonitoringFeeUSDPerMinute    float64 `yaml:"manual_monitoring_fee_usd_per_minute"`
+	FixedTimeMonitoringFeeUSDPerMinute float64 `yaml:"fixed_time_monitoring_fee_usd_per_minute"`
+	CronMonitoringFeeUSDPerMinute      float64 `yaml:"cron_monitoring_fee_usd_per_minute"`
+	BlockMonitoringFeeUSDPerMinute     float64 `yaml:"block_monitoring_fee_usd_per_minute"`
+	EventMonitoringFeeUSDPerMinute     float64 `yaml:"event_monitoring_fee_usd_per_minute"`
+
+	// Per-execution fees
+	ManualExecutionFeeUSD    float64 `yaml:"manual_execution_fee_usd"`
+	ScheduledExecutionFeeUSD float64 `yaml:"scheduled_execution_fee_usd"`
+	BlockExecutionFeeUSD     float64 `yaml:"block_execution_fee_usd"`
+	EventExecutionFeeUSD     float64 `yaml:"event_execution_fee_usd"`
+
+	// Event monitoring scaling factors
+	EventAddressFeeUSDPerMinute float64 `yaml:"event_address_fee_usd_per_minute"`
+	EventTopicFeeUSDPerMinute   float64 `yaml:"event_topic_fee_usd_per_minute"`
+}) *FeeRatesConfig {
+	// Helper function to get float64 from config with hardcoded default
+	// Uses the exact same defaults that were hardcoded in getDefaultAutomationRates()
+	getFloat64 := func(configValue, hardcodedDefault float64) float64 {
+		if configValue != 0.0 {
+			return configValue // Use YAML value if provided
+		}
+		return hardcodedDefault // Use hardcoded default (same as before)
+	}
+
+	return &FeeRatesConfig{
+		// Base fees - exactly as before
+		BaseFeeUSD: getFloat64(configRates.BaseFeeUSD, 0.0),
+
+		// Monitoring fees (per minute) - exactly as before
+		ManualMonitoringFeeUSDPerMinute:    getFloat64(configRates.ManualMonitoringFeeUSDPerMinute, 0.0),
+		FixedTimeMonitoringFeeUSDPerMinute: getFloat64(configRates.FixedTimeMonitoringFeeUSDPerMinute, 0.000017), // ~$0.01/day
+		CronMonitoringFeeUSDPerMinute:      getFloat64(configRates.CronMonitoringFeeUSDPerMinute, 0.000033),      // ~$0.02/day
+		BlockMonitoringFeeUSDPerMinute:     getFloat64(configRates.BlockMonitoringFeeUSDPerMinute, 0.000033),     // ~$0.02/day
+		EventMonitoringFeeUSDPerMinute:     getFloat64(configRates.EventMonitoringFeeUSDPerMinute, 0.000083),     // ~$0.05/day base
+
+		// Per-execution fees - exactly as before
+		ManualExecutionFeeUSD:    getFloat64(configRates.ManualExecutionFeeUSD, 0.0),
+		ScheduledExecutionFeeUSD: getFloat64(configRates.ScheduledExecutionFeeUSD, 0.005),
+		BlockExecutionFeeUSD:     getFloat64(configRates.BlockExecutionFeeUSD, 0.01),
+		EventExecutionFeeUSD:     getFloat64(configRates.EventExecutionFeeUSD, 0.01),
+
+		// Event monitoring scaling factors - exactly as before
+		EventAddressFeeUSDPerMinute: getFloat64(configRates.EventAddressFeeUSDPerMinute, 0.000008), // ~$0.005/day per address
+		EventTopicFeeUSDPerMinute:   getFloat64(configRates.EventTopicFeeUSDPerMinute, 0.000003),   // ~$0.002/day per topic group
+	}
+}
+
+// GetDefaultFeeRatesConfig returns the default fee rates configuration
+// This is useful for tests and as a reference for expected values
+func GetDefaultFeeRatesConfig() *FeeRatesConfig {
+	return &FeeRatesConfig{
+		BaseFeeUSD: 0.0,
+
+		ManualMonitoringFeeUSDPerMinute:    0.0,
+		FixedTimeMonitoringFeeUSDPerMinute: 0.000017, // ~$0.01/day
+		CronMonitoringFeeUSDPerMinute:      0.000033, // ~$0.02/day
+		BlockMonitoringFeeUSDPerMinute:     0.000033, // ~$0.02/day
+		EventMonitoringFeeUSDPerMinute:     0.000083, // ~$0.05/day base
+
+		ManualExecutionFeeUSD:    0.0,
+		ScheduledExecutionFeeUSD: 0.005,
+		BlockExecutionFeeUSD:     0.01,
+		EventExecutionFeeUSD:     0.01,
+
+		EventAddressFeeUSDPerMinute: 0.000008, // ~$0.005/day per address
+		EventTopicFeeUSDPerMinute:   0.000003, // ~$0.002/day per topic group
+	}
 }

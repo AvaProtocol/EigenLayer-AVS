@@ -109,6 +109,28 @@ func NewFeeEstimator(
 	}
 }
 
+// NewFeeEstimatorWithConfig creates a new fee estimator instance with configurable rates
+// Chain ID will be detected automatically from the eth client
+func NewFeeEstimatorWithConfig(
+	logger sdklogging.Logger,
+	ethClient *ethclient.Client,
+	tenderlyClient *TenderlyClient,
+	smartWalletConfig *config.SmartWalletConfig,
+	priceService PriceService,
+	feeRatesConfig *config.FeeRatesConfig,
+) *FeeEstimator {
+	return &FeeEstimator{
+		logger:            logger,
+		ethClient:         ethClient,
+		tenderlyClient:    tenderlyClient,
+		smartWalletConfig: smartWalletConfig,
+		chainID:           0, // Will be detected on first use
+		priceService:      priceService,
+		automationRates:   convertFeeRatesConfigToAutomationRates(feeRatesConfig),
+		discountRules:     getDefaultDiscountRules(),
+	}
+}
+
 // getChainID detects and caches the chain ID from the eth client
 func (fe *FeeEstimator) getChainID(ctx context.Context) (int64, error) {
 	// Return cached value if already detected
@@ -928,5 +950,35 @@ func getDefaultDiscountRules() *DiscountRules {
 
 		VolumeDiscountThreshold:  10,  // 10+ workflows
 		VolumeDiscountPercentage: 0.1, // 10% discount
+	}
+}
+
+// convertFeeRatesConfigToAutomationRates converts configuration-based fee rates to internal automation rates
+func convertFeeRatesConfigToAutomationRates(configRates *config.FeeRatesConfig) *AutomationFeeRates {
+	if configRates == nil {
+		// Fallback to defaults if no configuration provided
+		return getDefaultAutomationRates()
+	}
+
+	return &AutomationFeeRates{
+		// Base fees
+		BaseFeeUSD: configRates.BaseFeeUSD,
+
+		// Monitoring fees (per minute)
+		ManualMonitoringFeeUSDPerMinute:    configRates.ManualMonitoringFeeUSDPerMinute,
+		FixedTimeMonitoringFeeUSDPerMinute: configRates.FixedTimeMonitoringFeeUSDPerMinute,
+		CronMonitoringFeeUSDPerMinute:      configRates.CronMonitoringFeeUSDPerMinute,
+		BlockMonitoringFeeUSDPerMinute:     configRates.BlockMonitoringFeeUSDPerMinute,
+		EventMonitoringFeeUSDPerMinute:     configRates.EventMonitoringFeeUSDPerMinute,
+
+		// Per-execution fees
+		ManualExecutionFeeUSD:    configRates.ManualExecutionFeeUSD,
+		ScheduledExecutionFeeUSD: configRates.ScheduledExecutionFeeUSD,
+		BlockExecutionFeeUSD:     configRates.BlockExecutionFeeUSD,
+		EventExecutionFeeUSD:     configRates.EventExecutionFeeUSD,
+
+		// Event monitoring scaling factors
+		EventAddressFeeUSDPerMinute: configRates.EventAddressFeeUSDPerMinute,
+		EventTopicFeeUSDPerMinute:   configRates.EventTopicFeeUSDPerMinute,
 	}
 }
