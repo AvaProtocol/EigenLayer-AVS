@@ -779,54 +779,31 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	return s, nil
 }
 
-// applyDecimalFormattingToResult applies decimal formatting to existing result data
+// applyDecimalFormattingToResult applies decimal formatting to existing result data using shared utility
 func (r *ContractReadProcessor) applyDecimalFormattingToResult(originalData []*avsproto.ContractReadNode_MethodResult_StructuredField, decimalsValue *big.Int, fieldsToFormat []string) ([]*avsproto.ContractReadNode_MethodResult_StructuredField, map[string]string) {
 	if len(originalData) == 0 || decimalsValue == nil || len(fieldsToFormat) == 0 {
 		return originalData, make(map[string]string)
 	}
 
-	// Create a map of fields to format for quick lookup
-	formatFieldsMap := make(map[string]bool)
-	for _, field := range fieldsToFormat {
-		formatFieldsMap[field] = true
-	}
+	// Create decimal formatting context
+	formattingContext := NewDecimalFormattingContext(decimalsValue, fieldsToFormat, "contract_read")
 
-	// Create new structured data with decimal formatting applied
-	var formattedData []*avsproto.ContractReadNode_MethodResult_StructuredField
-	rawFieldsMetadata := make(map[string]string)
+	// Apply formatting using shared utility
+	formattedData := formattingContext.ApplyDecimalFormattingToStructuredFields(originalData)
 
-	for _, field := range originalData {
-		if formatFieldsMap[field.Name] {
-			// Apply decimal formatting to this field
-			if rawValue, ok := new(big.Int).SetString(field.Value, 10); ok {
-				// Format the value with decimals using ABIValueConverter
-				converter := &ABIValueConverter{}
-				formattedValue := converter.FormatWithDecimals(rawValue, decimalsValue)
-
-				// Add only the formatted field (no Raw field creation)
-				formattedData = append(formattedData, &avsproto.ContractReadNode_MethodResult_StructuredField{
-					Name:  field.Name,
-					Value: formattedValue,
-				})
-
-				if r.vm.logger != nil {
-					r.vm.logger.Debug("Applied decimal formatting",
-						"fieldName", field.Name,
-						"rawValue", field.Value,
-						"formattedValue", formattedValue,
-						"decimals", decimalsValue.String())
-				}
-			} else {
-				// If we can't parse as big int, keep original
-				formattedData = append(formattedData, field)
+	// Log the formatting operations
+	if r.vm.logger != nil {
+		for _, field := range originalData {
+			if formattingContext.ShouldApplyDecimalFormatting(field.Name) {
+				r.vm.logger.Debug("Applied decimal formatting via shared utility",
+					"fieldName", field.Name,
+					"rawValue", field.Value,
+					"decimals", decimalsValue.String())
 			}
-		} else {
-			// Keep original field as-is
-			formattedData = append(formattedData, field)
 		}
 	}
 
-	return formattedData, rawFieldsMetadata
+	return formattedData, make(map[string]string)
 }
 
 // extractMethodABI extracts ABI information for a specific method

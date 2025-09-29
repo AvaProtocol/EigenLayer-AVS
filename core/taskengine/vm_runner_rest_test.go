@@ -101,7 +101,7 @@ func TestRestRequest(t *testing.T) {
 		},
 	}, nil, testutil.GetTestSmartWalletConfig(), nil)
 
-	n := NewRestProrcessor(vm)
+	n := NewRestProcessor(vm)
 
 	step, err := n.Execute("123abc", node)
 
@@ -216,7 +216,7 @@ func TestRestRequestHandleEmptyResponse(t *testing.T) {
 		},
 	}, nil, testutil.GetTestSmartWalletConfig(), nil)
 
-	n := NewRestProrcessor(vm)
+	n := NewRestProcessor(vm)
 
 	step, err := n.Execute("123abc", node)
 
@@ -293,7 +293,7 @@ func TestRestRequestRenderVars(t *testing.T) {
 		},
 	})
 
-	n := NewRestProrcessor(vm)
+	n := NewRestProcessor(vm)
 
 	step, err := n.Execute("123abc", node)
 
@@ -377,7 +377,7 @@ func TestRestRequestRenderVarsMultipleExecutions(t *testing.T) {
 		},
 	})
 
-	n := NewRestProrcessor(vm)
+	n := NewRestProcessor(vm)
 	step, err := n.Execute("123abc", node)
 
 	if err != nil {
@@ -462,7 +462,7 @@ func TestRestRequestErrorHandling(t *testing.T) {
 		},
 	}, nil, testutil.GetTestSmartWalletConfig(), nil)
 
-	n := NewRestProrcessor(vm)
+	n := NewRestProcessor(vm)
 
 	step, err := n.Execute("error-test", node)
 
@@ -630,7 +630,7 @@ func TestRestRequestTelegramMockServer(t *testing.T) {
 		t.Fatalf("failed to create VM: %v", err)
 	}
 
-	processor := NewRestProrcessor(vm)
+	processor := NewRestProcessor(vm)
 	step, err := processor.Execute("telegram-test", node)
 
 	if err != nil {
@@ -836,7 +836,7 @@ func TestRestRequestSendGridGlobalSecret(t *testing.T) {
 		t.Fatalf("failed to create VM: %v", err)
 	}
 
-	processor := NewRestProrcessor(vm)
+	processor := NewRestProcessor(vm)
 	step, err := processor.Execute("sendgrid-test", node)
 
 	if err != nil {
@@ -988,7 +988,7 @@ func TestRestRequestArbitraryGlobalSecret(t *testing.T) {
 		t.Fatalf("failed to create VM: %v", err)
 	}
 
-	processor := NewRestProrcessor(vm)
+	processor := NewRestProcessor(vm)
 	step, err := processor.Execute("arbitrary-secret-test", node)
 
 	if err != nil {

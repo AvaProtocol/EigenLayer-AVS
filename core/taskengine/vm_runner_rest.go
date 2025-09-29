@@ -401,7 +401,7 @@ type RestProcessor struct {
 	executor   HTTPRequestExecutor
 }
 
-func NewRestProrcessor(vm *VM) *RestProcessor {
+func NewRestProcessor(vm *VM) *RestProcessor {
 	client := resty.New()
 	client.SetTimeout(30 * time.Second) // Default timeout
 	// client.SetLogger(vm.logger) // Resty logger might not match sdklogging.Logger interface

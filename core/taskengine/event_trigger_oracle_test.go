@@ -79,7 +79,7 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 			},
 			conditions:         []map[string]interface{}{},
 			expectedSuccess:    true,
-			expectedDataFields: []string{"current", "roundId", "updatedAt", "eventName"}, // AnswerUpdated event fields
+			expectedDataFields: []string{"current", "roundId", "updatedAt"}, // AnswerUpdated event fields (eventName is now the key)
 			description:        "Should always succeed when no conditions are specified",
 		},
 		{
@@ -102,8 +102,8 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 					"fieldType": "int256",
 				},
 			},
-			expectedSuccess:    true,                                                     // Assuming current ETH price < $5000
-			expectedDataFields: []string{"current", "roundId", "updatedAt", "eventName"}, // AnswerUpdated event fields
+			expectedSuccess:    true,                                        // Assuming current ETH price < $5000
+			expectedDataFields: []string{"current", "roundId", "updatedAt"}, // AnswerUpdated event fields (eventName is now the key)
 			description:        "Should succeed when price is below threshold",
 		},
 		{
@@ -126,8 +126,8 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 					"fieldType": "int256",
 				},
 			},
-			expectedSuccess:    false,                                                    // Assuming current ETH price > $1000
-			expectedDataFields: []string{"current", "roundId", "updatedAt", "eventName"}, // AnswerUpdated event fields
+			expectedSuccess:    false,                                       // Assuming current ETH price > $1000
+			expectedDataFields: []string{"current", "roundId", "updatedAt"}, // AnswerUpdated event fields (eventName is now the key)
 			description:        "Should fail when price is above threshold, but data should be in error",
 		},
 		{
@@ -156,8 +156,8 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 					"fieldType": "uint256",
 				},
 			},
-			expectedSuccess:    true,                                                     // Assuming price > $1000 and roundId > 0
-			expectedDataFields: []string{"current", "roundId", "updatedAt", "eventName"}, // AnswerUpdated event fields
+			expectedSuccess:    true,                                        // Assuming price > $1000 and roundId > 0
+			expectedDataFields: []string{"current", "roundId", "updatedAt"}, // AnswerUpdated event fields (eventName is now the key)
 			description:        "Should succeed when both conditions are met",
 		},
 	}
@@ -201,12 +201,18 @@ func TestEventTriggerOraclePriceConditions(t *testing.T) {
 				assert.Contains(t, result, "error", "Response should have error field")
 				assert.Equal(t, "", result["error"], "Error should be empty on success")
 
-				// Verify data contains expected fields
+				// Verify data contains expected fields in structured format
 				data, ok := result["data"].(map[string]interface{})
 				require.True(t, ok, "data should be a map")
 
-				for _, expectedField := range tc.expectedDataFields {
-					assert.Contains(t, data, expectedField, "Data should contain %s field", expectedField)
+				// Check for AnswerUpdated event structure
+				answerUpdatedData, exists := data["AnswerUpdated"].(map[string]interface{})
+				require.True(t, exists, "data should contain AnswerUpdated event")
+
+				// Verify expected fields exist in the AnswerUpdated structure
+				expectedEventFields := []string{"current", "roundId", "updatedAt"} // Remove eventName as it's now the key
+				for _, expectedField := range expectedEventFields {
+					assert.Contains(t, answerUpdatedData, expectedField, "AnswerUpdated should contain %s field", expectedField)
 				}
 
 				// Verify executionContext
