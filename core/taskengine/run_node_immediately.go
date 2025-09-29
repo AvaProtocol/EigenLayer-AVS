@@ -189,7 +189,10 @@ func (n *Engine) runCronTriggerImmediately(triggerConfig map[string]interface{},
 
 // runEventTriggerImmediately executes an event trigger immediately using the new queries-based system
 func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+	// FORCE TEST: Add a debug field to verify this function is being called
+
 	if n.logger != nil {
+		n.logger.Error("🚀 TRACE: runEventTriggerImmediately CALLED", "configKeys", GetMapKeys(triggerConfig))
 		n.logger.Info("🚀 runEventTriggerImmediately: Starting execution")
 		n.logger.Info("🚀 DEBUG: Function called with config", "configKeys", GetMapKeys(triggerConfig))
 	}
@@ -231,9 +234,22 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		// Check if this is a direct method call scenario (oracle reading)
 		shouldUseDirect := n.shouldUseDirectCalls(queriesArray)
 
+		if n.logger != nil {
+			n.logger.Error("🔍 TRACE: Path decision",
+				"simulationMode", simulationMode,
+				"shouldUseDirect", shouldUseDirect,
+				"queriesCount", len(queriesArray))
+		}
+
 		if shouldUseDirect {
+			if n.logger != nil {
+				n.logger.Error("🔍 FORCE DEBUG: Using DIRECT CALLS path")
+			}
 			return n.runEventTriggerWithDirectCalls(ctx, queriesArray, inputVariables)
 		} else {
+			if n.logger != nil {
+				n.logger.Error("🔍 FORCE DEBUG: Using TENDERLY SIMULATION path")
+			}
 			return n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
 		}
 	}
@@ -266,11 +282,18 @@ func (n *Engine) shouldUseDirectCalls(queriesArray []interface{}) bool {
 			if topicsArray, ok := topicsInterface.([]interface{}); ok && len(topicsArray) > 0 {
 				// Has topics - this is event-based, use simulation
 				if n.logger != nil {
-					n.logger.Info("🔍 shouldUseDirectCalls: Found topics, using simulation", "queryIndex", i, "topicsCount", len(topicsArray))
+					n.logger.Error("🔍 TRACE: Found non-empty topics, using SIMULATION", "queryIndex", i, "topicsCount", len(topicsArray))
 				}
 				return false
+			} else {
+				if n.logger != nil {
+					n.logger.Error("🔍 TRACE: Found empty topics array", "queryIndex", i, "topicsExists", exists, "topicsType", fmt.Sprintf("%T", topicsInterface))
+				}
 			}
 		} else {
+			if n.logger != nil {
+				n.logger.Error("🔍 TRACE: No topics found", "queryIndex", i)
+			}
 		}
 
 		// Check if query has methodCalls (indicates direct contract calls)
@@ -289,9 +312,13 @@ func (n *Engine) shouldUseDirectCalls(queriesArray []interface{}) bool {
 			if methodCallsCount > 0 {
 				// Has methodCalls but no topics - this is direct call scenario
 				if n.logger != nil {
-					n.logger.Info("🔍 shouldUseDirectCalls: Found methodCalls without topics, using direct calls", "queryIndex", i, "methodCallsCount", methodCallsCount)
+					n.logger.Error("🔍 TRACE: Found methodCalls without topics, using DIRECT CALLS", "queryIndex", i, "methodCallsCount", methodCallsCount)
 				}
 				return true
+			} else {
+				if n.logger != nil {
+					n.logger.Error("🔍 TRACE: Found empty methodCalls", "queryIndex", i)
+				}
 			}
 		}
 
@@ -311,6 +338,7 @@ func (n *Engine) shouldUseDirectCalls(queriesArray []interface{}) bool {
 // This ensures consistency with deployed tasks and simulate workflow by returning event data instead of method call results
 func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	if n.logger != nil {
+		n.logger.Error("🔍 TRACE: DIRECT CALLS path executing")
 		n.logger.Info("🎯 EventTrigger: Creating simulated AnswerUpdated events for consistency",
 			"queriesCount", len(queriesArray))
 	}
@@ -399,11 +427,60 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 		return n.createBasicSimulatedEventResponse(simulatedLog, chainID), nil
 	}
 
+	// Process method calls to extract decimal formatting information
+	var formattingContext *DecimalFormattingContext
+	if methodCallsInterface, hasMethodCalls := queryMap["methodCalls"]; hasMethodCalls {
+		if methodCallsArray, ok := methodCallsInterface.([]interface{}); ok {
+			// Look for decimals method with apply_to_fields
+			for _, methodCallInterface := range methodCallsArray {
+				if methodCallMap, ok := methodCallInterface.(map[string]interface{}); ok {
+					if methodName, ok := methodCallMap["methodName"].(string); ok && methodName == "decimals" {
+						// Extract applyToFields
+						if applyToFieldsInterface, hasApplyToFields := methodCallMap["applyToFields"]; hasApplyToFields {
+							if applyToFieldsArray, ok := applyToFieldsInterface.([]interface{}); ok {
+								fieldsToFormat := make([]string, 0, len(applyToFieldsArray))
+								for _, fieldInterface := range applyToFieldsArray {
+									if fieldStr, ok := fieldInterface.(string); ok {
+										fieldsToFormat = append(fieldsToFormat, fieldStr)
+									}
+								}
+
+								if len(fieldsToFormat) > 0 {
+									// Simulate decimals() call - for ETH/USD price feeds, typically 8 decimals
+									decimalsValue := big.NewInt(8)
+									formattingContext = NewDecimalFormattingContext(decimalsValue, fieldsToFormat, "decimals")
+
+									if n.logger != nil {
+										n.logger.Info("✅ Created decimal formatting context for direct calls",
+											"decimalsValue", decimalsValue.String(),
+											"fieldsToFormat", fieldsToFormat)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Apply decimal formatting to enriched event data if needed
+	parsedData := enrichmentResult.ParsedData
+	if formattingContext != nil {
+		// Apply decimal formatting to each event in the parsed data
+		for eventName, eventFields := range parsedData {
+			if eventFieldsMap, ok := eventFields.(map[string]interface{}); ok {
+				// Apply formatting using shared utility
+				formattingContext.ApplyDecimalFormattingToEventData(eventFieldsMap, eventName, n.logger)
+			}
+		}
+	}
+
 	// Create response with enriched event data (same format as deployed tasks and simulate workflow)
 	response := make(map[string]interface{})
 
 	// Add the parsed ABI fields as flattened data (like Transfer event format)
-	response["data"] = enrichmentResult.ParsedData
+	response["data"] = parsedData
 
 	// Add raw event log fields as metadata (no execution context in metadata)
 	response["metadata"] = enrichmentResult.RawEventData
@@ -425,7 +502,12 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 		}
 
 		if len(conditionsArray) > 0 {
-			conditionsMet = n.evaluateConditionsAgainstEventData(enrichmentResult.ParsedData, conditionsArray)
+			// Use decimal formatting context for consistent condition evaluation
+			if formattingContext != nil {
+				conditionsMet = n.evaluateConditionsAgainstEventDataWithDecimalContext(parsedData, conditionsArray, formattingContext)
+			} else {
+				conditionsMet = n.evaluateConditionsAgainstEventData(parsedData, conditionsArray)
+			}
 			if !conditionsMet {
 				errorMessage = "Conditions not met for simulated event"
 			}
@@ -629,6 +711,109 @@ type ConditionResult struct {
 	ActualValue   interface{} `json:"actualValue"`
 	Passed        bool        `json:"passed"`
 	Reason        string      `json:"reason,omitempty"`
+}
+
+// evaluateConditionsWithDetailsAndDecimalContext evaluates conditions with decimal formatting context
+func (n *Engine) evaluateConditionsWithDetailsAndDecimalContext(data map[string]interface{}, queryMap map[string]interface{}, formattingContext *DecimalFormattingContext) ([]ConditionResult, bool) {
+	conditionsInterface, exists := queryMap["conditions"]
+	if !exists {
+		// No conditions to evaluate - all conditions met by default
+		return []ConditionResult{}, true
+	}
+
+	// Handle both []interface{} and []map[string]interface{} types
+	var conditionsArray []interface{}
+	if directArray, ok := conditionsInterface.([]interface{}); ok {
+		conditionsArray = directArray
+	} else if mapArray, ok := conditionsInterface.([]map[string]interface{}); ok {
+		// Convert []map[string]interface{} to []interface{}
+		conditionsArray = make([]interface{}, len(mapArray))
+		for i, condMap := range mapArray {
+			conditionsArray[i] = condMap
+		}
+	} else {
+		// Unsupported type - no valid conditions
+		return []ConditionResult{}, true
+	}
+
+	if len(conditionsArray) == 0 {
+		// No conditions to evaluate - all conditions met by default
+		return []ConditionResult{}, true
+	}
+
+	results := make([]ConditionResult, len(conditionsArray))
+	allConditionsMet := true
+
+	for i, conditionInterface := range conditionsArray {
+		conditionMap, ok := conditionInterface.(map[string]interface{})
+		if !ok {
+			results[i] = ConditionResult{
+				FieldName: "unknown",
+				Passed:    false,
+				Reason:    "Invalid condition format",
+			}
+			allConditionsMet = false
+			continue
+		}
+
+		fieldName, _ := conditionMap["fieldName"].(string)
+		operator, _ := conditionMap["operator"].(string)
+		expectedValue, _ := conditionMap["value"].(string)
+		fieldType, _ := conditionMap["fieldType"].(string)
+
+		// Get actual value from data - support nested field access
+		actualValue, exists := n.getNestedFieldValue(data, fieldName)
+		if !exists {
+			results[i] = ConditionResult{
+				FieldName:     fieldName,
+				Operator:      operator,
+				ExpectedValue: expectedValue,
+				ActualValue:   nil,
+				Passed:        false,
+				Reason:        fmt.Sprintf("Field '%s' not found in method call results", fieldName),
+			}
+			allConditionsMet = false
+			continue
+		}
+
+		// FIXED: Handle decimal formatting context for consistent comparison
+		// When fieldType is "decimal" and we have a formatting context, ensure consistent comparison
+		var processedExpectedValue string = expectedValue
+		if fieldType == "decimal" && formattingContext != nil {
+			// Format the expected value to match the actual value's formatting
+			processedExpectedValue = formattingContext.FormatConditionValueForComparison(fieldName, expectedValue)
+			if n.logger != nil {
+				n.logger.Info("✅ DECIMAL CONDITION FIX: Formatted condition value for consistent comparison",
+					"fieldName", fieldName,
+					"originalExpectedValue", expectedValue,
+					"formattedExpectedValue", processedExpectedValue,
+					"actualValue", actualValue,
+					"fieldType", fieldType)
+			}
+		}
+
+		// Evaluate the condition using processed expected value
+		passed := n.evaluateCondition(actualValue, operator, processedExpectedValue, fieldType)
+		reason := n.buildConditionReason(actualValue, operator, processedExpectedValue, passed)
+
+		// Convert actualValue to display format for JSON serialization
+		displayActualValue := n.formatValueForDisplay(actualValue)
+
+		results[i] = ConditionResult{
+			FieldName:     fieldName,
+			Operator:      operator,
+			ExpectedValue: expectedValue, // Show original expected value in result
+			ActualValue:   displayActualValue,
+			Passed:        passed,
+			Reason:        reason,
+		}
+
+		if !passed {
+			allConditionsMet = false
+		}
+	}
+
+	return results, allConditionsMet
 }
 
 // evaluateConditionsWithDetails evaluates conditions and returns detailed results
@@ -987,6 +1172,16 @@ func (n *Engine) buildEventTriggerResponse(methodCallData map[string]interface{}
 	// Add executionContext for EventTrigger direct calls (real RPC calls, not simulated)
 	response["executionContext"] = GetExecutionContext(chainID, false)
 
+	// Add debug trace info
+	debugResponse := map[string]interface{}{
+		"debug_trace":     "runEventTriggerWithDirectCalls_COMPLETED",
+		"debug_timestamp": time.Now().Unix(),
+	}
+	for key, value := range debugResponse {
+		response[key] = value
+	}
+	response["debug_path"] = "DIRECT_CALLS"
+
 	return response
 }
 
@@ -1095,6 +1290,7 @@ func (n *Engine) executeMethodCallForSimulation(ctx context.Context, methodCall 
 // runEventTriggerWithTenderlySimulation executes event trigger using Tenderly simulation
 func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	if n.logger != nil {
+		n.logger.Error("🔍 FORCE DEBUG: runEventTriggerWithTenderlySimulation called")
 		n.logger.Info("🔮 EventTrigger: Starting Tenderly simulation mode",
 			"queriesCount", len(queriesArray))
 	}
@@ -1322,13 +1518,90 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 		methodCallResults[key] = value
 	}
 
+	// Apply decimal formatting to event fields if decimals method was called
+	// Store the formatting context for use in condition evaluation
+	var formattingContext *DecimalFormattingContext
+	if query.GetMethodCalls() != nil {
+		var decimalsValue *big.Int
+
+		if n.logger != nil {
+			n.logger.Error("🔍 FORCE DEBUG: Decimal formatting logic executing",
+				"methodCallResultsKeys", GetMapKeys(methodCallResults),
+				"methodCallsCount", len(query.GetMethodCalls()))
+			// Debug: Print all method call results
+			for key, value := range methodCallResults {
+				n.logger.Info("🔍 DEBUG: Method call result",
+					"key", key,
+					"value", value,
+					"type", fmt.Sprintf("%T", value))
+			}
+		}
+
+		// Find decimals method call and extract applyToFields
+		for _, methodCall := range query.GetMethodCalls() {
+			if n.logger != nil {
+				n.logger.Info("🔍 DEBUG: Processing method call",
+					"methodName", methodCall.GetMethodName(),
+					"hasApplyToFields", len(methodCall.GetApplyToFields()) > 0,
+					"applyToFields", methodCall.GetApplyToFields())
+			}
+
+			if methodCall.GetMethodName() == "decimals" && len(methodCall.GetApplyToFields()) > 0 {
+				// Check if we got decimals result from method calls
+				if decimalsResult, exists := methodCallResults["decimals"]; exists {
+					if decimalsFloat, ok := decimalsResult.(float64); ok {
+						decimalsValue = big.NewInt(int64(decimalsFloat))
+					} else if decimalsInt, ok := decimalsResult.(int64); ok {
+						decimalsValue = big.NewInt(decimalsInt)
+					} else if decimalsStr, ok := decimalsResult.(string); ok {
+						if parsed, success := new(big.Int).SetString(decimalsStr, 10); success {
+							decimalsValue = parsed
+						}
+					}
+				}
+
+				if decimalsValue != nil {
+					// Create list of fields to format from applyToFields
+					var fieldsToFormat []string
+					for _, applyToField := range methodCall.GetApplyToFields() {
+						parts := strings.Split(applyToField, ".")
+						if len(parts) == 2 {
+							targetEventName := parts[0]
+							// Use the full field name for mapping (eventName.fieldName)
+							fieldsToFormat = append(fieldsToFormat, fmt.Sprintf("%s.%s", targetEventName, parts[1]))
+						}
+					}
+
+					// Create formatting context for consistent decimal handling
+					formattingContext = NewDecimalFormattingContext(decimalsValue, fieldsToFormat, "decimals")
+
+					// Apply formatting to each target event field using shared utility
+					for _, applyToField := range methodCall.GetApplyToFields() {
+						parts := strings.Split(applyToField, ".")
+						if len(parts) == 2 {
+							targetEventName := parts[0]
+
+							// Check if we have this event in our parsed data
+							if eventData, exists := parsedData[targetEventName].(map[string]interface{}); exists {
+								// Apply decimal formatting using shared utility
+								formattingContext.ApplyDecimalFormattingToEventData(eventData, targetEventName, n.logger)
+							}
+						}
+					}
+				}
+				break
+			}
+		}
+	}
+
 	// Always include chainId in the response data for consistency
 	methodCallResults["chainId"] = chainID
 
 	// Evaluate conditions with details for enhanced response
 	var allConditionsMet bool = true
 	if hasConditions {
-		_, allConditionsMet = n.evaluateConditionsWithDetails(methodCallResults, queryMap)
+		// Use the structured parsedData for condition evaluation with decimal formatting context
+		_, allConditionsMet = n.evaluateConditionsWithDetailsAndDecimalContext(parsedData, queryMap, formattingContext)
 	}
 
 	// Create response following the same pattern as runEventTriggerWithDirectCalls
@@ -1336,6 +1609,25 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 
 	// Add the parsed ABI fields in structured format
 	response["data"] = parsedData
+
+	// DEBUG: Log the final parsedData structure
+	if n.logger != nil {
+		n.logger.Info("🔍 DEBUG: Final response data structure",
+			"parsedDataKeys", GetMapKeys(parsedData))
+		for eventName, eventFields := range parsedData {
+			if eventFieldsMap, ok := eventFields.(map[string]interface{}); ok {
+				n.logger.Info("🔍 DEBUG: Event fields",
+					"eventName", eventName,
+					"fields", GetMapKeys(eventFieldsMap))
+				if current, exists := eventFieldsMap["current"]; exists {
+					n.logger.Info("🔍 DEBUG: Current field value",
+						"eventName", eventName,
+						"current", current,
+						"type", fmt.Sprintf("%T", current))
+				}
+			}
+		}
+	}
 
 	// Add raw event log fields as metadata (direct format for backward compatibility)
 	response["metadata"] = enrichmentResult.RawEventData
@@ -1350,6 +1642,16 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 
 	// Add execution context (chainId, isSimulated, provider)
 	response["executionContext"] = GetExecutionContext(chainID, true) // true = isSimulation
+
+	// Add debug trace info
+	debugResponse := map[string]interface{}{
+		"debug_trace":     "runEventTriggerWithTenderlySimulation_COMPLETED",
+		"debug_timestamp": time.Now().Unix(),
+	}
+	for key, value := range debugResponse {
+		response[key] = value
+	}
+	response["debug_path"] = "TENDERLY_SIMULATION"
 
 	n.logger.Info("✅ EventTrigger simulation: Returning enhanced response format",
 		"contract", simulatedLog.Address.Hex(),
@@ -1519,7 +1821,7 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 		}
 	}
 
-	// Create ABI value converter
+	// Create ABI value converter AFTER processing method calls to ensure decimalsValue and fieldsToFormat are set
 	converter := NewABIValueConverter(decimalsValue, fieldsToFormat)
 
 	// Process event inputs (both indexed and non-indexed)
@@ -1604,6 +1906,41 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 	// Add decimals info if we retrieved it
 	if decimalsValue != nil {
 		eventFields["decimals"] = decimalsValue.Uint64() // Return as number, not string
+	}
+
+	// Apply decimal formatting to specified fields
+	if decimalsValue != nil && len(fieldsToFormat) > 0 {
+		if n.logger != nil {
+			n.logger.Debug("Applying decimal formatting to event fields",
+				"decimals", decimalsValue.String(),
+				"fieldsToFormat", fieldsToFormat,
+				"eventName", eventName)
+		}
+
+		for _, fieldName := range fieldsToFormat {
+			if rawValue, exists := eventFields[fieldName]; exists {
+				if rawValueStr, ok := rawValue.(string); ok {
+					if _, success := new(big.Int).SetString(rawValueStr, 10); success {
+						// Apply decimal formatting using the token enrichment service
+						if n.tokenEnrichmentService != nil {
+							formattedValue := n.tokenEnrichmentService.FormatTokenValue(rawValueStr, uint32(decimalsValue.Uint64()))
+							eventFields[fieldName] = formattedValue
+
+							// Also store the raw value for reference
+							eventFields[fieldName+"Raw"] = rawValueStr
+
+							if n.logger != nil {
+								n.logger.Debug("Applied decimal formatting to event field",
+									"fieldName", fieldName,
+									"rawValue", rawValueStr,
+									"formattedValue", formattedValue,
+									"decimals", decimalsValue.String())
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Create the structured format: eventName as key, fields as nested object
@@ -3797,6 +4134,97 @@ func (n *Engine) convertMapToEventQuery(queryMap map[string]interface{}) (*avspr
 	}
 
 	return query, nil
+}
+
+// evaluateConditionsAgainstEventDataWithDecimalContext evaluates conditions with decimal formatting context
+func (n *Engine) evaluateConditionsAgainstEventDataWithDecimalContext(eventData map[string]interface{}, conditionsArray []interface{}, formattingContext *DecimalFormattingContext) bool {
+	for _, conditionInterface := range conditionsArray {
+		conditionMap, ok := conditionInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		fieldName, _ := conditionMap["fieldName"].(string)
+		operator, _ := conditionMap["operator"].(string)
+		expectedValue, _ := conditionMap["value"].(string)
+		fieldType, _ := conditionMap["fieldType"].(string)
+
+		// Get the actual field value from structured event data
+		var actualValue interface{}
+		var exists bool
+
+		if strings.Contains(fieldName, ".") {
+			parts := strings.Split(fieldName, ".")
+			if len(parts) == 2 {
+				eventName := parts[0]
+				fieldNameOnly := parts[1]
+
+				// Look for the event in the structured data
+				if eventMap, eventExists := eventData[eventName].(map[string]interface{}); eventExists {
+					actualValue, exists = eventMap[fieldNameOnly]
+				}
+			}
+		} else {
+			// For simple field names, check all events for the field
+			for _, eventFields := range eventData {
+				if eventFieldsMap, ok := eventFields.(map[string]interface{}); ok {
+					if value, fieldExists := eventFieldsMap[fieldName]; fieldExists {
+						actualValue = value
+						exists = true
+						break
+					}
+				}
+			}
+		}
+
+		if !exists {
+			if n.logger != nil {
+				n.logger.Debug("Condition field not found in structured event data",
+					"fieldName", fieldName,
+					"availableEvents", GetMapKeys(eventData))
+			}
+			return false
+		}
+
+		// DECIMAL FORMATTING FIX: Apply consistent formatting for condition comparison
+		var processedExpectedValue string = expectedValue
+		if fieldType == "decimal" && formattingContext != nil {
+			// Format the expected value to match the actual value's formatting
+			processedExpectedValue = formattingContext.FormatConditionValueForComparison(fieldName, expectedValue)
+			if n.logger != nil {
+				n.logger.Info("✅ DECIMAL CONDITION FIX: Formatted condition value for consistent comparison (direct calls)",
+					"fieldName", fieldName,
+					"originalExpectedValue", expectedValue,
+					"formattedExpectedValue", processedExpectedValue,
+					"actualValue", actualValue,
+					"fieldType", fieldType)
+			}
+		}
+
+		// Evaluate condition based on field type using processed expected value
+		conditionMet := false
+		switch fieldType {
+		case "int256":
+			conditionMet = n.evaluateInt256Condition(actualValue, operator, processedExpectedValue)
+		case "uint256":
+			conditionMet = n.evaluateUint256Condition(actualValue, operator, processedExpectedValue)
+		case "decimal":
+			// Treat decimal as int256 for comparison with formatted expected value
+			conditionMet = n.evaluateInt256Condition(actualValue, operator, processedExpectedValue)
+		default:
+			if n.logger != nil {
+				n.logger.Warn("Unsupported field type for condition evaluation",
+					"fieldType", fieldType,
+					"fieldName", fieldName)
+			}
+			return false
+		}
+
+		if !conditionMet {
+			return false
+		}
+	}
+	return true
 }
 
 // evaluateConditionsAgainstEventData evaluates conditions against parsed event data

@@ -1277,6 +1277,10 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	contractAddr := common.HexToAddress(contractAddress)
 	var results []*avsproto.ContractWriteNode_MethodResult
 
+	// Track decimal formatting information - collect methods that provide decimal values
+	// and fields that need formatting with those decimal values
+	var decimalProviders = make(map[string]*big.Int) // methodName -> decimal value
+
 	// Execute each method call
 	ctx := context.Background()
 	for i, methodCall := range methodCalls {
@@ -1414,6 +1418,50 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// Convert results to JSON for the new protobuf structure using shared helper
 	resultsValue := ConvertResultsArrayToProtobufValue(resultsArray, &log)
 
+	// First pass to collect decimal information from method results
+	// This identifies methods that provide decimal values for formatting other methods
+	for i, methodCall := range methodCalls {
+		if len(methodCall.ApplyToFields) > 0 && i < len(results) {
+			methodResult := results[i]
+			methodName := methodResult.MethodName
+
+			// Check if this method provides decimal formatting for other fields
+			if methodResult.Success && methodResult.Value != nil {
+				valueMap, isMap := methodResult.Value.AsInterface().(map[string]interface{})
+				if isMap && len(valueMap) > 0 {
+					// For methods that return objects, try to find a decimal value
+					// Look for fields like "decimals" or "decimal"
+					for fieldName, fieldValue := range valueMap {
+						if fieldName == "decimals" || fieldName == "decimal" {
+							if strValue, ok := fieldValue.(string); ok {
+								if decimalsInt, err := strconv.ParseInt(strValue, 10, 64); err == nil {
+									decimalValue := big.NewInt(decimalsInt)
+									decimalProviders[methodName] = decimalValue
+									log.WriteString(fmt.Sprintf("✅ Method %s provides decimal value: %s\n", methodName, decimalValue.String()))
+									r.vm.logger.Info("Method provides decimal value",
+										"methodName", methodName,
+										"decimalValue", decimalValue.String(),
+										"applyToFields", methodCall.ApplyToFields)
+								}
+							}
+						}
+					}
+				} else if strValue, ok := methodResult.Value.AsInterface().(string); ok {
+					// For methods that return a single value (like ERC20 decimals())
+					if decimalsInt, err := strconv.ParseInt(strValue, 10, 64); err == nil {
+						decimalValue := big.NewInt(decimalsInt)
+						decimalProviders[methodName] = decimalValue
+						log.WriteString(fmt.Sprintf("✅ Method %s provides decimal value: %s\n", methodName, decimalValue.String()))
+						r.vm.logger.Info("Method provides decimal value",
+							"methodName", methodName,
+							"decimalValue", decimalValue.String(),
+							"applyToFields", methodCall.ApplyToFields)
+					}
+				}
+			}
+		}
+	}
+
 	// 🚀 NEW: Create decoded events data organized by method name
 	var decodedEventsData = make(map[string]interface{})
 
@@ -1539,6 +1587,20 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				"method", methodName,
 				"event_fields", len(methodEvents),
 				"event_data", methodEvents)
+
+			// Apply decimal formatting to event data if needed
+			for decimalProviderMethod, decimalsValue := range decimalProviders {
+				for _, methodCall := range methodCalls {
+					// Find the method call that provides formatting details for this event
+					if methodCall.MethodName == decimalProviderMethod && len(methodCall.ApplyToFields) > 0 {
+						// Create decimal formatting context
+						ctx := NewDecimalFormattingContext(decimalsValue, methodCall.ApplyToFields, decimalProviderMethod)
+						// Apply formatting to the event data
+						ctx.ApplyDecimalFormattingToEventData(methodEvents, methodName, r.vm.logger)
+						break
+					}
+				}
+			}
 		}
 		// If no events, preserve existing return values (return values only when no events)
 	}

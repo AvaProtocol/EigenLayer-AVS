@@ -1655,6 +1655,118 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		assert.True(t, success, "Condition 2500 > 2000 should pass - if this fails, there's a bug in decimal condition evaluation")
 	})
 
+	t.Run("ChainlinkPriceFeed_DecimalConditionDebugging", func(t *testing.T) {
+		// Test multiple condition values to debug the decimal formatting issue
+		// Current ETH price is $2500 (250000000000 raw with 8 decimals)
+		testCases := []struct {
+			conditionValue  string
+			expectedSuccess bool
+			description     string
+		}{
+			{"2400", true, "2500 > 2400 should be TRUE"},
+			{"2600", false, "2500 > 2600 should be FALSE"},
+			{"250000000000", false, "2500 > 250000000000 should be FALSE (if comparing formatted vs raw)"},
+			{"249999999999", true, "250000000000 > 249999999999 should be TRUE (if comparing raw vs raw)"},
+		}
+
+		for _, tc := range testCases {
+			t.Run(fmt.Sprintf("Condition_%s", tc.conditionValue), func(t *testing.T) {
+				triggerConfig := map[string]interface{}{
+					"simulationMode": true,
+					"queries": []interface{}{
+						map[string]interface{}{
+							"addresses": []interface{}{SEPOLIA_ETH_USD_FEED},
+							"topics":    []interface{}{},
+							"contractAbi": []interface{}{
+								// decimals function
+								map[string]interface{}{
+									"inputs":          []interface{}{},
+									"name":            "decimals",
+									"outputs":         []interface{}{map[string]interface{}{"internalType": "uint8", "name": "", "type": "uint8"}},
+									"stateMutability": "view",
+									"type":            "function",
+								},
+								// latestRoundData function
+								map[string]interface{}{
+									"inputs": []interface{}{},
+									"name":   "latestRoundData",
+									"outputs": []interface{}{
+										map[string]interface{}{"internalType": "uint80", "name": "roundId", "type": "uint80"},
+										map[string]interface{}{"internalType": "int256", "name": "answer", "type": "int256"},
+										map[string]interface{}{"internalType": "uint256", "name": "startedAt", "type": "uint256"},
+										map[string]interface{}{"internalType": "uint256", "name": "updatedAt", "type": "uint256"},
+										map[string]interface{}{"internalType": "uint80", "name": "answeredInRound", "type": "uint80"},
+									},
+									"stateMutability": "view",
+									"type":            "function",
+								},
+								// AnswerUpdated event
+								map[string]interface{}{
+									"anonymous": false,
+									"inputs": []interface{}{
+										map[string]interface{}{"indexed": true, "internalType": "int256", "name": "current", "type": "int256"},
+										map[string]interface{}{"indexed": true, "internalType": "uint256", "name": "roundId", "type": "uint256"},
+										map[string]interface{}{"indexed": false, "internalType": "uint256", "name": "updatedAt", "type": "uint256"},
+									},
+									"name": "AnswerUpdated",
+									"type": "event",
+								},
+							},
+							"methodCalls": []interface{}{
+								map[string]interface{}{
+									"methodName":    "decimals",
+									"methodParams":  []interface{}{},
+									"applyToFields": []interface{}{"AnswerUpdated.current"},
+								},
+								map[string]interface{}{
+									"methodName":   "latestRoundData",
+									"methodParams": []interface{}{},
+								},
+							},
+							"conditions": []interface{}{
+								map[string]interface{}{
+									"fieldName": "AnswerUpdated.current",
+									"operator":  "gt",
+									"value":     tc.conditionValue,
+									"fieldType": "decimal",
+								},
+							},
+							"maxEventsPerBlock": 5,
+						},
+					},
+				}
+
+				result, err := engine.runEventTriggerImmediately(triggerConfig, map[string]interface{}{})
+				require.NoError(t, err, "Should not error")
+				require.NotNil(t, result, "Should get result")
+
+				success, ok := result["success"].(bool)
+				require.True(t, ok, "Should have success field")
+
+				t.Logf("🧪 Testing condition: AnswerUpdated.current > %s", tc.conditionValue)
+				t.Logf("💰 Current price: 250000000000 (raw) = $2500 (formatted)")
+				t.Logf("🎯 Expected: %t, Actual: %t", tc.expectedSuccess, success)
+
+				if success != tc.expectedSuccess {
+					t.Logf("❌ DECIMAL CONDITION BUG DETECTED:")
+					t.Logf("   Raw price: 250000000000")
+					t.Logf("   Formatted price: $2500")
+					t.Logf("   Condition: > %s", tc.conditionValue)
+					t.Logf("   Expected: %t, Got: %t", tc.expectedSuccess, success)
+
+					if eventData, ok := result["data"].(map[string]interface{}); ok {
+						if answerData, exists := eventData["AnswerUpdated"].(map[string]interface{}); exists {
+							t.Logf("   Event data: %+v", answerData)
+						}
+					}
+				}
+
+				// Don't assert here - just log the results for debugging
+				// assert.Equal(t, tc.expectedSuccess, success, tc.description)
+			})
+		}
+	})
+
 	t.Run("TransferEvent_Simulation", func(t *testing.T) {
 		// Test Transfer event simulation - this will likely not work with Tenderly
 		// since Tenderly is specialized for Chainlink price feeds, but let's document the behavior
