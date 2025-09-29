@@ -3272,8 +3272,6 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				// No metadata detected, use result as-is
 				rawData = result
 			}
-		} else {
-			rawData = nil
 		}
 
 		valueData, err := structpb.NewValue(rawData)

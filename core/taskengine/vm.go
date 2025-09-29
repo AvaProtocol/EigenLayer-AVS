@@ -1342,7 +1342,7 @@ func (v *VM) addExecutionLog(log *avsproto.Execution_Step) {
 }
 
 func (v *VM) runRestApi(stepID string, nodeValue *avsproto.RestAPINode) (*avsproto.Execution_Step, error) {
-	p := NewRestProrcessor(v)                         // v is passed, CommonProcessor uses v.AddVar
+	p := NewRestProcessor(v)                          // v is passed, CommonProcessor uses v.AddVar
 	executionLog, err := p.Execute(stepID, nodeValue) // p.Execute should use SetOutputVarForStep
 	v.mu.Lock()
 	executionLog.Inputs = v.collectInputKeysForLog(stepID) // Pass stepID to exclude current node's variables
