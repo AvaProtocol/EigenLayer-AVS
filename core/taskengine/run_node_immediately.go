@@ -1334,7 +1334,7 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	// Create response following the same pattern as runEventTriggerWithDirectCalls
 	response := make(map[string]interface{})
 
-	// Add the parsed ABI fields as flattened data
+	// Add the parsed ABI fields in structured format
 	response["data"] = parsedData
 
 	// Add raw event log fields as metadata (direct format for backward compatibility)
@@ -1401,11 +1401,11 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 		return nil, fmt.Errorf("failed to decode event data for %s: %w", eventName, err)
 	}
 
-	// Initialize the result map with only ABI-parsed event data
+	// Initialize the result map with structured event data
 	parsedData := make(map[string]interface{})
 
-	// Add only the event name from ABI
-	parsedData["eventName"] = eventName
+	// Create structured format: eventName as key, fields as nested object
+	eventFields := make(map[string]interface{})
 
 	// Process method calls for decimal formatting
 	var decimalsValue *big.Int
@@ -1549,21 +1549,21 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 								"convertedValue", convertedValue)
 						}
 					} else {
-						parsedData[input.Name] = topicValue.Hex()
+						eventFields[input.Name] = topicValue.Hex()
 					}
 				case abi.BoolTy:
 					// Convert boolean from topic
 					boolVal := new(big.Int).SetBytes(topicValue.Bytes()).Cmp(big.NewInt(0)) != 0
-					parsedData[input.Name] = boolVal
+					eventFields[input.Name] = boolVal
 				case abi.AddressTy:
 					// Keep addresses as hex
-					parsedData[input.Name] = common.HexToAddress(topicValue.Hex()).Hex()
+					eventFields[input.Name] = common.HexToAddress(topicValue.Hex()).Hex()
 				case abi.HashTy, abi.FixedBytesTy:
 					// Keep hashes and fixed bytes as hex
-					parsedData[input.Name] = topicValue.Hex()
+					eventFields[input.Name] = topicValue.Hex()
 				default:
 					// Default to hex for other types
-					parsedData[input.Name] = topicValue.Hex()
+					eventFields[input.Name] = topicValue.Hex()
 				}
 
 				if n.logger != nil {
@@ -1581,7 +1581,7 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 				value := decodedData[nonIndexedCount]
 
 				convertedValue := converter.ConvertABIValueToInterface(value, input.Type, input.Name)
-				parsedData[input.Name] = convertedValue
+				eventFields[input.Name] = convertedValue
 
 				if n.logger != nil {
 					n.logger.Debug("Added non-indexed field from data",
@@ -1598,13 +1598,16 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 	// Add any raw fields metadata from decimal formatting
 	rawFieldsMetadata := converter.GetRawFieldsMetadata()
 	for key, value := range rawFieldsMetadata {
-		parsedData[key] = value
+		eventFields[key] = value
 	}
 
 	// Add decimals info if we retrieved it
 	if decimalsValue != nil {
-		parsedData["decimals"] = decimalsValue.Uint64() // Return as number, not string
+		eventFields["decimals"] = decimalsValue.Uint64() // Return as number, not string
 	}
+
+	// Create the structured format: eventName as key, fields as nested object
+	parsedData[eventName] = eventFields
 
 	// 🔥 ENHANCED TRANSFER EVENT ENRICHMENT
 	// If this is a Transfer event, create enriched transfer_log data
@@ -1639,10 +1642,10 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 		)
 
 		// Populate transfer-specific fields from ABI parsing
-		if fromAddr, ok := parsedData["from"].(string); ok {
+		if fromAddr, ok := eventFields["from"].(string); ok {
 			transferResponse.FromAddress = fromAddr
 		}
-		if toAddr, ok := parsedData["to"].(string); ok {
+		if toAddr, ok := eventFields["to"].(string); ok {
 			transferResponse.ToAddress = toAddr
 		}
 
@@ -1653,11 +1656,11 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 			transferResponse.TokenDecimals = tokenMetadata.Decimals
 
 			// Use the formatted value from ABI parsing if available, otherwise format using token metadata
-			if formattedValue, hasFormatted := parsedData["value"]; hasFormatted {
+			if formattedValue, hasFormatted := eventFields["value"]; hasFormatted {
 				if valueStr, ok := formattedValue.(string); ok {
 					transferResponse.Value = valueStr
 				}
-			} else if rawValue, ok := parsedData["valueRaw"].(string); ok {
+			} else if rawValue, ok := eventFields["valueRaw"].(string); ok {
 				// Fallback: format using token metadata if ABI didn't format it
 				formattedValue := n.tokenEnrichmentService.FormatTokenValue(rawValue, tokenMetadata.Decimals)
 				transferResponse.Value = formattedValue
@@ -1677,11 +1680,11 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 				transferResponse.TokenDecimals = decimalsUint32
 
 				// Use the formatted value from ABI parsing if available, otherwise format using method call decimals
-				if formattedValue, hasFormatted := parsedData["value"]; hasFormatted {
+				if formattedValue, hasFormatted := eventFields["value"]; hasFormatted {
 					if valueStr, ok := formattedValue.(string); ok {
 						transferResponse.Value = valueStr
 					}
-				} else if rawValue, ok := parsedData["valueRaw"].(string); ok {
+				} else if rawValue, ok := eventFields["valueRaw"].(string); ok {
 					// Fallback: format using method call decimals if ABI didn't format it
 					if n.tokenEnrichmentService != nil {
 						formattedValue := n.tokenEnrichmentService.FormatTokenValue(rawValue, decimalsUint32)
@@ -1711,10 +1714,10 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 			// If error, keep the default timestamp from CreateStandardizedTransferResponse
 		}
 
-		// Convert standardized response to map for compatibility with existing code
+		// Convert standardized response to map for structured format
 		// This provides all the standardized fields without deprecated or duplicate ones
 		// Note: logIndex and transactionIndex are excluded as they're available in metadata
-		transferMap := map[string]interface{}{
+		transferFields := map[string]interface{}{
 			"address":         transferResponse.Address,
 			"tokenName":       transferResponse.TokenName,
 			"tokenSymbol":     transferResponse.TokenSymbol,
@@ -1727,7 +1730,10 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 			"value":           transferResponse.Value,
 		}
 
-		return transferMap, nil
+		// Return structured format for Transfer events too
+		transferData := make(map[string]interface{})
+		transferData[eventName] = transferFields
+		return transferData, nil
 	}
 
 	// For non-Transfer events, return basic parsed data
@@ -3806,23 +3812,40 @@ func (n *Engine) evaluateConditionsAgainstEventData(eventData map[string]interfa
 		expectedValue, _ := conditionMap["value"].(string)
 		fieldType, _ := conditionMap["fieldType"].(string)
 
-		// Get the actual field value from event data
-		// Handle eventName.fieldName format by extracting just the field name
-		actualFieldName := fieldName
+		// Get the actual field value from structured event data
+		// Handle eventName.fieldName format for structured data
+		var actualValue interface{}
+		var exists bool
+
 		if strings.Contains(fieldName, ".") {
 			parts := strings.Split(fieldName, ".")
 			if len(parts) == 2 {
-				actualFieldName = parts[1] // Use just the field name part
+				eventName := parts[0]
+				fieldNameOnly := parts[1]
+
+				// Look for the event in the structured data
+				if eventMap, eventExists := eventData[eventName].(map[string]interface{}); eventExists {
+					actualValue, exists = eventMap[fieldNameOnly]
+				}
+			}
+		} else {
+			// For simple field names, check all events for the field
+			for _, eventFields := range eventData {
+				if eventFieldsMap, ok := eventFields.(map[string]interface{}); ok {
+					if value, fieldExists := eventFieldsMap[fieldName]; fieldExists {
+						actualValue = value
+						exists = true
+						break
+					}
+				}
 			}
 		}
 
-		actualValue, exists := eventData[actualFieldName]
 		if !exists {
 			if n.logger != nil {
-				n.logger.Debug("Condition field not found in event data",
-					"originalFieldName", fieldName,
-					"actualFieldName", actualFieldName,
-					"availableFields", GetMapKeys(eventData))
+				n.logger.Debug("Condition field not found in structured event data",
+					"fieldName", fieldName,
+					"availableEvents", GetMapKeys(eventData))
 			}
 			return false
 		}

@@ -1443,12 +1443,14 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		require.True(t, ok, "data should be a map[string]interface{}")
 		require.NotNil(t, eventData, "Should have event data")
 
-		// Verify expected fields in the parsed AnswerUpdated event data
-		assert.NotNil(t, eventData["current"], "Should have current price")
-		assert.NotNil(t, eventData["roundId"], "Should have round ID")
-		assert.NotNil(t, eventData["updatedAt"], "Should have updated timestamp")
-		assert.NotNil(t, eventData["eventName"], "Should have event name")
-		assert.Equal(t, "AnswerUpdated", eventData["eventName"], "Event name should be AnswerUpdated")
+		// Verify structured format: eventName as key, fields as nested object
+		assert.NotNil(t, eventData["AnswerUpdated"], "Should have AnswerUpdated event data")
+		answerUpdatedData, ok := eventData["AnswerUpdated"].(map[string]interface{})
+		require.True(t, ok, "AnswerUpdated should be a map[string]interface{}")
+
+		assert.NotNil(t, answerUpdatedData["current"], "Should have current price")
+		assert.NotNil(t, answerUpdatedData["roundId"], "Should have round ID")
+		assert.NotNil(t, answerUpdatedData["updatedAt"], "Should have updated timestamp")
 
 		// Get the metadata object (direct format)
 		metadata, ok := result["metadata"].(map[string]interface{})
@@ -1502,7 +1504,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 					},
 					"conditions": []interface{}{
 						map[string]interface{}{
-							"fieldName": "current",
+							"fieldName": "AnswerUpdated.current",
 							"operator":  "gt",
 							"value":     "100000000", // $1.00 - very low threshold
 							"fieldType": "int256",
@@ -1527,18 +1529,130 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		require.True(t, ok, "data should be a map[string]interface{}")
 		require.NotNil(t, eventData, "Should have event data")
 
-		// Verify we have parsed AnswerUpdated event data (the condition logic is tested elsewhere)
-		assert.NotNil(t, eventData["current"], "Should have current price")
-		assert.NotNil(t, eventData["roundId"], "Should have round ID")
-		assert.NotNil(t, eventData["updatedAt"], "Should have updated timestamp")
-		assert.NotNil(t, eventData["eventName"], "Should have event name")
+		// Verify we have structured AnswerUpdated event data
+		assert.NotNil(t, eventData["AnswerUpdated"], "Should have AnswerUpdated event data")
+		answerUpdatedData, ok := eventData["AnswerUpdated"].(map[string]interface{})
+		require.True(t, ok, "AnswerUpdated should be a map[string]interface{}")
+
+		assert.NotNil(t, answerUpdatedData["current"], "Should have current price")
+		assert.NotNil(t, answerUpdatedData["roundId"], "Should have round ID")
+		assert.NotNil(t, answerUpdatedData["updatedAt"], "Should have updated timestamp")
 
 		t.Logf("Condition evaluation successful.")
-		t.Logf("   Current Price: %v", eventData["current"])
-		t.Logf("   Round ID: %v", eventData["roundId"])
-		t.Logf("   Updated At: %v", eventData["updatedAt"])
-		t.Logf("   Event Name: %v", eventData["eventName"])
+		t.Logf("   Current Price: %v", answerUpdatedData["current"])
+		t.Logf("   Round ID: %v", answerUpdatedData["roundId"])
+		t.Logf("   Updated At: %v", answerUpdatedData["updatedAt"])
+		t.Logf("   Event Name: AnswerUpdated (from key)")
 		t.Logf("   Condition: simulation mode provides sample data ✅")
+	})
+
+	t.Run("ChainlinkPriceFeed_WithApplyToFieldsAndDecimalConditions", func(t *testing.T) {
+		// Test the exact scenario from the user's request: applyToFields + decimal conditions
+		// This replicates the failing case where latestRoundData.answer with decimal formatting fails condition evaluation
+		triggerConfig := map[string]interface{}{
+			"simulationMode": true,
+			"queries": []interface{}{
+				map[string]interface{}{
+					"addresses": []interface{}{SEPOLIA_ETH_USD_FEED},
+					"topics":    []interface{}{}, // Empty topics - will match AnswerUpdated events
+					"contractAbi": []interface{}{
+						// decimals function
+						map[string]interface{}{
+							"inputs":          []interface{}{},
+							"name":            "decimals",
+							"outputs":         []interface{}{map[string]interface{}{"internalType": "uint8", "name": "", "type": "uint8"}},
+							"stateMutability": "view",
+							"type":            "function",
+						},
+						// latestRoundData function
+						map[string]interface{}{
+							"inputs": []interface{}{},
+							"name":   "latestRoundData",
+							"outputs": []interface{}{
+								map[string]interface{}{"internalType": "uint80", "name": "roundId", "type": "uint80"},
+								map[string]interface{}{"internalType": "int256", "name": "answer", "type": "int256"},
+								map[string]interface{}{"internalType": "uint256", "name": "startedAt", "type": "uint256"},
+								map[string]interface{}{"internalType": "uint256", "name": "updatedAt", "type": "uint256"},
+								map[string]interface{}{"internalType": "uint80", "name": "answeredInRound", "type": "uint80"},
+							},
+							"stateMutability": "view",
+							"type":            "function",
+						},
+						// AnswerUpdated event
+						map[string]interface{}{
+							"anonymous": false,
+							"inputs": []interface{}{
+								map[string]interface{}{"indexed": true, "internalType": "int256", "name": "current", "type": "int256"},
+								map[string]interface{}{"indexed": true, "internalType": "uint256", "name": "roundId", "type": "uint256"},
+								map[string]interface{}{"indexed": false, "internalType": "uint256", "name": "updatedAt", "type": "uint256"},
+							},
+							"name": "AnswerUpdated",
+							"type": "event",
+						},
+					},
+					"methodCalls": []interface{}{
+						map[string]interface{}{
+							"methodName":    "decimals",
+							"methodParams":  []interface{}{},
+							"applyToFields": []interface{}{"AnswerUpdated.current"}, // Apply decimals to AnswerUpdated.current
+						},
+						map[string]interface{}{
+							"methodName":   "latestRoundData",
+							"methodParams": []interface{}{},
+						},
+					},
+					"conditions": []interface{}{
+						map[string]interface{}{
+							"fieldName": "AnswerUpdated.current", // Use structured format: eventName.fieldName
+							"operator":  "gt",
+							"value":     "2000", // $2000 - should pass since simulated price is ~$2500
+							"fieldType": "decimal",
+						},
+					},
+					"maxEventsPerBlock": 5,
+				},
+			},
+		}
+
+		t.Logf("🧪 Testing exact user scenario: applyToFields + decimal conditions")
+		t.Logf("📍 Configuration: decimals() applyToFields AnswerUpdated.current")
+		t.Logf("🎯 Condition: AnswerUpdated.current > 2000 (decimal)")
+		t.Logf("💰 Expected: 250000000000 (raw) = $2500 (formatted) > $2000 = TRUE")
+
+		result, err := engine.runEventTriggerImmediately(triggerConfig, map[string]interface{}{})
+
+		require.NoError(t, err, "Should not error")
+		require.NotNil(t, result, "Should get result")
+
+		// Debug the result structure
+		t.Logf("📊 Result: %+v", result)
+
+		if eventData, ok := result["data"].(map[string]interface{}); ok {
+			t.Logf("📈 Event Data Structure: %v", GetMapKeys(eventData))
+			if answerUpdatedData, exists := eventData["AnswerUpdated"].(map[string]interface{}); exists {
+				t.Logf("📈 AnswerUpdated Fields: %v", GetMapKeys(answerUpdatedData))
+				if current, exists := answerUpdatedData["current"]; exists {
+					t.Logf("💰 Current price (raw): %v", current)
+				}
+				if answer, exists := answerUpdatedData["answer"]; exists {
+					t.Logf("💰 Answer field (if exists): %v", answer)
+				}
+			}
+		}
+
+		// The key test: This should succeed since 2500 > 2000
+		success, ok := result["success"].(bool)
+		require.True(t, ok, "Should have success field")
+
+		if !success {
+			if errorMsg, exists := result["error"]; exists {
+				t.Logf("❌ Condition failed: %v", errorMsg)
+				t.Logf("🔍 This indicates the decimal condition evaluation issue")
+			}
+		}
+
+		// This assertion will help us identify the bug
+		assert.True(t, success, "Condition 2500 > 2000 should pass - if this fails, there's a bug in decimal condition evaluation")
 	})
 
 	t.Run("TransferEvent_Simulation", func(t *testing.T) {
