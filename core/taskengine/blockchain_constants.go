@@ -23,6 +23,10 @@ const (
 	// DefaultGasPriceHex is the hexadecimal representation of DefaultGasPrice (0.5 gwei)
 	// Used in transaction receipts and other hex-encoded contexts
 	DefaultGasPriceHex = "0x1dcd6500"
+
+	// HexPrefix is the standard prefix for hexadecimal strings in Ethereum
+	// Used for consistent hex string handling throughout the codebase
+	HexPrefix = "0x"
 )
 
 // Contract method constants

@@ -1077,26 +1077,14 @@ func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *C
 	}
 
 	receiptMap := map[string]interface{}{
-		"transactionHash":  result.Transaction.Hash,                                              // ✅ From Tenderly
-		"from":             result.Transaction.From,                                              // ✅ From Tenderly
-		"to":               result.Transaction.To,                                                // ✅ From Tenderly
-		"blockNumber":      "0x1",                                                                // Mock value for simulation
-		"blockHash":        "0x0000000000000000000000000000000000000000000000000000000000000001", // Mock value
-		"transactionIndex": "0x0",                                                                // Mock value for simulation
-		"gasUsed": func() string {
-			if gasUsed := r.getGasUsedFromTenderly(result); gasUsed != "" {
-				return gasUsed
-			}
-			// Use standard gas cost as fallback for receipt compatibility
-			return StandardGasCostHex
-		}(),
-		"cumulativeGasUsed": func() string {
-			if gasUsed := r.getGasUsedFromTenderly(result); gasUsed != "" {
-				return gasUsed
-			}
-			// Use standard gas cost as fallback for receipt compatibility
-			return StandardGasCostHex
-		}(),
+		"transactionHash":   result.Transaction.Hash,                                              // ✅ From Tenderly
+		"from":              result.Transaction.From,                                              // ✅ From Tenderly
+		"to":                result.Transaction.To,                                                // ✅ From Tenderly
+		"blockNumber":       "0x1",                                                                // Mock value for simulation
+		"blockHash":         "0x0000000000000000000000000000000000000000000000000000000000000001", // Mock value
+		"transactionIndex":  "0x0",                                                                // Mock value for simulation
+		"gasUsed":           r.getGasUsedWithFallback(result, StandardGasCostHex),
+		"cumulativeGasUsed": r.getGasUsedWithFallback(result, StandardGasCostHex),
 		"effectiveGasPrice": func() string {
 			if gasPrice := r.getGasPriceFromTenderly(result); gasPrice != "" {
 				return gasPrice
@@ -1184,6 +1172,15 @@ func (r *ContractWriteProcessor) getGasUsedFromTenderly(result *ContractWriteSim
 	}
 	// Return empty string when real gas data is unavailable - don't show fake values
 	return ""
+}
+
+// getGasUsedWithFallback returns gas used from Tenderly or fallback value if unavailable
+func (r *ContractWriteProcessor) getGasUsedWithFallback(result *ContractWriteSimulationResult, fallbackValue string) string {
+	if gasUsed := r.getGasUsedFromTenderly(result); gasUsed != "" {
+		return gasUsed
+	}
+	// Use fallback gas cost for receipt compatibility
+	return fallbackValue
 }
 
 // getGasPriceFromTenderly extracts gas price from Tenderly simulation result or returns empty string
@@ -2135,7 +2132,7 @@ func (r *ContractWriteProcessor) extractValidGasDataFromReceipt(receiptMap map[s
 
 	// This looks like real gas data, not our fallback values
 	gasUsedBig := new(big.Int)
-	if _, ok := gasUsedBig.SetString(strings.TrimPrefix(gasUsedHex, "0x"), 16); !ok {
+	if _, ok := gasUsedBig.SetString(strings.TrimPrefix(gasUsedHex, HexPrefix), 16); !ok {
 		return result
 	}
 
@@ -2146,7 +2143,7 @@ func (r *ContractWriteProcessor) extractValidGasDataFromReceipt(receiptMap map[s
 	}
 
 	gasPriceBig := new(big.Int)
-	if _, ok := gasPriceBig.SetString(strings.TrimPrefix(effectiveGasPriceHex, "0x"), 16); !ok {
+	if _, ok := gasPriceBig.SetString(strings.TrimPrefix(effectiveGasPriceHex, HexPrefix), 16); !ok {
 		return result
 	}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -21,7 +22,10 @@ type FeeEstimator struct {
 	ethClient         *ethclient.Client
 	tenderlyClient    *TenderlyClient
 	smartWalletConfig *config.SmartWalletConfig
-	chainID           int64 // Cached after first detection
+
+	// Chain ID caching with thread safety
+	chainIDMu sync.RWMutex
+	chainID   int64 // Cached after first detection
 
 	// Price service for USD conversion
 	priceService PriceService
@@ -111,7 +115,20 @@ func NewFeeEstimator(
 
 // getChainID detects and caches the chain ID from the eth client
 func (fe *FeeEstimator) getChainID(ctx context.Context) (int64, error) {
-	// Return cached value if already detected
+	// Check cached value with read lock first
+	fe.chainIDMu.RLock()
+	if fe.chainID != 0 {
+		cachedID := fe.chainID
+		fe.chainIDMu.RUnlock()
+		return cachedID, nil
+	}
+	fe.chainIDMu.RUnlock()
+
+	// Need to detect chain ID, acquire write lock
+	fe.chainIDMu.Lock()
+	defer fe.chainIDMu.Unlock()
+
+	// Double-check in case another goroutine set it while we waited for the lock
 	if fe.chainID != 0 {
 		return fe.chainID, nil
 	}
@@ -818,15 +835,23 @@ func (fe *FeeEstimator) generateRecommendations(req *avsproto.EstimateFeesReq, g
 
 // Utility methods for fee conversion
 func (fe *FeeEstimator) convertToFeeAmount(weiAmount *big.Int) (*avsproto.FeeAmount, error) {
-	// Use cached chain ID if available, otherwise detect it
+	// Use cached chain ID if available, otherwise detect it with proper synchronization
+	fe.chainIDMu.RLock()
 	chainID := fe.chainID
+	fe.chainIDMu.RUnlock()
+
 	if chainID == 0 {
 		// Try to detect chain ID, but don't fail if context is not available
 		// This is a fallback for cases where convertToFeeAmount is called without context
 		chainIDResult, err := fe.ethClient.ChainID(context.Background())
 		if err == nil {
 			chainID = chainIDResult.Int64()
-			fe.chainID = chainID // Cache for next time
+			// Cache for next time with proper synchronization
+			fe.chainIDMu.Lock()
+			if fe.chainID == 0 { // Double-check to avoid overwriting
+				fe.chainID = chainID
+			}
+			fe.chainIDMu.Unlock()
 		} else {
 			// Use a reasonable default
 			chainID = 1 // Ethereum mainnet as fallback
@@ -858,14 +883,22 @@ func (fe *FeeEstimator) convertToFeeAmount(weiAmount *big.Int) (*avsproto.FeeAmo
 }
 
 func (fe *FeeEstimator) convertUSDToFeeAmount(usdAmount float64) (*avsproto.FeeAmount, error) {
-	// Use cached chain ID if available, otherwise detect it
+	// Use cached chain ID if available, otherwise detect it with proper synchronization
+	fe.chainIDMu.RLock()
 	chainID := fe.chainID
+	fe.chainIDMu.RUnlock()
+
 	if chainID == 0 {
 		// Try to detect chain ID, but don't fail if context is not available
 		chainIDResult, err := fe.ethClient.ChainID(context.Background())
 		if err == nil {
 			chainID = chainIDResult.Int64()
-			fe.chainID = chainID // Cache for next time
+			// Cache for next time with proper synchronization
+			fe.chainIDMu.Lock()
+			if fe.chainID == 0 { // Double-check to avoid overwriting
+				fe.chainID = chainID
+			}
+			fe.chainIDMu.Unlock()
 		} else {
 			// Use a reasonable default
 			chainID = 1 // Ethereum mainnet as fallback

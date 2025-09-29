@@ -552,7 +552,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		err := fmt.Errorf("invalid URL format (must start with http:// or https://): %s", url)
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
+		finalizeExecutionStepWithError(executionLogStep, false, err, logBuilder.String())
 		return executionLogStep, err
 	}
 
@@ -600,14 +600,15 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		// Format connection errors to match test expectations
 		errorMsg := fmt.Sprintf("HTTP request failed: connection error or timeout - %s", err.Error())
 		logBuilder.WriteString(fmt.Sprintf("Request failed: %s\n", errorMsg))
-		finalizeExecutionStep(executionLogStep, false, errorMsg, logBuilder.String())
-		return executionLogStep, fmt.Errorf(errorMsg)
+		wrappedErr := fmt.Errorf(errorMsg)
+		finalizeExecutionStepWithError(executionLogStep, false, wrappedErr, logBuilder.String())
+		return executionLogStep, wrappedErr
 	}
 
 	if response == nil {
 		err = fmt.Errorf("received nil response")
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
+		finalizeExecutionStepWithError(executionLogStep, false, err, logBuilder.String())
 		return executionLogStep, err
 	}
 
@@ -650,7 +651,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	outputValue, err := structpb.NewValue(responseData)
 	if err != nil {
 		logBuilder.WriteString(fmt.Sprintf("Error converting response to protobuf: %s\n", err.Error()))
-		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
+		finalizeExecutionStepWithError(executionLogStep, false, err, logBuilder.String())
 		return executionLogStep, err
 	}
 
