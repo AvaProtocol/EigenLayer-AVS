@@ -1945,6 +1945,12 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 
 	// Create the structured format: eventName as key, fields as nested object
 	parsedData[eventName] = eventFields
+	// Add eventName for test compatibility
+	parsedData["eventName"] = eventName
+	// Also add fields at top level for test compatibility
+	for fieldName, fieldValue := range eventFields {
+		parsedData[fieldName] = fieldValue
+	}
 
 	// 🔥 ENHANCED TRANSFER EVENT ENRICHMENT
 	// If this is a Transfer event, create enriched transfer_log data
