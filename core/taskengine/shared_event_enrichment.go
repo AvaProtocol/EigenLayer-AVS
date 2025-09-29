@@ -158,9 +158,9 @@ func parseEventWithABIShared(eventLog *types.Log, contractABI *abi.ABI, query *a
 		return nil, "", fmt.Errorf("failed to decode event data for %s: %w", eventName, err)
 	}
 
-	// Build parsed data map with both indexed and non-indexed fields
+	// Build structured data map: eventName as key, fields as nested object
+	eventFields := make(map[string]interface{})
 	parsedData := make(map[string]interface{})
-	parsedData["eventName"] = eventName
 
 	// Create ABI value converter for proper type conversion
 	converter := NewABIValueConverter(nil, nil)
@@ -182,20 +182,20 @@ func parseEventWithABIShared(eventLog *types.Log, contractABI *abi.ABI, query *a
 					// Convert numeric types to proper types
 					bigInt := new(big.Int).SetBytes(topicValue.Bytes())
 					convertedValue := converter.ConvertABIValueToInterface(bigInt, input.Type, input.Name)
-					parsedData[input.Name] = convertedValue
+					eventFields[input.Name] = convertedValue
 				case abi.BoolTy:
 					// Convert boolean from topic
 					boolVal := new(big.Int).SetBytes(topicValue.Bytes()).Cmp(big.NewInt(0)) != 0
-					parsedData[input.Name] = boolVal
+					eventFields[input.Name] = boolVal
 				case abi.AddressTy:
 					// Keep addresses as hex
-					parsedData[input.Name] = common.HexToAddress(topicValue.Hex()).Hex()
+					eventFields[input.Name] = common.HexToAddress(topicValue.Hex()).Hex()
 				case abi.HashTy, abi.FixedBytesTy:
 					// Keep hashes and fixed bytes as hex
-					parsedData[input.Name] = topicValue.Hex()
+					eventFields[input.Name] = topicValue.Hex()
 				default:
 					// Default to hex for other types
-					parsedData[input.Name] = topicValue.Hex()
+					eventFields[input.Name] = topicValue.Hex()
 				}
 			}
 			indexedCount++
@@ -204,11 +204,14 @@ func parseEventWithABIShared(eventLog *types.Log, contractABI *abi.ABI, query *a
 			if nonIndexedCount < len(decodedData) {
 				rawValue := decodedData[nonIndexedCount]
 				// Use ABI converter to ensure structpb compatibility
-				parsedData[input.Name] = converter.ConvertABIValueToInterface(rawValue, input.Type, input.Name)
+				eventFields[input.Name] = converter.ConvertABIValueToInterface(rawValue, input.Type, input.Name)
 			}
 			nonIndexedCount++
 		}
 	}
+
+	// Create structured format: eventName as key, fields as nested object
+	parsedData[eventName] = eventFields
 
 	return parsedData, eventName, nil
 }
