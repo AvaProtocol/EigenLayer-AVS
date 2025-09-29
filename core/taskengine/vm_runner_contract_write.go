@@ -766,12 +766,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	// Add success information to execution log
 	executionLogBuilder.WriteString("✅ BUNDLER SUCCESS: UserOp transaction sent successfully\n")
 	if userOp != nil {
-		executionLogBuilder.WriteString(fmt.Sprintf("UserOp Hash: %s\n", func() string {
-			if receipt != nil {
-				return receipt.TxHash.Hex()
-			}
-			return "pending"
-		}()))
+		executionLogBuilder.WriteString(fmt.Sprintf("UserOp Hash: %s\n", r.getUserOpHashOrPending(receipt)))
 		executionLogBuilder.WriteString(fmt.Sprintf("Sender: %s\n", userOp.Sender.Hex()))
 		executionLogBuilder.WriteString(fmt.Sprintf("Nonce: %s\n", userOp.Nonce.String()))
 	}
@@ -1077,37 +1072,19 @@ func (r *ContractWriteProcessor) convertTenderlyResultToFlexibleFormat(result *C
 	}
 
 	receiptMap := map[string]interface{}{
-		"transactionHash":  result.Transaction.Hash,                                              // ✅ From Tenderly
-		"from":             result.Transaction.From,                                              // ✅ From Tenderly
-		"to":               result.Transaction.To,                                                // ✅ From Tenderly
-		"blockNumber":      "0x1",                                                                // Mock value for simulation
-		"blockHash":        "0x0000000000000000000000000000000000000000000000000000000000000001", // Mock value
-		"transactionIndex": "0x0",                                                                // Mock value for simulation
-		"gasUsed": func() string {
-			if gasUsed := r.getGasUsedFromTenderly(result); gasUsed != "" {
-				return gasUsed
-			}
-			// Use standard gas cost as fallback for receipt compatibility
-			return StandardGasCostHex
-		}(),
-		"cumulativeGasUsed": func() string {
-			if gasUsed := r.getGasUsedFromTenderly(result); gasUsed != "" {
-				return gasUsed
-			}
-			// Use standard gas cost as fallback for receipt compatibility
-			return StandardGasCostHex
-		}(),
-		"effectiveGasPrice": func() string {
-			if gasPrice := r.getGasPriceFromTenderly(result); gasPrice != "" {
-				return gasPrice
-			}
-			// Use default gas price as fallback for receipt compatibility
-			return DefaultGasPriceHex
-		}(),
-		"status":    receiptStatus,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        // Success/failure status based on actual result
-		"logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", // Empty logs bloom
-		"logs":      receiptLogs,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          // Logs from Tenderly simulation
-		"type":      "0x2",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // EIP-1559 transaction type
+		"transactionHash":   result.Transaction.Hash,                                              // ✅ From Tenderly
+		"from":              result.Transaction.From,                                              // ✅ From Tenderly
+		"to":                result.Transaction.To,                                                // ✅ From Tenderly
+		"blockNumber":       "0x1",                                                                // Mock value for simulation
+		"blockHash":         "0x0000000000000000000000000000000000000000000000000000000000000001", // Mock value
+		"transactionIndex":  "0x0",                                                                // Mock value for simulation
+		"gasUsed":           r.getGasUsedWithFallback(result, StandardGasCostHex),
+		"cumulativeGasUsed": r.getGasUsedWithFallback(result, StandardGasCostHex),
+		"effectiveGasPrice": r.getEffectiveGasPriceWithFallback(result),
+		"status":            receiptStatus,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        // Success/failure status based on actual result
+		"logsBloom":         "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", // Empty logs bloom
+		"logs":              receiptLogs,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          // Logs from Tenderly simulation
+		"type":              "0x2",                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // EIP-1559 transaction type
 	}
 
 	// Logs are now populated from real simulation provider (Tenderly)
@@ -1186,6 +1163,15 @@ func (r *ContractWriteProcessor) getGasUsedFromTenderly(result *ContractWriteSim
 	return ""
 }
 
+// getGasUsedWithFallback returns gas used from Tenderly or fallback value if unavailable
+func (r *ContractWriteProcessor) getGasUsedWithFallback(result *ContractWriteSimulationResult, fallbackValue string) string {
+	if gasUsed := r.getGasUsedFromTenderly(result); gasUsed != "" {
+		return gasUsed
+	}
+	// Use fallback gas cost for receipt compatibility
+	return fallbackValue
+}
+
 // getGasPriceFromTenderly extracts gas price from Tenderly simulation result or returns empty string
 func (r *ContractWriteProcessor) getGasPriceFromTenderly(result *ContractWriteSimulationResult) string {
 	if result != nil && result.GasPrice != "" {
@@ -1241,7 +1227,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 	defer func() {
 		if err != nil {
-			finalizeExecutionStep(s, false, err.Error(), log.String())
+			finalizeExecutionStepWithError(s, false, err, log.String())
 		}
 	}()
 
@@ -2230,4 +2216,23 @@ func (r *ContractWriteProcessor) validateGeneralTransactionParameters(methodName
 	}
 
 	return nil
+}
+
+// getEffectiveGasPriceWithFallback returns effective gas price from Tenderly or fallback value
+// Extracted from inline anonymous function for better maintainability
+func (r *ContractWriteProcessor) getEffectiveGasPriceWithFallback(result *ContractWriteSimulationResult) string {
+	if gasPrice := r.getGasPriceFromTenderly(result); gasPrice != "" {
+		return gasPrice
+	}
+	// Use default gas price as fallback for receipt compatibility
+	return DefaultGasPriceHex
+}
+
+// getUserOpHashOrPending returns transaction hash from receipt or "pending" if unavailable
+// Extracted from inline anonymous function for better maintainability
+func (r *ContractWriteProcessor) getUserOpHashOrPending(receipt *types.Receipt) string {
+	if receipt != nil {
+		return receipt.TxHash.Hex()
+	}
+	return "pending"
 }

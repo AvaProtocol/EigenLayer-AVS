@@ -388,7 +388,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	var err error
 	defer func() {
 		if err != nil {
-			finalizeExecutionStep(s, false, err.Error(), "")
+			finalizeExecutionStepWithError(s, false, err, "")
 		}
 	}()
 

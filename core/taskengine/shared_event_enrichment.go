@@ -247,11 +247,21 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 	)
 
 	// Populate transfer-specific fields from ABI parsing
-	if fromAddr, ok := parsedData["from"].(string); ok {
-		transferResponse.FromAddress = fromAddr
+	// Handle nested event structure: parsedData["Transfer"]["from"]
+	var transferEventData map[string]interface{}
+	if transferData, exists := parsedData["Transfer"]; exists {
+		if transferMap, ok := transferData.(map[string]interface{}); ok {
+			transferEventData = transferMap
+		}
 	}
-	if toAddr, ok := parsedData["to"].(string); ok {
-		transferResponse.ToAddress = toAddr
+
+	if transferEventData != nil {
+		if fromAddr, ok := transferEventData["from"].(string); ok {
+			transferResponse.FromAddress = fromAddr
+		}
+		if toAddr, ok := transferEventData["to"].(string); ok {
+			transferResponse.ToAddress = toAddr
+		}
 	}
 
 	// Populate token metadata if available
@@ -261,21 +271,23 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 		transferResponse.TokenDecimals = tokenMetadata.Decimals
 
 		// Format the value using token metadata
-		if rawValue, ok := parsedData["value"]; ok {
-			var valueStr string
+		if transferEventData != nil {
+			if rawValue, ok := transferEventData["value"]; ok {
+				var valueStr string
 
-			// Handle different value types (big.Int, string, etc.)
-			switch v := rawValue.(type) {
-			case *big.Int:
-				valueStr = v.String()
-			case string:
-				valueStr = v
-			default:
-				valueStr = fmt.Sprintf("%v", v)
+				// Handle different value types (big.Int, string, etc.)
+				switch v := rawValue.(type) {
+				case *big.Int:
+					valueStr = v.String()
+				case string:
+					valueStr = v
+				default:
+					valueStr = fmt.Sprintf("%v", v)
+				}
+
+				formattedValue := tokenService.FormatTokenValue(valueStr, tokenMetadata.Decimals)
+				transferResponse.Value = formattedValue
 			}
-
-			formattedValue := tokenService.FormatTokenValue(valueStr, tokenMetadata.Decimals)
-			transferResponse.Value = formattedValue
 		}
 
 		if logger != nil {
