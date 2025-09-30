@@ -372,7 +372,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			return &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodName,
 				Success:    false,
-				Error:      "chainId is required for contractWrite (provide in settings.chainId)",
+				Error:      "settings.chainId is required for contractWrite",
 			}
 		}
 		r.vm.logger.Debug("ContractWrite: resolved chain id for simulation", "chain_id", chainID)
