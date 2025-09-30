@@ -301,9 +301,9 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			setupVM: func(v *VM) {
 				// Use a valid RPC URL to test the validation logic
 				config := &config.SmartWalletConfig{
-					EthRpcUrl:  "https://sepolia.drpc.org", // Real endpoint for testing
+					EthRpcUrl:  testutil.GetTestRPCURL(),
 					BundlerURL: "https://bundler.test",
-					EthWsUrl:   "wss://sepolia.drpc.org",
+					EthWsUrl:   testutil.GetTestWsRPCURL(),
 					FactoryAddress: common.HexToAddress(func() string {
 						v := os.Getenv("FACTORY_ADDRESS")
 						if v != "" {
@@ -336,9 +336,9 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			setupVM: func(v *VM) {
 				// Use a valid RPC URL to test the validation logic
 				config := &config.SmartWalletConfig{
-					EthRpcUrl:  "https://sepolia.drpc.org", // Real endpoint for testing
+					EthRpcUrl:  testutil.GetTestRPCURL(),
 					BundlerURL: "https://bundler.test",
-					EthWsUrl:   "wss://sepolia.drpc.org",
+					EthWsUrl:   testutil.GetTestWsRPCURL(),
 					FactoryAddress: common.HexToAddress(func() string {
 						v := os.Getenv("FACTORY_ADDRESS")
 						if v != "" {
@@ -371,9 +371,9 @@ func TestVM_ContractRead_ErrorHandling(t *testing.T) {
 			setupVM: func(v *VM) {
 				// Use a valid RPC URL but point to a non-existent contract or one that returns empty data
 				config := &config.SmartWalletConfig{
-					EthRpcUrl:  "https://sepolia.drpc.org", // Real endpoint
+					EthRpcUrl:  testutil.GetTestRPCURL(),
 					BundlerURL: "https://bundler.test",
-					EthWsUrl:   "wss://sepolia.drpc.org",
+					EthWsUrl:   testutil.GetTestWsRPCURL(),
 					FactoryAddress: common.HexToAddress(func() string {
 						v := os.Getenv("FACTORY_ADDRESS")
 						if v != "" {
@@ -536,9 +536,9 @@ func TestVM_ContractWrite_ErrorHandling(t *testing.T) {
 			setupVM: func(v *VM) {
 				// Use a properly configured smart wallet config to ensure we test address validation
 				config := &config.SmartWalletConfig{
-					EthRpcUrl:  "https://sepolia.drpc.org", // Valid RPC URL
+					EthRpcUrl:  testutil.GetTestRPCURL(),
 					BundlerURL: "https://bundler.test",
-					EthWsUrl:   "wss://sepolia.drpc.org",
+					EthWsUrl:   testutil.GetTestWsRPCURL(),
 					FactoryAddress: common.HexToAddress(func() string {
 						v := os.Getenv("FACTORY_ADDRESS")
 						if v != "" {
