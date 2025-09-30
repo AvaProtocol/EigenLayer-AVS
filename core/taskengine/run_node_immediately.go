@@ -3997,6 +3997,7 @@ func isExpectedValidationError(err error) bool {
 		"invalid query format",                              // EventTrigger query format validation
 		"invalid addresses format",                          // EventTrigger addresses format validation
 		"invalid contractAbi format",                        // EventTrigger ABI format validation
+		"settings is required for contractWrite",            // ContractWrite settings validation
 	}
 
 	for _, pattern := range validationErrorPatterns {
