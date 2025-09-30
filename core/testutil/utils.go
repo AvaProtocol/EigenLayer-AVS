@@ -26,9 +26,10 @@ import (
 
 var testConfig *config.Config
 
-// init loads test configuration from config/aggregator.yaml
+// init loads test configuration from the default config path.
+// When commands use a non-default path via --config flag, testConfig will be nil
+// and the test utility functions will use their fallback default values.
 func init() {
-	// Load test configuration from aggregator.yaml
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))
 		configPath := filepath.Join(repoRoot, "config", "aggregator.yaml")
@@ -36,116 +37,157 @@ func init() {
 		var err error
 		testConfig, err = config.NewConfig(configPath)
 		if err != nil {
-			// Fallback: try current working directory
-			testConfig, err = config.NewConfig("config/aggregator.yaml")
-			if err != nil {
-				log.Printf("Warning: Could not load test config from aggregator.yaml: %v", err)
-				testConfig = nil
-			}
+			// Config loading failed - test utilities will use fallback defaults
+			testConfig = nil
 		}
 	}
 }
 
-const (
-	paymasterAddress = config.DefaultPaymasterAddressHex
-)
-
-// GetTestConfig returns the loaded test configuration from aggregator.yaml
+// GetTestConfig returns the loaded test configuration
 func GetTestConfig() *config.Config {
 	return testConfig
 }
 
 // GetTestRPC returns the RPC URL for tests from aggregator config
+// Panics if config is not loaded or EthHttpRpcUrl is empty
 func GetTestRPC() string {
-	if testConfig != nil && testConfig.EthHttpRpcUrl != "" {
-		return testConfig.EthHttpRpcUrl
+	if testConfig == nil {
+		panic("testConfig is nil - aggregator.yaml config must be loaded")
 	}
-	return "https://sepolia.drpc.org"
+	if testConfig.EthHttpRpcUrl == "" {
+		panic("EthHttpRpcUrl is empty in aggregator.yaml config")
+	}
+	return testConfig.EthHttpRpcUrl
 }
 
 // GetTestWsRPC returns the WebSocket RPC URL for tests from aggregator config
+// Panics if config is not loaded or EthWsRpcUrl is empty
 func GetTestWsRPC() string {
-	if testConfig != nil && testConfig.EthWsRpcUrl != "" {
+	if testConfig == nil {
+		panic("testConfig is nil - aggregator.yaml config must be loaded")
+	}
+	if testConfig.EthWsRpcUrl != "" {
 		return testConfig.EthWsRpcUrl
 	}
-	// Derive from HTTP RPC
+	// Try to derive from HTTP RPC if available
 	if http := GetTestRPC(); strings.HasPrefix(http, "https://") {
 		return strings.Replace(http, "https://", "wss://", 1)
 	}
-	return "wss://sepolia.drpc.org"
+	panic("EthWsRpcUrl is empty in aggregator.yaml config and cannot derive from EthHttpRpcUrl")
 }
 
 // GetTestBundlerRPC returns the bundler RPC URL for tests from aggregator config
+// Panics if config is not loaded or BundlerURL is empty
 func GetTestBundlerRPC() string {
-	if testConfig != nil && testConfig.SmartWallet != nil && testConfig.SmartWallet.BundlerURL != "" {
-		return testConfig.SmartWallet.BundlerURL
+	if testConfig == nil {
+		panic("testConfig is nil - aggregator.yaml config must be loaded")
 	}
-	return ""
+	if testConfig.SmartWallet == nil {
+		panic("SmartWallet config is nil in aggregator.yaml")
+	}
+	if testConfig.SmartWallet.BundlerURL == "" {
+		panic("BundlerURL is empty in aggregator.yaml config")
+	}
+	return testConfig.SmartWallet.BundlerURL
 }
 
 // GetTestTenderlyAccount returns the Tenderly account for tests from aggregator config
+// Panics if config is not loaded or TenderlyAccount is empty
 func GetTestTenderlyAccount() string {
-	if testConfig != nil {
-		return testConfig.TenderlyAccount
+	if testConfig == nil {
+		panic("testConfig is nil - aggregator.yaml config must be loaded")
 	}
-	return ""
+	if testConfig.TenderlyAccount == "" {
+		panic("TenderlyAccount is empty in aggregator.yaml config")
+	}
+	return testConfig.TenderlyAccount
 }
 
 // GetTestTenderlyProject returns the Tenderly project for tests from aggregator config
+// Panics if config is not loaded or TenderlyProject is empty
 func GetTestTenderlyProject() string {
-	if testConfig != nil {
-		return testConfig.TenderlyProject
+	if testConfig == nil {
+		panic("testConfig is nil - aggregator.yaml config must be loaded")
 	}
-	return ""
+	if testConfig.TenderlyProject == "" {
+		panic("TenderlyProject is empty in aggregator.yaml config")
+	}
+	return testConfig.TenderlyProject
 }
 
 // GetTestTenderlyAccessKey returns the Tenderly access key for tests from aggregator config
+// Panics if config is not loaded or TenderlyAccessKey is empty
 func GetTestTenderlyAccessKey() string {
-	if testConfig != nil {
-		return testConfig.TenderlyAccessKey
+	if testConfig == nil {
+		panic("testConfig is nil - aggregator.yaml config must be loaded")
 	}
-	return ""
+	if testConfig.TenderlyAccessKey == "" {
+		panic("TenderlyAccessKey is empty in aggregator.yaml config")
+	}
+	return testConfig.TenderlyAccessKey
 }
 
 // GetTestPrivateKey returns the test private key from aggregator config
+// Panics if config is not loaded or TestPrivateKey is empty
 func GetTestPrivateKey() string {
-	if testConfig != nil && testConfig.TestPrivateKey != "" {
-		return testConfig.TestPrivateKey
+	if testConfig == nil {
+		panic("testConfig is nil - aggregator.yaml config must be loaded")
 	}
-	return ""
+	if testConfig.TestPrivateKey == "" {
+		panic("TestPrivateKey is empty in aggregator.yaml config")
+	}
+	return testConfig.TestPrivateKey
 }
 
 // GetTestControllerPrivateKey returns the controller private key for tests from aggregator config
+// Panics if config is not loaded or SmartWallet is nil or ControllerPrivateKey is nil
 func GetTestControllerPrivateKey() string {
-	if testConfig != nil && testConfig.SmartWallet != nil && testConfig.SmartWallet.ControllerPrivateKey != nil {
-		return fmt.Sprintf("%x", testConfig.SmartWallet.ControllerPrivateKey.D)
+	if testConfig == nil {
+		panic("testConfig is nil - aggregator.yaml config must be loaded")
 	}
-	// No fallback - controller key and test key serve different purposes
-	return ""
+	if testConfig.SmartWallet == nil {
+		panic("SmartWallet config is nil in aggregator.yaml")
+	}
+	if testConfig.SmartWallet.ControllerPrivateKey == nil {
+		panic("ControllerPrivateKey is nil in aggregator.yaml config")
+	}
+	return fmt.Sprintf("%x", testConfig.SmartWallet.ControllerPrivateKey.D)
 }
 
 // GetTestFactoryAddress returns the factory address for tests from aggregator config
+// Panics if config is not loaded or SmartWallet is nil
 func GetTestFactoryAddress() string {
-	if testConfig != nil && testConfig.SmartWallet != nil {
-		return testConfig.SmartWallet.FactoryAddress.Hex()
+	if testConfig == nil {
+		panic("testConfig is nil - aggregator.yaml config must be loaded")
 	}
-	return config.DefaultFactoryProxyAddressHex
+	if testConfig.SmartWallet == nil {
+		panic("SmartWallet config is nil in aggregator.yaml")
+	}
+	return testConfig.SmartWallet.FactoryAddress.Hex()
 }
 
 // GetTestEntrypointAddress returns the entrypoint address for tests from aggregator config
+// Panics if config is not loaded or SmartWallet is nil
 func GetTestEntrypointAddress() string {
-	if testConfig != nil && testConfig.SmartWallet != nil {
-		return testConfig.SmartWallet.EntrypointAddress.Hex()
+	if testConfig == nil {
+		panic("testConfig is nil - aggregator.yaml config must be loaded")
 	}
-	return config.DefaultEntrypointAddressHex
+	if testConfig.SmartWallet == nil {
+		panic("SmartWallet config is nil in aggregator.yaml")
+	}
+	return testConfig.SmartWallet.EntrypointAddress.Hex()
 }
 
 // GetTestPaymasterAddress returns the paymaster address for tests from aggregator config
+// Panics if config is not loaded or SmartWallet is nil
 func GetTestPaymasterAddress() string {
-	if testConfig != nil && testConfig.SmartWallet != nil {
-		return testConfig.SmartWallet.PaymasterAddress.Hex()
+	if testConfig == nil {
+		panic("testConfig is nil - aggregator.yaml config must be loaded")
 	}
-	return config.DefaultPaymasterAddressHex
+	if testConfig.SmartWallet == nil {
+		panic("SmartWallet config is nil in aggregator.yaml")
+	}
+	return testConfig.SmartWallet.PaymasterAddress.Hex()
 }
 
 // TriggerData represents the flattened trigger information for testing
