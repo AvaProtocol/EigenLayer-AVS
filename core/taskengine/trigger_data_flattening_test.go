@@ -283,7 +283,7 @@ func TestCamelCaseVariableResolutionConsistency(t *testing.T) {
 	}
 
 	t.Run("RunNodeImmediately", func(t *testing.T) {
-		result, err := engine.RunNodeImmediately("customCode", customCodeConfig, inputVariables)
+		result, err := engine.RunNodeImmediately("customCode", customCodeConfig, inputVariables, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
@@ -409,7 +409,7 @@ func TestBranchNodeCamelCaseResolution(t *testing.T) {
 	}
 
 	t.Run("BranchNodeCamelCaseResolution", func(t *testing.T) {
-		result, err := engine.RunNodeImmediately("branch", branchConfig, inputVariables)
+		result, err := engine.RunNodeImmediately("branch", branchConfig, inputVariables, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 		if result != nil && result["success"] != nil {
@@ -461,7 +461,7 @@ func TestContractReadCamelCaseResolution(t *testing.T) {
 	t.Run("ContractReadCamelCaseResolution", func(t *testing.T) {
 		// This test will fail with RPC connection error, but we can check that the preprocessing worked
 		// by examining the error message - it should contain the resolved address, not the template
-		result, err := engine.RunNodeImmediately("contractRead", contractReadConfig, inputVariables)
+		result, err := engine.RunNodeImmediately("contractRead", contractReadConfig, inputVariables, nil)
 
 		// We expect an error due to RPC connection or template preprocessing issue
 		assert.Error(t, err)

@@ -328,13 +328,14 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			}
 		}
 
-		// Get chain ID for simulation
-		// STRICT: In runNode path, chainId must be provided via workflowContext.chainId
+		// Get chain ID for simulation from settings only
 		var chainID int64
 		foundChainID := false
-		if wfCtxIface, ok := r.vm.vars[WorkflowContextVarName]; ok {
-			if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
-				if cid, ok := wfCtx["chainId"]; ok {
+
+		// Get chainId from settings
+		if settingsIface, ok := r.vm.vars["settings"]; ok {
+			if settings, ok := settingsIface.(map[string]interface{}); ok {
+				if cid, ok := settings["chainId"]; ok {
 					switch v := cid.(type) {
 					case int64:
 						chainID = v
@@ -356,14 +357,22 @@ func (r *ContractWriteProcessor) executeMethodCall(
 							foundChainID = true
 						}
 					}
+					r.vm.logger.Info("ContractWrite: Found chainId in settings", "chain_id", chainID)
+				} else {
+					r.vm.logger.Warn("ContractWrite: chainId not found in settings")
 				}
+			} else {
+				r.vm.logger.Warn("ContractWrite: settings is not a valid object")
 			}
+		} else {
+			r.vm.logger.Warn("ContractWrite: settings not found in VM variables")
 		}
+
 		if !foundChainID {
 			return &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodName,
 				Success:    false,
-				Error:      "workflowContext.chainId is required for runNode contractWrite",
+				Error:      "chainId is required for contractWrite (provide in settings.chainId)",
 			}
 		}
 		r.vm.logger.Debug("ContractWrite: resolved chain id for simulation", "chain_id", chainID)

@@ -23,7 +23,7 @@ func TestRunNodeImmediately_RestAPIWithTemplates(t *testing.T) {
 		"test_value": "Hello World",
 	}
 
-	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
+	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData, nil)
 	if err != nil {
 		t.Skipf("Skipping due to network error: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestRunNodeImmediately_SecretsAccess(t *testing.T) {
 		"api_key": "test_secret_123",
 	}
 
-	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, secrets)
+	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, secrets, nil)
 	if err != nil {
 		t.Skipf("Skipping due to network error: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestRunNodeImmediately_SimpleUndefinedVariable(t *testing.T) {
 		},
 	}
 
-	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, map[string]interface{}{})
+	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, map[string]interface{}{}, nil)
 	if err != nil {
 		t.Skipf("Skipping due to network error: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestRunNodeImmediately_ClientInputDebug(t *testing.T) {
 		},
 	}
 
-	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
+	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData, nil)
 
 	// Some CI environments block outbound HTTP; tolerate network errors by skipping
 	if err != nil {
@@ -138,7 +138,7 @@ func TestRunNodeImmediately_TemplateProcessingDebug(t *testing.T) {
 		"array": []interface{}{"first_item", "second_item"},
 	}
 
-	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
+	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData, nil)
 	if err != nil {
 		t.Skipf("Skipping due to network error: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestRunNodeImmediately_MissingTemplateVariable(t *testing.T) {
 		"existing_field": "some_value",
 	}
 
-	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
+	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData, nil)
 	if err != nil {
 		t.Skipf("Skipping due to network error: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestRunNodeImmediately_UndefinedVariableReplacement(t *testing.T) {
 		"defined_value": "this_is_defined",
 	}
 
-	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
+	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData, nil)
 	if err != nil {
 		t.Skipf("Skipping due to network error: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestRunNodeImmediately_MalformedTemplateDetection(t *testing.T) {
 		"value": "test_value",
 	}
 
-	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
+	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData, nil)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -248,7 +248,7 @@ func TestRunNodeImmediately_ValidTemplateAfterFix(t *testing.T) {
 		"message": "Template processing works correctly",
 	}
 
-	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
+	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData, nil)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)

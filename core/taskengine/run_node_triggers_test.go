@@ -53,7 +53,7 @@ func TestRunNodeImmediately_TriggerTypes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := engine.RunNodeImmediately("trigger", tc.nodeConfig, map[string]interface{}{})
+			result, err := engine.RunNodeImmediately("trigger", tc.nodeConfig, map[string]interface{}{}, nil)
 
 			if err != nil {
 				t.Errorf("Expected no error for %s, got: %v", tc.name, err)
@@ -77,7 +77,7 @@ func TestRunTriggerRPC_ManualTrigger(t *testing.T) {
 		},
 	}
 
-	result, err := engine.RunNodeImmediately("manualTrigger", nodeConfig, map[string]interface{}{})
+	result, err := engine.RunNodeImmediately("manualTrigger", nodeConfig, map[string]interface{}{}, nil)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)

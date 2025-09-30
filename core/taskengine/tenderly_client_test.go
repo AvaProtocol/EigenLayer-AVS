@@ -2302,17 +2302,9 @@ func TestEndToEndValuePropagation(t *testing.T) {
 		}
 
 		inputVariables := map[string]interface{}{
-			"workflowContext": map[string]interface{}{
-				"id":           "afc0ea13-35a6-40a5-bcc1-cc26f53cda78",
-				"chainId":      11155111,
-				"name":         "Aug 14, 2025 6:32 PM",
-				"eoaAddress":   "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-				"runner":       "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
-				"startAt":      "2025-08-15T01:50:35.719Z",
-				"expiredAt":    "2025-09-15T01:32:09.000Z",
-				"maxExecution": 0,
-				"status":       "draft",
-				"chain":        "Sepolia",
+			"settings": map[string]interface{}{
+				"runner":  "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"chainId": 11155111,
 			},
 			"oracle1": map[string]interface{}{
 				"data": map[string]interface{}{
@@ -2332,7 +2324,7 @@ func TestEndToEndValuePropagation(t *testing.T) {
 		t.Logf("   - Node Type: %s", nodeType)
 		t.Logf("   - Contract: %s", nodeConfig["contractAddress"])
 		t.Logf("   - Value: %s wei (0.1 ETH)", nodeConfig["value"])
-		t.Logf("   - Runner: %s", inputVariables["workflowContext"].(map[string]interface{})["runner"])
+		t.Logf("   - Runner: %s", inputVariables["settings"].(map[string]interface{})["runner"])
 
 		// Skip if no Tenderly API key
 		testConfig := testutil.GetTestConfig()
@@ -2345,7 +2337,8 @@ func TestEndToEndValuePropagation(t *testing.T) {
 		}
 
 		// Execute the node using the same flow as the aggregator
-		result, err := engine.RunNodeImmediately(nodeType, nodeConfig, inputVariables)
+		user := testutil.TestUser1()
+		result, err := engine.RunNodeImmediately(nodeType, nodeConfig, inputVariables, user)
 
 		// Check for smart wallet validation error
 		// Note: The runner address (0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e) should be the salt:0
@@ -2355,7 +2348,7 @@ func TestEndToEndValuePropagation(t *testing.T) {
 			t.Skipf("⏭️  Skipping E2E test - smart wallet validation failed in test environment. "+
 				"Runner should be salt:0 derivation of EOA on Sepolia (chainId: %v). "+
 				"This appears to be a test environment configuration issue, not a code issue.",
-				inputVariables["workflowContext"].(map[string]interface{})["chainId"])
+				inputVariables["settings"].(map[string]interface{})["chainId"])
 			return
 		}
 

@@ -109,7 +109,7 @@ func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
 				}
 			}
 
-			result, err := engine.RunNodeImmediately(nodeType, nodeConfig, tc.templateData)
+			result, err := engine.RunNodeImmediately(nodeType, nodeConfig, tc.templateData, nil)
 
 			if tc.expectError && err == nil {
 				t.Errorf("Expected error for %s, but got none", tc.name)
@@ -155,7 +155,7 @@ func TestSmartTriggerDataFallback(t *testing.T) {
 		"fallbackCamelValue": "fallback_camel_value",
 	}
 
-	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData)
+	result, err := engine.RunNodeImmediately("restAPI", nodeConfig, triggerData, nil)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)

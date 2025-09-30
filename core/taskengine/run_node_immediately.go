@@ -38,13 +38,13 @@ func getRealisticBlockNumberForChain(chainID int64) uint64 {
 	}
 }
 
-// RunNodeImmediately executes a single node immediately for testing/simulation purposes.
-// This is different from workflow execution - it runs the node right now, ignoring any scheduling.
-func (n *Engine) RunNodeImmediately(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+// RunNodeImmediately executes a single node immediately with authenticated user context.
+// This is the primary entry point for running nodes that require user authentication.
+func (n *Engine) RunNodeImmediately(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, user *model.User) (map[string]interface{}, error) {
 	if IsTriggerNodeType(nodeType) {
 		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
 	} else {
-		return n.runProcessingNodeWithInputs(nodeType, nodeConfig, inputVariables)
+		return n.runProcessingNodeWithInputs(user, nodeType, nodeConfig, inputVariables)
 	}
 }
 
@@ -2710,7 +2710,7 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 }
 
 // runProcessingNodeWithInputs handles execution of processing node types
-func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	// Check if this is actually a trigger type that was misrouted
 	if IsTriggerNodeType(nodeType) {
 		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
@@ -2735,35 +2735,39 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 	vm.tenderlyClient = n.tenderlyClient
 	vm.WithLogger(n.logger).WithDb(n.db).SetSimulation(true)
 
-	// Set TaskOwner from workflowContext.eoaAddress if provided via input variables
-	if wfCtxIface, ok := inputVariables["workflowContext"]; ok {
-		if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
-			if eoaIface, ok := wfCtx["eoaAddress"]; ok {
-				if eoaStr, ok := eoaIface.(string); ok && eoaStr != "" {
-					vm.TaskOwner = common.HexToAddress(eoaStr)
-					if n.logger != nil {
-						n.logger.Info("RunNodeImmediately: Set TaskOwner from workflowContext.eoaAddress", "taskOwner", vm.TaskOwner.Hex())
-					}
-				}
-			}
+	// Set TaskOwner from authenticated user (extracted from signed API key)
+	if user != nil {
+		vm.TaskOwner = user.Address
+		if n.logger != nil {
+			n.logger.Info("RunNodeImmediately: Set TaskOwner from authenticated user", "taskOwner", vm.TaskOwner.Hex())
+		}
+	}
 
-			// Strictly require runner for contractWrite; validate against owner's wallets
+	// For contractWrite nodes, handle runner validation from settings
+	if strings.EqualFold(nodeType, "contractWrite") {
+		// Require authenticated user (TaskOwner)
+		if (vm.TaskOwner == common.Address{}) {
 			if n.logger != nil {
-				n.logger.Info("RunNodeImmediately: runner validation decision", "nodeType", nodeType)
+				n.logger.Warn("RunNodeImmediately: No authenticated user for contractWrite - refusing to simulate")
 			}
-			if strings.EqualFold(nodeType, "contractWrite") {
-				// Require owner
-				if (vm.TaskOwner == common.Address{}) {
-					return nil, fmt.Errorf("workflowContext.eoaAddress is required for contractWrite")
+			return nil, fmt.Errorf("authentication required for contractWrite")
+		}
+
+		// Look for runner in settings instead of workflowContext
+		if settingsIface, ok := inputVariables["settings"]; ok {
+			if settings, ok := settingsIface.(map[string]interface{}); ok {
+				if n.logger != nil {
+					n.logger.Info("RunNodeImmediately: Found settings for contractWrite validation", "keys", getMapKeys(settings))
 				}
+
 				// Require runner
-				runnerIface, ok := wfCtx["runner"]
+				runnerIface, ok := settings["runner"]
 				if !ok {
-					return nil, fmt.Errorf("workflowContext.runner is required for contractWrite")
+					return nil, fmt.Errorf("settings.runner is required for contractWrite")
 				}
 				runnerStr, ok := runnerIface.(string)
 				if !ok || !common.IsHexAddress(runnerStr) {
-					return nil, fmt.Errorf("workflowContext.runner must be a valid hex address for contractWrite")
+					return nil, fmt.Errorf("settings.runner must be a valid hex address for contractWrite")
 				}
 
 				// Validate runner belongs to owner
@@ -2791,30 +2795,24 @@ func (n *Engine) runProcessingNodeWithInputs(nodeType string, nodeConfig map[str
 
 				vm.AddVar("aa_sender", chosenSender.Hex())
 				if n.logger != nil {
-					n.logger.Info("RunNodeImmediately: AA sender resolved", "sender", chosenSender.Hex())
+					n.logger.Info("RunNodeImmediately: AA sender resolved from settings", "sender", chosenSender.Hex())
 				}
+			} else {
+				return nil, fmt.Errorf("settings must be an object for contractWrite")
 			}
+		} else {
+			return nil, fmt.Errorf("settings is required for contractWrite")
 		}
-	}
 
-	// even if inputVariables doesn't contain the workflowContext key at all, we still enforce that ContractWrite must provide it (and error if it's missing)
-	if strings.EqualFold(nodeType, NodeTypeContractWrite) {
-		// Require non-zero TaskOwner (set from workflowContext.eoaAddress)
-		if (vm.TaskOwner == common.Address{}) {
-			if n.logger != nil {
-				n.logger.Warn("RunNodeImmediately: Missing workflowContext.eoaAddress for contractWrite - refusing to simulate with zero address")
-			}
-			return nil, fmt.Errorf("workflowContext.eoaAddress is required for contractWrite")
-		}
-		// Require aa_sender derived from workflowContext.runner validation
+		// Final validation: ensure aa_sender was set
 		vm.mu.Lock()
 		_, hasSender := vm.vars["aa_sender"]
 		vm.mu.Unlock()
 		if !hasSender {
 			if n.logger != nil {
-				n.logger.Warn("RunNodeImmediately: Missing workflowContext.runner for contractWrite - refusing to simulate without aa_sender")
+				n.logger.Warn("RunNodeImmediately: Missing settings.runner for contractWrite - refusing to simulate without aa_sender")
 			}
-			return nil, fmt.Errorf("workflowContext.runner is required for contractWrite")
+			return nil, fmt.Errorf("settings.runner is required for contractWrite")
 		}
 	}
 
@@ -2900,6 +2898,15 @@ func (n *Engine) LoadSecretsForImmediateExecution(inputVariables map[string]inte
 	}
 
 	return secrets, nil
+}
+
+// Helper function to get keys from a map
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func (n *Engine) parseUint64(value interface{}) (uint64, error) {
@@ -3100,8 +3107,8 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		return resp, nil
 	}
 
-	// Execute the node immediately
-	result, err := n.RunNodeImmediately(nodeTypeStr, nodeConfig, inputVariables)
+	// Execute the node immediately with authenticated user
+	result, err := n.RunNodeImmediately(nodeTypeStr, nodeConfig, inputVariables, user)
 	if err != nil {
 		if n.logger != nil {
 			if isExpectedValidationError(err) {
