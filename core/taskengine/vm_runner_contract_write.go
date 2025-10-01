@@ -169,7 +169,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			return &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodCall.MethodName,
 				Success:    false,
-				Error:      fmt.Sprintf("template variable resolution failed in parameter %d: '%s' resolved to '%s'. Variables with hyphens (-) are not supported. Use snake_case (e.g., 'uniswapv3_pool' instead of 'uniswapv3-pool')", i, param, resolvedMethodParams[i]),
+				Error:      fmt.Sprintf("template variable resolution failed in parameter %d: '%s' resolved to '%s'", i, param, resolvedMethodParams[i]),
 			}
 		}
 	}
