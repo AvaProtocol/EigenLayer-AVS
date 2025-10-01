@@ -157,6 +157,21 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	resolvedMethodParams := make([]string, len(methodCall.MethodParams))
 	for i, param := range methodCall.MethodParams {
 		resolvedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(param)
+
+		// Validate that template resolution didn't produce "undefined" values
+		if strings.Contains(resolvedMethodParams[i], "undefined") {
+			if r.vm != nil && r.vm.logger != nil {
+				r.vm.logger.Error("❌ CONTRACT WRITE - Template variable failed to resolve",
+					"method", methodCall.MethodName,
+					"original_param", param,
+					"resolved_param", resolvedMethodParams[i])
+			}
+			return &avsproto.ContractWriteNode_MethodResult{
+				MethodName: methodCall.MethodName,
+				Success:    false,
+				Error:      fmt.Sprintf("template variable resolution failed in parameter %d: '%s' resolved to '%s'. Variables with hyphens (-) are not supported. Use snake_case (e.g., 'uniswapv3_pool' instead of 'uniswapv3-pool')", i, param, resolvedMethodParams[i]),
+			}
+		}
 	}
 
 	// Handle JSON objects/arrays: convert to appropriate format based on method signature

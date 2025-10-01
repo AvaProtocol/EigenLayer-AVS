@@ -3033,6 +3033,12 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 			}
 		}
 
+		// Set success flag based on execution step status
+		result["success"] = executionStep.Success
+		if !executionStep.Success {
+			result["error"] = executionStep.Error
+		}
+
 		return result, nil
 	} else if loop := executionStep.GetLoop(); loop != nil {
 		// Loop output contains the array of iteration results

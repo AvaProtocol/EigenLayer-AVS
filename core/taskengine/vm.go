@@ -1714,6 +1714,15 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 			continue
 		}
 
+		// Validate variable names - reject hyphenated keys
+		if strings.Contains(expr, "-") {
+			if v.logger != nil {
+				v.logger.Warn("Template variable contains invalid character (hyphen)", "expression", expr)
+			}
+			result = result[:start] + "undefined" + result[end+2:]
+			continue
+		}
+
 		// Try to resolve the variable with fallback to camelCase
 		exportedValue, resolved := v.resolveVariableWithFallback(jsvm, expr, currentVars)
 		if !resolved {
