@@ -171,8 +171,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 				r.vm.logger.Error("❌ CONTRACT WRITE - Template variable failed to resolve",
 					"method", methodCall.MethodName,
 					"original_param", param,
-					"resolved_param", resolvedMethodParams[i],
-					"explanation", "This may be due to an undefined variable, incorrect template syntax, or unsupported variable names (e.g., variables with hyphens are not supported; use snake_case such as 'recipient_address' instead of 'recipient-address').")
+					"resolved_param", resolvedMethodParams[i])
 			}
 			return &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodCall.MethodName,
