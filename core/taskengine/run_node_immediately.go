@@ -2757,7 +2757,7 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 		if settingsIface, ok := inputVariables["settings"]; ok {
 			if settings, ok := settingsIface.(map[string]interface{}); ok {
 				if n.logger != nil {
-					n.logger.Info("RunNodeImmediately: Found settings for contractWrite validation", "keys", getMapKeys(settings))
+					n.logger.Info("RunNodeImmediately: Found settings for contractWrite validation", "keys", GetMapKeys(settings))
 				}
 
 				// Require runner
@@ -2898,15 +2898,6 @@ func (n *Engine) LoadSecretsForImmediateExecution(inputVariables map[string]inte
 	}
 
 	return secrets, nil
-}
-
-// Helper function to get keys from a map
-func getMapKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }
 
 func (n *Engine) parseUint64(value interface{}) (uint64, error) {
