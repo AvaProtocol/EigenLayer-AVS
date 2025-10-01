@@ -41,7 +41,7 @@ func TestEventTriggerEndToEndRPC(t *testing.T) {
 			"matcherList": []interface{}{},
 		}
 
-		result, err := engine.RunNodeImmediately("eventTrigger", configMap, map[string]interface{}{})
+		result, err := engine.RunNodeImmediately("eventTrigger", configMap, map[string]interface{}{}, nil)
 		if err != nil {
 			t.Logf("Execution failed (this might be expected if no events exist): %v", err)
 			// Don't fail the test if RPC is unavailable or no events found

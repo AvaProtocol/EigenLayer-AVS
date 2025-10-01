@@ -70,7 +70,7 @@ func TestTokenEnrichmentIntegration(t *testing.T) {
 		}
 
 		// Execute EventTrigger immediately
-		result, err := engine.RunNodeImmediately("eventTrigger", configMap, map[string]interface{}{})
+		result, err := engine.RunNodeImmediately("eventTrigger", configMap, map[string]interface{}{}, nil)
 
 		// Even if no events are found, the integration should work without error
 		if err != nil {

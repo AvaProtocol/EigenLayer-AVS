@@ -86,7 +86,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 			},
 		}
 
-		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
+		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables, nil)
 
 		// Should succeed with direct resolution
 		assert.NoError(t, err)
@@ -133,7 +133,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 			},
 		}
 
-		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
+		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables, nil)
 
 		// Should succeed
 		assert.NoError(t, err)
@@ -179,7 +179,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 			},
 		}
 
-		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
+		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables, nil)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -221,7 +221,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 			},
 		}
 
-		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
+		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables, nil)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -267,7 +267,7 @@ func TestConsistentCamelCaseResolution(t *testing.T) {
 			},
 		}
 
-		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables)
+		result, err := engine.RunNodeImmediately(NodeTypeRestAPI, config, inputVariables, nil)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -333,7 +333,7 @@ func TestCamelCaseVariableSupport(t *testing.T) {
 			},
 		}
 
-		result, err := engine.RunNodeImmediately(NodeTypeCustomCode, config, inputVariables)
+		result, err := engine.RunNodeImmediately(NodeTypeCustomCode, config, inputVariables, nil)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -370,7 +370,7 @@ func TestCamelCaseVariableSupport(t *testing.T) {
 		}
 
 		// Execute REST API node to get output data
-		restResult, err := engine.RunNodeImmediately(NodeTypeRestAPI, restConfig, map[string]interface{}{})
+		restResult, err := engine.RunNodeImmediately(NodeTypeRestAPI, restConfig, map[string]interface{}{}, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, restResult)
 
@@ -399,7 +399,7 @@ func TestCamelCaseVariableSupport(t *testing.T) {
 			},
 		}
 
-		customResult, err := engine.RunNodeImmediately(NodeTypeCustomCode, customCodeConfig, inputVariables)
+		customResult, err := engine.RunNodeImmediately(NodeTypeCustomCode, customCodeConfig, inputVariables, nil)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, customResult)
@@ -456,7 +456,7 @@ func TestCamelCaseDebug(t *testing.T) {
 			},
 		}
 
-		result, err := engine.RunNodeImmediately(NodeTypeCustomCode, config, inputVariables)
+		result, err := engine.RunNodeImmediately(NodeTypeCustomCode, config, inputVariables, nil)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
