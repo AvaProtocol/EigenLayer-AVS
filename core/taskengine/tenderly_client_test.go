@@ -2303,8 +2303,8 @@ func TestEndToEndValuePropagation(t *testing.T) {
 
 		inputVariables := map[string]interface{}{
 			"settings": map[string]interface{}{
-				"runner":  "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
-				"chainId": 11155111,
+				"runner":   "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"chain_id": 11155111,
 			},
 			"oracle1": map[string]interface{}{
 				"data": map[string]interface{}{

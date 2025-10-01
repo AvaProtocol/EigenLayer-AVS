@@ -121,10 +121,10 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 
 		inputVariables := map[string]interface{}{
 			"settings": map[string]interface{}{
-				"chain":   "Sepolia",
-				"amount":  "100000000000000000", // 0.1 ETH in wei
-				"runner":  "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
-				"chainId": 11155111,
+				"chain":    "Sepolia",
+				"amount":   "100000000000000000", // 0.1 ETH in wei
+				"runner":   "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"chain_id": 11155111,
 				"uniswapv3_pool": map[string]interface{}{
 					"id": "0xeb502c739488180b106eded9902b7465a8c12edb",
 					"token0": map[string]interface{}{
@@ -244,9 +244,9 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 
 		inputVariables := map[string]interface{}{
 			"settings": map[string]interface{}{
-				"amount":  "100000000000000000",
-				"runner":  "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
-				"chainId": 11155111,
+				"amount":   "100000000000000000",
+				"runner":   "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"chain_id": 11155111,
 				"uniswapv3_pool": map[string]interface{}{
 					"token0": map[string]interface{}{
 						"id": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",

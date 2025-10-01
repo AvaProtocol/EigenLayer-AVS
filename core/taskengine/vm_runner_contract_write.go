@@ -347,10 +347,10 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		var chainID int64
 		foundChainID := false
 
-		// Get chainId from settings
+		// Get chain_id from settings (snake_case only)
 		if settingsIface, ok := r.vm.vars["settings"]; ok {
 			if settings, ok := settingsIface.(map[string]interface{}); ok {
-				if cid, ok := settings["chainId"]; ok {
+				if cid, ok := settings["chain_id"]; ok {
 					switch v := cid.(type) {
 					case int64:
 						chainID = v
@@ -387,7 +387,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			return &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodName,
 				Success:    false,
-				Error:      "settings.chainId is required for contractWrite",
+				Error:      "settings.chain_id is required for contractWrite",
 			}
 		}
 		r.vm.logger.Debug("ContractWrite: resolved chain id for simulation", "chain_id", chainID)

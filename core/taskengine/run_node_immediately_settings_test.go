@@ -71,8 +71,8 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 		// Input variables using NEW settings format (not workflowContext)
 		inputVariables := map[string]interface{}{
 			"settings": map[string]interface{}{
-				"runner":  runnerAddr.Hex(),
-				"chainId": 11155111, // Sepolia testnet
+				"runner":   runnerAddr.Hex(),
+				"chain_id": 11155111, // Sepolia testnet
 			},
 		}
 
@@ -199,7 +199,7 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 		// Input variables with settings but missing runner
 		inputVariables := map[string]interface{}{
 			"settings": map[string]interface{}{
-				"chainId": 11155111,
+				"chain_id": 11155111,
 				// "runner" is missing
 			},
 		}
@@ -246,8 +246,8 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 
 		inputVariables := map[string]interface{}{
 			"settings": map[string]interface{}{
-				"runner":  "0x5Df343de7d99fd64b2479189692C1dAb8f46184a",
-				"chainId": 11155111,
+				"runner":   "0x5Df343de7d99fd64b2479189692C1dAb8f46184a",
+				"chain_id": 11155111,
 			},
 		}
 

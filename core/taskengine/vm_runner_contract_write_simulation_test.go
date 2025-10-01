@@ -103,8 +103,8 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		// Provide settings for new backend validation structure
 		triggerData := map[string]interface{}{
 			"settings": map[string]interface{}{
-				"runner":  runnerAddr.Hex(),
-				"chainId": 11155111, // Sepolia
+				"runner":   runnerAddr.Hex(),
+				"chain_id": 11155111, // Sepolia
 			},
 		}
 
@@ -193,8 +193,8 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 				"input": map[string]interface{}{"schedules": []interface{}{"*/5 * * * *"}},
 			},
 			"settings": map[string]interface{}{
-				"runner":  "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
-				"chainId": 11155111,
+				"runner":   "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"chain_id": 11155111,
 			},
 			// Keep some legacy fields for context but authentication should come from user
 			"workflowMeta": map[string]interface{}{
@@ -319,8 +319,8 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 
 		triggerData := map[string]interface{}{
 			"settings": map[string]interface{}{
-				"runner":  derivedRunner.Hex(),
-				"chainId": 11155111,
+				"runner":   derivedRunner.Hex(),
+				"chain_id": 11155111,
 			},
 			"workflowMeta": map[string]interface{}{
 				"id":    "test-run-node-immediately-transfer",

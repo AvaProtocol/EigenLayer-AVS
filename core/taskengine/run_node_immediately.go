@@ -4004,6 +4004,7 @@ func isExpectedValidationError(err error) bool {
 		"invalid addresses format",                          // EventTrigger addresses format validation
 		"invalid contractAbi format",                        // EventTrigger ABI format validation
 		"settings is required for contractWrite",            // ContractWrite settings validation
+		"settings.chain_id is required for contractWrite",   // ContractWrite chain_id validation
 	}
 
 	for _, pattern := range validationErrorPatterns {
