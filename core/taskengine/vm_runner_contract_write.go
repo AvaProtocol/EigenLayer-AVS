@@ -372,15 +372,15 @@ func (r *ContractWriteProcessor) executeMethodCall(
 							foundChainID = true
 						}
 					}
-					r.vm.logger.Info("ContractWrite: Found chainId in settings", "chain_id", chainID)
+					r.vm.logger.Debug("ContractWrite: Found chainId in settings", "chain_id", chainID)
 				} else {
-					r.vm.logger.Warn("ContractWrite: chainId not found in settings")
+					r.vm.logger.Debug("ContractWrite: chainId not found in settings")
 				}
 			} else {
-				r.vm.logger.Warn("ContractWrite: settings is not a valid object")
+				r.vm.logger.Debug("ContractWrite: settings is not a valid object")
 			}
 		} else {
-			r.vm.logger.Warn("ContractWrite: settings not found in VM variables")
+			r.vm.logger.Debug("ContractWrite: settings not found in VM variables")
 		}
 
 		if !foundChainID {
