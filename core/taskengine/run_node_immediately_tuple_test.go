@@ -402,6 +402,67 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 		t.Logf("✅ Error handling test passed - correctly detected wrong element count")
 	})
 
+	t.Run("Mathematical_Expressions_With_Hyphen_Should_Work", func(t *testing.T) {
+		// Test that mathematical expressions like {{var - 10}} are allowed
+		// Only simple variable paths with hyphens should be rejected
+
+		// Seed wallet in DB
+		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{
+			Owner:   &ownerEOA,
+			Address: &runnerAddr,
+			Factory: &factory,
+			Salt:    big.NewInt(0),
+		})
+
+		nodeType := "contractWrite"
+		nodeConfig := map[string]interface{}{
+			"contractAddress": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", // USDC Sepolia
+			"contractAbi": []interface{}{
+				map[string]interface{}{
+					"inputs": []interface{}{
+						map[string]interface{}{"name": "spender", "type": "address"},
+						map[string]interface{}{"name": "amount", "type": "uint256"},
+					},
+					"name":            "approve",
+					"outputs":         []interface{}{map[string]interface{}{"name": "", "type": "bool"}},
+					"stateMutability": "nonpayable",
+					"type":            "function",
+				},
+			},
+			"methodCalls": []interface{}{
+				map[string]interface{}{
+					"methodName": "approve",
+					// Mathematical expression with hyphen should work
+					"methodParams": []interface{}{
+						"0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+						"{{settings.base_amount - 10}}", // Subtraction operator
+					},
+				},
+			},
+			"value":    "0",
+			"gasLimit": "210000",
+		}
+
+		inputVariables := map[string]interface{}{
+			"settings": map[string]interface{}{
+				"base_amount": "1000000", // Will subtract 10
+				"runner":      "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"chain_id":    11155111,
+			},
+		}
+
+		result, err := engine.RunNodeImmediately(nodeType, nodeConfig, inputVariables, user)
+
+		require.NoError(t, err, "RunNodeImmediately should not return error")
+		assert.NotNil(t, result, "Result should not be nil")
+
+		success, ok := result["success"].(bool)
+		require.True(t, ok, "Result should have success field")
+		assert.True(t, success, "Execution should succeed with mathematical expression")
+
+		t.Logf("✅ Mathematical expression test passed - hyphens allowed in complex expressions")
+	})
+
 	// Verify ABI parsing works correctly
 	t.Run("Verify_ABI_Structure", func(t *testing.T) {
 		method := parsedABI.Methods["quoteExactInputSingle"]
