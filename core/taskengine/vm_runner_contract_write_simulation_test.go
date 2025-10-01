@@ -100,16 +100,18 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		factory := testutil.GetAggregatorConfig().SmartWallet.FactoryAddress
 		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: &runnerAddr, Factory: &factory, Salt: big.NewInt(0)})
 
-		// Provide minimal workflowContext to satisfy backend validation
+		// Provide settings for new backend validation structure
 		triggerData := map[string]interface{}{
-			"workflowContext": map[string]interface{}{
-				"eoaAddress": ownerEOA.Hex(),
-				"runner":     runnerAddr.Hex(),
-				"chainId":    11155111, // Sepolia
+			"settings": map[string]interface{}{
+				"runner":   runnerAddr.Hex(),
+				"chain_id": 11155111, // Sepolia
 			},
 		}
 
-		result, err := engine.RunNodeImmediately("contractWrite", nodeConfig, triggerData)
+		// Create user for authentication (EOA from the stored wallet)
+		user := &model.User{Address: ownerEOA}
+
+		result, err := engine.RunNodeImmediately("contractWrite", nodeConfig, triggerData, user)
 
 		require.NoError(t, err, "RunNodeImmediately should succeed with Tenderly simulation")
 		require.NotNil(t, result, "Should get simulation result")
@@ -184,18 +186,20 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 			"gasLimit": "210000",
 		}
 
-		// Exact input variables from client request
+		// Updated input variables with new settings structure
 		inputVariables := map[string]interface{}{
 			"timeTrigger": map[string]interface{}{
 				"data":  map[string]interface{}{},
 				"input": map[string]interface{}{"schedules": []interface{}{"*/5 * * * *"}},
 			},
-			"workflowContext": map[string]interface{}{
+			"settings": map[string]interface{}{
+				"runner":   "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"chain_id": 11155111,
+			},
+			// Keep some legacy fields for context but authentication should come from user
+			"workflowMeta": map[string]interface{}{
 				"id":           "7625882c-8d1c-40dc-8d04-13eee0ba8b2f",
-				"chainId":      11155111,
 				"name":         "Recurring Transfer with report",
-				"eoaAddress":   "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
-				"runner":       "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
 				"startAt":      "2025-08-14T23:20:37.988Z",
 				"expiredAt":    "2025-09-14T22:23:37.084Z",
 				"maxExecution": 2,
@@ -207,11 +211,14 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		t.Logf("🚀 Testing exact client request:")
 		t.Logf("   Contract: %s", nodeConfig["contractAddress"])
 		t.Logf("   Method: transfer")
-		t.Logf("   From: %s", inputVariables["workflowContext"].(map[string]interface{})["runner"])
+		t.Logf("   From: %s", inputVariables["settings"].(map[string]interface{})["runner"])
 		t.Logf("   To: %s", nodeConfig["methodCalls"].([]interface{})[0].(map[string]interface{})["methodParams"].([]interface{})[0])
 		t.Logf("   Amount: %s", nodeConfig["methodCalls"].([]interface{})[0].(map[string]interface{})["methodParams"].([]interface{})[1])
 
-		result, err := engine.RunNodeImmediately("contractWrite", nodeConfig, inputVariables)
+		// Create user for authentication (EOA from the exact client request)
+		user := &model.User{Address: ownerEOA}
+
+		result, err := engine.RunNodeImmediately("contractWrite", nodeConfig, inputVariables, user)
 
 		if err != nil {
 			t.Logf("❌ RunNodeImmediately failed: %v", err)
@@ -311,18 +318,22 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		}
 
 		triggerData := map[string]interface{}{
-			"workflowContext": map[string]interface{}{
-				"id":         "test-run-node-immediately-transfer",
-				"chainId":    11155111,
-				"name":       "Recurring Transfer with report",
-				"eoaAddress": ownerEOA.Hex(),
-				"runner":     derivedRunner.Hex(),
-				"chain":      "Sepolia",
+			"settings": map[string]interface{}{
+				"runner":   derivedRunner.Hex(),
+				"chain_id": 11155111,
+			},
+			"workflowMeta": map[string]interface{}{
+				"id":    "test-run-node-immediately-transfer",
+				"name":  "Recurring Transfer with report",
+				"chain": "Sepolia",
 			},
 			"timeTrigger": map[string]interface{}{"data": map[string]interface{}{}, "input": map[string]interface{}{"schedules": []interface{}{"*/5 * * * *"}}},
 		}
 
-		result, err := engine.RunNodeImmediately("contractWrite", nodeConfig, triggerData)
+		// Create user for authentication (EOA from the derived runner test)
+		user := &model.User{Address: ownerEOA}
+
+		result, err := engine.RunNodeImmediately("contractWrite", nodeConfig, triggerData, user)
 		if err != nil {
 			t.Logf("❌ RunNodeImmediately failed: %v", err)
 		} else {

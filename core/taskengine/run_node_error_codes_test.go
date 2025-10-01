@@ -81,7 +81,7 @@ func TestRunNodeImmediatelyErrorCodes(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Execute the node
-			result, err := engine.RunNodeImmediately(tc.nodeType, tc.nodeConfig, tc.inputVariables)
+			result, err := engine.RunNodeImmediately(tc.nodeType, tc.nodeConfig, tc.inputVariables, nil)
 
 			// Verify that an error occurred
 			require.Error(t, err, "Expected error for %s", tc.name)
@@ -122,7 +122,7 @@ func TestNonStructuredErrorsReturnUnspecified(t *testing.T) {
 	}
 
 	// Execute the node
-	result, err := engine.RunNodeImmediately(nodeType, nodeConfig, inputVariables)
+	result, err := engine.RunNodeImmediately(nodeType, nodeConfig, inputVariables, nil)
 
 	// Verify that an error occurred
 	require.Error(t, err, "Expected error for non-existent node type")

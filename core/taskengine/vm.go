@@ -1634,6 +1634,31 @@ func (v *VM) runEthTransfer(stepID string, node *avsproto.ETHTransferNode) (*avs
 // convertToCamelCase converts snake_case to camelCase
 // Example: "block_number" -> "blockNumber", "gas_limit" -> "gasLimit"
 
+// isSimpleVariablePath checks if an expression is a simple variable path (e.g., settings.pool.token0)
+// Returns true for: var, var.field, var.nested.field
+// Returns false for: expressions with operators, function calls, string literals, etc.
+func isSimpleVariablePath(expr string) bool {
+	// Check if it contains operators, parentheses, brackets, quotes, or spaces
+	// These indicate it's a complex expression, not just a variable path
+	invalidChars := []string{
+		" ", "+", "*", "/", "%", // Mathematical operators (exclude "-" since we check it separately)
+		"(", ")", // Function calls
+		"[", "]", // Array indexing or computed properties
+		"\"", "'", "`", // String literals
+		"==", "!=", ">", "<", "&&", "||", // Comparison/logical operators
+	}
+
+	for _, char := range invalidChars {
+		if strings.Contains(expr, char) {
+			return false
+		}
+	}
+
+	// If it only contains letters, numbers, dots, and underscores, it's a simple path
+	// (we'll check for hyphens separately)
+	return true
+}
+
 // resolveVariableWithFallback tries to resolve a variable path
 func (v *VM) resolveVariableWithFallback(jsvm *goja.Runtime, varPath string, currentVars map[string]any) (interface{}, bool) {
 	// SECURITY: Validate variable path using centralized security validation
@@ -1711,6 +1736,21 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 				v.logger.Warn("Nested expression detected, replacing with empty string", "expression", expr)
 			}
 			result = result[:start] + result[end+2:]
+			continue
+		}
+
+		// Validate variable names - reject hyphenated keys in variable paths only
+		// Allow hyphens in:
+		// - String literals: "hello-world"
+		// - Mathematical expressions: some_var - 10
+		// - Array indexing: array[index-1]
+		// Reject hyphens in:
+		// - Variable names: settings.uniswap-pool (should be settings.uniswap_pool)
+		if isSimpleVariablePath(expr) && strings.Contains(expr, "-") {
+			if v.logger != nil {
+				v.logger.Warn("Template variable path contains invalid character (hyphen)", "expression", expr)
+			}
+			result = result[:start] + "undefined" + result[end+2:]
 			continue
 		}
 
