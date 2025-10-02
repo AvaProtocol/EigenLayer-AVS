@@ -2861,28 +2861,13 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 }
 
 // LoadSecretsForImmediateExecution loads secrets for immediate node execution
-// It loads global macroSecrets and user-level secrets (no workflow-level secrets since there's no workflow)
+// It loads global macroSecrets (no workflow-level secrets since there's no workflow)
+// User-level secrets could be loaded using the user parameter if needed in the future
 func (n *Engine) LoadSecretsForImmediateExecution(inputVariables map[string]interface{}) (map[string]string, error) {
 	secrets := make(map[string]string)
 
 	// Copy global static secrets from macroSecrets (equivalent to copyMap(secrets, macroSecrets) in LoadSecretForTask)
 	copyMap(secrets, macroSecrets)
-
-	// Try to get user from workflowContext if available
-	if workflowContext, ok := inputVariables["workflowContext"]; ok {
-		if wfCtx, ok := workflowContext.(map[string]interface{}); ok {
-			if userIdStr, ok := wfCtx["userId"].(string); ok {
-				// Load user-level secrets from database
-				// Note: For immediate execution we don't have workflow-level secrets since there's no specific workflow
-				// For now, we'll just use the global macroSecrets
-				// In a full implementation, you'd want to resolve userId to user address and load user secrets
-				// But the most important thing is that macroSecrets (global config secrets) are available
-				if n.logger != nil {
-					n.logger.Debug("LoadSecretsForImmediateExecution: Using global secrets", "userId", userIdStr, "secretCount", len(secrets))
-				}
-			}
-		}
-	}
 
 	return secrets, nil
 }
