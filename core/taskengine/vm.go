@@ -45,22 +45,6 @@ func (l *noOpLogger) WithServiceName(serviceName string) sdklogging.Logger { ret
 func (l *noOpLogger) WithHostName(hostName string) sdklogging.Logger       { return l }
 func (l *noOpLogger) Sync() error                                          { return nil }
 
-// getChainNameFromId maps chain ID to human-readable chain name
-func getChainNameFromId(chainId uint64) string {
-	switch chainId {
-	case 1:
-		return "Ethereum"
-	case 11155111:
-		return "Sepolia"
-	case 8453:
-		return "Base"
-	case 84532:
-		return "Base Sepolia"
-	default:
-		return "Unknown"
-	}
-}
-
 type VMState string
 
 const (
@@ -325,34 +309,6 @@ func (v *VM) WithLogger(logger sdklogging.Logger) *VM {
 
 func (v *VM) WithDb(db storage.Storage) *VM {
 	v.db = db
-	return v
-}
-
-// WithConfig attaches the aggregator configuration to the VM for downstream helpers
-// WithChainName updates the workflowContext with the chain name and chainId based on chainId
-func (v *VM) WithChainName(chainId uint64) *VM {
-	chainName := getChainNameFromId(chainId)
-
-	// Debug logging
-	if v.logger != nil {
-		v.logger.Info("🔗 WithChainName called", "chainId", chainId, "chainName", chainName)
-	}
-
-	// Update workflowContext if it exists
-	if workflowContextInterface, exists := v.vars[WorkflowContextVarName]; exists {
-		if workflowContext, ok := workflowContextInterface.(map[string]interface{}); ok {
-			workflowContext["chain"] = chainName
-			workflowContext["chainId"] = int64(chainId) // Add chainId for contract write operations
-			if v.logger != nil {
-				v.logger.Info("✅ Updated workflowContext with chain name and chainId", "chainName", chainName, "chainId", chainId)
-			}
-		}
-	} else {
-		if v.logger != nil {
-			v.logger.Warn("⚠️ workflowContext not found in VM vars")
-		}
-	}
-
 	return v
 }
 
@@ -2265,6 +2221,18 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 			v.logger.Debug("Copied nodeConfig to temporary VM for node execution")
 		}
 	}
+
+	// Copy aa_sender if it exists (required for contractWrite nodes)
+	if aaSenderValue, ok := v.vars["aa_sender"]; ok {
+		if tempVM.vars == nil { // Ensure tempVM.vars is initialized
+			tempVM.vars = make(map[string]any)
+		}
+		tempVM.vars["aa_sender"] = aaSenderValue
+		if v.logger != nil {
+			v.logger.Info("Copied aa_sender to temporary VM for contractWrite execution", "aa_sender", aaSenderValue)
+		}
+	}
+
 	v.mu.Unlock()
 
 	// Add provided input variables to the temporary VM

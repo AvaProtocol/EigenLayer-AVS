@@ -135,21 +135,28 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	// eoaAddress (r.owner) is ONLY for ownership verification
 	// For ALL transactions (simulations AND real), we MUST use runner (smart wallet) address as sender
 	// The runner smart wallet corresponds to and is controlled by eoaAddress, but sender must ALWAYS be runner
-	senderAddress := r.owner // Fallback only - should always be overridden by aa_sender
-
-	// Get runner address (smart wallet) - this is the ONLY valid sender for transactions
+	var senderAddress common.Address
 	if aaSenderVar, ok := r.vm.vars["aa_sender"]; ok {
 		if aaSenderStr, ok := aaSenderVar.(string); ok && aaSenderStr != "" {
 			senderAddress = common.HexToAddress(aaSenderStr) // This is the runner (smart wallet)
-			r.vm.logger.Error("🔄 CONTRACT WRITE CRITICAL DEBUG - Sender address resolved",
-				"r_owner_eoaAddress", r.owner.Hex(),
+			r.vm.logger.Info("CONTRACT WRITE - Sender address resolved from aa_sender",
 				"sender_address_runner", senderAddress.Hex(),
 				"aa_sender_var", aaSenderStr)
+		} else {
+			return &avsproto.ContractWriteNode_MethodResult{
+				MethodName: methodCall.MethodName,
+				Success:    false,
+				Error:      "aa_sender variable is set but invalid - must be a non-empty hex address string",
+			}
 		}
 	} else {
-		r.vm.logger.Error("⚠️ CONTRACT WRITE CRITICAL DEBUG - aa_sender not found, using eoaAddress fallback",
-			"r_owner_eoaAddress", r.owner.Hex(),
-			"sender_address_fallback", senderAddress.Hex())
+		// This should never happen because RunNodeImmediately validates settings.runner and sets aa_sender
+		// If we get here, it means validation was bypassed or there's a bug in the validation logic
+		return &avsproto.ContractWriteNode_MethodResult{
+			MethodName: methodCall.MethodName,
+			Success:    false,
+			Error:      "aa_sender variable not set - settings.runner is required for contractWrite",
+		}
 	}
 
 	// Substitute template variables in methodParams before generating calldata
@@ -169,7 +176,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			return &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodCall.MethodName,
 				Success:    false,
-				Error:      fmt.Sprintf("template variable resolution failed in parameter %d: '%s' resolved to '%s'", i, param, resolvedMethodParams[i]),
+				Error:      fmt.Sprintf("template variable resolution failed in parameter %d: '%s' resolved to '%s'. Variables with hyphens (-) are not supported. Use snake_case (e.g., 'recipient_address' instead of 'recipient-address')", i, param, resolvedMethodParams[i]),
 			}
 		}
 	}
