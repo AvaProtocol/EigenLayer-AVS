@@ -2862,8 +2862,7 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 
 // LoadSecretsForImmediateExecution loads secrets for immediate node execution
 // It loads global macroSecrets (no workflow-level secrets since there's no workflow)
-// Note: User-level secrets are not currently supported, as this function does not accept a user parameter.
-// Support for user-level secrets could be added in the future if needed.
+// User-level secrets could be loaded using the user parameter if needed in the future
 func (n *Engine) LoadSecretsForImmediateExecution(inputVariables map[string]interface{}) (map[string]string, error) {
 	secrets := make(map[string]string)
 
