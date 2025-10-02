@@ -233,15 +233,9 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		chainIdSource = "tokenEnrichmentService"
 	}
 
-	if chainId > 0 {
-		if x.logger != nil {
-			x.logger.Info("🔗 Executor: Adding chain name to VM", "chainId", chainId, "source", chainIdSource)
-		}
-		vm.WithChainName(chainId)
-	} else {
-		if x.logger != nil {
-			x.logger.Warn("⚠️ Executor: No chainId available for chain name resolution")
-		}
+	// chainId is used by execution context (set in vm.smartWalletConfig.ChainID)
+	if chainId > 0 && x.logger != nil {
+		x.logger.Debug("Executor: Chain ID resolved", "chainId", chainId, "source", chainIdSource)
 	}
 
 	// Debug: Log FilterNode expressions in VM after creation

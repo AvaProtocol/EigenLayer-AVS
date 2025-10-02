@@ -2091,22 +2091,10 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Create a temporary task structure for simulation (not saved to storage)
 	simulationTaskID := ulid.Make().String()
 
-	// Extract workflow name from inputVariables.workflowContext.name
-	workflowName := ""
-	if workflowContext, exists := inputVariables["workflowContext"]; exists {
-		if wfCtx, ok := workflowContext.(map[string]interface{}); ok {
-			if nameVar, nameExists := wfCtx["name"]; nameExists {
-				if nameStr, ok := nameVar.(string); ok {
-					workflowName = nameStr
-				}
-			}
-		}
-	}
-
 	task := &model.Task{
 		Task: &avsproto.Task{
 			Id:      simulationTaskID,
-			Name:    workflowName, // Set workflow name for simulation
+			Name:    "simulation", // Static name for simulation tasks
 			Owner:   user.Address.Hex(),
 			Trigger: trigger,
 			Nodes:   nodes,
@@ -2227,19 +2215,27 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 		if requiresAA {
 			owner := user.Address
 			var chosenSender common.Address
-			if wfCtxIface, ok := inputVariables["workflowContext"]; ok {
-				if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
-					if runnerIface, ok := wfCtx["runner"]; ok {
-						if runnerStr, ok := runnerIface.(string); ok && runnerStr != "" {
-							resp, err := n.ListWallets(owner, &avsproto.ListWalletReq{})
-							if err == nil {
-								for _, w := range resp.GetItems() {
-									if strings.EqualFold(w.GetAddress(), runnerStr) {
-										chosenSender = common.HexToAddress(w.GetAddress())
-										break
-									}
-								}
-							}
+
+			// Extract runner from settings (required for AA operations)
+			var runnerStr string
+			if settings, ok := inputVariables["settings"]; ok {
+				if settingsMap, ok := settings.(map[string]interface{}); ok {
+					if runnerIface, ok := settingsMap["runner"]; ok {
+						if rs, ok := runnerIface.(string); ok && rs != "" {
+							runnerStr = rs
+						}
+					}
+				}
+			}
+
+			// Validate the runner against registered wallets
+			if runnerStr != "" {
+				resp, err := n.ListWallets(owner, &avsproto.ListWalletReq{})
+				if err == nil {
+					for _, w := range resp.GetItems() {
+						if strings.EqualFold(w.GetAddress(), runnerStr) {
+							chosenSender = common.HexToAddress(w.GetAddress())
+							break
 						}
 					}
 				}
@@ -2273,37 +2269,12 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 			if n.logger != nil {
 				n.logger.Info("SimulateTask: AA sender resolved", "sender", chosenSender.Hex())
 			}
-
-			// Also ensure workflowContext.runner is available in the VM for downstream nodes
-			vm.mu.Lock()
-			if wfCtxIface, ok := vm.vars[WorkflowContextVarName]; ok {
-				if wfCtx, ok := wfCtxIface.(map[string]interface{}); ok {
-					if _, hasRunner := wfCtx["runner"]; !hasRunner || wfCtx["runner"] == "" {
-						wfCtx["runner"] = chosenSender.Hex()
-					}
-					// Keep aliases in sync when possible
-					if _, hasSWA := wfCtx["smartWalletAddress"]; !hasSWA || wfCtx["smartWalletAddress"] == "" {
-						wfCtx["smartWalletAddress"] = chosenSender.Hex()
-					}
-				}
-			}
-			vm.mu.Unlock()
 		} else if n.logger != nil {
 			n.logger.Info("SimulateTask: Skipping AA sender resolution (no AA-relevant nodes in workflow)")
 		}
 	}
 
-	// Add chain name to workflowContext if token enrichment service is available
-	if n.tokenEnrichmentService != nil {
-		chainId := n.tokenEnrichmentService.GetChainID()
-		n.logger.Info("🔗 Engine: Adding chain name to VM", "chainId", chainId)
-		vm.WithChainName(chainId)
-	} else {
-		n.logger.Warn("⚠️ Engine: No token enrichment service available for chain name")
-	}
-
 	// Add input variables to VM for template processing
-	// Apply dual-access mapping to enable both camelCase and snake_case field access
 	processedInputVariables := inputVariables
 	for key, processedValue := range processedInputVariables {
 		vm.AddVar(key, processedValue)
