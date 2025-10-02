@@ -146,7 +146,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			return &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodCall.MethodName,
 				Success:    false,
-				Error:      fmt.Sprintf("aa_sender variable is set but invalid - must be a non-empty hex address string, got: %v", aaSenderVar),
+				Error:      "aa_sender variable is set but invalid - must be a non-empty hex address string",
 			}
 		}
 	} else {
@@ -176,7 +176,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 			return &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodCall.MethodName,
 				Success:    false,
-				Error:      fmt.Sprintf("template variable resolution failed in parameter %d: '%s' resolved to '%s'", i, param, resolvedMethodParams[i]),
+				Error:      fmt.Sprintf("template variable resolution failed in parameter %d: '%s' resolved to '%s'. This may be due to an undefined variable, incorrect template syntax, or unsupported variable names (e.g., variables with hyphens are not supported; use snake_case such as 'recipient_address' instead of 'recipient-address').", i, param, resolvedMethodParams[i]),
 			}
 		}
 	}
