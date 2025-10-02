@@ -2827,19 +2827,6 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 	// This allows access to fields like 'value' and 'gasLimit' that aren't in protobuf schema
 	vm.AddVar("nodeConfig", nodeConfig)
 
-	// Add chain name to workflowContext if token enrichment service is available
-	if n.tokenEnrichmentService != nil {
-		chainId := n.tokenEnrichmentService.GetChainID()
-		if n.logger != nil {
-			n.logger.Info("🔗 RunNodeImmediately: Adding chain name to VM", "chainId", chainId)
-		}
-		vm.WithChainName(chainId)
-	} else {
-		if n.logger != nil {
-			n.logger.Warn("⚠️ RunNodeImmediately: No token enrichment service available for chain name")
-		}
-	}
-
 	// Create node from type and config
 	node, err := CreateNodeFromType(nodeType, nodeConfig, "")
 	if err != nil {
