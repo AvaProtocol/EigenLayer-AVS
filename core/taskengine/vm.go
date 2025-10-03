@@ -1704,7 +1704,7 @@ func (v *VM) preprocessTextWithVariableMapping(text string) string {
 		// - Variable names: settings.uniswap-pool (should be settings.uniswap_pool)
 		if isSimpleVariablePath(expr) && strings.Contains(expr, "-") {
 			if v.logger != nil {
-				v.logger.Warn("Template variable path contains invalid character (hyphen)", "expression", expr)
+				v.logger.Warn("Template variable path contains invalid character (hyphen) - use snake_case for simple variable paths", "expression", expr, "help", "Hyphens are only invalid in simple variable paths like 'settings.field-name'. Use 'settings.field_name' instead. Hyphens are allowed in complex expressions, string literals, and array indexing.")
 			}
 			result = result[:start] + "undefined" + result[end+2:]
 			continue
