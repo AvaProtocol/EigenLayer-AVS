@@ -28,7 +28,7 @@ var testConfig *config.Config
 
 // init loads test configuration from the default config path.
 // When commands use a non-default path via --config flag, testConfig will be nil
-// and the test utility functions will use their fallback default values.
+// and the test utility functions will panic if testConfig is not loaded.
 func init() {
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))
