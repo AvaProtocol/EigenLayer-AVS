@@ -2691,36 +2691,19 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 		)
 	}
 
-	// Validate JSON format if data is a string
-	if dataStr, ok := data.(string); ok {
-		// Check size limit first (before parsing to avoid wasting resources)
-		if len(dataStr) > MaxManualTriggerDataSize {
-			return nil, NewStructuredError(
-				avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
-				fmt.Sprintf("%s: %d bytes (max: %d bytes)", ValidationErrorMessages.ManualTriggerDataTooLarge, len(dataStr), MaxManualTriggerDataSize),
-				map[string]interface{}{
-					"field":   "data",
-					"issue":   "size limit exceeded",
-					"size":    len(dataStr),
-					"maxSize": MaxManualTriggerDataSize,
-				},
-			)
+	// Get language from config (default to JSON for backward compatibility)
+	lang := avsproto.Lang_JSON
+	if langInterface, ok := triggerConfig["lang"]; ok {
+		if langInt, ok := langInterface.(int32); ok {
+			lang = avsproto.Lang(langInt)
+		} else if langEnum, ok := langInterface.(avsproto.Lang); ok {
+			lang = langEnum
 		}
+	}
 
-		// Try to parse as JSON to validate format
-		var jsonTest interface{}
-		if err := json.Unmarshal([]byte(dataStr), &jsonTest); err != nil {
-			return nil, NewStructuredError(
-				avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
-				fmt.Sprintf("ManualTrigger data must be valid JSON: %s", err.Error()),
-				map[string]interface{}{
-					"field": "data",
-					"issue": "invalid JSON format",
-					"error": err.Error(),
-					"data":  dataStr,
-				},
-			)
-		}
+	// Validate based on language using universal validator
+	if err := ValidateInputByLanguage(data, lang); err != nil {
+		return nil, err
 	}
 
 	if n.logger != nil {

@@ -1996,6 +1996,32 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 		Output: ExtractTriggerOutput(payload.TriggerOutput),
 	}
 
+	// Validate manual trigger data if present
+	if triggerData.Type == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
+		if manualOutput, ok := triggerData.Output.(*avsproto.ManualTrigger_Output); ok && manualOutput != nil {
+			// Extract data from protobuf Value
+			if manualOutput.Data != nil {
+				var data interface{}
+				if stringVal := manualOutput.Data.GetStringValue(); stringVal != "" {
+					data = stringVal
+				} else {
+					data = manualOutput.Data.AsInterface()
+				}
+
+				// Get language from trigger config (default to JSON for backward compatibility)
+				lang := avsproto.Lang_JSON
+				if task.Trigger.GetManual() != nil && task.Trigger.GetManual().Config != nil {
+					lang = task.Trigger.GetManual().Config.Lang
+				}
+
+				// Validate based on language using universal validator
+				if err := ValidateInputByLanguage(data, lang); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
 	queueTaskData := QueueExecutionData{
 		TriggerType:   triggerData.Type,
 		TriggerOutput: triggerData.Output,
@@ -2146,6 +2172,26 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Extract trigger config using the shared utility function
 	triggerConfig := TaskTriggerToConfig(trigger)
+
+	// Validate manual trigger data if present (before execution)
+	if triggerType == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
+		if data, exists := triggerConfig["data"]; exists && data != nil {
+			// Get language from config (default to JSON for backward compatibility)
+			lang := avsproto.Lang_JSON
+			if langInterface, ok := triggerConfig["lang"]; ok {
+				if langInt, ok := langInterface.(int32); ok {
+					lang = avsproto.Lang(langInt)
+				} else if langEnum, ok := langInterface.(avsproto.Lang); ok {
+					lang = langEnum
+				}
+			}
+
+			// Validate based on language using universal validator
+			if err := ValidateInputByLanguage(data, lang); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	// Step 1: Start timing BEFORE trigger execution (consistent with node timing)
 	triggerStartTime := time.Now()
