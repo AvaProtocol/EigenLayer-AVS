@@ -264,6 +264,23 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 		return s, err
 	}
 
+	// Check source size limit (before preprocessing to avoid wasting resources)
+	if len(sourceStr) > MaxCustomCodeSourceSize {
+		err := NewStructuredError(
+			avsproto.ErrorCode_INVALID_NODE_CONFIG,
+			fmt.Sprintf("%s: %d bytes (max: %d bytes)", ValidationErrorMessages.CustomCodeSourceTooLarge, len(sourceStr), MaxCustomCodeSourceSize),
+			map[string]interface{}{
+				"field":   "source",
+				"issue":   "size limit exceeded",
+				"size":    len(sourceStr),
+				"maxSize": MaxCustomCodeSourceSize,
+			},
+		)
+		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		finalizeExecutionStepWithError(s, false, err, sb.String())
+		return s, err
+	}
+
 	// Preprocess source for template variables
 	sourceStr = r.vm.preprocessTextWithVariableMapping(sourceStr)
 
