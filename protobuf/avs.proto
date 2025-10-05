@@ -94,6 +94,9 @@ message IdReq {
 
 enum Lang {
   JavaScript = 0;
+  JSON = 1;
+  GraphQL = 2;
+  Handlebars = 3;
 }
 
 // Triggers are always the first element in a task execution flow
@@ -210,6 +213,8 @@ message ManualTrigger {
     map<string, string> headers = 2;
     // Path parameters for webhook testing - map format consistent with REST API nodes
     map<string, string> pathParams = 3;
+    // Language/format of the data field - for validation (default: JSON for backward compatibility)
+    Lang lang = 4;
   }
   
   message Output {
@@ -484,6 +489,8 @@ message BranchNode {
     string id = 1;
     string type = 2;
     string expression = 3;
+    // Language of the expression field - for validation (default: Handlebars for backward compatibility)
+    Lang lang = 4;
   }
 
   message Config {
@@ -509,6 +516,9 @@ message FilterNode {
     // The name of the input node whose output data will be filtered.
     // The data should be iterable (array, object, etc.). Runtime validation will check compatibility.
     string input_node_name = 2;
+    
+    // Language of the expression field - for validation (default: JavaScript for backward compatibility)
+    Lang lang = 3;
   }
 
   message Output {
