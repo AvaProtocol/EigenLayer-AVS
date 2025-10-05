@@ -569,12 +569,27 @@ User Input → Node extracts lang → ValidateInputByLanguage(data, lang)
 
 The architecture now treats **language as first-class**, not node types.
 
-### 🚧 Phase 2: Future Work
+### 🚧 Phase 2: FilterNode & BranchNode (IN PROGRESS)
 
-**FilterNode & BranchNode Validation**
-- Protobuf fields exist ✅
-- Validation hooks needed (similar to ManualTrigger pattern)
-- When needed: Extract lang from config, call `ValidateInputByLanguage()`
+**Status**: Protobuf fields added, placeholders in code, strict validation TODO
+
+**What's Done:**
+- ✅ Protobuf `lang` field exists in FilterNode.Config (line 521)
+- ✅ Protobuf `lang` field exists in BranchNode.Condition (line 493)
+- ✅ Code reads `lang` field in vm_runner_filter.go (line 101)
+- ✅ Code reads `lang` field in vm_runner_branch.go (line 83)
+- ✅ All three execution paths use same code (runFilter, runBranch)
+
+**What's NOT Done (TODO for Phase 2):**
+- ⚠️ **No strict validation** - currently just reads the lang field, doesn't fail if missing
+- ⚠️ **No backward compatibility removal** - should require lang explicitly like ManualTrigger
+- ⚠️ **No tests updated** - existing tests don't pass lang field
+
+**To Complete Phase 2:**
+1. Add strict `lang` field validation in FilterNode (similar to ManualTrigger pattern)
+2. Add strict `lang` field validation in BranchNode.Condition (similar to ManualTrigger pattern)
+3. Update all FilterNode and BranchNode tests to include `lang` field
+4. Remove any default/fallback logic
 
 **Language Validators**
 - [ ] JavaScript syntax validation

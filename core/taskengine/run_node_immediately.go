@@ -2691,15 +2691,35 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 		)
 	}
 
-	// Get language from config (default to JSON for backward compatibility)
-	lang := avsproto.Lang_JSON
-	if langInterface, ok := triggerConfig["lang"]; ok {
-		if langInt, ok := langInterface.(int32); ok {
-			lang = avsproto.Lang(langInt)
-		} else if langEnum, ok := langInterface.(avsproto.Lang); ok {
-			lang = langEnum
-		}
+	// Get language from config - REQUIRED
+	langInterface, ok := triggerConfig["lang"]
+	if !ok {
+		return nil, NewStructuredError(
+			avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
+			"language field (lang) is required in manual trigger config",
+			map[string]interface{}{
+				"field": "lang",
+				"issue": "missing required field",
+			},
+		)
 	}
+
+	var lang avsproto.Lang
+	if langInt, ok := langInterface.(int32); ok {
+		lang = avsproto.Lang(langInt)
+	} else if langEnum, ok := langInterface.(avsproto.Lang); ok {
+		lang = langEnum
+	} else {
+		return nil, NewStructuredError(
+			avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
+			"invalid language field type in manual trigger config",
+			map[string]interface{}{
+				"field": "lang",
+				"issue": "invalid type",
+			},
+		)
+	}
+	// Lang must be explicitly set (no validation of value needed - all enum values are valid)
 
 	// Validate based on language using universal validator
 	if err := ValidateInputByLanguage(data, lang); err != nil {

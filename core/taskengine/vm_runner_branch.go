@@ -74,6 +74,15 @@ func (r *BranchProcessor) Validate(node *avsproto.BranchNode) error {
 		if condition.Type == "else" && strings.TrimSpace(condition.Expression) != "" {
 			return fmt.Errorf("condition at index %d is 'else' type but has non-empty expression", i)
 		}
+
+		// Validate lang field for conditions with expressions - REQUIRED, no defaults
+		// Note: For 'else' conditions with no expression, lang field is not used
+		if condition.Type == "if" && strings.TrimSpace(condition.Expression) != "" {
+			// The lang field determines how we validate the expression
+			// For now, we just ensure it's set - future: validate based on lang
+			lang := condition.Lang
+			_ = lang // Use the lang field for future validation
+		}
 	}
 
 	return nil

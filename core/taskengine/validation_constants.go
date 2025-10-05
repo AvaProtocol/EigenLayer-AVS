@@ -132,10 +132,3 @@ func ValidateJSONFormat(data interface{}) error {
 
 	return nil
 }
-
-// ValidateManualTriggerData validates manual trigger data for size and JSON format.
-// DEPRECATED: Use ValidateInputByLanguage(data, avsproto.Lang_JSON) instead.
-// This function is kept for backward compatibility during migration.
-func ValidateManualTriggerData(data interface{}) error {
-	return ValidateJSONFormat(data)
-}
