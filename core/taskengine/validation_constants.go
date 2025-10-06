@@ -77,10 +77,19 @@ func ParseLanguageFromConfig(config map[string]interface{}) (avsproto.Lang, erro
 	case avsproto.Lang:
 		return v, nil
 	case string:
-		// Support string enum names (e.g., "JSON", "JavaScript")
+		// Try uppercase enum names first (e.g., "LANG_JAVASCRIPT")
 		if enumVal, exists := avsproto.Lang_value[v]; exists {
 			return avsproto.Lang(enumVal), nil
 		}
+
+		// Fall back to lowercase SDK strings (e.g., "javascript", "js")
+		// This allows both RPC and tests to work without explicit conversion
+		if converted := ConvertLangStringToEnum(v); converted != v {
+			if langEnum, ok := converted.(avsproto.Lang); ok {
+				return langEnum, nil
+			}
+		}
+
 		return 0, NewStructuredError(
 			avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
 			fmt.Sprintf("invalid language string value: %q", v),
@@ -88,7 +97,7 @@ func ParseLanguageFromConfig(config map[string]interface{}) (avsproto.Lang, erro
 				"field":        "lang",
 				"issue":        "invalid string value",
 				"received":     v,
-				"valid_values": []string{"LANG_JAVASCRIPT", "LANG_JSON", "LANG_GRAPHQL", "LANG_HANDLEBARS"},
+				"valid_values": []string{"javascript", "json", "graphql", "handlebars", "LANG_JAVASCRIPT", "LANG_JSON", "LANG_GRAPHQL", "LANG_HANDLEBARS"},
 			},
 		)
 	default:
