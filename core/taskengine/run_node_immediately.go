@@ -2889,15 +2889,10 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 	// This allows access to fields like 'value' and 'gasLimit' that aren't in protobuf schema
 	vm.AddVar("nodeConfig", nodeConfig)
 
-	// For CustomCode nodes, convert the lang field from string to protobuf enum if needed
-	// This allows tests that call RunNodeImmediately directly to use strings
-	if nodeType == NodeTypeCustomCode {
-		if langValue, exists := nodeConfig["lang"]; exists {
-			nodeConfig["lang"] = ConvertLangStringToEnum(langValue)
-		}
-	}
-
 	// Create node from type and config
+	// NOTE: For CustomCode nodes, lang field can be either:
+	// - avsproto.Lang enum (preferred in tests)
+	// - lowercase strings like "javascript" (from SDK, handled by ParseLanguageFromConfig)
 	node, err := CreateNodeFromType(nodeType, nodeConfig, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create node: %w", err)
@@ -3154,15 +3149,8 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		return resp, nil
 	}
 
-	// For CustomCode nodes, convert the lang field from lowercase string to protobuf enum
-	// (SDK sends "javascript", server expects LANG_JAVASCRIPT enum constant)
-	if nodeTypeStr == NodeTypeCustomCode {
-		if langValue, exists := nodeConfig["lang"]; exists {
-			nodeConfig["lang"] = ConvertLangStringToEnum(langValue)
-		}
-	}
-
 	// Execute the node immediately with authenticated user
+	// NOTE: lang field conversion for CustomCode is handled by ParseLanguageFromConfig
 	result, err := n.RunNodeImmediately(nodeTypeStr, nodeConfig, inputVariables, user)
 	if err != nil {
 		if n.logger != nil {
@@ -3839,15 +3827,8 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 		return resp, nil
 	}
 
-	// For ManualTrigger, convert the lang field from lowercase string to protobuf enum
-	// (SDK sends "javascript", server expects LANG_JAVASCRIPT enum constant)
-	if triggerTypeStr == NodeTypeManualTrigger {
-		if langValue, exists := triggerConfig["lang"]; exists {
-			triggerConfig["lang"] = ConvertLangStringToEnum(langValue)
-		}
-	}
-
 	// Execute the trigger immediately with trigger input data
+	// NOTE: lang field conversion for ManualTrigger is handled by ParseLanguageFromConfig
 	result, err := n.runTriggerImmediately(triggerTypeStr, triggerConfig, triggerInput)
 	if err != nil {
 		if n.logger != nil {
