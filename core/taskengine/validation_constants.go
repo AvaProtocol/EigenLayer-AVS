@@ -126,6 +126,18 @@ func ValidateManualTriggerPayload(data interface{}, lang avsproto.Lang) error {
 //	    return nil, err
 //	}
 func ValidateInputByLanguage(data interface{}, lang avsproto.Lang) error {
+	// First validate that lang is not UNSPECIFIED (zero value)
+	if lang == avsproto.Lang_LANG_UNSPECIFIED {
+		return NewStructuredError(
+			avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
+			"language field (lang) is required and cannot be LANG_UNSPECIFIED",
+			map[string]interface{}{
+				"field": "lang",
+				"issue": "LANG_UNSPECIFIED not allowed",
+			},
+		)
+	}
+
 	switch lang {
 	case avsproto.Lang_LANG_JSON:
 		return ValidateJSONFormat(data)
