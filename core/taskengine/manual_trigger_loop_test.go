@@ -3,6 +3,7 @@ package taskengine
 import (
 	"testing"
 
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -59,7 +60,7 @@ func TestLoopNode_ManualTriggerDataAccess(t *testing.T) {
 			"runner": map[string]interface{}{
 				"type": "customCode",
 				"config": map[string]interface{}{
-					"lang":   0, // JavaScript
+					"lang":   avsproto.Lang_LANG_JAVASCRIPT,
 					"source": "return value;",
 				},
 			},
@@ -135,7 +136,7 @@ func TestLoopNode_ManualTriggerDataAccess(t *testing.T) {
 			"runner": map[string]interface{}{
 				"type": "customCode",
 				"config": map[string]interface{}{
-					"lang":   0,
+					"lang":   avsproto.Lang_LANG_JAVASCRIPT,
 					"source": "return value;",
 				},
 			},
@@ -185,7 +186,7 @@ func TestLoopNode_ManualTriggerDataAccess(t *testing.T) {
 			"runner": map[string]interface{}{
 				"type": "customCode",
 				"config": map[string]interface{}{
-					"lang":   0,
+					"lang":   avsproto.Lang_LANG_JAVASCRIPT,
 					"source": "return value;",
 				},
 			},
