@@ -262,28 +262,24 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 			triggerConfig["data"] = manualTrigger.Config.Data.AsInterface()
 		}
 
-		// Handle lang field - required for validation
+		// Handle lang field - convert enum to string for structpb compatibility
 		if manualTrigger.Config.Lang != avsproto.Lang_LANG_UNSPECIFIED {
-			triggerConfig["lang"] = manualTrigger.Config.Lang
+			triggerConfig["lang"] = manualTrigger.Config.Lang.String()
 		}
 
-		// Handle headers
-		if len(manualTrigger.Config.Headers) > 0 {
-			headers := make(map[string]interface{})
-			for k, v := range manualTrigger.Config.Headers {
-				headers[k] = v
-			}
-			triggerConfig["headers"] = headers
+		// Always include headers and pathParams maps (even if empty) for consistent structure
+		// This ensures execution steps always show these fields for better debugging
+		headers := make(map[string]interface{})
+		for k, v := range manualTrigger.Config.Headers {
+			headers[k] = v
 		}
+		triggerConfig["headers"] = headers
 
-		// Handle pathParams
-		if len(manualTrigger.Config.PathParams) > 0 {
-			pathParams := make(map[string]interface{})
-			for k, v := range manualTrigger.Config.PathParams {
-				pathParams[k] = v
-			}
-			triggerConfig["pathParams"] = pathParams
+		pathParams := make(map[string]interface{})
+		for k, v := range manualTrigger.Config.PathParams {
+			pathParams[k] = v
 		}
+		triggerConfig["pathParams"] = pathParams
 	default:
 		// Handle unforeseen trigger types by returning empty configuration
 		// This ensures consistent behavior for unknown or future trigger types
