@@ -3,6 +3,7 @@ package taskengine
 import (
 	"testing"
 
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 )
 
@@ -25,6 +26,7 @@ func TestRunNodeImmediately_TriggerTypes(t *testing.T) {
 			name: "Manual Trigger",
 			nodeConfig: map[string]interface{}{
 				"triggerType": "manual",
+				"lang":        avsproto.Lang_LANG_JSON,
 			},
 		},
 		{
@@ -72,6 +74,7 @@ func TestRunTriggerRPC_ManualTrigger(t *testing.T) {
 
 	nodeConfig := map[string]interface{}{
 		"triggerType": "manual",
+		"lang":        avsproto.Lang_LANG_JSON,
 		"data": map[string]interface{}{
 			"testKey": "testValue",
 		},

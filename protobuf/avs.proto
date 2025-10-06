@@ -92,8 +92,14 @@ message IdReq {
   string id = 1;
 }
 
+// Lang defines supported languages/formats for code editors and data validation
+// Following protobuf best practice: 0 = UNSPECIFIED (not set)
 enum Lang {
-  JavaScript = 0;
+  LANG_UNSPECIFIED = 0;  // Not set - application must reject this
+  LANG_JAVASCRIPT = 1;   // JavaScript expressions
+  LANG_JSON = 2;         // JSON format
+  LANG_GRAPHQL = 3;      // GraphQL queries
+  LANG_HANDLEBARS = 4;   // Handlebars templates
 }
 
 // Triggers are always the first element in a task execution flow
@@ -210,6 +216,9 @@ message ManualTrigger {
     map<string, string> headers = 2;
     // Path parameters for webhook testing - map format consistent with REST API nodes
     map<string, string> pathParams = 3;
+    // Language/format of the data field - REQUIRED for validation
+    // Must be explicitly set (cannot be LANG_UNSPECIFIED). Application rejects zero value.
+    Lang lang = 4;
   }
   
   message Output {

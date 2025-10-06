@@ -382,6 +382,50 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 	var contractABI []interface{}
 	if contractAbiInterface, exists := queryMap["contractAbi"]; exists {
 		if abiArray, ok := contractAbiInterface.([]interface{}); ok {
+			// Validate total ABI size with short-circuit optimization
+			totalABISize := 0
+			for i, abiItem := range abiArray {
+				var itemSize int
+				if abiStr, ok := abiItem.(string); ok {
+					itemSize = len(abiStr)
+					// Validate individual ABI item size
+					if itemSize > MaxEventTriggerABIItemSize {
+						return nil, NewStructuredError(
+							avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
+							fmt.Sprintf("%s at index %d: %d bytes (max: %d bytes)", ValidationErrorMessages.EventTriggerABIItemTooLarge, i, itemSize, MaxEventTriggerABIItemSize),
+							map[string]interface{}{
+								"field":   "contractAbi",
+								"issue":   "ABI item size limit exceeded",
+								"index":   i,
+								"size":    itemSize,
+								"maxSize": MaxEventTriggerABIItemSize,
+							},
+						)
+					}
+				} else if abiMap, ok := abiItem.(map[string]interface{}); ok {
+					// Estimate size for map by marshaling to JSON
+					if jsonBytes, err := json.Marshal(abiMap); err == nil {
+						itemSize = len(jsonBytes)
+					}
+				}
+				totalABISize += itemSize
+
+				// Short-circuit: stop processing once total exceeds limit
+				if totalABISize > MaxContractABISize {
+					return nil, NewStructuredError(
+						avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
+						fmt.Sprintf("%s: %d bytes (max: %d bytes)", ValidationErrorMessages.ContractABITooLarge, totalABISize, MaxContractABISize),
+						map[string]interface{}{
+							"field":   "contractAbi",
+							"issue":   "total ABI size limit exceeded",
+							"size":    totalABISize,
+							"maxSize": MaxContractABISize,
+							"items":   len(abiArray),
+						},
+					)
+				}
+			}
+
 			contractABI = abiArray
 		}
 	}
@@ -2637,11 +2681,29 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 	// Validate that data is provided and not null
 	data, exists := triggerConfig["data"]
 	if !exists || data == nil {
-		return nil, fmt.Errorf("ManualTrigger data is required and cannot be null")
+		return nil, NewStructuredError(
+			avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
+			"ManualTrigger data is required and cannot be null",
+			map[string]interface{}{
+				"field": "data",
+				"issue": "missing or null",
+			},
+		)
+	}
+
+	// Parse language from config (strict requirement - no default)
+	lang, err := ParseLanguageFromConfig(triggerConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate based on language using universal validator
+	if err := ValidateInputByLanguage(data, lang); err != nil {
+		return nil, err
 	}
 
 	if n.logger != nil {
-		n.logger.Info("ManualTrigger executed with valid JSON data", "dataType", fmt.Sprintf("%T", data))
+		n.logger.Info("ManualTrigger executed with valid data", "dataType", fmt.Sprintf("%T", data))
 	}
 
 	// Process headers

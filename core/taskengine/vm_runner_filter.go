@@ -103,6 +103,15 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		return executionLogStep, fmt.Errorf(errMsg)
 	}
 
+	// LANGUAGE ENFORCEMENT: FilterNode uses JavaScript (hardcoded)
+	// Using centralized ValidateInputByLanguage for consistency
+	if err := ValidateInputByLanguage(expression, avsproto.Lang_LANG_JAVASCRIPT); err != nil {
+		errMsg := fmt.Sprintf("FilterNode expression validation failed: %v", err)
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
+		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
+		return executionLogStep, fmt.Errorf(errMsg)
+	}
+
 	inputNodeName := node.Config.InputNodeName
 	if inputNodeName == "" {
 		errMsg := "FilterNode inputNodeName is empty"
