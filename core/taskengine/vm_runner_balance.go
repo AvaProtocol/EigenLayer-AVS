@@ -3,6 +3,7 @@ package taskengine
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -13,27 +14,27 @@ import (
 
 // MoralisTokenBalance represents a single token balance in the Moralis API response
 type MoralisTokenBalance struct {
-	Balance                    string  `json:"balance"`
-	BalanceFormatted           string  `json:"balance_formatted"`
-	Decimals                   int     `json:"decimals"`
-	Logo                       string  `json:"logo"`
-	Name                       string  `json:"name"`
-	NativeToken                bool    `json:"native_token"`
-	PercentageRelativeToSupply *string `json:"percentage_relative_to_total_supply"`
-	PortfolioPercentage        float64 `json:"portfolio_percentage"`
-	PossibleSpam               bool    `json:"possible_spam"`
-	SecurityScore              int     `json:"security_score"`
-	Symbol                     string  `json:"symbol"`
-	Thumbnail                  string  `json:"thumbnail"`
-	TokenAddress               string  `json:"token_address"`
-	TotalSupply                *string `json:"total_supply"`
-	TotalSupplyFormatted       *string `json:"total_supply_formatted"`
-	USDPrice                   float64 `json:"usd_price"`
-	USDPrice24hrPercentChange  float64 `json:"usd_price_24hr_percent_change"`
-	USDPrice24hrUSDChange      float64 `json:"usd_price_24hr_usd_change"`
-	USDValue                   float64 `json:"usd_value"`
-	USDValue24hrUSDChange      float64 `json:"usd_value_24hr_usd_change"`
-	VerifiedContract           bool    `json:"verified_contract"`
+	Balance                    string   `json:"balance"`
+	BalanceFormatted           string   `json:"balance_formatted"`
+	Decimals                   int      `json:"decimals"`
+	Logo                       string   `json:"logo"`
+	Name                       string   `json:"name"`
+	NativeToken                bool     `json:"native_token"`
+	PercentageRelativeToSupply *float64 `json:"percentage_relative_to_total_supply"`
+	PortfolioPercentage        float64  `json:"portfolio_percentage"`
+	PossibleSpam               bool     `json:"possible_spam"`
+	SecurityScore              int      `json:"security_score"`
+	Symbol                     string   `json:"symbol"`
+	Thumbnail                  string   `json:"thumbnail"`
+	TokenAddress               string   `json:"token_address"`
+	TotalSupply                *string  `json:"total_supply"`
+	TotalSupplyFormatted       *string  `json:"total_supply_formatted"`
+	USDPrice                   float64  `json:"usd_price"`
+	USDPrice24hrPercentChange  float64  `json:"usd_price_24hr_percent_change"`
+	USDPrice24hrUSDChange      float64  `json:"usd_price_24hr_usd_change"`
+	USDValue                   float64  `json:"usd_value"`
+	USDValue24hrUSDChange      float64  `json:"usd_value_24hr_usd_change"`
+	VerifiedContract           bool     `json:"verified_contract"`
 }
 
 // MoralisBalanceResponse represents the full Moralis API response
@@ -65,40 +66,28 @@ var chainIDMap = map[string]string{
 	"1":        "eth",
 	"0x1":      "eth",
 
+	// Sepolia (Ethereum testnet)
+	"sepolia":  "sepolia",
+	"11155111": "sepolia",
+	"0xaa36a7": "sepolia",
+
 	// Base
 	"base":   "base",
 	"8453":   "base",
 	"0x2105": "base",
 
-	// Polygon
-	"polygon": "polygon",
-	"matic":   "polygon",
-	"137":     "polygon",
-	"0x89":    "polygon",
-
-	// Arbitrum
-	"arbitrum": "arbitrum",
-	"arb":      "arbitrum",
-	"42161":    "arbitrum",
-	"0xa4b1":   "arbitrum",
+	// Base Sepolia (Base testnet)
+	"base-sepolia": "base-sepolia",
+	"base sepolia": "base-sepolia",
+	"basesepolia":  "base-sepolia",
+	"84532":        "base-sepolia",
+	"0x14a34":      "base-sepolia",
 
 	// BSC
 	"bsc":     "bsc",
 	"binance": "bsc",
 	"56":      "bsc",
 	"0x38":    "bsc",
-
-	// Optimism
-	"optimism": "optimism",
-	"op":       "optimism",
-	"10":       "optimism",
-	"0xa":      "optimism",
-
-	// Avalanche
-	"avalanche": "avalanche",
-	"avax":      "avalanche",
-	"43114":     "avalanche",
-	"0xa86a":    "avalanche",
 }
 
 // normalizeChainID converts various chain identifier formats to Moralis chain name
@@ -108,6 +97,38 @@ func normalizeChainID(chain string) (string, error) {
 		return moralisChain, nil
 	}
 	return "", fmt.Errorf("unsupported chain: %s", chain)
+}
+
+// formatBalance converts raw balance to formatted balance using decimals
+func formatBalance(rawBalance string, decimals int) string {
+	// Parse the raw balance as a big integer
+	balance := new(big.Int)
+	balance, ok := balance.SetString(rawBalance, 10)
+	if !ok {
+		return ""
+	}
+
+	// Calculate divisor (10^decimals)
+	divisor := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
+
+	// Calculate quotient and remainder
+	quotient := new(big.Int).Div(balance, divisor)
+	remainder := new(big.Int).Mod(balance, divisor)
+
+	// Format remainder with leading zeros if needed
+	remainderStr := remainder.String()
+	if len(remainderStr) < decimals {
+		remainderStr = strings.Repeat("0", decimals-len(remainderStr)) + remainderStr
+	}
+
+	// Remove trailing zeros from remainder
+	remainderStr = strings.TrimRight(remainderStr, "0")
+
+	// Format result
+	if remainderStr == "" {
+		return quotient.String()
+	}
+	return quotient.String() + "." + remainderStr
 }
 
 // runBalance is the VM method wrapper for balance node execution
@@ -247,15 +268,20 @@ func (vm *VM) fetchMoralisBalances(
 		return nil, fmt.Errorf("Moralis API returned status %d: %s", resp.StatusCode(), resp.String())
 	}
 
-	// Parse Moralis response
-	var moralisResp MoralisBalanceResponse
-	if err := json.Unmarshal(resp.Body(), &moralisResp); err != nil {
-		return nil, fmt.Errorf("failed to parse Moralis response: %w", err)
+	// Parse Moralis response - try direct array first (v2.2 API returns array directly)
+	var tokens []MoralisTokenBalance
+	if err := json.Unmarshal(resp.Body(), &tokens); err != nil {
+		// If direct array parsing fails, try wrapper object format (older API version)
+		var moralisResp MoralisBalanceResponse
+		if err2 := json.Unmarshal(resp.Body(), &moralisResp); err2 != nil {
+			return nil, fmt.Errorf("failed to parse Moralis response as array or wrapper: %w", err)
+		}
+		tokens = moralisResp.Result
 	}
 
 	// Convert to simplified format
-	simplified := make([]interface{}, 0, len(moralisResp.Result))
-	for _, token := range moralisResp.Result {
+	simplified := make([]interface{}, 0, len(tokens))
+	for _, token := range tokens {
 		// Skip spam tokens if not included
 		if token.PossibleSpam && !config.IncludeSpam {
 			continue
@@ -271,12 +297,18 @@ func (vm *VM) fetchMoralisBalances(
 			continue
 		}
 
+		// Format balance if Moralis didn't provide it
+		balanceFormatted := token.BalanceFormatted
+		if balanceFormatted == "" && token.Balance != "" {
+			balanceFormatted = formatBalance(token.Balance, token.Decimals)
+		}
+
 		// Create simplified token balance
 		simpleToken := SimplifiedTokenBalance{
 			Symbol:           token.Symbol,
 			Name:             token.Name,
 			Balance:          token.Balance,
-			BalanceFormatted: token.BalanceFormatted,
+			BalanceFormatted: balanceFormatted,
 			Decimals:         token.Decimals,
 		}
 
