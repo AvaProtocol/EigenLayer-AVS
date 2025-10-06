@@ -276,7 +276,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 							Runner: &avsproto.LoopNode_CustomCode{
 								CustomCode: &avsproto.CustomCodeNode{
 									Config: &avsproto.CustomCodeNode_Config{
-										Lang:   avsproto.Lang_JavaScript,
+										Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 										Source: "return data.value * 2;",
 									},
 								},
@@ -299,7 +299,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 				runnerConfig, ok := runner["config"].(map[string]interface{})
 				require.True(t, ok, "runner config should be a map[string]interface{}")
 				assert.Equal(t, "return data.value * 2;", runnerConfig["source"])
-				assert.Equal(t, "JavaScript", runnerConfig["lang"])
+				assert.Equal(t, avsproto.Lang_LANG_JAVASCRIPT.String(), runnerConfig["lang"])
 			},
 		},
 		{

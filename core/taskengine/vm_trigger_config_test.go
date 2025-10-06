@@ -242,7 +242,7 @@ func TestTriggerConfigAccessInJavaScript(t *testing.T) {
 	// Create a CustomCode node that accesses triggerConfig
 	customCodeNode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
-			Lang: avsproto.Lang_JavaScript,
+			Lang: avsproto.Lang_LANG_JAVASCRIPT,
 			Source: `
 				// Test accessing trigger config
 				const triggerInfo = {
