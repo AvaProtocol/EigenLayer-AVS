@@ -3,6 +3,7 @@ package taskengine
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -103,9 +104,10 @@ func ParseLanguageFromConfig(config map[string]interface{}) (avsproto.Lang, erro
 	}
 }
 
-// ConvertLangStringToEnum converts lowercase language strings (from SDK) to protobuf enum constants.
+// ConvertLangStringToEnum converts language strings (from SDK or tests) to protobuf enum constants.
 // This is used by both RunNodeImmediatelyRPC (for CustomCode) and RunTriggerRPC (for ManualTrigger).
 // Returns the converted enum value, or the original value if it's not a convertible string.
+// Case-insensitive to support various formats (javascript, JavaScript, JAVASCRIPT).
 func ConvertLangStringToEnum(langValue interface{}) interface{} {
 	langStr, ok := langValue.(string)
 	if !ok {
@@ -113,9 +115,9 @@ func ConvertLangStringToEnum(langValue interface{}) interface{} {
 		return langValue
 	}
 
-	// Convert lowercase language string to protobuf enum constant
-	switch langStr {
-	case "javascript":
+	// Convert language string to protobuf enum constant (case-insensitive)
+	switch strings.ToLower(langStr) {
+	case "javascript", "js":
 		return avsproto.Lang_LANG_JAVASCRIPT
 	case "json":
 		return avsproto.Lang_LANG_JSON

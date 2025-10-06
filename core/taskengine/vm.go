@@ -2645,6 +2645,14 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			return nil, fmt.Errorf("loop node runner requires 'config' field")
 		}
 
+		// For customCode runners, convert lang field from string to protobuf enum if needed
+		// This allows tests that call CreateNodeFromType directly to use strings
+		if runnerType == "customCode" {
+			if langValue, exists := runnerConfig["lang"]; exists {
+				runnerConfig["lang"] = ConvertLangStringToEnum(langValue)
+			}
+		}
+
 		switch runnerType {
 		case "customCode":
 			ccConfig := &avsproto.CustomCodeNode_Config{}
