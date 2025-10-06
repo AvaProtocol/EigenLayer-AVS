@@ -1220,6 +1220,7 @@ message RunNodeWithInputsResp {
     BranchNode.Output branch = 16;
     FilterNode.Output filter = 17;
     LoopNode.Output loop = 18;
+    BalanceNode.Output balance = 19;
   }
 }
 

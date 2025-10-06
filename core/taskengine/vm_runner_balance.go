@@ -160,7 +160,7 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 		return executionLogStep, err
 	}
 
-	// Get Moralis API key from macro secrets
+	// Get Moralis API key from macro secrets (global package variable set by SetMacroSecrets)
 	moralisAPIKey := ""
 	if macroSecrets != nil {
 		moralisAPIKey = macroSecrets["moralis_api_key"]
@@ -215,61 +215,6 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 	finalizeExecutionStep(executionLogStep, true, "", logBuilder.String())
 
 	return executionLogStep, nil
-}
-
-// RunBalanceNode executes a balance node to retrieve wallet token balances (for direct node execution)
-func (vm *VM) RunBalanceNode(node *avsproto.TaskNode) (*avsproto.TaskNode, error) {
-	balanceNode := node.GetBalance()
-	if balanceNode == nil {
-		return nil, fmt.Errorf("balance node is nil")
-	}
-
-	config := balanceNode.Config
-	if config == nil {
-		return nil, fmt.Errorf("balance node config is nil")
-	}
-
-	// Resolve template variables in config
-	address := vm.preprocessTextWithVariableMapping(config.Address)
-	chain := vm.preprocessTextWithVariableMapping(config.Chain)
-
-	// Validate inputs
-	if address == "" {
-		return nil, fmt.Errorf("address is required")
-	}
-	if chain == "" {
-		return nil, fmt.Errorf("chain is required")
-	}
-
-	// Normalize chain to Moralis format
-	moralisChain, err := normalizeChainID(chain)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get Moralis API key from macro secrets
-	moralisAPIKey := ""
-	if macroSecrets != nil {
-		moralisAPIKey = macroSecrets["moralis_api_key"]
-	}
-	if moralisAPIKey == "" {
-		return nil, fmt.Errorf("Moralis API key is not configured in macros.secrets")
-	}
-
-	// Fetch balances from Moralis
-	_, err = vm.fetchMoralisBalances(address, moralisChain, moralisAPIKey, config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch balances: %w", err)
-	}
-
-	// Create output
-	node.TaskType = &avsproto.TaskNode_Balance{
-		Balance: &avsproto.BalanceNode{
-			Config: config,
-		},
-	}
-
-	return node, nil
 }
 
 // fetchMoralisBalances calls the Moralis API to get wallet token balances

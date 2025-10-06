@@ -3099,6 +3099,13 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 				result["data"] = iface
 			}
 		}
+	} else if balance := executionStep.GetBalance(); balance != nil {
+		// Balance output contains the array of token balances
+		if balance.GetData() != nil {
+			// Extract the balance data (always an array of token objects)
+			balanceArray := balance.GetData().AsInterface()
+			return map[string]interface{}{"data": balanceArray}, nil
+		}
 	}
 
 	// ALWAYS add step success/error fields for ALL node types (general approach)
@@ -3202,6 +3209,8 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			resp.OutputData = &avsproto.RunNodeWithInputsResp_Filter{Filter: &avsproto.FilterNode_Output{}}
 		case NodeTypeLoop:
 			resp.OutputData = &avsproto.RunNodeWithInputsResp_Loop{Loop: &avsproto.LoopNode_Output{}}
+		case NodeTypeBalance:
+			resp.OutputData = &avsproto.RunNodeWithInputsResp_Balance{Balance: &avsproto.BalanceNode_Output{}}
 		default:
 			resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{RestApi: &avsproto.RestAPINode_Output{}}
 		}
@@ -3701,6 +3710,40 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 					Data: dataValue,
 				},
 			}
+		}
+	case NodeTypeBalance:
+		// For balance nodes - create output with balance array data
+		// Result format is always {"data": [array of token balances]}
+		var dataValue *structpb.Value
+		var err error
+
+		if result != nil && len(result) > 0 {
+			// Extract the data field (always present from extractExecutionResult)
+			balanceData := result["data"]
+			dataValue, err = structpb.NewValue(balanceData)
+			if err != nil {
+				return &avsproto.RunNodeWithInputsResp{
+					Success: false,
+					Error:   fmt.Sprintf("failed to convert Balance output: %v", err),
+				}, nil
+			}
+		} else {
+			// Empty result - return empty array
+			emptyArray := []interface{}{}
+			dataValue, err = structpb.NewValue(emptyArray)
+			if err != nil {
+				return &avsproto.RunNodeWithInputsResp{
+					Success: false,
+					Error:   fmt.Sprintf("failed to create empty Balance output: %v", err),
+				}, nil
+			}
+		}
+
+		balanceOutput := &avsproto.BalanceNode_Output{
+			Data: dataValue,
+		}
+		resp.OutputData = &avsproto.RunNodeWithInputsResp_Balance{
+			Balance: balanceOutput,
 		}
 	default:
 		// For unknown/invalid node types, set RestAPI as default to avoid OUTPUT_DATA_NOT_SET
