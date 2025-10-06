@@ -63,57 +63,40 @@ The current approach is not user-friendly for a common operation like checking w
 
 ### Output Format
 
-The Balance Node should return a simplified, standardized response:
+The Balance Node returns a simplified array of token balance objects:
 
 ```json
-{
-  "address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
-  "chain": "ethereum",
-  "chainId": 1,
-  "blockNumber": 23515585,
-  "timestamp": "2025-10-06T12:34:56Z",
-  "tokens": [
-    {
-      "symbol": "ETH",
-      "name": "Ether",
-      "balance": "1234567890000000000",
-      "balanceFormatted": "1.23456789",
-      "decimals": 18,
-      "tokenAddress": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-      "isNative": true,
-      "usdPrice": 4528.12,
-      "usdValue": 5591.23,
-      "verified": true
-    },
-    {
-      "symbol": "USDC",
-      "name": "USD Coin",
-      "balance": "1000000000",
-      "balanceFormatted": "1000",
-      "decimals": 6,
-      "tokenAddress": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-      "isNative": false,
-      "usdPrice": 1.0,
-      "usdValue": 1000.0,
-      "verified": true
-    }
-  ],
-  "totalUsdValue": 6591.23,
-  "tokenCount": 2
-}
+[
+  {
+    "symbol": "ETH",
+    "name": "Ether",
+    "balance": "1234567890000000000",
+    "balanceFormatted": "1.23456789",
+    "decimals": 18,
+    "usdPrice": 4528.12,
+    "usdValue": 5591.23
+  },
+  {
+    "symbol": "USDC",
+    "name": "USD Coin",
+    "balance": "1000000000",
+    "balanceFormatted": "1000",
+    "decimals": 6,
+    "tokenAddress": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "usdPrice": 1.0,
+    "usdValue": 1000.0
+  }
+]
 ```
 
-### Response Fields Description
+**Notes:**
+- Response is a direct array (no wrapper object)
+- Maximum 100 tokens returned (no pagination needed)
+- Native tokens (ETH, MATIC, etc.) do not include `tokenAddress` field
+- Non-native tokens (ERC20) include `tokenAddress` field
+- All returned tokens are verified (unverified/spam tokens are filtered out)
 
-#### Root Level
-- `address`: The wallet address queried
-- `chain`: Human-readable chain name
-- `chainId`: Numeric chain ID
-- `blockNumber`: Block number at time of query
-- `timestamp`: ISO 8601 timestamp of query
-- `tokens`: Array of token balance objects
-- `totalUsdValue`: Sum of all token USD values
-- `tokenCount`: Number of tokens returned
+### Response Fields Description
 
 #### Token Object
 - `symbol`: Token symbol (e.g., "ETH", "USDC")
@@ -121,11 +104,9 @@ The Balance Node should return a simplified, standardized response:
 - `balance`: Raw balance as string (to handle large numbers)
 - `balanceFormatted`: Human-readable balance with decimals applied
 - `decimals`: Token decimal places
-- `tokenAddress`: Token contract address (or special address for native tokens)
-- `isNative`: Boolean indicating if this is the chain's native token
+- `tokenAddress`: Token contract address (only present for non-native tokens)
 - `usdPrice`: Current USD price per token (null if unavailable)
 - `usdValue`: Total USD value of this balance (null if price unavailable)
-- `verified`: Whether the token contract is verified
 
 ### Fields Removed from Moralis Response
 The following fields from the Moralis API response will NOT be included:
@@ -133,12 +114,14 @@ The following fields from the Moralis API response will NOT be included:
 - `possibleSpam` - Filtered out by default (unless `includeSpam=true`)
 - `portfolioPercentage` - Can be calculated if needed
 - `percentageRelativeToTotalSupply` - Rarely useful
-- `securityScore` - Redundant with verified flag
+- `securityScore` - Not needed (spam filtering handles security)
 - `usdPrice_24hrPercentChange` - Historical data (out of scope for v1)
 - `usdPrice_24hrUsdChange` - Historical data (out of scope for v1)
 - `usdValue_24hrUsdChange` - Historical data (out of scope for v1)
 - `totalSupply`, `totalSupplyFormatted` - Rarely needed
-- `verifiedContract` - Simplified to `verified` boolean
+- `verifiedContract` - All returned tokens are verified (spam filtered)
+- `blockNumber`, `cursor`, `page`, `pageSize` - Pagination not needed (max 100 items)
+- `nativeToken` - Implicit (native tokens don't have tokenAddress field)
 
 ## Implementation Plan
 
