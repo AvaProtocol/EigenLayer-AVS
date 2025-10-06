@@ -264,6 +264,14 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 		return s, err
 	}
 
+	// LANGUAGE ENFORCEMENT: CustomCodeNode uses JavaScript
+	// Using centralized ValidateInputByLanguage for consistency (includes size check)
+	if err := ValidateInputByLanguage(sourceStr, avsproto.Lang_LANG_JAVASCRIPT); err != nil {
+		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
+		finalizeExecutionStepWithError(s, false, err, sb.String())
+		return s, err
+	}
+
 	// Preprocess source for template variables
 	sourceStr = r.vm.preprocessTextWithVariableMapping(sourceStr)
 

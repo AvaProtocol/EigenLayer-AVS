@@ -2477,12 +2477,12 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		if lang, ok := config["lang"].(string); ok {
 			switch strings.ToLower(lang) {
 			case "javascript", "js":
-				customConfig.Lang = avsproto.Lang_JavaScript
+				customConfig.Lang = avsproto.Lang_LANG_JAVASCRIPT
 			default:
-				customConfig.Lang = avsproto.Lang_JavaScript // Default to JavaScript
+				customConfig.Lang = avsproto.Lang_LANG_JAVASCRIPT // Default to JavaScript
 			}
 		} else {
-			customConfig.Lang = avsproto.Lang_JavaScript // Default to JavaScript
+			customConfig.Lang = avsproto.Lang_LANG_JAVASCRIPT // Default to JavaScript
 		}
 
 		node.TaskType = &avsproto.TaskNode_CustomCode{
@@ -2649,12 +2649,12 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			if lang, ok := runnerConfig["lang"].(string); ok {
 				switch strings.ToLower(lang) {
 				case "javascript", "js":
-					ccConfig.Lang = avsproto.Lang_JavaScript
+					ccConfig.Lang = avsproto.Lang_LANG_JAVASCRIPT
 				default:
-					ccConfig.Lang = avsproto.Lang_JavaScript
+					ccConfig.Lang = avsproto.Lang_LANG_JAVASCRIPT
 				}
 			} else {
-				ccConfig.Lang = avsproto.Lang_JavaScript
+				ccConfig.Lang = avsproto.Lang_LANG_JAVASCRIPT
 			}
 			loopNode.Runner = &avsproto.LoopNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{Config: ccConfig},
@@ -2813,7 +2813,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		// Create a minimal config for trigger simulation
 		customConfig := &avsproto.CustomCodeNode_Config{
 			Source: "// Trigger simulation node",
-			Lang:   avsproto.Lang_JavaScript,
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 		}
 		node.TaskType = &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{
