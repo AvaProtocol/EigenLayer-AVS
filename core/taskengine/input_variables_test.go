@@ -85,7 +85,7 @@ func TestInputVariables_SimulateTask(t *testing.T) {
 		TriggerType: &avsproto.TaskTrigger_Manual{
 			Manual: &avsproto.ManualTrigger{
 				Config: &avsproto.ManualTrigger_Config{
-					Lang: avsproto.Lang_LANG_JAVASCRIPT,
+					Lang: avsproto.Lang_LANG_JSON,
 					Data: func() *structpb.Value {
 						data, _ := structpb.NewValue(map[string]interface{}{
 							"test": "data",
@@ -205,7 +205,7 @@ func TestInputVariables_DeployedTask(t *testing.T) {
 				TriggerType: &avsproto.TaskTrigger_Manual{
 					Manual: &avsproto.ManualTrigger{
 						Config: &avsproto.ManualTrigger_Config{
-							Lang: avsproto.Lang_LANG_JAVASCRIPT,
+							Lang: avsproto.Lang_LANG_JSON,
 						},
 					},
 				},
@@ -345,7 +345,7 @@ func TestInputVariables_CreateTask(t *testing.T) {
 			TriggerType: &avsproto.TaskTrigger_Manual{
 				Manual: &avsproto.ManualTrigger{
 					Config: &avsproto.ManualTrigger_Config{
-						Lang: avsproto.Lang_LANG_JAVASCRIPT,
+						Lang: avsproto.Lang_LANG_JSON,
 					},
 				},
 			},
@@ -462,7 +462,7 @@ func TestInputVariables_TemplateResolution(t *testing.T) {
 		TriggerType: &avsproto.TaskTrigger_Manual{
 			Manual: &avsproto.ManualTrigger{
 				Config: &avsproto.ManualTrigger_Config{
-					Lang: avsproto.Lang_LANG_JAVASCRIPT,
+					Lang: avsproto.Lang_LANG_JSON,
 					Data: func() *structpb.Value {
 						data, _ := structpb.NewValue(map[string]interface{}{
 							"test": "data",
@@ -562,7 +562,7 @@ func TestInputVariables_EmptyInputVariables(t *testing.T) {
 		TriggerType: &avsproto.TaskTrigger_Manual{
 			Manual: &avsproto.ManualTrigger{
 				Config: &avsproto.ManualTrigger_Config{
-					Lang: avsproto.Lang_LANG_JAVASCRIPT,
+					Lang: avsproto.Lang_LANG_JSON,
 					Data: func() *structpb.Value {
 						data, _ := structpb.NewValue(map[string]interface{}{
 							"test": "data",

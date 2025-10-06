@@ -308,6 +308,7 @@ func TestCamelCaseVariableResolutionConsistency(t *testing.T) {
 			TriggerType: &avsproto.TaskTrigger_Manual{
 				Manual: &avsproto.ManualTrigger{
 					Config: &avsproto.ManualTrigger_Config{
+						Lang: avsproto.Lang_LANG_JSON,
 						Data: triggerData,
 					},
 				},

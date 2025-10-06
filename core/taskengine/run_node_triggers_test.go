@@ -26,7 +26,7 @@ func TestRunNodeImmediately_TriggerTypes(t *testing.T) {
 			name: "Manual Trigger",
 			nodeConfig: map[string]interface{}{
 				"triggerType": "manual",
-				"lang":        avsproto.Lang_LANG_JAVASCRIPT,
+				"lang":        avsproto.Lang_LANG_JSON,
 			},
 		},
 		{
@@ -74,7 +74,7 @@ func TestRunTriggerRPC_ManualTrigger(t *testing.T) {
 
 	nodeConfig := map[string]interface{}{
 		"triggerType": "manual",
-		"lang":        avsproto.Lang_LANG_JAVASCRIPT,
+		"lang":        avsproto.Lang_LANG_JSON,
 		"data": map[string]interface{}{
 			"testKey": "testValue",
 		},
