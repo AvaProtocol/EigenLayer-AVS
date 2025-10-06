@@ -2484,10 +2484,10 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			case "javascript", "js":
 				customConfig.Lang = avsproto.Lang_LANG_JAVASCRIPT
 			default:
-				customConfig.Lang = avsproto.Lang_LANG_JAVASCRIPT // Default to JavaScript
+				return nil, fmt.Errorf("unsupported language: %s. Supported languages: javascript, js", lang)
 			}
 		} else {
-			customConfig.Lang = avsproto.Lang_LANG_JAVASCRIPT // Default to JavaScript
+			return nil, fmt.Errorf("custom code node requires 'lang' field")
 		}
 
 		node.TaskType = &avsproto.TaskNode_CustomCode{
@@ -2656,10 +2656,10 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				case "javascript", "js":
 					ccConfig.Lang = avsproto.Lang_LANG_JAVASCRIPT
 				default:
-					ccConfig.Lang = avsproto.Lang_LANG_JAVASCRIPT
+					return nil, fmt.Errorf("unsupported language: %s. Supported languages: javascript, js", lang)
 				}
 			} else {
-				ccConfig.Lang = avsproto.Lang_LANG_JAVASCRIPT
+				return nil, fmt.Errorf("loop node customCode runner requires 'lang' field")
 			}
 			loopNode.Runner = &avsproto.LoopNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{Config: ccConfig},
