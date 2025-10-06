@@ -264,18 +264,9 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 		return s, err
 	}
 
-	// Check source size limit (before preprocessing to avoid wasting resources)
-	if len(sourceStr) > MaxCustomCodeSourceSize {
-		err := NewStructuredError(
-			avsproto.ErrorCode_INVALID_NODE_CONFIG,
-			fmt.Sprintf("%s: %d bytes (max: %d bytes)", ValidationErrorMessages.CustomCodeSourceTooLarge, len(sourceStr), MaxCustomCodeSourceSize),
-			map[string]interface{}{
-				"field":   "source",
-				"issue":   "size limit exceeded",
-				"size":    len(sourceStr),
-				"maxSize": MaxCustomCodeSourceSize,
-			},
-		)
+	// LANGUAGE ENFORCEMENT: CustomCodeNode uses JavaScript
+	// Using centralized ValidateInputByLanguage for consistency (includes size check)
+	if err := ValidateInputByLanguage(sourceStr, avsproto.Lang_LANG_JAVASCRIPT); err != nil {
 		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
 		finalizeExecutionStepWithError(s, false, err, sb.String())
 		return s, err

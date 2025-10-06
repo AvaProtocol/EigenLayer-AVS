@@ -168,17 +168,11 @@ func ValidateInputByLanguage(data interface{}, lang avsproto.Lang) error {
 	case avsproto.Lang_LANG_JSON:
 		return ValidateJSONFormat(data)
 	case avsproto.Lang_LANG_JAVASCRIPT:
-		// TODO: Implement JavaScript syntax validation
-		// For now, no validation (JavaScript is validated at runtime)
-		return nil
+		return ValidateJavaScriptFormat(data)
 	case avsproto.Lang_LANG_GRAPHQL:
-		// TODO: Implement GraphQL syntax validation
-		// For now, no validation (GraphQL is validated at runtime)
-		return nil
+		return ValidateGraphQLFormat(data)
 	case avsproto.Lang_LANG_HANDLEBARS:
-		// TODO: Implement Handlebars template validation
-		// For now, no validation (Handlebars is validated at runtime)
-		return nil
+		return ValidateHandlebarsFormat(data)
 	default:
 		// For unknown/unspecified languages, no validation
 		// This allows flexibility for future formats
@@ -222,6 +216,96 @@ func ValidateJSONFormat(data interface{}) error {
 					"issue": "invalid JSON format",
 					"error": err.Error(),
 					"data":  dataStr,
+				},
+			)
+		}
+	}
+
+	return nil
+}
+
+// ValidateJavaScriptFormat validates JavaScript code size.
+// This ensures ALL JavaScript code (CustomCodeNode, FilterNode, BranchNode) is checked
+// for size limits, providing consistent DoS protection across all nodes.
+//
+// Coverage:
+// - CustomCodeNode.Config.Source (full JavaScript programs)
+// - FilterNode.Config.Expression (JavaScript filter expressions)
+// - BranchNode.Condition.Expression (JavaScript condition expressions)
+func ValidateJavaScriptFormat(data interface{}) error {
+	// Allow nil or missing data to pass through - handled by caller
+	if data == nil {
+		return nil
+	}
+
+	// Only validate if data is a string
+	if dataStr, ok := data.(string); ok {
+		// Check size limit (same limit for all JavaScript code)
+		if len(dataStr) > MaxCustomCodeSourceSize {
+			return NewStructuredError(
+				avsproto.ErrorCode_INVALID_NODE_CONFIG,
+				fmt.Sprintf("JavaScript code exceeds maximum size limit: %d bytes (max: %d bytes)", len(dataStr), MaxCustomCodeSourceSize),
+				map[string]interface{}{
+					"field":    "source/expression",
+					"issue":    "size limit exceeded",
+					"size":     len(dataStr),
+					"maxSize":  MaxCustomCodeSourceSize,
+					"language": "JavaScript",
+				},
+			)
+		}
+
+		// TODO: Add JavaScript syntax validation
+		// For now, size check is sufficient (syntax errors caught at runtime)
+	}
+
+	return nil
+}
+
+// ValidateGraphQLFormat validates GraphQL query size.
+// This ensures ALL GraphQL queries have size limits for DoS protection.
+func ValidateGraphQLFormat(data interface{}) error {
+	if data == nil {
+		return nil
+	}
+
+	if dataStr, ok := data.(string); ok {
+		if len(dataStr) > MaxCustomCodeSourceSize {
+			return NewStructuredError(
+				avsproto.ErrorCode_INVALID_NODE_CONFIG,
+				fmt.Sprintf("GraphQL query exceeds maximum size limit: %d bytes (max: %d bytes)", len(dataStr), MaxCustomCodeSourceSize),
+				map[string]interface{}{
+					"field":    "query",
+					"issue":    "size limit exceeded",
+					"size":     len(dataStr),
+					"maxSize":  MaxCustomCodeSourceSize,
+					"language": "GraphQL",
+				},
+			)
+		}
+	}
+
+	return nil
+}
+
+// ValidateHandlebarsFormat validates Handlebars template size.
+// This ensures ALL Handlebars templates have size limits for DoS protection.
+func ValidateHandlebarsFormat(data interface{}) error {
+	if data == nil {
+		return nil
+	}
+
+	if dataStr, ok := data.(string); ok {
+		if len(dataStr) > MaxCustomCodeSourceSize {
+			return NewStructuredError(
+				avsproto.ErrorCode_INVALID_NODE_CONFIG,
+				fmt.Sprintf("Handlebars template exceeds maximum size limit: %d bytes (max: %d bytes)", len(dataStr), MaxCustomCodeSourceSize),
+				map[string]interface{}{
+					"field":    "template",
+					"issue":    "size limit exceeded",
+					"size":     len(dataStr),
+					"maxSize":  MaxCustomCodeSourceSize,
+					"language": "Handlebars",
 				},
 			)
 		}

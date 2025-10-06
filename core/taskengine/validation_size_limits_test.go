@@ -215,13 +215,14 @@ func TestCustomCode_SizeLimit(t *testing.T) {
 		require.Error(t, err, "Should fail with oversized source")
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "exceeds maximum size limit")
-		assert.Contains(t, err.Error(), "Custom code source")
+		assert.Contains(t, err.Error(), "JavaScript") // Now using centralized validator
 
 		// Check if it's a structured error with correct error code
 		if structuredErr, ok := err.(*StructuredError); ok {
 			assert.Equal(t, avsproto.ErrorCode_INVALID_NODE_CONFIG, structuredErr.Code)
 			assert.Equal(t, "size limit exceeded", structuredErr.Details["issue"])
 			assert.Equal(t, MaxCustomCodeSourceSize, structuredErr.Details["maxSize"])
+			assert.Equal(t, "JavaScript", structuredErr.Details["language"]) // Centralized validator adds language field
 		}
 	})
 }
