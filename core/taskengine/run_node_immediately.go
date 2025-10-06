@@ -2889,6 +2889,14 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 	// This allows access to fields like 'value' and 'gasLimit' that aren't in protobuf schema
 	vm.AddVar("nodeConfig", nodeConfig)
 
+	// For CustomCode nodes, convert the lang field from string to protobuf enum if needed
+	// This allows tests that call RunNodeImmediately directly to use strings
+	if nodeType == NodeTypeCustomCode {
+		if langValue, exists := nodeConfig["lang"]; exists {
+			nodeConfig["lang"] = ConvertLangStringToEnum(langValue)
+		}
+	}
+
 	// Create node from type and config
 	node, err := CreateNodeFromType(nodeType, nodeConfig, "")
 	if err != nil {

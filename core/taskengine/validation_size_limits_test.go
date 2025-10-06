@@ -191,7 +191,7 @@ func TestCustomCode_SizeLimit(t *testing.T) {
 
 	t.Run("Valid size - under limit", func(t *testing.T) {
 		nodeConfig := map[string]interface{}{
-			"lang":   0, // JavaScript
+			"lang":   avsproto.Lang_LANG_JAVASCRIPT,
 			"source": "return { result: 'ok' };",
 		}
 
@@ -206,7 +206,7 @@ func TestCustomCode_SizeLimit(t *testing.T) {
 		largeSource := "return { data: '" + strings.Repeat("x", MaxCustomCodeSourceSize) + "' };"
 
 		nodeConfig := map[string]interface{}{
-			"lang":   0,
+			"lang":   avsproto.Lang_LANG_JAVASCRIPT,
 			"source": largeSource,
 		}
 
