@@ -2479,16 +2479,13 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			customConfig.Source = source
 		}
 
-		// Handle lang field - must be protobuf Lang enum
-		if langValue, exists := config["lang"]; exists {
-			if lang, ok := langValue.(avsproto.Lang); ok {
-				customConfig.Lang = lang
-			} else {
-				return nil, fmt.Errorf("invalid lang field type: %T. Expected avsproto.Lang enum", langValue)
-			}
-		} else {
-			return nil, fmt.Errorf("custom code node requires 'lang' field")
+		// Handle lang field - can be enum, string, or number
+		// ParseLanguageFromConfig handles conversion from lowercase strings like "javascript"
+		lang, err := ParseLanguageFromConfig(config)
+		if err != nil {
+			return nil, err
 		}
+		customConfig.Lang = lang
 
 		node.TaskType = &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{
@@ -2660,16 +2657,13 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				ccConfig.Source = source
 			}
 
-			// Handle lang field - must be protobuf Lang enum
-			if langValue, exists := runnerConfig["lang"]; exists {
-				if lang, ok := langValue.(avsproto.Lang); ok {
-					ccConfig.Lang = lang
-				} else {
-					return nil, fmt.Errorf("invalid lang field type: %T. Expected avsproto.Lang enum", langValue)
-				}
-			} else {
-				return nil, fmt.Errorf("loop node customCode runner requires 'lang' field")
+			// Handle lang field - can be enum, string, or number
+			// ParseLanguageFromConfig handles conversion from lowercase strings like "javascript"
+			lang, err := ParseLanguageFromConfig(runnerConfig)
+			if err != nil {
+				return nil, err
 			}
+			ccConfig.Lang = lang
 			loopNode.Runner = &avsproto.LoopNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{Config: ccConfig},
 			}
