@@ -256,6 +256,11 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 				triggerConfig["data"] = manualTrigger.Config.Data.AsInterface()
 			}
 
+			// Handle lang field - required for validation
+			if manualTrigger.Config.Lang != avsproto.Lang_LANG_UNSPECIFIED {
+				triggerConfig["lang"] = manualTrigger.Config.Lang
+			}
+
 			// Handle headers
 			if len(manualTrigger.Config.Headers) > 0 {
 				headers := make(map[string]interface{})

@@ -153,9 +153,13 @@ func ValidateManualTriggerFromProtobuf(manualOutput *avsproto.ManualTrigger_Outp
 //	}
 func ValidateInputByLanguage(data interface{}, lang avsproto.Lang) error {
 	// First validate that lang is not UNSPECIFIED (zero value)
+	// Use INVALID_NODE_CONFIG instead of INVALID_TRIGGER_CONFIG because this validator
+	// is called from both trigger contexts (ManualTrigger) and non-trigger contexts
+	// (CustomCodeNode, FilterNode, BranchNode). Using a generic error code provides
+	// consistency and avoids coupling this utility to trigger-specific semantics.
 	if lang == avsproto.Lang_LANG_UNSPECIFIED {
 		return NewStructuredError(
-			avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
+			avsproto.ErrorCode_INVALID_NODE_CONFIG,
 			"language field (lang) is required and cannot be LANG_UNSPECIFIED",
 			map[string]interface{}{
 				"field": "lang",
