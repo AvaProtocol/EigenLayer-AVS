@@ -1270,6 +1270,11 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
+	} else if nodeValue := node.GetBalance(); nodeValue != nil {
+		executionLogForNode, err = v.runBalance(node.Id, nodeValue)
+		if executionLogForNode != nil {
+			v.addExecutionLog(executionLogForNode)
+		}
 	} else {
 		err = fmt.Errorf("unknown node type for node ID %s", node.Id)
 	}
@@ -2855,6 +2860,40 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 				Config: graphqlConfig,
 			},
 		}
+	case NodeTypeBalance:
+		node.Type = avsproto.NodeType_NODE_TYPE_BALANCE
+		// Create balance node with proper configuration
+		balanceConfig := &avsproto.BalanceNode_Config{}
+
+		if address, ok := config["address"].(string); ok {
+			balanceConfig.Address = address
+		} else {
+			return nil, fmt.Errorf("balance node requires 'address' field")
+		}
+
+		if chain, ok := config["chain"].(string); ok {
+			balanceConfig.Chain = chain
+		} else {
+			return nil, fmt.Errorf("balance node requires 'chain' field")
+		}
+
+		if includeSpam, ok := config["includeSpam"].(bool); ok {
+			balanceConfig.IncludeSpam = includeSpam
+		}
+
+		if includeZeroBalances, ok := config["includeZeroBalances"].(bool); ok {
+			balanceConfig.IncludeZeroBalances = includeZeroBalances
+		}
+
+		if minUsdValue, ok := config["minUsdValue"].(float64); ok {
+			balanceConfig.MinUsdValue = minUsdValue
+		}
+
+		node.TaskType = &avsproto.TaskNode_Balance{
+			Balance: &avsproto.BalanceNode{
+				Config: balanceConfig,
+			},
+		}
 	default:
 		return nil, fmt.Errorf("unsupported node type for CreateNodeFromType: %s", nodeType)
 	}
@@ -3345,6 +3384,21 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 			config := map[string]interface{}{
 				"expression":    filter.Config.Expression,
 				"inputNodeName": filter.Config.InputNodeName,
+			}
+
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_Balance:
+		balance := taskNode.GetBalance()
+		if balance != nil && balance.Config != nil {
+			config := map[string]interface{}{
+				"address":             balance.Config.Address,
+				"chain":               balance.Config.Chain,
+				"includeSpam":         balance.Config.IncludeSpam,
+				"includeZeroBalances": balance.Config.IncludeZeroBalances,
+				"minUsdValue":         balance.Config.MinUsdValue,
 			}
 
 			// Clean up complex protobuf types before returning
@@ -4066,6 +4120,8 @@ func (v *VM) executeNodeDirect(node *avsproto.TaskNode, stepID string) (*avsprot
 		executionLogForNode, err = v.runFilter(stepID, nodeValue)
 	} else if nodeValue := node.GetEthTransfer(); nodeValue != nil {
 		executionLogForNode, err = v.runEthTransfer(stepID, nodeValue)
+	} else if nodeValue := node.GetBalance(); nodeValue != nil {
+		executionLogForNode, err = v.runBalance(stepID, nodeValue)
 	} else if nodeValue := node.GetLoop(); nodeValue != nil {
 		// For loop nodes, we need special handling to use the execution queue
 		return v.executeLoopWithQueue(stepID, nodeValue)

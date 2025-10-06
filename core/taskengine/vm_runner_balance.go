@@ -1,0 +1,323 @@
+package taskengine
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/go-resty/resty/v2"
+	"google.golang.org/protobuf/types/known/structpb"
+)
+
+// MoralisTokenBalance represents a single token balance in the Moralis API response
+type MoralisTokenBalance struct {
+	Balance                    string  `json:"balance"`
+	BalanceFormatted           string  `json:"balance_formatted"`
+	Decimals                   int     `json:"decimals"`
+	Logo                       string  `json:"logo"`
+	Name                       string  `json:"name"`
+	NativeToken                bool    `json:"native_token"`
+	PercentageRelativeToSupply *string `json:"percentage_relative_to_total_supply"`
+	PortfolioPercentage        float64 `json:"portfolio_percentage"`
+	PossibleSpam               bool    `json:"possible_spam"`
+	SecurityScore              int     `json:"security_score"`
+	Symbol                     string  `json:"symbol"`
+	Thumbnail                  string  `json:"thumbnail"`
+	TokenAddress               string  `json:"token_address"`
+	TotalSupply                *string `json:"total_supply"`
+	TotalSupplyFormatted       *string `json:"total_supply_formatted"`
+	USDPrice                   float64 `json:"usd_price"`
+	USDPrice24hrPercentChange  float64 `json:"usd_price_24hr_percent_change"`
+	USDPrice24hrUSDChange      float64 `json:"usd_price_24hr_usd_change"`
+	USDValue                   float64 `json:"usd_value"`
+	USDValue24hrUSDChange      float64 `json:"usd_value_24hr_usd_change"`
+	VerifiedContract           bool    `json:"verified_contract"`
+}
+
+// MoralisBalanceResponse represents the full Moralis API response
+type MoralisBalanceResponse struct {
+	BlockNumber int                   `json:"block_number"`
+	Cursor      *string               `json:"cursor"`
+	Page        int                   `json:"page"`
+	PageSize    int                   `json:"page_size"`
+	Result      []MoralisTokenBalance `json:"result"`
+}
+
+// SimplifiedTokenBalance represents the simplified token balance output
+type SimplifiedTokenBalance struct {
+	Symbol           string   `json:"symbol"`
+	Name             string   `json:"name"`
+	Balance          string   `json:"balance"`
+	BalanceFormatted string   `json:"balanceFormatted"`
+	Decimals         int      `json:"decimals"`
+	TokenAddress     *string  `json:"tokenAddress,omitempty"` // Only for non-native tokens
+	USDPrice         *float64 `json:"usdPrice,omitempty"`
+	USDValue         *float64 `json:"usdValue,omitempty"`
+}
+
+// Chain name to Moralis chain identifier mapping
+var chainIDMap = map[string]string{
+	// Ethereum
+	"ethereum": "eth",
+	"eth":      "eth",
+	"1":        "eth",
+	"0x1":      "eth",
+
+	// Base
+	"base":   "base",
+	"8453":   "base",
+	"0x2105": "base",
+
+	// Polygon
+	"polygon": "polygon",
+	"matic":   "polygon",
+	"137":     "polygon",
+	"0x89":    "polygon",
+
+	// Arbitrum
+	"arbitrum": "arbitrum",
+	"arb":      "arbitrum",
+	"42161":    "arbitrum",
+	"0xa4b1":   "arbitrum",
+
+	// BSC
+	"bsc":     "bsc",
+	"binance": "bsc",
+	"56":      "bsc",
+	"0x38":    "bsc",
+
+	// Optimism
+	"optimism": "optimism",
+	"op":       "optimism",
+	"10":       "optimism",
+	"0xa":      "optimism",
+
+	// Avalanche
+	"avalanche": "avalanche",
+	"avax":      "avalanche",
+	"43114":     "avalanche",
+	"0xa86a":    "avalanche",
+}
+
+// normalizeChainID converts various chain identifier formats to Moralis chain name
+func normalizeChainID(chain string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(chain))
+	if moralisChain, ok := chainIDMap[normalized]; ok {
+		return moralisChain, nil
+	}
+	return "", fmt.Errorf("unsupported chain: %s", chain)
+}
+
+// runBalance is the VM method wrapper for balance node execution
+func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avsproto.Execution_Step, error) {
+	// Create execution step
+	executionLogStep := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_BALANCE, v)
+
+	var logBuilder strings.Builder
+	logBuilder.WriteString(fmt.Sprintf("Executing Balance Node ID: %s at %s\n", stepID, time.Now()))
+
+	config := nodeValue.Config
+	if config == nil {
+		err := fmt.Errorf("balance node config is nil")
+		executionLogStep.Error = err.Error()
+		executionLogStep.Success = false
+		return executionLogStep, err
+	}
+
+	// Resolve template variables in config
+	address := v.preprocessTextWithVariableMapping(config.Address)
+	chain := v.preprocessTextWithVariableMapping(config.Chain)
+
+	logBuilder.WriteString(fmt.Sprintf("Fetching balances for address: %s on chain: %s\n", address, chain))
+
+	// Validate inputs
+	if address == "" {
+		err := fmt.Errorf("address is required")
+		executionLogStep.Error = err.Error()
+		executionLogStep.Success = false
+		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, err
+	}
+	if chain == "" {
+		err := fmt.Errorf("chain is required")
+		executionLogStep.Error = err.Error()
+		executionLogStep.Success = false
+		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, err
+	}
+
+	// Normalize chain to Moralis format
+	moralisChain, err := normalizeChainID(chain)
+	if err != nil {
+		executionLogStep.Error = err.Error()
+		executionLogStep.Success = false
+		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, err
+	}
+
+	// Get Moralis API key from macro secrets (global package variable set by SetMacroSecrets)
+	moralisAPIKey := ""
+	if macroSecrets != nil {
+		moralisAPIKey = macroSecrets["moralis_api_key"]
+	}
+	if moralisAPIKey == "" {
+		err := fmt.Errorf("Moralis API key is not configured in macros.secrets")
+		executionLogStep.Error = err.Error()
+		executionLogStep.Success = false
+		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, err
+	}
+
+	// Fetch balances from Moralis
+	balances, err := v.fetchMoralisBalances(address, moralisChain, moralisAPIKey, config)
+	if err != nil {
+		err = fmt.Errorf("failed to fetch balances: %w", err)
+		executionLogStep.Error = err.Error()
+		executionLogStep.Success = false
+		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, err
+	}
+
+	logBuilder.WriteString(fmt.Sprintf("✅ Successfully fetched %d token balances\n", len(balances)))
+
+	// Convert to protobuf Value
+	balancesValue, err := structpb.NewValue(balances)
+	if err != nil {
+		err = fmt.Errorf("failed to convert balances to protobuf value: %w", err)
+		executionLogStep.Error = err.Error()
+		executionLogStep.Success = false
+		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, err
+	}
+
+	// Create protobuf output
+	outputData := &avsproto.BalanceNode_Output{
+		Data: balancesValue,
+	}
+
+	executionLogStep.OutputData = &avsproto.Execution_Step_Balance{
+		Balance: outputData,
+	}
+
+	// Set output variable for following nodes
+	processor := &CommonProcessor{vm: v}
+	setNodeOutputData(processor, stepID, balances)
+
+	// Finalize execution step
+	finalizeExecutionStep(executionLogStep, true, "", logBuilder.String())
+
+	return executionLogStep, nil
+}
+
+// fetchMoralisBalances calls the Moralis API to get wallet token balances
+func (vm *VM) fetchMoralisBalances(
+	address, chain, apiKey string,
+	config *avsproto.BalanceNode_Config,
+) ([]interface{}, error) {
+	// Build Moralis API URL
+	url := fmt.Sprintf("https://deep-index.moralis.io/api/v2.2/%s/erc20", address)
+
+	// Create HTTP client
+	client := resty.New()
+	request := client.R().
+		SetHeader("X-API-Key", apiKey).
+		SetQueryParam("chain", chain)
+
+	// Add exclude_spam parameter (exclude by default unless includeSpam is true)
+	if !config.IncludeSpam {
+		request.SetQueryParam("exclude_spam", "true")
+	}
+
+	// Execute request
+	resp, err := request.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call Moralis API: %w", err)
+	}
+
+	// Check response status
+	if resp.StatusCode() != 200 {
+		return nil, fmt.Errorf("Moralis API returned status %d: %s", resp.StatusCode(), resp.String())
+	}
+
+	// Parse Moralis response
+	var moralisResp MoralisBalanceResponse
+	if err := json.Unmarshal(resp.Body(), &moralisResp); err != nil {
+		return nil, fmt.Errorf("failed to parse Moralis response: %w", err)
+	}
+
+	// Convert to simplified format
+	simplified := make([]interface{}, 0, len(moralisResp.Result))
+	for _, token := range moralisResp.Result {
+		// Skip spam tokens if not included
+		if token.PossibleSpam && !config.IncludeSpam {
+			continue
+		}
+
+		// Skip zero balances if not included
+		if !config.IncludeZeroBalances && token.Balance == "0" {
+			continue
+		}
+
+		// Skip tokens below minimum USD value
+		if config.MinUsdValue > 0 && token.USDValue < config.MinUsdValue {
+			continue
+		}
+
+		// Create simplified token balance
+		simpleToken := SimplifiedTokenBalance{
+			Symbol:           token.Symbol,
+			Name:             token.Name,
+			Balance:          token.Balance,
+			BalanceFormatted: token.BalanceFormatted,
+			Decimals:         token.Decimals,
+		}
+
+		// Only include tokenAddress for non-native tokens
+		if !token.NativeToken {
+			simpleToken.TokenAddress = &token.TokenAddress
+		}
+
+		// Include USD price if available
+		if token.USDPrice > 0 {
+			simpleToken.USDPrice = &token.USDPrice
+		}
+
+		// Include USD value if available
+		if token.USDValue > 0 {
+			simpleToken.USDValue = &token.USDValue
+		}
+
+		// Convert to map for JSON compatibility
+		tokenMap := map[string]interface{}{
+			"symbol":           simpleToken.Symbol,
+			"name":             simpleToken.Name,
+			"balance":          simpleToken.Balance,
+			"balanceFormatted": simpleToken.BalanceFormatted,
+			"decimals":         simpleToken.Decimals,
+		}
+
+		if simpleToken.TokenAddress != nil {
+			tokenMap["tokenAddress"] = *simpleToken.TokenAddress
+		}
+
+		if simpleToken.USDPrice != nil {
+			tokenMap["usdPrice"] = *simpleToken.USDPrice
+		}
+
+		if simpleToken.USDValue != nil {
+			tokenMap["usdValue"] = *simpleToken.USDValue
+		}
+
+		simplified = append(simplified, tokenMap)
+	}
+
+	return simplified, nil
+}
