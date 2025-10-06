@@ -276,7 +276,7 @@ func TestExtractNodeConfiguration_LoopNodeRunners(t *testing.T) {
 							Runner: &avsproto.LoopNode_CustomCode{
 								CustomCode: &avsproto.CustomCodeNode{
 									Config: &avsproto.CustomCodeNode_Config{
-										Lang:   avsproto.Lang_JavaScript,
+										Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 										Source: "return data.value * 2;",
 									},
 								},

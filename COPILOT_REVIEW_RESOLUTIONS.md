@@ -59,16 +59,22 @@ This document summarizes the resolutions of unresolved Copilot comments from PR 
 
 ---
 
-## 4. ✅ Proto Comments Updated
+## 4. ✅ Proto Enum Fixed to Follow Best Practices
 
-**Issue**: Proto comments claimed defaults but implementation requires explicit setting.
+**Issue**: Lang enum had `JavaScript = 0` which violated protobuf best practice where 0 should be UNSPECIFIED.
 
 **Resolution**: 
-- Updated proto comments to accurately state that lang is REQUIRED (no default)
-- Clarified that proto zero value is JavaScript but application enforces explicit setting
+- Renamed enum values to follow protobuf naming convention (LANG_* prefix)
+- Changed enum ordering: `LANG_UNSPECIFIED = 0` (proper protobuf practice)
+- New values: LANG_JAVASCRIPT=1, LANG_JSON=2, LANG_GRAPHQL=3, LANG_HANDLEBARS=4
+- Updated all code references to use new enum names
+- Updated proto comments to clarify LANG_UNSPECIFIED must be rejected by application
+- Regenerated protobuf files
 
 **Files Modified**:
-- `protobuf/avs.proto` - Updated comments for ManualTrigger.Config.lang and BranchNode.Condition.lang
+- `protobuf/avs.proto` - Fixed enum ordering and naming
+- `protobuf/*.pb.go` - Regenerated protobuf files
+- All Go files using Lang enum - Updated to new names
 
 ---
 

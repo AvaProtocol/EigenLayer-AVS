@@ -200,28 +200,33 @@ func (ExecutionMode) EnumDescriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{2}
 }
 
+// Lang defines supported languages/formats for code editors and data validation
+// Following protobuf best practice: 0 = UNSPECIFIED (not set)
 type Lang int32
 
 const (
-	Lang_JavaScript Lang = 0
-	Lang_JSON       Lang = 1
-	Lang_GraphQL    Lang = 2
-	Lang_Handlebars Lang = 3
+	Lang_LANG_UNSPECIFIED Lang = 0 // Not set - application must reject this
+	Lang_LANG_JAVASCRIPT  Lang = 1 // JavaScript expressions
+	Lang_LANG_JSON        Lang = 2 // JSON format
+	Lang_LANG_GRAPHQL     Lang = 3 // GraphQL queries
+	Lang_LANG_HANDLEBARS  Lang = 4 // Handlebars templates
 )
 
 // Enum value maps for Lang.
 var (
 	Lang_name = map[int32]string{
-		0: "JavaScript",
-		1: "JSON",
-		2: "GraphQL",
-		3: "Handlebars",
+		0: "LANG_UNSPECIFIED",
+		1: "LANG_JAVASCRIPT",
+		2: "LANG_JSON",
+		3: "LANG_GRAPHQL",
+		4: "LANG_HANDLEBARS",
 	}
 	Lang_value = map[string]int32{
-		"JavaScript": 0,
-		"JSON":       1,
-		"GraphQL":    2,
-		"Handlebars": 3,
+		"LANG_UNSPECIFIED": 0,
+		"LANG_JAVASCRIPT":  1,
+		"LANG_JSON":        2,
+		"LANG_GRAPHQL":     3,
+		"LANG_HANDLEBARS":  4,
 	}
 )
 
@@ -7090,7 +7095,8 @@ type ManualTrigger_Config struct {
 	Headers map[string]string `protobuf:"bytes,2,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Path parameters for webhook testing - map format consistent with REST API nodes
 	PathParams map[string]string `protobuf:"bytes,3,rep,name=pathParams,proto3" json:"pathParams,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// Language/format of the data field - for validation (default: JSON for backward compatibility)
+	// Language/format of the data field - REQUIRED for validation
+	// Must be explicitly set (cannot be LANG_UNSPECIFIED). Application rejects zero value.
 	Lang          Lang `protobuf:"varint,4,opt,name=lang,proto3,enum=aggregator.Lang" json:"lang,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -7151,7 +7157,7 @@ func (x *ManualTrigger_Config) GetLang() Lang {
 	if x != nil {
 		return x.Lang
 	}
-	return Lang_JavaScript
+	return Lang_LANG_UNSPECIFIED
 }
 
 type ManualTrigger_Output struct {
@@ -8139,7 +8145,7 @@ func (x *CustomCodeNode_Config) GetLang() Lang {
 	if x != nil {
 		return x.Lang
 	}
-	return Lang_JavaScript
+	return Lang_LANG_UNSPECIFIED
 }
 
 func (x *CustomCodeNode_Config) GetSource() string {
@@ -8199,7 +8205,8 @@ type BranchNode_Condition struct {
 	Id         string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Type       string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
 	Expression string                 `protobuf:"bytes,3,opt,name=expression,proto3" json:"expression,omitempty"`
-	// Language of the expression field - for validation (default: Handlebars for backward compatibility)
+	// Language of the expression field - REQUIRED for validation
+	// Must be explicitly set (cannot be LANG_UNSPECIFIED). Application should reject zero value.
 	Lang          Lang `protobuf:"varint,4,opt,name=lang,proto3,enum=aggregator.Lang" json:"lang,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -8260,7 +8267,7 @@ func (x *BranchNode_Condition) GetLang() Lang {
 	if x != nil {
 		return x.Lang
 	}
-	return Lang_JavaScript
+	return Lang_LANG_UNSPECIFIED
 }
 
 type BranchNode_Config struct {
@@ -8415,7 +8422,7 @@ func (x *FilterNode_Config) GetLang() Lang {
 	if x != nil {
 		return x.Lang
 	}
-	return Lang_JavaScript
+	return Lang_LANG_UNSPECIFIED
 }
 
 type FilterNode_Output struct {
@@ -9698,14 +9705,13 @@ const file_avs_proto_rawDesc = "" +
 	"\x0eNODE_TYPE_LOOP\x10\t*K\n" +
 	"\rExecutionMode\x12\x1d\n" +
 	"\x19EXECUTION_MODE_SEQUENTIAL\x10\x00\x12\x1b\n" +
-	"\x17EXECUTION_MODE_PARALLEL\x10\x01*=\n" +
-	"\x04Lang\x12\x0e\n" +
-	"\n" +
-	"JavaScript\x10\x00\x12\b\n" +
-	"\x04JSON\x10\x01\x12\v\n" +
-	"\aGraphQL\x10\x02\x12\x0e\n" +
-	"\n" +
-	"Handlebars\x10\x03*\xf2\a\n" +
+	"\x17EXECUTION_MODE_PARALLEL\x10\x01*g\n" +
+	"\x04Lang\x12\x14\n" +
+	"\x10LANG_UNSPECIFIED\x10\x00\x12\x13\n" +
+	"\x0fLANG_JAVASCRIPT\x10\x01\x12\r\n" +
+	"\tLANG_JSON\x10\x02\x12\x10\n" +
+	"\fLANG_GRAPHQL\x10\x03\x12\x13\n" +
+	"\x0fLANG_HANDLEBARS\x10\x04*\xf2\a\n" +
 	"\tErrorCode\x12\x1a\n" +
 	"\x16ERROR_CODE_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\fUNAUTHORIZED\x10\xe8\a\x12\x0e\n" +

@@ -86,7 +86,7 @@ func ParseLanguageFromConfig(config map[string]interface{}) (avsproto.Lang, erro
 				"field":        "lang",
 				"issue":        "invalid string value",
 				"received":     v,
-				"valid_values": []string{"JavaScript", "JSON", "GraphQL", "Handlebars"},
+				"valid_values": []string{"LANG_JAVASCRIPT", "LANG_JSON", "LANG_GRAPHQL", "LANG_HANDLEBARS"},
 			},
 		)
 	default:
@@ -121,23 +121,23 @@ func ValidateManualTriggerPayload(data interface{}, lang avsproto.Lang) error {
 //
 // Usage:
 //
-//	lang := avsproto.Lang_JSON // or from config
+//	lang := avsproto.Lang_LANG_JSON // or from config
 //	if err := ValidateInputByLanguage(data, lang); err != nil {
 //	    return nil, err
 //	}
 func ValidateInputByLanguage(data interface{}, lang avsproto.Lang) error {
 	switch lang {
-	case avsproto.Lang_JSON:
+	case avsproto.Lang_LANG_JSON:
 		return ValidateJSONFormat(data)
-	case avsproto.Lang_JavaScript:
+	case avsproto.Lang_LANG_JAVASCRIPT:
 		// TODO: Implement JavaScript syntax validation
 		// For now, no validation (JavaScript is validated at runtime)
 		return nil
-	case avsproto.Lang_GraphQL:
+	case avsproto.Lang_LANG_GRAPHQL:
 		// TODO: Implement GraphQL syntax validation
 		// For now, no validation (GraphQL is validated at runtime)
 		return nil
-	case avsproto.Lang_Handlebars:
+	case avsproto.Lang_LANG_HANDLEBARS:
 		// TODO: Implement Handlebars template validation
 		// For now, no validation (Handlebars is validated at runtime)
 		return nil

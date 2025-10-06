@@ -153,7 +153,7 @@ func TestTriggerOutputDataSerializationFix(t *testing.T) {
 							TaskType: &avsproto.TaskNode_CustomCode{
 								CustomCode: &avsproto.CustomCodeNode{
 									Config: &avsproto.CustomCodeNode_Config{
-										Lang:   avsproto.Lang_JavaScript,
+										Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 										Source: "({ message: 'trigger data test' })",
 									},
 								},

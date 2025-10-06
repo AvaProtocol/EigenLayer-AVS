@@ -82,7 +82,7 @@ func TestManualTrigger_JSONValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			triggerConfig := map[string]interface{}{
 				"triggerType": "manual",
-				"lang":        avsproto.Lang_JSON, // REQUIRED: explicit language field
+				"lang":        avsproto.Lang_LANG_JSON, // REQUIRED: explicit language field
 				"data":        tc.data,
 			}
 
@@ -127,7 +127,7 @@ func TestManualTrigger_MissingDataField(t *testing.T) {
 	// Test case where 'data' field is completely missing from triggerConfig
 	triggerConfig := map[string]interface{}{
 		"triggerType": "manual",
-		"lang":        avsproto.Lang_JSON, // REQUIRED: explicit language field
+		"lang":        avsproto.Lang_LANG_JSON, // REQUIRED: explicit language field
 		// No 'data' field
 	}
 
@@ -157,7 +157,7 @@ func TestManualTrigger_UserScenario(t *testing.T) {
 	triggerConfig := map[string]interface{}{
 		"triggerType": "manual",
 		"data":        malformedJSON,
-		"lang":        avsproto.Lang_JSON, // REQUIRED: explicit language field
+		"lang":        avsproto.Lang_LANG_JSON, // REQUIRED: explicit language field
 		"headers":     map[string]interface{}{},
 		"pathParams":  map[string]interface{}{},
 	}

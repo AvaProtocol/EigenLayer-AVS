@@ -21,7 +21,7 @@ func TestManualTrigger_SizeLimit(t *testing.T) {
 		triggerConfig := map[string]interface{}{
 			"triggerType": "manual",
 			"data":        validData,
-			"lang":        avsproto.Lang_JSON, // REQUIRED: explicit language field
+			"lang":        avsproto.Lang_LANG_JSON, // REQUIRED: explicit language field
 		}
 
 		result, err := engine.RunNodeImmediately("manualTrigger", triggerConfig, map[string]interface{}{}, nil)
@@ -38,7 +38,7 @@ func TestManualTrigger_SizeLimit(t *testing.T) {
 		triggerConfig := map[string]interface{}{
 			"triggerType": "manual",
 			"data":        largeData,
-			"lang":        avsproto.Lang_JSON, // REQUIRED: explicit language field
+			"lang":        avsproto.Lang_LANG_JSON, // REQUIRED: explicit language field
 		}
 
 		result, err := engine.RunNodeImmediately("manualTrigger", triggerConfig, map[string]interface{}{}, nil)
@@ -63,7 +63,7 @@ func TestManualTrigger_SizeLimit(t *testing.T) {
 		triggerConfig := map[string]interface{}{
 			"triggerType": "manual",
 			"data":        dataAtLimit,
-			"lang":        avsproto.Lang_JSON, // REQUIRED: explicit language field
+			"lang":        avsproto.Lang_LANG_JSON, // REQUIRED: explicit language field
 		}
 
 		_, err := engine.RunNodeImmediately("manualTrigger", triggerConfig, map[string]interface{}{}, nil)

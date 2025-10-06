@@ -80,7 +80,7 @@ func TestManualTriggerExecutionWithWebhookFields(t *testing.T) {
 			"data": map[string]interface{}{
 				"payload": "test payload",
 			},
-			"lang": avsproto.Lang_JSON, // REQUIRED: explicit language field
+			"lang": avsproto.Lang_LANG_JSON, // REQUIRED: explicit language field
 			"headers": []interface{}{
 				map[string]interface{}{"Authorization": "Bearer token123"},
 				map[string]interface{}{"Content-Type": "application/json"},
@@ -125,7 +125,7 @@ func TestManualTriggerExecutionWithWebhookFields(t *testing.T) {
 			"data": map[string]interface{}{
 				"payload": "test payload",
 			},
-			"lang": avsproto.Lang_JSON, // REQUIRED: explicit language field
+			"lang": avsproto.Lang_LANG_JSON, // REQUIRED: explicit language field
 			"headers": map[string]interface{}{
 				"Authorization": "Bearer token123",
 			},

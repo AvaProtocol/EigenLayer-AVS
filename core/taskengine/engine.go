@@ -2013,10 +2013,10 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 					return nil, status.Errorf(codes.InvalidArgument, "manual trigger config is required")
 				}
 				lang := task.Trigger.GetManual().Config.Lang
-				// Lang must be explicitly set - validate it's not zero value
-				if lang == avsproto.Lang_JavaScript {
-					// Zero value means unset - this is an error (strict requirement)
-					return nil, status.Errorf(codes.InvalidArgument, "language field (lang) is required in manual trigger config")
+				// Lang must be explicitly set - validate it's not UNSPECIFIED (zero value)
+				if lang == avsproto.Lang_LANG_UNSPECIFIED {
+					// Zero value (UNSPECIFIED) means unset - this is an error (strict requirement)
+					return nil, status.Errorf(codes.InvalidArgument, "language field (lang) is required and cannot be LANG_UNSPECIFIED")
 				}
 
 				// Validate based on language using universal validator
