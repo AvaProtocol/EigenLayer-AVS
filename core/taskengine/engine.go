@@ -2165,8 +2165,8 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 				return nil, err
 			}
 
-			// Validate based on language using shared helper
-			if err := ValidateManualTriggerPayload(data, lang); err != nil {
+			// Validate based on language using universal validator
+			if err := ValidateInputByLanguage(data, lang); err != nil {
 				return nil, err
 			}
 		}

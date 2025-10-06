@@ -2698,7 +2698,7 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 	}
 
 	// Validate based on language using universal validator
-	if err := ValidateManualTriggerPayload(data, lang); err != nil {
+	if err := ValidateInputByLanguage(data, lang); err != nil {
 		return nil, err
 	}
 

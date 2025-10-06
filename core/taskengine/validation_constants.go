@@ -103,13 +103,6 @@ func ParseLanguageFromConfig(config map[string]interface{}) (avsproto.Lang, erro
 	}
 }
 
-// ValidateManualTriggerPayload validates manual trigger data with language-based validation.
-// This is a shared helper used by TriggerTask, SimulateTask, and runManualTriggerImmediately
-// to ensure consistent validation across all manual trigger execution paths.
-func ValidateManualTriggerPayload(data interface{}, lang avsproto.Lang) error {
-	return ValidateInputByLanguage(data, lang)
-}
-
 // ValidateManualTriggerFromProtobuf extracts and validates manual trigger data from protobuf output.
 // Used by TriggerTask path when working with protobuf ManualTrigger_Output.
 func ValidateManualTriggerFromProtobuf(manualOutput *avsproto.ManualTrigger_Output, task *model.Task) error {

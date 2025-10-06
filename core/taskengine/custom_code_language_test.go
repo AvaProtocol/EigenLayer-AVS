@@ -9,7 +9,7 @@ import (
 func TestCustomCodeLanguageConversion(t *testing.T) {
 	// Test what the backend sees when language enum is set
 	config := &avsproto.CustomCodeNode_Config{
-		Lang:   avsproto.Lang_LANG_JAVASCRIPT, // This is the enum value 0
+		Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 		Source: "console.log('test');",
 	}
 
