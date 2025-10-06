@@ -33,6 +33,7 @@ enum NodeType {
   NODE_TYPE_BRANCH = 7;          // Branch node
   NODE_TYPE_FILTER = 8;          // Filter node
   NODE_TYPE_LOOP = 9;            // Loop node
+  NODE_TYPE_BALANCE = 10;        // Balance node for retrieving wallet token balances
 }
 
 enum ExecutionMode {
@@ -488,6 +489,31 @@ message CustomCodeNode {
   Config config = 1;
 }
 
+message BalanceNode {
+  message Config {
+    // Wallet address to check balances for
+    string address = 1;
+    // Chain name or chain ID (e.g., "ethereum", "base", 1, 8453)
+    string chain = 2;
+    // Whether to include tokens marked as spam (default: false)
+    bool include_spam = 3;
+    // Whether to include tokens with zero balance (default: false)
+    bool include_zero_balances = 4;
+    // Filter tokens below this USD value (default: 0)
+    double min_usd_value = 5;
+  }
+
+  message Output {
+    // Returns an array of token balance objects
+    // Native tokens (ETH, MATIC, etc.) will not have tokenAddress field
+    // Non-native tokens (ERC20) will include tokenAddress field
+    google.protobuf.Value data = 1;
+  }
+
+  // Include Config as field 
+  Config config = 1;
+}
+
 message BranchNode {
   message Condition {
     string id = 1;
@@ -601,6 +627,8 @@ message TaskNode {
     FilterNode        filter = 16;
     LoopNode          loop = 17;
     CustomCodeNode    custom_code = 18;
+    // Get token balances for a wallet address
+    BalanceNode       balance = 19;
   }
 }
 
@@ -661,6 +689,7 @@ message Execution {
       BranchNode.Output branch = 9;
       FilterNode.Output filter = 10;
       LoopNode.Output loop = 11;
+      BalanceNode.Output balance = 30;
     }
     
     // timestamp when step started (in milliseconds)
@@ -1191,6 +1220,7 @@ message RunNodeWithInputsResp {
     BranchNode.Output branch = 16;
     FilterNode.Output filter = 17;
     LoopNode.Output loop = 18;
+    BalanceNode.Output balance = 19;
   }
 }
 
