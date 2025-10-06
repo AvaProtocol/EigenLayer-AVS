@@ -1998,26 +1998,9 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 
 	// Validate manual trigger data if present
 	if triggerData.Type == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
-		if manualOutput, ok := triggerData.Output.(*avsproto.ManualTrigger_Output); ok && manualOutput != nil {
-			// Extract data from protobuf Value
-			if manualOutput.Data != nil {
-				var data interface{}
-				if stringVal := manualOutput.Data.GetStringValue(); stringVal != "" {
-					data = stringVal
-				} else {
-					data = manualOutput.Data.AsInterface()
-				}
-
-				// Get language from trigger config - REQUIRED (strict, no default)
-				if task.Trigger.GetManual() == nil || task.Trigger.GetManual().Config == nil {
-					return nil, status.Errorf(codes.InvalidArgument, "manual trigger config is required")
-				}
-				lang := task.Trigger.GetManual().Config.Lang
-
-				// Validate based on language using universal validator (which checks for LANG_UNSPECIFIED)
-				if err := ValidateInputByLanguage(data, lang); err != nil {
-					return nil, err
-				}
+		if manualOutput, ok := triggerData.Output.(*avsproto.ManualTrigger_Output); ok {
+			if err := ValidateManualTriggerFromProtobuf(manualOutput, task); err != nil {
+				return nil, err
 			}
 		}
 	}

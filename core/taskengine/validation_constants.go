@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
 
@@ -106,6 +107,38 @@ func ParseLanguageFromConfig(config map[string]interface{}) (avsproto.Lang, erro
 // This is a shared helper used by TriggerTask, SimulateTask, and runManualTriggerImmediately
 // to ensure consistent validation across all manual trigger execution paths.
 func ValidateManualTriggerPayload(data interface{}, lang avsproto.Lang) error {
+	return ValidateInputByLanguage(data, lang)
+}
+
+// ValidateManualTriggerFromProtobuf extracts and validates manual trigger data from protobuf output.
+// Used by TriggerTask path when working with protobuf ManualTrigger_Output.
+func ValidateManualTriggerFromProtobuf(manualOutput *avsproto.ManualTrigger_Output, task *model.Task) error {
+	if manualOutput == nil || manualOutput.Data == nil {
+		return nil // No data to validate
+	}
+
+	// Extract data from protobuf Value
+	var data interface{}
+	if stringVal := manualOutput.Data.GetStringValue(); stringVal != "" {
+		data = stringVal
+	} else {
+		data = manualOutput.Data.AsInterface()
+	}
+
+	// Get language from trigger config
+	if task.Trigger.GetManual() == nil || task.Trigger.GetManual().Config == nil {
+		return NewStructuredError(
+			avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
+			"manual trigger config is required",
+			map[string]interface{}{
+				"field": "config",
+				"issue": "missing trigger config",
+			},
+		)
+	}
+	lang := task.Trigger.GetManual().Config.Lang
+
+	// Validate based on language using universal validator (which checks for LANG_UNSPECIFIED)
 	return ValidateInputByLanguage(data, lang)
 }
 
