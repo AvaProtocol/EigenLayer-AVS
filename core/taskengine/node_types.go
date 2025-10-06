@@ -26,6 +26,7 @@ const (
 	NodeTypeBranch        = "branch"
 	NodeTypeFilter        = "filter"
 	NodeTypeLoop          = "loop"
+	NodeTypeBalance       = "balance"
 )
 
 // AllNodeTypes returns a slice of all supported node types
@@ -45,6 +46,7 @@ func AllNodeTypes() []string {
 		NodeTypeBranch,
 		NodeTypeFilter,
 		NodeTypeLoop,
+		NodeTypeBalance,
 	}
 }
 
@@ -102,6 +104,8 @@ func StringToNodeType(nodeType string) avsproto.NodeType {
 		return avsproto.NodeType_NODE_TYPE_FILTER
 	case NodeTypeLoop:
 		return avsproto.NodeType_NODE_TYPE_LOOP
+	case NodeTypeBalance:
+		return avsproto.NodeType_NODE_TYPE_BALANCE
 	default:
 		return avsproto.NodeType_NODE_TYPE_UNSPECIFIED
 	}
@@ -128,6 +132,8 @@ func NodeTypeToString(nodeType avsproto.NodeType) string {
 		return NodeTypeFilter
 	case avsproto.NodeType_NODE_TYPE_LOOP:
 		return NodeTypeLoop
+	case avsproto.NodeType_NODE_TYPE_BALANCE:
+		return NodeTypeBalance
 	default:
 		return ""
 	}
