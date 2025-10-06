@@ -83,11 +83,7 @@ func TestManualTrigger_JSONValidation(t *testing.T) {
 			triggerConfig := map[string]interface{}{
 				"triggerType": "manual",
 				"lang":        avsproto.Lang_JSON, // REQUIRED: explicit language field
-			}
-
-			// Only add data if it's not the "missing data" test case
-			if tc.name != "Missing data" {
-				triggerConfig["data"] = tc.data
+				"data":        tc.data,
 			}
 
 			result, err := engine.RunNodeImmediately("manualTrigger", triggerConfig, map[string]interface{}{}, nil)

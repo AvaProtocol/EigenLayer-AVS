@@ -382,7 +382,7 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 	var contractABI []interface{}
 	if contractAbiInterface, exists := queryMap["contractAbi"]; exists {
 		if abiArray, ok := contractAbiInterface.([]interface{}); ok {
-			// Validate total ABI size
+			// Validate total ABI size with short-circuit optimization
 			totalABISize := 0
 			for i, abiItem := range abiArray {
 				var itemSize int
@@ -409,21 +409,21 @@ func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArra
 					}
 				}
 				totalABISize += itemSize
-			}
 
-			// Check total ABI size
-			if totalABISize > MaxContractABISize {
-				return nil, NewStructuredError(
-					avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
-					fmt.Sprintf("%s: %d bytes (max: %d bytes)", ValidationErrorMessages.ContractABITooLarge, totalABISize, MaxContractABISize),
-					map[string]interface{}{
-						"field":   "contractAbi",
-						"issue":   "total ABI size limit exceeded",
-						"size":    totalABISize,
-						"maxSize": MaxContractABISize,
-						"items":   len(abiArray),
-					},
-				)
+				// Short-circuit: stop processing once total exceeds limit
+				if totalABISize > MaxContractABISize {
+					return nil, NewStructuredError(
+						avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
+						fmt.Sprintf("%s: %d bytes (max: %d bytes)", ValidationErrorMessages.ContractABITooLarge, totalABISize, MaxContractABISize),
+						map[string]interface{}{
+							"field":   "contractAbi",
+							"issue":   "total ABI size limit exceeded",
+							"size":    totalABISize,
+							"maxSize": MaxContractABISize,
+							"items":   len(abiArray),
+						},
+					)
+				}
 			}
 
 			contractABI = abiArray
@@ -2691,38 +2691,14 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 		)
 	}
 
-	// Get language from config - REQUIRED
-	langInterface, ok := triggerConfig["lang"]
-	if !ok {
-		return nil, NewStructuredError(
-			avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
-			"language field (lang) is required in manual trigger config",
-			map[string]interface{}{
-				"field": "lang",
-				"issue": "missing required field",
-			},
-		)
+	// Parse language from config (strict requirement - no default)
+	lang, err := ParseLanguageFromConfig(triggerConfig)
+	if err != nil {
+		return nil, err
 	}
-
-	var lang avsproto.Lang
-	if langInt, ok := langInterface.(int32); ok {
-		lang = avsproto.Lang(langInt)
-	} else if langEnum, ok := langInterface.(avsproto.Lang); ok {
-		lang = langEnum
-	} else {
-		return nil, NewStructuredError(
-			avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
-			"invalid language field type in manual trigger config",
-			map[string]interface{}{
-				"field": "lang",
-				"issue": "invalid type",
-			},
-		)
-	}
-	// Lang must be explicitly set (no validation of value needed - all enum values are valid)
 
 	// Validate based on language using universal validator
-	if err := ValidateInputByLanguage(data, lang); err != nil {
+	if err := ValidateManualTriggerPayload(data, lang); err != nil {
 		return nil, err
 	}
 

@@ -22,19 +22,19 @@ January 2025
 #### Implementation Points
 
 **Manual Trigger Data** (`core/taskengine/run_node_immediately.go`)
-- Line: 188-198
 - Validates size before JSON parsing
-- Returns structured error with code `INVALID_INPUT_SIZE`
+- Returns structured error with code `INVALID_TRIGGER_CONFIG`
+- Error message includes actual size and limit details
 
 **REST API Request Body** (`core/taskengine/vm_runner_rest.go`)
-- Line: 228-238
 - Validates size before sending HTTP request
-- Returns structured error with code `INVALID_INPUT_SIZE`
+- Returns structured error with code `INVALID_NODE_CONFIG`
+- Error message includes actual size and limit details
 
 **Custom Code Source** (`core/taskengine/vm_runner_customcode.go`)
-- Line: 53-61
 - Validates size before preprocessing
-- Returns structured error with code `INVALID_INPUT_SIZE`
+- Returns structured error with code `INVALID_NODE_CONFIG`
+- Error message includes actual size and limit details
 
 **Contract ABI** (`core/taskengine/run_node_immediately.go`)
 - Line: 213-232
@@ -44,33 +44,39 @@ January 2025
 ### 2. JSON Format Validations
 
 #### Manual Trigger
-- Location: `core/taskengine/run_node_immediately.go`
-- Lines: 200-211
+- Location: `core/taskengine/validation_constants.go` (ValidateJSONFormat function)
 - Validates JSON format when data is string type
-- Returns structured error with code `INVALID_JSON_FORMAT`
+- Returns structured error with code `INVALID_TRIGGER_CONFIG`
+- Error includes JSON parsing error details
 - Preserves original behavior for non-string JSON inputs
 
 #### REST API Request Body
 - Location: `core/taskengine/vm_runner_rest.go`
-- Lines: 240-256
 - Validates JSON format when Content-Type is application/json
-- Returns structured error with code `INVALID_JSON_FORMAT`
+- Returns structured error with code `INVALID_NODE_CONFIG`
+- Error includes JSON parsing error details
 - Only validates if explicitly specified as JSON content
 
 ## Error Response Format
 
-All validation errors follow consistent structure:
+All validation errors follow consistent structure using protobuf ErrorCode enum:
 ```json
 {
-  "code": "INVALID_INPUT_SIZE" | "INVALID_JSON_FORMAT",
+  "code": "INVALID_TRIGGER_CONFIG" | "INVALID_NODE_CONFIG",
   "message": "Descriptive error message",
   "details": {
+    "field": "field_name",
+    "issue": "size limit exceeded" | "invalid JSON format",
     "size": <actual_size>,
-    "limit": <max_limit>,
-    "context": "Additional context"
+    "maxSize": <max_limit>,
+    "error": "<parsing error details>"
   }
 }
 ```
+
+**Error Codes Used:**
+- `INVALID_TRIGGER_CONFIG` (3001): For trigger-related validation failures (ManualTrigger, EventTrigger)
+- `INVALID_NODE_CONFIG` (3002): For node-related validation failures (REST API, CustomCode)
 
 ## Test Coverage
 

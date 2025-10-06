@@ -2008,12 +2008,16 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 					data = manualOutput.Data.AsInterface()
 				}
 
-				// Get language from trigger config - REQUIRED
+				// Get language from trigger config - REQUIRED (strict, no default)
 				if task.Trigger.GetManual() == nil || task.Trigger.GetManual().Config == nil {
 					return nil, status.Errorf(codes.InvalidArgument, "manual trigger config is required")
 				}
 				lang := task.Trigger.GetManual().Config.Lang
-				// Lang is required and must be explicitly set (no default)
+				// Lang must be explicitly set - validate it's not zero value
+				if lang == avsproto.Lang_JavaScript {
+					// Zero value means unset - this is an error (strict requirement)
+					return nil, status.Errorf(codes.InvalidArgument, "language field (lang) is required in manual trigger config")
+				}
 
 				// Validate based on language using universal validator
 				if err := ValidateInputByLanguage(data, lang); err != nil {
@@ -2177,24 +2181,14 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	// Validate manual trigger data if present (before execution)
 	if triggerType == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
 		if data, exists := triggerConfig["data"]; exists && data != nil {
-			// Get language from config - REQUIRED
-			langInterface, ok := triggerConfig["lang"]
-			if !ok {
-				return nil, status.Errorf(codes.InvalidArgument, "language field (lang) is required in manual trigger config")
+			// Parse language from config (strict requirement - no default)
+			lang, err := ParseLanguageFromConfig(triggerConfig)
+			if err != nil {
+				return nil, err
 			}
 
-			var lang avsproto.Lang
-			if langInt, ok := langInterface.(int32); ok {
-				lang = avsproto.Lang(langInt)
-			} else if langEnum, ok := langInterface.(avsproto.Lang); ok {
-				lang = langEnum
-			} else {
-				return nil, status.Errorf(codes.InvalidArgument, "invalid language field type in manual trigger config")
-			}
-			// Lang must be explicitly set (no validation of value needed - all enum values are valid)
-
-			// Validate based on language using universal validator
-			if err := ValidateInputByLanguage(data, lang); err != nil {
+			// Validate based on language using shared helper
+			if err := ValidateManualTriggerPayload(data, lang); err != nil {
 				return nil, err
 			}
 		}

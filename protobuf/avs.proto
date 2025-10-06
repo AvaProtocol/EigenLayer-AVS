@@ -213,7 +213,8 @@ message ManualTrigger {
     map<string, string> headers = 2;
     // Path parameters for webhook testing - map format consistent with REST API nodes
     map<string, string> pathParams = 3;
-    // Language/format of the data field - for validation (default: JSON for backward compatibility)
+    // Language/format of the data field - REQUIRED for validation (no default)
+    // Must be explicitly set. Proto zero value is JavaScript but application enforces explicit setting.
     Lang lang = 4;
   }
   
@@ -489,7 +490,8 @@ message BranchNode {
     string id = 1;
     string type = 2;
     string expression = 3;
-    // Language of the expression field - for validation (default: Handlebars for backward compatibility)
+    // Language of the expression field - REQUIRED for validation (no default)
+    // Must be explicitly set. Proto zero value is JavaScript but application should enforce explicit setting.
     Lang lang = 4;
   }
 

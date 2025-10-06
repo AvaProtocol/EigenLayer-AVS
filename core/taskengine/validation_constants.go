@@ -50,6 +50,65 @@ var ValidationErrorMessages = struct {
 	RestAPIBodyInvalidJSON:      "REST API request body contains invalid JSON",
 }
 
+// ParseLanguageFromConfig extracts and validates the language field from a config map.
+// It supports multiple input types (int32, float64, string, Lang enum) for flexibility.
+// Returns error if lang is missing or invalid - NO DEFAULT (strict requirement).
+func ParseLanguageFromConfig(config map[string]interface{}) (avsproto.Lang, error) {
+	langInterface, ok := config["lang"]
+	if !ok {
+		return 0, NewStructuredError(
+			avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
+			"language field (lang) is required",
+			map[string]interface{}{
+				"field": "lang",
+				"issue": "missing required field",
+			},
+		)
+	}
+
+	switch v := langInterface.(type) {
+	case int32:
+		return avsproto.Lang(v), nil
+	case float64:
+		// JSON unmarshaling often produces float64 for numbers
+		return avsproto.Lang(int32(v)), nil
+	case avsproto.Lang:
+		return v, nil
+	case string:
+		// Support string enum names (e.g., "JSON", "JavaScript")
+		if enumVal, exists := avsproto.Lang_value[v]; exists {
+			return avsproto.Lang(enumVal), nil
+		}
+		return 0, NewStructuredError(
+			avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
+			fmt.Sprintf("invalid language string value: %q", v),
+			map[string]interface{}{
+				"field":        "lang",
+				"issue":        "invalid string value",
+				"received":     v,
+				"valid_values": []string{"JavaScript", "JSON", "GraphQL", "Handlebars"},
+			},
+		)
+	default:
+		return 0, NewStructuredError(
+			avsproto.ErrorCode_INVALID_TRIGGER_CONFIG,
+			fmt.Sprintf("invalid language field type: %T", v),
+			map[string]interface{}{
+				"field":         "lang",
+				"issue":         "invalid type",
+				"received_type": fmt.Sprintf("%T", v),
+			},
+		)
+	}
+}
+
+// ValidateManualTriggerPayload validates manual trigger data with language-based validation.
+// This is a shared helper used by TriggerTask, SimulateTask, and runManualTriggerImmediately
+// to ensure consistent validation across all manual trigger execution paths.
+func ValidateManualTriggerPayload(data interface{}, lang avsproto.Lang) error {
+	return ValidateInputByLanguage(data, lang)
+}
+
 // ValidateInputByLanguage is the UNIVERSAL validation function for all nodes.
 // Instead of each node (ManualTrigger, FilterNode, BranchNode, etc.) implementing
 // their own validation logic, they ALL call this single function with their lang field.
