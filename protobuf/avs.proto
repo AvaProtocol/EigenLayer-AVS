@@ -499,8 +499,9 @@ message BalanceNode {
     bool include_spam = 3;
     // Whether to include tokens with zero balance (default: false)
     bool include_zero_balances = 4;
-    // Filter tokens below this USD value (default: 0)
-    double min_usd_value = 5;
+    // Filter tokens below this USD value, in cents (default: 0)
+    // Example: 100 = $1.00, 1050 = $10.50
+    int64 min_usd_value_cents = 5;
   }
 
   message Output {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/go-resty/resty/v2"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -162,6 +163,23 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 		executionLogStep.Log = logBuilder.String()
 		return executionLogStep, err
 	}
+	if !common.IsHexAddress(address) {
+		err := fmt.Errorf("invalid ethereum address format: %s", address)
+		executionLogStep.Error = err.Error()
+		executionLogStep.Success = false
+		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, err
+	}
+	// Validate minUsdValueCents: must be 0 (no filter) or >= 1 (1 cent minimum)
+	if config.MinUsdValueCents < 0 {
+		err := fmt.Errorf("minUsdValue must be non-negative, got %d cents", config.MinUsdValueCents)
+		executionLogStep.Error = err.Error()
+		executionLogStep.Success = false
+		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
+		executionLogStep.Log = logBuilder.String()
+		return executionLogStep, err
+	}
 	if chain == "" {
 		err := fmt.Errorf("chain is required")
 		executionLogStep.Error = err.Error()
@@ -292,9 +310,12 @@ func (vm *VM) fetchMoralisBalances(
 			continue
 		}
 
-		// Skip tokens below minimum USD value
-		if config.MinUsdValue > 0 && token.USDValue < config.MinUsdValue {
-			continue
+		// Skip tokens below minimum USD value (convert cents to dollars)
+		if config.MinUsdValueCents > 0 {
+			minUsdValueDollars := float64(config.MinUsdValueCents) / 100.0
+			if token.USDValue < minUsdValueDollars {
+				continue
+			}
 		}
 
 		// Format balance if Moralis didn't provide it

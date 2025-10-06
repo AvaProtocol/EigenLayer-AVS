@@ -254,36 +254,42 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 		}
 	case *avsproto.TaskTrigger_Manual:
 		manualTrigger := trigger.GetManual()
-		if manualTrigger != nil && manualTrigger.Config != nil {
-			// For ManualTrigger, access protobuf fields directly to preserve structured data
-			// This avoids the JSON roundtrip in gow.ProtoToMap that converts arrays/objects to JSON strings
-			if manualTrigger.Config.Data != nil {
-				// Use .AsInterface() to preserve original data types (objects, arrays, primitives)
-				triggerConfig["data"] = manualTrigger.Config.Data.AsInterface()
-			}
+		if manualTrigger == nil {
+			return triggerConfig
+		}
 
-			// Handle lang field - required for validation
-			if manualTrigger.Config.Lang != avsproto.Lang_LANG_UNSPECIFIED {
-				triggerConfig["lang"] = manualTrigger.Config.Lang
-			}
+		if manualTrigger.Config == nil {
+			return triggerConfig
+		}
 
-			// Handle headers
-			if len(manualTrigger.Config.Headers) > 0 {
-				headers := make(map[string]interface{})
-				for k, v := range manualTrigger.Config.Headers {
-					headers[k] = v
-				}
-				triggerConfig["headers"] = headers
-			}
+		// For ManualTrigger, access protobuf fields directly to preserve structured data
+		// This avoids the JSON roundtrip in gow.ProtoToMap that converts arrays/objects to JSON strings
+		if manualTrigger.Config.Data != nil {
+			// Use .AsInterface() to preserve original data types (objects, arrays, primitives)
+			triggerConfig["data"] = manualTrigger.Config.Data.AsInterface()
+		}
 
-			// Handle pathParams
-			if len(manualTrigger.Config.PathParams) > 0 {
-				pathParams := make(map[string]interface{})
-				for k, v := range manualTrigger.Config.PathParams {
-					pathParams[k] = v
-				}
-				triggerConfig["pathParams"] = pathParams
+		// Handle lang field - required for validation
+		if manualTrigger.Config.Lang != avsproto.Lang_LANG_UNSPECIFIED {
+			triggerConfig["lang"] = manualTrigger.Config.Lang
+		}
+
+		// Handle headers
+		if len(manualTrigger.Config.Headers) > 0 {
+			headers := make(map[string]interface{})
+			for k, v := range manualTrigger.Config.Headers {
+				headers[k] = v
 			}
+			triggerConfig["headers"] = headers
+		}
+
+		// Handle pathParams
+		if len(manualTrigger.Config.PathParams) > 0 {
+			pathParams := make(map[string]interface{})
+			for k, v := range manualTrigger.Config.PathParams {
+				pathParams[k] = v
+			}
+			triggerConfig["pathParams"] = pathParams
 		}
 	default:
 		// Handle unforeseen trigger types by returning empty configuration

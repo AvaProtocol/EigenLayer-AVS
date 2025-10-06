@@ -8291,10 +8291,11 @@ type BalanceNode_Config struct {
 	IncludeSpam bool `protobuf:"varint,3,opt,name=include_spam,json=includeSpam,proto3" json:"include_spam,omitempty"`
 	// Whether to include tokens with zero balance (default: false)
 	IncludeZeroBalances bool `protobuf:"varint,4,opt,name=include_zero_balances,json=includeZeroBalances,proto3" json:"include_zero_balances,omitempty"`
-	// Filter tokens below this USD value (default: 0)
-	MinUsdValue   float64 `protobuf:"fixed64,5,opt,name=min_usd_value,json=minUsdValue,proto3" json:"min_usd_value,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Filter tokens below this USD value, in cents (default: 0)
+	// Example: 100 = $1.00, 1050 = $10.50
+	MinUsdValueCents int64 `protobuf:"varint,5,opt,name=min_usd_value_cents,json=minUsdValueCents,proto3" json:"min_usd_value_cents,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *BalanceNode_Config) Reset() {
@@ -8355,9 +8356,9 @@ func (x *BalanceNode_Config) GetIncludeZeroBalances() bool {
 	return false
 }
 
-func (x *BalanceNode_Config) GetMinUsdValue() float64 {
+func (x *BalanceNode_Config) GetMinUsdValueCents() int64 {
 	if x != nil {
-		return x.MinUsdValue
+		return x.MinUsdValueCents
 	}
 	return 0
 }
@@ -9389,15 +9390,15 @@ const file_avs_proto_rawDesc = "" +
 	"\x04lang\x18\x01 \x01(\x0e2\x10.aggregator.LangR\x04lang\x12\x16\n" +
 	"\x06source\x18\x02 \x01(\tR\x06source\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xb1\x02\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xbc\x02\n" +
 	"\vBalanceNode\x126\n" +
-	"\x06config\x18\x01 \x01(\v2\x1e.aggregator.BalanceNode.ConfigR\x06config\x1a\xb3\x01\n" +
+	"\x06config\x18\x01 \x01(\v2\x1e.aggregator.BalanceNode.ConfigR\x06config\x1a\xbe\x01\n" +
 	"\x06Config\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x14\n" +
 	"\x05chain\x18\x02 \x01(\tR\x05chain\x12!\n" +
 	"\finclude_spam\x18\x03 \x01(\bR\vincludeSpam\x122\n" +
-	"\x15include_zero_balances\x18\x04 \x01(\bR\x13includeZeroBalances\x12\"\n" +
-	"\rmin_usd_value\x18\x05 \x01(\x01R\vminUsdValue\x1a4\n" +
+	"\x15include_zero_balances\x18\x04 \x01(\bR\x13includeZeroBalances\x12-\n" +
+	"\x13min_usd_value_cents\x18\x05 \x01(\x03R\x10minUsdValueCents\x1a4\n" +
 	"\x06Output\x12*\n" +
 	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\x96\x02\n" +
 	"\n" +

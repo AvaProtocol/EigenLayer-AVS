@@ -2886,7 +2886,8 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		}
 
 		if minUsdValue, ok := config["minUsdValue"].(float64); ok {
-			balanceConfig.MinUsdValue = minUsdValue
+			// Convert dollars to cents for storage
+			balanceConfig.MinUsdValueCents = int64(minUsdValue * 100)
 		}
 
 		node.TaskType = &avsproto.TaskNode_Balance{
@@ -3398,7 +3399,7 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				"chain":               balance.Config.Chain,
 				"includeSpam":         balance.Config.IncludeSpam,
 				"includeZeroBalances": balance.Config.IncludeZeroBalances,
-				"minUsdValue":         balance.Config.MinUsdValue,
+				"minUsdValue":         float64(balance.Config.MinUsdValueCents) / 100.0,
 			}
 
 			// Clean up complex protobuf types before returning
