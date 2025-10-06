@@ -103,6 +103,32 @@ func ParseLanguageFromConfig(config map[string]interface{}) (avsproto.Lang, erro
 	}
 }
 
+// ConvertLangStringToEnum converts lowercase language strings (from SDK) to protobuf enum constants.
+// This is used by both RunNodeImmediatelyRPC (for CustomCode) and RunTriggerRPC (for ManualTrigger).
+// Returns the converted enum value, or the original value if it's not a convertible string.
+func ConvertLangStringToEnum(langValue interface{}) interface{} {
+	langStr, ok := langValue.(string)
+	if !ok {
+		// Not a string, return as-is (might already be an enum)
+		return langValue
+	}
+
+	// Convert lowercase language string to protobuf enum constant
+	switch langStr {
+	case "javascript":
+		return avsproto.Lang_LANG_JAVASCRIPT
+	case "json":
+		return avsproto.Lang_LANG_JSON
+	case "graphql":
+		return avsproto.Lang_LANG_GRAPHQL
+	case "handlebars":
+		return avsproto.Lang_LANG_HANDLEBARS
+	default:
+		// Unknown/invalid string - return as-is and let ParseLanguageFromConfig handle the error
+		return langValue
+	}
+}
+
 // ValidateManualTriggerFromProtobuf extracts and validates manual trigger data from protobuf output.
 // Used by TriggerTask path when working with protobuf ManualTrigger_Output.
 func ValidateManualTriggerFromProtobuf(manualOutput *avsproto.ManualTrigger_Output, task *model.Task) error {

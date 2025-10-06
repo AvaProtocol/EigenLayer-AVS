@@ -3146,6 +3146,14 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		return resp, nil
 	}
 
+	// For CustomCode nodes, convert the lang field from lowercase string to protobuf enum
+	// (SDK sends "javascript", server expects LANG_JAVASCRIPT enum constant)
+	if nodeTypeStr == NodeTypeCustomCode {
+		if langValue, exists := nodeConfig["lang"]; exists {
+			nodeConfig["lang"] = ConvertLangStringToEnum(langValue)
+		}
+	}
+
 	// Execute the node immediately with authenticated user
 	result, err := n.RunNodeImmediately(nodeTypeStr, nodeConfig, inputVariables, user)
 	if err != nil {
@@ -3821,6 +3829,14 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 			ManualTrigger: &avsproto.ManualTrigger_Output{},
 		}
 		return resp, nil
+	}
+
+	// For ManualTrigger, convert the lang field from lowercase string to protobuf enum
+	// (SDK sends "javascript", server expects LANG_JAVASCRIPT enum constant)
+	if triggerTypeStr == NodeTypeManualTrigger {
+		if langValue, exists := triggerConfig["lang"]; exists {
+			triggerConfig["lang"] = ConvertLangStringToEnum(langValue)
+		}
 	}
 
 	// Execute the trigger immediately with trigger input data
