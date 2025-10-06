@@ -187,7 +187,7 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 		moralisAPIKey = macroSecrets["moralis_api_key"]
 	}
 	if moralisAPIKey == "" {
-		err := fmt.Errorf("Moralis API key is not configured in macros.secrets")
+		err := fmt.Errorf("moralis API key is not configured in macros.secrets")
 		executionLogStep.Error = err.Error()
 		executionLogStep.Success = false
 		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
@@ -246,8 +246,8 @@ func (vm *VM) fetchMoralisBalances(
 	// Build Moralis API URL
 	url := fmt.Sprintf("https://deep-index.moralis.io/api/v2.2/%s/erc20", address)
 
-	// Create HTTP client
-	client := resty.New()
+	// Create HTTP client with timeout to prevent indefinite blocking
+	client := resty.New().SetTimeout(30 * time.Second)
 	request := client.R().
 		SetHeader("X-API-Key", apiKey).
 		SetQueryParam("chain", chain)
@@ -265,7 +265,7 @@ func (vm *VM) fetchMoralisBalances(
 
 	// Check response status
 	if resp.StatusCode() != 200 {
-		return nil, fmt.Errorf("Moralis API returned status %d: %s", resp.StatusCode(), resp.String())
+		return nil, fmt.Errorf("moralis API returned status %d: %s", resp.StatusCode(), resp.String())
 	}
 
 	// Parse Moralis response - try direct array first (v2.2 API returns array directly)
