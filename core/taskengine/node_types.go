@@ -210,46 +210,39 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 	case *avsproto.TaskTrigger_Event:
 		eventTrigger := trigger.GetEvent()
 		if eventTrigger != nil && eventTrigger.Config != nil {
-			// Use the generic protobuf to map converter
-			configMap, err := gow.ProtoToMap(eventTrigger.Config)
-			if err == nil {
-				// Merge the config fields into triggerConfig
-				for key, value := range configMap {
-					triggerConfig[key] = value
+			// Access protobuf fields directly to avoid JSON roundtrip
+			if len(eventTrigger.Config.Queries) > 0 {
+				// Convert queries to interface{} for map storage
+				queries := make([]interface{}, len(eventTrigger.Config.Queries))
+				for i, query := range eventTrigger.Config.Queries {
+					// Use gow.ProtoToMap for complex nested structures (Query has many fields)
+					if queryMap, err := gow.ProtoToMap(query); err == nil {
+						queries[i] = queryMap
+					}
 				}
+				triggerConfig["queries"] = queries
 			}
 		}
 	case *avsproto.TaskTrigger_Block:
 		blockTrigger := trigger.GetBlock()
 		if blockTrigger != nil && blockTrigger.Config != nil {
-			// Use the generic protobuf to map converter for consistency
-			configMap, err := gow.ProtoToMap(blockTrigger.Config)
-			if err == nil {
-				for key, value := range configMap {
-					triggerConfig[key] = value
-				}
-			}
+			// Direct field access - BlockTrigger.Config only has interval field
+			triggerConfig["interval"] = blockTrigger.Config.Interval
 		}
 	case *avsproto.TaskTrigger_Cron:
 		cronTrigger := trigger.GetCron()
 		if cronTrigger != nil && cronTrigger.Config != nil {
-			// Use the generic protobuf to map converter for consistency
-			configMap, err := gow.ProtoToMap(cronTrigger.Config)
-			if err == nil {
-				for key, value := range configMap {
-					triggerConfig[key] = value
-				}
+			// Direct field access - CronTrigger.Config only has schedules array
+			if len(cronTrigger.Config.Schedules) > 0 {
+				triggerConfig["schedules"] = cronTrigger.Config.Schedules
 			}
 		}
 	case *avsproto.TaskTrigger_FixedTime:
 		fixedTimeTrigger := trigger.GetFixedTime()
 		if fixedTimeTrigger != nil && fixedTimeTrigger.Config != nil {
-			// Use the generic protobuf to map converter for consistency
-			configMap, err := gow.ProtoToMap(fixedTimeTrigger.Config)
-			if err == nil {
-				for key, value := range configMap {
-					triggerConfig[key] = value
-				}
+			// Direct field access - FixedTimeTrigger.Config only has epochs array
+			if len(fixedTimeTrigger.Config.Epochs) > 0 {
+				triggerConfig["epochs"] = fixedTimeTrigger.Config.Epochs
 			}
 		}
 	case *avsproto.TaskTrigger_Manual:
@@ -262,8 +255,8 @@ func TaskTriggerToConfig(trigger *avsproto.TaskTrigger) map[string]interface{} {
 			return triggerConfig
 		}
 
-		// For ManualTrigger, access protobuf fields directly to preserve structured data
-		// This avoids the JSON roundtrip in gow.ProtoToMap that converts arrays/objects to JSON strings
+		// Access protobuf fields directly to preserve structured data
+		// This avoids the JSON roundtrip that converts arrays/objects to JSON strings
 		if manualTrigger.Config.Data != nil {
 			// Use .AsInterface() to preserve original data types (objects, arrays, primitives)
 			triggerConfig["data"] = manualTrigger.Config.Data.AsInterface()

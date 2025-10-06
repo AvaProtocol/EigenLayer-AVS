@@ -19,7 +19,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -3098,61 +3097,15 @@ func convertToExecutionStatus(resultStatus ExecutionResultStatus) avsproto.Execu
 
 // ExtractTriggerConfigData extracts configuration data from a TaskTrigger protobuf message
 // This function now extracts from the Config field since the duplicate input field was removed
+// Uses direct field access instead of JSON roundtrip for better performance and type preservation
 func ExtractTriggerConfigData(trigger *avsproto.TaskTrigger) map[string]interface{} {
 	if trigger == nil {
 		return nil
 	}
 
-	// Check each trigger type and extract config from the correct nested object
-	switch trigger.GetTriggerType().(type) {
-	case *avsproto.TaskTrigger_Block:
-		blockTrigger := trigger.GetBlock()
-		if blockTrigger != nil && blockTrigger.Config != nil {
-			// Use the same approach as TaskTriggerToConfig for consistency
-			configMap, err := gow.ProtoToMap(blockTrigger.Config)
-			if err == nil {
-				return configMap
-			}
-		}
-	case *avsproto.TaskTrigger_Cron:
-		cronTrigger := trigger.GetCron()
-		if cronTrigger != nil && cronTrigger.Config != nil {
-			// Use the same approach as TaskTriggerToConfig for consistency
-			configMap, err := gow.ProtoToMap(cronTrigger.Config)
-			if err == nil {
-				return configMap
-			}
-		}
-	case *avsproto.TaskTrigger_Event:
-		eventTrigger := trigger.GetEvent()
-		if eventTrigger != nil && eventTrigger.Config != nil {
-			// Use the same approach as TaskTriggerToConfig for consistency
-			configMap, err := gow.ProtoToMap(eventTrigger.Config)
-			if err == nil {
-				return configMap
-			}
-		}
-	case *avsproto.TaskTrigger_FixedTime:
-		fixedTimeTrigger := trigger.GetFixedTime()
-		if fixedTimeTrigger != nil && fixedTimeTrigger.Config != nil {
-			// Use the same approach as TaskTriggerToConfig for consistency
-			configMap, err := gow.ProtoToMap(fixedTimeTrigger.Config)
-			if err == nil {
-				return configMap
-			}
-		}
-	case *avsproto.TaskTrigger_Manual:
-		manualTrigger := trigger.GetManual()
-		if manualTrigger != nil && manualTrigger.Config != nil {
-			// Use the same approach as TaskTriggerToConfig for consistency
-			configMap, err := gow.ProtoToMap(manualTrigger.Config)
-			if err == nil {
-				return configMap
-			}
-		}
-		return nil
-	}
-	return nil
+	// Reuse TaskTriggerToConfig for consistent extraction logic
+	// This avoids code duplication and ensures both paths behave identically
+	return TaskTriggerToConfig(trigger)
 }
 
 // convertProtobufValueToMap converts a google.protobuf.Value to a map[string]interface{}
