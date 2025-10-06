@@ -95,17 +95,18 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		return executionLogStep, fmt.Errorf(errMsg)
 	}
 
-	// Validate lang field - REQUIRED, no defaults
-	// Note: Validation happens at execution time, not creation time
-	// The lang field determines how we validate the expression
-	lang := node.Config.Lang
-	_ = lang // Use the lang field for future validation
-	// For FilterNode, we accept JavaScript (for now) - future: validate based on lang
-	// The expression validator already handles security checks
-
 	expression := node.Config.Expression
 	if expression == "" {
 		errMsg := "FilterNode expression is empty"
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
+		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
+		return executionLogStep, fmt.Errorf(errMsg)
+	}
+
+	// LANGUAGE ENFORCEMENT: FilterNode uses JavaScript (hardcoded)
+	// Using centralized ValidateInputByLanguage for consistency
+	if err := ValidateInputByLanguage(expression, avsproto.Lang_LANG_JAVASCRIPT); err != nil {
+		errMsg := fmt.Sprintf("FilterNode expression validation failed: %v", err)
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
 		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
 		return executionLogStep, fmt.Errorf(errMsg)

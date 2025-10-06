@@ -75,13 +75,14 @@ func (r *BranchProcessor) Validate(node *avsproto.BranchNode) error {
 			return fmt.Errorf("condition at index %d is 'else' type but has non-empty expression", i)
 		}
 
-		// Validate lang field for conditions with expressions - REQUIRED, no defaults
-		// Note: For 'else' conditions with no expression, lang field is not used
+		// LANGUAGE ENFORCEMENT: Validate expression using centralized validator
+		// Note: For 'else' conditions with no expression, no validation needed
 		if condition.Type == "if" && strings.TrimSpace(condition.Expression) != "" {
-			// The lang field determines how we validate the expression
-			// For now, we just ensure it's set - future: validate based on lang
-			lang := condition.Lang
-			_ = lang // Use the lang field for future validation
+			// BranchNode uses JavaScript for expressions - hardcoded language
+			// Using centralized ValidateInputByLanguage for consistency
+			if err := ValidateInputByLanguage(condition.Expression, avsproto.Lang_LANG_JAVASCRIPT); err != nil {
+				return fmt.Errorf("condition at index %d expression validation failed: %w", i, err)
+			}
 		}
 	}
 
@@ -205,6 +206,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 		}
 
 		// Regular if condition
+		// BranchNode uses JavaScript (hardcoded) - validation done in Validate() method
 		expression := condition.Expression
 		if expression == "" {
 			log.WriteString("Condition '" + condition.Id + "' has empty expression, treating as false\n")

@@ -493,9 +493,6 @@ message BranchNode {
     string id = 1;
     string type = 2;
     string expression = 3;
-    // Language of the expression field - REQUIRED for validation
-    // Must be explicitly set (cannot be LANG_UNSPECIFIED). Application should reject zero value.
-    Lang lang = 4;
   }
 
   message Config {
@@ -521,9 +518,6 @@ message FilterNode {
     // The name of the input node whose output data will be filtered.
     // The data should be iterable (array, object, etc.). Runtime validation will check compatibility.
     string input_node_name = 2;
-    
-    // Language of the expression field - for validation (default: JavaScript for backward compatibility)
-    Lang lang = 3;
   }
 
   message Output {
