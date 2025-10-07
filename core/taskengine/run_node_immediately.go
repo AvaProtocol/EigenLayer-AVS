@@ -10,12 +10,10 @@ import (
 	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -2968,149 +2966,65 @@ func (n *Engine) parseUint64(value interface{}) (uint64, error) {
 	}
 }
 
-// extractExecutionResult extracts the result data from an execution step (legacy version with success/error fields)
+// assignOutputData is a helper function that converts interface{} output from handlers
+// to the correct protobuf oneof type using a type switch.
+// This helper eliminates code duplication where the same type switch pattern appears multiple times.
+func assignOutputData(resp *avsproto.RunNodeWithInputsResp, outputData interface{}) {
+	switch v := outputData.(type) {
+	case *avsproto.RunNodeWithInputsResp_RestApi:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_CustomCode:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_Balance:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_ContractRead:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_ContractWrite:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_EthTransfer:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_Graphql:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_Branch:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_Filter:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_Loop:
+		resp.OutputData = v
+	}
+}
+
+// extractExecutionResult extracts the result data from an execution step using node-specific handlers
+// This provides a clean, object-oriented approach that eliminates code duplication
 func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) (map[string]interface{}, error) {
-	result := make(map[string]interface{})
+	// Get node type from execution step
+	nodeType := executionStep.Type
+	if nodeType != "" {
+		// Normal case: Convert protobuf enum string to internal node type constant
+		// e.g., "NODE_TYPE_CONTRACT_WRITE" -> "contractWrite"
+		nodeType = n.convertProtobufNodeTypeToInternal(nodeType)
+	} else {
+		// Fallback case: try to determine from output data when Type field is empty
+		nodeType = n.detectNodeTypeFromStep(executionStep)
+	}
 
-	// Handle different output data types
-	if ccode := executionStep.GetCustomCode(); ccode != nil && ccode.GetData() != nil {
-		iface := ccode.GetData().AsInterface()
-		if m, ok := iface.(map[string]interface{}); ok {
-			result = m
-		} else {
-			result["data"] = iface
-		}
-	} else if restAPI := executionStep.GetRestApi(); restAPI != nil && restAPI.GetData() != nil {
-		// REST API data is now stored as structpb.Value directly (no Any wrapper)
-		iface := restAPI.GetData().AsInterface()
-		if m, ok := iface.(map[string]interface{}); ok {
-			// Use raw response format (same as simulateWorkflow) instead of ProcessRestAPIResponseRaw
-			result = m
-		} else {
-			result = map[string]interface{}{"data": iface}
-		}
-
-	} else if contractRead := executionStep.GetContractRead(); contractRead != nil {
-		// ContractRead now returns a single flattened object directly
-		// Data is in output; metadata is at step level
-
-		// Extract data if available
-		if contractRead.GetData() != nil {
-			iface := contractRead.GetData().AsInterface()
-			if m, ok := iface.(map[string]interface{}); ok {
-				// Create result map with data field
-				result["data"] = m
-			} else {
-				result["data"] = iface
-			}
-		}
-
-		// Extract metadata from step-level metadata
-		if executionStep.Metadata != nil {
-			if metadataArray := gow.ValueToSlice(executionStep.Metadata); metadataArray != nil {
-				result["metadata"] = metadataArray
-			} else {
-				result["metadata"] = executionStep.Metadata.AsInterface()
-			}
-		}
-	} else if branch := executionStep.GetBranch(); branch != nil {
-		// Extract conditionId from the new data field
-		if branch.Data != nil {
-			dataMap := gow.ValueToMap(branch.Data)
-			if dataMap != nil {
-				if conditionId, ok := dataMap["conditionId"]; ok {
-					result["conditionId"] = conditionId
-				}
-			}
-		}
-		result["success"] = true
-	} else if ethTransfer := executionStep.GetEthTransfer(); ethTransfer != nil {
-		// EthTransfer output now contains enhanced results structure
-		if ethTransfer.GetData() != nil {
-			// Extract transaction hash from the data field
-			if dataMap := gow.ValueToMap(ethTransfer.GetData()); dataMap != nil {
-				if txHash, ok := dataMap["transactionHash"]; ok {
-					result["txHash"] = txHash
-				}
-			}
-		}
-		result["success"] = true
-	} else if contractWrite := executionStep.GetContractWrite(); contractWrite != nil {
-		// ContractWrite output now contains enhanced results structure
-		// Data contains decoded events (flattened by method name); method results are in step-level metadata
-
-		// Extract data if available (decoded events organized by method name)
-		if contractWrite.GetData() != nil {
-			iface := contractWrite.GetData().AsInterface()
-			if m, ok := iface.(map[string]interface{}); ok {
-				result["data"] = m
-			} else {
-				result["data"] = iface
-			}
-		}
-
-		// Extract results and metadata from step-level metadata
-		if executionStep.Metadata != nil {
-			// Extract results array
-			allResults := ExtractResultsFromProtobufValue(executionStep.Metadata)
-			result["results"] = allResults
-
-			if metadataArray := gow.ValueToSlice(executionStep.Metadata); metadataArray != nil {
-				result["metadata"] = metadataArray
-			} else {
-				result["metadata"] = executionStep.Metadata.AsInterface()
-			}
-		}
-
-		// Set success flag based on execution step status
+	// Get the appropriate handler for this node type
+	factory := NewNodeOutputHandlerFactory(n)
+	handler, err := factory.GetHandler(nodeType)
+	if err != nil {
+		// Fallback to empty result for unknown node types
+		result := make(map[string]interface{})
 		result["success"] = executionStep.Success
-		if !executionStep.Success {
+		if executionStep.Error != "" {
 			result["error"] = executionStep.Error
 		}
-
 		return result, nil
-	} else if loop := executionStep.GetLoop(); loop != nil {
-		// Loop output contains the array of iteration results
-		if loop.GetData() != nil {
-			iface := loop.GetData().AsInterface()
-			// Store loop data in loopResult key for run_node_immediately.go to extract
-			result["loopResult"] = iface
-		}
-	} else if filter := executionStep.GetFilter(); filter != nil {
-		// Filter output contains the filtered array results
-		if filter.GetData() != nil {
-			iface := filter.GetData().AsInterface()
-			// Store filter data directly in result for consistency with other nodes
-			if filterArray, ok := iface.([]interface{}); ok {
-				// Return the filtered array wrapped in a map
-				return map[string]interface{}{"data": filterArray}, nil
-			} else {
-				// Fallback: store in data field
-				result["data"] = iface
-			}
-		}
-	} else if graphql := executionStep.GetGraphql(); graphql != nil {
-		// GraphQL output contains the query results
-		if graphql.GetData() != nil {
-			// Extract the actual GraphQL response data
-			iface := graphql.GetData().AsInterface()
-			// Return the GraphQL data directly (it should already be in the correct format)
-			if graphqlData, ok := iface.(map[string]interface{}); ok {
-				return graphqlData, nil
-			} else {
-				// Fallback: wrap in data field
-				result["data"] = iface
-			}
-		}
-	} else if balance := executionStep.GetBalance(); balance != nil {
-		// Balance output contains the array of token balances
-		if balance.GetData() != nil {
-			// Extract the balance data (always an array of token objects)
-			balanceArray := balance.GetData().AsInterface()
-			// For BalanceNode, store the array directly in the data field
-			// This will be handled specially in the RPC response layer
-			result["data"] = balanceArray
-		}
+	}
+
+	// Use the handler to extract data
+	result, err := handler.ExtractFromExecutionStep(executionStep)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract execution result for node type %q: %w", nodeType, err)
 	}
 
 	// ALWAYS add step success/error fields for ALL node types (general approach)
@@ -3121,6 +3035,65 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 	}
 
 	return result, nil
+}
+
+// convertProtobufNodeTypeToInternal converts protobuf enum string names to internal node type constants
+// e.g., "NODE_TYPE_CONTRACT_WRITE" -> "contractWrite"
+func (n *Engine) convertProtobufNodeTypeToInternal(protobufNodeType string) string {
+	switch protobufNodeType {
+	case "NODE_TYPE_CONTRACT_WRITE":
+		return NodeTypeContractWrite
+	case "NODE_TYPE_CONTRACT_READ":
+		return NodeTypeContractRead
+	case "NODE_TYPE_REST_API":
+		return NodeTypeRestAPI
+	case "NODE_TYPE_CUSTOM_CODE":
+		return NodeTypeCustomCode
+	case "NODE_TYPE_ETH_TRANSFER":
+		return NodeTypeETHTransfer
+	case "NODE_TYPE_GRAPHQL_QUERY":
+		return NodeTypeGraphQLQuery
+	case "NODE_TYPE_BRANCH":
+		return NodeTypeBranch
+	case "NODE_TYPE_FILTER":
+		return NodeTypeFilter
+	case "NODE_TYPE_LOOP":
+		return NodeTypeLoop
+	case "NODE_TYPE_BALANCE":
+		return NodeTypeBalance
+	default:
+		// If it's not a protobuf enum string, return as-is (it might already be the internal constant)
+		return protobufNodeType
+	}
+}
+
+// detectNodeTypeFromStep detects the node type from the execution step's output data
+// This is a fallback for cases where the Type field is not set
+func (n *Engine) detectNodeTypeFromStep(step *avsproto.Execution_Step) string {
+	switch {
+	case step.GetCustomCode() != nil:
+		return NodeTypeCustomCode
+	case step.GetRestApi() != nil:
+		return NodeTypeRestAPI
+	case step.GetContractRead() != nil:
+		return NodeTypeContractRead
+	case step.GetContractWrite() != nil:
+		return NodeTypeContractWrite
+	case step.GetEthTransfer() != nil:
+		return NodeTypeETHTransfer
+	case step.GetGraphql() != nil:
+		return NodeTypeGraphQLQuery
+	case step.GetBranch() != nil:
+		return NodeTypeBranch
+	case step.GetFilter() != nil:
+		return NodeTypeFilter
+	case step.GetLoop() != nil:
+		return NodeTypeLoop
+	case step.GetBalance() != nil:
+		return NodeTypeBalance
+	default:
+		return ""
+	}
 }
 
 // RunNodeImmediatelyRPC handles the RPC interface for immediate node execution
@@ -3170,55 +3143,15 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			ErrorCode: GetErrorCodeForProtobuf(err),
 		}
 
-		switch nodeTypeStr {
-		case NodeTypeContractWrite:
-			// No metadata for failed operations - metadata is only for successful contract call raw data
-			// Build empty data object with method keys for shape consistency
-			dataMap := map[string]interface{}{}
-			if calls, ok := nodeConfig["methodCalls"].([]interface{}); ok {
-				for _, c := range calls {
-					if m, ok := c.(map[string]interface{}); ok {
-						if mn, ok := m["methodName"].(string); ok && mn != "" {
-							dataMap[mn] = map[string]interface{}{}
-						}
-					}
-				}
-			}
-			dataVal, _ := structpb.NewValue(dataMap)
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractWrite{ContractWrite: &avsproto.ContractWriteNode_Output{Data: dataVal}}
-		case NodeTypeContractRead:
-			// No metadata for failed operations - metadata is only for successful contract call raw data
-			// Build empty data object with method keys for shape consistency
-			dataMap := map[string]interface{}{}
-			if calls, ok := nodeConfig["methodCalls"].([]interface{}); ok {
-				for _, c := range calls {
-					if m, ok := c.(map[string]interface{}); ok {
-						if mn, ok := m["methodName"].(string); ok && mn != "" {
-							dataMap[mn] = map[string]interface{}{}
-						}
-					}
-				}
-			}
-			dataVal, _ := structpb.NewValue(dataMap)
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractRead{ContractRead: &avsproto.ContractReadNode_Output{Data: dataVal}}
-		case NodeTypeRestAPI:
+		// Use handler to create empty output structure
+		factory := NewNodeOutputHandlerFactory(n)
+		handler, handlerErr := factory.GetHandler(nodeTypeStr)
+		if handlerErr != nil {
+			// Fallback to RestAPI for unknown node types
 			resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{RestApi: &avsproto.RestAPINode_Output{}}
-		case NodeTypeCustomCode:
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_CustomCode{CustomCode: &avsproto.CustomCodeNode_Output{}}
-		case NodeTypeETHTransfer:
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_EthTransfer{EthTransfer: &avsproto.ETHTransferNode_Output{}}
-		case NodeTypeGraphQLQuery:
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_Graphql{Graphql: &avsproto.GraphQLQueryNode_Output{}}
-		case NodeTypeBranch:
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_Branch{Branch: &avsproto.BranchNode_Output{}}
-		case NodeTypeFilter:
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_Filter{Filter: &avsproto.FilterNode_Output{}}
-		case NodeTypeLoop:
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_Loop{Loop: &avsproto.LoopNode_Output{}}
-		case NodeTypeBalance:
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_Balance{Balance: &avsproto.BalanceNode_Output{}}
-		default:
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{RestApi: &avsproto.RestAPINode_Output{}}
+		} else {
+			// Use helper to convert handler output to correct protobuf oneof type
+			assignOutputData(resp, handler.CreateEmptyOutput(nodeConfig))
 		}
 
 		return resp, nil
@@ -3256,518 +3189,46 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		ErrorCode: avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED, // Default for successful operations
 	}
 
-	// Set the appropriate output data based on the node type
-	// Always set output data structure even if result is empty to avoid OUTPUT_DATA_NOT_SET
-	switch nodeTypeStr {
-	case NodeTypeRestAPI:
-		// For REST API: extract data/error to top level, put raw response in metadata
-		var cleanData interface{}
-		var rawResponse interface{}
-
-		if result != nil {
-			// Extract the raw response for metadata
-			rawResponse = result
-
-			// Extract only the 'data' field from the raw response for top-level data
-			if dataField, ok := result["data"]; ok {
-				cleanData = dataField
-			} else {
-				cleanData = map[string]interface{}{}
-			}
-		}
-
-		// Convert clean data to protobuf Value
-		valueData, err := structpb.NewValue(cleanData)
+	// Use handler to convert result to protobuf output
+	factory := NewNodeOutputHandlerFactory(n)
+	handler, err := factory.GetHandler(nodeTypeStr)
+	if err != nil {
+		// Fallback to RestAPI for unknown node types
+		resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{RestApi: &avsproto.RestAPINode_Output{}}
+	} else {
+		outputData, metadata, err := handler.ConvertToProtobuf(result)
 		if err != nil {
 			return &avsproto.RunNodeWithInputsResp{
 				Success: false,
-				Error:   fmt.Sprintf("failed to convert REST API output: %v", err),
+				Error:   err.Error(),
 			}, nil
 		}
-
-		restOutput := &avsproto.RestAPINode_Output{
-			Data: valueData,
+		// Use helper to convert handler output to correct protobuf oneof type
+		assignOutputData(resp, outputData)
+		if metadata != nil {
+			resp.Metadata = metadata
 		}
-		resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{
-			RestApi: restOutput,
-		}
+	}
 
-		// Set raw response as metadata
-		if rawResponse != nil {
-			if metadataValue, err := structpb.NewValue(rawResponse); err == nil {
-				resp.Metadata = metadataValue
-			}
-		}
-	case NodeTypeCustomCode:
-		// For CustomCode immediate execution, return exactly what the JavaScript code returned
-		// Extract the raw data from the wrapped result to avoid nested structures and metadata pollution
-		var rawData interface{}
-
-		if result != nil {
-			// Check if this looks like an extractExecutionResult-processed object with metadata
-			if hasMetadata := (result["success"] != nil || result["nodeId"] != nil); hasMetadata {
-				// This result has been processed by extractExecutionResult, extract the original data
-				if dataField, ok := result["data"]; ok {
-					// Non-object return (like 42, "hello", null) - use the "data" field
-					rawData = dataField
-				} else {
-					// Object return that got metadata added - extract the original object
-					originalObject := make(map[string]interface{})
-					for k, v := range result {
-						// Skip metadata fields added by extractExecutionResult
-						if k != "success" && k != "nodeId" && k != "error" {
-							originalObject[k] = v
-						}
+	// Special handling for ContractWrite: align top-level success with method outcomes
+	if nodeTypeStr == NodeTypeContractWrite && resp.Metadata != nil {
+		meta := resp.Metadata.AsInterface()
+		if metaArr, ok := meta.([]interface{}); ok {
+			for _, item := range metaArr {
+				if m, ok := item.(map[string]interface{}); ok {
+					if succ, ok := m["success"].(bool); ok && !succ {
+						resp.Success = false
+						break
 					}
-					// If nothing remains after removing metadata, it was an empty object
-					rawData = originalObject
-				}
-			} else {
-				// No metadata detected, use result as-is
-				rawData = result
-			}
-		}
-
-		valueData, err := structpb.NewValue(rawData)
-		if err != nil {
-			return &avsproto.RunNodeWithInputsResp{
-				Success: false,
-				Error:   fmt.Sprintf("failed to convert CustomCode output: %v", err),
-			}, nil
-		}
-		customOutput := &avsproto.CustomCodeNode_Output{
-			Data: valueData,
-		}
-		resp.OutputData = &avsproto.RunNodeWithInputsResp_CustomCode{
-			CustomCode: customOutput,
-		}
-	case NodeTypeETHTransfer:
-		// For ETH transfer nodes - set empty structure if no result or extract transaction hash
-		// Create ETH transfer output with new data field
-		ethData := map[string]interface{}{}
-		if result != nil {
-			if txHash, ok := result["txHash"].(string); ok {
-				ethData["transactionHash"] = txHash
-			}
-		}
-
-		// Convert to protobuf Value
-		dataValue, err := structpb.NewValue(ethData)
-		if err != nil {
-			dataValue, _ = structpb.NewValue(map[string]interface{}{})
-		}
-
-		ethOutput := &avsproto.ETHTransferNode_Output{
-			Data: dataValue,
-		}
-		resp.OutputData = &avsproto.RunNodeWithInputsResp_EthTransfer{
-			EthTransfer: ethOutput,
-		}
-	case NodeTypeContractRead:
-		// For contract read nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
-		contractReadOutput := &avsproto.ContractReadNode_Output{}
-		if result != nil && len(result) > 0 {
-			// Extract data field (flattened clean data)
-			if dataInterface, hasData := result["data"]; hasData {
-				if resultsValue, err := structpb.NewValue(dataInterface); err == nil {
-					contractReadOutput.Data = resultsValue
-				}
-			} else {
-				// If no explicit data field, use the flattened result object (excluding metadata)
-				cleanResult := make(map[string]interface{})
-				for k, v := range result {
-					if k != "metadata" {
-						cleanResult[k] = v
-					}
-				}
-				if len(cleanResult) > 0 {
-					if resultsValue, err := structpb.NewValue(cleanResult); err == nil {
-						contractReadOutput.Data = resultsValue
-					}
-				}
-			}
-
-			// Extract metadata field (detailed method information) into top-level response metadata only
-			if metadataInterface, hasMetadata := result["metadata"]; hasMetadata {
-				if metadataValue, err := structpb.NewValue(metadataInterface); err == nil {
-					resp.Metadata = metadataValue
-				}
-			}
-		}
-
-		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractRead{
-			ContractRead: contractReadOutput,
-		}
-	case NodeTypeContractWrite:
-		// For contract write nodes - always set output structure to avoid OUTPUT_DATA_NOT_SET
-		contractWriteOutput := &avsproto.ContractWriteNode_Output{}
-		// Always create the data structure, even if result is nil/empty
-		var resultsArray []interface{}
-		var decodedEventsData = make(map[string]interface{})
-
-		if result != nil && len(result) > 0 {
-			// First, try to extract data directly (flattened events organized by method name)
-			if dataFromVM, ok := result["data"].(map[string]interface{}); ok {
-				decodedEventsData = dataFromVM
-			}
-
-			// Check if we have the new results array format (from VM execution)
-			if resultsFromVM, ok := result["results"].([]interface{}); ok {
-				// Process each result in the array
-				for _, resultInterface := range resultsFromVM {
-					if methodResult, ok := resultInterface.(*avsproto.ContractWriteNode_MethodResult); ok {
-						// Convert protobuf result to map for consistency
-						convertedResult := map[string]interface{}{
-							"methodName": methodResult.MethodName,
-							"success":    methodResult.Success,
-							"error":      methodResult.Error,
-						}
-
-						// Add methodABI if available
-						if methodResult.MethodAbi != nil {
-							convertedResult["methodABI"] = methodResult.MethodAbi.AsInterface()
-						}
-
-						// Add flexible receipt
-						if methodResult.Receipt != nil {
-							convertedResult["receipt"] = methodResult.Receipt.AsInterface()
-						}
-
-						// Add return value
-						if methodResult.Value != nil {
-							convertedResult["value"] = methodResult.Value.AsInterface()
-						} else {
-							convertedResult["value"] = nil
-						}
-
-						resultsArray = append(resultsArray, convertedResult)
-
-						// 🚀 NEW: Parse events for this specific method and store by method name
-						methodEvents := make(map[string]interface{})
-						if methodResult.Receipt != nil {
-							receiptData := methodResult.Receipt.AsInterface()
-							if receiptMap, ok := receiptData.(map[string]interface{}); ok {
-								if logs, hasLogs := receiptMap["logs"]; hasLogs {
-									if logsArray, ok := logs.([]interface{}); ok && len(logsArray) > 0 {
-										// Get contract ABI for event decoding
-										var contractABI *abi.ABI
-										if methodResult.MethodAbi != nil {
-											if abiData := methodResult.MethodAbi.AsInterface(); abiData != nil {
-												if abiMap, ok := abiData.(map[string]interface{}); ok {
-													if abiString, hasABI := abiMap["contractABI"]; hasABI {
-														if abiStr, ok := abiString.(string); ok {
-															if parsed, err := abi.JSON(strings.NewReader(abiStr)); err == nil {
-																contractABI = &parsed
-															}
-														}
-													}
-												}
-											}
-										}
-
-										// Decode each event log for this method
-										for _, logInterface := range logsArray {
-											if logMap, ok := logInterface.(map[string]interface{}); ok {
-												if contractABI != nil {
-													// Convert to types.Log structure for decoding
-													eventLog := &types.Log{}
-
-													// Parse address
-													if addr, hasAddr := logMap["address"]; hasAddr {
-														if addrStr, ok := addr.(string); ok {
-															eventLog.Address = common.HexToAddress(addrStr)
-														}
-													}
-
-													// Parse topics
-													if topics, hasTopics := logMap["topics"]; hasTopics {
-														if topicsArray, ok := topics.([]interface{}); ok {
-															for _, topic := range topicsArray {
-																if topicStr, ok := topic.(string); ok {
-																	eventLog.Topics = append(eventLog.Topics, common.HexToHash(topicStr))
-																}
-															}
-														}
-													}
-
-													// Parse data
-													if data, hasData := logMap["data"]; hasData {
-														if dataStr, ok := data.(string); ok {
-															if dataBytes, err := hexutil.Decode(dataStr); err == nil {
-																eventLog.Data = dataBytes
-															}
-														}
-													}
-
-													// Decode the event using existing logic
-													if decodedEvent, err := n.parseEventWithParsedABI(eventLog, contractABI, nil); err == nil {
-														// Flatten event fields into methodEvents
-														for key, value := range decodedEvent {
-															if key != "eventName" { // Skip meta field
-																methodEvents[key] = value
-															}
-														}
-													}
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-
-						// Store events for this method only if events exist (preserve return values otherwise)
-						if len(methodEvents) > 0 {
-							// Events take priority over return values
-							decodedEventsData[methodResult.MethodName] = methodEvents
-						} else {
-							// No events found - preserve any existing return values
-							// If no return values either, this will remain empty
-						}
-					} else if methodResultMap, ok := resultInterface.(map[string]interface{}); ok {
-						// Already in map format
-						resultsArray = append(resultsArray, methodResultMap)
-					}
-				}
-			} else {
-				// Fallback: Try to extract transaction hash from result (backward compatibility)
-				if txHash, ok := result["txHash"].(string); ok {
-					convertedResult := map[string]interface{}{
-						"methodName": UnknownMethodName,
-						"success":    true,
-						"transaction": map[string]interface{}{
-							"hash": txHash,
-						},
-					}
-					resultsArray = append(resultsArray, convertedResult)
-				} else if transactionHash, ok := result["transactionHash"].(string); ok {
-					convertedResult := map[string]interface{}{
-						"methodName": UnknownMethodName,
-						"success":    true,
-						"transaction": map[string]interface{}{
-							"hash": transactionHash,
-						},
-					}
-					resultsArray = append(resultsArray, convertedResult)
-				}
-			}
-
-		}
-
-		// 🚀 NEW: Set data field with decoded events (flattened format like ContractRead)
-		// Always set data field - empty object if no events, flattened events if present
-		if dataValue, err := structpb.NewValue(decodedEventsData); err == nil {
-			contractWriteOutput.Data = dataValue
-		}
-
-		// 🚀 NEW: Set metadata field with detailed method information
-		if len(resultsArray) > 0 {
-			if metadataValue, err := structpb.NewValue(resultsArray); err == nil {
-				resp.Metadata = metadataValue
-			} else {
-			}
-		} else {
-		}
-		resp.OutputData = &avsproto.RunNodeWithInputsResp_ContractWrite{
-			ContractWrite: contractWriteOutput,
-		}
-
-		// Align top-level success with method outcomes: any failed method or receipt.status == 0x0 -> resp.Success = false
-		if resp.Metadata != nil {
-			meta := resp.Metadata.AsInterface()
-			if metaArr, ok := meta.([]interface{}); ok {
-				for _, item := range metaArr {
-					if m, ok := item.(map[string]interface{}); ok {
-						if succ, ok := m["success"].(bool); ok && !succ {
+					if rec, ok := m["receipt"].(map[string]interface{}); ok {
+						if status, ok := rec["status"].(string); ok && strings.EqualFold(status, "0x0") {
 							resp.Success = false
 							break
 						}
-						if rec, ok := m["receipt"].(map[string]interface{}); ok {
-							if status, ok := rec["status"].(string); ok && strings.EqualFold(status, "0x0") {
-								resp.Success = false
-								break
-							}
-						}
 					}
 				}
 			}
 		}
-	case NodeTypeGraphQLQuery:
-		// For GraphQL query nodes - create output with new data field
-		var dataValue *structpb.Value
-		var err error
-		if result != nil && len(result) > 0 {
-			// Set actual GraphQL result data
-			dataValue, err = structpb.NewValue(result)
-			if err != nil {
-				return &avsproto.RunNodeWithInputsResp{
-					Success: false,
-					Error:   fmt.Sprintf("failed to convert GraphQL output: %v", err),
-				}, nil
-			}
-		} else {
-			// Set empty object for no result
-			dataValue, err = structpb.NewValue(map[string]interface{}{})
-			if err != nil {
-				return &avsproto.RunNodeWithInputsResp{
-					Success: false,
-					Error:   fmt.Sprintf("failed to create empty GraphQL output: %v", err),
-				}, nil
-			}
-		}
-
-		graphqlOutput := &avsproto.GraphQLQueryNode_Output{
-			Data: dataValue,
-		}
-		resp.OutputData = &avsproto.RunNodeWithInputsResp_Graphql{
-			Graphql: graphqlOutput,
-		}
-	case NodeTypeBranch:
-		// For branch nodes - create output with new data field
-		branchData := map[string]interface{}{}
-		if result != nil && len(result) > 0 {
-			// Set actual branch result data
-			if conditionId, ok := result["conditionId"].(string); ok {
-				branchData["conditionId"] = conditionId
-			}
-		} else {
-			// Set empty string for no result
-			branchData["conditionId"] = ""
-		}
-
-		// Convert to protobuf Value
-		dataValue, err := structpb.NewValue(branchData)
-		if err != nil {
-			dataValue, _ = structpb.NewValue(map[string]interface{}{})
-		}
-
-		branchOutput := &avsproto.BranchNode_Output{
-			Data: dataValue,
-		}
-		resp.OutputData = &avsproto.RunNodeWithInputsResp_Branch{
-			Branch: branchOutput,
-		}
-	case NodeTypeFilter:
-		// For filter nodes - create output with new data field
-		var dataValue *structpb.Value
-		var err error
-		if result != nil && len(result) > 0 {
-			// Set actual filter result data
-			dataValue, err = structpb.NewValue(result)
-			if err != nil {
-				return &avsproto.RunNodeWithInputsResp{
-					Success: false,
-					Error:   fmt.Sprintf("failed to convert Filter output: %v", err),
-				}, nil
-			}
-		} else {
-			// Set empty array for no result
-			emptyArray := []interface{}{}
-			dataValue, err = structpb.NewValue(emptyArray)
-			if err != nil {
-				return &avsproto.RunNodeWithInputsResp{
-					Success: false,
-					Error:   fmt.Sprintf("failed to create empty Filter output: %v", err),
-				}, nil
-			}
-		}
-
-		filterOutput := &avsproto.FilterNode_Output{
-			Data: dataValue,
-		}
-		resp.OutputData = &avsproto.RunNodeWithInputsResp_Filter{
-			Filter: filterOutput,
-		}
-	case NodeTypeLoop:
-		if result != nil {
-			// Extract the actual loop data from the loopResult key
-			var loopData interface{}
-			if loopResult, exists := result["loopResult"]; exists {
-				loopData = loopResult
-			} else {
-				// Fallback to entire result if no loopResult key
-				loopData = result
-			}
-
-			// Convert loop data to protobuf Value
-			dataValue, err := structpb.NewValue(loopData)
-			if err != nil {
-				return &avsproto.RunNodeWithInputsResp{
-					Success: false,
-					Error:   fmt.Sprintf("failed to convert loop output: %v", err),
-				}, nil
-			}
-
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_Loop{
-				Loop: &avsproto.LoopNode_Output{
-					Data: dataValue,
-				},
-			}
-		} else {
-			// Empty loop result as empty array
-			emptyArray := []interface{}{}
-			dataValue, err := structpb.NewValue(emptyArray)
-			if err != nil {
-				dataValue, _ = structpb.NewValue([]interface{}{})
-			}
-
-			resp.OutputData = &avsproto.RunNodeWithInputsResp_Loop{
-				Loop: &avsproto.LoopNode_Output{
-					Data: dataValue,
-				},
-			}
-		}
-	case NodeTypeBalance:
-		// For balance nodes - return the array directly without nesting
-		// extractExecutionResult always populates result["data"] with the balance array
-		var dataValue *structpb.Value
-		var err error
-
-		if result != nil && result["data"] != nil {
-			// Extract balance array from result["data"]
-			// extractExecutionResult (line 3112) always sets this field for BalanceNode
-			dataValue, err = structpb.NewValue(result["data"])
-			if err != nil {
-				return &avsproto.RunNodeWithInputsResp{
-					Success: false,
-					Error:   fmt.Sprintf("failed to convert Balance output: %v", err),
-				}, nil
-			}
-		} else {
-			// Empty result - return empty array
-			emptyArray := []interface{}{}
-			dataValue, err = structpb.NewValue(emptyArray)
-			if err != nil {
-				return &avsproto.RunNodeWithInputsResp{
-					Success: false,
-					Error:   fmt.Sprintf("failed to create empty Balance output: %v", err),
-				}, nil
-			}
-		}
-
-		balanceOutput := &avsproto.BalanceNode_Output{
-			Data: dataValue,
-		}
-		resp.OutputData = &avsproto.RunNodeWithInputsResp_Balance{
-			Balance: balanceOutput,
-		}
-	default:
-		// For unknown/invalid node types, set RestAPI as default to avoid OUTPUT_DATA_NOT_SET
-		resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{
-			RestApi: &avsproto.RestAPINode_Output{},
-		}
-	}
-
-	// Extract top-level metadata for ContractRead nodes (following event trigger pattern)
-	if nodeTypeStr == NodeTypeContractRead {
-		// For ContractRead nodes, extract metadata directly from the contractReadOutput that was created
-		// ContractRead now does not embed metadata inside output; nothing to copy here
-	}
-
-	// 🚀 NEW: Extract top-level metadata for ContractWrite nodes (for consistency with ContractRead)
-	if nodeTypeStr == NodeTypeContractWrite {
-		// For ContractWrite nodes, extract metadata directly from the contractWriteOutput that was created
-		// ContractWrite now does not embed metadata inside output; nothing to copy here
 	}
 
 	// Attach execution_context; treat writes as simulated (Tenderly), reads and others as real RPC

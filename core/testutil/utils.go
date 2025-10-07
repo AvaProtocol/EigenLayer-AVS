@@ -190,6 +190,15 @@ func GetTestPaymasterAddress() string {
 	return testConfig.SmartWallet.PaymasterAddress.Hex()
 }
 
+// GetTestMoralisApiKey returns the Moralis API key for tests from aggregator config
+// Returns empty string if config is not loaded or key is not configured
+func GetTestMoralisApiKey() string {
+	if testConfig == nil || testConfig.MacroSecrets == nil {
+		return ""
+	}
+	return testConfig.MacroSecrets["moralis_api_key"]
+}
+
 // TriggerData represents the flattened trigger information for testing
 type TriggerData struct {
 	Type   avsproto.TriggerType
