@@ -132,6 +132,8 @@ The Balance Node returns a **direct array** of token objects (not wrapped in an 
 
 **The ONLY way to identify a native token is by the absence of the `tokenAddress` field.**
 
+**Technical Note**: Internally, Moralis returns native tokens with a placeholder address (`0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee`). The aggregator automatically removes this field during response processing to provide a cleaner API for clients.
+
 ```typescript
 // TypeScript example
 interface TokenBalance {

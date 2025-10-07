@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -159,10 +160,23 @@ func setupBalanceVM(t *testing.T, config *avsproto.BalanceNode_Config) (*VM, *av
 		t.Fatalf("failed to create VM: %v", err)
 	}
 
-	// Set mock Moralis API key
-	SetMacroSecrets(map[string]string{
-		"moralis_api_key": "test-api-key",
-	})
+	// Set up real Moralis API key from config if available
+	moralisAPIKey := testutil.GetTestMoralisApiKey()
+	if moralisAPIKey != "" {
+		// Debug logging for CI: Show that real API key was loaded
+		if len(moralisAPIKey) > 20 {
+			fmt.Printf("TEST SETUP: Loaded real Moralis API key: %s... (length: %d)\n", moralisAPIKey[:20], len(moralisAPIKey))
+		}
+		SetMacroSecrets(map[string]string{
+			"moralis_api_key": moralisAPIKey,
+		})
+	} else {
+		// Fallback for tests that don't need real API
+		fmt.Printf("TEST SETUP: No real Moralis API key found, using test-api-key\n")
+		SetMacroSecrets(map[string]string{
+			"moralis_api_key": "test-api-key",
+		})
+	}
 
 	return vm, node
 }
@@ -223,16 +237,7 @@ func TestBalanceNode_BasicFetch(t *testing.T) {
 }
 
 func TestBalanceNode_TokenAddressFilter(t *testing.T) {
-	// Create mock Moralis server
-	mockServer := createMockMoralisServer(t, mockTokenBalances)
-	defer mockServer.Close()
-
-	// Set test API base URL to use mock server
-	testMoralisAPIBaseURL = mockServer.URL
-	defer func() {
-		testMoralisAPIBaseURL = "" // Reset after test
-	}()
-
+	// Use real Moralis API (no mock server)
 	testAddress := "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 
 	// Filter for only WETH and USDC
@@ -252,38 +257,53 @@ func TestBalanceNode_TokenAddressFilter(t *testing.T) {
 
 	vm, _ := setupBalanceVM(t, config)
 
-	balances, err := vm.fetchMoralisBalances(testAddress, "eth", "test-api-key", config, nil)
+	// Get real Moralis API key from macro secrets (already set in setupBalanceVM)
+	moralisAPIKey := ""
+	if macroSecrets != nil {
+		moralisAPIKey = macroSecrets["moralis_api_key"]
+	}
+	if moralisAPIKey == "" || moralisAPIKey == "test-api-key" {
+		t.Skip("real moralis API key not configured in macros.secrets - skipping real API test")
+	}
+
+	balances, err := vm.fetchMoralisBalancesWithFiltering(testAddress, "eth", moralisAPIKey, config)
 
 	if err != nil {
 		t.Fatalf("expected successful balance fetch but got error: %v", err)
 	}
 
-	// Should only return the 2 requested tokens
-	expectedCount := 2
-	if len(balances) > expectedCount {
-		// Note: In real scenario with API, this would be exactly 2
-		// But our mock returns all, so we verify logic elsewhere
-		t.Logf("Note: Mock returns all tokens, actual API would filter")
-	}
+	// With real API, we may get 0-2 tokens depending on what the address actually holds
+	// The key test is that ALL returned tokens must be in our filter list
+	t.Logf("Real Moralis API returned %d token(s) for filtered request", len(balances))
 
-	// Verify returned tokens are in the filter list
-	for _, bal := range balances {
+	// Verify ALL returned tokens are in the filter list (this is the main test)
+	for i, bal := range balances {
 		token, ok := bal.(map[string]interface{})
 		if !ok {
 			continue
+		}
+
+		// Log token details for debugging
+		if symbol, ok := token["symbol"]; ok {
+			t.Logf("Token %d: %s", i+1, symbol)
 		}
 
 		tokenAddr, hasAddr := token["tokenAddress"].(string)
 		if hasAddr {
 			found := false
 			for _, addr := range tokenAddresses {
-				if tokenAddr == addr {
+				if strings.EqualFold(tokenAddr, addr) {
 					found = true
 					break
 				}
 			}
 			if !found {
-				t.Errorf("unexpected token address %s not in filter list", tokenAddr)
+				t.Errorf("FILTER TEST FAILED: unexpected token address %s not in filter list %v", tokenAddr, tokenAddresses)
+			}
+		} else {
+			// This might be a native token (ETH), which should not appear since we're filtering for specific ERC-20s
+			if nativeToken, ok := token["native_token"]; ok && nativeToken == true {
+				t.Logf("Found native token, which is expected to be included regardless of filter")
 			}
 		}
 	}
@@ -765,6 +785,107 @@ func TestBalanceNode_MissingAPIKey(t *testing.T) {
 	SetMacroSecrets(map[string]string{
 		"moralis_api_key": "test-api-key",
 	})
+}
+
+func TestBalanceNode_MultipleTokenAddresses(t *testing.T) {
+	// Integration test with REAL Moralis API
+	// Tests the two-phase fetching strategy with multiple tokenAddresses filter
+	// Critical test case: When one requested token has no balance (USDT),
+	// we should STILL return ETH (native) + WETH (has balance)
+	testAddress := "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e"
+
+	// Config with TWO token addresses: WETH (has balance) + USDT (no balance/no data)
+	config := &avsproto.BalanceNode_Config{
+		Address: testAddress,
+		Chain:   "sepolia",
+		TokenAddresses: []string{
+			"0xfff9976782d46cc05630d1f6ebab18b2324d6b14", // WETH (wallet HAS this)
+			"0xaa8e23fb1079ea71e0a56f48a2aa51851d8433d0", // USDT (wallet does NOT have this)
+		},
+		IncludeSpam:         false,
+		IncludeZeroBalances: false,
+		MinUsdValueCents:    0,
+	}
+
+	vm, _ := setupBalanceVM(t, config)
+
+	// Get real Moralis API key from macro secrets (already set in setupBalanceVM)
+	moralisAPIKey := ""
+	if macroSecrets != nil {
+		moralisAPIKey = macroSecrets["moralis_api_key"]
+	}
+	if moralisAPIKey == "" || moralisAPIKey == "test-api-key" {
+		t.Skip("real moralis API key not configured in macros.secrets - skipping integration test")
+	}
+
+	// Use fetchMoralisBalancesWithFiltering (the two-phase approach)
+	balances, err := vm.fetchMoralisBalancesWithFiltering(testAddress, "sepolia", moralisAPIKey, config)
+
+	if err != nil {
+		t.Fatalf("fetchMoralisBalancesWithFiltering failed: %v", err)
+	}
+
+	t.Logf("Total balances returned: %d", len(balances))
+
+	// CRITICAL REQUIREMENT: Even though USDT has no balance, we should get:
+	// 1. ETH (native token - always included)
+	// 2. WETH (requested and has balance)
+	// USDT should NOT be in the response (no balance)
+	if len(balances) == 0 {
+		t.Fatalf("❌ Response is EMPTY! This is the bug! Expected ETH + WETH (at least 2 tokens)")
+	}
+
+	// Check which tokens we got
+	hasETH := false
+	hasWETH := false
+	hasUSDT := false
+
+	for _, bal := range balances {
+		token, ok := bal.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		symbol := token["symbol"].(string)
+		t.Logf("Token: %s", symbol)
+
+		if symbol == "ETH" {
+			hasETH = true
+			t.Logf("✅ Found ETH (native token)")
+			// Check if it has tokenAddress (it shouldn't)
+			if _, hasAddr := token["tokenAddress"]; hasAddr {
+				t.Errorf("❌ ETH should NOT have tokenAddress field")
+			}
+		}
+
+		if symbol == "WETH" {
+			hasWETH = true
+			t.Logf("✅ Found WETH")
+		}
+
+		if symbol == "USDT" {
+			hasUSDT = true
+			t.Logf("Found USDT (unexpected - wallet doesn't have balance)")
+		}
+	}
+
+	// Verify we got the expected tokens
+	if !hasETH {
+		t.Errorf("❌ ETH (native token) is missing from response!")
+	}
+
+	if !hasWETH {
+		t.Errorf("❌ WETH is missing from response!")
+	}
+
+	if hasUSDT {
+		t.Logf("Note: USDT was returned (wallet has balance for it)")
+	}
+
+	// Final check: we should have at least 2 tokens (ETH + WETH)
+	if len(balances) < 2 {
+		t.Errorf("❌ Expected at least 2 tokens (ETH + WETH), got %d", len(balances))
+	}
 }
 
 func TestBalanceNode_MoralisAuthError(t *testing.T) {

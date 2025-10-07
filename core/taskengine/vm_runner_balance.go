@@ -213,6 +213,22 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 		return executionLogStep, err
 	}
 
+	// Debug logging for CI/testing (show first 20 chars of API key to verify it's loaded)
+	if len(moralisAPIKey) > 20 {
+		fmt.Printf("DEBUG: Moralis API key loaded: %s... (length: %d)\n", moralisAPIKey[:20], len(moralisAPIKey))
+	} else {
+		fmt.Printf("DEBUG: Moralis API key loaded (length: %d)\n", len(moralisAPIKey))
+	}
+
+	// Additional debug: check if it looks like a JWT
+	if strings.HasPrefix(moralisAPIKey, "eyJ") {
+		fmt.Printf("DEBUG: Moralis API key format: JWT (starts with eyJ)\n")
+	} else if moralisAPIKey == "test-api-key" {
+		fmt.Printf("DEBUG: Moralis API key format: test/mock key\n")
+	} else {
+		fmt.Printf("DEBUG: Moralis API key format: unknown/other\n")
+	}
+
 	// Fetch balances from Moralis
 	// Note: If client specifies tokenAddresses, we need a two-phase approach:
 	// 1. Get all tokens first (to include native token)
@@ -275,6 +291,7 @@ func (vm *VM) fetchMoralisBalancesWithFiltering(
 	if err != nil {
 		return nil, err
 	}
+	// Phase 1 complete
 
 	// If no tokenAddresses filter specified, return all balances
 	if len(config.TokenAddresses) == 0 {
@@ -302,19 +319,21 @@ func (vm *VM) fetchMoralisBalancesWithFiltering(
 			continue
 		}
 
-		// Check if this is a native token (always include)
-		if nativeToken, ok := token["native_token"].(bool); ok && nativeToken {
+		// Check if this is a native token (native tokens don't have the tokenAddress field)
+		// The fetchMoralisBalances function only adds tokenAddress for non-native tokens
+		tokenAddr, hasTokenAddr := token["tokenAddress"].(string)
+
+		if !hasTokenAddr {
+			// Native token (no tokenAddress field) - always include it
 			result = append(result, bal)
 			foundAddrs["native"] = true
 			continue
 		}
 
 		// Check if token address matches client's filter
-		if tokenAddr, ok := token["token_address"].(string); ok {
-			if _, requested := requestedAddrs[strings.ToLower(tokenAddr)]; requested {
-				result = append(result, bal)
-				foundAddrs[strings.ToLower(tokenAddr)] = true
-			}
+		if _, requested := requestedAddrs[strings.ToLower(tokenAddr)]; requested {
+			result = append(result, bal)
+			foundAddrs[strings.ToLower(tokenAddr)] = true
 		}
 	}
 
@@ -328,7 +347,6 @@ func (vm *VM) fetchMoralisBalancesWithFiltering(
 
 	// If we have missing addresses, fetch them specifically
 	if len(missingAddrs) > 0 {
-		fmt.Printf("DEBUG: Fetching missing token addresses: %v\n", missingAddrs)
 		missingBalances, err := vm.fetchMoralisBalances(address, chain, apiKey, config, missingAddrs)
 		if err != nil {
 			// Don't fail entirely - just log warning and continue with what we have
@@ -349,11 +367,13 @@ func (vm *VM) fetchMoralisBalances(
 	tokenAddresses []string, // NEW: optional specific addresses to fetch
 ) ([]interface{}, error) {
 	// Build Moralis API URL
+	// NOTE: Use /tokens endpoint (not /erc20) to support exclude_native parameter
+	// The /erc20 endpoint doesn't support native tokens even with exclude_native=false
 	baseURL := "https://deep-index.moralis.io/api/v2.2"
 	if testMoralisAPIBaseURL != "" {
 		baseURL = testMoralisAPIBaseURL
 	}
-	url := fmt.Sprintf("%s/%s/erc20", baseURL, address)
+	url := fmt.Sprintf("%s/wallets/%s/tokens", baseURL, address)
 
 	// Create HTTP client with timeout to prevent indefinite blocking
 	client := resty.New().SetTimeout(30 * time.Second)
@@ -366,18 +386,18 @@ func (vm *VM) fetchMoralisBalances(
 		request.SetQueryParam("exclude_spam", "true")
 	}
 
+	// CRITICAL: Always include native tokens (ETH, BNB, etc.)
+	// Moralis excludes native tokens by default, so we must explicitly request them
+	request.SetQueryParam("exclude_native", "false")
+
 	// Add token_addresses parameter if specified (used for Phase 2 missing token fetching)
 	if len(tokenAddresses) > 0 {
 		tokenAddressesStr := strings.Join(tokenAddresses, ",")
 		request.SetQueryParam("token_addresses", tokenAddressesStr)
-		// Debug log to verify checksumming
-		fmt.Printf("DEBUG: Sending token_addresses to Moralis: %s\n", tokenAddressesStr)
 	}
 
 	// Execute request
 	resp, err := request.Get(url)
-	fmt.Printf("DEBUG: Moralis API URL: %s\n", url)
-	fmt.Printf("DEBUG: Moralis response status: %d\n", resp.StatusCode())
 	if err != nil {
 		return nil, fmt.Errorf("failed to call Moralis API: %w", err)
 	}
