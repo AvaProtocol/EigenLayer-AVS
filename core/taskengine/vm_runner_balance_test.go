@@ -761,6 +761,12 @@ func TestBalanceNode_OutputStructure(t *testing.T) {
 }
 
 func TestBalanceNode_MissingAPIKey(t *testing.T) {
+	// Skip this test if real Moralis API key is available
+	// This test can only run in environments without the real API key
+	if testutil.GetTestMoralisApiKey() != "" {
+		t.Skip("Skipping missing API key test - real API key is configured")
+	}
+
 	// Clear macro secrets to simulate missing API key
 	SetMacroSecrets(map[string]string{})
 
@@ -769,7 +775,32 @@ func TestBalanceNode_MissingAPIKey(t *testing.T) {
 		Chain:   "sepolia",
 	}
 
-	vm, node := setupBalanceVM(t, config)
+	node := &avsproto.BalanceNode{
+		Config: config,
+	}
+
+	taskNode := &avsproto.TaskNode{
+		Id:   "balance-node-1",
+		Name: "balance-node-1",
+		TaskType: &avsproto.TaskNode_Balance{
+			Balance: node,
+		},
+	}
+
+	vm, err := NewVMWithData(
+		&model.Task{
+			Task: &avsproto.Task{
+				SmartWalletAddress: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+				Nodes:              []*avsproto.TaskNode{taskNode},
+			},
+		},
+		nil, // triggerData
+		nil, // smartWalletConfig
+		nil, // secrets
+	)
+	if err != nil {
+		t.Fatalf("failed to create VM: %v", err)
+	}
 
 	step, err := vm.runBalance("balance-node-1", node)
 
