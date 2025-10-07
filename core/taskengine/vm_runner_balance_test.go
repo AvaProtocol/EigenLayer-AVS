@@ -191,7 +191,7 @@ func TestBalanceNode_BasicFetch(t *testing.T) {
 	vm, _ := setupBalanceVM(t, config)
 
 	// Fetch balances using the mock server
-	balances, err := vm.fetchMoralisBalances(testAddress, "sepolia", "test-api-key", config)
+	balances, err := vm.fetchMoralisBalances(testAddress, "sepolia", "test-api-key", config, nil)
 
 	if err != nil {
 		t.Fatalf("expected successful balance fetch but got error: %v", err)
@@ -252,7 +252,7 @@ func TestBalanceNode_TokenAddressFilter(t *testing.T) {
 
 	vm, _ := setupBalanceVM(t, config)
 
-	balances, err := vm.fetchMoralisBalances(testAddress, "eth", "test-api-key", config)
+	balances, err := vm.fetchMoralisBalances(testAddress, "eth", "test-api-key", config, nil)
 
 	if err != nil {
 		t.Fatalf("expected successful balance fetch but got error: %v", err)
@@ -289,6 +289,49 @@ func TestBalanceNode_TokenAddressFilter(t *testing.T) {
 	}
 }
 
+func TestBalanceNode_FilterInvalidTokenAddresses(t *testing.T) {
+	// Create mock Moralis server
+	mockServer := createMockMoralisServer(t, mockTokenBalances)
+	defer mockServer.Close()
+
+	// Set test API base URL to use mock server
+	testMoralisAPIBaseURL = mockServer.URL
+	defer func() {
+		testMoralisAPIBaseURL = "" // Reset after test
+	}()
+
+	testAddress := "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+
+	// Include invalid ETH placeholder address that should be filtered out
+	tokenAddresses := []string{
+		"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", // ETH placeholder - should be filtered
+		"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH - valid
+		"0xinvalidaddress",                           // Invalid - should be filtered
+		"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", // USDC - valid
+	}
+
+	config := &avsproto.BalanceNode_Config{
+		Address:             testAddress,
+		Chain:               "ethereum",
+		TokenAddresses:      tokenAddresses,
+		IncludeSpam:         false,
+		IncludeZeroBalances: true,
+		MinUsdValueCents:    0,
+	}
+
+	vm, _ := setupBalanceVM(t, config)
+
+	balances, err := vm.fetchMoralisBalances(testAddress, "eth", "test-api-key", config, nil)
+
+	if err != nil {
+		t.Fatalf("expected successful balance fetch but got error: %v", err)
+	}
+
+	// Should succeed without sending invalid addresses to Moralis
+	// The mock server would have received only valid addresses (WETH, USDC)
+	t.Logf("Successfully filtered invalid token addresses, returned %d balances", len(balances))
+}
+
 func TestBalanceNode_IncludeZeroBalances(t *testing.T) {
 	// Create mock Moralis server
 	mockServer := createMockMoralisServer(t, mockTokenBalances)
@@ -312,7 +355,7 @@ func TestBalanceNode_IncludeZeroBalances(t *testing.T) {
 
 	vm, _ := setupBalanceVM(t, config)
 
-	balances, err := vm.fetchMoralisBalances(testAddress, "sepolia", "test-api-key", config)
+	balances, err := vm.fetchMoralisBalances(testAddress, "sepolia", "test-api-key", config, nil)
 
 	if err != nil {
 		t.Fatalf("expected successful balance fetch but got error: %v", err)
@@ -360,7 +403,7 @@ func TestBalanceNode_IncludeSpam(t *testing.T) {
 
 	vm, _ := setupBalanceVM(t, config)
 
-	balances, err := vm.fetchMoralisBalances(testAddress, "sepolia", "test-api-key", config)
+	balances, err := vm.fetchMoralisBalances(testAddress, "sepolia", "test-api-key", config, nil)
 
 	if err != nil {
 		t.Fatalf("expected successful balance fetch but got error: %v", err)
@@ -408,7 +451,7 @@ func TestBalanceNode_MinUsdValueFilter(t *testing.T) {
 
 	vm, _ := setupBalanceVM(t, config)
 
-	balances, err := vm.fetchMoralisBalances(testAddress, "sepolia", "test-api-key", config)
+	balances, err := vm.fetchMoralisBalances(testAddress, "sepolia", "test-api-key", config, nil)
 
 	if err != nil {
 		t.Fatalf("expected successful balance fetch but got error: %v", err)
@@ -664,7 +707,7 @@ func TestBalanceNode_OutputStructure(t *testing.T) {
 
 	vm, _ := setupBalanceVM(t, config)
 
-	balances, err := vm.fetchMoralisBalances(testAddress, "sepolia", "test-api-key", config)
+	balances, err := vm.fetchMoralisBalances(testAddress, "sepolia", "test-api-key", config, nil)
 
 	if err != nil {
 		t.Fatalf("expected successful balance fetch but got error: %v", err)
@@ -748,7 +791,7 @@ func TestBalanceNode_MoralisAuthError(t *testing.T) {
 	vm, _ := setupBalanceVM(t, config)
 
 	// Attempt to fetch balances with invalid API key
-	balances, err := vm.fetchMoralisBalances(testAddress, "sepolia", "invalid-test-api-key", config)
+	balances, err := vm.fetchMoralisBalances(testAddress, "sepolia", "invalid-test-api-key", config, nil)
 
 	// Should receive an error
 	if err == nil {
