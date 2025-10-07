@@ -213,8 +213,27 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 		return executionLogStep, err
 	}
 
+	// Debug logging for CI/testing (show first 20 chars of API key to verify it's loaded)
+	if len(moralisAPIKey) > 20 {
+		fmt.Printf("DEBUG: Moralis API key loaded: %s... (length: %d)\n", moralisAPIKey[:20], len(moralisAPIKey))
+	} else {
+		fmt.Printf("DEBUG: Moralis API key loaded (length: %d)\n", len(moralisAPIKey))
+	}
+
+	// Additional debug: check if it looks like a JWT
+	if strings.HasPrefix(moralisAPIKey, "eyJ") {
+		fmt.Printf("DEBUG: Moralis API key format: JWT (starts with eyJ)\n")
+	} else if moralisAPIKey == "test-api-key" {
+		fmt.Printf("DEBUG: Moralis API key format: test/mock key\n")
+	} else {
+		fmt.Printf("DEBUG: Moralis API key format: unknown/other\n")
+	}
+
 	// Fetch balances from Moralis
-	balances, err := v.fetchMoralisBalances(address, moralisChain, moralisAPIKey, config)
+	// Note: If client specifies tokenAddresses, we need a two-phase approach:
+	// 1. Get all tokens first (to include native token)
+	// 2. If any requested addresses are missing, query them specifically
+	balances, err := v.fetchMoralisBalancesWithFiltering(address, moralisChain, moralisAPIKey, config)
 	if err != nil {
 		err = fmt.Errorf("failed to fetch balances: %w", err)
 		executionLogStep.Error = err.Error()
@@ -259,17 +278,102 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 // testMoralisAPIBaseURL allows tests to override the Moralis API base URL
 var testMoralisAPIBaseURL string
 
-// fetchMoralisBalances calls the Moralis API to get wallet token balances
-func (vm *VM) fetchMoralisBalances(
+// fetchMoralisBalancesWithFiltering retrieves token balances with two-phase approach:
+// Phase 1: Get all tokens (to include native token like ETH)
+// Phase 2: If client specified tokenAddresses and some are missing, query them specifically
+func (vm *VM) fetchMoralisBalancesWithFiltering(
 	address, chain, apiKey string,
 	config *avsproto.BalanceNode_Config,
 ) ([]interface{}, error) {
+	// Phase 1: Always fetch all tokens first (no token_addresses filter)
+	// This ensures we get native tokens (ETH, BNB, etc.)
+	allBalances, err := vm.fetchMoralisBalances(address, chain, apiKey, config, nil)
+	if err != nil {
+		return nil, err
+	}
+	// Phase 1 complete
+
+	// If no tokenAddresses filter specified, return all balances
+	if len(config.TokenAddresses) == 0 {
+		return allBalances, nil
+	}
+
+	// Client specified tokenAddresses - need to filter and potentially fetch missing ones
+	// Normalize client's requested addresses to lowercase for comparison
+	requestedAddrs := make(map[string]string) // lowercase -> checksummed
+	for _, addr := range config.TokenAddresses {
+		if addr != "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" && common.IsHexAddress(addr) {
+			checksummed := common.HexToAddress(addr).Hex()
+			requestedAddrs[strings.ToLower(checksummed)] = checksummed
+		}
+	}
+
+	// Build result set: tokens that match client's filter
+	result := make([]interface{}, 0)
+	foundAddrs := make(map[string]bool) // Track which addresses we found
+
+	// Scan all balances and include matches (including native token)
+	for _, bal := range allBalances {
+		token, ok := bal.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Check if this is a native token (native tokens don't have the tokenAddress field)
+		// The fetchMoralisBalances function only adds tokenAddress for non-native tokens
+		tokenAddr, hasTokenAddr := token["tokenAddress"].(string)
+
+		if !hasTokenAddr {
+			// Native token (no tokenAddress field) - always include it
+			result = append(result, bal)
+			foundAddrs["native"] = true
+			continue
+		}
+
+		// Check if token address matches client's filter
+		if _, requested := requestedAddrs[strings.ToLower(tokenAddr)]; requested {
+			result = append(result, bal)
+			foundAddrs[strings.ToLower(tokenAddr)] = true
+		}
+	}
+
+	// Phase 2: Check if any requested addresses are missing
+	missingAddrs := make([]string, 0)
+	for lowercaseAddr, checksummedAddr := range requestedAddrs {
+		if !foundAddrs[lowercaseAddr] {
+			missingAddrs = append(missingAddrs, checksummedAddr)
+		}
+	}
+
+	// If we have missing addresses, fetch them specifically
+	if len(missingAddrs) > 0 {
+		missingBalances, err := vm.fetchMoralisBalances(address, chain, apiKey, config, missingAddrs)
+		if err != nil {
+			// Don't fail entirely - just log warning and continue with what we have
+			fmt.Printf("WARNING: Failed to fetch missing token addresses: %v\n", err)
+		} else {
+			result = append(result, missingBalances...)
+		}
+	}
+
+	return result, nil
+}
+
+// fetchMoralisBalances calls the Moralis API to get wallet token balances
+// If tokenAddresses is nil, fetches all tokens. If specified, fetches only those tokens.
+func (vm *VM) fetchMoralisBalances(
+	address, chain, apiKey string,
+	config *avsproto.BalanceNode_Config,
+	tokenAddresses []string, // NEW: optional specific addresses to fetch
+) ([]interface{}, error) {
 	// Build Moralis API URL
+	// NOTE: Use /tokens endpoint (not /erc20) to support exclude_native parameter
+	// The /erc20 endpoint doesn't support native tokens even with exclude_native=false
 	baseURL := "https://deep-index.moralis.io/api/v2.2"
 	if testMoralisAPIBaseURL != "" {
 		baseURL = testMoralisAPIBaseURL
 	}
-	url := fmt.Sprintf("%s/%s/erc20", baseURL, address)
+	url := fmt.Sprintf("%s/wallets/%s/tokens", baseURL, address)
 
 	// Create HTTP client with timeout to prevent indefinite blocking
 	client := resty.New().SetTimeout(30 * time.Second)
@@ -282,10 +386,13 @@ func (vm *VM) fetchMoralisBalances(
 		request.SetQueryParam("exclude_spam", "true")
 	}
 
-	// Add token_addresses parameter if specified
-	if len(config.TokenAddresses) > 0 {
-		// Join token addresses with comma separator as required by Moralis API
-		tokenAddressesStr := strings.Join(config.TokenAddresses, ",")
+	// CRITICAL: Always include native tokens (ETH, BNB, etc.)
+	// Moralis excludes native tokens by default, so we must explicitly request them
+	request.SetQueryParam("exclude_native", "false")
+
+	// Add token_addresses parameter if specified (used for Phase 2 missing token fetching)
+	if len(tokenAddresses) > 0 {
+		tokenAddressesStr := strings.Join(tokenAddresses, ",")
 		request.SetQueryParam("token_addresses", tokenAddressesStr)
 	}
 
