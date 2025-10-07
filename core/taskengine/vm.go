@@ -2893,6 +2893,15 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			balanceConfig.MinUsdValueCents = int64(minUsdValue * 100)
 		}
 
+		if tokenAddresses, ok := config["tokenAddresses"].([]interface{}); ok {
+			// Convert interface{} slice to string slice
+			for _, addr := range tokenAddresses {
+				if addrStr, ok := addr.(string); ok {
+					balanceConfig.TokenAddresses = append(balanceConfig.TokenAddresses, addrStr)
+				}
+			}
+		}
+
 		node.TaskType = &avsproto.TaskNode_Balance{
 			Balance: &avsproto.BalanceNode{
 				Config: balanceConfig,
@@ -3357,6 +3366,7 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				"includeSpam":         balance.Config.IncludeSpam,
 				"includeZeroBalances": balance.Config.IncludeZeroBalances,
 				"minUsdValue":         float64(balance.Config.MinUsdValueCents) / 100.0,
+				"tokenAddresses":      balance.Config.TokenAddresses,
 			}
 
 			// Clean up complex protobuf types before returning

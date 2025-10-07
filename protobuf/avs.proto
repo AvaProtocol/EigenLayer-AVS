@@ -502,6 +502,9 @@ message BalanceNode {
     // Filter tokens below this USD value, in cents (default: 0)
     // Example: 100 = $1.00, 1050 = $10.50
     int64 min_usd_value_cents = 5;
+    // Optional list of specific token addresses to fetch balances for
+    // If empty, fetches all tokens. If specified, only returns balances for these tokens.
+    repeated string token_addresses = 6;
   }
 
   message Output {
