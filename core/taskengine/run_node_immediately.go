@@ -2966,6 +2966,34 @@ func (n *Engine) parseUint64(value interface{}) (uint64, error) {
 	}
 }
 
+// assignOutputData is a helper function that converts interface{} output from handlers
+// to the correct protobuf oneof type using a type switch.
+// This helper eliminates code duplication where the same type switch pattern appears multiple times.
+func assignOutputData(resp *avsproto.RunNodeWithInputsResp, outputData interface{}) {
+	switch v := outputData.(type) {
+	case *avsproto.RunNodeWithInputsResp_RestApi:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_CustomCode:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_Balance:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_ContractRead:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_ContractWrite:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_EthTransfer:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_Graphql:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_Branch:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_Filter:
+		resp.OutputData = v
+	case *avsproto.RunNodeWithInputsResp_Loop:
+		resp.OutputData = v
+	}
+}
+
 // extractExecutionResult extracts the result data from an execution step using node-specific handlers
 // This provides a clean, object-oriented approach that eliminates code duplication
 func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) (map[string]interface{}, error) {
@@ -2992,7 +3020,7 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 	// Use the handler to extract data
 	result, err := handler.ExtractFromExecutionStep(executionStep)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to extract execution result for node type %q: %w", nodeType, err)
 	}
 
 	// ALWAYS add step success/error fields for ALL node types (general approach)
@@ -3088,31 +3116,8 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			// Fallback to RestAPI for unknown node types
 			resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{RestApi: &avsproto.RestAPINode_Output{}}
 		} else {
-			// The handler returns the correct protobuf oneof type
-			// Use type switch to convert interface{} to the protobuf oneof type
-			outputData := handler.CreateEmptyOutput(nodeConfig)
-			switch v := outputData.(type) {
-			case *avsproto.RunNodeWithInputsResp_RestApi:
-				resp.OutputData = v
-			case *avsproto.RunNodeWithInputsResp_CustomCode:
-				resp.OutputData = v
-			case *avsproto.RunNodeWithInputsResp_Balance:
-				resp.OutputData = v
-			case *avsproto.RunNodeWithInputsResp_ContractRead:
-				resp.OutputData = v
-			case *avsproto.RunNodeWithInputsResp_ContractWrite:
-				resp.OutputData = v
-			case *avsproto.RunNodeWithInputsResp_EthTransfer:
-				resp.OutputData = v
-			case *avsproto.RunNodeWithInputsResp_Graphql:
-				resp.OutputData = v
-			case *avsproto.RunNodeWithInputsResp_Branch:
-				resp.OutputData = v
-			case *avsproto.RunNodeWithInputsResp_Filter:
-				resp.OutputData = v
-			case *avsproto.RunNodeWithInputsResp_Loop:
-				resp.OutputData = v
-			}
+			// Use helper to convert handler output to correct protobuf oneof type
+			assignOutputData(resp, handler.CreateEmptyOutput(nodeConfig))
 		}
 
 		return resp, nil
@@ -3164,30 +3169,8 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 				Error:   err.Error(),
 			}, nil
 		}
-		// The handler returns the correct protobuf oneof type
-		// Use type switch to convert interface{} to the protobuf oneof type
-		switch v := outputData.(type) {
-		case *avsproto.RunNodeWithInputsResp_RestApi:
-			resp.OutputData = v
-		case *avsproto.RunNodeWithInputsResp_CustomCode:
-			resp.OutputData = v
-		case *avsproto.RunNodeWithInputsResp_Balance:
-			resp.OutputData = v
-		case *avsproto.RunNodeWithInputsResp_ContractRead:
-			resp.OutputData = v
-		case *avsproto.RunNodeWithInputsResp_ContractWrite:
-			resp.OutputData = v
-		case *avsproto.RunNodeWithInputsResp_EthTransfer:
-			resp.OutputData = v
-		case *avsproto.RunNodeWithInputsResp_Graphql:
-			resp.OutputData = v
-		case *avsproto.RunNodeWithInputsResp_Branch:
-			resp.OutputData = v
-		case *avsproto.RunNodeWithInputsResp_Filter:
-			resp.OutputData = v
-		case *avsproto.RunNodeWithInputsResp_Loop:
-			resp.OutputData = v
-		}
+		// Use helper to convert handler output to correct protobuf oneof type
+		assignOutputData(resp, outputData)
 		if metadata != nil {
 			resp.Metadata = metadata
 		}
