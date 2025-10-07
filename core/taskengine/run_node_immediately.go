@@ -2999,8 +2999,12 @@ func assignOutputData(resp *avsproto.RunNodeWithInputsResp, outputData interface
 func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) (map[string]interface{}, error) {
 	// Get node type from execution step
 	nodeType := executionStep.Type
-	if nodeType == "" {
-		// Fallback: try to determine from output data
+	if nodeType != "" {
+		// Normal case: Convert protobuf enum string to internal node type constant
+		// e.g., "NODE_TYPE_CONTRACT_WRITE" -> "contractWrite"
+		nodeType = n.convertProtobufNodeTypeToInternal(nodeType)
+	} else {
+		// Fallback case: try to determine from output data when Type field is empty
 		nodeType = n.detectNodeTypeFromStep(executionStep)
 	}
 
@@ -3031,6 +3035,36 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 	}
 
 	return result, nil
+}
+
+// convertProtobufNodeTypeToInternal converts protobuf enum string names to internal node type constants
+// e.g., "NODE_TYPE_CONTRACT_WRITE" -> "contractWrite"
+func (n *Engine) convertProtobufNodeTypeToInternal(protobufNodeType string) string {
+	switch protobufNodeType {
+	case "NODE_TYPE_CONTRACT_WRITE":
+		return NodeTypeContractWrite
+	case "NODE_TYPE_CONTRACT_READ":
+		return NodeTypeContractRead
+	case "NODE_TYPE_REST_API":
+		return NodeTypeRestAPI
+	case "NODE_TYPE_CUSTOM_CODE":
+		return NodeTypeCustomCode
+	case "NODE_TYPE_ETH_TRANSFER":
+		return NodeTypeETHTransfer
+	case "NODE_TYPE_GRAPHQL_QUERY":
+		return NodeTypeGraphQLQuery
+	case "NODE_TYPE_BRANCH":
+		return NodeTypeBranch
+	case "NODE_TYPE_FILTER":
+		return NodeTypeFilter
+	case "NODE_TYPE_LOOP":
+		return NodeTypeLoop
+	case "NODE_TYPE_BALANCE":
+		return NodeTypeBalance
+	default:
+		// If it's not a protobuf enum string, return as-is (it might already be the internal constant)
+		return protobufNodeType
+	}
 }
 
 // detectNodeTypeFromStep detects the node type from the execution step's output data
