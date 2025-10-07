@@ -3107,7 +3107,9 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		if balance.GetData() != nil {
 			// Extract the balance data (always an array of token objects)
 			balanceArray := balance.GetData().AsInterface()
-			return map[string]interface{}{"data": balanceArray}, nil
+			// For BalanceNode, store the array directly in the data field
+			// This will be handled specially in the RPC response layer
+			result["data"] = balanceArray
 		}
 	}
 
@@ -3716,15 +3718,15 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			}
 		}
 	case NodeTypeBalance:
-		// For balance nodes - create output with balance array data
-		// Result format is always {"data": [array of token balances]}
+		// For balance nodes - return the array directly without nesting
+		// extractExecutionResult always populates result["data"] with the balance array
 		var dataValue *structpb.Value
 		var err error
 
-		if result != nil && len(result) > 0 {
-			// Extract the data field (always present from extractExecutionResult)
-			balanceData := result["data"]
-			dataValue, err = structpb.NewValue(balanceData)
+		if result != nil && result["data"] != nil {
+			// Extract balance array from result["data"]
+			// extractExecutionResult (line 3112) always sets this field for BalanceNode
+			dataValue, err = structpb.NewValue(result["data"])
 			if err != nil {
 				return &avsproto.RunNodeWithInputsResp{
 					Success: false,

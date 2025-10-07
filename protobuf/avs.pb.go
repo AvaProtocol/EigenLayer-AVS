@@ -8294,8 +8294,11 @@ type BalanceNode_Config struct {
 	// Filter tokens below this USD value, in cents (default: 0)
 	// Example: 100 = $1.00, 1050 = $10.50
 	MinUsdValueCents int64 `protobuf:"varint,5,opt,name=min_usd_value_cents,json=minUsdValueCents,proto3" json:"min_usd_value_cents,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Optional list of specific token addresses to fetch balances for
+	// If empty, fetches all tokens. If specified, only returns balances for these tokens.
+	TokenAddresses []string `protobuf:"bytes,6,rep,name=token_addresses,json=tokenAddresses,proto3" json:"token_addresses,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *BalanceNode_Config) Reset() {
@@ -8361,6 +8364,13 @@ func (x *BalanceNode_Config) GetMinUsdValueCents() int64 {
 		return x.MinUsdValueCents
 	}
 	return 0
+}
+
+func (x *BalanceNode_Config) GetTokenAddresses() []string {
+	if x != nil {
+		return x.TokenAddresses
+	}
+	return nil
 }
 
 type BalanceNode_Output struct {
@@ -9390,15 +9400,16 @@ const file_avs_proto_rawDesc = "" +
 	"\x04lang\x18\x01 \x01(\x0e2\x10.aggregator.LangR\x04lang\x12\x16\n" +
 	"\x06source\x18\x02 \x01(\tR\x06source\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xbc\x02\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xe5\x02\n" +
 	"\vBalanceNode\x126\n" +
-	"\x06config\x18\x01 \x01(\v2\x1e.aggregator.BalanceNode.ConfigR\x06config\x1a\xbe\x01\n" +
+	"\x06config\x18\x01 \x01(\v2\x1e.aggregator.BalanceNode.ConfigR\x06config\x1a\xe7\x01\n" +
 	"\x06Config\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x14\n" +
 	"\x05chain\x18\x02 \x01(\tR\x05chain\x12!\n" +
 	"\finclude_spam\x18\x03 \x01(\bR\vincludeSpam\x122\n" +
 	"\x15include_zero_balances\x18\x04 \x01(\bR\x13includeZeroBalances\x12-\n" +
-	"\x13min_usd_value_cents\x18\x05 \x01(\x03R\x10minUsdValueCents\x1a4\n" +
+	"\x13min_usd_value_cents\x18\x05 \x01(\x03R\x10minUsdValueCents\x12'\n" +
+	"\x0ftoken_addresses\x18\x06 \x03(\tR\x0etokenAddresses\x1a4\n" +
 	"\x06Output\x12*\n" +
 	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\x96\x02\n" +
 	"\n" +

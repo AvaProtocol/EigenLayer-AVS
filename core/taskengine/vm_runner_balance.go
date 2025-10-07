@@ -256,13 +256,20 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 	return executionLogStep, nil
 }
 
+// testMoralisAPIBaseURL allows tests to override the Moralis API base URL
+var testMoralisAPIBaseURL string
+
 // fetchMoralisBalances calls the Moralis API to get wallet token balances
 func (vm *VM) fetchMoralisBalances(
 	address, chain, apiKey string,
 	config *avsproto.BalanceNode_Config,
 ) ([]interface{}, error) {
 	// Build Moralis API URL
-	url := fmt.Sprintf("https://deep-index.moralis.io/api/v2.2/%s/erc20", address)
+	baseURL := "https://deep-index.moralis.io/api/v2.2"
+	if testMoralisAPIBaseURL != "" {
+		baseURL = testMoralisAPIBaseURL
+	}
+	url := fmt.Sprintf("%s/%s/erc20", baseURL, address)
 
 	// Create HTTP client with timeout to prevent indefinite blocking
 	client := resty.New().SetTimeout(30 * time.Second)
@@ -273,6 +280,13 @@ func (vm *VM) fetchMoralisBalances(
 	// Add exclude_spam parameter (exclude by default unless includeSpam is true)
 	if !config.IncludeSpam {
 		request.SetQueryParam("exclude_spam", "true")
+	}
+
+	// Add token_addresses parameter if specified
+	if len(config.TokenAddresses) > 0 {
+		// Join token addresses with comma separator as required by Moralis API
+		tokenAddressesStr := strings.Join(config.TokenAddresses, ",")
+		request.SetQueryParam("token_addresses", tokenAddressesStr)
 	}
 
 	// Execute request
