@@ -818,6 +818,415 @@ func TestBalanceNode_MissingAPIKey(t *testing.T) {
 	})
 }
 
+func TestBalanceNode_TokenAddressesWithTemplateVariables(t *testing.T) {
+	// Integration test with REAL Moralis API
+	// This test reproduces the exact client request structure with template variables
+	// that reference nested objects in settings (uniswap_v3_pool.token0/token1)
+	// CRITICAL: When specific token addresses are requested, zero balances should be included
+	testAddress := "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e"
+
+	// Token addresses with template variables (will be resolved by VM)
+	// NOTE: These reference the token OBJECTS, not .token0.id
+	// The backend will intelligently extract the 'id' or 'address' field from the object
+	tokenAddressTemplates := []string{
+		"{{settings.uniswap_v3_pool.token0}}", // Resolves to {id: "0x019...", symbol: "WETH"}
+		"{{settings.uniswap_v3_pool.token1}}", // Resolves to {id: "0x1c7...", symbol: "USDC"}
+	}
+
+	config := &avsproto.BalanceNode_Config{
+		Address:        testAddress,
+		Chain:          "sepolia",
+		TokenAddresses: tokenAddressTemplates, // These contain template variables
+		IncludeSpam:    false,
+		// includeZeroBalances is NOT provided in client request (omitted field)
+		// Protobuf default = false, smart default will enable it, and Phase 3 will synthesize missing tokens
+		IncludeZeroBalances: false,
+		MinUsdValueCents:    0,
+	}
+
+	// Create BalanceNode with template variables in tokenAddresses
+	node := &avsproto.BalanceNode{
+		Config: config,
+	}
+
+	nodes := []*avsproto.TaskNode{
+		{
+			Id:   "balance-node-1",
+			Name: "balanceNode",
+			TaskType: &avsproto.TaskNode_Balance{
+				Balance: node,
+			},
+		},
+	}
+
+	trigger := &avsproto.TaskTrigger{
+		Id:   "trigger-1",
+		Name: "trigger-1",
+	}
+
+	edges := []*avsproto.TaskEdge{
+		{
+			Id:     "e1",
+			Source: trigger.Id,
+			Target: "balance-node-1",
+		},
+	}
+
+	// Create VM with task structure
+	vm, err := NewVMWithData(&model.Task{
+		Task: &avsproto.Task{
+			Id:      "test-task",
+			Nodes:   nodes,
+			Edges:   edges,
+			Trigger: trigger,
+		},
+	}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
+	if err != nil {
+		t.Fatalf("failed to create VM: %v", err)
+	}
+
+	// Set up real Moralis API key from config
+	moralisAPIKey := testutil.GetTestMoralisApiKey()
+	if moralisAPIKey == "" || moralisAPIKey == "test-api-key" {
+		t.Skip("real moralis API key not configured in macros.secrets - skipping integration test")
+	}
+	SetMacroSecrets(map[string]string{
+		"moralis_api_key": moralisAPIKey,
+	})
+
+	// Set up the input variables that match the client request
+	// This includes the nested settings.uniswap_v3_pool structure
+	// Add each top-level variable to the VM using AddVar
+	vm.AddVar("eventTrigger", map[string]interface{}{
+		"data": map[string]interface{}{},
+	})
+
+	vm.AddVar("settings", map[string]interface{}{
+		"chain":    "Sepolia",
+		"amount":   "10",
+		"runner":   testAddress,
+		"chain_id": 11155111,
+		"uniswap_v3_pool": map[string]interface{}{
+			"id": "0xee8027d8430344ba3419f844ba858ac7f1a92095",
+			"token0": map[string]interface{}{
+				"id":     "0x019d3c1576190e5396db92e987e5631fbb318aeb", // WETH on Sepolia
+				"symbol": "WETH",
+			},
+			"token1": map[string]interface{}{
+				"id":     "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", // USDC on Sepolia
+				"symbol": "USDC",
+			},
+			"feeTier": "3000",
+		},
+		"uniswap_v3_contracts": map[string]interface{}{
+			"quoterV2":     "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3",
+			"swapRouter02": "0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E",
+		},
+	})
+
+	t.Log("Running BalanceNode with template variables in tokenAddresses...")
+	t.Logf("Template 1 (object): %s", tokenAddressTemplates[0])
+	t.Logf("Template 2 (object): %s", tokenAddressTemplates[1])
+	t.Log("Backend should extract 'id' or 'address' field from resolved objects")
+
+	// Execute the balance node - this will resolve template variables internally
+	step, err := vm.runBalance("balance-node-1", node)
+
+	if err != nil {
+		t.Fatalf("runBalance failed: %v", err)
+	}
+
+	if !step.Success {
+		t.Fatalf("Expected successful execution but got error: %s", step.Error)
+	}
+
+	// Log the execution step details
+	t.Logf("Execution step log:\n%s", step.Log)
+
+	// Parse the output data from BalanceNode_Output
+	balanceOutput := step.GetBalance()
+	if balanceOutput == nil {
+		t.Fatal("Expected balance output data but got nil")
+	}
+
+	if balanceOutput.Data == nil {
+		t.Fatal("Expected data in balance output but got nil")
+	}
+
+	// The Data field contains the balances array directly
+	outputData := balanceOutput.Data.AsInterface()
+	balancesRaw, ok := outputData.([]interface{})
+	if !ok {
+		t.Fatalf("Expected output data to be an array but got: %T", outputData)
+	}
+
+	t.Logf("Total balances returned: %d", len(balancesRaw))
+
+	// CRITICAL VERIFICATION: Check that template variables were resolved
+	// We should get balances for the specific tokens from the nested settings
+
+	// Expected tokens after template resolution:
+	// 1. ETH (native token - always included)
+	// 2. WETH (0x019d3c1576190e5396db92e987e5631fbb318aeb) - from settings.uniswap_v3_pool.token0 (extracted .id)
+	//    - Should be included EVEN WITH ZERO BALANCE because user explicitly requested it
+	// 3. USDC (0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238) - from settings.uniswap_v3_pool.token1 (extracted .id)
+
+	if len(balancesRaw) == 0 {
+		t.Fatal("Expected at least ETH in balances but got empty array")
+	}
+
+	// When specific token addresses are requested:
+	// - We ALWAYS get ETH (native token)
+	// - We get requested tokens that exist in wallet history (even with zero balance)
+	// - Moralis limitation: Won't return tokens wallet never interacted with
+	// So minimum is 1 (ETH), but we expect at least ETH + USDC for this wallet
+	if len(balancesRaw) < 2 {
+		t.Errorf("Expected at least 2 tokens (ETH + USDC) but got %d", len(balancesRaw))
+	}
+
+	// Expected addresses for verification
+	expectedWETHAddr := "0x019d3c1576190e5396db92e987e5631fbb318aeb"
+	expectedUSDCAddr := "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+
+	// Track which tokens we found
+	hasETH := false
+	hasWETH := false
+	hasUSDC := false
+	wethAddress := ""
+	usdcAddress := ""
+
+	for _, balRaw := range balancesRaw {
+		balance, ok := balRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		symbol, _ := balance["symbol"].(string)
+		tokenAddr, hasAddr := balance["tokenAddress"].(string)
+
+		t.Logf("Token: %s (address: %s)", symbol, tokenAddr)
+
+		if symbol == "ETH" {
+			hasETH = true
+			// Native ETH should not have tokenAddress field
+			if hasAddr && tokenAddr != "" {
+				t.Errorf("ETH (native token) should not have tokenAddress field")
+			}
+		}
+
+		// Check for WETH by address (symbol might be "UNKNOWN" if synthesized)
+		if hasAddr && strings.EqualFold(tokenAddr, expectedWETHAddr) {
+			hasWETH = true
+			wethAddress = tokenAddr
+		}
+
+		// Check for USDC by address
+		if hasAddr && strings.EqualFold(tokenAddr, expectedUSDCAddr) {
+			hasUSDC = true
+			usdcAddress = tokenAddr
+		}
+	}
+
+	// Verify ETH (native token) is present
+	if !hasETH {
+		t.Error("Expected ETH (native token) in response")
+	}
+
+	// Verify that template variables were resolved correctly
+	// Check if the returned token addresses match the expected addresses from settings
+
+	if !hasWETH {
+		t.Error("❌ WETH should be in response (synthesized with zero balance when explicitly requested)")
+	} else {
+		t.Log("✅ WETH found in response (synthesized by Phase 3 because explicitly requested)")
+		if !strings.EqualFold(wethAddress, expectedWETHAddr) {
+			t.Errorf("WETH address mismatch: expected %s but got %s", expectedWETHAddr, wethAddress)
+		} else {
+			t.Log("✅ WETH address matches template variable resolution")
+		}
+	}
+
+	if hasUSDC {
+		t.Log("✅ USDC found in response")
+		if !strings.EqualFold(usdcAddress, expectedUSDCAddr) {
+			t.Errorf("USDC address mismatch: expected %s but got %s", expectedUSDCAddr, usdcAddress)
+		} else {
+			t.Log("✅ USDC address matches template variable resolution")
+		}
+	} else {
+		t.Log("Note: USDC not in response (wallet may not have balance)")
+	}
+
+	// Verify that the config was updated with resolved addresses
+	// After runBalance(), config.TokenAddresses should contain resolved addresses (no templates)
+	t.Log("Verifying that tokenAddresses were resolved in config...")
+	for i, addr := range config.TokenAddresses {
+		if strings.Contains(addr, "{{") || strings.Contains(addr, "}}") {
+			t.Errorf("Token address %d still contains template syntax: %s", i, addr)
+		}
+		t.Logf("Resolved token address %d: %s", i, addr)
+	}
+
+	// Final verification: At least one token should be present
+	if len(balancesRaw) < 1 {
+		t.Error("Expected at least 1 token (ETH) in response")
+	}
+
+	t.Log("✅ Template variable resolution for nested objects (settings.uniswap_v3_pool.token0) works correctly")
+	t.Log("✅ Backend successfully extracted 'id' field from token objects")
+	t.Log("✅ Smart default: includeZeroBalances automatically enabled when tokenAddresses are specified")
+	t.Log("✅ Phase 3: Synthesizes zero balance entries for explicitly requested tokens not returned by Moralis")
+}
+
+func TestBalanceNode_ExtractAddressFromObject(t *testing.T) {
+	// Unit test for address extraction from token objects
+	// This tests the logic that extracts 'id' or 'address' fields from JSON objects
+	testAddress := "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e"
+
+	testCases := []struct {
+		name          string
+		tokenTemplate string
+		inputVar      interface{}
+		expectedAddr  string
+		shouldSucceed bool
+	}{
+		{
+			name:          "Token object with 'id' field",
+			tokenTemplate: "{{myToken}}",
+			inputVar: map[string]interface{}{
+				"id":     "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+				"symbol": "WETH",
+			},
+			expectedAddr:  "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+			shouldSucceed: true,
+		},
+		{
+			name:          "Token object with 'address' field",
+			tokenTemplate: "{{myToken}}",
+			inputVar: map[string]interface{}{
+				"address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+				"symbol":  "USDC",
+			},
+			expectedAddr:  "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+			shouldSucceed: true,
+		},
+		{
+			name:          "Direct address string",
+			tokenTemplate: "{{myToken}}",
+			inputVar:      "0x1234567890123456789012345678901234567890",
+			expectedAddr:  "0x1234567890123456789012345678901234567890",
+			shouldSucceed: true,
+		},
+		{
+			name:          "Token object with both 'id' and 'address' (prefer 'id')",
+			tokenTemplate: "{{myToken}}",
+			inputVar: map[string]interface{}{
+				"id":      "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+				"address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+				"symbol":  "TEST",
+			},
+			expectedAddr:  "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // Should prefer 'id'
+			shouldSucceed: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := &avsproto.BalanceNode_Config{
+				Address:        testAddress,
+				Chain:          "sepolia",
+				TokenAddresses: []string{tc.tokenTemplate},
+			}
+
+			node := &avsproto.BalanceNode{
+				Config: config,
+			}
+
+			nodes := []*avsproto.TaskNode{
+				{
+					Id:   "balance-node-1",
+					Name: "balanceNode",
+					TaskType: &avsproto.TaskNode_Balance{
+						Balance: node,
+					},
+				},
+			}
+
+			trigger := &avsproto.TaskTrigger{
+				Id:   "trigger-1",
+				Name: "trigger-1",
+			}
+
+			edges := []*avsproto.TaskEdge{
+				{
+					Id:     "e1",
+					Source: trigger.Id,
+					Target: "balance-node-1",
+				},
+			}
+
+			vm, err := NewVMWithData(&model.Task{
+				Task: &avsproto.Task{
+					Id:      "test-task",
+					Nodes:   nodes,
+					Edges:   edges,
+					Trigger: trigger,
+				},
+			}, nil, testutil.GetTestSmartWalletConfig(), nil)
+
+			if err != nil {
+				t.Fatalf("failed to create VM: %v", err)
+			}
+
+			// Set up mock API key
+			SetMacroSecrets(map[string]string{
+				"moralis_api_key": "test-api-key",
+			})
+
+			// Add the input variable
+			vm.AddVar("myToken", tc.inputVar)
+
+			// Create mock Moralis server
+			mockServer := createMockMoralisServer(t, mockTokenBalances)
+			defer mockServer.Close()
+
+			testMoralisAPIBaseURL = mockServer.URL
+			defer func() {
+				testMoralisAPIBaseURL = ""
+			}()
+
+			// Execute the balance node
+			step, err := vm.runBalance("balance-node-1", node)
+
+			if tc.shouldSucceed {
+				if err != nil {
+					t.Fatalf("expected success but got error: %v", err)
+				}
+				if !step.Success {
+					t.Fatalf("expected successful step but got: %s", step.Error)
+				}
+
+				// Verify the address was correctly extracted
+				if len(config.TokenAddresses) != 1 {
+					t.Fatalf("expected 1 resolved token address but got %d", len(config.TokenAddresses))
+				}
+
+				resolvedAddr := config.TokenAddresses[0]
+				if !strings.EqualFold(resolvedAddr, tc.expectedAddr) {
+					t.Errorf("expected address %s but got %s", tc.expectedAddr, resolvedAddr)
+				}
+
+				t.Logf("✅ Correctly extracted address: %s", resolvedAddr)
+			} else {
+				if err == nil {
+					t.Error("expected error but got success")
+				}
+			}
+		})
+	}
+}
+
 func TestBalanceNode_MultipleTokenAddresses(t *testing.T) {
 	// Integration test with REAL Moralis API
 	// Tests the two-phase fetching strategy with multiple tokenAddresses filter

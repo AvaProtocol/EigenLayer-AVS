@@ -8290,12 +8290,32 @@ type BalanceNode_Config struct {
 	// Whether to include tokens marked as spam (default: false)
 	IncludeSpam bool `protobuf:"varint,3,opt,name=include_spam,json=includeSpam,proto3" json:"include_spam,omitempty"`
 	// Whether to include tokens with zero balance (default: false)
+	//
+	// SMART DEFAULT BEHAVIOR:
+	// When token_addresses is provided, this field has special behavior to ensure
+	// explicitly requested tokens are always returned:
+	//   - If token_addresses is NOT empty AND include_zero_balances is false (default):
+	//     The system automatically enables zero balance inclusion for requested tokens
+	//   - If token_addresses is empty: respects the false default
+	//
+	// PROTOBUF LIMITATION:
+	// Since protobuf bool cannot distinguish between "user explicitly set false" and
+	// "default false", when token_addresses is provided, both cases trigger the smart
+	// default behavior. This means:
+	// ✅ Providing token_addresses → always returns those tokens (even with 0 balance)
+	// ⚠️  To filter out zero balances for specific tokens, set this to true explicitly
+	//
+	//	and filter on the client side (rare use case)
 	IncludeZeroBalances bool `protobuf:"varint,4,opt,name=include_zero_balances,json=includeZeroBalances,proto3" json:"include_zero_balances,omitempty"`
 	// Filter tokens below this USD value, in cents (default: 0)
 	// Example: 100 = $1.00, 1050 = $10.50
 	MinUsdValueCents int64 `protobuf:"varint,5,opt,name=min_usd_value_cents,json=minUsdValueCents,proto3" json:"min_usd_value_cents,omitempty"`
 	// Optional list of specific token addresses to fetch balances for
 	// If empty, fetches all tokens. If specified, only returns balances for these tokens.
+	//
+	// NOTE: When token_addresses is provided, include_zero_balances is automatically
+	// enabled (smart default) to ensure all requested tokens are returned, even if
+	// the wallet has never held them or they have zero balance.
 	TokenAddresses []string `protobuf:"bytes,6,rep,name=token_addresses,json=tokenAddresses,proto3" json:"token_addresses,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
