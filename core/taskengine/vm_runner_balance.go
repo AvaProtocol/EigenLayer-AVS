@@ -171,6 +171,15 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 				}
 				// If neither 'id' nor 'address' exists, keep the original JSON string
 				// The validation below will catch it as an invalid address
+			} else {
+				// JSON unmarshaling failed - log warning and keep original value
+				// The address validation below will catch invalid addresses
+				if v.logger != nil {
+					v.logger.Warn("Failed to parse token address as JSON object, treating as literal string",
+						"tokenAddress", tokenAddr,
+						"resolvedValue", resolved,
+						"error", err)
+				}
 			}
 		}
 
@@ -312,26 +321,31 @@ var testMoralisAPIBaseURL string
 // fetchMoralisBalancesWithFiltering retrieves token balances with two-phase approach:
 // Phase 1: Get all tokens (to include native token like ETH)
 // Phase 2: If client specified tokenAddresses and some are missing, query them specifically
+//
+// SMART DEFAULT BEHAVIOR (see protobuf/avs.proto BalanceNode.Config.include_zero_balances):
+// When tokenAddresses is provided, the system automatically enables zero balance inclusion
+// to ensure all explicitly requested tokens are returned, even if the wallet has never held them.
+//
+// This function implements the smart default by creating an effectiveConfig with
+// include_zero_balances=true when token_addresses is provided.
+//
+// PROTOBUF LIMITATION HANDLING:
+// Since protobuf bool fields cannot distinguish between "user explicitly set false" and
+// "default false", this function treats both cases the same when tokenAddresses is provided:
+// - tokenAddresses provided + includeZeroBalances=false → Auto-enable (smart default)
+// - tokenAddresses empty + includeZeroBalances=false → Respect false (standard behavior)
+//
+// For the rare case where users want to filter zero balances for specific tokens,
+// set includeZeroBalances=true explicitly and filter on the client side.
 func (vm *VM) fetchMoralisBalancesWithFiltering(
 	address, chain, apiKey string,
 	config *avsproto.BalanceNode_Config,
 ) ([]interface{}, error) {
-	// Smart default: When user specifies tokenAddresses but includeZeroBalances is false,
-	// we interpret this as "I want these specific tokens regardless of balance"
-	// This implements the logic:
-	// 1. If includeZeroBalances is explicitly true: respect it (always include zero balances)
-	// 2. If tokenAddresses is provided AND includeZeroBalances is false (default or explicit):
-	//    Apply smart default = true (user wants specific tokens regardless of balance)
-	// 3. Otherwise: includeZeroBalances defaults to false (protobuf default)
-	//
-	// LIMITATION: Since protobuf bool cannot distinguish "user set false" from "default false",
-	// we treat both cases the same when tokenAddresses is provided. This is the expected behavior:
-	// - If you specify exact token addresses, you typically want those tokens even with zero balance
-	// - If you truly want to filter out zero balances for specific tokens (rare case),
-	//   set includeZeroBalances=true explicitly and filter client-side
+	// Apply smart default: auto-enable includeZeroBalances when tokenAddresses is provided
+	// This ensures users always get the tokens they explicitly request, even with zero balance
 	effectiveConfig := config
 	if len(config.TokenAddresses) > 0 && !config.IncludeZeroBalances {
-		// User specified token addresses but includeZeroBalances is false
+		// User specified token addresses but includeZeroBalances is false (default or explicit)
 		// Apply smart default: create a modified config with includeZeroBalances = true
 		effectiveConfig = &avsproto.BalanceNode_Config{
 			Address:             config.Address,
@@ -340,6 +354,12 @@ func (vm *VM) fetchMoralisBalancesWithFiltering(
 			IncludeSpam:         config.IncludeSpam,
 			IncludeZeroBalances: true, // Smart default: include zero balances for explicitly requested tokens
 			MinUsdValueCents:    config.MinUsdValueCents,
+		}
+
+		if vm.logger != nil {
+			vm.logger.Debug("BalanceNode: Smart default applied - auto-enabling includeZeroBalances",
+				"reason", "tokenAddresses provided",
+				"tokenCount", len(config.TokenAddresses))
 		}
 	}
 
