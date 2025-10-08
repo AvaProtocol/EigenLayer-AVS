@@ -152,7 +152,47 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 	address := v.preprocessTextWithVariableMapping(config.Address)
 	chain := v.preprocessTextWithVariableMapping(config.Chain)
 
-	logBuilder.WriteString(fmt.Sprintf("Fetching balances for address: %s on chain: %s\n", address, chain))
+	// Resolve template variables in tokenAddresses array
+	resolvedTokenAddresses := make([]string, len(config.TokenAddresses))
+	for i, tokenAddr := range config.TokenAddresses {
+		resolved := v.preprocessTextWithVariableMapping(tokenAddr)
+
+		// If the resolved value is a JSON object (e.g., {"id":"0x...","symbol":"WETH"}),
+		// extract the address from the 'id' or 'address' field
+		if strings.HasPrefix(resolved, "{") && strings.HasSuffix(resolved, "}") {
+			var tokenObj map[string]interface{}
+			if err := json.Unmarshal([]byte(resolved), &tokenObj); err == nil {
+				// Try 'id' field first (common in subgraph responses)
+				if idVal, ok := tokenObj["id"].(string); ok && idVal != "" {
+					resolved = idVal
+				} else if addrVal, ok := tokenObj["address"].(string); ok && addrVal != "" {
+					// Try 'address' field as fallback
+					resolved = addrVal
+				}
+				// If neither 'id' nor 'address' exists, keep the original JSON string
+				// The validation below will catch it as an invalid address
+			} else {
+				// JSON unmarshaling failed - log warning and keep original value
+				// The address validation below will catch invalid addresses
+				if v.logger != nil {
+					v.logger.Warn("Failed to parse token address as JSON object, treating as literal string",
+						"tokenAddress", tokenAddr,
+						"resolvedValue", resolved,
+						"error", err)
+				}
+			}
+		}
+
+		resolvedTokenAddresses[i] = resolved
+	}
+	// Update config with resolved addresses for downstream use
+	config.TokenAddresses = resolvedTokenAddresses
+
+	if len(resolvedTokenAddresses) > 0 {
+		logBuilder.WriteString(fmt.Sprintf("Fetching balances for address: %s on chain: %s (filtering %d tokens)\n", address, chain, len(resolvedTokenAddresses)))
+	} else {
+		logBuilder.WriteString(fmt.Sprintf("Fetching balances for address: %s on chain: %s\n", address, chain))
+	}
 
 	// Validate inputs
 	if address == "" {
@@ -281,13 +321,51 @@ var testMoralisAPIBaseURL string
 // fetchMoralisBalancesWithFiltering retrieves token balances with two-phase approach:
 // Phase 1: Get all tokens (to include native token like ETH)
 // Phase 2: If client specified tokenAddresses and some are missing, query them specifically
+//
+// SMART DEFAULT BEHAVIOR (see protobuf/avs.proto BalanceNode.Config.include_zero_balances):
+// When tokenAddresses is provided, the system automatically enables zero balance inclusion
+// to ensure all explicitly requested tokens are returned, even if the wallet has never held them.
+//
+// This function implements the smart default by creating an effectiveConfig with
+// include_zero_balances=true when token_addresses is provided.
+//
+// PROTOBUF LIMITATION HANDLING:
+// Since protobuf bool fields cannot distinguish between "user explicitly set false" and
+// "default false", this function treats both cases the same when tokenAddresses is provided:
+// - tokenAddresses provided + includeZeroBalances=false → Auto-enable (smart default)
+// - tokenAddresses empty + includeZeroBalances=false → Respect false (standard behavior)
+//
+// For the rare case where users want to filter zero balances for specific tokens,
+// set includeZeroBalances=true explicitly and filter on the client side.
 func (vm *VM) fetchMoralisBalancesWithFiltering(
 	address, chain, apiKey string,
 	config *avsproto.BalanceNode_Config,
 ) ([]interface{}, error) {
+	// Apply smart default: auto-enable includeZeroBalances when tokenAddresses is provided
+	// This ensures users always get the tokens they explicitly request, even with zero balance
+	effectiveConfig := config
+	if len(config.TokenAddresses) > 0 && !config.IncludeZeroBalances {
+		// User specified token addresses but includeZeroBalances is false (default or explicit)
+		// Apply smart default: create a modified config with includeZeroBalances = true
+		effectiveConfig = &avsproto.BalanceNode_Config{
+			Address:             config.Address,
+			Chain:               config.Chain,
+			TokenAddresses:      config.TokenAddresses,
+			IncludeSpam:         config.IncludeSpam,
+			IncludeZeroBalances: true, // Smart default: include zero balances for explicitly requested tokens
+			MinUsdValueCents:    config.MinUsdValueCents,
+		}
+
+		if vm.logger != nil {
+			vm.logger.Debug("BalanceNode: Smart default applied - auto-enabling includeZeroBalances",
+				"reason", "tokenAddresses provided",
+				"tokenCount", len(config.TokenAddresses))
+		}
+	}
+
 	// Phase 1: Always fetch all tokens first (no token_addresses filter)
 	// This ensures we get native tokens (ETH, BNB, etc.)
-	allBalances, err := vm.fetchMoralisBalances(address, chain, apiKey, config, nil)
+	allBalances, err := vm.fetchMoralisBalances(address, chain, apiKey, effectiveConfig, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -347,12 +425,41 @@ func (vm *VM) fetchMoralisBalancesWithFiltering(
 
 	// If we have missing addresses, fetch them specifically
 	if len(missingAddrs) > 0 {
-		missingBalances, err := vm.fetchMoralisBalances(address, chain, apiKey, config, missingAddrs)
+		missingBalances, err := vm.fetchMoralisBalances(address, chain, apiKey, effectiveConfig, missingAddrs)
 		if err != nil {
 			// Don't fail entirely - just log warning and continue with what we have
 			fmt.Printf("WARNING: Failed to fetch missing token addresses: %v\n", err)
 		} else {
 			result = append(result, missingBalances...)
+
+			// Update foundAddrs map with what we got from Phase 2
+			for _, bal := range missingBalances {
+				token, ok := bal.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if tokenAddr, hasAddr := token["tokenAddress"].(string); hasAddr {
+					foundAddrs[strings.ToLower(tokenAddr)] = true
+				}
+			}
+		}
+	}
+
+	// Phase 3: For any STILL missing requested addresses, synthesize zero balance entries
+	// This handles the case where Moralis doesn't return tokens the wallet has never held
+	// When user explicitly requests specific token addresses, we should return them even with zero balance
+	for lowercaseAddr, checksummedAddr := range requestedAddrs {
+		if !foundAddrs[lowercaseAddr] {
+			// Token was requested but not found even after Phase 2 - synthesize it with zero balance
+			synthesizedToken := map[string]interface{}{
+				"symbol":           "UNKNOWN", // We don't have token metadata
+				"name":             "Unknown Token",
+				"balance":          "0",
+				"balanceFormatted": "0",
+				"decimals":         18, // Default to 18 decimals (standard ERC20)
+				"tokenAddress":     checksummedAddr,
+			}
+			result = append(result, synthesizedToken)
 		}
 	}
 
@@ -361,11 +468,15 @@ func (vm *VM) fetchMoralisBalancesWithFiltering(
 
 // fetchMoralisBalances calls the Moralis API to get wallet token balances
 // If tokenAddresses is nil, fetches all tokens. If specified, fetches only those tokens.
+// When tokenAddresses is specified (Phase 2), zero balances are always included
 func (vm *VM) fetchMoralisBalances(
 	address, chain, apiKey string,
 	config *avsproto.BalanceNode_Config,
 	tokenAddresses []string, // NEW: optional specific addresses to fetch
 ) ([]interface{}, error) {
+	// Phase 2 check: When we're fetching specific missing tokens (Phase 2 of two-phase approach),
+	// always include zero balances because user explicitly requested these specific tokens
+	isPhase2Request := len(tokenAddresses) > 0
 	// Build Moralis API URL
 	// NOTE: Use /tokens endpoint (not /erc20) to support exclude_native parameter
 	// The /erc20 endpoint doesn't support native tokens even with exclude_native=false
@@ -426,8 +537,14 @@ func (vm *VM) fetchMoralisBalances(
 			continue
 		}
 
-		// Skip zero balances if not included
-		if !config.IncludeZeroBalances && token.Balance == "0" {
+		// Zero balance filtering logic (3-tier priority):
+		// 1. If this is Phase 2 (fetching specific missing tokens), ALWAYS include zero balances
+		//    because user explicitly requested these specific token addresses
+		// 2. Otherwise, respect user's includeZeroBalances setting
+		// Note: The "smart default" logic (auto-enable for tokenAddresses) is handled at the
+		// fetchMoralisBalancesWithFiltering level, not here
+		shouldIncludeZeroBalance := isPhase2Request || config.IncludeZeroBalances
+		if !shouldIncludeZeroBalance && token.Balance == "0" {
 			continue
 		}
 
