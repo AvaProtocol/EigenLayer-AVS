@@ -96,6 +96,7 @@ func TestTaskRunLogicAndTemplateVariables(t *testing.T) {
 			case avsproto.NodeType_NODE_TYPE_CUSTOM_CODE:
 				nodeType = "customCode"
 				nodeConfig = map[string]interface{}{
+					"lang": avsproto.Lang_LANG_JAVASCRIPT,
 					"source": `
 						function main() {
 							const inputValue = {{trigger.input_value}};

@@ -190,6 +190,15 @@ func GetTestPaymasterAddress() string {
 	return testConfig.SmartWallet.PaymasterAddress.Hex()
 }
 
+// GetTestMoralisApiKey returns the Moralis API key for tests from aggregator config
+// Returns empty string if config is not loaded or key is not configured
+func GetTestMoralisApiKey() string {
+	if testConfig == nil || testConfig.MacroSecrets == nil {
+		return ""
+	}
+	return testConfig.MacroSecrets["moralis_api_key"]
+}
+
 // TriggerData represents the flattened trigger information for testing
 type TriggerData struct {
 	Type   avsproto.TriggerType
@@ -443,7 +452,7 @@ func JsFastTask() *avsproto.CreateTaskReq {
 		TaskType: &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{
 				Config: &avsproto.CustomCodeNode_Config{
-					Lang:   avsproto.Lang_JavaScript,
+					Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 					Source: "({ message: 'Hello from test' })",
 				},
 			},

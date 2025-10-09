@@ -523,11 +523,48 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		}
 	}
 
+	// Check body size limit (before processing to avoid wasting resources)
+	if len(body) > MaxRestAPIBodySize {
+		err := NewStructuredError(
+			avsproto.ErrorCode_INVALID_NODE_CONFIG,
+			fmt.Sprintf("%s: %d bytes (max: %d bytes)", ValidationErrorMessages.RestAPIBodyTooLarge, len(body), MaxRestAPIBodySize),
+			map[string]interface{}{
+				"field":   "body",
+				"issue":   "size limit exceeded",
+				"size":    len(body),
+				"maxSize": MaxRestAPIBodySize,
+			},
+		)
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		finalizeExecutionStepWithError(executionLogStep, false, err, logBuilder.String())
+		return executionLogStep, err
+	}
+
 	// Check if content type is JSON-related
 	isJSONContent := strings.Contains(contentType, "application/json") ||
 		strings.Contains(contentType, "text/json") ||
 		strings.Contains(contentType, "+json") || // For types like application/vnd.api+json
 		strings.HasSuffix(contentType, "/json")
+
+	// Validate JSON format if content type is JSON and body is not empty
+	if isJSONContent && body != "" {
+		var jsonTest interface{}
+		if err := json.Unmarshal([]byte(body), &jsonTest); err != nil {
+			structErr := NewStructuredError(
+				avsproto.ErrorCode_INVALID_NODE_CONFIG,
+				fmt.Sprintf("%s: %s", ValidationErrorMessages.RestAPIBodyInvalidJSON, err.Error()),
+				map[string]interface{}{
+					"field":       "body",
+					"issue":       "invalid JSON format",
+					"contentType": contentType,
+					"error":       err.Error(),
+				},
+			)
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", structErr.Error()))
+			finalizeExecutionStepWithError(executionLogStep, false, structErr, logBuilder.String())
+			return executionLogStep, structErr
+		}
+	}
 
 	if isJSONContent {
 		// Apply JSON-aware preprocessing for JSON content

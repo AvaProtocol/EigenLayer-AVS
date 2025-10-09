@@ -43,13 +43,12 @@ MANIFEST
 # Plugin files for semantic release
 .semrel/
 
-*.log
-*.zip
 # Log files
 *.log
 *_logs.txt
 _aggregator-*.txt
 _operator-*.txt
+*.zip
 
 # Environment files
 .env.test

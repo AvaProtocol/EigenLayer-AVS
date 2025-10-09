@@ -19,7 +19,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
@@ -1270,6 +1269,11 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
 		}
+	} else if nodeValue := node.GetBalance(); nodeValue != nil {
+		executionLogForNode, err = v.runBalance(node.Id, nodeValue)
+		if executionLogForNode != nil {
+			v.addExecutionLog(executionLogForNode)
+		}
 	} else {
 		err = fmt.Errorf("unknown node type for node ID %s", node.Id)
 	}
@@ -2474,16 +2478,14 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		if source, ok := config["source"].(string); ok {
 			customConfig.Source = source
 		}
-		if lang, ok := config["lang"].(string); ok {
-			switch strings.ToLower(lang) {
-			case "javascript", "js":
-				customConfig.Lang = avsproto.Lang_JavaScript
-			default:
-				customConfig.Lang = avsproto.Lang_JavaScript // Default to JavaScript
-			}
-		} else {
-			customConfig.Lang = avsproto.Lang_JavaScript // Default to JavaScript
+
+		// Handle lang field - can be enum, string, or number
+		// ParseLanguageFromConfig handles conversion from lowercase strings like "javascript"
+		lang, err := ParseLanguageFromConfig(config)
+		if err != nil {
+			return nil, err
 		}
+		customConfig.Lang = lang
 
 		node.TaskType = &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{
@@ -2640,22 +2642,28 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			return nil, fmt.Errorf("loop node runner requires 'config' field")
 		}
 
+		// For customCode runners, convert lang field from string to protobuf enum if needed
+		// This allows tests that call CreateNodeFromType directly to use strings
+		if runnerType == "customCode" {
+			if langValue, exists := runnerConfig["lang"]; exists {
+				runnerConfig["lang"] = ConvertLangStringToEnum(langValue)
+			}
+		}
+
 		switch runnerType {
 		case "customCode":
 			ccConfig := &avsproto.CustomCodeNode_Config{}
 			if source, ok := runnerConfig["source"].(string); ok {
 				ccConfig.Source = source
 			}
-			if lang, ok := runnerConfig["lang"].(string); ok {
-				switch strings.ToLower(lang) {
-				case "javascript", "js":
-					ccConfig.Lang = avsproto.Lang_JavaScript
-				default:
-					ccConfig.Lang = avsproto.Lang_JavaScript
-				}
-			} else {
-				ccConfig.Lang = avsproto.Lang_JavaScript
+
+			// Handle lang field - can be enum, string, or number
+			// ParseLanguageFromConfig handles conversion from lowercase strings like "javascript"
+			lang, err := ParseLanguageFromConfig(runnerConfig)
+			if err != nil {
+				return nil, err
 			}
+			ccConfig.Lang = lang
 			loopNode.Runner = &avsproto.LoopNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{Config: ccConfig},
 			}
@@ -2813,7 +2821,7 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		// Create a minimal config for trigger simulation
 		customConfig := &avsproto.CustomCodeNode_Config{
 			Source: "// Trigger simulation node",
-			Lang:   avsproto.Lang_JavaScript,
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 		}
 		node.TaskType = &avsproto.TaskNode_CustomCode{
 			CustomCode: &avsproto.CustomCodeNode{
@@ -2853,6 +2861,50 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 		node.TaskType = &avsproto.TaskNode_GraphqlQuery{
 			GraphqlQuery: &avsproto.GraphQLQueryNode{
 				Config: graphqlConfig,
+			},
+		}
+	case NodeTypeBalance:
+		node.Type = avsproto.NodeType_NODE_TYPE_BALANCE
+		// Create balance node with proper configuration
+		balanceConfig := &avsproto.BalanceNode_Config{}
+
+		if address, ok := config["address"].(string); ok {
+			balanceConfig.Address = address
+		} else {
+			return nil, fmt.Errorf("balance node requires 'address' field")
+		}
+
+		if chain, ok := config["chain"].(string); ok {
+			balanceConfig.Chain = chain
+		} else {
+			return nil, fmt.Errorf("balance node requires 'chain' field")
+		}
+
+		if includeSpam, ok := config["includeSpam"].(bool); ok {
+			balanceConfig.IncludeSpam = includeSpam
+		}
+
+		if includeZeroBalances, ok := config["includeZeroBalances"].(bool); ok {
+			balanceConfig.IncludeZeroBalances = includeZeroBalances
+		}
+
+		if minUsdValue, ok := config["minUsdValue"].(float64); ok {
+			// Convert dollars to cents for storage
+			balanceConfig.MinUsdValueCents = int64(minUsdValue * 100)
+		}
+
+		if tokenAddresses, ok := config["tokenAddresses"].([]interface{}); ok {
+			// Convert interface{} slice to string slice
+			for _, addr := range tokenAddresses {
+				if addrStr, ok := addr.(string); ok {
+					balanceConfig.TokenAddresses = append(balanceConfig.TokenAddresses, addrStr)
+				}
+			}
+		}
+
+		node.TaskType = &avsproto.TaskNode_Balance{
+			Balance: &avsproto.BalanceNode{
+				Config: balanceConfig,
 			},
 		}
 	default:
@@ -3058,61 +3110,15 @@ func convertToExecutionStatus(resultStatus ExecutionResultStatus) avsproto.Execu
 
 // ExtractTriggerConfigData extracts configuration data from a TaskTrigger protobuf message
 // This function now extracts from the Config field since the duplicate input field was removed
+// Uses direct field access instead of JSON roundtrip for better performance and type preservation
 func ExtractTriggerConfigData(trigger *avsproto.TaskTrigger) map[string]interface{} {
 	if trigger == nil {
 		return nil
 	}
 
-	// Check each trigger type and extract config from the correct nested object
-	switch trigger.GetTriggerType().(type) {
-	case *avsproto.TaskTrigger_Block:
-		blockTrigger := trigger.GetBlock()
-		if blockTrigger != nil && blockTrigger.Config != nil {
-			// Use the same approach as TaskTriggerToConfig for consistency
-			configMap, err := gow.ProtoToMap(blockTrigger.Config)
-			if err == nil {
-				return configMap
-			}
-		}
-	case *avsproto.TaskTrigger_Cron:
-		cronTrigger := trigger.GetCron()
-		if cronTrigger != nil && cronTrigger.Config != nil {
-			// Use the same approach as TaskTriggerToConfig for consistency
-			configMap, err := gow.ProtoToMap(cronTrigger.Config)
-			if err == nil {
-				return configMap
-			}
-		}
-	case *avsproto.TaskTrigger_Event:
-		eventTrigger := trigger.GetEvent()
-		if eventTrigger != nil && eventTrigger.Config != nil {
-			// Use the same approach as TaskTriggerToConfig for consistency
-			configMap, err := gow.ProtoToMap(eventTrigger.Config)
-			if err == nil {
-				return configMap
-			}
-		}
-	case *avsproto.TaskTrigger_FixedTime:
-		fixedTimeTrigger := trigger.GetFixedTime()
-		if fixedTimeTrigger != nil && fixedTimeTrigger.Config != nil {
-			// Use the same approach as TaskTriggerToConfig for consistency
-			configMap, err := gow.ProtoToMap(fixedTimeTrigger.Config)
-			if err == nil {
-				return configMap
-			}
-		}
-	case *avsproto.TaskTrigger_Manual:
-		manualTrigger := trigger.GetManual()
-		if manualTrigger != nil && manualTrigger.Config != nil {
-			// Use the same approach as TaskTriggerToConfig for consistency
-			configMap, err := gow.ProtoToMap(manualTrigger.Config)
-			if err == nil {
-				return configMap
-			}
-		}
-		return nil
-	}
-	return nil
+	// Reuse TaskTriggerToConfig for consistent extraction logic
+	// This avoids code duplication and ensures both paths behave identically
+	return TaskTriggerToConfig(trigger)
 }
 
 // convertProtobufValueToMap converts a google.protobuf.Value to a map[string]interface{}
@@ -3345,6 +3351,22 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 			config := map[string]interface{}{
 				"expression":    filter.Config.Expression,
 				"inputNodeName": filter.Config.InputNodeName,
+			}
+
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_Balance:
+		balance := taskNode.GetBalance()
+		if balance != nil && balance.Config != nil {
+			config := map[string]interface{}{
+				"address":             balance.Config.Address,
+				"chain":               balance.Config.Chain,
+				"includeSpam":         balance.Config.IncludeSpam,
+				"includeZeroBalances": balance.Config.IncludeZeroBalances,
+				"minUsdValue":         float64(balance.Config.MinUsdValueCents) / 100.0,
+				"tokenAddresses":      balance.Config.TokenAddresses,
 			}
 
 			// Clean up complex protobuf types before returning
@@ -4066,6 +4088,8 @@ func (v *VM) executeNodeDirect(node *avsproto.TaskNode, stepID string) (*avsprot
 		executionLogForNode, err = v.runFilter(stepID, nodeValue)
 	} else if nodeValue := node.GetEthTransfer(); nodeValue != nil {
 		executionLogForNode, err = v.runEthTransfer(stepID, nodeValue)
+	} else if nodeValue := node.GetBalance(); nodeValue != nil {
+		executionLogForNode, err = v.runBalance(stepID, nodeValue)
 	} else if nodeValue := node.GetLoop(); nodeValue != nil {
 		// For loop nodes, we need special handling to use the execution queue
 		return v.executeLoopWithQueue(stepID, nodeValue)

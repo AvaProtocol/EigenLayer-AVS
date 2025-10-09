@@ -59,6 +59,12 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 		return step, nil, err
 	}
 
+	// LANGUAGE ENFORCEMENT: GraphQLQueryNode uses GraphQL (hardcoded)
+	// Using centralized ValidateInputByLanguage for consistency (includes size check)
+	if err = ValidateInputByLanguage(queryStr, avsproto.Lang_LANG_GRAPHQL); err != nil {
+		return step, nil, err
+	}
+
 	// Preprocess URL and query for template variables
 	endpoint = r.vm.preprocessTextWithVariableMapping(endpoint)
 	queryStr = r.vm.preprocessTextWithVariableMapping(queryStr)

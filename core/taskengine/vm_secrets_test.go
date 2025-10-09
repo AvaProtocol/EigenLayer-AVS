@@ -132,7 +132,7 @@ func TestSecretAccessInCustomCode(t *testing.T) {
 
 	node := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
-			Lang:   avsproto.Lang_JavaScript,
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 			Source: "return { api_key: apContext.configVars.api_key, secret: apContext.configVars.secret, combined: apContext.configVars.api_key + '_' + apContext.configVars.secret }",
 		},
 	}

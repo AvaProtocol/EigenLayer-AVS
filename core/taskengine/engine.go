@@ -1996,6 +1996,15 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 		Output: ExtractTriggerOutput(payload.TriggerOutput),
 	}
 
+	// Validate manual trigger data if present
+	if triggerData.Type == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
+		if manualOutput, ok := triggerData.Output.(*avsproto.ManualTrigger_Output); ok {
+			if err := ValidateManualTriggerFromProtobuf(manualOutput, task); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	queueTaskData := QueueExecutionData{
 		TriggerType:   triggerData.Type,
 		TriggerOutput: triggerData.Output,
@@ -2146,6 +2155,22 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 
 	// Extract trigger config using the shared utility function
 	triggerConfig := TaskTriggerToConfig(trigger)
+
+	// Validate manual trigger data if present (before execution)
+	if triggerType == avsproto.TriggerType_TRIGGER_TYPE_MANUAL {
+		if data, exists := triggerConfig["data"]; exists && data != nil {
+			// Parse language from config (strict requirement - no default)
+			lang, err := ParseLanguageFromConfig(triggerConfig)
+			if err != nil {
+				return nil, err
+			}
+
+			// Validate based on language using universal validator
+			if err := ValidateInputByLanguage(data, lang); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	// Step 1: Start timing BEFORE trigger execution (consistent with node timing)
 	triggerStartTime := time.Now()

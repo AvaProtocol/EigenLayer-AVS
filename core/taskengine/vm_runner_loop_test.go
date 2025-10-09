@@ -35,7 +35,7 @@ func TestLoopProcessor_Execute_Sequential(t *testing.T) {
 
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
-			Lang:   avsproto.Lang_JavaScript,
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 			Source: "return value;",
 		},
 	}
@@ -86,7 +86,7 @@ func TestLoopProcessor_Execute_Parallel(t *testing.T) {
 
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
-			Lang:   avsproto.Lang_JavaScript,
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 			Source: "return value;",
 		},
 	}
@@ -141,7 +141,7 @@ func TestLoopProcessor_Execute_EmptyArray(t *testing.T) {
 
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
-			Lang:   avsproto.Lang_JavaScript,
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 			Source: "return value;",
 		},
 	}
@@ -186,7 +186,7 @@ func TestLoopProcessor_Execute_InvalidInput(t *testing.T) {
 
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
-			Lang:   avsproto.Lang_JavaScript,
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 			Source: "return value;",
 		},
 	}
@@ -220,7 +220,7 @@ func TestLoopProcessor_Execute_MissingInput(t *testing.T) {
 
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
-			Lang:   avsproto.Lang_JavaScript,
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 			Source: "return value;",
 		},
 	}
@@ -259,7 +259,7 @@ func TestLoopProcessor_Execute_ParallelMode(t *testing.T) {
 
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
-			Lang:   avsproto.Lang_JavaScript,
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 			Source: "return value * 2;", // Simple operation for testing
 		},
 	}
@@ -308,7 +308,7 @@ func TestLoopProcessor_Execute_SequentialMode(t *testing.T) {
 
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
-			Lang:   avsproto.Lang_JavaScript,
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 			Source: "return value * 3;", // Simple operation for testing
 		},
 	}
@@ -399,7 +399,7 @@ func TestLoopProcessor_Execute_DefaultExecutionMode(t *testing.T) {
 
 	customCode := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
-			Lang:   avsproto.Lang_JavaScript,
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 			Source: "return value;",
 		},
 	}

@@ -33,6 +33,7 @@ enum NodeType {
   NODE_TYPE_BRANCH = 7;          // Branch node
   NODE_TYPE_FILTER = 8;          // Filter node
   NODE_TYPE_LOOP = 9;            // Loop node
+  NODE_TYPE_BALANCE = 10;        // Balance node for retrieving wallet token balances
 }
 
 enum ExecutionMode {
@@ -92,8 +93,14 @@ message IdReq {
   string id = 1;
 }
 
+// Lang defines supported languages/formats for code editors and data validation
+// Following protobuf best practice: 0 = UNSPECIFIED (not set)
 enum Lang {
-  JavaScript = 0;
+  LANG_UNSPECIFIED = 0;  // Not set - application must reject this
+  LANG_JAVASCRIPT = 1;   // JavaScript expressions
+  LANG_JSON = 2;         // JSON format
+  LANG_GRAPHQL = 3;      // GraphQL queries
+  LANG_HANDLEBARS = 4;   // Handlebars templates
 }
 
 // Triggers are always the first element in a task execution flow
@@ -210,6 +217,9 @@ message ManualTrigger {
     map<string, string> headers = 2;
     // Path parameters for webhook testing - map format consistent with REST API nodes
     map<string, string> pathParams = 3;
+    // Language/format of the data field - REQUIRED for validation
+    // Must be explicitly set (cannot be LANG_UNSPECIFIED). Application rejects zero value.
+    Lang lang = 4;
   }
   
   message Output {
@@ -479,6 +489,57 @@ message CustomCodeNode {
   Config config = 1;
 }
 
+message BalanceNode {
+  message Config {
+    // Wallet address to check balances for
+    string address = 1;
+    // Chain name or chain ID (e.g., "ethereum", "base", 1, 8453)
+    string chain = 2;
+    // Whether to include tokens marked as spam (default: false)
+    bool include_spam = 3;
+    
+    // Whether to include tokens with zero balance (default: false)
+    // 
+    // SMART DEFAULT BEHAVIOR:
+    // When token_addresses is provided, this field has special behavior to ensure
+    // explicitly requested tokens are always returned:
+    // - If token_addresses is NOT empty AND include_zero_balances is false (default):
+    //   The system automatically enables zero balance inclusion for requested tokens
+    // - If token_addresses is empty: respects the false default
+    //
+    // PROTOBUF LIMITATION:
+    // Since protobuf bool cannot distinguish between "user explicitly set false" and 
+    // "default false", when token_addresses is provided, both cases trigger the smart
+    // default behavior. This means:
+    // ✅ Providing token_addresses → always returns those tokens (even with 0 balance)
+    // ⚠️  To filter out zero balances for specific tokens, set this to true explicitly
+    //     and filter on the client side (rare use case)
+    bool include_zero_balances = 4;
+    
+    // Filter tokens below this USD value, in cents (default: 0)
+    // Example: 100 = $1.00, 1050 = $10.50
+    int64 min_usd_value_cents = 5;
+    
+    // Optional list of specific token addresses to fetch balances for
+    // If empty, fetches all tokens. If specified, only returns balances for these tokens.
+    // 
+    // NOTE: When token_addresses is provided, include_zero_balances is automatically
+    // enabled (smart default) to ensure all requested tokens are returned, even if
+    // the wallet has never held them or they have zero balance.
+    repeated string token_addresses = 6;
+  }
+
+  message Output {
+    // Returns an array of token balance objects
+    // Native tokens (ETH, MATIC, etc.) will not have tokenAddress field
+    // Non-native tokens (ERC20) will include tokenAddress field
+    google.protobuf.Value data = 1;
+  }
+
+  // Include Config as field 
+  Config config = 1;
+}
+
 message BranchNode {
   message Condition {
     string id = 1;
@@ -592,6 +653,8 @@ message TaskNode {
     FilterNode        filter = 16;
     LoopNode          loop = 17;
     CustomCodeNode    custom_code = 18;
+    // Get token balances for a wallet address
+    BalanceNode       balance = 19;
   }
 }
 
@@ -652,6 +715,7 @@ message Execution {
       BranchNode.Output branch = 9;
       FilterNode.Output filter = 10;
       LoopNode.Output loop = 11;
+      BalanceNode.Output balance = 30;
     }
     
     // timestamp when step started (in milliseconds)
@@ -1182,6 +1246,7 @@ message RunNodeWithInputsResp {
     BranchNode.Output branch = 16;
     FilterNode.Output filter = 17;
     LoopNode.Output loop = 18;
+    BalanceNode.Output balance = 19;
   }
 }
 

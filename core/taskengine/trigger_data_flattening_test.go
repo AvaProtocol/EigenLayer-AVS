@@ -265,6 +265,7 @@ func TestCamelCaseVariableResolutionConsistency(t *testing.T) {
 
 	// Test custom code that accesses camelCase fields
 	customCodeConfig := map[string]interface{}{
+		"lang": avsproto.Lang_LANG_JAVASCRIPT,
 		"source": `
 			// Test accessing camelCase (consistent naming)
 			const tokenNameCamel = eventTrigger.data.tokenName;
@@ -308,6 +309,7 @@ func TestCamelCaseVariableResolutionConsistency(t *testing.T) {
 			TriggerType: &avsproto.TaskTrigger_Manual{
 				Manual: &avsproto.ManualTrigger{
 					Config: &avsproto.ManualTrigger_Config{
+						Lang: avsproto.Lang_LANG_JSON,
 						Data: triggerData,
 					},
 				},

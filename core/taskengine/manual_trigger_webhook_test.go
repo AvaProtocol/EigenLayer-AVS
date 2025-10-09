@@ -3,6 +3,7 @@ package taskengine
 import (
 	"testing"
 
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -79,6 +80,7 @@ func TestManualTriggerExecutionWithWebhookFields(t *testing.T) {
 			"data": map[string]interface{}{
 				"payload": "test payload",
 			},
+			"lang": avsproto.Lang_LANG_JSON, // REQUIRED: explicit language field
 			"headers": []interface{}{
 				map[string]interface{}{"Authorization": "Bearer token123"},
 				map[string]interface{}{"Content-Type": "application/json"},
@@ -123,6 +125,7 @@ func TestManualTriggerExecutionWithWebhookFields(t *testing.T) {
 			"data": map[string]interface{}{
 				"payload": "test payload",
 			},
+			"lang": avsproto.Lang_LANG_JSON, // REQUIRED: explicit language field
 			"headers": map[string]interface{}{
 				"Authorization": "Bearer token123",
 			},

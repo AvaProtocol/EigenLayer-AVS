@@ -93,7 +93,7 @@ func assertStructpbValueIsString(t *testing.T, val *structpb.Value, expectedStri
 func TestRunJavaScript(t *testing.T) {
 	node := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
-			Lang:   avsproto.Lang_JavaScript,
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 			Source: "return 3>2",
 		},
 	}
@@ -156,7 +156,7 @@ func TestRunJavaScript(t *testing.T) {
 func TestRunJavaScriptComplex(t *testing.T) {
 	node := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
-			Lang:   avsproto.Lang_JavaScript,
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 			Source: "const a=[1,2,3]; return a.filter((i) => i >= 2);",
 		},
 	}
@@ -202,7 +202,7 @@ func TestRunJavaScriptComplex(t *testing.T) {
 func TestRunJavaScriptComplexWithMap(t *testing.T) {
 	node := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
-			Lang: avsproto.Lang_JavaScript,
+			Lang: avsproto.Lang_LANG_JAVASCRIPT,
 			Source: `
 			const a=[{name: 'alice', age: 10}, {name: 'bob', age: 12}];
 			return a.filter((i) => i.age >= 12).map((i) => { return { name: i.name, age: i.age + 3} });
@@ -322,7 +322,7 @@ func TestRunJavaScriptComplexWithMap(t *testing.T) {
 func TestRunJavaScriptCanAccessSecretsWithapContext(t *testing.T) {
 	node := &avsproto.CustomCodeNode{
 		Config: &avsproto.CustomCodeNode_Config{
-			Lang:   avsproto.Lang_JavaScript,
+			Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 			Source: "return 'my name is ' + apContext.configVars.my_awesome_secret",
 		},
 	}
@@ -411,7 +411,7 @@ func TestRunJavaScriptObjectResultRendering(t *testing.T) {
 			TaskType: &avsproto.TaskNode_CustomCode{
 				CustomCode: &avsproto.CustomCodeNode{
 					Config: &avsproto.CustomCodeNode_Config{
-						Lang:   avsproto.Lang_JavaScript,
+						Lang:   avsproto.Lang_LANG_JAVASCRIPT,
 						Source: jsObjectSource,
 					},
 				},
