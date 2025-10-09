@@ -598,7 +598,7 @@ func sanitizeProtoValue(v *structpb.Value) *structpb.Value {
 	return pb
 }
 
-// sanitizeInterface recursively replaces NaN/Inf with safe values.
+// sanitizeInterface recursively replaces NaN/Inf with safe values and redacts sensitive credentials.
 func sanitizeInterface(x interface{}) interface{} {
 	switch t := x.(type) {
 	case float64:
@@ -606,10 +606,22 @@ func sanitizeInterface(x interface{}) interface{} {
 			return 0
 		}
 		return t
+	case string:
+		// Redact URLs with API keys
+		return redactSensitiveString(t)
 	case map[string]interface{}:
 		m := make(map[string]interface{}, len(t))
 		for k, v := range t {
-			m[k] = sanitizeInterface(v)
+			// Redact sensitive map keys
+			if isSensitiveKey(k) {
+				if strVal, ok := v.(string); ok {
+					m[k] = redactSensitiveString(strVal)
+				} else {
+					m[k] = "***REDACTED***"
+				}
+			} else {
+				m[k] = sanitizeInterface(v)
+			}
 		}
 		return m
 	case []interface{}:
@@ -621,6 +633,72 @@ func sanitizeInterface(x interface{}) interface{} {
 	default:
 		return x
 	}
+}
+
+// isSensitiveKey checks if a map key contains sensitive information
+func isSensitiveKey(key string) bool {
+	lowerKey := strings.ToLower(key)
+	sensitiveKeys := []string{
+		"authorization",
+		"api-key",
+		"apikey",
+		"x-api-key",
+		"access_token",
+		"accesstoken",
+		"bearer",
+		"bundlerurl",
+		"bundler_url",
+	}
+
+	for _, sensitive := range sensitiveKeys {
+		if strings.Contains(lowerKey, sensitive) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// redactSensitiveString redacts URLs and strings that might contain sensitive information
+func redactSensitiveString(s string) string {
+	// Redact URLs with API keys
+	if strings.Contains(s, "apikey=") || strings.Contains(s, "access_token=") {
+		// Redact API key parameter in URLs
+		if strings.Contains(s, "apikey=") {
+			parts := strings.Split(s, "apikey=")
+			if len(parts) > 1 {
+				keyPart := parts[1]
+				endIdx := strings.Index(keyPart, "&")
+				if endIdx == -1 {
+					s = parts[0] + "apikey=***REDACTED***"
+				} else {
+					s = parts[0] + "apikey=***REDACTED***" + keyPart[endIdx:]
+				}
+			}
+		}
+		if strings.Contains(s, "access_token=") {
+			parts := strings.Split(s, "access_token=")
+			if len(parts) > 1 {
+				keyPart := parts[1]
+				endIdx := strings.Index(keyPart, "&")
+				if endIdx == -1 {
+					s = parts[0] + "access_token=***REDACTED***"
+				} else {
+					s = parts[0] + "access_token=***REDACTED***" + keyPart[endIdx:]
+				}
+			}
+		}
+	}
+
+	// Redact Bearer tokens
+	if strings.HasPrefix(s, "Bearer ") {
+		return "Bearer ***REDACTED***"
+	}
+	if strings.HasPrefix(s, "Basic ") {
+		return "Basic ***REDACTED***"
+	}
+
+	return s
 }
 
 // validateWalletOwnership performs comprehensive wallet ownership validation

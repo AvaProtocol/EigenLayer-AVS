@@ -2,12 +2,39 @@ package core
 
 import (
 	"math/big"
+	"strings"
 
 	cstaskmanager "github.com/AvaProtocol/EigenLayer-AVS/contracts/bindings/AutomationTaskManager"
 	"github.com/Layr-Labs/eigensdk-go/crypto/bls"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"golang.org/x/crypto/sha3"
 )
+
+// RedactURL removes sensitive API keys and tokens from URLs for safe logging
+func RedactURL(url string) string {
+	if url == "" {
+		return url
+	}
+
+	// Redact apikey parameter
+	if strings.Contains(url, "apikey=") {
+		parts := strings.Split(url, "apikey=")
+		if len(parts) > 1 {
+			// Find the end of the API key (either & for more params or end of string)
+			keyPart := parts[1]
+			endIdx := strings.Index(keyPart, "&")
+			if endIdx == -1 {
+				// API key is the last parameter
+				url = parts[0] + "apikey=***REDACTED***"
+			} else {
+				// There are more parameters after the API key
+				url = parts[0] + "apikey=***REDACTED***" + keyPart[endIdx:]
+			}
+		}
+	}
+
+	return url
+}
 
 // this hardcodes abi.encode() for cstaskmanager.IAutomationTaskManagerTaskResponse
 // unclear why abigen doesn't provide this out of the box...
