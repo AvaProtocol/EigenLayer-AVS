@@ -667,8 +667,6 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		executionLogBuilder.WriteString("No paymaster (self-funded transaction)\n")
 	}
 
-	executionLogBuilder.WriteString(fmt.Sprintf("Bundler URL: %s\n", r.smartWalletConfig.BundlerURL))
-
 	// Pre-send gas estimation to capture in logs
 	executionLogBuilder.WriteString("Performing gas estimation...\n")
 
@@ -1372,7 +1370,6 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			// If this is a bundler/AA error, add additional debugging information
 			if strings.Contains(result.Error, "Bundler failed") || strings.Contains(result.Error, "AA21") {
 				log.WriteString("BUNDLER FAILURE DETAILS:\n")
-				log.WriteString(fmt.Sprintf("  Bundler URL: %s\n", r.smartWalletConfig.BundlerURL))
 				log.WriteString(fmt.Sprintf("  Entry Point: %s\n", r.smartWalletConfig.EntrypointAddress.Hex()))
 				log.WriteString(fmt.Sprintf("  Factory: %s\n", r.smartWalletConfig.FactoryAddress.Hex()))
 
