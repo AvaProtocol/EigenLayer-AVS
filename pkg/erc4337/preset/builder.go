@@ -161,8 +161,6 @@ func SendUserOp(
 			log.Printf("  InitCode length: %d bytes", len(userOp.InitCode))
 			log.Printf("  MaxFeePerGas: %s wei", userOp.MaxFeePerGas.String())
 			log.Printf("  MaxPriorityFeePerGas: %s wei", userOp.MaxPriorityFeePerGas.String())
-			log.Printf("  Bundler URL: %s", smartWalletConfig.BundlerURL)
-
 			gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *userOp, aa.EntrypointAddress, map[string]any{})
 			if gasErr == nil && gas != nil {
 				// Gas estimation success logging
@@ -184,7 +182,6 @@ func SendUserOp(
 				// Gas estimation failure logging
 				log.Printf("❌ GAS ESTIMATION FAILED:")
 				log.Printf("  Error: %v", gasErr)
-				log.Printf("  Bundler URL: %s", smartWalletConfig.BundlerURL)
 				log.Printf("  Entry Point: %s", aa.EntrypointAddress.Hex())
 				// Only fail on first attempt if gas estimation fails
 				return userOp, nil, fmt.Errorf("failed to estimate gas: %w", gasErr)
@@ -242,7 +239,6 @@ func SendUserOp(
 			log.Printf("  Attempt: %d/%d", retry+1, maxRetries)
 			log.Printf("  Nonce used: %s", userOp.Nonce.String())
 			log.Printf("  UserOp hash: %s", txResult)
-			log.Printf("  Bundler URL: %s", smartWalletConfig.BundlerURL)
 			break
 		}
 
@@ -251,8 +247,6 @@ func SendUserOp(
 		log.Printf("  Attempt: %d/%d", retry+1, maxRetries)
 		log.Printf("  Error: %v", err)
 		log.Printf("  TxResult: %s", txResult)
-		log.Printf("  Bundler URL: %s", smartWalletConfig.BundlerURL)
-
 		// For nonce errors, refetch nonce and retry
 		if err != nil && strings.Contains(err.Error(), "AA25 invalid account nonce") {
 			if retry < maxRetries-1 {
@@ -499,8 +493,6 @@ func SendUserOpWithWsClient(
 			log.Printf("  InitCode length: %d bytes", len(userOp.InitCode))
 			log.Printf("  MaxFeePerGas: %s wei", userOp.MaxFeePerGas.String())
 			log.Printf("  MaxPriorityFeePerGas: %s wei", userOp.MaxPriorityFeePerGas.String())
-			log.Printf("  Bundler URL: %s", smartWalletConfig.BundlerURL)
-
 			gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *userOp, aa.EntrypointAddress, map[string]any{})
 			if gasErr == nil && gas != nil {
 				// Gas estimation success logging
@@ -522,7 +514,6 @@ func SendUserOpWithWsClient(
 				// Gas estimation failure logging
 				log.Printf("❌ GAS ESTIMATION FAILED:")
 				log.Printf("  Error: %v", gasErr)
-				log.Printf("  Bundler URL: %s", smartWalletConfig.BundlerURL)
 				log.Printf("  Entry Point: %s", aa.EntrypointAddress.Hex())
 				// Only fail on first attempt if gas estimation fails
 				return userOp, nil, fmt.Errorf("failed to estimate gas: %w", gasErr)
@@ -580,7 +571,6 @@ func SendUserOpWithWsClient(
 			log.Printf("  Attempt: %d/%d", retry+1, maxRetries)
 			log.Printf("  Nonce used: %s", userOp.Nonce.String())
 			log.Printf("  UserOp hash: %s", txResult)
-			log.Printf("  Bundler URL: %s", smartWalletConfig.BundlerURL)
 			break
 		}
 
@@ -589,8 +579,6 @@ func SendUserOpWithWsClient(
 		log.Printf("  Attempt: %d/%d", retry+1, maxRetries)
 		log.Printf("  Error: %v", err)
 		log.Printf("  TxResult: %s", txResult)
-		log.Printf("  Bundler URL: %s", smartWalletConfig.BundlerURL)
-
 		// For nonce errors or invalid UserOp struct (often caused by nonce collision), refetch nonce and retry
 		if err != nil && (strings.Contains(err.Error(), "AA25 invalid account nonce") ||
 			strings.Contains(err.Error(), "invalid UserOperation struct/fields")) {
