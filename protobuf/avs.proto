@@ -1222,6 +1222,7 @@ message RunNodeWithInputsReq {
   NodeType node_type = 1; // Type of node to execute using the NodeType enum
   map<string, google.protobuf.Value> node_config = 2; // Configuration for the node
   map<string, google.protobuf.Value> input_variables = 3; // Input variables for the node
+  bool is_simulated = 4; // If true, use Tenderly simulation; if false, execute real UserOp (default: true)
 }
 
 // Response message for RunNodeWithInputs

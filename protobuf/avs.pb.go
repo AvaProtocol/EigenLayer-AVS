@@ -5144,6 +5144,7 @@ type RunNodeWithInputsReq struct {
 	NodeType       NodeType                   `protobuf:"varint,1,opt,name=node_type,json=nodeType,proto3,enum=aggregator.NodeType" json:"node_type,omitempty"`                                                                   // Type of node to execute using the NodeType enum
 	NodeConfig     map[string]*structpb.Value `protobuf:"bytes,2,rep,name=node_config,json=nodeConfig,proto3" json:"node_config,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`             // Configuration for the node
 	InputVariables map[string]*structpb.Value `protobuf:"bytes,3,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Input variables for the node
+	IsSimulated    bool                       `protobuf:"varint,4,opt,name=is_simulated,json=isSimulated,proto3" json:"is_simulated,omitempty"`                                                                                   // If true, use Tenderly simulation; if false, execute real UserOp (default: true)
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -5197,6 +5198,13 @@ func (x *RunNodeWithInputsReq) GetInputVariables() map[string]*structpb.Value {
 		return x.InputVariables
 	}
 	return nil
+}
+
+func (x *RunNodeWithInputsReq) GetIsSimulated() bool {
+	if x != nil {
+		return x.IsSimulated
+	}
+	return false
 }
 
 // Response message for RunNodeWithInputs
@@ -9784,12 +9792,13 @@ const file_avs_proto_rawDesc = "" +
 	"\x05total\x18\x01 \x01(\x03R\x05total\x12\x1c\n" +
 	"\tsucceeded\x18\x02 \x01(\x03R\tsucceeded\x12\x16\n" +
 	"\x06failed\x18\x03 \x01(\x03R\x06failed\x12,\n" +
-	"\x12avg_execution_time\x18\x04 \x01(\x01R\x10avgExecutionTime\"\xad\x03\n" +
+	"\x12avg_execution_time\x18\x04 \x01(\x01R\x10avgExecutionTime\"\xd0\x03\n" +
 	"\x14RunNodeWithInputsReq\x121\n" +
 	"\tnode_type\x18\x01 \x01(\x0e2\x14.aggregator.NodeTypeR\bnodeType\x12Q\n" +
 	"\vnode_config\x18\x02 \x03(\v20.aggregator.RunNodeWithInputsReq.NodeConfigEntryR\n" +
 	"nodeConfig\x12]\n" +
-	"\x0finput_variables\x18\x03 \x03(\v24.aggregator.RunNodeWithInputsReq.InputVariablesEntryR\x0einputVariables\x1aU\n" +
+	"\x0finput_variables\x18\x03 \x03(\v24.aggregator.RunNodeWithInputsReq.InputVariablesEntryR\x0einputVariables\x12!\n" +
+	"\fis_simulated\x18\x04 \x01(\bR\visSimulated\x1aU\n" +
 	"\x0fNodeConfigEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\x1aY\n" +
