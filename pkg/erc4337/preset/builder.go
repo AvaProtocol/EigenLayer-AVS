@@ -9,6 +9,7 @@ import (
 	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -689,9 +690,19 @@ func BuildUserOpWithPaymaster(
 		Signature:        common.FromHex("0x1234567890abcdef"),
 	}
 
+	// Get the paymaster's nonce for this sender
+	// The paymaster maintains its own nonce per sender which is part of the signed hash
+	paymasterNonce, err := paymasterContract.SenderNonce(nil, userOp.Sender)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get paymaster nonce: %w", err)
+	}
+
+	log.Printf("🔍 PAYMASTER NONCE DEBUG:")
+	log.Printf("   Sender: %s", userOp.Sender.Hex())
+	log.Printf("   Paymaster nonce: %s", paymasterNonce.String())
+
 	// Get the hash to sign from the PayMaster contract
 	// IMPORTANT: The GetHash function signature is (userOp, validUntil, validAfter) per the contract ABI
-	// This is DIFFERENT from the PaymasterAndData encoding order which is (validAfter, validUntil)
 	paymasterHash, err := paymasterContract.GetHash(nil, paymasterUserOp, validUntil, validAfter)
 
 	if err != nil {
@@ -702,7 +713,7 @@ func BuildUserOpWithPaymaster(
 	log.Printf("   Paymaster address: %s", paymasterAddress.Hex())
 	log.Printf("   validAfter: %s (timestamp: %d)", validAfter.String(), validAfter.Int64())
 	log.Printf("   validUntil: %s (timestamp: %d)", validUntil.String(), validUntil.Int64())
-	log.Printf("   Paymaster hash to sign: 0x%x", paymasterHash)
+	log.Printf("   Paymaster hash (from contract): 0x%x", paymasterHash)
 
 	// Sign the paymaster hash with the controller's private key
 	paymasterSignature, err := signer.SignMessage(smartWalletConfig.ControllerPrivateKey, paymasterHash[:])
@@ -711,30 +722,30 @@ func BuildUserOpWithPaymaster(
 		return nil, fmt.Errorf("failed to sign paymaster hash: %w", err)
 	}
 
-	// Manually pack uint48 timestamps (6 bytes each)
-	// Order: validAfter FIRST, then validUntil (validAfter must be before validUntil in time)
-	// uint48 is 6 bytes, so we take the lower 6 bytes of the big.Int
-	validAfterBytes := make([]byte, 6)
-	validUntilBytes := make([]byte, 6)
+	// ABI-encode the timestamps (validUntil FIRST, then validAfter per parsePaymasterAndData line 108)
+	// The contract uses abi.decode which expects 32-byte padded values
+	// Total: address(20) + abi.encode(validUntil, validAfter)(64) + signature(65) = 149 bytes
+	uint48Type, _ := abi.NewType("uint48", "", nil)
+	timestampArgs := abi.Arguments{
+		abi.Argument{Type: uint48Type},
+		abi.Argument{Type: uint48Type},
+	}
 
-	// Convert big.Int to bytes and take last 6 bytes
-	validAfterBigBytes := validAfter.Bytes()
-	validUntilBigBytes := validUntil.Bytes()
-
-	copy(validAfterBytes[6-len(validAfterBigBytes):], validAfterBigBytes)
-	copy(validUntilBytes[6-len(validUntilBigBytes):], validUntilBigBytes)
+	// CRITICAL: Order is validUntil FIRST, validAfter SECOND (per Solidity line 108)
+	encodedTimestamps, err := timestampArgs.Pack(validUntil, validAfter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to ABI encode timestamps: %w", err)
+	}
 
 	log.Printf("🔍 TIMESTAMP PACKING DEBUG:")
-	log.Printf("   validAfter bytes (6): 0x%x", validAfterBytes)
-	log.Printf("   validUntil bytes (6): 0x%x", validUntilBytes)
+	log.Printf("   ABI-encoded (validUntil, validAfter): 0x%x (%d bytes)", encodedTimestamps, len(encodedTimestamps))
 
-	// Create PaymasterAndData: address (20) + validAfter (6) + validUntil (6) + signature (65)
-	paymasterAndData := append(paymasterAddress.Bytes(), validAfterBytes...)
-	paymasterAndData = append(paymasterAndData, validUntilBytes...)
+	// Create PaymasterAndData: address (20) + abi.encode(validUntil, validAfter) (64) + signature (65) = 149 bytes
+	paymasterAndData := append(paymasterAddress.Bytes(), encodedTimestamps...)
 	paymasterAndData = append(paymasterAndData, paymasterSignature...)
 
 	log.Printf("🔍 PAYMASTER AND DATA DEBUG:")
-	log.Printf("   Total length: %d bytes", len(paymasterAndData))
+	log.Printf("   Total length: %d bytes (expected: 149)", len(paymasterAndData))
 	log.Printf("   PaymasterAndData: 0x%x", paymasterAndData)
 
 	// Update the UserOperation with the properly encoded PaymasterAndData
