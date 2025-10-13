@@ -711,8 +711,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		r.smartWalletConfig,
 		r.owner, // Use EOA address (owner) for smart wallet derivation
 		smartWalletCallData,
-		// TODO: Make paymasterReq configurable if paymaster-sponsored contract writes are needed in the future.
-		nil,            // No paymaster for contract writes (self-funded). See TODO above.
+		paymasterReq,   // Use paymaster for wallet creation/sponsorship if shouldUsePaymaster() returned true
 		senderOverride, // Smart wallet address from aa_sender
 	)
 
@@ -888,7 +887,7 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 			"logsBloom":         fmt.Sprintf("0x%x", receipt.Bloom),
 			"logs":              convertLogsToInterface(receipt.Logs),
 		}
-	} else {
+	} else if userOp != nil {
 		// UserOp submitted but receipt not available yet
 		receiptMap = map[string]interface{}{
 			"userOpHash":      userOp.GetUserOpHash(r.smartWalletConfig.EntrypointAddress, big.NewInt(r.smartWalletConfig.ChainID)).Hex(),
@@ -896,6 +895,13 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 			"nonce":           fmt.Sprintf("0x%x", userOp.Nonce.Uint64()),
 			"status":          "pending",
 			"transactionHash": "pending", // Will be available once bundler processes the UserOp
+		}
+	} else {
+		// Neither receipt nor userOp available - this shouldn't happen but handle gracefully
+		receiptMap = map[string]interface{}{
+			"status":          "unknown",
+			"transactionHash": "unknown",
+			"error":           "Neither receipt nor UserOp available",
 		}
 	}
 

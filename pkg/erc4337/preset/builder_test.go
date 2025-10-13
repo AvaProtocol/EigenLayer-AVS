@@ -304,6 +304,7 @@ func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
 		validUntil,
 		validAfter,
 		nil,
+		nil, // nonceOverride - let it fetch from chain
 	)
 
 	if err == nil {
