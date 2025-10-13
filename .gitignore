@@ -53,3 +53,6 @@ _operator-*.txt
 # Environment files
 .env.test
 .env.local
+
+# Ignore the file/folder that is constantly added by Cursor
+EigenLayer-AVS
