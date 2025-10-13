@@ -9,7 +9,6 @@ import (
 	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -310,7 +309,15 @@ func sendUserOpCore(
 		log.Printf("  UserOp Details:")
 		log.Printf("    Sender: %s", userOp.Sender.Hex())
 		log.Printf("    Nonce: %s", userOp.Nonce.String())
+		log.Printf("    InitCode: %d bytes (%s...)", len(userOp.InitCode), func() string {
+			if len(userOp.InitCode) > 20 {
+				return common.Bytes2Hex(userOp.InitCode[:20])
+			}
+			return common.Bytes2Hex(userOp.InitCode)
+		}())
+		log.Printf("    CallData: %d bytes", len(userOp.CallData))
 		log.Printf("    PaymasterAndData: %d bytes", len(userOp.PaymasterAndData))
+		log.Printf("    Signature: %d bytes", len(userOp.Signature))
 
 		// Calculate total estimated cost for prefund check
 		totalGasLimit := new(big.Int).Add(userOp.PreVerificationGas, new(big.Int).Add(userOp.VerificationGasLimit, userOp.CallGasLimit))
@@ -339,6 +346,12 @@ func sendUserOpCore(
 			log.Printf("  Attempt: %d/%d", retry+1, maxRetries)
 			log.Printf("  Nonce used: %s", userOp.Nonce.String())
 			log.Printf("  UserOp hash: %s", txResult)
+
+			// Increment nonce for next potential UserOp (prevents nonce collision for sequential txs)
+			// This allows the next UserOp to use nonce+1 even if this UserOp hasn't been mined yet
+			userOp.Nonce = new(big.Int).Add(userOp.Nonce, big.NewInt(1))
+			log.Printf("🔢 NONCE INCREMENT: Next nonce will be %s (for sequential UserOps)", userOp.Nonce.String())
+
 			break
 		}
 
@@ -414,9 +427,17 @@ func BuildUserOp(
 		return nil, err
 	}
 
+	log.Printf("🔍 BUILD USEROP DEBUG: Checking wallet deployment status")
+	log.Printf("  Sender: %s", sender.Hex())
+	log.Printf("  Code length at sender: %d bytes", len(code))
+
 	// account not initialized, feed in init code
 	if len(code) == 0 {
 		initCode, _ = aa.GetInitCode(owner.Hex(), accountSalt)
+		log.Printf("  ❌ Wallet NOT deployed - generating initCode")
+		log.Printf("  InitCode: %s", initCode)
+	} else {
+		log.Printf("  ✅ Wallet IS deployed - initCode will be empty (0x)")
 	}
 
 	maxFeePerGas, maxPriorityFeePerGas, err := eip1559.SuggestFee(client)
@@ -427,10 +448,17 @@ func BuildUserOp(
 	// Increase verificationGasLimit if initCode is present (wallet deployment)
 	// UUPS proxy + initialize(owner) account deployment requires significantly more gas than normal operations
 	actualVerificationGasLimit := verificationGasLimit
-	if len(initCode) > 0 {
+	log.Printf("🔍 VERIFICATION GAS DEBUG:")
+	log.Printf("  initCode string: '%s'", initCode)
+	log.Printf("  initCode length: %d", len(initCode))
+	log.Printf("  initCode == '0x': %v", initCode == "0x")
+
+	if len(initCode) > 0 && initCode != "0x" {
 		actualVerificationGasLimit = DEPLOYMENT_VERIFICATION_GAS_LIMIT
 		log.Printf("🔧 InitCode present, increasing verificationGasLimit from %s to %s (UUPS proxy deployment)",
 			verificationGasLimit.String(), actualVerificationGasLimit.String())
+	} else {
+		log.Printf("✅ No initCode (wallet deployed), using standard verificationGasLimit: %s", verificationGasLimit.String())
 	}
 
 	// Initialize UserOp with temporary nonce (will be set dynamically before sending)
@@ -662,11 +690,19 @@ func BuildUserOpWithPaymaster(
 	}
 
 	// Get the hash to sign from the PayMaster contract
+	// IMPORTANT: The GetHash function signature is (userOp, validUntil, validAfter) per the contract ABI
+	// This is DIFFERENT from the PaymasterAndData encoding order which is (validAfter, validUntil)
 	paymasterHash, err := paymasterContract.GetHash(nil, paymasterUserOp, validUntil, validAfter)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get paymaster hash: %w", err)
 	}
+
+	log.Printf("🔍 PAYMASTER SIGNATURE DEBUG:")
+	log.Printf("   Paymaster address: %s", paymasterAddress.Hex())
+	log.Printf("   validAfter: %s (timestamp: %d)", validAfter.String(), validAfter.Int64())
+	log.Printf("   validUntil: %s (timestamp: %d)", validUntil.String(), validUntil.Int64())
+	log.Printf("   Paymaster hash to sign: 0x%x", paymasterHash)
 
 	// Sign the paymaster hash with the controller's private key
 	paymasterSignature, err := signer.SignMessage(smartWalletConfig.ControllerPrivateKey, paymasterHash[:])
@@ -675,25 +711,31 @@ func BuildUserOpWithPaymaster(
 		return nil, fmt.Errorf("failed to sign paymaster hash: %w", err)
 	}
 
-	// Define ABI types for timestamps
-	uint48Type, _ := abi.NewType("uint48", "", nil)
-	timestampArgs := abi.Arguments{
-		abi.Argument{Type: uint48Type},
-		abi.Argument{Type: uint48Type},
-	}
+	// Manually pack uint48 timestamps (6 bytes each)
+	// Order: validAfter FIRST, then validUntil (validAfter must be before validUntil in time)
+	// uint48 is 6 bytes, so we take the lower 6 bytes of the big.Int
+	validAfterBytes := make([]byte, 6)
+	validUntilBytes := make([]byte, 6)
 
-	// Pack timestamps according to ABI encoding rules
-	encodedTimestamps, err := timestampArgs.Pack(
-		validUntil,
-		validAfter,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to ABI encode timestamps: %w", err)
-	}
+	// Convert big.Int to bytes and take last 6 bytes
+	validAfterBigBytes := validAfter.Bytes()
+	validUntilBigBytes := validUntil.Bytes()
 
-	// Create PaymasterAndData
-	paymasterAndData := append(paymasterAddress.Bytes(), encodedTimestamps...)
+	copy(validAfterBytes[6-len(validAfterBigBytes):], validAfterBigBytes)
+	copy(validUntilBytes[6-len(validUntilBigBytes):], validUntilBigBytes)
+
+	log.Printf("🔍 TIMESTAMP PACKING DEBUG:")
+	log.Printf("   validAfter bytes (6): 0x%x", validAfterBytes)
+	log.Printf("   validUntil bytes (6): 0x%x", validUntilBytes)
+
+	// Create PaymasterAndData: address (20) + validAfter (6) + validUntil (6) + signature (65)
+	paymasterAndData := append(paymasterAddress.Bytes(), validAfterBytes...)
+	paymasterAndData = append(paymasterAndData, validUntilBytes...)
 	paymasterAndData = append(paymasterAndData, paymasterSignature...)
+
+	log.Printf("🔍 PAYMASTER AND DATA DEBUG:")
+	log.Printf("   Total length: %d bytes", len(paymasterAndData))
+	log.Printf("   PaymasterAndData: 0x%x", paymasterAndData)
 
 	// Update the UserOperation with the properly encoded PaymasterAndData
 	userOp.PaymasterAndData = paymasterAndData
