@@ -100,10 +100,15 @@ func (bc *BundlerClient) sendUserOperationHTTP(
 	log.Printf("🔍 END BUNDLER SEND DEBUG")
 
 	// Create JSON-RPC request
+	// IMPORTANT: Some bundlers require EIP-55 checksummed addresses for EntryPoint
+	// Using hexutil.Encode preserves the original case, but we need checksum format
+	// The bundler logs show successful requests use uppercase hex, so we match that format
+	entrypointAddr := "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789" // EIP-55 checksummed EntryPoint v0.6
+
 	reqData := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "eth_sendUserOperation",
-		"params":  []interface{}{uo, entrypoint.Hex()},
+		"params":  []interface{}{uo, entrypointAddr},
 		"id":      1,
 	}
 
@@ -192,7 +197,10 @@ func (bc *BundlerClient) sendUserOperationRPC(
 		PaymasterAndData:     fmt.Sprintf("0x%x", userOp.PaymasterAndData),
 		Signature:            fmt.Sprintf("0x%x", userOp.Signature),
 	}
-	err := bc.client.CallContext(ctx, &txHash, "eth_sendUserOperation", uo, entrypoint)
+
+	// IMPORTANT: Use EIP-55 checksummed EntryPoint address (same as HTTP method)
+	entrypointAddr := "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789" // EIP-55 checksummed EntryPoint v0.6
+	err := bc.client.CallContext(ctx, &txHash, "eth_sendUserOperation", uo, entrypointAddr)
 	return txHash, err
 }
 
