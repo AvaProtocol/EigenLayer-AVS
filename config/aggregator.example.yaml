@@ -13,9 +13,9 @@ db_path: /tmp/ap-avs/db
 backup_dir: /tmp/ap-avs-backup
 
 ## Aggregator Address: Replace with your aggregator's address
-ecdsa_private_key: 
+ecdsa_private_key:
 
-## EigenLayer Related Configs
+## EigenLayer Related Configs - Ethereum or Sepolia
 eth_rpc_url: https://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY_HERE
 eth_ws_url: wss://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY_HERE
 
@@ -36,16 +36,16 @@ avs_registry_coordinator_address: 0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD # Y
 operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605 # Your AVS Operator State Retriever
 
 # Authentication and security
-jwt_secret: 
+jwt_secret:
 
 # Optional: Monitoring and telemetry
 server_name: "aggregator-your-name"
 sentry_dsn: https://your_sentry_dsn_here@sentry.io/project_id
 
 # Optional: Tenderly integration for simulation
-tenderly_account: 
-tenderly_project: 
-tenderly_access_key: 
+tenderly_account:
+tenderly_project:
+tenderly_access_key:
 
 # Optional: Unix socket path for REPL debugging interface
 # Connect with: socat - UNIX-CONNECT:/tmp/ap.sock
@@ -56,10 +56,10 @@ socket_path: "/tmp/ap.sock"
 smart_wallet:
   eth_rpc_url: https://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY_HERE
   eth_ws_url: wss://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY_HERE
-  bundler_url: 
+  bundler_url:
 
   # master key to generate and sign userops for any wallet
-  controller_private_key: 
+  controller_private_key:
 
   max_wallets_per_owner: 3
 
@@ -67,32 +67,32 @@ smart_wallet:
 # This replaces the hardcoded operator approval system
 # If this list is empty, the system will use the default hardcoded operators
 approved_operators:
-  - "0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d"  # Operator 1
-  - "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3"  # Operator 2  
-  - "0xa026265a0f01a6e1a19b04655519429df0a57c4e"  # Operator 3 (newly added)
+  - "0x997e5d40a32c44a3d93e59fc55c4fd20b7d2d49d" # Operator 1
+  - "0xc6b87cc9e85b07365b6abefff061f237f7cf7dc3" # Operator 2
+  - "0xa026265a0f01a6e1a19b04655519429df0a57c4e" # Operator 3 (newly added)
 
 # 🆕 CONFIGURABLE FEE RATES
 # All fields are optional - only specify ones you want to override
 fee_rates:
   # Base fees (one-time per workflow) - defaults to 0.0
   base_fee_usd: 0.0
-  
+
   # Monitoring fees (per minute) - cost to monitor triggers
-  manual_monitoring_fee_usd_per_minute: 0.0      # Manual triggers free (default)
-  fixed_time_monitoring_fee_usd_per_minute: 0.000017  # ~$0.01/day (default)
-  cron_monitoring_fee_usd_per_minute: 0.000033        # ~$0.02/day (default)
-  block_monitoring_fee_usd_per_minute: 0.000033       # ~$0.02/day (default)
-  event_monitoring_fee_usd_per_minute: 0.000083       # ~$0.05/day (default)
-  
+  manual_monitoring_fee_usd_per_minute: 0.0 # Manual triggers free (default)
+  fixed_time_monitoring_fee_usd_per_minute: 0.000017 # ~$0.01/day (default)
+  cron_monitoring_fee_usd_per_minute: 0.000033 # ~$0.02/day (default)
+  block_monitoring_fee_usd_per_minute: 0.000033 # ~$0.02/day (default)
+  event_monitoring_fee_usd_per_minute: 0.000083 # ~$0.05/day (default)
+
   # Per-execution fees - cost for each trigger activation
-  manual_execution_fee_usd: 0.0      # Manual executions free (default)
+  manual_execution_fee_usd: 0.0 # Manual executions free (default)
   scheduled_execution_fee_usd: 0.005 # $0.005 per scheduled execution (default)
-  block_execution_fee_usd: 0.01      # $0.01 per block trigger (default)
-  event_execution_fee_usd: 0.01      # $0.01 per event trigger (default)
-  
+  block_execution_fee_usd: 0.01 # $0.01 per block trigger (default)
+  event_execution_fee_usd: 0.01 # $0.01 per event trigger (default)
+
   # Event monitoring scaling factors - additional costs for complex event monitoring
-  event_address_fee_usd_per_minute: 0.000008  # ~$0.005/day per address (default)
-  event_topic_fee_usd_per_minute: 0.000003    # ~$0.002/day per topic (default)
+  event_address_fee_usd_per_minute: 0.000008 # ~$0.005/day per address (default)
+  event_topic_fee_usd_per_minute: 0.000003 # ~$0.002/day per topic (default)
 
 # Macro variables and secrets - Available globally to ALL workflows at runtime
 # Access in workflows via template syntax: {{apContext.configVars.SECRET_NAME}}
@@ -102,11 +102,11 @@ macros:
   secrets:
     # API keys for external services - accessible in workflow templates
     # Example usage in REST API node headers: "X-API-Key": "{{apContext.configVars.moralis_api_key}}"
-    ap_notify_bot_token:  # Telegram bot API token for notification workflows
-    sendgrid_key:         # SendGrid email service API key
-    thegraph_api_key:     # TheGraph protocol API key (auto-injected for gateway.thegraph.com queries)
-    moralis_api_key:      # Moralis Web3 Data API key (used by BalanceNode for token data)
-    # Add your custom secrets here - any key-value pair can be accessed in workflows 
+    ap_notify_bot_token: # Telegram bot API token for notification workflows
+    sendgrid_key: # SendGrid email service API key
+    thegraph_api_key: # TheGraph protocol API key (auto-injected for gateway.thegraph.com queries)
+    moralis_api_key: # Moralis Web3 Data API key (used by BalanceNode for token data)
+    # Add your custom secrets here - any key-value pair can be accessed in workflows
 
 # TEST_PRIVATE_KEY: used only by unit tests (e.g., ERC-4337 presets). The aggregator ignores this.
-test_private_key: 
+test_private_key:
