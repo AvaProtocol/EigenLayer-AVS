@@ -396,3 +396,19 @@ func (bc *BundlerClient) GetUserOperationReceipt(ctx context.Context, hash strin
 	err := bc.client.CallContext(ctx, &receipt, "eth_getUserOperationReceipt", hash)
 	return receipt, err
 }
+
+// SendBundleNow triggers immediate bundling of pending UserOps.
+// This is a debug method (debug_bundler_sendBundleNow) that forces the bundler to create and send a bundle immediately
+// instead of waiting for the configured bundle interval or other auto-bundling conditions.
+func (bc *BundlerClient) SendBundleNow(ctx context.Context) error {
+	log.Printf("🔨 Calling debug_bundler_sendBundleNow to trigger immediate bundling")
+
+	var result interface{}
+	err := bc.client.CallContext(ctx, &result, "debug_bundler_sendBundleNow")
+	if err != nil {
+		return fmt.Errorf("debug_bundler_sendBundleNow failed: %w", err)
+	}
+
+	log.Printf("✅ debug_bundler_sendBundleNow returned: %+v", result)
+	return nil
+}

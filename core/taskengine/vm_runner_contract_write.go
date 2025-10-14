@@ -979,9 +979,21 @@ func convertLogsToInterface(logs []*types.Log) []interface{} {
 	return result
 }
 
-// shouldUsePaymaster determines if paymaster should be used based on transaction limits and whitelist
+// shouldUsePaymaster determines if paymaster should be used based on wallet balance and estimated gas costs
 func (r *ContractWriteProcessor) shouldUsePaymaster() bool {
-	// Priority 1: If the intended sender (aa_sender override or derived) has ETH balance, do NOT use paymaster
+	// IMPORTANT: Check if wallet has enough ETH for the estimated gas cost
+	// This should ideally use EntryPoint.getDeposit() but we use balance as a proxy
+
+	// Priority 1: If no paymaster is configured, can't use it
+	if (r.smartWalletConfig.PaymasterAddress == common.Address{}) {
+		if r.vm.logger != nil {
+			r.vm.logger.Debug("No paymaster configured, proceeding self-funded",
+				"owner", r.owner.Hex())
+		}
+		return false
+	}
+
+	// Priority 2: If the intended sender has sufficient balance for gas, do NOT use paymaster
 	if r.client != nil {
 		// Prefer aa_sender override when present
 		var checkAddr *common.Address
@@ -1000,36 +1012,61 @@ func (r *ContractWriteProcessor) shouldUsePaymaster() bool {
 			if derived, err := aa.GetSenderAddress(r.client, r.owner, big.NewInt(0)); err == nil {
 				checkAddr = derived
 			} else if r.vm.logger != nil {
-				r.vm.logger.Debug("Could not derive smart wallet address for balance check; proceeding to consider paymaster",
+				r.vm.logger.Debug("Could not derive smart wallet address for balance check; will use paymaster",
 					"owner", r.owner.Hex(), "error", err)
 			}
 		}
+
 		if checkAddr != nil {
-			if bal, balErr := r.client.BalanceAt(context.Background(), *checkAddr, nil); balErr == nil && bal != nil && bal.Sign() > 0 {
-				if r.vm.logger != nil {
-					r.vm.logger.Debug("Sender has ETH balance, not using paymaster",
-						"owner", r.owner.Hex(), "wallet", checkAddr.Hex(), "balanceWei", bal.String())
+			// Check raw ETH balance as a proxy for available gas funds
+			// Note: This works because most wallets don't deposit to EntryPoint manually.
+			// The bundler performs the authoritative check using EntryPoint.getDeposit() during validation.
+			// Future enhancement: Call EntryPoint.getDeposit() for more accurate prefund checks.
+			balance, err := r.client.BalanceAt(context.Background(), *checkAddr, nil)
+			if err == nil && balance != nil {
+				// Estimate gas cost for this UserOp
+				// Formula: totalGas = callGas + verificationGas + preVerificationGas
+				// Cost = totalGas * maxFeePerGas
+				// Using conservative estimates from EIP-1559 (20 gwei maxFeePerGas)
+				estimatedCallGas := big.NewInt(100_000)           // 100K for smart wallet execute
+				estimatedVerificationGas := big.NewInt(150_000)   // 150K for signature verification
+				estimatedPreVerificationGas := big.NewInt(50_000) // 50K for bundler overhead
+				totalGas := new(big.Int).Add(estimatedCallGas, estimatedVerificationGas)
+				totalGas = new(big.Int).Add(totalGas, estimatedPreVerificationGas)
+
+				// Use 20 gwei maxFeePerGas (from gas price fix)
+				maxFeePerGas := big.NewInt(20_000_000_000) // 20 gwei
+				estimatedCost := new(big.Int).Mul(totalGas, maxFeePerGas)
+
+				// Add 20% buffer for gas price fluctuations and estimation inaccuracy
+				buffer := new(big.Int).Div(estimatedCost, big.NewInt(5)) // 20%
+				requiredBalance := new(big.Int).Add(estimatedCost, buffer)
+
+				if balance.Cmp(requiredBalance) >= 0 {
+					if r.vm.logger != nil {
+						r.vm.logger.Debug("Sender has sufficient balance for self-funding, not using paymaster",
+							"owner", r.owner.Hex(), "wallet", checkAddr.Hex(),
+							"balanceWei", balance.String(), "requiredWei", requiredBalance.String())
+					}
+					return false
+				} else {
+					if r.vm.logger != nil {
+						r.vm.logger.Debug("Sender has insufficient balance, will use paymaster",
+							"owner", r.owner.Hex(), "wallet", checkAddr.Hex(),
+							"balanceWei", balance.String(), "requiredWei", requiredBalance.String(),
+							"shortfallWei", new(big.Int).Sub(requiredBalance, balance).String())
+					}
 				}
-				return false
 			}
 		}
 	}
 
-	// Priority 2: If no ETH on wallet, and a paymaster is configured, use paymaster as fallback for creation/sponsorship
-	if (r.smartWalletConfig.PaymasterAddress != common.Address{}) {
-		if r.vm.logger != nil {
-			r.vm.logger.Debug("Using paymaster as fallback (wallet has no ETH or balance unknown)",
-				"owner", r.owner.Hex(), "paymaster", r.smartWalletConfig.PaymasterAddress.Hex())
-		}
-		return true
-	}
-
-	// No ETH and no paymaster configured → do not force paymaster; bundler will fail (AA21) and we propagate failure
+	// Priority 3: Use paymaster as fallback (wallet has insufficient balance or check failed)
 	if r.vm.logger != nil {
-		r.vm.logger.Debug("No wallet ETH and no paymaster configured; proceeding without paymaster (may fail)",
-			"owner", r.owner.Hex())
+		r.vm.logger.Debug("Using paymaster for gas sponsorship",
+			"owner", r.owner.Hex(), "paymaster", r.smartWalletConfig.PaymasterAddress.Hex())
 	}
-	return false
+	return true
 }
 
 // createMockContractWriteResult creates a mock result when Tenderly fails

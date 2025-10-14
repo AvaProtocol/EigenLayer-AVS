@@ -158,140 +158,139 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 		},
 	}
 
-	t.Run("Step1_ApproveUSDCToSwapRouter_Base", func(t *testing.T) {
-		t.Logf("✍️  Approving USDC to SwapRouter on Base with REAL execution...")
+	// ========================================
+	// Step 1: Approve USDC to SwapRouter
+	// ========================================
+	t.Logf("✍️  Step 1: Approving USDC to SwapRouter on Base with REAL execution...")
 
-		approvalConfig := map[string]interface{}{
-			"contractAddress": BASE_USDC,
-			"contractAbi":     erc20ABI,
-			"methodCalls": []interface{}{
-				map[string]interface{}{
-					"methodName":   "approve",
-					"methodParams": []interface{}{BASE_SWAPROUTER, BASE_SWAP_AMOUNT},
-					"callData":     "",
-				},
-			},
-		}
-
-		inputVars := map[string]interface{}{
-			"settings": settings,
-		}
-
-		t.Logf("   Calling RunNodeImmediately with isSimulated=false on Base...")
-		result, err := engine.RunNodeImmediately("contractWrite", approvalConfig, inputVars, user, false)
-
-		require.NoError(t, err, "Approval RunNodeImmediately should not return error")
-		require.NotNil(t, result, "Approval result should not be nil")
-
-		// Check if the execution succeeded (result contains success/error fields)
-		if successVal, ok := result["success"]; ok {
-			if success, isBool := successVal.(bool); isBool && !success {
-				// Execution failed - check for error message
-				if errorVal, hasError := result["error"]; hasError {
-					if errorStr, isString := errorVal.(string); isString {
-						t.Fatalf("❌ Approval execution failed: %s", errorStr)
-					}
-				}
-				t.Fatalf("❌ Approval execution failed with success=false")
-			}
-		}
-
-		t.Logf("✅ Approval result: %+v", result)
-		t.Logf("   Approval transaction submitted successfully on Base")
-
-		// Wait for state propagation
-		t.Logf("   ⏰ Waiting 15 seconds for Base state sync...")
-		time.Sleep(15 * time.Second)
-		t.Logf("   ✅ Wait complete")
-	})
-
-	t.Run("Step2_ExecuteSwap_Base", func(t *testing.T) {
-		t.Logf("🔄 Executing USDC → WETH swap on Base with REAL execution...")
-
-		minOutput := "1" // 1 wei minimum output
-
-		swapRouterABI := []interface{}{
+	approvalConfig := map[string]interface{}{
+		"contractAddress": BASE_USDC,
+		"contractAbi":     erc20ABI,
+		"methodCalls": []interface{}{
 			map[string]interface{}{
-				"inputs": []interface{}{
-					map[string]interface{}{
-						"components": []interface{}{
-							map[string]interface{}{"name": "tokenIn", "type": "address"},
-							map[string]interface{}{"name": "tokenOut", "type": "address"},
-							map[string]interface{}{"name": "fee", "type": "uint24"},
-							map[string]interface{}{"name": "recipient", "type": "address"},
-							map[string]interface{}{"name": "amountIn", "type": "uint256"},
-							map[string]interface{}{"name": "amountOutMinimum", "type": "uint256"},
-							map[string]interface{}{"name": "sqrtPriceLimitX96", "type": "uint160"},
-						},
-						"name": "params",
-						"type": "tuple",
-					},
-				},
-				"name":            "exactInputSingle",
-				"outputs":         []interface{}{map[string]interface{}{"name": "amountOut", "type": "uint256"}},
-				"stateMutability": "payable",
-				"type":            "function",
+				"methodName":   "approve",
+				"methodParams": []interface{}{BASE_SWAPROUTER, BASE_SWAP_AMOUNT},
+				"callData":     "",
 			},
-		}
+		},
+	}
 
-		swapConfig := map[string]interface{}{
-			"contractAddress": BASE_SWAPROUTER,
-			"contractAbi":     swapRouterABI,
-			"methodCalls": []interface{}{
-				map[string]interface{}{
-					"methodName": "exactInputSingle",
-					"methodParams": []interface{}{
-						fmt.Sprintf(`["%s", "%s", "%d", "%s", "%s", "%s", 0]`,
-							BASE_USDC,
-							BASE_WETH,
-							BASE_FEE_TIER,
-							(*smartWalletAddr).Hex(),
-							BASE_SWAP_AMOUNT,
-							minOutput,
-						),
-					},
-					"callData": "",
-				},
-			},
-		}
+	inputVars := map[string]interface{}{
+		"settings": settings,
+	}
 
-		inputVars := map[string]interface{}{
-			"settings": settings,
-		}
+	t.Logf("   Calling RunNodeImmediately with isSimulated=false on Base...")
+	approvalResult, err := engine.RunNodeImmediately("contractWrite", approvalConfig, inputVars, user, false)
 
-		t.Logf("   Swap parameters:")
-		t.Logf("     tokenIn: %s (USDC)", BASE_USDC)
-		t.Logf("     tokenOut: %s (WETH)", BASE_WETH)
-		t.Logf("     fee: %d (0.3%%)", BASE_FEE_TIER)
-		t.Logf("     amountIn: %s (1 USDC)", BASE_SWAP_AMOUNT)
-		t.Logf("     amountOutMinimum: %s", minOutput)
+	require.NoError(t, err, "Approval RunNodeImmediately should not return error")
+	require.NotNil(t, approvalResult, "Approval result should not be nil")
 
-		t.Logf("   Calling RunNodeImmediately with isSimulated=false on Base...")
-		result, err := engine.RunNodeImmediately("contractWrite", swapConfig, inputVars, user, false)
-
-		require.NoError(t, err, "Swap RunNodeImmediately should not return error")
-		require.NotNil(t, result, "Swap result should not be nil")
-
-		// Check if the execution succeeded (result contains success/error fields)
-		if successVal, ok := result["success"]; ok {
-			if success, isBool := successVal.(bool); isBool && !success {
-				// Execution failed - check for error message
-				if errorVal, hasError := result["error"]; hasError {
-					if errorStr, isString := errorVal.(string); isString {
-						t.Fatalf("❌ Swap execution failed: %s", errorStr)
-					}
+	// Check if the execution succeeded (result contains success/error fields)
+	if successVal, ok := approvalResult["success"]; ok {
+		if success, isBool := successVal.(bool); isBool && !success {
+			// Execution failed - check for error message
+			if errorVal, hasError := approvalResult["error"]; hasError {
+				if errorStr, isString := errorVal.(string); isString {
+					t.Fatalf("❌ Approval execution failed: %s", errorStr)
 				}
-				t.Fatalf("❌ Swap execution failed with success=false")
 			}
+			t.Fatalf("❌ Approval execution failed with success=false")
 		}
+	}
 
-		t.Logf("✅ Swap result: %+v", result)
+	t.Logf("✅ Approval confirmed on-chain")
+	t.Logf("   Result: %+v", approvalResult)
 
-		// Extract transaction hash
-		if data, ok := result["data"].(map[string]interface{}); ok {
-			t.Logf("   Swap data: %+v", data)
+	// Wait 5 seconds to ensure approval is fully propagated across RPC nodes
+	// This prevents gas estimation failures due to RPC node lag
+	t.Logf("⏳ Waiting 5 seconds for approval to propagate across RPC nodes...")
+	time.Sleep(5 * time.Second)
+
+	// ========================================
+	// Step 2: Execute Swap (only if approval succeeded)
+	// ========================================
+	t.Logf("🔄 Step 2: Executing USDC → WETH swap on Base with REAL execution...")
+
+	minOutput := "1" // 1 wei minimum output
+
+	swapRouterABI := []interface{}{
+		map[string]interface{}{
+			"inputs": []interface{}{
+				map[string]interface{}{
+					"components": []interface{}{
+						map[string]interface{}{"name": "tokenIn", "type": "address"},
+						map[string]interface{}{"name": "tokenOut", "type": "address"},
+						map[string]interface{}{"name": "fee", "type": "uint24"},
+						map[string]interface{}{"name": "recipient", "type": "address"},
+						map[string]interface{}{"name": "amountIn", "type": "uint256"},
+						map[string]interface{}{"name": "amountOutMinimum", "type": "uint256"},
+						map[string]interface{}{"name": "sqrtPriceLimitX96", "type": "uint160"},
+					},
+					"name": "params",
+					"type": "tuple",
+				},
+			},
+			"name":            "exactInputSingle",
+			"outputs":         []interface{}{map[string]interface{}{"name": "amountOut", "type": "uint256"}},
+			"stateMutability": "payable",
+			"type":            "function",
+		},
+	}
+
+	swapConfig := map[string]interface{}{
+		"contractAddress": BASE_SWAPROUTER,
+		"contractAbi":     swapRouterABI,
+		"methodCalls": []interface{}{
+			map[string]interface{}{
+				"methodName": "exactInputSingle",
+				"methodParams": []interface{}{
+					fmt.Sprintf(`["%s", "%s", "%d", "%s", "%s", "%s", 0]`,
+						BASE_USDC,
+						BASE_WETH,
+						BASE_FEE_TIER,
+						(*smartWalletAddr).Hex(),
+						BASE_SWAP_AMOUNT,
+						minOutput,
+					),
+				},
+				"callData": "",
+			},
+		},
+	}
+
+	t.Logf("   Swap parameters:")
+	t.Logf("     tokenIn: %s (USDC)", BASE_USDC)
+	t.Logf("     tokenOut: %s (WETH)", BASE_WETH)
+	t.Logf("     fee: %d (0.3%%)", BASE_FEE_TIER)
+	t.Logf("     amountIn: %s (1 USDC)", BASE_SWAP_AMOUNT)
+	t.Logf("     amountOutMinimum: %s", minOutput)
+
+	t.Logf("   Calling RunNodeImmediately with isSimulated=false on Base...")
+	swapResult, err := engine.RunNodeImmediately("contractWrite", swapConfig, inputVars, user, false)
+
+	require.NoError(t, err, "Swap RunNodeImmediately should not return error")
+	require.NotNil(t, swapResult, "Swap result should not be nil")
+
+	// Check if the execution succeeded (result contains success/error fields)
+	if successVal, ok := swapResult["success"]; ok {
+		if success, isBool := successVal.(bool); isBool && !success {
+			// Execution failed - check for error message
+			if errorVal, hasError := swapResult["error"]; hasError {
+				if errorStr, isString := errorVal.(string); isString {
+					t.Fatalf("❌ Swap execution failed: %s", errorStr)
+				}
+			}
+			t.Fatalf("❌ Swap execution failed with success=false")
 		}
+	}
 
-		t.Logf("🎉 SUCCESS: Smart wallet swap worked on Base!")
-	})
+	t.Logf("✅ Swap confirmed on-chain")
+	t.Logf("   Result: %+v", swapResult)
+
+	// Extract transaction hash
+	if data, ok := swapResult["data"].(map[string]interface{}); ok {
+		t.Logf("   Swap data: %+v", data)
+	}
+
+	t.Logf("🎉 SUCCESS: Both approval and swap completed successfully on Base!")
 }

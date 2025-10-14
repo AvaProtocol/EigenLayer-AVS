@@ -303,8 +303,11 @@ func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
 		invalidPaymasterAddress,
 		validUntil,
 		validAfter,
-		nil,
+		nil, // senderOverride
 		nil, // nonceOverride - let it fetch from chain
+		nil, // callGasOverride
+		nil, // verificationGasOverride
+		nil, // preVerificationGasOverride
 	)
 
 	if err == nil {
