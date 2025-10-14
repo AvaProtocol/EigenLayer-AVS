@@ -19,6 +19,13 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 )
 
+const (
+	// EntryPointV06Address is the canonical ERC-4337 EntryPoint v0.6 contract address
+	// This address is the same across all EVM-compatible chains (Ethereum, Base, etc.)
+	// Reference: https://github.com/eth-infinitism/account-abstraction/blob/develop/deployments.json
+	EntryPointV06Address = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
+)
+
 // safePreview returns a truncated preview of s with ellipsis when longer than n
 func safePreview(s string, n int) string {
 	if n <= 0 {
@@ -42,7 +49,7 @@ func NewBundlerClient(url string) (*BundlerClient, error) {
 	// endpoints, but it also supports other protocols such as WebSocket.
 	c, err := rpc.DialHTTP(url)
 	if err != nil {
-		return nil, fmt.Errorf("Error creating bundler client: %w", err)
+		return nil, fmt.Errorf("error creating bundler client: %w", err)
 	}
 	return &BundlerClient{client: c, url: url}, nil
 }
@@ -101,14 +108,10 @@ func (bc *BundlerClient) sendUserOperationHTTP(
 
 	// Create JSON-RPC request
 	// IMPORTANT: Some bundlers require EIP-55 checksummed addresses for EntryPoint
-	// Using hexutil.Encode preserves the original case, but we need checksum format
-	// The bundler logs show successful requests use uppercase hex, so we match that format
-	entrypointAddr := "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789" // EIP-55 checksummed EntryPoint v0.6
-
 	reqData := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "eth_sendUserOperation",
-		"params":  []interface{}{uo, entrypointAddr},
+		"params":  []interface{}{uo, EntryPointV06Address},
 		"id":      1,
 	}
 
@@ -199,8 +202,7 @@ func (bc *BundlerClient) sendUserOperationRPC(
 	}
 
 	// IMPORTANT: Use EIP-55 checksummed EntryPoint address (same as HTTP method)
-	entrypointAddr := "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789" // EIP-55 checksummed EntryPoint v0.6
-	err := bc.client.CallContext(ctx, &txHash, "eth_sendUserOperation", uo, entrypointAddr)
+	err := bc.client.CallContext(ctx, &txHash, "eth_sendUserOperation", uo, EntryPointV06Address)
 	return txHash, err
 }
 
