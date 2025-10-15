@@ -25,10 +25,8 @@ import (
 )
 
 const (
-	// DefaultSepoliaConfigPath is the default config path for Sepolia tests
-	DefaultSepoliaConfigPath = "aggregator-sepolia.yaml"
-	// DefaultBaseConfigPath is the default config path for Base tests
-	DefaultBaseConfigPath = "aggregator-base.yaml"
+	// DefaultConfigPath is the default aggregator config path for tests (replaces old aggregator.yaml)
+	DefaultConfigPath = "aggregator-sepolia.yaml"
 )
 
 var testConfig *config.Config
@@ -39,7 +37,7 @@ var testConfig *config.Config
 func init() {
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))
-		configPath := filepath.Join(repoRoot, "config", DefaultSepoliaConfigPath)
+		configPath := filepath.Join(repoRoot, "config", DefaultConfigPath)
 
 		var err error
 		testConfig, err = config.NewConfig(configPath)
@@ -52,7 +50,7 @@ func init() {
 
 // GetConfigPath returns the absolute path to a config file from the repo root.
 // This is useful for tests that need to load config files explicitly.
-// Example: GetConfigPath(testutil.DefaultSepoliaConfigPath) or GetConfigPath("aggregator-base.yaml")
+// Example: GetConfigPath(testutil.DefaultConfigPath) or GetConfigPath("aggregator-base.yaml")
 func GetConfigPath(configFileName string) string {
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))

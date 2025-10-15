@@ -1,13 +1,13 @@
 #!/bin/bash
 set -e
 
-# Generate config/aggregator.yaml for CI unit tests
+# Generate config/aggregator-sepolia.yaml for CI unit tests
 # This script expects all environment variables to be set by the caller
 
-echo "Generating config/aggregator.yaml for tests..."
+echo "Generating config/aggregator-sepolia.yaml for tests..."
 
 mkdir -p config
-cat > config/aggregator.yaml <<YAML
+cat > config/aggregator-sepolia.yaml <<YAML
 # Auto-generated for CI unit tests
 environment: development
 
@@ -51,13 +51,13 @@ macros:
     moralis_api_key: "${MORALIS_API_KEY:-}"
 YAML
 
-echo "Verifying config/aggregator.yaml..."
+echo "Verifying config/aggregator-sepolia.yaml..."
 echo "pwd=$(pwd)"
 ls -la config/ || true
-echo "Generated config/aggregator.yaml (redacted first 40 lines):"
-if [ -f config/aggregator.yaml ]; then
-  sed -n '1,40p' config/aggregator.yaml | sed -e 's/tenderly_access_key:.*/tenderly_access_key: ***REDACTED***/' -e 's/test_private_key:.*/test_private_key: ***REDACTED***/' -e 's/bundler_url:.*/bundler_url: ***REDACTED***/' -e 's/ecdsa_private_key:.*/ecdsa_private_key: ***REDACTED***/'
+echo "Generated config/aggregator-sepolia.yaml (redacted first 40 lines):"
+if [ -f config/aggregator-sepolia.yaml ]; then
+  sed -n '1,40p' config/aggregator-sepolia.yaml | sed -e 's/tenderly_access_key:.*/tenderly_access_key: ***REDACTED***/' -e 's/test_private_key:.*/test_private_key: ***REDACTED***/' -e 's/bundler_url:.*/bundler_url: ***REDACTED***/' -e 's/ecdsa_private_key:.*/ecdsa_private_key: ***REDACTED***/'
 fi
-test -s config/aggregator.yaml || (echo "config/aggregator.yaml missing"; exit 1)
+test -s config/aggregator-sepolia.yaml || (echo "config/aggregator-sepolia.yaml missing"; exit 1)
 
-echo "✅ config/aggregator.yaml generated successfully"
+echo "✅ config/aggregator-sepolia.yaml generated successfully"

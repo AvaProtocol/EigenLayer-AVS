@@ -38,7 +38,7 @@ func getSepoliaRPC(t *testing.T) string {
 		return rpc
 	}
 	// Fallback to config file
-	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultSepoliaConfigPath))
+	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
 	if err == nil && cfg.SmartWallet.EthRpcUrl != "" {
 		return cfg.SmartWallet.EthRpcUrl
 	}
@@ -76,7 +76,7 @@ func TestRunNodeImmediately_UniswapSwap(t *testing.T) {
 	}
 
 	// Load the aggregator config first (needed for controller key)
-	aggregatorCfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultSepoliaConfigPath))
+	aggregatorCfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
 	require.NoError(t, err, "Failed to load aggregator config")
 
 	// For real execution, we use the controller private key as the owner
@@ -389,7 +389,7 @@ func TestRunNodeImmediately_ApprovalOnly(t *testing.T) {
 	})
 
 	// Load the actual aggregator config (which has controller_private_key already set)
-	aggregatorCfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultSepoliaConfigPath))
+	aggregatorCfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
 	require.NoError(t, err, "Failed to load aggregator config")
 
 	engine := New(db, aggregatorCfg, nil, testutil.GetLogger())

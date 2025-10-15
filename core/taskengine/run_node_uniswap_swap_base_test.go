@@ -39,9 +39,11 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 		t.Skip("Skipping real transaction test in short mode")
 	}
 
-	// Load Base aggregator config first to get RPC endpoints
-	baseAggregatorCfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultBaseConfigPath))
-	require.NoError(t, err, "Failed to load Base aggregator config")
+	// Try to load aggregator config - if it's for Base, use it; otherwise skip
+	baseAggregatorCfg, err := config.NewConfig(testutil.GetConfigPath("aggregator-base.yaml"))
+	if err != nil {
+		t.Skipf("aggregator-base.yaml not found (expected in local dev only): %v", err)
+	}
 
 	// Skip if not running on Base (chain ID 8453)
 	tempClient, err := ethclient.Dial(baseAggregatorCfg.SmartWallet.EthRpcUrl)

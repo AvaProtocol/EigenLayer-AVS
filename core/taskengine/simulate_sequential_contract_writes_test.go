@@ -41,9 +41,11 @@ func TestSimulateTask_SequentialContractWrites_Base(t *testing.T) {
 
 	ownerAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
 
-	// Load aggregator config to get smart wallet settings
-	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultBaseConfigPath))
-	require.NoError(t, err, "Failed to load aggregator config")
+	// Try to load Base config - if it doesn't exist, skip (Base tests are local-only)
+	cfg, err := config.NewConfig(testutil.GetConfigPath("aggregator-base.yaml"))
+	if err != nil {
+		t.Skipf("aggregator-base.yaml not found (expected in local dev only): %v", err)
+	}
 
 	t.Logf("📋 Base Sequential Contract Writes Test Configuration:")
 	t.Logf("   Owner EOA (derives wallet address): %s", ownerAddress.Hex())
