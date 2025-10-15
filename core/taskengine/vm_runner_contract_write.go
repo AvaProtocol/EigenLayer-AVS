@@ -34,6 +34,7 @@ type SendUserOpFunc func(
 	callData []byte,
 	paymasterReq *preset.VerifyingPaymasterRequest,
 	senderOverride *common.Address,
+	paymasterNonceOverride *big.Int,
 ) (*userop.UserOperation, *types.Receipt, error)
 
 type ContractWriteProcessor struct {
@@ -707,12 +708,14 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	// Send UserOp transaction with correct parameters:
 	// - owner: EOA address (r.owner) for smart wallet derivation
 	// - senderOverride: smart wallet address (aa_sender) for the actual transaction
+	// - paymasterNonceOverride: nil (fetch from chain - previous UserOp is confirmed on-chain)
 	userOp, receipt, err := r.sendUserOpFunc(
 		r.smartWalletConfig,
 		r.owner, // Use EOA address (owner) for smart wallet derivation
 		smartWalletCallData,
 		paymasterReq,   // Use paymaster for wallet creation/sponsorship if shouldUsePaymaster() returned true
 		senderOverride, // Smart wallet address from aa_sender
+		nil,            // paymasterNonceOverride - fetch from chain (previous UserOp is confirmed on-chain)
 	)
 
 	// Increment transaction counter for this address (regardless of success/failure)
@@ -1018,12 +1021,28 @@ func (r *ContractWriteProcessor) shouldUsePaymaster() bool {
 		}
 
 		if checkAddr != nil {
-			// Check raw ETH balance as a proxy for available gas funds
-			// Note: This works because most wallets don't deposit to EntryPoint manually.
-			// The bundler performs the authoritative check using EntryPoint.getDeposit() during validation.
-			// Future enhancement: Call EntryPoint.getDeposit() for more accurate prefund checks.
-			balance, err := r.client.BalanceAt(context.Background(), *checkAddr, nil)
-			if err == nil && balance != nil {
+			// Check EntryPoint deposit for available gas funds (authoritative check)
+			// This is the correct way to check if a smart wallet can self-fund UserOps
+			entryPointContract, err := aa.NewEntryPoint(r.smartWalletConfig.EntrypointAddress, r.client)
+			if err != nil {
+				if r.vm.logger != nil {
+					r.vm.logger.Debug("Could not initialize EntryPoint contract for deposit check; will use paymaster",
+						"owner", r.owner.Hex(), "error", err)
+				}
+				return true // Use paymaster if we can't check deposit
+			}
+
+			depositInfo, err := entryPointContract.GetDepositInfo(nil, *checkAddr)
+			if err != nil {
+				if r.vm.logger != nil {
+					r.vm.logger.Debug("Could not get EntryPoint deposit info; will use paymaster",
+						"owner", r.owner.Hex(), "wallet", checkAddr.Hex(), "error", err)
+				}
+				return true // Use paymaster if we can't get deposit info
+			}
+
+			deposit := depositInfo.Deposit
+			if deposit != nil {
 				// Estimate gas cost for this UserOp
 				// Formula: totalGas = callGas + verificationGas + preVerificationGas
 				// Cost = totalGas * maxFeePerGas
@@ -1042,19 +1061,19 @@ func (r *ContractWriteProcessor) shouldUsePaymaster() bool {
 				buffer := new(big.Int).Div(estimatedCost, big.NewInt(5)) // 20%
 				requiredBalance := new(big.Int).Add(estimatedCost, buffer)
 
-				if balance.Cmp(requiredBalance) >= 0 {
+				if deposit.Cmp(requiredBalance) >= 0 {
 					if r.vm.logger != nil {
-						r.vm.logger.Debug("Sender has sufficient balance for self-funding, not using paymaster",
+						r.vm.logger.Debug("Sender has sufficient EntryPoint deposit for self-funding, not using paymaster",
 							"owner", r.owner.Hex(), "wallet", checkAddr.Hex(),
-							"balanceWei", balance.String(), "requiredWei", requiredBalance.String())
+							"depositWei", deposit.String(), "requiredWei", requiredBalance.String())
 					}
 					return false
 				} else {
 					if r.vm.logger != nil {
-						r.vm.logger.Debug("Sender has insufficient balance, will use paymaster",
+						r.vm.logger.Debug("Sender has insufficient EntryPoint deposit, will use paymaster",
 							"owner", r.owner.Hex(), "wallet", checkAddr.Hex(),
-							"balanceWei", balance.String(), "requiredWei", requiredBalance.String(),
-							"shortfallWei", new(big.Int).Sub(requiredBalance, balance).String())
+							"depositWei", deposit.String(), "requiredWei", requiredBalance.String(),
+							"shortfallWei", new(big.Int).Sub(requiredBalance, deposit).String())
 					}
 				}
 			}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"os"
 	"testing"
 	"time"
 
@@ -39,10 +38,10 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 		t.Skip("Skipping real transaction test in short mode")
 	}
 
-	// Try to load aggregator config - if it's for Base, use it; otherwise skip
+	// Load Base aggregator config - skip if not available (local dev only)
 	baseAggregatorCfg, err := config.NewConfig(testutil.GetConfigPath("aggregator-base.yaml"))
 	if err != nil {
-		t.Skipf("aggregator-base.yaml not found (expected in local dev only): %v", err)
+		t.Skipf("aggregator-base.yaml not found - skipping Base test (local dev only): %v", err)
 	}
 
 	// Skip if not running on Base (chain ID 8453)
@@ -59,19 +58,16 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 		t.Skipf("Test requires Base network connection (current chain ID: %d)", chainID.Int64())
 	}
 
+	// Get TEST_PRIVATE_KEY to derive the owner's EOA and smart wallet address
+	// (automatically loaded from .env file by testutil)
 	// Architecture: The smart wallet address is derived from the OWNER's EOA (TEST_PRIVATE_KEY)
 	// but the UserOperation is SIGNED by the CONTROLLER's private key (from config)
 	// This allows the controller to automate transactions on behalf of the owner's smart wallet
-	privateKeyHex := os.Getenv("TEST_PRIVATE_KEY")
-	if privateKeyHex == "" {
+	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+	if !ok {
 		t.Skip("TEST_PRIVATE_KEY not set, skipping real execution test")
 	}
-
-	// Parse owner's EOA private key (used to derive smart wallet address)
-	privateKey, err := crypto.HexToECDSA(privateKeyHex[2:]) // Remove 0x prefix
-	require.NoError(t, err, "Failed to parse TEST_PRIVATE_KEY")
-
-	ownerAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
+	ownerAddress := *ownerAddr
 	controllerAddress := crypto.PubkeyToAddress(baseAggregatorCfg.SmartWallet.ControllerPrivateKey.PublicKey)
 
 	t.Logf("📋 Base Test Configuration:")

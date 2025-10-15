@@ -109,7 +109,7 @@ func TestSendUserOp(t *testing.T) {
 		t.Errorf("expect pack userop successfully but got error: %v", err)
 	}
 
-	userop, receipt, err := SendUserOp(smartWalletConfig, owner, calldata, nil, nil)
+	userop, receipt, err := SendUserOp(smartWalletConfig, owner, calldata, nil, nil, nil)
 	if err != nil || userop == nil {
 		t.Errorf("UserOp failed to send; error %v", err)
 	}
@@ -162,7 +162,9 @@ func TestPaymaster(t *testing.T) {
 		owner,
 		calldata,
 		paymasterRequest,
-	)
+		nil, // senderOverride
+		nil, // paymasterNonceOverride
+		)
 
 	if err != nil {
 		t.Errorf("Failed to send user operation with paymaster: %v", err)
@@ -305,6 +307,7 @@ func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
 		validAfter,
 		nil, // senderOverride
 		nil, // nonceOverride - let it fetch from chain
+		nil, // paymasterNonceOverride - let it fetch from chain
 		nil, // callGasOverride
 		nil, // verificationGasOverride
 		nil, // preVerificationGasOverride

@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -31,10 +32,71 @@ const (
 
 var testConfig *config.Config
 
-// init loads test configuration from the default config path.
+// LoadDotEnv loads environment variables from .env file in the repository root.
+// This allows tests to access TEST_PRIVATE_KEY and other secrets from .env
+func LoadDotEnv() error {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		return fmt.Errorf("failed to get caller information")
+	}
+
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))
+	envPath := filepath.Join(repoRoot, ".env")
+
+	// Check if .env file exists
+	if _, err := os.Stat(envPath); os.IsNotExist(err) {
+		// .env file doesn't exist, skip silently (tests may use env vars from other sources)
+		return nil
+	}
+
+	// Read .env file
+	file, err := os.Open(envPath)
+	if err != nil {
+		return fmt.Errorf("failed to open .env file: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Parse KEY=VALUE
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		// Remove quotes if present
+		value = strings.Trim(value, `"'`)
+
+		// Only set if not already set in environment (env vars take precedence)
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading .env file: %w", err)
+	}
+
+	return nil
+}
+
+// init loads environment variables from .env file and test configuration.
 // When commands use a non-default path via --config flag, testConfig will be nil
 // and the test utility functions will panic if testConfig is not loaded.
 func init() {
+	// Load .env file first (if it exists)
+	_ = LoadDotEnv()
+
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))
 		configPath := filepath.Join(repoRoot, "config", DefaultConfigPath)
@@ -154,6 +216,37 @@ func GetTestPrivateKey() string {
 		panic("TestPrivateKey is empty in aggregator-sepolia.yaml config")
 	}
 	return testConfig.TestPrivateKey
+}
+
+// GetTestPrivateKeyFromEnv returns TEST_PRIVATE_KEY from environment (auto-loaded from .env).
+// Returns empty string if not set. Tests should check the return value and skip if empty.
+// This is the preferred way to get TEST_PRIVATE_KEY for tests.
+func GetTestPrivateKeyFromEnv() string {
+	key := os.Getenv("TEST_PRIVATE_KEY")
+	// Remove 0x prefix if present
+	if len(key) > 2 && key[:2] == "0x" {
+		key = key[2:]
+	}
+	return key
+}
+
+// MustGetTestOwnerAddress parses TEST_PRIVATE_KEY and returns the owner EOA address.
+// Returns nil and false if TEST_PRIVATE_KEY is not set (test should skip).
+// Returns address and true if successful.
+// Panics if TEST_PRIVATE_KEY is set but invalid.
+func MustGetTestOwnerAddress() (*common.Address, bool) {
+	privateKeyHex := GetTestPrivateKeyFromEnv()
+	if privateKeyHex == "" {
+		return nil, false
+	}
+
+	privateKey, err := crypto.HexToECDSA(privateKeyHex)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to parse TEST_PRIVATE_KEY: %v", err))
+	}
+
+	address := crypto.PubkeyToAddress(privateKey.PublicKey)
+	return &address, true
 }
 
 // GetTestControllerPrivateKey returns the controller private key for tests from aggregator config

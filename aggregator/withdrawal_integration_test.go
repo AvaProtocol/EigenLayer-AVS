@@ -59,6 +59,7 @@ func TestWithdrawETHUserOp(t *testing.T) {
 		callData,
 		nil, // No paymaster for this test
 		nil, // Use default smart wallet derivation
+		nil, // paymasterNonceOverride - no paymaster used
 	)
 
 	if err != nil {
@@ -129,6 +130,7 @@ func TestWithdrawERC20UserOp(t *testing.T) {
 		callData,
 		nil, // No paymaster for this test
 		nil, // Use default smart wallet derivation
+		nil, // paymasterNonceOverride - no paymaster used
 	)
 
 	if err != nil {
@@ -209,6 +211,7 @@ func TestWithdrawalWithCustomSmartWallet(t *testing.T) {
 		callData,
 		nil, // No paymaster for this test
 		nil, // Let the function derive the address from salt
+		nil, // paymasterNonceOverride - no paymaster used
 	)
 
 	if err != nil {

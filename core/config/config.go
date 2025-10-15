@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -460,7 +459,7 @@ func firstNonEmpty(values ...string) string {
 
 func ReadYamlConfig(path string, o interface{}) error {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		log.Fatal("Path ", path, " does not exist")
+		return fmt.Errorf("path %s does not exist", path)
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -469,7 +468,7 @@ func ReadYamlConfig(path string, o interface{}) error {
 
 	err = yaml.Unmarshal(b, o)
 	if err != nil {
-		log.Fatalf("unable to parse file with error %#v", err)
+		return fmt.Errorf("unable to parse file with error %#v", err)
 	}
 
 	return nil

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -17,27 +18,28 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// Test that simulateTask properly waits for on-chain confirmation between dependent contract writes
-// This ensures that sequential operations (like approve + swap) work correctly in simulated workflows
-func TestSimulateTask_SequentialContractWrites_Sepolia(t *testing.T) {
+// TestExecuteTask_SequentialContractWrites_Sepolia tests real execution (not simulation)
+// of a deployed workflow with sequential contract writes (approve + swap) on Sepolia.
+// This tests the full workflow execution path through the bundler.
+func TestExecuteTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	// Skip in short mode
 	if testing.Short() {
-		t.Skip("Skipping simulation test in short mode")
+		t.Skip("Skipping real execution test in short mode")
 	}
 
 	// Get TEST_PRIVATE_KEY to derive the owner's EOA and smart wallet address
 	// (automatically loaded from .env file by testutil)
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 	if !ok {
-		t.Skip("TEST_PRIVATE_KEY not set, skipping simulation test")
+		t.Skip("TEST_PRIVATE_KEY not set, skipping real execution test")
 	}
 	ownerAddress := *ownerAddr
 
-	// Load Sepolia config (needed for factory, RPC, etc.)
+	// Load Sepolia config
 	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
 	require.NoError(t, err, "Failed to load aggregator config")
 
-	t.Logf("📋 Sepolia Sequential Contract Writes Test Configuration:")
+	t.Logf("📋 Sepolia Sequential Contract Writes Execution Test:")
 	t.Logf("   Owner EOA (derives wallet address): %s", ownerAddress.Hex())
 	t.Logf("   Factory: %s", cfg.SmartWallet.FactoryAddress.Hex())
 	t.Logf("   Chain: Sepolia (ID: %d)", cfg.SmartWallet.ChainID)
@@ -61,22 +63,15 @@ func TestSimulateTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	require.NoError(t, err, "Failed to get wallet balance")
 	t.Logf("   ETH Balance: %s wei", balance.String())
 
+	if balance.Cmp(big.NewInt(0)) == 0 {
+		t.Skip("Smart wallet has 0 ETH balance - fund it to run real execution test")
+	}
+
 	// Initialize test database and engine
 	db := testutil.TestMustDB()
 	t.Cleanup(func() {
 		storage.Destroy(db.(*storage.BadgerStorage))
 	})
-
-	engine := New(db, cfg, nil, testutil.GetLogger())
-	t.Cleanup(func() {
-		engine.Stop()
-	})
-
-	// Create user
-	user := &model.User{
-		Address:             ownerAddress,
-		SmartAccountAddress: smartWalletAddr,
-	}
 
 	// Register smart wallet in database
 	err = StoreWallet(db, ownerAddress, &model.SmartWallet{
@@ -87,6 +82,9 @@ func TestSimulateTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	})
 	require.NoError(t, err, "Failed to register smart wallet")
 	t.Logf("   ✅ Smart wallet registered in database")
+
+	// Create task executor
+	executor := NewExecutor(cfg.SmartWallet, db, testutil.GetLogger())
 
 	// ========================================
 	// Create workflow with sequential contract writes:
@@ -214,29 +212,51 @@ func TestSimulateTask_SequentialContractWrites_Sepolia(t *testing.T) {
 		},
 	}
 
-	// Input variables
-	inputVariables := map[string]interface{}{
-		"settings": map[string]interface{}{
-			"runner":   smartWalletAddr.Hex(),
-			"chain_id": int64(11155111), // Sepolia
+	// Create the task
+	task := &model.Task{
+		Task: &avsproto.Task{
+			Id:                 "test-sequential-writes-real-exec",
+			SmartWalletAddress: smartWalletAddr.Hex(),
+			Owner:              ownerAddress.Hex(),
+			Trigger:            trigger,
+			Nodes:              nodes,
+			Edges:              edges,
 		},
 	}
 
-	t.Logf("🧪 Starting simulateTask with sequential contract writes...")
+	t.Logf("   ✅ Task created: %s", task.Id)
+
+	t.Logf("🚀 Starting real execution with sequential contract writes...")
 	t.Logf("   Node 1: Approve %s USDC to SwapRouter", approveAmount)
 	t.Logf("   Node 2: Swap %s USDC for WETH", swapAmount)
 
-	// Run simulation (should NOT actually execute on-chain)
-	execution, err := engine.SimulateTask(user, trigger, nodes, edges, inputVariables)
+	// Create trigger data for manual trigger
+	triggerData := &avsproto.ManualTrigger_Output{
+		Data: func() *structpb.Value {
+			data, _ := structpb.NewValue(map[string]interface{}{
+				"runner":   smartWalletAddr.Hex(),
+				"chain_id": int64(11155111), // Sepolia
+			})
+			return data
+		}(),
+	}
 
-	require.NoError(t, err, "SimulateTask should not return error")
-	require.NotNil(t, execution, "Simulation result should not be nil")
+	// Execute the task (real execution, not simulation)
+	execution, err := executor.RunTask(task, &QueueExecutionData{
+		TriggerType:   avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
+		TriggerOutput: triggerData,
+		ExecutionID:   fmt.Sprintf("exec-%d", time.Now().Unix()),
+	})
 
-	t.Logf("✅ SimulateTask completed")
+	require.NoError(t, err, "RunTask should not return error")
+	require.NotNil(t, execution, "Execution result should not be nil")
+
+	t.Logf("✅ Execution completed")
+	t.Logf("   Execution ID: %s", execution.Id)
 	t.Logf("   Status: %s", execution.Status)
 
-	// Verify simulation results
-	t.Logf("📊 Simulation steps:")
+	// Verify execution results
+	t.Logf("📊 Execution steps:")
 	for i, step := range execution.Steps {
 		t.Logf("   Step %d: %s", i+1, step.Name)
 		t.Logf("     Success: %v", step.Success)
@@ -245,5 +265,29 @@ func TestSimulateTask_SequentialContractWrites_Sepolia(t *testing.T) {
 		}
 	}
 
-	t.Logf("🎉 SUCCESS: Sequential contract writes simulation completed!")
+	// Check that approve step succeeded
+	// Find steps by name (order may vary)
+	var approveStep, swapStep *avsproto.Execution_Step
+	for _, step := range execution.Steps {
+		if step.Name == "approve_node" {
+			approveStep = step
+		} else if step.Name == "swap_node" {
+			swapStep = step
+		}
+	}
+
+	require.NotNil(t, approveStep, "Should have approve_node execution step")
+	require.True(t, approveStep.Success, "Approve step should succeed, error: %s", approveStep.Error)
+	t.Logf("✅ Approve step executed successfully")
+
+	// Swap step must exist and succeed for the test to pass
+	require.NotNil(t, swapStep, "Should have swap_node execution step")
+	require.True(t, swapStep.Success, "Swap step should succeed, error: %s", swapStep.Error)
+	t.Logf("✅ Swap step executed successfully")
+
+	// Verify overall execution status
+	require.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS, execution.Status,
+		"Overall execution should have SUCCESS status")
+
+	t.Logf("🎉 SUCCESS: Sequential contract writes executed on-chain through bundler!")
 }

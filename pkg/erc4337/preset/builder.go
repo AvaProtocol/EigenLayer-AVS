@@ -9,8 +9,8 @@ import (
 	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -65,8 +65,9 @@ type VerifyingPaymasterRequest struct {
 }
 
 func GetVerifyingPaymasterRequestForDuration(address common.Address, duration time.Duration) *VerifyingPaymasterRequest {
-	// Use a small negative skew to tolerate clock drift between services and the bundler
-	const skewSeconds int64 = 60 // 1 minute skew
+	// Use a larger negative skew to tolerate clock drift between services and the bundler
+	// Increased to 2 minutes to handle cases where aggregator clock is ahead of bundler
+	const skewSeconds int64 = 120 // 2 minute skew tolerance
 	now := time.Now().Unix()
 	validAfter := now - skewSeconds
 	validUntil := now + int64(duration.Seconds())
@@ -278,6 +279,7 @@ func SendUserOp(
 	callData []byte,
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
+	paymasterNonceOverride *big.Int,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	log.Printf("SendUserOp started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
 
@@ -355,6 +357,7 @@ func SendUserOp(
 			paymasterReq.ValidAfter,
 			senderOverride,
 			nil,                         // nonceOverride - let it fetch from chain
+			paymasterNonceOverride,      // Use provided paymaster nonce for sequential UserOps
 			estimatedCallGas,            // Use estimated gas
 			estimatedVerificationGas,    // Use estimated gas
 			estimatedPreVerificationGas, // Use estimated gas
@@ -394,6 +397,8 @@ func SendUserOp(
 	log.Printf("✅ DEPLOYED WORKFLOW: Receipt retrieved successfully - status: %d, gas_used: %d, logs_count: %d",
 		receipt.Status, receipt.GasUsed, len(receipt.Logs))
 
+	// The polling mechanism in waitForUserOpConfirmation already ensures
+	// the transaction is confirmed on-chain before we proceed
 	return userOp, receipt, nil
 }
 
@@ -657,10 +662,10 @@ func BuildUserOp(
 		log.Printf("✅ No initCode (wallet deployed), using standard verificationGasLimit: %s", verificationGasLimit.String())
 	}
 
-	// Initialize UserOp with temporary nonce (will be set dynamically before sending)
+	// Initialize UserOp without nonce (will be fetched from chain in sendUserOpCore)
 	userOp := userop.UserOperation{
 		Sender:   *sender,
-		Nonce:    big.NewInt(0), // Placeholder - will be set dynamically
+		Nonce:    nil, // Will be fetched from chain before sending
 		InitCode: common.FromHex(initCode),
 		CallData: callData,
 
@@ -687,6 +692,7 @@ func SendUserOpWithWsClient(
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
 	wsClient *ethclient.Client,
+	paymasterNonceOverride *big.Int,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	log.Printf("SendUserOpWithWsClient started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
 
@@ -710,7 +716,7 @@ func SendUserOpWithWsClient(
 	if wsClient == nil {
 		log.Printf("⚠️ TRANSACTION WAITING: No WebSocket client provided, transaction monitoring disabled")
 		// Fall back to original SendUserOp behavior
-		return SendUserOp(smartWalletConfig, owner, callData, paymasterReq, senderOverride)
+		return SendUserOp(smartWalletConfig, owner, callData, paymasterReq, senderOverride, nil)
 	}
 
 	// Step 1: Estimate gas FIRST (before deciding paymaster vs self-funded)
@@ -765,6 +771,7 @@ func SendUserOpWithWsClient(
 			paymasterReq.ValidAfter,
 			senderOverride,
 			nil,                         // nonceOverride - let it fetch from chain
+			paymasterNonceOverride,      // Use provided paymaster nonce for sequential UserOps
 			estimatedCallGas,            // Use estimated gas
 			estimatedVerificationGas,    // Use estimated gas
 			estimatedPreVerificationGas, // Use estimated gas
@@ -804,6 +811,8 @@ func SendUserOpWithWsClient(
 	log.Printf("✅ DEPLOYED WORKFLOW: Receipt retrieved successfully - status: %d, gas_used: %d, logs_count: %d",
 		receipt.Status, receipt.GasUsed, len(receipt.Logs))
 
+	// The polling mechanism in waitForUserOpConfirmation already ensures
+	// the transaction is confirmed on-chain before we proceed
 	return userOp, receipt, nil
 }
 
@@ -813,6 +822,7 @@ func SendUserOpWithWsClient(
 // Currently, we use the VerifyingPaymaster contract as the paymaster. We set a signer when initialize the paymaster contract.
 // The signer is also the controller private key. It's the only way to generate the signature for paymaster.
 // nonceOverride: if provided (not nil), uses this nonce instead of fetching from chain. Use this for sequential UserOps.
+// paymasterNonceOverride: if provided (not nil), uses this paymaster nonce instead of fetching from chain. Use this for sequential UserOps.
 // gasOverrides: if provided (not nil), uses these estimated gas limits instead of hardcoded defaults
 func BuildUserOpWithPaymaster(
 	smartWalletConfig *config.SmartWalletConfig,
@@ -825,6 +835,7 @@ func BuildUserOpWithPaymaster(
 	validAfter *big.Int,
 	senderOverride *common.Address,
 	nonceOverride *big.Int,
+	paymasterNonceOverride *big.Int,
 	callGasOverride *big.Int,
 	verificationGasOverride *big.Int,
 	preVerificationGasOverride *big.Int,
@@ -904,10 +915,36 @@ func BuildUserOpWithPaymaster(
 	}
 
 	// Get the paymaster's nonce for this sender
-	// The paymaster maintains its own nonce per sender which is part of the signed hash
-	paymasterNonce, err := paymasterContract.SenderNonce(nil, userOp.Sender)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get paymaster nonce: %w", err)
+	// IMPORTANT: The paymaster maintains its own nonce per sender which is internally included
+	// in the GetHash() call. The paymaster contract reads senderNonce[sender] from storage during
+	// GetHash() and includes it in the hash computation. This means:
+	// 1. The nonce value we fetch here is for logging/debugging only - it's NOT passed to GetHash()
+	// 2. GetHash() will use whatever nonce is currently in the contract's storage
+	// 3. If RPC nodes are out of sync, the nonce we see might differ from what GetHash() uses
+	// 4. AA33 errors can occur if the bundler's RPC sees a different nonce than our RPC during validation
+	var paymasterNonce *big.Int
+	if paymasterNonceOverride != nil {
+		// Use provided paymaster nonce for sequential UserOps (prevents nonce collisions)
+		paymasterNonce = paymasterNonceOverride
+		log.Printf("🔍 BuildUserOpWithPaymaster: Using provided paymaster nonce %s (sequential UserOps)", paymasterNonce.String())
+	} else {
+		// Fetch from chain using direct RPC call (Go binding has issues)
+		// Method signature: senderNonce(address) -> uint256
+		// Method ID: 0x9c90b443
+		paddedSender := common.LeftPadBytes(userOp.Sender.Bytes(), 32)
+		callData := "0x9c90b443" + hexutil.Encode(paddedSender)[2:]
+
+		// Use CallContract method for direct contract calls
+		result, err := client.CallContract(context.Background(), ethereum.CallMsg{
+			To:   &paymasterAddress,
+			Data: hexutil.MustDecode(callData),
+		}, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get paymaster nonce via RPC: %w", err)
+		}
+
+		paymasterNonce = new(big.Int).SetBytes(result)
+		log.Printf("🔍 BuildUserOpWithPaymaster: Fetched paymaster nonce %s from chain (via RPC)", paymasterNonce.String())
 	}
 
 	log.Printf("🔍 PAYMASTER NONCE DEBUG:")
@@ -935,30 +972,38 @@ func BuildUserOpWithPaymaster(
 		return nil, fmt.Errorf("failed to sign paymaster hash: %w", err)
 	}
 
-	// ABI-encode the timestamps (validUntil FIRST, then validAfter per parsePaymasterAndData line 108)
-	// The contract uses abi.decode which expects 32-byte padded values
-	// Total: address(20) + abi.encode(validUntil, validAfter)(64) + signature(65) = 149 bytes
-	uint48Type, _ := abi.NewType("uint48", "", nil)
-	timestampArgs := abi.Arguments{
-		abi.Argument{Type: uint48Type},
-		abi.Argument{Type: uint48Type},
+	// Pack timestamps as raw uint48 values (6 bytes each, 12 bytes total)
+	// The bundler expects raw bytes, NOT ABI-encoded 32-byte padded values
+	// Total: address(20) + uint48(6) + uint48(6) + signature(65) = 97 bytes
+
+	// Convert timestamps to 6-byte big-endian representation (uint48)
+	validUntilBytes := make([]byte, 6)
+	validAfterBytes := make([]byte, 6)
+
+	// validUntil to 6 bytes (big-endian)
+	validUntilU64 := validUntil.Uint64()
+	for i := 0; i < 6; i++ {
+		validUntilBytes[5-i] = byte(validUntilU64 >> (8 * i))
 	}
 
-	// CRITICAL: Order is validUntil FIRST, validAfter SECOND (per Solidity line 108)
-	encodedTimestamps, err := timestampArgs.Pack(validUntil, validAfter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to ABI encode timestamps: %w", err)
+	// validAfter to 6 bytes (big-endian)
+	validAfterU64 := validAfter.Uint64()
+	for i := 0; i < 6; i++ {
+		validAfterBytes[5-i] = byte(validAfterU64 >> (8 * i))
 	}
+
+	// Combine timestamps: validUntil FIRST, validAfter SECOND
+	encodedTimestamps := append(validUntilBytes, validAfterBytes...)
 
 	log.Printf("🔍 TIMESTAMP PACKING DEBUG:")
-	log.Printf("   ABI-encoded (validUntil, validAfter): 0x%x (%d bytes)", encodedTimestamps, len(encodedTimestamps))
+	log.Printf("   Raw uint48 (validUntil, validAfter): 0x%x (%d bytes)", encodedTimestamps, len(encodedTimestamps))
 
-	// Create PaymasterAndData: address (20) + abi.encode(validUntil, validAfter) (64) + signature (65) = 149 bytes
+	// Create PaymasterAndData: address (20) + uint48 validUntil (6) + uint48 validAfter (6) + signature (65) = 97 bytes
 	paymasterAndData := append(paymasterAddress.Bytes(), encodedTimestamps...)
 	paymasterAndData = append(paymasterAndData, paymasterSignature...)
 
 	log.Printf("🔍 PAYMASTER AND DATA DEBUG:")
-	log.Printf("   Total length: %d bytes (expected: 149)", len(paymasterAndData))
+	log.Printf("   Total length: %d bytes (expected: 97)", len(paymasterAndData))
 	log.Printf("   PaymasterAndData: 0x%x", paymasterAndData)
 
 	// Update the UserOperation with the properly encoded PaymasterAndData

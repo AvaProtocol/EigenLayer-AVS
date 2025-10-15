@@ -210,6 +210,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		smartWalletCallData,
 		paymasterReq,
 		senderOverride,
+		nil, // paymasterNonceOverride - ETH transfers are typically standalone
 	)
 
 	if err != nil {
