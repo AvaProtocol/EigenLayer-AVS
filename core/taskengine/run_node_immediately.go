@@ -3191,12 +3191,20 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		return resp, nil
 	}
 
-	// Determine execution mode: default to simulation (true) unless explicitly set to false
-	useSimulation := req.GetIsSimulated() // Defaults to true if not set
+	// Determine execution mode: default to simulation (true) for safety
+	// IMPORTANT: is_simulated is now an optional field (generates *bool in Go).
+	// When unset (nil pointer), we default to true (simulation mode) for safety.
+	// When explicitly set to true, use simulation. When explicitly set to false, use real execution.
+	useSimulation := true // Safe default
+	if req.IsSimulated != nil {
+		// Field is explicitly set - use its value
+		useSimulation = *req.IsSimulated
+	}
 
 	if n.logger != nil {
 		n.logger.Info("RunNodeImmediatelyRPC: Execution mode determined",
 			"is_simulated", useSimulation,
+			"explicitly_set", req.IsSimulated != nil,
 			"will_execute_real", !useSimulation,
 			"node_type", nodeTypeStr)
 	}
