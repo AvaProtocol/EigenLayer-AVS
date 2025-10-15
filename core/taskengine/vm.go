@@ -1253,6 +1253,35 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		executionLogForNode, err = v.runContractWrite(node.Id, nodeValue)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
+
+			// NEW: Wait for on-chain confirmation if this is a real UserOp (not simulated)
+			// This ensures sequential contract writes work correctly (e.g., approve → swap)
+			if shouldWaitForContractWriteConfirmation(executionLogForNode, v.IsSimulation) {
+				userOpHash := extractUserOpHashFromStep(executionLogForNode)
+				if userOpHash != "" {
+					v.logger.Info("⏳ Contract write pending - waiting for on-chain confirmation",
+						"nodeID", node.Id,
+						"userOpHash", userOpHash)
+
+					// Wait for confirmation using exponential backoff polling
+					waitErr := v.waitForUserOpConfirmation(userOpHash)
+					if waitErr != nil {
+						v.logger.Error("❌ Failed to wait for contract write confirmation",
+							"nodeID", node.Id,
+							"userOpHash", userOpHash,
+							"error", waitErr)
+						// Don't fail the entire execution, but log the error
+						// The UserOp may still be processing
+					} else {
+						v.logger.Info("✅ Contract write confirmed on-chain",
+							"nodeID", node.Id,
+							"userOpHash", userOpHash)
+
+						// Add RPC propagation delay to ensure state is visible across all RPC nodes
+						v.addRPCPropagationDelay()
+					}
+				}
+			}
 		}
 	} else if nodeValue := node.GetLoop(); nodeValue != nil {
 		executionLogForNode, err = v.runLoop(node.Id, nodeValue) // loop does not return a jump step
