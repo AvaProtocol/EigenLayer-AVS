@@ -418,8 +418,9 @@ func sendUserOpCore(
 	// Fetch nonce before entering the retry loop
 	// IMPORTANT: Only refresh nonce if it's not already set (e.g., from BuildUserOpWithPaymaster)
 	// Changing the nonce invalidates both the UserOp signature and paymaster signature
+	// NOTE: A nonce of 0 is valid for new accounts, so we only check for nil (not 0)
 	var freshNonce *big.Int
-	if userOp.Nonce == nil || userOp.Nonce.Cmp(big.NewInt(0)) == 0 {
+	if userOp.Nonce == nil {
 		freshNonce = aa.MustNonce(client, userOp.Sender, accountSalt)
 		log.Printf("🔍 NONCE DEBUG: Setting nonce to fresh value from chain: %s", freshNonce.String())
 		userOp.Nonce = freshNonce
