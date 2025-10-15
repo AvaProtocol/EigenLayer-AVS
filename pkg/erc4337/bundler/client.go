@@ -111,7 +111,7 @@ func (bc *BundlerClient) sendUserOperationHTTP(
 	reqData := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "eth_sendUserOperation",
-		"params":  []interface{}{uo, EntryPointV06Address},
+		"params":  []interface{}{uo, entrypoint.Hex()},
 		"id":      1,
 	}
 
@@ -202,7 +202,7 @@ func (bc *BundlerClient) sendUserOperationRPC(
 	}
 
 	// IMPORTANT: Use EIP-55 checksummed EntryPoint address (same as HTTP method)
-	err := bc.client.CallContext(ctx, &txHash, "eth_sendUserOperation", uo, EntryPointV06Address)
+	err := bc.client.CallContext(ctx, &txHash, "eth_sendUserOperation", uo, entrypoint.Hex())
 	return txHash, err
 }
 
