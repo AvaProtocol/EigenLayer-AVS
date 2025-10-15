@@ -42,7 +42,7 @@ func TestSimulateTask_SequentialContractWrites_Base(t *testing.T) {
 	ownerAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
 
 	// Load aggregator config to get smart wallet settings
-	cfg, err := config.NewConfig("../../config/aggregator.yaml")
+	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultBaseConfigPath))
 	require.NoError(t, err, "Failed to load aggregator config")
 
 	t.Logf("📋 Base Sequential Contract Writes Test Configuration:")

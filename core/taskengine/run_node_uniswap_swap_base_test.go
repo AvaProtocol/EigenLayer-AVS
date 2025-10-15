@@ -40,7 +40,7 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 	}
 
 	// Load Base aggregator config first to get RPC endpoints
-	baseAggregatorCfg, err := config.NewConfig("../../config/aggregator-base.yaml")
+	baseAggregatorCfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultBaseConfigPath))
 	require.NoError(t, err, "Failed to load Base aggregator config")
 
 	// Skip if not running on Base (chain ID 8453)

@@ -27,13 +27,24 @@ const (
 	SEPOLIA_QUOTER     = "0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3"
 	SEPOLIA_ENTRYPOINT = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
 	SEPOLIA_FACTORY    = "0xB99BC2E399e06CddCF5E725c0ea341E8f0322834"
-	SEPOLIA_RPC        = "https://ethereum-sepolia.core.chainstack.com/2504cb0765f0edf6c33d99095148006f"
-	SEPOLIA_WS         = "wss://ethereum-sepolia.core.chainstack.com/ws/2504cb0765f0edf6c33d99095148006f"
-	SEPOLIA_BUNDLER    = "https://bundler-sepolia.avaprotocol.org/rpc?apikey=kt8qTj8MtmAQGsj17Urz1ySn4R"
 	SWAP_AMOUNT        = "1000000" // 1 USDC
 	FEE_TIER           = 500       // 0.05% (trying different fee tier)
 	SLIPPAGE_PERCENT   = 50        // 50% slippage tolerance
 )
+
+// getSepoliaRPC returns Sepolia RPC URL from env or uses aggregator config
+func getSepoliaRPC(t *testing.T) string {
+	if rpc := os.Getenv("SEPOLIA_RPC_URL"); rpc != "" {
+		return rpc
+	}
+	// Fallback to config file
+	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultSepoliaConfigPath))
+	if err == nil && cfg.SmartWallet.EthRpcUrl != "" {
+		return cfg.SmartWallet.EthRpcUrl
+	}
+	t.Skip("SEPOLIA_RPC_URL not set in environment")
+	return ""
+}
 
 // TestRunNodeImmediately_UniswapSwap tests the full approve + swap flow using runNodeImmediately
 // with real UserOp execution to debug the STF error
@@ -47,9 +58,11 @@ func TestRunNodeImmediately_UniswapSwap(t *testing.T) {
 		t.Skip("Skipping real transaction test in short mode")
 	}
 
+	sepoliaRPC := getSepoliaRPC(t)
+
 	// Skip if not running on Sepolia (chain ID 11155111)
 	// Connect to RPC to check chain ID
-	tempClient, err := ethclient.Dial(SEPOLIA_RPC)
+	tempClient, err := ethclient.Dial(sepoliaRPC)
 	if err != nil {
 		t.Skipf("Cannot connect to RPC to verify chain ID: %v", err)
 	}
@@ -63,7 +76,7 @@ func TestRunNodeImmediately_UniswapSwap(t *testing.T) {
 	}
 
 	// Load the aggregator config first (needed for controller key)
-	aggregatorCfg, err := config.NewConfig("../../config/aggregator.yaml")
+	aggregatorCfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultSepoliaConfigPath))
 	require.NoError(t, err, "Failed to load aggregator config")
 
 	// For real execution, we use the controller private key as the owner
@@ -86,7 +99,7 @@ func TestRunNodeImmediately_UniswapSwap(t *testing.T) {
 	t.Logf("   Computing salt:0 smart wallet address...")
 
 	// Connect to Sepolia
-	client, err := ethclient.Dial(SEPOLIA_RPC)
+	client, err := ethclient.Dial(sepoliaRPC)
 	require.NoError(t, err, "Failed to connect to Sepolia")
 	defer client.Close()
 
@@ -327,7 +340,8 @@ func TestRunNodeImmediately_ApprovalOnly(t *testing.T) {
 
 	// Skip if not running on Sepolia (chain ID 11155111)
 	// Connect to RPC to check chain ID
-	tempClient, err := ethclient.Dial(SEPOLIA_RPC)
+	sepoliaRPC := getSepoliaRPC(t)
+	tempClient, err := ethclient.Dial(sepoliaRPC)
 	if err != nil {
 		t.Skipf("Cannot connect to RPC to verify chain ID: %v", err)
 	}
@@ -359,7 +373,7 @@ func TestRunNodeImmediately_ApprovalOnly(t *testing.T) {
 	t.Logf("   Computing salt:0 smart wallet address...")
 
 	// Compute the salt:0 smart wallet address for this owner
-	client, err := ethclient.Dial(SEPOLIA_RPC)
+	client, err := ethclient.Dial(sepoliaRPC)
 	require.NoError(t, err, "Failed to connect to RPC")
 	defer client.Close()
 
@@ -375,7 +389,7 @@ func TestRunNodeImmediately_ApprovalOnly(t *testing.T) {
 	})
 
 	// Load the actual aggregator config (which has controller_private_key already set)
-	aggregatorCfg, err := config.NewConfig("../../config/aggregator.yaml")
+	aggregatorCfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultSepoliaConfigPath))
 	require.NoError(t, err, "Failed to load aggregator config")
 
 	engine := New(db, aggregatorCfg, nil, testutil.GetLogger())
