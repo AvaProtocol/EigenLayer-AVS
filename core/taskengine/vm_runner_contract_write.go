@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"strconv"
 	"strings"
@@ -987,6 +988,19 @@ func (r *ContractWriteProcessor) shouldUsePaymaster() bool {
 	// IMPORTANT: Check if wallet has enough ETH for the estimated gas cost
 	// This should ideally use EntryPoint.getDeposit() but we use balance as a proxy
 
+	// Priority 0: Check shouldUsePaymasterOverride if set (explicit override)
+	log.Printf("🔍 shouldUsePaymaster: r.vm=%v, r.vm.shouldUsePaymasterOverride=%v", r.vm != nil, r.vm != nil && r.vm.shouldUsePaymasterOverride != nil)
+	if r.vm != nil && r.vm.shouldUsePaymasterOverride != nil {
+		log.Printf("✅ shouldUsePaymaster: OVERRIDE FOUND - returning %v", *r.vm.shouldUsePaymasterOverride)
+		if r.vm.logger != nil {
+			r.vm.logger.Info("shouldUsePaymaster: override is set, using explicit value",
+				"shouldUsePaymaster", *r.vm.shouldUsePaymasterOverride,
+				"owner", r.owner.Hex())
+		}
+		return *r.vm.shouldUsePaymasterOverride
+	}
+	log.Printf("⚠️  shouldUsePaymaster: NO OVERRIDE - proceeding with balance check")
+
 	// Priority 1: If no paymaster is configured, can't use it
 	if (r.smartWalletConfig.PaymasterAddress == common.Address{}) {
 		if r.vm.logger != nil {
@@ -1046,31 +1060,53 @@ func (r *ContractWriteProcessor) shouldUsePaymaster() bool {
 				// Estimate gas cost for this UserOp
 				// Formula: totalGas = callGas + verificationGas + preVerificationGas
 				// Cost = totalGas * maxFeePerGas
-				// Using conservative estimates from EIP-1559 (20 gwei maxFeePerGas)
 				estimatedCallGas := big.NewInt(100_000)           // 100K for smart wallet execute
 				estimatedVerificationGas := big.NewInt(150_000)   // 150K for signature verification
 				estimatedPreVerificationGas := big.NewInt(50_000) // 50K for bundler overhead
 				totalGas := new(big.Int).Add(estimatedCallGas, estimatedVerificationGas)
 				totalGas = new(big.Int).Add(totalGas, estimatedPreVerificationGas)
 
-				// Use 20 gwei maxFeePerGas (from gas price fix)
-				maxFeePerGas := big.NewInt(20_000_000_000) // 20 gwei
-				estimatedCost := new(big.Int).Mul(totalGas, maxFeePerGas)
+				// Get REAL-TIME gas price from the chain (not hardcoded)
+				// This is critical for accurate cost estimation, especially on L2s like Base
+				// where gas prices are much lower than Ethereum mainnet
+				gasPrice, err := r.client.SuggestGasPrice(context.Background())
+				if err != nil {
+					// Fallback to 20 gwei if we can't get real-time gas price
+					if r.vm.logger != nil {
+						r.vm.logger.Warn("Could not get real-time gas price, using 20 gwei fallback", "error", err)
+					}
+					gasPrice = big.NewInt(20_000_000_000) // 20 gwei fallback
+				} else {
+					// Add 50% buffer to gas price for EIP-1559 maxFeePerGas
+					// (baseFee can spike during blocks)
+					gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(15))
+					gasPrice = new(big.Int).Div(gasPrice, big.NewInt(10)) // 1.5x
+				}
 
-				// Add 20% buffer for gas price fluctuations and estimation inaccuracy
-				buffer := new(big.Int).Div(estimatedCost, big.NewInt(5)) // 20%
-				requiredBalance := new(big.Int).Add(estimatedCost, buffer)
+				estimatedCost := new(big.Int).Mul(totalGas, gasPrice)
+
+				// No buffer - use exact estimated cost
+				// (This allows using all available EntryPoint deposit, but risky if gas price spikes)
+				requiredBalance := estimatedCost
+
+				if r.vm.logger != nil {
+					r.vm.logger.Info("🔍 shouldUsePaymaster: Checking EntryPoint deposit",
+						"wallet", checkAddr.Hex(),
+						"deposit_wei", deposit.String(),
+						"required_wei", requiredBalance.String(),
+						"has_sufficient", deposit.Cmp(requiredBalance) >= 0)
+				}
 
 				if deposit.Cmp(requiredBalance) >= 0 {
 					if r.vm.logger != nil {
-						r.vm.logger.Debug("Sender has sufficient EntryPoint deposit for self-funding, not using paymaster",
+						r.vm.logger.Info("✅ Sender has sufficient EntryPoint deposit for self-funding, NOT using paymaster",
 							"owner", r.owner.Hex(), "wallet", checkAddr.Hex(),
 							"depositWei", deposit.String(), "requiredWei", requiredBalance.String())
 					}
 					return false
 				} else {
 					if r.vm.logger != nil {
-						r.vm.logger.Debug("Sender has insufficient EntryPoint deposit, will use paymaster",
+						r.vm.logger.Info("❌ Sender has insufficient EntryPoint deposit, WILL use paymaster",
 							"owner", r.owner.Hex(), "wallet", checkAddr.Hex(),
 							"depositWei", deposit.String(), "requiredWei", requiredBalance.String(),
 							"shortfallWei", new(big.Int).Sub(requiredBalance, deposit).String())
