@@ -25,7 +25,7 @@ func TestSimulateTask_SequentialContractWrites_Sepolia(t *testing.T) {
 		t.Skip("Skipping simulation test in short mode")
 	}
 
-	// Get owner EOA address from OWNER_EOA env var (or fallback to TEST_PRIVATE_KEY legacy)
+	// Get owner EOA address from OWNER_EOA env var
 	// Controller key from config signs all UserOps - no private key needed
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 	if !ok {

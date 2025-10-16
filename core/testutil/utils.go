@@ -206,44 +206,21 @@ func GetTestTenderlyAccessKey() string {
 	return testConfig.TenderlyAccessKey
 }
 
-// GetTestPrivateKeyFromEnv returns TEST_PRIVATE_KEY from environment (auto-loaded from .env).
-// Returns empty string if not set. Tests should check the return value and skip if empty.
-func GetTestPrivateKeyFromEnv() string {
-	key := os.Getenv("TEST_PRIVATE_KEY")
-	// Remove 0x prefix if present
-	if len(key) > 2 && key[:2] == "0x" {
-		key = key[2:]
-	}
-	return key
-}
-
-// MustGetTestOwnerAddress returns the owner EOA address for tests.
-// Prefers OWNER_EOA env var (direct address), falls back to deriving from TEST_PRIVATE_KEY (legacy).
-// Returns nil and false if neither is set (test should skip).
+// MustGetTestOwnerAddress returns the owner EOA address for tests from OWNER_EOA env var.
+// Returns nil and false if OWNER_EOA is not set (test should skip).
 // Returns address and true if successful.
-// Panics if TEST_PRIVATE_KEY is set but invalid.
+// Panics if OWNER_EOA is set but invalid.
 func MustGetTestOwnerAddress() (*common.Address, bool) {
-	// Prefer OWNER_EOA if set (no private key needed - controller signs everything)
-	if ownerEOAHex := os.Getenv("OWNER_EOA"); ownerEOAHex != "" {
-		if !common.IsHexAddress(ownerEOAHex) {
-			panic(fmt.Sprintf("OWNER_EOA is not a valid hex address: %s", ownerEOAHex))
-		}
-		address := common.HexToAddress(ownerEOAHex)
-		return &address, true
-	}
-
-	// Fallback to TEST_PRIVATE_KEY (legacy) - derive address from private key
-	privateKeyHex := GetTestPrivateKeyFromEnv()
-	if privateKeyHex == "" {
+	ownerEOAHex := os.Getenv("OWNER_EOA")
+	if ownerEOAHex == "" {
 		return nil, false
 	}
 
-	privateKey, err := crypto.HexToECDSA(privateKeyHex)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to parse TEST_PRIVATE_KEY: %v", err))
+	if !common.IsHexAddress(ownerEOAHex) {
+		panic(fmt.Sprintf("OWNER_EOA is not a valid hex address: %s", ownerEOAHex))
 	}
 
-	address := crypto.PubkeyToAddress(privateKey.PublicKey)
+	address := common.HexToAddress(ownerEOAHex)
 	return &address, true
 }
 
