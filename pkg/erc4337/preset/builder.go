@@ -530,8 +530,16 @@ func sendUserOpCore(
 				log.Printf("❌ GAS ESTIMATION FAILED:")
 				log.Printf("  Error: %v", gasErr)
 				log.Printf("  Entry Point: %s", aa.EntrypointAddress.Hex())
-				// Only fail on first attempt if gas estimation fails
-				return "", fmt.Errorf("failed to estimate gas: %w", gasErr)
+				log.Printf("  Continuing with hardcoded gas limits...")
+
+				// Use hardcoded gas limits as fallback (same as paymaster version)
+				userOp.PreVerificationGas = big.NewInt(50000)     // 50k gas
+				userOp.VerificationGasLimit = big.NewInt(1000000) // 1M gas
+				userOp.CallGasLimit = big.NewInt(100000)          // 100k gas
+
+				log.Printf("🔍 Gas Override: CallGasLimit set to 100000")
+				log.Printf("🔍 Gas Override: VerificationGasLimit set to 1000000")
+				log.Printf("🔍 Gas Override: PreVerificationGas set to 50000")
 			} else {
 				log.Printf("❌ GAS ESTIMATION FAILED on retry %d: %v", retry+1, gasErr)
 			}

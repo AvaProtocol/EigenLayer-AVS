@@ -11,27 +11,27 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// TestExecuteTask_SequentialContractWrites_Base tests real execution (not simulation)
-// of a deployed workflow with sequential contract writes (approve + swap) on Base.
-// This tests the full workflow execution path through the bundler on Base mainnet.
-//
-// DESIGN INTENT: This test is specifically designed to trigger paymaster usage by using a smart wallet
-// with insufficient EntryPoint deposit. The test validates that the paymaster can successfully sponsor
-// UserOperations when the smart wallet cannot self-fund the gas costs.
-//
-// Expected behavior:
-// - Smart wallet has insufficient EntryPoint deposit → triggers paymaster usage
-// - Paymaster sponsors both approve and swap UserOperations
-// - Both operations should succeed with paymaster sponsorship
-func TestExecuteTask_SequentialContractWrites_Base(t *testing.T) {
+// setupSequentialContractWritesTest performs common setup for sequential contract write tests
+type sequentialContractWritesTestSetup struct {
+	cfg               *config.Config
+	ownerAddress      common.Address
+	controllerAddress common.Address
+	smartWalletAddr   *common.Address
+	client            *ethclient.Client
+	executor          *TaskExecutor
+}
+
+func setupSequentialContractWritesTest(t *testing.T) *sequentialContractWritesTestSetup {
 	// Skip in short mode
 	if testing.Short() {
 		t.Skip("Skipping real execution test in short mode")
@@ -57,14 +57,19 @@ func TestExecuteTask_SequentialContractWrites_Base(t *testing.T) {
 		t.Skipf("Test requires Base network connection (current chain ID: %d)", chainID.Int64())
 	}
 
+	// Architecture: The smart wallet address is derived from the OWNER's EOA address
+	// but the UserOperation is SIGNED by the CONTROLLER's private key (from config)
+	// This allows the controller to automate transactions on behalf of the owner's smart wallet
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 	if !ok {
 		t.Skip("Owner EOA address not set, skipping real execution test")
 	}
 	ownerAddress := *ownerAddr
+	controllerAddress := crypto.PubkeyToAddress(baseAggregatorCfg.SmartWallet.ControllerPrivateKey.PublicKey)
 
 	t.Logf("📋 Base Sequential Contract Writes Execution Test:")
 	t.Logf("   Owner EOA (derives wallet address): %s", ownerAddress.Hex())
+	t.Logf("   Controller (signs UserOps): %s", controllerAddress.Hex())
 	t.Logf("   Factory: %s", BASE_FACTORY)
 	t.Logf("   Chain: Base (ID: %d)", BASE_CHAIN_ID)
 
@@ -111,14 +116,20 @@ func TestExecuteTask_SequentialContractWrites_Base(t *testing.T) {
 	// Create task executor
 	executor := NewExecutor(baseAggregatorCfg.SmartWallet, db, testutil.GetLogger())
 
-	// ========================================
-	// Create workflow with sequential contract writes:
-	// 1. Approve USDC to SwapRouter
-	// 2. Swap USDC for WETH
-	// ========================================
+	return &sequentialContractWritesTestSetup{
+		cfg:               baseAggregatorCfg,
+		ownerAddress:      ownerAddress,
+		controllerAddress: controllerAddress,
+		smartWalletAddr:   smartWalletAddr,
+		client:            client,
+		executor:          executor,
+	}
+}
 
-	approveAmount := BASE_SWAP_AMOUNT // 1 USDC (6 decimals)
-	swapAmount := BASE_SWAP_AMOUNT    // 1 USDC
+// buildSequentialContractWritesWorkflow creates the task with approve + swap nodes
+func buildSequentialContractWritesWorkflow(smartWalletAddr *common.Address, ownerAddress common.Address) *model.Task {
+	// Use small amount for repeated testing (0.01 USDC)
+	// Matches BASE_SWAP_AMOUNT constant defined in run_node_uniswap_swap_base_test.go
 
 	// Build nodes
 	nodes := []*avsproto.TaskNode{
@@ -146,7 +157,7 @@ func TestExecuteTask_SequentialContractWrites_Base(t *testing.T) {
 						MethodCalls: []*avsproto.ContractWriteNode_MethodCall{
 							{
 								MethodName:   "approve",
-								MethodParams: []string{BASE_SWAPROUTER, approveAmount},
+								MethodParams: []string{BASE_SWAPROUTER, BASE_SWAP_AMOUNT},
 							},
 						},
 					},
@@ -194,7 +205,7 @@ func TestExecuteTask_SequentialContractWrites_Base(t *testing.T) {
 										BASE_WETH,
 										BASE_FEE_TIER,
 										smartWalletAddr.Hex(),
-										swapAmount,
+										BASE_SWAP_AMOUNT, // Use same small amount (0.01 USDC)
 									),
 								},
 							},
@@ -237,8 +248,8 @@ func TestExecuteTask_SequentialContractWrites_Base(t *testing.T) {
 		},
 	}
 
-	// Create the task
-	task := &model.Task{
+	// Return the task
+	return &model.Task{
 		Task: &avsproto.Task{
 			Id:                 "test-sequential-writes-real-exec-base",
 			SmartWalletAddress: smartWalletAddr.Hex(),
@@ -248,29 +259,57 @@ func TestExecuteTask_SequentialContractWrites_Base(t *testing.T) {
 			Edges:              edges,
 		},
 	}
+}
 
+// TestExecuteTask_SequentialContractWrites_Base_SelfFunded tests deployed workflow
+// execution with self-funded UserOperations (no paymaster sponsorship).
+func TestExecuteTask_SequentialContractWrites_Base_SelfFunded(t *testing.T) {
+	setup := setupSequentialContractWritesTest(t)
+	defer setup.client.Close()
+
+	t.Logf("💰 Test Mode: SELF-FUNDED (no paymaster)")
+	task := buildSequentialContractWritesWorkflow(setup.smartWalletAddr, setup.ownerAddress)
 	t.Logf("   ✅ Task created: %s", task.Id)
 
 	t.Logf("🚀 Starting real execution with sequential contract writes on Base...")
-	t.Logf("   Node 1: Approve %s USDC to SwapRouter", approveAmount)
-	t.Logf("   Node 2: Swap %s USDC for WETH", swapAmount)
+	t.Logf("   Node 1: Approve %s USDC to SwapRouter (0.01 USDC)", BASE_SWAP_AMOUNT)
+	t.Logf("   Node 2: Swap %s USDC for WETH (0.01 USDC)", BASE_SWAP_AMOUNT)
+	t.Logf("   Funding: Self-funded (smart wallet pays gas)")
 
-	// Create trigger data for manual trigger
+	// Check USDC balance before swap (fail early with clear message)
+	usdcContract, err := erc20.NewErc20(common.HexToAddress(BASE_USDC), setup.client)
+	require.NoError(t, err, "Failed to create USDC contract binding")
+
+	usdcBalance, err := usdcContract.BalanceOf(nil, *setup.smartWalletAddr)
+	require.NoError(t, err, "Failed to get USDC balance")
+
+	requiredAmount := big.NewInt(10000) // 0.01 USDC (6 decimals) - tiny amount for repeated testing
+	require.True(t, usdcBalance.Cmp(requiredAmount) >= 0,
+		"wallet %s needs at least 0.01 USDC (10000 raw) before swap; have %s",
+		setup.smartWalletAddr.Hex(), usdcBalance.String())
+
+	t.Logf("✅ USDC Balance Check: %s (%.6f USDC) - sufficient for swap",
+		usdcBalance.String(), float64(usdcBalance.Int64())/1e6)
+
+	// Create trigger data for manual trigger (no paymaster override = auto-decision)
 	triggerData := &avsproto.ManualTrigger_Output{
 		Data: func() *structpb.Value {
 			data, _ := structpb.NewValue(map[string]interface{}{
-				"runner":   smartWalletAddr.Hex(),
-				"chain_id": int64(BASE_CHAIN_ID),
+				"settings": map[string]interface{}{
+					"runner":   setup.smartWalletAddr.Hex(),
+					"chain_id": int64(BASE_CHAIN_ID),
+					// No shouldUsePaymaster override - let the system decide based on balance
+				},
 			})
 			return data
 		}(),
 	}
 
-	// Execute the task (real execution, not simulation)
-	execution, err := executor.RunTask(task, &QueueExecutionData{
+	// Execute the task (real execution, not simulation, self-funded)
+	execution, err := setup.executor.RunTask(task, &QueueExecutionData{
 		TriggerType:   avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerOutput: triggerData,
-		ExecutionID:   fmt.Sprintf("exec-%d", time.Now().Unix()),
+		ExecutionID:   fmt.Sprintf("exec-self-funded-%d", time.Now().Unix()),
 	})
 
 	require.NoError(t, err, "RunTask should not return error")
@@ -314,5 +353,96 @@ func TestExecuteTask_SequentialContractWrites_Base(t *testing.T) {
 	require.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS, execution.Status,
 		"Overall execution should have SUCCESS status")
 
-	t.Logf("🎉 SUCCESS: Sequential contract writes executed on-chain through bundler on Base!")
+	t.Logf("🎉 SUCCESS: Self-funded sequential contract writes executed on-chain!")
+}
+
+// TestExecuteTask_SequentialContractWrites_Base_Paymaster tests deployed workflow
+// execution with paymaster-sponsored UserOperations.
+func TestExecuteTask_SequentialContractWrites_Base_Paymaster(t *testing.T) {
+	setup := setupSequentialContractWritesTest(t)
+	defer setup.client.Close()
+
+	t.Logf("💳 Test Mode: PAYMASTER SPONSORED")
+
+	// Check if paymaster is configured
+	if setup.cfg.SmartWallet.PaymasterAddress == (common.Address{}) {
+		t.Skip("Paymaster not configured - skipping paymaster sponsorship test")
+	}
+
+	t.Logf("   Paymaster: %s", setup.cfg.SmartWallet.PaymasterAddress.Hex())
+
+	task := buildSequentialContractWritesWorkflow(setup.smartWalletAddr, setup.ownerAddress)
+
+	// Modify task to use a different ID for paymaster test
+	task.Id = "test-sequential-writes-paymaster-base"
+	t.Logf("   ✅ Task created: %s", task.Id)
+
+	t.Logf("🚀 Starting real execution with sequential contract writes on Base...")
+	t.Logf("   Node 1: Approve %s USDC to SwapRouter (0.01 USDC)", BASE_SWAP_AMOUNT)
+	t.Logf("   Node 2: Swap %s USDC for WETH (0.01 USDC)", BASE_SWAP_AMOUNT)
+	t.Logf("   Funding: Paymaster sponsored (gas covered by paymaster)")
+
+	// Create trigger data for manual trigger with paymaster override in settings
+	triggerData := &avsproto.ManualTrigger_Output{
+		Data: func() *structpb.Value {
+			data, _ := structpb.NewValue(map[string]interface{}{
+				"settings": map[string]interface{}{
+					"runner":             setup.smartWalletAddr.Hex(),
+					"chain_id":           int64(BASE_CHAIN_ID),
+					"shouldUsePaymaster": true, // Force paymaster sponsorship
+				},
+			})
+			return data
+		}(),
+	}
+
+	// Execute the task (real execution, not simulation, paymaster-sponsored)
+	execution, err := setup.executor.RunTask(task, &QueueExecutionData{
+		TriggerType:   avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
+		TriggerOutput: triggerData,
+		ExecutionID:   fmt.Sprintf("exec-paymaster-%d", time.Now().Unix()),
+	})
+
+	require.NoError(t, err, "RunTask should not return error")
+	require.NotNil(t, execution, "Execution result should not be nil")
+
+	t.Logf("✅ Execution completed")
+	t.Logf("   Execution ID: %s", execution.Id)
+	t.Logf("   Status: %s", execution.Status)
+
+	// Verify execution results
+	t.Logf("📊 Execution steps:")
+	for i, step := range execution.Steps {
+		t.Logf("   Step %d: %s", i+1, step.Name)
+		t.Logf("     Success: %v", step.Success)
+		if step.Error != "" {
+			t.Logf("     Error: %s", step.Error)
+		}
+	}
+
+	// Check that approve step succeeded
+	// Find steps by name (order may vary)
+	var approveStep, swapStep *avsproto.Execution_Step
+	for _, step := range execution.Steps {
+		if step.Name == "approve_node" {
+			approveStep = step
+		} else if step.Name == "swap_node" {
+			swapStep = step
+		}
+	}
+
+	require.NotNil(t, approveStep, "Should have approve_node execution step")
+	require.True(t, approveStep.Success, "Approve step should succeed, error: %s", approveStep.Error)
+	t.Logf("✅ Approve step executed successfully with paymaster sponsorship")
+
+	// Swap step must exist and succeed for the test to pass
+	require.NotNil(t, swapStep, "Should have swap_node execution step")
+	require.True(t, swapStep.Success, "Swap step should succeed, error: %s", swapStep.Error)
+	t.Logf("✅ Swap step executed successfully with paymaster sponsorship")
+
+	// Verify overall execution status
+	require.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS, execution.Status,
+		"Overall execution should have SUCCESS status")
+
+	t.Logf("🎉 SUCCESS: Paymaster-sponsored sequential contract writes executed on-chain!")
 }
