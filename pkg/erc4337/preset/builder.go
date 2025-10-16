@@ -9,6 +9,7 @@ import (
 	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -28,11 +29,11 @@ import (
 var (
 	// Realistic gas limits for UserOp construction (bundler estimation often fails)
 	// These values are based on actual ETH transfer and smart wallet operations
-	// Last validated: Sept 2025. To update: run representative UserOperations on target network,
+	// Last validated: Oct 2025. To update: run representative UserOperations on target network,
 	// observe actual gas usage, and adjust these values accordingly
-	DEFAULT_CALL_GAS_LIMIT         = big.NewInt(100000) // 100K for smart wallet execute + ETH transfer
-	DEFAULT_VERIFICATION_GAS_LIMIT = big.NewInt(150000) // 150K for signature verification
-	DEFAULT_PREVERIFICATION_GAS    = big.NewInt(50000)  // 50K for bundler overhead
+	DEFAULT_CALL_GAS_LIMIT         = big.NewInt(100000)  // 100K for smart wallet execute + ETH transfer
+	DEFAULT_VERIFICATION_GAS_LIMIT = big.NewInt(1000000) // 1M for signature verification + paymaster validation (very conservative)
+	DEFAULT_PREVERIFICATION_GAS    = big.NewInt(50000)   // 50K for bundler overhead
 
 	// UUPS proxy wallet deployment gas limit
 	// Based on real-world data from Base/Sepolia mainnet: UUPS proxy + initialize(owner) requires 1.3M-1.6M gas
@@ -55,6 +56,13 @@ var (
 
 	// example tx send to entrypoint: https://sepolia.basescan.org/tx/0x7580ac508a2ac34cf6a4f4346fb6b4f09edaaa4f946f42ecdb2bfd2a633d43af#eventlog
 	userOpEventTopic0 = common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f")
+
+	// UseLocalGasEstimation controls whether to use local gas estimation (true) or bundler estimation (false)
+	// When true: Skips bundler's eth_estimateUserOperationGas call and uses hard-coded gas limits
+	// This avoids the AA33 paymaster nonce bug where bundler increments paymaster nonce during estimation
+	// See: BUNDLER-PAYMASTER-NONCE-BUG.md for details
+	// Default: false (use bundler estimation for backwards compatibility)
+	UseLocalGasEstimation = false
 )
 
 // VerifyingPaymasterRequest contains the parameters needed for paymaster functionality. This use the reference from https://github.com/eth-optimism/paymaster-reference
@@ -270,18 +278,18 @@ func pollUserOpReceipt(
 // It then listens on-chain for 60 seconds to wait until the userops is executed.
 // If the userops is executed, the transaction Receipt is also returned.
 // If paymasterReq is nil, a standard UserOp without paymaster is sent.
-// If paymasterReq is provided, it will use the paymaster parameters.
-// senderOverride: If provided, use this as the smart account sender.
-// saltOverride: If provided (and the account is not yet deployed), use this salt to produce initCode.
-func SendUserOp(
+// sendUserOpShared contains the shared logic between SendUserOp and SendUserOpWithWsClient
+// This eliminates code duplication and makes maintenance easier
+func sendUserOpShared(
 	smartWalletConfig *config.SmartWalletConfig,
 	owner common.Address,
 	callData []byte,
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
+	wsClient *ethclient.Client,
 	paymasterNonceOverride *big.Int,
 ) (*userop.UserOperation, *types.Receipt, error) {
-	log.Printf("SendUserOp started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
+	log.Printf("sendUserOpShared started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
 
 	var userOp *userop.UserOperation
 	var err error
@@ -299,44 +307,61 @@ func SendUserOp(
 	}
 	defer client.Close()
 
-	wsClient, err := ethclient.Dial(smartWalletConfig.EthWsUrl)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer wsClient.Close()
-
 	// Step 1: Estimate gas FIRST (before deciding paymaster vs self-funded)
 	// Build a temporary UserOp to estimate gas
 	var estimatedCallGas, estimatedVerificationGas, estimatedPreVerificationGas *big.Int
 	if paymasterReq != nil {
 		log.Printf("🔍 GAS ESTIMATION: Estimating gas before paymaster decision...")
 
-		// Build temporary UserOp for estimation (without paymaster)
-		tempUserOp, tempErr := BuildUserOp(smartWalletConfig, client, bundlerClient, owner, callData, senderOverride)
-		if tempErr != nil {
-			log.Printf("❌ Failed to build temp UserOp for gas estimation: %v", tempErr)
-			return nil, nil, tempErr
-		}
+		if UseLocalGasEstimation {
+			// Use local gas estimation (skips bundler call to avoid AA33 nonce bug)
+			log.Printf("   Using LOCAL gas estimation (skipping bundler to avoid AA33 nonce bug)")
+			estimatedCallGas = callGasLimit
+			estimatedVerificationGas = verificationGasLimit
+			estimatedPreVerificationGas = preVerificationGas
+			log.Printf("   Local gas limits: callGas=%s, verificationGas=%s, preVerificationGas=%s",
+				estimatedCallGas.String(), estimatedVerificationGas.String(), estimatedPreVerificationGas.String())
+		} else {
+			// FIXED: Estimate gas with the EXACT UserOp we're going to send (including paymaster)
+			// This prevents AA33 errors from estimation mismatch
+			tempUserOp, tempErr := BuildUserOpWithPaymaster(
+				smartWalletConfig,
+				client,
+				bundlerClient,
+				owner,
+				callData,
+				paymasterReq.PaymasterAddress,
+				paymasterReq.ValidUntil,
+				paymasterReq.ValidAfter,
+				senderOverride,
+				nil,                  // nonceOverride - let it fetch from chain
+				nil,                  // paymasterNonceOverride - let it fetch from chain
+				callGasLimit,         // Use default gas limits for estimation
+				verificationGasLimit, // Use default gas limits for estimation
+				preVerificationGas,   // Use default gas limits for estimation
+			)
+			if tempErr != nil {
+				log.Printf("❌ Failed to build temp UserOp for gas estimation: %v", tempErr)
+				return nil, nil, tempErr
+			}
 
-		// Set nonce for estimation
-		tempUserOp.Nonce = aa.MustNonce(client, tempUserOp.Sender, accountSalt)
+			// Set dummy signature for estimation (paymaster signature already set in BuildUserOpWithPaymaster)
+			tempUserOp.Signature, _ = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, dummySigForGasEstimation.Bytes())
 
-		// Set dummy signature for estimation
-		tempUserOp.Signature, _ = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, dummySigForGasEstimation.Bytes())
-
-		// Estimate gas using bundler
-		gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *tempUserOp, aa.EntrypointAddress, map[string]any{})
-		if gasErr != nil {
-			log.Printf("❌ GAS ESTIMATION FAILED: %v", gasErr)
-			log.Printf("   Continuing with hardcoded gas limits...")
-		} else if gas != nil {
-			estimatedCallGas = gas.CallGasLimit
-			estimatedVerificationGas = gas.VerificationGasLimit
-			estimatedPreVerificationGas = gas.PreVerificationGas
-			log.Printf("✅ GAS ESTIMATION SUCCESS:")
-			log.Printf("   CallGasLimit: %s", estimatedCallGas.String())
-			log.Printf("   VerificationGasLimit: %s", estimatedVerificationGas.String())
-			log.Printf("   PreVerificationGas: %s", estimatedPreVerificationGas.String())
+			// Estimate gas using bundler with the EXACT UserOp structure (including paymaster)
+			gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *tempUserOp, aa.EntrypointAddress, map[string]any{})
+			if gasErr != nil {
+				log.Printf("❌ GAS ESTIMATION FAILED: %v", gasErr)
+				log.Printf("   Continuing with hardcoded gas limits...")
+			} else if gas != nil {
+				estimatedCallGas = gas.CallGasLimit
+				estimatedVerificationGas = gas.VerificationGasLimit
+				estimatedPreVerificationGas = gas.PreVerificationGas
+				log.Printf("✅ GAS ESTIMATION SUCCESS (with paymaster):")
+				log.Printf("   CallGasLimit: %s", estimatedCallGas.String())
+				log.Printf("   VerificationGasLimit: %s", estimatedVerificationGas.String())
+				log.Printf("   PreVerificationGas: %s", estimatedPreVerificationGas.String())
+			}
 		}
 	}
 
@@ -371,7 +396,7 @@ func SendUserOp(
 
 	log.Printf("🔍 DEPLOYED WORKFLOW: UserOp built successfully, sending to bundler - sender: %s", userOp.Sender.Hex())
 
-	// Send the UserOp to the bundler using the shared core logic
+	// Send the UserOp to the bundler using the existing sendUserOpCore function
 	txResult, err := sendUserOpCore(smartWalletConfig, userOp, client, bundlerClient)
 	if err != nil {
 		return userOp, nil, err
@@ -390,16 +415,49 @@ func SendUserOp(
 		return userOp, nil, nil
 	}
 	if receipt == nil {
-		log.Printf("⏰ TRANSACTION WAITING: No confirmation received (bundler may still be processing)")
+		log.Printf("⚠️ TRANSACTION WAITING: No receipt received (timeout or other issue)")
 		return userOp, nil, nil
 	}
 
-	log.Printf("✅ DEPLOYED WORKFLOW: Receipt retrieved successfully - status: %d, gas_used: %d, logs_count: %d",
-		receipt.Status, receipt.GasUsed, len(receipt.Logs))
+	log.Printf("✅ TRANSACTION WAITING: UserOp confirmed on-chain")
+	log.Printf("  Block Number: %d", receipt.BlockNumber.Uint64())
+	log.Printf("  Transaction Hash: %s", receipt.TxHash.Hex())
+	log.Printf("  Gas Used: %d", receipt.GasUsed)
 
-	// The polling mechanism in waitForUserOpConfirmation already ensures
-	// the transaction is confirmed on-chain before we proceed
 	return userOp, receipt, nil
+}
+
+// If paymasterReq is provided, it will use the paymaster parameters.
+// senderOverride: If provided, use this as the smart account sender.
+// saltOverride: If provided (and the account is not yet deployed), use this salt to produce initCode.
+func SendUserOp(
+	smartWalletConfig *config.SmartWalletConfig,
+	owner common.Address,
+	callData []byte,
+	paymasterReq *VerifyingPaymasterRequest,
+	senderOverride *common.Address,
+	paymasterNonceOverride *big.Int,
+) (*userop.UserOperation, *types.Receipt, error) {
+	log.Printf("SendUserOp started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
+
+	// Only create WebSocket client if URL is provided
+	var wsClient *ethclient.Client
+	var err error
+	if smartWalletConfig.EthWsUrl != "" {
+		wsClient, err = ethclient.Dial(smartWalletConfig.EthWsUrl)
+		if err != nil {
+			log.Printf("⚠️  WebSocket client creation failed (will use polling): %v", err)
+			wsClient = nil
+		} else {
+			defer wsClient.Close()
+		}
+	} else {
+		log.Printf("ℹ️  No WebSocket URL configured, will use polling for receipt")
+		wsClient = nil
+	}
+
+	// Use the shared logic for the main UserOp processing
+	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient, paymasterNonceOverride)
 }
 
 // sendUserOpCore contains the shared retry loop logic for sending UserOps to the bundler.
@@ -696,124 +754,15 @@ func SendUserOpWithWsClient(
 ) (*userop.UserOperation, *types.Receipt, error) {
 	log.Printf("SendUserOpWithWsClient started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
 
-	var userOp *userop.UserOperation
-	var err error
-	entrypoint := smartWalletConfig.EntrypointAddress
-
-	// Initialize clients once and reuse them
-	bundlerClient, err := bundler.NewBundlerClient(smartWalletConfig.BundlerURL)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	client, err := ethclient.Dial(smartWalletConfig.EthRpcUrl)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer client.Close()
-
 	// Use provided WebSocket client (no defer close - managed globally)
 	if wsClient == nil {
-		log.Printf("⚠️ TRANSACTION WAITING: No WebSocket client provided, transaction monitoring disabled")
-		// Fall back to original SendUserOp behavior
-		return SendUserOp(smartWalletConfig, owner, callData, paymasterReq, senderOverride, nil)
+		log.Printf("⚠️ TRANSACTION WAITING: No WebSocket client provided, falling back to SendUserOp")
+		// Fall back to SendUserOp which will create its own WebSocket client if needed
+		return SendUserOp(smartWalletConfig, owner, callData, paymasterReq, senderOverride, paymasterNonceOverride)
 	}
 
-	// Step 1: Estimate gas FIRST (before deciding paymaster vs self-funded)
-	// Build a temporary UserOp to estimate gas
-	var estimatedCallGas, estimatedVerificationGas, estimatedPreVerificationGas *big.Int
-	if paymasterReq != nil {
-		log.Printf("🔍 GAS ESTIMATION: Estimating gas before paymaster decision...")
-
-		// Build temporary UserOp for estimation (without paymaster)
-		tempUserOp, tempErr := BuildUserOp(smartWalletConfig, client, bundlerClient, owner, callData, senderOverride)
-		if tempErr != nil {
-			log.Printf("❌ Failed to build temp UserOp for gas estimation: %v", tempErr)
-			return nil, nil, tempErr
-		}
-
-		// Set nonce for estimation
-		tempUserOp.Nonce = aa.MustNonce(client, tempUserOp.Sender, accountSalt)
-
-		// Set dummy signature for estimation
-		tempUserOp.Signature, _ = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, dummySigForGasEstimation.Bytes())
-
-		// Estimate gas using bundler
-		gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *tempUserOp, aa.EntrypointAddress, map[string]any{})
-		if gasErr != nil {
-			log.Printf("❌ GAS ESTIMATION FAILED: %v", gasErr)
-			log.Printf("   Continuing with hardcoded gas limits...")
-		} else if gas != nil {
-			estimatedCallGas = gas.CallGasLimit
-			estimatedVerificationGas = gas.VerificationGasLimit
-			estimatedPreVerificationGas = gas.PreVerificationGas
-			log.Printf("✅ GAS ESTIMATION SUCCESS:")
-			log.Printf("   CallGasLimit: %s", estimatedCallGas.String())
-			log.Printf("   VerificationGasLimit: %s", estimatedVerificationGas.String())
-			log.Printf("   PreVerificationGas: %s", estimatedPreVerificationGas.String())
-		}
-	}
-
-	// Build the userOp based on whether paymaster is requested or not
-	if paymasterReq == nil {
-		// Standard UserOp without paymaster
-		userOp, err = BuildUserOp(smartWalletConfig, client, bundlerClient, owner, callData, senderOverride)
-	} else {
-		// UserOp with paymaster support - use estimated gas limits
-		userOp, err = BuildUserOpWithPaymaster(
-			smartWalletConfig,
-			client,
-			bundlerClient,
-			owner,
-			callData,
-			paymasterReq.PaymasterAddress,
-			paymasterReq.ValidUntil,
-			paymasterReq.ValidAfter,
-			senderOverride,
-			nil,                         // nonceOverride - let it fetch from chain
-			paymasterNonceOverride,      // Use provided paymaster nonce for sequential UserOps
-			estimatedCallGas,            // Use estimated gas
-			estimatedVerificationGas,    // Use estimated gas
-			estimatedPreVerificationGas, // Use estimated gas
-		)
-	}
-
-	if err != nil {
-		log.Printf("🚨 DEPLOYED WORKFLOW ERROR: Failed to build UserOp - %v", err)
-		return nil, nil, err
-	}
-
-	log.Printf("🔍 DEPLOYED WORKFLOW: UserOp built successfully, sending to bundler - sender: %s", userOp.Sender.Hex())
-
-	// Send the UserOp to the bundler using the shared core logic
-	txResult, err := sendUserOpCore(smartWalletConfig, userOp, client, bundlerClient)
-	if err != nil {
-		return userOp, nil, err
-	}
-
-	// 🔍 TRANSACTION WAITING DEBUG: Start waiting for on-chain confirmation using global WebSocket client
-	log.Printf("🔍 TRANSACTION WAITING: Starting to wait for UserOp confirmation (using global client)")
-	log.Printf("  UserOp Hash: %s", txResult)
-	log.Printf("  Entrypoint: %s", entrypoint.Hex())
-
-	// Wait for UserOp confirmation using exponential backoff polling
-	// This is more efficient than a fixed 3-minute timeout and handles bundler delays gracefully
-	receipt, err := waitForUserOpConfirmation(client, wsClient, entrypoint, txResult)
-	if err != nil {
-		log.Printf("❌ TRANSACTION WAITING: Failed to get confirmation: %v", err)
-		return userOp, nil, nil
-	}
-	if receipt == nil {
-		log.Printf("⏰ TRANSACTION WAITING: No confirmation received (bundler may still be processing)")
-		return userOp, nil, nil
-	}
-
-	log.Printf("✅ DEPLOYED WORKFLOW: Receipt retrieved successfully - status: %d, gas_used: %d, logs_count: %d",
-		receipt.Status, receipt.GasUsed, len(receipt.Logs))
-
-	// The polling mechanism in waitForUserOpConfirmation already ensures
-	// the transaction is confirmed on-chain before we proceed
-	return userOp, receipt, nil
+	// Use the shared logic for the main UserOp processing
+	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient, paymasterNonceOverride)
 }
 
 // BuildUserOpWithPaymaster creates a UserOperation with paymaster support.
@@ -966,44 +915,53 @@ func BuildUserOpWithPaymaster(
 	log.Printf("   Paymaster hash (from contract): 0x%x", paymasterHash)
 
 	// Sign the paymaster hash with the controller's private key
-	paymasterSignature, err := signer.SignMessage(smartWalletConfig.ControllerPrivateKey, paymasterHash[:])
+	// CRITICAL: The VerifyingPaymaster contract calls ECDSA.toEthSignedMessageHash(getHash(...))
+	// which adds the "\x19Ethereum Signed Message:\n32" prefix during validation.
+	// Therefore, we must compute the SAME prefixed hash here and sign it with crypto.Sign()
+	// WITHOUT using signer.SignMessage() which would double-prefix it.
+	//
+	// From VerifyingPaymaster.sol line 94:
+	//   bytes32 hash = ECDSA.toEthSignedMessageHash(getHash(userOp, validUntil, validAfter));
+	//   if (verifyingSigner != ECDSA.recover(hash, signature)) { ... }
+	//
+	// EIP-191 format: "\x19Ethereum Signed Message:\n" + len(message) + message
+	prefix := []byte("\x19Ethereum Signed Message:\n32")
+	prefixedData := append(prefix, paymasterHash[:]...)
+	prefixedHash := crypto.Keccak256Hash(prefixedData)
 
+	paymasterSignature, err := crypto.Sign(prefixedHash.Bytes(), smartWalletConfig.ControllerPrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign paymaster hash: %w", err)
 	}
+	// Adjust v value from 0/1 to 27/28 for Ethereum compatibility
+	paymasterSignature[64] += 27
 
-	// Pack timestamps as raw uint48 values (6 bytes each, 12 bytes total)
-	// The bundler expects raw bytes, NOT ABI-encoded 32-byte padded values
-	// Total: address(20) + uint48(6) + uint48(6) + signature(65) = 97 bytes
+	// FIXED: Pack timestamps as ABI-encoded (uint48, uint48) - 64 bytes total
+	// VerifyingPaymasterFixed contract expects ABI-encoded timestamps, NOT raw bytes
+	// Total: address(20) + abi.encode(uint48,uint48)(64) + signature(65) = 149 bytes
 
-	// Convert timestamps to 6-byte big-endian representation (uint48)
-	validUntilBytes := make([]byte, 6)
-	validAfterBytes := make([]byte, 6)
-
-	// validUntil to 6 bytes (big-endian)
-	validUntilU64 := validUntil.Uint64()
-	for i := 0; i < 6; i++ {
-		validUntilBytes[5-i] = byte(validUntilU64 >> (8 * i))
+	// ABI encode (uint48, uint48) as a tuple using the standard ABI encoding
+	// This produces 64 bytes: 32 bytes for each uint48 (padded to uint256)
+	// Use abi.Arguments to match the contract's abi.decode(paymasterAndData[20:84], (uint48, uint48))
+	arguments := abi.Arguments{
+		{Type: abi.Type{T: abi.UintTy, Size: 48}}, // uint48
+		{Type: abi.Type{T: abi.UintTy, Size: 48}}, // uint48
 	}
 
-	// validAfter to 6 bytes (big-endian)
-	validAfterU64 := validAfter.Uint64()
-	for i := 0; i < 6; i++ {
-		validAfterBytes[5-i] = byte(validAfterU64 >> (8 * i))
+	encodedData, err := arguments.Pack(&validUntil, &validAfter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to ABI encode timestamps: %w", err)
 	}
-
-	// Combine timestamps: validUntil FIRST, validAfter SECOND
-	encodedTimestamps := append(validUntilBytes, validAfterBytes...)
 
 	log.Printf("🔍 TIMESTAMP PACKING DEBUG:")
-	log.Printf("   Raw uint48 (validUntil, validAfter): 0x%x (%d bytes)", encodedTimestamps, len(encodedTimestamps))
+	log.Printf("   ABI-encoded (validUntil, validAfter): 0x%x (%d bytes)", encodedData, len(encodedData))
 
-	// Create PaymasterAndData: address (20) + uint48 validUntil (6) + uint48 validAfter (6) + signature (65) = 97 bytes
-	paymasterAndData := append(paymasterAddress.Bytes(), encodedTimestamps...)
+	// Create PaymasterAndData: address (20) + abi.encode(uint48,uint48)(64) + signature (65) = 149 bytes
+	paymasterAndData := append(paymasterAddress.Bytes(), encodedData...)
 	paymasterAndData = append(paymasterAndData, paymasterSignature...)
 
 	log.Printf("🔍 PAYMASTER AND DATA DEBUG:")
-	log.Printf("   Total length: %d bytes (expected: 97)", len(paymasterAndData))
+	log.Printf("   Total length: %d bytes (expected: 149)", len(paymasterAndData))
 	log.Printf("   PaymasterAndData: 0x%x", paymasterAndData)
 
 	// Update the UserOperation with the properly encoded PaymasterAndData
