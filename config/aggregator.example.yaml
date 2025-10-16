@@ -107,6 +107,3 @@ macros:
     thegraph_api_key: # TheGraph protocol API key (auto-injected for gateway.thegraph.com queries)
     moralis_api_key: # Moralis Web3 Data API key (used by BalanceNode for token data)
     # Add your custom secrets here - any key-value pair can be accessed in workflows
-
-# TEST_PRIVATE_KEY: used only by unit tests (e.g., ERC-4337 presets). The aggregator ignores this.
-test_private_key:
