@@ -622,10 +622,31 @@ func sendUserOpCore(
 		// For nonce errors, refetch nonce and retry
 		if err != nil && strings.Contains(err.Error(), "AA25 invalid account nonce") {
 			if retry < maxRetries-1 {
-				log.Printf("🔄 DEPLOYED WORKFLOW: Nonce conflict detected, refetching fresh nonce")
-				freshNonce = aa.MustNonce(client, userOp.Sender, accountSalt)
-				userOp.Nonce = freshNonce
-				log.Printf("🔄 DEPLOYED WORKFLOW: Updated nonce to: %s", freshNonce.String())
+				log.Printf("🔄 DEPLOYED WORKFLOW: Nonce conflict detected, polling for fresh nonce")
+
+				// Poll for fresh nonce with timeout (similar to transaction waiting pattern)
+				startTime := time.Now()
+				timeout := 15 * time.Second
+				pollInterval := 500 * time.Millisecond
+
+				for time.Since(startTime) < timeout {
+					time.Sleep(pollInterval)
+					freshNonce = aa.MustNonce(client, userOp.Sender, accountSalt)
+
+					// Check if nonce has actually changed from what we had
+					if userOp.Nonce == nil || freshNonce.Cmp(userOp.Nonce) > 0 {
+						userOp.Nonce = freshNonce
+						log.Printf("🔄 DEPLOYED WORKFLOW: Updated nonce to: %s (after %v)", freshNonce.String(), time.Since(startTime))
+						break
+					}
+
+					log.Printf("🔄 DEPLOYED WORKFLOW: Nonce still %s, waiting... (elapsed: %v)", userOp.Nonce.String(), time.Since(startTime))
+				}
+
+				if time.Since(startTime) >= timeout {
+					log.Printf("⚠️ DEPLOYED WORKFLOW: Nonce polling timeout after %v, using current nonce: %s", timeout, userOp.Nonce.String())
+				}
+
 				continue
 			}
 		}

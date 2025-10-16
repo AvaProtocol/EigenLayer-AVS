@@ -26,7 +26,7 @@ const (
 	BASE_QUOTER      = "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a" // QuoterV2
 	BASE_ENTRYPOINT  = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789" // EntryPoint v0.6
 	BASE_FACTORY     = "0xB99BC2E399e06CddCF5E725c0ea341E8f0322834" // SimpleAccountFactory
-	BASE_SWAP_AMOUNT = "1000000"                                    // 1 USDC (6 decimals)
+	BASE_SWAP_AMOUNT = "10000"                                      // 0.01 USDC (6 decimals) - small amount for repeated testing
 	BASE_FEE_TIER    = 3000                                         // 0.3%
 	BASE_CHAIN_ID    = 8453                                         // Base mainnet chain ID
 )
@@ -176,7 +176,9 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 	}
 
 	t.Logf("   Calling RunNodeImmediately with isSimulated=false on Base...")
-	approvalResult, err := engine.RunNodeImmediately("contractWrite", approvalConfig, inputVars, user, false)
+	// Use paymaster sponsorship for gas fees (no ETH needed in smart wallet)
+	usePaymaster := true
+	approvalResult, err := engine.RunNodeImmediately("contractWrite", approvalConfig, inputVars, user, false, &usePaymaster)
 
 	require.NoError(t, err, "Approval RunNodeImmediately should not return error")
 	require.NotNil(t, approvalResult, "Approval result should not be nil")
@@ -262,7 +264,8 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 	t.Logf("     amountOutMinimum: %s", minOutput)
 
 	t.Logf("   Calling RunNodeImmediately with isSimulated=false on Base...")
-	swapResult, err := engine.RunNodeImmediately("contractWrite", swapConfig, inputVars, user, false)
+	// Use paymaster sponsorship for gas fees (no ETH needed in smart wallet)
+	swapResult, err := engine.RunNodeImmediately("contractWrite", swapConfig, inputVars, user, false, &usePaymaster)
 
 	require.NoError(t, err, "Swap RunNodeImmediately should not return error")
 	require.NotNil(t, swapResult, "Swap result should not be nil")
