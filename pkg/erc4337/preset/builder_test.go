@@ -239,8 +239,12 @@ func TestGetHash(t *testing.T) {
 		t.Fatalf("Failed to get hash from PayMaster contract: %v", err)
 	}
 
-	if common.Bytes2Hex(hash[:]) != "14972f699106bae44f682fd688b936dc1efce4be3b3bdd838521ac385ca5acc7" {
-		t.Fatalf("Expected hash to be 14972f699106bae44f682fd688b936dc1efce4be3b3bdd838521ac385ca5acc7, got %s", common.Bytes2Hex(hash[:]))
+	// Updated expected hash after switching to ABI-encoded timestamps (64 bytes instead of compact 12 bytes)
+	// The new format uses abi.encode(uint48, uint48) which produces 64 bytes of encoded data
+	// Old hash (compact format): 14972f699106bae44f682fd688b936dc1efce4be3b3bdd838521ac385ca5acc7
+	// New hash (ABI-encoded format): ea028b46be9e5659ababf4babf69952c28de8112aa04c7192c20ba89d3c4e31f
+	if common.Bytes2Hex(hash[:]) != "ea028b46be9e5659ababf4babf69952c28de8112aa04c7192c20ba89d3c4e31f" {
+		t.Fatalf("Expected hash to be ea028b46be9e5659ababf4babf69952c28de8112aa04c7192c20ba89d3c4e31f, got %s", common.Bytes2Hex(hash[:]))
 	}
 }
 

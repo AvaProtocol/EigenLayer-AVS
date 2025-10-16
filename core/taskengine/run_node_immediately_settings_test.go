@@ -8,6 +8,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,9 +33,14 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 		ownerEOA := *ownerAddr
 		factory := testutil.GetAggregatorConfig().SmartWallet.FactoryAddress
 
+		// Connect to RPC client for GetSenderAddress
+		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
+		require.NoError(t, err, "Failed to connect to RPC")
+		defer client.Close()
+
 		// Derive actual salt:0 smart wallet address
 		aa.SetFactoryAddress(factory)
-		runnerAddr, err := aa.GetSenderAddress(nil, ownerEOA, big.NewInt(0))
+		runnerAddr, err := aa.GetSenderAddress(client, ownerEOA, big.NewInt(0))
 		require.NoError(t, err, "Failed to derive smart wallet address")
 
 		// Create authenticated user model
