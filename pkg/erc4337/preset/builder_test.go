@@ -2,10 +2,8 @@ package preset
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/big"
 	"os"
 	"strings"
@@ -22,29 +20,20 @@ import (
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/ethclient/gethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
 func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
-	key := testutil.GetTestPrivateKeyFromEnv()
-	if key == "" {
-		panic("TEST_PRIVATE_KEY not set in environment. Please set it in .env file.")
-	}
-	var controllerPrivateKey *ecdsa.PrivateKey
-	var err error
-
-	if key == "" {
-		log.Fatal("TEST_PRIVATE_KEY environment variable is not set. Please configure it with a funded test key. Aborting.")
-	} else if strings.HasPrefix(key, "0x") {
-		key = key[2:]
-	}
-
-	controllerPrivateKey, err = crypto.HexToECDSA(key)
+	// Load aggregator config to get the CONTROLLER private key (used for signing UserOps)
+	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
 	if err != nil {
-		log.Fatalf("Failed to parse TEST_PRIVATE_KEY: %v. Aborting.", err)
+		panic(fmt.Sprintf("Failed to load aggregator config: %v", err))
+	}
+
+	if cfg.SmartWallet == nil || cfg.SmartWallet.ControllerPrivateKey == nil {
+		panic("SmartWallet config or ControllerPrivateKey not set in aggregator config")
 	}
 
 	// Use centralized test config
@@ -54,7 +43,7 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 		EthWsUrl:             testutil.GetTestWsRPC(),
 		FactoryAddress:       common.HexToAddress(testutil.GetTestFactoryAddress()),
 		EntrypointAddress:    common.HexToAddress(config.DefaultEntrypointAddressHex),
-		ControllerPrivateKey: controllerPrivateKey,
+		ControllerPrivateKey: cfg.SmartWallet.ControllerPrivateKey, // Use controller key from config
 		PaymasterAddress:     common.HexToAddress(config.DefaultPaymasterAddressHex),
 		WhitelistAddresses:   []common.Address{},
 	}

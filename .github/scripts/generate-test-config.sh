@@ -20,7 +20,6 @@ sed -i "s|controller_private_key:.*|controller_private_key: ${CONTROLLER_PRIVATE
 sed -i "s|tenderly_account:.*|tenderly_account: ${TENDERLY_ACCOUNT}|g" config/aggregator-sepolia.yaml
 sed -i "s|tenderly_project:.*|tenderly_project: ${TENDERLY_PROJECT}|g" config/aggregator-sepolia.yaml
 sed -i "s|tenderly_access_key:.*|tenderly_access_key: ${TENDERLY_ACCESS_KEY}|g" config/aggregator-sepolia.yaml
-sed -i "s|test_private_key:.*|test_private_key: ${TEST_PRIVATE_KEY}|g" config/aggregator-sepolia.yaml
 sed -i "s|moralis_api_key:.*|moralis_api_key: ${MORALIS_API_KEY:-}|g" config/aggregator-sepolia.yaml
 
 echo "Verifying config/aggregator-sepolia.yaml..."
@@ -28,7 +27,7 @@ echo "pwd=$(pwd)"
 ls -la config/ || true
 echo "Generated config/aggregator-sepolia.yaml (redacted first 40 lines):"
 if [ -f config/aggregator-sepolia.yaml ]; then
-  sed -n '1,40p' config/aggregator-sepolia.yaml | sed -e 's/tenderly_access_key:.*/tenderly_access_key: ***REDACTED***/' -e 's/test_private_key:.*/test_private_key: ***REDACTED***/' -e 's/bundler_url:.*/bundler_url: ***REDACTED***/' -e 's/ecdsa_private_key:.*/ecdsa_private_key: ***REDACTED***/'
+  sed -n '1,40p' config/aggregator-sepolia.yaml | sed -e 's/tenderly_access_key:.*/tenderly_access_key: ***REDACTED***/' -e 's/bundler_url:.*/bundler_url: ***REDACTED***/' -e 's/ecdsa_private_key:.*/ecdsa_private_key: ***REDACTED***/' -e 's/controller_private_key:.*/controller_private_key: ***REDACTED***/'
 fi
 test -s config/aggregator-sepolia.yaml || (echo "config/aggregator-sepolia.yaml missing"; exit 1)
 

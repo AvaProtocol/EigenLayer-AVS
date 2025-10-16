@@ -93,12 +93,20 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 			},
 		}
 
-		// Seed a wallet in DB to make ListWallets(owner) deterministic in CI
-		// Use distinct EOA (owner) and smart wallet (runner)
-		ownerEOA := common.HexToAddress("0xD7050816337a3f8f690F8083B5Ff8019D50c0E50")
-		runnerAddr := common.HexToAddress("0x5Df343de7d99fd64b2479189692C1dAb8f46184a")
+		// Get owner EOA from environment and derive salt:0 smart wallet
+		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+		if !ok {
+			t.Skip("Owner EOA address not set, skipping simulation test")
+		}
+		ownerEOA := *ownerAddr
 		factory := testutil.GetAggregatorConfig().SmartWallet.FactoryAddress
-		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: &runnerAddr, Factory: &factory, Salt: big.NewInt(0)})
+
+		// Derive actual salt:0 smart wallet address (no mock needed)
+		aa.SetFactoryAddress(factory)
+		runnerAddr, err := aa.GetSenderAddress(nil, ownerEOA, big.NewInt(0))
+		require.NoError(t, err, "Failed to derive smart wallet address")
+
+		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: runnerAddr, Factory: &factory, Salt: big.NewInt(0)})
 
 		// Provide settings for new backend validation structure
 		triggerData := map[string]interface{}{
@@ -150,13 +158,20 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
 		aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
 
-		// Exact parameters from the client request
-		ownerEOA := common.HexToAddress("0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788")
-		runnerAddr := common.HexToAddress("0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e")
+		// Get owner EOA from environment and derive salt:0 smart wallet
+		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+		if !ok {
+			t.Skip("Owner EOA address not set, skipping simulation test")
+		}
+		ownerEOA := *ownerAddr
 		factory := smartWalletConfig.FactoryAddress
 
+		// Derive actual salt:0 smart wallet address (no mock needed)
+		runnerAddr, err := aa.GetSenderAddress(nil, ownerEOA, big.NewInt(0))
+		require.NoError(t, err, "Failed to derive smart wallet address")
+
 		// Seed wallet for validation
-		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: &runnerAddr, Factory: &factory, Salt: big.NewInt(0)})
+		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: runnerAddr, Factory: &factory, Salt: big.NewInt(0)})
 
 		// Full USDC ABI as provided in client request (truncated for readability but key functions included)
 		contractAbi := []interface{}{
@@ -271,9 +286,13 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
 		aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
 
-		// Owner EOA and transfer params from client sample
-		ownerEOA := common.HexToAddress("0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788")
-		toAddr := "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788"
+		// Get owner EOA from environment
+		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+		if !ok {
+			t.Skip("Owner EOA address not set, skipping simulation test")
+		}
+		ownerEOA := *ownerAddr
+		toAddr := ownerEOA.Hex() // Transfer to owner EOA itself
 		amount := "1000000"
 
 		// Derive runner using salt:0 via factory on chain

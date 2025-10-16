@@ -25,11 +25,11 @@ func TestSimulateTask_SequentialContractWrites_Sepolia(t *testing.T) {
 		t.Skip("Skipping simulation test in short mode")
 	}
 
-	// Get TEST_PRIVATE_KEY to derive the owner's EOA and smart wallet address
-	// (automatically loaded from .env file by testutil)
+	// Get owner EOA address from OWNER_EOA env var (or fallback to TEST_PRIVATE_KEY legacy)
+	// Controller key from config signs all UserOps - no private key needed
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 	if !ok {
-		t.Skip("TEST_PRIVATE_KEY not set, skipping simulation test")
+		t.Skip("Owner EOA address not set, skipping simulation test")
 	}
 	ownerAddress := *ownerAddr
 

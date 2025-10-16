@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/big"
 	"strconv"
 	"strings"
@@ -41,17 +42,35 @@ func getRealisticBlockNumberForChain(chainID int64) uint64 {
 // RunNodeImmediately executes a single node immediately with authenticated user context.
 // This is the primary entry point for running nodes that require user authentication.
 // useSimulation defaults to true if not specified.
-func (n *Engine) RunNodeImmediately(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, user *model.User, useSimulation ...bool) (map[string]interface{}, error) {
+// shouldUsePaymaster is an optional third parameter that overrides the paymaster decision:
+//   - nil (default): let the system decide based on wallet balance
+//   - &true: override to use paymaster (for testing paymaster sponsorship)
+//   - &false: override to use self-funded (for EntryPoint deposit withdrawal)
+func (n *Engine) RunNodeImmediately(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, user *model.User, useSimulation ...interface{}) (map[string]interface{}, error) {
 	// Default to simulation mode
 	simulationMode := true
-	if len(useSimulation) > 0 {
-		simulationMode = useSimulation[0]
+	var shouldUsePaymasterOverride *bool = nil
+
+	// Parse variadic parameters
+	for i, param := range useSimulation {
+		switch i {
+		case 0:
+			// First parameter: useSimulation (bool)
+			if simMode, ok := param.(bool); ok {
+				simulationMode = simMode
+			}
+		case 1:
+			// Second parameter: shouldUsePaymaster (*bool)
+			if shouldUsePaymasterPtr, ok := param.(*bool); ok {
+				shouldUsePaymasterOverride = shouldUsePaymasterPtr
+			}
+		}
 	}
 
 	if IsTriggerNodeType(nodeType) {
 		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
 	} else {
-		return n.runProcessingNodeWithInputs(user, nodeType, nodeConfig, inputVariables, simulationMode)
+		return n.runProcessingNodeWithInputs(user, nodeType, nodeConfig, inputVariables, simulationMode, shouldUsePaymasterOverride)
 	}
 }
 
@@ -2779,7 +2798,7 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 }
 
 // runProcessingNodeWithInputs handles execution of processing node types
-func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, useSimulation bool) (map[string]interface{}, error) {
+func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, useSimulation bool, shouldUsePaymasterOverride *bool) (map[string]interface{}, error) {
 	// Check if this is actually a trigger type that was misrouted
 	if IsTriggerNodeType(nodeType) {
 		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
@@ -2805,6 +2824,17 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 
 	// Use the simulation mode parameter (true = simulation, false = real execution)
 	vm.WithLogger(n.logger).WithDb(n.db).SetSimulation(useSimulation)
+
+	// Set shouldUsePaymaster override in VM if provided
+	if shouldUsePaymasterOverride != nil {
+		vm.shouldUsePaymasterOverride = shouldUsePaymasterOverride
+		log.Printf("🔧 RunNodeImmediately: shouldUsePaymaster override set to %v", *shouldUsePaymasterOverride)
+		if n.logger != nil {
+			n.logger.Info("RunNodeImmediately: shouldUsePaymaster override set", "shouldUsePaymaster", *shouldUsePaymasterOverride)
+		}
+	} else {
+		log.Printf("🔧 RunNodeImmediately: NO shouldUsePaymaster override (nil)")
+	}
 
 	if n.logger != nil {
 		n.logger.Info("RunNodeImmediately: Execution mode set",

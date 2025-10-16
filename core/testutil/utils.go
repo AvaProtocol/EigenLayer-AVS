@@ -33,7 +33,7 @@ const (
 var testConfig *config.Config
 
 // LoadDotEnv loads environment variables from .env file in the repository root.
-// This allows tests to access TEST_PRIVATE_KEY and other secrets from .env
+// This allows tests to access OWNER_EOA and other secrets from .env
 func LoadDotEnv() error {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -217,11 +217,22 @@ func GetTestPrivateKeyFromEnv() string {
 	return key
 }
 
-// MustGetTestOwnerAddress parses TEST_PRIVATE_KEY and returns the owner EOA address.
-// Returns nil and false if TEST_PRIVATE_KEY is not set (test should skip).
+// MustGetTestOwnerAddress returns the owner EOA address for tests.
+// Prefers OWNER_EOA env var (direct address), falls back to deriving from TEST_PRIVATE_KEY (legacy).
+// Returns nil and false if neither is set (test should skip).
 // Returns address and true if successful.
 // Panics if TEST_PRIVATE_KEY is set but invalid.
 func MustGetTestOwnerAddress() (*common.Address, bool) {
+	// Prefer OWNER_EOA if set (no private key needed - controller signs everything)
+	if ownerEOAHex := os.Getenv("OWNER_EOA"); ownerEOAHex != "" {
+		if !common.IsHexAddress(ownerEOAHex) {
+			panic(fmt.Sprintf("OWNER_EOA is not a valid hex address: %s", ownerEOAHex))
+		}
+		address := common.HexToAddress(ownerEOAHex)
+		return &address, true
+	}
+
+	// Fallback to TEST_PRIVATE_KEY (legacy) - derive address from private key
 	privateKeyHex := GetTestPrivateKeyFromEnv()
 	if privateKeyHex == "" {
 		return nil, false

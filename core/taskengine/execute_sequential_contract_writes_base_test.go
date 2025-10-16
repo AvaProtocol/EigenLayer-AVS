@@ -57,11 +57,9 @@ func TestExecuteTask_SequentialContractWrites_Base(t *testing.T) {
 		t.Skipf("Test requires Base network connection (current chain ID: %d)", chainID.Int64())
 	}
 
-	// Get TEST_PRIVATE_KEY to derive the owner's EOA and smart wallet address
-	// (automatically loaded from .env file by testutil)
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 	if !ok {
-		t.Skip("TEST_PRIVATE_KEY not set, skipping real execution test")
+		t.Skip("Owner EOA address not set, skipping real execution test")
 	}
 	ownerAddress := *ownerAddr
 

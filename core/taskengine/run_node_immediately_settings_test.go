@@ -8,7 +8,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,9 +25,17 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 		aa.SetFactoryAddress(smartWalletConfig.FactoryAddress)
 
 		// Create test user (simulating authenticated user from JWT)
-		ownerEOA := common.HexToAddress("0xD7050816337a3f8f690F8083B5Ff8019D50c0E50")
-		runnerAddr := common.HexToAddress("0x5Df343de7d99fd64b2479189692C1dAb8f46184a")
+		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+		if !ok {
+			t.Skip("Owner EOA address not set, skipping settings validation test")
+		}
+		ownerEOA := *ownerAddr
 		factory := testutil.GetAggregatorConfig().SmartWallet.FactoryAddress
+
+		// Derive actual salt:0 smart wallet address
+		aa.SetFactoryAddress(factory)
+		runnerAddr, err := aa.GetSenderAddress(nil, ownerEOA, big.NewInt(0))
+		require.NoError(t, err, "Failed to derive smart wallet address")
 
 		// Create authenticated user model
 		user := &model.User{
@@ -38,7 +45,7 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 		// Seed wallet in DB for validation
 		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{
 			Owner:   &ownerEOA,
-			Address: &runnerAddr,
+			Address: runnerAddr,
 			Factory: &factory,
 			Salt:    big.NewInt(0),
 		})
@@ -122,7 +129,11 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 		engine := New(db, config, nil, testutil.GetLogger())
 
 		// Create test user
-		ownerEOA := common.HexToAddress("0xD7050816337a3f8f690F8083B5Ff8019D50c0E50")
+		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+		if !ok {
+			t.Skip("Owner EOA address not set, skipping settings validation test")
+		}
+		ownerEOA := *ownerAddr
 		user := &model.User{Address: ownerEOA}
 
 		nodeConfig := map[string]interface{}{
@@ -171,7 +182,11 @@ func TestContractWrite_WithSettingsAndUserAuth(t *testing.T) {
 		engine := New(db, config, nil, testutil.GetLogger())
 
 		// Create test user
-		ownerEOA := common.HexToAddress("0xD7050816337a3f8f690F8083B5Ff8019D50c0E50")
+		ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+		if !ok {
+			t.Skip("Owner EOA address not set, skipping settings validation test")
+		}
+		ownerEOA := *ownerAddr
 		user := &model.User{Address: ownerEOA}
 
 		nodeConfig := map[string]interface{}{

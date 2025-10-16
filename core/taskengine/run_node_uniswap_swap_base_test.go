@@ -58,14 +58,12 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 		t.Skipf("Test requires Base network connection (current chain ID: %d)", chainID.Int64())
 	}
 
-	// Get TEST_PRIVATE_KEY to derive the owner's EOA and smart wallet address
-	// (automatically loaded from .env file by testutil)
-	// Architecture: The smart wallet address is derived from the OWNER's EOA (TEST_PRIVATE_KEY)
+	// Architecture: The smart wallet address is derived from the OWNER's EOA address
 	// but the UserOperation is SIGNED by the CONTROLLER's private key (from config)
 	// This allows the controller to automate transactions on behalf of the owner's smart wallet
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 	if !ok {
-		t.Skip("TEST_PRIVATE_KEY not set, skipping real execution test")
+		t.Skip("Owner EOA address not set, skipping real execution test")
 	}
 	ownerAddress := *ownerAddr
 	controllerAddress := crypto.PubkeyToAddress(baseAggregatorCfg.SmartWallet.ControllerPrivateKey.PublicKey)

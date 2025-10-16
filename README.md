@@ -332,8 +332,8 @@ For integration tests that require interaction with blockchain networks, you nee
 #### Required Environment Variables
 
 ```bash
-# Test private key (must have funds on test networks)
-TEST_PRIVATE_KEY=your_test_private_key_here
+# Owner EOA wallet of testing smart wallets (must have funds on test networks)
+OWNER_EOA=
 
 # Test network endpoints  
 SEPOLIA_RPC=https://your-sepolia-rpc-endpoint
@@ -352,7 +352,7 @@ SEPOLIA_BUNDLER_RPC=https://your-sepolia-bundler-endpoint
 
 1. Generate a new private key for testing (or use an existing test key)
 2. Fund the corresponding address with testnet tokens (Sepolia ETH, test USDC, etc.)
-3. Set the `TEST_PRIVATE_KEY` environment variable or add it to your config
+3. Set the `OWNER_EOA` environment variable or add it to your config
 4. Ensure the key has sufficient balance for test transactions
 
 ## Troubleshooting

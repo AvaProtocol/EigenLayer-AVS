@@ -27,11 +27,9 @@ func TestExecuteTask_SequentialContractWrites_Sepolia(t *testing.T) {
 		t.Skip("Skipping real execution test in short mode")
 	}
 
-	// Get TEST_PRIVATE_KEY to derive the owner's EOA and smart wallet address
-	// (automatically loaded from .env file by testutil)
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 	if !ok {
-		t.Skip("TEST_PRIVATE_KEY not set, skipping real execution test")
+		t.Skip("Owner EOA address not set, skipping real execution test")
 	}
 	ownerAddress := *ownerAddr
 

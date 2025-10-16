@@ -15,9 +15,9 @@ This document explains how controller authorization works in the EigenLayer-AVS 
 
 ### Example Configuration
 
-- **Smart Wallet Owner**: `0x72D841F43241957b558097A5110A8Ed68c6fD88c` (from TEST_PRIVATE_KEY)
 - **Controller**: `0x3b6f68B9B4577A3D3085ead6Fcdc2951719ad2e1` (from ControllerPrivateKey config)
-- **Smart Wallet Address**: `0x981E18d5AadE83620A6Bd21990b5Da0c797e1e5b` (derived from owner + salt:0)
+- **Smart Wallet Owner**: 
+- **Smart Wallet Address**:
 
 ## How Controller Authorization Works
 
@@ -78,7 +78,7 @@ function validateUserOp(UserOperation userOp, bytes32 userOpHash, uint256) {
 
 ## Why This Works
 
-The controller (`0x3b6f68B9B4577A3D3085ead6Fcdc2951719ad2e1`) can sign UserOps for the smart wallet (`0x981E18d5AadE83620A6Bd21990b5Da0c797e1e5b`) because:
+The controller (`0x3b6f68B9B4577A3D3085ead6Fcdc2951719ad2e1`) can sign UserOps for the smart wallet because:
 
 1. **The smart wallet contract explicitly trusts the controller address**
 2. **The controller was registered/authorized during deployment**  

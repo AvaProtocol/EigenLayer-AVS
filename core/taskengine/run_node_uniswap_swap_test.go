@@ -49,8 +49,6 @@ func getSepoliaRPC(t *testing.T) string {
 // TestRunNodeImmediately_UniswapSwap tests the full approve + swap flow using runNodeImmediately
 // with real UserOp execution to debug the STF error
 //
-// NOTE: This test uses the actual workflow owner (0xc60e71bd...) and smart wallet (0x71c8f4D7...).
-// The TEST_PRIVATE_KEY is for a different owner (0x72D841...) and won't work with this wallet.
 // To run this test, you need the private key for 0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788.
 func TestRunNodeImmediately_UniswapSwap(t *testing.T) {
 	// Skip in short mode - this is a real transaction test
@@ -75,11 +73,11 @@ func TestRunNodeImmediately_UniswapSwap(t *testing.T) {
 		t.Skipf("Skipping Sepolia-only test (current chain ID: %d)", chainID.Int64())
 	}
 
-	// Get TEST_PRIVATE_KEY to derive the owner's EOA and smart wallet address
-	// (automatically loaded from .env file by testutil)
+	// Get owner EOA address from OWNER_EOA env var
+	// Controller key from config signs all UserOps - no private key needed
 	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
 	if !ok {
-		t.Skip("TEST_PRIVATE_KEY not set, skipping real execution test")
+		t.Skip("Owner EOA address not set, skipping real execution test")
 	}
 	ownerAddress := *ownerAddr
 
