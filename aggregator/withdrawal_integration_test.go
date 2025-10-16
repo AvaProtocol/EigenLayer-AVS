@@ -237,7 +237,10 @@ func TestWithdrawalWithCustomSmartWallet(t *testing.T) {
 
 // getTestSmartWalletConfig creates a test SmartWalletConfig similar to the existing pattern
 func getTestSmartWalletConfig() *config.SmartWalletConfig {
-	key := testutil.GetTestPrivateKey()
+	key := testutil.GetTestPrivateKeyFromEnv()
+	if key == "" {
+		panic("TEST_PRIVATE_KEY not set in environment. Please set it in .env file.")
+	}
 	var controllerPrivateKey *ecdsa.PrivateKey
 	var err error
 

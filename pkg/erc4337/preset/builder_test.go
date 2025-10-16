@@ -28,10 +28,11 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
-const dummyPaymasterAndDataHex = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-
 func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
-	key := testutil.GetTestPrivateKey()
+	key := testutil.GetTestPrivateKeyFromEnv()
+	if key == "" {
+		panic("TEST_PRIVATE_KEY not set in environment. Please set it in .env file.")
+	}
 	var controllerPrivateKey *ecdsa.PrivateKey
 	var err error
 

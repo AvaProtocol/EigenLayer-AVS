@@ -206,21 +206,8 @@ func GetTestTenderlyAccessKey() string {
 	return testConfig.TenderlyAccessKey
 }
 
-// GetTestPrivateKey returns the test private key from aggregator config
-// Panics if config is not loaded or TestPrivateKey is empty
-func GetTestPrivateKey() string {
-	if testConfig == nil {
-		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
-	}
-	if testConfig.TestPrivateKey == "" {
-		panic("TestPrivateKey is empty in aggregator-sepolia.yaml config")
-	}
-	return testConfig.TestPrivateKey
-}
-
 // GetTestPrivateKeyFromEnv returns TEST_PRIVATE_KEY from environment (auto-loaded from .env).
 // Returns empty string if not set. Tests should check the return value and skip if empty.
-// This is the preferred way to get TEST_PRIVATE_KEY for tests.
 func GetTestPrivateKeyFromEnv() string {
 	key := os.Getenv("TEST_PRIVATE_KEY")
 	// Remove 0x prefix if present
