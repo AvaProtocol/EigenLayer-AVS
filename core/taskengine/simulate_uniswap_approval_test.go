@@ -1,11 +1,15 @@
 package taskengine
 
 import (
+	"math/big"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -19,10 +23,40 @@ func TestUniswapApprovalAmountSimulation(t *testing.T) {
 
 	config := testutil.GetAggregatorConfig()
 	engine := New(db, config, nil, testutil.GetLogger())
-	user := testutil.TestUser1()
+
+	// Use OWNER_EOA approach instead of hardcoded TestUser1
+	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+	if !ok {
+		t.Skip("OWNER_EOA environment variable not set, skipping Uniswap approval test")
+	}
+	ownerAddress := *ownerAddr
+
+	// Derive smart wallet address from OWNER_EOA + salt:0
+	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
+	client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
+	require.NoError(t, err, "Failed to connect to RPC")
+	defer client.Close()
+
+	smartWalletAddr, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(0))
+	require.NoError(t, err, "Failed to derive smart wallet address")
+
+	// Create user with derived addresses
+	user := &model.User{
+		Address:             ownerAddress,
+		SmartAccountAddress: smartWalletAddr,
+	}
+
+	// Register the smart wallet in the database
+	err = StoreWallet(db, ownerAddress, &model.SmartWallet{
+		Owner:   &ownerAddress,
+		Address: smartWalletAddr,
+		Factory: &config.SmartWallet.FactoryAddress,
+		Salt:    big.NewInt(0),
+	})
+	require.NoError(t, err, "Failed to store wallet in database")
 
 	// Get smart wallet address for funding
-	smartWalletAddress := user.SmartAccountAddress.Hex()
+	smartWalletAddress := smartWalletAddr.Hex()
 	t.Logf("🏦 Smart Wallet Address for funding: %s", smartWalletAddress)
 	t.Logf("Please fund this address with:")
 	t.Logf("- USDC on Sepolia: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
@@ -340,10 +374,27 @@ func TestUniswapApprovalAmountSimulation(t *testing.T) {
 
 // TestUniswapApprovalAmountSimulation_PrintAddresses just prints the smart wallet address for manual funding
 func TestUniswapApprovalAmountSimulation_PrintAddresses(t *testing.T) {
-	user := testutil.TestUser1()
-	smartWalletAddress := user.SmartAccountAddress.Hex()
+	// Use OWNER_EOA approach instead of hardcoded TestUser1
+	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+	if !ok {
+		t.Skip("OWNER_EOA environment variable not set, skipping address printing")
+	}
+	ownerAddress := *ownerAddr
+
+	// Derive smart wallet address from OWNER_EOA + salt:0
+	config := testutil.GetAggregatorConfig()
+	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
+	client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
+	require.NoError(t, err, "Failed to connect to RPC")
+	defer client.Close()
+
+	smartWalletAddr, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(0))
+	require.NoError(t, err, "Failed to derive smart wallet address")
+
+	smartWalletAddress := smartWalletAddr.Hex()
 
 	t.Logf("=== FUNDING INFORMATION ===")
+	t.Logf("Owner EOA: %s", ownerAddress.Hex())
 	t.Logf("Smart Wallet Address: %s", smartWalletAddress)
 	t.Logf("Network: Sepolia")
 	t.Logf("USDC Contract: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")

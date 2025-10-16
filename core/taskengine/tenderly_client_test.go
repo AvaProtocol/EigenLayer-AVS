@@ -2339,6 +2339,13 @@ func TestEndToEndValuePropagation(t *testing.T) {
 
 		// Execute the node using the same flow as the aggregator
 		user := testutil.TestUser1()
+
+		// Use the derived smart wallet address instead of hardcoded address
+		smartWalletAddress := user.SmartAccountAddress.Hex()
+		inputVariables["settings"].(map[string]interface{})["runner"] = smartWalletAddress
+
+		t.Logf("   - Updated Runner: %s", smartWalletAddress)
+
 		result, err := engine.RunNodeImmediately(nodeType, nodeConfig, inputVariables, user)
 
 		// Check for smart wallet validation error
