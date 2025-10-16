@@ -5207,7 +5207,7 @@ func (x *RunNodeWithInputsReq) GetIsSimulated() bool {
 	if x != nil && x.IsSimulated != nil {
 		return *x.IsSimulated
 	}
-	return true
+	return false
 }
 
 // Response message for RunNodeWithInputs
