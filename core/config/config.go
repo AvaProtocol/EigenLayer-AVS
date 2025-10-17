@@ -45,7 +45,7 @@ const DefaultEntrypointAddressHex = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
 // controlled by us and deployed uniformly across supported chains. If the
 // aggregator config omits the smart_wallet.paymaster_address field, this
 // value will be used.
-const DefaultPaymasterAddressHex = "0xB985af5f96EF2722DC99aEBA573520903B86505e"
+const DefaultPaymasterAddressHex = "0xf023eA291F5bEDA4Bf59BbDC9004F1d18be19D6f"
 
 // Config contains all of the configuration information for a credible squaring aggregators and challengers.
 // Operators use a separate config. (see config-files/operator.anvil.yaml)
