@@ -15,9 +15,10 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// TestUniswapApprovalAmountSimulation tests whether Uniswap swap fails due to insufficient approval
-// and validates the theory that approval needs to be higher than the exact swap amount
-func TestUniswapApprovalAmountSimulation(t *testing.T) {
+// TestExecuteTask_UniswapApprovalAndSwap_DifferentApprovalAmounts_Sepolia tests whether Uniswap swap
+// success depends on approval amount by executing a real workflow with approve + swap steps.
+// This validates that approval must be HIGHER than swap amount (not equal) due to Uniswap fees.
+func TestExecuteTask_UniswapApprovalAndSwap_DifferentApprovalAmounts_Sepolia(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
@@ -370,35 +371,4 @@ func TestUniswapApprovalAmountSimulation(t *testing.T) {
 			t.Logf("✅ Test case '%s' completed", tc.name)
 		})
 	}
-}
-
-// TestUniswapApprovalAmountSimulation_PrintAddresses just prints the smart wallet address for manual funding
-func TestUniswapApprovalAmountSimulation_PrintAddresses(t *testing.T) {
-	// Use OWNER_EOA approach instead of hardcoded TestUser1
-	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
-	if !ok {
-		t.Skip("OWNER_EOA environment variable not set, skipping address printing")
-	}
-	ownerAddress := *ownerAddr
-
-	// Derive smart wallet address from OWNER_EOA + salt:0
-	config := testutil.GetAggregatorConfig()
-	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
-	client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
-	require.NoError(t, err, "Failed to connect to RPC")
-	defer client.Close()
-
-	smartWalletAddr, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(0))
-	require.NoError(t, err, "Failed to derive smart wallet address")
-
-	smartWalletAddress := smartWalletAddr.Hex()
-
-	t.Logf("=== FUNDING INFORMATION ===")
-	t.Logf("Owner EOA: %s", ownerAddress.Hex())
-	t.Logf("Smart Wallet Address: %s", smartWalletAddress)
-	t.Logf("Network: Sepolia")
-	t.Logf("USDC Contract: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238")
-	t.Logf("WETH Contract: 0xfff9976782d46cc05630d1f6ebab18b2324d6b14")
-	t.Logf("Fund the smart wallet with at least 15 USDC before running the main test")
-	t.Logf("==========================")
 }

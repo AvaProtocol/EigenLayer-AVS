@@ -9,12 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -2256,22 +2259,54 @@ func TestContractWriteWithValueParameter(t *testing.T) {
 	})
 }
 
-func TestEndToEndValuePropagation(t *testing.T) {
-	// End-to-end test that validates the complete flow from client request to Tenderly simulation
-	// This test reproduces the exact scenario from the user's logs
+func TestContractWrite_WETHDeposit_WithETHValue_Sepolia(t *testing.T) {
+	// Tests that ETH value is correctly passed through ContractWrite to WETH deposit() on Sepolia
+	// This validates the complete flow: nodeConfig.value -> VM -> ContractWriteProcessor -> Tenderly simulation
+	//
+	// Test Requirements on Sepolia:
+	// - Smart wallet must have ~0.15 ETH (0.1 ETH for deposit + gas)
+	// - Uses OWNER_EOA with salt:0 derivation for smart wallet
 
-	t.Run("WETH_Deposit_E2E_Value_Propagation", func(t *testing.T) {
+	t.Run("WETH_Deposit_With_Point1_ETH_Value", func(t *testing.T) {
+		// Get owner EOA and derive smart wallet address
+		ownerEOA, hasOwner := testutil.MustGetTestOwnerAddress()
+		if !hasOwner {
+			t.Skip("Skipping test - OWNER_EOA environment variable not set")
+		}
+
 		logger := testutil.GetLogger()
 
-		// Create a test engine (similar to the aggregator)
+		// Create a test engine
 		db := testutil.TestMustDB()
 		config := testutil.GetAggregatorConfig()
 		engine := New(db, config, nil, logger)
 
-		// Simulate the exact request from the client logs
+		// Derive smart wallet address using salt:0
+		ethRPC := testutil.GetTestRPCURL()
+		ethClient, err := ethclient.Dial(ethRPC)
+		require.NoError(t, err, "Failed to connect to Sepolia RPC")
+		defer ethClient.Close()
+
+		smartWalletAddress, err := aa.GetSenderAddress(ethClient, *ownerEOA, big.NewInt(0))
+		require.NoError(t, err, "Failed to derive smart wallet address")
+
+		t.Logf("📋 Test Configuration:")
+		t.Logf("   - Owner EOA: %s", ownerEOA.Hex())
+		t.Logf("   - Smart Wallet (salt:0): %s", smartWalletAddress.Hex())
+		t.Logf("   - Network: Sepolia (chain_id: 11155111)")
+		t.Logf("   - Required Balance: ~0.15 ETH (0.1 ETH deposit + gas)")
+		t.Logf("   - Smart wallet contract will be auto-created on first transaction")
+
+		// Create user object
+		user := &model.User{
+			Address:             *ownerEOA,
+			SmartAccountAddress: smartWalletAddress,
+		}
+
+		// Configure WETH deposit with 0.1 ETH value
 		nodeType := "contractWrite"
 		nodeConfig := map[string]interface{}{
-			"contractAddress": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+			"contractAddress": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14", // WETH on Sepolia
 			"contractAbi": []interface{}{
 				map[string]interface{}{
 					"constant":        false,
@@ -2298,116 +2333,62 @@ func TestEndToEndValuePropagation(t *testing.T) {
 					"methodParams": []interface{}{},
 				},
 			},
-			"value":    "100000000000000000", // 0.1 ETH - This was missing before!
+			"value":    "100000000000000000", // 0.1 ETH in wei
 			"gasLimit": "210000",
 		}
 
 		inputVariables := map[string]interface{}{
 			"settings": map[string]interface{}{
-				"runner":   "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"runner":   smartWalletAddress.Hex(),
 				"chain_id": 11155111,
-			},
-			"oracle1": map[string]interface{}{
-				"data": map[string]interface{}{
-					"decimals": "8",
-					"latestRoundData": map[string]interface{}{
-						"answer":          "4425.33831",
-						"answeredInRound": "18446744073709577131",
-						"roundId":         "18446744073709577131",
-						"startedAt":       "1755278832",
-						"updatedAt":       "1755278832",
-					},
-				},
 			},
 		}
 
-		t.Logf("🧪 Testing End-to-End Value Propagation")
-		t.Logf("   - Node Type: %s", nodeType)
-		t.Logf("   - Contract: %s", nodeConfig["contractAddress"])
-		t.Logf("   - Value: %s wei (0.1 ETH)", nodeConfig["value"])
-		t.Logf("   - Runner: %s", inputVariables["settings"].(map[string]interface{})["runner"])
+		t.Logf("🧪 Testing WETH deposit with ETH value parameter")
+		t.Logf("   - Contract: WETH %s", nodeConfig["contractAddress"])
+		t.Logf("   - Method: deposit()")
+		t.Logf("   - Value: 0.1 ETH (%s wei)", nodeConfig["value"])
 
 		// Skip if no Tenderly API key
 		testConfig := testutil.GetTestConfig()
 		if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
-			t.Logf("⏭️  Skipping E2E test - Tenderly credentials must be set in config/aggregator.yaml")
+			t.Logf("⏭️  Skipping test - Tenderly credentials must be set in config/aggregator.yaml")
 			t.Logf("✅ Configuration includes value field: %s", nodeConfig["value"])
 			t.Logf("✅ This would be passed through to Tenderly simulation")
 			t.Logf("✅ Expected result: WETH Deposit event with wad=%s", nodeConfig["value"])
 			return
 		}
 
-		// Execute the node using the same flow as the aggregator
-		user := testutil.TestUser1()
-
-		// Use the derived smart wallet address instead of hardcoded address
-		smartWalletAddress := user.SmartAccountAddress.Hex()
-		inputVariables["settings"].(map[string]interface{})["runner"] = smartWalletAddress
-
-		t.Logf("   - Updated Runner: %s", smartWalletAddress)
-
 		result, err := engine.RunNodeImmediately(nodeType, nodeConfig, inputVariables, user)
-
-		// Check for smart wallet validation error
-		// Note: The runner address (0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e) should be the salt:0
-		// derivation of the EOA (0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788) on Sepolia chain.
-		// This validation failure suggests a test environment configuration issue.
-		if err != nil && strings.Contains(err.Error(), "does not match any existing smart wallet for owner") {
-			t.Skipf("⏭️  Skipping E2E test - smart wallet validation failed in test environment. "+
-				"Runner should be salt:0 derivation of EOA on Sepolia (chain_id: %v). "+
-				"This appears to be a test environment configuration issue, not a code issue.",
-				inputVariables["settings"].(map[string]interface{})["chain_id"])
-			return
-		}
 
 		// The execution should succeed
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		// Check if we have success result
-		if success, ok := result["success"].(bool); ok && success {
-			t.Logf("✅ Contract write execution succeeded")
+		// Verify successful execution
+		success, ok := result["success"].(bool)
+		assert.True(t, ok, "Result should have success field")
+		assert.True(t, success, "Contract write should succeed")
 
-			// Check if we have the deposit event data
-			if data, ok := result["data"].(map[string]interface{}); ok {
-				if deposit, ok := data["deposit"].(map[string]interface{}); ok {
-					if wad, ok := deposit["wad"].(string); ok {
-						t.Logf("📊 WETH Deposit Event Result:")
-						t.Logf("   - dst: %s", deposit["dst"])
-						t.Logf("   - wad: %s", wad)
+		// Verify WETH Deposit event data
+		data, ok := result["data"].(map[string]interface{})
+		assert.True(t, ok, "Result should have data field")
 
-						// This is the key test - wad should equal our input value
-						if wad == nodeConfig["value"] {
-							t.Logf("🎉 SUCCESS: wad matches input value!")
-							t.Logf("   - Expected: %s", nodeConfig["value"])
-							t.Logf("   - Actual: %s", wad)
-						} else if wad == "0" {
-							t.Logf("❌ ISSUE: wad is still 0, value not propagated")
-							t.Logf("   - Expected: %s", nodeConfig["value"])
-							t.Logf("   - Actual: %s", wad)
-							t.Fail()
-						} else {
-							t.Logf("⚠️  UNEXPECTED: wad has different value")
-							t.Logf("   - Expected: %s", nodeConfig["value"])
-							t.Logf("   - Actual: %s", wad)
-						}
-					}
-				}
-			}
-		} else {
-			t.Logf("❌ Contract write execution failed")
-			if errorMsg, ok := result["error"].(string); ok {
-				t.Logf("   Error: %s", errorMsg)
-			}
-		}
+		deposit, ok := data["deposit"].(map[string]interface{})
+		assert.True(t, ok, "Data should contain deposit event")
 
-		t.Logf("\n🎯 END-TO-END TEST SUMMARY:")
-		t.Logf("   This test validates the complete flow:")
-		t.Logf("   1. Client sends nodeConfig with value field")
-		t.Logf("   2. RunNodeImmediately stores nodeConfig in VM variables")
-		t.Logf("   3. ContractWriteProcessor extracts value from VM variables")
-		t.Logf("   4. SimulateContractWrite receives and uses the value parameter")
-		t.Logf("   5. Tenderly simulation uses the correct ETH value")
-		t.Logf("   6. WETH Deposit event emits correct wad amount")
+		// Key assertion: wad should equal the value we sent (0.1 ETH)
+		wad, ok := deposit["wad"].(string)
+		assert.True(t, ok, "Deposit event should have wad field")
+		assert.Equal(t, nodeConfig["value"], wad, "WETH deposit amount should match ETH value sent")
+
+		dst, ok := deposit["dst"].(string)
+		assert.True(t, ok, "Deposit event should have dst field")
+		assert.Equal(t, strings.ToLower(smartWalletAddress.Hex()), strings.ToLower(dst), "Deposit recipient should be smart wallet")
+
+		t.Logf("✅ Test passed: ETH value correctly propagated to WETH deposit")
+		t.Logf("   - Sent: 0.1 ETH (%s wei)", nodeConfig["value"])
+		t.Logf("   - Received WETH: %s wei", wad)
+		t.Logf("   - Recipient: %s", dst)
 	})
 }
