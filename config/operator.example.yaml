@@ -1,0 +1,76 @@
+# Comprehensive Operator Configuration
+# This file consolidates all available configuration options with examples and comments
+
+# Environment and logging
+# Sets the log level and Sentry environment: "development" (debug logs) or "production" (info logs)
+# Note: Old configs using "production: true/false" are still supported for backward compatibility
+environment: development
+
+# Replace with your operator address
+operator_address: 0x997E5D40a32c44a3D93E59fC55C4Fd20b7d2d49D
+
+# AVS contract addresses - Update these based on your deployment target
+# For Sepolia testnet:
+avs_registry_coordinator_address: 0xcA95381802FD1398d5BF2D01243210cFb3a2b3BD
+operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
+
+# Main RPC endpoints for AVS operations
+# For Sepolia:
+eth_rpc_url: https://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY
+eth_ws_url: wss://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY
+
+# Key store paths
+# If you running this using eigenlayer CLI and the provided AVS packaging structure,
+# this should be /operator_keys/ecdsa_key.json as the host path will be asked while running
+#
+# If you are running locally using go run main.go, this should be full path to your local ecdsa key file
+ecdsa_private_key_store_path: /Users/mikasa/Code/EigenLayer-AVS/keys/vinh.ecdsa.key.json
+
+# BLS key configuration
+# If you running this using eigenlayer CLI and the provided AVS packaging structure,
+# this should be /operator_keys/bls_key.json as the host path will be asked while running
+#
+# We are using bn254 curve for bls keys
+#
+# If you are running locally using go run main.go, this should be full path to your local bls key file
+bls_private_key_store_path: /Users/mikasa/Code/EigenLayer-AVS/keys/vinh.bls.key.json
+
+# When setting remote signer, we can skip bls_private_key_store_path
+# bls_remote_signer:
+#   grpc_url: "127.0.0.1:50051"
+#   public_key: "a2e8430e4c3932f33260b4346ab9845ce6192c5ca6472f3a481eaaa02d066d0a"
+#   password: ""
+
+# Aggregator server configuration
+# Address which the aggregator listens on for operator signed messages
+aggregator_server_ip_port_address: "127.0.0.1:2206"
+# Alternative for production:
+# aggregator_server_ip_port_address: "aggregator-holesky.avaprotocol.org:2206"
+
+# AVS node spec compliance https://eigen.nethermind.io/docs/spec/intro
+eigen_metrics_ip_port_address: localhost:9090
+enable_metrics: true
+node_api_ip_port_address: localhost:9010
+enable_node_api: true
+
+# Optional: Database storage path (not currently used by operator)
+db_path: /tmp/ap-avs-operator
+
+# Optional: Error reporting (Sentry)
+# sentry_dsn: https://PUBLIC_KEY@oORG_ID.ingest.us.sentry.io/PROJECT_ID
+# server_name: operator-sepolia-1
+
+# Destination chain configuration - where the tasks run
+# Replace with your actual target chain endpoints
+target_chain:
+  # For Sepolia:
+  eth_rpc_url: https://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY
+  eth_ws_url: wss://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY
+
+# Feature toggles
+enabled_features:
+  # Event trigger requires a dedicated RPC node with websocket to listen to all on-chain events.
+  # Depending on your RPC provider, this may require significant billing so we disable by default
+  event_trigger: true
+  # For production or cost-conscious setups, set to false:
+  # event_trigger: false

@@ -64,8 +64,10 @@ import (
 const AVS_NAME = "ap-avs"
 
 type OperatorConfig struct {
-	// used to set the logger level (true = info, false = debug)
-	Production                    bool   `yaml:"production"`
+	// Sets the log level and Sentry environment: "development" (debug logs) or "production" (info logs)
+	Environment sdklogging.LogLevel `yaml:"environment"`
+	// Deprecated: Use Environment instead. Kept for backward compatibility with old configs
+	Production                    *bool  `yaml:"production,omitempty"`
 	OperatorAddress               string `yaml:"operator_address"`
 	OperatorStateRetrieverAddress string `yaml:"operator_state_retriever_address"`
 	AVSRegistryCoordinatorAddress string `yaml:"avs_registry_coordinator_address"`
@@ -246,12 +248,22 @@ func NewOperatorFromConfigFile(configPath string) (*Operator, error) {
 func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 	elapsing := timekeeper.NewElapsing()
 
-	var logLevel logging.LogLevel
-	if c.Production {
-		logLevel = sdklogging.Production
-	} else {
-		logLevel = sdklogging.Development
+	// Backward compatibility: Handle old 'production' boolean field
+	// Priority: Environment > Production > default to "production"
+	logLevel := c.Environment
+	if logLevel == "" {
+		if c.Production != nil {
+			if *c.Production {
+				logLevel = sdklogging.Production
+			} else {
+				logLevel = sdklogging.Development
+			}
+		} else {
+			// Default to production for safety if neither is set
+			logLevel = sdklogging.Production
+		}
 	}
+
 	logger, err := sdklogging.NewZapLogger(logLevel)
 	if err != nil {
 		return nil, err
@@ -259,10 +271,7 @@ func NewOperatorFromConfig(c OperatorConfig) (*Operator, error) {
 
 	// Initialize Sentry if DSN provided
 	if c.SentryDsn != "" {
-		env := "development"
-		if c.Production {
-			env = "production"
-		}
+		env := string(logLevel)
 		serverName := c.OperatorAddress
 		if c.ServerName != "" {
 			serverName = c.ServerName

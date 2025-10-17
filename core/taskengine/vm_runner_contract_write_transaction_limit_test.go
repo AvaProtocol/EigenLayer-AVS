@@ -1,6 +1,8 @@
 package taskengine
 
 import (
+	"math/big"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
@@ -16,6 +18,8 @@ func mockSendUserOp(
 	owner common.Address,
 	callData []byte,
 	paymasterReq *preset.VerifyingPaymasterRequest,
+	senderOverride *common.Address,
+	paymasterNonceOverride *big.Int,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	capturedPaymasterRequest = paymasterReq
 	return &userop.UserOperation{}, &types.Receipt{}, nil
@@ -39,7 +43,12 @@ func TestTransactionSponsorshipLimit(t *testing.T) {
 		{"Whitelisted address with 20 transactions", 20, true, true},
 	}
 
-	owner := common.HexToAddress("0xe272b72E51a5bF8cB720fc6D6DF164a4D5E321C5")
+	// Get owner EOA address from environment
+	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+	if !ok {
+		t.Skip("Owner EOA address not set, skipping transaction limit test")
+	}
+	owner := *ownerAddr
 	smartWalletConfig := testutil.GetBaseTestSmartWalletConfig()
 
 	contractAddress := common.HexToAddress("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238") // Sepolia USDC

@@ -105,13 +105,13 @@ ifndef RUN_ID
 endif
 	@gh run view $(RUN_ID) --log | grep "FAIL:" | sed -E 's/^.*([ ]{4}--- FAIL:|--- FAIL:)/\1/'
 
-## build: build the application
-.PHONY: build
-build:
+## build-prod: build the application for production
+.PHONY: build-prod
+build-prod:
 	go build -ldflags="-X 'github.com/AvaProtocol/EigenLayer-AVS/version.semver=dev' -X 'github.com/AvaProtocol/EigenLayer-AVS/version.revision=dev'" -o=/tmp/bin/${BINARY_NAME} ${MAIN_PACKAGE_PATH}
 
 .PHONY: run
-run: build
+run: build-prod
 	/tmp/bin/${BINARY_NAME}
 
 
@@ -157,24 +157,71 @@ unstable-build:
 .PHONY: dev-live
 dev-live:
 	go run github.com/air-verse/air@v1.61.1 \
-		--build.cmd "make dev-build" --build.bin "./out/${BINARY_NAME}" --build.args_bin "aggregator" --build.delay "100" \
+		--build.cmd "make build" --build.bin "./out/${BINARY_NAME}" --build.args_bin "aggregator" --build.delay "100" \
 		--build.exclude_dir "certs,client-sdk,contracts,examples,out,docs,tmp, migrations" \
 		--build.include_ext "go, tpl, tmpl, html, css, scss, js, ts, sql, jpeg, jpg, gif, png, bmp, svg, webp, ico" \
 		--misc.clean_on_exit "true"
 
-## dev-build: build a dev version for local development
-dev-build:
+## build: build the application for local development
+.PHONY: build
+build:
 	mkdir out || true
 	go build \
 		-o ./out/ap \
     	-ldflags "-X github.com/AvaProtocol/EigenLayer-AVS/version.revision=$(shell  git rev-parse HEAD)"
 
-## dev-agg: run aggregator locally with dev build
-dev-agg:dev-build
-	./out/ap aggregator --config=config/aggregator.yaml
-## dev-agg: run operator locally with dev build
-dev-op:
+## aggregator: show usage for aggregator commands
+.PHONY: aggregator aggregator-sepolia aggregator-ethereum aggregator-base aggregator-base-sepolia
+aggregator:
+	@echo "Usage: make aggregator-<chain>"
+	@echo ""
+	@echo "Available commands:"
+	@echo "  make aggregator-sepolia        - Start aggregator with Sepolia config"
+	@echo "  make aggregator-ethereum       - Start aggregator with Ethereum config"
+	@echo "  make aggregator-base           - Start aggregator with Base config"
+	@echo "  make aggregator-base-sepolia   - Start aggregator with Base Sepolia config"
+aggregator-sepolia: build
+	@echo "🚀 Starting aggregator with Sepolia configuration..."
+	./out/ap aggregator --config=config/aggregator-sepolia.yaml
+
+aggregator-ethereum: build
+	@echo "🚀 Starting aggregator with Ethereum configuration..."
+	./out/ap aggregator --config=config/aggregator-ethereum.yaml
+
+aggregator-base: build
+	@echo "🚀 Starting aggregator with Base configuration..."
+	./out/ap aggregator --config=config/aggregator-base.yaml
+
+aggregator-base-sepolia: build
+	@echo "🚀 Starting aggregator with Base Sepolia configuration..."
+	./out/ap aggregator --config=config/aggregator-base-sepolia.yaml
+## operator: show usage for operator commands
+.PHONY: operator operator-sepolia operator-ethereum operator-base
+operator:
+	@echo "Usage: make operator-<chain>"
+	@echo ""
+	@echo "Available commands:"
+	@echo "  make operator-sepolia          - Start operator with Sepolia config"
+	@echo "  make operator-ethereum         - Start operator with Ethereum config"
+	@echo "  make operator-base             - Start operator with Base config"
+	@echo "  make operator-default          - Start operator with default config"
+
+operator-sepolia: build
+	@echo "🔧 Starting operator with Sepolia configuration..."
+	./out/ap operator --config=config/operator-sepolia.yaml
+
+operator-ethereum: build
+	@echo "🔧 Starting operator with Ethereum configuration..."
+	./out/ap operator --config=config/operator-ethereum.yaml
+
+operator-base: build
+	@echo "🔧 Starting operator with Base configuration..."
+	./out/ap operator --config=config/operator-base.yaml
+
+operator-default: build
+	@echo "🔧 Starting operator with default configuration..."
 	./out/ap operator --config=config/operator.yaml
+
 
 ## dev-clean: cleanup storage data
 dev-clean:

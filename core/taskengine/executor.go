@@ -203,6 +203,28 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		return nil, err
 	}
 
+	// Check for paymaster override in settings (inputVariables.settings.shouldUsePaymaster)
+	// This allows tests and workflows to explicitly control paymaster usage
+	if triggerReason != nil && triggerReason.Output != nil {
+		if outputData, ok := triggerReason.Output.(*avsproto.ManualTrigger_Output); ok && outputData.Data != nil {
+			dataInterface := outputData.Data.AsInterface()
+			if dataMap, ok := dataInterface.(map[string]interface{}); ok {
+				if settingsIface, hasSettings := dataMap["settings"]; hasSettings {
+					if settings, isMap := settingsIface.(map[string]interface{}); isMap {
+						if shouldUsePaymasterIface, hasOverride := settings["shouldUsePaymaster"]; hasOverride {
+							if shouldUsePaymaster, isBool := shouldUsePaymasterIface.(bool); isBool {
+								vm.shouldUsePaymasterOverride = &shouldUsePaymaster
+								x.logger.Info("Deployed workflow: Using paymaster override from settings",
+									"shouldUsePaymaster", shouldUsePaymaster,
+									"task_id", task.Id)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Add chain name to workflowContext - extract chainId from enriched event data first, fallback to tokenEnrichmentService
 	var chainId uint64
 	var chainIdSource string

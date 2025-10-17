@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -102,9 +101,6 @@ type Config struct {
 
 	// Moralis Web3 Data API key for token price lookup (optional)
 	MoralisApiKey string `yaml:"moralis_api_key"`
-
-	// Test private key for Go tests (optional)
-	TestPrivateKey string
 
 	// Fee rates configuration for task execution pricing
 	FeeRates *FeeRatesConfig
@@ -209,9 +205,6 @@ type ConfigRaw struct {
 	// Moralis Web3 Data API key for token price lookup (optional)
 	MoralisApiKey string `yaml:"moralis_api_key"`
 
-	// Test private key for Go tests (optional)
-	TestPrivateKey string `yaml:"test_private_key"`
-
 	// Fee rates configuration for task execution pricing
 	FeeRates struct {
 		// Base fees (one-time per workflow)
@@ -277,16 +270,24 @@ func NewConfig(configFilePath string) (*Config, error) {
 		}
 	}
 
-	ethWsClient, err := eth.NewInstrumentedClient(configRaw.EthWsUrl, rpcCallsCollector)
-	if err != nil {
-		// In CI environment, gracefully handle WebSocket connection failures
-		if os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
-			logger.Warnf("WebSocket client connection failed in CI environment, setting to nil: %v", err)
-			ethWsClient = nil
-		} else {
-			logger.Errorf("Cannot create ws ethclient", "err", err)
-			return nil, err
+	// Only create WebSocket client if URL is provided
+	var ethWsClient *eth.InstrumentedClient
+	if configRaw.EthWsUrl != "" {
+		ethWsClient, err = eth.NewInstrumentedClient(configRaw.EthWsUrl, rpcCallsCollector)
+		if err != nil {
+			// In CI environment or when URL is empty, gracefully handle WebSocket connection failures
+			if os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+				logger.Warnf("WebSocket client connection failed in CI environment, setting to nil: %v", err)
+				ethWsClient = nil
+			} else {
+				// For local development, log warning but continue without WebSocket
+				logger.Warnf("Cannot create ws ethclient (will continue without WebSocket support)", "err", err)
+				ethWsClient = nil
+			}
 		}
+	} else {
+		logger.Info("No WebSocket URL configured, WebSocket client will be nil")
+		ethWsClient = nil
 	}
 
 	ecdsaPrivateKeyString := configRaw.EcdsaPrivateKey
@@ -423,9 +424,6 @@ func NewConfig(configFilePath string) (*Config, error) {
 		// Pass through Moralis API key (from YAML or environment variable)
 		MoralisApiKey: firstNonEmpty(configRaw.MoralisApiKey, os.Getenv("MORALIS_API_KEY")),
 
-		// Pass through test private key (if provided in YAML)
-		TestPrivateKey: configRaw.TestPrivateKey,
-
 		// Initialize fee rates - use defaults if no YAML config provided
 		FeeRates: loadFeeRatesFromConfig(configRaw.FeeRates),
 	}
@@ -460,7 +458,7 @@ func firstNonEmpty(values ...string) string {
 
 func ReadYamlConfig(path string, o interface{}) error {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		log.Fatal("Path ", path, " does not exist")
+		return fmt.Errorf("path %s does not exist", path)
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -469,7 +467,7 @@ func ReadYamlConfig(path string, o interface{}) error {
 
 	err = yaml.Unmarshal(b, o)
 	if err != nil {
-		log.Fatalf("unable to parse file with error %#v", err)
+		return fmt.Errorf("unable to parse file with error %#v", err)
 	}
 
 	return nil

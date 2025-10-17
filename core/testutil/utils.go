@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -24,15 +25,81 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+const (
+	// DefaultConfigPath is the default aggregator config path for tests (replaces old aggregator.yaml)
+	DefaultConfigPath = "aggregator-sepolia.yaml"
+)
+
 var testConfig *config.Config
 
-// init loads test configuration from the default config path.
+// LoadDotEnv loads environment variables from .env file in the repository root.
+// This allows tests to access OWNER_EOA and other secrets from .env
+func LoadDotEnv() error {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		return fmt.Errorf("failed to get caller information")
+	}
+
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))
+	envPath := filepath.Join(repoRoot, ".env")
+
+	// Check if .env file exists
+	if _, err := os.Stat(envPath); os.IsNotExist(err) {
+		// .env file doesn't exist, skip silently (tests may use env vars from other sources)
+		return nil
+	}
+
+	// Read .env file
+	file, err := os.Open(envPath)
+	if err != nil {
+		return fmt.Errorf("failed to open .env file: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Parse KEY=VALUE
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		// Remove quotes if present
+		value = strings.Trim(value, `"'`)
+
+		// Only set if not already set in environment (env vars take precedence)
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading .env file: %w", err)
+	}
+
+	return nil
+}
+
+// init loads environment variables from .env file and test configuration.
 // When commands use a non-default path via --config flag, testConfig will be nil
 // and the test utility functions will panic if testConfig is not loaded.
 func init() {
+	// Load .env file first (if it exists)
+	_ = LoadDotEnv()
+
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))
-		configPath := filepath.Join(repoRoot, "config", "aggregator.yaml")
+		configPath := filepath.Join(repoRoot, "config", DefaultConfigPath)
 
 		var err error
 		testConfig, err = config.NewConfig(configPath)
@@ -41,6 +108,18 @@ func init() {
 			testConfig = nil
 		}
 	}
+}
+
+// GetConfigPath returns the absolute path to a config file from the repo root.
+// This is useful for tests that need to load config files explicitly.
+// Example: GetConfigPath(testutil.DefaultConfigPath) or GetConfigPath("aggregator-base.yaml")
+func GetConfigPath(configFileName string) string {
+	if _, thisFile, _, ok := runtime.Caller(0); ok {
+		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))
+		return filepath.Join(repoRoot, "config", configFileName)
+	}
+	// Fallback to relative path if caller info not available
+	return filepath.Join("../../config", configFileName)
 }
 
 // GetTestConfig returns the loaded test configuration
@@ -52,10 +131,10 @@ func GetTestConfig() *config.Config {
 // Panics if config is not loaded or EthHttpRpcUrl is empty
 func GetTestRPC() string {
 	if testConfig == nil {
-		panic("testConfig is nil - aggregator.yaml config must be loaded")
+		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
 	if testConfig.EthHttpRpcUrl == "" {
-		panic("EthHttpRpcUrl is empty in aggregator.yaml config")
+		panic("EthHttpRpcUrl is empty in aggregator-sepolia.yaml config")
 	}
 	return testConfig.EthHttpRpcUrl
 }
@@ -64,7 +143,7 @@ func GetTestRPC() string {
 // Panics if config is not loaded or EthWsRpcUrl is empty
 func GetTestWsRPC() string {
 	if testConfig == nil {
-		panic("testConfig is nil - aggregator.yaml config must be loaded")
+		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
 	if testConfig.EthWsRpcUrl != "" {
 		return testConfig.EthWsRpcUrl
@@ -73,20 +152,20 @@ func GetTestWsRPC() string {
 	if http := GetTestRPC(); strings.HasPrefix(http, "https://") {
 		return strings.Replace(http, "https://", "wss://", 1)
 	}
-	panic("EthWsRpcUrl is empty in aggregator.yaml config and cannot derive from EthHttpRpcUrl")
+	panic("EthWsRpcUrl is empty in aggregator-sepolia.yaml config and cannot derive from EthHttpRpcUrl")
 }
 
 // GetTestBundlerRPC returns the bundler RPC URL for tests from aggregator config
 // Panics if config is not loaded or BundlerURL is empty
 func GetTestBundlerRPC() string {
 	if testConfig == nil {
-		panic("testConfig is nil - aggregator.yaml config must be loaded")
+		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
 	if testConfig.SmartWallet == nil {
-		panic("SmartWallet config is nil in aggregator.yaml")
+		panic("SmartWallet config is nil in aggregator-sepolia.yaml")
 	}
 	if testConfig.SmartWallet.BundlerURL == "" {
-		panic("BundlerURL is empty in aggregator.yaml config")
+		panic("BundlerURL is empty in aggregator-sepolia.yaml config")
 	}
 	return testConfig.SmartWallet.BundlerURL
 }
@@ -95,10 +174,10 @@ func GetTestBundlerRPC() string {
 // Panics if config is not loaded or TenderlyAccount is empty
 func GetTestTenderlyAccount() string {
 	if testConfig == nil {
-		panic("testConfig is nil - aggregator.yaml config must be loaded")
+		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
 	if testConfig.TenderlyAccount == "" {
-		panic("TenderlyAccount is empty in aggregator.yaml config")
+		panic("TenderlyAccount is empty in aggregator-sepolia.yaml config")
 	}
 	return testConfig.TenderlyAccount
 }
@@ -107,10 +186,10 @@ func GetTestTenderlyAccount() string {
 // Panics if config is not loaded or TenderlyProject is empty
 func GetTestTenderlyProject() string {
 	if testConfig == nil {
-		panic("testConfig is nil - aggregator.yaml config must be loaded")
+		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
 	if testConfig.TenderlyProject == "" {
-		panic("TenderlyProject is empty in aggregator.yaml config")
+		panic("TenderlyProject is empty in aggregator-sepolia.yaml config")
 	}
 	return testConfig.TenderlyProject
 }
@@ -119,37 +198,43 @@ func GetTestTenderlyProject() string {
 // Panics if config is not loaded or TenderlyAccessKey is empty
 func GetTestTenderlyAccessKey() string {
 	if testConfig == nil {
-		panic("testConfig is nil - aggregator.yaml config must be loaded")
+		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
 	if testConfig.TenderlyAccessKey == "" {
-		panic("TenderlyAccessKey is empty in aggregator.yaml config")
+		panic("TenderlyAccessKey is empty in aggregator-sepolia.yaml config")
 	}
 	return testConfig.TenderlyAccessKey
 }
 
-// GetTestPrivateKey returns the test private key from aggregator config
-// Panics if config is not loaded or TestPrivateKey is empty
-func GetTestPrivateKey() string {
-	if testConfig == nil {
-		panic("testConfig is nil - aggregator.yaml config must be loaded")
+// MustGetTestOwnerAddress returns the owner EOA address for tests from OWNER_EOA env var.
+// Returns nil and false if OWNER_EOA is not set (test should skip).
+// Returns address and true if successful.
+// Panics if OWNER_EOA is set but invalid.
+func MustGetTestOwnerAddress() (*common.Address, bool) {
+	ownerEOAHex := os.Getenv("OWNER_EOA")
+	if ownerEOAHex == "" {
+		return nil, false
 	}
-	if testConfig.TestPrivateKey == "" {
-		panic("TestPrivateKey is empty in aggregator.yaml config")
+
+	if !common.IsHexAddress(ownerEOAHex) {
+		panic(fmt.Sprintf("OWNER_EOA is not a valid hex address: %s", ownerEOAHex))
 	}
-	return testConfig.TestPrivateKey
+
+	address := common.HexToAddress(ownerEOAHex)
+	return &address, true
 }
 
 // GetTestControllerPrivateKey returns the controller private key for tests from aggregator config
 // Panics if config is not loaded or SmartWallet is nil or ControllerPrivateKey is nil
 func GetTestControllerPrivateKey() string {
 	if testConfig == nil {
-		panic("testConfig is nil - aggregator.yaml config must be loaded")
+		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
 	if testConfig.SmartWallet == nil {
-		panic("SmartWallet config is nil in aggregator.yaml")
+		panic("SmartWallet config is nil in aggregator-sepolia.yaml")
 	}
 	if testConfig.SmartWallet.ControllerPrivateKey == nil {
-		panic("ControllerPrivateKey is nil in aggregator.yaml config")
+		panic("ControllerPrivateKey is nil in aggregator-sepolia.yaml config")
 	}
 	return fmt.Sprintf("%x", testConfig.SmartWallet.ControllerPrivateKey.D)
 }
@@ -158,10 +243,10 @@ func GetTestControllerPrivateKey() string {
 // Panics if config is not loaded or SmartWallet is nil
 func GetTestFactoryAddress() string {
 	if testConfig == nil {
-		panic("testConfig is nil - aggregator.yaml config must be loaded")
+		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
 	if testConfig.SmartWallet == nil {
-		panic("SmartWallet config is nil in aggregator.yaml")
+		panic("SmartWallet config is nil in aggregator-sepolia.yaml")
 	}
 	return testConfig.SmartWallet.FactoryAddress.Hex()
 }
@@ -170,10 +255,10 @@ func GetTestFactoryAddress() string {
 // Panics if config is not loaded or SmartWallet is nil
 func GetTestEntrypointAddress() string {
 	if testConfig == nil {
-		panic("testConfig is nil - aggregator.yaml config must be loaded")
+		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
 	if testConfig.SmartWallet == nil {
-		panic("SmartWallet config is nil in aggregator.yaml")
+		panic("SmartWallet config is nil in aggregator-sepolia.yaml")
 	}
 	return testConfig.SmartWallet.EntrypointAddress.Hex()
 }
@@ -182,10 +267,10 @@ func GetTestEntrypointAddress() string {
 // Panics if config is not loaded or SmartWallet is nil
 func GetTestPaymasterAddress() string {
 	if testConfig == nil {
-		panic("testConfig is nil - aggregator.yaml config must be loaded")
+		panic("testConfig is nil - aggregator-sepolia.yaml config must be loaded")
 	}
 	if testConfig.SmartWallet == nil {
-		panic("SmartWallet config is nil in aggregator.yaml")
+		panic("SmartWallet config is nil in aggregator-sepolia.yaml")
 	}
 	return testConfig.SmartWallet.PaymasterAddress.Hex()
 }
