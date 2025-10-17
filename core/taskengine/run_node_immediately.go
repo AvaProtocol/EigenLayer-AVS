@@ -4,17 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/big"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -38,11 +41,36 @@ func getRealisticBlockNumberForChain(chainID int64) uint64 {
 
 // RunNodeImmediately executes a single node immediately with authenticated user context.
 // This is the primary entry point for running nodes that require user authentication.
-func (n *Engine) RunNodeImmediately(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, user *model.User) (map[string]interface{}, error) {
+// useSimulation defaults to true if not specified.
+// shouldUsePaymaster is an optional third parameter that overrides the paymaster decision:
+//   - nil (default): let the system decide based on wallet balance
+//   - &true: override to use paymaster (for testing paymaster sponsorship)
+//   - &false: override to use self-funded (for EntryPoint deposit withdrawal)
+func (n *Engine) RunNodeImmediately(nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, user *model.User, useSimulation ...interface{}) (map[string]interface{}, error) {
+	// Default to simulation mode
+	simulationMode := true
+	var shouldUsePaymasterOverride *bool = nil
+
+	// Parse variadic parameters
+	for i, param := range useSimulation {
+		switch i {
+		case 0:
+			// First parameter: useSimulation (bool)
+			if simMode, ok := param.(bool); ok {
+				simulationMode = simMode
+			}
+		case 1:
+			// Second parameter: shouldUsePaymaster (*bool)
+			if shouldUsePaymasterPtr, ok := param.(*bool); ok {
+				shouldUsePaymasterOverride = shouldUsePaymasterPtr
+			}
+		}
+	}
+
 	if IsTriggerNodeType(nodeType) {
 		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
 	} else {
-		return n.runProcessingNodeWithInputs(user, nodeType, nodeConfig, inputVariables)
+		return n.runProcessingNodeWithInputs(user, nodeType, nodeConfig, inputVariables, simulationMode, shouldUsePaymasterOverride)
 	}
 }
 
@@ -2770,7 +2798,7 @@ func (n *Engine) runManualTriggerImmediately(triggerConfig map[string]interface{
 }
 
 // runProcessingNodeWithInputs handles execution of processing node types
-func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
+func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, nodeConfig map[string]interface{}, inputVariables map[string]interface{}, useSimulation bool, shouldUsePaymasterOverride *bool) (map[string]interface{}, error) {
 	// Check if this is actually a trigger type that was misrouted
 	if IsTriggerNodeType(nodeType) {
 		return n.runTriggerImmediately(nodeType, nodeConfig, inputVariables)
@@ -2793,7 +2821,27 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 	}
 
 	vm.tenderlyClient = n.tenderlyClient
-	vm.WithLogger(n.logger).WithDb(n.db).SetSimulation(true)
+
+	// Use the simulation mode parameter (true = simulation, false = real execution)
+	vm.WithLogger(n.logger).WithDb(n.db).SetSimulation(useSimulation)
+
+	// Set shouldUsePaymaster override in VM if provided
+	if shouldUsePaymasterOverride != nil {
+		vm.shouldUsePaymasterOverride = shouldUsePaymasterOverride
+		log.Printf("🔧 RunNodeImmediately: shouldUsePaymaster override set to %v", *shouldUsePaymasterOverride)
+		if n.logger != nil {
+			n.logger.Info("RunNodeImmediately: shouldUsePaymaster override set", "shouldUsePaymaster", *shouldUsePaymasterOverride)
+		}
+	} else {
+		log.Printf("🔧 RunNodeImmediately: NO shouldUsePaymaster override (nil)")
+	}
+
+	if n.logger != nil {
+		n.logger.Info("RunNodeImmediately: Execution mode set",
+			"simulation_mode", useSimulation,
+			"node_type", nodeType,
+			"will_execute_real_userop", !useSimulation && strings.EqualFold(nodeType, "contractWrite"))
+	}
 
 	// Set TaskOwner from authenticated user (extracted from signed API key)
 	if user != nil {
@@ -2831,26 +2879,75 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 				}
 
 				// Validate runner belongs to owner
+				// For runNodeImmediately, we allow smart wallets that haven't been created yet
+				// The paymaster will sponsor their creation if needed (same as deployed workflows)
 				resp, err := n.ListWallets(vm.TaskOwner, &avsproto.ListWalletReq{})
 				if err != nil {
 					return nil, fmt.Errorf("failed to list wallets for owner %s: %w", vm.TaskOwner.Hex(), err)
 				}
 				var chosenSender common.Address
+				walletExists := false
 				for _, w := range resp.GetItems() {
 					if strings.EqualFold(w.GetAddress(), runnerStr) {
 						chosenSender = common.HexToAddress(w.GetAddress())
+						walletExists = true
 						break
 					}
 				}
-				if (chosenSender == common.Address{}) {
-					return nil, NewStructuredError(
-						avsproto.ErrorCode_SMART_WALLET_NOT_FOUND,
-						fmt.Sprintf("runner %s does not match any existing smart wallet for owner %s", runnerStr, vm.TaskOwner.Hex()),
-						map[string]interface{}{
-							"runner": runnerStr,
-							"owner":  vm.TaskOwner.Hex(),
-						},
-					)
+
+				// If wallet doesn't exist in database, verify it's a valid derived address for this owner
+				// We support up to 5 smart wallets per EOA (salt:0 through salt:4)
+				if !walletExists {
+					if n.logger != nil {
+						n.logger.Info("RunNodeImmediately: Smart wallet not found in database, verifying it's a valid derived address for this owner",
+							"runner", runnerStr,
+							"owner", vm.TaskOwner.Hex())
+					}
+
+					// Connect to RPC to derive addresses
+					client, err := ethclient.Dial(n.smartWalletConfig.EthRpcUrl)
+					if err != nil {
+						return nil, fmt.Errorf("failed to connect to RPC for address derivation: %w", err)
+					}
+
+					// Check salts 0-4 (we allow up to 5 smart wallets per EOA)
+					var matchedSalt *big.Int
+					for salt := int64(0); salt < 5; salt++ {
+						derivedAddr, err := aa.GetSenderAddress(client, vm.TaskOwner, big.NewInt(salt))
+						if err != nil {
+							if n.logger != nil {
+								n.logger.Debug("Failed to derive address for salt", "salt", salt, "error", err)
+							}
+							continue
+						}
+
+						if strings.EqualFold(derivedAddr.Hex(), runnerStr) {
+							matchedSalt = big.NewInt(salt)
+							chosenSender = *derivedAddr
+							break
+						}
+					}
+					client.Close()
+
+					// If no match found in salts 0-4, reject the runner
+					if matchedSalt == nil {
+						return nil, NewStructuredError(
+							avsproto.ErrorCode_SMART_WALLET_NOT_FOUND,
+							fmt.Sprintf("runner %s does not match any derived address (salt:0 through salt:4) for owner %s", runnerStr, vm.TaskOwner.Hex()),
+							map[string]interface{}{
+								"runner": runnerStr,
+								"owner":  vm.TaskOwner.Hex(),
+							},
+						)
+					}
+
+					if n.logger != nil {
+						n.logger.Info("RunNodeImmediately: Smart wallet will be created on first use with paymaster sponsorship",
+							"sender", chosenSender.Hex(),
+							"owner", vm.TaskOwner.Hex(),
+							"salt", matchedSalt.Int64(),
+							"paymaster", n.smartWalletConfig.PaymasterAddress.Hex())
+					}
 				}
 
 				vm.AddVar("aa_sender", chosenSender.Hex())
@@ -3124,9 +3221,27 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		return resp, nil
 	}
 
+	// Determine execution mode: default to simulation (true) for safety
+	// IMPORTANT: is_simulated is now an optional field (generates *bool in Go).
+	// When unset (nil pointer), we default to true (simulation mode) for safety.
+	// When explicitly set to true, use simulation. When explicitly set to false, use real execution.
+	useSimulation := true // Safe default
+	if req.IsSimulated != nil {
+		// Field is explicitly set - use its value
+		useSimulation = *req.IsSimulated
+	}
+
+	if n.logger != nil {
+		n.logger.Info("RunNodeImmediatelyRPC: Execution mode determined",
+			"is_simulated", useSimulation,
+			"explicitly_set", req.IsSimulated != nil,
+			"will_execute_real", !useSimulation,
+			"node_type", nodeTypeStr)
+	}
+
 	// Execute the node immediately with authenticated user
 	// NOTE: lang field conversion for CustomCode is handled by ParseLanguageFromConfig
-	result, err := n.RunNodeImmediately(nodeTypeStr, nodeConfig, inputVariables, user)
+	result, err := n.RunNodeImmediately(nodeTypeStr, nodeConfig, inputVariables, user, useSimulation)
 	if err != nil {
 		if n.logger != nil {
 			if isExpectedValidationError(err) {

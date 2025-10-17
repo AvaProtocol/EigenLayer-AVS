@@ -97,7 +97,7 @@ jobs:
           tenderly-project: ${{ vars.TENDERLY_PROJECT }}
           controller-private-key: ${{ secrets.CONTROLLER_PRIVATE_KEY }}
           tenderly-access-key: ${{ secrets.TENDERLY_ACCESS_KEY }}
-          test-private-key: ${{ secrets.TEST_PRIVATE_KEY }}
+          owner-eoa: ${{ vars.OWNER_EOA }}
           moralis-api-key: ${{ secrets.MORALIS_API_KEY }}
 
       - name: Set up Go
@@ -160,7 +160,7 @@ jobs:
           tenderly-project: ${{ vars.TENDERLY_PROJECT }}
           controller-private-key: ${{ secrets.CONTROLLER_PRIVATE_KEY }}
           tenderly-access-key: ${{ secrets.TENDERLY_ACCESS_KEY }}
-          test-private-key: ${{ secrets.TEST_PRIVATE_KEY }}
+          owner-eoa: ${{ vars.OWNER_EOA }}
           moralis-api-key: ${{ secrets.MORALIS_API_KEY }}
 
       - name: Run Go test

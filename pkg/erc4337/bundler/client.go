@@ -19,6 +19,13 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
 )
 
+const (
+	// EntryPointV06Address is the canonical ERC-4337 EntryPoint v0.6 contract address
+	// This address is the same across all EVM-compatible chains (Ethereum, Base, etc.)
+	// Reference: https://github.com/eth-infinitism/account-abstraction/blob/develop/deployments.json
+	EntryPointV06Address = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
+)
+
 // safePreview returns a truncated preview of s with ellipsis when longer than n
 func safePreview(s string, n int) string {
 	if n <= 0 {
@@ -42,7 +49,7 @@ func NewBundlerClient(url string) (*BundlerClient, error) {
 	// endpoints, but it also supports other protocols such as WebSocket.
 	c, err := rpc.DialHTTP(url)
 	if err != nil {
-		return nil, fmt.Errorf("Error creating bundler client: %w", err)
+		return nil, fmt.Errorf("error creating bundler client: %w", err)
 	}
 	return &BundlerClient{client: c, url: url}, nil
 }
@@ -100,6 +107,7 @@ func (bc *BundlerClient) sendUserOperationHTTP(
 	log.Printf("🔍 END BUNDLER SEND DEBUG")
 
 	// Create JSON-RPC request
+	// IMPORTANT: Some bundlers require EIP-55 checksummed addresses for EntryPoint
 	reqData := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "eth_sendUserOperation",
@@ -192,7 +200,9 @@ func (bc *BundlerClient) sendUserOperationRPC(
 		PaymasterAndData:     fmt.Sprintf("0x%x", userOp.PaymasterAndData),
 		Signature:            fmt.Sprintf("0x%x", userOp.Signature),
 	}
-	err := bc.client.CallContext(ctx, &txHash, "eth_sendUserOperation", uo, entrypoint)
+
+	// IMPORTANT: Use EIP-55 checksummed EntryPoint address (same as HTTP method)
+	err := bc.client.CallContext(ctx, &txHash, "eth_sendUserOperation", uo, entrypoint.Hex())
 	return txHash, err
 }
 
@@ -385,4 +395,20 @@ func (bc *BundlerClient) GetUserOperationReceipt(ctx context.Context, hash strin
 	var receipt interface{}
 	err := bc.client.CallContext(ctx, &receipt, "eth_getUserOperationReceipt", hash)
 	return receipt, err
+}
+
+// SendBundleNow triggers immediate bundling of pending UserOps.
+// This is a debug method (debug_bundler_sendBundleNow) that forces the bundler to create and send a bundle immediately
+// instead of waiting for the configured bundle interval or other auto-bundling conditions.
+func (bc *BundlerClient) SendBundleNow(ctx context.Context) error {
+	log.Printf("🔨 Calling debug_bundler_sendBundleNow to trigger immediate bundling")
+
+	var result interface{}
+	err := bc.client.CallContext(ctx, &result, "debug_bundler_sendBundleNow")
+	if err != nil {
+		return fmt.Errorf("debug_bundler_sendBundleNow failed: %w", err)
+	}
+
+	log.Printf("✅ debug_bundler_sendBundleNow returned: %+v", result)
+	return nil
 }

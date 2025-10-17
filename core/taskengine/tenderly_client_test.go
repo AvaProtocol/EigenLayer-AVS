@@ -9,21 +9,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
+	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// Test configuration for Sepolia
+// Test configuration for Sepolia (Tenderly tests)
 const (
-	SEPOLIA_CHAIN_ID     = 11155111
-	SEPOLIA_ETH_USD_FEED = "0x694AA1769357215DE4FAC081bf1f309aDC325306"
-	ANSWER_UPDATED_SIG   = "0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"
+	TENDERLY_SEPOLIA_CHAIN_ID     = 11155111
+	TENDERLY_SEPOLIA_ETH_USD_FEED = "0x694AA1769357215DE4FAC081bf1f309aDC325306"
+	ANSWER_UPDATED_SIG            = "0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"
 )
 
 // Chainlink ABI for AnswerUpdated event
@@ -147,7 +150,7 @@ func TestTenderlySimulation_ConditionMatching_Unit(t *testing.T) {
 
 		// Set condition: price > $2000 (should match)
 		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
+			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 			Topics: []*avsproto.EventTrigger_Topics{
 				{Values: []string{ANSWER_UPDATED_SIG}},
 			},
@@ -162,7 +165,7 @@ func TestTenderlySimulation_ConditionMatching_Unit(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		simulatedLog, err := mockClient.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		simulatedLog, err := mockClient.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 
 		require.NoError(t, err, "Mock simulation should succeed")
 		require.NotNil(t, simulatedLog, "Should get simulated log")
@@ -188,7 +191,7 @@ func TestTenderlySimulation_ConditionMatching_Unit(t *testing.T) {
 
 		// Set condition: price > $2000 (should NOT match)
 		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
+			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 			Topics: []*avsproto.EventTrigger_Topics{
 				{Values: []string{ANSWER_UPDATED_SIG}},
 			},
@@ -203,7 +206,7 @@ func TestTenderlySimulation_ConditionMatching_Unit(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		simulatedLog, err := mockClient.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		simulatedLog, err := mockClient.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 
 		require.NoError(t, err, "Mock simulation should succeed")
 		require.NotNil(t, simulatedLog, "Should get simulated log")
@@ -229,7 +232,7 @@ func TestTenderlySimulation_ConditionMatching_Unit(t *testing.T) {
 
 		// Set condition: price < $2000 (should match)
 		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
+			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 			Topics: []*avsproto.EventTrigger_Topics{
 				{Values: []string{ANSWER_UPDATED_SIG}},
 			},
@@ -244,7 +247,7 @@ func TestTenderlySimulation_ConditionMatching_Unit(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		simulatedLog, err := mockClient.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		simulatedLog, err := mockClient.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 
 		require.NoError(t, err, "Mock simulation should succeed")
 		require.NotNil(t, simulatedLog, "Should get simulated log")
@@ -270,7 +273,7 @@ func TestTenderlySimulation_ConditionMatching_Unit(t *testing.T) {
 
 		// Set condition: price == $2000 (should match)
 		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
+			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 			Topics: []*avsproto.EventTrigger_Topics{
 				{Values: []string{ANSWER_UPDATED_SIG}},
 			},
@@ -285,7 +288,7 @@ func TestTenderlySimulation_ConditionMatching_Unit(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		simulatedLog, err := mockClient.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		simulatedLog, err := mockClient.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 
 		require.NoError(t, err, "Mock simulation should succeed")
 		require.NotNil(t, simulatedLog, "Should get simulated log")
@@ -311,7 +314,7 @@ func TestTenderlySimulation_ConditionMatching_Unit(t *testing.T) {
 
 		// Set conditions: $2000 < price < $2500 (should match)
 		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
+			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 			Topics: []*avsproto.EventTrigger_Topics{
 				{Values: []string{ANSWER_UPDATED_SIG}},
 			},
@@ -332,7 +335,7 @@ func TestTenderlySimulation_ConditionMatching_Unit(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		simulatedLog, err := mockClient.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		simulatedLog, err := mockClient.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 
 		require.NoError(t, err, "Mock simulation should succeed")
 		require.NotNil(t, simulatedLog, "Should get simulated log")
@@ -365,14 +368,14 @@ func TestTenderlySimulation_ConditionMatching_Unit(t *testing.T) {
 		mockClient.SetError(true, "mock tenderly API error")
 
 		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
+			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 			Topics: []*avsproto.EventTrigger_Topics{
 				{Values: []string{ANSWER_UPDATED_SIG}},
 			},
 		}
 
 		ctx := context.Background()
-		simulatedLog, err := mockClient.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		simulatedLog, err := mockClient.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 
 		require.Error(t, err, "Mock should return error when configured")
 		require.Nil(t, simulatedLog, "Should not get simulated log on error")
@@ -402,7 +405,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 	t.Run("Basic AnswerUpdated Simulation", func(t *testing.T) {
 		// Create query for Chainlink ETH/USD feed
 		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
+			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 			Topics: []*avsproto.EventTrigger_Topics{
 				{
 					Values: []string{ANSWER_UPDATED_SIG},
@@ -411,18 +414,18 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 		}
 
 		fmt.Printf("\n=== TENDERLY END-TO-END TEST: Basic AnswerUpdated Simulation ===\n")
-		fmt.Printf("Contract: %s (Sepolia ETH/USD)\n", SEPOLIA_ETH_USD_FEED)
+		fmt.Printf("Contract: %s (Sepolia ETH/USD)\n", TENDERLY_SEPOLIA_ETH_USD_FEED)
 		fmt.Printf("Event: AnswerUpdated\n")
 		fmt.Printf("Mode: Real Tenderly API call\n\n")
 
 		// Execute simulation
-		simulatedLog, err := tenderlyClient.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		simulatedLog, err := tenderlyClient.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 
 		require.NoError(t, err, "Tenderly simulation should succeed")
 		require.NotNil(t, simulatedLog, "Simulated log should not be nil")
 
 		// Validate the simulated log structure
-		assert.Equal(t, SEPOLIA_ETH_USD_FEED, simulatedLog.Address.Hex(), "Contract address should match")
+		assert.Equal(t, TENDERLY_SEPOLIA_ETH_USD_FEED, simulatedLog.Address.Hex(), "Contract address should match")
 		assert.Len(t, simulatedLog.Topics, 3, "AnswerUpdated should have 3 topics")
 		assert.Equal(t, ANSWER_UPDATED_SIG, simulatedLog.Topics[0].Hex(), "First topic should be AnswerUpdated signature")
 
@@ -433,7 +436,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 	t.Run("Conditional Price Alert Simulation", func(t *testing.T) {
 		// Test with price > $2000 condition
 		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
+			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 			Topics: []*avsproto.EventTrigger_Topics{
 				{
 					Values: []string{ANSWER_UPDATED_SIG},
@@ -451,7 +454,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 
 		fmt.Printf("\n=== CONDITIONAL SIMULATION: Price > $2000 ===\n")
 
-		simulatedLog, err := tenderlyClient.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		simulatedLog, err := tenderlyClient.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 
 		require.NoError(t, err, "Conditional simulation should succeed")
 		require.NotNil(t, simulatedLog, "Simulated log should not be nil")
@@ -461,7 +464,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 		fmt.Printf("Simulated price (hex): %s\n", priceHex)
 
 		// The price should be > $2000 (200000000000 in 8-decimal format)
-		assert.Equal(t, SEPOLIA_ETH_USD_FEED, simulatedLog.Address.Hex())
+		assert.Equal(t, TENDERLY_SEPOLIA_ETH_USD_FEED, simulatedLog.Address.Hex())
 
 		fmt.Printf("Conditional simulation successful.\n")
 		printSimulatedLog(simulatedLog)
@@ -482,7 +485,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 			"simulationMode": true,
 			"queries": []interface{}{
 				map[string]interface{}{
-					"addresses": []interface{}{SEPOLIA_ETH_USD_FEED},
+					"addresses": []interface{}{TENDERLY_SEPOLIA_ETH_USD_FEED},
 					"topics": []interface{}{
 						map[string]interface{}{
 							"values": []interface{}{ANSWER_UPDATED_SIG},
@@ -636,7 +639,7 @@ func BenchmarkTenderlySimulation(b *testing.B) {
 	client := NewTenderlyClient(testConfig, logger)
 
 	query := &avsproto.EventTrigger_Query{
-		Addresses: []string{SEPOLIA_ETH_USD_FEED},
+		Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 		Topics: []*avsproto.EventTrigger_Topics{
 			{Values: []string{ANSWER_UPDATED_SIG}},
 		},
@@ -646,7 +649,7 @@ func BenchmarkTenderlySimulation(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := client.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		_, err := client.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 		if err != nil {
 			b.Fatalf("Simulation failed: %v", err)
 		}
@@ -671,14 +674,14 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 		}
 		t.Logf("🔗 Using Tenderly HTTP API (RPC gateway deprecated)")
 
-		roundData, err := client.getLatestRoundData(ctx, SEPOLIA_ETH_USD_FEED, SEPOLIA_CHAIN_ID)
+		roundData, err := client.getLatestRoundData(ctx, TENDERLY_SEPOLIA_ETH_USD_FEED, TENDERLY_SEPOLIA_CHAIN_ID)
 		require.NoError(t, err, "Should get real price data from Tenderly")
 		require.NotNil(t, roundData)
 
 		currentPriceFloat := float64(roundData.Answer.Int64()) / 100000000 // Convert to USD
 
 		t.Logf("📊 CURRENT REAL CHAINLINK DATA:")
-		t.Logf("   Contract: %s", SEPOLIA_ETH_USD_FEED)
+		t.Logf("   Contract: %s", TENDERLY_SEPOLIA_ETH_USD_FEED)
 		t.Logf("   Current Price: $%.2f (raw: %s)", currentPriceFloat, roundData.Answer.String())
 		t.Logf("   Round ID: %s", roundData.RoundId.String())
 		t.Logf("   Updated At: %s", time.Unix(roundData.UpdatedAt.Int64(), 0).Format(time.RFC3339))
@@ -700,7 +703,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 		thresholdRaw := int64(thresholdFloat * 100000000) // Convert to 8-decimal format
 
 		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
+			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 			Topics: []*avsproto.EventTrigger_Topics{
 				{
 					Values: []string{ANSWER_UPDATED_SIG},
@@ -721,7 +724,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 		t.Logf("   Condition: price > $%.2f", thresholdFloat)
 		t.Logf("   Expected: MATCH ✅")
 
-		simulatedLog, err := client.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		simulatedLog, err := client.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 		require.NoError(t, err, "Simulation should succeed when condition should match")
 		require.NotNil(t, simulatedLog)
 
@@ -760,7 +763,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 		thresholdRaw := int64(thresholdFloat * 100000000) // Convert to 8-decimal format
 
 		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
+			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 			Topics: []*avsproto.EventTrigger_Topics{
 				{
 					Values: []string{ANSWER_UPDATED_SIG},
@@ -781,7 +784,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 		t.Logf("   Condition: price > $%.2f", thresholdFloat)
 		t.Logf("   Expected: REAL BEHAVIOR - Return real data that doesn't satisfy condition")
 
-		simulatedLog, err := client.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		simulatedLog, err := client.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 		require.NoError(t, err, "Simulation should still succeed")
 		require.NotNil(t, simulatedLog)
 
@@ -835,7 +838,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 		maxThresholdRaw := int64(maxThreshold * 100000000)
 
 		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
+			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 			Topics: []*avsproto.EventTrigger_Topics{
 				{
 					Values: []string{ANSWER_UPDATED_SIG},
@@ -863,7 +866,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 		t.Logf("   Condition 2: price < $%.2f", maxThreshold)
 		t.Logf("   Expected: Price in range [$%.2f, $%.2f]", minThreshold, maxThreshold)
 
-		simulatedLog, err := client.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		simulatedLog, err := client.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 		require.NoError(t, err, "Multi-condition simulation should succeed")
 		require.NotNil(t, simulatedLog)
 
@@ -885,7 +888,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 	t.Run("RawDataStructureAnalysis", func(t *testing.T) {
 		// Simple query without conditions to see pure simulated data
 		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
+			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 			Topics: []*avsproto.EventTrigger_Topics{
 				{
 					Values: []string{ANSWER_UPDATED_SIG},
@@ -895,7 +898,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 
 		t.Logf("ANALYZING RAW SIMULATION DATA STRUCTURE:")
 
-		simulatedLog, err := client.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		simulatedLog, err := client.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 		require.NoError(t, err)
 		require.NotNil(t, simulatedLog)
 
@@ -1003,7 +1006,7 @@ func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testin
 
 	t.Run("EnhancedBehavior_WithConditionsThatDontMatch", func(t *testing.T) {
 		// First get real current price
-		roundData, err := client.getLatestRoundData(ctx, SEPOLIA_ETH_USD_FEED, SEPOLIA_CHAIN_ID)
+		roundData, err := client.getLatestRoundData(ctx, TENDERLY_SEPOLIA_ETH_USD_FEED, TENDERLY_SEPOLIA_CHAIN_ID)
 		require.NoError(t, err)
 
 		currentPriceFloat := float64(roundData.Answer.Int64()) / 100000000
@@ -1013,7 +1016,7 @@ func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testin
 		impossibleThresholdRaw := int64(impossibleThreshold * 100000000)
 
 		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
+			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 			Topics: []*avsproto.EventTrigger_Topics{
 				{
 					Values: []string{ANSWER_UPDATED_SIG},
@@ -1035,7 +1038,7 @@ func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testin
 		t.Logf("   Expected: Return real data with condition_met=false")
 
 		// Test the current method (enhanced method was removed for simplicity)
-		simulatedLog, err := client.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		simulatedLog, err := client.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 		if err != nil {
 			t.Logf("⚠️  Current implementation returns error for impossible conditions: %s", err.Error())
 			t.Skip("Current implementation doesn't support enhanced condition handling")
@@ -1059,7 +1062,7 @@ func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testin
 	// Test with condition that DOES match
 	t.Run("EnhancedBehavior_WithConditionsThatMatch", func(t *testing.T) {
 		// Get real current price and set a condition that will match
-		roundData, err := client.getLatestRoundData(ctx, SEPOLIA_ETH_USD_FEED, SEPOLIA_CHAIN_ID)
+		roundData, err := client.getLatestRoundData(ctx, TENDERLY_SEPOLIA_ETH_USD_FEED, TENDERLY_SEPOLIA_CHAIN_ID)
 		require.NoError(t, err)
 
 		currentPriceFloat := float64(roundData.Answer.Int64()) / 100000000
@@ -1069,7 +1072,7 @@ func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testin
 		lowThresholdRaw := int64(lowThreshold * 100000000)
 
 		query := &avsproto.EventTrigger_Query{
-			Addresses: []string{SEPOLIA_ETH_USD_FEED},
+			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
 			Topics: []*avsproto.EventTrigger_Topics{
 				{
 					Values: []string{ANSWER_UPDATED_SIG},
@@ -1089,7 +1092,7 @@ func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testin
 		t.Logf("   Real Current Price: $%.2f", currentPriceFloat)
 		t.Logf("   Easy Condition: price > $%.2f", lowThreshold)
 
-		simulatedLog, err := client.SimulateEventTrigger(ctx, query, SEPOLIA_CHAIN_ID)
+		simulatedLog, err := client.SimulateEventTrigger(ctx, query, TENDERLY_SEPOLIA_CHAIN_ID)
 		require.NoError(t, err)
 
 		// When conditions match, should always use real price
@@ -1120,7 +1123,7 @@ func TestEventConditionEvaluation_Unit(t *testing.T) {
 		roundIdHash := common.BytesToHash(common.LeftPadBytes(big.NewInt(24008).Bytes(), 32))
 
 		return &types.Log{
-			Address: common.HexToAddress(SEPOLIA_ETH_USD_FEED),
+			Address: common.HexToAddress(TENDERLY_SEPOLIA_ETH_USD_FEED),
 			Topics: []common.Hash{
 				eventSignature, // Event signature
 				priceHash,      // current (indexed)
@@ -1407,7 +1410,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 			"simulationMode": true, // KEY: Enable simulation mode
 			"queries": []interface{}{
 				map[string]interface{}{
-					"addresses": []interface{}{SEPOLIA_ETH_USD_FEED},
+					"addresses": []interface{}{TENDERLY_SEPOLIA_ETH_USD_FEED},
 					"topics": []interface{}{
 						map[string]interface{}{
 							"values": []interface{}{ANSWER_UPDATED_SIG},
@@ -1430,7 +1433,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 		}
 
 		t.Logf("🔮 Testing Tenderly simulation for Chainlink price feed")
-		t.Logf("📍 Contract: %s", SEPOLIA_ETH_USD_FEED)
+		t.Logf("📍 Contract: %s", TENDERLY_SEPOLIA_ETH_USD_FEED)
 		t.Logf("🎯 Event: AnswerUpdated")
 
 		result, err := engine.runEventTriggerImmediately(triggerConfig, map[string]interface{}{})
@@ -1489,7 +1492,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 			"simulationMode": true,
 			"queries": []interface{}{
 				map[string]interface{}{
-					"addresses": []interface{}{SEPOLIA_ETH_USD_FEED},
+					"addresses": []interface{}{TENDERLY_SEPOLIA_ETH_USD_FEED},
 					"topics": []interface{}{
 						map[string]interface{}{
 							"values": []interface{}{ANSWER_UPDATED_SIG},
@@ -1558,7 +1561,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 			"simulationMode": true,
 			"queries": []interface{}{
 				map[string]interface{}{
-					"addresses": []interface{}{SEPOLIA_ETH_USD_FEED},
+					"addresses": []interface{}{TENDERLY_SEPOLIA_ETH_USD_FEED},
 					"topics":    []interface{}{}, // Empty topics - will match AnswerUpdated events
 					"contractAbi": []interface{}{
 						// decimals function
@@ -1680,7 +1683,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 					"simulationMode": true,
 					"queries": []interface{}{
 						map[string]interface{}{
-							"addresses": []interface{}{SEPOLIA_ETH_USD_FEED},
+							"addresses": []interface{}{TENDERLY_SEPOLIA_ETH_USD_FEED},
 							"topics":    []interface{}{},
 							"contractAbi": []interface{}{
 								// decimals function
@@ -2256,22 +2259,54 @@ func TestContractWriteWithValueParameter(t *testing.T) {
 	})
 }
 
-func TestEndToEndValuePropagation(t *testing.T) {
-	// End-to-end test that validates the complete flow from client request to Tenderly simulation
-	// This test reproduces the exact scenario from the user's logs
+func TestContractWrite_WETHDeposit_WithETHValue_Sepolia(t *testing.T) {
+	// Tests that ETH value is correctly passed through ContractWrite to WETH deposit() on Sepolia
+	// This validates the complete flow: nodeConfig.value -> VM -> ContractWriteProcessor -> Tenderly simulation
+	//
+	// Test Requirements on Sepolia:
+	// - Smart wallet must have ~0.15 ETH (0.1 ETH for deposit + gas)
+	// - Uses OWNER_EOA with salt:0 derivation for smart wallet
 
-	t.Run("WETH_Deposit_E2E_Value_Propagation", func(t *testing.T) {
+	t.Run("WETH_Deposit_With_Point1_ETH_Value", func(t *testing.T) {
+		// Get owner EOA and derive smart wallet address
+		ownerEOA, hasOwner := testutil.MustGetTestOwnerAddress()
+		if !hasOwner {
+			t.Skip("Skipping test - OWNER_EOA environment variable not set")
+		}
+
 		logger := testutil.GetLogger()
 
-		// Create a test engine (similar to the aggregator)
+		// Create a test engine
 		db := testutil.TestMustDB()
 		config := testutil.GetAggregatorConfig()
 		engine := New(db, config, nil, logger)
 
-		// Simulate the exact request from the client logs
+		// Derive smart wallet address using salt:0
+		ethRPC := testutil.GetTestRPCURL()
+		ethClient, err := ethclient.Dial(ethRPC)
+		require.NoError(t, err, "Failed to connect to Sepolia RPC")
+		defer ethClient.Close()
+
+		smartWalletAddress, err := aa.GetSenderAddress(ethClient, *ownerEOA, big.NewInt(0))
+		require.NoError(t, err, "Failed to derive smart wallet address")
+
+		t.Logf("📋 Test Configuration:")
+		t.Logf("   - Owner EOA: %s", ownerEOA.Hex())
+		t.Logf("   - Smart Wallet (salt:0): %s", smartWalletAddress.Hex())
+		t.Logf("   - Network: Sepolia (chain_id: 11155111)")
+		t.Logf("   - Required Balance: ~0.15 ETH (0.1 ETH deposit + gas)")
+		t.Logf("   - Smart wallet contract will be auto-created on first transaction")
+
+		// Create user object
+		user := &model.User{
+			Address:             *ownerEOA,
+			SmartAccountAddress: smartWalletAddress,
+		}
+
+		// Configure WETH deposit with 0.1 ETH value
 		nodeType := "contractWrite"
 		nodeConfig := map[string]interface{}{
-			"contractAddress": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+			"contractAddress": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14", // WETH on Sepolia
 			"contractAbi": []interface{}{
 				map[string]interface{}{
 					"constant":        false,
@@ -2298,109 +2333,62 @@ func TestEndToEndValuePropagation(t *testing.T) {
 					"methodParams": []interface{}{},
 				},
 			},
-			"value":    "100000000000000000", // 0.1 ETH - This was missing before!
+			"value":    "100000000000000000", // 0.1 ETH in wei
 			"gasLimit": "210000",
 		}
 
 		inputVariables := map[string]interface{}{
 			"settings": map[string]interface{}{
-				"runner":   "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"runner":   smartWalletAddress.Hex(),
 				"chain_id": 11155111,
-			},
-			"oracle1": map[string]interface{}{
-				"data": map[string]interface{}{
-					"decimals": "8",
-					"latestRoundData": map[string]interface{}{
-						"answer":          "4425.33831",
-						"answeredInRound": "18446744073709577131",
-						"roundId":         "18446744073709577131",
-						"startedAt":       "1755278832",
-						"updatedAt":       "1755278832",
-					},
-				},
 			},
 		}
 
-		t.Logf("🧪 Testing End-to-End Value Propagation")
-		t.Logf("   - Node Type: %s", nodeType)
-		t.Logf("   - Contract: %s", nodeConfig["contractAddress"])
-		t.Logf("   - Value: %s wei (0.1 ETH)", nodeConfig["value"])
-		t.Logf("   - Runner: %s", inputVariables["settings"].(map[string]interface{})["runner"])
+		t.Logf("🧪 Testing WETH deposit with ETH value parameter")
+		t.Logf("   - Contract: WETH %s", nodeConfig["contractAddress"])
+		t.Logf("   - Method: deposit()")
+		t.Logf("   - Value: 0.1 ETH (%s wei)", nodeConfig["value"])
 
 		// Skip if no Tenderly API key
 		testConfig := testutil.GetTestConfig()
 		if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
-			t.Logf("⏭️  Skipping E2E test - Tenderly credentials must be set in config/aggregator.yaml")
+			t.Logf("⏭️  Skipping test - Tenderly credentials must be set in config/aggregator.yaml")
 			t.Logf("✅ Configuration includes value field: %s", nodeConfig["value"])
 			t.Logf("✅ This would be passed through to Tenderly simulation")
 			t.Logf("✅ Expected result: WETH Deposit event with wad=%s", nodeConfig["value"])
 			return
 		}
 
-		// Execute the node using the same flow as the aggregator
-		user := testutil.TestUser1()
 		result, err := engine.RunNodeImmediately(nodeType, nodeConfig, inputVariables, user)
-
-		// Check for smart wallet validation error
-		// Note: The runner address (0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e) should be the salt:0
-		// derivation of the EOA (0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788) on Sepolia chain.
-		// This validation failure suggests a test environment configuration issue.
-		if err != nil && strings.Contains(err.Error(), "does not match any existing smart wallet for owner") {
-			t.Skipf("⏭️  Skipping E2E test - smart wallet validation failed in test environment. "+
-				"Runner should be salt:0 derivation of EOA on Sepolia (chain_id: %v). "+
-				"This appears to be a test environment configuration issue, not a code issue.",
-				inputVariables["settings"].(map[string]interface{})["chain_id"])
-			return
-		}
 
 		// The execution should succeed
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
 
-		// Check if we have success result
-		if success, ok := result["success"].(bool); ok && success {
-			t.Logf("✅ Contract write execution succeeded")
+		// Verify successful execution
+		success, ok := result["success"].(bool)
+		assert.True(t, ok, "Result should have success field")
+		assert.True(t, success, "Contract write should succeed")
 
-			// Check if we have the deposit event data
-			if data, ok := result["data"].(map[string]interface{}); ok {
-				if deposit, ok := data["deposit"].(map[string]interface{}); ok {
-					if wad, ok := deposit["wad"].(string); ok {
-						t.Logf("📊 WETH Deposit Event Result:")
-						t.Logf("   - dst: %s", deposit["dst"])
-						t.Logf("   - wad: %s", wad)
+		// Verify WETH Deposit event data
+		data, ok := result["data"].(map[string]interface{})
+		assert.True(t, ok, "Result should have data field")
 
-						// This is the key test - wad should equal our input value
-						if wad == nodeConfig["value"] {
-							t.Logf("🎉 SUCCESS: wad matches input value!")
-							t.Logf("   - Expected: %s", nodeConfig["value"])
-							t.Logf("   - Actual: %s", wad)
-						} else if wad == "0" {
-							t.Logf("❌ ISSUE: wad is still 0, value not propagated")
-							t.Logf("   - Expected: %s", nodeConfig["value"])
-							t.Logf("   - Actual: %s", wad)
-							t.Fail()
-						} else {
-							t.Logf("⚠️  UNEXPECTED: wad has different value")
-							t.Logf("   - Expected: %s", nodeConfig["value"])
-							t.Logf("   - Actual: %s", wad)
-						}
-					}
-				}
-			}
-		} else {
-			t.Logf("❌ Contract write execution failed")
-			if errorMsg, ok := result["error"].(string); ok {
-				t.Logf("   Error: %s", errorMsg)
-			}
-		}
+		deposit, ok := data["deposit"].(map[string]interface{})
+		assert.True(t, ok, "Data should contain deposit event")
 
-		t.Logf("\n🎯 END-TO-END TEST SUMMARY:")
-		t.Logf("   This test validates the complete flow:")
-		t.Logf("   1. Client sends nodeConfig with value field")
-		t.Logf("   2. RunNodeImmediately stores nodeConfig in VM variables")
-		t.Logf("   3. ContractWriteProcessor extracts value from VM variables")
-		t.Logf("   4. SimulateContractWrite receives and uses the value parameter")
-		t.Logf("   5. Tenderly simulation uses the correct ETH value")
-		t.Logf("   6. WETH Deposit event emits correct wad amount")
+		// Key assertion: wad should equal the value we sent (0.1 ETH)
+		wad, ok := deposit["wad"].(string)
+		assert.True(t, ok, "Deposit event should have wad field")
+		assert.Equal(t, nodeConfig["value"], wad, "WETH deposit amount should match ETH value sent")
+
+		dst, ok := deposit["dst"].(string)
+		assert.True(t, ok, "Deposit event should have dst field")
+		assert.Equal(t, strings.ToLower(smartWalletAddress.Hex()), strings.ToLower(dst), "Deposit recipient should be smart wallet")
+
+		t.Logf("✅ Test passed: ETH value correctly propagated to WETH deposit")
+		t.Logf("   - Sent: 0.1 ETH (%s wei)", nodeConfig["value"])
+		t.Logf("   - Received WETH: %s wei", wad)
+		t.Logf("   - Recipient: %s", dst)
 	})
 }

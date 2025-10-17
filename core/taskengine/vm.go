@@ -261,6 +261,12 @@ type VM struct {
 	// send real transactions and should use Tenderly or mock paths instead.
 	IsSimulation bool
 
+	// shouldUsePaymasterOverride overrides the shouldUsePaymaster() decision for contract writes:
+	//   - nil (default): let shouldUsePaymaster() decide based on wallet balance
+	//   - &true: override to use paymaster (useful for testing paymaster sponsorship)
+	//   - &false: override to use self-funded (useful for EntryPoint deposit withdrawal)
+	shouldUsePaymasterOverride *bool
+
 	// Shared clients
 	tenderlyClient *TenderlyClient
 }
@@ -1253,6 +1259,35 @@ func (v *VM) executeNode(node *avsproto.TaskNode) (*Step, error) {
 		executionLogForNode, err = v.runContractWrite(node.Id, nodeValue)
 		if executionLogForNode != nil {
 			v.addExecutionLog(executionLogForNode)
+
+			// NEW: Wait for on-chain confirmation if this is a real UserOp (not simulated)
+			// This ensures sequential contract writes work correctly (e.g., approve → swap)
+			if shouldWaitForContractWriteConfirmation(executionLogForNode, v.IsSimulation) {
+				userOpHash := extractUserOpHashFromStep(executionLogForNode)
+				if userOpHash != "" {
+					v.logger.Info("⏳ Contract write pending - waiting for on-chain confirmation",
+						"nodeID", node.Id,
+						"userOpHash", userOpHash)
+
+					// Wait for confirmation using exponential backoff polling
+					waitErr := v.waitForUserOpConfirmation(userOpHash)
+					if waitErr != nil {
+						v.logger.Error("❌ Failed to wait for contract write confirmation",
+							"nodeID", node.Id,
+							"userOpHash", userOpHash,
+							"error", waitErr)
+						// Don't fail the entire execution, but log the error
+						// The UserOp may still be processing
+					} else {
+						v.logger.Info("✅ Contract write confirmed on-chain",
+							"nodeID", node.Id,
+							"userOpHash", userOpHash)
+
+						// Add RPC propagation delay to ensure state is visible across all RPC nodes
+						v.addRPCPropagationDelay()
+					}
+				}
+			}
 		}
 	} else if nodeValue := node.GetLoop(); nodeValue != nil {
 		executionLogForNode, err = v.runLoop(node.Id, nodeValue) // loop does not return a jump step
@@ -2197,11 +2232,15 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 	// Propagate shared clients (e.g., Tenderly)
 	tempVM.tenderlyClient = v.tenderlyClient
 
+	// Propagate shouldUsePaymasterOverride if set
+	tempVM.shouldUsePaymasterOverride = v.shouldUsePaymasterOverride
+
 	// Log simulation mode for debugging
 	if v.logger != nil {
 		v.logger.Debug("RunNodeWithInputs inheriting simulation mode",
 			"node_type", node.Type.String(),
-			"inherited_simulation_mode", tempVM.IsSimulation)
+			"inherited_simulation_mode", tempVM.IsSimulation,
+			"inherited_shouldUsePaymaster_override", tempVM.shouldUsePaymasterOverride != nil)
 	}
 
 	tempVM.mu.Lock()

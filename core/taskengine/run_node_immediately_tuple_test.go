@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,10 +25,20 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 	config := testutil.GetAggregatorConfig()
 	engine := New(db, config, nil, testutil.GetLogger())
 
-	// Create test user
-	ownerEOA := common.HexToAddress("0x72D841F43241957b558097A5110A8Ed68c6fD88c")
-	runnerAddr := common.HexToAddress("0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e")
+	// Create test user - get owner EOA from environment
+	ownerAddr, ok := testutil.MustGetTestOwnerAddress()
+	if !ok {
+		t.Skip("Owner EOA address not set, skipping tuple test")
+	}
+
+	ownerEOA := *ownerAddr
 	factory := config.SmartWallet.FactoryAddress
+
+	// Derive actual salt:0 smart wallet address
+	aa.SetFactoryAddress(factory)
+	runnerAddr, err := aa.GetSenderAddress(nil, ownerEOA, big.NewInt(0))
+	require.NoError(t, err, "Failed to derive smart wallet address")
+
 	user := &model.User{
 		Address: ownerEOA,
 	}
@@ -71,7 +81,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 		// Seed wallet in DB for validation
 		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{
 			Owner:   &ownerEOA,
-			Address: &runnerAddr,
+			Address: runnerAddr,
 			Factory: &factory,
 			Salt:    big.NewInt(0),
 		})
@@ -194,7 +204,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 		// Seed wallet in DB for validation
 		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{
 			Owner:   &ownerEOA,
-			Address: &runnerAddr,
+			Address: runnerAddr,
 			Factory: &factory,
 			Salt:    big.NewInt(0),
 		})
@@ -409,7 +419,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 		// Seed wallet in DB
 		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{
 			Owner:   &ownerEOA,
-			Address: &runnerAddr,
+			Address: runnerAddr,
 			Factory: &factory,
 			Salt:    big.NewInt(0),
 		})

@@ -2,10 +2,8 @@ package preset
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/big"
 	"os"
 	"strings"
@@ -22,28 +20,20 @@ import (
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/ethclient/gethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
-const dummyPaymasterAndDataHex = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-
 func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
-	key := testutil.GetTestPrivateKey()
-	var controllerPrivateKey *ecdsa.PrivateKey
-	var err error
-
-	if key == "" {
-		log.Fatal("TEST_PRIVATE_KEY environment variable is not set. Please configure it with a funded test key. Aborting.")
-	} else if strings.HasPrefix(key, "0x") {
-		key = key[2:]
+	// Load aggregator config to get the CONTROLLER private key (used for signing UserOps)
+	cfg, err := config.NewConfig(testutil.GetConfigPath(testutil.DefaultConfigPath))
+	if err != nil {
+		panic(fmt.Sprintf("Failed to load aggregator config: %v", err))
 	}
 
-	controllerPrivateKey, err = crypto.HexToECDSA(key)
-	if err != nil {
-		log.Fatalf("Failed to parse TEST_PRIVATE_KEY: %v. Aborting.", err)
+	if cfg.SmartWallet == nil || cfg.SmartWallet.ControllerPrivateKey == nil {
+		panic("SmartWallet config or ControllerPrivateKey not set in aggregator config")
 	}
 
 	// Use centralized test config
@@ -53,7 +43,7 @@ func mockGetBaseTestSmartWalletConfig() *config.SmartWalletConfig {
 		EthWsUrl:             testutil.GetTestWsRPC(),
 		FactoryAddress:       common.HexToAddress(testutil.GetTestFactoryAddress()),
 		EntrypointAddress:    common.HexToAddress(config.DefaultEntrypointAddressHex),
-		ControllerPrivateKey: controllerPrivateKey,
+		ControllerPrivateKey: cfg.SmartWallet.ControllerPrivateKey, // Use controller key from config
 		PaymasterAddress:     common.HexToAddress(config.DefaultPaymasterAddressHex),
 		WhitelistAddresses:   []common.Address{},
 	}
@@ -109,7 +99,7 @@ func TestSendUserOp(t *testing.T) {
 		t.Errorf("expect pack userop successfully but got error: %v", err)
 	}
 
-	userop, receipt, err := SendUserOp(smartWalletConfig, owner, calldata, nil, nil)
+	userop, receipt, err := SendUserOp(smartWalletConfig, owner, calldata, nil, nil, nil)
 	if err != nil || userop == nil {
 		t.Errorf("UserOp failed to send; error %v", err)
 	}
@@ -162,7 +152,9 @@ func TestPaymaster(t *testing.T) {
 		owner,
 		calldata,
 		paymasterRequest,
-	)
+		nil, // senderOverride
+		nil, // paymasterNonceOverride
+		)
 
 	if err != nil {
 		t.Errorf("Failed to send user operation with paymaster: %v", err)
@@ -247,8 +239,12 @@ func TestGetHash(t *testing.T) {
 		t.Fatalf("Failed to get hash from PayMaster contract: %v", err)
 	}
 
-	if common.Bytes2Hex(hash[:]) != "14972f699106bae44f682fd688b936dc1efce4be3b3bdd838521ac385ca5acc7" {
-		t.Fatalf("Expected hash to be 14972f699106bae44f682fd688b936dc1efce4be3b3bdd838521ac385ca5acc7, got %s", common.Bytes2Hex(hash[:]))
+	// Updated expected hash after switching to ABI-encoded timestamps (64 bytes instead of compact 12 bytes)
+	// The new format uses abi.encode(uint48, uint48) which produces 64 bytes of encoded data
+	// Old hash (compact format): 14972f699106bae44f682fd688b936dc1efce4be3b3bdd838521ac385ca5acc7
+	// New hash (ABI-encoded format): ea028b46be9e5659ababf4babf69952c28de8112aa04c7192c20ba89d3c4e31f
+	if common.Bytes2Hex(hash[:]) != "ea028b46be9e5659ababf4babf69952c28de8112aa04c7192c20ba89d3c4e31f" {
+		t.Fatalf("Expected hash to be ea028b46be9e5659ababf4babf69952c28de8112aa04c7192c20ba89d3c4e31f, got %s", common.Bytes2Hex(hash[:]))
 	}
 }
 
@@ -303,7 +299,12 @@ func TestBuildUserOpWithPaymasterErrors(t *testing.T) {
 		invalidPaymasterAddress,
 		validUntil,
 		validAfter,
-		nil,
+		nil, // senderOverride
+		nil, // nonceOverride - let it fetch from chain
+		nil, // paymasterNonceOverride - let it fetch from chain
+		nil, // callGasOverride
+		nil, // verificationGasOverride
+		nil, // preVerificationGasOverride
 	)
 
 	if err == nil {

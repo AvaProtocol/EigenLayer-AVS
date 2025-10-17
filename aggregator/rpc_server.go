@@ -335,6 +335,7 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 			nil, // No paymaster for withdrawals
 			smartWalletAddress,
 			r.smartWalletWsRpc, // Use global WebSocket client
+			nil,                // paymasterNonceOverride - no paymaster used
 		)
 	} else {
 		// Fallback to original method (creates new WebSocket connection)
@@ -345,6 +346,7 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 			callData,
 			nil, // No paymaster for withdrawals
 			smartWalletAddress,
+			nil, // paymasterNonceOverride - no paymaster used
 		)
 	}
 }

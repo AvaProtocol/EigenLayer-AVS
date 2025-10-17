@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"fmt"
+	"log"
 	"math/big"
 	"time"
 
@@ -210,6 +211,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 		smartWalletCallData,
 		paymasterReq,
 		senderOverride,
+		nil, // paymasterNonceOverride - ETH transfers are typically standalone
 	)
 
 	if err != nil {
@@ -309,9 +311,30 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 // shouldUsePaymaster determines if paymaster should be used for this ETH transfer
 // This is a simplified version of the logic from contract write processor
 func (p *ETHTransferProcessor) shouldUsePaymaster() bool {
-	// For now, always try to use paymaster if available
-	// In the future, this could include more sophisticated logic
-	return p.smartWalletConfig.PaymasterAddress != (common.Address{})
+	// Priority 0: Check shouldUsePaymasterOverride if set (explicit override from RunNodeImmediately)
+	log.Printf("🔍 [ETHTransfer] shouldUsePaymaster: p.vm=%v, p.vm.shouldUsePaymasterOverride=%v", p.vm != nil, p.vm != nil && p.vm.shouldUsePaymasterOverride != nil)
+	if p.vm != nil && p.vm.shouldUsePaymasterOverride != nil {
+		log.Printf("✅ [ETHTransfer] shouldUsePaymaster: OVERRIDE FOUND - returning %v", *p.vm.shouldUsePaymasterOverride)
+		if p.vm.logger != nil {
+			p.vm.logger.Info("[ETHTransfer] shouldUsePaymaster: override is set, using explicit value",
+				"shouldUsePaymaster", *p.vm.shouldUsePaymasterOverride,
+				"owner", p.taskOwner.Hex())
+		}
+		return *p.vm.shouldUsePaymasterOverride
+	}
+	log.Printf("⚠️  [ETHTransfer] shouldUsePaymaster: NO OVERRIDE - proceeding with balance check")
+
+	// Priority 1: If no paymaster configured, must self-fund
+	if p.smartWalletConfig.PaymasterAddress == (common.Address{}) {
+		log.Printf("❌ [ETHTransfer] shouldUsePaymaster: No paymaster address configured - must self-fund")
+		return false
+	}
+
+	// Priority 2: Check wallet balance to decide if paymaster is needed
+	// TODO: In the future, estimate gas cost and compare with wallet balance
+	// For now, default to using paymaster if available
+	log.Printf("✅ [ETHTransfer] shouldUsePaymaster: Paymaster available - using it")
+	return true
 }
 
 // TODO: Remove this old function - replaced by executeRealETHTransfer

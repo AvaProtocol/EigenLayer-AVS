@@ -24,6 +24,8 @@ metadata.json
 
 # Ignores yaml configuration files in the config directory
 config/*.yaml
+!config/aggregator.example.yaml
+!config/operator.example.yaml
 
 contracts/script/output*
 
@@ -53,3 +55,6 @@ _operator-*.txt
 # Environment files
 .env.test
 .env.local
+
+# Ignore the file/folder that is constantly added by Cursor
+EigenLayer-AVS
