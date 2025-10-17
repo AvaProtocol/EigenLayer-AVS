@@ -7,6 +7,20 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
+// minGweiFloor is a conservative network-wide floor we enforce to avoid
+// unrealistically low gas caps on slow testnets. Default: 2 gwei.
+var minGweiFloor = big.NewInt(2_000_000_000) // 2 gwei in wei
+
+// SetMinGweiFloor allows overriding the minimum gas floor (in wei).
+// Pass nil to reset to default 2 gwei.
+func SetMinGweiFloor(wei *big.Int) {
+	if wei == nil || wei.Sign() <= 0 {
+		minGweiFloor = big.NewInt(2_000_000_000)
+		return
+	}
+	minGweiFloor = new(big.Int).Set(wei)
+}
+
 func SuggestFee(client *ethclient.Client) (*big.Int, *big.Int, error) {
 	// Get suggested gas tip cap (maxPriorityFeePerGas) from the chain
 	tipCap, err := client.SuggestGasTipCap(context.Background())
@@ -27,21 +41,9 @@ func SuggestFee(client *ethclient.Client) (*big.Int, *big.Int, error) {
 	buffer = new(big.Int).Mul(buffer, big.NewInt(13))
 	maxPriorityFeePerGas := new(big.Int).Add(tipCap, buffer)
 
-	// Dynamic minimum based on actual chain conditions, not hardcoded values
-	// Use the chain's suggested tip or a small fraction of baseFee, whichever is higher
-	var minTip *big.Int
-	if baseFee != nil {
-		// For EIP-1559 chains: minimum tip is 1% of baseFee or the suggested tip, whichever is higher
-		// This ensures we don't use artificially low tips on high-fee chains
-		onePercentOfBaseFee := new(big.Int).Div(baseFee, big.NewInt(100))
-		minTip = onePercentOfBaseFee
-	} else {
-		// For legacy chains: use a very small minimum (0.001 gwei)
-		minTip = big.NewInt(1_000_000) // 0.001 gwei
-	}
-
-	if maxPriorityFeePerGas.Cmp(minTip) < 0 {
-		maxPriorityFeePerGas = minTip
+	// Enforce a floor for priority fee to avoid stalled inclusion on testnets
+	if maxPriorityFeePerGas.Cmp(minGweiFloor) < 0 {
+		maxPriorityFeePerGas = new(big.Int).Set(minGweiFloor)
 	}
 
 	var maxFeePerGas *big.Int
@@ -55,12 +57,16 @@ func SuggestFee(client *ethclient.Client) (*big.Int, *big.Int, error) {
 			maxPriorityFeePerGas,
 		)
 
-		// NO hardcoded minimums - trust the chain's real-time data
-		// Base chain baseFee ~0.001 gwei → maxFeePerGas ~0.002 gwei (realistic)
-		// Ethereum baseFee ~30 gwei → maxFeePerGas ~62 gwei (realistic)
+		// Enforce a floor for maxFeePerGas too
+		if maxFeePerGas.Cmp(minGweiFloor) < 0 {
+			maxFeePerGas = new(big.Int).Set(minGweiFloor)
+		}
 	} else {
 		// Legacy (pre-EIP-1559) chain - use maxPriorityFeePerGas as maxFeePerGas
 		maxFeePerGas = new(big.Int).Set(maxPriorityFeePerGas)
+		if maxFeePerGas.Cmp(minGweiFloor) < 0 {
+			maxFeePerGas = new(big.Int).Set(minGweiFloor)
+		}
 	}
 
 	return maxFeePerGas, maxPriorityFeePerGas, nil

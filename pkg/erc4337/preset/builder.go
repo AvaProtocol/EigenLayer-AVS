@@ -31,7 +31,7 @@ var (
 	// These values are based on actual ETH transfer and smart wallet operations
 	// Last validated: Oct 2025. To update: run representative UserOperations on target network,
 	// observe actual gas usage, and adjust these values accordingly
-	DEFAULT_CALL_GAS_LIMIT         = big.NewInt(100000)  // 100K for smart wallet execute + ETH transfer
+	DEFAULT_CALL_GAS_LIMIT         = big.NewInt(200000)  // 200K for smart wallet execute + ETH transfer (more headroom)
 	DEFAULT_VERIFICATION_GAS_LIMIT = big.NewInt(1000000) // 1M for signature verification + paymaster validation (very conservative)
 	DEFAULT_PREVERIFICATION_GAS    = big.NewInt(50000)   // 50K for bundler overhead
 
@@ -43,8 +43,8 @@ var (
 	// - Initialization with owner (~100K-300K)
 	// - validateUserOp() with AAConfig.controller() call (~200K-500K)
 	// - Paymaster validation if present
-	// Confirmed via bundler logs: 150K fails with AA13, 1.6M succeeds
-	DEPLOYMENT_VERIFICATION_GAS_LIMIT = big.NewInt(1600000) // 1.6M gas for wallet deployment + validation
+	// Observed AA95 on Sepolia with 2.4M; use 3.0M to avoid bundler struct caps
+	DEPLOYMENT_VERIFICATION_GAS_LIMIT = big.NewInt(3000000) // 3.0M gas for wallet deployment + validation
 
 	callGasLimit         = DEFAULT_CALL_GAS_LIMIT
 	verificationGasLimit = DEFAULT_VERIFICATION_GAS_LIMIT
@@ -61,8 +61,8 @@ var (
 	// When true: Skips bundler's eth_estimateUserOperationGas call and uses hard-coded gas limits
 	// This avoids the AA33 paymaster nonce bug where bundler increments paymaster nonce during estimation
 	// See: BUNDLER-PAYMASTER-NONCE-BUG.md for details
-	// Default: false (use bundler estimation for backwards compatibility)
-	UseLocalGasEstimation = false
+	// Default: true (prefer stable final-signature flow to avoid bundler cache mismatches)
+	UseLocalGasEstimation = true
 )
 
 // VerifyingPaymasterRequest contains the parameters needed for paymaster functionality. This use the reference from https://github.com/eth-optimism/paymaster-reference
@@ -495,9 +495,12 @@ func sendUserOpCore(
 		log.Printf("🔄 DEPLOYED WORKFLOW: Attempt %d/%d - Using nonce: %s", retry+1, maxRetries, userOp.Nonce.String())
 
 		// Re-estimate gas with current nonce (only on first attempt or if previous failed due to gas)
-		// IMPORTANT: Skip gas re-estimation if paymaster is present, as it would invalidate the paymaster signature
+		// IMPORTANT:
+		// - Skip gas re-estimation if paymaster is present (would invalidate paymaster signature)
+		// - Skip gas re-estimation entirely when UseLocalGasEstimation is enabled to avoid
+		//   introducing a dummy-signed estimation that can diverge from the final signed UserOp.
 		hasPaymaster := len(userOp.PaymasterAndData) > 0
-		if !hasPaymaster && (retry == 0 || (err != nil && strings.Contains(err.Error(), "gas"))) {
+		if !UseLocalGasEstimation && !hasPaymaster && (retry == 0 || (err != nil && strings.Contains(err.Error(), "gas"))) {
 			userOp.Signature, _ = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, dummySigForGasEstimation.Bytes())
 
 			// Gas estimation debug logging
@@ -543,6 +546,8 @@ func sendUserOpCore(
 			} else {
 				log.Printf("❌ GAS ESTIMATION FAILED on retry %d: %v", retry+1, gasErr)
 			}
+		} else if UseLocalGasEstimation && !hasPaymaster {
+			log.Printf("🔧 GAS ESTIMATION: Skipping bundler estimation due to UseLocalGasEstimation=true (self-funded)")
 		}
 
 		// Sign with current nonce
@@ -591,6 +596,15 @@ func sendUserOpCore(
 			}
 		} else {
 			log.Printf("  ❌ BALANCE CHECK FAILED: %v", balErr)
+		}
+
+		// Final preflight estimation with the fully signed, final UserOp.
+		// Important: DO NOT mutate any field from the result, to keep the signature stable.
+		// This ensures the bundler's cached UserOp (from estimation) matches exactly what we send.
+		if gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *userOp, aa.EntrypointAddress, map[string]any{}); gasErr == nil && gas != nil {
+			log.Printf("🔍 FINAL PREFLIGHT ESTIMATION: ok (no field changes)")
+		} else {
+			log.Printf("⚠️ FINAL PREFLIGHT ESTIMATION skipped or failed: %v", gasErr)
 		}
 
 		// Attempt to send
