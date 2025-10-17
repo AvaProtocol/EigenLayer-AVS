@@ -1113,6 +1113,17 @@ func (tc *TenderlyClient) decodeReturnData(hexData string, contractABI string, m
 }
 
 // decodeReturnDataComplete decodes all return values from a method call
+//
+// Return value handling:
+//   - Single unnamed return (e.g., approve() -> bool): Flattened to just the value (e.g., true)
+//   - Multiple unnamed returns: Wrapped in object with output_0, output_1, etc.
+//   - Named returns: Wrapped in object with actual parameter names
+//
+// Examples:
+//   - approve(address,uint256) -> bool: Returns true (not {output_0: true})
+//   - balanceOf(address) -> uint256: Returns "1000000" (not {output_0: "1000000"})
+//   - getReserves() -> (uint112,uint112,uint32): Returns {output_0: "...", output_1: "...", output_2: "..."}
+//   - getReserves() -> (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast): Returns {reserve0: "...", reserve1: "...", blockTimestampLast: "..."}
 func (tc *TenderlyClient) decodeReturnDataComplete(hexData string, contractABI string, methodName string) *ContractWriteReturnData {
 	if contractABI == "" || methodName == "" || hexData == "" || hexData == "0x" {
 		return nil
@@ -1149,7 +1160,43 @@ func (tc *TenderlyClient) decodeReturnDataComplete(hexData string, contractABI s
 		return nil
 	}
 
-	// Create a structured map of all return values
+	// Special case: Single unnamed return value should be returned directly (not wrapped in output_0)
+	// This handles common patterns like approve() returning bool, transfer() returning bool, etc.
+	if len(values) == 1 && method.Outputs[0].Name == "" {
+		output := method.Outputs[0]
+		var formattedValue interface{}
+
+		switch output.Type.String() {
+		case "uint256", "uint160", "uint32", "uint24", "uint8":
+			formattedValue = fmt.Sprintf("%v", values[0])
+		case "address":
+			if addr, ok := values[0].(common.Address); ok {
+				formattedValue = addr.Hex()
+			} else {
+				formattedValue = fmt.Sprintf("%v", values[0])
+			}
+		case "bool":
+			formattedValue = values[0]
+		default:
+			formattedValue = fmt.Sprintf("%v", values[0])
+		}
+
+		tc.logger.Info("🔍 Decoded single unnamed output (flattened)",
+			"method", methodName,
+			"type", output.Type.String(),
+			"value", formattedValue)
+
+		// Return the value directly without wrapping in a field name
+		if jsonBytes, err := json.Marshal(formattedValue); err == nil {
+			return &ContractWriteReturnData{
+				Name:  methodName + "_return",
+				Type:  output.Type.String(),
+				Value: string(jsonBytes),
+			}
+		}
+	}
+
+	// For multiple outputs or named outputs: Create a structured map
 	resultMap := make(map[string]interface{})
 	for i, value := range values {
 		output := method.Outputs[i]
