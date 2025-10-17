@@ -620,34 +620,3 @@ func GetMapKeys(m map[string]interface{}) []string {
 	}
 	return keys
 }
-
-// redactHeaders creates a copy of headers with sensitive values redacted for safe logging
-func redactHeaders(headers map[string]string) map[string]string {
-	if headers == nil {
-		return nil
-	}
-
-	redacted := make(map[string]string, len(headers))
-	for key, value := range headers {
-		lowerKey := strings.ToLower(key)
-
-		// Redact Authorization headers (Bearer tokens, API keys, etc.)
-		if lowerKey == "authorization" {
-			if strings.HasPrefix(value, "Bearer ") {
-				redacted[key] = "Bearer ***REDACTED***"
-			} else if strings.HasPrefix(value, "Basic ") {
-				redacted[key] = "Basic ***REDACTED***"
-			} else {
-				redacted[key] = "***REDACTED***"
-			}
-		} else if lowerKey == "x-api-key" || lowerKey == "api-key" || strings.Contains(lowerKey, "token") {
-			// Redact other common API key headers
-			redacted[key] = "***REDACTED***"
-		} else {
-			// Keep other headers as-is
-			redacted[key] = value
-		}
-	}
-
-	return redacted
-}

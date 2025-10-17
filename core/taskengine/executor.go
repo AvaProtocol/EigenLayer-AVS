@@ -565,6 +565,8 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 // sanitizeExecutionForPersistence walks execution steps and replaces any NaN/Inf float
 // occurrences inside step output/config/metadata with safe JSON values (nil or 0).
+// NOTE: This function does NOT redact sensitive data - it only handles NaN/Inf for JSON compatibility.
+// The actual execution data is preserved as-is for users. Redaction only happens in aggregator logs.
 func sanitizeExecutionForPersistence(exec *avsproto.Execution) {
 	if exec == nil || len(exec.Steps) == 0 {
 		return
@@ -620,7 +622,9 @@ func sanitizeProtoValue(v *structpb.Value) *structpb.Value {
 	return pb
 }
 
-// sanitizeInterface recursively replaces NaN/Inf with safe values and redacts sensitive credentials.
+// sanitizeInterface recursively replaces NaN/Inf with safe values.
+// NOTE: This function does NOT redact sensitive data - it only handles NaN/Inf for JSON compatibility.
+// Redaction should only happen in logging functions (see core/utils.go and core/taskengine/utils.go).
 func sanitizeInterface(x interface{}) interface{} {
 	switch t := x.(type) {
 	case float64:
@@ -628,22 +632,10 @@ func sanitizeInterface(x interface{}) interface{} {
 			return 0
 		}
 		return t
-	case string:
-		// Redact URLs with API keys
-		return redactSensitiveString(t)
 	case map[string]interface{}:
 		m := make(map[string]interface{}, len(t))
 		for k, v := range t {
-			// Redact sensitive map keys
-			if isSensitiveKey(k) {
-				if strVal, ok := v.(string); ok {
-					m[k] = redactSensitiveString(strVal)
-				} else {
-					m[k] = "***REDACTED***"
-				}
-			} else {
-				m[k] = sanitizeInterface(v)
-			}
+			m[k] = sanitizeInterface(v)
 		}
 		return m
 	case []interface{}:
@@ -655,72 +647,6 @@ func sanitizeInterface(x interface{}) interface{} {
 	default:
 		return x
 	}
-}
-
-// isSensitiveKey checks if a map key contains sensitive information
-func isSensitiveKey(key string) bool {
-	lowerKey := strings.ToLower(key)
-	sensitiveKeys := []string{
-		"authorization",
-		"api-key",
-		"apikey",
-		"x-api-key",
-		"access_token",
-		"accesstoken",
-		"bearer",
-		"bundlerurl",
-		"bundler_url",
-	}
-
-	for _, sensitive := range sensitiveKeys {
-		if strings.Contains(lowerKey, sensitive) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// redactSensitiveString redacts URLs and strings that might contain sensitive information
-func redactSensitiveString(s string) string {
-	// Redact URLs with API keys
-	if strings.Contains(s, "apikey=") || strings.Contains(s, "access_token=") {
-		// Redact API key parameter in URLs
-		if strings.Contains(s, "apikey=") {
-			parts := strings.Split(s, "apikey=")
-			if len(parts) > 1 {
-				keyPart := parts[1]
-				endIdx := strings.Index(keyPart, "&")
-				if endIdx == -1 {
-					s = parts[0] + "apikey=***REDACTED***"
-				} else {
-					s = parts[0] + "apikey=***REDACTED***" + keyPart[endIdx:]
-				}
-			}
-		}
-		if strings.Contains(s, "access_token=") {
-			parts := strings.Split(s, "access_token=")
-			if len(parts) > 1 {
-				keyPart := parts[1]
-				endIdx := strings.Index(keyPart, "&")
-				if endIdx == -1 {
-					s = parts[0] + "access_token=***REDACTED***"
-				} else {
-					s = parts[0] + "access_token=***REDACTED***" + keyPart[endIdx:]
-				}
-			}
-		}
-	}
-
-	// Redact Bearer tokens
-	if strings.HasPrefix(s, "Bearer ") {
-		return "Bearer ***REDACTED***"
-	}
-	if strings.HasPrefix(s, "Basic ") {
-		return "Basic ***REDACTED***"
-	}
-
-	return s
 }
 
 // validateWalletOwnership performs comprehensive wallet ownership validation
