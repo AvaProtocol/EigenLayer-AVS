@@ -846,8 +846,17 @@ func BuildUserOpWithPaymaster(
 		log.Printf("🔍 Gas Override: CallGasLimit set to %s", callGasOverride.String())
 	}
 	if verificationGasOverride != nil {
-		userOp.VerificationGasLimit = verificationGasOverride
-		log.Printf("🔍 Gas Override: VerificationGasLimit set to %s", verificationGasOverride.String())
+		// CRITICAL: Do NOT override verificationGasLimit when we have initCode (deployment scenario)
+		// Bundler estimates ~1M but wallet deployment needs 3M (DEPLOYMENT_VERIFICATION_GAS_LIMIT)
+		// Overriding with bundler's estimate causes "Invalid UserOp signature" errors
+		hasInitCode := len(userOp.InitCode) > 0
+		if hasInitCode {
+			log.Printf("🔧 Gas Override SKIPPED for VerificationGasLimit: InitCode present, keeping deployment limit %s (bundler suggested %s)",
+				userOp.VerificationGasLimit.String(), verificationGasOverride.String())
+		} else {
+			userOp.VerificationGasLimit = verificationGasOverride
+			log.Printf("🔍 Gas Override: VerificationGasLimit set to %s", verificationGasOverride.String())
+		}
 	}
 	if preVerificationGasOverride != nil {
 		userOp.PreVerificationGas = preVerificationGasOverride
