@@ -36,30 +36,18 @@ audit:
 	go run honnef.co/go/tools/cmd/staticcheck@latest -checks=all,-ST1000,-U1000 ./...
 	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 	golangci-lint run ./...
-	go test -race -buildvcs -vet=off ./...
+	go test -race -buildvcs -vet=off $(shell go list ./... | grep -v '/scripts$$')
 
 
-## test: run all tests excluding long-running integration tests
+## test: run all tests with coverage (excluding long-running integration tests)
 .PHONY: test
 test:
+	go clean -testcache
 	go clean -cache
 	go mod tidy
-	go build ./...
-	go test -v -race -buildvcs ./...
-
-## test/cover: run all tests and display coverage excluding long-running integration tests
-.PHONY: test/cover
-test/cover:
-	go clean -cache
-	go mod tidy
-	go build ./...
-	go test -v -race -buildvcs -coverprofile=/tmp/coverage.out ./...
+	go build $(shell go list ./... | grep -v '/scripts$$')
+	go test -v -race -buildvcs -coverprofile=/tmp/coverage.out $(shell go list ./... | grep -v '/scripts$$')
 	go tool cover -html=/tmp/coverage.out
-
-## test/quick: run tests without race detection for faster feedback during development
-.PHONY: test/quick
-test/quick:
-	go test -v ./...
 
 ## test/integration: run long-running integration tests (usually failing, for debugging only)
 .PHONY: test/integration
@@ -68,34 +56,19 @@ test/integration:
 	@echo "⚠️  These are excluded from regular test runs and are for debugging purposes only"
 	go clean -cache
 	go mod tidy
-	go build ./...
+	go build $(shell go list ./... | grep -v '/scripts$$')
 	go test -v -race -buildvcs -tags=integration ./integration_test/
 
-## test/all: run all tests including integration tests (not recommended for CI)
-.PHONY: test/all
-test/all:
-	@echo "⚠️  Running ALL tests including long-running integration tests..."
-	go clean -cache
-	go mod tidy
-	go build ./...
-	go test -v -race -buildvcs -tags=integration ./...
 
 ## test/package: run tests for a specific package (usage: make test/package PKG=./core/taskengine)
 .PHONY: test/package
 test/package:
-	go clean -cache
-	go mod tidy
-	go build ./...
-	go test -v -race -buildvcs $(PKG)
-
-## test/clean: run tests with clean cache to ensure consistency
-.PHONY: test/clean
-test/clean:
 	go clean -testcache
 	go clean -cache
 	go mod tidy
-	go build ./...
-	go test -v -race -buildvcs ./...
+	go build $(shell go list ./... | grep -v '/scripts$$')
+	go test -v -race -buildvcs $(PKG)
+
 
 ## cicd-failed: print cleaned test failures from GitHub Actions logs (usage: make cicd-failed RUN_ID=123456789)
 .PHONY: cicd-failed
@@ -223,6 +196,6 @@ operator-default: build
 	./out/ap operator --config=config/operator.yaml
 
 
-## dev-clean: cleanup storage data
-dev-clean:
+## clean: cleanup storage data
+clean:
 	rm -rf /tmp/ap-avs /tmp/ap.sock
