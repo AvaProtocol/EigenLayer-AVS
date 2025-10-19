@@ -101,8 +101,24 @@ func TaskTriggerKey(t *model.Task, executionID string) []byte {
 	))
 }
 
+// Pending execution queue (per task) — used to tie pre-created execution IDs
+// to operator-triggered executions in FIFO order
+func PendingExecutionPrefix(taskID string) []byte {
+	return []byte(fmt.Sprintf("pending:%s:", taskID))
+}
+
+func PendingExecutionKey(t *model.Task, executionID string) []byte {
+	return []byte(fmt.Sprintf("pending:%s:%s", t.Id, executionID))
+}
+
 func ExecutionIdFromStorageKey(key []byte) string {
 	// key layout: history:01JG2FE5MDVKBPHEG0PEYSDKAC:01JG2FE5MFKTH0754RGF2DMVY7
+	return string(key[35:])
+}
+
+func ExecutionIdFromPendingKey(key []byte) string {
+	// key layout: pending:01JG2FE5MDVKBPHEG0PEYSDKAC:01JG2FE5MFKTH0754RGF2DMVY7
+	// "pending:" = 8 bytes, task id = 26 bytes, colon = 1 => start at 8+26+1 = 35
 	return string(key[35:])
 }
 

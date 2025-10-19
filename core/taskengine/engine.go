@@ -1575,7 +1575,28 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 	queueTaskData := QueueExecutionData{
 		TriggerType:   triggerData.Type,
 		TriggerOutput: triggerData.Output,
-		ExecutionID:   ulid.Make().String(),
+		ExecutionID:   "",
+	}
+	// If there is a pre-created pending execution id for this task, consume it FIFO; otherwise create new
+	// Only for operator-driven notifications path
+	{
+		pendingKeys, _ := n.db.GetKeyHasPrefix(PendingExecutionPrefix(task.Id))
+		var pickedID string
+		for _, k := range pendingKeys {
+			id := ExecutionIdFromPendingKey(k)
+			if pickedID == "" || id < pickedID {
+				pickedID = id
+			}
+		}
+		if pickedID != "" {
+			queueTaskData.ExecutionID = pickedID
+			// consume the pending entry
+			_ = n.db.Delete(PendingExecutionKey(task, pickedID))
+		} else {
+			queueTaskData.ExecutionID = ulid.Make().String()
+			// ensure pending status exists so GetExecutionStatus returns PENDING until completion
+			_ = n.setExecutionStatusQueue(task, queueTaskData.ExecutionID)
+		}
 	}
 
 	// For event triggers, if we have enriched data, convert it to a map format that survives JSON serialization
@@ -1967,26 +1988,33 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 				"user", user.Address.String())
 		}
 
-		// Send immediate trigger instruction to operator
-		err := n.instructOperatorImmediateTrigger(task.Id)
-		if err != nil {
-			if n.logger != nil {
-				n.logger.Error("Failed to instruct operator for immediate trigger", "error", err, "task_id", task.Id)
+		// For non-blocking mode, pre-create execution ID, persist Pending status and queue marker,
+		// then instruct operator and return immediately (do NOT enqueue here).
+		if !payload.IsBlocking {
+			preExecID := ulid.Make().String()
+			// Mark pending in queue so GetExecutionStatus returns PENDING
+			if err := n.setExecutionStatusQueue(task, preExecID); err != nil {
+				return nil, err
 			}
-			// Fall back to original logic if operator instruction fails
-		} else if !payload.IsBlocking {
-			// For non-blocking mode, return success response - the operator will handle the actual trigger with real blockchain data
-			response := &avsproto.TriggerTaskResp{
-				ExecutionId: ulid.Make().String(), // Generate execution ID for tracking
-				WorkflowId:  payload.TaskId,
+			// Persist pending execution ID for FIFO consumption when operator notifies
+			if err := n.db.Set(PendingExecutionKey(task, preExecID), []byte("1")); err != nil {
+				n.logger.Error("Failed to persist pending execution id", "task_id", task.Id, "execution_id", preExecID, "error", err)
+				return nil, status.Errorf(codes.Internal, "failed to persist pending execution id")
 			}
 
-			// For non-blocking mode, set startAt to indicate trigger was initiated
+			// Best-effort operator instruction (ignore errors; operator may connect later)
+			_ = n.instructOperatorImmediateTrigger(task.Id)
+
 			startTime := time.Now().UnixMilli()
-			response.StartAt = &startTime
-
-			return response, nil
+			resp := &avsproto.TriggerTaskResp{
+				ExecutionId: preExecID,
+				WorkflowId:  payload.TaskId,
+				Status:      avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING,
+				StartAt:     &startTime,
+			}
+			return resp, nil
 		}
+
 		// For blocking mode, continue with normal execution flow even for block triggers
 	}
 
