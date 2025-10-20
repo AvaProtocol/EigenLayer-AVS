@@ -460,8 +460,6 @@ func sendUserOpShared(
 	senderOverride *common.Address,
 	wsClient *ethclient.Client,
 ) (*userop.UserOperation, *types.Receipt, error) {
-	log.Printf("sendUserOpShared started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
-
 	var userOp *userop.UserOperation
 	var err error
 	entrypoint := smartWalletConfig.EntrypointAddress
@@ -482,38 +480,27 @@ func sendUserOpShared(
 	// This is CRITICAL: we need to estimate gas for the WRAPPED operation, not the unwrapped one
 	var wrappedForReimbursement bool
 	if paymasterReq != nil && EnablePaymasterReimbursement {
-		log.Printf("💳 PAYMASTER REIMBURSEMENT: Enabled, wrapping calldata BEFORE gas estimation")
-
 		// Get reimbursement recipient from config (paymaster owner address)
 		reimbursementRecipient := smartWalletConfig.PaymasterOwnerAddress
 		if reimbursementRecipient == (common.Address{}) {
-			log.Printf("⚠️ PaymasterOwnerAddress not configured, using paymaster address itself")
 			reimbursementRecipient = paymasterReq.PaymasterAddress
-		} else {
-			log.Printf("   Reimbursement will be sent to paymaster owner: %s", reimbursementRecipient.Hex())
 		}
 
 		// Wrap with estimated reimbursement (using nil gas estimate for now, will use defaults)
 		wrapped, reimbursement, wrapErr := wrapWithReimbursement(client, callData, reimbursementRecipient, nil)
 		if wrapErr != nil {
-			log.Printf("❌ Failed to wrap with reimbursement: %v", wrapErr)
-			log.Printf("   Continuing without reimbursement (paymaster absorbs gas costs)")
+			log.Printf("Failed to wrap with reimbursement: %v (paymaster absorbs gas costs)", wrapErr)
 		} else {
 			callData = wrapped
 			wrappedForReimbursement = true
-			log.Printf("✅ Calldata wrapped with reimbursement of %s wei (%.6f ETH)", reimbursement.String(), float64(reimbursement.Int64())/1e18)
-			log.Printf("   Now estimating gas for the WRAPPED operation...")
+			log.Printf("Paymaster reimbursement: %s wei, recipient: %s", reimbursement.String(), reimbursementRecipient.Hex())
 		}
-	} else if paymasterReq != nil && !EnablePaymasterReimbursement {
-		log.Printf("💳 PAYMASTER REIMBURSEMENT: Disabled (paymaster absorbs gas costs)")
 	}
 
 	// Step 1: Estimate gas for the FINAL calldata (wrapped or unwrapped)
 	// Build a temporary UserOp to estimate gas
 	var estimatedCallGas, estimatedVerificationGas, estimatedPreVerificationGas *big.Int
 	if paymasterReq != nil {
-		log.Printf("🔍 GAS ESTIMATION: Estimating gas for %s operation...", map[bool]string{true: "WRAPPED", false: "UNWRAPPED"}[wrappedForReimbursement])
-
 		// CRITICAL: Skip bundler estimation for wrapped operations - the bundler can't simulate them correctly
 		// The wrapped operation includes ETH transfers that the bundler's simulation can't handle properly
 		if wrappedForReimbursement {
@@ -521,10 +508,8 @@ func sendUserOpShared(
 			estimatedCallGas = new(big.Int).Mul(DEFAULT_CALL_GAS_LIMIT, big.NewInt(5)) // 1M for executeBatchWithValues
 			estimatedVerificationGas = DEFAULT_VERIFICATION_GAS_LIMIT
 			estimatedPreVerificationGas = DEFAULT_PREVERIFICATION_GAS
-			log.Printf("   Using CONSERVATIVE hardcoded gas limits for wrapped operation (bundler can't simulate)")
-			log.Printf("   CallGasLimit: %s (5x default for executeBatchWithValues)", estimatedCallGas.String())
-			log.Printf("   VerificationGasLimit: %s", estimatedVerificationGas.String())
-			log.Printf("   PreVerificationGas: %s", estimatedPreVerificationGas.String())
+			log.Printf("Gas estimation: using hardcoded limits for wrapped operation (callGas=%s, verificationGas=%s, preVerificationGas=%s)",
+				estimatedCallGas.String(), estimatedVerificationGas.String(), estimatedPreVerificationGas.String())
 		} else {
 			// Estimate gas with the EXACT UserOp we're going to send (with WRAPPED or UNWRAPPED calldata)
 			// CRITICAL: If wrapped, we need a HIGHER initial gas limit for bundler's binary search
@@ -533,7 +518,6 @@ func sendUserOpShared(
 				// Increase initial gas limit by 3x for wrapped operations
 				// The bundler uses this as the MAX for its binary search
 				initialCallGasLimit = new(big.Int).Mul(callGasLimit, big.NewInt(3))
-				log.Printf("   Using 3x callGasLimit for wrapped operation: %s (bundler's binary search max)", initialCallGasLimit.String())
 			}
 
 			tempUserOp, tempErr := BuildUserOpWithPaymaster(
@@ -552,7 +536,7 @@ func sendUserOpShared(
 				preVerificationGas,   // Use default gas limits for estimation
 			)
 			if tempErr != nil {
-				log.Printf("❌ Failed to build temp UserOp for gas estimation: %v", tempErr)
+				log.Printf("Failed to build temp UserOp for gas estimation: %v", tempErr)
 				return nil, nil, tempErr
 			}
 
@@ -562,16 +546,13 @@ func sendUserOpShared(
 			// Estimate gas using bundler with the EXACT UserOp structure (including paymaster and wrapped calldata)
 			gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *tempUserOp, aa.EntrypointAddress, map[string]any{})
 			if gasErr != nil {
-				log.Printf("❌ GAS ESTIMATION FAILED: %v", gasErr)
-				log.Printf("   Continuing with hardcoded gas limits...")
+				log.Printf("Gas estimation failed: %v (using hardcoded limits)", gasErr)
 			} else if gas != nil {
 				estimatedCallGas = gas.CallGasLimit
 				estimatedVerificationGas = gas.VerificationGasLimit
 				estimatedPreVerificationGas = gas.PreVerificationGas
-				log.Printf("✅ GAS ESTIMATION SUCCESS (with paymaster, %s):", map[bool]string{true: "WRAPPED", false: "UNWRAPPED"}[wrappedForReimbursement])
-				log.Printf("   CallGasLimit: %s", estimatedCallGas.String())
-				log.Printf("   VerificationGasLimit: %s", estimatedVerificationGas.String())
-				log.Printf("   PreVerificationGas: %s", estimatedPreVerificationGas.String())
+				log.Printf("Gas estimation: callGas=%s, verificationGas=%s, preVerificationGas=%s",
+					estimatedCallGas.String(), estimatedVerificationGas.String(), estimatedPreVerificationGas.String())
 			}
 		}
 	}
@@ -600,11 +581,9 @@ func sendUserOpShared(
 	}
 
 	if err != nil {
-		log.Printf("🚨 DEPLOYED WORKFLOW ERROR: Failed to build UserOp - %v", err)
+		log.Printf("Failed to build UserOp: %v", err)
 		return nil, nil, err
 	}
-
-	log.Printf("🔍 DEPLOYED WORKFLOW: UserOp built successfully, sending to bundler - sender: %s", userOp.Sender.Hex())
 
 	// Send the UserOp to the bundler using the existing sendUserOpCore function
 	txResult, err := sendUserOpCore(smartWalletConfig, userOp, client, bundlerClient)
@@ -612,27 +591,19 @@ func sendUserOpShared(
 		return userOp, nil, err
 	}
 
-	// 🔍 TRANSACTION WAITING DEBUG: Start waiting for on-chain confirmation
-	log.Printf("🔍 TRANSACTION WAITING: Starting to wait for UserOp confirmation")
-	log.Printf("  UserOp Hash: %s", txResult)
-	log.Printf("  Entrypoint: %s", entrypoint.Hex())
-
 	// Wait for UserOp confirmation using exponential backoff polling
 	// This is more efficient than a fixed 3-minute timeout and handles bundler delays gracefully
 	receipt, err := waitForUserOpConfirmation(client, wsClient, entrypoint, txResult)
 	if err != nil {
-		log.Printf("❌ TRANSACTION WAITING: Failed to get confirmation: %v", err)
+		log.Printf("Failed to get UserOp confirmation (hash=%s): %v", txResult, err)
 		return userOp, nil, nil
 	}
 	if receipt == nil {
-		log.Printf("⚠️ TRANSACTION WAITING: No receipt received (timeout or other issue)")
+		log.Printf("No receipt received for UserOp (hash=%s)", txResult)
 		return userOp, nil, nil
 	}
 
-	log.Printf("✅ TRANSACTION WAITING: UserOp confirmed on-chain")
-	log.Printf("  Block Number: %d", receipt.BlockNumber.Uint64())
-	log.Printf("  Transaction Hash: %s", receipt.TxHash.Hex())
-	log.Printf("  Gas Used: %d", receipt.GasUsed)
+	log.Printf("UserOp confirmed: block=%d, txHash=%s, gasUsed=%d", receipt.BlockNumber.Uint64(), receipt.TxHash.Hex(), receipt.GasUsed)
 
 	return userOp, receipt, nil
 }
@@ -697,15 +668,10 @@ func sendUserOpCore(
 	var freshNonce *big.Int
 	if userOp.Nonce == nil {
 		freshNonce = aa.MustNonce(client, userOp.Sender, accountSalt)
-		log.Printf("🔍 NONCE DEBUG: Setting nonce to fresh value from chain: %s", freshNonce.String())
 		userOp.Nonce = freshNonce
-	} else {
-		log.Printf("🔍 NONCE DEBUG: Keeping existing nonce: %s (not refreshing to avoid invalidating signatures)", userOp.Nonce.String())
 	}
 
 	for retry := 0; retry < maxRetries; retry++ {
-		log.Printf("🔄 DEPLOYED WORKFLOW: Attempt %d/%d - Using nonce: %s", retry+1, maxRetries, userOp.Nonce.String())
-
 		// Re-estimate gas with current nonce (only on first attempt or if previous failed due to gas)
 		// IMPORTANT:
 		// - Skip gas re-estimation if paymaster is present (would invalidate paymaster signature)
@@ -713,48 +679,21 @@ func sendUserOpCore(
 		if !hasPaymaster && (retry == 0 || (err != nil && strings.Contains(err.Error(), "gas"))) {
 			userOp.Signature, _ = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, dummySigForGasEstimation.Bytes())
 
-			// Gas estimation debug logging
-			log.Printf("GAS ESTIMATION DEBUG: Starting gas estimation for UserOp")
-			log.Printf("  Sender: %s", userOp.Sender.Hex())
-			log.Printf("  Nonce: %s", userOp.Nonce.String())
-			log.Printf("  CallData length: %d bytes", len(userOp.CallData))
-			log.Printf("  InitCode length: %d bytes", len(userOp.InitCode))
-			log.Printf("  MaxFeePerGas: %s wei", userOp.MaxFeePerGas.String())
-			log.Printf("  MaxPriorityFeePerGas: %s wei", userOp.MaxPriorityFeePerGas.String())
 			gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *userOp, aa.EntrypointAddress, map[string]any{})
 			if gasErr == nil && gas != nil {
-				// Gas estimation success logging
-				log.Printf("✅ GAS ESTIMATION SUCCESS:")
-				log.Printf("  PreVerificationGas: %s wei", gas.PreVerificationGas.String())
-				log.Printf("  VerificationGasLimit: %s wei", gas.VerificationGasLimit.String())
-				log.Printf("  CallGasLimit: %s wei", gas.CallGasLimit.String())
-
-				// Calculate total gas and cost estimates
-				totalGasLimit := new(big.Int).Add(gas.PreVerificationGas, new(big.Int).Add(gas.VerificationGasLimit, gas.CallGasLimit))
-				estimatedCost := new(big.Int).Mul(totalGasLimit, userOp.MaxFeePerGas)
-				log.Printf("  Total Gas Limit: %s", totalGasLimit.String())
-				log.Printf("  Estimated Max Cost: %s wei", estimatedCost.String())
-
 				userOp.PreVerificationGas = gas.PreVerificationGas
 				userOp.VerificationGasLimit = gas.VerificationGasLimit
 				userOp.CallGasLimit = gas.CallGasLimit
+				log.Printf("Gas estimated: callGas=%s, verificationGas=%s, preVerificationGas=%s",
+					gas.CallGasLimit.String(), gas.VerificationGasLimit.String(), gas.PreVerificationGas.String())
 			} else if retry == 0 {
-				// Gas estimation failure logging
-				log.Printf("❌ GAS ESTIMATION FAILED:")
-				log.Printf("  Error: %v", gasErr)
-				log.Printf("  Entry Point: %s", aa.EntrypointAddress.Hex())
-				log.Printf("  Continuing with hardcoded gas limits...")
-
 				// Use hardcoded gas limits as fallback (same as paymaster version)
 				userOp.PreVerificationGas = big.NewInt(50000)     // 50k gas
 				userOp.VerificationGasLimit = big.NewInt(1000000) // 1M gas
 				userOp.CallGasLimit = big.NewInt(100000)          // 100k gas
-
-				log.Printf("🔍 Gas Override: CallGasLimit set to 100000")
-				log.Printf("🔍 Gas Override: VerificationGasLimit set to 1000000")
-				log.Printf("🔍 Gas Override: PreVerificationGas set to 50000")
+				log.Printf("Gas estimation failed: %v (using hardcoded limits)", gasErr)
 			} else {
-				log.Printf("❌ GAS ESTIMATION FAILED on retry %d: %v", retry+1, gasErr)
+				log.Printf("Gas estimation failed on retry %d: %v", retry+1, gasErr)
 			}
 		}
 
@@ -762,31 +701,8 @@ func sendUserOpCore(
 		userOpHash := userOp.GetUserOpHash(aa.EntrypointAddress, chainID)
 		userOp.Signature, err = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, userOpHash.Bytes())
 		if err != nil {
-			log.Printf("🚨 DEPLOYED WORKFLOW ERROR: Failed to sign UserOp - %v", err)
 			return "", fmt.Errorf("failed to sign UserOp: %w", err)
 		}
-
-		// Bundler send debug logging
-		log.Printf("BUNDLER SEND DEBUG: Preparing to send UserOp to bundler")
-		log.Printf("  Final Gas Limits:")
-		log.Printf("    CallGasLimit: %s", userOp.CallGasLimit.String())
-		log.Printf("    VerificationGasLimit: %s", userOp.VerificationGasLimit.String())
-		log.Printf("    PreVerificationGas: %s", userOp.PreVerificationGas.String())
-		log.Printf("  Final Gas Prices:")
-		log.Printf("    MaxFeePerGas: %s wei", userOp.MaxFeePerGas.String())
-		log.Printf("    MaxPriorityFeePerGas: %s wei", userOp.MaxPriorityFeePerGas.String())
-		log.Printf("  UserOp Details:")
-		log.Printf("    Sender: %s", userOp.Sender.Hex())
-		log.Printf("    Nonce: %s", userOp.Nonce.String())
-		log.Printf("    InitCode: %d bytes (%s...)", len(userOp.InitCode), func() string {
-			if len(userOp.InitCode) > 20 {
-				return common.Bytes2Hex(userOp.InitCode[:20])
-			}
-			return common.Bytes2Hex(userOp.InitCode)
-		}())
-		log.Printf("    CallData: %d bytes", len(userOp.CallData))
-		log.Printf("    PaymasterAndData: %d bytes", len(userOp.PaymasterAndData))
-		log.Printf("    Signature: %d bytes", len(userOp.Signature))
 
 		// Final preflight estimation with the fully signed, final UserOp.
 		// Important: DO NOT mutate any field from the result, to keep the signature stable.
@@ -796,13 +712,9 @@ func sendUserOpCore(
 		// First 4 bytes of calldata = function selector (method ID)
 		isWrappedOperation := len(userOp.CallData) >= 4 && hexutil.Encode(userOp.CallData[:4]) == "0xc3ff72fc"
 		if !isWrappedOperation {
-			if gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *userOp, aa.EntrypointAddress, map[string]any{}); gasErr == nil && gas != nil {
-				log.Printf("🔍 FINAL PREFLIGHT ESTIMATION: ok (no field changes)")
-			} else {
-				log.Printf("⚠️ FINAL PREFLIGHT ESTIMATION skipped or failed: %v", gasErr)
+			if _, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *userOp, aa.EntrypointAddress, map[string]any{}); gasErr != nil {
+				log.Printf("Preflight estimation failed: %v", gasErr)
 			}
-		} else {
-			log.Printf("⚠️ FINAL PREFLIGHT ESTIMATION skipped for wrapped operation (bundler can't simulate executeBatchWithValues)")
 		}
 
 		// Attempt to send
@@ -810,39 +722,28 @@ func sendUserOpCore(
 
 		// Bundler send result logging
 		if err == nil && txResult != "" {
-			log.Printf("✅ BUNDLER SEND SUCCESS:")
-			log.Printf("  Attempt: %d/%d", retry+1, maxRetries)
-			log.Printf("  Nonce used: %s", userOp.Nonce.String())
-			log.Printf("  UserOp hash: %s", txResult)
+			log.Printf("UserOp sent (attempt %d/%d): hash=%s, nonce=%s, sender=%s", retry+1, maxRetries, txResult, userOp.Nonce.String(), userOp.Sender.Hex())
 
 			// Manually trigger bundling immediately (helps with development/testing)
 			// This is only needed for local bundlers that don't auto-bundle frequently
-			log.Printf("🔨 MANUAL BUNDLE TRIGGER: Calling debug_bundler_sendBundleNow...")
 			triggerErr := bundlerClient.SendBundleNow(context.Background())
 			if triggerErr != nil {
-				log.Printf("⚠️  Manual bundle trigger failed (non-fatal): %v", triggerErr)
-				log.Printf("   Bundler will auto-bundle based on --bundle_interval setting")
-			} else {
-				log.Printf("✅ Manual bundle trigger successful - bundler should process immediately")
+				log.Printf("Manual bundle trigger failed (non-fatal): %v", triggerErr)
 			}
 
 			// Increment nonce for next potential UserOp (prevents nonce collision for sequential txs)
 			// This allows the next UserOp to use nonce+1 even if this UserOp hasn't been mined yet
 			userOp.Nonce = new(big.Int).Add(userOp.Nonce, big.NewInt(1))
-			log.Printf("🔢 NONCE INCREMENT: Next nonce will be %s (for sequential UserOps)", userOp.Nonce.String())
 
 			break
 		}
 
 		// Bundler send failure logging
-		log.Printf("❌ BUNDLER SEND FAILED:")
-		log.Printf("  Attempt: %d/%d", retry+1, maxRetries)
-		log.Printf("  Error: %v", err)
-		log.Printf("  TxResult: %s", txResult)
+		log.Printf("UserOp send failed (attempt %d/%d): %v", retry+1, maxRetries, err)
 		// For nonce errors, refetch nonce and retry
 		if err != nil && strings.Contains(err.Error(), "AA25 invalid account nonce") {
 			if retry < maxRetries-1 {
-				log.Printf("🔄 DEPLOYED WORKFLOW: Nonce conflict detected, polling for fresh nonce")
+				log.Printf("Nonce conflict detected, polling for fresh nonce")
 
 				// Poll for fresh nonce with timeout (similar to transaction waiting pattern)
 				startTime := time.Now()
@@ -856,15 +757,13 @@ func sendUserOpCore(
 					// Check if nonce has actually changed from what we had
 					if userOp.Nonce == nil || freshNonce.Cmp(userOp.Nonce) > 0 {
 						userOp.Nonce = freshNonce
-						log.Printf("🔄 DEPLOYED WORKFLOW: Updated nonce to: %s (after %v)", freshNonce.String(), time.Since(startTime))
+						log.Printf("Updated nonce to %s (after %v)", freshNonce.String(), time.Since(startTime))
 						break
 					}
-
-					log.Printf("🔄 DEPLOYED WORKFLOW: Nonce still %s, waiting... (elapsed: %v)", userOp.Nonce.String(), time.Since(startTime))
 				}
 
 				if time.Since(startTime) >= timeout {
-					log.Printf("⚠️ DEPLOYED WORKFLOW: Nonce polling timeout after %v, using current nonce: %s", timeout, userOp.Nonce.String())
+					log.Printf("Nonce polling timeout after %v, using current nonce: %s", timeout, userOp.Nonce.String())
 				}
 
 				continue
@@ -874,17 +773,16 @@ func sendUserOpCore(
 		// For other errors, don't retry unless it's a transient network error
 		if err != nil && !strings.Contains(err.Error(), "AA25 invalid account nonce") &&
 			!strings.Contains(err.Error(), "timeout") && !strings.Contains(err.Error(), "connection") {
-			log.Printf("🚨 DEPLOYED WORKFLOW: Non-retryable error, stopping: %v", err)
+			log.Printf("Non-retryable error, stopping: %v", err)
 			break
 		}
 	}
 
 	if err != nil || txResult == "" {
-		log.Printf("🚨 DEPLOYED WORKFLOW ERROR: Failed to send UserOp to bundler after %d retries - err: %v, txResult: %s", maxRetries, err, txResult)
+		log.Printf("Failed to send UserOp to bundler after %d retries (err=%v, txResult=%s)", maxRetries, err, txResult)
 		return "", fmt.Errorf("error sending transaction to bundler: %w", err)
 	}
 
-	log.Printf("✅ DEPLOYED WORKFLOW: UserOp sent successfully - txResult: %s", txResult)
 	return txResult, nil
 }
 
@@ -1112,49 +1010,16 @@ func BuildUserOpWithPaymaster(
 		Signature:        common.FromHex("0x1234567890abcdef"),
 	}
 
-	// Get the paymaster's nonce for this sender
+	// Get the hash to sign from the PayMaster contract
 	// IMPORTANT: The paymaster maintains its own nonce per sender which is internally included
 	// in the GetHash() call. The paymaster contract reads senderNonce[sender] from storage during
-	// GetHash() and includes it in the hash computation. This means:
-	// 1. The nonce value we fetch here is for logging/debugging only - it's NOT passed to GetHash()
-	// 2. GetHash() will use whatever nonce is currently in the contract's storage
-	// 3. If RPC nodes are out of sync, the nonce we see might differ from what GetHash() uses
-	// 4. AA33 errors can occur if the bundler's RPC sees a different nonce than our RPC during validation
-	// Fetch paymaster nonce from chain using direct RPC call (Go binding has issues)
-	// Method signature: senderNonce(address) -> uint256
-	// Method ID: 0x9c90b443
-	paddedSender := common.LeftPadBytes(userOp.Sender.Bytes(), 32)
-	callDataStr := "0x9c90b443" + hexutil.Encode(paddedSender)[2:]
-
-	// Use CallContract method for direct contract calls
-	result, err := client.CallContract(context.Background(), ethereum.CallMsg{
-		To:   &paymasterAddress,
-		Data: hexutil.MustDecode(callDataStr),
-	}, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get paymaster nonce via RPC: %w", err)
-	}
-
-	paymasterNonce := new(big.Int).SetBytes(result)
-	log.Printf("🔍 BuildUserOpWithPaymaster: Fetched paymaster nonce %s from chain (via RPC)", paymasterNonce.String())
-
-	log.Printf("🔍 PAYMASTER NONCE DEBUG:")
-	log.Printf("   Sender: %s", userOp.Sender.Hex())
-	log.Printf("   Paymaster nonce: %s", paymasterNonce.String())
-
-	// Get the hash to sign from the PayMaster contract
+	// GetHash() and includes it in the hash computation.
 	// IMPORTANT: The GetHash function signature is (userOp, validUntil, validAfter) per the contract ABI
 	paymasterHash, err := paymasterContract.GetHash(nil, paymasterUserOp, validUntil, validAfter)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get paymaster hash: %w", err)
 	}
-
-	log.Printf("🔍 PAYMASTER SIGNATURE DEBUG:")
-	log.Printf("   Paymaster address: %s", paymasterAddress.Hex())
-	log.Printf("   validAfter: %s (timestamp: %d)", validAfter.String(), validAfter.Int64())
-	log.Printf("   validUntil: %s (timestamp: %d)", validUntil.String(), validUntil.Int64())
-	log.Printf("   Paymaster hash (from contract): 0x%x", paymasterHash)
 
 	// Sign the paymaster hash with the controller's private key
 	// CRITICAL: The VerifyingPaymaster contract calls ECDSA.toEthSignedMessageHash(getHash(...))
@@ -1195,16 +1060,9 @@ func BuildUserOpWithPaymaster(
 		return nil, fmt.Errorf("failed to ABI encode timestamps: %w", err)
 	}
 
-	log.Printf("🔍 TIMESTAMP PACKING DEBUG:")
-	log.Printf("   ABI-encoded (validUntil, validAfter): 0x%x (%d bytes)", encodedData, len(encodedData))
-
 	// Create PaymasterAndData: address (20) + abi.encode(uint48,uint48)(64) + signature (65) = 149 bytes
 	paymasterAndData := append(paymasterAddress.Bytes(), encodedData...)
 	paymasterAndData = append(paymasterAndData, paymasterSignature...)
-
-	log.Printf("🔍 PAYMASTER AND DATA DEBUG:")
-	log.Printf("   Total length: %d bytes (expected: 149)", len(paymasterAndData))
-	log.Printf("   PaymasterAndData: 0x%x", paymasterAndData)
 
 	// Update the UserOperation with the properly encoded PaymasterAndData
 	userOp.PaymasterAndData = paymasterAndData

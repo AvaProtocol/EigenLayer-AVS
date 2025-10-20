@@ -312,9 +312,6 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 			if deleteErr := x.db.Delete(pendingKey); deleteErr != nil {
 				x.logger.Warn("Failed to delete pending key after using pre-assigned index",
 					"task_id", task.Id, "execution_id", queueData.ExecutionID, "error", deleteErr)
-			} else {
-				x.logger.Debug("Cleaned up pending key after using pre-assigned index",
-					"task_id", task.Id, "execution_id", queueData.ExecutionID, "index", executionIndex)
 			}
 		} else {
 			// Pending data exists but not a valid index; require engine to assign atomically
@@ -327,8 +324,6 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 				return nil, fmt.Errorf("failed to assign execution index: %w", indexErr)
 			}
 			executionIndex = newIndex
-			x.logger.Debug("Assigned new execution index (pending data not an index)",
-				"task_id", task.Id, "execution_id", queueData.ExecutionID, "index", executionIndex)
 		}
 	} else {
 		// No pending data found, assign new atomic index for blocking executions
@@ -341,8 +336,6 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 			return nil, fmt.Errorf("failed to assign execution index: %w", indexErr)
 		}
 		executionIndex = newIndex
-		x.logger.Debug("Assigned new execution index (no pending data)",
-			"task_id", task.Id, "execution_id", queueData.ExecutionID, "index", executionIndex)
 	}
 
 	// Create execution record immediately - this ensures we have a record even if validation fails
