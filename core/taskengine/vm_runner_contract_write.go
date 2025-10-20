@@ -34,7 +34,6 @@ type SendUserOpFunc func(
 	callData []byte,
 	paymasterReq *preset.VerifyingPaymasterRequest,
 	senderOverride *common.Address,
-	paymasterNonceOverride *big.Int,
 ) (*userop.UserOperation, *types.Receipt, error)
 
 type ContractWriteProcessor struct {
@@ -708,14 +707,12 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	// Send UserOp transaction with correct parameters:
 	// - owner: EOA address (r.owner) for smart wallet derivation
 	// - senderOverride: smart wallet address (aa_sender) for the actual transaction
-	// - paymasterNonceOverride: nil (fetch from chain - previous UserOp is confirmed on-chain)
 	userOp, receipt, err := r.sendUserOpFunc(
 		r.smartWalletConfig,
 		r.owner, // Use EOA address (owner) for smart wallet derivation
 		smartWalletCallData,
 		paymasterReq,   // Use paymaster for wallet creation/sponsorship if shouldUsePaymaster() returned true
 		senderOverride, // Smart wallet address from aa_sender
-		nil,            // paymasterNonceOverride - fetch from chain (previous UserOp is confirmed on-chain)
 	)
 
 	// Increment transaction counter for this address (regardless of success/failure)

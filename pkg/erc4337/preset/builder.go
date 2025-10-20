@@ -448,8 +448,10 @@ func wrapWithReimbursement(
 // It then listens on-chain for 60 seconds to wait until the userops is executed.
 // If the userops is executed, the transaction Receipt is also returned.
 // If paymasterReq is nil, a standard UserOp without paymaster is sent.
-// sendUserOpShared contains the shared logic between SendUserOp and SendUserOpWithWsClient
-// This eliminates code duplication and makes maintenance easier
+// sendUserOpShared contains the core UserOp processing logic shared between SendUserOp and SendUserOpWithWsClient.
+// It handles UserOp building, signing, bundler communication, and transaction confirmation monitoring.
+// The WebSocket client is only used for efficient transaction confirmation monitoring, not for sending UserOps.
+// This eliminates code duplication and makes maintenance easier.
 func sendUserOpShared(
 	smartWalletConfig *config.SmartWalletConfig,
 	owner common.Address,
@@ -457,7 +459,6 @@ func sendUserOpShared(
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
 	wsClient *ethclient.Client,
-	paymasterNonceOverride *big.Int,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	log.Printf("sendUserOpShared started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
 
@@ -546,7 +547,6 @@ func sendUserOpShared(
 				paymasterReq.ValidAfter,
 				senderOverride,
 				nil,                  // nonceOverride - let it fetch from chain
-				nil,                  // paymasterNonceOverride - let it fetch from chain
 				initialCallGasLimit,  // Use higher gas limit for wrapped operations
 				verificationGasLimit, // Use default gas limits for estimation
 				preVerificationGas,   // Use default gas limits for estimation
@@ -593,7 +593,6 @@ func sendUserOpShared(
 			paymasterReq.ValidAfter,
 			senderOverride,
 			nil,                         // nonceOverride - let it fetch from chain
-			paymasterNonceOverride,      // Use provided paymaster nonce for sequential UserOps
 			estimatedCallGas,            // Use estimated gas
 			estimatedVerificationGas,    // Use estimated gas
 			estimatedPreVerificationGas, // Use estimated gas
@@ -638,6 +637,9 @@ func sendUserOpShared(
 	return userOp, receipt, nil
 }
 
+// SendUserOp creates and manages its own WebSocket client for transaction monitoring.
+// Use this for single operations where you don't need to optimize WebSocket connection reuse.
+// The WebSocket is only used for monitoring transaction confirmation, not for sending UserOps.
 // If paymasterReq is provided, it will use the paymaster parameters.
 // senderOverride: If provided, use this as the smart account sender.
 // saltOverride: If provided (and the account is not yet deployed), use this salt to produce initCode.
@@ -647,7 +649,6 @@ func SendUserOp(
 	callData []byte,
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
-	paymasterNonceOverride *big.Int,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	log.Printf("SendUserOp started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
 
@@ -668,7 +669,7 @@ func SendUserOp(
 	}
 
 	// Use the shared logic for the main UserOp processing
-	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient, paymasterNonceOverride)
+	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient)
 }
 
 // sendUserOpCore contains the shared retry loop logic for sending UserOps to the bundler.
@@ -982,7 +983,9 @@ func BuildUserOp(
 	return &userOp, nil
 }
 
-// SendUserOpWithWsClient is like SendUserOp but uses a provided WebSocket client for efficient transaction monitoring
+// SendUserOpWithWsClient reuses a provided WebSocket client for efficient transaction monitoring.
+// Use this for batch operations where you want to reuse the same WebSocket connection.
+// The WebSocket is only used for monitoring transaction confirmation, not for sending UserOps.
 func SendUserOpWithWsClient(
 	smartWalletConfig *config.SmartWalletConfig,
 	owner common.Address,
@@ -990,7 +993,6 @@ func SendUserOpWithWsClient(
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
 	wsClient *ethclient.Client,
-	paymasterNonceOverride *big.Int,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	log.Printf("SendUserOpWithWsClient started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
 
@@ -998,11 +1000,11 @@ func SendUserOpWithWsClient(
 	if wsClient == nil {
 		log.Printf("⚠️ TRANSACTION WAITING: No WebSocket client provided, falling back to SendUserOp")
 		// Fall back to SendUserOp which will create its own WebSocket client if needed
-		return SendUserOp(smartWalletConfig, owner, callData, paymasterReq, senderOverride, paymasterNonceOverride)
+		return SendUserOp(smartWalletConfig, owner, callData, paymasterReq, senderOverride)
 	}
 
 	// Use the shared logic for the main UserOp processing
-	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient, paymasterNonceOverride)
+	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient)
 }
 
 // BuildUserOpWithPaymaster creates a UserOperation with paymaster support.
@@ -1011,7 +1013,6 @@ func SendUserOpWithWsClient(
 // Currently, we use the VerifyingPaymaster contract as the paymaster. We set a signer when initialize the paymaster contract.
 // The signer is also the controller private key. It's the only way to generate the signature for paymaster.
 // nonceOverride: if provided (not nil), uses this nonce instead of fetching from chain. Use this for sequential UserOps.
-// paymasterNonceOverride: if provided (not nil), uses this paymaster nonce instead of fetching from chain. Use this for sequential UserOps.
 // gasOverrides: if provided (not nil), uses these estimated gas limits instead of hardcoded defaults
 func BuildUserOpWithPaymaster(
 	smartWalletConfig *config.SmartWalletConfig,
@@ -1024,7 +1025,6 @@ func BuildUserOpWithPaymaster(
 	validAfter *big.Int,
 	senderOverride *common.Address,
 	nonceOverride *big.Int,
-	paymasterNonceOverride *big.Int,
 	callGasOverride *big.Int,
 	verificationGasOverride *big.Int,
 	preVerificationGasOverride *big.Int,
@@ -1120,30 +1120,23 @@ func BuildUserOpWithPaymaster(
 	// 2. GetHash() will use whatever nonce is currently in the contract's storage
 	// 3. If RPC nodes are out of sync, the nonce we see might differ from what GetHash() uses
 	// 4. AA33 errors can occur if the bundler's RPC sees a different nonce than our RPC during validation
-	var paymasterNonce *big.Int
-	if paymasterNonceOverride != nil {
-		// Use provided paymaster nonce for sequential UserOps (prevents nonce collisions)
-		paymasterNonce = paymasterNonceOverride
-		log.Printf("🔍 BuildUserOpWithPaymaster: Using provided paymaster nonce %s (sequential UserOps)", paymasterNonce.String())
-	} else {
-		// Fetch from chain using direct RPC call (Go binding has issues)
-		// Method signature: senderNonce(address) -> uint256
-		// Method ID: 0x9c90b443
-		paddedSender := common.LeftPadBytes(userOp.Sender.Bytes(), 32)
-		callData := "0x9c90b443" + hexutil.Encode(paddedSender)[2:]
+	// Fetch paymaster nonce from chain using direct RPC call (Go binding has issues)
+	// Method signature: senderNonce(address) -> uint256
+	// Method ID: 0x9c90b443
+	paddedSender := common.LeftPadBytes(userOp.Sender.Bytes(), 32)
+	callDataStr := "0x9c90b443" + hexutil.Encode(paddedSender)[2:]
 
-		// Use CallContract method for direct contract calls
-		result, err := client.CallContract(context.Background(), ethereum.CallMsg{
-			To:   &paymasterAddress,
-			Data: hexutil.MustDecode(callData),
-		}, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get paymaster nonce via RPC: %w", err)
-		}
-
-		paymasterNonce = new(big.Int).SetBytes(result)
-		log.Printf("🔍 BuildUserOpWithPaymaster: Fetched paymaster nonce %s from chain (via RPC)", paymasterNonce.String())
+	// Use CallContract method for direct contract calls
+	result, err := client.CallContract(context.Background(), ethereum.CallMsg{
+		To:   &paymasterAddress,
+		Data: hexutil.MustDecode(callDataStr),
+	}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get paymaster nonce via RPC: %w", err)
 	}
+
+	paymasterNonce := new(big.Int).SetBytes(result)
+	log.Printf("🔍 BuildUserOpWithPaymaster: Fetched paymaster nonce %s from chain (via RPC)", paymasterNonce.String())
 
 	log.Printf("🔍 PAYMASTER NONCE DEBUG:")
 	log.Printf("   Sender: %s", userOp.Sender.Hex())

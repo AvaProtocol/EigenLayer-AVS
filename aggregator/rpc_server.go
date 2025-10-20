@@ -351,7 +351,6 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 			paymasterReq, // Use provided paymaster request
 			smartWalletAddress,
 			r.smartWalletWsRpc, // Use global WebSocket client
-			nil,                // paymasterNonceOverride - let it fetch from chain
 		)
 	} else {
 		// Fallback to original method (creates new WebSocket connection)
@@ -362,7 +361,6 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 			callData,
 			paymasterReq, // Use provided paymaster request
 			smartWalletAddress,
-			nil, // paymasterNonceOverride - let it fetch from chain
 		)
 	}
 }
