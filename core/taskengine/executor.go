@@ -407,7 +407,14 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		updateTriggerVariableInVM(vm, triggerVarName, triggerVarData)
 	}
 
-	// err is guaranteed to be nil here (checked after VM creation)
+	// Check for error after VM creation
+	if err != nil {
+		execution.EndAt = time.Now().UnixMilli()
+		execution.Error = fmt.Sprintf("failed to create VM: %v", err)
+		execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
+		x.persistFailedExecution(task, execution, initialTaskStatus)
+		return execution, nil // Return execution record with failure details
+	}
 
 	var runTaskErr error = nil
 	if err = vm.Compile(); err != nil {
