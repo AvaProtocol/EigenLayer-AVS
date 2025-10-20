@@ -147,10 +147,9 @@ func TestUserOpETHTransferWithPaymaster(t *testing.T) {
 	}
 
 	// ETHTransfer node with is_simulated=false for real UserOp execution
-	// Use paymaster sponsorship for ETH transfer
-	usePaymaster := true
-	t.Logf("   Using ethTransfer node with PAYMASTER sponsorship (shouldUsePaymasterOverride=true)...")
-	transferResult, err := engine.RunNodeImmediately("ethTransfer", ethTransferConfig, inputVars, user, false, &usePaymaster)
+	// Paymaster sponsorship is automatically used if configured (no override needed)
+	t.Logf("   Using ethTransfer node with PAYMASTER sponsorship (automatic)...")
+	transferResult, err := engine.RunNodeImmediately("ethTransfer", ethTransferConfig, inputVars, user, false)
 
 	require.NoError(t, err, "ETH transfer RunNodeImmediately should not return error")
 	require.NotNil(t, transferResult, "ETH transfer result should not be nil")

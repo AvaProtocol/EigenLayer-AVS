@@ -113,8 +113,9 @@ func setupSequentialContractWritesTest(t *testing.T) *sequentialContractWritesTe
 	require.NoError(t, err, "Failed to register smart wallet")
 	t.Logf("   ✅ Smart wallet registered in database")
 
-	// Create task executor
-	executor := NewExecutor(baseAggregatorCfg.SmartWallet, db, testutil.GetLogger())
+	// Create task engine and executor with engine reference for atomic indexing
+	engine := New(db, baseAggregatorCfg, nil, testutil.GetLogger())
+	executor := NewExecutor(baseAggregatorCfg.SmartWallet, db, testutil.GetLogger(), engine)
 
 	return &sequentialContractWritesTestSetup{
 		cfg:               baseAggregatorCfg,

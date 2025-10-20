@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/prometheus/client_golang/prometheus"
@@ -138,9 +141,10 @@ type SmartWalletConfig struct {
 	// ChainID of the connected network (derived at runtime from RPC)
 	ChainID int64
 
-	ControllerPrivateKey *ecdsa.PrivateKey
-	PaymasterAddress     common.Address
-	WhitelistAddresses   []common.Address
+	ControllerPrivateKey  *ecdsa.PrivateKey
+	PaymasterAddress      common.Address
+	PaymasterOwnerAddress common.Address // Owner of the paymaster contract (for gas reimbursement)
+	WhitelistAddresses    []common.Address
 
 	// Maximum number of smart wallets allowed per EOA owner
 	// Unlimited is NOT supported. If zero or negative, the default limit is applied.
@@ -402,6 +406,7 @@ func NewConfig(configFilePath string) (*Config, error) {
 			PaymasterAddress:     common.HexToAddress(firstNonEmpty(configRaw.SmartWallet.PaymasterAddress, DefaultPaymasterAddressHex)),
 			WhitelistAddresses:   convertToAddressSlice(configRaw.SmartWallet.WhitelistAddresses),
 			MaxWalletsPerOwner:   configRaw.SmartWallet.MaxWalletsPerOwner,
+			// PaymasterOwnerAddress will be populated below by calling owner() on the paymaster contract
 		},
 
 		BackupConfig: BackupConfig{
@@ -431,6 +436,20 @@ func NewConfig(configFilePath string) (*Config, error) {
 	if config.SocketPath == "" {
 		config.SocketPath = "/tmp/ap.sock"
 	}
+
+	// Fetch the paymaster owner address by calling owner() on the paymaster contract
+	// This is needed for gas reimbursement - we send ETH to the owner (EOA), not the contract itself
+	if config.SmartWallet != nil && config.SmartWallet.PaymasterAddress != (common.Address{}) {
+		paymasterOwner, err := fetchPaymasterOwner(smartWalletRpcClient, config.SmartWallet.PaymasterAddress)
+		if err != nil {
+			logger.Warn("Failed to fetch paymaster owner address", "paymaster", config.SmartWallet.PaymasterAddress, "err", err)
+			logger.Warn("Gas reimbursement may fail without paymaster owner address configured")
+		} else {
+			config.SmartWallet.PaymasterOwnerAddress = paymasterOwner
+			logger.Info("Paymaster owner address loaded", "paymaster", config.SmartWallet.PaymasterAddress, "owner", paymasterOwner.Hex())
+		}
+	}
+
 	// If HttpBindAddress is empty, HTTP server will be disabled (startup code will skip starting it)
 	config.validate()
 	return config, nil
@@ -549,4 +568,42 @@ func GetDefaultFeeRatesConfig() *FeeRatesConfig {
 		EventAddressFeeUSDPerMinute: 0.000008, // ~$0.005/day per address
 		EventTopicFeeUSDPerMinute:   0.000003, // ~$0.002/day per topic group
 	}
+}
+
+// fetchPaymasterOwner calls owner() on the paymaster contract to get the owner address
+// This is used for gas reimbursement - ETH is sent to the owner (EOA), not the contract itself
+func fetchPaymasterOwner(client *eth.InstrumentedClient, paymasterAddress common.Address) (common.Address, error) {
+	// ABI for owner() function
+	ownerABI := `[{"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"}]`
+
+	parsedABI, err := abi.JSON(strings.NewReader(ownerABI))
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to parse owner ABI: %w", err)
+	}
+
+	// Pack the owner() function call
+	calldata, err := parsedABI.Pack("owner")
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to pack owner() call: %w", err)
+	}
+
+	// Call owner() on the paymaster contract
+	msg := ethereum.CallMsg{
+		To:   &paymasterAddress,
+		Data: calldata,
+	}
+
+	result, err := client.CallContract(context.Background(), msg, nil)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to call owner() on paymaster: %w", err)
+	}
+
+	// Unpack the result
+	var owner common.Address
+	err = parsedABI.UnpackIntoInterface(&owner, "owner", result)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to unpack owner() result: %w", err)
+	}
+
+	return owner, nil
 }
