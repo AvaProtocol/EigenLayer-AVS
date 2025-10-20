@@ -1583,18 +1583,20 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 		pendingKeys, _ := n.db.GetKeyHasPrefix(PendingExecutionPrefix(task.Id))
 		n.logger.Debug("🔍 Checking for pending execution IDs", "task_id", task.Id, "pending_keys_found", len(pendingKeys))
 		var pickedID string
+		var pickedKey []byte
 		for _, k := range pendingKeys {
 			id := ExecutionIdFromPendingKey(k)
 			n.logger.Debug("🔍 Found pending execution ID", "task_id", task.Id, "execution_id", id, "key", string(k))
 			if pickedID == "" || id < pickedID {
 				pickedID = id
+				pickedKey = k
 			}
 		}
 		if pickedID != "" {
 			queueTaskData.ExecutionID = pickedID
 			n.logger.Debug("✅ Consuming pending execution ID", "task_id", task.Id, "execution_id", pickedID)
-			// consume the pending entry
-			_ = n.db.Delete(PendingExecutionKey(task, pickedID))
+			// consume the pending entry (we no longer need the index stored here since it will be assigned atomically in the executor)
+			_ = n.db.Delete(pickedKey)
 		} else {
 			queueTaskData.ExecutionID = ulid.Make().String()
 			n.logger.Debug("🆕 Creating new execution ID (no pending found)", "task_id", task.Id, "execution_id", queueTaskData.ExecutionID)
@@ -1997,17 +1999,27 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 		if !payload.IsBlocking {
 			preExecID := ulid.Make().String()
 			n.logger.Debug("🔄 Pre-creating execution ID for non-blocking trigger", "task_id", task.Id, "execution_id", preExecID)
+
+			// Pre-assign atomic execution index for stable indexing
+			preAssignedIndex, indexErr := n.AssignNextExecutionIndex(task)
+			if indexErr != nil {
+				n.logger.Error("Failed to assign execution index for non-blocking trigger", "task_id", task.Id, "execution_id", preExecID, "error", indexErr)
+				return nil, status.Errorf(codes.Internal, "failed to assign execution index")
+			}
+			n.logger.Debug("🔢 Pre-assigned execution index", "task_id", task.Id, "execution_id", preExecID, "index", preAssignedIndex)
+
 			// Mark pending in queue so GetExecutionStatus returns PENDING
 			if err := n.setExecutionStatusQueue(task, preExecID); err != nil {
 				return nil, err
 			}
-			// Persist pending execution ID for FIFO consumption when operator notifies
+			// Persist pending execution ID with its assigned index for FIFO consumption when operator notifies
 			pendingKey := PendingExecutionKey(task, preExecID)
-			if err := n.db.Set(pendingKey, []byte("1")); err != nil {
-				n.logger.Error("Failed to persist pending execution id", "task_id", task.Id, "execution_id", preExecID, "error", err)
+			pendingData := fmt.Sprintf("%d", preAssignedIndex) // Store the index as the value
+			if err := n.db.Set(pendingKey, []byte(pendingData)); err != nil {
+				n.logger.Error("Failed to persist pending execution id with index", "task_id", task.Id, "execution_id", preExecID, "index", preAssignedIndex, "error", err)
 				return nil, status.Errorf(codes.Internal, "failed to persist pending execution id")
 			}
-			n.logger.Debug("💾 Persisted pending execution ID", "task_id", task.Id, "execution_id", preExecID, "key", string(pendingKey))
+			n.logger.Debug("💾 Persisted pending execution ID with index", "task_id", task.Id, "execution_id", preExecID, "index", preAssignedIndex, "key", string(pendingKey))
 
 			// Best-effort operator instruction (ignore errors; operator may connect later)
 			_ = n.instructOperatorImmediateTrigger(task.Id)
@@ -2756,22 +2768,37 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 	// Create a minimal execution object for pending status
 	// We don't have full execution details yet, but we can return basic info
 
-	// Assign atomic execution index for pending executions
-	pendingIndex, indexErr := n.AssignNextExecutionIndex(task)
-	if indexErr != nil {
-		n.logger.Warn("Failed to assign atomic index for pending execution, using fallback",
-			"task_id", payload.TaskId, "execution_id", payload.ExecutionId, "error", indexErr)
-		// Fallback to task execution count for compatibility
-		pendingIndex = task.ExecutionCount
+	// For pending executions created by non-blocking triggers, try to get the pre-assigned index
+	// from the pending execution storage
+	pendingIndex := int64(0) // Default to 0 if not found
+	pendingKey := PendingExecutionKey(task, payload.ExecutionId)
+	if pendingData, err := n.db.GetKey(pendingKey); err == nil {
+		if storedIndex, parseErr := strconv.ParseInt(string(pendingData), 10, 64); parseErr == nil {
+			pendingIndex = storedIndex
+			n.logger.Debug("🔍 Retrieved pre-assigned index from pending storage", "task_id", payload.TaskId, "execution_id", payload.ExecutionId, "index", pendingIndex)
+		} else {
+			n.logger.Debug("Pending data not an index, using fallback", "task_id", payload.TaskId, "execution_id", payload.ExecutionId, "pending_data", string(pendingData))
+			// Fallback: assign new atomic index for pending executions without stored index
+			if atomicIndex, indexErr := n.AssignNextExecutionIndex(task); indexErr == nil {
+				pendingIndex = atomicIndex
+				n.logger.Debug("Assigned new atomic index for pending execution", "task_id", payload.TaskId, "execution_id", payload.ExecutionId, "index", pendingIndex)
+			}
+		}
+	} else {
+		// No pending data found, assign new atomic index
+		if atomicIndex, indexErr := n.AssignNextExecutionIndex(task); indexErr == nil {
+			pendingIndex = atomicIndex
+			n.logger.Debug("Assigned new atomic index for pending execution (no stored index)", "task_id", payload.TaskId, "execution_id", payload.ExecutionId, "index", pendingIndex)
+		}
 	}
 
-	n.logger.Debug("🗒️ Returning pending execution", "task_id", payload.TaskId, "execution_id", payload.ExecutionId, "status", *execStatus, "index", pendingIndex)
+	n.logger.Debug("🗂️ Returning pending execution", "task_id", payload.TaskId, "execution_id", payload.ExecutionId, "status", *execStatus, "index", pendingIndex)
 	return &avsproto.Execution{
 		Id:      payload.ExecutionId,
 		Status:  *execStatus,
 		StartAt: time.Now().UnixMilli(),       // Approximate start time
 		Steps:   []*avsproto.Execution_Step{}, // Empty steps for pending
-		Index:   pendingIndex,                 // Use atomic execution index
+		Index:   pendingIndex,                 // Use pre-assigned or newly assigned index
 	}, nil
 }
 
