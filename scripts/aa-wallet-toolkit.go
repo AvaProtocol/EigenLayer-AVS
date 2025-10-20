@@ -31,8 +31,8 @@ func main() {
 	salt := flag.Int64("salt", 0, "Salt value for smart wallet derivation (default: 0)")
 	flag.Parse()
 
-	fmt.Println("🛠️  Smart Wallet Management Tool")
-	fmt.Println("=================================")
+	fmt.Println("AA Wallet Toolkit")
+	fmt.Println("=================")
 	fmt.Println()
 
 	switch *mode {

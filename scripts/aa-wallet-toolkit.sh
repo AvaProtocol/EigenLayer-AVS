@@ -4,7 +4,7 @@
 # All-in-one tool for wallet deployment and troubleshooting
 #
 # Usage:
-#   ./wallet-tool.sh <mode> [options]
+#   ./aa-wallet-toolkit.sh <mode> [options]
 #
 # Modes:
 #   check              Check wallet deployment status
@@ -22,22 +22,22 @@
 #
 # Examples:
 #   # Run full diagnostic
-#   TEST_PRIVATE_KEY=your_key ./wallet-tool.sh all
+#   TEST_PRIVATE_KEY=your_key ./aa-wallet-toolkit.sh all
 #
 #   # Check if wallet exists
-#   TEST_PRIVATE_KEY=your_key ./wallet-tool.sh check
+#   TEST_PRIVATE_KEY=your_key ./aa-wallet-toolkit.sh check
 #
 #   # Deploy wallet
-#   TEST_PRIVATE_KEY=your_key ./wallet-tool.sh deploy
+#   TEST_PRIVATE_KEY=your_key ./aa-wallet-toolkit.sh deploy
 #
 #   # Clear stuck UserOps
-#   ./wallet-tool.sh clear-mempool
+#   ./aa-wallet-toolkit.sh clear-mempool
 #
 #   # Verify paymaster configuration
-#   ./wallet-tool.sh verify-paymaster
+#   ./aa-wallet-toolkit.sh verify-paymaster
 #
 #   # Check wallet with specific salt
-#   TEST_PRIVATE_KEY=your_key ./wallet-tool.sh check --salt 1
+#   TEST_PRIVATE_KEY=your_key ./aa-wallet-toolkit.sh check --salt 1
 
 set -e
 
@@ -53,5 +53,5 @@ shift || true  # Remove mode from args, ignore if no args
 cd "$PROJECT_ROOT"
 
 # Run the Go script with all arguments
-exec go run scripts/wallet-tool.go --mode "$MODE" "$@"
+exec go run scripts/aa-wallet-toolkit.go --mode "$MODE" "$@"
 
