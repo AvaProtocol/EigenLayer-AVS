@@ -155,19 +155,23 @@ aggregator:
 	@echo "  make aggregator-base-sepolia   - Start aggregator with Base Sepolia config"
 aggregator-sepolia: build
 	@echo "🚀 Starting aggregator with Sepolia configuration..."
-	./out/ap aggregator --config=config/aggregator-sepolia.yaml
+	@echo "📝 Logs will be written to aggregator-sepolia.log"
+	./out/ap aggregator --config=config/aggregator-sepolia.yaml 2>&1 | tee aggregator-sepolia.log
 
 aggregator-ethereum: build
 	@echo "🚀 Starting aggregator with Ethereum configuration..."
-	./out/ap aggregator --config=config/aggregator-ethereum.yaml
+	@echo "📝 Logs will be written to aggregator-ethereum.log"
+	./out/ap aggregator --config=config/aggregator-ethereum.yaml 2>&1 | tee aggregator-ethereum.log
 
 aggregator-base: build
 	@echo "🚀 Starting aggregator with Base configuration..."
-	./out/ap aggregator --config=config/aggregator-base.yaml
+	@echo "📝 Logs will be written to aggregator-base.log"
+	./out/ap aggregator --config=config/aggregator-base.yaml 2>&1 | tee aggregator-base.log
 
 aggregator-base-sepolia: build
 	@echo "🚀 Starting aggregator with Base Sepolia configuration..."
-	./out/ap aggregator --config=config/aggregator-base-sepolia.yaml
+	@echo "📝 Logs will be written to aggregator-base-sepolia.log"
+	./out/ap aggregator --config=config/aggregator-base-sepolia.yaml 2>&1 | tee aggregator-base-sepolia.log
 ## operator: show usage for operator commands
 .PHONY: operator operator-sepolia operator-ethereum operator-base
 operator:
@@ -181,19 +185,23 @@ operator:
 
 operator-sepolia: build
 	@echo "🔧 Starting operator with Sepolia configuration..."
-	./out/ap operator --config=config/operator-sepolia.yaml
+	@echo "📝 Logs will be written to operator-sepolia.log"
+	./out/ap operator --config=config/operator-sepolia.yaml 2>&1 | tee operator-sepolia.log
 
 operator-ethereum: build
 	@echo "🔧 Starting operator with Ethereum configuration..."
-	./out/ap operator --config=config/operator-ethereum.yaml
+	@echo "📝 Logs will be written to operator-ethereum.log"
+	./out/ap operator --config=config/operator-ethereum.yaml 2>&1 | tee operator-ethereum.log
 
 operator-base: build
 	@echo "🔧 Starting operator with Base configuration..."
-	./out/ap operator --config=config/operator-base.yaml
+	@echo "📝 Logs will be written to operator-base.log"
+	./out/ap operator --config=config/operator-base.yaml 2>&1 | tee operator-base.log
 
 operator-default: build
 	@echo "🔧 Starting operator with default configuration..."
-	./out/ap operator --config=config/operator.yaml
+	@echo "📝 Logs will be written to operator-default.log"
+	./out/ap operator --config=config/operator.yaml 2>&1 | tee operator-default.log
 
 
 ## clean: cleanup storage data
