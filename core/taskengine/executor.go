@@ -69,15 +69,19 @@ func NewExecutor(config *config.SmartWalletConfig, db storage.Storage, logger sd
 	}
 }
 
-// NewExecutorForTesting creates a TaskExecutor with nil engine for testing purposes
+// Creates a TaskExecutor with nil engine for testing purposes
 // Tests should set up a mock engine or use this when atomic indexing is not needed
-func NewExecutorForTesting(config *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger) *TaskExecutor {
+func NewExecutorForTesting(swCfg *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger) *TaskExecutor {
+	// Initialize a minimal Engine instance so tests exercise production code paths
+	// without requiring separate mocks or test-only fallbacks.
+	minimalCfg := &config.Config{SmartWallet: swCfg}
+	eng := New(db, minimalCfg, nil, logger)
 	return &TaskExecutor{
 		db:                     db,
 		logger:                 logger,
-		smartWalletConfig:      config,
+		smartWalletConfig:      swCfg,
 		tokenEnrichmentService: GetTokenEnrichmentService(),
-		engine:                 nil, // Tests should set up mock engine if atomic indexing is needed
+		engine:                 eng,
 	}
 }
 
@@ -158,7 +162,7 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 
 	if runErr == nil {
 		// Task logic executed successfully. Clean up the TaskTriggerKey for this async execution.
-		if queueData != nil && queueData.ExecutionID != "" { // Assumes `ExecutionID` is always set for queued jobs. Verify this assumption if the logic changes.
+		if queueData.ExecutionID != "" { // Assumes `ExecutionID` is always set for queued jobs. Verify this assumption if the logic changes.
 			triggerKeyToClean := TaskTriggerKey(task, queueData.ExecutionID)
 			if delErr := x.db.Delete(triggerKeyToClean); delErr != nil {
 				x.logger.Error("Perform: Failed to delete TaskTriggerKey after successful async execution",
@@ -313,26 +317,30 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 					"task_id", task.Id, "execution_id", queueData.ExecutionID, "index", executionIndex)
 			}
 		} else {
-			// Pending data exists but not a valid index, assign new atomic index
+			// Pending data exists but not a valid index; require engine to assign atomically
+			if x.engine == nil {
+				return nil, fmt.Errorf("engine is not initialized; cannot assign execution index")
+			}
 			newIndex, indexErr := x.engine.AssignNextExecutionIndex(task)
 			if indexErr != nil {
 				x.logger.Error("Failed to assign execution index", "task_id", task.Id, "execution_id", queueData.ExecutionID, "error", indexErr)
-				executionIndex = task.ExecutionCount - 1 // Fallback
-			} else {
-				executionIndex = newIndex
+				return nil, fmt.Errorf("failed to assign execution index: %w", indexErr)
 			}
+			executionIndex = newIndex
 			x.logger.Debug("Assigned new execution index (pending data not an index)",
 				"task_id", task.Id, "execution_id", queueData.ExecutionID, "index", executionIndex)
 		}
 	} else {
 		// No pending data found, assign new atomic index for blocking executions
+		if x.engine == nil {
+			return nil, fmt.Errorf("engine is not initialized; cannot assign execution index")
+		}
 		newIndex, indexErr := x.engine.AssignNextExecutionIndex(task)
 		if indexErr != nil {
 			x.logger.Error("Failed to assign execution index", "task_id", task.Id, "execution_id", queueData.ExecutionID, "error", indexErr)
-			executionIndex = task.ExecutionCount - 1 // Fallback
-		} else {
-			executionIndex = newIndex
+			return nil, fmt.Errorf("failed to assign execution index: %w", indexErr)
 		}
+		executionIndex = newIndex
 		x.logger.Debug("Assigned new execution index (no pending data)",
 			"task_id", task.Id, "execution_id", queueData.ExecutionID, "index", executionIndex)
 	}
@@ -399,9 +407,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		updateTriggerVariableInVM(vm, triggerVarName, triggerVarData)
 	}
 
-	if err != nil {
-		return nil, fmt.Errorf("vm failed to initialize: %w", err)
-	}
+	// err is guaranteed to be nil here (checked after VM creation)
 
 	var runTaskErr error = nil
 	if err = vm.Compile(); err != nil {
