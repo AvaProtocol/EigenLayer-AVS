@@ -32,6 +32,8 @@ var (
 	// Last validated: Oct 2025. To update: run representative UserOperations on target network,
 	// observe actual gas usage, and adjust these values accordingly
 	DEFAULT_CALL_GAS_LIMIT         = big.NewInt(200000)  // 200K for smart wallet execute + ETH transfer (more headroom)
+	ETH_TRANSFER_GAS_COST          = big.NewInt(21000)   // Standard ETH transfer gas cost
+	BATCH_OVERHEAD_BUFFER_PERCENT  = 20                  // 20% buffer for executeBatchWithValues overhead
 	DEFAULT_VERIFICATION_GAS_LIMIT = big.NewInt(1000000) // 1M for signature verification + paymaster validation (very conservative)
 	DEFAULT_PREVERIFICATION_GAS    = big.NewInt(50000)   // 50K for bundler overhead
 
@@ -61,8 +63,18 @@ var (
 	// When true: Skips bundler's eth_estimateUserOperationGas call and uses hard-coded gas limits
 	// This avoids the AA33 paymaster nonce bug where bundler increments paymaster nonce during estimation
 	// See: BUNDLER-PAYMASTER-NONCE-BUG.md for details
-	// Default: true (prefer stable final-signature flow to avoid bundler cache mismatches)
-	UseLocalGasEstimation = true
+	// Default: false (use bundler's gas estimation for accurate gas limits)
+	UseLocalGasEstimation = false // Use bundler's gas estimation for accurate gas limits
+
+	// EnablePaymasterReimbursement controls whether to add ETH reimbursement to paymaster
+	// When true: Wraps execute() with executeBatchWithValues() to atomically reimburse paymaster
+	// Default: true (reimburse paymaster for gas costs)
+	EnablePaymasterReimbursement = true
+
+	// GasReimbursementBufferPercent is the extra buffer percentage added to the reimbursement amount
+	// Formula: reimbursement = (total UserOp gas × maxFeePerGas) × (100% + buffer%)
+	// Default: 20% buffer to account for gas price fluctuations and execution variations
+	GasReimbursementBufferPercent = 20
 )
 
 // VerifyingPaymasterRequest contains the parameters needed for paymaster functionality. This use the reference from https://github.com/eth-optimism/paymaster-reference
@@ -274,6 +286,171 @@ func pollUserOpReceipt(
 	return receipt, true, nil
 }
 
+// estimateGasReimbursementAmount computes the ETH amount to reimburse the paymaster.
+// Formula: (bundler's estimated gas OR fallback gas + ETH transfer) × 20% buffer × maxFeePerGas
+// This uses the bundler's accurate gas estimation when available, otherwise uses conservative fallbacks.
+func estimateGasReimbursementAmount(client *ethclient.Client, gasEstimate *bundler.GasEstimation) (*big.Int, error) {
+	maxFeePerGas, _, err := eip1559.SuggestFee(client)
+	if err != nil {
+		// Fallback to 20 gwei if we can't get real-time price
+		log.Printf("⚠️  Failed to get gas price, using 20 gwei fallback: %v", err)
+		maxFeePerGas = big.NewInt(20_000_000_000) // 20 gwei
+	}
+
+	// Dynamic gas calculation: Use bundler's gas estimation for reimbursement
+	// Formula: (bundler's estimated gas + ETH transfer) × buffer
+	var totalUserOpGas *big.Int
+
+	if gasEstimate != nil {
+		// Use bundler's gas estimation (most accurate)
+		preVerificationGas := new(big.Int).Set(gasEstimate.PreVerificationGas)
+		verificationGas := new(big.Int).Set(gasEstimate.VerificationGasLimit)
+		callGas := new(big.Int).Set(gasEstimate.CallGasLimit)
+		ethTransferGas := new(big.Int).Set(ETH_TRANSFER_GAS_COST) // ETH transfer for reimbursement (~21K)
+
+		// Total UserOp gas: bundler's estimate + ETH transfer
+		totalUserOpGas = new(big.Int).Add(preVerificationGas, verificationGas)
+		totalUserOpGas.Add(totalUserOpGas, callGas)
+		totalUserOpGas.Add(totalUserOpGas, ethTransferGas)
+
+		log.Printf("💰 Using BUNDLER gas estimation for reimbursement")
+		log.Printf("   PreVerificationGas: %s", preVerificationGas.String())
+		log.Printf("   VerificationGas: %s", verificationGas.String())
+		log.Printf("   CallGas: %s", callGas.String())
+		log.Printf("   ETH transfer: %s", ethTransferGas.String())
+	} else {
+		// Fallback to conservative defaults when bundler estimation fails
+		preVerificationGas := new(big.Int).Set(DEFAULT_PREVERIFICATION_GAS) // Bundler overhead (~50K)
+		verificationGas := new(big.Int).Set(DEFAULT_VERIFICATION_GAS_LIMIT) // Signature + paymaster validation (~1M)
+		callGas := new(big.Int).Set(DEFAULT_CALL_GAS_LIMIT)                 // Original operation (~200K)
+		ethTransferGas := new(big.Int).Set(ETH_TRANSFER_GAS_COST)           // ETH transfer for reimbursement (~21K)
+
+		// Total UserOp gas: preVerification + verification + call + ETH transfer
+		totalUserOpGas = new(big.Int).Add(preVerificationGas, verificationGas)
+		totalUserOpGas.Add(totalUserOpGas, callGas)
+		totalUserOpGas.Add(totalUserOpGas, ethTransferGas)
+
+		log.Printf("💰 Using FALLBACK gas estimation for reimbursement")
+		log.Printf("   Fallback PreVerificationGas: %s", DEFAULT_PREVERIFICATION_GAS.String())
+		log.Printf("   Fallback VerificationGas: %s", DEFAULT_VERIFICATION_GAS_LIMIT.String())
+		log.Printf("   Fallback CallGas: %s", DEFAULT_CALL_GAS_LIMIT.String())
+	}
+
+	// Apply buffer to the total UserOp gas
+	gasBufferMultiplier := big.NewInt(100 + int64(BATCH_OVERHEAD_BUFFER_PERCENT)) // 120 for 20% buffer
+	effectiveGas := new(big.Int).Mul(totalUserOpGas, gasBufferMultiplier)
+	effectiveGas.Div(effectiveGas, big.NewInt(100))
+
+	baseCost := new(big.Int).Mul(effectiveGas, maxFeePerGas)
+
+	// Apply configured buffer
+	bufferMultiplier := big.NewInt(100 + int64(GasReimbursementBufferPercent))
+	reimbursement := new(big.Int).Mul(baseCost, bufferMultiplier)
+	reimbursement = new(big.Int).Div(reimbursement, big.NewInt(100))
+
+	log.Printf("💰 GAS REIMBURSEMENT ESTIMATION:")
+	if gasEstimate != nil {
+		log.Printf("   Source: (bundler's estimated gas + ETH transfer) × %d%% buffer", BATCH_OVERHEAD_BUFFER_PERCENT)
+	} else {
+		log.Printf("   Source: (fallback gas + ETH transfer) × %d%% buffer", BATCH_OVERHEAD_BUFFER_PERCENT)
+	}
+	log.Printf("   ETH transfer: %s", ETH_TRANSFER_GAS_COST.String())
+	log.Printf("   MaxFeePerGas: %s wei (%.2f gwei)", maxFeePerGas.String(), float64(maxFeePerGas.Int64())/1e9)
+	log.Printf("   Total UserOp gas: %s", totalUserOpGas.String())
+	log.Printf("   Effective gas: %s (total × %d%%)", effectiveGas.String(), BATCH_OVERHEAD_BUFFER_PERCENT)
+	log.Printf("   Base cost: %s wei", baseCost.String())
+	log.Printf("   Buffer: %d%%", GasReimbursementBufferPercent)
+	log.Printf("   Reimbursement: %s wei (%.6f ETH)", reimbursement.String(), float64(reimbursement.Int64())/1e18)
+
+	return reimbursement, nil
+}
+
+// wrapWithReimbursement wraps original SimpleAccount.execute() calldata with executeBatchWithValues
+// to add a second step that transfers reimbursement ETH to the reimbursement recipient (paymaster owner or paymaster), atomically.
+func wrapWithReimbursement(
+	client *ethclient.Client,
+	originalCallData []byte,
+	reimbursementRecipient common.Address,
+	gasEstimate *bundler.GasEstimation,
+) ([]byte, *big.Int, error) {
+	// Estimate reimbursement
+	reimbursementAmount, err := estimateGasReimbursementAmount(client, gasEstimate)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to estimate reimbursement: %w", err)
+	}
+
+	// Decode execute(dest, value, data) - we need to manually decode since we don't have a public GetAccountABI
+	// The execute() function signature is: execute(address dest, uint256 value, bytes calldata func)
+	// Calldata format: [4-byte selector][32-byte dest][32-byte value][offset to bytes][length][data...]
+
+	if len(originalCallData) < 4 {
+		return nil, nil, fmt.Errorf("calldata too short: %d bytes", len(originalCallData))
+	}
+
+	// Skip function selector (4 bytes) and decode the ABI-encoded parameters
+	params := originalCallData[4:]
+	if len(params) < 96 { // minimum: 32 (dest) + 32 (value) + 32 (offset)
+		return nil, nil, fmt.Errorf("calldata params too short: %d bytes", len(params))
+	}
+
+	// Decode: address dest (32 bytes, right-aligned)
+	dest := common.BytesToAddress(params[12:32]) // Skip 12 padding bytes, take last 20
+
+	// Decode: uint256 value (32 bytes)
+	value := new(big.Int).SetBytes(params[32:64])
+
+	// Decode: bytes data (dynamic, offset at params[64:96])
+	dataOffset := new(big.Int).SetBytes(params[64:96]).Uint64()
+	var data []byte
+	if dataOffset < uint64(len(params)) {
+		// Data exists, read length and content
+		dataLength := new(big.Int).SetBytes(params[dataOffset : dataOffset+32]).Uint64()
+		if dataOffset+32+dataLength <= uint64(len(params)) {
+			data = params[dataOffset+32 : dataOffset+32+dataLength]
+		}
+	}
+
+	// If data is nil or empty, use make([]byte, 0) to avoid ABI encoding issues
+	if len(data) == 0 {
+		data = make([]byte, 0)
+	}
+
+	log.Printf("🔍 DECODED EXECUTE() PARAMS:")
+	log.Printf("   dest: %s", dest.Hex())
+	log.Printf("   value: %s wei", value.String())
+	log.Printf("   data: %d bytes (cap: %d)", len(data), cap(data))
+
+	// Create batch arrays for executeBatchWithValues
+	// [0] = original operation (e.g., withdrawal)
+	// [1] = reimbursement to paymaster owner (to compensate for gas paid by paymaster)
+	targets := []common.Address{dest, reimbursementRecipient}
+	values := []*big.Int{value, reimbursementAmount}
+
+	// Use truly empty []byte for both calldatas (no additional contract calls)
+	// CRITICAL: Use make([]byte, 0) to avoid Go's ABI encoder padding bug
+	calldatas := [][]byte{make([]byte, 0), make([]byte, 0)}
+
+	log.Printf("🔄 REIMBURSEMENT WRAPPING (manual ABI encoding):")
+	log.Printf("   Original operation:")
+	log.Printf("     Target: %s", dest.Hex())
+	log.Printf("     Value: %s wei", value.String())
+	log.Printf("     Data: %d bytes", len(data))
+	log.Printf("   Reimbursement operation:")
+	log.Printf("     Target: %s (paymaster owner for gas reimbursement)", reimbursementRecipient.Hex())
+	log.Printf("     Value: %s wei (%.6f ETH)", reimbursementAmount.String(), float64(reimbursementAmount.Int64())/1e18)
+	log.Printf("     Data: 0 bytes (truly empty!)")
+
+	// Use manual ABI encoding to bypass Go's ABI encoder bug with empty []byte slices
+	wrappedCalldata, err := aa.PackExecuteBatchWithValues(targets, values, calldatas)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to pack executeBatchWithValues: %w", err)
+	}
+
+	log.Printf("✅ Calldata manually encoded: %d bytes", len(wrappedCalldata))
+
+	return wrappedCalldata, reimbursementAmount, nil
+}
+
 // SendUserOp builds, signs, and sends a UserOperation to be executed.
 // It then listens on-chain for 60 seconds to wait until the userops is executed.
 // If the userops is executed, the transaction Receipt is also returned.
@@ -307,13 +484,54 @@ func sendUserOpShared(
 	}
 	defer client.Close()
 
-	// Step 1: Estimate gas FIRST (before deciding paymaster vs self-funded)
+	// Step 0.5: If paymaster reimbursement is enabled, wrap the calldata FIRST (before gas estimation)
+	// This is CRITICAL: we need to estimate gas for the WRAPPED operation, not the unwrapped one
+	var wrappedForReimbursement bool
+	if paymasterReq != nil && EnablePaymasterReimbursement {
+		log.Printf("💳 PAYMASTER REIMBURSEMENT: Enabled, wrapping calldata BEFORE gas estimation")
+
+		// Get reimbursement recipient from config (paymaster owner address)
+		reimbursementRecipient := smartWalletConfig.PaymasterOwnerAddress
+		if reimbursementRecipient == (common.Address{}) {
+			log.Printf("⚠️ PaymasterOwnerAddress not configured, using paymaster address itself")
+			reimbursementRecipient = paymasterReq.PaymasterAddress
+		} else {
+			log.Printf("   Reimbursement will be sent to paymaster owner: %s", reimbursementRecipient.Hex())
+		}
+
+		// Wrap with estimated reimbursement (using nil gas estimate for now, will use defaults)
+		wrapped, reimbursement, wrapErr := wrapWithReimbursement(client, callData, reimbursementRecipient, nil)
+		if wrapErr != nil {
+			log.Printf("❌ Failed to wrap with reimbursement: %v", wrapErr)
+			log.Printf("   Continuing without reimbursement (paymaster absorbs gas costs)")
+		} else {
+			callData = wrapped
+			wrappedForReimbursement = true
+			log.Printf("✅ Calldata wrapped with reimbursement of %s wei (%.6f ETH)", reimbursement.String(), float64(reimbursement.Int64())/1e18)
+			log.Printf("   Now estimating gas for the WRAPPED operation...")
+		}
+	} else if paymasterReq != nil && !EnablePaymasterReimbursement {
+		log.Printf("💳 PAYMASTER REIMBURSEMENT: Disabled (paymaster absorbs gas costs)")
+	}
+
+	// Step 1: Estimate gas for the FINAL calldata (wrapped or unwrapped)
 	// Build a temporary UserOp to estimate gas
 	var estimatedCallGas, estimatedVerificationGas, estimatedPreVerificationGas *big.Int
 	if paymasterReq != nil {
-		log.Printf("🔍 GAS ESTIMATION: Estimating gas before paymaster decision...")
+		log.Printf("🔍 GAS ESTIMATION: Estimating gas for %s operation...", map[bool]string{true: "WRAPPED", false: "UNWRAPPED"}[wrappedForReimbursement])
 
-		if UseLocalGasEstimation {
+		// CRITICAL: Skip bundler estimation for wrapped operations - the bundler can't simulate them correctly
+		// The wrapped operation includes ETH transfers that the bundler's simulation can't handle properly
+		if wrappedForReimbursement {
+			// Use conservative hardcoded gas limits for wrapped operations
+			estimatedCallGas = new(big.Int).Mul(DEFAULT_CALL_GAS_LIMIT, big.NewInt(5)) // 1M for executeBatchWithValues
+			estimatedVerificationGas = DEFAULT_VERIFICATION_GAS_LIMIT
+			estimatedPreVerificationGas = DEFAULT_PREVERIFICATION_GAS
+			log.Printf("   Using CONSERVATIVE hardcoded gas limits for wrapped operation (bundler can't simulate)")
+			log.Printf("   CallGasLimit: %s (5x default for executeBatchWithValues)", estimatedCallGas.String())
+			log.Printf("   VerificationGasLimit: %s", estimatedVerificationGas.String())
+			log.Printf("   PreVerificationGas: %s", estimatedPreVerificationGas.String())
+		} else if UseLocalGasEstimation {
 			// Use local gas estimation (skips bundler call to avoid AA33 nonce bug)
 			log.Printf("   Using LOCAL gas estimation (skipping bundler to avoid AA33 nonce bug)")
 			estimatedCallGas = callGasLimit
@@ -322,21 +540,29 @@ func sendUserOpShared(
 			log.Printf("   Local gas limits: callGas=%s, verificationGas=%s, preVerificationGas=%s",
 				estimatedCallGas.String(), estimatedVerificationGas.String(), estimatedPreVerificationGas.String())
 		} else {
-			// FIXED: Estimate gas with the EXACT UserOp we're going to send (including paymaster)
-			// This prevents AA33 errors from estimation mismatch
+			// Estimate gas with the EXACT UserOp we're going to send (with WRAPPED or UNWRAPPED calldata)
+			// CRITICAL: If wrapped, we need a HIGHER initial gas limit for bundler's binary search
+			initialCallGasLimit := callGasLimit
+			if wrappedForReimbursement {
+				// Increase initial gas limit by 3x for wrapped operations
+				// The bundler uses this as the MAX for its binary search
+				initialCallGasLimit = new(big.Int).Mul(callGasLimit, big.NewInt(3))
+				log.Printf("   Using 3x callGasLimit for wrapped operation: %s (bundler's binary search max)", initialCallGasLimit.String())
+			}
+
 			tempUserOp, tempErr := BuildUserOpWithPaymaster(
 				smartWalletConfig,
 				client,
 				bundlerClient,
 				owner,
-				callData,
+				callData, // This is now the WRAPPED calldata if reimbursement is enabled!
 				paymasterReq.PaymasterAddress,
 				paymasterReq.ValidUntil,
 				paymasterReq.ValidAfter,
 				senderOverride,
 				nil,                  // nonceOverride - let it fetch from chain
 				nil,                  // paymasterNonceOverride - let it fetch from chain
-				callGasLimit,         // Use default gas limits for estimation
+				initialCallGasLimit,  // Use higher gas limit for wrapped operations
 				verificationGasLimit, // Use default gas limits for estimation
 				preVerificationGas,   // Use default gas limits for estimation
 			)
@@ -348,7 +574,7 @@ func sendUserOpShared(
 			// Set dummy signature for estimation (paymaster signature already set in BuildUserOpWithPaymaster)
 			tempUserOp.Signature, _ = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, dummySigForGasEstimation.Bytes())
 
-			// Estimate gas using bundler with the EXACT UserOp structure (including paymaster)
+			// Estimate gas using bundler with the EXACT UserOp structure (including paymaster and wrapped calldata)
 			gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *tempUserOp, aa.EntrypointAddress, map[string]any{})
 			if gasErr != nil {
 				log.Printf("❌ GAS ESTIMATION FAILED: %v", gasErr)
@@ -357,7 +583,7 @@ func sendUserOpShared(
 				estimatedCallGas = gas.CallGasLimit
 				estimatedVerificationGas = gas.VerificationGasLimit
 				estimatedPreVerificationGas = gas.PreVerificationGas
-				log.Printf("✅ GAS ESTIMATION SUCCESS (with paymaster):")
+				log.Printf("✅ GAS ESTIMATION SUCCESS (with paymaster, %s):", map[bool]string{true: "WRAPPED", false: "UNWRAPPED"}[wrappedForReimbursement])
 				log.Printf("   CallGasLimit: %s", estimatedCallGas.String())
 				log.Printf("   VerificationGasLimit: %s", estimatedVerificationGas.String())
 				log.Printf("   PreVerificationGas: %s", estimatedPreVerificationGas.String())
@@ -601,10 +827,18 @@ func sendUserOpCore(
 		// Final preflight estimation with the fully signed, final UserOp.
 		// Important: DO NOT mutate any field from the result, to keep the signature stable.
 		// This ensures the bundler's cached UserOp (from estimation) matches exactly what we send.
-		if gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *userOp, aa.EntrypointAddress, map[string]any{}); gasErr == nil && gas != nil {
-			log.Printf("🔍 FINAL PREFLIGHT ESTIMATION: ok (no field changes)")
+		// SKIP for wrapped operations (executeBatchWithValues) - bundler can't simulate them
+		// Check if calldata starts with executeBatchWithValues selector (0xc3ff72fc)
+		// First 4 bytes of calldata = function selector (method ID)
+		isWrappedOperation := len(userOp.CallData) >= 4 && hexutil.Encode(userOp.CallData[:4]) == "0xc3ff72fc"
+		if !isWrappedOperation {
+			if gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *userOp, aa.EntrypointAddress, map[string]any{}); gasErr == nil && gas != nil {
+				log.Printf("🔍 FINAL PREFLIGHT ESTIMATION: ok (no field changes)")
+			} else {
+				log.Printf("⚠️ FINAL PREFLIGHT ESTIMATION skipped or failed: %v", gasErr)
+			}
 		} else {
-			log.Printf("⚠️ FINAL PREFLIGHT ESTIMATION skipped or failed: %v", gasErr)
+			log.Printf("⚠️ FINAL PREFLIGHT ESTIMATION skipped for wrapped operation (bundler can't simulate executeBatchWithValues)")
 		}
 
 		// Attempt to send

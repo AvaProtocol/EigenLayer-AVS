@@ -265,10 +265,14 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 		if value, err := r.cache.Get(cachekey); err == nil {
 			defaultSmartWallet := common.BytesToAddress(value)
 			user.SmartAccountAddress = &defaultSmartWallet
+			r.config.Logger.Debug("loaded smart wallet from cache", "owner", user.Address.Hex(), "wallet", defaultSmartWallet.Hex())
 		} else {
+			r.config.Logger.Debug("cache miss, deriving smart wallet address", "owner", user.Address.Hex())
 			if err := user.LoadDefaultSmartWallet(r.smartWalletRpc); err != nil {
-				return nil, fmt.Errorf("Rpc error")
+				r.config.Logger.Error("failed to derive smart wallet address", "owner", user.Address.Hex(), "error", err)
+				return nil, fmt.Errorf("failed to derive smart wallet: %w", err)
 			}
+			r.config.Logger.Debug("derived smart wallet address", "owner", user.Address.Hex(), "wallet", user.SmartAccountAddress.Hex())
 
 			// We don't care if its error out in caching, but log it for debugging
 			if err := r.cache.Set(cachekey, user.SmartAccountAddress.Bytes()); err != nil {

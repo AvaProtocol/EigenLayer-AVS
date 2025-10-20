@@ -261,12 +261,6 @@ type VM struct {
 	// send real transactions and should use Tenderly or mock paths instead.
 	IsSimulation bool
 
-	// shouldUsePaymasterOverride overrides the shouldUsePaymaster() decision for contract writes:
-	//   - nil (default): let shouldUsePaymaster() decide based on wallet balance
-	//   - &true: override to use paymaster (useful for testing paymaster sponsorship)
-	//   - &false: override to use self-funded (useful for EntryPoint deposit withdrawal)
-	shouldUsePaymasterOverride *bool
-
 	// Shared clients
 	tenderlyClient *TenderlyClient
 }
@@ -2232,15 +2226,11 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 	// Propagate shared clients (e.g., Tenderly)
 	tempVM.tenderlyClient = v.tenderlyClient
 
-	// Propagate shouldUsePaymasterOverride if set
-	tempVM.shouldUsePaymasterOverride = v.shouldUsePaymasterOverride
-
 	// Log simulation mode for debugging
 	if v.logger != nil {
 		v.logger.Debug("RunNodeWithInputs inheriting simulation mode",
 			"node_type", node.Type.String(),
-			"inherited_simulation_mode", tempVM.IsSimulation,
-			"inherited_shouldUsePaymaster_override", tempVM.shouldUsePaymasterOverride != nil)
+			"inherited_simulation_mode", tempVM.IsSimulation)
 	}
 
 	tempVM.mu.Lock()
