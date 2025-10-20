@@ -1583,20 +1583,18 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 		pendingKeys, _ := n.db.GetKeyHasPrefix(PendingExecutionPrefix(task.Id))
 		n.logger.Debug("🔍 Checking for pending execution IDs", "task_id", task.Id, "pending_keys_found", len(pendingKeys))
 		var pickedID string
-		var pickedKey []byte
 		for _, k := range pendingKeys {
 			id := ExecutionIdFromPendingKey(k)
 			n.logger.Debug("🔍 Found pending execution ID", "task_id", task.Id, "execution_id", id, "key", string(k))
 			if pickedID == "" || id < pickedID {
 				pickedID = id
-				pickedKey = k
 			}
 		}
 		if pickedID != "" {
 			queueTaskData.ExecutionID = pickedID
 			n.logger.Debug("✅ Consuming pending execution ID", "task_id", task.Id, "execution_id", pickedID)
-			// consume the pending entry (we no longer need the index stored here since it will be assigned atomically in the executor)
-			_ = n.db.Delete(pickedKey)
+			// DO NOT delete pending key here - executor needs it to get pre-assigned index!
+			// The pending key will be deleted by executor after using the pre-assigned index
 		} else {
 			queueTaskData.ExecutionID = ulid.Make().String()
 			n.logger.Debug("🆕 Creating new execution ID (no pending found)", "task_id", task.Id, "execution_id", queueTaskData.ExecutionID)
@@ -2004,7 +2002,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 			preAssignedIndex, indexErr := n.AssignNextExecutionIndex(task)
 			if indexErr != nil {
 				n.logger.Error("Failed to assign execution index for non-blocking trigger", "task_id", task.Id, "execution_id", preExecID, "error", indexErr)
-				return nil, status.Errorf(codes.Internal, "failed to assign execution index")
+				return nil, status.Errorf(codes.Internal, "failed to assign execution index: %v", indexErr)
 			}
 			n.logger.Debug("🔢 Pre-assigned execution index", "task_id", task.Id, "execution_id", preExecID, "index", preAssignedIndex)
 

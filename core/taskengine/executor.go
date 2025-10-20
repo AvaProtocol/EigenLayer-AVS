@@ -303,6 +303,15 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 			executionIndex = storedIndex
 			x.logger.Info("Using pre-assigned execution index from pending storage",
 				"task_id", task.Id, "execution_id", queueData.ExecutionID, "index", executionIndex)
+
+			// Now that we've used the pre-assigned index, clean up the pending key
+			if deleteErr := x.db.Delete(pendingKey); deleteErr != nil {
+				x.logger.Warn("Failed to delete pending key after using pre-assigned index",
+					"task_id", task.Id, "execution_id", queueData.ExecutionID, "error", deleteErr)
+			} else {
+				x.logger.Debug("Cleaned up pending key after using pre-assigned index",
+					"task_id", task.Id, "execution_id", queueData.ExecutionID, "index", executionIndex)
+			}
 		} else {
 			// Pending data exists but not a valid index, assign new atomic index
 			newIndex, indexErr := x.engine.AssignNextExecutionIndex(task)
