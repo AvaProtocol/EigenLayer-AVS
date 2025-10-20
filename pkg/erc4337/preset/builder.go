@@ -59,13 +59,6 @@ var (
 	// example tx send to entrypoint: https://sepolia.basescan.org/tx/0x7580ac508a2ac34cf6a4f4346fb6b4f09edaaa4f946f42ecdb2bfd2a633d43af#eventlog
 	userOpEventTopic0 = common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f")
 
-	// UseLocalGasEstimation controls whether to use local gas estimation (true) or bundler estimation (false)
-	// When true: Skips bundler's eth_estimateUserOperationGas call and uses hard-coded gas limits
-	// This avoids the AA33 paymaster nonce bug where bundler increments paymaster nonce during estimation
-	// See: BUNDLER-PAYMASTER-NONCE-BUG.md for details
-	// Default: false (use bundler's gas estimation for accurate gas limits)
-	UseLocalGasEstimation = false // Use bundler's gas estimation for accurate gas limits
-
 	// EnablePaymasterReimbursement controls whether to add ETH reimbursement to paymaster
 	// When true: Wraps execute() with executeBatchWithValues() to atomically reimburse paymaster
 	// Default: true (reimburse paymaster for gas costs)
@@ -531,14 +524,6 @@ func sendUserOpShared(
 			log.Printf("   CallGasLimit: %s (5x default for executeBatchWithValues)", estimatedCallGas.String())
 			log.Printf("   VerificationGasLimit: %s", estimatedVerificationGas.String())
 			log.Printf("   PreVerificationGas: %s", estimatedPreVerificationGas.String())
-		} else if UseLocalGasEstimation {
-			// Use local gas estimation (skips bundler call to avoid AA33 nonce bug)
-			log.Printf("   Using LOCAL gas estimation (skipping bundler to avoid AA33 nonce bug)")
-			estimatedCallGas = callGasLimit
-			estimatedVerificationGas = verificationGasLimit
-			estimatedPreVerificationGas = preVerificationGas
-			log.Printf("   Local gas limits: callGas=%s, verificationGas=%s, preVerificationGas=%s",
-				estimatedCallGas.String(), estimatedVerificationGas.String(), estimatedPreVerificationGas.String())
 		} else {
 			// Estimate gas with the EXACT UserOp we're going to send (with WRAPPED or UNWRAPPED calldata)
 			// CRITICAL: If wrapped, we need a HIGHER initial gas limit for bundler's binary search
@@ -723,10 +708,8 @@ func sendUserOpCore(
 		// Re-estimate gas with current nonce (only on first attempt or if previous failed due to gas)
 		// IMPORTANT:
 		// - Skip gas re-estimation if paymaster is present (would invalidate paymaster signature)
-		// - Skip gas re-estimation entirely when UseLocalGasEstimation is enabled to avoid
-		//   introducing a dummy-signed estimation that can diverge from the final signed UserOp.
 		hasPaymaster := len(userOp.PaymasterAndData) > 0
-		if !UseLocalGasEstimation && !hasPaymaster && (retry == 0 || (err != nil && strings.Contains(err.Error(), "gas"))) {
+		if !hasPaymaster && (retry == 0 || (err != nil && strings.Contains(err.Error(), "gas"))) {
 			userOp.Signature, _ = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, dummySigForGasEstimation.Bytes())
 
 			// Gas estimation debug logging
@@ -772,8 +755,6 @@ func sendUserOpCore(
 			} else {
 				log.Printf("❌ GAS ESTIMATION FAILED on retry %d: %v", retry+1, gasErr)
 			}
-		} else if UseLocalGasEstimation && !hasPaymaster {
-			log.Printf("🔧 GAS ESTIMATION: Skipping bundler estimation due to UseLocalGasEstimation=true (self-funded)")
 		}
 
 		// Sign with current nonce
@@ -805,24 +786,6 @@ func sendUserOpCore(
 		log.Printf("    CallData: %d bytes", len(userOp.CallData))
 		log.Printf("    PaymasterAndData: %d bytes", len(userOp.PaymasterAndData))
 		log.Printf("    Signature: %d bytes", len(userOp.Signature))
-
-		// Calculate total estimated cost for prefund check
-		totalGasLimit := new(big.Int).Add(userOp.PreVerificationGas, new(big.Int).Add(userOp.VerificationGasLimit, userOp.CallGasLimit))
-		estimatedMaxCost := new(big.Int).Mul(totalGasLimit, userOp.MaxFeePerGas)
-		log.Printf("  PREFUND REQUIREMENT: %s wei (total gas * maxFeePerGas)", estimatedMaxCost.String())
-
-		// Check sender balance before sending to bundler
-		if balance, balErr := client.BalanceAt(context.Background(), userOp.Sender, nil); balErr == nil {
-			log.Printf("  SENDER BALANCE: %s wei", balance.String())
-			if balance.Cmp(estimatedMaxCost) >= 0 {
-				log.Printf("  ✅ PREFUND CHECK: Sufficient balance (%s >= %s)", balance.String(), estimatedMaxCost.String())
-			} else {
-				log.Printf("  ❌ PREFUND CHECK: Insufficient balance (%s < %s)", balance.String(), estimatedMaxCost.String())
-				log.Printf("  SHORTFALL: Need %s more wei", new(big.Int).Sub(estimatedMaxCost, balance).String())
-			}
-		} else {
-			log.Printf("  ❌ BALANCE CHECK FAILED: %v", balErr)
-		}
 
 		// Final preflight estimation with the fully signed, final UserOp.
 		// Important: DO NOT mutate any field from the result, to keep the signature stable.
