@@ -82,7 +82,7 @@ func TestExecuteTask_SequentialContractWrites_Sepolia(t *testing.T) {
 	t.Logf("   ✅ Smart wallet registered in database")
 
 	// Create task executor
-	executor := NewExecutor(cfg.SmartWallet, db, testutil.GetLogger())
+	executor := NewExecutorForTesting(cfg.SmartWallet, db, testutil.GetLogger())
 
 	// ========================================
 	// Create workflow with sequential contract writes:

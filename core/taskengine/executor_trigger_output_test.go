@@ -185,7 +185,7 @@ func TestTriggerOutputDataSerializationFix(t *testing.T) {
 					}
 
 					// Create executor
-					executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+					executor := NewExecutorForTesting(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
 
 					// Create queue execution data with the test trigger output
 					queueData := &QueueExecutionData{

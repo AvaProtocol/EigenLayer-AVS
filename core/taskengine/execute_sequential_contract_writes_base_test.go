@@ -114,7 +114,7 @@ func setupSequentialContractWritesTest(t *testing.T) *sequentialContractWritesTe
 	t.Logf("   ✅ Smart wallet registered in database")
 
 	// Create task executor
-	executor := NewExecutor(baseAggregatorCfg.SmartWallet, db, testutil.GetLogger())
+	executor := NewExecutorForTesting(baseAggregatorCfg.SmartWallet, db, testutil.GetLogger())
 
 	return &sequentialContractWritesTestSetup{
 		cfg:               baseAggregatorCfg,

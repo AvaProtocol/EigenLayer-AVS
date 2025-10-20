@@ -60,7 +60,7 @@ func TestExecutorRunTaskWithNilReason(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	executor := NewExecutorForTesting(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
 	execution, err := executor.RunTask(task, &QueueExecutionData{
 		TriggerType:   avsproto.TriggerType_TRIGGER_TYPE_UNSPECIFIED,
 		TriggerOutput: nil,

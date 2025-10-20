@@ -158,7 +158,7 @@ func TestInputVariables_DeployedTask(t *testing.T) {
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
-	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	executor := NewExecutorForTesting(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
 
 	// Create input variables using protobuf Values (as they would be stored)
 	inputVarsProto := make(map[string]*structpb.Value)

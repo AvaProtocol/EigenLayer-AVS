@@ -1581,19 +1581,23 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 	// Only for operator-driven notifications path
 	{
 		pendingKeys, _ := n.db.GetKeyHasPrefix(PendingExecutionPrefix(task.Id))
+		n.logger.Debug("🔍 Checking for pending execution IDs", "task_id", task.Id, "pending_keys_found", len(pendingKeys))
 		var pickedID string
 		for _, k := range pendingKeys {
 			id := ExecutionIdFromPendingKey(k)
+			n.logger.Debug("🔍 Found pending execution ID", "task_id", task.Id, "execution_id", id, "key", string(k))
 			if pickedID == "" || id < pickedID {
 				pickedID = id
 			}
 		}
 		if pickedID != "" {
 			queueTaskData.ExecutionID = pickedID
+			n.logger.Debug("✅ Consuming pending execution ID", "task_id", task.Id, "execution_id", pickedID)
 			// consume the pending entry
 			_ = n.db.Delete(PendingExecutionKey(task, pickedID))
 		} else {
 			queueTaskData.ExecutionID = ulid.Make().String()
+			n.logger.Debug("🆕 Creating new execution ID (no pending found)", "task_id", task.Id, "execution_id", queueTaskData.ExecutionID)
 			// ensure pending status exists so GetExecutionStatus returns PENDING until completion
 			_ = n.setExecutionStatusQueue(task, queueTaskData.ExecutionID)
 		}
@@ -1992,15 +1996,18 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 		// then instruct operator and return immediately (do NOT enqueue here).
 		if !payload.IsBlocking {
 			preExecID := ulid.Make().String()
+			n.logger.Debug("🔄 Pre-creating execution ID for non-blocking trigger", "task_id", task.Id, "execution_id", preExecID)
 			// Mark pending in queue so GetExecutionStatus returns PENDING
 			if err := n.setExecutionStatusQueue(task, preExecID); err != nil {
 				return nil, err
 			}
 			// Persist pending execution ID for FIFO consumption when operator notifies
-			if err := n.db.Set(PendingExecutionKey(task, preExecID), []byte("1")); err != nil {
+			pendingKey := PendingExecutionKey(task, preExecID)
+			if err := n.db.Set(pendingKey, []byte("1")); err != nil {
 				n.logger.Error("Failed to persist pending execution id", "task_id", task.Id, "execution_id", preExecID, "error", err)
 				return nil, status.Errorf(codes.Internal, "failed to persist pending execution id")
 			}
+			n.logger.Debug("💾 Persisted pending execution ID", "task_id", task.Id, "execution_id", preExecID, "key", string(pendingKey))
 
 			// Best-effort operator instruction (ignore errors; operator may connect later)
 			_ = n.instructOperatorImmediateTrigger(task.Id)
@@ -2052,7 +2059,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 	}
 
 	if payload.IsBlocking {
-		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger)
+		executor := NewExecutor(n.smartWalletConfig, n.db, n.logger, n)
 		execution, runErr := executor.RunTask(task, &queueTaskData)
 		if runErr != nil {
 			n.logger.Error("failed to run blocking task", runErr)
@@ -2729,19 +2736,43 @@ func (n *Engine) GetExecution(user *model.User, payload *avsproto.ExecutionReq) 
 		return nil, err
 	}
 
+	// First try to get completed execution from storage
 	rawExecution, err := n.db.GetKey(TaskExecutionKey(task, payload.ExecutionId))
+	if err == nil {
+		exec := &avsproto.Execution{}
+		err = protojson.Unmarshal(rawExecution, exec)
+		if err != nil {
+			return nil, status.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
+		}
+		return exec, nil
+	}
+
+	// If not found in completed executions, check if it's pending in queue
+	execStatus, err := n.getExecutionStatusFromQueue(task, payload.ExecutionId)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, ExecutionNotFoundError)
 	}
 
-	exec := &avsproto.Execution{}
-	err = protojson.Unmarshal(rawExecution, exec)
-	if err != nil {
-		return nil, status.Errorf(codes.Code(avsproto.ErrorCode_TASK_DATA_CORRUPTED), TaskStorageCorruptedError)
+	// Create a minimal execution object for pending status
+	// We don't have full execution details yet, but we can return basic info
+
+	// Assign atomic execution index for pending executions
+	pendingIndex, indexErr := n.AssignNextExecutionIndex(task)
+	if indexErr != nil {
+		n.logger.Warn("Failed to assign atomic index for pending execution, using fallback",
+			"task_id", payload.TaskId, "execution_id", payload.ExecutionId, "error", indexErr)
+		// Fallback to task execution count for compatibility
+		pendingIndex = task.ExecutionCount
 	}
 
-	// No longer need trigger type at execution level - it's in the first step
-	return exec, nil
+	n.logger.Debug("🗒️ Returning pending execution", "task_id", payload.TaskId, "execution_id", payload.ExecutionId, "status", *execStatus, "index", pendingIndex)
+	return &avsproto.Execution{
+		Id:      payload.ExecutionId,
+		Status:  *execStatus,
+		StartAt: time.Now().UnixMilli(),       // Approximate start time
+		Steps:   []*avsproto.Execution_Step{}, // Empty steps for pending
+		Index:   pendingIndex,                 // Use atomic execution index
+	}, nil
 }
 
 func (n *Engine) GetExecutionStatus(user *model.User, payload *avsproto.ExecutionReq) (*avsproto.ExecutionStatusResp, error) {

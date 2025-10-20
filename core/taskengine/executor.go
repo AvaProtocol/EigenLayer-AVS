@@ -58,12 +58,25 @@ func reconstructTriggerOutputData(m map[string]interface{}, logger sdklogging.Lo
 	return nil
 }
 
-func NewExecutor(config *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger) *TaskExecutor {
+func NewExecutor(config *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger, engine *Engine) *TaskExecutor {
 	return &TaskExecutor{
 		db:                     db,
 		logger:                 logger,
 		smartWalletConfig:      config,
 		tokenEnrichmentService: GetTokenEnrichmentService(),
+		engine:                 engine,
+	}
+}
+
+// NewExecutorForTesting creates a TaskExecutor with nil engine for testing purposes
+// Tests should set up a mock engine or use this when atomic indexing is not needed
+func NewExecutorForTesting(config *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger) *TaskExecutor {
+	return &TaskExecutor{
+		db:                     db,
+		logger:                 logger,
+		smartWalletConfig:      config,
+		tokenEnrichmentService: GetTokenEnrichmentService(),
+		engine:                 nil, // Tests should set up mock engine if atomic indexing is needed
 	}
 }
 
@@ -72,6 +85,7 @@ type TaskExecutor struct {
 	logger                 sdklogging.Logger
 	smartWalletConfig      *config.SmartWalletConfig
 	tokenEnrichmentService *TokenEnrichmentService
+	engine                 *Engine
 }
 
 type QueueExecutionData struct {
@@ -211,13 +225,11 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 			if dataMap, ok := dataInterface.(map[string]interface{}); ok {
 				if settingsIface, hasSettings := dataMap["settings"]; hasSettings {
 					if settings, isMap := settingsIface.(map[string]interface{}); isMap {
-						if shouldUsePaymasterIface, hasOverride := settings["shouldUsePaymaster"]; hasOverride {
-							if shouldUsePaymaster, isBool := shouldUsePaymasterIface.(bool); isBool {
-								vm.shouldUsePaymasterOverride = &shouldUsePaymaster
-								x.logger.Info("Deployed workflow: Using paymaster override from settings",
-									"shouldUsePaymaster", shouldUsePaymaster,
-									"task_id", task.Id)
-							}
+						// Note: shouldUsePaymaster override has been removed - always use paymaster if configured
+						if _, hasLegacyOverride := settings["shouldUsePaymaster"]; hasLegacyOverride {
+							x.logger.Warn("Deployed workflow: shouldUsePaymaster override is deprecated and ignored",
+								"reason", "paymaster is always used if configured",
+								"task_id", task.Id)
 						}
 					}
 				}
@@ -281,6 +293,15 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	task.LastRanAt = t0.UnixMilli()
 	initialTaskStatus := task.Status
 
+	// Assign atomic execution index BEFORE creating execution record
+	// This ensures consistent indexing for both blocking and non-blocking executions
+	executionIndex, indexErr := x.engine.AssignNextExecutionIndex(task)
+	if indexErr != nil {
+		x.logger.Error("Failed to assign execution index", "task_id", task.Id, "execution_id", queueData.ExecutionID, "error", indexErr)
+		// For backward compatibility, fall back to ExecutionCount-based index
+		executionIndex = task.ExecutionCount - 1
+	}
+
 	// Create execution record immediately - this ensures we have a record even if validation fails
 	execution := &avsproto.Execution{
 		Id:      queueData.ExecutionID,
@@ -289,7 +310,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		Status:  avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING, // Default to pending, will be updated based on results
 		Error:   "",                                                // Will be populated if there are errors
 		Steps:   []*avsproto.Execution_Step{},                      // Will be populated during execution
-		Index:   task.ExecutionCount - 1,                           // 0-based index (ExecutionCount was already incremented)
+		Index:   executionIndex,                                    // Atomic execution index assignment
 	}
 
 	// Wallet validation - if this fails, we'll record the failure and return the execution record

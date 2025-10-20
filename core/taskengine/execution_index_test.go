@@ -22,11 +22,14 @@ import (
 // This ensures that clients can use the index field to understand execution order
 // without needing to sort by timestamps or other fields.
 func TestExecutionIndexIncrement(t *testing.T) {
-	// Set up test database and executor
+	// Set up test database and engine for proper atomic indexing
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 
-	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger())
+	// Create engine with proper configuration for atomic indexing
+	config := testutil.GetAggregatorConfig()
+	engine := New(db, config, nil, testutil.GetLogger())
+	executor := NewExecutor(testutil.GetTestSmartWalletConfig(), db, testutil.GetLogger(), engine)
 
 	// Create a simple task with manual trigger and custom code node
 	task := &model.Task{
