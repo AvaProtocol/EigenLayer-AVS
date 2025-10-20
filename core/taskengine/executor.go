@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
@@ -293,13 +294,38 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	task.LastRanAt = t0.UnixMilli()
 	initialTaskStatus := task.Status
 
-	// Assign atomic execution index BEFORE creating execution record
-	// This ensures consistent indexing for both blocking and non-blocking executions
-	executionIndex, indexErr := x.engine.AssignNextExecutionIndex(task)
-	if indexErr != nil {
-		x.logger.Error("Failed to assign execution index", "task_id", task.Id, "execution_id", queueData.ExecutionID, "error", indexErr)
-		// For backward compatibility, fall back to ExecutionCount-based index
-		executionIndex = task.ExecutionCount - 1
+	// Check if there's a pre-assigned execution index from non-blocking trigger first
+	var executionIndex int64
+	pendingKey := PendingExecutionKey(task, queueData.ExecutionID)
+	if pendingData, err := x.db.GetKey(pendingKey); err == nil {
+		// Try to parse the pre-assigned index from pending storage
+		if storedIndex, parseErr := strconv.ParseInt(string(pendingData), 10, 64); parseErr == nil {
+			executionIndex = storedIndex
+			x.logger.Info("Using pre-assigned execution index from pending storage",
+				"task_id", task.Id, "execution_id", queueData.ExecutionID, "index", executionIndex)
+		} else {
+			// Pending data exists but not a valid index, assign new atomic index
+			newIndex, indexErr := x.engine.AssignNextExecutionIndex(task)
+			if indexErr != nil {
+				x.logger.Error("Failed to assign execution index", "task_id", task.Id, "execution_id", queueData.ExecutionID, "error", indexErr)
+				executionIndex = task.ExecutionCount - 1 // Fallback
+			} else {
+				executionIndex = newIndex
+			}
+			x.logger.Debug("Assigned new execution index (pending data not an index)",
+				"task_id", task.Id, "execution_id", queueData.ExecutionID, "index", executionIndex)
+		}
+	} else {
+		// No pending data found, assign new atomic index for blocking executions
+		newIndex, indexErr := x.engine.AssignNextExecutionIndex(task)
+		if indexErr != nil {
+			x.logger.Error("Failed to assign execution index", "task_id", task.Id, "execution_id", queueData.ExecutionID, "error", indexErr)
+			executionIndex = task.ExecutionCount - 1 // Fallback
+		} else {
+			executionIndex = newIndex
+		}
+		x.logger.Debug("Assigned new execution index (no pending data)",
+			"task_id", task.Id, "execution_id", queueData.ExecutionID, "index", executionIndex)
 	}
 
 	// Create execution record immediately - this ensures we have a record even if validation fails
