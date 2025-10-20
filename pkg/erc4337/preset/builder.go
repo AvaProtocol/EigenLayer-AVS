@@ -33,6 +33,7 @@ var (
 	// observe actual gas usage, and adjust these values accordingly
 	DEFAULT_CALL_GAS_LIMIT         = big.NewInt(200000)  // 200K for smart wallet execute + ETH transfer (more headroom)
 	ETH_TRANSFER_GAS_COST          = big.NewInt(21000)   // Standard ETH transfer gas cost
+	ETH_TRANSFER_GAS_MULTIPLIER    = int64(5)            // Multiplier for wrapped operations with ETH transfers
 	BATCH_OVERHEAD_BUFFER_PERCENT  = 20                  // 20% buffer for executeBatchWithValues overhead
 	DEFAULT_VERIFICATION_GAS_LIMIT = big.NewInt(1000000) // 1M for signature verification + paymaster validation (very conservative)
 	DEFAULT_PREVERIFICATION_GAS    = big.NewInt(50000)   // 50K for bundler overhead
@@ -419,9 +420,12 @@ func wrapWithReimbursement(
 	targets := []common.Address{dest, reimbursementRecipient}
 	values := []*big.Int{value, reimbursementAmount}
 
-	// Use truly empty []byte for both calldatas (no additional contract calls)
-	// CRITICAL: Use make([]byte, 0) to avoid Go's ABI encoder padding bug
-	calldatas := [][]byte{make([]byte, 0), make([]byte, 0)}
+	// Preserve the original call's calldata for the first step and use an empty
+	// bytes for the reimbursement step. This ensures the intended contract
+	// method is actually executed (e.g., ERC20 transfer), while the second step
+	// simply transfers ETH to reimburse gas costs.
+	// CRITICAL: Use make([]byte, 0) to avoid Go's ABI encoder padding bug for empty bytes
+	calldatas := [][]byte{data, make([]byte, 0)}
 
 	log.Printf("🔄 REIMBURSEMENT WRAPPING (manual ABI encoding):")
 	log.Printf("   Original operation:")
@@ -505,7 +509,7 @@ func sendUserOpShared(
 		// The wrapped operation includes ETH transfers that the bundler's simulation can't handle properly
 		if wrappedForReimbursement {
 			// Use conservative hardcoded gas limits for wrapped operations
-			estimatedCallGas = new(big.Int).Mul(DEFAULT_CALL_GAS_LIMIT, big.NewInt(5)) // 1M for executeBatchWithValues
+			estimatedCallGas = new(big.Int).Mul(DEFAULT_CALL_GAS_LIMIT, big.NewInt(ETH_TRANSFER_GAS_MULTIPLIER)) // 1M for executeBatchWithValues
 			estimatedVerificationGas = DEFAULT_VERIFICATION_GAS_LIMIT
 			estimatedPreVerificationGas = DEFAULT_PREVERIFICATION_GAS
 			log.Printf("Gas estimation: using hardcoded limits for wrapped operation (callGas=%s, verificationGas=%s, preVerificationGas=%s)",

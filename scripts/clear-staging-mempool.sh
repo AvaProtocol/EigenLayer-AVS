@@ -185,10 +185,6 @@ USEROP_COUNT_AFTER=$(echo "$MEMPOOL_AFTER" | jq -r '.result | length' 2>/dev/nul
 echo ""
 if [ "$USEROP_COUNT_AFTER" = "0" ] || [ "$USEROP_COUNT_AFTER" = "null" ]; then
     echo "✅ Success! Mempool is now empty"
-    echo ""
-    echo "You can now retry the withdrawal tests:"
-    echo "  cd /Users/mikasa/Code/ava-sdk-js"
-    echo "  npx jest tests/core/withdraw.test.ts"
 else
     echo "⚠️  Mempool still has $USEROP_COUNT_AFTER UserOp(s)"
     echo ""
@@ -202,7 +198,4 @@ else
     echo "Check bundler logs on staging server for details:"
     echo "  ssh ap-staging1 'docker logs voltaire-bundler --tail 100'"
 fi
-
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
