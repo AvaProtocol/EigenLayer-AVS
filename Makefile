@@ -36,30 +36,18 @@ audit:
 	go run honnef.co/go/tools/cmd/staticcheck@latest -checks=all,-ST1000,-U1000 ./...
 	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 	golangci-lint run ./...
-	go test -race -buildvcs -vet=off ./...
+	go test -race -buildvcs -vet=off $(shell go list ./... | grep -v '/scripts$$')
 
 
-## test: run all tests excluding long-running integration tests
+## test: run all tests with coverage (excluding long-running integration tests)
 .PHONY: test
 test:
+	go clean -testcache
 	go clean -cache
 	go mod tidy
-	go build ./...
-	go test -v -race -buildvcs ./...
-
-## test/cover: run all tests and display coverage excluding long-running integration tests
-.PHONY: test/cover
-test/cover:
-	go clean -cache
-	go mod tidy
-	go build ./...
-	go test -v -race -buildvcs -coverprofile=/tmp/coverage.out ./...
+	go build $(shell go list ./... | grep -v '/scripts$$')
+	go test -v -race -buildvcs -coverprofile=/tmp/coverage.out $(shell go list ./... | grep -v '/scripts$$')
 	go tool cover -html=/tmp/coverage.out
-
-## test/quick: run tests without race detection for faster feedback during development
-.PHONY: test/quick
-test/quick:
-	go test -v ./...
 
 ## test/integration: run long-running integration tests (usually failing, for debugging only)
 .PHONY: test/integration
@@ -68,34 +56,19 @@ test/integration:
 	@echo "⚠️  These are excluded from regular test runs and are for debugging purposes only"
 	go clean -cache
 	go mod tidy
-	go build ./...
+	go build $(shell go list ./... | grep -v '/scripts$$')
 	go test -v -race -buildvcs -tags=integration ./integration_test/
 
-## test/all: run all tests including integration tests (not recommended for CI)
-.PHONY: test/all
-test/all:
-	@echo "⚠️  Running ALL tests including long-running integration tests..."
-	go clean -cache
-	go mod tidy
-	go build ./...
-	go test -v -race -buildvcs -tags=integration ./...
 
 ## test/package: run tests for a specific package (usage: make test/package PKG=./core/taskengine)
 .PHONY: test/package
 test/package:
-	go clean -cache
-	go mod tidy
-	go build ./...
-	go test -v -race -buildvcs $(PKG)
-
-## test/clean: run tests with clean cache to ensure consistency
-.PHONY: test/clean
-test/clean:
 	go clean -testcache
 	go clean -cache
 	go mod tidy
-	go build ./...
-	go test -v -race -buildvcs ./...
+	go build $(shell go list ./... | grep -v '/scripts$$')
+	go test -v -race -buildvcs $(PKG)
+
 
 ## cicd-failed: print cleaned test failures from GitHub Actions logs (usage: make cicd-failed RUN_ID=123456789)
 .PHONY: cicd-failed
@@ -182,19 +155,23 @@ aggregator:
 	@echo "  make aggregator-base-sepolia   - Start aggregator with Base Sepolia config"
 aggregator-sepolia: build
 	@echo "🚀 Starting aggregator with Sepolia configuration..."
-	./out/ap aggregator --config=config/aggregator-sepolia.yaml
+	@echo "📝 Logs will be written to aggregator-sepolia.log"
+	./out/ap aggregator --config=config/aggregator-sepolia.yaml 2>&1 | tee aggregator-sepolia.log
 
 aggregator-ethereum: build
 	@echo "🚀 Starting aggregator with Ethereum configuration..."
-	./out/ap aggregator --config=config/aggregator-ethereum.yaml
+	@echo "📝 Logs will be written to aggregator-ethereum.log"
+	./out/ap aggregator --config=config/aggregator-ethereum.yaml 2>&1 | tee aggregator-ethereum.log
 
 aggregator-base: build
 	@echo "🚀 Starting aggregator with Base configuration..."
-	./out/ap aggregator --config=config/aggregator-base.yaml
+	@echo "📝 Logs will be written to aggregator-base.log"
+	./out/ap aggregator --config=config/aggregator-base.yaml 2>&1 | tee aggregator-base.log
 
 aggregator-base-sepolia: build
 	@echo "🚀 Starting aggregator with Base Sepolia configuration..."
-	./out/ap aggregator --config=config/aggregator-base-sepolia.yaml
+	@echo "📝 Logs will be written to aggregator-base-sepolia.log"
+	./out/ap aggregator --config=config/aggregator-base-sepolia.yaml 2>&1 | tee aggregator-base-sepolia.log
 ## operator: show usage for operator commands
 .PHONY: operator operator-sepolia operator-ethereum operator-base
 operator:
@@ -208,21 +185,25 @@ operator:
 
 operator-sepolia: build
 	@echo "🔧 Starting operator with Sepolia configuration..."
-	./out/ap operator --config=config/operator-sepolia.yaml
+	@echo "📝 Logs will be written to operator-sepolia.log"
+	./out/ap operator --config=config/operator-sepolia.yaml 2>&1 | tee operator-sepolia.log
 
 operator-ethereum: build
 	@echo "🔧 Starting operator with Ethereum configuration..."
-	./out/ap operator --config=config/operator-ethereum.yaml
+	@echo "📝 Logs will be written to operator-ethereum.log"
+	./out/ap operator --config=config/operator-ethereum.yaml 2>&1 | tee operator-ethereum.log
 
 operator-base: build
 	@echo "🔧 Starting operator with Base configuration..."
-	./out/ap operator --config=config/operator-base.yaml
+	@echo "📝 Logs will be written to operator-base.log"
+	./out/ap operator --config=config/operator-base.yaml 2>&1 | tee operator-base.log
 
 operator-default: build
 	@echo "🔧 Starting operator with default configuration..."
-	./out/ap operator --config=config/operator.yaml
+	@echo "📝 Logs will be written to operator-default.log"
+	./out/ap operator --config=config/operator.yaml 2>&1 | tee operator-default.log
 
 
-## dev-clean: cleanup storage data
-dev-clean:
+## clean: cleanup storage data
+clean:
 	rm -rf /tmp/ap-avs /tmp/ap.sock

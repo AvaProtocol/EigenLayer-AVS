@@ -87,7 +87,16 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 		}
 	}
 
-	taskExecutor := taskengine.NewExecutor(agg.config.SmartWallet, agg.db, agg.logger)
+	// Create engine first so it can be passed to executor
+	agg.engine = taskengine.New(
+		agg.db,
+		agg.config,
+		agg.queue,
+		agg.logger,
+	)
+
+	// Create executor with engine reference for atomic execution indexing
+	taskExecutor := taskengine.NewExecutor(agg.config.SmartWallet, agg.db, agg.logger, agg.engine)
 	taskengine.SetMacroVars(agg.config.MacroVars)
 	taskengine.SetMacroSecrets(agg.config.MacroSecrets)
 	taskengine.SetCache(agg.cache)
@@ -99,13 +108,6 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	); err != nil {
 		agg.logger.Error("failed to register task processor", "error", err.Error())
 	}
-
-	agg.engine = taskengine.New(
-		agg.db,
-		agg.config,
-		agg.queue,
-		agg.logger,
-	)
 	if err := agg.engine.MustStart(); err != nil {
 		agg.logger.Error("failed to start task engine", "error", err.Error())
 	}

@@ -228,11 +228,26 @@ func (r *RpcServer) WithdrawFunds(ctx context.Context, payload *avsproto.Withdra
 		return nil, status.Errorf(codes.Internal, "smart wallet configuration not available")
 	}
 
+	// Enable paymaster for gas sponsorship (15 minute validity)
+	paymasterReq := preset.GetVerifyingPaymasterRequestForDuration(
+		r.config.SmartWallet.PaymasterAddress,
+		15*time.Minute,
+	)
+
+	r.config.Logger.Info("processing withdrawal with paymaster sponsorship",
+		"user", user.Address.String(),
+		"smartWallet", smartWalletAddress.Hex(),
+		"paymaster", r.config.SmartWallet.PaymasterAddress.Hex(),
+		"amount", payload.Amount,
+		"token", payload.Token,
+	)
+
 	// Send UserOp via preset.SendUserOp with global WebSocket client
 	userOp, receipt, err := r.sendUserOpWithGlobalWs(
 		user.Address,
 		callData,
 		smartWalletAddress,
+		paymasterReq,
 	)
 
 	if err != nil {
@@ -325,6 +340,7 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 	owner common.Address,
 	callData []byte,
 	smartWalletAddress *common.Address,
+	paymasterReq *preset.VerifyingPaymasterRequest,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	// Use global WebSocket client if available, otherwise fall back to creating new connection
 	if r.smartWalletWsRpc != nil {
@@ -332,10 +348,9 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 			r.config.SmartWallet,
 			owner,
 			callData,
-			nil, // No paymaster for withdrawals
+			paymasterReq, // Use provided paymaster request
 			smartWalletAddress,
 			r.smartWalletWsRpc, // Use global WebSocket client
-			nil,                // paymasterNonceOverride - no paymaster used
 		)
 	} else {
 		// Fallback to original method (creates new WebSocket connection)
@@ -344,9 +359,8 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 			r.config.SmartWallet,
 			owner,
 			callData,
-			nil, // No paymaster for withdrawals
+			paymasterReq, // Use provided paymaster request
 			smartWalletAddress,
-			nil, // paymasterNonceOverride - no paymaster used
 		)
 	}
 }

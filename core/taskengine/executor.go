@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,12 +59,29 @@ func reconstructTriggerOutputData(m map[string]interface{}, logger sdklogging.Lo
 	return nil
 }
 
-func NewExecutor(config *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger) *TaskExecutor {
+func NewExecutor(config *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger, engine *Engine) *TaskExecutor {
 	return &TaskExecutor{
 		db:                     db,
 		logger:                 logger,
 		smartWalletConfig:      config,
 		tokenEnrichmentService: GetTokenEnrichmentService(),
+		engine:                 engine,
+	}
+}
+
+// Creates a TaskExecutor with nil engine for testing purposes
+// Tests should set up a mock engine or use this when atomic indexing is not needed
+func NewExecutorForTesting(swCfg *config.SmartWalletConfig, db storage.Storage, logger sdklogging.Logger) *TaskExecutor {
+	// Initialize a minimal Engine instance so tests exercise production code paths
+	// without requiring separate mocks or test-only fallbacks.
+	minimalCfg := &config.Config{SmartWallet: swCfg}
+	eng := New(db, minimalCfg, nil, logger)
+	return &TaskExecutor{
+		db:                     db,
+		logger:                 logger,
+		smartWalletConfig:      swCfg,
+		tokenEnrichmentService: GetTokenEnrichmentService(),
+		engine:                 eng,
 	}
 }
 
@@ -72,6 +90,7 @@ type TaskExecutor struct {
 	logger                 sdklogging.Logger
 	smartWalletConfig      *config.SmartWalletConfig
 	tokenEnrichmentService *TokenEnrichmentService
+	engine                 *Engine
 }
 
 type QueueExecutionData struct {
@@ -143,7 +162,7 @@ func (x *TaskExecutor) Perform(job *apqueue.Job) error {
 
 	if runErr == nil {
 		// Task logic executed successfully. Clean up the TaskTriggerKey for this async execution.
-		if queueData != nil && queueData.ExecutionID != "" { // Assumes `ExecutionID` is always set for queued jobs. Verify this assumption if the logic changes.
+		if queueData.ExecutionID != "" { // Assumes `ExecutionID` is always set for queued jobs. Verify this assumption if the logic changes.
 			triggerKeyToClean := TaskTriggerKey(task, queueData.ExecutionID)
 			if delErr := x.db.Delete(triggerKeyToClean); delErr != nil {
 				x.logger.Error("Perform: Failed to delete TaskTriggerKey after successful async execution",
@@ -211,13 +230,11 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 			if dataMap, ok := dataInterface.(map[string]interface{}); ok {
 				if settingsIface, hasSettings := dataMap["settings"]; hasSettings {
 					if settings, isMap := settingsIface.(map[string]interface{}); isMap {
-						if shouldUsePaymasterIface, hasOverride := settings["shouldUsePaymaster"]; hasOverride {
-							if shouldUsePaymaster, isBool := shouldUsePaymasterIface.(bool); isBool {
-								vm.shouldUsePaymasterOverride = &shouldUsePaymaster
-								x.logger.Info("Deployed workflow: Using paymaster override from settings",
-									"shouldUsePaymaster", shouldUsePaymaster,
-									"task_id", task.Id)
-							}
+						// Note: shouldUsePaymaster override has been removed - always use paymaster if configured
+						if _, hasLegacyOverride := settings["shouldUsePaymaster"]; hasLegacyOverride {
+							x.logger.Warn("Deployed workflow: shouldUsePaymaster override is deprecated and ignored",
+								"reason", "paymaster is always used if configured",
+								"task_id", task.Id)
 						}
 					}
 				}
@@ -281,6 +298,46 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 	task.LastRanAt = t0.UnixMilli()
 	initialTaskStatus := task.Status
 
+	// Check if there's a pre-assigned execution index from non-blocking trigger first
+	var executionIndex int64
+	pendingKey := PendingExecutionKey(task, queueData.ExecutionID)
+	if pendingData, err := x.db.GetKey(pendingKey); err == nil {
+		// Try to parse the pre-assigned index from pending storage
+		if storedIndex, parseErr := strconv.ParseInt(string(pendingData), 10, 64); parseErr == nil {
+			executionIndex = storedIndex
+			x.logger.Info("Using pre-assigned execution index from pending storage",
+				"task_id", task.Id, "execution_id", queueData.ExecutionID, "index", executionIndex)
+
+			// Now that we've used the pre-assigned index, clean up the pending key
+			if deleteErr := x.db.Delete(pendingKey); deleteErr != nil {
+				x.logger.Warn("Failed to delete pending key after using pre-assigned index",
+					"task_id", task.Id, "execution_id", queueData.ExecutionID, "error", deleteErr)
+			}
+		} else {
+			// Pending data exists but not a valid index; require engine to assign atomically
+			if x.engine == nil {
+				return nil, fmt.Errorf("engine is not initialized; cannot assign execution index")
+			}
+			newIndex, indexErr := x.engine.AssignNextExecutionIndex(task)
+			if indexErr != nil {
+				x.logger.Error("Failed to assign execution index", "task_id", task.Id, "execution_id", queueData.ExecutionID, "error", indexErr)
+				return nil, fmt.Errorf("failed to assign execution index: %w", indexErr)
+			}
+			executionIndex = newIndex
+		}
+	} else {
+		// No pending data found, assign new atomic index for blocking executions
+		if x.engine == nil {
+			return nil, fmt.Errorf("engine is not initialized; cannot assign execution index")
+		}
+		newIndex, indexErr := x.engine.AssignNextExecutionIndex(task)
+		if indexErr != nil {
+			x.logger.Error("Failed to assign execution index", "task_id", task.Id, "execution_id", queueData.ExecutionID, "error", indexErr)
+			return nil, fmt.Errorf("failed to assign execution index: %w", indexErr)
+		}
+		executionIndex = newIndex
+	}
+
 	// Create execution record immediately - this ensures we have a record even if validation fails
 	execution := &avsproto.Execution{
 		Id:      queueData.ExecutionID,
@@ -289,7 +346,7 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		Status:  avsproto.ExecutionStatus_EXECUTION_STATUS_PENDING, // Default to pending, will be updated based on results
 		Error:   "",                                                // Will be populated if there are errors
 		Steps:   []*avsproto.Execution_Step{},                      // Will be populated during execution
-		Index:   task.ExecutionCount - 1,                           // 0-based index (ExecutionCount was already incremented)
+		Index:   executionIndex,                                    // Atomic execution index assignment
 	}
 
 	// Wallet validation - if this fails, we'll record the failure and return the execution record
@@ -343,8 +400,13 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		updateTriggerVariableInVM(vm, triggerVarName, triggerVarData)
 	}
 
+	// Check for error after VM creation
 	if err != nil {
-		return nil, fmt.Errorf("vm failed to initialize: %w", err)
+		execution.EndAt = time.Now().UnixMilli()
+		execution.Error = fmt.Sprintf("failed to create VM: %v", err)
+		execution.Status = avsproto.ExecutionStatus_EXECUTION_STATUS_FAILED
+		x.persistFailedExecution(task, execution, initialTaskStatus)
+		return execution, nil // Return execution record with failure details
 	}
 
 	var runTaskErr error = nil

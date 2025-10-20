@@ -18,7 +18,7 @@ type User struct {
 func (u *User) LoadDefaultSmartWallet(rpcClient *ethclient.Client) error {
 	smartAccountAddress, err := aa.GetSenderAddress(rpcClient, u.Address, big.NewInt(0))
 	if err != nil {
-		return fmt.Errorf("Rpc error")
+		return fmt.Errorf("failed to derive smart wallet address for owner %s: %w", u.Address.Hex(), err)
 	}
 	u.SmartAccountAddress = smartAccountAddress
 	return nil

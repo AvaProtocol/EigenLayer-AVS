@@ -267,7 +267,8 @@ func (r *RpcServer) verifyAuth(ctx context.Context) (*model.User, error) {
 			user.SmartAccountAddress = &defaultSmartWallet
 		} else {
 			if err := user.LoadDefaultSmartWallet(r.smartWalletRpc); err != nil {
-				return nil, fmt.Errorf("Rpc error")
+				r.config.Logger.Error("failed to derive smart wallet address", "owner", user.Address.Hex(), "error", err)
+				return nil, fmt.Errorf("failed to derive smart wallet: %w", err)
 			}
 
 			// We don't care if its error out in caching, but log it for debugging
