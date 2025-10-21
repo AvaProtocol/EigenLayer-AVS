@@ -24,6 +24,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 )
 
 var (
@@ -109,7 +110,11 @@ func waitForUserOpConfirmation(
 	wsClient *ethclient.Client,
 	entrypoint common.Address,
 	userOpHash string,
+	lgr logger.Logger,
 ) (*types.Receipt, error) {
+	// Ensure logger is never nil to avoid panic
+	logger := logger.EnsureLogger(lgr)
+
 	// Configuration for exponential backoff polling
 	const (
 		maxWaitTime     = 30 * time.Second // Maximum total wait time (bundler should process within 2-5s)
@@ -120,9 +125,7 @@ func waitForUserOpConfirmation(
 
 	// Try WebSocket subscription first (most efficient for real-time events)
 	if wsClient != nil {
-		if VerboseLogs {
-			log.Printf("Transaction waiting: attempting WebSocket subscription")
-		}
+		logger.Debug("Transaction waiting: attempting WebSocket subscription")
 
 		query := ethereum.FilterQuery{
 			Addresses: []common.Address{entrypoint},
@@ -134,9 +137,7 @@ func waitForUserOpConfirmation(
 
 		if err == nil {
 			// WebSocket subscription successful - use it with a polling fallback
-			if VerboseLogs {
-				log.Printf("Transaction waiting: websocket subscription active, polling as fallback")
-			}
+			logger.Debug("Transaction waiting: websocket subscription active, polling as fallback")
 			defer sub.Unsubscribe()
 
 			startTime := time.Now()
@@ -171,9 +172,7 @@ func waitForUserOpConfirmation(
 						return nil, nil
 					}
 
-					if VerboseLogs {
-						log.Printf("Transaction waiting: polling (elapsed: %v, interval: %v)", elapsed.Round(time.Second), pollInterval)
-					}
+					logger.Debug("Transaction waiting: polling (elapsed: %v, interval: %v)", elapsed.Round(time.Second), pollInterval)
 
 					receipt, found, err := pollUserOpReceipt(client, entrypoint, userOpHash)
 					if err != nil {
@@ -196,16 +195,12 @@ func waitForUserOpConfirmation(
 			log.Printf("Transaction waiting: websocket subscription failed, using polling only: %v", err)
 		}
 	} else {
-		if VerboseLogs {
-			log.Printf("Transaction waiting: no WebSocket client, using polling only")
-		}
+		logger.Debug("Transaction waiting: no WebSocket client, using polling only")
 	}
 
 PollingOnly:
 	// Polling-only mode (WebSocket unavailable or failed)
-	if VerboseLogs {
-		log.Printf("Transaction waiting: polling-only mode with exponential backoff")
-	}
+	logger.Debug("Transaction waiting: polling-only mode with exponential backoff")
 
 	startTime := time.Now()
 	pollInterval := initialInterval
@@ -475,6 +470,7 @@ func sendUserOpShared(
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
 	wsClient *ethclient.Client,
+	logger logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	var userOp *userop.UserOperation
 	var err error
@@ -646,7 +642,7 @@ func sendUserOpShared(
 
 	// Wait for UserOp confirmation using exponential backoff polling
 	// This is more efficient than a fixed 3-minute timeout and handles bundler delays gracefully
-	receipt, err := waitForUserOpConfirmation(client, wsClient, entrypoint, txResult)
+	receipt, err := waitForUserOpConfirmation(client, wsClient, entrypoint, txResult, logger)
 	if err != nil {
 		log.Printf("Failed to get UserOp confirmation (hash=%s): %v", txResult, err)
 		return userOp, nil, nil
@@ -673,6 +669,7 @@ func SendUserOp(
 	callData []byte,
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
+	logger logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	log.Printf("SendUserOp started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
 
@@ -693,7 +690,7 @@ func SendUserOp(
 	}
 
 	// Use the shared logic for the main UserOp processing
-	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient)
+	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient, nil)
 }
 
 // sendUserOpCore contains the shared retry loop logic for sending UserOps to the bundler.
@@ -950,6 +947,7 @@ func SendUserOpWithWsClient(
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
 	wsClient *ethclient.Client,
+	logger logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	log.Printf("SendUserOpWithWsClient started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
 
@@ -957,11 +955,11 @@ func SendUserOpWithWsClient(
 	if wsClient == nil {
 		log.Printf("⚠️ TRANSACTION WAITING: No WebSocket client provided, falling back to SendUserOp")
 		// Fall back to SendUserOp which will create its own WebSocket client if needed
-		return SendUserOp(smartWalletConfig, owner, callData, paymasterReq, senderOverride)
+		return SendUserOp(smartWalletConfig, owner, callData, paymasterReq, senderOverride, logger)
 	}
 
 	// Use the shared logic for the main UserOp processing
-	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient)
+	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient, logger)
 }
 
 // BuildUserOpWithPaymaster creates a UserOperation with paymaster support.

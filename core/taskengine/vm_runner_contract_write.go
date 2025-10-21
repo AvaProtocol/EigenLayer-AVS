@@ -24,6 +24,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -34,6 +35,7 @@ type SendUserOpFunc func(
 	callData []byte,
 	paymasterReq *preset.VerifyingPaymasterRequest,
 	senderOverride *common.Address,
+	lgr logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error)
 
 type ContractWriteProcessor struct {
@@ -713,6 +715,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		smartWalletCallData,
 		paymasterReq,   // Use paymaster for wallet creation/sponsorship if shouldUsePaymaster() returned true
 		senderOverride, // Smart wallet address from aa_sender
+		r.vm.logger,    // Pass logger for debug/verbose logging
 	)
 
 	// Increment transaction counter for this address (regardless of success/failure)
@@ -907,6 +910,11 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 
 	receiptValue, _ := structpb.NewValue(receiptMap)
 
+	// Initialize UserOp success tracking (for Account Abstraction)
+	userOpEventTopic := common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f")
+	userOpInnerSuccess := true // Default to true for non-AA transactions
+	foundUserOpEvent := false
+
 	// Debug real transaction receipt
 	if receipt != nil {
 		r.vm.logger.Error("🔍 REAL TRANSACTION DEBUG - Receipt analysis",
@@ -916,25 +924,47 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 			"logs_count", len(receipt.Logs),
 			"method", methodName)
 
-		// Log each individual log entry
+		// Log each individual log entry and check for UserOperationEvent
+
 		for i, log := range receipt.Logs {
 			r.vm.logger.Error("🔍 REAL TRANSACTION DEBUG - Log entry",
 				"log_index", i,
 				"address", log.Address.Hex(),
 				"topics_count", len(log.Topics),
 				"data_length", len(log.Data))
+
+			// If this is a UserOperationEvent, decode the success field
+			if len(log.Topics) > 0 && log.Topics[0] == userOpEventTopic {
+				foundUserOpEvent = true
+				// UserOperationEvent(bytes32 indexed userOpHash, address indexed sender, address indexed paymaster, uint256 nonce, bool success, uint256 actualGasCost, uint256 actualGasUsed)
+				// Data contains: nonce (32 bytes), success (32 bytes), actualGasCost (32 bytes), actualGasUsed (32 bytes)
+				if len(log.Data) >= 128 {
+					// success is at bytes 32-64
+					successBytes := log.Data[32:64]
+					userOpInnerSuccess = len(successBytes) > 0 && successBytes[len(successBytes)-1] == 1
+					r.vm.logger.Error("🔍 USEROPERATION EVENT DECODED",
+						"inner_call_success", userOpInnerSuccess,
+						"userOpHash", log.Topics[1].Hex(),
+						"sender", common.BytesToAddress(log.Topics[2].Bytes()).Hex())
+				}
+			}
 		}
 	} else {
 		r.vm.logger.Error("🔍 REAL TRANSACTION DEBUG - No receipt available")
 	}
 
-	success := receipt != nil && receipt.Status == 1
+	// For AA transactions, check both receipt status AND UserOp inner success
+	// For regular transactions, just check receipt status
+	success := receipt != nil && receipt.Status == 1 && userOpInnerSuccess
 	errorMsg := ""
 	if !success {
 		if receipt == nil {
 			errorMsg = "No transaction receipt received"
 		} else if receipt.Status != 1 {
 			errorMsg = fmt.Sprintf("Transaction failed with status %d", receipt.Status)
+		} else if !userOpInnerSuccess && foundUserOpEvent {
+			// AA transaction succeeded at EntryPoint level but inner call failed
+			errorMsg = "UserOperation inner execution failed (likely insufficient token balance or other contract error)"
 		}
 	}
 
@@ -1502,6 +1532,20 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			if receiptMap := methodResult.Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
 				if logs, hasLogs := receiptMap["logs"]; hasLogs {
 					if logsArray, ok := logs.([]interface{}); ok && len(logsArray) > 0 {
+						// First, log ALL addresses in the receipt for debugging
+						r.vm.logger.Error("🔍 EVENT DEBUG - ALL LOG ADDRESSES IN RECEIPT",
+							"total_logs", len(logsArray),
+							"target_contract", contractAddress)
+						for logIdx, logIface := range logsArray {
+							if logM, ok := logIface.(map[string]interface{}); ok {
+								if addr, hasAddr := logM["address"]; hasAddr {
+									r.vm.logger.Error("🔍 EVENT DEBUG - Log address",
+										"log_index", logIdx,
+										"address", addr)
+								}
+							}
+						}
+
 						// Decode each event log using contract ABI
 						for _, logInterface := range logsArray {
 							if logMap, ok := logInterface.(map[string]interface{}); ok {

@@ -19,30 +19,10 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
-	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
-
-// noOpLogger implements the sdklogging.Logger interface as a no-op to prevent nil pointer dereferences
-type noOpLogger struct{}
-
-func (l *noOpLogger) Info(msg string, keysAndValues ...interface{})        {}
-func (l *noOpLogger) Infof(format string, args ...interface{})             {}
-func (l *noOpLogger) Debug(msg string, keysAndValues ...interface{})       {}
-func (l *noOpLogger) Debugf(format string, args ...interface{})            {}
-func (l *noOpLogger) Error(msg string, keysAndValues ...interface{})       {}
-func (l *noOpLogger) Errorf(format string, args ...interface{})            {}
-func (l *noOpLogger) Warn(msg string, keysAndValues ...interface{})        {}
-func (l *noOpLogger) Warnf(format string, args ...interface{})             {}
-func (l *noOpLogger) Fatal(msg string, keysAndValues ...interface{})       {}
-func (l *noOpLogger) Fatalf(format string, args ...interface{})            {}
-func (l *noOpLogger) With(keysAndValues ...interface{}) sdklogging.Logger  { return l }
-func (l *noOpLogger) WithComponent(componentName string) sdklogging.Logger { return l }
-func (l *noOpLogger) WithName(name string) sdklogging.Logger               { return l }
-func (l *noOpLogger) WithServiceName(serviceName string) sdklogging.Logger { return l }
-func (l *noOpLogger) WithHostName(hostName string) sdklogging.Logger       { return l }
-func (l *noOpLogger) Sync() error                                          { return nil }
 
 type VMState string
 
@@ -254,7 +234,7 @@ type VM struct {
 	entrypoint        string
 	instructionCount  int64
 	smartWalletConfig *config.SmartWalletConfig
-	logger            sdklogging.Logger
+	logger            logger.Logger
 	db                storage.Storage
 	// IsSimulation indicates whether this VM is executing in a simulation context
 	// (SimulateTask or RunNodeImmediately). In simulation, write operations must not
@@ -301,8 +281,8 @@ func (v *VM) Reset() {
 	// Simplified: just reset what's needed for re-compilation and re-run.
 }
 
-func (v *VM) WithLogger(logger sdklogging.Logger) *VM {
-	v.logger = logger
+func (v *VM) WithLogger(lgr logger.Logger) *VM {
+	v.logger = lgr
 	return v
 }
 
@@ -379,11 +359,8 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 	v.smartWalletConfig = smartWalletConfig
 	v.parsedTriggerData = &triggerDataType{} // Initialize parsedTriggerData
 
-	// Initialize logger if it's nil to prevent panic
-	if v.logger == nil {
-		// Create a no-op logger to prevent nil pointer dereferences
-		v.logger = &noOpLogger{}
-	}
+	// Initialize logger if it's nil to prevent panic (using shared utility)
+	v.logger = logger.EnsureLogger(v.logger)
 
 	// Initialize apContext with configVars containing secrets and macro variables
 	configVars := make(map[string]string)
