@@ -24,7 +24,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/preset"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -35,7 +34,6 @@ type SendUserOpFunc func(
 	callData []byte,
 	paymasterReq *preset.VerifyingPaymasterRequest,
 	senderOverride *common.Address,
-	lgr logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error)
 
 type ContractWriteProcessor struct {
@@ -58,15 +56,6 @@ func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConf
 	}
 
 	return r
-}
-
-// resolveSimulationMode resolves the effective simulation mode for a contract write node.
-// It returns the per-node is_simulated value if explicitly set, otherwise falls back to the VM's simulation flag.
-func (r *ContractWriteProcessor) resolveSimulationMode(node *avsproto.ContractWriteNode, vmDefault bool) bool {
-	if node != nil && node.Config != nil && node.Config.IsSimulated != nil {
-		return node.Config.GetIsSimulated()
-	}
-	return vmDefault
 }
 
 func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) (string, string, []*avsproto.ContractWriteNode_MethodCall, error) {
@@ -132,7 +121,6 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	originalAbiString string,
 	contractAddress common.Address,
 	methodCall *avsproto.ContractWriteNode_MethodCall,
-	shouldSimulate bool,
 ) *avsproto.ContractWriteNode_MethodResult {
 	t0 := time.Now()
 
@@ -329,23 +317,24 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		r.vm.logger.Warn("⚠️ CONTRACT WRITE DEBUG - Smart wallet config is NIL!")
 	}
 
-	// For logging, detect RNWI context
+	// Check if this is a runNodeWithInputs call (should always be simulation)
 	isRunNodeWithInputs := false
 	if taskTypeVar, ok := r.vm.vars["task_type"]; ok {
 		if taskTypeStr, ok := taskTypeVar.(string); ok && taskTypeStr == "run_node_with_inputs" {
 			isRunNodeWithInputs = true
 		}
 	}
-	// Log VM mode
-	r.vm.logger.Debug("🔧 CONTRACT WRITE - VM mode check",
-		"vm_is_simulation", r.vm.IsSimulation,
-		"rnwi", isRunNodeWithInputs,
-		"should_simulate", shouldSimulate,
+
+	// Log VM mode (simulation flag only)
+	r.vm.logger.Error("🔧 CONTRACT WRITE CRITICAL DEBUG - VM mode check",
+		"is_simulation", r.vm.IsSimulation,
+		"is_run_node_with_inputs", isRunNodeWithInputs,
+		"should_simulate", r.vm.IsSimulation || isRunNodeWithInputs,
 		"method", methodName,
 		"contract", contractAddress.Hex())
 
-	// Use simulation if flag resolves true; otherwise perform real execution
-	if shouldSimulate {
+	// If simulation flag is set OR forcing simulation, always use simulation path
+	if r.vm.IsSimulation || isRunNodeWithInputs {
 		r.vm.logger.Info("🔮 CONTRACT WRITE DEBUG - Using Tenderly simulation path",
 			"contract", contractAddress.Hex(),
 			"method", methodName,
@@ -523,7 +512,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	}
 
 	// Deployed workflows (simulation flag is false): require smartWalletConfig and use real UserOp path
-	r.vm.logger.Debug("🚀 CONTRACT WRITE - Going down REAL transaction path",
+	r.vm.logger.Error("🚀 CONTRACT WRITE CRITICAL DEBUG - Going down REAL transaction path",
 		"is_simulation", r.vm.IsSimulation,
 		"method", methodName,
 		"contract", contractAddress.Hex())
@@ -724,7 +713,6 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		smartWalletCallData,
 		paymasterReq,   // Use paymaster for wallet creation/sponsorship if shouldUsePaymaster() returned true
 		senderOverride, // Smart wallet address from aa_sender
-		r.vm.logger,    // Pass logger for debug/verbose logging
 	)
 
 	// Increment transaction counter for this address (regardless of success/failure)
@@ -736,7 +724,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	}
 
 	if err != nil {
-		// Add detailed error information to execution log (internal)
+		// Add detailed error information to execution log
 		executionLogBuilder.WriteString(fmt.Sprintf("❌ BUNDLER FAILED: UserOp transaction could not be sent\n"))
 		executionLogBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
 
@@ -791,41 +779,15 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 				"solution", "Fund the smart wallet with ETH for gas fees")
 		}
 
-		// Create simplified user-facing error message
-		var userErrorMsg string
-		if strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "dial tcp") {
-			userErrorMsg = "Bundler service unavailable"
-		} else if strings.Contains(err.Error(), "AA21") {
-			userErrorMsg = "Insufficient ETH balance for gas fees"
-		} else if strings.Contains(err.Error(), "AA") {
-			// Other AA error codes (AA10, AA23, etc.)
-			// Extract AA error code if present
-			parts := strings.Split(err.Error(), "AA")
-			if len(parts) > 1 {
-				// Take first line after AA code
-				userErrorMsg = "AA" + strings.Split(parts[1], "\n")[0]
-			} else {
-				userErrorMsg = "Transaction validation failed"
-			}
-		} else {
-			// Extract first meaningful error line without verbose details
-			errStr := err.Error()
-			if idx := strings.Index(errStr, "\n"); idx > 0 {
-				userErrorMsg = errStr[:idx]
-			} else {
-				userErrorMsg = errStr
-			}
-			// Limit length to avoid extremely long messages
-			if len(userErrorMsg) > 200 {
-				userErrorMsg = userErrorMsg[:200] + "..."
-			}
-		}
+		// Create comprehensive error message with all details
+		var errorBuilder strings.Builder
+		errorBuilder.WriteString(fmt.Sprintf("Bundler failed - UserOp transaction could not be sent: %v\n", err))
+		errorBuilder.WriteString(executionLogBuilder.String())
 
-		// Return error result with simplified user message
-		// Detailed execution log is available in server logs for debugging
+		// Return error result with detailed execution log
 		return &avsproto.ContractWriteNode_MethodResult{
 			Success:    false,
-			Error:      userErrorMsg,
+			Error:      errorBuilder.String(),
 			MethodName: methodName,
 		}
 	}
@@ -945,61 +907,34 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 
 	receiptValue, _ := structpb.NewValue(receiptMap)
 
-	// Initialize UserOp success tracking (for Account Abstraction)
-	userOpEventTopic := common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f")
-	userOpInnerSuccess := true // Default to true for non-AA transactions
-	foundUserOpEvent := false
-
 	// Debug real transaction receipt
 	if receipt != nil {
-		r.vm.logger.Debug("🔍 REAL TRANSACTION DEBUG - Receipt analysis",
+		r.vm.logger.Error("🔍 REAL TRANSACTION DEBUG - Receipt analysis",
 			"tx_hash", receipt.TxHash.Hex(),
 			"block_number", receipt.BlockNumber.Uint64(),
 			"status", receipt.Status,
 			"logs_count", len(receipt.Logs),
 			"method", methodName)
 
-		// Log each individual log entry and check for UserOperationEvent
-
+		// Log each individual log entry
 		for i, log := range receipt.Logs {
-			r.vm.logger.Debug("🔍 REAL TRANSACTION DEBUG - Log entry",
+			r.vm.logger.Error("🔍 REAL TRANSACTION DEBUG - Log entry",
 				"log_index", i,
 				"address", log.Address.Hex(),
 				"topics_count", len(log.Topics),
 				"data_length", len(log.Data))
-
-			// If this is a UserOperationEvent, decode the success field
-			if len(log.Topics) > 0 && log.Topics[0] == userOpEventTopic {
-				foundUserOpEvent = true
-				// UserOperationEvent(bytes32 indexed userOpHash, address indexed sender, address indexed paymaster, uint256 nonce, bool success, uint256 actualGasCost, uint256 actualGasUsed)
-				// Data contains: nonce (32 bytes), success (32 bytes), actualGasCost (32 bytes), actualGasUsed (32 bytes)
-				if len(log.Data) >= 128 {
-					// success is at bytes 32-64
-					successBytes := log.Data[32:64]
-					userOpInnerSuccess = len(successBytes) > 0 && successBytes[len(successBytes)-1] == 1
-					r.vm.logger.Debug("🔍 USEROPERATION EVENT DECODED",
-						"inner_call_success", userOpInnerSuccess,
-						"userOpHash", log.Topics[1].Hex(),
-						"sender", common.BytesToAddress(log.Topics[2].Bytes()).Hex())
-				}
-			}
 		}
 	} else {
-		r.vm.logger.Debug("🔍 REAL TRANSACTION DEBUG - No receipt available")
+		r.vm.logger.Error("🔍 REAL TRANSACTION DEBUG - No receipt available")
 	}
 
-	// For AA transactions, check both receipt status AND UserOp inner success
-	// For regular transactions, just check receipt status
-	success := receipt != nil && receipt.Status == 1 && userOpInnerSuccess
+	success := receipt != nil && receipt.Status == 1
 	errorMsg := ""
 	if !success {
 		if receipt == nil {
 			errorMsg = "No transaction receipt received"
 		} else if receipt.Status != 1 {
 			errorMsg = fmt.Sprintf("Transaction failed with status %d", receipt.Status)
-		} else if !userOpInnerSuccess && foundUserOpEvent {
-			// AA transaction succeeded at EntryPoint level but inner call failed
-			errorMsg = "UserOperation inner execution failed (likely insufficient token balance or other contract error)"
 		}
 	}
 
@@ -1304,26 +1239,6 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		}
 	}()
 
-	// Ensure aa_sender is available (node-type-specific prep)
-	r.vm.mu.Lock()
-	_, hasSender := r.vm.vars["aa_sender"]
-	settingsVal, hasSettings := r.vm.vars["settings"]
-	r.vm.mu.Unlock()
-	if !hasSender && hasSettings {
-		if settings, ok := settingsVal.(map[string]interface{}); ok {
-			if runnerIface, ok := settings["runner"]; ok {
-				if runnerStr, ok := runnerIface.(string); ok && common.IsHexAddress(runnerStr) {
-					r.vm.AddVar("aa_sender", runnerStr)
-					if r.vm.logger != nil {
-						r.vm.logger.Info("ContractWriteProcessor.Prepare: aa_sender extracted from settings.runner",
-							"aa_sender", runnerStr,
-							"step_id", stepID)
-					}
-				}
-			}
-		}
-	}
-
 	// Get input configuration
 	contractAddress, _, methodCalls, inputErr := r.getInputData(node)
 	if inputErr != nil {
@@ -1398,9 +1313,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					}
 				}
 			}()
-			// Resolve shouldSimulate: default to VM flag; allow per-node override via typed config
-			effectiveSim := r.resolveSimulationMode(node, r.vm.IsSimulation)
-			result = r.executeMethodCall(ctx, parsedABI, originalAbiString, contractAddr, methodCall, effectiveSim)
+			result = r.executeMethodCall(ctx, parsedABI, originalAbiString, contractAddr, methodCall)
 		}()
 		// Ensure MethodName is populated to avoid empty keys downstream
 		if result.MethodName == "" {
@@ -1589,27 +1502,13 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			if receiptMap := methodResult.Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
 				if logs, hasLogs := receiptMap["logs"]; hasLogs {
 					if logsArray, ok := logs.([]interface{}); ok && len(logsArray) > 0 {
-						// First, log ALL addresses in the receipt for debugging
-						r.vm.logger.Debug("🔍 EVENT DEBUG - ALL LOG ADDRESSES IN RECEIPT",
-							"total_logs", len(logsArray),
-							"target_contract", contractAddress)
-						for logIdx, logIface := range logsArray {
-							if logM, ok := logIface.(map[string]interface{}); ok {
-								if addr, hasAddr := logM["address"]; hasAddr {
-									r.vm.logger.Debug("🔍 EVENT DEBUG - Log address",
-										"log_index", logIdx,
-										"address", addr)
-								}
-							}
-						}
-
 						// Decode each event log using contract ABI
 						for _, logInterface := range logsArray {
 							if logMap, ok := logInterface.(map[string]interface{}); ok {
 								if parsedABI != nil {
 									// Convert log map to types.Log structure for parsing
 									if eventLog := r.convertMapToEventLog(logMap); eventLog != nil {
-										r.vm.logger.Debug("🔍 EVENT DEBUG - Converted log",
+										r.vm.logger.Error("🔍 EVENT DEBUG - Converted log",
 											"address", eventLog.Address.Hex(),
 											"topics_count", len(eventLog.Topics),
 											"data_length", len(eventLog.Data),
@@ -1649,44 +1548,18 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 										// Parse the log using shared event parsing function
 										decodedEvent, eventName, err := parseEventWithABIShared(eventLog, parsedABI, nil, r.vm.logger)
 										if err != nil {
-											r.vm.logger.Debug("🔍 EVENT DEBUG - Failed to parse event",
+											r.vm.logger.Error("🔍 EVENT DEBUG - Failed to parse event",
 												"contractAddress", eventLog.Address.Hex(),
 												"error", err)
 										} else {
-											r.vm.logger.Debug("🔍 EVENT DEBUG - Successfully parsed event",
+											r.vm.logger.Error("🔍 EVENT DEBUG - Successfully parsed event",
 												"event_name", eventName,
 												"decoded_data", decodedEvent)
 
 											// Flatten event fields into methodEvents
-											// Prefer removing the event name wrapper if present, so
-											// output is methodName: { from, to, value } rather than methodName: { Transfer: {...} }
-											if eventName != "" {
-												if only, ok := decodedEvent[eventName]; ok {
-													if inner, ok2 := only.(map[string]interface{}); ok2 {
-														for k, v := range inner {
-															methodEvents[k] = v
-														}
-													} else {
-														// Fallback: copy decodedEvent sans meta key
-														for key, value := range decodedEvent {
-															if key != "eventName" {
-																methodEvents[key] = value
-															}
-														}
-													}
-												} else {
-													// No direct eventName key; copy sans meta key
-													for key, value := range decodedEvent {
-														if key != "eventName" {
-															methodEvents[key] = value
-														}
-													}
-												}
-											} else {
-												for key, value := range decodedEvent {
-													if key != "eventName" {
-														methodEvents[key] = value
-													}
+											for key, value := range decodedEvent {
+												if key != "eventName" { // Skip meta field
+													methodEvents[key] = value
 												}
 											}
 										}
@@ -1720,11 +1593,6 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 						break
 					}
 				}
-			}
-		} else {
-			// No events decoded: if method succeeded, set boolean true for methodName; otherwise keep {}
-			if methodResult.Success {
-				decodedEventsData[methodName] = true
 			}
 		}
 		// If no events, preserve existing return values (return values only when no events)
@@ -1860,8 +1728,8 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	}
 
 	// Update ExecutionContext to reflect actual execution mode (simulated vs real)
-	// Use the resolved per-node simulation flag as the source of truth
-	isSimulated := r.resolveSimulationMode(node, r.vm.IsSimulation)
+	// Use the VM's IsSimulation flag as the source of truth
+	isSimulated := r.vm.IsSimulation
 	provider := string(ProviderTenderly)
 	if !isSimulated {
 		provider = string(ProviderBundler) // Real UserOp executed through bundler
