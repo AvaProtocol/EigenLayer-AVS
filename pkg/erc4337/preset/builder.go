@@ -57,6 +57,9 @@ var (
 	dummySigForGasEstimation = crypto.Keccak256Hash(common.FromHex("0xdead123"))
 	accountSalt              = big.NewInt(0)
 
+	// Controls verbose logging for this package. Set to true for detailed debug output.
+	VerboseLogs = false
+
 	// example tx send to entrypoint: https://sepolia.basescan.org/tx/0x7580ac508a2ac34cf6a4f4346fb6b4f09edaaa4f946f42ecdb2bfd2a633d43af#eventlog
 	userOpEventTopic0 = common.HexToHash("0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f")
 
@@ -117,7 +120,9 @@ func waitForUserOpConfirmation(
 
 	// Try WebSocket subscription first (most efficient for real-time events)
 	if wsClient != nil {
-		log.Printf("🔍 TRANSACTION WAITING: Attempting WebSocket subscription...")
+		if VerboseLogs {
+			log.Printf("Transaction waiting: attempting WebSocket subscription")
+		}
 
 		query := ethereum.FilterQuery{
 			Addresses: []common.Address{entrypoint},
@@ -129,7 +134,9 @@ func waitForUserOpConfirmation(
 
 		if err == nil {
 			// WebSocket subscription successful - use it with a polling fallback
-			log.Printf("✅ TRANSACTION WAITING: WebSocket subscription active, will poll as fallback")
+			if VerboseLogs {
+				log.Printf("Transaction waiting: websocket subscription active, polling as fallback")
+			}
 			defer sub.Unsubscribe()
 
 			startTime := time.Now()
@@ -141,14 +148,14 @@ func waitForUserOpConfirmation(
 				select {
 				case err := <-sub.Err():
 					if err != nil {
-						log.Printf("⚠️ TRANSACTION WAITING: WebSocket error, falling back to polling: %v", err)
+						log.Printf("Transaction waiting: websocket error, falling back to polling: %v", err)
 						// Continue with polling below
 						goto PollingOnly
 					}
 
 				case vLog := <-logs:
 					// Got the event via WebSocket - fastest path!
-					log.Printf("✅ TRANSACTION WAITING: UserOp confirmed via WebSocket - tx: %s", vLog.TxHash.Hex())
+					log.Printf("UserOp confirmed via websocket - tx: %s", vLog.TxHash.Hex())
 					receipt, err := client.TransactionReceipt(context.Background(), vLog.TxHash)
 					if err != nil {
 						log.Printf("⚠️ TRANSACTION WAITING: Failed to get receipt for %s: %v", vLog.TxHash.Hex(), err)
@@ -160,19 +167,20 @@ func waitForUserOpConfirmation(
 					// Periodic polling as fallback (in case WebSocket misses events)
 					elapsed := time.Since(startTime)
 					if elapsed > maxWaitTime {
-						log.Printf("⏰ TRANSACTION WAITING: Timeout after %v - UserOp may still be pending", elapsed)
+						log.Printf("Transaction waiting timeout after %v - UserOp may still be pending", elapsed)
 						return nil, nil
 					}
 
-					log.Printf("🔍 TRANSACTION WAITING: Polling for confirmation (elapsed: %v, interval: %v)...",
-						elapsed.Round(time.Second), pollInterval)
+					if VerboseLogs {
+						log.Printf("Transaction waiting: polling (elapsed: %v, interval: %v)", elapsed.Round(time.Second), pollInterval)
+					}
 
 					receipt, found, err := pollUserOpReceipt(client, entrypoint, userOpHash)
 					if err != nil {
-						log.Printf("⚠️ TRANSACTION WAITING: Polling error: %v", err)
+						log.Printf("Transaction waiting polling error: %v", err)
 					}
 					if found {
-						log.Printf("✅ TRANSACTION WAITING: UserOp confirmed via polling")
+						log.Printf("UserOp confirmed via polling")
 						return receipt, nil
 					}
 
@@ -185,15 +193,19 @@ func waitForUserOpConfirmation(
 				}
 			}
 		} else {
-			log.Printf("⚠️ TRANSACTION WAITING: WebSocket subscription failed, using polling only: %v", err)
+			log.Printf("Transaction waiting: websocket subscription failed, using polling only: %v", err)
 		}
 	} else {
-		log.Printf("🔍 TRANSACTION WAITING: No WebSocket client, using polling only")
+		if VerboseLogs {
+			log.Printf("Transaction waiting: no WebSocket client, using polling only")
+		}
 	}
 
 PollingOnly:
 	// Polling-only mode (WebSocket unavailable or failed)
-	log.Printf("🔍 TRANSACTION WAITING: Starting polling-only mode with exponential backoff")
+	if VerboseLogs {
+		log.Printf("Transaction waiting: polling-only mode with exponential backoff")
+	}
 
 	startTime := time.Now()
 	pollInterval := initialInterval
@@ -468,6 +480,10 @@ func sendUserOpShared(
 	var err error
 	entrypoint := smartWalletConfig.EntrypointAddress
 
+	// Preserve original calldata for possible no-paymaster fallback
+	originalCallData := make([]byte, len(callData))
+	copy(originalCallData, callData)
+
 	// Initialize clients once and reuse them
 	bundlerClient, err := bundler.NewBundlerClient(smartWalletConfig.BundlerURL)
 	if err != nil {
@@ -505,59 +521,50 @@ func sendUserOpShared(
 	// Build a temporary UserOp to estimate gas
 	var estimatedCallGas, estimatedVerificationGas, estimatedPreVerificationGas *big.Int
 	if paymasterReq != nil {
-		// CRITICAL: Skip bundler estimation for wrapped operations - the bundler can't simulate them correctly
-		// The wrapped operation includes ETH transfers that the bundler's simulation can't handle properly
+		// Attempt bundler gas estimation on the FINAL calldata (wrapped or unwrapped)
+		// If wrapped, boost the initial callGas limit to help the bundler's binary search converge.
+		initialCallGasLimit := callGasLimit
 		if wrappedForReimbursement {
-			// Use conservative hardcoded gas limits for wrapped operations
-			estimatedCallGas = new(big.Int).Mul(DEFAULT_CALL_GAS_LIMIT, big.NewInt(ETH_TRANSFER_GAS_MULTIPLIER)) // 1M for executeBatchWithValues
+			initialCallGasLimit = new(big.Int).Mul(callGasLimit, big.NewInt(3))
+		}
+
+		tempUserOp, tempErr := BuildUserOpWithPaymaster(
+			smartWalletConfig,
+			client,
+			bundlerClient,
+			owner,
+			callData, // WRAPPED calldata when reimbursement is enabled
+			paymasterReq.PaymasterAddress,
+			paymasterReq.ValidUntil,
+			paymasterReq.ValidAfter,
+			senderOverride,
+			nil,                  // nonceOverride - fetch from chain
+			initialCallGasLimit,  // higher starting point if wrapped
+			verificationGasLimit, // provisional values
+			preVerificationGas,   // provisional values
+		)
+		if tempErr != nil {
+			log.Printf("Failed to build temp UserOp for gas estimation: %v", tempErr)
+			return nil, nil, tempErr
+		}
+
+		// Set dummy signature for estimation (paymaster signature already set in BuildUserOpWithPaymaster)
+		tempUserOp.Signature, _ = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, dummySigForGasEstimation.Bytes())
+
+		// Estimate gas using bundler with the EXACT UserOp structure (including paymaster and wrapped calldata)
+		gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *tempUserOp, aa.EntrypointAddress, map[string]any{})
+		if gasErr != nil {
+			log.Printf("Gas estimation failed: %v (falling back to defaults)", gasErr)
+			// Fallback to conservative defaults when estimation fails
+			estimatedCallGas = new(big.Int).Mul(DEFAULT_CALL_GAS_LIMIT, big.NewInt(ETH_TRANSFER_GAS_MULTIPLIER))
 			estimatedVerificationGas = DEFAULT_VERIFICATION_GAS_LIMIT
 			estimatedPreVerificationGas = DEFAULT_PREVERIFICATION_GAS
-			log.Printf("Gas estimation: using hardcoded limits for wrapped operation (callGas=%s, verificationGas=%s, preVerificationGas=%s)",
+		} else if gas != nil {
+			estimatedCallGas = gas.CallGasLimit
+			estimatedVerificationGas = gas.VerificationGasLimit
+			estimatedPreVerificationGas = gas.PreVerificationGas
+			log.Printf("Gas estimation: callGas=%s, verificationGas=%s, preVerificationGas=%s",
 				estimatedCallGas.String(), estimatedVerificationGas.String(), estimatedPreVerificationGas.String())
-		} else {
-			// Estimate gas with the EXACT UserOp we're going to send (with WRAPPED or UNWRAPPED calldata)
-			// CRITICAL: If wrapped, we need a HIGHER initial gas limit for bundler's binary search
-			initialCallGasLimit := callGasLimit
-			if wrappedForReimbursement {
-				// Increase initial gas limit by 3x for wrapped operations
-				// The bundler uses this as the MAX for its binary search
-				initialCallGasLimit = new(big.Int).Mul(callGasLimit, big.NewInt(3))
-			}
-
-			tempUserOp, tempErr := BuildUserOpWithPaymaster(
-				smartWalletConfig,
-				client,
-				bundlerClient,
-				owner,
-				callData, // This is now the WRAPPED calldata if reimbursement is enabled!
-				paymasterReq.PaymasterAddress,
-				paymasterReq.ValidUntil,
-				paymasterReq.ValidAfter,
-				senderOverride,
-				nil,                  // nonceOverride - let it fetch from chain
-				initialCallGasLimit,  // Use higher gas limit for wrapped operations
-				verificationGasLimit, // Use default gas limits for estimation
-				preVerificationGas,   // Use default gas limits for estimation
-			)
-			if tempErr != nil {
-				log.Printf("Failed to build temp UserOp for gas estimation: %v", tempErr)
-				return nil, nil, tempErr
-			}
-
-			// Set dummy signature for estimation (paymaster signature already set in BuildUserOpWithPaymaster)
-			tempUserOp.Signature, _ = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, dummySigForGasEstimation.Bytes())
-
-			// Estimate gas using bundler with the EXACT UserOp structure (including paymaster and wrapped calldata)
-			gas, gasErr := bundlerClient.EstimateUserOperationGas(context.Background(), *tempUserOp, aa.EntrypointAddress, map[string]any{})
-			if gasErr != nil {
-				log.Printf("Gas estimation failed: %v (using hardcoded limits)", gasErr)
-			} else if gas != nil {
-				estimatedCallGas = gas.CallGasLimit
-				estimatedVerificationGas = gas.VerificationGasLimit
-				estimatedPreVerificationGas = gas.PreVerificationGas
-				log.Printf("Gas estimation: callGas=%s, verificationGas=%s, preVerificationGas=%s",
-					estimatedCallGas.String(), estimatedVerificationGas.String(), estimatedPreVerificationGas.String())
-			}
 		}
 	}
 
@@ -589,10 +596,52 @@ func sendUserOpShared(
 		return nil, nil, err
 	}
 
+	// Run full validation on the final, fully-built userOp to catch signature/paymaster issues early
+	if paymasterReq != nil {
+		if simErr := bundlerClient.SimulateUserOperation(context.Background(), *userOp, entrypoint); simErr != nil {
+			log.Printf("SimulateUserOperation failed on final userOp: %v", simErr)
+			return userOp, nil, fmt.Errorf("simulate validation failed: %w", simErr)
+		}
+	}
+
+	// Local signature self-check (detects struct/signature drift before sending)
+	if paymasterReq != nil {
+		chainID, _ := client.ChainID(context.Background())
+		hash := userOp.GetUserOpHash(aa.EntrypointAddress, chainID)
+		// Recover signer
+		if len(userOp.Signature) == 65 {
+			if pub, err := crypto.SigToPub(hash.Bytes(), userOp.Signature); err == nil {
+				recovered := crypto.PubkeyToAddress(*pub)
+				ctrl := smartWalletConfig.ControllerAddress
+				if (ctrl != common.Address{}) && !strings.EqualFold(recovered.Hex(), ctrl.Hex()) {
+					log.Printf("Local signature check failed: recovered=%s controller=%s", recovered.Hex(), ctrl.Hex())
+					return userOp, nil, fmt.Errorf("local signature check failed: recovered %s != controller %s", recovered.Hex(), ctrl.Hex())
+				}
+			}
+		}
+	}
+
 	// Send the UserOp to the bundler using the existing sendUserOpCore function
 	txResult, err := sendUserOpCore(smartWalletConfig, userOp, client, bundlerClient)
 	if err != nil {
-		return userOp, nil, err
+		// Fallback: if paymaster path failed with invalid params, retry without paymaster (self-funded)
+		if paymasterReq != nil && (strings.Contains(strings.ToLower(err.Error()), "invalid useroperation") || strings.Contains(err.Error(), "-32602")) {
+			log.Printf("⚠️ Paymaster send failed with invalid params (-32602). Retrying without paymaster (self-funded)...")
+			// Rebuild WITHOUT paymaster and WITHOUT reimbursement wrapping
+			userOpNoPM, buildErr := BuildUserOp(smartWalletConfig, client, bundlerClient, owner, originalCallData, senderOverride)
+			if buildErr != nil {
+				log.Printf("Fallback build without paymaster failed: %v", buildErr)
+				return userOp, nil, err
+			}
+			// Try to send self-funded userOp
+			txResult, err = sendUserOpCore(smartWalletConfig, userOpNoPM, client, bundlerClient)
+			if err != nil {
+				return userOpNoPM, nil, err
+			}
+			userOp = userOpNoPM
+		} else {
+			return userOp, nil, err
+		}
 	}
 
 	// Wait for UserOp confirmation using exponential backoff polling
@@ -847,6 +896,12 @@ func BuildUserOp(
 		return nil, fmt.Errorf("failed to suggest gas fees: %w", err)
 	}
 
+	// Ensure maxFeePerGas has sufficient headroom over maxPriorityFeePerGas (>= 1 gwei)
+	minHeadroom := new(big.Int).Add(maxPriorityFeePerGas, big.NewInt(1_000_000_000))
+	if maxFeePerGas.Cmp(minHeadroom) < 0 {
+		maxFeePerGas = minHeadroom
+	}
+
 	// Increase verificationGasLimit if initCode is present (wallet deployment)
 	// UUPS proxy + initialize(owner) account deployment requires significantly more gas than normal operations
 	actualVerificationGasLimit := verificationGasLimit
@@ -1059,7 +1114,7 @@ func BuildUserOpWithPaymaster(
 		{Type: abi.Type{T: abi.UintTy, Size: 48}}, // uint48
 	}
 
-	encodedData, err := arguments.Pack(&validUntil, &validAfter)
+	encodedData, err := arguments.Pack(validUntil, validAfter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to ABI encode timestamps: %w", err)
 	}
@@ -1079,7 +1134,7 @@ func BuildUserOpWithPaymaster(
 	// The AVA smart wallet expects an EIP-191 prefixed signature
 	log.Printf("🔐 SIGNATURE DEBUG:")
 	log.Printf("   UserOpHash (to be signed): %s", userOpHash.Hex())
-	log.Printf("   Controller address: %s", crypto.PubkeyToAddress(smartWalletConfig.ControllerPrivateKey.PublicKey).Hex())
+	log.Printf("   Controller address: %s", smartWalletConfig.ControllerAddress.Hex())
 
 	userOp.Signature, err = signer.SignMessage(smartWalletConfig.ControllerPrivateKey, userOpHash.Bytes())
 	if err != nil {
