@@ -3322,14 +3322,22 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		}
 	}
 
-	// Attach execution_context; treat writes as simulated (Tenderly), reads and others as real RPC
+	// Attach execution_context; detect actual execution mode for contract writes
 	// Skip for EventTrigger since it provides its own executionContext in metadata
 	if nodeTypeStr != NodeTypeEventTrigger {
 		isSimulated := false
 		provider := string(ProviderChainRPC)
+
 		if nodeTypeStr == NodeTypeContractWrite {
-			isSimulated = true
-			provider = string(ProviderTenderly)
+			// Detect whether this was actually a real execution or simulation
+			// by examining the metadata for real transaction receipts
+			// We use the useSimulation flag from the request as the source of truth
+			isSimulated = useSimulation
+			if useSimulation {
+				provider = string(ProviderTenderly)
+			} else {
+				provider = string(ProviderBundler)
+			}
 		}
 
 		ctxMap := map[string]interface{}{

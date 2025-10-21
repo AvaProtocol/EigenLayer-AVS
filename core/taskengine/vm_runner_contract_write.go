@@ -1727,6 +1727,30 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			"results_count", len(results))
 	}
 
+	// Update ExecutionContext to reflect actual execution mode (simulated vs real)
+	// Use the VM's IsSimulation flag as the source of truth
+	isSimulated := r.vm.IsSimulation
+	provider := string(ProviderTenderly)
+	if !isSimulated {
+		provider = string(ProviderBundler) // Real UserOp executed through bundler
+	}
+
+	// Update the step's ExecutionContext
+	ctxMap := map[string]interface{}{
+		"is_simulated": isSimulated,
+		"provider":     provider,
+	}
+	if r.vm.smartWalletConfig != nil && r.vm.smartWalletConfig.ChainID != 0 {
+		ctxMap["chain_id"] = r.vm.smartWalletConfig.ChainID
+	}
+	if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
+		s.ExecutionContext = ctxVal
+		r.vm.logger.Debug("✅ Updated step ExecutionContext based on actual execution mode",
+			"step_id", stepID,
+			"is_simulated", isSimulated,
+			"provider", provider)
+	}
+
 	// Finalize step with computed success and error message
 	finalizeExecutionStep(s, stepSuccess, stepErrorMsg, log.String())
 
