@@ -24,7 +24,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/eip1559"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/bundler"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc4337/userop"
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 )
 
 var (
@@ -73,10 +72,6 @@ var (
 	// Formula: reimbursement = (total UserOp gas × maxFeePerGas) × (100% + buffer%)
 	// Default: 20% buffer to account for gas price fluctuations and execution variations
 	GasReimbursementBufferPercent = 20
-
-	// globalNonceManager tracks pending nonces across all UserOp submissions
-	// to prevent conflicts with transactions pending in the bundler's mempool
-	globalNonceManager = bundler.NewNonceManager(nil)
 )
 
 // VerifyingPaymasterRequest contains the parameters needed for paymaster functionality. This use the reference from https://github.com/eth-optimism/paymaster-reference
@@ -114,11 +109,7 @@ func waitForUserOpConfirmation(
 	wsClient *ethclient.Client,
 	entrypoint common.Address,
 	userOpHash string,
-	lgr logger.Logger,
 ) (*types.Receipt, error) {
-	// Ensure logger is never nil to avoid panic
-	logger := logger.EnsureLogger(lgr)
-
 	// Configuration for exponential backoff polling
 	const (
 		maxWaitTime     = 30 * time.Second // Maximum total wait time (bundler should process within 2-5s)
@@ -129,7 +120,9 @@ func waitForUserOpConfirmation(
 
 	// Try WebSocket subscription first (most efficient for real-time events)
 	if wsClient != nil {
-		logger.Debug("Transaction waiting: attempting WebSocket subscription")
+		if VerboseLogs {
+			log.Printf("Transaction waiting: attempting WebSocket subscription")
+		}
 
 		query := ethereum.FilterQuery{
 			Addresses: []common.Address{entrypoint},
@@ -141,7 +134,9 @@ func waitForUserOpConfirmation(
 
 		if err == nil {
 			// WebSocket subscription successful - use it with a polling fallback
-			logger.Debug("Transaction waiting: websocket subscription active, polling as fallback")
+			if VerboseLogs {
+				log.Printf("Transaction waiting: websocket subscription active, polling as fallback")
+			}
 			defer sub.Unsubscribe()
 
 			startTime := time.Now()
@@ -176,7 +171,9 @@ func waitForUserOpConfirmation(
 						return nil, nil
 					}
 
-					logger.Debug("Transaction waiting: polling (elapsed: %v, interval: %v)", elapsed.Round(time.Second), pollInterval)
+					if VerboseLogs {
+						log.Printf("Transaction waiting: polling (elapsed: %v, interval: %v)", elapsed.Round(time.Second), pollInterval)
+					}
 
 					receipt, found, err := pollUserOpReceipt(client, entrypoint, userOpHash)
 					if err != nil {
@@ -199,12 +196,16 @@ func waitForUserOpConfirmation(
 			log.Printf("Transaction waiting: websocket subscription failed, using polling only: %v", err)
 		}
 	} else {
-		logger.Debug("Transaction waiting: no WebSocket client, using polling only")
+		if VerboseLogs {
+			log.Printf("Transaction waiting: no WebSocket client, using polling only")
+		}
 	}
 
 PollingOnly:
 	// Polling-only mode (WebSocket unavailable or failed)
-	logger.Debug("Transaction waiting: polling-only mode with exponential backoff")
+	if VerboseLogs {
+		log.Printf("Transaction waiting: polling-only mode with exponential backoff")
+	}
 
 	startTime := time.Now()
 	pollInterval := initialInterval
@@ -474,7 +475,6 @@ func sendUserOpShared(
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
 	wsClient *ethclient.Client,
-	logger logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	var userOp *userop.UserOperation
 	var err error
@@ -496,9 +496,8 @@ func sendUserOpShared(
 	}
 	defer client.Close()
 
-	// Step 0.5: If paymaster reimbursement is enabled, consider wrapping with executeBatchWithValues
-	// We will estimate the reimbursement amount and compare it with the smart wallet's ETH balance.
-	// If balance is insufficient for reimbursement, auto-skip wrapping to ensure the main call succeeds.
+	// Step 0.5: If paymaster reimbursement is enabled, wrap the calldata FIRST (before gas estimation)
+	// This is CRITICAL: we need to estimate gas for the WRAPPED operation, not the unwrapped one
 	var wrappedForReimbursement bool
 	if paymasterReq != nil && EnablePaymasterReimbursement {
 		// Get reimbursement recipient from config (paymaster owner address)
@@ -507,48 +506,14 @@ func sendUserOpShared(
 			reimbursementRecipient = paymasterReq.PaymasterAddress
 		}
 
-		// Prepare wrapped candidate and an initial reimbursement estimate (defaults-based)
-		wrappedCandidate, initialReimb, wrapErr := wrapWithReimbursement(client, callData, reimbursementRecipient, nil)
+		// Wrap with estimated reimbursement (using nil gas estimate for now, will use defaults)
+		wrapped, reimbursement, wrapErr := wrapWithReimbursement(client, callData, reimbursementRecipient, nil)
 		if wrapErr != nil {
-			log.Printf("Failed to prepare reimbursement wrapping: %v (skipping wrap; paymaster absorbs gas costs)", wrapErr)
+			log.Printf("Failed to wrap with reimbursement: %v (paymaster absorbs gas costs)", wrapErr)
 		} else {
-			// Resolve smart wallet sender
-			var sender *common.Address
-			if senderOverride != nil {
-				sender = senderOverride
-			} else {
-				// Derive sender from owner (salt:0)
-				derived, derr := aa.GetSenderAddress(client, owner, accountSalt)
-				if derr == nil {
-					sender = derived
-				}
-			}
-
-			// Fetch current smart wallet ETH balance (0 if unknown)
-			balance := big.NewInt(0)
-			if sender != nil {
-				if bal, balErr := client.BalanceAt(context.Background(), *sender, nil); balErr == nil {
-					balance = bal
-				} else {
-					log.Printf("Failed to fetch smart wallet balance (proceeding): %v", balErr)
-				}
-			}
-
-			// Use initial (fallback) reimbursement estimate; avoid an extra bundler estimation here
-			// The final bundler estimation will still occur later for the chosen path
-			var reimbToUse = initialReimb
-
-			// Compare balance with reimbursement; auto-skip wrapping if insufficient
-			if balance.Cmp(reimbToUse) < 0 {
-				log.Printf("Auto-skip reimbursement wrap: insufficient ETH on smart wallet. balance=%s wei < reimburse=%s wei",
-					balance.String(), reimbToUse.String())
-				wrappedForReimbursement = false
-				// Keep original unwrapped callData
-			} else {
-				callData = wrappedCandidate
-				wrappedForReimbursement = true
-				log.Printf("Paymaster reimbursement enabled: %s wei, recipient: %s", reimbToUse.String(), reimbursementRecipient.Hex())
-			}
+			callData = wrapped
+			wrappedForReimbursement = true
+			log.Printf("Paymaster reimbursement: %s wei, recipient: %s", reimbursement.String(), reimbursementRecipient.Hex())
 		}
 	}
 
@@ -681,7 +646,7 @@ func sendUserOpShared(
 
 	// Wait for UserOp confirmation using exponential backoff polling
 	// This is more efficient than a fixed 3-minute timeout and handles bundler delays gracefully
-	receipt, err := waitForUserOpConfirmation(client, wsClient, entrypoint, txResult, logger)
+	receipt, err := waitForUserOpConfirmation(client, wsClient, entrypoint, txResult)
 	if err != nil {
 		log.Printf("Failed to get UserOp confirmation (hash=%s): %v", txResult, err)
 		return userOp, nil, nil
@@ -708,7 +673,6 @@ func SendUserOp(
 	callData []byte,
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
-	logger logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	log.Printf("SendUserOp started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
 
@@ -729,7 +693,7 @@ func SendUserOp(
 	}
 
 	// Use the shared logic for the main UserOp processing
-	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient, logger)
+	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient)
 }
 
 // sendUserOpCore contains the shared retry loop logic for sending UserOps to the bundler.
@@ -756,14 +720,7 @@ func sendUserOpCore(
 	// NOTE: A nonce of 0 is valid for new accounts, so we only check for nil (not 0)
 	var freshNonce *big.Int
 	if userOp.Nonce == nil {
-		// Use NonceManager for non-paymaster UserOps
-		var err error
-		freshNonce, err = globalNonceManager.GetNextNonce(client, userOp.Sender, func() (*big.Int, error) {
-			return aa.GetNonce(client, userOp.Sender, accountSalt)
-		})
-		if err != nil {
-			return "", fmt.Errorf("failed to get nonce: %w", err)
-		}
+		freshNonce = aa.MustNonce(client, userOp.Sender, accountSalt)
 		userOp.Nonce = freshNonce
 	}
 
@@ -827,30 +784,19 @@ func sendUserOpCore(
 				log.Printf("Manual bundle trigger failed (non-fatal): %v", triggerErr)
 			}
 
-			// Update NonceManager to track this pending UserOp
+			// Increment nonce for next potential UserOp (prevents nonce collision for sequential txs)
 			// This allows the next UserOp to use nonce+1 even if this UserOp hasn't been mined yet
-			globalNonceManager.IncrementNonce(userOp.Sender, userOp.Nonce)
+			userOp.Nonce = new(big.Int).Add(userOp.Nonce, big.NewInt(1))
 
 			break
 		}
 
 		// Bundler send failure logging
 		log.Printf("UserOp send failed (attempt %d/%d): %v", retry+1, maxRetries, err)
-
-		// Detect nonce conflicts from various error messages:
-		// - "AA25 invalid account nonce" = EntryPoint validation error
-		// - "invalid UserOperation struct/fields" = Voltaire's mempool replacement error (nonce already pending)
-		isNonceConflict := err != nil && (strings.Contains(err.Error(), "AA25 invalid account nonce") ||
-			strings.Contains(err.Error(), "invalid UserOperation struct/fields"))
-
-		if isNonceConflict {
+		// For nonce errors, refetch nonce and retry
+		if err != nil && strings.Contains(err.Error(), "AA25 invalid account nonce") {
 			if retry < maxRetries-1 {
-				log.Printf("⚠️ NONCE CONFLICT DETECTED: %v", err)
-				log.Printf("   This usually means a UserOp with nonce %s is already pending in bundler", userOp.Nonce.String())
-
-				// Reset NonceManager cache to force fresh on-chain query
-				globalNonceManager.ResetNonce(userOp.Sender)
-				log.Printf("   Reset nonce cache for sender %s", userOp.Sender.Hex())
+				log.Printf("Nonce conflict detected, polling for fresh nonce")
 
 				// Poll for fresh nonce with timeout (similar to transaction waiting pattern)
 				startTime := time.Now()
@@ -859,34 +805,26 @@ func sendUserOpCore(
 
 				for time.Since(startTime) < timeout {
 					time.Sleep(pollInterval)
-
-					// Get fresh nonce through NonceManager (will fetch from chain since we just reset)
-					freshNonce, nonceErr := globalNonceManager.GetNextNonce(client, userOp.Sender, func() (*big.Int, error) {
-						return aa.GetNonce(client, userOp.Sender, accountSalt)
-					})
-					if nonceErr != nil {
-						log.Printf("Failed to fetch fresh nonce: %v", nonceErr)
-						continue
-					}
+					freshNonce = aa.MustNonce(client, userOp.Sender, accountSalt)
 
 					// Check if nonce has actually changed from what we had
 					if userOp.Nonce == nil || freshNonce.Cmp(userOp.Nonce) > 0 {
 						userOp.Nonce = freshNonce
-						log.Printf("✅ Updated nonce to %s (after %v)", freshNonce.String(), time.Since(startTime))
+						log.Printf("Updated nonce to %s (after %v)", freshNonce.String(), time.Since(startTime))
 						break
 					}
 				}
 
 				if time.Since(startTime) >= timeout {
-					log.Printf("⏰ Nonce polling timeout after %v, using current nonce: %s", timeout, userOp.Nonce.String())
+					log.Printf("Nonce polling timeout after %v, using current nonce: %s", timeout, userOp.Nonce.String())
 				}
 
 				continue
 			}
 		}
 
-		// For other errors, don't retry unless it's a transient network error or nonce conflict
-		if err != nil && !isNonceConflict &&
+		// For other errors, don't retry unless it's a transient network error
+		if err != nil && !strings.Contains(err.Error(), "AA25 invalid account nonce") &&
 			!strings.Contains(err.Error(), "timeout") && !strings.Contains(err.Error(), "connection") {
 			log.Printf("Non-retryable error, stopping: %v", err)
 			break
@@ -1012,7 +950,6 @@ func SendUserOpWithWsClient(
 	paymasterReq *VerifyingPaymasterRequest,
 	senderOverride *common.Address,
 	wsClient *ethclient.Client,
-	logger logger.Logger,
 ) (*userop.UserOperation, *types.Receipt, error) {
 	log.Printf("SendUserOpWithWsClient started - owner: %s, bundler: %s", owner.Hex(), smartWalletConfig.BundlerURL)
 
@@ -1020,11 +957,11 @@ func SendUserOpWithWsClient(
 	if wsClient == nil {
 		log.Printf("⚠️ TRANSACTION WAITING: No WebSocket client provided, falling back to SendUserOp")
 		// Fall back to SendUserOp which will create its own WebSocket client if needed
-		return SendUserOp(smartWalletConfig, owner, callData, paymasterReq, senderOverride, logger)
+		return SendUserOp(smartWalletConfig, owner, callData, paymasterReq, senderOverride)
 	}
 
 	// Use the shared logic for the main UserOp processing
-	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient, logger)
+	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient)
 }
 
 // BuildUserOpWithPaymaster creates a UserOperation with paymaster support.
@@ -1087,15 +1024,9 @@ func BuildUserOpWithPaymaster(
 		freshNonce = nonceOverride
 		log.Printf("🔍 BuildUserOpWithPaymaster: Using provided nonce %s (sequential UserOps)", freshNonce.String())
 	} else {
-		// Use NonceManager to get next nonce (considers both on-chain state and pending UserOps)
-		var err error
-		freshNonce, err = globalNonceManager.GetNextNonce(client, userOp.Sender, func() (*big.Int, error) {
-			return aa.GetNonce(client, userOp.Sender, accountSalt)
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get nonce: %w", err)
-		}
-		log.Printf("🔍 BuildUserOpWithPaymaster: Got nonce %s from NonceManager", freshNonce.String())
+		// Fetch from chain (first UserOp or standalone)
+		freshNonce = aa.MustNonce(client, userOp.Sender, accountSalt)
+		log.Printf("🔍 BuildUserOpWithPaymaster: Fetched nonce %s from chain", freshNonce.String())
 	}
 	userOp.Nonce = freshNonce
 
@@ -1183,7 +1114,7 @@ func BuildUserOpWithPaymaster(
 		{Type: abi.Type{T: abi.UintTy, Size: 48}}, // uint48
 	}
 
-	encodedData, err := arguments.Pack(&validUntil, &validAfter)
+	encodedData, err := arguments.Pack(validUntil, validAfter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to ABI encode timestamps: %w", err)
 	}
