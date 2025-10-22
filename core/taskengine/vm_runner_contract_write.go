@@ -123,6 +123,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	originalAbiString string,
 	contractAddress common.Address,
 	methodCall *avsproto.ContractWriteNode_MethodCall,
+	shouldSimulate bool,
 ) *avsproto.ContractWriteNode_MethodResult {
 	t0 := time.Now()
 
@@ -319,24 +320,23 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		r.vm.logger.Warn("⚠️ CONTRACT WRITE DEBUG - Smart wallet config is NIL!")
 	}
 
-	// Check if this is a runNodeWithInputs call (should always be simulation)
+	// For logging, detect RNWI context
 	isRunNodeWithInputs := false
 	if taskTypeVar, ok := r.vm.vars["task_type"]; ok {
 		if taskTypeStr, ok := taskTypeVar.(string); ok && taskTypeStr == "run_node_with_inputs" {
 			isRunNodeWithInputs = true
 		}
 	}
-
-	// Log VM mode (simulation flag only)
+	// Log VM mode
 	r.vm.logger.Error("🔧 CONTRACT WRITE CRITICAL DEBUG - VM mode check",
-		"is_simulation", r.vm.IsSimulation,
-		"is_run_node_with_inputs", isRunNodeWithInputs,
-		"should_simulate", r.vm.IsSimulation || isRunNodeWithInputs,
+		"vm_is_simulation", r.vm.IsSimulation,
+		"rnwi", isRunNodeWithInputs,
+		"should_simulate", shouldSimulate,
 		"method", methodName,
 		"contract", contractAddress.Hex())
 
-	// If simulation flag is set OR forcing simulation, always use simulation path
-	if r.vm.IsSimulation || isRunNodeWithInputs {
+	// Use simulation if flag resolves true; otherwise perform real execution
+	if shouldSimulate {
 		r.vm.logger.Info("🔮 CONTRACT WRITE DEBUG - Using Tenderly simulation path",
 			"contract", contractAddress.Hex(),
 			"method", methodName,
@@ -1269,6 +1269,26 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		}
 	}()
 
+	// Ensure aa_sender is available (node-type-specific prep)
+	r.vm.mu.Lock()
+	_, hasSender := r.vm.vars["aa_sender"]
+	settingsVal, hasSettings := r.vm.vars["settings"]
+	r.vm.mu.Unlock()
+	if !hasSender && hasSettings {
+		if settings, ok := settingsVal.(map[string]interface{}); ok {
+			if runnerIface, ok := settings["runner"]; ok {
+				if runnerStr, ok := runnerIface.(string); ok && common.IsHexAddress(runnerStr) {
+					r.vm.AddVar("aa_sender", runnerStr)
+					if r.vm.logger != nil {
+						r.vm.logger.Info("ContractWriteProcessor.Prepare: aa_sender extracted from settings.runner",
+							"aa_sender", runnerStr,
+							"step_id", stepID)
+					}
+				}
+			}
+		}
+	}
+
 	// Get input configuration
 	contractAddress, _, methodCalls, inputErr := r.getInputData(node)
 	if inputErr != nil {
@@ -1343,7 +1363,12 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					}
 				}
 			}()
-			result = r.executeMethodCall(ctx, parsedABI, originalAbiString, contractAddr, methodCall)
+			// Resolve shouldSimulate: default to VM flag; allow per-node override via typed config
+			effectiveSim := r.vm.IsSimulation
+			if node != nil && node.Config != nil && node.Config.IsSimulated != nil {
+				effectiveSim = node.Config.GetIsSimulated()
+			}
+			result = r.executeMethodCall(ctx, parsedABI, originalAbiString, contractAddr, methodCall, effectiveSim)
 		}()
 		// Ensure MethodName is populated to avoid empty keys downstream
 		if result.MethodName == "" {
@@ -1601,9 +1626,35 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 												"decoded_data", decodedEvent)
 
 											// Flatten event fields into methodEvents
-											for key, value := range decodedEvent {
-												if key != "eventName" { // Skip meta field
-													methodEvents[key] = value
+											// Prefer removing the event name wrapper if present, so
+											// output is methodName: { from, to, value } rather than methodName: { Transfer: {...} }
+											if eventName != "" {
+												if only, ok := decodedEvent[eventName]; ok {
+													if inner, ok2 := only.(map[string]interface{}); ok2 {
+														for k, v := range inner {
+															methodEvents[k] = v
+														}
+													} else {
+														// Fallback: copy decodedEvent sans meta key
+														for key, value := range decodedEvent {
+															if key != "eventName" {
+																methodEvents[key] = value
+															}
+														}
+													}
+												} else {
+													// No direct eventName key; copy sans meta key
+													for key, value := range decodedEvent {
+														if key != "eventName" {
+															methodEvents[key] = value
+														}
+													}
+												}
+											} else {
+												for key, value := range decodedEvent {
+													if key != "eventName" {
+														methodEvents[key] = value
+													}
 												}
 											}
 										}
@@ -1637,6 +1688,11 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 						break
 					}
 				}
+			}
+		} else {
+			// No events decoded: if method succeeded, set boolean true for methodName; otherwise keep {}
+			if methodResult.Success {
+				decodedEventsData[methodName] = true
 			}
 		}
 		// If no events, preserve existing return values (return values only when no events)
@@ -1772,8 +1828,13 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	}
 
 	// Update ExecutionContext to reflect actual execution mode (simulated vs real)
-	// Use the VM's IsSimulation flag as the source of truth
-	isSimulated := r.vm.IsSimulation
+	// Use the resolved per-node simulation flag as the source of truth
+	isSimulated := false
+	if node != nil && node.Config != nil && node.Config.IsSimulated != nil {
+		isSimulated = node.Config.GetIsSimulated()
+	} else {
+		isSimulated = r.vm.IsSimulation
+	}
 	provider := string(ProviderTenderly)
 	if !isSimulated {
 		provider = string(ProviderBundler) // Real UserOp executed through bundler

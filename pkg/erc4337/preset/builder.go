@@ -492,8 +492,9 @@ func sendUserOpShared(
 	}
 	defer client.Close()
 
-	// Step 0.5: If paymaster reimbursement is enabled, wrap the calldata FIRST (before gas estimation)
-	// This is CRITICAL: we need to estimate gas for the WRAPPED operation, not the unwrapped one
+	// Step 0.5: If paymaster reimbursement is enabled, consider wrapping with executeBatchWithValues
+	// We will estimate the reimbursement amount and compare it with the smart wallet's ETH balance.
+	// If balance is insufficient for reimbursement, auto-skip wrapping to ensure the main call succeeds.
 	var wrappedForReimbursement bool
 	if paymasterReq != nil && EnablePaymasterReimbursement {
 		// Get reimbursement recipient from config (paymaster owner address)
@@ -502,14 +503,48 @@ func sendUserOpShared(
 			reimbursementRecipient = paymasterReq.PaymasterAddress
 		}
 
-		// Wrap with estimated reimbursement (using nil gas estimate for now, will use defaults)
-		wrapped, reimbursement, wrapErr := wrapWithReimbursement(client, callData, reimbursementRecipient, nil)
+		// Prepare wrapped candidate and an initial reimbursement estimate (defaults-based)
+		wrappedCandidate, initialReimb, wrapErr := wrapWithReimbursement(client, callData, reimbursementRecipient, nil)
 		if wrapErr != nil {
-			log.Printf("Failed to wrap with reimbursement: %v (paymaster absorbs gas costs)", wrapErr)
+			log.Printf("Failed to prepare reimbursement wrapping: %v (skipping wrap; paymaster absorbs gas costs)", wrapErr)
 		} else {
-			callData = wrapped
-			wrappedForReimbursement = true
-			log.Printf("Paymaster reimbursement: %s wei, recipient: %s", reimbursement.String(), reimbursementRecipient.Hex())
+			// Resolve smart wallet sender
+			var sender *common.Address
+			if senderOverride != nil {
+				sender = senderOverride
+			} else {
+				// Derive sender from owner (salt:0)
+				derived, derr := aa.GetSenderAddress(client, owner, accountSalt)
+				if derr == nil {
+					sender = derived
+				}
+			}
+
+			// Fetch current smart wallet ETH balance (0 if unknown)
+			balance := big.NewInt(0)
+			if sender != nil {
+				if bal, balErr := client.BalanceAt(context.Background(), *sender, nil); balErr == nil {
+					balance = bal
+				} else {
+					log.Printf("Failed to fetch smart wallet balance (proceeding): %v", balErr)
+				}
+			}
+
+			// Use initial (fallback) reimbursement estimate; avoid an extra bundler estimation here
+			// The final bundler estimation will still occur later for the chosen path
+			var reimbToUse = initialReimb
+
+			// Compare balance with reimbursement; auto-skip wrapping if insufficient
+			if balance.Cmp(reimbToUse) < 0 {
+				log.Printf("Auto-skip reimbursement wrap: insufficient ETH on smart wallet. balance=%s wei < reimburse=%s wei",
+					balance.String(), reimbToUse.String())
+				wrappedForReimbursement = false
+				// Keep original unwrapped callData
+			} else {
+				callData = wrappedCandidate
+				wrappedForReimbursement = true
+				log.Printf("Paymaster reimbursement enabled: %s wei, recipient: %s", reimbToUse.String(), reimbursementRecipient.Hex())
+			}
 		}
 	}
 
