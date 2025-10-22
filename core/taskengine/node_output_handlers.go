@@ -378,9 +378,41 @@ func (h *ContractWriteOutputHandler) ConvertToProtobuf(result map[string]interfa
 												}
 
 												if decodedEvent, err := h.engine.parseEventWithParsedABI(eventLog, contractABI, nil); err == nil {
-													for key, value := range decodedEvent {
-														if key != "eventName" {
-															methodEvents[key] = value
+													// Flatten event data: if decoded map contains the concrete event name as a key,
+													// unwrap it so methodName maps directly to event fields
+													if nameVal, hasName := decodedEvent["eventName"]; hasName {
+														if nameStr, ok := nameVal.(string); ok && nameStr != "" {
+															if inner, ok2 := decodedEvent[nameStr]; ok2 {
+																if innerMap, ok3 := inner.(map[string]interface{}); ok3 {
+																	for k, v := range innerMap {
+																		methodEvents[k] = v
+																	}
+																} else {
+																	for k, v := range decodedEvent {
+																		if k != "eventName" {
+																			methodEvents[k] = v
+																		}
+																	}
+																}
+															} else {
+																for k, v := range decodedEvent {
+																	if k != "eventName" {
+																		methodEvents[k] = v
+																	}
+																}
+															}
+														} else {
+															for k, v := range decodedEvent {
+																if k != "eventName" {
+																	methodEvents[k] = v
+																}
+															}
+														}
+													} else {
+														for k, v := range decodedEvent {
+															if k != "eventName" {
+																methodEvents[k] = v
+															}
 														}
 													}
 												}
