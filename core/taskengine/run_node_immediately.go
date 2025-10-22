@@ -2809,14 +2809,13 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 
 	vm.tenderlyClient = n.tenderlyClient
 
-	// Use the simulation mode parameter (true = simulation, false = real execution)
+	// Use the simulation mode parameter by default
 	vm.WithLogger(n.logger).WithDb(n.db).SetSimulation(useSimulation)
 
 	if n.logger != nil {
 		n.logger.Info("RunNodeImmediately: Execution mode set",
 			"simulation_mode", useSimulation,
-			"node_type", nodeType,
-			"will_execute_real_userop", !useSimulation && strings.EqualFold(nodeType, "contractWrite"))
+			"node_type", nodeType)
 	}
 
 	// Set TaskOwner from authenticated user (extracted from signed API key)
@@ -2827,8 +2826,9 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 		}
 	}
 
-	// For contractWrite nodes, handle runner validation from settings
+	// For contractWrite nodes, handle runner validation from settings only; simulation is resolved in the processor from typed config
 	if strings.EqualFold(nodeType, "contractWrite") {
+
 		// Require authenticated user (TaskOwner)
 		if (vm.TaskOwner == common.Address{}) {
 			if n.logger != nil {
@@ -3197,27 +3197,13 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		return resp, nil
 	}
 
-	// Determine execution mode: default to simulation (true) for safety
-	// IMPORTANT: is_simulated is now an optional field (generates *bool in Go).
-	// When unset (nil pointer), we default to true (simulation mode) for safety.
-	// When explicitly set to true, use simulation. When explicitly set to false, use real execution.
-	useSimulation := true // Safe default
-	if req.IsSimulated != nil {
-		// Field is explicitly set - use its value
-		useSimulation = *req.IsSimulated
-	}
-
-	if n.logger != nil {
-		n.logger.Info("RunNodeImmediatelyRPC: Execution mode determined",
-			"is_simulated", useSimulation,
-			"explicitly_set", req.IsSimulated != nil,
-			"will_execute_real", !useSimulation,
-			"node_type", nodeTypeStr)
-	}
+	// Simulation mode is determined per-node (e.g., contractWrite.config.is_simulated).
+	// No top-level is_simulated handling here.
 
 	// Execute the node immediately with authenticated user
 	// NOTE: lang field conversion for CustomCode is handled by ParseLanguageFromConfig
-	result, err := n.RunNodeImmediately(nodeTypeStr, nodeConfig, inputVariables, user, useSimulation)
+	// Defer simulation/real decision to per-node config (e.g., contractWrite.config.is_simulated)
+	result, err := n.RunNodeImmediately(nodeTypeStr, nodeConfig, inputVariables, user)
 	if err != nil {
 		if n.logger != nil {
 			if isExpectedValidationError(err) {
@@ -3325,24 +3311,10 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 	// Attach execution_context; detect actual execution mode for contract writes
 	// Skip for EventTrigger since it provides its own executionContext in metadata
 	if nodeTypeStr != NodeTypeEventTrigger {
-		isSimulated := false
-		provider := string(ProviderChainRPC)
-
-		if nodeTypeStr == NodeTypeContractWrite {
-			// Detect whether this was actually a real execution or simulation
-			// by examining the metadata for real transaction receipts
-			// We use the useSimulation flag from the request as the source of truth
-			isSimulated = useSimulation
-			if useSimulation {
-				provider = string(ProviderTenderly)
-			} else {
-				provider = string(ProviderBundler)
-			}
-		}
-
+		// We can infer provider/is_simulated from metadata when needed; default to unknown here
 		ctxMap := map[string]interface{}{
-			"is_simulated": isSimulated,
-			"provider":     provider,
+			"is_simulated": nil,
+			"provider":     string(ProviderChainRPC),
 		}
 		if n.smartWalletConfig != nil && n.smartWalletConfig.ChainID != 0 {
 			ctxMap["chain_id"] = n.smartWalletConfig.ChainID
