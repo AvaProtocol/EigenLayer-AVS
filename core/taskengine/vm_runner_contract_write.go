@@ -727,7 +727,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	}
 
 	if err != nil {
-		// Add detailed error information to execution log
+		// Add detailed error information to execution log (internal)
 		executionLogBuilder.WriteString(fmt.Sprintf("❌ BUNDLER FAILED: UserOp transaction could not be sent\n"))
 		executionLogBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
 
@@ -782,15 +782,41 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 				"solution", "Fund the smart wallet with ETH for gas fees")
 		}
 
-		// Create comprehensive error message with all details
-		var errorBuilder strings.Builder
-		errorBuilder.WriteString(fmt.Sprintf("Bundler failed - UserOp transaction could not be sent: %v\n", err))
-		errorBuilder.WriteString(executionLogBuilder.String())
+		// Create simplified user-facing error message
+		var userErrorMsg string
+		if strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "dial tcp") {
+			userErrorMsg = "Bundler service unavailable"
+		} else if strings.Contains(err.Error(), "AA21") {
+			userErrorMsg = "Insufficient ETH balance for gas fees"
+		} else if strings.Contains(err.Error(), "AA") {
+			// Other AA error codes (AA10, AA23, etc.)
+			// Extract AA error code if present
+			parts := strings.Split(err.Error(), "AA")
+			if len(parts) > 1 {
+				// Take first line after AA code
+				userErrorMsg = "AA" + strings.Split(parts[1], "\n")[0]
+			} else {
+				userErrorMsg = "Transaction validation failed"
+			}
+		} else {
+			// Extract first meaningful error line without verbose details
+			errStr := err.Error()
+			if idx := strings.Index(errStr, "\n"); idx > 0 {
+				userErrorMsg = errStr[:idx]
+			} else {
+				userErrorMsg = errStr
+			}
+			// Limit length to avoid extremely long messages
+			if len(userErrorMsg) > 200 {
+				userErrorMsg = userErrorMsg[:200] + "..."
+			}
+		}
 
-		// Return error result with detailed execution log
+		// Return error result with simplified user message
+		// Detailed execution log is available in server logs for debugging
 		return &avsproto.ContractWriteNode_MethodResult{
 			Success:    false,
-			Error:      errorBuilder.String(),
+			Error:      userErrorMsg,
 			MethodName: methodName,
 		}
 	}

@@ -3324,9 +3324,18 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		}
 	}
 
-	// For failed operations, set a non-zero error code so it doesn't serialize as undefined
+	// For failed operations, set error code based on failure type
 	if !resp.Success {
-		resp.ErrorCode = avsproto.ErrorCode_INVALID_REQUEST // Use a non-zero error code
+		// Check if error indicates bundler/RPC connectivity issues
+		if strings.Contains(resp.Error, "connection refused") ||
+			strings.Contains(resp.Error, "dial tcp") ||
+			strings.Contains(resp.Error, "Bundler service unavailable") {
+			resp.ErrorCode = avsproto.ErrorCode_RPC_NODE_ERROR // 5000: External service unavailable
+		} else if resp.ErrorCode == avsproto.ErrorCode_ERROR_CODE_UNSPECIFIED {
+			// Fallback for generic failures
+			resp.ErrorCode = avsproto.ErrorCode_INVALID_REQUEST // 3000: Generic validation failure
+		}
+		// Otherwise keep the error code set by the step/handler
 	}
 
 	return resp, nil
