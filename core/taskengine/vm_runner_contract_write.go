@@ -328,7 +328,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		}
 	}
 	// Log VM mode
-	r.vm.logger.Error("🔧 CONTRACT WRITE CRITICAL DEBUG - VM mode check",
+	r.vm.logger.Debug("🔧 CONTRACT WRITE - VM mode check",
 		"vm_is_simulation", r.vm.IsSimulation,
 		"rnwi", isRunNodeWithInputs,
 		"should_simulate", shouldSimulate,
@@ -514,7 +514,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	}
 
 	// Deployed workflows (simulation flag is false): require smartWalletConfig and use real UserOp path
-	r.vm.logger.Error("🚀 CONTRACT WRITE CRITICAL DEBUG - Going down REAL transaction path",
+	r.vm.logger.Debug("🚀 CONTRACT WRITE - Going down REAL transaction path",
 		"is_simulation", r.vm.IsSimulation,
 		"method", methodName,
 		"contract", contractAddress.Hex())
@@ -1558,13 +1558,13 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				if logs, hasLogs := receiptMap["logs"]; hasLogs {
 					if logsArray, ok := logs.([]interface{}); ok && len(logsArray) > 0 {
 						// First, log ALL addresses in the receipt for debugging
-						r.vm.logger.Error("🔍 EVENT DEBUG - ALL LOG ADDRESSES IN RECEIPT",
+						r.vm.logger.Debug("🔍 EVENT DEBUG - ALL LOG ADDRESSES IN RECEIPT",
 							"total_logs", len(logsArray),
 							"target_contract", contractAddress)
 						for logIdx, logIface := range logsArray {
 							if logM, ok := logIface.(map[string]interface{}); ok {
 								if addr, hasAddr := logM["address"]; hasAddr {
-									r.vm.logger.Error("🔍 EVENT DEBUG - Log address",
+									r.vm.logger.Debug("🔍 EVENT DEBUG - Log address",
 										"log_index", logIdx,
 										"address", addr)
 								}
@@ -1577,7 +1577,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 								if parsedABI != nil {
 									// Convert log map to types.Log structure for parsing
 									if eventLog := r.convertMapToEventLog(logMap); eventLog != nil {
-										r.vm.logger.Error("🔍 EVENT DEBUG - Converted log",
+										r.vm.logger.Debug("🔍 EVENT DEBUG - Converted log",
 											"address", eventLog.Address.Hex(),
 											"topics_count", len(eventLog.Topics),
 											"data_length", len(eventLog.Data),
@@ -1617,11 +1617,11 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 										// Parse the log using shared event parsing function
 										decodedEvent, eventName, err := parseEventWithABIShared(eventLog, parsedABI, nil, r.vm.logger)
 										if err != nil {
-											r.vm.logger.Error("🔍 EVENT DEBUG - Failed to parse event",
+											r.vm.logger.Debug("🔍 EVENT DEBUG - Failed to parse event",
 												"contractAddress", eventLog.Address.Hex(),
 												"error", err)
 										} else {
-											r.vm.logger.Error("🔍 EVENT DEBUG - Successfully parsed event",
+											r.vm.logger.Debug("🔍 EVENT DEBUG - Successfully parsed event",
 												"event_name", eventName,
 												"decoded_data", decodedEvent)
 

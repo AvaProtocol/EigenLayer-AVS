@@ -621,12 +621,12 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		}
 		// Add critical debug logging to see the raw result structure
 		if raw, err := json.Marshal(resultForExtraction); err == nil {
-			tc.logger.Error("🔍 CRITICAL DEBUG - Raw Tenderly result for log extraction", "json", string(raw))
+			tc.logger.Debug("🔍 CRITICAL DEBUG - Raw Tenderly result for log extraction", "json", string(raw))
 		}
 
 		// Also log the entire simulation result structure to see where logs might be hiding
 		if rawResponse, err := json.Marshal(simResult); err == nil {
-			tc.logger.Error("🔍 CRITICAL DEBUG - Full Tenderly simulation result structure", "response", string(rawResponse))
+			tc.logger.Debug("🔍 CRITICAL DEBUG - Full Tenderly simulation result structure", "response", string(rawResponse))
 		}
 
 		// FIRST: Let's see ALL keys in the Tenderly response
@@ -636,7 +636,7 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 			for key := range m {
 				allKeys = append(allKeys, key)
 			}
-			tc.logger.Error("🔍 ALL TENDERLY KEYS", "keys", strings.Join(allKeys, ", "))
+			tc.logger.Debug("🔍 ALL TENDERLY KEYS", "keys", strings.Join(allKeys, ", "))
 
 			// Check for logs in each key
 			for key, value := range m {
@@ -647,7 +647,7 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		}
 
 		logs := tc.extractLogsFromTenderlyResult(resultForExtraction)
-		tc.logger.Error("🔍 CRITICAL DEBUG - Log extraction result", "logs_count", len(logs))
+		tc.logger.Debug("🔍 CRITICAL DEBUG - Log extraction result", "logs_count", len(logs))
 
 		if len(logs) == 0 {
 			if m, ok := resultForExtraction.(map[string]interface{}); ok {
@@ -683,11 +683,11 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		}
 		if len(logs) > 0 {
 			result.ReceiptLogs = logs
-			tc.logger.Error("🔍 CRITICAL DEBUG - Assigned logs to result.ReceiptLogs",
+			tc.logger.Debug("🔍 CRITICAL DEBUG - Assigned logs to result.ReceiptLogs",
 				"logs_count", len(logs),
 				"first_log_address", logs[0]["address"])
 		} else {
-			tc.logger.Error("🔍 CRITICAL DEBUG - No logs to assign to result.ReceiptLogs")
+			tc.logger.Debug("🔍 CRITICAL DEBUG - No logs to assign to result.ReceiptLogs")
 		}
 
 		// Extract and decode output data from Tenderly response
@@ -949,14 +949,14 @@ func (tc *TenderlyClient) extractLogsFromTenderlyResult(res interface{}) []map[s
 	// - { result: { logs: [...] } }
 	// - { simulation: { transaction_info: { logs: [...] } } } (HTTP API)
 	if root, ok := res.(map[string]interface{}); ok {
-		tc.logger.Error("🔍 extractLogsFromTenderlyResult: found map, checking for logs", "has_logs_key", root["logs"] != nil)
+		tc.logger.Debug("🔍 extractLogsFromTenderlyResult: found map, checking for logs", "has_logs_key", root["logs"] != nil)
 		if v, ok := root["logs"]; ok {
-			tc.logger.Error("🔍 extractLogsFromTenderlyResult: found logs key", "logs_type", fmt.Sprintf("%T", v))
+			tc.logger.Debug("🔍 extractLogsFromTenderlyResult: found logs key", "logs_type", fmt.Sprintf("%T", v))
 			if logs := toLogs(v); len(logs) > 0 {
-				tc.logger.Error("🔍 extractLogsFromTenderlyResult: converted logs successfully", "count", len(logs))
+				tc.logger.Debug("🔍 extractLogsFromTenderlyResult: converted logs successfully", "count", len(logs))
 				return logs
 			} else {
-				tc.logger.Error("🔍 extractLogsFromTenderlyResult: toLogs returned empty", "original_type", fmt.Sprintf("%T", v))
+				tc.logger.Debug("🔍 extractLogsFromTenderlyResult: toLogs returned empty", "original_type", fmt.Sprintf("%T", v))
 			}
 		}
 		if tx, ok := root["transaction"].(map[string]interface{}); ok {
