@@ -368,6 +368,8 @@ message ContractWriteNode {
     repeated google.protobuf.Value contract_abi = 3;
     // Support for multiple method calls in sequence (similar to ContractRead)
     repeated MethodCall method_calls = 4;
+    // Execution mode for this contract write node: when true (default), use simulation; when false, execute real UserOp
+    optional bool is_simulated = 5;
   }
 
   message MethodCall {
@@ -1222,10 +1224,6 @@ message RunNodeWithInputsReq {
   NodeType node_type = 1; // Type of node to execute using the NodeType enum
   map<string, google.protobuf.Value> node_config = 2; // Configuration for the node
   map<string, google.protobuf.Value> input_variables = 3; // Input variables for the node
-  // IMPORTANT: Using 'optional' generates a pointer (*bool) in Go, allowing us to detect unset state.
-  // When unset (nil), defaults to true (simulation mode) for safety.
-  // When explicitly set to true, use simulation. When explicitly set to false, use real execution.
-  optional bool is_simulated = 4; // If true (or unset), use simulation; if explicitly false, execute real UserOp
 }
 
 // Response message for RunNodeWithInputs

@@ -2472,6 +2472,13 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		}
 
+		// Per-node execution mode: expect camelCase key from clients
+		if v, ok := config["isSimulated"]; ok {
+			if b, ok2 := v.(bool); ok2 {
+				contractConfig.IsSimulated = &b
+			}
+		}
+
 		node.TaskType = &avsproto.TaskNode_ContractWrite{
 			ContractWrite: &avsproto.ContractWriteNode{
 				Config: contractConfig,
@@ -2800,6 +2807,14 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 						}
 						if methodName, ok := methodCallMap["methodName"].(string); ok {
 							methodCall.MethodName = methodName
+						}
+						// Map methodParams (array of strings)
+						if params, ok := methodCallMap["methodParams"].([]interface{}); ok {
+							paramStrs := make([]string, 0, len(params))
+							for _, p := range params {
+								paramStrs = append(paramStrs, fmt.Sprintf("%v", p))
+							}
+							methodCall.MethodParams = paramStrs
 						}
 						cwConfig.MethodCalls = append(cwConfig.MethodCalls, methodCall)
 					}
@@ -3886,6 +3901,24 @@ func (eq *ExecutionQueue) executeTask(task *ExecutionTask) *ExecutionResult {
 	var resultData interface{}
 	if step != nil && step.Success {
 		resultData = eq.extractResultData(step)
+		// Debug: log what we extracted for this iteration
+		if eq.vm != nil && eq.vm.logger != nil {
+			nodeType := "unknown"
+			switch {
+			case step.GetContractWrite() != nil:
+				nodeType = "contractWrite"
+			case step.GetContractRead() != nil:
+				nodeType = "contractRead"
+			case step.GetCustomCode() != nil:
+				nodeType = "customCode"
+			case step.GetRestApi() != nil:
+				nodeType = "restApi"
+			}
+			eq.vm.logger.Info("Loop iteration result extracted",
+				"step_id", task.StepID,
+				"node_type", nodeType,
+				"has_data", resultData != nil)
+		}
 	}
 
 	return &ExecutionResult{
@@ -3917,18 +3950,19 @@ func (eq *ExecutionQueue) extractResultData(step *avsproto.Execution_Step) inter
 		}
 		return rawData
 	}
-	if contractWriteOutput := step.GetContractWrite(); contractWriteOutput != nil && contractWriteOutput.Data != nil {
-		// For contract write, return individual objects for single method calls to avoid double nesting in loops (same as ContractRead)
-		rawData := contractWriteOutput.Data.AsInterface()
-		if dataArray, ok := rawData.([]interface{}); ok {
-			if len(dataArray) == 1 {
-				// Single method call - return individual object to avoid [[{...}], [{...}]] in loops
-				return dataArray[0]
+	if contractWriteOutput := step.GetContractWrite(); contractWriteOutput != nil {
+		// Return the child's data as-is; allow nils when no data
+		if contractWriteOutput.Data != nil {
+			rawData := contractWriteOutput.Data.AsInterface()
+			if dataArray, ok := rawData.([]interface{}); ok {
+				if len(dataArray) == 1 {
+					return dataArray[0]
+				}
+				return dataArray
 			}
-			// Multiple method calls - return the array
-			return dataArray
+			return rawData
 		}
-		return rawData
+		return nil
 	}
 	if ethTransferOutput := step.GetEthTransfer(); ethTransferOutput != nil && ethTransferOutput.Data != nil {
 		return ethTransferOutput.Data.AsInterface()
@@ -3970,8 +4004,37 @@ func (v *VM) executeNodeDirectWithVars(node *avsproto.TaskNode, stepID string, t
 	return v.executeNodeWithIsolatedVars(node, stepID, isolatedVars)
 }
 
-// executeNodeWithIsolatedVars executes a node with completely isolated variables
+// executes a node with completely isolated variables
 func (v *VM) executeNodeWithIsolatedVars(node *avsproto.TaskNode, stepID string, isolatedVars map[string]any) (*avsproto.Execution_Step, error) {
+	// Temporarily inject isolated variables into VM vars for this node's execution
+	// so processors that read from v.vars (e.g., contractWrite template resolution) can see them.
+	// Restore original values after execution to avoid leaking iteration-scoped data.
+	originalValues := make(map[string]struct {
+		val     any
+		present bool
+	})
+	v.mu.Lock()
+	for key, val := range isolatedVars {
+		oldVal, ok := v.vars[key]
+		originalValues[key] = struct {
+			val     any
+			present bool
+		}{val: oldVal, present: ok}
+		v.vars[key] = val
+	}
+	v.mu.Unlock()
+	defer func() {
+		v.mu.Lock()
+		for key, prev := range originalValues {
+			if prev.present {
+				v.vars[key] = prev.val
+			} else {
+				delete(v.vars, key)
+			}
+		}
+		v.mu.Unlock()
+	}()
+
 	// For loop iterations, don't store node configuration as input variables
 	if !strings.Contains(stepID, "_iter_") {
 		// Extract and set input data for this node (making it available as node_name.input)

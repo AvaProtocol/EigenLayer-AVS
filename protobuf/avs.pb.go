@@ -5144,12 +5144,8 @@ type RunNodeWithInputsReq struct {
 	NodeType       NodeType                   `protobuf:"varint,1,opt,name=node_type,json=nodeType,proto3,enum=aggregator.NodeType" json:"node_type,omitempty"`                                                                   // Type of node to execute using the NodeType enum
 	NodeConfig     map[string]*structpb.Value `protobuf:"bytes,2,rep,name=node_config,json=nodeConfig,proto3" json:"node_config,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`             // Configuration for the node
 	InputVariables map[string]*structpb.Value `protobuf:"bytes,3,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Input variables for the node
-	// IMPORTANT: Using 'optional' generates a pointer (*bool) in Go, allowing us to detect unset state.
-	// When unset (nil), defaults to true (simulation mode) for safety.
-	// When explicitly set to true, use simulation. When explicitly set to false, use real execution.
-	IsSimulated   *bool `protobuf:"varint,4,opt,name=is_simulated,json=isSimulated,proto3,oneof" json:"is_simulated,omitempty"` // If true (or unset), use simulation; if explicitly false, execute real UserOp
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *RunNodeWithInputsReq) Reset() {
@@ -5201,13 +5197,6 @@ func (x *RunNodeWithInputsReq) GetInputVariables() map[string]*structpb.Value {
 		return x.InputVariables
 	}
 	return nil
-}
-
-func (x *RunNodeWithInputsReq) GetIsSimulated() bool {
-	if x != nil && x.IsSimulated != nil {
-		return *x.IsSimulated
-	}
-	return false
 }
 
 // Response message for RunNodeWithInputs
@@ -7400,7 +7389,9 @@ type ContractWriteNode_Config struct {
 	// The ABI as array of ABI elements
 	ContractAbi []*structpb.Value `protobuf:"bytes,3,rep,name=contract_abi,json=contractAbi,proto3" json:"contract_abi,omitempty"`
 	// Support for multiple method calls in sequence (similar to ContractRead)
-	MethodCalls   []*ContractWriteNode_MethodCall `protobuf:"bytes,4,rep,name=method_calls,json=methodCalls,proto3" json:"method_calls,omitempty"`
+	MethodCalls []*ContractWriteNode_MethodCall `protobuf:"bytes,4,rep,name=method_calls,json=methodCalls,proto3" json:"method_calls,omitempty"`
+	// Execution mode for this contract write node: when true (default), use simulation; when false, execute real UserOp
+	IsSimulated   *bool `protobuf:"varint,5,opt,name=is_simulated,json=isSimulated,proto3,oneof" json:"is_simulated,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7461,6 +7452,13 @@ func (x *ContractWriteNode_Config) GetMethodCalls() []*ContractWriteNode_MethodC
 		return x.MethodCalls
 	}
 	return nil
+}
+
+func (x *ContractWriteNode_Config) GetIsSimulated() bool {
+	if x != nil && x.IsSimulated != nil {
+		return *x.IsSimulated
+	}
+	return false
 }
 
 type ContractWriteNode_MethodCall struct {
@@ -9345,14 +9343,16 @@ const file_avs_proto_rawDesc = "" +
 	"\vdestination\x18\x01 \x01(\tR\vdestination\x12\x16\n" +
 	"\x06amount\x18\x02 \x01(\tR\x06amount\x1a4\n" +
 	"\x06Output\x12*\n" +
-	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xc1\x06\n" +
+	"\x04data\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x04data\"\xfa\x06\n" +
 	"\x11ContractWriteNode\x12<\n" +
-	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x1a\xd8\x01\n" +
+	"\x06config\x18\x01 \x01(\v2$.aggregator.ContractWriteNode.ConfigR\x06config\x1a\x91\x02\n" +
 	"\x06Config\x12)\n" +
 	"\x10contract_address\x18\x01 \x01(\tR\x0fcontractAddress\x12\x1b\n" +
 	"\tcall_data\x18\x02 \x01(\tR\bcallData\x129\n" +
 	"\fcontract_abi\x18\x03 \x03(\v2\x16.google.protobuf.ValueR\vcontractAbi\x12K\n" +
-	"\fmethod_calls\x18\x04 \x03(\v2(.aggregator.ContractWriteNode.MethodCallR\vmethodCalls\x1a\xaa\x01\n" +
+	"\fmethod_calls\x18\x04 \x03(\v2(.aggregator.ContractWriteNode.MethodCallR\vmethodCalls\x12&\n" +
+	"\fis_simulated\x18\x05 \x01(\bH\x00R\visSimulated\x88\x01\x01B\x0f\n" +
+	"\r_is_simulated\x1a\xaa\x01\n" +
 	"\n" +
 	"MethodCall\x12 \n" +
 	"\tcall_data\x18\x01 \x01(\tH\x00R\bcallData\x88\x01\x01\x12\x1f\n" +
@@ -9795,20 +9795,18 @@ const file_avs_proto_rawDesc = "" +
 	"\x05total\x18\x01 \x01(\x03R\x05total\x12\x1c\n" +
 	"\tsucceeded\x18\x02 \x01(\x03R\tsucceeded\x12\x16\n" +
 	"\x06failed\x18\x03 \x01(\x03R\x06failed\x12,\n" +
-	"\x12avg_execution_time\x18\x04 \x01(\x01R\x10avgExecutionTime\"\xe6\x03\n" +
+	"\x12avg_execution_time\x18\x04 \x01(\x01R\x10avgExecutionTime\"\xad\x03\n" +
 	"\x14RunNodeWithInputsReq\x121\n" +
 	"\tnode_type\x18\x01 \x01(\x0e2\x14.aggregator.NodeTypeR\bnodeType\x12Q\n" +
 	"\vnode_config\x18\x02 \x03(\v20.aggregator.RunNodeWithInputsReq.NodeConfigEntryR\n" +
 	"nodeConfig\x12]\n" +
-	"\x0finput_variables\x18\x03 \x03(\v24.aggregator.RunNodeWithInputsReq.InputVariablesEntryR\x0einputVariables\x12&\n" +
-	"\fis_simulated\x18\x04 \x01(\bH\x00R\visSimulated\x88\x01\x01\x1aU\n" +
+	"\x0finput_variables\x18\x03 \x03(\v24.aggregator.RunNodeWithInputsReq.InputVariablesEntryR\x0einputVariables\x1aU\n" +
 	"\x0fNodeConfigEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\x1aY\n" +
 	"\x13InputVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
-	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01B\x0f\n" +
-	"\r_is_simulated\"\x8e\a\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"\x8e\a\n" +
 	"\x15RunNodeWithInputsResp\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\x122\n" +
@@ -10508,7 +10506,6 @@ func file_avs_proto_init() {
 		(*TriggerTaskReq_ManualTrigger)(nil),
 	}
 	file_avs_proto_msgTypes[45].OneofWrappers = []any{}
-	file_avs_proto_msgTypes[65].OneofWrappers = []any{}
 	file_avs_proto_msgTypes[66].OneofWrappers = []any{
 		(*RunNodeWithInputsResp_EthTransfer)(nil),
 		(*RunNodeWithInputsResp_Graphql)(nil),
@@ -10530,6 +10527,7 @@ func file_avs_proto_init() {
 	}
 	file_avs_proto_msgTypes[85].OneofWrappers = []any{}
 	file_avs_proto_msgTypes[86].OneofWrappers = []any{}
+	file_avs_proto_msgTypes[96].OneofWrappers = []any{}
 	file_avs_proto_msgTypes[97].OneofWrappers = []any{}
 	file_avs_proto_msgTypes[99].OneofWrappers = []any{}
 	file_avs_proto_msgTypes[100].OneofWrappers = []any{}
