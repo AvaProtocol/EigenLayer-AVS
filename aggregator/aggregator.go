@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -205,7 +206,15 @@ func (agg *Aggregator) initDB(ctx context.Context) error {
 	agg.db, err = storage.NewWithPath(agg.config.DbPath)
 
 	if err != nil {
-		panic(err)
+		// Gracefully handle Badger lock errors without stack trace
+		if strings.Contains(err.Error(), "Cannot acquire directory lock") {
+			// Use Info level to avoid stack trace from Error level logging
+			agg.logger.Info("❌ Database lock error - another aggregator instance may be running",
+				"db_path", agg.config.DbPath,
+				"solution", "Stop the other instance or use a different db_path")
+			return fmt.Errorf("database locked by another process")
+		}
+		return fmt.Errorf("failed to open database: %w", err)
 	}
 
 	agg.operatorPool.db = agg.db
@@ -265,8 +274,8 @@ func (agg *Aggregator) Start(ctx context.Context) error {
 
 	agg.logger.Infof("Initialize Storage")
 	if err := agg.initDB(ctx); err != nil {
-		agg.logger.Error("Failed to initialize database storage", "error", err.Error())
-		panic("database initialization failed - cannot continue")
+		// Log error and exit gracefully without panic/stack trace
+		return fmt.Errorf("database initialization failed: %w", err)
 	}
 
 	agg.migrate()

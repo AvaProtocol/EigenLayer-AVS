@@ -943,7 +943,7 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 
 	// Debug real transaction receipt
 	if receipt != nil {
-		r.vm.logger.Error("🔍 REAL TRANSACTION DEBUG - Receipt analysis",
+		r.vm.logger.Debug("🔍 REAL TRANSACTION DEBUG - Receipt analysis",
 			"tx_hash", receipt.TxHash.Hex(),
 			"block_number", receipt.BlockNumber.Uint64(),
 			"status", receipt.Status,
@@ -953,7 +953,7 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 		// Log each individual log entry and check for UserOperationEvent
 
 		for i, log := range receipt.Logs {
-			r.vm.logger.Error("🔍 REAL TRANSACTION DEBUG - Log entry",
+			r.vm.logger.Debug("🔍 REAL TRANSACTION DEBUG - Log entry",
 				"log_index", i,
 				"address", log.Address.Hex(),
 				"topics_count", len(log.Topics),
@@ -968,7 +968,7 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 					// success is at bytes 32-64
 					successBytes := log.Data[32:64]
 					userOpInnerSuccess = len(successBytes) > 0 && successBytes[len(successBytes)-1] == 1
-					r.vm.logger.Error("🔍 USEROPERATION EVENT DECODED",
+					r.vm.logger.Debug("🔍 USEROPERATION EVENT DECODED",
 						"inner_call_success", userOpInnerSuccess,
 						"userOpHash", log.Topics[1].Hex(),
 						"sender", common.BytesToAddress(log.Topics[2].Bytes()).Hex())
@@ -976,7 +976,7 @@ func (r *ContractWriteProcessor) createRealTransactionResult(methodName, contrac
 			}
 		}
 	} else {
-		r.vm.logger.Error("🔍 REAL TRANSACTION DEBUG - No receipt available")
+		r.vm.logger.Debug("🔍 REAL TRANSACTION DEBUG - No receipt available")
 	}
 
 	// For AA transactions, check both receipt status AND UserOp inner success

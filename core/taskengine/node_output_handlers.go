@@ -286,6 +286,11 @@ func (h *ContractWriteOutputHandler) ExtractFromExecutionStep(step *avsproto.Exe
 		if !step.Success {
 			result["error"] = step.Error
 		}
+
+		// Preserve executionContext from step if available
+		if step.ExecutionContext != nil {
+			result["executionContext"] = step.ExecutionContext
+		}
 	}
 	return result, nil
 }

@@ -3107,6 +3107,11 @@ func (n *Engine) extractExecutionResult(executionStep *avsproto.Execution_Step) 
 		result["error"] = executionStep.Error
 	}
 
+	// Preserve executionContext from step if available
+	if executionStep.ExecutionContext != nil {
+		result["executionContext"] = executionStep.ExecutionContext
+	}
+
 	return result, nil
 }
 
@@ -3308,19 +3313,34 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 		}
 	}
 
-	// Attach execution_context; detect actual execution mode for contract writes
+	// Attach execution_context from step if available, otherwise use defaults
 	// Skip for EventTrigger since it provides its own executionContext in metadata
 	if nodeTypeStr != NodeTypeEventTrigger {
-		// We can infer provider/is_simulated from metadata when needed; default to unknown here
-		ctxMap := map[string]interface{}{
-			"is_simulated": nil,
-			"provider":     string(ProviderChainRPC),
+		// Check if result already has executionContext from step
+		var ctxFromStep *structpb.Value
+		if result != nil {
+			if ctxVal, ok := result["executionContext"]; ok {
+				if ctxProto, ok := ctxVal.(*structpb.Value); ok {
+					ctxFromStep = ctxProto
+				}
+			}
 		}
-		if n.smartWalletConfig != nil && n.smartWalletConfig.ChainID != 0 {
-			ctxMap["chain_id"] = n.smartWalletConfig.ChainID
-		}
-		if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
-			resp.ExecutionContext = ctxVal
+
+		// Use step's execution context if available; otherwise create default
+		if ctxFromStep != nil {
+			resp.ExecutionContext = ctxFromStep
+		} else {
+			// Fallback to default context
+			ctxMap := map[string]interface{}{
+				"is_simulated": nil,
+				"provider":     string(ProviderChainRPC),
+			}
+			if n.smartWalletConfig != nil && n.smartWalletConfig.ChainID != 0 {
+				ctxMap["chain_id"] = n.smartWalletConfig.ChainID
+			}
+			if ctxVal, err := structpb.NewValue(ctxMap); err == nil {
+				resp.ExecutionContext = ctxVal
+			}
 		}
 	}
 
