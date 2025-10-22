@@ -3,6 +3,7 @@ package taskengine
 import (
 	"testing"
 
+	"github.com/AvaProtocol/EigenLayer-AVS/core/testutil"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -211,6 +212,111 @@ func TestLoopNode_ManualTriggerDataAccess(t *testing.T) {
 			t.Logf("✅ Correctly handled missing data field with error: %s", executionStep.Error)
 		}
 	})
+}
+
+func TestLoopNode_ContractWrite_Approve_PerIterationData(t *testing.T) {
+	// Fast, isolated test: simulate a loop over two approve calls and assert per-iteration data is populated
+	vm := NewVM()
+	require.NotNil(t, vm)
+
+	// Force simulation path for contract write
+	vm.SetSimulation(true)
+
+	// Minimal Tenderly client stub is required by processor; use real initializer with test config
+	logger := testutil.GetLogger()
+	testConfig := testutil.GetTestConfig()
+	require.NotNil(t, testConfig)
+	tenderlyClient := NewTenderlyClient(testConfig, logger)
+	require.NotNil(t, tenderlyClient)
+	// Initialize VM with smart wallet config
+	smartWalletConfig := testutil.GetTestSmartWalletConfig()
+	vmWithCfg, err := NewVMWithData(nil, nil, smartWalletConfig, nil)
+	require.NoError(t, err)
+	require.NotNil(t, vmWithCfg)
+	vm = vmWithCfg
+	vm.tenderlyClient = tenderlyClient
+	vm.SetSimulation(true)
+
+	// Provide settings.runner and chain_id expected by ContractWrite
+	inputVariables := map[string]interface{}{
+		"writeParams": []interface{}{
+			map[string]interface{}{"spender": "0x0000000000000000000000000000000000000001", "amount": "0"},
+			map[string]interface{}{"spender": "0x0000000000000000000000000000000000000001", "amount": "0"},
+		},
+		"settings": map[string]interface{}{
+			"runner":   "0x5a8A8a79DdF433756D4D97DCCE33334D9E218856",
+			"chain_id": int64(11155111),
+			"chain":    "sepolia",
+		},
+	}
+
+	// Build loop node with ContractWrite runner (USDC approve signature)
+	nodeConfig := map[string]interface{}{
+		"inputNodeName": "writeParams",
+		"iterVal":       "value",
+		"iterKey":       "index",
+		"executionMode": "sequential",
+		"runner": map[string]interface{}{
+			"type": "contractWrite",
+			"config": map[string]interface{}{
+				"contractAddress": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+				"contractAbi": []interface{}{
+					map[string]interface{}{
+						"type":            "function",
+						"name":            "approve",
+						"stateMutability": "nonpayable",
+						"inputs": []interface{}{
+							map[string]interface{}{"name": "spender", "type": "address"},
+							map[string]interface{}{"name": "amount", "type": "uint256"},
+						},
+						"outputs": []interface{}{map[string]interface{}{"name": "", "type": "bool"}},
+					},
+				},
+				"methodCalls": []interface{}{
+					map[string]interface{}{
+						"methodName":   "approve",
+						"methodParams": []interface{}{"{{value.spender}}", "{{value.amount}}"},
+					},
+				},
+			},
+		},
+	}
+
+	node, err := CreateNodeFromType("loop", nodeConfig, "")
+	require.NoError(t, err)
+	require.NotNil(t, node)
+	node.Name = "testLoopContractWrite"
+
+	// Execute
+	step, err := vm.RunNodeWithInputs(node, inputVariables)
+	require.NoError(t, err)
+	require.NotNil(t, step)
+	require.True(t, step.Success, "execution failed: %s", step.Error)
+
+	// Assert per-iteration data are non-nil and shaped as approve:true
+	loopOutput := step.GetLoop()
+	require.NotNil(t, loopOutput)
+	require.NotNil(t, loopOutput.Data)
+	iface := loopOutput.Data.AsInterface()
+	arr, ok := iface.([]interface{})
+	require.True(t, ok, "expected array, got %T", iface)
+	require.Len(t, arr, 2)
+
+	for i, it := range arr {
+		require.NotNil(t, it, "iteration %d data is nil", i)
+		// Expect a map like { approve: true } when value is boolean
+		if m, ok := it.(map[string]interface{}); ok {
+			if v, exists := m["approve"]; exists {
+				// bool true is ideal; some sims may return "true" string
+				switch val := v.(type) {
+				case bool:
+					assert.True(t, val, "iteration %d approve should be true", i)
+				case string:
+					assert.Equal(t, "true", val, "iteration %d approve string should be 'true'", i)
+				}
+			}
+		}
+	}
 }
 
 func TestRestApiStandardFormat(t *testing.T) {
