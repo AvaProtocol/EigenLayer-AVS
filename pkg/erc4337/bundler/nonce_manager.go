@@ -1,13 +1,12 @@
 package bundler
 
 import (
+	"log"
 	"math/big"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-
-	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 )
 
 // NonceManager manages nonce tracking for UserOperations to prevent conflicts
@@ -19,14 +18,12 @@ type NonceManager struct {
 	// Key: sender address (lowercase), Value: next nonce to use
 	pendingNonces map[string]*big.Int
 	mu            sync.RWMutex
-	logger        logger.Logger
 }
 
-// NewNonceManager creates a new NonceManager instance with optional logger
-func NewNonceManager(lgr logger.Logger) *NonceManager {
+// NewNonceManager creates a new NonceManager instance
+func NewNonceManager() *NonceManager {
 	return &NonceManager{
 		pendingNonces: make(map[string]*big.Int),
-		logger:        logger.EnsureLogger(lgr),
 	}
 }
 
@@ -56,9 +53,8 @@ func (nm *NonceManager) GetNextNonce(
 	if !hasCached {
 		// First time seeing this sender - use on-chain nonce
 		nextNonce = new(big.Int).Set(onChainNonce)
-		nm.logger.Debug("NONCE MANAGER: First UserOp for sender, using on-chain nonce",
-			"sender", sender.Hex(),
-			"nonce", nextNonce.String())
+		log.Printf("🔢 NONCE MANAGER: First UserOp for sender %s, using on-chain nonce %s",
+			sender.Hex(), nextNonce.String())
 	} else {
 		// Use max(on-chain, cached) to handle cases where:
 		// 1. Pending UserOp was mined (on-chain advanced)
@@ -67,17 +63,13 @@ func (nm *NonceManager) GetNextNonce(
 		if onChainNonce.Cmp(cachedNonce) > 0 {
 			// On-chain advanced (previous UserOps mined or dropped)
 			nextNonce = new(big.Int).Set(onChainNonce)
-			nm.logger.Debug("NONCE MANAGER: On-chain nonce > cached, using on-chain",
-				"sender", sender.Hex(),
-				"on_chain_nonce", onChainNonce.String(),
-				"cached_nonce", cachedNonce.String())
+			log.Printf("🔢 NONCE MANAGER: On-chain nonce (%s) > cached (%s), using on-chain for sender %s",
+				onChainNonce.String(), cachedNonce.String(), sender.Hex())
 		} else {
 			// Cached is ahead or equal (pending UserOps)
 			nextNonce = new(big.Int).Set(cachedNonce)
-			nm.logger.Debug("NONCE MANAGER: Using cached nonce",
-				"sender", sender.Hex(),
-				"cached_nonce", nextNonce.String(),
-				"on_chain_nonce", onChainNonce.String())
+			log.Printf("🔢 NONCE MANAGER: Using cached nonce %s (on-chain: %s) for sender %s",
+				nextNonce.String(), onChainNonce.String(), sender.Hex())
 		}
 	}
 
@@ -94,10 +86,8 @@ func (nm *NonceManager) IncrementNonce(sender common.Address, currentNonce *big.
 	nextNonce := new(big.Int).Add(currentNonce, big.NewInt(1))
 	nm.pendingNonces[senderKey] = nextNonce
 
-	nm.logger.Debug("NONCE MANAGER: Incremented nonce for sender",
-		"sender", sender.Hex(),
-		"current_nonce", currentNonce.String(),
-		"next_nonce", nextNonce.String())
+	log.Printf("🔢 NONCE MANAGER: Incremented nonce for sender %s: %s -> %s",
+		sender.Hex(), currentNonce.String(), nextNonce.String())
 }
 
 // ResetNonce clears the cached nonce for a sender, forcing the next GetNextNonce
@@ -109,8 +99,8 @@ func (nm *NonceManager) ResetNonce(sender common.Address) {
 	senderKey := sender.Hex()
 	delete(nm.pendingNonces, senderKey)
 
-	nm.logger.Debug("NONCE MANAGER: Reset cached nonce for sender (will fetch fresh from chain)",
-		"sender", sender.Hex())
+	log.Printf("🔢 NONCE MANAGER: Reset cached nonce for sender %s (will fetch fresh from chain)",
+		sender.Hex())
 }
 
 // SetNonce explicitly sets the cached nonce for a sender.
@@ -122,9 +112,8 @@ func (nm *NonceManager) SetNonce(sender common.Address, nonce *big.Int) {
 	senderKey := sender.Hex()
 	nm.pendingNonces[senderKey] = new(big.Int).Set(nonce)
 
-	nm.logger.Debug("NONCE MANAGER: Set cached nonce for sender",
-		"sender", sender.Hex(),
-		"nonce", nonce.String())
+	log.Printf("🔢 NONCE MANAGER: Set cached nonce for sender %s to %s",
+		sender.Hex(), nonce.String())
 }
 
 // GetCachedNonce returns the cached nonce for a sender without fetching from chain.
