@@ -321,7 +321,7 @@ func enrichTransferEventShared(eventLog *types.Log, parsedData map[string]interf
 		"tokenName":       transferResponse.TokenName,
 		"tokenSymbol":     transferResponse.TokenSymbol,
 		"tokenDecimals":   transferResponse.TokenDecimals,
-		"tokenContract":   transferResponse.Address, // Renamed from "address" for clarity
+		"contractAddress": transferResponse.ContractAddress, // Contract address that emitted the event
 		"transactionHash": transferResponse.TransactionHash,
 		"blockNumber":     transferResponse.BlockNumber,
 		"blockTimestamp":  transferResponse.BlockTimestamp,
@@ -447,7 +447,7 @@ func createBasicEventMetadata(eventLog *types.Log) map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"tokenContract":   eventLog.Address.Hex(), // Renamed from "address" for clarity
+		"contractAddress": eventLog.Address.Hex(), // Contract address that emitted the event
 		"blockNumber":     eventLog.BlockNumber,
 		"transactionHash": eventLog.TxHash.Hex(),
 		"logIndex":        eventLog.Index,
