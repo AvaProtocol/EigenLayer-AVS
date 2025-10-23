@@ -76,7 +76,7 @@ var (
 
 	// globalNonceManager tracks pending nonces across all UserOp submissions
 	// to prevent conflicts with transactions pending in the bundler's mempool
-	globalNonceManager = bundler.NewNonceManager()
+	globalNonceManager = bundler.NewNonceManager(nil)
 )
 
 // VerifyingPaymasterRequest contains the parameters needed for paymaster functionality. This use the reference from https://github.com/eth-optimism/paymaster-reference
@@ -729,7 +729,7 @@ func SendUserOp(
 	}
 
 	// Use the shared logic for the main UserOp processing
-	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient, nil)
+	return sendUserOpShared(smartWalletConfig, owner, callData, paymasterReq, senderOverride, wsClient, logger)
 }
 
 // sendUserOpCore contains the shared retry loop logic for sending UserOps to the bundler.
@@ -1183,7 +1183,7 @@ func BuildUserOpWithPaymaster(
 		{Type: abi.Type{T: abi.UintTy, Size: 48}}, // uint48
 	}
 
-	encodedData, err := arguments.Pack(validUntil, validAfter)
+	encodedData, err := arguments.Pack(&validUntil, &validAfter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to ABI encode timestamps: %w", err)
 	}

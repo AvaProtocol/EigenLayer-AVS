@@ -60,6 +60,15 @@ func NewContractWriteProcessor(vm *VM, client *ethclient.Client, smartWalletConf
 	return r
 }
 
+// resolveSimulationMode resolves the effective simulation mode for a contract write node.
+// It returns the per-node is_simulated value if explicitly set, otherwise falls back to the VM's simulation flag.
+func (r *ContractWriteProcessor) resolveSimulationMode(node *avsproto.ContractWriteNode, vmDefault bool) bool {
+	if node != nil && node.Config != nil && node.Config.IsSimulated != nil {
+		return node.Config.GetIsSimulated()
+	}
+	return vmDefault
+}
+
 func (r *ContractWriteProcessor) getInputData(node *avsproto.ContractWriteNode) (string, string, []*avsproto.ContractWriteNode_MethodCall, error) {
 	var contractAddress, callData string
 	var methodCalls []*avsproto.ContractWriteNode_MethodCall
@@ -1390,10 +1399,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				}
 			}()
 			// Resolve shouldSimulate: default to VM flag; allow per-node override via typed config
-			effectiveSim := r.vm.IsSimulation
-			if node != nil && node.Config != nil && node.Config.IsSimulated != nil {
-				effectiveSim = node.Config.GetIsSimulated()
-			}
+			effectiveSim := r.resolveSimulationMode(node, r.vm.IsSimulation)
 			result = r.executeMethodCall(ctx, parsedABI, originalAbiString, contractAddr, methodCall, effectiveSim)
 		}()
 		// Ensure MethodName is populated to avoid empty keys downstream
@@ -1855,12 +1861,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 	// Update ExecutionContext to reflect actual execution mode (simulated vs real)
 	// Use the resolved per-node simulation flag as the source of truth
-	isSimulated := false
-	if node != nil && node.Config != nil && node.Config.IsSimulated != nil {
-		isSimulated = node.Config.GetIsSimulated()
-	} else {
-		isSimulated = r.vm.IsSimulation
-	}
+	isSimulated := r.resolveSimulationMode(node, r.vm.IsSimulation)
 	provider := string(ProviderTenderly)
 	if !isSimulated {
 		provider = string(ProviderBundler) // Real UserOp executed through bundler
