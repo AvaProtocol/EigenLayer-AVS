@@ -392,7 +392,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 		// Create query for Chainlink ETH/USD feed
 		query := &avsproto.EventTrigger_Query{
 			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
-			Topics: []string{ANSWER_UPDATED_SIG},
+			Topics:    []string{ANSWER_UPDATED_SIG},
 		}
 
 		fmt.Printf("\n=== TENDERLY END-TO-END TEST: Basic AnswerUpdated Simulation ===\n")
@@ -419,7 +419,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 		// Test with price > $2000 condition
 		query := &avsproto.EventTrigger_Query{
 			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
-			Topics: []string{ANSWER_UPDATED_SIG},
+			Topics:    []string{ANSWER_UPDATED_SIG},
 			Conditions: []*avsproto.EventCondition{
 				{
 					FieldName: "current",
@@ -618,7 +618,7 @@ func BenchmarkTenderlySimulation(b *testing.B) {
 
 	query := &avsproto.EventTrigger_Query{
 		Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
-		Topics: []string{ANSWER_UPDATED_SIG},
+		Topics:    []string{ANSWER_UPDATED_SIG},
 	}
 
 	ctx := context.Background()
@@ -680,7 +680,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 
 		query := &avsproto.EventTrigger_Query{
 			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
-			Topics: []string{ANSWER_UPDATED_SIG},
+			Topics:    []string{ANSWER_UPDATED_SIG},
 			Conditions: []*avsproto.EventCondition{
 				{
 					FieldName: "current",
@@ -736,7 +736,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 
 		query := &avsproto.EventTrigger_Query{
 			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
-			Topics: []string{ANSWER_UPDATED_SIG},
+			Topics:    []string{ANSWER_UPDATED_SIG},
 			Conditions: []*avsproto.EventCondition{
 				{
 					FieldName: "current",
@@ -807,7 +807,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 
 		query := &avsproto.EventTrigger_Query{
 			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
-			Topics: []string{ANSWER_UPDATED_SIG},
+			Topics:    []string{ANSWER_UPDATED_SIG},
 			Conditions: []*avsproto.EventCondition{
 				{
 					FieldName: "current",
@@ -853,7 +853,7 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 		// Simple query without conditions to see pure simulated data
 		query := &avsproto.EventTrigger_Query{
 			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
-			Topics: []string{ANSWER_UPDATED_SIG},
+			Topics:    []string{ANSWER_UPDATED_SIG},
 		}
 
 		t.Logf("ANALYZING RAW SIMULATION DATA STRUCTURE:")
@@ -977,7 +977,7 @@ func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testin
 
 		query := &avsproto.EventTrigger_Query{
 			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
-			Topics: []string{ANSWER_UPDATED_SIG},
+			Topics:    []string{ANSWER_UPDATED_SIG},
 			Conditions: []*avsproto.EventCondition{
 				{
 					FieldName: "current",
@@ -1029,7 +1029,7 @@ func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testin
 
 		query := &avsproto.EventTrigger_Query{
 			Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
-			Topics: []string{ANSWER_UPDATED_SIG},
+			Topics:    []string{ANSWER_UPDATED_SIG},
 			Conditions: []*avsproto.EventCondition{
 				{
 					FieldName: "current",
