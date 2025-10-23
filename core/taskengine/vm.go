@@ -518,13 +518,12 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 						queryMap["addresses"] = query.Addresses
 					}
 
-					// Convert topics to match SDK structure
+					// Convert topics to match SDK flat array structure
 					if len(query.Topics) > 0 {
+						// Convert []string to []interface{} for JSON compatibility
 						topics := make([]interface{}, len(query.Topics))
 						for j, topic := range query.Topics {
-							topics[j] = map[string]interface{}{
-								"values": topic.Values,
-							}
+							topics[j] = topic
 						}
 						queryMap["topics"] = topics
 					}

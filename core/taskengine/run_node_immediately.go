@@ -200,19 +200,59 @@ func (n *Engine) runCronTriggerImmediately(triggerConfig map[string]interface{},
 	return result, nil
 }
 
+// validateTopicHexFormat validates that a topic string is properly formatted as a hex value
+// Returns error if the topic contains malformed hex (e.g., "0x...00x..." from bad template substitution)
+func validateTopicHexFormat(topic string) error {
+	if topic == "" {
+		return nil // Empty/null topics are valid (wildcards)
+	}
+
+	// Check for double "0x" prefix (common template substitution error)
+	if strings.Contains(strings.ToLower(topic), "0x") {
+		firstIndex := strings.Index(strings.ToLower(topic), "0x")
+		secondIndex := strings.Index(strings.ToLower(topic[firstIndex+1:]), "0x")
+		if secondIndex != -1 {
+			return fmt.Errorf("malformed topic hex value - contains multiple '0x' prefixes (likely from incorrect template substitution): %s", topic)
+		}
+	}
+
+	// Validate hex format
+	if !strings.HasPrefix(topic, "0x") {
+		return fmt.Errorf("topic must start with '0x' prefix: %s", topic)
+	}
+
+	// Check that all characters after "0x" are valid hex
+	hexPart := topic[2:]
+	for _, c := range hexPart {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return fmt.Errorf("topic contains invalid hex character '%c': %s", c, topic)
+		}
+	}
+
+	return nil
+}
+
 // runEventTriggerImmediately executes an event trigger immediately using the new queries-based system
 func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
-	// FORCE TEST: Add a debug field to verify this function is being called
-
 	if n.logger != nil {
-		n.logger.Error("🚀 TRACE: runEventTriggerImmediately CALLED", "configKeys", GetMapKeys(triggerConfig))
+		n.logger.Debug("🚀 TRACE: runEventTriggerImmediately CALLED", "configKeys", GetMapKeys(triggerConfig))
 		n.logger.Info("🚀 runEventTriggerImmediately: Starting execution")
-		n.logger.Info("🚀 DEBUG: Function called with config", "configKeys", GetMapKeys(triggerConfig))
+		n.logger.Debug("🚀 DEBUG: Function called with config", "configKeys", GetMapKeys(triggerConfig))
 	}
 
 	// Create a context with timeout to prevent hanging tests
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+
+	// Create a temporary VM for template variable resolution
+	// This allows eventTrigger to use {{settings.uniswapv3_pool.token0.id}} syntax in addresses
+	tempVM := NewVM()
+	tempVM.logger = n.logger
+	if inputVariables != nil {
+		for k, v := range inputVariables {
+			tempVM.AddVar(k, v)
+		}
+	}
 
 	// Parse the new queries-based configuration
 	queriesInterface, ok := triggerConfig["queries"]
@@ -226,6 +266,81 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 	queriesArray, ok := queriesInterface.([]interface{})
 	if !ok || len(queriesArray) == 0 {
 		return nil, NewInvalidNodeConfigError("queries must be a non-empty array")
+	}
+
+	// Resolve template variables in addresses and topics for all queries
+	for queryIdx, queryInterface := range queriesArray {
+		if queryMap, ok := queryInterface.(map[string]interface{}); ok {
+			var queryAddresses []string
+
+			// Resolve addresses
+			if addressesInterface, exists := queryMap["addresses"]; exists {
+				if addressesArray, ok := addressesInterface.([]interface{}); ok {
+					resolvedAddresses := make([]interface{}, len(addressesArray))
+					for i, addrInterface := range addressesArray {
+						if addrStr, ok := addrInterface.(string); ok {
+							// Resolve template variables like {{settings.uniswapv3_pool.token0.id}}
+							resolvedAddr := tempVM.preprocessTextWithVariableMapping(addrStr)
+							resolvedAddresses[i] = resolvedAddr
+							queryAddresses = append(queryAddresses, resolvedAddr)
+
+							if addrStr != resolvedAddr && n.logger != nil {
+								n.logger.Info("EventTrigger: Resolved template in address",
+									"original", addrStr,
+									"resolved", resolvedAddr)
+							}
+
+							// Validate resolved address format
+							if resolvedAddr != "" && !common.IsHexAddress(resolvedAddr) {
+								return nil, fmt.Errorf("query[%d]: resolved address is not a valid Ethereum address: %s (original: %s)",
+									queryIdx, resolvedAddr, addrStr)
+							}
+						} else {
+							resolvedAddresses[i] = addrInterface
+						}
+					}
+					queryMap["addresses"] = resolvedAddresses
+				}
+			}
+
+			// Resolve topic values - flat array format
+			if topicsInterface, exists := queryMap["topics"]; exists {
+				if topicsArray, ok := topicsInterface.([]interface{}); ok {
+					resolvedTopics := make([]interface{}, len(topicsArray))
+					for i, topicInterface := range topicsArray {
+						if topicStr, ok := topicInterface.(string); ok {
+							// Resolve template variables in topic values
+							resolvedValue := tempVM.preprocessTextWithVariableMapping(topicStr)
+							resolvedTopics[i] = resolvedValue
+
+							if topicStr != resolvedValue && n.logger != nil {
+								n.logger.Info("EventTrigger: Resolved template in topic value",
+									"original", topicStr,
+									"resolved", resolvedValue)
+							}
+
+							// Validate resolved topic format
+							if err := validateTopicHexFormat(resolvedValue); err != nil {
+								if n.logger != nil {
+									n.logger.Error("❌ EventTrigger: Invalid topic format after template resolution",
+										"queryIndex", queryIdx,
+										"topicIndex", i,
+										"original", topicStr,
+										"resolved", resolvedValue,
+										"error", err.Error())
+								}
+								return nil, fmt.Errorf("query[%d].topics[%d]: %w (original: %s, resolved: %s)",
+									queryIdx, i, err, topicStr, resolvedValue)
+							}
+						} else {
+							// Keep non-string values (null) as-is
+							resolvedTopics[i] = topicInterface
+						}
+					}
+					queryMap["topics"] = resolvedTopics
+				}
+			}
+		}
 	}
 
 	// Check if simulation mode is enabled (default: true, provides sample data for development)
@@ -248,7 +363,7 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 		shouldUseDirect := n.shouldUseDirectCalls(queriesArray)
 
 		if n.logger != nil {
-			n.logger.Error("🔍 TRACE: Path decision",
+			n.logger.Debug("🔍 TRACE: Path decision",
 				"simulationMode", simulationMode,
 				"shouldUseDirect", shouldUseDirect,
 				"queriesCount", len(queriesArray))
@@ -256,12 +371,12 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 
 		if shouldUseDirect {
 			if n.logger != nil {
-				n.logger.Error("🔍 FORCE DEBUG: Using DIRECT CALLS path")
+				n.logger.Debug("🔍 EventTrigger: Using DIRECT CALLS path")
 			}
 			return n.runEventTriggerWithDirectCalls(ctx, queriesArray, inputVariables)
 		} else {
 			if n.logger != nil {
-				n.logger.Error("🔍 FORCE DEBUG: Using TENDERLY SIMULATION path")
+				n.logger.Debug("🔍 EventTrigger: Using TENDERLY SIMULATION path")
 			}
 			return n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
 		}
@@ -295,17 +410,17 @@ func (n *Engine) shouldUseDirectCalls(queriesArray []interface{}) bool {
 			if topicsArray, ok := topicsInterface.([]interface{}); ok && len(topicsArray) > 0 {
 				// Has topics - this is event-based, use simulation
 				if n.logger != nil {
-					n.logger.Error("🔍 TRACE: Found non-empty topics, using SIMULATION", "queryIndex", i, "topicsCount", len(topicsArray))
+					n.logger.Debug("🔍 TRACE: Found non-empty topics, using SIMULATION", "queryIndex", i, "topicsCount", len(topicsArray))
 				}
 				return false
 			} else {
 				if n.logger != nil {
-					n.logger.Error("🔍 TRACE: Found empty topics array", "queryIndex", i, "topicsExists", exists, "topicsType", fmt.Sprintf("%T", topicsInterface))
+					n.logger.Debug("🔍 TRACE: Found empty topics array", "queryIndex", i, "topicsExists", exists, "topicsType", fmt.Sprintf("%T", topicsInterface))
 				}
 			}
 		} else {
 			if n.logger != nil {
-				n.logger.Error("🔍 TRACE: No topics found", "queryIndex", i)
+				n.logger.Debug("🔍 TRACE: No topics found", "queryIndex", i)
 			}
 		}
 
@@ -325,12 +440,12 @@ func (n *Engine) shouldUseDirectCalls(queriesArray []interface{}) bool {
 			if methodCallsCount > 0 {
 				// Has methodCalls but no topics - this is direct call scenario
 				if n.logger != nil {
-					n.logger.Error("🔍 TRACE: Found methodCalls without topics, using DIRECT CALLS", "queryIndex", i, "methodCallsCount", methodCallsCount)
+					n.logger.Debug("🔍 TRACE: Found methodCalls without topics, using DIRECT CALLS", "queryIndex", i, "methodCallsCount", methodCallsCount)
 				}
 				return true
 			} else {
 				if n.logger != nil {
-					n.logger.Error("🔍 TRACE: Found empty methodCalls", "queryIndex", i)
+					n.logger.Debug("🔍 TRACE: Found empty methodCalls", "queryIndex", i)
 				}
 			}
 		}
@@ -351,7 +466,7 @@ func (n *Engine) shouldUseDirectCalls(queriesArray []interface{}) bool {
 // This ensures consistency with deployed tasks and simulate workflow by returning event data instead of method call results
 func (n *Engine) runEventTriggerWithDirectCalls(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	if n.logger != nil {
-		n.logger.Error("🔍 TRACE: DIRECT CALLS path executing")
+		n.logger.Debug("🔍 TRACE: DIRECT CALLS path executing")
 		n.logger.Info("🎯 EventTrigger: Creating simulated AnswerUpdated events for consistency",
 			"queriesCount", len(queriesArray))
 	}
@@ -1347,7 +1462,7 @@ func (n *Engine) executeMethodCallForSimulation(ctx context.Context, methodCall 
 // runEventTriggerWithTenderlySimulation executes event trigger using Tenderly simulation
 func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, queriesArray []interface{}, inputVariables map[string]interface{}) (map[string]interface{}, error) {
 	if n.logger != nil {
-		n.logger.Error("🔍 FORCE DEBUG: runEventTriggerWithTenderlySimulation called")
+		n.logger.Debug("🔍 TRACE: runEventTriggerWithTenderlySimulation called")
 		n.logger.Info("🔮 EventTrigger: Starting Tenderly simulation mode",
 			"queriesCount", len(queriesArray))
 	}
@@ -1425,50 +1540,8 @@ func (n *Engine) runEventTriggerWithTenderlySimulation(ctx context.Context, quer
 	// Simulate the event using Tenderly (gets real current data)
 	simulatedLog, err := tenderlyClient.SimulateEventTrigger(ctx, query, chainID)
 	if err != nil {
-		n.logger.Warn("🚫 Tenderly simulation failed, creating sample Transfer event for development", "error", err)
-
-		// Instead of returning error, create a sample Transfer event log and process it through our enrichment pipeline
-		// This ensures that the enrichment logic is tested even when Tenderly is not available
-
-		// Create a sample Transfer event log with proper structure
-		sampleAddress := common.HexToAddress("0x779877A7B0D9E8603169DdbD7836e478b4624789") // Sample token contract
-		fromAddress := common.HexToAddress("0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788")
-		toAddress := common.HexToAddress("0x1234567890123456789012345678901234567890")
-
-		// Create sample topics for Transfer event
-		transferSignature := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
-		fromTopic := common.BytesToHash(fromAddress.Bytes())
-		toTopic := common.BytesToHash(toAddress.Bytes())
-
-		// Use dynamic sample value based on decimals (default to 18 decimals like ETH)
-		sampleValue := GetSampleTransferAmount(uint32(18))
-		sampleData := common.LeftPadBytes(sampleValue.Bytes(), 32)
-
-		// Create sample log with realistic block number for the chain
-		sampleBlockNumber := getRealisticBlockNumberForChain(chainID)
-
-		sampleLog := &types.Log{
-			Address:     sampleAddress,
-			Topics:      []common.Hash{transferSignature, fromTopic, toTopic},
-			Data:        sampleData,
-			BlockNumber: sampleBlockNumber,
-			TxHash:      common.HexToHash(fmt.Sprintf("0x%064x", sampleBlockNumber-1750000000+0x184cd1e84b904808)),
-			TxIndex:     0,
-			BlockHash:   common.HexToHash(fmt.Sprintf("0x%064x", sampleBlockNumber+0x184cd1e84b904bf1)),
-			Index:       0,
-			Removed:     false,
-		}
-
-		if n.logger != nil {
-			n.logger.Info("🎭 Created sample Transfer event for enrichment testing",
-				"contract", sampleLog.Address.Hex(),
-				"from", fromAddress.Hex(),
-				"to", toAddress.Hex(),
-				"blockNumber", sampleLog.BlockNumber)
-		}
-
-		// Now process this sample log through our normal enrichment pipeline
-		simulatedLog = sampleLog
+		n.logger.Error("🚫 Tenderly simulation failed", "error", err)
+		return nil, fmt.Errorf("tenderly event simulation failed: %w", err)
 	}
 
 	// Check if conditions exist - if so, we need to evaluate them after enrichment
@@ -3671,26 +3744,20 @@ func (n *Engine) convertMapToEventQuery(queryMap map[string]interface{}) (*avspr
 		}
 	}
 
-	// Extract topics
+	// Extract topics - flat array format
+	// Client sends: topics: ['sig', 'from', 'to']
 	if topicsInterface, exists := queryMap["topics"]; exists {
 		if topicsArray, ok := topicsInterface.([]interface{}); ok {
-			for _, topicGroupInterface := range topicsArray {
-				if topicGroupMap, ok := topicGroupInterface.(map[string]interface{}); ok {
-					if valuesInterface, exists := topicGroupMap["values"]; exists {
-						if valuesArray, ok := valuesInterface.([]interface{}); ok {
-							topicGroup := &avsproto.EventTrigger_Topics{}
-							values := make([]string, 0, len(valuesArray))
-							for _, valueInterface := range valuesArray {
-								if valueStr, ok := valueInterface.(string); ok {
-									values = append(values, valueStr)
-								}
-							}
-							topicGroup.Values = values
-							query.Topics = append(query.Topics, topicGroup)
-						}
-					}
+			topics := make([]string, 0, len(topicsArray))
+			for _, valueInterface := range topicsArray {
+				if valueStr, ok := valueInterface.(string); ok {
+					topics = append(topics, valueStr)
+				} else if valueInterface == nil {
+					// Handle null values as empty strings
+					topics = append(topics, "")
 				}
 			}
+			query.Topics = topics
 		}
 	}
 

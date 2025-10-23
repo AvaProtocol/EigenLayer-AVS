@@ -361,31 +361,27 @@ func determineDirectionFromQueries(query *avsproto.EventTrigger_Query, fromAddre
 	}
 
 	// Extract the user wallet address from the query topics
-	// Look for non-empty addresses in topic[1] (from) or topic[2] (to) positions
+	// Topics is now a flat array: topics[0]=signature, topics[1]=from, topics[2]=to
 	var userWallet string
 
-	for _, topic := range query.Topics {
-		if len(topic.Values) >= 3 {
-			// Topic[1] = from address, Topic[2] = to address in Transfer events
-			fromAddr := topic.Values[1]
-			toAddr := topic.Values[2]
+	if len(query.Topics) >= 3 {
+		// Topic[1] = from address, Topic[2] = to address in Transfer events
+		fromAddr := query.Topics[1]
+		toAddr := query.Topics[2]
 
-			// Check if fromAddr is specified (not empty/null) - this means user is sender
-			if fromAddr != "" && fromAddr != "0x" && !strings.Contains(strings.ToLower(fromAddr), "null") {
-				cleanFromAddr := extractAddressFromPaddedHex(fromAddr)
-				if cleanFromAddr != "" {
-					userWallet = cleanFromAddr
-					break
-				}
+		// Check if fromAddr is specified (not empty/null) - this means user is sender
+		if fromAddr != "" && fromAddr != "0x" && !strings.Contains(strings.ToLower(fromAddr), "null") {
+			cleanFromAddr := extractAddressFromPaddedHex(fromAddr)
+			if cleanFromAddr != "" {
+				userWallet = cleanFromAddr
 			}
+		}
 
-			// Check if toAddr is specified (not empty/null) - this means user is receiver
-			if toAddr != "" && toAddr != "0x" && !strings.Contains(strings.ToLower(toAddr), "null") {
-				cleanToAddr := extractAddressFromPaddedHex(toAddr)
-				if cleanToAddr != "" {
-					userWallet = cleanToAddr
-					break
-				}
+		// Check if toAddr is specified (not empty/null) - this means user is receiver
+		if userWallet == "" && toAddr != "" && toAddr != "0x" && !strings.Contains(strings.ToLower(toAddr), "null") {
+			cleanToAddr := extractAddressFromPaddedHex(toAddr)
+			if cleanToAddr != "" {
+				userWallet = cleanToAddr
 			}
 		}
 	}
@@ -405,14 +401,29 @@ func determineDirectionFromQueries(query *avsproto.EventTrigger_Query, fromAddre
 }
 
 // extractAddressFromPaddedHex converts padded hex (0x000...address) to clean address format
-func extractAddressFromPaddedHex(paddedHex string) string {
-	if len(paddedHex) != 66 { // 0x + 64 hex chars
+// Also handles regular unpadded Ethereum addresses
+func extractAddressFromPaddedHex(hex string) string {
+	if hex == "" {
 		return ""
 	}
 
-	// Extract last 40 hex characters (20 bytes = address)
-	addressPart := paddedHex[26:] // Skip 0x + 24 padding chars
-	return "0x" + addressPart
+	// Handle regular Ethereum address (42 chars: 0x + 40 hex)
+	if len(hex) == 42 {
+		// Validate it's a valid address format
+		if common.IsHexAddress(hex) {
+			return common.HexToAddress(hex).Hex() // Normalize to checksummed format
+		}
+		return ""
+	}
+
+	// Handle padded 32-byte hex (66 chars: 0x + 64 hex)
+	if len(hex) == 66 {
+		// Extract last 40 hex characters (20 bytes = address)
+		addressPart := hex[26:] // Skip 0x + 24 padding chars
+		return "0x" + addressPart
+	}
+
+	return ""
 }
 
 // findCommonAddress finds addresses that appear in both fromAddresses and toAddresses lists

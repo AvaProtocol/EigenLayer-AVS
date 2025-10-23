@@ -899,28 +899,24 @@ func (t *EventTrigger) logMatchesEventQuery(log types.Log, query *avsproto.Event
 		}
 	}
 
-	// Check topics
+	// Check topics - now a flat array where each string is a single topic value
 	topics := query.GetTopics()
 	if len(topics) > 0 && len(log.Topics) > 0 {
-		for i, topicFilter := range topics {
+		for i, topicStr := range topics {
 			if i >= len(log.Topics) {
 				break
 			}
 
-			topicValues := topicFilter.GetValues()
-			if len(topicValues) > 0 {
-				found := false
-				for _, expectedTopicStr := range topicValues {
-					// Apply same address padding as in filter query building
-					paddedTopicStr := t.padAddressIfNeeded(expectedTopicStr)
-					if expectedTopic := common.HexToHash(paddedTopicStr); log.Topics[i] == expectedTopic {
-						found = true
-						break
-					}
-				}
-				if !found {
-					return false
-				}
+			// Empty string or "null" means wildcard - skip validation for this topic
+			if topicStr == "" || topicStr == "null" {
+				continue
+			}
+
+			// Apply same address padding as in filter query building
+			paddedTopicStr := t.padAddressIfNeeded(topicStr)
+			expectedTopic := common.HexToHash(paddedTopicStr)
+			if log.Topics[i] != expectedTopic {
+				return false
 			}
 		}
 	}
@@ -1516,52 +1512,19 @@ func (t *EventTrigger) convertToFilterQuery(query *avsproto.EventTrigger_Query) 
 
 	var topics [][]common.Hash
 
-	// Handle the case where client sends all topic values in a single topic array
-	// This is the format: topics: [{ values: [Transfer signature, FROM address, null] }]
-	if len(query.GetTopics()) == 1 && len(query.GetTopics()[0].GetValues()) > 1 {
-		// Client sent all topic values in a single array, need to split them by position
-		allValues := query.GetTopics()[0].GetValues()
-
-		// Process each topic position
-		for i := 0; i < len(allValues); i++ {
-			if i < len(allValues) {
-				topicStr := allValues[i]
-				if topicStr == "" {
-					// Empty string represents null/wildcard for this topic position
-					topics = append(topics, nil)
-				} else {
-					// Check if this looks like an Ethereum address and pad it properly
-					paddedTopicStr := t.padAddressIfNeeded(topicStr)
-					if hash := common.HexToHash(paddedTopicStr); hash != (common.Hash{}) {
-						topics = append(topics, []common.Hash{hash})
-					} else {
-						topics = append(topics, nil)
-					}
-				}
-			}
-		}
-	} else {
-		// Original format: each topicFilter represents a separate topic position
-		for _, topicFilter := range query.GetTopics() {
-			allWildcard := true
-			var topicHashes []common.Hash
-			for _, topicStr := range topicFilter.GetValues() {
-				if topicStr == "" {
-					// Empty string represents null/wildcard
-					continue
-				} else {
-					// Check if this looks like an Ethereum address and pad it properly
-					paddedTopicStr := t.padAddressIfNeeded(topicStr)
-					if hash := common.HexToHash(paddedTopicStr); hash != (common.Hash{}) {
-						topicHashes = append(topicHashes, hash)
-						allWildcard = false
-					}
-				}
-			}
-			if allWildcard {
-				topics = append(topics, nil) // nil means wildcard for this topic position
+	// Topics is now a flat array: topics[0]=signature, topics[1]=from, topics[2]=to, etc.
+	// Convert each topic string to ethereum.FilterQuery format
+	for _, topicStr := range query.GetTopics() {
+		if topicStr == "" || topicStr == "null" {
+			// Empty string or "null" represents wildcard for this topic position
+			topics = append(topics, nil)
+		} else {
+			// Check if this looks like an Ethereum address and pad it properly
+			paddedTopicStr := t.padAddressIfNeeded(topicStr)
+			if hash := common.HexToHash(paddedTopicStr); hash != (common.Hash{}) {
+				topics = append(topics, []common.Hash{hash})
 			} else {
-				topics = append(topics, topicHashes)
+				topics = append(topics, nil)
 			}
 		}
 	}
