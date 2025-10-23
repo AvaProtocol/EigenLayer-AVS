@@ -94,9 +94,10 @@ type TaskExecutor struct {
 }
 
 type QueueExecutionData struct {
-	TriggerType   avsproto.TriggerType
-	TriggerOutput interface{} // Will hold the specific trigger output (BlockTrigger.Output, etc.)
-	ExecutionID   string
+	TriggerType    avsproto.TriggerType
+	TriggerOutput  interface{} // Will hold the specific trigger output (BlockTrigger.Output, etc.)
+	ExecutionID    string
+	InputVariables map[string]interface{} // Input variables for template resolution (e.g., settings: {runner, chain_id})
 }
 
 func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
@@ -217,6 +218,21 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 
 	// Create VM with trigger reason data
 	vm, err := NewVMWithData(task, triggerReason, x.smartWalletConfig, secrets)
+	if err != nil {
+		return nil, err
+	}
+
+	// Merge input variables from trigger execution (overrides task-level input variables)
+	if queueData != nil && len(queueData.InputVariables) > 0 {
+		if x.logger != nil {
+			x.logger.Debug("Adding input variables from trigger execution",
+				"task_id", task.Id,
+				"input_variables_count", len(queueData.InputVariables))
+		}
+		for key, value := range queueData.InputVariables {
+			vm.AddVar(key, value)
+		}
+	}
 
 	if err != nil {
 		return nil, err

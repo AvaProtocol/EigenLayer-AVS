@@ -952,6 +952,10 @@ message TriggerTaskReq {
   // setting to false, the task will be execute in our normal queueu system, and the request won't block.
   // default value is false, for interact testing, set this to true
   bool is_blocking = 8;
+  
+  // Input variables for template resolution in trigger configuration (e.g., settings: {runner, chain_id})
+  // These variables are merged with the workflow's input_variables during execution
+  map<string, google.protobuf.Value> trigger_input = 9;
 }
 
 message TriggerTaskResp {

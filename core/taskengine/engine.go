@@ -2050,10 +2050,20 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 		}
 	}
 
+	// Extract input variables from trigger_input protobuf map
+	var inputVariables map[string]interface{}
+	if len(payload.TriggerInput) > 0 {
+		inputVariables = make(map[string]interface{})
+		for key, value := range payload.TriggerInput {
+			inputVariables[key] = value.AsInterface()
+		}
+	}
+
 	queueTaskData := QueueExecutionData{
-		TriggerType:   triggerData.Type,
-		TriggerOutput: triggerData.Output,
-		ExecutionID:   ulid.Make().String(),
+		TriggerType:    triggerData.Type,
+		TriggerOutput:  triggerData.Output,
+		ExecutionID:    ulid.Make().String(),
+		InputVariables: inputVariables,
 	}
 
 	// Store execution status as pending first
