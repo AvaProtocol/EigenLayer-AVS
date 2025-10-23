@@ -2185,7 +2185,7 @@ func (n *Engine) parseEventWithParsedABI(eventLog *types.Log, contractABI *abi.A
 		// This provides all the standardized fields without deprecated or duplicate ones
 		// Note: logIndex and transactionIndex are excluded as they're available in metadata
 		transferFields := map[string]interface{}{
-			"address":         transferResponse.Address,
+			"contractAddress": transferResponse.ContractAddress,
 			"tokenName":       transferResponse.TokenName,
 			"tokenSymbol":     transferResponse.TokenSymbol,
 			"tokenDecimals":   transferResponse.TokenDecimals,

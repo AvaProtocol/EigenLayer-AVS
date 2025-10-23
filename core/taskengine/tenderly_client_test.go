@@ -585,7 +585,7 @@ func printEngineResult(result map[string]interface{}) {
 
 	if evmLog, ok := result["evm_log"].(map[string]interface{}); ok {
 		fmt.Printf("\n🔍 EVM LOG ANALYSIS:\n")
-		fmt.Printf("Address: %s\n", evmLog["tokenContract"])
+		fmt.Printf("Address: %s\n", evmLog["contractAddress"])
 		fmt.Printf("Block: %v\n", evmLog["blockNumber"])
 		fmt.Printf("TX Hash: %s\n", evmLog["transactionHash"])
 
