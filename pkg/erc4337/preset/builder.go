@@ -73,6 +73,10 @@ var (
 	// Formula: reimbursement = (total UserOp gas × maxFeePerGas) × (100% + buffer%)
 	// Default: 20% buffer to account for gas price fluctuations and execution variations
 	GasReimbursementBufferPercent = 20
+
+	// globalNonceManager tracks pending nonces across all UserOp submissions
+	// to prevent conflicts with transactions pending in the bundler's mempool
+	globalNonceManager = bundler.NewNonceManager()
 )
 
 // VerifyingPaymasterRequest contains the parameters needed for paymaster functionality. This use the reference from https://github.com/eth-optimism/paymaster-reference
@@ -752,7 +756,14 @@ func sendUserOpCore(
 	// NOTE: A nonce of 0 is valid for new accounts, so we only check for nil (not 0)
 	var freshNonce *big.Int
 	if userOp.Nonce == nil {
-		freshNonce = aa.MustNonce(client, userOp.Sender, accountSalt)
+		// Use NonceManager for non-paymaster UserOps
+		var err error
+		freshNonce, err = globalNonceManager.GetNextNonce(client, userOp.Sender, func() (*big.Int, error) {
+			return aa.GetNonce(client, userOp.Sender, accountSalt)
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to get nonce: %w", err)
+		}
 		userOp.Nonce = freshNonce
 	}
 
@@ -816,19 +827,30 @@ func sendUserOpCore(
 				log.Printf("Manual bundle trigger failed (non-fatal): %v", triggerErr)
 			}
 
-			// Increment nonce for next potential UserOp (prevents nonce collision for sequential txs)
+			// Update NonceManager to track this pending UserOp
 			// This allows the next UserOp to use nonce+1 even if this UserOp hasn't been mined yet
-			userOp.Nonce = new(big.Int).Add(userOp.Nonce, big.NewInt(1))
+			globalNonceManager.IncrementNonce(userOp.Sender, userOp.Nonce)
 
 			break
 		}
 
 		// Bundler send failure logging
 		log.Printf("UserOp send failed (attempt %d/%d): %v", retry+1, maxRetries, err)
-		// For nonce errors, refetch nonce and retry
-		if err != nil && strings.Contains(err.Error(), "AA25 invalid account nonce") {
+
+		// Detect nonce conflicts from various error messages:
+		// - "AA25 invalid account nonce" = EntryPoint validation error
+		// - "invalid UserOperation struct/fields" = Voltaire's mempool replacement error (nonce already pending)
+		isNonceConflict := err != nil && (strings.Contains(err.Error(), "AA25 invalid account nonce") ||
+			strings.Contains(err.Error(), "invalid UserOperation struct/fields"))
+
+		if isNonceConflict {
 			if retry < maxRetries-1 {
-				log.Printf("Nonce conflict detected, polling for fresh nonce")
+				log.Printf("⚠️ NONCE CONFLICT DETECTED: %v", err)
+				log.Printf("   This usually means a UserOp with nonce %s is already pending in bundler", userOp.Nonce.String())
+
+				// Reset NonceManager cache to force fresh on-chain query
+				globalNonceManager.ResetNonce(userOp.Sender)
+				log.Printf("   Reset nonce cache for sender %s", userOp.Sender.Hex())
 
 				// Poll for fresh nonce with timeout (similar to transaction waiting pattern)
 				startTime := time.Now()
@@ -837,26 +859,34 @@ func sendUserOpCore(
 
 				for time.Since(startTime) < timeout {
 					time.Sleep(pollInterval)
-					freshNonce = aa.MustNonce(client, userOp.Sender, accountSalt)
+
+					// Get fresh nonce through NonceManager (will fetch from chain since we just reset)
+					freshNonce, nonceErr := globalNonceManager.GetNextNonce(client, userOp.Sender, func() (*big.Int, error) {
+						return aa.GetNonce(client, userOp.Sender, accountSalt)
+					})
+					if nonceErr != nil {
+						log.Printf("Failed to fetch fresh nonce: %v", nonceErr)
+						continue
+					}
 
 					// Check if nonce has actually changed from what we had
 					if userOp.Nonce == nil || freshNonce.Cmp(userOp.Nonce) > 0 {
 						userOp.Nonce = freshNonce
-						log.Printf("Updated nonce to %s (after %v)", freshNonce.String(), time.Since(startTime))
+						log.Printf("✅ Updated nonce to %s (after %v)", freshNonce.String(), time.Since(startTime))
 						break
 					}
 				}
 
 				if time.Since(startTime) >= timeout {
-					log.Printf("Nonce polling timeout after %v, using current nonce: %s", timeout, userOp.Nonce.String())
+					log.Printf("⏰ Nonce polling timeout after %v, using current nonce: %s", timeout, userOp.Nonce.String())
 				}
 
 				continue
 			}
 		}
 
-		// For other errors, don't retry unless it's a transient network error
-		if err != nil && !strings.Contains(err.Error(), "AA25 invalid account nonce") &&
+		// For other errors, don't retry unless it's a transient network error or nonce conflict
+		if err != nil && !isNonceConflict &&
 			!strings.Contains(err.Error(), "timeout") && !strings.Contains(err.Error(), "connection") {
 			log.Printf("Non-retryable error, stopping: %v", err)
 			break
@@ -1057,9 +1087,15 @@ func BuildUserOpWithPaymaster(
 		freshNonce = nonceOverride
 		log.Printf("🔍 BuildUserOpWithPaymaster: Using provided nonce %s (sequential UserOps)", freshNonce.String())
 	} else {
-		// Fetch from chain (first UserOp or standalone)
-		freshNonce = aa.MustNonce(client, userOp.Sender, accountSalt)
-		log.Printf("🔍 BuildUserOpWithPaymaster: Fetched nonce %s from chain", freshNonce.String())
+		// Use NonceManager to get next nonce (considers both on-chain state and pending UserOps)
+		var err error
+		freshNonce, err = globalNonceManager.GetNextNonce(client, userOp.Sender, func() (*big.Int, error) {
+			return aa.GetNonce(client, userOp.Sender, accountSalt)
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get nonce: %w", err)
+		}
+		log.Printf("🔍 BuildUserOpWithPaymaster: Got nonce %s from NonceManager", freshNonce.String())
 	}
 	userOp.Nonce = freshNonce
 
