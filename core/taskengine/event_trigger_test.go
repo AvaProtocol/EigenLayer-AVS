@@ -252,12 +252,16 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 	sepoliaUSDT := "0x7169D38820dfd117C3FA1f22a697dBA58d90BA06" // Example Sepolia USDT
 
 	testCases := []struct {
-		name    string
-		queries []interface{}
-		desc    string
+		name        string
+		queries     []interface{}
+		desc        string
+		expectError bool
+		errorMsg    string
 	}{
 		{
-			name: "Transfer FROM target address (any token)",
+			name:        "Transfer FROM target address (any token)",
+			expectError: true,
+			errorMsg:    "queries[].addresses must be a non-empty array",
 			queries: []interface{}{
 				map[string]interface{}{
 					"addresses": []interface{}{},
@@ -276,7 +280,9 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 			desc: "Find any ERC20 transfer FROM the target address",
 		},
 		{
-			name: "Transfer TO target address (any token)",
+			name:        "Transfer TO target address (any token)",
+			expectError: true,
+			errorMsg:    "queries[].addresses must be a non-empty array",
 			queries: []interface{}{
 				map[string]interface{}{
 					"addresses": []interface{}{},
@@ -371,7 +377,9 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 			desc: "Find USDC or USDT transfers TO the target address",
 		},
 		{
-			name: "Any transfers FROM OR TO target address (two queries)",
+			name:        "Any transfers FROM OR TO target address (two queries)",
+			expectError: true,
+			errorMsg:    "queries[].addresses must be a non-empty array",
 			queries: []interface{}{
 				map[string]interface{}{
 					"addresses": []interface{}{},
@@ -411,14 +419,20 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 
 			// Test with runTriggerImmediately
 			triggerConfig := map[string]interface{}{
-				"queries": tc.queries,
+				"queries":        tc.queries,
+				"simulationMode": false, // Use historical search for tests with broad (empty) addresses
 			}
 			inputVariables := map[string]interface{}{}
 
 			result, err := engine.runTriggerImmediately("eventTrigger", triggerConfig, inputVariables)
-			if err != nil {
-				t.Errorf("runTriggerImmediately failed: %v", err)
+			if tc.expectError {
+				if err == nil || !strings.Contains(err.Error(), tc.errorMsg) {
+					t.Fatalf("expected error containing '%s', got: %v", tc.errorMsg, err)
+				}
 				return
+			}
+			if err != nil {
+				t.Fatalf("runTriggerImmediately failed: %v", err)
 			}
 
 			// Log the parsing results
@@ -594,7 +608,9 @@ func TestEventTriggerQueriesBasedConfiguration(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "Query with empty addresses",
+			name:        "Query with empty addresses",
+			expectError: true,
+			errorMsg:    "queries[].addresses must be a non-empty array",
 			queries: []interface{}{
 				map[string]interface{}{
 					"addresses": []interface{}{},
@@ -607,7 +623,6 @@ func TestEventTriggerQueriesBasedConfiguration(t *testing.T) {
 					},
 				},
 			},
-			expectError: false,
 		},
 		{
 			name: "Query with empty topics",
@@ -633,12 +648,8 @@ func TestEventTriggerQueriesBasedConfiguration(t *testing.T) {
 			result, err := engine.runTriggerImmediately("eventTrigger", triggerConfig, inputVariables)
 
 			if tc.expectError {
-				if err == nil {
-					t.Errorf("Expected error but got none")
-					return
-				}
-				if !strings.Contains(err.Error(), tc.errorMsg) {
-					t.Errorf("Expected error containing '%s', got: %v", tc.errorMsg, err)
+				if err == nil || !strings.Contains(err.Error(), tc.errorMsg) {
+					t.Fatalf("Expected error containing '%s', got: %v", tc.errorMsg, err)
 				}
 				t.Logf("✅ Expected error occurred: %v", err)
 			} else {

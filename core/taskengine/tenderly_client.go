@@ -116,8 +116,8 @@ func (tc *TenderlyClient) SimulateEventTrigger(ctx context.Context, query *avspr
 		return tc.simulateTransferEvent(ctx, contractAddress, query, chainID)
 	}
 
-	// For other event types, we might add more simulation strategies
-	return nil, fmt.Errorf("simulation not yet supported for this event type")
+	// Generic simulation for other event types: build a plausible log from input
+	return tc.simulateGenericEvent(ctx, contractAddress, query, chainID)
 }
 
 // isChainlinkPriceFeed checks if the query is monitoring Chainlink AnswerUpdated events
@@ -354,6 +354,53 @@ func (tc *TenderlyClient) simulateTransferEvent(ctx context.Context, contractAdd
 		"tx", simulatedLog.TxHash.Hex())
 
 	return simulatedLog, nil
+}
+
+// simulateGenericEvent creates a generic simulated log for arbitrary event signatures/topics
+func (tc *TenderlyClient) simulateGenericEvent(ctx context.Context, contractAddress string, query *avsproto.EventTrigger_Query, chainID int64) (*types.Log, error) {
+	tc.logger.Info("🔮 Simulating generic event via Tenderly fallback",
+		"contract", contractAddress,
+		"chain_id", chainID,
+		"topics_count", len(query.GetTopics()))
+
+	// Build topics: zero-hash for empty entries
+	var topics []common.Hash
+	for _, t := range query.GetTopics() {
+		if t == "" || strings.EqualFold(t, "0x") || strings.Contains(strings.ToLower(t), "null") {
+			topics = append(topics, common.Hash{})
+		} else {
+			topics = append(topics, common.HexToHash(t))
+		}
+	}
+	// Ensure at least one topic slot (event signature) exists
+	if len(topics) == 0 {
+		topics = []common.Hash{common.Hash{}}
+	}
+
+	// Use zeroed 32-byte data by default
+	data := make([]byte, 32)
+
+	// Realistic identifiers
+	txHash := common.HexToHash(fmt.Sprintf("0x%064x", time.Now().UnixNano()))
+	blockNumber := tc.getRealisticBlockNumber(chainID)
+
+	log := &types.Log{
+		Address:     common.HexToAddress(contractAddress),
+		Topics:      topics,
+		Data:        data,
+		BlockNumber: blockNumber,
+		TxHash:      txHash,
+		Index:       0,
+		TxIndex:     0,
+		BlockHash:   common.HexToHash(fmt.Sprintf("0x%064x", time.Now().UnixNano()+1)),
+		Removed:     false,
+	}
+
+	tc.logger.Info("✅ Generic event simulation completed",
+		"block", blockNumber,
+		"tx", txHash.Hex())
+
+	return log, nil
 }
 
 // createMockTransferLog creates a mock ERC20 Transfer event log with realistic block number
