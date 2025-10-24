@@ -19,30 +19,10 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/taskengine/macros"
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
+	"github.com/AvaProtocol/EigenLayer-AVS/pkg/logger"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
-	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
 )
-
-// noOpLogger implements the sdklogging.Logger interface as a no-op to prevent nil pointer dereferences
-type noOpLogger struct{}
-
-func (l *noOpLogger) Info(msg string, keysAndValues ...interface{})        {}
-func (l *noOpLogger) Infof(format string, args ...interface{})             {}
-func (l *noOpLogger) Debug(msg string, keysAndValues ...interface{})       {}
-func (l *noOpLogger) Debugf(format string, args ...interface{})            {}
-func (l *noOpLogger) Error(msg string, keysAndValues ...interface{})       {}
-func (l *noOpLogger) Errorf(format string, args ...interface{})            {}
-func (l *noOpLogger) Warn(msg string, keysAndValues ...interface{})        {}
-func (l *noOpLogger) Warnf(format string, args ...interface{})             {}
-func (l *noOpLogger) Fatal(msg string, keysAndValues ...interface{})       {}
-func (l *noOpLogger) Fatalf(format string, args ...interface{})            {}
-func (l *noOpLogger) With(keysAndValues ...interface{}) sdklogging.Logger  { return l }
-func (l *noOpLogger) WithComponent(componentName string) sdklogging.Logger { return l }
-func (l *noOpLogger) WithName(name string) sdklogging.Logger               { return l }
-func (l *noOpLogger) WithServiceName(serviceName string) sdklogging.Logger { return l }
-func (l *noOpLogger) WithHostName(hostName string) sdklogging.Logger       { return l }
-func (l *noOpLogger) Sync() error                                          { return nil }
 
 type VMState string
 
@@ -254,7 +234,7 @@ type VM struct {
 	entrypoint        string
 	instructionCount  int64
 	smartWalletConfig *config.SmartWalletConfig
-	logger            sdklogging.Logger
+	logger            logger.Logger
 	db                storage.Storage
 	// IsSimulation indicates whether this VM is executing in a simulation context
 	// (SimulateTask or RunNodeImmediately). In simulation, write operations must not
@@ -301,8 +281,8 @@ func (v *VM) Reset() {
 	// Simplified: just reset what's needed for re-compilation and re-run.
 }
 
-func (v *VM) WithLogger(logger sdklogging.Logger) *VM {
-	v.logger = logger
+func (v *VM) WithLogger(lgr logger.Logger) *VM {
+	v.logger = lgr
 	return v
 }
 
@@ -379,11 +359,8 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 	v.smartWalletConfig = smartWalletConfig
 	v.parsedTriggerData = &triggerDataType{} // Initialize parsedTriggerData
 
-	// Initialize logger if it's nil to prevent panic
-	if v.logger == nil {
-		// Create a no-op logger to prevent nil pointer dereferences
-		v.logger = &noOpLogger{}
-	}
+	// Initialize logger if it's nil to prevent panic (using shared utility)
+	v.logger = logger.EnsureLogger(v.logger)
 
 	// Initialize apContext with configVars containing secrets and macro variables
 	configVars := make(map[string]string)
@@ -541,13 +518,12 @@ func NewVMWithDataAndTransferLog(task *model.Task, triggerData *TriggerData, sma
 						queryMap["addresses"] = query.Addresses
 					}
 
-					// Convert topics to match SDK structure
+					// Convert topics to match SDK flat array structure
 					if len(query.Topics) > 0 {
+						// Convert []string to []interface{} for JSON compatibility
 						topics := make([]interface{}, len(query.Topics))
 						for j, topic := range query.Topics {
-							topics[j] = map[string]interface{}{
-								"values": topic.Values,
-							}
+							topics[j] = topic
 						}
 						queryMap["topics"] = topics
 					}
@@ -2495,6 +2471,13 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		}
 
+		// Per-node execution mode: expect camelCase key from clients
+		if v, ok := config["isSimulated"]; ok {
+			if b, ok2 := v.(bool); ok2 {
+				contractConfig.IsSimulated = &b
+			}
+		}
+
 		node.TaskType = &avsproto.TaskNode_ContractWrite{
 			ContractWrite: &avsproto.ContractWriteNode{
 				Config: contractConfig,
@@ -2823,6 +2806,14 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 						}
 						if methodName, ok := methodCallMap["methodName"].(string); ok {
 							methodCall.MethodName = methodName
+						}
+						// Map methodParams (array of strings)
+						if params, ok := methodCallMap["methodParams"].([]interface{}); ok {
+							paramStrs := make([]string, 0, len(params))
+							for _, p := range params {
+								paramStrs = append(paramStrs, fmt.Sprintf("%v", p))
+							}
+							methodCall.MethodParams = paramStrs
 						}
 						cwConfig.MethodCalls = append(cwConfig.MethodCalls, methodCall)
 					}
@@ -3909,6 +3900,24 @@ func (eq *ExecutionQueue) executeTask(task *ExecutionTask) *ExecutionResult {
 	var resultData interface{}
 	if step != nil && step.Success {
 		resultData = eq.extractResultData(step)
+		// Debug: log what we extracted for this iteration
+		if eq.vm != nil && eq.vm.logger != nil {
+			nodeType := "unknown"
+			switch {
+			case step.GetContractWrite() != nil:
+				nodeType = "contractWrite"
+			case step.GetContractRead() != nil:
+				nodeType = "contractRead"
+			case step.GetCustomCode() != nil:
+				nodeType = "customCode"
+			case step.GetRestApi() != nil:
+				nodeType = "restApi"
+			}
+			eq.vm.logger.Info("Loop iteration result extracted",
+				"step_id", task.StepID,
+				"node_type", nodeType,
+				"has_data", resultData != nil)
+		}
 	}
 
 	return &ExecutionResult{
@@ -3940,18 +3949,19 @@ func (eq *ExecutionQueue) extractResultData(step *avsproto.Execution_Step) inter
 		}
 		return rawData
 	}
-	if contractWriteOutput := step.GetContractWrite(); contractWriteOutput != nil && contractWriteOutput.Data != nil {
-		// For contract write, return individual objects for single method calls to avoid double nesting in loops (same as ContractRead)
-		rawData := contractWriteOutput.Data.AsInterface()
-		if dataArray, ok := rawData.([]interface{}); ok {
-			if len(dataArray) == 1 {
-				// Single method call - return individual object to avoid [[{...}], [{...}]] in loops
-				return dataArray[0]
+	if contractWriteOutput := step.GetContractWrite(); contractWriteOutput != nil {
+		// Return the child's data as-is; allow nils when no data
+		if contractWriteOutput.Data != nil {
+			rawData := contractWriteOutput.Data.AsInterface()
+			if dataArray, ok := rawData.([]interface{}); ok {
+				if len(dataArray) == 1 {
+					return dataArray[0]
+				}
+				return dataArray
 			}
-			// Multiple method calls - return the array
-			return dataArray
+			return rawData
 		}
-		return rawData
+		return nil
 	}
 	if ethTransferOutput := step.GetEthTransfer(); ethTransferOutput != nil && ethTransferOutput.Data != nil {
 		return ethTransferOutput.Data.AsInterface()
@@ -3989,12 +3999,47 @@ func (v *VM) executeNodeDirectWithVars(node *avsproto.TaskNode, stepID string, t
 			"isolatedVars", isolatedVars)
 	}
 
-	// Execute the node with isolated context
+	// For CustomCode, execute directly with isolated vars without modifying shared VM state
+	// This prevents race conditions in parallel execution
+	if node.GetCustomCode() != nil {
+		return v.runCustomCodeWithIsolatedVars(stepID, node.GetCustomCode(), isolatedVars)
+	}
+
+	// For other node types, execute with isolated context (may temporarily modify shared state)
 	return v.executeNodeWithIsolatedVars(node, stepID, isolatedVars)
 }
 
-// executeNodeWithIsolatedVars executes a node with completely isolated variables
+// executes a node with completely isolated variables
 func (v *VM) executeNodeWithIsolatedVars(node *avsproto.TaskNode, stepID string, isolatedVars map[string]any) (*avsproto.Execution_Step, error) {
+	// Temporarily inject isolated variables into VM vars for this node's execution
+	// so processors that read from v.vars (e.g., contractWrite template resolution) can see them.
+	// Restore original values after execution to avoid leaking iteration-scoped data.
+	originalValues := make(map[string]struct {
+		val     any
+		present bool
+	})
+	v.mu.Lock()
+	for key, val := range isolatedVars {
+		oldVal, ok := v.vars[key]
+		originalValues[key] = struct {
+			val     any
+			present bool
+		}{val: oldVal, present: ok}
+		v.vars[key] = val
+	}
+	v.mu.Unlock()
+	defer func() {
+		v.mu.Lock()
+		for key, prev := range originalValues {
+			if prev.present {
+				v.vars[key] = prev.val
+			} else {
+				delete(v.vars, key)
+			}
+		}
+		v.mu.Unlock()
+	}()
+
 	// For loop iterations, don't store node configuration as input variables
 	if !strings.Contains(stepID, "_iter_") {
 		// Extract and set input data for this node (making it available as node_name.input)
@@ -4046,12 +4091,14 @@ func deepCopyValue(value interface{}) interface{} {
 
 	switch v := value.(type) {
 	case map[string]interface{}:
+		// Note: map[string]any is the same type (any is alias for interface{})
 		copy := make(map[string]interface{})
 		for key, val := range v {
 			copy[key] = deepCopyValue(val)
 		}
 		return copy
 	case []interface{}:
+		// Note: []any is the same type (any is alias for interface{})
 		copy := make([]interface{}, len(v))
 		for i, val := range v {
 			copy[i] = deepCopyValue(val)
@@ -4260,45 +4307,52 @@ func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsp
 		// Parallel execution using the queue
 		resultChannels := make([]chan *ExecutionResult, len(inputArray))
 
-		for i, item := range inputArray {
-			iterInputs := make(map[string]interface{})
-			iterInputs[iterVal] = item
-			if iterKey != "" {
-				iterInputs[iterKey] = i
-			}
+		for i := range inputArray {
+			// Use a closure to properly capture loop variables for each iteration
+			// This is the idiomatic Go pattern to avoid goroutine closure bugs
+			func(iterationIndex int, iterationItem interface{}) {
+				// Create a deep copy of the iteration item to ensure complete isolation
+				itemCopy := deepCopyValue(iterationItem)
 
-			iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, i)
-			nestedNode := v.createNestedNodeFromLoop(node, iterationStepID, iterInputs)
-
-			// Debug: Log what variables are being set for this iteration
-			if v.logger != nil {
-				v.logger.Debug("Creating parallel task",
-					"iteration", i,
-					"item", item,
-					"iterVal", iterVal,
-					"iterKey", iterKey,
-					"iterInputs", iterInputs)
-			}
-
-			resultChannel := make(chan *ExecutionResult, 1)
-			resultChannels[i] = resultChannel
-
-			task := &ExecutionTask{
-				Node:           nestedNode,
-				InputVariables: iterInputs,
-				StepID:         iterationStepID,
-				Depth:          1, // Loop iterations are depth 1
-				ResultChannel:  resultChannel,
-				IterationIndex: i,
-			}
-
-			if err := eq.Submit(task); err != nil {
-				log.WriteString(fmt.Sprintf("\nError submitting iteration %d: %s", i, err.Error()))
-				success = false
-				if firstError == nil {
-					firstError = err
+				iterInputs := make(map[string]interface{})
+				iterInputs[iterVal] = itemCopy
+				if iterKey != "" {
+					iterInputs[iterKey] = iterationIndex
 				}
-			}
+
+				iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, iterationIndex)
+				nestedNode := v.createNestedNodeFromLoop(node, iterationStepID, iterInputs)
+
+				// Debug: Log what variables are being set for this iteration
+				if v.logger != nil {
+					v.logger.Debug("Creating parallel task",
+						"iteration", iterationIndex,
+						"item", itemCopy,
+						"iterVal", iterVal,
+						"iterKey", iterKey,
+						"iterInputs", iterInputs)
+				}
+
+				resultChannel := make(chan *ExecutionResult, 1)
+				resultChannels[iterationIndex] = resultChannel
+
+				task := &ExecutionTask{
+					Node:           nestedNode,
+					InputVariables: iterInputs,
+					StepID:         iterationStepID,
+					Depth:          1, // Loop iterations are depth 1
+					ResultChannel:  resultChannel,
+					IterationIndex: iterationIndex,
+				}
+
+				if err := eq.Submit(task); err != nil {
+					log.WriteString(fmt.Sprintf("\nError submitting iteration %d: %s", iterationIndex, err.Error()))
+					success = false
+					if firstError == nil {
+						firstError = err
+					}
+				}
+			}(i, inputArray[i])
 		}
 
 		// Collect results

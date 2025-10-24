@@ -351,6 +351,7 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 			paymasterReq, // Use provided paymaster request
 			smartWalletAddress,
 			r.smartWalletWsRpc, // Use global WebSocket client
+			r.config.Logger,    // Pass logger for debug/verbose logging
 		)
 	} else {
 		// Fallback to original method (creates new WebSocket connection)
@@ -361,6 +362,7 @@ func (r *RpcServer) sendUserOpWithGlobalWs(
 			callData,
 			paymasterReq, // Use provided paymaster request
 			smartWalletAddress,
+			r.config.Logger, // Pass logger for debug/verbose logging
 		)
 	}
 }

@@ -56,9 +56,9 @@ const (
 var (
 	rpcConn *ethclient.Client
 	// websocket client used for subscription
-	wsEthClient *ethclient.Client
-	wsRpcURL    string
-	logger      sdklogging.Logger
+	wsEthClient  *ethclient.Client
+	wsRpcURL     string
+	globalLogger sdklogging.Logger
 
 	// a global variable that we expose to our tasks. User can use `{{name}}` to access them
 	// These macro are define in our aggregator yaml config file under `macros`
@@ -74,7 +74,7 @@ var (
 
 // Set a global logger for task engine
 func SetLogger(mylogger sdklogging.Logger) {
-	logger = mylogger
+	globalLogger = mylogger
 }
 
 // Set the global macro system. macros are static, immutable and available to  all tasks at runtime
@@ -164,7 +164,7 @@ func retryWsRpc() error {
 			wsEthClient = conn
 			return nil
 		}
-		logger.Errorf("cannot establish websocket client for RPC, retry in 15 seconds", "err", err)
+		globalLogger.Errorf("cannot establish websocket client for RPC, retry in 15 seconds", "err", err)
 		time.Sleep(15 * time.Second)
 	}
 }
@@ -2050,10 +2050,20 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 		}
 	}
 
+	// Extract input variables from trigger_input protobuf map
+	var inputVariables map[string]interface{}
+	if len(payload.TriggerInput) > 0 {
+		inputVariables = make(map[string]interface{})
+		for key, value := range payload.TriggerInput {
+			inputVariables[key] = value.AsInterface()
+		}
+	}
+
 	queueTaskData := QueueExecutionData{
-		TriggerType:   triggerData.Type,
-		TriggerOutput: triggerData.Output,
-		ExecutionID:   ulid.Make().String(),
+		TriggerType:    triggerData.Type,
+		TriggerOutput:  triggerData.Output,
+		ExecutionID:    ulid.Make().String(),
+		InputVariables: inputVariables,
 	}
 
 	// Store execution status as pending first

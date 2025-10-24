@@ -18,6 +18,22 @@ type LoopProcessor struct {
 	*CommonProcessor
 }
 
+// buildIterInputs merges parent VM variables with iteration-specific variables
+// to construct the input map for a loop iteration.
+func (r *LoopProcessor) buildIterInputs(parentVars map[string]interface{}, iterVal string, iterKey string, index int, item interface{}) map[string]interface{} {
+	iterInputs := make(map[string]interface{})
+	// Copy parent variables (settings, apContext, etc.)
+	for key, value := range parentVars {
+		iterInputs[key] = value
+	}
+	// Add iteration-specific variables
+	iterInputs[iterVal] = item
+	if iterKey != "" {
+		iterInputs[iterKey] = index
+	}
+	return iterInputs
+}
+
 func NewLoopProcessor(vm *VM) *LoopProcessor {
 	return &LoopProcessor{
 		CommonProcessor: &CommonProcessor{
@@ -225,17 +241,20 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 		var wg sync.WaitGroup
 		var mutex sync.Mutex
 
+		// Capture parent VM variables once before execution (shared for both modes)
+		r.vm.mu.Lock()
+		parentVars := make(map[string]interface{})
+		for key, value := range r.vm.vars {
+			parentVars[key] = value
+		}
+		r.vm.mu.Unlock()
+
 		for i, item := range inputArray {
 			wg.Add(1)
 			go func(index int, item interface{}) {
 				defer wg.Done()
 
-				// Create iteration-specific inputs
-				iterInputs := make(map[string]interface{})
-				iterInputs[iterVal] = item
-				if iterKey != "" {
-					iterInputs[iterKey] = index
-				}
+				iterInputs := r.buildIterInputs(parentVars, iterVal, iterKey, index, item)
 
 				iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, index)
 				resultData, err := r.executeNestedNode(node, iterationStepID, iterInputs)
@@ -257,13 +276,16 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	} else {
 		log.WriteString(fmt.Sprintf("\nExecuting loop iterations %s", executionModeLog))
 		// Sequential execution
+		// Capture parent VM variables once before execution (shared for both modes)
+		r.vm.mu.Lock()
+		parentVars := make(map[string]interface{})
+		for key, value := range r.vm.vars {
+			parentVars[key] = value
+		}
+		r.vm.mu.Unlock()
+
 		for i, item := range inputArray {
-			// Create iteration-specific inputs
-			iterInputs := make(map[string]interface{})
-			iterInputs[iterVal] = item
-			if iterKey != "" {
-				iterInputs[iterKey] = i
-			}
+			iterInputs := r.buildIterInputs(parentVars, iterVal, iterKey, i, item)
 
 			iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, i)
 			resultData, err := r.executeNestedNode(node, iterationStepID, iterInputs)
@@ -506,14 +528,11 @@ func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterat
 		}
 		return nil, nil
 	} else if contractWriteOutput := executionStep.GetContractWrite(); contractWriteOutput != nil {
-		// For contract write, return the flattened data directly (same as contract_read response)
+		// Keep loop simple: take child's returned data field as-is; allow nil
 		if contractWriteOutput.GetData() != nil {
-			// Return the flattened data object directly, consistent with contract_read
-			// This matches the standalone contract_read response format for consistency
 			return contractWriteOutput.GetData().AsInterface(), nil
 		}
-		// Return empty object for consistency with contractRead format when no data
-		return map[string]interface{}{}, nil
+		return nil, nil
 	} else if ethTransferOutput := executionStep.GetEthTransfer(); ethTransferOutput != nil {
 		// Extract transaction hash from the new data field
 		if ethTransferOutput.Data != nil {

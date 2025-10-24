@@ -116,19 +116,17 @@ func (tc *TenderlyClient) SimulateEventTrigger(ctx context.Context, query *avspr
 		return tc.simulateTransferEvent(ctx, contractAddress, query, chainID)
 	}
 
-	// For other event types, we might add more simulation strategies
-	return nil, fmt.Errorf("simulation not yet supported for this event type")
+	// Generic simulation for other event types: build a plausible log from input
+	return tc.simulateGenericEvent(ctx, contractAddress, query, chainID)
 }
 
 // isChainlinkPriceFeed checks if the query is monitoring Chainlink AnswerUpdated events
 func (tc *TenderlyClient) isChainlinkPriceFeed(query *avsproto.EventTrigger_Query) bool {
 	answerUpdatedSignature := "0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"
 
-	for _, topicGroup := range query.GetTopics() {
-		for _, topic := range topicGroup.GetValues() {
-			if strings.EqualFold(topic, answerUpdatedSignature) {
-				return true
-			}
+	for _, topic := range query.GetTopics() {
+		if strings.EqualFold(topic, answerUpdatedSignature) {
+			return true
 		}
 	}
 	return false
@@ -138,11 +136,9 @@ func (tc *TenderlyClient) isChainlinkPriceFeed(query *avsproto.EventTrigger_Quer
 func (tc *TenderlyClient) isTransferEvent(query *avsproto.EventTrigger_Query) bool {
 	transferSignature := "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
-	for _, topicGroup := range query.GetTopics() {
-		for _, topic := range topicGroup.GetValues() {
-			if strings.EqualFold(topic, transferSignature) {
-				return true
-			}
+	for _, topic := range query.GetTopics() {
+		if strings.EqualFold(topic, transferSignature) {
+			return true
 		}
 	}
 	return false
@@ -286,71 +282,68 @@ func (tc *TenderlyClient) simulateTransferEvent(ctx context.Context, contractAdd
 		"contract", contractAddress,
 		"chain_id", chainID)
 
-	// Extract from and to addresses from query topics if provided
+	// Extract from and to addresses from query topics
+	// Topics is now a flat array: topics[0]=signature, topics[1]=from, topics[2]=to
+	topics := query.GetTopics()
+
 	var fromAddress, toAddress common.Address
 	var hasSpecificFrom, hasSpecificTo bool
 
-	// Default addresses for demonstration if none specified
-	fromAddress = common.HexToAddress("0x6C6244dFd5d0bA3230B6600bFA380f0bB4E8AC49") // Default from
-	toAddress = common.HexToAddress("0x742d35Cc6634C0532925a3b8D965337c7FF18723")   // Default to
-
-	// Try to extract addresses from query topics
-	if len(query.GetTopics()) > 0 && len(query.GetTopics()[0].GetValues()) >= 3 {
-		topics := query.GetTopics()[0].GetValues()
-
-		// Topics[1] is from address (if not empty/null)
-		if len(topics) > 1 && topics[1] != "" && topics[1] != "null" && topics[1] != "0x" {
-			extractedFrom := extractAddressFromPaddedHex(topics[1])
-			if extractedFrom != "" {
-				fromAddress = common.HexToAddress(extractedFrom)
-				hasSpecificFrom = true
-			}
-		}
-
-		// Topics[2] is to address (if not empty/null)
-		if len(topics) > 2 && topics[2] != "" && topics[2] != "null" && topics[2] != "0x" {
-			extractedTo := extractAddressFromPaddedHex(topics[2])
-			if extractedTo != "" {
-				toAddress = common.HexToAddress(extractedTo)
-				hasSpecificTo = true
-			}
+	// Extract FROM address from topics[1]
+	if len(topics) > 1 && topics[1] != "" && topics[1] != "null" && topics[1] != "0x" {
+		extractedFrom := extractAddressFromPaddedHex(topics[1])
+		if extractedFrom != "" {
+			fromAddress = common.HexToAddress(extractedFrom)
+			hasSpecificFrom = true
 		}
 	}
 
-	// If only one address is specified, use it as the user wallet and create a realistic counterpart
-	if hasSpecificFrom && !hasSpecificTo {
-		// User is sender, create a realistic recipient
-		toAddress = common.HexToAddress("0x742d35Cc6634C0532925a3b8D965337c7FF18723")
-	} else if !hasSpecificFrom && hasSpecificTo {
-		// User is receiver, create a realistic sender
-		fromAddress = common.HexToAddress("0x742d35Cc6634C0532925a3b8D965337c7FF18723")
+	// Extract TO address from topics[2]
+	if len(topics) > 2 && topics[2] != "" && topics[2] != "null" && topics[2] != "0x" {
+		extractedTo := extractAddressFromPaddedHex(topics[2])
+		if extractedTo != "" {
+			toAddress = common.HexToAddress(extractedTo)
+			hasSpecificTo = true
+		}
+	}
+
+	// Validate that we have at least ONE address
+	if !hasSpecificFrom && !hasSpecificTo {
+		return nil, fmt.Errorf("transfer event simulation requires at least one address (FROM or TO) in topics")
+	}
+
+	// For simulation, we need both addresses to create a mock Transfer event
+	// Use generic placeholders for missing addresses (not user-specific)
+	if !hasSpecificFrom {
+		// Only TO address specified - use generic placeholder for FROM
+		fromAddress = common.HexToAddress("0x0000000000000000000000000000000000000001")
+	}
+	if !hasSpecificTo {
+		// Only FROM address specified - use generic placeholder for TO
+		toAddress = common.HexToAddress("0x0000000000000000000000000000000000000002")
+	}
+
+	// Extract transfer amount from query conditions (optional)
+	transferAmount := big.NewInt(1500000000000000000) // Default 1.5 tokens for simulation
+
+	for _, condition := range query.GetConditions() {
+		if condition.GetFieldName() == "value" || condition.GetFieldName() == "amount" {
+			// Try to parse the condition value as the transfer amount
+			if conditionValue := condition.GetValue(); conditionValue != "" {
+				if amount, ok := new(big.Int).SetString(conditionValue, 10); ok {
+					transferAmount = amount
+					break
+				}
+			}
+		}
 	}
 
 	tc.logger.Info("📋 Transfer simulation parameters",
 		"from", fromAddress.Hex(),
 		"to", toAddress.Hex(),
-		"hasSpecificFrom", hasSpecificFrom,
-		"hasSpecificTo", hasSpecificTo)
+		"amount", transferAmount.String())
 
-	// Create realistic transfer amount based on token contract
-	transferAmount := GetSampleTransferAmount(uint32(18)) // Default to 18 decimals
-
-	// Check if this contract is USDC/USDT (6 decimals) and use appropriate amount
-	contractAddr := strings.ToLower(contractAddress)
-	knownUSDCAddresses := []string{
-		"0x1c7d4b196cb0c7b01d743fbc6116a902379c7238", // USDC on Sepolia
-		"0xaa8e23fb1079ea71e0a56f48a2aa51851d8433d0", // USDT on Sepolia
-	}
-
-	for _, usdcAddr := range knownUSDCAddresses {
-		if contractAddr == usdcAddr {
-			transferAmount = GetSampleTransferAmount(uint32(6)) // Use 6 decimals for USDC/USDT
-			break
-		}
-	}
-
-	// For now, create a realistic mock log instead of calling Tenderly Simulation API
-	// TODO: Replace with actual Tenderly simulation transaction call when needed
+	// Create mock log for simulation
 	simulatedLog := tc.createMockTransferLog(contractAddress, fromAddress, toAddress, transferAmount, chainID)
 
 	tc.logger.Info("✅ Transfer event simulation completed",
@@ -361,6 +354,53 @@ func (tc *TenderlyClient) simulateTransferEvent(ctx context.Context, contractAdd
 		"tx", simulatedLog.TxHash.Hex())
 
 	return simulatedLog, nil
+}
+
+// simulateGenericEvent creates a generic simulated log for arbitrary event signatures/topics
+func (tc *TenderlyClient) simulateGenericEvent(ctx context.Context, contractAddress string, query *avsproto.EventTrigger_Query, chainID int64) (*types.Log, error) {
+	tc.logger.Info("🔮 Simulating generic event via Tenderly fallback",
+		"contract", contractAddress,
+		"chain_id", chainID,
+		"topics_count", len(query.GetTopics()))
+
+	// Build topics: zero-hash for empty entries
+	var topics []common.Hash
+	for _, t := range query.GetTopics() {
+		if t == "" || strings.EqualFold(t, "0x") || strings.Contains(strings.ToLower(t), "null") {
+			topics = append(topics, common.Hash{})
+		} else {
+			topics = append(topics, common.HexToHash(t))
+		}
+	}
+	// Ensure at least one topic slot (event signature) exists
+	if len(topics) == 0 {
+		topics = []common.Hash{common.Hash{}}
+	}
+
+	// Use zeroed 32-byte data by default
+	data := make([]byte, 32)
+
+	// Realistic identifiers
+	txHash := common.HexToHash(fmt.Sprintf("0x%064x", time.Now().UnixNano()))
+	blockNumber := tc.getRealisticBlockNumber(chainID)
+
+	log := &types.Log{
+		Address:     common.HexToAddress(contractAddress),
+		Topics:      topics,
+		Data:        data,
+		BlockNumber: blockNumber,
+		TxHash:      txHash,
+		Index:       0,
+		TxIndex:     0,
+		BlockHash:   common.HexToHash(fmt.Sprintf("0x%064x", time.Now().UnixNano()+1)),
+		Removed:     false,
+	}
+
+	tc.logger.Info("✅ Generic event simulation completed",
+		"block", blockNumber,
+		"tx", txHash.Hex())
+
+	return log, nil
 }
 
 // createMockTransferLog creates a mock ERC20 Transfer event log with realistic block number
@@ -621,12 +661,12 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		}
 		// Add critical debug logging to see the raw result structure
 		if raw, err := json.Marshal(resultForExtraction); err == nil {
-			tc.logger.Error("🔍 CRITICAL DEBUG - Raw Tenderly result for log extraction", "json", string(raw))
+			tc.logger.Debug("🔍 CRITICAL DEBUG - Raw Tenderly result for log extraction", "json", string(raw))
 		}
 
 		// Also log the entire simulation result structure to see where logs might be hiding
 		if rawResponse, err := json.Marshal(simResult); err == nil {
-			tc.logger.Error("🔍 CRITICAL DEBUG - Full Tenderly simulation result structure", "response", string(rawResponse))
+			tc.logger.Debug("🔍 CRITICAL DEBUG - Full Tenderly simulation result structure", "response", string(rawResponse))
 		}
 
 		// FIRST: Let's see ALL keys in the Tenderly response
@@ -636,7 +676,7 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 			for key := range m {
 				allKeys = append(allKeys, key)
 			}
-			tc.logger.Error("🔍 ALL TENDERLY KEYS", "keys", strings.Join(allKeys, ", "))
+			tc.logger.Debug("🔍 ALL TENDERLY KEYS", "keys", strings.Join(allKeys, ", "))
 
 			// Check for logs in each key
 			for key, value := range m {
@@ -647,7 +687,7 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		}
 
 		logs := tc.extractLogsFromTenderlyResult(resultForExtraction)
-		tc.logger.Error("🔍 CRITICAL DEBUG - Log extraction result", "logs_count", len(logs))
+		tc.logger.Debug("🔍 CRITICAL DEBUG - Log extraction result", "logs_count", len(logs))
 
 		if len(logs) == 0 {
 			if m, ok := resultForExtraction.(map[string]interface{}); ok {
@@ -683,11 +723,11 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		}
 		if len(logs) > 0 {
 			result.ReceiptLogs = logs
-			tc.logger.Error("🔍 CRITICAL DEBUG - Assigned logs to result.ReceiptLogs",
+			tc.logger.Debug("🔍 CRITICAL DEBUG - Assigned logs to result.ReceiptLogs",
 				"logs_count", len(logs),
 				"first_log_address", logs[0]["address"])
 		} else {
-			tc.logger.Error("🔍 CRITICAL DEBUG - No logs to assign to result.ReceiptLogs")
+			tc.logger.Debug("🔍 CRITICAL DEBUG - No logs to assign to result.ReceiptLogs")
 		}
 
 		// Extract and decode output data from Tenderly response
@@ -949,14 +989,14 @@ func (tc *TenderlyClient) extractLogsFromTenderlyResult(res interface{}) []map[s
 	// - { result: { logs: [...] } }
 	// - { simulation: { transaction_info: { logs: [...] } } } (HTTP API)
 	if root, ok := res.(map[string]interface{}); ok {
-		tc.logger.Error("🔍 extractLogsFromTenderlyResult: found map, checking for logs", "has_logs_key", root["logs"] != nil)
+		tc.logger.Debug("🔍 extractLogsFromTenderlyResult: found map, checking for logs", "has_logs_key", root["logs"] != nil)
 		if v, ok := root["logs"]; ok {
-			tc.logger.Error("🔍 extractLogsFromTenderlyResult: found logs key", "logs_type", fmt.Sprintf("%T", v))
+			tc.logger.Debug("🔍 extractLogsFromTenderlyResult: found logs key", "logs_type", fmt.Sprintf("%T", v))
 			if logs := toLogs(v); len(logs) > 0 {
-				tc.logger.Error("🔍 extractLogsFromTenderlyResult: converted logs successfully", "count", len(logs))
+				tc.logger.Debug("🔍 extractLogsFromTenderlyResult: converted logs successfully", "count", len(logs))
 				return logs
 			} else {
-				tc.logger.Error("🔍 extractLogsFromTenderlyResult: toLogs returned empty", "original_type", fmt.Sprintf("%T", v))
+				tc.logger.Debug("🔍 extractLogsFromTenderlyResult: toLogs returned empty", "original_type", fmt.Sprintf("%T", v))
 			}
 		}
 		if tx, ok := root["transaction"].(map[string]interface{}); ok {

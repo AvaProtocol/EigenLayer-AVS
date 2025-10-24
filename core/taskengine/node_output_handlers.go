@@ -50,10 +50,8 @@ func (h *RestAPIOutputHandler) ExtractFromExecutionStep(step *avsproto.Execution
 
 func (h *RestAPIOutputHandler) ConvertToProtobuf(result map[string]interface{}) (interface{}, *structpb.Value, error) {
 	var cleanData interface{}
-	var rawResponse interface{}
 
 	if result != nil {
-		rawResponse = result
 		if dataField, ok := result["data"]; ok {
 			cleanData = dataField
 		} else {
@@ -69,13 +67,47 @@ func (h *RestAPIOutputHandler) ConvertToProtobuf(result map[string]interface{}) 
 	restOutput := &avsproto.RestAPINode_Output{Data: valueData}
 	outputData := &avsproto.RunNodeWithInputsResp_RestApi{RestApi: restOutput}
 
-	// Metadata contains raw response
+	// Metadata contains raw response (full REST API response structure)
+	// The result map already contains the full response from ExtractFromExecutionStep
+	// which has been converted to plain Go types via AsInterface()
 	var metadata *structpb.Value
-	if rawResponse != nil {
-		metadata, _ = structpb.NewValue(rawResponse)
+	if len(result) > 0 {
+		// Create a clean metadata map with only serializable fields
+		metadataMap := make(map[string]interface{})
+		for key, value := range result {
+			// Deep convert to ensure no protobuf Values remain
+			metadataMap[key] = convertProtobufValueToPlain(value)
+		}
+
+		metadata, err = structpb.NewValue(metadataMap)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to convert REST API metadata: %w", err)
+		}
 	}
 
 	return outputData, metadata, nil
+}
+
+// convertProtobufValueToPlain recursively converts protobuf Values to plain Go types
+func convertProtobufValueToPlain(v interface{}) interface{} {
+	if pbValue, ok := v.(*structpb.Value); ok {
+		return pbValue.AsInterface()
+	}
+	if m, ok := v.(map[string]interface{}); ok {
+		result := make(map[string]interface{})
+		for key, val := range m {
+			result[key] = convertProtobufValueToPlain(val)
+		}
+		return result
+	}
+	if arr, ok := v.([]interface{}); ok {
+		result := make([]interface{}, len(arr))
+		for i, val := range arr {
+			result[i] = convertProtobufValueToPlain(val)
+		}
+		return result
+	}
+	return v
 }
 
 func (h *RestAPIOutputHandler) CreateEmptyOutput(nodeConfig map[string]interface{}) interface{} {
@@ -110,7 +142,7 @@ func (h *CustomCodeOutputHandler) ConvertToProtobuf(result map[string]interface{
 				// Extract original object by removing metadata fields
 				originalObject := make(map[string]interface{})
 				for k, v := range result {
-					if k != "success" && k != "nodeId" && k != "error" {
+					if k != "success" && k != "nodeId" && k != "error" && k != "executionContext" {
 						originalObject[k] = v
 					}
 				}
@@ -121,7 +153,10 @@ func (h *CustomCodeOutputHandler) ConvertToProtobuf(result map[string]interface{
 		}
 	}
 
-	valueData, err := structpb.NewValue(rawData)
+	// Deep convert to ensure no protobuf Values remain
+	cleanRawData := convertProtobufValueToPlain(rawData)
+
+	valueData, err := structpb.NewValue(cleanRawData)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to convert CustomCode output: %w", err)
 	}
@@ -153,7 +188,10 @@ func (h *BalanceOutputHandler) ConvertToProtobuf(result map[string]interface{}) 
 	var err error
 
 	if result != nil && result["data"] != nil {
-		dataValue, err = structpb.NewValue(result["data"])
+		// Deep convert to ensure no protobuf Values remain
+		cleanData := convertProtobufValueToPlain(result["data"])
+
+		dataValue, err = structpb.NewValue(cleanData)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to convert Balance output: %w", err)
 		}
@@ -205,16 +243,19 @@ func (h *ContractReadOutputHandler) ConvertToProtobuf(result map[string]interfac
 	contractReadOutput := &avsproto.ContractReadNode_Output{}
 	var metadata *structpb.Value
 
-	if result != nil && len(result) > 0 {
+	if len(result) > 0 {
 		if dataInterface, hasData := result["data"]; hasData {
-			if resultsValue, err := structpb.NewValue(dataInterface); err == nil {
+			// Deep convert to ensure no protobuf Values remain
+			cleanDataInterface := convertProtobufValueToPlain(dataInterface)
+			if resultsValue, err := structpb.NewValue(cleanDataInterface); err == nil {
 				contractReadOutput.Data = resultsValue
 			}
 		} else {
 			cleanResult := make(map[string]interface{})
 			for k, v := range result {
 				if k != "metadata" {
-					cleanResult[k] = v
+					// Deep convert to ensure no protobuf Values remain
+					cleanResult[k] = convertProtobufValueToPlain(v)
 				}
 			}
 			if len(cleanResult) > 0 {
@@ -225,7 +266,9 @@ func (h *ContractReadOutputHandler) ConvertToProtobuf(result map[string]interfac
 		}
 
 		if metadataInterface, hasMetadata := result["metadata"]; hasMetadata {
-			if metadataValue, err := structpb.NewValue(metadataInterface); err == nil {
+			// Deep convert to ensure no protobuf Values remain
+			cleanMetadataInterface := convertProtobufValueToPlain(metadataInterface)
+			if metadataValue, err := structpb.NewValue(cleanMetadataInterface); err == nil {
 				metadata = metadataValue
 			}
 		}
@@ -286,6 +329,11 @@ func (h *ContractWriteOutputHandler) ExtractFromExecutionStep(step *avsproto.Exe
 		if !step.Success {
 			result["error"] = step.Error
 		}
+
+		// Preserve executionContext from step if available
+		if step.ExecutionContext != nil {
+			result["executionContext"] = step.ExecutionContext
+		}
 	}
 	return result, nil
 }
@@ -310,16 +358,19 @@ func (h *ContractWriteOutputHandler) ConvertToProtobuf(result map[string]interfa
 						"error":      methodResult.Error,
 					}
 
+					// Deep convert protobuf Values to plain types
 					if methodResult.MethodAbi != nil {
-						convertedResult["methodABI"] = methodResult.MethodAbi.AsInterface()
+						convertedResult["methodABI"] = convertProtobufValueToPlain(methodResult.MethodAbi.AsInterface())
 					}
 
+					var cleanReceipt interface{}
 					if methodResult.Receipt != nil {
-						convertedResult["receipt"] = methodResult.Receipt.AsInterface()
+						cleanReceipt = convertProtobufValueToPlain(methodResult.Receipt.AsInterface())
+						convertedResult["receipt"] = cleanReceipt
 					}
 
 					if methodResult.Value != nil {
-						convertedResult["value"] = methodResult.Value.AsInterface()
+						convertedResult["value"] = convertProtobufValueToPlain(methodResult.Value.AsInterface())
 					} else {
 						convertedResult["value"] = nil
 					}
@@ -328,8 +379,8 @@ func (h *ContractWriteOutputHandler) ConvertToProtobuf(result map[string]interfa
 
 					// Parse events for this specific method
 					methodEvents := make(map[string]interface{})
-					if methodResult.Receipt != nil {
-						receiptData := methodResult.Receipt.AsInterface()
+					if cleanReceipt != nil {
+						receiptData := cleanReceipt
 						if receiptMap, ok := receiptData.(map[string]interface{}); ok {
 							if logs, hasLogs := receiptMap["logs"]; hasLogs {
 								if logsArray, ok := logs.([]interface{}); ok && len(logsArray) > 0 {
@@ -378,9 +429,41 @@ func (h *ContractWriteOutputHandler) ConvertToProtobuf(result map[string]interfa
 												}
 
 												if decodedEvent, err := h.engine.parseEventWithParsedABI(eventLog, contractABI, nil); err == nil {
-													for key, value := range decodedEvent {
-														if key != "eventName" {
-															methodEvents[key] = value
+													// Flatten event data: if decoded map contains the concrete event name as a key,
+													// unwrap it so methodName maps directly to event fields
+													if nameVal, hasName := decodedEvent["eventName"]; hasName {
+														if nameStr, ok := nameVal.(string); ok && nameStr != "" {
+															if inner, ok2 := decodedEvent[nameStr]; ok2 {
+																if innerMap, ok3 := inner.(map[string]interface{}); ok3 {
+																	for k, v := range innerMap {
+																		methodEvents[k] = v
+																	}
+																} else {
+																	for k, v := range decodedEvent {
+																		if k != "eventName" {
+																			methodEvents[k] = v
+																		}
+																	}
+																}
+															} else {
+																for k, v := range decodedEvent {
+																	if k != "eventName" {
+																		methodEvents[k] = v
+																	}
+																}
+															}
+														} else {
+															for k, v := range decodedEvent {
+																if k != "eventName" {
+																	methodEvents[k] = v
+																}
+															}
+														}
+													} else {
+														for k, v := range decodedEvent {
+															if k != "eventName" {
+																methodEvents[k] = v
+															}
 														}
 													}
 												}
@@ -423,12 +506,16 @@ func (h *ContractWriteOutputHandler) ConvertToProtobuf(result map[string]interfa
 		}
 	}
 
-	if dataValue, err := structpb.NewValue(decodedEventsData); err == nil {
+	// Deep convert to ensure no protobuf Values remain
+	cleanDecodedEventsData := convertProtobufValueToPlain(decodedEventsData)
+	if dataValue, err := structpb.NewValue(cleanDecodedEventsData); err == nil {
 		contractWriteOutput.Data = dataValue
 	}
 
 	if len(resultsArray) > 0 {
-		if metadataValue, err := structpb.NewValue(resultsArray); err == nil {
+		// Deep convert to ensure no protobuf Values remain
+		cleanResultsArray := convertProtobufValueToPlain(resultsArray)
+		if metadataValue, err := structpb.NewValue(cleanResultsArray); err == nil {
 			metadata = metadataValue
 		}
 	}
@@ -512,8 +599,14 @@ func (h *GraphQLOutputHandler) ConvertToProtobuf(result map[string]interface{}) 
 	var dataValue *structpb.Value
 	var err error
 
-	if result != nil && len(result) > 0 {
-		dataValue, err = structpb.NewValue(result)
+	if len(result) > 0 {
+		// Deep convert to ensure no protobuf Values remain
+		cleanResult := make(map[string]interface{})
+		for key, value := range result {
+			cleanResult[key] = convertProtobufValueToPlain(value)
+		}
+
+		dataValue, err = structpb.NewValue(cleanResult)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to convert GraphQL output: %w", err)
 		}
@@ -597,8 +690,14 @@ func (h *FilterOutputHandler) ConvertToProtobuf(result map[string]interface{}) (
 	var dataValue *structpb.Value
 	var err error
 
-	if result != nil && len(result) > 0 {
-		dataValue, err = structpb.NewValue(result)
+	if len(result) > 0 {
+		// Deep convert to ensure no protobuf Values remain
+		cleanResult := make(map[string]interface{})
+		for key, value := range result {
+			cleanResult[key] = convertProtobufValueToPlain(value)
+		}
+
+		dataValue, err = structpb.NewValue(cleanResult)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to convert Filter output: %w", err)
 		}
@@ -641,7 +740,10 @@ func (h *LoopOutputHandler) ConvertToProtobuf(result map[string]interface{}) (in
 			loopData = result
 		}
 
-		dataValue, err := structpb.NewValue(loopData)
+		// Deep convert to ensure no protobuf Values remain
+		cleanLoopData := convertProtobufValueToPlain(loopData)
+
+		dataValue, err := structpb.NewValue(cleanLoopData)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to convert loop output: %w", err)
 		}

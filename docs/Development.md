@@ -17,13 +17,25 @@ npm install -g grpc-tools
 
 ## Running a Local Node
 
-For a node that connects to Ava pre-deployed AVS contract on Holesky testnet, you need to create a `config/aggregator.yaml` file. Contact a developer for help with constructing this file.
+For a node that connects to Ava pre-deployed AVS contract, you need to create the appropriate config file for your target chain.
 
-After having the config file, you can run the aggregator:
+After having the config file, you can run the aggregator for your desired network:
 
 ```bash
-make dev-build
-make dev-agg
+# Build the application
+make build
+
+# Run aggregator on Sepolia
+make aggregator-sepolia
+
+# Run aggregator on Ethereum mainnet
+make aggregator-ethereum
+
+# Run aggregator on Base
+make aggregator-base
+
+# Run aggregator on Base Sepolia
+make aggregator-base-sepolia
 ```
 
 Or use Docker Compose directly:
@@ -47,13 +59,23 @@ For details on methods and payloads, check the `Protocol.md` documentation. Look
 
 ## Running an Operator Locally
 
-Running an operator locally allows you to schedule and see job execution. First, prepare a `config/operator.yaml` file, then run:
+Running an operator locally allows you to schedule and see job execution. First, prepare the appropriate config file for your target chain, then run:
 
 ```bash
-make dev-op
+# Run operator on Sepolia
+make operator-sepolia
+
+# Run operator on Ethereum mainnet
+make operator-ethereum
+
+# Run operator on Base
+make operator-base
+
+# Run operator with default config
+make operator-default
 ```
 
-This local operator will connect to the EigenLayer Holesky environment, so you will need to make sure you have existing operator keys onboarded with EigenLayer.
+The operator will connect to the corresponding EigenLayer environment for the chain you select, so you will need to make sure you have existing operator keys onboarded with EigenLayer.
 
 ## Live Reload
 
@@ -62,6 +84,13 @@ To automatically compile and live reload the node during development, run:
 ```bash
 make dev-live
 ```
+
+**Note:** Live reload performs a full process restart on every code change, which interrupts:
+- Active task executions and monitoring loops
+- WebSocket connections from operators (they must reconnect)
+- In-memory state and queued jobs
+
+Persistent storage (BadgerDB) survives restarts. For testing complete workflows or debugging stateful operations, consider using manual restarts (`make aggregator-<chain>`) instead.
 
 ## Client SDK
 
@@ -150,5 +179,7 @@ This command is currently under development and not fully implemented.
 During development, you may need to reset storage to erase bad data due to schema changes. In the future, we will implement migration to properly migrate storage. For now, to wipe out storage, run:
 
 ```bash
-make dev-clean
+make clean
 ```
+
+This will remove the `/tmp/ap-avs` directory and the `/tmp/ap.sock` socket file.

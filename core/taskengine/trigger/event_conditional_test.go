@@ -139,12 +139,8 @@ func TestEventTriggerConditionalFiltering(t *testing.T) {
 
 			// Create EventTrigger query with conditional filtering
 			query := &avsproto.EventTrigger_Query{
-				Addresses: []string{"0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419"}, // ETH/USD price feed
-				Topics: []*avsproto.EventTrigger_Topics{
-					{
-						Values: []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"}, // AnswerUpdated signature
-					},
-				},
+				Addresses:   []string{"0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419"},                         // ETH/USD price feed
+				Topics:      []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"}, // AnswerUpdated signature
 				ContractAbi: convertJSONABIToProtobufValues(ChainlinkAggregatorABI),
 				Conditions:  []*avsproto.EventCondition{tc.priceCondition},
 			}
@@ -188,12 +184,8 @@ func TestEventTriggerMultipleConditions(t *testing.T) {
 	mockLog := createChainlinkAnswerUpdatedLogWithRound(big.NewInt(250000000000), big.NewInt(12345))
 
 	query := &avsproto.EventTrigger_Query{
-		Addresses: []string{"0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419"},
-		Topics: []*avsproto.EventTrigger_Topics{
-			{
-				Values: []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"},
-			},
-		},
+		Addresses:   []string{"0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419"},
+		Topics:      []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"},
 		ContractAbi: convertJSONABIToProtobufValues(ChainlinkAggregatorABI),
 		Conditions: []*avsproto.EventCondition{
 			{
@@ -248,11 +240,7 @@ func TestEventTriggerWithoutConditions(t *testing.T) {
 	// Query without conditions (should work like before)
 	query := &avsproto.EventTrigger_Query{
 		Addresses: []string{"0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419"},
-		Topics: []*avsproto.EventTrigger_Topics{
-			{
-				Values: []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"},
-			},
-		},
+		Topics:    []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"},
 		// No ContractAbi or Conditions - should default to basic filtering
 	}
 
@@ -287,11 +275,7 @@ func TestEventTriggerInvalidABI(t *testing.T) {
 	// Query with invalid ABI
 	query := &avsproto.EventTrigger_Query{
 		Addresses: []string{"0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419"},
-		Topics: []*avsproto.EventTrigger_Topics{
-			{
-				Values: []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"},
-			},
-		},
+		Topics:    []string{"0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"},
 		ContractAbi: func() []*structpb.Value {
 			// Create invalid ABI structure for testing error handling
 			invalidValue, _ := structpb.NewValue("invalid json abi")
@@ -479,12 +463,8 @@ func TestSignedIntegerConditions(t *testing.T) {
 
 			// Create query with signed integer condition
 			query := &avsproto.EventTrigger_Query{
-				Addresses: []string{"0x1234567890123456789012345678901234567890"},
-				Topics: []*avsproto.EventTrigger_Topics{
-					{
-						Values: []string{mockLog.Topics[0].Hex()}, // Use actual signature from mock log
-					},
-				},
+				Addresses:   []string{"0x1234567890123456789012345678901234567890"},
+				Topics:      []string{mockLog.Topics[0].Hex()}, // Use actual signature from mock log
 				ContractAbi: convertJSONABIToProtobufValues(createSignedIntegerABI()),
 				Conditions:  []*avsproto.EventCondition{tc.condition},
 			}
