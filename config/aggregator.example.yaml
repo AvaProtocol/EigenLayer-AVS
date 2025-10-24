@@ -16,8 +16,8 @@ backup_dir: /tmp/ap-avs-backup
 ecdsa_private_key:
 
 ## EigenLayer Related Configs - Ethereum or Sepolia
-eth_rpc_url: https://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY_HERE
-eth_ws_url: wss://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY_HERE
+eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
+eth_ws_url: wss://ethereum-sepolia-rpc.publicnode.com
 
 # Optional: Used to generate Etherscan links for operator addresses in the telemetry dashboard
 # Only needed if telemetry dashboard links are important (auto-detected based on chain for Sepolia/Mainnet)
@@ -54,8 +54,8 @@ socket_path: "/tmp/ap.sock"
 
 # Account abstraction configuration
 smart_wallet:
-  eth_rpc_url: https://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY_HERE
-  eth_ws_url: wss://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY_HERE
+  eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
+  eth_ws_url: wss://ethereum-sepolia-rpc.publicnode.com
   bundler_url:
 
   # master key to generate and sign userops for any wallet
