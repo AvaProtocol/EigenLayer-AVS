@@ -3999,7 +3999,13 @@ func (v *VM) executeNodeDirectWithVars(node *avsproto.TaskNode, stepID string, t
 			"isolatedVars", isolatedVars)
 	}
 
-	// Execute the node with isolated context
+	// For CustomCode, execute directly with isolated vars without modifying shared VM state
+	// This prevents race conditions in parallel execution
+	if node.GetCustomCode() != nil {
+		return v.runCustomCodeWithIsolatedVars(stepID, node.GetCustomCode(), isolatedVars)
+	}
+
+	// For other node types, execute with isolated context (may temporarily modify shared state)
 	return v.executeNodeWithIsolatedVars(node, stepID, isolatedVars)
 }
 
@@ -4085,12 +4091,14 @@ func deepCopyValue(value interface{}) interface{} {
 
 	switch v := value.(type) {
 	case map[string]interface{}:
+		// Note: map[string]any is the same type (any is alias for interface{})
 		copy := make(map[string]interface{})
 		for key, val := range v {
 			copy[key] = deepCopyValue(val)
 		}
 		return copy
 	case []interface{}:
+		// Note: []any is the same type (any is alias for interface{})
 		copy := make([]interface{}, len(v))
 		for i, val := range v {
 			copy[i] = deepCopyValue(val)
@@ -4299,45 +4307,52 @@ func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsp
 		// Parallel execution using the queue
 		resultChannels := make([]chan *ExecutionResult, len(inputArray))
 
-		for i, item := range inputArray {
-			iterInputs := make(map[string]interface{})
-			iterInputs[iterVal] = item
-			if iterKey != "" {
-				iterInputs[iterKey] = i
-			}
+		for i := range inputArray {
+			// Use a closure to properly capture loop variables for each iteration
+			// This is the idiomatic Go pattern to avoid goroutine closure bugs
+			func(iterationIndex int, iterationItem interface{}) {
+				// Create a deep copy of the iteration item to ensure complete isolation
+				itemCopy := deepCopyValue(iterationItem)
 
-			iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, i)
-			nestedNode := v.createNestedNodeFromLoop(node, iterationStepID, iterInputs)
-
-			// Debug: Log what variables are being set for this iteration
-			if v.logger != nil {
-				v.logger.Debug("Creating parallel task",
-					"iteration", i,
-					"item", item,
-					"iterVal", iterVal,
-					"iterKey", iterKey,
-					"iterInputs", iterInputs)
-			}
-
-			resultChannel := make(chan *ExecutionResult, 1)
-			resultChannels[i] = resultChannel
-
-			task := &ExecutionTask{
-				Node:           nestedNode,
-				InputVariables: iterInputs,
-				StepID:         iterationStepID,
-				Depth:          1, // Loop iterations are depth 1
-				ResultChannel:  resultChannel,
-				IterationIndex: i,
-			}
-
-			if err := eq.Submit(task); err != nil {
-				log.WriteString(fmt.Sprintf("\nError submitting iteration %d: %s", i, err.Error()))
-				success = false
-				if firstError == nil {
-					firstError = err
+				iterInputs := make(map[string]interface{})
+				iterInputs[iterVal] = itemCopy
+				if iterKey != "" {
+					iterInputs[iterKey] = iterationIndex
 				}
-			}
+
+				iterationStepID := fmt.Sprintf("%s_iter_%d", stepID, iterationIndex)
+				nestedNode := v.createNestedNodeFromLoop(node, iterationStepID, iterInputs)
+
+				// Debug: Log what variables are being set for this iteration
+				if v.logger != nil {
+					v.logger.Debug("Creating parallel task",
+						"iteration", iterationIndex,
+						"item", itemCopy,
+						"iterVal", iterVal,
+						"iterKey", iterKey,
+						"iterInputs", iterInputs)
+				}
+
+				resultChannel := make(chan *ExecutionResult, 1)
+				resultChannels[iterationIndex] = resultChannel
+
+				task := &ExecutionTask{
+					Node:           nestedNode,
+					InputVariables: iterInputs,
+					StepID:         iterationStepID,
+					Depth:          1, // Loop iterations are depth 1
+					ResultChannel:  resultChannel,
+					IterationIndex: iterationIndex,
+				}
+
+				if err := eq.Submit(task); err != nil {
+					log.WriteString(fmt.Sprintf("\nError submitting iteration %d: %s", iterationIndex, err.Error()))
+					success = false
+					if firstError == nil {
+						firstError = err
+					}
+				}
+			}(i, inputArray[i])
 		}
 
 		// Collect results
