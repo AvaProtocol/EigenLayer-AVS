@@ -465,9 +465,7 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 				map[string]interface{}{
 					"addresses": []interface{}{TENDERLY_SEPOLIA_ETH_USD_FEED},
 					"topics": []interface{}{
-						map[string]interface{}{
-							"values": []interface{}{ANSWER_UPDATED_SIG},
-						},
+						ANSWER_UPDATED_SIG,
 					},
 					"contractAbi": []interface{}{
 						map[string]interface{}{
@@ -1364,9 +1362,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 				map[string]interface{}{
 					"addresses": []interface{}{TENDERLY_SEPOLIA_ETH_USD_FEED},
 					"topics": []interface{}{
-						map[string]interface{}{
-							"values": []interface{}{ANSWER_UPDATED_SIG},
-						},
+						ANSWER_UPDATED_SIG,
 					},
 					"contractAbi": []interface{}{
 						map[string]interface{}{
@@ -1446,9 +1442,7 @@ func TestEventTriggerImmediately_TenderlySimulation_Unit(t *testing.T) {
 				map[string]interface{}{
 					"addresses": []interface{}{TENDERLY_SEPOLIA_ETH_USD_FEED},
 					"topics": []interface{}{
-						map[string]interface{}{
-							"values": []interface{}{ANSWER_UPDATED_SIG},
-						},
+						ANSWER_UPDATED_SIG,
 					},
 					"contractAbi": []interface{}{
 						map[string]interface{}{
@@ -1871,13 +1865,9 @@ func TestTransferEventSampleData_ForUserDocumentation(t *testing.T) {
 						"0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6", // WETH
 					},
 					"topics": []interface{}{
-						map[string]interface{}{
-							"values": []interface{}{
-								"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer signature
-								"0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",                         // from address
-								nil, // to address (wildcard)
-							},
-						},
+						"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer signature
+						"0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",                         // from address
+						nil, // to address (wildcard)
 					},
 				},
 			},

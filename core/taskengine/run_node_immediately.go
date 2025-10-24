@@ -274,33 +274,40 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 			var queryAddresses []string
 
 			// Resolve addresses
-			if addressesInterface, exists := queryMap["addresses"]; exists {
-				if addressesArray, ok := addressesInterface.([]interface{}); ok {
-					resolvedAddresses := make([]interface{}, len(addressesArray))
-					for i, addrInterface := range addressesArray {
-						if addrStr, ok := addrInterface.(string); ok {
-							// Resolve template variables like {{settings.uniswapv3_pool.token0.id}}
-							resolvedAddr := tempVM.preprocessTextWithVariableMapping(addrStr)
-							resolvedAddresses[i] = resolvedAddr
-							queryAddresses = append(queryAddresses, resolvedAddr)
-
-							if addrStr != resolvedAddr && n.logger != nil {
-								n.logger.Info("EventTrigger: Resolved template in address",
-									"original", addrStr,
-									"resolved", resolvedAddr)
-							}
-
-							// Validate resolved address format
-							if resolvedAddr != "" && !common.IsHexAddress(resolvedAddr) {
-								return nil, fmt.Errorf("query[%d]: resolved address is not a valid Ethereum address: %s (original: %s)",
-									queryIdx, resolvedAddr, addrStr)
-							}
-						} else {
-							resolvedAddresses[i] = addrInterface
-						}
-					}
-					queryMap["addresses"] = resolvedAddresses
+			addressesInterface, hasAddresses := queryMap["addresses"]
+			if !hasAddresses {
+				return nil, NewInvalidNodeConfigError("queries[].addresses must be a non-empty array")
+			}
+			if addressesArray, ok := addressesInterface.([]interface{}); ok {
+				if len(addressesArray) == 0 {
+					return nil, NewInvalidNodeConfigError("queries[].addresses must be a non-empty array")
 				}
+				resolvedAddresses := make([]interface{}, len(addressesArray))
+				for i, addrInterface := range addressesArray {
+					if addrStr, ok := addrInterface.(string); ok {
+						// Resolve template variables like {{settings.uniswapv3_pool.token0.id}}
+						resolvedAddr := tempVM.preprocessTextWithVariableMapping(addrStr)
+						resolvedAddresses[i] = resolvedAddr
+						queryAddresses = append(queryAddresses, resolvedAddr)
+
+						if addrStr != resolvedAddr && n.logger != nil {
+							n.logger.Info("EventTrigger: Resolved template in address",
+								"original", addrStr,
+								"resolved", resolvedAddr)
+						}
+
+						// Validate resolved address format
+						if resolvedAddr == "" || !common.IsHexAddress(resolvedAddr) {
+							return nil, fmt.Errorf("query[%d]: resolved address is not a valid Ethereum address: %s (original: %s)",
+								queryIdx, resolvedAddr, addrStr)
+						}
+					} else {
+						return nil, NewInvalidNodeConfigError("queries[].addresses must be a non-empty array of strings")
+					}
+				}
+				queryMap["addresses"] = resolvedAddresses
+			} else {
+				return nil, NewInvalidNodeConfigError("queries[].addresses must be a non-empty array")
 			}
 
 			// Resolve topic values - flat array format
@@ -376,9 +383,49 @@ func (n *Engine) runEventTriggerImmediately(triggerConfig map[string]interface{}
 			return n.runEventTriggerWithDirectCalls(ctx, queriesArray, inputVariables)
 		} else {
 			if n.logger != nil {
-				n.logger.Debug("🔍 EventTrigger: Using TENDERLY SIMULATION path")
+				n.logger.Debug("🔍 EventTrigger: Attempting TENDERLY SIMULATION path")
 			}
-			return n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
+			// Try Tenderly simulation first, but fallback to historical search if not supported
+			result, err := n.runEventTriggerWithTenderlySimulation(ctx, queriesArray, inputVariables)
+			if err != nil {
+				// Check if this is a "not supported" error that should fallback to historical search
+				if strings.Contains(err.Error(), "simulation not yet supported") {
+					if n.logger != nil {
+						n.logger.Info("⚠️ EventTrigger: Tenderly simulation not supported, falling back to historical search",
+							"error", err.Error())
+					}
+					// Fallback to historical search with timeout check
+					if rpcConn == nil {
+						if n.logger != nil {
+							n.logger.Warn("⚠️ EventTrigger: RPC connection not available for historical search fallback, returning simulation error")
+						}
+						// Return the original simulation error since RPC is not available
+						return nil, fmt.Errorf("tenderly simulation not supported and RPC connection not available: %w", err)
+					}
+					// Create a timeout context for historical search (30 seconds max)
+					historicalCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+					defer cancel()
+
+					historicalResult, histErr := n.runEventTriggerWithHistoricalSearch(historicalCtx, queriesArray, inputVariables)
+					if histErr != nil {
+						if n.logger != nil {
+							n.logger.Warn("⚠️ EventTrigger: Historical search failed after simulation failure",
+								"simulationError", err.Error(),
+								"historicalError", histErr.Error())
+						}
+						// Return the simulation error as the primary error (more informative)
+						return nil, fmt.Errorf("tenderly simulation failed: %w (historical search also failed: %v)", err, histErr)
+					}
+					return historicalResult, nil
+				}
+				// If addresses are missing for simulation, reject as invalid configuration (too broad)
+				if strings.Contains(err.Error(), "no contract addresses provided") {
+					return nil, NewInvalidNodeConfigError("queries[].addresses must be a non-empty array")
+				}
+				// For other errors, return them as-is
+				return nil, err
+			}
+			return result, nil
 		}
 	}
 
