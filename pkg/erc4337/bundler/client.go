@@ -43,6 +43,80 @@ type BundlerClient struct {
 	url    string // Store the original URL for HTTP requests
 }
 
+// SimulateUserOperation runs a full validation/simulation cycle on the bundler.
+// This catches signature/paymaster validation errors that gas estimation ignores.
+func (bc *BundlerClient) SimulateUserOperation(
+	ctx context.Context,
+	userOp userop.UserOperation,
+	entrypoint common.Address,
+) error {
+	uo := UserOperation{
+		Sender:               userOp.Sender,
+		Nonce:                fmt.Sprintf("0x%x", userOp.Nonce),
+		InitCode:             fmt.Sprintf("0x%x", userOp.InitCode),
+		CallData:             fmt.Sprintf("0x%x", userOp.CallData),
+		CallGasLimit:         fmt.Sprintf("0x%x", userOp.CallGasLimit),
+		VerificationGasLimit: fmt.Sprintf("0x%x", userOp.VerificationGasLimit),
+		PreVerificationGas:   fmt.Sprintf("0x%x", userOp.PreVerificationGas),
+		MaxFeePerGas:         fmt.Sprintf("0x%x", userOp.MaxFeePerGas),
+		MaxPriorityFeePerGas: fmt.Sprintf("0x%x", userOp.MaxPriorityFeePerGas),
+		PaymasterAndData:     fmt.Sprintf("0x%x", userOp.PaymasterAndData),
+		Signature:            fmt.Sprintf("0x%x", userOp.Signature),
+	}
+
+	// JSON-RPC request: eth_simulateUserOperation
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "eth_simulateUserOperation",
+		"params":  []interface{}{uo, entrypoint.Hex(), "latest"},
+		"id":      1,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal simulate request: %w", err)
+	}
+
+	log.Printf("🔍 HTTP SIMULATE REQUEST DEBUG")
+	log.Printf("  URL: %s", bc.url)
+	log.Printf("  Request Body: %s", string(body))
+
+	hreq, err := http.NewRequestWithContext(ctx, "POST", bc.url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed to create simulate HTTP request: %w", err)
+	}
+	hreq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(hreq)
+	if err != nil {
+		return fmt.Errorf("failed to send simulate HTTP request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	log.Printf("🔍 HTTP SIMULATE RESPONSE DEBUG")
+	log.Printf("  Status Code: %d", resp.StatusCode)
+	log.Printf("  Response Body: %s", string(respBody))
+
+	// Parse JSON-RPC generically to be resilient to bundlers that use string/null ids
+	var generic map[string]interface{}
+	if err := json.Unmarshal(respBody, &generic); err != nil {
+		// Non-fatal: some bundlers may return non-conforming payloads; let send decide
+		return nil
+	}
+	if errObj, ok := generic["error"].(map[string]interface{}); ok {
+		code, _ := errObj["code"].(float64)
+		msg, _ := errObj["message"].(string)
+		// If method is not supported (-32601), treat as non-fatal and continue.
+		if int(code) == -32601 || msg == "Method not found" {
+			log.Printf("eth_simulateUserOperation not supported by bundler (continuing): %v", msg)
+			return nil
+		}
+		return fmt.Errorf("JSON-RPC error %d: %s", int(code), msg)
+	}
+	return nil
+}
+
 // NewBundlerClient creates a new BundlerClient that connects to the given URL.
 func NewBundlerClient(url string) (*BundlerClient, error) {
 	// Use DialHTTP instead of Dial as it is more compatible with HTTP-based bundler

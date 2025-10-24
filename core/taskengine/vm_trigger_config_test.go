@@ -15,31 +15,19 @@ func TestEventTriggerConfigExposure(t *testing.T) {
 			Queries: []*avsproto.EventTrigger_Query{
 				{
 					Addresses: []string{"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"}, // USDC
-					Topics: []*avsproto.EventTrigger_Topics{
-						{
-							Values: []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"}, // Transfer signature
-						},
-						{
-							Values: []string{"0x000000000000000000000000fE66125343Aabda4A330DA667431eC1Acb7BbDA9"}, // FROM address
-						},
-						{
-							Values: []string{}, // Any TO address
-						},
+					Topics: []string{
+						"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer signature
+						"0x000000000000000000000000fE66125343Aabda4A330DA667431eC1Acb7BbDA9", // FROM address
+						"", // Any TO address (empty string for wildcard)
 					},
 					MaxEventsPerBlock: func() *uint32 { v := uint32(10); return &v }(),
 				},
 				{
 					Addresses: []string{"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"}, // USDC
-					Topics: []*avsproto.EventTrigger_Topics{
-						{
-							Values: []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"}, // Transfer signature
-						},
-						{
-							Values: []string{}, // Any FROM address
-						},
-						{
-							Values: []string{"0x000000000000000000000000fE66125343Aabda4A330DA667431eC1Acb7BbDA9"}, // TO address
-						},
+					Topics: []string{
+						"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer signature
+						"", // Any FROM address (empty string for wildcard)
+						"0x000000000000000000000000fE66125343Aabda4A330DA667431eC1Acb7BbDA9", // TO address
 					},
 				},
 			},
@@ -152,7 +140,7 @@ func TestEventTriggerConfigExposure(t *testing.T) {
 		t.Errorf("Expected USDC address, got %v", addressSlice)
 	}
 
-	// Check topics structure
+	// Check topics structure - now a flat array of strings
 	topics, exists := firstQuery["topics"]
 	if !exists {
 		t.Errorf("First query topics not found")
@@ -170,27 +158,15 @@ func TestEventTriggerConfigExposure(t *testing.T) {
 		return
 	}
 
-	// Check first topic (Transfer signature)
-	firstTopic, ok := topicsSlice[0].(map[string]interface{})
+	// Check first topic (Transfer signature) - now a string, not a map
+	firstTopic, ok := topicsSlice[0].(string)
 	if !ok {
-		t.Errorf("First topic is not map[string]interface{}, got %T", topicsSlice[0])
+		t.Errorf("First topic is not string, got %T", topicsSlice[0])
 		return
 	}
 
-	values, exists := firstTopic["values"]
-	if !exists {
-		t.Errorf("First topic values not found")
-		return
-	}
-
-	valuesSlice, ok := values.([]string)
-	if !ok {
-		t.Errorf("First topic values is not []string, got %T", values)
-		return
-	}
-
-	if len(valuesSlice) != 1 || valuesSlice[0] != "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" {
-		t.Errorf("Expected Transfer signature, got %v", valuesSlice)
+	if firstTopic != "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" {
+		t.Errorf("Expected Transfer signature, got %v", firstTopic)
 	}
 
 	// Check maxEventsPerBlock
@@ -220,10 +196,8 @@ func TestTriggerConfigAccessInJavaScript(t *testing.T) {
 			Queries: []*avsproto.EventTrigger_Query{
 				{
 					Addresses: []string{"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"}, // USDC
-					Topics: []*avsproto.EventTrigger_Topics{
-						{
-							Values: []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"},
-						},
+					Topics: []string{
+						"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 					},
 				},
 			},

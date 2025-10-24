@@ -15,7 +15,6 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/erc20"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/require"
 )
@@ -162,7 +161,7 @@ func setupUniswapSwapTest(t *testing.T) *uniswapSwapTestSetup {
 		t.Skip("Owner EOA address not set, skipping real execution test")
 	}
 	ownerAddress := *ownerAddr
-	controllerAddress := crypto.PubkeyToAddress(aggregatorCfg.SmartWallet.ControllerPrivateKey.PublicKey)
+	controllerAddress := aggregatorCfg.SmartWallet.ControllerAddress
 
 	t.Logf("📋 %s Uniswap Swap Test Configuration:", chain.name)
 	t.Logf("   Owner EOA (derives wallet address): %s", ownerAddress.Hex())

@@ -63,12 +63,8 @@ func TestBuildFilterQueriesOptimization(t *testing.T) {
 			"0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
 			"0x20c54c5f742f123abb49a982bfe0af47edb38756",
 		},
-		Topics: []*avsproto.EventTrigger_Topics{
-			{
-				Values: []string{
-					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-				},
-			},
+		Topics: []string{
+			"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 		},
 		MaxEventsPerBlock: &maxEvents1,
 	}
@@ -78,12 +74,8 @@ func TestBuildFilterQueriesOptimization(t *testing.T) {
 			"0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
 			"0x20c54c5f742f123abb49a982bfe0af47edb38756",
 		},
-		Topics: []*avsproto.EventTrigger_Topics{
-			{
-				Values: []string{
-					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-				},
-			},
+		Topics: []string{
+			"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 		},
 		MaxEventsPerBlock: &maxEvents2, // Different max events
 	}
@@ -152,10 +144,10 @@ func TestBuildFilterQueriesDistinguishFromTo(t *testing.T) {
 			"0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
 			"0x20c54c5f742f123abb49a982bfe0af47edb38756",
 		},
-		Topics: []*avsproto.EventTrigger_Topics{
-			{Values: []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"}},
-			{Values: []string{coreAddress}},
-			{}, // topic[2] omitted for wildcard
+		Topics: []string{
+			"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+			coreAddress,
+			"", // topic[2] empty string for wildcard
 		},
 		MaxEventsPerBlock: &maxEvents,
 	}
@@ -166,10 +158,10 @@ func TestBuildFilterQueriesDistinguishFromTo(t *testing.T) {
 			"0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
 			"0x20c54c5f742f123abb49a982bfe0af47edb38756",
 		},
-		Topics: []*avsproto.EventTrigger_Topics{
-			{Values: []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"}},
-			{}, // topic[1] omitted for wildcard
-			{Values: []string{coreAddress}},
+		Topics: []string{
+			"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+			"", // topic[1] empty string for wildcard
+			coreAddress,
 		},
 		MaxEventsPerBlock: &maxEvents,
 	}
@@ -259,23 +251,17 @@ func TestEventTriggerQueryDeduplication(t *testing.T) {
 		}
 
 		var topics [][]common.Hash
-		for _, topicFilter := range query.GetTopics() {
-			allWildcard := true
-			var topicHashes []common.Hash
-			for _, topicStr := range topicFilter.GetValues() {
-				if topicStr == "" {
-					continue
-				} else {
-					if hash := common.HexToHash(topicStr); hash != (common.Hash{}) {
-						topicHashes = append(topicHashes, hash)
-						allWildcard = false
-					}
-				}
-			}
-			if allWildcard {
+		// New flat array format: topics is []string where each string is a topic value
+		for _, topicStr := range query.GetTopics() {
+			if topicStr == "" {
+				// Empty string represents null/wildcard
 				topics = append(topics, nil)
 			} else {
-				topics = append(topics, topicHashes)
+				if hash := common.HexToHash(topicStr); hash != (common.Hash{}) {
+					topics = append(topics, []common.Hash{hash})
+				} else {
+					topics = append(topics, nil)
+				}
 			}
 		}
 
@@ -327,31 +313,19 @@ func TestEventTriggerQueryDeduplication(t *testing.T) {
 	// Create FROM and TO queries
 	fromQuery := &avsproto.EventTrigger_Query{
 		Addresses: []string{},
-		Topics: []*avsproto.EventTrigger_Topics{
-			{
-				Values: []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"}, // Transfer signature
-			},
-			{
-				Values: []string{targetAddress}, // FROM address
-			},
-			{
-				Values: []string{""}, // Any TO address (wildcard)
-			},
+		Topics: []string{
+			"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer signature
+			targetAddress, // FROM address
+			"",            // Any TO address (wildcard)
 		},
 	}
 
 	toQuery := &avsproto.EventTrigger_Query{
 		Addresses: []string{},
-		Topics: []*avsproto.EventTrigger_Topics{
-			{
-				Values: []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"}, // Transfer signature
-			},
-			{
-				Values: []string{""}, // Any FROM address (wildcard)
-			},
-			{
-				Values: []string{targetAddress}, // TO address
-			},
+		Topics: []string{
+			"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer signature
+			"",            // Any FROM address (wildcard)
+			targetAddress, // TO address
 		},
 	}
 
@@ -400,49 +374,16 @@ func TestConvertToFilterQueryClientFormat(t *testing.T) {
 		}
 
 		var topics [][]common.Hash
-
-		// Handle the case where client sends all topic values in a single topic array
-		// This is the format: topics: [{ values: [Transfer signature, FROM address, null] }]
-		if len(query.GetTopics()) == 1 && len(query.GetTopics()[0].GetValues()) > 1 {
-			// Client sent all topic values in a single array, need to split them by position
-			allValues := query.GetTopics()[0].GetValues()
-
-			// Process each topic position
-			for i := 0; i < len(allValues); i++ {
-				if i < len(allValues) {
-					topicStr := allValues[i]
-					if topicStr == "" {
-						// Empty string represents null/wildcard for this topic position
-						topics = append(topics, nil)
-					} else {
-						if hash := common.HexToHash(topicStr); hash != (common.Hash{}) {
-							topics = append(topics, []common.Hash{hash})
-						} else {
-							topics = append(topics, nil)
-						}
-					}
-				}
-			}
-		} else {
-			// Original format: each topicFilter represents a separate topic position
-			for _, topicFilter := range query.GetTopics() {
-				allWildcard := true
-				var topicHashes []common.Hash
-				for _, topicStr := range topicFilter.GetValues() {
-					if topicStr == "" {
-						// Empty string represents null/wildcard
-						continue
-					} else {
-						if hash := common.HexToHash(topicStr); hash != (common.Hash{}) {
-							topicHashes = append(topicHashes, hash)
-							allWildcard = false
-						}
-					}
-				}
-				if allWildcard {
-					topics = append(topics, nil) // nil means wildcard for this topic position
+		// New flat array format: topics is []string where each string is a topic value
+		for _, topicStr := range query.GetTopics() {
+			if topicStr == "" {
+				// Empty string represents null/wildcard
+				topics = append(topics, nil)
+			} else {
+				if hash := common.HexToHash(topicStr); hash != (common.Hash{}) {
+					topics = append(topics, []common.Hash{hash})
 				} else {
-					topics = append(topics, topicHashes)
+					topics = append(topics, nil)
 				}
 			}
 		}
@@ -456,31 +397,23 @@ func TestConvertToFilterQueryClientFormat(t *testing.T) {
 	// Test address
 	targetAddress := "0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9"
 
-	// Create FROM query in client format (all topic values in single array)
+	// Create FROM query in client format (flat topics array)
 	fromQuery := &avsproto.EventTrigger_Query{
 		Addresses: []string{},
-		Topics: []*avsproto.EventTrigger_Topics{
-			{
-				Values: []string{
-					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer signature
-					targetAddress, // FROM address
-					"",            // Any TO address (wildcard)
-				},
-			},
+		Topics: []string{
+			"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer signature
+			targetAddress, // FROM address
+			"",            // Any TO address (wildcard)
 		},
 	}
 
-	// Create TO query in client format (all topic values in single array)
+	// Create TO query in client format (flat topics array)
 	toQuery := &avsproto.EventTrigger_Query{
 		Addresses: []string{},
-		Topics: []*avsproto.EventTrigger_Topics{
-			{
-				Values: []string{
-					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer signature
-					"",            // Any FROM address (wildcard)
-					targetAddress, // TO address
-				},
-			},
+		Topics: []string{
+			"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer signature
+			"",            // Any FROM address (wildcard)
+			targetAddress, // TO address
 		},
 	}
 
@@ -532,14 +465,10 @@ func TestTOSubscriptionFilter(t *testing.T) {
 			"0x20c54c5f742f123abb49a982bfe0af47edb38756",
 			"0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
 		},
-		Topics: []*avsproto.EventTrigger_Topics{
-			{
-				Values: []string{
-					"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer signature
-					"", // Any FROM address (wildcard)
-					"0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9", // TO address
-				},
-			},
+		Topics: []string{
+			"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer signature
+			"", // Any FROM address (wildcard)
+			"0xfE66125343Aabda4A330DA667431eC1Acb7BbDA9", // TO address
 		},
 	}
 
@@ -553,43 +482,16 @@ func TestTOSubscriptionFilter(t *testing.T) {
 		}
 
 		var topics [][]common.Hash
-
-		// Handle the case where client sends all topic values in a single topic array
-		if len(query.GetTopics()) == 1 && len(query.GetTopics()[0].GetValues()) > 1 {
-			allValues := query.GetTopics()[0].GetValues()
-
-			for i := 0; i < len(allValues); i++ {
-				if i < len(allValues) {
-					topicStr := allValues[i]
-					if topicStr == "" {
-						topics = append(topics, nil)
-					} else {
-						if hash := common.HexToHash(topicStr); hash != (common.Hash{}) {
-							topics = append(topics, []common.Hash{hash})
-						} else {
-							topics = append(topics, nil)
-						}
-					}
-				}
-			}
-		} else {
-			for _, topicFilter := range query.GetTopics() {
-				allWildcard := true
-				var topicHashes []common.Hash
-				for _, topicStr := range topicFilter.GetValues() {
-					if topicStr == "" {
-						continue
-					} else {
-						if hash := common.HexToHash(topicStr); hash != (common.Hash{}) {
-							topicHashes = append(topicHashes, hash)
-							allWildcard = false
-						}
-					}
-				}
-				if allWildcard {
-					topics = append(topics, nil)
+		// New flat array format: topics is []string where each string is a topic value
+		for _, topicStr := range query.GetTopics() {
+			if topicStr == "" {
+				// Empty string represents null/wildcard
+				topics = append(topics, nil)
+			} else {
+				if hash := common.HexToHash(topicStr); hash != (common.Hash{}) {
+					topics = append(topics, []common.Hash{hash})
 				} else {
-					topics = append(topics, topicHashes)
+					topics = append(topics, nil)
 				}
 			}
 		}

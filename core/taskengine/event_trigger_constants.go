@@ -10,10 +10,10 @@ import (
 // Note: logIndex and transactionIndex are excluded from main data as they're available in metadata
 type TransferEventResponse struct {
 	// Contract and token information
-	Address       string `json:"address"`       // Contract address
-	TokenName     string `json:"tokenName"`     // Token name (e.g., "Wrapped Ether")
-	TokenSymbol   string `json:"tokenSymbol"`   // Token symbol (e.g., "WETH")
-	TokenDecimals uint32 `json:"tokenDecimals"` // Token decimals (e.g., 18)
+	ContractAddress string `json:"contractAddress"` // Contract address that emitted the event
+	TokenName       string `json:"tokenName"`       // Token name (e.g., "Wrapped Ether")
+	TokenSymbol     string `json:"tokenSymbol"`     // Token symbol (e.g., "WETH")
+	TokenDecimals   uint32 `json:"tokenDecimals"`   // Token decimals (e.g., 18)
 
 	// Transaction information
 	TransactionHash string `json:"transactionHash"` // Transaction hash
@@ -74,7 +74,7 @@ func CreateStandardizedTransferResponse(
 	value string,
 ) TransferEventResponse {
 	return TransferEventResponse{
-		Address:         contractAddress,
+		ContractAddress: contractAddress,
 		TokenName:       tokenName,
 		TokenSymbol:     tokenSymbol,
 		TokenDecimals:   tokenDecimals,

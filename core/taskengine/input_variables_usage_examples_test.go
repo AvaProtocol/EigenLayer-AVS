@@ -23,10 +23,10 @@ func TestInputVariables_UsageExamples(t *testing.T) {
 	// Define input variables that will be used in nodes
 	inputVariables := map[string]interface{}{
 		// Simple variables
-		"tokenContract": "0xA0b86a33E6441e4EF45bAcfCaAd5C7f899342E38",
-		"recipient":     "0x742d35Cc6634C0532925a3b8D2C0e3e0C8C8E1c7",
-		"amount":        "1000000", // 1 USDC (6 decimals)
-		"gasLimit":      200000,
+		"contractAddress": "0xA0b86a33E6441e4EF45bAcfCaAd5C7f899342E38",
+		"recipient":       "0x742d35Cc6634C0532925a3b8D2C0e3e0C8C8E1c7",
+		"amount":          "1000000", // 1 USDC (6 decimals)
+		"gasLimit":        200000,
 
 		// Complex object
 		"swapConfig": map[string]interface{}{
@@ -58,9 +58,9 @@ func TestInputVariables_UsageExamples(t *testing.T) {
 							// ==========================================
 							
 							// 1. Simple variable access
-							// Input: "tokenContract": "0xA0b86a33E6441e4EF45bAcfCaAd5C7f899342E38"
-							// Usage: tokenContract
-							const contract = tokenContract;
+							// Input: "contractAddress": "0xA0b86a33E6441e4EF45bAcfCaAd5C7f899342E38"
+							// Usage: contractAddress
+							const contract = contractAddress;
 							
 							// 2. Simple variable access (other types)
 							// Input: "amount": "1000000"

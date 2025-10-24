@@ -15,7 +15,6 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -65,7 +64,7 @@ func setupSequentialContractWritesTest(t *testing.T) *sequentialContractWritesTe
 		t.Skip("Owner EOA address not set, skipping real execution test")
 	}
 	ownerAddress := *ownerAddr
-	controllerAddress := crypto.PubkeyToAddress(baseAggregatorCfg.SmartWallet.ControllerPrivateKey.PublicKey)
+	controllerAddress := baseAggregatorCfg.SmartWallet.ControllerAddress
 
 	t.Logf("📋 Base Sequential Contract Writes Execution Test:")
 	t.Logf("   Owner EOA (derives wallet address): %s", ownerAddress.Hex())

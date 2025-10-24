@@ -142,6 +142,7 @@ type SmartWalletConfig struct {
 	ChainID int64
 
 	ControllerPrivateKey  *ecdsa.PrivateKey
+	ControllerAddress     common.Address // Derived from ControllerPrivateKey (for signature verification)
 	PaymasterAddress      common.Address
 	PaymasterOwnerAddress common.Address // Owner of the paymaster contract (for gas reimbursement)
 	WhitelistAddresses    []common.Address
@@ -435,6 +436,13 @@ func NewConfig(configFilePath string) (*Config, error) {
 
 	if config.SocketPath == "" {
 		config.SocketPath = "/tmp/ap.sock"
+	}
+
+	// Derive the controller address from the controller private key
+	// This is used for signature verification throughout the system
+	if config.SmartWallet != nil && config.SmartWallet.ControllerPrivateKey != nil {
+		config.SmartWallet.ControllerAddress = crypto.PubkeyToAddress(config.SmartWallet.ControllerPrivateKey.PublicKey)
+		logger.Info("Controller address derived", "controller", config.SmartWallet.ControllerAddress.Hex())
 	}
 
 	// Fetch the paymaster owner address by calling owner() on the paymaster contract

@@ -8,38 +8,63 @@ services:
       dockerfile: dockerfiles/aggregator.Dockerfile
     ports:
       - "2206:2206"
-      - "1323:1323"
+      - "8080:8080"
     networks:
       - ava
     environment:
+      # Environment and logging
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      
       # Core configuration (required)
       - ETH_RPC_URL=${ETH_RPC_URL}
       - ETH_WS_URL=${ETH_WS_URL}
       
       # Private keys and secrets (should be provided via .env file)
       - ECDSA_PRIVATE_KEY=${ECDSA_PRIVATE_KEY}
-      - CONTROLLER_PRIVATE_KEY=${CONTROLLER_PRIVATE_KEY}
       - JWT_SECRET=${JWT_SECRET}
       
-      # API keys and tokens
+      # EigenLayer AVS contract addresses
+      - AVS_REGISTRY_COORDINATOR_ADDRESS=${AVS_REGISTRY_COORDINATOR_ADDRESS}
+      - OPERATOR_STATE_RETRIEVER_ADDRESS=${OPERATOR_STATE_RETRIEVER_ADDRESS}
+      
+      # Server binding addresses
+      - RPC_BIND_ADDRESS=${RPC_BIND_ADDRESS:-0.0.0.0:2206}
+      - HTTP_BIND_ADDRESS=${HTTP_BIND_ADDRESS:-0.0.0.0:8080}
+      
+      # Storage paths
+      - DB_PATH=${DB_PATH:-/tmp/ap-avs/db}
+      - BACKUP_DIR=${BACKUP_DIR:-/tmp/ap-avs-backup}
+      
+      # Optional: Monitoring and telemetry
+      - SERVER_NAME=${SERVER_NAME:-aggregator-docker}
+      - SENTRY_DSN=${SENTRY_DSN}
+      
+      # Optional: Explorer URLs (auto-detected if not provided)
+      - ETHERSCAN_URL=${ETHERSCAN_URL}
+      - EIGENLAYER_URL=${EIGENLAYER_URL}
+      
+      # Optional: Tenderly integration for simulation
+      - TENDERLY_ACCOUNT=${TENDERLY_ACCOUNT}
+      - TENDERLY_PROJECT=${TENDERLY_PROJECT}
       - TENDERLY_ACCESS_KEY=${TENDERLY_ACCESS_KEY}
+      
+      # Smart wallet configuration
+      - SMART_WALLET_ETH_RPC_URL=${SMART_WALLET_ETH_RPC_URL:-${ETH_RPC_URL}}
+      - SMART_WALLET_ETH_WS_URL=${SMART_WALLET_ETH_WS_URL:-${ETH_WS_URL}}
+      - BUNDLER_URL=${BUNDLER_URL}
+      - CONTROLLER_PRIVATE_KEY=${CONTROLLER_PRIVATE_KEY}
+      - MAX_WALLETS_PER_OWNER=${MAX_WALLETS_PER_OWNER:-3}
+      
+      # Macro secrets - API keys for external services
       - AP_NOTIFY_BOT_TOKEN=${AP_NOTIFY_BOT_TOKEN}
       - SENDGRID_KEY=${SENDGRID_KEY}
       - THEGRAPH_API_KEY=${THEGRAPH_API_KEY}
-      
-      # Smart wallet configuration
-      - BUNDLER_URL=${BUNDLER_URL}
-      - MAX_WALLETS_PER_OWNER=${MAX_WALLETS_PER_OWNER:-5}
-      
-      # Optional overrides
-      - TENDERLY_ACCOUNT=${TENDERLY_ACCOUNT}
-      - TENDERLY_PROJECT=${TENDERLY_PROJECT}
-      - SERVER_NAME=${SERVER_NAME:-aggregator-docker}
+      - MORALIS_API_KEY=${MORALIS_API_KEY}
     volumes:
       - ./config:/app/config
-      - db-data:/tmp/app-avs
+      - db-data:/tmp/ap-avs
     healthcheck:
-      test: curl --fail http://localhost:1323/up || exit 1
+      test: curl --fail http://localhost:8080/up || exit 1
       interval: 3s
       retries: 15
       start_period: 3s
@@ -54,18 +79,43 @@ services:
     networks:
       - ava
     environment:
+      # Environment and logging
+      - ENVIRONMENT=${OPERATOR_ENVIRONMENT:-development}
+      
       # Core configuration (required)
       - ETH_RPC_URL=${ETH_RPC_URL}
       - ETH_WS_URL=${ETH_WS_URL}
       
-      # Operator private key
+      # Operator address and keys
+      - OPERATOR_ADDRESS=${OPERATOR_ADDRESS}
       - ECDSA_PRIVATE_KEY=${OPERATOR_PRIVATE_KEY}
       
-      # Aggregator connection
-      - AGGREGATOR_ADDRESS=${AGGREGATOR_ADDRESS:-aggregator:2206}
+      # EigenLayer AVS contract addresses
+      - AVS_REGISTRY_COORDINATOR_ADDRESS=${AVS_REGISTRY_COORDINATOR_ADDRESS}
+      - OPERATOR_STATE_RETRIEVER_ADDRESS=${OPERATOR_STATE_RETRIEVER_ADDRESS}
       
-      # Optional overrides
+      # Aggregator connection
+      - AGGREGATOR_SERVER_IP_PORT_ADDRESS=${AGGREGATOR_SERVER_IP_PORT_ADDRESS:-aggregator:2206}
+      
+      # AVS node spec compliance
+      - EIGEN_METRICS_IP_PORT_ADDRESS=${EIGEN_METRICS_IP_PORT_ADDRESS:-localhost:9090}
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      - NODE_API_IP_PORT_ADDRESS=${NODE_API_IP_PORT_ADDRESS:-localhost:9010}
+      - ENABLE_NODE_API=${ENABLE_NODE_API:-true}
+      
+      # Storage paths
+      - DB_PATH=${OPERATOR_DB_PATH:-/tmp/ap-avs-operator}
+      
+      # Optional: Monitoring
       - SERVER_NAME=${OPERATOR_SERVER_NAME:-operator-docker}
+      - SENTRY_DSN=${OPERATOR_SENTRY_DSN}
+      
+      # Destination chain configuration
+      - TARGET_CHAIN_ETH_RPC_URL=${TARGET_CHAIN_ETH_RPC_URL:-${ETH_RPC_URL}}
+      - TARGET_CHAIN_ETH_WS_URL=${TARGET_CHAIN_ETH_WS_URL:-${ETH_WS_URL}}
+      
+      # Feature toggles
+      - EVENT_TRIGGER_ENABLED=${EVENT_TRIGGER_ENABLED:-true}
     volumes:
       - ./config:/app/config
     depends_on:
@@ -75,7 +125,7 @@ services:
     image: fullstorydev/grpcui
     command: ["-plaintext", "aggregator:2206"]
     ports: 
-      - "8080:8080"
+      - "8081:8080"
     networks:
       - ava
     depends_on:

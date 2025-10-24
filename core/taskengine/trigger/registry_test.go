@@ -26,9 +26,7 @@ func TestTaskRegistry_ConvertFromSyncMap(t *testing.T) {
 	queries := []*avsproto.EventTrigger_Query{
 		{
 			Addresses: []string{"0x1234567890123456789012345678901234567890"},
-			Topics: []*avsproto.EventTrigger_Topics{
-				{Values: []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"}},
-			},
+			Topics:    []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"},
 		},
 	}
 
