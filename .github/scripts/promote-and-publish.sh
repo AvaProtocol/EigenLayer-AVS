@@ -33,10 +33,10 @@ echo -e "${GREEN}✅ GitHub CLI is installed and authenticated${NC}"
 REPO=$(gh repo view --json owner,name --jq '.owner.login + "/" + .name')
 echo -e "${BLUE}📦 Working with repository: ${REPO}${NC}"
 
-# Get the latest release to publish Docker images for
+# Get the latest release to publish Docker images for (including pre-releases)
 echo -e "${BLUE}🔍 Finding latest release for Docker publishing...${NC}"
-LATEST_RELEASE=$(gh release list --repo "$REPO" --limit 1 --json tagName,isPrerelease | \
-    jq -r '.[] | select(.isPrerelease == false) | .tagName')
+LATEST_RELEASE=$(gh release list --repo "$REPO" --limit 1 --json tagName | \
+    jq -r '.[].tagName')
 
 if [ -z "$LATEST_RELEASE" ]; then
     echo -e "${RED}❌ No releases found. Make sure a release exists.${NC}"

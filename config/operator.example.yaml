@@ -16,8 +16,8 @@ operator_state_retriever_address: 0x070E0ABE8407eb4727fC7C5284bdc1e5E5CBf605
 
 # Main RPC endpoints for AVS operations
 # For Sepolia:
-eth_rpc_url: https://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY
-eth_ws_url: wss://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY
+eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
+eth_ws_url: wss://ethereum-sepolia-rpc.publicnode.com
 
 # Key store paths
 # If you running this using eigenlayer CLI and the provided AVS packaging structure,
@@ -64,8 +64,8 @@ db_path: /tmp/ap-avs-operator
 # Replace with your actual target chain endpoints
 target_chain:
   # For Sepolia:
-  eth_rpc_url: https://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY
-  eth_ws_url: wss://ethereum-sepolia.core.chainstack.com/YOUR_API_KEY
+  eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
+  eth_ws_url: wss://ethereum-sepolia-rpc.publicnode.com
 
 # Feature toggles
 enabled_features:

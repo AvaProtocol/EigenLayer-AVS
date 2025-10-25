@@ -20,8 +20,8 @@ operator_address: <operator_address>
 avs_registry_coordinator_address: 0x90c6d6f2A78d5Ce22AB8631Ddb142C03AC87De7a
 operator_state_retriever_address: 0xb7bb920538e038DFFEfcB55caBf713652ED2031F
 
-eth_rpc_url: https://ethereum-sepolia.core.chainstack.com/YOUR_PROJECT_ID
-eth_ws_url: wss://ethereum-sepolia.core.chainstack.com/YOUR_PROJECT_ID
+eth_rpc_url: https://ethereum-sepolia-rpc.publicnode.com
+eth_ws_url: wss://ethereum-sepolia-rpc.publicnode.com
 
 ecdsa_private_key_store_path: <path_to_operator_ecdsa_key_json>
 bls_private_key_store_path: <path_to_operator_bls_key_json>
