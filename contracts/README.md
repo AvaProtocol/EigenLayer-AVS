@@ -86,7 +86,7 @@ forge clean && forge build
 
 2) Required environment variables
 ```bash
-export RPC_URL="https://ethereum-sepolia.core.chainstack.com/<your_key>"
+export RPC_URL="https://ethereum-sepolia-rpc.publicnode.com"
 export ETHSCAN_API_KEY="<your_etherscan_key>"
 export PRIVATE_KEY="0x<YOUR_PRIVATE_KEY_HEX>"   # Use the intended key
 

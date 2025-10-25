@@ -36,10 +36,15 @@ The simulation mode behaves **exactly like the regular `runTask`** execution:
 
 ### Tenderly Configuration
 
-The system uses your Tenderly Gateway endpoint:
+The system uses the Tenderly Simulation API endpoint:
 ```
-https://sepolia.gateway.tenderly.co/YOUR_API_KEY
+https://api.tenderly.co/api/v1/account/{ACCOUNT}/project/{PROJECT}/simulate
 ```
+
+You need to configure in your `config/aggregator.yaml`:
+- `tenderly_account`: Your Tenderly account name
+- `tenderly_project`: Your Tenderly project name
+- `tenderly_access_key`: Your Tenderly API access key
 
 ## Examples
 
