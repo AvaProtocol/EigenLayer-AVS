@@ -271,6 +271,11 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		// Leave summarizer unset; deterministic fallback will be used
 	}
 
+	// Initialize global macro variables and secrets from config
+	// This ensures all nodes (BalanceNode, etc.) can access secrets without manual setup
+	SetMacroVars(config.MacroVars)
+	SetMacroSecrets(config.MacroSecrets)
+
 	SetRpc(config.SmartWallet.EthRpcUrl)
 	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
 	//SetWsRpc(config.SmartWallet.EthWsUrl)
