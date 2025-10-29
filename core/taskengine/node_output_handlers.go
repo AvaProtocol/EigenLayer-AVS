@@ -29,7 +29,7 @@ type NodeOutputHandler interface {
 	// CreateEmptyOutput creates an empty output structure for error cases
 	// This ensures we never return OUTPUT_DATA_NOT_SET
 	// Returns the protobuf OutputData variant (which must implement isRunNodeWithInputsResp_OutputData)
-	CreateEmptyOutput(nodeConfig map[string]interface{}) interface{}
+	CreateEmptyOutput() interface{}
 }
 
 // RestAPIOutputHandler handles RestAPI node output conversion
@@ -110,7 +110,7 @@ func convertProtobufValueToPlain(v interface{}) interface{} {
 	return v
 }
 
-func (h *RestAPIOutputHandler) CreateEmptyOutput(nodeConfig map[string]interface{}) interface{} {
+func (h *RestAPIOutputHandler) CreateEmptyOutput() interface{} {
 	return &avsproto.RunNodeWithInputsResp_RestApi{RestApi: &avsproto.RestAPINode_Output{}}
 }
 
@@ -167,7 +167,7 @@ func (h *CustomCodeOutputHandler) ConvertToProtobuf(result map[string]interface{
 	return outputData, nil, nil
 }
 
-func (h *CustomCodeOutputHandler) CreateEmptyOutput(nodeConfig map[string]interface{}) interface{} {
+func (h *CustomCodeOutputHandler) CreateEmptyOutput() interface{} {
 	return &avsproto.RunNodeWithInputsResp_CustomCode{CustomCode: &avsproto.CustomCodeNode_Output{}}
 }
 
@@ -209,7 +209,7 @@ func (h *BalanceOutputHandler) ConvertToProtobuf(result map[string]interface{}) 
 	return outputData, nil, nil
 }
 
-func (h *BalanceOutputHandler) CreateEmptyOutput(nodeConfig map[string]interface{}) interface{} {
+func (h *BalanceOutputHandler) CreateEmptyOutput() interface{} {
 	return &avsproto.RunNodeWithInputsResp_Balance{Balance: &avsproto.BalanceNode_Output{}}
 }
 
@@ -278,18 +278,9 @@ func (h *ContractReadOutputHandler) ConvertToProtobuf(result map[string]interfac
 	return outputData, metadata, nil
 }
 
-func (h *ContractReadOutputHandler) CreateEmptyOutput(nodeConfig map[string]interface{}) interface{} {
-	dataMap := map[string]interface{}{}
-	if calls, ok := nodeConfig["methodCalls"].([]interface{}); ok {
-		for _, c := range calls {
-			if m, ok := c.(map[string]interface{}); ok {
-				if mn, ok := m["methodName"].(string); ok && mn != "" {
-					dataMap[mn] = map[string]interface{}{}
-				}
-			}
-		}
-	}
-	dataVal, _ := structpb.NewValue(dataMap)
+func (h *ContractReadOutputHandler) CreateEmptyOutput() interface{} {
+	// Return empty structure without method names (not needed for error cases)
+	dataVal, _ := structpb.NewValue(map[string]interface{}{})
 	return &avsproto.RunNodeWithInputsResp_ContractRead{ContractRead: &avsproto.ContractReadNode_Output{Data: dataVal}}
 }
 
@@ -524,18 +515,9 @@ func (h *ContractWriteOutputHandler) ConvertToProtobuf(result map[string]interfa
 	return outputData, metadata, nil
 }
 
-func (h *ContractWriteOutputHandler) CreateEmptyOutput(nodeConfig map[string]interface{}) interface{} {
-	dataMap := map[string]interface{}{}
-	if calls, ok := nodeConfig["methodCalls"].([]interface{}); ok {
-		for _, c := range calls {
-			if m, ok := c.(map[string]interface{}); ok {
-				if mn, ok := m["methodName"].(string); ok && mn != "" {
-					dataMap[mn] = map[string]interface{}{}
-				}
-			}
-		}
-	}
-	dataVal, _ := structpb.NewValue(dataMap)
+func (h *ContractWriteOutputHandler) CreateEmptyOutput() interface{} {
+	// Return empty structure without method names (not needed for error cases)
+	dataVal, _ := structpb.NewValue(map[string]interface{}{})
 	return &avsproto.RunNodeWithInputsResp_ContractWrite{ContractWrite: &avsproto.ContractWriteNode_Output{Data: dataVal}}
 }
 
@@ -576,7 +558,7 @@ func (h *ETHTransferOutputHandler) ConvertToProtobuf(result map[string]interface
 	return outputData, nil, nil
 }
 
-func (h *ETHTransferOutputHandler) CreateEmptyOutput(nodeConfig map[string]interface{}) interface{} {
+func (h *ETHTransferOutputHandler) CreateEmptyOutput() interface{} {
 	return &avsproto.RunNodeWithInputsResp_EthTransfer{EthTransfer: &avsproto.ETHTransferNode_Output{}}
 }
 
@@ -623,7 +605,7 @@ func (h *GraphQLOutputHandler) ConvertToProtobuf(result map[string]interface{}) 
 	return outputData, nil, nil
 }
 
-func (h *GraphQLOutputHandler) CreateEmptyOutput(nodeConfig map[string]interface{}) interface{} {
+func (h *GraphQLOutputHandler) CreateEmptyOutput() interface{} {
 	return &avsproto.RunNodeWithInputsResp_Graphql{Graphql: &avsproto.GraphQLQueryNode_Output{}}
 }
 
@@ -667,7 +649,7 @@ func (h *BranchOutputHandler) ConvertToProtobuf(result map[string]interface{}) (
 	return outputData, nil, nil
 }
 
-func (h *BranchOutputHandler) CreateEmptyOutput(nodeConfig map[string]interface{}) interface{} {
+func (h *BranchOutputHandler) CreateEmptyOutput() interface{} {
 	return &avsproto.RunNodeWithInputsResp_Branch{Branch: &avsproto.BranchNode_Output{}}
 }
 
@@ -715,7 +697,7 @@ func (h *FilterOutputHandler) ConvertToProtobuf(result map[string]interface{}) (
 	return outputData, nil, nil
 }
 
-func (h *FilterOutputHandler) CreateEmptyOutput(nodeConfig map[string]interface{}) interface{} {
+func (h *FilterOutputHandler) CreateEmptyOutput() interface{} {
 	return &avsproto.RunNodeWithInputsResp_Filter{Filter: &avsproto.FilterNode_Output{}}
 }
 
@@ -766,7 +748,7 @@ func (h *LoopOutputHandler) ConvertToProtobuf(result map[string]interface{}) (in
 	return outputData, nil, nil
 }
 
-func (h *LoopOutputHandler) CreateEmptyOutput(nodeConfig map[string]interface{}) interface{} {
+func (h *LoopOutputHandler) CreateEmptyOutput() interface{} {
 	return &avsproto.RunNodeWithInputsResp_Loop{Loop: &avsproto.LoopNode_Output{}}
 }
 

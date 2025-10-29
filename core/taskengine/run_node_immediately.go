@@ -3076,10 +3076,6 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 		vm.AddVar(key, processedValue)
 	}
 
-	// Store raw node configuration in VM variables for processors to access
-	// This allows access to fields like 'value' and 'gasLimit' that aren't in protobuf schema
-	vm.AddVar("nodeConfig", nodeConfig)
-
 	// Create node from type and config
 	// NOTE: For CustomCode nodes, lang field can be either:
 	// - avsproto.Lang enum (preferred in tests)
@@ -3353,7 +3349,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{RestApi: &avsproto.RestAPINode_Output{}}
 		} else {
 			// Use helper to convert handler output to correct protobuf oneof type
-			assignOutputData(resp, handler.CreateEmptyOutput(nodeConfig))
+			assignOutputData(resp, handler.CreateEmptyOutput())
 		}
 
 		return resp, nil

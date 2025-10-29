@@ -1025,6 +1025,7 @@ func (v *VM) runKahnScheduler() error {
 			}
 
 			processed++
+			// Check termination AFTER all successors have been scheduled
 			if processed == scheduledCount { // all scheduled nodes completed
 				closeOnce.Do(func() { close(ready) })
 			}
@@ -2220,16 +2221,6 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 		}
 		tempVM.vars[APContextVarName] = apContextValue
 	}
-	// Copy nodeConfig if it exists (contains raw configuration including value and gasLimit)
-	if nodeConfigValue, ok := v.vars["nodeConfig"]; ok {
-		if tempVM.vars == nil { // Ensure tempVM.vars is initialized
-			tempVM.vars = make(map[string]any)
-		}
-		tempVM.vars["nodeConfig"] = nodeConfigValue
-		if v.logger != nil {
-			v.logger.Debug("Copied nodeConfig to temporary VM for node execution")
-		}
-	}
 
 	// Copy aa_sender if it exists (required for contractWrite nodes)
 	if aaSenderValue, ok := v.vars["aa_sender"]; ok {
@@ -3352,6 +3343,16 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 			config := map[string]interface{}{
 				"contractAddress": contractWrite.Config.ContractAddress,
 				"contractAbi":     contractAbiArray,
+			}
+
+			// Extract optional value field (ETH to send with transaction)
+			if contractWrite.Config.Value != nil {
+				config["value"] = *contractWrite.Config.Value
+			}
+
+			// Extract optional gas_limit field (custom gas limit)
+			if contractWrite.Config.GasLimit != nil {
+				config["gasLimit"] = *contractWrite.Config.GasLimit
 			}
 
 			// Handle method calls - extract fields to simple map for protobuf compatibility

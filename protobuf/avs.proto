@@ -368,6 +368,10 @@ message ContractWriteNode {
     repeated MethodCall method_calls = 4;
     // Execution mode for this contract write node: when true (default), use simulation; when false, execute real UserOp
     optional bool is_simulated = 5;
+    // ETH value to send with the transaction (in wei as string)
+    optional string value = 6;
+    // Custom gas limit for the transaction (as string to handle large numbers)
+    optional string gas_limit = 7;
   }
 
   message MethodCall {
@@ -1226,7 +1230,11 @@ message GetExecutionStatsResp {
 // Request message for RunNodeWithInputs
 message RunNodeWithInputsReq {
   NodeType node_type = 1; // Type of node to execute using the NodeType enum
-  map<string, google.protobuf.Value> node_config = 2; // Configuration for the node
+  // Configuration for the node - this creates a proper node with Config from the map
+  // HISTORICAL NOTE: This field was previously also stored as vm.vars["nodeConfig"] as a workaround
+  // for fields not yet in protobuf schema (value, gasLimit, options). That workaround has been
+  // removed (Jan 2025). All configuration now goes through proper node.Config fields.
+  map<string, google.protobuf.Value> node_config = 2;
   map<string, google.protobuf.Value> input_variables = 3; // Input variables for the node
 }
 

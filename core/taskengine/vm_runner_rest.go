@@ -774,33 +774,15 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	return executionLogStep, nil
 }
 
-// shouldSummarize checks VM vars for nodeConfig.options.summarize=true
+// shouldSummarize checks node.Config.Options for summarize=true
 func shouldSummarize(vm *VM, node *avsproto.RestAPINode) bool {
 	if vm == nil {
 		return false
 	}
-	// First, check protobuf node config options (works for deployed workflows)
+	// Check protobuf node.Config.Options
 	if node != nil && node.Config != nil && node.Config.Options != nil {
 		if optsMap, ok := node.Config.Options.AsInterface().(map[string]interface{}); ok {
 			if v, ok := optsMap["summarize"].(bool); ok {
-				return v
-			}
-		}
-	}
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-	rawCfg, ok := vm.vars["nodeConfig"]
-	if !ok {
-		return false
-	}
-	cfgMap, ok := rawCfg.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	// options may be a map[string]interface{}
-	if rawOpts, ok := cfgMap["options"]; ok && rawOpts != nil {
-		if opts, ok := rawOpts.(map[string]interface{}); ok {
-			if v, ok := opts["summarize"].(bool); ok {
 				return v
 			}
 		}

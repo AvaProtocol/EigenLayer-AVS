@@ -134,6 +134,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	contractAddress common.Address,
 	methodCall *avsproto.ContractWriteNode_MethodCall,
 	shouldSimulate bool,
+	node *avsproto.ContractWriteNode,
 ) *avsproto.ContractWriteNode_MethodResult {
 	t0 := time.Now()
 
@@ -437,8 +438,8 @@ func (r *ContractWriteProcessor) executeMethodCall(
 
 		// Note: HTTP Simulation API automatically uses the latest block context
 
-		// Extract transaction value from VM variables (passed from raw nodeConfig)
-		transactionValue := r.extractTransactionValue(methodName, contractAddress.Hex())
+		// Extract transaction value from node Config or VM variables (RNWI fallback)
+		transactionValue := r.extractTransactionValue(methodName, contractAddress.Hex(), node)
 
 		// Simulate the contract write using Tenderly
 
@@ -1414,7 +1415,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			}()
 			// Resolve shouldSimulate: default to VM flag; allow per-node override via typed config
 			effectiveSim := r.resolveSimulationMode(node, r.vm.IsSimulation)
-			result = r.executeMethodCall(ctx, parsedABI, originalAbiString, contractAddr, methodCall, effectiveSim)
+			result = r.executeMethodCall(ctx, parsedABI, originalAbiString, contractAddr, methodCall, effectiveSim, node)
 		}()
 		// Ensure MethodName is populated to avoid empty keys downstream
 		if result.MethodName == "" {
@@ -1992,41 +1993,45 @@ func (r *ContractWriteProcessor) convertMapToEventLog(logMap map[string]interfac
 	return eventLog
 }
 
-// extractTransactionValue extracts the transaction value from nodeConfig with proper error handling
-func (r *ContractWriteProcessor) extractTransactionValue(methodName, contractAddress string) string {
+// extractTransactionValue extracts the transaction value from node.Config.Value (protobuf)
+func (r *ContractWriteProcessor) extractTransactionValue(methodName, contractAddress string, node *avsproto.ContractWriteNode) string {
 	transactionValue := "0" // Default to 0 if not specified
 
-	r.vm.mu.Lock()
-	defer r.vm.mu.Unlock()
-
-	nodeConfigIface, exists := r.vm.vars["nodeConfig"]
-	if !exists {
-		return transactionValue
+	if node != nil && node.Config != nil && node.Config.Value != nil {
+		valueStr := *node.Config.Value
+		if valueStr != "" {
+			if r.vm.logger != nil {
+				r.vm.logger.Info("Using transaction value from node.Config",
+					"value", valueStr,
+					"method", methodName,
+					"contract", contractAddress)
+			}
+			return valueStr
+		}
 	}
 
-	nodeConfig, ok := nodeConfigIface.(map[string]interface{})
-	if !ok {
-		return transactionValue
+	return transactionValue
+}
+
+// extractGasLimit extracts the custom gas limit from node.Config.GasLimit (protobuf)
+// Returns empty string if not specified (caller should use default gas estimation)
+func (r *ContractWriteProcessor) extractGasLimit(methodName, contractAddress string, node *avsproto.ContractWriteNode) string {
+	gasLimit := "" // Default to empty (use gas estimation)
+
+	if node != nil && node.Config != nil && node.Config.GasLimit != nil {
+		gasLimitStr := *node.Config.GasLimit
+		if gasLimitStr != "" {
+			if r.vm.logger != nil {
+				r.vm.logger.Info("Using custom gas limit from node.Config",
+					"gasLimit", gasLimitStr,
+					"method", methodName,
+					"contract", contractAddress)
+			}
+			return gasLimitStr
+		}
 	}
 
-	valueIface, exists := nodeConfig["value"]
-	if !exists {
-		return transactionValue
-	}
-
-	valueStr, ok := valueIface.(string)
-	if !ok || valueStr == "" {
-		return transactionValue
-	}
-
-	if r.vm.logger != nil {
-		r.vm.logger.Info("Using transaction value from configuration",
-			"value", valueStr,
-			"method", methodName,
-			"contract", contractAddress)
-	}
-
-	return valueStr
+	return gasLimit
 }
 
 // calculatePoolAddresses calculates pool addresses from router method calldata
