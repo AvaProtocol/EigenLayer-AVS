@@ -5,7 +5,6 @@ import (
 	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
-	storageschema "github.com/AvaProtocol/EigenLayer-AVS/storage/schema"
 	badger "github.com/dgraph-io/badger/v4"
 )
 
@@ -63,7 +62,7 @@ func (q *Queue) CleanupOrphanedJobs() (*CleanupStats, error) {
 			var checkedStatuses []string
 
 			for _, taskStatus := range taskStatuses {
-				taskKey := storageschema.TaskStorageKey(job.Name, taskStatus)
+				taskKey := buildTaskStorageKey(job.Name, taskStatus)
 				checkedStatuses = append(checkedStatuses, string(taskKey))
 				_, err := q.db.GetKey(taskKey)
 				if err == nil {
@@ -117,6 +116,31 @@ func (q *Queue) CleanupOrphanedJobs() (*CleanupStats, error) {
 		"duration_ms", stats.Duration.Milliseconds())
 
 	return stats, nil
+}
+
+// taskStatusToStorageKey converts a task status enum to its storage key prefix
+// This duplicates logic from taskengine/schema.go to avoid import cycle
+// c: completed, f: failed, x: executing, l: cancelled, a: active (default)
+func taskStatusToStorageKey(v avsproto.TaskStatus) string {
+	switch v {
+	case avsproto.TaskStatus_Completed:
+		return "c"
+	case avsproto.TaskStatus_Failed:
+		return "f"
+	case avsproto.TaskStatus_Canceled:
+		return "l"
+	case avsproto.TaskStatus_Executing:
+		return "x"
+	case avsproto.TaskStatus_Active:
+		return "a"
+	default:
+		return "a"
+	}
+}
+
+// buildTaskStorageKey constructs a task storage key for the given task ID and status
+func buildTaskStorageKey(taskID string, status avsproto.TaskStatus) []byte {
+	return []byte(fmt.Sprintf("t:%s:%s", taskStatusToStorageKey(status), taskID))
 }
 
 // SchedulePeriodicCleanup runs cleanup every interval
