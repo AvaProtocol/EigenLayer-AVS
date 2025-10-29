@@ -1229,8 +1229,12 @@ message GetExecutionStatsResp {
 
 // Request message for RunNodeWithInputs
 message RunNodeWithInputsReq {
-  TaskNode node = 1; // Complete node definition with proper Config (consistent with SimulateTask)
-  // Field 2 was node_config (removed in Jan 2025) - do not reuse
+  NodeType node_type = 1; // Type of node to execute using the NodeType enum
+  // Configuration for the node - this creates a proper node with Config from the map
+  // HISTORICAL NOTE: This field was previously also stored as vm.vars["nodeConfig"] as a workaround
+  // for fields not yet in protobuf schema (value, gasLimit, options). That workaround has been
+  // removed (Jan 2025). All configuration now goes through proper node.Config fields.
+  map<string, google.protobuf.Value> node_config = 2;
   map<string, google.protobuf.Value> input_variables = 3; // Input variables for the node
 }
 
@@ -1262,8 +1266,8 @@ message RunNodeWithInputsResp {
 
 // Request message for RunTrigger
 message RunTriggerReq {
-  TaskTrigger trigger = 1; // Complete trigger definition with proper Config (consistent with SimulateTask)
-  // Field 2 was trigger_config (removed in Jan 2025) - do not reuse
+  TriggerType trigger_type = 1; // Type of trigger to execute using the TriggerType enum
+  map<string, google.protobuf.Value> trigger_config = 2; // Configuration for the trigger
   map<string, google.protobuf.Value> trigger_input = 3; // Input data for the trigger
 }
 
