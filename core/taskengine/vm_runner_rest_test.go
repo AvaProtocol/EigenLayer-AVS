@@ -912,6 +912,8 @@ func TestRestRequestSendGridGlobalSecret(t *testing.T) {
 func TestRestSummarizeTelegramHTML(t *testing.T) {
 	// Expect composed subject/body
 	expectedWorkflowName := "Using sdk test wallet"
+	expectedSubject := expectedWorkflowName + ": succeeded"
+	expectedBody := "Finished run_swap."
 
 	// Mock Telegram endpoint that inspects incoming request
 	telegramServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -932,18 +934,9 @@ func TestRestSummarizeTelegramHTML(t *testing.T) {
 		}
 		text, _ := req["text"].(string)
 		t.Logf("telegram composed text: %q", text)
-		// Verify that summarization happened - check for HTML formatting and key workflow info
-		if !strings.Contains(text, "<b>") || !strings.Contains(text, "</b>") {
-			t.Errorf("telegram text missing HTML bold tags, summarization may not have occurred. got: %q", text)
-		}
-		if !strings.Contains(text, expectedWorkflowName) {
-			t.Errorf("telegram text missing workflow name %q. got: %q", expectedWorkflowName, text)
-		}
-		if !strings.Contains(strings.ToLower(text), "succeed") {
-			t.Errorf("telegram text missing success indicator. got: %q", text)
-		}
-		if text == "placeholder" {
-			t.Errorf("telegram text was not replaced by summary, still shows placeholder")
+		expectedText := "<b>" + expectedSubject + "</b>\n" + expectedBody
+		if text != expectedText {
+			t.Errorf("unexpected telegram text.\nwant: %q\n got: %q", expectedText, text)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -993,6 +986,8 @@ func TestRestSummarizeTelegramHTML(t *testing.T) {
 
 func TestRestSummarizeSendGridInjection(t *testing.T) {
 	expectedWorkflowName := "Using sdk test wallet"
+	expectedSubject := expectedWorkflowName + ": succeeded"
+	expectedBody := "Finished run_swap."
 
 	// Mock SendGrid endpoint; verify subject and content[0].value
 	sendgridServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1016,26 +1011,14 @@ func TestRestSummarizeSendGridInjection(t *testing.T) {
 			}
 		}
 		t.Logf("sendgrid composed subject: %q body: %q", subj, body)
-		// Verify subject contains workflow name and success indicator (could be AI-generated)
-		if !strings.Contains(subj, expectedWorkflowName) {
-			t.Errorf("subject missing workflow name. want to contain %q got %q", expectedWorkflowName, subj)
-		}
-		if !strings.Contains(strings.ToLower(subj), "succeed") {
-			t.Errorf("subject missing success indicator. got %q", subj)
+		if subj != expectedSubject {
+			t.Errorf("unexpected subject. want %q got %q", expectedSubject, subj)
 		}
 		if len(content) == 0 {
 			t.Errorf("expected content array to be non-empty")
 		} else if first, ok := content[0].(map[string]interface{}); ok {
-			if val, _ := first["value"].(string); val != "" {
-				// Verify body was generated and replaced placeholder (could be AI-generated)
-				if val == "placeholder" {
-					t.Errorf("content[0].value was not replaced by summary, still shows placeholder")
-				}
-				if !strings.Contains(val, expectedWorkflowName) {
-					t.Errorf("content[0].value missing workflow name. want to contain %q got %q", expectedWorkflowName, val)
-				}
-			} else {
-				t.Errorf("content[0].value is empty")
+			if val, _ := first["value"].(string); val != expectedBody {
+				t.Errorf("unexpected content[0].value. want %q got %q", expectedBody, val)
 			}
 		} else {
 			t.Errorf("content[0] not an object")
@@ -1068,6 +1051,64 @@ func TestRestSummarizeSendGridInjection(t *testing.T) {
 
 	processor := NewRestProcessor(vm)
 	step, err := processor.Execute("sg-sum", node)
+	if err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+	if !step.Success {
+		t.Fatalf("expected step success, got failure: %s", step.Error)
+	}
+}
+
+// Verifies summarize works via RNWI-style vm.vars["nodeConfig"].options path
+func TestRestSummarizeRNWIOptionsVar(t *testing.T) {
+	expectedWorkflowName := "Using sdk test wallet"
+	expectedSubject := expectedWorkflowName + ": succeeded"
+	expectedBody := "Finished run_swap."
+
+	// Mock Telegram endpoint
+	telegramServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		text, _ := req["text"].(string)
+		t.Logf("telegram (RNWI) composed text: %q", text)
+		expectedText := "<b>" + expectedSubject + "</b>\n" + expectedBody
+		if text != expectedText {
+			t.Errorf("unexpected telegram text (RNWI).\nwant: %q\n got: %q", expectedText, text)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "result": map[string]interface{}{"message_id": 1}})
+	}))
+	defer telegramServer.Close()
+
+	// Node WITHOUT Config.Options; will use vm.vars["nodeConfig"].options
+	node := &avsproto.RestAPINode{
+		Config: &avsproto.RestAPINode_Config{
+			Url:     telegramServer.URL + "/botX/sendMessage",
+			Headers: map[string]string{"Content-Type": "application/json"},
+			Body:    `{"chat_id": 1, "text": "placeholder"}`,
+			Method:  "POST",
+		},
+	}
+
+	nodes := []*avsproto.TaskNode{{Id: "tg-rnwi", Name: "restApi", TaskType: &avsproto.TaskNode_RestApi{RestApi: node}}}
+	trigger := &avsproto.TaskTrigger{Id: "trig", Name: "trig"}
+	edges := []*avsproto.TaskEdge{{Id: "e1", Source: trigger.Id, Target: "tg-rnwi"}}
+	vm, err := NewVMWithData(&model.Task{Task: &avsproto.Task{Id: "tg-rnwi", Nodes: nodes, Edges: edges, Trigger: trigger}}, nil, testutil.GetTestSmartWalletConfig(), nil)
+	if err != nil {
+		t.Fatalf("failed to create VM: %v", err)
+	}
+
+	// Simulate RNWI-provided nodeConfig with options.summarize=true
+	vm.AddVar("nodeConfig", map[string]interface{}{
+		"options": map[string]interface{}{"summarize": true},
+	})
+
+	vm.AddVar("settings", map[string]interface{}{"name": expectedWorkflowName})
+	vm.ExecutionLogs = append(vm.ExecutionLogs, &avsproto.Execution_Step{Name: "run_swap", Success: true})
+
+	processor := NewRestProcessor(vm)
+	step, err := processor.Execute("tg-rnwi", node)
 	if err != nil {
 		t.Fatalf("expected success, got error: %v", err)
 	}

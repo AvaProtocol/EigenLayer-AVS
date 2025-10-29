@@ -3,7 +3,6 @@ package taskengine
 import (
 	"encoding/json"
 	"fmt"
-	"html"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -582,16 +581,12 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 
 	// Optionally compose summary and inject into provider payloads when enabled via nodeConfig.options.summarize
-	// Keep a reference to the composed summary so we can return it to clients even
-	// when the external notification provider (e.g., SendGrid) returns an empty body.
-	var summaryForClient *Summary
 	if shouldSummarize(r.vm, node) {
 		provider := detectNotificationProvider(url)
 		if provider != "" {
-			// Build summary from current VM context (AI if enabled, else deterministic)
+			// Build summary from current VM context
 			currentName := r.vm.GetNodeNameAsVar(stepID)
-			s := ComposeSummarySmart(r.vm, currentName)
-			summaryForClient = &s
+			s := ComposeSummary(r.vm, currentName)
 
 			// Attempt to parse body as JSON and inject subject/body accordingly
 			var bodyObj map[string]interface{}
@@ -599,49 +594,19 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 				switch provider {
 				case "sendgrid":
 					bodyObj["subject"] = s.Subject
-					// Also update subject in personalizations array if present (SendGrid canonical location)
-					if pers, ok := bodyObj["personalizations"].([]interface{}); ok {
-						for i := range pers {
-							if p, ok := pers[i].(map[string]interface{}); ok {
-								p["subject"] = s.Subject
-								pers[i] = p
-							}
-						}
-						bodyObj["personalizations"] = pers
-					}
-					// Ensure content array exists and contains both text/plain and text/html
+					// Ensure content array exists
 					var contentArr []interface{}
 					if v, ok := bodyObj["content"].([]interface{}); ok {
 						contentArr = v
 					}
-
-					// Build styled HTML email
-					styledHTML := buildStyledHTMLEmail(s.Subject, s.Body)
-
-					// Update or add text/plain and text/html parts
-					foundPlain := false
-					foundHTML := false
-					for i := range contentArr {
-						if m, ok := contentArr[i].(map[string]interface{}); ok {
-							if t, ok2 := m["type"].(string); ok2 {
-								if strings.EqualFold(t, "text/plain") {
-									m["value"] = s.Body
-									contentArr[i] = m
-									foundPlain = true
-								}
-								if strings.EqualFold(t, "text/html") {
-									m["value"] = styledHTML
-									contentArr[i] = m
-									foundHTML = true
-								}
-							}
+					if len(contentArr) == 0 {
+						contentArr = []interface{}{map[string]interface{}{"type": "text/plain", "value": s.Body}}
+					} else {
+						// Update first element's value
+						if first, ok := contentArr[0].(map[string]interface{}); ok {
+							first["value"] = s.Body
+							contentArr[0] = first
 						}
-					}
-					if !foundPlain {
-						contentArr = append(contentArr, map[string]interface{}{"type": "text/plain", "value": s.Body})
-					}
-					if !foundHTML {
-						contentArr = append(contentArr, map[string]interface{}{"type": "text/html", "value": styledHTML})
 					}
 					bodyObj["content"] = contentArr
 				case "telegram":
@@ -745,7 +710,6 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	// Parse response body
 	var bodyData interface{}
 	bodyStr := string(response.Body())
-	statusSuccess := response.StatusCode() < 400
 	if bodyStr != "" {
 		var jsonData interface{}
 		if err := json.Unmarshal(response.Body(), &jsonData); err == nil {
@@ -754,55 +718,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 			bodyData = bodyStr
 		}
 	} else {
-		// If the provider didn't return a body (common for notification providers with 202 Accepted),
-		// surface the composed summary in the server response so clients have subject/body to display.
-		// For single-node notification calls, derive success from the HTTP response status.
-		if summaryForClient != nil {
-			workflowName := resolveWorkflowName(r.vm)
-			// Build a summary for clients based on HTTP response status
-			var subj string
-			var bod string
-			if statusSuccess {
-				subj = fmt.Sprintf("%s: succeeded (%d steps)", workflowName, 1)
-				// Provide a concise success body for notification-only steps
-				runner := ""
-				owner := ""
-				r.vm.mu.Lock()
-				if settings, ok := r.vm.vars["settings"].(map[string]interface{}); ok {
-					if rr, ok := settings["runner"].(string); ok {
-						runner = rr
-					}
-				}
-				if wc, ok := r.vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
-					if rr, ok := wc["runner"].(string); ok && runner == "" {
-						runner = rr
-					}
-					if ow, ok := wc["owner"].(string); ok {
-						owner = ow
-					}
-					if eoa, ok := wc["eoaAddress"].(string); ok && owner == "" {
-						owner = eoa
-					}
-				}
-				r.vm.mu.Unlock()
-				bod = fmt.Sprintf(
-					"Smart wallet %s (owner %s) executed 1 notification step.\n\nThe email was sent successfully via SendGrid.\n\nAll steps completed on %s.",
-					runner, owner, resolveChainName(r.vm),
-				)
-			} else {
-				subj = fmt.Sprintf("%s: failed (%d steps)", workflowName, 1)
-				bod = fmt.Sprintf(
-					"Smart wallet executed 1 notification step, but the provider returned HTTP %d.\n\nThe email could not be sent.",
-					response.StatusCode(),
-				)
-			}
-			bodyData = map[string]interface{}{
-				"subject": subj,
-				"body":    bod,
-			}
-		} else {
-			bodyData = ""
-		}
+		bodyData = ""
 	}
 
 	// Create standard format response
@@ -858,15 +774,33 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	return executionLogStep, nil
 }
 
-// shouldSummarize checks node.Config.Options for summarize=true
+// shouldSummarize checks VM vars for nodeConfig.options.summarize=true
 func shouldSummarize(vm *VM, node *avsproto.RestAPINode) bool {
 	if vm == nil {
 		return false
 	}
-	// Check protobuf node.Config.Options
+	// First, check protobuf node config options (works for deployed workflows)
 	if node != nil && node.Config != nil && node.Config.Options != nil {
 		if optsMap, ok := node.Config.Options.AsInterface().(map[string]interface{}); ok {
 			if v, ok := optsMap["summarize"].(bool); ok {
+				return v
+			}
+		}
+	}
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	rawCfg, ok := vm.vars["nodeConfig"]
+	if !ok {
+		return false
+	}
+	cfgMap, ok := rawCfg.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	// options may be a map[string]interface{}
+	if rawOpts, ok := cfgMap["options"]; ok && rawOpts != nil {
+		if opts, ok := rawOpts.(map[string]interface{}); ok {
+			if v, ok := opts["summarize"].(bool); ok {
 				return v
 			}
 		}
@@ -889,37 +823,6 @@ func detectNotificationProvider(u string) string {
 		return "telegram"
 	}
 	return ""
-}
-
-// buildStyledHTMLEmail wraps a plain-text body into a simple, safe HTML layout
-// suitable for email clients. It escapes the input text and preserves paragraph
-// breaks by turning double newlines into <p> blocks and single newlines into <br/>.
-func buildStyledHTMLEmail(subject, body string) string {
-	// Escape HTML to avoid injection
-	safe := html.EscapeString(body)
-	// Normalize newlines
-	safe = strings.ReplaceAll(safe, "\r\n", "\n")
-	// Split by paragraphs (double newline)
-	parts := strings.Split(safe, "\n\n")
-	var paragraphs []string
-	for _, p := range parts {
-		if strings.TrimSpace(p) == "" {
-			continue
-		}
-		// Convert single newlines within a paragraph to <br/>
-		p = strings.ReplaceAll(p, "\n", "<br/>")
-		paragraphs = append(paragraphs, "<p style=\"margin:0 0 16px 0;\">"+p+"</p>")
-	}
-
-	content := strings.Join(paragraphs, "\n")
-	// Minimal, responsive-friendly dark theme matching Ava Protocol brand
-	return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
-		"<title>" + html.EscapeString(subject) + "</title>" +
-		"<style>body{background:#141414;color:#D2D2D2;margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;}" +
-		".container{max-width:640px;margin:0 auto;padding:32px 24px;}h1,h2,h3,h4,h5,h6{color:#fff;margin-top:24px;margin-bottom:12px;}a{color:#A061FF;text-decoration:none;}" +
-		"p{margin:0 0 16px 0;line-height:1.6;}.divider{border-top:1px solid #333;margin:24px 0;}" +
-		"@media(max-width:480px){.container{padding:24px 16px;}h1,h2,h3{font-size:1.2rem;}}</style></head>" +
-		"<body><div class=\"container\">" + content + "</div></body></html>"
 }
 
 // escapeJSONString properly escapes a string for use within JSON
