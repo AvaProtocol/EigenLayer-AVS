@@ -5150,9 +5150,9 @@ func (x *GetExecutionStatsResp) GetAvgExecutionTime() float64 {
 
 // Request message for RunNodeWithInputs
 type RunNodeWithInputsReq struct {
-	state    protoimpl.MessageState `protogen:"open.v1"`
-	NodeType NodeType               `protobuf:"varint,1,opt,name=node_type,json=nodeType,proto3,enum=aggregator.NodeType" json:"node_type,omitempty"` // Type of node to execute using the NodeType enum
-	// Field 2 (node_config) was removed in Jan 2025 - do not reuse this field number
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Node  *TaskNode              `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"` // Complete node definition with proper Config (consistent with SimulateTask)
+	// Field 2 was node_config (removed in Jan 2025) - do not reuse
 	InputVariables map[string]*structpb.Value `protobuf:"bytes,3,rep,name=input_variables,json=inputVariables,proto3" json:"input_variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Input variables for the node
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -5188,11 +5188,11 @@ func (*RunNodeWithInputsReq) Descriptor() ([]byte, []int) {
 	return file_avs_proto_rawDescGZIP(), []int{65}
 }
 
-func (x *RunNodeWithInputsReq) GetNodeType() NodeType {
+func (x *RunNodeWithInputsReq) GetNode() *TaskNode {
 	if x != nil {
-		return x.NodeType
+		return x.Node
 	}
-	return NodeType_NODE_TYPE_UNSPECIFIED
+	return nil
 }
 
 func (x *RunNodeWithInputsReq) GetInputVariables() map[string]*structpb.Value {
@@ -9793,9 +9793,9 @@ const file_avs_proto_rawDesc = "" +
 	"\x05total\x18\x01 \x01(\x03R\x05total\x12\x1c\n" +
 	"\tsucceeded\x18\x02 \x01(\x03R\tsucceeded\x12\x16\n" +
 	"\x06failed\x18\x03 \x01(\x03R\x06failed\x12,\n" +
-	"\x12avg_execution_time\x18\x04 \x01(\x01R\x10avgExecutionTime\"\x83\x02\n" +
-	"\x14RunNodeWithInputsReq\x121\n" +
-	"\tnode_type\x18\x01 \x01(\x0e2\x14.aggregator.NodeTypeR\bnodeType\x12]\n" +
+	"\x12avg_execution_time\x18\x04 \x01(\x01R\x10avgExecutionTime\"\xfa\x01\n" +
+	"\x14RunNodeWithInputsReq\x12(\n" +
+	"\x04node\x18\x01 \x01(\v2\x14.aggregator.TaskNodeR\x04node\x12]\n" +
 	"\x0finput_variables\x18\x03 \x03(\v24.aggregator.RunNodeWithInputsReq.InputVariablesEntryR\x0einputVariables\x1aY\n" +
 	"\x13InputVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
@@ -10280,7 +10280,7 @@ var file_avs_proto_depIdxs = []int32{
 	128, // 64: aggregator.TriggerTaskResp.steps:type_name -> aggregator.Execution.Step
 	56,  // 65: aggregator.ListSecretsResp.items:type_name -> aggregator.Secret
 	55,  // 66: aggregator.ListSecretsResp.page_info:type_name -> aggregator.PageInfo
-	1,   // 67: aggregator.RunNodeWithInputsReq.node_type:type_name -> aggregator.NodeType
+	28,  // 67: aggregator.RunNodeWithInputsReq.node:type_name -> aggregator.TaskNode
 	132, // 68: aggregator.RunNodeWithInputsReq.input_variables:type_name -> aggregator.RunNodeWithInputsReq.InputVariablesEntry
 	137, // 69: aggregator.RunNodeWithInputsResp.metadata:type_name -> google.protobuf.Value
 	137, // 70: aggregator.RunNodeWithInputsResp.execution_context:type_name -> google.protobuf.Value

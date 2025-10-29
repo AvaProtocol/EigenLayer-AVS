@@ -3292,44 +3292,53 @@ func (n *Engine) detectNodeTypeFromStep(step *avsproto.Execution_Step) string {
 
 // RunNodeImmediatelyRPC handles the RPC interface for immediate node execution
 func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWithInputsReq) (*avsproto.RunNodeWithInputsResp, error) {
-	// Extract node configuration from input_variables
-	// The SDK should pass node config under a special key (e.g., "config" or "nodeConfig")
-	nodeConfig := make(map[string]interface{})
-	inputVariables := make(map[string]interface{})
+	// The request now contains a complete TaskNode, consistent with SimulateTask
+	node := req.Node
+	if node == nil {
+		return &avsproto.RunNodeWithInputsResp{
+			Success:   false,
+			Error:     "node is required",
+			ErrorCode: avsproto.ErrorCode_INVALID_REQUEST,
+			OutputData: &avsproto.RunNodeWithInputsResp_RestApi{
+				RestApi: &avsproto.RestAPINode_Output{},
+			},
+		}, nil
+	}
 
+	// Convert input variables from protobuf to Go map
+	inputVariables := make(map[string]interface{})
 	for k, v := range req.InputVariables {
 		inputVariables[k] = v.AsInterface()
 	}
 
-	// Extract node configuration from inputVariables if provided
-	// Support both "config" and "nodeConfig" keys for backward compatibility
-	if configIface, ok := inputVariables["config"]; ok {
-		if configMap, ok := configIface.(map[string]interface{}); ok {
-			nodeConfig = configMap
-			// Remove from inputVariables so it doesn't pollute the VM vars
-			delete(inputVariables, "config")
-		}
-	} else if configIface, ok := inputVariables["nodeConfig"]; ok {
-		if configMap, ok := configIface.(map[string]interface{}); ok {
-			nodeConfig = configMap
-			// Remove from inputVariables so it doesn't pollute the VM vars
-			delete(inputVariables, "nodeConfig")
-		}
-	}
-
-	// Convert NodeType enum to string
-	nodeTypeStr := NodeTypeToString(req.NodeType)
+	// Get node type string from the node's Type field
+	nodeTypeStr := NodeTypeToString(node.Type)
 	if nodeTypeStr == "" {
 		// For unsupported node types, return error but still set output data to avoid OUTPUT_DATA_NOT_SET
 		resp := &avsproto.RunNodeWithInputsResp{
 			Success: false,
-			Error:   fmt.Sprintf("unsupported node type: %v", req.NodeType),
+			Error:   fmt.Sprintf("unsupported node type: %v", node.Type),
 		}
 		// Set default RestAPI output structure to avoid OUTPUT_DATA_NOT_SET
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{
 			RestApi: &avsproto.RestAPINode_Output{},
 		}
 		return resp, nil
+	}
+
+	// Extract node configuration from the TaskNode protobuf
+	// This uses ExtractNodeConfiguration to get a properly typed config map with all fields
+	// (including value and gasLimit for ContractWrite nodes)
+	nodeConfig := ExtractNodeConfiguration(node)
+	if nodeConfig == nil {
+		return &avsproto.RunNodeWithInputsResp{
+			Success:   false,
+			Error:     "failed to extract node configuration",
+			ErrorCode: avsproto.ErrorCode_INVALID_REQUEST,
+			OutputData: &avsproto.RunNodeWithInputsResp_RestApi{
+				RestApi: &avsproto.RestAPINode_Output{},
+			},
+		}, nil
 	}
 
 	// Simulation mode is determined per-node (e.g., contractWrite.config.is_simulated).
@@ -3371,7 +3380,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 	// Log successful execution (success determined by node execution)
 	if n.logger != nil {
-		n.logger.Info("RunNodeImmediatelyRPC: Executed successfully", "nodeTypeStr", nodeTypeStr, "originalNodeType", req.NodeType)
+		n.logger.Info("RunNodeImmediatelyRPC: Executed successfully", "nodeTypeStr", nodeTypeStr, "nodeType", node.Type)
 	}
 
 	// Convert result to the appropriate protobuf output type

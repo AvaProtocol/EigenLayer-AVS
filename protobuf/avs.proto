@@ -1229,8 +1229,8 @@ message GetExecutionStatsResp {
 
 // Request message for RunNodeWithInputs
 message RunNodeWithInputsReq {
-  NodeType node_type = 1; // Type of node to execute using the NodeType enum
-  // Field 2 (node_config) was removed in Jan 2025 - do not reuse this field number
+  TaskNode node = 1; // Complete node definition with proper Config (consistent with SimulateTask)
+  // Field 2 was node_config (removed in Jan 2025) - do not reuse
   map<string, google.protobuf.Value> input_variables = 3; // Input variables for the node
 }
 
