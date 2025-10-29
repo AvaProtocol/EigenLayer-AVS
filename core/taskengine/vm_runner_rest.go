@@ -584,9 +584,9 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	if shouldSummarize(r.vm, node) {
 		provider := detectNotificationProvider(url)
 		if provider != "" {
-			// Build summary from current VM context
+			// Build summary from current VM context (AI if enabled, else deterministic)
 			currentName := r.vm.GetNodeNameAsVar(stepID)
-			s := ComposeSummary(r.vm, currentName)
+			s := ComposeSummarySmart(r.vm, currentName)
 
 			// Attempt to parse body as JSON and inject subject/body accordingly
 			var bodyObj map[string]interface{}

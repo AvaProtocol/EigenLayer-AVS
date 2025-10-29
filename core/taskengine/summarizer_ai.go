@@ -7,11 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"time"
-
-	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -39,8 +36,8 @@ func ComposeSummarySmart(vm *VM, currentStepName string) Summary {
 		return ComposeSummary(vm, currentStepName)
 	}
 
-	// Use a modest timeout to allow remote providers to respond
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Use a conservative timeout even if the underlying summarizer chooses a shorter one
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	if s, err := globalSummarizer.Summarize(ctx, vm, currentStepName); err == nil {
@@ -77,7 +74,7 @@ func NewOpenAISummarizerFromAggregatorConfig(c *config.Config) Summarizer {
 	if !c.NotificationsSummary.Enabled || strings.ToLower(c.NotificationsSummary.Provider) != "openai" {
 		return nil
 	}
-	apiKey := firstNonEmptyStr(c.MacroSecrets["openai_api_key"], os.Getenv("OPENAI_API_KEY")) // prefer config secret; fallback to env
+	apiKey := firstNonEmptyStr(os.Getenv("OPENAI_API_KEY"), c.MacroSecrets["openai_api_key"]) // prefer env override
 	if strings.TrimSpace(apiKey) == "" {
 		return nil
 	}
@@ -112,25 +109,7 @@ func (o *OpenAISummarizer) Summarize(ctx context.Context, vm *VM, currentStepNam
 		"max_tokens":      o.cfg.MaxOutputTokens,
 		"response_format": map[string]string{"type": "json_object"},
 		"messages": []map[string]string{
-			{"role": "system", "content": `You create concise, professional workflow execution email summaries for on-chain operations. Your summary must include:
-
-1. Workflow name and total steps executed
-2. Smart wallet address that executed the transactions and the owner EOA address it belongs to
-3. Detailed explanation of what smart contract calls were made (contract address, method name, what action was performed)
-4. For swaps: explain token amounts (e.g., "spent X token1 for Y token0")
-5. For approvals: explain what token was approved and to which contract
-
-Be specific about on-chain state changes. Do not speculate. Redact any secrets. Return strict JSON with keys: subject, body.
-
-Subject format: "{workflow_name}: {status} ({N} steps)"
-Body format: A clear paragraph explaining the workflow execution, smart wallet operations, and on-chain changes.
-
-Formatting rules:
-- Insert a blank line between sentences (double newline) to increase readability.
-- If the provided 'actions' array is empty or there are no recognizable on-chain actions, include a sentence:
-  "No specific on-chain actions were recorded; this may have been a simulation or a step encountered an error."
-
-Note: The input includes a normalized 'actions' array summarizing key on-chain actions (approve/quote/swap). Prefer these for accuracy.`},
+			{"role": "system", "content": "You create concise, accurate workflow email summaries. Do not speculate. Redact secrets. Return strict JSON with keys: subject, body."},
 			{"role": "user", "content": digest},
 		},
 	}
@@ -179,9 +158,6 @@ Note: The input includes a normalized 'actions' array summarizing key on-chain a
 			return Summary{}, err
 		}
 	}
-
-	// Post-process body to ensure double newlines between sentences
-	s.Body = ensureDoubleNewlines(s.Body)
 	return s, nil
 }
 
@@ -200,43 +176,8 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 		lastName = safeName(currentStepName)
 	}
 
-	// Extract smart wallet and owner info
+	// Copy execution logs under lock to avoid races
 	vm.mu.Lock()
-	smartWallet := ""
-	ownerEOA := ""
-
-	// Try aa_sender first (smart wallet address)
-	if aaSender, ok := vm.vars["aa_sender"].(string); ok && aaSender != "" {
-		smartWallet = aaSender
-	}
-
-	// Try workflowContext.runner (also smart wallet)
-	if wfCtx, ok := vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
-		if runner, ok := wfCtx["runner"].(string); ok && runner != "" && smartWallet == "" {
-			smartWallet = runner
-		}
-		if owner, ok := wfCtx["owner"].(string); ok && owner != "" {
-			ownerEOA = owner
-		}
-		if eoa, ok := wfCtx["eoaAddress"].(string); ok && eoa != "" && ownerEOA == "" {
-			ownerEOA = eoa
-		}
-	}
-
-	// Also check settings.runner for single-node executions
-	if smartWallet == "" {
-		if settings, ok := vm.vars["settings"].(map[string]interface{}); ok {
-			if runner, ok := settings["runner"].(string); ok && strings.TrimSpace(runner) != "" {
-				smartWallet = runner
-			}
-		}
-	}
-
-	// Fallback to TaskOwner if available
-	if ownerEOA == "" && vm.TaskOwner != (common.Address{}) {
-		ownerEOA = vm.TaskOwner.Hex()
-	}
-
 	steps := make([]*avsproto.Execution_Step, len(vm.ExecutionLogs))
 	copy(steps, vm.ExecutionLogs)
 	vm.mu.Unlock()
@@ -247,52 +188,30 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 		start = len(steps) - maxSteps
 	}
 
-	// Build digest structure with contract call details
+	// Build digest structure
 	type stepDigest struct {
-		Name         string                 `json:"name"`
-		ID           string                 `json:"id"`
-		Type         string                 `json:"type"`
-		Success      bool                   `json:"success"`
-		Error        string                 `json:"error,omitempty"`
-		StartAt      int64                  `json:"start_at,omitempty"`
-		EndAt        int64                  `json:"end_at,omitempty"`
-		DurationMs   int64                  `json:"duration_ms,omitempty"`
-		ContractAddr string                 `json:"contract_address,omitempty"`
-		MethodName   string                 `json:"method_name,omitempty"`
-		MethodParams map[string]interface{} `json:"method_params,omitempty"`
-		OutputData   interface{}            `json:"output_data,omitempty"`
-		Metadata     interface{}            `json:"metadata,omitempty"`
+		Name       string `json:"name"`
+		ID         string `json:"id"`
+		Success    bool   `json:"success"`
+		Error      string `json:"error,omitempty"`
+		StartAt    int64  `json:"start_at,omitempty"`
+		EndAt      int64  `json:"end_at,omitempty"`
+		DurationMs int64  `json:"duration_ms,omitempty"`
 	}
 	d := struct {
-		Workflow    string                   `json:"workflow"`
-		SmartWallet string                   `json:"smart_wallet,omitempty"`
-		OwnerEOA    string                   `json:"owner_eoa,omitempty"`
-		TotalSteps  int                      `json:"total_steps"`
-		Status      string                   `json:"status"`
-		Failed      bool                     `json:"failed"`
-		FailedStep  string                   `json:"failed_step,omitempty"`
-		Reason      string                   `json:"reason,omitempty"`
-		LastStep    string                   `json:"last_step"`
-		Steps       []stepDigest             `json:"steps"`
-		Actions     []map[string]interface{} `json:"actions,omitempty"`
+		Workflow   string       `json:"workflow"`
+		Failed     bool         `json:"failed"`
+		FailedStep string       `json:"failed_step,omitempty"`
+		Reason     string       `json:"reason,omitempty"`
+		LastStep   string       `json:"last_step"`
+		Steps      []stepDigest `json:"steps"`
 	}{
-		Workflow:    workflowName,
-		SmartWallet: smartWallet,
-		OwnerEOA:    ownerEOA,
-		TotalSteps:  len(steps),
-		Status:      "",
-		Failed:      failed,
-		FailedStep:  failedName,
-		Reason:      firstLine(failedReason),
-		LastStep:    lastName,
-		Steps:       make([]stepDigest, 0, len(steps)-start),
-		Actions:     make([]map[string]interface{}, 0, 4),
-	}
-
-	// If this is a single-node immediate VM, reflect at least one in-flight step
-	// even if the execution log hasn't been appended yet.
-	if d.TotalSteps == 0 && isSingleNodeImmediate(vm) {
-		d.TotalSteps = 1
+		Workflow:   workflowName,
+		Failed:     failed,
+		FailedStep: failedName,
+		Reason:     firstLine(failedReason),
+		LastStep:   lastName,
+		Steps:      make([]stepDigest, 0, len(steps)-start),
 	}
 
 	for i := start; i < len(steps); i++ {
@@ -308,7 +227,6 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 		sd := stepDigest{
 			Name:       safeName(name),
 			ID:         st.GetId(),
-			Type:       st.GetType(),
 			Success:    st.GetSuccess(),
 			Error:      firstLine(st.GetError()),
 			StartAt:    st.GetStartAt(),
@@ -319,122 +237,7 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 		if sd.Error == "unknown error" {
 			sd.Error = ""
 		}
-
-		// Extract contract call details for contractWrite and contractRead
-		t := strings.ToUpper(st.GetType())
-		isWrite := strings.Contains(t, "CONTRACT_WRITE")
-		isRead := strings.Contains(t, "CONTRACT_READ")
-		if isWrite || isRead {
-			// Extract contract address from config
-			if st.GetConfig() != nil {
-				if cfgMap, ok := st.GetConfig().AsInterface().(map[string]interface{}); ok {
-					if addr, ok := cfgMap["contractAddress"].(string); ok && addr != "" {
-						sd.ContractAddr = addr
-					}
-					// Extract method calls
-					if methodCalls, ok := cfgMap["methodCalls"].([]interface{}); ok && len(methodCalls) > 0 {
-						if firstCall, ok := methodCalls[0].(map[string]interface{}); ok {
-							if mName, ok := firstCall["methodName"].(string); ok {
-								sd.MethodName = mName
-							}
-							if mParams, ok := firstCall["methodParams"].([]interface{}); ok && len(mParams) > 0 {
-								sd.MethodParams = map[string]interface{}{
-									"params": mParams,
-								}
-							}
-						}
-					}
-				}
-			}
-
-			// Extract output data
-			switch {
-			case st.GetContractWrite() != nil && st.GetContractWrite().Data != nil:
-				sd.OutputData = st.GetContractWrite().Data.AsInterface()
-				if st.Metadata != nil {
-					sd.Metadata = st.Metadata.AsInterface()
-				}
-			case st.GetContractRead() != nil && st.GetContractRead().Data != nil:
-				sd.OutputData = st.GetContractRead().Data.AsInterface()
-				if st.Metadata != nil {
-					sd.Metadata = st.Metadata.AsInterface()
-				}
-			}
-			// Build normalized actions for the model
-			lowerMethod := strings.ToLower(sd.MethodName)
-			switch lowerMethod {
-			case "approve":
-				action := map[string]interface{}{
-					"type":     "approve",
-					"contract": map[string]interface{}{"address": sd.ContractAddr},
-				}
-				if sd.MethodParams != nil {
-					action["params"] = sd.MethodParams
-				}
-				if out, ok := sd.OutputData.(map[string]interface{}); ok {
-					if ev, ok2 := out["Approval"].(map[string]interface{}); ok2 {
-						if v, ok3 := ev["value"]; ok3 {
-							action["amount"] = v
-						}
-					}
-				}
-				d.Actions = append(d.Actions, action)
-			case "quoteexactinputsingle":
-				action := map[string]interface{}{
-					"type":     "quote",
-					"contract": map[string]interface{}{"address": sd.ContractAddr},
-				}
-				if out, ok := sd.OutputData.(map[string]interface{}); ok {
-					if q, ok2 := out["quoteExactInputSingle"].(map[string]interface{}); ok2 {
-						if v, ok3 := q["amountOut"]; ok3 {
-							action["amountOut"] = v
-						}
-					}
-				}
-				d.Actions = append(d.Actions, action)
-			case "exactinputsingle":
-				action := map[string]interface{}{
-					"type":     "swap",
-					"contract": map[string]interface{}{"address": sd.ContractAddr},
-				}
-				if isWrite && sd.Metadata != nil {
-					if arr, ok := sd.Metadata.([]interface{}); ok && len(arr) > 0 {
-						if first, ok := arr[0].(map[string]interface{}); ok {
-							if val, ok := first["value"].(map[string]interface{}); ok {
-								if amt, ok := val["amountOut"].(string); ok && amt != "" {
-									action["amountOut"] = amt
-								}
-							} else if amtStr, ok := first["value"].(string); ok && amtStr != "" {
-								action["amountOut"] = amtStr
-							}
-						}
-					}
-				}
-				if isRead && sd.OutputData != nil {
-					if out, ok := sd.OutputData.(map[string]interface{}); ok {
-						if q, ok2 := out["exactInputSingle"].(map[string]interface{}); ok2 {
-							if v, ok3 := q["amountOut"]; ok3 {
-								action["amountOut"] = v
-							}
-						}
-					}
-				}
-				d.Actions = append(d.Actions, action)
-			}
-		}
-
 		d.Steps = append(d.Steps, sd)
-	}
-
-	// Set status text and notification-only flag
-	if failed {
-		if d.FailedStep != "" {
-			d.Status = "failed at " + d.FailedStep
-		} else {
-			d.Status = "failed"
-		}
-	} else {
-		d.Status = "succeeded"
 	}
 
 	// Marshal compactly
@@ -456,23 +259,6 @@ func stripCodeFences(s string) string {
 		trim = strings.TrimSuffix(trim, "```")
 	}
 	return strings.TrimSpace(trim)
-}
-
-// ensureDoubleNewlines inserts a blank line between sentences.
-// It replaces a single space after sentence terminators with two newlines
-// while preserving existing double newlines.
-func ensureDoubleNewlines(text string) string {
-	if strings.TrimSpace(text) == "" {
-		return text
-	}
-	// Normalize Windows newlines
-	t := strings.ReplaceAll(text, "\r\n", "\n")
-	// Don't break existing double newlines
-	// First, collapse any triple+ newlines to double
-	t = regexp.MustCompile("\n{3,}").ReplaceAllString(t, "\n\n")
-	// Insert double newlines after typical sentence endings if not already followed by a newline
-	t = regexp.MustCompile(`([.!?])\s+(\S)`).ReplaceAllString(t, "$1\n\n$2")
-	return t
 }
 
 func firstNonEmptyStr(a, b string) string {

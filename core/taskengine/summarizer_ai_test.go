@@ -2,7 +2,6 @@ package taskengine
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -29,17 +28,11 @@ func TestComposeSummarySmart_FallbackDeterministic(t *testing.T) {
 	}}
 
 	s := ComposeSummarySmart(vm, "rest1")
-	if !strings.Contains(s.Subject, "Workflow X: succeeded") {
-		t.Fatalf("subject should contain 'Workflow X: succeeded', got: %q", s.Subject)
+	if s.Subject != "Workflow X: succeeded" {
+		t.Fatalf("unexpected subject: %q", s.Subject)
 	}
-	// Body should contain the workflow name and completion message
-	// The exact format may vary based on available context (smart wallet, owner, etc.)
-	// Just verify it contains the essential elements
-	if s.Body == "" {
-		t.Fatalf("body should not be empty")
-	}
-	if !strings.Contains(s.Body, "Workflow X") && !strings.Contains(s.Body, "Step A") {
-		t.Fatalf("body should mention workflow or step name, got: %q", s.Body)
+	if s.Body != "Finished Step A." {
+		t.Fatalf("unexpected body: %q", s.Body)
 	}
 }
 
@@ -68,7 +61,7 @@ func TestComposeSummarySmart_AIFailsFallback(t *testing.T) {
 	}}
 
 	s := ComposeSummarySmart(vm, "rest1")
-	if !strings.Contains(s.Subject, "Workflow Y: succeeded") {
-		t.Fatalf("fallback failed, subject should contain 'Workflow Y: succeeded', got: %q", s.Subject)
+	if s.Subject != "Workflow Y: succeeded" {
+		t.Fatalf("fallback failed, subject=%q", s.Subject)
 	}
 }

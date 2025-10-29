@@ -137,22 +137,13 @@ type FeeRatesConfig struct {
 
 // NotificationsSummaryConfig defines optional AI summarization settings for notifications
 type NotificationsSummaryConfig struct {
-	// Enabled determines whether AI summarization is active for notifications.
-	// Set to true to enable summarization, false to disable.
-	Enabled bool
-	// Provider specifies the AI service to use for summarization (e.g., "openai").
-	Provider string
-	// Model specifies the model name or identifier to use with the provider (e.g., "gpt-3.5-turbo").
-	Model string
-	// MaxInputTokens sets the maximum number of input tokens allowed per summary request.
-	MaxInputTokens int
-	// MaxOutputTokens sets the maximum number of output tokens generated per summary.
-	MaxOutputTokens int
-	// Temperature controls the randomness of the AI output; valid range is 0.0 (deterministic) to 1.0 (most random).
-	Temperature float64
-	// TimeoutMs specifies the maximum time in milliseconds to wait for a summary response.
-	TimeoutMs int
-	// BudgetUSDPerSummary sets the maximum allowed cost in USD for generating a single summary.
+	Enabled             bool
+	Provider            string
+	Model               string
+	MaxInputTokens      int
+	MaxOutputTokens     int
+	Temperature         float64
+	TimeoutMs           int
 	BudgetUSDPerSummary float64
 }
 
