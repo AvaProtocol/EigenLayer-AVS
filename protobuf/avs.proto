@@ -1230,11 +1230,7 @@ message GetExecutionStatsResp {
 // Request message for RunNodeWithInputs
 message RunNodeWithInputsReq {
   NodeType node_type = 1; // Type of node to execute using the NodeType enum
-  // Configuration for the node - this creates a proper node with Config from the map
-  // HISTORICAL NOTE: This field was previously also stored as vm.vars["nodeConfig"] as a workaround
-  // for fields not yet in protobuf schema (value, gasLimit, options). That workaround has been
-  // removed (Jan 2025). All configuration now goes through proper node.Config fields.
-  map<string, google.protobuf.Value> node_config = 2;
+  // Field 2 (node_config) was removed in Jan 2025 - do not reuse this field number
   map<string, google.protobuf.Value> input_variables = 3; // Input variables for the node
 }
 

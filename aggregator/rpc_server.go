@@ -649,16 +649,33 @@ func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNode
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
-	// Get node type from the TaskNode for logging
-	var nodeTypeForLogging avsproto.NodeType
-	if req.Node != nil {
-		nodeTypeForLogging = req.Node.Type
-	}
-
 	r.config.Logger.Info("process run node with inputs",
 		"user", user.Address.String(),
-		"node_type", nodeTypeForLogging,
+		"node_type", req.NodeType,
 	)
+
+	// Add debug logging for the request details
+	inputKeys := make([]string, 0, len(req.InputVariables))
+	for k := range req.InputVariables {
+		inputKeys = append(inputKeys, k)
+	}
+
+	r.config.Logger.Info("run node with inputs details",
+		"user", user.Address.String(),
+		"node_type", req.NodeType,
+		"input_keys", inputKeys,
+	)
+
+	// For contract read debugging, log the full request details
+	if req.NodeType == avsproto.NodeType_NODE_TYPE_CONTRACT_READ {
+		// Extract keys only to avoid logging sensitive data
+		inputKeys := getInputKeys(req.InputVariables)
+
+		r.config.Logger.Debug("ContractRead full request",
+			"user", user.Address.String(),
+			"input_keys", inputKeys,
+		)
+	}
 
 	// Call the immediate execution function directly
 	result, err := r.engine.RunNodeImmediatelyRPC(user, req)
@@ -685,16 +702,21 @@ func (r *RpcServer) RunTrigger(ctx context.Context, req *avsproto.RunTriggerReq)
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
-	// Get trigger type from the TaskTrigger for logging
-	var triggerTypeForLogging avsproto.TriggerType
-	if req.Trigger != nil {
-		triggerTypeForLogging = req.Trigger.Type
-	}
-
 	r.config.Logger.Info("process run trigger",
 		"user", user.Address.String(),
-		"trigger_type", triggerTypeForLogging,
-		"trigger_name", req.Trigger.GetName(),
+		"trigger_type", req.TriggerType,
+	)
+
+	// Add debug logging for the request details
+	configKeys := make([]string, 0, len(req.TriggerConfig))
+	for k := range req.TriggerConfig {
+		configKeys = append(configKeys, k)
+	}
+
+	r.config.Logger.Info("run trigger details",
+		"user", user.Address.String(),
+		"trigger_type", req.TriggerType,
+		"config_keys", configKeys,
 	)
 
 	// Call the trigger execution function directly
