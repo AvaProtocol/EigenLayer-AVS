@@ -655,10 +655,6 @@ func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNode
 	)
 
 	// Add debug logging for the request details
-	configKeys := make([]string, 0, len(req.NodeConfig))
-	for k := range req.NodeConfig {
-		configKeys = append(configKeys, k)
-	}
 	inputKeys := make([]string, 0, len(req.InputVariables))
 	for k := range req.InputVariables {
 		inputKeys = append(inputKeys, k)
@@ -667,19 +663,16 @@ func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNode
 	r.config.Logger.Info("run node with inputs details",
 		"user", user.Address.String(),
 		"node_type", req.NodeType,
-		"config_keys", configKeys,
 		"input_keys", inputKeys,
 	)
 
 	// For contract read debugging, log the full request details
 	if req.NodeType == avsproto.NodeType_NODE_TYPE_CONTRACT_READ {
 		// Extract keys only to avoid logging sensitive data
-		configKeys := getConfigKeys(req.NodeConfig)
 		inputKeys := getInputKeys(req.InputVariables)
 
 		r.config.Logger.Debug("ContractRead full request",
 			"user", user.Address.String(),
-			"config_keys", configKeys,
 			"input_keys", inputKeys,
 		)
 	}
@@ -860,14 +853,6 @@ func (r *RpcServer) ReportEventOverload(ctx context.Context, alert *avsproto.Eve
 }
 
 // Helper functions for logging
-func getConfigKeys(config map[string]*structpb.Value) []string {
-	keys := make([]string, 0, len(config))
-	for k := range config {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
 func getInputKeys(inputs map[string]*structpb.Value) []string {
 	keys := make([]string, 0, len(inputs))
 	for k := range inputs {

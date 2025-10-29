@@ -3292,11 +3292,10 @@ func (n *Engine) detectNodeTypeFromStep(step *avsproto.Execution_Step) string {
 
 // RunNodeImmediatelyRPC handles the RPC interface for immediate node execution
 func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWithInputsReq) (*avsproto.RunNodeWithInputsResp, error) {
-	// Convert protobuf request to internal format
+	// Node configuration is now handled through proper protobuf node definitions
+	// For immediate node execution, we use an empty config as all configuration
+	// should come from input_variables and the node type
 	nodeConfig := make(map[string]interface{})
-	for k, v := range req.NodeConfig {
-		nodeConfig[k] = v.AsInterface()
-	}
 
 	inputVariables := make(map[string]interface{})
 	for k, v := range req.InputVariables {
