@@ -3292,14 +3292,29 @@ func (n *Engine) detectNodeTypeFromStep(step *avsproto.Execution_Step) string {
 
 // RunNodeImmediatelyRPC handles the RPC interface for immediate node execution
 func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWithInputsReq) (*avsproto.RunNodeWithInputsResp, error) {
-	// Node configuration is now handled through proper protobuf node definitions
-	// For immediate node execution, we use an empty config as all configuration
-	// should come from input_variables and the node type
+	// Extract node configuration from input_variables
+	// The SDK should pass node config under a special key (e.g., "config" or "nodeConfig")
 	nodeConfig := make(map[string]interface{})
-
 	inputVariables := make(map[string]interface{})
+
 	for k, v := range req.InputVariables {
 		inputVariables[k] = v.AsInterface()
+	}
+
+	// Extract node configuration from inputVariables if provided
+	// Support both "config" and "nodeConfig" keys for backward compatibility
+	if configIface, ok := inputVariables["config"]; ok {
+		if configMap, ok := configIface.(map[string]interface{}); ok {
+			nodeConfig = configMap
+			// Remove from inputVariables so it doesn't pollute the VM vars
+			delete(inputVariables, "config")
+		}
+	} else if configIface, ok := inputVariables["nodeConfig"]; ok {
+		if configMap, ok := configIface.(map[string]interface{}); ok {
+			nodeConfig = configMap
+			// Remove from inputVariables so it doesn't pollute the VM vars
+			delete(inputVariables, "nodeConfig")
+		}
 	}
 
 	// Convert NodeType enum to string
