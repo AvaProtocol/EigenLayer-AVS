@@ -263,6 +263,14 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 		logger: logger,
 	}
 
+	// Initialize optional AI summarizer (global) from aggregator config
+	if s := NewOpenAISummarizerFromAggregatorConfig(config); s != nil {
+		SetSummarizer(s)
+		logger.Info("AI summarizer initialized", "provider", config.NotificationsSummary.Provider, "model", config.NotificationsSummary.Model)
+	} else {
+		// Leave summarizer unset; deterministic fallback will be used
+	}
+
 	SetRpc(config.SmartWallet.EthRpcUrl)
 	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
 	//SetWsRpc(config.SmartWallet.EthWsUrl)

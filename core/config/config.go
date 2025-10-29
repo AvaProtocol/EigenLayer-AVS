@@ -107,6 +107,9 @@ type Config struct {
 
 	// Fee rates configuration for task execution pricing
 	FeeRates *FeeRatesConfig
+
+	// NotificationsSummary contains optional AI summarization settings for notifications
+	NotificationsSummary NotificationsSummaryConfig
 }
 
 // FeeRatesConfig defines configurable pricing for different trigger types and operations
@@ -130,6 +133,18 @@ type FeeRatesConfig struct {
 	// Event monitoring scaling factors
 	EventAddressFeeUSDPerMinute float64
 	EventTopicFeeUSDPerMinute   float64
+}
+
+// NotificationsSummaryConfig defines optional AI summarization settings for notifications
+type NotificationsSummaryConfig struct {
+	Enabled             bool
+	Provider            string
+	Model               string
+	MaxInputTokens      int
+	MaxOutputTokens     int
+	Temperature         float64
+	TimeoutMs           int
+	BudgetUSDPerSummary float64
 }
 
 type SmartWalletConfig struct {
@@ -232,6 +247,20 @@ type ConfigRaw struct {
 		EventAddressFeeUSDPerMinute float64 `yaml:"event_address_fee_usd_per_minute"`
 		EventTopicFeeUSDPerMinute   float64 `yaml:"event_topic_fee_usd_per_minute"`
 	} `yaml:"fee_rates"`
+
+	// Notifications configuration block
+	Notifications struct {
+		Summary struct {
+			Enabled             bool    `yaml:"enabled"`
+			Provider            string  `yaml:"provider"`
+			Model               string  `yaml:"model"`
+			MaxInputTokens      int     `yaml:"max_input_tokens"`
+			MaxOutputTokens     int     `yaml:"max_output_tokens"`
+			Temperature         float64 `yaml:"temperature"`
+			TimeoutMs           int     `yaml:"timeout_ms"`
+			BudgetUSDPerSummary float64 `yaml:"budget_usd_per_summary"`
+		} `yaml:"summary"`
+	} `yaml:"notifications"`
 }
 
 // These are read from CredibleSquaringDeploymentFileFlag
@@ -432,6 +461,18 @@ func NewConfig(configFilePath string) (*Config, error) {
 
 		// Initialize fee rates - use defaults if no YAML config provided
 		FeeRates: loadFeeRatesFromConfig(configRaw.FeeRates),
+
+		// Initialize notifications summary configuration (optional)
+		NotificationsSummary: NotificationsSummaryConfig{
+			Enabled:             configRaw.Notifications.Summary.Enabled,
+			Provider:            configRaw.Notifications.Summary.Provider,
+			Model:               configRaw.Notifications.Summary.Model,
+			MaxInputTokens:      configRaw.Notifications.Summary.MaxInputTokens,
+			MaxOutputTokens:     configRaw.Notifications.Summary.MaxOutputTokens,
+			Temperature:         configRaw.Notifications.Summary.Temperature,
+			TimeoutMs:           configRaw.Notifications.Summary.TimeoutMs,
+			BudgetUSDPerSummary: configRaw.Notifications.Summary.BudgetUSDPerSummary,
+		},
 	}
 
 	if config.SocketPath == "" {
