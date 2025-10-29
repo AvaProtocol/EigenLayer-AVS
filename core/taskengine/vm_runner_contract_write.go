@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -179,17 +180,30 @@ func (r *ContractWriteProcessor) executeMethodCall(
 
 		// Validate that template resolution didn't produce "undefined" values
 		if strings.Contains(resolvedMethodParams[i], "undefined") {
+			failedVars := extractFailedVariables(param, r.vm)
+			var errorMsg string
+			if len(failedVars) > 0 {
+				var failedVarStrs []string
+				for varName, varValue := range failedVars {
+					failedVarStrs = append(failedVarStrs, fmt.Sprintf("%s=%s", varName, varValue))
+				}
+				errorMsg = fmt.Sprintf("could not resolve template variable in method '%s': %s", methodCall.MethodName, strings.Join(failedVarStrs, ", "))
+			} else {
+				errorMsg = fmt.Sprintf("template variable resolution failed in method '%s': '%s' resolved to '%s'", methodCall.MethodName, param, resolvedMethodParams[i])
+			}
+
 			if r.vm != nil && r.vm.logger != nil {
 				r.vm.logger.Error("❌ CONTRACT WRITE - Template variable failed to resolve",
 					"method", methodCall.MethodName,
 					"original_param", param,
 					"resolved_param", resolvedMethodParams[i],
+					"failed_variables", failedVars,
 					"explanation", "This may be due to an undefined variable, incorrect template syntax, or unsupported variable names (e.g., variables with hyphens are not supported; use snake_case such as 'recipient_address' instead of 'recipient-address').")
 			}
 			return &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodCall.MethodName,
 				Success:    false,
-				Error:      fmt.Sprintf("template variable resolution failed in parameter %d: '%s' resolved to '%s'", i, param, resolvedMethodParams[i]),
+				Error:      errorMsg,
 			}
 		}
 	}
@@ -1545,10 +1559,10 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// 🚀 NEW: Create decoded events data organized by method name
 	var decodedEventsData = make(map[string]interface{})
 
-	// PRIORITY LOGIC: Add return values first, events will override if present
-	// Rule: Events take priority (more descriptive) over return values when both exist
+	// PRIORITY 1: Add return values from function outputs (ABI outputs)
+	// Return values take highest priority
 	for _, methodResult := range results {
-		r.vm.logger.Info("🔍 CRITICAL DEBUG - Processing methodResult for decodedEventsData",
+		r.vm.logger.Debug("🔍 Processing methodResult return value",
 			"method", methodResult.MethodName,
 			"value_nil", methodResult.Value == nil,
 			"value_content", func() interface{} {
@@ -1558,16 +1572,11 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				return "nil"
 			}())
 		if methodResult.Value != nil {
-			// Add return values under method name
+			// Add return values under method name - this takes priority
 			decodedEventsData[methodResult.MethodName] = methodResult.Value.AsInterface()
-			r.vm.logger.Info("✅ Added return value to decodedEventsData (will be overridden by events if present)",
+			r.vm.logger.Debug("✅ Added return value to decodedEventsData (priority 1)",
 				"method", methodResult.MethodName,
 				"data", methodResult.Value.AsInterface())
-		} else {
-			// For methods with no return value, create empty object to maintain structure
-			decodedEventsData[methodResult.MethodName] = map[string]interface{}{}
-			r.vm.logger.Info("✅ Added empty object for method with no return value",
-				"method", methodResult.MethodName)
 		}
 	}
 
@@ -1699,35 +1708,41 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			}
 		}
 
-		// PRIORITY LOGIC: Events take priority over return values
-		if len(methodEvents) > 0 {
-			// If we have events, use ONLY event data (events are more descriptive)
-			decodedEventsData[methodName] = methodEvents
-			r.vm.logger.Info("✅ EVENT PRIORITY - Using event data only (overriding return values)",
-				"method", methodName,
-				"event_fields", len(methodEvents),
-				"event_data", methodEvents)
+		// PRIORITY 2: Use event data only if no return value exists
+		// Priority order: 1) Return value (already set), 2) Event data, 3) true
+		if _, hasReturnValue := decodedEventsData[methodName]; !hasReturnValue {
+			if len(methodEvents) > 0 {
+				// Priority 2: Use event data if no return value
+				decodedEventsData[methodName] = methodEvents
+				r.vm.logger.Debug("✅ Using event data (priority 2, no return value)",
+					"method", methodName,
+					"event_fields", len(methodEvents),
+					"event_data", methodEvents)
 
-			// Apply decimal formatting to event data if needed
-			for decimalProviderMethod, decimalsValue := range decimalProviders {
-				for _, methodCall := range methodCalls {
-					// Find the method call that provides formatting details for this event
-					if methodCall.MethodName == decimalProviderMethod && len(methodCall.ApplyToFields) > 0 {
-						// Create decimal formatting context
-						ctx := NewDecimalFormattingContext(decimalsValue, methodCall.ApplyToFields, decimalProviderMethod)
-						// Apply formatting to the event data
-						ctx.ApplyDecimalFormattingToEventData(methodEvents, methodName, r.vm.logger)
-						break
+				// Apply decimal formatting to event data if needed
+				for decimalProviderMethod, decimalsValue := range decimalProviders {
+					for _, methodCall := range methodCalls {
+						// Find the method call that provides formatting details for this event
+						if methodCall.MethodName == decimalProviderMethod && len(methodCall.ApplyToFields) > 0 {
+							// Create decimal formatting context
+							ctx := NewDecimalFormattingContext(decimalsValue, methodCall.ApplyToFields, decimalProviderMethod)
+							// Apply formatting to the event data
+							ctx.ApplyDecimalFormattingToEventData(methodEvents, methodName, r.vm.logger)
+							break
+						}
 					}
 				}
+			} else if methodResult.Success {
+				// Priority 3: No return value and no events, set boolean true
+				decodedEventsData[methodName] = true
+				r.vm.logger.Debug("✅ No return value or events, setting boolean true (priority 3)",
+					"method", methodName)
 			}
 		} else {
-			// No events decoded: if method succeeded, set boolean true for methodName; otherwise keep {}
-			if methodResult.Success {
-				decodedEventsData[methodName] = true
-			}
+			r.vm.logger.Debug("✅ Keeping return value (priority 1, skipping events)",
+				"method", methodName,
+				"return_value", decodedEventsData[methodName])
 		}
-		// If no events, preserve existing return values (return values only when no events)
 	}
 
 	// Convert decoded events to protobuf Value
@@ -2398,4 +2413,30 @@ func (r *ContractWriteProcessor) getUserOpHashOrPending(receipt *types.Receipt) 
 		return receipt.TxHash.Hex()
 	}
 	return "pending"
+}
+
+// extractFailedVariables extracts template variables from a parameter string and identifies which ones resolved to "undefined"
+func extractFailedVariables(originalParam string, vm *VM) map[string]string {
+	failedVars := make(map[string]string)
+
+	// Regex to find all template variables: {{variable.path}}
+	templateVarRegex := regexp.MustCompile(`\{\{([^}]+)\}\}`)
+	matches := templateVarRegex.FindAllStringSubmatch(originalParam, -1)
+
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		varExpr := strings.TrimSpace(match[1])
+		varTemplate := match[0] // Full template including {{ }}
+
+		// Resolve just this variable to check if it becomes "undefined"
+		resolved := vm.preprocessTextWithVariableMapping(varTemplate)
+
+		if resolved == "undefined" || strings.Contains(resolved, "undefined") {
+			failedVars[varExpr] = "undefined"
+		}
+	}
+
+	return failedVars
 }
