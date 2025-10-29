@@ -88,6 +88,7 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 	}
 
 	// Create engine first so it can be passed to executor
+	// Note: Engine.New() automatically initializes MacroVars and MacroSecrets from config
 	agg.engine = taskengine.New(
 		agg.db,
 		agg.config,
@@ -97,8 +98,6 @@ func (agg *Aggregator) startTaskEngine(ctx context.Context) {
 
 	// Create executor with engine reference for atomic execution indexing
 	taskExecutor := taskengine.NewExecutor(agg.config.SmartWallet, agg.db, agg.logger, agg.engine)
-	taskengine.SetMacroVars(agg.config.MacroVars)
-	taskengine.SetMacroSecrets(agg.config.MacroSecrets)
 	taskengine.SetCache(agg.cache)
 	macros.SetRpc(agg.config.SmartWallet.EthRpcUrl)
 

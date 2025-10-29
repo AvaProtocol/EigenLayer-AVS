@@ -430,6 +430,12 @@ func TestUser2() *model.User {
 }
 
 func GetAggregatorConfig() *config.Config {
+	// Include MacroSecrets from loaded config if available
+	var macroSecrets map[string]string
+	if testConfig != nil && testConfig.MacroSecrets != nil {
+		macroSecrets = testConfig.MacroSecrets
+	}
+
 	return &config.Config{
 		SmartWallet: &config.SmartWalletConfig{
 			EthRpcUrl:          GetTestRPCURL(),
@@ -443,6 +449,8 @@ func GetAggregatorConfig() *config.Config {
 		TenderlyAccount:   GetTestTenderlyAccount(),
 		TenderlyProject:   GetTestTenderlyProject(),
 		TenderlyAccessKey: GetTestTenderlyAccessKey(),
+		// Include MacroSecrets from loaded aggregator-sepolia.yaml
+		MacroSecrets: macroSecrets,
 	}
 }
 

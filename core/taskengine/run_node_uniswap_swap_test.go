@@ -413,6 +413,7 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 	t.Logf("📊 Step 4: Getting quote from QuoterV2...")
 
 	// QuoterV2 ABI for quoteExactInputSingle
+	// Note: QuoterV2 returns 4 values, not just amountOut
 	quoterV2ABI := []interface{}{
 		map[string]interface{}{
 			"inputs": []interface{}{
@@ -420,17 +421,22 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 					"components": []interface{}{
 						map[string]interface{}{"name": "tokenIn", "type": "address"},
 						map[string]interface{}{"name": "tokenOut", "type": "address"},
-						map[string]interface{}{"name": "fee", "type": "uint24"},
 						map[string]interface{}{"name": "amountIn", "type": "uint256"},
+						map[string]interface{}{"name": "fee", "type": "uint24"},
 						map[string]interface{}{"name": "sqrtPriceLimitX96", "type": "uint160"},
 					},
 					"name": "params",
 					"type": "tuple",
 				},
 			},
-			"name":            "quoteExactInputSingle",
-			"outputs":         []interface{}{map[string]interface{}{"name": "amountOut", "type": "uint256"}},
-			"stateMutability": "view",
+			"name": "quoteExactInputSingle",
+			"outputs": []interface{}{
+				map[string]interface{}{"name": "amountOut", "type": "uint256"},
+				map[string]interface{}{"name": "sqrtPriceX96After", "type": "uint160"},
+				map[string]interface{}{"name": "initializedTicksCrossed", "type": "uint32"},
+				map[string]interface{}{"name": "gasEstimate", "type": "uint256"},
+			},
+			"stateMutability": "nonpayable",
 			"type":            "function",
 		},
 	}
@@ -442,11 +448,14 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 			map[string]interface{}{
 				"methodName": "quoteExactInputSingle",
 				"methodParams": []interface{}{
-					fmt.Sprintf(`["%s", "%s", %d, "%s", 0]`,
-						setup.chain.usdc,
-						setup.chain.weth,
-						setup.chain.feeTier,
-						setup.chain.swapAmount,
+					// Tuple parameter: (tokenIn, tokenOut, amountIn, fee, sqrtPriceLimitX96)
+					// Note: Parameter order matters! amountIn comes BEFORE fee in QuoterV2
+					// Note: Numbers should NOT be quoted in the JSON array
+					fmt.Sprintf(`["%s","%s",%s,%d,0]`,
+						setup.chain.usdc,       // tokenIn
+						setup.chain.weth,       // tokenOut
+						setup.chain.swapAmount, // amountIn (NO quotes)
+						setup.chain.feeTier,    // fee
 					),
 				},
 				"callData": "",
@@ -461,16 +470,21 @@ func TestRunNodeImmediately_UniswapSwap_Base(t *testing.T) {
 	require.NotNil(t, quoteResult, "Quote result should not be nil")
 
 	// Extract the quoted amount
+	// The contract read result structure is: {"data": {"methodName": {"output1": value1, ...}}}
 	var quotedAmount string
 	if data, ok := quoteResult["data"].(map[string]interface{}); ok {
-		if results, hasResults := data["results"]; hasResults {
-			if resultArray, isArray := results.([]interface{}); isArray && len(resultArray) > 0 {
-				if result, isMap := resultArray[0].(map[string]interface{}); isMap {
-					if amountOut, hasAmountOut := result["amountOut"]; hasAmountOut {
-						if amountStr, isString := amountOut.(string); isString {
-							quotedAmount = amountStr
-						}
-					}
+		if quoteData, hasQuoteData := data["quoteExactInputSingle"].(map[string]interface{}); hasQuoteData {
+			if amountOut, hasAmountOut := quoteData["amountOut"]; hasAmountOut {
+				// amountOut might be int64, float64, or string depending on how it was decoded
+				switch v := amountOut.(type) {
+				case string:
+					quotedAmount = v
+				case int64:
+					quotedAmount = fmt.Sprintf("%d", v)
+				case float64:
+					quotedAmount = fmt.Sprintf("%.0f", v)
+				default:
+					quotedAmount = fmt.Sprintf("%v", v)
 				}
 			}
 		}
@@ -906,6 +920,7 @@ func TestRunNodeImmediately_UniswapSwap_Base_WithQuoter(t *testing.T) {
 	t.Logf("📊 Step 3: Getting quote from QuoterV2...")
 
 	// QuoterV2 ABI for quoteExactInputSingle
+	// Note: QuoterV2 returns 4 values, not just amountOut
 	quoterV2ABI := []interface{}{
 		map[string]interface{}{
 			"inputs": []interface{}{
@@ -913,17 +928,22 @@ func TestRunNodeImmediately_UniswapSwap_Base_WithQuoter(t *testing.T) {
 					"components": []interface{}{
 						map[string]interface{}{"name": "tokenIn", "type": "address"},
 						map[string]interface{}{"name": "tokenOut", "type": "address"},
-						map[string]interface{}{"name": "fee", "type": "uint24"},
 						map[string]interface{}{"name": "amountIn", "type": "uint256"},
+						map[string]interface{}{"name": "fee", "type": "uint24"},
 						map[string]interface{}{"name": "sqrtPriceLimitX96", "type": "uint160"},
 					},
 					"name": "params",
 					"type": "tuple",
 				},
 			},
-			"name":            "quoteExactInputSingle",
-			"outputs":         []interface{}{map[string]interface{}{"name": "amountOut", "type": "uint256"}},
-			"stateMutability": "view",
+			"name": "quoteExactInputSingle",
+			"outputs": []interface{}{
+				map[string]interface{}{"name": "amountOut", "type": "uint256"},
+				map[string]interface{}{"name": "sqrtPriceX96After", "type": "uint160"},
+				map[string]interface{}{"name": "initializedTicksCrossed", "type": "uint32"},
+				map[string]interface{}{"name": "gasEstimate", "type": "uint256"},
+			},
+			"stateMutability": "nonpayable",
 			"type":            "function",
 		},
 	}
@@ -935,11 +955,13 @@ func TestRunNodeImmediately_UniswapSwap_Base_WithQuoter(t *testing.T) {
 			map[string]interface{}{
 				"methodName": "quoteExactInputSingle",
 				"methodParams": []interface{}{
-					fmt.Sprintf(`["%s", "%s", %d, "%s", 0]`,
-						setup.chain.usdc,
-						setup.chain.weth,
-						setup.chain.feeTier,
-						setup.chain.swapAmount,
+					// Tuple parameter: (tokenIn, tokenOut, amountIn, fee, sqrtPriceLimitX96)
+					// Note: Parameter order matters! amountIn comes BEFORE fee in QuoterV2
+					fmt.Sprintf(`["%s", "%s", %s, %d, 0]`,
+						setup.chain.usdc,       // tokenIn
+						setup.chain.weth,       // tokenOut
+						setup.chain.swapAmount, // amountIn (no quotes)
+						setup.chain.feeTier,    // fee
 					),
 				},
 				"callData": "",
@@ -956,21 +978,24 @@ func TestRunNodeImmediately_UniswapSwap_Base_WithQuoter(t *testing.T) {
 	t.Logf("🔍 Quote result structure: %+v", quoteResult)
 
 	// Extract the quoted amount
+	// The contract read result structure is: {"data": {"methodName": {"output1": value1, ...}}}
 	var quotedAmount string
 	if data, ok := quoteResult["data"].(map[string]interface{}); ok {
 		t.Logf("🔍 Quote data: %+v", data)
-		if results, hasResults := data["results"]; hasResults {
-			t.Logf("🔍 Quote results: %+v", results)
-			if resultArray, isArray := results.([]interface{}); isArray && len(resultArray) > 0 {
-				t.Logf("🔍 Quote result array[0]: %+v", resultArray[0])
-				if result, isMap := resultArray[0].(map[string]interface{}); isMap {
-					t.Logf("🔍 Quote result map: %+v", result)
-					if amountOut, hasAmountOut := result["amountOut"]; hasAmountOut {
-						t.Logf("🔍 Quote amountOut: %+v", amountOut)
-						if amountStr, isString := amountOut.(string); isString {
-							quotedAmount = amountStr
-						}
-					}
+		if quoteData, hasQuoteData := data["quoteExactInputSingle"].(map[string]interface{}); hasQuoteData {
+			t.Logf("🔍 Quote data for quoteExactInputSingle: %+v", quoteData)
+			if amountOut, hasAmountOut := quoteData["amountOut"]; hasAmountOut {
+				t.Logf("🔍 Quote amountOut: %+v", amountOut)
+				// amountOut might be int64, float64, or string depending on how it was decoded
+				switch v := amountOut.(type) {
+				case string:
+					quotedAmount = v
+				case int64:
+					quotedAmount = fmt.Sprintf("%d", v)
+				case float64:
+					quotedAmount = fmt.Sprintf("%.0f", v)
+				default:
+					quotedAmount = fmt.Sprintf("%v", v)
 				}
 			}
 		}
