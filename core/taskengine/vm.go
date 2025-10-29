@@ -2337,6 +2337,13 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			}
 		}
 
+		// Handle options bag (e.g., { "summarize": true })
+		if optsInterface, exists := config["options"]; exists && optsInterface != nil {
+			if optsVal, err := structpb.NewValue(optsInterface); err == nil {
+				restConfig.Options = optsVal
+			}
+		}
+
 		node.TaskType = &avsproto.TaskNode_RestApi{
 			RestApi: &avsproto.RestAPINode{
 				Config: restConfig,
@@ -2695,6 +2702,13 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			// Handle headers - only support standard map[string]string format
 			if headers, ok := runnerConfig["headers"].(map[string]string); ok {
 				rConfig.Headers = headers
+			}
+
+			// Handle options in loop runner config as well
+			if optsInterface, exists := runnerConfig["options"]; exists && optsInterface != nil {
+				if optsVal, err := structpb.NewValue(optsInterface); err == nil {
+					rConfig.Options = optsVal
+				}
 			}
 
 			loopNode.Runner = &avsproto.LoopNode_RestApi{
@@ -3204,6 +3218,11 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 			// Handle headers - use standard map format
 			if len(restApi.Config.Headers) > 0 {
 				config["headers"] = restApi.Config.Headers
+			}
+
+			// Include options bag if present
+			if restApi.Config.Options != nil {
+				config["options"] = restApi.Config.Options.AsInterface()
 			}
 
 			// Clean up complex protobuf types before returning

@@ -580,6 +580,53 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		r.vm.logger.Debug("REST API body preprocessing", "contentType", contentType, "usedJSONPreprocessing", isJSONContent)
 	}
 
+	// Optionally compose summary and inject into provider payloads when enabled via nodeConfig.options.summarize
+	if shouldSummarize(r.vm, node) {
+		provider := detectNotificationProvider(url)
+		if provider != "" {
+			// Build summary from current VM context
+			currentName := r.vm.GetNodeNameAsVar(stepID)
+			s := ComposeSummary(r.vm, currentName)
+
+			// Attempt to parse body as JSON and inject subject/body accordingly
+			var bodyObj map[string]interface{}
+			if err := json.Unmarshal([]byte(body), &bodyObj); err == nil {
+				switch provider {
+				case "sendgrid":
+					bodyObj["subject"] = s.Subject
+					// Ensure content array exists
+					var contentArr []interface{}
+					if v, ok := bodyObj["content"].([]interface{}); ok {
+						contentArr = v
+					}
+					if len(contentArr) == 0 {
+						contentArr = []interface{}{map[string]interface{}{"type": "text/plain", "value": s.Body}}
+					} else {
+						// Update first element's value
+						if first, ok := contentArr[0].(map[string]interface{}); ok {
+							first["value"] = s.Body
+							contentArr[0] = first
+						}
+					}
+					bodyObj["content"] = contentArr
+				case "telegram":
+					bodyObj["parse_mode"] = "HTML"
+					bodyObj["text"] = "<b>" + s.Subject + "</b>\n" + s.Body
+				}
+				if newBody, mErr := json.Marshal(bodyObj); mErr == nil {
+					body = string(newBody)
+					if r.vm.logger != nil {
+						r.vm.logger.Debug("REST API injected composed summary into provider payload", "provider", provider)
+					}
+				} else if r.vm.logger != nil {
+					r.vm.logger.Warn("REST API failed to marshal body after summary injection", "error", mErr)
+				}
+			} else if r.vm.logger != nil {
+				r.vm.logger.Warn("REST API summarize enabled but body is not JSON, skipping injection")
+			}
+		}
+	}
+
 	// Default method to GET if not specified
 	if method == "" {
 		method = "GET"
@@ -725,6 +772,57 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	finalizeExecutionStep(executionLogStep, stepSuccess, errorMessage, logBuilder.String())
 
 	return executionLogStep, nil
+}
+
+// shouldSummarize checks VM vars for nodeConfig.options.summarize=true
+func shouldSummarize(vm *VM, node *avsproto.RestAPINode) bool {
+	if vm == nil {
+		return false
+	}
+	// First, check protobuf node config options (works for deployed workflows)
+	if node != nil && node.Config != nil && node.Config.Options != nil {
+		if optsMap, ok := node.Config.Options.AsInterface().(map[string]interface{}); ok {
+			if v, ok := optsMap["summarize"].(bool); ok {
+				return v
+			}
+		}
+	}
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	rawCfg, ok := vm.vars["nodeConfig"]
+	if !ok {
+		return false
+	}
+	cfgMap, ok := rawCfg.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	// options may be a map[string]interface{}
+	if rawOpts, ok := cfgMap["options"]; ok && rawOpts != nil {
+		if opts, ok := rawOpts.(map[string]interface{}); ok {
+			if v, ok := opts["summarize"].(bool); ok {
+				return v
+			}
+		}
+	}
+	return false
+}
+
+// detectNotificationProvider returns "sendgrid" or "telegram" based on URL patterns; empty string if unknown
+func detectNotificationProvider(u string) string {
+	lu := strings.ToLower(u)
+	// SendGrid: allow detection by path for tests using mock servers
+	if strings.Contains(lu, "/v3/mail/send") || strings.Contains(lu, "/mail/send") || strings.Contains(lu, "api.sendgrid.com") && strings.Contains(lu, "/mail/send") {
+		return "sendgrid"
+	}
+	if strings.Contains(lu, "api.telegram.org") && strings.Contains(lu, "/sendmessage") {
+		return "telegram"
+	}
+	// Heuristic for tests using mock servers but Telegram path shape
+	if strings.Contains(lu, "/bot") && strings.Contains(lu, "/sendmessage") {
+		return "telegram"
+	}
+	return ""
 }
 
 // escapeJSONString properly escapes a string for use within JSON

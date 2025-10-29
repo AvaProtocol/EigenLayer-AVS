@@ -463,6 +463,8 @@ message RestAPINode {
     map<string, string> headers = 2;
     string body = 3;
     string method = 4;
+    // Generic options bag for backend features (e.g., { "summarize": true })
+    optional google.protobuf.Value options = 5;
   }
 
   message Output {
