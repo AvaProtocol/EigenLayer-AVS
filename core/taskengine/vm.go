@@ -3412,6 +3412,40 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
 		}
+
+	case *avsproto.TaskNode_Branch:
+		branch := taskNode.GetBranch()
+		if branch != nil && branch.Config != nil {
+			// Convert conditions array
+			var conditionsArray []interface{}
+			for _, condition := range branch.Config.Conditions {
+				conditionMap := map[string]interface{}{
+					"id":         condition.Id,
+					"type":       condition.Type,
+					"expression": condition.Expression,
+				}
+				conditionsArray = append(conditionsArray, conditionMap)
+			}
+
+			config := map[string]interface{}{
+				"conditions": conditionsArray,
+			}
+
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_EthTransfer:
+		ethTransfer := taskNode.GetEthTransfer()
+		if ethTransfer != nil && ethTransfer.Config != nil {
+			config := map[string]interface{}{
+				"destination": ethTransfer.Config.Destination,
+				"amount":      ethTransfer.Config.Amount,
+			}
+
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
 	}
 
 	return nil

@@ -172,8 +172,12 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		ownerEOA := *ownerAddr
 		factory := smartWalletConfig.FactoryAddress
 
-		// Derive actual salt:0 smart wallet address (no mock needed)
-		runnerAddr, err := aa.GetSenderAddress(nil, ownerEOA, big.NewInt(0))
+		// Derive actual salt:0 smart wallet address (need ethclient)
+		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
+		require.NoError(t, err, "Failed to connect to RPC")
+		defer client.Close()
+
+		runnerAddr, err := aa.GetSenderAddress(client, ownerEOA, big.NewInt(0))
 		require.NoError(t, err, "Failed to derive smart wallet address")
 
 		// Seed wallet for validation
