@@ -174,14 +174,6 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 	})
 
 	t.Run("BalanceNode_ConfigViaInputVariables", func(t *testing.T) {
-		// Skip if Moralis API key is not configured
-		moralisAPIKey := testutil.GetTestMoralisApiKey()
-		if moralisAPIKey == "" {
-			t.Skip("Moralis API key not configured, skipping BalanceNode test")
-		}
-
-		// No need to manually call SetMacroSecrets() - Engine.New() does this automatically
-
 		// Setup test environment
 		db := testutil.TestMustDB()
 		defer storage.Destroy(db.(*storage.BadgerStorage))
@@ -240,12 +232,6 @@ func TestRunNodeImmediatelyRPC(t *testing.T) {
 		// Assertions
 		require.NoError(t, err, "RunNodeImmediatelyRPC should succeed for balance node")
 		require.NotNil(t, result, "Should get response")
-
-		// Log error if success is false
-		if !result.Success {
-			t.Logf("❌ Balance check failed with error: %s", result.Error)
-		}
-
 		assert.True(t, result.Success, "Balance check should succeed")
 
 		// Verify we got balance data

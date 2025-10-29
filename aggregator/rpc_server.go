@@ -649,33 +649,16 @@ func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNode
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
+	// Get node type from the TaskNode for logging
+	var nodeTypeForLogging avsproto.NodeType
+	if req.Node != nil {
+		nodeTypeForLogging = req.Node.Type
+	}
+
 	r.config.Logger.Info("process run node with inputs",
 		"user", user.Address.String(),
-		"node_type", req.NodeType,
+		"node_type", nodeTypeForLogging,
 	)
-
-	// Add debug logging for the request details
-	inputKeys := make([]string, 0, len(req.InputVariables))
-	for k := range req.InputVariables {
-		inputKeys = append(inputKeys, k)
-	}
-
-	r.config.Logger.Info("run node with inputs details",
-		"user", user.Address.String(),
-		"node_type", req.NodeType,
-		"input_keys", inputKeys,
-	)
-
-	// For contract read debugging, log the full request details
-	if req.NodeType == avsproto.NodeType_NODE_TYPE_CONTRACT_READ {
-		// Extract keys only to avoid logging sensitive data
-		inputKeys := getInputKeys(req.InputVariables)
-
-		r.config.Logger.Debug("ContractRead full request",
-			"user", user.Address.String(),
-			"input_keys", inputKeys,
-		)
-	}
 
 	// Call the immediate execution function directly
 	result, err := r.engine.RunNodeImmediatelyRPC(user, req)
