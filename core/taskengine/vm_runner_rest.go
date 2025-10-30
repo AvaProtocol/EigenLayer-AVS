@@ -594,6 +594,16 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 				switch provider {
 				case "sendgrid":
 					bodyObj["subject"] = s.Subject
+					// Also update subject in personalizations array if present (SendGrid canonical location)
+					if pers, ok := bodyObj["personalizations"].([]interface{}); ok {
+						for i := range pers {
+							if p, ok := pers[i].(map[string]interface{}); ok {
+								p["subject"] = s.Subject
+								pers[i] = p
+							}
+						}
+						bodyObj["personalizations"] = pers
+					}
 					// Ensure content array exists
 					var contentArr []interface{}
 					if v, ok := bodyObj["content"].([]interface{}); ok {
