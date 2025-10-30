@@ -268,6 +268,7 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 		SmartWallet string                   `json:"smart_wallet,omitempty"`
 		OwnerEOA    string                   `json:"owner_eoa,omitempty"`
 		TotalSteps  int                      `json:"total_steps"`
+		Status      string                   `json:"status"`
 		Failed      bool                     `json:"failed"`
 		FailedStep  string                   `json:"failed_step,omitempty"`
 		Reason      string                   `json:"reason,omitempty"`
@@ -279,6 +280,7 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 		SmartWallet: smartWallet,
 		OwnerEOA:    ownerEOA,
 		TotalSteps:  len(steps),
+		Status:      "",
 		Failed:      failed,
 		FailedStep:  failedName,
 		Reason:      firstLine(failedReason),
@@ -422,6 +424,17 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 		}
 
 		d.Steps = append(d.Steps, sd)
+	}
+
+	// Set status text and notification-only flag
+	if failed {
+		if d.FailedStep != "" {
+			d.Status = "failed at " + d.FailedStep
+		} else {
+			d.Status = "failed"
+		}
+	} else {
+		d.Status = "succeeded"
 	}
 
 	// Marshal compactly

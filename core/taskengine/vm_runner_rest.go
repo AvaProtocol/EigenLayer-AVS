@@ -581,12 +581,16 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	}
 
 	// Optionally compose summary and inject into provider payloads when enabled via nodeConfig.options.summarize
+	// Keep a reference to the composed summary so we can return it to clients even
+	// when the external notification provider (e.g., SendGrid) returns an empty body.
+	var summaryForClient *Summary
 	if shouldSummarize(r.vm, node) {
 		provider := detectNotificationProvider(url)
 		if provider != "" {
 			// Build summary from current VM context (AI if enabled, else deterministic)
 			currentName := r.vm.GetNodeNameAsVar(stepID)
 			s := ComposeSummarySmart(r.vm, currentName)
+			summaryForClient = &s
 
 			// Attempt to parse body as JSON and inject subject/body accordingly
 			var bodyObj map[string]interface{}
@@ -720,6 +724,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	// Parse response body
 	var bodyData interface{}
 	bodyStr := string(response.Body())
+	statusSuccess := response.StatusCode() < 400
 	if bodyStr != "" {
 		var jsonData interface{}
 		if err := json.Unmarshal(response.Body(), &jsonData); err == nil {
@@ -728,7 +733,55 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 			bodyData = bodyStr
 		}
 	} else {
-		bodyData = ""
+		// If the provider didn't return a body (common for notification providers with 202 Accepted),
+		// surface the composed summary in the server response so clients have subject/body to display.
+		// For single-node notification calls, derive success from the HTTP response status.
+		if summaryForClient != nil {
+			workflowName := resolveWorkflowName(r.vm)
+			// Build a summary for clients based on HTTP response status
+			var subj string
+			var bod string
+			if statusSuccess {
+				subj = fmt.Sprintf("%s: succeeded (%d steps)", workflowName, 1)
+				// Provide a concise success body for notification-only steps
+				runner := ""
+				owner := ""
+				r.vm.mu.Lock()
+				if settings, ok := r.vm.vars["settings"].(map[string]interface{}); ok {
+					if rr, ok := settings["runner"].(string); ok {
+						runner = rr
+					}
+				}
+				if wc, ok := r.vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
+					if rr, ok := wc["runner"].(string); ok && runner == "" {
+						runner = rr
+					}
+					if ow, ok := wc["owner"].(string); ok {
+						owner = ow
+					}
+					if eoa, ok := wc["eoaAddress"].(string); ok && owner == "" {
+						owner = eoa
+					}
+				}
+				r.vm.mu.Unlock()
+				bod = fmt.Sprintf(
+					"Smart wallet %s (owner %s) executed 1 notification step.\n\nThe email was sent successfully via SendGrid.\n\nAll steps completed on %s.",
+					runner, owner, resolveChainName(r.vm),
+				)
+			} else {
+				subj = fmt.Sprintf("%s: failed (%d steps)", workflowName, 1)
+				bod = fmt.Sprintf(
+					"Smart wallet executed 1 notification step, but the provider returned HTTP %d.\n\nThe email could not be sent.",
+					response.StatusCode(),
+				)
+			}
+			bodyData = map[string]interface{}{
+				"subject": subj,
+				"body":    bod,
+			}
+		} else {
+			bodyData = ""
+		}
 	}
 
 	// Create standard format response
