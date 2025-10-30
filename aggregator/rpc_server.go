@@ -685,21 +685,16 @@ func (r *RpcServer) RunTrigger(ctx context.Context, req *avsproto.RunTriggerReq)
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
-	r.config.Logger.Info("process run trigger",
-		"user", user.Address.String(),
-		"trigger_type", req.TriggerType,
-	)
-
-	// Add debug logging for the request details
-	configKeys := make([]string, 0, len(req.TriggerConfig))
-	for k := range req.TriggerConfig {
-		configKeys = append(configKeys, k)
+	// Get trigger type from the TaskTrigger for logging
+	var triggerTypeForLogging avsproto.TriggerType
+	if req.Trigger != nil {
+		triggerTypeForLogging = req.Trigger.Type
 	}
 
-	r.config.Logger.Info("run trigger details",
+	r.config.Logger.Info("process run trigger",
 		"user", user.Address.String(),
-		"trigger_type", req.TriggerType,
-		"config_keys", configKeys,
+		"trigger_type", triggerTypeForLogging,
+		"trigger_name", req.Trigger.GetName(),
 	)
 
 	// Call the trigger execution function directly
