@@ -139,6 +139,7 @@ type FeeRatesConfig struct {
 type NotificationsSummaryConfig struct {
 	// Enabled determines whether AI summarization is active for notifications.
 	// Set to true to enable summarization, false to disable.
+	Enabled bool
 	// Provider specifies the AI service to use for summarization (e.g., "openai").
 	Provider string
 	// Model specifies the model name or identifier to use with the provider (e.g., "gpt-3.5-turbo").

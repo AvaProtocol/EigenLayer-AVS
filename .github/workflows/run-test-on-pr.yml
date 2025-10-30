@@ -166,4 +166,4 @@ jobs:
       - name: Run Go test
         run: |
           cd ./${{ matrix.test }}
-          go test . -v
+          go test . -v -short

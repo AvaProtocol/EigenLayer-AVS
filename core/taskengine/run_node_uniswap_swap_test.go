@@ -125,9 +125,9 @@ type uniswapSwapTestSetup struct {
 
 // setupUniswapSwapTest performs common setup for Uniswap swap tests
 func setupUniswapSwapTest(t *testing.T) *uniswapSwapTestSetup {
-	// Skip in short mode
+	// Skip in short mode (e.g., in CI/CD)
 	if testing.Short() {
-		t.Skip("Skipping real transaction test in short mode")
+		t.Skip("Skipping real execution test in short mode")
 	}
 
 	// Get chain configuration based on TEST_CHAIN env var
@@ -171,18 +171,19 @@ func setupUniswapSwapTest(t *testing.T) *uniswapSwapTestSetup {
 
 	// Set factory for AA library
 	aa.SetFactoryAddress(common.HexToAddress(chain.factory))
-	t.Logf("   Computing salt:0 smart wallet address...")
+	t.Logf("   Computing salt:2 smart wallet address...")
 
 	// Connect using config
 	client, err := ethclient.Dial(aggregatorCfg.SmartWallet.EthRpcUrl)
 	require.NoError(t, err, "Failed to connect to %s", chain.name)
 	defer client.Close()
 
-	// Compute the salt:0 smart wallet address for this owner
-	smartWalletAddr, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(0))
+	// Compute the salt:2 smart wallet address for this owner
+	// Using salt=2 for address 0x5a8A8a79DdF433756D4D97DCCE33334D9E218856 which has proper balance
+	smartWalletAddr, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(2))
 	require.NoError(t, err, "Failed to compute smart wallet address")
 
-	t.Logf("   ✅ Smart Wallet (salt:0): %s", smartWalletAddr.Hex())
+	t.Logf("   ✅ Smart Wallet (salt:2): %s", smartWalletAddr.Hex())
 
 	// Check balances
 	ethBalance, err := client.BalanceAt(context.Background(), *smartWalletAddr, nil)
@@ -213,7 +214,7 @@ func setupUniswapSwapTest(t *testing.T) *uniswapSwapTestSetup {
 		Owner:   &ownerAddress,
 		Address: smartWalletAddr,
 		Factory: &factory,
-		Salt:    big.NewInt(0),
+		Salt:    big.NewInt(2),
 	})
 	require.NoError(t, err, "Failed to store wallet in database")
 	t.Logf("   ✅ Smart wallet registered in database")
