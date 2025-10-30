@@ -941,7 +941,10 @@ func (v *VM) runKahnScheduler() error {
 			if _, exists := predCount[e.Target]; exists {
 				if !hasRegularPred[e.Target] { // ONLY if no regular predecessors
 					branchTargets[e.Target] = true
-					predCount[e.Target]++ // gating count so they are not initially ready
+					// Add an extra predecessor count to prevent branch targets from becoming ready immediately;
+					// this ensures that branch targets are only scheduled (i.e., become ready) when the branch node
+					// explicitly schedules them based on the selected condition.
+					predCount[e.Target]++
 				}
 			}
 		}
