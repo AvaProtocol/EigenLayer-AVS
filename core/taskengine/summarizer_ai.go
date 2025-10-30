@@ -76,7 +76,7 @@ func NewOpenAISummarizerFromAggregatorConfig(c *config.Config) Summarizer {
 	if !c.NotificationsSummary.Enabled || strings.ToLower(c.NotificationsSummary.Provider) != "openai" {
 		return nil
 	}
-	apiKey := firstNonEmptyStr(os.Getenv("OPENAI_API_KEY"), c.MacroSecrets["openai_api_key"]) // prefer env override
+	apiKey := firstNonEmptyStr(c.MacroSecrets["openai_api_key"], os.Getenv("OPENAI_API_KEY")) // prefer config secret; fallback to env
 	if strings.TrimSpace(apiKey) == "" {
 		return nil
 	}
