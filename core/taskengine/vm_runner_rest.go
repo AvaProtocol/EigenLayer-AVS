@@ -3,6 +3,7 @@ package taskengine
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -608,19 +609,39 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 						}
 						bodyObj["personalizations"] = pers
 					}
-					// Ensure content array exists
+					// Ensure content array exists and contains both text/plain and text/html
 					var contentArr []interface{}
 					if v, ok := bodyObj["content"].([]interface{}); ok {
 						contentArr = v
 					}
-					if len(contentArr) == 0 {
-						contentArr = []interface{}{map[string]interface{}{"type": "text/plain", "value": s.Body}}
-					} else {
-						// Update first element's value
-						if first, ok := contentArr[0].(map[string]interface{}); ok {
-							first["value"] = s.Body
-							contentArr[0] = first
+
+					// Build styled HTML email
+					styledHTML := buildStyledHTMLEmail(s.Subject, s.Body)
+
+					// Update or add text/plain and text/html parts
+					foundPlain := false
+					foundHTML := false
+					for i := range contentArr {
+						if m, ok := contentArr[i].(map[string]interface{}); ok {
+							if t, ok2 := m["type"].(string); ok2 {
+								if strings.EqualFold(t, "text/plain") {
+									m["value"] = s.Body
+									contentArr[i] = m
+									foundPlain = true
+								}
+								if strings.EqualFold(t, "text/html") {
+									m["value"] = styledHTML
+									contentArr[i] = m
+									foundHTML = true
+								}
+							}
 						}
+					}
+					if !foundPlain {
+						contentArr = append(contentArr, map[string]interface{}{"type": "text/plain", "value": s.Body})
+					}
+					if !foundHTML {
+						contentArr = append(contentArr, map[string]interface{}{"type": "text/html", "value": styledHTML})
 					}
 					bodyObj["content"] = contentArr
 				case "telegram":
@@ -868,6 +889,37 @@ func detectNotificationProvider(u string) string {
 		return "telegram"
 	}
 	return ""
+}
+
+// buildStyledHTMLEmail wraps a plain-text body into a simple, safe HTML layout
+// suitable for email clients. It escapes the input text and preserves paragraph
+// breaks by turning double newlines into <p> blocks and single newlines into <br/>.
+func buildStyledHTMLEmail(subject, body string) string {
+	// Escape HTML to avoid injection
+	safe := html.EscapeString(body)
+	// Normalize newlines
+	safe = strings.ReplaceAll(safe, "\r\n", "\n")
+	// Split by paragraphs (double newline)
+	parts := strings.Split(safe, "\n\n")
+	var paragraphs []string
+	for _, p := range parts {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		// Convert single newlines within a paragraph to <br/>
+		p = strings.ReplaceAll(p, "\n", "<br/>")
+		paragraphs = append(paragraphs, "<p style=\"margin:0 0 16px 0;\">"+p+"</p>")
+	}
+
+	content := strings.Join(paragraphs, "\n")
+	// Minimal, responsive-friendly dark theme matching Ava Protocol brand
+	return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+		"<title>" + html.EscapeString(subject) + "</title>" +
+		"<style>body{background:#141414;color:#D2D2D2;margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;}" +
+		".container{max-width:640px;margin:0 auto;padding:32px 24px;}h1,h2,h3,h4,h5,h6{color:#fff;margin-top:24px;margin-bottom:12px;}a{color:#A061FF;text-decoration:none;}" +
+		"p{margin:0 0 16px 0;line-height:1.6;}.divider{border-top:1px solid #333;margin:24px 0;}" +
+		"@media(max-width:480px){.container{padding:24px 16px;}h1,h2,h3{font-size:1.2rem;}}</style></head>" +
+		"<body><div class=\"container\">" + content + "</div></body></html>"
 }
 
 // escapeJSONString properly escapes a string for use within JSON
