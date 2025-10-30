@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -36,8 +38,8 @@ func ComposeSummarySmart(vm *VM, currentStepName string) Summary {
 		return ComposeSummary(vm, currentStepName)
 	}
 
-	// Use a conservative timeout even if the underlying summarizer chooses a shorter one
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// Use a modest timeout to allow remote providers to respond
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if s, err := globalSummarizer.Summarize(ctx, vm, currentStepName); err == nil {
@@ -109,7 +111,18 @@ func (o *OpenAISummarizer) Summarize(ctx context.Context, vm *VM, currentStepNam
 		"max_tokens":      o.cfg.MaxOutputTokens,
 		"response_format": map[string]string{"type": "json_object"},
 		"messages": []map[string]string{
-			{"role": "system", "content": "You create concise, accurate workflow email summaries. Do not speculate. Redact secrets. Return strict JSON with keys: subject, body."},
+			{"role": "system", "content": `You create concise, professional workflow execution email summaries for on-chain operations. Your summary must include:
+
+1. Workflow name and total steps executed
+2. Smart wallet address that executed the transactions and the owner EOA address it belongs to
+3. Detailed explanation of what smart contract calls were made (contract address, method name, what action was performed)
+4. For swaps: explain token amounts (e.g., "spent X token1 for Y token0")
+5. For approvals: explain what token was approved and to which contract
+
+Be specific about on-chain state changes. Do not speculate. Redact any secrets. Return strict JSON with keys: subject, body.
+
+Subject format: "{workflow_name}: {status} ({N} steps)"
+Body format: A clear paragraph explaining the workflow execution, smart wallet operations, and on-chain changes.`},
 			{"role": "user", "content": digest},
 		},
 	}
@@ -176,8 +189,34 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 		lastName = safeName(currentStepName)
 	}
 
-	// Copy execution logs under lock to avoid races
+	// Extract smart wallet and owner info
 	vm.mu.Lock()
+	smartWallet := ""
+	ownerEOA := ""
+
+	// Try aa_sender first (smart wallet address)
+	if aaSender, ok := vm.vars["aa_sender"].(string); ok && aaSender != "" {
+		smartWallet = aaSender
+	}
+
+	// Try workflowContext.runner (also smart wallet)
+	if wfCtx, ok := vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
+		if runner, ok := wfCtx["runner"].(string); ok && runner != "" && smartWallet == "" {
+			smartWallet = runner
+		}
+		if owner, ok := wfCtx["owner"].(string); ok && owner != "" {
+			ownerEOA = owner
+		}
+		if eoa, ok := wfCtx["eoaAddress"].(string); ok && eoa != "" && ownerEOA == "" {
+			ownerEOA = eoa
+		}
+	}
+
+	// Fallback to TaskOwner if available
+	if ownerEOA == "" && vm.TaskOwner != (common.Address{}) {
+		ownerEOA = vm.TaskOwner.Hex()
+	}
+
 	steps := make([]*avsproto.Execution_Step, len(vm.ExecutionLogs))
 	copy(steps, vm.ExecutionLogs)
 	vm.mu.Unlock()
@@ -188,30 +227,41 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 		start = len(steps) - maxSteps
 	}
 
-	// Build digest structure
+	// Build digest structure with contract call details
 	type stepDigest struct {
-		Name       string `json:"name"`
-		ID         string `json:"id"`
-		Success    bool   `json:"success"`
-		Error      string `json:"error,omitempty"`
-		StartAt    int64  `json:"start_at,omitempty"`
-		EndAt      int64  `json:"end_at,omitempty"`
-		DurationMs int64  `json:"duration_ms,omitempty"`
+		Name         string                 `json:"name"`
+		ID           string                 `json:"id"`
+		Type         string                 `json:"type"`
+		Success      bool                   `json:"success"`
+		Error        string                 `json:"error,omitempty"`
+		StartAt      int64                  `json:"start_at,omitempty"`
+		EndAt        int64                  `json:"end_at,omitempty"`
+		DurationMs   int64                  `json:"duration_ms,omitempty"`
+		ContractAddr string                 `json:"contract_address,omitempty"`
+		MethodName   string                 `json:"method_name,omitempty"`
+		MethodParams map[string]interface{} `json:"method_params,omitempty"`
+		OutputData   interface{}            `json:"output_data,omitempty"`
 	}
 	d := struct {
-		Workflow   string       `json:"workflow"`
-		Failed     bool         `json:"failed"`
-		FailedStep string       `json:"failed_step,omitempty"`
-		Reason     string       `json:"reason,omitempty"`
-		LastStep   string       `json:"last_step"`
-		Steps      []stepDigest `json:"steps"`
+		Workflow    string       `json:"workflow"`
+		SmartWallet string       `json:"smart_wallet,omitempty"`
+		OwnerEOA    string       `json:"owner_eoa,omitempty"`
+		TotalSteps  int          `json:"total_steps"`
+		Failed      bool         `json:"failed"`
+		FailedStep  string       `json:"failed_step,omitempty"`
+		Reason      string       `json:"reason,omitempty"`
+		LastStep    string       `json:"last_step"`
+		Steps       []stepDigest `json:"steps"`
 	}{
-		Workflow:   workflowName,
-		Failed:     failed,
-		FailedStep: failedName,
-		Reason:     firstLine(failedReason),
-		LastStep:   lastName,
-		Steps:      make([]stepDigest, 0, len(steps)-start),
+		Workflow:    workflowName,
+		SmartWallet: smartWallet,
+		OwnerEOA:    ownerEOA,
+		TotalSteps:  len(steps),
+		Failed:      failed,
+		FailedStep:  failedName,
+		Reason:      firstLine(failedReason),
+		LastStep:    lastName,
+		Steps:       make([]stepDigest, 0, len(steps)-start),
 	}
 
 	for i := start; i < len(steps); i++ {
@@ -227,6 +277,7 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 		sd := stepDigest{
 			Name:       safeName(name),
 			ID:         st.GetId(),
+			Type:       st.GetType(),
 			Success:    st.GetSuccess(),
 			Error:      firstLine(st.GetError()),
 			StartAt:    st.GetStartAt(),
@@ -237,6 +288,40 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 		if sd.Error == "unknown error" {
 			sd.Error = ""
 		}
+
+		// Extract contract call details for contractWrite and contractRead
+		if st.GetType() == "contractWrite" || st.GetType() == "contractRead" {
+			// Extract contract address from config
+			if st.GetConfig() != nil {
+				if cfgMap, ok := st.GetConfig().AsInterface().(map[string]interface{}); ok {
+					if addr, ok := cfgMap["contractAddress"].(string); ok && addr != "" {
+						sd.ContractAddr = addr
+					}
+					// Extract method calls
+					if methodCalls, ok := cfgMap["methodCalls"].([]interface{}); ok && len(methodCalls) > 0 {
+						if firstCall, ok := methodCalls[0].(map[string]interface{}); ok {
+							if mName, ok := firstCall["methodName"].(string); ok {
+								sd.MethodName = mName
+							}
+							if mParams, ok := firstCall["methodParams"].([]interface{}); ok && len(mParams) > 0 {
+								sd.MethodParams = map[string]interface{}{
+									"params": mParams,
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// Extract output data
+			switch {
+			case st.GetContractWrite() != nil && st.GetContractWrite().Data != nil:
+				sd.OutputData = st.GetContractWrite().Data.AsInterface()
+			case st.GetContractRead() != nil && st.GetContractRead().Data != nil:
+				sd.OutputData = st.GetContractRead().Data.AsInterface()
+			}
+		}
+
 		d.Steps = append(d.Steps, sd)
 	}
 

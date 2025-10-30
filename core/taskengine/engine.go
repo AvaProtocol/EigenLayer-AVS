@@ -86,6 +86,15 @@ func SetMacroSecrets(v map[string]string) {
 	macroSecrets = v
 }
 
+// GetMacroSecret returns a secret from macros.secrets loaded into the engine.
+// Returns empty string if the key is not set or macros were not initialized.
+func GetMacroSecret(key string) string {
+	if macroSecrets == nil || key == "" {
+		return ""
+	}
+	return macroSecrets[key]
+}
+
 func SetCache(c *bigcache.BigCache) {
 	cache = c
 }
