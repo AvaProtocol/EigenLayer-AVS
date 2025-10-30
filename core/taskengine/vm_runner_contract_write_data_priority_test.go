@@ -20,13 +20,9 @@ import (
 // PRIORITY 3: Boolean true fallback (when no return value and no events)
 func TestContractWriteDataPriority(t *testing.T) {
 	// Require Tenderly credentials for simulation
-	testConfig := testutil.GetTestConfig()
-	if testConfig == nil {
-		t.Fatal("Test config is nil - config/aggregator.yaml not loaded")
-	}
-	if testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
-		t.Skip("Tenderly credentials not configured, skipping simulation test")
-	}
+	_ = testutil.GetTestTenderlyAccount()
+	_ = testutil.GetTestTenderlyProject()
+	_ = testutil.GetTestTenderlyAccessKey()
 
 	// Common test setup
 	setupTest := func(t *testing.T) (*Engine, *model.User, common.Address, map[string]interface{}) {

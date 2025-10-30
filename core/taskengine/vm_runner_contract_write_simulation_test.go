@@ -25,14 +25,9 @@ func maskKey(key string) string {
 
 func TestContractWriteTenderlySimulation(t *testing.T) {
 	// Require Tenderly credentials in config
-	testConfig := testutil.GetTestConfig()
-	if testConfig == nil {
-		t.Fatal("Test config is nil - config/aggregator.yaml not loaded")
-	}
-	if testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
-		t.Fatalf("Tenderly credentials not configured in config/aggregator.yaml: account=%s, project=%s, accessKey=%s",
-			testConfig.TenderlyAccount, testConfig.TenderlyProject, maskKey(testConfig.TenderlyAccessKey))
-	}
+	_ = testutil.GetTestTenderlyAccount()
+	_ = testutil.GetTestTenderlyProject()
+	_ = testutil.GetTestTenderlyAccessKey()
 
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
@@ -279,14 +274,9 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 	// Replicate client request: transfer(to, amount) using derived runner (salt:0)
 	t.Run("RunNodeImmediately_Transfer_WithDerivedRunner_UsesTenderlySimulation", func(t *testing.T) {
 		// Require Tenderly credentials in config
-		testConfig := testutil.GetTestConfig()
-		if testConfig == nil {
-			t.Fatal("Test config is nil - config/aggregator.yaml not loaded")
-		}
-		if testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
-			t.Fatalf("Tenderly credentials not configured in config/aggregator.yaml: account=%s, project=%s, accessKey=%s",
-				testConfig.TenderlyAccount, testConfig.TenderlyProject, maskKey(testConfig.TenderlyAccessKey))
-		}
+		_ = testutil.GetTestTenderlyAccount()
+		_ = testutil.GetTestTenderlyProject()
+		_ = testutil.GetTestTenderlyAccessKey()
 
 		db := testutil.TestMustDB()
 		defer storage.Destroy(db.(*storage.BadgerStorage))
