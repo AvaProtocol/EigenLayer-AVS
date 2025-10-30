@@ -1262,8 +1262,8 @@ message RunNodeWithInputsResp {
 
 // Request message for RunTrigger
 message RunTriggerReq {
-  TriggerType trigger_type = 1; // Type of trigger to execute using the TriggerType enum
-  map<string, google.protobuf.Value> trigger_config = 2; // Configuration for the trigger
+  TaskTrigger trigger = 1; // Complete trigger definition with proper Config (consistent with SimulateTask)
+  // Field 2 was trigger_config (removed in Jan 2025) - do not reuse
   map<string, google.protobuf.Value> trigger_input = 3; // Input data for the trigger
 }
 

@@ -3502,10 +3502,29 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 // RunTriggerRPC handles the RPC interface for immediate trigger execution
 func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*avsproto.RunTriggerResp, error) {
-	// Convert protobuf request to internal format
-	triggerConfig := make(map[string]interface{})
-	for k, v := range req.TriggerConfig {
-		triggerConfig[k] = v.AsInterface()
+	// Validate that trigger is provided
+	if req.Trigger == nil {
+		resp := &avsproto.RunTriggerResp{
+			Success: false,
+			Error:   "trigger is required",
+		}
+		resp.OutputData = &avsproto.RunTriggerResp_ManualTrigger{
+			ManualTrigger: &avsproto.ManualTrigger_Output{},
+		}
+		return resp, nil
+	}
+
+	// Extract trigger configuration from TaskTrigger using existing helper
+	triggerConfig := ExtractTriggerConfigData(req.Trigger)
+	if triggerConfig == nil {
+		resp := &avsproto.RunTriggerResp{
+			Success: false,
+			Error:   "failed to extract trigger configuration",
+		}
+		resp.OutputData = &avsproto.RunTriggerResp_ManualTrigger{
+			ManualTrigger: &avsproto.ManualTrigger_Output{},
+		}
+		return resp, nil
 	}
 
 	// Extract trigger input data from the request
@@ -3515,12 +3534,12 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 	}
 
 	// Convert TriggerType enum to string
-	triggerTypeStr := TriggerTypeToString(req.TriggerType)
+	triggerTypeStr := TriggerTypeToString(req.Trigger.Type)
 	if triggerTypeStr == "" {
 		// For unsupported trigger types, return error but still set output data to avoid OUTPUT_DATA_NOT_SET
 		resp := &avsproto.RunTriggerResp{
 			Success: false,
-			Error:   fmt.Sprintf("unsupported trigger type: %v", req.TriggerType),
+			Error:   fmt.Sprintf("unsupported trigger type: %v", req.Trigger.Type),
 		}
 		// Set default ManualTrigger output structure to avoid OUTPUT_DATA_NOT_SET
 		resp.OutputData = &avsproto.RunTriggerResp_ManualTrigger{
@@ -3586,7 +3605,7 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 
 	// Log successful execution
 	if n.logger != nil {
-		n.logger.Info("RunTriggerRPC: Executed successfully", "triggerTypeStr", triggerTypeStr, "originalTriggerType", req.TriggerType)
+		n.logger.Info("RunTriggerRPC: Executed successfully", "triggerTypeStr", triggerTypeStr, "originalTriggerType", req.Trigger.Type)
 	}
 
 	// Convert result to the appropriate protobuf output type
