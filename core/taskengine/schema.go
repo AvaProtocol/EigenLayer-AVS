@@ -7,6 +7,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	storageschema "github.com/AvaProtocol/EigenLayer-AVS/storage/schema"
 	badger "github.com/dgraph-io/badger/v4"
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -20,7 +21,7 @@ func SmartWalletTaskStoragePrefix(owner common.Address, smartWalletAddress commo
 }
 
 func TaskByStatusStoragePrefix(status avsproto.TaskStatus) []byte {
-	return []byte(fmt.Sprintf("t:%s:", TaskStatusToStorageKey(status)))
+	return storageschema.TaskByStatusStoragePrefix(status)
 }
 
 func WalletByOwnerPrefix(owner common.Address) []byte {
@@ -65,11 +66,7 @@ func StoreWallet(db storage.Storage, owner common.Address, wallet *model.SmartWa
 }
 
 func TaskStorageKey(id string, status avsproto.TaskStatus) []byte {
-	return []byte(fmt.Sprintf(
-		"t:%s:%s",
-		TaskStatusToStorageKey(status),
-		id,
-	))
+	return storageschema.TaskStorageKey(id, status)
 }
 
 func TaskUserKey(t *model.Task) []byte {
@@ -130,27 +127,6 @@ func TaskIdFromExecutionStorageKey(key []byte) string {
 func TaskIdFromTaskStatusStorageKey(key []byte) []byte {
 	// Exampley key u:0xd7050816337a3f8f690f8083b5ff8019d50c0e50:0x415f09526f25d6520d471890abf0953b0505313d:01JMN2JHAGXTNSY46KH0KYY0MZ
 	return key[88:114]
-}
-
-// Convert task status gRPC enum into the storage prefix
-// c: completed. task is completed and no longer being check for trigger anymore
-// f: failed. task is failed to executed, and no longer being check for trigger anymore
-// x: executing. task is being execured currently.
-// l: cancelled. task is cancelled by user, no longer being check for trigger
-// a: actived. task is actived, and will be checked for triggering. task may had executed zero or more time depend on repeatable or not
-func TaskStatusToStorageKey(v avsproto.TaskStatus) string {
-	switch v {
-	case 1:
-		return "c"
-	case 2:
-		return "f"
-	case 3:
-		return "l"
-	case 4:
-		return "x"
-	}
-
-	return "a"
 }
 
 func SecretStorageKey(secret *model.Secret) (string, error) {
