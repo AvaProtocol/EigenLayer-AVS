@@ -919,13 +919,30 @@ func (v *VM) runKahnScheduler() error {
 		}
 	}
 
-	// Identify targets reachable only from branch condition edges; add one gating predecessor
+	// Identify targets reachable ONLY from branch condition edges; add one gating predecessor.
+	// First, collect all nodes with regular (non-branch) predecessors.
+	hasRegularPred := make(map[string]bool)
+	for _, e := range edges {
+		if !strings.Contains(e.Source, ".") { // regular edge
+			v.mu.Lock()
+			_, srcOK := v.TaskNodes[e.Source]
+			_, tgtOK := v.TaskNodes[e.Target]
+			v.mu.Unlock()
+			if (srcOK || (trigger != nil && e.Source == trigger.Id)) && tgtOK {
+				hasRegularPred[e.Target] = true
+			}
+		}
+	}
+
+	// Now mark as branchTarget ONLY if the node has NO regular predecessors.
 	branchTargets := make(map[string]bool)
 	for _, e := range edges {
-		if strings.Contains(e.Source, ".") {
+		if strings.Contains(e.Source, ".") { // branch condition edge
 			if _, exists := predCount[e.Target]; exists {
-				branchTargets[e.Target] = true
-				predCount[e.Target]++ // gating count so they are not initially ready
+				if !hasRegularPred[e.Target] { // ONLY if no regular predecessors
+					branchTargets[e.Target] = true
+					predCount[e.Target]++ // gating count so they are not initially ready
+				}
 			}
 		}
 	}
