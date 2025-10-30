@@ -1306,6 +1306,76 @@ func (r *ContractWriteProcessor) extractMethodABI(method *abi.Method) map[string
 	}
 }
 
+// addReturnValuesToDecodedData adds method return values from ABI outputs to the decoded data map
+// This is PRIORITY 1: return values from function outputs take precedence
+func (r *ContractWriteProcessor) addReturnValuesToDecodedData(
+	results []*avsproto.ContractWriteNode_MethodResult,
+	decodedEventsData map[string]interface{},
+) {
+	for _, methodResult := range results {
+		r.vm.logger.Debug("🔍 Processing methodResult return value",
+			"method", methodResult.MethodName,
+			"value_nil", methodResult.Value == nil,
+			"value_content", func() interface{} {
+				if methodResult.Value != nil {
+					return methodResult.Value.AsInterface()
+				}
+				return "nil"
+			}())
+		if methodResult.Value != nil {
+			// Add return values under method name
+			decodedEventsData[methodResult.MethodName] = methodResult.Value.AsInterface()
+			r.vm.logger.Debug("✅ Added return value to decodedEventsData (priority 1)",
+				"method", methodResult.MethodName,
+				"data", methodResult.Value.AsInterface())
+		}
+	}
+}
+
+// handleEventDataForMethod processes event data for a method call
+// This is PRIORITY 2: if events are found, use them; otherwise fall back to return value or boolean true
+func (r *ContractWriteProcessor) handleEventDataForMethod(
+	methodName string,
+	methodEvents map[string]interface{},
+	methodResult *avsproto.ContractWriteNode_MethodResult,
+	decodedEventsData map[string]interface{},
+	decimalProviders map[string]*big.Int,
+	methodCalls []*avsproto.ContractWriteNode_MethodCall,
+) {
+	if len(methodEvents) > 0 {
+		// Events found - use them (overwriting any return value from PRIORITY 1)
+		decodedEventsData[methodName] = methodEvents
+		r.vm.logger.Debug("✅ Using parsed event data",
+			"method", methodName,
+			"event_fields", len(methodEvents),
+			"event_data", methodEvents)
+
+		// Apply decimal formatting to event data if needed
+		for decimalProviderMethod, decimalsValue := range decimalProviders {
+			for _, methodCall := range methodCalls {
+				if methodCall.MethodName == decimalProviderMethod && len(methodCall.ApplyToFields) > 0 {
+					ctx := NewDecimalFormattingContext(decimalsValue, methodCall.ApplyToFields, decimalProviderMethod)
+					ctx.ApplyDecimalFormattingToEventData(methodEvents, methodName, r.vm.logger)
+					break
+				}
+			}
+		}
+	} else if _, hasValue := decodedEventsData[methodName]; !hasValue {
+		// No events found AND no return value from PRIORITY 1
+		// Use boolean true as fallback for successful calls
+		if methodResult.Success {
+			decodedEventsData[methodName] = true
+			r.vm.logger.Debug("✅ No events or return value, using boolean true (fallback)",
+				"method", methodName)
+		}
+	} else {
+		// No events found, but return value exists from PRIORITY 1 - keep it
+		r.vm.logger.Debug("✅ No events found, keeping return value from ABI output",
+			"method", methodName,
+			"return_value", decodedEventsData[methodName])
+	}
+}
+
 func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
 	// Use shared function to create execution step
 	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE, r.vm)
@@ -1561,25 +1631,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	var decodedEventsData = make(map[string]interface{})
 
 	// PRIORITY 1: Add return values from function outputs (ABI outputs)
-	// Return values take highest priority
-	for _, methodResult := range results {
-		r.vm.logger.Debug("🔍 Processing methodResult return value",
-			"method", methodResult.MethodName,
-			"value_nil", methodResult.Value == nil,
-			"value_content", func() interface{} {
-				if methodResult.Value != nil {
-					return methodResult.Value.AsInterface()
-				}
-				return "nil"
-			}())
-		if methodResult.Value != nil {
-			// Add return values under method name - this takes priority
-			decodedEventsData[methodResult.MethodName] = methodResult.Value.AsInterface()
-			r.vm.logger.Debug("✅ Added return value to decodedEventsData (priority 1)",
-				"method", methodResult.MethodName,
-				"data", methodResult.Value.AsInterface())
-		}
-	}
+	r.addReturnValuesToDecodedData(results, decodedEventsData)
 
 	// Parse events from each method's transaction receipt
 	for idx, methodResult := range results {
@@ -1709,41 +1761,8 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			}
 		}
 
-		// PRIORITY 2: Use event data only if no return value exists
-		// Priority order: 1) Return value (already set), 2) Event data, 3) true
-		if _, hasReturnValue := decodedEventsData[methodName]; !hasReturnValue {
-			if len(methodEvents) > 0 {
-				// Priority 2: Use event data if no return value
-				decodedEventsData[methodName] = methodEvents
-				r.vm.logger.Debug("✅ Using event data (priority 2, no return value)",
-					"method", methodName,
-					"event_fields", len(methodEvents),
-					"event_data", methodEvents)
-
-				// Apply decimal formatting to event data if needed
-				for decimalProviderMethod, decimalsValue := range decimalProviders {
-					for _, methodCall := range methodCalls {
-						// Find the method call that provides formatting details for this event
-						if methodCall.MethodName == decimalProviderMethod && len(methodCall.ApplyToFields) > 0 {
-							// Create decimal formatting context
-							ctx := NewDecimalFormattingContext(decimalsValue, methodCall.ApplyToFields, decimalProviderMethod)
-							// Apply formatting to the event data
-							ctx.ApplyDecimalFormattingToEventData(methodEvents, methodName, r.vm.logger)
-							break
-						}
-					}
-				}
-			} else if methodResult.Success {
-				// Priority 3: No return value and no events, set boolean true
-				decodedEventsData[methodName] = true
-				r.vm.logger.Debug("✅ No return value or events, setting boolean true (priority 3)",
-					"method", methodName)
-			}
-		} else {
-			r.vm.logger.Debug("✅ Keeping return value (priority 1, skipping events)",
-				"method", methodName,
-				"return_value", decodedEventsData[methodName])
-		}
+		// PRIORITY 2: Handle event data
+		r.handleEventDataForMethod(methodName, methodEvents, methodResult, decodedEventsData, decimalProviders, methodCalls)
 	}
 
 	// Convert decoded events to protobuf Value
