@@ -180,7 +180,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		resolvedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(param)
 
 		// Validate that template resolution didn't produce "undefined" values
-		if strings.Contains(resolvedMethodParams[i], "undefined") {
+		if resolvedMethodParams[i] == "undefined" {
 			failedVars := extractFailedVariables(param, r.vm)
 			var errorMsg string
 			if len(failedVars) > 0 {
@@ -439,7 +439,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		// Note: HTTP Simulation API automatically uses the latest block context
 
 		// Extract transaction value from node Config or VM variables (RNWI fallback)
-		transactionValue := r.extractTransactionValue(methodName, contractAddress.Hex(), node)
+		transactionValue := r.extractTransactionValue(node)
 
 		// Simulate the contract write using Tenderly
 
@@ -2013,7 +2013,7 @@ func (r *ContractWriteProcessor) convertMapToEventLog(logMap map[string]interfac
 }
 
 // extractTransactionValue extracts the transaction value from node.Config.Value (protobuf)
-func (r *ContractWriteProcessor) extractTransactionValue(methodName, contractAddress string, node *avsproto.ContractWriteNode) string {
+func (r *ContractWriteProcessor) extractTransactionValue(node *avsproto.ContractWriteNode) string {
 	transactionValue := "0" // Default to 0 if not specified
 
 	if node != nil && node.Config != nil && node.Config.Value != nil {
@@ -2021,9 +2021,7 @@ func (r *ContractWriteProcessor) extractTransactionValue(methodName, contractAdd
 		if valueStr != "" {
 			if r.vm.logger != nil {
 				r.vm.logger.Info("Using transaction value from node.Config",
-					"value", valueStr,
-					"method", methodName,
-					"contract", contractAddress)
+					"value", valueStr)
 			}
 			return valueStr
 		}
@@ -2439,12 +2437,14 @@ func (r *ContractWriteProcessor) getUserOpHashOrPending(receipt *types.Receipt) 
 	return "pending"
 }
 
+// templateVarRegex is compiled once at package level for performance
+var templateVarRegex = regexp.MustCompile(`\{\{([^}]+)\}\}`)
+
 // extractFailedVariables extracts template variables from a parameter string and identifies which ones resolved to "undefined"
 func extractFailedVariables(originalParam string, vm *VM) map[string]string {
 	failedVars := make(map[string]string)
 
-	// Regex to find all template variables: {{variable.path}}
-	templateVarRegex := regexp.MustCompile(`\{\{([^}]+)\}\}`)
+	// Find all template variables: {{variable.path}}
 	matches := templateVarRegex.FindAllStringSubmatch(originalParam, -1)
 
 	for _, match := range matches {
@@ -2457,7 +2457,7 @@ func extractFailedVariables(originalParam string, vm *VM) map[string]string {
 		// Resolve just this variable to check if it becomes "undefined"
 		resolved := vm.preprocessTextWithVariableMapping(varTemplate)
 
-		if resolved == "undefined" || strings.Contains(resolved, "undefined") {
+		if resolved == "undefined" {
 			failedVars[varExpr] = "undefined"
 		}
 	}
