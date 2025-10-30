@@ -212,13 +212,14 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		}
 
 		// Updated input variables with new settings structure
+		// Use the derived runner address instead of hardcoded value
 		inputVariables := map[string]interface{}{
 			"timeTrigger": map[string]interface{}{
 				"data":  map[string]interface{}{},
 				"input": map[string]interface{}{"schedules": []interface{}{"*/5 * * * *"}},
 			},
 			"settings": map[string]interface{}{
-				"runner":   "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"runner":   runnerAddr.Hex(), // Use derived address, not hardcoded
 				"chain_id": 11155111,
 			},
 			// Keep some legacy fields for context but authentication should come from user
