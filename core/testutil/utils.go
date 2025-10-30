@@ -206,21 +206,34 @@ func GetTestTenderlyAccessKey() string {
 	return testConfig.TenderlyAccessKey
 }
 
-// MustGetTestOwnerAddress returns the owner EOA address for tests from OWNER_EOA env var.
-// Returns nil and false if OWNER_EOA is not set (test should skip).
+// MustGetTestOwnerAddress returns the owner EOA address for tests.
+// First tries OWNER_EOA env var, then derives from TEST_PRIVATE_KEY if available.
+// Returns nil and false if neither is set (test should skip).
 // Returns address and true if successful.
-// Panics if OWNER_EOA is set but invalid.
+// Panics if OWNER_EOA is set but invalid, or if TEST_PRIVATE_KEY is invalid.
 func MustGetTestOwnerAddress() (*common.Address, bool) {
+	// Try OWNER_EOA first (explicit address)
 	ownerEOAHex := os.Getenv("OWNER_EOA")
-	if ownerEOAHex == "" {
+	if ownerEOAHex != "" {
+		if !common.IsHexAddress(ownerEOAHex) {
+			panic(fmt.Sprintf("OWNER_EOA is not a valid hex address: %s", ownerEOAHex))
+		}
+		address := common.HexToAddress(ownerEOAHex)
+		return &address, true
+	}
+
+	// Fallback: derive from TEST_PRIVATE_KEY
+	testPrivateKeyHex := os.Getenv("TEST_PRIVATE_KEY")
+	if testPrivateKeyHex == "" {
 		return nil, false
 	}
 
-	if !common.IsHexAddress(ownerEOAHex) {
-		panic(fmt.Sprintf("OWNER_EOA is not a valid hex address: %s", ownerEOAHex))
+	privateKey, err := crypto.HexToECDSA(testPrivateKeyHex)
+	if err != nil {
+		panic(fmt.Sprintf("TEST_PRIVATE_KEY is not a valid hex private key: %v", err))
 	}
 
-	address := common.HexToAddress(ownerEOAHex)
+	address := crypto.PubkeyToAddress(privateKey.PublicKey)
 	return &address, true
 }
 
@@ -282,6 +295,20 @@ func GetTestMoralisApiKey() string {
 		return ""
 	}
 	return testConfig.MacroSecrets["moralis_api_key"]
+}
+
+// GetTestOpenAIApiKey returns the OpenAI API key for tests from aggregator config
+// Returns empty string if config is not loaded or key is not configured
+func GetTestOpenAIApiKey() string {
+	// Use loaded aggregator config (if available)
+	if testConfig != nil && testConfig.MacroSecrets != nil {
+		if v := testConfig.MacroSecrets["openai_api_key"]; v != "" {
+			return v
+		}
+	}
+
+	// Fallback to environment variable for local runs
+	return os.Getenv("OPENAI_API_KEY")
 }
 
 // TriggerData represents the flattened trigger information for testing
