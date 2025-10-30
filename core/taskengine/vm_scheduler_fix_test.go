@@ -8,6 +8,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // TestSchedulerExecutesAllNodesInSequence verifies that the Kahn scheduler
@@ -23,7 +24,15 @@ func TestSchedulerExecutesAllNodesInSequence(t *testing.T) {
 		Name: "testTrigger",
 		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerType: &avsproto.TaskTrigger_Manual{
-			Manual: &avsproto.ManualTrigger{},
+			Manual: &avsproto.ManualTrigger{
+				Config: &avsproto.ManualTrigger_Config{
+					Lang: avsproto.Lang_LANG_JSON,
+					Data: func() *structpb.Value {
+						data, _ := structpb.NewValue(map[string]interface{}{"test": "data"})
+						return data
+					}(),
+				},
+			},
 		},
 	}
 
@@ -107,15 +116,23 @@ func TestSchedulerExecutesAllNodesInSequence(t *testing.T) {
 // are executed correctly, even when the branch path has multiple steps.
 func TestSchedulerExecutesNodeAfterBranch(t *testing.T) {
 	// Workflow: trigger -> balance -> branch
-	//                                   |-> (condition 0) -> approve -> swap -> email
-	//                                   |-> (condition 1) -> email
+	//                                   |-> (condition 0 /IF) -> approve -> swap -> email
+	//                                   |-> (condition 1/ELSE) -> error_email
 
 	trigger := &avsproto.TaskTrigger{
 		Id:   "trigger1",
 		Name: "testTrigger",
 		Type: avsproto.TriggerType_TRIGGER_TYPE_MANUAL,
 		TriggerType: &avsproto.TaskTrigger_Manual{
-			Manual: &avsproto.ManualTrigger{},
+			Manual: &avsproto.ManualTrigger{
+				Config: &avsproto.ManualTrigger_Config{
+					Lang: avsproto.Lang_LANG_JSON,
+					Data: func() *structpb.Value {
+						data, _ := structpb.NewValue(map[string]interface{}{"test": "data"})
+						return data
+					}(),
+				},
+			},
 		},
 	}
 
@@ -183,6 +200,18 @@ func TestSchedulerExecutesNodeAfterBranch(t *testing.T) {
 				},
 			},
 		},
+		{
+			Id:   "error_email",
+			Name: "email_error",
+			Type: avsproto.NodeType_NODE_TYPE_CUSTOM_CODE,
+			TaskType: &avsproto.TaskNode_CustomCode{
+				CustomCode: &avsproto.CustomCodeNode{
+					Config: &avsproto.CustomCodeNode_Config{
+						Source: "return { error: true };",
+					},
+				},
+			},
+		},
 	}
 
 	edges := []*avsproto.TaskEdge{
@@ -190,8 +219,8 @@ func TestSchedulerExecutesNodeAfterBranch(t *testing.T) {
 		{Source: "balance", Target: "branch"},
 		{Source: "branch.0", Target: "approve"}, // IF path
 		{Source: "approve", Target: "swap"},
-		{Source: "swap", Target: "email"},     // This is the critical edge that was skipped
-		{Source: "branch.1", Target: "email"}, // ELSE path
+		{Source: "swap", Target: "email"},           // This is the critical edge that was skipped
+		{Source: "branch.1", Target: "error_email"}, // ELSE path (different endpoint)
 	}
 
 	// Setup test infrastructure
@@ -210,6 +239,12 @@ func TestSchedulerExecutesNodeAfterBranch(t *testing.T) {
 	// Verify execution was successful
 	assert.Equal(t, avsproto.ExecutionStatus_EXECUTION_STATUS_SUCCESS, execution.Status)
 	assert.Empty(t, execution.Error)
+
+	// Debug: print what executed
+	t.Logf("Executed %d steps:", len(execution.Steps))
+	for i, step := range execution.Steps {
+		t.Logf("  Step %d: %s (name: %s, success: %v)", i, step.Id, step.Name, step.Success)
+	}
 
 	// Verify all nodes in the IF path executed (trigger, balance, branch, approve, swap, email)
 	assert.GreaterOrEqual(t, len(execution.Steps), 6, "At least 6 steps should execute (trigger, balance, branch, approve, swap, email)")
