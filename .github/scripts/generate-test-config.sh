@@ -8,14 +8,18 @@ echo "Generating test config files from example template..."
 
 mkdir -p config
 
+# Prepend protocols to CHAIN_ENDPOINT (which is just the domain)
+CHAIN_RPC="https://${CHAIN_ENDPOINT}"
+CHAIN_WS="wss://${CHAIN_ENDPOINT}"
+
 # Copy example file as base
 cp config/aggregator.example.yaml config/aggregator-sepolia.yaml
 
-# Substitute secret values for Sepolia
-sed -i "s|eth_rpc_url:.*|eth_rpc_url: ${SEPOLIA_RPC}|g" config/aggregator-sepolia.yaml
-sed -i "s|eth_ws_url:.*|eth_ws_url: ${SEPOLIA_WS}|g" config/aggregator-sepolia.yaml
+# Substitute secret values using unified environment variable names
+sed -i "s|eth_rpc_url:.*|eth_rpc_url: ${CHAIN_RPC}|g" config/aggregator-sepolia.yaml
+sed -i "s|eth_ws_url:.*|eth_ws_url: ${CHAIN_WS}|g" config/aggregator-sepolia.yaml
 sed -i "s|ecdsa_private_key:.*|ecdsa_private_key: ${CONTROLLER_PRIVATE_KEY}|g" config/aggregator-sepolia.yaml
-sed -i "s|bundler_url:.*|bundler_url: ${SEPOLIA_BUNDLER_RPC}|g" config/aggregator-sepolia.yaml
+sed -i "s|bundler_url:.*|bundler_url: ${BUNDLER_RPC}|g" config/aggregator-sepolia.yaml
 sed -i "s|controller_private_key:.*|controller_private_key: ${CONTROLLER_PRIVATE_KEY}|g" config/aggregator-sepolia.yaml
 sed -i "s|tenderly_account:.*|tenderly_account: ${TENDERLY_ACCOUNT}|g" config/aggregator-sepolia.yaml
 sed -i "s|tenderly_project:.*|tenderly_project: ${TENDERLY_PROJECT}|g" config/aggregator-sepolia.yaml
