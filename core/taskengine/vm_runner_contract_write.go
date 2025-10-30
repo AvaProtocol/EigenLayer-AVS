@@ -579,7 +579,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 
 	// 🔍 PRE-FLIGHT VALIDATION: Check for common failure scenarios before gas estimation
 	if validationErr := r.validateTransactionBeforeGasEstimation(methodName, callData, callDataBytes, contractAddress); validationErr != nil {
-		executionLogBuilder.WriteString(fmt.Sprintf("❌ PRE-FLIGHT VALIDATION FAILED: %v\n", validationErr))
+		executionLogBuilder.WriteString(fmt.Sprintf("PRE-FLIGHT VALIDATION FAILED: %v\n", validationErr))
 		executionLogBuilder.WriteString("Skipped gas estimation to avoid bundler error\n")
 
 		r.vm.logger.Error("🚫 PRE-FLIGHT VALIDATION FAILED - Skipping gas estimation to avoid bundler error",
@@ -604,7 +604,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		callDataBytes,   // contract method calldata
 	)
 	if err != nil {
-		executionLogBuilder.WriteString(fmt.Sprintf("❌ CALLDATA PACKING FAILED: %v\n", err))
+		executionLogBuilder.WriteString(fmt.Sprintf("CALLDATA PACKING FAILED: %v\n", err))
 
 		r.vm.logger.Error("🚨 DEPLOYED WORKFLOW ERROR: Failed to pack smart wallet execute calldata",
 			"error", err,
@@ -618,7 +618,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		}
 	}
 
-	executionLogBuilder.WriteString(fmt.Sprintf("✅ Smart wallet calldata packed: %d bytes\n", len(smartWalletCallData)))
+	executionLogBuilder.WriteString(fmt.Sprintf("Smart wallet calldata packed: %d bytes\n", len(smartWalletCallData)))
 
 	// Set up factory address for AA operations
 	aa.SetFactoryAddress(r.smartWalletConfig.FactoryAddress)
@@ -683,7 +683,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		r.vm.logger.Error("🚨 DEPLOYED WORKFLOW ERROR: aa_sender not found in VM vars",
 			"owner_eoaAddress", r.owner.Hex())
 	} else {
-		executionLogBuilder.WriteString(fmt.Sprintf("✅ Smart wallet sender: %s\n", senderOverride.Hex()))
+		executionLogBuilder.WriteString(fmt.Sprintf("Smart wallet sender: %s\n", senderOverride.Hex()))
 	}
 
 	// Add paymaster information to execution log
@@ -699,13 +699,13 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	// Create a temporary UserOp for gas estimation
 	rpcClient, rpcErr := ethclient.Dial(r.smartWalletConfig.EthRpcUrl)
 	if rpcErr != nil {
-		executionLogBuilder.WriteString(fmt.Sprintf("❌ Failed to connect to RPC: %v\n", rpcErr))
+		executionLogBuilder.WriteString(fmt.Sprintf("Failed to connect to RPC: %v\n", rpcErr))
 	} else {
 		defer rpcClient.Close()
 
 		_, bundlerErr := bundler.NewBundlerClient(r.smartWalletConfig.BundlerURL)
 		if bundlerErr != nil {
-			executionLogBuilder.WriteString(fmt.Sprintf("❌ Failed to create bundler client: %v\n", bundlerErr))
+			executionLogBuilder.WriteString(fmt.Sprintf("Failed to create bundler client: %v\n", bundlerErr))
 		} else {
 			// Check smart wallet balance
 			smartWalletAddr := senderOverride
@@ -713,7 +713,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 				if balance, balErr := rpcClient.BalanceAt(ctx, *smartWalletAddr, nil); balErr == nil {
 					executionLogBuilder.WriteString(fmt.Sprintf("Smart wallet balance: %s wei\n", balance.String()))
 				} else {
-					executionLogBuilder.WriteString(fmt.Sprintf("❌ Failed to check balance: %v\n", balErr))
+					executionLogBuilder.WriteString(fmt.Sprintf("Failed to check balance: %v\n", balErr))
 				}
 			}
 
@@ -723,7 +723,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 				executionLogBuilder.WriteString(fmt.Sprintf("  MaxFeePerGas: %s wei\n", maxFee.String()))
 				executionLogBuilder.WriteString(fmt.Sprintf("  MaxPriorityFeePerGas: %s wei\n", maxPriority.String()))
 			} else {
-				executionLogBuilder.WriteString(fmt.Sprintf("❌ Failed to get gas prices: %v\n", feeErr))
+				executionLogBuilder.WriteString(fmt.Sprintf("Failed to get gas prices: %v\n", feeErr))
 			}
 		}
 	}
@@ -752,7 +752,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 
 	if err != nil {
 		// Add detailed error information to execution log (internal)
-		executionLogBuilder.WriteString(fmt.Sprintf("❌ BUNDLER FAILED: UserOp transaction could not be sent\n"))
+		executionLogBuilder.WriteString(fmt.Sprintf("BUNDLER FAILED: UserOp transaction could not be sent\n"))
 		executionLogBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
 
 		// Check if this is specifically the AA21 prefund error and add detailed explanation
@@ -846,7 +846,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	}
 
 	// Add success information to execution log
-	executionLogBuilder.WriteString("✅ BUNDLER SUCCESS: UserOp transaction sent successfully\n")
+	executionLogBuilder.WriteString("BUNDLER SUCCESS: UserOp transaction sent successfully\n")
 	if userOp != nil {
 		executionLogBuilder.WriteString(fmt.Sprintf("UserOp Hash: %s\n", r.getUserOpHashOrPending(receipt)))
 		executionLogBuilder.WriteString(fmt.Sprintf("Sender: %s\n", userOp.Sender.Hex()))
@@ -1432,7 +1432,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 		if optimizedParsedABI, parseErr := ParseABIOptimized(node.Config.ContractAbi); parseErr == nil {
 			parsedABI = optimizedParsedABI
-			log.WriteString("✅ ABI parsed successfully using optimized shared method (no string conversion)\n")
+			log.WriteString("ABI parsed successfully using optimized shared method (no string conversion)\n")
 		} else {
 			log.WriteString(fmt.Sprintf("Warning: Failed to parse ABI with optimized method: %v\n", parseErr))
 		}
@@ -1470,7 +1470,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 						"panic_type": fmt.Sprintf("%T", rcv),
 					})
 
-					log.WriteString(fmt.Sprintf("🚨 PANIC in executeMethodCall: %v\n", rcv))
+					log.WriteString(fmt.Sprintf("PANIC in executeMethodCall: %v\n", rcv))
 					result = &avsproto.ContractWriteNode_MethodResult{
 						MethodName: methodCall.MethodName,
 						Success:    false,
@@ -1506,7 +1506,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					}
 				}
 			}
-			log.WriteString(fmt.Sprintf("✅ Success: %s (tx: %s)\n", result.MethodName, txHash))
+			log.WriteString(fmt.Sprintf("Success: %s (tx: %s)\n", result.MethodName, txHash))
 		} else {
 			r.vm.logger.Error("🚨 DEPLOYED WORKFLOW: Method execution failed",
 				"method_name", result.MethodName,
@@ -1515,7 +1515,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				"success", result.Success)
 
 			// Add detailed failure information to execution log
-			log.WriteString(fmt.Sprintf("❌ Failed: %s - %s\n", result.MethodName, result.Error))
+			log.WriteString(fmt.Sprintf("Failed: %s - %s\n", result.MethodName, result.Error))
 
 			// If this is a bundler/AA error, add additional debugging information
 			if strings.Contains(result.Error, "Bundler failed") || strings.Contains(result.Error, "AA21") {
@@ -1602,7 +1602,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 								if decimalsInt, err := strconv.ParseInt(strValue, 10, 64); err == nil {
 									decimalValue := big.NewInt(decimalsInt)
 									decimalProviders[methodName] = decimalValue
-									log.WriteString(fmt.Sprintf("✅ Method %s provides decimal value: %s\n", methodName, decimalValue.String()))
+									log.WriteString(fmt.Sprintf("Method %s provides decimal value: %s\n", methodName, decimalValue.String()))
 									r.vm.logger.Info("Method provides decimal value",
 										"methodName", methodName,
 										"decimalValue", decimalValue.String(),
@@ -1616,7 +1616,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					if decimalsInt, err := strconv.ParseInt(strValue, 10, 64); err == nil {
 						decimalValue := big.NewInt(decimalsInt)
 						decimalProviders[methodName] = decimalValue
-						log.WriteString(fmt.Sprintf("✅ Method %s provides decimal value: %s\n", methodName, decimalValue.String()))
+						log.WriteString(fmt.Sprintf("Method %s provides decimal value: %s\n", methodName, decimalValue.String()))
 						r.vm.logger.Info("Method provides decimal value",
 							"methodName", methodName,
 							"decimalValue", decimalValue.String(),
