@@ -919,13 +919,33 @@ func (v *VM) runKahnScheduler() error {
 		}
 	}
 
-	// Identify targets reachable only from branch condition edges; add one gating predecessor
+	// Identify targets reachable ONLY from branch condition edges; add one gating predecessor.
+	// First, collect all nodes with regular (non-branch) predecessors.
+	hasRegularPred := make(map[string]bool)
+	for _, e := range edges {
+		if !strings.Contains(e.Source, ".") { // regular edge
+			v.mu.Lock()
+			_, srcOK := v.TaskNodes[e.Source]
+			_, tgtOK := v.TaskNodes[e.Target]
+			v.mu.Unlock()
+			if (srcOK || (trigger != nil && e.Source == trigger.Id)) && tgtOK {
+				hasRegularPred[e.Target] = true
+			}
+		}
+	}
+
+	// Now mark as branchTarget ONLY if the node has NO regular predecessors.
 	branchTargets := make(map[string]bool)
 	for _, e := range edges {
-		if strings.Contains(e.Source, ".") {
+		if strings.Contains(e.Source, ".") { // branch condition edge
 			if _, exists := predCount[e.Target]; exists {
-				branchTargets[e.Target] = true
-				predCount[e.Target]++ // gating count so they are not initially ready
+				if !hasRegularPred[e.Target] { // ONLY if no regular predecessors
+					branchTargets[e.Target] = true
+					// Add an extra predecessor count to prevent branch targets from becoming ready immediately;
+					// this ensures that branch targets are only scheduled (i.e., become ready) when the branch node
+					// explicitly schedules them based on the selected condition.
+					predCount[e.Target]++
+				}
 			}
 		}
 	}
@@ -1025,6 +1045,7 @@ func (v *VM) runKahnScheduler() error {
 			}
 
 			processed++
+			// Check termination AFTER all successors have been scheduled
 			if processed == scheduledCount { // all scheduled nodes completed
 				closeOnce.Do(func() { close(ready) })
 			}
@@ -2220,16 +2241,6 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 		}
 		tempVM.vars[APContextVarName] = apContextValue
 	}
-	// Copy nodeConfig if it exists (contains raw configuration including value and gasLimit)
-	if nodeConfigValue, ok := v.vars["nodeConfig"]; ok {
-		if tempVM.vars == nil { // Ensure tempVM.vars is initialized
-			tempVM.vars = make(map[string]any)
-		}
-		tempVM.vars["nodeConfig"] = nodeConfigValue
-		if v.logger != nil {
-			v.logger.Debug("Copied nodeConfig to temporary VM for node execution")
-		}
-	}
 
 	// Copy aa_sender if it exists (required for contractWrite nodes)
 	if aaSenderValue, ok := v.vars["aa_sender"]; ok {
@@ -2334,6 +2345,13 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 						restConfig.Headers = convertedHeaders
 					}
 				}
+			}
+		}
+
+		// Handle options bag (e.g., { "summarize": true })
+		if optsInterface, exists := config["options"]; exists && optsInterface != nil {
+			if optsVal, err := structpb.NewValue(optsInterface); err == nil {
+				restConfig.Options = optsVal
 			}
 		}
 
@@ -2695,6 +2713,13 @@ func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID s
 			// Handle headers - only support standard map[string]string format
 			if headers, ok := runnerConfig["headers"].(map[string]string); ok {
 				rConfig.Headers = headers
+			}
+
+			// Handle options in loop runner config as well
+			if optsInterface, exists := runnerConfig["options"]; exists && optsInterface != nil {
+				if optsVal, err := structpb.NewValue(optsInterface); err == nil {
+					rConfig.Options = optsVal
+				}
 			}
 
 			loopNode.Runner = &avsproto.LoopNode_RestApi{
@@ -3206,6 +3231,11 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				config["headers"] = restApi.Config.Headers
 			}
 
+			// Include options bag if present
+			if restApi.Config.Options != nil {
+				config["options"] = restApi.Config.Options.AsInterface()
+			}
+
 			// Clean up complex protobuf types before returning
 			return removeComplexProtobufTypes(config)
 		}
@@ -3335,6 +3365,16 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				"contractAbi":     contractAbiArray,
 			}
 
+			// Extract optional value field (ETH to send with transaction)
+			if contractWrite.Config.Value != nil {
+				config["value"] = *contractWrite.Config.Value
+			}
+
+			// Extract optional gas_limit field (custom gas limit)
+			if contractWrite.Config.GasLimit != nil {
+				config["gasLimit"] = *contractWrite.Config.GasLimit
+			}
+
 			// Handle method calls - extract fields to simple map for protobuf compatibility
 			if len(contractWrite.Config.MethodCalls) > 0 {
 				methodCallsArray := make([]interface{}, len(contractWrite.Config.MethodCalls))
@@ -3387,6 +3427,40 @@ func ExtractNodeConfiguration(taskNode *avsproto.TaskNode) map[string]interface{
 				"includeZeroBalances": balance.Config.IncludeZeroBalances,
 				"minUsdValue":         float64(balance.Config.MinUsdValueCents) / 100.0,
 				"tokenAddresses":      balance.Config.TokenAddresses,
+			}
+
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_Branch:
+		branch := taskNode.GetBranch()
+		if branch != nil && branch.Config != nil {
+			// Convert conditions array
+			var conditionsArray []interface{}
+			for _, condition := range branch.Config.Conditions {
+				conditionMap := map[string]interface{}{
+					"id":         condition.Id,
+					"type":       condition.Type,
+					"expression": condition.Expression,
+				}
+				conditionsArray = append(conditionsArray, conditionMap)
+			}
+
+			config := map[string]interface{}{
+				"conditions": conditionsArray,
+			}
+
+			// Clean up complex protobuf types before returning
+			return removeComplexProtobufTypes(config)
+		}
+
+	case *avsproto.TaskNode_EthTransfer:
+		ethTransfer := taskNode.GetEthTransfer()
+		if ethTransfer != nil && ethTransfer.Config != nil {
+			config := map[string]interface{}{
+				"destination": ethTransfer.Config.Destination,
+				"amount":      ethTransfer.Config.Amount,
 			}
 
 			// Clean up complex protobuf types before returning

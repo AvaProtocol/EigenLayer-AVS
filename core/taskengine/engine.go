@@ -86,6 +86,15 @@ func SetMacroSecrets(v map[string]string) {
 	macroSecrets = v
 }
 
+// GetMacroSecret returns a secret from macros.secrets loaded into the engine.
+// Returns empty string if the key is not set or macros were not initialized.
+func GetMacroSecret(key string) string {
+	if macroSecrets == nil || key == "" {
+		return ""
+	}
+	return macroSecrets[key]
+}
+
 func SetCache(c *bigcache.BigCache) {
 	cache = c
 }
@@ -262,6 +271,19 @@ func New(db storage.Storage, config *config.Config, queue *apqueue.Queue, logger
 
 		logger: logger,
 	}
+
+	// Initialize optional AI summarizer (global) from aggregator config
+	if s := NewOpenAISummarizerFromAggregatorConfig(config); s != nil {
+		SetSummarizer(s)
+		logger.Info("AI summarizer initialized", "provider", config.NotificationsSummary.Provider, "model", config.NotificationsSummary.Model)
+	} else {
+		// Leave summarizer unset; deterministic fallback will be used
+	}
+
+	// Initialize global macro variables and secrets from config
+	// This ensures all nodes (BalanceNode, etc.) can access secrets without manual setup
+	SetMacroVars(config.MacroVars)
+	SetMacroSecrets(config.MacroSecrets)
 
 	SetRpc(config.SmartWallet.EthRpcUrl)
 	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)

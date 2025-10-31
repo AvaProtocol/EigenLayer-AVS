@@ -442,10 +442,10 @@ func TestSecretFieldControlPerformance(t *testing.T) {
 
 // TestLoadSecretForTask tests the LoadSecretForTask function
 func TestLoadSecretForTask(t *testing.T) {
-	// Clear any global secrets from other tests
-	SetMacroSecrets(map[string]string{})
-
 	engine := createSecretTestEngine(t)
+
+	// Clear any global secrets after engine creation (engine init loads config secrets)
+	SetMacroSecrets(map[string]string{})
 	user1 := testutil.TestUser1()
 
 	engine.CreateSecret(user1, &avsproto.CreateOrUpdateSecretReq{

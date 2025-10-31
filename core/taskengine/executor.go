@@ -22,6 +22,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/core/chainio/aa"
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
+	storageschema "github.com/AvaProtocol/EigenLayer-AVS/storage/schema"
 )
 
 // reconstructTriggerOutputData is a helper function to reconstruct trigger output data
@@ -104,11 +105,11 @@ func (x *TaskExecutor) GetTask(id string) (*model.Task, error) {
 	task := &model.Task{
 		Task: &avsproto.Task{},
 	}
-	storageKey := []byte(fmt.Sprintf("t:%s:%s", TaskStatusToStorageKey(avsproto.TaskStatus_Active), id))
+	storageKey := storageschema.TaskStorageKey(id, avsproto.TaskStatus_Active)
 	item, err := x.db.GetKey(storageKey)
 
 	if err != nil {
-		return nil, fmt.Errorf("storage access failed for key 't:%s:%s': %w", TaskStatusToStorageKey(avsproto.TaskStatus_Active), id, err)
+		return nil, fmt.Errorf("storage access failed for key '%s': %w", string(storageKey), err)
 	}
 	err = protojson.Unmarshal(item, task)
 	if err != nil {

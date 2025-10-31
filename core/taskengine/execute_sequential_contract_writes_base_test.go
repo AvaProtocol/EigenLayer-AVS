@@ -31,7 +31,7 @@ type sequentialContractWritesTestSetup struct {
 }
 
 func setupSequentialContractWritesTest(t *testing.T) *sequentialContractWritesTestSetup {
-	// Skip in short mode
+	// Skip in short mode (e.g., in CI/CD)
 	if testing.Short() {
 		t.Skip("Skipping real execution test in short mode")
 	}
@@ -74,17 +74,18 @@ func setupSequentialContractWritesTest(t *testing.T) *sequentialContractWritesTe
 
 	// Set factory for AA library
 	aa.SetFactoryAddress(common.HexToAddress(BASE_FACTORY))
-	t.Logf("   Computing salt:0 smart wallet address...")
+	t.Logf("   Computing salt:2 smart wallet address...")
 
 	// Connect to Base
 	client, err := ethclient.Dial(baseAggregatorCfg.SmartWallet.EthRpcUrl)
 	require.NoError(t, err, "Failed to connect to Base RPC")
 	defer client.Close()
 
-	// Compute the salt:0 smart wallet address for this owner
-	smartWalletAddr, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(0))
+	// Compute the salt:2 smart wallet address for this owner
+	// Using salt=2 for address 0x5a8A8a79DdF433756D4D97DCCE33334D9E218856 which has proper balance
+	smartWalletAddr, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(2))
 	require.NoError(t, err, "Failed to derive smart wallet address")
-	t.Logf("   ✅ Smart Wallet (salt:0): %s", smartWalletAddr.Hex())
+	t.Logf("   ✅ Smart Wallet (salt:2): %s", smartWalletAddr.Hex())
 
 	// Check smart wallet balance
 	balance, err := client.BalanceAt(context.Background(), *smartWalletAddr, nil)
@@ -107,7 +108,7 @@ func setupSequentialContractWritesTest(t *testing.T) *sequentialContractWritesTe
 		Owner:   &ownerAddress,
 		Address: smartWalletAddr,
 		Factory: &factory,
-		Salt:    big.NewInt(0),
+		Salt:    big.NewInt(2),
 	})
 	require.NoError(t, err, "Failed to register smart wallet")
 	t.Logf("   ✅ Smart wallet registered in database")

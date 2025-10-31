@@ -10,6 +10,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -34,9 +35,14 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 	ownerEOA := *ownerAddr
 	factory := config.SmartWallet.FactoryAddress
 
+	// Connect to RPC client for GetSenderAddress
+	client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
+	require.NoError(t, err, "Failed to connect to RPC")
+	defer client.Close()
+
 	// Derive actual salt:0 smart wallet address
 	aa.SetFactoryAddress(factory)
-	runnerAddr, err := aa.GetSenderAddress(nil, ownerEOA, big.NewInt(0))
+	runnerAddr, err := aa.GetSenderAddress(client, ownerEOA, big.NewInt(0))
 	require.NoError(t, err, "Failed to derive smart wallet address")
 
 	user := &model.User{
@@ -133,7 +139,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 			"settings": map[string]interface{}{
 				"chain":    "Sepolia",
 				"amount":   "100000000000000000", // 0.1 ETH in wei
-				"runner":   "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"runner":   runnerAddr.Hex(),
 				"chain_id": 11155111,
 				"uniswapv3_pool": map[string]interface{}{
 					"id": "0xeb502c739488180b106eded9902b7465a8c12edb",
@@ -255,7 +261,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 		inputVariables := map[string]interface{}{
 			"settings": map[string]interface{}{
 				"amount":   "100000000000000000",
-				"runner":   "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"runner":   runnerAddr.Hex(),
 				"chain_id": 11155111,
 				"uniswapv3_pool": map[string]interface{}{
 					"token0": map[string]interface{}{
@@ -316,7 +322,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 			"settings": map[string]interface{}{
 				"token0": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
 				"amount": "100000000000000000",
-				"runner": "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"runner": runnerAddr.Hex(),
 			},
 		}
 
@@ -376,7 +382,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 				"token0": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
 				"token1": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
 				"amount": "100000000000000000",
-				"runner": "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"runner": runnerAddr.Hex(),
 			},
 		}
 
@@ -444,7 +450,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 					"methodName": "approve",
 					// Mathematical expression with hyphen should work
 					"methodParams": []interface{}{
-						"0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+						runnerAddr.Hex(),
 						"{{settings.base_amount - 10}}", // Subtraction operator
 					},
 				},
@@ -456,7 +462,7 @@ func TestRunNodeImmediately_ContractWrite_TupleWithTemplates(t *testing.T) {
 		inputVariables := map[string]interface{}{
 			"settings": map[string]interface{}{
 				"base_amount": "1000000", // Will subtract 10
-				"runner":      "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"runner":      runnerAddr.Hex(),
 				"chain_id":    11155111,
 			},
 		}

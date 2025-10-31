@@ -283,7 +283,7 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 		return executionLogStep, err
 	}
 
-	logBuilder.WriteString(fmt.Sprintf("✅ Successfully fetched %d token balances\n", len(balances)))
+	logBuilder.WriteString(fmt.Sprintf("Successfully fetched %d token balances\n", len(balances)))
 
 	// Convert to protobuf Value
 	balancesValue, err := structpb.NewValue(balances)
