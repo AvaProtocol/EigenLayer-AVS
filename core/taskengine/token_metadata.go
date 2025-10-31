@@ -75,6 +75,27 @@ const (
 	ChainIDBaseSepolia uint64 = 84532
 )
 
+// Native token sentinel address used by Moralis and other services
+// to represent native ETH across all chains
+const NativeTokenAddress = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+// isNativeToken checks if the given address is the native token sentinel
+func isNativeToken(address string) bool {
+	return strings.ToLower(address) == NativeTokenAddress
+}
+
+// getNativeTokenMetadata returns metadata for native token (ETH)
+// Same metadata across all Ethereum-based chains
+func getNativeTokenMetadata() *TokenMetadata {
+	return &TokenMetadata{
+		Address:  NativeTokenAddress,
+		Name:     "Ether",
+		Symbol:   "ETH",
+		Decimals: 18,
+		Source:   "native",
+	}
+}
+
 // NewTokenEnrichmentService creates a new token enrichment service
 func NewTokenEnrichmentService(rpcClient *ethclient.Client, logger sdklogging.Logger) (*TokenEnrichmentService, error) {
 	// Parse ERC20 ABI
@@ -190,6 +211,22 @@ func (t *TokenEnrichmentService) LoadWhitelist() error {
 // GetTokenMetadata retrieves token metadata, checking cache first, then RPC
 func (t *TokenEnrichmentService) GetTokenMetadata(contractAddress string) (*TokenMetadata, error) {
 	normalizedAddr := strings.ToLower(contractAddress)
+
+	// Check if this is the native token sentinel address
+	if isNativeToken(normalizedAddr) {
+		if t.logger != nil {
+			t.logger.Debug("Detected native token sentinel address, returning ETH metadata",
+				"address", normalizedAddr)
+		}
+		metadata := getNativeTokenMetadata()
+
+		// Cache it for consistency
+		t.cacheMux.Lock()
+		t.cache[normalizedAddr] = metadata
+		t.cacheMux.Unlock()
+
+		return metadata, nil
+	}
 
 	// Check cache first (this includes whitelist data)
 	t.cacheMux.RLock()
