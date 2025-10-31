@@ -368,6 +368,10 @@ message ContractWriteNode {
     repeated MethodCall method_calls = 4;
     // Execution mode for this contract write node: when true (default), use simulation; when false, execute real UserOp
     optional bool is_simulated = 5;
+    // ETH value to send with the transaction (in wei as string)
+    optional string value = 6;
+    // Custom gas limit for the transaction (as string to handle large numbers)
+    optional string gas_limit = 7;
   }
 
   message MethodCall {
@@ -463,6 +467,8 @@ message RestAPINode {
     map<string, string> headers = 2;
     string body = 3;
     string method = 4;
+    // Generic options bag for backend features (e.g., { "summarize": true })
+    optional google.protobuf.Value options = 5;
   }
 
   message Output {
@@ -1223,8 +1229,8 @@ message GetExecutionStatsResp {
 
 // Request message for RunNodeWithInputs
 message RunNodeWithInputsReq {
-  NodeType node_type = 1; // Type of node to execute using the NodeType enum
-  map<string, google.protobuf.Value> node_config = 2; // Configuration for the node
+  TaskNode node = 1; // Complete node definition with proper Config (consistent with SimulateTask)
+  // Field 2 was node_config (removed in Jan 2025) - do not reuse
   map<string, google.protobuf.Value> input_variables = 3; // Input variables for the node
 }
 
@@ -1256,8 +1262,8 @@ message RunNodeWithInputsResp {
 
 // Request message for RunTrigger
 message RunTriggerReq {
-  TriggerType trigger_type = 1; // Type of trigger to execute using the TriggerType enum
-  map<string, google.protobuf.Value> trigger_config = 2; // Configuration for the trigger
+  TaskTrigger trigger = 1; // Complete trigger definition with proper Config (consistent with SimulateTask)
+  // Field 2 was trigger_config (removed in Jan 2025) - do not reuse
   map<string, google.protobuf.Value> trigger_input = 3; // Input data for the trigger
 }
 

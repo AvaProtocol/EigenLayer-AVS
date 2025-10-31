@@ -2,6 +2,10 @@
 
 This file provides guidance to WARP (warp.dev) when working with code in this repository.
 
+## Top Rules
+
+**IMPORTANT**: Do NOT run `git commit` unless explicitly asked to do so in the user's message. Only stage changes with `git add` when appropriate, but never commit automatically.
+
 ## Repository Overview
 
 Ava Protocol Automation AVS (Actively Validated Service) on EigenLayer - a task automation system that enables scheduled and triggered execution of on-chain actions through smart wallets. This is a dual-language codebase with Go (backend/operators) and Solidity (smart contracts).

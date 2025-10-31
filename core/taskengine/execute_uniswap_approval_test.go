@@ -32,13 +32,14 @@ func TestExecuteTask_UniswapApprovalAndSwap_DifferentApprovalAmounts_Sepolia(t *
 	}
 	ownerAddress := *ownerAddr
 
-	// Derive smart wallet address from OWNER_EOA + salt:0
+	// Derive smart wallet address from OWNER_EOA + salt:2
+	// Using salt=2 for address 0x5a8A8a79DdF433756D4D97DCCE33334D9E218856 which has proper balance
 	aa.SetFactoryAddress(config.SmartWallet.FactoryAddress)
 	client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
 	require.NoError(t, err, "Failed to connect to RPC")
 	defer client.Close()
 
-	smartWalletAddr, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(0))
+	smartWalletAddr, err := aa.GetSenderAddress(client, ownerAddress, big.NewInt(2))
 	require.NoError(t, err, "Failed to derive smart wallet address")
 
 	// Create user with derived addresses
@@ -52,7 +53,7 @@ func TestExecuteTask_UniswapApprovalAndSwap_DifferentApprovalAmounts_Sepolia(t *
 		Owner:   &ownerAddress,
 		Address: smartWalletAddr,
 		Factory: &config.SmartWallet.FactoryAddress,
-		Salt:    big.NewInt(0),
+		Salt:    big.NewInt(2),
 	})
 	require.NoError(t, err, "Failed to store wallet in database")
 

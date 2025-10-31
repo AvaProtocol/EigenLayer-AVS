@@ -376,14 +376,15 @@ func TestTenderlyEventSimulation_EndToEnd_Integration(t *testing.T) {
 
 	logger := testutil.GetLogger()
 
-	// Get test config for Tenderly credentials
-	testConfig := testutil.GetTestConfig()
-	if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
-		t.Skip("Skipping Tenderly end-to-end integration: Tenderly credentials must be set in config/aggregator.yaml")
-	}
+	// Validate Tenderly credentials are configured
+	// These will panic with clear error messages if not configured
+	_ = testutil.GetTestTenderlyAccount()
+	_ = testutil.GetTestTenderlyProject()
+	_ = testutil.GetTestTenderlyAccessKey()
 
 	// Create TenderlyClient with test config
-	tenderlyClient := NewTenderlyClient(testConfig, logger)
+	config := testutil.GetAggregatorConfig()
+	tenderlyClient := NewTenderlyClient(config, logger)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -606,13 +607,12 @@ func printEngineResult(result map[string]interface{}) {
 
 // Benchmark the simulation performance
 func BenchmarkTenderlySimulation(b *testing.B) {
-	testConfig := testutil.GetTestConfig()
-	if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
-		b.Skip("Skipping benchmark - Tenderly credentials must be set in config/aggregator.yaml")
-	}
+	_ = testutil.GetTestTenderlyAccount()
+	_ = testutil.GetTestTenderlyProject()
+	_ = testutil.GetTestTenderlyAccessKey()
 
 	logger := testutil.GetLogger()
-	client := NewTenderlyClient(testConfig, logger)
+	client := NewTenderlyClient(testutil.GetAggregatorConfig(), logger)
 
 	query := &avsproto.EventTrigger_Query{
 		Addresses: []string{TENDERLY_SEPOLIA_ETH_USD_FEED},
@@ -631,21 +631,20 @@ func BenchmarkTenderlySimulation(b *testing.B) {
 }
 
 func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *testing.T) {
-	testConfig := testutil.GetTestConfig()
-	if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
-		t.Skip("Skipping Tenderly comprehensive integration: Tenderly credentials must be set in config/aggregator.yaml")
-	}
+	_ = testutil.GetTestTenderlyAccount()
+	_ = testutil.GetTestTenderlyProject()
+	_ = testutil.GetTestTenderlyAccessKey()
 
 	logger := testutil.GetLogger()
-	client := NewTenderlyClient(testConfig, logger)
+	client := NewTenderlyClient(testutil.GetAggregatorConfig(), logger)
 
 	ctx := context.Background()
 
 	// First, get the current real price from Tenderly to use in our tests
 	t.Run("GetCurrentPriceData", func(t *testing.T) {
-		if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
-			t.Skip("Skipping: Tenderly credentials must be set in config/aggregator.yaml")
-		}
+		_ = testutil.GetTestTenderlyAccount()
+		_ = testutil.GetTestTenderlyProject()
+		_ = testutil.GetTestTenderlyAccessKey()
 		t.Logf("🔗 Using Tenderly HTTP API (RPC gateway deprecated)")
 
 		roundData, err := client.getLatestRoundData(ctx, TENDERLY_SEPOLIA_ETH_USD_FEED, TENDERLY_SEPOLIA_CHAIN_ID)
@@ -667,9 +666,9 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 
 	// Test 1: Condition that SHOULD match (price > very low threshold)
 	t.Run("ConditionShouldMatch_GreaterThan", func(t *testing.T) {
-		if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
-			t.Skip("Skipping: Tenderly credentials must be set in config/aggregator.yaml")
-		}
+		_ = testutil.GetTestTenderlyAccount()
+		_ = testutil.GetTestTenderlyProject()
+		_ = testutil.GetTestTenderlyAccessKey()
 		currentPriceFloat := ctx.Value("currentPriceFloat").(float64)
 
 		// Set threshold much lower than current price to ensure it matches
@@ -723,9 +722,9 @@ func TestTenderlySimulation_WithConditions_ComprehensiveTest_Integration(t *test
 
 	// Test 2: Condition that SHOULD NOT match (price > very high threshold)
 	t.Run("ConditionShouldNotMatch_GreaterThan", func(t *testing.T) {
-		if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
-			t.Skip("Skipping: Tenderly credentials must be set in config/aggregator.yaml")
-		}
+		_ = testutil.GetTestTenderlyAccount()
+		_ = testutil.GetTestTenderlyProject()
+		_ = testutil.GetTestTenderlyAccessKey()
 		currentPriceFloat := ctx.Value("currentPriceFloat").(float64)
 
 		// Set threshold much higher than current price to test non-matching
@@ -952,13 +951,12 @@ func TestTenderlySimulation_EnhancedConditionHandling_PROPOSAL(t *testing.T) {
 
 // Test the enhanced condition handling behavior
 func TestTenderlySimulation_EnhancedConditionHandling_REAL_Integration(t *testing.T) {
-	testConfig := testutil.GetTestConfig()
-	if testConfig == nil || testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
-		t.Skip("Skipping enhanced condition handling integration: Tenderly credentials must be set in config/aggregator.yaml")
-	}
+	_ = testutil.GetTestTenderlyAccount()
+	_ = testutil.GetTestTenderlyProject()
+	_ = testutil.GetTestTenderlyAccessKey()
 
 	logger := testutil.GetLogger()
-	client := NewTenderlyClient(testConfig, logger)
+	client := NewTenderlyClient(testutil.GetAggregatorConfig(), logger)
 
 	ctx := context.Background()
 

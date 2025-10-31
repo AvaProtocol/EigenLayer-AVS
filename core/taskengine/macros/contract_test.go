@@ -19,14 +19,7 @@ type answer struct {
 }
 
 func TestQueryContract(t *testing.T) {
-	testConfig := testutil.GetTestConfig()
-	if testConfig == nil {
-		t.Fatal("Test config is nil - config/aggregator.yaml not loaded")
-	}
-	if testConfig.SmartWallet == nil || testConfig.SmartWallet.EthRpcUrl == "" {
-		t.Fatal("RPC URL not configured in config/aggregator.yaml")
-	}
-	rpc := testConfig.SmartWallet.EthRpcUrl
+	rpc := testutil.GetTestRPCURL()
 	conn, err := ethclient.Dial(rpc)
 	if err != nil {
 		t.Skipf("Skipping TestQueryContract: failed to dial RPC %s: %v", rpc, err)
@@ -49,14 +42,7 @@ func TestQueryContract(t *testing.T) {
 }
 
 func TestExpression(t *testing.T) {
-	testConfig := testutil.GetTestConfig()
-	if testConfig == nil {
-		t.Fatal("Test config is nil - config/aggregator.yaml not loaded")
-	}
-	if testConfig.SmartWallet == nil || testConfig.SmartWallet.EthRpcUrl == "" {
-		t.Fatal("RPC URL not configured in config/aggregator.yaml")
-	}
-	rpc := testConfig.SmartWallet.EthRpcUrl
+	rpc := testutil.GetTestRPCURL()
 	SetRpc(rpc)
 
 	p, e := CompileExpression(`priceChainlink("0x694AA1769357215DE4FAC081bf1f309aDC325306")`)
@@ -103,14 +89,7 @@ func TestExpression(t *testing.T) {
 }
 
 func TestExpressionDynamic(t *testing.T) {
-	testConfig := testutil.GetTestConfig()
-	if testConfig == nil {
-		t.Fatal("Test config is nil - config/aggregator.yaml not loaded")
-	}
-	if testConfig.SmartWallet == nil || testConfig.SmartWallet.EthRpcUrl == "" {
-		t.Fatal("RPC URL not configured in config/aggregator.yaml")
-	}
-	rpc := testConfig.SmartWallet.EthRpcUrl
+	rpc := testutil.GetTestRPCURL()
 	SetRpc(rpc)
 
 	// https://sepolia.etherscan.io/address/0x9aCb42Ac07C72cFc29Cd95d9DEaC807E93ada1F6#code

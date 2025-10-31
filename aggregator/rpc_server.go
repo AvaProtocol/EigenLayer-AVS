@@ -649,40 +649,16 @@ func (r *RpcServer) RunNodeWithInputs(ctx context.Context, req *avsproto.RunNode
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
+	// Get node type from the TaskNode for logging
+	var nodeTypeForLogging avsproto.NodeType
+	if req.Node != nil {
+		nodeTypeForLogging = req.Node.Type
+	}
+
 	r.config.Logger.Info("process run node with inputs",
 		"user", user.Address.String(),
-		"node_type", req.NodeType,
+		"node_type", nodeTypeForLogging,
 	)
-
-	// Add debug logging for the request details
-	configKeys := make([]string, 0, len(req.NodeConfig))
-	for k := range req.NodeConfig {
-		configKeys = append(configKeys, k)
-	}
-	inputKeys := make([]string, 0, len(req.InputVariables))
-	for k := range req.InputVariables {
-		inputKeys = append(inputKeys, k)
-	}
-
-	r.config.Logger.Info("run node with inputs details",
-		"user", user.Address.String(),
-		"node_type", req.NodeType,
-		"config_keys", configKeys,
-		"input_keys", inputKeys,
-	)
-
-	// For contract read debugging, log the full request details
-	if req.NodeType == avsproto.NodeType_NODE_TYPE_CONTRACT_READ {
-		// Extract keys only to avoid logging sensitive data
-		configKeys := getConfigKeys(req.NodeConfig)
-		inputKeys := getInputKeys(req.InputVariables)
-
-		r.config.Logger.Debug("ContractRead full request",
-			"user", user.Address.String(),
-			"config_keys", configKeys,
-			"input_keys", inputKeys,
-		)
-	}
 
 	// Call the immediate execution function directly
 	result, err := r.engine.RunNodeImmediatelyRPC(user, req)
@@ -709,21 +685,16 @@ func (r *RpcServer) RunTrigger(ctx context.Context, req *avsproto.RunTriggerReq)
 		return nil, status.Errorf(codes.Unauthenticated, "%s: %s", auth.AuthenticationError, err.Error())
 	}
 
-	r.config.Logger.Info("process run trigger",
-		"user", user.Address.String(),
-		"trigger_type", req.TriggerType,
-	)
-
-	// Add debug logging for the request details
-	configKeys := make([]string, 0, len(req.TriggerConfig))
-	for k := range req.TriggerConfig {
-		configKeys = append(configKeys, k)
+	// Get trigger type from the TaskTrigger for logging
+	var triggerTypeForLogging avsproto.TriggerType
+	if req.Trigger != nil {
+		triggerTypeForLogging = req.Trigger.Type
 	}
 
-	r.config.Logger.Info("run trigger details",
+	r.config.Logger.Info("process run trigger",
 		"user", user.Address.String(),
-		"trigger_type", req.TriggerType,
-		"config_keys", configKeys,
+		"trigger_type", triggerTypeForLogging,
+		"trigger_name", req.Trigger.GetName(),
 	)
 
 	// Call the trigger execution function directly
@@ -860,14 +831,6 @@ func (r *RpcServer) ReportEventOverload(ctx context.Context, alert *avsproto.Eve
 }
 
 // Helper functions for logging
-func getConfigKeys(config map[string]*structpb.Value) []string {
-	keys := make([]string, 0, len(config))
-	for k := range config {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
 func getInputKeys(inputs map[string]*structpb.Value) []string {
 	keys := make([]string, 0, len(inputs))
 	for k := range inputs {

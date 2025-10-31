@@ -1,7 +1,12 @@
 package apqueue
 
 import (
+	"fmt"
 	"time"
+
+	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	storageschema "github.com/AvaProtocol/EigenLayer-AVS/storage/schema"
+	badger "github.com/dgraph-io/badger/v4"
 )
 
 // CleanupStats holds statistics about the cleanup operation
@@ -43,12 +48,45 @@ func (q *Queue) CleanupOrphanedJobs() (*CleanupStats, error) {
 				continue
 			}
 
-			// Check if task still exists
-			taskKey := []byte("t:a:" + job.Name) // Check active tasks
-			_, err = q.db.GetKey(taskKey)
-			if err != nil {
-				// Task doesn't exist - this is an orphaned job
+			// Check if task exists in any status
+			// Tasks can be in: active (a), completed (c), failed (f), canceled (l), executing (x)
+			taskStatuses := []avsproto.TaskStatus{
+				avsproto.TaskStatus_Active,
+				avsproto.TaskStatus_Completed,
+				avsproto.TaskStatus_Failed,
+				avsproto.TaskStatus_Canceled,
+				avsproto.TaskStatus_Executing,
+			}
+
+			taskExists := false
+			var lastErr error
+			var checkedStatuses []string
+
+			for _, taskStatus := range taskStatuses {
+				taskKey := storageschema.TaskStorageKey(job.Name, taskStatus)
+				checkedStatuses = append(checkedStatuses, string(taskKey))
+				_, err := q.db.GetKey(taskKey)
+				if err == nil {
+					// Task exists in this status
+					taskExists = true
+					break
+				}
+				lastErr = err
+			}
+
+			if !taskExists {
+				// Task doesn't exist in any status - this is an orphaned job
 				stats.OrphanedJobs++
+
+				// Determine failure reason
+				failureReason := "task_not_found_any_status"
+				if lastErr != nil {
+					if lastErr == badger.ErrKeyNotFound {
+						failureReason = "task_not_found_in_storage"
+					} else {
+						failureReason = fmt.Sprintf("storage_error: %v", lastErr)
+					}
+				}
 
 				q.dbLock.Lock()
 				if delErr := q.db.Delete(kv.Key); delErr != nil {
@@ -56,7 +94,13 @@ func (q *Queue) CleanupOrphanedJobs() (*CleanupStats, error) {
 					stats.FailedCleanup++
 				} else {
 					stats.RemovedJobs++
-					q.logger.Debug("removed orphaned job", "job_id", job.ID, "task_id", job.Name, "status", status.HumanReadable())
+					q.logger.Debug("removed orphaned job",
+						"job_id", job.ID,
+						"task_id", job.Name,
+						"status", status.HumanReadable(),
+						"failure_reason", failureReason,
+						"checked_statuses", checkedStatuses,
+						"last_error", lastErr)
 				}
 				q.dbLock.Unlock()
 			}

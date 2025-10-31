@@ -629,3 +629,88 @@ func TestExtractNodeConfiguration_StandaloneNodesProtobufCompatibility(t *testin
 		})
 	}
 }
+
+func TestExtractNodeConfiguration_BranchNode(t *testing.T) {
+	// Test that Branch node configuration can be properly extracted
+	// This is a regression test for the missing Branch case in ExtractNodeConfiguration
+
+	node := &avsproto.TaskNode{
+		Type: avsproto.NodeType_NODE_TYPE_BRANCH,
+		TaskType: &avsproto.TaskNode_Branch{
+			Branch: &avsproto.BranchNode{
+				Config: &avsproto.BranchNode_Config{
+					Conditions: []*avsproto.BranchNode_Condition{
+						{
+							Id:         "condition-1",
+							Type:       "if",
+							Expression: "output.value > 100",
+						},
+						{
+							Id:         "condition-2",
+							Type:       "else",
+							Expression: "true",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Extract configuration
+	config := ExtractNodeConfiguration(node)
+	require.NotNil(t, config, "Configuration should not be nil for Branch node")
+
+	// Verify the conditions field exists (plural)
+	assert.Contains(t, config, "conditions", "Branch node config should have conditions field")
+
+	// Verify the conditions structure
+	if conditions, exists := config["conditions"]; exists {
+		conditionsArray, ok := conditions.([]interface{})
+		assert.True(t, ok, "Conditions should be []interface{}")
+		assert.Len(t, conditionsArray, 2, "Should have two conditions")
+
+		// Verify first condition
+		firstCondition, ok := conditionsArray[0].(map[string]interface{})
+		assert.True(t, ok, "First condition should be map[string]interface{}")
+		assert.Equal(t, "condition-1", firstCondition["id"], "First condition ID should match")
+		assert.Equal(t, "if", firstCondition["type"], "First condition type should match")
+		assert.Equal(t, "output.value > 100", firstCondition["expression"], "First condition expression should match")
+	}
+
+	// The critical test: ensure protobuf conversion works without errors
+	_, err := structpb.NewValue(config)
+	assert.NoError(t, err, "Protobuf conversion should succeed for Branch node")
+}
+
+func TestExtractNodeConfiguration_ETHTransferNode(t *testing.T) {
+	// Test that ETHTransfer node configuration can be properly extracted
+	// This is a regression test for the missing ETHTransfer case in ExtractNodeConfiguration
+
+	node := &avsproto.TaskNode{
+		Type: avsproto.NodeType_NODE_TYPE_ETH_TRANSFER,
+		TaskType: &avsproto.TaskNode_EthTransfer{
+			EthTransfer: &avsproto.ETHTransferNode{
+				Config: &avsproto.ETHTransferNode_Config{
+					Destination: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+					Amount:      "1000000000000000000", // 1 ETH in wei
+				},
+			},
+		},
+	}
+
+	// Extract configuration
+	config := ExtractNodeConfiguration(node)
+	require.NotNil(t, config, "Configuration should not be nil for ETHTransfer node")
+
+	// Verify the essential fields exist
+	assert.Contains(t, config, "destination", "ETHTransfer node config should have destination field")
+	assert.Contains(t, config, "amount", "ETHTransfer node config should have amount field")
+
+	// Verify field values
+	assert.Equal(t, "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb", config["destination"], "Destination should match")
+	assert.Equal(t, "1000000000000000000", config["amount"], "Amount should match")
+
+	// The critical test: ensure protobuf conversion works without errors
+	_, err := structpb.NewValue(config)
+	assert.NoError(t, err, "Protobuf conversion should succeed for ETHTransfer node")
+}
