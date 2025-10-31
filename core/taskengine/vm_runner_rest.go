@@ -645,8 +645,10 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 					}
 					bodyObj["content"] = contentArr
 				case "telegram":
+					// Format summary for Telegram: concise, chat-friendly message
+					telegramMsg := FormatSummaryForChannel(s, "telegram")
 					bodyObj["parse_mode"] = "HTML"
-					bodyObj["text"] = "<b>" + s.Subject + "</b>\n" + s.Body
+					bodyObj["text"] = telegramMsg
 				}
 				if newBody, mErr := json.Marshal(bodyObj); mErr == nil {
 					body = string(newBody)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"regexp"
@@ -33,7 +34,9 @@ func SetSummarizer(s Summarizer) {
 }
 
 // ComposeSummarySmart tries AI (if configured) with strict timeout and falls back
-// to deterministic ComposeSummary on any failure.
+// to deterministic ComposeSummary on any failure. The summary is automatically
+// formatted for the appropriate channel (email or chat) by the REST API runner
+// when used in notification nodes.
 func ComposeSummarySmart(vm *VM, currentStepName string) Summary {
 	if globalSummarizer == nil {
 		return ComposeSummary(vm, currentStepName)
@@ -46,6 +49,9 @@ func ComposeSummarySmart(vm *VM, currentStepName string) Summary {
 	if s, err := globalSummarizer.Summarize(ctx, vm, currentStepName); err == nil {
 		// Validate minimal fields; fall back if empty
 		if strings.TrimSpace(s.Subject) != "" && strings.TrimSpace(s.Body) != "" {
+			if len(strings.TrimSpace(s.Body)) < 40 {
+				return ComposeSummary(vm, currentStepName)
+			}
 			return s
 		}
 	}
@@ -86,7 +92,7 @@ func NewOpenAISummarizerFromAggregatorConfig(c *config.Config) Summarizer {
 		MaxInputTokens:      nonZeroOr(c.NotificationsSummary.MaxInputTokens, 2000),
 		MaxOutputTokens:     nonZeroOr(c.NotificationsSummary.MaxOutputTokens, 250),
 		Temperature:         c.NotificationsSummary.Temperature,
-		TimeoutMs:           nonZeroOr(c.NotificationsSummary.TimeoutMs, 1800),
+		TimeoutMs:           nonZeroOr(c.NotificationsSummary.TimeoutMs, 8000),
 		BudgetUSDPerSummary: c.NotificationsSummary.BudgetUSDPerSummary,
 		APIKey:              apiKey,
 	}
@@ -112,25 +118,29 @@ func (o *OpenAISummarizer) Summarize(ctx context.Context, vm *VM, currentStepNam
 		"max_tokens":      o.cfg.MaxOutputTokens,
 		"response_format": map[string]string{"type": "json_object"},
 		"messages": []map[string]string{
-			{"role": "system", "content": `You create concise, professional workflow execution email summaries for on-chain operations. Your summary must include:
+			{"role": "system", "content": `You create concise, professional workflow execution summaries for on-chain operations. Summaries are used for both email and chat channels (like Telegram).
 
+Your summary must include:
 1. Workflow name and total steps executed
 2. Smart wallet address that executed the transactions and the owner EOA address it belongs to
-3. Detailed explanation of what smart contract calls were made (contract address, method name, what action was performed)
-4. For swaps: explain token amounts (e.g., "spent X token1 for Y token0")
-5. For approvals: explain what token was approved and to which contract
+3. Clear description of on-chain actions (contract address, method name, what happened)
+4. For swaps: token symbols and formatted amounts (e.g., "swapped 0.10 WETH → ~300 USDC via Uniswap")
+5. For approvals: token symbol, formatted amount, and spender/contract
 
-Be specific about on-chain state changes. Do not speculate. Redact any secrets. Return strict JSON with keys: subject, body.
+Use ONLY the provided data. Do not speculate. Redact secrets. Return strict JSON with keys: subject, body.
 
-Subject format: "{workflow_name}: {status} ({N} steps)"
-Body format: A clear paragraph explaining the workflow execution, smart wallet operations, and on-chain changes.
+Subject format: "{workflow_name}: {status} ({N} steps)" - Keep subject under 80 characters.
+Body: 1–2 short, focused paragraphs. Be concise since summaries may be used in chat channels.
+- First paragraph: Smart wallet, owner EOA, and key on-chain actions in human-readable terms
+- Second paragraph (if needed): Additional context or failure details
 
 Formatting rules:
-- Insert a blank line between sentences (double newline) to increase readability.
-- If the provided 'actions' array is empty or there are no recognizable on-chain actions, include a sentence:
-  "No specific on-chain actions were recorded; this may have been a simulation or a step encountered an error."
+- Insert a blank line between sentences (double newline) for email readability
+- Keep total body under 400 characters when possible for chat channel compatibility
+- If the 'actions' array is empty or lacks recognizable actions, include: "No specific on-chain actions were recorded; this may have been a simulation or a step encountered an error."
 
-Note: The input includes a normalized 'actions' array summarizing key on-chain actions (approve/quote/swap). Prefer these for accuracy.`},
+Prefer the normalized 'actions' array when present.
+`},
 			{"role": "user", "content": digest},
 		},
 	}
@@ -153,7 +163,8 @@ Note: The input includes a normalized 'actions' array summarizing key on-chain a
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return Summary{}, errors.New("openai non-2xx response")
+		errBody, _ := io.ReadAll(resp.Body)
+		return Summary{}, errors.New("openai non-2xx response: " + string(errBody))
 	}
 
 	var cr struct {
@@ -487,4 +498,50 @@ func nonZeroOr(val, def int) int {
 		return val
 	}
 	return def
+}
+
+// FormatSummaryForChannel converts an email-oriented Summary into a concise chat message
+// suitable for channels like Telegram or Discord. It keeps the most important facts in a
+// single short paragraph with appropriate formatting for the target channel.
+func FormatSummaryForChannel(s Summary, channel string) string {
+	body := strings.TrimSpace(s.Body)
+	subject := strings.TrimSpace(s.Subject)
+	if body == "" {
+		return subject
+	}
+	// Extract the first sentence or up to ~200 chars, whichever comes first.
+	maxLen := 220
+	msg := body
+	// Split on blank lines first (since email body uses double newlines).
+	parts := strings.SplitN(body, "\n\n", 2)
+	if len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
+		msg = strings.TrimSpace(parts[0])
+	}
+	// Hard cap length for Telegram-style brevity.
+	if len(msg) > maxLen {
+		msg = msg[:maxLen]
+		// avoid cutting in the middle of a word
+		if idx := strings.LastIndex(msg, " "); idx > 0 {
+			msg = msg[:idx]
+		}
+		msg += "…"
+	}
+	// Channel-specific formatting
+	switch strings.ToLower(channel) {
+	case "telegram":
+		// For Telegram, add bold subject line and preserve HTML-safe formatting
+		// The subject is already short (under 80 chars per AI prompt)
+		if subject != "" && !strings.Contains(msg, subject) {
+			return "<b>" + subject + "</b>\n" + msg
+		}
+		return msg
+	case "discord":
+		// For Discord, use markdown bold
+		if subject != "" && !strings.Contains(msg, subject) {
+			return "**" + subject + "**\n" + msg
+		}
+		return msg
+	default:
+		return msg
+	}
 }
