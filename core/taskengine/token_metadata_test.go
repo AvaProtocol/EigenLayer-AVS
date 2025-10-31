@@ -72,3 +72,55 @@ func BenchmarkGetTokenMetadata(b *testing.B) {
 	// Skip this benchmark since we now require RPC client
 	b.Skip("Skipping metadata benchmark - requires RPC client in new implementation")
 }
+
+func TestIsNativeToken(t *testing.T) {
+	tests := []struct {
+		name     string
+		address  string
+		expected bool
+	}{
+		{
+			name:     "Native token lowercase",
+			address:  "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+			expected: true,
+		},
+		{
+			name:     "Native token uppercase",
+			address:  "0xEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+			expected: true,
+		},
+		{
+			name:     "Native token mixed case",
+			address:  "0xEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEeEe",
+			expected: true,
+		},
+		{
+			name:     "Regular ERC20 address",
+			address:  "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+			expected: false,
+		},
+		{
+			name:     "Zero address",
+			address:  "0x0000000000000000000000000000000000000000",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isNativeToken(tt.address)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetNativeTokenMetadata(t *testing.T) {
+	metadata := getNativeTokenMetadata()
+
+	assert.NotNil(t, metadata)
+	assert.Equal(t, NativeTokenAddress, metadata.Address)
+	assert.Equal(t, "Ether", metadata.Name)
+	assert.Equal(t, "ETH", metadata.Symbol)
+	assert.Equal(t, uint32(18), metadata.Decimals)
+	assert.Equal(t, "native", metadata.Source)
+}
