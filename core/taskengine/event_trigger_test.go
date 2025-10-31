@@ -9,7 +9,6 @@ import (
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/AvaProtocol/EigenLayer-AVS/storage"
 	"github.com/ethereum/go-ethereum/common"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestEventTriggerEndToEndRPC(t *testing.T) {
@@ -133,19 +132,22 @@ func TestEventTriggerEndToEndRPC(t *testing.T) {
 
 	// Test 2: RPC interface
 	t.Run("RPCInterface", func(t *testing.T) {
-		// Create trigger config for RPC call
-		triggerConfig := map[string]*structpb.Value{
-			"expression":  structpb.NewStringValue(expression),
-			"matcherList": structpb.NewListValue(&structpb.ListValue{Values: []*structpb.Value{}}),
-		}
-
-		// Create RunTrigger request
+		// Create RunTrigger request with TaskTrigger structure
 		req := &avsproto.RunTriggerReq{
-			TriggerType:   avsproto.TriggerType_TRIGGER_TYPE_EVENT,
-			TriggerConfig: triggerConfig,
+			Trigger: &avsproto.TaskTrigger{
+				Name: "test_event_trigger",
+				Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+				TriggerType: &avsproto.TaskTrigger_Event{
+					Event: &avsproto.EventTrigger{
+						Config: &avsproto.EventTrigger_Config{
+							Queries: []*avsproto.EventTrigger_Query{},
+						},
+					},
+				},
+			},
 		}
 
-		t.Logf("Making RunTriggerRPC call with TriggerType: %s", req.TriggerType.String())
+		t.Logf("Making RunTriggerRPC call with TriggerType: %s", req.Trigger.Type.String())
 
 		// Execute the trigger via RPC interface
 		result, err := engine.RunTriggerRPC(user, req)
@@ -475,17 +477,34 @@ func TestEventTriggerQueriesBasedMultipleContracts(t *testing.T) {
 				}
 			}
 
-			// Test with RPC interface as well
-			triggerConfigStructpb := make(map[string]*structpb.Value)
-			for k, v := range triggerConfig {
-				if val, err := structpb.NewValue(v); err == nil {
-					triggerConfigStructpb[k] = val
+			// Test with RPC interface as well - convert queries to protobuf format
+			queriesProto := make([]*avsproto.EventTrigger_Query, 0)
+			for _, q := range tc.queries {
+				if qMap, ok := q.(map[string]interface{}); ok {
+					query := &avsproto.EventTrigger_Query{}
+					if addresses, ok := qMap["addresses"].([]interface{}); ok {
+						for _, addr := range addresses {
+							if addrStr, ok := addr.(string); ok {
+								query.Addresses = append(query.Addresses, addrStr)
+							}
+						}
+					}
+					queriesProto = append(queriesProto, query)
 				}
 			}
 
 			rpcReq := &avsproto.RunTriggerReq{
-				TriggerType:   avsproto.TriggerType_TRIGGER_TYPE_EVENT,
-				TriggerConfig: triggerConfigStructpb,
+				Trigger: &avsproto.TaskTrigger{
+					Name: "test_event_trigger",
+					Type: avsproto.TriggerType_TRIGGER_TYPE_EVENT,
+					TriggerType: &avsproto.TaskTrigger_Event{
+						Event: &avsproto.EventTrigger{
+							Config: &avsproto.EventTrigger_Config{
+								Queries: queriesProto,
+							},
+						},
+					},
+				},
 			}
 
 			rpcResult, err := engine.RunTriggerRPC(user, rpcReq)

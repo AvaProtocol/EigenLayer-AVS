@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -133,6 +134,7 @@ func (r *ContractWriteProcessor) executeMethodCall(
 	contractAddress common.Address,
 	methodCall *avsproto.ContractWriteNode_MethodCall,
 	shouldSimulate bool,
+	node *avsproto.ContractWriteNode,
 ) *avsproto.ContractWriteNode_MethodResult {
 	t0 := time.Now()
 
@@ -178,18 +180,31 @@ func (r *ContractWriteProcessor) executeMethodCall(
 		resolvedMethodParams[i] = r.vm.preprocessTextWithVariableMapping(param)
 
 		// Validate that template resolution didn't produce "undefined" values
-		if strings.Contains(resolvedMethodParams[i], "undefined") {
+		if resolvedMethodParams[i] == "undefined" {
+			failedVars := extractFailedVariables(param, r.vm)
+			var errorMsg string
+			if len(failedVars) > 0 {
+				var failedVarStrs []string
+				for varName, varValue := range failedVars {
+					failedVarStrs = append(failedVarStrs, fmt.Sprintf("%s=%s", varName, varValue))
+				}
+				errorMsg = fmt.Sprintf("could not resolve template variable in method '%s': %s", methodCall.MethodName, strings.Join(failedVarStrs, ", "))
+			} else {
+				errorMsg = fmt.Sprintf("template variable resolution failed in method '%s': '%s' resolved to '%s'", methodCall.MethodName, param, resolvedMethodParams[i])
+			}
+
 			if r.vm != nil && r.vm.logger != nil {
 				r.vm.logger.Error("❌ CONTRACT WRITE - Template variable failed to resolve",
 					"method", methodCall.MethodName,
 					"original_param", param,
 					"resolved_param", resolvedMethodParams[i],
+					"failed_variables", failedVars,
 					"explanation", "This may be due to an undefined variable, incorrect template syntax, or unsupported variable names (e.g., variables with hyphens are not supported; use snake_case such as 'recipient_address' instead of 'recipient-address').")
 			}
 			return &avsproto.ContractWriteNode_MethodResult{
 				MethodName: methodCall.MethodName,
 				Success:    false,
-				Error:      fmt.Sprintf("template variable resolution failed in parameter %d: '%s' resolved to '%s'", i, param, resolvedMethodParams[i]),
+				Error:      errorMsg,
 			}
 		}
 	}
@@ -423,8 +438,8 @@ func (r *ContractWriteProcessor) executeMethodCall(
 
 		// Note: HTTP Simulation API automatically uses the latest block context
 
-		// Extract transaction value from VM variables (passed from raw nodeConfig)
-		transactionValue := r.extractTransactionValue(methodName, contractAddress.Hex())
+		// Extract transaction value from node Config or VM variables (RNWI fallback)
+		transactionValue := r.extractTransactionValue(node)
 
 		// Simulate the contract write using Tenderly
 
@@ -564,7 +579,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 
 	// 🔍 PRE-FLIGHT VALIDATION: Check for common failure scenarios before gas estimation
 	if validationErr := r.validateTransactionBeforeGasEstimation(methodName, callData, callDataBytes, contractAddress); validationErr != nil {
-		executionLogBuilder.WriteString(fmt.Sprintf("❌ PRE-FLIGHT VALIDATION FAILED: %v\n", validationErr))
+		executionLogBuilder.WriteString(fmt.Sprintf("PRE-FLIGHT VALIDATION FAILED: %v\n", validationErr))
 		executionLogBuilder.WriteString("Skipped gas estimation to avoid bundler error\n")
 
 		r.vm.logger.Error("🚫 PRE-FLIGHT VALIDATION FAILED - Skipping gas estimation to avoid bundler error",
@@ -589,7 +604,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		callDataBytes,   // contract method calldata
 	)
 	if err != nil {
-		executionLogBuilder.WriteString(fmt.Sprintf("❌ CALLDATA PACKING FAILED: %v\n", err))
+		executionLogBuilder.WriteString(fmt.Sprintf("CALLDATA PACKING FAILED: %v\n", err))
 
 		r.vm.logger.Error("🚨 DEPLOYED WORKFLOW ERROR: Failed to pack smart wallet execute calldata",
 			"error", err,
@@ -603,7 +618,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		}
 	}
 
-	executionLogBuilder.WriteString(fmt.Sprintf("✅ Smart wallet calldata packed: %d bytes\n", len(smartWalletCallData)))
+	executionLogBuilder.WriteString(fmt.Sprintf("Smart wallet calldata packed: %d bytes\n", len(smartWalletCallData)))
 
 	// Set up factory address for AA operations
 	aa.SetFactoryAddress(r.smartWalletConfig.FactoryAddress)
@@ -668,7 +683,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		r.vm.logger.Error("🚨 DEPLOYED WORKFLOW ERROR: aa_sender not found in VM vars",
 			"owner_eoaAddress", r.owner.Hex())
 	} else {
-		executionLogBuilder.WriteString(fmt.Sprintf("✅ Smart wallet sender: %s\n", senderOverride.Hex()))
+		executionLogBuilder.WriteString(fmt.Sprintf("Smart wallet sender: %s\n", senderOverride.Hex()))
 	}
 
 	// Add paymaster information to execution log
@@ -684,13 +699,13 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	// Create a temporary UserOp for gas estimation
 	rpcClient, rpcErr := ethclient.Dial(r.smartWalletConfig.EthRpcUrl)
 	if rpcErr != nil {
-		executionLogBuilder.WriteString(fmt.Sprintf("❌ Failed to connect to RPC: %v\n", rpcErr))
+		executionLogBuilder.WriteString(fmt.Sprintf("Failed to connect to RPC: %v\n", rpcErr))
 	} else {
 		defer rpcClient.Close()
 
 		_, bundlerErr := bundler.NewBundlerClient(r.smartWalletConfig.BundlerURL)
 		if bundlerErr != nil {
-			executionLogBuilder.WriteString(fmt.Sprintf("❌ Failed to create bundler client: %v\n", bundlerErr))
+			executionLogBuilder.WriteString(fmt.Sprintf("Failed to create bundler client: %v\n", bundlerErr))
 		} else {
 			// Check smart wallet balance
 			smartWalletAddr := senderOverride
@@ -698,7 +713,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 				if balance, balErr := rpcClient.BalanceAt(ctx, *smartWalletAddr, nil); balErr == nil {
 					executionLogBuilder.WriteString(fmt.Sprintf("Smart wallet balance: %s wei\n", balance.String()))
 				} else {
-					executionLogBuilder.WriteString(fmt.Sprintf("❌ Failed to check balance: %v\n", balErr))
+					executionLogBuilder.WriteString(fmt.Sprintf("Failed to check balance: %v\n", balErr))
 				}
 			}
 
@@ -708,7 +723,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 				executionLogBuilder.WriteString(fmt.Sprintf("  MaxFeePerGas: %s wei\n", maxFee.String()))
 				executionLogBuilder.WriteString(fmt.Sprintf("  MaxPriorityFeePerGas: %s wei\n", maxPriority.String()))
 			} else {
-				executionLogBuilder.WriteString(fmt.Sprintf("❌ Failed to get gas prices: %v\n", feeErr))
+				executionLogBuilder.WriteString(fmt.Sprintf("Failed to get gas prices: %v\n", feeErr))
 			}
 		}
 	}
@@ -737,7 +752,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 
 	if err != nil {
 		// Add detailed error information to execution log (internal)
-		executionLogBuilder.WriteString(fmt.Sprintf("❌ BUNDLER FAILED: UserOp transaction could not be sent\n"))
+		executionLogBuilder.WriteString(fmt.Sprintf("BUNDLER FAILED: UserOp transaction could not be sent\n"))
 		executionLogBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
 
 		// Check if this is specifically the AA21 prefund error and add detailed explanation
@@ -831,7 +846,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 	}
 
 	// Add success information to execution log
-	executionLogBuilder.WriteString("✅ BUNDLER SUCCESS: UserOp transaction sent successfully\n")
+	executionLogBuilder.WriteString("BUNDLER SUCCESS: UserOp transaction sent successfully\n")
 	if userOp != nil {
 		executionLogBuilder.WriteString(fmt.Sprintf("UserOp Hash: %s\n", r.getUserOpHashOrPending(receipt)))
 		executionLogBuilder.WriteString(fmt.Sprintf("Sender: %s\n", userOp.Sender.Hex()))
@@ -1291,6 +1306,76 @@ func (r *ContractWriteProcessor) extractMethodABI(method *abi.Method) map[string
 	}
 }
 
+// addReturnValuesToDecodedData adds method return values from ABI outputs to the decoded data map
+// This is PRIORITY 1: return values from function outputs take precedence
+func (r *ContractWriteProcessor) addReturnValuesToDecodedData(
+	results []*avsproto.ContractWriteNode_MethodResult,
+	decodedEventsData map[string]interface{},
+) {
+	for _, methodResult := range results {
+		r.vm.logger.Debug("🔍 Processing methodResult return value",
+			"method", methodResult.MethodName,
+			"value_nil", methodResult.Value == nil,
+			"value_content", func() interface{} {
+				if methodResult.Value != nil {
+					return methodResult.Value.AsInterface()
+				}
+				return "nil"
+			}())
+		if methodResult.Value != nil {
+			// Add return values under method name
+			decodedEventsData[methodResult.MethodName] = methodResult.Value.AsInterface()
+			r.vm.logger.Debug("✅ Added return value to decodedEventsData (priority 1)",
+				"method", methodResult.MethodName,
+				"data", methodResult.Value.AsInterface())
+		}
+	}
+}
+
+// handleEventDataForMethod processes event data for a method call
+// This is PRIORITY 2: if events are found, use them; otherwise fall back to return value or boolean true
+func (r *ContractWriteProcessor) handleEventDataForMethod(
+	methodName string,
+	methodEvents map[string]interface{},
+	methodResult *avsproto.ContractWriteNode_MethodResult,
+	decodedEventsData map[string]interface{},
+	decimalProviders map[string]*big.Int,
+	methodCalls []*avsproto.ContractWriteNode_MethodCall,
+) {
+	if len(methodEvents) > 0 {
+		// Events found - use them (overwriting any return value from PRIORITY 1)
+		decodedEventsData[methodName] = methodEvents
+		r.vm.logger.Debug("✅ Using parsed event data",
+			"method", methodName,
+			"event_fields", len(methodEvents),
+			"event_data", methodEvents)
+
+		// Apply decimal formatting to event data if needed
+		for decimalProviderMethod, decimalsValue := range decimalProviders {
+			for _, methodCall := range methodCalls {
+				if methodCall.MethodName == decimalProviderMethod && len(methodCall.ApplyToFields) > 0 {
+					ctx := NewDecimalFormattingContext(decimalsValue, methodCall.ApplyToFields, decimalProviderMethod)
+					ctx.ApplyDecimalFormattingToEventData(methodEvents, methodName, r.vm.logger)
+					break
+				}
+			}
+		}
+	} else if _, hasValue := decodedEventsData[methodName]; !hasValue {
+		// No events found AND no return value from PRIORITY 1
+		// Use boolean true as fallback for successful calls
+		if methodResult.Success {
+			decodedEventsData[methodName] = true
+			r.vm.logger.Debug("✅ No events or return value, using boolean true (fallback)",
+				"method", methodName)
+		}
+	} else {
+		// No events found, but return value exists from PRIORITY 1 - keep it
+		r.vm.logger.Debug("✅ No events found, keeping return value from ABI output",
+			"method", methodName,
+			"return_value", decodedEventsData[methodName])
+	}
+}
+
 func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractWriteNode) (*avsproto.Execution_Step, error) {
 	// Use shared function to create execution step
 	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE, r.vm)
@@ -1347,7 +1432,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 		if optimizedParsedABI, parseErr := ParseABIOptimized(node.Config.ContractAbi); parseErr == nil {
 			parsedABI = optimizedParsedABI
-			log.WriteString("✅ ABI parsed successfully using optimized shared method (no string conversion)\n")
+			log.WriteString("ABI parsed successfully using optimized shared method (no string conversion)\n")
 		} else {
 			log.WriteString(fmt.Sprintf("Warning: Failed to parse ABI with optimized method: %v\n", parseErr))
 		}
@@ -1385,7 +1470,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 						"panic_type": fmt.Sprintf("%T", rcv),
 					})
 
-					log.WriteString(fmt.Sprintf("🚨 PANIC in executeMethodCall: %v\n", rcv))
+					log.WriteString(fmt.Sprintf("PANIC in executeMethodCall: %v\n", rcv))
 					result = &avsproto.ContractWriteNode_MethodResult{
 						MethodName: methodCall.MethodName,
 						Success:    false,
@@ -1400,7 +1485,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			}()
 			// Resolve shouldSimulate: default to VM flag; allow per-node override via typed config
 			effectiveSim := r.resolveSimulationMode(node, r.vm.IsSimulation)
-			result = r.executeMethodCall(ctx, parsedABI, originalAbiString, contractAddr, methodCall, effectiveSim)
+			result = r.executeMethodCall(ctx, parsedABI, originalAbiString, contractAddr, methodCall, effectiveSim, node)
 		}()
 		// Ensure MethodName is populated to avoid empty keys downstream
 		if result.MethodName == "" {
@@ -1421,7 +1506,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					}
 				}
 			}
-			log.WriteString(fmt.Sprintf("✅ Success: %s (tx: %s)\n", result.MethodName, txHash))
+			log.WriteString(fmt.Sprintf("Success: %s (tx: %s)\n", result.MethodName, txHash))
 		} else {
 			r.vm.logger.Error("🚨 DEPLOYED WORKFLOW: Method execution failed",
 				"method_name", result.MethodName,
@@ -1430,7 +1515,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 				"success", result.Success)
 
 			// Add detailed failure information to execution log
-			log.WriteString(fmt.Sprintf("❌ Failed: %s - %s\n", result.MethodName, result.Error))
+			log.WriteString(fmt.Sprintf("Failed: %s - %s\n", result.MethodName, result.Error))
 
 			// If this is a bundler/AA error, add additional debugging information
 			if strings.Contains(result.Error, "Bundler failed") || strings.Contains(result.Error, "AA21") {
@@ -1517,7 +1602,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 								if decimalsInt, err := strconv.ParseInt(strValue, 10, 64); err == nil {
 									decimalValue := big.NewInt(decimalsInt)
 									decimalProviders[methodName] = decimalValue
-									log.WriteString(fmt.Sprintf("✅ Method %s provides decimal value: %s\n", methodName, decimalValue.String()))
+									log.WriteString(fmt.Sprintf("Method %s provides decimal value: %s\n", methodName, decimalValue.String()))
 									r.vm.logger.Info("Method provides decimal value",
 										"methodName", methodName,
 										"decimalValue", decimalValue.String(),
@@ -1531,7 +1616,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 					if decimalsInt, err := strconv.ParseInt(strValue, 10, 64); err == nil {
 						decimalValue := big.NewInt(decimalsInt)
 						decimalProviders[methodName] = decimalValue
-						log.WriteString(fmt.Sprintf("✅ Method %s provides decimal value: %s\n", methodName, decimalValue.String()))
+						log.WriteString(fmt.Sprintf("Method %s provides decimal value: %s\n", methodName, decimalValue.String()))
 						r.vm.logger.Info("Method provides decimal value",
 							"methodName", methodName,
 							"decimalValue", decimalValue.String(),
@@ -1545,31 +1630,8 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// 🚀 NEW: Create decoded events data organized by method name
 	var decodedEventsData = make(map[string]interface{})
 
-	// PRIORITY LOGIC: Add return values first, events will override if present
-	// Rule: Events take priority (more descriptive) over return values when both exist
-	for _, methodResult := range results {
-		r.vm.logger.Info("🔍 CRITICAL DEBUG - Processing methodResult for decodedEventsData",
-			"method", methodResult.MethodName,
-			"value_nil", methodResult.Value == nil,
-			"value_content", func() interface{} {
-				if methodResult.Value != nil {
-					return methodResult.Value.AsInterface()
-				}
-				return "nil"
-			}())
-		if methodResult.Value != nil {
-			// Add return values under method name
-			decodedEventsData[methodResult.MethodName] = methodResult.Value.AsInterface()
-			r.vm.logger.Info("✅ Added return value to decodedEventsData (will be overridden by events if present)",
-				"method", methodResult.MethodName,
-				"data", methodResult.Value.AsInterface())
-		} else {
-			// For methods with no return value, create empty object to maintain structure
-			decodedEventsData[methodResult.MethodName] = map[string]interface{}{}
-			r.vm.logger.Info("✅ Added empty object for method with no return value",
-				"method", methodResult.MethodName)
-		}
-	}
+	// PRIORITY 1: Add return values from function outputs (ABI outputs)
+	r.addReturnValuesToDecodedData(results, decodedEventsData)
 
 	// Parse events from each method's transaction receipt
 	for idx, methodResult := range results {
@@ -1699,35 +1761,8 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			}
 		}
 
-		// PRIORITY LOGIC: Events take priority over return values
-		if len(methodEvents) > 0 {
-			// If we have events, use ONLY event data (events are more descriptive)
-			decodedEventsData[methodName] = methodEvents
-			r.vm.logger.Info("✅ EVENT PRIORITY - Using event data only (overriding return values)",
-				"method", methodName,
-				"event_fields", len(methodEvents),
-				"event_data", methodEvents)
-
-			// Apply decimal formatting to event data if needed
-			for decimalProviderMethod, decimalsValue := range decimalProviders {
-				for _, methodCall := range methodCalls {
-					// Find the method call that provides formatting details for this event
-					if methodCall.MethodName == decimalProviderMethod && len(methodCall.ApplyToFields) > 0 {
-						// Create decimal formatting context
-						ctx := NewDecimalFormattingContext(decimalsValue, methodCall.ApplyToFields, decimalProviderMethod)
-						// Apply formatting to the event data
-						ctx.ApplyDecimalFormattingToEventData(methodEvents, methodName, r.vm.logger)
-						break
-					}
-				}
-			}
-		} else {
-			// No events decoded: if method succeeded, set boolean true for methodName; otherwise keep {}
-			if methodResult.Success {
-				decodedEventsData[methodName] = true
-			}
-		}
-		// If no events, preserve existing return values (return values only when no events)
+		// PRIORITY 2: Handle event data
+		r.handleEventDataForMethod(methodName, methodEvents, methodResult, decodedEventsData, decimalProviders, methodCalls)
 	}
 
 	// Convert decoded events to protobuf Value
@@ -1977,41 +2012,43 @@ func (r *ContractWriteProcessor) convertMapToEventLog(logMap map[string]interfac
 	return eventLog
 }
 
-// extractTransactionValue extracts the transaction value from nodeConfig with proper error handling
-func (r *ContractWriteProcessor) extractTransactionValue(methodName, contractAddress string) string {
+// extractTransactionValue extracts the transaction value from node.Config.Value (protobuf)
+func (r *ContractWriteProcessor) extractTransactionValue(node *avsproto.ContractWriteNode) string {
 	transactionValue := "0" // Default to 0 if not specified
 
-	r.vm.mu.Lock()
-	defer r.vm.mu.Unlock()
-
-	nodeConfigIface, exists := r.vm.vars["nodeConfig"]
-	if !exists {
-		return transactionValue
+	if node != nil && node.Config != nil && node.Config.Value != nil {
+		valueStr := *node.Config.Value
+		if valueStr != "" {
+			if r.vm.logger != nil {
+				r.vm.logger.Info("Using transaction value from node.Config",
+					"value", valueStr)
+			}
+			return valueStr
+		}
 	}
 
-	nodeConfig, ok := nodeConfigIface.(map[string]interface{})
-	if !ok {
-		return transactionValue
+	return transactionValue
+}
+
+// extractGasLimit extracts the custom gas limit from node.Config.GasLimit (protobuf)
+// Returns empty string if not specified (caller should use default gas estimation)
+func (r *ContractWriteProcessor) extractGasLimit(methodName, contractAddress string, node *avsproto.ContractWriteNode) string {
+	gasLimit := "" // Default to empty (use gas estimation)
+
+	if node != nil && node.Config != nil && node.Config.GasLimit != nil {
+		gasLimitStr := *node.Config.GasLimit
+		if gasLimitStr != "" {
+			if r.vm.logger != nil {
+				r.vm.logger.Info("Using custom gas limit from node.Config",
+					"gasLimit", gasLimitStr,
+					"method", methodName,
+					"contract", contractAddress)
+			}
+			return gasLimitStr
+		}
 	}
 
-	valueIface, exists := nodeConfig["value"]
-	if !exists {
-		return transactionValue
-	}
-
-	valueStr, ok := valueIface.(string)
-	if !ok || valueStr == "" {
-		return transactionValue
-	}
-
-	if r.vm.logger != nil {
-		r.vm.logger.Info("Using transaction value from configuration",
-			"value", valueStr,
-			"method", methodName,
-			"contract", contractAddress)
-	}
-
-	return valueStr
+	return gasLimit
 }
 
 // calculatePoolAddresses calculates pool addresses from router method calldata
@@ -2398,4 +2435,32 @@ func (r *ContractWriteProcessor) getUserOpHashOrPending(receipt *types.Receipt) 
 		return receipt.TxHash.Hex()
 	}
 	return "pending"
+}
+
+// templateVarRegex is compiled once at package level for performance
+var templateVarRegex = regexp.MustCompile(`\{\{([^}]+)\}\}`)
+
+// extractFailedVariables extracts template variables from a parameter string and identifies which ones resolved to "undefined"
+func extractFailedVariables(originalParam string, vm *VM) map[string]string {
+	failedVars := make(map[string]string)
+
+	// Find all template variables: {{variable.path}}
+	matches := templateVarRegex.FindAllStringSubmatch(originalParam, -1)
+
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		varExpr := strings.TrimSpace(match[1])
+		varTemplate := match[0] // Full template including {{ }}
+
+		// Resolve just this variable to check if it becomes "undefined"
+		resolved := vm.preprocessTextWithVariableMapping(varTemplate)
+
+		if resolved == "undefined" {
+			failedVars[varExpr] = "undefined"
+		}
+	}
+
+	return failedVars
 }

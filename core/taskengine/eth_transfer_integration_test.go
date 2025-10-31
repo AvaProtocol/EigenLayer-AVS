@@ -17,14 +17,9 @@ func TestETHTransferTaskIntegration(t *testing.T) {
 	}
 
 	// Require RPC endpoints to be configured
-	testConfig := testutil.GetTestConfig()
-	if testConfig == nil {
-		t.Fatal("Test config is nil - config/aggregator.yaml not loaded")
-	}
-	if testConfig.SmartWallet == nil ||
-		testConfig.SmartWallet.EthRpcUrl == "" || testConfig.SmartWallet.BundlerURL == "" {
-		t.Fatal("RPC/Bundler URLs not configured in config/aggregator.yaml")
-	}
+	// These will panic with clear error messages if not configured
+	_ = testutil.GetTestRPC()        // Validates RPC is configured
+	_ = testutil.GetTestBundlerRPC() // Validates Bundler is configured
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
 

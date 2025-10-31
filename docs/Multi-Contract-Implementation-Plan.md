@@ -115,7 +115,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
     
     // Check if we should use batch execution
     if r.shouldUseBatch(methodCalls, contractAddress) {
-        log.WriteString("🚀 Using batch execution for multi-contract operations\n")
+        log.WriteString("Using batch execution for multi-contract operations\n")
         
         result := r.executeBatchMethodCalls(ctx, methodCalls, contractAddress)
         results = append(results, result)

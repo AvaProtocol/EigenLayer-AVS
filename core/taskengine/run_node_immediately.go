@@ -3076,10 +3076,6 @@ func (n *Engine) runProcessingNodeWithInputs(user *model.User, nodeType string, 
 		vm.AddVar(key, processedValue)
 	}
 
-	// Store raw node configuration in VM variables for processors to access
-	// This allows access to fields like 'value' and 'gasLimit' that aren't in protobuf schema
-	vm.AddVar("nodeConfig", nodeConfig)
-
 	// Create node from type and config
 	// NOTE: For CustomCode nodes, lang field can be either:
 	// - avsproto.Lang enum (preferred in tests)
@@ -3296,30 +3292,53 @@ func (n *Engine) detectNodeTypeFromStep(step *avsproto.Execution_Step) string {
 
 // RunNodeImmediatelyRPC handles the RPC interface for immediate node execution
 func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWithInputsReq) (*avsproto.RunNodeWithInputsResp, error) {
-	// Convert protobuf request to internal format
-	nodeConfig := make(map[string]interface{})
-	for k, v := range req.NodeConfig {
-		nodeConfig[k] = v.AsInterface()
+	// The request now contains a complete TaskNode, consistent with SimulateTask
+	node := req.Node
+	if node == nil {
+		return &avsproto.RunNodeWithInputsResp{
+			Success:   false,
+			Error:     "node is required",
+			ErrorCode: avsproto.ErrorCode_INVALID_REQUEST,
+			OutputData: &avsproto.RunNodeWithInputsResp_RestApi{
+				RestApi: &avsproto.RestAPINode_Output{},
+			},
+		}, nil
 	}
 
+	// Convert input variables from protobuf to Go map
 	inputVariables := make(map[string]interface{})
 	for k, v := range req.InputVariables {
 		inputVariables[k] = v.AsInterface()
 	}
 
-	// Convert NodeType enum to string
-	nodeTypeStr := NodeTypeToString(req.NodeType)
+	// Get node type string from the node's Type field
+	nodeTypeStr := NodeTypeToString(node.Type)
 	if nodeTypeStr == "" {
 		// For unsupported node types, return error but still set output data to avoid OUTPUT_DATA_NOT_SET
 		resp := &avsproto.RunNodeWithInputsResp{
 			Success: false,
-			Error:   fmt.Sprintf("unsupported node type: %v", req.NodeType),
+			Error:   fmt.Sprintf("unsupported node type: %v", node.Type),
 		}
 		// Set default RestAPI output structure to avoid OUTPUT_DATA_NOT_SET
 		resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{
 			RestApi: &avsproto.RestAPINode_Output{},
 		}
 		return resp, nil
+	}
+
+	// Extract node configuration from the TaskNode protobuf
+	// This uses ExtractNodeConfiguration to get a properly typed config map with all fields
+	// (including value and gasLimit for ContractWrite nodes)
+	nodeConfig := ExtractNodeConfiguration(node)
+	if nodeConfig == nil {
+		return &avsproto.RunNodeWithInputsResp{
+			Success:   false,
+			Error:     "failed to extract node configuration",
+			ErrorCode: avsproto.ErrorCode_INVALID_REQUEST,
+			OutputData: &avsproto.RunNodeWithInputsResp_RestApi{
+				RestApi: &avsproto.RestAPINode_Output{},
+			},
+		}, nil
 	}
 
 	// Simulation mode is determined per-node (e.g., contractWrite.config.is_simulated).
@@ -3353,7 +3372,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 			resp.OutputData = &avsproto.RunNodeWithInputsResp_RestApi{RestApi: &avsproto.RestAPINode_Output{}}
 		} else {
 			// Use helper to convert handler output to correct protobuf oneof type
-			assignOutputData(resp, handler.CreateEmptyOutput(nodeConfig))
+			assignOutputData(resp, handler.CreateEmptyOutput())
 		}
 
 		return resp, nil
@@ -3361,7 +3380,7 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 	// Log successful execution (success determined by node execution)
 	if n.logger != nil {
-		n.logger.Info("RunNodeImmediatelyRPC: Executed successfully", "nodeTypeStr", nodeTypeStr, "originalNodeType", req.NodeType)
+		n.logger.Info("RunNodeImmediatelyRPC: Executed successfully", "nodeTypeStr", nodeTypeStr, "nodeType", node.Type)
 	}
 
 	// Convert result to the appropriate protobuf output type
@@ -3483,10 +3502,29 @@ func (n *Engine) RunNodeImmediatelyRPC(user *model.User, req *avsproto.RunNodeWi
 
 // RunTriggerRPC handles the RPC interface for immediate trigger execution
 func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*avsproto.RunTriggerResp, error) {
-	// Convert protobuf request to internal format
-	triggerConfig := make(map[string]interface{})
-	for k, v := range req.TriggerConfig {
-		triggerConfig[k] = v.AsInterface()
+	// Validate that trigger is provided
+	if req.Trigger == nil {
+		resp := &avsproto.RunTriggerResp{
+			Success: false,
+			Error:   "trigger is required",
+		}
+		resp.OutputData = &avsproto.RunTriggerResp_ManualTrigger{
+			ManualTrigger: &avsproto.ManualTrigger_Output{},
+		}
+		return resp, nil
+	}
+
+	// Extract trigger configuration from TaskTrigger using existing helper
+	triggerConfig := ExtractTriggerConfigData(req.Trigger)
+	if triggerConfig == nil {
+		resp := &avsproto.RunTriggerResp{
+			Success: false,
+			Error:   "failed to extract trigger configuration",
+		}
+		resp.OutputData = &avsproto.RunTriggerResp_ManualTrigger{
+			ManualTrigger: &avsproto.ManualTrigger_Output{},
+		}
+		return resp, nil
 	}
 
 	// Extract trigger input data from the request
@@ -3496,12 +3534,12 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 	}
 
 	// Convert TriggerType enum to string
-	triggerTypeStr := TriggerTypeToString(req.TriggerType)
+	triggerTypeStr := TriggerTypeToString(req.Trigger.Type)
 	if triggerTypeStr == "" {
 		// For unsupported trigger types, return error but still set output data to avoid OUTPUT_DATA_NOT_SET
 		resp := &avsproto.RunTriggerResp{
 			Success: false,
-			Error:   fmt.Sprintf("unsupported trigger type: %v", req.TriggerType),
+			Error:   fmt.Sprintf("unsupported trigger type: %v", req.Trigger.Type),
 		}
 		// Set default ManualTrigger output structure to avoid OUTPUT_DATA_NOT_SET
 		resp.OutputData = &avsproto.RunTriggerResp_ManualTrigger{
@@ -3567,7 +3605,7 @@ func (n *Engine) RunTriggerRPC(user *model.User, req *avsproto.RunTriggerReq) (*
 
 	// Log successful execution
 	if n.logger != nil {
-		n.logger.Info("RunTriggerRPC: Executed successfully", "triggerTypeStr", triggerTypeStr, "originalTriggerType", req.TriggerType)
+		n.logger.Info("RunTriggerRPC: Executed successfully", "triggerTypeStr", triggerTypeStr, "originalTriggerType", req.Trigger.Type)
 	}
 
 	// Convert result to the appropriate protobuf output type

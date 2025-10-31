@@ -1,20 +1,11 @@
 name: 'Setup Test Configuration'
 description: 'Generate config/aggregator.yaml for CI unit tests'
 inputs:
-  sepolia-rpc:
-    description: 'Sepolia RPC URL'
+  chain-endpoint:
+    description: 'Chain RPC endpoint domain (e.g., sepolia.infura.io/v3/KEY)'
     required: true
-  sepolia-ws:
-    description: 'Sepolia WebSocket URL'
-    required: true
-  sepolia-bundler-rpc:
-    description: 'Sepolia Bundler RPC URL'
-    required: true
-  base-sepolia-rpc:
-    description: 'Base Sepolia RPC URL'
-    required: true
-  base-sepolia-bundler-rpc:
-    description: 'Base Sepolia Bundler RPC URL'
+  bundler-rpc:
+    description: 'Bundler RPC URL'
     required: true
   tenderly-account:
     description: 'Tenderly account name'
@@ -39,12 +30,9 @@ runs:
   steps:
     - name: Generate and verify config/aggregator.yaml
       env:
-        # Consolidated CI variables
-        SEPOLIA_RPC: "${{ inputs.sepolia-rpc }}"
-        SEPOLIA_WS: "${{ inputs.sepolia-ws }}"
-        SEPOLIA_BUNDLER_RPC: "${{ inputs.sepolia-bundler-rpc }}"
-        BASE_SEPOLIA_RPC: "${{ inputs.base-sepolia-rpc }}"
-        BASE_SEPOLIA_BUNDLER_RPC: "${{ inputs.base-sepolia-bundler-rpc }}"
+        # Unified environment variables
+        CHAIN_ENDPOINT: "${{ inputs.chain-endpoint }}"
+        BUNDLER_RPC: "${{ inputs.bundler-rpc }}"
 
         # Tenderly HTTP API credentials
         TENDERLY_ACCOUNT: "${{ inputs.tenderly-account }}"

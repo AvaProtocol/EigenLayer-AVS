@@ -25,14 +25,9 @@ func maskKey(key string) string {
 
 func TestContractWriteTenderlySimulation(t *testing.T) {
 	// Require Tenderly credentials in config
-	testConfig := testutil.GetTestConfig()
-	if testConfig == nil {
-		t.Fatal("Test config is nil - config/aggregator.yaml not loaded")
-	}
-	if testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
-		t.Fatalf("Tenderly credentials not configured in config/aggregator.yaml: account=%s, project=%s, accessKey=%s",
-			testConfig.TenderlyAccount, testConfig.TenderlyProject, maskKey(testConfig.TenderlyAccessKey))
-	}
+	_ = testutil.GetTestTenderlyAccount()
+	_ = testutil.GetTestTenderlyProject()
+	_ = testutil.GetTestTenderlyAccessKey()
 
 	db := testutil.TestMustDB()
 	defer storage.Destroy(db.(*storage.BadgerStorage))
@@ -103,7 +98,13 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 
 		// Derive actual salt:0 smart wallet address (no mock needed)
 		aa.SetFactoryAddress(factory)
-		runnerAddr, err := aa.GetSenderAddress(nil, ownerEOA, big.NewInt(0))
+
+		// Connect to RPC to derive address
+		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
+		require.NoError(t, err, "Failed to connect to RPC")
+		defer client.Close()
+
+		runnerAddr, err := aa.GetSenderAddress(client, ownerEOA, big.NewInt(0))
 		require.NoError(t, err, "Failed to derive smart wallet address")
 
 		_ = StoreWallet(db, ownerEOA, &model.SmartWallet{Owner: &ownerEOA, Address: runnerAddr, Factory: &factory, Salt: big.NewInt(0)})
@@ -166,8 +167,12 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		ownerEOA := *ownerAddr
 		factory := smartWalletConfig.FactoryAddress
 
-		// Derive actual salt:0 smart wallet address (no mock needed)
-		runnerAddr, err := aa.GetSenderAddress(nil, ownerEOA, big.NewInt(0))
+		// Derive actual salt:0 smart wallet address (need ethclient)
+		client, err := ethclient.Dial(config.SmartWallet.EthRpcUrl)
+		require.NoError(t, err, "Failed to connect to RPC")
+		defer client.Close()
+
+		runnerAddr, err := aa.GetSenderAddress(client, ownerEOA, big.NewInt(0))
 		require.NoError(t, err, "Failed to derive smart wallet address")
 
 		// Seed wallet for validation
@@ -202,13 +207,14 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 		}
 
 		// Updated input variables with new settings structure
+		// Use the derived runner address instead of hardcoded value
 		inputVariables := map[string]interface{}{
 			"timeTrigger": map[string]interface{}{
 				"data":  map[string]interface{}{},
 				"input": map[string]interface{}{"schedules": []interface{}{"*/5 * * * *"}},
 			},
 			"settings": map[string]interface{}{
-				"runner":   "0x71c8f4D7D5291EdCb3A081802e7efB2788Bd232e",
+				"runner":   runnerAddr.Hex(), // Use derived address, not hardcoded
 				"chain_id": 11155111,
 			},
 			// Keep some legacy fields for context but authentication should come from user
@@ -268,14 +274,9 @@ func TestContractWriteTenderlySimulation(t *testing.T) {
 	// Replicate client request: transfer(to, amount) using derived runner (salt:0)
 	t.Run("RunNodeImmediately_Transfer_WithDerivedRunner_UsesTenderlySimulation", func(t *testing.T) {
 		// Require Tenderly credentials in config
-		testConfig := testutil.GetTestConfig()
-		if testConfig == nil {
-			t.Fatal("Test config is nil - config/aggregator.yaml not loaded")
-		}
-		if testConfig.TenderlyAccount == "" || testConfig.TenderlyProject == "" || testConfig.TenderlyAccessKey == "" {
-			t.Fatalf("Tenderly credentials not configured in config/aggregator.yaml: account=%s, project=%s, accessKey=%s",
-				testConfig.TenderlyAccount, testConfig.TenderlyProject, maskKey(testConfig.TenderlyAccessKey))
-		}
+		_ = testutil.GetTestTenderlyAccount()
+		_ = testutil.GetTestTenderlyProject()
+		_ = testutil.GetTestTenderlyAccessKey()
 
 		db := testutil.TestMustDB()
 		defer storage.Destroy(db.(*storage.BadgerStorage))

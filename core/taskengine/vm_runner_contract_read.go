@@ -411,13 +411,14 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		return s, err
 	}
 
-	// Validate contract address
-	if !common.IsHexAddress(config.ContractAddress) {
-		err = NewInvalidAddressError(config.ContractAddress)
+	// Resolve template variables first before validation
+	contractAddress := r.vm.preprocessTextWithVariableMapping(config.ContractAddress)
+
+	// Validate contract address after template resolution
+	if !common.IsHexAddress(contractAddress) {
+		err = NewInvalidAddressError(contractAddress)
 		return s, err
 	}
-
-	contractAddress := r.vm.preprocessTextWithVariableMapping(config.ContractAddress)
 	// Note: ABI is never subject to template variable substitution
 
 	if len(config.MethodCalls) == 0 {

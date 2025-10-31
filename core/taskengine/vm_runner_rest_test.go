@@ -13,6 +13,7 @@ import (
 	"github.com/AvaProtocol/EigenLayer-AVS/model"
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/gow"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestRestRequest(t *testing.T) {
@@ -906,6 +907,173 @@ func TestRestRequestSendGridGlobalSecret(t *testing.T) {
 	t.Logf("✅ SendGrid API response structure properly accessible: type='%s', reputation=%f",
 		expectedAccountType, expectedReputation)
 	t.Logf("✅ Verified global secret access via {{apContext.configVars.sendgrid_key}} template")
+}
+
+func TestRestSummarizeTelegramHTML(t *testing.T) {
+	// Expect composed subject/body
+	expectedWorkflowName := "Using sdk test wallet"
+
+	// Mock Telegram endpoint that inspects incoming request
+	telegramServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("expected POST request, got %s", r.Method)
+		}
+		if !strings.Contains(strings.ToLower(r.URL.Path), "/sendmessage") {
+			t.Errorf("expected /sendMessage path, got: %s", r.URL.Path)
+		}
+		// Read JSON body
+		var req map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode telegram request body: %v", err)
+		}
+		// Verify parse_mode and text
+		if pm, _ := req["parse_mode"].(string); pm != "HTML" {
+			t.Errorf("expected parse_mode=HTML, got: %v", pm)
+		}
+		text, _ := req["text"].(string)
+		t.Logf("telegram composed text: %q", text)
+		// Verify that summarization happened - check for HTML formatting and key workflow info
+		if !strings.Contains(text, "<b>") || !strings.Contains(text, "</b>") {
+			t.Errorf("telegram text missing HTML bold tags, summarization may not have occurred. got: %q", text)
+		}
+		if !strings.Contains(text, expectedWorkflowName) {
+			t.Errorf("telegram text missing workflow name %q. got: %q", expectedWorkflowName, text)
+		}
+		if !strings.Contains(strings.ToLower(text), "succeed") {
+			t.Errorf("telegram text missing success indicator. got: %q", text)
+		}
+		if text == "placeholder" {
+			t.Errorf("telegram text was not replaced by summary, still shows placeholder")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "result": map[string]interface{}{"message_id": 1}})
+	}))
+	defer telegramServer.Close()
+
+	// Node with summarize=true via Config.Options
+	optsVal, _ := structpb.NewValue(map[string]interface{}{"summarize": true})
+	node := &avsproto.RestAPINode{
+		Config: &avsproto.RestAPINode_Config{
+			Url:     telegramServer.URL + "/botX/sendMessage",
+			Headers: map[string]string{"Content-Type": "application/json"},
+			Body:    `{"chat_id": 1, "text": "placeholder"}`,
+			Method:  "POST",
+			Options: optsVal,
+		},
+	}
+
+	nodes := []*avsproto.TaskNode{{
+		Id:       "tg-sum",
+		Name:     "restApi",
+		TaskType: &avsproto.TaskNode_RestApi{RestApi: node},
+	}}
+	trigger := &avsproto.TaskTrigger{Id: "trig", Name: "trig"}
+	edges := []*avsproto.TaskEdge{{Id: "e1", Source: trigger.Id, Target: "tg-sum"}}
+
+	vm, err := NewVMWithData(&model.Task{Task: &avsproto.Task{Id: "tg-sum", Nodes: nodes, Edges: edges, Trigger: trigger}}, nil, testutil.GetTestSmartWalletConfig(), nil)
+	if err != nil {
+		t.Fatalf("failed to create VM: %v", err)
+	}
+
+	// Provide settings.name and a last successful step
+	vm.AddVar("settings", map[string]interface{}{"name": expectedWorkflowName})
+	vm.ExecutionLogs = append(vm.ExecutionLogs, &avsproto.Execution_Step{Name: "run_swap", Success: true})
+
+	processor := NewRestProcessor(vm)
+	step, err := processor.Execute("tg-sum", node)
+	if err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+	if !step.Success {
+		t.Fatalf("expected step success, got failure: %s", step.Error)
+	}
+}
+
+func TestRestSummarizeSendGridInjection(t *testing.T) {
+	expectedWorkflowName := "Using sdk test wallet"
+
+	// Mock SendGrid endpoint; verify subject and content[0].value
+	sendgridServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if !strings.Contains(r.URL.Path, "/v3/mail/send") && !strings.Contains(r.URL.Path, "/mail/send") {
+			t.Errorf("expected /v3/mail/send path, got: %s", r.URL.Path)
+		}
+		var req map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode sendgrid request: %v", err)
+		}
+		subj, _ := req["subject"].(string)
+		// content should be array with first element value == expectedBody
+		content, _ := req["content"].([]interface{})
+		var body string
+		if len(content) > 0 {
+			if first, ok := content[0].(map[string]interface{}); ok {
+				body, _ = first["value"].(string)
+			}
+		}
+		t.Logf("sendgrid composed subject: %q body: %q", subj, body)
+		// Verify subject contains workflow name and success indicator (could be AI-generated)
+		if !strings.Contains(subj, expectedWorkflowName) {
+			t.Errorf("subject missing workflow name. want to contain %q got %q", expectedWorkflowName, subj)
+		}
+		if !strings.Contains(strings.ToLower(subj), "succeed") {
+			t.Errorf("subject missing success indicator. got %q", subj)
+		}
+		if len(content) == 0 {
+			t.Errorf("expected content array to be non-empty")
+		} else if first, ok := content[0].(map[string]interface{}); ok {
+			if val, _ := first["value"].(string); val != "" {
+				// Verify body was generated and replaced placeholder (could be AI-generated)
+				if val == "placeholder" {
+					t.Errorf("content[0].value was not replaced by summary, still shows placeholder")
+				}
+				if !strings.Contains(val, expectedWorkflowName) {
+					t.Errorf("content[0].value missing workflow name. want to contain %q got %q", expectedWorkflowName, val)
+				}
+			} else {
+				t.Errorf("content[0].value is empty")
+			}
+		} else {
+			t.Errorf("content[0] not an object")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"message": "accepted"})
+	}))
+	defer sendgridServer.Close()
+
+	optsVal, _ := structpb.NewValue(map[string]interface{}{"summarize": true})
+	node := &avsproto.RestAPINode{Config: &avsproto.RestAPINode_Config{
+		Url:     sendgridServer.URL + "/v3/mail/send",
+		Headers: map[string]string{"Content-Type": "application/json"},
+		Body:    `{"personalizations":[{"to":[{"email":"user@example.com"}]}],"from":{"email":"noreply@example.com"},"subject":"placeholder","content":[{"type":"text/plain","value":"placeholder"}]}`,
+		Method:  "POST",
+		Options: optsVal,
+	}}
+
+	nodes := []*avsproto.TaskNode{{Id: "sg-sum", Name: "restApi", TaskType: &avsproto.TaskNode_RestApi{RestApi: node}}}
+	trigger := &avsproto.TaskTrigger{Id: "trig", Name: "trig"}
+	edges := []*avsproto.TaskEdge{{Id: "e1", Source: trigger.Id, Target: "sg-sum"}}
+	vm, err := NewVMWithData(&model.Task{Task: &avsproto.Task{Id: "sg-sum", Nodes: nodes, Edges: edges, Trigger: trigger}}, nil, testutil.GetTestSmartWalletConfig(), nil)
+	if err != nil {
+		t.Fatalf("failed to create VM: %v", err)
+	}
+	vm.AddVar("settings", map[string]interface{}{"name": expectedWorkflowName})
+	vm.ExecutionLogs = append(vm.ExecutionLogs, &avsproto.Execution_Step{Name: "run_swap", Success: true})
+
+	processor := NewRestProcessor(vm)
+	step, err := processor.Execute("sg-sum", node)
+	if err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+	if !step.Success {
+		t.Fatalf("expected step success, got failure: %s", step.Error)
+	}
 }
 
 func TestRestRequestArbitraryGlobalSecret(t *testing.T) {

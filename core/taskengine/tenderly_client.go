@@ -13,16 +13,10 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/go-resty/resty/v2"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	sdklogging "github.com/Layr-Labs/eigensdk-go/logging"
-)
-
-// Constants for storage values
-const (
-	STORAGE_FALSE_VALUE = "0x0000000000000000000000000000000000000000000000000000000000000000" // false value for storage
 )
 
 // TenderlyClient handles Tenderly HTTP simulation API interactions
@@ -475,7 +469,7 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		"gas_price":       0,
 		"value":           apiValue, // Use the provided value parameter, defaulting empty to "0"
 		"input":           callData,
-		"simulation_type": "quick",
+		"simulation_type": "full", // Use "full" instead of "quick" for more accurate state (ensures latest allowances are visible)
 		// Optional conveniences kept compatible
 		"state_objects": map[string]interface{}{
 			strings.ToLower(fromAddress): map[string]interface{}{
@@ -484,14 +478,11 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		},
 	}
 
-	// Also override ERC20 token balance for the runner to ensure transfer() succeeds.
-	// Heuristic: set balance for multiple plausible mapping slots (0..10) to cover diverse layouts.
-	// Storage slot key = keccak256(pad(address), pad(slotIndex)) under the token contract's storage.
-	// We set a very large balance value so any reasonable transfer amount passes.
-	if common.IsHexAddress(contractAddress) && common.IsHexAddress(fromAddress) {
+	// Set ETH balance for the sender so gas checks don't fail in simulation
+	// Tenderly uses the latest block state by default, which includes all on-chain approvals
+	// So we don't need to set token allowances here - they're already on-chain
+	if common.IsHexAddress(fromAddress) {
 		stateObjects := body["state_objects"].(map[string]interface{})
-
-		// Set ETH balance for the sender (following Tenderly documentation pattern)
 		senderKey := strings.ToLower(fromAddress)
 		senderOverrides, ok := stateObjects[senderKey].(map[string]interface{})
 		if !ok || senderOverrides == nil {
@@ -500,69 +491,8 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		}
 		// Set 10 ETH balance (0x8AC7230489E80000 = 10 * 10^18)
 		senderOverrides["balance"] = "0x8AC7230489E80000"
-		contractKey := strings.ToLower(contractAddress)
-		contractOverrides, ok := stateObjects[contractKey].(map[string]interface{})
-		if !ok || contractOverrides == nil {
-			contractOverrides = map[string]interface{}{}
-			stateObjects[contractKey] = contractOverrides
-		}
-		storageMap, ok := contractOverrides["storage"].(map[string]interface{})
-		if !ok || storageMap == nil {
-			storageMap = map[string]interface{}{}
-			contractOverrides["storage"] = storageMap
-		}
-		// Set USDC balance using multiple storage slot calculation approaches
-		// USDC uses slot 9 for the balances mapping
-
-		// Set balance to 1 billion USDC (1e9 * 1e6 for USDC 6 decimals = 1e15)
-		balanceHex := "0x0000000000000000000000000000000000000000000000000038d7ea4c68000"
-
-		// Try both approaches as different contracts may use different patterns
-
-		// Approach 1: Standard Solidity abi.encodePacked(address, uint256(slot))
-		// Uses 20-byte address + 32-byte slot
-		addrBytes := common.HexToAddress(fromAddress).Bytes() // 20 bytes, no padding
-		slotBytes := make([]byte, 32)
-		slotBytes[31] = 9 // uint256(9) as 32 bytes
-		encoded1 := append(addrBytes, slotBytes...)
-		slotKey1 := common.BytesToHash(crypto.Keccak256(encoded1)).Hex()
-		storageMap[slotKey1] = balanceHex
-
-		// Approach 2: Tenderly documentation style with 32-byte padded address
-		// Uses 32-byte padded address + 32-byte slot (64 bytes total)
-		paddedAddr := make([]byte, 32)
-		copy(paddedAddr[12:], addrBytes) // Right-pad address to 32 bytes
-		encoded2 := append(paddedAddr, slotBytes...)
-		slotKey2 := common.BytesToHash(crypto.Keccak256(encoded2)).Hex()
-		storageMap[slotKey2] = balanceHex
-
-		// Also try to clear any potential blacklist flags (common in USDC)
-		// Some tokens use different slots for blacklists, try multiple approaches
-		for blacklistSlot := 10; blacklistSlot <= 12; blacklistSlot++ {
-			blacklistSlotBytes := make([]byte, 32)
-			blacklistSlotBytes[31] = byte(blacklistSlot)
-
-			// Standard approach (20-byte address + 32-byte slot)
-			encodedBlacklist1 := append(addrBytes, blacklistSlotBytes...)
-			blacklistKey1 := common.BytesToHash(crypto.Keccak256(encodedBlacklist1)).Hex()
-			storageMap[blacklistKey1] = STORAGE_FALSE_VALUE // false
-
-			// Tenderly docs approach (32-byte padded address + 32-byte slot)
-			encodedBlacklist2 := append(paddedAddr, blacklistSlotBytes...)
-			blacklistKey2 := common.BytesToHash(crypto.Keccak256(encodedBlacklist2)).Hex()
-			storageMap[blacklistKey2] = STORAGE_FALSE_VALUE // false
-		}
-
-		tc.logger.Info("🔧 Comprehensive balance and blacklist overrides applied",
-			"token_contract", contractKey,
-			"runner", strings.ToLower(fromAddress),
-			"eth_balance", "10 ETH",
-			"usdc_balance", balanceHex,
-			"storage_slot_standard", slotKey1,
-			"storage_slot_padded", slotKey2,
-			"blacklist_slots_cleared", "10-12")
-
 	}
+
 	tc.logger.Info("📡 Making Tenderly HTTP simulation call for contract write", "url", simURL)
 	httpResp, httpErr := tc.httpClient.R().
 		SetContext(ctx).
@@ -588,6 +518,21 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 	if errObj, ok := httpResult["error"].(map[string]interface{}); ok {
 		msg, _ := errObj["message"].(string)
 		slug, _ := errObj["slug"].(string)
+
+		// Enhanced error logging with full error details
+		callDataPreview := callData
+		if len(callData) > 20 {
+			callDataPreview = callData[:20] + "..."
+		}
+		tc.logger.Error("❌ Tenderly simulation returned error",
+			"contract", contractAddress,
+			"method", methodName,
+			"from", fromAddress,
+			"chain_id", chainID,
+			"error_message", msg,
+			"error_slug", slug,
+			"full_error", errObj,
+			"call_data_preview", callDataPreview)
 
 		// If we got "invalid_state_storage" error, try again without storage overrides
 		if slug == "invalid_state_storage" {
@@ -877,26 +822,56 @@ func (tc *TenderlyClient) SimulateContractWrite(ctx context.Context, contractAdd
 		}
 
 		// Propagate revert status from Tenderly into result.Success/Error
+		// Also extract detailed error messages from call traces for better debugging
 		if m, ok := resultForExtraction.(map[string]interface{}); ok {
+			// Check simulation.status
 			if sim, ok := m["simulation"].(map[string]interface{}); ok {
 				if status, ok := sim["status"].(bool); ok && !status {
 					result.Success = false
 					if em, ok := sim["error_message"].(string); ok && em != "" {
+						tc.logger.Error("❌ Tenderly simulation failed: simulation.status=false",
+							"contract", contractAddress,
+							"method", methodName,
+							"error_message", em,
+							"from", fromAddress)
 						result.Error = &ContractWriteErrorData{Code: "SIMULATION_REVERTED", Message: em}
 					} else {
 						result.Error = &ContractWriteErrorData{Code: "SIMULATION_REVERTED", Message: "simulation status false"}
 					}
 				}
 			}
+			// Check transaction.status
 			if tx, ok := m["transaction"].(map[string]interface{}); ok {
 				if status, ok := tx["status"].(bool); ok && !status {
 					result.Success = false
-					if result.Error == nil {
-						if em, ok := tx["error_message"].(string); ok && em != "" {
-							result.Error = &ContractWriteErrorData{Code: "SIMULATION_REVERTED", Message: em}
-						} else {
-							result.Error = &ContractWriteErrorData{Code: "SIMULATION_REVERTED", Message: "transaction status false"}
+					var errorMsg string
+					if em, ok := tx["error_message"].(string); ok && em != "" {
+						errorMsg = em
+					} else {
+						errorMsg = "transaction status false"
+					}
+
+					// Try to extract more detailed error from call trace
+					if callTrace, ok := tx["call_trace"].([]interface{}); ok {
+						for _, call := range callTrace {
+							if callMap, ok := call.(map[string]interface{}); ok {
+								// Look for error in nested calls (like ERC20 transferFrom failures)
+								if errMsg, ok := callMap["error"].(string); ok && errMsg != "" {
+									errorMsg = errMsg
+									tc.logger.Error("❌ Tenderly simulation failed: transaction reverted",
+										"contract", contractAddress,
+										"method", methodName,
+										"error_from_call_trace", errMsg,
+										"from", fromAddress,
+										"call_output", callMap["output"])
+									break
+								}
+							}
 						}
+					}
+
+					if result.Error == nil {
+						result.Error = &ContractWriteErrorData{Code: "SIMULATION_REVERTED", Message: errorMsg}
 					}
 				}
 			}
