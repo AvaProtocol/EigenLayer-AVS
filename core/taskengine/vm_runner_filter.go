@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 	"github.com/dop251/goja"
@@ -85,39 +84,38 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	executionLogStep := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_FILTER, r.vm)
 
 	var logBuilder strings.Builder
-	logBuilder.WriteString(fmt.Sprintf("Executing Filter Node ID: %s at %s\n", stepID, time.Now()))
+	logBuilder.WriteString(formatNodeExecutionLogHeader(executionLogStep))
+
+	var err error
+	defer func() {
+		finalizeStep(executionLogStep, err == nil, err, "", logBuilder.String())
+	}()
 
 	// Get configuration from Config message (consistent with other processors)
-	if node.Config == nil {
-		errMsg := "FilterNode Config is nil"
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
-		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
-		return executionLogStep, fmt.Errorf(errMsg)
+	if err = validateNodeConfig(node.Config, "FilterNode"); err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		return executionLogStep, err
 	}
 
 	expression := node.Config.Expression
 	if expression == "" {
-		errMsg := "FilterNode expression is empty"
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
-		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
-		return executionLogStep, fmt.Errorf(errMsg)
+		err = fmt.Errorf("FilterNode expression is empty")
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		return executionLogStep, err
 	}
 
 	// LANGUAGE ENFORCEMENT: FilterNode uses JavaScript (hardcoded)
 	// Using centralized ValidateInputByLanguage for consistency
-	if err := ValidateInputByLanguage(expression, avsproto.Lang_LANG_JAVASCRIPT); err != nil {
-		errMsg := fmt.Sprintf("FilterNode expression validation failed: %v", err)
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
-		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
-		return executionLogStep, fmt.Errorf(errMsg)
+	if err = ValidateInputByLanguage(expression, avsproto.Lang_LANG_JAVASCRIPT); err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error: FilterNode expression validation failed: %v\n", err))
+		return executionLogStep, err
 	}
 
 	inputNodeName := node.Config.InputNodeName
 	if inputNodeName == "" {
-		errMsg := "FilterNode inputNodeName is empty"
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
-		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
-		return executionLogStep, fmt.Errorf(errMsg)
+		err = fmt.Errorf("FilterNode inputNodeName is empty")
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		return executionLogStep, err
 	}
 
 	// Determine the variable name to use in JavaScript BEFORE locking mutex
@@ -139,10 +137,9 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	r.vm.mu.Unlock()
 
 	if !exists {
-		errMsg := fmt.Sprintf("input variable for source '%s' not found", inputNodeName)
-		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
-		finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
-		return executionLogStep, fmt.Errorf(errMsg)
+		err = fmt.Errorf("input variable for source '%s' not found", inputNodeName)
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+		return executionLogStep, err
 	}
 
 	// Apply template processing to the expression if it contains {{ }}
@@ -162,12 +159,11 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	// Set all variables from the VM context
 	r.vm.mu.Lock()
 	for key, value := range r.vm.vars {
-		if err := jsvm.Set(key, value); err != nil {
+		if setErr := jsvm.Set(key, value); setErr != nil {
 			r.vm.mu.Unlock()
-			errMsg := fmt.Sprintf("failed to set variable '%s' in JS VM: %v", key, err)
-			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", errMsg))
-			finalizeExecutionStep(executionLogStep, false, errMsg, logBuilder.String())
-			return executionLogStep, fmt.Errorf(errMsg)
+			err = fmt.Errorf("failed to set variable '%s' in JS VM: %v", key, setErr)
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+			return executionLogStep, err
 		}
 	}
 	r.vm.mu.Unlock()
@@ -185,7 +181,7 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 		actualDataToFilter = inputVar
 	}
 
-	logBuilder.WriteString(fmt.Sprintf("Data to filter type: %T, content: %v\n", actualDataToFilter, actualDataToFilter))
+	logBuilder.WriteString(fmt.Sprintf("Data to filter type: %T, content: %s\n", actualDataToFilter, FormatAsJSON(actualDataToFilter)))
 
 	var filteredResult []interface{}
 	var evaluationError error
@@ -211,8 +207,8 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	}
 
 	if evaluationError != nil {
-		finalizeExecutionStep(executionLogStep, false, evaluationError.Error(), logBuilder.String())
-		return executionLogStep, evaluationError
+		err = evaluationError
+		return executionLogStep, err
 	}
 
 	logBuilder.WriteString(fmt.Sprintf("Filter completed: %d items passed\n", len(filteredResult)))
@@ -221,10 +217,10 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	// We need to create a Value that contains a ListValue for AnyToSlice to work properly
 	listValue := &structpb.ListValue{}
 	for _, item := range filteredResult {
-		itemValue, err := structpb.NewValue(item)
-		if err != nil {
+		itemValue, itemErr := structpb.NewValue(item)
+		if itemErr != nil {
+			err = itemErr
 			logBuilder.WriteString(fmt.Sprintf("Error converting item to proto value: %v\n", err))
-			finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
 			return executionLogStep, err
 		}
 		listValue.Values = append(listValue.Values, itemValue)
@@ -247,8 +243,7 @@ func (r *FilterProcessor) Execute(stepID string, node *avsproto.FilterNode) (*av
 	// Set the actual filtered results directly, not the protobuf-encoded version
 	setNodeOutputData(r.CommonProcessor, stepID, filteredResult)
 
-	// Use shared function to finalize execution step with success
-	finalizeExecutionStep(executionLogStep, true, "", logBuilder.String())
+	// Success - defer will finalize
 	return executionLogStep, nil
 }
 

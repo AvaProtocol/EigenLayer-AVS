@@ -620,3 +620,50 @@ func GetMapKeys(m map[string]interface{}) []string {
 	}
 	return keys
 }
+
+// FormatAsJSON converts any data structure to a JSON string for logging purposes.
+// This function disables HTML escaping to provide clean, readable output for developer logs.
+// For complex structures (maps, slices, structs), it marshals to JSON.
+// For simple types (strings, numbers, booleans), it returns a string representation.
+func FormatAsJSON(data interface{}) string {
+	if data == nil {
+		return "null"
+	}
+
+	// Handle simple types directly
+	switch v := data.(type) {
+	case string:
+		// If it's already a valid JSON string, return as-is
+		// Otherwise, marshal it to preserve proper JSON string quoting
+		var testJSON interface{}
+		if err := json.Unmarshal([]byte(v), &testJSON); err == nil {
+			// It's valid JSON, return as-is
+			return v
+		}
+		// Not valid JSON, marshal as string
+		result, _ := json.Marshal(v)
+		return string(result)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:
+		result, _ := json.Marshal(v)
+		return string(result)
+	}
+
+	// For complex types, marshal to JSON with HTML escaping disabled
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false) // Disable HTML escaping for clean output
+	encoder.SetIndent("", "")    // Compact output (no pretty printing)
+
+	if err := encoder.Encode(data); err != nil {
+		// If marshaling fails, fall back to fmt.Sprintf
+		return fmt.Sprintf("%v", data)
+	}
+
+	// Remove trailing newline added by encoder.Encode
+	result := buf.String()
+	if len(result) > 0 && result[len(result)-1] == '\n' {
+		result = result[:len(result)-1]
+	}
+
+	return result
+}

@@ -19,6 +19,11 @@ const (
 	MockAPIEndpoint = "https://mock-api.ap-aggregator.local"
 )
 
+// SendGrid Dynamic Template ID for AI-generated workflow summaries
+const (
+	SendGridSummaryTemplateID = "d-3b4b885af0fc45ad822024ebc72f169c"
+)
+
 // HTTPRequestExecutor interface for making HTTP requests
 type HTTPRequestExecutor interface {
 	ExecuteRequest(method, url, body string, headers map[string]string) (*resty.Response, error)
@@ -434,11 +439,18 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	executionLogStep := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_REST_API, r.vm)
 
 	var logBuilder strings.Builder
-	logBuilder.WriteString(fmt.Sprintf("Executing REST API Node ID: %s at %s\n", stepID, time.Now()))
+	logBuilder.WriteString(formatNodeExecutionLogHeader(executionLogStep))
 
 	// Extract configuration from the node's Config message
 	var url, method, body string
 	var headers map[string]string
+	var err error
+	var stepSuccess bool
+	var errorMessage string
+
+	defer func() {
+		finalizeStep(executionLogStep, stepSuccess, err, errorMessage, logBuilder.String())
+	}()
 
 	// Start with Config values (if available)
 	if node.Config != nil {
@@ -494,9 +506,8 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	// Validate required fields
 	if url == "" {
-		err := NewMissingRequiredFieldError("url")
+		err = NewMissingRequiredFieldError("url")
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-		finalizeExecutionStepWithError(executionLogStep, false, err, logBuilder.String())
 		return executionLogStep, err
 	}
 
@@ -526,7 +537,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	// Check body size limit (before processing to avoid wasting resources)
 	if len(body) > MaxRestAPIBodySize {
-		err := NewStructuredError(
+		err = NewStructuredError(
 			avsproto.ErrorCode_INVALID_NODE_CONFIG,
 			fmt.Sprintf("%s: %d bytes (max: %d bytes)", ValidationErrorMessages.RestAPIBodyTooLarge, len(body), MaxRestAPIBodySize),
 			map[string]interface{}{
@@ -537,7 +548,6 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 			},
 		)
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-		finalizeExecutionStepWithError(executionLogStep, false, err, logBuilder.String())
 		return executionLogStep, err
 	}
 
@@ -550,20 +560,19 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	// Validate JSON format if content type is JSON and body is not empty
 	if isJSONContent && body != "" {
 		var jsonTest interface{}
-		if err := json.Unmarshal([]byte(body), &jsonTest); err != nil {
-			structErr := NewStructuredError(
+		if jsonErr := json.Unmarshal([]byte(body), &jsonTest); jsonErr != nil {
+			err = NewStructuredError(
 				avsproto.ErrorCode_INVALID_NODE_CONFIG,
-				fmt.Sprintf("%s: %s", ValidationErrorMessages.RestAPIBodyInvalidJSON, err.Error()),
+				fmt.Sprintf("%s: %s", ValidationErrorMessages.RestAPIBodyInvalidJSON, jsonErr.Error()),
 				map[string]interface{}{
 					"field":       "body",
 					"issue":       "invalid JSON format",
 					"contentType": contentType,
-					"error":       err.Error(),
+					"error":       jsonErr.Error(),
 				},
 			)
-			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", structErr.Error()))
-			finalizeExecutionStepWithError(executionLogStep, false, structErr, logBuilder.String())
-			return executionLogStep, structErr
+			logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
+			return executionLogStep, err
 		}
 	}
 
@@ -587,10 +596,19 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	var summaryForClient *Summary
 	if shouldSummarize(r.vm, node) {
 		provider := detectNotificationProvider(url)
+		if r.vm.logger != nil {
+			r.vm.logger.Info("REST API summarize enabled", "provider", provider, "url", url)
+		}
 		if provider != "" {
 			// Build summary from current VM context (AI if enabled, else deterministic)
 			currentName := r.vm.GetNodeNameAsVar(stepID)
+			if r.vm.logger != nil {
+				r.vm.logger.Info("REST API calling ComposeSummarySmart", "currentName", currentName)
+			}
 			s := ComposeSummarySmart(r.vm, currentName)
+			if r.vm.logger != nil {
+				r.vm.logger.Info("REST API summary generated", "subject", s.Subject, "bodyLength", len(s.Body))
+			}
 			summaryForClient = &s
 
 			// Attempt to parse body as JSON and inject subject/body accordingly
@@ -598,65 +616,236 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 			if err := json.Unmarshal([]byte(body), &bodyObj); err == nil {
 				switch provider {
 				case "sendgrid":
-					bodyObj["subject"] = s.Subject
-					// Also update subject in personalizations array if present (SendGrid canonical location)
+					// Always use Dynamic Templates for AI summaries - inject template_id automatically
+					bodyObj["template_id"] = SendGridSummaryTemplateID
+
+					// Get dynamic template data from summary (subject/title/analysis...)
+					dynamicData := s.SendGridDynamicData()
+
+					// Enrich with runner/eoaAddress for template usage
+					smartWallet := ""
+					ownerEOA := ""
+					r.vm.mu.Lock()
+					if aaSender, ok := r.vm.vars["aa_sender"].(string); ok && aaSender != "" {
+						smartWallet = aaSender
+					}
+					if wc, ok := r.vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
+						if runner, ok := wc["runner"].(string); ok && runner != "" && smartWallet == "" {
+							smartWallet = runner
+						}
+						if owner, ok := wc["owner"].(string); ok && owner != "" {
+							ownerEOA = owner
+						}
+						if eoa, ok := wc["eoaAddress"].(string); ok && eoa != "" && ownerEOA == "" {
+							ownerEOA = eoa
+						}
+					}
+					if smartWallet == "" {
+						if settings, ok := r.vm.vars["settings"].(map[string]interface{}); ok {
+							if runner, ok := settings["runner"].(string); ok && strings.TrimSpace(runner) != "" {
+								smartWallet = runner
+							}
+						}
+					}
+					r.vm.mu.Unlock()
+					dynamicData["runner"] = smartWallet
+					dynamicData["eoaAddress"] = shortHex(ownerEOA)
+
+					// Compute skipped nodes (by name) = workflow nodes - executed step names
+					executedNames := make(map[string]struct{})
+					for _, st := range r.vm.ExecutionLogs {
+						name := st.GetName()
+						if name == "" {
+							name = st.GetId()
+						}
+						if name != "" {
+							executedNames[name] = struct{}{}
+						}
+					}
+					skippedNodes := make([]string, 0, len(r.vm.TaskNodes))
+					r.vm.mu.Lock()
+					for _, n := range r.vm.TaskNodes {
+						if n != nil {
+							if _, ok := executedNames[n.Name]; !ok {
+								skippedNodes = append(skippedNodes, n.Name)
+							}
+						}
+					}
+					r.vm.mu.Unlock()
+					if len(skippedNodes) > 0 {
+						dynamicData["skippedNodes"] = skippedNodes
+					}
+
+					// Collect branch selections with condition expressions
+					branchSelections := make([]map[string]interface{}, 0, 2)
+					for _, st := range r.vm.ExecutionLogs {
+						t := strings.ToUpper(st.GetType())
+						if !strings.Contains(t, "BRANCH") {
+							continue
+						}
+						entry := map[string]interface{}{}
+						name := st.GetName()
+						if name == "" {
+							name = st.GetId()
+						}
+						entry["step"] = name
+						// selected conditionId from branch output
+						if br := st.GetBranch(); br != nil && br.GetData() != nil {
+							if m, ok := br.GetData().AsInterface().(map[string]interface{}); ok {
+								if cid, ok := m["conditionId"].(string); ok {
+									entry["condition_id"] = cid
+									if idx := strings.LastIndex(cid, "."); idx >= 0 && idx+1 < len(cid) {
+										switch cid[idx+1:] {
+										case "0":
+											entry["path"] = "if"
+										case "1":
+											entry["path"] = "else"
+										default:
+											entry["path"] = cid[idx+1:]
+										}
+									}
+								}
+							}
+						}
+						// conditions array from config
+						if st.GetConfig() != nil {
+							if cfgMap, ok := st.GetConfig().AsInterface().(map[string]interface{}); ok {
+								if conds, ok := cfgMap["conditions"].([]interface{}); ok {
+									condList := make([]map[string]interface{}, 0, len(conds))
+									for _, c := range conds {
+										if cm, ok := c.(map[string]interface{}); ok {
+											condList = append(condList, map[string]interface{}{
+												"id":         cm["id"],
+												"type":       cm["type"],
+												"expression": cm["expression"],
+											})
+										}
+									}
+									if len(condList) > 0 {
+										entry["conditions"] = condList
+									}
+								}
+							}
+						}
+						branchSelections = append(branchSelections, entry)
+					}
+					if len(branchSelections) > 0 {
+						dynamicData["branchSelections"] = branchSelections
+					}
+
+					// Compose deterministic branch/skip summary strings
+					// When branches/skips are present, use the structured summary as the primary analysisHtml
+					if text, html := BuildBranchAndSkippedSummary(r.vm); strings.TrimSpace(html) != "" {
+						// Replace analysisHtml with the structured branch summary
+						// The old analysisHtml (from Summary.Body) often duplicates this information
+						dynamicData["analysisHtml"] = html
+						dynamicData["branchSummaryHtml"] = html
+
+						// Compute and set status, statusHtml, subject, and summary (deterministic)
+						totalSteps := getTotalWorkflowSteps(r.vm)
+						executedSteps := len(r.vm.ExecutionLogs)
+						skippedCount := 0
+						if totalSteps > executedSteps {
+							skippedCount = totalSteps - executedSteps
+						}
+						failed, failedName, failedReason := findEarliestFailure(r.vm)
+
+						// Use ExecutionResultStatus enum
+						var resultStatus ExecutionResultStatus
+						var statusText, statusBgColor, statusTextColor string
+						if failed {
+							resultStatus = ExecutionFailure
+							statusText = fmt.Sprintf("but ultimately failed at the '%s' step due to %s.", safeName(failedName), firstLine(failedReason))
+							statusBgColor = "#FEE2E2"   // light red
+							statusTextColor = "#991B1B" // dark red
+						} else if skippedCount > 0 {
+							resultStatus = ExecutionPartialSuccess
+							statusText = fmt.Sprintf("but %d nodes were skipped due to Branch condition.", skippedCount)
+							statusBgColor = "#FEF3C7"   // light yellow
+							statusTextColor = "#92400E" // dark yellow/amber
+						} else {
+							resultStatus = ExecutionSuccess
+							statusText = "All steps completed successfully"
+							statusBgColor = "#D1FAE5"   // light green
+							statusTextColor = "#065F46" // dark green
+						}
+
+						// Generate status badge HTML with colors for the badge itself
+						iconSvg := ""
+						switch resultStatus {
+						case ExecutionSuccess:
+							iconSvg = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#10B981"/><path d="M11 6L7 10L5 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+						case ExecutionPartialSuccess:
+							iconSvg = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#F59E0B"/><circle cx="8" cy="5" r="1" fill="white"/><rect x="7.5" y="7" width="1" height="4" rx="0.5" fill="white"/></svg>`
+						case ExecutionFailure:
+							iconSvg = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle; margin-right:6px"><circle cx="8" cy="8" r="7" fill="#EF4444"/><path d="M10 6L6 10M6 6L10 10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`
+						}
+						statusHtml := fmt.Sprintf(
+							`<div style="display:inline-block; padding:8px 16px; background-color:%s; color:%s; border-radius:8px; font-weight:500; margin:8px 0">%s%s</div>`,
+							statusBgColor,
+							statusTextColor,
+							iconSvg,
+							statusText,
+						)
+
+						workflowName := resolveWorkflowName(r.vm)
+						summaryLine := fmt.Sprintf("Your workflow '%s' executed %d out of %d total steps", workflowName, executedSteps, totalSteps)
+
+						// Update subject based on status
+						var newSubject string
+						switch resultStatus {
+						case ExecutionSuccess:
+							newSubject = fmt.Sprintf("%s successfully completed", workflowName)
+						case ExecutionPartialSuccess:
+							newSubject = fmt.Sprintf("%s partially executed", workflowName)
+						case ExecutionFailure:
+							newSubject = fmt.Sprintf("%s failed to execute", workflowName)
+						}
+
+						dynamicData["statusHtml"] = statusHtml
+						dynamicData["summary"] = summaryLine
+						dynamicData["subject"] = newSubject
+
+						// Set preheader from deterministic summary line (fallback to subject)
+						preheader := extractPreheaderFromSummaryText(text, newSubject)
+						dynamicData["preheader"] = preheader
+					}
+
+					// Ensure 'from' object includes a display name for better inbox rendering
+					if fromObj, ok := bodyObj["from"].(map[string]interface{}); ok {
+						if _, hasName := fromObj["name"]; !hasName || strings.TrimSpace(asString(fromObj["name"])) == "" {
+							fromObj["name"] = "AP Studio Notification"
+							bodyObj["from"] = fromObj
+						}
+					}
+
+					// Provide dynamic_template_data both at top-level and per-personalization to satisfy API variants
+					bodyObj["dynamic_template_data"] = dynamicData
+
+					// Attach dynamic_template_data per-personalization; DO NOT set subject here when using template {{{subject}}}
 					if pers, ok := bodyObj["personalizations"].([]interface{}); ok {
 						for i := range pers {
 							if p, ok := pers[i].(map[string]interface{}); ok {
-								p["subject"] = s.Subject
+								// Pass all dynamic template data (SendGrid expects snake_case)
+								p["dynamic_template_data"] = dynamicData
 								pers[i] = p
 							}
 						}
 						bodyObj["personalizations"] = pers
 					}
-					// Ensure content array exists and contains both text/plain and text/html
-					var contentArr []interface{}
-					if v, ok := bodyObj["content"].([]interface{}); ok {
-						contentArr = v
-					}
 
-					// Build styled HTML email
-					styledHTML := buildStyledHTMLEmail(s.Subject, s.Body)
-
-					// Update or add text/plain and text/html parts
-					foundPlain := false
-					foundHTML := false
-					for i := range contentArr {
-						if m, ok := contentArr[i].(map[string]interface{}); ok {
-							if t, ok2 := m["type"].(string); ok2 {
-								if strings.EqualFold(t, "text/plain") {
-									m["value"] = s.Body
-									contentArr[i] = m
-									foundPlain = true
-								}
-								if strings.EqualFold(t, "text/html") {
-									m["value"] = styledHTML
-									contentArr[i] = m
-									foundHTML = true
-								}
-							}
-						}
-					}
-					if !foundPlain {
-						contentArr = append(contentArr, map[string]interface{}{"type": "text/plain", "value": s.Body})
-					}
-					if !foundHTML {
-						contentArr = append(contentArr, map[string]interface{}{"type": "text/html", "value": styledHTML})
-					}
-					bodyObj["content"] = contentArr
+					// Remove any content array; Dynamic Templates should not include 'content'
+					delete(bodyObj, "content")
 				case "telegram":
 					// Format summary for Telegram: concise, chat-friendly message
 					telegramMsg := FormatSummaryForChannel(s, "telegram")
 					bodyObj["parse_mode"] = "HTML"
 					bodyObj["text"] = telegramMsg
 				}
-				if newBody, mErr := json.Marshal(bodyObj); mErr == nil {
-					body = string(newBody)
-					if r.vm.logger != nil {
-						r.vm.logger.Debug("REST API injected composed summary into provider payload", "provider", provider)
-					}
-				} else if r.vm.logger != nil {
-					r.vm.logger.Warn("REST API failed to marshal body after summary injection", "error", mErr)
+				// Use FormatAsJSON to ensure HTML characters are not escaped in the body
+				body = FormatAsJSON(bodyObj)
+				if r.vm.logger != nil {
+					r.vm.logger.Debug("REST API injected composed summary into provider payload", "provider", provider)
 				}
 			} else if r.vm.logger != nil {
 				r.vm.logger.Warn("REST API summarize enabled but body is not JSON, skipping injection")
@@ -671,9 +860,8 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	// Validate URL format
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		err := fmt.Errorf("invalid URL format (must start with http:// or https://): %s", url)
+		err = fmt.Errorf("invalid URL format (must start with http:// or https://): %s", url)
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
 		return executionLogStep, err
 	}
 
@@ -699,12 +887,11 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	logBuilder.WriteString(fmt.Sprintf("Making %s request to: %s\n", method, url))
 	if body != "" {
-		logBuilder.WriteString(fmt.Sprintf("Request body: %s\n", body))
+		logBuilder.WriteString(fmt.Sprintf("Request body: %s\n", FormatAsJSON(body)))
 	}
 
-	// Declare response and error variables
+	// Declare response variable
 	var response *resty.Response
-	var err error
 
 	// Determine which executor to use based on URL
 	var executor HTTPRequestExecutor
@@ -719,16 +906,14 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 
 	if err != nil {
 		// Format connection errors to match test expectations
-		errorMsg := fmt.Sprintf("HTTP request failed: connection error or timeout - %s", err.Error())
-		logBuilder.WriteString(fmt.Sprintf("Request failed: %s\n", errorMsg))
-		finalizeExecutionStep(executionLogStep, false, errorMsg, logBuilder.String())
-		return executionLogStep, fmt.Errorf(errorMsg)
+		err = fmt.Errorf("HTTP request failed: connection error or timeout - %s", err.Error())
+		logBuilder.WriteString(fmt.Sprintf("Request failed: %s\n", err.Error()))
+		return executionLogStep, err
 	}
 
 	if response == nil {
 		err = fmt.Errorf("received nil response")
 		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
-		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
 		return executionLogStep, err
 	}
 
@@ -736,7 +921,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	if r.vm.logger != nil {
 		r.vm.logger.Debug("REST API response headers", "headers", response.Header())
 	}
-	logBuilder.WriteString(fmt.Sprintf("Response headers: %v\n", response.Header()))
+	logBuilder.WriteString(fmt.Sprintf("Response headers: %s\n", FormatAsJSON(response.Header())))
 
 	// Parse response and transform to standard format
 	var responseData map[string]interface{}
@@ -820,7 +1005,6 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	outputValue, err := structpb.NewValue(responseData)
 	if err != nil {
 		logBuilder.WriteString(fmt.Sprintf("Error converting response to protobuf: %s\n", err.Error()))
-		finalizeExecutionStep(executionLogStep, false, err.Error(), logBuilder.String())
 		return executionLogStep, err
 	}
 
@@ -836,9 +1020,6 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 	setNodeOutputData(r.CommonProcessor, stepID, responseData)
 
 	// Determine if the step was successful based on HTTP status code
-	var stepSuccess bool
-	var errorMessage string
-
 	if response.StatusCode() >= 400 {
 		stepSuccess = false
 		errorMessage = fmt.Sprintf("HTTP %d: %s", response.StatusCode(), http.StatusText(response.StatusCode()))
@@ -854,9 +1035,7 @@ func (r *RestProcessor) Execute(stepID string, node *avsproto.RestAPINode) (*avs
 		}
 	}
 
-	// Use shared function to finalize execution step
-	finalizeExecutionStep(executionLogStep, stepSuccess, errorMessage, logBuilder.String())
-
+	// Defer will finalize the execution step
 	return executionLogStep, nil
 }
 
@@ -914,12 +1093,12 @@ func buildStyledHTMLEmail(subject, body string) string {
 	}
 
 	content := strings.Join(paragraphs, "\n")
-	// Minimal, responsive-friendly dark theme matching Ava Protocol brand
+	// Minimal, responsive-friendly light theme
 	return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
 		"<title>" + html.EscapeString(subject) + "</title>" +
-		"<style>body{background:#141414;color:#D2D2D2;margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;}" +
-		".container{max-width:640px;margin:0 auto;padding:32px 24px;}h1,h2,h3,h4,h5,h6{color:#fff;margin-top:24px;margin-bottom:12px;}a{color:#A061FF;text-decoration:none;}" +
-		"p{margin:0 0 16px 0;line-height:1.6;}.divider{border-top:1px solid #333;margin:24px 0;}" +
+		"<style>body{background:#FFFFFF;color:#1F2937;margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;}" +
+		".container{max-width:640px;margin:0 auto;padding:32px 24px;}h1,h2,h3,h4,h5,h6{color:#111827;margin-top:24px;margin-bottom:12px;}a{color:#8B5CF6;text-decoration:none;}" +
+		"p{margin:0 0 16px 0;line-height:1.6;}.divider{border-top:1px solid #E5E7EB;margin:24px 0;}" +
 		"@media(max-width:480px){.container{padding:24px 16px;}h1,h2,h3{font-size:1.2rem;}}</style></head>" +
 		"<body><div class=\"container\">" + content + "</div></body></html>"
 }
@@ -1033,4 +1212,47 @@ func (r *RestProcessor) preprocessJSONWithVariableMapping(text string) string {
 		result = result[:start] + escapedReplacement + result[end+2:]
 	}
 	return result
+}
+
+// shortHex formats a hex string as 0xABCD…WXYZ for compact display. If too short, returns as-is.
+func shortHex(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return s
+	}
+	if strings.HasPrefix(s, "0x") {
+		if len(s) > 10 { // 0x + 4 prefix + … + 4 suffix
+			return s[:6] + "…" + s[len(s)-4:]
+		}
+		return s
+	}
+	if len(s) > 8 {
+		return s[:4] + "…" + s[len(s)-4:]
+	}
+	return s
+}
+
+// extractPreheaderFromSummaryText finds the first meaningful line after the
+// "Workflow Summary" heading and truncates it for email preheader usage.
+func extractPreheaderFromSummaryText(text, fallback string) string {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return fallback
+	}
+	lines := strings.Split(t, "\n")
+	for _, ln := range lines {
+		s := strings.TrimSpace(ln)
+		if s == "" {
+			continue
+		}
+		if strings.EqualFold(s, "Summary") {
+			continue
+		}
+		// Truncate to ~180 chars to fit preheader best practices
+		if len(s) > 180 {
+			return s[:177] + "..."
+		}
+		return s
+	}
+	return fallback
 }

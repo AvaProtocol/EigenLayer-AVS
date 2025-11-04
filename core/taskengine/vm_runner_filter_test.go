@@ -75,6 +75,13 @@ func TestFilter(t *testing.T) {
 		t.Errorf("Filter execution failed with error: %v", err)
 		return
 	}
+	// Added assertions for Execution_Step success/error states
+	if !step.Success {
+		t.Fatalf("expected step.Success=true, got false, error=%s", step.Error)
+	}
+	if step.Error != "" {
+		t.Fatalf("expected empty error for success case, got: %s", step.Error)
+	}
 
 	varname := vm.GetNodeNameAsVar("abc123")
 	vm.mu.Lock()

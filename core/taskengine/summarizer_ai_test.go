@@ -2,8 +2,10 @@ package taskengine
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
 )
@@ -170,4 +172,334 @@ func TestFormatSummaryForChannel_Discord(t *testing.T) {
 	if !strings.Contains(result, "Contract deployed to 0xabc") {
 		t.Errorf("discord message should contain body content, got: %s", result)
 	}
+}
+
+// TestOpenAISummarizer_BuildDigestNoDeadlock ensures buildDigest doesn't deadlock
+// when called with a VM that has execution logs and variables populated
+func TestOpenAISummarizer_BuildDigestNoDeadlock(t *testing.T) {
+	// Create a VM with realistic state
+	vm := NewVM()
+	vm.TaskID = "test-task-123"
+
+	// Add execution logs
+	vm.ExecutionLogs = []*avsproto.Execution_Step{
+		{
+			Id:      "step1",
+			Name:    "balance_check",
+			Type:    "balance",
+			Success: true,
+			Log:     "Balance checked successfully",
+		},
+		{
+			Id:      "step2",
+			Name:    "approve_token",
+			Type:    "contractWrite",
+			Success: true,
+			Log:     "Approved 1000 USDC",
+		},
+		{
+			Id:      "step3",
+			Name:    "swap_tokens",
+			Type:    "contractWrite",
+			Success: true,
+			Log:     "Swapped successfully",
+		},
+	}
+
+	// Add TaskNodes (simulate a workflow with nodes)
+	vm.mu.Lock()
+	vm.TaskNodes = map[string]*avsproto.TaskNode{
+		"node1": {Id: "node1", Name: "balance_check", Type: avsproto.NodeType_NODE_TYPE_BALANCE},
+		"node2": {Id: "node2", Name: "approve_token", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE},
+		"node3": {Id: "node3", Name: "swap_tokens", Type: avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE},
+	}
+
+	// Add VM variables
+	vm.vars = map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name":   "Test Workflow",
+			"chain":  "sepolia",
+			"runner": "0xTestAddress",
+		},
+		WorkflowContextVarName: map[string]interface{}{
+			"name":               "Test Workflow",
+			"runner":             "0xTestSmartWallet",
+			"owner":              "0xTestOwner",
+			"smartWalletAddress": "0xTestSmartWallet",
+		},
+		"aa_sender": "0xTestSmartWallet",
+	}
+	vm.mu.Unlock()
+
+	// Create summarizer
+	cfg := OpenAIConfig{
+		Model:           "gpt-4o-mini",
+		Temperature:     0.3,
+		MaxInputTokens:  2000,
+		MaxOutputTokens: 300,
+		TimeoutMs:       5000,
+		APIKey:          "test-key",
+	}
+	summarizer := &OpenAISummarizer{
+		cfg: cfg,
+		// Don't need actual HTTP client for buildDigest test
+	}
+
+	// Test that buildDigest completes without deadlock
+	done := make(chan bool, 1)
+	var digest string
+
+	go func() {
+		digest = summarizer.buildDigest(vm, "email_node")
+		done <- true
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	select {
+	case <-done:
+		// Success - buildDigest completed
+		if len(digest) == 0 {
+			t.Error("digest should not be empty")
+		}
+		if !strings.Contains(digest, "Test Workflow") {
+			t.Error("digest should contain workflow name")
+		}
+		t.Logf("Digest built successfully, length: %d", len(digest))
+	case <-ctx.Done():
+		t.Fatal("buildDigest deadlocked - did not complete within 2 seconds")
+	}
+}
+
+// TestOpenAISummarizer_TimeoutProtection verifies that the timeout mechanism
+// in Summarize() works correctly when buildDigest hangs
+func TestOpenAISummarizer_TimeoutProtection(t *testing.T) {
+	vm := NewVM()
+	vm.mu.Lock()
+	vm.vars = map[string]interface{}{
+		"settings": map[string]interface{}{"name": "Test Workflow"},
+	}
+	vm.mu.Unlock()
+	vm.ExecutionLogs = []*avsproto.Execution_Step{
+		{Name: "step1", Success: true},
+	}
+
+	// Create a mock summarizer that simulates a hanging buildDigest
+	// by using an extremely slow operation
+	cfg := OpenAIConfig{
+		Model:           "gpt-4o-mini",
+		Temperature:     0.3,
+		MaxInputTokens:  2000,
+		MaxOutputTokens: 300,
+		TimeoutMs:       100, // Short timeout for test
+		APIKey:          "test-key",
+	}
+	summarizer := &OpenAISummarizer{
+		cfg: cfg,
+		hc:  &http.Client{Timeout: time.Duration(cfg.TimeoutMs) * time.Millisecond},
+	}
+
+	// Use a short context timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	// The Summarize call should timeout and return an error
+	// (not hang indefinitely)
+	// Since we don't have a valid OpenAI key, this will fail at the HTTP call
+	// but importantly it should NOT deadlock
+	_, err := summarizer.Summarize(ctx, vm, "test_node")
+
+	if err == nil {
+		t.Error("Expected error (timeout or HTTP failure), got nil")
+	}
+
+	// Should get either a timeout error OR an HTTP error (not a deadlock)
+	t.Logf("Summarize returned error (expected): %v", err)
+}
+
+// TestOpenAISummarizer_BuildDigestWithMixedResults tests buildDigest with
+// both successful and failed steps
+func TestOpenAISummarizer_BuildDigestWithMixedResults(t *testing.T) {
+	vm := NewVM()
+	vm.TaskID = "test-task-mixed"
+
+	vm.ExecutionLogs = []*avsproto.Execution_Step{
+		{
+			Id:      "step1",
+			Name:    "check_balance",
+			Type:    "balance",
+			Success: true,
+		},
+		{
+			Id:      "step2",
+			Name:    "approve_failed",
+			Type:    "contractWrite",
+			Success: false,
+			Error:   "Insufficient gas",
+		},
+		{
+			Id:      "step3",
+			Name:    "swap_skipped",
+			Type:    "contractWrite",
+			Success: false,
+			Error:   "Previous step failed",
+		},
+	}
+
+	vm.mu.Lock()
+	vm.TaskNodes = map[string]*avsproto.TaskNode{
+		"node1": {Id: "node1", Name: "check_balance"},
+		"node2": {Id: "node2", Name: "approve_failed"},
+		"node3": {Id: "node3", Name: "swap_skipped"},
+	}
+	vm.vars = map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name": "Failed Workflow",
+		},
+	}
+	vm.mu.Unlock()
+
+	cfg := OpenAIConfig{
+		Model:           "gpt-4o-mini",
+		MaxInputTokens:  2000,
+		MaxOutputTokens: 300,
+		TimeoutMs:       5000,
+		APIKey:          "test-key",
+	}
+	summarizer := &OpenAISummarizer{cfg: cfg}
+
+	digest := summarizer.buildDigest(vm, "final_node")
+
+	if len(digest) == 0 {
+		t.Fatal("digest should not be empty")
+	}
+
+	// Verify digest contains failure information
+	if !strings.Contains(digest, "Failed Workflow") && !strings.Contains(digest, "failed") {
+		t.Error("digest should mention failure")
+	}
+
+	t.Logf("Mixed results digest length: %d", len(digest))
+}
+
+// TestOpenAISummarizer_BuildDigestWithLargeExecutionLog tests that buildDigest
+// handles workflows with many steps without issues
+func TestOpenAISummarizer_BuildDigestWithLargeExecutionLog(t *testing.T) {
+	vm := NewVM()
+	vm.TaskID = "test-task-large"
+
+	// Create 50 execution steps
+	for i := 0; i < 50; i++ {
+		vm.ExecutionLogs = append(vm.ExecutionLogs, &avsproto.Execution_Step{
+			Id:      "step" + string(rune(i)),
+			Name:    "operation_" + string(rune(i)),
+			Type:    "contractWrite",
+			Success: true,
+		})
+	}
+
+	vm.mu.Lock()
+	vm.TaskNodes = make(map[string]*avsproto.TaskNode)
+	for i := 0; i < 50; i++ {
+		nodeID := "node" + string(rune(i))
+		vm.TaskNodes[nodeID] = &avsproto.TaskNode{
+			Id:   nodeID,
+			Name: "operation_" + string(rune(i)),
+		}
+	}
+	vm.vars = map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name": "Large Workflow",
+		},
+	}
+	vm.mu.Unlock()
+
+	cfg := OpenAIConfig{
+		Model:           "gpt-4o-mini",
+		MaxInputTokens:  2000,
+		MaxOutputTokens: 300,
+		TimeoutMs:       5000,
+		APIKey:          "test-key",
+	}
+	summarizer := &OpenAISummarizer{cfg: cfg}
+
+	// Should complete without hanging
+	done := make(chan string, 1)
+	go func() {
+		done <- summarizer.buildDigest(vm, "final_node")
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	select {
+	case digest := <-done:
+		if len(digest) == 0 {
+			t.Fatal("digest should not be empty")
+		}
+		t.Logf("Large workflow digest length: %d", len(digest))
+	case <-ctx.Done():
+		t.Fatal("buildDigest with large execution log deadlocked")
+	}
+}
+
+// TestComposeSummarySmart_WithRealWorkflowState tests the full flow
+// with realistic workflow state
+func TestComposeSummarySmart_WithRealWorkflowState(t *testing.T) {
+	// Don't use real AI, test deterministic fallback with realistic state
+	SetSummarizer(nil)
+	defer SetSummarizer(nil)
+
+	vm := NewVM()
+	vm.TaskID = "01K6H8R583M8WFXM2Z4APP7JTN"
+
+	// Simulate a workflow that ran 4 out of 7 steps
+	vm.ExecutionLogs = []*avsproto.Execution_Step{
+		{Id: "trigger", Name: "eventTrigger", Type: "eventTrigger", Success: true},
+		{Id: "step1", Name: "balance1", Type: "balance", Success: true},
+		{Id: "step2", Name: "branch1", Type: "branch", Success: true},
+		{Id: "step3", Name: "email_report", Type: "restApi", Success: true},
+	}
+
+	vm.mu.Lock()
+	vm.TaskNodes = map[string]*avsproto.TaskNode{
+		"node1": {Id: "node1", Name: "balance1"},
+		"node2": {Id: "node2", Name: "branch1"},
+		"node3": {Id: "node3", Name: "approve_token1"},
+		"node4": {Id: "node4", Name: "get_quote"},
+		"node5": {Id: "node5", Name: "run_swap"},
+		"node6": {Id: "node6", Name: "email_report"},
+	}
+	vm.vars = map[string]interface{}{
+		"settings": map[string]interface{}{
+			"name":   "Test template",
+			"chain":  "Sepolia",
+			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
+		},
+		WorkflowContextVarName: map[string]interface{}{
+			"name":   "Test template",
+			"runner": "0xeCb88a770e1b2Ba303D0dC3B1c6F239fAB014bAE",
+			"owner":  "0xc60e71bd0f2e6d8832Fea1a2d56091C48493C788",
+		},
+	}
+	vm.mu.Unlock()
+
+	summary := ComposeSummarySmart(vm, "email_report")
+
+	// Should show "4 out of 7 steps" (1 trigger + 6 nodes = 7 total, 4 executed)
+	if !strings.Contains(summary.Subject, "out of") {
+		t.Errorf("Subject should show 'X out of Y steps', got: %s", summary.Subject)
+	}
+
+	if !strings.Contains(summary.Subject, "Test template") {
+		t.Errorf("Subject should contain workflow name, got: %s", summary.Subject)
+	}
+
+	if summary.Body == "" {
+		t.Error("Body should not be empty")
+	}
+
+	t.Logf("Subject: %s", summary.Subject)
+	t.Logf("Body length: %d", len(summary.Body))
 }

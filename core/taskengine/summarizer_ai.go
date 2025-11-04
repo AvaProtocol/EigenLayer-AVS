@@ -39,23 +39,47 @@ func SetSummarizer(s Summarizer) {
 // when used in notification nodes.
 func ComposeSummarySmart(vm *VM, currentStepName string) Summary {
 	if globalSummarizer == nil {
+		if vm != nil && vm.logger != nil {
+			vm.logger.Info("ComposeSummarySmart: no global summarizer, using deterministic")
+		}
 		return ComposeSummary(vm, currentStepName)
+	}
+
+	if vm != nil && vm.logger != nil {
+		vm.logger.Info("ComposeSummarySmart: starting AI summarization")
 	}
 
 	// Use a modest timeout to allow remote providers to respond
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if s, err := globalSummarizer.Summarize(ctx, vm, currentStepName); err == nil {
-		// Validate minimal fields; fall back if empty
-		if strings.TrimSpace(s.Subject) != "" && strings.TrimSpace(s.Body) != "" {
-			if len(strings.TrimSpace(s.Body)) < 40 {
-				return ComposeSummary(vm, currentStepName)
-			}
-			return s
+	s, err := globalSummarizer.Summarize(ctx, vm, currentStepName)
+	if err != nil {
+		if vm != nil && vm.logger != nil {
+			vm.logger.Warn("ComposeSummarySmart: AI summarization failed, falling back to deterministic", "error", err)
 		}
+		return ComposeSummary(vm, currentStepName)
 	}
-	return ComposeSummary(vm, currentStepName)
+
+	// Validate minimal fields; fall back if empty
+	if strings.TrimSpace(s.Subject) == "" || strings.TrimSpace(s.Body) == "" {
+		if vm != nil && vm.logger != nil {
+			vm.logger.Warn("ComposeSummarySmart: AI summary has empty fields, falling back to deterministic")
+		}
+		return ComposeSummary(vm, currentStepName)
+	}
+
+	if len(strings.TrimSpace(s.Body)) < 40 {
+		if vm != nil && vm.logger != nil {
+			vm.logger.Warn("ComposeSummarySmart: AI summary body too short, falling back to deterministic", "bodyLength", len(s.Body))
+		}
+		return ComposeSummary(vm, currentStepName)
+	}
+
+	if vm != nil && vm.logger != nil {
+		vm.logger.Info("ComposeSummarySmart: AI summarization successful", "subject", s.Subject, "bodyLength", len(s.Body))
+	}
+	return s
 }
 
 // OpenAIConfig holds runtime options for the OpenAI-based summarizer.
@@ -107,8 +131,28 @@ func (o *OpenAISummarizer) Summarize(ctx context.Context, vm *VM, currentStepNam
 		return Summary{}, errors.New("summarizer not initialized")
 	}
 
-	// Build compact digest with strict redaction and truncation
-	digest := o.buildDigest(vm, currentStepName)
+	if vm != nil && vm.logger != nil {
+		vm.logger.Info("OpenAISummarizer.Summarize: building digest")
+	}
+
+	// Build compact digest with strict redaction and truncation - add timeout protection
+	digestChan := make(chan string, 1)
+	go func() {
+		digestChan <- o.buildDigest(vm, currentStepName)
+	}()
+
+	var digest string
+	select {
+	case digest = <-digestChan:
+		if vm != nil && vm.logger != nil {
+			vm.logger.Info("OpenAISummarizer.Summarize: digest built successfully", "digestLength", len(digest))
+		}
+	case <-ctx.Done():
+		if vm != nil && vm.logger != nil {
+			vm.logger.Error("OpenAISummarizer.Summarize: buildDigest timed out", "error", ctx.Err())
+		}
+		return Summary{}, errors.New("digest build timeout")
+	}
 
 	// Prepare request payload for chat completions
 	// Use response_format json_object to force strict JSON output
@@ -121,15 +165,28 @@ func (o *OpenAISummarizer) Summarize(ctx context.Context, vm *VM, currentStepNam
 			{"role": "system", "content": `You create concise, professional workflow execution summaries for on-chain operations. Summaries are used for both email and chat channels (like Telegram).
 
 Your summary must include:
-1. Workflow name and total steps executed
+1. Workflow name and execution status (executed_steps out of total_steps)
 2. Smart wallet address that executed the transactions and the owner EOA address it belongs to
 3. Clear description of on-chain actions (contract address, method name, what happened)
 4. For swaps: token symbols and formatted amounts (e.g., "swapped 0.10 WETH → ~300 USDC via Uniswap")
 5. For approvals: token symbol, formatted amount, and spender/contract
+6. If the digest indicates a failure (Failed: true), you MUST explicitly state where it failed and the root cause:
+   - Include a clear line like: "Failure at {FailedStep}: {Reason}"
+   - If Reason is empty, look up the first step with success=false in Steps and use its Error field (first line)
+   - Keep the failure explanation short and factual, with the failed step name
+7. If multiple steps failed (some branches can allow later steps to succeed, then fail again), include a short bullet list of ALL failed steps:
+   - Start a new paragraph with "Failures:" then add one bullet (-) per failed step
+   - Bullet format: "- {step_name_or_id}: {first_line_of_error}"
+   - Use the 'failures' array from the digest when present; otherwise, derive from Steps where success=false
+   - Limit to the first 8 failed steps if there are many
+8. Include a bullet list of all SUCCESSFUL contractWrite operations (these change wallet state):
+   - Start a new paragraph with "Writes:" then add one bullet (-) per successful write
+   - Bullet format: "- {step_name_or_id}: {method} @ {contract_address}{simulated_suffix}"
+   - Use the 'writes' array from the digest. If writes[i].simulated is true, append " (Simulated)" to that bullet
 
 Use ONLY the provided data. Do not speculate. Redact secrets. Return strict JSON with keys: subject, body.
 
-Subject format: "{workflow_name}: {status} ({N} steps)" - Keep subject under 80 characters.
+Subject format: "{workflow_name}: {status} ({executed_steps} out of {total_steps} steps)" - Keep subject under 80 characters.
 Body: 1–2 short, focused paragraphs. Be concise since summaries may be used in chat channels.
 - First paragraph: Smart wallet, owner EOA, and key on-chain actions in human-readable terms
 - Second paragraph (if needed): Additional context or failure details
@@ -140,6 +197,11 @@ Formatting rules:
 - If the 'actions' array is empty or lacks recognizable actions, include: "No specific on-chain actions were recorded; this may have been a simulation or a step encountered an error."
 
 Prefer the normalized 'actions' array when present.
+
+IMPORTANT RULES:
+- Never declare the workflow failed unless the 'Failed' flag is true in the digest.
+- A Branch node is NOT a failure. It indicates which path was selected. Use 'branch_selections' and 'executed_steps/total_steps' to explain that some nodes were skipped due to branching when applicable.
+- If total_steps > executed_steps, mention that some nodes were skipped due to branching/conditions.
 `},
 			{"role": "user", "content": digest},
 		},
@@ -150,14 +212,33 @@ Prefer the normalized 'actions' array when present.
 		return Summary{}, err
 	}
 
+	if vm != nil && vm.logger != nil {
+		vm.logger.Info("OpenAISummarizer.Summarize: creating HTTP request to OpenAI")
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/chat/completions", buf)
 	if err != nil {
+		if vm != nil && vm.logger != nil {
+			vm.logger.Error("OpenAISummarizer.Summarize: failed to create request", "error", err)
+		}
 		return Summary{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+o.cfg.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 
+	if vm != nil && vm.logger != nil {
+		vm.logger.Info("OpenAISummarizer.Summarize: sending request to OpenAI API")
+	}
+
 	resp, err := o.hc.Do(req)
+
+	if vm != nil && vm.logger != nil {
+		if err != nil {
+			vm.logger.Error("OpenAISummarizer.Summarize: HTTP request failed", "error", err)
+		} else {
+			vm.logger.Info("OpenAISummarizer.Summarize: received response from OpenAI", "statusCode", resp.StatusCode)
+		}
+	}
 	if err != nil {
 		return Summary{}, err
 	}
@@ -211,6 +292,9 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 		lastName = safeName(currentStepName)
 	}
 
+	// Get total workflow steps count BEFORE locking (this function locks internally)
+	totalWorkflowSteps := getTotalWorkflowSteps(vm)
+
 	// Extract smart wallet and owner info
 	vm.mu.Lock()
 	smartWallet := ""
@@ -250,6 +334,8 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 
 	steps := make([]*avsproto.Execution_Step, len(vm.ExecutionLogs))
 	copy(steps, vm.ExecutionLogs)
+	executedSteps := len(steps)
+
 	vm.mu.Unlock()
 
 	// Select tail of steps up to maxSteps for compactness
@@ -275,35 +361,44 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 		Metadata     interface{}            `json:"metadata,omitempty"`
 	}
 	d := struct {
-		Workflow    string                   `json:"workflow"`
-		SmartWallet string                   `json:"smart_wallet,omitempty"`
-		OwnerEOA    string                   `json:"owner_eoa,omitempty"`
-		TotalSteps  int                      `json:"total_steps"`
-		Status      string                   `json:"status"`
-		Failed      bool                     `json:"failed"`
-		FailedStep  string                   `json:"failed_step,omitempty"`
-		Reason      string                   `json:"reason,omitempty"`
-		LastStep    string                   `json:"last_step"`
-		Steps       []stepDigest             `json:"steps"`
-		Actions     []map[string]interface{} `json:"actions,omitempty"`
+		Workflow         string                   `json:"workflow"`
+		SmartWallet      string                   `json:"smart_wallet,omitempty"`
+		OwnerEOA         string                   `json:"owner_eoa,omitempty"`
+		TotalSteps       int                      `json:"total_steps"`
+		ExecutedSteps    int                      `json:"executed_steps"`
+		SkippedSteps     int                      `json:"skipped_steps"`
+		Status           string                   `json:"status"`
+		Failed           bool                     `json:"failed"`
+		FailedStep       string                   `json:"failed_step,omitempty"`
+		Reason           string                   `json:"reason,omitempty"`
+		LastStep         string                   `json:"last_step"`
+		Steps            []stepDigest             `json:"steps"`
+		Actions          []map[string]interface{} `json:"actions,omitempty"`
+		Failures         []map[string]string      `json:"failures,omitempty"`
+		Writes           []map[string]interface{} `json:"writes,omitempty"`
+		BranchSelections []map[string]interface{} `json:"branch_selections,omitempty"`
 	}{
-		Workflow:    workflowName,
-		SmartWallet: smartWallet,
-		OwnerEOA:    ownerEOA,
-		TotalSteps:  len(steps),
-		Status:      "",
-		Failed:      failed,
-		FailedStep:  failedName,
-		Reason:      firstLine(failedReason),
-		LastStep:    lastName,
-		Steps:       make([]stepDigest, 0, len(steps)-start),
-		Actions:     make([]map[string]interface{}, 0, 4),
-	}
-
-	// If this is a single-node immediate VM, reflect at least one in-flight step
-	// even if the execution log hasn't been appended yet.
-	if d.TotalSteps == 0 && isSingleNodeImmediate(vm) {
-		d.TotalSteps = 1
+		Workflow:      workflowName,
+		SmartWallet:   smartWallet,
+		OwnerEOA:      ownerEOA,
+		TotalSteps:    totalWorkflowSteps,
+		ExecutedSteps: executedSteps,
+		SkippedSteps: func() int {
+			if totalWorkflowSteps > executedSteps {
+				return totalWorkflowSteps - executedSteps
+			}
+			return 0
+		}(),
+		Status:           "",
+		Failed:           failed,
+		FailedStep:       failedName,
+		Reason:           firstLine(failedReason),
+		LastStep:         lastName,
+		Steps:            make([]stepDigest, 0, len(steps)-start),
+		Actions:          make([]map[string]interface{}, 0, 4),
+		Failures:         make([]map[string]string, 0, 4),
+		Writes:           make([]map[string]interface{}, 0, 4),
+		BranchSelections: make([]map[string]interface{}, 0, 2),
 	}
 
 	for i := start; i < len(steps); i++ {
@@ -351,6 +446,50 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 							if mParams, ok := firstCall["methodParams"].([]interface{}); ok && len(mParams) > 0 {
 								sd.MethodParams = map[string]interface{}{
 									"params": mParams,
+								}
+							}
+							// Branch details
+							if strings.Contains(strings.ToUpper(st.GetType()), "BRANCH") {
+								if br := st.GetBranch(); br != nil && br.GetData() != nil {
+									if m, ok := br.GetData().AsInterface().(map[string]interface{}); ok {
+										entry := map[string]interface{}{"step": sd.Name}
+										if cid, ok := m["conditionId"].(string); ok {
+											entry["condition_id"] = cid
+											// infer if/else by suffix
+											if idx := strings.LastIndex(cid, "."); idx >= 0 && idx+1 < len(cid) {
+												switch cid[idx+1:] {
+												case "0":
+													entry["path"] = "if"
+												case "1":
+													entry["path"] = "else"
+												}
+											}
+										}
+										d.BranchSelections = append(d.BranchSelections, entry)
+									}
+								}
+							}
+							// Detect simulation flag when present on writes
+							if isWrite {
+								isSimulated := false
+								if sim, ok := cfgMap["isSimulated"]; ok {
+									switch v := sim.(type) {
+									case bool:
+										isSimulated = v
+									case string:
+										if strings.EqualFold(strings.TrimSpace(v), "true") {
+											isSimulated = true
+										}
+									}
+								}
+								// If this write succeeded, record it for summary
+								if st.GetSuccess() {
+									d.Writes = append(d.Writes, map[string]interface{}{
+										"step":      safeName(name),
+										"contract":  sd.ContractAddr,
+										"method":    sd.MethodName,
+										"simulated": isSimulated,
+									})
 								}
 							}
 						}
@@ -435,6 +574,18 @@ func (o *OpenAISummarizer) buildDigest(vm *VM, currentStepName string) string {
 		}
 
 		d.Steps = append(d.Steps, sd)
+		if !st.GetSuccess() {
+			// Capture all failures with compact fields for the model
+			failName := safeName(name)
+			failErr := firstLine(st.GetError())
+			if strings.TrimSpace(failErr) == "" {
+				failErr = "unknown error"
+			}
+			d.Failures = append(d.Failures, map[string]string{
+				"step":  failName,
+				"error": failErr,
+			})
+		}
 	}
 
 	// Set status text and notification-only flag

@@ -1381,12 +1381,12 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE, r.vm)
 
 	var log strings.Builder
+	log.WriteString(formatNodeExecutionLogHeader(s))
+
 	var err error
 
 	defer func() {
-		if err != nil {
-			finalizeExecutionStepWithError(s, false, err, log.String())
-		}
+		finalizeStep(s, err == nil, err, "", log.String())
 	}()
 
 	// Ensure aa_sender is available (node-type-specific prep)
@@ -1919,18 +1919,9 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	}
 
 	// Finalize step with computed success and error message
-	finalizeExecutionStep(s, stepSuccess, stepErrorMsg, log.String())
+	finalizeStep(s, stepSuccess, nil, stepErrorMsg, log.String())
 
 	return s, nil
-}
-
-// getOutputVarKeys returns the keys of a map as a slice of strings for debugging
-func getOutputVarKeys(m map[string]any) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }
 
 // convertMapToEventLog converts a log map from receipt to types.Log structure for event parsing

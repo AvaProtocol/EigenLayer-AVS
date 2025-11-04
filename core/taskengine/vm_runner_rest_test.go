@@ -994,7 +994,7 @@ func TestRestSummarizeTelegramHTML(t *testing.T) {
 func TestRestSummarizeSendGridInjection(t *testing.T) {
 	expectedWorkflowName := "Using sdk test wallet"
 
-	// Mock SendGrid endpoint; verify subject and content[0].value
+	// Mock SendGrid endpoint; verify subject and dynamicTemplateData
 	sendgridServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			t.Errorf("expected POST, got %s", r.Method)
@@ -1006,39 +1006,79 @@ func TestRestSummarizeSendGridInjection(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("failed to decode sendgrid request: %v", err)
 		}
+
+		// Verify template_id is injected
+		templateID, _ := req["template_id"].(string)
+		if templateID == "" {
+			t.Error("expected template_id to be set")
+		}
+		t.Logf("sendgrid template_id: %q", templateID)
+
+		// Verify subject at top level
 		subj, _ := req["subject"].(string)
-		// content should be array with first element value == expectedBody
-		content, _ := req["content"].([]interface{})
-		var body string
-		if len(content) > 0 {
-			if first, ok := content[0].(map[string]interface{}); ok {
-				body, _ = first["value"].(string)
-			}
+		t.Logf("sendgrid top-level subject: %q", subj)
+
+		// With new changes, top-level subject may be from original body (placeholder)
+		// The real subject is in dynamic_template_data
+		// So we check dynamic_template_data subject instead
+
+		// Verify dynamic_template_data in personalizations
+		pers, ok := req["personalizations"].([]interface{})
+		if !ok || len(pers) == 0 {
+			t.Fatal("expected personalizations array")
 		}
-		t.Logf("sendgrid composed subject: %q body: %q", subj, body)
-		// Verify subject contains workflow name and success indicator (could be AI-generated)
-		if !strings.Contains(subj, expectedWorkflowName) {
-			t.Errorf("subject missing workflow name. want to contain %q got %q", expectedWorkflowName, subj)
+
+		firstPers, ok := pers[0].(map[string]interface{})
+		if !ok {
+			t.Fatal("personalizations[0] should be an object")
 		}
-		if !strings.Contains(strings.ToLower(subj), "succeed") {
-			t.Errorf("subject missing success indicator. got %q", subj)
+
+		// With new changes, we no longer set subject in personalizations or top-level
+		// Subject comes from dynamic_template_data only (for template {{{subject}}})
+		// So we don't check for persSubj or top-level subject matching
+
+		// Check dynamic_template_data
+		dynamicData, ok := firstPers["dynamic_template_data"].(map[string]interface{})
+		if !ok {
+			t.Fatal("expected dynamic_template_data in personalizations[0]")
 		}
-		if len(content) == 0 {
-			t.Errorf("expected content array to be non-empty")
-		} else if first, ok := content[0].(map[string]interface{}); ok {
-			if val, _ := first["value"].(string); val != "" {
-				// Verify body was generated and replaced placeholder (could be AI-generated)
-				if val == "placeholder" {
-					t.Errorf("content[0].value was not replaced by summary, still shows placeholder")
-				}
-				if !strings.Contains(val, expectedWorkflowName) {
-					t.Errorf("content[0].value missing workflow name. want to contain %q got %q", expectedWorkflowName, val)
-				}
-			} else {
-				t.Errorf("content[0].value is empty")
-			}
-		} else {
-			t.Errorf("content[0] not an object")
+
+		// Verify new variables are present (updated for latest changes)
+		if ah, _ := dynamicData["analysisHtml"].(string); ah == "" {
+			t.Error("analysisHtml should not be empty")
+		}
+		if summary, _ := dynamicData["summary"].(string); summary == "" {
+			t.Error("summary should not be empty")
+		}
+		if statusHtml, _ := dynamicData["statusHtml"].(string); statusHtml == "" {
+			t.Error("statusHtml should not be empty")
+		}
+
+		// Verify subject in dynamic_template_data (new location for subject)
+		dtdSubject, _ := dynamicData["subject"].(string)
+		if dtdSubject == "" {
+			t.Error("subject in dynamic_template_data should not be empty")
+		}
+		// Verify subject contains workflow name and execution indicator
+		if !strings.Contains(dtdSubject, expectedWorkflowName) {
+			t.Errorf("dynamic_template_data subject missing workflow name. want to contain %q got %q", expectedWorkflowName, dtdSubject)
+		}
+		subjLower := strings.ToLower(dtdSubject)
+		if !strings.Contains(subjLower, "successfully") && !strings.Contains(subjLower, "partially") && !strings.Contains(subjLower, "failed") {
+			t.Errorf("subject missing execution status (successfully/partially/failed). got %q", dtdSubject)
+		}
+
+		// runner and eoaAddress keys should exist (may be empty strings depending on VM state)
+		if _, exists := dynamicData["runner"]; !exists {
+			t.Error("runner key missing in dynamic_template_data")
+		}
+		if _, exists := dynamicData["eoaAddress"]; !exists {
+			t.Error("eoaAddress key missing in dynamic_template_data")
+		}
+
+		// Verify no content array (should be removed for Dynamic Templates)
+		if _, hasContent := req["content"]; hasContent {
+			t.Error("content array should be removed when using Dynamic Templates")
 		}
 
 		w.Header().Set("Content-Type", "application/json")
