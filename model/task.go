@@ -83,11 +83,16 @@ func ValidateNodeNameForJavaScript(nodeName string) error {
 	return nil
 }
 
-// Generate a sorted uuid
-func GenerateTaskID() string {
-	taskId := ulid.Make()
+// GenerateID creates a new ULID in lowercase format for better readability
+// This is the centralized function for all ID generation (task IDs, execution IDs, node IDs, etc.)
+func GenerateID() string {
+	return strings.ToLower(ulid.Make().String())
+}
 
-	return taskId.String()
+// GenerateTaskID creates a new task ID using the centralized ID generation
+// Kept for backward compatibility, but internally uses GenerateID()
+func GenerateTaskID() string {
+	return GenerateID()
 }
 
 func NewTask() *Task {

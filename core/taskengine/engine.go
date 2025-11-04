@@ -1618,7 +1618,7 @@ func (n *Engine) AggregateChecksResultWithState(address string, payload *avsprot
 			// DO NOT delete pending key here - executor needs it to get pre-assigned index!
 			// The pending key will be deleted by executor after using the pre-assigned index
 		} else {
-			queueTaskData.ExecutionID = ulid.Make().String()
+			queueTaskData.ExecutionID = model.GenerateID()
 			n.logger.Debug("🆕 Creating new execution ID (no pending found)", "task_id", task.Id, "execution_id", queueTaskData.ExecutionID)
 			// ensure pending status exists so GetExecutionStatus returns PENDING until completion
 			_ = n.setExecutionStatusQueue(task, queueTaskData.ExecutionID)
@@ -2017,7 +2017,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 		// For non-blocking mode, pre-create execution ID, persist Pending status and queue marker,
 		// then instruct operator and return immediately (do NOT enqueue here).
 		if !payload.IsBlocking {
-			preExecID := ulid.Make().String()
+			preExecID := model.GenerateID()
 			n.logger.Debug("🔄 Pre-creating execution ID for non-blocking trigger", "task_id", task.Id, "execution_id", preExecID)
 
 			// Pre-assign atomic execution index for stable indexing
@@ -2084,7 +2084,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 	queueTaskData := QueueExecutionData{
 		TriggerType:    triggerData.Type,
 		TriggerOutput:  triggerData.Output,
-		ExecutionID:    ulid.Make().String(),
+		ExecutionID:    model.GenerateID(),
 		InputVariables: inputVariables,
 	}
 
@@ -2175,7 +2175,7 @@ func (n *Engine) TriggerTask(user *model.User, payload *avsproto.TriggerTaskReq)
 // The task definition is provided in the request, so no storage persistence is required.
 func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, nodes []*avsproto.TaskNode, edges []*avsproto.TaskEdge, inputVariables map[string]interface{}) (*avsproto.Execution, error) {
 	// Create a temporary task structure for simulation (not saved to storage)
-	simulationTaskID := ulid.Make().String()
+	simulationTaskID := model.GenerateID()
 
 	task := &model.Task{
 		Task: &avsproto.Task{
@@ -2261,7 +2261,7 @@ func (n *Engine) SimulateTask(user *model.User, trigger *avsproto.TaskTrigger, n
 	triggerEndTime := time.Now()
 
 	// Step 3: Create QueueExecutionData similar to regular task execution
-	simulationID := ulid.Make().String()
+	simulationID := model.GenerateID()
 
 	// Convert trigger output to proper protobuf structure using shared functions
 	var triggerOutputProto interface{}

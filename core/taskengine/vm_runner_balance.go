@@ -138,13 +138,16 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 	executionLogStep := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_BALANCE, v)
 
 	var logBuilder strings.Builder
-	logBuilder.WriteString(fmt.Sprintf("Executing Balance Node ID: %s at %s\n", stepID, time.Now()))
+	logBuilder.WriteString(formatNodeExecutionLogHeader(executionLogStep))
+
+	var err error
+	defer func() {
+		finalizeStep(executionLogStep, err == nil, err, "", logBuilder.String())
+	}()
 
 	config := nodeValue.Config
-	if config == nil {
-		err := fmt.Errorf("balance node config is nil")
-		executionLogStep.Error = err.Error()
-		executionLogStep.Success = false
+	if err = validateNodeConfig(config, "BalanceNode"); err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
 		return executionLogStep, err
 	}
 
@@ -196,46 +199,31 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 
 	// Validate inputs
 	if address == "" {
-		err := fmt.Errorf("address is required")
-		executionLogStep.Error = err.Error()
-		executionLogStep.Success = false
+		err = fmt.Errorf("address is required")
 		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
-		executionLogStep.Log = logBuilder.String()
 		return executionLogStep, err
 	}
 	if !common.IsHexAddress(address) {
-		err := fmt.Errorf("invalid ethereum address format: %s", address)
-		executionLogStep.Error = err.Error()
-		executionLogStep.Success = false
+		err = fmt.Errorf("invalid ethereum address format: %s", address)
 		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
-		executionLogStep.Log = logBuilder.String()
 		return executionLogStep, err
 	}
 	// Validate minUsdValueCents: must be 0 (no filter) or >= 1 (1 cent minimum)
 	if config.MinUsdValueCents < 0 {
-		err := fmt.Errorf("minUsdValue must be non-negative, got %d cents", config.MinUsdValueCents)
-		executionLogStep.Error = err.Error()
-		executionLogStep.Success = false
+		err = fmt.Errorf("minUsdValue must be non-negative, got %d cents", config.MinUsdValueCents)
 		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
-		executionLogStep.Log = logBuilder.String()
 		return executionLogStep, err
 	}
 	if chain == "" {
-		err := fmt.Errorf("chain is required")
-		executionLogStep.Error = err.Error()
-		executionLogStep.Success = false
+		err = fmt.Errorf("chain is required")
 		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
-		executionLogStep.Log = logBuilder.String()
 		return executionLogStep, err
 	}
 
 	// Normalize chain to Moralis format
 	moralisChain, err := normalizeChainID(chain)
 	if err != nil {
-		executionLogStep.Error = err.Error()
-		executionLogStep.Success = false
 		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
-		executionLogStep.Log = logBuilder.String()
 		return executionLogStep, err
 	}
 
@@ -245,11 +233,8 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 		moralisAPIKey = macroSecrets["moralis_api_key"]
 	}
 	if moralisAPIKey == "" {
-		err := fmt.Errorf("moralis API key is not configured in macros.secrets")
-		executionLogStep.Error = err.Error()
-		executionLogStep.Success = false
+		err = fmt.Errorf("moralis API key is not configured in macros.secrets")
 		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
-		executionLogStep.Log = logBuilder.String()
 		return executionLogStep, err
 	}
 
@@ -276,10 +261,7 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 	balances, err := v.fetchMoralisBalancesWithFiltering(address, moralisChain, moralisAPIKey, config)
 	if err != nil {
 		err = fmt.Errorf("failed to fetch balances: %w", err)
-		executionLogStep.Error = err.Error()
-		executionLogStep.Success = false
 		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
-		executionLogStep.Log = logBuilder.String()
 		return executionLogStep, err
 	}
 
@@ -289,10 +271,7 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 	balancesValue, err := structpb.NewValue(balances)
 	if err != nil {
 		err = fmt.Errorf("failed to convert balances to protobuf value: %w", err)
-		executionLogStep.Error = err.Error()
-		executionLogStep.Success = false
 		logBuilder.WriteString(fmt.Sprintf("Error: %v\n", err))
-		executionLogStep.Log = logBuilder.String()
 		return executionLogStep, err
 	}
 
@@ -309,8 +288,8 @@ func (v *VM) runBalance(stepID string, nodeValue *avsproto.BalanceNode) (*avspro
 	processor := &CommonProcessor{vm: v}
 	setNodeOutputData(processor, stepID, balances)
 
-	// Finalize execution step
-	finalizeExecutionStep(executionLogStep, true, "", logBuilder.String())
+	// Finalize execution step (success)
+	finalizeStep(executionLogStep, true, nil, "", logBuilder.String())
 
 	return executionLogStep, nil
 }

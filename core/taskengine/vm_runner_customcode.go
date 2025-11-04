@@ -240,36 +240,36 @@ func containsReturnStatement(code string) bool {
 
 func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*avsproto.Execution_Step, error) {
 	// Use shared function to create execution step
-	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_CUSTOM_CODE, r.vm)
+	executionStep := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_CUSTOM_CODE, r.vm)
 
 	var sb strings.Builder
-	sb.WriteString("Execute Custom Code: ")
-	sb.WriteString(stepID)
+	sb.WriteString(formatNodeExecutionLogHeader(executionStep))
+
+	var err error
+	defer func() {
+		finalizeStep(executionStep, err == nil, err, "", sb.String())
+	}()
 
 	// Get configuration from Config message (static configuration)
-	if node.Config == nil {
-		err := fmt.Errorf("CustomCodeNode Config is nil")
+	if err = validateNodeConfig(node.Config, "CustomCodeNode"); err != nil {
 		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		finalizeExecutionStepWithError(s, false, err, sb.String())
-		return s, err
+		return executionStep, err
 	}
 
 	langStr := node.Config.Lang.String()
 	sourceStr := node.Config.Source
 
 	if sourceStr == "" {
-		err := NewMissingRequiredFieldError("source")
+		err = NewMissingRequiredFieldError("source")
 		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		finalizeExecutionStepWithError(s, false, err, sb.String())
-		return s, err
+		return executionStep, err
 	}
 
 	// LANGUAGE ENFORCEMENT: CustomCodeNode uses JavaScript
 	// Using centralized ValidateInputByLanguage for consistency (includes size check)
-	if err := ValidateInputByLanguage(sourceStr, avsproto.Lang_LANG_JAVASCRIPT); err != nil {
+	if err = ValidateInputByLanguage(sourceStr, avsproto.Lang_LANG_JAVASCRIPT); err != nil {
 		sb.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		finalizeExecutionStepWithError(s, false, err, sb.String())
-		return s, err
+		return executionStep, err
 	}
 
 	// Preprocess source for template variables
@@ -288,8 +288,8 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 				r.vm.logger.Error("failed to set variable in JS VM", "key", key, "error", err)
 			}
 			sb.WriteString(fmt.Sprintf("\nError setting JS variable '%s': %v", key, err))
-			finalizeExecutionStepWithError(s, false, fmt.Errorf("failed to set JS variable '%s': %w", key, err), sb.String())
-			return s, fmt.Errorf("failed to set JS variable '%s': %w", key, err)
+			err = fmt.Errorf("failed to set JS variable '%s': %w", key, err)
+			return executionStep, err
 		}
 	}
 	r.vm.mu.Unlock()
@@ -311,8 +311,8 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	result, err := r.jsvm.RunString(codeToExecute)
 	if err != nil {
 		sb.WriteString(fmt.Sprintf("\nError executing script: %s", err.Error()))
-		finalizeExecutionStepWithError(s, false, err, sb.String())
-		return s, err
+		err = fmt.Errorf("failed to execute script: %w", err)
+		return executionStep, err
 	}
 
 	// Convert the result to a protobuf struct
@@ -320,11 +320,11 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	outputStruct, err := structpb.NewValue(exportedVal)
 	if err != nil {
 		sb.WriteString(fmt.Sprintf("\nError converting execution result to Value: %s", err.Error()))
-		finalizeExecutionStepWithError(s, false, err, sb.String())
-		return s, err
+		err = fmt.Errorf("failed to convert execution result to Value: %w", err)
+		return executionStep, err
 	}
 
-	s.OutputData = &avsproto.Execution_Step_CustomCode{
+	executionStep.OutputData = &avsproto.Execution_Step_CustomCode{
 		CustomCode: &avsproto.CustomCodeNode_Output{
 			Data: outputStruct,
 		},
@@ -336,7 +336,7 @@ func (r *JSProcessor) Execute(stepID string, node *avsproto.CustomCodeNode) (*av
 	sb.WriteString(fmt.Sprintf("\nExecution result: %v", exportedVal))
 
 	// Use shared function to finalize execution step with success
-	finalizeExecutionStep(s, true, "", sb.String())
+	finalizeStep(executionStep, true, nil, "", sb.String())
 
-	return s, nil
+	return executionStep, nil
 }

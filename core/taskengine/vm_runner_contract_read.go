@@ -385,18 +385,17 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 	// Use shared function to create execution step
 	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_CONTRACT_READ, r.vm)
 
+	var log strings.Builder
+	log.WriteString(formatNodeExecutionLogHeader(s))
+
 	var err error
 	defer func() {
-		if err != nil {
-			finalizeExecutionStepWithError(s, false, err, "")
-		}
+		finalizeStep(s, err == nil, err, "", log.String())
 	}()
 
-	var log strings.Builder
-
 	// Get configuration from node config
-	if node.Config == nil {
-		err = fmt.Errorf("missing contract read configuration")
+	if err = validateNodeConfig(node.Config, "ContractReadNode"); err != nil {
+		log.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
 		return s, err
 	}
 
@@ -775,7 +774,7 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 
 	// Determine step success from method results: any method with Success == false marks step as failed
 	stepSuccess, stepErrorMsg := computeReadStepSuccess(results)
-	finalizeExecutionStep(s, stepSuccess, stepErrorMsg, log.String())
+	finalizeStep(s, stepSuccess, nil, stepErrorMsg, log.String())
 
 	return s, nil
 }

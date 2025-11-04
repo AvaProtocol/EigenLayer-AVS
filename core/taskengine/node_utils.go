@@ -2,6 +2,7 @@ package taskengine
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/types/known/structpb"
@@ -134,29 +135,64 @@ func setNodeOutputData(processor *CommonProcessor, stepID string, outputData int
 	processor.SetOutputVarForStep(stepID, outputData)
 }
 
-// finalizeExecutionStep sets the final execution step properties
-// This function consolidates the common logic used across node runners
-func finalizeExecutionStep(step *avsproto.Execution_Step, success bool, errorMsg string, logContent string) {
+// finalizeStep is the single unified finalizer for both success and error paths.
+// It sets end time, success flag, error message/code (when err != nil), and log content.
+func finalizeStep(step *avsproto.Execution_Step, success bool, err error, errorMessage string, logContent string) {
+	// If no explicit error provided but step failed and an errorMessage exists, wrap it
+	if err == nil && !success && strings.TrimSpace(errorMessage) != "" {
+		err = fmt.Errorf("%s", errorMessage)
+	}
+
 	step.EndAt = time.Now().UnixMilli()
 	step.Success = success
-	step.Error = errorMsg
+	if err != nil {
+		step.Error = err.Error()
+		step.ErrorCode = GetErrorCode(err)
+	} else {
+		// Ensure error is cleared on success/falsy err
+		if step.Error != "" {
+			step.Error = ""
+		}
+	}
 	step.Log = logContent
 }
 
-// finalizeExecutionStepWithError finalizes an execution step and includes error code
-func finalizeExecutionStepWithError(step *avsproto.Execution_Step, success bool, err error, logContent string) {
-	step.EndAt = time.Now().UnixMilli()
-	step.Success = success
+// errFromString wraps a non-empty error message into an error; returns nil when empty
+func errFromString(msg string) error {
+	if strings.TrimSpace(msg) == "" {
+		return nil
+	}
+	return fmt.Errorf("%s", msg)
+}
 
-	if err != nil {
-		step.Error = err.Error()
+// formatNodeExecutionLogHeader generates a standardized log header for node execution
+// This centralizes the log format across all node runners for consistency
+// Returns a formatted string like "Executing REST API 'fetch_data' (01k70sm85e929fqhdbh64nnm28)"
+func formatNodeExecutionLogHeader(step *avsproto.Execution_Step) string {
+	nodeTypeName := step.Type
+	nodeName := step.Name
+	nodeID := strings.ToLower(step.Id) // Convert to lowercase for better readability
 
-		// Set error code directly for consistency with runNodeImmediately
-		errorCode := GetErrorCode(err)
-		step.ErrorCode = errorCode
+	// Use node name if available, otherwise fall back to ID
+	displayName := nodeName
+	if displayName == "" || displayName == "unknown" {
+		displayName = nodeID
+		// If we only have ID, don't show it twice
+		return fmt.Sprintf("Executing %s '%s'\n", nodeTypeName, displayName)
 	}
 
-	step.Log = logContent
+	// Show both name (for readability) and ID (for reference)
+	return fmt.Sprintf("Executing %s '%s' (%s)\n", nodeTypeName, displayName, nodeID)
+}
+
+// Checks if a node's config is nil and returns a standardized error
+// This centralizes the common config validation pattern used across all node runners
+// Usage: if err := validateNodeConfig(node.Config, "NodeTypeName"); err != nil { return err }
+func validateNodeConfig(config interface{}, nodeTypeName string) error {
+	if config == nil {
+		return fmt.Errorf("%s Config is nil", nodeTypeName)
+	}
+	return nil
 }
 
 // ---- Shared helpers for determining step success across runners ----

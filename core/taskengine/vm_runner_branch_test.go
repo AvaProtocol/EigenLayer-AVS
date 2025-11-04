@@ -1032,12 +1032,12 @@ func TestBranchNodeSecurity(t *testing.T) {
 			}
 
 			logContent := result.Log
-			if !strings.Contains(logContent, "Dangerous expression detected") {
-				t.Errorf("Expected log to contain security warning but got: %s", logContent)
+			if !strings.Contains(logContent, "security validation failed") {
+				t.Errorf("Expected log to contain security validation failure but got: %s", logContent)
 			}
 
-			if !strings.Contains(logContent, "failed security validation") {
-				t.Errorf("Expected log to contain validation failure message but got: %s", logContent)
+			if !strings.Contains(logContent, "Error:") {
+				t.Errorf("Expected log to contain error details but got: %s", logContent)
 			}
 		})
 	}
@@ -1127,7 +1127,7 @@ func TestBranchNodeSafety(t *testing.T) {
 			// Check that the log does NOT contain security warnings
 			if result.Log != "" {
 				logContent := result.Log
-				if strings.Contains(logContent, "Dangerous expression detected") {
+				if strings.Contains(logContent, "security validation failed") {
 					t.Errorf("Expected log to NOT contain security warning for safe expression but got: %s", logContent)
 				}
 			}

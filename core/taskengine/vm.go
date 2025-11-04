@@ -13,7 +13,6 @@ import (
 	"github.com/dop251/goja"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/oklog/ulid/v2"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/core/config"
@@ -2309,7 +2308,7 @@ func (v *VM) RunNodeWithInputs(node *avsproto.TaskNode, inputVariables map[strin
 
 func CreateNodeFromType(nodeType string, config map[string]interface{}, nodeID string) (*avsproto.TaskNode, error) {
 	if nodeID == "" {
-		nodeID = "node_" + ulid.Make().String()
+		nodeID = "node_" + model.GenerateID()
 	}
 	node := &avsproto.TaskNode{Id: nodeID, Name: "singleNodeExecution_" + nodeType}
 
@@ -3066,10 +3065,26 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int, ExecutionResultStatus)
 	var errorMessage string
 
 	if failedCount == 0 {
-		// All steps succeeded
-		resultStatus = ExecutionSuccess
-		success = true
-		errorMessage = ""
+		// All executed steps succeeded. However, if not all workflow steps executed
+		// (e.g., due to branch selections or conditional skips), report PARTIAL_SUCCESS
+		// to reflect that the workflow did not traverse all configured nodes.
+		executedCount := len(v.ExecutionLogs)
+		totalWorkflowSteps := 1 + len(v.TaskNodes) // 1 trigger + all nodes
+		if v.GetTaskId() == "" && len(v.TaskNodes) == 1 {
+			// single-node immediate execution
+			totalWorkflowSteps = 1
+		}
+
+		if executedCount < totalWorkflowSteps {
+			resultStatus = ExecutionPartialSuccess
+			success = false // do not mark full success when nodes were skipped
+			errorMessage = fmt.Sprintf("Partial execution: %d out of %d steps executed (branch/conditional path)", executedCount, totalWorkflowSteps)
+		} else {
+			// All steps that exist in the workflow executed and succeeded
+			resultStatus = ExecutionSuccess
+			success = true
+			errorMessage = ""
+		}
 	} else if successfulCount > 0 {
 		// Mixed results: some succeeded, some failed (partial success)
 		resultStatus = ExecutionPartialSuccess
@@ -4262,7 +4277,7 @@ func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsp
 	if node.Config == nil {
 		err := fmt.Errorf("LoopNode Config is nil")
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		finalizeExecutionStep(s, false, err.Error(), log.String())
+		finalizeStep(s, false, nil, err.Error(), log.String())
 		return s, err
 	}
 
@@ -4291,7 +4306,7 @@ func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsp
 	if !exists {
 		err := fmt.Errorf("input variable %s not found", inputVarName)
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		finalizeExecutionStep(s, false, err.Error(), log.String())
+		finalizeStep(s, false, nil, err.Error(), log.String())
 		return s, err
 	}
 
@@ -4319,20 +4334,20 @@ func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsp
 					// Data field exists but is not an array
 					err := fmt.Errorf("input variable %s.data is type %T, expected array", inputVarName, dataValue)
 					log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-					finalizeExecutionStep(s, false, err.Error(), log.String())
+					finalizeStep(s, false, nil, err.Error(), log.String())
 					return s, err
 				}
 			} else {
 				// No data field found
 				err := fmt.Errorf("input variable %s is not an array and has no 'data' field (available keys: %v)", inputVarName, GetMapKeys(dataMap))
 				log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-				finalizeExecutionStep(s, false, err.Error(), log.String())
+				finalizeStep(s, false, nil, err.Error(), log.String())
 				return s, err
 			}
 		} else {
 			err := fmt.Errorf("input variable %s is type %T, expected array or object with 'data' field", inputVarName, inputVar)
 			log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-			finalizeExecutionStep(s, false, err.Error(), log.String())
+			finalizeStep(s, false, nil, err.Error(), log.String())
 			return s, err
 		}
 	}
@@ -4539,11 +4554,11 @@ func (v *VM) executeLoopWithQueue(stepID string, node *avsproto.LoopNode) (*avsp
 	}
 
 	if !success && firstError != nil {
-		finalizeExecutionStep(s, false, firstError.Error(), log.String())
+		finalizeStep(s, false, nil, firstError.Error(), log.String())
 		return s, firstError
 	}
 
-	finalizeExecutionStep(s, true, "", log.String())
+	finalizeStep(s, true, nil, "", log.String())
 	return s, nil
 }
 

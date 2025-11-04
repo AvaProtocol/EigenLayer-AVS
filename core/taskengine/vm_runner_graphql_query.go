@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/AvaProtocol/EigenLayer-AVS/pkg/graphql"
 	avsproto "github.com/AvaProtocol/EigenLayer-AVS/protobuf"
@@ -38,16 +37,17 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	// Use shared function to create execution step
 	step := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_GRAPHQL_QUERY, r.vm)
 
+	// Add standardized log header
+	r.sb.WriteString(formatNodeExecutionLogHeader(step))
+
 	var err error
 	defer func() {
-		if err != nil {
-			finalizeExecutionStep(step, false, err.Error(), r.sb.String())
-		}
+		finalizeStep(step, err == nil, err, "", r.sb.String())
 	}()
 
 	// Get configuration from Config message (static configuration)
-	if node.Config == nil {
-		err = fmt.Errorf("GraphQLQueryNode Config is nil")
+	if err = validateNodeConfig(node.Config, "GraphQLQueryNode"); err != nil {
+		r.sb.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
 		return step, nil, err
 	}
 
@@ -95,7 +95,7 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	}
 
 	var resp map[string]any
-	r.sb.WriteString(fmt.Sprintf("Execute GraphQL %s at %s", u.Hostname(), time.Now()))
+	r.sb.WriteString(fmt.Sprintf("Querying endpoint: %s\n", u.Hostname()))
 	query := graphql.NewRequest(queryStr)
 
 	// Add variables to the GraphQL request
@@ -133,7 +133,7 @@ func (r *GraphqlQueryProcessor) Execute(stepID string, node *avsproto.GraphQLQue
 	setNodeOutputData(r.CommonProcessor, stepID, resp)
 
 	// Use shared function to finalize execution step with success
-	finalizeExecutionStep(step, true, "", r.sb.String())
+	finalizeStep(step, true, nil, "", r.sb.String())
 
 	return step, resp, err
 }

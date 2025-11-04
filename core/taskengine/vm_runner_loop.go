@@ -47,25 +47,16 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	s := createNodeExecutionStep(stepID, avsproto.NodeType_NODE_TYPE_LOOP, r.vm)
 
 	var log strings.Builder
-	log.WriteString(fmt.Sprintf("Start loop execution at %s", time.Now()))
+	log.WriteString(formatNodeExecutionLogHeader(s))
 
-	// Debug logging
-	if r.vm.logger != nil {
-		r.vm.logger.Info("🔄 LoopProcessor.Execute: Starting",
-			"stepID", stepID,
-			"node_exists", node != nil,
-			"execution_step_created", s != nil,
-			"execution_step_config_exists", s != nil && s.Config != nil)
-	}
+	var err error
+	defer func() {
+		finalizeStep(s, err == nil, err, "", log.String())
+	}()
 
 	// Get configuration from node.Config (new architecture)
-	if node.Config == nil {
-		err := fmt.Errorf("LoopNode Config is nil")
+	if err = validateNodeConfig(node.Config, "LoopNode"); err != nil {
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		if r.vm.logger != nil {
-			r.vm.logger.Error("🚫 LoopProcessor.Execute: Config is nil", "stepID", stepID)
-		}
-		finalizeExecutionStep(s, false, err.Error(), log.String())
 		return s, err
 	}
 
@@ -84,21 +75,13 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	}
 
 	if inputNodeName == "" {
-		err := NewMissingRequiredFieldError("inputNodeName")
+		err = NewMissingRequiredFieldError("inputNodeName")
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		if r.vm.logger != nil {
-			r.vm.logger.Error("🚫 LoopProcessor.Execute: Missing required config", "stepID", stepID, "inputNodeName", inputNodeName)
-		}
-		finalizeExecutionStep(s, false, err.Error(), log.String())
 		return s, err
 	}
 	if iterVal == "" {
-		err := NewMissingRequiredFieldError("iterVal")
+		err = NewMissingRequiredFieldError("iterVal")
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		if r.vm.logger != nil {
-			r.vm.logger.Error("🚫 LoopProcessor.Execute: Missing required config", "stepID", stepID, "iterVal", iterVal)
-		}
-		finalizeExecutionStep(s, false, err.Error(), log.String())
 		return s, err
 	}
 
@@ -125,9 +108,8 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 	log.WriteString(fmt.Sprintf("\nLoop configuration - input_node_name: %s, input_var: %s, iter_val: %s, iter_key: %s", inputNodeName, inputVarName, iterVal, iterKey))
 
 	if !exists {
-		err := fmt.Errorf("input variable %s not found (tried both as node name and direct variable)", inputVarName)
+		err = fmt.Errorf("input variable %s not found (tried both as node name and direct variable)", inputVarName)
 		log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-		finalizeExecutionStep(s, false, err.Error(), log.String())
 		return s, err
 	}
 
@@ -156,22 +138,19 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 					log.WriteString(fmt.Sprintf("\nExtracted []any array from 'data' field: %d items", len(inputArray)))
 				} else {
 					// Data field exists but is not an array
-					err := fmt.Errorf("input variable %s.data is type %T, expected array", inputVarName, dataValue)
+					err = fmt.Errorf("input variable %s.data is type %T, expected array", inputVarName, dataValue)
 					log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-					finalizeExecutionStep(s, false, err.Error(), log.String())
 					return s, err
 				}
 			} else {
 				// No data field found
-				err := fmt.Errorf("input variable %s is not an array and has no 'data' field (available keys: %v)", inputVarName, GetMapKeys(dataMap))
+				err = fmt.Errorf("input variable %s is not an array and has no 'data' field (available keys: %v)", inputVarName, GetMapKeys(dataMap))
 				log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-				finalizeExecutionStep(s, false, err.Error(), log.String())
 				return s, err
 			}
 		} else {
-			err := fmt.Errorf("input variable %s is type %T, expected array or object with 'data' field", inputVarName, inputVar)
+			err = fmt.Errorf("input variable %s is type %T, expected array or object with 'data' field", inputVarName, inputVar)
 			log.WriteString(fmt.Sprintf("\nError: %s", err.Error()))
-			finalizeExecutionStep(s, false, err.Error(), log.String())
 			return s, err
 		}
 	}
@@ -199,7 +178,6 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 			Loop: loopOutput,
 		}
 		log.WriteString("\nEmpty array input - returning empty results")
-		finalizeExecutionStep(s, true, "", log.String())
 		return s, nil
 	}
 
@@ -338,7 +316,7 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 		}
 	}
 
-	_, err := json.Marshal(jsonSerializableResults)
+	_, err = json.Marshal(jsonSerializableResults)
 	if err == nil {
 		// Convert results to protobuf Value
 		dataValue, protoErr := structpb.NewValue(jsonSerializableResults)
@@ -419,14 +397,12 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 		}
 	}
 
-	log.WriteString(fmt.Sprintf("\nCompleted loop execution at %s", time.Now()))
-
 	// Use shared function to finalize execution step
 	var errorMsg string
 	if !success && firstError != nil {
 		errorMsg = firstError.Error()
 	}
-	finalizeExecutionStep(s, success, errorMsg, log.String())
+	finalizeStep(s, success, nil, errorMsg, log.String())
 
 	if !success && firstError != nil {
 		return s, firstError

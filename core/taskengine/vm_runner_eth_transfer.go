@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -39,11 +40,18 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	// Initially assume failure until we succeed
 	executionLog.Success = false
 
+	var logBuilder strings.Builder
+	logBuilder.WriteString(formatNodeExecutionLogHeader(executionLog))
+
+	var err error
+	defer func() {
+		finalizeStep(executionLog, err == nil, err, "", logBuilder.String())
+	}()
+
 	// Get configuration
 	config := node.GetConfig()
-	if config == nil {
-		err := fmt.Errorf("ETHTransferNode config is nil")
-		finalizeExecutionStep(executionLog, false, err.Error(), "")
+	if err = validateNodeConfig(config, "ETHTransferNode"); err != nil {
+		logBuilder.WriteString(fmt.Sprintf("Error: %s\n", err.Error()))
 		return executionLog, err
 	}
 
@@ -52,29 +60,25 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	amountStr := p.vm.preprocessTextWithVariableMapping(config.GetAmount())
 
 	if destination == "" {
-		err := fmt.Errorf("destination address is required for ETH transfer")
-		finalizeExecutionStep(executionLog, false, err.Error(), "")
+		err = fmt.Errorf("destination address is required for ETH transfer")
 		return executionLog, err
 	}
 
 	if amountStr == "" {
-		err := fmt.Errorf("amount is required for ETH transfer")
-		finalizeExecutionStep(executionLog, false, err.Error(), "")
+		err = fmt.Errorf("amount is required for ETH transfer")
 		return executionLog, err
 	}
 
 	// Validate destination address
 	if !common.IsHexAddress(destination) {
-		err := fmt.Errorf("invalid destination address: %s", destination)
-		finalizeExecutionStep(executionLog, false, err.Error(), "")
+		err = fmt.Errorf("invalid destination address: %s", destination)
 		return executionLog, err
 	}
 
 	// Validate amount (assuming it's in wei)
 	_, ok := new(big.Int).SetString(amountStr, 10)
 	if !ok {
-		err := fmt.Errorf("invalid amount: %s", amountStr)
-		finalizeExecutionStep(executionLog, false, err.Error(), "")
+		err = fmt.Errorf("invalid amount: %s", amountStr)
 		return executionLog, err
 	}
 
@@ -137,7 +141,7 @@ func (p *ETHTransferProcessor) Execute(stepID string, node *avsproto.ETHTransfer
 	logMessage := fmt.Sprintf("Simulated ETH transfer of %s wei to %s (tx: %s)", amountStr, destination, txHash)
 
 	// Use shared function to finalize execution step
-	finalizeExecutionStep(executionLog, true, "", logMessage)
+	finalizeStep(executionLog, true, nil, "", logMessage)
 
 	return executionLog, nil
 }
@@ -152,7 +156,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	amount, ok := new(big.Int).SetString(amountStr, 10)
 	if !ok {
 		err := fmt.Errorf("failed to parse amount: %s", amountStr)
-		finalizeExecutionStep(executionLog, false, err.Error(), "")
+		finalizeStep(executionLog, false, nil, err.Error(), "")
 		return executionLog, err
 	}
 
@@ -174,7 +178,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	)
 	if err != nil {
 		p.vm.logger.Error("Failed to pack smart wallet execute calldata for ETH transfer", "error", err)
-		finalizeExecutionStep(executionLog, false, fmt.Sprintf("Failed to pack execute calldata: %v", err), "")
+		finalizeStep(executionLog, false, nil, fmt.Sprintf("Failed to pack execute calldata: %v", err), "")
 		return executionLog, err
 	}
 
@@ -222,7 +226,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 			"amount", amountStr)
 
 		// Return error result - deployed workflows must fail if bundler is unavailable
-		finalizeExecutionStep(executionLog, false, fmt.Sprintf("Bundler failed - ETH transfer UserOp transaction could not be sent: %v", err), "")
+		finalizeStep(executionLog, false, nil, fmt.Sprintf("Bundler failed - ETH transfer UserOp transaction could not be sent: %v", err), "")
 		return executionLog, err
 	}
 
@@ -303,7 +307,7 @@ func (p *ETHTransferProcessor) executeRealETHTransfer(stepID, destination, amoun
 	}
 
 	// Use shared function to finalize execution step
-	finalizeExecutionStep(executionLog, true, "", logMessage)
+	finalizeStep(executionLog, true, nil, "", logMessage)
 
 	return executionLog, nil
 }
