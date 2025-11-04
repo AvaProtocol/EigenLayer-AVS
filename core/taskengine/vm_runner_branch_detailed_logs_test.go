@@ -84,9 +84,11 @@ func TestBranchNode_DetailedExecutionLogs(t *testing.T) {
 	assert.Contains(t, log, "Executing NODE_TYPE_BRANCH", "Log should show node execution header")
 	assert.Contains(t, log, "'branch1'", "Log should show node name")
 
-	// The If condition should show as "resolved to false" with original expression
+	// The If condition should show as "resolved to false" with comparison operands
 	assert.Contains(t, log, "If condition resolved to false", "Log should show 'If condition resolved to false'")
-	assert.Contains(t, log, "Expression: {{balance1.data.find", "Log should show original template expression, not resolved value")
+	assert.Contains(t, log, "balance1.data.find", "Log should show the left operand expression")
+	assert.Contains(t, log, "Number(settings.amount)", "Log should show the right operand expression")
+	assert.Contains(t, log, "Evaluated:", "Log should show evaluated operand values")
 
 	// Should NOT show "Processed: false" (that's redundant)
 	assert.NotContains(t, log, "Processed: false", "Log should NOT show redundant 'Processed: false' line")

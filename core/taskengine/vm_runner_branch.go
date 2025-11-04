@@ -199,8 +199,9 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 	logFalseConditionDetails := func(label string, expression string, processedExpr string, jsvm *goja.Runtime) {
 		log.WriteString(fmt.Sprintf("%s condition resolved to false\n", label))
 
-		// Use consolidated parser to extract operands
-		parsed := parseComparisonExpression(processedExpr, jsvm)
+		// Use consolidated parser to extract operands from the ORIGINAL expression
+		// (not the evaluated result processedExpr which might be "false")
+		parsed := parseComparisonExpression(expression, jsvm)
 		if parsed.Valid {
 			// Show comparison using shared formatter
 			comparisonText := formatComparisonForLog(parsed)
@@ -212,21 +213,6 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 
 		// Fallback: show full expression if not a simple comparison
 		log.WriteString(fmt.Sprintf("  Expression: %s\n", expression))
-
-		// Extract and show variable values from the original expression
-		varValues := extractVariableValuesFromExpression(expression, r.vm, jsvm)
-		if len(varValues) > 0 {
-			log.WriteString("  Variable values:\n")
-			for varName, varVal := range varValues {
-				// Format value for display
-				valStr := FormatAsJSON(varVal)
-				// Truncate very long values
-				if len(valStr) > 200 {
-					valStr = valStr[:197] + "..."
-				}
-				log.WriteString(fmt.Sprintf("    %s = %s\n", varName, valStr))
-			}
-		}
 	}
 
 	// Evaluate conditions in order
@@ -438,9 +424,10 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 			continue
 		}
 
-		// Extract variable values from the VM for email summary
-		// For complex expressions, we need to extract all referenced variables
-		operandValues := extractVariableValuesFromExpression(expression, r.vm, jsvm)
+		// Extract comparison operands for email summary (using consolidated parser)
+		// Pass the ORIGINAL expression (not the evaluated result) for parsing
+		// This provides structured operand data instead of dumping entire variables
+		operandValues := extractComparisonOperands(expression, jsvm)
 
 		if boolValue {
 			// Record this evaluation (condition was true and taken)
@@ -456,6 +443,19 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 				ProcessedExpr:  trimmedProcessed,
 				VariableValues: operandValues,
 			})
+
+			// Log the comparison details (similar to false condition logging)
+			log.WriteString(fmt.Sprintf("%s condition resolved to true\n", conditionLabel))
+			parsed := parseComparisonExpression(expression, jsvm)
+			if parsed.Valid {
+				comparisonText := formatComparisonForLog(parsed)
+				if comparisonText != "" {
+					log.WriteString(fmt.Sprintf("  %s\n", comparisonText))
+				}
+			} else {
+				// Fallback: show expression if not a comparison
+				log.WriteString(fmt.Sprintf("  Expression: %s\n", expression))
+			}
 
 			executionStep.Success = true
 
@@ -636,6 +636,7 @@ func extractComparisonOperands(expr string, jsvm *goja.Runtime) map[string]inter
 
 // parseComparisonExpression is the core parser that extracts operands from comparison expressions.
 // It returns a structured ComparisonOperands that can be formatted for logs or emails.
+// Handles nested operators by tracking parentheses/brackets to find the top-level comparison.
 func parseComparisonExpression(expr string, jsvm *goja.Runtime) ComparisonOperands {
 	result := ComparisonOperands{Valid: false}
 
@@ -643,34 +644,120 @@ func parseComparisonExpression(expr string, jsvm *goja.Runtime) ComparisonOperan
 		return result
 	}
 
+	// Remove template delimiters if present
+	expr = strings.TrimSpace(expr)
+	if strings.HasPrefix(expr, "{{") && strings.HasSuffix(expr, "}}") {
+		expr = strings.TrimSpace(expr[2 : len(expr)-2])
+	}
+
 	// Common comparison operators in order of precedence (longer first to avoid false matches)
 	operators := []string{"===", "!==", "==", "!=", "<=", ">=", "<", ">"}
 
+	// Find the top-level comparison operator (not inside parentheses, brackets, or quotes)
 	for _, op := range operators {
-		if strings.Contains(expr, op) {
-			parts := strings.SplitN(expr, op, 2)
-			if len(parts) == 2 {
-				result.LeftExpr = strings.TrimSpace(parts[0])
-				result.RightExpr = strings.TrimSpace(parts[1])
-				result.Operator = op
+		pos := findTopLevelOperator(expr, op)
+		if pos >= 0 {
+			result.LeftExpr = strings.TrimSpace(expr[:pos])
+			result.RightExpr = strings.TrimSpace(expr[pos+len(op):])
+			result.Operator = op
 
-				// Evaluate left operand
-				if leftVal, err := jsvm.RunString(fmt.Sprintf("(%s)", result.LeftExpr)); err == nil {
-					result.Left = leftVal.Export()
-				}
-
-				// Evaluate right operand
-				if rightVal, err := jsvm.RunString(fmt.Sprintf("(%s)", result.RightExpr)); err == nil {
-					result.Right = rightVal.Export()
-				}
-
-				result.Valid = true
-				return result
+			// Evaluate left operand
+			if leftVal, err := jsvm.RunString(fmt.Sprintf("(%s)", result.LeftExpr)); err == nil {
+				result.Left = leftVal.Export()
 			}
+
+			// Evaluate right operand
+			if rightVal, err := jsvm.RunString(fmt.Sprintf("(%s)", result.RightExpr)); err == nil {
+				result.Right = rightVal.Export()
+			}
+
+			result.Valid = true
+			return result
 		}
 	}
 
 	return result
+}
+
+// findTopLevelOperator finds the position of an operator that is not inside parentheses, brackets, or quotes
+// Returns -1 if no valid operator found at the top level
+func findTopLevelOperator(expr string, op string) int {
+	depth := 0        // Parentheses depth
+	bracketDepth := 0 // Square bracket depth
+	braceDepth := 0   // Curly brace depth
+	inString := false
+	inTemplate := false
+	escapeNext := false
+
+	for i := 0; i <= len(expr)-len(op); i++ {
+		ch := expr[i]
+
+		// Handle escape sequences
+		if escapeNext {
+			escapeNext = false
+			continue
+		}
+		if ch == '\\' {
+			escapeNext = true
+			continue
+		}
+
+		// Track string literals
+		if ch == '"' || ch == '\'' {
+			if !inTemplate {
+				inString = !inString
+			}
+			continue
+		}
+
+		// Track template literals (backticks)
+		if ch == '`' {
+			inTemplate = !inTemplate
+			inString = inTemplate // Inside template is like inside string
+			continue
+		}
+
+		// Skip if inside string/template
+		if inString || inTemplate {
+			continue
+		}
+
+		// Track nesting depth
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case '[':
+			bracketDepth++
+		case ']':
+			bracketDepth--
+		case '{':
+			braceDepth++
+		case '}':
+			braceDepth--
+		}
+
+		// Only check for operator at top level (depth == 0)
+		if depth == 0 && bracketDepth == 0 && braceDepth == 0 {
+			if i+len(op) <= len(expr) && expr[i:i+len(op)] == op {
+				// Special case: For single-char operators like '>', check if it's part of '=>'
+				// to avoid matching the '>' in arrow functions
+				if op == ">" && i+1 < len(expr) && expr[i+1] == '=' {
+					// This is '=>' (arrow function), not a standalone '>'
+					continue
+				}
+				// Special case: For '>=', check if it's preceded by '=' to avoid matching '==>'
+				if op == ">=" && i > 0 && expr[i-1] == '=' {
+					// This is part of '==>', skip it
+					continue
+				}
+				return i
+			}
+		}
+	}
+
+	return -1
 }
 
 // formatComparisonForLog formats comparison operands for plain text execution logs
@@ -681,7 +768,7 @@ func formatComparisonForLog(operands ComparisonOperands) string {
 	}
 	leftVal := formatValueConcise(operands.Left)
 	rightVal := formatValueConcise(operands.Right)
-	return fmt.Sprintf("%s %s %s\nEvaluated: %s %s %s",
+	return fmt.Sprintf("Expression: %s %s %s\nEvaluated: %s %s %s",
 		operands.LeftExpr, operands.Operator, operands.RightExpr,
 		leftVal, operands.Operator, rightVal)
 }
