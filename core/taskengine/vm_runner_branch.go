@@ -212,6 +212,21 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 
 		// Fallback: show full expression if not a simple comparison
 		log.WriteString(fmt.Sprintf("  Expression: %s\n", expression))
+
+		// Extract and show variable values from the original expression
+		varValues := extractVariableValuesFromExpression(expression, r.vm, jsvm)
+		if len(varValues) > 0 {
+			log.WriteString("  Variable values:\n")
+			for varName, varVal := range varValues {
+				// Format value for display
+				valStr := FormatAsJSON(varVal)
+				// Truncate very long values
+				if len(valStr) > 200 {
+					valStr = valStr[:197] + "..."
+				}
+				log.WriteString(fmt.Sprintf("    %s = %s\n", varName, valStr))
+			}
+		}
 	}
 
 	// Evaluate conditions in order
@@ -423,8 +438,9 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 			continue
 		}
 
-		// Extract and evaluate operands from comparison for email summary
-		operandValues := extractComparisonOperands(trimmedProcessed, jsvm)
+		// Extract variable values from the VM for email summary
+		// For complex expressions, we need to extract all referenced variables
+		operandValues := extractVariableValuesFromExpression(expression, r.vm, jsvm)
 
 		if boolValue {
 			// Record this evaluation (condition was true and taken)
@@ -668,4 +684,140 @@ func formatComparisonForLog(operands ComparisonOperands) string {
 	return fmt.Sprintf("%s %s %s\nEvaluated: %s %s %s",
 		operands.LeftExpr, operands.Operator, operands.RightExpr,
 		leftVal, operands.Operator, rightVal)
+}
+
+// extractVariableValuesFromExpression extracts all top-level variable values from an expression
+// For expressions like "{{balance1.data.find(...) > Number(settings.amount)}}", it extracts
+// the values of "balance1", "settings", etc. from the VM for display in logs and emails.
+func extractVariableValuesFromExpression(expression string, vm *VM, jsvm *goja.Runtime) map[string]interface{} {
+	if vm == nil || jsvm == nil || strings.TrimSpace(expression) == "" {
+		return make(map[string]interface{})
+	}
+
+	// Extract variable names from the expression (looking for top-level identifiers)
+	varNames := extractTopLevelVariables(expression)
+	if len(varNames) == 0 {
+		return make(map[string]interface{})
+	}
+
+	// Get the values from the VM
+	result := make(map[string]interface{})
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+
+	for _, varName := range varNames {
+		if val, exists := vm.vars[varName]; exists {
+			// Store the variable value
+			// Truncate large objects for readability
+			result[varName] = truncateForDisplay(val)
+		}
+	}
+
+	return result
+}
+
+// extractTopLevelVariables extracts top-level variable names from an expression
+// For "{{balance1.data.find(...) > Number(settings.amount)}}", returns ["balance1", "settings"]
+func extractTopLevelVariables(expression string) []string {
+	// Remove template delimiters
+	expr := strings.TrimSpace(expression)
+	expr = strings.TrimPrefix(expr, "{{")
+	expr = strings.TrimSuffix(expr, "}}")
+	expr = strings.TrimSpace(expr)
+
+	if expr == "" {
+		return nil
+	}
+
+	// Common JavaScript keywords/functions to exclude
+	keywords := map[string]bool{
+		"true": true, "false": true, "null": true, "undefined": true,
+		"Number": true, "String": true, "Boolean": true, "Object": true,
+		"Array": true, "Math": true, "Date": true, "JSON": true,
+		"parseInt": true, "parseFloat": true, "isNaN": true,
+	}
+
+	// Extract identifiers (alphanumeric + underscore, starting with letter/underscore)
+	varMap := make(map[string]bool)
+	var currentVar strings.Builder
+	inIdentifier := false
+
+	for i := 0; i < len(expr); i++ {
+		ch := expr[i]
+		isAlphaNum := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+			(ch >= '0' && ch <= '9') || ch == '_'
+
+		if isAlphaNum {
+			if !inIdentifier {
+				inIdentifier = true
+			}
+			currentVar.WriteByte(ch)
+		} else {
+			if inIdentifier {
+				// End of identifier
+				varName := currentVar.String()
+				// Only include if it starts with a letter or underscore (not a number)
+				if len(varName) > 0 && (varName[0] >= 'a' && varName[0] <= 'z' ||
+					varName[0] >= 'A' && varName[0] <= 'Z' || varName[0] == '_') {
+					// Check if it's not a keyword
+					if !keywords[varName] {
+						varMap[varName] = true
+					}
+				}
+				currentVar.Reset()
+				inIdentifier = false
+			}
+		}
+	}
+
+	// Handle last identifier if expression ends with one
+	if inIdentifier {
+		varName := currentVar.String()
+		if len(varName) > 0 && (varName[0] >= 'a' && varName[0] <= 'z' ||
+			varName[0] >= 'A' && varName[0] <= 'Z' || varName[0] == '_') {
+			if !keywords[varName] {
+				varMap[varName] = true
+			}
+		}
+	}
+
+	// Convert map to slice
+	result := make([]string, 0, len(varMap))
+	for varName := range varMap {
+		result = append(result, varName)
+	}
+
+	return result
+}
+
+// truncateForDisplay truncates large values for readable display in logs/emails
+func truncateForDisplay(val interface{}) interface{} {
+	// For strings, truncate to 200 chars
+	if str, ok := val.(string); ok {
+		if len(str) > 200 {
+			return str[:197] + "..."
+		}
+		return str
+	}
+
+	// For maps/objects, show structure but truncate nested content
+	if m, ok := val.(map[string]interface{}); ok {
+		if len(m) > 10 {
+			// Too many keys, just show count
+			return fmt.Sprintf("{%d keys}", len(m))
+		}
+		// Return as-is for small maps (let JSON formatter handle it)
+		return m
+	}
+
+	// For arrays, limit to first 5 items
+	if arr, ok := val.([]interface{}); ok {
+		if len(arr) > 5 {
+			return append(arr[:5], "...")
+		}
+		return arr
+	}
+
+	// Return other types as-is
+	return val
 }

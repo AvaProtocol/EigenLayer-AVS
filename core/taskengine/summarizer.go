@@ -311,19 +311,19 @@ func BuildBranchAndSkippedSummary(vm *VM) (string, string) {
 						hb = append(hb, fmt.Sprintf("<p style=\"margin:4px 0 0 0\">%s condition resolved to false (empty)</p>", html.EscapeString(label)))
 					} else {
 						hb = append(hb, fmt.Sprintf("<p style=\"margin:4px 0 0 0\">%s condition resolved to false</p>", html.EscapeString(label)))
+						hb = append(hb, fmt.Sprintf("<p style=\"margin:0 0 2px 20px; font-family:monospace; font-size:0.9em\">Expression: %s</p>", html.EscapeString(expr)))
 
-						// Show operand comparison if available (using shared parser data)
-						if varVals, ok := eval["variableValues"].(map[string]interface{}); ok {
-							compHTML := formatComparisonForHTML(varVals)
-							if compHTML != "" {
-								hb = append(hb, compHTML)
-							} else {
-								// Fallback: show full expression
-								hb = append(hb, fmt.Sprintf("<p style=\"margin:0 0 8px 20px; font-family:monospace; font-size:0.9em\">Expression: %s</p>", html.EscapeString(expr)))
+						// Show variable values if available
+						if varVals, ok := eval["variableValues"].(map[string]interface{}); ok && len(varVals) > 0 {
+							hb = append(hb, "<p style=\"margin:0 0 8px 20px; font-size:0.9em; color:#6B7280\">Variable values:</p>")
+							for varName, varVal := range varVals {
+								// Truncate large values for readability
+								valStr := fmt.Sprintf("%v", varVal)
+								if len(valStr) > 100 {
+									valStr = valStr[:97] + "..."
+								}
+								hb = append(hb, fmt.Sprintf("<p style=\"margin:0 0 2px 40px; font-family:monospace; font-size:0.85em; color:#6B7280\">%s = %s</p>", html.EscapeString(varName), html.EscapeString(valStr)))
 							}
-						} else {
-							// No operand data; show expression only
-							hb = append(hb, fmt.Sprintf("<p style=\"margin:0 0 8px 20px; font-family:monospace; font-size:0.9em\">Expression: %s</p>", html.EscapeString(expr)))
 						}
 					}
 				}
