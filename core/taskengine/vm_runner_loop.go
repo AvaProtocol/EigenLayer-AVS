@@ -397,18 +397,13 @@ func (r *LoopProcessor) Execute(stepID string, node *avsproto.LoopNode) (*avspro
 		}
 	}
 
-	// Use shared function to finalize execution step
-	var errorMsg string
+	// Note: defer at line 54 will handle finalization
+	// Set err so defer can finalize properly
 	if !success && firstError != nil {
-		errorMsg = firstError.Error()
-	}
-	finalizeStep(s, success, nil, errorMsg, log.String())
-
-	if !success && firstError != nil {
-		return s, firstError
+		err = firstError
 	}
 
-	return s, nil
+	return s, err
 }
 
 func (r *LoopProcessor) executeNestedNode(loopNodeDef *avsproto.LoopNode, iterationStepID string, iterInputs map[string]interface{}) (interface{}, error) {

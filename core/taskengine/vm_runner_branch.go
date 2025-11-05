@@ -309,8 +309,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 
 			// Store metadata before returning
 			storeMetadata()
-			// Finalize success; defer will also handle finalization
-			finalizeStep(executionStep, true, nil, "", log.String())
+			// Note: defer will handle finalization
 			return executionStep, nextStepInPlan, nil
 		}
 
@@ -534,8 +533,7 @@ func (r *BranchProcessor) Execute(stepID string, node *avsproto.BranchNode) (*av
 
 			// Store metadata before returning
 			storeMetadata()
-			// Use shared function to finalize execution step
-			finalizeStep(executionStep, true, nil, "", log.String())
+			// Note: defer will handle finalization
 			return executionStep, nextStepInPlan, nil
 		} else {
 			// Condition evaluated to false

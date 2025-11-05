@@ -136,9 +136,21 @@ func (o *OpenAISummarizer) Summarize(ctx context.Context, vm *VM, currentStepNam
 	}
 
 	// Build compact digest with strict redaction and truncation - add timeout protection
+	// Use a goroutine with proper cleanup to prevent resource leaks
 	digestChan := make(chan string, 1)
+	digestDone := make(chan struct{})
 	go func() {
-		digestChan <- o.buildDigest(vm, currentStepName)
+		defer close(digestDone)
+		select {
+		case digestChan <- o.buildDigest(vm, currentStepName):
+			// Digest sent successfully
+		case <-ctx.Done():
+			// Context cancelled, exit goroutine cleanly
+			if vm != nil && vm.logger != nil {
+				vm.logger.Warn("OpenAISummarizer: buildDigest goroutine cancelled")
+			}
+			return
+		}
 	}()
 
 	var digest string
@@ -150,6 +162,14 @@ func (o *OpenAISummarizer) Summarize(ctx context.Context, vm *VM, currentStepNam
 	case <-ctx.Done():
 		if vm != nil && vm.logger != nil {
 			vm.logger.Error("OpenAISummarizer.Summarize: buildDigest timed out", "error", ctx.Err())
+		}
+		// Wait briefly for goroutine to finish cleanup
+		select {
+		case <-digestDone:
+		case <-time.After(100 * time.Millisecond):
+			if vm != nil && vm.logger != nil {
+				vm.logger.Warn("OpenAISummarizer: buildDigest goroutine cleanup timeout")
+			}
 		}
 		return Summary{}, errors.New("digest build timeout")
 	}
