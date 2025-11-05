@@ -96,9 +96,29 @@ func createNodeExecutionStep(stepID string, nodeType avsproto.NodeType, vm *VM) 
 
 	// Attach execution_context to the step (e.g., is_simulated, chain_id, provider)
 	if vm != nil {
-		// Only contract write operations should be marked as simulated and use Tenderly
-		isSimulated := nodeType == avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE
+		// Determine if operation should be simulated
+		isSimulated := false
 		provider := string(ProviderChainRPC)
+
+		// For contract write operations, check the node config for is_simulated flag
+		if nodeType == avsproto.NodeType_NODE_TYPE_CONTRACT_WRITE {
+			// Default to simulation for safety
+			isSimulated = true
+
+			// Check if node config explicitly sets is_simulated
+			vm.mu.Lock()
+			if taskNode, exists := vm.TaskNodes[stepID]; exists {
+				if contractWrite := taskNode.GetContractWrite(); contractWrite != nil && contractWrite.Config != nil {
+					// Respect the is_simulated config if explicitly set
+					if contractWrite.Config.IsSimulated != nil {
+						isSimulated = *contractWrite.Config.IsSimulated
+					}
+				}
+			}
+			vm.mu.Unlock()
+		}
+
+		// Set provider based on simulation flag
 		if isSimulated {
 			provider = string(ProviderTenderly)
 		}
