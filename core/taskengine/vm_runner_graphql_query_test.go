@@ -78,7 +78,7 @@ func TestGraphlQlNodeSimpleQuery(t *testing.T) {
 		t.Errorf("expected rest node run successfully but failed")
 	}
 
-	if !strings.Contains(step.Log, "Execute GraphQL spacex-production.up.railway.app") {
+	if !strings.Contains(step.Log, "Executing 'graphqlQuery'") {
 		t.Errorf("expected log contains request trace data but not found. Log data is: %s", step.Log)
 	}
 

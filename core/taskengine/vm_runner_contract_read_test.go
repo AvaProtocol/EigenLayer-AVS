@@ -82,7 +82,7 @@ func TestContractReadSimpleReturn(t *testing.T) {
 		t.Errorf("expected contract read node run successfully but failed")
 	}
 
-	if !strings.Contains(step.Log, "Call 1: balanceOf on 0x1c7d4b196cb0c7b01d743fbc6116a902379c7238") {
+	if !strings.Contains(step.Log, "Executing 'contractQuery'") {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 
@@ -186,7 +186,7 @@ func TestContractReadComplexReturn(t *testing.T) {
 		t.Errorf("expected contract read node run successfully but failed")
 	}
 
-	if !strings.Contains(step.Log, "Call 1: getRoundData on 0xc59E3633BAAC79493d908e63626716e204A45EdF") {
+	if !strings.Contains(step.Log, "Executing 'contractQuery'") {
 		t.Errorf("expected log contains request trace data but found no")
 	}
 

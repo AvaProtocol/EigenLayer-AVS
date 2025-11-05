@@ -1,4 +1,4 @@
-name: Run Tests and Lint on PR or on-demand
+name: Run Unit Tests
 
 on:
   pull_request:

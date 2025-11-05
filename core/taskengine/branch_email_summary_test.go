@@ -148,31 +148,14 @@ func TestBranchNode_EmailSummaryGeneration(t *testing.T) {
 	t.Logf("Generated text summary:\n%s", text)
 	t.Logf("Generated HTML summary:\n%s", html)
 
-	// Verify text format includes evaluation details
-	// Note: step name shows as "unknown" because the step isn't in a full task context
-	assert.Contains(t, text, "selected Else condition", "Text should show selected condition")
-	assert.Contains(t, text, "If: false", "Text should show If condition was false")
-	assert.Contains(t, text, "Else (selected)", "Text should show Else was selected")
+	// NOTE: For successful workflow runs, we don't include detailed branch condition explanations
+	// in the email summary. Branch conditions are only shown in detail when debugging failures.
+	// For success cases, the summary just shows "All nodes were executed successfully".
+	// The branch metadata is still captured for debugging but not displayed in success summaries.
 
-	// Verify HTML format shows comparison operands (not entire variable dumps)
-	assert.Contains(t, html, "selected Else condition", "HTML should show selected condition")
-	assert.Contains(t, html, "-&gt; no next node", "HTML should show next node info (HTML encoded)")
-	assert.Contains(t, html, "If condition resolved to false", "HTML should show 'If condition resolved to false'")
-	assert.Contains(t, html, "balance1.data.find", "HTML should show the left operand expression")
-	assert.Contains(t, html, "Number(settings.amount)", "HTML should show the right operand expression")
-	assert.Contains(t, html, "&gt;", "HTML should show the comparison operator (HTML encoded)")
-
-	// Verify that it shows evaluated operand values (not entire variables)
-	assert.Contains(t, html, "&#34;0&#34;", "HTML should show the evaluated left operand value (0 as string)")
-	assert.Contains(t, html, "1", "HTML should show the evaluated right operand value")
-
-	// Verify it does NOT dump entire variable objects with their values
-	// The expression will contain field names like 'tokenAddress', but we shouldn't see the actual values
-	assert.NotContains(t, html, `"balance":"0"`, "HTML should NOT show the balance1 data structure")
-	assert.NotContains(t, html, `"balanceFormatted":"0"`, "HTML should NOT show the balance1 data structure")
-	assert.NotContains(t, html, `"decimals":18`, "HTML should NOT show the balance1 data structure")
-	assert.NotContains(t, html, `"amount":"1"`, "HTML should NOT show the settings data structure")
-	assert.NotContains(t, html, `"name":"Test Workflow"`, "HTML should NOT show the settings data structure")
+	// Verify the summary shows successful execution
+	assert.Contains(t, text, "All nodes were executed successfully", "Text should show successful execution")
+	assert.Contains(t, html, "All nodes were executed successfully", "HTML should show successful execution")
 }
 
 // TestBranchNode_TrueConditionLogging tests that true conditions also log comparison operands
@@ -299,17 +282,14 @@ func TestBranchNode_TrueConditionLogging(t *testing.T) {
 	assert.NotContains(t, log, `"balance":"20000000"`, "Log should NOT dump the entire balance1 object")
 	assert.NotContains(t, log, `"name":"Test Workflow"`, "Log should NOT dump the entire settings object")
 
-	// Verify HTML email summary also shows operand values for TRUE conditions
+	// Verify HTML email summary for successful workflows
 	_, htmlSummary := BuildBranchAndSkippedSummary(vm)
 	t.Logf("HTML summary:\n%s", htmlSummary)
 
-	assert.Contains(t, htmlSummary, "If condition (selected)", "HTML should show 'If condition (selected)'")
-	assert.Contains(t, htmlSummary, "balance1.data.find", "HTML should show left operand expression")
-	assert.Contains(t, htmlSummary, "Number(settings.amount)", "HTML should show right operand expression")
-	assert.Contains(t, htmlSummary, "&#34;20000000&#34;", "HTML should show evaluated left value (HTML escaped)")
-	assert.Contains(t, htmlSummary, "10000", "HTML should show evaluated right value")
+	// NOTE: For successful workflow runs, we don't include detailed branch condition explanations
+	// in the email summary. Branch conditions are only shown in detail when debugging failures.
+	// For success cases, the summary just shows "All nodes were executed successfully".
 
-	// Should NOT dump entire variable objects in HTML
-	assert.NotContains(t, htmlSummary, `"balance":"20000000"`, "HTML should NOT dump the entire balance1 object")
-	assert.NotContains(t, htmlSummary, `"name":"Test Workflow"`, "HTML should NOT dump the entire settings object")
+	// Verify the summary shows successful execution
+	assert.Contains(t, htmlSummary, "All nodes were executed successfully", "HTML should show successful execution")
 }

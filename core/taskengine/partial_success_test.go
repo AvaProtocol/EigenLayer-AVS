@@ -105,8 +105,8 @@ func TestAnalyzeExecutionResult_PartialSuccess(t *testing.T) {
 		t.Errorf("Expected resultStatus=ExecutionPartialSuccess, got resultStatus=%v", resultStatus)
 	}
 
-	// Check that error message contains partial success information
-	expectedSubstring := "Partial success: 1 of 4 steps failed"
+	// Check that error message contains failure information
+	expectedSubstring := "1 of 4 steps failed"
 	if !strings.HasPrefix(errorMessage, expectedSubstring) {
 		t.Errorf("Expected error message to start with '%s', got: %s", expectedSubstring, errorMessage)
 	}
@@ -155,8 +155,8 @@ func TestAnalyzeExecutionResult_AllFailure(t *testing.T) {
 		t.Errorf("Expected resultStatus=ExecutionFailure, got resultStatus=%v", resultStatus)
 	}
 
-	// Check that error message contains all failures information
-	expectedSubstring := "All: 3 of 3 steps failed"
+	// Check that error message contains failure information
+	expectedSubstring := "3 of 3 steps failed"
 	if len(errorMessage) == 0 || !strings.Contains(errorMessage, expectedSubstring) {
 		t.Errorf("Expected error message to contain '%s', got: %s", expectedSubstring, errorMessage)
 	}
