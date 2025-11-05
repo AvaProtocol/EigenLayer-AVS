@@ -157,14 +157,6 @@ func finalizeStep(step *avsproto.Execution_Step, success bool, err error, errorM
 	step.Log = logContent
 }
 
-// errFromString wraps a non-empty error message into an error; returns nil when empty
-func errFromString(msg string) error {
-	if strings.TrimSpace(msg) == "" {
-		return nil
-	}
-	return fmt.Errorf("%s", msg)
-}
-
 // formatNodeExecutionLogHeader generates a standardized log header for node execution
 // This centralizes the log format across all node runners for consistency
 // Returns a formatted string like "Executing REST API 'fetch_data' (01k70sm85e929fqhdbh64nnm28)"
