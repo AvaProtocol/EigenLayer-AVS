@@ -3085,15 +3085,17 @@ func (v *VM) AnalyzeExecutionResult() (bool, string, int, ExecutionResultStatus)
 			errorMessage = ""
 		}
 	} else if failedCount > 0 {
-		// Any failure should mark the overall result as FAILURE regardless of mixed successes
-		resultStatus = ExecutionFailure
+		// Distinguish between all failed vs some failed (for internal status tracking)
+		if failedCount == totalSteps {
+			// All steps failed
+			resultStatus = ExecutionFailure
+		} else {
+			// Some steps succeeded, some failed - partial success for internal tracking
+			resultStatus = ExecutionPartialSuccess
+		}
 		success = false
-		errorMessage = formatExecutionErrorMessage("Some", failedCount, totalSteps, failedStepNames)
-	} else {
-		// All steps failed or no successful steps
-		resultStatus = ExecutionFailure
-		success = false
-		errorMessage = formatExecutionErrorMessage("All", failedCount, failedCount, failedStepNames)
+		// Use simple error message format (no prefix) for both cases
+		errorMessage = formatExecutionErrorMessage("", failedCount, totalSteps, failedStepNames)
 	}
 
 	return success, errorMessage, failedCount, resultStatus
@@ -3150,6 +3152,9 @@ func (v *VM) CalculateTotalGasCost() string {
 // formatExecutionErrorMessage creates a standardized error message for execution results
 func formatExecutionErrorMessage(prefix string, failedCount, totalCount int, failedStepNames []string) string {
 	failedNodesList := strings.Join(failedStepNames, ", ")
+	if prefix == "" {
+		return fmt.Sprintf("%d of %d steps failed: %s", failedCount, totalCount, failedNodesList)
+	}
 	return fmt.Sprintf("%s: %d of %d steps failed: %s", prefix, failedCount, totalCount, failedNodesList)
 }
 

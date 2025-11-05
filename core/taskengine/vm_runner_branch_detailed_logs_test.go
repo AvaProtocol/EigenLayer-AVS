@@ -81,8 +81,7 @@ func TestBranchNode_DetailedExecutionLogs(t *testing.T) {
 	t.Logf("Execution log:\n%s", log)
 
 	// Verify log structure and content
-	assert.Contains(t, log, "Executing NODE_TYPE_BRANCH", "Log should show node execution header")
-	assert.Contains(t, log, "'branch1'", "Log should show node name")
+	assert.Contains(t, log, "Executing 'branch1'", "Log should show node execution header")
 
 	// The If condition should show as "resolved to false" with comparison operands
 	assert.Contains(t, log, "If condition resolved to false", "Log should show 'If condition resolved to false'")
@@ -171,8 +170,7 @@ func TestBranchNode_IfConditionTrue(t *testing.T) {
 	t.Logf("Execution log:\n%s", log)
 
 	// Verify log structure and content
-	assert.Contains(t, log, "Executing NODE_TYPE_BRANCH", "Log should show node execution header")
-	assert.Contains(t, log, "'branch1'", "Log should show node name")
+	assert.Contains(t, log, "Executing 'branch1'", "Log should show node execution header")
 
 	// The If condition should show evaluation result - since it's true, we should see resolution message
 	assert.Contains(t, log, "BranchNode 'branch1' resolved to If condition", "Log should clearly state branch resolution")
