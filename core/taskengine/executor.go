@@ -355,6 +355,15 @@ func (x *TaskExecutor) RunTask(task *model.Task, queueData *QueueExecutionData) 
 		executionIndex = newIndex
 	}
 
+	// Add execution index to workflowContext for email subject formatting
+	if wc, ok := vm.vars[WorkflowContextVarName].(map[string]interface{}); ok {
+		wc["executionIndex"] = executionIndex
+		vm.AddVar(WorkflowContextVarName, wc)
+		if x.logger != nil {
+			x.logger.Debug("Added execution index to workflowContext", "executionIndex", executionIndex)
+		}
+	}
+
 	// Create execution record immediately - this ensures we have a record even if validation fails
 	execution := &avsproto.Execution{
 		Id:      queueData.ExecutionID,

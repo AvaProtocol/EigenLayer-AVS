@@ -169,7 +169,6 @@ func errFromString(msg string) error {
 // This centralizes the log format across all node runners for consistency
 // Returns a formatted string like "Executing REST API 'fetch_data' (01k70sm85e929fqhdbh64nnm28)"
 func formatNodeExecutionLogHeader(step *avsproto.Execution_Step) string {
-	nodeTypeName := step.Type
 	nodeName := step.Name
 	nodeID := strings.ToLower(step.Id) // Convert to lowercase for better readability
 
@@ -177,12 +176,11 @@ func formatNodeExecutionLogHeader(step *avsproto.Execution_Step) string {
 	displayName := nodeName
 	if displayName == "" || displayName == "unknown" {
 		displayName = nodeID
-		// If we only have ID, don't show it twice
-		return fmt.Sprintf("Executing %s '%s'\n", nodeTypeName, displayName)
+		return fmt.Sprintf("Executing '%s'\n", displayName)
 	}
 
-	// Show both name (for readability) and ID (for reference)
-	return fmt.Sprintf("Executing %s '%s' (%s)\n", nodeTypeName, displayName, nodeID)
+	// Show both name (for readability) and ID (for reference), without node type
+	return fmt.Sprintf("Executing '%s' (%s)\n", displayName, nodeID)
 }
 
 // Checks if a node's config is nil and returns a standardized error

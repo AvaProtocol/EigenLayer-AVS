@@ -728,7 +728,7 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		}
 	}
 
-	executionLogBuilder.WriteString("Sending UserOp to bundler...\n")
+	executionLogBuilder.WriteString("Sending packed User Operation to bundler\n")
 
 	// Send UserOp transaction with correct parameters:
 	// - owner: EOA address (r.owner) for smart wallet derivation
@@ -813,12 +813,14 @@ func (r *ContractWriteProcessor) executeRealUserOpTransaction(ctx context.Contex
 		} else if strings.Contains(err.Error(), "AA21") {
 			userErrorMsg = "Insufficient ETH balance for gas fees"
 		} else if strings.Contains(err.Error(), "AA") {
-			// Other AA error codes (AA10, AA23, etc.)
-			// Extract AA error code if present
-			parts := strings.Split(err.Error(), "AA")
-			if len(parts) > 1 {
-				// Take first line after AA code
-				userErrorMsg = "AA" + strings.Split(parts[1], "\n")[0]
+			// Parse standard AA error codes like AA10, AA21, AA23, etc.
+			// Avoid falsely matching 'AA' inside hex strings or addresses.
+			if code := regexp.MustCompile(`AA\d{2}`).FindString(err.Error()); code != "" {
+				userErrorMsg = code
+			} else if strings.Contains(strings.ToLower(err.Error()), "not deployed") ||
+				strings.Contains(strings.ToLower(err.Error()), "override is not deployed") ||
+				strings.Contains(strings.ToLower(err.Error()), "sender not deployed") {
+				userErrorMsg = "Smart wallet not deployed"
 			} else {
 				userErrorMsg = "Transaction validation failed"
 			}
@@ -1384,9 +1386,16 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	log.WriteString(formatNodeExecutionLogHeader(s))
 
 	var err error
-
+	// Defer finalization for consistent closure across node runners.
+	// We'll compute success and error message later and feed them into this.
+	var finalizeSuccess bool
+	var finalizeErrorMsg string
 	defer func() {
-		finalizeStep(s, err == nil, err, "", log.String())
+		success := false
+		if err == nil {
+			success = finalizeSuccess
+		}
+		finalizeStep(s, success, err, finalizeErrorMsg, log.String())
 	}()
 
 	// Ensure aa_sender is available (node-type-specific prep)
@@ -1416,8 +1425,7 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		return s, err
 	}
 
-	log.WriteString(fmt.Sprintf("Contract Write Node: %s\n", contractAddress))
-	log.WriteString(fmt.Sprintf("Number of method calls: %d\n", len(methodCalls)))
+	// First sentence should indicate the method call. We'll log per-method below for clarity.
 
 	// Parse ABI if provided - OPTIMIZED: Use protobuf Values directly
 	var parsedABI *abi.ABI
@@ -1432,7 +1440,6 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 		if optimizedParsedABI, parseErr := ParseABIOptimized(node.Config.ContractAbi); parseErr == nil {
 			parsedABI = optimizedParsedABI
-			log.WriteString("ABI parsed successfully using optimized shared method (no string conversion)\n")
 		} else {
 			log.WriteString(fmt.Sprintf("Warning: Failed to parse ABI with optimized method: %v\n", parseErr))
 		}
@@ -1448,7 +1455,62 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 	// Execute each method call
 	ctx := context.Background()
 	for i, methodCall := range methodCalls {
-		log.WriteString(fmt.Sprintf("Executing method %d: %s\n", i+1, methodCall.MethodName))
+		// Log the method call action consistently with ContractRead
+		log.WriteString(fmt.Sprintf("Calling method %s on %s\n", methodCall.MethodName, contractAddr.Hex()))
+
+		// General parameter logging (flattened): derive names from ABI when available,
+		// otherwise use arg{index}. Resolve template variables before logging.
+		resolvedParams := make([]string, len(methodCall.MethodParams))
+		for pi, p := range methodCall.MethodParams {
+			resolvedParams[pi] = r.vm.preprocessTextWithVariableMapping(p)
+		}
+
+		if parsedABI != nil {
+			if m, ok := parsedABI.Methods[methodCall.MethodName]; ok {
+				// Handle single tuple parameter specially (common for exactInputSingle)
+				if len(m.Inputs) == 1 && m.Inputs[0].Type.T == abi.TupleTy && len(resolvedParams) == 1 {
+					var any interface{}
+					if err := json.Unmarshal([]byte(resolvedParams[0]), &any); err == nil {
+						if arr, okArr := any.([]interface{}); okArr {
+							// Map tuple element names to values
+							names := m.Inputs[0].Type.TupleRawNames
+							for ti := range arr {
+								fieldName := fmt.Sprintf("arg%d", ti)
+								if ti < len(names) && strings.TrimSpace(names[ti]) != "" {
+									fieldName = names[ti]
+								}
+								log.WriteString(fmt.Sprintf("param.%s=%s\n", fieldName, FormatAsJSON(arr[ti])))
+							}
+						} else {
+							// Not an array; log as-is
+							log.WriteString(fmt.Sprintf("param=%s\n", FormatAsJSON(any)))
+						}
+					} else {
+						// Not JSON; log the raw string
+						log.WriteString(fmt.Sprintf("param=%s\n", resolvedParams[0]))
+					}
+				} else {
+					// Named inputs or positional fallbacks
+					for pi := range resolvedParams {
+						name := fmt.Sprintf("arg%d", pi)
+						if pi < len(m.Inputs) && strings.TrimSpace(m.Inputs[pi].Name) != "" {
+							name = m.Inputs[pi].Name
+						}
+						log.WriteString(fmt.Sprintf("param.%s=%s\n", name, resolvedParams[pi]))
+					}
+				}
+			} else {
+				// Method not in ABI; fall back to positional args
+				for pi := range resolvedParams {
+					log.WriteString(fmt.Sprintf("param.arg%d=%s\n", pi, resolvedParams[pi]))
+				}
+			}
+		} else {
+			// No ABI; fall back to positional args
+			for pi := range resolvedParams {
+				log.WriteString(fmt.Sprintf("param.arg%d=%s\n", pi, resolvedParams[pi]))
+			}
+		}
 
 		// Add panic recovery to ensure individual method failures don't break the loop
 		var result *avsproto.ContractWriteNode_MethodResult
@@ -1485,6 +1547,10 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			}()
 			// Resolve shouldSimulate: default to VM flag; allow per-node override via typed config
 			effectiveSim := r.resolveSimulationMode(node, r.vm.IsSimulation)
+			if effectiveSim {
+				// Surface simulation mode clearly in the node log for users
+				log.WriteString("Simulation Mode is ON — no real transactions will be submitted on-chain.\n")
+			}
 			result = r.executeMethodCall(ctx, parsedABI, originalAbiString, contractAddr, methodCall, effectiveSim, node)
 		}()
 		// Ensure MethodName is populated to avoid empty keys downstream
@@ -1497,16 +1563,24 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 		results = append(results, result)
 
 		if result.Success {
-			// Extract transaction hash from flexible receipt
-			var txHash string
+			// If we have a receipt, include compact bundler request/response notes
 			if result.Receipt != nil {
+				log.WriteString("Sending packed User Operation to bundler\n")
 				if receiptMap := result.Receipt.AsInterface().(map[string]interface{}); receiptMap != nil {
-					if hash, ok := receiptMap["transactionHash"].(string); ok {
-						txHash = hash
+					txh := ""
+					gasUsed := ""
+					if v, ok := receiptMap["transactionHash"].(string); ok {
+						txh = v
+					}
+					if v, ok := receiptMap["gasUsed"].(string); ok {
+						gasUsed = v
+					}
+					log.WriteString(fmt.Sprintf("Received bundler response successfully: txHash: %s, gasUsed: %s\n", txh, gasUsed))
+					if txh != "" {
+						log.WriteString(fmt.Sprintf("The %s call is submitted on-chain, txHash: %s\n", result.MethodName, txh))
 					}
 				}
 			}
-			log.WriteString(fmt.Sprintf("Success: %s (tx: %s)\n", result.MethodName, txHash))
 		} else {
 			r.vm.logger.Error("🚨 DEPLOYED WORKFLOW: Method execution failed",
 				"method_name", result.MethodName,
@@ -1516,6 +1590,33 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 
 			// Add detailed failure information to execution log
 			log.WriteString(fmt.Sprintf("Failed: %s - %s\n", result.MethodName, result.Error))
+
+			// If this appears to be a bundler/AA failure, include bundler request context for clarity
+			if strings.Contains(result.Error, "Bundler") || strings.Contains(result.Error, "AA") {
+				log.WriteString("Bundler REQUEST:\n")
+				func() {
+					r.vm.mu.Lock()
+					defer r.vm.mu.Unlock()
+					if v, ok := r.vm.vars["aa_sender"]; ok {
+						if s, ok2 := v.(string); ok2 && s != "" {
+							log.WriteString(fmt.Sprintf("  Sender: %s\n", s))
+						}
+					}
+				}()
+				if r.smartWalletConfig != nil {
+					if (r.smartWalletConfig.EntrypointAddress != common.Address{}) {
+						log.WriteString(fmt.Sprintf("  EntryPoint: %s\n", r.smartWalletConfig.EntrypointAddress.Hex()))
+					}
+					if r.smartWalletConfig.BundlerURL != "" {
+						log.WriteString(fmt.Sprintf("  Bundler: %s\n", r.smartWalletConfig.BundlerURL))
+					}
+					if (r.smartWalletConfig.PaymasterAddress != common.Address{}) {
+						log.WriteString(fmt.Sprintf("  Paymaster: %s\n", r.smartWalletConfig.PaymasterAddress.Hex()))
+					}
+				}
+				log.WriteString(fmt.Sprintf("  Method: %s\n", result.MethodName))
+				log.WriteString(fmt.Sprintf("  Contract: %s\n", contractAddr.Hex()))
+			}
 
 			// If this is a bundler/AA error, add additional debugging information
 			if strings.Contains(result.Error, "Bundler failed") || strings.Contains(result.Error, "AA21") {
@@ -1918,9 +2019,9 @@ func (r *ContractWriteProcessor) Execute(stepID string, node *avsproto.ContractW
 			"provider", provider)
 	}
 
-	// Finalize step with computed success and error message
-	finalizeStep(s, stepSuccess, nil, stepErrorMsg, log.String())
-
+	// Provide values for deferred finalization
+	finalizeSuccess = stepSuccess
+	finalizeErrorMsg = stepErrorMsg
 	return s, nil
 }
 

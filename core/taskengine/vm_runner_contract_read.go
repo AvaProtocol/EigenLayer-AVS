@@ -454,9 +454,9 @@ func (r *ContractReadProcessor) Execute(stepID string, node *avsproto.ContractRe
 		r.vm.logger.Debug("Starting method call processing")
 	}
 
-	for i, methodCall := range config.MethodCalls {
+	for _, methodCall := range config.MethodCalls {
 		methodName := r.vm.preprocessTextWithVariableMapping(methodCall.GetMethodName())
-		log.WriteString(fmt.Sprintf("Call %d: %s on %s\n", i+1, methodName, contractAddress))
+		log.WriteString(fmt.Sprintf("Calling method %s on %s\n", methodName, contractAddress))
 
 		if r.vm.logger != nil {
 			r.vm.logger.Debug("Processing method with applyToFields",
